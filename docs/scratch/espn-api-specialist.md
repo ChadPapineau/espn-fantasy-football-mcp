@@ -14,7 +14,7 @@ league), ≥1 s apart, everything anonymized before it lands here.
   (`.../scratchpad/espn-specialist/probes/b01..b30.json`, headers `h*.txt`;
   scratchpad is outside the repo and may be gone — the notes below are sufficient).
 - Do NOT run more probes; the budget is spent. Everything needed is recorded here.
-- Sections landed in `03-espn-api.md`: (update as they land) none yet.
+- Sections landed in `03-espn-api.md`: header, sources, capability matrix, A, B (committed). Next: C, D; then E, F, G.
 
 ## Sources gathered (all read statically; nothing executed)
 
