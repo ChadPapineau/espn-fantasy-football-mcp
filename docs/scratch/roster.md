@@ -9,7 +9,7 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | agent | id | wave | status | owns | last SHA | resume pointer |
 |---|---|---|---|---|---|---|
 | repo-security-auditor | afe0e8db560613322 | 1 | 🟢 running | `docs/research/01-*`, `02-*`, `docs/scratch/repo-security-auditor.md` | — | brief |
-| espn-api-specialist | ae40ffdfb8c95bafa | 1 | 🟢 running | `docs/research/03-espn-api.md`, `docs/scratch/espn-api-specialist.md` | — | brief |
+| espn-api-specialist | ae40ffdfb8c95bafa | 1 | ✅ done (SHAs verified on origin; identifier scan clean) | `docs/research/03-espn-api.md`, `docs/scratch/espn-api-specialist.md` | `c43704c` | — |
 | data-source-evaluator | — | 2 | ⚪ not started | `docs/research/04-*`, `docs/scratch/data-source-evaluator.md` | — | brief |
 | fantasy-strategy-analyst | — | 2 | ⚪ not started | `docs/research/05-*`, `docs/scratch/fantasy-strategy-analyst.md` | — | brief |
 | skills-mcp-researcher | — | 3 | ⚪ not started | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | — | brief |
@@ -32,3 +32,5 @@ wave order; respawn cold from the saved brief only if the ID is gone.
   description + 15 topics applied via `gh`. Repo is PUBLIC, no branch
   protection, no rulesets; secret scanning + push protection enabled.
 - 2026-09-29 — wave 1 spawned: `repo-security-auditor`, `espn-api-specialist` (briefs committed at `efd6f4b`).
+- 2026-09-29 — `espn-api-specialist` ✅ (`dd7cdec`…`c43704c`), 617 lines, 30/30 anonymized probes. Orchestrator: SHAs match origin; grep for GUIDs/IPs/league ids clean. Key facts: only `lm-api-reads` serves JSON; unknown views return 200 skeletons (drift must be key-based); no rate-limit headers; native projections/ownership/ADP; Disney ToU text covers automated access literally, no verified enforcement against own-league reads.
+- 2026-09-29 — wave 2 (first slot) spawned: `data-source-evaluator`.
