@@ -38,12 +38,20 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 ### Other tasks
 - Plan 10 §4 resolved table — applied (plan 10 §4: five columns, "Resolution applied" names file §; T-11 note only; T-13 → T-03; T-16 already done)
 - `docs/plan/changelog.md` §R1 — applied (numbers table, 20 objection rows, 16 tension rows, survived-unchanged list, narrow readings)
-- Consistency grep (retired phrases / old numbers) — pending
-- Mermaid manual parse pass — pending
+- Consistency grep (retired phrases / old numbers) — done: all retired phrases 0 hits over plans 01–10 + changelog (adversarial-log.md excluded — not mine to edit); survivors fixed: plan 10 A11b label, Ph8, §3.0, §3.1b scope/deferred list, D10, §2 ledger, A-7; plan 07 C3 table name; plan 01 §10, D6; plan 02 S9, §8 #5/#9; plan 03 §2.1 flags, §2.2; plan 04 R2, §1; plan 05 §3.1; plan 06 J3
+- Mermaid manual parse pass — done: touched blocks = plan 01 §1 (one quoted node label) and plan 02 §2.1 (four transition labels); both pass; other blocks untouched
 - `docs/HANDOFF.md` item 2 + "Things Chad needs to know / decide" — pending
 
 ### Notes / ambiguities resolved narrowly
-(none yet)
+- OBJ-01: `record-fixture.ts --public` (existing script, standalone in Phase 0) instead of a second `record-fixtures.ts`
+- OBJ-07: `N_SIMS_MAX` constant, value set on first measurement
+- OBJ-09(a): "plan 10 A4a" read as A5a (store rows) + A15a
+- OBJ-09(c): "plan 02 §8 #2/#5" read as the forgeability sentences (opening rule, §1, §4.2, §8 #14)
+- OBJ-13: onboard gets the Y−1 evidence via opt-in `include: ["seeding_evidence"]` on A1
+- OBJ-16: waiver-relative jobs use the same fixed-cadence self-selecting pattern as kickoff-relative ones
+- T-15(a): CI matrix → Node 24 only
+- Not applied: defence §1.F item 1 (separate acceptance row for the D0-not-accepted product) — a suggestion, not a §1.E edit
+- Not mine to fix: HANDOFF finding 4 ("verdict pending"), item 10 ("21 P0 tools"), finding 7 ("ensemble") are stale but outside the two permitted HANDOFF edits
 
 ### Pushed SHAs
 - f1d2003 — resume file
@@ -53,3 +61,4 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - 22e80ef — OBJ-10..14
 - 5973653 — OBJ-15..20 + tensions T-01..T-15
 - e95f4de — plan 10 §4 resolved table
+- 896a4db — changelog §R1

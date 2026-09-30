@@ -16,7 +16,7 @@ The plan (`docs/plan/01-*` … `10-*`) is attacked by a devil's-advocate agent a
 | P1 tools added by `full` | 16 (34 total, unchanged) | 13 | OBJ-08 |
 | `tools/list` ceilings (chars) | `core` ≤ 20 000, `full` ≤ 35 000, token-derived and downward-only | more than twice as high — set above the design's size | OBJ-09(b) |
 | Skills listing ceiling | ≤ 4 600 chars | unchanged | OBJ-09(b) |
-| Node floor | ≥ 24.15 | ≥ 22.13 | T-15(a) |
+| Node floor | ≥ 24.15 | the v22 line | T-15(a) |
 | Per-call upstream deadline | ≤ 20 s, retries inside it | none (≈ 48 s worst case) | OBJ-20 |
 | Main-loop stall during analytics | ≤ 50 ms (≤ 20 ms cooperative batches) | unbounded (3–5 s) | OBJ-07 |
 | `espn_s2` length at setup | refuse < 40, warn 40–99, accept | refuse < 100 | OBJ-15 |
@@ -89,7 +89,7 @@ Also adopted from the log's §1.5: plan 01 §7 now states which views the daily 
 
 ### Narrow readings the reviser made (for round 2 to check)
 
-- **OBJ-01** — the ruling names `scripts/record-fixtures.ts --public`; the plan already had `scripts/record-fixture.ts`, so the keyless recording is that script's `--public` mode rather than a second script.
+- **OBJ-01** — the ruling names `scripts/record-fixtures.ts --public`; the plan already had `scripts/record-fixture.ts`, so the keyless recording is that script's `--public` mode rather than a second script — standalone in Phase 0 (like `scripts/probe.ts`), because no provider code exists yet. With no probe league named (D2), 1a has no keyless recording source and its golden waits for D0.
 - **OBJ-07** — "`n_sims` max bounded to what fits" is a named constant (`N_SIMS_MAX` in `src/mcp/bounds.ts`) set on the first A16a measurement, not a number invented here.
 - **OBJ-09(a)** — the ruling lists "plan 10 A4a/A15a"; A4a is in-call drift, so the dataset-file assertion sits in A5a (the `store` rows) and A15a.
 - **OBJ-09(c)** — "plan 02 §1/§8 #2/#5" read as the forgeability sentences: the opening rule, §1's boundary paragraph, §4.2 and §8 #14 (§8 rows 2 and 5 do not speak of forging).

@@ -12,7 +12,7 @@ Legend as in plan 01.
 | # | Decision | Why | Alternative considered | What would change it |
 |---|---|---|---|---|
 | R1 | **Single npm package, no workspaces** — but the tree keeps the shared-core candidates in directories that are already package-shaped (plan 01 §0.2) | one deployable, one lockfile to audit, one `npm ci`; the shared package is a later extraction (plan 01 D3), and a workspace with one member is ceremony | workspaces (`server`, `core`) from day one | the plan 01 §0.3 trigger firing → the candidate directories become `packages/core` in **their own repo**, not a workspace here |
-| R2 | **TypeScript strict ESM, `module: NodeNext`, `target: ES2023`, Node ≥ 24.15** [V-sib 04 R2; the floor raised from 22.13 by T-15(a): the v22 line's `node:sqlite` emits `ExperimentalWarning` on every launch — sib ADV OBJ-09] | the SDK v2 is ESM with `zod/v4`; `NodeNext` is what Node resolves; matches the other local server's stack [V-00] | CommonJS; bundling | Nothing |
+| R2 | **TypeScript strict ESM, `module: NodeNext`, `target: ES2023`, Node ≥ 24.15** [V-sib 04 R2; the floor raised off the v22 line by T-15(a): that line's `node:sqlite` emits `ExperimentalWarning` on every launch — sib ADV OBJ-09] | the SDK v2 is ESM with `zod/v4`; `NodeNext` is what Node resolves; matches the other local server's stack [V-00] | CommonJS; bundling | Nothing |
 | R3 | **ESLint 9 flat config + typescript-eslint (type-checked), Prettier, import-boundary rules per directory** [V-sib 04 R3] with two ESPN-specific zones: nothing outside `src/auth` and `src/http` may import `@napi-rs/keyring`; nothing outside `src/providers/espn` may import `src/providers/espn/views/*` (wire schemas) | the plan 01 §1.1 boundaries must be mechanical; the credential store must have exactly two import sites | Biome | Biome gaining equivalent type-aware rules |
 | R4 | **Conventional Commits checked by a 30-line script** [V-sib 04 R4] | changelog derives from it; `commitlint` is ~100 dev packages for a regex | commitlint | Nothing |
 | R5 | **CI on every push and PR: ubuntu, Node 24 (the matrix gains the next even line when it ships; 22 is below the T-15(a) floor); a macOS job weekly and on release** [V-sib 04 R5] | Linux covers everything but launchd/`osascript`/keychain; macOS covers those on a cadence — and the **keychain integration test can only run on macOS** | macOS every push | a macOS-only regression slipping through more than once |
@@ -116,7 +116,7 @@ espn-fantasy-football-mcp/
     └── PULL_REQUEST_TEMPLATE.md # checklist: no identifiers, tests, docs, changelog
 ```
 
-`dist/` is built, git-ignored (already), and is what the launch config points at (plan 03 §4). Fixture file names avoid the `.gitignore`'s secret-shaped globs (`*cookie*`, `*credentials*.json`, `*token*.json`) by construction — a test asserts every fixture path is tracked.
+`dist/` is built, git-ignored (already), and is what the launch config points at — in the runtime install, outside any file-provider directory (plan 03 §4; ADV OBJ-10). Fixture file names avoid the `.gitignore`'s secret-shaped globs (`*cookie*`, `*credentials*.json`, `*token*.json`) by construction — a test asserts every fixture path is tracked.
 
 ---
 

@@ -106,7 +106,7 @@ The procedure is 03 §C.4's, made concrete:
 7. Print the re-paste recommendation: "cookie lifetime is unknown; re-run `eff setup` if `eff status` shows rejected, and consider doing so every 30 days" [V-03 §C.2].
 8. Timeout: each prompt waits 10 minutes, then exits 1 with "run `eff setup` again"; nothing partial is left stored (a failed step deletes what the earlier step wrote).
 
-`--reset` deletes the stored items and clears `lastAcceptedAt`/`lastRejectedAt`; `--storage keychain|file` overrides `EFF_CREDENTIAL_STORE` for this run and records the choice in `config.json`; `--enable-writes` is the acknowledgement flow of plan 02 §3.2 (writes phase).
+`--reset` deletes the stored items and clears `lastAcceptedAt`/`lastRejectedAt`; `--storage keychain|file` overrides `EFF_CREDENTIAL_STORE` for this run and records the choice in `config.json` for the whole install — switching store deletes the other store's items first, so exactly one store ever holds a value (ADV OBJ-05); `--seeding espn_rule|points_only` records the operator's seeding reading (`EFF_SEEDING_MODE`, `seeding_confirmed_at` — plan 07 C12, ADV OBJ-13); `--enable-writes` is the acknowledgement flow of plan 02 §3.2 (writes phase).
 
 ### 2.2 `eff setup --page` (opt-in) — one-shot local page
 
@@ -117,7 +117,7 @@ The procedure is 03 §C.4's, made concrete:
 | Bind | `127.0.0.1` only (never `0.0.0.0`, never `::` — a single family keeps the `Host` check exact **[A-6]**) |
 | URL | printed exactly as bound: `http://127.0.0.1:<port>/setup/<32-byte-hex-token>` — plain `http` is acceptable on loopback: nothing leaves the host, and a self-signed cert would only add a browser warning [V-03 §C.4] |
 | Form | POST-only; the token in the path **and** a hidden field; accepted only when `Host` is exactly `127.0.0.1:<port>`, `Origin`/`Referer` match it, the token matches, and it is the **first** submission; responses carry `Cache-Control: no-store`; nothing is logged; the page has the DevTools instructions and two fields |
-| After POST | the same validate → store → `mSettings` check → team resolution as §2.1, results printed in the **terminal** (the browser tab gets a "done, you can close this tab" page with no values) |
+| After POST | the same validate → store → definitive check → team resolution as §2.1, results printed in the **terminal** (the browser tab gets a "done, you can close this tab" page with no values) |
 | Timeout | 120 s, then close + exit 1 with "run again" |
 | One callback | the first valid POST is processed; every other path returns 404; the server closes after handling it |
 
