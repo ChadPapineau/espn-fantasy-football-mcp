@@ -6,11 +6,11 @@ docs/README.md, docs/plan/00-index.md). Brief:
 
 ## RESUME HERE
 
-- **State**: started. Nothing written yet beyond this file.
+- **State**: LICENSE + SECURITY.md pushed. Next: the two indexes, then the README.
 - **Order of work** (orchestrator note: supporting files first so the
   plan-reviser's round-2 edits to plan 01–10 land before the
   plan-dependent README sections are written):
-  1. [ ] `LICENSE` (MIT) + `SECURITY.md` — commit + push
+  1. [x] `LICENSE` (MIT) + `SECURITY.md` — commit + push
   2. [ ] `docs/README.md` + `docs/plan/00-index.md` — commit + push
   3. [ ] `README.md` first half (banner, status, features, 8 Mermaid
          diagrams) — commit + push
@@ -33,3 +33,4 @@ docs/README.md, docs/plan/00-index.md). Brief:
 ## Log
 
 - started; resume file created.
+- LICENSE (MIT) and SECURITY.md written and pushed. SECURITY.md links to README anchor `#terms-of-use-and-account-risk` — the README must carry that heading.
