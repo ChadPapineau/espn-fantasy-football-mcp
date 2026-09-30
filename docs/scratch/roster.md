@@ -15,9 +15,9 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | skills-mcp-researcher | a4ffbd8e575038d07 | 3 | ✅ done (SHAs verified; identifier scan clean; plugin tool-naming claim spot-checked at code.claude.com) | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | `2696787` | — |
 | architecture-planner-core | aa8211963894867bd | 3 | ✅ done (SHAs verified; identifier/abs-path scan clean; SDK 2.2.0 and keyring 2.1.0 metadata re-checked on the npm registry) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `965ee10` | — |
 | product-planner | abf797cc7b96aadb5 | 4 | ✅ done (SHAs verified; identifier scan clean) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `131ec10` | — |
-| devils-advocate | a30c04c0a440fc7aa | 5 | 🟡 round 1 ✅ (`e72afb5`, 20 objections: 1 blocking / 9 significant / 10 marginal); defence appended (`175fe2f`); awaiting reviser, then round 2 | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief |
-| plan-reviser | a5f11d7307d30c73a | 5 | ✅ done (all OBJ-01…20 and T-01…16 applied; changelog §R1; consistency grep 0 hits re-run by the orchestrator; diagrams render) | `docs/plan/01-*` … `10-*` edits, `docs/plan/changelog.md`, `docs/scratch/plan-reviser.md`, two HANDOFF items | `5351241` | — |
-| docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | — | brief |
+| devils-advocate | a30c04c0a440fc7aa | 5 | 🟡 round 2 ✅ (`ae7bb52`: all 20 R1 rulings accepted; 6 new — 1 significant, 5 marginal — + 10 nits); defence appended (`07e4b37`, all conceded); awaiting reviser, then round 3 = closing verdict | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | `ae7bb52` | same id via SendMessage |
+| plan-reviser | a5f11d7307d30c73a | 5 | 🟢 resumed for round-2 edits (R1 edits ✅ `5351241`) | `docs/plan/01-*` … `10-*` edits, `docs/plan/changelog.md`, `docs/scratch/plan-reviser.md`, named HANDOFF items | `5351241` | same id via SendMessage |
+| docs-writer | (spawned 2026-09-30, second slot) | 6 | 🟢 running | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | — | brief |
 
 ## Cutoff procedure
 
@@ -46,3 +46,4 @@ wave order; respawn cold from the saved brief only if the ID is gone.
 - 2026-09-30 — `devils-advocate` round 1 ✅ (`e72afb5`). Orchestrator defence: 14 CONCEDE, 6 CONCEDE-MODIFIED (OBJ-05/06/07/12/13/18), tensions adopted per triage (`175fe2f`). `plan-reviser` spawned to apply the edits and write `changelog.md` §R1.
 - 2026-09-30 — `plan-reviser` 🟠 cut off by a usage limit after `5973653`; inventory: tree clean, HEAD == origin/main, RESUME HERE checklist current (all OBJ-01…20 and T-01…16 applied; five closing tasks pending). Resumed the same id via SendMessage. Orchestrator re-rendered all six plan diagrams after the edits (6 ok, Mermaid 11.4.1) and re-scanned `docs/plan/` for identifiers (clean).
 - 2026-09-30 — `plan-reviser` ✅ (`f1d2003`…`5351241`). Orchestrator follow-ups: `espn_get_player` example → `espn_get_player_stats`; changelog keyring review row; HANDOFF findings 4/7/10 corrected. `devils-advocate` resumed for round 2.
+- 2026-09-30 — Adversarial round 2: `devils-advocate` `ae7bb52`; orchestrator reproduced the SQLite 10-attachment limit and the read-only open mode on this machine; defence `07e4b37` (OBJ-21 option A; OBJ-22–26 and ten nits conceded). `plan-reviser` resumed for the R2 edits; `docs-writer` spawned in the second slot (no path overlap; final consistency pass against changelog §R2).
