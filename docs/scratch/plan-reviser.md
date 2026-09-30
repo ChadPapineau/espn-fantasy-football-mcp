@@ -15,10 +15,10 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - OBJ-02 — applied (plan 07 E1 output/method/DWAC; plan 10 A11a, B14; plan 01 D15)
 - OBJ-03 — applied (plan 07 E5 output/method, E7 verdict; plan 09 §3.8 output/guardrails/WV-1, §3.2 WK-1; plan 10 A9a, A12b)
 - OBJ-04 — applied (plan 06 §1.4 credential check + closing para + snapshot roster, §3; plan 02 §2.1 diagram/table, S3; plan 01 §4.3, §8; plan 03 §6, §5 #6; plan 07 G1; plan 10 A2b)
-- OBJ-05 — pending
-- OBJ-06 — pending
-- OBJ-07 — pending
-- OBJ-08 — pending
+- OBJ-05 — applied (plan 06 §2 + A-2; plan 02 §2.2 row, friction para, §8 #21, A-1; plan 03 §2.1 step 4, §5 #6, §8 step 2)
+- OBJ-06 — applied (plan 03 §3 key, §5 #15; plan 02 S12, §5, §7.1; plan 01 §4.3 row, §7 host row + recovery para; plan 09 §2 orient, §3.7)
+- OBJ-07 — applied (plan 01 §1.1 Domain; plan 03 §1.2; plan 10 A16a, A-2; plan 07 E1/E3 n_sims)
+- OBJ-08 — applied (plan 07 C3 row, §2 Toolset, C3/E3/E14 headers, E2 data, §5.1, A-4; plan 10 Ph1, §1, §3.1a Analytics/Tools, A3a, A7a, A10a, 1b Tools, §3.2, B10, B12, D3)
 - OBJ-09 — pending
 - OBJ-10 — pending
 - OBJ-11 — pending
@@ -47,3 +47,4 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 
 ### Pushed SHAs
 - f1d2003 — resume file
+- 18d6e32 — OBJ-01..04
