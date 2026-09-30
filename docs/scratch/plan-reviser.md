@@ -129,3 +129,31 @@ Status legend as above.
 - e582f7e — changelog §R3 + Summary
 
 **STATE: ADVERSARIAL REVIEW CLOSED; ALL REVISER WORK DONE (2026-09-30).** Nothing pending; no WIP patch exists.
+
+---
+
+## R4 — consistency fixes after the docs pass (rulings: the orchestrator's four R4 rulings; started from `480352c`)
+
+Status legend as above.
+
+### Checklist
+- (1) `waivers` prompt priority — applied (plan 07 §4.2 P0/P1 prompt lists: eight P0, five P1, "a Skill's prompt has its Skill's priority"; plan 10 §1 row 1a "8 P0 prompts", §3.1a *Prompts* "the eight P0 prompts", A3a, §3.2 "the five P1 prompts"). README not edited: its prompt list states no priorities.
+- (2) Channel-2 pending file — applied (plan 02 §1 diagram node → `NOTIF["macOS notification"]`; plan 02 §4.2 channel 2 row: the code in the notification only, nothing written to disk in plaintext; plan 03 §8 step 4: `config.json`, `gate_key` only; plan 10 §3.W prerequisite (c) and §4 T-09 reworded so the retired phrase is gone).
+- (3) Annotation families — applied (plan 01 §4.1: new row "Dataset reads (local store: nflverse and other ingested sources)" `readOnlyHint: true, idempotentHint: true, openWorldHint: false`, `openWorldHint: true` kept for D2/D3/D5; Ops row → "Ops (local reads)" with `espn_list_recommendations`; plan 07 §2 *Annotations*, D1–D5 annotations lines, E14 annotations; README family table `DS` / `DS+E` replacing the unnamed-family marker, rows D1–D5 → DS/DS+E, E14 → OP).
+- (4) `permissions.deny` set — applied (plan 10 §3.W prerequisite (a): enumerated once, [A]; plan 03 §5 #13 fix column points to it). README not edited: it never said no set is defined.
+- changelog §R4 — applied (before "## Summary"; four-row table; reviser's notes; "### Verification pass" left for the verification pass).
+- consistency grep — done: "pending/", "pending file", "pending confirmation", "seven P0 prompts", "RO†" = 0 over plans 01–10, changelog (R4 table excluded) and README; the R1/R2 retired phrases ("21 P0", "45 000", "75 000", "generated from rules", "attached staging", "bin/eff", "a human updates config", "espn_list_free_agents", "espn_list_teams") still 0.
+- Mermaid — only plan 02 §1 touched: one node label, double-quoted, no ':' ';' '|' '()' inside; edges unchanged.
+
+### R4 narrow readings
+- (3) "Where a D-tool also makes an ESPN request per its own catalog entry": read literally against plan 07 — D2 (ESPN injury enum; `kona_player_info` when not cached), D3 (keyless `proTeamSchedules_wl` when the store is empty) and D5 (`mPositionalRatings`) all name one, so all three keep `openWorldHint: true`; D1 and D4 are store-only.
+- (3) Plan 07 §2 "the sixth family in plan 01 §4.1" → "the local-store write family in plan 01 §4.1" (a positional count stops being right once a family is added); plan 01's Ops row is labelled "Ops (local reads)" to carry the ruling's "Ops/local-read" name — annotations unchanged.
+- (3) README keys: `DS` for the family, `DS+E` for the three tools that keep `openWorldHint: true`; the † footnote became a plain sentence naming which tools are which.
+- (4) The config directory is named by its path (`~/.config/espn-fantasy-football-mcp/`, plan 01 D16), not by a guessed `Read(...)` rule string; the commit-tool wildcards are written as the ruling gave them, with the three tool names alongside.
+- (2) "read the file store" in plan 02 §4.2 / §8 #14 and plan 10 T-09 is the credential file-store fallback, not the code file — left unchanged. `docs/HANDOFF.md` item 15 already describes R4 and was not touched (not mine to edit).
+
+### R4 pushed SHAs
+- 2840a58 — the four rulings (plans 01, 02, 03, 07, 10; README)
+- (this commit) — changelog §R4 + these notes
+
+**STATE: R4 DONE (2026-09-30).** Nothing pending; the changelog's "### Verification pass" is left for the verification pass.

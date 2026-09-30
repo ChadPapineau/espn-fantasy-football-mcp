@@ -178,6 +178,23 @@ Also adopted from the log's §1.5: plan 01 §7 now states which views the daily 
 
 Reviser's notes on R3: (c) changes what the daily job probes on such a league, not `espn_check_auth`, which still reports `accepted: null` there; (d) supersedes the R2 narrow reading that left E13's shape unchanged; no diagram was touched.
 
+## R4 — consistency fixes after the docs pass (2026-09-30)
+
+**Trigger:** the docs pass (README, SECURITY.md, indexes) found four places where the plan disagreed with itself after the adversarial review had closed. These are not objections and add no design: the orchestrator ruled on each (the four R4 rulings), and the reviser applied them exactly. **Plan state:** `480352c`. **Edits landed in:** `2840a58` and the commit that adds this section.
+
+| item | ruling | what changed (file §) |
+|---|---|---|
+| (1) `waivers` prompt priority | A Skill's prompt has its Skill's priority: `waivers` ships at P0 (plan 09 §1), so `espn.waivers` is a P0 prompt — eight P0 prompts, five P1 | plan 07 §4.2 (P0 and P1 prompt lists); plan 10 §1 (row 1a), §3.1a (*Prompts*), A3a, §3.2 (*Skills*: the five P1 prompts); README unchanged — its prompt list states no priorities |
+| (2) Channel-2 pending file | Plan 10 §3.W prerequisite (c) is right: the one-time code travels in the notification only, and nothing about a pending confirmation is written to disk in plaintext | plan 02 §1 (diagram node → `NOTIF["macOS notification"]`), §4.2 (channel 2 row); plan 03 §8 step 4 (uninstall no longer mentions pending confirmations); plan 10 §3.W prerequisite (c) and §4 T-09 (wording only) |
+| (3) Annotation families for D1–D5 and E14 | One new family, "Dataset reads (local store: nflverse and other ingested sources)" — `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false` — for D1–D5; a D-tool whose own catalog entry makes an ESPN request says so and keeps `openWorldHint: true`; E14 joins the Ops / local-read family (`readOnlyHint: true`, `openWorldHint: false`) | plan 01 §4.1 (family table: the new row; the Ops row gains `espn_list_recommendations`); plan 07 §2 (*Annotations*), D1–D5 (an annotations line each — D2, D3 and D5 with `openWorldHint: true`), E14; README (annotation-family table: `DS` and `DS+E` replace the unnamed-family marker; rows D1–D5 and E14) |
+| (4) The `permissions.deny` set | Enumerated once in plan 10 §3.W prerequisite (a), marked [A] until checked against the client's permission-rule syntax: the three commit tools in both install-path forms, `Bash(eff confirm:*)`, `Bash(eff setup:*)`, and `Read` of the config directory; plan 03 §5 #13 points to it | plan 10 §3.W prerequisite (a); plan 03 §5 #13 (fix column); README unchanged — it never said that no set is defined |
+
+Reviser's notes on R4: the D-tools that keep `openWorldHint: true` are the three whose own entries name an ESPN request — D2 (ESPN's injury enum, from cache or one `kona_player_info` request), D3 (the keyless `proTeamSchedules_wl` view when the store is empty) and D5 (`mPositionalRatings`); D1 and D4 read only the store. Plan 07 §2's "the sixth family" became "the local-store write family", because a positional count stops being right once a family is added; the plan 01 Ops row is labelled "Ops (local reads)" to carry the ruling's name. The config directory in the deny set is named by its path (plan 01 D16), not by a guessed rule string. The "file store" in the forgeability sentences (plan 02 §4.2, §8 #14; plan 10 §4 T-09) is the credential file-store fallback, not a file of one-time codes, and was left as it stands. No objection, tension or nit total changes; no Mermaid block other than plan 02 §1 was touched.
+
+### Verification pass
+
+_Filled by the verification pass below._
+
 ## Summary — what the adversarial process changed and what survived
 
 For a reader who reads nothing else. The full record is `docs/plan/adversarial-log.md`; the row-by-row edits are §R1–§R3 above.
