@@ -63,4 +63,6 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - e95f4de — plan 10 §4 resolved table
 - 896a4db — changelog §R1
 - 8a96156 — consistency pass
-- (next) — HANDOFF edits + final resume state: ALL TASKS DONE; nothing pending; no WIP patch exists
+- 488b2da — HANDOFF edits (item 2; items 10–11)
+
+**STATE: ALL TASKS DONE (2026-09-30).** Nothing pending; no WIP patch exists; tree clean. Round 2 can start from `origin/main`.
