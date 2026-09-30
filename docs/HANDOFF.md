@@ -17,11 +17,10 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Running: `skills-mcp-researcher` (wave 3, `06`) and `repo-security-auditor`
-(resumed for the focused `@napi-rs/keyring` audit that plan `02` §7.2
-requires before the pin; appends to `01`). When each finishes: verify its
-SHAs on `origin`, scan for identifiers, spot-check one claim. When `06` is
-done, spawn `product-planner` (wave 4, plan `07`–`10`; needs `05`, `06`,
+Running: `skills-mcp-researcher` (wave 3, `06`; A–C pushed at `524a254`).
+The keyring audit is done (`01` §30: **Safe**, pin exact). When `06` is
+done: verify SHAs, scan for identifiers, spot-check one claim, then spawn
+`product-planner` (wave 4, plan `07`–`10`; needs `05`, `06`,
 plan `01`–`06`). Then wave 5 `devils-advocate` (multi-round; the
 orchestrator defends in `docs/plan/adversarial-log.md`, edits the plan,
 writes `docs/plan/changelog.md`), wave 6 `docs-writer` (README with 8
@@ -169,7 +168,7 @@ testing before his review.**
 - [x] Phase 0 complete
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
 - [x] `04`, `05` verified
-- [x] plan `01`–`06` verified · [ ] `06` · [ ] keyring audit · [ ] plan `07`–`10`
+- [x] plan `01`–`06` verified · [x] keyring audit (Safe) · [ ] `06` · [ ] plan `07`–`10`
 - [ ] adversarial rounds, changelog
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
 - [ ] executive summary for Chad
@@ -197,3 +196,5 @@ testing before his review.**
 - 2026-09-30 — `architecture-planner-core` ✅ (`965ee10`). Orchestrator re-checked
   the SDK and keyring pins on npm. Auditor resumed for the keyring review.
   Chad: report back when research and planning are complete; no build before review.
+- 2026-09-30 — keyring audit ✅ (`5b6b0bb`, Safe). Provenance re-verified by the
+  orchestrator on npm's attestations endpoint.
