@@ -467,3 +467,116 @@ Same purpose, trigger and non-triggers as the sibling's D.11 [V-sib 06 §D.11]; 
 5. The daily IR-validity job writing `espn_get_status.checks[]` — the reason `ir-slot-management` is not a Skill.
 
 **Prompts to expose** (one per user-invocable Skill; string arguments; bodies generated from `SKILL.md` [V-sib 07 §4.2]): `espn.onboard` · `espn.weekly [week]` · `espn.start_sit [week]` · `espn.stream <K|DST>` · `espn.retro [week]` · `espn.apply <what>` · `espn.session` (P0); `espn.waivers` · `espn.trade <offer>` · `espn.injury <player>` · `espn.schedule` · `espn.roster_audit` · `espn.check <claim>` · `espn.live` (P1). Each returns the Skill body, the embedded `espn-ff://league/settings` resource, and both guardrail sentences.
+
+---
+
+## E. Repo layout, packaging, versioning, and which evals run with zero tokens
+
+Where the sibling decided, this section says **same** and cites; the ESPN deltas are named.
+
+### E.1 Directory layout — same shape as the sibling, with the plugin manifest present from Phase 0
+
+The sibling recommended the repo root as the plugin root and a built `skills/` tree with shared references stamped in [V-sib 06 §E.1; sib 09 K4, §4; sib 04 §1]; its product plan made the plugin manifest an additive P1 layer (sib 09 K7; sib 10 D3). **Delta:** here the manifest lands with the first commit of product code, because the plugin *name* is what fixes the fully-qualified tool names the Skills' `disallowed-tools` must list (§C.3 item 1) — a reason the sibling did not have. Everything else is the sibling's tree with `eff`/`espn` names:
+
+```
+/                                    # repo root == plugin root (`claude --plugin-dir .` in development)
+├── .claude-plugin/
+│   ├── plugin.json                  # name "espn-fantasy-football" (= the client config key), version = package.json,
+│   │                                #   description, author, license, keywords; userConfig: { league_id, season } — non-sensitive only
+│   └── marketplace.json             # { name: "espn-fantasy-football-mcp", owner, plugins: [{ name: "espn-fantasy-football", source: "./", version }] }
+├── .mcp.json                        # { "espn-fantasy-football": { "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/cli.js", "serve"],
+│                                    #     "env": { "EFF_CONFIG_DIR": "${CLAUDE_PLUGIN_DATA}", "EFF_CACHE_DIR": "${CLAUDE_PLUGIN_DATA}/cache",
+│                                    #              "ESPN_LEAGUE_ID": "${user_config.league_id}", "ESPN_SEASON": "${user_config.season}" } } }
+│                                    #   — variables only; no secrets, no absolute user paths (sib 10 T7 wording)
+├── skills/
+│   ├── _shared/references/          # orient.md · tool-outputs.md (GENERATED) · output-template.md · guardrails.md · log.md ·
+│   │                                #   espn-vocabulary.md · priority-waivers.md   (not a Skill; ignored by the skills scan)
+│   ├── onboard/ weekly/ start-sit/ stream-kdef/ retro/ apply/ session-check/          # P0
+│   ├── waivers/ trade/ injury-cascade/ schedule-plan/ roster-audit/ news-check/ live/  # P1
+│   │   └── <name>/{SKILL.md, references/ (stamped + own), evals/{tool_sequence.json, trigger_eval.json, evals.json}}
+│   └── README.md                    # index; install paths (E.4); "Skills N.x need server N.x"
+├── evals/                           # `claude plugin eval` suite (Lane 2)
+│   ├── mocks/espn-fantasy-football/ # one <tool>.md per tool, {{file:fixtures/fx-10h/…}} substitution, expect: guards;
+│   │   ├── _tools.json              #   saved tools/list from fixture mode so mocks carry real schemas [V-cc plugin-evals]
+│   │   └── .replay/                 #   adopted agent-mock recordings (committed)
+│   └── <case>/{prompt.md, case.yaml, graders/*.md}
+├── fixtures/espn/{fx-10h/, <variants>/, manifest.json}   # ANONYMISED only (03 §F.3); league id 0; fake GUID range
+├── fixtures/{nflverse/, news/, golden/}
+├── src/ … (plan 01 §1.1)  ·  dist/ (built; what .mcp.json points at)
+├── scripts/build-skills.ts          # _shared → each Skill; stamps metadata.version/tool_contract; emits dist/skills-copy/espn-<name>/ (E.4)
+├── scripts/check-skills.ts          # Lane 1 (E.3)
+├── scripts/gen-fixtures.ts          # fx-10h + variants from rules (never from a real league in CI)
+└── docs/, package.json, package-lock.json, .npmrc, README.md
+```
+
+No `bin/` (claude.ai and Cowork refuse the whole plugin [V-sib 06 §A.5]); no root `CLAUDE.md` (not loaded; the validator warns). Credentials never live under the plugin root or `${CLAUDE_PLUGIN_DATA}`: the keychain is the default (plan 01 D12) and the file fallback keeps its `~/.config/espn-fantasy-football-mcp/` default from `.env.example`; `${CLAUDE_PLUGIN_DATA}` holds `config.json` and the cache only.
+
+### E.2 Versioning and compatibility — same
+
+One semver for server + Skills + plugin (`package.json` → `plugin.json.version` → the marketplace entry); each built `SKILL.md` carries `metadata: { version, tool_contract }`; `espn_get_status.server.tool_contract` reports the registry's constant; `check-skills.ts` fails CI on a mismatch and `orient.md` stops at runtime on one; the compatibility matrix is one row — "Skills N.x require server N.x" — because a plugin install cannot skew and a copy-install is caught at Step 0 [V-sib 06 §E.2; sib 09 K5, §4]. **Delta:** `tool_contract` also increments when an error-code *name* changes (Skill text names them — §C.3 item 7), and the client config key / plugin name are part of the contract: changing either changes every `disallowed-tools` string, so it is a major bump. Tool definitions never change at runtime (prompt-cache hygiene [V-sib 06 §A.6]); the write module toggles only at process start (§A.1 R).
+
+### E.3 Evals — what runs with zero tokens, what runs with tokens
+
+**Lane 1 — zero tokens, every push** (`docs.yml` skills job as in sib 04 §4.2, with the sibling's seven checks [V-sib 09 §5.1] plus the ESPN ones):
+
+| # | Check | Tokens |
+|---|---|---|
+| 1–7 | The sibling's: frontmatter rules (name = dir, description ≤ 1 024, description + `when_to_use` ≤ 1 536, `metadata` matches); body ≤ 500 lines; references exist and are one level deep; shared references byte-identical to `_shared/`; every backticked tool name is registered (read from `tools/list` in fixture mode); `tool_sequence.json` argument templates validate against each tool's zod input schema; only `apply` references `espn_prepare_*`/`espn_commit_*`; `apply` has `disable-model-invocation: true`; `trigger_eval.json` ≥ 6/≥ 6 with the pairwise trigger-collision check; no identifiers under `skills/` | 0 |
+| 8 | Every non-`apply` Skill's `disallowed-tools` contains all **eight** strings of §C.3 item 1 (six explicit, two globs) | 0 |
+| 9 | Both guardrail sentences verbatim in every body (plan 02 §6.3's and §A.3 rule 5's); the "never ask for a cookie" line; every backticked error code exists in the registry's error table | 0 |
+| 10 | Identifier and secret scan over `skills/`, `evals/`, `fixtures/`: no `espn_s2=`/`SWID=` values, no brace-GUID outside the fake range `{00000000-0000-4000-8000-…}`, no IPv4 literal, no `leagueId=` other than `0` — gitleaks rules per sib 04 §4.3, ESPN-shaped | 0 |
+| 11 | **Fixture dry run:** every `tool_sequence.json` replayed against `dist/` in fixture mode (`EFF_FIXTURE_DIR=fixtures/espn/fx-10h` and each variant the sequence names); every call returns the envelope; every `Rec` carries an interval; `espn_record_recommendation` accepts the previous tool's `Rec`; in the base fixture no write tool is listed | 0 |
+| 12 | **Injection invariance at the tool level** (05 §6 rule 5): for each analytics tool, the output on `inj-*` equals the output on the base fixture byte-for-byte except `warnings[]` and `meta.untrusted_fields` — vitest over the four 05 §6 cases | 0 |
+| 13 | `evals/mocks/espn-fantasy-football/_tools.json` equals `tools/list` in fixture mode; every mock body validates against its tool's `outputSchema` (so mocks cannot drift — whether a mock can also carry `structuredContent` is [U-2]) | 0 |
+| 14 | `claude plugin validate . --strict` | 0 |
+
+**Lane 2 — tokens; manual before a release and after any Skill or tool-description change; nightly only if Chad opts in** (sib 09 K6; sib 10 D7 — same posture): `claude plugin eval . --json results.json --trust-plugin --model <pinned> --judge-model <pinned> --ablation none --max-cost-usd 20` [V-cc plugin-evals: flags and "never starts your plugin's real MCP servers unless you ask"], with mocks generated from `fx-10h`; the free graders (`regex`, `tool_used`, `tool_order`) do the bulk, `llm` graders the minority; **trigger evals** as `tool_used: Skill` cases with `arm: both` and `min: 0, max: 0` for negatives; the **`-INJ` cases** with a judge that sees the injected and the base reply side by side; weekly `--ablation with-without` for the "Δ vs no plugin" number. Pass bar as the sibling's (every free grader passes; rubric ≥ 80 % [A-5]; every positive triggers and no negative does, on both model classes Chad uses). Cost: 14 Skills × 4–6 cases × 2 runs ≈ 130 agent runs per pre-release pass. The **skill-creator authoring loop** (with-skill vs baseline, `grading.json`, `benchmark.json`, the viewer, the description improver) is used by hand while writing or revising a Skill, never in CI; its `evals/evals.json` is the file each Skill ships (D.0) and it does not read plugin-eval's case files nor vice versa [V-cc plugin-evals: "neither tool reads the other's case files"].
+
+### E.4 Install paths per client — same table, ESPN commands
+
+| Client | Skills | Server | Path |
+|---|---|---|---|
+| **Claude Code** (primary) | plugin: `claude plugin marketplace add ChadPapineau/espn-fantasy-football-mcp` → `claude plugin install espn-fantasy-football@espn-fantasy-football-mcp` (user scope); dev: `claude --plugin-dir .`; copy-install alternative: `dist/skills-copy/espn-*` into `~/.claude/skills/` (renamed `espn-<name>`, standard-only frontmatter — §C.3 item 3, [U-4]) | plugin: `.mcp.json` above; copy-install: `eff print-config --client code` prints `claude mcp add --scope user espn-fantasy-football -- <node> <abs dist/cli.js> serve` — the **same key** [A-3] | `/espn-fantasy-football:onboard` (plugin) or `/espn-onboard` (copy) |
+| **Claude Desktop — Code tab** | same as Claude Code | same | — |
+| **Claude Desktop / claude.ai chat** | the plugin from Customize › Plugins (Skills load, stdio server ignored [V-sib 06 §A.5]) or per-Skill zip (standard fields only — `disallowed-tools` and `disable-model-invocation` are ignored there, so the server gate is the only write guard; the write module is off unless the operator opted in **from a terminal**, which a chat surface cannot do — §A.1 R) | `eff print-config --client desktop` → `claude_desktop_config.json` key `espn-fantasy-football` with the absolute `fnm` node path [V-00] | the `espn.<workflow>` prompts also work here |
+| **Cowork / Agent SDK** | account-synced Skills / `settingSources` + `skills: [...]`; `apply` cannot fire from a scheduled task (`disable-model-invocation` [V-cc]) | `mcpServers` option with the same command | a `scripts/run-weekly.ts` example ships with the plugin |
+| **Non-Claude MCP clients** | copy `skills/` where the client reads Agent Skills; otherwise the `espn.<workflow>` prompts or `espn_get_playbook(skill)` | the client's MCP config (stdio) | — |
+
+Honest README line (docs-writer): *Skills everywhere; server in Claude Code and in Desktop via manual config; elicitation confirmation only where the client supports it — the out-of-band code and `eff confirm` always work; the write module is off unless you enabled it from a terminal and acknowledged the account risk.* Release artefact: `source: "./"` with a `sha`-pinned marketplace entry and `dist/` committed on release tags, or the `npm` source once tested end to end — same open item as the sibling's U-6 [V-sib 06 §E.4].
+
+### E.5 Lifecycle — same [V-sib 06 §E.5]
+
+Author in `skills/<name>/` → `trigger_eval.json` and three `evals.json` cases first (one of them `-INJ`) → iterate with skill-creator → `npm run build:skills` → Lane 1 → PR → Lane 2 before the tag → bump `version` in `package.json`/`plugin.json`/marketplace → users `claude plugin update espn-fantasy-football`. A tool change bumps `tool_contract`, regenerates `tool-outputs.md`, and re-runs Lane 1.
+
+---
+
+## F. Assumptions and unverified items, by name
+
+| # | Item | How to verify / what if wrong |
+|---|---|---|
+| A-1 | `disallowed-tools` applies the same glob matcher as permission deny rules (`mcp__…__espn_commit_*`) — the doc states it only by analogy | one Claude Code session with a glob-only list; the six explicit entries make the globs redundant either way |
+| A-2 | 30 days as the `credential.stale_warning` threshold | a constant in `src/config/freshness.ts`; 03 §C.2's community range is "weeks to months" |
+| A-3 | Copy-installs use the config key `espn-fantasy-football` (because `eff print-config` prints it) | a different key silently disables the `disallowed-tools` belt; the token gate still holds; `orient.md` cannot detect the key |
+| A-4 | Two personal skills with the same directory name collide (which wins is undocumented) — hence `espn-<name>` in the copy tree | copy both bundles into one `~/.claude/skills/` and run `/skills` |
+| A-5 | 80 % rubric pass bar (the sibling's A-1) | first Lane 2 run calibrates it |
+| A-6 | `fx-10h` can be generated from rules with realistic distributions, or recorded from Chad's league and anonymised per 03 §F.3 (plan 05 owns the recording procedure) | the first `gen-fixtures` run; the four injection variants are hand-authored either way |
+| U-1 | Claude Desktop elicitation (sib 06 U-15; plan 01 A-1) | the Desktop smoke in the writes phase; channels 2/3 are the default until then |
+| U-2 | Whether plugin-eval mock files can return `structuredContent` (sib 06 U-9) — matters more here because every tool returns both | one mock with a JSON body and an `outputSchema`-validating grader |
+| U-3 | The exact plugin-hosted tool name when plugin name and server key contain hyphens and are equal (`mcp__plugin_espn-fantasy-football_espn-fantasy-football__espn_get_roster`) — the doc gives the pattern, not a hyphenated example | the `mocked:` progress line of `claude plugin eval` prints `plugin_<plugin>_<server>`; `/mcp` in a session with the plugin loaded |
+| U-4 | Whether claude.ai zip upload tolerates Claude-Code-only frontmatter fields (sib 09 A-3) — `package_skill.py` rejects them, so `dist/skills-copy/` strips them regardless | one upload |
+| U-5 | ESPN league discovery for a SWID via `fan.api.espn.com` (03 §G.1 #16) — if it works, `espn_list_leagues` becomes a twin and `onboard` gains the sibling's step | a cookie-bearing probe by Chad |
+| U-6 | `espn_s2` lifetime and whether log-out / "log out everywhere" invalidates it (03 §G.1 #2) — `session-check`'s rotation advice is best-effort | the design does not depend on it |
+| U-7 | Whether anonymous callers ever see a public league's `mTransactions2` (03 §G.1 #5) — affects `fx-10h/public-league` | the probe league during fixture recording |
+| U-8 | `waiverOrderReset` semantics and the non-FAAB `acquisitionType` value (03 §G.1 #8; 05 §9.1 #3) — `waivers` reads them and confirms via `waiverRank` movement after the first processed claim | the first in-season Wednesday |
+| U-9 | Whether a second claim in one run is processed at the new (bottom) position (05 §9.1 #1) — modelled conservatively as "yes" | `WAIVER` rows with the same `processDate` and `teamId` |
+| U-10 | Whether `disallowed-tools` also removes a deferred (Tool Search) MCP tool from the searchable pool, not only the visible one | a session with Tool Search on; the token gate is the guard either way |
+| U-11 | `skills.sh`, `mcpmarket.com` and `lobehub` are not searchable by fetch (navigation, servers-only, 403); a listing could exist that the searches did not surface | browse them by hand once before the docs phase claims "none" |
+| U-12 | Carried from 04 §G because Skills name them: the `rankSourceId` → analyst map (#2); `statSplitTypeId 2` (#3); in-game latency (#4) | as 04 §G |
+
+## G. Sources
+
+**This repo (read in full):** `docs/research/00-tooling-inventory.md`, `02-prior-art-lessons.md`, `03-espn-api.md`, `04-data-sources.md`, `05-strategy-and-analytics.md`, `docs/HANDOFF.md`, `.env.example`, `docs/plan/01-system-architecture.md` (§0 at `9f41a3c`; §1–§14 at `55fc885`).
+**Sibling (read in full at `dfde1b621fdc26be6db00cde64a316c51bba3cdf`):** `docs/research/06-skills-and-mcp-design.md`; `docs/plan/01-system-architecture.md`, `02-security-architecture.md`, `04-repo-structure-and-ci.md`, `07-tool-catalog.md`, `09-skills-bundle.md`, `10-phasing-and-acceptance.md`.
+**Authoring standards (local, read):** `…/skills/mcp-builder/SKILL.md`, `reference/mcp_best_practices.md`, `reference/evaluation.md`; `~/.claude/plugins/marketplaces/claude-plugins-official/plugins/skill-creator/skills/skill-creator/SKILL.md`, `references/schemas.md`.
+**Claude Code documentation (fetched 2026-09-30):** `https://code.claude.com/docs/en/skills` · `https://code.claude.com/docs/en/plugin-evals` · `https://code.claude.com/docs/en/permissions`.
+**Public-Skill search (2026-09-30, static reads only):** `https://api.github.com/search/repositories?q=…` (four queries, §D.0); `https://github.com/ryanjadhav/espn-fantasy` (+ `/contents/`, raw `SKILL.md`); `https://github.com/garavitgabriel/espn-fantasy-claude-openclaw` (+ `/contents/`, `/contents/.claude-plugin`, `/contents/skills`); `https://github.com/tdiderich/fantasy-football-agent`; `https://github.com/parkermarshall97/fantasy-league-history` (`SKILL.md`); `https://api.github.com/repos/{alexdejong3/espn-fantasy-football-claude,tlo1216/frontoffice-manager,TheSirLancelot/the_combine}/contents/`; `https://github.com/curtisawe-cmd/FF-Site` (404); `https://skills.sh/search?q=espn+fantasy`; `https://mcpmarket.com/search?q=espn%20fantasy`; `https://lobehub.com/mcp/thorsenk-espn-fantasy-rffl-analysis` (302 → 403); three WebSearch queries as listed in §D.0; the MCP registry search recorded in 00.

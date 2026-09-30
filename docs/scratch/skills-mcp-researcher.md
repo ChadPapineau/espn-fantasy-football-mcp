@@ -12,11 +12,11 @@ Deliverable: `docs/research/06-skills-and-mcp-design.md` (sections A–E).
 - [x] Section A (ESPN mechanism deltas: gate + opt-in, cookie failure UX, free text in fact JSON)
 - [x] Section B (split applied to every ESPN capability and decision type)
 - [x] Section C (naming crosswalk given plan §0; Skill-level consequences)
-- [ ] Section D (Skills catalog: triggers, tool order, evals)
-- [ ] Section E (layout, plugin manifest, versioning, evals in CI)
+- [x] Section D (Skills catalog: triggers, tool order, evals) — 1e7c161
+- [x] Section E (layout, plugin manifest, versioning, evals in CI)
 - [x] Public ESPN Skill search run (GitHub API ×4, WebSearch ×3, skills.sh, mcpmarket, lobehub) — results below; write-up pending in 06 §D.0
-- [ ] Unverified list
-- [ ] Final push; WIP patch retired
+- [x] Unverified list (§F, A-1–A-6, U-1–U-12) and sources (§G)
+- [x] Final push; no WIP patch was ever needed (every checkpoint was a complete section)
 
 ## Sources log
 
@@ -27,14 +27,12 @@ Deliverable: `docs/research/06-skills-and-mcp-design.md` (sections A–E).
 
 ## RESUME HERE
 
-`docs/research/06-skills-and-mcp-design.md` has the header, the one-paragraph answer and sections A–C
-(pushed). Next: append §D (catalog D.0 conventions + fixture `fx-10h` + eval format, then D.1–D.16 with
-purpose/trigger/non-triggers/tools/inputs/outputs/guardrails/evals incl. one injection case each),
-then §E (layout, plugin manifest, versioning, install paths, eval lanes) and §F unverified + §G sources.
-Skill list decided: 13 sibling names + `session-check`; `draft` deferred; rejected: waiver-priority-strategy,
-points-for-seeding-strategy, ir-slot-management (reasons in §B.3). Next step: read inputs (brief §"Where you
-are"), then write `docs/research/06-skills-and-mcp-design.md` section by section,
-committing after each. Paths owned: `docs/research/06-skills-and-mcp-design.md`,
-`docs/scratch/skills-mcp-researcher.md`, `docs/scratch/skills-mcp-researcher.wip.patch`.
-Do not touch `docs/plan/` (planner writes there), `docs/research/00–05`, README,
-`.env.example`, `.gitignore`, `docs/scratch/roster.md`, `program.md`, `briefs/`.
+**Done.** `docs/research/06-skills-and-mcp-design.md` is complete: A (gate + opt-in module, cookie-failure UX,
+field-by-field untrusted text), B (split over 03 rows 1–25 and every 05 decision type; ≈ 36 read + 3 ops + 7
+conditional write tools), C (crosswalk table; eight Skill-level consequences incl. the plugin-hosted tool-name
+form `mcp__plugin_<plugin>_<server>__<tool>`), D (14 shipping Skills — the sibling's 13 names + `session-check`;
+`draft` deferred; each with trigger, non-triggers, tool order, inputs, outputs, guardrails, ≥ 3 evals incl. an
+injection case; fixture `fx-10h` + variants; skill-creator eval format), E (layout with the plugin manifest from
+Phase 0, versioning, Lane 1 zero-token / Lane 2 token evals, install paths), F (unverified by name), G (sources).
+Nothing pending. If resumed for revisions: the product planner (plan 07/09) owns final tool names; sib 10 nits
+to pass back to the Yahoo program are in §C.1 (server-name vs config-key in Skill text).
