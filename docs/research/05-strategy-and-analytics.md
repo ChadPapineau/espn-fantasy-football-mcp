@@ -168,3 +168,87 @@ Let the regular season end with `(wins_i, PF_i)` for every team. The user's util
 
 **Evaluation.** Brier score and reliability of pre-week `P(playoffs)` / `P(bye)` over replayed seasons versus ESPN's `currentSimulationResults.playoffPct` and a naive "current-record extrapolation"; agreement of the implemented tiebreak chain with ESPN's realised `playoffSeed` on every finished season available (`status.previousSeasons`); "working" = Brier at or below ESPN's own number and exact seed reproduction on ≥ 2 finished seasons.
 
+---
+
+## 3. 5-pt passing TDs and the −2 INT / −2 fumble penalties
+
+### 3.1 Method (so the scoring engine can reproduce it) [V-data]
+
+- **Data.** nflverse-data release `stats_player`, assets `stats_player_week_2025.csv` (8,656,387 B; 19,422 rows; `season_type` REG weeks 1–18 + POST) and `stats_player_week_2024.csv` (8,470,040 B; 18,983 rows), downloaded 2026-09-30 with `curl` from `https://github.com/nflverse/nflverse-data/releases/download/stats_player/…`. (The older `player_stats` release tag no longer carries weekly files for these seasons — the 2025 file 404s there.)
+- **Filter.** `season_type == "REG"`, `week ≤ 17` (ESPN's `finalScoringPeriod` was 17, 03 P04 — week 18 is not a fantasy week), `position ∈ {QB, RB, WR, TE}`.
+- **Scoring**, column → ESPN stat id (03 §B.2): `passing_yards`→3 × 0.04; `passing_tds`→4 × {4, 5, 6}; `passing_interceptions`→20 × −2 (and −1 for the comparison); `rushing_yards`→24 × 0.1; `rushing_tds`→25 × 6; `receptions`→53 × 0.5; `receiving_yards`→42 × 0.1; `receiving_tds`→43 × 6; `sack_fumbles_lost + rushing_fumbles_lost + receiving_fumbles_lost`→72 × −2; `passing/rushing/receiving_2pt_conversions`→19/26/44 × 2; `special_teams_tds`→101/102 × 6. Everything else 0.
+- **Aggregates.** Season total (sum over weeks 1–17); per-game mean for players with ≥ 8 games; weekly positional ranks (the k-th best score of each week). **VOR** = points minus the baseline; the QB baseline is QB12 on season totals (10 starters + the two backups a 10-team league typically rosters), QB10 is shown as the last-starter baseline; RB/WR/TE baselines come from §4.1's flex allocation.
+- **Caveat.** nflverse derives stats from play-by-play; ESPN's official box scores can differ by a yard or a fumble attribution. These numbers are for *format* comparisons; the engine's correctness test is against ESPN's own `appliedTotal` (§7), never against nflverse.
+
+### 3.2 Results
+
+**QB value under 4 / 5 / 6-pt passing TDs (INT −2, fumble −2), season totals, weeks 1–17.**
+
+| | 2025: 4 pt | 5 pt | 6 pt | 2024: 4 pt | 5 pt | 6 pt |
+|---|---:|---:|---:|---:|---:|---:|
+| QB1 | 364.6 | 389.6 | 414.6 | 407.4 | 446.4 | 485.4 |
+| QB5 | 313.1 | 340.9 | 366.9 | 344.2 | 376.6 | 401.6 |
+| QB10 (last starter) | 285.2 | 312.9 | 338.9 | 282.5 | 308.2 | 333.2 |
+| QB12 (replacement) | 258.7 | 283.7 | 308.7 | 266.9 | 286.4 | 303.4 |
+| VOR QB1 − QB12 | 105.9 | 105.9 | 105.9 | 140.5 | 160.0 | 182.0 |
+| VOR QB5 − QB12 | 54.4 | 57.2 | 58.2 | 77.3 | 90.2 | 98.2 |
+| VOR QB10 − QB12 | 26.5 | 29.2 | 30.2 | 15.7 | 21.8 | 29.8 |
+| Σ VOR, QB1…QB10 over QB12 | 533.5 | 567.2 (+6 %) | 604.2 (+13 %) | 669.3 | 787.3 (+18 %) | 930.3 (+39 %) |
+
+(The identical 105.9 in 2025 is a coincidence — QB1 and QB12 threw the same number of TD passes.) Per game (≥ 8 GP): 2025 QB1 − QB12 = 5.18 / 4.80 / 5.35 and QB10 − QB12 = 0.78 / 0.40 / 0.56; 2024 QB1 − QB12 = 8.63 / 9.61 / 10.26 and QB10 − QB12 = 0.86 / 0.97 / 0.74. Weekly baselines at 5 pt: the mean of each week's 10th-best QB score is 22.2 (2025) / 21.6 (2024) and of the 12th-best 20.6 / 19.7; the week's best QB averages 37.5 / 37.7 (hindsight, not a decision-time number).
+
+**Reading.** Going from 4 to 5 points per passing TD raises the *pool* of QB value over replacement by 6 % (2025) to 18 % (2024) and the elite QB's per-game edge by 0 to 1 point; 6 points would roughly double those effects. The tier structure does not change: QB10 sits within a point per game of QB12 in every scoring variant and both seasons, i.e. **the last starter is a replacement-level player**, while QB1–QB3 are worth 3–10 points per game over replacement depending on the season. Compare §4.1: that is the range of RB3–RB10 or WR1–WR3 in the same seasons — an elite QB is a WR1-class asset in this format, not a class of its own.
+
+**Turnover penalties (5 pt, INT −2, fumble lost −2), largest among the top-24 QBs.** 2025: Darnold −40 (14 INT, 6 FL), G. Smith −36, Lawrence −30, Herbert −30, Young −28, Ward −28, Allen −26, Nix −26, Mayfield −26, Goff −24. 2024: Cousins −36, Mayfield −34, Darnold −32, Stroud −32, Maye −32, Purdy −30, Murray −30, G. Smith −30, Richardson −30, Burrow −26. The penalty is 7–12 % of a top-12 QB's season. **Clean negative:** re-scoring with INT −1 instead of −2 moves no top-24 QB more than one rank in either season — the penalty is a level shift, not a re-ranking, because interception counts among starting QBs are compressed (7–17 over a season). For RB/WR the −2 fumble is a 2–8-point season item and never changes a tier. The projection consequence is in sib §1 step 9: turnovers are Poisson draws whose *rate* is shrunk toward the positional prior; they widen the QB distribution's left tail (P(negative-ish week)) more than they move its mean.
+
+**Variance and stacking [V-data].** Weekly CV of the top-12 QBs: 0.391 / 0.401 / 0.411 at 4 / 5 / 6 pt (2025) and 0.374 / 0.385 / 0.396 (2024) — the 5-pt TD adds ≈ 0.01. Same-team weekly correlation of a team's primary QB (most attempts) with its WR1 (most targets), ~410 team-weeks: **0.342 / 0.353 / 0.361** (2025) and 0.341 / 0.355 / 0.365 (2024); QB–TE1 0.267 / 0.281 / 0.291 and 0.265 / 0.273 / 0.277. This reproduces sib §3.3's RotoWire figure (+0.31) in this format and shows the TD value nudges it by a hundredth.
+
+### 3.3 Consequences for the reference league
+
+- **QB streaming versus elite QB.** Hold an elite QB only when his `xVBD` (sib §2) beats the flex-eligible alternative at the same acquisition cost — in 2025 that was true of about three QBs, in 2024 of about five. Below that, stream: the wire in a 10-team league routinely carries a QB1-class starter (in §1.6's hindsight sample the best available player was a QB in 8 of 26 weeks). **Carry no backup QB** on a 5-bench roster; the bye week is a one-week stream (§4.2), and the server should say so rather than recommend a QB2.
+- **QB–WR stacking in H2H.** A stack is a variance instrument (sib §3.3): correlation 0.35 with the QB's CV at 0.40 adds roughly two points of weekly ceiling and removes as much floor. Under reading (a) use it as the underdog and avoid it as the favourite (sib §3.2); under reading (b) the weekly opponent is irrelevant and the stack's variance is judged against the season PF cutoff (§2.2). The 5-pt TD does not change the recommendation; it changes the magnitude by a few percent.
+- **The FLEX under half-PPR with these TD values.** The 5-pt TD never reaches the flex (no QB eligibility, `eligibleSlots` decide). Half-PPR makes the flex position-neutral in this league — §4.1 shows RB and WR replacement levels within 0.2 points per game of each other and the ten flex slots splitting 7/3 one year and 4/6 the next — so the flex decision is the sib §3.1 assignment on projections, with `xVBD` (upside) as the tiebreak, and never a "RB in the flex" heuristic. TE never wins a flex slot in either season.
+
+---
+
+## 4. Half-PPR, 10 teams, 2 RB / 2 WR / TE / FLEX, 5 bench, 2 IR
+
+### 4.1 Replacement level for this exact configuration (sib §2 method; 2025 and 2024 as calibration) [V-data, `qb_vor.py`]
+
+Fixed slots for `N = 10`: 10 QB, 20 RB, 20 WR, 10 TE; then the 10 FLEX slots are filled greedily from the best remaining RB/WR/TE; the baseline of a position is the best player *not* slotted (the "streaming" sense of sib §2 is approximated by this because in a 10-team league the best unslotted player is typically on the wire). Per game, ≥ 8 GP, reference scoring:
+
+| | 2025 baseline | 2025 top | VOR at rank 1 / 3 / 5 / 10 / 15 / 20 | 2024 baseline | 2024 top | VOR at rank 1 / 3 / 5 / 10 / 15 / 20 |
+|---|---:|---:|---|---:|---:|---|
+| QB (QB12; QB10 = last starter) | 19.55 (19.96) | 24.35 | 4.8 / 3.3 / 2.4 / 0.4 (QB10) | 18.29 (19.26) | 27.9 | 9.6 / 6.8 / 5.2 / 1.0 (QB10) |
+| RB | 10.08 | 22.31 | 12.2 / 10.3 / 8.0 / 4.4 / 3.3 / 2.1 | 11.07 | 21.17 | 10.1 / 7.3 / 5.8 / 4.9 / 3.3 / 1.8 |
+| WR | 10.18 | 19.30 | 9.1 / 5.3 / 5.2 / 3.4 / 1.2 / 0.3 | 10.92 | 19.93 | 9.0 / 5.3 / 4.3 / 3.3 / 1.8 / 1.3 |
+| TE | 9.12 | 15.18 | 6.1 / 3.5 / 1.2 / 0.0 (rank 10) | 8.29 | 13.85 | 5.6 / 3.2 / 2.3 / 0.1 (rank 10) |
+
+Flex fill: 2025 RB 7 / WR 3 (season totals: 6 / 4); 2024 WR 6 / RB 4 (season totals: 7 / 3); TE 0 both years. On season totals the baselines are RB 132.9 / WR 149.1 / TE 127.6 (2025) and 162.9 / 161.2 / 116.5 (2024).
+
+What the numbers say about this configuration: (1) the flex is a coin flip between RB and WR — the baselines differ by < 0.2 pts/game — so the position of the last flex player changes from year to year and must be recomputed, not assumed; (2) RB is the steep curve (RB1 → RB10 loses 8 points per game, WR1 → WR10 loses 6, TE1 → TE5 loses 5), which is sib §2's scarcity result in this format; (3) TE5 and beyond, QB10 and beyond, and WR20 and beyond are replacement-level — three positions can be streamed in a 10-team league; (4) the **bench effect** (sib §2): with 5 bench + 2 IR the roster holds 16 players of which 9 start, and IR-eligible injuries cost no bench, so `effective_starters` deepens the RB/WR baselines by roughly the 1–2 players per team that byes force into lineups each week — the server computes it from the league's own bye-week lineups (`mBoxscore` over past weeks), and cold-starts with the table above.
+
+### 4.2 Bench construction with five spots
+
+Sib §9.1's rule — allocate each bench slot to the largest marginal expected lineup points over the horizon — yields, for this format, a template the server should *derive and display*, never impose:
+
+- **K and D/ST: exactly one of each, always in the starting slot, never on the bench.** Streamability (sib §2) is ≈ 1 in a 10-team league. On the starter's bye week the move is drop-and-stream, not carry-two: the cost is one claim/add, the alternative is a bench spot for 13 weeks. "Carry none" is the window between that drop and the streamer's add; the server should schedule the two moves for the same Wednesday morning so the window is minutes long, and it should not assume a roster with an empty K/D-ST slot can add a non-K/D-ST player into the vacancy (ESPN's handling of an empty starting slot versus a full bench is [U]).
+- **QB and TE: zero bench.** §3.3 and §4.1: replacement-level QBs and TEs are on the wire; a bye is a one-week stream.
+- **The five spots are RB/WR depth**: two RB, two WR, one flex-position upside or bye-cover player is the typical allocation, but the split follows the drop-off curves (§4.1: RB is steeper, so RB depth is worth more in 2025-like years) and the roster's own bye clusters (sib §7.1).
+- **Handcuffs.** Sib §9.2's value: `P(starter misses ≥ 1 week) × Σ_w P(out at w) × max(0, proj(handcuff | starter out, w) − opportunity_cost(w))` minus the slot's alternative use. With five bench spots it is positive for at most one handcuff — a clear standalone starter when promoted, behind a high-injury-risk RB1 — and negative for committee backups and for *rivals'* handcuffs (a "block" is worth `P(rival benefits) × their Δ`, tiny in a 10-team league where the wire refills). The server computes the number and never applies "always/never handcuff".
+- **Speculative adds** (sib §4.2 weeks-of-usable-value) compete with the fifth bench spot, whose value is the bye-cover it provides; §1.2's `s` already nets the two.
+
+### 4.3 IR slots — eligibility, policy, and the hidden-bench exploit
+
+**Eligibility [V-docs].** "In ESPN Fantasy Football, players with either the Out (O) or Injured/Reserve (IR) status may be placed into the IR slot" and "Suspended players (SSPD) are NOT eligible for IR on FFL" (Players on Injured Reserve, Updated 2026-08-18); "Only players with the (IR), (IL), or (O) tag can be placed on the IR (injured reserve)/Injury List (IL) slot" and "The system will automatically place the IR (injured reserve) or Injury List (IL) tag on a player once ESPN receives the league report" (Moving Players on and off IR, Updated 2026-08-18). **PUP and NFI are not mentioned on any page fetched** — which tag ESPN gives them is [U]; the server should treat a player as IR-eligible only when `player.injuryStatus ∈ {OUT, INJURY_RESERVE}` (03 §B.2 enum; `SUSPENSION` is [U] and must be treated as ineligible) and otherwise say "not eligible per ESPN's current tag". Questionable and Doubtful players cannot be *moved into* the slot.
+
+**Leaving the slot [V-docs].** "If a player in the IR slot has their status updated from OUT or IR to QUESTIONABLE or DOUBTFUL, the user's roster is NOT invalid." "If a player goes from OUT to no longer having an injury designation, the user's roster becomes INVALID, and they must update it accordingly." ESPN does not say it moves the player itself — the docs are silent, so "no automatic move" is the working assumption [U]. While invalid: "If you have a healthy player in an IR/IL slot, you cannot add any new players to your roster" and "you will receive a message to clear your IR/IL before you can make a claim" (IR impact on waivers, Updated 2026-03-10). Whether lineup edits are also blocked is [U]. And the timing trap: "If you have an open bench slot when you make a waiver claim but then activate an IR/IL player before the claim processes, your claim will fail."
+
+**Stash policy with two slots.**
+1. *Rank stashes by* `P(returns by week w) × Σ_{w' ≥ w} max(0, proj(w') − opportunity_cost(w'))` over the weeks that matter (sib §9.3, with `P(alive at w)` weighting) — an IR stash is free bench, so any positive value beats an empty slot, and two candidates compete only with each other.
+2. *Playoff horizon:* after the trade deadline, a stash that cannot return before week 15 has value only as a trade chip (none — no trades) → zero; the server should say "drop for a streamer" then.
+3. *The hidden-bench play (and its risks):* a week-to-week player who is OUT this week can be placed in IR and, by the rule above, **may stay there while Questionable or Doubtful**, holding a bench spot open for a sixth depth player. It ends the first Wednesday–Saturday his designation disappears: the roster is then INVALID, adds are blocked (including that week's scramble), and he must be moved to the bench — which forces a drop if the bench is full — before his kickoff. The server's guard: a daily check of every `lineupSlotId 21` entry's `injuryStatus`; a "roster invalid" alert with the forced drop pre-computed; and a rule that the extra bench player acquired through the play is the designated drop. Second risk: the activation-before-processing failure above — activate *after* the run, never the night before. Third: `moveToIR` / `moveToActive` are counted in `transactionCounter` and can carry fees (`financeSettings.playerMoveToIR`, 03 §B.1) in leagues that charge.
+4. *Effective bench* = 5 + (number of IR slots holding a player with positive stash value); the §1.2 drop candidate is computed on that roster.
+
+**Fields.** Roster entry `lineupSlotId == 21`, `player.injuryStatus`, `player.injured`, `playerPoolEntry.lineupLocked`; `rosterSettings.lineupSlotCounts["21"]` = 2; `transactionCounter.moveToIR/moveToActive`. A write of `type: ROSTER` with a `LINEUP` item to/from slot 21 is how the move is made (03 §E) — out of scope for v1, so the server *recommends* the move and its deadline.
+
