@@ -21,8 +21,13 @@ Running: `architecture-planner-core` (wave 3, plan `01`–`06`; its §0
 shared-core decision is already committed at `9f41a3c`) and
 `skills-mcp-researcher` (wave 3, `06`). When either finishes: verify its
 SHAs on `origin`, scan its files for identifiers and credential-shaped
-strings, spot-check one load-bearing claim. When **both** are done, spawn
-`product-planner` (wave 4, plan `07`–`10`; needs `05`, `06`, plan `01`–`06`).
+strings, spot-check one load-bearing claim. When the first slot frees,
+resume `repo-security-auditor` (SendMessage to its existing id) for a
+**focused static audit of `@napi-rs/keyring` 2.1.0** (source repo, install
+scripts, optional native deps, maintenance, advisories) appended to `01`
+— plan `01` D12 pins it for the credential store but doc `01` carries no
+verdict. When plan `01`–`06` and `06` are done, spawn `product-planner`
+(wave 4, plan `07`–`10`; needs `05`, `06`, plan `01`–`06`).
 Wave 4 `product-planner` follows once 05, 06 and plan 01–06 exist; wave 5
 `devils-advocate` (multi-round; the orchestrator defends in
 `docs/plan/adversarial-log.md` and edits the plan; then writes
@@ -152,6 +157,18 @@ browser). Then the executive summary for Chad. All briefs:
    servers + a shared npm package, (c) independent repos. This needs
    Chad's sign-off because it couples release cycles.
 8. **Handoff**: created 2026-09-30 per Chad's "Yes".
+9. **Shared core — the planner's recommendation (plan `01` §0, D3/D4)**:
+   two servers, two repos, **no shared package today**, with a written
+   contract (same module boundaries, canonical stat hub, envelope,
+   `DataSource` interface, mechanical name crosswalk `ff_*` ↔ `espn_*`)
+   and a named trigger for extracting `fantasy-core` later (both engines
+   pass golden tests **and** a shared module needs the same fix in both
+   repos). Evidence: both clients namespace tools by config key, so
+   collisions are avoided by keys, not names; one binary would put two
+   contracts under one name (ESPN has native projections/ownership/live
+   scoring, Yahoo none); both projects are pre-build. Needs Chad's
+   sign-off (it diverges from the sibling's `ff_` prefix choice, which
+   assumed one binary).
 
 ## Open items
 
