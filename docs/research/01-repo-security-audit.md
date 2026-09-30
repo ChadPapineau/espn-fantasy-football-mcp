@@ -684,7 +684,7 @@ flow through `actions/upload-artifact`/`download-artifact`, and the `publish` jo
 `permissions: id-token: write` and runs `npm publish --access public` with only
 `GITHUB_TOKEN` in its environment — i.e. npm OIDC trusted publishing with automatic
 provenance, no long-lived npm token. The darwin-arm64 binary's embedded install name
-(`/Users/runner/work/keyring-node/keyring-node/target/aarch64-apple-darwin/release/deps/…`)
+(`…/target/aarch64-apple-darwin/release/deps/…` — the CI runner's home-directory prefix is elided by the orchestrator, 2026-09-30, so this public file carries no absolute path)
 confirms a GitHub macOS runner built it.
 
 **Checklist item 3 — `npm audit` on the pinned tree: zero advisories.** PASS. A

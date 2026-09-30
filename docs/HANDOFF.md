@@ -154,7 +154,7 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
 
 | date | decision | why |
 |---|---|---|
-| 2026-09-29 | Repo lives at the exact path Chad specified (contains spaces; under iCloud-managed `~/Documents`) | Chad's instruction. Consequence: credentials and caches live **outside** the repo dir (`~/.config/…`, `~/.cache/…`); every committed command quotes paths; no absolute local path is committed |
+| 2026-09-29 | Repo lives at the exact path Chad specified (contains spaces; under iCloud-managed `~/Documents`) | Chad's instruction. Consequence: credentials and caches live **outside** the repo dir (`~/.config/…`, `~/.cache/…`); every committed command quotes paths; no absolute local path is committed on `main` (history residual: item 13) |
 | 2026-09-29 | Stack default: Node/TypeScript + official MCP SDK | matches Chad's other local MCP server (`strava-mcp`: ESM, SDK + zod, `tsc` → `dist/`, launched by Claude Desktop with the absolute `fnm` node path) |
 | 2026-09-29 | Concurrency capped at two agents | Chad's credit-efficiency rule (2026-09-24, recorded in the sibling program) |
 | 2026-09-29 | Sibling Yahoo research reused **by citation** where platform-agnostic; ESPN-specific work done here; the shared-core question is the architecture planner's first decision | Chad: evaluate a shared core, do not couple without recommending |
