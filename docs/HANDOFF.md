@@ -17,13 +17,12 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Running: `fantasy-strategy-analyst` (wave 2, writes `05`) and
-`architecture-planner-core` (wave 3, writes plan `01`–`06`; commits the
-shared-core/naming decision in `01` §0 early). When either finishes:
-verify its SHAs on `origin`, scan its files for identifiers and
-credential-shaped strings, spot-check one load-bearing claim, then fill
-the slot with `skills-mcp-researcher` (needs `05` and the planner's
-naming decision).
+Running: `architecture-planner-core` (wave 3, plan `01`–`06`; its §0
+shared-core decision is already committed at `9f41a3c`) and
+`skills-mcp-researcher` (wave 3, `06`). When either finishes: verify its
+SHAs on `origin`, scan its files for identifiers and credential-shaped
+strings, spot-check one load-bearing claim. When **both** are done, spawn
+`product-planner` (wave 4, plan `07`–`10`; needs `05`, `06`, plan `01`–`06`).
 Wave 4 `product-planner` follows once 05, 06 and plan 01–06 exist; wave 5
 `devils-advocate` (multi-round; the orchestrator defends in
 `docs/plan/adversarial-log.md` and edits the plan; then writes
@@ -90,14 +89,27 @@ browser). Then the executive summary for Chad. All briefs:
    ESPN-native only. The binding commercial constraint is Disney ToU
    §2.B.viii (no commercial use, "whether or not for profit" — verified),
    so ESPN-derived and nflverse-derived layers stay separable.
+8. **Format strategy (`05`)**: waiver priority is an option — claim iff
+   the player's rest-of-season surplus over the drop candidate exceeds
+   the premium of holding position k (a failed claim costs nothing under
+   move-to-last); the 1-day period makes the Wednesday free-agent scramble
+   the larger market. Points-for seeding has **two readings**: ESPN's
+   `playoffSeedingRule: TOTAL_POINTS_SCORED` is win% first with PF as the
+   tiebreak; "qualify and seed by PF alone" has no ESPN field (it is a
+   commissioner edit), so the server needs a `seeding_mode` switch and
+   last-season detection — the same roster is a favourite under one
+   reading and a bubble team under the other. 5-pt passing TDs raise
+   QB1–10 value 6–18 % over 4-pt but the last starter stays at
+   replacement (stream QB). IR eligibility is O or IR only (verified);
+   a cleared IR player makes the roster INVALID and blocks every add.
 
 ## Program status (pre-build: research → plan → adversarial review → docs)
 
 | phase | status | artefacts |
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
-| 1 — research | 🟢 `01`–`04` ✅ verified · `05` running · `06` ⚪ | `docs/research/01-*` … `06-*` |
-| 2 — plan | 🟢 core planner running (`01`–`06`); product planner ⚪ | `docs/plan/01-*` … `10-*` |
+| 1 — research | 🟢 `01`–`05` ✅ verified · `06` running | `docs/research/01-*` … `06-*` |
+| 2 — plan | 🟢 core planner running (`01`–`06`; §0 decision committed `9f41a3c`); product planner ⚪ | `docs/plan/01-*` … `10-*` |
 | 3 — adversarial review | ⚪ (brief ready) | `docs/plan/adversarial-log.md`, `changelog.md` |
 | docs — README, LICENSE, SECURITY.md | ⚪ (brief ready) | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
@@ -145,7 +157,7 @@ browser). Then the executive summary for Chad. All briefs:
 
 - [x] Phase 0 complete
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
-- [x] `04` verified · [ ] `05`
+- [x] `04`, `05` verified
 - [ ] wave 3 (`06`, plan `01`–`06`), wave 4 (plan `07`–`10`)
 - [ ] adversarial rounds, changelog
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
@@ -168,3 +180,6 @@ browser). Then the executive summary for Chad. All briefs:
 - 2026-09-30 — `data-source-evaluator` ✅ (`38c778b`). Orchestrator recounted
   the crosswalk (497/500) and verified ToU §2.B.viii. `architecture-planner-core`
   spawned (wave 3, first slot).
+- 2026-09-30 — `fantasy-strategy-analyst` ✅ (`31abd8f`). Orchestrator verified
+  the IR-eligibility quotes at the source. `skills-mcp-researcher` spawned
+  (wave 3, second slot).
