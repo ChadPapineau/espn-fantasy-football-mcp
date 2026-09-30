@@ -136,10 +136,11 @@ works for whoever saw it until you have done all of the following:
 The planned server is **read-only by default**. The write module (lineup changes first; add/drop,
 waiver claims and trades as separate later gates) is opt-in, off, and carries the plan's own
 verdict **"recommended: do not build yet"**. If it is ever built, write tools are not even
-registered unless the operator sets `EFF_ENABLE_WRITES=true`, types an acknowledgement sentence in
-a terminal, has a validated credential, and the server has resolved the operator's own team; every
-roster change then goes through `prepare → explicit human confirmation → commit`, pinned to the
-operator's own team.
+registered unless, when the server starts, the operator has set `EFF_ENABLE_WRITES=true`, has typed
+an acknowledgement sentence in a terminal, has a credential the local store records as validated,
+and `eff setup` has recorded the operator's own team — all checked from persisted evidence, with no
+network; the tool set changes only at a restart. Every roster change then goes through
+`prepare → explicit human confirmation → commit`, pinned to the operator's own team.
 
 The confirmation is one the model **cannot forge only in a session where the model has no shell or
 filesystem reach as the user**. That is a property of the *session*, not of the client: Claude Code

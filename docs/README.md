@@ -44,8 +44,9 @@ are the **structural plan** (architecture, security, lifecycle, repository and C
   nothing pressed at close. The closing verdict also ranks the residual concerns.
 - [`plan/changelog.md`](plan/changelog.md) records, one row per objection, tension and nit, what changed
   in which plan file and what survived unchanged (§R1, §R2, §R3, plus §R4 — the consistency fixes after
-  the docs pass and their verification pass), ends with a **Summary** for a reader who reads nothing
-  else, and lists the dependency reviews that must be re-run on every version bump.
+  the docs pass, their verification pass and the orchestrator's rulings on the parked items), ends with
+  a **Summary** for a reader who reads nothing else, and lists the dependency reviews that must be
+  re-run on every version bump.
 
 The plan is final and **awaiting the owner's approval**; approval, not the review, is what starts the build.
 
