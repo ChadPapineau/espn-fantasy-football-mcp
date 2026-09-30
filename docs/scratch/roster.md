@@ -14,8 +14,8 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | fantasy-strategy-analyst | a0bfbe7bbfa3c85c1 | 2 | ✅ done (SHAs verified; identifier scan clean; IR-eligibility quotes verified at support.espn.com) | `docs/research/05-*`, `docs/scratch/fantasy-strategy-analyst.md` | `31abd8f` | — |
 | skills-mcp-researcher | a4ffbd8e575038d07 | 3 | ✅ done (SHAs verified; identifier scan clean; plugin tool-naming claim spot-checked at code.claude.com) | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | `2696787` | — |
 | architecture-planner-core | aa8211963894867bd | 3 | ✅ done (SHAs verified; identifier/abs-path scan clean; SDK 2.2.0 and keyring 2.1.0 metadata re-checked on the npm registry) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `965ee10` | — |
-| product-planner | abf797cc7b96aadb5 | 4 | 🟢 running | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief |
-| devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief |
+| product-planner | abf797cc7b96aadb5 | 4 | ✅ done (SHAs verified; identifier scan clean) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `131ec10` | — |
+| devils-advocate | a30c04c0a440fc7aa | 5 | 🟢 round 1 running | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | — | brief |
 
 ## Cutoff procedure
@@ -41,3 +41,4 @@ wave order; respawn cold from the saved brief only if the ID is gone.
 - 2026-09-30 — `architecture-planner-core` ✅ (`94e18cd`…`965ee10`), plans 01–06, 1,914 lines. Orchestrator verified `@modelcontextprotocol/server` 2.2.0 (2026-09-28, no install scripts) and `@napi-rs/keyring` 2.1.0 (2026-09-13, prebuilt optional deps, no install script) on the npm registry; scans clean. `repo-security-auditor` resumed (same id) for the keyring audit per plan 02 §7.2.
 - 2026-09-30 — keyring addendum ✅ (`5b6b0bb`): `@napi-rs/keyring@2.1.0` Safe, pin exact + lockfile integrity; plan 02 §7.2 items 1–4 pass statically, item 5 (macOS prompt behaviour) is a runtime check for the first `eff doctor`. Orchestrator verified the SLSA provenance (GitHub-hosted runner, `CI.yml`, source commit `1635ed45…`).
 - 2026-09-30 — `skills-mcp-researcher` ✅ (`8b7fff1`…`2696787`), 582 lines: 14 Skills shipping + `draft` deferred; 36-tool crosswalk; registration gate (operator-controlled) + execution gate (prepare/commit with HMAC ticket). Wave 4 spawned: `product-planner`.
+- 2026-09-30 — `product-planner` ✅ (`3fd70c9`…`131ec10`), plans 07–10, 1,413 lines: 21 P0 tools, 13 Skills, engine spec, phases with testable acceptance, write module verdict "do not build yet", 16 tensions (T-01…T-16), 15 open decisions. Wave 5 spawned: `devils-advocate` round 1 (tensions handed over as pre-filed objections).

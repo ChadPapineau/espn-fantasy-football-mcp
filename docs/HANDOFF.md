@@ -17,11 +17,9 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Running: `product-planner` (wave 4, plan `07`–`10`; the only agent in the
-tree). When it finishes: verify SHAs, scan for identifiers, spot-check one
-claim, then spawn `devils-advocate` (wave 5, brief in
-`docs/scratch/briefs/devils-advocate.md`). The adversarial phase is
-multi-round: after each round the orchestrator appends `## Round N —
+Running: `devils-advocate` round 1 (wave 5; plan `07`–`10` are done and
+verified at `131ec10`; the 16 tensions in plan `10` §4 were handed to it
+as pre-filed objections). The adversarial phase is multi-round: after each round the orchestrator appends `## Round N —
 defence` to `docs/plan/adversarial-log.md` (justify with evidence or
 concede), edits the plan files directly, pushes, then resumes the same
 agent id via SendMessage for the next round; stop when the remaining
@@ -118,7 +116,18 @@ development or testing before his review.**
    plugin-hosted MCP tools are named `mcp__plugin_<plugin>_<server>__<tool>`,
    so Skill prose must use bare tool names — which makes the `espn_`
    prefix necessary beside the Yahoo server (`06` §C.1). No public ESPN
-   fantasy Skills bundle exists.
+   fantasy Skills bundle exists. (Plan `09` later folded `live` into
+   `start-sit`: **13 Skills ship**.)
+10. **Product plan (`07`–`10`)**: 21 P0 tools under `EFF_TOOLSET=core`
+   (13 P1 under `full`, 7 conditional writes, 4 later), 10 resources, 13
+   prompts; `espn_analyze_waivers` is priority-cost-aware at P0;
+   `espn_analyze_lineup` picks its objective from the seeding reading;
+   the scoring engine is validated per stat (≤ 0.005) and per total
+   (≤ 0.01) against ESPN's `appliedStats`/`appliedTotal`. Phases 0 → 1a
+   (fixtures + nflverse, no cookie) → 1b (live, needs Chad's ToU
+   acceptance) → 2 → 3, plus a conditional write phase with the verdict
+   **"recommended: do not build yet"**. Honest 2026 expectation: P0 tools
+   mid-to-late November; `trade` misses the 2026-12-02 deadline.
 
 ## Program status (pre-build: research → plan → adversarial review → docs)
 
@@ -126,8 +135,8 @@ development or testing before his review.**
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research | ✅ `00`–`06` verified (`01` incl. keyring §30) | `docs/research/01-*` … `06-*` |
-| 2 — plan | 🟢 `01`–`06` ✅ verified; product planner running (`07`–`10`) | `docs/plan/01-*` … `10-*` |
-| 3 — adversarial review | ⚪ (brief ready) | `docs/plan/adversarial-log.md`, `changelog.md` |
+| 2 — plan | ✅ `01`–`10` verified (`131ec10`); 16 tensions open for the adversarial pass | `docs/plan/01-*` … `10-*` |
+| 3 — adversarial review | 🟢 round 1 running | `docs/plan/adversarial-log.md`, `changelog.md` |
 | docs — README, LICENSE, SECURITY.md | ⚪ (brief ready) | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
@@ -187,7 +196,7 @@ development or testing before his review.**
 - [x] Phase 0 complete
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
 - [x] `04`, `05` verified
-- [x] plan `01`–`06` verified · [x] keyring audit (Safe) · [x] `06` verified · [ ] plan `07`–`10`
+- [x] plan `01`–`10` verified · [x] keyring audit (Safe)
 - [ ] adversarial rounds, changelog
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
 - [ ] executive summary for Chad
@@ -219,3 +228,5 @@ development or testing before his review.**
   orchestrator on npm's attestations endpoint.
 - 2026-09-30 — `skills-mcp-researcher` ✅ (`2696787`). Orchestrator spot-checked the
   plugin tool-naming sentence at code.claude.com. `product-planner` spawned (wave 4).
+- 2026-09-30 — `product-planner` ✅ (`131ec10`). `devils-advocate` round 1 spawned
+  with the 16 tensions as pre-filed objections.
