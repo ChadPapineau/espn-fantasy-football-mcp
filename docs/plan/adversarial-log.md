@@ -562,3 +562,19 @@ The architecture: one Node process, stdio only, the domain / provider / source /
 8. **The plan is unbuilt.** Its acceptance criteria are tests, and the tests are the next adversary.
 
 _The devil's advocate rests. Twenty-six objections, twenty-six answered; the remainder is marginal._
+
+## Round 3 — orchestrator note (after the closing verdict)
+
+**Date:** 2026-09-30 · **Plan state:** `b4e0588`. Nothing was pressed and no new objection was raised, so there is no defence to write. The five line-level nits in §3.1 are **all taken** and applied in the commits recorded in `docs/plan/changelog.md` §R3:
+
+| nit | taken as |
+|---|---|
+| (a) | `refresh` writes each dataset file with `journal_mode=DELETE` and closes it before `rename()` (no `-wal`/`-shm` sidecar can be left behind the published file) — plan 01 §5.5 |
+| (b) | `gen-fixtures.ts` re-derives **every aggregate** of a re-scored field in `fx-10h` (team totals, `winner`, records, points for/against) — plan 05 §3, plan 09 §5.2, plan 10 §3.1a; lands before the script is written |
+| (c) | on a public league whose board probe does not discriminate, the daily credential check probes the view whose 401 caused the rejection, once a day, so `rejected` can flip back — plan 06 §1.4, plan 02 §2.1, plan 07 G2 |
+| (d) | `espn_analyze_retrospective` returns `baselines.espn_projection_lineup.informative: false` while `weight_espn = 1.0` (a field, not prose — plan 07 C9's own rule) — plan 07 E13, plan 09 §3.5 |
+| (e) | `eff setup` prints one sentence before the launchd-context test that a Keychain dialog may appear — plan 03 §2.1 |
+
+The residual concerns in the closing verdict are carried, ranked as written, into `docs/HANDOFF.md` and the executive summary; (1) D0 and D2 are decisions for the repository owner and gate everything live.
+
+_The adversarial review ends here: three rounds, 26 objections (1 blocking, 10 significant, 15 marginal), 16 tensions, 15 nits — all resolved; none pressed at close._
