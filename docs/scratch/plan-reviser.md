@@ -11,10 +11,10 @@ No new design decisions.
 Status legend: `pending` · `applied (file §)` · `note only` · `already done`.
 
 ### Objections
-- OBJ-01 — pending
-- OBJ-02 — pending
-- OBJ-03 — pending
-- OBJ-04 — pending
+- OBJ-01 — applied (plan 10 §3.1a Fixtures, A1a, A-1, §5 D0/D2; plan 09 §4 tree, §5.2, A-2; plan 05 §3.1, §2 domain/scoring; plan 08 §6 steps 1, 6)
+- OBJ-02 — applied (plan 07 E1 output/method/DWAC; plan 10 A11a, B14; plan 01 D15)
+- OBJ-03 — applied (plan 07 E5 output/method, E7 verdict; plan 09 §3.8 output/guardrails/WV-1, §3.2 WK-1; plan 10 A9a, A12b)
+- OBJ-04 — applied (plan 06 §1.4 credential check + closing para + snapshot roster, §3; plan 02 §2.1 diagram/table, S3; plan 01 §4.3, §8; plan 03 §6, §5 #6; plan 07 G1; plan 10 A2b)
 - OBJ-05 — pending
 - OBJ-06 — pending
 - OBJ-07 — pending
@@ -46,4 +46,4 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 (none yet)
 
 ### Pushed SHAs
-(none yet)
+- f1d2003 — resume file
