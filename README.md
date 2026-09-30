@@ -371,9 +371,9 @@ stateDiagram-v2
     [*] --> NotConfigured
     NotConfigured --> Stored: eff setup in a terminal - hidden input, format validated, written to the one chosen store
     Stored --> Validated: definitive check accepted - lastAcceptedAt set
-    Stored --> Validated: espn_check_auth or daily credential-check probe accepted - lastAcceptedAt set
+    Stored --> Validated: espn_check_auth, eff doctor --online or daily credential-check probe accepted - lastAcceptedAt set
     Stored --> NotConfigured: setup check answered 401 or 403 - the stored value is deleted and the user is told
-    Stored --> NotConfigured: league id not found - the stored value is deleted
+    Stored --> NotConfigured: setup check found no such league id - the stored value is deleted
     Validated --> Validated: any cookie-bearing 200 refreshes lastAcceptedAt
     Validated --> Rejected: any cookie-bearing 401 or 403 - never retried
     Stored --> Rejected: any cookie-bearing 401 or 403 after setup - the value is kept, never retried
@@ -958,7 +958,7 @@ Nobody could establish how long `espn_s2` lives — community reports say "weeks
 | `EFF_CONFIG_DIR=~/.config/espn-fantasy-football-mcp` | a path | The configuration directory: `config.json`, setup results and — only if the write module is ever built — the confirmation-gate key. Outside the repository; created `0700`; refused if cloud-synced |
 | `EFF_CACHE_DIR=~/.cache/espn-fantasy-football-mcp` | a path | The cache and dataset directory: the SQLite store plus the per-source dataset files. Outside the repository |
 | `# EFF_CREDENTIAL_STORE=keychain` | `keychain` · `file` (`keychain`) | **One store per install, decided by `eff setup`**, which tests whether scheduled jobs can read the keychain without a prompt and records the result in `config.json`; that recorded choice wins over any environment value (a disagreeing one is ignored and `eff doctor` fails on it), so the line is commented out — choose with `eff setup --storage`. `file` is a `0600` JSON file in a `0700` directory. Having both is a `doctor` failure |
-| `EFF_CREDENTIAL_FILE=~/.config/espn-fantasy-football-mcp/session.json` | a path | Used only when the store is `file`. The path only — never a cookie value |
+| `EFF_CREDENTIAL_FILE=~/.config/espn-fantasy-football-mcp/session.json` | a path | Used only when the store is `file`. The path only — never a cookie value. `eff setup` records the path in `config.json` and every process uses that one; a disagreeing environment value is ignored and `eff doctor` fails on it |
 | `EFF_LOG_LEVEL=info` | `error` · `warn` · `info` · `debug` (`info`) | Logs go to **stderr only** (stdout is the MCP stdio transport). Cookies, member ids and IP addresses are redacted at every level |
 | `EFF_TOOLSET=core` | `core` · `full` (`core`) | Which tools are registered: `core` is the 18 P0 tools; `full` adds the 16 P1 tools. Decided at process start |
 | `EFF_SEEDING_MODE=espn_rule` | `espn_rule` · `points_only` (`espn_rule`) | How playoff seeding is read: `espn_rule` is what the league's ESPN settings say (record first, points for as the tiebreak); `points_only` is a commissioner seeding by total points. Set by `eff setup --seeding`; until you confirm it, every result carries `seeding.confirmed: false` |
