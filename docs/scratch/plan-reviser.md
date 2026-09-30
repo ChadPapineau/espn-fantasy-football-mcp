@@ -77,9 +77,9 @@ Status legend as above.
 - OBJ-21 — applied (plan 10 §3.1a Fixtures, A1a, A14a, §6 A-1; plan 09 §4 tree ×2, §3.1 ON-3, §5.1 #7, §5.2, §7 A-2; plan 05 §3 fixture-law box, §3.1 steps 1/2/4, §2 domain/scoring, §5 smoke dir; plan 08 §6 step 1; plan 01 §9.1; plan 04 §1, §4.1 smoke dir)
 - OBJ-22 — applied (plan 01 D6, §1 diagram node, §5.1, §5.5 new paragraph, §14 A-13; plan 03 §1.1 step 3; plan 05 §2 store row; plan 06 §1.3 intro + store prune; plan 10 §4 T-15)
 - OBJ-23 — applied (plan 09 §4 tree, §6 Code-tab row, K8; plan 04 §1 tree, §2 files; plan 03 §4.2, §5 #2; plan 10 §4 T-01, A15b)
-- OBJ-24 (instructions delivery [U], nonce in A11b spike, rule also in docs resource, fallback short form, pointer ≤ 40) — pending
-- OBJ-25 (throwaway item, 10 s timeout, ok/timeout/error, recorded + doctor #7) — pending
-- OBJ-26 (anonymous control request; accepted: null when not discriminating) — pending
+- OBJ-24 — applied (plan 01 §4.1, §14 A-14; plan 02 §6.3, §8 #5, §10; plan 07 §5.1, §4.1 docs resource; plan 09 §2 tool-outputs.md; plan 10 A11b, §3.1b echo spike, §2 ledger; pointer string now 40 chars)
+- OBJ-25 — applied (plan 03 §2.1 step 4, §5 #7; plan 06 §2, A-2; plan 02 §2.2 row, §10 A-1)
+- OBJ-26 — applied (plan 07 G2 output + method; plan 02 S2, §2.1 diagram label + table; plan 03 §2.1 step 5, §5 #16; plan 09 §3.7 ×3, §3.1 ON-5-E; plan 06 §1.4 credential check; plan 10 D2)
 
 ### Nits
 - N1 8 s CPU deadline · N2 retro "not informative in v1" + shadow weights 0.5/0.75 · N3 marginal[] · N4 orient.md line · N5 hourly snapshot-pool wake · N6 host-override scope · N7 Z7 — applied (plan 10 §3.0 Z7 + exit gate, §1 row 0) · N8 E2 wording · N9 wireOutputSchema lever · N10 bounds name their dataset — all pending
@@ -95,7 +95,10 @@ Status legend as above.
 - OBJ-22: the ruling puts the readOnly [A] in "plan 01 §13"; §13 is "What this plan does not decide" — the assumptions table is §14, so it is A-13 there
 - OBJ-22: dataset files are now `datasets/<source>.sqlite` (rename onto the same path); the version lives in `refresh_log`, not the file name
 - OBJ-23: plan 04 §2 `files` drops `bin` and lists `scripts/eff-launch.sh` so a tarball install is still a plugin root
+- OBJ-25: the ruling names the item only by its suffix (`-selftest`); I wrote the service as `espn-fantasy-football-mcp-selftest`; the advocate's extras (a `store_decided_by` key, a setup warning text, doctor re-running the test) are not in the ruling and were not added
+- OBJ-26: on a non-discriminating public league setup keeps the value and leaves the state `stored` (the ruling says only `accepted: null` with the reason)
 
 ### R2 pushed SHAs
 - 89debff — R2 resume checklist
 - 3c18e09 — OBJ-21 + Z7
+- 0420837 — OBJ-22, OBJ-23
