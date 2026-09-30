@@ -25,15 +25,15 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - OBJ-12 — applied (plan 09 §4 .mcp.json + bin/eff, §6 Code-tab row, K8; plan 04 §1 tree; plan 10 A15b; plan 03 §5 #2)
 - OBJ-13 — applied (plan 07 C12, A1 inputs/output/method/views/clean negatives, C9, E2 inputs/objective, E3 inputs, §6 row 1, G1; plan 09 §3.1 tools/inputs/output, §3.3 inputs, §3.11 inputs/SP-5-E; plan 03 §3 key; plan 10 D1, B5)
 - OBJ-14 — applied (plan 07 G2; plan 02 S2, §2.1 diagram/table; plan 03 §2.1 step 5, §5 #16/#17; plan 09 §3.7 ×3, §3.1 ON-5-E; plan 06 credential check; plan 10 D2)
-- OBJ-15 — pending
-- OBJ-16 — pending
-- OBJ-17 — pending
-- OBJ-18 — pending
-- OBJ-19 — pending
-- OBJ-20 — pending
+- OBJ-15 — applied (plan 02 §2 facts, §2.1 format row, §2.3; plan 01 §8, §10; plan 03 §2.1 step 3; plan 05 auth/format, cli/log)
+- OBJ-16 — applied (plan 06 §1.4 snapshot roster/pool, transactions append, pre-kickoff, budget line, §2 StartCalendarInterval; plan 03 §5 #11)
+- OBJ-17 — applied (plan 09 §2 orient.md; plan 10 A16b)
+- OBJ-18 — applied (plan 09 §2 P1 Step 0, §5.1 item 3; plan 10 D3, B10, B11)
+- OBJ-19 — applied ((a) plan 02 header, S1, §7.2, §10; plan 01 D12; plan 04 §2 · (b) plan 04 §2 devDeps; plan 05 A-2; plan 09 §5.1 #3 · (c) plan 07 A6 · (d) plan 05 sources/*; plan 01 D9, §5.5 · (e) plan 08 §6 step 5 · (f) already done)
+- OBJ-20 — applied (plan 01 §6 backoff + httpClient; plan 05 §4.1 two rows; plan 10 A5a)
 
 ### Tensions
-- T-01 … T-16 — pending (T-15(c) → OBJ-09(a); T-05/T-09 sharpened; T-11 note only; T-13 merged into T-03; T-16 already done)
+- T-01 applied (plan 04 §1 tree, §2 files, §4.2 skills; plan 03 §4.2; plan 09 §4/K8) · T-02 applied (plan 04 §4.2; plan 03 §4.2; plan 07 §1) · T-03 applied (plan 03 §3; plan 01 §3.1; plan 07 §2) · T-04 applied (plan 01 §4.1 table; plan 02 §4.1; plan 07 §2/E12) · T-05 applied (plan 01 §4 intro; plan 05 §2 envelope; plan 07 C10) · T-06 applied (plan 01 §4.2; plan 07 §5.1) · T-07 applied (plan 01 §9.2; plan 06 §1.3/§1.4; plan 08 §9; plan 07 A4/E12/E13; plan 10 §3.1a) · T-08 applied (plan 03 §5 #21–23; plan 06 §1.4; plan 07 E9; plan 08 §6; plan 10 1b) · T-09 applied (with OBJ-09(c)) · T-10 applied (plan 05 T8, §1, §2, §7) · T-11 note only (plan 02 §5) · T-12 applied (plan 01 §4.4) · T-13 merged into T-03 (plan 01 §4.1/§5.6 examples; plan 07 C1/§1/A2/C2) · T-14 applied (plan 01 §7) · T-15 (a) plan 01 D2, plan 03 §4.1/§5 #1/§4.3, plan 04 R2/R5/§1/§2/§4.1, plan 06 §1.1 · (b) plan 03 §7/L7, plan 05 store, plan 06 backup · (c) replaced by OBJ-09(a) · (d) plan 04 §4.2 · (e) plan 04 §5/A-3 · T-16 already done · §1.5 probe coverage applied (plan 01 §7)
 
 ### Other tasks
 - Plan 10 §4 resolved table — pending
@@ -50,3 +50,4 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - 18d6e32 — OBJ-01..04
 - d419983 — OBJ-05..08
 - 3e8b675 — OBJ-09
+- 22e80ef — OBJ-10..14
