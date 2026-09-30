@@ -111,6 +111,7 @@ stateDiagram-v2
     [*] --> NotConfigured
     NotConfigured --> Stored: eff setup - format validation passed, value written to the store
     Stored --> Validated: setup probe accepted (200, or 404 on an informative board probe) - lastAcceptedAt set
+    Stored --> Validated: espn_check_auth or daily credential-check probe 200 - lastAcceptedAt set
     Stored --> NotConfigured: setup probe 401 or 403 - value deleted, user told
     Stored --> NotConfigured: setup mSettings 404 - league id wrong, value deleted
     Validated --> Validated: any cookie-bearing 200 - lastAcceptedAt refreshed
@@ -267,7 +268,7 @@ An opaque token returned to the model proves the model called `prepare` and bind
 
 ### 4.4 Journal states and reconciliation
 
-`prepared → (denied | expired | voided_precondition | voided_code | sent)` (`voided_code`: three wrong one-time codes, §4.2); `sent → (applied | applied_mismatch | rejected_transaction | rejected_auth | sent_unknown)`; `sent_unknown → (confirmed_applied | confirmed_not_applied)` by the reconciliation job (plan 06) comparing `mTransactions2` (which reflected a change within ~1.5 s in the capture [V-03 §E.2]) and `mRoster` against the journal within 24 h. **Writes are never automatically retried** [V-02 §3 #4]; `applied_mismatch` (ESPN said `EXECUTED`, the read-back disagrees) is surfaced loudly — it means our model of the write is wrong.
+`prepared → (denied | expired | voided_precondition | voided_code | voided_cancelled | sent)` (`voided_code`: three wrong one-time codes, §4.2; `voided_cancelled`: `espn_cancel_prepared`, plan 07 F7); `sent → (applied | applied_mismatch | rejected_transaction | rejected_auth | sent_unknown)`; `sent_unknown → (confirmed_applied | confirmed_not_applied)` by the reconciliation job (plan 06) comparing `mTransactions2` (which reflected a change within ~1.5 s in the capture [V-03 §E.2]) and `mRoster` against the journal within 24 h. **Writes are never automatically retried** [V-02 §3 #4]; `applied_mismatch` (ESPN said `EXECUTED`, the read-back disagrees) is surfaced loudly — it means our model of the write is wrong.
 
 ---
 

@@ -296,6 +296,16 @@ Follow-up fixes from the audit:
 - **G37, G38, G39, G41, G42** · plan 03 §5 #16; plan 04 §4.3 (`espn-league-id`); plan 08 §7 P9, P15; plan 06 §1.3 (`sleeper:trending`); plan 08 §3.1 (the `fga_*`/`fgm_*` row) · table rows repaired so each has its header's cell count: pipes inside code spans escaped as `\|`, and the merged names-and-ids cell split in two.
 - **Not fixed here (outside this pass's editable files):** G4, G35, G36 — `docs/HANDOFF.md` ▶ NEXT STEP, Program status and Open items still list the parked items and the research 01 runner path as open; G43 — four research table rows with unescaped pipes (research 03 line 385, 04 line 39, 05 line 97, 06 line 157).
 
+#### Loop-until-dry pass
+
+- **L1** · plan 04 §4.5 (`scheduled.yml`, macOS runner) · the keychain round trip is restated as plan 05 §4.2 has it: `eff setup --storage keychain --service-name eff-test-<random>` with a fake value, then the items are checked and deleted with `security find-generic-password`/`delete-generic-password -s eff-test-<random> -a <account>`; the `eff doctor` #7 and `eff uninstall --yes` steps are removed, because both would touch the real service name.
+- **L2** · README Testing (levels table, keychain round-trip row) · "`eff setup` under a throwaway `eff-test-…` service name, then the items are checked and deleted with macOS's `security` tool; the real service name is never touched" replaces "Setup → doctor → uninstall".
+- **L3** · plan 02 §2.1 diagram; README Architecture §4 diagram · new edge `Stored --> Validated` for an `espn_check_auth` or daily credential-check probe 200 (`lastAcceptedAt` set); the README's setup `401 or 403` edge (`Stored --> NotConfigured`) now says "setup check", as plan 02's does. The §2.1 table already agreed (the definitive-check row sends a 200 to `Validated` from every place it runs).
+- **L4** · plan 06 §0 J5 · the daily credential check is the shape probe's request only when no public probe league is configured and the user's league is private (§1.2); on a public user league it is the separate board probe.
+- **L5** · README Testing (test-only settings, `EFF_TEST_STUBS`) · "any network call or keychain read", as plan 05 §4.2 says.
+- **L6** · plan 03 §2.1 (the `--service-name` flag); plan 05 §4.2 (keychain round trip) · a setup run given `--service-name eff-test-…` skips step 5, and with it the step 6 request, and prints that it did; a throwaway test item holding a fake value is never sent to ESPN, so the test makes no network call (plan 05 §8). The test asserts the items exist, then deletes them with the `security` CLI. When the launchd-context self-test outcome that setup records is not `ok`, the test is skipped and logs that outcome.
+- **L7** · plan 02 §4.4; plan 07 F7; plan 05 §4.3; plan 10 W1 · `espn_cancel_prepared` leaves the journal row in the terminal state `voided_cancelled`, beside `voided_code`. The gate tests add: cancel → `voided_cancelled`, then commit → zero POSTs.
+
 ## Summary — what the adversarial process changed and what survived
 
 For a reader who reads nothing else. The full record is `docs/plan/adversarial-log.md`; the row-by-row edits are §R1–§R3 above, plus §R4's consistency fixes after the docs pass.

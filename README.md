@@ -371,7 +371,8 @@ stateDiagram-v2
     [*] --> NotConfigured
     NotConfigured --> Stored: eff setup in a terminal - hidden input, format validated, written to the one chosen store
     Stored --> Validated: definitive check accepted - lastAcceptedAt set
-    Stored --> NotConfigured: check answered 401 or 403 - the stored value is deleted and the user is told
+    Stored --> Validated: espn_check_auth or daily credential-check probe accepted - lastAcceptedAt set
+    Stored --> NotConfigured: setup check answered 401 or 403 - the stored value is deleted and the user is told
     Stored --> NotConfigured: league id not found - the stored value is deleted
     Validated --> Validated: any cookie-bearing 200 refreshes lastAcceptedAt
     Validated --> Rejected: any cookie-bearing 401 or 403 - never retried
@@ -1079,7 +1080,7 @@ The untrusted-text rule the server declares to the model, verbatim from the plan
 | Drift | The manifest, skeleton detection, a simulated renamed view, the probe's diff logic, `ESPN_DRIFT_DETECTED` end to end | every push | no | no |
 | Fault injection | 401 (exactly one attempt, then the short-circuit), 404, 400, 429, 5xx, timeouts, a redirect to another host (not followed), non-JSON, malformed and oversized bodies, a black-holed network under the 20-second deadline, two processes sharing the limiter | every push | no | no |
 | Process / lifecycle | The built binary: fast startup with network and keychain stubbed, clean exit on stdin EOF and signals, orphan detection, no listening socket in `serve`, migrations | every push (Linux); weekly on macOS | no | no |
-| Keychain round trip | Setup → doctor → uninstall against a throwaway item | weekly (macOS only) | no | no |
+| Keychain round trip | `eff setup` under a throwaway `eff-test-…` service name, then the items are checked and deleted with macOS's `security` tool; the real service name is never touched | weekly (macOS only) | no | no |
 | Inspector smoke | The tool list equals the expected list, in order, **with no write tool**; results carry the envelope; the two mandatory sentences appear exactly once | every push, in fixture mode | no | no |
 | Skills Lane 1 | Structure, tool names against the registry, a fixture dry run of every promised tool sequence, injection invariance | every push | no | no |
 | Live smoke (`eff smoke`) | Your real league: settings, one roster, one pool page, one completed week scored against ESPN's applied points per stat | **never in CI** — run by you | yes | no |
@@ -1093,7 +1094,7 @@ The untrusted-text rule the server declares to the model, verbatim from the plan
 |---|---|
 | `EFF_FIXTURE_DIR` | A fixture directory: the server serves recorded, anonymised fixtures from it instead of calling ESPN (fixture mode, league id `0`). Unreachable when a credential is stored |
 | `EFF_FIXTURE_RECORD` | `1` enables fixture-recording mode: raw response bodies are written outside the repository, to be scrubbed before anything is committed. Unset, no raw body is ever written |
-| `EFF_TEST_STUBS` | `1` makes any network call or keychain-secret read exit the process — how the startup test proves that startup touches neither |
+| `EFF_TEST_STUBS` | `1` makes any network call or keychain read exit the process — how the startup test proves that startup touches neither |
 
 **The fixture law** (the plan's most intricate rule, written as a box at the top of its fixtures section):
 

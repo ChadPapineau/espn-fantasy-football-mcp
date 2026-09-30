@@ -204,7 +204,7 @@ Build → full `ci.yml` jobs → `scripts/check-changelog.ts` → `npm pack` →
 
 ### 4.5 `scheduled.yml` — weekly (Monday 06:00 UTC) + manual
 
-`npm audit` full report → `npm outdated --json` into the job summary → **macOS runner:** `test:process` (launchd plist generation, `osascript` path with a stub, `lsof` report, **the keychain round-trip: `eff setup` with a fake value from stdin → `eff doctor` #7 → `eff uninstall --yes`, asserting no item survives**) → Inspector smoke. Failures surface in the Actions summary (no bot tokens beyond `GITHUB_TOKEN`).
+`npm audit` full report → `npm outdated --json` into the job summary → **macOS runner:** `test:process` (launchd plist generation, `osascript` path with a stub, `lsof` report, **the keychain round-trip (plan 05 §4.2): `eff setup --storage keychain --service-name eff-test-<random>` with a fake value from stdin (setup skips the ESPN check for a test service name, so no network call) → the items checked with `security find-generic-password -s eff-test-<random> -a <account>` and deleted with `security delete-generic-password -s eff-test-<random> -a <account>`, asserting no item survives; skipped, with the outcome logged, when setup's launchd-context self-test is not `ok`; no `eff doctor` and no `eff uninstall` step, because both would touch the real service name**) → Inspector smoke. Failures surface in the Actions summary (no bot tokens beyond `GITHUB_TOKEN`).
 
 ### 4.6 What can be built **before** the server exists
 

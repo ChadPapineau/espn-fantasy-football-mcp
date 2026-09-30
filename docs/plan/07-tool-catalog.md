@@ -323,7 +323,7 @@ All `espn_prepare_*` return `{ prepared_id, kind, diff: { human: string, structu
 | F4 | `espn_commit_transaction` | conditional (later) | `{ prepared_id, evidence? }` | `FREEAGENT` / `WAIVER` (`PENDING` until `waiverNextExecutionDate`) / `CANCEL` |
 | F5 | `espn_prepare_trade` | conditional (later, if ever) | `{ kind: "propose"\|"accept"\|"decline"\|"cancel", partner_team_id?, give?: player_ids[1..6], get?: player_ids[1..6], pending_transaction_id? }` — no free-text note field | — |
 | F6 | `espn_commit_trade` | conditional (later) | `{ prepared_id, evidence? }` | `TRADE_PROPOSAL` / `TRADE_ACCEPT` / `TRADE_DECLINE` |
-| F7 | `espn_cancel_prepared` | conditional | `{ prepared_id }` → `{ voided }`; local-store write (T-04) | — |
+| F7 | `espn_cancel_prepared` | conditional | `{ prepared_id }` → `{ voided }`; the journal row ends in the terminal state `voided_cancelled` (plan 02 §4.4); local-store write (T-04) | — |
 
 - D/W/A/C (family): one prepare/commit pair per ESPN write family with `kind` inside · plan 02 §4 requires two tools per write; ESPN's three payload families (`ROSTER`, `FREEAGENT`/`WAIVER`, `TRADE_*`) each need one precondition-hash definition (06 §A.1) · one pair per ESPN verb · Chad deciding to build the module at all (plan 10 §3.W verdict) — until then this section registers nothing and the write host is not in the allow-list.
 
