@@ -19,7 +19,7 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - OBJ-06 — applied (plan 03 §3 key, §5 #15; plan 02 S12, §5, §7.1; plan 01 §4.3 row, §7 host row + recovery para; plan 09 §2 orient, §3.7)
 - OBJ-07 — applied (plan 01 §1.1 Domain; plan 03 §1.2; plan 10 A16a, A-2; plan 07 E1/E3 n_sims)
 - OBJ-08 — applied (plan 07 C3 row, §2 Toolset, C3/E3/E14 headers, E2 data, §5.1, A-4; plan 10 Ph1, §1, §3.1a Analytics/Tools, A3a, A7a, A10a, 1b Tools, §3.2, B10, B12, D3)
-- OBJ-09 — pending
+- OBJ-09 — applied ((a) plan 01 D6, §1 diagram, §5.1, §5.5; plan 02 §8 #8; plan 03 L7, §1.1, §7; plan 05 store row; plan 06 J3, §2; plan 10 A5a, A15a · (b) plan 01 §4.1; plan 02 §6.3; plan 05 §5; plan 07 legend, C10, §5.1, A-4; plan 10 A3a, A7a, B12 · (c) plan 02 opening rule, §1, §4.2, §8 #14; plan 03 §5 #13; plan 09 §6 ×2; plan 10 §3.W (4), prereqs (a)(b), W10 · sibling citations: plans 07/09/10 headers)
 - OBJ-10 — pending
 - OBJ-11 — pending
 - OBJ-12 — pending
@@ -48,3 +48,4 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 ### Pushed SHAs
 - f1d2003 — resume file
 - 18d6e32 — OBJ-01..04
+- d419983 — OBJ-05..08
