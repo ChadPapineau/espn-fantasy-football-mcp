@@ -378,9 +378,11 @@ stateDiagram-v2
     Validated --> Rejected: any cookie-bearing 401 or 403 - never retried
     Stored --> Rejected: any cookie-bearing 401 or 403 after setup - the value is kept, never retried
     Rejected --> Rejected: every cookie-bearing call short-circuits with ESPN_AUTH_REJECTED and sends no request
-    Rejected --> Validated: espn_check_auth probe accepted, at most once per minute
+    Rejected --> Validated: espn_check_auth or eff doctor --online probe accepted, the tool at most once per minute
     Rejected --> Validated: daily credential-check job probe accepted, at most twice a day
     Rejected --> Stored: eff setup run again with freshly copied cookies
+    Validated --> Stored: eff setup run again with freshly copied cookies
+    Stored --> NotConfigured: eff setup --reset or eff uninstall
     Validated --> NotConfigured: eff setup --reset or eff uninstall
     Rejected --> NotConfigured: eff setup --reset or eff uninstall
     note right of Stored
@@ -778,7 +780,7 @@ Prompts are user-invoked, hold no logic, and are generated from the Skill bodies
 
 | Code | Meaning | Retryable |
 |---|---|---|
-| `ESPN_AUTH_REJECTED` | A cookie-bearing request got 401/403. The credential state becomes `rejected` and further cookie-bearing calls short-circuit without a request until `eff setup`, `espn_check_auth` or the daily credential check succeeds. The message says "usually expired" — ESPN's 401 cannot distinguish an expired cookie from a league that is not yours | no |
+| `ESPN_AUTH_REJECTED` | A cookie-bearing request got 401/403. The credential state becomes `rejected` and further cookie-bearing calls short-circuit without a request until `eff setup`, `espn_check_auth`, `eff doctor --online` or the daily credential check succeeds. The message says "usually expired" — ESPN's 401 cannot distinguish an expired cookie from a league that is not yours | no |
 | `ESPN_REQUIRES_COOKIES` | The tool needs private data and no credential is stored | no — run `eff setup` |
 | `ESPN_DRIFT_DETECTED` | A required key was missing from a view, or a skeleton came back for a known view; names the view and the JSON path | no — a human reads the diff |
 | `ESPN_HOST_MOVED` | The read host answered a redirect or a non-JSON body | no — operator override, then a release |
@@ -929,7 +931,7 @@ The value is read lazily on the first tool call that needs it, never on the star
 Nobody could establish how long `espn_s2` lives — community reports say "weeks to months" — so the design does not depend on it:
 
 - **In chat:** a tool returns `ESPN_AUTH_REJECTED` with the exact command to run. The message says the cookies were not accepted and that this *usually* means `espn_s2` expired (ESPN's 401 cannot distinguish an expired cookie from a league that is not yours). The server stays alive; cached data inside its hard limit is still served, marked stale.
-- **No retry loop, ever.** A 401 is never retried; every later cookie-bearing call short-circuits without sending a request. The ways back are a human re-running setup, the `espn_check_auth` tool (once a minute at most), or the daily credential-check job (twice a day at most) — which cover the case where ESPN merely hiccupped.
+- **No retry loop, ever.** A 401 is never retried; every later cookie-bearing call short-circuits without sending a request. The ways back are a human re-running setup, the `espn_check_auth` tool (once a minute at most), a human running `eff doctor --online`, or the daily credential-check job (twice a day at most) — which cover the case where ESPN merely hiccupped.
 - **Outside chat:** `eff status` shows `rejected_since` and `next_probe_at`; the daily job sends one notification per rejection.
 - **To recover:** copy fresh cookies (section 1) and run `eff setup` again in a terminal. A running server notices the new value on its next call — **no restart needed**.
 
@@ -1028,7 +1030,7 @@ What to get right:
 - **The configuration key is `espn-fantasy-football`.** Clients namespace tools by this key (in Claude Code the tools appear as `mcp__espn-fantasy-football__espn_<tool>`). Keep it distinct from the sibling Yahoo server's key so the two never collide.
 - **`env` holds non-secret settings only.** Never put `espn_s2` or `SWID` there.
 - **The plugin launches through `/bin/sh` and a small shim**, `scripts/eff-launch.sh`, which resolves a Node ≥ 24.15 deterministically (an `EFF_NODE` override, then the `fnm`/`nvm` default, then `/opt/homebrew/bin`, then `command -v node`) and fails with the exact fix if it finds none. `/bin/sh` is absolute on every macOS and needs neither a `PATH` nor an executable bit on the shim. Credentials never live under the plugin root.
-- **One configuration directory and one cache directory for everything.** The plugin's server, the `eff` CLI and the launchd jobs all use `~/.config/espn-fantasy-football-mcp` and `~/.cache/espn-fantasy-football-mcp` — or, if you override `EFF_CONFIG_DIR`/`EFF_CACHE_DIR`, the same explicit values, which `eff print-config` and `eff install-launchd` write into the client configuration and the job definitions. The plugin's `.mcp.json` sets neither.
+- **One configuration directory and one cache directory for everything.** The plugin's server, the `eff` CLI and the launchd jobs all use `~/.config/espn-fantasy-football-mcp` and `~/.cache/espn-fantasy-football-mcp` — or, if you override `EFF_CONFIG_DIR`/`EFF_CACHE_DIR`, the same explicit values, which `eff print-config` and `eff install-launchd` write into the client configuration and the job definitions. The plugin's `.mcp.json` sets neither, so the plugin install supports the default directories only: to use an override, launch the server from a client configuration instead. `eff doctor` warns when an override is set, because a server started by the plugin would not see it.
 - **`--scope user`** keeps your personal entry in your own Claude Code configuration rather than in a repository file.
 - **`serve` opens no listening socket.** It speaks MCP on stdin/stdout, logs to stderr, and exits cleanly when the client closes stdin.
 

@@ -315,6 +315,17 @@ Follow-up fixes from the audit:
 - **C1-11** · plan 03 §2.1 step 4, §3, §5 #6; plan 02 §2.2 (env override); plan 06 §2 (plists); `.env.example`; README Configuration · the file store's resolved `session.json` path is recorded by `eff setup` in `config.json` as `EFF_CREDENTIAL_FILE` and is authoritative like `EFF_CREDENTIAL_STORE` (two exceptions to env > `config.json`); a disagreeing env value is not used and doctor #6 fails on it, so the server and the jobs read the same file.
 - **C1-12** · README Architecture §4 diagram · the same edit as C1-2 (the duplicate finding).
 - **C1-13** · plan 03 §2.1; plan 05 §4.2; plan 04 §4.5 · plan 03 now states the Phase W non-TTY refusal of `eff setup` (exit 2; no flag exempts a run, `--service-name` included), and the macOS keychain round trip feeds the fake value through a pty instead of a pipe.
+- **C2-1** · plan 02 §2.1 diagram; README Architecture §4 diagram · the tool's `Rejected --> Validated` edge now reads "espn_check_auth or eff doctor --online probe accepted, the tool at most once per minute", identically in both, as the §2.1 table and the short-circuit row already had it.
+- **C2-2** · plan 10 A2b; plan 01 §4.3 (`ESPN_AUTH_REJECTED`); README error-code row, Security §4 · `eff doctor --online` joins the list of ways out of `rejected`.
+- **C2-4** · plan 05 §4.2; plan 03 §2.1 (non-TTY stdin) · every process test that spawns `eff setup` — the `--page` port, POST and SIGINT tests and the keychain round trip — runs it under a pty (util-linux `script -qec` on ubuntu, `script -q /dev/null` on macOS); from Phase W prerequisite (c) on, one more case spawns setup with piped stdin and asserts exit 2 with the TTY message.
+- **C2-6** · plan 02 S3, §2.1 diagram; plan 06 §3 (`credential_state = rejected`); plan 07 G2 Method; README diagram 4 · `eff doctor --online` is named as a way back from `Rejected` wherever the ways are listed (the plan 01 §4.3, plan 10 A2b and README rows are C2-2's).
+- **C2-8** · plan 01 D6 · the truncated clause is completed: credential observations are in the store, as the `credential_state` row with `stored_at` (§9.2; plan 02 §2.1).
+- **C2-10** · plan 01 D16; plan 03 §4.1, §5 #4; plan 09 §4; README launch configuration · option (a): the plugin's fixed `.mcp.json` sets neither directory variable, so the plugin install supports the default directories only; an override needs a client-config launch, and `doctor` #4 warns when `EFF_CONFIG_DIR` or `EFF_CACHE_DIR` is set.
+- **C2-11** · plan 02 §1 diagram · `store.sqlite` no longer lists datasets (it now names `credential_state`); a new node for the per-source dataset files, read-only to the server, receives the data sources' edge.
+- **C2-13** · plan 02 §2.1 diagram; README diagram 4 · new edges `Stored --> NotConfigured` (`eff setup --reset` or `eff uninstall`) and `Validated --> Stored` (setup run again with a new value).
+- **C2-14** · plan 02 §3.2 (Own team gate) · the team is resolved in setup's team-resolution step, the `mTeam` request that follows the definitive check, not during the check.
+- **C2-15** · plan 02 S7 · the ticket's HMAC input list gains `period`, matching §4.3.
+- **Not fixed here (outside this pass's editable files):** C2-7 — `docs/HANDOFF.md` ▶ NEXT STEP still lists F3, F41, F47, F49, F13/F56, F58 and the `--service-name` flag as decisions for Chad, though V1–V8 resolved them, and says the research 01 runner path remains, though `331dbf6` (V3) elided it.
 
 ## Summary — what the adversarial process changed and what survived
 
