@@ -17,23 +17,22 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Adversarial **round 1 is closed**: 20 objections (1 blocking, 9
-significant, 10 marginal) + 16 tensions; defence = 14 CONCEDE, 6
-CONCEDE-MODIFIED (`docs/plan/adversarial-log.md` §Round 1 — defence);
-every edit applied by `plan-reviser` (`18d6e32`…`5351241`) and recorded in
-`docs/plan/changelog.md` §R1; the orchestrator re-grepped the retired
-phrases (0 hits), re-rendered all six plan diagrams (6 ok) and re-scanned
-for identifiers (clean). **Now:** resume `devils-advocate` (same agent id,
-SendMessage) for round 2 — it re-reads the revised plan and the defence,
-withdraws / presses / raises what the revisions broke. Repeat
-defence → reviser → verify until its remaining objections are marginal
-and it writes `## Closing verdict`. Then wave 6 `docs-writer` (README with
-8 Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
-`docs/plan/00-index.md`); the orchestrator re-validates every diagram with
-the browser harness (a scratch page that fetches a JSON list of the
-repo's ```mermaid blocks and calls `mermaid.parse()` on each, Mermaid 11
-from jsDelivr, served by `python3 -m http.server` on 127.0.0.1 — recreate
-it if the scratchpad is gone). Then the executive summary for Chad. **Chad
+Adversarial rounds 1 and 2 are closed (26 objections, 10 nits, 16
+tensions — all conceded, six with modified fixes; edits in
+`docs/plan/changelog.md` §R1/§R2; plan state `b4e0588`). **Running:**
+`devils-advocate` round 3 (expected: a verdict table and `## Closing
+verdict`) and `docs-writer` (README with 8 Mermaid diagrams, LICENSE,
+SECURITY.md, `docs/README.md`, `docs/plan/00-index.md`). When round 3
+lands: if it presses or raises anything, append `## Round 3 — defence`,
+resume `plan-reviser` (same id) for the edits and a changelog §R3, then
+ask for the closing verdict; if it closes, add the closing summary to the
+changelog. When `docs-writer` lands: render every README diagram with the
+browser harness (a scratch page that fetches a JSON list of the repo's
+```mermaid blocks and calls `mermaid.parse()` on each — Mermaid 11 from
+jsDelivr, served by `python3 -m http.server` on 127.0.0.1; recreate it if
+the scratchpad is gone), scan for identifiers and absolute paths, check
+the README against changelog §R1–§R3, fix or send back. Then the
+executive summary for Chad with the decisions that need his input. **Chad
 (2026-09-30): report back when all research and planning is complete; no
 development or testing before his review.**
 
@@ -143,8 +142,8 @@ development or testing before his review.**
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research | ✅ `00`–`06` verified (`01` incl. keyring §30) | `docs/research/01-*` … `06-*` |
 | 2 — plan | ✅ `01`–`10` verified; revised after adversarial round 1 (`5351241`) | `docs/plan/01-*` … `10-*` |
-| 3 — adversarial review | 🟢 round 1 closed (defended, edits applied, `changelog.md` §R1); round 2 next | `docs/plan/adversarial-log.md`, `changelog.md` |
-| docs — README, LICENSE, SECURITY.md | ⚪ (brief ready) | root + `docs/README.md` |
+| 3 — adversarial review | 🟢 rounds 1–2 closed (defended, edits applied, `changelog.md` §R1/§R2); round 3 running | `docs/plan/adversarial-log.md`, `changelog.md` |
+| docs — README, LICENSE, SECURITY.md | 🟢 `docs-writer` running | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
 ## Decisions made
@@ -229,7 +228,7 @@ development or testing before his review.**
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
 - [x] `04`, `05` verified
 - [x] plan `01`–`10` verified · [x] keyring audit (Safe)
-- [x] adversarial round 1 (defence + edits + changelog §R1) · [ ] round 2+ and closing verdict
+- [x] adversarial rounds 1–2 (defence + edits + changelog §R1/§R2) · [ ] round 3 / closing verdict
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
 - [ ] executive summary for Chad
 
@@ -267,3 +266,7 @@ development or testing before his review.**
   (`18d6e32`…`5351241`; survived a usage-limit cutoff with nothing lost — resumed by id).
   Orchestrator verification: retired-phrase grep 0 hits, six diagrams render, identifier
   scan clean; changelog gained the keyring review row; HANDOFF findings 4, 7, 10 corrected.
+- 2026-09-30 — Adversarial round 2: `ae7bb52` (all 20 R1 rulings accepted; 6 new + 10 nits);
+  the orchestrator reproduced the SQLite 10-attachment limit locally; defence `07e4b37`
+  (OBJ-21 option A — two fixture classes; all conceded); `plan-reviser` R2 edits
+  `89debff`…`b4e0588`; verification clean. Round 3 and `docs-writer` running.
