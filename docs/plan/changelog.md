@@ -185,7 +185,7 @@ Reviser's notes on R3: (c) changes what the daily job probes on such a league, n
 | item | ruling | what changed (file §) |
 |---|---|---|
 | (1) `waivers` prompt priority | A Skill's prompt has its Skill's priority: `waivers` ships at P0 (plan 09 §1), so `espn.waivers` is a P0 prompt — eight P0 prompts, five P1 | plan 07 §4.2 (P0 and P1 prompt lists); plan 10 §1 (row 1a), §3.1a (*Prompts*), A3a, §3.2 (*Skills*: the five P1 prompts); README unchanged — its prompt list states no priorities |
-| (2) Channel-2 pending file | Plan 10 §3.W prerequisite (c) is right: the one-time code travels in the notification only, and nothing about a pending confirmation is written to disk in plaintext | plan 02 §1 (diagram node → `NOTIF["macOS notification"]`), §4.2 (channel 2 row); plan 03 §8 step 4 (uninstall no longer mentions pending confirmations); plan 10 §3.W prerequisite (c) and §4 T-09 (wording only) |
+| (2) Channel-2 pending file | Plan 10 §3.W prerequisite (c) is right: the one-time code travels in the notification only, and nothing about a pending confirmation is written to disk in plaintext | plan 02 §1 (diagram node → `NOTIF["macOS notification"]`), §4.2 (channel 2 row); plan 03 §8 step 4 (uninstall no longer mentions pending confirmations); plan 10 §3.W prerequisite (c) and §4 T-09 (wording only). *(Refined by V1: no plaintext copy of the code is written anywhere; the journal row holds the diff and the keyed hash.)* |
 | (3) Annotation families for D1–D5 and E14 | One new family, "Dataset reads (local store: nflverse and other ingested sources)" — `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false` — for D1–D5; a D-tool whose own catalog entry makes an ESPN request says so and keeps `openWorldHint: true`; E14 joins the Ops / local-read family (`readOnlyHint: true`, `openWorldHint: false`) | plan 01 §4.1 (family table: the new row; the Ops row gains `espn_list_recommendations`); plan 07 §2 (*Annotations*), D1–D5 (an annotations line each — D2, D3 and D5 with `openWorldHint: true`), E14; README (annotation-family table: `DS` and `DS+E` replace the unnamed-family marker; rows D1–D5 and E14) |
 | (4) The `permissions.deny` set | Enumerated once in plan 10 §3.W prerequisite (a), marked [A] until checked against the client's permission-rule syntax: the three commit tools in both install-path forms, `Bash(eff confirm:*)`, `Bash(eff setup:*)`, and `Read` of the config directory; plan 03 §5 #13 points to it | plan 10 §3.W prerequisite (a); plan 03 §5 #13 (fix column); README unchanged — it never said that no set is defined |
 
@@ -197,7 +197,7 @@ Reviser's notes on R4: the D-tools that keep `openWorldHint: true` are the three
 
 | key | file § | what changed |
 |---|---|---|
-| F1 | plan 10 §3.W prerequisite (a) | the deny set's `Read` rule names the configured config directory: `EFF_CONFIG_DIR` (default `~/.config/espn-fantasy-football-mcp/`); under the plugin install it covers `${CLAUDE_PLUGIN_DATA}` and also the default directory, which still holds the file-store fallback (plan 09 §4) |
+| F1 | plan 10 §3.W prerequisite (a) | the deny set's `Read` rule names the configured config directory: `EFF_CONFIG_DIR` (default `~/.config/espn-fantasy-football-mcp/`); under the plugin install it covers `${CLAUDE_PLUGIN_DATA}` and also the default directory, which still holds the file-store fallback (plan 09 §4). *(Superseded by V6: one config directory under every install path.)* |
 | F4, F15, F26, F29, F48 | HANDOFF ▶ NEXT STEP, Program status, Open items, Log | the plan state after R4 and this pass; `docs-writer` ✅ (`315ebe5`); the README item ticked; the R4 and verification-pass entries logged |
 | F5, F17, F39 | plan 00-index (Review record); `docs/README.md` (plan list); changelog Summary | the changelog is described as §R1–§R3 plus §R4 |
 | F6 | plan 10 §6 (new A-8), §3.W (a); plan 03 §5 #13 | the `permissions.deny` syntax assumption is ledger row A-8, and both pointers cite it |
@@ -206,10 +206,10 @@ Reviser's notes on R4: the D-tools that keep `openWorldHint: true` are the three
 | F10, F30, F42 | plan 10 A16a | the tarball holds exactly plan 04 §2's `files`, so it adds `scripts/eff-launch.sh`, `.claude-plugin` and `.mcp.json` |
 | F11 | changelog Summary item 5; plan 07 C3 | `espn_search_players` is named as the one P0 tool without a P0 Skill caller; it stays P0 as the only path from a name to an id |
 | F12, F32 | `.env.example`; README Configuration row | `EFF_SETUP_PORT` is commented out. Unset: 8790, then 8790–8799. Set: that exact port, no fallback (plan 03 §2.2) |
-| F14, F54 | plan 07 §5.4; plan 01 §3.1 | "never changes mid-session" now applies to v1 only; in the writes phase a gate turning false unregisters the write tools and sends `list_changed` (plan 02 §3.2) |
+| F14, F54 | plan 07 §5.4; plan 01 §3.1 | "never changes mid-session" now applies to v1 only; in the writes phase a gate turning false unregisters the write tools and sends `list_changed` (plan 02 §3.2). *(Superseded by V4: the tool set changes only at process start, in the writes phase too.)* |
 | F16, F31 | changelog §R4 | this record replaces the placeholder; the render results are in *Checks run* above |
 | F18 | HANDOFF finding 9 | "stored credential" → "validated stored credential" |
-| F20 | plan 06 §1.4 budget line | per-day arithmetic: 7 projection requests on a snapshot day (21 a week), ≈ 10–24 requests on a day with a pool run |
+| F20 | plan 06 §1.4 budget line | per-day arithmetic: 7 projection requests on a snapshot day (21 a week), ≈ 10–24 requests on a day with a pool run. *(Superseded by V7: two caps; the projection term is 0–7 a day.)* |
 | F22 | plan 09 §3.7 (evals), §5.2 | the variant `cookie-rejected` → `auth-rejected`, because the `.gitignore` glob `*cookie*` would ignore that directory (plan 04 §1). Research 06 keeps the old name |
 | F23 | `docs/README.md` (Conventions) | "no absolute local path in any file on `main`", with the git-history residual disclosed (HANDOFF item 13) |
 | F24 | README Security model; FAQ | the non-affiliation statement is added to both |
@@ -230,18 +230,52 @@ Reviser's notes on R4: the D-tools that keep `openWorldHint: true` are the three
 | F61 | plan 02 §5 | `scoringPeriodId` 0–22 is the outer bound; a tool's `week` is 1–18 (plan 07 §2) |
 | F62 | plan 04 §1 tree; plan 05 §9 | `tests/backtest/` now exists for plan 10 §2's backtests |
 
-**Not fixed here: owner decisions.**
-- **F3:** the `PreparedWrite` row and an unkeyed `sha256` of a 6-digit code are written to disk. Narrowing the sentence and keying the hash is a design change.
-- **F41:** how the Credential and Own team gates are known when the tools register. Neither is known on the no-network startup path. The options are late registration or persisted evidence; doctor #13 follows the choice.
-- **F47:** the plugin server's `${CLAUDE_PLUGIN_DATA}` config and cache directory differ from the defaults that `eff setup`, `eff refresh` and launchd use.
-- **F49:** L5 says doctor "never modifies the credential store", but doctor #16 updates the `meta` timestamps.
-- **F13, F56:** the launcher-only `EFF_NODE` and the test-only keys conflict with a README table generated from `schema.ts`.
-- **F58:** on a game day, the job fleet's keyless and credentialed requests together exceed the "≤ 40 per day" line.
-- **F59 (remainder):** plan 05 §4.2 uses the `--service-name` test flag, which plan 03 §2.1 does not define.
-- **F21, F37, F64:** research 01 line 687 quotes a GitHub-runner home-directory path that plan 04 R11 fails. Research files are outside this pass: elide the prefix there, or allow-list it.
+**Parked items — resolved by orchestrator rulings V1–V8 (2026-09-30).** The pass left each of these for a design decision; each is now resolved, and its row is in [*Orchestrator rulings on the parked items*](#orchestrator-rulings-on-the-parked-items) below.
+- **F3** — resolved by **V1**. The `PreparedWrite` row and an unkeyed `sha256` of a 6-digit code were written to disk; narrowing the sentence and keying the hash was a design change.
+- **F41** — resolved by **V4**. How the Credential and Own team gates are known when the tools register: neither was known on the no-network startup path. The options were late registration or persisted evidence; the ruling is persisted evidence, and doctor #13 follows it.
+- **F47** — resolved by **V6**. The plugin server's `${CLAUDE_PLUGIN_DATA}` config and cache directory differed from the defaults that `eff setup`, `eff refresh` and launchd use.
+- **F49** — resolved by **V5**. L5 said doctor "never modifies the credential store", but doctor #16 updated the `meta` timestamps.
+- **F13, F56** — resolved by **V2**. The launcher-only `EFF_NODE` and the test-only keys conflicted with a README table generated from `schema.ts`.
+- **F58** — resolved by **V7**. On a game day, the job fleet's keyless and credentialed requests together exceeded the "≤ 40 per day" line.
+- **F59 (remainder)** — resolved by **V8**. Plan 05 §4.2 used the `--service-name` test flag, which plan 03 §2.1 did not define.
+- **F21, F37, F64** — resolved by **V3** (the orchestrator, `331dbf6`). Research 01 line 687 quoted a GitHub-runner home-directory path that plan 04 R11 fails; the prefix is now elided there.
 
 **Skipped as not a defect:**
 - **F7:** plan 07's legend applies family annotations "unless stated". G2 states its own annotations, and the README reproduces them.
+
+### Orchestrator rulings on the parked items
+
+**Trigger:** the eight parked items above and ten residuals (C1–C10) that a recheck of the verification pass found. The orchestrator ruled on each (2026-09-30), and the reviser applied the rulings exactly, taking the narrowest reading where a ruling was ambiguous. These are rulings, not an adversarial round: no objection, tension or nit total changes. **Plan state:** `331dbf6`. **Edits landed in:** `34a88e8` (plans 01–10), `5e56254` (README, `SECURITY.md`, the indexes) and the commit that adds this section.
+
+| id | ruling | what changed (file §) |
+|---|---|---|
+| V1 (F3) | The one-time code is kept on the `PreparedWrite` as `HMAC-SHA256(gate_key, code)` — never an unkeyed hash, which enumeration reverses; no plaintext copy of the code is written anywhere, and the journal row holds the diff and the keyed hash | plan 02 §4.2 (channel 2 row); plan 10 §3.W prerequisite (c) and §4 T-09 (the same channel-2 wording); the wrong-code cap already stood in plan 02 §4.2 ("3 attempts, then voided"), so no line was added |
+| V2 (F13, F56) | Plan 03 §3 lists every key the code reads by scope — server, launcher (`EFF_NODE`), test (`EFF_FIXTURE_DIR`, `EFF_FIXTURE_RECORD`, `EFF_TEST_STUBS`); `schema.ts` declares each with a `scope`; the README Configuration table carries the server and launcher keys, the README Testing section the test keys, `.env.example` the server and launcher keys only; `docs-current` covers all three scopes | plan 03 §3; plan 04 §1 (tree: `schema.ts`), §4.2 (`docs-current`), §6; plan 05 §3.1 step 5 (names the test keys); README Configuration (the note, the closing line) and Testing (a test-only settings table); `.env.example` unchanged — it already lists the server and launcher keys only |
+| V3 (F21, F37, F64) | Done by the orchestrator: the research 01 quote's runner path elided at `331dbf6` | this changelog only; `docs/README.md` Conventions names no residual absolute path on `main`, so it is unchanged |
+| V4 (F41) | The four registration gates are evaluated at process start from persisted evidence, with no network and no keychain read: Env = `EFF_ENABLE_WRITES`; Acknowledgement = the typed acknowledgement in `config.json`; Credential = the `store.sqlite` `credential_state` row says `validated`; Own team = `ESPN_TEAM_ID` recorded in `config.json` by `eff setup`. No late registration, no `list_changed`; a credential rejected mid-session makes the listed `prepare_*`/`commit_*` tools refuse through the short-circuit until restart | plan 02 S4, §3.2 (the Own team and Credential rows, the paragraph), §4.1 (one sequence-diagram message); plan 03 §1.1 step 6, §5 #13, §6 (the write-host row); plan 07 §3.F (heading), §5.4; plan 10 §3.W W2; plan 01 §3.1 (the list-TTL sentence); README Writes, the `EFF_ENABLE_WRITES` row, Security model (*Least privilege*); `SECURITY.md` *Writes and the confirmation gate* |
+| V5 (F49; the recheck residual on the reload signal) | Credential observations (`credential_state`, `lastAcceptedAt`, `lastRejectedAt`, `rejected_since`, `next_probe_at`) live in a `credential_state` table in `store.sqlite`; the credential store holds only the secret and its setup metadata (`storedAt`, `format_version`, `fingerprint`) and is read-only after setup in both backends; the reload signal compares the recorded `storedAt` field, not the file's modification time; doctor never modifies the stored secret or its setup metadata, and `--online` records its observation exactly as `espn_check_auth` does | plan 01 D6, §1.1 (Auth row), §5.1, §9.2 (the table list gains `credential_state`), §10; plan 02 §2.1 (a paragraph under the state diagram; the Short-circuit row), §2.2 (Location, Multiple processes, a new *Credential observations* row); plan 03 L5, §1.1 step 4, §5 #6, #7, #16, §6; plan 06 §1.4 (`credential check` outputs); README Ops table (`eff doctor`), Safe credential setup §3 |
+| V6 (F47) | Every entry point — the server launched by the plugin or by a client config, the `eff` CLI, the launchd jobs — uses one config and one cache directory: the defaults, or the same explicit `EFF_CONFIG_DIR`/`EFF_CACHE_DIR` values that `eff print-config` and `eff install-launchd` write; the plugin's `.mcp.json` sets neither, and the plugin data variable is not used (plan 09 §4 says so once, with the reason) | plan 01 D16; plan 03 §4.1 (a new bullet); plan 06 §2 (`EnvironmentVariables`); plan 09 §4 (the `.mcp.json` comment; the shared-location bullet), §6 (Claude Code row); plan 10 §3.W prerequisite (a) (the `Read` rule names the one config directory); README launch configuration (the two env lines removed; a new bullet) |
+| V7 (F58; plan 06 arithmetic) | The job fleet's ESPN budget is two daily caps, both enforced by the global limiter: ≤ 40 cookie-bearing and ≤ 30 keyless requests (drift probe, pro-team schedule, player index); the projection term is 0–7 a day (7 on each of the three snapshot days, 21 a week); every range equals the sum of its terms; a game-day estimate for each cap | plan 06 principle, §1.2 and §1.3 budget lines, §1.4 budget paragraph (cookie-bearing ≈ 10–24 on a pool day and ≈ 3–18 on a game day; keyless ≤ 27 on a game day, 7–8 otherwise); plan 10 A5b; README Ops table (the zero-token automation row) |
+| V8 (F59 remainder) | `eff setup --service-name <name>` is a test-only flag: it changes the keychain service name so the macOS integration test never touches the real item, and it is refused unless the name starts with `eff-test-` | plan 03 §2.1 (the flags paragraph); plan 05 §4.2 already used it — unchanged |
+| C1 | The tarball holds exactly plan 04 §2's `files` plus `package.json` (which npm always includes), and nothing else | plan 04 §4.1 (`pack` row); plan 10 A16a |
+| C2 | Covered by V5 or already done by the orchestrator (ruled together with C5, C6, C7 and C9) | no separate edit: V5's row above, or `331dbf6` (roster, research 01 elision, HANDOFF wording, closing-verdict annotation) |
+| C3 | The README Ops table names all three snapshot kinds | README Ops table: `eff snapshot <roster\|pool\|projections>` |
+| C4 | Covered by V7 | V7's row |
+| C5 | As C2 | as C2 |
+| C6 | As C2 | as C2 |
+| C7 | As C2 | as C2 |
+| C8 | Covered by V4: doctor #13's pass condition names all four gates | plan 03 §5 #13 |
+| C9 | As C2 | as C2 |
+| C10 | Plan 03's input citation says the Node on this machine is below the floor | plan 03 header (*Inputs*): "Node 22.23.2 via `fnm` today — below the ≥ 24.15 floor, doctor #1" |
+
+Reviser's notes on the rulings (narrow readings):
+- **V1:** plan 02 §4.2 already capped wrong codes ("3 attempts, then voided", as plan 05 §4.3 and plan 10 W1 test), so the ruling's conditional line was not added and the existing `voided` outcome was not renamed. Plan 10 §3.W (c) and T-09 restated the old channel-2 wording, so they now carry the new one.
+- **V4:** plan 01 §3.1 was not in the ruling's file list but restated the run-time unregister, so it was aligned. Plan 02 §3.2's "second owner appearing" now makes `prepare_*` refuse at the own-team re-check that already ran on every `prepare_*`; the [V-sib 02 §3.4] citation went with the run-time unregister it supported. The plan 02 §4.1 sequence message changed its wording only and adds no `:` `;` `|` or parentheses.
+- **V5:** the state-diagram labels were left as they are — they name the observations, not where they live; the location is a paragraph under the diagram, so no Mermaid label changed. The `fingerprint` in the setup metadata is plan 02 §2.3's 6-hex fingerprint; status and doctor still never show it. Plan 07 G1/G2 name no storage location and are unchanged; `SECURITY.md` names none either.
+- **V6:** the plists carry `EFF_CONFIG_DIR`/`EFF_CACHE_DIR` only when the user has overridden them (the defaults need no entry). Plan 03 §8 (uninstall) still names the default directories.
+- **V7:** the game-day cookie-bearing pool term is 0–6, not 0–12, because the Tuesday 06:00 run never falls on a game day. The keyless game-day figure counts the 05:00 schedule run and the host probe separately, so 27 is an upper bound.
+- **V8:** plan 05 §4.2 also passes `--service-name` to `eff uninstall`, and doctor #7 reads the item; the ruling defines the flag for `eff setup` only, so those uses were left as they are — a question for the build.
+- **Summary:** it names no parked item (its owner decisions are D0 and D2, which no ruling touches), so it is unchanged.
 
 ## Summary — what the adversarial process changed and what survived
 
