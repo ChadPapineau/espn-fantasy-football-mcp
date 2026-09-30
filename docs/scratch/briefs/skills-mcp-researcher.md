@@ -83,6 +83,14 @@ seeding, 5-pt TD QB valuation, IR-slot policy). Name the arguable
 placements and why they landed where they did.
 
 ### C. Naming and consistency with the sibling — decide, with a table
+**Coordination rule:** the `architecture-planner-core` agent (running in
+parallel) owns the shared-core and naming decision and commits it early
+in `docs/plan/01-system-architecture.md` §0. Check for that file first
+(`git pull --rebase origin main`). If the decision is there, take it as
+given and produce only the crosswalk table and the Skill-level
+consequences; if it is not there yet, write your recommendation as input
+for the planner and label it as such.
+
 The sibling plan chose platform-neutral tool names (`ff_<verb>_<resource>`,
 server `fantasy-football-mcp-server`, resources `ff://…`, prompts
 `ff.<workflow>`) because of a future ESPN seam. This project *is* that
