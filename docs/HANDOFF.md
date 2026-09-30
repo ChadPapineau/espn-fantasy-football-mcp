@@ -17,24 +17,23 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Adversarial rounds 1 and 2 are closed (26 objections, 10 nits, 16
-tensions — all conceded, six with modified fixes; edits in
-`docs/plan/changelog.md` §R1/§R2; plan state `b4e0588`). **Running:**
-`devils-advocate` round 3 (expected: a verdict table and `## Closing
-verdict`) and `docs-writer` (README with 8 Mermaid diagrams, LICENSE,
-SECURITY.md, `docs/README.md`, `docs/plan/00-index.md`). When round 3
-lands: if it presses or raises anything, append `## Round 3 — defence`,
-resume `plan-reviser` (same id) for the edits and a changelog §R3, then
-ask for the closing verdict; if it closes, add the closing summary to the
-changelog. When `docs-writer` lands: render every README diagram with the
+**The plan is final at `7f36671`** and the adversarial review is closed
+(three rounds; 26 objections — 1 blocking, 10 significant, 15 marginal;
+16 tensions; 15 nits; all resolved, none pressed — see
+`docs/plan/changelog.md` §Summary and the closing verdict at the end of
+`docs/plan/adversarial-log.md`). **Running:** `docs-writer` (README with
+8 Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
+`docs/plan/00-index.md`). When it lands: render every diagram with the
 browser harness (a scratch page that fetches a JSON list of the repo's
-```mermaid blocks and calls `mermaid.parse()` on each — Mermaid 11 from
-jsDelivr, served by `python3 -m http.server` on 127.0.0.1; recreate it if
-the scratchpad is gone), scan for identifiers and absolute paths, check
-the README against changelog §R1–§R3, fix or send back. Then the
-executive summary for Chad with the decisions that need his input. **Chad
-(2026-09-30): report back when all research and planning is complete; no
-development or testing before his review.**
+```mermaid blocks and calls `mermaid.parse()` + `mermaid.render()` on
+each — Mermaid 11 from jsDelivr, served by `python3 -m http.server` on
+127.0.0.1; recreate it if the scratchpad is gone), scan for identifiers
+and absolute paths, check the README against `changelog.md` §R1–§R3 and
+`.env.example`, fix or send back. Then deliver the executive summary to
+Chad with the decisions that need his input (the list below; D0 and D2
+first). **Chad (2026-09-30): report back when all research and planning
+is complete; no development or testing before his review.** After his
+approval the build starts at plan `10` Phase 0 (Z1–Z7).
 
 ## The findings that shape the product (verified by the orchestrator)
 
@@ -141,8 +140,8 @@ development or testing before his review.**
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research | ✅ `00`–`06` verified (`01` incl. keyring §30) | `docs/research/01-*` … `06-*` |
-| 2 — plan | ✅ `01`–`10` verified; revised after adversarial round 1 (`5351241`) | `docs/plan/01-*` … `10-*` |
-| 3 — adversarial review | 🟢 rounds 1–2 closed (defended, edits applied, `changelog.md` §R1/§R2); round 3 running | `docs/plan/adversarial-log.md`, `changelog.md` |
+| 2 — plan | ✅ `01`–`10` final after three adversarial rounds (`7f36671`) | `docs/plan/01-*` … `10-*` |
+| 3 — adversarial review | ✅ closed at round 3 (`ae92d9a`); changelog §R1–§R3 + Summary | `docs/plan/adversarial-log.md`, `changelog.md` |
 | docs — README, LICENSE, SECURITY.md | 🟢 `docs-writer` running | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
@@ -228,7 +227,7 @@ development or testing before his review.**
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
 - [x] `04`, `05` verified
 - [x] plan `01`–`10` verified · [x] keyring audit (Safe)
-- [x] adversarial rounds 1–2 (defence + edits + changelog §R1/§R2) · [ ] round 3 / closing verdict
+- [x] adversarial review closed (3 rounds; changelog §R1–§R3 + Summary)
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
 - [ ] executive summary for Chad
 
@@ -270,3 +269,10 @@ development or testing before his review.**
   the orchestrator reproduced the SQLite 10-attachment limit locally; defence `07e4b37`
   (OBJ-21 option A — two fixture classes; all conceded); `plan-reviser` R2 edits
   `89debff`…`b4e0588`; verification clean. Round 3 and `docs-writer` running.
+- 2026-09-30 — Adversarial review closed at round 3 (`ae92d9a`; nothing pressed, no new
+  objections). Orchestrator note `073f4e4` took the five closing nits; `plan-reviser`
+  applied them and wrote changelog §R3 + Summary (`7f36671`). `.env.example` realigned
+  with plan 03 §3 (`88215ac`). Residual concerns (eight, ranked) are in the changelog
+  Summary: D0/D2 are Chad's; the API is unofficial and recovery is human; v1 usefulness
+  vs correctness; the calendar; the fixture law; build-time unknowns; reach-session
+  detection is a heuristic; the plan is unbuilt.
