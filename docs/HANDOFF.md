@@ -17,28 +17,37 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-**The plan is final after the R4 consistency rulings** (`2840a58`,
-changelog §R4) **and the R4 verification pass** (`7d03833`, `ab04385`,
-and the commit that adds changelog §R4 → *Verification pass*). The
-adversarial review is closed (three rounds; 26 objections — 1 blocking,
-10 significant, 15 marginal; 16 tensions; 15 nits; all resolved, none
-pressed — see `docs/plan/changelog.md` §Summary and the closing verdict at
-the end of `docs/plan/adversarial-log.md`). **Docs landed:** `docs-writer`
-✅ (`315ebe5`; path placeholders `480352c`) — README with 8 Mermaid
-diagrams, LICENSE, SECURITY.md, `docs/README.md`, `docs/plan/00-index.md`.
-The verification pass rendered all 14 Mermaid blocks (README 1–8; plans
-01, 02 ×3, 03, 08) with Mermaid 11.17.2 at `ab04385` — all OK — and
-scanned every tracked file for identifiers: one hit remains, a GitHub-runner
-build path quoted in `docs/research/01-repo-security-audit.md`. To render
-again, load Mermaid 11 from jsDelivr in a browser page, fetch the markdown,
-and call `mermaid.parse()` + `mermaid.render()` on each ```mermaid block.
-**Next:** deliver the executive summary to Chad with the decisions that
-need his input: the list below (D0 and D2 first), plus the items the
-verification pass left for him (changelog §R4 → *Verification pass*,
-"Not fixed here": F3, F41, F47, F49, F13/F56, F58, the `--service-name`
-test flag, and the runner path in research 01). **Chad (2026-09-30): report back when all research and planning
-is complete; no development or testing before his review.** After his
-approval the build starts at plan `10` Phase 0 (Z1–Z7).
+**Research and planning are COMPLETE (2026-09-30). Awaiting Chad's
+review. Do not start development or testing until he approves the plan**
+(his instruction, 2026-09-30).
+
+Final state: research `docs/research/00`–`06`; plan `docs/plan/01`–`10`
+after three adversarial rounds (26 objections, 16 tensions, 15 nits — all
+resolved, none pressed) and a post-docs consistency programme (changelog
+§R4: rulings 1–4, a 10-agent verification pass, orchestrator rulings
+V1–V8 on the parked items, a loop-until-dry pass, and final rulings
+R-1–R-8); README with 8 Mermaid diagrams, LICENSE (MIT), SECURITY.md,
+`docs/README.md`, `docs/plan/00-index.md`. Orchestrator checks at hand-off:
+all 14 Mermaid blocks in tracked markdown parse **and render** (Mermaid 11,
+browser harness); every markdown table row matches its header's cell
+count; no broken relative links in README/SECURITY/indexes/HANDOFF; no
+identifier, secret, IP, GUID or absolute local path in any tracked file
+(the only name hits are the public GitHub handle inside repo slugs and the
+mandated copyright line).
+
+**Honest limit:** each fresh consistency sweep of a ~5,000-line plan still
+finds a handful of wording-level inconsistencies (the last three sweeps
+found ~10 each, all fixed). None found in the last two passes changed a
+decision. The build's generated docs (`docs-current`), lint and tests are
+designed to catch the rest (plan 04 §6, plan 05).
+
+**On approval**, start plan `10` Phase 0: Z1–Z7 (repo scaffolding, CI with
+the `identifiers`, secret-scan and Mermaid jobs, the keyless recording of
+≥ 3 probe-league `mBoxscore` weeks — needs D2), after the decisions below.
+To re-render diagrams: a scratch page that fetches a JSON list of the
+repo's ```mermaid blocks and calls `mermaid.parse()` + `mermaid.render()`
+on each (Mermaid 11 from jsDelivr, served by `python3 -m http.server` on
+127.0.0.1).
 
 ## The findings that shape the product (verified by the orchestrator)
 
@@ -145,9 +154,9 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research | ✅ `00`–`06` verified (`01` incl. keyring §30) | `docs/research/01-*` … `06-*` |
-| 2 — plan | ✅ `01`–`10` final after three adversarial rounds (`7f36671`), the R4 consistency rulings (`2840a58`) and the R4 verification pass (`7d03833`) | `docs/plan/01-*` … `10-*` |
+| 2 — plan | ✅ `01`–`10` final after three adversarial rounds and the §R4 consistency programme (last plan commit `b8e22f2`) | `docs/plan/01-*` … `10-*` |
 | 3 — adversarial review | ✅ closed at round 3 (`ae92d9a`); changelog §R1–§R3 + Summary; §R4 (post-docs consistency rulings and their verification pass) | `docs/plan/adversarial-log.md`, `changelog.md` |
-| docs — README, LICENSE, SECURITY.md | ✅ `docs-writer` (`315ebe5`; `480352c`); aligned after R4 (`ab04385`) | root + `docs/README.md` |
+| docs — README, LICENSE, SECURITY.md | ✅ `docs-writer` (`315ebe5`); aligned through the §R4 programme; 14 diagrams render | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
 ## Decisions made
@@ -162,7 +171,43 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
 | 2026-09-30 | Handoff document = `docs/HANDOFF.md`, committed | Chad's answer ("Yes") to the Phase-0 question; mirrors the sibling |
 | 2026-09-30 | Repo-local git identity set to the name/email used in Chad's other repos | no global identity was visible in the session shell; nothing else in git config touched |
 
-## Things Chad needs to know / decide (accumulating; summarized at the end)
+## Decisions for Chad — consolidated at hand-off (2026-09-30), ranked
+
+1. **D0 — accept the Disney Terms of Use account risk for live use.** The
+   ToU text literally covers automated access and AI use; no enforcement
+   against reading one's own league was found. Gates Phase 1b and every
+   credentialed job. If not accepted, Phase 1a ships as a
+   fixtures-and-nflverse product and the engine is validated only on the
+   probe league's settings.
+2. **D2 — name a public ESPN league** for the keyless drift probe and the
+   recorded engine fixtures (`EFF_PROBE_LEAGUE_ID`, configured locally,
+   never committed). A Phase 0 dependency.
+3. **Your league's seeding reading (D1):** ESPN's rule (record first,
+   total points as tiebreak) or commissioner seeding purely by points.
+   Your brief says "seeded by total points for"; the two readings flip
+   lineup variance, trade and deadline advice.
+4. **Runtime install location:** outside iCloud (a clone under a non-synced
+   path, or `npm install -g` from a release tarball). The research checkout
+   stays where it is.
+5. **Shared core with the Yahoo project:** recommended — two repos,
+   `espn_` tool prefix, no shared package until a named trigger
+   (plan `01` §0). Diverges from the sibling's `ff_` assumption.
+6. **Write module:** recommended **do not build yet** (plan `10` §3.W).
+7. **Repo settings:** PUBLIC is intended? Add the plan `04` R9 ruleset
+   (block force-push/deletion); enable private vulnerability reporting
+   (SECURITY.md relies on it); Dependabot security updates are off.
+8. **Git-history residual:** early agent briefs carried an absolute local
+   path (fixed on `main`; still in history). Removing it needs a history
+   rewrite and force-push, which your rules forbid — accept or authorize.
+9. **Pass on to the Yahoo program:** SQLite's 10-attachment limit breaks a
+   one-`ATTACH`-per-dataset layout (reproduced here); that plan has it.
+10. **Optional:** notify `cwendt94/espn-api` of its 2020 historical cookie
+    leak (presumed expired; nothing sent).
+
+Plan `10` §5's other decisions (D3–D15) carry recommended defaults;
+approving the plan accepts them unless Chad says otherwise.
+
+## Accumulated notes (history; superseded by the consolidated list above)
 
 1. Repo visibility is **PUBLIC**, no branch protection, no rulesets.
    Secret scanning + push protection are **on**; Dependabot security
@@ -253,7 +298,9 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
 - [x] adversarial review closed (3 rounds; changelog §R1–§R3 + Summary)
 - [x] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes (`315ebe5`)
 - [x] R4 consistency rulings (`2840a58`) and their verification pass (changelog §R4)
-- [ ] executive summary for Chad
+- [x] §R4 consistency programme (verification pass, V1–V8, loop-until-dry, R-1–R-8)
+- [x] executive summary delivered to Chad (2026-09-30)
+- [ ] Chad's review and the decisions above → then Phase 0
 
 ## Log
 
@@ -312,3 +359,10 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
   Summary (`ab04385`). The record, one row per fix, and the items left for Chad are in
   changelog §R4 → *Verification pass*. 14/14 Mermaid blocks render (Mermaid 11.17.2). The
   identifier scan's one hit is a GitHub-runner path in research 01 (left for Chad).
+- 2026-09-30 — Session model switched to Opus 5.5 by Chad; ultracode on. §R4
+  consistency programme run as four workflows (R4 apply + 10-agent audit; V1–V8
+  rulings + 8-agent audit; loop-until-dry 12 agents; final residuals 4 agents);
+  orchestrator-owned edits (audit-quote path elision `331dbf6`, closing-verdict
+  annotation, research table pipes `c1f89e1`, `.env.example` gate wording).
+  Final checks: 14 diagrams render, tables consistent, links resolve, identifier
+  scan clean. **Planning complete; executive summary delivered; awaiting Chad.**
