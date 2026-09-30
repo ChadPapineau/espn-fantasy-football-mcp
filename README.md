@@ -744,7 +744,7 @@ Every `espn_prepare_*` returns `prepared_id`, a human-readable and a structured 
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
 | `espn_get_status` | The status snapshot the Skills route on | `include_checks?` | `server` (versions, `tool_contract`, `toolset`), `credential` (state, age, `last_accepted_at`, `last_rejected_at`, `next_probe_at` — never a value, length or fingerprint), `capabilities` (incl. `write` and the first failing write gate), `drift` (status, diff, affected tools), `limiter` (requests in the last minute and today, breaker), `sources[]` with licence and freshness, `crosswalk`, `store`, `jobs[]`, `checks[]` | OP | P0 | 📋 |
-| `espn_check_auth` | One explicit credential probe, once a minute at most | — | `accepted` (true · false · null), `probe` (settings · communication), `state`, `checked_at`, `next_allowed_at` | read-only, open-world | P0 | 📋 |
+| `espn_check_auth` | One explicit credential probe, once a minute at most | — | `accepted` (true · false · null), `probe` (settings · board), `state`, `checked_at`, `next_allowed_at` | read-only, open-world | P0 | 📋 |
 | `espn_get_playbook` | A Skill's body for clients without Skills or prompts (the prompts already carry every Skill body) | a Skill name | the Skill body with its `tool_contract` | — | later | 📋 |
 
 </details>
@@ -918,6 +918,8 @@ Do **not** install a third-party "cookie finder" extension for this (an unaudite
 
 The value is read lazily on the first tool call that needs it, never on the startup path, and is sent only to ESPN's fantasy API host: a host allow-list refuses everything else and refuses to follow a redirect off the list. Time Machine may back up the keychain (encrypted) or the file store; the plan says so rather than pretending otherwise.
 
+**Keychain prompts.** `eff setup` and the server use the same `node` binary and the same keychain package, which should mean no access dialog; `eff doctor` performs one read and reports whether a prompt appeared. A GUI client launching the server may still show one macOS "allow access" prompt. A variant that reads the same keychain item through macOS's `security` command-line tool is not adopted now — whether it prompts under launchd is the same unverified question — and may replace the file fallback once `eff doctor` has observed prompt-free reads.
+
 ### 4. How expiry shows up, and what to do
 
 Nobody could establish how long `espn_s2` lives — community reports say "weeks to months" — so the design does not depend on it:
@@ -957,7 +959,7 @@ Nobody could establish how long `espn_s2` lives — community reports say "weeks
 | `EFF_TOOLSET=core` | `core` · `full` (`core`) | Which tools are registered: `core` is the 18 P0 tools; `full` adds the 16 P1 tools. Decided at process start |
 | `EFF_SEEDING_MODE=espn_rule` | `espn_rule` · `points_only` (`espn_rule`) | How playoff seeding is read: `espn_rule` is what the league's ESPN settings say (record first, points for as the tiebreak); `points_only` is a commissioner seeding by total points. Set by `eff setup --seeding`; until you confirm it, every result carries `seeding.confirmed: false` |
 | `EFF_WEATHER_SOURCE=open-meteo` | `open-meteo` · `nws` (`open-meteo`) | The weather source for outdoor games. Open-Meteo's free API is for non-commercial use; `nws` is the US National Weather Service |
-| `EFF_SETUP_PORT=8790` | a port (8790) | The first port tried by the optional one-shot local setup page (`eff setup --page`); it falls back through 8790–8799 and prints the URL it actually bound |
+| `# EFF_SETUP_PORT=8790` | a port (unset → 8790, then 8791–8799) | The port for the optional one-shot local setup page (`eff setup --page`). **Unset:** it tries 8790, then the rest of 8790–8799, and prints the URL it actually bound. **Set:** that exact port only, no fallback — a busy port exits with the name of the process holding it |
 | `# EFF_PROBE_LEAGUE_ID=0000000` | a public league id (unset) | A **public** league used by the daily keyless drift probe and for the recorded test fixtures. Configure it locally; never commit a real value |
 | `# EFF_ESPN_READ_HOST=lm-api-reads.fantasy.espn.com` | a host name (unset) | **Emergency override if ESPN moves its API host again.** Accepted only when it matches `^[a-z0-9-]+\.fantasy\.espn\.com$`, so cookies can never be sent outside `*.fantasy.espn.com`. It covers only a move inside that domain; the permanent fix is a release |
 | `EFF_ENABLE_WRITES=false` | `true` · `false` (`false`) | The write module is **not built in v1** and is off by default. If it is ever built, its tools register only when this is exactly `true` **and** `eff setup --enable-writes` has recorded a typed acknowledgement **and** your own team resolves from the stored `SWID` (with a validated credential) — and every write still needs an explicit human confirmation through a channel the model does not author |
@@ -1032,6 +1034,8 @@ What to get right:
 ## Security model
 
 > **📋 Planned.** This is a summary of [`docs/plan/02-security-architecture.md`](docs/plan/02-security-architecture.md). To report a vulnerability, or if a cookie has leaked, see **[`SECURITY.md`](SECURITY.md)**.
+
+**Not affiliated with ESPN.** This project is not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company; it is planned to use ESPN's unofficial, undocumented API with your own session cookies — see [Terms of use and account risk](#terms-of-use-and-account-risk).
 
 **Two rules, stated plainly in the plan:**
 
@@ -1188,6 +1192,10 @@ Because read-only is where the value is and where the risk is lowest. The decisi
 ### Will it ever change my roster without asking?
 
 **Never.** In v1 there is no write tool at all — the server cannot change anything at ESPN. If the opt-in write module is ever built, it is off by default, its tools are not even registered until you enable them from a terminal and type an acknowledgement, every change is pinned to your own team, and every change requires an explicit human confirmation through a channel the model does not author — a confirmation the model cannot forge in a session where it has no shell or filesystem reach as you. In a session where it does have that reach, writes are unsupported rather than "safe", and the documentation says so.
+
+### Is this an official ESPN product?
+
+No. This project is not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company. It is planned to use ESPN's unofficial, undocumented fantasy API with your own session cookies; see [Terms of use and account risk](#terms-of-use-and-account-risk).
 
 ### Is this allowed by ESPN's terms?
 

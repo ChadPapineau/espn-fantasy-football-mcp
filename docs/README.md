@@ -43,8 +43,9 @@ are the **structural plan** (architecture, security, lifecycle, repository and C
   tensions and 15 nits — all resolved and landed in the plan; nothing rejected, nothing withdrawn,
   nothing pressed at close. The closing verdict also ranks the residual concerns.
 - [`plan/changelog.md`](plan/changelog.md) records, one row per objection, tension and nit, what changed
-  in which plan file and what survived unchanged (§R1, §R2, §R3), ends with a **Summary** for a reader
-  who reads nothing else, and lists the dependency reviews that must be re-run on every version bump.
+  in which plan file and what survived unchanged (§R1, §R2, §R3, plus §R4 — the consistency fixes after
+  the docs pass and their verification pass), ends with a **Summary** for a reader who reads nothing
+  else, and lists the dependency reviews that must be re-run on every version bump.
 
 The plan is final and **awaiting the owner's approval**; approval, not the review, is what starts the build.
 
@@ -63,8 +64,10 @@ it is a decision unless `HANDOFF.md` or a plan file records it.
   probe, quoted from an official page, or read in community source) or **unverified**; each document
   collects its unverified items by name in a ledger near its end.
 - **No identifiers, no secrets.** No league id, team or owner name, member GUID, IP address, cookie or
-  absolute local path appears in any committed file. Examples use placeholders (`0000000`,
-  "Example League", "Team A", `/absolute/path/to/…`).
+  absolute local path appears in any file on `main`. One residual is disclosed: the agent briefs under
+  `docs/scratch/briefs/` carried the local checkout path in commits before `480352c`, and git history
+  still holds them (HANDOFF item 13; a history rewrite is the owner's call). Examples use placeholders
+  (`0000000`, "Example League", "Team A", `/absolute/path/to/…`).
 - **Third-party code is untrusted.** The audited repositories were read statically; nothing here copies
   their code or prose. They are acknowledged in the README as inspiration only.
 - **Sibling project.** `yahoo-fantasy-football-mcp` (same owner) runs the same program for Yahoo. Its

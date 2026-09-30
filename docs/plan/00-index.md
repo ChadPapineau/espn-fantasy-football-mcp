@@ -50,7 +50,7 @@ it**, and every file ends with its assumptions and unverified items by name.
 | Document | One line |
 |---|---|
 | [Adversarial log](adversarial-log.md) | The devil's advocate's objections and the orchestrator's defence, round by round, ending in the **closing verdict**. Closed after three rounds: 26 objections (1 blocking, 10 significant, 15 marginal), 16 pre-filed tensions and 15 nits — all resolved (20 objections as ruled, 6 with a modified fix), nothing rejected, nothing pressed at close. The closing verdict lists what survived unchanged, what changed and why it matters, and the residual concerns in rank order |
-| [Changelog](changelog.md) | What each round changed (§R1, §R2, §R3): one row per objection, tension and nit — ruling, files and sections changed, what survived unchanged — the numbers that moved (for example `core` = 18 tools, the Node floor, `weight_espn = 1.0`), the narrow readings the reviser made, a final **Summary** for a reader who reads nothing else, and the dependency reviews to re-run on every version bump |
+| [Changelog](changelog.md) | What each round changed (§R1, §R2, §R3, plus §R4 — the consistency fixes after the docs pass and their verification pass): one row per objection, tension and nit — ruling, files and sections changed, what survived unchanged — the numbers that moved (for example `core` = 18 tools, the Node floor, `weight_espn = 1.0`), the narrow readings the reviser made, a final **Summary** for a reader who reads nothing else, and the dependency reviews to re-run on every version bump |
 
 ## Numbers worth knowing before you read
 
