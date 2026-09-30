@@ -8,10 +8,10 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 
 | agent | id | wave | status | owns | last SHA | resume pointer |
 |---|---|---|---|---|---|---|
-| repo-security-auditor | afe0e8db560613322 | 1 | 🟢 running | `docs/research/01-*`, `02-*`, `docs/scratch/repo-security-auditor.md` | — | brief |
+| repo-security-auditor | afe0e8db560613322 | 1 | ✅ done (SHAs verified; credential-shaped scan clean; leak commit confirmed by metadata) | `docs/research/01-*`, `02-*`, `docs/scratch/repo-security-auditor.md` | `879763f` | — |
 | espn-api-specialist | ae40ffdfb8c95bafa | 1 | ✅ done (SHAs verified on origin; identifier scan clean) | `docs/research/03-espn-api.md`, `docs/scratch/espn-api-specialist.md` | `c43704c` | — |
-| data-source-evaluator | — | 2 | ⚪ not started | `docs/research/04-*`, `docs/scratch/data-source-evaluator.md` | — | brief |
-| fantasy-strategy-analyst | — | 2 | ⚪ not started | `docs/research/05-*`, `docs/scratch/fantasy-strategy-analyst.md` | — | brief |
+| data-source-evaluator | a60240589e2bf3479 | 2 | 🟢 running | `docs/research/04-*`, `docs/scratch/data-source-evaluator.md` | — | brief |
+| fantasy-strategy-analyst | a0bfbe7bbfa3c85c1 | 2 | 🟢 running | `docs/research/05-*`, `docs/scratch/fantasy-strategy-analyst.md` | — | brief |
 | skills-mcp-researcher | — | 3 | ⚪ not started | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | — | brief |
 | architecture-planner-core | — | 3 | ⚪ not started | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | — | brief |
 | product-planner | — | 4 | ⚪ not started | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief |
@@ -34,3 +34,5 @@ wave order; respawn cold from the saved brief only if the ID is gone.
 - 2026-09-29 — wave 1 spawned: `repo-security-auditor`, `espn-api-specialist` (briefs committed at `efd6f4b`).
 - 2026-09-29 — `espn-api-specialist` ✅ (`dd7cdec`…`c43704c`), 617 lines, 30/30 anonymized probes. Orchestrator: SHAs match origin; grep for GUIDs/IPs/league ids clean. Key facts: only `lm-api-reads` serves JSON; unknown views return 200 skeletons (drift must be key-based); no rate-limit headers; native projections/ownership/ADP; Disney ToU text covers automated access literally, no verified enforcement against own-league reads.
 - 2026-09-29 — wave 2 (first slot) spawned: `data-source-evaluator`.
+- 2026-09-30 — `repo-security-auditor` ✅ (`879763f`), 29 repos. Orchestrator scan clean; leak commit confirmed by metadata. Wave 2 (second slot) spawned: `fantasy-strategy-analyst`.
+- 2026-09-30 — `docs/HANDOFF.md` created (Chad: "Yes").

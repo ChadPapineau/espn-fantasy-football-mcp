@@ -42,7 +42,7 @@ rule, recorded 2026-09-24 in the sibling program). Waves start when a slot frees
 
 Orchestrator-owned: `docs/scratch/roster.md`, `docs/scratch/program.md`,
 `docs/scratch/briefs/*`, `docs/research/00-tooling-inventory.md`, the
-handoff document (pending Chad's answer — none exists for this project).
+handoff document `docs/HANDOFF.md` (created 2026-09-30 per Chad's answer).
 
 ## Ground rules that apply to every agent
 
