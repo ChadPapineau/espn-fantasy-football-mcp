@@ -15,11 +15,11 @@ Brief: `docs/scratch/briefs/product-planner.md`.
 - [x] Read MCP best-practices + evaluation reference
 - [x] Write 07 tool catalog → commit/push
 - [x] Write 08 scoring engine → commit/push
-- [ ] Write 09 skills bundle → commit/push
+- [x] Write 09 skills bundle → commit/push
 - [ ] Write 10 phasing + acceptance (tensions + open decisions) → commit/push
 - [ ] Final: update this file, reply with SHAs
 
-Status: 07 and 08 written and pushed; writing 09 next.
+Status: 07, 08, 09 written and pushed; writing 10 next.
 Nothing in flight on disk beyond this file.
 
 ## Commit ledger
