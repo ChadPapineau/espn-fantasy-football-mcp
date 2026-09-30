@@ -36,7 +36,7 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - T-01 applied (plan 04 §1 tree, §2 files, §4.2 skills; plan 03 §4.2; plan 09 §4/K8) · T-02 applied (plan 04 §4.2; plan 03 §4.2; plan 07 §1) · T-03 applied (plan 03 §3; plan 01 §3.1; plan 07 §2) · T-04 applied (plan 01 §4.1 table; plan 02 §4.1; plan 07 §2/E12) · T-05 applied (plan 01 §4 intro; plan 05 §2 envelope; plan 07 C10) · T-06 applied (plan 01 §4.2; plan 07 §5.1) · T-07 applied (plan 01 §9.2; plan 06 §1.3/§1.4; plan 08 §9; plan 07 A4/E12/E13; plan 10 §3.1a) · T-08 applied (plan 03 §5 #21–23; plan 06 §1.4; plan 07 E9; plan 08 §6; plan 10 1b) · T-09 applied (with OBJ-09(c)) · T-10 applied (plan 05 T8, §1, §2, §7) · T-11 note only (plan 02 §5) · T-12 applied (plan 01 §4.4) · T-13 merged into T-03 (plan 01 §4.1/§5.6 examples; plan 07 C1/§1/A2/C2) · T-14 applied (plan 01 §7) · T-15 (a) plan 01 D2, plan 03 §4.1/§5 #1/§4.3, plan 04 R2/R5/§1/§2/§4.1, plan 06 §1.1 · (b) plan 03 §7/L7, plan 05 store, plan 06 backup · (c) replaced by OBJ-09(a) · (d) plan 04 §4.2 · (e) plan 04 §5/A-3 · T-16 already done · §1.5 probe coverage applied (plan 01 §7)
 
 ### Other tasks
-- Plan 10 §4 resolved table — pending
+- Plan 10 §4 resolved table — applied (plan 10 §4: five columns, "Resolution applied" names file §; T-11 note only; T-13 → T-03; T-16 already done)
 - `docs/plan/changelog.md` §R1 — pending
 - Consistency grep (retired phrases / old numbers) — pending
 - Mermaid manual parse pass — pending
@@ -51,3 +51,4 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - d419983 — OBJ-05..08
 - 3e8b675 — OBJ-09
 - 22e80ef — OBJ-10..14
+- 5973653 — OBJ-15..20 + tensions T-01..T-15
