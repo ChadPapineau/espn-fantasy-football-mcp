@@ -1,0 +1,170 @@
+# 05 — Strategy and analytics for the ESPN server
+
+**Author:** `fantasy-strategy-analyst` · **Researched:** 2026-09-30 · **Brief:** `docs/scratch/briefs/fantasy-strategy-analyst.md`
+**Companions:** `03-espn-api.md` (what ESPN exposes; §B.1 settings paths, §B.2 enums, §B.5 player fields are assumed throughout) and `04-*` (data sources; written in parallel, so data are named by kind here).
+
+## How to read this document
+
+| Tag | Meaning |
+|---|---|
+| **[V-docs]** | Stated on an ESPN Fan Support page fetched 2026-09-30; quoted. Article ids and "Updated" dates are in the source list (§9). |
+| **[V-data]** | Computed here from public data with `python3` (standard library only). File, date and method are given where the number appears; the scripts' logic is written out so the scoring engine can reproduce it. |
+| **[V-community]** | Wrapper source or community capture; reliable in practice, silently changeable by ESPN. |
+| **[U]** | Unverified. Collected by name in §9.1. |
+| **[F]** | Folk practice with no evidence found — stated so the plan can treat it as a hypothesis. |
+
+**The sibling methodology is reused, not re-derived.** The Yahoo program's `yahoo-fantasy-football-mcp@7663b6ae47a1a19a30e8fa573ed006b0cde6cbb1 docs/research/05-strategy-and-analytics.md` (1,394 lines, 2026-09-29; cited below as **sib §n**) already specifies projection construction, replacement level, start/sit, FAAB, trades, injury cascades, bye/playoff planning, K/DEF streaming, ROS construction, news-vs-stats, H2H win probability, calibration and draft, plus its output contract (sib §0), pitfalls (sib §17) and clean negatives (sib §18). Where a method is platform-agnostic this document gives ≤ 10 lines: the citation, what ESPN adds, what this format changes. The budget went to the four things the reference league makes different: rolling waiver priority with a 1-day period (§1), points-for seeding (§2), 5-pt passing TDs with −2/−2 turnover penalties (§3), and a 10-team half-PPR roster with 5 bench and 2 IR (§4).
+
+**Parameters.** As in sib §0, nothing is hard-coded: `S` = `settings.scoringSettings.scoringItems[] {statId, points, pointsOverrides}`; `R` = `settings.rosterSettings.lineupSlotCounts {slotId: count}` with slot ids 0 QB, 2 RB, 4 WR, 6 TE, 23 FLEX, 16 D/ST, 17 K, 20 BE, 21 IR; `N` = `settings.size`; plus `scoringSettings.scoringType`, `scheduleSettings.{playoffTeamCount, playoffSeedingRule, matchupPeriodCount, matchupPeriods, playoffMatchupPeriodLength}`, `acquisitionSettings.{acquisitionType, isUsingAcquisitionBudget, waiverHours, waiverProcessDays, waiverProcessHour, waiverOrderReset}`, `tradeSettings.deadlineDate` (03 §B.1, all [V-observed] there). Every number below is a function of these.
+
+**The reference league (validation fixture, described by settings only).** `N = 10`, `scoringType H2H_POINTS`; `S`: statId 53 (reception) 0.5, statId 4 (pass TD) **5**, 25/43 (rush/rec TD) 6, 20 (INT) −2, 72 (fumble lost) −2, yardage at ESPN defaults (3: 0.04, 24/42: 0.1); `R`: QB, 2 RB, 2 WR, TE, FLEX, D/ST, K, **5 BE, 2 IR**; `isUsingAcquisitionBudget: false`, `waiverHours: 24`, rolling order (move-to-last on a successful claim); `matchupPeriodCount 14`, `playoffTeamCount 6`, `playoffSeedingRule TOTAL_POINTS_SCORED` (reading (a)) or a commissioner-applied points-only seeding (reading (b)) — §2 handles both; `deadlineDate` = 2026-12-02; no keepers. Note that −2 INT and −2 fumble lost are ESPN's *defaults* (03 §B.1 observed `statId 4: 4.0` and item 72 on the probe league) — only the 5-pt TD and the 0.5 reception are non-default.
+
+---
+
+## 1. Waiver priority as a scarce resource (move-to-last, 1-day period)
+
+### 1.1 Mechanics — what ESPN's own pages say, and which fields encode it
+
+| Fact | Source |
+|---|---|
+| "A waiver period is the length of time a player must spend on waivers before waiver claims are processed." | [V-docs] Waiver Period, Updated 2026-08-18 |
+| "The Standard league waiver process begins daily between 3 a.m. and 5 a.m. ET." · "Waivers are typically processed daily around 3:00 AM ET." | [V-docs] Waiver Period; Claim a Player Off Waivers (Updated 2026-08-11) |
+| "1 Day – This is the default setting. Most players will clear Wednesday mornings." · "2 Days – Most players will clear Thursday mornings." A dropped player clears "at the next waiver run that is at least a full 24 hours later". | [V-docs] Waiver Period |
+| A player dropped after being on a team for < 24 h is "immediately available as a free agent"; otherwise the drop goes to waivers. | [V-docs] Waiver Period (the Colts D/ST example) |
+| "When the waiver period expires, the player will be awarded to the team with the highest waiver priority that made a claim." · "that team will move to the end of the waiver order." | [V-docs] Waivers Overview, Updated 2026-08-11 |
+| "all players not added via waivers become free agents, which can be acquired by any team on a first-come, first-served basis." | [V-docs] Waivers Overview |
+| "The waiver order begins as the inverse of the draft order." · "Once a team successfully makes a waiver claim, they move to the bottom of the waiver priority list." ESPN offers two refresh rules: "Each Monday at 12:00 AM PT / 3:00 AM ET (when a new fantasy week begins), the order resets" to inverse standings, **or** move-to-bottom on a successful claim. | [V-docs] Waiver Order Overview and FAB Tiebreakers, Updated 2026-08-11 |
+| Multiple claims by one team: "Reorder claims by dragging them into your preferred priority." · "If your roster is full, you will be prompted to drop a player." | [V-docs] Claim a Player Off Waivers |
+| Whether a team's *second* claim in the same run is processed at its **new** (bottom) position after the first succeeds. | **[U]** — not stated on any page fetched; model it conservatively as "yes" (§1.2) and learn it from `mTransactions2` (§1.6). |
+| On a continuous-waivers league at 23:29 ET on a Tuesday, **every** unowned player in the pool had `status: "WAIVERS"` (797) and none `"FREEAGENT"` (03 P24). | [V-observed in 03] — consistent with the help text "most players will clear Wednesday mornings": unowned players who played that week sit on waivers until the Wednesday run. The precise rule that puts them there (kickoff lock → waivers) is **[U]**. |
+| A failed claim does **not** move a team (only "successfully makes a waiver claim" moves it). | [V-docs] by the wording of both pages; the negative (nothing happens on failure) is not stated explicitly → treat as [V-docs] for the rule, [U] for edge cases. |
+
+**Fields (03 §B.1, §B.3, §B.5, §B.6):** the rule is `acquisitionSettings.acquisitionType` (observed `"WAIVERS_CONTINUOUS"` on a FAAB league; the non-FAAB value is [U]) with `isUsingAcquisitionBudget` (`false` here) and `waiverOrderReset` (meaning [U]; the help page's two refresh rules are the two candidates — the server should read the value and confirm against `teams[].waiverRank` movement after the first processed claim); the period is `waiverHours` (24); the run schedule is `waiverProcessDays[]` + `waiverProcessHour` (an LM can set them — the probe league had `["THURSDAY","SUNDAY"]`, hour 12 — so **never assume the 3–5 a.m. daily run**); the next run is `status.waiverNextExecutionDate` (epoch ms) with `waiverLastExecutionDate` and `waiverProcessStatus`; the order is `teams[].waiverRank`; a pool entry carries `status ∈ {FREEAGENT, WAIVERS, ONTEAM}` and `waiverProcessDate`; my pending claims are `mPendingTransactions` (owner-scoped, cookies required); history is `mTransactions2` with `type ∈ {WAIVER, WAIVER_ERROR, FREEAGENT}` and `processDate` (visible to the authenticated caller [V-community]); add limits are `acquisitionLimit` (−1 = unlimited), `matchupAcquisitionLimit`, `matchupLimitPerScoringPeriod`; `teams[].transactionCounter.acquisitions` counts a rival's activity.
+
+### 1.2 Priority as an option: the model and the decision rule
+
+Let `k` be my position in the order (1 = first), `N` the number of teams, `W` the usable weeks remaining after this week's claim (including playoff weeks I might reach, weighted by `P(alive)` as in sib §7.1). Each processing run offers a best claimable player `p` with **surplus** `s = value(p) − value(drop)` where `value(p)` is sib §4.2's weeks-of-usable-value on *my* roster (`Σ_w P(role holds at w) × max(0, proj(p,w) − opportunity_cost(w))`, the opportunity cost from the §3 assignment) and `value(drop)` is the sib §4.5 drop candidate's value. Write `s = r × W` with `r` the per-week rate.
+
+Two mechanics drive everything: **a successful claim sends me to `N`; a failed claim costs nothing** [V-docs]. So the only cost of claiming is the position I give up if I win. Let `V(k, W)` be the expected future surplus from holding `k` optimally, `V^pass(k, W)` the same after this week's drift (rivals ahead of me who win a claim drop below me: `D ~ Binomial(k−1, c)`, `c` = a rival's per-week probability of a successful claim), and `P_k(s) = (1 − q(s))^(k−1)` the probability none of the `k−1` teams ahead claims the same player, `q(s)` the demand model (1.3). Then
+
+```
+claim value = P_k(s) × (s + V(N, W)) + (1 − P_k(s)) × V^pass(k, W)
+pass  value = V^pass(k, W)
+claim  ⇔  s ≥ Π(k, W) := V^pass(k, W) − V(N, W)          // the PRIORITY PREMIUM
+V(k, W+1) = V^pass(k, W) + E_s[ P_k(s) × max(s − Π(k, W), 0) ],   V(·, 0) = 0
+```
+
+**Decision rule.** Submit a claim for every player whose surplus over my drop candidate exceeds the premium of my current position for the remaining weeks, `s ≥ Π(k, W)`, ordered by `s`; never claim below it, however likely the claim is to succeed. `P_k` affects how much the claim is *worth*, not whether to make it. At `k = N` the premium is only the drift residual, so claim anything with `s > 0`. The premium is the price of the option; the rule is a strike.
+
+**Computed premium table [V-data, `waiver_dp.py`, 2026-09-30].** `N = 10`; per-week surplus rate of the best weekly claim `r ∈ {0: 0.30, 1.0: 0.30, 2.5: 0.20, 4.5: 0.12, 7.0: 0.06, 10.0: 0.02}` (a *forecast* distribution — the hindsight ceiling in §1.5 is ~3× larger); demand `q(r) = min(0.85, 0.05 + 0.08 r)`; drift `c = 0.25`. `Π(k, W)` in ROS points:
+
+| k \ W | 1 | 3 | 5 | 7 | 9 | 11 | 13 | 15 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1.8 | 6.8 | 12.8 | 18.9 | 25.0 | 31.1 | 37.5 | 44.0 |
+| 2 | 1.2 | 4.9 | 9.5 | 14.4 | 19.5 | 24.5 | 29.5 | 34.5 |
+| 3 | 0.9 | 3.7 | 7.2 | 11.2 | 15.4 | 19.6 | 23.7 | 27.8 |
+| 4 | 0.6 | 2.9 | 5.6 | 8.8 | 12.2 | 15.7 | 19.1 | 22.5 |
+| 5 | 0.5 | 2.2 | 4.4 | 6.9 | 9.7 | 12.5 | 15.4 | 18.2 |
+| 6 | 0.3 | 1.7 | 3.5 | 5.5 | 7.7 | 10.0 | 12.3 | 14.6 |
+| 7 | 0.2 | 1.4 | 2.8 | 4.3 | 6.1 | 7.9 | 9.7 | 11.6 |
+| 8 | 0.2 | 1.0 | 2.2 | 3.4 | 4.7 | 6.2 | 7.6 | 9.0 |
+| 9 | 0.1 | 0.8 | 1.6 | 2.5 | 3.6 | 4.7 | 5.8 | 6.9 |
+| 10 | 0.1 | 0.5 | 1.2 | 1.8 | 2.6 | 3.3 | 4.1 | 4.9 |
+
+Read as per-week thresholds `r* = Π/W` (claim if the player beats my drop candidate by more than `r*` points per week): with 10 weeks left, `r*` = 2.50, 1.95, 1.54, 1.22, 0.97, 0.77, 0.61, 0.47, 0.36, 0.26 for `k` = 1…10; with 4 weeks left, 1.71 … 0.13. The value of the #1 slot at the season's start is `V(1,16) = 95.8` ROS points against `V(10,16) = 48.5` — the whole order is worth about two weeks of a starter, spread over a season. Sensitivities: `c` = 0.15 / 0.35 → `Π(1,9)` = 26.8 / 23.2; demand × 0.5 / × 1.5 → 19.9 / 27.2; surplus rates × 0.5 / × 1.5 → `Π(1,9)` = 12.1 / 42.8 (and `Π(5,9)` = 5.3 / 12.1). **The premium scales almost linearly with how rich the league's waiver wire is, and only weakly with the demand and drift assumptions** — so the parameter to learn first is the surplus distribution (§1.6), not `q`.
+
+**How the rule moves with the state.**
+- *Weeks remaining:* `Π` falls roughly linearly with `W`; in the last four weeks even the #1 slot should take a 1.7-pt/week upgrade. After the last processing run before the playoffs, unspent priority is worth exactly zero — claim anything positive.
+- *Roster need:* enters only through `s` (the opportunity cost in `value(p)` is *my* lineup with and without `p`); a WR-thin roster sees a larger `s` for the same WR and therefore clears the same `Π` more often. No separate "need" adjustment.
+- *The 5-bench constraint:* the drop candidate is the fifth-best bench player, whose own value is higher on a 5-bench than a 6-bench roster (sib §2 bench effect), so `s` is smaller and fewer claims clear `Π`. If the drop can instead be an IR-eligible player moved into an open IR slot (§4.3), `value(drop)` falls to that of the lowest bench player and `s` rises — the server must show both versions of `s`.
+- *`P(role holds)`:* the single most sensitive input (§1.5 example A); the recommendation must carry it.
+
+### 1.3 The demand model (how many rivals will claim)
+
+`q_i(p)` = probability rival `i` claims `p`. Inputs, in order of value: (1) whether `p` is a lineup upgrade for rival `i` — run sib §3's assignment on *their* roster (all rosters are readable, 03 §B.3); (2) the crowd signals: ESPN `player.ownership.percentChange` and `percentOwned` (native; the change window is [U] — `ownership.date` is present on `kona_player_info` entries) and Sleeper's trending adds (`GET /v1/players/nfl/trending/add?lookback_hours=24&limit=N` → `[{player_id, count}]`, fetched 2026-09-30, counts in the millions for the top three [V-data]; needs the Sleeper-id crosswalk from 04); (3) rival activity, `transactionCounter.acquisitions` and their history in `mTransactions2`; (4) rival roster room (a rival with a healthy player in an IR slot *cannot* add — §4.3 [V-docs]). Cold start: `q(r)` as in the table; warm: `q_i = logistic(a + b·upgrade_i + c·log(1+trend) + d·activity_i)` fit on the league's own claim history (`WAIVER` and `WAIVER_ERROR` rows tell who claimed whom). `percentChange` is a **competition** signal, not a detection signal (sib §4.1) — by the time it moves, the crowd has moved.
+
+### 1.4 FAAB versus priority (sib §4.3, one paragraph)
+
+What transfers from sib §4.3 unchanged: `value(p)` in weeks of usable value on my roster, the horizon weighting by `P(alive at w)`, the competition model (who else is upgraded by `p`), the drop-candidate logic (sib §4.5), and the terminal condition that unspent budget — dollars or priority — is worthless after the last run. What does not transfer: bid **shading** and the `P(win | b)` curve (there is no bid; `P(win)` is a step function of `k` and rivals' claims that I cannot buy up), the **marginal value of a dollar `λ`** (replaced by the premium `Π(k, W)`, which unlike `λ` *regenerates* — rivals' successful claims push me up the order at rate `c`, so priority is a renewable resource and FAAB is not), and the price-of-a-point regression (replaced by the surplus distribution of §1.6). The consequence that matters most in practice: because a failed claim is free, a priority league rewards submitting a **long ordered list** every run, whereas FAAB rewards concentrating on one target; and because the 1-day period turns every uncontested player into a first-come free agent on Wednesday morning, **timing** (§1.5) substitutes for money.
+
+### 1.5 The 1-day-period timing play (reference league, ET)
+
+The weekly rhythm follows from the mechanics above and the observation in 03 P24. Times are ET; the server must replace them with `status.waiverNextExecutionDate` and the `proTeamSchedules_wl` game `date`s, never the calendar.
+
+| When | What happens | What the server does |
+|---|---|---|
+| Sun 13:00 → Mon ~23:30 | Games; unowned players who play sit on waivers until the next run (03 P24 [V-observed]; rule [U]). Drops during games of players held > 24 h go to waivers. | Nothing to claim yet; §4 usage signals and §6 cascades are computed as stats finalise. |
+| Tue (all day) | Injury news, MRIs, depth-chart reports; claims can be entered and reordered until the run. | **Tuesday-evening waiver brief** (after Monday-night stats are in `mBoxscore`): every candidate with `s`, `P(role holds)`, `Π(k,W)`, `claim | pass`, the ordered claim list, the conditional drop for each, and a "will probably clear" flag = `P(no rival ahead claims)` from §1.3. |
+| Wed ~03:00–05:00 | The run [V-docs]. Claims processed by `waiverRank`; winners move to last; the rest become free agents, first-come. | Poll `status.waiverLastExecutionDate` (or `mTransactions2` with `scoringPeriodId`) once after the run; diff `waiverRank` to learn who claimed. |
+| Wed ~05:00–07:00 | **The scramble.** Every unclaimed target is a free agent; first `ADD` wins. | **Wednesday-morning FA brief**: the Tuesday list filtered to `status: "FREEAGENT"`, re-ranked by `s`; the user acts immediately. A team with poor priority should spend its *claims* on contested players it would have to be lucky to win and its *attention* on the second tier that clears — being first at 05:01 beats holding `k = 10`. |
+| Wed–Sat | Free agency. A player dropped Wed 09:00 (held > 24 h) clears at the run "at least a full 24 hours later" = Fri ~03:00–05:00 [V-docs]; same-day drops are immediate free agents. | Mid-week drops by rivals generate a second, smaller claim cycle; the brief re-runs on any `mTransactions2` delta. |
+| Thu 20:15 | Thursday-night kickoff locks those players (`lineupLocktimeType INDIVIDUAL_GAME`). | A Thursday-night target must be on the roster before kickoff; a claim that would clear Friday is useless for him this week. What happens to a *waivers* player whose game starts is [U]. |
+
+### 1.6 Worked examples (invented but realistic; `Π` from the table)
+
+**A — early season, high priority, uncertain role.** Week 5 run, `W = 13` (weeks 5–17), I hold `k = 2`. RB "X" inherits a backfield after the starter's 6-week injury (sib §6 sizes it): 12.5 pts/week in the role versus 8.0 for my drop candidate/opportunity cost → `r = 4.5`; `P(role holds)` = 0.7 for six weeks, then a 1.0-pt residual at 0.5 for seven. `s = 0.7 × 4.5 × 6 + 0.5 × 1.0 × 7 = 22.4`. `Π(2, 12) ≈ 27.0` (between 24.5 and 29.5). **Pass.** The demand model says four rivals ahead would claim, so X will not clear to free agency — I simply do not get him, and that is right: the #2 slot's expected future surplus is worth more than this claim. If the injury report firms up to 8 weeks with `P = 0.9`, `s = 0.9 × 4.5 × 8 + 3.5 = 35.9 > 27` → **claim**, and the recommendation must say that the flip is driven by `P(role holds)` and duration, not by X's box score.
+
+**B — late season, middle priority, modest upgrade.** Week 11 run, `W = 7`, `k = 5`. WR "Y" projects 2.0/week over my WR4 for seven weeks at `P = 0.8`: `s = 11.2`. `Π(5, 6) ≈ 5.6`. **Claim.** With two rivals likely to claim, `P_5 = (1 − 0.21)^4 ≈ 0.39` — the claim is still correct (failing is free), and Y also goes on the Wednesday FA list in case he clears.
+
+**C — last in the order.** `k = 10`, `W = 9`: `Π = 2.6`, i.e. claim anyone worth ≥ 0.3/week over the drop candidate. I will win only if none of nine rivals claims, so the realistic value is the scramble: the brief for a `k = 10` team is mostly a Wednesday-05:00 list.
+
+**D — the 5-bench drop.** Target Z's gross value is 20; my drop candidate is a handcuff whose sib §9.2 value is 9 → `s = 11`. If a Questionable-turned-Out player on my bench is IR-eligible (§4.3) and an IR slot is open, the drop becomes my lowest bench player (value 3) → `s = 17`. Same target, different answer; the server shows both.
+
+**Hindsight ceiling for `s` [V-data, `waiver_surplus.py`, nflverse `stats_player_week_{2024,2025}.csv`, weeks 2–14].** "Available" = prior per-game rank below RB36 / WR38 / TE14 / QB14 (≈ rostered counts in a 10-team, 5-bench league); surplus = `Σ_{w ≥ t}^{17} max(0, pts_w − replacement_pos)` under reference scoring with §4's per-game replacement levels. Across 26 season-weeks the **best** available player's ROS surplus had p25/p50/p75/max = 54 / 62 / 86 / 156 points (6.1 / 7.1 / 7.8 / 12.4 per week); the 2nd-best 52 / 57 / 68 / 103; the 5th-best 39 / 48 / 60 / 75. These are hindsight numbers (the player who *turned out* best), so a forecast at claim time should be shrunk hard — the DP's `r` distribution has mean 1.9/week against a hindsight mean near 7 — but they bound the surplus distribution the league should be calibrated to, and they show the table's `Π` values are of the right order: a #1 slot with nine weeks left (`Π = 25`) is worth less than half of one median best-claim. Note that in a 10-team league many of the hindsight "best available" were **QBs** (three of thirteen weeks in 2025, five in 2024), which is §3.4's streaming result seen from the wire.
+
+**Output shape.** Sib §4's candidate record plus `{k, W, Π(k,W), s, s_with_IR_move, P(role_holds)[], P_k(win), P(clears_to_FA), claim|pass, claim_rank, conditional_drop, next_run_at, scramble_list}` and the common contract (sib §0).
+
+**Evaluation.** (1) Replay the league's own `mTransactions2`: for each processed run, would the rule have claimed the players that were claimed, and what did the winners' `s` turn out to be versus `Π`? (2) Calibrate `q_i` against realised rival claims (Brier). (3) Estimate the league's surplus distribution and `c` from history and re-solve `Π`; report how far the cold-start table was off. (4) Learn the [U] mechanics from data: whether a team's second claim in one run was processed at its new position (pairs of `WAIVER` rows with the same `processDate` and `teamId`), and whether unowned players enter waivers at kickoff (pool `status` flips over a Sunday). "Working" = the rule's realised surplus per claim beats "claim the top trending player every week" over ≥ 2 replayed seasons, and `P(clears_to_FA)` is calibrated within ±10 points.
+
+---
+
+## 2. Points-for seeding
+
+### 2.1 Two readings, and which ESPN value each one is
+
+ESPN's H2H seeding pages describe one rule: seeds go to division winners, then by winning percentage, with **points for** as a tiebreaker — "Points For … is the default first tiebreaker in all public leagues" and in LM leagues the order is head-to-head, then "Most total points scored during the regular season wins", then division record, points against, coin flip [V-docs, Playoff Seeding (Updated 2026-08-18) and H2H Points League Playoff Seeding Tiebreakers (Updated 2026-08-11)]. The wrapper implements exactly this from the setting: `playoff_seed_tie_rule ∈ {TOTAL_POINTS_SCORED: win% → PF → h2h → division → PA → coin; H2H_RECORD: win% → h2h → PF → …; INTRA_DIVISION_RECORD: division → h2h → win% → PF → …}` (cwendt94/espn-api `football/league.py` `standings_weekly`, fetched 2026-09-30 [V-community]). **No `playoffSeedingRule` value seeds by points alone**; winning percentage is first (or, for the intra-division rule, third) in every branch.
+
+- **Reading (a) — qualification by record, points for as the seeding tiebreak** ⇔ `scheduleSettings.playoffSeedingRule = "TOTAL_POINTS_SCORED"` (03 §B.1 observed it on the probe league). This is what ESPN computes and displays in `teams[].playoffSeed`.
+- **Reading (b) — qualification *and* seeding purely by points for** has **no settings field**. If a league runs this way, the commissioner applies it by hand on the LM Tools "Edit Playoffs" page [V-docs] — visible afterwards as `status.isPlayoffMatchupEdited` (03 §A.4 [V-observed field]) and as a `playoffSeed` order that matches the `record.overall.pointsFor` order rather than the record order. The server therefore reads `playoffSeedingRule` for (a), exposes `seeding_mode: auto | points_only` for (b), and **detects** (b) from last season: fetch `seasons/{Y−1}/…?view=mTeam&view=mSettings` (past seasons are served on the modern route, 03 P01) and test whether the final `playoffSeed` ordering agrees with the PF ordering but not the record ordering; if so, suggest `points_only` to the user rather than assume it. The remaining ambiguity is [U] until the reference league's own `mSettings` is read.
+
+### 2.2 The objective, and what it changes
+
+Let the regular season end with `(wins_i, PF_i)` for every team. The user's utility is `U = P(seed ≤ 6)` (or a bye/champion-weighted version). Under (a), `U` depends on `wins` first and on `PF` through ties; under (b), on `PF` only. Both **expected wins and expected points are terminal quantities**, and the right weights are the simulator's marginal values (2.4): `ΔU ≈ (∂U/∂wins) ΔE[wins] + (∂U/∂PF) ΔE[PF] + (∂U/∂σ) Δσ`. The computed exchange rates below [V-data, `seeding_mc.py`] are state-dependent — that is the point of running the simulator rather than a rule of thumb.
+
+**Start/sit variance policy.** Under (a) the weekly objective is still sib §3.2's `P(win)` (underdog → variance, favourite → floor) *plus* a PF term that only matters when `∂U/∂wins` is small — when `P(win)` this week is already saturated or the game is decided. In the example state, one win is worth ≈ 0.12 of `P(playoffs)` and 40 points ≈ 0.024, so **one win ≈ 200 points** for a team on the right side of the tiebreak, and ≈ 0.26 vs 0.05 — **one win ≈ 90 points** — for a team on the wrong side (T8 below). The variance sign is unchanged from sib §3.2. Under (b) the matchup opponent is irrelevant: maximise `E[pts]` every week, and choose variance by position relative to the *season* PF cutoff — comfortably above it, prefer low variance (T4: SD 14 → +0.022, SD 28 → −0.049); chasing it, prefer high variance (T8: SD 28 → +0.060). A high-variance lineup is therefore *wrong* under (b) for a team that is safely in, even if it is an H2H underdog that week — and *right* for a team that is out on points even if it is the H2H favourite.
+
+**Blowout management.** Under (a) with a PF tiebreak there is no "coasting": in the example, sixth and seventh place were tied on wins in **56 %** of simulated seasons, so the tiebreak decides the last spot more often than not; every point in a decided game is a tiebreak point. Under (b) every point counts identically in every week; the notion of "winning by enough" does not exist. In both readings the one concrete error to prevent is benching a locked-in starter to "protect a lead" — it costs PF for nothing.
+
+**Clinched spot.** Seeds 1–2 carry a bye (2.3), so the objective after clinching is `P(bye)`, then seed. Under (a) that still means wins (+1 win → +0.16 to +0.22 `P(bye)` in the examples, versus +0.04 for 80 points); under (b) it means points (+80 PF → +0.38 `P(bye)` for T4). Fantasy starters do not tire; there is never a reason to rest anyone.
+
+**Trade deadline.** `tradeSettings.deadlineDate` (epoch ms) is the authority; the reference value 2026-12-02 is a Wednesday and, if the 2026 season opens Thursday 2026-09-10 [U], falls between week 12 and week 13 — so trades cover 12 of 14 regular-season weeks and the post-deadline horizon is weeks 13–17 (two regular + three playoff). Deadline calculus under (a): a bubble team buys wins for weeks 13–14 (start-lineup strength, sib §5.1 with `weight(w)` concentrated on two weeks, plus PF as the tiebreak); a clinched team buys playoff-week strength and the bye. Under (b): every team buys PF for weeks 13–14 — the deadline market is one-dimensional, and the sib §9.4 consolidation trade (two mid players for one starter) is the typical move because only the starting lineup scores. The server should compute `ΔU` per side with the simulator, not `Δ` in points.
+
+### 2.3 Playoff structure (6 of 10)
+
+- **Bracket and byes** [V-docs, Playoff Schedule, Updated 2026-07-15]: "Any BYEs replace the seed starting with the highest number, working in ascending order." The page's own example: "Your league has 6 teams in an 8-team bracket. The two BYEs are assigned to seeds #7 and #8, which aren't filled; thus, the #1 and #2 seeds have first-round BYEs." So 6 of 10 → three rounds, seeds 1–2 idle in round one, 1 v (4/5 winner) and 2 v (3/6 winner) if reseeded (`scheduleSettings.playoffReseed`, 03 §B.1 [V-observed field]; its default is [U]). "The 5th through 10th-seeded teams in each league compete in the consolation bracket" — with 6 in, seeds 7–10 play consolation (`consolationLadderDisabled`).
+- **Weeks.** Public leagues: "ESPN has set fourteen(14) weeks in the regular season" [V-docs, Updated 2026-08-11]. The Playoff Schedule page says "Each round of the playoffs spans a two-week period starting in week 14 of the NFL regular season, unless adjusted by the League Manager" [V-docs] — which cannot be literally true of a 14-week regular season and is a stale or public-league-specific statement; **the server reads `scheduleSettings.matchupPeriods {id: [weeks]}`, `matchupPeriodCount` (regular-season matchups — the probe league showed 15 with two 1-week playoff rounds and `finalScoringPeriod 17`, 03 §A.4/§B.1) and `playoffMatchupPeriodLength`** and never assumes. For the reference league that arithmetic is matchups 1–14 = NFL weeks 1–14, playoff rounds = weeks 15, 16, 17 with `playoffMatchupPeriodLength 1`, and `status.finalScoringPeriod = 17`.
+- **Week 17/18.** ESPN's `finalScoringPeriod` was 17 in 2026 (03 P04) — week 18 is unused unless an LM sets it (`variablePlayoffMatchupPeriodLength`, 2-week finals would reach week 18). The championship in NFL week 17 carries the known late-season risk of clinched or eliminated NFL teams resting or pulling starters [F; no quantified source found]; the server should surface an NFL team's clinch/elimination state as a *risk flag* on playoff-week projections when a data kind for it exists (04), and otherwise say the risk is unmodelled.
+
+### 2.4 The seeding-scenario simulator
+
+**Inputs.** Standings to date (`teams[].record.overall {wins, losses, ties, pointsFor, pointsAgainst}`, `divisionId`), completed and remaining `schedule[]` from `mMatchup` (`matchupPeriodId`, `home/away.teamId`, `totalPoints`, `winner`), the settings above, and each team's **weekly points distribution**: from sib §1 projections of its current lineup when available, otherwise `Normal(μ_i, σ_i)` with `μ_i` = season-to-date mean shrunk toward the league mean (weight `n/(n+4)`) and `σ_i` pooled — the cold-start model used below. ESPN's own `teams[].currentSimulationResults{playoffPct, …}` (03 §B.3 [V-observed]) is a comparator, never an input.
+
+**Method.** For ≥ 10,000 paths: draw every remaining matchup (both scores from the teams' distributions, correlated only through shared NFL games if the §3.3 table is available), accumulate wins and PF, then apply the exact chain the setting implies — (a) division winners first if `divisions[]` has more than one entry, then win %, then the `playoffSeedingRule` tiebreak chain with head-to-head computed from the simulated schedule, division record, PA, coin flip; (b) PF only — and fill the bracket with the bye rule of 2.3. Optionally continue through the bracket for `P(champion)`.
+
+**Outputs.** `P(playoffs)`, `P(bye)`, the seed distribution, `P(champion)` if simulated, and the **marginal values** obtained by re-running from perturbed states: `+1 past win` (a loss flipped, the opponent's win removed), `+X PF` for X ∈ {10, 20, 40, 80}, `+δ` mean per remaining week, and `σ × {0.7, 1.4}` for the remaining weeks — reported as `ΔP` so the user sees the exchange rate for *their* state.
+
+**Worked run [V-data, `seeding_mc.py`, 2026-09-30].** Ten teams with true weekly means 122, 119, 116, 114, 112, 110, 108, 106, 103, 100 and σ = 20 (half-PPR 10-team weekly totals are of this order), a 14-week round-robin (9 rounds + rounds 1–5), state fixed after week 8 by one seeded draw, 20,000 paths for weeks 9–14, ties in the (a) chain broken by PF then coin flip (head-to-head and divisions omitted). Three teams from the same state:
+
+| Team (μ, record, PF rank) | Reading | P(playoffs) | P(bye) | +1 past win | +20 PF | +40 PF | +80 PF | σ 14 | σ 28 |
+|---|---|---:|---:|---|---|---|---|---|---|
+| T4 (112, 4-4, 3rd) | (a) | 0.826 | 0.068 | +0.117 / +0.164 | +0.013 / +0.006 | +0.024 / +0.021 | +0.028 / +0.038 | +0.024 / −0.009 | −0.016 / +0.006 |
+| | (b) | 0.969 | 0.090 | −0.002 / +0.004 | +0.019 / +0.065 | +0.026 / +0.148 | +0.031 / +0.376 | +0.022 / −0.037 | −0.049 / +0.049 |
+| T8 (103, 4-4, 7th) | (a) | 0.331 | 0.007 | +0.255 / +0.039 | +0.019 / 0 | +0.048 / +0.001 | +0.108 / +0.001 | −0.046 / −0.003 | +0.051 / +0.003 |
+| | (b) | 0.133 | 0.000 | +0.003 / 0 | +0.090 / 0 | +0.207 / +0.001 | +0.486 / +0.008 | −0.053 / 0 | +0.060 / +0.002 |
+| T2 (116, 4-4, 5th) | (a) | 0.857 | 0.080 | +0.097 / +0.221 | +0.010 / 0 | +0.026 / +0.013 | +0.047 / +0.036 | +0.023 / −0.004 | −0.032 / −0.006 |
+| | (b) | 0.757 | 0.010 | +0.001 / 0 | +0.091 / +0.013 | +0.161 / +0.035 | +0.225 / +0.135 | +0.052 / −0.008 | −0.055 / +0.022 |
+
+(cells are `ΔP(playoffs) / ΔP(bye)`.) Also `+3 pts/week of mean ROS` for T4: (a) +0.057 / +0.031, (b) +0.016 / +0.059. Read: under (a) a past win is worth 90–200 points of PF depending on which side of the tiebreak the team sits; under (b) wins are worth nothing and 40 points of PF is worth 0.03–0.21 of `P(playoffs)`; the variance sign flips with the team's position relative to the cutoff in both readings; and the same roster (T2, highest mean of the three) is a favourite under (a) and a bubble team under (b) — **the reading changes who should be buying and who should be selling at the deadline**, which is why the server must know it.
+
+**Evaluation.** Brier score and reliability of pre-week `P(playoffs)` / `P(bye)` over replayed seasons versus ESPN's `currentSimulationResults.playoffPct` and a naive "current-record extrapolation"; agreement of the implemented tiebreak chain with ESPN's realised `playoffSeed` on every finished season available (`status.previousSeasons`); "working" = Brier at or below ESPN's own number and exact seed reproduction on ≥ 2 finished seasons.
+
