@@ -9,9 +9,9 @@ Deliverable: `docs/research/06-skills-and-mcp-design.md` (sections A–E).
 - [x] Scratch file created and pushed (8b7fff1)
 - [x] Inputs read: docs/research/00–05, docs/plan/01 §0 (9f41a3c), HANDOFF, .env.example; sibling 06 + plans 01, 02, 04, 07, 09, 10 (dfde1b6)
 - [x] Authoring standards loaded: mcp-builder SKILL.md + mcp_best_practices.md + evaluation.md; skill-creator SKILL.md + references/schemas.md
-- [ ] Section A (ESPN mechanism deltas: gate + opt-in, cookie failure UX, free text in fact JSON)
-- [ ] Section B (split applied to every ESPN capability and decision type)
-- [ ] Section C (naming crosswalk given plan §0; Skill-level consequences)
+- [x] Section A (ESPN mechanism deltas: gate + opt-in, cookie failure UX, free text in fact JSON)
+- [x] Section B (split applied to every ESPN capability and decision type)
+- [x] Section C (naming crosswalk given plan §0; Skill-level consequences)
 - [ ] Section D (Skills catalog: triggers, tool order, evals)
 - [ ] Section E (layout, plugin manifest, versioning, evals in CI)
 - [x] Public ESPN Skill search run (GitHub API ×4, WebSearch ×3, skills.sh, mcpmarket, lobehub) — results below; write-up pending in 06 §D.0
@@ -27,7 +27,12 @@ Deliverable: `docs/research/06-skills-and-mcp-design.md` (sections A–E).
 
 ## RESUME HERE
 
-Nothing written yet beyond this file. Next step: read inputs (brief §"Where you
+`docs/research/06-skills-and-mcp-design.md` has the header, the one-paragraph answer and sections A–C
+(pushed). Next: append §D (catalog D.0 conventions + fixture `fx-10h` + eval format, then D.1–D.16 with
+purpose/trigger/non-triggers/tools/inputs/outputs/guardrails/evals incl. one injection case each),
+then §E (layout, plugin manifest, versioning, install paths, eval lanes) and §F unverified + §G sources.
+Skill list decided: 13 sibling names + `session-check`; `draft` deferred; rejected: waiver-priority-strategy,
+points-for-seeding-strategy, ir-slot-management (reasons in §B.3). Next step: read inputs (brief §"Where you
 are"), then write `docs/research/06-skills-and-mcp-design.md` section by section,
 committing after each. Paths owned: `docs/research/06-skills-and-mcp-design.md`,
 `docs/scratch/skills-mcp-researcher.md`, `docs/scratch/skills-mcp-researcher.wip.patch`.
