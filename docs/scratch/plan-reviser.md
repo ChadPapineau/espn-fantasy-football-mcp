@@ -86,9 +86,9 @@ Status legend as above.
 
 ### Other tasks
 - changelog §R2 — applied (numbers/names table, 6 objection rows, 10 nit rows, narrow readings; four R1 rows re-pointed at the R2 rulings that superseded them)
-- consistency grep (R2 phrases + R1 list re-check) — pending
-- Mermaid manual pass on touched blocks — pending
-- HANDOFF: one item (SQLite 10-attachment limit applies to the sibling's layout) — pending
+- consistency grep (R2 phrases + R1 list re-check) — done: every R2 retired phrase 0 hits over plans 01–10 + changelog (remaining `ATTACH` = the new plan 01 §5.5 paragraph stating the limit and "no startup ATTACH loop"); pointer strings measure 40 chars; R1 list still all 0; one leftover fixed (plan 09 §3.10 verdict list gained `marginal`)
+- Mermaid manual pass on touched blocks — done: plan 01 §1 (DS node label) and plan 02 §2.1 (one transition label); both pass; no other block touched
+- HANDOFF: one item — applied (item 12; one hunk; nothing else touched)
 
 ### R2 narrow readings
 - OBJ-21: the two Inspector-smoke invocations (plan 04 §4.1, plan 05 §5) pointed at bare `fixtures/espn`; with two classes I pointed them at `fixtures/espn/fx-10h` (the dir plan 09 already uses for fixture mode)
@@ -104,3 +104,8 @@ Status legend as above.
 - 0420837 — OBJ-22, OBJ-23
 - 5216555 — OBJ-24, OBJ-25, OBJ-26
 - 5661da1 — nits 1–6, 8–10
+- dce2216 — changelog §R2
+- 4f28dec — consistency pass
+- bfd2cbf — HANDOFF item 12
+
+**STATE: ROUND 2 EDITS DONE (2026-09-30).** Nothing pending; no WIP patch exists. Round 3 can start from `origin/main`.
