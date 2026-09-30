@@ -10,10 +10,10 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 |---|---|---|---|---|---|---|
 | repo-security-auditor | afe0e8db560613322 | 1 | ✅ done (SHAs verified; credential-shaped scan clean; leak commit confirmed by metadata) | `docs/research/01-*`, `02-*`, `docs/scratch/repo-security-auditor.md` | `879763f` | — |
 | espn-api-specialist | ae40ffdfb8c95bafa | 1 | ✅ done (SHAs verified on origin; identifier scan clean) | `docs/research/03-espn-api.md`, `docs/scratch/espn-api-specialist.md` | `c43704c` | — |
-| data-source-evaluator | a60240589e2bf3479 | 2 | 🟢 running | `docs/research/04-*`, `docs/scratch/data-source-evaluator.md` | — | brief |
+| data-source-evaluator | a60240589e2bf3479 | 2 | ✅ done (SHAs verified; identifier scan clean; espn_id 497/500 recounted independently; ToU §2.B.viii quote verified) | `docs/research/04-*`, `docs/scratch/data-source-evaluator.md` | `38c778b` | — |
 | fantasy-strategy-analyst | a0bfbe7bbfa3c85c1 | 2 | 🟢 running | `docs/research/05-*`, `docs/scratch/fantasy-strategy-analyst.md` | — | brief |
 | skills-mcp-researcher | — | 3 | ⚪ not started | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | — | brief |
-| architecture-planner-core | — | 3 | ⚪ not started | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | — | brief |
+| architecture-planner-core | aa8211963894867bd | 3 | 🟢 running | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | — | brief |
 | product-planner | — | 4 | ⚪ not started | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief |
 | devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | — | brief |
@@ -36,3 +36,4 @@ wave order; respawn cold from the saved brief only if the ID is gone.
 - 2026-09-29 — wave 2 (first slot) spawned: `data-source-evaluator`.
 - 2026-09-30 — `repo-security-auditor` ✅ (`879763f`), 29 repos. Orchestrator scan clean; leak commit confirmed by metadata. Wave 2 (second slot) spawned: `fantasy-strategy-analyst`.
 - 2026-09-30 — `docs/HANDOFF.md` created (Chad: "Yes").
+- 2026-09-30 — `data-source-evaluator` ✅ (`d36a34f`…`38c778b`), 306 lines, 28 probes. Orchestrator recounted nflverse `roster_weekly_2026` espn_id coverage: 497/500 (99.4%) — matches; Disney ToU §2.B.viii commercial-use quote verified at source. Wave 3 (first slot) spawned: `architecture-planner-core`.

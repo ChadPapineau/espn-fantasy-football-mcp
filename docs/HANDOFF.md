@@ -17,12 +17,13 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Wave 2 is running: `data-source-evaluator` and `fantasy-strategy-analyst`.
-When either finishes: verify its SHAs on `origin`, scan its files for
-identifiers and credential-shaped strings, spot-check one load-bearing
-claim, then fill the slot from wave 3 — `architecture-planner-core` first
-(needs 01–04; commits the shared-core/naming decision early), then
-`skills-mcp-researcher` (needs 05; reads the planner's naming decision).
+Running: `fantasy-strategy-analyst` (wave 2, writes `05`) and
+`architecture-planner-core` (wave 3, writes plan `01`–`06`; commits the
+shared-core/naming decision in `01` §0 early). When either finishes:
+verify its SHAs on `origin`, scan its files for identifiers and
+credential-shaped strings, spot-check one load-bearing claim, then fill
+the slot with `skills-mcp-researcher` (needs `05` and the planner's
+naming decision).
 Wave 4 `product-planner` follows once 05, 06 and plan 01–06 exist; wave 5
 `devils-advocate` (multi-round; the orchestrator defends in
 `docs/plan/adversarial-log.md` and edits the plan; then writes
@@ -78,14 +79,25 @@ browser). Then the executive summary for Chad. All briefs:
    current week only; a commissioner's cookie can edit other teams) and
    are **off in v1**; if ever built: opt-in, lineup-only first,
    own-team-pinned, two-step confirmed, read-back verified. `03` §E.
+7. **Data sources (`04`)**: the ESPN player-id crosswalk is a lookup, not
+   a matcher — nflverse `roster_weekly_2026.espn_id` covers 497/500
+   active skill players (100 % of anyone ≥ 1 %-owned; recounted by the
+   orchestrator). ESPN weekly projections exist for every week and are
+   expressed in the league's own scoring; independent accuracy studies
+   rank ESPN best at TE, worst at QB, so the plan uses an **ensemble**
+   (own nflverse-based model + ESPN) with ESPN labelled. ESPN's own
+   ownership data replaces Sleeper trending; live in-game scoring is
+   ESPN-native only. The binding commercial constraint is Disney ToU
+   §2.B.viii (no commercial use, "whether or not for profit" — verified),
+   so ESPN-derived and nflverse-derived layers stay separable.
 
 ## Program status (pre-build: research → plan → adversarial review → docs)
 
 | phase | status | artefacts |
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
-| 1 — research | 🟢 `01`–`03` ✅ verified · `04`, `05` running · `06` ⚪ | `docs/research/01-*` … `06-*` |
-| 2 — plan | ⚪ (briefs ready) | `docs/plan/01-*` … `10-*` |
+| 1 — research | 🟢 `01`–`04` ✅ verified · `05` running · `06` ⚪ | `docs/research/01-*` … `06-*` |
+| 2 — plan | 🟢 core planner running (`01`–`06`); product planner ⚪ | `docs/plan/01-*` … `10-*` |
 | 3 — adversarial review | ⚪ (brief ready) | `docs/plan/adversarial-log.md`, `changelog.md` |
 | docs — README, LICENSE, SECURITY.md | ⚪ (brief ready) | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
@@ -133,7 +145,7 @@ browser). Then the executive summary for Chad. All briefs:
 
 - [x] Phase 0 complete
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
-- [ ] wave 2 (`04`, `05`)
+- [x] `04` verified · [ ] `05`
 - [ ] wave 3 (`06`, plan `01`–`06`), wave 4 (plan `07`–`10`)
 - [ ] adversarial rounds, changelog
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
@@ -153,3 +165,6 @@ browser). Then the executive summary for Chad. All briefs:
   the cwendt94 leak commit (2020-09-11, `transactions.py`) confirmed by
   metadata only. `fantasy-strategy-analyst` spawned. All remaining briefs
   (waves 3–6) written and pushed. `docs/HANDOFF.md` created per Chad.
+- 2026-09-30 — `data-source-evaluator` ✅ (`38c778b`). Orchestrator recounted
+  the crosswalk (497/500) and verified ToU §2.B.viii. `architecture-planner-core`
+  spawned (wave 3, first slot).
