@@ -16,10 +16,10 @@ Brief: `docs/scratch/briefs/product-planner.md`.
 - [x] Write 07 tool catalog → commit/push
 - [x] Write 08 scoring engine → commit/push
 - [x] Write 09 skills bundle → commit/push
-- [ ] Write 10 phasing + acceptance (tensions + open decisions) → commit/push
+- [x] Write 10 phasing + acceptance (tensions + open decisions) → commit/push
 - [ ] Final: update this file, reply with SHAs
 
-Status: 07, 08, 09 written and pushed; writing 10 next.
+Status: 07, 08, 09, 10 written and pushed; final scratch update and reply remain.
 Nothing in flight on disk beyond this file.
 
 ## Commit ledger
