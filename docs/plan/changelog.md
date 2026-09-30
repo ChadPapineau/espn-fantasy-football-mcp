@@ -6,7 +6,7 @@ The plan (`docs/plan/01-*` … `10-*`) is attacked by a devil's-advocate agent a
 
 ## R1 — after adversarial round 1 (2026-09-30)
 
-**Plan state attacked:** `131ec10`. **Round 1:** 20 objections (1 blocking, 9 significant, 10 marginal) → 14 CONCEDE, 6 CONCEDE-MODIFIED, 0 REJECT; 16 pre-filed tensions → 13 adopted (2 sharpened, 1 with one item replaced), 1 dismissed to a note, 1 merged, 1 already done. **Edits landed in:** `18d6e32` (OBJ-01–04), `d419983` (OBJ-05–08), `3e8b675` (OBJ-09), `22e80ef` (OBJ-10–14), `5973653` (OBJ-15–20, tensions), `e95f4de` (plan 10 §4 resolved table), and the commit that adds this file.
+**Plan state attacked:** `131ec10`. **Round 1:** 20 objections (1 blocking, 9 significant, 10 marginal) → 14 CONCEDE, 6 CONCEDE-MODIFIED, 0 REJECT; 16 pre-filed tensions → 13 adopted (2 sharpened, 1 with one item replaced), 1 dismissed to a note, 1 merged, 1 already done. **Edits landed in:** `18d6e32` (OBJ-01–04), `d419983` (OBJ-05–08), `3e8b675` (OBJ-09), `22e80ef` (OBJ-10–14), `5973653` (OBJ-15–20, tensions), `e95f4de` (plan 10 §4 resolved table), `896a4db` (this file), `8a96156` (consistency pass), and the commit after it (the two `docs/HANDOFF.md` edits: item 2, items 10–11).
 
 ### Numbers that changed
 

@@ -158,9 +158,14 @@ development or testing before his review.**
    Secret scanning + push protection are **on**; Dependabot security
    updates are **off**. Intended? (Everything pushed is treated as public
    regardless.)
-2. The checkout is iCloud-managed. Mitigated by design (nothing secret in
-   the repo dir), but `node_modules`/build output will churn through
-   iCloud once the build starts.
+2. **Decision needed — where the runtime install lives** (plan `03` §4;
+   adversarial OBJ-10). The checkout is iCloud-managed. Nothing secret
+   lives in it by design, but the *runtime* (`dist/cli.js` and
+   `node_modules`, which the client config and every launchd job launch)
+   must not: iCloud's eviction and sync churn of `node_modules` breaks
+   launches in the client's MCP log, where nobody looks. Options: a clone
+   outside iCloud (e.g. `~/src/…`) or `npm install -g` from the release
+   tarball; the research/plan checkout stays where Chad put it.
 3. **The Disney Terms of Use literally prohibit what this project does**
    (finding 2). The plan proceeds on the "own account, own league,
    read-only, polite" posture with the risk disclosed in the README; Chad
@@ -190,6 +195,18 @@ development or testing before his review.**
    scoring, Yahoo none); both projects are pre-build. Needs Chad's
    sign-off (it diverges from the sibling's `ff_` prefix choice, which
    assumed one binary).
+10. **D2 moves up — name the public probe league before Phase 0** (plan
+    `10` §5 D2; adversarial OBJ-01). The Phase 1a engine gate now
+    requires ≥ 3 *recorded* `mBoxscore` weeks; the public probe league
+    (`EFF_PROBE_LEAGUE_ID` — configured, never committed) is the only
+    keyless source of them, so it is a Phase 0 dependency, not a Phase 1
+    detail.
+11. **D0 moves up — it now decides what the engine is validated on**
+    (plan `10` §5 D0; item 3 above). Accepting the ToU account risk for
+    live use gates Phase 1b; if it is not accepted, the scoring engine is
+    validated only on the probe league's settings (non-PPR, 4-pt passing
+    TD), and the reference format's half-PPR, 5-pt-TD and −2 turnover
+    items stay unverified.
 
 ## Open items
 

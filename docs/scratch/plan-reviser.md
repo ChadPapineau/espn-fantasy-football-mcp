@@ -40,7 +40,7 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - `docs/plan/changelog.md` §R1 — applied (numbers table, 20 objection rows, 16 tension rows, survived-unchanged list, narrow readings)
 - Consistency grep (retired phrases / old numbers) — done: all retired phrases 0 hits over plans 01–10 + changelog (adversarial-log.md excluded — not mine to edit); survivors fixed: plan 10 A11b label, Ph8, §3.0, §3.1b scope/deferred list, D10, §2 ledger, A-7; plan 07 C3 table name; plan 01 §10, D6; plan 02 S9, §8 #5/#9; plan 03 §2.1 flags, §2.2; plan 04 R2, §1; plan 05 §3.1; plan 06 J3
 - Mermaid manual parse pass — done: touched blocks = plan 01 §1 (one quoted node label) and plan 02 §2.1 (four transition labels); both pass; other blocks untouched
-- `docs/HANDOFF.md` item 2 + "Things Chad needs to know / decide" — pending
+- `docs/HANDOFF.md` item 2 + "Things Chad needs to know / decide" — applied (item 2 → decision on the runtime-install location; items 10 (D2) and 11 (D0) added; nothing else touched)
 
 ### Notes / ambiguities resolved narrowly
 - OBJ-01: `record-fixture.ts --public` (existing script, standalone in Phase 0) instead of a second `record-fixtures.ts`
@@ -62,3 +62,5 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - 5973653 — OBJ-15..20 + tensions T-01..T-15
 - e95f4de — plan 10 §4 resolved table
 - 896a4db — changelog §R1
+- 8a96156 — consistency pass
+- (next) — HANDOFF edits + final resume state: ALL TASKS DONE; nothing pending; no WIP patch exists
