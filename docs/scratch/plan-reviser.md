@@ -114,14 +114,18 @@ Status legend as above.
 
 ## RESUME HERE — Round 3 closing nits (rulings: adversarial-log.md "Round 3 — orchestrator note"; started from `386bdcf`)
 
-- (a) plan 01 §5.5 — journal_mode=DELETE, close before rename() — pending
-- (b) plan 05 §3, plan 09 §5.2, plan 10 §3.1a — gen-fixtures re-derives every aggregate of a re-scored field — pending
-- (c) plan 06 §1.4, plan 02 §2.1, plan 07 G2 — daily check probes the rejecting view on a non-discriminating public league — pending
-- (d) plan 07 E13, plan 09 §3.5 — `baselines.espn_projection_lineup.informative: false` — pending
-- (e) plan 03 §2.1 — one sentence before the launchd-context test — pending
-- changelog §R3 + "Summary" section (before "Reviews") — pending
-- consistency grep (R1 + R2 lists) — pending
-- Mermaid check on anything touched — pending
+- (a) applied (plan 01 §5.5)
+- (b) applied (plan 05 §3 fixture law line 2; plan 09 §5.2; plan 10 §3.1a)
+- (c) applied (plan 06 §1.4 credential check; plan 02 §2.1 definitive-check row; plan 07 G2)
+- (d) applied (plan 07 E13 output + method, C9; plan 09 §3.5)
+- (e) applied (plan 03 §2.1 step 4)
+- changelog §R3 + "Summary" — applied (before "Reviews"; five nit rows; totals, Changed ×8, Survived unchanged ×9, residual concerns ×8; two R2 narrow readings marked superseded)
+- consistency grep (R1 + R2 lists) — done: all 0 (only `ATTACH` left = plan 01 §5.5 stating the limit / no startup loop); pointers 40 chars
+- Mermaid check — done: no block touched in R3 (every block byte-identical to 386bdcf)
 
 ### R3 pushed SHAs
-(none yet)
+- 96b7d9b — R3 resume checklist
+- 1b2af1e — the five closing nits
+- e582f7e — changelog §R3 + Summary
+
+**STATE: ADVERSARIAL REVIEW CLOSED; ALL REVISER WORK DONE (2026-09-30).** Nothing pending; no WIP patch exists.
