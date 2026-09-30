@@ -305,7 +305,7 @@ A projection is stored **once** per `(gsis_id, season, week, model_version)` as 
 
 ---
 
-## 8. Edge-case catalogue (each a named fixture in `fixtures/golden/edge/` and a test)
+## 8. Edge-case catalogue (each a named fixture in `fixtures/engine-edge/` and a test — hand-built engine unit-test inputs outside the golden's path guard, never golden evidence: plan 05 §3's fixture law)
 
 | Case | Expected behaviour | Source |
 |---|---|---|

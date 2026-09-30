@@ -13,7 +13,7 @@ Legend as in plan 01.
 |---|---|---|---|---|
 | R1 | **Single npm package, no workspaces** — but the tree keeps the shared-core candidates in directories that are already package-shaped (plan 01 §0.2) | one deployable, one lockfile to audit, one `npm ci`; the shared package is a later extraction (plan 01 D3), and a workspace with one member is ceremony | workspaces (`server`, `core`) from day one | the plan 01 §0.3 trigger firing → the candidate directories become `packages/core` in **their own repo**, not a workspace here |
 | R2 | **TypeScript strict ESM, `module: NodeNext`, `target: ES2023`, Node ≥ 24.15** [V-sib 04 R2; the floor raised off the v22 line by T-15(a): that line's `node:sqlite` emits `ExperimentalWarning` on every launch — sib ADV OBJ-09] | the SDK v2 is ESM with `zod/v4`; `NodeNext` is what Node resolves; matches the other local server's stack [V-00] | CommonJS; bundling | Nothing |
-| R3 | **ESLint 9 flat config + typescript-eslint (type-checked), Prettier, import-boundary rules per directory** [V-sib 04 R3] with two ESPN-specific zones: nothing outside `src/auth` and `src/http` may import `@napi-rs/keyring`; nothing outside `src/providers/espn` may import `src/providers/espn/views/*` (wire schemas) | the plan 01 §1.1 boundaries must be mechanical; the credential store must have exactly two import sites | Biome | Biome gaining equivalent type-aware rules |
+| R3 | **ESLint 9 flat config + typescript-eslint (type-checked), Prettier, import-boundary rules per directory** [V-sib 04 R3] with two ESPN-specific zones: nothing outside `src/auth/keychain.ts` may import `@napi-rs/keyring` (§3); nothing outside `src/providers/espn` may import `src/providers/espn/views/*` (wire schemas) | the plan 01 §1.1 boundaries must be mechanical; the keychain package must have exactly one import site (plus tests) | Biome | Biome gaining equivalent type-aware rules |
 | R4 | **Conventional Commits checked by a 30-line script** [V-sib 04 R4] | changelog derives from it; `commitlint` is ~100 dev packages for a regex | commitlint | Nothing |
 | R5 | **CI on every push and PR: ubuntu, Node 24 (the matrix gains the next even line when it ships; 22 is below the T-15(a) floor); a macOS job weekly and on release** [V-sib 04 R5] | Linux covers everything but launchd/`osascript`/keychain; macOS covers those on a cadence — and the **keychain integration test can only run on macOS** | macOS every push | a macOS-only regression slipping through more than once |
 | R6 | **Secret scanning = gitleaks (pinned by SHA) with ESPN-specific rules** (§4.3) **plus** GitHub push protection (already on [HANDOFF]) | a single binary, custom TOML rules, scans history; the two prior-art leaks (a 2020 cookie commit [V-01 #13]; a script echoing cookies into config [V-01 #12]) would both be caught; league ids and member GUIDs are identifiers this public repo must not carry [HANDOFF] | trufflehog | Nothing |
@@ -86,7 +86,8 @@ espn-fantasy-football-mcp/
 │   └── cli/
 │       ├── log.ts               # stderr JSON logger + redaction
 │       ├── serve.ts · setup.ts · setup_page.ts · status.ts · doctor.ts · smoke.ts · probe.ts
-│       ├── refresh.ts · snapshot.ts · print-config.ts · install-launchd.ts · uninstall.ts · confirm.ts (writes phase)
+│       ├── refresh.ts · snapshot.ts · transactions.ts · credential.ts · pre-kickoff.ts · crosswalk.ts · store.ts   # one per plan 06 job (J2)
+│       ├── print-config.ts · install-launchd.ts · uninstall.ts · tune.ts (Phase 3) · confirm.ts · journal.ts (writes phase)
 │       └── launchd/             # plist templates (absolute paths filled at install)
 ├── tests/                       # mirrors src/ (unit), plus:
 │   ├── contract/                # recorded-fixture tests per ESPN view
@@ -95,13 +96,15 @@ espn-fantasy-football-mcp/
 │   ├── property/                # fast-check: path + filter builders, scoring engine, envelope, redactor, limiter
 │   ├── process/                 # spawn the real binary: shutdown, orphan, setup-page port, keychain (macOS only)
 │   ├── smoke/                   # expected-tools.json for the Inspector run
+│   ├── backtest/                # the analytics backtests named in plan 10 §2 (lineup, projection, waivers, kdef → docs/evals/)
 │   └── evals/                   # 10-question read-only eval (plan 05 §6), run manually
 ├── fixtures/
 │   ├── espn/                    # ANONYMISED only (03 §F.3): recorded/ (evidence: one JSON per view + the three error bodies — the golden's
 │   │                            #   only input), fx-10h/ + variants (derived: true — the Skills' league), manifest.json (ADV OBJ-21)
 │   ├── nflverse/                # tiny csv.gz excerpts (≤ 50 rows) + ATTRIBUTION.md (CC-BY)
 │   ├── news/                    # RSS samples incl. injection attempts
-│   └── golden/                  # scoring-engine expected outputs (per-stat appliedStats)
+│   └── engine-edge/             # plan 08 §8 edge cases: hand-built engine unit-test inputs, never golden evidence (the golden's
+│                                #   expected appliedStats live only in espn/recorded/ — ADV OBJ-21)
 ├── skills/                      # the Skills bundle (product planner / skills researcher own content)
 │   ├── _shared/references/      # generated into each Skill by scripts/build-skills.ts (plan 09 K5)
 │   └── <skill-name>/SKILL.md (+ references/, evals/)

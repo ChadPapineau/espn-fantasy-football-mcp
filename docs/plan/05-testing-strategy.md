@@ -183,9 +183,9 @@ Redaction with adversarial strings; cookie-not-in-store-metadata (a grep of the 
 EFF_FIXTURE_DIR=fixtures/espn/fx-10h ESPN_LEAGUE_ID=0 npx -y @modelcontextprotocol/inspector@<pin> --cli node dist/cli.js serve --method tools/list --format json \
   | jq -e '[.tools[].name] == $expected' --argjson expected "$(cat tests/smoke/expected-tools.json)"
 … --method tools/call --tool-name espn_get_league --format json \
-  | jq -e '.structuredContent.meta.source[0] == "espn:mSettings" and .structuredContent.meta.freshness != null and (.structuredContent.data.name.untrusted_text != null)'
+  | jq -e '.structuredContent.meta.source[0] == "espn:mSettings" and .structuredContent.meta.freshness != null and (.structuredContent.data.league.name.untrusted_text != null)'
 … --method tools/call --tool-name espn_get_status --format json \
-  | jq -e '.structuredContent.data.credentials.present == false and .structuredContent.data.writes == "off"'
+  | jq -e '.structuredContent.data.credential.present == false and .structuredContent.data.capabilities.write.lineup == false'
 ```
 
 Assertions: the tool list equals the expected file (order included); **no `espn_commit_*`/`espn_prepare_*` tool listed**; every tool name starts with `espn_`; a call returns the envelope with attribution, freshness and wrapped free text; `resources/list` carries `ttlMs` and `cacheScope`; `espn_get_status` in fixture mode reports no credentials without erroring; the server-level `instructions` returned by `server/discover` (2026-07-28) and by `initialize` (legacy) carries each of the two mandatory sentences (plan 02 §6.3) **exactly once**, and no tool description carries either (ADV OBJ-09(b)). Exact Inspector flag names are from its README as the sibling read it [V-sib 05 §5, U] — verify at build time. If the Inspector can pin the protocol era, the smoke runs twice.
@@ -200,7 +200,7 @@ Built exactly as `evaluation.md` prescribes, with the fixture league (id `0`, we
 
 1. *"Which fixture-league team had the largest margin of defeat in the week with the highest combined score through week N? Answer with the team name."* (`mMatchup`)
 2. *"How many free agents eligible at the FLEX slot had a higher ESPN weekly projection for week N than the lowest-projected FLEX starter on Team 3? Answer with an integer."* (`kona_player_info`, `mRoster`, two id spaces)
-3. *"Under this league's scoring, how many points does a 45-yard field goal score? Answer with a number."* (`mSettings` stat 79/82 bucket)
+3. *"Under this league's scoring, how many points does a 45-yard field goal score? Answer with a number."* (`mSettings` stat 77 bucket, 40–49)
 4. *"Which player on Team 3's week-N roster was in the FLEX slot? Full name."* (slot id 23)
 5. *"True or false: the team seeded first would still be first if playoff seeding used head-to-head record instead of total points."* (`playoffSeedingRule`, standings)
 6. *"Which NFL team has the same bye week as the pro team of Team 1's starting quarterback in week N? Answer with the three-letter abbreviation."* (`proTeamSchedules_wl` join)
@@ -217,7 +217,7 @@ Answers are recorded by solving each with the tools; stored as `tests/evals/read
 
 **Global:** lines 90 %, branches 85 %, functions 90 %, statements 90 % (`@vitest/coverage-v8` thresholds + `scripts/check-coverage.ts` for the job summary).
 **Per-file 100 % lines and branches:** `src/domain/scoring/**` (incl. `verify.ts`, the golden comparator), `src/domain/reclog/metrics.ts` (Brier decomposition, CRPS, pinball, coverage — T-10), `src/domain/gate/**` (when built), `src/providers/espn/path.ts`, `src/providers/espn/filter.ts`, `src/providers/espn/errors.ts`, `src/providers/espn/ids.ts`, `src/auth/file.ts` + `src/auth/format.ts`, `src/cli/log.ts`, `src/drift/**`.
-**Excluded:** `src/cli/cli.ts` (arg dispatch), generated code, `tests/`.
+**Excluded:** `src/cli.ts` (arg dispatch), generated code, `tests/`.
 
 *Why these numbers and these modules:* 90/85 is where a codebase this size stops being coverage by accident; the ten 100 % modules are the ones where an untested branch is a silent wrong score, a silently mis-tuned model (a wrong metric in the retrospective — T-10), an unbounded pool pull, a mislabelled position, an unrecognised 401, a world-readable cookie file, a leaked secret, or a missed drift — each a threat-model row (plan 02 §8). *Alternative:* 80 % flat. *What would change it:* only upward. Never lowered to pass a build.
 
@@ -241,7 +241,7 @@ Answers are recorded by solving each with the tools; stored as `tests/evals/read
 
 ## 9. What this plan does not decide
 
-Analytics-model evaluation (backtests of the ensemble against ESPN's 2025 embedded projections — 04 §B.1.1's design; product planner); the Skills' behavioural tests (plans 09/10); the schedule of the credentialed manual jobs (plan 06).
+Analytics-model evaluation (backtests of the ensemble against ESPN's 2025 embedded projections — 04 §B.1.1's design; product planner — its files are the `tests/backtest/*.test.ts` of plan 10 §2's ledger); the Skills' behavioural tests (plans 09/10); the schedule of the credentialed manual jobs (plan 06).
 
 ---
 
