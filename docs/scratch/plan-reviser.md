@@ -66,3 +66,32 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - 488b2da — HANDOFF edits (item 2; items 10–11)
 
 **STATE: ALL TASKS DONE (2026-09-30).** Nothing pending; no WIP patch exists; tree clean. Round 2 can start from `origin/main`.
+
+---
+
+## RESUME HERE — Round 2 (rulings: adversarial-log.md §2.D–§2.F; started from `07e4b37`)
+
+Status legend as above.
+
+### Objections
+- OBJ-21 (option A: two fixture classes, path guard, derived: true, gen-fixtures gate, reworded rule, base match test, fixture-law box) — pending
+- OBJ-22 (separate read-only connections, no startup ATTACH loop, on-demand ceiling 8, rename-onto-same-path, 11-source test, [A] readOnly on Node 24) — pending
+- OBJ-23 (shim → scripts/eff-launch.sh via /bin/sh; no bin/ at plugin root) — pending
+- OBJ-24 (instructions delivery [U], nonce in A11b spike, rule also in docs resource, fallback short form, pointer ≤ 40) — pending
+- OBJ-25 (throwaway item, 10 s timeout, ok/timeout/error, recorded + doctor #7) — pending
+- OBJ-26 (anonymous control request; accepted: null when not discriminating) — pending
+
+### Nits
+- N1 8 s CPU deadline · N2 retro "not informative in v1" + shadow weights 0.5/0.75 · N3 marginal[] · N4 orient.md line · N5 hourly snapshot-pool wake · N6 host-override scope · N7 Z7 · N8 E2 wording · N9 wireOutputSchema lever · N10 bounds name their dataset — all pending
+
+### Other tasks
+- changelog §R2 — pending
+- consistency grep (R2 phrases + R1 list re-check) — pending
+- Mermaid manual pass on touched blocks — pending
+- HANDOFF: one item (SQLite 10-attachment limit applies to the sibling's layout) — pending
+
+### R2 narrow readings
+(none yet)
+
+### R2 pushed SHAs
+(none yet)
