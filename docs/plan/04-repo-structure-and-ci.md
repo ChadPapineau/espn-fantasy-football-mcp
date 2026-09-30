@@ -45,7 +45,8 @@ espn-fantasy-football-mcp/
 ├── src/
 │   ├── cli.ts                   # entry: `eff <subcommand>`; `serve` is the client's command
 │   ├── config/
-│   │   ├── schema.ts            # zod schema of every env/config key (README table generated from it)
+│   │   ├── schema.ts            # zod schema of every key the code reads, each with a scope: server | launcher | test
+│   │   │                        #   (README Configuration table + Testing keys generated from it — plan 03 §3)
 │   │   ├── paths.ts             # XDG resolution, absolute-path assertions, iCloud xattr check
 │   │   └── freshness.ts         # TTL / hard-limit constants (plan 01 §5.4)
 │   ├── mcp/                     # MCP surface only
@@ -170,7 +171,7 @@ All workflows: `permissions: contents: read` by default; actions pinned by **com
 | `supply-chain` | `npm audit --omit=dev --audit-level=high` (gate) · `npm audit` (report) · `check:no-scripts` (no `install`/`postinstall`/`preinstall`, no `binding.gyp`/`prebuild-install`/`node-gyp` in `npm ls --omit=dev`; **the `@napi-rs/keyring` platform package must be present as a prebuilt `.node` with no scripts**) · `check:licenses` (allow-list MIT, ISC, BSD-2/3, Apache-2.0, 0BSD, CC0-1.0, Unlicense) · `npm ls --omit=dev --depth=1` diff against §2 (depth 1 so the one platform package is visible and the other eleven are absent) | any high/critical runtime advisory; any install script; any license outside the list; any undeclared runtime dependency |
 | `secrets` | gitleaks (pinned) with `.gitleaks.toml`, full history | any finding not allow-listed |
 | `identifiers` (R11) | `scripts/check-identifiers.ts` over tracked files: `/Users/<name>/`, `/home/<name>/`, `C:\\Users\\<name>\\` with `<name>` ≠ the literal `<you>` → fail; brace-GUIDs outside `{00000000-0000-4000-8000-0000000000NN}` and the `.env.example` placeholder → fail; IPv4 literals other than `127.0.0.1`, `0.0.0.0` → fail; `leagueId=\d{4,}`, `leagues/\d{4,}`, `ESPN_LEAGUE_ID=\d+` other than `0000000`/`0` → fail; `espn_s2=` followed by ≥ 40 non-space chars → fail | any hit |
-| `pack` | `build` → `npm pack --dry-run --json` → `scripts/scan-tarball.ts`: only `files` globs; no `fixtures/`, `tests/`, `.env*`, `*.sqlite`; the `identifiers` rules over the tarball contents | any violation |
+| `pack` | `build` → `npm pack --dry-run --json` → `scripts/scan-tarball.ts`: exactly §2's `files` plus `package.json` (which npm always includes) — and nothing else; no `fixtures/`, `tests/`, `.env*`, `*.sqlite`; the `identifiers` rules over the tarball contents | any violation |
 
 ### 4.2 `docs.yml` — on changes under `docs/**`, `skills/**`, `README.md`
 
@@ -178,7 +179,7 @@ All workflows: `permissions: contents: read` by default; actions pinned by **com
 |---|---|
 | `mermaid` | an explicit `npx puppeteer browsers install chrome` step first — `.npmrc ignore-scripts=true` skips mermaid-cli's puppeteer `postinstall`, so without it the job goes red the day `.npmrc` lands (sib ADV OBJ-12; T-15(d)) — then `scripts/check-mermaid.ts` extracts every ```` ```mermaid ```` block to `tmp/*.mmd` → `npx -y @mermaid-js/mermaid-cli@<pin> -i <file> -o /dev/null` per block; a parse error fails with file + block index. **Can run today** on `docs/plan/*.md` (this plan's diagrams included) |
 | `skills` | `scripts/check-skills.ts` (plan 09 §5.1 in full): every `skills/*/SKILL.md` has frontmatter `name` (= directory, `[a-z0-9-]+`) and `description` (third person, ≤ 350 chars as shipped; the platform cap is 1 024) [rules finalised by `docs/research/06` and plan 09 §2]; referenced files exist; no file > 200 KB; both guardrail sentences present verbatim in every Skill body; **tool references in Skill bodies are bare `espn_*` names, validated against `tools/list` in fixture mode** (the qualified name differs by install path — T-02); the eight `disallowed-tools` strings (06 §C.3 item 1: six explicit in both install forms, two globs) in every non-`apply` frontmatter; no `espn_commit_*`/`espn_prepare_*` reference outside the `apply` Skill; `claude plugin validate . --strict` (T-01) |
-| `docs-current` | `check:docs` — regenerates the README config table from `src/config/schema.ts` and the tool reference from `tools/list` in fixture mode; fails on diff |
+| `docs-current` | `check:docs` — regenerates from `src/config/schema.ts`, by each key's `scope`, the README Configuration table (server and launcher keys) and the README Testing section's test keys — all three scopes — and the tool reference from `tools/list` in fixture mode; fails on diff |
 | `links` | internal relative links resolve (no external link checking — flaky) |
 | `identifiers` | the R11 job again (docs are where prose leaks happen) |
 
@@ -225,7 +226,7 @@ Today: public, no protection, no rulesets; secret scanning + push protection on;
 
 ## 6. Docs that are generated, not written
 
-- README config table ← `src/config/schema.ts` (`scripts/gen-config-docs.ts`), checked in CI.
+- README Configuration table (the server and launcher keys) and the README Testing section's test keys ← `src/config/schema.ts`, by each key's `scope` (`scripts/gen-config-docs.ts`); the `docs-current` check covers all three scopes (plan 03 §3); `.env.example` lists the server and launcher keys only.
 - `eff print-config` output ← the same schema.
 - The tool reference ← `tools/list` in fixture mode (`scripts/gen-tool-docs.ts`); `docs-writer` owns the prose around it.
 - `fixtures/espn/manifest.json` ← `scripts/gen-manifest.ts` over the committed (anonymised) fixtures — never hand-edited (plan 01 §7).
