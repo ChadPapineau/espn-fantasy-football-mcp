@@ -15,7 +15,8 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | skills-mcp-researcher | a4ffbd8e575038d07 | 3 | ✅ done (SHAs verified; identifier scan clean; plugin tool-naming claim spot-checked at code.claude.com) | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | `2696787` | — |
 | architecture-planner-core | aa8211963894867bd | 3 | ✅ done (SHAs verified; identifier/abs-path scan clean; SDK 2.2.0 and keyring 2.1.0 metadata re-checked on the npm registry) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `965ee10` | — |
 | product-planner | abf797cc7b96aadb5 | 4 | ✅ done (SHAs verified; identifier scan clean) | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | `131ec10` | — |
-| devils-advocate | a30c04c0a440fc7aa | 5 | 🟢 round 1 running | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief |
+| devils-advocate | a30c04c0a440fc7aa | 5 | 🟡 round 1 ✅ (`e72afb5`, 20 objections: 1 blocking / 9 significant / 10 marginal); defence appended (`175fe2f`); awaiting reviser, then round 2 | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief |
+| plan-reviser | (spawned 2026-09-30) | 5 | 🟢 applying R1 rulings | `docs/plan/01-*` … `10-*` edits per the defence, `docs/plan/changelog.md`, `docs/scratch/plan-reviser.md`, two HANDOFF items | — | brief |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | — | brief |
 
 ## Cutoff procedure
@@ -42,3 +43,4 @@ wave order; respawn cold from the saved brief only if the ID is gone.
 - 2026-09-30 — keyring addendum ✅ (`5b6b0bb`): `@napi-rs/keyring@2.1.0` Safe, pin exact + lockfile integrity; plan 02 §7.2 items 1–4 pass statically, item 5 (macOS prompt behaviour) is a runtime check for the first `eff doctor`. Orchestrator verified the SLSA provenance (GitHub-hosted runner, `CI.yml`, source commit `1635ed45…`).
 - 2026-09-30 — `skills-mcp-researcher` ✅ (`8b7fff1`…`2696787`), 582 lines: 14 Skills shipping + `draft` deferred; 36-tool crosswalk; registration gate (operator-controlled) + execution gate (prepare/commit with HMAC ticket). Wave 4 spawned: `product-planner`.
 - 2026-09-30 — `product-planner` ✅ (`3fd70c9`…`131ec10`), plans 07–10, 1,413 lines: 21 P0 tools, 13 Skills, engine spec, phases with testable acceptance, write module verdict "do not build yet", 16 tensions (T-01…T-16), 15 open decisions. Wave 5 spawned: `devils-advocate` round 1 (tensions handed over as pre-filed objections).
+- 2026-09-30 — `devils-advocate` round 1 ✅ (`e72afb5`). Orchestrator defence: 14 CONCEDE, 6 CONCEDE-MODIFIED (OBJ-05/06/07/12/13/18), tensions adopted per triage (`175fe2f`). `plan-reviser` spawned to apply the edits and write `changelog.md` §R1.
