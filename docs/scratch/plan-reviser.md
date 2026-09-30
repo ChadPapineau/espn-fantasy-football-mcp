@@ -109,3 +109,19 @@ Status legend as above.
 - bfd2cbf — HANDOFF item 12
 
 **STATE: ROUND 2 EDITS DONE (2026-09-30).** Nothing pending; no WIP patch exists. Round 3 can start from `origin/main`.
+
+---
+
+## RESUME HERE — Round 3 closing nits (rulings: adversarial-log.md "Round 3 — orchestrator note"; started from `386bdcf`)
+
+- (a) plan 01 §5.5 — journal_mode=DELETE, close before rename() — pending
+- (b) plan 05 §3, plan 09 §5.2, plan 10 §3.1a — gen-fixtures re-derives every aggregate of a re-scored field — pending
+- (c) plan 06 §1.4, plan 02 §2.1, plan 07 G2 — daily check probes the rejecting view on a non-discriminating public league — pending
+- (d) plan 07 E13, plan 09 §3.5 — `baselines.espn_projection_lineup.informative: false` — pending
+- (e) plan 03 §2.1 — one sentence before the launchd-context test — pending
+- changelog §R3 + "Summary" section (before "Reviews") — pending
+- consistency grep (R1 + R2 lists) — pending
+- Mermaid check on anything touched — pending
+
+### R3 pushed SHAs
+(none yet)
