@@ -6,31 +6,25 @@ section per round) plus these notes. I own only those two paths.
 
 ## RESUME HERE
 
-- **State:** round 2 written to `docs/plan/adversarial-log.md`
-  (`## Round 2 — verdicts and objections`): all 20 round-1 objections
-  conceded-by-defence (6 with accepted modifications), 0 withdrawn, 0
-  pressed; six new objections from what the revisions broke — OBJ-21
-  significant (fx-10h = probe-scored bodies + hand-written reference
-  `mSettings`), OBJ-22–26 marginal (SQLite attach limit of 10 — verified
-  on sqlite.org and Node's `sqlite.gyp`; `bin/` vs research 06 §E.1;
-  `instructions` delivery [U] + 42-char pointer; launchd-context test reads
-  a non-existent item; board-probe 404 ordering) plus ten nits. **No
-  closing verdict yet — not marginal by one item (OBJ-21).** Staked:
-  OBJ-21.
-- **Waiting on:** `## Round 2 — defence` and the reviser's commits.
-- **Round 3 procedure:** pull --rebase; diff `docs/plan/*` against
-  `784b1b9`; verdict table for OBJ-21..26 (+ the ten nits if addressed);
-  check the fixture-class decision (A: recorded/ vs derived fx-10h with a
-  path guard; or B: fx-10h keeps recorded scoringItems), the attach rule
-  (≤ 10 / separate read-only connections), shim location, the
-  `instructions` nonce in A11b, the throwaway-item launchd test, the
-  anonymous board-probe control. If nothing structural remains, write
-  `## Closing verdict` (what survived unchanged, what changed, residual
-  concerns ranked) in the same push.
-- **Sibling log:** carried through its round 3 + closing verdict (three
-  nits folded into OBJ-22/OBJ-24).
+- **State: CLOSED.** Round 3 and `## Closing verdict` are written to
+  `docs/plan/adversarial-log.md`: OBJ-21..26 all conceded-by-defence, the
+  ten round-2 nits taken, nothing pressed; five line-level nits left in
+  §3.1 (dataset `journal_mode=DELETE`; re-derive aggregates in the derived
+  fixture class; the probe for a public league whose board probe does not
+  discriminate; `informative: false` on E13's ESPN-baseline regret; a
+  sentence before the launchd-context test). The remainder is marginal and
+  the log says so.
+- **Totals:** 26 objections over three rounds (1 blocking, 10 significant,
+  15 marginal) — all conceded-by-defence (6 with accepted modifications),
+  0 withdrawn, 0 pressed; 16 tensions triaged; sibling log carried through
+  its round 3.
+- **If resumed:** only to verify that the §3.1 nits were taken (a diff of
+  `docs/plan/*` against `b4e0588`); no new round is expected. No WIP patch
+  exists; nothing of mine is uncommitted.
 - **Discipline:** explicit-path staging only; `git pull --rebase origin
-  main` before push; never force-push; verify HEAD == origin/main.
+  main` before push; never force-push; verify HEAD == origin/main. Do not
+  touch `README.md`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md`
+  (docs-writer's) or any plan file.
 
 ## Reading log
 
