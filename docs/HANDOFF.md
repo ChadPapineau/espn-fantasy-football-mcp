@@ -17,21 +17,26 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-**The plan is final at `7f36671`** and the adversarial review is closed
-(three rounds; 26 objections — 1 blocking, 10 significant, 15 marginal;
-16 tensions; 15 nits; all resolved, none pressed — see
-`docs/plan/changelog.md` §Summary and the closing verdict at the end of
-`docs/plan/adversarial-log.md`). **Running:** `docs-writer` (README with
-8 Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
-`docs/plan/00-index.md`). When it lands: render every diagram with the
-browser harness (a scratch page that fetches a JSON list of the repo's
-```mermaid blocks and calls `mermaid.parse()` + `mermaid.render()` on
-each — Mermaid 11 from jsDelivr, served by `python3 -m http.server` on
-127.0.0.1; recreate it if the scratchpad is gone), scan for identifiers
-and absolute paths, check the README against `changelog.md` §R1–§R3 and
-`.env.example`, fix or send back. Then deliver the executive summary to
-Chad with the decisions that need his input (the list below; D0 and D2
-first). **Chad (2026-09-30): report back when all research and planning
+**The plan is final after the R4 consistency rulings** (`2840a58`,
+changelog §R4) **and the R4 verification pass** (`7d03833`, `ab04385`,
+and the commit that adds changelog §R4 → *Verification pass*). The
+adversarial review is closed (three rounds; 26 objections — 1 blocking,
+10 significant, 15 marginal; 16 tensions; 15 nits; all resolved, none
+pressed — see `docs/plan/changelog.md` §Summary and the closing verdict at
+the end of `docs/plan/adversarial-log.md`). **Docs landed:** `docs-writer`
+✅ (`315ebe5`; path placeholders `480352c`) — README with 8 Mermaid
+diagrams, LICENSE, SECURITY.md, `docs/README.md`, `docs/plan/00-index.md`.
+The verification pass rendered all 14 Mermaid blocks (README 1–8; plans
+01, 02 ×3, 03, 08) with Mermaid 11.17.2 at `ab04385` — all OK — and
+scanned every tracked file for identifiers: one hit remains, a GitHub-runner
+build path quoted in `docs/research/01-repo-security-audit.md`. To render
+again, load Mermaid 11 from jsDelivr in a browser page, fetch the markdown,
+and call `mermaid.parse()` + `mermaid.render()` on each ```mermaid block.
+**Next:** deliver the executive summary to Chad with the decisions that
+need his input: the list below (D0 and D2 first), plus the items the
+verification pass left for him (changelog §R4 → *Verification pass*,
+"Not fixed here": F3, F41, F47, F49, F13/F56, F58, the `--service-name`
+test flag, and the runner path in research 01). **Chad (2026-09-30): report back when all research and planning
 is complete; no development or testing before his review.** After his
 approval the build starts at plan `10` Phase 0 (Z1–Z7).
 
@@ -116,8 +121,8 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
    names and procedures match the sibling where the procedure is the
    same, with format-specific branches (move-to-last claim rule, seeding
    reading) chosen by settings. Writes: an operator-controlled
-   registration gate (env flag AND typed acknowledgement AND stored
-   credential AND own team resolved) plus the prepare/commit execution
+   registration gate (env flag AND typed acknowledgement AND validated
+   stored credential AND own team resolved) plus the prepare/commit execution
    gate; only the `apply` Skill may call commit tools. New evidence:
    plugin-hosted MCP tools are named `mcp__plugin_<plugin>_<server>__<tool>`,
    so Skill prose must use bare tool names — which makes the `espn_`
@@ -140,9 +145,9 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research | ✅ `00`–`06` verified (`01` incl. keyring §30) | `docs/research/01-*` … `06-*` |
-| 2 — plan | ✅ `01`–`10` final after three adversarial rounds (`7f36671`) | `docs/plan/01-*` … `10-*` |
-| 3 — adversarial review | ✅ closed at round 3 (`ae92d9a`); changelog §R1–§R3 + Summary | `docs/plan/adversarial-log.md`, `changelog.md` |
-| docs — README, LICENSE, SECURITY.md | 🟢 `docs-writer` running | root + `docs/README.md` |
+| 2 — plan | ✅ `01`–`10` final after three adversarial rounds (`7f36671`), the R4 consistency rulings (`2840a58`) and the R4 verification pass (`7d03833`) | `docs/plan/01-*` … `10-*` |
+| 3 — adversarial review | ✅ closed at round 3 (`ae92d9a`); changelog §R1–§R3 + Summary; §R4 (post-docs consistency rulings and their verification pass) | `docs/plan/adversarial-log.md`, `changelog.md` |
+| docs — README, LICENSE, SECURITY.md | ✅ `docs-writer` (`315ebe5`; `480352c`); aligned after R4 (`ab04385`) | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
 ## Decisions made
@@ -246,7 +251,8 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
 - [x] `04`, `05` verified
 - [x] plan `01`–`10` verified · [x] keyring audit (Safe)
 - [x] adversarial review closed (3 rounds; changelog §R1–§R3 + Summary)
-- [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
+- [x] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes (`315ebe5`)
+- [x] R4 consistency rulings (`2840a58`) and their verification pass (changelog §R4)
 - [ ] executive summary for Chad
 
 ## Log
@@ -294,3 +300,15 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
   Summary: D0/D2 are Chad's; the API is unofficial and recovery is human; v1 usefulness
   vs correctness; the calendar; the fixture law; build-time unknowns; reach-session
   detection is a heuristic; the plan is unbuilt.
+- 2026-09-30 — `docs-writer` ✅ (`315ebe5`): README (8 Mermaid diagrams, rendered by the
+  orchestrator), LICENSE, SECURITY.md, indexes. The final scan found the checkout path in
+  the saved briefs → placeholders; `.env.example` write gate (four conditions); HANDOFF
+  corrections (`480352c`; the git-history residual is item 13).
+- 2026-09-30 — R4: four consistency rulings after the docs pass (`2840a58`; changelog §R4
+  `39196fe`) — `espn.waivers` P0, the code in the notification only, the dataset-read
+  annotation family, the `permissions.deny` set.
+- 2026-09-30 — R4 verification pass: the surviving findings were re-read and minimal fixes
+  landed in plans 01–10 (`7d03833`) and in the README, `.env.example`, indexes and the
+  Summary (`ab04385`). The record, one row per fix, and the items left for Chad are in
+  changelog §R4 → *Verification pass*. 14/14 Mermaid blocks render (Mermaid 11.17.2). The
+  identifier scan's one hit is a GitHub-runner path in research 01 (left for Chad).

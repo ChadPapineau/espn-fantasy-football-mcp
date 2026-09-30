@@ -193,7 +193,55 @@ Reviser's notes on R4: the D-tools that keep `openWorldHint: true` are the three
 
 ### Verification pass
 
-_Filled by the verification pass below._
+**Scope and result (2026-09-30).** After R4, a verification pass cross-read the plan, the README, `SECURITY.md`, `.env.example`, the indexes and HANDOFF against the canonical facts. Each finding that survived adversarial verification was re-read at its cited text and then fixed with a minimal text edit, skipped as not a defect, or left for the owner when a fix would need a design decision. No ruling, objection, tension or nit total changes. **Edits landed in:** `7d03833` (plans 01–10), `ab04385` (README, `.env.example`, indexes, the Summary) and the commit that adds this record (this section, HANDOFF). **Checks run:** all 14 Mermaid blocks (README diagrams 1–8; plan 01; plan 02 ×3, incl. §1; plan 03; plan 08) parse and render with Mermaid 11.17.2 at `ab04385`, and this pass edited none of them. An identifier scan of every tracked file finds no member GUID outside the fake range, no IPv4 literal other than `127.0.0.1`/`0.0.0.0`, no league id and no cookie value. It finds one absolute path, a GitHub-runner home-directory build path quoted in research 01 (F21, below).
+
+| key | file § | what changed |
+|---|---|---|
+| F1 | plan 10 §3.W prerequisite (a) | the deny set's `Read` rule names the configured config directory: `EFF_CONFIG_DIR` (default `~/.config/espn-fantasy-football-mcp/`); under the plugin install it covers `${CLAUDE_PLUGIN_DATA}` and also the default directory, which still holds the file-store fallback (plan 09 §4) |
+| F4, F15, F26, F29, F48 | HANDOFF ▶ NEXT STEP, Program status, Open items, Log | the plan state after R4 and this pass; `docs-writer` ✅ (`315ebe5`); the README item ticked; the R4 and verification-pass entries logged |
+| F5, F17, F39 | plan 00-index (Review record); `docs/README.md` (plan list); changelog Summary | the changelog is described as §R1–§R3 plus §R4 |
+| F6 | plan 10 §6 (new A-8), §3.W (a); plan 03 §5 #13 | the `permissions.deny` syntax assumption is ledger row A-8, and both pointers cite it |
+| F8 | plan 02 S4, §3.2 | S4 names four registration gates (it adds the validated stored credential); §3.2 says that Env, Acknowledgement, Own team and Credential are the registration gates and that Scope and Cap are per-write limits; the Credential row is checked at registration too |
+| F9 | plan 04 §1 tree; plan 08 §8 | `fixtures/golden/` → `fixtures/engine-edge/`: hand-built engine unit-test inputs, never golden evidence; the golden's expected `appliedStats` live only in `recorded/` |
+| F10, F30, F42 | plan 10 A16a | the tarball holds exactly plan 04 §2's `files`, so it adds `scripts/eff-launch.sh`, `.claude-plugin` and `.mcp.json` |
+| F11 | changelog Summary item 5; plan 07 C3 | `espn_search_players` is named as the one P0 tool without a P0 Skill caller; it stays P0 as the only path from a name to an id |
+| F12, F32 | `.env.example`; README Configuration row | `EFF_SETUP_PORT` is commented out. Unset: 8790, then 8790–8799. Set: that exact port, no fallback (plan 03 §2.2) |
+| F14, F54 | plan 07 §5.4; plan 01 §3.1 | "never changes mid-session" now applies to v1 only; in the writes phase a gate turning false unregisters the write tools and sends `list_changed` (plan 02 §3.2) |
+| F16, F31 | changelog §R4 | this record replaces the placeholder; the render results are in *Checks run* above |
+| F18 | HANDOFF finding 9 | "stored credential" → "validated stored credential" |
+| F20 | plan 06 §1.4 budget line | per-day arithmetic: 7 projection requests on a snapshot day (21 a week), ≈ 10–24 requests on a day with a pool run |
+| F22 | plan 09 §3.7 (evals), §5.2 | the variant `cookie-rejected` → `auth-rejected`, because the `.gitignore` glob `*cookie*` would ignore that directory (plan 04 §1). Research 06 keeps the old name |
+| F23 | `docs/README.md` (Conventions) | "no absolute local path in any file on `main`", with the git-history residual disclosed (HANDOFF item 13) |
+| F24 | README Security model; FAQ | the non-affiliation statement is added to both |
+| F25 | README Safe credential setup §3 | discloses the runtime Keychain prompt and the `security`-CLI variant, which plans 02 §2.2 and 06 §2 say the README carries |
+| F38, F55 | plan 04 R3 | the keyring's only import site is `src/auth/keychain.ts` (plus tests), as §3 and the tree say |
+| F40 | plan 05 §7 | the coverage exclusion is `src/cli.ts` |
+| F43 | plan 05 §5 | the smoke `jq` paths follow plan 07 A1/G1 and plan 10 A3a |
+| F44 | plan 02 §2.1 (Short-circuit), §2.2 (Multiple processes) | a rejected server compares `storedAt` and reloads after `eff setup`, with no restart (plan 03 §6; L6) |
+| F45 | plan 09 §2 (`orient.md`), §5.1 #3 | a P1-labelled step in a P0 Skill runs only under `full` and is validated under `full`; the rest of the body is validated under `core` |
+| F46 | plan 09 §3.8 | `espn_get_depth_chart` is labelled P1 |
+| F50 | plan 10 exit gates (1a; Phase 2) | the parts of A9a, A11a, A12a and B3–B6 marked hard are now gated |
+| F51 | plan 05 §6 Q3 | the stat is 77 (made FG, 40–49) |
+| F52 | plan 07 E2; plan 10 C2 | E2 cites C2; C2 no longer says "A7-style" |
+| F53 | plan 01 §0.1 row 1, §0.4; plan 10 T-02 | Skill prose uses bare names; qualified forms appear only in frontmatter |
+| F57 | plan 07 A1; plan 10 B13 | the families enum matches plan 08 `BracketFamily` (nine values); `fg_50p_legacy` is a member of `fg_distance` |
+| F59 | plan 01 §11; plan 04 §1 `src/cli` | one subcommand per plan 06 job, plus `tune --apply` (Phase 3) and `journal reconcile` (writes phase) |
+| F60 | plan 07 G2; README Ops table | the probe vocabulary is `settings` / `board` |
+| F61 | plan 02 §5 | `scoringPeriodId` 0–22 is the outer bound; a tool's `week` is 1–18 (plan 07 §2) |
+| F62 | plan 04 §1 tree; plan 05 §9 | `tests/backtest/` now exists for plan 10 §2's backtests |
+
+**Not fixed here: owner decisions.**
+- **F3:** the `PreparedWrite` row and an unkeyed `sha256` of a 6-digit code are written to disk. Narrowing the sentence and keying the hash is a design change.
+- **F41:** how the Credential and Own team gates are known when the tools register. Neither is known on the no-network startup path. The options are late registration or persisted evidence; doctor #13 follows the choice.
+- **F47:** the plugin server's `${CLAUDE_PLUGIN_DATA}` config and cache directory differ from the defaults that `eff setup`, `eff refresh` and launchd use.
+- **F49:** L5 says doctor "never modifies the credential store", but doctor #16 updates the `meta` timestamps.
+- **F13, F56:** the launcher-only `EFF_NODE` and the test-only keys conflict with a README table generated from `schema.ts`.
+- **F58:** on a game day, the job fleet's keyless and credentialed requests together exceed the "≤ 40 per day" line.
+- **F59 (remainder):** plan 05 §4.2 uses the `--service-name` test flag, which plan 03 §2.1 does not define.
+- **F21, F37, F64:** research 01 line 687 quotes a GitHub-runner home-directory path that plan 04 R11 fails. Research files are outside this pass: elide the prefix there, or allow-list it.
+
+**Skipped as not a defect:**
+- **F7:** plan 07's legend applies family annotations "unless stated". G2 states its own annotations, and the README reproduces them.
 
 ## Summary — what the adversarial process changed and what survived
 
