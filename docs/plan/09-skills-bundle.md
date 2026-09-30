@@ -18,7 +18,7 @@
 | K5 | **Shared text lives once in `skills/_shared/references/` and is generated into each Skill by `scripts/build-skills.ts`; CI fails on drift** | plan 04 §6's "generated, not written"; each directory stays self-contained and zip-uploadable | a `skills-src/` → `skills/` build | nothing |
 | K6 | **One semver for server + Skills + plugin; `metadata.tool_contract` in every `SKILL.md`; `check:skills` fails when it differs; `tool_contract` also bumps on an error-code rename and on a config-key/plugin-name change** | 06 §E.2; a copy-installed bundle can drift, a plugin cannot; Skill text names error codes and the eight strings name the key | a compat matrix | never — "Skills N.x need server N.x" is the matrix |
 | K7 | **Evals in two lanes: zero-token structural (CI, every push) and model-graded (manual, pre-release); every Skill that reads free text carries at least one `-INJ` case whose expected recommendation equals the base fixture's** | plan 05 §8; 06 §E.3; 05 §6 rule 5 (invariance is the contract) | plugin-eval nightly with tokens | Chad opting into a token budget for CI (plan 10 D7) |
-| K8 | **The Claude Code plugin manifest ships with the first commit of product code (repo root = plugin root), and copy-install stays supported** | 06 §E.1: the plugin *name* fixes the qualified tool names the `disallowed-tools` strings must list — a reason the sibling did not have (it made the manifest an additive P1 layer, sib 09 K7) | plugin as a P1 layer | nothing; plan 04 §1's tree carries the plugin files and the `bin/eff` shim since R1 (T-01; ADV OBJ-12) |
+| K8 | **The Claude Code plugin manifest ships with the first commit of product code (repo root = plugin root), and copy-install stays supported** | 06 §E.1: the plugin *name* fixes the qualified tool names the `disallowed-tools` strings must list — a reason the sibling did not have (it made the manifest an additive P1 layer, sib 09 K7) | plugin as a P1 layer | nothing; plan 04 §1's tree carries the plugin files and the launch shim `scripts/eff-launch.sh` (T-01; ADV OBJ-12; no `bin/` at the plugin root — ADV OBJ-23) |
 
 ---
 
@@ -227,13 +227,10 @@ As 06 §D.15: ESPN's `mDraftDetail`, native ADP and `auctionValueAverage`, the f
 ├── .claude-plugin/
 │   ├── plugin.json                      # name "espn-fantasy-football" (= the client config key), version = package.json
 │   └── marketplace.json                 # { name: "espn-fantasy-football-mcp", plugins: [{ name: "espn-fantasy-football", source: "./" }] }
-├── .mcp.json                            # { "espn-fantasy-football": { command: "${CLAUDE_PLUGIN_ROOT}/bin/eff", args: ["serve"],
+├── .mcp.json                            # { "espn-fantasy-football": { command: "/bin/sh", args: ["${CLAUDE_PLUGIN_ROOT}/scripts/eff-launch.sh", "serve"],
 │                                        #     env: { EFF_CONFIG_DIR: "${CLAUDE_PLUGIN_DATA}", EFF_CACHE_DIR: "${CLAUDE_PLUGIN_DATA}/cache",
 │                                        #            ESPN_LEAGUE_ID: "${user_config.league_id}", ESPN_SEASON: "${user_config.season}" } } }
 │                                        #   variables only; no secrets; no absolute user paths (plan 03 §4.2 — T-01, resolved)
-├── bin/eff                              # POSIX shim (ADV OBJ-12): resolves the runtime deterministically — EFF_NODE override → fnm/nvm default →
-│                                        #   /opt/homebrew/bin/node → `command -v node`, in that order, ≥ the Node floor (24.15) — then execs
-│                                        #   `<node> "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" "$@"`; fails with the exact fix; `doctor` #2 runs the same resolution
 ├── skills/
 │   ├── _shared/references/              # orient.md · tool-outputs.md (GENERATED) · output-template.md · guardrails.md · log.md ·
 │   │                                    #   espn-vocabulary.md · priority-waivers.md   (not a Skill; ignored by the skills scan)
@@ -246,6 +243,10 @@ As 06 §D.15: ESPN's `mDraftDetail`, native ADP and `auctionValueAverage`, the f
 │   └── <case>/{prompt.md, case.yaml, graders/*.md}
 ├── fixtures/espn/{recorded/, fx-10h/, <variants>/, manifest.json}   # recorded/ = evidence (the golden's only input); fx-10h/ and its
 │                                        #   variants = derived: true (plumbing) — ADV OBJ-21; ANONYMISED only (03 §F.3); league id 0; fake GUID range
+├── scripts/eff-launch.sh                # POSIX launch shim run by /bin/sh (ADV OBJ-12; ADV OBJ-23: there is NO bin/ directory at the plugin
+│                                        #   root): resolves the runtime deterministically — EFF_NODE override → fnm/nvm default →
+│                                        #   /opt/homebrew/bin/node → `command -v node`, in that order, ≥ the Node floor (24.15) — then execs
+│                                        #   `<node> "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" "$@"`; fails with the exact fix; `doctor` #2 runs the same resolution
 ├── scripts/build-skills.ts              # _shared → each Skill; stamps metadata; emits dist/skills-copy/espn-<name>/ (§6)
 ├── scripts/check-skills.ts              # Lane 1 (§5.1)
 └── scripts/gen-fixtures.ts              # builds fixtures/espn/fx-10h/** from fixtures/espn/recorded/**: the variant mutations plus scoring
@@ -292,7 +293,7 @@ As 06 §D.15: ESPN's `mDraftDetail`, native ADP and `auctionValueAverage`, the f
 | Client | Skills | Server | Path |
 |---|---|---|---|
 | **Claude Code** (primary) | plugin: `claude plugin marketplace add <owner>/espn-fantasy-football-mcp` → `claude plugin install espn-fantasy-football@espn-fantasy-football-mcp` (user scope); dev: `claude --plugin-dir .`; copy-install alternative: `dist/skills-copy/espn-*` into `~/.claude/skills/` (renamed `espn-<name>` so two bundles cannot overwrite each other [A-3]) | plugin: `.mcp.json` above; copy-install: `eff print-config --client code` prints `claude mcp add --scope user espn-fantasy-football -- <node> <abs dist/cli.js> serve` — the **same key** [A-4]. **Read-only here by design:** the write module is unsupported in any session where the model has shell or filesystem reach as the user — a Claude Code session with unrestricted `Bash`, or any client with a shell/filesystem MCP server configured beside this one — because the model could forge every confirmation channel there (sib ADV OBJ-01, sharpened to the session condition by the sibling's round-2 OBJ-24 via ADV OBJ-09(c); T-09); `apply`'s read-only mode is the Claude Code path | `/espn-fantasy-football:onboard` (plugin) or `/espn-onboard` (copy) |
-| **Claude Desktop — Code tab** | same as Claude Code (the plugin's `bin/eff` shim finds the runtime without a login-shell `PATH`; plan 10 A15b verifies the plugin path from the Code tab, not only a terminal — ADV OBJ-12) | same | — |
+| **Claude Desktop — Code tab** | same as Claude Code (the plugin's launch shim — `scripts/eff-launch.sh`, run by `/bin/sh`, which is absolute on every macOS, needs no `PATH` and no executable bit — finds the runtime without a login-shell `PATH`; plan 10 A15b verifies the plugin path from the Code tab, not only a terminal — ADV OBJ-12) | same | — |
 | **Claude Desktop / claude.ai chat** | the plugin from Customize › Plugins (Skills load; the stdio server is ignored there) or per-Skill zip (standard fields only — `disallowed-tools` and `disable-model-invocation` are ignored, so the server gate is the only write guard; the write module is off unless the operator opted in **from a terminal**, which a chat surface cannot do) | `eff print-config --client desktop` → `claude_desktop_config.json` key `espn-fantasy-football` with the absolute `fnm` node path (plan 03 §4.1) | the `espn.<workflow>` prompts also work here |
 | **Cowork / Agent SDK** | account-synced Skills / `settingSources` + `skills: [...]`; `apply` cannot fire from a scheduled task (`disable-model-invocation`) | `mcpServers` option with the same absolute command | a `scripts/run-weekly.ts` example ships with the plugin |
 | **Non-Claude MCP clients** | copy `skills/` where the client reads Agent Skills; otherwise the `espn.<workflow>` prompts | the client's MCP config (stdio) | — |

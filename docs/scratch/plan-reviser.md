@@ -75,8 +75,8 @@ Status legend as above.
 
 ### Objections
 - OBJ-21 — applied (plan 10 §3.1a Fixtures, A1a, A14a, §6 A-1; plan 09 §4 tree ×2, §3.1 ON-3, §5.1 #7, §5.2, §7 A-2; plan 05 §3 fixture-law box, §3.1 steps 1/2/4, §2 domain/scoring, §5 smoke dir; plan 08 §6 step 1; plan 01 §9.1; plan 04 §1, §4.1 smoke dir)
-- OBJ-22 (separate read-only connections, no startup ATTACH loop, on-demand ceiling 8, rename-onto-same-path, 11-source test, [A] readOnly on Node 24) — pending
-- OBJ-23 (shim → scripts/eff-launch.sh via /bin/sh; no bin/ at plugin root) — pending
+- OBJ-22 — applied (plan 01 D6, §1 diagram node, §5.1, §5.5 new paragraph, §14 A-13; plan 03 §1.1 step 3; plan 05 §2 store row; plan 06 §1.3 intro + store prune; plan 10 §4 T-15)
+- OBJ-23 — applied (plan 09 §4 tree, §6 Code-tab row, K8; plan 04 §1 tree, §2 files; plan 03 §4.2, §5 #2; plan 10 §4 T-01, A15b)
 - OBJ-24 (instructions delivery [U], nonce in A11b spike, rule also in docs resource, fallback short form, pointer ≤ 40) — pending
 - OBJ-25 (throwaway item, 10 s timeout, ok/timeout/error, recorded + doctor #7) — pending
 - OBJ-26 (anonymous control request; accepted: null when not discriminating) — pending
@@ -92,6 +92,10 @@ Status legend as above.
 
 ### R2 narrow readings
 - OBJ-21: the two Inspector-smoke invocations (plan 04 §4.1, plan 05 §5) pointed at bare `fixtures/espn`; with two classes I pointed them at `fixtures/espn/fx-10h` (the dir plan 09 already uses for fixture mode)
+- OBJ-22: the ruling puts the readOnly [A] in "plan 01 §13"; §13 is "What this plan does not decide" — the assumptions table is §14, so it is A-13 there
+- OBJ-22: dataset files are now `datasets/<source>.sqlite` (rename onto the same path); the version lives in `refresh_log`, not the file name
+- OBJ-23: plan 04 §2 `files` drops `bin` and lists `scripts/eff-launch.sh` so a tarball install is still a plugin root
 
 ### R2 pushed SHAs
-(none yet)
+- 89debff — R2 resume checklist
+- 3c18e09 — OBJ-21 + Z7

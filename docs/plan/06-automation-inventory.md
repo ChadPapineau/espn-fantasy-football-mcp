@@ -61,7 +61,7 @@ Budget: 2 requests/day (3 on Tuesdays).
 
 ### 1.3 Data refreshes (launchd, Chad's Mac, no cookies)
 
-All are `eff refresh <source>`; each: poll version → skip/download → assert schema → transactional load → `refresh_log` row; retries 3× with jitter inside the run; never overlaps itself (a per-job lock row); exits 0 when up to date [V-sib 06 §1.2].
+All are `eff refresh <source>` — **eleven sources under `full`** (six in Phase 1a), one more than SQLite's limit of 10 attached databases, which is why the server opens each dataset file as its own read-only connection instead of attaching them (plan 01 §5.5 — ADV OBJ-22); each: poll version → skip/download → assert schema → load into the source's dataset file, published by `rename()` onto the same path → `refresh_log` row; retries 3× with jitter inside the run; never overlaps itself (a per-job lock row); exits 0 when up to date [V-sib 06 §1.2].
 
 | Job | Trigger (local time) | Inputs | Outputs | Failure signal | Cookies | Before server? |
 |---|---|---|---|---|---|---|
@@ -77,7 +77,7 @@ All are `eff refresh <source>`; each: poll version → skip/download → assert 
 | `refresh weather` | hourly Wed → kickoff, outdoor games of the coming week only | Open-Meteo / NWS | `ds_weather` | warn-only | N | 🔧 |
 | `refresh odds` (optional) | 3×/day if `ODDS_API_KEY` set | The Odds API | `ds_odds` | warn-only; credit counter | N | 🔧 |
 | `crosswalk rebuild` | chained after `nflverse:daily` and `espn:players` | `ds_roster_weekly`, `ds_players`, overrides file, persisted pairs | `crosswalk` rows; unmatched report | **notification when any rostered or ≥ 1 %-owned ESPN player lacks a confidence-1.0 pair** (today that count is 0 [V-04 §C]; threshold **1**, not 5 — a non-zero value is a data-quality event, not a routine gap) | N | 🔧 |
-| `store prune` | weekly Sun 03:00 | cache rows past hard limits, `ds_news` > 30 d, `roster_snapshot`/`pool_snapshot` > 30 d, `points_cache`, temp files, backups beyond two versions, `espn_requests` > 10 min. **Never pruned (T-07):** `recommendation_log`, the `league_settings` rows it references, `espn_projection`, `scoreboard_snapshot`, `write_journal` — the backtest corpus and the log's referents (ADV OBJ-04's daily probe is the other guard: a silenced fleet is the other way the corpus stops accumulating) | freed space | warn-only | N | 🔧 |
+| `store prune` | weekly Sun 03:00 | cache rows past hard limits, `ds_news` > 30 d, `roster_snapshot`/`pool_snapshot` > 30 d, `points_cache`, temp files, any dataset file `refresh_log` no longer names (ADV OBJ-22), backups beyond two versions, `espn_requests` > 10 min. **Never pruned (T-07):** `recommendation_log`, the `league_settings` rows it references, `espn_projection`, `scoreboard_snapshot`, `write_journal` — the backtest corpus and the log's referents (ADV OBJ-04's daily probe is the other guard: a silenced fleet is the other way the corpus stops accumulating) | freed space | warn-only | N | 🔧 |
 | `store backup` | weekly Sun 03:10 | `store.sqlite` (`VACUUM INTO` under the process lock — T-15(b)) | `~/.cache/…/backups/store-<date>.sqlite` (keep 4) | notification on failure | N | 🔧 |
 
 Budget from this table: `espn:schedule` ≤ 24/day on game days (4 otherwise) + `espn:players` 1 — all keyless, CloudFront-cached, and counted by the limiter.

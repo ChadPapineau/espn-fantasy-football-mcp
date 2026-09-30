@@ -36,8 +36,8 @@ espn-fantasy-football-mcp/
 ├── eslint.config.js · .prettierrc · .editorconfig
 ├── .gitleaks.toml               # custom rules (§4.3)
 ├── .claude-plugin/              # plugin.json (name "espn-fantasy-football") · marketplace.json — the plugin manifest (plan 09 §4, K8 — T-01)
-├── .mcp.json                    # the plugin's server entry: command "${CLAUDE_PLUGIN_ROOT}/bin/eff" — variables only, no secrets, no absolute user paths (T-01)
-├── bin/eff                      # POSIX shim resolving the runtime deterministically (plan 09 §4 — ADV OBJ-12)
+├── .mcp.json                    # the plugin's server entry: command "/bin/sh", args ["${CLAUDE_PLUGIN_ROOT}/scripts/eff-launch.sh", "serve"] —
+│                                # variables only, no secrets, no absolute user paths (T-01); no bin/ directory at the plugin root (ADV OBJ-23)
 ├── .gitignore                   # exists today — untouched by this plan (it already ignores *cookie*, *credentials*.json, *token*.json, .env*)
 ├── .env.example                 # exists today — untouched (documents names; the server reads no .env — plan 01 D16)
 ├── README.md · LICENSE · SECURITY.md   # docs-writer's files
@@ -109,7 +109,8 @@ espn-fantasy-football-mcp/
 ├── scripts/                     # zero-token tooling (plan 06): record-fixture (incl. --public), scrub-fixture, gen-manifest,
 │   │                            # gen-config-docs, gen-tool-docs, check-commits, check-licenses, check-no-scripts,
 │   │                            # check-mermaid, check-skills (incl. `claude plugin validate --strict`), check-identifiers,
-│   │                            # check-coverage, scan-tarball, build-skills, gen-fixtures (T-01)
+│   │                            # check-coverage, scan-tarball, build-skills, gen-fixtures (T-01),
+│   │                            # eff-launch.sh — the POSIX launch shim run by /bin/sh (plan 09 §4 — ADV OBJ-12, OBJ-23)
 ├── docs/                        # research/, plan/, scratch/, HANDOFF.md (as today)
 └── .github/
     ├── workflows/ci.yml · docs.yml · release.yml · scheduled.yml
@@ -136,7 +137,7 @@ Four direct runtime packages (six names with `core` and the platform package). E
 
 **Dev dependencies:** `typescript`, `vitest` + `@vitest/coverage-v8`, `fast-check`, `eslint` + `typescript-eslint` + `eslint-plugin-import-x`, `prettier`, `tsx`, `@types/node`, **`@modelcontextprotocol/client`** (exact-pinned to the server SDK's version — for `InMemoryTransport.createLinkedPair()` in the gate tests and the Skills fixture dry run, verified by the sibling in its round 1 §1.0; ADV OBJ-19(b)). Run via `npx` with pinned versions in CI only: `@modelcontextprotocol/inspector`, `@mermaid-js/mermaid-cli`.
 
-`package.json` essentials: `"type": "module"`, `"bin": { "eff": "dist/cli.js" }`, `"engines": { "node": ">=24.15" }`, `"files": ["dist", "bin", "skills", ".claude-plugin", ".mcp.json", "README.md", "LICENSE", "CHANGELOG.md"]` (fixtures and tests never ship; the plugin files ship so a tarball install is also a plugin root — T-01), scripts: `build`, `typecheck`, `lint`, `format:check`, `test`, `test:coverage`, `test:process`, `smoke`, `eval` (manual, tokens), `check:commits`, `check:licenses`, `check:no-scripts`, `check:mermaid`, `check:skills`, `check:identifiers`, `check:docs`, `pack:scan`, `fixtures:record`, `fixtures:scrub`, `fixtures:manifest`.
+`package.json` essentials: `"type": "module"`, `"bin": { "eff": "dist/cli.js" }`, `"engines": { "node": ">=24.15" }`, `"files": ["dist", "scripts/eff-launch.sh", "skills", ".claude-plugin", ".mcp.json", "README.md", "LICENSE", "CHANGELOG.md"]` (fixtures and tests never ship; the plugin files and the launch shim ship so a tarball install is also a plugin root — T-01; there is no `bin/` directory — ADV OBJ-23 — and the `eff` CLI name for terminal use still comes from the `"bin"` field above on a normal install), scripts: `build`, `typecheck`, `lint`, `format:check`, `test`, `test:coverage`, `test:process`, `smoke`, `eval` (manual, tokens), `check:commits`, `check:licenses`, `check:no-scripts`, `check:mermaid`, `check:skills`, `check:identifiers`, `check:docs`, `pack:scan`, `fixtures:record`, `fixtures:scrub`, `fixtures:manifest`.
 
 ---
 
