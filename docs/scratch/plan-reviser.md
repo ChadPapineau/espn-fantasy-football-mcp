@@ -20,11 +20,11 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - OBJ-07 — applied (plan 01 §1.1 Domain; plan 03 §1.2; plan 10 A16a, A-2; plan 07 E1/E3 n_sims)
 - OBJ-08 — applied (plan 07 C3 row, §2 Toolset, C3/E3/E14 headers, E2 data, §5.1, A-4; plan 10 Ph1, §1, §3.1a Analytics/Tools, A3a, A7a, A10a, 1b Tools, §3.2, B10, B12, D3)
 - OBJ-09 — applied ((a) plan 01 D6, §1 diagram, §5.1, §5.5; plan 02 §8 #8; plan 03 L7, §1.1, §7; plan 05 store row; plan 06 J3, §2; plan 10 A5a, A15a · (b) plan 01 §4.1; plan 02 §6.3; plan 05 §5; plan 07 legend, C10, §5.1, A-4; plan 10 A3a, A7a, B12 · (c) plan 02 opening rule, §1, §4.2, §8 #14; plan 03 §5 #13; plan 09 §6 ×2; plan 10 §3.W (4), prereqs (a)(b), W10 · sibling citations: plans 07/09/10 headers)
-- OBJ-10 — pending
-- OBJ-11 — pending
-- OBJ-12 — pending
-- OBJ-13 — pending
-- OBJ-14 — pending
+- OBJ-10 — applied (plan 03 §4.1 runtime-install para + example paths, §4.2, §4.3, §5 #2, #24, #25, A-9, §7; plan 06 §2 runtime bullet; plan 05 cli/print-config)
+- OBJ-11 — applied (plan 03 §4.1 doctor bullet, §5 #2, §7 upgrade path)
+- OBJ-12 — applied (plan 09 §4 .mcp.json + bin/eff, §6 Code-tab row, K8; plan 04 §1 tree; plan 10 A15b; plan 03 §5 #2)
+- OBJ-13 — applied (plan 07 C12, A1 inputs/output/method/views/clean negatives, C9, E2 inputs/objective, E3 inputs, §6 row 1, G1; plan 09 §3.1 tools/inputs/output, §3.3 inputs, §3.11 inputs/SP-5-E; plan 03 §3 key; plan 10 D1, B5)
+- OBJ-14 — applied (plan 07 G2; plan 02 S2, §2.1 diagram/table; plan 03 §2.1 step 5, §5 #16/#17; plan 09 §3.7 ×3, §3.1 ON-5-E; plan 06 credential check; plan 10 D2)
 - OBJ-15 — pending
 - OBJ-16 — pending
 - OBJ-17 — pending
@@ -49,3 +49,4 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - f1d2003 — resume file
 - 18d6e32 — OBJ-01..04
 - d419983 — OBJ-05..08
+- 3e8b675 — OBJ-09

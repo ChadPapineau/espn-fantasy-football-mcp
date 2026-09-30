@@ -101,7 +101,7 @@ The procedure is 03 §C.4's, made concrete:
 2. Prompt `SWID` (echoed — it is an identifier); validate the braced-GUID regex (plan 02 §2.1); on failure say which part is wrong (missing braces is the common one [V-03 §C.1]).
 3. Prompt `espn_s2` with **echo off** (a muted `readline` output stream — no dependency); validate length ≥ 100 and the character class; warn on whitespace or quotes (the `%`-mangling pitfall [V-03 §C.1]); never print the value or its length beyond "ok (N chars)".
 4. On a fresh install, run the **launchd-context test** first (plan 06 §2 — a one-shot agent reads the keychain `meta` item; if that read prompts or fails, `EFF_CREDENTIAL_STORE=file` is recorded in `config.json` for the whole install and the reason printed — ADV OBJ-05); then store per `EFF_CREDENTIAL_STORE` (plan 02 §2.2); the file store runs the mode and iCloud-xattr checks first. Exactly one store ever holds a value.
-5. **The definitive check:** one `GET L?view=mSettings` with the Cookie header (under the limiter). `200` → set `lastAcceptedAt`, print `stored: SWID ok (38 chars), espn_s2 ok (N chars), league [league] check 200 (private: yes/no), age 0d`. `401/403` → **delete what was stored**, print "ESPN did not accept these cookies for that league — copy them again from a logged-in browser tab and re-run `eff setup`". `404` → delete, print "league id not found for season YYYY — check `ESPN_LEAGUE_ID`". Anything else → keep the value, print the classified error, exit 1.
+5. **The definitive check:** one probe under the limiter — `GET L?view=mSettings` with the Cookie header on a private league; on a public league (`settings.isPublic` from the anonymous read) the `/communication/` board probe with `topics.limit: 1`, body discarded, because `mSettings` is 200 there with or without cookies (plan 02 §2.1 — ADV OBJ-14). `200` (or `404` from the board probe) → set `lastAcceptedAt`, print `stored: SWID ok (38 chars), espn_s2 ok (N chars), league [league] check ok (private: yes/no; probe: settings|board), age 0d`. `401/403` → **delete what was stored**, print "ESPN did not accept these cookies for that league — copy them again from a logged-in browser tab and re-run `eff setup`". `404` from `mSettings` → delete, print "league id not found for season YYYY — check `ESPN_LEAGUE_ID`". Anything else → keep the value, print the classified error, exit 1.
 6. Resolve the user's team: the team whose `owners[]` contains the SWID (from `mTeam`, one more request) → print it and write `ESPN_TEAM_ID` into `config.json` if unambiguous; zero or many matches → print why and leave it unset (this also gates the write module, plan 02 §3.2).
 7. Print the re-paste recommendation: "cookie lifetime is unknown; re-run `eff setup` if `eff status` shows rejected, and consider doing so every 30 days" [V-03 §C.2].
 8. Timeout: each prompt waits 10 minutes, then exits 1 with "run `eff setup` again"; nothing partial is left stored (a failed step deletes what the earlier step wrote).
@@ -135,14 +135,14 @@ The procedure is 03 §C.4's, made concrete:
 
 ### 4.1 `eff print-config --client desktop`
 
-Emits a JSON snippet with **resolved absolute paths** — `command` = `process.execPath` (the exact `node` binary that ran `eff`; under `fnm` this is a versioned path such as `<home>/.fnm/node-versions/v22.x.y/installation/bin/node` (the layout observed on this machine, 2026-09-30) [V-00: the existing `strava-mcp` entry uses the absolute `fnm` node path]), `args[0]` = the absolute path of `dist/cli.js` resolved from `import.meta.url` — and only non-secret env keys:
+Emits a JSON snippet with **resolved absolute paths** — `command` = `process.execPath` (the exact `node` binary that ran `eff`; under `fnm` this is a versioned path such as `<home>/.fnm/node-versions/v24.x.y/installation/bin/node` (the layout observed on this machine, 2026-09-30, at v22.23.2 — below the Node ≥ 24.15 floor, so the quickstart's first step is `fnm install 24 && fnm default 24`; T-15(a)) [V-00: the existing `strava-mcp` entry uses the absolute `fnm` node path]), `args[0]` = the absolute path of `dist/cli.js` resolved from `import.meta.url` — and only non-secret env keys. **Where the runtime install lives (ADV OBJ-10):** the `dist/cli.js` and `node_modules` that this snippet and every launchd plist point at must sit **outside any file-provider directory** — a clone under a non-synced path (e.g. `~/src/espn-fantasy-football-mcp`) or `npm install -g` from the release tarball (§4.3); the research/plan checkout under the iCloud-managed `~/Documents` may stay where it is (it holds no runtime). iCloud's eviction and sync churn of a `node_modules` tree breaks launches in the client's MCP log, where nobody looks. `eff print-config` **warns** when the resolved `dist/cli.js` sits under a directory carrying `com.apple.file-provider-domain-id`/`com.apple.icloud.*`; where the runtime install lives is Chad's decision (HANDOFF item 2):
 
 ```json
 {
   "mcpServers": {
     "espn-fantasy-football": {
-      "command": "/Users/<you>/.fnm/node-versions/v22.23.2/installation/bin/node",
-      "args": ["/Users/<you>/Documents/Repos/ESPN Fantasy Football/dist/cli.js", "serve"],
+      "command": "/Users/<you>/.fnm/node-versions/v24.15.0/installation/bin/node",
+      "args": ["/Users/<you>/src/espn-fantasy-football-mcp/dist/cli.js", "serve"],
       "env": {
         "ESPN_LEAGUE_ID": "<your league id>",
         "ESPN_SEASON": "2026",
@@ -156,7 +156,7 @@ Emits a JSON snippet with **resolved absolute paths** — `command` = `process.e
 - The config key is **`espn-fantasy-football`** — distinct from the sibling's `fantasy-football`, which is what keeps the two servers in separate namespaces in Claude Desktop (plan 01 §0.1 row 2).
 - JSON quoting handles the spaces in the path; `print-config` also emits the shell-quoted form for the Claude Code command (§4.2) so the user never hand-types a path with spaces.
 - Paste target: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS; mode `0600` on this machine [V-03 §C.4]) **[A-7: the path is from general knowledge; verify at build time]**.
-- `eff doctor` reads that file if present and checks: `command` and `args[0]` are absolute and exist; `command` is a Node ≥ 22.13; `args` contains `serve`; **no `env` value matches a cookie shape** (plan 02 §2.3 patterns) — if one does, doctor prints the removal instruction and exits 2.
+- `eff doctor` reads that file if present and checks: `command` and `args[0]` are absolute and exist; `command` is a Node ≥ 24.15 **and matches `process.execPath`** (ADV OBJ-11); `args[0]` sits outside any file-provider directory (ADV OBJ-10); `args` contains `serve`; **no `env` value matches a cookie shape** (plan 02 §2.3 patterns) — if one does, doctor prints the removal instruction and exits 2.
 
 ### 4.2 `eff print-config --client code`
 
@@ -165,14 +165,14 @@ Emits, with the same absolute paths and shell quoting:
 ```
 claude mcp add --scope user --transport stdio \
   --env ESPN_LEAGUE_ID=<your league id> --env ESPN_SEASON=2026 --env EFF_LOG_LEVEL=info \
-  espn-fantasy-football -- "/Users/<you>/…/fnm/…/bin/node" "/Users/<you>/Documents/Repos/ESPN Fantasy Football/dist/cli.js" serve
+  espn-fantasy-football -- "/Users/<you>/…/fnm/…/bin/node" "/Users/<you>/src/espn-fantasy-football-mcp/dist/cli.js" serve
 ```
 
-`--scope user` stores the entry in `~/.claude.json` so nothing lands in the public repo's `.mcp.json`; "the `--` (double dash) separates Claude's own options … from the command and arguments that run the server" [V-cc]. `doctor` parses `~/.claude.json`'s `mcpServers` if found, with the §4.1 checks. In Claude Code the tools appear as `mcp__espn-fantasy-football__espn_<tool>` [V-cc; V-session] — the README says so, because a Skill that names tools must use that full form for `allowed-tools` [V-cc].
+`--scope user` stores the entry in `~/.claude.json`, so no user-specific entry lands in the repo's `.mcp.json` — which exists (plan 09 §4, K8) and carries **no secrets and no absolute user paths**: `${CLAUDE_PLUGIN_ROOT}` variables and the `bin/eff` shim only (T-01; ADV OBJ-12); "the `--` (double dash) separates Claude's own options … from the command and arguments that run the server" [V-cc]. `doctor` parses `~/.claude.json`'s `mcpServers` if found, with the §4.1 checks. In Claude Code the tools appear as `mcp__espn-fantasy-football__espn_<tool>` [V-cc; V-session] — the README says so; Skill *frontmatter* (`disallowed-tools`) lists the qualified forms for both install paths, while Skill bodies use bare `espn_*` names validated against `tools/list` (plan 09 convention; T-02) [V-cc].
 
 ### 4.3 Global install variant
 
-`npm install -g` puts `eff` on `PATH`; the config still uses the absolute `dist/cli.js` path printed by `eff print-config` — GUI clients do not have the user's shell `PATH` [A-1].
+`npm install -g` puts `eff` on `PATH`; the config still uses the absolute `dist/cli.js` path printed by `eff print-config` — GUI clients do not have the user's shell `PATH` [A-1]. The global install (from the release tarball) is the recommended runtime location when the checkout is iCloud-managed (ADV OBJ-10); the quickstart's first step is `fnm install 24 && fnm default 24` (T-15(a)).
 
 ---
 
@@ -182,8 +182,8 @@ Offline checks always; `--online` adds the network ones (all read-only GETs unde
 
 | # | Check | Pass condition | Fix / message |
 |---|---|---|---|
-| 1 | Node version | ≥ 22.13.0 (`node:sqlite`); reports the running binary's path | install/switch; the config's `command` must point at it |
-| 2 | Launch config paths | `command` and `args[0]` absolute, exist, executable; `command` is Node ≥ 22.13; `args` contains `serve`; the config key is `espn-fantasy-football` (warn if the sibling's `fantasy-football` key also exists — fine, just says both are installed) | prints the corrected snippet from `print-config` |
+| 1 | Node version | ≥ 24.15.0 (`node:sqlite` unflagged and without the v22 line's `ExperimentalWarning` on every launch — T-15(a)); reports the running binary's path | `fnm install 24 && fnm default 24`, then `eff print-config` and `eff install-launchd`; the config's `command` must point at it |
+| 2 | Launch config paths | `command` and `args[0]` absolute, exist, executable; `command` is Node ≥ 24.15; `args` contains `serve`; the config key is `espn-fantasy-football` (warn if the sibling's `fantasy-football` key also exists — fine, just says both are installed); **`args[0]`'s directory and its `node_modules` carry no file-provider xattr and are not dataless placeholders** — reads `dist/cli.js` and one `node_modules` entry, asserting non-zero on-disk size (ADV OBJ-10); **`command` matches `process.execPath`** — a version mismatch warns "config uses v<a>; you are running v<b> — re-run `eff print-config` and `eff install-launchd`" (ADV OBJ-11); for the plugin path, runs `bin/eff`'s resolution (`EFF_NODE` → `fnm`/`nvm` default → `/opt/homebrew/bin` → `command -v node`) and reports the node it would pick (ADV OBJ-12) | prints the corrected snippet from `print-config`; a file-provider directory or a placeholder is a hard fail naming the directory and the fix (a clone outside iCloud or `npm install -g`) |
 | 3 | Client config secrecy | no `env` value in either client config matches a cookie shape; no `ESPN_S2`/`SWID`-named key at all | removal instruction; exit 2 |
 | 4 | Config dir | exists, mode `0700`, owned by the user, **no iCloud/file-provider xattr** [V-03 §C.4] | `--fix` chmods; an iCloud-managed dir is a hard fail with the reason |
 | 5 | Cache dir + store | writable; free space ≥ 1 GB; `PRAGMA quick_check` ok; schema version = binary's; size (warn > 500 MB); no file-provider xattr | `--fix` creates; `eff refresh` |
@@ -192,16 +192,21 @@ Offline checks always; `--online` adds the network ones (all read-only GETs unde
 | 8 | Credential format | the stored values pass the plan 02 §2.1 regexes | "re-run `eff setup`" |
 | 9 | Drift probe age | `probe_log` last success ≤ 36 h; `drift_state` not red | "run `eff probe`"; exit 4 if red, with the diff summary |
 | 10 | Datasets | each `ds_*` last load age vs its hard limit (plan 01 §5.4) | `eff refresh <source>` |
-| 11 | launchd jobs | plists present in `~/Library/LaunchAgents/`, loaded (`launchctl print gui/$UID/<label>`), last exit status from `refresh_log` | `eff install-launchd` |
+| 11 | launchd jobs | plists present in `~/Library/LaunchAgents/`, loaded (`launchctl print gui/$UID/<label>`), last exit status from `refresh_log`; warns when `waiverProcessHour` (interpreted as ET) and `status.waiverNextExecutionDate` disagree (ADV OBJ-16) | `eff install-launchd` |
 | 12 | `.npmrc` | `ignore-scripts=true`, `save-exact=true` when run from a checkout | — |
 | 13 | Write flag | `EFF_ENABLE_WRITES=true` only with a recorded acknowledgement and a resolved own team; says "writes: off" otherwise; **warns when writes are enabled and (a) the launch is Claude Code (`CLAUDECODE=1`) or (b) the client config holds other `mcpServers` entries** — another server may give the model shell or filesystem reach as the user, and the confirmation channels are unforgeable only in a session without such reach (ADV OBJ-09(c); T-09) | the warning names the session condition and the offered `permissions.deny` set |
 | 14 | *(online)* Clock skew | local time vs `Date`/`x-fantasy-server-time` from a **keyless** `GET …/seasons/{season}?view=proTeamSchedules_wl` (no cookie, no league id; the header is on every read-host 200 [V-03 §A.4]); warn > 60 s, fail > 300 s (kickoff-window math and the gate's TTL depend on it) | fix the system clock |
 | 15 | *(online)* API host / shape probe | the same request's keys vs the manifest (plan 01 §7); a 3xx or non-JSON body → `ESPN_HOST_MOVED`; with `EFF_ESPN_READ_HOST` set (§3), probes the override and **re-baselines the manifest against it** (ADV OBJ-06) | exit 4 with the diff; on `host_moved` prints the override instruction and "the permanent fix is a release" |
-| 16 | *(online)* Credential validity (boolean) | `GET L?view=mSettings` with cookies → `accepted: true|false`; **never** interpreted as "expired" (the 401 cannot say [V-03 §C.3]); updates `lastAcceptedAt`/`lastRejectedAt` only — L5 | exit 3 with "run `eff setup`" |
-| 17 | *(online)* League reachability | from #16: 200 (private or public), 404 (wrong id/season), 401 (private and rejected) | the exact message per case |
+| 16 | *(online)* Credential validity (boolean) | the plan 02 §2.1 definitive probe with cookies (`mSettings` on a private league; the `/communication/` board probe with `topics.limit: 1` on a public league, body discarded — ADV OBJ-14) → `accepted: true|false` and `probe: settings|board`; **never** interpreted as "expired" (the 401 cannot say [V-03 §C.3]); updates `lastAcceptedAt`/`lastRejectedAt` only — L5 | exit 3 with "run `eff setup`" |
+| 17 | *(online)* League reachability | from the anonymous `mSettings` read: 200 (public, or private with accepted cookies), 404 (wrong id/season), 401 (private and rejected, or no cookies) | the exact message per case |
 | 18 | *(online)* Own team | the SWID resolves to exactly one team | prints the team; warns on 0 or 2+ |
 | 19 | *(online)* Sources | `HEAD`/`GET timestamp.txt` for each nflverse release, RSS heads — reachability only | — |
 | 20 | *(page only)* `EFF_SETUP_PORT` free, or the range has a free port | — | see §2.2 |
+| 21 | Scoring golden, nightly (T-08) | `league_settings`/`refresh_log`: the just-finalised week's `scoring_mismatch` check (written by `snapshot roster`, plan 06 §1.4) has `share ≤ 10 %`; names the players otherwise | "run `onboard`" (plan 08 §6 step 3d) |
+| 22 | Settings changed (T-08) | `refresh_log`: no `settings_changed` row since the last acknowledged `settings_hash` | prints the commissioner-change note; `onboard` explains it |
+| 23 | IR validity, daily (T-08) | `roster_snapshot` diff: no `ir_invalid` check row for the user's team (a healthy player in slot 21 blocks every add — 05 §4.3) | names the player and the forced drop |
+| 24 | Stale `dist/` (ADV OBJ-10) | in a checkout install, `dist/cli.js` is newer than every file under `src/` and `package.json` | "run `npm run build`" |
+| 25 | Client MCP-log tail (ADV OBJ-10) | reads the last 40 lines of the client's MCP log for this server, redacted (`--client-log <path>`; default the Desktop log path `~/Library/Logs/Claude/mcp-server-espn-fantasy-football.log` **[A-9: verify at build time]**) — "what happened last time" | prints them; a launch failure there is the failure the user is asking about |
 
 ---
 
@@ -222,10 +227,10 @@ The server process never exits on a credential problem; credential problems are 
 
 ## 7. Upgrade and migration
 
-- **Store:** `schema_version(version INTEGER, applied_at)`; migrations `src/store/migrations/NNN_<name>.ts` export `up(db)` only (forward-only); applied in order inside `BEGIN IMMEDIATE`; before the first pending migration, copy `store.sqlite` → `store.sqlite.bak-v<old>` (snapshots and the recommendation log are not rebuildable; the parsed ESPN cache is) and prune backups older than the last two versions. A store with `version > binary's` → exit 1: `"store.sqlite was written by a newer version (v7); this binary supports v5. Upgrade the package or restore the backup."` A **refresh job** that finds a newer store refuses the same way (plan 02 §8 #8). Dataset table changes bump `ds_schema` in `refresh_log`, which makes the next `eff refresh` write a new per-source dataset file from the last downloaded file if present, else re-download — a dataset file is replaced whole, never migrated in place (ADV OBJ-09(a)). The **manifest** (plan 01 §7) has its own version in `drift_state`; a binary with a newer manifest re-baselines on its first probe and says so.
+- **Store:** `schema_version(version INTEGER, applied_at)`; migrations `src/store/migrations/NNN_<name>.ts` export `up(db)` only (forward-only); applied in order inside `BEGIN IMMEDIATE`; before the first pending migration, `VACUUM INTO 'store.sqlite.bak-v<old>'` under the process lock — a file copy of a WAL database with another process live is not a backup (sib ADV OBJ-10; T-15(b)) — (snapshots and the recommendation log are not rebuildable; the parsed ESPN cache and the dataset files are) and prune backups older than the last two versions. A store with `version > binary's` → exit 1: `"store.sqlite was written by a newer version (v7); this binary supports v5. Upgrade the package or restore the backup."` A **refresh job** that finds a newer store refuses the same way (plan 02 §8 #8). Dataset table changes bump `ds_schema` in `refresh_log`, which makes the next `eff refresh` write a new per-source dataset file from the last downloaded file if present, else re-download — a dataset file is replaced whole, never migrated in place (ADV OBJ-09(a)). The **manifest** (plan 01 §7) has its own version in `drift_state`; a binary with a newer manifest re-baselines on its first probe and says so.
 - **Credential store:** the keychain `meta` item / `session.json` carries `format_version`; `src/auth/upgrade.ts` migrates older shapes in memory and rewrites on the next `eff setup`; the secret values themselves are never transformed (they are stored exactly as pasted [V-03 §C.1]).
 - **Config:** additive only; unknown keys warn, never fail.
-- **Package upgrade path:** `git pull && npm ci && npm run build` (checkout install — note that `node_modules/` and `dist/` under the iCloud-managed checkout will churn through iCloud [HANDOFF item 2]; the README suggests `brctl`/"Remove Download" or a non-synced clone as Chad's call) or `npm update -g espn-fantasy-football-mcp`; the launch config does not change because `dist/cli.js` keeps its path; `eff doctor` after every upgrade.
+- **Package upgrade path:** `git pull && npm ci && npm run build` in the **runtime** clone (outside any file-provider directory — §4; the iCloud-managed research checkout is never the runtime, ADV OBJ-10) or `npm update -g espn-fantasy-football-mcp`; then, whenever the Node path changed (a `fnm install 24 && fnm default 24`, or any later `fnm uninstall`), `eff print-config` **and** `eff install-launchd` (ADV OBJ-11 — every client config and plist points at a versioned `fnm` path); the launch config does not change otherwise because `dist/cli.js` keeps its path; `eff doctor` after every upgrade (#2 catches a `command` that no longer matches `process.execPath`, #24 a stale `dist/`).
 - **SDK/protocol upgrades:** re-read `docs/protocol-versions.md` on every SDK bump; the Inspector smoke (plan 05 §5) runs against both eras.
 - **Season rollover:** `ESPN_SEASON` unset → current season; the fixture set and manifest are re-recorded each August (plan 06 §1.4); `finalScoringPeriod` is read from `status`, never hard-coded (16 → 17 happened silently [V-03 §F.1]).
 
@@ -262,4 +267,5 @@ Which refresh/probe/snapshot jobs exist and their schedules (plan 06 — this pl
 | A-6 | Binding `127.0.0.1` only (no `::1`) is enough because the CLI prints a literal `127.0.0.1` URL | open the printed URL in Safari and Chrome once |
 | A-7 | Claude Desktop config path on macOS | verify at build time; `doctor` accepts `--client-config <path>` |
 | A-8 | `claude mcp remove` syntax | Claude Code MCP docs at build time |
+| A-9 | The Claude Desktop MCP log path for this server (`~/Library/Logs/Claude/mcp-server-espn-fantasy-football.log`) — `doctor` #25's default | verify at build time; `--client-log <path>` overrides |
 | U (03 §G.1 #14) | keychain prompt behaviour between `eff setup` and `eff serve` under a GUI client | `doctor` #7 and the first Desktop launch |
