@@ -80,6 +80,7 @@ use · **—** = skipped (reason given).
 | 27 | Chrome Web Store "ESPN Private League Setup" (recommended by #1) | — | — | — | — | — | — | **—** no public source; **not verifiable** |
 | 28 | jwulff/fantasy-sports (added by coordinator) | `93830048b68a5c00bdae5af2970bcd50bd08ae11` | Python | MIT | 2026-09-12 | 2 | Yes (119 commits) | **S** — CLI, read-only; best credential/redaction/untrusted-output design seen |
 | 29 | DanielTomaro13/sportsdata-mcp (added by coordinator) | `713f5a7a4746c34f270e3ead544dbf2a2ee7bba7` | Python | MIT | 2026-09-29 | 21 | Yes (259 commits) | **C** — opt-in Chrome cookie-DB reader; `fastmcp>=0.4,<4`, no lockfile; large commerce/OTA/telemetry surface (all opt-in) |
+| 30 | **`@napi-rs/keyring` 2.1.0 (npm)** — source Brooooooklyn/keyring-node at tag v2.1.0 (focused dependency audit for plan 01 D12 / plan 02 §7.2) | `1635ed458e8349ba28233728a8238ad99a5b2817` (= npm `gitHead` = attested commit) | Rust + JS loader | MIT | 2026-09-14 (release 2026-09-13) | 103 | Yes (152 commits; releases 2025-09, 2026-04, 2026-08, 2026-09) | **S** — checklist items 1–4 pass statically; item 5 is a runtime check; see §30 |
 | — | carterfawson, derekrbreese, kYpranite, andrewrgoss, MichaelCrowcroft (multi-platform) | see sibling audit | — | — | — | — | — | **X** (sibling); no ESPN cookie code (see §"Multi-platform") |
 
 Search coverage (2026-09-30): `gh search repos` for "espn fantasy mcp" (7 hits),
@@ -583,6 +584,8 @@ possible statically): rrichardtang (pinned `espn-api==0.46.0`, `mcp==2.2.0`,
 `uvicorn==0.54.0`) 0; HamCops/dodi (6 direct at latest) 0; i-am-david-weinstein (4) 0;
 saik0v0ur (2) 0; stmorse (5) 0; noahking0207-hash (3) 0; sportsdata-mcp (6) 0.
 
+`@napi-rs/keyring` 2.1.0 pinned tree (lockfile-only simulation, 14 packages): **0** advisories; OSV: 0 for the package and all 12 platform packages (any version); 0 for the Rust crates baked into the darwin-arm64 binary (§30).
+
 Two patterns recur: (a) every server that pins or locks an MCP Python SDK **1.x** carries
 3–5 HIGH advisories in `mcp` itself (DNS-rebinding/Origin checks on HTTP transports,
 unverified session requests); only the SDK-2.x repos (fantasy-yolo, dodi, rrichardtang)
@@ -622,3 +625,111 @@ PyPI/npm (`espn-api` → cwendt94, `espn-fantasy-football-api` → mkreiser,
   not exercised; the write-surface captures are the author's, dated 2026-09-12.
 - **Any runtime property** (rate limits, actual ESPN acceptance of the captured write
   headers, cache correctness): nothing was executed.
+
+---
+
+## 30. `@napi-rs/keyring` 2.1.0 (npm) — focused dependency audit — Safe
+
+Requested by the coordinator after the architecture plan selected this addon for
+credential storage (plan 01 D12). The review checklist is plan 02 §7.2; each item is
+answered below. Method as for every other repo: registry JSON and attestation bundles
+read over HTTPS, tarballs listed and extracted into the scratchpad (never installed,
+nothing executed), the source repo cloned at the tag and read, the shipped binary
+inspected with `otool -L`/`strings` (static), OSV over npm and crates.io, and a
+lockfile-only `npm audit` on a throwaway `package.json` that pins 2.1.0.
+
+**Identity.** npm `@napi-rs/keyring` 2.1.0, published 2026-09-13, `repository`
+`git+https://github.com/Brooooooklyn/keyring-node.git`, license MIT (`LICENSE` in the
+tarball), maintainers `broooooklyn` (LongYinan — author of napi-rs, GitHub account since
+2013, 5 087 followers) and `forehalo`. Repo: 103 stars, 152 commits, 4 open issues,
+pushed 2026-09-25, Renovate-managed. Releases: v1.2.0 2025-09-02, v1.3.0 2026-04-30,
+v2.0.0 2026-08-31, v2.1.0 2026-09-13. The tag commit `1635ed45` equals the registry's
+`gitHead` and the attested source commit. Source: 1 050 lines of Rust in `src/`
+(`entry.rs`, `async_entry.rs`, `entry_builder.rs`, `options.rs`, `result.rs`,
+`linux_credential_builder.rs`, `lib.rs`), a 5-line `build.rs` (`napi_build::setup()`),
+the generated `index.js`/`index.d.ts` loader and a `keytar.js` compatibility shim.
+
+**Checklist item 1 — the loader loads only the platform package, never downloads,
+never spawns.** PASS on macOS, with one Linux-only note. The shipped `index.js`
+(tarball: `LICENSE`, `index.js`, `index.d.ts`, `keytar.js`, `keytar.d.ts`,
+`package.json`, `README.md`; 47 KB unpacked) is the standard napi-rs loader: it tries a
+local `./keyring.<platform>.node`, then `require('@napi-rs/keyring-<platform>')` with a
+version-equality check against `2.1.0`, collecting `loadErrors` and throwing if nothing
+loads. No `fetch`, `http`, `net`, or download code exists (grep of the tarball). Two
+things to know: (a) on Linux only, libc detection reads `/usr/bin/ldd` and, if that
+fails, runs `child_process.execSync('ldd --version')` (`index.js:27,55`) — never
+reached on macOS; (b) `process.env.NAPI_RS_NATIVE_LIBRARY_PATH`, if set, is
+`require`d as the binding (`index.js:63-65`) — an operator-controlled load path that is
+standard napi-rs behaviour; our server must not inherit an attacker-writable
+environment (the client's `env` block is operator-owned, which plan 02 already assumes).
+`keytar.js` only wraps `AsyncEntry`/`findCredentialsAsync` from `index.js`.
+
+**Checklist item 2 — artifacts built by the repository's own CI, publish
+provenance-attested.** PASS. The registry carries two attestations for 2.1.0: an npm
+publish attestation and a SLSA v1 provenance whose payload names `buildType`
+`github-actions-buildtypes/workflow/v1`, builder `github.com/actions/runner/github-hosted`,
+source `https://github.com/Brooooooklyn/keyring-node` at `refs/heads/main`, workflow
+`.github/workflows/CI.yml`, resolved commit `1635ed458e8349ba28233728a8238ad99a5b2817`,
+invocation `actions/runs/34771608160/attempts/1`, subject `pkg:npm/%40napi-rs/keyring@2.1.0`
+(sha512 matches the tarball I downloaded: integrity `sha512-km9J3fom…`). **All 12
+platform packages** (`darwin-x64`, `darwin-arm64`, `freebsd-x64`, `linux-x64-gnu`,
+`linux-x64-musl`, `linux-arm64-gnu`, `linux-arm64-musl`, `linux-arm-gnueabihf`,
+`linux-riscv64-gnu`, `win32-x64-msvc`, `win32-ia32-msvc`, `win32-arm64-msvc`) carry the
+same SLSA v1 provenance; the `darwin-arm64` one resolves to the **same run and commit**.
+Each platform package has 3 files (`package.json`, `README.md`, the `.node`), no
+`dependencies`, no `scripts`, and `os`/`cpu` constraints. In `CI.yml` the `build` matrix
+runs per target on GitHub-hosted runners (Linux cross builds via `cargo-zigbuild`/napi
+cross; FreeBSD via `cross-platform-actions` fetching rustup at build time), artifacts
+flow through `actions/upload-artifact`/`download-artifact`, and the `publish` job has
+`permissions: id-token: write` and runs `npm publish --access public` with only
+`GITHUB_TOKEN` in its environment — i.e. npm OIDC trusted publishing with automatic
+provenance, no long-lived npm token. The darwin-arm64 binary's embedded install name
+(`/Users/runner/work/keyring-node/keyring-node/target/aarch64-apple-darwin/release/deps/…`)
+confirms a GitHub macOS runner built it.
+
+**Checklist item 3 — `npm audit` on the pinned tree: zero advisories.** PASS. A
+throwaway `package.json` pinning `@napi-rs/keyring@2.1.0`, resolved with
+`--package-lock-only --ignore-scripts` (14 lockfile entries: the package plus 12
+optional platform packages; no `node_modules` created), audits to
+`{critical:0, high:0, moderate:0, low:0, info:0}`. OSV `querybatch`: 0 advisories for
+2.1.0 of the package and of every platform package, and 0 for any version of
+`@napi-rs/keyring` ever.
+
+**Checklist item 4 — static grep of the tarball for network or process APIs.** PASS
+(see item 1 for the two loader hits). The **binary** (`keyring.darwin-arm64.node`,
+525 712 bytes, Mach-O arm64) links only `Security.framework`, `CoreFoundation.framework`,
+`libiconv` and `libSystem` (`otool -L`); `strings` finds no URL, hostname, socket,
+shell or `execv` string. The **Rust source** imports only `napi`/`napi-derive`,
+`anyhow`, `keyring-core` and the platform store crates
+(`apple-native-keyring-store` + `security-framework` on macOS,
+`windows-native-keyring-store` + `windows` on Windows, `linux-keyutils-keyring-store` +
+`dbus-secret-service-keyring-store` + `secret-service` on Linux/BSD); there is no
+`std::net`, `std::process`, `std::env`, `std::fs` or dynamic loading anywhere. The only
+`unsafe` blocks are CoreFoundation/`SecItemCopyMatching` FFI in `find_credentials`
+(`src/entry.rs:218-300`). The addon therefore talks only to the OS credential API. The
+crates compiled into the binary are readable from its panic paths:
+`keyring-core 1.0.0`, `apple-native-keyring-store 1.0.2`, `security-framework 3.7.0`,
+`napi 3.12.4`; OSV reports 0 advisories for those versions (historical advisories exist
+only for `security-framework` < 0.1 — RUSTSEC-2017-0003 — and `windows` < 0.30 —
+RUSTSEC-2022-0008 — neither applicable).
+
+**Checklist item 5 — keychain prompt count under Claude Desktop.** NOT VERIFIABLE
+STATICALLY. Whether the setup CLI and the server share one ACL entry, and whether the
+`security` CLI and the addon share a partition (03 §G.1 #14), are runtime properties of
+macOS; nothing in this audit changes plan 02's fallback (`security`-CLI variant, then
+file-only).
+
+**Other observations.** `Cargo.lock` is gitignored, so the Rust dependency set is
+resolved at build time rather than pinned in the repo; for the pinned npm version this
+does not matter (the artifact is attested and its crates are identifiable as above), but
+**every future version bump must repeat the binary/crate check**. `prepublishOnly:
+napi prepublish -t npm` and `preversion` run on the publisher's machine only; there is
+no `install`/`postinstall`/`preinstall` on the main or platform packages. The
+v2.0.0→v2.1.0 diff (4 commits, 2026-09-13/14) adds an `EntryOptions` bag that selects
+the Linux store (`secret-service` vs `keyutils`) and refreshes deps/binding files —
+nothing macOS-relevant. Credentials: clean (no secrets in tree or in the tarballs).
+
+**Verdict: Safe** — pin `@napi-rs/keyring@2.1.0` by exact version and lockfile
+integrity (`sha512-km9J3fom…`), keep `NAPI_RS_NATIVE_LIBRARY_PATH` out of the server's
+environment (or assert it is unset at startup), and record checklist item 5's result in
+`docs/plan/changelog.md` after the first `eff doctor` run.

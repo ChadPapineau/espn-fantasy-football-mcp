@@ -24,6 +24,8 @@ per-repo findings, rejected list, severity counts, unverifiable list) and
 `docs/research/02-prior-art-lessons.md` (two capability matrices, 13 working
 choices, 20 mistakes with symptoms, design deltas, API-knowledge pointers).
 
+**Addendum 2026-09-30:** focused audit of `@napi-rs/keyring` 2.1.0 added as 01 §30 (verdict Safe; checklist 1–4 pass, 5 is runtime). Clone: `…/vendor/Brooooooklyn__keyring-node` at v2.1.0; tarballs, attestations and the lockfile-only audit simulation in `…/eff-research/keyring/`.
+
 **Nothing left to do.** If re-opened: the clones and inventory reports are in
 the session scratchpad (`…/eff-research/vendor/`, `…/eff-research/inv/`,
 `…/eff-research/audit/`); they are not committed and will vanish with the
@@ -232,3 +234,16 @@ code. None handles espn_s2/SWID → nothing to add; verdicts cited from sibling.
     → sportsdata-entitlement.sportsdata.workers.dev; root-logger secret filter.
     `fastmcp>=0.4,<4`, no lockfile; direct deps at latest: 0. creds clean (doc
     GUID is an all-letters placeholder).
+
+### Focused dependency audit (coordinator request, 2026-09-30)
+31. @napi-rs/keyring 2.1.0 (npm) / Brooooooklyn/keyring-node `1635ed45` (tag v2.1.0
+    = npm gitHead = SLSA-attested commit) MIT 103★ — **S**. No install scripts on
+    main or 12 platform packages; all 13 packages SLSA v1 provenance-attested from
+    GitHub-hosted runners (run 34771608160), OIDC publish (`id-token: write`, no npm
+    token); loader requires only the platform package (Linux-only guarded
+    `execSync('ldd --version')`; `NAPI_RS_NATIVE_LIBRARY_PATH` env override);
+    darwin-arm64 binary links only Security/CoreFoundation/libiconv/libSystem, no
+    URL strings; Rust source uses keyring-core + platform stores only, unsafe = CF
+    FFI; crates baked in: keyring-core 1.0.0, apple-native-keyring-store 1.0.2,
+    security-framework 3.7.0, napi 3.12.4 — OSV 0; npm audit (lockfile-only sim) 0;
+    Cargo.lock not committed (re-check on every bump). Item 5 (prompt count) runtime only.
