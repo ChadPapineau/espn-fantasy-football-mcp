@@ -6,30 +6,18 @@ section per round) plus these notes. I own only those two paths.
 
 ## RESUME HERE
 
-- **State:** round 1 objections written to `docs/plan/adversarial-log.md`
-  (`## Round 1 — objections`: 20 objections — 1 blocking, 9 significant,
-  10 marginal; tension triage T-01…T-16; sibling rulings adopted listed in
-  §1.4; staked objection OBJ-01). Committed and pushed with this note.
-- **Waiting on:** the orchestrator to append `## Round 1 — defence` and
-  the plan-reviser's commits.
-- **Round 2 procedure:** `git pull --rebase origin main`; diff
-  `docs/plan/*` against `131ec10`; read the defence; open
-  `## Round 2 — verdicts and objections` with the verdict table
-  (withdrawn / conceded-by-defence / pressed, one line each); then new
-  objections only for what the revisions broke; say explicitly when the
-  remainder is marginal. Largest revisions to check if conceded: A1a
-  recorded-fixture rule (OBJ-01), `weight_espn` default (OBJ-02),
-  `premium_band` (OBJ-03), credential-check exemption (OBJ-04), single
-  store rule (OBJ-05), host-move story (OBJ-06), worker pool (OBJ-07),
-  `core` = 18 (OBJ-08), T-15 (f)–(h) per-source dataset files / ceilings /
-  session wording (OBJ-09), doctor rows + non-iCloud clone (OBJ-10).
-- **Also re-check in round 2:** the sibling log on `origin/main` of the
-  Yahoo repo — if a round 3 / closing verdict has landed there, carry any
-  new platform-agnostic ruling.
+- **State:** round 2 in progress. Pulled `784b1b9`; defence (§1.D–§1.F) and
+  `docs/plan/changelog.md` §R1 read; sibling log now has round 3 + closing
+  verdict (three nits: pointer length 42 vs "≤ 40"; `store prune` of
+  superseded ds files; `ATTACH ?mode=ro` URI is a build-time [U]).
+- **Next:** verify each ruling landed (diff `docs/plan/*` vs `131ec10`,
+  added lines extracted to the session scratchpad), check the reviser's
+  "narrow readings" (OBJ-01 no-probe-league case, `N_SIMS_MAX` unset,
+  `include: ["seeding_evidence"]`, OBJ-16 fixed cadence), then write
+  `## Round 2 — verdicts and objections` and, if the remainder is marginal,
+  `## Closing verdict` in the same push.
 - **Discipline:** explicit-path staging only; `git pull --rebase origin
-  main` before push; never force-push; verify HEAD == origin/main after
-  each push; WIP as `docs/scratch/devils-advocate.wip.patch` if torn down
-  mid-round.
+  main` before push; never force-push; verify HEAD == origin/main.
 
 ## Reading log
 
