@@ -214,6 +214,14 @@ development or testing before his review.**
     validated only on the probe league's settings (non-PPR, 4-pt passing
     TD), and the reference format's half-PPR, 5-pt-TD and −2 turnover
     items stay unverified.
+12. **For Chad to pass to the sibling Yahoo program — SQLite's
+    10-attachment limit applies to its per-source dataset layout too**
+    (adversarial round 2, OBJ-22; its own round 3 did not catch it).
+    SQLite allows 10 attached databases per connection and Node's bundled
+    build does not raise it, so a server that `ATTACH`es one file per
+    dataset source fails at the 11th ("too many attached databases" —
+    reproduced here by the orchestrator). This plan's fix: one read-only
+    connection per dataset file, no startup attach loop (plan `01` §5.5).
 
 ## Open items
 
