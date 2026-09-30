@@ -460,3 +460,158 @@ Not found: any first-person, dated report of an ESPN/Disney account suspended or
 
 **Mitigations that define the project:** personal use by the account owner on their own single league; read-mostly with writes off by default and confirmed per action; aggressive caching and hard request caps (tens of requests per day, not per minute); honest identification; no redistribution, resale or dataset-building; no model training on the data; secrets in the OS keychain, never in the repo or the client config; a `health` tool that says when the credential was last accepted. With those in place the exposure is one person's fantasy account, and the failure mode to design for is drift, not enforcement.
 
+---
+
+## E. Write endpoints — documented, not probed, and a recommendation
+
+**Nothing in this section was exercised by this research.** It is assembled from a community capture study that executed 21 requests against its author's own league on 2026-09-12 (S-JW; ten executed, eleven rejected, every lineup change reversed), ESPN's own client code as transcribed by S-SDM, and three community implementations (S-HEY `constants.ts`; `mcolen5050/FantasyFootballAutomation_public` `main.py` L111–130; `AbdulsaboorS/fantasybasketballbot` `espn_lineup.py` L37–163). All of it is [V-community].
+
+### E.1 Host, method, headers
+
+- `POST https://lm-api-writes.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leagues/{id}/transactions/` — same path family as reads, different host; `GET` on it → `405 HTTP_METHOD_NOT_SUPPORTED` (S-JW §1.1, S-SDM). S-PY v0.46.0 has no reference to the write host (S-JW §10).
+- Required: `Content-Type: application/json` and the **`espn_s2` cookie**. Everything else is optional per S-JW's variation probes (§2.2): the `SWID` cookie, the body's `memberId`, and the `x-fantasy-source: kona` / `x-fantasy-platform: kona-PROD` headers that the browser sends (community scripts send `x-fantasy-platform: espn-fantasy-web`, `x-fantasy-source: kona` — S-HEY `WRITE_HEADERS`, AbdulsaboorS L41–45). Two scripts assert `memberId` is required (mcolen5050, AbdulsaboorS L109); the capture study shows it is not — a discrepancy worth a note, not a dependency.
+
+### E.2 Payload shapes (as the community encodes them)
+
+Envelope (S-JW §2.1 capture; S-SDM transcription of `createTransaction`): `type` (`ROSTER` for lineup moves; `FREEAGENT`, `WAIVER`, `TRADE_PROPOSAL`, `TRADE_ACCEPT`, `TRADE_DECLINE`, `DRAFT` also exist), `teamId`, `scoringPeriodId`, `executionType` (`EXECUTE`; `CANCEL` withdraws a pending claim; `VALIDATE` → `400 Invalid Input.` — **there is no dry-run mode**), `items[]`, optional `memberId` (`{SWID}`), `bidAmount` (FAAB, `WAIVER` only), `isLeagueManager` / `isActingAsTeamOwner` / `skipTransactionCounters` (leave `false`), `comment`, `expirationDate`, `relatedTransactionId`. Items: lineup `{playerId, type: "LINEUP", fromLineupSlotId, toLineupSlotId}`; add `{playerId, type: "ADD", toTeamId}`; drop `{playerId, type: "DROP", fromTeamId}` (S-SDM). The success response echoes the envelope with `status: "EXECUTED"` (or `PENDING` for a waiver claim), a UUID `id`, and items expanded with `fromTeamId, toTeamId, isKeeper, overallPickNumber` (S-JW §2.3). `mRoster` and `mTransactions2` reflected the change within ~1.5 s (S-JW §9).
+
+### E.3 Rules and failure modes (S-JW §3–5, S-SDM)
+
+| Rule | Wire behaviour |
+|---|---|
+| One POST, many items, **atomic** | a batch containing any rejected item applies nothing |
+| Items must describe only slots that change | `fromLineupSlotId == toLineupSlotId` → `409 TRAN_ROSTER_SAME_SLOT` ("<player> is already in the RB slot") |
+| A player whose game has started is locked | `409 TRAN_LINEUP_LOCKED` ("Lineup transaction could not be completed, <player> is locked") |
+| Slot capacity | `409 TRAN_ROSTER_SLOT_LIMIT_EXCEEDED` ("Too many players in the WR slot (maximum 2)", `metaData: {"teamid": "1"}`) |
+| Writes target only the league's **current** `scoringPeriodId` | `409 TRAN_INVALID_SCORINGPERIOD_NOT_CURRENT` for next week and for week 18 alike |
+| Missing/invalid `espn_s2` | `401 AUTH_MISSING_CREDENTIALS` ("Unauthorized:  Credentials are missing.", two spaces) |
+| Malformed body / unknown enum | `400 {"messages": ["Invalid Input."]}` with **no** `details[]` |
+| Roster full, position limit, budget exceeded, drop of a non-owned player | `409` with a `TRAN_*` type — named by S-SDM (`TRAN_ROSTER_LIMIT_EXCEEDED*`, `TRAN_ROSTER_POSITION_LIMIT_EXCEEDED`), **not observed** by S-JW; [U] |
+| Authority | the **session** confers authority, not the body: a commissioner's `espn_s2` with `isLeagueManager: false` executed a lineup change on **another manager's team** (`200 EXECUTED`, S-JW §6.1, immediately reversed). Commissioner = `isLeagueCreator OR isLeagueManager` from `mNav` (§B.6). |
+| `X-Fantasy-Role` | read `NONE` on every write-host response, even the commissioner's — not an authority signal |
+
+### E.4 Recommendation
+
+**Do not ship a write module in v1.** If one is built later, it is a separate, opt-in module with these properties, each of which follows from a failure mode above:
+
+1. Off by default (`ESPN_FF_WRITES=off`), enabled per session; every write tool is absent from the tool list when off.
+2. **Lineup moves only** in the first version (`type: ROSTER`, `LINEUP` items). No add/drop, waiver claims or trades — those change the league's competitive state irreversibly (a waiver claim is `PENDING` and processes later; a drop cannot be undone if another team claims the player).
+3. **Two-step confirmation per action**: `propose_lineup` computes the diff from the current `mRoster` (only changed slots, never a no-op item), pre-flights `lineupLocked`, slot counts (`rosterSettings.lineupSlotCounts`) and eligibility (`eligibleSlots`), and returns a human-readable diff plus a one-time token; `execute_lineup(token)` sends exactly that diff with `scoringPeriodId` = the league's current period from the bootstrap payload, then **re-reads `mRoster` and reports the actual result** — the `EXECUTED` status is not trusted on its own.
+4. `teamId` is pinned to the team whose `owners[]` contains the stored `SWID`; any other target is refused client-side, because ESPN will not refuse it for a commissioner. `isLeagueManager` is never sent as `true`.
+5. Hard cap (e.g. 5 writes per day), an anonymized local journal of every request/response, and no writes inside the 15 minutes before any kickoff of a player involved.
+6. Every `TRAN_*` type is surfaced verbatim so an unknown code is visible, never mapped to "try again".
+
+**Account-risk delta versus read-only.** A read looks like a page view and, if ESPN objects, costs at most the account. A write changes league state under the account's identity: a bug or a prompt-injected instruction could bench a starter, and with a commissioner's cookie could alter *another* team — which is precisely what the Fair Play rules police ("team cancellation and expulsion", S-FAIR) and what the rest of the league would see. Writes also live on a separately named host whose monitoring is unknown ([U]). The delta is from "possible terms exposure" to "possible competitive-integrity incident with a human audience", which is why the default is off and the first version is lineup-only with a confirmation step.
+
+---
+
+## F. API-drift resilience — design input
+
+### F.1 What the community has seen, with dates
+
+| When | Change | Evidence |
+|---|---|---|
+| Feb 2019 | v2 → v3 API; every wrapper rewritten | S-JS README "ESPN API Changes" [V-community] |
+| by 2019-02-01 | ESPN deleted pre-2017 data (box scores gone); ≤2017 seasons moved to `leagueHistory/{id}?seasonId=` returning an array | S-JS README "ESPN Databases and Data Storage"; S-STM 2019-07-27 [V-community] |
+| 2019-09-10 | "espn_s2 cookie no longer exists?" (mkreiser #133) — a user could not find it; no rename occurred: the names `espn_s2` / `SWID` are unchanged in every 2026 source | [V-community] |
+| Sep 2020 | reCAPTCHA on the Disney login API; password automation dead | cwendt94 #128 [V-community] |
+| Apr 2024 | read host → `lm-api-reads.fantasy.espn.com`; the old host began returning 403, now 302s to a marketing page | cwendt94 #539/#540; S-STM; S-PSR [V-community]; P02 [V-observed] |
+| ≤ 2026-09 | read/write host split (`lm-api-writes`) — invisible to read-only wrappers | S-JW, S-SDM, S-HEY [V-community] |
+| 2020 → 2026 | `status.finalScoringPeriod` 16 → 17 with the 17-game NFL season (`latestScoringPeriod` reached 18 in 2020) — constants like "18 = end of season" in S-JS README are stale | P01 vs P04 [V-observed] |
+| 2026-09-30 | `site.api.espn.com` news endpoint (still hard-coded in S-PY) answers 403 to scripted clients; `www.espn.com` pages return empty 202s | P26, ToS fetches [V-observed] |
+| undated | a dozen view names circulating in blog posts that do nothing (`player_wl`, `mLiveScoringDetail`, `mLeagueSettings`, …); S-PY's own TODOs on duplicate stat ids (22/3, 40/24, 61/42, 53/41, 187/120, 206/205) suggest ids were added over time; 103/104 disagree between wrappers; `TRADE_ACCEPT` vs `TRADE_ACCEPTED` | S-SDM, S-PY `constant.py` [V-community] |
+
+**Cadence:** one breaking transport change roughly every 2–5 years (2019, 2024), unannounced; additive field/enum changes continuously and silently; view names never error when wrong. That is what the design below is sized for.
+
+### F.2 Resilience design
+
+- **Schemas.** One zod schema per view (and per shared entity: `team`, `rosterEntry`, `player`, `stats`, `scheduleItem`, `settings.*`, `status`), `.passthrough()` on every object so unknown fields flow through untouched; **required** fields are only those a tool actually reads, and a missing required field is a **hard failure** (`SCHEMA_DRIFT` error naming the JSON path and the view) — never a silent default. Enum fields are `z.string()` with a known-value set checked separately: an unknown value is accepted, counted and logged, except for `statSourceId`/`statSplitTypeId`, where an unknown value fails the stat entry (it changes meaning). Skeleton detection: a league response without the keys the requested views should add (e.g. `mRoster` without `teams[].roster`) is treated as drift, because ESPN returns 200 for unknown views (P28).
+- **Fixtures.** The anonymized bodies of P04–P28 are the seed corpus (one file per view, plus the three error bodies); `fixtures/manifest.json` records, per view, the top-level key set, per-entity key sets, observed enum values, array lengths and the server date. Contract tests: every schema parses its fixture; every "required" set is a subset of the manifest's observed keys; the error-shape parser accepts the 400/401/404 fixtures.
+- **Drift detector.** A daily job (also runnable as `health --probe`) makes **one** request — `mSettings` (plus `mNav`, same request) on the public fixture league — and diffs top-level keys, `settings.*`/`status` key sets and enum values against the manifest. Any difference fails loudly with an added/removed diff written to the health state and to stderr; the host is also checked (a 3xx or non-JSON body = "host moved" alert). It **never auto-adapts**; a human updates the manifest after reading the diff.
+- **`health` / `version` tool** reports: API host in use; last successful probe (time, status); schema/manifest version (hash); `cookiesPresent`, `cookieAgeDays`, `lastAcceptedAt`, `lastRejectedAt` (booleans and timestamps only); cache state (entries, hit ratio, oldest entry, per-view TTLs); rate-limiter state (tokens, breaker open?); the current drift diff if any; the read-only/writes-off flag.
+- **Graceful degradation.**
+
+| Tool group | Needs | Works without cookies on a public league | Works with a private league and cookies | Degrades to |
+|---|---|---|---|---|
+| settings, teams, standings, schedule, draft | `mSettings`, `mTeam`, `mStandings`, `mMatchup`, `mDraftDetail` | yes (P04, P05, P16) | yes | — |
+| rosters, box scores, matchup live totals | `mRoster`, `mBoxscore`, `mMatchupScore` | yes (P05–P07) | yes | without `mBoxscore`: totals only from `mMatchupScore` |
+| free agents, player search, projections, outlooks | `kona_player_info`, `kona_playercard` | yes (P09, P21) | yes | without `kona_playercard`: no weekly actuals |
+| NFL schedule, byes, player universe | `proTeamSchedules_wl`, `players_wl` | yes, no league id (P20, P23) | yes | — |
+| transactions, pending claims, activity feed, live scoring | `mTransactions2`, `mPendingTransactions`, `/communication/`, `mLiveScoring` | **no** (empty / 401 / stripped) | yes [V-community] | tool reports "requires stored cookies" |
+| player news articles | `site.api.espn.com` news | no (403) | no | `seasonOutlook` / `outlooksByWeek` from league views |
+| seasons ≤ 2017 | `leagueHistory` | [V-community] | [V-community] | tool refuses seasons before 2018 unless the array route is implemented and tested |
+
+### F.3 Fixture-anonymization procedure
+
+Run by a script over raw captures kept **outside** the repo; only the output is committed.
+
+1. **Strip or replace** — league `id` → `0`; `settings.name` → `"League"`; `divisions[].name` → `"Division <n>"`; `teams[].name/abbrev/location/nickname/logo` → `"Team <n>"`, `"T<n>"`, `""`, `""`, `""`; `members[].displayName/firstName/lastName` → `"Member <n>"`, `""`, `""`; `notificationSettings` removed; every member GUID (`members[].id`, `teams[].owners[]`, `teams[].primaryOwner`, `draftDetail.picks[].memberId`, `transactions[].memberId`) → a deterministic fake built from first-appearance order (`{00000000-0000-4000-8000-0000000000<nn>}`), one mapping applied everywhere; `status.lastUpdateInfo.clientAddress` → `"0.0.0.0"`; `tradeBlock`, `draftStrategy` → `{}`; any message-board/activity text removed; `player.seasonOutlook` and `outlooks.outlooksByWeek[*]` → `"[outlook <length> chars]"` (keeps the shape, avoids republishing editorial text, shrinks the file); `logo` URLs → `""`. Player names, ids and pro-team ids stay (public entities). Timestamps stay (they are league-level, not personal).
+2. **Determinism** — stable key order (sorted), arrays sorted by `id` where an `id` exists, the GUID map by first appearance, a fixed `capturedAt` recorded in the manifest instead of the `x-fantasy-server-time` header; running the script twice on the same input yields byte-identical output.
+3. **Verification** — a test greps every committed fixture for: brace-GUID patterns not in the fake range, IPv4 addresses, the real league id, and every string in a local, uncommitted denylist of the real team/member names captured at anonymization time; any hit fails CI.
+4. **Manifest** — generated *after* anonymization from the committed fixtures, so the detector compares against exactly what the tests use.
+
+---
+
+## G. Verified / unverified ledger and probe log
+
+### G.1 Unverified, by name
+
+1. The read host's 401 body for a **private league** (community: `AUTH_LEAGUE_NOT_VISIBLE`); both published example ids tried were 404.
+2. `espn_s2` lifetime (no `Expires` attribute observed anywhere); whether a new login reissues it; whether log-out, "log out everywhere" or a password change invalidates it.
+3. Whether ESPN accepts a brace-less `SWID` or a URL-decoded `espn_s2`.
+4. The `leagueHistory` array response shape for seasons ≤ 2017 (the probe league starts in 2018).
+5. What `mLiveScoring` returns with cookies; whether anonymous callers ever see a public league's `mTransactions2`/`mPendingTransactions`; the field names of `pendingTransactions[]`.
+6. `forTeamId` / `rosterForTeamId` semantics; `matchupPeriodId` as a URL parameter; segments other than `0`; the effect of `mTopPerformers`.
+7. `statSplitTypeId = 2`; the id format of weekly-actual `stats[]` entries; the `rankSourceId` → source map; the meaning of the `ratings` key `"0"`.
+8. The non-FAAB `acquisitionSettings.acquisitionType` value(s) and the meaning of `waiverOrderReset`; the integers in `status.waiverProcessStatus`; further values of `scoringType`, `matchupTieRule`, `playoffTierType`, `lineupLocktimeType`, roster-entry `acquisitionType`/`status`, and `injuryStatus` (`SUSPENSION`).
+9. Stat ids 103 vs 104 (swapped between the Python and JS maps); `TRADE_ACCEPT` vs `TRADE_ACCEPTED`.
+10. `x-fantasy-role` values other than `NONE`; whether `X-Fantasy-Last-Update-League` appears on reads; `polling-interval` units; whether `If-None-Match` yields 304.
+11. When `rosterForMatchupPeriod` is populated; when `lineupLocked` flips; the semantics of `statsOfficial` and `validForLocking`.
+12. Whether `limit` on the league path also requires a sort (every probe with `limit` included one).
+13. The whole write surface (§E): never probed here; in particular the 409 types for budget-exceeded, position-limit, roster-full and drop-not-owned; the `CANCEL` and trade payloads; `isLeagueManager: true`; whether the write host is monitored differently.
+14. Keychain behaviour between the `security` CLI and `@napi-rs/keyring` (partition lists; first-read prompt for the MCP server binary).
+15. ESPN's fantasy-specific "Legal Restrictions" / "Terms & Conditions" text (pages bot-gated today).
+16. `fan.api.espn.com` as a login probe; the filter keys `filterRanksForScoringPeriodIds`, `filterRanksForSlotIds`, `filterProTeamIds`, `filterInjured`.
+
+### G.2 Probe log
+
+All `GET`, unauthenticated, no cookies, ≥ 1.3 s apart, 2026-09-30 UTC. `User-Agent` = a desktop Chrome string except P30 (curl default). `R` = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl`; `L` = `R/seasons/2026/segments/0/leagues/[league-id]`. The league id is the public example in ffscrapr's ESPN vignette; the two other ids are the wiki's and the JS README's example ids (both 404 today).
+
+| # | time | URL | status | bytes | top-level keys / note |
+|---|------|-----|--------|-------|-----------------------|
+| 01 | 03:26:52 | `R/seasons/2020/segments/0/leagues/[league-id]?view=mSettings` | 200 | 9,164 | draftDetail, gameId, id, scoringPeriodId, seasonId, segmentId, settings, status |
+| 02 | 03:26:53 | `https://fantasy.espn.com/apis/v3/games/ffl/seasons/2020/segments/0/leagues/[league-id]?view=mSettings` | 302 | 13 | `Location: https://www.espn.com/fantasy/`; body "Redirecting", text/plain |
+| 03 | 03:26:55 | `R/leagueHistory/[league-id]?seasonId=2020&view=mSettings` | 404 | 150 | messages, details → `GENERAL_NOT_FOUND` |
+| 04 | 03:26:56 | `L?view=mSettings` | 200 | 9,004 | as 01; `status.currentMatchupPeriod` 4, `latestScoringPeriod` 4, `finalScoringPeriod` 17, `previousSeasons` 2018–2025 |
+| 05 | 03:29:05 | `L?view=mTeam&view=mRoster&view=mMatchup&view=mSettings&view=mStandings` | 200 | 3,162,832 | + members, schedule, teams; `x-fantasy-filter-player-count: 951` |
+| 06 | 03:29:06 | `L?view=mMatchupScore&scoringPeriodId=4` | 200 | 212,878 | schedule (75); current rows carry `totalPointsLive`, `totalProjectedPointsLive`, `winProbability`, `rosterForCurrentScoringPeriod` |
+| 07 | 03:29:08 | `L?view=mBoxscore&scoringPeriodId=4` | 200 | 324,669 | schedule + settings + teams; rows lack `winner`/`playoffTierType` |
+| 08 | 03:29:10 | `L?view=mScoreboard&scoringPeriodId=4` | 200 | 394,829 | draftDetail, id, schedule, settings, status, teams; rows lack `matchupPeriodId` |
+| 09 | 03:29:12 | `L?view=kona_player_info&scoringPeriodId=4` + filter (FREEAGENT/WAIVERS, slot 2, limit 5, sortPercOwned, sortDraftRanks) | 200 | 67,400 | players (5), positionAgainstOpponent; count header 196 |
+| 10 | 03:29:13 | `L?view=mPendingTransactions` | 200 | 964 | pendingTransactions: [] |
+| 11 | 03:29:15 | `L?view=mTransactions2&scoringPeriodId=4` + filter (FREEAGENT, WAIVER, WAIVER_ERROR, TRADE_ACCEPT) | 200 | 1,067 | transactions: []; `x-fantasy-filter-transaction-count: 0` |
+| 12 | 03:29:16 | `L?view=mNav` | 200 | 5,300 | members (+isLeagueCreator, isLeagueManager), teams (slim), settings (subset) |
+| 13 | 03:30:37 | `L?view=mStatus` | 200 | 1,049 | status (+lastUpdateInfo{clientAddress, platform, source}) |
+| 14 | 03:30:38 | `L?view=mLiveScoring&scoringPeriodId=4` | 200 | 2,632 | schedule rows contain only `matchupPeriodId` |
+| 15 | 03:30:40 | `L?view=mPositionalRatings&scoringPeriodId=4` | 200 | 9,381 | positionAgainstOpponent.positionalRatings{1,2,3,4,5,16} × 32 opponents |
+| 16 | 03:30:41 | `L?view=mDraftDetail` | 200 | 42,389 | draftDetail{completeDate, drafted, inProgress, picks[150]} + settings |
+| 17 | 03:30:43 | `L?view=mSchedule` | 200 | 939 | skeleton only |
+| 18 | 03:30:44 | `L?view=modular` | 200 | 939 | skeleton only |
+| 19 | 03:30:46 | `R/seasons/2026/players?view=players_wl` + `{"filterActive":{"value":true},"limit":5}` | 400 | 284 | `FILTER_LIMIT_MISSING_SORT` |
+| 20 | 03:30:47 | `R/seasons/2026?view=proTeamSchedules_wl` | 200 | 109,067 | display, settings.proTeams[33]; `cache-control: max-age=300`, CloudFront hit |
+| 21 | 03:32:51 | `L?view=kona_playercard` + `filterIds` (1 id), `filterStatsForTopScoringPeriodIds` | 200 | 13,114 | players[1]: seasonOutlook (739 chars), outlooks.outlooksByWeek{2,3,4}, lastNewsDate, transactions, waiverDate, weekly actual splits |
+| 22 | 03:32:53 | `R/seasons/2026/segments/0/leagues/[wiki-example-id]?view=mSettings` | 404 | 150 | `GENERAL_NOT_FOUND` |
+| 23 | 03:32:54 | `R/seasons/2026/players?view=players_wl` + `{"filterActive":{"value":true}}` | 200 | 663,713 | JSON array, 2,663 players; count header 2663 |
+| 24 | 03:32:57 | `L?view=kona_player_info&scoringPeriodId=4` + `{"players":{"limit":5000,"offset":0,"sortPercOwned":{…}}}` | 200 | 5,660,652 | players[951] = count header 951 (no ceiling hit) |
+| 25 | 03:32:58 | as 09 with `offset: 5` | 200 | 66,078 | 5 players, zero overlap with 09; count header 196 |
+| 26 | 03:33:00 | `https://site.api.espn.com/apis/fantasy/v3/games/ffl/news/players?playerId=[player-id]` | 403 | 442 | HTML "Access Denied" (edge bot block) |
+| 27 | 03:33:01 | `L/communication/?view=kona_league_communication` + topics filter | 401 | 304 | `AUTH_COMMUNICATION_NOT_VISIBLE`; `polling-interval: 10` |
+| 28 | 03:33:03 | `L?view=mBogusViewName` | 200 | 2,142 | skeleton: gameId, id, members, scoringPeriodId, seasonId, segmentId, settings{name}, status, teams{abbrev, id, owners} |
+| 29 | 03:34:37 | `R/seasons/2026/segments/0/leagues/[readme-example-id]?view=mSettings` | 404 | 150 | `GENERAL_NOT_FOUND` |
+| 30 | 03:34:39 | `L?view=mSettings`, curl default User-Agent | 200 | 9,004 | byte-identical to 04, same weak ETag |
+
+Headers common to every 200 from the read host: `content-type: application/json;charset=utf-8`, weak `etag`, `cache-control: must-revalidate`, `expires: -1`, `x-fantasy-server-time`, `x-fantasy-role: NONE`, `x-fantasy-filter-player-count`, CloudFront `via`/`x-cache`, permissive CORS. **No rate-limit or `Retry-After` header on any response.**
+
+Non-API page fetches made for §D (not probes, no league data): `www.espn.com` rules/terms pages ×3 and `www.espn.com/fantasy/football/` → `202`, 0 bytes, `x-cache: Error from cloudfront`; `espn.co.uk` rules page → `202`, 0 bytes; `support.espn.com` Fair Play article → 200; `disneytermsofuse.com/english/` → 200 (112 KB).
+
+Raw probe bodies and headers were kept only in the session scratchpad outside the repo and are not committed; the anonymized shapes above and in §A–§B are the record.

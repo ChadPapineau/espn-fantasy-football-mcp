@@ -7,14 +7,11 @@ league), ≥1 s apart, everything anonymized before it lands here.
 
 ## RESUME HERE
 
-- Status (2026-09-30 03:40Z): **research complete, probe budget exhausted (30/30)**;
-  writing `docs/research/03-espn-api.md` section by section. If this file is the
-  latest commit and `03-espn-api.md` is absent or partial, resume by writing the
-  missing sections from the notes below and the raw probe bodies in the scratchpad
-  (`.../scratchpad/espn-specialist/probes/b01..b30.json`, headers `h*.txt`;
-  scratchpad is outside the repo and may be gone — the notes below are sufficient).
-- Do NOT run more probes; the budget is spent. Everything needed is recorded here.
-- Sections landed in `03-espn-api.md`: header, sources, capability matrix, A, B, C, D (committed). Next: E, F, G.
+- Status (2026-09-30 ~03:55Z): **COMPLETE.** `docs/research/03-espn-api.md` has every section
+  (header, sources, capability matrix, A–G, unverified ledger, 30-row probe log) and is pushed.
+  Probe budget 30/30 spent — do not probe again. No WIP patch exists (every checkpoint was a
+  clean commit). Nothing outstanding; if resumed, only re-read §G.1 for follow-ups that need
+  cookies (they belong to a later, credentialed phase, not this agent).
 
 ## Sources gathered (all read statically; nothing executed)
 
