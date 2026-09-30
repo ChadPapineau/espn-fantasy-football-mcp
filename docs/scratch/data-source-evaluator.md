@@ -6,12 +6,21 @@ Brief: `docs/scratch/briefs/data-source-evaluator.md`. Deliverable:
 
 ## RESUME HERE
 
-- Status (2026-09-30 ~04:05Z): reading done (03-espn-api.md; sibling
-  `yahoo-fantasy-football-mcp@d10835c` 04 + scratch). Probes 1–17 done; raw
-  counts below. Web evidence (accuracy, cadence, live latency) in flight.
-- Next: write `docs/research/04-data-sources.md` sections A–H from the notes
-  below; one more kona limit-5 re-sample near the end for intra-day cadence.
-- Deliverable not yet created; nothing in the tree besides this file.
+**Status: COMPLETE (2026-09-30 ~04:20Z).** Deliverable `docs/research/04-data-sources.md`
+(sections A–H) is on `origin/main`; this file carries the probe log (28 rows) and
+raw counts. Nothing outstanding for this agent. No wip patch exists (the document
+was written and committed whole).
+
+If reopened, the follow-ups are §G of the deliverable; the three that most help
+the plan: (1) run the retrospective ESPN-projection backtest from the embedded
+2025 weekly splits (§B.1.1 step 1) to settle whether they are as-of-kickoff;
+(2) observe `ownership.date` and `lastNewsDate` on a game day to fix the ESPN
+refresh cadence; (3) map `rankSourceId` 3/5/6/7/9/10/11/12 to ESPN's eight
+rankers.
+
+**Owned paths:** `docs/research/04-data-sources.md`, `docs/scratch/data-source-evaluator.md`.
+Nothing else was touched. `docs/scratch/repo-security-auditor.md` was dirty in
+the shared tree at times (another agent's) and was left alone.
 
 ## Request budget (≤ 40)
 
@@ -31,6 +40,19 @@ Brief: `docs/scratch/briefs/data-source-evaluator.md`. Deliverable:
 | 15 | GET | api.github.com/repos/dynastyprocess/data/license | 200 | 49,370 | GPL-3.0 (repo LICENSE) |
 | 16 | GET | api.github.com/repos/dynastyprocess/data/commits?path=files/db_playerids.csv | 200 | 10,165 | weekly Fri ~05:00Z: 09-25, 09-18, 09-11 |
 | 17 | GET | api.sleeper.com/stats/nfl/2026/3?…position[]=RB | 200 | 24,920 | 177 items, company sportradar, category stat, last_modified epoch; s-maxage=300 |
+| 18 | WebFetch | fantasyfootballanalytics.net/2026/08/we-analyzed-12-seasons-of-fantasy-football-projections… | 200 | — | seasonal accuracy 2014–2025, 11 sources; ESPN QB last (86.7 MAE last 3 yrs), RB t-5th 53.4, WR 3rd 42.0, TE t-4th 31.9 |
+| 19 | WebFetch | fantasyfootballanalytics.net/which-projections-are-most-accurate | 200 | — | same study, live page updated May 2026 |
+| 20 | WebFetch | fantasypros.com/2026/01/2025-fantasy-football-rankings-most-accurate-experts/ | 200 | — | rankings accuracy wks 1–17, 159+ experts; top 10 has no ESPN ranker; ESPN site projections not evaluated |
+| 21 | WebFetch | espn.com/fantasy/football/story/_/id/50005325/… (Clay playbook wk 3, 2026-09-24) | 200 | — | "projections will always be updated inside the game leading up to kickoff" |
+| 22 | WebFetch | github.com/Lolindhir/fantasy-app/issues/669 | 200 | — | "Any claim such as 'ESPN updates within N minutes' would currently be unsupported" |
+| 23 | WebFetch | support.sleeper.com/en/articles/2441282-stat-corrections | 200 | — | "update stats throughout live games"; corrections up to Thursday |
+| 24 | WebFetch | espn.com/fantasy/football/story/_/page/FFWeeklyPlayerRank26-49804068/… (wk 4 RB ranks) | 200 | — | "published every Tuesday … updated throughout the week"; 8 authors (Bowen, Clay, Cockcroft, Dopp, Karabell, Loza, Moody, Yates); 2026-09-29 09:56 ET |
+| 25 | WebFetch | support.espn.com/hc/en-us/articles/360000099732-Scoring-Stat-Corrections | 200 | — | updated 2026-08-18: "During the game, scores/stats are updated as they are received"; corrections "within minutes", "up to seven (7) days" |
+| 26 | WebFetch | fantasyfootballanalytics.net/which-dfs-projections-are-most-accurate | 200 | — | weekly accuracy 2015–2025, 9 sources; ESPN QB 6.38/6.44 (bottom), RB 5.23/5.31, WR 5.05/5.18, TE 3.85 (best) / 3.71 |
+| 27 | WebFetch | fantasyfootballanalytics.net/2026/09/we-analyzed-11-seasons-of-dfs-projections… | 200 | — | 2026-09-09, Kartes; "FFA Average … outperformed individual sources in 63% of head-to-head comparisons"; ESPN TE CV 35.50% worst |
+| 28 | GET | lm-api-reads…/leaguedefaults/3?view=kona_player_info&scoringPeriodId=4 + limit 5 sortPercOwned | 200 | 235,344 | 04:13:50Z re-sample: wk4/wk5/ROS projections, percentOwned, ownership.date (03:30Z) and lastNewsDate identical to #11 for all 5; max-age=5 |
+
+Total: 28 HTTP requests (17 curl + 11 WebFetch). Web searches (8) not counted. Sample-size breach: #11 at 11.6 MB (disclosed in the deliverable §H).
 
 ## Notes (raw counts, observed 2026-09-30 03:59–04:02Z)
 
@@ -52,3 +74,15 @@ Brief: `docs/scratch/briefs/data-source-evaluator.md`. Deliverable:
 **Sleeper stats wk3** (undocumented `api.sleeper.com/stats/nfl/2026/3`): 177 RB items, company sportradar, category stat, fields game_id/date/last_modified/updated_at/status/opponent/week_shard + stats (off_snp, tm_off_snp, rec_rz_tgt, rush_rz_att, rec_air_yd, pos_rank_*, pts_*), Gibbs 41.4 ppr. wk4 empty with s-maxage=4 (live week), wk3 s-maxage=300.
 
 **ESPN site scoreboard** (bare): week 3, 16 events, status.type {state post, completed}, clock/period, linescores, competitors.score, leaders; max-age=4; no odds/weather keys on completed games.
+
+**Local follow-ups (no HTTP)**: TBD games = 24 (wk16 4, wk17 4, wk18 16), ESPN placeholder date 08:01Z vs nflverse 13:00 ET (−599 min). Weeks 19–22 projections = the 25 K only. (1,0,2026,0) == sum of weekly (1,1) wk4–18 within 0.2 for 272/299 → "season" split is ROS. Split 2 / ROS ratio min 0.008, median 1.137, max 4.24 → not ROS-derived; looks like a frozen preseason full-season projection [U]. (1,0,2025,0) == sum 2025 weeklies only 5/275; (0,0,2025,0) == sum 2025 weekly actuals 275/275. ownership.date min 01:30:21Z, max 03:30:19Z (two snapshots, 2 h apart). Latest lastNewsDate 02:52:57Z.
+
+**Web evidence**: see probe rows 18–27. ESPN projections are Mike Clay's ("Mike Clay's projections power the ESPN Fantasy Football game" — search snippet of an ESPN page, [V-community]).
+
+## Findings for the orchestrator
+
+1. ESPN-native projections: real, continuously revised, every week 1–18 populated at once, expressed in the league's scoring; independent weekly accuracy (FFA, 2015–2025): best of 9 at TE, worst at QB, lower-middle RB/WR; averaging sources wins 63% of head-to-heads → grade Secondary, ensemble with own model, display labelled. No study covers this league's scoring → backtest design in 04 §B.1.1.
+2. Crosswalk is a lookup: nflverse `espn_id` 497/500 active QB/RB/WR/TE (2026 rookies 75/77); 100% of ≥1%-owned ESPN players map; DP adds 0 (and is GPL-3.0); Sleeper 25%. Name matcher only for a 3-player residue.
+3. `proTeamSchedules_wl` = nflverse `games.csv` exactly (byes 32/32, game ids 272/272 via `schedules.espn`, kickoffs 248/248 non-TBD); `statsOfficial` = final (48), `validForLocking` = kickoff known (248).
+4. Live scoring: ESPN-native only real option ("updated as they are received"); Sleeper undocumented stats + ESPN site scoreboard as signals; nflverse post-game.
+5. Licensing: Disney ToU §2.B.viii (no commercial use) is the binding constraint; Sleeper/Open-Meteo swappable; DP not needed.

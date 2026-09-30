@@ -116,7 +116,7 @@ ESPN Fan Support, *Scoring & Stat Corrections* (updated 2026-08-18) [V-docs]: "D
 
 #### B.1.8 Intra-day drift check (P28)
 
-See §H row 28: a second 5-player pull ~20 minutes after P11 to record whether `appliedTotal` (weeks 4 and 5) or `ownership.date` moved on a quiet Tuesday night. Result recorded in that row and in `docs/scratch/data-source-evaluator.md`.
+A second pull of the top 5 players at 04:13:50Z, 14.5 minutes after P11 [V-observed P28]: **nothing moved** — week-4 and week-5 `appliedTotal`, the rest-of-season figure, `percentOwned`, `ownership.date` (still the 03:30Z snapshot, so no new snapshot inside 43 minutes; the next is expected at 05:30Z if the two-hour rhythm holds) and `lastNewsDate` were identical to the decimal for all five (Gibbs 26.18133064 / 27.41409005 / 365.71296411; Smith-Njigba 20.97477357 / 21.18377858 / 292.97042859; and so on), under a fresh weak ETag. Together with the sibling's Gibbs 26.2 seven hours earlier, projections on a quiet Tuesday night are static; the `max-age=5` header is ESPN's readiness to change them, not evidence that they do. The server should therefore cache the player pool by *event* (a `lastNewsDate` or `ownership.date` change, an injury-status change, a kickoff window) rather than by a short fixed TTL — 03 §D.3's 60-minute free-agent TTL is conservative, not risky, outside game windows.
 
 #### B.1.9 What remains unverified about ESPN-native data
 
@@ -301,6 +301,6 @@ Week boundary tonight: nflverse stats have weeks 1–3; `roster_weekly` has week
 | 25 | ~04:12 | `support.espn.com/hc/en-us/articles/360000099732-Scoring-Stat-Corrections` (WebFetch) | 200 | — | updated 2026-08-18; quotes in §B.1.7 |
 | 26 | ~04:12 | `fantasyfootballanalytics.net/which-dfs-projections-are-most-accurate` (WebFetch) | 200 | — | weekly accuracy, updated April 2026 |
 | 27 | ~04:12 | `fantasyfootballanalytics.net/2026/09/we-analyzed-11-seasons-of-dfs-projections-heres-what-we-found.html` (WebFetch) | 200 | — | weekly study, 2026-09-09 |
-| 28 | see scratch | `R/seasons/2026/segments/0/leaguedefaults/3?view=kona_player_info&scoringPeriodId=4` + `limit 5` re-sample | — | — | intra-day drift check (§B.1.8); result recorded in `docs/scratch/data-source-evaluator.md` and below once run |
+| 28 | 04:13:50 | `R/seasons/2026/segments/0/leaguedefaults/3?view=kona_player_info&scoringPeriodId=4` + `{"players":{"limit":5,"offset":0,"sortPercOwned":{…}}}` | 200 | 235,344 | intra-day drift check (§B.1.8): all projections, ownership (snapshot still 03:30Z) and `lastNewsDate` identical to P11 for all 5; `max-age=5`; new weak ETag |
 
-Web *searches* (not fetches of a provider) are not counted: six queries on accuracy studies, ESPN cadence, ESPN live scoring, Sleeper stats, ESPN projection authorship. Raw bodies were kept only in the session scratchpad outside the repo; the counts above are the record.
+Web *searches* (not fetches of a provider) are not counted: eight queries on accuracy studies, ESPN cadence, ESPN live scoring, Sleeper stats, ESPN projection authorship, weekly-accuracy studies and ESPN stat-correction policy. Raw bodies were kept only in the session scratchpad outside the repo; the counts above are the record.
