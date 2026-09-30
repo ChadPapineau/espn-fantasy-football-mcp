@@ -241,9 +241,10 @@ These bind every tool the product planner defines (plans 07–10). They are enfo
 | ESPN-native estimates, labelled | `espn_get_projections` (ESPN's own numbers, `meta.estimate: false`, `meta.source: ["espn:projection"]`) | provider; the label says whose number it is | as above |
 | Our analytics | `espn_project_players`, `espn_analyze_lineup` | domain; `meta.estimate: true`; `data.inputs[]` lists ESPN's projection as one input (D15) | `readOnlyHint: true`, `idempotentHint: false`, `openWorldHint: false` |
 | External text | `espn_get_news`, `espn_get_player_outlook` | RSS / ESPN editorial; all text `untrusted_text` | `readOnlyHint: true`, `openWorldHint: true` |
+| Dataset reads (local store: nflverse and other ingested sources) | `espn_get_player_usage`, `espn_get_injuries`, `espn_get_schedule`, `espn_get_depth_chart`, `espn_get_defense_profile` (plan 07 D1–D5) | the per-source dataset files (§5.5); a tool whose own catalog entry also makes an ESPN request says so in that entry — `espn_get_injuries` (ESPN's injury enum, from the roster/pool cache or one `kona_player_info` request), `espn_get_schedule` (the keyless `proTeamSchedules_wl` view when the store is empty) and `espn_get_defense_profile` (`mPositionalRatings`) do | `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: false` — `openWorldHint: true` kept only for a tool whose catalog entry makes an ESPN request (plan 07 D2, D3, D5) |
 | Local-store write | `espn_record_recommendation`, `espn_prepare_*` (writes phase), `espn_cancel_prepared` | domain (a journal row, the gate key, a notification); **no ESPN write** | `readOnlyHint: false`, `destructiveHint: false`, `openWorldHint: false`, `idempotentHint` per tool (sib ADV OBJ-19 conceded the `readOnlyHint: true` mislabel on `prepare`; T-04) |
 | Write — commit (writes phase) | `espn_commit_lineup` | provider write | `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: true`, `openWorldHint: true` |
-| Ops | `espn_get_status` | store + auth state + drift state | `readOnlyHint: true`, `openWorldHint: false` |
+| Ops (local reads) | `espn_get_status`, `espn_list_recommendations` | store + auth state + drift state; the recommendation log (a local read) | `readOnlyHint: true`, `openWorldHint: false` |
 
 Annotations are hints to the client UI, not our security boundary (plan 02 is) [V-sib 01 §4.1].
 

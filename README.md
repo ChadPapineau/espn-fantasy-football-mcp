@@ -641,9 +641,10 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 | **LW** | local-store write (the recommendation log, a prepared write) — no ESPN write | false | false | per tool | false |
 | **CM** | commit (an ESPN write) | false | true | true | true |
 | **OP** | ops / local store read | true | — | — | false |
-| **RO†** | read-only; family not named in the catalog | true | — | — | — |
+| **DS** | dataset reads (local store: nflverse and other ingested sources) | true | — | true | false |
+| **DS+E** | a dataset read whose catalog entry also makes an ESPN request | true | — | true | true |
 
-† The catalog does not assign an annotation family to the read-only external-data tools (`espn_get_player_usage`, `espn_get_injuries`, `espn_get_schedule`, `espn_get_depth_chart`, `espn_get_defense_profile`) or to `espn_list_recommendations`. They are read-only; their exact hints are settled when the tools are defined. This README does not invent them.
+`espn_get_player_usage` and `espn_get_depth_chart` read only the local store (**DS**). `espn_get_injuries` (ESPN's injury enum beside the official report), `espn_get_schedule` (ESPN's keyless schedule view when the store is empty) and `espn_get_defense_profile` (ESPN's positional ratings) also make an ESPN request per their catalog entries, so they keep `openWorldHint: true` (**DS+E**). `espn_list_recommendations` reads the recommendation log and is in the ops / local-read family (**OP**).
 
 <details>
 <summary><strong>League and discovery</strong> (A1–A7)</summary>
@@ -687,11 +688,11 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 
 | Tool | Purpose | Key inputs | Output summary | Fam. | Prio. | Status |
 |---|---|---|---|---|---|---|
-| `espn_get_player_usage` | Opportunity and efficiency inputs | `players` (selector), `window?` 1–17, `include_prior_season?` | `trailing` (snap, target, carry and red-zone shares, change points, expected-points gap), per-game rows at `full`, `role_confidence_games`, `data_gaps[]`, `routes_proxy` named as a proxy | RO† | P1 | 📋 |
-| `espn_get_injuries` | ESPN status beside the official report | `players?` (default your roster), `only_flagged?` | per player `espn` (status, `ir_eligible`), `official` (report status, practice trend), `p_active` with `p_active_basis`, `sources_agree`, `game_day` | RO† | P0 | 📋 |
-| `espn_get_schedule` | Kickoffs, byes, lines, weather | `weeks?` (up to 6), `nfl_team?`, `include_weather?`, `include_lines?` | `games[]` with kickoff, lock and final flags, roof, surface, rest days, `lines` (spread, total, implied totals, `as_of`), `weather`; `byes`; `lock_windows[]` | RO† | P0 | 📋 |
-| `espn_get_depth_chart` | A team's depth chart with the snap cross-check | an NFL team (the shape follows the sibling catalog, keyed by ESPN `player_id`) | depth-chart rows with snap shares beside them | RO† | P1 | 📋 |
-| `espn_get_defense_profile` | Regressed opponent adjustments | defense and position (the shape follows the sibling catalog) | shrunk multipliers with the shrinkage shown, pace and pressure profiles, `espn_positional_rating` as a labelled comparator | RO† | P1 | 📋 |
+| `espn_get_player_usage` | Opportunity and efficiency inputs | `players` (selector), `window?` 1–17, `include_prior_season?` | `trailing` (snap, target, carry and red-zone shares, change points, expected-points gap), per-game rows at `full`, `role_confidence_games`, `data_gaps[]`, `routes_proxy` named as a proxy | DS | P1 | 📋 |
+| `espn_get_injuries` | ESPN status beside the official report | `players?` (default your roster), `only_flagged?` | per player `espn` (status, `ir_eligible`), `official` (report status, practice trend), `p_active` with `p_active_basis`, `sources_agree`, `game_day` | DS+E | P0 | 📋 |
+| `espn_get_schedule` | Kickoffs, byes, lines, weather | `weeks?` (up to 6), `nfl_team?`, `include_weather?`, `include_lines?` | `games[]` with kickoff, lock and final flags, roof, surface, rest days, `lines` (spread, total, implied totals, `as_of`), `weather`; `byes`; `lock_windows[]` | DS+E | P0 | 📋 |
+| `espn_get_depth_chart` | A team's depth chart with the snap cross-check | an NFL team (the shape follows the sibling catalog, keyed by ESPN `player_id`) | depth-chart rows with snap shares beside them | DS | P1 | 📋 |
+| `espn_get_defense_profile` | Regressed opponent adjustments | defense and position (the shape follows the sibling catalog) | shrunk multipliers with the shrinkage shown, pace and pressure profiles, `espn_positional_rating` as a labelled comparator | DS+E | P1 | 📋 |
 | `espn_get_news` | Headlines with a rules-based claim extract | `players?`, `nfl_team?`, `since_hours?` 1–168, `limit?` 1–50, `sources?` | items with title and blurb as `untrusted_text`, matched players, `flags[]`, a deterministic claim extract | EX | P1 | 📋 |
 
 </details>
@@ -714,7 +715,7 @@ Every tool below comes from [`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-c
 | `espn_analyze_league_activity` | The league activity digest | `since_days?` 1–30, `include_rival_needs?` | transactions by team including losing claims, `waiver_order_movement[]`, `rival_needs[]` with `ir_blocked`, `learned` | AN | P1 | 📋 |
 | `espn_record_recommendation` | Log the recommendation actually made | `kind`, `week`, `rec`, `alternatives[]`, `source_calls[]`, `settings_hash`, `client_ref?`, `note?` (≤ 200 chars) | `log_id`, `recorded_at`, `deduplicated` | LW | P0 | 📋 |
 | `espn_analyze_retrospective` | Score last week's calls | `week?` (default the last final week), `kinds?`, `min_n?` | `calls[]` with regret, `baselines` (each with its regret; the ESPN-projection baseline carries `informative: false` while `weight_espn = 1.0`), `metrics` (projection vs ESPN's, swap regret, Brier scores, coverage), `sample_size` per metric with "n too small" caveats, `rec` | AN | P0 | 📋 |
-| `espn_list_recommendations` | Browse the log | `week?`, `kind?`, `limit?`, `offset?` | `items[]` with `log_id`, kind, week, summary, `followed`; `page` | RO† | P1 | 📋 |
+| `espn_list_recommendations` | Browse the log | `week?`, `kind?`, `limit?`, `offset?` | `items[]` with `log_id`, kind, week, summary, `followed`; `page` | OP | P1 | 📋 |
 | `espn_analyze_scoring` | What-if scoring | stat lines and named scoring variants (the shape follows the sibling catalog) | points under this league's settings and the variants | AN | later | 📋 |
 | `espn_analyze_draft` | Draft board | — | best available by value over baseline, tiers, gaps against ESPN's average draft position | AN | later | 📋 |
 

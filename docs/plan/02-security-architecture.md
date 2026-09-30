@@ -51,7 +51,7 @@ flowchart LR
     GK["gate_key 0600 (writes phase)"]
     DB["store.sqlite (parsed cache, datasets, snapshots, journal, log)"]
     CFG["config.json (league id, settings, acknowledgement) - no secrets"]
-    NOTIF["macOS notification / pending file"]
+    NOTIF["macOS notification"]
   end
   ESPNR["ESPN read host (JSON incl. member names, outlooks, an IP)"]
   ESPNW["ESPN write host (writes phase only)"]
@@ -246,7 +246,7 @@ An opaque token returned to the model proves the model called `prepare` and bind
 | Priority | Channel | How the evidence is produced | Model can forge it? | Availability |
 |---|---|---|---|---|
 | 1 | **Form-mode elicitation** | `espn_commit_*` returns an input-required result with an APPROVE/REJECT enum and the diff as the message; the **client** renders it, the **user** picks, the client retries with the response; legacy-era clients get a real `elicitation/create` via the SDK shim [V-sib 02 §4.2 row 1] | No — the client constructs the response from UI input | Claude Code on 2026-07-28 connections; **Claude Desktop treated as unsupported until the Desktop smoke verifies it** [V-sib 02 §4.2, U] |
-| 2 | **Out-of-band one-time code** | when the client lacks the capability or answers decline/cancel within ~2 s: a 6-digit code, `sha256(code)` on the `PreparedWrite`, shown **with the diff summary** via `osascript -e 'display notification …'` and written to `<config>/pending/<prepared_id>.txt` (0600); the tool result says only "a confirmation code has been shown to you outside this chat"; 3 attempts, then voided | No — the code never enters the model's context until the human types it | always on macOS |
+| 2 | **Out-of-band one-time code** | when the client lacks the capability or answers decline/cancel within ~2 s: a 6-digit code, `sha256(code)` on the `PreparedWrite`, shown **with the diff summary** via `osascript -e 'display notification …'` — **in the notification only**: no plaintext copy of the code, or of anything else about the awaited confirmation, is written to disk (plan 10 §3.W prerequisite (c); sib ADV OBJ-01 #3); the tool result says only "a confirmation code has been shown to you outside this chat"; 3 attempts, then voided | No — the code never enters the model's context until the human types it | always on macOS |
 | 3 | **CLI: `eff confirm <prepared_id>`** | prints the diff, asks `y/N`, performs the commit in the CLI process through the same gate code | No | always |
 
 **In what session (T-09; ADV OBJ-09(c)):** every "No" above holds only in a session where the model has no shell or filesystem reach as the user — including through another local MCP server configured in the same client (a filesystem or shell server in Claude Desktop gives the model the same reach as Claude Code; the unit is the session, not the client). In such a session a pty can drive `eff confirm` and the file store can be read; the non-TTY refusal of `eff confirm`/`eff setup` is a hurdle a pty defeats, not a proof — the channels are then defence-in-depth, writes are unsupported, and `doctor` #13 warns when other `mcpServers` entries exist while writes are enabled.
