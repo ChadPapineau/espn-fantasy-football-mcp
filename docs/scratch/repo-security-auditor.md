@@ -15,36 +15,25 @@ only) or the OSV HTTP API.
 
 ## RESUME HERE
 
-**Status (2026-09-30):** all 29 clones inventoried and read; verdicts decided
-(see audit log below). Dependency audits NOT yet run. Deliverables 01/02 NOT
-yet written.
+**Status (2026-09-30): COMPLETE.** 31 clones inventoried and read (29 from the
+brief + discovery, 2 added by the coordinator: jwulff/fantasy-sports and
+DanielTomaro13/sportsdata-mcp). Dependency audits done (npm lockfile-only ×7,
+OSV over 7 uv.lock files + direct deps of 7 lockfile-less repos). Deliverables
+written: `docs/research/01-repo-security-audit.md` (method, 31-row table,
+per-repo findings, rejected list, severity counts, unverifiable list) and
+`docs/research/02-prior-art-lessons.md` (two capability matrices, 13 working
+choices, 20 mistakes with symptoms, design deltas, API-knowledge pointers).
 
-**Done:**
-- Sibling (Yahoo) audit read; overlap handled by citation (ffscrapr ESPN adapter
-  audited here; multi-platform servers checked via code search: none has ESPN
-  cookie code).
-- Discovery: `gh search repos` "espn fantasy mcp" / "espn_s2 mcp" /
-  "ESPN-Fantasy-Football" / "espn cookie" / "espn private league setup".
-- Fork checks: anthtogs/mcp_espn_ff = identical fork (skip); jlumba79/mcp_espn_ff
-  +2 commits (.env defaults, /startsit command — skip as fork); caleblwright/
-  espn-fantasy-mcp = identical to tlo1216 (same SHA, skip); ryanpag3/espn-ff-api-2
-  = fork of Possardt +2 (skip); HamCops/espn-mcp is a GitHub rename of HamCops/dodi.
-- Per-repo static review complete (audit log below).
+**Nothing left to do.** If re-opened: the clones and inventory reports are in
+the session scratchpad (`…/eff-research/vendor/`, `…/eff-research/inv/`,
+`…/eff-research/audit/`); they are not committed and will vanish with the
+session — re-clone at the SHAs in 01 if needed.
 
-**Not done (in order):**
-1. Dependency audits: `npm audit --package-lock-only` for tlo1216, mkreiser,
-   eponerine, Possardt, darkonda, shulman33, JayMishra (mcp-server lock); OSV
-   querybatch for uv.lock repos (mdanaher1, KBThree13, mpsthedude, fantasy-yolo,
-   ktrann24, cwendt94) and declared-pin repos (rrichardtang, dodi, weinstein,
-   saik0v0ur, stmorse, dtcarls).
-2. Write `docs/research/01-repo-security-audit.md` (method, table, per-repo
-   findings, rejected list, dep counts, unverifiable list).
-3. Write `docs/research/02-prior-art-lessons.md` (capability matrix, mistakes,
-   what we do differently, API-knowledge pointers).
-4. Final commit/push; reply in brief's format with SHAs.
-
-**Next concrete step:** run the dependency audits (step 1) from the scratch
-vendor dir, record counts by severity in this file, then write 01.
+**Verdict tally:** Safe 9 (mdanaher1, mpsthedude, fantasy-yolo, tlo1216, mkreiser,
+ryanjadhav, stmorse, ffscrapr-adapter, jwulff) · Caution 8 (KBThree13, dodi,
+weinstein, rrichardtang, saik0v0ur, cwendt94, eponerine, sportsdata-mcp) · Do not
+use 4 (JayMishra, Possardt, darkonda, true-champion) + 5 sibling multi-platform ·
+Skipped 12 by name.
 
 ## Audit log (verdicts + key evidence; file:line refer to the clone at the SHA)
 
@@ -223,3 +212,23 @@ Legend: S = Safe to learn from · C = Learn from with caution · X = Do not use 
 carterfawson, kYpranite, andrewrgoss, MichaelCrowcroft: `gh search code espn`
 → 0 hits; derekrbreese: hits only in roster-slot constants/docs, no cookie
 code. None handles espn_s2/SWID → nothing to add; verdicts cited from sibling.
+
+### Added by the coordinator (2026-09-30)
+29. jwulff/fantasy-sports `93830048` py MIT 2★ 2026-09-12, 119 commits — **S**.
+    CLI (typer), reads only in src (0 write hits); write surface captured as
+    research (`docs/research/05-espn-write-surface/`, 23 probes, all SWIDs
+    `{SWID-REDACTED}`/pseudonymised). Auth chain env → Keychain (keyring) → XDG
+    config.toml; `Secret` carrier; errors scrub at construction; SQLite HTTP
+    cache redacted; `untrusted` output container + indented-block renderer.
+    uv.lock → 6 advisories (urllib3 2.2.3: 4 H, 2 M). creds clean (FAKE_ constants).
+30. DanielTomaro13/sportsdata-mcp `713f5a7a` py MIT 21★ 2026-09-29, 259 commits
+    — **C**. Spec-driven, 841 tools/64 providers; ESPN: 27 reads + 2 writes in
+    an opt-in `espnfantasy.write` group; cookie = `ESPN_FANTASY_COOKIE` raw
+    Cookie header via static_header auth. `connect espnfantasy` reads the
+    Chrome-family cookie DB (all profiles) and decrypts with the Chrome Safe
+    Storage Keychain key (`connect.py:131-210`), host-scoped, verified, saved
+    0600, never printed; manual fallback. Telemetry local-only unless two env
+    vars set; OTA signed spec bundles on explicit command; opt-in licence gate
+    → sportsdata-entitlement.sportsdata.workers.dev; root-logger secret filter.
+    `fastmcp>=0.4,<4`, no lockfile; direct deps at latest: 0. creds clean (doc
+    GUID is an all-letters placeholder).
