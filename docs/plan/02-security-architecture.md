@@ -210,13 +210,13 @@ sequenceDiagram
 
     C->>S: espn_prepare_lineup(moves)
     S->>R: GET mRoster (cache-first) and mSettings current period
-    S->>S: pinned team from SWID; diff = changed slots only; preflight locks, counts, eligibility, window, cap
+    S->>S: pinned team from SWID — diff = changed slots only — preflight locks, counts, eligibility, window, cap
     S->>S: pre = hash(entries {playerId, lineupSlotId, lineupLocked} + currentScoringPeriod)
     S->>J: insert PreparedWrite(id, diff, pre, period, expires_at = now + 10 min, status = prepared)
     S-->>C: { prepared_id, diff (human + structured), expires_at, how_to_confirm }
     Note over C,S: Human channel (one of three) produces confirmation evidence
     C->>S: espn_commit_lineup(prepared_id, evidence)
-    S->>S: verify evidence and HMAC ticket; expired -> CONFIRMATION_EXPIRED
+    S->>S: verify evidence and HMAC ticket — expired -> CONFIRMATION_EXPIRED
     S->>R: GET mRoster (force refresh) and current period
     S->>S: hash == pre and period unchanged ? else PRECONDITION_CHANGED (void, re-prepare)
     S->>J: status = sent (UPDATE WHERE status = prepared, rowcount must be 1)
@@ -229,7 +229,7 @@ sequenceDiagram
         S->>J: status = rejected_transaction, type verbatim
         S-->>C: ESPN_TRANSACTION_REJECTED { upstream_type }
     else 401 AUTH_MISSING_CREDENTIALS
-        S->>J: status = rejected_auth; credential_state = Rejected; write tools unregistered
+        S->>J: status = rejected_auth — credential_state = Rejected — write tools unregistered
         S-->>C: ESPN_AUTH_REJECTED
     else timeout / 5xx
         S->>J: status = sent_unknown (reconcile later, never auto-retry)
