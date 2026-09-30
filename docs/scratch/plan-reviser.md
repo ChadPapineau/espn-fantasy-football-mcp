@@ -37,7 +37,7 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 
 ### Other tasks
 - Plan 10 §4 resolved table — applied (plan 10 §4: five columns, "Resolution applied" names file §; T-11 note only; T-13 → T-03; T-16 already done)
-- `docs/plan/changelog.md` §R1 — pending
+- `docs/plan/changelog.md` §R1 — applied (numbers table, 20 objection rows, 16 tension rows, survived-unchanged list, narrow readings)
 - Consistency grep (retired phrases / old numbers) — pending
 - Mermaid manual parse pass — pending
 - `docs/HANDOFF.md` item 2 + "Things Chad needs to know / decide" — pending
@@ -52,3 +52,4 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 - 3e8b675 — OBJ-09
 - 22e80ef — OBJ-10..14
 - 5973653 — OBJ-15..20 + tensions T-01..T-15
+- e95f4de — plan 10 §4 resolved table
