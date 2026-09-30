@@ -6,13 +6,13 @@ docs/README.md, docs/plan/00-index.md). Brief:
 
 ## RESUME HERE
 
-- **State**: LICENSE, SECURITY.md and both indexes pushed. All plan + research files read. Next: README first half (banner → diagrams).
+- **State**: README first half pushed (banner, status + ToS disclosure, features, 8 diagrams linted by hand + a local lint script). Next: second half — replace the `<!-- WIP-MARKER -->` line at the end of README.md with the tool reference onward.
 - **Order of work** (orchestrator note: supporting files first so the
   plan-reviser's round-2 edits to plan 01–10 land before the
   plan-dependent README sections are written):
   1. [x] `LICENSE` (MIT) + `SECURITY.md` — commit + push
   2. [x] `docs/README.md` + `docs/plan/00-index.md` — commit + push
-  3. [ ] `README.md` first half (banner, status, features, 8 Mermaid
+  3. [x] `README.md` first half (banner, status, features, 8 Mermaid
          diagrams) — commit + push
   4. [ ] `README.md` second half (tool + Skills reference, quickstart,
          credentials, config, launch config, security, testing,
@@ -45,3 +45,4 @@ docs/README.md, docs/plan/00-index.md). Brief:
   P1 prompt while plan 09 K2/§1 ships the `waivers` Skill at P0 (priority branch) — 8 P0 Skills vs 7 P0
   prompts; (2) HANDOFF finding 9 still lists `waivers` under P1 and says "14 Skills ship" before its
   parenthetical correction; (3) private vulnerability reporting is OFF on the repo (SECURITY.md says so).
+- README first half written; the file ends with a WIP-MARKER comment that the second half replaces.
