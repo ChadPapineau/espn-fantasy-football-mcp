@@ -160,9 +160,63 @@ Also adopted from the log's §1.5: plan 01 §7 now states which views the daily 
 - **OBJ-23** — plan 04 §2 `files` drops `bin` and lists `scripts/eff-launch.sh`, so a tarball install is still a plugin root.
 - **OBJ-24** — the pointer is the advocate's 40-character candidate, "Untrusted text: see server instructions."; the [U] is named in both plan 01 §14 (A-14) and plan 02 §10.
 - **OBJ-25** — the ruling names the throwaway item only by its suffix; the service is written as `espn-fantasy-football-mcp-selftest`. The advocate's extras that the ruling does not carry (a `store_decided_by` key, a setup warning text, `doctor` re-running the test) were not added.
-- **OBJ-26** — on a public league whose board probe does not discriminate, setup keeps the value and the state stays `stored`; the daily `credential check` then yields `accepted: null` and changes no state.
-- **Nit 2** — E13's output shape is unchanged; "not informative in v1" is what `retro` says (a guardrail in plan 09 §3.5), noted in E13's method.
+- **OBJ-26** — on a public league whose board probe does not discriminate, setup keeps the value and the state stays `stored`; the daily `credential check` then yields `accepted: null` and changes no state. *(Superseded by R3 nit (c): on such a league the daily check probes the view whose 401 caused the rejection.)*
+- **Nit 2** — E13's output shape is unchanged; "not informative in v1" is what `retro` says (a guardrail in plan 09 §3.5), noted in E13's method. *(Superseded by R3 nit (d): E13 now returns `informative: false`.)*
 - **Nit 10** — the 500 ms bound names `fx-10h` in fixture mode and "the process test"; no test file name was invented.
+
+## R3 — after adversarial round 3 (2026-09-30)
+
+**Plan state attacked:** `b4e0588`. **Round 3:** the 6 round-2 objections conceded-by-defence and all 10 round-2 nits taken; nothing pressed, no new objection; the devil's advocate closed with five line-level nits (log §3.1), all taken in the orchestrator's note. **Edits landed in:** `1b2af1e` and the commit that adds this section.
+
+| nit | ruling | what changed (file §) |
+|---|---|---|
+| (a) | taken | `refresh` writes each dataset file with `journal_mode=DELETE` and closes it before `rename()`, so no `-wal`/`-shm` sidecar can be left behind the published file — plan 01 §5.5 |
+| (b) | taken | `gen-fixtures.ts` re-derives every aggregate of a re-scored field in `fx-10h` (team totals, `winner`, records, points for/against), so the scoreboard, the standings and the seeding simulator agree with the box scores — plan 05 §3 (fixture law, line 2); plan 09 §5.2; plan 10 §3.1a |
+| (c) | taken | On a public league whose board probe does not discriminate, the daily credential check probes the view whose 401 caused the rejection, once a day, so `rejected` can flip back — plan 06 §1.4; plan 02 §2.1 (the definitive-check row); plan 07 G2 |
+| (d) | taken | `espn_analyze_retrospective` returns `baselines.espn_projection_lineup.informative: false` while `weight_espn = 1.0` — a field, not prose (plan 07 C9's own rule) — plan 07 E13 (output, method), C9; plan 09 §3.5 |
+| (e) | taken | `eff setup` prints one sentence before the launchd-context test that a Keychain dialog may appear — plan 03 §2.1 step 4 |
+
+Reviser's notes on R3: (c) changes what the daily job probes on such a league, not `espn_check_auth`, which still reports `accepted: null` there; (d) supersedes the R2 narrow reading that left E13's shape unchanged; no diagram was touched.
+
+## Summary — what the adversarial process changed and what survived
+
+For a reader who reads nothing else. The full record is `docs/plan/adversarial-log.md`; the row-by-row edits are §R1–§R3 above.
+
+**Totals.** Three rounds. **26 objections** — 1 blocking, 10 significant, 15 marginal (round 1: 20; round 2: 6; round 3: none) — all conceded by the defence and landed: 20 as ruled, 6 with a modification the devil's advocate accepted (OBJ-05, 06, 07, 12, 13, 18). **16 pre-filed tensions**, all resolved (one dismissed to a note, one merged, one already done). **15 nits** (10 in round 2, 5 in round 3), all taken. Nothing withdrawn, nothing rejected, **nothing pressed at close**.
+
+### Changed
+
+1. **The engine's gate can no longer pass vacuously.** Phase 1a's golden reads only recorded ESPN weeks (the public probe league, keyless), scored under the league that was recorded; the Skills' fixture league is a separate, labelled, derived class that is never engine evidence; the recording is a Phase 0 row (Z7) and the probe league (D2) a Phase 0 decision. Under D0-not-accepted the plan says exactly which scoring families stay unverified.
+2. **The v1 numbers claim only what they have earned.** The point estimate is ESPN's (`weight_espn = 1.0`) until a backtest under this league's scoring shows a mixture is better, with shadow weights named; the waiver premium carries its ×0.5–×1.5 band and a `marginal` verdict kept off the claim list; the seeding reading is an operator answer with an unconfirmed flag rather than a detector; the retrospective says which comparisons are not informative.
+3. **The fleet recovers without a human where it can, and says so where it cannot.** The daily credential probe is exempt from the short-circuit; one credential store per install is decided by a real launchd-context test; a host move has an operator override restricted to `*.fantasy.espn.com` and an honest "then a release"; a black-holed network costs 20 seconds, not 48; jobs schedule from the API's epoch-ms fields, not from a calendar baked into a plist.
+4. **The store and the loop do what their tests assert.** Node ≥ 24.15; backups by `VACUUM INTO`; datasets in per-source files published by `rename()` and opened as separate read-only connections — under SQLite's verified limit of ten attachments; simulations yield every 20 ms under a measured 50 ms stall bound, with an 8 s deadline and a worker pool as the named fallback.
+5. **The per-turn cost is budgeted where it is paid.** Eighteen P0 tools instead of twenty-one (none without a P0 Skill caller); 20 000 / 35 000-character ceilings that can only go down; the two mandatory sentences once in the server `instructions`, with the delivery of that field to the model spiked per client and a fallback named; `outputSchema` kept in code and removable from the wire.
+6. **The runtime lives where it can run.** Outside any file-provider directory, with `doctor` checking the directory that holds code, a stale `dist/`, the client's MCP log and a Node path that still matches; the plugin launches through `/bin/sh` and a shim instead of a bare `node` or a `bin/` directory.
+7. **Every security "cannot" names the session for which it holds.** The confirmation channels are unforgeable only where the model has no shell or filesystem reach as the user — a property of the session, not the client — and the README and SECURITY.md say "unsupported" for the rest. The public-league credential check uses a probe that discriminates, and reports `null` where none does.
+8. **The sibling's rulings are carried through its round 3**, and one finding went the other way: the attachment limit applies to the sibling's dataset layout too.
+
+### Survived unchanged
+
+- **The architecture:** one Node process, stdio only; the domain / provider / source / store layering with lint-enforced import boundaries; SQLite through `node:sqlite` for the main store; one path builder and one `X-Fantasy-Filter` builder with a view whitelist and `limit ≤ 100` plus a mandatory sort; the cache-first cross-process limiter with coalescing and a breaker; the envelope's `meta` (as-of, freshness, provisional, attribution, `estimate`); the error contract with fixed messages and no upstream body; per-view zod schemas that pass unknown fields through and hard-fail on missing required keys; skeleton detection; the daily keyless probe.
+- **The shared-core decision** (two repos, a written contract, a named extraction trigger) and the `espn_` prefix.
+- **The credential design's spine:** cookies only through a terminal prompt — never a tool argument, the client config or a log line; the keychain behind a seam with a `0600` fallback; "never retry a 401" per request; redaction of cookies, GUIDs, IPs and the league id.
+- **Read-only as the product:** the operator-gated write module, own-team pinning, the prepare/commit gate's mechanics, and the verdict "recommended, do not build yet".
+- **`untrusted_text` applied field by field** inside ESPN's fact objects, the deterministic injection flags and the invariance tests.
+- **The scoring engine in full:** the canonical hub, the id-keyed ESPN table, bracket families, the property set P1–P16, and the per-stat golden against `appliedStats`.
+- **The priority-waiver DP** and its cold-start table, the two-reading seeding simulator, ESPN's numbers labelled as ESPN's.
+- **The thirteen Skills** and their two eval lanes.
+- **The phasing shape** (0 → 1a → 1b → 2 → 3, W conditional, 4 later) and the honest expected-value paragraph for 2026.
+
+### Residual concerns, ranked (from the closing verdict)
+
+1. **Two decisions sit in front of everything and are Chad's.** D0 (the Disney Terms of Use literally cover this project; Phase 1b and every credentialed job wait on his accepting that account risk) and D2 (naming a public probe league — without it Phase 0's Z7 stays open and the 1a golden waits for D0). The plan cannot make either.
+2. **The API is unofficial and the recovery is human.** A cookie of unknown lifetime with no refresh; a host move outside `*.fantasy.espn.com` or a renamed view is a release measured in days, in season. The plan degrades honestly; it cannot degrade gracefully past the cache's hard limits.
+3. **Whether v1 is useful, not merely correct.** With ESPN's mean as the point estimate, a position-level spread, a cold-start premium table and hand-set role priors, the MVP's added value is the assignment, the priority rule with its band, the engine check and the discipline of labelled numbers. That may be thin until Phase 2's usage data and a season of the league's own feed; the retrospective is built to show it either way.
+4. **The calendar.** Phase 1a is "L" with no measurement behind it, starting after a review at NFL week 4; the plan's own reading is late-season use and a corpus for 2027. The first two weeks of building will say whether that was optimistic.
+5. **The fixture law is one path guard and one manifest flag.** It is the rule a builder under time pressure is most likely to bend; the aggregate re-derivation (R3 nit (b)) is in the plan before `gen-fixtures.ts` is written.
+6. **Build-time unknowns, each worth up to a day, all named with a fallback:** Keychain behaviour under launchd; whether clients deliver `instructions` and forward `structuredContent`; `readOnly` on the Node 24 floor; the Desktop Code tab's environment; the never-observed transaction fields; 103/104; ESPN's rounding; the private-league 401 body.
+7. **Reach-session detection is a heuristic.** Bounded because writes are unbuilt — but the sentence must keep saying "unsupported", never "safe".
+8. **The plan is unbuilt.** Its acceptance criteria are tests, and the tests are the next adversary.
 
 ## Reviews (re-run on every version bump of the named dependency)
 
