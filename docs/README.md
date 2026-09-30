@@ -38,16 +38,15 @@ are the **structural plan** (architecture, security, lifecycle, repository and C
 07–10 are the **product plan** (tool catalog, scoring engine, Skills bundle, phasing and acceptance).
 
 - [`plan/adversarial-log.md`](plan/adversarial-log.md) holds every objection a devil's-advocate agent
-  raised and the defence's ruling on each. **Round 1:** 20 objections (1 blocking, 9 significant,
-  10 marginal) and 16 pre-filed tensions — 14 conceded, 6 conceded with a modified fix, none rejected.
-  **Round 2:** verdicts on all 20, plus 6 new objections (1 significant, 5 marginal) and 10 nits — all
-  conceded. Where a plan file and the log's latest defence section disagree, the defence is the truth
-  until the corresponding edit lands.
-- [`plan/changelog.md`](plan/changelog.md) records, one row per objection and per tension, what changed
-  in which plan file and what survived unchanged — plus the dependency reviews that must be re-run on
-  every version bump.
+  raised, the defence's ruling on each, and — at the end — the **closing verdict**. The review is
+  **closed after three rounds**: 26 objections (1 blocking, 10 significant, 15 marginal), 16 pre-filed
+  tensions and 15 nits — all resolved and landed in the plan; nothing rejected, nothing withdrawn,
+  nothing pressed at close. The closing verdict also ranks the residual concerns.
+- [`plan/changelog.md`](plan/changelog.md) records, one row per objection, tension and nit, what changed
+  in which plan file and what survived unchanged (§R1, §R2, §R3), ends with a **Summary** for a reader
+  who reads nothing else, and lists the dependency reviews that must be re-run on every version bump.
 
-The plan is **awaiting the owner's approval**; approval, not the review, is what starts the build.
+The plan is final and **awaiting the owner's approval**; approval, not the review, is what starts the build.
 
 ## Scratch
 
