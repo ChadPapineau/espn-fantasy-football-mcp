@@ -6,16 +6,29 @@ section per round) plus these notes. I own only those two paths.
 
 ## RESUME HERE
 
-- **State:** round 2 in progress. Pulled `784b1b9`; defence (§1.D–§1.F) and
-  `docs/plan/changelog.md` §R1 read; sibling log now has round 3 + closing
-  verdict (three nits: pointer length 42 vs "≤ 40"; `store prune` of
-  superseded ds files; `ATTACH ?mode=ro` URI is a build-time [U]).
-- **Next:** verify each ruling landed (diff `docs/plan/*` vs `131ec10`,
-  added lines extracted to the session scratchpad), check the reviser's
-  "narrow readings" (OBJ-01 no-probe-league case, `N_SIMS_MAX` unset,
-  `include: ["seeding_evidence"]`, OBJ-16 fixed cadence), then write
-  `## Round 2 — verdicts and objections` and, if the remainder is marginal,
-  `## Closing verdict` in the same push.
+- **State:** round 2 written to `docs/plan/adversarial-log.md`
+  (`## Round 2 — verdicts and objections`): all 20 round-1 objections
+  conceded-by-defence (6 with accepted modifications), 0 withdrawn, 0
+  pressed; six new objections from what the revisions broke — OBJ-21
+  significant (fx-10h = probe-scored bodies + hand-written reference
+  `mSettings`), OBJ-22–26 marginal (SQLite attach limit of 10 — verified
+  on sqlite.org and Node's `sqlite.gyp`; `bin/` vs research 06 §E.1;
+  `instructions` delivery [U] + 42-char pointer; launchd-context test reads
+  a non-existent item; board-probe 404 ordering) plus ten nits. **No
+  closing verdict yet — not marginal by one item (OBJ-21).** Staked:
+  OBJ-21.
+- **Waiting on:** `## Round 2 — defence` and the reviser's commits.
+- **Round 3 procedure:** pull --rebase; diff `docs/plan/*` against
+  `784b1b9`; verdict table for OBJ-21..26 (+ the ten nits if addressed);
+  check the fixture-class decision (A: recorded/ vs derived fx-10h with a
+  path guard; or B: fx-10h keeps recorded scoringItems), the attach rule
+  (≤ 10 / separate read-only connections), shim location, the
+  `instructions` nonce in A11b, the throwaway-item launchd test, the
+  anonymous board-probe control. If nothing structural remains, write
+  `## Closing verdict` (what survived unchanged, what changed, residual
+  concerns ranked) in the same push.
+- **Sibling log:** carried through its round 3 + closing verdict (three
+  nits folded into OBJ-22/OBJ-24).
 - **Discipline:** explicit-path staging only; `git pull --rebase origin
   main` before push; never force-push; verify HEAD == origin/main.
 
