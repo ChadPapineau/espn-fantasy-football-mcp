@@ -311,3 +311,152 @@ Personal identifiers here: `members[]` (`id` GUID, `displayName`, `firstName`, `
 - `playerPoolEntry.lineupLocked` / `rosterLocked` / `tradeLocked` booleans exist on every entry (P05) [V-observed]; `lineupLocked` presumably flips at kickoff ([U]).
 - `polling-interval: 10` was returned on the `/communication/` endpoint (P27) — ESPN's own client polling hint, seconds presumably ([U]).
 
+---
+
+## C. Credentials: obtaining, storing, expiring, recovering
+
+There is no OAuth, no API key and no developer program. Access to a private league is two browser cookies from a logged-in `espn.com` session: **`espn_s2`** (the bearer secret, a few hundred characters, URL-encoded on the wire) and **`SWID`** (the account's member id, a braced GUID). This section is written so the design does not depend on the one fact nobody could establish — how long `espn_s2` lives.
+
+### C.1 How users obtain the cookies today
+
+The instructions are the same in every wrapper and help page read [V-community ×5]:
+
+- S-JS README L93: "You need two cookies from ESPN: `espn_s2` and `SWID`. These are found at "Application > Cookies > espn.com" in the Chrome DevTools when on espn.com."
+- cwendt94/espn-api discussion #150 (dtcarls, 2020-11-19): "Right click anywhere on the website and click inspect option. From there click Application on the top bar. On the left under Storage section click Cookies then http://fantasy.espn.com."
+- ffscrapr `espn_authentication` (2023-02-11): visit the league page logged in, open DevTools ("Inspect Element"), Storage/Application → Cookies → fantasy.espn.com; SWID "about 38 characters" **with** the braces; its `espn_s2` example is URL-encoded (`AECt%2F…`).
+- keystone-fantasy README: "Filter for `espn_s2`, double-click its Value, select all, copy. It is a few hundred characters long." / "Filter for `SWID`, copy its value including the curly braces: `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`."
+- S-SDM: "Keep the braces on `SWID`. These are session credentials for your ESPN account — treat them like a password." S-PSR: `espn_s2` "200+ alphanumeric characters", `SWID` "in format `{UUID}`".
+
+**Braces.** Keep them. The wiki's constructor example passes `swid='{03JFJHW-…}'` (S-WIKI `Home.md`) and every observed member id — `members[].id`, `teams[].owners[]`, `teams[].primaryOwner` — is a 38-character string that begins with `{` (P05) [V-observed]; the write capture shows ESPN echoing `memberId` as `{<swid>}` (S-JW §2.3) [V-community]. Whether ESPN accepts a brace-less SWID is [U]; store it exactly as the browser shows it and validate `^\{[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\}$`.
+
+**Encoding.** `espn_s2` is shown URL-encoded in DevTools (`%2F`, `%2B`, `%3D` sequences; S-FFS and S-SDM examples) and every wrapper sends it **verbatim** in the `Cookie` header (S-JS `client.js` L362 `Cookie: espn_s2=${espnS2}; SWID=${SWID};`; S-PY passes a `cookies` dict to `requests`, which sends values unchanged; S-SDM one cookie string). Keep it encoded — that is the wire form the browser itself sends. cwendt94 #549 (2024-07-27) asked "does espn_s2 need URL-decoding?" and got no visible answer; whether a decoded value is also accepted is [U]. Practical pitfalls: `.env` parsers, shells and JSON editors mangle `%`, `+` and `=`; validate the stored value against `^[A-Za-z0-9%+/=._-]{100,}$` and warn if it contains whitespace or quotes.
+
+**Third-party helpers.** A Chrome/Firefox extension "ESPN Cookie Finder" (publisher Hashtag Fantasy Sports, 5,000 users, v1.2 dated 2025-08-25) copies the two values; dtcarls recommends it (#150, 2025-08-20) [V-community]. We should not recommend it: it is an unaudited extension that reads authentication cookies, and DevTools is enough.
+
+**No username/password path.** ESPN's login API gained reCAPTCHA in September 2020 (`PALOMINO_CHECK_FAILED`; cwendt94 discussion #128, 2020-09-24) and S-PY's `authentication()` is commented out with "Username and password no longer works using their API without using google recaptcha" (`espn_requests.py` L282–283) [V-community]. Never implement a password flow.
+
+### C.2 Lifetime — what is actually known
+
+| Claim | Source | Standing |
+|---|---|---|
+| "It remains the same through different sessions." | dtcarls, cwendt94 #150, 2020-11-19 | [V-community] — persistence across browser sessions, not a lifetime |
+| "`espn_s2` expires every few weeks to months." | keystone-fantasy README, 2026 | [V-community] — operator experience, no attribute quoted |
+| "two manually-extracted cookies with no refresh path that expire silently after weeks" / "Silent expiry is the top operational failure in this space" | jwulff/fantasy-sports #5, 2026-08-27 | [V-community] |
+| "espn_s2 is a session cookie and will expire." | mykool223/CommissonersCartelFFL #5, 2026-08-21 | [V-community] |
+| "can expire or change if you log out or ESPN resets your session" | leagueloom.com/espn (a hosted connector) | [V-community] — vendor statement |
+| A DevTools screenshot or `Set-Cookie` capture showing `espn_s2`'s `Expires` attribute | — | **not found**; the login flow cannot be observed without an account, and the anonymous `www.espn.com` fetch today set no `SWID`/`espn_s2` (only `region` and `_dcf` on the fantasy.espn.com redirect, P02) |
+| Rotation of `espn_s2` on each login; invalidation on log-out, "log out everywhere", or password change | — | **[U]** (leagueloom asserts log-out invalidates; no primary evidence) |
+
+**Verdict: the `espn_s2` lifetime is [U]; the consistent community range is "weeks to months".** `SWID` is the account's member id — it is the key used for `members[].id`, `owners[]`, `memberId` (P05, S-JW) — so it is stable per account [V-observed role + V-community]; it is an identifier, not a secret, but it is personal data and must still not be logged.
+
+**Design that does not depend on the lifetime:** record `storedAt` with the credential; report age (days) in `health`; treat any 401 on a league that previously read fine as "credential rejected" (§C.3); recommend a re-paste every 30 days in the setup output (conservative against "weeks"); never guess an expiry date.
+
+### C.3 Expiry detection and graceful behaviour
+
+**What a rejected credential looks like.** Read host, private league, no/invalid `espn_s2` → `401` with the typed body (S-SDM: `AUTH_LEAGUE_NOT_VISIBLE` "the cookie is fine but this league is not yours (or the cookie went stale)"; S-PY raises `ESPNAccessDenied`) [V-community]. Write host → `401 AUTH_MISSING_CREDENTIALS` for no cookies, for `SWID` only, **and for an invalid `espn_s2` with a valid `SWID`** (S-JW §5.1, probes p1/p13/p14) [V-community]. The important negative from S-JW: "the read host's 401 is typed and constant" — the body does **not** distinguish *expired* from *not your league*. Valid credentials → `200` with the full payload. On a **public** league an expired cookie is invisible (cookies are irrelevant; P01–P30 all 200 anonymously), so expiry can only be detected against a private resource.
+
+**Cheap "am I still logged in" probes, assessed.**
+
+| Candidate | Result | Standing |
+|---|---|---|
+| `x-fantasy-role` response header | `NONE` on all 24 anonymous 200s (P01–P30); S-JW saw `NONE` on every cookie-bearing response, including a commissioner's | **Not a login indicator** [V-observed + V-community] |
+| `mNav` / `members[]` | returned to anonymous callers on a public league (P12) | not a login probe [V-observed] |
+| `L/communication/?view=kona_league_communication` + `{"topics":{"limit":1,"sortMessageDate":{…}}}` | `401 AUTH_COMMUNICATION_NOT_VISIBLE` anonymously even on a public league (P27); `200 {topics:[]}` with cookies per S-PY `recent_activity`; `404 COMMUNICATION_GROUP_NOT_FOUND` if the league never used the board (S-PY comment, S-SDM) | **Usable read-only probe**: 200 or 404 = cookies accepted; 401 = rejected [V-observed 401 + V-community 200] |
+| `L?view=mSettings` on the user's private league | 200 vs 401; 9 KB | **The definitive check** for the league that matters [V-community] |
+| `fan.api.espn.com` preferences | account-scoped; needs cookies | [U] |
+
+**Graceful-expiry behaviour (design):**
+
+1. Every upstream 401 (and 403) on a request that carried cookies sets `credentialState = { status: "rejected", at, httpStatus, type }` and the tool returns a structured error `ESPN_AUTH_REJECTED` whose message says: which league, that the stored cookies were not accepted, that this usually means `espn_s2` expired, and the exact command to re-run setup. It does **not** say the cookie value, its length, or its fingerprint.
+2. **No retry, no loop.** A 401 is never retried; further cookie-bearing calls are short-circuited with the same error until the user re-runs setup or explicitly calls `auth_check` (one probe, rate-limited to once per minute).
+3. `auth_check` / `health` report `cookiesPresent: boolean`, `cookieAgeDays`, `lastAcceptedAt`, `lastRejectedAt` — never the values.
+4. Logging: cookie values are redacted at the transport layer (a `Cookie`-header scrubber on every log line and error object); the only identifier ever logged is a 6-hex-char fingerprint of `sha256(espn_s2)`, and only at debug level.
+5. Setup performs the definitive check immediately (one `mSettings` request against the configured league) so a mis-pasted value fails at setup time, not mid-week.
+
+### C.4 Storage recommendation (local Node stdio server, macOS first; Windows/Linux too)
+
+**Facts about this machine that constrain the choice** [V-observed, metadata only, no contents read]:
+
+- `~/Documents` is iCloud-managed (`com.apple.file-provider-domain-id … com.apple.CloudDocs.iCloudDriveFileProvider`, `com.apple.icloud.desktop` xattrs; `MobileMeAccounts` `CLOUDDESKTOP` `Enabled = 1`). The repo lives under it, so **any file in the repo directory — including an ignored `.env` — is uploaded to iCloud.** `.gitignore` protects git, not iCloud.
+- MCP client configs: `~/Library/Application Support/Claude/claude_desktop_config.json` is mode `0600`; `~/.claude.json` `0600`; `~/.claude/settings.json` **`0644`**. `~/Library` is not iCloud-synced by default. So "world-readable" is true of one of the three today, and none of them is designed to hold secrets.
+
+| Option | Assessment |
+|---|---|
+| **(a) OS keychain** — macOS Keychain, Windows Credential Manager, Linux Secret Service/keyutils | Best at-rest protection; encrypted, ACL'd to the user, excluded from iCloud Drive (login keychain sync is a separate, opt-in iCloud Keychain feature). Two ways in: **`security` CLI** (`add-generic-password -a <account> -s <service> -w <secret>`, `find-generic-password … -w`; man page on this Mac) — shelling out puts the secret in the child's argv (briefly visible to `ps` for the same user) and in no shell history if invoked from Node; acceptable for a one-shot setup, not elegant. **`@napi-rs/keyring`** 2.1.0 (published 2026-09-13, MIT; Rust `keyring-rs` binding; repo `Brooooooklyn/keyring-node` active, last push 2026-09-25) ships **prebuilt binaries as 12 optional per-platform packages and has no install script** (`npm view` shows none) [S-NPM]. **`keytar`** 7.9.0: GitHub repo **archived 2022-12-12**, installs via `prebuild-install || node-gyp rebuild` (network download or compile at install), needs libsecret on Linux — reject [S-NPM]. Friction to document: the first read from a different binary (the MCP server launched by the client vs. the setup CLI) can trigger a Keychain "allow access" dialog; items written by the `security` CLI and by a native module have different partition lists ([U] exact behaviour on this macOS; test during implementation). |
+| **(b) `0600` JSON file** in a `0700` directory under `$XDG_CONFIG_HOME`/`~/.config/espn-ff-mcp/` (Windows `%APPDATA%\espn-ff-mcp\`), written atomically (temp file in the same dir + `fsync` + `rename`), permissions re-checked on every read | Adequate and portable; plaintext at rest but outside iCloud (`~/.config` is not under Documents/Desktop — the server must **verify** at startup that the directory carries no file-provider xattr and refuse to store if it does) and outside the repo. Loses to (a) only on at-rest protection against same-user malware/backups. |
+| **(c) env vars in the MCP client config** | **Worst.** Plaintext in a JSON file the user edits, pastes into chat and screenshots for support; copied into backups/Time Machine; one of the three configs here is `0644`; the values are inherited by every child process and appear in crash dumps; no rotation story; and the MCP host may log the launch environment. Also the wrong *place*: the same file configures unrelated servers. Reject. |
+
+**Recommendation:** default **(a)** via `@napi-rs/keyring` once the repo-security auditor clears the package and its platform sub-package for this machine; fallback **(b)** behind an explicit `--storage file` opt-in with the iCloud/xattr and mode checks. Never (c). Never accept the cookie as an MCP tool argument (it would enter the model context and the client's transcript logs). The repo directory holds nothing secret, ever.
+
+**Setup procedure (both variants run in a terminal, outside the MCP session):**
+
+- *Hidden-input prompt (default):* `npx espn-ff-mcp setup` → prints the three DevTools steps → prompts for `SWID` (echoed, it is an id) and `espn_s2` with echo **off** (readline with a muted output stream or `@inquirer/password`) → validates both formats → stores → runs the definitive check (`mSettings` on the configured league; expects 200) → prints only `stored: SWID ok (38 chars), espn_s2 ok (N chars), league check 200, age 0d`. On 401 it deletes what it stored and says so. Simple, no network listener, no page holding a secret.
+- *Local one-shot setup page (optional):* bind `127.0.0.1` on a random high port; URL contains a 32-byte random token; the form is POST-only, includes the same token as a hidden field and is accepted only when `Host` is `127.0.0.1:<port>`, `Origin`/`Referer` match, the token matches, and it is the **first** submission; the listener closes after one accepted POST or 120 s; responses carry `Cache-Control: no-store`; nothing is logged. Better UX (instructions with screenshots, paste fields), larger surface (a socket, a browser tab and the clipboard holding the secret). Acceptable if all of those properties hold; offer it second.
+
+### C.5 Browser cookie-store readers and automated logins — rejected
+
+`browser_cookie3`-style extraction reads the browser's cookie database directly (Chrome's `Cookies` SQLite is encrypted with a key in the login keychain, so reading it prompts for "Chrome Safe Storage" — the exact behaviour of credential-stealing malware; Safari's store is Full-Disk-Access-gated), and Selenium/Playwright logins (the accepted workaround in cwendt94 #128, 2021-01-13) drive a real browser through a reCAPTCHA-protected login. **Recommendation: reject both.** They are invasive and brittle — they touch the user's browser profile and keychain in a way indistinguishable from credential theft, and they break on cookie-encryption, profile-path and reCAPTCHA changes — and they move the project from "the user pastes their own session" to "software harvests credentials", which reads directly onto S-DTOU §2.B.ix ("bypass … circumvent any of the functions or protections") rather than only §2.B.x.
+
+### C.6 Rotation without OAuth
+
+"Rotate" can only mean: log out of ESPN in the browser (best-effort invalidation of the old `espn_s2`), log back in, copy the new cookies, re-run setup (which overwrites and re-checks). Whether log-out, "log out everywhere", or a password change actually invalidates an outstanding `espn_s2` is **[U]** (asserted by leagueloom, unverified anywhere primary); whether a new login issues a new `espn_s2` value is [U] (dtcarls' "remains the same through different sessions" suggests reuse while the browser keeps the cookie, not reissue). Emergency procedure if a cookie is exposed: change the Disney/ESPN password and use the account's sign-out-everywhere control, then re-run setup — expected to help, [U] that it is sufficient. `health` shows the credential age so the user can rotate on a schedule regardless.
+
+---
+
+## D. Terms of service, rate limits, account risk
+
+### D.1 The governing text
+
+**Disney Terms of Use (United States), "Last Updated: May 24, 2024"** (https://disneytermsofuse.com/english/, fetched 2026-09-30) [V-docs]. The agreement covers "websites, software, applications, content, products, and services … ('Disney Products')" from Disney and its affiliates; the ESPN fantasy site is one. The clauses that bear on this project, quoted verbatim:
+
+- §2.B.x — you may not "access, monitor, copy or extract the Disney Products using a robot, spider, script, or other automated means, including, for the avoidance of doubt, for the purposes of creating or developing any AI Tool, data mining or web scraping or otherwise compiling, building, creating or contributing to any collection of data, data set or database (other than for a public search engine's use of spiders for creating search indices to the extent not disallowed by Disney, including through the applicable robots.txt files or NOINDEX or NOFOLLOW meta-tags)".
+- §2.B.ix — "bypass, modify, defeat, tamper with or circumvent any of the functions or protections of the Disney Products".
+- §2.B.viii — "use the Disney Products for any commercial or business-related use or build a business utilizing the Disney Products, or engage in any activity to enable third parties to engage in any of the foregoing activities, in each case whether or not for profit".
+- §2.A (consumer licence) excludes use "in connection with any use, creation, development, modification, prompting, fine-tuning, training, testing, benchmarking or validation of any artificial intelligence or machine learning tool, model, system, algorithm, product or other technology ("AI Tool") … (except as may be expressly described within the Disney Product or used in a Disney Product in the manner for which it was intended)".
+- §1.H (Termination or Suspension) — "We may terminate or suspend your access to any Disney Products, and/or terminate this Agreement … if we have objective reason to believe you have used the Disney Products in violation of any provision of this Agreement or any supplemental terms".
+
+**ESPN Fantasy "Fair Play and Conduct" (support.espn.com, "Updated: August 04, 2026")** [V-docs]: governs one-person-one-team, collusion, cycling players through free agency, roster dumping and manager conduct; sanctions are "team cancellation and expulsion from the game" and being "prohibited from participating in future ESPN Fantasy Games". It says nothing about scripts, automation or the API. The fantasy-specific "Rules – Legal Restrictions" and "Terms & Conditions" pages on `www.espn.com` **could not be read today** — every fetch returned `202` with an empty body from CloudFront (bot gate) — so any automation clause specific to the fantasy game is **[U]**. There is no ESPN page about API use at all; no developer program, key or quota exists [V-observed negative; S-SDM "No API key exists for either"].
+
+**Plain reading.** A script that reads a user's own league through the JSON API and hands the data to an AI assistant is inside the literal text of §2.B.x ("script, or other automated means … for the purposes of creating or developing any AI Tool") and §2.A ("prompting … any artificial intelligence … tool"). The frequently repeated community view — S-STM (2019): "To my knowledge there is nothing against ESPN's ToS about using your own cookies for personal use within your own league" — is folklore and is wrong on the current text. finger-six/fantasy_bot #8 (2026-09-22) reads the same terms and concludes "Disney's current U.S. terms restrict automated extraction and gameplay without written permission" [V-community].
+
+### D.2 Enforcement evidence — verified vs folklore
+
+Verified, dated events (none is an account action against a user):
+
+| When | What | Evidence |
+|---|---|---|
+| Feb 2019 | v2 → v3 API migration broke every wrapper | S-JS README "ESPN API Changes" [V-community] |
+| Sep 2020 | reCAPTCHA added to the Disney login API; username/password automation dead (`PALOMINO_CHECK_FAILED`) | cwendt94 #128 [V-community] |
+| Apr 2024 | read host moved to `lm-api-reads.fantasy.espn.com`; the old host began answering 403/redirects to everyone | cwendt94 #539 (2024-04-23: "I have been working with the API for the past few weeks with no issues. However, when restarting my kernel … I was given a 403 error"), PR #540 merged 2024-04-25; S-STM update; S-PSR [V-community]; old host `302` today (P02) [V-observed] |
+| 2026-09-30 | bot gating on ESPN's **web pages** and on `site.api.espn.com` for a scripted client: `202` empty (CloudFront) on every `www.espn.com` page; `403 "Access Denied"` HTML on the news endpoint (P26) — while the read API host served 30 requests, including one with curl's default User-Agent, with no challenge (P30) | [V-observed] |
+
+Not found: any first-person, dated report of an ESPN/Disney account suspended or an IP blocked for reading one's own league through the API with one's own cookies — not in the issue trackers of S-PY or S-JS, not in the searches run today (`"espn_s2" … suspended OR banned OR "Access Denied"`, `"lm-api-reads" … 429 OR 403 rate limit`). Long-running cookie-based community services (GameDayBot's help page, keystone-fantasy, League Loom) publish these instructions openly. "ESPN might ban you" appears in forums without a case behind it. Absence of evidence is not evidence of absence: §1.H gives Disney the right, and the April 2024 change shows infrastructure moves happen without notice.
+
+### D.3 Rate limits and the polite-usage design
+
+**Observed numbers: none.** No documentation exists; no rate-limit, quota or `Retry-After` header appeared on any of 30 responses (§A.4) [V-observed negative]. S-PSR's "excessive requests may be blocked" is an assertion without a case. **What the wrappers do: nothing.** S-PY issues plain `requests.get` with no retry, no backoff and no cache, pulls the 2,663-row `players_wl` at construction, and `box_scores()` costs three requests (schedule, pro schedule, positional ratings); S-JS uses bare axios with no retry [V-community]. Sizes seen today: 3.2 MB for the wrappers' default five-view bootstrap (P05), 5.7 MB for a full-pool `kona_player_info` (P24) — neither belongs inside a tool call.
+
+**Design (numbers are proposals calibrated to the observed sizes and `max-age`s):**
+
+| Concern | Rule |
+|---|---|
+| Cache TTLs per view | `mSettings` 24 h (invalidate when `status.standingsUpdateDate`/`waiverLastExecutionDate` change); `mTeam`+`mStandings` 15 min in-week; `mRoster` 5 min in-week, 60 min off-season; `mMatchupScore`/`mBoxscore` **60 s inside game windows** (kickoff − 15 min to kickoff + 4 h, computed from `proTeamSchedules_wl` game `date`s), 10 min otherwise; `kona_player_info` free-agent lists 60 min; `kona_playercard` 6 h; `mTransactions2`/`mPendingTransactions` 10 min; `mDraftDetail` immutable once `draftDetail.drafted` is true; `players_wl` and `proTeamSchedules_wl` 24 h (server `max-age=300`, but the data changes weekly) |
+| Conditional requests | send `If-None-Match` with the stored weak ETag (stable for identical bodies, P04/P30); benefit [U] until a 304 is observed |
+| Single-flight | coalesce identical in-flight (URL + filter header) requests; compose views into one request the way the wrappers do (`mTeam&mRoster&mMatchup&mSettings&mStandings`) rather than five |
+| Backoff | on 429 and 5xx: exponential 1 s, 2 s, 4 s, 8 s with ±25 % jitter, max 3 retries, honour `Retry-After` if it ever appears; on 400/401/403/404: **never retry** |
+| Hard caps | token bucket **≤ 30 requests/min, ≤ 1 request/s sustained, ≤ 2 concurrent** per process; a global circuit breaker opens for 5 min after 3 consecutive 5xx/429 |
+| Per-tool-call budget | ≤ 3 upstream requests per tool call (most tools need 1); a tool that would exceed it returns what it has plus an explicit "partial" flag |
+| Drift probe | 1 request/day against the public fixture league (§F.2) |
+| Identification | a fixed, honest `User-Agent: espn-ff-mcp/<version> (+<repo URL>)` — the API host does not gate on UA (P30), and spoofing a browser to get past a gate would be the §2.B.ix behaviour we must avoid; if the API host ever starts blocking that UA, stop and report rather than impersonate |
+| Payload hygiene | never pull `allon`, never pull the full pool per call; page `kona_player_info` at ≤ 100 with a sort; request only the views a tool needs |
+
+### D.4 Risk assessment in plain language
+
+**What the text says:** the Disney Terms of Use, as updated May 24, 2024, prohibit automated access by script and use with AI tools, and let Disney suspend an account for it. This project is inside that text. Nothing in ESPN's fantasy fair-play rules addresses it, and the fantasy-specific legal pages could not be read.
+
+**What happens in practice:** in seven years of public wrappers, MCP servers and hosted cookie-based services, no verified account suspension or IP block for reading one's own league was found; every documented breakage was ESPN changing infrastructure (2019, 2020, 2024) with no notice. The read API host today serves anonymous scripted clients without challenge; ESPN's web pages and its news host do not.
+
+**The realistic risks, in order:** (1) silent breakage when ESPN moves a host or renames a field (§F); (2) leaking `espn_s2`, which is a password-equivalent for the whole ESPN/Disney account (§C.4); (3) a write mistake that changes a real lineup (§E); (4) an account action by ESPN — possible under §1.H, unobserved in the record.
+
+**Mitigations that define the project:** personal use by the account owner on their own single league; read-mostly with writes off by default and confirmed per action; aggressive caching and hard request caps (tens of requests per day, not per minute); honest identification; no redistribution, resale or dataset-building; no model training on the data; secrets in the OS keychain, never in the repo or the client config; a `health` tool that says when the credential was last accepted. With those in place the exposure is one person's fantasy account, and the failure mode to design for is drift, not enforcement.
+
