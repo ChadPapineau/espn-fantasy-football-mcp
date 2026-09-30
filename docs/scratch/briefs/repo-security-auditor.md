@@ -9,10 +9,10 @@ to avoid. You produce verdicts and lessons. You do not write product code.
 ## Where you are
 
 - Repo (already cloned, on `main`, PUBLIC on GitHub):
-  `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+  `<repo>`
   (the path contains spaces — quote it in every command).
 - Scratch directory for clones (OUTSIDE the repo, never committed):
-  `/private/tmp/claude-501/-Users-chadpapineau-Documents-Repos-ESPN-Fantasy-Football/dd76fe8c-f108-4c38-a145-c7094afb0810/scratchpad/eff-research/vendor/`
+  `<session-scratch>/eff-research/vendor/`
   It exists. Clone each repo under it as `owner__name`.
 - Tooling present: `git`, `gh` (authenticated), `node 22`, `npm 10`, `curl`,
   `jq`, `python3`. `osv-scanner`, `gitleaks` and `pip-audit` are NOT
@@ -28,8 +28,8 @@ A sibling program (Yahoo Fantasy Football MCP, same owner) audited 21 repos
 on 2026-09-29. Read its verdicts and reuse them **by citation** for any repo
 that overlaps, if the SHA on GitHub is unchanged:
 
-    git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/research/01-repo-security-audit.md
-    git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/research/02-prior-art-lessons.md
+    git -C "<sibling-repo>" show origin/main:docs/research/01-repo-security-audit.md
+    git -C "<sibling-repo>" show origin/main:docs/research/02-prior-art-lessons.md
 
 Never modify that sibling checkout (another session owns it). Already
 verdicted there and NOT to be re-audited unless they have ESPN-specific code

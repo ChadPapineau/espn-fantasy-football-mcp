@@ -56,3 +56,13 @@ handoff document `docs/HANDOFF.md` (created 2026-09-30 per Chad's answer).
 - Explicit-path staging only; `git pull --rebase` before every push; never
   force-push; verify `HEAD == origin/main` after each push.
 - Mark every claim **verified** (with a source and date) or **unverified**.
+
+## Placeholders in the saved briefs
+
+Briefs in `docs/scratch/briefs/` are the text sent to each agent, except
+that absolute local paths are replaced by placeholders (no local path is
+committed to this public repo): `<repo>` = this checkout, `<sibling-repo>`
+= the local clone of the Yahoo project, `<session-scratch>` = the
+orchestrating session's scratch directory (outside the repo),
+`<mcp-builder-skill>` and `<skill-creator-skill>` = the locally installed
+skill directories, `<home>` = the user's home directory.

@@ -12,7 +12,7 @@ same. You do not write product code.
 ## Where you are
 
 - Repo (already cloned, on `main`, PUBLIC on GitHub):
-  `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+  `<repo>`
   (the path contains spaces — quote it in every command).
 - Read first (all on `main`): `docs/research/00-tooling-inventory.md`,
   `02-prior-art-lessons.md` (what existing ESPN servers expose and get
@@ -24,8 +24,8 @@ same. You do not write product code.
 - **The sibling program already did the mechanism research today.** Read
   it in full and reuse by citation; do not re-derive:
 
-      git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/research/06-skills-and-mcp-design.md
-      git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/plan/01-system-architecture.md
+      git -C "<sibling-repo>" show origin/main:docs/research/06-skills-and-mcp-design.md
+      git -C "<sibling-repo>" show origin/main:docs/plan/01-system-architecture.md
 
   (cite as `yahoo-fantasy-football-mcp@<sha> docs/research/06-… §<n>`, sha
   from `git -C "…Yahoo Fantasy Football" rev-parse origin/main`; never
@@ -37,9 +37,9 @@ same. You do not write product code.
   unless you find them wrong — say so if you do, with evidence.
 - **Authoring standards** (load/read before writing the catalog):
   - `Skill(skill="anthropic-skills:mcp-builder")`, and its reference files:
-    `/Users/chadpapineau/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/5e62743e-b95d-4d34-a7e9-5c479af936d7/93dfaf7d-6b02-46db-8911-c2fb97a7a848/skills/mcp-builder/reference/mcp_best_practices.md`
+    `<mcp-builder-skill>/reference/mcp_best_practices.md`
     and `…/reference/evaluation.md` (same directory; quote the path).
-  - `/Users/chadpapineau/.claude/plugins/marketplaces/claude-plugins-official/plugins/skill-creator/skills/skill-creator/SKILL.md`
+  - `<skill-creator-skill>/SKILL.md`
     and its `references/` (the Skill authoring standard: frontmatter,
     description-as-trigger, progressive disclosure, evals).
 - Tools: `WebFetch`, `WebSearch`, `Read`, `Grep`, `Bash` (git only).

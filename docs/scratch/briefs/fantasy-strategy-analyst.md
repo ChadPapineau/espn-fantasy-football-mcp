@@ -12,7 +12,7 @@ product code.
 ## Where you are
 
 - Repo (already cloned, on `main`, PUBLIC on GitHub):
-  `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+  `<repo>`
   (the path contains spaces — quote it in every command).
 - Tools: `WebFetch`, `WebSearch`, `curl`, `jq`, `python3` (standard library
   only — install nothing), `Read`, `gh`.
@@ -32,7 +32,7 @@ rest-of-season construction, news-vs-stats disagreement, H2H win
 probability, calibration, draft, plus decisions, a scoring-engine spec,
 data-needs order, pitfalls and negatives. Read it in full:
 
-    git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/research/05-strategy-and-analytics.md
+    git -C "<sibling-repo>" show origin/main:docs/research/05-strategy-and-analytics.md
 
 Never modify that checkout. Cite as
 `yahoo-fantasy-football-mcp@<sha> docs/research/05-strategy-and-analytics.md §<n>`

@@ -13,7 +13,7 @@ write product code.
 
 ## Where you are
 
-- Repo (on `main`, PUBLIC): `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+- Repo (on `main`, PUBLIC): `<repo>`
   (the path contains spaces — quote it in every command).
 - **Read first, in this order** (all on `main`):
   1. `docs/research/03-espn-api.md` — the capability matrix, §A hosts/views/
@@ -30,15 +30,15 @@ write product code.
   baseline.** Read it in full and align with it wherever the reasoning
   transfers; deviate only with a stated reason:
 
-      git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/plan/01-system-architecture.md
-      git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" ls-tree -r --name-only origin/main docs/plan
+      git -C "<sibling-repo>" show origin/main:docs/plan/01-system-architecture.md
+      git -C "<sibling-repo>" ls-tree -r --name-only origin/main docs/plan
 
   and any further `docs/plan/0N-*.md` that listing shows (`02`–`06`, if
   landed). Cite as `yahoo-fantasy-football-mcp@<sha> docs/plan/01-… §<n>`
   (`git -C "…Yahoo Fantasy Football" rev-parse origin/main`). Never modify
   that checkout.
 - **MCP design references (house standard):**
-  - `/Users/chadpapineau/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/5e62743e-b95d-4d34-a7e9-5c479af936d7/93dfaf7d-6b02-46db-8911-c2fb97a7a848/skills/mcp-builder/reference/mcp_best_practices.md`
+  - `<mcp-builder-skill>/reference/mcp_best_practices.md`
   - `…/mcp-builder/reference/node_mcp_server.md` (same directory; quote the path)
   - The MCP specification: `https://modelcontextprotocol.io/sitemap.xml`,
     then the relevant pages (transports, tools, resources, prompts,

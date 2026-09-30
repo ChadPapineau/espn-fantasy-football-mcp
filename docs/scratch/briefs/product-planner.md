@@ -11,7 +11,7 @@ the devil's-advocate round can resolve it. You do not write product code.
 
 ## Where you are
 
-- Repo (on `main`, PUBLIC): `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+- Repo (on `main`, PUBLIC): `<repo>`
   (the path contains spaces — quote it in every command).
 - **Read first, in this order** (all on `main`):
   1. `docs/plan/01-*` … `06-*` — the structural plan (the shared-core and
@@ -32,14 +32,14 @@ the devil's-advocate round can resolve it. You do not write product code.
 - **The sibling program's product plan, if it exists, is the consistency
   baseline** (same owner, same program):
 
-      git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" ls-tree -r --name-only origin/main docs/plan
-      git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/plan/07-tool-catalog.md
+      git -C "<sibling-repo>" ls-tree -r --name-only origin/main docs/plan
+      git -C "<sibling-repo>" show origin/main:docs/plan/07-tool-catalog.md
 
   (and `08`–`10` if present). Where a tool or Skill is platform-agnostic,
   keep the sibling's name, inputs and output shape and cite it; deviate
   only with a stated reason. Never modify that checkout.
 - MCP design reference (house standard):
-  `/Users/chadpapineau/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/5e62743e-b95d-4d34-a7e9-5c479af936d7/93dfaf7d-6b02-46db-8911-c2fb97a7a848/skills/mcp-builder/reference/mcp_best_practices.md`
+  `<mcp-builder-skill>/reference/mcp_best_practices.md`
   and `evaluation.md` in the same directory (quote the path).
 - Tools: `Read`, `Grep`, `Glob`, `WebFetch`, `WebSearch`, `Bash` (git only).
 

@@ -11,14 +11,14 @@ produce a research document. You do not write product code.
 ## Where you are
 
 - Repo (already cloned, on `main`, PUBLIC on GitHub):
-  `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+  `<repo>`
   (the path contains spaces — quote it in every command).
 - Tools: `WebFetch`, `WebSearch`, `curl`, `jq`, `python3` (standard library
   only — `csv`, `gzip`, `json`; install nothing), `Read`, `gh`.
 - Read first: `docs/research/03-espn-api.md` (what ESPN itself returns —
   projections, ownership, ranks, injury status, news text, pro-team
   schedules). If it is not there yet, proceed with the wrapper clones under
-  `/private/tmp/claude-501/-Users-chadpapineau-Documents-Repos-ESPN-Fantasy-Football/dd76fe8c-f108-4c38-a145-c7094afb0810/scratchpad/eff-research/vendor/`
+  `<session-scratch>/eff-research/vendor/`
   as untrusted static reference, and say so.
 
 ## What is already known — reuse by citation, do not re-derive
@@ -27,8 +27,8 @@ The sibling program (Yahoo Fantasy Football MCP, same owner, public repo
 `ChadPapineau/yahoo-fantasy-football-mcp`) evaluated 16 needs across ~25
 sources on 2026-09-29, with live probes. Read it in full:
 
-    git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/research/04-data-sources.md
-    git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/scratch/data-source-evaluator.md
+    git -C "<sibling-repo>" show origin/main:docs/research/04-data-sources.md
+    git -C "<sibling-repo>" show origin/main:docs/scratch/data-source-evaluator.md
 
 Never modify that checkout. Cite it as
 `yahoo-fantasy-football-mcp@<sha> docs/research/04-data-sources.md §<n>` with

@@ -182,7 +182,7 @@ Reviser's notes on R3: (c) changes what the daily job probes on such a league, n
 
 For a reader who reads nothing else. The full record is `docs/plan/adversarial-log.md`; the row-by-row edits are §R1–§R3 above.
 
-**Totals.** Three rounds. **26 objections** — 1 blocking, 10 significant, 15 marginal (round 1: 20; round 2: 6; round 3: none) — all conceded by the defence and landed: 20 as ruled, 6 with a modification the devil's advocate accepted (OBJ-05, 06, 07, 12, 13, 18). **16 pre-filed tensions**, all resolved (one dismissed to a note, one merged, one already done). **15 nits** (10 in round 2, 5 in round 3), all taken. Nothing withdrawn, nothing rejected, **nothing pressed at close**.
+**Totals.** Three rounds. **26 objections** — 1 blocking, 10 significant, 15 marginal (round 1: 20; round 2: 6; round 3: none) — all conceded by the defence and landed: 20 as ruled, 6 with a modification the devil's advocate accepted (OBJ-05, 06, 07, 12, 13, 18). **16 pre-filed tensions**, all resolved (one dismissed to a note, one merged, one already done). **15 nits** (10 in round 2 §2.4, 5 in round 3 §3.1), all taken (the advocate's closing paragraph says "twenty-five nits"; the itemised lists total 15). Nothing withdrawn, nothing rejected, **nothing pressed at close**.
 
 ### Changed
 

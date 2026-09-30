@@ -108,10 +108,11 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
    QB1–10 value 6–18 % over 4-pt but the last starter stays at
    replacement (stream QB). IR eligibility is O or IR only (verified);
    a cleared IR player makes the roster INVALID and blocks every add.
-9. **Skills and MCP design (`06`)**: 14 Skills ship (`onboard`, `weekly`,
-   `start-sit`, `stream-kdef`, `retro`, `apply`, `session-check` at P0;
-   `waivers`, `trade`, `injury-cascade`, `schedule-plan`, `roster-audit`,
-   `news-check`, `live` at P1) and `draft` is deferred to next August;
+9. **Skills and MCP design (`06`)**: 13 Skills ship (`onboard`, `weekly`,
+   `start-sit`, `stream-kdef`, `retro`, `apply`, `session-check` and the
+   priority branch of `waivers` at P0; `trade`, `injury-cascade`,
+   `schedule-plan`, `roster-audit`, `news-check` at P1); `live` is folded
+   into `start-sit` and `draft` is deferred to next August;
    names and procedures match the sibling where the procedure is the
    same, with format-specific branches (move-to-last claim rule, seeding
    reading) chosen by settings. Writes: an operator-controlled
@@ -121,8 +122,7 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
    plugin-hosted MCP tools are named `mcp__plugin_<plugin>_<server>__<tool>`,
    so Skill prose must use bare tool names — which makes the `espn_`
    prefix necessary beside the Yahoo server (`06` §C.1). No public ESPN
-   fantasy Skills bundle exists. (Plan `09` later folded `live` into
-   `start-sit`: **13 Skills ship**.)
+   fantasy Skills bundle exists.
 10. **Product plan (`07`–`10`)**: **18** P0 tools under `EFF_TOOLSET=core`
    (16 P1 under `full`, 7 conditional writes, 4 later — round 1 OBJ-08), 10 resources, 13
    prompts; `espn_analyze_waivers` is priority-cost-aware at P0;
@@ -220,6 +220,24 @@ approval the build starts at plan `10` Phase 0 (Z1–Z7).
     dataset source fails at the 11th ("too many attached databases" —
     reproduced here by the orchestrator). This plan's fix: one read-only
     connection per dataset file, no startup attach loop (plan `01` §5.5).
+
+13. **An absolute local path was committed in the agent briefs** (orchestrator's
+    error, found by the final scan): `docs/scratch/briefs/*.md` carried the
+    checkout path and the session scratch path from commit `efd6f4b` until
+    they were replaced by placeholders on 2026-09-30. Nothing secret was
+    exposed (the username in the path equals the public GitHub handle), and
+    every other tracked file was clean. The strings remain in **git
+    history**; removing them needs a history rewrite and a force-push, which
+    Chad's rules forbid — his call.
+14. **GitHub private vulnerability reporting is off** on the repo;
+    `SECURITY.md` names it as the reporting path and says it is a pending
+    maintainer step. Enabling it is a repository setting (owner's action).
+15. **Plan consistency fixes after the docs pass** (changelog §R4): the
+    `waivers` prompt is P0 like its Skill; the confirmation code is carried
+    in the notification only (no pending file); the dataset-read tools and
+    `espn_list_recommendations` have named annotation families; the
+    `permissions.deny` set for a reach session is enumerated as a Phase W
+    prerequisite.
 
 ## Open items
 

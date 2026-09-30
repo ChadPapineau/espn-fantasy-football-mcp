@@ -20,12 +20,12 @@ thorough is a failure.
 
 ## Where you are
 
-- Repo (on `main`, PUBLIC): `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+- Repo (on `main`, PUBLIC): `<repo>`
   (the path contains spaces — quote it in every command).
 - **Read everything in `docs/plan/` first** (`01-*` … `10-*`). Then the
   research it rests on: `docs/research/02-*` … `06-*` (and `01-*`'s
   verdict table). Then the MCP reference the plan claims to follow:
-  `/Users/chadpapineau/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/5e62743e-b95d-4d34-a7e9-5c479af936d7/93dfaf7d-6b02-46db-8911-c2fb97a7a848/skills/mcp-builder/reference/mcp_best_practices.md`
+  `<mcp-builder-skill>/reference/mcp_best_practices.md`
   (quote the path).
 - Tools: `Read`, `Grep`, `Glob`, `WebFetch`, `WebSearch`, `Bash` (git
   only). Verify claims against primary sources when a claim is

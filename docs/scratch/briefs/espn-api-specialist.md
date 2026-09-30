@@ -13,13 +13,13 @@ write product code.
 ## Where you are
 
 - Repo (already cloned, on `main`, PUBLIC on GitHub):
-  `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+  `<repo>`
   (the path contains spaces — quote it in every command).
 - Tools: `WebFetch`, `WebSearch`, `curl`, `jq`, `Read`, `gh`. Node 22 is
   present but you write no product code.
 - A parallel agent (`repo-security-auditor`) is cloning ESPN wrapper repos
   into
-  `/private/tmp/claude-501/-Users-chadpapineau-Documents-Repos-ESPN-Fantasy-Football/dd76fe8c-f108-4c38-a145-c7094afb0810/scratchpad/eff-research/vendor/`
+  `<session-scratch>/eff-research/vendor/`
   (subdirs `owner__name`). You MAY read those clones statically as
   **untrusted reference material** (they encode endpoint lists, view names,
   stat-id maps). Never run anything from them; never copy code; cite paths.
@@ -29,7 +29,7 @@ write product code.
 - Sibling program (Yahoo, same owner) for structure and consistency — read
   its API doc for the section shape and the verification vocabulary, never
   modify that checkout:
-  `git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:docs/research/03-yahoo-api.md`
+  `git -C "<sibling-repo>" show origin/main:docs/research/03-yahoo-api.md`
 
 ## Standing rules (from Chad, non-negotiable)
 

@@ -13,7 +13,7 @@ plan awaiting the owner's approval. You do not write product code.
 
 ## Where you are
 
-- Repo (on `main`, PUBLIC): `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+- Repo (on `main`, PUBLIC): `<repo>`
   (the path contains spaces — quote it in every command; **never write
   this absolute path into any committed file**).
 - **Read first**: every file in `docs/plan/` (the refined plan `01-*` …
@@ -22,7 +22,7 @@ plan awaiting the owner's approval. You do not write product code.
   disclosure in `03-*` §D); `.env.example`; `docs/scratch/program.md`.
 - The sibling project's README, if it exists, is a **structure**
   reference for consistency (same owner):
-  `git -C "/Users/chadpapineau/Documents/Repos/Yahoo Fantasy Football" show origin/main:README.md`
+  `git -C "<sibling-repo>" show origin/main:README.md`
   — copy its section order where sensible; copy no prose about Yahoo.
   Never modify that checkout.
 - Tools: `Read`, `Write`, `Edit`, `Grep`, `Glob`, `Bash` (git; and

@@ -12,7 +12,7 @@ product code.
 
 ## Where you are
 
-- Repo (on `main`, PUBLIC): `/Users/chadpapineau/Documents/Repos/ESPN Fantasy Football`
+- Repo (on `main`, PUBLIC): `<repo>`
   (the path contains spaces — quote it in every command).
 - **Read first, in this order:** `docs/plan/adversarial-log.md` — §1.1
   (objection table), §1.2 (details: each objection's *Target* lines tell
