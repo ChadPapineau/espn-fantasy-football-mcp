@@ -85,7 +85,7 @@ Status legend as above.
 - N1 applied (plan 07 E1/E3 inputs, §7 A-7; plan 10 A16a, A8a, §6 A-2; plan 08 §7 P12) · N2 applied (plan 07 E13; plan 09 §3.5; plan 10 A11a, B14) · N3 applied (plan 07 E5 output + method; plan 09 §3.8; plan 10 A9a) · N4 applied (plan 09 §2 orient.md) · N5 applied (plan 06 §1.4 snapshot pool) · N6 applied (plan 01 §7; plan 03 §3) · N7 applied (plan 10 §3.0 Z7, §1) · N8 applied (plan 07 E2 ×2, §7 A-3) · N9 applied (plan 07 C10, §5.1; plan 10 A7a; plan 01 §4 intro) · N10 applied (plan 05 §0; plan 10 A16a)
 
 ### Other tasks
-- changelog §R2 — pending
+- changelog §R2 — applied (numbers/names table, 6 objection rows, 10 nit rows, narrow readings; four R1 rows re-pointed at the R2 rulings that superseded them)
 - consistency grep (R2 phrases + R1 list re-check) — pending
 - Mermaid manual pass on touched blocks — pending
 - HANDOFF: one item (SQLite 10-attachment limit applies to the sibling's layout) — pending
@@ -103,3 +103,4 @@ Status legend as above.
 - 3c18e09 — OBJ-21 + Z7
 - 0420837 — OBJ-22, OBJ-23
 - 5216555 — OBJ-24, OBJ-25, OBJ-26
+- 5661da1 — nits 1–6, 8–10
