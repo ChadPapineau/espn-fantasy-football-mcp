@@ -17,18 +17,23 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Running: `skills-mcp-researcher` (wave 3, `06`; A–C pushed at `524a254`).
-The keyring audit is done (`01` §30: **Safe**, pin exact). When `06` is
-done: verify SHAs, scan for identifiers, spot-check one claim, then spawn
-`product-planner` (wave 4, plan `07`–`10`; needs `05`, `06`,
-plan `01`–`06`). Then wave 5 `devils-advocate` (multi-round; the
-orchestrator defends in `docs/plan/adversarial-log.md`, edits the plan,
-writes `docs/plan/changelog.md`), wave 6 `docs-writer` (README with 8
-validated Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
-`docs/plan/00-index.md`; the orchestrator re-validates diagrams in a
-browser). Then the executive summary for Chad. **Chad (2026-09-30): report
-back when all research and planning is complete; no development or
-testing before his review.**
+Running: `product-planner` (wave 4, plan `07`–`10`; the only agent in the
+tree). When it finishes: verify SHAs, scan for identifiers, spot-check one
+claim, then spawn `devils-advocate` (wave 5, brief in
+`docs/scratch/briefs/devils-advocate.md`). The adversarial phase is
+multi-round: after each round the orchestrator appends `## Round N —
+defence` to `docs/plan/adversarial-log.md` (justify with evidence or
+concede), edits the plan files directly, pushes, then resumes the same
+agent id via SendMessage for the next round; stop when the remaining
+objections are marginal; then write `docs/plan/changelog.md` (what the
+process changed, what survived). Then wave 6 `docs-writer` (README with 8
+Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
+`docs/plan/00-index.md`); the orchestrator re-validates every diagram with
+the browser harness (scratchpad `mermaid/index.html`, served on
+127.0.0.1:8791 — recreate from the description in the 2026-09-30 log entry
+if the scratchpad is gone). Then the executive summary for Chad. **Chad
+(2026-09-30): report back when all research and planning is complete; no
+development or testing before his review.**
 
 ## The findings that shape the product (verified by the orchestrator)
 
@@ -100,14 +105,28 @@ testing before his review.**
    QB1–10 value 6–18 % over 4-pt but the last starter stays at
    replacement (stream QB). IR eligibility is O or IR only (verified);
    a cleared IR player makes the roster INVALID and blocks every add.
+9. **Skills and MCP design (`06`)**: 14 Skills ship (`onboard`, `weekly`,
+   `start-sit`, `stream-kdef`, `retro`, `apply`, `session-check` at P0;
+   `waivers`, `trade`, `injury-cascade`, `schedule-plan`, `roster-audit`,
+   `news-check`, `live` at P1) and `draft` is deferred to next August;
+   names and procedures match the sibling where the procedure is the
+   same, with format-specific branches (move-to-last claim rule, seeding
+   reading) chosen by settings. Writes: an operator-controlled
+   registration gate (env flag AND typed acknowledgement AND stored
+   credential AND own team resolved) plus the prepare/commit execution
+   gate; only the `apply` Skill may call commit tools. New evidence:
+   plugin-hosted MCP tools are named `mcp__plugin_<plugin>_<server>__<tool>`,
+   so Skill prose must use bare tool names — which makes the `espn_`
+   prefix necessary beside the Yahoo server (`06` §C.1). No public ESPN
+   fantasy Skills bundle exists.
 
 ## Program status (pre-build: research → plan → adversarial review → docs)
 
 | phase | status | artefacts |
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
-| 1 — research | 🟢 `01`–`05` ✅ verified · `06` running | `docs/research/01-*` … `06-*` |
-| 2 — plan | 🟢 plan `01`–`06` ✅ verified (`965ee10`); product planner ⚪ (waits for `06`) | `docs/plan/01-*` … `10-*` |
+| 1 — research | ✅ `00`–`06` verified (`01` incl. keyring §30) | `docs/research/01-*` … `06-*` |
+| 2 — plan | 🟢 `01`–`06` ✅ verified; product planner running (`07`–`10`) | `docs/plan/01-*` … `10-*` |
 | 3 — adversarial review | ⚪ (brief ready) | `docs/plan/adversarial-log.md`, `changelog.md` |
 | docs — README, LICENSE, SECURITY.md | ⚪ (brief ready) | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
@@ -168,7 +187,7 @@ testing before his review.**
 - [x] Phase 0 complete
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
 - [x] `04`, `05` verified
-- [x] plan `01`–`06` verified · [x] keyring audit (Safe) · [ ] `06` · [ ] plan `07`–`10`
+- [x] plan `01`–`06` verified · [x] keyring audit (Safe) · [x] `06` verified · [ ] plan `07`–`10`
 - [ ] adversarial rounds, changelog
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
 - [ ] executive summary for Chad
@@ -198,3 +217,5 @@ testing before his review.**
   Chad: report back when research and planning are complete; no build before review.
 - 2026-09-30 — keyring audit ✅ (`5b6b0bb`, Safe). Provenance re-verified by the
   orchestrator on npm's attestations endpoint.
+- 2026-09-30 — `skills-mcp-researcher` ✅ (`2696787`). Orchestrator spot-checked the
+  plugin tool-naming sentence at code.claude.com. `product-planner` spawned (wave 4).

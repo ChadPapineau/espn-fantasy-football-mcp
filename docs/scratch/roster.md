@@ -12,9 +12,9 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 | espn-api-specialist | ae40ffdfb8c95bafa | 1 | ✅ done (SHAs verified on origin; identifier scan clean) | `docs/research/03-espn-api.md`, `docs/scratch/espn-api-specialist.md` | `c43704c` | — |
 | data-source-evaluator | a60240589e2bf3479 | 2 | ✅ done (SHAs verified; identifier scan clean; espn_id 497/500 recounted independently; ToU §2.B.viii quote verified) | `docs/research/04-*`, `docs/scratch/data-source-evaluator.md` | `38c778b` | — |
 | fantasy-strategy-analyst | a0bfbe7bbfa3c85c1 | 2 | ✅ done (SHAs verified; identifier scan clean; IR-eligibility quotes verified at support.espn.com) | `docs/research/05-*`, `docs/scratch/fantasy-strategy-analyst.md` | `31abd8f` | — |
-| skills-mcp-researcher | a4ffbd8e575038d07 | 3 | 🟢 running | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | — | brief |
+| skills-mcp-researcher | a4ffbd8e575038d07 | 3 | ✅ done (SHAs verified; identifier scan clean; plugin tool-naming claim spot-checked at code.claude.com) | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | `2696787` | — |
 | architecture-planner-core | aa8211963894867bd | 3 | ✅ done (SHAs verified; identifier/abs-path scan clean; SDK 2.2.0 and keyring 2.1.0 metadata re-checked on the npm registry) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `965ee10` | — |
-| product-planner | — | 4 | ⚪ not started | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief |
+| product-planner | abf797cc7b96aadb5 | 4 | 🟢 running | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief |
 | devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | — | brief |
 
@@ -40,3 +40,4 @@ wave order; respawn cold from the saved brief only if the ID is gone.
 - 2026-09-30 — `fantasy-strategy-analyst` ✅ (`c57d110`…`31abd8f`), 451 lines, 22 requests. Orchestrator verified the IR-eligibility quotes at the ESPN help article (Updated 2026-08-18). `architecture-planner-core` committed the shared-core decision early (`9f41a3c`). Wave 3 (second slot) spawned: `skills-mcp-researcher`.
 - 2026-09-30 — `architecture-planner-core` ✅ (`94e18cd`…`965ee10`), plans 01–06, 1,914 lines. Orchestrator verified `@modelcontextprotocol/server` 2.2.0 (2026-09-28, no install scripts) and `@napi-rs/keyring` 2.1.0 (2026-09-13, prebuilt optional deps, no install script) on the npm registry; scans clean. `repo-security-auditor` resumed (same id) for the keyring audit per plan 02 §7.2.
 - 2026-09-30 — keyring addendum ✅ (`5b6b0bb`): `@napi-rs/keyring@2.1.0` Safe, pin exact + lockfile integrity; plan 02 §7.2 items 1–4 pass statically, item 5 (macOS prompt behaviour) is a runtime check for the first `eff doctor`. Orchestrator verified the SLSA provenance (GitHub-hosted runner, `CI.yml`, source commit `1635ed45…`).
+- 2026-09-30 — `skills-mcp-researcher` ✅ (`8b7fff1`…`2696787`), 582 lines: 14 Skills shipping + `draft` deferred; 36-tool crosswalk; registration gate (operator-controlled) + execution gate (prepare/commit with HMAC ticket). Wave 4 spawned: `product-planner`.
