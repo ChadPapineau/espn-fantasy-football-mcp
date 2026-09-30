@@ -351,3 +351,101 @@ points(line, pos) = Σ_{item ∈ scoringItems} pts(item, pos) × line.get(item.s
 | 7 | Line with statId 999 = 4 | unchanged total; one log line |
 | 8 | QB line scored with `defaultPositionId 15` (TQB) and an item whose `pointsOverrides["15"]` differs | uses the override |
 
+---
+
+## 8. Decisions, pitfalls, negatives, evaluation
+
+### 8.1 Decisions the plan should adopt
+
+1. **Read the format, never assume it.** Every recommendation is a function of `S`, `R`, `N`, the acquisition, schedule and trade settings named in §0; a tool with no `mSettings` in cache refuses to recommend. The seeding reading is `playoffSeedingRule` (reading (a)) plus a `seeding_mode: points_only` switch for (b), with the last-season detection of §2.1 offered, not imposed.
+2. **Waivers are an option, not an auction.** Implement §1.2's premium `Π(k, W)` (cold-start table; re-solved from the league's own surplus distribution and drift, §1.6), the rule `claim ⇔ s ≥ Π`, the long ordered claim list, and the two briefs (Tuesday evening, Wednesday morning) keyed to `status.waiverNextExecutionDate`.
+3. **The seeding simulator is the objective function** for start/sit variance (§2.2), trade `ΔU` (§2.2), ROS weighting (`P(alive at w)`) and the deadline; it runs under both readings when the mode is uncertain and shows both.
+4. **The scoring engine of §7 is the only scorer**, validated weekly against `appliedTotal`; ESPN's native projection is the comparator in every evaluation (§5).
+5. **Derive the roster template**: one K and one D/ST in starting slots, no bench QB/TE/K/D-ST, five RB/WR depth spots by the §4.1 curves, two IR stashes under §4.3, with the daily IR-validity guard.
+6. **Untrusted-text envelope** for every free-text field (§6), with the three injection evals in CI.
+7. **Log every recommendation** with alternatives and `as_of` (sib §12) so the retrospective can score regret against "start by ESPN projection" and Brier against ESPN's `winProbability` / `playoffPct`.
+8. **Ingestion order for this server**: ESPN league payloads (`mSettings`, `mTeam+mRoster+mMatchup`, `mBoxscore`, `kona_player_info` with projections and ownership) → `proTeamSchedules_wl` → implied totals → injuries → nflverse weekly usage (its `target_share`, `air_yards_share`, `wopr` columns cover sib §4.1's detection signals) → Sleeper trending → play-by-play. This is sib §16 with ESPN's native projection promoted to day one because it costs nothing.
+
+### 8.2 Pitfalls — where naive versions fail in this format
+
+1. Spending a high waiver slot on a small upgrade (`s < Π`) — or the mirror image, passing on a genuine role change "to keep priority" when `s > Π`. Both are the same error: not computing the premium.
+2. Porting FAAB logic (shading, `λ`) to a priority league; there is no bid to shade.
+3. Ignoring the Wednesday-morning free-agent scramble — with a 1-day period, first-come free agency is the larger market.
+4. Modelling the wrong seeding reading: the same 4-4 team is a favourite under (a) and a bubble team under (b) (§2.4), and the deadline advice inverts.
+5. "Coasting" or benching a locked-in starter to protect a lead: PF decides the last spot in more than half of simulated seasons under (a) and everything under (b).
+6. Paying for an elite QB as if 5-pt TDs made the position scarce (§3.2: QB1 is WR1-class; QB10 ≈ replacement).
+7. Carrying a QB2/TE2/K2/D-ST2 on a five-man bench.
+8. Position rules for the flex ("always RB") — the baselines differ by < 0.2 pts/game and the split flips between seasons.
+9. IR misuse: moving a Questionable player in (ineligible), leaving a healed player in (blocks every add), activating the night before a run (the claim fails).
+10. Decoding `defaultPositionId` or `draftRanksByRankType` with the *slot* map (03 §B.2 trap) — every QB becomes "TQB".
+11. Using `mPositionalRatings` unregressed as a matchup driver (sib §1 step 6; YoY r 0.15–0.27).
+12. Treating `ownership.percentChange` or Sleeper trending as a buy signal rather than a demand signal.
+13. Hard-coding playoff weeks from the help page ("starting in week 14") instead of `matchupPeriods`; hard-coding the 3–5 a.m. run instead of `waiverProcessDays/Hour` and `waiverNextExecutionDate`.
+14. Letting `seasonOutlook` / `outlooksByWeek` override `injuryStatus` or a roster fact.
+15. Using season totals for replacement level (byes and missed games bake in) — §4.1 shows the per-game and season-total flex splits disagree in the same season.
+
+### 8.3 Negatives — things that sound smart and are not, with the reason
+
+| Claim | Verdict | Why |
+|---|---|---|
+| "Hoard the #1 waiver slot for the league-winner." | No | `V(1,16) = 96` ROS points at the season's start, shrinking ~linearly; any claim with `s > Π(1, W)` (≈ 2.5 pts/week with 10 weeks left) is worth more than the option; the slot also regenerates through rivals' claims (§1.2) [V-data]. |
+| "Never claim from a high slot — wait for free agency." | No | A contested player clears with probability `Π_i (1 − q_i)`; for the players worth claiming that is near zero (§1.3). Claim when `s ≥ Π`, scramble for the rest. |
+| "5-pt passing TDs mean draft a QB early." | No | QB1 − QB12 = 105.9 (2025) / 160.0 (2024) season points vs RB1 224 / 176 and WR1 140 / 158; the 4→5 change adds 6–18 % to the QB VOR pool and 0–1 pt/game to QB1's edge; QB10 is within 1 pt/game of QB12 [V-data §3.2]. Take an elite QB only when `xVBD` says so. |
+| "−2 INT makes turnover-prone QBs unstartable." | No | No top-24 QB moves more than one rank between INT −1 and −2 in either season; the penalty is a 7–12 % level shift [V-data §3.2]. |
+| "Stack QB–WR to score more." | No | Correlation 0.35 (this format, 2024–2025) changes variance, not the mean; use it as an underdog only (sib §3.3) [V-data]. |
+| "Points-for seeding rewards high-ceiling lineups every week." | No | Under (a) one win ≈ 90–200 PF points; under (b) a safely-in team *loses* 0.05 of `P(playoffs)` by raising its σ from 20 to 28, while a chasing team gains 0.06 [V-data §2.4]. Variance is a position, not a style. |
+| "When the matchup is decided, the rest of the week doesn't matter." | No | PF tiebreak decides the sixth seed in 56 % of simulated seasons under (a); every point counts under (b) [V-data]. |
+| "Carry a backup QB/TE for the bye." | No | QB10 − QB12 < 1 pt/game; the wire's best available was a QB in 8 of 26 hindsight weeks; TE5+ is replacement [V-data §3–§4]. Stream the bye week. |
+| "Always handcuff your RB1" / "never handcuff". | Neither | Compute sib §9.2; with five bench spots it is positive for at most one handcuff and negative for committees and rivals' backups (§4.2). No rigorous study exists (sib §18). |
+| "Put any injured player in IR." | No | Only `OUT` / `INJURY_RESERVE` tags qualify; Questionable/Doubtful cannot enter; suspended never; a healed player in the slot blocks all adds [V-docs §4.3]. |
+| "ESPN's position-vs-opponent ratings rank the matchups." | No | Preseason and early-season DvP is near noise (sib §7.2, §18); regress toward 1 and ramp in from week 8. |
+| "Trending adds tell you who to add." | No | A competition signal by construction (sib §18 on `percent_owned.delta`); use it in `q_i`, not in detection. |
+| "Plan playoff-week lineups by strength of schedule in September." | No | sib §7.2 / §18 negative (YoY r 0.15–0.27). |
+| "Avoid players on clinched NFL teams in the week-17 final." | Unproven | Real but unquantified [F]; a flag on the projection, not a rule (§2.3). |
+| "The waiver order resets weekly, so priority doesn't matter." | Wrong for this league | The reference league is rolling; ESPN offers both refresh rules [V-docs]; confirm via `waiverOrderReset` [U]. Under a weekly reset the cost of a claim is one week and the rule collapses to sib §4.4's "claim more freely". |
+
+### 8.4 Evaluation plan
+
+**Backtests over 2024–2025 with nflverse (`stats_player_week_{2024,2025}.csv`, plus `stats_team_week_*` for D/ST):**
+1. *Replacement level and VOR* — recompute §4.1 for both seasons (done; the allocation logic is a regression test) and for the six format variants of sib §2 to confirm the baselines move in the stated directions.
+2. *Projections* — the trailing-window opportunity model of sib §1 scored under `S` against (a) trailing-4, (b) season-to-date and, once logged, (c) ESPN's native projection; CRPS, pinball at p10/p50/p90, 80 % coverage, Spearman within position. ESPN projections are not in nflverse, so (c) starts the day the server first logs them; the retrospective is designed to accumulate it.
+3. *Waiver detection* — nflverse's `target_share`, `air_yards_share`, `wopr`, `carries`, `targets` give sib §4.1's signals; precision/recall of "signal fired → top-24 RB/WR or top-12 TE/QB over t+1..t+4" versus a last-week-points detector.
+4. *The DP* — re-solve `Π` from each season's hindsight surplus distribution (median best claim 62, §1.6) shrunk to a forecast, and replay weeks 2–14 with simulated rival demand; compare realised surplus per claim of the rule against "claim the top trending player" and "always claim the top hindsight player from your slot".
+5. *Seeding simulator* — on every finished ESPN season available (`status.previousSeasons`), reproduce `playoffSeed` exactly from records, PF and the tiebreak chain; Brier and reliability of `P(playoffs)` from weeks 4, 8 and 12 against ESPN's `currentSimulationResults.playoffPct`.
+6. *Scoring engine* — the golden test on every available week of the reference league and the public fixture league; the §7 format test reproducing §3.2's totals.
+7. *Start/sit* — regret versus the "start by ESPN projection" lineup and calibration of `ΔP(win)`; the share of calls that changed a result, reported honestly.
+8. *K/D-ST* — rank correlation versus "lowest opponent implied total" and "most points last week".
+9. *News* — the per-source table including `outlooksByWeek`; the three injection evals of §6 in CI.
+10. *IR guard* — zero invalid-roster days in a replay of the league's roster history.
+
+**What "good" looks like, per method.** Waivers: realised surplus per successful claim ≥ the trending baseline by 10 % and `P(clears_to_FA)` calibrated within ±10 points. Seeding: exact seed reproduction on ≥ 2 finished seasons and Brier ≤ ESPN's. Projections: beat ESPN's mean-only projection (given a positional-CV distribution) on CRPS and match or beat its Spearman, with coverage 80 ± 5 %. Engine: zero mismatches. Start/sit: lower regret than the ESPN-projection lineup and `ΔP(win)` calibrated within ±5 points per bin. K/D-ST: ≥ the implied-total baseline. Every claim of improvement must hold in both seasons and not be concentrated in weeks 1–3 (sib §1-Evaluation).
+
+**Calibration checks (sib §12).** Reliability diagrams by decile for `P(win)`, `P(playoffs)`, `P(bye)`, `P(active)`, `P(role holds)`, `P(clears_to_FA)` and `P_k(win claim)`; CRPS/pinball/coverage for distributions; a continuous "engine == appliedTotal" check; rolling re-fits of `h`, `k`, `β_pos`, and of the waiver parameters `c`, `q_i` and the surplus distribution, with the sib §12.5 floor on window size; the retrospective refuses conclusions from fewer than ~30 calls of a type.
+
+---
+
+## 9. Ledger and sources
+
+### 9.1 Unverified, by name
+
+1. Whether a team's second waiver claim in the same processing run is evaluated at its **new** (bottom) position after its first claim succeeds (§1.1).
+2. The rule that places unowned players on waivers each week (observed as "no `FREEAGENT` status on a Tuesday night", 03 P24; not stated on the pages fetched) and what happens to a waivers player whose NFL game kicks off.
+3. `acquisitionSettings.waiverOrderReset` semantics and the non-FAAB `acquisitionType` value(s); whether a failed claim has any side effect.
+4. Whether a roster with an empty starting slot (e.g. after dropping a K) can add a non-eligible player when the bench is full.
+5. The window of `ownership.percentChange`.
+6. Whether the reference league's points-only seeding (reading (b)) is a manual commissioner action — until its own `mSettings`/`status` are read; `playoffReseed` default; `playoffSeedingRuleBy` meaning.
+7. Which of ESPN's two statements is current — "two-week rounds starting in week 14" (Playoff Schedule) versus the 14-week public regular season (Regular Season and Playoffs Schedule in Public Leagues).
+8. The 2026 NFL week-1 date (assumed Thursday 2026-09-10) and hence that the 2026-12-02 deadline falls between weeks 12 and 13.
+9. IR: how ESPN tags PUP and NFI players; the `SUSPENSION` enum value; whether ESPN ever auto-moves a healed IR player; whether lineup edits are blocked while a roster is invalid.
+10. Stat ids 103/104 order; the semantics of the "every N yards" items 5–14/27–34/47–55; `isReverseItem`, `allowOutOfPositionScoring`, `scoringEnhancementType`, the `SLOT_POINTS` tie rule; ESPN's rounding of `appliedTotal`.
+11. `statSplitTypeId 2` as rest-of-season; `statsOfficial` semantics (both inherited from 03 §G.1).
+12. The ESPN "Waiver Order" article (360000036671), which redirected to a Zendesk login wall.
+13. The magnitude of week-17 NFL resting risk [F]; handcuff value and the snap-jump threshold [F] (inherited from sib §18).
+
+### 9.2 Sources
+
+- **Sibling:** `yahoo-fantasy-football-mcp@7663b6ae47a1a19a30e8fa573ed006b0cde6cbb1 docs/research/05-strategy-and-analytics.md` (sib §0–§19).
+- **ESPN Fan Support** (`https://support.espn.com/hc/en-us/articles/<id>`, fetched 2026-09-30): 360012531592 Waiver Period (Updated 2026-08-18); 360000041152 Waivers Overview (2026-08-11); 4669787227668 Waiver Order Overview and Free Agent Budget Tiebreakers (2026-08-11); 360000036711 Claim a Player Off Waivers (2026-08-11); 360000041232 Change Acquisition and Waiver Settings (2026-09-22; setting names only); 115003849911 Players on Injured Reserve (2026-08-18); 115003860512 Moving Players on and off IR/IL (2026-08-18); 360035123032 How does the IR slot impact Waiver Claims and Free Agent Acquisitions (2026-03-10); 360048828792 IR Settings (2023-10-09; one sentence); 360036952471 Playoff Seeding: How Regular Season Standings Tiebreakers Work (2026-08-18); 47190901074708 H2H Points League Playoff Seeding Tiebreakers (2026-08-11); 115003883552 Playoff Schedule (2026-07-15); 360004507992 Regular Season and Playoffs Schedule in Public Leagues (2026-08-11).
+- **Community:** cwendt94/espn-api `espn_api/football/league.py` (`standings_weekly`, raw master fetched 2026-09-30).
+- **Data:** nflverse-data GitHub release `stats_player`, `stats_player_week_2025.csv` (8,656,387 B) and `stats_player_week_2024.csv` (8,470,040 B), downloaded 2026-09-30; Sleeper `GET https://api.sleeper.app/v1/players/nfl/trending/add?lookback_hours=24&limit=10` (2026-09-30).
+- **Computation:** four `python3` (stdlib) scripts run 2026-09-30 — `qb_vor.py` (§3, §4.1), `waiver_dp.py` (§1.2), `waiver_surplus.py` (§1.6), `seeding_mc.py` (§2.4); their logic is written out in the sections above and their outputs are recorded in `docs/scratch/fantasy-strategy-analyst.md`. Budget used: 22 of 25 HTTP requests, 17.2 MB of 30 MB.

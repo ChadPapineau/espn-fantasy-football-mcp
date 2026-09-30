@@ -6,17 +6,12 @@ Deliverable: `docs/research/05-strategy-and-analytics.md` (sections 1–8).
 
 ## RESUME HERE
 
-- Status (2026-09-30): research and all computations DONE; results recorded below. Deliverable
-  `docs/research/05-strategy-and-analytics.md` is being written next, section by section
-  (commit after each). If this file is the latest commit and 05 is absent or partial, resume by
-  writing the missing sections from the results below — no further HTTP requests are needed.
-- Budget used: 22/25 HTTP requests (1 nflverse 404 probe, 2 `gh api`, 3 curl downloads, 1 curl
-  Sleeper, 1 curl raw espn-api, 13 WebFetch incl. 1 redirect and 1 cached re-prompt);
-  downloads 17.2 MB / 30 MB. Do not spend the remaining 3 unless a fact is missing.
-- Scripts and data live only in the session scratchpad (not committed): `qb_vor.py`,
-  `waiver_dp.py`, `waiver_surplus.py`, `seeding_mc.py`, `stats_player_week_{2024,2025}.csv`.
-  The method is written out in 05 so it can be re-run.
-- WIP patch: none (05 not yet created).
+- Status (2026-09-30): **DONE.** `docs/research/05-strategy-and-analytics.md` is complete (§0–§9, sections 1–8 of the
+  brief plus a ledger/sources §9). Nothing is pending; no WIP patch exists or is needed.
+- If reopened: the only follow-ups are the [U] items in 05 §9.1, which need the reference league's own `mSettings`/`status`
+  (seeding mode, `waiverOrderReset`, process days) and one ESPN `mTransactions2` history (second-claim ordering).
+- Budget used: 22/25 HTTP requests; downloads 17.2 MB / 30 MB. Scripts and CSVs live only in the session scratchpad;
+  their logic is written out in 05 §1.2, §1.6, §2.4, §3.1 and their outputs are recorded below.
 
 ## Sibling citation
 
@@ -75,3 +70,4 @@ Seeding MC (10 teams, μ 122…100 step ~2.4, σ 20, 14 wks, 6 spots, 2 byes; st
 ## Log
 
 - 2026-09-30: created this file; read 03 and the sibling doc; fetched ESPN help pages; downloaded nflverse; ran all four computations; recorded results here.
+- 2026-09-30: wrote 05 §0–§2 (02298c7), §3–§4 (1c8e1f3), §5–§7 (273cd70), §8–§9 (this commit). Done.
