@@ -147,7 +147,7 @@ One checked-in table, seeded from 03 §B.2 (S-PY and S-JS agree on every spot-ch
 | `pass_ypg`, `rush_ypg`, `rec_ypg` | 22, 40, 61 | O | per-game averages (S-PY TODO duplicates); mapped, applies only if scored |
 | `pass_1d`, `rush_1d`, `rec_1d`, `gp` | 211, 212, 213, 210 | O | linear |
 | `fg_0_39`, `fg_40_49`, `fg_50_59`, `fg_60p`, `fg_50p_legacy` | 80, 77, 198, 201, 74 | K | `fg_distance` (exclusive) with bounds [0,39], [40,49], [50,59], [60,∞); **74 = legacy 50+ incl. 60+** — a league using 74 must not also use 198/201 (the normaliser asserts a partition); `fg_made_total` = 83 |
-| `fga_*` 81, 78, 199, 202, 75, 84; `fgm_*` (missed) 82, 79, 200, 203, 76, 85 | K | `fg_attempt`, `fg_miss` families with the same bounds; `attempted = made + missed` per bucket |
+| `fga_*`; `fgm_*` (missed) | 81, 78, 199, 202, 75, 84; 82, 79, 200, 203, 76, 85 | K | `fg_attempt`, `fg_miss` families with the same bounds; `attempted = made + missed` per bucket |
 | `pat_made`, `pat_att`, `pat_miss` | 86, 87, 88 | K | linear |
 | `fg_yd`, `fg_yd_made`, `fg_yd_att` | 214, 215, 216 | K | linear |
 | `dst_pa_raw` (120); `dst_pa_0`, `dst_pa_1_6`, `dst_pa_7_13`, `dst_pa_14_17`, `dst_pa_18_21`, `dst_pa_22_27`, `dst_pa_28_34`, `dst_pa_35_45`, `dst_pa_46p` | 120; 89, 90, 91, 92, 121, 122, 123, 124, 125 | DST | `dst_points_allowed` (exclusive) with the bounds in the names |
@@ -294,13 +294,13 @@ A projection is stored **once** per `(gsis_id, season, week, model_version)` as 
 | P6 | **Class gating**: a stat counted under `O` never counts under `DST` and vice versa; a line whose class is outside a rule's `applies_to` contributes 0 for that rule | lines with both O and DST stats |
 | P7 | **Unmapped / ignored / underivable**: an unknown ESPN id in `S` changes no score and appears in `unmapped[]` once per hash; an unknown canonical in a line appears in `ignored[]`; a long-TD id in `S` with an nflverse line sets `underivable[]` and `complete: false` | random extra ids |
 | P8 | **Normaliser idempotence and hash stability**: `normalize(normalize(s)) = normalize(s)`; reordering `scoringItems[]` or the keys of `pointsOverrides` does not change `settings_hash`; changing any `points` or override does | permutations |
-| P9 | **Rounding bounded**: with `mode: exact`, `points = points_exact`; with any verified mode, `|points − points_exact| ≤ 0.01 × rules.length` and the mode is idempotent | — |
+| P9 | **Rounding bounded**: with `mode: exact`, `points = points_exact`; with any verified mode, `\|points − points_exact\| ≤ 0.01 × rules.length` and the mode is idempotent | — |
 | P10 | **Complete flag**: `complete = false` ⇔ (`provisional ∧ ∃ scored rule whose canonical ∉ present`) ∨ `underivable ≠ ∅`; never false for a non-provisional ESPN line | random `present` sets |
 | P11 | **No NaN/Infinity** ever leaves `score`; a non-numeric ESPN value fails the entry as drift before `score` is reached | adversarial wire values |
 | P12 | **Determinism**: same inputs → byte-identical `ScoreResult`; `scoreSamples` with a fixed seed is reproducible (run with the per-call CPU deadline disabled, so a `partial` result can never make byte-equality flake — R2 nit 1) | — |
 | P13 | **Sample-mean consistency**: `scoreSamples(...).dist.mean ≈ mean_of_exact` within `3σ/√n` | random projection samples |
 | P14 | **Platform round trip** (the `fantasy-core` guard): a canonical line scored under an ESPN `ScoringSettings` and under a Yahoo `ScoringSettings` built from the same canonical rule set gives identical points — the ESPN normaliser here, the sibling's Yahoo normaliser as a fixture-frozen JSON of its output (no shared code today, plan 01 D3) | the two normalisers over one canonical rule table |
-| P15 | **Translator agreement** (E8): for every fixture player-week both sources report, `|score(toStatLine(espn)) − score(toStatLine(nflverse))| ≤ 0.01` on the shared stats, and every raw difference > 1 yard or > 1 event is listed by name | the fixture set |
+| P15 | **Translator agreement** (E8): for every fixture player-week both sources report, `\|score(toStatLine(espn)) − score(toStatLine(nflverse))\| ≤ 0.01` on the shared stats, and every raw difference > 1 yard or > 1 event is listed by name | the fixture set |
 | P16 | **Verify soundness**: `verify` returns `match: true` iff every per-stat delta ≤ 0.005 and the total delta ≤ 0.01; a single perturbed applied stat is named in `mismatch_stat_ids` | perturbations of `appliedStats` |
 
 ---

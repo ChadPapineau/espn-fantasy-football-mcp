@@ -277,6 +277,25 @@ Reviser's notes on the rulings (narrow readings):
 - **V8:** plan 05 §4.2 also passes `--service-name` to `eff uninstall`, and doctor #7 reads the item; the ruling defines the flag for `eff setup` only, so those uses were left as they are — a question for the build.
 - **Summary:** it names no parked item (its owner decisions are D0 and D2, which no ruling touches), so it is unchanged.
 
+Follow-up fixes from the audit:
+- **G1** · plan 02 §2.1 (the definitive-check row) · a 401/403 means delete + `NotConfigured` in `eff setup` only; in `eff doctor --online` #16, `espn_check_auth` and the daily job it means `Rejected`, with `lastRejectedAt` recorded in the `store.sqlite` `credential_state` table and the stored secret untouched (L5); a 404 means the league id is wrong (setup deletes the value; elsewhere `ESPN_LEAGUE_NOT_FOUND`, not a credential observation).
+- **G2** · plan 02 §2.2 (file location), plan 03 §1.1 step 1, plan 04 §1 (`paths.ts`) · `$XDG_*` is not read: the directories are the two fixed defaults or explicit `EFF_CONFIG_DIR`/`EFF_CACHE_DIR` values (V6, plan 01 D16).
+- **G5, G32** · plan 05 §4.2 (keychain round trip), plan 03 §2.1 · the test checks and cleans up the test items with `security find-generic-password`/`delete-generic-password -s eff-test-…`; `--service-name` stays on `eff setup` only (V8) and the step 4 throwaway item follows it (`<name>-selftest`); the test no longer runs `eff doctor` #7 or `eff uninstall`, which use the real service name.
+- **G7, G40** · plan 06 §1.2 (budget), §1.4 (keyless sum) · the drift probe is 2 requests a run, so 4 on Tuesdays; other days 1–4 + 4 + 1 = 6–9 (the lower bound is the merged case of G19); game days 1–2 + ≤ 24 + 1 ≤ 27.
+- **G9** · plan 02 §4.2 (channel 2), §4.4; plan 05 §4.3; plan 10 W1 · three wrong codes end the prepared write in a terminal journal state, `voided_code`; the user must prepare again.
+- **G13** · plan 01 §10 · the keychain accounts are `espn_s2`, `SWID` and `meta` (setup metadata only).
+- **G15** · plan 07 G2 · on a private league `mSettings` 200 = accepted, 401/403 = rejected, 404 = `ESPN_LEAGUE_NOT_FOUND` (not a credential observation).
+- **G16** · plan 03 §1.1 step 4, §10 A-3; plan 05 §4.2 · startup takes the state from the `credential_state` row (plus a `stat` of `session.json` for the file store) and never reads the keychain; the `meta` item is read with the secret on the first cookie-bearing call, which corrects the label; the `unknown` state is removed; `EFF_TEST_STUBS` exits 99 on any keychain read.
+- **G18** · plan 03 §2.1 (`--storage`), §3, §5 #6; plan 02 §2.2 (env override); plan 06 §2 (plists); `.env.example`; README Configuration · the store `eff setup` records in `config.json` is authoritative (the one exception to env > `config.json`); an env `EFF_CREDENTIAL_STORE` that disagrees is not used and doctor #6 fails on it; the plists no longer carry the key; `--storage keychain` runs the launchd-context test and is refused unless it is `ok`; the `.env.example` line is commented out.
+- **G19** · plan 06 §1.2, §1.4 (`credential check`); plan 01 §7 (the daily probe) · the shape probe is merged with the credential check only on a private user league, on one schedule (daily 05:00, plus Sun 08:00 in season; the Tuesday 12:00 run is then the host probe only); on a public user league the shape probe runs without cookies and the credential check stays the board probe.
+- **G20** · plan 02 §2.1 diagram; README Architecture §4 · new edge `Stored --> Rejected` for any cookie-bearing 401/403 after setup (the value is kept).
+- **G23** · plan 01 §3.1, plan 07 §5.4, plan 10 W2, README Writes · after a mid-session rejection the write tools refuse through the short-circuit while the credential stays rejected and stay listed until restart (V4, as plan 02 §3.2 says).
+- **G24** · plan 10 §3.1a · migration 001's table list names `job_lock` and `credential_state`.
+- **G31** · plan 03 §5 #17 · anonymous only: 200 = public, 401 = private (cookie acceptance is #16), 404 = wrong id or season.
+- **G34** · plan 09 §3.7 `session-check` · `stored` on any league → `espn_check_auth` once (the `mSettings` probe on a private league).
+- **G37, G38, G39, G41, G42** · plan 03 §5 #16; plan 04 §4.3 (`espn-league-id`); plan 08 §7 P9, P15; plan 06 §1.3 (`sleeper:trending`); plan 08 §3.1 (the `fga_*`/`fgm_*` row) · table rows repaired so each has its header's cell count: pipes inside code spans escaped as `\|`, and the merged names-and-ids cell split in two.
+- **Not fixed here (outside this pass's editable files):** G4, G35, G36 — `docs/HANDOFF.md` ▶ NEXT STEP, Program status and Open items still list the parked items and the research 01 runner path as open; G43 — four research table rows with unescaped pipes (research 03 line 385, 04 line 39, 05 line 97, 06 line 157).
+
 ## Summary — what the adversarial process changed and what survived
 
 For a reader who reads nothing else. The full record is `docs/plan/adversarial-log.md`; the row-by-row edits are §R1–§R3 above, plus §R4's consistency fixes after the docs pass.

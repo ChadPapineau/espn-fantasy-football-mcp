@@ -47,7 +47,7 @@ espn-fantasy-football-mcp/
 │   ├── config/
 │   │   ├── schema.ts            # zod schema of every key the code reads, each with a scope: server | launcher | test
 │   │   │                        #   (README Configuration table + Testing keys generated from it — plan 03 §3)
-│   │   ├── paths.ts             # XDG resolution, absolute-path assertions, iCloud xattr check
+│   │   ├── paths.ts             # config/cache dirs (EFF_CONFIG_DIR/EFF_CACHE_DIR or the fixed defaults; no XDG — plan 01 D16), absolute-path assertions, iCloud xattr check
 │   │   └── freshness.ts         # TTL / hard-limit constants (plan 01 §5.4)
 │   ├── mcp/                     # MCP surface only
 │   │   ├── server.ts · registry.ts · define.ts · envelope.ts · errors.ts · bounds.ts
@@ -192,7 +192,7 @@ All workflows: `permissions: contents: read` by default; actions pinned by **com
 | `espn-swid` | `(?i)swid\s*[=:]\s*["']?\{?[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}?` | the member id |
 | `brace-guid` | `\{[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\}` with allow-list `\{00000000-0000-4000-8000-0000000000[0-9A-F]{2}\}` (fixture pseudonyms) and the `.env.example` placeholder | every member GUID in any ESPN payload [V-03 §B.3] |
 | `cookie-header` | `(?i)^\s*cookie:\s*.*espn_s2` | a captured header in a doc or fixture |
-| `espn-league-id` | `(?i)(leagueId=|leagues/|ESPN_LEAGUE_ID=)\d{4,9}` with allow-list `0000000`, `/0`, `leagueId=0` | league ids are identifiers (HANDOFF) |
+| `espn-league-id` | `(?i)(leagueId=\|leagues/\|ESPN_LEAGUE_ID=)\d{4,9}` with allow-list `0000000`, `/0`, `leagueId=0` | league ids are identifiers (HANDOFF) |
 | `client-address` | `"clientAddress"\s*:\s*"(?!0\.0\.0\.0)` | the IP field in `mStatus` [V-03 §A.2] |
 | `odds-api-key` | `ODDS_API_KEY\s*=\s*[0-9a-f]{32}` | optional key |
 
