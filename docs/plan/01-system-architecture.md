@@ -189,7 +189,7 @@ Reading the arrows: the **domain never imports a wire type** (no `playerPoolEntr
 | HTTP | `src/http/` | one `fetch` wrapper: host allow-list **per mode** (read host always; write host only when the write module is enabled), timeouts, limiter hook, `User-Agent`, redaction before logging | `src/mcp`, `src/domain` |
 | CLI/ops | `src/cli/` | `eff` subcommands, logger, doctor checks, launchd plist generator | — (may import anything; nothing imports it) |
 
-*Why a separate `src/drift/` rather than folding it into the provider:* the daily probe must run **without cookies and without the server**, and the schema failure path must run **inside** every call; one module with two entry points keeps the manifest and the diff logic in one place. *Alternative:* provider-internal. *What would change it:* nothing.
+*Why a separate `src/drift/` rather than folding it into the provider:* the daily probe must run **without the server** (and keyless when a public probe league is configured, §7, plan 06 §1.2), and the schema failure path must run **inside** every call; one module with two entry points keeps the manifest and the diff logic in one place. *Alternative:* provider-internal. *What would change it:* nothing.
 
 ---
 

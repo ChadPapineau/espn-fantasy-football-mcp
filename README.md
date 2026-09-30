@@ -408,7 +408,7 @@ stateDiagram-v2
 flowchart TB
   subgraph PROBE["Daily probe - eff probe under launchd, keyless with a probe league"]
     P1["Host probe<br/>keyless pro-schedule view, no league id"]
-    P2["Shape probe<br/>settings, navigation and team views on a public probe league"]
+    P2["Shape probe<br/>settings, navigation and team views on the probe league, else your league"]
     CMP{"Compare key sets, enum values and the host<br/>with the fixture manifest"}
   end
   subgraph INCALL["In-call detection - every ESPN response, zero extra requests"]
@@ -446,7 +446,7 @@ flowchart TB
   OVR --> REL
 ```
 
-*ESPN answers an unknown or renamed view with HTTP 200 and a skeleton body, so every response is validated for the presence of required keys and a keyless daily probe diffs the live shape against a fixture manifest. Drift fails loudly with the view and JSON path, degrades per view instead of taking the product down, and is never auto-adapted; a host move has an operator override for hours and a release for days — plan 01 D5, §4.3, §7; plan 03 §3, §5 #9 and #15; plan 06 §1.2.*
+*ESPN answers an unknown or renamed view with HTTP 200 and a skeleton body, so every response is validated for the presence of required keys and a daily probe (keyless when a public probe league is configured) diffs the live shape against a fixture manifest. Drift fails loudly with the view and JSON path, degrades per view instead of taking the product down, and is never auto-adapted; a host move has an operator override for hours and a release for days — plan 01 D5, §4.3, §7; plan 03 §3, §5 #9 and #15; plan 06 §1.2.*
 
 ### 6. Security and trust boundaries
 
@@ -468,6 +468,7 @@ flowchart LR
     STORE["store.sqlite and dataset files<br/>member GUIDs pseudonymised outside the parsed cache"]
     NOTIF["macOS notification<br/>diff summary and a one-time code shown to the human only"]
     TERM["Terminal<br/>eff setup with hidden input, eff confirm"]
+    REFRESH["eff refresh - separate process, launchd"]
   end
   ESPNR["ESPN read host<br/>facts trusted after validation, free text NOT trusted"]
   ESPNW["ESPN write host<br/>not in the allow-list unless the write module is enabled"]
@@ -480,13 +481,14 @@ flowchart LR
   DOM --> SRC
   PROV -- "Cookie header to the allow-listed host only, off-list redirects refused" --> ESPNR
   ESPNR -- "T2 facts plus member-written names and ESPN editorial text" --> PROV
-  DATA -- "T3 dataset text" --> SRC
-  NEWS -- "T4 headlines" --> SRC
+  DATA -- "T3 dataset text" --> REFRESH
+  NEWS -- "T4 headlines" --> REFRESH
   DOM --> OUT
   OUT -- "envelope - no upstream body, no cookie, no member GUID, no IP" --> CLIENT
   PROV --> CRED
   PROV --> STORE
-  SRC --> STORE
+  REFRESH -- "writes the dataset files by atomic rename - their only writer" --> STORE
+  SRC -- "reads the dataset files only" --> STORE
   HUMAN -- "cookies typed here, never in chat" --> TERM
   TERM --> CRED
   IN -. "write tools registered only when all four gates hold" .-> GATE
@@ -1256,7 +1258,7 @@ Tool results go to the MCP client you connected — that is the point of the too
 
 ### What happens when ESPN changes the API?
 
-That is the failure mode the project is sized for, because it has happened before without notice and an unknown view returns HTTP 200. Every response is validated for required keys, so a renamed field or view fails **loudly** — `ESPN_DRIFT_DETECTED` with the view and the JSON path — instead of silently returning wrong data; a daily keyless probe catches drift while nobody is looking and fires a notification; tools on unaffected views keep working, and affected results say so. The server **never auto-adapts**: a human reads the diff, re-records fixtures and ships a fix. If ESPN moves the API host within its fantasy domain, an operator override restores service in hours and a release follows in days; in between, tools serve stale data and label it. Anything larger waits for a release — the plan says "days, in season" and does not pretend otherwise.
+That is the failure mode the project is sized for, because it has happened before without notice and an unknown view returns HTTP 200. Every response is validated for required keys, so a renamed field or view fails **loudly** — `ESPN_DRIFT_DETECTED` with the view and the JSON path — instead of silently returning wrong data; a daily probe — keyless when a public probe league is configured — catches drift while nobody is looking and fires a notification; tools on unaffected views keep working, and affected results say so. The server **never auto-adapts**: a human reads the diff, re-records fixtures and ships a fix. If ESPN moves the API host within its fantasy domain, an operator override restores service in hours and a release follows in days; in between, tools serve stale data and label it. Anything larger waits for a release — the plan says "days, in season" and does not pretend otherwise.
 
 ### Whose numbers am I looking at — ESPN's or the server's?
 
