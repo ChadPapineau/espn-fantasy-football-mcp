@@ -14,12 +14,12 @@ Brief: `docs/scratch/briefs/product-planner.md`.
 - [x] Read sibling Yahoo plan 07–10 + adversarial-log round 1 at origin/main `67144b1` (baseline; never modified)
 - [x] Read MCP best-practices + evaluation reference
 - [x] Write 07 tool catalog → commit/push
-- [ ] Write 08 scoring engine → commit/push
+- [x] Write 08 scoring engine → commit/push
 - [ ] Write 09 skills bundle → commit/push
 - [ ] Write 10 phasing + acceptance (tensions + open decisions) → commit/push
 - [ ] Final: update this file, reply with SHAs
 
-Status: 07 written and pushed; writing 08 next.
+Status: 07 and 08 written and pushed; writing 09 next.
 Nothing in flight on disk beyond this file.
 
 ## Commit ledger
