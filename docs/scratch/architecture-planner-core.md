@@ -1,44 +1,42 @@
 # architecture-planner-core — working notes
 
 Agent: architecture-planner-core (wave 3). Brief: `docs/scratch/briefs/architecture-planner-core.md`.
-Owns: `docs/plan/01-*` … `docs/plan/06-*`, this file, and (transiently)
-`docs/scratch/architecture-planner-core.wip.patch`.
+Owns: `docs/plan/01-*` … `docs/plan/06-*`, this file. No wip patch exists (nothing unfinished).
 
 ## RESUME HERE
 
-State: **reading done; verification done; writing plan 01 §0 next.**
+State: **DONE.** All six plan files are on `origin/main`. Nothing is pending.
 
-Next steps, in order:
-1. Write `docs/plan/01-system-architecture.md` §0 (shared-core + naming decision) — commit + push FIRST.
-2. Finish 01 (layers, transport, conventions, caching, limiter, drift, observability, seam).
-3. 02 security, 03 lifecycle, 04 repo+CI, 05 testing, 06 automation — commit + push after each.
-4. Final reply per brief format (SHAs, decision in three lines, ten decisions, negatives, assumptions).
+If re-opened: the shared-core/naming decision is plan 01 §0 (D3, D4, §0.1–0.4); the one review this plan
+requires but could not perform is the `@napi-rs/keyring` source/provenance checklist (plan 02 §7.2) — the
+security auditor's doc 01 carries no verdict on it. The product planner (plans 07–10) and the skills researcher
+(research 06) should take plan 01 §0.4's crosswalk rule (`ff_x` ↔ `espn_x`) as given.
+
+## Commits (all on origin/main)
+
+- 94e18cd scratch notes created
+- d58ee9c scratch notes: verified facts
+- 9f41a3c plan 01 §0 — shared-core decision + espn_ naming (committed first per brief)
+- 55fc885 plan 01 complete
+- fb8c7c6 plan 02
+- f4ea7ef plans 03 + 04
+- d272eee plans 05 + 06 (+ plan 04 identifiers-rule fix)
 
 ## Verified facts gathered (2026-09-30, this session)
 
-- Sibling baseline: `yahoo-fantasy-football-mcp@f3a0a48` docs/plan/01–10 all landed. D1–D11 as the brief says.
-  Sibling plan 07 has 51 `ff_*` tool names (34 read in v1 + 7 conditional write + ops); plan 09 ships 13 Skills.
-- npm (read 2026-09-30): `@modelcontextprotocol/server` latest 2.2.0 (2026-09-28), engines node>=20, deps
-  `zod ^4.2.0`, `@modelcontextprotocol/core 2.2.0`, no install script. `@modelcontextprotocol/sdk` v1 latest 1.31.0
-  (2026-09-28) — 17 runtime deps incl. express/hono/jose. `@napi-rs/keyring` 2.1.0 (2026-09-13), MIT, **no
-  install script**, 12 optional platform packages. `hyparquet` 1.31.2 (`prepare` script only — dev-time, not
-  run on install from registry). `zod` latest 4.6.5.
-- MCP spec sitemap: revisions 2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25, **2026-07-28** (latest) + draft.
-- Claude Code tool naming observed first-hand in this session: `mcp__<server>__<tool>` (e.g. `mcp__strava__strava_get_activity`);
-  MCP tools are deferred behind ToolSearch in this session.
-- Doc 01 (security audit) contains **no verdict on `@napi-rs/keyring`** — the brief said "if present"; it is not.
-  Doc 03 §C.4 has the npm facts; the decision must be made here with an honest assessment.
-
-## Decision sketch (to be committed in 01 §0)
-
-Shared core: option **(b′)** — two independently released servers now; extract a shared npm package
-(`@<scope>/fantasy-core`: canonical stat hub, scoring engine, analytics, DataSource loaders, envelope,
-untrusted_text) *only after* both engines pass their golden tests, i.e. a migration path not a day-one coupling.
-Tool prefix: `ff_` **identical to the sibling** is rejected for the ESPN server → use `espn_` for platform-fact
-tools? — evaluate against the evidence: Claude Code namespaces by server (no collision); Desktop [U]; Skill
-trigger ambiguity when both installed. Decide in §0 with the reasoning.
+- Sibling baseline `yahoo-fantasy-football-mcp@f3a0a48` plans 01–10 read (01–06 in full, 07–10 §0 + tool/skill names; 51 `ff_*` tools, 13 Skills).
+- npm: `@modelcontextprotocol/server` 2.2.0 (2026-09-28; core 2.2.0 + zod ^4.2.0; no scripts); `@modelcontextprotocol/sdk` 1.31.0 (17 runtime deps);
+  `@napi-rs/keyring` 2.1.0 (no install script; 12 optional platform packages; `darwin-arm64` = one .node, no scripts, no deps); `hyparquet` 1.31.2; `zod` 4.6.5.
+- MCP spec sitemap: latest published revision 2026-07-28 (+ draft).
+- SDK `docs/protocol-versions.md`: v2 "serves both [eras] from the same entry points"; `serveStdio` pins era per connection; `legacy: 'reject'` opt-in.
+- Claude Code: tools exposed as `mcp__<server>__<tool>` [docs + observed]; `claude mcp add --scope user --env K=V --transport stdio <name> -- <cmd>`; user scope in `~/.claude.json`.
+- Claude Desktop (user report #50319, 2026-04-18): namespace key = config key; different keys → separate namespaces; same key + same tool name → silent hang. MCP discussion #1198: namespacing unspecified in the spec.
+- This machine: node v22.23.2 at `<home>/.fnm/node-versions/v22.23.2/installation/bin/node`, fnm 1.39.0.
+- Doc 01 has **no** `@napi-rs/keyring` verdict.
 
 ## Log
 
-- (t0) Created this file. Working tree clean at 38c778b. Pushed 94e18cd.
-- (t1) Read research 03, 02, 04, 01, 00; sibling plan 01–06 in full, 07–10 §0; mcp-builder refs; npm; sitemap.
+- (t0) Created this file at 38c778b; pushed 94e18cd.
+- (t1) Read research 03, 02, 04, 01, 00; sibling plans; mcp-builder refs; npm; sitemap; Claude Code docs; three GitHub threads.
+- (t2) §0 committed first (9f41a3c); then 01 (55fc885), 02 (fb8c7c6), 03+04 (f4ea7ef), 05+06 (d272eee).
+- (t3) Zero-install Mermaid lint (regex for unquoted special chars; fence balance) and identifier scan over all six files: clean.
