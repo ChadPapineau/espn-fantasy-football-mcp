@@ -74,7 +74,7 @@ Status legend: `pending` · `applied (file §)` · `note only` · `already done`
 Status legend as above.
 
 ### Objections
-- OBJ-21 (option A: two fixture classes, path guard, derived: true, gen-fixtures gate, reworded rule, base match test, fixture-law box) — pending
+- OBJ-21 — applied (plan 10 §3.1a Fixtures, A1a, A14a, §6 A-1; plan 09 §4 tree ×2, §3.1 ON-3, §5.1 #7, §5.2, §7 A-2; plan 05 §3 fixture-law box, §3.1 steps 1/2/4, §2 domain/scoring, §5 smoke dir; plan 08 §6 step 1; plan 01 §9.1; plan 04 §1, §4.1 smoke dir)
 - OBJ-22 (separate read-only connections, no startup ATTACH loop, on-demand ceiling 8, rename-onto-same-path, 11-source test, [A] readOnly on Node 24) — pending
 - OBJ-23 (shim → scripts/eff-launch.sh via /bin/sh; no bin/ at plugin root) — pending
 - OBJ-24 (instructions delivery [U], nonce in A11b spike, rule also in docs resource, fallback short form, pointer ≤ 40) — pending
@@ -82,7 +82,7 @@ Status legend as above.
 - OBJ-26 (anonymous control request; accepted: null when not discriminating) — pending
 
 ### Nits
-- N1 8 s CPU deadline · N2 retro "not informative in v1" + shadow weights 0.5/0.75 · N3 marginal[] · N4 orient.md line · N5 hourly snapshot-pool wake · N6 host-override scope · N7 Z7 · N8 E2 wording · N9 wireOutputSchema lever · N10 bounds name their dataset — all pending
+- N1 8 s CPU deadline · N2 retro "not informative in v1" + shadow weights 0.5/0.75 · N3 marginal[] · N4 orient.md line · N5 hourly snapshot-pool wake · N6 host-override scope · N7 Z7 — applied (plan 10 §3.0 Z7 + exit gate, §1 row 0) · N8 E2 wording · N9 wireOutputSchema lever · N10 bounds name their dataset — all pending
 
 ### Other tasks
 - changelog §R2 — pending
@@ -91,7 +91,7 @@ Status legend as above.
 - HANDOFF: one item (SQLite 10-attachment limit applies to the sibling's layout) — pending
 
 ### R2 narrow readings
-(none yet)
+- OBJ-21: the two Inspector-smoke invocations (plan 04 §4.1, plan 05 §5) pointed at bare `fixtures/espn`; with two classes I pointed them at `fixtures/espn/fx-10h` (the dir plan 09 already uses for fixture mode)
 
 ### R2 pushed SHAs
 (none yet)

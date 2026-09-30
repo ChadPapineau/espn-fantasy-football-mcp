@@ -97,7 +97,8 @@ espn-fantasy-football-mcp/
 │   ├── smoke/                   # expected-tools.json for the Inspector run
 │   └── evals/                   # 10-question read-only eval (plan 05 §6), run manually
 ├── fixtures/
-│   ├── espn/                    # ANONYMISED only (03 §F.3): one JSON per view + the three error bodies + manifest.json
+│   ├── espn/                    # ANONYMISED only (03 §F.3): recorded/ (evidence: one JSON per view + the three error bodies — the golden's
+│   │                            #   only input), fx-10h/ + variants (derived: true — the Skills' league), manifest.json (ADV OBJ-21)
 │   ├── nflverse/                # tiny csv.gz excerpts (≤ 50 rows) + ATTRIBUTION.md (CC-BY)
 │   ├── news/                    # RSS samples incl. injection attempts
 │   └── golden/                  # scoring-engine expected outputs (per-stat appliedStats)
@@ -161,7 +162,7 @@ All workflows: `permissions: contents: read` by default; actions pinned by **com
 | `typecheck` | `tsc --noEmit -p tsconfig.json` (includes tests) | any type error |
 | `test` (node 24; the matrix grows with the next even line) | `test:coverage` → upload `coverage/` → `scripts/check-coverage.ts` against the gate (plan 05 §7) | any failure; coverage below gate; a 100 %-module below 100 % |
 | `process` | `build` → `test:process` (startup < 1 s with network+keychain stubbed, stdin-EOF exit 0, SIGTERM exit 0, orphan exit, setup-page port fallback + close, two-process limiter race) | any process test fails |
-| `smoke` | `build` → `npx -y @modelcontextprotocol/inspector@<pin> --cli node dist/cli.js serve --method tools/list` in **fixture mode** (`EFF_FIXTURE_DIR=fixtures/espn`, `ESPN_LEAGUE_ID=0`, no credentials) → assert the expected tool names and that **no `espn_commit_*`/`espn_prepare_*` tool is listed** | list ≠ `tests/smoke/expected-tools.json` |
+| `smoke` | `build` → `npx -y @modelcontextprotocol/inspector@<pin> --cli node dist/cli.js serve --method tools/list` in **fixture mode** (`EFF_FIXTURE_DIR=fixtures/espn/fx-10h`, `ESPN_LEAGUE_ID=0`, no credentials) → assert the expected tool names and that **no `espn_commit_*`/`espn_prepare_*` tool is listed** | list ≠ `tests/smoke/expected-tools.json` |
 | `supply-chain` | `npm audit --omit=dev --audit-level=high` (gate) · `npm audit` (report) · `check:no-scripts` (no `install`/`postinstall`/`preinstall`, no `binding.gyp`/`prebuild-install`/`node-gyp` in `npm ls --omit=dev`; **the `@napi-rs/keyring` platform package must be present as a prebuilt `.node` with no scripts**) · `check:licenses` (allow-list MIT, ISC, BSD-2/3, Apache-2.0, 0BSD, CC0-1.0, Unlicense) · `npm ls --omit=dev --depth=1` diff against §2 (depth 1 so the one platform package is visible and the other eleven are absent) | any high/critical runtime advisory; any install script; any license outside the list; any undeclared runtime dependency |
 | `secrets` | gitleaks (pinned) with `.gitleaks.toml`, full history | any finding not allow-listed |
 | `identifiers` (R11) | `scripts/check-identifiers.ts` over tracked files: `/Users/<name>/`, `/home/<name>/`, `C:\\Users\\<name>\\` with `<name>` ≠ the literal `<you>` → fail; brace-GUIDs outside `{00000000-0000-4000-8000-0000000000NN}` and the `.env.example` placeholder → fail; IPv4 literals other than `127.0.0.1`, `0.0.0.0` → fail; `leagueId=\d{4,}`, `leagues/\d{4,}`, `ESPN_LEAGUE_ID=\d+` other than `0000000`/`0` → fail; `espn_s2=` followed by ≥ 40 non-space chars → fail | any hit |

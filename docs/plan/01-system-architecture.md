@@ -558,7 +558,7 @@ The `license` field is what keeps 04 §E's "separable layers" visible in the run
 - Placement: `src/domain/scoring/` — pure `score(statLine, settings) → { points, complete, unmapped[] }` (the product planner's plan 08 owns the internals; this section fixes where it sits and how it is fed).
 - Input: `ScoringSettings` normalised by the provider from `settings.scoringSettings.scoringItems[]` (`statId`, `points`, `pointsOverrides{positionId}`, `isReverseItem`) [V-03 §B.1] into canonical rules with per-position overrides.
 - Caching: normalised settings memoised by a content hash; projections stored canonically and scored per league on demand.
-- **Golden-test fixture path:** `fixtures/espn/mSettings.json` (anonymised) + `fixtures/espn/mBoxscore-week-N.json` (per-player `appliedStats`/`appliedTotal` for a completed week) → `tests/domain/scoring/golden.test.ts` asserts equality within 0.01 against `appliedTotal` [V-03 §B.5]. ESPN's `appliedStats{statId: pts}` per stat makes the golden test **per stat**, not just per total — stronger than the Yahoo equivalent.
+- **Golden-test fixture path:** `fixtures/espn/recorded/mSettings.json` (anonymised) + `fixtures/espn/recorded/mBoxscore-week-N.json` (recorded per-player `appliedStats`/`appliedTotal` for a completed week — the golden reads only `recorded/`, never the derived `fx-10h/` class; ADV OBJ-21) → `tests/domain/scoring/golden.test.ts` asserts equality within 0.01 against `appliedTotal` [V-03 §B.5]. ESPN's `appliedStats{statId: pts}` per stat makes the golden test **per stat**, not just per total — stronger than the Yahoo equivalent.
 
 ### 9.2 Journal, snapshots, recommendation log
 
