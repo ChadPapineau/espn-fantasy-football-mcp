@@ -258,7 +258,7 @@ flowchart LR
   JOBS --> STORE
   SRV -- "cache-first, one global limiter" --> ESPNR
   JOBS -- "snapshots and the daily credential check" --> ESPNR
-  JOBS -- "daily drift probe, no cookies" --> ESPNS
+  JOBS -- "daily drift probe - keyless with a probe league" --> ESPNS
   JOBS -- "version poll, then parquet" --> NFLV
   JOBS --> WX
   JOBS --> ODDS
@@ -374,7 +374,7 @@ stateDiagram-v2
     Stored --> Validated: espn_check_auth, eff doctor --online or daily credential-check probe accepted - lastAcceptedAt set
     Stored --> NotConfigured: setup check answered 401 or 403 - the stored value is deleted and the user is told
     Stored --> NotConfigured: setup check found no such league id - the stored value is deleted
-    Validated --> Validated: any cookie-bearing 200 refreshes lastAcceptedAt
+    Validated --> Validated: cookie-bearing 200 on a private league or an informative board probe refreshes lastAcceptedAt
     Validated --> Rejected: any cookie-bearing 401 or 403 - never retried
     Stored --> Rejected: any cookie-bearing 401 or 403 after setup - the value is kept, never retried
     Rejected --> Rejected: every cookie-bearing call short-circuits with ESPN_AUTH_REJECTED and sends no request
@@ -406,7 +406,7 @@ stateDiagram-v2
 ```mermaid
 %% 5. API drift detection and resilience - status codes cannot detect drift, so keys are checked
 flowchart TB
-  subgraph PROBE["Daily probe - eff probe under launchd, no cookies"]
+  subgraph PROBE["Daily probe - eff probe under launchd, keyless with a probe league"]
     P1["Host probe<br/>keyless pro-schedule view, no league id"]
     P2["Shape probe<br/>settings, navigation and team views on a public probe league"]
     CMP{"Compare key sets, enum values and the host<br/>with the fixture manifest"}
@@ -1030,7 +1030,7 @@ What to get right:
 - **The configuration key is `espn-fantasy-football`.** Clients namespace tools by this key (in Claude Code the tools appear as `mcp__espn-fantasy-football__espn_<tool>`). Keep it distinct from the sibling Yahoo server's key so the two never collide.
 - **`env` holds non-secret settings only.** Never put `espn_s2` or `SWID` there.
 - **The plugin launches through `/bin/sh` and a small shim**, `scripts/eff-launch.sh`, which resolves a Node ≥ 24.15 deterministically (an `EFF_NODE` override, then the `fnm`/`nvm` default, then `/opt/homebrew/bin`, then `command -v node`) and fails with the exact fix if it finds none. `/bin/sh` is absolute on every macOS and needs neither a `PATH` nor an executable bit on the shim. Credentials never live under the plugin root.
-- **One configuration directory and one cache directory for everything.** The plugin's server, the `eff` CLI and the launchd jobs all use `~/.config/espn-fantasy-football-mcp` and `~/.cache/espn-fantasy-football-mcp` — or, if you override `EFF_CONFIG_DIR`/`EFF_CACHE_DIR`, the same explicit values, which `eff print-config` and `eff install-launchd` write into the client configuration and the job definitions. The plugin's `.mcp.json` sets neither, so the plugin install supports the default directories only: to use an override, launch the server from a client configuration instead. `eff doctor` warns when an override is set, because a server started by the plugin would not see it.
+- **One configuration directory and one cache directory for everything.** By default the server, the `eff` CLI and the launchd jobs all use `~/.config/espn-fantasy-football-mcp` and `~/.cache/espn-fantasy-football-mcp`. `EFF_CONFIG_DIR`/`EFF_CACHE_DIR` overrides are supported for a client-configuration install: `eff print-config` writes them into the client configuration and `eff install-launchd` into the job definitions. A plugin install uses the default directories only, because the plugin's `.mcp.json` cannot carry per-user values for them and a plugin launched by a GUI client does not reliably inherit your shell environment — to use an override, launch the server from a client configuration instead. `EFF_NODE` is optional for the plugin's shim for the same reason: without it, the shim falls back to its resolution order. `eff doctor` warns when an override is set, because a server started by the plugin would not see it.
 - **`--scope user`** keeps your personal entry in your own Claude Code configuration rather than in a repository file.
 - **`serve` opens no listening socket.** It speaks MCP on stdin/stdout, logs to stderr, and exits cleanly when the client closes stdin.
 
@@ -1086,7 +1086,7 @@ The untrusted-text rule the server declares to the model, verbatim from the plan
 | Inspector smoke | The tool list equals the expected list, in order, **with no write tool**; results carry the envelope; the two mandatory sentences appear exactly once | every push, in fixture mode | no | no |
 | Skills Lane 1 | Structure, tool names against the registry, a fixture dry run of every promised tool sequence, injection invariance | every push | no | no |
 | Live smoke (`eff smoke`) | Your real league: settings, one roster, one pool page, one completed week scored against ESPN's applied points per stat | **never in CI** — run by you | yes | no |
-| Live probe (`eff probe`) | The host and response shape against the manifest | never in CI — launchd | no | no |
+| Live probe (`eff probe`) | The host and response shape against the manifest | never in CI — launchd | keyless when a public probe league is configured (plan 06 §1.2) | no |
 | Model-driven evals | Ten read-only questions over the frozen fixture league; pass bar 8 of 10 | manual, before a release | no | **yes** |
 | Skills Lane 2 | Model-graded cases per Skill, including an injection case each | manual, before a release | no | **yes** |
 
