@@ -297,7 +297,7 @@ A projection is stored **once** per `(gsis_id, season, week, model_version)` as 
 | P9 | **Rounding bounded**: with `mode: exact`, `points = points_exact`; with any verified mode, `|points − points_exact| ≤ 0.01 × rules.length` and the mode is idempotent | — |
 | P10 | **Complete flag**: `complete = false` ⇔ (`provisional ∧ ∃ scored rule whose canonical ∉ present`) ∨ `underivable ≠ ∅`; never false for a non-provisional ESPN line | random `present` sets |
 | P11 | **No NaN/Infinity** ever leaves `score`; a non-numeric ESPN value fails the entry as drift before `score` is reached | adversarial wire values |
-| P12 | **Determinism**: same inputs → byte-identical `ScoreResult`; `scoreSamples` with a fixed seed is reproducible | — |
+| P12 | **Determinism**: same inputs → byte-identical `ScoreResult`; `scoreSamples` with a fixed seed is reproducible (run with the per-call CPU deadline disabled, so a `partial` result can never make byte-equality flake — R2 nit 1) | — |
 | P13 | **Sample-mean consistency**: `scoreSamples(...).dist.mean ≈ mean_of_exact` within `3σ/√n` | random projection samples |
 | P14 | **Platform round trip** (the `fantasy-core` guard): a canonical line scored under an ESPN `ScoringSettings` and under a Yahoo `ScoringSettings` built from the same canonical rule set gives identical points — the ESPN normaliser here, the sibling's Yahoo normaliser as a fixture-frozen JSON of its output (no shared code today, plan 01 D3) | the two normalisers over one canonical rule table |
 | P15 | **Translator agreement** (E8): for every fixture player-week both sources report, `|score(toStatLine(espn)) − score(toStatLine(nflverse))| ≤ 0.01` on the shared stats, and every raw difference > 1 yard or > 1 event is listed by name | the fixture set |

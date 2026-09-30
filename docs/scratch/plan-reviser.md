@@ -82,7 +82,7 @@ Status legend as above.
 - OBJ-26 — applied (plan 07 G2 output + method; plan 02 S2, §2.1 diagram label + table; plan 03 §2.1 step 5, §5 #16; plan 09 §3.7 ×3, §3.1 ON-5-E; plan 06 §1.4 credential check; plan 10 D2)
 
 ### Nits
-- N1 8 s CPU deadline · N2 retro "not informative in v1" + shadow weights 0.5/0.75 · N3 marginal[] · N4 orient.md line · N5 hourly snapshot-pool wake · N6 host-override scope · N7 Z7 — applied (plan 10 §3.0 Z7 + exit gate, §1 row 0) · N8 E2 wording · N9 wireOutputSchema lever · N10 bounds name their dataset — all pending
+- N1 applied (plan 07 E1/E3 inputs, §7 A-7; plan 10 A16a, A8a, §6 A-2; plan 08 §7 P12) · N2 applied (plan 07 E13; plan 09 §3.5; plan 10 A11a, B14) · N3 applied (plan 07 E5 output + method; plan 09 §3.8; plan 10 A9a) · N4 applied (plan 09 §2 orient.md) · N5 applied (plan 06 §1.4 snapshot pool) · N6 applied (plan 01 §7; plan 03 §3) · N7 applied (plan 10 §3.0 Z7, §1) · N8 applied (plan 07 E2 ×2, §7 A-3) · N9 applied (plan 07 C10, §5.1; plan 10 A7a; plan 01 §4 intro) · N10 applied (plan 05 §0; plan 10 A16a)
 
 ### Other tasks
 - changelog §R2 — pending
@@ -102,3 +102,4 @@ Status legend as above.
 - 89debff — R2 resume checklist
 - 3c18e09 — OBJ-21 + Z7
 - 0420837 — OBJ-22, OBJ-23
+- 5216555 — OBJ-24, OBJ-25, OBJ-26

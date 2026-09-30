@@ -25,6 +25,8 @@ Standard carried over from the sibling [V-sib 05]: **everything ships with tests
 | T10 | **The keychain integration test runs only on the macOS runner and only against a throwaway service name; it never touches a real item** | Linux has no Keychain; the test must not read Chad's real cookies | mock the addon everywhere | Nothing |
 | T11 | **No test ever calls the ESPN write host**, in any mode, including fixture recording | [V-03 §E: never probed; account risk] | a reversed write capture (S-JW did it) | the conditional write phase — and even then one captured probe against Chad's own team, reversed immediately, done by Chad |
 
+**A rule for every bound (ADV R2 nit 10):** every latency or size bound names the dataset it is measured on and the test that measures it — e.g. the 500 ms warm bound is measured on `fx-10h` in fixture mode by the process test (plan 10 A16a), and the `tools/list` ceilings by `tests/mcp/size.test.ts` in fixture mode (plan 07 §5.1).
+
 ---
 
 ## 1. The pyramid
