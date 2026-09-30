@@ -89,7 +89,7 @@ Standard carried over from the sibling [V-sib 05]: **everything ships with tests
 
 > **The fixture law (ADV OBJ-21) — read this before any fixture script.**
 > 1. **Recorded = evidence.** `fixtures/espn/recorded/**` is recorded together with its league's own `mSettings` and scored under it; its scoring fields hash to a recorded original.
-> 2. **Derived = plumbing.** `fixtures/espn/fx-10h/**` — the reference-format Skills league and its variants — has its scoring fields re-scored by the engine under the reference `S` and is marked `derived: true` in the manifest with the engine version and `settings_hash`; `match: true` there is never engine evidence.
+> 2. **Derived = plumbing.** `fixtures/espn/fx-10h/**` — the reference-format Skills league and its variants — has its scoring fields re-scored by the engine under the reference `S` and is marked `derived: true` in the manifest with the engine version and `settings_hash`; `gen-fixtures.ts` re-derives **every aggregate** of a re-scored field (team totals, `winner`, records, points for/against — R3 nit (b)), so the scoreboard, the standings and the seeding simulator agree with the box scores; `match: true` there is never engine evidence.
 > 3. **The golden reads only recorded.** A path guard keeps the golden test, A1a, `verify`'s tests and plan 08 §6 inside `recorded/` — the golden never reads a derived scoring field — and `gen-fixtures.ts` refuses to run unless the recorded golden is green.
 
 ### 3.1 ESPN (manual; never in CI; cookies only for private-league views)
