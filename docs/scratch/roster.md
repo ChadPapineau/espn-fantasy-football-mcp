@@ -8,12 +8,12 @@ Status vocabulary: ⚪ not started · 🟢 running · 🟠 cut off · ✅ done �
 
 | agent | id | wave | status | owns | last SHA | resume pointer |
 |---|---|---|---|---|---|---|
-| repo-security-auditor | afe0e8db560613322 | 1 | ✅ done (SHAs verified; credential-shaped scan clean; leak commit confirmed by metadata) | `docs/research/01-*`, `02-*`, `docs/scratch/repo-security-auditor.md` | `879763f` | — |
+| repo-security-auditor | afe0e8db560613322 | 1 (+ keyring addendum) | 🟢 resumed 2026-09-30 for a focused `@napi-rs/keyring` audit (appends to `01`) — wave-1 work ✅ verified | `docs/research/01-*`, `02-*`, `docs/scratch/repo-security-auditor.md` | `879763f` | — |
 | espn-api-specialist | ae40ffdfb8c95bafa | 1 | ✅ done (SHAs verified on origin; identifier scan clean) | `docs/research/03-espn-api.md`, `docs/scratch/espn-api-specialist.md` | `c43704c` | — |
 | data-source-evaluator | a60240589e2bf3479 | 2 | ✅ done (SHAs verified; identifier scan clean; espn_id 497/500 recounted independently; ToU §2.B.viii quote verified) | `docs/research/04-*`, `docs/scratch/data-source-evaluator.md` | `38c778b` | — |
 | fantasy-strategy-analyst | a0bfbe7bbfa3c85c1 | 2 | ✅ done (SHAs verified; identifier scan clean; IR-eligibility quotes verified at support.espn.com) | `docs/research/05-*`, `docs/scratch/fantasy-strategy-analyst.md` | `31abd8f` | — |
 | skills-mcp-researcher | a4ffbd8e575038d07 | 3 | 🟢 running | `docs/research/06-*`, `docs/scratch/skills-mcp-researcher.md` | — | brief |
-| architecture-planner-core | aa8211963894867bd | 3 | 🟢 running | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | — | brief |
+| architecture-planner-core | aa8211963894867bd | 3 | ✅ done (SHAs verified; identifier/abs-path scan clean; SDK 2.2.0 and keyring 2.1.0 metadata re-checked on the npm registry) | `docs/plan/01-*` … `06-*`, `docs/scratch/architecture-planner-core.md` | `965ee10` | — |
 | product-planner | — | 4 | ⚪ not started | `docs/plan/07-*` … `10-*`, `docs/scratch/product-planner.md` | — | brief |
 | devils-advocate | — | 5 | ⚪ not started | `docs/plan/adversarial-log.md`, `docs/scratch/devils-advocate.md` | — | brief |
 | docs-writer | — | 6 | ⚪ not started | `README.md`, `LICENSE`, `SECURITY.md`, `docs/README.md`, `docs/plan/00-index.md` | — | brief |
@@ -38,3 +38,4 @@ wave order; respawn cold from the saved brief only if the ID is gone.
 - 2026-09-30 — `docs/HANDOFF.md` created (Chad: "Yes").
 - 2026-09-30 — `data-source-evaluator` ✅ (`d36a34f`…`38c778b`), 306 lines, 28 probes. Orchestrator recounted nflverse `roster_weekly_2026` espn_id coverage: 497/500 (99.4%) — matches; Disney ToU §2.B.viii commercial-use quote verified at source. Wave 3 (first slot) spawned: `architecture-planner-core`.
 - 2026-09-30 — `fantasy-strategy-analyst` ✅ (`c57d110`…`31abd8f`), 451 lines, 22 requests. Orchestrator verified the IR-eligibility quotes at the ESPN help article (Updated 2026-08-18). `architecture-planner-core` committed the shared-core decision early (`9f41a3c`). Wave 3 (second slot) spawned: `skills-mcp-researcher`.
+- 2026-09-30 — `architecture-planner-core` ✅ (`94e18cd`…`965ee10`), plans 01–06, 1,914 lines. Orchestrator verified `@modelcontextprotocol/server` 2.2.0 (2026-09-28, no install scripts) and `@napi-rs/keyring` 2.1.0 (2026-09-13, prebuilt optional deps, no install script) on the npm registry; scans clean. `repo-security-auditor` resumed (same id) for the keyring audit per plan 02 §7.2.

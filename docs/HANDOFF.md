@@ -17,25 +17,19 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Running: `architecture-planner-core` (wave 3, plan `01`–`06`; its §0
-shared-core decision is already committed at `9f41a3c`) and
-`skills-mcp-researcher` (wave 3, `06`). When either finishes: verify its
-SHAs on `origin`, scan its files for identifiers and credential-shaped
-strings, spot-check one load-bearing claim. When the first slot frees,
-resume `repo-security-auditor` (SendMessage to its existing id) for a
-**focused static audit of `@napi-rs/keyring` 2.1.0** (source repo, install
-scripts, optional native deps, maintenance, advisories) appended to `01`
-— plan `01` D12 pins it for the credential store but doc `01` carries no
-verdict. When plan `01`–`06` and `06` are done, spawn `product-planner`
-(wave 4, plan `07`–`10`; needs `05`, `06`, plan `01`–`06`).
-Wave 4 `product-planner` follows once 05, 06 and plan 01–06 exist; wave 5
-`devils-advocate` (multi-round; the orchestrator defends in
-`docs/plan/adversarial-log.md` and edits the plan; then writes
-`docs/plan/changelog.md`); wave 6 `docs-writer` (README with 8 validated
-Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
-`docs/plan/00-index.md`; the orchestrator re-validates the diagrams in a
-browser). Then the executive summary for Chad. All briefs:
-`docs/scratch/briefs/`. Two agents at a time.
+Running: `skills-mcp-researcher` (wave 3, `06`) and `repo-security-auditor`
+(resumed for the focused `@napi-rs/keyring` audit that plan `02` §7.2
+requires before the pin; appends to `01`). When each finishes: verify its
+SHAs on `origin`, scan for identifiers, spot-check one claim. When `06` is
+done, spawn `product-planner` (wave 4, plan `07`–`10`; needs `05`, `06`,
+plan `01`–`06`). Then wave 5 `devils-advocate` (multi-round; the
+orchestrator defends in `docs/plan/adversarial-log.md`, edits the plan,
+writes `docs/plan/changelog.md`), wave 6 `docs-writer` (README with 8
+validated Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
+`docs/plan/00-index.md`; the orchestrator re-validates diagrams in a
+browser). Then the executive summary for Chad. **Chad (2026-09-30): report
+back when all research and planning is complete; no development or
+testing before his review.**
 
 ## The findings that shape the product (verified by the orchestrator)
 
@@ -114,7 +108,7 @@ browser). Then the executive summary for Chad. All briefs:
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research | 🟢 `01`–`05` ✅ verified · `06` running | `docs/research/01-*` … `06-*` |
-| 2 — plan | 🟢 core planner running (`01`–`06`; §0 decision committed `9f41a3c`); product planner ⚪ | `docs/plan/01-*` … `10-*` |
+| 2 — plan | 🟢 plan `01`–`06` ✅ verified (`965ee10`); product planner ⚪ (waits for `06`) | `docs/plan/01-*` … `10-*` |
 | 3 — adversarial review | ⚪ (brief ready) | `docs/plan/adversarial-log.md`, `changelog.md` |
 | docs — README, LICENSE, SECURITY.md | ⚪ (brief ready) | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
@@ -175,7 +169,7 @@ browser). Then the executive summary for Chad. All briefs:
 - [x] Phase 0 complete
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
 - [x] `04`, `05` verified
-- [ ] wave 3 (`06`, plan `01`–`06`), wave 4 (plan `07`–`10`)
+- [x] plan `01`–`06` verified · [ ] `06` · [ ] keyring audit · [ ] plan `07`–`10`
 - [ ] adversarial rounds, changelog
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
 - [ ] executive summary for Chad
@@ -200,3 +194,6 @@ browser). Then the executive summary for Chad. All briefs:
 - 2026-09-30 — `fantasy-strategy-analyst` ✅ (`31abd8f`). Orchestrator verified
   the IR-eligibility quotes at the source. `skills-mcp-researcher` spawned
   (wave 3, second slot).
+- 2026-09-30 — `architecture-planner-core` ✅ (`965ee10`). Orchestrator re-checked
+  the SDK and keyring pins on npm. Auditor resumed for the keyring review.
+  Chad: report back when research and planning are complete; no build before review.
