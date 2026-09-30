@@ -97,3 +97,19 @@ Also adopted from the log's §1.5: plan 01 §7 now states which views the daily 
 - **OBJ-16** — "schedule from `waiverNextExecutionDate` read at the previous run" is implemented as the same fixed-cadence, self-selecting pattern the ruling gives the kickoff-relative jobs (launchd calendars cannot be re-timed per run).
 - **T-15(a)** — the CI matrix became Node 24 only, since 22 is below the new floor.
 - **Not applied:** the defence's §1.F item 1 (a separate acceptance row for the D0-not-accepted product) is a suggestion, not a §1.E edit.
+
+### Orchestrator follow-ups after the reviser (2026-09-30)
+
+| item | what changed |
+|---|---|
+| Defence §1.F (1) — the D0-not-accepted product | No new row needed: plan 10 §5 D0 now states what ships (Phase 1a: engine, projections v1, K/D-ST by implied totals, the waiver DP on a pasted roster), that its acceptance criteria are Phase 1a's own (A1a–A16a), and which scoring families stay `verified: false` on the probe league's settings |
+| Example tool name `espn_get_player` (plan 01 §5.6, §7) | replaced by plan 07's final name `espn_get_player_stats` (same kind of nit as T-13) |
+| Diagrams | all six plan diagrams re-rendered after the R1 edits with Mermaid 11.4.1 in a browser: 6 ok, 0 failed |
+| Independent consistency grep | the orchestrator re-ran the retired-phrase grep over plans 01–10 and this file: 0 hits for every retired phrase; positive controls present |
+
+## Reviews (re-run on every version bump of the named dependency)
+
+| date | dependency | verdict | evidence | open item |
+|---|---|---|---|---|
+| 2026-09-30 | `@napi-rs/keyring@2.1.0` (+ 12 platform packages) | **Safe — pin exact + lockfile integrity** | research 01 §30: no install scripts; loader only `require`s the platform package; SLSA v1 provenance from a GitHub-hosted runner (`CI.yml`, source commit `1635ed45…` = tag v2.1.0), re-verified by the orchestrator on npm's attestations endpoint; `npm audit` and OSV = 0; binary links only OS frameworks; MIT | plan 02 §7.2 item 5 (Keychain prompt count under Claude Desktop and under launchd) — a macOS runtime property, recorded here after the first `eff doctor` |
+

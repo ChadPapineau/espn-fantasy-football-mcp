@@ -17,19 +17,23 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-Running: `devils-advocate` round 1 (wave 5; plan `07`–`10` are done and
-verified at `131ec10`; the 16 tensions in plan `10` §4 were handed to it
-as pre-filed objections). The adversarial phase is multi-round: after each round the orchestrator appends `## Round N —
-defence` to `docs/plan/adversarial-log.md` (justify with evidence or
-concede), edits the plan files directly, pushes, then resumes the same
-agent id via SendMessage for the next round; stop when the remaining
-objections are marginal; then write `docs/plan/changelog.md` (what the
-process changed, what survived). Then wave 6 `docs-writer` (README with 8
-Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
+Adversarial **round 1 is closed**: 20 objections (1 blocking, 9
+significant, 10 marginal) + 16 tensions; defence = 14 CONCEDE, 6
+CONCEDE-MODIFIED (`docs/plan/adversarial-log.md` §Round 1 — defence);
+every edit applied by `plan-reviser` (`18d6e32`…`5351241`) and recorded in
+`docs/plan/changelog.md` §R1; the orchestrator re-grepped the retired
+phrases (0 hits), re-rendered all six plan diagrams (6 ok) and re-scanned
+for identifiers (clean). **Now:** resume `devils-advocate` (same agent id,
+SendMessage) for round 2 — it re-reads the revised plan and the defence,
+withdraws / presses / raises what the revisions broke. Repeat
+defence → reviser → verify until its remaining objections are marginal
+and it writes `## Closing verdict`. Then wave 6 `docs-writer` (README with
+8 Mermaid diagrams, LICENSE, SECURITY.md, `docs/README.md`,
 `docs/plan/00-index.md`); the orchestrator re-validates every diagram with
-the browser harness (scratchpad `mermaid/index.html`, served on
-127.0.0.1:8791 — recreate from the description in the 2026-09-30 log entry
-if the scratchpad is gone). Then the executive summary for Chad. **Chad
+the browser harness (a scratch page that fetches a JSON list of the
+repo's ```mermaid blocks and calls `mermaid.parse()` on each, Mermaid 11
+from jsDelivr, served by `python3 -m http.server` on 127.0.0.1 — recreate
+it if the scratchpad is gone). Then the executive summary for Chad. **Chad
 (2026-09-30): report back when all research and planning is complete; no
 development or testing before his review.**
 
@@ -59,8 +63,8 @@ development or testing before his review.**
    exposes an IP and `members[]` are SWID GUIDs — strip in fixtures and
    logs. `03` §B.
 4. **Credentials: keychain by default.** `espn_s2` + `SWID` only; store in
-   the OS keychain via `@napi-rs/keyring` (no install script; verdict
-   pending in `01`) with a `0600` file under `~/.config/…` as fallback;
+   the OS keychain via `@napi-rs/keyring` 2.1.0 (no install script; **Safe**,
+   `01` §30) with a `0600` file under `~/.config/…` as fallback;
    never `.env`, never the MCP client config, never a tool argument, never
    logged; on any 401 return `ESPN_AUTH_REJECTED` with the re-setup
    command and never retry. Cookie lifetime is unverified; the design
@@ -84,8 +88,11 @@ development or testing before his review.**
    active skill players (100 % of anyone ≥ 1 %-owned; recounted by the
    orchestrator). ESPN weekly projections exist for every week and are
    expressed in the league's own scoring; independent accuracy studies
-   rank ESPN best at TE, worst at QB, so the plan uses an **ensemble**
-   (own nflverse-based model + ESPN) with ESPN labelled. ESPN's own
+   rank ESPN best at TE, worst at QB. After adversarial round 1 (OBJ-02)
+   v1 ships **ESPN's mean as the point estimate** (`weight_espn = 1.0`);
+   the own nflverse-based line contributes the distribution shape and a
+   disagreement flag, and the weight moves only when a backtest under the
+   league's scoring shows the mixture beats ESPN alone. ESPN's own
    ownership data replaces Sleeper trending; live in-game scoring is
    ESPN-native only. The binding commercial constraint is Disney ToU
    §2.B.viii (no commercial use, "whether or not for profit" — verified),
@@ -118,8 +125,8 @@ development or testing before his review.**
    prefix necessary beside the Yahoo server (`06` §C.1). No public ESPN
    fantasy Skills bundle exists. (Plan `09` later folded `live` into
    `start-sit`: **13 Skills ship**.)
-10. **Product plan (`07`–`10`)**: 21 P0 tools under `EFF_TOOLSET=core`
-   (13 P1 under `full`, 7 conditional writes, 4 later), 10 resources, 13
+10. **Product plan (`07`–`10`)**: **18** P0 tools under `EFF_TOOLSET=core`
+   (16 P1 under `full`, 7 conditional writes, 4 later — round 1 OBJ-08), 10 resources, 13
    prompts; `espn_analyze_waivers` is priority-cost-aware at P0;
    `espn_analyze_lineup` picks its objective from the seeding reading;
    the scoring engine is validated per stat (≤ 0.005) and per total
@@ -135,8 +142,8 @@ development or testing before his review.**
 |---|---|---|
 | 0 — repo setup | ✅ done | `.gitignore` + `.env.example` first (`0408875`), `main` pushed, description + 15 topics via `gh`, tooling inventory (`docs/research/00-*`) |
 | 1 — research | ✅ `00`–`06` verified (`01` incl. keyring §30) | `docs/research/01-*` … `06-*` |
-| 2 — plan | ✅ `01`–`10` verified (`131ec10`); 16 tensions open for the adversarial pass | `docs/plan/01-*` … `10-*` |
-| 3 — adversarial review | 🟢 round 1 running | `docs/plan/adversarial-log.md`, `changelog.md` |
+| 2 — plan | ✅ `01`–`10` verified; revised after adversarial round 1 (`5351241`) | `docs/plan/01-*` … `10-*` |
+| 3 — adversarial review | 🟢 round 1 closed (defended, edits applied, `changelog.md` §R1); round 2 next | `docs/plan/adversarial-log.md`, `changelog.md` |
 | docs — README, LICENSE, SECURITY.md | ⚪ (brief ready) | root + `docs/README.md` |
 | build | ⛔ blocked on Chad's plan approval | — |
 
@@ -214,7 +221,7 @@ development or testing before his review.**
 - [x] wave 1 complete and verified (`01`, `02`, `03`)
 - [x] `04`, `05` verified
 - [x] plan `01`–`10` verified · [x] keyring audit (Safe)
-- [ ] adversarial rounds, changelog
+- [x] adversarial round 1 (defence + edits + changelog §R1) · [ ] round 2+ and closing verdict
 - [ ] README (8 validated Mermaid diagrams), LICENSE, SECURITY.md, indexes
 - [ ] executive summary for Chad
 
@@ -247,3 +254,8 @@ development or testing before his review.**
   plugin tool-naming sentence at code.claude.com. `product-planner` spawned (wave 4).
 - 2026-09-30 — `product-planner` ✅ (`131ec10`). `devils-advocate` round 1 spawned
   with the 16 tensions as pre-filed objections.
+- 2026-09-30 — Adversarial round 1: `devils-advocate` `e72afb5` (20 objections); defence
+  `175fe2f` (all conceded, six with modified fixes); `plan-reviser` applied every edit
+  (`18d6e32`…`5351241`; survived a usage-limit cutoff with nothing lost — resumed by id).
+  Orchestrator verification: retired-phrase grep 0 hits, six diagrams render, identifier
+  scan clean; changelog gained the keyring review row; HANDOFF findings 4, 7, 10 corrected.

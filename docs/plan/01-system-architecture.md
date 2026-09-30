@@ -423,7 +423,7 @@ Not ingested, by decision: DynastyProcess ids (adds 0 pairs; GPL-3.0 [V-04 §B.4
 | `espn_get_live_scoreboard` | 1 (+0: pro schedule from the store) | `mMatchupScore` |
 | `espn_get_box_score` | 1 | `mBoxscore&scoringPeriodId=N` |
 | `espn_list_players` / `espn_search_players` | 1 per page (≤ 100 rows, sorted) | `kona_player_info` + filter |
-| `espn_get_player` (card, weekly actuals) | 1 per ≤ 25 ids | `kona_playercard` + `filterIds` |
+| `espn_get_player_stats` (card, weekly actuals) | 1 per ≤ 25 ids | `kona_playercard` + `filterIds` |
 | `espn_list_transactions` / pending | 1 | `mTransactions2` / `mPendingTransactions` |
 | `espn_analyze_lineup` and other analytics | **≤ 3** (roster; pool page for replacements; live/box if in a game window) — the rest from the store | — |
 | `espn_get_status` | 0 | — |
@@ -477,7 +477,7 @@ Store stays **< 150 MB** for a season: pbp subset ~10 MB [A-11], nflverse rest <
 
 | If this view drifts or is missing | Tools that still work | Tools that stop, and what they say |
 |---|---|---|
-| `kona_playercard` | everything except weekly actuals per player | `espn_get_player` returns season splits only, warning "weekly actuals unavailable" |
+| `kona_playercard` | everything except weekly actuals per player | `espn_get_player_stats` returns season splits only, warning "weekly actuals unavailable" |
 | `mBoxscore` | live totals from `mMatchupScore` | per-player live lines unavailable |
 | `mMatchupScore` | schedule/results from `mMatchup` | live totals and win probability unavailable |
 | `mTransactions2` / `mPendingTransactions` | everything else | transaction tools return `ESPN_DRIFT_DETECTED`; the nightly append pauses |
