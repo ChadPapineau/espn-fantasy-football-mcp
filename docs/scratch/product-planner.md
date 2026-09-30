@@ -17,14 +17,21 @@ Brief: `docs/scratch/briefs/product-planner.md`.
 - [x] Write 08 scoring engine → commit/push
 - [x] Write 09 skills bundle → commit/push
 - [x] Write 10 phasing + acceptance (tensions + open decisions) → commit/push
-- [ ] Final: update this file, reply with SHAs
+- [x] Final: update this file, reply with SHAs
 
-Status: 07, 08, 09, 10 written and pushed; final scratch update and reply remain.
+Status: DONE. All four plan files on origin/main; no WIP patch was needed (each file landed whole).
+If resumed: nothing to do except respond to the devil's-advocate round (plan 10 §4 lists the tensions to defend or concede).
 Nothing in flight on disk beyond this file.
 
 ## Commit ledger
 
 - `3fd70c9` docs(scratch): product-planner — working notes with RESUME HERE
+- `a91d673` docs(scratch): reading done, design decisions pinned
+- `2214c98` docs(plan): 07 tool catalog
+- `376e3f3` docs(plan): 08 scoring engine
+- `bbea69b` docs(plan): 09 skills bundle
+- `3214f70` docs(plan): 10 phasing and acceptance
+- (this commit) plan 10 identifier-shaped example reworded; scratch closed
 
 ## Design decisions pinned (so the four files agree)
 
