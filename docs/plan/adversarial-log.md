@@ -447,3 +447,43 @@ Count: 0 blocking · 1 significant · 5 marginal.
 ---
 
 _Round 2 ends here. Orchestrator: append `## Round 2 — defence` below this line._
+
+## Round 2 — defence
+
+**Author:** orchestrator · **Date:** 2026-09-30 · **Plan state defended:** `784b1b9`. Same vocabulary as round 1. All six objections and all ten nits are taken; the edits land in the commits recorded in `docs/plan/changelog.md` §R2 before round 3.
+
+### 2.D Verdict table
+
+| id | ruling | one-line reason |
+|---|---|---|
+| OBJ-21 | **CONCEDE — option (A)** | Two fixture classes; the invariant is "the golden never reads a derived scoring field". (A) keeps the Skills evals on the format actually played. |
+| OBJ-22 | **CONCEDE** | Reproduced by the orchestrator on this machine; separate read-only connections, no startup `ATTACH` loop. |
+| OBJ-23 | **CONCEDE** | Move the shim out of `bin/`; the two-hop claim need not be settled to avoid it. |
+| OBJ-24 | **CONCEDE** | State the [U], spike it, carry the rule in a second place, name the fallback. |
+| OBJ-25 | **CONCEDE** | A throwaway item and a timeout make the test mean something. |
+| OBJ-26 | **CONCEDE** | One anonymous control request at setup decides whether the probe discriminates. |
+| nits 1–10 | **taken** | Line edits, listed in §2.E. |
+
+### 2.E Rulings and edits
+
+**OBJ-21 — CONCEDE, option (A).** The round-1 fix was right for the golden set and wrong as applied to the Skills' league. (A) over (B) because (B) would leave every format-specific eval — half-PPR flex, 5-pt passing TD, the priority branch of `waivers` — running on a league that is not the reference format, and move the format checks to Phase 1b behind D0. Edits: (1) two classes — `fixtures/espn/recorded/**`: recorded together, scored under their own recorded `mSettings`, scoring fields hash to an original; the **only** inputs the golden test, A1a, `verify`'s tests and plan 08 §6 ever read, enforced by a path guard in the tests; `fixtures/espn/fx-10h/**`: the reference-format Skills league, scoring fields **re-scored by the engine under the reference `S`** from the recorded raw `stats{}`, every file marked `derived: true` in the manifest with the engine version and `settings_hash`; (2) `gen-fixtures.ts` refuses to run unless the recorded golden is green; (3) the rule's wording becomes "**the golden never reads a derived scoring field**", and `match: true` on `fx-10h` is asserted as plumbing and never counted as engine evidence; (4) a test asserts that on base `fx-10h` `espn_get_box_score` for a recorded final week returns `match: true` for every player and that `mismatch-53` differs from the base on stat 53 only; (5) final-week lineups are not mutated unless totals are re-derived with them. Files: plan 10 §3.1a, A1a, A14a; plan 09 §3.1, §5.1 #7, §5.2, A-2; plan 05 §3; plan 08 §6.
+
+**OBJ-22 — CONCEDE.** Reproduced on this machine (Node 22.23.2, `node:sqlite`): the 11th `ATTACH` fails with "too many attached databases - max 10"; `new DatabaseSync(path, { readOnly: true })` refuses writes ("attempt to write a readonly database"); after `rename()` onto the same path a reader opened before the rename still sees the old rows and a re-open sees the new. Edits in plan 01 §5.5 (one paragraph: the limit, the source count, the mechanism): each dataset file is opened as its **own read-only connection**; there is no startup `ATTACH` loop; cross-source joins are done in the domain layer over per-source result sets, and a query family that needs a SQL join attaches on demand on a short-lived connection with a hard ceiling of 8 asserted in code; read-only is enforced by the open mode, with the sibling's invariant (a statement trace shows zero `ds_*` DML from the server) as the test; `refresh` publishes by `rename()` onto the same path, so the superseded inode is released by the OS when the last reader closes and no unlink owner is needed; `store prune` removes any dataset file `refresh_log` no longer names. Plan 05 `store` row: opens all eleven sources and asserts no error. Plan 01 D6, plan 03 §1.1, plan 06 §1.3 aligned. The `readOnly` option is re-verified on the Node 24 floor at build time ([A], one line in plan 01 §13). **Note for the sibling program:** the same limit applies to its per-source layout; recorded in HANDOFF for Chad to pass on.
+
+**OBJ-23 — CONCEDE.** The shim moves to `scripts/eff-launch.sh`, launched as `"command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/eff-launch.sh", "serve"]`; no `bin/` at the plugin root. Whether claude.ai/Cowork refuse a plugin with `bin/` stays [U] in research 06 and no longer matters. The `eff` CLI name for terminal use still comes from `package.json` `bin` on a normal install. Files: plan 09 §4/§6/K8; plan 04 §1/§2; plan 03 §5 #2; plan 10 §4 T-01 resolution text, A15b.
+
+**OBJ-24 — CONCEDE.** Edits: plan 01 §4.1 and plan 02 §6.3 state that a client's delivery of `instructions` to the model is **[U]**; the A11b spike gains an `instructions` nonce (a random token in the instructions text that the eval asks the model to repeat) per client; the two sentences are also carried in `espn-ff://docs/tool-outputs` and in every Skill's shared guardrail text (already there); the named fallback: where the spike shows `instructions` is not delivered, a ≤ 120-char short form of the rule returns to each tool description and `size.test.ts` re-measures against the same ceilings; the structural control (the `untrusted_text` wrapper and `meta.untrusted_fields[]`) never depended on prose. The per-description pointer is shortened to ≤ 40 chars as ruled.
+
+**OBJ-25 — CONCEDE.** Plan 03 §2.1 step 4, plan 06 §2, plan 02 §2.2/A-1: the launchd-context test writes a **throwaway item** (service suffix `-selftest`, random value), the one-shot agent reads it with a **10 s timeout**, the outcome is one of `ok` / `timeout` (a prompt or a hang) / `error`, anything but `ok` selects the file store for the whole install, the throwaway item is deleted, and the outcome is recorded in `config.json` and shown by `doctor` #7.
+
+**OBJ-26 — CONCEDE.** Plan 07 G2, plan 02 S2/§2.1, plan 03 §2.1, plan 09 SC-3: at setup on a public league, one **anonymous control request** to the board probe: if the anonymous answer is 401, then 200/404 with cookies = accepted and 401 = rejected; if the anonymous answer is not 401 (a board-less league may answer 404 to anyone), the probe does not discriminate and the result is `accepted: null` with the reason; the control result is cached with the league settings.
+
+**Nits.** (1) The per-call CPU deadline is **8 s** ([A], re-measured at A16a); `partial: true` results carry the completed sample count and are never cached; invariance and determinism tests run with the deadline disabled. (2) At `weight_espn = 1.0` the "start by ESPN's projection" regret is identically zero — `retro` says "not informative in v1" instead of printing it; B14 evaluates **shadow weights 0.5 and 0.75** alongside the shipped 1.0. (3) `marginal` candidates do not enter `claim_list[]`; they are returned in a separate `marginal[]` and presented as "your call". (4) `orient.md` prints one line while `seeding.confirmed` is false, pointing to `onboard`. (5) `snapshot pool` wakes hourly every day in season; a run with nothing due makes no request. (6) One sentence: the host override covers only a move within `*.fantasy.espn.com`; anything else is the release path. (7) Phase 0 gains row **Z7**: ≥ 3 recorded final `mBoxscore` weeks of the probe league, scrubbed and committed with provenance hashes — gated on D2. (8) Plan 07 E2: "until the seeding simulator has run". (9) The first lever under the 20 000-char ceiling is named: `wireOutputSchema: false` generalised beyond the five list tools, shapes documented in `espn-ff://docs/tool-outputs`. (10) Plan 05 §0: "every latency or size bound names the dataset it is measured on and the test that measures it"; the 500 ms warm bound names its fixture.
+
+**Sibling round 3.** Its three platform-agnostic nits are covered by OBJ-24 (pointer length) and OBJ-22 (prune/unlink; read-only open mode verified here rather than left [U]).
+
+### 2.F What could be strengthened in the position I am defending
+
+The fixture design is now the plan's most intricate rule; its safety rests on one path guard and one manifest flag. Plan 05 §3 should therefore carry a three-line "fixture law" box (recorded = evidence; derived = plumbing; the golden reads only recorded) that a Phase 1a builder sees before any script — added with the OBJ-21 edits.
+
+_Defence ends. Reviser edits follow in `docs/plan/changelog.md` §R2; round 3 begins when they are on `main`._
