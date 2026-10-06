@@ -25,9 +25,17 @@ import {
 } from "./canonical.js";
 import { formatJson } from "./format-json.js";
 import { pathsAtLines, segmentsAtLines, type Seg } from "./json-lines.js";
-import { READ_HOST, leagueUrl, seasonUrl, type PoliteClient } from "./http.js";
+import {
+  READ_HOST,
+  communicationUrl,
+  leagueUrl,
+  playersUrl,
+  seasonUrl,
+  type PoliteClient,
+} from "./http.js";
 import { leagueFormat, matchupPeriodOf, type LeagueFormat } from "./league-format.js";
 import { scanWithRepoScanner } from "./scan.js";
+import { SYNTHETIC_ERRORS, type SyntheticError } from "./synthetic.js";
 import {
   SCRUB_RULES_VERSION,
   ScrubAbort,
@@ -57,13 +65,20 @@ const KEEP_ORDER: Readonly<Record<string, ReadonlySet<string>>> = {
   kona_player_info: new Set(["players"]),
 };
 
+/**
+ * The four read-host routes a capture can use (research 03 §A.1): a league, the season (no league
+ * id), the season player index (`/seasons/{s}/players`, no league id) and the league's board
+ * route (`…/communication/` — anonymously a typed 401, the one keyless 401 body).
+ */
+export type Route = "league" | "season" | "players" | "communication";
+
 /** One raw capture as stored OUTSIDE the repo (it holds the real ids and names). */
 export interface RawEnvelope {
   schema: number;
   slot: string;
   name: string;
   kind: BodyKind;
-  route: "league" | "season";
+  route: Route;
   views: string[];
   params: Record<string, string>;
   filter: Json;
@@ -81,7 +96,7 @@ export interface RequestSpec {
   slot: string;
   name: string;
   kind: BodyKind;
-  route: "league" | "season";
+  route: Route;
   views: string[];
   params: Record<string, string>;
   filter: Json;
@@ -129,9 +144,14 @@ export function officialWeeks(proTeamSchedules: Json): Map<number, boolean> {
 
 export function requestUrl(spec: RequestSpec, season: number, leagueId: string | null): string {
   if (spec.route === "season") return seasonUrl(season, spec.views);
+  if (spec.route === "players") return playersUrl(season, spec.views);
   if (leagueId === null) throw new Error("a league request needs a league id");
+  if (spec.route === "communication") return communicationUrl(season, leagueId, spec.views);
   return leagueUrl(season, leagueId, spec.views, spec.params);
 }
+
+/** The season player index filter (research 03 §A.3: root-level on `/players`; P23). */
+export const PLAYERS_WL_FILTER: Json = { filterActive: { value: true } };
 
 /** The league-independent requests (one per run). */
 export function seasonPlan(): RequestSpec[] {
@@ -155,6 +175,17 @@ export function seasonPlan(): RequestSpec[] {
       views: ["mBogusViewName"],
       params: {},
       filter: null,
+      expect: "ok",
+    },
+    // the season player index (the C1 name index — plan 07 C1; research 03 §A.2 P23): a root array
+    {
+      slot: "season",
+      name: "players_wl",
+      kind: "season",
+      route: "players",
+      views: ["players_wl"],
+      params: {},
+      filter: PLAYERS_WL_FILTER,
       expect: "ok",
     },
   ];
@@ -237,6 +268,37 @@ export function leaguePlan(
     filter: konaFilter(opts.konaLimit),
     expect: "ok",
   });
+  // mMatchupScore as the live scoreboard requests it (plan 07 A4: `mMatchupScore&scoringPeriodId=N`,
+  // no filter): the current week (pre-kickoff or in-game) and the last recorded final week, whose
+  // rows line up with that week's recorded box score (research 03 §B.4, §B.7)
+  if (latest === null) throw new Error(`${slot}: mSettings has no status.latestScoringPeriod`);
+  const finalWeek = Math.max(...weeks);
+  for (const [w, isFinal] of [
+    [latest, official.get(latest) === true],
+    [finalWeek, true],
+  ] as const)
+    specs.push({
+      slot,
+      name: `mMatchupScore.sp${String(w)}`,
+      kind: "league",
+      route: "league",
+      views: ["mMatchupScore"],
+      params: { scoringPeriodId: String(w) },
+      filter: null,
+      expect: "ok",
+      stats_official: isFinal,
+    });
+  // mNav alone (research 03 §A.2 P12): the commissioner flags members[].isLeagueCreator/Manager
+  specs.push({
+    slot,
+    name: "mNav",
+    kind: "league",
+    route: "league",
+    views: ["mNav"],
+    params: {},
+    filter: null,
+    expect: "ok",
+  });
   if (opts.probeExtras) {
     specs.push({
       slot,
@@ -262,7 +324,7 @@ export function leaguePlan(
   return specs;
 }
 
-/** The two recorded error bodies for the classifier (research 03 §A.4): 404 and 400. */
+/** The recorded error bodies for the classifier (research 03 §A.4): 404, 400 and the keyless 401. */
 export function errorPlan(): RequestSpec[] {
   return [
     // league id 0 never exists: GENERAL_NOT_FOUND (P03/P22 shape)
@@ -286,6 +348,112 @@ export function errorPlan(): RequestSpec[] {
       params: {},
       filter: { players: { limit: 5 } },
       expect: "error",
+    },
+    // the board route answers anonymously with a typed 401 (P27 shape) — sent to the first league
+    {
+      slot: "errors",
+      name: "401-communication-not-visible",
+      kind: "error",
+      route: "communication",
+      views: ["kona_league_communication"],
+      params: {},
+      filter: null,
+      expect: "error",
+    },
+  ];
+}
+
+/** At most this many player ids per `filterIds` capture (plan 07 B2/C1: ≤ 25 ids per call). */
+export const CARD_IDS_MAX = 25;
+/** Of those, this many are spread over the league's own roster; the rest come from the kona page. */
+export const CARD_ROSTERED_IDS = 20;
+
+/** Every integer `playerId` of a roster body (`teams[].roster.entries[]`), unique, ascending. */
+export function rosteredPlayerIds(rosterBody: Json): number[] {
+  const out = new Set<number>();
+  const teams = isObject(rosterBody) && Array.isArray(rosterBody.teams) ? rosterBody.teams : [];
+  for (const t of teams) {
+    const roster = isObject(t) && isObject(t.roster) ? t.roster : null;
+    const entries = roster && Array.isArray(roster.entries) ? roster.entries : [];
+    for (const e of entries)
+      if (isObject(e) && typeof e.playerId === "number" && Number.isSafeInteger(e.playerId))
+        out.add(e.playerId);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * The deterministic id set of the two `filterIds` captures: CARD_ROSTERED_IDS ids spread evenly
+ * over the league's rostered ids (ascending, so the most negative — a D/ST or TQB unit — comes
+ * first), then the kona page's ids in its order (free agents) until CARD_IDS_MAX; sorted ascending.
+ */
+export function cardIds(rosterBody: Json, konaBody: Json, max = CARD_IDS_MAX): number[] {
+  if (!Number.isInteger(max) || max < 1 || max > CARD_IDS_MAX)
+    throw new Error(`card id count must be 1–${String(CARD_IDS_MAX)}`);
+  const rostered = rosteredPlayerIds(rosterBody);
+  const want = Math.min(CARD_ROSTERED_IDS, max, rostered.length);
+  const chosen = new Set<number>();
+  for (let i = 0; i < want; i++) {
+    const id = rostered[Math.floor((i * rostered.length) / want)];
+    if (id !== undefined) chosen.add(id);
+  }
+  const page = isObject(konaBody) && Array.isArray(konaBody.players) ? konaBody.players : [];
+  for (const p of page) {
+    if (chosen.size >= max) break;
+    if (isObject(p) && typeof p.id === "number" && Number.isSafeInteger(p.id)) chosen.add(p.id);
+  }
+  return [...chosen].sort((a, b) => a - b);
+}
+
+/**
+ * The two per-league captures keyed on player ids (made after the roster and the kona page are
+ * known): `kona_player_info` + `filterIds` (plan 07 C1/D2) and `kona_playercard` + `filterIds` +
+ * `filterStatsForTopScoringPeriodIds` (plan 07 B2: weekly actuals; research 03 §A.3, §B.5 P21).
+ */
+export function cardPlan(
+  slot: string,
+  ids: readonly number[],
+  settings: Json,
+  season: number,
+): RequestSpec[] {
+  if (!ids.length || ids.length > CARD_IDS_MAX || !ids.every((i) => Number.isSafeInteger(i)))
+    throw new Error(`${slot}: 1–${String(CARD_IDS_MAX)} integer player ids are needed`);
+  const status = isObject(settings) && isObject(settings.status) ? settings.status : {};
+  const latest = typeof status.latestScoringPeriod === "number" ? status.latestScoringPeriod : null;
+  const finalPeriod =
+    typeof status.finalScoringPeriod === "number" ? status.finalScoringPeriod : 17;
+  return [
+    {
+      slot,
+      name: "kona_player_info.ids",
+      kind: "league",
+      route: "league",
+      views: ["kona_player_info"],
+      params: latest !== null ? { scoringPeriodId: String(latest) } : {},
+      filter: { players: { filterIds: { value: [...ids] } } },
+      expect: "ok",
+    },
+    {
+      slot,
+      name: "kona_playercard",
+      kind: "league",
+      route: "league",
+      views: ["kona_playercard"],
+      params: {},
+      filter: {
+        players: {
+          filterIds: { value: [...ids] },
+          filterStatsForTopScoringPeriodIds: {
+            value: finalPeriod,
+            additionalValue: [
+              `00${String(season)}`,
+              `10${String(season)}`,
+              `00${String(season - 1)}`,
+            ],
+          },
+        },
+      },
+      expect: "ok",
     },
   ];
 }
@@ -367,7 +535,7 @@ function statusOk(status: number, expect: "ok" | "error"): boolean {
  * shape. Never a scoring key (scrub.ts refuses one).
  */
 export const DEFAULT_PRUNE: readonly string[] = ["rankings"];
-const PRUNE_EXEMPT_VIEWS = new Set(["kona_player_info"]);
+const PRUNE_EXEMPT_VIEWS = new Set(["kona_player_info", "kona_playercard"]);
 
 export interface ManifestEntry {
   path: string;
@@ -375,15 +543,24 @@ export interface ManifestEntry {
   views: string[];
   scoringPeriodId: number | null;
   matchupPeriodId: number | null;
-  request: { route: "league" | "season"; path: string; query: string; filter: Json };
+  request: { route: Route; path: string; query: string; filter: Json };
   status: number;
   headers: Record<string, string>;
   recorded_at: string;
   derived: false;
   scrub_rules_version: number;
   pruned: string[];
-  /** Set when one response was split into parts to stay ≤ 1 MB (concatenate `array` in index order). */
-  part: { index: number; of: number; array: string } | null;
+  /**
+   * Set when one response was split into parts to stay ≤ 1 MB (concatenate `array` in index order;
+   * `array` is `$` when the body itself is the array — players_wl). `id_range`: the first and last
+   * element `id` of this part when every element has a numeric id (the canonical order is by id).
+   */
+  part: {
+    index: number;
+    of: number;
+    array: string;
+    id_range?: { first: number; last: number } | null;
+  } | null;
   /**
    * Units removed because a line of theirs matched the local repo deny-list (scan-secrets.mjs): JSON
    * paths into the scrubbed body as it stood before the removal. Never a value.
@@ -399,13 +576,43 @@ export interface ManifestEntry {
    * entry or whose matchup row was removed, and how many matchup rows are gone — so fixture-mode
    * tests never treat an artificial hole as a real empty slot or a missing game. null = complete.
    */
-  incomplete: { team_ids: number[]; matchups_missing: number } | null;
+  incomplete: Incomplete | null;
   stats_official: boolean | null;
   top_level_keys: string[];
   bytes: number;
   sha256: string;
   scoring: { entries: number; sha256: string };
   format: LeagueFormat | null;
+}
+
+/**
+ * What withheld units leave missing, value-free (CAT-12): team ids whose roster lost an entry or
+ * whose matchup row is gone, the count of removed matchup rows, and the count of removed player
+ * rows (`$[n]` of players_wl, `$.players[n]` of the kona views) — a count, never an id (a row is
+ * withheld because a line of it matched the local deny-list, which may be that very id).
+ */
+export interface Incomplete {
+  team_ids: number[];
+  matchups_missing: number;
+  rows_missing?: number;
+}
+
+/**
+ * A hand-written body (plan 05 §3 fixture law: synthetic is allowed ONLY for error bodies, never
+ * for a scoring field): the shape comes from `basis` (research 03 §A.4), not from a recording.
+ */
+export interface SyntheticEntry {
+  path: string;
+  synthetic: true;
+  kind: "error";
+  views: string[];
+  status: number;
+  basis: string;
+  headers: Record<string, string>;
+  top_level_keys: string[];
+  bytes: number;
+  sha256: string;
+  scoring: { entries: number; sha256: string };
 }
 
 export interface FixtureManifest {
@@ -419,6 +626,8 @@ export interface FixtureManifest {
   files: ManifestEntry[];
   /** Captures withheld whole (a deny-list match that no unit removal could clear). */
   withheld_files: string[];
+  /** Hand-written error bodies (never evidence), under `synthetic/`. */
+  synthetic_files?: SyntheticEntry[];
 }
 
 export interface ScrubRunOptions {
@@ -434,6 +643,8 @@ export interface ScrubRunOptions {
   dryRun?: boolean;
   /** Size cap per file (tests); defaults to MAX_FIXTURE_BYTES. */
   maxBytes?: number;
+  /** The hand-written error bodies to write under `synthetic/` (tests); defaults to SYNTHETIC_ERRORS. */
+  synthetic?: readonly SyntheticError[];
   /**
    * When the repo scanner's ONLY findings are local deny-list matches, remove the smallest
    * self-contained unit holding each matched line (withholdUnit) instead of refusing the run; the
@@ -458,6 +669,8 @@ export function withholdUnit(
       ? { segs: segs.slice(0, 2), action: "omit" }
       : null;
   }
+  // a root-array body (players_wl): the one player row
+  if (typeof segs[0] === "number") return { segs: segs.slice(0, 1), action: "omit" };
   for (let k = segs.length - 2; k >= 0; k--)
     if (segs[k] === "entries" && typeof segs[k + 1] === "number")
       return { segs: segs.slice(0, k + 2), action: "omit" };
@@ -506,6 +719,31 @@ export function replaceableNameLeaf(
   return { segs: [...segs], action: "replace", value: `Player ${String(id)}` };
 }
 
+/**
+ * The name leaves a deny-listed LINE may be cleared by (CAT-12): the leaf itself when the line is a
+ * player-name leaf (replaceableNameLeaf); else, when the line is a whole player object printed on
+ * one line — a players_wl row (`$[n]`) or a `…player` object — every name leaf of it that is not
+ * already its placeholder. Empty: nothing replaceable (the caller withholds the unit).
+ */
+export function replaceableNameLeaves(
+  body: Json,
+  segs: readonly Seg[],
+): { segs: Seg[]; action: "replace"; value: string }[] {
+  const one = replaceableNameLeaf(body, segs);
+  if (one) return [one];
+  const isPlayerObject =
+    (segs.length === 1 && typeof segs[0] === "number") ||
+    (segs.length > 0 && segs[segs.length - 1] === "player");
+  if (!isPlayerObject) return [];
+  const obj = leafAt(body, segs);
+  if (!isObject(obj) || typeof obj.id !== "number" || !Number.isSafeInteger(obj.id)) return [];
+  const value = `Player ${String(obj.id)}`;
+  return [...REPLACEABLE_NAME_KEYS]
+    .sort()
+    .filter((k) => typeof obj[k] === "string" && obj[k] !== value)
+    .map((k) => ({ segs: [...segs, k], action: "replace" as const, value }));
+}
+
 /** The value at `segs` in `body`, or undefined when the path does not resolve. */
 export function leafAt(body: Json, segs: readonly Seg[]): Json | undefined {
   let cur: Json | undefined = body;
@@ -523,13 +761,11 @@ export function leafAt(body: Json, segs: readonly Seg[]): Json | undefined {
  * that side's teamId; a whole `schedule[k]` row (box scores) → every team of `teams[]` no
  * remaining row names, and one missing matchup per removed row. null when nothing was withheld.
  */
-export function deriveIncomplete(
-  body: Json,
-  withheld: readonly string[],
-): { team_ids: number[]; matchups_missing: number } | null {
+export function deriveIncomplete(body: Json, withheld: readonly string[]): Incomplete | null {
   if (!withheld.length) return null;
   const teamIds = new Set<number>();
   let matchupsMissing = 0;
+  let rowsMissing = 0;
   const b = isObject(body) ? body : null;
   const teams = b && Array.isArray(b.teams) ? b.teams : [];
   const schedule = b && Array.isArray(b.schedule) ? b.schedule : [];
@@ -551,6 +787,7 @@ export function deriveIncomplete(
       matchupsMissing++;
       continue;
     }
+    if (/^\$(?:\.players)?\[\d+\]$/.test(w)) rowsMissing++;
   }
   if (matchupsMissing > 0) {
     const playing = new Set<number>();
@@ -563,7 +800,11 @@ export function deriveIncomplete(
     for (const t of teams)
       if (isObject(t) && typeof t.id === "number" && !playing.has(t.id)) teamIds.add(t.id);
   }
-  return { team_ids: [...teamIds].sort((x, y) => x - y), matchups_missing: matchupsMissing };
+  return {
+    team_ids: [...teamIds].sort((x, y) => x - y),
+    matchups_missing: matchupsMissing,
+    ...(rowsMissing > 0 ? { rows_missing: rowsMissing } : {}),
+  };
 }
 
 /** Removes (omit), empties or replaces (a string leaf) the given units; applied together. */
@@ -613,8 +854,10 @@ export function rawInventory(rawDir: string): { slot: string; names: string[] }[
     const fixed = [
       "proTeamSchedules_wl",
       "skeleton",
+      "players_wl",
       "404-league-not-found",
       "400-limit-missing-sort",
+      "401-communication-not-visible",
       "mSettings",
       "mTeam",
       "mMatchup",
@@ -624,7 +867,11 @@ export function rawInventory(rawDir: string): { slot: string; names: string[] }[
     if (n.startsWith("mRoster.sp")) return `1${n.slice(10).padStart(3, "0")}`;
     if (n.startsWith("mBoxscore.sp")) return `2${n.slice(12).padStart(3, "0")}`;
     if (n === "kona_player_info") return "3";
-    if (n === "probe-shape") return "4";
+    if (n.startsWith("mMatchupScore.sp")) return `4${n.slice(16).padStart(3, "0")}`;
+    if (n === "mNav") return "5";
+    if (n === "kona_player_info.ids") return "6";
+    if (n === "kona_playercard") return "7";
+    if (n === "probe-shape") return "8";
     return `9${n}`;
   };
   const out: { slot: string; names: string[] }[] = [];
@@ -640,10 +887,13 @@ export function rawInventory(rawDir: string): { slot: string; names: string[] }[
   return out;
 }
 
-function leagueRequestPath(season: number, route: "league" | "season"): string {
-  return route === "season"
-    ? `/apis/v3/games/ffl/seasons/${String(season)}`
-    : `/apis/v3/games/ffl/seasons/${String(season)}/segments/0/leagues/0`;
+/** The scrubbed request path of a capture (the league id is always 0 here). */
+export function leagueRequestPath(season: number, route: Route): string {
+  const base = `/apis/v3/games/ffl/seasons/${String(season)}`;
+  if (route === "season") return base;
+  if (route === "players") return `${base}/players`;
+  if (route === "communication") return `${base}/segments/0/leagues/0/communication/`;
+  return `${base}/segments/0/leagues/0`;
 }
 
 function keptHeaders(h: Record<string, string>): Record<string, string> {
@@ -675,8 +925,15 @@ export function annotateFindings(findings: readonly string[], text: string): str
   });
 }
 
-/** The top-level array a too-large body is split along: the largest one with ≥ 2 elements. */
-function splitArrayKey(body: Json): string | null {
+/** The `part.array` of a body that is itself the array (players_wl). */
+export const ROOT_ARRAY = "$";
+
+/**
+ * The array a too-large body is split along: the body itself when it is an array (≥ 2 elements),
+ * else the largest top-level array with ≥ 2 elements.
+ */
+export function splitArrayKey(body: Json): string | null {
+  if (Array.isArray(body)) return body.length >= 2 ? ROOT_ARRAY : null;
   if (!isObject(body)) return null;
   let best: string | null = null;
   let bestSize = 0;
@@ -692,42 +949,60 @@ function splitArrayKey(body: Json): string | null {
   return best;
 }
 
-function withArray(body: JsonObject, key: string, items: Json[]): Json {
+/** The array `key` of `body` (`$`: the body itself), or null. */
+function arrayAt(body: Json, key: string): Json[] | null {
+  if (key === ROOT_ARRAY) return Array.isArray(body) ? body : null;
+  return isObject(body) && Array.isArray(body[key]) ? body[key] : null;
+}
+
+/** `body` with its array `key` replaced by `items` (`$`: the items themselves). */
+export function withArray(body: Json, key: string, items: Json[]): Json {
+  if (key === ROOT_ARRAY || !isObject(body)) return items;
   const out = emptyObject();
   for (const k of Object.keys(body)) setOwn(out, k, k === key ? items : (body[k] as Json));
   return out;
 }
 
+/** The first and last numeric `id` of `items` when every element has one, else null. */
+export function idRange(items: readonly Json[]): { first: number; last: number } | null {
+  const ids = items.map((el) => (isObject(el) && typeof el.id === "number" ? el.id : null));
+  const first = ids[0];
+  const last = ids[ids.length - 1];
+  if (!ids.length || ids.some((i) => i === null) || typeof first !== "number") return null;
+  return typeof last === "number" ? { first, last } : null;
+}
+
 /**
- * Splits a body along one top-level array into contiguous parts that each format to ≤ maxBytes
- * (greedy, lossless: concatenating the parts' arrays in index order restores the body). Returns the
- * index ranges, or null when a single element alone is over the cap.
+ * Splits a body along one array (`$` = the body itself) into contiguous parts that each format to
+ * ≤ maxBytes, each part as long as it can be (lossless: concatenating the parts' arrays in index
+ * order restores the body). The formatted size grows strictly with every added element, so a
+ * binary search per part finds the same boundary the one-at-a-time growth would (a 2,663-row
+ * index stays a few dozen formats). Returns the index ranges, or null when one element alone is
+ * over the cap.
  */
-async function planSplit(
-  body: JsonObject,
+export async function planSplit(
+  body: Json,
   key: string,
   maxBytes: number,
 ): Promise<{ from: number; to: number }[] | null> {
-  const items = body[key] as Json[];
+  const items = arrayAt(body, key);
+  if (!items) return null;
+  const fits = async (from: number, to: number) =>
+    Buffer.byteLength(await formatJson(withArray(body, key, items.slice(from, to)), "recorded")) <=
+    maxBytes;
   const ranges: { from: number; to: number }[] = [];
   let from = 0;
   while (from < items.length) {
-    let to = from + 1;
-    if (
-      Buffer.byteLength(await formatJson(withArray(body, key, items.slice(from, to)), "recorded")) >
-      maxBytes
-    )
-      return null;
-    // grow while the part still fits (one format per added element; parts are few and small)
-    while (to < items.length) {
-      const size = Buffer.byteLength(
-        await formatJson(withArray(body, key, items.slice(from, to + 1)), "recorded"),
-      );
-      if (size > maxBytes) break;
-      to++;
+    if (!(await fits(from, from + 1))) return null;
+    let lo = from + 1; // fits
+    let hi = items.length; // may fit
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (await fits(from, mid)) lo = mid;
+      else hi = mid - 1;
     }
-    ranges.push({ from, to });
-    from = to;
+    ranges.push({ from, to: lo });
+    from = lo;
   }
   return ranges;
 }
@@ -849,17 +1124,20 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
         | { segs: Seg[]; action: "replace"; value: string }
       )[] = [];
       for (const segs of segmentsAtLines(whole, lines).values()) {
-        // a public player's name leaf is replaced, never the whole unit (CAT-12) — unless the
-        // placeholder would read the same, or a replacement already failed to clear this line
-        const rep = replaceableNameLeaf(body, segs);
+        // a public player's name leaf (or the name leaves of a player printed on one line) is
+        // replaced, never the whole unit (CAT-12) — unless the placeholder would read the same,
+        // or a replacement already failed to clear this line
+        const reps = replaceableNameLeaves(body, segs);
         const usable =
-          rep !== null &&
-          !replaced.includes(formatPath(rep.segs)) &&
-          rep.value !== leafAt(body, rep.segs);
-        const u = usable ? rep : withholdUnit(env.views[0] ?? "", segs);
-        if (u === null) withholdFile = true;
-        else if (!units.some((x) => JSON.stringify(x.segs) === JSON.stringify(u.segs)))
-          units.push(u);
+          reps.length > 0 &&
+          reps.every(
+            (rep) =>
+              !replaced.includes(formatPath(rep.segs)) && rep.value !== leafAt(body, rep.segs),
+          );
+        const fallback = usable ? null : withholdUnit(env.views[0] ?? "", segs);
+        if (!usable && fallback === null) withholdFile = true;
+        for (const u of usable ? reps : fallback ? [fallback] : [])
+          if (!units.some((x) => JSON.stringify(x.segs) === JSON.stringify(u.segs))) units.push(u);
       }
       if (withholdFile || lines.length !== r.findings.length) {
         withholdFile = true;
@@ -898,28 +1176,26 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
     ];
     if (Buffer.byteLength(whole, "utf8") > maxBytes) {
       const key = splitArrayKey(body);
-      const ranges =
-        key && isObject(body) && isObject(rawBody) ? await planSplit(body, key, maxBytes) : null;
-      if (!key || !ranges || !isObject(body) || !isObject(rawBody)) {
+      const ranges = key ? await planSplit(body, key, maxBytes) : null;
+      const items = key ? arrayAt(body, key) : null;
+      const rawItems = key ? arrayAt(rawBody, key) : null;
+      if (!key || !ranges || !items) {
         problems.push(
-          `${base}.json: over the ${String(maxBytes)}-byte cap and cannot be split along a top-level array`,
+          `${base}.json: over the ${String(maxBytes)}-byte cap and cannot be split along an array`,
         );
+      } else if (rawItems?.length !== items.length) {
+        problems.push(`${base}.json: raw and scrubbed ${key} arrays differ in length`);
       } else {
-        const scrubbedObj = body;
-        const rawObj = rawBody;
-        const rawItems = rawObj[key];
-        const items = scrubbedObj[key] as Json[];
-        if (!Array.isArray(rawItems) || rawItems.length !== items.length) {
-          problems.push(`${base}.json: raw and scrubbed ${key} arrays differ in length`);
-        } else {
-          parts = ranges.map((r, i) => ({
+        parts = ranges.map((r, i) => {
+          const slice = items.slice(r.from, r.to);
+          return {
             rel: `${base}.p${String(i + 1)}.json`,
-            body: withArray(scrubbedObj, key, items.slice(r.from, r.to)),
-            raw: withArray(rawObj, key, rawItems.slice(r.from, r.to)),
-            part: { index: i + 1, of: ranges.length, array: key },
-          }));
-          log(`${base}: split into ${String(parts.length)} parts along ${key} (lossless)`);
-        }
+            body: withArray(body, key, slice),
+            raw: withArray(rawBody, key, rawItems.slice(r.from, r.to)),
+            part: { index: i + 1, of: ranges.length, array: key, id_range: idRange(slice) },
+          };
+        });
+        log(`${base}: split into ${String(parts.length)} parts along ${key} (lossless)`);
       }
     }
 
@@ -989,6 +1265,8 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
     }
   }
   const blanked = [...new Set([...contexts.values()].flatMap((c) => [...c.blanked]))].sort();
+  const synthetic = await syntheticOutputs(opts.synthetic ?? SYNTHETIC_ERRORS, scan, problems);
+  outputs.push(...synthetic.outputs);
   if (problems.length)
     throw new ScrubAbort(`refusing to write: ${String(problems.length)} problem(s)`, problems);
 
@@ -1007,7 +1285,7 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
   }
   const manifest: FixtureManifest = {
     $comment:
-      "Recorded ESPN fixtures (evidence, plan 05 §3 fixture law): keyless captures of public leagues, scrubbed by scripts/scrub-fixture.ts (research 03 §F.3). sha256 = sha256 of the canonical JSON (sorted keys, no whitespace) of the scrubbed body; scoring.sha256 = the same over every scoring field (scrub.ts SCORING_KEYS), computed on the raw recording and re-verified on the scrubbed file. `pruned` keys were emptied (never a scoring key); `part` marks one response split along `array` to stay ≤ 1 MB; `withheld` lists units removed because a line of theirs matched the local repo deny-list (never committed). No league id, team name or member name of any recorded league is stored anywhere in this repo.",
+      "Recorded ESPN fixtures (evidence, plan 05 §3 fixture law): keyless captures of public leagues, scrubbed by scripts/scrub-fixture.ts (research 03 §F.3). sha256 = sha256 of the canonical JSON (sorted keys, no whitespace) of the scrubbed body; scoring.sha256 = the same over every scoring field (scrub.ts SCORING_KEYS), computed on the raw recording and re-verified on the scrubbed file. `pruned` keys were emptied (never a scoring key); `part` marks one response split along `array` to stay ≤ 1 MB; `withheld` lists units removed because a line of theirs matched the local repo deny-list (never committed); `replaced` lists public player-name leaves set to `Player <id>` instead; `synthetic_files` are hand-written error bodies (never evidence, never a scoring field). No league id, team name or member name of any recorded league is stored anywhere in this repo.",
     version: 1,
     host: READ_HOST,
     season,
@@ -1016,6 +1294,7 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
     leagues,
     files: entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
     withheld_files: withheldFiles.sort(),
+    synthetic_files: synthetic.entries,
   };
   const manifestText = await formatJson(manifest as unknown as Json);
   const mScan = scan(manifestText, "manifest.json");
@@ -1036,6 +1315,53 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
   }
   outputs.push({ rel: "manifest.json", text: manifestText });
   return { manifest, outputs, blanked };
+}
+
+/**
+ * The hand-written error bodies (synthetic.ts) as files under `synthetic/errors/` and their
+ * manifest entries. Refused (a problem) unless each is an error status with no scoring field and
+ * the repo scanner passes it.
+ */
+export async function syntheticOutputs(
+  list: readonly SyntheticError[],
+  scan: (text: string, label: string) => { clean: boolean; findings: string[]; error?: string },
+  problems: string[],
+): Promise<{ outputs: { rel: string; text: string }[]; entries: SyntheticEntry[] }> {
+  const outputs: { rel: string; text: string }[] = [];
+  const entries: SyntheticEntry[] = [];
+  const names = new Set<string>();
+  for (const s of [...list].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const rel = `synthetic/errors/${s.name}.json`;
+    if (!/^[\w.-]{1,80}$/.test(s.name) || names.has(s.name)) {
+      problems.push(`${rel}: bad or duplicate synthetic name`);
+      continue;
+    }
+    names.add(s.name);
+    const body = canonicalize(s.body);
+    const scoring = scoringProjection(body);
+    if (!Number.isInteger(s.status) || s.status < 400 || s.status > 599)
+      problems.push(`${rel}: a synthetic body must be an error (status ${String(s.status)})`);
+    if (scoring.entries > 0)
+      problems.push(`${rel}: a synthetic body may never carry a scoring field (fixture law)`);
+    const text = await formatJson(body);
+    const scanned = scan(text, rel);
+    if (!scanned.clean) problems.push(`${rel}: the repo scanner refused it`);
+    outputs.push({ rel, text });
+    entries.push({
+      path: rel,
+      synthetic: true,
+      kind: "error",
+      views: [...s.views],
+      status: s.status,
+      basis: s.basis,
+      headers: { "content-type": "application/json;charset=utf-8" },
+      top_level_keys: isObject(body) ? Object.keys(body).sort() : [],
+      bytes: Buffer.byteLength(text, "utf8"),
+      sha256: contentSha256(body),
+      scoring,
+    });
+  }
+  return { outputs, entries };
 }
 
 /** Parses a JSON object from a file (manifest readers). */

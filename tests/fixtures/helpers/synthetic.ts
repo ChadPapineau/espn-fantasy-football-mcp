@@ -320,19 +320,98 @@ export function leagueBody(
       },
     ];
   }
-  if (views.includes("kona_player_info")) {
-    const fp = filter as { players?: { limit?: number; sortPercOwned?: unknown } } | undefined;
-    if (fp?.players?.limit !== undefined && fp.players.sortPercOwned === undefined) return null; // caller turns this into a 400
-    const n = fp?.players?.limit ?? 5;
-    // descending ownership order (NOT id order): the scrubber must keep it
-    body.players = Array.from({ length: Math.min(n, 6) }, (_, i) => ({
-      id: 900 - i * 7 + (i % 2) * 20,
-      onTeamId: 0,
-      status: "FREEAGENT",
-      player: player(900 + i, week, season),
+  if (views.includes("mMatchupScore")) {
+    // the whole season's schedule; the requested period's rows carry the live fields (research 03 §B.4)
+    body.schedule = Array.from({ length: 6 }, (_, i) => {
+      const mp = Math.floor(i / 2) + 1;
+      const live = mp === week;
+      const side = (teamId: number, pts: number) => ({
+        teamId,
+        totalPoints: pts,
+        ...(live
+          ? {
+              totalPointsLive: pts,
+              totalProjectedPointsLive: pts + 3.5,
+              rosterForCurrentScoringPeriod: {
+                entries: rosterEntries(teamId, week, season, l.pendingId).map((e) => ({
+                  lineupSlotId: e.lineupSlotId,
+                  playerPoolEntry: { player: { stats: e.playerPoolEntry.player.stats } },
+                })),
+              },
+            }
+          : {}),
+      });
+      return {
+        id: i + 1,
+        matchupPeriodId: mp,
+        playoffTierType: "NONE",
+        winner: live ? "UNDECIDED" : "HOME",
+        home: side(1 + (i % size), 110.5),
+        away: side(1 + ((i + 1) % size), 99.25),
+      };
+    });
+  }
+  const fp = filter as
+    | {
+        players?: {
+          limit?: number;
+          sortPercOwned?: unknown;
+          filterIds?: { value?: number[] };
+        };
+      }
+    | undefined;
+  if (views.includes("kona_playercard")) {
+    const ids = fp?.players?.filterIds?.value ?? [];
+    body.players = ids.map((id) => ({
+      id,
+      onTeamId: Math.abs(id) % (size + 1),
+      status: "ONTEAM",
+      appliedStatTotal: 12.5,
+      transactions: [],
+      player: { ...player(id, week, season), laterality: "RIGHT", stance: "STANDARD" },
     }));
   }
+  if (views.includes("kona_player_info")) {
+    if (fp?.players?.limit !== undefined && fp.players.sortPercOwned === undefined) return null; // caller turns this into a 400
+    const ids = fp?.players?.filterIds?.value;
+    const n = fp?.players?.limit ?? 5;
+    // descending ownership order (NOT id order): the scrubber must keep it
+    body.players = ids
+      ? ids.map((id) => ({
+          id,
+          onTeamId: 0,
+          status: "FREEAGENT",
+          player: player(id, week, season),
+        }))
+      : Array.from({ length: Math.min(n, 6) }, (_, i) => ({
+          id: 900 - i * 7 + (i % 2) * 20,
+          onTeamId: 0,
+          status: "FREEAGENT",
+          player: player(900 + i, week, season),
+        }));
+  }
   return body;
+}
+
+/** The season player index (`/seasons/{s}/players?view=players_wl`): a root ARRAY (research 03 P23). */
+export function playersIndex(count = 12): unknown[] {
+  // reverse id order on purpose: the scrubber sorts it by id
+  return Array.from({ length: count }, (_, i) => {
+    const id = 5000 - i * 13;
+    return {
+      id,
+      fullName: `Player ${String(id)}`,
+      firstName: "Player",
+      lastName: String(id),
+      defaultPositionId: 1 + (i % 4),
+      droppable: true,
+      eligibleSlots: [2, 3, 23, 20, 21],
+      lastNewsDate: 1_700_000_000_000 + i,
+      ownership: { percentOwned: 50 - i },
+      proTeamId: 1 + (i % 32),
+      universeId: 0,
+    };
+  });
 }
 
 export function proTeamSchedules(
@@ -406,6 +485,31 @@ export function fakeEspn(
     const views = u.searchParams.getAll("view");
     const filterText = headers["x-fantasy-filter"];
     const filter: unknown = filterText ? JSON.parse(filterText) : undefined;
+    if (/^\/apis\/v3\/games\/ffl\/seasons\/\d{4}\/players$/.test(u.pathname))
+      return Promise.resolve(
+        views.includes("players_wl")
+          ? json(200, playersIndex())
+          : json(200, { display: true, settings: {} }),
+      );
+    const comm =
+      /^\/apis\/v3\/games\/ffl\/seasons\/\d{4}\/segments\/0\/leagues\/(\d+)\/communication\/$/.exec(
+        u.pathname,
+      );
+    if (comm)
+      return Promise.resolve(
+        json(401, {
+          messages: ["You are not authorized to view this Communication Group."],
+          details: [
+            {
+              message: "You are not authorized to view this Communication Group.",
+              shortMessage: "You are not authorized to view this Communication Group.",
+              resolution: null,
+              type: "AUTH_COMMUNICATION_NOT_VISIBLE",
+              metaData: null,
+            },
+          ],
+        }),
+      );
     const m = /^\/apis\/v3\/games\/ffl\/seasons\/(\d{4})(?:\/segments\/0\/leagues\/(\d+))?$/.exec(
       u.pathname,
     );

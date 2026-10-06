@@ -674,16 +674,11 @@ describe("scrubRun — capture → scrub → freeze over a synthetic raw run", (
       scan: inProcessScan(),
       dryRun: true,
     });
-    // a cap just above every other file, below the roster bodies
+    // a cap just below the smallest roster body (any other body over it splits too)
     const cap =
-      Math.max(
-        ...whole.manifest.files.filter((f) => !f.path.includes("mRoster")).map((f) => f.bytes),
-      ) + 1;
-    expect(
       Math.min(
         ...whole.manifest.files.filter((f) => f.path.includes("mRoster")).map((f) => f.bytes),
-      ),
-    ).toBeGreaterThan(cap);
+      ) - 1;
     const split = await scrubRun({
       rawDir: run.rawDir,
       outRoot: path.join(dir, "s"),
@@ -695,12 +690,21 @@ describe("scrubRun — capture → scrub → freeze over a synthetic raw run", (
       f.path.startsWith("recorded/league-a/mRoster.sp1.p"),
     );
     expect(parts.length).toBeGreaterThan(1);
-    expect(parts.map((p) => p.part)).toEqual(
-      parts.map((_, i) => ({ index: i + 1, of: parts.length, array: "teams" })),
-    );
-    for (const p of parts) expect(p.bytes).toBeLessThanOrEqual(cap);
+    for (const p of split.manifest.files) expect(p.bytes).toBeLessThanOrEqual(cap);
     const bodies = parts.map(
       (p) => JSON.parse(split.outputs.find((o) => o.rel === p.path)?.text ?? "{}") as JsonObject,
+    );
+    // each part names its array and the id range it holds (the canonical order is by id)
+    expect(parts.map((p) => p.part)).toEqual(
+      parts.map((_, i) => {
+        const ids = (bodies[i]?.teams as JsonObject[]).map((t) => t.id as number);
+        return {
+          index: i + 1,
+          of: parts.length,
+          array: "teams",
+          id_range: { first: ids[0], last: ids[ids.length - 1] },
+        };
+      }),
     );
     const merged = { ...bodies[0], teams: bodies.flatMap((b) => b.teams as Json[]) };
     const original = JSON.parse(

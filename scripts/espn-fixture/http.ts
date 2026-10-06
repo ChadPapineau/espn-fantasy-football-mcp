@@ -59,6 +59,13 @@ export function seasonUrl(season: number, views: readonly string[]): string {
   return `${API_ROOT}/seasons/${String(season)}?${q.toString()}`;
 }
 
+/** `…/seasons/{season}/players?view=…` — the season player index, no league id (research 03 §A.1, P23). */
+export function playersUrl(season: number, views: readonly string[]): string {
+  const q = new URLSearchParams();
+  for (const v of views) q.append("view", v);
+  return `${API_ROOT}/seasons/${String(season)}/players?${q.toString()}`;
+}
+
 /** `…/seasons/{season}/segments/0/leagues/{id}?view=…&…` (research 03 §A.1–§A.3). */
 export function leagueUrl(
   season: number,
@@ -71,6 +78,21 @@ export function leagueUrl(
   for (const v of views) q.append("view", v);
   for (const [k, v] of Object.entries(params)) q.append(k, v);
   return `${API_ROOT}/seasons/${String(season)}/segments/0/leagues/${leagueId}?${q.toString()}`;
+}
+
+/**
+ * `…/leagues/{id}/communication/?view=…` — the board route; anonymously it answers a typed 401
+ * (`AUTH_COMMUNICATION_NOT_VISIBLE`, research 03 §A.1 P27), the one 401 body a keyless run can record.
+ */
+export function communicationUrl(
+  season: number,
+  leagueId: string,
+  views: readonly string[],
+): string {
+  if (!/^\d{1,12}$/.test(leagueId)) throw new Error("league id must be digits only");
+  const q = new URLSearchParams();
+  for (const v of views) q.append("view", v);
+  return `${API_ROOT}/seasons/${String(season)}/segments/0/leagues/${leagueId}/communication/?${q.toString()}`;
 }
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;

@@ -1,13 +1,15 @@
 #!/usr/bin/env -S npx tsx
-// record-fixture.ts — the keyless recording of public probe leagues (Phase 0): plan 05 §3.1 step 1
-// (`--public`: mSettings, mTeam+mStandings, mRoster, mMatchup, ≥ 3 final mBoxscore weeks; raw JSON
-// + status + headers OUTSIDE the repo), plan 10 §3.0 Z7 and §3.1a (the recorded evidence of the 1a
-// golden; ADV OBJ-01, OBJ-21), research 03 §D.3 (polite usage). Then it scrubs (scrub-fixture.ts).
+// record-fixture.ts — the keyless recording of public probe leagues: plan 05 §3.1 step 1 (`--public`:
+// mSettings, mTeam+mStandings, mRoster, mMatchup, ≥ 3 final mBoxscore weeks; raw JSON + status +
+// headers OUTSIDE the repo), plan 10 §3.0 Z7 and §3.1a/b (the recorded evidence of the 1a golden;
+// ADV OBJ-01, OBJ-21; the B1 views: mMatchupScore current + final, solo mNav, kona_player_info and
+// kona_playercard by filterIds, players_wl, the keyless 401), research 03 §D.3 (polite usage). Then
+// it scrubs (scrub-fixture.ts).
 //
 // Usage:
 //   EFF_PROBE_LEAGUE_IDS=<id>,<id>,… scripts/dev/with-node.sh npx tsx scripts/record-fixture.ts --public
 //       [--season <year>] [--weeks 1,2,3] [--raw-dir <dir outside the repo>] [--out <fixtures/espn>]
-//       [--max-requests <n ≤ 60>] [--kona-limit <n ≤ 50>] [--prune <key,…>] [--no-scrub]
+//       [--max-requests <n ≤ 80>] [--kona-limit <n ≤ 50>] [--prune <key,…>] [--no-scrub]
 //       [--withhold-denylisted]  (see scrub-fixture.ts)
 //   League ids come from EFF_PROBE_LEAGUE_IDS (or --league <id>, repeatable); they map in order to
 //   league-a, league-b, … and are NEVER written into the repo or printed. No cookie is ever sent:
@@ -32,6 +34,8 @@ import {
   KONA_FILTER_DEFAULT_LIMIT,
   LEAGUE_SLOTS,
   captureOne,
+  cardIds,
+  cardPlan,
   errorPlan,
   leaguePlan,
   officialWeeks,
@@ -41,7 +45,10 @@ import {
 } from "./espn-fixture/pipeline.js";
 import { ScrubAbort } from "./espn-fixture/scrub.js";
 
-export const HARD_REQUEST_CAP = 60;
+/** The most requests one run may ever send (the B1 recording brief: ≤ 80). */
+export const HARD_REQUEST_CAP = 80;
+/** The default cap: a three-league run with three weeks needs 53. */
+export const DEFAULT_MAX_REQUESTS = 60;
 
 export interface RecordDeps {
   fetch?: FetchLike;
@@ -87,7 +94,7 @@ export function parseArgs(
   let weeks = [1, 2, 3];
   let rawDir: string | null = null;
   let outRoot = path.join(REPO_ROOT, "fixtures", "espn");
-  let maxRequests = 45;
+  let maxRequests = DEFAULT_MAX_REQUESTS;
   let konaLimit = KONA_FILTER_DEFAULT_LIMIT;
   let prune: string[] = [];
   let scrub = true;
@@ -203,7 +210,14 @@ export function parseArgs(
 
 /** Requests a run will make at most (the plan is checked against the cap before the first request). */
 export function plannedRequests(o: RecordOptions): number {
-  const perLeague = 1 /* mSettings */ + 2 /* mTeam, mMatchup */ + 2 * o.weeks.length + 1; /* kona */
+  const perLeague =
+    1 /* mSettings */ +
+    2 /* mTeam, mMatchup */ +
+    2 * o.weeks.length /* mRoster, mBoxscore */ +
+    1 /* kona page */ +
+    2 /* mMatchupScore current + final */ +
+    1 /* mNav */ +
+    2; /* kona_player_info + kona_playercard by filterIds */
   return (
     seasonPlan().length + errorPlan().length + o.leagues.length * perLeague + 2
   ); /* probe extras, first league */
@@ -266,17 +280,33 @@ export async function record(o: RecordOptions, deps: RecordDeps = {}): Promise<v
     };
     const settingsEnv = await captureOne(client, o.rawDir, settingsSpec, o.season, id, now, log);
     const settings = parseJsonStrict(settingsEnv.bodyText);
+    const bodies = new Map<string, string>();
     for (const spec of leaguePlan(slot, settings, official, o.weeks, {
       probeExtras: id === first,
       konaLimit: o.konaLimit,
     }))
+      bodies.set(
+        spec.name,
+        (await captureOne(client, o.rawDir, spec, o.season, id, now, log)).bodyText,
+      );
+    // the filterIds captures: ids spread over the last recorded week's roster + the kona page
+    const ids = cardIds(
+      parseJsonStrict(bodies.get(`mRoster.sp${String(Math.max(...o.weeks))}`) ?? "null"),
+      parseJsonStrict(bodies.get("kona_player_info") ?? "null"),
+    );
+    for (const spec of cardPlan(slot, ids, settings, o.season))
       await captureOne(client, o.rawDir, spec, o.season, id, now, log);
   }
 
-  // 3. the two recorded error bodies (league 0; the first league for the 400)
-  const [notFound, missingSort] = errorPlan() as [RequestSpec, RequestSpec];
+  // 3. the recorded error bodies (league 0 for the 404; the first league for the 400 and the 401)
+  const [notFound, missingSort, notVisible] = errorPlan() as [
+    RequestSpec,
+    RequestSpec,
+    RequestSpec,
+  ];
   await captureOne(client, o.rawDir, notFound, o.season, "0", now, log);
   await captureOne(client, o.rawDir, missingSort, o.season, first, now, log);
+  await captureOne(client, o.rawDir, notVisible, o.season, first, now, log);
   log(
     `${String(client.count())} request(s) sent this run (cap ${String(o.maxRequests)}); raw captures kept outside the repo`,
   );

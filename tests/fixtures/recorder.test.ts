@@ -7,6 +7,7 @@ import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_MAX_REQUESTS,
   HARD_REQUEST_CAP,
   Refusal,
   parseArgs,
@@ -124,18 +125,21 @@ describe("argument validation", () => {
     expect(() => parseArgs(argv, e, NOW)).toThrow(msg);
   });
 
-  it("defaults: weeks 1–3, cap 45, kona page 25, raw dir under ~/.cache (outside the repo)", () => {
+  it("defaults: weeks 1–3, cap 60, kona page 25, raw dir under ~/.cache (outside the repo)", () => {
     const o = parseArgs(["--public"], env, NOW);
     expect(o.weeks).toEqual([1, 2, 3]);
-    expect(o.maxRequests).toBe(45);
+    expect(o.maxRequests).toBe(DEFAULT_MAX_REQUESTS);
+    expect(DEFAULT_MAX_REQUESTS).toBe(60);
+    expect(HARD_REQUEST_CAP).toBe(80);
     expect(o.konaLimit).toBe(25);
     expect(o.season).toBe(2026);
     expect(o.rawDir).toMatch(
       /\.cache[/\\]espn-fantasy-football-mcp[/\\]recordings[/\\]2026-10-05$/,
     );
+    // 3 season + 3 error + 3 × 15 per league + 2 probe extras: within the default cap
     expect(
       plannedRequests(parseArgs(["--public"], { EFF_PROBE_LEAGUE_IDS: ids(1, 2, 3) }, NOW)),
-    ).toBe(36);
+    ).toBe(53);
   });
 });
 
