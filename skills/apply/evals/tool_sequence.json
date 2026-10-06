@@ -1,0 +1,28 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the read-only mode's calls on fx-10h (Team 02; week 5). apply logs nothing — the agreed recommendation already holds a log_id — and no write tool exists in this build (PHASE W SEAM — NOT IMPLEMENTED). Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "apply",
+  "tool_contract": 1,
+  "toolset": "core",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "core"
+    },
+    "team_id": 2,
+    "week": 5
+  },
+  "sequences": [
+    {
+      "id": "read_only",
+      "when": "capabilities.write is all false (always, in this build): render the exact clicks",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } }
+      ]
+    }
+  ]
+}

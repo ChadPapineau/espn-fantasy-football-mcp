@@ -1,0 +1,16 @@
+[
+  { "query": "claude can't see my espn team anymore", "should_trigger": true },
+  { "query": "getting 401s from the espn thing", "should_trigger": true },
+  { "query": "it says ESPN rejected my session", "should_trigger": true },
+  { "query": "Is my session still valid?", "should_trigger": true },
+  { "query": "How old are my cookies?", "should_trigger": true },
+  { "query": "The assistant stopped working", "should_trigger": true },
+  { "query": "Do I need to re-run eff setup?", "should_trigger": true },
+  { "query": "set up my league", "should_trigger": false },
+  { "query": "is my roster data stale", "should_trigger": false },
+  { "query": "my Yahoo token expired", "should_trigger": false },
+  { "query": "my Sleeper login stopped working", "should_trigger": false },
+  { "query": "how do I get an ESPN API key", "should_trigger": false },
+  { "query": "Who should I pick up this week?", "should_trigger": false },
+  { "query": "review last week", "should_trigger": false }
+]

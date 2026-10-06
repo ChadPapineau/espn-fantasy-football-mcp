@@ -1,0 +1,129 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with argument templates on fx-10h (Team 02; Tuesday of week 5, priority waivers). Kicker first, then D/ST, one position per espn_analyze_waivers call. Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "stream-kdef",
+  "tool_contract": 1,
+  "toolset": "core",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "core"
+    },
+    "team_id": 2,
+    "week": 5
+  },
+  "sequences": [
+    {
+      "id": "both",
+      "when": "the user asked about streaming without naming a position: kicker, then D/ST",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "schedule", "tool": "espn_get_schedule", "args": { "weeks": [5, 6] } },
+        {
+          "id": "pool_k",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "AVAILABLE",
+            "position": "K",
+            "sort": "projection_week",
+            "week": 5,
+            "limit": 15
+          }
+        },
+        {
+          "id": "kicker",
+          "tool": "espn_analyze_waivers",
+          "args": { "mode": "auto", "positions": ["K"], "look_ahead": 2 }
+        },
+        {
+          "id": "pool_dst",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "AVAILABLE",
+            "position": "D/ST",
+            "sort": "projection_week",
+            "week": 5,
+            "limit": 15
+          }
+        },
+        {
+          "id": "dst",
+          "tool": "espn_analyze_waivers",
+          "args": { "mode": "auto", "positions": ["D/ST"], "look_ahead": 2 }
+        },
+        {
+          "id": "record_k",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "stream",
+            "week": 5,
+            "rec": { "$ref": "kicker.data.rec" },
+            "alternatives": [],
+            "source_calls": { "$source_calls": ["roster", "schedule", "pool_k", "kicker"] },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "stream-kdef-2026-w5-k"
+          }
+        },
+        {
+          "id": "record_dst",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "stream",
+            "week": 5,
+            "rec": { "$ref": "dst.data.rec" },
+            "alternatives": [],
+            "source_calls": { "$source_calls": ["roster", "schedule", "pool_dst", "dst"] },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "stream-kdef-2026-w5-dst"
+          }
+        }
+      ]
+    },
+    {
+      "id": "defense_only",
+      "when": "the user asked about the defense only",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "schedule", "tool": "espn_get_schedule", "args": { "weeks": [5, 6] } },
+        {
+          "id": "pool_dst",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "AVAILABLE",
+            "position": "D/ST",
+            "sort": "projection_week",
+            "week": 5,
+            "limit": 15
+          }
+        },
+        {
+          "id": "dst",
+          "tool": "espn_analyze_waivers",
+          "args": { "mode": "auto", "positions": ["D/ST"], "look_ahead": 2 }
+        },
+        {
+          "id": "record_dst",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "stream",
+            "week": 5,
+            "rec": { "$ref": "dst.data.rec" },
+            "alternatives": [],
+            "source_calls": { "$source_calls": ["roster", "schedule", "pool_dst", "dst"] },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "stream-kdef-2026-w5-dst"
+          }
+        }
+      ]
+    }
+  ]
+}

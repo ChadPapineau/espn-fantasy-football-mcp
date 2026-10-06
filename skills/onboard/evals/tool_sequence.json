@@ -1,0 +1,107 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with argument templates on the fixture league fx-10h (Team 02 is the user's; Tuesday of week 5; week 4 final). Format: skills/README.md#tool-sequences. The onboarding entry is the exact template of references/onboard-log-entry.md with its placeholders bound to earlier results.",
+  "schema_version": 1,
+  "skill": "onboard",
+  "tool_contract": 1,
+  "toolset": "core",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "core"
+    },
+    "team_id": 2,
+    "week": 5,
+    "last_final_week": 4
+  },
+  "sequences": [
+    {
+      "id": "setup",
+      "when": "the session is usable, league.my_team resolved and seeding.confirmed is true",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "box", "tool": "espn_get_box_score", "args": { "week": 4, "team_id": 2 } },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "onboarding",
+            "week": { "$ref": "league.data.clock.current_matchup_period" },
+            "rec": {
+              "action": "Onboarding: league format restated, scoring self-check shown for the last final week, seeding reading recorded or asked",
+              "subjects": [],
+              "lineup": null,
+              "point_estimate": 0,
+              "distribution": {
+                "mean": 0,
+                "p10": 0,
+                "p25": 0,
+                "p50": 0,
+                "p75": 0,
+                "p90": 0,
+                "p_zero": 1,
+                "basis": "position_cv"
+              },
+              "delta_vs_next": { "value": 0, "p10": 0, "p90": 0 },
+              "decision_metric": "golden_mismatch_share",
+              "drivers": [],
+              "assumptions": [
+                {
+                  "text": "The scoring self-check covers the sampled players of the checked weeks only",
+                  "revisit_trigger": "the league's settings_hash changes or a later week shows a mismatch"
+                }
+              ],
+              "confidence": { "role_games": 0, "inputs": [] },
+              "as_of": { "$ref": "league.meta.as_of" },
+              "latest_execution_time": null,
+              "no_move": true,
+              "log_id": null
+            },
+            "alternatives": [],
+            "source_calls": { "$source_calls": ["league", "roster", "box"] },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "onboard-setup"
+          }
+        }
+      ]
+    },
+    {
+      "id": "owner_mismatch",
+      "when": "league.my_team is null: list the teams and ask which one is the user's (nothing is logged before the answer)",
+      "fixture_variant": "owner-mismatch",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "standings", "tool": "espn_get_standings", "args": {} }
+      ]
+    },
+    {
+      "id": "seeding_unconfirmed",
+      "when": "seeding.confirmed is false: the one-time seeding evidence, then the question and the config command",
+      "fixture_variant": "points-only-seeding",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "box", "tool": "espn_get_box_score", "args": { "week": 4, "team_id": 2 } },
+        { "id": "evidence", "tool": "espn_get_league", "args": { "include": ["seeding_evidence"] } }
+      ]
+    },
+    {
+      "id": "public_league",
+      "when": "a public league with credential.state stored: one session probe, reported by which case applies",
+      "fixture_variant": "public-league",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "box", "tool": "espn_get_box_score", "args": { "week": 4, "team_id": 2 } },
+        { "id": "auth", "tool": "espn_check_auth", "args": {}, "expect": ["ok", "RATE_LIMITED"] }
+      ]
+    }
+  ]
+}

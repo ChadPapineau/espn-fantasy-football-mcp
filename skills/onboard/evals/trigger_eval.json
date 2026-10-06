@@ -1,0 +1,17 @@
+[
+  { "query": "Set up my league", "should_trigger": true },
+  { "query": "connect my espn league", "should_trigger": true },
+  { "query": "what are my league's rules?", "should_trigger": true },
+  { "query": "can I trust these numbers?", "should_trigger": true },
+  { "query": "Which team am I in this league?", "should_trigger": true },
+  { "query": "Did the settings change after the commissioner's edit?", "should_trigger": true },
+  { "query": "Is the scoring right for a half-PPR league?", "should_trigger": true },
+  { "query": "How does seeding work in my league?", "should_trigger": true },
+  { "query": "set up my Yahoo league", "should_trigger": false },
+  { "query": "connect my Sleeper league", "should_trigger": false },
+  { "query": "who should I start", "should_trigger": false },
+  { "query": "my ESPN session expired", "should_trigger": false },
+  { "query": "explain how ESPN scoring works in general", "should_trigger": false },
+  { "query": "trade my RB2 for their WR1?", "should_trigger": false },
+  { "query": "which defense should I stream?", "should_trigger": false }
+]

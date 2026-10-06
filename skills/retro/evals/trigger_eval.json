@@ -1,0 +1,17 @@
+[
+  { "query": "How did last week's advice do?", "should_trigger": true },
+  { "query": "review last week", "should_trigger": true },
+  { "query": "Were you right last week?", "should_trigger": true },
+  { "query": "Was ESPN right or were you?", "should_trigger": true },
+  { "query": "show me the calibration", "should_trigger": true },
+  { "query": "recap my week", "should_trigger": true },
+  { "query": "What was my regret on the calls you made?", "should_trigger": true },
+  { "query": "how did we do on the picks?", "should_trigger": true },
+  { "query": "who won my matchup", "should_trigger": false },
+  { "query": "prep me for next week", "should_trigger": false },
+  { "query": "how did my Yahoo team do?", "should_trigger": false },
+  { "query": "review my Sleeper league's results", "should_trigger": false },
+  { "query": "what happened in my league this week", "should_trigger": false },
+  { "query": "Should I pick up a backup tight end?", "should_trigger": false },
+  { "query": "Is my session still valid?", "should_trigger": false }
+]

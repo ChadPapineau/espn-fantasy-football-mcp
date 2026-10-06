@@ -1,0 +1,16 @@
+[
+  { "query": "Apply it", "should_trigger": true },
+  { "query": "Make the move", "should_trigger": true },
+  { "query": "Go ahead and set my lineup", "should_trigger": true },
+  { "query": "go ahead, place the claim", "should_trigger": true },
+  { "query": "Put him in IR", "should_trigger": true },
+  { "query": "Send the offer we agreed on", "should_trigger": true },
+  { "query": "Do it", "should_trigger": true },
+  { "query": "Should I start A or B?", "should_trigger": false },
+  { "query": "Is this trade fair?", "should_trigger": false },
+  { "query": "set my Yahoo lineup", "should_trigger": false },
+  { "query": "apply this in my Sleeper league", "should_trigger": false },
+  { "query": "Who should I claim?", "should_trigger": false },
+  { "query": "what can I still change?", "should_trigger": false },
+  { "query": "How did last week's advice do?", "should_trigger": false }
+]

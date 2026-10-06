@@ -1,0 +1,48 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises on fx-10h. espn_check_auth at most once per sequence and nothing logged (plan 09 §3.7). Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "session-check",
+  "tool_contract": 1,
+  "toolset": "core",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "core"
+    },
+    "team_id": 2,
+    "week": 5
+  },
+  "sequences": [
+    {
+      "id": "rejected",
+      "when": "credential.state is rejected: the setup steps, then — after the user says they ran eff setup — one probe",
+      "fixture_variant": "auth-rejected",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        {
+          "id": "probe",
+          "tool": "espn_check_auth",
+          "args": {},
+          "expect": ["ok", "ESPN_AUTH_REJECTED", "RATE_LIMITED"]
+        }
+      ]
+    },
+    {
+      "id": "stored_public",
+      "when": "a public league with credential.state stored: one probe, reported by which case applies",
+      "fixture_variant": "public-league",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "probe", "tool": "espn_check_auth", "args": {}, "expect": ["ok", "RATE_LIMITED"] }
+      ]
+    },
+    {
+      "id": "drift",
+      "when": "drift.status is red: not a session problem — no setup, no probe",
+      "fixture_variant": "drift-mRoster",
+      "steps": [{ "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } }]
+    }
+  ]
+}

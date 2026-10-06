@@ -1,0 +1,277 @@
+{
+  "$comment": "Single source of the Skills tooling's tool facts (plan 09 §4 K5/K6, §5.1; plan 07 C3, §3; plan 10 §3.1a). Kept beside the scripts, not under skills/, so the shipped bundle never carries a write-tool name outside skills/apply/ (scripts/ci/check-skills-structure.mjs). `tool_contract` is stamped into every SKILL.md and must equal src/mcp/registry.ts TOOL_CONTRACT once the registry exports it; `tools.core` (the 18 P0 tools, EFF_TOOLSET=core) and `tools.p1` (the 16 P1 tools; core + p1 = full, 34) must equal tests/smoke/expected-tools.json once it exists. `write_tools` are the PHASE W SEAM — NOT IMPLEMENTED names (plan 07 §3.F): never registered in this build and named by no Skill body. `inputs` is the plan 07 input contract of every P0 tool in the tiny type grammar documented in skills/README.md; the Lane 1 dry run re-validates against the real zod schemas once the registry lands.",
+  "plugin": "espn-fantasy-football",
+  "tool_contract": 1,
+  "tools": {
+    "core": [
+      "espn_get_league",
+      "espn_get_standings",
+      "espn_get_scoreboard",
+      "espn_get_live_scoreboard",
+      "espn_get_box_score",
+      "espn_list_transactions",
+      "espn_get_roster",
+      "espn_search_players",
+      "espn_list_players",
+      "espn_get_injuries",
+      "espn_get_schedule",
+      "espn_project_players",
+      "espn_analyze_lineup",
+      "espn_analyze_waivers",
+      "espn_record_recommendation",
+      "espn_analyze_retrospective",
+      "espn_get_status",
+      "espn_check_auth"
+    ],
+    "p1": [
+      "espn_get_player_stats",
+      "espn_get_projections",
+      "espn_get_player_outlook",
+      "espn_get_player_usage",
+      "espn_get_depth_chart",
+      "espn_get_defense_profile",
+      "espn_get_news",
+      "espn_analyze_matchup",
+      "espn_analyze_replacement",
+      "espn_analyze_trade",
+      "espn_analyze_injury_cascade",
+      "espn_analyze_schedule",
+      "espn_analyze_roster",
+      "espn_analyze_evidence",
+      "espn_analyze_league_activity",
+      "espn_list_recommendations"
+    ]
+  },
+  "write_tools": [
+    "espn_prepare_lineup",
+    "espn_commit_lineup",
+    "espn_prepare_transaction",
+    "espn_commit_transaction",
+    "espn_prepare_trade",
+    "espn_commit_trade",
+    "espn_cancel_prepared"
+  ],
+  "disallowed_tools": [
+    "mcp__espn-fantasy-football__espn_commit_lineup",
+    "mcp__espn-fantasy-football__espn_commit_transaction",
+    "mcp__espn-fantasy-football__espn_commit_trade",
+    "mcp__plugin_espn-fantasy-football_espn-fantasy-football__espn_commit_lineup",
+    "mcp__plugin_espn-fantasy-football_espn-fantasy-football__espn_commit_transaction",
+    "mcp__plugin_espn-fantasy-football_espn-fantasy-football__espn_commit_trade",
+    "mcp__espn-fantasy-football__espn_commit_*",
+    "mcp__plugin_espn-fantasy-football_espn-fantasy-football__espn_commit_*"
+  ],
+  "skills": {
+    "p0": [
+      "apply",
+      "onboard",
+      "retro",
+      "session-check",
+      "start-sit",
+      "stream-kdef",
+      "waivers",
+      "weekly"
+    ],
+    "p1": []
+  },
+  "fixture": {
+    "league": "fx-10h",
+    "dir": "fixtures/espn/fx-10h",
+    "variants": [
+      "writes-on",
+      "auth-rejected",
+      "public-league",
+      "drift-mRoster",
+      "points-only-seeding",
+      "seeding-unknown",
+      "faab",
+      "k10",
+      "post-run",
+      "ir-open",
+      "ir-invalid",
+      "hidden-bench",
+      "sunday-live",
+      "all-locked",
+      "underdog-9",
+      "questionable-late",
+      "owner-mismatch",
+      "mismatch-53",
+      "espn-proj-disagree",
+      "inj-outlook-system",
+      "inj-teamname-json",
+      "inj-ir-cleared",
+      "inj-tradeblock",
+      "inj-league-name",
+      "inj-division-name"
+    ]
+  },
+  "constants": {
+    "$comment": "Backticked UPPER_SNAKE tokens a Skill may name that are not error codes (06 §C.3 item 7: every other one must be in src/mcp/errors.ts ERROR_CODES). ESPN's verbatim TRAN_* rejection types are allowed by prefix.",
+    "allowed": [
+      "ACTIVE",
+      "QUESTIONABLE",
+      "DOUBTFUL",
+      "OUT",
+      "INJURY_RESERVE",
+      "DAY_TO_DAY",
+      "SUSPENSION",
+      "FREEAGENT",
+      "WAIVERS",
+      "ONTEAM",
+      "AVAILABLE",
+      "WAIVER",
+      "WAIVER_ERROR",
+      "TRADE_ACCEPT",
+      "TRADE_PROPOSAL",
+      "TRADE_DECLINE",
+      "TOTAL_POINTS_SCORED",
+      "EFF_TOOLSET",
+      "EFF_SEEDING_MODE",
+      "EFF_ESPN_READ_HOST",
+      "EFF_FIXTURE_DIR",
+      "ESPN_LEAGUE_ID",
+      "ESPN_SEASON"
+    ],
+    "allowed_prefixes": ["TRAN_"]
+  },
+  "inputs": {
+    "espn_get_league": {
+      "season": "int:2018..2100",
+      "include": "enum[]:league|clock|scoring|roster|rules|seeding|seeding_evidence",
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_standings": {
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_scoreboard": {
+      "week": "int:1..18",
+      "matchup_period": "int:1..17",
+      "team_id": "int:1..999",
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_live_scoreboard": {
+      "week": "int:1..18",
+      "team_id": "int:1..999",
+      "force_refresh": "bool",
+      "allow_stale": "bool"
+    },
+    "espn_get_box_score": {
+      "week": "int:1..18",
+      "matchup_id": "int:1..1000",
+      "team_id": "int:1..999",
+      "all_matchups": "bool",
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_list_transactions": {
+      "types": "enum[]:FREEAGENT|WAIVER|WAIVER_ERROR|TRADE_ACCEPT|TRADE_PROPOSAL|TRADE_DECLINE|ROSTER|DRAFT",
+      "week": "int:1..18",
+      "since": "string",
+      "count": "int:1..200",
+      "pending": "bool",
+      "team_id": "int:1..999",
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_roster": {
+      "team_id": "int:1..999",
+      "all": "bool",
+      "week": "int:1..18",
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_search_players": { "query": "string", "position": "string", "limit": "int:1..25" },
+    "espn_list_players": {
+      "status": "enum:FREEAGENT|WAIVERS|AVAILABLE|ONTEAM|ALL",
+      "position": "string",
+      "sort": "enum:percOwned|percChanged|projection_week|projection_ros|draftRank|name",
+      "week": "int:1..18",
+      "injured": "bool",
+      "limit": "int:1..100",
+      "offset": "int:0..5000",
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_injuries": { "players": "selector", "only_flagged": "bool", "allow_stale": "bool" },
+    "espn_get_schedule": {
+      "weeks": "int[]:1..18",
+      "nfl_team": "string",
+      "include_weather": "bool",
+      "include_lines": "bool",
+      "allow_stale": "bool"
+    },
+    "espn_project_players": {
+      "players": "selector",
+      "horizon": "enum:week|ros|season",
+      "week": "int:1..18",
+      "n_sims": "int:1000..20000",
+      "seed": "int:0..2147483647",
+      "include_stat_line": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_analyze_lineup": {
+      "team_id": "int:1..999",
+      "week": "int:1..18",
+      "objective": "enum:auto|mean|pwin|blend|points_only",
+      "blend_weight": "number:0..1",
+      "pf_weight": "number:0..1000",
+      "seeding_mode": "enum:config|espn_rule|points_only|both",
+      "only_unlocked": "bool",
+      "exclude": "int[]:1..2147483647",
+      "force_start": "int[]:1..2147483647",
+      "compare": "array",
+      "allow_stale": "bool"
+    },
+    "espn_analyze_waivers": {
+      "team_id": "int:1..999",
+      "mode": "enum:auto|priority|faab",
+      "positions": "string[]",
+      "candidates": "int[]:1..2147483647",
+      "horizon_weeks": "int:1..17",
+      "look_ahead": "int:0..2",
+      "phase": "enum:auto|pre_run|post_run",
+      "value_source": "enum:auto|espn_ros|ensemble",
+      "include_drop": "bool",
+      "reserve": "enum:none|playoff_reserve",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_record_recommendation": {
+      "kind": "enum:lineup|waiver|stream|trade|cascade|schedule|roster|evidence|matchup|onboarding|retro|executed|weekly|session",
+      "week": "int:0..18",
+      "rec": "object",
+      "alternatives": "array",
+      "source_calls": "array",
+      "settings_hash": "string",
+      "seeding_mode_used": "enum:espn_rule|points_only|both",
+      "followed_hint": "enum:unknown|user_said_yes|user_said_no",
+      "client_ref": "string",
+      "note": "string"
+    },
+    "espn_analyze_retrospective": {
+      "week": "int:1..18",
+      "kinds": "enum[]:lineup|waiver|stream|trade|cascade|schedule|roster|evidence|matchup|onboarding|retro|executed|weekly|session",
+      "min_n": "int:1..10000",
+      "allow_stale": "bool"
+    },
+    "espn_get_status": { "include_checks": "bool" },
+    "espn_check_auth": {}
+  },
+  "required_inputs": {
+    "espn_get_box_score": ["week"],
+    "espn_search_players": ["query"],
+    "espn_project_players": ["players", "horizon"],
+    "espn_record_recommendation": ["kind", "week", "rec", "settings_hash"]
+  }
+}

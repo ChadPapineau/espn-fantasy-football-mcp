@@ -1,0 +1,16 @@
+[
+  { "query": "Which defense should I stream?", "should_trigger": true },
+  { "query": "Who is the best kicker to pick up?", "should_trigger": true },
+  { "query": "Should I hold my D/ST or stream one?", "should_trigger": true },
+  { "query": "Which K should I stream?", "should_trigger": true },
+  { "query": "stream a kicker for the next two weeks", "should_trigger": true },
+  { "query": "Is there a better DST on the wire for me?", "should_trigger": true },
+  { "query": "Should I hold my kicker through his bye?", "should_trigger": true },
+  { "query": "who should I start at WR3", "should_trigger": false },
+  { "query": "Who should I pick up at running back?", "should_trigger": false },
+  { "query": "which defense should I stream in my Yahoo league", "should_trigger": false },
+  { "query": "best streaming defense for my Sleeper team", "should_trigger": false },
+  { "query": "Trade for a running back?", "should_trigger": false },
+  { "query": "Who should I claim off waivers at WR?", "should_trigger": false },
+  { "query": "Is my lineup right for this week?", "should_trigger": false }
+]

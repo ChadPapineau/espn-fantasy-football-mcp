@@ -1,0 +1,17 @@
+[
+  { "query": "Prep me for week 5", "should_trigger": true },
+  { "query": "What's my game plan?", "should_trigger": true },
+  { "query": "Give me my briefing for the week", "should_trigger": true },
+  { "query": "what should I do this week", "should_trigger": true },
+  { "query": "what happened in my league this week", "should_trigger": true },
+  { "query": "waivers cleared, prep me", "should_trigger": true },
+  { "query": "weekly check-in please", "should_trigger": true },
+  { "query": "Make me a weekly plan", "should_trigger": true },
+  { "query": "how do waivers work on ESPN?", "should_trigger": false },
+  { "query": "who should I start at flex?", "should_trigger": false },
+  { "query": "Is this trade fair?", "should_trigger": false },
+  { "query": "prep me for my Yahoo league", "should_trigger": false },
+  { "query": "what happened in my Sleeper league", "should_trigger": false },
+  { "query": "Should I claim the backup running back?", "should_trigger": false },
+  { "query": "which kicker should I stream?", "should_trigger": false }
+]

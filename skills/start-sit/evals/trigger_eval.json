@@ -1,0 +1,19 @@
+[
+  { "query": "who should I start?", "should_trigger": true },
+  { "query": "X is inactive, who goes in?", "should_trigger": true },
+  { "query": "what can I still change?", "should_trigger": true },
+  { "query": "what are my odds right now?", "should_trigger": true },
+  { "query": "Should I start my WR2 or the receiver on my bench?", "should_trigger": true },
+  { "query": "Is my lineup right for this week?", "should_trigger": true },
+  { "query": "My TE is Questionable, do I play him?", "should_trigger": true },
+  { "query": "Start or sit my second running back?", "should_trigger": true },
+  { "query": "Who do I play at FLEX?", "should_trigger": true },
+  { "query": "My WR is a late scratch, what now?", "should_trigger": true },
+  { "query": "should I claim X", "should_trigger": false },
+  { "query": "trade A for B?", "should_trigger": false },
+  { "query": "good DFS lineup for the main slate", "should_trigger": false },
+  { "query": "set my Yahoo lineup", "should_trigger": false },
+  { "query": "who should I start in my Sleeper league?", "should_trigger": false },
+  { "query": "prep me for next week", "should_trigger": false },
+  { "query": "which defense should I stream?", "should_trigger": false }
+]
