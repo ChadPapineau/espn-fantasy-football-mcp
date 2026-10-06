@@ -1,0 +1,115 @@
+# gitleaks configuration for espn-fantasy-football-mcp — plan 04 §4.3 (rule table), R6; HANDOFF
+# (public repo: no secrets, no personal identifiers — league ids and member GUIDs included).
+# Ported from sibling @d72e03b, adapted: Yahoo rules replaced by the ESPN rules below.
+# Runs: .github/workflows/secrets.yml (full history + the tree on every push/PR, and a self-test).
+# Self-test: scripts/ci/secret-fixtures.mjs GENERATES a must-flag file (every rule below must fire)
+# and a must-pass file (the documentation placeholders must not) at run time — no fake secret is
+# ever committed, so this config needs no path allowlist. Add a rule → add its case there.
+# scripts/dev/scan-secrets.mjs carries the same rules locally (never narrower — its espn_s2 floor
+# is 40, this one 80) plus IPv4 / home-path / email (plan 04 R11, the `identifiers` job).
+#
+# Regex dialect is Go RE2: no lookaround, `\b` is an ASCII word boundary, `(?i)` applies to the
+# whole rest of the pattern.
+
+title = "espn-fantasy-football-mcp"
+
+[extend]
+# Keep every default rule (GitHub/AWS/Slack/… and the generic-api-key heuristic) and add ours.
+useDefault = true
+
+# --- ESPN session cookies (research 03 §C.1) ----------------------------------------------------
+
+[[rules]]
+id = "espn-s2-cookie"
+description = "ESPN espn_s2 session cookie with its name: 80+ cookie characters (80, not 100, to catch a truncated paste)"
+regex = '''(?i)espn[_-]?s2["'`]?\s*[:=]\s*["'`]?([A-Za-z0-9%+/=._-]{80,})'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["espn"]
+tags = ["espn", "credential"]
+
+[[rules]]
+id = "espn-s2-value-bare"
+description = "A bare espn_s2-shaped value: AE-prefixed 100+ char run (plan 04 A-2: the prefix is from published examples)"
+regex = '''\bAE[A-Za-z0-9%+/=]{98,}'''
+entropy = 4.0
+tags = ["espn", "credential"]
+
+[[rules]]
+id = "espn-s2-percent-encoded"
+description = "A bare 100+ char URL-encoded base64 run (how DevTools shows espn_s2), whatever its prefix"
+regex = '''[A-Za-z0-9%+/=]{20,}%(?:2[BbFf]|3[Dd])[A-Za-z0-9%+/=]{77,}'''
+entropy = 4.0
+keywords = ["%2b", "%2f", "%3d"]
+tags = ["espn", "credential"]
+
+[[rules]]
+id = "espn-swid"
+description = "ESPN SWID member id next to its name (braces optional, URL-encoded braces too), outside the fixture range"
+regex = '''(?i)\bswid["'`]?\s*[:=]\s*["'`]?(?:\{|%7B)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'''
+secretGroup = 1
+keywords = ["swid"]
+tags = ["espn", "identifier"]
+  [[rules.allowlists]]
+  description = "fixture pseudonym range {00000000-0000-4000-8000-0000000000NN}"
+  regexTarget = "secret"
+  regexes = ['''(?i)^00000000-0000-4000-8000-0000000000[0-9a-f]{2}$''']
+
+[[rules]]
+id = "brace-guid"
+description = "A brace-GUID (every ESPN member id, research 03 §B.3) outside the fixture pseudonym range"
+regex = '''(?i)(?:\{|%7B)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\}|%7D)'''
+secretGroup = 1
+tags = ["espn", "identifier"]
+  [[rules.allowlists]]
+  description = "fixture pseudonym range {00000000-0000-4000-8000-0000000000NN}"
+  regexTarget = "secret"
+  regexes = ['''(?i)^00000000-0000-4000-8000-0000000000[0-9a-f]{2}$''']
+
+[[rules]]
+id = "cookie-header"
+description = "A captured Cookie / Set-Cookie header carrying an espn_s2 or SWID value"
+regex = '''(?i)\b(?:set-)?cookie["'`]?\s*:[^\n]*?\b(?:espn_s2|swid)\s*=\s*([^\s;"'`]{8,})'''
+secretGroup = 1
+keywords = ["cookie"]
+tags = ["espn", "credential"]
+  [[rules.allowlists]]
+  description = "documentation placeholders: <your value>, ${VAR}, [redacted], {XXXX…}, …"
+  regexTarget = "secret"
+  regexes = ['''^(?:<|\$|\[|\{X|\.\.\.)''', '''(?i)redacted|example|placeholder|your[-_]''']
+
+# --- ESPN identifiers ---------------------------------------------------------------------------
+
+[[rules]]
+id = "espn-league-id"
+description = "An ESPN league id (leagueId=, league_id:, ESPN_LEAGUE_ID=, EFF_PROBE_LEAGUE_ID=, leagues/<id>, leagueHistory/<id>) other than all zeros"
+regex = '''(?i)(?:league[_-]?id["'`]?\s*[:=]\s*["'`]?|\bleagues/|\bleagueHistory/)(\d{4,})'''
+secretGroup = 1
+keywords = ["league"]
+tags = ["espn", "identifier"]
+  [[rules.allowlists]]
+  description = "the documented placeholders 0 / 0000000"
+  regexTarget = "secret"
+  regexes = ['''^0+$''']
+
+[[rules]]
+id = "client-address"
+description = "The client IP field of ESPN's mStatus view (research 03 §A.2)"
+regex = '''"clientAddress"\s*:\s*"([^"]+)"'''
+secretGroup = 1
+keywords = ["clientaddress"]
+tags = ["espn", "identifier"]
+  [[rules.allowlists]]
+  description = "the scrubbed value and placeholders"
+  regexTarget = "secret"
+  regexes = ['''^0\.0\.0\.0$''', '''^<''']
+
+# --- Optional third-party keys ------------------------------------------------------------------
+
+[[rules]]
+id = "odds-api-key"
+description = "The Odds API key (ODDS_API_KEY = 32 hex) — optional, never required"
+regex = '''(?i)odds[_-]?api[_-]?key["']?\s*[:=]\s*["']?([0-9a-f]{32})\b'''
+secretGroup = 1
+keywords = ["odds"]
+tags = ["credential"]

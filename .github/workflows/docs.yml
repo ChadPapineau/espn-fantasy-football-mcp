@@ -1,0 +1,167 @@
+# docs — validates the documents and the identifiers on every push: every ```mermaid block must
+# render, every internal Markdown link must resolve, no tracked file may carry a secret or a personal
+# identifier, and the plugin root + Skills must be structurally valid. Spec: plan 04 §4.2 (mermaid,
+# links, identifiers, skills; `docs-current` arrives with src/config/schema.ts), R7, R11; plan 10
+# §3.0 Z1, Z2, Z6. Ported from sibling @d72e03b, adapted. Every checker first proves it can FAIL
+# (scripts/ci/docs-check-selftest/, scripts/ci/secret-fixtures.mjs) before its pass is trusted.
+#
+# Choices, and why
+# - Mermaid is rendered with @mermaid-js/mermaid-cli, the reference renderer (plan 04 R7), via
+#   `npx --yes -p <pkg>@<exact>` rather than a third-party action. Pinned to the 11.x line (GitHub
+#   renders with mermaid 11). npx pins are not Dependabot-managed — bump deliberately, TOGETHER.
+# - The browser: mermaid-cli 11 launches puppeteer with `headless: "shell"`, i.e. Chrome's
+#   chrome-headless-shell. puppeteer's postinstall would download it, but `.npmrc` sets
+#   ignore-scripts=true (and npx run from the repo root reads it), so the postinstall never runs —
+#   plan 04 T-15(d). Instead an EXPLICIT `npx puppeteer browsers install chrome-headless-shell` step
+#   installs it, with the same pinned puppeteer that mmdc loads (same `-p` list). No third-party
+#   install script runs at all. Chrome runs with --no-sandbox (scripts/ci/puppeteer-config.json)
+#   because Ubuntu 24.04 restricts unprivileged user namespaces. Runner only; never on a laptop.
+# - `claude plugin validate --strict` (plan 04 §4.2, T-01; plan 10 Z6) runs the pinned Claude Code
+#   CLI's linux-x64 platform package fetched with `npm pack` (registry sha512 verified by npm), run
+#   directly — no install script, no login, no token. It validates the marketplace at the root and
+#   the plugin manifest as it SHIPS (the packed tarball: the root CLAUDE.md is a dev-agent file, not
+#   plugin content, and is not in the tarball).
+# - Safe on a public repo: permissions contents: read; no secrets; `pull_request` (never
+#   pull_request_target); persist-credentials: false.
+# - Triggers: every push and PR (no path filter: `identifiers` must see every change).
+
+name: docs
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+
+env:
+  # exact pins; bump deliberately and TOGETHER (mermaid-cli 11.17.0 accepts puppeteer ^23 || ^24 || ^25)
+  MERMAID_CLI: "@mermaid-js/mermaid-cli@11.17.0"
+  PUPPETEER_PIN: "puppeteer@25.12.0"
+  CLAUDE_CODE_PLATFORM_PKG: "@anthropic-ai/claude-code-linux-x64@2.1.238"
+
+jobs:
+  mermaid:
+    name: mermaid
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Fetch the pinned renderer + pinned puppeteer into the npx cache (scripts ignored per .npmrc)
+        run: npx --yes -p "$MERMAID_CLI" -p "$PUPPETEER_PIN" mmdc --version
+      - name: Install chrome-headless-shell explicitly (plan 04 T-15(d); independent of any postinstall)
+        run: npx --yes -p "$MERMAID_CLI" -p "$PUPPETEER_PIN" puppeteer browsers install chrome-headless-shell
+      - name: Self-test — the checker must fail on the known-bad fixture block
+        run: |
+          set +e
+          node scripts/ci/check-mermaid.mjs --no-annotate --root scripts/ci/docs-check-selftest \
+            --out "$RUNNER_TEMP/mermaid-selftest" \
+            --renderer "npx --yes -p $MERMAID_CLI -p $PUPPETEER_PIN mmdc -q --puppeteerConfigFile scripts/ci/puppeteer-config.json" \
+            | tee "$RUNNER_TEMP/mermaid-selftest.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "self-test: check-mermaid exit code on the fixture = $rc (1 required)"
+          if [ "$rc" -ne 1 ] || ! grep -q 'rendered 1/2, failed 1' "$RUNNER_TEMP/mermaid-selftest.log"; then
+            echo "::error::check-mermaid self-test: expected exit 1 with 'rendered 1/2, failed 1' — the checker cannot fail, so its pass would mean nothing"
+            exit 1
+          fi
+      - name: Render every mermaid block in the tree (plan 10 Z2)
+        run: >
+          node scripts/ci/check-mermaid.mjs
+          --out "$RUNNER_TEMP/mermaid-blocks"
+          --renderer "npx --yes -p $MERMAID_CLI -p $PUPPETEER_PIN mmdc -q --puppeteerConfigFile scripts/ci/puppeteer-config.json"
+
+  links:
+    name: links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Self-test — the checker must fail on the known-broken fixture links
+        run: |
+          set +e
+          node scripts/ci/check-links.mjs --no-annotate --root scripts/ci/docs-check-selftest | tee "$RUNNER_TEMP/links-selftest.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "self-test: check-links exit code on the fixture = $rc (1 required)"
+          if [ "$rc" -ne 1 ] || ! grep -q ', 3 broken' "$RUNNER_TEMP/links-selftest.log"; then
+            echo "::error::check-links self-test: expected exit 1 with '3 broken' — the checker cannot fail, so its pass would mean nothing"
+            exit 1
+          fi
+      - name: Check every internal link in the tree
+        run: node scripts/ci/check-links.mjs
+
+  identifiers:
+    name: identifiers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Self-test — scan-secrets must flag every generated case and pass every placeholder (plan 10 Z1)
+        run: node scripts/ci/secret-fixtures.mjs assert-scan
+      - name: Every tracked file — secrets, ESPN cookies/GUIDs/league ids, IPv4, home paths, emails (plan 04 R11)
+        run: node scripts/dev/scan-secrets.mjs --all
+
+  skills:
+    name: skills
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Plugin root + Skills structure (passes on zero Skills)
+        run: node scripts/ci/check-skills-structure.mjs
+      - name: claude plugin validate --strict — the marketplace and the plugin as it ships (plan 10 Z6)
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          DISABLE_TELEMETRY: "1"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/plugin-validate"
+          mkdir -p "$work/cc" "$work/pkg"
+          ( cd "$work" && npm pack "$CLAUDE_CODE_PLATFORM_PKG" --ignore-scripts --silent > cc.tgz.name )
+          tar -xzf "$work/$(cat "$work/cc.tgz.name")" -C "$work/cc"
+          claude="$work/cc/package/claude"
+          chmod +x "$claude"
+          "$claude" --version
+          "$claude" plugin validate "$GITHUB_WORKSPACE" --strict
+          npm pack --ignore-scripts --silent --pack-destination "$work" > "$work/self.tgz.name"
+          tar -xzf "$work/$(cat "$work/self.tgz.name")" -C "$work/pkg"
+          "$claude" plugin validate "$work/pkg/package/.claude-plugin/plugin.json" --strict

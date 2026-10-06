@@ -1,0 +1,199 @@
+# ci — the product gate on every push (any branch) and every PR. Spec: plan 04 §4.1 (jobs lint,
+# typecheck, test, supply-chain, pack, process), plan 05 §7 (coverage gate), plan 04 R5 (ubuntu,
+# Node from .nvmrc), R11 (full runtime tree). Ported from sibling @d72e03b, adapted. The `smoke` job
+# (Inspector in fixture mode) and the weekly macOS run (scheduled.yml) arrive with the server.
+#
+# Choices, and why
+# - Actions pinned to full commit SHAs with the `# vX.Y.Z` comment; Dependabot (github-actions)
+#   rewrites both together.
+# - Node from .nvmrc (24.21.0, matching engines ">=24.15"; .npmrc engine-strict makes a mismatch
+#   fail). No dependency cache (package-manager-cache: false): one less thing that can be poisoned,
+#   and `npm ci` of the committed lockfile with ignore-scripts=true (.npmrc) is fast enough.
+# - Safe on a public repo: permissions contents: read; NO secrets of any kind (CI never holds ESPN
+#   credentials — plan 04 §4); `pull_request` (never pull_request_target); persist-credentials:
+#   false so the job token never lands in .git/config.
+# - Concurrency cancels superseded runs for PRs and for pushes to any branch but main; a run on main
+#   is never cancelled — a cancelled run on main is a commit without a verdict.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out (history for the commit-message check)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: ESLint (type-checked, import boundaries, ESPN zones)
+        run: npm run lint
+      - name: Prettier
+        run: npm run format:check
+      - name: Commit messages — Conventional, no AI attribution trailer (plan 04 R4)
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          range=""
+          if [ "$EVENT" = "pull_request" ]; then
+            range="${PR_BASE}..${HEAD_SHA}"
+          elif [ "$EVENT" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            range="${BEFORE}..${HEAD_SHA}"
+          fi
+          if [ -z "$range" ]; then
+            echo "no usable range (new branch, manual run or force-push) — commit messages not checked"
+            exit 0
+          fi
+          msg="$RUNNER_TEMP/commit-msg.txt"
+          n=0
+          for sha in $(git rev-list --no-merges "$range"); do
+            git log -1 --format=%B "$sha" > "$msg"
+            node scripts/dev/check-commit-msg.mjs "$msg" || { echo "::error::commit $sha: message refused"; exit 1; }
+            n=$((n + 1))
+          done
+          echo "checked $n commit message(s) in $range"
+
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: tsc --noEmit (src + tests + scripts)
+        run: npm run typecheck
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Tests with coverage (vitest thresholds, plan 05 §7)
+        run: npm run test:coverage
+      - name: Coverage gate, independent re-check (per-file 100 % modules)
+        run: npm run check:coverage
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: warn
+
+  supply-chain:
+    name: supply-chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: npm audit — runtime tree, high/critical fails
+        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit — full tree, report only
+        run: npm audit || echo "::notice::npm audit (full tree incl. dev) reported advisories — report only"
+      - name: No install scripts or native builds; the keyring platform package is a bare prebuilt .node
+        run: npm run check:no-scripts
+      - name: Runtime licenses on the allow-list
+        run: npm run check:licenses
+      - name: Runtime tree equals scripts/ci/runtime-allowlist.json (every depth)
+        run: npm run check:runtime-tree
+
+  pack:
+    name: pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Scan what npm pack would ship (files allow-list, plugin root, secrets, identifiers)
+        run: npm run pack:scan
+
+  process:
+    name: process
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Process suites against dist (plan 05 §4.2; none yet — passes with no tests)
+        env:
+          EFF_PROCESS_TEST_DIST: "1"
+        run: npm run test:process

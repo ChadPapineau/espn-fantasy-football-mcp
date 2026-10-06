@@ -1,0 +1,38 @@
+# Dependabot — plan 04 §5 (version updates monthly, grouped), plan 06 §1.1. Ported from sibling
+# @d72e03b, adapted (monthly).
+# github-actions: keeps the SHA-pinned actions in .github/workflows current (it rewrites the pin and
+#   the `# vX.Y.Z` comment together), grouped into one PR.
+# npm: minor + patch updates grouped, majors one PR each (a major is a decision, not a chore);
+#   `increase` keeps the exact pins plan 04 §2 mandates. A runtime change still needs a plan 04 §2
+#   row and a reviewed scripts/ci/runtime-allowlist.json update — CI fails until both exist.
+# Not managed here (bump by hand, value and checksum together): the mermaid-cli / puppeteer / Claude
+#   Code npx pins in .github/workflows/docs.yml and the gitleaks pin in scripts/ci/install-gitleaks.sh.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    versioning-strategy: "increase"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "build"
+      prefix-development: "build"
