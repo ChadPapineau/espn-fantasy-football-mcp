@@ -33,6 +33,7 @@ import {
   hindsightSurplus,
   hindsightTable,
   loadSeason,
+  poolsFor,
   quantile,
   referenceSettings,
   replayWaivers,
@@ -272,13 +273,13 @@ describe("the replay's pieces on a constructed season", () => {
   wire.HOT = ["WR", Array.from({ length: 17 }, (_, i) => (i + 1 === 5 ? 35 : 3))];
   const sw = constructed(2098, wire);
   const table = solvePremiumTable({ teams: REPLAY.teams });
-  const pools = new Map(REPLAY.claimWeeks.map((t) => [t, candidatesAt(sw, t)] as const));
+  const pools = poolsFor(sw);
 
   it("the rule claims only at or above the shipped premium Π(k, W), never a zero forecast", () => {
     let attempts = 0;
     for (let startK = 1; startK <= REPLAY.teams; startK++)
       for (let p = 0; p < 20; p++) {
-        const r = simulateSeason(sw, "rule", startK, seededRng(p), table, pools);
+        const r = simulateSeason("rule", startK, seededRng(p), table, pools);
         for (const e of r.events) {
           expect(e.f).toBeGreaterThan(0);
           expect(e.f).toBeGreaterThanOrEqual(e.premium);
@@ -296,7 +297,7 @@ describe("the replay's pieces on a constructed season", () => {
     for (const policy of POLICIES)
       for (let startK = 1; startK <= REPLAY.teams; startK++)
         for (let p = 0; p < 20; p++) {
-          const r = simulateSeason(sw, policy, startK, seededRng(1000 + p), table, pools);
+          const r = simulateSeason(policy, startK, seededRng(1000 + p), table, pools);
           expect(r.positions[0]).toBe(startK);
           r.positions.forEach((k, i) => {
             expect(k).toBeGreaterThanOrEqual(1);
@@ -317,21 +318,33 @@ describe("the replay's pieces on a constructed season", () => {
   });
 
   it("the baselines: trending claims last week's top scorer, hindsight the top surplus; same seed, same season", () => {
-    const tr = simulateSeason(sw, "trending", 1, seededRng(7), table, pools);
+    const tr = simulateSeason("trending", 1, seededRng(7), table, pools);
     // from k = 1 the first claim wins: week 2's top last-week scorer among the available
-    const w2 = (pools.get(2) ?? [])
-      .slice()
-      .sort((a, b) => b.last - a.last || b.f - a.f || a.id.localeCompare(b.id));
+    // (an independent sort of the week's candidates, not the pool's own order)
+    const w2 = candidatesAt(sw, 2).sort(
+      (a, b) => b.last - a.last || b.f - a.f || a.id.localeCompare(b.id),
+    );
     expect(tr.events[0]?.id).toBe(w2[0]?.id);
-    const hi = simulateSeason(sw, "hindsight", 1, seededRng(7), table, pools);
-    const best = (pools.get(2) ?? []).slice().sort((a, b) => b.h - a.h || a.id.localeCompare(b.id));
+    const hi = simulateSeason("hindsight", 1, seededRng(7), table, pools);
+    const best = candidatesAt(sw, 2).sort((a, b) => b.h - a.h || a.id.localeCompare(b.id));
     expect(hi.events[0]?.id).toBe(best[0]?.id);
     expect(hi.events[0]?.won).toBe(true);
     // the week-5 one-week wonder is what trending chases in week 6
-    expect((pools.get(6) ?? []).find((c) => c.id === "HOT")?.last).toBe(35);
+    expect(pools.get(6)?.byLast[0]?.id).toBe("HOT");
+    expect(pools.get(6)?.byLast[0]?.last).toBe(35);
+    // each order is a permutation of the week's candidates, sorted by its key
+    for (const [t, pool] of pools) {
+      const ids = candidatesAt(sw, t)
+        .map((c) => c.id)
+        .sort();
+      for (const order of [pool.byForecast, pool.byLast, pool.byHindsight])
+        expect(order.map((c) => c.id).sort()).toEqual(ids);
+      for (let i = 1; i < pool.byForecast.length; i++)
+        expect(pool.byForecast[i - 1]?.f ?? 0).toBeGreaterThanOrEqual(pool.byForecast[i]?.f ?? 0);
+    }
     for (const policy of POLICIES)
-      expect(simulateSeason(sw, policy, 5, seededRng(3), table, pools)).toEqual(
-        simulateSeason(sw, policy, 5, seededRng(3), table, pools),
+      expect(simulateSeason(policy, 5, seededRng(3), table, pools)).toEqual(
+        simulateSeason(policy, 5, seededRng(3), table, pools),
       );
   });
 
@@ -343,7 +356,7 @@ describe("the replay's pieces on a constructed season", () => {
       expect(r.successes).toBeLessThanOrEqual(r.claims);
       expect(r.per_season).toBeCloseTo(r.per_claim * r.successes, 6);
     }
-    const maxH = Math.max(...[...pools.values()].flat().map((c) => c.h));
+    const maxH = Math.max(...[...pools.values()].flatMap((p) => p.byHindsight.map((c) => c.h)));
     for (const r of rows) expect(r.per_claim).toBeLessThanOrEqual(maxH);
     expect(rows.find((r) => r.policy === "rule")?.successes ?? 0).toBeGreaterThan(0);
     expect(replayWaivers([sw], 20)).toEqual(rows);

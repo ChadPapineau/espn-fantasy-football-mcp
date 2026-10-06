@@ -278,6 +278,53 @@ export function demand(f: number, W: number): number {
   return Math.min(WAIVER_DP.qCap, WAIVER_DP.q0 + (WAIVER_DP.q1 * f) / (W + 1));
 }
 
+/** A claim week's available players in each policy's order (sorted once; a path only skips). */
+export interface Pool {
+  /** Forecast surplus, best first (the rule's list). */
+  readonly byForecast: readonly Candidate[];
+  /** Points last week, best first (trending), ties by forecast then id. */
+  readonly byLast: readonly Candidate[];
+  /** Hindsight surplus, best first (the ceiling). */
+  readonly byHindsight: readonly Candidate[];
+}
+
+/** The pool of claim week t. */
+export function poolAt(s: Season, t: number): Pool {
+  const c = candidatesAt(s, t);
+  return {
+    byForecast: [...c].sort((a, b) => b.f - a.f || a.id.localeCompare(b.id)),
+    byLast: [...c].sort((a, b) => b.last - a.last || b.f - a.f || a.id.localeCompare(b.id)),
+    byHindsight: [...c].sort((a, b) => b.h - a.h || a.id.localeCompare(b.id)),
+  };
+}
+
+/** Every claim week's pool of one season. */
+export function poolsFor(s: Season): Map<number, Pool> {
+  return new Map(REPLAY.claimWeeks.map((t) => [t, poolAt(s, t)] as const));
+}
+
+/** The targets a policy submits this run, best first (each order is sorted descending). */
+function targetsOf(
+  policy: Policy,
+  pool: Pool | undefined,
+  premium: number,
+  skip: (id: string) => boolean,
+): Candidate[] {
+  if (pool === undefined) return [];
+  const order =
+    policy === "rule" ? pool.byForecast : policy === "trending" ? pool.byLast : pool.byHindsight;
+  const max = policy === "rule" ? REPLAY.claimListMax : 1;
+  const out: Candidate[] = [];
+  for (const c of order) {
+    if (out.length >= max) break;
+    const v = policy === "rule" ? c.f : policy === "trending" ? c.last : c.h;
+    // the strike: never below the premium, never a zero forecast (the rest of the list is lower)
+    if (v <= 0 || (policy === "rule" && c.f < premium)) break;
+    if (!skip(c.id)) out.push(c);
+  }
+  return out;
+}
+
 /**
  * One season under one policy from waiver position `startK` (research 05 §1.2 mechanics): each run
  * the policy's targets are tried in order; a claim at position k wins when none of the k − 1 rivals
@@ -286,12 +333,11 @@ export function demand(f: number, W: number): number {
  * has him); a week without a win moves me up by D ~ Binomial(k − 1, c) (rivals ahead who won).
  */
 export function simulateSeason(
-  s: Season,
   policy: Policy,
   startK: number,
   rng: Rng,
   table: PremiumTable,
-  pools: ReadonlyMap<number, readonly Candidate[]>,
+  pools: ReadonlyMap<number, Pool>,
 ): PathResult {
   const N = REPLAY.teams;
   let k = startK;
@@ -306,23 +352,7 @@ export function simulateSeason(
     positions.push(k);
     const W = REPLAY.finalWeek - t;
     const premium = table.premium(k, W);
-    const pool = (pools.get(t) ?? []).filter((c) => !mine.has(c.id) && !gone.has(c.id));
-    let targets: Candidate[];
-    if (policy === "rule")
-      targets = pool
-        .filter((c) => c.f > 0 && c.f >= premium)
-        .sort((a, b) => b.f - a.f || a.id.localeCompare(b.id))
-        .slice(0, REPLAY.claimListMax);
-    else if (policy === "trending")
-      targets = pool
-        .filter((c) => c.last > 0)
-        .sort((a, b) => b.last - a.last || b.f - a.f || a.id.localeCompare(b.id))
-        .slice(0, 1);
-    else
-      targets = pool
-        .filter((c) => c.h > 0)
-        .sort((a, b) => b.h - a.h || a.id.localeCompare(b.id))
-        .slice(0, 1);
+    const targets = targetsOf(policy, pools.get(t), premium, (id) => mine.has(id) || gone.has(id));
     let won = false;
     for (const c of targets) {
       claims++;
@@ -369,7 +399,7 @@ export function replayWaivers(
   const table = solvePremiumTable({ teams: REPLAY.teams });
   const rows: PolicyRow[] = [];
   for (const s of seasons) {
-    const pools = new Map(REPLAY.claimWeeks.map((t) => [t, candidatesAt(s, t)] as const));
+    const pools = poolsFor(s);
     for (const policy of POLICIES) {
       let claims = 0;
       let successes = 0;
@@ -380,7 +410,7 @@ export function replayWaivers(
           const rng = seededRng(REPLAY.seed).fork(
             `${String(s.season)}/${String(startK)}/${String(p)}`,
           );
-          const r = simulateSeason(s, policy, startK, rng, table, pools);
+          const r = simulateSeason(policy, startK, rng, table, pools);
           claims += r.claims;
           successes += r.successes;
           surplus += r.surplus;
