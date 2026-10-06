@@ -1,0 +1,14 @@
+#!/bin/sh
+# commit-msg — the commit message is published with the commit: scan it for secrets, identifiers
+# and deny-list terms, and refuse a non-Conventional subject or an AI attribution trailer
+# (CLAUDE.md "Security", "Workflow"; plan 04 §3 R4). Enabled with core.hooksPath (see pre-commit).
+root=$(git rev-parse --show-toplevel) || exit 1
+msg_file=${1:?commit-msg: git passes the message file}
+"$root/scripts/dev/with-node.sh" node "$root/scripts/dev/check-commit-msg.mjs" "$msg_file" || {
+  echo "commit-msg: message refused — commit blocked" >&2
+  exit 1
+}
+"$root/scripts/dev/with-node.sh" node "$root/scripts/dev/scan-secrets.mjs" --message "$msg_file" || {
+  echo "commit-msg: the message carries a secret or an identifier — commit blocked" >&2
+  exit 1
+}

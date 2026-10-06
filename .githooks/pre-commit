@@ -1,0 +1,16 @@
+#!/bin/sh
+# pre-commit — block secrets, personal identifiers (incl. the local deny-list) and a personal commit
+# address before they reach a commit (CLAUDE.md "Security"; plan 04 §4.1 R11). Ported from sibling
+# @d72e03b, adapted. Scans the STAGED blob of every file the commit adds or changes — any status but
+# a deletion, type changes included — enumerated by the scanner itself (`git diff --cached --raw -z`)
+# and read by object id, so a name git would C-quote is never mangled into a path that is skipped.
+# It also refuses an author or committer address that is not a GitHub no-reply address.
+#
+# Enabled per clone (local config only):  git config core.hooksPath .githooks
+# scripts/dev/commit-paths.sh runs the same checks itself (it commits via plumbing that fires no
+# hooks). Never bypass with --no-verify.
+root=$(git rev-parse --show-toplevel) || exit 1
+"$root/scripts/dev/with-node.sh" node "$root/scripts/dev/scan-secrets.mjs" --index --identity || {
+  echo "pre-commit: secret/identifier/identity scan failed — commit blocked" >&2
+  exit 1
+}
