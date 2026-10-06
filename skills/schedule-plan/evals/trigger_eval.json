@@ -1,0 +1,19 @@
+[
+  { "query": "How bad are my byes?", "should_trigger": true },
+  { "query": "Who has the best playoff schedule?", "should_trigger": true },
+  { "query": "Am I making the playoffs — do I need wins or points?", "should_trigger": true },
+  { "query": "What are my chances of a first-round bye?", "should_trigger": true },
+  { "query": "Plan ahead for weeks 15-17", "should_trigger": true },
+  { "query": "Can I coast down the stretch?", "should_trigger": true },
+  { "query": "Three of my starters share a bye week; how do I cover it?", "should_trigger": true },
+  { "query": "start A or B for this matchup", "should_trigger": false },
+  { "query": "trade A for B", "should_trigger": false },
+  { "query": "which defense should I stream next", "should_trigger": false },
+  { "query": "what are my playoff odds in my Yahoo league", "should_trigger": false },
+  { "query": "show my Sleeper league's bye weeks", "should_trigger": false },
+  {
+    "query": "Should I start the higher-ceiling WR because points-for matters?",
+    "should_trigger": false
+  },
+  { "query": "Is my lineup right?", "should_trigger": false }
+]

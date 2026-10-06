@@ -1,0 +1,20 @@
+[
+  { "query": "Is this trade fair?", "should_trigger": true },
+  { "query": "He offered his WR1 for my RB2 and my TE — is it fair?", "should_trigger": true },
+  { "query": "Should I buy low on a struggling receiver?", "should_trigger": true },
+  { "query": "Who should I trade with for a running back?", "should_trigger": true },
+  { "query": "Is it a good moment to sell high on my running back?", "should_trigger": true },
+  { "query": "Would a 2-for-1 deal help my roster?", "should_trigger": true },
+  { "query": "Draft a counter-offer to the one I received", "should_trigger": true },
+  {
+    "query": "How close is the trade deadline, and should I make a deal before it?",
+    "should_trigger": true
+  },
+  { "query": "should I add the backup running back", "should_trigger": false },
+  { "query": "start A or B", "should_trigger": false },
+  { "query": "is this trade fair in my Yahoo league", "should_trigger": false },
+  { "query": "evaluate a deal in my Sleeper league", "should_trigger": false },
+  { "query": "Rate my roster", "should_trigger": false },
+  { "query": "Should I keep him as a keeper next season?", "should_trigger": false },
+  { "query": "Send the offer we agreed on", "should_trigger": false }
+]

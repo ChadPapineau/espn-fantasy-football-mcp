@@ -1,0 +1,22 @@
+[
+  { "query": "My RB1 tore his ACL — who do I grab?", "should_trigger": true },
+  { "query": "Their starting running back got hurt. Who benefits?", "should_trigger": true },
+  { "query": "A star receiver is suspended; what changes for my team?", "should_trigger": true },
+  { "query": "Who is the next man up now that their QB is injured?", "should_trigger": true },
+  {
+    "query": "How long will this injury keep him sidelined, and who gains the targets?",
+    "should_trigger": true
+  },
+  { "query": "Their tight end is out for weeks. Who gets his work?", "should_trigger": true },
+  { "query": "Broken collarbone for my WR2 — what now?", "should_trigger": true },
+  { "query": "start A or B", "should_trigger": false },
+  { "query": "who should I pick up", "should_trigger": false },
+  { "query": "is my running back healthy?", "should_trigger": false },
+  { "query": "which injured players are on my Yahoo team", "should_trigger": false },
+  { "query": "who benefits from the injury in my Sleeper league", "should_trigger": false },
+  { "query": "Is my roster valid with a healthy player in IR?", "should_trigger": false },
+  {
+    "query": "What does research say about ACL recovery times in general?",
+    "should_trigger": false
+  }
+]

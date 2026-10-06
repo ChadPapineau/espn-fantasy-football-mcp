@@ -3,6 +3,7 @@
 Call `espn_record_recommendation` **before** presenting a recommendation, then quote the returned `log_id` in the **Log** line. The retrospective can only score what was logged; "no move" is a recommendation and is logged too.
 
 - `kind`: the producer's kind — `lineup` for an `espn_analyze_lineup` result (also on game day), `waiver` for an `espn_analyze_waivers` claim list, `stream` for a K or D/ST call, `retro` for the retrospective, `onboarding` for the onboarding entry. A rec logged under another kind is never scored.
+  (P1; under `full`: `matchup` for an `espn_analyze_matchup` result, `trade` for `espn_analyze_trade`, `cascade` for `espn_analyze_injury_cascade`, `schedule` for `espn_analyze_schedule`, `roster` for `espn_analyze_roster`, `evidence` for `espn_analyze_evidence`.)
 - `week`: the week the decision is for.
 - `rec`: the analytics result's `data.rec`, copied verbatim — never re-derive, round or edit its numbers.
 - `alternatives[]`: the options offered beside it, each with its distribution (the runner-up swap, the next streamer).

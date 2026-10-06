@@ -19,7 +19,7 @@ metadata:
 
 # waivers — is this claim worth my spot?
 
-In a move-to-last league a successful claim costs the user's place in the order and a failed claim costs nothing, so every claim is priced: **claim ⇔ s ≥ Π(k, W)** — the candidate's surplus `s` over the drop, on this roster, against the premium `Π` of the user's position `k` with `W` usable weeks left. `espn_analyze_waivers` solves it; this Skill reads it back plainly, keeps marginal calls apart, and keys the brief to the league's own waiver clock: **the claim brief** before the run, **the scramble brief** after it. In this version candidates are valued on ESPN's rest-of-season projection, labelled (`value_basis: espn_ros`).
+In a move-to-last league a successful claim costs the user's place in the order and a failed claim costs nothing, so every claim is priced: **claim ⇔ s ≥ Π(k, W)** — the candidate's surplus `s` over the drop, on this roster, against the premium `Π` of the user's position `k` with `W` usable weeks left. `espn_analyze_waivers` solves it; this Skill reads it back plainly, keeps marginal calls apart, and keys the brief to the league's own waiver clock: **the claim brief** before the run, **the scramble brief** after it. Under `EFF_TOOLSET=core` candidates are valued on ESPN's rest-of-season projection, labelled (`value_basis: espn_ros`); under `full` the **usage branch** detects opportunity before the box score shows it — snap and target-share jumps, the expected-points gap, red-zone shifts, depth-chart moves — and values candidates on this server's ensemble (`value_basis: ensemble`), with ESPN's projection beside it.
 
 Conventions: Step 0, routing and the never-re-fetch rules in [orient](references/orient.md); fields per tool in [tool outputs](references/tool-outputs.md); the premium story, the two briefs and what is still unconfirmed in [priority waivers](references/priority-waivers.md); pages and statuses in [ESPN vocabulary](references/espn-vocabulary.md); logging in [log](references/log.md). The guardrails and the output contract are repeated below.
 
@@ -38,10 +38,10 @@ Run Step 0 of [orient](references/orient.md). Note `rules.waiver.uses_budget`, `
 1. `espn_get_injuries` for the user's roster and the leading candidates.
 2. `espn_list_transactions` with `types: ["WAIVER", "WAIVER_ERROR", "FREEAGENT"]` and `count: 60` — rivals' claims, including the losing ones. Without cookies on a private league this answers `ESPN_REQUIRES_COOKIES` (or `ESPN_AUTH_REJECTED`): carry on — the engine falls back to its cold-start demand model — and route the session repair to `session-check` in one line without abandoning the answer.
 3. `espn_get_standings` — the user's `waiver_rank` (`k`) and rivals' activity.
-4. (P1; `espn_get_player_usage` and `espn_get_depth_chart` add usage-first detection under `full`; under `core` skip them and say the ranking rests on ESPN's projections.)
+4. **P1:** under `full`, the usage branch — `espn_get_player_usage` (`window: 3`) for the user's roster and for the leading candidates (a pool selector per position of need), and `espn_get_depth_chart` for each team where an injury opened a role. Under `core` skip both and say the ranking rests on ESPN's projections.
 
 ### 5. The decision
-`espn_analyze_waivers` with `mode: "auto"`, `phase: "auto"` and `value_source: "auto"` (and `candidates` when the user named players). (P1; `espn_analyze_replacement` refines the replacement level under `full`.)
+`espn_analyze_waivers` with `mode: "auto"`, `phase: "auto"` and `value_source: "auto"` (and `candidates` when the user named players). (P1; under `full`, `espn_analyze_replacement` with `horizon: "ros"` first refines the replacement level, `value_source: "auto"` then values on the ensemble, and `mode: "auto"` gives a FAAB league its bid curve.)
 
 ### 6. Log, then answer
 `espn_record_recommendation` with `kind: "waiver"` and the result's `rec` ([log](references/log.md)). Then render.
@@ -56,11 +56,17 @@ Run Step 0 of [orient](references/orient.md). Note `rules.waiver.uses_budget`, `
 - The `flip_driver` line — "driven by the chance the role holds and how long, not by last week's box score".
 - The `learned` line once the league's own feed has confirmed one of the unconfirmed waiver mechanics; until then, one line saying the server learns them from the league's own feed.
 
+## Output additions (the usage branch and FAAB — P1, under `full`)
+- **P1:** each candidate's `signals[]` — `snap_jump`, `target_share_jump`, `xfp_gap`, `rz_shift`, `depth_chart`, `injury_cascade`, `implied_total` — each with its numeric `evidence`, strongest first. `percent_change` is never a signal: it says who else will claim, not who is good.
+- **P1:** a candidate whose points ran ahead of his expected points (`xfp_gap` strongly negative — touchdown luck) is flagged and never the top target on points alone; one whose expected points run ahead of his scoring is the opposite case.
+- **P1:** the **Value basis** line reads "this server's usage-based ensemble, ESPN's projection beside it" while `value_basis` is `ensemble` — the `Π` rule and the band are unchanged.
+- **P1:** in a FAAB league (`mode_used: faab`): the bid curve — `faab.b_star` (the bid), `p_win_curve[]` (the chance each bid wins), `lambda` (the value of a dollar kept) and `dollars_per_point` with its sample size — the reserve question only when `lambda` is near zero, and no premium or claim-order language (that is the priority league's).
+
 ## Guardrails specific to waivers
 - Never rank by last week's points alone.
 - Never port FAAB bid shading or a dollar value per point to a priority league.
 - Never hoard the first spot "for the league-winner", and never pass "to keep priority" when `s > Π`.
-- The drop never names a handcuff or stash the engine valued, nor a player with `droppable: false`.
+- The drop never names a handcuff or stash the engine valued, nor a player with `droppable: false` — nor, under `full` (P1: from `espn_get_player_usage`), a player whose `xfp_gap` is strongly positive: his points are coming.
 - `percent_change` and trending adds are competition signals — who else will claim — never evidence of value.
 - Every time comes from `rules.waiver.next_execution`.
 - A marginal verdict is printed as marginal, with the band that makes it so.

@@ -1,0 +1,22 @@
+[
+  { "query": "I heard their backup is taking over — is it true?", "should_trigger": true },
+  {
+    "query": "A beat writer says my RB will get more work. Does the data agree?",
+    "should_trigger": true
+  },
+  {
+    "query": "This tweet says my WR is limited. What do the numbers show?",
+    "should_trigger": true
+  },
+  { "query": "Is the rumor about my QB losing his job real?", "should_trigger": true },
+  { "query": "ESPN says my receiver will see more targets — believe it?", "should_trigger": true },
+  { "query": "Does his ESPN outlook match the usage?", "should_trigger": true },
+  { "query": "Reports say he practised in full. Story vs numbers?", "should_trigger": true },
+  { "query": "summarise the latest NFL news", "should_trigger": false },
+  { "query": "start A or B", "should_trigger": false },
+  { "query": "Is my RB on the official injury report?", "should_trigger": false },
+  { "query": "check this rumor in my Yahoo league", "should_trigger": false },
+  { "query": "what does Sleeper's feed show for my WR", "should_trigger": false },
+  { "query": "tell me something fun about my kicker", "should_trigger": false },
+  { "query": "Who should I pick up this week?", "should_trigger": false }
+]

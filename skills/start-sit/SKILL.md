@@ -51,9 +51,11 @@ Named players resolve from the roster, or through `espn_search_players` — neve
 2. `espn_get_live_scoreboard` for the week on every call in this branch (the server's 60-second cache absorbs repeats).
 3. **Availability comes from ESPN's `injury_status` only** — `espn_get_injuries` reports `p_active_basis: "espn_gameday_status"` on game day. The user's own "X is inactive" is unconfirmed until ESPN's status agrees: give a conditional ("if ESPN shows X as Out, put Y in — Y's game kicks off at 16:25 ET, so that swap is still open") and say what would confirm it; pass X in `exclude` only once ESPN's status agrees.
 4. `espn_project_players` for the players whose games have not started only.
-5. Live odds: ESPN's `win_probability_espn`, labelled as ESPN's, with the points split final / live / pending. Our own live win probability is not available in this version — say so. (P1; under `full`, `espn_analyze_matchup` with `mode: "live"` adds ours beside ESPN's, and its rec is logged as `matchup`.)
+5. Live odds: ESPN's `win_probability_espn`, labelled as ESPN's, with the points split final / live / pending. Under `core` our own live win probability is not available — say so.
+   **P1:** under `full`, `espn_analyze_matchup` with `mode: "live"` puts ours beside ESPN's — `p_win` with its `interval`, the players split into `players_final`, `players_live` and `players_pending`, `espn_cross_check.win_probability_espn`, and `actionable_slots[]` with their lock times. Show both numbers, each labelled; when they differ by more than 0.15 say so, and say which one the swap advice follows. Every in-game number is provisional.
 6. `espn_analyze_lineup` with `only_unlocked: true` — set it automatically; a locked player is never moved, benched or suggested.
 7. `espn_record_recommendation` with `kind: "lineup"` and the rec of step 6 — a game-day swap is a lineup decision, and only lineup entries are scored for swap regret.
+   **P1:** under `full`, first `espn_record_recommendation` with `kind: "matchup"` and the live matchup's `rec` — the retrospective scores a live win probability against the result.
 8. Output: the slots still actionable (`actionable_slots`, from the roster's unlocked players, each with its `lock_at`), then the single best swap among unlocked slots — or **"Nothing actionable: every slot that could change is locked."** Every in-game number is provisional.
 
 ### 5. Output additions (on top of the contract)

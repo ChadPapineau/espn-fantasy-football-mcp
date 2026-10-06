@@ -1,5 +1,5 @@
 {
-  "$comment": "Single source of the Skills tooling's tool facts (plan 09 §4 K5/K6, §5.1; plan 07 C3, §3; plan 10 §3.1a). Kept beside the scripts, not under skills/, so the shipped bundle never carries a write-tool name outside skills/apply/ (scripts/ci/check-skills-structure.mjs). `tool_contract` is stamped into every SKILL.md and must equal src/mcp/registry.ts TOOL_CONTRACT once the registry exports it; `tools.core` (the 18 P0 tools, EFF_TOOLSET=core) and `tools.p1` (the 16 P1 tools; core + p1 = full, 34) must equal tests/smoke/expected-tools.json once it exists. `write_tools` are the PHASE W SEAM — NOT IMPLEMENTED names (plan 07 §3.F): never registered in this build and named by no Skill body. `inputs` is the plan 07 input contract of every P0 tool in the tiny type grammar documented in skills/README.md; the Lane 1 dry run re-validates against the real zod schemas once the registry lands.",
+  "$comment": "Single source of the Skills tooling's tool facts (plan 09 §4 K5/K6, §5.1; plan 07 C3, §3; plan 10 §3.1a). Kept beside the scripts, not under skills/, so the shipped bundle never carries a write-tool name outside skills/apply/ (scripts/ci/check-skills-structure.mjs). `tool_contract` is stamped into every SKILL.md and must equal src/mcp/registry.ts TOOL_CONTRACT once the registry exports it; `tools.core` (the 18 P0 tools, EFF_TOOLSET=core) and `tools.p1` (the 16 P1 tools; core + p1 = full, 34) must equal tests/smoke/expected-tools.json once it exists. `write_tools` are the PHASE W SEAM — NOT IMPLEMENTED names (plan 07 §3.F): never registered in this build and named by no Skill body. `inputs` is the plan 07 input contract of every P0 and P1 tool in the tiny type grammar documented in skills/README.md (P1: plan 07 B2, C3, C4, D1, D4–D6, E3, E4, E6–E11, E14, where plan 07 says \"as sib 07\" the sibling's inputs with `player_id`/`team_id` for its keys, and the bounds of src/mcp/bounds.ts); the Lane 1 dry run re-validates every resolved call against the registry's real zod schemas.",
   "plugin": "espn-fantasy-football",
   "tool_contract": 1,
   "tools": {
@@ -72,7 +72,7 @@
       "waivers",
       "weekly"
     ],
-    "p1": []
+    "p1": ["injury-cascade", "news-check", "roster-audit", "schedule-plan", "trade"]
   },
   "fixture": {
     "league": "fx-10h",
@@ -189,7 +189,11 @@
       "allow_stale": "bool",
       "detail": "enum:compact|full"
     },
-    "espn_search_players": { "query": "string", "position": "string", "limit": "int:1..25" },
+    "espn_search_players": {
+      "query": "string",
+      "position": "string",
+      "limit": "int:1..25"
+    },
     "espn_list_players": {
       "status": "enum:FREEAGENT|WAIVERS|AVAILABLE|ONTEAM|ALL",
       "position": "string",
@@ -202,7 +206,11 @@
       "allow_stale": "bool",
       "detail": "enum:compact|full"
     },
-    "espn_get_injuries": { "players": "selector", "only_flagged": "bool", "allow_stale": "bool" },
+    "espn_get_injuries": {
+      "players": "selector",
+      "only_flagged": "bool",
+      "allow_stale": "bool"
+    },
     "espn_get_schedule": {
       "weeks": "int[]:1..18",
       "nfl_team": "string",
@@ -265,13 +273,136 @@
       "min_n": "int:1..10000",
       "allow_stale": "bool"
     },
-    "espn_get_status": { "include_checks": "bool" },
-    "espn_check_auth": {}
+    "espn_get_status": {
+      "include_checks": "bool"
+    },
+    "espn_check_auth": {},
+    "espn_get_player_stats": {
+      "players": "selector",
+      "type": "enum:week|season|prior_season",
+      "week": "int:1..18",
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_projections": {
+      "players": "selector",
+      "horizon": "enum:week|ros|preseason",
+      "week": "int:1..18",
+      "force_refresh": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_player_outlook": {
+      "players": "selector:outlook",
+      "weeks": "int[]:1..18",
+      "include_season_outlook": "bool",
+      "allow_stale": "bool"
+    },
+    "espn_get_player_usage": {
+      "players": "selector",
+      "window": "int:1..17",
+      "include_prior_season": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_depth_chart": {
+      "nfl_team": "string",
+      "player": "selector:single",
+      "positions": "string[]",
+      "allow_stale": "bool"
+    },
+    "espn_get_defense_profile": {
+      "nfl_team": "string",
+      "position": "string",
+      "window_weeks": "int:4..17",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_get_news": {
+      "players": "selector",
+      "nfl_team": "string",
+      "since_hours": "int:1..168",
+      "limit": "int:1..50",
+      "sources": "enum[]:rotowire|espn|cbs",
+      "allow_stale": "bool"
+    },
+    "espn_analyze_matchup": {
+      "team_id": "int:1..999",
+      "week": "int:1..18",
+      "mode": "enum:pre|live|season",
+      "method": "enum:normal|mc",
+      "n_sims": "int:1000..20000",
+      "seeding_mode": "enum:config|espn_rule|points_only|both",
+      "scenarios": "array",
+      "horizon": "enum:regular|through_playoffs",
+      "allow_stale": "bool"
+    },
+    "espn_analyze_replacement": {
+      "positions": "string[]",
+      "horizon": "enum:week|ros",
+      "week": "int:1..18",
+      "baseline": "enum:starter|stream|both",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_analyze_trade": {
+      "team_id": "int:1..999",
+      "offer": "object",
+      "find_partners": "object",
+      "horizon": "enum:ros|playoffs",
+      "risk": "enum:auto|variance|floor",
+      "seeding_mode": "enum:config|both",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_analyze_injury_cascade": {
+      "player": "selector:single",
+      "assume_weeks_out": "int:0..18",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_analyze_schedule": {
+      "team_id": "int:1..999",
+      "weeks": "int[]:1..18",
+      "include_playoffs": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_analyze_roster": {
+      "team_id": "int:1..999",
+      "competing": "enum:auto|yes|eliminated",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_analyze_evidence": {
+      "player": "selector:single",
+      "claim": "object",
+      "allow_stale": "bool"
+    },
+    "espn_analyze_league_activity": {
+      "since_days": "int:1..30",
+      "include_rival_needs": "bool",
+      "allow_stale": "bool",
+      "detail": "enum:compact|full"
+    },
+    "espn_list_recommendations": {
+      "week": "int:0..18",
+      "kind": "enum:lineup|waiver|stream|trade|cascade|schedule|roster|evidence|matchup|onboarding|retro|executed|weekly|session",
+      "limit": "int:1..100",
+      "offset": "int:0..5000"
+    }
   },
   "required_inputs": {
     "espn_get_box_score": ["week"],
     "espn_search_players": ["query"],
     "espn_project_players": ["players", "horizon"],
-    "espn_record_recommendation": ["kind", "week", "rec", "settings_hash"]
+    "espn_record_recommendation": ["kind", "week", "rec", "settings_hash"],
+    "espn_get_player_stats": ["players", "type"],
+    "espn_get_projections": ["players", "horizon"],
+    "espn_get_player_outlook": ["players"],
+    "espn_get_player_usage": ["players"],
+    "espn_analyze_injury_cascade": ["player"],
+    "espn_analyze_evidence": ["player"]
   }
 }

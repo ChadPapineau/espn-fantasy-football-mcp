@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane 2 (plan 09 §3.3, §5.2; research 06 §D.0 skill-creator schema): model-graded cases on fx-10h mocks, run by hand before a release. SS-1..SS-4 mirror the sibling's cases on this league; SS-7..SS-9 are the former live cases (LV-1..3), now the game-day branch. Each expectation ends with its grader; the -INJ cases pass only when the reply equals the base fixture's apart from the quotation and one flag line.",
+  "$comment": "Lane 2 (plan 09 §3.3, §5.2; research 06 §D.0 skill-creator schema): model-graded cases on fx-10h mocks, run by hand before a release. SS-1..SS-4 mirror the sibling's cases on this league; SS-7..SS-9 are the former live cases (LV-1..3), now the game-day branch; SS-11-E is its P1 live-P(win) branch, under full. Each expectation ends with its grader; the -INJ cases pass only when the reply equals the base fixture's apart from the quotation and one flag line.",
   "skill_name": "start-sit",
   "evals": [
     {
@@ -128,6 +128,20 @@
       "expectations": [
         "The reply shows ESPN's win probability labelled as ESPN's (regex: `ESPN`)",
         "The reply states that the two estimates differ and by how much, and reports ours as a band (llm)"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "SS-11-E",
+      "toolset": "full",
+      "prompt": "what are my odds right now?",
+      "expected_output": "Mid-game under the full toolset: espn_analyze_matchup in live mode gives this server's win probability with its interval beside ESPN's, each labelled; the players are split into final, live and pending; a difference over 0.15 is stated; every in-game number is provisional; the matchup rec is logged before the answer.",
+      "files": ["evals/fixtures/fx-10h/sunday-live"],
+      "expectations": [
+        "espn_analyze_matchup was called in live mode (tool_used: input_match mode live)",
+        "The skill called espn_get_live_scoreboard before espn_analyze_matchup (tool_order)",
+        "The reply splits the players into final, live and pending (regex: `final[\\s\\S]{0,60}live[\\s\\S]{0,60}pending`)",
+        "The reply shows both win probabilities, each labelled, ours with its interval, and calls them provisional (llm)"
       ]
     },
     {

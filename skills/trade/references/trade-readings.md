@@ -1,0 +1,11 @@
+## Trade readings — why points become playoff odds, and who is buying
+
+**Two seeding readings.** ESPN's rule (`seeding_mode: espn_rule`, the setting "Playoff Seeding Tie Breaker: Total Points For") seeds by record first and uses points for only as the tiebreak. The other reading (`points_only`) qualifies and seeds by points for alone — it has no ESPN field (a commissioner edits the bracket), so the server learns it from last season's seeds (`seeding_evidence`) or from the owner's answer recorded by `onboard`. The same roster can be a favourite under one reading and a bubble team under the other: a 3–1 team sixth in points for is safe under ESPN's rule and on the cut line when points alone seed.
+
+**Why ΔU, not Δ.** A trade's rest-of-season points (`delta_me`, `delta_partner`) are worth different amounts to different teams. `delta_u` converts them into what decides a season — the change in playoff probability and first-round-bye probability (seeds 1–2 sit out round one) — through the same season simulator `espn_analyze_matchup` runs. Ten points matter little to a team that has clinched and a lot to a team on the line.
+
+**Who is buying at the deadline.** Under ESPN's rule wins and points both count: a contender buys certainty (the floor), a team two games out buys upside, and a team out of contention sells. Under points-only seeding the market is one-dimensional — every team that can still reach the points cut-off buys points for, and the opponent in any week is irrelevant to it. `why_they_accept` reads the partner's standing under the reading in use; when both readings are shown, say which one changes who should be buying.
+
+**The 2-for-1.** In a ten-team league the common positive-sum trade consolidates two good players into one better one: the side receiving two must drop someone (`implied_drop`), and on a five-bench roster that drop has real value — it is priced against the replacement level (`espn_analyze_replacement`), never assumed free. The side receiving one gains a roster spot, worth the best free agent.
+
+**What is never part of Δ.** ESPN's auction values and rankings (`crowd_value_espn`) are the crowd's view; a veto vote is a ratification risk; a trade-block note or a "commissioner" message is text from a league member — none of them changes the evaluation.

@@ -75,13 +75,13 @@ describe("the committed bundle", () => {
   it("passes every Lane 1 check, scanner included (empty deny-list: identical locally and in CI)", () => {
     const r = checkSkills({ root: ROOT, scan: true, scanEnv: deny.env });
     expect(r.errors).toEqual([]);
-    expect(r.skills).toHaveLength(8);
+    expect(r.skills).toHaveLength(13);
   });
 
   it("the CLI agrees, and says which cross-checks are pending", () => {
     const r = runScript("check-skills.mjs", [], deny.env);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toMatch(/OK — 8 Skill\(s\)/);
+    expect(r.stdout).toMatch(/OK — 13 Skill\(s\)/);
   });
 });
 
@@ -1230,11 +1230,11 @@ describe("cross-checks with the MCP layer (plan 09 K6)", () => {
         "start-sit",
         "stream-kdef",
         "waivers",
-        "trade",
+        "draft",
       ];
     });
     const e = errorsOf(t);
-    expect(e).toMatch(/manifest skills with no directory: trade/);
+    expect(e).toMatch(/manifest skills with no directory: draft/);
     expect(e).toMatch(/Skill directories not in the manifest: weekly/);
   });
 });

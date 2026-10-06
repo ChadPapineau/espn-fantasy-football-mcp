@@ -1,5 +1,5 @@
-// bundle.test.ts — the eight P0 Skills against the contract layer (plan 09 §2, §3, §5.1; plan 07 C3,
-// §3; plan 10 A9b, A14a). The scripts are zero-dependency and read the TypeScript by regex; this
+// bundle.test.ts — the thirteen Skills against the contract layer (plan 09 §2, §3, §5.1; plan 07 C3,
+// §3; plan 10 A9b, A14a, B10, B11). The scripts are zero-dependency and read the TypeScript by regex; this
 // file closes the loop with real imports: the manifest's tool lists and input enums equal
 // src/mcp/bounds.ts and src/providers, every record step validates against the real
 // espn_record_recommendation input schema, the onboarding entry is accepted, the sentences are the
@@ -42,7 +42,17 @@ import {
   IR_ELIGIBLE_INJURY_STATUSES,
 } from "../../src/domain/league/types.js";
 import { PLAYER_SORTS } from "../../src/providers/espn/types.js";
-import { ROOT, SKILLS, readSequence, type SeqStep } from "./helpers.js";
+import { INJURY_STATUSES, TOOLSET_STOP } from "../../scripts/skills/check-skills.mjs";
+import { REGISTRY } from "../../src/mcp/registry.js";
+import {
+  BOUNDS as B,
+  espnProjectionHorizonSchema,
+  matchupModeSchema,
+  seasonHorizonSchema,
+  statsTypeSchema,
+  winProbMethodSchema,
+} from "../../src/mcp/bounds.js";
+import { P0_SKILLS, P1_SKILLS, ROOT, SKILLS, readSequence, type SeqStep } from "./helpers.js";
 
 type Json = Record<string, unknown>;
 const manifest = readManifest(ROOT);
@@ -143,6 +153,47 @@ describe("the manifest equals the tool catalog and the contract layer", () => {
     expect(rangeOf(i.espn_analyze_lineup?.pf_weight)).toBe(r(BOUNDS.pfWeight));
   });
 
+  it("carries the P1 input enums and bounds of src/mcp/bounds.ts exactly", () => {
+    const i = manifest.inputs;
+    const r = (b: { min: number; max: number }) => `${String(b.min)}..${String(b.max)}`;
+    expect(enumOf(i.espn_analyze_matchup?.mode)).toEqual(matchupModeSchema.options);
+    expect(enumOf(i.espn_analyze_matchup?.method)).toEqual(winProbMethodSchema.options);
+    expect(enumOf(i.espn_analyze_matchup?.horizon)).toEqual(seasonHorizonSchema.options);
+    expect(enumOf(i.espn_analyze_matchup?.seeding_mode)).toEqual(seedingModeArgSchema.options);
+    expect(enumOf(i.espn_get_projections?.horizon)).toEqual(espnProjectionHorizonSchema.options);
+    expect(enumOf(i.espn_get_player_stats?.type)).toEqual(statsTypeSchema.options);
+    // E6 takes the configured reading or both (plan 07 E6) — a subset of the E2/E3 enum
+    for (const v of enumOf(i.espn_analyze_trade?.seeding_mode))
+      expect(seedingModeArgSchema.options).toContain(v);
+    expect(enumOf(i.espn_list_recommendations?.kind)).toEqual([...RECOMMENDATION_KINDS]);
+    expect(rangeOf(i.espn_get_player_usage?.window)).toBe(r(B.usageWindow));
+    expect(rangeOf(i.espn_get_news?.since_hours)).toBe(r(B.sinceHours));
+    expect(rangeOf(i.espn_get_news?.limit)).toBe(r(B.newsLimit));
+    expect(rangeOf(i.espn_analyze_league_activity?.since_days)).toBe(r(B.sinceDays));
+    expect(rangeOf(i.espn_get_defense_profile?.window_weeks)).toBe(r(B.defenseWindowWeeks));
+    expect(rangeOf(i.espn_analyze_injury_cascade?.assume_weeks_out)).toBe(r(B.assumeWeeksOut));
+    expect(rangeOf(i.espn_analyze_matchup?.n_sims)).toBe(
+      `${String(B.nSims.min)}..${String(N_SIMS_MAX)}`,
+    );
+    expect(rangeOf(i.espn_list_recommendations?.limit)).toBe(r(B.limit));
+    expect(rangeOf(i.espn_list_recommendations?.offset)).toBe(r(B.offset));
+    for (const tool of ["espn_analyze_matchup", "espn_analyze_schedule", "espn_analyze_roster"]) {
+      const spec = i[tool];
+      if (spec?.team_id !== undefined) expect(rangeOf(spec.team_id), tool).toBe(r(B.teamId));
+    }
+    // the selector variants: E7/E10/D4 take one player, C4 at most 12 (src/mcp/bounds.ts)
+    expect(i.espn_analyze_injury_cascade?.player).toBe("selector:single");
+    expect(i.espn_analyze_evidence?.player).toBe("selector:single");
+    expect(i.espn_get_depth_chart?.player).toBe("selector:single");
+    expect(i.espn_get_player_outlook?.players).toBe("selector:outlook");
+    expect(B.outlookIds.max).toBe(12);
+    expect(B.playerIds.max).toBe(25);
+  });
+
+  it("the $player status filter knows exactly ESPN's injury statuses", () => {
+    expect([...INJURY_STATUSES]).toEqual([...ESPN_INJURY_STATUSES]);
+  });
+
   it("allows only constants the domain knows, and the error codes are the exported ones", () => {
     for (const s of ESPN_INJURY_STATUSES) expect(manifest.constants).toContain(s);
     for (const c of manifest.constants) expect(ERROR_CODES as readonly string[]).not.toContain(c);
@@ -223,13 +274,67 @@ describe("every promised call is a valid call", () => {
     expect(n).toBeGreaterThanOrEqual(12);
   });
 
-  it("every step uses a P0 tool and P0 Skills run under core (ADV OBJ-18)", () => {
-    for (const s of SKILLS) {
+  it("P0 Skills run under core with P0 tools; their P1 branches are sequences of their own under full (ADV OBJ-18)", () => {
+    let branches = 0;
+    for (const s of P0_SKILLS) {
       const f = readSequence(s);
       expect(f.toolset, s).toBe("core");
-      for (const q of f.sequences)
-        for (const st of q.steps) expect(manifest.core, `${s}/${q.id}/${st.id}`).toContain(st.tool);
+      for (const q of f.sequences) {
+        const tools = q.steps.map((st) => st.tool);
+        if ((q as { toolset?: string }).toolset === "full") {
+          branches++;
+          expect(
+            tools.some((t) => manifest.p1.includes(t)),
+            `${s}/${q.id}`,
+          ).toBe(true);
+          for (const t of tools) expect([...manifest.core, ...manifest.p1]).toContain(t);
+        } else {
+          for (const t of tools) expect(manifest.core, `${s}/${q.id}`).toContain(t);
+        }
+      }
     }
+    // waivers' usage branch and FAAB curve, start-sit's live P(win) (plan 10 §3.2 Skills)
+    expect(branches).toBe(3);
+  });
+
+  it("P1 Skills run under full, and every P1 tool the bundle promises is a P1 row of the registry", () => {
+    const p1Rows = REGISTRY.filter((r) => r.priority === "P1").map((r) => r.name);
+    expect(manifest.p1).toEqual(p1Rows);
+    expect(manifest.core).toEqual(REGISTRY.filter((r) => r.priority === "P0").map((r) => r.name));
+    const used = new Set<string>();
+    for (const s of P1_SKILLS) {
+      const f = readSequence(s);
+      expect(f.toolset, s).toBe("full");
+      for (const q of f.sequences) {
+        expect((q as { toolset?: string }).toolset, `${s}/${q.id}`).toBeUndefined();
+        for (const st of q.steps) {
+          expect([...manifest.core, ...manifest.p1], `${s}/${q.id}/${st.id}`).toContain(st.tool);
+          if (manifest.p1.includes(st.tool)) used.add(st.tool);
+        }
+      }
+    }
+    // the five P1 Skills between them call every P1 analytics engine plan 09 §3 gives them
+    for (const t of [
+      "espn_analyze_trade",
+      "espn_analyze_injury_cascade",
+      "espn_analyze_schedule",
+      "espn_analyze_roster",
+      "espn_analyze_evidence",
+      "espn_analyze_matchup",
+      "espn_analyze_replacement",
+      "espn_get_player_usage",
+      "espn_get_depth_chart",
+      "espn_get_player_outlook",
+      "espn_get_news",
+      "espn_list_recommendations",
+    ])
+      expect(used, t).toContain(t);
+  });
+
+  it("every P1 Skill's Step 0 carries the toolset stop, and orient.md says it the same way (plan 10 B10)", () => {
+    for (const s of P1_SKILLS) expect(bodyOf(s), s).toContain(TOOLSET_STOP);
+    expect(read("skills/_shared/references/orient.md")).toContain(TOOLSET_STOP);
+    for (const s of P0_SKILLS) expect(bodyOf(s), s).not.toContain(TOOLSET_STOP);
   });
 });
 
@@ -332,8 +437,8 @@ describe("read-only by construction (PHASE W SEAM — NOT IMPLEMENTED)", () => {
     );
   });
 
-  it("the existing structural CI check passes on the bundle (eight Skills)", () => {
-    expect(checkStructure(ROOT)).toEqual({ count: 8, errors: [] });
+  it("the existing structural CI check passes on the bundle (thirteen Skills)", () => {
+    expect(checkStructure(ROOT)).toEqual({ count: 13, errors: [] });
   });
 
   it("the committed bundle is built (stamped blocks and copies current)", () => {
@@ -353,7 +458,8 @@ describe("Lane 2 coverage (plan 10 A9b)", () => {
       for (const c of inj) {
         const variant = c.files[0]?.split("/")[3] ?? "";
         const pasted = /says|texted|sent|paste|league chat|NOW/i.test(c.prompt);
-        expect(variant.startsWith("inj-") || pasted, `${s}/${c.name}`).toBe(true);
+        const readBack = /logged/i.test(c.prompt); // NC-INJ-2: the log read back in a later session
+        expect(variant.startsWith("inj-") || pasted || readBack, `${s}/${c.name}`).toBe(true);
       }
     }
   });

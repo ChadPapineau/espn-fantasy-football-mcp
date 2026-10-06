@@ -72,7 +72,7 @@ export function isMain(metaUrl) {
 
 /** The type grammar of `manifest.inputs` (documented in skills/README.md). */
 export const INPUT_TYPE_RE =
-  /^(?:bool|string|string\[\]|object|array|selector|(?:int|int\[\]|number):-?\d+(?:\.\d+)?\.\.-?\d+(?:\.\d+)?|enum(?:\[\])?:[A-Za-z0-9_]+(?:\|[A-Za-z0-9_]+)*)$/;
+  /^(?:bool|string|string\[\]|object|array|selector(?::single|:outlook)?|(?:int|int\[\]|number):-?\d+(?:\.\d+)?\.\.-?\d+(?:\.\d+)?|enum(?:\[\])?:[A-Za-z0-9_]+(?:\|[A-Za-z0-9_]+)*)$/;
 
 /**
  * The eight `disallowed-tools` strings for a plugin name (research 06 §C.3 item 1): both install
@@ -169,7 +169,8 @@ export function readManifest(root) {
   /** @type {Record<string, Record<string, string>>} */
   const inputs = {};
   for (const [tool, spec] of Object.entries(inputsRaw)) {
-    if (!core.includes(tool)) throw new Error(`manifest: inputs.${tool} is not a core tool`);
+    if (!core.includes(tool) && !p1.includes(tool))
+      throw new Error(`manifest: inputs.${tool} is not a core or P1 tool`);
     if (!isRecord(spec)) throw new Error(`manifest: inputs.${tool} must be an object`);
     /** @type {Record<string, string>} */
     const out = {};
@@ -183,7 +184,8 @@ export function readManifest(root) {
     }
     inputs[tool] = out;
   }
-  for (const t of core) if (!(t in inputs)) throw new Error(`manifest: inputs.${t} is missing`);
+  for (const t of [...core, ...p1])
+    if (!(t in inputs)) throw new Error(`manifest: inputs.${t} is missing`);
   const reqRaw = isRecord(raw["required_inputs"]) ? raw["required_inputs"] : {};
   /** @type {Record<string, string[]>} */
   const required = {};

@@ -66,7 +66,7 @@ describe("the committed bundle", () => {
   it("the CLI agrees: --check exits 0 on the working tree", () => {
     const r = runScript("build-skills.mjs", ["--check"]);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toMatch(/up to date \(8 Skill\(s\)\)/);
+    expect(r.stdout).toMatch(/up to date \(13 Skill\(s\)\)/);
   });
 });
 
@@ -366,7 +366,7 @@ describe("the CLI", () => {
     const built = runScript("build-skills.mjs", ["--root", t.root, "--copy-out", t.p("dist/copy")]);
     expect(built.status, built.stderr).toBe(0);
     expect(built.stdout).toMatch(
-      /1 file\(s\) written, 8 Skill\(s\); copy-install tree: espn-apply/,
+      /1 file\(s\) written, 13 Skill\(s\); copy-install tree: espn-apply/,
     );
     expect(runScript("build-skills.mjs", ["--check", "--root", t.root]).status).toBe(0);
   });

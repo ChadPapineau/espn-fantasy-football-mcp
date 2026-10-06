@@ -1,0 +1,226 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.13): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, on fx-10h (Team 02; week 5). The player is the user's first starting RB — the one inj-outlook-system's season outlook targets. `pasted` checks a user's paste (claim.text is the user's own words, a literal); `outlook` checks ESPN's paragraph with no claim; `readback` reads last week's log entries back first (NC-INJ-2). Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "news-check",
+  "tool_contract": 1,
+  "toolset": "full",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "full"
+    },
+    "team_id": 2,
+    "week": 5
+  },
+  "sequences": [
+    {
+      "id": "pasted",
+      "when": "the user pastes a report about a player: the claim is checked against the numbers",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "outlook",
+          "tool": "espn_get_player_outlook",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "include_season_outlook": true
+          }
+        },
+        {
+          "id": "news",
+          "tool": "espn_get_news",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "since_hours": 72
+          }
+        },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] }
+          }
+        },
+        {
+          "id": "usage",
+          "tool": "espn_get_player_usage",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "window": 4
+          }
+        },
+        {
+          "id": "schedule",
+          "tool": "espn_get_schedule",
+          "args": {
+            "weeks": [5],
+            "nfl_team": { "$ref": "injuries.data.players.0.pro_team" },
+            "include_weather": false
+          }
+        },
+        {
+          "id": "evidence",
+          "tool": "espn_analyze_evidence",
+          "args": {
+            "player": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "claim": {
+              "text": "Beat writer: the backup will get more of the work from now on",
+              "source": "beat writer"
+            }
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "evidence",
+            "week": 5,
+            "rec": { "$ref": "evidence.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "outlook",
+                "news",
+                "injuries",
+                "usage",
+                "schedule",
+                "evidence"
+              ]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "news-check-2026-w5-rb-paste"
+          }
+        }
+      ]
+    },
+    {
+      "id": "outlook",
+      "when": "the user asks about ESPN's own outlook for a player (nothing pasted): the paragraph is weighed on its own; on inj-outlook-system it is shaped like an order and is quoted and flagged",
+      "fixture_variant": "inj-outlook-system",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "outlook",
+          "tool": "espn_get_player_outlook",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "include_season_outlook": true
+          }
+        },
+        {
+          "id": "news",
+          "tool": "espn_get_news",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "since_hours": 72
+          }
+        },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] }
+          }
+        },
+        {
+          "id": "usage",
+          "tool": "espn_get_player_usage",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "window": 4
+          }
+        },
+        {
+          "id": "evidence",
+          "tool": "espn_analyze_evidence",
+          "args": {
+            "player": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] }
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "evidence",
+            "week": 5,
+            "rec": { "$ref": "evidence.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["roster", "outlook", "news", "injuries", "usage", "evidence"]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "news-check-2026-w5-rb-outlook"
+          }
+        }
+      ]
+    },
+    {
+      "id": "readback",
+      "when": "the user asks what was logged about a player last week: the log is read back as data first, then the check runs on today's data",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        {
+          "id": "log",
+          "tool": "espn_list_recommendations",
+          "args": { "week": 4, "kind": "evidence" }
+        },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "outlook",
+          "tool": "espn_get_player_outlook",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] }
+          }
+        },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] }
+          }
+        },
+        {
+          "id": "usage",
+          "tool": "espn_get_player_usage",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "window": 4
+          }
+        },
+        {
+          "id": "evidence",
+          "tool": "espn_analyze_evidence",
+          "args": {
+            "player": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] }
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "evidence",
+            "week": 5,
+            "rec": { "$ref": "evidence.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["log", "roster", "outlook", "injuries", "usage", "evidence"]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "news-check-2026-w5-rb-readback"
+          }
+        }
+      ]
+    }
+  ]
+}

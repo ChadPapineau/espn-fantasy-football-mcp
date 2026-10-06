@@ -7,6 +7,10 @@
 // input (tool-sequences.mjs is its loader). Zero dependencies. Ported from sibling @c696e47,
 // adapted (ESPN tool grammar and the P1-labelled-step rule; the eight disallowed-tools strings; both
 // guardrail sentences; error-code and identifier rules; the skill-creator evals.json schema).
+// Phase 2 (plan 09 §3.8 usage branch, §3.3 live P(win), §3.9–§3.13; plan 10 B10, B11): the five P1
+// Skills validated under `full` with their Step 0 stop under `core`, a P0 Skill's P1 sequences and
+// cases under `full` (the toolset stated per sequence and per case), and the collision check across
+// all thirteen.
 //
 // Usage: node scripts/skills/check-skills.mjs [--root <repo root>] [--no-scan]
 // Exit:  0 clean · 1 findings · 2 usage error.
@@ -97,6 +101,24 @@ export const GAME_DAY_PROMPTS = Object.freeze([
 ]);
 /** The Skill that owns the game-day prompts. */
 export const GAME_DAY_OWNER = "start-sit";
+/**
+ * The P1 Skills' Step 0 stop under `core` (plan 09 §2 `orient.md`; plan 10 B10; ADV OBJ-18) —
+ * every P1 body carries it verbatim, so a `core` user is told how to turn the Skill on.
+ */
+export const TOOLSET_STOP =
+  "this Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client";
+/** ESPN's injury statuses (src/domain/league/types.ts) a `$player` template may filter on. */
+export const INJURY_STATUSES = Object.freeze([
+  "ACTIVE",
+  "QUESTIONABLE",
+  "DOUBTFUL",
+  "OUT",
+  "INJURY_RESERVE",
+  "DAY_TO_DAY",
+  "SUSPENSION",
+]);
+/** A Lane 2 case that checks a P1 Skill's Step 0 stop under `core` (plan 10 B10). */
+export const CORE_CASE_RE = /-CORE$/;
 /** Another platform, named by a negative trigger (plan 09 §2). */
 export const OTHER_PLATFORM_RE = /\b(?:yahoo|sleeper)\b/i;
 /** A line that labels a P1 step inside a P0 Skill (plan 09 §2 `orient.md`; changelog F45). */
@@ -112,10 +134,17 @@ export const GRADERS = Object.freeze([
 ]);
 
 /** @typedef {{ id: string, tool: string, args: Record<string, unknown>, expect: string[] }} SeqStep */
-/** @typedef {{ id: string, steps: SeqStep[] }} Sequence */
 /**
+ * A validated sequence: `toolset` is the one it runs under — the file's, or `full` for a P0 Skill's
+ * P1 sequence (plan 09 §5.1 item 3: a P1-labelled step inside a P0 Skill is validated under `full`).
+ * @typedef {{ id: string, toolset: string, fixture_variant: string | null, steps: SeqStep[] }} Sequence
+ */
+/**
+ * `p1Cases`: a P0 Skill's Lane 2 cases that exercise its P1 branch and so run under `full`;
+ * `bodyAbsent`: words the body must not use (news-check: no "posterior" at P1 — plan 09 §3.13).
  * @typedef {{ prefix: string, kinds: string[], records: boolean, requiredCases: string[],
- *   body: RegExp[], sequences: (seqs: Sequence[]) => string[] }} SkillRule
+ *   p1Cases?: string[], body: RegExp[], bodyAbsent?: RegExp[],
+ *   sequences: (seqs: Sequence[]) => string[] }} SkillRule
  */
 
 /**
@@ -162,9 +191,114 @@ export function recKindOf(producer) {
       return "retro";
     case "espn_analyze_waivers":
       return isKdst(producer.args["positions"]) ? "stream" : "waiver";
+    case "espn_analyze_matchup":
+      return "matchup";
+    case "espn_analyze_trade":
+      return "trade";
+    case "espn_analyze_injury_cascade":
+      return "cascade";
+    case "espn_analyze_schedule":
+      return "schedule";
+    case "espn_analyze_roster":
+      return "roster";
+    case "espn_analyze_evidence":
+      return "evidence";
     default:
       return undefined;
   }
+}
+
+/**
+ * A literal integer in [lo, hi] or a `$`-template (resolved at run time).
+ * @param {unknown} v
+ * @param {number} lo
+ * @param {number} hi
+ */
+const intOrTemplate = (v, lo, hi) =>
+  (isRecord(v) && Object.keys(v).some((k) => k.startsWith("$"))) ||
+  (typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi);
+
+/**
+ * Plan 07 E6's `offer` (`{ partner_team_id, give: player_id[1..6], get: player_id[1..6] }`) and
+ * `find_partners` (`{ need_position, max_partners?: 1..4 }`) — the problems in one call's arguments.
+ * @param {Record<string, unknown>} args
+ * @returns {string[]}
+ */
+export function tradeArgProblems(args) {
+  /** @type {string[]} */
+  const e = [];
+  const o = args["offer"];
+  const f = args["find_partners"];
+  if ((o === undefined) === (f === undefined)) {
+    e.push("espn_analyze_trade takes exactly one of `offer` and `find_partners` (plan 07 E6)");
+  }
+  if (o !== undefined) {
+    if (!isRecord(o)) e.push("espn_analyze_trade.offer must be an object");
+    else {
+      const extra = Object.keys(o).filter((k) => !["partner_team_id", "give", "get"].includes(k));
+      if (extra.length) e.push(`espn_analyze_trade.offer has unknown keys ${extra.join(", ")}`);
+      if (!intOrTemplate(o["partner_team_id"], 1, 999))
+        e.push("espn_analyze_trade.offer.partner_team_id must be a team id");
+      for (const side of ["give", "get"]) {
+        const ids = o[side];
+        // a whole-list template is a partner search's proposal (`partners[].proposal.give`)
+        if (isRecord(ids) && Object.keys(ids).some((k) => k.startsWith("$"))) continue;
+        if (
+          !Array.isArray(ids) ||
+          ids.length < 1 ||
+          ids.length > 6 ||
+          !ids.every((x) => intOrTemplate(x, 1, 2147483647))
+        ) {
+          e.push(`espn_analyze_trade.offer.${side} must list 1–6 player ids`);
+        }
+      }
+    }
+  }
+  if (f !== undefined) {
+    if (!isRecord(f)) e.push("espn_analyze_trade.find_partners must be an object");
+    else {
+      const extra = Object.keys(f).filter((k) => !["need_position", "max_partners"].includes(k));
+      if (extra.length)
+        e.push(`espn_analyze_trade.find_partners has unknown keys ${extra.join(", ")}`);
+      if (
+        typeof f["need_position"] !== "string" ||
+        !/^[A-Za-z][A-Za-z/]{0,9}$/.test(f["need_position"])
+      )
+        e.push("espn_analyze_trade.find_partners.need_position must be a position name");
+      if (f["max_partners"] !== undefined && !intOrTemplate(f["max_partners"], 1, 4))
+        e.push("espn_analyze_trade.find_partners.max_partners must be 1–4 (plan 09 §3.9)");
+    }
+  }
+  return e;
+}
+
+/**
+ * Plan 07 E10's `claim` (`{ text ≤ 400, source? ≤ 64, time?, type? }`) — the problems in it. The
+ * text is the user's own pasted words: a literal here, never a template that could copy an outlook,
+ * a headline or a name out of an earlier result into a tool argument (plan 02 §6.4).
+ * @param {unknown} claim
+ * @returns {string[]}
+ */
+export function claimProblems(claim) {
+  if (claim === undefined) return [];
+  if (!isRecord(claim)) return ["espn_analyze_evidence.claim must be an object"];
+  /** @type {string[]} */
+  const e = [];
+  const extra = Object.keys(claim).filter((k) => !["text", "source", "time", "type"].includes(k));
+  if (extra.length) e.push(`espn_analyze_evidence.claim has unknown keys ${extra.join(", ")}`);
+  const t = claim["text"];
+  if (typeof t !== "string" || t.trim() === "" || t.length > 400) {
+    e.push(
+      "espn_analyze_evidence.claim.text must be the user's own words, 1–400 characters — never a value copied from a tool result",
+    );
+  }
+  const s = claim["source"];
+  if (s !== undefined && (typeof s !== "string" || s.length === 0 || s.length > 64))
+    e.push("espn_analyze_evidence.claim.source must be 1–64 characters");
+  const tm = claim["time"];
+  if (tm !== undefined && (typeof tm !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(tm)))
+    e.push("espn_analyze_evidence.claim.time must be an ISO instant");
+  return e;
 }
 
 /**
@@ -252,7 +386,7 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
     },
     "start-sit": {
       prefix: "SS",
-      kinds: ["lineup"],
+      kinds: ["lineup", "matchup"],
       records: true,
       requiredCases: [
         "SS-1",
@@ -265,9 +399,11 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         "SS-8",
         "SS-9",
         "SS-10-E",
+        "SS-11-E",
         "SS-INJ",
         "SS-INJ-2",
       ],
+      p1Cases: ["SS-11-E"],
       body: [
         /only_unlocked/,
         /lineup_locked/,
@@ -277,6 +413,8 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         /percent_started/,
         /espn_get_live_scoreboard/,
         /win_probability_espn/,
+        /mode: "live"/,
+        /final, live and pending|final \/ live \/ pending/,
       ],
       sequences: (seqs) => {
         /** @type {string[]} */
@@ -284,7 +422,8 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         if (!seqs.some((s) => before(s, "espn_project_players", "espn_analyze_lineup"))) {
           e.push("no sequence calls espn_project_players before espn_analyze_lineup");
         }
-        const pre = seqs.filter((s) => s.id !== "game_day");
+        const gameDay = seqs.filter((s) => s.id.startsWith("game_day"));
+        const pre = seqs.filter((s) => !s.id.startsWith("game_day"));
         if (
           !pre.some((s) =>
             stepsOf(s, "espn_analyze_lineup").some((x) => x.args["objective"] === "auto"),
@@ -298,22 +437,43 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         ) {
           e.push("no espn_analyze_lineup step shows `compare` for a named pair");
         }
-        const gd = seqs.find((s) => s.id === "game_day");
-        if (!gd)
+        if (!seqs.some((s) => s.id === "game_day"))
           e.push("no `game_day` sequence (the branch selected by lineup_locked/lock_schedule)");
-        else {
+        for (const gd of gameDay) {
           if (!stepsOf(gd, "espn_analyze_lineup").some((x) => x.args["only_unlocked"] === true)) {
-            e.push("the game_day sequence's espn_analyze_lineup must carry only_unlocked: true");
+            e.push(`the ${gd.id} sequence's espn_analyze_lineup must carry only_unlocked: true`);
           }
           if (stepsOf(gd, "espn_get_live_scoreboard").length === 0) {
-            e.push("the game_day sequence must call espn_get_live_scoreboard");
+            e.push(`the ${gd.id} sequence must call espn_get_live_scoreboard`);
           }
           if (
             stepsOf(gd, "espn_get_roster").filter((x) => x.args["force_refresh"] === true).length >
             1
           ) {
-            e.push("the game_day sequence forces a roster refresh at most once");
+            e.push(`the ${gd.id} sequence forces a roster refresh at most once`);
           }
+          for (const m of stepsOf(gd, "espn_analyze_matchup")) {
+            if (m.args["mode"] !== "live")
+              e.push(`the ${gd.id} sequence's espn_analyze_matchup must carry mode: "live"`);
+          }
+        }
+        // the P1 live-P(win) branch (plan 09 §3.3 game-day step 5; plan 10 B9)
+        const live = seqs.find((s) => s.id === "game_day_live");
+        if (!live) e.push("no `game_day_live` sequence (the P1 live P(win) branch under full)");
+        else {
+          if (live.toolset !== "full")
+            e.push('the game_day_live sequence runs under toolset "full" (it calls a P1 tool)');
+          if (!before(live, "espn_analyze_matchup", "espn_analyze_lineup"))
+            e.push(
+              "game_day_live: espn_analyze_matchup (mode live) comes before espn_analyze_lineup",
+            );
+          const kinds = stepsOf(live, "espn_record_recommendation").map((x) => x.args["kind"]);
+          if (!kinds.includes("matchup") || !kinds.includes("lineup"))
+            e.push("game_day_live logs both the matchup rec and the lineup rec");
+        }
+        for (const s of pre) {
+          if (stepsOf(s, "espn_analyze_matchup").length)
+            e.push(`sequence ${s.id}: espn_analyze_matchup belongs to the game-day branch`);
         }
         return e;
       },
@@ -411,7 +571,8 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "WV",
       kinds: ["waiver"],
       records: true,
-      requiredCases: ["WV-1", "WV-4-E", "WV-5-E", "WV-6-E", "WV-7-E", "WV-INJ"],
+      requiredCases: ["WV-1", "WV-2", "WV-3-E", "WV-4-E", "WV-5-E", "WV-6-E", "WV-7-E", "WV-INJ"],
+      p1Cases: ["WV-2", "WV-3-E"],
       body: [
         /marginal/,
         /premium_band/,
@@ -420,12 +581,29 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         /value_basis/,
         /s_with_ir_move/,
         /cold_start_table/,
+        /xfp_gap/,
+        /signals\[\]/,
+        /bid curve/i,
       ],
       sequences: (seqs) => {
         /** @type {string[]} */
         const e = [];
         if (!seqs.some((s) => before(s, "espn_list_players", "espn_analyze_waivers"))) {
           e.push("no sequence calls espn_list_players before espn_analyze_waivers");
+        }
+        // the P1 usage branch (plan 09 §3.8 Lane 1: espn_get_player_usage before the decision)
+        const usage = seqs.filter((s) => stepsOf(s, "espn_get_player_usage").length > 0);
+        if (!usage.some((s) => before(s, "espn_get_player_usage", "espn_analyze_waivers"))) {
+          e.push(
+            "no sequence calls espn_get_player_usage before espn_analyze_waivers (the P1 usage branch)",
+          );
+        }
+        for (const s of usage) {
+          if (s.toolset !== "full")
+            e.push(`sequence ${s.id}: the usage branch runs under toolset "full"`);
+        }
+        if (!seqs.some((s) => s.fixture_variant === "faab" && s.toolset === "full")) {
+          e.push('no sequence on the faab variant under toolset "full" (the P1 bid curve)');
         }
         for (const s of seqs) {
           for (const w of stepsOf(s, "espn_analyze_waivers")) {
@@ -441,6 +619,217 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
             );
           }
         }
+        return e;
+      },
+    },
+    // --- the five P1 Skills (plan 09 §3.9–§3.13; plan 10 B11) — every sequence runs under full ---
+    trade: {
+      prefix: "TR",
+      kinds: ["trade"],
+      records: true,
+      requiredCases: ["TR-1", "TR-2", "TR-3", "TR-4", "TR-5-E", "TR-INJ", "TR-CORE"],
+      body: [
+        /devil's advocate/i,
+        /delta_u/,
+        /why_they_accept/,
+        /implied_drop/,
+        /veto/,
+        /rules\.trade\.deadline/,
+        /espn\.team\.trade_block/,
+        /crowd_value_espn/,
+        /seeding_mode: "both"/,
+      ],
+      sequences: (seqs) => {
+        /** @type {string[]} */
+        const e = [];
+        const trades = seqs.flatMap((s) => stepsOf(s, "espn_analyze_trade"));
+        if (!trades.some((t) => t.args["offer"] !== undefined))
+          e.push("no espn_analyze_trade step evaluates an `offer`");
+        if (!trades.some((t) => t.args["find_partners"] !== undefined))
+          e.push("no espn_analyze_trade step runs a partner search (`find_partners`)");
+        for (const s of seqs) {
+          for (const t of stepsOf(s, "espn_analyze_trade"))
+            for (const p of tradeArgProblems(t.args)) e.push(`sequence ${s.id}: ${p}`);
+          if (!stepsOf(s, "espn_analyze_trade").length) continue;
+          if (!before(s, "espn_project_players", "espn_analyze_trade"))
+            e.push(`sequence ${s.id}: espn_project_players comes before espn_analyze_trade`);
+          if (!before(s, "espn_analyze_replacement", "espn_analyze_trade"))
+            e.push(`sequence ${s.id}: espn_analyze_replacement comes before espn_analyze_trade`);
+          for (const p of stepsOf(s, "espn_project_players")) {
+            if (p.args["horizon"] !== "ros")
+              e.push(`sequence ${s.id}: a trade is valued rest-of-season — horizon: "ros"`);
+          }
+        }
+        return e;
+      },
+    },
+    "injury-cascade": {
+      prefix: "IC",
+      kinds: ["cascade"],
+      records: true,
+      requiredCases: ["IC-1", "IC-2", "IC-3", "IC-INJ", "IC-CORE"],
+      body: [
+        /news-check/,
+        /hypothesis_only/,
+        /ir_consequence/,
+        /p_role_holds/,
+        /1:1/,
+        /expected_weeks/,
+        /structured_disagrees/,
+        /`OUT` or `INJURY_RESERVE`/,
+      ],
+      sequences: (seqs) => {
+        /** @type {string[]} */
+        const e = [];
+        if (!seqs.some((s) => stepsOf(s, "espn_analyze_injury_cascade").length))
+          e.push("no espn_analyze_injury_cascade step");
+        for (const s of seqs) {
+          if (!stepsOf(s, "espn_analyze_injury_cascade").length) continue;
+          if (!before(s, "espn_get_depth_chart", "espn_analyze_injury_cascade"))
+            e.push(
+              `sequence ${s.id}: espn_get_depth_chart comes before espn_analyze_injury_cascade`,
+            );
+          if (!before(s, "espn_get_player_usage", "espn_analyze_injury_cascade"))
+            e.push(
+              `sequence ${s.id}: espn_get_player_usage comes before espn_analyze_injury_cascade`,
+            );
+          for (const u of stepsOf(s, "espn_get_player_usage")) {
+            if (u.args["window"] !== 6 || u.args["include_prior_season"] !== true)
+              e.push(
+                `sequence ${s.id}: the team's usage reads window: 6 with include_prior_season: true`,
+              );
+          }
+          for (const w of stepsOf(s, "espn_analyze_waivers")) {
+            if (w.args["mode"] !== "auto")
+              e.push(`sequence ${s.id}: espn_analyze_waivers must carry mode: "auto"`);
+            if (!before(s, "espn_analyze_injury_cascade", "espn_analyze_waivers"))
+              e.push(`sequence ${s.id}: the beneficiaries are priced after the cascade`);
+          }
+        }
+        if (!seqs.some((s) => before(s, "espn_analyze_injury_cascade", "espn_analyze_waivers")))
+          e.push("no sequence prices the beneficiaries with espn_analyze_waivers");
+        return e;
+      },
+    },
+    "schedule-plan": {
+      prefix: "SP",
+      kinds: ["schedule"],
+      records: true,
+      requiredCases: ["SP-1", "SP-2", "SP-3", "SP-4-E", "SP-5-E", "SP-INJ", "SP-CORE"],
+      body: [
+        /marginal-values table/i,
+        /coast/i,
+        /seeding_mode: "both"/,
+        /shrink_w/,
+        /week 17/i,
+        /playoff_pct_espn/,
+        /pf_per_win/,
+      ],
+      sequences: (seqs) => {
+        /** @type {string[]} */
+        const e = [];
+        if (!seqs.some((s) => stepsOf(s, "espn_analyze_schedule").length))
+          e.push("no espn_analyze_schedule step");
+        for (const s of seqs) {
+          for (const m of stepsOf(s, "espn_analyze_matchup")) {
+            if (m.args["mode"] !== "season")
+              e.push(`sequence ${s.id}: espn_analyze_matchup carries mode: "season"`);
+          }
+          if (
+            stepsOf(s, "espn_analyze_schedule").length &&
+            !before(s, "espn_analyze_matchup", "espn_analyze_schedule")
+          ) {
+            e.push(
+              `sequence ${s.id}: espn_analyze_matchup (mode season) comes before espn_analyze_schedule`,
+            );
+          }
+        }
+        if (
+          !seqs.some(
+            (s) =>
+              s.fixture_variant === "seeding-unknown" &&
+              stepsOf(s, "espn_analyze_matchup").some((m) => m.args["seeding_mode"] === "both"),
+          )
+        ) {
+          e.push(
+            'no sequence on seeding-unknown passes seeding_mode: "both" explicitly (ADV OBJ-13)',
+          );
+        }
+        return e;
+      },
+    },
+    "roster-audit": {
+      prefix: "RA",
+      kinds: ["roster"],
+      records: true,
+      requiredCases: ["RA-1", "RA-2", "RA-3-E", "RA-4-E", "RA-INJ", "RA-CORE"],
+      body: [
+        /ir\.invalid/,
+        /hidden-bench/i,
+        /three risks/i,
+        /bench_template/,
+        /streamability/,
+        /after the (?:waiver )?run/,
+        /eliminated/,
+        /acquisition/i,
+      ],
+      sequences: (seqs) => {
+        /** @type {string[]} */
+        const e = [];
+        if (!seqs.some((s) => stepsOf(s, "espn_analyze_roster").length))
+          e.push("no espn_analyze_roster step");
+        for (const s of seqs) {
+          if (
+            stepsOf(s, "espn_analyze_roster").length &&
+            !before(s, "espn_analyze_replacement", "espn_analyze_roster")
+          ) {
+            e.push(`sequence ${s.id}: espn_analyze_replacement comes before espn_analyze_roster`);
+          }
+          for (const p of stepsOf(s, "espn_list_players")) {
+            if ((p.args["offset"] ?? 0) !== 0)
+              e.push(`sequence ${s.id}: the pool is read one page per position (no offset)`);
+          }
+        }
+        if (!seqs.some((s) => s.fixture_variant === "ir-invalid"))
+          e.push("no sequence on ir-invalid (the IR section first when the roster is invalid)");
+        return e;
+      },
+    },
+    "news-check": {
+      prefix: "NC",
+      kinds: ["evidence"],
+      records: true,
+      requiredCases: ["NC-1", "NC-2", "NC-3", "NC-4-E", "NC-INJ", "NC-INJ-2", "NC-CORE"],
+      body: [
+        /priors are hand-set/,
+        /structured_disagrees/,
+        /what_would_confirm/,
+        /store\.recommendation_log/,
+        /espn\.player\.outlook/,
+        /calibration_state/,
+      ],
+      bodyAbsent: [/posterior/i],
+      sequences: (seqs) => {
+        /** @type {string[]} */
+        const e = [];
+        const ev = seqs.flatMap((s) => stepsOf(s, "espn_analyze_evidence"));
+        if (ev.length === 0) e.push("no espn_analyze_evidence step");
+        for (const s of seqs) {
+          for (const x of stepsOf(s, "espn_analyze_evidence"))
+            for (const p of claimProblems(x.args["claim"])) e.push(`sequence ${s.id}: ${p}`);
+          if (
+            stepsOf(s, "espn_analyze_evidence").length &&
+            !before(s, "espn_get_player_outlook", "espn_analyze_evidence")
+          ) {
+            e.push(`sequence ${s.id}: espn_get_player_outlook comes before espn_analyze_evidence`);
+          }
+        }
+        if (!ev.some((x) => x.args["claim"] !== undefined))
+          e.push("no espn_analyze_evidence step checks a pasted claim");
+        if (!ev.some((x) => x.args["claim"] === undefined))
+          e.push("no espn_analyze_evidence step checks ESPN's own outlook (no claim)");
+        if (!seqs.some((s) => stepsOf(s, "espn_list_recommendations").length))
+          e.push("no sequence reads the log back (espn_list_recommendations — NC-INJ-2)");
         return e;
       },
     },
@@ -714,13 +1103,23 @@ export function validateTriggers(raw, where) {
 const STEP_ID_RE = /^[a-z][a-z0-9_]{0,31}$/;
 const REF_RE = /^([a-z][a-z0-9_]{0,31})((?:\.[A-Za-z0-9_]+)+)$/;
 /** The `$` forms an argument template may use (skills/README.md "Tool sequences"). */
-export const TEMPLATE_KEYS = Object.freeze(["$ref", "$source_calls", "$opponent", "$player"]);
+export const TEMPLATE_KEYS = Object.freeze([
+  "$ref",
+  "$source_calls",
+  "$opponent",
+  "$player",
+  "$ids",
+]);
+/** `$ids` collects at most this many ids (plan 07 E5 `candidates` 1..25). */
+export const IDS_MAX = 25;
 
 /**
  * Walk `args` checking every `$`-object: `{ $ref: "<earlier step>.<path>" }`,
  * `{ $source_calls: [earlier step ids] }`, `{ $opponent: "<earlier step>" }` (the other team of
- * the user's matchup in that step's scoreboard) or `{ $player: { step, slot, eligible? } }` (the
- * first player of an earlier roster step in that slot, optionally eligible for another slot); any
+ * the user's matchup in that step's scoreboard), `{ $player: { step, slot, eligible?,
+ * injury_status? } }` (the first player of an earlier roster step in that slot, optionally eligible
+ * for another slot and carrying an ESPN injury status) or `{ $ids: { from: "<earlier step>.<path>",
+ * key, max? } }` (the distinct numeric `key` values of the array at that path, at most `max`); any
  * other `$` key is an error.
  * @param {unknown} v
  * @param {Map<string, string>} earlier step id → tool
@@ -773,11 +1172,32 @@ function checkRefs(v, earlier, where, errors) {
         SLOT_NAMES.includes(val["slot"]) &&
         (val["eligible"] === undefined ||
           (typeof val["eligible"] === "string" && SLOT_NAMES.includes(val["eligible"]))) &&
-        Object.keys(val).every((x) => ["step", "slot", "eligible"].includes(x));
+        (val["injury_status"] === undefined ||
+          (typeof val["injury_status"] === "string" &&
+            INJURY_STATUSES.includes(val["injury_status"]))) &&
+        Object.keys(val).every((x) => ["step", "slot", "eligible", "injury_status"].includes(x));
       if (!ok)
         errors.push(
-          `${where}: $player must be { step: <earlier espn_get_roster step>, slot, eligible? } with ESPN slot names`,
+          `${where}: $player must be { step: <earlier espn_get_roster step>, slot, eligible?, injury_status? } with ESPN slot names and statuses`,
         );
+    } else if (k === "$ids") {
+      const from = isRecord(val) ? val["from"] : undefined;
+      const m = typeof from === "string" ? REF_RE.exec(from) : null;
+      const max = isRecord(val) ? val["max"] : undefined;
+      const ok =
+        isRecord(val) &&
+        m !== null &&
+        typeof val["key"] === "string" &&
+        /^[a-z][a-z0-9_]{0,39}$/.test(val["key"]) &&
+        (max === undefined ||
+          (typeof max === "number" && Number.isInteger(max) && max >= 1 && max <= IDS_MAX)) &&
+        Object.keys(val).every((x) => ["from", "key", "max"].includes(x));
+      if (!ok)
+        errors.push(
+          `${where}: $ids must be { from: "<step id>.<path>", key: <field>, max?: 1..${String(IDS_MAX)} }`,
+        );
+      else if (!earlier.has(m[1] ?? ""))
+        errors.push(`${where}: $ids "${String(from)}" names no earlier step`);
     } else errors.push(`${where}: unknown ${k} (only ${TEMPLATE_KEYS.join(", ")})`);
     return;
   }
@@ -820,7 +1240,7 @@ export function checkArgType(v, type) {
     case "string[]":
       return Array.isArray(v) &&
         v.length > 0 &&
-        v.every((x) => typeof x === "string" && x.length > 0)
+        v.every((x) => isTemplate(x) || (typeof x === "string" && x.length > 0))
         ? null
         : "must be a non-empty string array";
     case "object":
@@ -828,12 +1248,31 @@ export function checkArgType(v, type) {
     case "array":
       return Array.isArray(v) ? null : "must be an array";
     case "selector": {
+      // plan 07 legend: `PlayerSelector` (ids ≤ 25); `:single` — E7/E10/D4's one player;
+      // `:outlook` — C4's ≤ 12 ids or a team (src/mcp/bounds.ts)
+      const label =
+        spec === "single"
+          ? "single-player selector"
+          : spec === "outlook"
+            ? "outlook selector"
+            : "PlayerSelector";
       if (!isRecord(v) || Object.keys(v).length !== 1)
-        return "must be a PlayerSelector (exactly one key)";
+        return `must be a ${label} (exactly one key)`;
       const key = Object.keys(v)[0] ?? "";
-      return ["player_ids", "gsis_ids", "team_id", "nfl_team", "pool"].includes(key)
-        ? null
-        : `PlayerSelector has no \`${key}\``;
+      const keys =
+        spec === "single"
+          ? ["player_ids", "gsis_ids"]
+          : spec === "outlook"
+            ? ["player_ids", "team_id"]
+            : ["player_ids", "gsis_ids", "team_id", "nfl_team", "pool"];
+      if (!keys.includes(key)) return `${label} has no \`${key}\``;
+      const ids = v[key];
+      if ((key === "player_ids" || key === "gsis_ids") && !isTemplate(ids)) {
+        const max = spec === "single" ? 1 : spec === "outlook" ? 12 : 25;
+        if (!Array.isArray(ids) || ids.length < 1 || ids.length > max)
+          return `${label}.${key} must list 1–${String(max)} ids`;
+      }
+      return null;
     }
     case "int":
       return inRange(v, true) ? null : `must be an integer in ${spec}`;
@@ -897,7 +1336,8 @@ export function validateToolSequence(raw, ctx) {
       `${where}: toolset must be "${isP1Skill ? "full" : "core"}" (P0 Skills under core, P1 under full — ADV OBJ-18)`,
     );
   }
-  const tools = toolset === "full" ? [...manifest.core, ...manifest.p1] : manifest.core;
+  /** @param {unknown} ts */
+  const toolsOf = (ts) => (ts === "full" ? [...manifest.core, ...manifest.p1] : manifest.core);
   const fx = raw["fixture"];
   if (!isRecord(fx)) errors.push(`${where}: fixture is required`);
   else {
@@ -934,9 +1374,21 @@ export function validateToolSequence(raw, ctx) {
       return;
     }
     const extra = Object.keys(s).filter(
-      (k) => !["id", "when", "fixture_variant", "steps"].includes(k),
+      (k) => !["id", "when", "fixture_variant", "toolset", "steps"].includes(k),
     );
     if (extra.length) errors.push(`${sw}: unknown keys ${extra.join(", ")}`);
+    // a P0 Skill's P1 branch (a `(P1; …)` step in its body) is a sequence of its own under `full`;
+    // a P1 Skill's sequences all run under the file's `full` (plan 09 §5.1 item 3; ADV OBJ-18)
+    const st = s["toolset"];
+    if (st !== undefined && (isP1Skill || st !== "full")) {
+      errors.push(
+        isP1Skill
+          ? `${sw}: a P1 Skill's sequences all run under the file's toolset "full" — drop the sequence toolset`
+          : `${sw}: a sequence toolset may only be "full" (a P0 Skill's P1 branch)`,
+      );
+    }
+    const seqToolset = st === "full" ? "full" : String(toolset);
+    const tools = toolsOf(seqToolset);
     const id = s["id"];
     if (typeof id !== "string" || !STEP_ID_RE.test(id)) errors.push(`${sw}: bad id`);
     else if (seqIds.has(id)) errors.push(`${sw}: duplicate id ${id}`);
@@ -974,7 +1426,7 @@ export function validateToolSequence(raw, ctx) {
           manifest.write_tools.includes(String(tool))
             ? `${w}: ${String(tool)} is a write tool — PHASE W SEAM — NOT IMPLEMENTED; no sequence may call one`
             : manifest.p1.includes(String(tool))
-              ? `${w}: ${String(tool)} is a P1 tool; this sequence runs under EFF_TOOLSET=${String(toolset)}`
+              ? `${w}: ${String(tool)} is a P1 tool; this sequence runs under EFF_TOOLSET=${seqToolset}`
               : `${w}: ${String(tool)} is not a registered tool`,
         );
       }
@@ -1050,7 +1502,15 @@ export function validateToolSequence(raw, ctx) {
         );
       }
     });
-    sequences.push({ id: String(id), steps: parsed });
+    if (st === "full" && !isP1Skill && !parsed.some((p) => manifest.p1.includes(p.tool))) {
+      errors.push(`${sw}: a sequence under toolset "full" in a P0 Skill must call a P1 tool`);
+    }
+    sequences.push({
+      id: String(id),
+      toolset: seqToolset,
+      fixture_variant: typeof fv === "string" ? fv : null,
+      steps: parsed,
+    });
   });
   const records = sequences.some((s) =>
     s.steps.some((p) => p.tool === "espn_record_recommendation"),
@@ -1064,7 +1524,7 @@ export function validateToolSequence(raw, ctx) {
 
 // --- Lane 2 cases (skill-creator evals.json) --------------------------------------------------------
 
-const CASE_NAME_RE = /^([A-Z]{2})-(?:\d{1,2}(?:-E)?|INJ(?:-\d)?)$/;
+const CASE_NAME_RE = /^([A-Z]{2})-(?:\d{1,2}(?:-E)?|INJ(?:-\d)?|CORE)$/;
 const FILES_RE = /^evals\/fixtures\/fx-10h(?:\/([a-zA-Z0-9-]{1,64}))?$/;
 const GRADER_TAG_RE = /\(([a-z_]+)(?:[\s:,][^()]*)?\)\s*$/;
 const REGEX_TAG_RE = /\((regex|regex_absent):\s*`([^`]+)`\)\s*$/;
@@ -1131,10 +1591,38 @@ export function validateEvals(raw, ctx) {
       names.add(String(name));
     }
     const toolset = c["toolset"];
+    const isCore = typeof name === "string" && CORE_CASE_RE.test(name);
+    const p1Cases = ctx.rule?.p1Cases ?? [];
     if (toolset !== "core" && toolset !== "full")
       errors.push(`${w}: toolset must be "core" or "full" (ADV OBJ-18)`);
-    else if (!isP1Skill && toolset !== "core")
-      errors.push(`${w}: a P0 Skill's cases run under toolset "core"`);
+    else if (isP1Skill) {
+      if (isCore && toolset !== "core")
+        errors.push(`${w}: the -CORE case checks the Step 0 stop, so it runs under toolset "core"`);
+      else if (!isCore && toolset !== "full")
+        errors.push(
+          `${w}: a P1 Skill's cases run under toolset "full" (only its -CORE case under "core")`,
+        );
+    } else if (isCore) {
+      errors.push(`${w}: a -CORE case belongs to a P1 Skill (its Step 0 stop under core)`);
+    } else if (typeof name === "string" && p1Cases.includes(name)) {
+      if (toolset !== "full")
+        errors.push(
+          `${w}: ${name} exercises the Skill's P1 branch, so it runs under toolset "full"`,
+        );
+    } else if (toolset !== "core") {
+      errors.push(
+        `${w}: a P0 Skill's cases run under toolset "core" (its P1 cases: ${p1Cases.join(", ") || "none"})`,
+      );
+    }
+    if (isCore && Array.isArray(c["expectations"])) {
+      const says = c["expectations"].some(
+        (x) => typeof x === "string" && /\(regex: `[^`]*EFF_TOOLSET[^`]*`\)\s*$/.test(x),
+      );
+      if (!says)
+        errors.push(
+          `${w}: the -CORE case needs a regex expectation that the reply names EFF_TOOLSET=full (plan 10 B10)`,
+        );
+    }
     const p = c["prompt"];
     if (typeof p !== "string" || p.trim() === "" || p.length > 2000)
       errors.push(`${w}: prompt must be 1–2000 chars`);
@@ -1204,6 +1692,10 @@ export function validateEvals(raw, ctx) {
   });
   if (![...names].some((n) => /-INJ/.test(n)))
     errors.push(`${where}: needs an -INJ case (plan 09 K7)`);
+  if (isP1Skill && ![...names].some((n) => CORE_CASE_RE.test(n)))
+    errors.push(
+      `${where}: a P1 Skill needs a -CORE case (its Step 0 stop under core — plan 10 B10)`,
+    );
   for (const req of ctx.rule?.requiredCases ?? []) {
     if (!names.has(req)) errors.push(`${where}: missing case ${req} (plan 09 §3; plan 10 A9b)`);
   }
@@ -1596,6 +2088,16 @@ export function checkSkills(opts = {}) {
     for (const re of rule?.body ?? []) {
       if (!re.test(body))
         errors.push(`${rel}/SKILL.md: body must mention ${String(re)} (plan 09 §3 Lane 1)`);
+    }
+    for (const re of rule?.bodyAbsent ?? []) {
+      if (re.test(body))
+        errors.push(`${rel}/SKILL.md: body must not mention ${String(re)} (plan 09 §3 Lane 1)`);
+    }
+    // a P1 Skill under `core` stops in Step 0 and says how to turn it on (plan 10 B10; ADV OBJ-18)
+    if (p1Skill && !body.includes(TOOLSET_STOP)) {
+      errors.push(
+        `${rel}/SKILL.md: a P1 Skill's Step 0 must carry the toolset stop verbatim: "${TOOLSET_STOP}"`,
+      );
     }
 
     // files: size, symlinks, links, tool references, constants

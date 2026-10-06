@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with argument templates on fx-10h (Team 02 at waiver rank 2; Tuesday of week 5, W = 13; priority waivers). Format: skills/README.md#tool-sequences.",
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with argument templates on fx-10h (Team 02 at waiver rank 2; Tuesday of week 5 — W = 12 usable weeks after the claim week, changelog R5-1; priority waivers). `pre_run` and `post_run` run under core; `usage_pre_run` (the usage branch) and `faab` (the bid curve, on the faab variant) are the P1 branch, under full. Format: skills/README.md#tool-sequences.",
   "schema_version": 1,
   "skill": "waivers",
   "tool_contract": 1,
@@ -19,31 +19,76 @@
       "id": "pre_run",
       "when": "before the waiver run (rules.waiver.last_execution precedes this week's games ending): the claim brief",
       "steps": [
-        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
-        { "id": "league", "tool": "espn_get_league", "args": {} },
-        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
         {
           "id": "pool",
           "tool": "espn_list_players",
-          "args": { "status": "WAIVERS", "sort": "percOwned", "week": 5, "limit": 25 }
+          "args": {
+            "status": "WAIVERS",
+            "sort": "percOwned",
+            "week": 5,
+            "limit": 25
+          }
         },
         {
           "id": "trending",
           "tool": "espn_list_players",
-          "args": { "status": "WAIVERS", "sort": "percChanged", "week": 5, "limit": 25 }
+          "args": {
+            "status": "WAIVERS",
+            "sort": "percChanged",
+            "week": 5,
+            "limit": 25
+          }
         },
-        { "id": "injuries", "tool": "espn_get_injuries", "args": { "players": { "team_id": 2 } } },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": {
+              "team_id": 2
+            }
+          }
+        },
         {
           "id": "txns",
           "tool": "espn_list_transactions",
-          "args": { "types": ["WAIVER", "WAIVER_ERROR", "FREEAGENT"], "count": 60 },
+          "args": {
+            "types": ["WAIVER", "WAIVER_ERROR", "FREEAGENT"],
+            "count": 60
+          },
           "expect": ["ok", "ESPN_REQUIRES_COOKIES", "ESPN_AUTH_REJECTED"]
         },
-        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        {
+          "id": "standings",
+          "tool": "espn_get_standings",
+          "args": {}
+        },
         {
           "id": "waivers",
           "tool": "espn_analyze_waivers",
-          "args": { "mode": "auto", "phase": "auto", "value_source": "auto" }
+          "args": {
+            "mode": "auto",
+            "phase": "auto",
+            "value_source": "auto"
+          }
         },
         {
           "id": "record",
@@ -51,12 +96,16 @@
           "args": {
             "kind": "waiver",
             "week": 5,
-            "rec": { "$ref": "waivers.data.rec" },
+            "rec": {
+              "$ref": "waivers.data.rec"
+            },
             "alternatives": [],
             "source_calls": {
               "$source_calls": ["roster", "pool", "trending", "injuries", "standings", "waivers"]
             },
-            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
             "followed_hint": "unknown",
             "client_ref": "waivers-2026-w5-claims"
           }
@@ -68,19 +117,48 @@
       "when": "after the waiver run (rules.waiver.last_execution just passed): the scramble brief over free agents",
       "fixture_variant": "post-run",
       "steps": [
-        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
-        { "id": "league", "tool": "espn_get_league", "args": {} },
-        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
         {
           "id": "pool",
           "tool": "espn_list_players",
-          "args": { "status": "FREEAGENT", "sort": "percOwned", "week": 5, "limit": 25 }
+          "args": {
+            "status": "FREEAGENT",
+            "sort": "percOwned",
+            "week": 5,
+            "limit": 25
+          }
         },
-        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        {
+          "id": "standings",
+          "tool": "espn_get_standings",
+          "args": {}
+        },
         {
           "id": "waivers",
           "tool": "espn_analyze_waivers",
-          "args": { "mode": "auto", "phase": "auto", "value_source": "auto" }
+          "args": {
+            "mode": "auto",
+            "phase": "auto",
+            "value_source": "auto"
+          }
         },
         {
           "id": "record",
@@ -88,12 +166,286 @@
           "args": {
             "kind": "waiver",
             "week": 5,
-            "rec": { "$ref": "waivers.data.rec" },
+            "rec": {
+              "$ref": "waivers.data.rec"
+            },
             "alternatives": [],
-            "source_calls": { "$source_calls": ["roster", "pool", "standings", "waivers"] },
-            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "source_calls": {
+              "$source_calls": ["roster", "pool", "standings", "waivers"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
             "followed_hint": "unknown",
             "client_ref": "waivers-2026-w5-scramble"
+          }
+        }
+      ]
+    },
+    {
+      "id": "usage_pre_run",
+      "when": "the P1 usage branch under full, before the waiver run: usage-first detection and the ensemble value basis",
+      "toolset": "full",
+      "steps": [
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "pool",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "WAIVERS",
+            "sort": "percOwned",
+            "week": 5,
+            "limit": 25
+          }
+        },
+        {
+          "id": "trending",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "WAIVERS",
+            "sort": "percChanged",
+            "week": 5,
+            "limit": 25
+          }
+        },
+        {
+          "id": "usage_mine",
+          "tool": "espn_get_player_usage",
+          "args": {
+            "players": {
+              "team_id": 2
+            },
+            "window": 3
+          }
+        },
+        {
+          "id": "usage_rb",
+          "tool": "espn_get_player_usage",
+          "args": {
+            "players": {
+              "pool": {
+                "status": "WAIVERS",
+                "position": "RB",
+                "top": 10
+              }
+            },
+            "window": 3
+          }
+        },
+        {
+          "id": "usage_wr",
+          "tool": "espn_get_player_usage",
+          "args": {
+            "players": {
+              "pool": {
+                "status": "WAIVERS",
+                "position": "WR",
+                "top": 10
+              }
+            },
+            "window": 3
+          }
+        },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": {
+              "team_id": 2
+            }
+          }
+        },
+        {
+          "id": "depth",
+          "tool": "espn_get_depth_chart",
+          "args": {
+            "player": {
+              "player_ids": [
+                {
+                  "$player": {
+                    "step": "roster",
+                    "slot": "BE",
+                    "injury_status": "OUT"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "txns",
+          "tool": "espn_list_transactions",
+          "args": {
+            "types": ["WAIVER", "WAIVER_ERROR", "FREEAGENT"],
+            "count": 60
+          },
+          "expect": ["ok", "ESPN_REQUIRES_COOKIES", "ESPN_AUTH_REJECTED"]
+        },
+        {
+          "id": "standings",
+          "tool": "espn_get_standings",
+          "args": {}
+        },
+        {
+          "id": "replacement",
+          "tool": "espn_analyze_replacement",
+          "args": {
+            "horizon": "ros"
+          }
+        },
+        {
+          "id": "waivers",
+          "tool": "espn_analyze_waivers",
+          "args": {
+            "mode": "auto",
+            "phase": "auto",
+            "value_source": "auto"
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "waiver",
+            "week": 5,
+            "rec": {
+              "$ref": "waivers.data.rec"
+            },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "pool",
+                "trending",
+                "usage_mine",
+                "usage_rb",
+                "usage_wr",
+                "injuries",
+                "depth",
+                "standings",
+                "replacement",
+                "waivers"
+              ]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "followed_hint": "unknown",
+            "client_ref": "waivers-2026-w5-usage"
+          }
+        }
+      ]
+    },
+    {
+      "id": "faab",
+      "when": "a FAAB league (rules.waiver.uses_budget true) under full: the bid curve instead of the priority premium",
+      "fixture_variant": "faab",
+      "toolset": "full",
+      "steps": [
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "pool",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "WAIVERS",
+            "sort": "percOwned",
+            "week": 5,
+            "limit": 25
+          }
+        },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": {
+              "team_id": 2
+            }
+          }
+        },
+        {
+          "id": "txns",
+          "tool": "espn_list_transactions",
+          "args": {
+            "types": ["WAIVER", "WAIVER_ERROR", "FREEAGENT"],
+            "count": 60
+          },
+          "expect": ["ok", "ESPN_REQUIRES_COOKIES", "ESPN_AUTH_REJECTED"]
+        },
+        {
+          "id": "standings",
+          "tool": "espn_get_standings",
+          "args": {}
+        },
+        {
+          "id": "replacement",
+          "tool": "espn_analyze_replacement",
+          "args": {
+            "horizon": "ros"
+          }
+        },
+        {
+          "id": "waivers",
+          "tool": "espn_analyze_waivers",
+          "args": {
+            "mode": "auto",
+            "phase": "auto",
+            "value_source": "auto"
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "waiver",
+            "week": 5,
+            "rec": {
+              "$ref": "waivers.data.rec"
+            },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["roster", "pool", "injuries", "standings", "replacement", "waivers"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "followed_hint": "unknown",
+            "client_ref": "waivers-2026-w5-faab"
           }
         }
       ]

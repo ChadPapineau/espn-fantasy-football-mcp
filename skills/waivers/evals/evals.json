@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane 2 (plan 09 §3.8, §5.2; plan 10 A9b: WV-1 and WV-4-E..WV-7-E plus the -INJ case — WV-2 needs usage data and WV-3-E the FAAB mode, both P1). Model-graded cases on fx-10h mocks, run by hand before a release; the -INJ case passes only when the ranking equals the base fixture's apart from the quotation and one flag line.",
+  "$comment": "Lane 2 (plan 09 §3.8, §5.2; plan 10 A9b: WV-1 and WV-4-E..WV-7-E plus the -INJ case under core; plan 10 B11: WV-2 (the usage branch) and WV-3-E (the FAAB bid curve) under full). Model-graded cases on fx-10h, run by hand before a release; the -INJ case passes only when the ranking equals the base fixture's apart from the quotation and one flag line. WV-2 reads the usage datasets, so it needs the fixture-mode datasets published into the eval server's cache (scripts/skills/build-plugin-evals.mjs README).",
   "skill_name": "waivers",
   "evals": [
     {
@@ -7,7 +7,7 @@
       "name": "WV-1",
       "toolset": "core",
       "prompt": "Who should I pick up this week and is it worth my waiver spot?",
-      "expected_output": "At k = 2 with W = 13: mode_used priority; a claim, pass or marginal verdict per candidate; the premium with its band printed beside it and each candidate's surplus; the ordered claim list with marginal candidates apart; the scramble list; next_run_at; a drop with re-add risk; the value-basis line; a log id.",
+      "expected_output": "At k = 2 with W = 12 (the usable weeks after this week's claim; the premium about 27 points — changelog R5-1): mode_used priority; a claim, pass or marginal verdict per candidate; the premium with its band printed beside it and each candidate's surplus; the ordered claim list with marginal candidates apart; the scramble list; next_run_at; a drop with re-add risk; the value-basis line; a log id.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_list_players before espn_analyze_waivers, and espn_record_recommendation last (tool_order)",
@@ -17,6 +17,35 @@
         "The reply prints the premium band beside the premium (llm)",
         "The reply gives an ordered claim list, the marginal candidates apart from it, a scramble list and the next run time (llm)",
         "The reply names a drop with its re-add risk and states the value basis (llm)"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "WV-2",
+      "toolset": "full",
+      "prompt": "Who should I pick up this week and is it worth my waiver spot?",
+      "expected_output": "Under the full toolset the usage branch runs: each candidate carries signals[] with numeric evidence, value_basis is the ensemble (ESPN's projection beside it), and a candidate whose points ran ahead of his expected points (strongly negative xfp_gap — touchdown luck) is flagged and not the top target; the premium rule and its band are unchanged.",
+      "files": ["evals/fixtures/fx-10h"],
+      "expectations": [
+        "The skill called espn_get_player_usage before espn_analyze_waivers (tool_order)",
+        "The skill called espn_analyze_waivers before espn_record_recommendation (tool_order)",
+        "The reply cites usage signals with numbers (regex: `snap|target share|xfp_gap|expected points`)",
+        "A candidate inflated by touchdowns relative to his expected points is flagged and not ranked first on points alone (llm)",
+        "The value basis line says the ensemble is used, with ESPN's projection beside it (llm)"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "WV-3-E",
+      "toolset": "full",
+      "prompt": "Who should I bid on this week, and how much?",
+      "expected_output": "A FAAB league (budget 100): mode_used faab; per target a bid (b_star) with its win-probability curve, lambda (the value of a dollar kept) and dollars per point with its sample size; no waiver-priority premium or claim-order language.",
+      "files": ["evals/fixtures/fx-10h/faab"],
+      "expectations": [
+        "espn_analyze_waivers was called with mode auto (tool_used: input_match mode auto)",
+        "The reply gives a bid amount per target (regex: `\\$\\s?\\d+|bid`)",
+        "The reply gives the bid curve or the chance each bid wins, and the value of a dollar kept (llm)",
+        "The reply prints no waiver-priority premium (regex_absent: `premium band|Π\\(k`)"
       ]
     },
     {

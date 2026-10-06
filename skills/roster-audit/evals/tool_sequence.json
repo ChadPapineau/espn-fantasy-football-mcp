@@ -1,0 +1,138 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.12): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, on fx-10h (Team 02; week 5; an INJURY_RESERVE receiver in IR, an OUT back and an INJURY_RESERVE receiver on the bench, one IR slot open). `invalid` runs on ir-invalid (a healthy player in IR: adds blocked). Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "roster-audit",
+  "tool_contract": 1,
+  "toolset": "full",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "full"
+    },
+    "team_id": 2,
+    "week": 5
+  },
+  "sequences": [
+    {
+      "id": "audit",
+      "when": "a valid roster: the rest-of-season audit",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "injuries", "tool": "espn_get_injuries", "args": { "players": { "team_id": 2 } } },
+        {
+          "id": "proj",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 2 }, "horizon": "ros", "seed": 20261006 }
+        },
+        { "id": "replacement", "tool": "espn_analyze_replacement", "args": { "horizon": "ros" } },
+        {
+          "id": "pool_rb",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "AVAILABLE",
+            "position": "RB",
+            "sort": "percOwned",
+            "week": 5,
+            "limit": 15
+          }
+        },
+        {
+          "id": "pool_wr",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "AVAILABLE",
+            "position": "WR",
+            "sort": "percOwned",
+            "week": 5,
+            "limit": 15
+          }
+        },
+        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        { "id": "audit", "tool": "espn_analyze_roster", "args": { "competing": "auto" } },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "roster",
+            "week": 5,
+            "rec": { "$ref": "audit.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "injuries",
+                "proj",
+                "replacement",
+                "pool_rb",
+                "pool_wr",
+                "standings",
+                "audit"
+              ]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "roster-audit-2026-w5"
+          }
+        }
+      ]
+    },
+    {
+      "id": "invalid",
+      "when": "a healthy player sits in IR (ir.invalid): the IR section first — what is blocked, the forced drop, the deadline",
+      "fixture_variant": "ir-invalid",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "injuries", "tool": "espn_get_injuries", "args": { "players": { "team_id": 2 } } },
+        {
+          "id": "proj",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 2 }, "horizon": "ros", "seed": 20261006 }
+        },
+        { "id": "replacement", "tool": "espn_analyze_replacement", "args": { "horizon": "ros" } },
+        {
+          "id": "pool_rb",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "AVAILABLE",
+            "position": "RB",
+            "sort": "percOwned",
+            "week": 5,
+            "limit": 15
+          }
+        },
+        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        { "id": "audit", "tool": "espn_analyze_roster", "args": { "competing": "auto" } },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "roster",
+            "week": 5,
+            "rec": { "$ref": "audit.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "injuries",
+                "proj",
+                "replacement",
+                "pool_rb",
+                "standings",
+                "audit"
+              ]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "roster-audit-2026-w5-invalid"
+          }
+        }
+      ]
+    }
+  ]
+}

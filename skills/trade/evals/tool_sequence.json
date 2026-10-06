@@ -1,0 +1,217 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.9): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, with argument templates on fx-10h (Team 02; week 5; the week-5 opponent Team 10 carries the inj-tradeblock note; Team 03 is 3–1 but sixth in points for). The give side is the user's first starting WR, the get side the partner's first starting RB. Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "trade",
+  "tool_contract": 1,
+  "toolset": "full",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "full"
+    },
+    "team_id": 2,
+    "week": 5
+  },
+  "sequences": [
+    {
+      "id": "offer",
+      "when": "the user names an offer (received or considered); last season's seeds agree with the configured reading, so the evaluation runs under it",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        {
+          "id": "seeding",
+          "tool": "espn_get_league",
+          "args": { "include": ["seeding", "seeding_evidence"] }
+        },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "partner", "tool": "espn_get_roster", "args": { "team_id": 10, "week": 5 } },
+        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": {
+              "player_ids": [
+                { "$player": { "step": "roster", "slot": "WR" } },
+                { "$player": { "step": "partner", "slot": "RB" } }
+              ]
+            }
+          }
+        },
+        {
+          "id": "proj_me",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 2 }, "horizon": "ros", "seed": 20261006 }
+        },
+        {
+          "id": "proj_partner",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 10 }, "horizon": "ros", "seed": 20261006 }
+        },
+        { "id": "replacement", "tool": "espn_analyze_replacement", "args": { "horizon": "ros" } },
+        {
+          "id": "trade",
+          "tool": "espn_analyze_trade",
+          "args": {
+            "offer": {
+              "partner_team_id": 10,
+              "give": [{ "$player": { "step": "roster", "slot": "WR" } }],
+              "get": [{ "$player": { "step": "partner", "slot": "RB" } }]
+            },
+            "seeding_mode": "config"
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "trade",
+            "week": 5,
+            "rec": { "$ref": "trade.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "partner",
+                "standings",
+                "injuries",
+                "proj_me",
+                "proj_partner",
+                "replacement",
+                "trade"
+              ]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "trade-2026-w5-offer-t10"
+          }
+        }
+      ]
+    },
+    {
+      "id": "partners",
+      "when": "the user asks who to trade with for a position: a partner search (at most four partners), then the chosen proposal evaluated as an offer",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        {
+          "id": "seeding",
+          "tool": "espn_get_league",
+          "args": { "include": ["seeding", "seeding_evidence"] }
+        },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        {
+          "id": "proj_me",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 2 }, "horizon": "ros", "seed": 20261006 }
+        },
+        { "id": "replacement", "tool": "espn_analyze_replacement", "args": { "horizon": "ros" } },
+        {
+          "id": "search",
+          "tool": "espn_analyze_trade",
+          "args": {
+            "find_partners": { "need_position": "RB", "max_partners": 3 },
+            "seeding_mode": "config"
+          }
+        },
+        {
+          "id": "trade",
+          "tool": "espn_analyze_trade",
+          "args": {
+            "offer": {
+              "partner_team_id": { "$ref": "search.data.partners.0.team_id" },
+              "give": { "$ref": "search.data.partners.0.proposal.give" },
+              "get": { "$ref": "search.data.partners.0.proposal.get" }
+            },
+            "seeding_mode": "config"
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "trade",
+            "week": 5,
+            "rec": { "$ref": "trade.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["roster", "standings", "proj_me", "replacement", "search", "trade"]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "trade-2026-w5-partner-rb"
+          }
+        }
+      ]
+    },
+    {
+      "id": "both_readings",
+      "when": "last season's seeds point to the other reading (points-only-seeding): the same offer valued under both readings, side by side",
+      "fixture_variant": "points-only-seeding",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        {
+          "id": "seeding",
+          "tool": "espn_get_league",
+          "args": { "include": ["seeding", "seeding_evidence"] }
+        },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        { "id": "partner", "tool": "espn_get_roster", "args": { "team_id": 3, "week": 5 } },
+        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        {
+          "id": "proj_me",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 2 }, "horizon": "ros", "seed": 20261006 }
+        },
+        {
+          "id": "proj_partner",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 3 }, "horizon": "ros", "seed": 20261006 }
+        },
+        { "id": "replacement", "tool": "espn_analyze_replacement", "args": { "horizon": "ros" } },
+        {
+          "id": "trade",
+          "tool": "espn_analyze_trade",
+          "args": {
+            "offer": {
+              "partner_team_id": 3,
+              "give": [{ "$player": { "step": "roster", "slot": "WR" } }],
+              "get": [{ "$player": { "step": "partner", "slot": "RB" } }]
+            },
+            "seeding_mode": "both"
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "trade",
+            "week": 5,
+            "rec": { "$ref": "trade.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "partner",
+                "standings",
+                "proj_me",
+                "proj_partner",
+                "replacement",
+                "trade"
+              ]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "seeding_mode_used": "both",
+            "followed_hint": "unknown",
+            "client_ref": "trade-2026-w5-offer-t03-both"
+          }
+        }
+      ]
+    }
+  ]
+}

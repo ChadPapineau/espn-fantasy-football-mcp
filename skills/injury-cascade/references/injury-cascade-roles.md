@@ -1,0 +1,11 @@
+## Cascade roles — how an absence moves opportunity
+
+**Role affinity, not the depth chart.** The vacated work goes to the players whose roles look most like the injured player's — a slot receiver's targets to the next slot-type receiver and the pass-catching back, a lead back's carries split between the backup and the change-of-pace back — not to whoever is listed second. `espn_get_depth_chart` shows the listed order with recent snaps beside it; when the two disagree, the snaps win. The shares are split, never handed over whole, and never add up to more than the vacated share: some of the work leaves the team's offence altogether (more passes to the tight end, a lower implied total).
+
+**How sure.** `p_role_holds` is the chance a beneficiary keeps the role for the weeks that matter. The evidence grade says why: team games already played without the player (`team_games`), whether the usage data confirm the shift (`usage_confirmed`), and whether the betting market moved (`market_move`). With none of the three the result is `hypothesis_only` — a reasoned guess, said as one. Past absences from earlier seasons (`include_prior_season: true`) are the best prior for a team that has not played without him yet.
+
+**How long.** `expected_weeks` (p25 / p50 / p75) comes from the official report when it says (`basis: report`) and from the injury type's prior otherwise (`basis: prior`). A returning player ramps up (`returning_ramp`): his first game back is rarely a full workload.
+
+**The user's own roster.** When the injured player is on the user's team, the cascade states the IR consequence: an `OUT` or `INJURY_RESERVE` player can move to an open IR slot and free a bench spot for a beneficiary; a `QUESTIONABLE`, `DOUBTFUL` or suspended player cannot. Activate players after the waiver run, never the night before a pending claim — an invalid roster blocks every add.
+
+**Pricing the beneficiaries.** In a move-to-last priority league a claim costs the user's place in the order only when it wins, so each available beneficiary is priced like any waiver target — claim when its surplus over the drop beats the premium of holding the position, marginal inside the premium band — by `espn_analyze_waivers` with the beneficiaries as `candidates`.

@@ -1,7 +1,7 @@
 // helpers.ts — temporary repository trees for the Skills tooling tests (plan 09 §4, §5.1; plan 05 §2
 // "adversarial by default"): a copy of the real skills/ bundle plus the files the scripts read, so
 // every failure case mutates a private copy and never the working tree. Ported from sibling @c696e47,
-// adapted (the manifest beside the scripts; an empty scanner deny-list).
+// adapted (the manifest beside the scripts; an empty scanner deny-list; the P0/P1 Skill lists).
 import { spawnSync } from "node:child_process";
 import {
   cpSync,
@@ -17,8 +17,8 @@ import path from "node:path";
 
 export const ROOT = path.resolve(import.meta.dirname, "..", "..");
 
-/** The eight P0 Skills (plan 09 §1; plan 10 §3.1a). */
-export const SKILLS = [
+/** The eight P0 Skills (plan 09 §1; plan 10 §3.1a) — validated under EFF_TOOLSET=core. */
+export const P0_SKILLS = [
   "apply",
   "onboard",
   "retro",
@@ -28,6 +28,18 @@ export const SKILLS = [
   "waivers",
   "weekly",
 ] as const;
+
+/** The five P1 Skills (plan 09 §1, §3.9–§3.13; plan 10 §3.2) — validated under EFF_TOOLSET=full. */
+export const P1_SKILLS = [
+  "injury-cascade",
+  "news-check",
+  "roster-audit",
+  "schedule-plan",
+  "trade",
+] as const;
+
+/** All thirteen Skills, in directory order (the order the scripts list them). */
+export const SKILLS = [...P0_SKILLS, ...P1_SKILLS].sort();
 
 /**
  * An empty, readable scanner deny-list, so the tests never read the developer's real one and stay

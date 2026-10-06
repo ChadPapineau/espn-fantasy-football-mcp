@@ -1,0 +1,210 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.10): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, on fx-10h (Team 02; week 5; before the waiver run). The injured player is resolved from the user's roster: the player in IR (`report`), or the OUT player on the bench with an IR slot open (`ir_move`, ir-open). The beneficiaries priced by espn_analyze_waivers are the cascade's own (`$ids`). Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "injury-cascade",
+  "tool_contract": 1,
+  "toolset": "full",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "full"
+    },
+    "team_id": 2,
+    "week": 5
+  },
+  "sequences": [
+    {
+      "id": "report",
+      "when": "ESPN's status or the official report confirms the absence (the news gate passed or was not needed)",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "IR" } }] }
+          }
+        },
+        {
+          "id": "depth",
+          "tool": "espn_get_depth_chart",
+          "args": {
+            "player": { "player_ids": [{ "$player": { "step": "roster", "slot": "IR" } }] }
+          }
+        },
+        {
+          "id": "usage",
+          "tool": "espn_get_player_usage",
+          "args": {
+            "players": { "nfl_team": { "$ref": "injuries.data.players.0.pro_team" } },
+            "window": 6,
+            "include_prior_season": true
+          }
+        },
+        {
+          "id": "schedule",
+          "tool": "espn_get_schedule",
+          "args": {
+            "weeks": [5, 6],
+            "nfl_team": { "$ref": "injuries.data.players.0.pro_team" },
+            "include_weather": false
+          }
+        },
+        {
+          "id": "cascade",
+          "tool": "espn_analyze_injury_cascade",
+          "args": {
+            "player": { "player_ids": [{ "$player": { "step": "roster", "slot": "IR" } }] }
+          }
+        },
+        {
+          "id": "pool",
+          "tool": "espn_list_players",
+          "args": { "status": "WAIVERS", "sort": "percChanged", "week": 5, "limit": 25 }
+        },
+        {
+          "id": "waivers",
+          "tool": "espn_analyze_waivers",
+          "args": {
+            "mode": "auto",
+            "phase": "auto",
+            "candidates": {
+              "$ids": { "from": "cascade.data.beneficiaries", "key": "player_id", "max": 5 }
+            }
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "cascade",
+            "week": 5,
+            "rec": { "$ref": "cascade.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "injuries",
+                "depth",
+                "usage",
+                "schedule",
+                "cascade",
+                "pool",
+                "waivers"
+              ]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "injury-cascade-2026-w5-ir"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ir_move",
+      "when": "the injured player is the user's own OUT bench player and an IR slot is open: the IR consequence and the bench spot it frees",
+      "fixture_variant": "ir-open",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": {
+              "player_ids": [
+                { "$player": { "step": "roster", "slot": "BE", "injury_status": "OUT" } }
+              ]
+            }
+          }
+        },
+        {
+          "id": "depth",
+          "tool": "espn_get_depth_chart",
+          "args": {
+            "player": {
+              "player_ids": [
+                { "$player": { "step": "roster", "slot": "BE", "injury_status": "OUT" } }
+              ]
+            }
+          }
+        },
+        {
+          "id": "usage",
+          "tool": "espn_get_player_usage",
+          "args": {
+            "players": { "nfl_team": { "$ref": "injuries.data.players.0.pro_team" } },
+            "window": 6,
+            "include_prior_season": true
+          }
+        },
+        {
+          "id": "schedule",
+          "tool": "espn_get_schedule",
+          "args": {
+            "weeks": [5, 6],
+            "nfl_team": { "$ref": "injuries.data.players.0.pro_team" },
+            "include_weather": false
+          }
+        },
+        {
+          "id": "cascade",
+          "tool": "espn_analyze_injury_cascade",
+          "args": {
+            "player": {
+              "player_ids": [
+                { "$player": { "step": "roster", "slot": "BE", "injury_status": "OUT" } }
+              ]
+            }
+          }
+        },
+        {
+          "id": "pool",
+          "tool": "espn_list_players",
+          "args": { "status": "WAIVERS", "sort": "percChanged", "week": 5, "limit": 25 }
+        },
+        {
+          "id": "waivers",
+          "tool": "espn_analyze_waivers",
+          "args": {
+            "mode": "auto",
+            "phase": "auto",
+            "candidates": {
+              "$ids": { "from": "cascade.data.beneficiaries", "key": "player_id", "max": 5 }
+            }
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "cascade",
+            "week": 5,
+            "rec": { "$ref": "cascade.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "injuries",
+                "depth",
+                "usage",
+                "schedule",
+                "cascade",
+                "pool",
+                "waivers"
+              ]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "injury-cascade-2026-w5-irmove"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with argument templates on fx-10h (Team 02; week 5). `pre_game` runs on the base fixture (nothing locked); `game_day` on sunday-live (some starters locked). The compare pair is the user's FLEX starter and a bench player eligible for FLEX. Format: skills/README.md#tool-sequences.",
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with argument templates on fx-10h (Team 02; week 5). `pre_game` runs on the base fixture (nothing locked); `game_day` on sunday-live (some starters locked); `game_day_live` is the P1 branch under full on the same fixture — our live P(win) from espn_analyze_matchup (mode live) beside ESPN's, logged as a matchup rec before the lineup rec. The compare pair is the user's FLEX starter and a bench player eligible for FLEX. Format: skills/README.md#tool-sequences.",
   "schema_version": 1,
   "skill": "start-sit",
   "tool_contract": 1,
@@ -19,31 +19,83 @@
       "id": "pre_game",
       "when": "no starter has lineup_locked true and no game_state is in or final",
       "steps": [
-        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
-        { "id": "league", "tool": "espn_get_league", "args": {} },
-        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
-        { "id": "scoreboard", "tool": "espn_get_scoreboard", "args": { "week": 5 } },
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "scoreboard",
+          "tool": "espn_get_scoreboard",
+          "args": {
+            "week": 5
+          }
+        },
         {
           "id": "opp_roster",
           "tool": "espn_get_roster",
-          "args": { "team_id": { "$opponent": "scoreboard" }, "week": 5 }
+          "args": {
+            "team_id": {
+              "$opponent": "scoreboard"
+            },
+            "week": 5
+          }
         },
-        { "id": "inj_me", "tool": "espn_get_injuries", "args": { "players": { "team_id": 2 } } },
+        {
+          "id": "inj_me",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": {
+              "team_id": 2
+            }
+          }
+        },
         {
           "id": "inj_opp",
           "tool": "espn_get_injuries",
-          "args": { "players": { "team_id": { "$opponent": "scoreboard" } } }
+          "args": {
+            "players": {
+              "team_id": {
+                "$opponent": "scoreboard"
+              }
+            }
+          }
         },
         {
           "id": "proj_me",
           "tool": "espn_project_players",
-          "args": { "players": { "team_id": 2 }, "horizon": "week", "week": 5, "seed": 20261006 }
+          "args": {
+            "players": {
+              "team_id": 2
+            },
+            "horizon": "week",
+            "week": 5,
+            "seed": 20261006
+          }
         },
         {
           "id": "proj_opp",
           "tool": "espn_project_players",
           "args": {
-            "players": { "team_id": { "$opponent": "scoreboard" } },
+            "players": {
+              "team_id": {
+                "$opponent": "scoreboard"
+              }
+            },
             "horizon": "week",
             "week": 5,
             "seed": 20261006
@@ -57,8 +109,19 @@
             "objective": "auto",
             "compare": [
               {
-                "out": { "$player": { "step": "roster", "slot": "FLEX" } },
-                "in": { "$player": { "step": "roster", "slot": "BE", "eligible": "FLEX" } }
+                "out": {
+                  "$player": {
+                    "step": "roster",
+                    "slot": "FLEX"
+                  }
+                },
+                "in": {
+                  "$player": {
+                    "step": "roster",
+                    "slot": "BE",
+                    "eligible": "FLEX"
+                  }
+                }
               }
             ]
           }
@@ -69,13 +132,19 @@
           "args": {
             "kind": "lineup",
             "week": 5,
-            "rec": { "$ref": "lineup.data.rec" },
+            "rec": {
+              "$ref": "lineup.data.rec"
+            },
             "alternatives": [],
             "source_calls": {
               "$source_calls": ["roster", "inj_me", "proj_me", "proj_opp", "lineup"]
             },
-            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
-            "seeding_mode_used": { "$ref": "lineup.data.seeding_mode_used" },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "seeding_mode_used": {
+              "$ref": "lineup.data.seeding_mode_used"
+            },
             "followed_hint": "unknown",
             "client_ref": "start-sit-2026-w5-flex"
           }
@@ -87,22 +156,70 @@
       "when": "any starter has lineup_locked true or game_state in or final",
       "fixture_variant": "sunday-live",
       "steps": [
-        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
-        { "id": "league", "tool": "espn_get_league", "args": {} },
-        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
-        { "id": "fresh", "tool": "espn_get_roster", "args": { "week": 5, "force_refresh": true } },
-        { "id": "live", "tool": "espn_get_live_scoreboard", "args": { "week": 5 } },
-        { "id": "injuries", "tool": "espn_get_injuries", "args": { "players": { "team_id": 2 } } },
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "fresh",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5,
+            "force_refresh": true
+          }
+        },
+        {
+          "id": "live",
+          "tool": "espn_get_live_scoreboard",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": {
+              "team_id": 2
+            }
+          }
+        },
         {
           "id": "proj_pending",
           "tool": "espn_project_players",
-          "args": { "players": { "team_id": 2 }, "horizon": "week", "week": 5, "seed": 20261006 },
+          "args": {
+            "players": {
+              "team_id": 2
+            },
+            "horizon": "week",
+            "week": 5,
+            "seed": 20261006
+          },
           "note": "the Skill passes only the players whose games have not started (player_ids from the fresh roster)"
         },
         {
           "id": "lineup",
           "tool": "espn_analyze_lineup",
-          "args": { "week": 5, "objective": "auto", "only_unlocked": true }
+          "args": {
+            "week": 5,
+            "objective": "auto",
+            "only_unlocked": true
+          }
         },
         {
           "id": "record",
@@ -110,15 +227,145 @@
           "args": {
             "kind": "lineup",
             "week": 5,
-            "rec": { "$ref": "lineup.data.rec" },
+            "rec": {
+              "$ref": "lineup.data.rec"
+            },
             "alternatives": [],
             "source_calls": {
               "$source_calls": ["fresh", "live", "injuries", "proj_pending", "lineup"]
             },
-            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
-            "seeding_mode_used": { "$ref": "lineup.data.seeding_mode_used" },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "seeding_mode_used": {
+              "$ref": "lineup.data.seeding_mode_used"
+            },
             "followed_hint": "unknown",
             "client_ref": "start-sit-2026-w5-gameday"
+          }
+        }
+      ]
+    },
+    {
+      "id": "game_day_live",
+      "when": "the game-day branch under the full toolset: some slots locked, and our live win probability beside ESPN's",
+      "fixture_variant": "sunday-live",
+      "toolset": "full",
+      "steps": [
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "fresh",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5,
+            "force_refresh": true
+          }
+        },
+        {
+          "id": "live",
+          "tool": "espn_get_live_scoreboard",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "injuries",
+          "tool": "espn_get_injuries",
+          "args": {
+            "players": {
+              "team_id": 2
+            }
+          }
+        },
+        {
+          "id": "proj_pending",
+          "tool": "espn_project_players",
+          "args": {
+            "players": {
+              "team_id": 2
+            },
+            "horizon": "week",
+            "week": 5,
+            "seed": 20261006
+          },
+          "note": "the Skill passes only the players whose games have not started (player_ids from the fresh roster)"
+        },
+        {
+          "id": "matchup",
+          "tool": "espn_analyze_matchup",
+          "args": {
+            "week": 5,
+            "mode": "live"
+          }
+        },
+        {
+          "id": "lineup",
+          "tool": "espn_analyze_lineup",
+          "args": {
+            "week": 5,
+            "objective": "auto",
+            "only_unlocked": true
+          }
+        },
+        {
+          "id": "record_matchup",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "matchup",
+            "week": 5,
+            "rec": {
+              "$ref": "matchup.data.rec"
+            },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["fresh", "live", "injuries", "proj_pending", "matchup"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "followed_hint": "unknown",
+            "client_ref": "start-sit-2026-w5-live-pwin"
+          }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "lineup",
+            "week": 5,
+            "rec": {
+              "$ref": "lineup.data.rec"
+            },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["fresh", "live", "injuries", "proj_pending", "matchup", "lineup"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "seeding_mode_used": {
+              "$ref": "lineup.data.seeding_mode_used"
+            },
+            "followed_hint": "unknown",
+            "client_ref": "start-sit-2026-w5-gameday-live"
           }
         }
       ]

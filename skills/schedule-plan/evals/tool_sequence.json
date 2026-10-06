@@ -1,0 +1,128 @@
+{
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.11): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, on fx-10h (Team 02; week 5; 14 regular-season weeks, six playoff teams over weeks 15–17). `season` runs under the configured reading (last season's seeds agree with it); `both_readings` on seeding-unknown passes seeding_mode both explicitly (ADV OBJ-13). Format: skills/README.md#tool-sequences.",
+  "schema_version": 1,
+  "skill": "schedule-plan",
+  "tool_contract": 1,
+  "toolset": "full",
+  "fixture": {
+    "league": "fx-10h",
+    "env": {
+      "EFF_FIXTURE_DIR": "fixtures/espn/fx-10h",
+      "ESPN_LEAGUE_ID": "0",
+      "EFF_TOOLSET": "full"
+    },
+    "team_id": 2,
+    "week": 5
+  },
+  "sequences": [
+    {
+      "id": "season",
+      "when": "the seeding reading is settled (confirmed, or last season's seeds agree with the configured reading)",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        {
+          "id": "seeding",
+          "tool": "espn_get_league",
+          "args": { "include": ["seeding", "seeding_evidence"] }
+        },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "playoff_games",
+          "tool": "espn_get_schedule",
+          "args": { "weeks": [15, 16, 17], "include_weather": false }
+        },
+        {
+          "id": "proj",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 2 }, "horizon": "ros", "seed": 20261006 }
+        },
+        { "id": "replacement", "tool": "espn_analyze_replacement", "args": { "horizon": "ros" } },
+        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        {
+          "id": "race",
+          "tool": "espn_analyze_matchup",
+          "args": { "mode": "season", "seeding_mode": "config", "horizon": "through_playoffs" }
+        },
+        {
+          "id": "plan",
+          "tool": "espn_analyze_schedule",
+          "args": { "include_playoffs": true }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "schedule",
+            "week": 5,
+            "rec": { "$ref": "plan.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": [
+                "roster",
+                "playoff_games",
+                "proj",
+                "replacement",
+                "standings",
+                "race",
+                "plan"
+              ]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": "schedule-plan-2026-w5"
+          }
+        }
+      ]
+    },
+    {
+      "id": "both_readings",
+      "when": "the seeding reading is unconfirmed and no evidence settles it (seeding-unknown): both readings simulated side by side",
+      "fixture_variant": "seeding-unknown",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        {
+          "id": "seeding",
+          "tool": "espn_get_league",
+          "args": { "include": ["seeding", "seeding_evidence"] }
+        },
+        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
+        {
+          "id": "proj",
+          "tool": "espn_project_players",
+          "args": { "players": { "team_id": 2 }, "horizon": "ros", "seed": 20261006 }
+        },
+        { "id": "replacement", "tool": "espn_analyze_replacement", "args": { "horizon": "ros" } },
+        { "id": "standings", "tool": "espn_get_standings", "args": {} },
+        {
+          "id": "race",
+          "tool": "espn_analyze_matchup",
+          "args": { "mode": "season", "seeding_mode": "both" }
+        },
+        {
+          "id": "plan",
+          "tool": "espn_analyze_schedule",
+          "args": { "include_playoffs": true }
+        },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "schedule",
+            "week": 5,
+            "rec": { "$ref": "plan.data.rec" },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["roster", "proj", "replacement", "standings", "race", "plan"]
+            },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "seeding_mode_used": "both",
+            "followed_hint": "unknown",
+            "client_ref": "schedule-plan-2026-w5-both"
+          }
+        }
+      ]
+    }
+  ]
+}

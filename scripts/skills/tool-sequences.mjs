@@ -4,10 +4,14 @@
 // and turns a step's argument template into concrete tool arguments from the results of the earlier
 // steps. The dry run itself (the server in fixture mode, EFF_FIXTURE_DIR=fixtures/espn/fx-10h) lives
 // with the integration tests. Zero dependencies. Ported from sibling @c696e47, adapted (`$opponent`;
-// the fixture env block).
+// the fixture env block). Phase 2 (plan 09 §5.1 item 3; plan 10 B11): every loaded sequence carries
+// the toolset it runs under, and `loadToolSequences` returns one toolset's sequences — `core` (the
+// default, the eight P0 Skills' P0 paths) or `full` (the P1 Skills and the P0 Skills' P1 branches) —
+// so a dry run starts its server with the matching EFF_TOOLSET; `$ids` and `$player.injury_status`
+// resolve here too.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { SKILL_RULES, validateToolSequence } from "./check-skills.mjs";
+import { IDS_MAX, SKILL_RULES, validateToolSequence } from "./check-skills.mjs";
 import {
   REPO_ROOT,
   SKILLS_DIR,
@@ -18,20 +22,29 @@ import {
 } from "./_lib.mjs";
 
 /**
- * @typedef {{ id: string, when: string, fixture_variant: string | null,
+ * @typedef {{ id: string, when: string, fixture_variant: string | null, toolset: string,
  *   steps: import("./check-skills.mjs").SeqStep[] }} LoadedSequence
  * @typedef {{ skill: string, toolset: string, env: Record<string, string>,
  *   fixture: Record<string, unknown>, sequences: LoadedSequence[] }} SkillSequences
  * @typedef {{ tool: string, result: unknown }} StepResult  the step's tool and its full envelope
  */
 
+/** The toolsets a dry run can ask for: one server per toolset (`all` = both, for tooling). */
+export const LOAD_TOOLSETS = Object.freeze(["core", "full", "all"]);
+
 /**
- * Load and validate every Skill's tool_sequence.json. Throws with every problem listed when any
- * file is invalid — the dry run must never replay a sequence the checker would reject.
+ * Load and validate every Skill's tool_sequence.json, then keep the sequences that run under
+ * `opts.toolset` (default `core`): a Skill with none left is omitted. Throws with every problem
+ * listed when any file is invalid — the dry run must never replay a sequence the checker would
+ * reject (validation covers every file whatever the filter).
  * @param {string} [root]
+ * @param {{ toolset?: "core" | "full" | "all" }} [opts]
  * @returns {SkillSequences[]}
  */
-export function loadToolSequences(root = REPO_ROOT) {
+export function loadToolSequences(root = REPO_ROOT, opts = {}) {
+  const want = opts.toolset ?? "core";
+  if (!LOAD_TOOLSETS.includes(want))
+    throw new Error(`loadToolSequences: toolset must be one of ${LOAD_TOOLSETS.join(", ")}`);
   const skillsRoot = path.join(root, SKILLS_DIR);
   const manifest = readManifest(root);
   const errorCodes = readErrorCodes(root);
@@ -67,21 +80,25 @@ export function loadToolSequences(root = REPO_ROOT) {
     if (v.errors.length || !isRecord(raw)) continue;
     const rawSeqs = /** @type {Record<string, unknown>[]} */ (raw["sequences"]);
     const fixture = /** @type {Record<string, unknown>} */ (raw["fixture"]);
+    const sequences = v.sequences
+      .map((s, i) => {
+        const r = rawSeqs[i] ?? {};
+        return {
+          id: s.id,
+          when: String(r["when"]),
+          fixture_variant: s.fixture_variant,
+          toolset: s.toolset,
+          steps: s.steps,
+        };
+      })
+      .filter((s) => want === "all" || s.toolset === want);
+    if (sequences.length === 0) continue;
     out.push({
       skill,
       toolset: String(raw["toolset"]),
       env: /** @type {Record<string, string>} */ (fixture["env"]),
       fixture,
-      sequences: v.sequences.map((s, i) => {
-        const r = rawSeqs[i] ?? {};
-        const fv = r["fixture_variant"];
-        return {
-          id: s.id,
-          when: String(r["when"]),
-          fixture_variant: typeof fv === "string" ? fv : null,
-          steps: s.steps,
-        };
-      }),
+      sequences,
     });
   }
   if (errors.length) throw new Error(`tool sequences are invalid:\n  ${errors.join("\n  ")}`);
@@ -136,9 +153,10 @@ export function opponentOf(result, id) {
 
 /**
  * The first player of a roster result in `slot` (plan 07 B1: `data.players[]` with `slot`,
- * `eligible_slots[]`, `player_id`), optionally one also eligible for `eligible`.
+ * `eligible_slots[]`, `injury_status`, `player_id`), optionally one also eligible for `eligible`
+ * and carrying ESPN's `injury_status`.
  * @param {unknown} result an espn_get_roster envelope
- * @param {{ step: string, slot: string, eligible?: string }} spec
+ * @param {{ step: string, slot: string, eligible?: string, injury_status?: string }} spec
  * @returns {number}
  */
 export function playerOf(result, spec) {
@@ -151,11 +169,38 @@ export function playerOf(result, spec) {
     const slots = p["eligible_slots"];
     if (spec.eligible !== undefined && !(Array.isArray(slots) && slots.includes(spec.eligible)))
       continue;
+    if (spec.injury_status !== undefined && p["injury_status"] !== spec.injury_status) continue;
     if (typeof p["player_id"] === "number") return p["player_id"];
   }
   throw new Error(
-    `$player "${spec.step}": no player in ${spec.slot}${spec.eligible ? ` eligible for ${spec.eligible}` : ""}`,
+    `$player "${spec.step}": no player in ${spec.slot}${spec.eligible ? ` eligible for ${spec.eligible}` : ""}${spec.injury_status ? ` with status ${spec.injury_status}` : ""}`,
   );
+}
+
+/**
+ * The distinct numeric `key` values of the array at `from` (`<step>.<path>`), in order, at most
+ * `max` (default IDS_MAX): `{ $ids: { from: "cascade.data.beneficiaries", key: "player_id" } }`
+ * becomes the beneficiaries' ESPN ids (null ids — an unmapped player — are skipped). Throws when
+ * the path is not an array or no id is left: a tool's id list is never sent empty.
+ * @param {ReadonlyMap<string, StepResult>} results
+ * @param {{ from: string, key: string, max?: number }} spec
+ * @returns {number[]}
+ */
+export function idsOf(results, spec) {
+  const [id = "", ...keys] = spec.from.split(".");
+  const done = results.get(id);
+  if (!done) throw new Error(`$ids "${spec.from}": step ${id} has no result`);
+  const list = pick(done.result, keys, spec.from);
+  if (!Array.isArray(list)) throw new Error(`$ids "${spec.from}": not an array`);
+  /** @type {number[]} */
+  const out = [];
+  for (const row of list) {
+    const v = isRecord(row) ? row[spec.key] : undefined;
+    if (typeof v === "number" && Number.isInteger(v) && !out.includes(v)) out.push(v);
+    if (out.length >= (spec.max ?? IDS_MAX)) break;
+  }
+  if (out.length === 0) throw new Error(`$ids "${spec.from}": no ${spec.key} in the list`);
+  return out;
 }
 
 /**
@@ -163,7 +208,8 @@ export function playerOf(result, spec) {
  * path of that step's result envelope; every `{ $source_calls: [ids] }` becomes
  * `[{ tool, request_id }]` from those steps (`meta.request_id`); every `{ $opponent: "<step>" }`
  * becomes the opponent's `team_id` from that scoreboard step; every `{ $player: { step, slot,
- * eligible? } }` becomes a `player_id` from that roster step. Plain values are deep-copied.
+ * eligible?, injury_status? } }` becomes a `player_id` from that roster step; every `{ $ids: {
+ * from, key, max? } }` becomes a list of ids (idsOf). Plain values are deep-copied.
  * @param {unknown} template
  * @param {ReadonlyMap<string, StepResult>} results completed steps by id
  * @returns {unknown}
@@ -204,10 +250,24 @@ export function resolveArgs(template, results) {
     const done = results.get(spec["step"]);
     if (!done) throw new Error(`$player "${spec["step"]}": step has no result`);
     const eligible = spec["eligible"];
+    const status = spec["injury_status"];
     return playerOf(done.result, {
       step: spec["step"],
       slot: spec["slot"],
       ...(typeof eligible === "string" ? { eligible } : {}),
+      ...(typeof status === "string" ? { injury_status: status } : {}),
+    });
+  }
+  if (Object.hasOwn(template, "$ids")) {
+    const spec = template["$ids"];
+    if (!isRecord(spec) || typeof spec["from"] !== "string" || typeof spec["key"] !== "string") {
+      throw new Error("$ids must be { from, key, max? }");
+    }
+    const max = spec["max"];
+    return idsOf(results, {
+      from: spec["from"],
+      key: spec["key"],
+      ...(typeof max === "number" ? { max } : {}),
     });
   }
   // Object.fromEntries defines own properties, so a `__proto__` key stays a key (an assignment

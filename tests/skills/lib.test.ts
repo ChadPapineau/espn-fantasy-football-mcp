@@ -154,6 +154,15 @@ describe("the manifest", () => {
     expect(m.p1).toHaveLength(16);
     expect(m.write_tools).toHaveLength(7);
     expect(m.p0_skills).toHaveLength(8);
+    expect(m.p1_skills).toEqual([
+      "injury-cascade",
+      "news-check",
+      "roster-audit",
+      "schedule-plan",
+      "trade",
+    ]);
+    // every core and every P1 tool carries its input contract (the dry run promises P1 calls too)
+    for (const t of [...m.core, ...m.p1]) expect(m.inputs[t], t).toBeDefined();
   });
 
   type Mutation = [string, (j: Record<string, unknown>) => void, RegExp];
@@ -175,9 +184,26 @@ describe("the manifest", () => {
     ],
     ["only seven strings", (j) => (j.disallowed_tools as string[]).pop(), /eight strings/],
     [
-      "inputs for a P1 tool",
-      (j) => ((j.inputs as Record<string, unknown>).espn_analyze_trade = {}),
-      /not a core tool/,
+      "inputs for a write tool",
+      (j) => ((j.inputs as Record<string, unknown>).espn_commit_trade = {}),
+      /not a core or P1 tool/,
+    ],
+    [
+      "inputs for an unknown tool",
+      (j) => ((j.inputs as Record<string, unknown>).espn_get_everything = {}),
+      /not a core or P1 tool/,
+    ],
+    [
+      "a P1 tool without inputs",
+      (j) => delete (j.inputs as Record<string, unknown>).espn_analyze_trade,
+      /inputs\.espn_analyze_trade is missing/,
+    ],
+    [
+      "a bad selector variant",
+      (j) =>
+        ((j.inputs as Record<string, Record<string, string>>).espn_analyze_evidence!.player =
+          "selector:many"),
+      /bad type/,
     ],
     [
       "a core tool without inputs",
