@@ -293,9 +293,25 @@ export async function analyzeRoster(req: RosterAuditRequest): Promise<RosterAudi
   const plan = seatPlan(req.roster);
   const active = req.players.filter((p) => slotClassOf(p.slot_id) !== "ir");
   const bench = active.filter((p) => slotClassOf(p.slot_id) === "bench");
-  const weekMean = (p: AuditPlayer, w: Week): number => {
+  // an injured player's week counts at P(returned by then) × E1's mean — E1 applies the injury
+  // status to its first week only (projection.ts), so a later week reads him at full health
+  const injured = (p: AuditPlayer): boolean =>
+    isIrEligible(p.injury_status) || p.injury_status === "SUSPENSION";
+  const returnBy = new Map(
+    req.players
+      .filter(injured)
+      .map((p) => [
+        p.player_id,
+        new Map(returnCurve(p, weeks, req.current_week).map((c) => [c.week, c.p])),
+      ]),
+  );
+  const healthyMean = (p: AuditPlayer, w: Week): number => {
     const x = p.weeks.find((y) => y.week === w);
     return x === undefined || x.bye || !Number.isFinite(x.mean) ? 0 : Math.max(0, x.mean);
+  };
+  const weekMean = (p: AuditPlayer, w: Week): number => {
+    const r = returnBy.get(p.player_id);
+    return healthyMean(p, w) * (r === undefined ? 1 : (r.get(w) ?? 0));
   };
   const eligibleSets = new Map(req.players.map((p) => [p.player_id, new Set(p.eligible_slot_ids)]));
   const fastOf = (p: AuditPlayer, v: number): FastPlayer => ({
@@ -410,12 +426,19 @@ export async function analyzeRoster(req: RosterAuditRequest): Promise<RosterAudi
     if (p === undefined || slotClassOf(p.slot_id) === "ir") continue;
     const outBy = new Map((h.p_starter_out ?? []).map((x) => [x.week, clamp(x.p, 0, 1)]));
     const promoted = new Map(h.promoted.map((x) => [x.week, Math.max(0, x.mean)]));
+    // the starter's absence is scored when he is mine: the handcuff then replaces him (sib
+    // research 05 §9.2: proj(handcuff | starter out) − the opportunity cost of that week)
+    const mineStarter = active.some((x) => x.player_id === h.starter);
+    const withoutP = active.filter((x) => x.player_id !== p.player_id);
     let v = 0;
     for (const w of weeks) {
       const pOut = outBy.get(w) ?? ROSTER_AUDIT.weeklyAbsence;
       const up = promoted.get(w);
       if (up === undefined) continue;
-      const gain = lineupValue(active, w, new Map([[p.player_id, up]])) - lineupValue(active, w);
+      const out: [number, number][] = mineStarter ? [[h.starter, 0]] : [];
+      const gain =
+        lineupValue(active, w, new Map([...out, [p.player_id, up]])) -
+        lineupValue(withoutP, w, new Map(out));
       v += weightOf(w) * pOut * Math.max(0, gain);
     }
     const value = v - altUse;
@@ -447,11 +470,10 @@ export async function analyzeRoster(req: RosterAuditRequest): Promise<RosterAudi
     let v = 0;
     const without = active.filter((x) => x.player_id !== s.player_id);
     const withS = [...without, s];
+    // weekMean already weights an injured player's week by P(returned by then); an IR occupant whose
+    // designation lets him return now (Q/D, cleared) reads 1
     for (const w of weeks)
-      v +=
-        weightOf(w) *
-        (pBy.get(w) ?? 0) *
-        Math.max(0, lineupValue(withS, w) - lineupValue(without, w));
+      v += weightOf(w) * Math.max(0, lineupValue(withS, w) - lineupValue(without, w));
     const pAtPlayoffs = firstPlayoff === null ? 1 : (pBy.get(firstPlayoff) ?? 0);
     const deadOnArrival = late && pAtPlayoffs < ROSTER_AUDIT.stashPlayoffMin;
     const value = deadOnArrival ? 0 : v;
@@ -668,6 +690,10 @@ export async function analyzeRoster(req: RosterAuditRequest): Promise<RosterAudi
     A(
       `a healthy starter misses a week with probability ${String(ROSTER_AUDIT.weeklyAbsence)} (injury cover, handcuffs) [U]`,
       "the league's own absence history is read",
+    ),
+    A(
+      "an injured player's weeks count at P(returned by then) × E1's projection (cold-start return hazards unless a return curve is passed)",
+      "D2 or E7 report an expected return",
     ),
     A(
       given === null

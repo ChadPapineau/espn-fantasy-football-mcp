@@ -16,7 +16,14 @@
 import type { Clock } from "../clock.js";
 import { gamesOfWeek, kickoffMsOf } from "../league/schedule.js";
 import { canOccupySlot, slotClassOf, startingSeats } from "../league/slots.js";
-import type { InjuryStatus, IsoInstant, ProSchedule, RosterSlots, Week } from "../league/types.js";
+import {
+  isIrEligible,
+  type InjuryStatus,
+  type IsoInstant,
+  type ProSchedule,
+  type RosterSlots,
+  type Week,
+} from "../league/types.js";
 import type { Dist } from "../scoring/types.js";
 import { FORBIDDEN, solveAssignment } from "./assignment.js";
 import { DEFAULT_CV, POSITION_CV } from "./constants.js";
@@ -25,6 +32,7 @@ import { ensure } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs, newestAsOf } from "./inputs.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
 import { clamp, normalDist, round, zeroDist } from "./math.js";
+import { returnCurve } from "./rosterAudit.js";
 import { lineupMoments, type TotalMember } from "./totals.js";
 import type {
   Assumption,
@@ -293,7 +301,29 @@ export async function analyzeSchedule(req: ScheduleRequest): Promise<ScheduleOut
       ),
     );
   const typical = new Map(active.map((p) => [p.player_id, typicalValue(p)]));
-  const weekOf = (p: SchedulePlayer, w: Week) => p.weeks.find((x) => x.week === w) ?? null;
+  // an injured player is out of a week whose P(returned by then) is below one half — E1 applies the
+  // injury status to its first week only (projection.ts); the cold-start return hazards of E9
+  const out = new Map(
+    req.players
+      .filter((p) => isIrEligible(p.injury_status) || p.injury_status === "SUSPENSION")
+      .map((p) => {
+        const curve = returnCurve({ injury_status: p.injury_status }, weeks, Math.min(...weeks));
+        return [p.player_id, new Set(curve.filter((c) => c.p < 0.5).map((c) => c.week))] as const;
+      }),
+  );
+  const weekOf = (p: SchedulePlayer, w: Week) => {
+    const x = p.weeks.find((y) => y.week === w) ?? null;
+    return x !== null && out.get(p.player_id)?.has(w) === true
+      ? { ...x, dist: zeroDist(x.dist.basis) }
+      : x;
+  };
+  if (out.size > 0)
+    assumptions.push(
+      A(
+        `${String(out.size)} injured players are out of each week their cold-start return probability is below one half`,
+        "D2 or E7 report an expected return",
+      ),
+    );
   const pAlive = new Map((req.p_alive_by_week ?? []).map((x) => [x.week, clamp(x.p, 0, 1)]));
   if (req.p_alive_by_week === null || req.p_alive_by_week === undefined)
     assumptions.push(

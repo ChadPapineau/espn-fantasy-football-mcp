@@ -153,6 +153,27 @@ describe("the week-by-week stress test", () => {
     expect(typicalValue(players[2]!)).toBeCloseTo((1 + 13 * 6) / 7, 6);
   });
 
+  it("an injured starter is out of every week his cold-start return probability is below one half", async () => {
+    // INJURY_RESERVE from week 8: no return before 4 weeks (weeks 8–11 out), back by week 15
+    const players = roster().map((p) =>
+      p.player_id === 2 ? { ...p, injury_status: "INJURY_RESERVE" as const } : p,
+    );
+    const out = await analyzeSchedule(rq({ players }));
+    const w8 = out.data.weeks.find((w) => w.week === 8);
+    const w15 = out.data.weeks.find((w) => w.week === 15);
+    const base = await analyzeSchedule(rq());
+    expect(w8?.lineup_pts.mean).toBeLessThan(
+      base.data.weeks.find((w) => w.week === 8)?.lineup_pts.mean ?? 0,
+    );
+    expect(w15?.lineup_pts.mean).toBeCloseTo(
+      base.data.weeks.find((w) => w.week === 15)?.lineup_pts.mean ?? -1,
+      6,
+    );
+    expect(
+      out.data.rec.assumptions.some((a) => a.text.startsWith("1 injured players are out")),
+    ).toBe(true);
+  });
+
   it("fixes: stream the worst week's holes, gain weighted by importance, deadline the week's first kickoff", async () => {
     const out = await analyzeSchedule(rq());
     const fix = out.data.fixes.find((f) => f.action.endsWith("week 9"));

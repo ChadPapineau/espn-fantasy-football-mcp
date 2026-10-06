@@ -277,6 +277,62 @@ describe("handcuffs and stashes (research 05 §4.2–§4.3)", () => {
     expect(none.data.handcuff_values).toEqual([]);
   });
 
+  it("a handcuff behind MY starter replaces him when he is out (the starter's absence is scored)", async () => {
+    // week 6 only: RB 2 (15) out for sure, RB 12 promoted to 16. Without RB 12 the RB seats hold RB 3
+    // (13) and RB 10 (9); with him RB 12 (16) and RB 3, RB 10 losing the FLEX to WR 7 (10): +7
+    const out = await analyzeRoster(
+      rq({
+        stream: [],
+        handcuffs: [
+          {
+            handcuff: 12,
+            starter: 2,
+            p_starter_out: WEEKS.map((w) => ({ week: w, p: w === 6 ? 1 : 0 })),
+            promoted: [{ week: 6, mean: 16 }],
+          },
+        ],
+      }),
+    );
+    expect(out.data.handcuff_values[0]?.value.mean).toBeCloseTo(7, 6);
+    // the same case behind a RIVAL's starter: no absence on my roster — RB 12 at 16 beside RB 2
+    const rival = await analyzeRoster(
+      rq({
+        stream: [],
+        handcuffs: [
+          {
+            handcuff: 12,
+            starter: 555,
+            p_starter_out: WEEKS.map((w) => ({ week: w, p: w === 6 ? 1 : 0 })),
+            promoted: [{ week: 6, mean: 16 }],
+          },
+        ],
+      }),
+    );
+    // RB 12 (16) and RB 2 (15) take the RB seats, RB 3 (13) the FLEX over WR 7 (10): +6 vs without him
+    expect(rival.data.handcuff_values[0]?.value.mean).toBeCloseTo(16 + 15 + 13 - (15 + 13 + 10), 6);
+  });
+
+  it("an injured bench player counts at P(returned by then): never more than when healthy; a sure return equals healthy", async () => {
+    const healthy = roster().map((p) =>
+      p.player_id === 10
+        ? { ...p, weeks: p.weeks.map((w) => ({ ...w, mean: w.bye ? 0 : 20 })) }
+        : p,
+    );
+    const out = healthy.map((p) =>
+      p.player_id === 10 ? { ...p, injury_status: "OUT" as const } : p,
+    );
+    const sure = out.map((p) =>
+      p.player_id === 10 ? { ...p, return_by_week: WEEKS.map((w) => ({ week: w, p: 1 })) } : p,
+    );
+    const mv = async (players: AuditPlayer[]) =>
+      (await analyzeRoster(rq({ players, stream: [] }))).data.bench_plan.find(
+        (b) => b.player_id === 10,
+      )?.marginal_value ?? -1;
+    const [h, o, s1] = [await mv(healthy), await mv(out), await mv(sure)];
+    expect(o).toBeLessThan(h);
+    expect(s1).toBeCloseTo(h, 6);
+  });
+
   it("returnCurve: OUT returns at the weekly hazard from next week; IR not before 4 weeks; Q/D now; input wins", () => {
     const out = returnCurve({ injury_status: "OUT" }, [6, 7, 8], 6);
     expect(out.map((x) => x.p)).toEqual([0, 0.5, 0.75]);
