@@ -21,7 +21,7 @@ import {
   type FreshnessState,
   type TtlContext,
 } from "../config/freshness.js";
-import { GSIS_ID_RE, type SeedingMode } from "../config/schema.js";
+import { GSIS_ID_RE, containsCredentialShape, type SeedingMode } from "../config/schema.js";
 import type { DatasetStamp, InputFreshness } from "../domain/analytics/types.js";
 import {
   INJECTION_FLAGS,
@@ -843,9 +843,13 @@ export function toolAnnotations(name: string): ToolAnnotationHints {
 /** Printable text: no controls, format characters or other default-ignorable code points. */
 export const PRINTABLE_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Default_Ignorable_Code_Point}]*$/u;
 
-/** Model-supplied free text with a cap: printable, capped. */
+/** Model-supplied free text with a cap: printable, capped, never credential-shaped (B1). */
 export function boundedTextSchema(maxChars: number) {
-  return z.string().max(maxChars).regex(PRINTABLE_RE, { message: "unprintable_characters" });
+  return z
+    .string()
+    .max(maxChars)
+    .regex(PRINTABLE_RE, { message: "unprintable_characters" })
+    .refine((t) => !containsCredentialShape(t), { message: "credential_shaped" });
 }
 
 /** An input provenance tag: `espn:<View>`, a dataset source id, `store:<table>`, or a plain tag. */

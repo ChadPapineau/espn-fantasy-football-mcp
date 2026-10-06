@@ -3,6 +3,7 @@
 // with `pool`; E12's input schema; no league id argument). Adversarial: off-by-one at every bound,
 // duplicates, two selectors at once, hostile strings, unicode, oversized records.
 import fc from "fast-check";
+import { fakeEspnS2, fakeGuid } from "../../scripts/ci/secret-fixtures.mjs";
 import { N_SIMS_MAX as ANALYTICS_N_SIMS_MAX } from "../../src/domain/analytics/constants.js";
 import { z } from "zod/v4";
 import { describe, expect, it } from "vitest";
@@ -389,6 +390,8 @@ describe("the E12 record input (plan 07 E12)", () => {
     ["a bad settings hash", { settings_hash: "XYZ" }],
     ["a hidden-character note", { note: "fine\u202e reversed" }],
     ["an over-long note", { note: "n".repeat(201) }],
+    ["a cookie-shaped note", { note: `paste: ${fakeEspnS2("bounds-note", 120)}` }],
+    ["a SWID in the rec's action", { rec: { ...rec, action: `start {${fakeGuid("bounds")}}` } }],
     ["a client ref with a space", { client_ref: "a b" }],
   ])("refuses %s", (_label, over) => {
     expect(ok(recordRecommendationInputSchema, { ...valid, ...over })).toBe(false);

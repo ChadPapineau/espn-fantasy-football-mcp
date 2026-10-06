@@ -364,6 +364,21 @@ export function looksLikeCredentialValue(v: string): boolean {
   return shaped && /[A-Z]/.test(t) && /[a-z]/.test(t) && /\d/.test(t) && shannonEntropy(t) >= 3.5;
 }
 
+/** A cookie-alphabet run long enough to be a pasted espn_s2 (the bare-shape floor is 40). */
+const COOKIE_RUN_RE = /[A-Za-z0-9%+/=._-]{40,8192}/g;
+
+/**
+ * Whether free text CONTAINS an ESPN credential shape anywhere (B1, defence in depth behind the
+ * Skills for the recommendation log's model-authored text): a named `espn_s2=`/`SWID=` assignment,
+ * a brace-GUID (raw or URL-encoded), or a cookie-alphabet run that `looksLikeCredentialValue`
+ * judges espn_s2-shaped. Ordinary prose, ids, hashes and paths are not.
+ */
+export function containsCredentialShape(text: string): boolean {
+  if (NAMED_COOKIE_RE.test(text) || GUID_IN_TEXT_RE.test(text)) return true;
+  for (const m of text.matchAll(COOKIE_RUN_RE)) if (looksLikeCredentialValue(m[0])) return true;
+  return false;
+}
+
 /** A key name that suggests a secret (only checked on keys that are not known keys). */
 const SECRETISH_KEY_RE =
   /espn[_-]?s2|swid|cookie|secret|token|passw(?:or)?d|api[_-]?key|credential/i;

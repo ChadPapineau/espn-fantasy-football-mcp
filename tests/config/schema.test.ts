@@ -32,6 +32,7 @@ import {
   isOneOf,
   loadConfig,
   loadConfigFromProcess,
+  containsCredentialShape,
   looksLikeCredentialValue,
   readConfigFile,
   scanConfigFileForCredentials,
@@ -443,6 +444,49 @@ describe("looksLikeCredentialValue (plan 03 §5 #3 shapes)", () => {
     ["huge", `AE${"Ab1%2F".repeat(2000)}`],
   ])("does not flag %s", (_name, v) => {
     expect(looksLikeCredentialValue(v)).toBe(false);
+  });
+});
+
+describe("containsCredentialShape (free text; B1 defence in depth for the recommendation log)", () => {
+  it.each([
+    ["a pasted cookie inside a sentence", `my cookie is ${fakeEspnS2("cs1", 220)} thanks`],
+    ["a 70-char escaped paste between words", `x ${fakeEspnS2("cs2", 70)} y`],
+    ["a named assignment in prose", "set espn_s2 = whatever before the run"],
+    ["a SWID header shape", "Cookie: SWID=abc"],
+    ["a brace GUID among words", `owner {${fakeGuid("cs3")}} again`],
+    ["an encoded brace GUID", `id=%7B${fakeGuid("cs4")}%7D`],
+    ["a cookie glued to punctuation", `(${fakeEspnS2("cs5", 120)}).`],
+  ])("flags %s", (_name, v) => {
+    expect(containsCredentialShape(v)).toBe(true);
+  });
+  it.each([
+    [
+      "a lineup rationale",
+      "Start the WR over the RB: higher floor in a must-win week (P(win) up).",
+    ],
+    ["a request id and a hash", `r-0123456789ab ${"0123456789abcdef".repeat(4)}`],
+    ["a bare GUID without braces", fakeGuid("cs6")],
+    [
+      "a URL path",
+      "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0?view=mRoster&scoringPeriodId=4",
+    ],
+    ["the empty string", ""],
+    ["long prose", "word ".repeat(200)],
+  ])("does not flag %s", (_name, v) => {
+    expect(containsCredentialShape(v)).toBe(false);
+  });
+  it("property: a generated cookie anywhere in text is found; text without one is not", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ maxLength: 40 }).map((x) => x.replace(/[A-Za-z0-9%+/=._-]/g, " ")),
+        fc.string({ maxLength: 40 }).map((x) => x.replace(/[A-Za-z0-9%+/=._-]/g, " ")),
+        fc.integer({ min: 70, max: 300 }),
+        (pre, post, n) =>
+          containsCredentialShape(`${pre} ${fakeEspnS2(`p${String(n)}`, n)} ${post}`) &&
+          !containsCredentialShape(`${pre} ${post}`),
+      ),
+      { numRuns: 100 },
+    );
   });
 });
 

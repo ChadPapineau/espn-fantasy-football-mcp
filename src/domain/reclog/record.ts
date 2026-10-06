@@ -5,7 +5,13 @@
 // original. Ported from sibling @cf3b015, adapted (ESPN integer player ids, nine roles, settings_hash
 // and seeding_mode_used in the input, the 20 000-char cap measured on the tool-visible fields).
 
-import { GSIS_ID_RE, SEASON_MIN, SEEDING_MODES, isLeagueId } from "../../config/schema.js";
+import {
+  GSIS_ID_RE,
+  SEASON_MIN,
+  SEEDING_MODES,
+  containsCredentialShape,
+  isLeagueId,
+} from "../../config/schema.js";
 import type { Assumption, Driver, InputFreshness, Rec, RecSubject } from "../analytics/types.js";
 import { parseIso, toIso, type Clock, type Rng } from "../clock.js";
 import { TEXT_CAPS } from "../league/types.js";
@@ -153,6 +159,9 @@ function checkText(v: unknown, max: number, path: string, out: Issues): void {
   if (typeof v !== "string") out.push({ path, code: "not_a_string" });
   else if (v.length > max) out.push({ path, code: "too_long" });
   else if (!PRINTABLE_TEXT_RE.test(v)) out.push({ path, code: "unprintable_characters" });
+  // a cookie or SWID never belongs in the log (it would be stored and read back): defence in
+  // depth behind the Skills, mirrored by src/mcp's boundedTextSchema (B1)
+  else if (containsCredentialShape(v)) out.push({ path, code: "credential_shaped" });
 }
 
 function checkNumber(v: unknown, bound: number, path: string, out: Issues): void {

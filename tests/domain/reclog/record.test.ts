@@ -5,6 +5,7 @@
 // oversize arrays and payloads, impossible dates, a future `as_of`, a smuggled `__proto__`).
 // Ported from sibling @cf3b015, adapted (ESPN ids, roles, settings_hash, seeding_mode_used).
 import fc from "fast-check";
+import { fakeEspnS2, fakeGuid } from "../../../scripts/ci/secret-fixtures.mjs";
 import { describe, expect, it } from "vitest";
 import type { Rec } from "../../../src/domain/analytics/types.js";
 import { fixedClock, seededRng, type Rng } from "../../../src/domain/clock.js";
@@ -417,6 +418,23 @@ describe("validateRecordInput — hostile input", () => {
     expect(issues(input({ note: "Ja'Marr — São Paulo 🏈 ﬁ" }))).toEqual([]);
   });
 
+  it("text: a cookie, a SWID or an espn_s2= assignment is never stored (B1, defence in depth)", () => {
+    expect(issues(input({ note: `here: ${fakeEspnS2("rec-note", 150)}` }))).toEqual([
+      "note: credential_shaped",
+    ]);
+    expect(issues(input({ note: `owner {${fakeGuid("rec-note")}}` }))).toEqual([
+      "note: credential_shaped",
+    ]);
+    expect(recIssues({ action: "espn_s2=abc then start him" })).toEqual([
+      "rec.action: credential_shaped",
+    ]);
+    expect(
+      issues(input({ alternatives: [{ ...alt(), action: `bench ${fakeEspnS2("rec-alt", 70)}` }] })),
+    ).toEqual(["alternatives[0].action: credential_shaped"]);
+    // ordinary rationale, ids and hashes are fine
+    expect(issues(input({ note: "start the WR: floor 9.1 vs 7.4, r-0123456789ab" }))).toEqual([]);
+  });
+
   it("rec: shape, text and numbers", () => {
     expect(issues(input({ rec: null as unknown as Rec }))).toEqual(["rec: not_an_object"]);
     expect(recIssues({ action: "x".repeat(201) })).toEqual(["rec.action: too_long"]);
@@ -701,6 +719,8 @@ describe("validateRecordInput — hostile input", () => {
       ["week 0", (i) => ({ ...i, week: 0 })],
       ["bad hash", (i) => ({ ...i, settings_hash: "x" })],
       ["long note", (i) => ({ ...i, note: "n".repeat(201) })],
+      ["cookie note", (i) => ({ ...i, note: `x ${fakeEspnS2("rec-agree", 90)}` })],
+      ["swid action", (i) => ({ ...i, rec: { ...i.rec, action: `SWID={${fakeGuid("a")}}` } })],
       ["note 200", (i) => ({ ...i, note: "n".repeat(200) })],
       ["bidi action", (i) => ({ ...i, rec: { ...i.rec, action: "a\u202eb" } })],
       [

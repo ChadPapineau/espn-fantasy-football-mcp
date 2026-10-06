@@ -5,6 +5,7 @@
 // degrades to its named fallback with a warning, a 4th request makes `partial: true`).
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fakeEspnS2 } from "../../scripts/ci/secret-fixtures.mjs";
 import { MANDATORY_SENTENCES } from "../../src/mcp/envelope.js";
 import { coded, faulty } from "./helpers/faults.js";
 import { envelopeViolations, identifierLeaks } from "./helpers/walk.js";
@@ -810,6 +811,18 @@ describe("E12 espn_record_recommendation and E13 espn_analyze_retrospective", ()
         })
       ).code,
     ).toBe("VALIDATION");
+    // a cookie-shaped note is refused before anything is stored, and never echoed (B1)
+    const cookie = fakeEspnS2("tools-note", 150);
+    const refused = await err("espn_record_recommendation", {
+      ...base,
+      week: 4,
+      note: `my cookie: ${cookie}`,
+    });
+    expect(refused.code).toBe("VALIDATION");
+    expect(JSON.stringify(refused)).not.toContain(cookie.slice(0, 24));
+    for (const week of [3, 4] as const)
+      for (const r of world.store.repos.recommendationLog.forWeek("0", 2026, week))
+        expect(r.note ?? "").not.toContain(cookie.slice(0, 24));
   });
 
   it("an onboarding record may cite the last final week's box score (its scoring self-check)", async () => {
