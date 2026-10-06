@@ -1,4 +1,4 @@
-// credentials.test.ts — src/providers/espn/credentials.ts (plan 02 §2.1; plan 01 §10): the provider
+// auth-gate.test.ts — src/providers/espn/auth-gate.ts (plan 02 §2.1; plan 01 §10): the provider
 // never reads a store; season routes are keyless; a public league is read keyless; `rejected`
 // short-circuits with zero requests; required views without a credential refuse; only
 // discriminating acceptances are recorded (private league; hourly while validated); the SWID is read
@@ -11,7 +11,7 @@ import {
   EspnCredentialError,
   hasProbeAccess,
   swidFromHeader,
-} from "../../../src/providers/espn/credentials.js";
+} from "../../../src/providers/espn/auth-gate.js";
 import { FakeAuthority, FakeProbeAuthority, NOW_ISO, testCookieHeader } from "./helpers.js";
 
 const SWID = "{00000000-0000-4000-8000-000000000003}";

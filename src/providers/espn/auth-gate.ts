@@ -1,4 +1,4 @@
-// credentials.ts — the provider's side of the credential rules (plan 02 §2.1; plan 01 §10): the
+// auth-gate.ts — the provider's side of the credential rules (plan 02 §2.1; plan 01 §10): the
 // provider never reads a store — it asks the injected CredentialAuthority for the Cookie header and
 // reports discriminating observations. Season routes are always keyless; a league known public is
 // read keyless (cookies cannot be tested there, and a 200 is not an acceptance); `rejected`

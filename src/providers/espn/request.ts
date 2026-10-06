@@ -52,7 +52,7 @@ import { classifyAnswer, EspnDriftError, EspnUpstreamError } from "./errors.js";
 import { backoffMs, EspnBreakerOpenError, EspnLimiter, realSleep, type Sleep } from "./limiter.js";
 import { primaryView, type EspnTarget } from "./path.js";
 import { sendAttempt, type AttemptAnswer, type FetchLike } from "./transport.js";
-import { CookieGate, type CookieUse } from "./credentials.js";
+import { CookieGate, type CookieUse } from "./auth-gate.js";
 import { ESPN_BACKOFF } from "../../config/schema.js";
 import type { EspnView } from "./types.js";
 

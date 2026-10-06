@@ -56,7 +56,7 @@ import {
   type TransportStatus,
   type TxnQuery,
 } from "../platform.js";
-import { EspnCredentialError } from "./credentials.js";
+import { EspnCredentialError } from "./auth-gate.js";
 import { EspnDriftError, EspnUpstreamError } from "./errors.js";
 import {
   boardProbeFilter,
