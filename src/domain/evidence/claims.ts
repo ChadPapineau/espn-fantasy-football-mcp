@@ -157,7 +157,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "down",
     "out",
-    String.raw`\b(?:is|was|will be|remains|remain|listed|declared|considered|be|been|being)\s+out\b(?!-|\s+of\b)|\bout\s+(?:indefinitely|again|this week|sunday|monday|thursday|saturday|week \d{1,2})\b|\bout for (?:the\s+)?(?:week|weeks|game|games|sunday|monday|thursday|saturday|the rest|the remainder|several|multiple|an extended|extended|\d{1,2})\b`,
+    String.raw`\b(?:is|was|will be|remains|remain|listed|declared|considered|officially|be|been|being)\s+out\b(?!-|\s+of\b)|\bout\s+(?:indefinitely|again|this week|sunday|monday|thursday|saturday|week \d{1,2})\b|\bout for (?:the\s+)?(?:week|weeks|game|games|sunday|monday|thursday|saturday|the rest|the remainder|several|multiple|an extended|extended|\d{1,2})\b`,
     { negatable: true },
   ),
   rule(
@@ -197,14 +197,14 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "neutral",
     "status_unknown",
-    String.raw`\bstatus (?:is |still |remains |remained )?(?:unknown|unclear|uncertain|in doubt|up in the air|to be determined)\b`,
+    String.raw`\bstatus (?:is |still |remains |remained )?(?:unknown|unclear|uncertain|in doubt|up in the air|to be determined)\b|\b(?:uncertain|iffy|in doubt)\s+(?:for|to play|to suit)\b`,
   ),
   rule(
     "availability.injured_reserve",
     "availability",
     "down",
     "injured_reserve",
-    String.raw`\b(?:placed|place|places|placing|moved|moves|move|sent|put|puts)\s+(?:[a-z.'-]+\s+){0,3}?(?:on|to)\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b|\b(?:landed|lands|land|headed|heads|head|going|goes|to)\s+(?:on|to)\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b|\bseason[- ]ending\b|\bout for the (?:season|year)\b`,
+    String.raw`\b(?:placed|place|places|placing|moved|moves|move|sent|put|puts)\s+(?:[a-z.'-]+\s+){0,3}?(?:on|to)\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b|\b(?:landed|lands|land|headed|heads|head|going|goes|reverts|revert|reverted|to)\s+(?:on|to)\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b|\bseason[- ]ending\b|\bout for the (?:season|year)\b`,
   ),
   rule(
     "availability.pup_nfi",
@@ -272,6 +272,13 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     String.raw`\b(?:slim|outside|small|little|no|low)\s+chance\s+(?:to|of)\s+(?:play|playing|suit|return|returning|be)\b`,
   ),
   rule(
+    "availability.trending_down",
+    "availability",
+    "down",
+    "doubtful",
+    String.raw`\btrending (?:toward|towards|to)\s+(?:not playing|missing|sitting|being inactive)\b`,
+  ),
+  rule(
     "availability.concussion_protocol",
     "availability",
     "down",
@@ -300,7 +307,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "up",
     "will_play",
-    String.raw`\bgood to go\b|\bno injury designation\b|\boff (?:the |his )?injury report\b|\bremoved (?:from )?(?:the )?injury report\b|\bwithout (?:an |a )?(?:injury )?designation\b|\bnot (?:listed )?on (?:the|his) injury report\b|\bdesignation removed\b`,
+    String.raw`\bgood to go\b|\bno injury designation\b|\boff (?:the |his )?injury report\b|\bremoved (?:from )?(?:the )?injury report\b|\bwithout (?:an |a )?(?:injury )?designation\b|\bnot (?:listed )?on (?:the |his )?injury report\b|\bdesignation removed\b`,
   ),
   rule(
     "availability.activated",
@@ -330,7 +337,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "up",
     "practice_full",
-    String.raw`\bfull(?:y)? participant\b|\bfull participation\b|\bpractic(?:e|ed|es|ing)\s+(?:in\s+)?full\b|\bfull practice\b|\bpracticed fully\b|\bupgraded\b`,
+    String.raw`\bfull(?:y)? participant\b|\bfull participation\b|\bpractic(?:e|ed|es|ing)\s+(?:in\s+)?full\b|\bfull practice\b|\bpractic(?:ed|es) fully\b|\bupgraded\b`,
     { negatable: true },
   ),
   rule(
@@ -340,20 +347,27 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "will_play",
     String.raw`\b(?:good|great|strong|decent|real|solid)\s+chance\s+(?:to|of)\s+(?:play|playing|suit|return|returning|be available)\b`,
   ),
+  rule(
+    "availability.trending_up",
+    "availability",
+    "up",
+    "will_play",
+    String.raw`\btrending (?:toward|towards|to)\s+play(?:ing)?\b`,
+  ),
   // --- transaction ------------------------------------------------------------------------------------
   rule(
     "transaction.not_signed",
     "transaction",
     "down",
     null,
-    String.raw`\b(?:not|won't|will not|decline(?:s|d)? to|opt(?:s|ed)? not to|decide(?:s|d)? not to|no longer)\s+(?:to\s+)?(?:sign|signing|join|joining|re-sign)\b|\bpass(?:es|ed)? on (?:signing|him)\b`,
+    String.raw`\b(?:not|won't|will not|decline(?:s|d)? to|opt(?:s|ed)? not to|decide(?:s|d)? not to|no longer)\s+(?:to\s+)?(?:sign|signed|signing|join|joined|joining|re-sign)\b|\bpass(?:es|ed)? on (?:signing|him)\b`,
   ),
   rule(
     "transaction.signed",
     "transaction",
     "up",
     null,
-    String.raw`\b(?:re-?)?sign(?:s|ed|ing)\b|\bsign\s+(?:with|him|a deal|a contract|on)\b|\bagree(?:s|d)?\s+to\s+(?:terms|a deal|a contract|sign)\b|\bclaim(?:s|ed)?\s+(?:him\s+)?off waivers\b|\b(?:promote[sd]?|elevate[sd]?|promoting|elevating)\b|\bacquir(?:e|es|ed|ing)\b|\bcom(?:es|ing) out of retirement\b|\bunretire(?:s|d)?\b`,
+    String.raw`\b(?:re-?)?sign(?:s|ed|ing)\b|\bsign\s+(?:with|him|a deal|a contract|on)\b|\bagree(?:s|d)?\s+to\s+(?:terms|a deal|a contract|sign)\b|\bclaim(?:s|ed)?\s+(?:him\s+)?off waivers\b|\b(?:promote[sd]?|elevate[sd]?|promoting|elevating)\b|\bacquir(?:e|es|ed|ing)\b|\bcom(?:es|ing) out of retirement\b|\bunretire(?:s|d)?\b|\binks?\s+(?:a\s+)?(?:[a-z0-9-]+\s+){0,2}(?:deal|contract|extension)\b|\b(?:contract|multi-year|\d-year)\s+extension\b|\bclaimed by\b`,
     { negatable: true },
   ),
   rule(
@@ -369,7 +383,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "transaction",
     "neutral",
     null,
-    String.raw`\btraded\b|\btrades\s+(?:for|away)\b|\bdealt\s+to\b|\bin a trade\b`,
+    String.raw`\btraded\b|\btrades\s+(?:for|away)\b|\bdealt\s+to\b|\bin a trade\b|\brequests? (?:a )?trade\b|\btrade request\b`,
     { negatable: true },
   ),
   rule(
@@ -400,7 +414,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "health",
     "down",
     null,
-    String.raw`\b(?:suffer(?:s|ed|ing)?|sustain(?:s|ed|ing)?)\s+(?:a\s+|an\s+|another\s+)?(?:[a-z-]+\s+){0,2}(?:injury|sprain|strain|tear|fracture|concussion|setback|bruise|contusion)\b|\b(?:tore|torn|fractured|sprained|strained|dislocated|aggravated|re-?injured)\b|\btweak(?:s|ed)?\s+(?:his|a|an)\b|\binjured\b(?!\s+(?:reserve|list))`,
+    String.raw`\b(?:suffer(?:s|ed|ing)?|sustain(?:s|ed|ing)?)\s+(?:a\s+|an\s+|another\s+)?(?:[a-z-]+\s+){0,2}(?:injury|sprain|strain|tear|fracture|concussion|setback|bruise|contusion)\b|\b(?:tore|torn|fractured|sprained|strained|dislocated|aggravated|re-?injured)\b|\btweak(?:s|ed)?\s+(?:his|a|an)\b|\binjured\b(?!\s+(?:reserve|list))|\btears?\s+(?:his\s+)?(?:acl|mcl|pcl|achilles|meniscus|labrum|hamstring|pectoral|pec|biceps|triceps)\b|\b(?:breaks|broke|broken)\s+(?:his\s+)?(?:foot|leg|arm|hand|wrist|ankle|collarbone|rib|ribs|finger|thumb|jaw|fibula|tibia|clavicle|fibula)\b|\b(?:undergo(?:es|ing)?|underwent|to undergo|scheduled for|getting|gets)\s+(?:an\s+)?mri\b`,
     { negatable: true },
   ),
   rule("health.surgery", "health", "down", null, String.raw`\bsurgery\b|\bsurgical\b`, {
@@ -412,7 +426,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "role",
     "down",
     null,
-    String.raw`\b(?:lose|loses|lost|losing)\s+(?:his\s+|the\s+)?(?:starting\s+|lead\s+|featured\s+)?(?:job|role|spot|gig)\b|\b(?:benched|demoted|relegated)\b`,
+    String.raw`\b(?:lose|loses|lost|losing)\s+(?:his\s+|the\s+)?(?:starting\s+|lead\s+|featured\s+)?(?:job|role|spot|gig)\b|\b(?:lose|loses|lost|losing)\s+(?:snaps|carries|targets|touches|work|reps)\b|\b(?:benched|demoted|relegated)\b|\bout-?snapped\b|\b(?:won't|will not|not expected to|isn't expected to)\s+start\b`,
   ),
   rule(
     "role.reduced",
@@ -433,7 +447,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "role",
     "up",
     null,
-    String.raw`\b(?:named|name|names|will be|to be|remains|as)\s+(?:the\s+)?(?:[a-z]+\s+)?starter\b|\b(?:will|to|set to|expected to|in line to|poised to|slated to)\s+start\b(?!\s+(?:time|the (?:season|year) on))|\b(?:gets|get|getting|draws|draw|drew|earns|earned|makes|making|set for|in line for)\s+(?:his\s+|the\s+|a\s+)?(?:[a-z]+\s+){0,2}starts?\b|\btakes? over\s+(?:as|at)\b|\bstarting nod\b`,
+    String.raw`\b(?:named|name|names|will be|to be|remains|as)\s+(?:the\s+)?(?:[a-z]+\s+)?starter\b|\b(?:will|to|set to|expected to|in line to|poised to|slated to)\s+start\b(?!\s+(?:time|the (?:season|year) on))|\b(?:gets|get|getting|draws|draw|drew|earns|earned|makes|making|set for|in line for)\s+(?:his\s+|the\s+|a\s+)?(?:[a-z]+\s+){0,2}starts?\b|\btakes? over\s+(?:as|at)\b|\btakes? over\s+(?:the\s+)?(?:backfield|starting|lead|kicking|duties|role|job)\b|\bstarting nod\b|\bfirst-team reps\b|\b(?:runs|ran|running|working|works) with the (?:first|starting) (?:team|unit|offense)s?\b|\bwith the starters\b`,
     { negatable: true },
   ),
   rule(
@@ -450,7 +464,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "coaching_intent",
     "down",
     null,
-    String.raw`\b(?:wants?|plans?|hopes?|intends?|expects?|looking|aims?)\s+to\s+(?:limit|reduce|ease|manage|monitor|lighten)\b|\b(?:on|under)\s+a\s+(?:snap|pitch|play)\s+count\b`,
+    String.raw`\b(?:wants?|plans?|hopes?|intends?|expects?|looking|aims?)\s+to\s+(?:limit|reduce|ease|manage|monitor|lighten)\b|\b(?:on|under)\s+a\s+(?:snap|pitch|play)\s+count\b|\beased? back\b|\beasing (?:him )?back\b|\bworkload (?:will be |to be |is being )?(?:managed|monitored|limited)\b`,
   ),
   rule(
     "coaching_intent.more",

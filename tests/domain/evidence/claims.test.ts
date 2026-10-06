@@ -132,6 +132,36 @@ describe("rules_v1 — transactions, health, role, coaching intent", () => {
   });
 });
 
+describe("rules_v1 — more feed phrasings", () => {
+  it.each([
+    ["Player A: Officially out Sunday", "availability/down"],
+    ["Player A: Uncertain for Week 6", "availability/neutral"],
+    ["Player A reverts to IR", "availability/down"],
+    ["Player A: Not on injury report", "availability/up"],
+    ["Player A practices fully Thursday", "availability/up"],
+    ["Player A trending toward playing", "availability/up"],
+    ["Player A trending toward not playing", "availability/down"],
+    ["Player A not signed after workout", "transaction/down"],
+    ["Player A inks three-year extension", "transaction/up"],
+    ["Player A gets contract extension", "transaction/up"],
+    ["Player A claimed by Giants", "transaction/up"],
+    ["Player A requests trade", "transaction/neutral"],
+    ["Player A tears ACL", "health/down"],
+    ["Player A breaks foot", "health/down"],
+    ["Player A undergoes MRI", "health/down"],
+    ["Player A loses carries to rookie", "role/down"],
+    ["Player A out-snapped by rookie", "role/down"],
+    ["Player A won't start Sunday", "role/down"],
+    ["Player A takes over backfield", "role/up"],
+    ["Player A gets first-team reps", "role/up"],
+    ["Player A working with the first team", "role/up"],
+    ["Player A will be eased back", "coaching_intent/down"],
+    ["Player A's workload to be managed", "coaching_intent/down"],
+  ])("%s → %s", (text, want) => {
+    expect(c(text)).toBe(want);
+  });
+});
+
 describe("rules_v1 — look-alikes that are not claims", () => {
   it.each([
     "Kyle Pitts: Uptick in production during big win",
