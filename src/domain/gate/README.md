@@ -3,7 +3,8 @@
 This directory holds the **types and markers only** for the confirmation gate of the optional
 write module. Nothing here runs. The product is read-only: no code in this build evaluates a
 registration gate, mints a ticket, sends a code, writes a journal row, or sends a request to the
-ESPN write host (`lm-api-writes.fantasy.espn.com`). The owner decided not to build writes (D11);
+ESPN write host (`ESPN_WRITE_HOST`, spelled once, in `src/config/schema.ts`, where the read-host
+override refuses it). The owner decided not to build writes (D11);
 plan 10 §3.W's verdict is "recommended: do not build yet".
 
 Specification: plan 02 §3.2 (the four registration gates), §4 (prepare → human channel → commit,

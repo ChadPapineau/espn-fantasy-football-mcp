@@ -742,22 +742,28 @@ export async function checkCredentialPresence(
   } catch {
     filePresent = false;
   }
-  // the keychain is consulted only when it is the recorded store or a file copy exists beside it
-  let keychainPresent: boolean | "error" | "unchecked" = "unchecked";
+  // the keychain is consulted only when it is the recorded store or a file copy exists beside it;
+  // `unavailable` = the native keyring addon did not load (it holds nothing we wrote, but it is a
+  // broken install, never "no credential is stored")
+  let keychainPresent: boolean | "error" | "unavailable" | "unchecked" = "unchecked";
   if (config.credentialStore === "keychain" || filePresent) {
     try {
       keychainPresent = await stores.keychain.exists();
     } catch (e) {
       keychainPresent =
-        e instanceof CredentialStoreError && e.reason === "unavailable" ? false : "error";
+        e instanceof CredentialStoreError && e.reason === "unavailable" ? "unavailable" : "error";
     }
   }
   details.push(
     `recorded store: ${config.credentialStore}${config.origins.EFF_CREDENTIAL_STORE === "file" ? " (recorded by eff setup)" : ""}`,
   );
-  details.push(
-    `keychain item: ${keychainPresent === "unchecked" ? "not checked" : String(keychainPresent)}; session.json: ${String(filePresent)}`,
-  );
+  const keychainText =
+    keychainPresent === "unchecked"
+      ? "not checked"
+      : keychainPresent === "unavailable"
+        ? "unavailable (the native keyring addon did not load)"
+        : String(keychainPresent);
+  details.push(`keychain item: ${keychainText}; session.json: ${String(filePresent)}`);
   const mine =
     credentialRow !== null &&
     config.leagueId !== null &&
@@ -814,6 +820,19 @@ export async function checkCredentialPresence(
         "fail",
         "the keychain could not be read",
         "unlock the login keychain, or `eff setup --storage file`",
+        details,
+      ),
+      facts: { configured: false },
+    };
+  if (keychainPresent === "unavailable" && config.credentialStore === "keychain")
+    return {
+      row: row(
+        6,
+        "credential_store",
+        title,
+        "fail",
+        "the keychain is unavailable: the native keyring addon did not load",
+        "reinstall the server's dependencies, or `eff setup --storage file`",
         details,
       ),
       facts: { configured: false },

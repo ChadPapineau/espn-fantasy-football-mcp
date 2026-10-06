@@ -33,12 +33,12 @@ const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 const SRC = path.join(ROOT, "src");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 
-function tsFiles(dir: string): string[] {
+function tsFiles(dir: string, any = false): string[] {
   const out: string[] = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...tsFiles(p));
-    else if (e.isFile() && e.name.endsWith(".ts")) out.push(p);
+    if (e.isDirectory()) out.push(...tsFiles(p, any));
+    else if (e.isFile() && (any || e.name.endsWith(".ts"))) out.push(p);
   }
   return out;
 }
@@ -82,7 +82,8 @@ describe("the seam stays a seam", () => {
   });
   it("the write host literal appears only in src/config/schema.ts (where the read-host override refuses it)", () => {
     const allowed = path.join(SRC, "config", "schema.ts");
-    for (const f of tsFiles(SRC)) {
+    // every file under src/, prose included (the gate README names the constant, not the host)
+    for (const f of tsFiles(SRC, true)) {
       if (f === allowed) continue;
       expect(readFileSync(f, "utf8").includes("lm-api-writes"), path.relative(ROOT, f)).toBe(false);
     }

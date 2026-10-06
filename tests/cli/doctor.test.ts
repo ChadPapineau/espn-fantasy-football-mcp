@@ -547,7 +547,7 @@ describe("the keychain rows (#6–#8) over the in-memory keyring", () => {
     expect(JSON.stringify(r)).not.toContain(COOKIES.espn_s2.slice(0, 16));
     expect(JSON.stringify(r)).not.toContain(COOKIES.swid);
   });
-  it("a keychain that cannot be read fails #6; an unavailable keychain reads as empty (exit 3)", async () => {
+  it("a keychain that cannot be read fails #6; an addon that did not load fails #6 naming it", async () => {
     sb = sandbox();
     const keyring = new FakeKeyring();
     keyring.failOn = { op: "get", account: "meta", times: 5 };
@@ -565,6 +565,27 @@ describe("the keychain rows (#6–#8) over the in-memory keyring", () => {
       }),
       { json: false, online: false, fix: false, yes: false },
     );
-    expect(byId(none.rows, "credential_store").status).toBe("credentials");
+    // a broken native addon is a broken install, never "no credential is stored … run eff setup"
+    const six = byId(none.rows, "credential_store");
+    expect(six.status).toBe("fail");
+    expect(six.message).toContain("native keyring addon did not load");
+    expect(six.message).not.toContain("no credential is stored");
+    expect(six.fix).toContain("eff setup --storage file");
+    expect(six.details.join("\n")).toContain("keychain item: unavailable");
+    expect(none.exit_code).toBe(1);
+    // with the file store recorded and a session.json beside it, the unloadable keychain is only
+    // reported (it holds nothing we wrote): not the two-stores failure, not this failure
+    writeSession(sb);
+    const fileIo = makeIo(sb, {
+      loadKeyring: () => Promise.reject(new Error("no addon")),
+      env: { ESPN_LEAGUE_ID: "0", EFF_CREDENTIAL_STORE: "file" },
+    });
+    const file = byId(
+      (await runDoctor(fileIo, { json: false, online: false, fix: false, yes: false })).rows,
+      "credential_store",
+    );
+    expect(file.status).toBe("ok");
+    expect(file.message).not.toContain("two stores");
+    expect(file.details.join("\n")).toContain("keychain item: unavailable");
   });
 });

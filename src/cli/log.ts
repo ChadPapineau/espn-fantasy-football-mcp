@@ -6,8 +6,9 @@
 // `[ip]`, registered league ids and ESPN league paths → `[league]`, generic token shapes, URL
 // query strings; strings are truncated (bodies to 500). S1 hardening: numeric league ids logged as
 // numbers, camelCase secret keys, unbraced GUIDs, every spelling and any ≥ 24-char fragment of a
-// registered espn_s2, a bare espn_s2-shaped run, `%40`-encoded emails. Linear-time: every string is
-// pre-cut before the patterns run, and every quantifier is bounded. Nothing is written to stdout.
+// registered espn_s2 — in any letter case (a case-changed copy, B1) —, a bare espn_s2-shaped run,
+// `%40`-encoded emails. Linear-time: every string is pre-cut before the patterns run, and every
+// quantifier is bounded. Nothing is written to stdout.
 // Ported from sibling @d72e03b, adapted (ESPN rules; league-id identifiers; GUID pseudonyms).
 import { createHash } from "node:crypto";
 import type { LogLevel } from "../config/schema.js";
@@ -77,18 +78,35 @@ export const MIN_SECRET_FRAGMENT = 24;
 /** Secrets at least this long get fragment matching (espn_s2-sized values; short keys do not). */
 export const FRAGMENT_MATCH_MIN_LENGTH = 40;
 
-/** Every spelling a pasted secret can take in a log: as pasted, encoded, decoded, form-decoded, any escape case. */
+/**
+ * Every spelling a pasted secret can take in a log: as pasted, encoded, decoded, form-decoded. Letter
+ * case (of the value and of its %XX escapes) is not enumerated: secrets match case-insensitively.
+ */
 function secretForms(value: string): Set<string> {
   const base = new Set([value, encodeURIComponent(value), safeDecode(value)]);
   const out = new Set<string>();
-  for (const v of base) {
-    for (const w of [v, v.replace(/\+/g, " "), safeDecode(v.replace(/\+/g, " "))]) {
-      out.add(w);
-      out.add(w.replace(/%[0-9A-Fa-f]{2}/g, (m) => m.toLowerCase()));
-      out.add(w.replace(/%[0-9A-Fa-f]{2}/g, (m) => m.toUpperCase()));
-    }
-  }
+  for (const v of base)
+    for (const w of [v, v.replace(/\+/g, " "), safeDecode(v.replace(/\+/g, " "))]) out.add(w);
   return out;
+}
+
+/**
+ * ASCII-only lower case. Unlike `toLowerCase()` it never changes a string's length (`"İ"` lowers to
+ * two code units), so an index into the folded text is an index into the original.
+ */
+export function asciiFold(s: string): string {
+  return s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+}
+
+/** Replaces every occurrence of `needle` in `folded` (the ASCII fold of `text`) within `text`. */
+function replaceFolded(text: string, folded: string, needle: string, replace: string): string {
+  let out = "";
+  let last = 0;
+  for (let i = folded.indexOf(needle); i >= 0; i = folded.indexOf(needle, last)) {
+    out += text.slice(last, i) + replace;
+    last = i + needle.length;
+  }
+  return out + text.slice(last);
 }
 
 /** A registry of secret and identifier values, longest first so overlapping values redact fully. */
@@ -98,36 +116,54 @@ export class SecretRegistry {
     value: string;
     replace: string;
     numeric: boolean;
-    /** MIN_SECRET_FRAGMENT-char window → its first offset in `value` (secrets ≥ 40 chars only). */
+    /** A secret: matched in any ASCII letter case (identifiers match exactly). */
+    secret: boolean;
+    /** `asciiFold(value)` for a secret, `value` for an identifier. */
+    folded: string;
+    /** Folded MIN_SECRET_FRAGMENT-char window → its first offset (secrets ≥ 40 chars only). */
     windows: Map<string, number> | null;
   }[] = [];
 
-  private push(kind: string, value: string, replace: string, fragments: boolean): void {
-    if (value.length < MIN_SECRET_LENGTH || this.entries.some((e) => e.value === value)) return;
+  private push(kind: string, value: string, replace: string, secret: boolean): void {
+    const folded = secret ? asciiFold(value) : value;
+    if (
+      value.length < MIN_SECRET_LENGTH ||
+      this.entries.some((e) => e.value === value || (secret && e.secret && e.folded === folded))
+    )
+      return;
     let windows: Map<string, number> | null = null;
-    if (fragments && value.length >= FRAGMENT_MATCH_MIN_LENGTH) {
+    if (secret && value.length >= FRAGMENT_MATCH_MIN_LENGTH) {
       windows = new Map();
-      for (let i = 0; i + MIN_SECRET_FRAGMENT <= value.length; i++) {
-        const w = value.slice(i, i + MIN_SECRET_FRAGMENT);
+      for (let i = 0; i + MIN_SECRET_FRAGMENT <= folded.length; i++) {
+        const w = folded.slice(i, i + MIN_SECRET_FRAGMENT);
         if (!windows.has(w)) windows.set(w, i);
       }
     }
-    this.entries.push({ kind, value, replace, numeric: /^[0-9]+$/.test(value), windows });
+    this.entries.push({
+      kind,
+      value,
+      replace,
+      numeric: /^[0-9]+$/.test(value),
+      secret,
+      folded,
+      windows,
+    });
     this.entries.sort((a, b) => b.value.length - a.value.length);
   }
 
   /**
    * Adds a secret in every spelling a log can carry (ADV OBJ-15; S1): pasted, URL-encoded,
-   * URL-decoded, `+` form-decoded as a space, and %XX escapes in either case. A secret of ≥ 40
-   * chars is also redacted wherever ≥ 24 consecutive chars of it appear (a truncated prefix, a
-   * suffix, a wrapped middle).
+   * URL-decoded, `+` form-decoded as a space — each matched in any letter case, so an upper-cased,
+   * lower-cased or case-swapped copy (and %XX escapes in either case) is redacted too (B1). A
+   * secret of ≥ 40 chars is also redacted wherever ≥ 24 consecutive chars of it appear, in any
+   * case (a truncated prefix, a suffix, a wrapped middle).
    */
   add(kind: string, value: string): void {
     const k = KIND_RE.test(kind) ? kind : "secret";
     for (const v of secretForms(value)) this.push(k, v, `[redacted:${k}]`, true);
   }
 
-  /** Adds an identifier; a numeric one is replaced only as a whole digit run. */
+  /** Adds an identifier (exact case); a numeric one is replaced only as a whole digit run. */
   addIdentifier(kind: string, value: string): void {
     const k = KIND_RE.test(kind) ? kind : "identifier";
     this.push(k, value, k === "league" ? "[league]" : `[redacted:${k}]`, false);
@@ -142,15 +178,22 @@ export class SecretRegistry {
   /** Replaces every registered value in `s`, then every ≥ 24-char fragment of a long secret. */
   apply(s: string): string {
     let out = s;
+    let folded: string | null = null;
     for (const e of this.entries) {
-      if (!out.includes(e.value)) continue;
-      out = e.numeric
-        ? out.replace(new RegExp(`(?<![0-9])${escapeRe(e.value)}(?![0-9])`, "g"), e.replace)
-        : out.split(e.value).join(e.replace);
+      if (e.numeric) {
+        if (!out.includes(e.value)) continue;
+        out = out.replace(new RegExp(`(?<![0-9])${escapeRe(e.value)}(?![0-9])`, "g"), e.replace);
+      } else if (e.secret) {
+        folded ??= asciiFold(out);
+        if (!folded.includes(e.folded)) continue;
+        out = replaceFolded(out, folded, e.folded, e.replace);
+      } else {
+        if (!out.includes(e.value)) continue;
+        out = out.split(e.value).join(e.replace);
+      }
+      folded = null;
     }
-    for (const e of this.entries)
-      if (e.windows !== null) out = redactFragments(out, e.value, e.windows, e.replace);
-    return out;
+    return redactFragments(out, this.entries);
   }
 
   get size(): number {
@@ -164,35 +207,47 @@ export class SecretRegistry {
 }
 
 /**
- * Replaces every maximal span of `text` that equals a run of ≥ MIN_SECRET_FRAGMENT consecutive
- * chars of `secret` (found through its window map, then extended rightwards). Linear in `text`.
+ * Replaces every maximal span of `text` that equals, in any ASCII letter case, a run of
+ * ≥ MIN_SECRET_FRAGMENT consecutive chars of a registered secret's spelling (found through the
+ * folded window maps, then extended rightwards). At each window every spelling is tried and the
+ * longest span wins: one spelling's window can open a span another spelling carries further (a
+ * fragment through `%2F` matches the URL-encoded form's window, which stops at `%25`), and the
+ * shorter span would leave the secret's tail behind. Linear in `text` (times the spelling count).
  */
 function redactFragments(
   text: string,
-  secret: string,
-  windows: Map<string, number>,
-  replace: string,
+  entries: readonly { folded: string; replace: string; windows: Map<string, number> | null }[],
 ): string {
   if (text.length < MIN_SECRET_FRAGMENT) return text;
+  const folded = asciiFold(text);
   let out = "";
   let last = 0;
   let i = 0;
   while (i + MIN_SECRET_FRAGMENT <= text.length) {
-    const at = windows.get(text.slice(i, i + MIN_SECRET_FRAGMENT));
-    if (at === undefined) {
+    const window = folded.slice(i, i + MIN_SECRET_FRAGMENT);
+    let end = -1;
+    let replace = "";
+    for (const e of entries) {
+      const at = e.windows?.get(window);
+      if (at === undefined) continue;
+      // the scan is left to right, so a span cannot extend leftwards: a matching char before `i`
+      // would have made the window at `i - 1` match first
+      let stop = i + MIN_SECRET_FRAGMENT;
+      let q = at + MIN_SECRET_FRAGMENT;
+      while (stop < text.length && q < e.folded.length && folded[stop] === e.folded[q]) {
+        stop++;
+        q++;
+      }
+      if (stop > end) {
+        end = stop;
+        replace = e.replace;
+      }
+    }
+    if (end < 0) {
       i++;
       continue;
     }
-    // the scan is left to right, so the span cannot extend leftwards: a matching char before `i`
-    // would have made the window at `i - 1` match first
-    const start = i;
-    let end = i + MIN_SECRET_FRAGMENT;
-    let q = at + MIN_SECRET_FRAGMENT;
-    while (end < text.length && q < secret.length && text[end] === secret[q]) {
-      end++;
-      q++;
-    }
-    out += text.slice(last, start) + replace;
+    out += text.slice(last, i) + replace;
     last = end;
     i = end;
   }

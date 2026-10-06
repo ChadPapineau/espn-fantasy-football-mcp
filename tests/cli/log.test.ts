@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeEspnS2, fakeGuid, fakeIpv4, fakeLeagueId } from "../../scripts/ci/secret-fixtures.mjs";
 import {
   FRAGMENT_MATCH_MIN_LENGTH,
+  asciiFold,
   MIN_SECRET_FRAGMENT,
   isSecretKey,
   keyComponents,
@@ -724,6 +725,89 @@ describe("S1: the leaks a critic reproduced are closed", () => {
     );
     expect(MIN_SECRET_FRAGMENT).toBe(24);
     expect(FRAGMENT_MATCH_MIN_LENGTH).toBe(40);
+  });
+  it("(4a) a case-changed copy of a registered espn_s2 is redacted: upper, lower, swapped (B1)", () => {
+    const reg = new SecretRegistry();
+    reg.add("espn_s2", S2);
+    const swap = (s: string): string =>
+      s.replace(/[A-Za-z]/g, (c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()));
+    for (const variant of [
+      S2.toUpperCase(),
+      S2.toLowerCase(),
+      swap(S2),
+      S2_DECODED.toUpperCase(),
+      swap(S2_DECODED),
+      encodeURIComponent(S2_DECODED).toLowerCase(),
+      // fragments of a case-changed copy (≥ 24 chars): a truncated prefix, a suffix, a middle
+      S2.toUpperCase().slice(0, 60),
+      swap(S2).slice(-40),
+      S2.toLowerCase().slice(50, 90),
+    ]) {
+      const out = redactString(`before ${variant} after`, reg);
+      expect(out, variant.slice(0, 12)).toContain("[redacted:espn_s2]");
+      expect(asciiFold(out)).not.toContain(asciiFold(variant.slice(0, MIN_SECRET_FRAGMENT)));
+      expect(out.startsWith("before ") && out.endsWith(" after")).toBe(true);
+    }
+    // the logger path: registered once, logged three ways
+    const { log, raw } = capture();
+    log.registerSecret("espn_s2", S2);
+    log.info("x", { a: S2.toUpperCase(), b: swap(S2), c: `k=${S2.toLowerCase()};` });
+    expect(asciiFold(raw[0] ?? "")).not.toContain(asciiFold(S2.slice(0, MIN_SECRET_FRAGMENT)));
+    // case variants of one form are one entry (no duplicate work per line)
+    const r2 = new SecretRegistry();
+    r2.add("k", "Abcd-efgh");
+    r2.add("k", "aBCD-EFGH");
+    expect(r2.size).toBe(1);
+    expect(r2.apply("x ABCD-efgh y abcd-EFGH")).toBe("x [redacted:k] y [redacted:k]");
+  });
+  it("(4a) the fold never changes a length, so non-ASCII text around a secret keeps its offsets", () => {
+    for (const s of ["İstanbul", "Straße", "ﬃ", "ΑΒΓ", "😀Ab", ""])
+      expect(asciiFold(s).length, s).toBe(s.length);
+    expect(asciiFold("AbC-xYz")).toBe("abc-xyz");
+    const reg = new SecretRegistry();
+    reg.add("espn_s2", S2);
+    const out = redactString(`İİ ${S2.toUpperCase()} ﬃß ${S2.toLowerCase().slice(5, 45)} İ`, reg);
+    expect(out).toBe("İİ [redacted:espn_s2] ﬃß [redacted:espn_s2] İ");
+  });
+  it("(4a) a fragment through an escape leaves no tail: every 40-char window, any case, any form", () => {
+    // one spelling's window can open a span another carries further (the URL-encoded form stops at
+    // `%25` where the pasted form goes on through `%2F`); the longest span wins
+    const reg = new SecretRegistry();
+    reg.add("espn_s2", S2);
+    for (const form of [S2, S2_DECODED, S2.toLowerCase(), S2_DECODED.toUpperCase()])
+      for (let a = 0; a + 40 <= form.length; a++) {
+        const frag = form.slice(a, a + 40);
+        // (a separating space may go too: the `+`-as-space spelling has a space there)
+        expect(redactString(`x ${frag} y`, reg), String(a)).toMatch(/^x ?\[redacted:espn_s2\] ?y$/);
+      }
+  });
+  it("(4a) identifiers still match exactly (only secrets are case-folded)", () => {
+    const reg = new SecretRegistry();
+    reg.addIdentifier("member", "Member-Xyz");
+    expect(reg.apply("Member-Xyz member-xyz")).toBe("[redacted:member] member-xyz");
+    expect(reg.apply("MEMBER-XYZ")).toBe("MEMBER-XYZ");
+  });
+  it("property: no case-flipped copy of a registered espn_s2 (≥ 24 chars) survives", () => {
+    const reg = new SecretRegistry();
+    reg.add("espn_s2", S2);
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: S2.length - MIN_SECRET_FRAGMENT }),
+        fc.integer({ min: MIN_SECRET_FRAGMENT, max: S2.length }),
+        fc.array(fc.boolean(), { minLength: S2.length, maxLength: S2.length }),
+        fc.string({ maxLength: 20 }),
+        (start, len, flips, pre) => {
+          const flipped = S2.replace(/[\s\S]/g, (c, i: number) =>
+            flips[i] === true ? c.toUpperCase() : c.toLowerCase(),
+          );
+          const frag = flipped.slice(start, start + len);
+          if (frag.length < MIN_SECRET_FRAGMENT) return true;
+          const out = asciiFold(redactString(`${pre} ${frag} .`, reg));
+          return !out.includes(asciiFold(frag.slice(0, MIN_SECRET_FRAGMENT)));
+        },
+      ),
+      { numRuns: 300 },
+    );
   });
   it("(4b) an UNREGISTERED espn_s2-shaped value under any key is redacted (bare shape)", () => {
     const { log, raw } = capture();
