@@ -3,12 +3,16 @@
 // synthetic rows, two-statement joins in code (defence lines + points allowed; players + pro-team
 // abbreviations; weather preference then fallback), the never-loaded outcome, and hostile inputs
 // (bounded lists, bad seasons/weeks, ids that never reach SQL, SQL-shaped strings bound as data).
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { DatasetSourceId } from "../../src/config/freshness.js";
 import { isUntrustedText } from "../../src/domain/league/types.js";
+import { DS_SCHEMA_VERSION } from "../../src/store/datasets/connections.js";
 import { READER_LIST_MAX } from "../../src/store/datasets/readers.js";
 import { nflPlayersReaderOf } from "../../src/store/store.js";
 import type { DatasetPublisher, Store } from "../../src/store/types.js";
-import { DS_STATS_PLAYER_WEEK } from "../../src/store/datasets/tables.js";
+import { columnsHash, DS_STATS_PLAYER_WEEK, tablesFor } from "../../src/store/datasets/tables.js";
 import {
   GAME_W1,
   GAME_W1B,
@@ -517,5 +521,172 @@ describe("hostile inputs", () => {
       ).rows,
     ).toEqual([]);
     expect(s.datasets.playerWeeks.defenseLines(["BUF"], 2026, [1]).rows).toHaveLength(1);
+  });
+});
+
+describe("a forged file that claims the contract (nullable, untyped columns)", () => {
+  /**
+   * A dataset file written by hand, not by the publisher: the contract's table and column names,
+   * but no NOT NULL and no STRICT, a dataset_meta claiming this binary's layout and columns hash,
+   * and a refresh_log row naming it — the readers must skip every malformed row, never throw.
+   */
+  function forge(
+    source: DatasetSourceId,
+    tables: { name: string; rows: Record<string, unknown>[] }[],
+  ): void {
+    const file = path.join(t.datasetDir, `${source.replace(":", "__")}.sqlite`);
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = DELETE");
+    for (const tb of tables) {
+      const spec = tablesFor(source).find((x) => x.name === tb.name)!;
+      db.exec(`CREATE TABLE ${tb.name} (${spec.columns.map((c) => `"${c.name}"`).join(", ")})`);
+      for (const r of tb.rows) {
+        const cols = Object.keys(r);
+        db.prepare(
+          `INSERT INTO ${tb.name} (${cols.map((c) => `"${c}"`).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
+        ).run(...(cols.map((c) => r[c]) as (string | number | null)[]));
+      }
+    }
+    for (const spec of tablesFor(source))
+      if (!tables.some((x) => x.name === spec.name))
+        db.exec(`CREATE TABLE ${spec.name} (${spec.columns.map((c) => `"${c.name}"`).join(", ")})`);
+    db.exec("CREATE TABLE dataset_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    const meta = db.prepare("INSERT INTO dataset_meta (key, value) VALUES (?, ?)");
+    meta.run("source", source);
+    meta.run("file_version", "forged-1");
+    meta.run("published_at", "2026-10-06T12:00:00.000Z");
+    meta.run("ds_schema", String(DS_SCHEMA_VERSION));
+    meta.run("columns_hash", columnsHash(source));
+    db.close();
+    s.repos.refreshLog.record({
+      source,
+      file,
+      file_version: "forged-1",
+      release_updated_at: null,
+      seasons: [2026],
+      rows: 0,
+      columns_hash: columnsHash(source),
+      started_at: "2026-10-06T12:00:00.000Z",
+      finished_at: "2026-10-06T12:00:00.000Z",
+      ok: true,
+      error: null,
+      checked_at: "2026-10-06T12:00:00.000Z",
+    });
+  }
+
+  it("pro schedule, teams, players, nflverse players and weather skip malformed rows with warnings", () => {
+    forge("espn:pro_schedule", [
+      {
+        name: "ds_pro_schedule",
+        rows: [
+          { season: 2026, espn_game_id: null, week: 1, home_pro_team_id: 1, away_pro_team_id: 2 },
+          { season: 2026, espn_game_id: "x", week: 1, home_pro_team_id: 1, away_pro_team_id: 2 },
+          {
+            season: 2026,
+            espn_game_id: 7,
+            week: null,
+            date_ms: "soon",
+            home_pro_team_id: 1,
+            away_pro_team_id: 2,
+          },
+        ],
+      },
+      {
+        name: "ds_pro_teams",
+        rows: [
+          { season: 2026, pro_team_id: 1, abbrev: null },
+          { season: 2026, pro_team_id: 2, abbrev: "AAA" },
+        ],
+      },
+    ]);
+    forge("espn:players", [
+      {
+        name: "ds_players",
+        rows: [
+          { season: 2026, espn_id: 1, full_name: null, position_id: 1, pro_team_id: 2 },
+          {
+            season: 2026,
+            espn_id: 2,
+            full_name: "Test Forged",
+            position_id: 1,
+            pro_team_id: 2,
+            percent_owned: "lots",
+          },
+        ],
+      },
+    ]);
+    forge("nflverse:players", [
+      {
+        name: "ds_nfl_players",
+        rows: [
+          { gsis_id: null, espn_id: 5, display_name: "No Id" },
+          { gsis_id: "00-9000005", espn_id: 6, display_name: null },
+          { gsis_id: "00-9000007", espn_id: 7, display_name: "Test Kept", jersey_number: 7.5 },
+        ],
+      },
+    ]);
+    forge("weather:open_meteo", [
+      {
+        name: "ds_weather_open_meteo",
+        rows: [
+          { game_id: "g1", as_of: null, temp_f: 50 },
+          { game_id: null, as_of: "x" },
+        ],
+      },
+    ]);
+    const games = s.datasets.proSchedule.games(2026, null);
+    expect(games.rows).toEqual([
+      expect.objectContaining({ espn_game_id: 7, week: 0, kickoff: null }),
+    ]);
+    expect(games.stamp?.file_version).toBe("forged-1");
+    expect(s.datasets.proSchedule.teams(2026).rows).toEqual([
+      { id: 2, abbrev: "AAA", bye_week: null },
+    ]);
+    const players = s.playerUniverse.all(2026).rows;
+    expect(players).toEqual([
+      expect.objectContaining({ espn_id: 2, pro_team: "AAA", percent_owned: null }),
+    ]);
+    expect(s.playerUniverse.byIds([2]).rows).toEqual([
+      expect.objectContaining({ espn_id: 2, pro_team: "AAA" }),
+    ]);
+    expect(s.playerUniverse.byIds([1]).rows).toEqual([]);
+    expect(s.nflPlayers.byEspnIds([5, 6, 7]).rows).toEqual([
+      expect.objectContaining({ gsis_id: "00-9000007", jersey_number: null }),
+    ]);
+    expect(s.datasets.weather.forGames(["g1"]).rows).toEqual([]);
+    expect(warnings.filter((w) => w === "dataset_row_skipped").length).toBeGreaterThanOrEqual(6);
+  });
+
+  it("a defence row the translator refuses, or whose team is not an NflTeam, is skipped and warned", () => {
+    forge("nflverse:stats_player_week", [
+      {
+        name: "ds_team_defense_week",
+        rows: [
+          { season: 2026, week: 1, team: "BUF", opponent_team: "MIA", game_id: "g1", def_sacks: 1 },
+          { season: 2026, week: 1, team: "XXX", opponent_team: "BUF", game_id: "g1", def_sacks: 1 },
+        ],
+      },
+    ]);
+    // a negative final score: points allowed cannot be computed → the translator refuses the line
+    forge("nflverse:schedules", [
+      {
+        name: "ds_schedules",
+        rows: [
+          {
+            season: 2026,
+            game_id: "g1",
+            away_team: "MIA",
+            home_team: "BUF",
+            away_score: -3,
+            home_score: 10,
+          },
+        ],
+      },
+    ]);
+    const res = s.datasets.playerWeeks.defenseLines(["BUF", "XXX"] as never[], 2026, [1]);
+    expect(res.stamp?.file_version).toBe("forged-1");
+    expect(res.rows).toEqual([]);
+    expect(warnings).toContain("dataset_row_invalid");
+    expect(warnings).toContain("dataset_row_skipped_team");
   });
 });

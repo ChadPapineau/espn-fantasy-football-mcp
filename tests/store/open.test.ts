@@ -57,6 +57,9 @@ describe("a fresh store", () => {
     expect(mode(t.cache)).toBe(0o700);
     expect(mode(t.storePath)).toBe(0o600);
     expect(mode(t.datasetDir)).toBe(0o700);
+    // SQLite creates the WAL sidecars with the database file's own mode
+    expect(mode(`${t.storePath}-wal`)).toBe(0o600);
+    expect(mode(`${t.storePath}-shm`)).toBe(0o600);
     expect(s.schemaVersion).toBe(1);
     expect(s.path).toBe(t.storePath);
     const db = storeInternalsOf(s)?.db;
