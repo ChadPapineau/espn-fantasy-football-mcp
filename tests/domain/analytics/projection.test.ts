@@ -128,7 +128,16 @@ describe("ESPN's mean is the point estimate (weight_espn = 1.0)", () => {
             }),
           );
           const d = out.data.projections[0]?.weeks[0]?.points;
-          return d !== undefined && Math.abs(d.mean - espn) < 1e-4 && d.p10 <= d.p90;
+          return (
+            d !== undefined &&
+            Math.abs(d.mean - espn) < 1e-4 &&
+            d.p10 <= d.p25 &&
+            d.p25 <= d.p50 &&
+            d.p50 <= d.p75 &&
+            d.p75 <= d.p90 &&
+            d.p_zero >= 0 &&
+            d.p_zero <= 1
+          );
         },
       ),
       { numRuns: 40 },
@@ -303,6 +312,36 @@ describe("availability, byes and missing inputs", () => {
     expect(pActiveOf("ACTIVE", null, now)).toEqual({ p: 1, basis: "none" });
     expect(pActiveOf("SOMETHING_NEW", null, now)).toEqual({ p: 1, basis: "none" });
     expect(pActiveOf("DAY_TO_DAY", null, now).p).toBe(0.71);
+  });
+});
+
+describe("hostile numbers", () => {
+  it("a negative D/ST projection keeps its mean; a huge one stays finite and ordered", async () => {
+    const out = await projectPlayers(
+      request({
+        targets: [
+          target({ player_id: 1, position: "D/ST", position_id: 16, espn_week: -3 }),
+          target({ player_id: 2, position: "WR", position_id: 3, espn_week: 1e5 }),
+        ],
+      }),
+    );
+    const [neg, huge] = out.data.projections.map((p) => p.weeks[0]?.points);
+    expect(neg?.mean).toBe(-3);
+    expect(neg?.p10 ?? 0).toBeLessThan(neg?.p90 ?? 0);
+    expect(huge?.mean).toBe(1e5);
+    expect(Number.isFinite(huge?.p90)).toBe(true);
+    expect(huge?.p10 ?? 0).toBeLessThan(huge?.p90 ?? 0);
+  });
+
+  it("the ROS total's quantiles are ordered and its mean is the sum of the weeks", async () => {
+    const out = await projectPlayers(request({ horizon: "ros", week: 10, final_week: 17 }));
+    const ros = out.data.projections[0]?.ros_total;
+    const weeks = out.data.projections[0]?.weeks ?? [];
+    expect(ros?.mean).toBeCloseTo(
+      weeks.reduce((s, w) => s + w.points.mean, 0),
+      3,
+    );
+    expect((ros?.p10 ?? 0) <= (ros?.p50 ?? 0) && (ros?.p50 ?? 0) <= (ros?.p90 ?? 0)).toBe(true);
   });
 });
 
