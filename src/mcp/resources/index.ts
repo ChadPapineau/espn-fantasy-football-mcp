@@ -71,6 +71,7 @@ export async function readAsEnvelope(
   services: McpServices,
   options: McpServerOptions,
   body: (ctx: ToolContext) => Promise<ResourceOutput>,
+  budget: number = RESULT_BUDGET_CHARS,
 ): Promise<ReadResourceResult> {
   const requestId = newRequestId();
   try {
@@ -86,7 +87,7 @@ export async function readAsEnvelope(
       ...(out.bareFields === undefined ? {} : { bareFields: out.bareFields }),
       ...(out.extraSources === undefined ? {} : { extraSources: out.extraSources }),
     });
-    const fit = fitToBudget(env, RESULT_BUDGET_CHARS, out.listKey, {
+    const fit = fitToBudget(env, budget, out.listKey, {
       pageable: false,
       hint: TRUNCATION_HINTS.narrow,
     });
@@ -100,6 +101,12 @@ export async function readAsEnvelope(
     };
   }
 }
+
+/**
+ * The stat-id table's budget: the whole registry (168 ids, ≈ 22 000 chars) is one static reference
+ * read once per season (`ttlMs` 7 days) — truncating the engine's truth table would defeat it.
+ */
+export const STAT_IDS_BUDGET_CHARS = 40_000;
 
 const hint = (uri: keyof typeof RESOURCE_TTL_MS) =>
   ({ ttlMs: RESOURCE_TTL_MS[uri], cacheScope: "private" }) as const;
@@ -151,12 +158,13 @@ export function registerResources(
     uri: keyof typeof RESOURCE_TTL_MS,
     description: string,
     body: (ctx: ToolContext) => Promise<ResourceOutput>,
+    budget: number = RESULT_BUDGET_CHARS,
   ): void => {
     server.registerResource(
       name,
       uri,
       { description, mimeType: JSON_MIME, cacheHint: hint(uri) },
-      (u) => readAsEnvelope(u.href, services, options, body),
+      (u) => readAsEnvelope(u.href, services, options, body, budget),
     );
   };
 
@@ -177,11 +185,10 @@ export function registerResources(
     "espn-ff://game/stat-ids",
     "ESPN's stat-id table: id, abbreviation, meaning, canonical name, bracket family.",
     () => {
-      const data: StatIdResourceData = {
-        stat_ids: espnStatIdRows().map((r) => ({ ...r, canonical: r.canonical })),
-      };
+      const data: StatIdResourceData = { stat_ids: espnStatIdRows() };
       return Promise.resolve({ data, inputs: [], extraSources: ["engine"] });
     },
+    STAT_IDS_BUDGET_CHARS,
   );
   reg(
     "status",
@@ -237,7 +244,11 @@ export function registerResources(
         fetched_at: latest.taken_at,
         state: "fresh",
       });
-      return { data, inputs };
+      return {
+        data,
+        inputs,
+        bareFields: [{ path: "data.roster.players[].name", source: "espn.player.name" }],
+      };
     },
   );
 

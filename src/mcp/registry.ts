@@ -102,18 +102,11 @@ export function catalogNames(toolset: Toolset): string[] {
 // --- PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11) ------------------------------
 
 /**
- * The seven conditional write tools of plan 07 §3.F — declared names only. No definition exists in
- * this build; the write host is not in the allow-list (src/http).
+ * The seven conditional write tools of plan 07 §3.F — declared names only, owned by the gate's types
+ * (no other source file spells them). No definition exists in this build; the write host is not in
+ * the allow-list (src/http).
  */
-export const WRITE_TOOL_NAMES: readonly string[] = Object.freeze([
-  "espn_prepare_lineup",
-  "espn_commit_lineup",
-  "espn_prepare_transaction",
-  "espn_commit_transaction",
-  "espn_prepare_trade",
-  "espn_commit_trade",
-  "espn_cancel_prepared",
-]);
+export { WRITE_TOOL_NAMES } from "../domain/gate/types.js";
 
 /**
  * PHASE W SEAM — NOT IMPLEMENTED. The registration point of the write tools: plan 02 §3.2 lets them

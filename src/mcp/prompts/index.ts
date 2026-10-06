@@ -115,33 +115,36 @@ export function registerPrompts(
   options: McpServerOptions,
 ): void {
   for (const p of PROMPTS) {
-    server.registerPrompt(
-      p.name,
-      { description: p.description, argsSchema: p.args },
-      async (raw: Readonly<Record<string, unknown>>): Promise<GetPromptResult> => {
-        const args: Record<string, string | undefined> = {};
-        for (const [k, v] of Object.entries(raw)) if (typeof v === "string") args[k] = v;
-        const messages: GetPromptResult["messages"] = [
-          {
-            role: "user",
-            content: { type: "text", text: promptText(options.texts, p.skill, args) },
-          },
-        ];
-        const settings = await leagueSettingsText(services, options);
-        if (settings !== null)
-          messages.push({
-            role: "user",
-            content: {
-              type: "resource",
-              resource: {
-                uri: "espn-ff://league/settings",
-                mimeType: "application/json",
-                text: settings,
-              },
+    const build = async (raw: Readonly<Record<string, unknown>>): Promise<GetPromptResult> => {
+      const args: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries(raw)) if (typeof v === "string") args[k] = v;
+      const messages: GetPromptResult["messages"] = [
+        {
+          role: "user",
+          content: { type: "text", text: promptText(options.texts, p.skill, args) },
+        },
+      ];
+      const settings = await leagueSettingsText(services, options);
+      if (settings !== null)
+        messages.push({
+          role: "user",
+          content: {
+            type: "resource",
+            resource: {
+              uri: "espn-ff://league/settings",
+              mimeType: "application/json",
+              text: settings,
             },
-          });
-        return { description: p.description, messages };
-      },
-    );
+          },
+        });
+      return { description: p.description, messages };
+    };
+    // an argument-less prompt has no argsSchema: a client may omit `arguments` entirely
+    if (Object.keys(p.args.shape).length === 0)
+      server.registerPrompt(p.name, { description: p.description }, () => build({}));
+    else
+      server.registerPrompt(p.name, { description: p.description, argsSchema: p.args }, (raw) =>
+        build(raw),
+      );
   }
 }
