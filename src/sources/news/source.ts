@@ -229,7 +229,7 @@ export interface NewsBuild {
 }
 
 /** Builds the `ds_news` and `ds_news_players` rows of a temp file (pure, deterministic). */
-export function buildNewsRows(file: NewsFile): NewsBuild {
+export function buildNewsRows(file: NewsFile, opts: { readonly refs?: boolean } = {}): NewsBuild {
   const doc = parseRss(file.xml);
   const counts = {
     invalid: 0,
@@ -281,7 +281,10 @@ export function buildNewsRows(file: NewsFile): NewsBuild {
     counts.over_cap = rows.length - MAX_NEWS_ITEMS;
     rows = rows.slice(0, MAX_NEWS_ITEMS);
   }
-  const matcher = buildPlayerMatcher(file.universe.slice(0, MAX_UNIVERSE_PLAYERS));
+  // the schema assertion only counts rows: it skips the matcher (the publish step runs it)
+  const matcher = buildPlayerMatcher(
+    opts.refs === false ? [] : file.universe.slice(0, MAX_UNIVERSE_PLAYERS),
+  );
   const refs: DatasetRow[] = [];
   if (matcher.size > 0) {
     for (const r of rows) {
@@ -310,7 +313,8 @@ export function buildNewsRows(file: NewsFile): NewsBuild {
   say(counts.future, "item(s) dated more than a day after the fetch were dropped");
   say(counts.bad_previous, "row(s) of the previous file did not read back and were not carried");
   say(counts.over_cap, "oldest item(s) beyond the per-file ceiling were not kept");
-  if (matcher.size === 0) warnings.push("no player universe: items carry no player refs");
+  if (matcher.size === 0 && opts.refs !== false)
+    warnings.push("no player universe: items carry no player refs");
   return {
     news: rows.map((r) => Object.freeze({ ...r })),
     refs,
@@ -349,7 +353,7 @@ export function assertNewsShape(file: NewsFile): SchemaReport {
       doc.items.flatMap((i) => i.children).filter((c) => !known.has(c) && SAFE_NAME.test(c)),
     ),
   ].sort();
-  const built = buildNewsRows(file);
+  const built = buildNewsRows(file, { refs: false });
   const warnings = [...file.warnings, ...built.warnings];
   if (doc.items.length === 0) warnings.push("the feed has no items");
   for (const c of extra) warnings.push(`extra item field ${c}`);

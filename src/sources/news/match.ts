@@ -155,7 +155,10 @@ interface Token {
 const CHUNK_RE = /[\p{L}\p{N}'’ʼ.-]+/gu;
 
 /** The sanitised text's word tokens, each normalised with the crosswalk's `mergeName`. */
-function tokenize(text: string): (Token | null)[] {
+/** Distinct words a matcher remembers the normalised form of (the cache is cleared beyond it). */
+const NORM_CACHE_MAX = 100_000;
+
+function tokenize(text: string, cache: Map<string, string | null>): (Token | null)[] {
   const out: (Token | null)[] = [];
   let lastEnd = 0;
   for (const m of text.matchAll(CHUNK_RE)) {
@@ -165,7 +168,12 @@ function tokenize(text: string): (Token | null)[] {
       .replace(/^[.'’ʼ-]+/u, "")
       .replace(/(?:['’ʼ]s|['’ʼ])$/u, "")
       .replace(/[.-]+$/u, "");
-    const norm = chunk === "" ? null : mergeName(chunk);
+    let norm = cache.get(chunk);
+    if (norm === undefined) {
+      norm = chunk === "" ? null : mergeName(chunk);
+      if (cache.size >= NORM_CACHE_MAX) cache.clear();
+      cache.set(chunk, norm);
+    }
     out.push(
       norm === null || norm.includes(" ")
         ? null
@@ -228,10 +236,11 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
   }
   for (const list of byFirst.values()) list.sort((a, b) => b.key.length - a.key.length);
 
+  const normCache = new Map<string, string | null>();
   const match = (raw: string): NewsPlayerRef[] => {
     const text = sanitizeText(raw, MATCH_TEXT_CAP).value;
     const teams = new Set<NflTeam>(teamsMentioned(text));
-    const tokens = tokenize(text);
+    const tokens = tokenize(text, normCache);
     const consumed = new Array<boolean>(tokens.length).fill(false);
     const found = new Map<number, NewsPlayerRef & { at: number }>();
     const add = (p: NewsUniversePlayer, method: NewsMatchMethod, at: number): void => {

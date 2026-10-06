@@ -7,9 +7,11 @@
 // What it is: a fixed, ordered table of regular expressions over a folded copy of the text (the
 // plan 02 §6.2 sanitiser, then `flagFold`: NFKC, lower case, confusables folded — so "оut" written
 // with a Cyrillic о still reads as "out"). Every hit is a (position, rule); the claim is the EARLIEST
-// hit in reading order (ties → table order: availability, transaction, health, role, coaching
-// intent), the title before the blurb — the labelling convention of the B8 set. Up-rules are
-// dropped when a negator stands within two words before them ("not expected to play"); a suspension
+// hit in reading order (a hit starting inside its phrase is the same claim read twice, and the table
+// order decides: availability, transaction, health, role, coaching intent — "suffers season-ending
+// injury" is availability), the title before the blurb — the labelling convention of the B8 set.
+// Rules marked negatable are dropped when a negator stands within two words before them ("not
+// expected to play"); a suspension
 // is never read as a player's when the text is about game officials. The output is a closed
 // vocabulary (type, direction, rule id, designation): no part of the input text ever reaches it, so
 // an instruction in a headline cannot travel through the extractor (research 05 §6 rule 5).
