@@ -10,11 +10,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
+import fc from "fast-check";
+import type { JSONRPCMessage } from "@modelcontextprotocol/server";
+import { fakeEspnS2, fakeGuid, fakeIpv4 } from "../../scripts/ci/secret-fixtures.mjs";
 import {
   EXIT,
   invalidRequestReply,
   newerStoreMessage,
   serve,
+  withoutEchoedName,
   type ServeInternals,
 } from "../../src/cli/serve.js";
 import { PathSecurityError } from "../../src/config/paths.js";
@@ -297,6 +301,41 @@ describe("fixture mode over stdio", () => {
     expect(await r.code).toBe(EXIT.ok);
   });
 
+  it("an unregistered tool or prompt is answered -32602 without echoing the caller's string", async () => {
+    const r = start(tempEnv());
+    await ready(r);
+    const pieces = [
+      fakeEspnS2("serve-echo", 80),
+      fakeGuid("serve-echo"),
+      fakeIpv4("serve-echo"),
+      "evil\u0000\u001b[2Jname\u202e",
+    ];
+    const hostile = `espn_s2=${pieces[0] ?? ""} {${pieces[1] ?? ""}} ${pieces.slice(2).join(" ")} not found`;
+    r.send({
+      jsonrpc: "2.0",
+      id: 51,
+      method: "tools/call",
+      params: { name: hostile, arguments: {} },
+    });
+    r.send({ jsonrpc: "2.0", id: 52, method: "prompts/get", params: { name: hostile } });
+    const tool = await r.reply(51);
+    const prompt = await r.reply(52);
+    expect(tool.error).toMatchObject({ code: -32602, message: "Tool not found" });
+    expect(prompt.error).toMatchObject({ code: -32602, message: "Prompt not found" });
+    for (const piece of pieces) expect(r.raw()).not.toContain(JSON.stringify(piece).slice(1, -1));
+    expect(r.raw()).not.toContain("evil");
+    // a registered tool still answers normally
+    r.send({
+      jsonrpc: "2.0",
+      id: 53,
+      method: "tools/call",
+      params: { name: "espn_get_status", arguments: {} },
+    });
+    expect((await r.reply(53)).result).toBeDefined();
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+  });
+
   it("EOF: an in-flight call finishes before the store closes (the SDK transport drops its reply)", async () => {
     const r = start(tempEnv());
     await ready(r);
@@ -529,5 +568,51 @@ describe("invalidRequestReply", () => {
       invalidRequestReply(`{"jsonrpc":"1.0","id":"${"a".repeat(257)}","method":"x"}`),
     ).toBeNull();
     expect(invalidRequestReply('{"jsonrpc":"1.0","id":{"a":1},"method":"x"}')).toBeNull();
+  });
+});
+
+describe("withoutEchoedName", () => {
+  const err = (message: string, id: number | string = 1): JSONRPCMessage => ({
+    jsonrpc: "2.0",
+    id,
+    error: { code: -32602, message },
+  });
+  it("drops the name from the SDK's unknown-name replies; keeps the code and the id", () => {
+    expect(withoutEchoedName(err("Tool x not found", "a"))).toEqual(err("Tool not found", "a"));
+    expect(withoutEchoedName(err("Tool x disabled"))).toEqual(err("Tool disabled"));
+    expect(withoutEchoedName(err("Prompt p\nq not found"))).toEqual(err("Prompt not found"));
+    expect(withoutEchoedName(err("Resource template espn-ff://x/{y} not found"))).toEqual(
+      err("Resource template not found"),
+    );
+  });
+  it("leaves every other message alone", () => {
+    for (const m of [
+      err("Invalid Request"),
+      err("Tool not found"), // nothing echoed: no name between the words
+      err("Input validation error: Invalid arguments for tool espn_get_league: x"),
+      { jsonrpc: "2.0", id: 1, result: { content: [] } },
+      { jsonrpc: "2.0", method: "notifications/progress", params: {} },
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "Tool x not found" } },
+    ] as JSONRPCMessage[])
+      expect(withoutEchoedName(m)).toBe(m);
+  });
+  it("property: whatever the name, the reply carries none of it (huge, unicode, controls)", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom("Tool", "Prompt", "Resource template"),
+        fc.string({ minLength: 1, maxLength: 200, unit: "binary" }),
+        fc.constantFrom("not found", "disabled"),
+        (kind, name, tail) => {
+          const out = withoutEchoedName(err(`${kind} ${name} ${tail}`)) as {
+            error: { message: string; code: number };
+          };
+          expect(out.error).toEqual({ code: -32602, message: `${kind} ${tail}` });
+        },
+      ),
+    );
+    const huge = withoutEchoedName(err(`Tool ${"\u0007x".repeat(200_000)} not found`)) as {
+      error: { message: string };
+    };
+    expect(huge.error.message).toBe("Tool not found");
   });
 });

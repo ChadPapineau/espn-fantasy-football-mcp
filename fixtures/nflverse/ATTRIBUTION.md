@@ -55,6 +55,17 @@ it through a fake HttpGet at the release URL it stands in for. No test touches t
 - `players.excerpt`: the fixture-roster players and the decoy, the player whose `espn_id`
   differs from `roster_weekly`, and three legacy rows whose `gsis_id` is not a GSIS id.
 
+## UUID-shaped values are public NFL player ids, not member GUIDs
+
+`players.excerpt` (`smart_id`) and `roster_weekly_2026.excerpt` (`smart_id`, `sportradar_id`)
+carry UUID-shaped values outside the fixture pseudonym range
+(`{00000000-0000-4000-8000-0000000000NN}`). They are nflverse's public identifiers of NFL
+players — published in the release files above, unchanged here — not ESPN member GUIDs (an ESPN
+member id is always a brace-wrapped SWID GUID: research 03 §B.3) and never anyone's fantasy-league
+identity. The ESPN rules of `scripts/dev/scan-secrets.mjs` and `.gitleaks.toml` match the brace or
+`SWID` forms only, so they pass these columns by design; a literal "every GUID in the fake range"
+check applies to ESPN fixtures (`fixtures/espn/`), not to this public dataset.
+
 To refresh: download the release files into one directory as `<tag>_<file>` and
 `<tag>_timestamp.txt`, run
 `scripts/dev/with-node.sh npx tsx tests/sources/nflverse/helpers/make-fixtures.ts <download-dir>`,

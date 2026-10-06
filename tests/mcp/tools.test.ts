@@ -254,6 +254,30 @@ describe("A5 espn_get_box_score", () => {
     );
   });
 
+  it("a week outside the league's season is NOT_FOUND before any box-score request", async () => {
+    const league = await ok("espn_get_league");
+    const clock = league.data.clock as {
+      first_scoring_period: number;
+      final_scoring_period: number;
+    };
+    const s = faulty(world.services, {
+      getBoxScores: coded("INTERNAL", { reason: "fixture_missing" }),
+    });
+    const c = await connect(world, { services: s });
+    // week 18 is valid by schema; the recorded league's season ends at 17
+    expect(clock.final_scoring_period).toBeLessThan(18);
+    expect((await err("espn_get_box_score", { week: 18 }, c.client)).code).toBe("NOT_FOUND");
+    expect((await err("espn_get_box_score", { week: 18, team_id: 2 }, c.client)).code).toBe(
+      "NOT_FOUND",
+    );
+    expect(clock.first_scoring_period).toBe(1);
+    // inside the season the request is made (here it fails as injected)
+    expect(
+      (await err("espn_get_box_score", { week: clock.final_scoring_period }, c.client)).code,
+    ).toBe("INTERNAL");
+    await c.close();
+  });
+
   it("drifted scoring settings: lines served, engine_points and match null, a warning (T-14)", async () => {
     const s = faulty(world.services, {
       getScoringSettings: coded("ESPN_DRIFT_DETECTED", { view: "mSettings" }),

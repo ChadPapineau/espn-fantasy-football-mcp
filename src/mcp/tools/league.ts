@@ -884,6 +884,10 @@ export const getBoxScore = defineTool({
     const inputs: InputStamp[] = [];
     const warnings: string[] = [];
     const league = await leagueOf(ctx, inputs, args);
+    // a week outside the league's season (week 18 of a 17-period league) has no box score:
+    // NOT_FOUND before any request — never the INTERNAL a missing fixture or an empty schedule gives
+    const { first_scoring_period: first, final_scoring_period: last } = league.clock;
+    if (args.week < first || args.week > last) throw new EffError("NOT_FOUND");
     let settings: ScoringSettings | null = null;
     try {
       settings = await settingsOf(ctx, inputs);

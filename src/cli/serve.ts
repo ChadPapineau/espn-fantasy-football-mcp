@@ -13,7 +13,9 @@ import {
   INVALID_REQUEST,
   STDIO_DEFAULT_MAX_BUFFER_SIZE,
   deserializeMessage,
+  isJSONRPCErrorResponse,
   type JSONRPCErrorResponse,
+  type JSONRPCMessage,
 } from "@modelcontextprotocol/server";
 import {
   serveStdio,
@@ -120,6 +122,23 @@ export function invalidRequestReply(line: string): JSONRPCErrorResponse | null {
     (typeof id === "string" && id.length <= 256) || (typeof id === "number" && Number.isFinite(id));
   if (!usable) return null;
   return { jsonrpc: "2.0", id, error: { code: INVALID_REQUEST, message: "Invalid Request" } };
+}
+
+/** The SDK's "unknown name" replies: `Tool <name> not found`, `Prompt <name> disabled`, … */
+const ECHOED_NAME_RE = /^(Tool|Prompt|Resource template) [\s\S]* (not found|disabled)$/;
+
+/**
+ * The reply with the caller's string taken out of an SDK "unknown name" error. The SDK answers a
+ * call to an unregistered tool or prompt (or an unknown resource template) with -32602 and the name
+ * verbatim — control characters and cookie-, GUID- or IP-shaped text included; the code stays, the
+ * echo goes (the caller knows what it sent). Every other message passes unchanged.
+ */
+export function withoutEchoedName(message: JSONRPCMessage): JSONRPCMessage {
+  if (!isJSONRPCErrorResponse(message)) return message;
+  const m = ECHOED_NAME_RE.exec(message.error.message);
+  if (m === null) return message;
+  const text = `${m[1] ?? "Tool"} ${m[2] ?? "not found"}`;
+  return { ...message, error: { ...message.error, message: text } };
 }
 
 /** Watches stdin's lines beside the SDK transport and answers each invalid request. */
@@ -423,6 +442,8 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       opts.stdin as unknown as Readable,
       opts.stdout as unknown as Writable,
     );
+    const sdkSend = transport.send.bind(transport);
+    transport.send = (message) => sdkSend(withoutEchoedName(message));
     handle = serveStdio(() => createServer(services, w.options), {
       transport,
       onerror: (e) => {
