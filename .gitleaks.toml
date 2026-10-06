@@ -136,3 +136,12 @@ tags = ["credential"]
 # list never matches a working-tree (`gitleaks dir`) scan, so the tree scan stays fully armed.
 description = "History-only false positive in commit 3214f70: the dummy seven-digit league id in plan 10 Z1 text"
 commits = ["3214f70048b63d9281377baf9cbf93c2a26a5b3c"]
+
+[[allowlists]]
+# Commit f97d8cc (2026-10-05, the shared contract layer) wrote a dummy ODDS_API_KEY fixture value in
+# tests/config/schema.test.ts: the canonical sequence "0123456789abcdef" twice — never a key (checked
+# by equality, not by eye). gitleaks' default generic-api-key rule flags it; commit 06b6969 builds the
+# value at run time so the tree carries no key-shaped literal. COMMITS-ONLY, as above: the working-tree
+# scan stays fully armed.
+description = "History-only false positive in commit f97d8cc: the dummy 0-f odds key in a config test"
+commits = ["f97d8cc4ad7f2f1d94ee10820d957b2422558b5c"]
