@@ -397,7 +397,7 @@ Not adversarial rulings: the numbers and pointers the plan said the build would 
 
 ## R5 — build-time rulings (2026-10-06)
 
-**Trigger:** closing Stage B1's gate, two acceptance criteria (A9a, A10a) turned out to assume facts that neither the fixture league nor the research record can carry, and three minor defects surfaced. The orchestrator ruled on each (2026-10-06) and the B1 closeout engineer applied the rulings exactly. These are build-time rulings, not an adversarial round: no objection, tension or nit total changes; each supersedes the older text it names. **Plan state:** `cf275e4`. **Edits landed in:** the commit that adds this section.
+**Trigger:** closing Stage B1's gate, two acceptance criteria (A9a, A10a) turned out to assume facts that neither the fixture league nor the research record can carry, and three minor defects surfaced. The orchestrator ruled on each (2026-10-06) and the B1 closeout engineer applied the rulings exactly. These are build-time rulings, not an adversarial round: no objection, tension or nit total changes; each supersedes the older text it names. **Plan state:** `cf275e4`. **Edits landed in:** `37d89c8` (the three minor items: code and tests), `a4b4830` (R5-1, R5-2: plan 10, plan 07 E5, the evals report, the A9a tool-level test, the test labels, and this section) and the commit that records these SHAs.
 
 | id | ruling | what changed (file §) |
 |---|---|---|
