@@ -181,6 +181,9 @@ export interface CredentialAuthority {
   observe(o: CredentialObservation): Promise<CredentialState>;
 }
 
+/** Additive (B1): the name the build briefs use for the port the ESPN provider consumes. */
+export type CredentialProvider = CredentialAuthority;
+
 // --- the state machine (plan 02 §2.1 diagram) --------------------------------------------------
 
 /** The events that move the credential state. */
