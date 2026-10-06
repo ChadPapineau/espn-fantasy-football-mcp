@@ -172,26 +172,35 @@ describe("two processes, one limiter table (plan 05 §2, §4.1)", () => {
     const W = 2000;
     const MAX = 5;
     const SHORT = 150;
+    // A correct limiter promises the caps, not a fair share: a process can lose every race while
+    // the other runs. So each process stops at a quota (> MAX, so neither can finish inside one
+    // window: both are still contending when the first window rolls over), and the one that lost
+    // the races gets the table once the other is done. Both reach the quota whatever the scheduling.
+    const QUOTA = 6;
     const args = [
       t.storePath,
       t.datasetDir,
       t.backupDir,
-      "3500",
+      "20000",
       String(W),
       String(MAX),
       String(SHORT),
       "1",
+      String(QUOTA),
     ];
     const a = run("limiter-child.mjs", args, { tsx: true });
     const b = run("limiter-child.mjs", args, { tsx: true });
     await Promise.all([a.waitFor(/^STARTED/), b.waitFor(/^STARTED/)]);
-    const [ra, rb] = await Promise.all([a.waitFor(/^\{/, 30_000), b.waitFor(/^\{/, 30_000)]);
+    // the start barrier: both loops begin together, whatever each process's startup took
+    for (const c of [a, b]) c.proc.stdin?.end("GO\n");
+    const [ra, rb] = await Promise.all([a.waitFor(/^\{/, 25_000), b.waitFor(/^\{/, 25_000)]);
     expect(await a.exited()).toBe(0);
     expect(await b.exited()).toBe(0);
     const sa = JSON.parse(ra) as { sent: number; refused: number };
     const sb = JSON.parse(rb) as { sent: number; refused: number };
-    expect(sa.sent).toBeGreaterThan(0);
-    expect(sb.sent).toBeGreaterThan(0);
+    expect(sa.sent).toBe(QUOTA);
+    expect(sb.sent).toBe(QUOTA);
+    // 2 × QUOTA > MAX requests asked back to back: the windows turned some away
     expect(sa.refused + sb.refused).toBeGreaterThan(0);
     const ts = s.repos.limiter
       .recentOutcomes(1000)
