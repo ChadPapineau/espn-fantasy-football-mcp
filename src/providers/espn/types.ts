@@ -555,3 +555,40 @@ export function upstreamTypeOrUnknown(v: unknown): string {
     return v;
   return "UNKNOWN";
 }
+
+// --- provider ports (additive, B1: the scoring translator and the credential probe seam) ----------
+
+/**
+ * The league's scoring items as ESPN sends them, value-checked by the normaliser (research 03 §B.1:
+ * `pointsOverrides` keyed by POSITION id strings). The scoring module's translator turns this into
+ * `ScoringSettings` with canonical names, families and the settings hash (plan 08 §2–§4; the ESPN
+ * stat table `stat_map.ts` is the scoring module's).
+ */
+export interface EspnScoringInput {
+  readonly scoring_type: string;
+  readonly items: readonly {
+    readonly stat_id: number;
+    readonly points: number;
+    readonly overrides: Readonly<Record<string, number>>;
+    readonly is_reverse: boolean;
+  }[];
+  readonly matchup_tie_rule: string | null;
+  readonly playoff_tie_rule: string | null;
+  readonly home_bonus: number;
+  readonly playoff_home_bonus: number;
+}
+
+/** The scoring module's normaliser, injected into the provider (plan 08 §1 `normalizeSettings()`). */
+export type ScoringSettingsTranslator = (
+  input: EspnScoringInput,
+) => import("../../domain/scoring/types.js").ScoringSettings;
+
+/**
+ * The explicit probe's cookie access (plan 02 §2.1: the probe — `espn_check_auth`, `eff doctor
+ * --online`, the daily job — is the one request exempt from the `rejected` short-circuit). A
+ * CredentialAuthority MAY implement it; without it a probe in the `rejected` state reports the
+ * short-circuit (no request) instead of re-checking.
+ */
+export interface CredentialProbeAccess {
+  getCookieHeaderForProbe(): Promise<import("../../auth/types.js").CookieHeaderResult>;
+}
