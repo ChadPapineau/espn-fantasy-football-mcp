@@ -596,6 +596,15 @@ export interface WaiverCandidate {
   readonly flip_driver: string;
   readonly invalidators: readonly string[];
   readonly kdst: KdstDetail | null;
+  /**
+   * FAAB mode only (P1, additive): the candidate's own bid `b*`, `P(win | b*)` and the expected net
+   * value `P(win | b*) × (s − λ·b*)` it was ranked by (sib research 05 §4.3); absent in priority mode.
+   */
+  readonly bid?: {
+    readonly b_star: number;
+    readonly p_win: number;
+    readonly expected_net: number;
+  } | null;
 }
 
 /** `espn_analyze_waivers` data (plan 07 E5). Marginal candidates never enter `claim_list`. */
@@ -638,11 +647,23 @@ export interface WaiversData extends AnalyticsResult {
 
 // --- E6 espn_analyze_trade -----------------------------------------------------------------------
 
-/** E6 `ΔU` under the recorded seeding reading (plan 07 E6). */
+/**
+ * E6 `ΔU` under the recorded seeding reading (plan 07 E6). Additive (Phase 2): `basis` says whether
+ * the conversion read the seeding simulator's marginal values (`season_sim`) or the cold-start
+ * PF-per-win rate (`cold_start`, [A-3]); `by_reading` holds one row per reading simulated — both
+ * when `seeding_mode: "both"` was passed explicitly (ADV OBJ-13) — and `me`/`partner` are the
+ * configured reading's row.
+ */
 export interface DeltaU {
   readonly me: MarginalValue;
   readonly partner: MarginalValue;
   readonly reading: SeedingMode | "both";
+  readonly basis: "season_sim" | "cold_start";
+  readonly by_reading: readonly {
+    readonly seeding_mode: SeedingMode;
+    readonly me: MarginalValue;
+    readonly partner: MarginalValue;
+  }[];
 }
 
 /** E6 offer evaluation (plan 07 E6 = sib E6 + ESPN fields). */
@@ -659,11 +680,17 @@ export interface TradeEvaluationData extends AnalyticsResult {
     readonly partner: number;
   }[];
   readonly playoff_weeks_impact: { readonly me: number; readonly partner: number };
+  /**
+   * Every uneven trade carries one (plan 10 B5). Additive: `forced` is true when the receiving side's
+   * active roster overflows (the drop is inside `Δ`), false when an open seat absorbs the extra
+   * player (the named player is the one cut on that side's next add; `Δ` does not include it).
+   */
   readonly implied_drop: {
     readonly side: "me" | "partner";
     readonly player_id: number;
     readonly name: BareText;
     readonly value: number;
+    readonly forced: boolean;
   } | null;
   readonly health_adjustment: { readonly me: number; readonly partner: number };
   readonly bye_conflicts: readonly {
@@ -749,6 +776,12 @@ export interface InjuryCascadeData extends AnalyticsResult {
     readonly verdict: WaiverVerdict | null;
   }[];
   readonly team_volume_change: { readonly implied_total_delta: number | null };
+  /**
+   * Additive (Phase 2): the injured player's per-game opportunity the cascade redistributes (team
+   * volume × his share, after the team-volume factor). Σ beneficiaries' `delta_opportunity` never
+   * exceeds it, component by component (plan 10 B6).
+   */
+  readonly vacated: { readonly targets: number; readonly carries: number; readonly rz: number };
   readonly returning_ramp: { readonly weeks: number; readonly factor: number };
   readonly ir_consequence: {
     readonly on_my_roster: boolean;
