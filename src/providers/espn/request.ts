@@ -148,8 +148,25 @@ interface Fresh {
   readonly cache: CacheOutcome;
 }
 
-/** JSON.parse that never builds a `__proto__` key (plan 02 §5 A-3: no prototype-pollution vector). */
+/** A cached body longer than this yields to the event loop before it is parsed (see `read`). */
+export const YIELD_BEFORE_PARSE_CHARS = 64 * 1024;
+
+/** Lets the event loop run (timers, stdin, the shutdown handler) before the next synchronous step. */
+export function yieldToLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
+/**
+ * JSON.parse that never builds a `__proto__` key (plan 02 §5 A-3: no prototype-pollution vector).
+ * A reviver costs a JS call per value (≈ 50 ms of blocked main loop for a 1 MB roster body — the
+ * end-to-end stall probe found it on every cached read, plan 10 A16a), so it runs only when the
+ * text could spell the key: literally, or through a `\u` escape (JSON has no other way to write
+ * `_`). Every other text cannot produce such a key and is parsed natively.
+ */
 export function parseJsonSafe(text: string): unknown {
+  if (!text.includes("__proto__") && !text.includes("\\u")) return JSON.parse(text);
   return JSON.parse(text, (k: string, v: unknown) => (k === "__proto__" ? undefined : v));
 }
 
@@ -260,6 +277,12 @@ export class EspnRequester {
     const cacheable = !views.some((v) => UNCACHED_VIEWS.includes(v));
     const key = cacheKey(spec.target, spec.leagueId, spec.filter);
     const entry = cacheable ? this.cacheGet(key) : null;
+    // A large cached body is parsed and schema-checked synchronously (≈ 15 ms for a 1 MB roster).
+    // Cache hits resolve as microtasks, so a tool's several reads would otherwise run as ONE
+    // macrotask and block the event loop past the 50 ms stall bound (plan 03 §1.2; plan 10 A16a —
+    // found by the end-to-end stall probe): a yield before each large parse lets timers and stdin
+    // run between them. Small bodies (settings, standings) parse in well under a millisecond.
+    if (entry !== null && entry.parsed_json.length > YIELD_BEFORE_PARSE_CHARS) await yieldToLoop();
     const cached = entry === null ? null : this.parseCached(spec, entry);
     const usable = entry !== null && cached !== null ? { entry, value: cached } : null;
     const now = this.deps.clock.nowMs();

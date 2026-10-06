@@ -812,6 +812,59 @@ describe("E12 espn_record_recommendation and E13 espn_analyze_retrospective", ()
     ).toBe("VALIDATION");
   });
 
+  it("an onboarding record may cite the last final week's box score (its scoring self-check)", async () => {
+    const league = await ok("espn_get_league", { include: ["scoring"] });
+    const box = await ok("espn_get_box_score", { week: 3, team_id: 1 });
+    const hash = (league.data.scoring as { settings_hash: string }).settings_hash;
+    const rec = {
+      action: "Onboarding: format restated, scoring self-check shown",
+      subjects: [],
+      lineup: null,
+      point_estimate: 0,
+      distribution: {
+        mean: 0,
+        p10: 0,
+        p25: 0,
+        p50: 0,
+        p75: 0,
+        p90: 0,
+        p_zero: 1,
+        basis: "position_cv",
+      },
+      delta_vs_next: { value: 0, p10: 0, p90: 0 },
+      decision_metric: "golden_mismatch_share",
+      drivers: [],
+      assumptions: [],
+      confidence: { role_games: 0, inputs: [] },
+      as_of: (league.meta as unknown as { as_of: string }).as_of,
+      latest_execution_time: null,
+      no_move: true,
+      log_id: null,
+    };
+    const source_calls = [{ tool: "espn_get_box_score", request_id: box.meta.request_id }];
+    const r = await ok("espn_record_recommendation", {
+      kind: "onboarding",
+      week: 4,
+      rec,
+      source_calls,
+      settings_hash: hash,
+      client_ref: "onboard-week-check",
+    });
+    expect(r.data.kind).toBe("onboarding");
+    // a decision record under another week than that call is still refused
+    expect(
+      (
+        await err("espn_record_recommendation", {
+          kind: "lineup",
+          week: 4,
+          rec,
+          source_calls,
+          settings_hash: hash,
+        })
+      ).reason,
+    ).toBe("source_call_week_mismatch");
+  });
+
   it("the retrospective defaults to the last final week and validates its input", async () => {
     // every week-4 game is official in the recorded schedule, so the default is week 4 — whose box
     // scores were not recorded: serve week 3's under it to observe the default resolution

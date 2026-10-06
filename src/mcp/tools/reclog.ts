@@ -97,7 +97,9 @@ export const recordRecommendation = defineTool({
           field: "source_calls",
           reason: "source_call_tool_mismatch",
         });
-      if (known.week !== null && known.week !== args.week)
+      // an onboarding record is a no-move session note whose scoring self-check cites the last
+      // final week's box score (skills/onboard), so only decision records are held to their week
+      if (known.week !== null && known.week !== args.week && args.kind !== "onboarding")
         throw new EffError("VALIDATION", {
           field: "source_calls",
           reason: "source_call_week_mismatch",

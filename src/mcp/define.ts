@@ -422,6 +422,11 @@ export async function runTool(
   const started = performance.now();
   log.debug("tool.start", { request_id: ctx.requestId, tool: def.name });
   const out = await def.run(args as never, ctx);
+  // the envelope is built, fitted and schema-checked synchronously (tens of ms for an analytics
+  // result): a yield first keeps it a macrotask of its own (plan 03 §1.2 stall bound; plan 10 A16a)
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
   const env = buildEnvelope({
     data: def.budget === "analytics" ? roundDeep(out.data) : out.data,
     requestId: ctx.requestId,
