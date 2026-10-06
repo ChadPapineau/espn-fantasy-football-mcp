@@ -4,7 +4,10 @@
 // timestamp.txt, one TempFile per season, the schema + codec assertion over every file, and the
 // publish loop reading row groups into contract rows. Ported from sibling @521f9f3, adapted
 // (registry-driven job/limiter/season gate, not-published seasons, SourceErrorCode reports, the
-// store's `columnsHash`, a season-less source).
+// store's `columnsHash`, a season-less source). Phase 2 (plan 10 §3.2), additive: the assertion,
+// the row loop and the stats take the expected columns PER FILE (a dataset's layout can change by
+// season — depth charts in 2025), a size cap and a columns hash, so phase2.ts reuses them; the
+// Phase-1 entry points (`assertNflverseSchema`, `eachRow`, `publishStats`) behave exactly as before.
 import { constants } from "node:fs";
 import { copyFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -22,7 +25,9 @@ import {
   type TempFile,
 } from "../source.js";
 import { checkParquet, openParquet, readRowGroups, type ColumnTypeMismatch } from "./parquet.js";
+import type { ColumnKind } from "./schemas.js";
 import {
+  MAX_RELEASE_FILE_BYTES,
   NflverseSourceError,
   downloadAsset,
   isNotFound,
@@ -77,7 +82,8 @@ export interface NflverseSourceDef {
   readonly publish: PublishFn;
 }
 
-const label = (f: TempFile): string => (f.season === null ? "file" : `season ${String(f.season)}`);
+const fileLabel = (f: TempFile): string =>
+  f.season === null ? "file" : `season ${String(f.season)}`;
 
 /** Asserts columns, types and codecs of every file (plan 01 §5.5, D9). Never throws on data. */
 export async function assertNflverseSchema(
@@ -85,6 +91,28 @@ export async function assertNflverseSchema(
   files: readonly TempFile[],
 ): Promise<NflverseSchemaReport> {
   const expected = EXPECTED_COLUMNS[id];
+  return assertSchemaOf(id, files, () => expected);
+}
+
+/** At most this many extra (tolerated) column names are listed in the warning; the rest counted. */
+export const MAX_EXTRA_NAMED = 20;
+
+/** The expected upstream columns (→ kind) of one file, or null when no layout covers its season. */
+export type ExpectedColumns = Readonly<Record<string, ColumnKind>>;
+/** Picks a file's expected columns (by its season); null → the file fails, naming its season. */
+export type ExpectedFor = (file: TempFile) => ExpectedColumns | null;
+
+/**
+ * The schema + codec assertion over files whose expected columns may differ by file (plan 01 §5.5,
+ * D9): `id` (a source id) prefixes every warning; a file for which `expectedFor` returns null
+ * fails the report (`schema_mismatch`) with a warning naming its season. Never throws on data.
+ */
+export async function assertSchemaOf(
+  id: string,
+  files: readonly TempFile[],
+  expectedFor: ExpectedFor,
+  maxBytes: number = MAX_RELEASE_FILE_BYTES,
+): Promise<NflverseSchemaReport> {
   const missing = new Set<string>();
   const extra = new Set<string>();
   const mismatches = new Map<string, ColumnTypeMismatch>();
@@ -95,20 +123,26 @@ export async function assertNflverseSchema(
   let unreadable = false;
   if (files.length === 0) warnings.push(`${id}: no files to check`);
   for (const f of files) {
+    const expected = expectedFor(f);
+    if (expected === null) {
+      unreadable = true;
+      warnings.push(`${id} ${fileLabel(f)}: no layout of this source covers the season`);
+      continue;
+    }
     let check;
     try {
-      check = checkParquet((await openParquet(f.path)).metadata, expected);
+      check = checkParquet((await openParquet(f.path, maxBytes)).metadata, expected);
     } catch (err) {
       unreadable = true;
       const why = err instanceof NflverseSourceError ? err.message : "unreadable file";
-      warnings.push(`${id} ${label(f)}: ${why}`);
+      warnings.push(`${id} ${fileLabel(f)}: ${why}`);
       continue;
     }
     check.missing.forEach((c) => missing.add(c));
     check.extra.forEach((c) => extra.add(c));
     for (const mm of check.mismatches) mismatches.set(mm.column, mm);
     for (const bc of check.badCodecs) codecs.set(`${bc.column}\u0000${bc.codec}`, bc);
-    if (check.rows === 0) warnings.push(`${id} ${label(f)}: file has no rows`);
+    if (check.rows === 0) warnings.push(`${id} ${fileLabel(f)}: file has no rows`);
     rows += check.rows;
     perFile.push({
       season: f.season,
@@ -132,8 +166,11 @@ export async function assertNflverseSchema(
     );
   }
   if (extraList.length > 0) {
+    // A projected source (pbp: 372 upstream columns, ~49 read) would otherwise name hundreds.
+    const named = extraList.slice(0, MAX_EXTRA_NAMED).join(", ");
+    const more = extraList.length - MAX_EXTRA_NAMED;
     warnings.push(
-      `${id}: ${String(extraList.length)} extra column(s) tolerated: ${extraList.join(", ")}`,
+      `${id}: ${String(extraList.length)} extra column(s) tolerated: ${named}${more > 0 ? ` … and ${String(more)} more` : ""}`,
     );
   }
   if (files.length > 0 && !unreadable && rows === 0) warnings.push(`${id}: no rows in any file`);
@@ -175,15 +212,40 @@ export async function eachRow(
   fn: (raw: RawRow, file: TempFile) => void,
 ): Promise<void> {
   const expected = EXPECTED_COLUMNS[id];
-  const columns = Object.keys(expected);
+  return eachRowOf(id, files, () => expected, fn);
+}
+
+/**
+ * `eachRow` with per-file expected columns and a size cap (phase2.ts): only the file's asserted
+ * columns are decoded — the pbp projection (372 upstream columns → the contract's ~49) happens
+ * here, before a row is ever built. A file without a layout fails like a schema mismatch.
+ */
+export async function eachRowOf(
+  id: string,
+  files: readonly TempFile[],
+  expectedFor: ExpectedFor,
+  fn: (raw: RawRow, file: TempFile) => void,
+  maxBytes: number = MAX_RELEASE_FILE_BYTES,
+): Promise<void> {
   for (const f of files) {
-    const opened = await openParquet(f.path);
+    const expected = expectedFor(f);
+    if (expected === null) {
+      throw new NflverseSourceError(
+        "schema",
+        `${id}: ${fileLabel(f)} has no layout in this source`,
+      );
+    }
+    const columns = Object.keys(expected);
+    const opened = await openParquet(f.path, maxBytes);
     const check = checkParquet(opened.metadata, expected);
     if (check.badCodecs.length > 0) {
-      throw new NflverseSourceError("codec", `${id}: ${label(f)} uses a codec that is not allowed`);
+      throw new NflverseSourceError(
+        "codec",
+        `${id}: ${fileLabel(f)} uses a codec that is not allowed`,
+      );
     }
     if (check.missing.length > 0 || check.mismatches.length > 0) {
-      throw new NflverseSourceError("schema", `${id}: ${label(f)} fails the schema assertion`);
+      throw new NflverseSourceError("schema", `${id}: ${fileLabel(f)} fails the schema assertion`);
     }
     for await (const group of readRowGroups(opened, columns)) {
       for (const raw of group) fn(raw, f);
@@ -197,6 +259,15 @@ export function publishStats(
   loaders: readonly TableLoader[],
   extraWarnings: readonly string[],
 ): NflversePublishStats {
+  return publishStatsWith(columnsHash(id), loaders, extraWarnings);
+}
+
+/** `publishStats` with an explicit `columns_hash` (a Phase-2 or history file's contract hash). */
+export function publishStatsWith(
+  hash: string,
+  loaders: readonly TableLoader[],
+  extraWarnings: readonly string[],
+): NflversePublishStats {
   const reports = loaders.map((l) => l.finish());
   const seasons = new Set<number>();
   for (const r of reports) r.seasons.forEach((s) => seasons.add(s));
@@ -204,7 +275,7 @@ export function publishStats(
     rows: reports.reduce((n, r) => n + r.rows, 0),
     tables: reports.map((r) => ({ name: r.name, rows: r.rows })),
     seasons: [...seasons].sort((a, b) => a - b),
-    columns_hash: columnsHash(id),
+    columns_hash: hash,
     warnings: [...reports.flatMap((r) => r.warnings), ...extraWarnings],
   };
 }

@@ -3,6 +3,9 @@
 // from timestamp.txt; files arrive through the runner's injected HttpGet / HttpDownload (never global
 // fetch) inside the run's temp dir. Ported from sibling @521f9f3, adapted (SourceContext's required
 // download + tempDir, the ESPN pro schedule as the season-start clock, SourceErrorCode errors).
+// Phase 2 (plan 10 §3.2), additive: the Phase-2 tags, a per-call size cap (the pbp files are ~21 MB
+// a season), and the release machinery parameterised by base URL, tag and stamp parser so the
+// ffopportunity release (`ffverse/ffopportunity`, tag `latest-data`) reuses it.
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { SourceErrorCode } from "../../config/freshness.js";
@@ -21,12 +24,23 @@ export const NFLVERSE_TAGS = [
   "stats_player",
   "players",
 ] as const;
-export type NflverseTag = (typeof NFLVERSE_TAGS)[number];
+/**
+ * The release tags the Phase-2 sources read (plan 10 §3.2). Kept apart from NFLVERSE_TAGS, which
+ * `eff doctor` polls one by one (src/cli/doctor-online.ts) — adding a tag there is that owner's call.
+ */
+export const NFLVERSE_PHASE_2_TAGS = ["stats_team", "pbp", "snap_counts", "depth_charts"] as const;
+export type NflverseTag = (typeof NFLVERSE_TAGS)[number] | (typeof NFLVERSE_PHASE_2_TAGS)[number];
 
 /** timestamp.txt is 24 bytes today; anything past this is not a timestamp. */
 export const TIMESTAMP_MAX_BYTES = 256;
 /** Cap per release file (the 2026 files are 35 KB – 3.4 MB; plan 01 §5.8 "< 5 MB each"). */
 export const MAX_RELEASE_FILE_BYTES = 16 * 1024 * 1024;
+/**
+ * Cap per pbp release file (Phase 2): a full season is ~21 MB (2024: 20,597,560 B; 2025: 20,337,029 B,
+ * observed 2026-10-06), so 64 MiB leaves 3× headroom while still refusing a runaway body. The file
+ * is read whole by hyparquet, so this also bounds the run's peak memory.
+ */
+export const PBP_MAX_FILE_BYTES = 64 * 1024 * 1024;
 /** The oldest and newest season a URL may be built for (nflverse starts in 1999). */
 export const MIN_SEASON = 1999;
 export const MAX_SEASON = 2100;
@@ -71,12 +85,24 @@ export class NflverseSourceError extends Error {
   }
 }
 
+const SAFE_ASSET_PART_RE = /^[A-Za-z0-9_.-]{1,80}$/;
+
+/**
+ * The URL of an asset of a GitHub release: `<base>/<tag>/<file>`; `tag` and `file` must be plain
+ * names (no `/`, no `..`) — both come from code constants and validated seasons, never upstream.
+ */
+export function releaseAssetUrl(base: string, tag: string, file: string): string {
+  for (const part of [tag, file]) {
+    if (!SAFE_ASSET_PART_RE.test(part) || part.includes("..")) {
+      throw new NflverseSourceError("download", "nflverse: refusing an unsafe release file name");
+    }
+  }
+  return `${base}/${tag}/${file}`;
+}
+
 /** The URL of a release asset; `file` must be a plain file name. */
 export function releaseUrl(tag: NflverseTag, file: string): string {
-  if (!/^[A-Za-z0-9_.-]{1,80}$/.test(file) || file.includes("..")) {
-    throw new NflverseSourceError("download", "nflverse: refusing an unsafe release file name");
-  }
-  return `${NFLVERSE_RELEASE_BASE}/${tag}/${file}`;
+  return releaseAssetUrl(NFLVERSE_RELEASE_BASE, tag, file);
 }
 
 /** A season fit for a URL; anything else throws (seasons come from config, never upstream). */
@@ -199,18 +225,37 @@ export async function releaseVersion(
   ctx: SourceContext,
   seasonless = false,
 ): Promise<ReleaseVersion | null> {
-  const seasons = seasonless ? [] : runSeasons(ctx.seasons);
-  const body = await timestampBody(ctx.http, releaseUrl(tag, "timestamp.txt"), ctx.signal);
+  return releaseVersionAt(
+    releaseUrl(tag, "timestamp.txt"),
+    `nflverse ${tag}`,
+    ctx,
+    seasonless ? [] : runSeasons(ctx.seasons),
+  );
+}
+
+/**
+ * `releaseVersion` for any release's `timestamp.txt` URL: `label` names the release in errors (our
+ * text, never upstream's); `parse` reads the stamp (default: nflverse's form). The same contract:
+ * null when unreachable or non-200; a reachable but unparseable stamp throws `schema_mismatch`.
+ */
+export async function releaseVersionAt(
+  url: string,
+  label: string,
+  ctx: SourceContext,
+  seasons: readonly number[],
+  parse: (text: string) => IsoInstant | null = parseNflverseTimestamp,
+): Promise<ReleaseVersion | null> {
+  const body = await timestampBody(ctx.http, url, ctx.signal);
   if (body === null) return null;
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(body);
   } catch {
-    throw new NflverseSourceError("bad_timestamp", `nflverse ${tag}: timestamp.txt is not UTF-8`);
+    throw new NflverseSourceError("bad_timestamp", `${label}: timestamp.txt is not UTF-8`);
   }
-  const releasedAt = parseNflverseTimestamp(text);
+  const releasedAt = parse(text);
   if (releasedAt === null) {
-    throw new NflverseSourceError("bad_timestamp", `nflverse ${tag}: unparseable timestamp.txt`);
+    throw new NflverseSourceError("bad_timestamp", `${label}: unparseable timestamp.txt`);
   }
   return { version: versionString(releasedAt, seasons), released_at: releasedAt };
 }
@@ -231,18 +276,20 @@ function isHttps(url: string): boolean {
 /**
  * Downloads one release asset to `dest` through the runner's streaming HttpDownload (a new 0600 file,
  * created exclusively). A non-200 status, a non-https final URL or an oversize body fails naming the
- * URL; the partial file is removed on every failure path.
+ * URL; the partial file is removed on every failure path. `maxBytes` (default
+ * MAX_RELEASE_FILE_BYTES) is the per-source cap: the pbp files need more (PBP_MAX_FILE_BYTES).
  */
 export async function downloadAsset(
   ctx: SourceContext,
   url: string,
   dest: string,
   season: number | null,
+  maxBytes: number = MAX_RELEASE_FILE_BYTES,
 ): Promise<TempFile> {
   try {
     const res = await ctx.download(url, {
       signal: ctx.signal,
-      maxBytes: MAX_RELEASE_FILE_BYTES,
+      maxBytes,
       dest,
       accept: "application/octet-stream",
     });
@@ -256,7 +303,7 @@ export async function downloadAsset(
     if (!isHttps(res.final_url)) {
       throw new NflverseSourceError("download", `nflverse: ${url} was not served over https`);
     }
-    if (!Number.isSafeInteger(res.bytes) || res.bytes < 0 || res.bytes > MAX_RELEASE_FILE_BYTES) {
+    if (!Number.isSafeInteger(res.bytes) || res.bytes < 0 || res.bytes > maxBytes) {
       throw new NflverseSourceError("download", `nflverse: ${url} exceeds the size cap`);
     }
     return { path: dest, bytes: res.bytes, season };

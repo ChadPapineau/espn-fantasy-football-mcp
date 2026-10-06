@@ -1,0 +1,285 @@
+dt	team	player_name	espn_id	gsis_id	pos_grp_id	pos_grp	pos_id	pos_name	pos_abb	pos_slot	pos_rank
+"2025-10-20T07:16:12Z"	"DAL"	"Sam Williams"	"4567242"	"00-0037665"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	1
+"2025-10-20T07:16:12Z"	"DAL"	"Kenny Clark"	"3122752"	"00-0033120"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	1
+"2025-10-20T07:16:12Z"	"DAL"	"Osa Odighizuwa"	"4035840"	"00-0036942"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	1
+"2025-10-20T07:16:12Z"	"DAL"	"Dante Fowler Jr."	"2980100"	"00-0032052"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	1
+"2025-10-20T07:16:12Z"	"DAL"	"Damone Clark"	"4362636"	"00-0037281"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	1
+"2025-10-20T07:16:12Z"	"DAL"	"Shemar James"	"4685400"	"00-0040011"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	1
+"2025-10-20T07:16:12Z"	"DAL"	"Kenneth Murray Jr."	"4241394"	"00-0036441"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	1
+"2025-10-20T07:16:12Z"	"DAL"	"DaRon Bland"	"4248911"	"00-0037275"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	1
+"2025-10-20T07:16:12Z"	"DAL"	"Donovan Wilson"	"3122135"	"00-0035301"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	1
+"2025-10-20T07:16:12Z"	"DAL"	"Juanyeh Thomas"	"4360590"	"00-0037578"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	1
+"2025-10-20T07:16:12Z"	"DAL"	"Trevon Diggs"	"4040966"	"00-0036361"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	1
+"2025-10-20T07:16:12Z"	"DAL"	"Reddy Steward"	"4428584"	"00-0039465"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	1
+"2025-10-20T07:16:12Z"	"DAL"	"James Houston"	"4240608"	"00-0037310"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	2
+"2025-10-20T07:16:12Z"	"DAL"	"Jay Toia"	"4431603"	"00-0040019"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	2
+"2025-10-20T07:16:12Z"	"DAL"	"Solomon Thomas"	"3117258"	"00-0033870"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	2
+"2025-10-20T07:16:12Z"	"DAL"	"Marshawn Kneeland"	"4429996"	"00-0039900"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	2
+"2025-10-20T07:16:12Z"	"DAL"	"Jack Sanborn"	"4372576"	"00-0037109"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	2
+"2025-10-20T07:16:12Z"	"DAL"	"DeMarvion Overshown"	"4362088"	"00-0038556"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	2
+"2025-10-20T07:16:12Z"	"DAL"	"Kaiir Elam"	"4567399"	"00-0037242"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	2
+"2025-10-20T07:16:12Z"	"DAL"	"Markquese Bell"	"4241921"	"00-0037561"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	2
+"2025-10-20T07:16:12Z"	"DAL"	"Alijah Clark"	"4595352"	"00-0040045"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	2
+"2025-10-20T07:16:12Z"	"DAL"	"Caelen Carson"	"4431006"	"00-0039387"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	2
+"2025-10-20T07:16:12Z"	"DAL"	"C.J. Goodwin"	"17474"	"00-0031357"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	2
+"2025-10-20T07:16:12Z"	"DAL"	"Jadeveon Clowney"	"16734"	"00-0031364"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	3
+"2025-10-20T07:16:12Z"	"DAL"	"Mazi Smith"	"4426347"	"00-0038545"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	3
+"2025-10-20T07:16:12Z"	"DAL"	"Perrion Winfrey"	"4686470"	"00-0038126"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	3
+"2025-10-20T07:16:12Z"	"DAL"	"Donovan Ezeiruaku"	"4683848"	"00-0040725"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	3
+"2025-10-20T07:16:12Z"	"DAL"	"Marist Liufau"	"4427816"	"00-0039352"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	3
+"2025-10-20T07:16:12Z"	"DAL"	"Shavon Revel Jr."	"5095865"	"00-0040008"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	3
+"2025-10-20T07:16:12Z"	"DAL"	"Malik Hooker"	"3121415"	"00-0033877"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	3
+"2025-10-20T07:16:12Z"	"DAL"	"Trikweze Bridges"	"4426513"	"00-0040251"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	3
+"2025-10-20T07:16:12Z"	"DAL"	"Payton Turner"	"4240269"	"00-0036926"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	4
+"2025-10-20T07:16:12Z"	"DAL"	"Josh Butler"	"3929814"	"00-0038348"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	4
+"2025-10-20T07:16:12Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2025-10-20T07:16:12Z"	"DAL"	"Bryan Anger"	"14950"	"00-0029692"	"18"	"Special Teams"	"23"	"Punter"	"P"	2	1
+"2025-10-20T07:16:12Z"	"DAL"	"Bryan Anger"	"14950"	"00-0029692"	"18"	"Special Teams"	"79"	"Holder"	"H"	3	1
+"2025-10-20T07:16:12Z"	"DAL"	"KaVontae Turpin"	"3676833"	"00-0037801"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	1
+"2025-10-20T07:16:12Z"	"DAL"	"KaVontae Turpin"	"3676833"	"00-0037801"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	1
+"2025-10-20T07:16:12Z"	"DAL"	"Trent Sieg"	"3052357"	"00-0034198"	"18"	"Special Teams"	"39"	"Long Snapper"	"LS"	6	1
+"2025-10-20T07:16:12Z"	"DAL"	"Jalen Tolbert"	"4249417"	"00-0037666"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2025-10-20T07:16:12Z"	"DAL"	"Jaydon Blue"	"4685279"	"00-0040586"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	2
+"2025-10-20T07:16:12Z"	"DAL"	"Jalen Tolbert"	"4249417"	"00-0037666"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2025-10-20T07:16:12Z"	"DAL"	"CeeDee Lamb"	"4241389"	"00-0036358"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2025-10-20T07:16:12Z"	"DAL"	"Tyler Guyton"	"4609048"	"00-0039341"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	1
+"2025-10-20T07:16:12Z"	"DAL"	"Tyler Smith"	"4568652"	"00-0037243"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	1
+"2025-10-20T07:16:12Z"	"DAL"	"Brock Hoffman"	"4241087"	"00-0037336"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	1
+"2025-10-20T07:16:12Z"	"DAL"	"Tyler Booker"	"4685263"	"00-0040007"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	1
+"2025-10-20T07:16:12Z"	"DAL"	"Terence Steele"	"3915834"	"00-0036036"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	1
+"2025-10-20T07:16:12Z"	"DAL"	"Dak Prescott"	"2577417"	"00-0033077"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2025-10-20T07:16:12Z"	"DAL"	"Jake Ferguson"	"4242355"	"00-0038041"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2025-10-20T07:16:12Z"	"DAL"	"Javonte Williams"	"4361579"	"00-0036997"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2025-10-20T07:16:12Z"	"DAL"	"Hunter Luepke"	"4383396"	"00-0038738"	"21"	"3WR 1TE"	"10"	"Fullback"	"FB"	12	1
+"2025-10-20T07:16:12Z"	"DAL"	"George Pickens"	"4426354"	"00-0037247"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2025-10-20T07:16:12Z"	"DAL"	"Nate Thomas"	"4428656"	"00-0039422"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	2
+"2025-10-20T07:16:12Z"	"DAL"	"Hakeem Adeniji"	"4046557"	"00-0036310"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	2
+"2025-10-20T07:16:12Z"	"DAL"	"Cooper Beebe"	"4426663"	"00-0039348"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	2
+"2025-10-20T07:16:12Z"	"DAL"	"T.J. Bass"	"4685120"	"00-0038731"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	2
+"2025-10-20T07:16:12Z"	"DAL"	"Hakeem Adeniji"	"4046557"	"00-0036310"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	2
+"2025-10-20T07:16:12Z"	"DAL"	"Joe Milton III"	"4360698"	"00-0039398"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	2
+"2025-10-20T07:16:12Z"	"DAL"	"Luke Schoonmaker"	"4372096"	"00-0038547"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2025-10-20T07:16:12Z"	"DAL"	"Jaydon Blue"	"4685279"	"00-0040586"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	2
+"2025-10-20T07:16:12Z"	"DAL"	"Ryan Flournoy"	"5083754"	"00-0039410"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2025-10-20T07:16:12Z"	"DAL"	"Trevor Keegan"	"4427140"	"00-0039310"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	3
+"2025-10-20T07:16:12Z"	"DAL"	"Rob Jones"	"4570495"	"00-0036596"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	3
+"2025-10-20T07:16:12Z"	"DAL"	"Ajani Cornelius"	"4696203"	"00-0040017"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	3
+"2025-10-20T07:16:12Z"	"DAL"	"Brevyn Spann-Ford"	"4360967"	"00-0039530"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	3
+"2025-10-20T07:16:12Z"	"DAL"	"Malik Davis"	"4240603"	"00-0037563"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	3
+"2025-10-20T07:16:12Z"	"DAL"	"Jalen Tolbert"	"4249417"	"00-0037666"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2025-10-20T07:16:12Z"	"DAL"	"John Stephens Jr."	"4362489"	"00-0038741"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	4
+"2025-10-20T07:16:12Z"	"DAL"	"Phil Mafah"	"4431562"	"00-0040021"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2025-10-20T07:16:12Z"	"DAL"	"KaVontae Turpin"	"3676833"	"00-0037801"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	5
+"2025-10-20T07:16:12Z"	"DAL"	"Miles Sanders"	"4045163"	"00-0035243"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	5
+"2025-10-20T07:16:12Z"	"DAL"	"Jonathan Mingo"	"4426485"	"00-0039062"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	6
+"2025-10-20T07:16:12Z"	"WAS"	"Dorance Armstrong"	"3928979"	"00-0034373"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	1
+"2025-10-20T07:16:12Z"	"WAS"	"Daron Payne"	"3925354"	"00-0034333"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	1
+"2025-10-20T07:16:12Z"	"WAS"	"Javon Kinlaw"	"4259491"	"00-0036260"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	1
+"2025-10-20T07:16:12Z"	"WAS"	"Preston Smith"	"2577446"	"00-0031935"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	1
+"2025-10-20T07:16:12Z"	"WAS"	"Frankie Luvu"	"3127273"	"00-0034302"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	1
+"2025-10-20T07:16:12Z"	"WAS"	"Bobby Wagner"	"14979"	"00-0029255"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	1
+"2025-10-20T07:16:12Z"	"WAS"	"Von Miller"	"13976"	"00-0027940"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	1
+"2025-10-20T07:16:12Z"	"WAS"	"Trey Amos"	"4574689"	"00-0040731"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	1
+"2025-10-20T07:16:12Z"	"WAS"	"Jeremy Reaves"	"3125248"	"00-0034465"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	1
+"2025-10-20T07:16:12Z"	"WAS"	"Quan Martin"	"4360378"	"00-0039149"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	1
+"2025-10-20T07:16:12Z"	"WAS"	"Marshon Lattimore"	"3121421"	"00-0033874"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	1
+"2025-10-20T07:16:12Z"	"WAS"	"Mike Sainristil"	"4428414"	"00-0039898"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	1
+"2025-10-20T07:16:12Z"	"WAS"	"Drake Jackson"	"4569511"	"00-0037826"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	2
+"2025-10-20T07:16:12Z"	"WAS"	"Eddie Goldman"	"2969924"	"00-0031551"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	2
+"2025-10-20T07:16:12Z"	"WAS"	"Jer'Zhan Newton"	"4430560"	"00-0039906"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	2
+"2025-10-20T07:16:12Z"	"WAS"	"Javontae Jean-Baptiste"	"4361357"	"00-0039412"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	2
+"2025-10-20T07:16:12Z"	"WAS"	"Nick Bellore"	"14471"	"00-0028292"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	2
+"2025-10-20T07:16:12Z"	"WAS"	"Jordan Magee"	"4568617"	"00-0039368"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	2
+"2025-10-20T07:16:12Z"	"WAS"	"Jacob Martin"	"3138764"	"00-0034163"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	2
+"2025-10-20T07:16:12Z"	"WAS"	"Jonathan Jones"	"2971027"	"00-0032580"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	2
+"2025-10-20T07:16:12Z"	"WAS"	"Darnell Savage"	"3915419"	"00-0034968"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	2
+"2025-10-20T07:16:12Z"	"WAS"	"Tyler Owens"	"4572460"	"00-0039681"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	2
+"2025-10-20T07:16:12Z"	"WAS"	"Antonio Hamilton Sr."	"3056354"	"00-0032933"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	2
+"2025-10-20T07:16:12Z"	"WAS"	"Noah Igbinoghene"	"4242516"	"00-0036287"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	2
+"2025-10-20T07:16:12Z"	"WAS"	"Sheldon Day"	"2976194"	"00-0033010"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	3
+"2025-10-20T07:16:12Z"	"WAS"	"Deatrich Wise Jr."	"2980080"	"00-0033947"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	3
+"2025-10-20T07:16:12Z"	"WAS"	"Ale Kaho"	"4361090"	"00-0040318"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	3
+"2025-10-20T07:16:12Z"	"WAS"	"Kain Medrano"	"4427984"	"00-0040216"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	3
+"2025-10-20T07:16:12Z"	"WAS"	"Percy Butler"	"4363097"	"00-0038100"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	3
+"2025-10-20T07:16:12Z"	"WAS"	"Will Harris"	"3915297"	"00-0035655"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	3
+"2025-10-20T07:16:12Z"	"WAS"	"Matt Gay"	"4249087"	"00-0035269"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2025-10-20T07:16:12Z"	"WAS"	"Tress Way"	"16166"	"00-0030140"	"18"	"Special Teams"	"23"	"Punter"	"P"	2	1
+"2025-10-20T07:16:12Z"	"WAS"	"Tress Way"	"16166"	"00-0030140"	"18"	"Special Teams"	"79"	"Holder"	"H"	3	1
+"2025-10-20T07:16:12Z"	"WAS"	"Jaylin Lane"	"4602667"	"00-0040164"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	1
+"2025-10-20T07:16:12Z"	"WAS"	"Deebo Samuel"	"3126486"	"00-0035719"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	1
+"2025-10-20T07:16:12Z"	"WAS"	"Tyler Ott"	"17378"	"00-0031156"	"18"	"Special Teams"	"39"	"Long Snapper"	"LS"	6	1
+"2025-10-20T07:16:12Z"	"WAS"	"Luke McCaffrey"	"4426948"	"00-0039355"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2025-10-20T07:16:12Z"	"WAS"	"Luke McCaffrey"	"4426948"	"00-0039355"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	2
+"2025-10-20T07:16:12Z"	"WAS"	"Terry McLaurin"	"3121422"	"00-0035659"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2025-10-20T07:16:12Z"	"WAS"	"Laremy Tunsil"	"3051890"	"00-0032380"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	1
+"2025-10-20T07:16:12Z"	"WAS"	"Chris Paul"	"4244615"	"00-0037092"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	1
+"2025-10-20T07:16:12Z"	"WAS"	"Tyler Biadasz"	"4035788"	"00-0036376"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	1
+"2025-10-20T07:16:12Z"	"WAS"	"Sam Cosmi"	"4262199"	"00-0036618"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	1
+"2025-10-20T07:16:12Z"	"WAS"	"Josh Conerly Jr."	"4685326"	"00-0040686"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	1
+"2025-10-20T07:16:12Z"	"WAS"	"Jayden Daniels"	"4426348"	"00-0039910"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2025-10-20T07:16:12Z"	"WAS"	"Zach Ertz"	"15835"	"00-0030061"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2025-10-20T07:16:12Z"	"WAS"	"Jacory Croskey-Merritt"	"4575131"	"00-0040242"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2025-10-20T07:16:12Z"	"WAS"	"Deebo Samuel"	"3126486"	"00-0035719"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2025-10-20T07:16:12Z"	"WAS"	"George Fant"	"2583951"	"00-0032466"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	2
+"2025-10-20T07:16:12Z"	"WAS"	"Nick Allegretti"	"3115922"	"00-0035149"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	2
+"2025-10-20T07:16:12Z"	"WAS"	"Andrew Wylie"	"3042702"	"00-0033831"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	2
+"2025-10-20T07:16:12Z"	"WAS"	"Trent Scott"	"3123303"	"00-0034571"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	2
+"2025-10-20T07:16:12Z"	"WAS"	"Marcus Mariota"	"2576980"	"00-0032268"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	2
+"2025-10-20T07:16:12Z"	"WAS"	"John Bates"	"4048228"	"00-0036628"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2025-10-20T07:16:12Z"	"WAS"	"Chris Rodriguez Jr."	"4362619"	"00-0038611"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	2
+"2025-10-20T07:16:12Z"	"WAS"	"Luke McCaffrey"	"4426948"	"00-0039355"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2025-10-20T07:16:12Z"	"WAS"	"Lucas Niang"	"4038552"	"00-0036367"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	3
+"2025-10-20T07:16:12Z"	"WAS"	"Brandon Coleman"	"4685030"	"00-0039913"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	3
+"2025-10-20T07:16:12Z"	"WAS"	"Nick Allegretti"	"3115922"	"00-0035149"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	3
+"2025-10-20T07:16:12Z"	"WAS"	"Josh Johnson"	"11394"	"00-0026300"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	3
+"2025-10-20T07:16:12Z"	"WAS"	"Ben Sinnott"	"4690923"	"00-0039912"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	3
+"2025-10-20T07:16:12Z"	"WAS"	"Jeremy McNichols"	"3127586"	"00-0033955"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	3
+"2025-10-20T07:16:12Z"	"WAS"	"Jaylin Lane"	"4602667"	"00-0040164"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2025-10-20T07:16:12Z"	"WAS"	"Colson Yankoff"	"4361088"	"00-0039686"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	4
+"2025-10-20T07:16:12Z"	"WAS"	"Austin Ekeler"	"3068267"	"00-0033699"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2025-10-20T07:16:12Z"	"WAS"	"Chris Moore"	"2576581"	"00-0032398"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	5
+"2025-10-20T07:16:12Z"	"WAS"	"Tyree Jackson"	"3916564"	"00-0035356"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	5
+"2025-10-20T07:16:12Z"	"WAS"	"Robbie Chosen"	"2574808"	"00-0032688"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	6
+"2025-10-20T07:16:12Z"	"WAS"	"Noah Brown"	"3121409"	"00-0033591"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	7
+"2025-10-19T07:13:17Z"	"DAL"	"Sam Williams"	"4567242"	"00-0037665"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	1
+"2025-10-19T07:13:17Z"	"DAL"	"Kenny Clark"	"3122752"	"00-0033120"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	1
+"2025-10-19T07:13:17Z"	"DAL"	"Osa Odighizuwa"	"4035840"	"00-0036942"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	1
+"2025-10-19T07:13:17Z"	"DAL"	"Dante Fowler Jr."	"2980100"	"00-0032052"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	1
+"2025-10-19T07:13:17Z"	"DAL"	"Shemar James"	"4685400"	"00-0040011"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	1
+"2025-10-19T07:13:17Z"	"DAL"	"Jack Sanborn"	"4372576"	"00-0037109"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	1
+"2025-10-19T07:13:17Z"	"DAL"	"Kenneth Murray Jr."	"4241394"	"00-0036441"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	1
+"2025-10-19T07:13:17Z"	"DAL"	"DaRon Bland"	"4248911"	"00-0037275"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	1
+"2025-10-19T07:13:17Z"	"DAL"	"Donovan Wilson"	"3122135"	"00-0035301"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	1
+"2025-10-19T07:13:17Z"	"DAL"	"Juanyeh Thomas"	"4360590"	"00-0037578"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	1
+"2025-10-19T07:13:17Z"	"DAL"	"Trevon Diggs"	"4040966"	"00-0036361"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	1
+"2025-10-19T07:13:17Z"	"DAL"	"Reddy Steward"	"4428584"	"00-0039465"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	1
+"2025-10-19T07:13:17Z"	"DAL"	"James Houston"	"4240608"	"00-0037310"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	2
+"2025-10-19T07:13:17Z"	"DAL"	"Jay Toia"	"4431603"	"00-0040019"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	2
+"2025-10-19T07:13:17Z"	"DAL"	"Solomon Thomas"	"3117258"	"00-0033870"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	2
+"2025-10-19T07:13:17Z"	"DAL"	"Marshawn Kneeland"	"4429996"	"00-0039900"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	2
+"2025-10-19T07:13:17Z"	"DAL"	"Damone Clark"	"4362636"	"00-0037281"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	2
+"2025-10-19T07:13:17Z"	"DAL"	"Marist Liufau"	"4427816"	"00-0039352"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	2
+"2025-10-19T07:13:17Z"	"DAL"	"DeMarvion Overshown"	"4362088"	"00-0038556"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	2
+"2025-10-19T07:13:17Z"	"DAL"	"Kaiir Elam"	"4567399"	"00-0037242"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	2
+"2025-10-19T07:13:17Z"	"DAL"	"Markquese Bell"	"4241921"	"00-0037561"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	2
+"2025-10-19T07:13:17Z"	"DAL"	"Alijah Clark"	"4595352"	"00-0040045"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	2
+"2025-10-19T07:13:17Z"	"DAL"	"Trikweze Bridges"	"4426513"	"00-0040251"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	2
+"2025-10-19T07:13:17Z"	"DAL"	"C.J. Goodwin"	"17474"	"00-0031357"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	2
+"2025-10-19T07:13:17Z"	"DAL"	"Jadeveon Clowney"	"16734"	"00-0031364"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	3
+"2025-10-19T07:13:17Z"	"DAL"	"Mazi Smith"	"4426347"	"00-0038545"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	3
+"2025-10-19T07:13:17Z"	"DAL"	"Perrion Winfrey"	"4686470"	"00-0038126"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	3
+"2025-10-19T07:13:17Z"	"DAL"	"Donovan Ezeiruaku"	"4683848"	"00-0040725"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	3
+"2025-10-19T07:13:17Z"	"DAL"	"Caelen Carson"	"4431006"	"00-0039387"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	3
+"2025-10-19T07:13:17Z"	"DAL"	"Malik Hooker"	"3121415"	"00-0033877"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	3
+"2025-10-19T07:13:17Z"	"DAL"	"Josh Butler"	"3929814"	"00-0038348"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	3
+"2025-10-19T07:13:17Z"	"DAL"	"Payton Turner"	"4240269"	"00-0036926"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	4
+"2025-10-19T07:13:17Z"	"DAL"	"Shavon Revel Jr."	"5095865"	"00-0040008"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	4
+"2025-10-19T07:13:17Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2025-10-19T07:13:17Z"	"DAL"	"Bryan Anger"	"14950"	"00-0029692"	"18"	"Special Teams"	"23"	"Punter"	"P"	2	1
+"2025-10-19T07:13:17Z"	"DAL"	"Bryan Anger"	"14950"	"00-0029692"	"18"	"Special Teams"	"79"	"Holder"	"H"	3	1
+"2025-10-19T07:13:17Z"	"DAL"	"KaVontae Turpin"	"3676833"	"00-0037801"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	1
+"2025-10-19T07:13:17Z"	"DAL"	"KaVontae Turpin"	"3676833"	"00-0037801"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	1
+"2025-10-19T07:13:17Z"	"DAL"	"Trent Sieg"	"3052357"	"00-0034198"	"18"	"Special Teams"	"39"	"Long Snapper"	"LS"	6	1
+"2025-10-19T07:13:17Z"	"DAL"	"Jalen Tolbert"	"4249417"	"00-0037666"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2025-10-19T07:13:17Z"	"DAL"	"Jaydon Blue"	"4685279"	"00-0040586"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	2
+"2025-10-19T07:13:17Z"	"DAL"	"Jalen Tolbert"	"4249417"	"00-0037666"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2025-10-19T07:13:17Z"	"DAL"	"CeeDee Lamb"	"4241389"	"00-0036358"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2025-10-19T07:13:17Z"	"DAL"	"Tyler Guyton"	"4609048"	"00-0039341"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	1
+"2025-10-19T07:13:17Z"	"DAL"	"Tyler Smith"	"4568652"	"00-0037243"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	1
+"2025-10-19T07:13:17Z"	"DAL"	"Brock Hoffman"	"4241087"	"00-0037336"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	1
+"2025-10-19T07:13:17Z"	"DAL"	"Tyler Booker"	"4685263"	"00-0040007"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	1
+"2025-10-19T07:13:17Z"	"DAL"	"Terence Steele"	"3915834"	"00-0036036"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	1
+"2025-10-19T07:13:17Z"	"DAL"	"Dak Prescott"	"2577417"	"00-0033077"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2025-10-19T07:13:17Z"	"DAL"	"Jake Ferguson"	"4242355"	"00-0038041"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2025-10-19T07:13:17Z"	"DAL"	"Javonte Williams"	"4361579"	"00-0036997"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2025-10-19T07:13:17Z"	"DAL"	"Hunter Luepke"	"4383396"	"00-0038738"	"21"	"3WR 1TE"	"10"	"Fullback"	"FB"	12	1
+"2025-10-19T07:13:17Z"	"DAL"	"George Pickens"	"4426354"	"00-0037247"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2025-10-19T07:13:17Z"	"DAL"	"Nate Thomas"	"4428656"	"00-0039422"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	2
+"2025-10-19T07:13:17Z"	"DAL"	"Hakeem Adeniji"	"4046557"	"00-0036310"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	2
+"2025-10-19T07:13:17Z"	"DAL"	"Cooper Beebe"	"4426663"	"00-0039348"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	2
+"2025-10-19T07:13:17Z"	"DAL"	"T.J. Bass"	"4685120"	"00-0038731"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	2
+"2025-10-19T07:13:17Z"	"DAL"	"Hakeem Adeniji"	"4046557"	"00-0036310"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	2
+"2025-10-19T07:13:17Z"	"DAL"	"Joe Milton III"	"4360698"	"00-0039398"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	2
+"2025-10-19T07:13:17Z"	"DAL"	"Luke Schoonmaker"	"4372096"	"00-0038547"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2025-10-19T07:13:17Z"	"DAL"	"Jaydon Blue"	"4685279"	"00-0040586"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	2
+"2025-10-19T07:13:17Z"	"DAL"	"Ryan Flournoy"	"5083754"	"00-0039410"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2025-10-19T07:13:17Z"	"DAL"	"Trevor Keegan"	"4427140"	"00-0039310"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	3
+"2025-10-19T07:13:17Z"	"DAL"	"Rob Jones"	"4570495"	"00-0036596"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	3
+"2025-10-19T07:13:17Z"	"DAL"	"Ajani Cornelius"	"4696203"	"00-0040017"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	3
+"2025-10-19T07:13:17Z"	"DAL"	"Brevyn Spann-Ford"	"4360967"	"00-0039530"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	3
+"2025-10-19T07:13:17Z"	"DAL"	"Malik Davis"	"4240603"	"00-0037563"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	3
+"2025-10-19T07:13:17Z"	"DAL"	"Jalen Tolbert"	"4249417"	"00-0037666"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2025-10-19T07:13:17Z"	"DAL"	"John Stephens Jr."	"4362489"	"00-0038741"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	4
+"2025-10-19T07:13:17Z"	"DAL"	"Miles Sanders"	"4045163"	"00-0035243"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2025-10-19T07:13:17Z"	"DAL"	"KaVontae Turpin"	"3676833"	"00-0037801"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	5
+"2025-10-19T07:13:17Z"	"DAL"	"Phil Mafah"	"4431562"	"00-0040021"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	5
+"2025-10-19T07:13:17Z"	"DAL"	"Jonathan Mingo"	"4426485"	"00-0039062"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	6
+"2025-10-19T07:13:17Z"	"WAS"	"Dorance Armstrong"	"3928979"	"00-0034373"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	1
+"2025-10-19T07:13:17Z"	"WAS"	"Daron Payne"	"3925354"	"00-0034333"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	1
+"2025-10-19T07:13:17Z"	"WAS"	"Javon Kinlaw"	"4259491"	"00-0036260"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	1
+"2025-10-19T07:13:17Z"	"WAS"	"Preston Smith"	"2577446"	"00-0031935"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	1
+"2025-10-19T07:13:17Z"	"WAS"	"Frankie Luvu"	"3127273"	"00-0034302"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	1
+"2025-10-19T07:13:17Z"	"WAS"	"Bobby Wagner"	"14979"	"00-0029255"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	1
+"2025-10-19T07:13:17Z"	"WAS"	"Von Miller"	"13976"	"00-0027940"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	1
+"2025-10-19T07:13:17Z"	"WAS"	"Trey Amos"	"4574689"	"00-0040731"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	1
+"2025-10-19T07:13:17Z"	"WAS"	"Jeremy Reaves"	"3125248"	"00-0034465"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	1
+"2025-10-19T07:13:17Z"	"WAS"	"Quan Martin"	"4360378"	"00-0039149"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	1
+"2025-10-19T07:13:17Z"	"WAS"	"Marshon Lattimore"	"3121421"	"00-0033874"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	1
+"2025-10-19T07:13:17Z"	"WAS"	"Mike Sainristil"	"4428414"	"00-0039898"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	1
+"2025-10-19T07:13:17Z"	"WAS"	"Drake Jackson"	"4569511"	"00-0037826"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	2
+"2025-10-19T07:13:17Z"	"WAS"	"Eddie Goldman"	"2969924"	"00-0031551"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	2
+"2025-10-19T07:13:17Z"	"WAS"	"Jer'Zhan Newton"	"4430560"	"00-0039906"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	2
+"2025-10-19T07:13:17Z"	"WAS"	"Javontae Jean-Baptiste"	"4361357"	"00-0039412"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	2
+"2025-10-19T07:13:17Z"	"WAS"	"Nick Bellore"	"14471"	"00-0028292"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	2
+"2025-10-19T07:13:17Z"	"WAS"	"Jordan Magee"	"4568617"	"00-0039368"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	2
+"2025-10-19T07:13:17Z"	"WAS"	"Jacob Martin"	"3138764"	"00-0034163"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	2
+"2025-10-19T07:13:17Z"	"WAS"	"Jonathan Jones"	"2971027"	"00-0032580"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	2
+"2025-10-19T07:13:17Z"	"WAS"	"Darnell Savage"	"3915419"	"00-0034968"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	2
+"2025-10-19T07:13:17Z"	"WAS"	"Tyler Owens"	"4572460"	"00-0039681"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	2
+"2025-10-19T07:13:17Z"	"WAS"	"Antonio Hamilton Sr."	"3056354"	"00-0032933"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	2
+"2025-10-19T07:13:17Z"	"WAS"	"Noah Igbinoghene"	"4242516"	"00-0036287"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	2
+"2025-10-19T07:13:17Z"	"WAS"	"Sheldon Day"	"2976194"	"00-0033010"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	3
+"2025-10-19T07:13:17Z"	"WAS"	"Deatrich Wise Jr."	"2980080"	"00-0033947"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	3
+"2025-10-19T07:13:17Z"	"WAS"	"Ale Kaho"	"4361090"	"00-0040318"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	3
+"2025-10-19T07:13:17Z"	"WAS"	"Kain Medrano"	"4427984"	"00-0040216"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	3
+"2025-10-19T07:13:17Z"	"WAS"	"Percy Butler"	"4363097"	"00-0038100"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	3
+"2025-10-19T07:13:17Z"	"WAS"	"Will Harris"	"3915297"	"00-0035655"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	3
+"2025-10-19T07:13:17Z"	"WAS"	"Matt Gay"	"4249087"	"00-0035269"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2025-10-19T07:13:17Z"	"WAS"	"Tress Way"	"16166"	"00-0030140"	"18"	"Special Teams"	"23"	"Punter"	"P"	2	1
+"2025-10-19T07:13:17Z"	"WAS"	"Tress Way"	"16166"	"00-0030140"	"18"	"Special Teams"	"79"	"Holder"	"H"	3	1
+"2025-10-19T07:13:17Z"	"WAS"	"Jaylin Lane"	"4602667"	"00-0040164"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	1
+"2025-10-19T07:13:17Z"	"WAS"	"Deebo Samuel"	"3126486"	"00-0035719"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	1
+"2025-10-19T07:13:17Z"	"WAS"	"Tyler Ott"	"17378"	"00-0031156"	"18"	"Special Teams"	"39"	"Long Snapper"	"LS"	6	1
+"2025-10-19T07:13:17Z"	"WAS"	"Luke McCaffrey"	"4426948"	"00-0039355"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2025-10-19T07:13:17Z"	"WAS"	"Luke McCaffrey"	"4426948"	"00-0039355"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	2
+"2025-10-19T07:13:17Z"	"WAS"	"Terry McLaurin"	"3121422"	"00-0035659"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2025-10-19T07:13:17Z"	"WAS"	"Laremy Tunsil"	"3051890"	"00-0032380"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	1
+"2025-10-19T07:13:17Z"	"WAS"	"Chris Paul"	"4244615"	"00-0037092"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	1
+"2025-10-19T07:13:17Z"	"WAS"	"Tyler Biadasz"	"4035788"	"00-0036376"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	1
+"2025-10-19T07:13:17Z"	"WAS"	"Sam Cosmi"	"4262199"	"00-0036618"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	1
+"2025-10-19T07:13:17Z"	"WAS"	"Josh Conerly Jr."	"4685326"	"00-0040686"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	1
+"2025-10-19T07:13:17Z"	"WAS"	"Jayden Daniels"	"4426348"	"00-0039910"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2025-10-19T07:13:17Z"	"WAS"	"Zach Ertz"	"15835"	"00-0030061"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2025-10-19T07:13:17Z"	"WAS"	"Jacory Croskey-Merritt"	"4575131"	"00-0040242"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2025-10-19T07:13:17Z"	"WAS"	"Deebo Samuel"	"3126486"	"00-0035719"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2025-10-19T07:13:17Z"	"WAS"	"George Fant"	"2583951"	"00-0032466"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	2
+"2025-10-19T07:13:17Z"	"WAS"	"Nick Allegretti"	"3115922"	"00-0035149"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	2
+"2025-10-19T07:13:17Z"	"WAS"	"Andrew Wylie"	"3042702"	"00-0033831"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	2
+"2025-10-19T07:13:17Z"	"WAS"	"Trent Scott"	"3123303"	"00-0034571"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	2
+"2025-10-19T07:13:17Z"	"WAS"	"Marcus Mariota"	"2576980"	"00-0032268"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	2
+"2025-10-19T07:13:17Z"	"WAS"	"John Bates"	"4048228"	"00-0036628"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2025-10-19T07:13:17Z"	"WAS"	"Chris Rodriguez Jr."	"4362619"	"00-0038611"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	2
+"2025-10-19T07:13:17Z"	"WAS"	"Luke McCaffrey"	"4426948"	"00-0039355"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2025-10-19T07:13:17Z"	"WAS"	"Lucas Niang"	"4038552"	"00-0036367"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	3
+"2025-10-19T07:13:17Z"	"WAS"	"Brandon Coleman"	"4685030"	"00-0039913"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	3
+"2025-10-19T07:13:17Z"	"WAS"	"Nick Allegretti"	"3115922"	"00-0035149"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	3
+"2025-10-19T07:13:17Z"	"WAS"	"Josh Johnson"	"11394"	"00-0026300"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	3
+"2025-10-19T07:13:17Z"	"WAS"	"Ben Sinnott"	"4690923"	"00-0039912"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	3
+"2025-10-19T07:13:17Z"	"WAS"	"Jeremy McNichols"	"3127586"	"00-0033955"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	3
+"2025-10-19T07:13:17Z"	"WAS"	"Jaylin Lane"	"4602667"	"00-0040164"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2025-10-19T07:13:17Z"	"WAS"	"Colson Yankoff"	"4361088"	"00-0039686"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	4
+"2025-10-19T07:13:17Z"	"WAS"	"Austin Ekeler"	"3068267"	"00-0033699"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2025-10-19T07:13:17Z"	"WAS"	"Chris Moore"	"2576581"	"00-0032398"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	5
+"2025-10-19T07:13:17Z"	"WAS"	"Tyree Jackson"	"3916564"	"00-0035356"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	5
+"2025-10-19T07:13:17Z"	"WAS"	"Robbie Chosen"	"2574808"	"00-0032688"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	6
+"2025-10-19T07:13:17Z"	"WAS"	"Noah Brown"	"3121409"	"00-0033591"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	7

@@ -1,0 +1,594 @@
+dt	team	player_name	espn_id	gsis_id	pos_grp_id	pos_grp	pos_id	pos_name	pos_abb	pos_slot	pos_rank
+"2026-10-06T14:08:49Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-06T14:08:49Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-06T14:08:49Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T14:08:49Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-06T14:08:49Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T14:08:49Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T14:08:49Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T14:08:49Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T14:08:49Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-06T14:08:49Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-06T14:08:49Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T14:08:49Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-06T14:08:49Z"	"DET"	"Aidan Hutchinson"	"4372099"	"00-0037236"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	1
+"2026-10-06T14:08:49Z"	"DET"	"Alim McNeill"	"4361662"	"00-0036624"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	1
+"2026-10-06T14:08:49Z"	"DET"	"Tyleik Williams"	"4431615"	"00-0040672"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	1
+"2026-10-06T14:08:49Z"	"DET"	"Tyler Lacy"	"4361861"	"00-0038940"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	1
+"2026-10-06T14:08:49Z"	"DET"	"Derrick Barnes"	"4260409"	"00-0036964"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	1
+"2026-10-06T14:08:49Z"	"DET"	"Jack Campbell"	"4569465"	"00-0039018"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	1
+"2026-10-06T14:08:49Z"	"DET"	"Devin White"	"4035434"	"00-0035707"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	1
+"2026-10-06T14:08:49Z"	"DET"	"D.J. Reed"	"3139387"	"00-0034384"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	1
+"2026-10-06T14:08:49Z"	"DET"	"Christian Izien"	"4372459"	"00-0038820"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	1
+"2026-10-06T14:08:49Z"	"DET"	"Chuck Clark"	"3045463"	"00-0033294"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	1
+"2026-10-06T14:08:49Z"	"DET"	"Ennis Rakestraw Jr."	"4566092"	"00-0039862"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	1
+"2026-10-06T14:08:49Z"	"DET"	"Roger McCreary"	"4371973"	"00-0038125"	"16"	"Base 4-3 D"	"34"	"Nickel Back"	"NB"	12	1
+"2026-10-06T14:08:49Z"	"DET"	"Derrick Moore"	"4685461"	"00-0041441"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	2
+"2026-10-06T14:08:49Z"	"DET"	"Mekhi Wingo"	"4586333"	"00-0039396"	"16"	"Base 4-3 D"	"24"	"Left Defensive Tackle"	"LDT"	2	2
+"2026-10-06T14:08:49Z"	"DET"	"Levi Onwuzurike"	"4039020"	"00-0036954"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	2
+"2026-10-06T14:08:49Z"	"DET"	"DJ Wonnum"	"4038849"	"00-0036335"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	2
+"2026-10-06T14:08:49Z"	"DET"	"Jimmy Rolder"	"4896353"	"00-0041442"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	2
+"2026-10-06T14:08:49Z"	"DET"	"Amen Ogbongbemiga"	"4038432"	"00-0036716"	"16"	"Base 4-3 D"	"27"	"Middle Linebacker"	"MLB"	6	2
+"2026-10-06T14:08:49Z"	"DET"	"Malcolm Rodriguez"	"4241411"	"00-0037289"	"16"	"Base 4-3 D"	"28"	"Strongside Linebacker"	"SLB"	7	2
+"2026-10-06T14:08:49Z"	"DET"	"Keith Abney II"	"5093004"	"00-0041445"	"16"	"Base 4-3 D"	"18"	"Left Cornerback"	"LCB"	8	2
+"2026-10-06T14:08:49Z"	"DET"	"Brian Branch"	"4692025"	"00-0039141"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	2
+"2026-10-06T14:08:49Z"	"DET"	"Bishop Fitzgerald"	"5151810"	"00-0040914"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	2
+"2026-10-06T14:08:49Z"	"DET"	"Rock Ya-Sin"	"3910229"	"00-0035637"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	2
+"2026-10-06T14:08:49Z"	"DET"	"Eric O'Neill"	"4892218"	"00-0041459"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	3
+"2026-10-06T14:08:49Z"	"DET"	"Skyler Gill-Howard"	"5103940"	"00-0041447"	"16"	"Base 4-3 D"	"25"	"Right Defensive Tackle"	"RDT"	3	3
+"2026-10-06T14:08:49Z"	"DET"	"Trevor Nowaske"	"5144894"	"00-0038660"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	3
+"2026-10-06T14:08:49Z"	"DET"	"Damone Clark"	"4362636"	"00-0037281"	"16"	"Base 4-3 D"	"26"	"Weakside Linebacker"	"WLB"	5	3
+"2026-10-06T14:08:49Z"	"DET"	"Thomas Harper"	"4569323"	"00-0039660"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	3
+"2026-10-06T14:08:49Z"	"DET"	"Kerby Joseph"	"4360383"	"00-0037667"	"16"	"Base 4-3 D"	"21"	"Free Safety"	"FS"	10	3
+"2026-10-06T14:08:49Z"	"DET"	"Khalil Dorsey"	"4027919"	"00-0036124"	"16"	"Base 4-3 D"	"19"	"Right Cornerback"	"RCB"	11	3
+"2026-10-06T14:08:49Z"	"DET"	"Payton Turner"	"4240269"	"00-0036926"	"16"	"Base 4-3 D"	"11"	"Left Defensive End"	"LDE"	1	4
+"2026-10-06T14:08:49Z"	"DET"	"Ahmed Hassanein"	"4710422"	"00-0040761"	"16"	"Base 4-3 D"	"13"	"Right Defensive End"	"RDE"	4	4
+"2026-10-06T14:08:49Z"	"DET"	"Avonte Maddox"	"3123938"	"00-0034377"	"16"	"Base 4-3 D"	"20"	"Strong Safety"	"SS"	9	4
+"2026-10-06T14:08:49Z"	"DET"	"Jake Bates"	"4689936"	"00-0039172"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-06T14:08:49Z"	"DET"	"Jack Fox"	"3916370"	"00-0035156"	"18"	"Special Teams"	"23"	"Punter"	"P"	2	1
+"2026-10-06T14:08:49Z"	"DET"	"Jack Fox"	"3916370"	"00-0035156"	"18"	"Special Teams"	"79"	"Holder"	"H"	3	1
+"2026-10-06T14:08:49Z"	"DET"	"Tom Kennedy"	"3126997"	"00-0035544"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	1
+"2026-10-06T14:08:49Z"	"DET"	"Tom Kennedy"	"3126997"	"00-0035544"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	1
+"2026-10-06T14:08:49Z"	"DET"	"Hogan Hatten"	"4571755"	"00-0039445"	"18"	"Special Teams"	"39"	"Long Snapper"	"LS"	6	1
+"2026-10-06T14:08:49Z"	"DET"	"Tay Martin"	"4245144"	"00-0037524"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-06T14:08:49Z"	"DET"	"Jacob Saylors"	"4383429"	"00-0038896"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	2
+"2026-10-06T14:08:49Z"	"DET"	"Sione Vaki"	"4912274"	"00-0039364"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-06T14:08:49Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-06T14:08:49Z"	"DET"	"Penei Sewell"	"4373825"	"00-0036880"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	1
+"2026-10-06T14:08:49Z"	"DET"	"Christian Mahogany"	"4427864"	"00-0039408"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	1
+"2026-10-06T14:08:49Z"	"DET"	"Juice Scruggs"	"4361425"	"00-0038936"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	1
+"2026-10-06T14:08:49Z"	"DET"	"Tate Ratledge"	"4429035"	"00-0040728"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	1
+"2026-10-06T14:08:49Z"	"DET"	"Blake Miller"	"5081450"	"00-0011237"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	1
+"2026-10-06T14:08:49Z"	"DET"	"Jared Goff"	"3046779"	"00-0033106"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T14:08:49Z"	"DET"	"Sam LaPorta"	"4430027"	"00-0039065"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-06T14:08:49Z"	"DET"	"Jahmyr Gibbs"	"4429795"	"00-0039139"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T14:08:49Z"	"DET"	"Jameson Williams"	"4426388"	"00-0037240"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-06T14:08:49Z"	"DET"	"Giovanni Manu"	"5209589"	"00-0039362"	"21"	"3WR 1TE"	"2"	"Left Tackle"	"LT"	3	2
+"2026-10-06T14:08:49Z"	"DET"	"Ben Bartch"	"4611506"	"00-0036272"	"21"	"3WR 1TE"	"3"	"Left Guard"	"LG"	4	2
+"2026-10-06T14:08:49Z"	"DET"	"Seth McLaughlin"	"4429187"	"00-0040374"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	2
+"2026-10-06T14:08:49Z"	"DET"	"Miles Frazier"	"4608890"	"00-0040193"	"21"	"3WR 1TE"	"5"	"Right Guard"	"RG"	6	2
+"2026-10-06T14:08:49Z"	"DET"	"Larry Borom"	"4241217"	"00-0036905"	"21"	"3WR 1TE"	"6"	"Right Tackle"	"RT"	7	2
+"2026-10-06T14:08:49Z"	"DET"	"Joshua Dobbs"	"3044720"	"00-0033949"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	2
+"2026-10-06T14:08:49Z"	"DET"	"Brock Wright"	"4242392"	"00-0036754"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-06T14:08:49Z"	"DET"	"Sione Vaki"	"4912274"	"00-0039364"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	2
+"2026-10-06T14:08:49Z"	"DET"	"Isaac TeSlaa"	"5123663"	"00-0040669"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-06T14:08:49Z"	"DET"	"Cade Mays"	"4361788"	"00-0037297"	"21"	"3WR 1TE"	"4"	"Center"	"C"	5	3
+"2026-10-06T14:08:49Z"	"DET"	"Jackson Meeks"	"4602788"	"00-0040390"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	3
+"2026-10-06T14:08:49Z"	"DET"	"Jacob Saylors"	"4383429"	"00-0038896"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	3
+"2026-10-06T14:08:49Z"	"DET"	"Tom Kennedy"	"3126997"	"00-0035544"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-06T14:08:49Z"	"DET"	"Tyler Conklin"	"3915486"	"00-0034270"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	4
+"2026-10-06T14:08:49Z"	"DET"	"Isiah Pacheco"	"4361529"	"00-0037197"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-06T14:08:49Z"	"DET"	"Tay Martin"	"4245144"	"00-0037524"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	5
+"2026-10-06T14:08:49Z"	"DET"	"Kendrick Law"	"4685441"	"00-0041446"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	6
+"2026-10-06T14:08:49Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-06T14:08:49Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T14:08:49Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-06T14:08:49Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T14:08:49Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-06T14:08:49Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-06T14:08:49Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-06T14:08:49Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-06T14:08:49Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-06T14:08:49Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-06T14:08:49Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-06T14:08:49Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-06T06:02:22Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-06T06:02:22Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-06T06:02:22Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T06:02:22Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-06T06:02:22Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T06:02:22Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T06:02:22Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T06:02:22Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-06T06:02:22Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-06T06:02:22Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-06T06:02:22Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T06:02:22Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-06T06:02:22Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-06T06:02:22Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-06T06:02:22Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T06:02:22Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-06T06:02:22Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-06T06:02:22Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-06T06:02:22Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-06T06:02:22Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-06T06:02:22Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-06T06:02:22Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-06T06:02:22Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-06T06:02:22Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-06T06:02:22Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-05T15:53:14Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-05T15:53:14Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-05T15:53:14Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-05T15:53:14Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-05T15:53:14Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-05T15:53:14Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-05T15:53:14Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-05T15:53:14Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-05T15:53:14Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-05T15:53:14Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-05T15:53:14Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-05T15:53:14Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-05T15:53:14Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-05T15:53:14Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-05T15:53:14Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-05T15:53:14Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-05T15:53:14Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-05T15:53:14Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-05T15:53:14Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-05T15:53:14Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-05T15:53:14Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-05T15:53:14Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-05T15:53:14Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-05T15:53:14Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-05T15:53:14Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-05T06:02:21Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-05T06:02:21Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-05T06:02:21Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-05T06:02:21Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-05T06:02:21Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-05T06:02:21Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-05T06:02:21Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-05T06:02:21Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-05T06:02:21Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-05T06:02:21Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-05T06:02:21Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-05T06:02:21Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-05T06:02:21Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-05T06:02:21Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-05T06:02:21Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-05T06:02:21Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-05T06:02:21Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-05T06:02:21Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-05T06:02:21Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-05T06:02:21Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-05T06:02:21Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-05T06:02:21Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-05T06:02:21Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-05T06:02:21Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-05T06:02:21Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-04T13:09:16Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-04T13:09:16Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-04T13:09:16Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-04T13:09:16Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-04T13:09:16Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-04T13:09:16Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-04T13:09:16Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-04T13:09:16Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-04T13:09:16Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-04T13:09:16Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-04T13:09:16Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-04T13:09:16Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-04T13:09:16Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-04T13:09:16Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-04T13:09:16Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-04T13:09:16Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-04T13:09:16Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-04T13:09:16Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-04T13:09:16Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-04T13:09:16Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-04T13:09:16Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-04T13:09:16Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-04T13:09:16Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-04T13:09:16Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-04T13:09:16Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-04T06:02:08Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-04T06:02:08Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-04T06:02:08Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-04T06:02:08Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-04T06:02:08Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-04T06:02:08Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-04T06:02:08Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-04T06:02:08Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-04T06:02:08Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-04T06:02:08Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-04T06:02:08Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-04T06:02:08Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-04T06:02:08Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-04T06:02:08Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-04T06:02:08Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-04T06:02:08Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-04T06:02:08Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-04T06:02:08Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-04T06:02:08Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-04T06:02:08Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-04T06:02:08Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-04T06:02:08Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-04T06:02:08Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-04T06:02:08Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-04T06:02:08Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-03T12:27:18Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-03T12:27:18Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-03T12:27:18Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-03T12:27:18Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-03T12:27:18Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-03T12:27:18Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-03T12:27:18Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-03T12:27:18Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-03T12:27:18Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-03T12:27:18Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-03T12:27:18Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-03T12:27:18Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-03T12:27:18Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-03T12:27:18Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-03T12:27:18Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-03T12:27:18Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-03T12:27:18Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-03T12:27:18Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-03T12:27:18Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-03T12:27:18Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-03T12:27:18Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-03T12:27:18Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-03T12:27:18Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-03T12:27:18Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-03T12:27:18Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-03T06:02:25Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-03T06:02:25Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-03T06:02:25Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-03T06:02:25Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-03T06:02:25Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-03T06:02:25Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-03T06:02:25Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-03T06:02:25Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-03T06:02:25Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-03T06:02:25Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-03T06:02:25Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-03T06:02:25Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-03T06:02:25Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-03T06:02:25Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-03T06:02:25Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-03T06:02:25Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-03T06:02:25Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-03T06:02:25Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-03T06:02:25Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-03T06:02:25Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-03T06:02:25Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-03T06:02:25Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-03T06:02:25Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-03T06:02:25Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-03T06:02:25Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-02T13:49:21Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-02T13:49:21Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-02T13:49:21Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-02T13:49:21Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-02T13:49:21Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-02T13:49:21Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-02T13:49:21Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-02T13:49:21Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-02T13:49:21Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-02T13:49:21Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-02T13:49:21Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-02T13:49:21Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-02T13:49:21Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-02T13:49:21Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-02T13:49:21Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-02T13:49:21Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-02T13:49:21Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-02T13:49:21Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-02T13:49:21Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-02T13:49:21Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-02T13:49:21Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-02T13:49:21Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-02T13:49:21Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-02T13:49:21Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-02T13:49:21Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-02T06:02:14Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-02T06:02:14Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-02T06:02:14Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-02T06:02:14Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-02T06:02:14Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-02T06:02:14Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-02T06:02:14Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-02T06:02:14Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-02T06:02:14Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-02T06:02:14Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-02T06:02:14Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-02T06:02:14Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-02T06:02:14Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-02T06:02:14Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-02T06:02:14Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-02T06:02:14Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-02T06:02:14Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-02T06:02:14Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-02T06:02:14Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-02T06:02:14Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-02T06:02:14Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-02T06:02:14Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	4
+"2026-10-02T06:02:14Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-02T06:02:14Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-02T06:02:14Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-01T14:25:58Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-01T14:25:58Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-01T14:25:58Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T14:25:58Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-01T14:25:58Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T14:25:58Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T14:25:58Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-01T14:25:58Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T14:25:58Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-01T14:25:58Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-01T14:25:58Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-01T14:25:58Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-01T14:25:58Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-01T14:25:58Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-01T14:25:58Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-01T14:25:58Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-01T14:25:58Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-01T14:25:58Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-01T14:25:58Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-01T14:25:58Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-01T14:25:58Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-01T14:25:58Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T14:25:58Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-01T14:25:58Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-01T14:25:58Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-01T06:09:43Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-10-01T06:09:43Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-01T06:09:43Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T06:09:43Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-01T06:09:43Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T06:09:43Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T06:09:43Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-01T06:09:43Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T06:09:43Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-10-01T06:09:43Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-01T06:09:43Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-01T06:09:43Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-01T06:09:43Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-01T06:09:43Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-01T06:09:43Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-01T06:09:43Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-10-01T06:09:43Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-10-01T06:09:43Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-10-01T06:09:43Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-10-01T06:09:43Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-10-01T06:09:43Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-10-01T06:09:43Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-10-01T06:09:43Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-10-01T06:09:43Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-10-01T06:09:43Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-30T13:37:56Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-30T13:37:56Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-30T13:37:56Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T13:37:56Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-30T13:37:56Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T13:37:56Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T13:37:56Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-30T13:37:56Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T13:37:56Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-30T13:37:56Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-30T13:37:56Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-30T13:37:56Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-30T13:37:56Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-30T13:37:56Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-30T13:37:56Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-30T13:37:56Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-30T13:37:56Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-30T13:37:56Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-30T13:37:56Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-30T13:37:56Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-30T13:37:56Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-30T13:37:56Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T13:37:56Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-30T13:37:56Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-30T13:37:56Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-30T06:02:36Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-30T06:02:36Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-30T06:02:36Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T06:02:36Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-30T06:02:36Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T06:02:36Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T06:02:36Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-30T06:02:36Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T06:02:36Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-30T06:02:36Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-30T06:02:36Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-30T06:02:36Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-30T06:02:36Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-30T06:02:36Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-30T06:02:36Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-30T06:02:36Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-30T06:02:36Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-30T06:02:36Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-30T06:02:36Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-30T06:02:36Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-30T06:02:36Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-30T06:02:36Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-30T06:02:36Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-30T06:02:36Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-30T06:02:36Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-29T13:59:18Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-29T13:59:18Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-29T13:59:18Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T13:59:18Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-29T13:59:18Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T13:59:18Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T13:59:18Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-29T13:59:18Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T13:59:18Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-29T13:59:18Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-29T13:59:18Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-29T13:59:18Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-29T13:59:18Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-29T13:59:18Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-29T13:59:18Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-29T13:59:18Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-29T13:59:18Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-29T13:59:18Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-29T13:59:18Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-29T13:59:18Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-29T13:59:18Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-29T13:59:18Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T13:59:18Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-29T13:59:18Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-29T13:59:18Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-29T06:02:44Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-29T06:02:44Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-29T06:02:44Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T06:02:44Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-29T06:02:44Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T06:02:44Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T06:02:44Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-29T06:02:44Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T06:02:44Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-29T06:02:44Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-29T06:02:44Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-29T06:02:44Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-29T06:02:44Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-29T06:02:44Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-29T06:02:44Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-29T06:02:44Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-29T06:02:44Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-29T06:02:44Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-29T06:02:44Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-29T06:02:44Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-29T06:02:44Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-29T06:02:44Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-29T06:02:44Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-29T06:02:44Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-29T06:02:44Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-28T15:17:44Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-28T15:17:44Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-28T15:17:44Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T15:17:44Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-28T15:17:44Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T15:17:44Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T15:17:44Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-28T15:17:44Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T15:17:44Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-28T15:17:44Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-28T15:17:44Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-28T15:17:44Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-28T15:17:44Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-28T15:17:44Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-28T15:17:44Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-28T15:17:44Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-28T15:17:44Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-28T15:17:44Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-28T15:17:44Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-28T15:17:44Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-28T15:17:44Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-28T15:17:44Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T15:17:44Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-28T15:17:44Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-28T15:17:44Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-28T06:01:42Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-28T06:01:42Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-28T06:01:42Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T06:01:42Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-28T06:01:42Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T06:01:42Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T06:01:42Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-28T06:01:42Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T06:01:42Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-28T06:01:42Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-28T06:01:42Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-28T06:01:42Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-28T06:01:42Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-28T06:01:42Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-28T06:01:42Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-28T06:01:42Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-28T06:01:42Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-28T06:01:42Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-28T06:01:42Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-28T06:01:42Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-28T06:01:42Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-28T06:01:42Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-28T06:01:42Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-28T06:01:42Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-28T06:01:42Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-27T12:56:55Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-27T12:56:55Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-27T12:56:55Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T12:56:55Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-27T12:56:55Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T12:56:55Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T12:56:55Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-27T12:56:55Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T12:56:55Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-27T12:56:55Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-27T12:56:55Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-27T12:56:55Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-27T12:56:55Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-27T12:56:55Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-27T12:56:55Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-27T12:56:55Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-27T12:56:55Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-27T12:56:55Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-27T12:56:55Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-27T12:56:55Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-27T12:56:55Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-27T12:56:55Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T12:56:55Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-27T12:56:55Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-27T12:56:55Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-27T06:01:58Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-27T06:01:58Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-27T06:01:58Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T06:01:58Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-27T06:01:58Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T06:01:58Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T06:01:58Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-27T06:01:58Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T06:01:58Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-27T06:01:58Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-27T06:01:58Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-27T06:01:58Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-27T06:01:58Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-27T06:01:58Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-27T06:01:58Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-27T06:01:58Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-27T06:01:58Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-27T06:01:58Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-27T06:01:58Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-27T06:01:58Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-27T06:01:58Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-27T06:01:58Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-27T06:01:58Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-27T06:01:58Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-27T06:01:58Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-26T12:12:29Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"18"	"Special Teams"	"77"	"Kick Returner"	"KR"	5	3
+"2026-09-26T12:12:29Z"	"ARI"	"Trey McBride"	"4361307"	"00-0037744"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-26T12:12:29Z"	"ARI"	"Jeremiyah Love"	"4870808"	"00-0041027"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-26T12:12:29Z"	"ATL"	"Kyle Pitts Sr."	"4360248"	"00-0036970"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-26T12:12:29Z"	"ATL"	"Bijan Robinson"	"4430807"	"00-0038542"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-26T12:12:29Z"	"BAL"	"Derrick Henry"	"3043078"	"00-0032764"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-26T12:12:29Z"	"BUF"	"Josh Allen"	"3918298"	"00-0034857"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-26T12:12:29Z"	"BUF"	"James Cook III"	"4379399"	"00-0037248"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-26T12:12:29Z"	"BUF"	"Joshua Palmer"	"4242433"	"00-0036988"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	4
+"2026-09-26T12:12:29Z"	"CIN"	"Ja'Marr Chase"	"4362628"	"00-0036900"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-26T12:12:29Z"	"CIN"	"Joe Burrow"	"3915511"	"00-0036442"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-26T12:12:29Z"	"DAL"	"Brandon Aubrey"	"3953687"	"00-0037692"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-26T12:12:29Z"	"DET"	"Amon-Ra St. Brown"	"4374302"	"00-0036963"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-26T12:12:29Z"	"GB"	"Trey Smack"	"4869461"	"00-0040899"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-26T12:12:29Z"	"GB"	"Jordan Love"	"4036378"	"00-0036264"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-26T12:12:29Z"	"HOU"	"Ka'imi Fairbairn"	"2971573"	"00-0032726"	"18"	"Special Teams"	"22"	"Place kicker"	"PK"	1	1
+"2026-09-26T12:12:29Z"	"HOU"	"C.J. Stroud"	"4432577"	"00-0039163"	"21"	"3WR 1TE"	"8"	"Quarterback"	"QB"	9	1
+"2026-09-26T12:12:29Z"	"IND"	"Keenan Allen"	"15818"	"00-0030279"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	2	2
+"2026-09-26T12:12:29Z"	"LAC"	"Oronde Gadsden"	"4595342"	"00-0040189"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	2
+"2026-09-26T12:12:29Z"	"MIN"	"Justin Jefferson"	"4262921"	"00-0036322"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1
+"2026-09-26T12:12:29Z"	"NE"	"Hunter Henry"	"3046439"	"00-0033090"	"21"	"3WR 1TE"	"7"	"Tight End"	"TE"	10	1
+"2026-09-26T12:12:29Z"	"NO"	"Travis Etienne Jr."	"4239996"	"00-0036973"	"21"	"3WR 1TE"	"9"	"Running Back"	"RB"	11	1
+"2026-09-26T12:12:29Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"18"	"Special Teams"	"76"	"Punt Returner"	"PR"	4	2
+"2026-09-26T12:12:29Z"	"PHI"	"Makai Lemon"	"4870795"	"00-0040867"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	8	3
+"2026-09-26T12:12:29Z"	"SEA"	"Jaxon Smith-Njigba"	"4430878"	"00-0038543"	"21"	"3WR 1TE"	"1"	"Wide Receiver"	"WR"	1	1

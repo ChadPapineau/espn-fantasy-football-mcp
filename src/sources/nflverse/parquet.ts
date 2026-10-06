@@ -37,11 +37,17 @@ export interface OpenedParquet {
 
 const MAGIC = [0x50, 0x41, 0x52, 0x31]; // "PAR1"
 
-/** Reads and parses a parquet file; anything that is not one fails with `not_parquet`. */
-export async function openParquet(path: string): Promise<OpenedParquet> {
+/**
+ * Reads and parses a parquet file; anything that is not one fails with `not_parquet`. `maxBytes`
+ * (default MAX_RELEASE_FILE_BYTES) is the source's cap — the pbp source passes PBP_MAX_FILE_BYTES.
+ */
+export async function openParquet(
+  path: string,
+  maxBytes: number = MAX_RELEASE_FILE_BYTES,
+): Promise<OpenedParquet> {
   const b = await readFile(path);
   const n = b.length;
-  if (n > MAX_RELEASE_FILE_BYTES) {
+  if (n > maxBytes) {
     throw new NflverseSourceError("not_parquet", "nflverse: file exceeds the size cap");
   }
   const magicOk =
