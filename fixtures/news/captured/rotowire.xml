@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>RotoWire.com Latest NFL News</title>
+    <copyright>Copyright (c) 2026 Roto Sports, Inc, All rights reserved.</copyright>
+    <description>Fantasy Sports from RotoWire.com</description>
+    <category>Fantasy Sports</category>
+    <language>en-us</language>
+    <ttl>10</ttl>
+    <image>
+      <title>RotoWire.com Fantasy Sports</title>
+      <width>120</width>
+      <height>30</height>
+      <link>https://www.rotowire.com</link>
+      <url>https://assets.rotowire.com/images/logo_roto_small.gif</url>
+    </image>
+    <link>https://www.rotowire.com</link>
+    <item>
+        <guid>nfl641059</guid>
+        <title>Joe Mixon: Not joining Seattle after all</title>
+        <link>https://www.rotowire.com//football/player/joe-mixon-11707</link>
+        <description>Fixture placeholder: the feed's description text is not committed.</description>
+        <pubDate>Tue, 06 Oct 2026 11:05:00 AM PDT</pubDate>
+    </item>
+    <item>
+        <guid>nfl641057</guid>
+        <title>Lamar Jackson: Could miss multiple games</title>
+        <link>https://www.rotowire.com//football/player/lamar-jackson-12561</link>
+        <description>Fixture placeholder: the feed's description text is not committed.</description>
+        <pubDate>Tue, 06 Oct 2026 6:12:00 AM PDT</pubDate>
+    </item>
+    <item>
+        <guid>nfl641055</guid>
+        <title>Kyle Pitts: Uptick in production during big win</title>
+        <link>https://www.rotowire.com//football/player/kyle-pitts-15265</link>
+        <description>Fixture placeholder: the feed's description text is not committed.</description>
+        <pubDate>Mon, 05 Oct 2026 9:24:00 PM PDT</pubDate>
+    </item>
+    <item>
+        <guid>nfl641054</guid>
+        <title>Juwan Johnson: Stays busy in Week 4 loss</title>
+        <link>https://www.rotowire.com//football/player/juwan-johnson-14630</link>
+        <description>Fixture placeholder: the feed's description text is not committed.</description>
+        <pubDate>Mon, 05 Oct 2026 9:20:00 PM PDT</pubDate>
+    </item>
+    <item>
+        <guid>nfl641053</guid>
+        <title>Alvin Kamara: Two rush TDs in return to lead role</title>
+        <link>https://www.rotowire.com//football/player/alvin-kamara-11732</link>
+        <description>Fixture placeholder: the feed's description text is not committed.</description>
+        <pubDate>Mon, 05 Oct 2026 9:15:00 PM PDT</pubDate>
+    </item>
+  </channel>
+</rss>
