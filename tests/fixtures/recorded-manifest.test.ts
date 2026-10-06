@@ -19,6 +19,7 @@ import { leagueFormat } from "../../scripts/espn-fixture/league-format.js";
 import {
   KEEP_HEADERS,
   MAX_FIXTURE_BYTES,
+  deriveIncomplete,
   type FixtureManifest,
   type ManifestEntry,
 } from "../../scripts/espn-fixture/pipeline.js";
@@ -108,6 +109,31 @@ describe("fixtures/espn/manifest.json", () => {
       expect(leagueFormat(read(e).body)).toEqual(l.format);
       for (const f of files.filter((x) => x.league === slot)) expect(f.format).toEqual(l.format);
     }
+  });
+
+  it("CAT-12: `incomplete` re-derives from the committed bodies and the withheld paths", () => {
+    for (const e of files) {
+      let whole: Json;
+      if (e.part === null) whole = read(e).body;
+      else {
+        const base = e.path.replace(/\.p\d+\.json$/, "");
+        const parts = files
+          .filter((f) => f.part !== null && f.path.replace(/\.p\d+\.json$/, "") === base)
+          .sort((a, b) => (a.part?.index ?? 0) - (b.part?.index ?? 0));
+        const bodies = parts.map((p) => read(p).body as JsonObject);
+        const array = e.part.array;
+        whole = {
+          ...bodies[0],
+          [array]: bodies.flatMap((b) => (b[array] as Json[] | undefined) ?? []),
+        };
+      }
+      expect(e.incomplete, e.path).toEqual(deriveIncomplete(whole, e.withheld));
+      expect(e.incomplete === null, e.path).toBe(e.withheld.length === 0);
+      for (const r of e.replaced) expect(r).toMatch(/\.player\.(?:fullName|firstName|lastName)$/);
+    }
+    // the artefacts are visible: some box-score weeks are missing a matchup, some rosters an entry
+    expect(files.some((f) => (f.incomplete?.matchups_missing ?? 0) > 0)).toBe(true);
+    expect(files.some((f) => (f.incomplete?.team_ids.length ?? 0) > 0)).toBe(true);
   });
 
   it("split responses are contiguous parts 1..n sharing every non-array top-level key", () => {

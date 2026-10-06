@@ -107,6 +107,8 @@
       "pruned": [],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": ["details", "messages"],
       "bytes": 301,
@@ -141,6 +143,8 @@
       "pruned": [],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": ["details", "messages"],
       "bytes": 167,
@@ -184,6 +188,8 @@
       "pruned": [],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": ["players", "positionAgainstOpponent"],
       "bytes": 336357,
@@ -233,6 +239,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": ["$.schedule[1]"],
+      "replaced": [],
+      "incomplete": { "team_ids": [1, 3], "matchups_missing": 1 },
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -293,6 +301,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": ["$.schedule[0]"],
+      "replaced": [],
+      "incomplete": { "team_ids": [3, 5], "matchups_missing": 1 },
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -353,6 +363,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -417,6 +429,8 @@
         "$.schedule[18].home.rosterForMatchupPeriod.entries[7]",
         "$.teams[1].roster.entries[13]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -482,6 +496,8 @@
         "$.teams[5].roster.entries[9]",
         "$.teams[6].roster.entries[14]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 5, 6, 8], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -546,6 +562,8 @@
         "$.teams[5].roster.entries[9]",
         "$.teams[6].roster.entries[14]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 5, 6, 8], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -611,6 +629,8 @@
         "$.teams[6].roster.entries[13]",
         "$.teams[8].roster.entries[15]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 5, 6, 8, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -676,6 +696,8 @@
         "$.teams[6].roster.entries[13]",
         "$.teams[8].roster.entries[15]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 5, 6, 8, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -740,6 +762,8 @@
         "$.teams[6].roster.entries[13]",
         "$.teams[8].roster.entries[14]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 5, 6, 8, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -804,6 +828,8 @@
         "$.teams[6].roster.entries[13]",
         "$.teams[8].roster.entries[14]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 5, 6, 8, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -862,6 +888,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -920,6 +948,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -980,6 +1010,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1040,6 +1072,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "gameId",
@@ -1107,6 +1141,8 @@
       "pruned": [],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": ["players", "positionAgainstOpponent"],
       "bytes": 367676,
@@ -1165,6 +1201,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -1234,6 +1272,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -1303,6 +1343,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": ["$.schedule[1]"],
+      "replaced": [],
+      "incomplete": { "team_ids": [3, 7], "matchups_missing": 1 },
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -1376,6 +1418,8 @@
         "$.schedule[15].away.rosterForMatchupPeriod.entries[8]",
         "$.teams[2].roster.entries[12]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1449,6 +1493,8 @@
         "$.teams[5].roster.entries[6]",
         "$.teams[9].roster.entries[7]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [1, 4, 6, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1521,6 +1567,8 @@
         "$.teams[5].roster.entries[6]",
         "$.teams[9].roster.entries[7]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [1, 4, 6, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1593,6 +1641,8 @@
         "$.teams[5].roster.entries[6]",
         "$.teams[9].roster.entries[7]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [1, 4, 6, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1665,6 +1715,8 @@
         "$.teams[5].roster.entries[6]",
         "$.teams[9].roster.entries[7]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [1, 4, 6, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1738,6 +1790,8 @@
         "$.teams[5].roster.entries[6]",
         "$.teams[9].roster.entries[7]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [1, 3, 4, 6, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1811,6 +1865,8 @@
         "$.teams[5].roster.entries[6]",
         "$.teams[9].roster.entries[7]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [1, 3, 4, 6, 10], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1878,6 +1934,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1945,6 +2003,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2022,6 +2082,8 @@
       "pruned": [],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": ["players", "positionAgainstOpponent"],
       "bytes": 329014,
@@ -2083,6 +2145,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": ["$.schedule[0]"],
+      "replaced": [],
+      "incomplete": { "team_ids": [1, 3], "matchups_missing": 1 },
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -2155,6 +2219,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": ["$.schedule[0]"],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3], "matchups_missing": 1 },
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -2227,6 +2293,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": ["$.schedule[1]"],
+      "replaced": [],
+      "incomplete": { "team_ids": [3, 6], "matchups_missing": 1 },
       "stats_official": true,
       "top_level_keys": [
         "draftDetail",
@@ -2303,6 +2371,8 @@
         "$.schedule[18].away.rosterForMatchupPeriod.entries[10]",
         "$.teams[2].roster.entries[10]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2381,6 +2451,8 @@
         "$.teams[10].roster.entries[7]",
         "$.teams[11].roster.entries[5]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2458,6 +2530,8 @@
         "$.teams[10].roster.entries[7]",
         "$.teams[11].roster.entries[5]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2535,6 +2609,8 @@
         "$.teams[10].roster.entries[7]",
         "$.teams[11].roster.entries[5]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2612,6 +2688,8 @@
         "$.teams[10].roster.entries[7]",
         "$.teams[11].roster.entries[5]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2689,6 +2767,8 @@
         "$.teams[10].roster.entries[7]",
         "$.teams[11].roster.entries[5]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2766,6 +2846,8 @@
         "$.teams[10].roster.entries[7]",
         "$.teams[11].roster.entries[5]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2843,6 +2925,8 @@
         "$.teams[10].roster.entries[7]",
         "$.teams[11].roster.entries[5]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2920,6 +3004,8 @@
         "$.teams[10].roster.entries[7]",
         "$.teams[11].roster.entries[5]"
       ],
+      "replaced": [],
+      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2990,6 +3076,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -3060,6 +3148,8 @@
       "pruned": ["rankings"],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -3130,6 +3220,8 @@
       "pruned": [],
       "part": null,
       "withheld": ["$.settings.proTeams[16].teamPlayersByPosition"],
+      "replaced": [],
+      "incomplete": { "team_ids": [], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": ["display", "settings"],
       "bytes": 130779,
@@ -3163,6 +3255,8 @@
       "pruned": [],
       "part": null,
       "withheld": [],
+      "replaced": [],
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "abbrev",

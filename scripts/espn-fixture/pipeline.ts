@@ -389,6 +389,17 @@ export interface ManifestEntry {
    * paths into the scrubbed body as it stood before the removal. Never a value.
    */
   withheld: string[];
+  /**
+   * Player-name leaves REPLACED (`Player <id>`) instead of withholding their whole unit, because the
+   * only deny-list match in the unit was that public name (CAT-12). JSON paths; never a value.
+   */
+  replaced: string[];
+  /**
+   * What the withheld units leave missing, value-free (CAT-12): the teams whose roster lost an
+   * entry or whose matchup row was removed, and how many matchup rows are gone — so fixture-mode
+   * tests never treat an artificial hole as a real empty slot or a missing game. null = complete.
+   */
+  incomplete: { team_ids: number[]; matchups_missing: number } | null;
   stats_official: boolean | null;
   top_level_keys: string[];
   bytes: number;
@@ -468,15 +479,109 @@ export function withholdUnit(
   return null;
 }
 
-/** Removes (omit) or empties the given units; units index the same body, applied together. */
+/** Player-name keys whose value may be replaced instead of withholding the unit (CAT-12). */
+export const REPLACEABLE_NAME_KEYS = new Set(["fullName", "firstName", "lastName"]);
+
+/**
+ * When the deny-listed line is a public player's NAME leaf (`…player.fullName|firstName|lastName`)
+ * inside a body we can address, the leaf is replaced by `Player <id>` (the public ESPN id) instead
+ * of removing the whole unit — the stats, slot and scoring fields stay (CAT-12). Returns null
+ * when the leaf is anything else (the caller withholds the unit).
+ */
+export function replaceableNameLeaf(
+  body: Json,
+  segs: readonly Seg[],
+): { segs: Seg[]; action: "replace"; value: string } | null {
+  const last = segs[segs.length - 1];
+  if (typeof last !== "string" || !REPLACEABLE_NAME_KEYS.has(last)) return null;
+  if (segs[segs.length - 2] !== "player") return null;
+  let cur: Json = body;
+  for (const s of segs.slice(0, -1)) {
+    if (typeof s === "number" ? !Array.isArray(cur) : !isObject(cur)) return null;
+    cur = (cur as Record<string, Json>)[s as never] ?? null;
+  }
+  if (!isObject(cur) || typeof cur[last] !== "string") return null;
+  const id = cur.id;
+  if (typeof id !== "number" || !Number.isSafeInteger(id)) return null;
+  return { segs: [...segs], action: "replace", value: `Player ${String(id)}` };
+}
+
+/** The value at `segs` in `body`, or undefined when the path does not resolve. */
+export function leafAt(body: Json, segs: readonly Seg[]): Json | undefined {
+  let cur: Json | undefined = body;
+  for (const s of segs) {
+    if (typeof s === "number") cur = Array.isArray(cur) ? cur[s] : undefined;
+    else cur = isObject(cur) && Object.prototype.hasOwnProperty.call(cur, s) ? cur[s] : undefined;
+    if (cur === undefined) return undefined;
+  }
+  return cur;
+}
+
+/**
+ * The value-free incompleteness a set of withheld units leaves in a COMMITTED (post-withhold)
+ * body (CAT-12): `teams[i].roster.entries[j]` → teams[i].id; `schedule[k].<side>.….entries[j]` →
+ * that side's teamId; a whole `schedule[k]` row (box scores) → every team of `teams[]` no
+ * remaining row names, and one missing matchup per removed row. null when nothing was withheld.
+ */
+export function deriveIncomplete(
+  body: Json,
+  withheld: readonly string[],
+): { team_ids: number[]; matchups_missing: number } | null {
+  if (!withheld.length) return null;
+  const teamIds = new Set<number>();
+  let matchupsMissing = 0;
+  const b = isObject(body) ? body : null;
+  const teams = b && Array.isArray(b.teams) ? b.teams : [];
+  const schedule = b && Array.isArray(b.schedule) ? b.schedule : [];
+  for (const w of withheld) {
+    let m = /^\$\.teams\[(\d+)\]\.roster\.entries\[\d+\]$/.exec(w);
+    if (m) {
+      const t = teams[Number(m[1])];
+      if (isObject(t) && typeof t.id === "number") teamIds.add(t.id);
+      continue;
+    }
+    m = /^\$\.schedule\[(\d+)\]\.(home|away)\.[A-Za-z]+\.entries\[\d+\]$/.exec(w);
+    if (m) {
+      const row = schedule[Number(m[1])];
+      const side = isObject(row) ? row[m[2] ?? ""] : null;
+      if (isObject(side) && typeof side.teamId === "number") teamIds.add(side.teamId);
+      continue;
+    }
+    if (/^\$\.schedule\[\d+\]$/.test(w)) {
+      matchupsMissing++;
+      continue;
+    }
+  }
+  if (matchupsMissing > 0) {
+    const playing = new Set<number>();
+    for (const row of schedule)
+      if (isObject(row))
+        for (const side of ["home", "away"]) {
+          const s = row[side];
+          if (isObject(s) && typeof s.teamId === "number") playing.add(s.teamId);
+        }
+    for (const t of teams)
+      if (isObject(t) && typeof t.id === "number" && !playing.has(t.id)) teamIds.add(t.id);
+  }
+  return { team_ids: [...teamIds].sort((x, y) => x - y), matchups_missing: matchupsMissing };
+}
+
+/** Removes (omit), empties or replaces (a string leaf) the given units; applied together. */
 export function applyUnits(
   body: Json,
-  units: readonly { segs: Seg[]; action: "omit" | "empty" }[],
+  units: readonly (
+    { segs: Seg[]; action: "omit" | "empty" } | { segs: Seg[]; action: "replace"; value: string }
+  )[],
 ): Json {
   const key = (segs: readonly Seg[]) => JSON.stringify(segs);
   const omit = new Set(units.filter((u) => u.action === "omit").map((u) => key(u.segs)));
   const empty = new Set(units.filter((u) => u.action === "empty").map((u) => key(u.segs)));
+  const replace = new Map(
+    units.flatMap((u) => (u.action === "replace" ? [[key(u.segs), u.value] as const] : [])),
+  );
   const walk = (v: Json, segs: Seg[]): Json => {
+    const r = replace.get(key(segs));
+    if (r !== undefined && typeof v === "string") return r;
     if (empty.has(key(segs))) return Array.isArray(v) ? [] : isObject(v) ? emptyObject() : null;
     if (Array.isArray(v)) {
       const out: Json[] = [];
@@ -724,6 +829,7 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
     let rawBody = p.rawCanonical;
     let whole = await formatJson(body, "recorded");
     const withheld: string[] = [];
+    const replaced: string[] = [];
     let withholdFile = false;
     for (let round = 0; round < 3; round++) {
       const r = scan(whole, `${base}.json`);
@@ -738,9 +844,19 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
         .map((f) => /:(\d+)$/.exec(f)?.[1])
         .filter((x): x is string => x !== undefined)
         .map(Number);
-      const units: { segs: Seg[]; action: "omit" | "empty" }[] = [];
+      const units: (
+        | { segs: Seg[]; action: "omit" | "empty" }
+        | { segs: Seg[]; action: "replace"; value: string }
+      )[] = [];
       for (const segs of segmentsAtLines(whole, lines).values()) {
-        const u = withholdUnit(env.views[0] ?? "", segs);
+        // a public player's name leaf is replaced, never the whole unit (CAT-12) — unless the
+        // placeholder would read the same, or a replacement already failed to clear this line
+        const rep = replaceableNameLeaf(body, segs);
+        const usable =
+          rep !== null &&
+          !replaced.includes(formatPath(rep.segs)) &&
+          rep.value !== leafAt(body, rep.segs);
+        const u = usable ? rep : withholdUnit(env.views[0] ?? "", segs);
         if (u === null) withholdFile = true;
         else if (!units.some((x) => JSON.stringify(x.segs) === JSON.stringify(u.segs)))
           units.push(u);
@@ -749,7 +865,21 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
         withholdFile = true;
         break;
       }
-      for (const u of units) withheld.push(formatPath(u.segs));
+      for (const u of units) {
+        const p = formatPath(u.segs);
+        if (u.action === "replace") replaced.push(p);
+        else {
+          withheld.push(p);
+          // a replaced leaf inside a now-withheld unit is no longer "replaced" — it is gone
+          for (let i = replaced.length - 1; i >= 0; i--)
+            if (
+              replaced[i] === p ||
+              replaced[i]?.startsWith(`${p}.`) ||
+              replaced[i]?.startsWith(`${p}[`)
+            )
+              replaced.splice(i, 1);
+        }
+      }
       body = applyUnits(body, units);
       rawBody = applyUnits(rawBody, units);
       whole = await formatJson(body, "recorded");
@@ -845,6 +975,9 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
         pruned: p.pruned,
         part: part.part,
         withheld,
+        replaced,
+        // the paths index the WHOLE response (before any split): derive on the whole body
+        incomplete: deriveIncomplete(body, withheld),
         stats_official: env.stats_official,
         top_level_keys: isObject(part.body) ? Object.keys(part.body).sort() : [],
         bytes,

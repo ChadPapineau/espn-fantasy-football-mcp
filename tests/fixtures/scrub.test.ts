@@ -618,6 +618,35 @@ describe("scrubRun — capture → scrub → freeze over a synthetic raw run", (
       for (const w of f.withheld) expect(w).toMatch(/^\$(?:\.[A-Za-z_]\w*|\[\d+\])+$/);
   });
 
+  it("CAT-12: a deny-listed public player NAME is replaced (`Player <id>`), the unit and its scoring kept", async () => {
+    const dir = tmp?.dir ?? "";
+    const run = await makeRawRun(path.join(dir, "raw"), { count: 1 });
+    const env = readRaw(run.rawDir, "league-a", "mRoster.sp1");
+    if (!env) throw new Error("missing capture");
+    const body = JSON.parse(env.bodyText) as JsonObject;
+    const teams = body.teams as JsonObject[];
+    const entry = ((teams[1]?.roster as JsonObject).entries as JsonObject[])[1]!;
+    const player = (entry.playerPoolEntry as JsonObject).player as JsonObject;
+    const term = ["Gridiron", "Hero"].join(" ");
+    player.fullName = term;
+    writeRaw(run.rawDir, { ...env, bodyText: JSON.stringify(body) });
+    const r = await scrubRun({
+      rawDir: run.rawDir,
+      outRoot: path.join(dir, "out"),
+      scan: inProcessScan([term]),
+      withholdDenylisted: true,
+    });
+    const roster = r.manifest.files.find((f) => f.path === "recorded/league-a/mRoster.sp1.json");
+    expect(roster?.withheld).toEqual([]);
+    expect(roster?.replaced).toEqual([
+      "$.teams[1].roster.entries[1].playerPoolEntry.player.fullName",
+    ]);
+    expect(roster?.incomplete).toBeNull();
+    const text = r.outputs.find((o) => o.rel === "recorded/league-a/mRoster.sp1.json")?.text ?? "";
+    expect(text).not.toContain(term);
+    expect(text).toContain(`Player ${String(player.id as number)}`);
+  });
+
   it("--withhold-denylisted never hides a non-deny-list finding: a real secret still refuses the run", async () => {
     const dir = tmp?.dir ?? "";
     const run = await makeRawRun(path.join(dir, "raw"), { count: 1 });

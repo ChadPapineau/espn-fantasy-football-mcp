@@ -21,9 +21,13 @@ import { findCookieMaterial, isInside, rawDirRefusal } from "../../scripts/espn-
 import { pathsAtLines } from "../../scripts/espn-fixture/json-lines.js";
 import { leagueFormat, matchupPeriodOf } from "../../scripts/espn-fixture/league-format.js";
 import {
+  REPLACEABLE_NAME_KEYS,
   annotateFindings,
+  applyUnits,
+  deriveIncomplete,
   konaFilter,
   officialWeeks,
+  replaceableNameLeaf,
 } from "../../scripts/espn-fixture/pipeline.js";
 import { ROOT, tempDir } from "../lint/helpers.js";
 import { proTeamSchedules } from "./helpers/synthetic.js";
@@ -275,5 +279,81 @@ describe("guards", () => {
     expect(rawDirRefusal(path.join(tmp.dir, "plain", "raw"), ROOT)).toBeNull();
     expect(rawDirRefusal(path.join(tmp.dir, "x"), ROOT, () => false)).toBeNull();
     expect(rawDirRefusal(path.join(ROOT, "fixtures", "raw"), ROOT)).toBe("inside_repo");
+  });
+});
+
+describe("CAT-12: replace a public name leaf instead of withholding its unit; derive incompleteness", () => {
+  const body = {
+    teams: [
+      {
+        id: 4,
+        roster: {
+          entries: [
+            { playerPoolEntry: { player: { id: 9001, fullName: "Some Player", stats: [] } } },
+          ],
+        },
+      },
+      { id: 7, roster: { entries: [] } },
+    ],
+    schedule: [
+      { home: { teamId: 4, rosterForCurrentScoringPeriod: { entries: [] } }, away: { teamId: 7 } },
+    ],
+  };
+  it("replaces fullName/firstName/lastName under a player with `Player <id>`; anything else is not replaceable", () => {
+    const segs = ["teams", 0, "roster", "entries", 0, "playerPoolEntry", "player", "fullName"];
+    expect(replaceableNameLeaf(body as never, segs)).toEqual({
+      segs,
+      action: "replace",
+      value: "Player 9001",
+    });
+    expect(replaceableNameLeaf(body as never, [...segs.slice(0, -1), "stats"])).toBeNull();
+    expect(replaceableNameLeaf(body as never, ["teams", 0, "id"])).toBeNull();
+    expect(
+      replaceableNameLeaf(body as never, [
+        "teams",
+        9,
+        "roster",
+        "entries",
+        0,
+        "playerPoolEntry",
+        "player",
+        "fullName",
+      ]),
+    ).toBeNull();
+    expect(replaceableNameLeaf(body as never, ["teams", 0, "fullName"])).toBeNull();
+    const out = applyUnits(body, [
+      { segs, action: "replace", value: "Player 9001" },
+    ]) as typeof body;
+    expect(out.teams[0]?.roster.entries[0]?.playerPoolEntry.player).toEqual({
+      id: 9001,
+      fullName: "Player 9001",
+      stats: [],
+    });
+    expect(REPLACEABLE_NAME_KEYS).toEqual(new Set(["fullName", "firstName", "lastName"]));
+  });
+  it("derives team ids and missing matchups from withheld paths, value-free", () => {
+    expect(deriveIncomplete(body as never, [])).toBeNull();
+    expect(deriveIncomplete(body as never, ["$.teams[0].roster.entries[3]"])).toEqual({
+      team_ids: [4],
+      matchups_missing: 0,
+    });
+    expect(
+      deriveIncomplete(body as never, [
+        "$.schedule[0].home.rosterForCurrentScoringPeriod.entries[2]",
+      ]),
+    ).toEqual({ team_ids: [4], matchups_missing: 0 });
+    // a removed box-score row: every team no remaining row names
+    const box = {
+      teams: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }],
+      schedule: [{ home: { teamId: 1 }, away: { teamId: 2 } }],
+    };
+    expect(deriveIncomplete(box as never, ["$.schedule[1]"])).toEqual({
+      team_ids: [3, 4],
+      matchups_missing: 1,
+    });
+    expect(deriveIncomplete(box as never, ["$.settings.proTeams[1].x"])).toEqual({
+      team_ids: [],
+      matchups_missing: 0,
+    });
   });
 });

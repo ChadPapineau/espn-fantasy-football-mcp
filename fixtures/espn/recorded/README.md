@@ -36,13 +36,32 @@ Manifest fields worth knowing:
   (`mRoster.spN.p1.json`, `.p2.json`, …): concatenate that array in part order.
 - `withheld` — units (a box-score matchup row, a roster entry) removed because a line of theirs
   matched the local repo deny-list; listed by JSON path only.
+- `replaced` — public player-name leaves (`…player.fullName|firstName|lastName`) replaced by
+  `Player <id>` instead of withholding their whole unit, when that name was the unit's only
+  deny-list match (the pipeline does this for recordings made after 2026-10-06; the current files
+  predate it, so every list is empty).
+- `incomplete` — what the withheld units leave missing, value-free: the team ids whose roster lost
+  an entry or whose matchup row is gone, and `matchups_missing`. **A fixture-mode test must treat
+  those teams as incomplete** — an empty starting slot or a missing game there is an artefact of
+  withholding, not ESPN data (the next re-recording replaces names instead, so most holes close).
 
 The files are printed by prettier at width 1000 (the `.prettierrc` here) so each stat map stays on
 one line; `tests/fixtures/recorded-manifest.test.ts` checks every file against the manifest.
+
+## Not recorded yet (B1 grounding)
+
+The Phase 0 plan does not request every view a P0 tool reads in fixture mode. B1 grounding extends
+the keyless recorder to: `mMatchupScore` (the current week — A4), solo `mNav` (today only inside the
+probe's `mSettings&mNav&mTeam` composite), `kona_player_info` with `filterIds` (C1/D2),
+`kona_playercard` for ≤ 5 ids (B2) and `players_wl` (the first 200 rows — the C1 name index).
+`mTransactions2` and `mPendingTransactions` (A6) are not visible anonymously [U]: their fixtures are
+**hand-built** (`derived`, never evidence) until the Phase 1b cookie recording.
+`src/drift/types.ts` `REQUIRED_PATHS_UNVERIFIED` lists the views whose required keys no recording
+verifies yet; a test fails when one gains a solo recording without leaving that list.
 
 ## Re-recording
 
 A manual job (plan 06 §1.5), once per season or after drift — see the usage block at the top of
 `scripts/record-fixture.ts`. League ids are given in the environment only and never written down.
-After re-recording, re-baseline the drift probe's observed keys with
-`scripts/probe.ts --rebaseline`.
+After re-recording, re-baseline the drift manifest (the probe's observed keys AND the per-view
+`views` section of `fixtures/drift/manifest.json`) with `scripts/probe.ts --rebaseline`.
