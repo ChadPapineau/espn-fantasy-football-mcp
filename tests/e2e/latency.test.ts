@@ -1,11 +1,11 @@
 // latency.test.ts — the latency bounds of plan 10 A16a / A15a, each naming its dataset and test
 // (plan 05 §0): the BUILT server over real stdio in fixture mode on fx-10h. Startup (spawn to a
 // completed handshake) < 1 s with no network and no keychain; on a warm cache every P0 tool answers
-// in < 500 ms (round trip, client side); espn_project_players for 32 players at n_sims 4000 < 3 s;
-// the analytics that run the seeding simulator (E2's exchange rate, E5's P(alive)) < 5 s; and the
-// server's main loop never stalls more than 50 ms during any analytics call (an event-loop delay
-// probe inside the server process — tests/e2e/fixtures/heartbeat.cjs; ADV OBJ-07). The measured
-// numbers are printed for the report.
+// in < 500 ms (round trip, client side; all 18, the journal write included); espn_project_players
+// for 32 players at n_sims 4000 < 3 s; the analytics that run the seeding simulator (E2's exchange
+// rate, E5's P(alive)) < 5 s; and the server's main loop never stalls more than 50 ms during any
+// analytics call (an event-loop delay probe inside the server process —
+// tests/e2e/fixtures/heartbeat.cjs; ADV OBJ-07). The measured numbers are printed for the report.
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
@@ -95,7 +95,44 @@ describe("latency on fx-10h over real stdio (A15a, A16a)", { timeout: 300_000 },
       report[`warm_${name}`] = Math.round(ms);
       if (ms >= 500) slow.push(`${name} ${String(Math.round(ms))} ms`);
     }
+    // espn_record_recommendation (the 18th P0 tool) writes the journal: each call is a real write
+    // under a fresh client_ref (an equal one would be the dedup path), recording the lineup call
+    // just made — so it is timed with its own cold/warm pair, never in the read loop above
+    const lineup = bodyOf(
+      await s?.client.callTool({
+        name: "espn_analyze_lineup",
+        arguments: { week: 5, objective: "auto" },
+      }),
+    );
+    const league = bodyOf(await s?.client.callTool({ name: "espn_get_league", arguments: {} }));
+    const record = (ref: string): Record<string, unknown> => ({
+      kind: "lineup",
+      week: 5,
+      rec: (lineup.data as Record<string, unknown>).rec,
+      source_calls: [
+        {
+          tool: "espn_analyze_lineup",
+          request_id: (lineup.meta as Record<string, unknown>).request_id,
+        },
+      ],
+      settings_hash: ((league.data as Record<string, unknown>).scoring as Record<string, unknown>)
+        .settings_hash,
+      followed_hint: "unknown",
+      client_ref: ref,
+    });
+    await timed("espn_record_recommendation", record("latency-cold"));
+    const rec = await timed("espn_record_recommendation", record("latency-warm"));
+    report.warm_espn_record_recommendation = Math.round(rec);
+    if (rec >= 500) slow.push(`espn_record_recommendation ${String(Math.round(rec))} ms`);
     expect(slow).toEqual([]);
+    // all 18 P0 tools were timed warm (espn_check_auth once, by its once-a-minute rule)
+    const timedTools = new Set([
+      "espn_check_auth",
+      ...Object.keys(report)
+        .filter((k) => k.startsWith("warm_"))
+        .map((k) => k.slice(5)),
+    ]);
+    expect(timedTools.size).toBe(18);
   });
 
   it("E1 for 32 players at n_sims 4000 < 3 s; E2 and E5 (the seeding simulator inside) < 5 s; loop stall ≤ 50 ms", async () => {
