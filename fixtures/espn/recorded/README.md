@@ -51,10 +51,9 @@ Manifest fields worth knowing:
   an entry or whose matchup row is gone, `matchups_missing`, and `rows_missing` (index or kona
   rows — a count, never an id). **A fixture-mode test must treat those teams as incomplete** — an
   empty starting slot or a missing game there is an artefact of withholding, not ESPN data. The
-  2026-10-06 re-recording closed every hole a name or a digit run caused; what is left is one
-  public player whose id equals a term of the local deny-list (ids are never altered — they key
-  the scoring evidence), so his roster entries, his box-score matchup rows and his index row stay
-  withheld.
+  2026-10-06 re-recording closed every hole a name or a digit run caused; what is left is the
+  units of one public player that a deny-list match keeps withheld — a match no name replacement
+  can clear, and ids are never altered (they key the scoring evidence).
 - `synthetic_files` — hand-written error bodies (see `../synthetic/`): `basis` names the source
   of the shape; never evidence, never a scoring field.
 
