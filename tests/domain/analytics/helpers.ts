@@ -4,9 +4,11 @@
 // data only: no recorded id, name or league value.
 import { fixedClock, seededRng, type FixedClock, type Rng } from "../../../src/domain/clock.js";
 import type { Pacer } from "../../../src/domain/analytics/cooperative.js";
+import { buildLeagueRules } from "../../../src/domain/league/rules.js";
 import { buildRosterSlots } from "../../../src/domain/league/slots.js";
 import type {
   BareText,
+  LeagueRules,
   ProGame,
   ProSchedule,
   ProTeam,
@@ -153,4 +155,64 @@ export function clockAndRng(
   seed = 7,
 ): { clock: FixedClock; rng: Rng } {
   return { clock: fixedClock(iso), rng: seededRng(seed) };
+}
+
+/**
+ * The reference league's rules (research 05 §0): 10 teams, rolling move-to-last waivers (no
+ * budget, 1-day period), 14 regular-season matchups, playoffs in weeks 15–17 (6 teams, 1-week rounds).
+ */
+export function referenceRules(
+  over: {
+    readonly order_reset?: boolean | null;
+    readonly uses_budget?: boolean | null;
+    readonly last_ms?: number | null;
+    readonly next_ms?: number | null;
+    readonly type?: string;
+  } = {},
+): LeagueRules {
+  const periods: Record<string, number[]> = {};
+  for (let p = 1; p <= 17; p++) periods[String(p)] = [p];
+  return buildLeagueRules({
+    roster: {
+      slot_counts: {},
+      position_limits: {},
+      lineup_lock_type: "INDIVIDUAL_GAME",
+      undroppable_list: false,
+      move_limit: null,
+    },
+    acquisition: {
+      acquisition_type: over.type ?? "WAIVERS_TRADITIONAL",
+      uses_budget: over.uses_budget === undefined ? false : over.uses_budget,
+      budget: 100,
+      order_reset: over.order_reset === undefined ? false : over.order_reset,
+      acquisition_limit: -1,
+      matchup_acquisition_limit: 0,
+      min_bid: 0,
+      waiver_hours: 24,
+      process_days: ["WEDNESDAY"],
+      process_hour: 3,
+      matchup_limit_per_period: false,
+      next_execution_ms: over.next_ms === undefined ? Date.UTC(2026, 9, 7, 7, 0) : over.next_ms,
+      last_execution_ms: over.last_ms === undefined ? Date.UTC(2026, 8, 30, 7, 0) : over.last_ms,
+    },
+    schedule: {
+      regular_season_matchups: 14,
+      matchup_periods: periods,
+      playoff_team_count: 6,
+      playoff_matchup_period_length: 1,
+      variable_playoff_length: false,
+      playoff_reseed: false,
+      playoff_seeding_rule: "TOTAL_POINTS_SCORED",
+      playoff_seeding_rule_by: 0,
+      consolation_ladder_disabled: false,
+    },
+    trade: {
+      deadline_ms: Date.UTC(2026, 11, 2, 17, 0),
+      revision_hours: 24,
+      veto_votes_required: 0,
+      max: -1,
+    },
+    ties: { matchup_tie_rule: "NONE", playoff_tie_rule: "NONE" },
+    fees: null,
+  });
 }

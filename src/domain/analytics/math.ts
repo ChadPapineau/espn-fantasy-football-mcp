@@ -226,3 +226,113 @@ export function spearman(a: readonly number[], b: readonly number[]): number | n
   if (da === 0 || db === 0) return null;
   return num / Math.sqrt(da * db);
 }
+
+// --- the gamma CDF (deterministic K/D-ST bracket probabilities) — ported from sibling @f6ba81e ---------
+
+const LANCZOS: readonly number[] = [
+  0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
+  -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6,
+  1.5056327351493116e-7,
+];
+
+/** ln Γ(x) for x > 0 (Lanczos, g = 7; relative error ≲ 1e-13). */
+export function lnGamma(x: number): number {
+  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lnGamma(1 - x);
+  const y = x - 1;
+  let a = at(LANCZOS, 0);
+  for (let i = 1; i < LANCZOS.length; i++) a += at(LANCZOS, i) / (y + i);
+  const t = y + 7.5;
+  return 0.5 * Math.log(2 * Math.PI) + (y + 0.5) * Math.log(t) - t + Math.log(a);
+}
+
+/**
+ * The regularized lower incomplete gamma P(a, x) = the Gamma(a, 1) CDF at x (series below a + 1,
+ * the Lentz continued fraction above — Numerical Recipes §6.2). Throws RangeError for a ≤ 0.
+ */
+export function gammaCdf(a: number, x: number): number {
+  if (!Number.isFinite(a) || a <= 0) throw new RangeError("math: gamma shape must be > 0");
+  if (!(x > 0)) return 0;
+  if (x === Infinity) return 1;
+  const lead = Math.exp(-x + a * Math.log(x) - lnGamma(a));
+  if (x < a + 1) {
+    let ap = a;
+    let del = 1 / a;
+    let sum = del;
+    for (let n = 0; n < 1000; n++) {
+      ap += 1;
+      del *= x / ap;
+      sum += del;
+      if (Math.abs(del) < Math.abs(sum) * 1e-16) break;
+    }
+    return clamp(sum * lead, 0, 1);
+  }
+  const tiny = 1e-300;
+  let b = x + 1 - a;
+  let c = 1 / tiny;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i < 1000; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = b + an / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-16) break;
+  }
+  return clamp(1 - lead * h, 0, 1);
+}
+
+/** The CDF at x of a gamma with mean `mean` and coefficient of variation `cv` (both > 0). */
+export function gammaCdfMeanCv(x: number, mean: number, cv: number): number {
+  const shape = 1 / (cv * cv);
+  return gammaCdf(shape, (x * shape) / mean);
+}
+
+/** The Gamma(shape, 1) quantile at p ∈ (0, 1), by bisection on the (monotone) CDF. */
+export function gammaQuantile(p: number, shape: number): number {
+  if (!(p > 0)) return 0;
+  if (p >= 1) return Infinity;
+  let lo = 0;
+  let hi = Math.max(1, shape);
+  while (gammaCdf(shape, hi) < p) hi *= 2;
+  for (let i = 0; i < 200 && hi - lo > 1e-12 * hi; i++) {
+    const mid = (lo + hi) / 2;
+    if (gammaCdf(shape, mid) < p) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * The Dist of a gamma with mean `mean` and coefficient of variation `cv` (deterministic quantiles):
+ * a point estimate widened by the `position_cv` rule without sampling. mean ≤ 0 → a point mass.
+ */
+export function gammaDist(mean: number, cv: number, basis: DistBasis): Dist {
+  if (!(mean > 0) || !(cv > 0))
+    return {
+      mean: round(mean),
+      p10: round(mean),
+      p25: round(mean),
+      p50: round(mean),
+      p75: round(mean),
+      p90: round(mean),
+      p_zero: mean === 0 ? 1 : 0,
+      basis,
+    };
+  const shape = 1 / (cv * cv);
+  const q = (x: number): number => round((mean * gammaQuantile(x, shape)) / shape);
+  return {
+    mean: round(mean),
+    p10: q(0.1),
+    p25: q(0.25),
+    p50: q(0.5),
+    p75: q(0.75),
+    p90: q(0.9),
+    p_zero: 0,
+    basis,
+  };
+}

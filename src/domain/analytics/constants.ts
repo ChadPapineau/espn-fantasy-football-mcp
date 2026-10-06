@@ -232,16 +232,17 @@ export const WAIVER_DP = Object.freeze({
  * status"): the first week's probability and a weekly decay [U]. The injury status multiplies the
  * first week by its P(active) and recovers at `injuryRecovery` per week.
  */
+const ROLE_BASE: Readonly<Record<string, number>> = Object.freeze({
+  QB: 0.9,
+  TQB: 0.9,
+  RB: 0.8,
+  WR: 0.85,
+  TE: 0.85,
+  K: 0.97,
+  "D/ST": 0.98,
+});
 export const ROLE_HOLDS = Object.freeze({
-  base: Object.freeze({
-    QB: 0.9,
-    TQB: 0.9,
-    RB: 0.8,
-    WR: 0.85,
-    TE: 0.85,
-    K: 0.97,
-    "D/ST": 0.98,
-  }),
+  base: ROLE_BASE,
   defaultBase: 0.8,
   weeklyDecay: 0.97,
   injuryRecovery: 0.5,
