@@ -161,7 +161,8 @@ describe("A10a: the research run's ten-team state (research 05 §2.4)", () => {
         t,
         (await simulateSeason({ ...tenTeam(t, "espn_rule"), seeding_mode: "both" })).data,
       );
-  });
+    // three 20 000-path runs under both readings: ~5 s locally, ~3× that under coverage on CI
+  }, 120_000);
 
   it.each([4, 8, 2] as const)(
     "T%i's P(playoffs) is within 0.05 of the table under both readings",
@@ -557,5 +558,140 @@ describe("determinism, monotone marginal values, partial runs, hostile input", (
         scenarios: Array.from({ length: 11 }, () => ({ team_id: 1, pf_delta: 1 })),
       }),
     ).rejects.toBeInstanceOf(AnalyticsError);
+  });
+});
+
+describe("deterministic edges (σ 0): ties, multi-week matchups, the deep tiebreak levels", () => {
+  const flat = (
+    id: number,
+    w: number,
+    l: number,
+    pf: number,
+    div: number | null = null,
+    pa = 0,
+  ): SeasonTeam => ({
+    team_id: id,
+    division_id: div,
+    wins: w,
+    losses: l,
+    ties: 0,
+    points_for: pf,
+    points_against: pa,
+    weekly: { mu: 100, sigma: 0 },
+  });
+  const run = (over: Partial<SeasonSimRequest>) =>
+    simulateSeason(base({ marginal: false, seeding_mode: "espn_rule", n_sims: 1000, ...over }));
+
+  it("an exact tie counts as a tie for both teams (a half win each)", async () => {
+    const out = await run({
+      teams: [flat(1, 1, 1, 200), flat(2, 1, 1, 200), flat(3, 0, 2, 100)],
+      remaining: [{ period: 3, home: 1, away: 2, weeks: 2 }],
+      playoff: { team_count: 1, seeding_rule: "TOTAL_POINTS_SCORED", reseed: null, rounds: [] },
+    });
+    // 1.5-1.5 each and equal PF: head to head is the tie itself, division and PA equal → coin
+    const p = out.data.readings[0]?.p_playoffs ?? 0;
+    expect(p).toBeGreaterThan(0.4);
+    expect(p).toBeLessThan(0.6);
+  });
+
+  it("points against decides once win %, PF, head to head and division all tie (fewer ranks higher)", async () => {
+    const out = await run({
+      teams: [
+        flat(1, 1, 1, 200, null, 150),
+        flat(2, 1, 1, 200, null, 180),
+        flat(3, 1, 1, 200, null, 160),
+      ],
+      playoff: { team_count: 1, seeding_rule: "TOTAL_POINTS_SCORED", reseed: null, rounds: [] },
+    });
+    expect(out.data.readings[0]?.p_playoffs).toBe(1);
+    const second = await run({
+      me: 2,
+      teams: [
+        flat(1, 1, 1, 200, null, 150),
+        flat(2, 1, 1, 200, null, 180),
+        flat(3, 1, 1, 200, null, 160),
+      ],
+      playoff: { team_count: 1, seeding_rule: "TOTAL_POINTS_SCORED", reseed: null, rounds: [] },
+    });
+    expect(second.data.readings[0]?.p_playoffs).toBe(0);
+  });
+
+  it("INTRA_DIVISION_RECORD seeds by the division record first", async () => {
+    const played = [
+      { period: 1, home: 1, away: 2, home_points: 100, away_points: 90 },
+      { period: 2, home: 3, away: 4, home_points: 90, away_points: 100 },
+      { period: 3, home: 1, away: 4, home_points: 80, away_points: 120 },
+      { period: 4, home: 3, away: 2, home_points: 130, away_points: 70 },
+    ];
+    const teams = [
+      flat(1, 1, 1, 180, 1),
+      flat(2, 0, 2, 160, 1),
+      flat(3, 1, 1, 220, 2),
+      flat(4, 2, 0, 220, 2),
+    ];
+    const out = await run({
+      me: 1,
+      teams,
+      played,
+      playoff: { team_count: 2, seeding_rule: "INTRA_DIVISION_RECORD", reseed: null, rounds: [] },
+    });
+    // team 1 is its division's winner (1-0 inside it) and seeds in ahead of team 3 (0-1 inside its division)
+    expect(out.data.readings[0]?.p_playoffs).toBe(1);
+    expect(out.data.readings[0]?.tiebreak_chain.slice(0, 2)).toEqual([
+      "division_winners_first",
+      "division_record",
+    ]);
+  });
+
+  it("a tied playoff game goes to the higher seed; without reseeding the bracket keeps its slots", async () => {
+    const teams = Array.from({ length: 4 }, (_, i) => flat(i + 1, 4 - i, i, 500 - i));
+    const top = await run({
+      me: 1,
+      teams,
+      playoff: {
+        team_count: 4,
+        seeding_rule: "TOTAL_POINTS_SCORED",
+        reseed: false,
+        rounds: [{ weeks: [15] }, { weeks: [16, 17] }],
+      },
+    });
+    expect(top.data.readings[0]?.p_champion).toBe(1);
+    const fourth = await run({
+      me: 4,
+      teams,
+      playoff: {
+        team_count: 4,
+        seeding_rule: "TOTAL_POINTS_SCORED",
+        reseed: false,
+        rounds: [{ weeks: [15] }, { weeks: [16, 17] }],
+      },
+    });
+    expect(fourth.data.readings[0]?.p_champion).toBe(0);
+    expect(fourth.data.readings[0]?.p_alive_by_week).toEqual([
+      { week: 15, p: 1 },
+      { week: 16, p: 0 },
+      { week: 17, p: 0 },
+    ]);
+  });
+
+  it("an unknown seeding rule is read as TOTAL_POINTS_SCORED and named", async () => {
+    const out = await run({
+      teams: [flat(1, 2, 0, 200), flat(2, 0, 2, 100)],
+      playoff: { team_count: 1, seeding_rule: "SOMETHING_NEW", reseed: null, rounds: [] },
+    });
+    expect(
+      out.data.rec.assumptions.some((a) => a.text.includes("not one ESPN is known to send")),
+    ).toBe(true);
+    expect(out.data.readings[0]?.p_playoffs).toBe(1);
+  });
+
+  it("without marginal values the table is zero and pf_per_win null", async () => {
+    const out = await run({
+      teams: [flat(1, 2, 0, 200), flat(2, 0, 2, 100)],
+      playoff: { team_count: 1, seeding_rule: "TOTAL_POINTS_SCORED", reseed: null, rounds: [] },
+    });
+    const r = out.data.readings[0];
+    expect(r?.marginal_values.plus_pf_40).toEqual({ d_p_playoffs: 0, d_p_bye: 0 });
+    expect(r?.pf_per_win).toBeNull();
   });
 });

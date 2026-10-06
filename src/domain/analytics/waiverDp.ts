@@ -68,32 +68,29 @@ export function solvePremiumTable(params: WaiverDpParams): PremiumTable {
   const q = (r: number): number =>
     Math.min(WAIVER_DP.qCap, (WAIVER_DP.q0 + WAIVER_DP.q1 * r) * dScale);
   const rows = Array.from({ length: n + 1 }, (_, k) => (k >= 1 ? binomialRow(k - 1, c) : []));
-  // V[h][k], Pi[h][k] for h = 0..H (the DP's horizon: the claim's value spans h weeks)
+  // V[h][k], Pi[h][k] for h = 0..H (the DP's horizon: the claim's value spans h weeks); index 0 of
+  // each row is unused (positions are 1-based)
+  const rd = (a: readonly number[], i: number): number => a[i] ?? 0;
   const V: number[][] = [new Array<number>(n + 1).fill(0)];
   const Pi: number[][] = [];
+  let vh = V[0] ?? [];
   for (let h = 0; h <= H; h++) {
-    const vh = V[h] ?? [];
-    const vpass = new Array<number>(n + 1).fill(0);
-    for (let k = 1; k <= n; k++) {
-      const row = rows[k] ?? [];
-      let s = 0;
-      for (let d = 0; d < row.length; d++) s += (row[d] ?? 0) * (vh[k - d] ?? 0);
-      vpass[k] = s;
-    }
-    const pih = new Array<number>(n + 1).fill(0);
-    for (let k = 1; k <= n; k++) pih[k] = (vpass[k] ?? 0) - (vh[n] ?? 0);
+    const vpass = rows.map((row, k) =>
+      k === 0 ? 0 : row.reduce((s, pd, d) => s + pd * rd(vh, k - d), 0),
+    );
+    const pih = vpass.map((v) => v - rd(vh, n));
     Pi.push(pih);
-    const next = new Array<number>(n + 1).fill(0);
-    for (let k = 1; k <= n; k++) {
+    const next = vpass.map((v, k) => {
+      if (k === 0) return 0;
       let e = 0;
       for (const { r, p } of WAIVER_DP.rates) {
         const surplus = r * scale * h;
-        const pk = (1 - q(r)) ** (k - 1);
-        e += p * pk * Math.max(surplus - (pih[k] ?? 0), 0);
+        e += p * (1 - q(r)) ** (k - 1) * Math.max(surplus - rd(pih, k), 0);
       }
-      next[k] = (vpass[k] ?? 0) + e;
-    }
+      return v + e;
+    });
     V.push(next);
+    vh = next;
   }
   const look = (grid: number[][], k: number, W: number): number => {
     if (!Number.isInteger(k) || k < 1 || k > n)
@@ -101,8 +98,8 @@ export function solvePremiumTable(params: WaiverDpParams): PremiumTable {
     const w = Number.isFinite(W) ? Math.min(Math.max(W, 0), WAIVER_DP.maxHorizon) : 0;
     const lo = Math.floor(w);
     const hi = Math.min(lo + 1, WAIVER_DP.maxHorizon);
-    const a = grid[lo + 1]?.[k] ?? 0;
-    const b = grid[hi + 1]?.[k] ?? 0;
+    const a = rd(grid[lo + 1] ?? [], k);
+    const b = rd(grid[hi + 1] ?? [], k);
     return a + (w - lo) * (b - a);
   };
   const table: PremiumTable = Object.freeze({

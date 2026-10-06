@@ -408,3 +408,92 @@ describe("helpers and bounds", () => {
       await expect(analyzeWaivers(request(bad))).rejects.toBeInstanceOf(AnalyticsError);
   });
 });
+
+describe("the remaining paths", () => {
+  it("an open roster seat needs no drop; include_drop false never drops", async () => {
+    const open = await analyzeWaivers(request({ mine: mine().filter((x) => x.player_id !== 14) }));
+    expect(byId(open.data, 101)?.conditional_drop).toBeNull();
+    const noDrop = await analyzeWaivers(request({ include_drop: false }));
+    expect(byId(noDrop.data, 101)?.conditional_drop).toBeNull();
+    expect(noDrop.data.rec.assumptions.some((a) => a.text.includes("no drop considered"))).toBe(
+      true,
+    );
+  });
+
+  it("explicit mode and phase win over the league's; the run time without a status is named", async () => {
+    const out = await analyzeWaivers(
+      request({ rules: referenceRules({ next_ms: null }), mode: "priority", phase: "post_run" }),
+    );
+    expect(out.data.mode_used).toBe("priority");
+    expect(out.data.phase).toBe("post_run");
+    expect(out.data.rec.assumptions.some((a) => a.text.includes("not stated by ESPN"))).toBe(true);
+  });
+
+  it("an out-of-range rank reads the middle; a non-finite P(alive) reads 1; null ranks are not ahead", async () => {
+    const out = await analyzeWaivers(
+      request({
+        k: 11,
+        alive_by_week: { "15": Number.NaN, "16": 2, "17": -1 },
+        rivals: request().rivals.map((r) => ({ ...r, waiver_rank: null })),
+      }),
+    );
+    expect(out.data.W).toBeCloseTo(10 + 1 + 1 + 0, 6);
+    expect(out.data.rec.assumptions.some((a) => a.text.includes("middle of the order"))).toBe(true);
+    expect(byId(out.data, 101)?.p_k_win).toBe(1);
+  });
+
+  it("an invalid roster (a healthy player in IR) is named: ESPN blocks adds", async () => {
+    const roster = mine().map((x) => (x.player_id === 15 ? { ...x, injury_status: "ACTIVE" } : x));
+    const out = await analyzeWaivers(request({ mine: roster }));
+    expect(out.data.rec.assumptions.some((a) => a.text.includes("roster is invalid"))).toBe(true);
+  });
+
+  it("locked candidates are skipped with a count; missing weekly values read 0", async () => {
+    const out = await analyzeWaivers(
+      request({
+        candidates: [
+          c(401, "WR", 14, "WAIVERS", { locked: true }),
+          c(402, "WR", 0, "WAIVERS", { weekly: WEEKS.map(() => null) }),
+        ],
+      }),
+    );
+    expect(out.data.candidates.map((x) => x.player_id)).toEqual([402]);
+    expect(out.warnings.some((w) => w.includes("game started"))).toBe(true);
+    expect(byId(out.data, 402)).toMatchObject({ s: 0, verdict: "pass" });
+    expect(byId(out.data, 402)?.value.p_zero).toBe(1);
+  });
+
+  it("K/D-ST without implied totals stream on the projections given; look_ahead 0 has no next week", async () => {
+    const out = await analyzeWaivers(
+      request({
+        positions: ["K"],
+        look_ahead: 0,
+        candidates: [c(501, "K", 9, "FREEAGENT"), c(502, "K", 7, "FREEAGENT")],
+      }),
+    );
+    expect(byId(out.data, 501)?.verdict).toBe("fa_add_now");
+    expect(byId(out.data, 501)?.kdst?.next_week).toBeNull();
+    expect(byId(out.data, 501)?.kdst?.implied_total).toBeNull();
+    expect(out.data.hold_vs_stream).toEqual({ streamability: 1, current_starter_delta: 1 });
+  });
+
+  it("a streamer on a bye keeps the projection given for that week", async () => {
+    const schedule = proSchedule(2026, WEEKS, { byes: { "4": [9, 10] } });
+    const out = await analyzeWaivers(
+      request({
+        positions: ["D/ST"],
+        settings: referenceSettings(),
+        kdst: { schedule, implied_totals: [] },
+        candidates: [
+          c(601, "D/ST", 0, "FREEAGENT", {
+            pro_team_id: 9,
+            weekly: WEEKS.map((_, i) => (i === 0 ? 0 : 6)),
+          }),
+        ],
+      }),
+    );
+    const x = byId(out.data, 601);
+    expect(x?.kdst?.brackets_e).toBeNull();
+    expect(x?.kdst?.next_week?.e).not.toBeNull();
+  });
+});

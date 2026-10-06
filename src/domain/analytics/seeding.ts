@@ -192,6 +192,13 @@ interface Agg {
   readonly results: readonly Result[];
 }
 
+/** A typed-array read whose index the caller has bounded (the fallback is never taken). */
+const rd = (a: ArrayLike<number>, i: number): number => a[i] ?? 0;
+/** a[i] += by. */
+const add = (a: Float64Array, i: number, by: number): void => {
+  a[i] = rd(a, i) + by;
+};
+
 const pct = (w: number, l: number, t: number): number => {
   const g = w + l + t;
   return g > 0 ? (w + t / 2) / g : 0;
@@ -201,14 +208,14 @@ const pct = (w: number, l: number, t: number): number => {
 function metric(level: TieLevel, i: number, group: readonly number[], s: Agg): number {
   switch (level) {
     case "win_pct":
-      return pct(s.wins[i] ?? 0, s.losses[i] ?? 0, s.ties[i] ?? 0);
+      return pct(rd(s.wins, i), rd(s.losses, i), rd(s.ties, i));
     case "points_for":
-      return s.pf[i] ?? 0;
+      return rd(s.pf, i);
     case "points_against":
       // fewer points against ranks higher [U]: the tiebreak's direction is unverified
-      return -(s.pa[i] ?? 0);
+      return -rd(s.pa, i);
     case "coin_flip":
-      return s.coin[i] ?? 0;
+      return rd(s.coin, i);
     case "head_to_head": {
       let w = 0;
       let g = 0;
@@ -459,14 +466,20 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
   const pf0 = Float64Array.from(req.teams.map((t) => t.points_for));
   const pa0 = Float64Array.from(req.teams.map((t) => t.points_against));
   const applied: string[] = [];
-  const remaining = req.remaining.map((g) => ({
-    h: idx.get(g.home) ?? 0,
-    a: idx.get(g.away) ?? 0,
-    L: Math.max(1, g.weeks ?? 1),
-    period: g.period,
-    matchup_id: g.matchup_id ?? null,
-    forced: -1,
-  }));
+  const remaining = req.remaining.map((g) => {
+    const h = idx.get(g.home) ?? 0;
+    const a = idx.get(g.away) ?? 0;
+    const result: Result = { a: h, b: a, winner: 2 };
+    return {
+      h,
+      a,
+      L: Math.max(1, g.weeks ?? 1),
+      period: g.period,
+      matchup_id: g.matchup_id ?? null,
+      forced: -1,
+      result,
+    };
+  });
   for (const sc of scenarios) {
     if ("pf_delta" in sc) {
       const i = idx.get(sc.team_id);
@@ -502,15 +515,11 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
     b: idx.get(g.away) ?? 0,
     winner: g.home_points > g.away_points ? 0 : g.home_points < g.away_points ? 1 : 2,
   }));
-  let flipIndex = -1;
-  for (let i = playedResults.length - 1; i >= 0; i--) {
-    const r = playedResults[i];
-    if (r === undefined) continue;
-    if ((r.a === me && r.winner === 1) || (r.b === me && r.winner === 0)) {
-      flipIndex = i;
-      break;
-    }
-  }
+  // each played result has a live copy the +1 win perturbation may flip and every path resets
+  const playedPairs = playedResults.map((r) => ({ orig: r, live: { ...r } }));
+  const lostByMe = (r: Result): boolean =>
+    (r.a === me && r.winner === 1) || (r.b === me && r.winner === 0);
+  const flipPair = [...playedPairs].reverse().find((p) => lostByMe(p.orig)) ?? null;
   const canFlip = (l0[me] ?? 0) > 0;
   if (!canFlip)
     assumptions.push(A("no loss to flip: the +1 win marginal value is 0", "a loss is recorded"));
@@ -558,8 +567,10 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
   const ties = new Float64Array(n);
   const pf = new Float64Array(n);
   const pa = new Float64Array(n);
-  const simResults: Result[] = remaining.map((g) => ({ a: g.h, b: g.a, winner: 2 }));
-  const resultsAll: Result[] = [...playedResults.map((r) => ({ ...r })), ...simResults];
+  const resultsAll: Result[] = [
+    ...playedPairs.map((p) => p.live),
+    ...remaining.map((g) => g.result),
+  ];
 
   const evaluate = (v: Variant): void => {
     wins.set(w0);
@@ -567,54 +578,48 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
     ties.set(t0);
     pf.set(pf0);
     pa.set(pa0);
-    playedResults.forEach((r, i) => {
-      const t = resultsAll[i];
-      if (t !== undefined) t.winner = r.winner;
-    });
-    const muMe = (mu[me] ?? 0) + (v === "plus_3_ppw" ? SEEDING.plusPointsPerWeek : 0);
-    const sgMe = (sigma[me] ?? 0) * (v === "sigma_x0_7" ? 0.7 : v === "sigma_x1_4" ? 1.4 : 1);
-    const mOf = (i: number): number => (i === me ? muMe : (mu[i] ?? 0));
-    const sOf = (i: number): number => (i === me ? sgMe : (sigma[i] ?? 0));
+    for (const p of playedPairs) p.live.winner = p.orig.winner;
+    const muMe = rd(mu, me) + (v === "plus_3_ppw" ? SEEDING.plusPointsPerWeek : 0);
+    const sgMe = rd(sigma, me) * (v === "sigma_x0_7" ? 0.7 : v === "sigma_x1_4" ? 1.4 : 1);
+    const mOf = (i: number): number => (i === me ? muMe : rd(mu, i));
+    const sOf = (i: number): number => (i === me ? sgMe : rd(sigma, i));
     if (v === "plus_1_win" && canFlip) {
-      wins[me] = (wins[me] ?? 0) + 1;
-      losses[me] = (losses[me] ?? 0) - 1;
-      const r = flipIndex >= 0 ? resultsAll[flipIndex] : undefined;
-      if (r !== undefined) {
+      add(wins, me, 1);
+      add(losses, me, -1);
+      if (flipPair !== null) {
+        const r = flipPair.live;
         const opp = r.a === me ? r.b : r.a;
-        wins[opp] = Math.max(0, (wins[opp] ?? 0) - 1);
-        losses[opp] = (losses[opp] ?? 0) + 1;
+        wins[opp] = Math.max(0, rd(wins, opp) - 1);
+        add(losses, opp, 1);
         r.winner = r.a === me ? 0 : 1;
       }
     }
-    if (v === "plus_pf_20") pf[me] = (pf[me] ?? 0) + 20;
-    if (v === "plus_pf_40") pf[me] = (pf[me] ?? 0) + 40;
-    if (v === "plus_pf_80") pf[me] = (pf[me] ?? 0) + 80;
-    for (let g = 0; g < G; g++) {
-      const gm = remaining[g];
-      if (gm === undefined) continue;
+    if (v === "plus_pf_20") add(pf, me, 20);
+    if (v === "plus_pf_40") add(pf, me, 40);
+    if (v === "plus_pf_80") add(pf, me, 80);
+    remaining.forEach((gm, g) => {
       const rL = Math.sqrt(gm.L);
-      let sh = gm.L * mOf(gm.h) + rL * sOf(gm.h) * (zg[2 * g] ?? 0);
-      let sa = gm.L * mOf(gm.a) + rL * sOf(gm.a) * (zg[2 * g + 1] ?? 0);
+      let sh = gm.L * mOf(gm.h) + rL * sOf(gm.h) * rd(zg, 2 * g);
+      let sa = gm.L * mOf(gm.a) + rL * sOf(gm.a) * rd(zg, 2 * g + 1);
       if ((gm.forced === gm.h && sh < sa) || (gm.forced === gm.a && sa < sh)) [sh, sa] = [sa, sh];
-      pf[gm.h] = (pf[gm.h] ?? 0) + sh;
-      pa[gm.h] = (pa[gm.h] ?? 0) + sa;
-      pf[gm.a] = (pf[gm.a] ?? 0) + sa;
-      pa[gm.a] = (pa[gm.a] ?? 0) + sh;
-      const sr = simResults[g];
+      add(pf, gm.h, sh);
+      add(pa, gm.h, sa);
+      add(pf, gm.a, sa);
+      add(pa, gm.a, sh);
       if (sh > sa) {
-        wins[gm.h] = (wins[gm.h] ?? 0) + 1;
-        losses[gm.a] = (losses[gm.a] ?? 0) + 1;
-        if (sr !== undefined) sr.winner = 0;
+        add(wins, gm.h, 1);
+        add(losses, gm.a, 1);
+        gm.result.winner = 0;
       } else if (sa > sh) {
-        wins[gm.a] = (wins[gm.a] ?? 0) + 1;
-        losses[gm.h] = (losses[gm.h] ?? 0) + 1;
-        if (sr !== undefined) sr.winner = 1;
+        add(wins, gm.a, 1);
+        add(losses, gm.h, 1);
+        gm.result.winner = 1;
       } else {
-        ties[gm.h] = (ties[gm.h] ?? 0) + 1;
-        ties[gm.a] = (ties[gm.a] ?? 0) + 1;
-        if (sr !== undefined) sr.winner = 2;
+        add(ties, gm.h, 1);
+        add(ties, gm.a, 1);
+        gm.result.winner = 2;
       }
-    }
+    });
     const agg: Agg = { n, wins, losses, ties, pf, pa, div, coin, results: resultsAll };
     modes.forEach((mode, mi) => {
       const chain = chains[mi]?.chain ?? [];
