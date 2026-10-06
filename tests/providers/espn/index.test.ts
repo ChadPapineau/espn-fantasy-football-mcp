@@ -3,7 +3,9 @@
 // fixture mode serves the recorded fixtures keyless and refuses to start with a configured credential
 // (fixture mode and real cookies never coexist); the public surfaces export what callers use.
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { storeFactory } from "../../../src/store/index.js";
+import { tempDir } from "../../lint/helpers.js";
 import * as drift from "../../../src/drift/index.js";
 import { fixedClock } from "../../../src/domain/clock.js";
 import * as espn from "../../../src/providers/espn/index.js";
@@ -131,6 +133,58 @@ describe("createEspnProvider", () => {
       league: "league-b",
     });
     expect(resolveFixtureDir(path.join(RECORDED, "season"))).toBeNull();
+  });
+});
+
+describe("over the real store (store.sqlite repositories)", () => {
+  let tmp: ReturnType<typeof tempDir> | undefined;
+  afterEach(() => {
+    tmp?.cleanup();
+    tmp = undefined;
+  });
+  it("fixture mode through the store: cache rows written without raw bodies; drift_state written on drift", async () => {
+    tmp = tempDir("eff-provider-store-");
+    const clock = fixedClock(NOW_ISO);
+    const store = storeFactory.open({
+      path: path.join(tmp.dir, "store.sqlite"),
+      datasetDir: path.join(tmp.dir, "datasets"),
+      backupDir: path.join(tmp.dir, "backups"),
+      clock,
+      migrate: true,
+    });
+    try {
+      const p = createEspnProvider({
+        config: { ...base, fixtureDir: FIXTURES },
+        repos: store.repos,
+        credentials: null,
+        clock,
+        scoring: stubScoring,
+      });
+      const league = await p.getLeague(ref);
+      expect(league.stamp.cache).toBe("miss");
+      const again = await p.getLeague(ref);
+      expect(again.stamp.cache).toBe("hit");
+      clock.advance(1001);
+      const rosters = await p.getRosters(ref, 3);
+      expect(rosters.value).toHaveLength(10);
+      expect(store.repos.limiter.countSince("2026-10-06T00:00:00.000Z")).toBe(2);
+      expect(store.repos.limiter.recentOutcomes(5).map((r) => r.outcome)).toEqual(["ok", "ok"]);
+      const skeleton = createEspnProvider({
+        config: base,
+        repos: store.repos,
+        credentials: null,
+        clock,
+        scoring: stubScoring,
+        fetch: () => Promise.resolve(jsonResponse(loadFixture("recorded/league-a/skeleton.json"))),
+      });
+      clock.advance(1001);
+      await expect(skeleton.getMatchups(ref)).rejects.toMatchObject({
+        effCode: "ESPN_DRIFT_DETECTED",
+      });
+      expect(store.repos.driftState.get()?.status).toBe("red");
+    } finally {
+      store.close();
+    }
   });
 });
 

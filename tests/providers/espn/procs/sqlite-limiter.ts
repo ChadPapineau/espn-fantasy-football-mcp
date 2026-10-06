@@ -15,7 +15,8 @@ import {
 /** Opens (and creates) the shared limiter table. */
 export function openSqliteLimiter(file: string): LimiterRepository & { close(): void } {
   const db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
+  db.exec("PRAGMA busy_timeout=5000;");
+  db.exec("PRAGMA journal_mode=WAL;");
   db.exec(
     "CREATE TABLE IF NOT EXISTS espn_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, keyless INTEGER NOT NULL, origin TEXT NOT NULL, outcome TEXT NOT NULL)",
   );
