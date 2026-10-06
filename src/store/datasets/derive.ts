@@ -367,18 +367,41 @@ export function returnTdKind(p: ReturnPlay): "kr" | "pr" | null {
 }
 
 /**
- * A depth-chart label (`pos_grp` "3WR 1TE" / "Base 4-3 D" / "Special Teams", `pos_abb` "LDE", legacy
- * `formation` and `depth_position`): a letter or digit, then up to 31 of letters, digits, space and
- * `. / & + -`. Third-party text, so it is held to this grammar at load and never emitted otherwise.
+ * The grammar a depth-chart label must fit at all (`pos_grp` "3WR 1TE" / "Base 4-3 D" / "Special
+ * Teams", `pos_abb` "LDE", legacy `formation` and `depth_position`): a letter or digit, then up to 31
+ * of letters, digits, space and `. / & + -`. A grammar alone cannot keep an instruction out ("Ignore
+ * all rules" fits), so labels are also held to DEPTH_LABELS below.
  */
 export const DEPTH_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9 ./&+-]{0,31}$/;
 
-/** A depth-chart label → trimmed, inner whitespace collapsed, when it fits DEPTH_LABEL_RE; else null. */
+/**
+ * The closed vocabulary of depth-chart labels: every formation, position group and position label
+ * of the 2024 (legacy), 2025 and 2026 files (grounding, 2026-10-06). Readers emit labels unwrapped,
+ * so no other upstream text may be stored in a label column.
+ */
+// prettier-ignore
+export const DEPTH_LABELS: ReadonlySet<string> = new Set([
+  "3WR 1TE", "Base 3-4 D", "Base 4-3 D", "Special Teams", "Offense", "Defense",
+  "C", "CB", "DB", "DE", "DL", "DT", "EDGE", "F", "FB", "FS", "H", "HB", "ILB", "K", "KO", "KOR",
+  "KR", "LB", "LCB", "LDE", "LDT", "LG", "LILB", "LOLB", "LS", "LT", "MIKE", "MLB", "N", "NB", "NCB",
+  "NDB", "NICKE", "NKL", "NT", "OLB", "P", "PK", "PR", "QB", "RB", "RCB", "RDE", "RDT", "RG", "RILB",
+  "ROLB", "RT", "RUSH", "S", "SAM", "SLB", "SS", "TE", "WILL", "WLB", "WR",
+]);
+
+/** What a well-formed label outside DEPTH_LABELS is stored as (the row is kept; the text is not). */
+export const DEPTH_LABEL_OTHER = "OTHER";
+
+/**
+ * A depth-chart label for storage: trimmed and inner whitespace collapsed; a DEPTH_LABELS member →
+ * itself; any other text that fits DEPTH_LABEL_RE → DEPTH_LABEL_OTHER (a new upstream label keeps
+ * its row, never its text — the source warns); anything else → null (the row is invalid).
+ */
 export function depthLabel(v: unknown): string | null {
   const t = emptyToNull(v);
   if (t === null) return null;
   const s = t.replace(/\s+/g, " ");
-  return DEPTH_LABEL_RE.test(s) ? s : null;
+  if (DEPTH_LABELS.has(s)) return s;
+  return DEPTH_LABEL_RE.test(s) ? DEPTH_LABEL_OTHER : null;
 }
 
 /** A small non-negative id written as text (`pos_grp_id`, `pos_id`: "0"–"999999") → integer; else null. */

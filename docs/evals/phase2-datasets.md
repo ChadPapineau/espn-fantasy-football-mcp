@@ -63,8 +63,11 @@ verifies them on the first live fetch.
 
 ## What the grounding verified
 
-- **Columns:** for every source and every season (2024, 2025, 2026) the contract's required upstream
-  columns exist in that season's file (`phase2-tables.test.ts`, "grounded"). All five Phase-2
+- **Columns and types:** for every source and every season (2024, 2025, 2026) the contract's
+  required upstream columns exist in that season's file, and each decodes as the kind the contract
+  reads it with (`phase2UpstreamKinds`: string / int / double — e.g. pbp `play_id`, the snap counts
+  and ffopportunity's `week` are DOUBLEs read through `wholeNumber`; ffopportunity's `season` is a
+  string) (`phase2-tables.test.ts`, "grounded"). All five Phase-2
   parquet schemas are identical across the three seasons **except `depth_charts`**, which changed
   layout in 2025 (no `season`/`week`; `dt`, `espn_id`, `pos_*`) — hence `ds_depth_charts_legacy`.
 - **pbp counting = nflverse's own counting.** With `PBP_KEPT_PLAY_TYPES` (drop `no_play` and
@@ -84,6 +87,12 @@ verifies them on the first live fetch.
   roster wins, as for `espn_id`). Every ep_weekly `player_id` is a gsis id in `players.parquet`
   (438/438 in 2026). Depth charts carry `espn_id` on every row; `gsis_id` is null on 300 of 3,318
   2026 espn ids.
+- **Depth-chart labels are a closed vocabulary.** Readers emit `pos_grp` / `pos_abb` / `formation`
+  unwrapped, and a label grammar alone admits short imperatives ("Ignore all rules"), so the
+  contract stores only the 63 labels of the 2024–2026 files (`DEPTH_LABELS`); any other well-formed
+  label is stored as `OTHER` (the row kept, the text not — the source warns) and anything else makes
+  the row invalid. The fx-10h injection texts never reach a label, a Sleeper id or a link column
+  (`phase2-tables.test.ts`).
 - **Real-data reader runs** (all Phase-2 statements on the files above): the BUF defence profile,
   the week-1 chart as of kickoff, 2024's last listed chart, ep and snap rows for a fixture QB all
   return the expected rows; with no `ANALYZE` in a published file the planner preferred the

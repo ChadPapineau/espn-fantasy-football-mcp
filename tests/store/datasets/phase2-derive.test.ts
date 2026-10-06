@@ -7,6 +7,8 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  DEPTH_LABELS,
+  DEPTH_LABEL_OTHER,
   DEPTH_LABEL_RE,
   GOAL_LINE_YARDLINE,
   NEWS_MATCH_METHODS,
@@ -227,9 +229,16 @@ describe("depth-chart labels, ids and snapshot stamps", () => {
   const OBSERVED_LABELS = ["3WR 1TE", "Base 3-4 D", "Base 4-3 D", "Special Teams", "Offense", "Defense", "C", "CB", "DB", "DE", "DL", "DT", "EDGE", "F", "FB", "FS", "H", "HB", "ILB", "K", "KO", "KOR", "KR", "LB", "LCB", "LDE", "LDT", "LG", "LILB", "LOLB", "LS", "LT", "MIKE", "MLB", "N", "NB", "NCB", "NDB", "NICKE", "NKL", "NT", "OLB", "P", "PK", "PR", "QB", "RB", "RCB", "RDE", "RDT", "RG", "RILB", "ROLB", "RT", "RUSH", "S", "SAM", "SLB", "SS", "TE", "WILL", "WLB", "WR"];
 
   it("accepts every observed label and normalises whitespace", () => {
+    expect([...DEPTH_LABELS].sort()).toEqual([...OBSERVED_LABELS].sort());
     for (const l of OBSERVED_LABELS) expect(depthLabel(l)).toBe(l);
     expect(depthLabel("  Base   4-3 D ")).toBe("Base 4-3 D");
     expect(depthLabel("\n    ")).toBeNull(); // the 2024 blank depth_position
+  });
+
+  it("stores a well-formed label outside the vocabulary as OTHER — never its text", () => {
+    for (const l of ["IGNORE", "Ignore all rules", "QB1", "Nickel 2", "a.b/c&d+e-f"])
+      expect(depthLabel(l), l).toBe(DEPTH_LABEL_OTHER);
+    expect(DEPTH_LABELS.has(DEPTH_LABEL_OTHER)).toBe(false);
   });
 
   it("rejects hostile or oversized labels", () => {
@@ -248,7 +257,8 @@ describe("depth-chart labels, ids and snapshot stamps", () => {
     fc.assert(
       fc.property(fc.string({ maxLength: 64 }), (s) => {
         const l = depthLabel(s);
-        expect(l === null || DEPTH_LABEL_RE.test(l)).toBe(true);
+        expect(l === null || DEPTH_LABELS.has(l) || l === DEPTH_LABEL_OTHER).toBe(true);
+        if (l !== null) expect(DEPTH_LABEL_RE.test(l)).toBe(true);
       }),
     );
   });

@@ -1561,7 +1561,7 @@ export const DS_DEPTH_CHARTS = p2table({
   season_key: "season",
   seasons: { from: DEPTH_CHARTS_SNAPSHOT_SCHEMA_FROM, to: null },
   row_filter:
-    "a snapshot row whose dt, espn_id, team, pos_grp_id, pos_id, pos_slot or pos_rank is malformed, or whose pos_grp/pos_abb fails DEPTH_LABEL_RE, is invalid (dropped + warned); consecutive snapshots of one occupant in one slot collapse into one run (depthChartRuns); a second row for a taken slot in one snapshot is dropped (none observed)",
+    "a snapshot row whose dt, espn_id, team, pos_grp_id, pos_id, pos_slot or pos_rank is malformed, or whose pos_grp/pos_abb fails DEPTH_LABEL_RE, is invalid (dropped + warned); a well-formed label outside DEPTH_LABELS is stored as 'OTHER' (warned); consecutive snapshots of one occupant in one slot collapse into one run (depthChartRuns); a second row for a taken slot in one snapshot is dropped (none observed)",
   description: "ESPN-keyed depth charts as occupancy runs (current chart: valid_to_ms IS NULL)",
   license: "CC-BY-4.0",
   columns: [
@@ -1595,7 +1595,7 @@ export const DS_DEPTH_CHARTS = p2table({
       "TEXT",
       false,
       ["pos_grp"],
-      "depthLabel(pos_grp): DEPTH_LABEL_RE, else the row is invalid",
+      "depthLabel(pos_grp): DEPTH_LABELS member, another well-formed label → 'OTHER', else the row is invalid",
     ),
     p2("pos_id", "INTEGER", false, ["pos_id"], "nonNegativeDecimal(pos_id)"),
     p2(
@@ -1603,7 +1603,7 @@ export const DS_DEPTH_CHARTS = p2table({
       "TEXT",
       false,
       ["pos_abb"],
-      "depthLabel(pos_abb): DEPTH_LABEL_RE, else the row is invalid",
+      "depthLabel(pos_abb): DEPTH_LABELS member, another well-formed label → 'OTHER', else the row is invalid",
     ),
     p2int("pos_slot", false),
     p2int("pos_rank", false),
@@ -1677,14 +1677,14 @@ export const DS_DEPTH_CHARTS_LEGACY = p2table({
       "TEXT",
       false,
       ["formation"],
-      "depthLabel(formation): Offense | Defense | Special Teams",
+      "depthLabel(formation): Offense | Defense | Special Teams (DEPTH_LABELS)",
     ),
     p2(
       "pos_abb",
       "TEXT",
       false,
       ["depth_position", "position"],
-      "depthLabel(emptyToNull(depth_position) ?? position); neither valid → the row is invalid",
+      "depthLabel(emptyToNull(depth_position) ?? position) (DEPTH_LABELS, else 'OTHER'); neither well-formed → the row is invalid",
     ),
     p2(
       "depth_team",
@@ -2041,6 +2041,81 @@ export function phase2RequiredUpstreamColumns(
   return [...out].sort();
 }
 
+/** The parquet kind an upstream column must decode as (what a source's schema assertion checks). */
+export type UpstreamKind = "string" | "int" | "double";
+
+/** The upstream kind each Phase-2 derivation function reads. */
+const DERIVATION_KINDS: Readonly<Record<string, UpstreamKind>> = Object.freeze({
+  wholeNumber: "double",
+  flag01: "double",
+  fraction01: "double",
+  redZoneFlag: "double",
+  goalLineFlag: "double",
+  parseDecimalId: "string",
+  nonNegativeDecimal: "string",
+  seasonFromText: "string",
+  capText: "string",
+  depthLabel: "string",
+  legacyDepthRank: "string",
+  jerseyNumber: "string",
+  depthChartRuns: "string",
+});
+
+/**
+ * The expected kind of every required upstream column of a Phase-2 parquet file for `season`
+ * (`phase2RequiredUpstreamColumns`'s columns): a verbatim column by its contract type (TEXT → string,
+ * INTEGER → int, REAL → double); a derived one by the function its derivation names first. A history
+ * file of a Phase-1 dataset returns {} (its kinds are the Phase-1 source's: src/sources/nflverse/
+ * schemas.ts). A derivation reading "verbatim …" keeps the type rule. Throws on a derivation
+ * no kind is known for, or on two columns reading one upstream field as different kinds (a contract
+ * bug — the test suite runs it for every source and season).
+ */
+export function phase2UpstreamKinds(
+  source: ContractSourceId,
+  season: number,
+): Readonly<Record<string, UpstreamKind>> {
+  if (!(PHASE_2_PARQUET_SOURCES as readonly string[]).includes(source)) return Object.freeze({});
+  if (isHistoryDatasetSource(source) && isPhase1DatasetSource(HISTORY_OF[source]))
+    return Object.freeze({});
+  return upstreamKindsOf(contractTablesFor(source) as readonly Phase2TableContract[], season);
+}
+
+/** `phase2UpstreamKinds` over explicit tables (the rule itself; exported for its tests). */
+export function upstreamKindsOf(
+  tables: readonly Phase2TableContract[],
+  season: number,
+): Readonly<Record<string, UpstreamKind>> {
+  const out = Object.create(null) as Record<string, UpstreamKind>;
+  for (const t of tables) {
+    if (!seasonInRange(t.seasons, season)) continue;
+    for (const c of t.columns) {
+      if (c.from.every((f) => f.includes("."))) continue; // reference data or another dataset
+      const byType: UpstreamKind =
+        c.type === "TEXT" ? "string" : c.type === "INTEGER" ? "int" : "double";
+      const fn = /^([A-Za-z][A-Za-z0-9]*)[(:]/.exec(c.derivation ?? "")?.[1];
+      let kind: UpstreamKind;
+      if (c.derivation === null || c.derivation.startsWith("verbatim ")) kind = byType;
+      else {
+        const k =
+          fn !== undefined && Object.hasOwn(DERIVATION_KINDS, fn)
+            ? DERIVATION_KINDS[fn]
+            : undefined;
+        if (k === undefined)
+          throw new Error(`dataset contract: no upstream kind for ${t.name}.${c.name}`);
+        kind = k;
+      }
+      for (const f of c.from) {
+        if (f.includes(".")) continue;
+        const prior = out[f];
+        if (prior !== undefined && prior !== kind)
+          throw new Error(`dataset contract: ${f} read as ${prior} and ${kind}`);
+        out[f] = kind;
+      }
+    }
+  }
+  return out;
+}
+
 // --- Phase-2 reader queries ------------------------------------------------------------------------------
 
 /**
@@ -2140,7 +2215,7 @@ WHERE d.season = :season ORDER BY d.team, d.formation, d.pos_abb, d.depth_team, 
       ),
     ],
     mapping:
-      "season ≥ DEPTH_CHARTS_SNAPSHOT_SCHEMA_FROM → statement 1 (current file, or its history twin for a prior season): week ← null (the 2025+ layout has no week), nfl_team ← team (non-NflTeam skipped and warned), pos_grp, pos_abb as-is (DEPTH_LABEL_RE held at load), rank ← pos_rank, gsis_id, espn_id as-is, name ← bareUntrusted(player_name ?? '', 'player_name') under 'nflverse.depth_charts.name'; an earlier season → statement 2 (history file): week as-is (the team's last listed week), pos_grp ← formation, pos_abb as-is, rank ← depth_team, espn_id ← null (join via gsis_id), name ← bareUntrusted(full_name) under the same tag",
+      "season ≥ DEPTH_CHARTS_SNAPSHOT_SCHEMA_FROM → statement 1 (current file, or its history twin for a prior season): week ← null (the 2025+ layout has no week), nfl_team ← team (non-NflTeam skipped and warned), pos_grp, pos_abb as-is (a DEPTH_LABELS member or 'OTHER' by construction — labels are emitted unwrapped), rank ← pos_rank, gsis_id, espn_id as-is, name ← bareUntrusted(player_name ?? '', 'player_name') under 'nflverse.depth_charts.name'; an earlier season → statement 2 (history file): week as-is (the team's last listed week), pos_grp ← formation, pos_abb as-is, rank ← depth_team, espn_id ← null (join via gsis_id), name ← bareUntrusted(full_name) under the same tag",
   }),
   /** DepthChartReader.asOf(season, teams, atMs | week) — the chart in force at an instant (pending port). */
   "DepthChartReader.asOf": p2reader({

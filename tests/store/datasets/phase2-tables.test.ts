@@ -63,17 +63,21 @@ import {
   isPhase1DatasetSource,
   isPhase2DatasetSource,
   phase2RequiredUpstreamColumns,
+  phase2UpstreamKinds,
   quoteIdentifier,
   requiredUpstreamColumns,
   seasonInRange,
   tablesFor,
+  upstreamKindsOf,
   type ContractSourceId,
   type Phase2ReaderMethod,
   type Phase2ReaderStatement,
   type Phase2TableContract,
 } from "../../../src/store/datasets/tables.js";
 import { MAX_ON_DEMAND_ATTACHMENTS, type DatasetRow } from "../../../src/store/types.js";
+import { INJECTIONS } from "../../../scripts/fx10h/variants.js";
 import { OBSERVED_PHASE2 } from "./observed-phase2.js";
+import { depthSnapshot, newsRow, trendingRows } from "./phase2-loaders.js";
 
 type Params = Record<string, string | number | null>;
 
@@ -439,6 +443,72 @@ describe("grounded in the real 2024–2026 release files (2026-10-06)", () => {
       );
     },
   );
+
+  it.each(cases)(
+    "%s season %i: every required column has the parquet kind the contract reads",
+    (s, y) => {
+      const file = (y === 2026 ? s : historyTwinOf(s)) as ContractSourceId;
+      const kinds = phase2UpstreamKinds(file, y);
+      const required = phase2RequiredUpstreamColumns(file, y);
+      expect(Object.keys(kinds).sort()).toEqual([...required]);
+      const o = OBSERVED_PHASE2[`${s}@${String(y)}`];
+      const typeOf = new Map((o?.columns ?? []).map((c, i) => [c, o?.types[i] ?? ""]));
+      for (const c of required) {
+        const t = typeOf.get(c) ?? "";
+        const ok =
+          kinds[c] === "string"
+            ? t === "BYTE_ARRAY/STRING" || t === "BYTE_ARRAY/UTF8" || t === "BYTE_ARRAY"
+            : kinds[c] === "int"
+              ? t === "INT32" || t === "INT64"
+              : ["DOUBLE", "FLOAT", "INT32", "INT64"].includes(t);
+        expect(ok, `${c}: contract ${String(kinds[c])}, file ${t}`).toBe(true);
+      }
+    },
+  );
+
+  it("upstream kinds: none for JSON/RSS or Phase-1 twins; a contract slip throws", () => {
+    expect(phase2UpstreamKinds("sleeper:trending", 2026)).toEqual({});
+    expect(phase2UpstreamKinds("nflverse:injuries_history", 2024)).toEqual({});
+    expect(phase2UpstreamKinds("nflverse:depth_charts", 2024)).toEqual({});
+    const base = DS_SNAP_COUNTS;
+    const col = (o: Partial<Phase2TableContract["columns"][number]>) =>
+      ({ ...base.columns[0], ...o }) as Phase2TableContract["columns"][number];
+    const withCols = (...cols: Phase2TableContract["columns"][number][]): Phase2TableContract => ({
+      ...base,
+      columns: cols,
+    });
+    expect(() =>
+      upstreamKindsOf([withCols(col({ name: "x", from: ["x"], derivation: "mystery(x)" }))], 2026),
+    ).toThrow(/no upstream kind/);
+    expect(() =>
+      upstreamKindsOf(
+        [
+          withCols(
+            col({ name: "a", type: "TEXT", from: ["x"], derivation: null }),
+            col({ name: "b", from: ["x"], derivation: "wholeNumber(x)" }),
+          ),
+        ],
+        2026,
+      ),
+    ).toThrow(/read as string and double/);
+    expect(
+      upstreamKindsOf(
+        [withCols(col({ name: "r", from: ["ds_other.x"], derivation: "anything" }))],
+        2026,
+      ),
+    ).toEqual({});
+    expect(
+      upstreamKindsOf(
+        [
+          {
+            ...withCols(col({ name: "y", type: "INTEGER", from: ["y"], derivation: null })),
+            seasons: { from: 2030, to: null },
+          },
+        ],
+        2026,
+      ),
+    ).toEqual({});
+  });
 
   it.each([
     ["nflverse:stats_player_week", 2024],
@@ -1077,6 +1147,53 @@ describe("DDL + statements on node:sqlite", () => {
     expect(dbOf(dbs, "nflverse:pbp").prepare("SELECT COUNT(*) AS n FROM ds_pbp").get()).toEqual({
       n: 1,
     });
+    closeAll(dbs);
+  });
+
+  it("the injection fixtures stay inert: stored and read back as bytes, never in SQL, labels refused", () => {
+    const dbs = contractDbs();
+    const espn = dbOf(dbs, "news:espn");
+    const texts = Object.values(INJECTIONS);
+    texts.forEach((t, i) => {
+      const r = newsRow(
+        "espn",
+        {
+          title: t,
+          description: t,
+          link: `https://www.espn.com/x?q=${encodeURIComponent(t)}`,
+          guid: `g${String(i)}`,
+          pubDate: "Tue, 29 Sep 2026 14:50:00 EST",
+        },
+        Date.UTC(2026, 8, 30),
+      );
+      expect(r).not.toBeNull();
+      if (r !== null) insert(espn, "ds_news", r);
+    });
+    const got = run(dbs, stmt("NewsReader.recent", 1), { since_ms: 0, gsis_ids: null, limit: 50 });
+    expect(got.map((r) => r.title).sort()).toEqual([...texts].sort());
+    expect(got.map((r) => r.blurb).sort()).toEqual([...texts].sort());
+    for (const [, st] of statements) for (const t of texts) expect(st.sql.includes(t)).toBe(false);
+    // the same text where only an id or a checked label may stand is refused at load, not stored
+    for (const t of texts) {
+      expect(trendingRows("add", [{ player_id: t, count: 1 }], "2026-10-06T00:00:00.000Z")).toEqual(
+        [],
+      );
+      const label =
+        depthSnapshot({
+          dt: "2026-10-06T14:08:49Z",
+          team: "BUF",
+          espn_id: "3918298",
+          pos_grp_id: "21",
+          pos_grp: t,
+          pos_id: "8",
+          pos_abb: "QB",
+          pos_slot: 9,
+          pos_rank: 1,
+        })?.pos_grp ?? null;
+      expect(label === null || label === derive.DEPTH_LABEL_OTHER, t).toBe(true);
+      expect(derive.httpUrlOrNull(t)).toBeNull();
+    }
+    expect(espn.prepare("SELECT COUNT(*) AS n FROM ds_news").get()).toEqual({ n: texts.length });
     closeAll(dbs);
   });
 });

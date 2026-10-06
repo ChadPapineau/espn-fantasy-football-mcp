@@ -56,3 +56,11 @@ releases `weekly_rosters`, `stats_player`, `players`), © the nflverse contribut
 <https://github.com/nflverse/nflverse-data>. Redistributed here unmodified in substance (a
 selection of columns and rows). ESPN ids, names and positions are facts taken from the recorded
 ESPN fixtures (see `fixtures/espn/recorded/README.md`).
+
+## Phase-2 excerpts
+
+[`phase2/`](phase2/README.md) holds the fixture roster's rows of the 2026-10-06 Phase-2 release
+files (pbp, snap counts, expected points, depth charts, team stats; and the pre-2025 depth-chart
+layout from 2024), which ground the Phase-2 dataset contract on real data. They join to this file
+by `gsis_id`, `pfr_id` and `espn_id`; their licences (nflverse CC-BY 4.0, ffopportunity
+CC-BY-SA 4.0) are stated there.
