@@ -157,6 +157,9 @@ describe("rules_v1 — more feed phrasings", () => {
     ["Player A working with the first team", "role/up"],
     ["Player A will be eased back", "coaching_intent/down"],
     ["Player A's workload to be managed", "coaching_intent/down"],
+    ["Player A: Viewed as 'unlikely' for Week 5", "availability/down"],
+    ["Player A \u201Cnot expected\u201D for Sunday", "availability/down"],
+    ["Player A: 'Questionable' for Week 6", "availability/down"],
   ])("%s → %s", (text, want) => {
     expect(c(text)).toBe(want);
   });
@@ -231,15 +234,18 @@ describe("rules_v1 — conventions", () => {
   });
 
   it("folds homoglyphs, fullwidth forms, zero-width and bidi characters and HTML before matching", () => {
-    expect(c("Player A: Ruled оut")).toBe("availability/down"); // Cyrillic о
+    expect(c("Player A: Ruled \u043Eut")).toBe("availability/down"); // Cyrillic \u043E
     expect(c("Player A: ＲＵＬＥＤ ＯＵＴ")).toBe("availability/down"); // fullwidth
-    expect(c("Player A: Ru​led o‍ut")).toBe("availability/down"); // zero-width
-    expect(c("Player A: ‮ruled out‬")).toBe("availability/down"); // bidi override
+    expect(c("Player A: Ru\u200Bled o\u200Dut")).toBe("availability/down"); // zero-width
+    expect(c("Player A: \u202Eruled out\u202C")).toBe("availability/down"); // bidi override
     expect(c("Player A: <b>ruled</b> <i>out</i>")).toBe("availability/down");
     expect(c("Player A: ruled&nbsp;out")).toBe("availability/down");
     expect(c("Player A won’t play Sunday")).toBe("availability/down"); // typographic apostrophe
     expect(c("Player A day–to–day")).toBe("availability/down"); // en dash
-    expect(claimFold("A​  B‮")).toBe("a b");
+    expect(claimFold("A\u200B  B\u202E")).toBe("a b");
+    expect(claimFold("Viewed as 'unlikely' \u2014 won't play, \"out\"")).toBe(
+      "viewed as unlikely - won't play, out",
+    );
   });
 
   it("reads only the first CLAIM_TEXT_CAP code points (bounded work on hostile input)", () => {

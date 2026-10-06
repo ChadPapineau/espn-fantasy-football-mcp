@@ -8,7 +8,8 @@ titles by `tests/sources/news/match.test.ts`.
 
 | File | Items | Source | Labelled claims | Relation to the rules |
 |---|---|---|---|---|
-| `items.json` | 65 | every item of the three 2026-10-06 19:53 UTC captures (`../captured/*.xml`) except one removed for privacy | 14 | **in-sample**: the `rules_v1` table was drafted with these titles in view, so this set shows the rules fit the phrasing they were written for — not how they generalise |
+| `items.json` | 65 | every item of the three 2026-10-06 19:53 UTC captures (`../captured/{rotowire,espn,cbs}.xml`) except one removed for privacy | 14 | **in-sample**: the `rules_v1` table was drafted with these titles in view, so this set shows the rules fit the phrasing they were written for — not how they generalise |
+| `holdout.json` | 6 | every item that was new in three later fetches (20:39–21:24 UTC, `../captured/holdout-{rotowire,cbs}.xml`) except one removed for privacy | 2 | **held out**: labelled before `rules_v1` was run on them. Too small to estimate precision — a generalisation sanity check; the feeds turn over slowly (7 new items in 90 minutes) and the capture was kept to a few requests |
 
 Each item records `feed`, `guid` and `title` (held equal to the committed capture by the test), the
 `claim` label (`{ type, direction }` or `null`), the fixture-roster ESPN ids the title names
@@ -52,6 +53,18 @@ emitted claim on an item labelled `null` is a false positive. Recall is reported
 | Set | Items | Labelled claims | Emitted | Correct | Precision | Recall |
 |---|---|---|---|---|---|---|
 | `items.json` (in-sample) | 65 | 14 | 14 | 14 | 1.00 | 1.00 |
+| `holdout.json`, as first run (held out) | 6 | 2 | 1 | 1 | 1.00 | 0.50 |
+| `holdout.json`, after the one change it prompted | 6 | 2 | 2 | 2 | 1.00 | 1.00 |
+| both, pooled (current rules) | 71 | 16 | 16 | 16 | 1.00 | 1.00 |
+
+The held-out miss was RotoWire's "Viewed as 'unlikely' for Week 5": the rules read "unlikely to play"
+but not "unlikely for Week N", and a quoting mark split the phrase. The change that followed is
+general — quoting marks are folded away before matching (an apostrophe inside a word such as
+"won't" stays) and "unlikely / not expected / not likely for <game>" reads as availability/down —
+and it leaves the in-sample result unchanged. After it the held-out sample is no longer held out;
+the next capture is the next out-of-sample check. No item was ever emitted with a wrong label in
+either set, so the plan's ≥ 0.8 gate holds with margin, but on 16 claims the estimate is coarse:
+one more false positive costs ~6 points.
 
 Matcher (fixture-roster universe, the same titles): 7 refs emitted, 7 correct (precision 1.00); 9
 labelled mentions, 7 found — the two misses are by design: "RB Mixon" (a free agent's bare surname:

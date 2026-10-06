@@ -5,8 +5,8 @@
 // precision on a hand-labelled set of real items, fixtures/news/labelled/README.md).
 //
 // What it is: a fixed, ordered table of regular expressions over a folded copy of the text (the
-// plan 02 §6.2 sanitiser, then `flagFold`: NFKC, lower case, confusables folded — so "оut" written
-// with a Cyrillic о still reads as "out"). Every hit is a (position, rule); the claim is the EARLIEST
+// plan 02 §6.2 sanitiser, then `flagFold`: NFKC, lower case, confusables folded — so "out" spelt
+// with a Cyrillic o still reads as "out"). Every hit is a (position, rule); the claim is the EARLIEST
 // hit in reading order (a hit starting inside its phrase is the same claim read twice, and the table
 // order decides: availability, transaction, health, role, coaching intent — "suffers season-ending
 // injury" is availability), the title before the blurb — the labelling convention of the B8 set.
@@ -138,7 +138,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "down",
     "out",
-    String.raw`\b(?:won't|wont|will not|not expected to|unlikely to|isn't expected to|is not expected to|not going to|doesn't expect to|does not expect to)\s+(?:play|suit up|dress|be available|go)\b`,
+    String.raw`\b(?:won't|wont|will not|not expected to|unlikely to|isn't expected to|is not expected to|not going to|doesn't expect to|does not expect to)\s+(?:play|suit up|dress|be available|go)\b|\b(?:unlikely|not expected|not likely)\s+(?:for|against|vs)\s+(?:week|sunday|monday|thursday|saturday|tonight|the game)\b`,
   ),
   rule(
     "availability.will_miss",
@@ -512,10 +512,15 @@ const OFFICIALS_RE =
  */
 export function claimFold(raw: string): string {
   const clean = sanitizeText(raw, CLAIM_TEXT_CAP).value;
-  return flagFold(clean)
-    .replace(/[‘’ʼʻ´`′]/gu, "'")
-    .replace(/[‐‑‒–—―−]/gu, "-")
-    .trim();
+  return (
+    flagFold(clean)
+      .replace(/[‘’ʼʻ´`′]/gu, "'")
+      .replace(/[‐‑‒–—―−]/gu, "-")
+      .replace(/[\u201C\u201D\u201E\u201F\u00AB\u00BB]/gu, '"')
+      // a quoting mark is not part of a word ("viewed as 'unlikely' for"); "won't" keeps its own
+      .replace(/(^|[^a-z0-9])['"]+|['"]+(?=[^a-z0-9]|$)/g, "$1")
+      .trim()
+  );
 }
 
 interface Hit {

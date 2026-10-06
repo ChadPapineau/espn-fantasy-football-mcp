@@ -25,6 +25,12 @@ Licensing: the feeds are RotoWire's, ESPN's and CBS's (research 04 §E `api-term
 Disney product, 04 §B.10). Headlines are kept here only as test inputs for a personal, non-commercial
 tool; nothing here is served to anyone.
 
+## `captured/holdout-*.xml` — the later fetches (20:39–21:24 UTC the same day)
+
+Only the items that were new since the first capture: 1 from RotoWire and 5 from CBS (ESPN's one
+new item was removed for privacy — it named a person's health). Same treatment as above. They back
+`labelled/holdout.json`.
+
 ## `labelled/` — the plan 10 B8 hand-labelled set
 
 See [`labelled/README.md`](labelled/README.md): the labelling rules, the measured precision, and

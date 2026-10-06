@@ -557,7 +557,7 @@ describe("hostile feeds (plan 02 §6; plan 10 B8)", () => {
     const xml = rss(
       [
         { title: "&lol9; Player A", guid: "lol" },
-        { title: "‮no tuo delur‬ Player B ​", guid: "bidi" },
+        { title: "\u202Eno tuo delur\u202C Player B \u200B", guid: "bidi" },
         { title: "<script>alert(1)</script>", guid: "script" },
       ],
       { raw: true, head: `<!DOCTYPE rss [<!ENTITY lol9 "${"&lol8;".repeat(10)}">]>` },
@@ -576,7 +576,7 @@ describe("hostile feeds (plan 02 §6; plan 10 B8)", () => {
     expect(news.map((x) => x.title)).toEqual([
       "&lol9; Player A",
       "alert(1)",
-      "‮no tuo delur‬ Player B ​",
+      "\u202Eno tuo delur\u202C Player B \u200B",
     ]);
     // the wrapper strips what storage kept
     const wrapped = rows(publisher.db, "SELECT * FROM ds_news").map(

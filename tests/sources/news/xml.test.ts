@@ -128,8 +128,8 @@ describe("hostile fields", () => {
   });
 
   it("keeps bidi and zero-width characters as data (removed by the sanitiser, not here)", () => {
-    const d = parseRss(rss([{ title: "Player​ A ‮ruled out‬" }]));
-    expect(d.items[0]?.title).toBe("Player​ A ‮ruled out‬");
+    const d = parseRss(rss([{ title: "Player\u200B A \u202Eruled out\u202C" }]));
+    expect(d.items[0]?.title).toBe("Player\u200B A \u202Eruled out\u202C");
   });
 
   it("a bare '<' in text is text, and does not swallow the closing tag", () => {

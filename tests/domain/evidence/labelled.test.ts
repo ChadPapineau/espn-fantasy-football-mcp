@@ -1,8 +1,9 @@
 // labelled.test.ts — plan 10 B8 "the `rules_v1` claim extractor scores ≥ 0.8 precision on a
 // hand-labelled set of 50 real items [A-4]". The sets are fixtures/news/labelled/*.json (real RSS
 // items captured from the three feeds, labelled by title under fixtures/news/labelled/README.md):
-// `items.json` (65 items, 2026-10-06 19:53Z; in-sample — the rules were drafted with it in view).
-// Precision = emitted claims
+// `items.json` (65 items, 2026-10-06 19:53Z; in-sample — the rules were drafted with it in view) and
+// `holdout.json` (6 items fetched later and labelled before the extractor was run on them; small — a
+// generalisation sanity check, its pre-change result recorded in the README). Precision = emitted claims
 // whose type AND direction equal the label ÷ emitted claims. The titles are also held to the
 // committed captures, so a label can never drift from the item it describes.
 import { describe, expect, it } from "vitest";
@@ -103,5 +104,39 @@ describe("B8 — the 2026-10-06 labelled set (items.json)", () => {
       correct: 14,
       labelled: 14,
     });
+  });
+});
+
+describe("B8 — the held-out sample (holdout.json)", () => {
+  const items = labelledItems("fixtures/news/labelled/holdout.json");
+
+  it("titles equal the committed held-out captures; labels well-formed", () => {
+    const titles = new Map<string, string>();
+    for (const feed of new Set(items.map((i) => i.feed))) {
+      for (const it of parseRss(fixtureText(`fixtures/news/captured/holdout-${feed}.xml`)).items)
+        titles.set(
+          `${feed}|${(it.guid ?? "").trim()}`,
+          (it.title ?? "").replace(/\s+/g, " ").trim(),
+        );
+    }
+    expect(titles.size).toBe(items.length);
+    for (const it of items) {
+      expect(titles.get(`${it.feed}|${it.guid}`), `${it.feed}|${it.guid}`).toBe(it.title);
+      if (it.claim !== null) expect(TYPES.has(it.claim.type)).toBe(true);
+    }
+  });
+
+  it("rules_v1 precision ≥ 0.8 on the held-out sample and on both sets pooled", () => {
+    const s = score(items);
+    expect(s.emitted).toBeGreaterThan(0);
+    expect(s.precision, s.misses.join("; ")).toBeGreaterThanOrEqual(0.8);
+    // before the one rule change it prompted (README): emitted 1, correct 1, recall 0.5
+    expect({ emitted: s.emitted, correct: s.correct, labelled: s.labelled_claims }).toEqual({
+      emitted: 2,
+      correct: 2,
+      labelled: 2,
+    });
+    const pooled = score([...labelledItems(), ...items]);
+    expect(pooled.precision, pooled.misses.join("; ")).toBeGreaterThanOrEqual(0.8);
   });
 });

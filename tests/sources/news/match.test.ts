@@ -80,8 +80,8 @@ describe("full names", () => {
 
   it("does not match a homoglyph or an invisible-character spelling as someone else", () => {
     // the sanitiser removes zero-width characters, so this IS the name; a Cyrillic letter is not
-    expect(ids("Bij​an Robinson")).toEqual([[4430807, "full_name"]]);
-    expect(ids("Bijаn Robinson")).toEqual([]);
+    expect(ids("Bij\u200Ban Robinson")).toEqual([[4430807, "full_name"]]);
+    expect(ids("Bij\u0430n Robinson")).toEqual([]);
   });
 
   it("needs the team to decide a full name two universe players share", () => {
@@ -151,7 +151,12 @@ describe("the universe", () => {
       { espn_id: 0, full_name: "Zero Player", team: null, gsis_id: null },
       { espn_id: 1.5, full_name: "Half Player", team: null, gsis_id: null },
       { espn_id: 5, full_name: "Madonna", team: null, gsis_id: null },
-      { espn_id: 6, full_name: "Пётр Иванов", team: null, gsis_id: null },
+      {
+        espn_id: 6,
+        full_name: "\u041f\u0451\u0442\u0440\u0020\u0418\u0432\u0430\u043d\u043e\u0432",
+        team: null,
+        gsis_id: null,
+      },
       { espn_id: 7, full_name: "Real Name", team: "BUF", gsis_id: "not-a-gsis" },
       { espn_id: 7, full_name: "Real Name", team: "BUF", gsis_id: "not-a-gsis" },
     ]);
