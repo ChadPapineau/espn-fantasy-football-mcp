@@ -1,0 +1,12 @@
+[
+  { "op": "replace", "path": ["schedule", 20, "away", "pointsByScoringPeriod", "5"], "value": 99.48 },
+  { "op": "replace", "path": ["schedule", 20, "home", "pointsByScoringPeriod", "5"], "value": 113.12 },
+  { "op": "replace", "path": ["schedule", 21, "away", "pointsByScoringPeriod", "5"], "value": 153.58 },
+  { "op": "replace", "path": ["schedule", 21, "home", "pointsByScoringPeriod", "5"], "value": 113.72 },
+  { "op": "replace", "path": ["schedule", 22, "away", "pointsByScoringPeriod", "5"], "value": 96.44 },
+  { "op": "replace", "path": ["schedule", 22, "home", "pointsByScoringPeriod", "5"], "value": 82.88 },
+  { "op": "replace", "path": ["schedule", 23, "away", "pointsByScoringPeriod", "5"], "value": 92.4 },
+  { "op": "replace", "path": ["schedule", 23, "home", "pointsByScoringPeriod", "5"], "value": 84.74 },
+  { "op": "replace", "path": ["schedule", 24, "away", "pointsByScoringPeriod", "5"], "value": 109.44 },
+  { "op": "replace", "path": ["schedule", 24, "home", "pointsByScoringPeriod", "5"], "value": 91.06 }
+]

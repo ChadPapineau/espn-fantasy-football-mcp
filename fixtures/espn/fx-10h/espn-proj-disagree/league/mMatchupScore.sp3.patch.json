@@ -1,0 +1,6 @@
+[
+  { "op": "replace", "path": ["schedule", 24, "away", "winProbability"], "value": 0.68 },
+  { "op": "replace", "path": ["schedule", 24, "home", "totalProjectedPoints"], "value": 116.525948 },
+  { "op": "replace", "path": ["schedule", 24, "home", "totalProjectedPointsLive"], "value": 116.525948 },
+  { "op": "replace", "path": ["schedule", 24, "home", "winProbability"], "value": 0.32 }
+]

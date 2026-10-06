@@ -1,0 +1,12 @@
+[
+  { "op": "replace", "path": ["teams", 0, "transactionCounter", "acquisitionBudgetSpent"], "value": 7 },
+  { "op": "replace", "path": ["teams", 1, "transactionCounter", "acquisitionBudgetSpent"], "value": 14 },
+  { "op": "replace", "path": ["teams", 2, "transactionCounter", "acquisitionBudgetSpent"], "value": 21 },
+  { "op": "replace", "path": ["teams", 3, "transactionCounter", "acquisitionBudgetSpent"], "value": 5 },
+  { "op": "replace", "path": ["teams", 4, "transactionCounter", "acquisitionBudgetSpent"], "value": 12 },
+  { "op": "replace", "path": ["teams", 5, "transactionCounter", "acquisitionBudgetSpent"], "value": 19 },
+  { "op": "replace", "path": ["teams", 6, "transactionCounter", "acquisitionBudgetSpent"], "value": 3 },
+  { "op": "replace", "path": ["teams", 7, "transactionCounter", "acquisitionBudgetSpent"], "value": 10 },
+  { "op": "replace", "path": ["teams", 8, "transactionCounter", "acquisitionBudgetSpent"], "value": 17 },
+  { "op": "replace", "path": ["teams", 9, "transactionCounter", "acquisitionBudgetSpent"], "value": 1 }
+]

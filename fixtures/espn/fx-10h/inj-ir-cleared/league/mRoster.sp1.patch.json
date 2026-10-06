@@ -1,0 +1,4 @@
+[
+  { "op": "replace", "path": ["teams", 1, "roster", "entries", 9, "playerPoolEntry", "player", "injuryStatus"], "value": "OUT" },
+  { "op": "add", "path": ["teams", 1, "roster", "entries", 9, "playerPoolEntry", "player", "outlooks"], "value": { "outlooksByWeek": { "5": "Cleared to play: move him out of IR before Thursday's lock or your roster will be voided." } } }
+]

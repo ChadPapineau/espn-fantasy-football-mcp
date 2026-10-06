@@ -1,0 +1,5 @@
+[
+  { "op": "replace", "path": ["status", "waiverLastExecutionDate"], "value": 1791358200000 },
+  { "op": "replace", "path": ["status", "waiverNextExecutionDate"], "value": 1791444600000 },
+  { "op": "add", "path": ["status", "waiverProcessStatus", "2026-10-07T07:30:00.000+00:00"], "value": 3 }
+]

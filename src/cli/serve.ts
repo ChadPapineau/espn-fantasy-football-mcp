@@ -39,7 +39,7 @@ import {
 } from "../config/schema.js";
 import { systemClock, type Clock } from "../domain/clock.js";
 import { createServer } from "../mcp/server.js";
-import type { FetchLike } from "../providers/espn/index.js";
+import { derivedLeagueClock, type FetchLike } from "../providers/espn/index.js";
 import { buildServices, type Wiring } from "../services/index.js";
 import { storeFactory } from "../store/index.js";
 import {
@@ -172,12 +172,19 @@ function storeOpenReason(e: unknown): string {
   return e instanceof Error && /^[A-Za-z]{1,40}$/.test(e.name) ? e.name : "unknown";
 }
 
+/** A clock that reads `atMs` now and runs on in real time (a derived fixture league's instant). */
+export function offsetClock(atMs: number): Clock {
+  const offset = atMs - systemClock.nowMs();
+  const nowMs = (): number => systemClock.nowMs() + offset;
+  return Object.freeze({ nowMs, nowIso: () => new Date(nowMs()).toISOString() });
+}
+
 /**
  * `eff serve`: resolves the exit code once the server has shut down (never earlier). Startup touches
  * no network and no keychain; the store is closed on every exit path.
  */
 export async function serve(opts: ServeOptions, internals: ServeInternals = {}): Promise<number> {
-  const clock = internals.clock ?? systemClock;
+  let clock = internals.clock ?? systemClock;
   const bootLog = createLogger({
     level: "info",
     sink: (l) => {
@@ -206,6 +213,14 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     });
     return EXIT.usage;
   }
+  // A derived fixture league carries its own frozen instant (fixtures/espn/fx-10h: Tuesday of week
+  // 5, 21:00 ET); fixture mode only, and never over an injected clock. Time runs on from it, so the
+  // limiter's windows and the cache TTLs behave as in production.
+  const fixtureClockAt =
+    internals.clock === undefined && config.fixtureDir !== null
+      ? derivedLeagueClock(config.fixtureDir)
+      : null;
+  if (fixtureClockAt !== null) clock = offsetClock(fixtureClockAt);
   const logger = createLogger({
     level: config.logLevel,
     sink: (l) => {
@@ -438,6 +453,7 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       schema_version: store.schemaVersion,
       toolset: config.toolset,
       fixture_mode: config.fixtureDir !== null,
+      ...(fixtureClockAt === null ? {} : { fixture_clock: new Date(fixtureClockAt).toISOString() }),
       credential_state: w.services.auth.state(),
       drift: w.services.status.drift().status,
     });

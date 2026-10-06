@@ -1,0 +1,5 @@
+[
+  { "op": "replace", "path": ["settings", "acquisitionSettings", "acquisitionBudget"], "value": 100 },
+  { "op": "replace", "path": ["settings", "acquisitionSettings", "isUsingAcquisitionBudget"], "value": true },
+  { "op": "replace", "path": ["settings", "acquisitionSettings", "minimumBid"], "value": 1 }
+]

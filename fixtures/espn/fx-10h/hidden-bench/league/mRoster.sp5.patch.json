@@ -1,0 +1,5 @@
+[
+  { "op": "replace", "path": ["teams", 1, "roster", "entries", 12, "lineupSlotId"], "value": 21 },
+  { "op": "replace", "path": ["teams", 1, "roster", "entries", 12, "playerPoolEntry", "player", "injured"], "value": true },
+  { "op": "replace", "path": ["teams", 1, "roster", "entries", 12, "playerPoolEntry", "player", "injuryStatus"], "value": "QUESTIONABLE" }
+]

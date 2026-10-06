@@ -1,0 +1,4 @@
+[
+  { "op": "replace", "path": ["entries", 166, "player", "injured"], "value": true },
+  { "op": "replace", "path": ["entries", 166, "player", "injuryStatus"], "value": "QUESTIONABLE" }
+]

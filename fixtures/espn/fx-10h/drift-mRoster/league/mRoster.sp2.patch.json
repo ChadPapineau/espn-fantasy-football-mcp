@@ -1,0 +1,1 @@
+[{ "op": "remove", "path": ["teams", 0, "roster", "entries"] }]

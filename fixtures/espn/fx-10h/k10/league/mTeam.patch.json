@@ -1,0 +1,11 @@
+[
+  { "op": "replace", "path": ["teams", 0, "waiverRank"], "value": 9 },
+  { "op": "replace", "path": ["teams", 1, "waiverRank"], "value": 10 },
+  { "op": "replace", "path": ["teams", 2, "waiverRank"], "value": 7 },
+  { "op": "replace", "path": ["teams", 3, "waiverRank"], "value": 8 },
+  { "op": "replace", "path": ["teams", 4, "waiverRank"], "value": 3 },
+  { "op": "replace", "path": ["teams", 5, "waiverRank"], "value": 4 },
+  { "op": "replace", "path": ["teams", 6, "waiverRank"], "value": 5 },
+  { "op": "replace", "path": ["teams", 7, "waiverRank"], "value": 2 },
+  { "op": "replace", "path": ["teams", 9, "waiverRank"], "value": 6 }
+]

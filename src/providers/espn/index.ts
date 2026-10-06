@@ -13,6 +13,7 @@ import type { Clock } from "../../domain/clock.js";
 import type { DriftObservations } from "../../drift/types.js";
 import type { RequestOrigin, StoreRepositories } from "../../store/types.js";
 import { createFixtureFetch } from "./fixture.js";
+import { createDerivedLeagueFetch, readDerivedManifest } from "./fixture-league.js";
 import { EspnProvider } from "./provider.js";
 import { EspnProviderError, type ProviderLog } from "./request.js";
 import type { FetchLike } from "./transport.js";
@@ -21,6 +22,14 @@ import type { ScoringSettingsTranslator } from "./types.js";
 export { EspnProvider, ESPN_PROVIDER_WRITES, PLAYERCARD_IDS_MAX } from "./provider.js";
 export type { EspnProviderDeps } from "./provider.js";
 export { createFixtureFetch, FixtureError, composeBodies } from "./fixture.js";
+export {
+  applyJsonPatch,
+  createDerivedLeagueFetch,
+  derivedLeagueClock,
+  DERIVED_LEAGUE_KIND,
+  poolQuery,
+  readDerivedManifest,
+} from "./fixture-league.js";
 export { EspnDriftError, EspnUpstreamError, isEspnUpstreamError } from "./errors.js";
 export type { FetchLike } from "./transport.js";
 export type { ProviderLog } from "./request.js";
@@ -29,17 +38,25 @@ export type { ProviderLog } from "./request.js";
 export interface FixtureLocation {
   readonly dir: string;
   readonly league: string;
+  /**
+   * `recorded` (fixtures/espn, exact recorded requests) or `derived` (a derived fixture league such
+   * as fixtures/espn/fx-10h or one of its variant directories — served by view and filter).
+   */
+  readonly kind?: "recorded" | "derived";
 }
 
 const SLOT_RE = /^league-[a-z]$/;
 
 /**
- * Resolves `EFF_FIXTURE_DIR` (absolute): either the `fixtures/espn` directory (its manifest.json
- * present; slot `league-a`) or one recorded league directory `…/fixtures/espn/recorded/<slot>`.
- * Null when neither shape is found.
+ * Resolves `EFF_FIXTURE_DIR` (absolute): a derived fixture league (its manifest.json has `kind:
+ * "derived_league"` — fixtures/espn/fx-10h or a variant directory), the `fixtures/espn` directory
+ * (its manifest.json present; slot `league-a`) or one recorded league directory
+ * `…/fixtures/espn/recorded/<slot>`. Null when none of these shapes is found.
  */
 export function resolveFixtureDir(dir: string): FixtureLocation | null {
   if (!path.isAbsolute(dir)) return null;
+  const derived = readDerivedManifest(dir);
+  if (derived !== null) return { dir, league: derived.league, kind: "derived" };
   if (existsSync(path.join(dir, "manifest.json"))) return { dir, league: "league-a" };
   const slot = path.basename(dir);
   const root = path.dirname(path.dirname(dir));
@@ -78,7 +95,8 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
       throw new EspnProviderError("INTERNAL", "fixture_mode_with_credentials");
     const loc = resolveFixtureDir(o.config.fixtureDir);
     if (loc === null) throw new EspnProviderError("INTERNAL", "fixture_dir_not_found");
-    fetchFn = createFixtureFetch(loc);
+    fetchFn =
+      loc.kind === "derived" ? createDerivedLeagueFetch({ dir: loc.dir }) : createFixtureFetch(loc);
     credentials = null;
   }
   return new EspnProvider({

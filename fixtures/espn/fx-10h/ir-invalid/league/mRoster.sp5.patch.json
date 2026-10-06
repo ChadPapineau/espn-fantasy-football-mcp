@@ -1,0 +1,1 @@
+[{ "op": "replace", "path": ["teams", 1, "roster", "entries", 12, "lineupSlotId"], "value": 21 }]
