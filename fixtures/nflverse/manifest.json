@@ -37,13 +37,19 @@
   },
   "files": [
     {
-      "path": "schedules/games.excerpt.json.gz",
+      "path": "schedules/games.excerpt.json",
       "url": "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.parquet",
       "dataset": "nflverse:schedules",
       "season": null,
       "rows": 557,
-      "bytes": 29739,
-      "sha256": "a23f9d528305cf40aff4e424df57325e58d9f7c66d0dbc992855750ac7e37896",
+      "parts": [
+        {
+          "path": "schedules/games.excerpt.1.tsv",
+          "rows": 557,
+          "bytes": 191870,
+          "sha256": "c72c3440a940bb585cda7d7b25f8fb96bdfb65c159aa9e0b744cdf9e34f7785e"
+        }
+      ],
       "excerpt": "every game of seasons 2025 and 2026; all 46 columns",
       "upstream": {
         "bytes": 521703,
@@ -57,13 +63,19 @@
       }
     },
     {
-      "path": "injuries/injuries_2026.excerpt.json.gz",
+      "path": "injuries/injuries_2026.excerpt.json",
       "url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2026.parquet",
       "dataset": "nflverse:injuries",
       "season": 2026,
       "rows": 1052,
-      "bytes": 19374,
-      "sha256": "a368b98e786cc8b446122a50ba8b7184f9db86d6084df1cea737aa8d364fd028",
+      "parts": [
+        {
+          "path": "injuries/injuries_2026.excerpt.1.tsv",
+          "rows": 1052,
+          "bytes": 156164,
+          "sha256": "86e85e6919f02fc1a09482897f071f3e82a0bbe288639be81400124449ef07d3"
+        }
+      ],
       "excerpt": "every row (weeks 1-4); all 16 columns",
       "upstream": {
         "bytes": 34788,
@@ -77,13 +89,19 @@
       }
     },
     {
-      "path": "weekly_rosters/roster_weekly_2026.excerpt.json.gz",
+      "path": "weekly_rosters/roster_weekly_2026.excerpt.json",
       "url": "https://github.com/nflverse/nflverse-data/releases/download/weekly_rosters/roster_weekly_2026.parquet",
       "dataset": "nflverse:roster_weekly",
       "season": 2026,
       "rows": 297,
-      "bytes": 15215,
-      "sha256": "ec7670d74d89a985bb94d341b78c3a9364c2b91fd1b1c1394429078ef46ebdec",
+      "parts": [
+        {
+          "path": "weekly_rosters/roster_weekly_2026.excerpt.1.tsv",
+          "rows": 297,
+          "bytes": 115972,
+          "sha256": "bb729c1cdf863abaccb5001b22717e9a83021760eb282a964dab7c573a933a68"
+        }
+      ],
       "excerpt": "every row (weeks 1-4) of the fixture-roster players and the decoy; every row sharing a same_surname last name (Allen, Love, Henry); every kicker row; the rows with a null gsis_id; the active QB/RB/WR/TE rows without an espn_id; the one player whose espn_id differs in players.parquet; all 36 columns",
       "upstream": {
         "bytes": 744949,
@@ -97,13 +115,31 @@
       }
     },
     {
-      "path": "stats_player/stats_player_week_2026.excerpt.json.gz",
+      "path": "stats_player/stats_player_week_2026.excerpt.json",
       "url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.parquet",
       "dataset": "nflverse:stats_player_week",
       "season": 2026,
       "rows": 1075,
-      "bytes": 58867,
-      "sha256": "fae6aac7f6ecd9afc038811b8ab774bf2977a6947dfbad46a53d54d8c49fc011",
+      "parts": [
+        {
+          "path": "stats_player/stats_player_week_2026.excerpt.1.tsv",
+          "rows": 473,
+          "bytes": 245600,
+          "sha256": "a378af5aae2dc1a090e1a844e46194cef137c179f417015d5cc6855ff820d0d6"
+        },
+        {
+          "path": "stats_player/stats_player_week_2026.excerpt.2.tsv",
+          "rows": 470,
+          "bytes": 245620,
+          "sha256": "2a926b8e64c1a83df4bdcfc4bb5269ced549beed8317882a3b0b135a1352a00d"
+        },
+        {
+          "path": "stats_player/stats_player_week_2026.excerpt.3.tsv",
+          "rows": 132,
+          "bytes": 70338,
+          "sha256": "7ff04077a5726089178c8b0c678488bcf1f0f435542e03aa4a8222c04b279b45"
+        }
+      ],
       "excerpt": "weeks 1-3: every row of both teams in the 14 games the fixture team units (PHI, DET, LA, WAS D/ST; LAC TQB) played, every fixture-roster player row, every kicker row; plus the rows with a null player_id (all weeks); all 150 columns",
       "upstream": {
         "bytes": 306484,
@@ -117,13 +153,19 @@
       }
     },
     {
-      "path": "players/players.excerpt.json.gz",
+      "path": "players/players.excerpt.json",
       "url": "https://github.com/nflverse/nflverse-data/releases/download/players/players.parquet",
       "dataset": "nflverse:players",
       "season": null,
       "rows": 29,
-      "bytes": 4696,
-      "sha256": "e4c89e86a308e7747f6a340110ed87a6c19cc7a10a8cd3773a89b980861e81f3",
+      "parts": [
+        {
+          "path": "players/players.excerpt.1.tsv",
+          "rows": 29,
+          "bytes": 12017,
+          "sha256": "24cba6101dbf07be76a0b1e9b6daf0db3bf39f809d7b0536624b9d489beea48a"
+        }
+      ],
       "excerpt": "the fixture-roster players and the decoy, the one player whose espn_id differs from roster_weekly, and three legacy rows whose gsis_id is not a GSIS id; all 39 columns",
       "upstream": {
         "bytes": 3390504,

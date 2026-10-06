@@ -1,6 +1,6 @@
 // fixtures.test.ts — the committed nflverse fixtures (plan 05 §3: small real excerpts ≤ 300 KB under
 // CC-BY 4.0 with ATTRIBUTION.md; plan 10 §3.1a: ≥ 3 final weeks for the fixture league's players;
-// plan 08 §6 step 5: the upstream sha256 pinned beside the excerpt): every file hashes to its manifest
+// plan 08 §6 step 5: the upstream sha256 pinned beside the excerpt): every part hashes to its manifest
 // entry, keeps the real file's schema (observed-columns.ts) and covers the fixture roster's weeks
 // 1–3; the parquet rebuilt from it round-trips through hyparquet value for value; and the test-only
 // writer's snappy and dictionary encodings decode.
@@ -22,6 +22,7 @@ import {
   manifest,
 } from "./helpers/fixtures.js";
 import { snappyCompress, snappyLiteral, writeParquet } from "./helpers/parquet-writer.js";
+import { decodeTsv, encodeTsv } from "./helpers/tsv.js";
 
 const roster = JSON.parse(
   readFileSync(new URL("../../../fixtures/players/fixture-roster.json", import.meta.url), "utf8"),
@@ -34,13 +35,18 @@ const toAb = (u: Uint8Array): ArrayBuffer =>
   u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
 
 describe("the manifest and the committed files", () => {
-  it("every file hashes to its manifest entry and stays ≤ 300 KB", () => {
+  it("every part hashes to its manifest entry and stays ≤ 300 KB; the rows add up", () => {
     expect(manifest.files.map((f) => f.path).sort()).toEqual(Object.values(FX).sort());
     for (const f of manifest.files) {
-      const bytes = readFileSync(join(FIXTURES, f.path));
-      expect(createHash("sha256").update(bytes).digest("hex"), f.path).toBe(f.sha256);
-      expect(bytes.length, f.path).toBe(f.bytes);
-      expect(bytes.length, f.path).toBeLessThanOrEqual(300 * 1024);
+      expect(f.parts.length).toBeGreaterThan(0);
+      for (const p of f.parts) {
+        const bytes = readFileSync(join(FIXTURES, p.path));
+        expect(createHash("sha256").update(bytes).digest("hex"), p.path).toBe(p.sha256);
+        expect(bytes.length, p.path).toBe(p.bytes);
+        expect(bytes.length, p.path).toBeLessThanOrEqual(300 * 1024);
+      }
+      expect(f.parts.reduce((a, p) => a + p.rows, 0)).toBe(f.rows);
+      expect(loadFixture(f.path).parts).toEqual(f.parts.map((p) => p.path.split("/").pop()));
       expect(f.url.startsWith(`${REL}/`)).toBe(true);
       expect(f.upstream.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(f.upstream.codecs).toEqual(["SNAPPY"]);
@@ -62,8 +68,8 @@ describe("the manifest and the committed files", () => {
       expect(f.upstream.bytes).toBe(observed?.bytes);
       expect(f.upstream.rows).toBe(observed?.rows);
       expect(fx.rows).toBe(f.rows);
-      for (const c of fx.schema)
-        expect(fx.columns[c.name], `${f.path}:${c.name}`).toHaveLength(fx.rows);
+      expect(fx.values).toHaveLength(fx.rows);
+      for (const row of fx.values) expect(row).toHaveLength(fx.schema.length);
       expect(fx.key_value.nflverse_timestamp).toBe(f.upstream.nflverse_timestamp);
       expect(fx.$comment).toMatch(/CC-BY 4\.0/);
     }
@@ -250,5 +256,26 @@ describe("the test-only writer", () => {
         parquetMetadata(toAb(writeParquet([{ name: "a", type: "INT32", values: [] }]))).num_rows,
       ),
     ).toBe(0);
+  });
+});
+
+describe("the TSV excerpt encoding", () => {
+  it("round-trips nulls, empty strings, tabs, newlines, unicode and numbers exactly", () => {
+    const schema = [{ name: "a" }, { name: "b" }];
+    const rows = [
+      [null, ""],
+      ["tab\there", "line\nbreak"],
+      ["🏈 Ja'Marr \u202e", 1.5],
+      [-0.25, 12345678901],
+    ];
+    expect(decodeTsv(schema, encodeTsv(schema, rows))).toEqual(rows);
+    expect(encodeTsv(schema, [])).toBe("a\tb\n");
+  });
+
+  it("refuses a header that does not match the schema and a ragged row", () => {
+    const schema = [{ name: "a" }, { name: "b" }];
+    expect(() => decodeTsv(schema, "b\ta\n1\t2\n")).toThrow(/header/);
+    expect(() => decodeTsv(schema, "a\tb\n1\n")).toThrow(/ragged/);
+    expect(() => decodeTsv(schema, "a\tb\nnot json\t1\n")).toThrow();
   });
 });
