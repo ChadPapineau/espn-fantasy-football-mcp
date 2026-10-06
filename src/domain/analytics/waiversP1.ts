@@ -89,6 +89,14 @@ export interface WaiverP1Request extends WaiverRequest {
 }
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
+/** A projected value as the lineup kernel may read it: finite and ≥ 0 (NaN / ±∞ / null → 0). */
+const nonNeg = (x: number | null | undefined): number =>
+  typeof x === "number" && Number.isFinite(x) && x > 0 ? x : 0;
+/** A player whose non-finite weekly values read as unknown (null) before the P0 engine sees them. */
+const finiteWeeks = <T extends WaiverPlayer>(p: T): T =>
+  p.weekly.every((v) => v === null || Number.isFinite(v))
+    ? p
+    : { ...p, weekly: p.weekly.map((v) => (v !== null && Number.isFinite(v) ? v : null)) };
 /** The P0 engine's "last in the order" assumption — dropped when k = N was only FAAB's device. */
 const AT_LAST_TRIGGER = "my position improves";
 
@@ -143,7 +151,21 @@ interface RivalQ {
  * E5 at P1. Same refusals as `analyzeWaivers` (it runs first); FAAB bidding works for every
  * position here.
  */
-export async function analyzeWaiversP1(req: WaiverP1Request): Promise<WaiverOutcome> {
+export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutcome> {
+  // a NaN / ±∞ weekly value (an upstream gap) is unknown, never a number the assignment reads
+  const req: WaiverP1Request = {
+    ...raw,
+    mine: raw.mine.map(finiteWeeks),
+    candidates: raw.candidates.map(finiteWeeks),
+    ...(raw.rival_rosters === undefined
+      ? {}
+      : {
+          rival_rosters: raw.rival_rosters.map((r) => ({
+            ...r,
+            players: r.players.map(finiteWeeks),
+          })),
+        }),
+  };
   const N = req.league_size;
   const usesBudget = req.rules.waiver.uses_budget === true;
   const modeArg = req.mode ?? "auto";
@@ -176,7 +198,7 @@ export async function analyzeWaiversP1(req: WaiverP1Request): Promise<WaiverOutc
     const H = Math.max(1, Math.min(DEMAND_FIT.upgradeWeeks, req.weeks.length));
     const fp = (p: WaiverPlayer, w: number): FastPlayer => ({
       eligible: new Set(p.eligible_slot_ids),
-      value: Math.max(0, p.weekly[w] ?? 0),
+      value: nonNeg(p.weekly[w]),
     });
     const baseOf = new Map<number, number[]>();
     for (const r of rosters)

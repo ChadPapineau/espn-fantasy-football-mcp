@@ -110,8 +110,10 @@ export interface TradeOutcome {
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 const BENCH = 20;
 const IR = 21;
-const own = (p: TradePlayer): number =>
-  p.weekly.reduce<number>((s, v) => s + Math.max(0, v ?? 0), 0);
+/** A projected value as the lineup kernel may read it: finite and ≥ 0 (NaN / ±∞ / null → 0). */
+const nonNeg = (x: number | null | undefined): number =>
+  typeof x === "number" && Number.isFinite(x) && x > 0 ? x : 0;
+const own = (p: TradePlayer): number => p.weekly.reduce<number>((s, v) => s + nonNeg(v), 0);
 const asc = (xs: readonly number[]): number[] => [...xs].sort((a, b) => a - b);
 
 /** Health-adjusted availability of a player in value week `wi` (sib §5.4; the roleHolds rule). */
@@ -156,7 +158,7 @@ function fastOf(ctx: Ctx, p: TradePlayer, wi: number, pass: Pass): FastPlayer {
     eligible = new Set(p.eligible_slot_ids);
     ctx.eligible.set(p, eligible);
   }
-  const base = Math.max(0, p.weekly[wi] ?? 0);
+  const base = nonNeg(p.weekly[wi]);
   const h = pass.health ? availability(p, wi) : 1;
   const m = pass.mult?.get(p.player_id) ?? 1;
   return { eligible, value: base * h * m };
@@ -408,8 +410,7 @@ export function positionGaps(
     const pos = startPosition(s.slot_id);
     if (pos !== null) counts.set(pos, (counts.get(pos) ?? 0) + s.count);
   }
-  const total = (p: DepthPlayer): number =>
-    p.weekly.reduce<number>((s, v) => s + Math.max(0, v ?? 0), 0);
+  const total = (p: DepthPlayer): number => p.weekly.reduce<number>((s, v) => s + nonNeg(v), 0);
   const out: { position: string; gap: number }[] = [];
   for (const [pos, n] of counts) {
     const depth = (players: readonly DepthPlayer[]): number => {

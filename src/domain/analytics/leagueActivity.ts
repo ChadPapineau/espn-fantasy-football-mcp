@@ -265,7 +265,10 @@ export function analyzeLeagueActivity(req: ActivityRequest): ActivityOutcome {
       );
     const pool = req.pool ?? [];
     const total = (p: DepthPlayer): number =>
-      p.weekly.reduce<number>((s, v) => s + Math.max(0, v ?? 0), 0);
+      p.weekly.reduce<number>(
+        (s, v) => s + (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0),
+        0,
+      );
     rival_needs = withPlayers
       .filter((t) => t.team_id !== req.my_team_id)
       .map((t) => {

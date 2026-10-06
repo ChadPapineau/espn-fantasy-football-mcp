@@ -140,6 +140,9 @@ export interface CascadeOutcome {
 type Component = "targets" | "carries" | "rz";
 const COMPONENTS: readonly Component[] = Object.freeze(["targets", "carries", "rz"]);
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
+/** A volume or projection as the cascade reads it: finite and ≥ 0 (NaN / ±∞ / null → 0). */
+const nonNeg = (x: number | null | undefined): number =>
+  typeof x === "number" && Number.isFinite(x) && x > 0 ? x : 0;
 const share = (s: Shares, c: Component): number => {
   const v = c === "targets" ? s.target_share : c === "carries" ? s.carry_share : s.rz_share;
   return v !== null && Number.isFinite(v) ? clamp(v, 0, 1) : 0;
@@ -280,9 +283,9 @@ export async function analyzeInjuryCascade(req: CascadeRequest): Promise<Cascade
       ),
     );
   const vol = {
-    targets: Math.max(0, req.team_volume.targets) * factor,
-    carries: Math.max(0, req.team_volume.carries) * factor,
-    rz: Math.max(0, req.team_volume.rz) * factor,
+    targets: nonNeg(req.team_volume.targets) * factor,
+    carries: nonNeg(req.team_volume.carries) * factor,
+    rz: nonNeg(req.team_volume.rz) * factor,
   };
   const mates = req.teammates.filter((m) => m.player_id === null || m.player_id !== inj.player_id);
   const { vacated, allocs } = redistribute(
@@ -323,8 +326,8 @@ export async function analyzeInjuryCascade(req: CascadeRequest): Promise<Cascade
       const out = stillOut(weeksOut, i);
       let delta = out * perGame;
       if (qbCase && m.position === "QB") {
-        const starter = Math.max(0, inj.weekly?.[i] ?? 0);
-        const mine = Math.max(0, m.weekly?.[i] ?? 0);
+        const starter = nonNeg(inj.weekly?.[i]);
+        const mine = nonNeg(m.weekly?.[i]);
         delta = out * Math.max(0, starter * CASCADE.qbBackupFactor - mine);
       }
       return { week: w, delta: round(delta, 3) };

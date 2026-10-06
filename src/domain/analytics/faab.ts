@@ -132,7 +132,15 @@ function grid(minBid: number, budget: number): number[] {
  * `maxGridPoints`), ties to the lower bid; a value ≤ 0 or no positive expectation → b* = 0 with
  * p_win at 0. The curve: P(win) at ×0.5/×1 /×1.5 of b* and at the first bids reaching 25/50/75 %.
  */
-export function faabBid(input: FaabInput): FaabBid {
+export function faabBid(raw: FaabInput): FaabBid {
+  const finite0 = (x: number): number => (Number.isFinite(x) && x > 0 ? x : 0);
+  const input: FaabInput = {
+    ...raw,
+    value: Number.isFinite(raw.value) ? raw.value : 0,
+    my_budget: finite0(raw.my_budget),
+    min_bid: finite0(raw.min_bid),
+    lambda: finite0(raw.lambda),
+  };
   const bids = grid(input.min_bid, input.my_budget);
   const lambda = Math.max(0, input.lambda);
   let best = { b: 0, p: pWinAt(0, input), net: 0 };
