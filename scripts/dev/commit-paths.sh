@@ -18,6 +18,9 @@
 #   * the author/committer address is not a GitHub no-reply address (exit 10)
 #   * the message is not a Conventional Commit or carries an AI attribution trailer (exit 11)
 #   * an explicitly named file is git-ignored, so it would be left out silently (exit 12)
+#   * a named directory under src/, tests/, scripts/ or skills/ holds a git-ignored file that is
+#     not OS junk (.DS_Store, ._*, Thumbs.db, editor swap files) — a source file an over-broad
+#     .gitignore pattern would drop: local runs pass, CI fails or a test is never committed (exit 12)
 #
 # How: a private index (GIT_INDEX_FILE) is built from HEAD, the paths are added to it, `git
 # commit-tree` + a compare-and-swap `update-ref` move the branch, and the shared index is realigned
@@ -45,7 +48,21 @@ for r in "${rel[@]}"; do
   fi
   if [[ -d $r ]]; then
     ignored=(${(0)"$(git ls-files -z --others --ignored --exclude-standard -- "$r")"})
-    (( ${#ignored} )) && print -u2 "commit-paths: note: ${#ignored} git-ignored file(s) under $r are NOT included: ${ignored[*]}"
+    if (( ${#ignored} )); then
+      if [[ $r == (src|tests|scripts|skills) || $r == (src|tests|scripts|skills)/* ]]; then
+        source_ignored=()
+        for f in "${ignored[@]}"; do
+          base=${f:t}
+          [[ $base == (.DS_Store|Thumbs.db|desktop.ini|Desktop.ini) || $base == ._* || $base == *.sw[op] || $base == *~ ]] && continue
+          [[ $f == (src|tests|scripts|skills)/* ]] && source_ignored+=("$f")
+        done
+        if (( ${#source_ignored} )); then
+          print -u2 "commit-paths: ${#source_ignored} git-ignored file(s) under a source directory would be silently left out: ${source_ignored[*]} — fix .gitignore or rename; nothing committed"
+          exit 12
+        fi
+      fi
+      print -u2 "commit-paths: note: ${#ignored} git-ignored file(s) under $r are NOT included: ${ignored[*]}"
+    fi
   fi
 done
 

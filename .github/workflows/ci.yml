@@ -45,6 +45,16 @@ jobs:
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
+      - name: No source path is git-ignored (S6 — an over-broad pattern drops a file silently)
+        run: |
+          set -euo pipefail
+          ignored="$(git ls-files --others --ignored --exclude-standard -- src tests scripts skills)"
+          probes="src/lib/x.ts src/build/x.ts src/out/x.ts src/cli/logs/x.ts tests/private/x.ts tests/build/x.test.ts src/auth/cookie.ts src/auth/secrets.ts src/auth/credentials.ts src/auth/espn_s2.ts src/providers/espn/swid.ts tests/auth/swid.test.ts"
+          # shellcheck disable=SC2086
+          hit="$(git check-ignore --no-index $probes || true)"
+          if [ -n "$ignored" ] || [ -n "$hit" ]; then
+            echo "git-ignored source paths:"; printf '%s\n' "$ignored" "$hit"; exit 1
+          fi
       - name: Install (lockfile only, no lifecycle scripts)
         run: npm ci
       - name: ESLint (type-checked, import boundaries, ESPN zones)

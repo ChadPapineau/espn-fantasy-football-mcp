@@ -82,13 +82,25 @@ tags = ["espn", "credential"]
 
 [[rules]]
 id = "espn-league-id"
-description = "An ESPN league id (leagueId=, league_id:, ESPN_LEAGUE_ID=, EFF_PROBE_LEAGUE_ID=, leagues/<id>, leagueHistory/<id>) other than all zeros"
-regex = '''(?i)(?:league[_-]?id["'`]?\s*[:=]\s*["'`]?|\bleagues/|\bleagueHistory/)(\d{4,})'''
+description = "An ESPN league id (leagueId=, league_id:, league id: N, \"leagueIds\": [N], a markdown cell, ESPN_LEAGUE_ID=, EFF_PROBE_LEAGUE_ID=, --league N, --league-id=N, leagues/<id>, leagueHistory/<id>) other than all zeros"
+regex = '''(?i)(?:league[ _-]?ids?["'`]?\s*[:=|]?\s*\[?\s*["'`]?|--league(?:-id)?[ =]["'`]?|\bleagues/|\bleagueHistory/)(\d{4,})'''
 secretGroup = 1
 keywords = ["league"]
 tags = ["espn", "identifier"]
   [[rules.allowlists]]
   description = "the documented placeholders 0 / 0000000"
+  regexTarget = "secret"
+  regexes = ['''^0+$''']
+
+[[rules]]
+id = "espn-league-envelope"
+description = "The root of an ESPN league body: \"gameId\": 1, \"id\": <league id>, then a league key (canonical key order) — an unscrubbed fixture"
+regex = '''"gameId"\s*:\s*1\s*,\s*"id"\s*:\s*(\d+)\s*,\s*"(?:members|schedule|scoringPeriodId|seasonId|segmentId|settings|status|teams)"'''
+secretGroup = 1
+keywords = ["gameid"]
+tags = ["espn", "identifier"]
+  [[rules.allowlists]]
+  description = "the scrubbed fixture league id 0"
   regexTarget = "secret"
   regexes = ['''^0+$''']
 

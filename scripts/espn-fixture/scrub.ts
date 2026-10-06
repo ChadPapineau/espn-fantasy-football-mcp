@@ -78,9 +78,58 @@ export const SCORING_KEYS = new Set([
   "totalProjectedPointsLive",
 ]);
 
-/** NFKC, case-folded, invisible characters removed, whitespace collapsed (the scanner's rule). */
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+  amp: "&",
+  apos: "'",
+  quot: '"',
+  lt: "<",
+  gt: ">",
+  nbsp: " ",
+  rsquo: "'",
+  lsquo: "'",
+};
+
+/**
+ * Undoes the encodings a captured name can carry (S4; the scanner's `decodeLayers`): %XX (UTF-8
+ * runs), \uXXXX, HTML entities — a bounded number of layers; what does not decode is kept.
+ */
+export function decodeLayers(s: string): string {
+  let cur = s;
+  for (let i = 0; i < 4; i++) {
+    const next = cur
+      .replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+        try {
+          return decodeURIComponent(run);
+        } catch {
+          return run;
+        }
+      })
+      .replace(/\\u([0-9A-Fa-f]{4})/g, (_m, h: string) =>
+        String.fromCharCode(Number.parseInt(h, 16)),
+      )
+      .replace(/&#(?:x([0-9A-Fa-f]{1,6})|([0-9]{1,7}));/g, (m, hex?: string, dec?: string) => {
+        const cp = hex !== undefined ? Number.parseInt(hex, 16) : Number.parseInt(dec ?? "", 10);
+        return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)
+          ? String.fromCodePoint(cp)
+          : m;
+      })
+      .replace(/&([a-z]{2,6});/gi, (m, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? m);
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/** Letters and digits only (any script) — `gridiron.gang`, `Gridiron 🏈 Gang` → `gridirongang`. */
+export function termSkeleton(s: string): string {
+  return s.replace(/[^\p{L}\p{N}]/gu, "");
+}
+/** A captured term's skeleton is compared too when it has at least this many letters/digits. */
+export const TERM_SKELETON_MIN = 6;
+
+/** Decoded, NFKC, case-folded, invisible characters removed, whitespace collapsed (the scanner's rule). */
 export function normaliseTerm(s: string): string {
-  return s
+  return decodeLayers(s)
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[­᠎​-‏⁠-⁤﻿]/g, "")
@@ -358,6 +407,7 @@ export function verifyScrubbed(value: Json, kind: BodyKind, ctx: LeagueScrubCont
   const ids = [...ctx.realLeagueIds];
   const idRes = ids.map((id) => new RegExp(`(?<!\\d)${id}(?!\\d)`));
   const terms = [...ctx.denyTerms];
+  const skels = [...new Set(terms.map(termSkeleton).filter((k) => k.length >= TERM_SKELETON_MIN))];
   const checkString = (s: string, segs: Seg[]) => {
     for (const m of s.matchAll(GUID_RE))
       if (!FAKE_GUID_RE.test(m[1] ?? "")) out.push({ rule: "guid", path: formatPath(segs) });
@@ -371,7 +421,9 @@ export function verifyScrubbed(value: Json, kind: BodyKind, ctx: LeagueScrubCont
       const p = formatPath(segs);
       if (!PUBLIC_NAME_PATH.test(p)) {
         const n = normaliseTerm(s);
-        if (terms.some((t) => n.includes(t))) out.push({ rule: "captured-name", path: p });
+        const k = termSkeleton(n);
+        if (terms.some((t) => n.includes(t)) || skels.some((t) => k.includes(t)))
+          out.push({ rule: "captured-name", path: p });
       }
     }
   };

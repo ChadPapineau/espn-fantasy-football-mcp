@@ -18,15 +18,17 @@ node_modules/
 !.yarn/versions
 
 # --- Build output ---------------------------------------------------------
-dist/
-build/
-out/
-lib/
+# ANCHORED to the repo root (S6): an unanchored `lib/` or `build/` silently ignored
+# src/lib/*.ts or tests/build/* — a local run stays green while the file is never committed.
+/dist/
+/build/
+/out/
+/lib/
 *.tsbuildinfo
-coverage/
-.nyc_output/
-.turbo/
-.cache/
+/coverage/
+/.nyc_output/
+/.turbo/
+/.cache/
 .eslintcache
 *.tgz
 
@@ -38,6 +40,8 @@ coverage/
 !.env.example
 
 # --- Secrets, tokens, credentials, cookies (belt and braces) --------------
+# Scoped to DATA files (S6): a name pattern like `*cookie*` or `secrets.*` used to ignore the
+# source files that implement the cookie port (src/auth/cookie.ts, tests/auth/swid.test.ts).
 *.pem
 *.key
 *.p12
@@ -47,26 +51,40 @@ coverage/
 *.token
 *.secret
 *.secrets
-secrets.*
-!secrets.example.*
-credentials.*
-!credentials.example.*
+secrets.json
+secrets.yaml
+secrets.yml
+secrets.txt
+secrets.ini
+credentials.json
+credentials.yaml
+credentials.yml
+credentials.txt
+credentials.ini
 *credentials*.json
 *token*.json
 *oauth*.json
-*cookie*
-*cookies*
+*cookie*.json
+*cookie*.txt
+*cookies*.json
+*cookies*.txt
+cookies
+*.cookie
+*.cookies
 !*cookie*.example.*
 *.har
 *session*.json
 !*session*.example.json
-espn_s2*
-swid*
-SWID*
+espn_s2
+espn_s2*.txt
+espn_s2*.json
+swid
+swid*.txt
+swid*.json
 .espn/
 .tokens/
-tokens/
-private/
+/tokens/
+/private/
 
 # --- Recorded fixtures before anonymization (never commit raw captures) ---
 fixtures/raw/
@@ -75,15 +93,28 @@ tests/fixtures/raw/
 **/*.recorded.json
 
 # --- Local data caches the server may write ------------------------------
-data/cache/
+# Archives and databases are never committed (S5: no rule can scan them; scan-secrets refuses them).
+/data/cache/
 *.sqlite
+*.sqlite3
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
 *.db
+*.db3
+*.duckdb
+*.parquet
+*.arrow
+*.feather
+*.gz
+*.zip
+*.xz
+*.zst
+*.bz2
+*.7z
 
 # --- Logs -----------------------------------------------------------------
-logs/
+/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -92,8 +123,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # --- Test artifacts -------------------------------------------------------
-test-results/
-playwright-report/
+/test-results/
+/playwright-report/
 junit.xml
 
 # --- Third-party research clones (never committed here) ------------------

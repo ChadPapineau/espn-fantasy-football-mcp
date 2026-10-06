@@ -14,7 +14,7 @@
 // Exit: 0 written · 1 refused (the deny-list abort or another problem, each listed by path) · 2 usage.
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { isInside } from "./espn-fixture/guards.js";
+import { rawDirRefusal } from "./espn-fixture/guards.js";
 import { REPO_ROOT } from "./espn-fixture/http.js";
 import { scrubRun, type ScrubRunResult } from "./espn-fixture/pipeline.js";
 import { ScrubAbort } from "./espn-fixture/scrub.js";
@@ -54,8 +54,8 @@ export function parseScrubArgs(argv: readonly string[]): ScrubCliOptions {
     else throw new Error(`unknown argument #${String(i + 1)}`);
   }
   if (rawDir === null) throw new Error("--raw-dir is required");
-  if (isInside(rawDir, REPO_ROOT))
-    throw new Error("the raw directory must be outside the repository");
+  if (rawDirRefusal(rawDir, REPO_ROOT) !== null)
+    throw new Error("the raw directory must be outside the repository and any git working tree");
   return { rawDir, outRoot, prune, dryRun, withholdDenylisted };
 }
 

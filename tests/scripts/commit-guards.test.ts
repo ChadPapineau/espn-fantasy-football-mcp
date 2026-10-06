@@ -355,6 +355,31 @@ describe.skipIf(!HAS_ZSH)("scripts/dev/commit-paths.sh (macOS dev tool; zsh)", (
     expect(r.out).toContain("1 git-ignored file(s) under ci are NOT included: ci/secrets.yml");
   });
 
+  it("S6: refuses (exit 12) when a named source directory holds a git-ignored source file; OS junk is fine", () => {
+    const repo = makeRepo();
+    withOrigin(repo);
+    repo.write(".gitignore", "*cookie*\n.DS_Store\n");
+    repo.git(["add", ".gitignore"]);
+    expect(repo.git(["commit", "-qm", "chore: ignore"]).status).toBe(0);
+    const before = head(repo);
+    repo.write("src/auth/cookie.ts", "export const x = 1;\n");
+    repo.write("src/auth/state.ts", "export const y = 2;\n");
+    const r = commitPaths(repo, ["feat: auth", "src/auth"]);
+    expect(r.status, r.out).toBe(12);
+    expect(r.out).toContain("src/auth/cookie.ts");
+    expect(head(repo)).toBe(before);
+    // the top-level source directory itself is checked too
+    expect(commitPaths(repo, ["feat: auth", "src"]).status).toBe(12);
+    // OS junk under a source dir does not block
+    repo.write(".gitignore", ".DS_Store\n");
+    repo.git(["add", ".gitignore"]);
+    expect(repo.git(["commit", "-qm", "chore: narrower ignore"]).status).toBe(0);
+    repo.write("src/auth/.DS_Store", "junk\n");
+    const ok = commitPaths(repo, ["feat: auth", "src/auth"]);
+    expect(ok.status, ok.out).toBe(0);
+    expect(ok.out).toContain("NOT included: src/auth/.DS_Store");
+  });
+
   it("never touches the shared index of other staged work", () => {
     const repo = makeRepo();
     withOrigin(repo);

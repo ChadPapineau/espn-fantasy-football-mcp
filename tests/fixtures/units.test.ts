@@ -17,7 +17,7 @@ import {
   type Json,
 } from "../../scripts/espn-fixture/canonical.js";
 import { formatJson } from "../../scripts/espn-fixture/format-json.js";
-import { findCookieMaterial, isInside } from "../../scripts/espn-fixture/guards.js";
+import { findCookieMaterial, isInside, rawDirRefusal } from "../../scripts/espn-fixture/guards.js";
 import { pathsAtLines } from "../../scripts/espn-fixture/json-lines.js";
 import { leagueFormat, matchupPeriodOf } from "../../scripts/espn-fixture/league-format.js";
 import {
@@ -251,5 +251,29 @@ describe("guards", () => {
     symlinkSync(ROOT, path.join(tmp.dir, "link"));
     expect(isInside(path.join(tmp.dir, "link", "fixtures"), ROOT)).toBe(true);
     expect(isInside(`${ROOT}-sibling`, ROOT)).toBe(false);
+  });
+
+  it("S7: a case-changed spelling of the repo root is inside it on macOS (case-insensitive APFS)", () => {
+    const shouted = path.join(ROOT.toUpperCase(), "RAWCAPTURES");
+    const lowered = path.join(ROOT.toLowerCase(), "rawcaptures");
+    expect(isInside(shouted, ROOT, "darwin")).toBe(true);
+    expect(isInside(lowered, ROOT, "darwin")).toBe(true);
+    if (process.platform === "darwin") {
+      expect(isInside(shouted, ROOT)).toBe(true);
+      expect(rawDirRefusal(lowered, ROOT)).toBe("inside_repo");
+    }
+    // a different NFD/NFC spelling folds too
+    expect(isInside("/tmp/Jose\u0301/x", "/tmp/Jos\u00e9", "darwin")).toBe(true);
+    expect(isInside("/tmp/Jose\u0301/x", "/tmp/Jos\u00e9", "linux")).toBe(false);
+  });
+
+  it("S7: a raw dir inside any other git working tree is refused; a plain temp dir is not", () => {
+    tmp = tempDir("eff-guard-");
+    const other = path.join(tmp.dir, "other-repo");
+    mkdirSync(path.join(other, ".git"), { recursive: true });
+    expect(rawDirRefusal(path.join(other, "raw"), ROOT)).toBe("inside_git_work_tree");
+    expect(rawDirRefusal(path.join(tmp.dir, "plain", "raw"), ROOT)).toBeNull();
+    expect(rawDirRefusal(path.join(tmp.dir, "x"), ROOT, () => false)).toBeNull();
+    expect(rawDirRefusal(path.join(ROOT, "fixtures", "raw"), ROOT)).toBe("inside_repo");
   });
 });

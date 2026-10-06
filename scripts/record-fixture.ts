@@ -18,7 +18,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseJsonStrict } from "./espn-fixture/canonical.js";
-import { findCookieMaterial, isInside } from "./espn-fixture/guards.js";
+import { findCookieMaterial, rawDirRefusal } from "./espn-fixture/guards.js";
 import {
   REPO_ROOT,
   defaultSeason,
@@ -183,9 +183,9 @@ export function parseArgs(
       "recordings",
       now.toISOString().slice(0, 10),
     );
-  if (isInside(raw, REPO_ROOT))
+  if (rawDirRefusal(raw, REPO_ROOT) !== null)
     throw new Refusal(
-      "the raw directory must be OUTSIDE the repository (raw captures hold real names and ids)",
+      "the raw directory must be OUTSIDE the repository and outside any git working tree (raw captures hold real names and ids)",
     );
   return {
     season: resolvedSeason,

@@ -29,6 +29,9 @@ import {
   fakeGuid,
   letters,
   normaliseTerm,
+  decodeLayers,
+  termSkeleton,
+  TERM_SKELETON_MIN,
   outlookPlaceholder,
   scoringProjection,
   scrubBody,
@@ -421,6 +424,30 @@ describe("verifyScrubbed — the deny-list abort's in-process half", () => {
     const v = verifyScrubbed(bad, "league", ctx);
     expect(v).toEqual([{ rule: "captured-name", path: "$.teams[1].waiverNote" }]);
     expect(JSON.stringify(v)).not.toContain(l.teams[2]?.name ?? "never");
+  });
+
+  it("S4: a captured name re-encoded or re-punctuated in a scrubbed string is still a violation", () => {
+    const c3 = createLeagueContext(1);
+    c3.denyTerms.add(normaliseTerm("O'Brien Bombers"));
+    c3.denyTerms.add(normaliseTerm("Gridiron Gang"));
+    for (const disguised of [
+      "o%27brien%20bombers",
+      String.raw`O\u0027Brien Bombers`,
+      "O&#39;Brien Bombers",
+      "gridiron.gang",
+      "Gridiron 🏈 Gang",
+    ]) {
+      const bad = JSON.parse(JSON.stringify(out)) as JsonObject;
+      (bad.teams as JsonObject[])[0]!.waiverNote = `note ${disguised}`;
+      expect(
+        verifyScrubbed(bad, "league", c3).filter((v) => v.rule === "captured-name"),
+        disguised,
+      ).toEqual([{ rule: "captured-name", path: "$.teams[0].waiverNote" }]);
+    }
+    expect(decodeLayers("%E2%9C%93 &amp; \\u0041")).toBe("✓ & A");
+    expect(termSkeleton("Grid-iron 🏈 Gang!")).toBe("GridironGang");
+    expect(TERM_SKELETON_MIN).toBe(6);
+    expect(normaliseTerm("O%27Brien%20Bombers")).toBe("o'brien bombers");
   });
 
   it("a captured name equal to a public player name is not a violation (a team named after a player)", () => {

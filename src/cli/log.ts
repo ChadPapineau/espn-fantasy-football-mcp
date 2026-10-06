@@ -4,8 +4,10 @@
 // pasted (URL-encoded) and its decodeURIComponent form (ADV OBJ-15) — Cookie/Set-Cookie headers
 // wholesale, `espn_s2=`/`SWID=` assignments, every brace-GUID → `{guid:<6 hex>}`, IPv4/IPv6 →
 // `[ip]`, registered league ids and ESPN league paths → `[league]`, generic token shapes, URL
-// query strings; strings are truncated (bodies to 500). Linear-time: every string is pre-cut before
-// the patterns run, and every quantifier is bounded. Nothing is ever written to stdout.
+// query strings; strings are truncated (bodies to 500). S1 hardening: numeric league ids logged as
+// numbers, camelCase secret keys, unbraced GUIDs, every spelling and any ≥ 24-char fragment of a
+// registered espn_s2, a bare espn_s2-shaped run, `%40`-encoded emails. Linear-time: every string is
+// pre-cut before the patterns run, and every quantifier is bounded. Nothing is written to stdout.
 // Ported from sibling @d72e03b, adapted (ESPN rules; league-id identifiers; GUID pseudonyms).
 import { createHash } from "node:crypto";
 import type { LogLevel } from "../config/schema.js";
@@ -70,31 +72,74 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** A fragment of a registered secret this long (a prefix, a suffix, any window) is redacted too. */
+export const MIN_SECRET_FRAGMENT = 24;
+/** Secrets at least this long get fragment matching (espn_s2-sized values; short keys do not). */
+export const FRAGMENT_MATCH_MIN_LENGTH = 40;
+
+/** Every spelling a pasted secret can take in a log: as pasted, encoded, decoded, form-decoded, any escape case. */
+function secretForms(value: string): Set<string> {
+  const base = new Set([value, encodeURIComponent(value), safeDecode(value)]);
+  const out = new Set<string>();
+  for (const v of base) {
+    for (const w of [v, v.replace(/\+/g, " "), safeDecode(v.replace(/\+/g, " "))]) {
+      out.add(w);
+      out.add(w.replace(/%[0-9A-Fa-f]{2}/g, (m) => m.toLowerCase()));
+      out.add(w.replace(/%[0-9A-Fa-f]{2}/g, (m) => m.toUpperCase()));
+    }
+  }
+  return out;
+}
+
 /** A registry of secret and identifier values, longest first so overlapping values redact fully. */
 export class SecretRegistry {
-  private readonly entries: { kind: string; value: string; replace: string; numeric: boolean }[] =
-    [];
+  private readonly entries: {
+    kind: string;
+    value: string;
+    replace: string;
+    numeric: boolean;
+    /** MIN_SECRET_FRAGMENT-char window → its first offset in `value` (secrets ≥ 40 chars only). */
+    windows: Map<string, number> | null;
+  }[] = [];
 
-  private push(kind: string, value: string, replace: string): void {
+  private push(kind: string, value: string, replace: string, fragments: boolean): void {
     if (value.length < MIN_SECRET_LENGTH || this.entries.some((e) => e.value === value)) return;
-    this.entries.push({ kind, value, replace, numeric: /^[0-9]+$/.test(value) });
+    let windows: Map<string, number> | null = null;
+    if (fragments && value.length >= FRAGMENT_MATCH_MIN_LENGTH) {
+      windows = new Map();
+      for (let i = 0; i + MIN_SECRET_FRAGMENT <= value.length; i++) {
+        const w = value.slice(i, i + MIN_SECRET_FRAGMENT);
+        if (!windows.has(w)) windows.set(w, i);
+      }
+    }
+    this.entries.push({ kind, value, replace, numeric: /^[0-9]+$/.test(value), windows });
     this.entries.sort((a, b) => b.value.length - a.value.length);
   }
 
-  /** Adds a secret in its pasted, URL-encoded and URL-decoded forms (ADV OBJ-15). */
+  /**
+   * Adds a secret in every spelling a log can carry (ADV OBJ-15; S1): pasted, URL-encoded,
+   * URL-decoded, `+` form-decoded as a space, and %XX escapes in either case. A secret of ≥ 40
+   * chars is also redacted wherever ≥ 24 consecutive chars of it appear (a truncated prefix, a
+   * suffix, a wrapped middle).
+   */
   add(kind: string, value: string): void {
     const k = KIND_RE.test(kind) ? kind : "secret";
-    for (const v of new Set([value, encodeURIComponent(value), safeDecode(value)]))
-      this.push(k, v, `[redacted:${k}]`);
+    for (const v of secretForms(value)) this.push(k, v, `[redacted:${k}]`, true);
   }
 
   /** Adds an identifier; a numeric one is replaced only as a whole digit run. */
   addIdentifier(kind: string, value: string): void {
     const k = KIND_RE.test(kind) ? kind : "identifier";
-    this.push(k, value, k === "league" ? "[league]" : `[redacted:${k}]`);
+    this.push(k, value, k === "league" ? "[league]" : `[redacted:${k}]`, false);
   }
 
-  /** Replaces every registered value in `s`. */
+  /** The replacement for a number whose decimal form is a registered numeric identifier, or null. */
+  numericReplacement(digits: string): string | null {
+    for (const e of this.entries) if (e.numeric && e.value === digits) return e.replace;
+    return null;
+  }
+
+  /** Replaces every registered value in `s`, then every ≥ 24-char fragment of a long secret. */
   apply(s: string): string {
     let out = s;
     for (const e of this.entries) {
@@ -103,6 +148,8 @@ export class SecretRegistry {
         ? out.replace(new RegExp(`(?<![0-9])${escapeRe(e.value)}(?![0-9])`, "g"), e.replace)
         : out.split(e.value).join(e.replace);
     }
+    for (const e of this.entries)
+      if (e.windows !== null) out = redactFragments(out, e.value, e.windows, e.replace);
     return out;
   }
 
@@ -114,6 +161,42 @@ export class SecretRegistry {
   get longest(): number {
     return this.entries[0]?.value.length ?? 0;
   }
+}
+
+/**
+ * Replaces every maximal span of `text` that equals a run of ≥ MIN_SECRET_FRAGMENT consecutive
+ * chars of `secret` (found through its window map, then extended rightwards). Linear in `text`.
+ */
+function redactFragments(
+  text: string,
+  secret: string,
+  windows: Map<string, number>,
+  replace: string,
+): string {
+  if (text.length < MIN_SECRET_FRAGMENT) return text;
+  let out = "";
+  let last = 0;
+  let i = 0;
+  while (i + MIN_SECRET_FRAGMENT <= text.length) {
+    const at = windows.get(text.slice(i, i + MIN_SECRET_FRAGMENT));
+    if (at === undefined) {
+      i++;
+      continue;
+    }
+    // the scan is left to right, so the span cannot extend leftwards: a matching char before `i`
+    // would have made the window at `i - 1` match first
+    const start = i;
+    let end = i + MIN_SECRET_FRAGMENT;
+    let q = at + MIN_SECRET_FRAGMENT;
+    while (end < text.length && q < secret.length && text[end] === secret[q]) {
+      end++;
+      q++;
+    }
+    out += text.slice(last, start) + replace;
+    last = end;
+    i = end;
+  }
+  return last === 0 ? text : out + text.slice(last);
 }
 
 /** `{guid:<6 hex of sha256>}` — a stable pseudonym; the GUID cannot be recovered from it. */
@@ -162,6 +245,20 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
     replace: (m: string) => guidPseudonym(m),
   },
   {
+    // an UNBRACED GUID (a SWID with its braces stripped for comparison) → the same pseudonym
+    id: "bare_guid",
+    re: new RegExp(`(?<![0-9A-Za-z-])${GUID}(?![0-9A-Za-z-])`, "g"),
+    replace: (m: string) => guidPseudonym(m),
+  },
+  {
+    // a pasted espn_s2 without its name (mirrors scan-secrets looksLikeBareEspnS2): a run of the
+    // cookie alphabet, ≥ 100 chars starting AE or with ≥ 2 escapes — or ≥ 40 starting AE WITH ≥ 2
+    // escapes — mixed case with digits and high entropy
+    id: "espn_s2_bare",
+    re: /(?<![A-Za-z0-9%+/=])[A-Za-z0-9%+/=]{40,8192}(?![A-Za-z0-9%+/=])/g,
+    replace: (m: string) => (looksLikeBareEspnS2(m) ? "[redacted:espn_s2]" : m),
+  },
+  {
     id: "authorization",
     re: /\b(authorization["']?\s{0,8}[:=]\s{0,8}["']?)(?:(?:bearer|basic|token)\s{1,8})?[^\s"',;}]{1,4096}/gi,
     replace: "$1[redacted:authorization]",
@@ -198,6 +295,12 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
     replace: "[redacted:email]",
   },
   {
+    // the same address URL- or HTML-encoded (`name%40<domain>`, `name&#64;<domain>`)
+    id: "email_encoded",
+    re: /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}(?:%40|&#0*64;|&#x0*40;)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.[A-Za-z]{2,24}(?![A-Za-z])/gi,
+    replace: "[redacted:email]",
+  },
+  {
     id: "ipv4",
     re: /(?<![0-9.])(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})(?:\.(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})){3}(?![0-9.])/g,
     replace: "[ip]",
@@ -228,6 +331,44 @@ export const REDACTION_PATTERNS: readonly PatternRule[] = Object.freeze([
 /** Object keys whose values are always redacted whole (a component match, not a substring). */
 const SECRET_KEY_RE =
   /(?:^|[_-])(?:authorization|cookie|set[_-]?cookie|password|passwd|secret|token|api[_-]?key|apikey|private[_-]?key|espn[_-]?s2|swid|email)(?:$|[_-])/i;
+/** Keys that hold a league id (`leagueId`, `league_ids`, `EFF_PROBE_LEAGUE_ID`): always `[league]`. */
+const LEAGUE_KEY_RE = /(?:^|[_-])league[_-]?ids?$/i;
+
+/** camelCase → snake components, so `accessToken`, `espnS2Value`, `sessionCookie` match by component. */
+export function keyComponents(k: string): string {
+  return k.replace(/(?<=[a-z0-9])(?=[A-Z])/g, "_");
+}
+
+/** Whether a value under key `k` is redacted whole (secret-named or league-id-named keys). */
+export function isSecretKey(k: string): boolean {
+  const c = keyComponents(k);
+  return SECRET_KEY_RE.test(c) || LEAGUE_KEY_RE.test(c);
+}
+
+/** Shannon entropy in bits per character (callers pass ≥ 40 chars). */
+function entropy(s: string): number {
+  const counts = new Map<string, number>();
+  for (const c of s) counts.set(c, (counts.get(c) ?? 0) + 1);
+  let h = 0;
+  for (const n of counts.values()) {
+    const p = n / s.length;
+    h -= p * Math.log2(p);
+  }
+  return h;
+}
+
+/**
+ * Whether a cookie-alphabet run looks like a bare espn_s2 (scan-secrets.mjs `looksLikeBareEspnS2`,
+ * plus the ≥ 40-char floor for an `AE` run with ≥ 2 escapes — what `eff setup` accepts with a warning).
+ */
+export function looksLikeBareEspnS2(run: string): boolean {
+  const escapes = (run.match(/%[0-9A-Fa-f]{2}/g) ?? []).length;
+  const ae = run.startsWith("AE");
+  if (!(run.length >= 100 ? ae || escapes >= 2 : run.length >= 40 && ae && escapes >= 2))
+    return false;
+  if (!/[A-Z]/.test(run) || !/[a-z]/.test(run) || !/\d/.test(run)) return false;
+  return entropy(run) >= (run.length >= 100 ? 4.0 : 3.5);
+}
 
 /** Redacts one string: registered values, then every pattern. */
 export function redactString(s: string, secrets: SecretRegistry): string {
@@ -285,7 +426,12 @@ export function redactValue(
     if (v.length > HARD_MAX_STRING) return `[dropped ${String(v.length)} chars]`;
     return redactAndTruncate(v, secrets, maxString);
   }
-  if (typeof v === "number") return Number.isFinite(v) ? v : String(v);
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return String(v);
+    // a numeric league id logged as a number (S1): `{ leagueId: <n> }`, `[<n>]`
+    if (Number.isSafeInteger(v)) return secrets.numericReplacement(String(Math.abs(v))) ?? v;
+    return v;
+  }
   if (typeof v === "boolean" || v === null) return v;
   if (typeof v === "bigint") return v.toString();
   if (typeof v !== "object") return v === undefined ? null : `[${typeof v}]`;
@@ -320,8 +466,10 @@ export function redactValue(
     const safeKey = redactAndTruncate(k, secrets, MAX_KEY_CHARS);
     const child = (v as Record<string, unknown>)[k];
     out[safeKey] =
-      SECRET_KEY_RE.test(k) && child !== null && child !== undefined
-        ? "[redacted]"
+      isSecretKey(k) && child !== null && child !== undefined
+        ? LEAGUE_KEY_RE.test(keyComponents(k))
+          ? "[league]"
+          : "[redacted]"
         : redactValue(child, secrets, maxString, depth + 1, seen);
   }
   if (keys.length > MAX_OBJECT_KEYS) out["[more_keys]"] = keys.length - MAX_OBJECT_KEYS;

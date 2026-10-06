@@ -10,6 +10,11 @@ import fc from "fast-check";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeEspnS2, fakeGuid, fakeIpv4, fakeLeagueId } from "../../scripts/ci/secret-fixtures.mjs";
 import {
+  FRAGMENT_MATCH_MIN_LENGTH,
+  MIN_SECRET_FRAGMENT,
+  isSecretKey,
+  keyComponents,
+  looksLikeBareEspnS2,
   DEFAULT_MAX_STRING,
   HARD_MAX_STRING,
   LOG_FILTER_MAX_CHARS,
@@ -629,5 +634,173 @@ describe("linear-time redaction (every quantifier bounded)", () => {
     );
     expect(out).toContain("[redacted:token]");
     expect(out).toMatch(/truncated \d+ chars\]$/);
+  });
+});
+
+describe("S1: the leaks a critic reproduced are closed", () => {
+  it("(1) a registered league id logged as a NUMBER, in objects and arrays, reads [league]", () => {
+    const { log, raw } = capture();
+    log.registerIdentifier("league", LEAGUE);
+    log.info("x", {
+      n: Number(LEAGUE),
+      list: [Number(LEAGUE), 7],
+      nested: { a: { b: Number(LEAGUE) } },
+    });
+    expect(raw.join("\n")).not.toContain(LEAGUE);
+    expect(raw[0]).toContain('"n":"[league]"');
+    expect(raw[0]).toContain('"list":["[league]",7]');
+    log.info("y", { frac: 1.5, neg: -Number(LEAGUE) });
+    expect(raw[1]).toContain('"frac":1.5');
+    expect(raw[1]).toContain('"neg":"[league]"');
+  });
+  it("(1b) any value under a league-id-named key reads [league], registered or not", () => {
+    const { log, raw } = capture();
+    const other = fakeLeagueId("unregistered", 8);
+    log.info("x", {
+      leagueId: Number(other),
+      league_ids: [other],
+      EFF_PROBE_LEAGUE_ID: other,
+      probeLeagueId: other,
+      leagueIdentity: "kept",
+    });
+    expect(raw[0]).not.toContain(other);
+    expect(raw[0]).toContain('"leagueId":"[league]"');
+    expect(raw[0]).toContain('"league_ids":"[league]"');
+    expect(raw[0]).toContain('"EFF_PROBE_LEAGUE_ID":"[league]"');
+    expect(raw[0]).toContain('"probeLeagueId":"[league]"');
+    expect(raw[0]).toContain('"leagueIdentity":"kept"');
+  });
+  it("(2) camelCase secret keys are redacted by component", () => {
+    const { log, raw } = capture();
+    const v = "plain-looking-value-123";
+    log.info("x", {
+      accessToken: v,
+      espnS2Value: v,
+      swidValue: v,
+      sessionCookie: v,
+      apiKeyHint: v,
+      userEmail: v,
+    });
+    expect(raw[0]).not.toContain(v);
+    expect(isSecretKey("accessToken")).toBe(true);
+    expect(isSecretKey("tokenizer")).toBe(false);
+    expect(keyComponents("espnS2Value")).toBe("espn_S2_Value");
+  });
+  it("(3) an UNBRACED GUID gets the same pseudonym as its braced form", () => {
+    const { log, raw } = capture();
+    log.info("x", {
+      owner_bare: GUID.toLowerCase(),
+      in: `owner ${GUID} here`,
+      braced: GUID_BRACED,
+    });
+    expect(raw[0]).not.toMatch(new RegExp(GUID, "i"));
+    const p = guidPseudonym(GUID_BRACED);
+    expect(raw[0]?.split(p).length).toBe(4);
+    // a hex run that is not exactly a GUID is untouched
+    const notGuid = `${GUID}0`;
+    expect(redactString(notGuid, new SecretRegistry())).toBe(notGuid);
+  });
+  it("(4) every spelling of a registered espn_s2: lower-case escapes, + as space, truncation", () => {
+    const reg = new SecretRegistry();
+    reg.add("espn_s2", S2);
+    const lower = S2.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase());
+    const plusSpace = S2_DECODED.replace(/\+/g, " ");
+    for (const variant of [
+      S2,
+      S2_DECODED,
+      lower,
+      plusSpace,
+      S2.slice(0, 60),
+      S2.slice(-40),
+      S2.slice(50, 90),
+    ]) {
+      const out = redactString(`before ${variant} after`, reg);
+      expect(out, variant.slice(0, 12)).toContain("[redacted:espn_s2]");
+      expect(out).not.toContain(variant.slice(0, MIN_SECRET_FRAGMENT));
+    }
+    // fewer than MIN_SECRET_FRAGMENT consecutive chars is not redacted (a log is not shredded)
+    expect(redactString(S2.slice(10, 10 + MIN_SECRET_FRAGMENT - 1), reg)).not.toContain(
+      "[redacted",
+    );
+    expect(MIN_SECRET_FRAGMENT).toBe(24);
+    expect(FRAGMENT_MATCH_MIN_LENGTH).toBe(40);
+  });
+  it("(4b) an UNREGISTERED espn_s2-shaped value under any key is redacted (bare shape)", () => {
+    const { log, raw } = capture();
+    const rotated = fakeEspnS2("rotated", 220);
+    // ≥ 68 chars: both of the fake's escapes are inside (an AE run with ≥ 2 escapes, ≥ 40 chars)
+    const short = fakeEspnS2("short-paste", 70);
+    log.info("x", { note: `got ${rotated} back`, other: short });
+    expect(raw[0]).not.toContain(rotated.slice(0, 30));
+    expect(raw[0]).not.toContain(short.slice(0, 30));
+    expect(looksLikeBareEspnS2(rotated)).toBe(true);
+    expect(looksLikeBareEspnS2(short)).toBe(true);
+    // ordinary long tokens are not espn_s2: a path, a base64 blob without escapes, a hex digest
+    for (const ok of [
+      "%2f%2b" + "abc123".repeat(20), // no upper case
+      "AE%2F%2B" + "ABC123".repeat(20), // no lower case
+      "AE" + "abcXYZ".repeat(20), // no digit
+      "AE%2F%2B" + "aB1".repeat(40), // low entropy
+      "AE" + "Ab1".repeat(14), // short, no escapes
+      "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0/communication",
+      "Q".repeat(20) + "abcdefghij0123456789".repeat(5),
+      "0123456789abcdef".repeat(8),
+    ])
+      expect(looksLikeBareEspnS2(ok), ok.slice(0, 20)).toBe(false);
+  });
+  it("(5) a URL-encoded or HTML-encoded email is redacted", () => {
+    // reserved domains only (a real-looking address in the repo would itself be a finding)
+    for (const enc of [
+      "name%40example.com",
+      "name%40Example.Org",
+      "first.last&#64;example.net",
+      "x&#x40;mail.example",
+    ])
+      expect(redactString(`mail ${enc} here`, new SecretRegistry()), enc).toBe(
+        "mail [redacted:email] here",
+      );
+  });
+  it("property: no registered espn_s2 window of ≥ 24 chars survives in any position", () => {
+    const reg = new SecretRegistry();
+    reg.add("espn_s2", S2);
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: S2.length - MIN_SECRET_FRAGMENT }),
+        fc.integer({ min: MIN_SECRET_FRAGMENT, max: 120 }),
+        fc.string({ maxLength: 20 }),
+        fc.string({ maxLength: 20 }),
+        (start, len, pre, post) => {
+          const frag = S2.slice(start, start + len);
+          if (frag.length < MIN_SECRET_FRAGMENT) return true;
+          const out = redactString(`${pre}${frag}${post}`, reg);
+          return (
+            !out.includes(frag.slice(0, MIN_SECRET_FRAGMENT)) &&
+            !out.includes(frag.slice(-MIN_SECRET_FRAGMENT))
+          );
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+  it("property: any GUID, braced or bare, any case, never reaches a line", () => {
+    fc.assert(
+      fc.property(fc.uuid(), fc.boolean(), fc.boolean(), (u, braced, upper) => {
+        const g = upper ? u.toUpperCase() : u;
+        const out = redactString(`x ${braced ? `{${g}}` : g} y`, new SecretRegistry());
+        return !out.toLowerCase().includes(u.toLowerCase());
+      }),
+      { numRuns: 300 },
+    );
+  });
+  it("property: a numeric league id never survives as a number or a string", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1000, max: 999_999_999 }), (n) => {
+        const { log, raw } = capture();
+        log.registerIdentifier("league", String(n));
+        log.info("x", { a: n, b: String(n), c: [n], d: `leagues/${String(n)}?view=mTeam` });
+        return !new RegExp(`(?<![0-9])${String(n)}(?![0-9])`).test(raw[0] ?? "");
+      }),
+      { numRuns: 100 },
+    );
   });
 });

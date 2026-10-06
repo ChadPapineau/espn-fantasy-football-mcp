@@ -28,13 +28,17 @@
 // Local deny-list (personal identifiers): if $EFF_SCAN_DENYLIST names a readable file, else if
 // ~/.local/share/espn-fantasy-football-mcp-dev/scan-denylist.txt exists, every non-comment line is
 // a case-insensitive literal that must not appear in any scanned content, file path or commit
-// message — also when a line break or zero-width character splits it. A match prints ONLY
+// message — also when a line break or zero-width character splits it, when it is %XX-, \uXXXX- or
+// HTML-entity-encoded, and (for terms of ≥ 6 letters/digits) when punctuation, emoji or symbols
+// separate its words (`gridiron.gang`). List distinctive location/nickname parts and team
+// abbreviations as separate lines: a name stored as separate fields never forms the joined term. A match prints ONLY
 // "deny-list match in <file>:<line>"; the term and the file's contents are never printed. Absent
 // file = no deny-list (CI has none). The file lives outside the repo: it holds the very strings
 // that must never enter it.
 
 import { existsSync, lstatSync, readFileSync, readlinkSync, accessSync, constants } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { gunzipSync } from "node:zlib";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -81,15 +85,20 @@ export function entropy(s) {
 /**
  * A bare run that looks like an espn_s2 value: ≥ 100 chars of the cookie alphabet, starting `AE`
  * (two published examples, plan 04 A-2) or carrying ≥ 2 percent-escapes (DevTools shows the value
- * URL-encoded — research 03 §C.1), mixed-case with digits, and high-entropy.
+ * URL-encoded — research 03 §C.1) — or ≥ 40 chars (what `eff setup` accepts with a warning, ADV
+ * OBJ-15) when it starts `AE` AND carries ≥ 2 escapes — mixed-case with digits, and high-entropy.
  */
 export function looksLikeBareEspnS2(run) {
-  if (run.length < 100) return false;
+  if (run.length < BARE_MIN) return false;
   const escapes = (run.match(/%[0-9A-Fa-f]{2}/g) ?? []).length;
-  if (!(run.startsWith("AE") || escapes >= 2)) return false;
+  const ae = run.startsWith("AE");
+  if (!(run.length >= 100 ? ae || escapes >= 2 : ae && escapes >= 2)) return false;
   if (!/[A-Z]/.test(run) || !/[a-z]/.test(run) || !/\d/.test(run)) return false;
-  return entropy(run) >= 4.0;
+  return entropy(run) >= (run.length >= 100 ? 4.0 : 3.5);
 }
+
+/** The shortest run the bare-espn_s2 heuristics consider (S3: a 40–99-char paste). */
+export const BARE_MIN = 40;
 
 /** The espn_s2 cookie alphabet as a lookup table (ASCII only). */
 const COOKIE_CHAR = (() => {
@@ -100,22 +109,81 @@ const COOKIE_CHAR = (() => {
 })();
 
 /**
- * Every maximal run of ≥ 100 cookie-alphabet characters in `line`, in one linear pass.
+ * Every maximal run of ≥ BARE_MIN cookie-alphabet characters in `line`, in one linear pass. A
+ * JSON-escaped slash (`\/`) and a string concatenation (`" + "`, `' + '`) inside a value are
+ * removed first, so a value split that way is one run again (S3).
  * @param {string} line
  * @returns {string[]}
  */
 export function bareRuns(line) {
+  const joined = line.replace(/\\\//g, "/").replace(/["'\x60]\s*\+\s*["'\x60]/g, "");
   const out = [];
   let start = -1;
-  for (let i = 0; i <= line.length; i++) {
-    const code = i < line.length ? line.charCodeAt(i) : 0;
+  for (let i = 0; i <= joined.length; i++) {
+    const code = i < joined.length ? joined.charCodeAt(i) : 0;
     if (code < 128 && COOKIE_CHAR[code] === 1) {
       if (start < 0) start = i;
     } else if (start >= 0) {
-      if (i - start >= 100) out.push(line.slice(start, i));
+      if (i - start >= BARE_MIN) out.push(joined.slice(start, i));
       start = -1;
     }
   }
+  return out;
+}
+
+/** Characters that may wrap a value fragment on its own line: whitespace, quotes, `+`, `,`, `;`, `\`. */
+const WRAPPER_CHARS = new Set([" ", "\t", '"', "'", "\x60", "+", ",", ";", "\\"]);
+/** Longer lines are never a wrapped fragment (a wrap is ≤ a few hundred columns). */
+const MAX_FRAGMENT_LINE = 4096;
+
+/**
+ * The cookie-alphabet core of a line that is ONLY a value fragment (wrapper characters trimmed
+ * from both ends, ≥ 8 cookie characters between), or null. A manual linear scan — never a regex:
+ * a greedy class over a multi-megabyte line overflows V8's backtrack stack.
+ * @param {string} line
+ * @returns {string | null}
+ */
+export function fragmentCore(line) {
+  if (line.length > MAX_FRAGMENT_LINE) return null;
+  const t = line.replace(/\\\//g, "/");
+  let a = 0;
+  let b = t.length;
+  while (a < b && WRAPPER_CHARS.has(t[a] ?? "")) a++;
+  while (b > a && WRAPPER_CHARS.has(t[b - 1] ?? "")) b--;
+  if (b - a < 8) return null;
+  for (let i = a; i < b; i++) {
+    const code = t.charCodeAt(i);
+    if (!(code < 128 && COOKIE_CHAR[code] === 1)) return null;
+  }
+  return t.slice(a, b);
+}
+
+/**
+ * Values wrapped across lines (80-column wrapping, `"AE…" +⏎ "…"` concatenation): consecutive
+ * fragment lines are joined and their runs returned with the group's first line (1-based). Linear.
+ * @param {string[]} lines
+ * @returns {{ line: number, run: string }[]}
+ */
+export function wrappedRuns(lines) {
+  const out = [];
+  let group = "";
+  let first = -1;
+  let count = 0;
+  const flush = () => {
+    if (count >= 2) for (const run of bareRuns(group)) out.push({ line: first + 1, run });
+    group = "";
+    first = -1;
+    count = 0;
+  };
+  lines.forEach((raw, i) => {
+    const core = fragmentCore(raw);
+    if (core !== null) {
+      if (first < 0) first = i;
+      group += core;
+      count++;
+    } else flush();
+  });
+  flush();
   return out;
 }
 
@@ -180,10 +248,21 @@ export const RULES = [
     allow: (m) => isPlaceholderCookie(m[1] ?? ""),
   },
   {
-    // league ids are identifiers (HANDOFF): leagueId=, league_id:, ESPN_LEAGUE_ID=,
-    // EFF_PROBE_LEAGUE_ID=, …/leagues/<id>, …/leagueHistory/<id> — 4+ digits, all-zero allowed
+    // league ids are identifiers (HANDOFF): leagueId=, league_id:, league id: N, "leagueIds": [N],
+    // a markdown cell `| league id | N |`, ESPN_LEAGUE_ID=, EFF_PROBE_LEAGUE_ID=, --league N,
+    // --league-id=N, …/leagues/<id>, …/leagueHistory/<id> — 4+ digits, all-zero allowed
     id: "espn-league-id",
-    re: /(?:league[_-]?id["'\x60]?\s*[:=]\s*["'\x60]?|\bleagues\/|\bleagueHistory\/)(\d{4,})/gi,
+    re: /(?:league[ _-]?ids?["'\x60]?\s*[:=|]?\s*\[?\s*["'\x60]?|--league(?:-id)?[ =]["'\x60]?|\bleagues\/|\bleagueHistory\/)(\d{4,})/gi,
+    group: 1,
+    strict: true,
+    allow: (m) => /^0+$/.test(m[1] ?? ""),
+  },
+  {
+    // the root of any ESPN league body: `"gameId": 1, "id": <league id>, "<a league key>"` in the
+    // canonical (sorted) key order — the most likely unscrubbed-fixture leak, and CI has no
+    // deny-list (S3). A season body (`/seasons/{s}`: `"id": <year>, "name"`) is not a league body.
+    id: "espn-league-envelope",
+    re: /"gameId"\s*:\s*1\s*,\s*"id"\s*:\s*(\d+)\s*,\s*"(?:members|schedule|scoringPeriodId|seasonId|segmentId|settings|status|teams)"/g,
     group: 1,
     strict: true,
     allow: (m) => /^0+$/.test(m[1] ?? ""),
@@ -207,7 +286,7 @@ export const RULES = [
   {
     // /Users/<name>, /home/<name>, C:\Users\<name> (JSON-escaped too); placeholders are exempt
     id: "home-path",
-    re: /(?:\/(?:Users|home)\/|\b[A-Za-z]:(?:\\{1,2}|\/)Users(?:\\{1,2}|\/))(<[^<>\s]{0,64}>|\$\{[A-Za-z_]\w{0,64}\}|[^/\\\s"'\x60<>()[\]{},;:|*?]{1,256})/gi,
+    re: /(?:(?:\/|\\\/|%2F)(?:Users|home)(?:\/|\\\/|%2F)|\b[A-Za-z]:(?:\\{1,2}|\/|%5C|%2F)Users(?:\\{1,2}|\/|%5C|%2F))(<[^<>\s]{0,64}>|\$\{[A-Za-z_]\w{0,64}\}|[^/\\\s"'\x60<>()[\]{},;:|*?%]{1,256})/gi,
     group: 1,
     strict: true,
     allow: (m) => isPlaceholderName(m[1] ?? ""),
@@ -219,11 +298,30 @@ export const RULES = [
     re: /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/g,
     strict: true,
     // not a mailbox: a no-reply/reserved address; the `git` SSH transport user (git@github.com:…);
-    // or URL userinfo (https://user:pw@host — the authority of a scheme:// URL)
+    // or the PASSWORD half of URL userinfo (scheme://user:pw@host — `pw@host` is what matched).
+    // A bare `//name@host` (protocol-relative URL, `//comment`) is NOT exempt (S3).
     allow: (m) =>
       isPlaceholderEmail(m[0]) ||
       /^git@/i.test(m[0]) ||
-      /\/\/[^/\s@]*$/.test(m.input.slice(0, m.index)),
+      /[a-z][a-z0-9+.-]*:\/\/[^/\s@:]*:$/i.test(m.input.slice(0, m.index)),
+  },
+  {
+    // the same mailbox URL- or HTML-encoded (`name%40<domain>`, `name&#64;<domain>`)
+    id: "email-address-encoded",
+    re: /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._+-]+(?:%40|&#0*64;|&#x0*40;)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/gi,
+    strict: true,
+    allow: (m) => isPlaceholderEmail(m[0].replace(/%40|&#0*64;|&#x0*40;/i, "@")),
+  },
+  {
+    // an IPv6 literal anywhere (not only clientAddress): the full 8-group form, or a compressed
+    // form with a group on both sides of `::` — never a clock time; link-local fe80::/10 and the
+    // RFC 3849 documentation prefix 2001:db8::/32 are allowed (S3)
+    id: "ipv6-literal",
+    re: /(?<![0-9A-Za-z:.])((?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,6}:(?:[0-9A-Fa-f]{1,4}:){0,5}[0-9A-Fa-f]{1,4})(?![0-9A-Za-z:])/g,
+    group: 1,
+    strict: true,
+    allow: (m) =>
+      /^(?:2001:0?db8:|fe[89ab][0-9a-f]:)/i.test(m[1] ?? "") || !/[0-9]/.test(m[1] ?? ""),
   },
   {
     id: "private-key",
@@ -287,7 +385,17 @@ export function isGithubNoreply(addr) {
 
 /** A NUL byte skips a file only when its name is one of these binary formats. */
 const BINARY_EXT =
-  /\.(?:png|jpe?g|gif|webp|ico|icns|bmp|tiff?|avif|heic|pdf|parquet|arrow|feather|sqlite3?|db|gz|tgz|zip|bz2|xz|zst|7z|jar|woff2?|ttf|otf|eot|wasm|mp3|mp4|m4a|mov|wav|ogg|webm|docx|xlsx|pptx|node|dylib|so|o|a|class|bin)$/i;
+  /\.(?:png|jpe?g|gif|webp|ico|icns|bmp|tiff?|avif|heic|pdf|jar|woff2?|ttf|otf|eot|wasm|mp3|mp4|m4a|mov|wav|ogg|webm|docx|xlsx|pptx|node|dylib|so|o|a|class|bin)$/i;
+/**
+ * Archives and databases that no rule can read (S5: a compressed raw capture or a store dump
+ * would skip every identifier rule): refused outright — fail closed — unless the path is on the
+ * reviewed allow-list below (empty today). gzip (`.gz`, `.tgz`) is decompressed and scanned instead.
+ */
+export const REFUSED_EXT =
+  /\.(?:zip|7z|xz|zst|zstd|bz2|lz4|lzma|rar|tar|sqlite|sqlite3|db|db3|parquet|arrow|feather|ipc|duckdb)$/i;
+export const GZIP_EXT = /\.(?:gz|tgz)$/i;
+/** Reviewed binary paths that may be committed despite REFUSED_EXT (none). */
+export const REVIEWED_BINARY_ALLOWLIST = Object.freeze(new Set([]));
 
 /** The largest file it reads; anything larger is an error, never skipped. */
 const MAX_SCAN_BYTES = (() => {
@@ -302,14 +410,65 @@ class ScanError extends Error {}
 /** Zero-width and invisible characters an identifier could hide behind. */
 const INVISIBLE = /[\u00AD\u180E\u200B-\u200F\u2060-\u2064\uFEFF]/g;
 
-/** NFKC, case-folded, curly quotes straightened, invisible characters removed. */
+/** The HTML named entities a name is likely to be written with. */
+const NAMED_ENTITIES = {
+  amp: "&",
+  apos: "'",
+  quot: '"',
+  lt: "<",
+  gt: ">",
+  nbsp: " ",
+  rsquo: "'",
+  lsquo: "'",
+};
+
+/**
+ * Undoes the encodings a name takes in captured text (S4), a bounded number of layers: %XX
+ * (UTF-8 runs), \uXXXX (JSON's default for non-ASCII), and HTML entities (`&#39;`, `&#x27;`,
+ * `&amp;`). Anything that does not decode is left as it is.
+ * @param {string} s
+ */
+export function decodeLayers(s) {
+  let cur = s;
+  for (let i = 0; i < 4; i++) {
+    const next = cur
+      .replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+        try {
+          return decodeURIComponent(run);
+        } catch {
+          return run;
+        }
+      })
+      .replace(/\\u([0-9A-Fa-f]{4})/g, (_m, h) => String.fromCharCode(Number.parseInt(h, 16)))
+      .replace(/&#(?:x([0-9A-Fa-f]{1,6})|([0-9]{1,7}));/g, (m, hex, dec) => {
+        const cp = hex !== undefined ? Number.parseInt(hex, 16) : Number.parseInt(dec, 10);
+        return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)
+          ? String.fromCodePoint(cp)
+          : m;
+      })
+      .replace(/&([a-z]{2,6});/gi, (m, name) => NAMED_ENTITIES[name.toLowerCase()] ?? m);
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/** NFKC, case-folded, curly quotes straightened, invisible characters removed — after decoding. */
 export function normalise(s) {
-  return s
+  return decodeLayers(s)
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[‘’ʼ`]/g, "'")
     .replace(INVISIBLE, "");
 }
+
+/** Letters and digits only (any script): `gridiron.gang`, `Gridiron 🏈 Gang` → `gridirongang`. */
+export function skeleton(s) {
+  return s.replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+/** A term's skeleton is compared too when it has at least this many letters/digits. */
+export const SKELETON_MIN = 6;
 
 /**
  * The deny-list file in force, or null: $EFF_SCAN_DENYLIST when it names a readable file, else the
@@ -382,9 +541,13 @@ function loadDenylist() {
 export function denylistLines(text, deny) {
   if (!deny.length) return [];
   const norm = text.split(/\r?\n/).map((l) => normalise(l).replace(/\s+/g, " ").trim());
+  const skels = [...new Set(deny.map((d) => skeleton(d)).filter((k) => k.length >= SKELETON_MIN))];
   const has = (/** @type {string} */ s) => {
     const t = s.replace(/\s+/g, " ");
-    return deny.some((d) => t.includes(d));
+    if (deny.some((d) => t.includes(d))) return true;
+    if (!skels.length) return false;
+    const k = skeleton(t);
+    return skels.some((d) => k.includes(d));
   };
   const hits = new Set();
   for (let i = 0; i < norm.length; i++) {
@@ -560,8 +723,76 @@ export function scanText(label, text, deny) {
       }
     }
   });
+  // values wrapped across lines or split by concatenation (S3)
+  const lineSet = new Set(findings);
+  for (const { line, run } of wrappedRuns(lines))
+    if (looksLikeBareEspnS2(run)) {
+      const f = `${label}:${String(line)}  [espn-s2-bare]`;
+      if (!lineSet.has(f)) {
+        lineSet.add(f);
+        findings.push(f);
+      }
+    }
+  findings.push(...fixtureLeagueIdFindings(label, text));
   for (const n of denylistLines(text, deny)) findings.push(`deny-list match in ${label}:${n}`);
   return findings;
+}
+
+/**
+ * A recorded ESPN body under fixtures/ parsed as JSON (S3): a non-zero root `id` of a league body
+ * (`gameId` 1 with a `seasonId` — a season body has none) or a non-zero numeric `leagueId` anywhere
+ * is the real league id — whatever the key
+ * order or whitespace. Unparseable JSON is not this rule's concern (the line rules still ran).
+ * @param {string} label
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function fixtureLeagueIdFindings(label, text) {
+  if (!/(?:^|\/)fixtures\/.+\.json$/.test(label)) return [];
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const out = [];
+  if (
+    body !== null &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    body.gameId === 1 &&
+    "seasonId" in body &&
+    typeof body.id === "number" &&
+    body.id !== 0
+  )
+    out.push(`${label}  [espn-league-root-id]`);
+  let flagged = false;
+  const walk = (/** @type {unknown} */ v, depth = 0) => {
+    if (flagged || depth > 64 || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x, depth + 1);
+      return;
+    }
+    for (const [k, x] of Object.entries(v)) {
+      if (/^league[_-]?ids?$/i.test(k)) {
+        const vals = Array.isArray(x) ? x : [x];
+        if (
+          vals.some(
+            (n) =>
+              (typeof n === "number" && n !== 0) ||
+              (typeof n === "string" && /^[1-9]\d{3,}$/.test(n)),
+          )
+        ) {
+          out.push(`${label}  [espn-league-id-field]`);
+          flagged = true;
+          return;
+        }
+      }
+      walk(x, depth + 1);
+    }
+  };
+  walk(body);
+  return out;
 }
 
 function main() {
@@ -654,6 +885,22 @@ function main() {
       );
     }
     if (!buf) return;
+    if (REFUSED_EXT.test(file) && !REVIEWED_BINARY_ALLOWLIST.has(file)) {
+      findings.push(
+        `${file}  [unscannable-archive-or-database] (an archive or database cannot be scanned, so it cannot be committed)`,
+      );
+      return;
+    }
+    if (GZIP_EXT.test(file)) {
+      try {
+        buf = gunzipSync(buf, { maxOutputLength: MAX_SCAN_BYTES });
+      } catch {
+        findings.push(
+          `${file}  [unscannable-archive-or-database] (gzip could not be decompressed within the scan limit)`,
+        );
+        return;
+      }
+    }
     if (isBinary(buf) && BINARY_EXT.test(file)) {
       binary++;
       // a binary file is not regex-scanned, but the deny-list still applies to its bytes as latin1

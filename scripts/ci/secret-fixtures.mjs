@@ -182,7 +182,87 @@ export function mustFlag() {
       gitleaks: [],
       scan: ["email-address"],
     },
+    // --- S3: the leak shapes a critic built that both scanners used to miss -----------------
+    {
+      line: join(
+        '{"draftDetail":{},"gameId":1,"id":',
+        fakeLeagueId("envelope", 8),
+        ',"members":[]}',
+      ),
+      gitleaks: ["espn-league-envelope"],
+      scan: ["espn-league-envelope"],
+    },
+    {
+      line: join("league id: ", fakeLeagueId("spaced", 8)),
+      gitleaks: ["espn-league-id"],
+      scan: ["espn-league-id"],
+    },
+    {
+      line: join('"leagueIds": [', fakeLeagueId("array", 7), "]"),
+      gitleaks: ["espn-league-id"],
+      scan: ["espn-league-id"],
+    },
+    {
+      line: join("| league id | ", fakeLeagueId("table", 9), " |"),
+      gitleaks: ["espn-league-id"],
+      scan: ["espn-league-id"],
+    },
+    {
+      line: join("npx tsx scripts/probe.ts --league ", fakeLeagueId("argv", 6)),
+      gitleaks: ["espn-league-id"],
+      scan: ["espn-league-id"],
+    },
+    {
+      line: join("--league-id=", fakeLeagueId("argv2", 8)),
+      gitleaks: ["espn-league-id"],
+      scan: ["espn-league-id"],
+    },
+    {
+      // a value split by string concatenation: neither half alone is 100 chars
+      line: join(
+        'const s = "',
+        fakeEspnS2("concat", 140).slice(0, 70),
+        '" + "',
+        fakeEspnS2("concat", 140).slice(70),
+        '";',
+      ),
+      gitleaks: [],
+      scan: ["espn-s2-bare"],
+    },
+    {
+      // a decoded value written JSON-escaped (`\/`): the backslashes split the run
+      line: join(
+        '{"v":"',
+        decodeURIComponent(fakeEspnS2("json-escaped", 160)).replace(/\//g, "\\/"),
+        '"}',
+      ),
+      gitleaks: [],
+      scan: ["espn-s2-bare"],
+    },
+    { line: join("pasted: ", fakeEspnS2("short-paste", 70)), gitleaks: [], scan: ["espn-s2-bare"] },
+    {
+      line: join("contact: jane.doe", "%40", "acme-corp.io"),
+      gitleaks: [],
+      scan: ["email-address-encoded"],
+    },
+    { line: join("see //", at("jane.doe", "acme-corp.io")), gitleaks: [], scan: ["email-address"] },
+    {
+      line: join('"cwd": "\\/Users\\/', "probe-user", '\\/src"'),
+      gitleaks: [],
+      scan: ["home-path"],
+    },
+    { line: join("path=%2FUsers%2F", "probe-user", "%2Fsrc"), gitleaks: [], scan: ["home-path"] },
+    { line: join("peer ", fakeIpv6("peer")), gitleaks: [], scan: ["ipv6-literal"] },
   ];
+}
+
+/**
+ * A fake global-unicast IPv6 address (never the documentation or link-local ranges).
+ * @param {string} label
+ */
+export function fakeIpv6(label) {
+  const h = digest(label).toString("hex");
+  return `2a0${h[0] ?? "1"}:${h.slice(1, 5)}:${h.slice(5, 9)}::${h.slice(9, 13)}`;
 }
 
 /** Lines that LOOK like the shapes above but are the placeholders the docs use: both scanners stay quiet. */
@@ -210,6 +290,15 @@ export function mustPass() {
     "validate ^[A-Za-z0-9%+/=._-]{100,}$",
     "Node 24.15.0 and SDK 2.2.0",
     "espn_s2: string",
+    // S3 additions: placeholders and near misses of the new rules
+    '{"draftDetail":{},"gameId":1,"id":0,"members":[]}',
+    '{"abbrev":"FFL","gameId":1,"id":2026,"name":"2026"}',
+    "league ids are 4+ digits; pass --league-id <id> from the environment",
+    "| league id | 0 |",
+    "documentation 2001:db8::1 and link-local fe80::1",
+    "at 12:34:56 the C++ std::vector was ok",
+    "write to name%40example.com or a&#64;example.org",
+    "https://user:pw@internal.example/path",
   ];
 }
 

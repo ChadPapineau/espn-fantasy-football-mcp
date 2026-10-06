@@ -11,6 +11,9 @@ import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FAKE_GUID,
+  SKELETON_MIN,
+  decodeLayers,
+  skeleton,
   denylistLines,
   entropy,
   isGithubNoreply,
@@ -120,8 +123,28 @@ describe("a bare espn_s2-shaped value (espn-s2-bare)", () => {
     expect(flags(`value: "${fakeEspnS2("d", 300)}"`, "espn-s2-bare")).toBe(true);
   });
 
-  it("99 characters is below the floor", () => {
-    expect(flags(fakeEspnS2("b", 200).slice(0, 99), "espn-s2-bare")).toBe(false);
+  it("the floor: 39 never; 40–99 only when the run starts AE AND carries ≥ 2 escapes (S3)", () => {
+    const v = fakeEspnS2("b", 200);
+    expect(flags(v.slice(0, 99), "espn-s2-bare")).toBe(true); // AE + %2F + %2B
+    expect(flags(v.slice(0, 68), "espn-s2-bare")).toBe(true);
+    expect(flags(v.replace(/%../g, "").slice(0, 99), "espn-s2-bare")).toBe(false); // no escapes
+    expect(flags(`Zq${v.slice(2, 99)}`, "espn-s2-bare")).toBe(false); // escapes but no AE
+    expect(flags(v.slice(0, 39), "espn-s2-bare")).toBe(false);
+  });
+  it("a value wrapped across lines or split by concatenation is joined (S3)", () => {
+    const v = fakeEspnS2("wrapped", 240);
+    const wrapped = [v.slice(0, 80), v.slice(80, 160), v.slice(160)];
+    expect(rulesOn(wrapped).get(1)).toContain("espn-s2-bare");
+    const concat = [
+      `const s = "${v.slice(0, 70)}" +`,
+      `  "${v.slice(70, 150)}" +`,
+      `  "${v.slice(150)}";`,
+    ];
+    expect(rulesOn(concat).get(1)).toContain("espn-s2-bare");
+    const json = [`"${v.slice(0, 60)}",`, `"${v.slice(60, 120)}",`];
+    expect(rulesOn(json).get(1)).toContain("espn-s2-bare");
+    // ordinary multi-line prose of single words is not a cookie
+    expect(rulesOn(["Description", "Parameters", "Returns", "Examples"]).size).toBe(0);
   });
 
   it.each([
@@ -483,6 +506,122 @@ describe("the local deny-list — matched, never printed", () => {
   });
 });
 
+describe("S3: league ids in every spelling, envelope and parsed fixtures", () => {
+  const id = () => ["1", "2", "3", "4", "5", "6", "7", "8"].join("");
+  it.each([
+    ["league id: N", () => `league id: ${id()}`],
+    ["League-ID = N", () => `League-ID = ${id()}`],
+    ['"leagueIds": [N]', () => `"leagueIds": [${id()}, 0]`],
+    ["markdown cell", () => `| league id | ${id()} |`],
+    ["--league N", () => `run --league ${id()}`],
+    ["--league-id=N", () => `--league-id=${id()}`],
+  ])("flags %s", (_n, line) => {
+    expect(flags(line(), "espn-league-id")).toBe(true);
+  });
+  it("the league envelope rule flags a non-zero root id; a season body and id 0 pass", () => {
+    expect(
+      flags(`{"draftDetail":{},"gameId":1,"id":${id()},"members":[]}`, "espn-league-envelope"),
+    ).toBe(true);
+    expect(flags(`{"gameId": 1, "id": ${id()}, "seasonId": 2026}`, "espn-league-envelope")).toBe(
+      true,
+    );
+    expect(clean('{"draftDetail":{},"gameId":1,"id":0,"members":[]}')).toBe(true);
+    expect(clean('{"abbrev":"FFL","gameId":1,"id":2026,"name":"2026"}')).toBe(true);
+  });
+  it("a pretty-printed fixture under fixtures/ is parsed: root id and leagueId fields", () => {
+    const pretty = JSON.stringify(
+      { teams: [], gameId: 1, seasonId: 2026, id: Number(id()) },
+      null,
+      2,
+    );
+    expect(scanText("fixtures/espn/recorded/league-z/mTeam.json", pretty, [])).toContain(
+      "fixtures/espn/recorded/league-z/mTeam.json  [espn-league-root-id]",
+    );
+    const nested = JSON.stringify({ a: { b: [{ leagueId: Number(id()) }] } }, null, 2);
+    expect(scanText("fixtures/x.json", nested, [])).toContain(
+      "fixtures/x.json  [espn-league-id-field]",
+    );
+    expect(scanText("fixtures/x.json", JSON.stringify({ a: { leagueIds: [id()] } }), [])).toContain(
+      "fixtures/x.json  [espn-league-id-field]",
+    );
+    // the scrubbed shape, a season body, non-fixture paths and unparseable text are not this rule's
+    expect(
+      scanText(
+        "fixtures/y.json",
+        JSON.stringify({ gameId: 1, seasonId: 2026, id: 0, leagueId: 0 }),
+        [],
+      ),
+    ).toEqual([]);
+    expect(
+      scanText("fixtures/y.json", JSON.stringify({ gameId: 1, id: 2026, name: "2026" }), []),
+    ).toEqual([]);
+    expect(scanText("docs/y.json", pretty, [])).toEqual([]);
+    expect(scanText("fixtures/y.json", "{not json", [])).toEqual([]);
+  });
+});
+
+describe("S3: encoded emails, protocol-relative userinfo, escaped home paths, IPv6", () => {
+  it("flags name%40domain and HTML-entity @; reserved domains pass", () => {
+    expect(flags(["mail jane.doe", "%40", "acme-corp.io"].join(""), "email-address-encoded")).toBe(
+      true,
+    );
+    expect(flags(["x&", "#64;acme-corp.io"].join(""), "email-address-encoded")).toBe(true);
+    expect(clean(["name", "%40", "example.com"].join(""))).toBe(true);
+  });
+  it("a protocol-relative //name@host is a mailbox; only scheme://user:pw@ userinfo is exempt", () => {
+    expect(flags(`see //${at("jane.doe", "acme-corp.io")}`, "email-address")).toBe(true);
+    expect(flags(`https://${at("jane.doe", "acme-corp.io")}/x`, "email-address")).toBe(true);
+    expect(clean(`https://user:${at("pw", "acme-corp.io")}/x`)).toBe(true);
+  });
+  it("JSON-escaped and URL-encoded home paths are flagged", () => {
+    const user = ["probe", "user"].join("-");
+    const esc = (...p: string[]) => p.join(String.raw`\/`);
+    const enc = (...p: string[]) => p.join("%2F");
+    expect(flags(`"cwd": "${esc("", "Users", user, "src")}"`, "home-path")).toBe(true);
+    expect(flags(`path=${enc("", "Users", user, "src")}`, "home-path")).toBe(true);
+    expect(flags(`path=${enc("", "home", user).toLowerCase()}`, "home-path")).toBe(true);
+    expect(clean(String.raw`"cwd": "\/Users\/<you>\/src"`)).toBe(true);
+  });
+  it("IPv6 anywhere; documentation, link-local and non-addresses pass", () => {
+    const g = ["2a01", "4f8", "c17", "", "1"].join(":");
+    expect(flags(`peer ${g} up`, "ipv6-literal")).toBe(true);
+    expect(flags(["2a01", "4f8", "c17", "b21", "0", "0", "0", "2"].join(":"), "ipv6-literal")).toBe(
+      true,
+    );
+    for (const ok of ["2001:db8::1", "fe80::1", "12:34:56", "std::vector", "Vec::new", "a::b"])
+      expect(clean(ok), ok).toBe(true);
+  });
+});
+
+describe("S4: deny-list terms in every encoding a capture can carry", () => {
+  const TERM2 = "O'Brien Bombers";
+  const TERM3 = "Gridiron Gang";
+  const deny = parseDenylist(`${TERM2}\n${TERM3}\nñandú fc\n`);
+  it.each([
+    ["URL-encoded apostrophe and spaces", "o%27brien%20bombers"],
+    ["JSON \\u escapes", String.raw`O\u0027Brien Bombers`],
+    ["HTML entity", "O&#39;Brien Bombers"],
+    ["hex HTML entity", "O&#x27;Brien Bombers"],
+    ["named entity", "O&apos;Brien Bombers"],
+    ["dot separators", "gridiron.gang"],
+    ["emoji between words", "Gridiron 🏈 Gang"],
+    ["underscore+camel", "GRIDIRON__gang"],
+    ["JSON non-ASCII escape", String.raw`\u00f1and\u00fa FC`],
+    ["double-encoded", "o%2527brien%2520bombers"],
+  ])("matches %s", (_n, text) => {
+    expect(denylistLines(`x\n${text}\ny`, deny)).toEqual([2]);
+  });
+  it("short terms are not skeleton-matched (no shredding); unrelated text passes", () => {
+    const d = parseDenylist("ab cd\n");
+    expect(denylistLines("a.b.c.d", d)).toEqual([]);
+    expect(denylistLines("the gridiron is a field and gangs are bad", deny)).toEqual([]);
+    expect(decodeLayers("%E2%9C%93 &amp; \\u0041")).toBe("✓ & A");
+    expect(decodeLayers("%ZZ &bogus; &#0; &#xD800;")).toBe("%ZZ &bogus; &#0; &#xD800;");
+    expect(skeleton("Grid-iron 🏈 Gang!")).toBe("GridironGang");
+    expect(SKELETON_MIN).toBe(6);
+  });
+});
+
 describe("fails closed on content it cannot scan", () => {
   it("scans a text file over 8 MB instead of skipping it", () => {
     tmp = tempDir("eff-scan-");
@@ -520,17 +659,49 @@ describe("fails closed on content it cannot scan", () => {
     expect(r.status).toBe(1);
   });
 
-  it("still skips a genuine binary format, and says so; a .png without NUL is scanned", () => {
+  it("still skips a genuine binary image format, and says so; a .png without NUL is scanned", () => {
     tmp = tempDir("eff-scan-");
-    writeFileSync(
-      path.join(tmp.dir, "a.parquet"),
-      Buffer.from([0x50, 0x41, 0x52, 0x31, 0, 0, 1, 2]),
-    );
-    const r = scan(tmp.dir, ["--", "a.parquet"]);
+    writeFileSync(path.join(tmp.dir, "a.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 1, 2]));
+    const r = scan(tmp.dir, ["--", "a.png"]);
     expect(r.status).toBe(0);
     expect(r.out).toMatch(/1 binary file\(s\) skipped/);
     writeFileSync(path.join(tmp.dir, "shot.png"), `token = ${TOKEN}\n`);
     expect(scan(tmp.dir, ["--", "shot.png"]).status).toBe(1);
+  });
+  it.each([
+    "a.parquet",
+    "store.sqlite3",
+    "dump.db",
+    "raw.zip",
+    "cap.json.xz",
+    "x.zst",
+    "y.bz2",
+    "z.arrow",
+    "w.feather",
+    "v.7z",
+  ])("S5: refuses %s outright — an archive or database cannot be scanned (fail closed)", (name) => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, name), Buffer.from([0x50, 0x41, 0x52, 0x31, 0, 0, 1, 2]));
+    const r = scan(tmp.dir, ["--", name]);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain(`${name}  [unscannable-archive-or-database]`);
+  });
+  it("S5: decompresses gzip and scans the text — a GUID and a league envelope inside are found", async () => {
+    const { gzipSync } = await import("node:zlib");
+    tmp = tempDir("eff-scan-");
+    const rootId = ["1234", "5678"].join("");
+    const body = `{"draftDetail":{},"gameId":1,"id":${rootId},"members":[{"id":"{${fakeGuid("gz")}}"}]}`;
+    writeFileSync(path.join(tmp.dir, "leak.json.gz"), gzipSync(body));
+    const r = scan(tmp.dir, ["--", "leak.json.gz"]);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("leak.json.gz:1  [brace-guid]");
+    expect(r.out).toContain("leak.json.gz:1  [espn-league-envelope]");
+    writeFileSync(path.join(tmp.dir, "bad.gz"), Buffer.from([0x1f, 0x8b, 8, 0, 1, 2, 3]));
+    const bad = scan(tmp.dir, ["--", "bad.gz"]);
+    expect(bad.status).toBe(1);
+    expect(bad.out).toContain("bad.gz  [unscannable-archive-or-database]");
+    writeFileSync(path.join(tmp.dir, "ok.txt.gz"), gzipSync("nothing to see\n"));
+    expect(scan(tmp.dir, ["--", "ok.txt.gz"]).status).toBe(0);
   });
 
   it("scans a symlink as its target string and never follows it", () => {
