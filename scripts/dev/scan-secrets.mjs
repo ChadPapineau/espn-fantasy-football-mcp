@@ -462,6 +462,21 @@ export function normalise(s) {
     .replace(INVISIBLE, "");
 }
 
+/**
+ * How an all-digit deny-list term (a league id) matches: as a whole digit run — never inside a
+ * longer number — and, below NUMERIC_ALNUM_BOUNDARY digits, never touching a letter either (a
+ * short id would otherwise hit every hex digest and stat value that happens to contain it). A
+ * long id may touch letters (`league12345678`).
+ * @param {string} digits
+ */
+export function numericTermRe(digits) {
+  return digits.length >= NUMERIC_ALNUM_BOUNDARY
+    ? new RegExp(`(?<![0-9])${digits}(?![0-9])`)
+    : new RegExp(`(?<![0-9A-Za-z.])${digits}(?![0-9A-Za-z.])`);
+}
+/** Numeric terms this long may touch letters; shorter ones must stand alone. */
+export const NUMERIC_ALNUM_BOUNDARY = 7;
+
 /** Letters and digits only (any script): `gridiron.gang`, `Gridiron 🏈 Gang` → `gridirongang`. */
 export function skeleton(s) {
   return s.replace(/[^\p{L}\p{N}]/gu, "");
@@ -541,10 +556,15 @@ function loadDenylist() {
 export function denylistLines(text, deny) {
   if (!deny.length) return [];
   const norm = text.split(/\r?\n/).map((l) => normalise(l).replace(/\s+/g, " ").trim());
-  const skels = [...new Set(deny.map((d) => skeleton(d)).filter((k) => k.length >= SKELETON_MIN))];
+  const numericRes = deny.filter((d) => /^[0-9]+$/.test(d)).map(numericTermRe);
+  const textual = deny.filter((d) => !/^[0-9]+$/.test(d));
+  const skels = [
+    ...new Set(textual.map((d) => skeleton(d)).filter((k) => k.length >= SKELETON_MIN)),
+  ];
   const has = (/** @type {string} */ s) => {
     const t = s.replace(/\s+/g, " ");
-    if (deny.some((d) => t.includes(d))) return true;
+    if (textual.some((d) => t.includes(d))) return true;
+    if (numericRes.some((re) => re.test(t))) return true;
     if (!skels.length) return false;
     const k = skeleton(t);
     return skels.some((d) => k.includes(d));

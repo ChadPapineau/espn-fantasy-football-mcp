@@ -11,8 +11,10 @@ import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FAKE_GUID,
+  NUMERIC_ALNUM_BOUNDARY,
   SKELETON_MIN,
   decodeLayers,
+  numericTermRe,
   skeleton,
   denylistLines,
   entropy,
@@ -590,6 +592,33 @@ describe("S3: encoded emails, protocol-relative userinfo, escaped home paths, IP
     );
     for (const ok of ["2001:db8::1", "fe80::1", "12:34:56", "std::vector", "Vec::new", "a::b"])
       expect(clean(ok), ok).toBe(true);
+  });
+});
+
+describe("numeric deny-list terms (league ids) match as whole tokens", () => {
+  const short = ["3", "1", "4", "1"].join("");
+  const long = ["1", "2", "3", "4", "5", "6", "7", "8"].join("");
+  const deny = parseDenylist(`${short}\n${long}\n`);
+  it.each([
+    [`leagues/${short}?view=mTeam`, true],
+    [`id: ${short},`, true],
+    [`"${short}"`, true],
+    [`sha ab${short}cd`, false],
+    [`n=9${short}`, false],
+    [`${short}5 points`, false],
+    [`ratio 0.${short}`, false],
+    [`${short}.5 yards`, false],
+    [`league${long}`, true],
+    [`x${long}y`, true],
+    [`9${long}`, false],
+    [`${long}0`, false],
+  ])("%s → %s", (line, hit) => {
+    expect(denylistLines(line, deny).length > 0).toBe(hit);
+  });
+  it("numericTermRe picks the boundary by length", () => {
+    expect(NUMERIC_ALNUM_BOUNDARY).toBe(7);
+    expect(numericTermRe(short).test(`a${short}`)).toBe(false);
+    expect(numericTermRe(long).test(`a${long}`)).toBe(true);
   });
 });
 
