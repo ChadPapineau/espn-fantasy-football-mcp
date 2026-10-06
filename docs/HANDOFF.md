@@ -17,37 +17,12 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-**Research and planning are COMPLETE (2026-09-30). Awaiting Chad's
-review. Do not start development or testing until he approves the plan**
-(his instruction, 2026-09-30).
-
-Final state: research `docs/research/00`–`06`; plan `docs/plan/01`–`10`
-after three adversarial rounds (26 objections, 16 tensions, 15 nits — all
-resolved, none pressed) and a post-docs consistency programme (changelog
-§R4: rulings 1–4, a 10-agent verification pass, orchestrator rulings
-V1–V8 on the parked items, a loop-until-dry pass, and final rulings
-R-1–R-8); README with 8 Mermaid diagrams, LICENSE (MIT), SECURITY.md,
-`docs/README.md`, `docs/plan/00-index.md`. Orchestrator checks at hand-off:
-all 14 Mermaid blocks in tracked markdown parse **and render** (Mermaid 11,
-browser harness); every markdown table row matches its header's cell
-count; no broken relative links in README/SECURITY/indexes/HANDOFF; no
-identifier, secret, IP, GUID or absolute local path in any tracked file
-(the only name hits are the public GitHub handle inside repo slugs and the
-mandated copyright line).
-
-**Honest limit:** each fresh consistency sweep of a ~5,000-line plan still
-finds a handful of wording-level inconsistencies (the last three sweeps
-found ~10 each, all fixed). None found in the last two passes changed a
-decision. The build's generated docs (`docs-current`), lint and tests are
-designed to catch the rest (plan 04 §6, plan 05).
-
-**On approval**, start plan `10` Phase 0: Z1–Z7 (repo scaffolding, CI with
-the `identifiers`, secret-scan and Mermaid jobs, the keyless recording of
-≥ 3 probe-league `mBoxscore` weeks — needs D2), after the decisions below.
-To re-render diagrams: a scratch page that fetches a JSON list of the
-repo's ```mermaid blocks and calls `mermaid.parse()` + `mermaid.render()`
-on each (Mermaid 11 from jsDelivr, served by `python3 -m http.server` on
-127.0.0.1).
+**BUILD APPROVED (Chad, 2026-10-05).** Program: `docs/scratch/build-program.md` (stages A → B1 →
+B2 → owner stop → C → D). Work happens in the clone at `~/Developer/espn-fantasy-football-mcp`
+(outside iCloud) on branch `build/phase-1`; the `~/Documents` checkout is retired. Agent rules:
+`CLAUDE.md`. Effort: routine building at "Extra"; the QA/pentest stage (C) needs "Ultracode" —
+the orchestrator stops after B2 and asks Chad to (1) run `eff setup` in a terminal, (2) switch to
+Ultracode, (3) reply "go". Read `docs/scratch/build-program.md` § RESUME HERE for the current stage.
 
 ## The findings that shape the product (verified by the orchestrator)
 
@@ -170,6 +145,16 @@ on each (Mermaid 11 from jsDelivr, served by `python3 -m http.server` on
 | 2026-09-29 | Env prefix `EFF_`; read-only default; `EFF_ENABLE_WRITES=false` | `.env.example` |
 | 2026-09-30 | Handoff document = `docs/HANDOFF.md`, committed | Chad's answer ("Yes") to the Phase-0 question; mirrors the sibling |
 | 2026-09-30 | Repo-local git identity set to the name/email used in Chad's other repos | no global identity was visible in the session shell; nothing else in git config touched |
+| 2026-10-05 | **Build approved; full planned scope, no cuts; free services only; personal use** | Chad. The November estimate was withdrawn: it came from a human-engineer effort scale; the sibling's equivalent phase took ~12 hours (plan 10 §0 rewritten) |
+| 2026-10-05 | **D0 accepted** — the Disney Terms of Use account risk for live, read-only use | Chad, on the orchestrator's recommendation |
+| 2026-10-05 | **D2: three public probe leagues** named by Chad, all verified keyless on 2026-10-05 (public, active, finished box scores with `appliedStats`): one 10-team half-PPR FAAB league (daily drift probe), one 12-team 6-pt-pass-TD league with rolling non-FAAB waivers, one 10-team league with an unusual 5-flex lineup. **Their ids are kept in local config only, never committed** | the engine golden is recorded from all three (anonymised), covering half-PPR, a non-4 pass-TD override and odd slot structures |
+| 2026-10-05 | **D1: the reference league uses ESPN's rule** — "Playoff Seeding Tie Breaker: Total Points For", reseeding off, 6 playoff teams, 1-week rounds, consolation ladder on (settings screenshot) → `EFF_SEEDING_MODE=espn_rule`; record first, points as the tiebreak | Chad |
+| 2026-10-05 | **Runtime and development location: `~/Developer/espn-fantasy-football-mcp`** (outside iCloud; matches the sibling's `~/Developer` clone); Node 24.21.0 set as the fnm default | iCloud had evicted 10,026 files and made 132 conflict copies in the sibling's old `~/Documents` checkout |
+| 2026-10-05 | **Shared core: option (c)** — two repos, `espn_` prefix, shared package only on the named trigger; the owner's sibling code may be ported where the plan's boundaries match | Chad |
+| 2026-10-05 | **Writes not built**; the integration seam is declared and clearly marked in code | Chad (D11) |
+| 2026-10-05 | **Repo stays PUBLIC** (no concrete legal issue found: Terms-of-Use exposure is the account's, the repo carries no ESPN code or content, comparable tools have been public for years). Applied: ruleset `protect-main` (no force-push, no deletion), private vulnerability reporting ON, Dependabot alerts + security updates ON; secret scanning + push protection already ON (generic-pattern and validity checks are not available on this plan) | Chad: go private only if there is a real legal concern |
+| 2026-10-05 | **Git-history path residual accepted** after a full-history scan (123 commits): no credential, email, league or team name ever committed; only folder paths showing the macOS username (= the public GitHub handle) | the most secure option: a force-push rewrite would break 243 commit references and cannot reach existing clones |
+| 2026-10-05 | **Commits use the GitHub no-reply address** from now on (`<id>+<login>@users.noreply.github.com`); earlier commits carry a machine-derived address | privacy; matches the sibling's rule |
 
 ## Decisions for Chad — consolidated at hand-off (2026-09-30), ranked
 
@@ -366,3 +351,4 @@ approving the plan accepts them unless Chad says otherwise.
   annotation, research table pipes `c1f89e1`, `.env.example` gate wording).
   Final checks: 14 diagrams render, tables consistent, links resolve, identifier
   scan clean. **Planning complete; executive summary delivered; awaiting Chad.**
+- 2026-10-05 — Chad approved the build (full scope, Extra for building, Ultracode for QA). Held items done: Node 24 default; clone at `~/Developer/espn-fantasy-football-mcp`; three public leagues verified keyless; Yahoo session notified (both earlier notes already handled there; 13 iCloud conflict copies flagged in its old checkout); repo ruleset + vulnerability reporting + Dependabot applied; plan 10 timing corrected; `CLAUDE.md` and `docs/scratch/build-program.md` written.
