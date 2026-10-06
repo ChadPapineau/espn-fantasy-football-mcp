@@ -216,6 +216,12 @@ describe("delete (reset, failed setup, uninstall)", () => {
     expect(kr.items.size).toBe(0);
     await store.delete();
   });
+  it("an addon that cannot load reports `unavailable` on delete (setup/uninstall tolerate it)", async () => {
+    const store = createKeychainCredentialStore({
+      loadKeyring: () => Promise.reject(new Error("no addon for this platform")),
+    });
+    expect((await rejection(store.delete())).reason).toBe("unavailable");
+  });
   it("attempts every item even when one fails, then reports delete_failed", async () => {
     const { kr, store } = setup();
     const c = fakeCookies("del2");

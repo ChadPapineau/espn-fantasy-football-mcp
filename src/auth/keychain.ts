@@ -145,6 +145,7 @@ export function createKeychainCredentialStore(
   };
 
   const deleteAll = async (): Promise<void> => {
+    await keyring(); // an unreachable keychain stays `unavailable` (it holds nothing we wrote)
     let failed = false;
     // meta first: an interrupted delete then reads as "nothing stored"
     for (const account of [
