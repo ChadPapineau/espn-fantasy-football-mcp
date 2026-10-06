@@ -1842,7 +1842,8 @@ export function p1StepTools(body, manifest) {
   const out = new Set();
   for (const line of body.split("\n")) {
     if (!P1_LABEL_RE.test(line)) continue;
-    for (const r of toolRefs(line)) if (!r.wildcard && manifest.p1.includes(r.tool)) out.add(r.tool);
+    for (const r of toolRefs(line))
+      if (!r.wildcard && manifest.p1.includes(r.tool)) out.add(r.tool);
   }
   return [...out].sort();
 }
@@ -2195,7 +2196,9 @@ export function checkSkills(opts = {}) {
       // tool its body names on a P1 line is called by one of its full sequences
       if (!p1Skill) {
         const inFull = new Set(
-          v.sequences.filter((q) => q.toolset === "full").flatMap((q) => q.steps.map((x) => x.tool)),
+          v.sequences
+            .filter((q) => q.toolset === "full")
+            .flatMap((q) => q.steps.map((x) => x.tool)),
         );
         for (const t of p1StepTools(body, manifest).filter((x) => !inFull.has(x))) {
           errors.push(
