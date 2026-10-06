@@ -1832,6 +1832,22 @@ export function checkToolRefs(text, file, ctx, errors) {
 }
 
 /**
+ * The P1 tools a body names on its P1-labelled lines (`(P1; …)`, `**P1:**`), sorted.
+ * @param {string} body
+ * @param {import("./_lib.mjs").Manifest} manifest
+ * @returns {string[]}
+ */
+export function p1StepTools(body, manifest) {
+  /** @type {Set<string>} */
+  const out = new Set();
+  for (const line of body.split("\n")) {
+    if (!P1_LABEL_RE.test(line)) continue;
+    for (const r of toolRefs(line)) if (!r.wildcard && manifest.p1.includes(r.tool)) out.add(r.tool);
+  }
+  return [...out].sort();
+}
+
+/**
  * Backticked UPPER_SNAKE tokens that are neither error codes nor allowed constants (research 06
  * §C.3 item 7: a Skill never invents an error code).
  * @param {string} text
@@ -2175,6 +2191,18 @@ export function checkSkills(opts = {}) {
             .map((st) => String(st.args["kind"])),
         ),
       );
+      // a P0 Skill's P1-labelled steps are validated under full (plan 09 §5.1 item 3): every P1
+      // tool its body names on a P1 line is called by one of its full sequences
+      if (!p1Skill) {
+        const inFull = new Set(
+          v.sequences.filter((q) => q.toolset === "full").flatMap((q) => q.steps.map((x) => x.tool)),
+        );
+        for (const t of p1StepTools(body, manifest).filter((x) => !inFull.has(x))) {
+          errors.push(
+            `${rel}/evals/tool_sequence.json: the body's P1 step ${t} is in no sequence under toolset "full"`,
+          );
+        }
+      }
       const said = bodyRecordKinds(body);
       for (const k of said.filter((x) => !seqKinds.has(x)))
         errors.push(`${rel}/SKILL.md: logs kind "${k}" but no tool_sequence records it`);

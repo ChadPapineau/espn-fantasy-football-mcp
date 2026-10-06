@@ -394,8 +394,12 @@ describe("tool names, error codes and links (plan 09 §5.1 items 3–4; research
     );
     t.edit("skills/apply/SKILL.md", "## Output\n", "Never `espn_prepare_*`.\n\n## Output\n");
     const e = errorsOf(t);
-    expect(e).not.toMatch(/espn_analyze_trade/);
-    expect(e).not.toMatch(/espn_get_news/);
+    // labelled, so not "a P1 tool off a P1 line" — but a P1 step no full sequence calls (§5.1 item 3)
+    expect(e).not.toMatch(/espn_analyze_trade is a P1 tool/);
+    expect(e).not.toMatch(/espn_get_news is a P1 tool/);
+    expect(e).toMatch(
+      /retro\/evals\/tool_sequence\.json: the body's P1 step espn_analyze_trade is in no sequence/,
+    );
     expect(e).toMatch(/apply\/SKILL\.md: names the write tools "espn_prepare_\*"/);
   });
 

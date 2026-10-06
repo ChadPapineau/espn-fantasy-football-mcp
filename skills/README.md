@@ -19,7 +19,7 @@ Agent Skills that teach Claude to use the ESPN fantasy-football MCP server (plan
 | [session-check](session-check/SKILL.md) | the ESPN session: status, the DevTools steps, `eff setup` in a terminal, one verification — never a cookie in chat | status → (one auth probe) |
 | [waivers](waivers/SKILL.md) | claim, pass or marginal against the priority premium; the ordered claim list; the scramble list; the drop with its IR-move option | status → league → roster → pool → injuries → transactions → standings → waivers → record |
 
-Two P0 Skills carry a P1 branch that runs only under `EFF_TOOLSET=full`: `waivers`' usage branch (usage-first detection, the ensemble value basis, the FAAB bid curve) and `start-sit`'s live win probability (`espn_analyze_matchup` with `mode: "live"` beside ESPN's). Under `core` each takes its P0 path and says so.
+Two P0 Skills carry a P1 branch that runs only under `EFF_TOOLSET=full`: `waivers`' usage branch (usage-first detection, the ensemble value basis, the FAAB bid curve) and `start-sit`'s live win probability (`espn_analyze_matchup` with `mode: "live"` beside ESPN's). `weekly` (usage signals, the bye-cluster cost, the league activity digest) and `stream-kdef` (the regressed opponent profiles) name P1 steps too. Under `core` each takes its P0 path and says so.
 
 ## The five P1 Skills (`EFF_TOOLSET=full`)
 
@@ -69,7 +69,7 @@ scripts/skills/           manifest.json (tool lists, tool_contract, the eight de
   sequences: [ { id, when, fixture_variant?, toolset?: "full", steps: [ { id, tool, args, expect?, note? } ] } ] }
 ```
 
-- `toolset` is the file's: `core` for a P0 Skill, `full` for a P1 Skill. A P0 Skill's P1 branch is a sequence of its own with `"toolset": "full"` (it must call a P1 tool); a P1 Skill's sequences never set one.
+- `toolset` is the file's: `core` for a P0 Skill, `full` for a P1 Skill. A P0 Skill's P1 branch is a sequence of its own with `"toolset": "full"` (it must call a P1 tool, and every P1 step the body names is called by one); a P1 Skill's sequences never set one.
 - `tool` is a bare tool of the sequence's toolset; `args` validate against the tool's input contract in `scripts/skills/manifest.json` (keys, enums, ranges, the selector variants `selector:single` and `selector:outlook` — the dry run re-validates against the registry's zod schemas).
 - `expect` lists the outcomes a step may have on the fixture: `"ok"` (default) or error codes.
 - Templates: `{ "$ref": "<step>.<path>" }` (a value from an earlier step's envelope, e.g. `"lineup.data.rec"`); `{ "$source_calls": ["<step>", …] }` (`[{ tool, request_id }]` from those steps); `{ "$opponent": "<scoreboard step>" }` (the other team of the user's matchup); `{ "$player": { "step": "<roster step>", "slot": "FLEX", "eligible": "FLEX", "injury_status": "OUT" } }` (the first player in that slot, optionally eligible for another and carrying ESPN's status); `{ "$ids": { "from": "<step>.<path to an array>", "key": "player_id", "max": 5 } }` (the distinct ids in that list — the cascade's beneficiaries priced as waiver candidates; never resolved empty).

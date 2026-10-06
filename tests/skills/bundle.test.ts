@@ -293,8 +293,9 @@ describe("every promised call is a valid call", () => {
         }
       }
     }
-    // waivers' usage branch and FAAB curve, start-sit's live P(win) (plan 10 §3.2 Skills)
-    expect(branches).toBe(3);
+    // waivers' usage branch and FAAB curve, start-sit's live P(win) (plan 10 §3.2 Skills), and
+    // the P1 steps weekly and stream-kdef already name (plan 09 §5.1 item 3)
+    expect(branches).toBe(5);
   });
 
   it("P1 Skills run under full, and every P1 tool the bundle promises is a P1 row of the registry", () => {

@@ -59,7 +59,9 @@ describe("loadToolSequences", () => {
 
   it("loads the full toolset's sequences: the five P1 Skills and the P0 Skills' P1 branches", () => {
     const full = loadToolSequences(ROOT, { toolset: "full" });
-    expect(full.map((s) => s.skill)).toEqual([...P1_SKILLS, "start-sit", "waivers"].sort());
+    expect(full.map((s) => s.skill)).toEqual(
+      [...P1_SKILLS, "start-sit", "stream-kdef", "waivers", "weekly"].sort(),
+    );
     for (const s of full) {
       for (const q of s.sequences) expect(q.toolset, `${s.skill}/${q.id}`).toBe("full");
       expect(s.toolset).toBe(P1_SKILLS.includes(s.skill as never) ? "full" : "core");

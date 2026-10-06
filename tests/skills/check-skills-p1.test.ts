@@ -14,9 +14,11 @@ import {
   checkArgType,
   checkSkills,
   claimProblems,
+  p1StepTools,
   recKindOf,
   tradeArgProblems,
 } from "../../scripts/skills/check-skills.mjs";
+import { readManifest } from "../../scripts/skills/_lib.mjs";
 import { P1_SKILLS, ROOT, emptyDenylist, tempRepo, type TempRepo } from "./helpers.js";
 
 type Json = Record<string, unknown>;
@@ -163,6 +165,48 @@ describe("toolset per sequence (plan 09 §5.1 item 3)", () => {
     expect(errorsOf(t)).toMatch(
       /espn_get_player_usage is a P1 tool; this sequence runs under EFF_TOOLSET=core/,
     );
+  });
+
+  it("every P1 step a P0 body names is called by one of its full sequences", () => {
+    const t = fresh();
+    t.editJson(
+      SEQ("weekly"),
+      (j) => (j.sequences = seqs(j).filter((s) => s.id !== "pre_run_full")),
+    );
+    t.editJson(SEQ("stream-kdef"), (j) => {
+      const s = seq(j, "both_full");
+      s.steps = s.steps.filter((x) => x.tool !== "espn_get_defense_profile");
+      for (const x of s.steps)
+        if (x.tool === "espn_record_recommendation")
+          (x.args.source_calls as Json).$source_calls = ["roster", "schedule"];
+    });
+    const e = errorsOf(t);
+    for (const tool of [
+      "espn_analyze_league_activity",
+      "espn_analyze_schedule",
+      "espn_get_player_usage",
+    ])
+      expect(e).toContain(
+        `skills/weekly/evals/tool_sequence.json: the body's P1 step ${tool} is in no sequence under toolset "full"`,
+      );
+    expect(e).toContain(
+      `skills/stream-kdef/evals/tool_sequence.json: the body's P1 step espn_get_defense_profile is in no sequence`,
+    );
+    expect(e).toMatch(/a sequence under toolset "full" in a P0 Skill must call a P1 tool/);
+  });
+
+  it("p1StepTools reads only P1-labelled lines, and only P1 tools on them", () => {
+    const body = [
+      "Call `espn_get_news` here.",
+      "(P1; `espn_get_news` and `espn_get_roster` under full.)",
+      "**P1:** `espn_analyze_trade` too.",
+      "P1: `espn_get_depth_chart`.",
+    ].join("\n");
+    expect(p1StepTools(body, readManifest(ROOT))).toEqual([
+      "espn_analyze_trade",
+      "espn_get_depth_chart",
+      "espn_get_news",
+    ]);
   });
 
   it("a P1 Skill's file must run under full", () => {

@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with argument templates on fx-10h (Team 02; Tuesday of week 5, priority waivers). Kicker first, then D/ST, one position per espn_analyze_waivers call. Format: skills/README.md#tool-sequences.",
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7): the calls this Skill promises, in order, with argument templates on fx-10h (Team 02; Tuesday of week 5, priority waivers). Kicker first, then D/ST, one position per espn_analyze_waivers call. Format: skills/README.md#tool-sequences. `both_full` is the P1 branch under full (espn_get_defense_profile).",
   "schema_version": 1,
   "skill": "stream-kdef",
   "tool_contract": 1,
@@ -19,10 +19,32 @@
       "id": "both",
       "when": "the user asked about streaming without naming a position: kicker, then D/ST",
       "steps": [
-        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
-        { "id": "league", "tool": "espn_get_league", "args": {} },
-        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
-        { "id": "schedule", "tool": "espn_get_schedule", "args": { "weeks": [5, 6] } },
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "schedule",
+          "tool": "espn_get_schedule",
+          "args": {
+            "weeks": [5, 6]
+          }
+        },
         {
           "id": "pool_k",
           "tool": "espn_list_players",
@@ -37,7 +59,11 @@
         {
           "id": "kicker",
           "tool": "espn_analyze_waivers",
-          "args": { "mode": "auto", "positions": ["K"], "look_ahead": 2 }
+          "args": {
+            "mode": "auto",
+            "positions": ["K"],
+            "look_ahead": 2
+          }
         },
         {
           "id": "pool_dst",
@@ -53,7 +79,11 @@
         {
           "id": "dst",
           "tool": "espn_analyze_waivers",
-          "args": { "mode": "auto", "positions": ["D/ST"], "look_ahead": 2 }
+          "args": {
+            "mode": "auto",
+            "positions": ["D/ST"],
+            "look_ahead": 2
+          }
         },
         {
           "id": "record_k",
@@ -61,10 +91,16 @@
           "args": {
             "kind": "stream",
             "week": 5,
-            "rec": { "$ref": "kicker.data.rec" },
+            "rec": {
+              "$ref": "kicker.data.rec"
+            },
             "alternatives": [],
-            "source_calls": { "$source_calls": ["roster", "schedule", "pool_k", "kicker"] },
-            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "source_calls": {
+              "$source_calls": ["roster", "schedule", "pool_k", "kicker"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
             "followed_hint": "unknown",
             "client_ref": "stream-kdef-2026-w5-k"
           }
@@ -75,10 +111,16 @@
           "args": {
             "kind": "stream",
             "week": 5,
-            "rec": { "$ref": "dst.data.rec" },
+            "rec": {
+              "$ref": "dst.data.rec"
+            },
             "alternatives": [],
-            "source_calls": { "$source_calls": ["roster", "schedule", "pool_dst", "dst"] },
-            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "source_calls": {
+              "$source_calls": ["roster", "schedule", "pool_dst", "dst"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
             "followed_hint": "unknown",
             "client_ref": "stream-kdef-2026-w5-dst"
           }
@@ -89,10 +131,32 @@
       "id": "defense_only",
       "when": "the user asked about the defense only",
       "steps": [
-        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
-        { "id": "league", "tool": "espn_get_league", "args": {} },
-        { "id": "roster", "tool": "espn_get_roster", "args": { "week": 5 } },
-        { "id": "schedule", "tool": "espn_get_schedule", "args": { "weeks": [5, 6] } },
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "schedule",
+          "tool": "espn_get_schedule",
+          "args": {
+            "weeks": [5, 6]
+          }
+        },
         {
           "id": "pool_dst",
           "tool": "espn_list_players",
@@ -107,7 +171,11 @@
         {
           "id": "dst",
           "tool": "espn_analyze_waivers",
-          "args": { "mode": "auto", "positions": ["D/ST"], "look_ahead": 2 }
+          "args": {
+            "mode": "auto",
+            "positions": ["D/ST"],
+            "look_ahead": 2
+          }
         },
         {
           "id": "record_dst",
@@ -115,12 +183,136 @@
           "args": {
             "kind": "stream",
             "week": 5,
-            "rec": { "$ref": "dst.data.rec" },
+            "rec": {
+              "$ref": "dst.data.rec"
+            },
             "alternatives": [],
-            "source_calls": { "$source_calls": ["roster", "schedule", "pool_dst", "dst"] },
-            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "source_calls": {
+              "$source_calls": ["roster", "schedule", "pool_dst", "dst"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
             "followed_hint": "unknown",
             "client_ref": "stream-kdef-2026-w5-dst"
+          }
+        }
+      ]
+    },
+    {
+      "id": "both_full",
+      "when": "K and D/ST under the full toolset: the regressed opponent profiles beside the schedule",
+      "toolset": "full",
+      "steps": [
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "schedule",
+          "tool": "espn_get_schedule",
+          "args": {
+            "weeks": [5, 6]
+          }
+        },
+        {
+          "id": "profiles",
+          "tool": "espn_get_defense_profile",
+          "args": {}
+        },
+        {
+          "id": "pool_k",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "AVAILABLE",
+            "position": "K",
+            "sort": "projection_week",
+            "week": 5,
+            "limit": 15
+          }
+        },
+        {
+          "id": "kicker",
+          "tool": "espn_analyze_waivers",
+          "args": {
+            "mode": "auto",
+            "positions": ["K"],
+            "look_ahead": 2
+          }
+        },
+        {
+          "id": "pool_dst",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "AVAILABLE",
+            "position": "D/ST",
+            "sort": "projection_week",
+            "week": 5,
+            "limit": 15
+          }
+        },
+        {
+          "id": "dst",
+          "tool": "espn_analyze_waivers",
+          "args": {
+            "mode": "auto",
+            "positions": ["D/ST"],
+            "look_ahead": 2
+          }
+        },
+        {
+          "id": "record_k",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "stream",
+            "week": 5,
+            "rec": {
+              "$ref": "kicker.data.rec"
+            },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["roster", "schedule", "profiles", "pool_k", "kicker"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "followed_hint": "unknown",
+            "client_ref": "stream-kdef-2026-w5-k-full"
+          }
+        },
+        {
+          "id": "record_dst",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "stream",
+            "week": 5,
+            "rec": {
+              "$ref": "dst.data.rec"
+            },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["roster", "schedule", "profiles", "pool_dst", "dst"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "followed_hint": "unknown",
+            "client_ref": "stream-kdef-2026-w5-dst-full"
           }
         }
       ]
