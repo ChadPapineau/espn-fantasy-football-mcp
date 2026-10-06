@@ -11,6 +11,7 @@ import type {
   CredentialStoreKind,
   DriftStatus,
   RequestOutcome,
+  WeatherSource,
 } from "../config/schema.js";
 import type {
   BestEffortOutcome,
@@ -43,6 +44,39 @@ export type { BestEffortOutcome } from "../domain/analytics/types.js";
 export const BUSY_TIMEOUT_MS = 5000;
 /** The two classes of server write: a best-effort cache write may be skipped; a required one may not. */
 export type WriteClass = "best_effort" | "required";
+/**
+ * The most wall clock a BEST-EFFORT write waits for a busy writer lock before it becomes a counted
+ * miss (`{ written: false, reason: "busy" }`) — a cache write never stalls the stdio loop for the
+ * full BUSY_TIMEOUT_MS (plan 01 §5.3; T-15(c)). Required writes wait BUSY_TIMEOUT_MS.
+ */
+export const BEST_EFFORT_BUSY_MS = 100;
+
+/** A REQUIRED write could not take the writer lock within BUSY_TIMEOUT_MS (fail closed). */
+export class StoreBusyError extends Error {
+  readonly effCode = "INTERNAL" as const;
+  readonly table: string;
+  constructor(table: string) {
+    super(`store: the writer lock stayed busy; the ${table} write was not made`);
+    this.name = "StoreBusyError";
+    this.table = table;
+  }
+}
+
+/** The store has pending migrations and was opened with `migrate: false` (exit 1). */
+export class StoreMigrationPendingError extends Error {
+  readonly effCode = "INTERNAL" as const;
+  readonly exitCode = 1 as const;
+  readonly storeVersion: number;
+  readonly binaryVersion: number;
+  constructor(storeVersion: number, binaryVersion: number) {
+    super(
+      `store.sqlite is at v${String(storeVersion)}; this binary needs v${String(binaryVersion)} and was opened without migrating.`,
+    );
+    this.name = "StoreMigrationPendingError";
+    this.storeVersion = storeVersion;
+    this.binaryVersion = binaryVersion;
+  }
+}
 
 /** The store file was written by a newer binary: startup exits 1 (plan 03 §1.1 step 3, §7). */
 export class StoreVersionError extends Error {
@@ -89,6 +123,11 @@ export const MIGRATION_001_TABLES = [
   "recommendation_outcome",
   "checks",
   "write_journal",
+  /**
+   * Recorded deviation (plan 02 §2.4 "one map per store"): the GUID pseudonym map — sha256 of the
+   * upper-cased brace-GUID → its first-appearance number, so the map itself holds no real GUID.
+   */
+  "guid_pseudonym",
 ] as const;
 export type StoreTable = (typeof MIGRATION_001_TABLES)[number];
 
@@ -101,6 +140,8 @@ export const NEVER_PRUNED_TABLES: readonly StoreTable[] = Object.freeze([
   "scoreboard_snapshot",
   "projection",
   "write_journal",
+  /** Pruning it would renumber the pseudonyms the never-pruned rows already carry. */
+  "guid_pseudonym",
 ]);
 
 /** What `store prune` removes, per table (plan 06 §1.3). */
@@ -137,6 +178,7 @@ export const WRITE_CLASS: Readonly<Record<Exclude<StoreTable, "schema_version">,
     recommendation_outcome: "required",
     checks: "required",
     write_journal: "required",
+    guid_pseudonym: "required",
   });
 
 // --- dataset files (plan 01 §5.5) -------------------------------------------------------------------
@@ -196,6 +238,29 @@ export type PublishOutcome =
 
 /** The `PublishOutcome` error when the version is already published (skip under the job lock). */
 export const PUBLISH_ALREADY_CURRENT = "already_current";
+/** Another publisher (this process or another) holds the source's job lock: nothing was done. */
+export const PUBLISH_JOB_LOCKED = "job_locked";
+/**
+ * The file was renamed into place but its refresh_log row could not be written: the dataset IS
+ * live; the next publish of the source records it from the file's own `dataset_meta` first.
+ */
+export const PUBLISH_UNRECORDED = "publish_unrecorded";
+/** Refusals before the job lock is taken (bad arguments; nothing written, no refresh_log row). */
+export const PUBLISH_REFUSALS = [
+  "invalid_source",
+  "invalid_version",
+  "invalid_release_time",
+] as const;
+/**
+ * Every `PublishOutcome.error` value: the refusals, the skip/lock/unrecorded outcomes, and the
+ * fixed-vocabulary SourceErrorCode the failure's refresh_log row carries (never an exception text).
+ */
+export type PublishErrorCode =
+  | (typeof PUBLISH_REFUSALS)[number]
+  | typeof PUBLISH_ALREADY_CURRENT
+  | typeof PUBLISH_JOB_LOCKED
+  | typeof PUBLISH_UNRECORDED
+  | SourceErrorCode;
 
 /**
  * Publishes a dataset atomically (`eff refresh` only — the server never opens one): job lock →
@@ -509,6 +574,13 @@ export interface StoreOpenOptions {
   readonly migrate: boolean;
   /** Receives fixed-vocabulary warning codes; the store itself never logs. */
   readonly onWarning?: (code: string) => void;
+  /** Which weather table `WeatherReader.forGames` consults first (EFF_WEATHER_SOURCE; default open-meteo). */
+  readonly weatherSource?: WeatherSource;
+  /**
+   * Keep `espn_cache.raw_body` (EFF_FIXTURE_RECORD=1 only — plan 01 §5.3, plan 05 §2). Default
+   * false: a raw body handed to `put` is dropped, so the cache never becomes a PII store.
+   */
+  readonly recordRawBodies?: boolean;
 }
 
 /** A consistent backup (plan 03 §7: `VACUUM INTO` under the process lock, never a file copy). */
@@ -524,6 +596,8 @@ export interface StoreStats {
   readonly size_bytes: number;
   readonly schema_version: number;
   readonly open_datasets: readonly OpenDataset[];
+  /** Best-effort writes skipped because the writer lock was busy (since open). */
+  readonly cache_misses_busy?: number;
 }
 
 /** An open store (one main connection, WAL, busy_timeout 5000). */

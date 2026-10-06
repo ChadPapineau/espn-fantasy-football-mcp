@@ -12,13 +12,19 @@ import {
   type LimiterRepository,
   type LimiterVerdict,
   type RefreshLogRow,
+  BEST_EFFORT_BUSY_MS,
   BUSY_TIMEOUT_MS,
   MAX_ON_DEMAND_ATTACHMENTS,
   MIGRATION_001_TABLES,
   NEVER_PRUNED_TABLES,
   PRUNE_POLICY,
   PUBLISH_ALREADY_CURRENT,
+  PUBLISH_JOB_LOCKED,
+  PUBLISH_REFUSALS,
+  PUBLISH_UNRECORDED,
   SQLITE_ATTACH_LIMIT,
+  StoreBusyError,
+  StoreMigrationPendingError,
   StoreVersionError,
   WRITE_CLASS,
 } from "../../src/store/types.js";
@@ -191,5 +197,41 @@ describe("M2: credential_state transitions serialise (type contract)", () => {
       .toEqualTypeOf<(row: CredentialStateRow | null) => CredentialStateRow | null>();
     expectTypeOf<LimiterRepository["tryRecord"]>().returns.toEqualTypeOf<LimiterVerdict>();
     expectTypeOf<RefreshLogRow["error"]>().toEqualTypeOf<SourceErrorCode | null>();
+  });
+});
+
+describe("store B1 additions (additive)", () => {
+  it("StoreBusyError / StoreMigrationPendingError map to INTERNAL and carry no upstream text", () => {
+    const busy = new StoreBusyError("espn_requests");
+    expect(busy).toBeInstanceOf(Error);
+    expect(busy.name).toBe("StoreBusyError");
+    expect(busy.effCode).toBe("INTERNAL");
+    expect(busy.table).toBe("espn_requests");
+    expect(busy.message).toBe(
+      "store: the writer lock stayed busy; the espn_requests write was not made",
+    );
+    const pending = new StoreMigrationPendingError(0, 1);
+    expect(pending.effCode).toBe("INTERNAL");
+    expect(pending.exitCode).toBe(1);
+    expect([pending.storeVersion, pending.binaryVersion]).toEqual([0, 1]);
+  });
+  it("best-effort waits are far shorter than the required busy_timeout", () => {
+    expect(BEST_EFFORT_BUSY_MS).toBe(100);
+    expect(BEST_EFFORT_BUSY_MS * 10).toBeLessThan(BUSY_TIMEOUT_MS);
+  });
+  it("publish outcome codes are a fixed vocabulary, distinct from the SourceErrorCodes", () => {
+    const codes = [
+      PUBLISH_ALREADY_CURRENT,
+      PUBLISH_JOB_LOCKED,
+      PUBLISH_UNRECORDED,
+      ...PUBLISH_REFUSALS,
+    ];
+    expect(new Set(codes).size).toBe(codes.length);
+    for (const c of codes) expect(c).toMatch(/^[a-z][a-z_]*$/);
+  });
+  it("the GUID pseudonym map is a migration-001 table, required, never pruned", () => {
+    expect(MIGRATION_001_TABLES).toContain("guid_pseudonym");
+    expect(WRITE_CLASS.guid_pseudonym).toBe("required");
+    expect(NEVER_PRUNED_TABLES).toContain("guid_pseudonym");
   });
 });

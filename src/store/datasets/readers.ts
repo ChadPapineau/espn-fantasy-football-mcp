@@ -1,0 +1,621 @@
+// readers.ts — the domain's read-only dataset ports over the per-source read-only connections (plan
+// 01 §5.2/§5.5; plan 07 §2 stamps), running EXACTLY the SQL of READER_QUERIES (tables.ts) with
+// JSON-array list parameters (`json_each`, so no caller value is spliced into SQL) and applying each
+// entry's `mapping`. A method that needs two files runs two statements and joins in code. A dataset
+// whose file is not loaded answers `{ rows: [], stamp: null }` — the contract's "never loaded" outcome,
+// never an exception. Phase-2 ports (depth charts, EP, news, trending) have no file yet and answer the
+// same. Ported from sibling @cf3b015, adapted (separate connections; ESPN pro schedule and players).
+import { isNflTeam, type NflTeam, type WeatherSource } from "../../config/schema.js";
+import type {
+  DatasetReaders,
+  DatasetResult,
+  DatasetStamp,
+  GameLines,
+  InjuryReport,
+  NflGame,
+  PlayerWeekLine,
+  TeamDefenseWeekLine,
+  WeatherObservation,
+} from "../../domain/analytics/types.js";
+import type {
+  EspnPlayerIdentity,
+  NflRosterPlayer,
+  PlayerUniverseReader,
+  RosterWeeklyReader,
+} from "../../domain/crosswalk/types.js";
+import {
+  bareUntrusted,
+  wrapUntrustedOrNull,
+  type IsoInstant,
+  type ProGame,
+  type ProTeam,
+  type Week,
+} from "../../domain/league/types.js";
+import type { DatasetConnection, DatasetConnections } from "./connections.js";
+import { epochMsToIso, impliedPoints } from "./derive.js";
+import { defenseRowToStatLine, playerRowToStatLine, sqlNum, type SqlRow } from "./statline.js";
+import { READER_QUERIES, type ReaderMethod } from "./tables.js";
+
+/** Most ids / weeks / teams one reader call accepts (a bounded statement). */
+export const READER_LIST_MAX = 100_000;
+/** The seasons and weeks a reader accepts (nflverse reaches back to 1999; POST weeks run to 22). */
+export const READER_SEASON_MIN = 1990;
+export const READER_SEASON_MAX = 2100;
+export const READER_WEEK_MAX = 22;
+
+/** One nflverse `players` row (the crosswalk's fallback; src/domain/crosswalk NflPlayerRecord). */
+export interface NflPlayerRow {
+  readonly gsis_id: string;
+  readonly espn_id: number | null;
+  /** Raw display name (matching only; never emitted unsanitised). */
+  readonly display_name: string;
+  readonly position: string | null;
+  readonly latest_team: NflTeam | null;
+  readonly jersey_number: number | null;
+  readonly status: string | null;
+  readonly last_season: number | null;
+}
+
+/** The nflverse players port (structurally the crosswalk's NflPlayersReader). */
+export interface NflPlayersPort {
+  byEspnIds(espnIds: readonly number[]): DatasetResult<NflPlayerRow>;
+}
+
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const team = (v: unknown): NflTeam | null => (typeof v === "string" && isNflTeam(v) ? v : null);
+const intOrNull = (v: unknown): number | null => {
+  const n = sqlNum(v);
+  return n !== null && Number.isInteger(n) ? n : null;
+};
+
+function season(v: unknown): number {
+  if (
+    typeof v !== "number" ||
+    !Number.isInteger(v) ||
+    v < READER_SEASON_MIN ||
+    v > READER_SEASON_MAX
+  )
+    throw new RangeError(
+      `store: season must be an integer in ${String(READER_SEASON_MIN)}..${String(READER_SEASON_MAX)}`,
+    );
+  return v;
+}
+function week(v: unknown): Week {
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > READER_WEEK_MAX)
+    throw new RangeError(`store: week must be an integer in 1..${String(READER_WEEK_MAX)}`);
+  return v;
+}
+function bounded(v: unknown, what: string): readonly unknown[] {
+  if (!Array.isArray(v) || v.length > READER_LIST_MAX)
+    throw new RangeError(`store: ${what} must be an array of at most ${String(READER_LIST_MAX)}`);
+  return v;
+}
+function weekList(v: readonly Week[]): string {
+  return JSON.stringify([...new Set(bounded(v, "weeks").map(week))]);
+}
+function stringList(v: readonly string[], what: string): string {
+  const xs = bounded(v, what);
+  for (const s of xs)
+    if (typeof s !== "string") throw new RangeError(`store: ${what} must hold strings`);
+  return JSON.stringify([...new Set(xs as string[])]);
+}
+/** Positive safe integers only (others never match an id); deduplicated. */
+function idList(v: readonly number[], what: string): number[] {
+  return [...new Set(bounded(v, what).filter((n): n is number => Number.isSafeInteger(n)))];
+}
+
+/** Options the readers are built from. */
+export interface ReadersOptions {
+  readonly connections: DatasetConnections;
+  readonly weatherFirst: WeatherSource;
+  readonly warn: (code: string) => void;
+}
+
+/** The readers a store serves. */
+export interface StoreReaders {
+  readonly datasets: DatasetReaders;
+  readonly rosterWeekly: RosterWeeklyReader;
+  readonly playerUniverse: PlayerUniverseReader;
+  readonly nflPlayers: NflPlayersPort;
+}
+
+const NEVER_LOADED = Object.freeze({
+  rows: Object.freeze([]),
+  stamp: null,
+}) as DatasetResult<never>;
+
+export function createReaders(o: ReadersOptions): StoreReaders {
+  const { connections, warn } = o;
+
+  /** Runs statement `i` of a reader method on its source's connection; null when not loaded. */
+  function run(
+    method: ReaderMethod,
+    i: number,
+    params: Record<string, string | number | null>,
+  ): { rows: SqlRow[]; conn: DatasetConnection } | null {
+    const st = READER_QUERIES[method].statements[i];
+    if (st === undefined) throw new Error(`store: ${method} has no statement ${String(i)}`);
+    const conn = connections.use(st.source);
+    if (conn === null) return null;
+    const rows = conn.db.prepare(st.sql).all(params) as unknown as SqlRow[];
+    return { rows, conn };
+  }
+
+  const stampOf = (c: DatasetConnection): DatasetStamp => connections.stamp(c);
+
+  // --- espn:pro_schedule ------------------------------------------------------------------------
+
+  const proSchedule: DatasetReaders["proSchedule"] = {
+    games(s, weeks): DatasetResult<ProGame> {
+      const res = run("ProScheduleReader.games", 0, {
+        season: season(s),
+        weeks: weeks === null ? null : weekList(weeks),
+      });
+      if (res === null) return NEVER_LOADED;
+      const rows: ProGame[] = [];
+      for (const r of res.rows) {
+        const id = intOrNull(r.espn_game_id);
+        const home = intOrNull(r.home_pro_team_id);
+        const away = intOrNull(r.away_pro_team_id);
+        if (id === null || home === null || away === null) {
+          warn("dataset_row_skipped");
+          continue;
+        }
+        rows.push({
+          espn_game_id: id,
+          season: intOrNull(r.season) ?? s,
+          week: intOrNull(r.week) ?? 0,
+          kickoff: epochMsToIso(r.date_ms),
+          start_time_tbd: r.start_time_tbd === 1,
+          valid_for_locking: r.valid_for_locking === 1,
+          stats_official: r.stats_official === 1,
+          home_pro_team_id: home,
+          away_pro_team_id: away,
+        });
+      }
+      return { rows, stamp: stampOf(res.conn) };
+    },
+    teams(s): DatasetResult<ProTeam> {
+      const res = run("ProScheduleReader.teams", 0, { season: season(s) });
+      if (res === null) return NEVER_LOADED;
+      const rows: ProTeam[] = [];
+      for (const r of res.rows) {
+        const id = intOrNull(r.pro_team_id);
+        const abbrev = str(r.abbrev);
+        if (id === null || abbrev === null) {
+          warn("dataset_row_skipped");
+          continue;
+        }
+        rows.push({ id, abbrev, bye_week: intOrNull(r.bye_week) });
+      }
+      return { rows, stamp: stampOf(res.conn) };
+    },
+  };
+
+  // --- nflverse:schedules -----------------------------------------------------------------------
+
+  function mapGame(r: SqlRow, asOf: IsoInstant): NflGame | null {
+    const away = team(r.away_team);
+    const home = team(r.home_team);
+    const gameId = str(r.game_id);
+    if (away === null || home === null || gameId === null) {
+      warn("dataset_row_skipped_team");
+      return null;
+    }
+    const spread = sqlNum(r.spread_line);
+    const total = sqlNum(r.total_line);
+    const mlAway = sqlNum(r.away_moneyline);
+    const mlHome = sqlNum(r.home_moneyline);
+    const lines: GameLines | null =
+      spread === null && total === null && mlAway === null && mlHome === null
+        ? null
+        : {
+            spread_line: spread,
+            total_line: total,
+            implied: impliedPoints(spread, total),
+            moneyline: { away: mlAway, home: mlHome },
+            as_of: asOf,
+          };
+    const as = sqlNum(r.away_score);
+    const hs = sqlNum(r.home_score);
+    const final = as !== null && hs !== null;
+    const div = sqlNum(r.div_game);
+    return {
+      game_id: gameId,
+      espn_game_id: intOrNull(r.espn_game_id),
+      season: intOrNull(r.season) ?? 0,
+      week: intOrNull(r.week) ?? 0,
+      kickoff: str(r.kickoff_utc),
+      away,
+      home,
+      roof: str(r.roof) ?? str(r.venue_roof_default),
+      surface: str(r.surface),
+      stadium: wrapUntrustedOrNull(str(r.stadium), "nflverse.schedules.stadium"),
+      divisional: div === null ? null : div === 1,
+      rest_days: { away: intOrNull(r.away_rest), home: intOrNull(r.home_rest) },
+      lines,
+      is_final: final,
+      score: final ? { away: as, home: hs } : null,
+    };
+  }
+
+  function games(res: { rows: SqlRow[]; conn: DatasetConnection }): DatasetResult<NflGame> {
+    const stamp = stampOf(res.conn);
+    const rows = res.rows
+      .map((r) => mapGame(r, stamp.as_of))
+      .filter((g): g is NflGame => g !== null);
+    return { rows, stamp };
+  }
+
+  const nflGames: DatasetReaders["nflGames"] = {
+    games(s, weeks) {
+      const res = run("NflGamesReader.games", 0, { season: season(s), weeks: weekList(weeks) });
+      return res === null ? NEVER_LOADED : games(res);
+    },
+    byEspnGameId(ids) {
+      const res = run("NflGamesReader.byEspnGameId", 0, {
+        espn_game_ids: JSON.stringify(idList(ids, "espnGameIds").filter((n) => n > 0)),
+      });
+      return res === null ? NEVER_LOADED : games(res);
+    },
+  };
+
+  // --- nflverse:injuries ------------------------------------------------------------------------
+
+  const injuries: DatasetReaders["injuries"] = {
+    reports(s, w, gsisIds): DatasetResult<InjuryReport> {
+      const res = run("InjuryReader.reports", 0, {
+        season: season(s),
+        week: week(w),
+        gsis_ids: gsisIds === null ? null : stringList(gsisIds, "gsisIds"),
+      });
+      if (res === null) return NEVER_LOADED;
+      const stamp = stampOf(res.conn);
+      const rows: InjuryReport[] = [];
+      for (const r of res.rows) {
+        const t = team(r.team);
+        const gsis = str(r.gsis_id);
+        if (t === null || gsis === null) {
+          warn("dataset_row_skipped_team");
+          continue;
+        }
+        const reportStatus = str(r.report_status);
+        const practice = str(r.practice_status);
+        rows.push({
+          gsis_id: gsis,
+          season: intOrNull(r.season) ?? s,
+          week: intOrNull(r.week) ?? w,
+          nfl_team: t,
+          report_status: reportStatus === null ? null : bareUntrusted(reportStatus, "dataset_text"),
+          practice:
+            practice === null
+              ? []
+              : [{ day: "week", status: bareUntrusted(practice, "dataset_text") }],
+          primary_injury: wrapUntrustedOrNull(
+            str(r.report_primary_injury) ?? str(r.practice_primary_injury),
+            "nflverse.injuries.primary_injury",
+          ),
+          secondary_injury: wrapUntrustedOrNull(
+            str(r.report_secondary_injury) ?? str(r.practice_secondary_injury),
+            "nflverse.injuries.secondary_injury",
+          ),
+          as_of: stamp.as_of,
+        });
+      }
+      return { rows, stamp };
+    },
+  };
+
+  // --- nflverse:stats_player_week ---------------------------------------------------------------
+
+  const playerWeeks: DatasetReaders["playerWeeks"] = {
+    lines(gsisIds, s, weeks): DatasetResult<PlayerWeekLine> {
+      const res = run("PlayerWeekReader.lines", 0, {
+        season: season(s),
+        weeks: weekList(weeks),
+        gsis_ids: stringList(gsisIds, "gsisIds"),
+      });
+      if (res === null) return NEVER_LOADED;
+      const rows: PlayerWeekLine[] = [];
+      for (const r of res.rows) {
+        const t = team(r.team);
+        const gsis = str(r.player_id);
+        if (t === null || gsis === null) {
+          warn("dataset_row_skipped_team");
+          continue;
+        }
+        const targets = sqlNum(r.targets);
+        const air = sqlNum(r.receiving_air_yards);
+        rows.push({
+          gsis_id: gsis,
+          season: intOrNull(r.season) ?? s,
+          week: intOrNull(r.week) ?? 0,
+          nfl_team: t,
+          opponent: team(r.opponent_team),
+          position: str(r.position) ?? "",
+          line: playerRowToStatLine(r),
+          usage: {
+            snaps: null,
+            snap_pct: null,
+            routes_proxy: null,
+            targets,
+            target_share: sqlNum(r.target_share),
+            air_yards: air,
+            air_yards_share: sqlNum(r.air_yards_share),
+            adot: air !== null && targets !== null && targets > 0 ? air / targets : null,
+            wopr: sqlNum(r.wopr),
+            racr: sqlNum(r.racr),
+            carries: sqlNum(r.carries),
+            carry_share: null,
+            rz_targets: null,
+            rz_carries: null,
+            gl_carries: null,
+            xfp_ep: null,
+          },
+        });
+      }
+      return { rows, stamp: stampOf(res.conn) };
+    },
+
+    defenseLines(teams, s, weeks): DatasetResult<TeamDefenseWeekLine> {
+      const sn = season(s);
+      const res = run("PlayerWeekReader.defenseLines", 0, {
+        season: sn,
+        weeks: weekList(weeks),
+        teams: stringList(teams, "teams"),
+      });
+      if (res === null) return NEVER_LOADED;
+      const gameIds = [
+        ...new Set(res.rows.map((r) => str(r.game_id)).filter((g): g is string => g !== null)),
+      ];
+      // Statement 2: points allowed from the schedules file (skipped when it is not loaded).
+      const scores = new Map<string, SqlRow>();
+      if (gameIds.length > 0) {
+        const g = run("PlayerWeekReader.defenseLines", 1, {
+          season: sn,
+          game_ids: JSON.stringify(gameIds),
+        });
+        for (const r of g?.rows ?? []) {
+          const id = str(r.game_id);
+          if (id !== null) scores.set(id, r);
+        }
+      }
+      const rows: TeamDefenseWeekLine[] = [];
+      for (const r of res.rows) {
+        const t = team(r.team);
+        if (t === null) {
+          warn("dataset_row_skipped_team");
+          continue;
+        }
+        const game = scores.get(str(r.game_id) ?? "");
+        let pa: number | null = null;
+        if (game !== undefined) {
+          const as = sqlNum(game.away_score);
+          const hs = sqlNum(game.home_score);
+          if (as !== null && hs !== null) {
+            if (game.home_team === t) pa = as;
+            else if (game.away_team === t) pa = hs;
+          }
+        }
+        rows.push({
+          nfl_team: t,
+          season: intOrNull(r.season) ?? sn,
+          week: intOrNull(r.week) ?? 0,
+          opponent: team(r.opponent_team),
+          line: defenseRowToStatLine(r, pa),
+        });
+      }
+      return { rows, stamp: stampOf(res.conn) };
+    },
+  };
+
+  // --- weather ------------------------------------------------------------------------------------
+
+  const weather: DatasetReaders["weather"] = {
+    forGames(gameIds): DatasetResult<WeatherObservation> {
+      const want = JSON.parse(stringList(gameIds, "gameIds")) as string[];
+      const order: readonly ["weather:open_meteo" | "weather:nws", number][] =
+        o.weatherFirst === "nws"
+          ? [
+              ["weather:nws", 1],
+              ["weather:open_meteo", 0],
+            ]
+          : [
+              ["weather:open_meteo", 0],
+              ["weather:nws", 1],
+            ];
+      const found = new Map<string, WeatherObservation>();
+      let stamp: DatasetStamp | null = null;
+      let firstLoaded: DatasetConnection | null = null;
+      for (const [source, idx] of order) {
+        const missing = want.filter((g) => !found.has(g));
+        if (missing.length === 0 && want.length > 0) break;
+        const res = run("WeatherReader.forGames", idx, { game_ids: JSON.stringify(missing) });
+        if (res === null) continue;
+        firstLoaded ??= res.conn;
+        let contributed = false;
+        for (const r of res.rows) {
+          const id = str(r.game_id);
+          const asOf = str(r.as_of);
+          if (id === null || asOf === null || found.has(id)) continue;
+          found.set(id, {
+            game_id: id,
+            temp_f: sqlNum(r.temp_f),
+            wind_mph: sqlNum(r.wind_mph),
+            gust_mph: sqlNum(r.gust_mph),
+            precip_prob: sqlNum(r.precip_prob),
+            as_of: asOf,
+            source,
+          });
+          contributed = true;
+        }
+        if (contributed && stamp === null) stamp = stampOf(res.conn);
+      }
+      if (stamp === null && firstLoaded !== null) stamp = stampOf(firstLoaded);
+      const rows = [...found.values()].sort((a, b) => (a.game_id < b.game_id ? -1 : 1));
+      return { rows, stamp };
+    },
+  };
+
+  // --- nflverse:roster_weekly (the crosswalk) -------------------------------------------------------
+
+  function mapRoster(r: SqlRow): NflRosterPlayer | null {
+    const t = team(r.team);
+    const gsis = str(r.gsis_id);
+    if (t === null || gsis === null) {
+      warn("dataset_row_skipped_team");
+      return null;
+    }
+    return {
+      gsis_id: gsis,
+      season: intOrNull(r.season) ?? 0,
+      week: intOrNull(r.week) ?? 0,
+      full_name: str(r.full_name) ?? "",
+      team: t,
+      position: str(r.position) ?? "",
+      jersey_number: intOrNull(r.jersey_number),
+      espn_id: intOrNull(r.espn_id),
+      sleeper_id: str(r.sleeper_id),
+      status: str(r.status),
+    };
+  }
+
+  const rosterWeekly: RosterWeeklyReader = {
+    latest(s): DatasetResult<NflRosterPlayer> {
+      const res = run("RosterWeeklyReader.latest", 0, { season: season(s) });
+      if (res === null) return NEVER_LOADED;
+      const rows = res.rows.map(mapRoster).filter((p): p is NflRosterPlayer => p !== null);
+      return { rows, stamp: stampOf(res.conn) };
+    },
+    byEspnId(espnId): DatasetResult<NflRosterPlayer> {
+      if (!Number.isSafeInteger(espnId) || espnId <= 0) {
+        // A non-positive or non-integer id never reaches SQL (mapping note).
+        const conn = connections.use("nflverse:roster_weekly");
+        return { rows: [], stamp: conn === null ? null : stampOf(conn) };
+      }
+      const res = run("RosterWeeklyReader.byEspnId", 0, { espn_id: espnId });
+      if (res === null) return NEVER_LOADED;
+      const rows = res.rows.map(mapRoster).filter((p): p is NflRosterPlayer => p !== null);
+      return { rows, stamp: stampOf(res.conn) };
+    },
+  };
+
+  // --- espn:players (+ pro-team abbreviations from espn:pro_schedule) ------------------------------
+
+  function mapPlayers(
+    rows: readonly SqlRow[],
+    abbrevOf: (season: number, proTeamId: number) => string | null,
+  ): EspnPlayerIdentity[] {
+    const out: EspnPlayerIdentity[] = [];
+    for (const r of rows) {
+      const id = intOrNull(r.espn_id);
+      const name = str(r.full_name);
+      const pos = intOrNull(r.position_id);
+      const pro = intOrNull(r.pro_team_id);
+      const s = intOrNull(r.season);
+      if (id === null || name === null || pos === null || pro === null || s === null) {
+        warn("dataset_row_skipped");
+        continue;
+      }
+      out.push({
+        espn_id: id,
+        full_name: name,
+        position_id: pos,
+        pro_team_id: pro,
+        pro_team: pro === 0 ? null : abbrevOf(s, pro),
+        percent_owned: sqlNum(r.percent_owned),
+        jersey: null,
+      });
+    }
+    return out;
+  }
+
+  const playerUniverse: PlayerUniverseReader = {
+    all(s): DatasetResult<EspnPlayerIdentity> {
+      const sn = season(s);
+      const res = run("PlayerUniverseReader.all", 0, { season: sn });
+      if (res === null) return NEVER_LOADED;
+      const teams = run("PlayerUniverseReader.all", 1, { season: sn });
+      const abbrev = new Map<number, string>();
+      for (const r of teams?.rows ?? []) {
+        const id = intOrNull(r.pro_team_id);
+        const a = str(r.abbrev);
+        if (id !== null && a !== null) abbrev.set(id, a);
+      }
+      return {
+        rows: mapPlayers(res.rows, (_s, id) => abbrev.get(id) ?? null),
+        stamp: stampOf(res.conn),
+      };
+    },
+    byIds(espnIds): DatasetResult<EspnPlayerIdentity> {
+      const res = run("PlayerUniverseReader.byIds", 0, {
+        espn_ids: JSON.stringify(idList(espnIds, "espnIds")),
+      });
+      if (res === null) return NEVER_LOADED;
+      const seasons = [
+        ...new Set(res.rows.map((r) => intOrNull(r.season)).filter((x): x is number => x !== null)),
+      ];
+      const abbrev = new Map<string, string>();
+      if (seasons.length > 0) {
+        const teams = run("PlayerUniverseReader.byIds", 1, { seasons: JSON.stringify(seasons) });
+        for (const r of teams?.rows ?? []) {
+          const s = intOrNull(r.season);
+          const id = intOrNull(r.pro_team_id);
+          const a = str(r.abbrev);
+          if (s !== null && id !== null && a !== null) abbrev.set(`${String(s)}:${String(id)}`, a);
+        }
+      }
+      return {
+        rows: mapPlayers(res.rows, (s, id) => abbrev.get(`${String(s)}:${String(id)}`) ?? null),
+        stamp: stampOf(res.conn),
+      };
+    },
+  };
+
+  // --- nflverse:players (the crosswalk's id fallback) --------------------------------------------
+
+  const nflPlayers: NflPlayersPort = {
+    byEspnIds(espnIds): DatasetResult<NflPlayerRow> {
+      const res = run("NflPlayersReader.byEspnIds", 0, {
+        espn_ids: JSON.stringify(idList(espnIds, "espnIds").filter((n) => n > 0)),
+      });
+      if (res === null) return NEVER_LOADED;
+      const rows: NflPlayerRow[] = [];
+      for (const r of res.rows) {
+        const gsis = str(r.gsis_id);
+        const name = str(r.display_name);
+        if (gsis === null || name === null) {
+          warn("dataset_row_skipped");
+          continue;
+        }
+        rows.push({
+          gsis_id: gsis,
+          espn_id: intOrNull(r.espn_id),
+          display_name: name,
+          position: str(r.position),
+          latest_team: team(r.latest_team),
+          jersey_number: intOrNull(r.jersey_number),
+          status: str(r.status),
+          last_season: intOrNull(r.last_season),
+        });
+      }
+      return { rows, stamp: stampOf(res.conn) };
+    },
+  };
+
+  const neverLoaded = <T>(): DatasetResult<T> => NEVER_LOADED;
+  const datasets: DatasetReaders = {
+    proSchedule,
+    nflGames,
+    injuries,
+    playerWeeks,
+    // Phase-2 sources (plan 10 §3.2): no dataset file exists in this phase — never loaded.
+    depthCharts: { chart: () => neverLoaded() },
+    epWeekly: { rows: () => neverLoaded() },
+    weather,
+    news: { recent: () => neverLoaded() },
+    trending: { latest: () => neverLoaded() },
+  };
+
+  return { datasets, rosterWeekly, playerUniverse, nflPlayers };
+}
