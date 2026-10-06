@@ -196,7 +196,10 @@ describe("A9a: the priority premium on the reference format (hard)", () => {
       ),
       { numRuns: 30 },
     );
-  });
+    // 30 full E5 runs (each up to 5 candidates × 13 drops × 14 weeks of assignments): ~1.7 s alone,
+    // ~7 s under v8 coverage, and 32 s once under coverage with every fork of the suite busy — past
+    // the 30 s unit hang detector. Its own hang bound, sized to that worst case with headroom.
+  }, 120_000);
 
   it("k = N: every waivers candidate with positive surplus is a claim; the scramble list is non-empty", async () => {
     const waiversOnly = CANDIDATES.filter((x) => x.status === "WAIVERS" && x.position !== "K");
