@@ -4,7 +4,8 @@
 // `next_probe_at` while rejected; plan 02 §2.3 and plan 10 A2b: NO value, length or fingerprint of
 // a credential — booleans, labels and timestamps only). Reads only: the store is opened without
 // creating or migrating it. Exit 0 whenever the report was produced; 1 only when the store cannot
-// be read. Ported from sibling @5daa625, adapted (credential, drift, limiter, checks).
+// be read. Each source line carries its license and age (plan 10 B1); the Phase-2 sources are
+// listed under EFF_TOOLSET=full. Ported from sibling @5daa625, adapted (credential, drift, limiter, checks).
 import { lstatSync } from "node:fs";
 import { deriveStartupState } from "../auth/state.js";
 import {
@@ -27,8 +28,27 @@ import { availableJobs } from "./install-launchd.js";
 import type { Logger } from "./log.js";
 import { openExistingStore, type ExistingStore } from "./store-access.js";
 
-/** The Phase-1 dataset sources, in refresh order (weather follows EFF_WEATHER_SOURCE). */
-export function configuredSources(config: Pick<LenientConfig, "weatherSource">): DatasetSourceId[] {
+/** The Phase-2 dataset sources (plan 10 §3.2) — the P1 tools read them, so `full` reports them. */
+export const PHASE_2_SOURCES: readonly DatasetSourceId[] = Object.freeze([
+  "nflverse:stats_team_week",
+  "nflverse:pbp",
+  "nflverse:snap_counts",
+  "nflverse:depth_charts",
+  "ffopportunity:ep_weekly",
+  "sleeper:trending",
+  "news:rotowire",
+  "news:espn",
+  "news:cbs",
+]);
+
+/**
+ * The configured dataset sources, in refresh order (weather follows EFF_WEATHER_SOURCE): the Phase-1
+ * eight, plus the Phase-2 nine under EFF_TOOLSET=full (their tools are registered only there, so a
+ * `core` install is never told to refresh data no tool reads).
+ */
+export function configuredSources(
+  config: Pick<LenientConfig, "weatherSource"> & Partial<Pick<LenientConfig, "toolset">>,
+): DatasetSourceId[] {
   return [
     "espn:pro_schedule",
     "espn:players",
@@ -37,6 +57,7 @@ export function configuredSources(config: Pick<LenientConfig, "weatherSource">):
     "nflverse:roster_weekly",
     "nflverse:players",
     "nflverse:stats_player_week",
+    ...(config.toolset === "full" ? PHASE_2_SOURCES : []),
     config.weatherSource === "nws" ? "weather:nws" : "weather:open_meteo",
   ];
 }
@@ -44,6 +65,8 @@ export function configuredSources(config: Pick<LenientConfig, "weatherSource">):
 /** One source's line on the dashboard. */
 export interface SourceStatus {
   readonly source: DatasetSourceId;
+  /** The source's license (research 04 §E; plan 10 B1: `eff status` shows each source's license). */
+  readonly license: string;
   readonly freshness_class: string;
   readonly state: FreshnessState | "never_loaded" | "file_missing";
   readonly beyond_hard: string | null;
@@ -68,6 +91,7 @@ export function sourceStatus(
   const cls = freshnessClass(SOURCE_REGISTRY[source].freshness);
   const base = {
     source,
+    license: SOURCE_REGISTRY[source].license,
     freshness_class: cls.id,
     beyond_hard: cls.beyondHard,
     consecutive_failures: failures,
@@ -406,7 +430,9 @@ export function renderStatus(r: StatusReport): string[] {
     );
   }
   out.push("");
-  out.push("source                       state         age    version / rows            failures");
+  out.push(
+    "source                       state         age    license          version / rows            failures",
+  );
   for (const src of r.sources) {
     const v =
       src.file_version === null
@@ -417,7 +443,7 @@ export function renderStatus(r: StatusReport): string[] {
         ? ""
         : `  last error ${src.last_error.error ?? "?"} at ${src.last_error.at}`;
     out.push(
-      `${src.source.padEnd(28)} ${STATE_LABEL[src.state].padEnd(13)} ${formatAge(src.age_s).padEnd(6)} ${v.padEnd(25)} ${String(src.consecutive_failures)}${err}`,
+      `${src.source.padEnd(28)} ${STATE_LABEL[src.state].padEnd(13)} ${formatAge(src.age_s).padEnd(6)} ${src.license.padEnd(16)} ${v.padEnd(25)} ${String(src.consecutive_failures)}${err}`,
     );
   }
   const red = r.sources.filter((x) => x.state !== "fresh" && x.state !== "stale");

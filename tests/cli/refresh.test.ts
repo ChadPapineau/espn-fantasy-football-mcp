@@ -10,6 +10,9 @@ import {
   comingWeek,
   defaultSeasons,
   describeResult,
+  historyTwinsOf,
+  isHistorySource,
+  newsInputs,
   describeWarnings,
   isRefreshTarget,
   jobNameFor,
@@ -20,7 +23,9 @@ import {
   type SourceRegistry,
 } from "../../src/cli/refresh.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
+import { isDatasetSourceId } from "../../src/config/freshness.js";
 import { NFLVERSE_SOURCES } from "../../src/sources/nflverse/index.js";
+import type { Store } from "../../src/store/types.js";
 import type { RefreshResult } from "../../src/sources/runner.js";
 import type { DataSource } from "../../src/sources/source.js";
 import { fakeExec, makeIo, noNetwork, sandbox, type Sandbox } from "./helpers.js";
@@ -45,10 +50,12 @@ const published: RefreshResult = {
 };
 
 describe("planning", () => {
-  it("knows every target; every Phase-1a job has its sources (the ESPN season sources included)", () => {
+  it("knows every target; every built job has its sources (the ESPN season sources included)", () => {
     sb = sandbox();
     expect(isRefreshTarget("all")).toBe(true);
-    expect(isRefreshTarget("nflverse:snaps")).toBe(false);
+    expect(isRefreshTarget("nflverse:snaps")).toBe(true);
+    // D13: no paid or keyed odds API — odds is not a target of this build
+    expect(isRefreshTarget("odds")).toBe(false);
     expect(REFRESH_TARGETS).toContain("nflverse:players");
     expect(availableRefreshJobs()).toEqual([
       "espn:schedule",
@@ -56,6 +63,10 @@ describe("planning", () => {
       "nflverse:schedules",
       "nflverse:daily",
       "nflverse:stats",
+      "nflverse:snaps",
+      "ffopportunity",
+      "sleeper:trending",
+      "news",
       "weather",
     ]);
     const all = planTarget("all", { weatherSource: "nws" });
@@ -88,7 +99,13 @@ describe("planning", () => {
       planTarget("nflverse:daily", { weatherSource: "open-meteo" }).map((s) =>
         s.kind === "source" ? s.source.id : s.job,
       ),
-    ).toEqual(["nflverse:injuries", "nflverse:roster_weekly", "nflverse:players"]);
+    ).toEqual([
+      "nflverse:injuries",
+      "nflverse:depth_charts",
+      "nflverse:roster_weekly",
+      "nflverse:players",
+      ...historyTwinsOf("nflverse:daily").map((t) => t.id),
+    ]);
     expect(planTarget("nflverse:roster_weekly", { weatherSource: "open-meteo" })[0]).toMatchObject({
       job: "nflverse:daily",
     });
@@ -101,11 +118,88 @@ describe("planning", () => {
     expect(DEFAULT_REGISTRY.byJob("odds", { weatherSource: "nws" })).toBeNull();
     expect(jobNameFor("nflverse:daily")).toBe("refresh-nflverse-daily");
   });
-  it("seasons: defaults carry the previous season for stats/schedules; --seasons is validated", () => {
+  it("Phase 2 (plan 10 §3.2): the new sources in their plan 06 §1.3 jobs; a source target plans alone", () => {
+    sb = sandbox();
+    const ids = (t: Parameters<typeof planTarget>[0]) =>
+      planTarget(t, { weatherSource: "open-meteo" }).map((s) =>
+        s.kind === "source" ? s.source.id : `unavailable:${s.job}`,
+      );
+    expect(ids("nflverse:stats")).toEqual([
+      "nflverse:stats_player_week",
+      "nflverse:stats_team_week",
+      "nflverse:pbp",
+      ...historyTwinsOf("nflverse:stats").map((t) => t.id),
+    ]);
+    expect(ids("nflverse:snaps")[0]).toBe("nflverse:snap_counts");
+    expect(ids("ffopportunity")[0]).toBe("ffopportunity:ep_weekly");
+    expect(ids("sleeper:trending")).toEqual(["sleeper:trending"]);
+    expect(ids("news")).toEqual(["news:rotowire", "news:espn", "news:cbs"]);
+    expect(ids("news:espn")).toEqual(["news:espn"]);
+    expect(planTarget("nflverse:pbp", { weatherSource: "open-meteo" })[0]).toMatchObject({
+      job: "nflverse:stats",
+    });
+    expect(planTarget("nflverse:depth_charts", { weatherSource: "open-meteo" })[0]).toMatchObject({
+      job: "nflverse:daily",
+    });
+    // `all`: news after the player index and the daily job (the matcher's universe), weather last
+    const all = ids("all");
+    expect(all.indexOf("news:rotowire")).toBeGreaterThan(all.indexOf("espn:players"));
+    expect(all.indexOf("news:rotowire")).toBeGreaterThan(all.indexOf("nflverse:roster_weekly"));
+    expect(all.filter((x) => x.startsWith("unavailable:"))).toEqual([]);
+    // a history twin is wired only once its id is a registered dataset source (no failing run)
+    for (const job of [
+      "nflverse:stats",
+      "nflverse:snaps",
+      "nflverse:daily",
+      "ffopportunity",
+    ] as const)
+      for (const t of historyTwinsOf(job)) expect(isDatasetSourceId(t.id)).toBe(true);
+    expect(isHistorySource({ id: "nflverse:pbp_history" as never })).toBe(true);
+    expect(isHistorySource(NFLVERSE_SOURCES["nflverse:players"])).toBe(false);
+  });
+
+  it("the news inputs: the universe from the player index with crosswalk ids; nothing carried before a file exists", () => {
+    sb = sandbox();
+    const store = {
+      playerUniverse: {
+        all: () => ({
+          rows: [
+            { espn_id: 4239996, full_name: "Travis Etienne Jr.", pro_team_id: 18, position_id: 2 },
+            { espn_id: -1, full_name: "bad", pro_team_id: 0, position_id: 2 },
+          ],
+          stamp: null,
+        }),
+      },
+      repos: {
+        crosswalk: {
+          get: (id: number) => (id === 4239996 ? { espn_id: id, gsis_id: "00-0036973" } : null),
+        },
+      },
+    } as unknown as Store;
+    const opts = newsInputs(() => store, sb.dir, "espn");
+    const ctx = { seasons: [2026] } as never;
+    const u = opts.universe?.(ctx) ?? [];
+    expect(u).toEqual([
+      { espn_id: 4239996, full_name: "Travis Etienne Jr.", team: "NO", gsis_id: "00-0036973" },
+    ]);
+    expect(opts.previous?.(ctx)).toEqual([]);
+    expect(newsInputs(() => null, sb.dir, "cbs").universe?.(ctx)).toEqual([]);
+  });
+
+  it("seasons: defaults carry the previous season for stats, two for schedules; --seasons is validated", () => {
     sb = sandbox();
     expect(defaultSeasons(NFLVERSE_SOURCES["nflverse:stats_player_week"], 2026)).toEqual([
       2025, 2026,
     ]);
+    expect(defaultSeasons(NFLVERSE_SOURCES["nflverse:schedules"], 2026)).toEqual([
+      2024, 2025, 2026,
+    ]);
+    expect(
+      defaultSeasons(
+        { ...NFLVERSE_SOURCES["nflverse:players"], id: "nflverse:pbp_history" as never },
+        2026,
+      ),
+    ).toEqual([2024, 2025]);
     expect(defaultSeasons(NFLVERSE_SOURCES["nflverse:injuries"], 2026)).toEqual([2026]);
     expect(parseSeasons(" 2026,2025,2026 ")).toEqual([2025, 2026]);
     for (const bad of [
@@ -232,6 +326,27 @@ describe("refresh", () => {
       ),
     ).rejects.toThrow(/refresh needs a target/);
   });
+  it("plan 10 B1: outside the season (no schedule loaded) each Phase-2 job exits 0 in < 2 s, no request", async () => {
+    sb = sandbox();
+    for (const target of ["nflverse:snaps", "ffopportunity", "sleeper:trending", "news"] as const) {
+      const io = makeIo(sb, { fetch: noNetwork });
+      const { config, log } = await loadLenientRuntime(io);
+      const t0 = performance.now();
+      const code = await refresh(
+        io,
+        config,
+        log,
+        { target, force: false, notify: false, json: true },
+        new AbortController().signal,
+      );
+      expect(code, target).toBe(0);
+      expect(performance.now() - t0, target).toBeLessThan(2000);
+      const out = JSON.parse(io.out.text) as { results: { status: string; reason?: string }[] };
+      expect(out.results.length, target).toBeGreaterThan(0);
+      for (const r of out.results) expect(r.status, target).toBe("skipped");
+    }
+  });
+
   it("a job this build cannot run is exit 1 with a 'not available' line and no request", async () => {
     sb = sandbox();
     const io = makeIo(sb, { fetch: noNetwork });

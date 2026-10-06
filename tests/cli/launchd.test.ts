@@ -91,6 +91,41 @@ describe("job table", () => {
     expect(selectJobs("all").length).toBe(JOBS.length);
     expect(selectJobs("   ").length).toBe(JOBS.length);
   });
+  it("the Phase-2 jobs (plan 06 §1.3; plan 10 §3.2): cadence, keyless, their sources and refresh job", () => {
+    sb = sandbox();
+    const by = new Map(JOBS.map((j) => [j.name, j]));
+    const snaps = by.get("refresh-nflverse-snaps");
+    expect(snaps?.argv).toEqual(["refresh", "nflverse:snaps", "--notify"]);
+    expect(snaps?.calendar.map((c) => `${String(c.Hour)}:${String(c.Minute)}`)).toEqual([
+      "1:30",
+      "7:30",
+      "13:30",
+      "19:30",
+    ]);
+    expect(by.get("refresh-ffopportunity")?.calendar).toEqual([{ Hour: 8, Minute: 30 }]);
+    expect(by.get("refresh-sleeper-trending")?.calendar).toEqual([{ Minute: 0 }, { Minute: 30 }]);
+    expect(by.get("refresh-news")?.calendar.map((c) => c.Minute)).toEqual([0, 15, 30, 45]);
+    expect(by.get("refresh-news")?.sources).toEqual(["news:rotowire", "news:espn", "news:cbs"]);
+    expect(by.get("refresh-nflverse-stats")?.sources).toEqual([
+      "nflverse:stats_player_week",
+      "nflverse:stats_team_week",
+      "nflverse:pbp",
+    ]);
+    expect(by.get("refresh-nflverse-daily")?.sources).toContain("nflverse:depth_charts");
+    for (const n of [
+      "refresh-nflverse-snaps",
+      "refresh-ffopportunity",
+      "refresh-sleeper-trending",
+      "refresh-news",
+    ]) {
+      expect(by.get(n)?.cookies, n).toBe(false);
+      expect(
+        availableJobs().map((j) => j.name),
+        n,
+      ).toContain(n);
+    }
+  });
+
   it("nextOccurrence walks local time; the credential check's next run is 09:00 or Sun 08:00", () => {
     sb = sandbox();
     const at = new Date(2026, 9, 6, 10, 0, 0).getTime(); // a Tuesday, local

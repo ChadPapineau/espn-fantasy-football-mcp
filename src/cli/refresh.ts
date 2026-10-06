@@ -1,6 +1,8 @@
 // refresh.ts — `eff refresh <job|source|all>` (plan 01 §5.5 refresh execution model, §5.7; plan 06
 // J3 file-release polls, §1.3 the data-refresh rows, §2 season awareness / per-job lock /
-// notifications; plan 10 §3.1a "Jobs"). Builds ONE http client (src/http, the read host from config),
+// notifications; plan 10 §3.1a "Jobs", §3.2 the Phase-2 sources: team stats, the pbp subset, snap
+// counts, depth charts, ffopportunity, Sleeper trending, the RSS headlines and — once their ids are
+// registered — the two-prior-season history twins). Builds ONE http client (src/http, the read host from config),
 // opens the store (refresh_log, the pro-schedule reader the season gate needs, nflverse schedules
 // for retractable roofs) and a DatasetPublisher, then runs each source through src/sources/runner.ts
 // in order (schedules first, so weather sees this run's schedule); a publish of `nflverse:daily` or
@@ -8,7 +10,12 @@
 // skipped; 1 when any failed. Fixture mode makes no network call, so it refuses (decision recorded).
 // Ported from sibling @5daa625, adapted (ESPN jobs, the players source, the chained rebuild).
 import { randomInt } from "node:crypto";
-import type { DatasetSourceId, RefreshJob } from "../config/freshness.js";
+import {
+  SOURCE_REGISTRY,
+  isDatasetSourceId,
+  type DatasetSourceId,
+  type RefreshJob,
+} from "../config/freshness.js";
 import {
   datasetDir,
   ensureSecureDir,
@@ -19,7 +26,22 @@ import {
 import type { LenientConfig } from "../config/schema.js";
 import { MAX_SEED, seededRng } from "../domain/clock.js";
 import { createHttpClient } from "../http/client.js";
-import { NFLVERSE_SOURCES } from "../sources/nflverse/index.js";
+import {
+  FFOPPORTUNITY_HISTORY_SOURCES,
+  FFOPPORTUNITY_SOURCES,
+} from "../sources/ffopportunity/index.js";
+import {
+  createNewsSource,
+  PREVIOUS_NEWS_SQL,
+  universeFromEspnPlayers,
+  type NewsSourceOptions,
+} from "../sources/news/index.js";
+import {
+  NFLVERSE_HISTORY_SOURCES,
+  NFLVERSE_PHASE_2_SOURCES,
+  NFLVERSE_SOURCES,
+} from "../sources/nflverse/index.js";
+import { SLEEPER_TRENDING_SOURCE } from "../sources/sleeper/index.js";
 import { fsTempArea, isRefreshSuccess, runRefresh, type RefreshResult } from "../sources/runner.js";
 import type { DataSource } from "../sources/source.js";
 import { weatherSourceFor } from "../sources/weather/index.js";
@@ -27,8 +49,8 @@ import { espnSeasonSources } from "../sources/espn_season/index.js";
 import { ESPN_READ_HOST_DEFAULT } from "../config/schema.js";
 import { seasonGet } from "./espn-http.js";
 import type { ProScheduleReader } from "../domain/analytics/types.js";
-import { storeFactory } from "../store/index.js";
-import type { StoreFactory } from "../store/types.js";
+import { storeFactory, withDatasetJoin } from "../store/index.js";
+import type { Store, StoreFactory } from "../store/types.js";
 import { runCrosswalkRebuild } from "./crosswalk.js";
 import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
@@ -45,16 +67,45 @@ export const REFRESH_JOBS_1A = [
   "nflverse:stats",
   "weather",
 ] as const satisfies readonly RefreshJob[];
-/** The individual nflverse sources a target may name. */
+
+/**
+ * Every refresh job this build ships sources for, in `all` order (plan 06 §1.3; plan 10 §3.2): the
+ * season views and schedules first (weather reads this run's schedule), the nflverse files, then
+ * ffopportunity, Sleeper's trending (secondary) and the RSS headlines (after the player index and the
+ * crosswalk, whose universe they match against). `odds` is not built: owner decision D13 (no paid or
+ * keyed odds API — nflverse lines only), so it plans as "not available in this build".
+ */
+export const REFRESH_JOBS_BUILT = [
+  "espn:schedule",
+  "espn:players",
+  "nflverse:schedules",
+  "nflverse:daily",
+  "nflverse:stats",
+  "nflverse:snaps",
+  "ffopportunity",
+  "sleeper:trending",
+  "news",
+  "weather",
+] as const satisfies readonly RefreshJob[];
+
+/** The individual sources a target may name (each runs inside its own job). */
 export const SOURCE_TARGETS = [
   "nflverse:schedules",
   "nflverse:injuries",
   "nflverse:roster_weekly",
   "nflverse:players",
   "nflverse:stats_player_week",
+  "nflverse:stats_team_week",
+  "nflverse:pbp",
+  "nflverse:snap_counts",
+  "nflverse:depth_charts",
+  "ffopportunity:ep_weekly",
+  "news:rotowire",
+  "news:espn",
+  "news:cbs",
 ] as const satisfies readonly DatasetSourceId[];
 /** Every `eff refresh` target. */
-export const REFRESH_TARGETS = ["all", ...REFRESH_JOBS_1A, ...SOURCE_TARGETS] as const;
+export const REFRESH_TARGETS = ["all", ...REFRESH_JOBS_BUILT, ...SOURCE_TARGETS] as const;
 export type RefreshTarget = (typeof REFRESH_TARGETS)[number];
 
 /** Whether `s` is a refresh target. */
@@ -71,14 +122,50 @@ export interface SourceRegistry {
   readonly byJob: (job: RefreshJob, config: RegistryConfig) => readonly DataSource[] | null;
 }
 
-/** What the registry reads of the config. */
+/** What the registry reads of the config (plus the news sources' store-backed inputs at run time). */
 export type RegistryConfig = Pick<LenientConfig, "weatherSource"> &
-  Partial<Pick<LenientConfig, "espnReadHost">>;
+  Partial<Pick<LenientConfig, "espnReadHost">> & {
+    /** Per-feed news inputs (the matcher universe, the carried-over items) — built by `refresh`. */
+    readonly news?: (feed: "rotowire" | "espn" | "cbs") => NewsSourceOptions;
+  };
+
+/**
+ * The Phase-2 history twins (two prior seasons for the soft backtests — plan 10 §3.2 [A-3]) that a
+ * job runs beside its current-season sources. A twin is wired the moment its id is a registered
+ * dataset source (src/config/freshness.ts DATASET_SOURCE_IDS): before that the publisher and the
+ * refresh log would refuse it, so it is left out rather than failing the job on every run.
+ */
+export function historyTwinsOf(job: RefreshJob): DataSource[] {
+  const H = NFLVERSE_HISTORY_SOURCES;
+  const twins: { readonly id: string }[] =
+    job === "nflverse:stats"
+      ? [
+          H["nflverse:stats_player_week_history"],
+          H["nflverse:stats_team_week_history"],
+          H["nflverse:pbp_history"],
+        ]
+      : job === "nflverse:snaps"
+        ? [H["nflverse:snap_counts_history"]]
+        : job === "nflverse:daily"
+          ? [H["nflverse:injuries_history"], H["nflverse:depth_charts_history"]]
+          : job === "ffopportunity"
+            ? [FFOPPORTUNITY_HISTORY_SOURCES["ffopportunity:ep_weekly_history"]]
+            : [];
+  // a twin is a DataSource exactly when its id is a registered dataset source id (checked here)
+  return twins.filter((t) => isDatasetSourceId(t.id)) as unknown as DataSource[];
+}
+
+/** Whether a source is a history twin (its seasons are the two before the current one). */
+export function isHistorySource(source: Pick<DataSource, "id">): boolean {
+  return (source.id as string).endsWith("_history");
+}
 
 /** The registry of this build. */
 export const DEFAULT_REGISTRY: SourceRegistry = {
   byJob: (job, config) => {
     const S = NFLVERSE_SOURCES;
+    const P = NFLVERSE_PHASE_2_SOURCES;
+    const twins = historyTwinsOf(job);
     switch (job) {
       case "espn:schedule":
         return [espnSeasonSources(config.espnReadHost ?? ESPN_READ_HOST_DEFAULT).proSchedule];
@@ -87,9 +174,30 @@ export const DEFAULT_REGISTRY: SourceRegistry = {
       case "nflverse:schedules":
         return [S["nflverse:schedules"]];
       case "nflverse:daily":
-        return [S["nflverse:injuries"], S["nflverse:roster_weekly"], S["nflverse:players"]];
+        return [
+          S["nflverse:injuries"],
+          P["nflverse:depth_charts"],
+          S["nflverse:roster_weekly"],
+          S["nflverse:players"],
+          ...twins,
+        ];
       case "nflverse:stats":
-        return [S["nflverse:stats_player_week"]];
+        return [
+          S["nflverse:stats_player_week"],
+          P["nflverse:stats_team_week"],
+          P["nflverse:pbp"],
+          ...twins,
+        ];
+      case "nflverse:snaps":
+        return [P["nflverse:snap_counts"], ...twins];
+      case "ffopportunity":
+        return [FFOPPORTUNITY_SOURCES["ffopportunity:ep_weekly"], ...twins];
+      case "sleeper:trending":
+        return [SLEEPER_TRENDING_SOURCE];
+      case "news":
+        return (["rotowire", "espn", "cbs"] as const).map((feed) =>
+          createNewsSource(feed, config.news?.(feed) ?? {}),
+        );
       case "weather":
         return [weatherSourceFor(config.weatherSource)];
       default:
@@ -100,7 +208,9 @@ export const DEFAULT_REGISTRY: SourceRegistry = {
 
 /** The refresh jobs whose sources this build ships. */
 export function availableRefreshJobs(registry: SourceRegistry = DEFAULT_REGISTRY): RefreshJob[] {
-  return REFRESH_JOBS_1A.filter((j) => registry.byJob(j, { weatherSource: "open-meteo" }) !== null);
+  return REFRESH_JOBS_BUILT.filter(
+    (j) => registry.byJob(j, { weatherSource: "open-meteo" }) !== null,
+  );
 }
 
 /** One planned step: a source to run, or a job this build cannot run. */
@@ -120,23 +230,64 @@ export function planTarget(
       ? [{ kind: "unavailable", job }]
       : list.map((source) => ({ kind: "source", job, source }));
   };
-  if (target === "all") return REFRESH_JOBS_1A.flatMap(ofJob);
-  if ((REFRESH_JOBS_1A as readonly string[]).includes(target)) return ofJob(target as RefreshJob);
+  if (target === "all") return REFRESH_JOBS_BUILT.flatMap(ofJob);
+  if ((REFRESH_JOBS_BUILT as readonly string[]).includes(target))
+    return ofJob(target as RefreshJob);
+  // one source: its job's plan, that source only (its job from the source registry)
   const id = target as (typeof SOURCE_TARGETS)[number];
-  const job: RefreshJob =
-    id === "nflverse:schedules"
-      ? "nflverse:schedules"
-      : id === "nflverse:stats_player_week"
-        ? "nflverse:stats"
-        : "nflverse:daily";
-  return [{ kind: "source", job, source: NFLVERSE_SOURCES[id] }];
+  const job = SOURCE_REGISTRY[id].job;
+  const steps = ofJob(job).filter((s) => s.kind === "unavailable" || s.source.id === id);
+  return steps.length > 0 ? steps : [{ kind: "unavailable", job }];
 }
 
-/** Default seasons per source: stats and schedules carry the previous season too (E1's window). */
+/**
+ * Default seasons per source: stats carry the previous season too (E1's window); schedules the two
+ * before it as well (the soft backtests' games); a history twin the two prior seasons only (the
+ * current season is its current source's file — plan 10 §3.2 [A-3]).
+ */
 export function defaultSeasons(source: DataSource, season: number): number[] {
-  return source.id === "nflverse:stats_player_week" || source.id === "nflverse:schedules"
-    ? [season - 1, season]
-    : [season];
+  if (isHistorySource(source)) return [season - 2, season - 1];
+  if (source.id === "nflverse:schedules") return [season - 2, season - 1, season];
+  return source.id === "nflverse:stats_player_week" ? [season - 1, season] : [season];
+}
+
+/**
+ * One feed's news inputs over the open store (plan 06 §1.3 `refresh news`): the matcher universe is
+ * the ESPN player index with each player's crosswalk gsis id; the carried-over items are that feed's
+ * CURRENT `ds_news` rows, read through a short-lived read-only attach (src/store `withDatasetJoin`) —
+ * the source never opens a dataset file itself. Either read failing leaves its list empty (the source
+ * warns: no refs, or nothing carried over).
+ */
+export function newsInputs(
+  store: () => Store | null,
+  cacheDir: string,
+  feed: "rotowire" | "espn" | "cbs",
+): NewsSourceOptions {
+  return {
+    universe: (ctx) => {
+      const s = store();
+      if (s === null) return [];
+      const season = ctx.seasons[ctx.seasons.length - 1];
+      if (season === undefined) return [];
+      return universeFromEspnPlayers(s.playerUniverse.all(season).rows, (id) => {
+        const pair = s.repos.crosswalk.get(id);
+        return pair?.espn_id === id ? pair.gsis_id : null;
+      });
+    },
+    previous: () => {
+      const out = withDatasetJoin(datasetDir(cacheDir), [`news:${feed}`], (db) => {
+        try {
+          return db.prepare(PREVIOUS_NEWS_SQL).all();
+        } catch {
+          return null;
+        }
+      });
+      if (out.value !== null) return out.value;
+      // no published file yet: nothing to carry; a file that would not read: the source warns
+      if (out.attached.length === 0) return [];
+      throw new Error("news: the current file did not read");
+    },
+  };
 }
 
 /** Parses `--seasons 2025,2026` (1999–2100, ascending, de-duplicated, at most 30). */
@@ -290,7 +441,13 @@ export async function refresh(
   }
   const seasonsOverride = opts.seasons === undefined ? null : parseSeasons(opts.seasons);
   const registry = opts.registry ?? DEFAULT_REGISTRY;
-  const steps = planTarget(target, config, registry);
+  // the news sources' store-backed inputs are bound once the store is open (below)
+  let storeRef: Store | null = null;
+  const steps = planTarget(
+    target,
+    { ...config, news: (feed) => newsInputs(() => storeRef, config.cacheDir, feed) },
+    registry,
+  );
   const notifier = createNotifier({
     platform: io.platform,
     exec: io.exec,
@@ -309,6 +466,7 @@ export async function refresh(
       datasetDir: datasetDir(config.cacheDir),
       clock: io.clock,
     });
+    storeRef = store;
   } catch (e) {
     store?.close();
     await writeLine(io.stderr, `eff refresh: the store could not be opened: ${errorText(e)}`);

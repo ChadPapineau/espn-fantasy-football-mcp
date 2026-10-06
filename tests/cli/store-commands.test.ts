@@ -127,6 +127,38 @@ describe("status", () => {
     expect(text).toContain("launchd: not available");
     expect(text).toContain("run `eff refresh all`");
   });
+  it("plan 10 B1: every source line shows its license and age; full lists the Phase-2 sources", async () => {
+    sb = sandbox();
+    const core = makeIo(sb);
+    const a = await loadLenientRuntime(core);
+    const r1 = collectStatus(core, a.config, a.log);
+    expect(r1.sources.map((s) => s.source)).not.toContain("nflverse:pbp");
+    for (const s of r1.sources) expect(s.license.length).toBeGreaterThan(0);
+    const io = makeIo(sb, { env: { EFF_TOOLSET: "full" } });
+    const { config, log } = await loadLenientRuntime(io);
+    const r = collectStatus(io, config, log);
+    const ids = r.sources.map((s) => s.source);
+    for (const id of [
+      "nflverse:stats_team_week",
+      "nflverse:pbp",
+      "nflverse:snap_counts",
+      "nflverse:depth_charts",
+      "ffopportunity:ep_weekly",
+      "sleeper:trending",
+      "news:rotowire",
+      "news:espn",
+      "news:cbs",
+    ])
+      expect(ids).toContain(id);
+    const lic = new Map(r.sources.map((s) => [s.source, s.license]));
+    expect(lic.get("ffopportunity:ep_weekly")).toBe("CC-BY-SA-4.0");
+    expect(lic.get("sleeper:trending")).toBe("non-commercial");
+    expect(lic.get("nflverse:pbp")).toBe("CC-BY-4.0");
+    const text = renderStatus(r).join("\n");
+    expect(text).toContain("license");
+    expect(text).toMatch(/ffopportunity:ep_weekly\s+NEVER LOADED\s+\S+\s+CC-BY-SA-4\.0/);
+  });
+
   it("rejected cookies: since and next probe shown; never a value, a length or a fingerprint", async () => {
     sb = sandbox();
     const { io, config, log, store } = await withStore();

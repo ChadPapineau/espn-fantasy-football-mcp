@@ -103,17 +103,22 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
     name: "refresh-nflverse-daily",
     argv: ["refresh", "nflverse:daily", "--notify"],
     description:
-      "refresh injuries + roster_weekly + players — 04:30, 10:30, 16:30, 22:30 (then the crosswalk rebuild)",
+      "refresh injuries + depth_charts + roster_weekly + players — 04:30, 10:30, 16:30, 22:30 (then the crosswalk rebuild)",
     calendar: [at(4, 30), at(10, 30), at(16, 30), at(22, 30)],
     cookies: false,
     refreshJob: "nflverse:daily",
-    sources: ["nflverse:injuries", "nflverse:roster_weekly", "nflverse:players"],
+    sources: [
+      "nflverse:injuries",
+      "nflverse:depth_charts",
+      "nflverse:roster_weekly",
+      "nflverse:players",
+    ],
   },
   {
     name: "refresh-nflverse-stats",
     argv: ["refresh", "nflverse:stats", "--notify"],
     description:
-      "refresh stats_player_week — daily 04:30; Thu/Sun/Mon 13:00, 17:00, 21:00; 00:30 after each game day",
+      "refresh stats_player_week + stats_team_week + the pbp subset — daily 04:30; Thu/Sun/Mon 13:00, 17:00, 21:00; 00:30 after each game day",
     calendar: [
       at(4, 30),
       ...GAME_DAYS.flatMap((d) => [at(13, 0, d), at(17, 0, d), at(21, 0, d)]),
@@ -123,7 +128,48 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
     ],
     cookies: false,
     refreshJob: "nflverse:stats",
-    sources: ["nflverse:stats_player_week"],
+    sources: ["nflverse:stats_player_week", "nflverse:stats_team_week", "nflverse:pbp"],
+  },
+  {
+    // plan 06 §1.3 `refresh nflverse:snaps` (Phase 2): 4×/day
+    name: "refresh-nflverse-snaps",
+    argv: ["refresh", "nflverse:snaps", "--notify"],
+    description: "refresh snap_counts — 01:30, 07:30, 13:30, 19:30",
+    calendar: [at(1, 30), at(7, 30), at(13, 30), at(19, 30)],
+    cookies: false,
+    refreshJob: "nflverse:snaps",
+    sources: ["nflverse:snap_counts"],
+  },
+  {
+    // plan 06 §1.3 `refresh ffopportunity` (Phase 2): daily 08:30
+    name: "refresh-ffopportunity",
+    argv: ["refresh", "ffopportunity", "--notify"],
+    description: "refresh ffopportunity ep_weekly — daily 08:30",
+    calendar: [at(8, 30)],
+    cookies: false,
+    refreshJob: "ffopportunity",
+    sources: ["ffopportunity:ep_weekly"],
+  },
+  {
+    // plan 06 §1.3 `refresh sleeper:trending` (secondary, warn-only): every 30 min; the job itself
+    // is season-gated, so an off-season wake exits 0 in seconds with no request
+    name: "refresh-sleeper-trending",
+    argv: ["refresh", "sleeper:trending", "--notify"],
+    description: "refresh Sleeper trending (secondary) — every 30 min in season",
+    calendar: [{ Minute: 0 }, { Minute: 30 }],
+    cookies: false,
+    refreshJob: "sleeper:trending",
+    sources: ["sleeper:trending"],
+  },
+  {
+    // plan 06 §1.3 `refresh news` (headlines, warn-only): every 15 min, season-gated
+    name: "refresh-news",
+    argv: ["refresh", "news", "--notify"],
+    description: "refresh RSS headlines (RotoWire, ESPN, CBS) — every 15 min in season",
+    calendar: [{ Minute: 0 }, { Minute: 15 }, { Minute: 30 }, { Minute: 45 }],
+    cookies: false,
+    refreshJob: "news",
+    sources: ["news:rotowire", "news:espn", "news:cbs"],
   },
   {
     name: "refresh-nflverse-schedules",
