@@ -1,36 +1,24 @@
-// drift.ts — the probe's comparison of a live body with the checked-in required-key manifest
-// (fixtures/drift/manifest.json): plan 01 §7 (required keys per view, skeleton detection, removed /
-// type / enum findings are red, new keys additive, host anomalies), plan 05 §3.3 (probe diff, host
-// moved), research 03 §F.2. Pure: no I/O. The future src/drift/ may port it.
+// drift.ts — the probe's comparison of a live body with the checked-in drift manifest
+// (fixtures/drift/manifest.json, typed by src/drift/types.ts): plan 01 §7 (required keys per view,
+// skeleton detection, removed / type / enum findings are red, new keys additive, host anomalies,
+// the per-view manifest of entity keys, enums and array lengths), plan 05 §3.1 step 4 and §3.3
+// (probe diff, host moved, required ⊆ observed), research 03 §F.2. Pure: no I/O.
+import type {
+  DriftManifest as SharedDriftManifest,
+  EnumValue,
+  KeyType,
+  ProbeSpec as SharedProbeSpec,
+  ViewManifest,
+} from "../../src/drift/types.js";
 import { formatPath, isObject, type Json } from "./canonical.js";
 
-/** A required key's JSON type: one name or a `|` union ("integer|null"). */
-export type KeyType = string;
+export type { EnumValue, KeyType, ViewManifest } from "../../src/drift/types.js";
+/** The probe spec — one definition, src/drift/types.ts's. */
+export type ProbeSpec = SharedProbeSpec;
+/** The drift manifest — one definition, src/drift/types.ts's. */
+export type DriftManifest = SharedDriftManifest;
+
 const TYPE_NAMES = new Set(["string", "number", "integer", "boolean", "object", "array", "null"]);
-
-export interface ProbeSpec {
-  /** ESPN view names the probe requests, in order. */
-  views: string[];
-  /** Entity path → { key: type }. A missing key or a wrong type is red drift. */
-  required: Record<string, Record<string, KeyType>>;
-  /** Entity path → every key seen in the recorded fixtures; anything else is additive drift. */
-  observed: Record<string, string[]>;
-  /** Array path → the fewest elements a healthy body has (an emptied list is red drift). */
-  minItems?: Record<string, number>;
-  /** Value path → the allowed values; a value outside the set is red drift (plan 01 §7). */
-  enums?: Record<string, (string | number | boolean | null)[]>;
-  /**
-   * Entity path → keys ESPN sends that the fixture scrubber removes (research 03 §F.3, e.g.
-   * members[].notificationSettings): known, never additive, never required.
-   */
-  scrubbed?: Record<string, string[]>;
-}
-
-export interface DriftManifest {
-  version: 1;
-  host: string;
-  probes: { host: ProbeSpec; shape: ProbeSpec };
-}
 
 export type Severity = "red" | "additive";
 export interface Finding {
@@ -118,12 +106,60 @@ export function typeMatches(v: Json, declared: KeyType): boolean {
     .some((t) => t === actual || (t === "number" && actual === "integer") || t === "any");
 }
 
+/** Validates one `views.<view>` entry (a malformed entry must never read as "no drift"). */
+function validateView(name: string, v: unknown): void {
+  if (!/^[A-Za-z_]+$/.test(name)) throw new Error("drift manifest: bad view name");
+  if (!isObject(v)) throw new Error(`drift manifest: views.${name} invalid`);
+  if (
+    !Array.isArray(v.sources) ||
+    !v.sources.length ||
+    !v.sources.every((x) => typeof x === "string")
+  )
+    throw new Error(`drift manifest: views.${name}.sources invalid`);
+  for (const field of ["observed", "enums", "array_lengths"] as const)
+    if (!isObject(v[field])) throw new Error(`drift manifest: views.${name}.${field} missing`);
+  for (const [pat, keys] of Object.entries(v.observed as Record<string, unknown>)) {
+    parsePattern(pat);
+    if (!Array.isArray(keys) || !keys.every((k) => typeof k === "string"))
+      throw new Error(`drift manifest: views.${name}.observed ${pat} invalid`);
+  }
+  for (const [pat, vals] of Object.entries(v.enums as Record<string, unknown>)) {
+    parsePattern(pat);
+    if (
+      !Array.isArray(vals) ||
+      !vals.every((x) => x === null || ["string", "number", "boolean"].includes(typeof x))
+    )
+      throw new Error(`drift manifest: views.${name}.enums ${pat} invalid`);
+  }
+  for (const [pat, r] of Object.entries(v.array_lengths as Record<string, unknown>)) {
+    parsePattern(pat);
+    if (
+      !isObject(r) ||
+      !Number.isInteger(r.min) ||
+      !Number.isInteger(r.max) ||
+      (r.min as number) < 0 ||
+      (r.min as number) > (r.max as number)
+    )
+      throw new Error(`drift manifest: views.${name}.array_lengths ${pat} invalid`);
+  }
+}
+
 /** Validates a manifest's own structure (a malformed manifest must never read as "no drift"). */
 export function validateManifest(m: unknown): asserts m is DriftManifest {
   if (!isObject(m)) throw new Error("drift manifest: not an object");
   const o = m;
   if (o.version !== 1) throw new Error("drift manifest: unsupported version");
   if (typeof o.host !== "string" || !o.host) throw new Error("drift manifest: host missing");
+  const src = o.$sources;
+  if (
+    !isObject(src) ||
+    !["host", "shape"].every(
+      (k) => Array.isArray(src[k]) && (src[k] as unknown[]).every((x) => typeof x === "string"),
+    )
+  )
+    throw new Error("drift manifest: $sources invalid");
+  if (!isObject(o.views)) throw new Error("drift manifest: views missing");
+  for (const [name, v] of Object.entries(o.views)) validateView(name, v);
   const probes = o.probes;
   if (!isObject(probes)) throw new Error("drift manifest: probes missing");
   for (const name of ["host", "shape"]) {
@@ -278,6 +314,155 @@ export function diffBody(spec: ProbeSpec, body: Json): Finding[] {
         ? -1
         : 1,
   );
+}
+
+// --- the per-view manifest (plan 01 §7; plan 05 §3.1 step 4) ------------------------------------
+
+/** Keys whose UPPER_SNAKE string values are member/editor text, never an enum. */
+const TEXT_KEYS = new Set([
+  "abbrev",
+  "name",
+  "nickname",
+  "location",
+  "displayName",
+  "firstName",
+  "lastName",
+  "fullName",
+  "logo",
+  "tradeBlock",
+  "draftStrategy",
+  "seasonOutlook",
+  "primaryOwner",
+  "id",
+  "notes",
+  "jersey",
+]);
+/** Integer fields that are closed vocabularies (research 03 §B.2): observed values are enums. */
+const INTEGER_ENUM_KEYS = new Set([
+  "statSourceId",
+  "statSplitTypeId",
+  "lineupSlotId",
+  "defaultPositionId",
+  "proTeamId",
+]);
+const ENUM_STRING_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+/** More distinct values than this at one pattern → not an enum (dropped from the manifest). */
+export const MAX_ENUM_VALUES = 64;
+const KEY_RE = /^[A-Za-z_$][\w$]*$/;
+const MAX_OBSERVE_DEPTH = 24;
+
+/**
+ * An object whose keys are data, not schema — every key numeric (stats by stat id, points by
+ * period, slot counts) or any key outside the pattern grammar: its VALUES are walked under `{}`.
+ */
+function isMapLike(o: Record<string, Json>): boolean {
+  const keys = Object.keys(o);
+  return (
+    keys.length > 0 &&
+    (keys.every((k) => /^-?[0-9]+$/.test(k)) || keys.some((k) => !KEY_RE.test(k)))
+  );
+}
+
+/**
+ * The per-view observations of `bodies`: every entity pattern's key set, every array pattern's
+ * length range, and the enum values (UPPER_SNAKE strings outside TEXT_KEYS, and the integer
+ * vocabularies) per value pattern, each sorted. Deterministic for a given input.
+ */
+export function observeBodies(bodies: readonly Json[]): Omit<ViewManifest, "sources"> {
+  const observed = new Map<string, Set<string>>();
+  const enums = new Map<string, Set<string | number>>();
+  const lengths = new Map<string, { min: number; max: number }>();
+  const walk = (v: Json, pattern: string, key: string | null, depth: number): void => {
+    if (depth > MAX_OBSERVE_DEPTH) return;
+    if (Array.isArray(v)) {
+      const r = lengths.get(pattern);
+      lengths.set(
+        pattern,
+        r
+          ? { min: Math.min(r.min, v.length), max: Math.max(r.max, v.length) }
+          : { min: v.length, max: v.length },
+      );
+      for (const el of v) walk(el, `${pattern}[]`, key, depth + 1);
+      return;
+    }
+    if (isObject(v)) {
+      if (isMapLike(v)) {
+        for (const x of Object.values(v)) walk(x, `${pattern}{}`, key, depth + 1);
+        return;
+      }
+      const set = observed.get(pattern) ?? new Set<string>();
+      for (const [k, x] of Object.entries(v)) {
+        set.add(k);
+        walk(x, `${pattern}.${k}`, k, depth + 1);
+      }
+      observed.set(pattern, set);
+      return;
+    }
+    if (key === null) return;
+    const isEnum =
+      (typeof v === "string" && !TEXT_KEYS.has(key) && ENUM_STRING_RE.test(v)) ||
+      (typeof v === "number" && Number.isInteger(v) && INTEGER_ENUM_KEYS.has(key));
+    if (isEnum) {
+      const set = enums.get(pattern) ?? new Set<string | number>();
+      set.add(v);
+      enums.set(pattern, set);
+    }
+  };
+  for (const b of bodies) walk(b, "$", null, 0);
+  const sortVals = (xs: Iterable<string | number>) =>
+    [...xs].sort((a, b) =>
+      typeof a === "number" && typeof b === "number"
+        ? a - b
+        : String(a) < String(b)
+          ? -1
+          : String(a) > String(b)
+            ? 1
+            : 0,
+    );
+  const byKey = <T>(m: Map<string, T>) => [...m.keys()].sort();
+  const out: {
+    observed: Record<string, string[]>;
+    enums: Record<string, EnumValue[]>;
+    array_lengths: Record<string, { min: number; max: number }>;
+  } = {
+    observed: {},
+    enums: {},
+    array_lengths: {},
+  };
+  for (const k of byKey(observed)) out.observed[k] = [...(observed.get(k) ?? [])].sort();
+  for (const k of byKey(enums)) {
+    const vals = enums.get(k) ?? new Set();
+    if (vals.size <= MAX_ENUM_VALUES) out.enums[k] = sortVals(vals);
+  }
+  for (const k of byKey(lengths)) out.array_lengths[k] = lengths.get(k) ?? { min: 0, max: 0 };
+  return out;
+}
+
+/**
+ * Evaluates a required path (src/drift/types.ts REQUIRED_PATHS_BY_VIEW notation) on a body:
+ * `present` when the parent pattern selects ≥ 1 node and every node has the last key (for `…[]`:
+ * the parent is a non-empty array), `absent` when no selected node has it (or nothing is
+ * selected), `partial` otherwise. Skeleton detection = every required path absent.
+ */
+export function requiredPathStatus(
+  body: Json,
+  requiredPath: string,
+): "present" | "absent" | "partial" {
+  if (requiredPath.endsWith("[]")) {
+    const parents = select(body, requiredPath.slice(0, -2) || "$");
+    if (!parents.length) return "absent";
+    const ok = parents.filter((n) => Array.isArray(n.value) && n.value.length > 0).length;
+    return ok === parents.length ? "present" : ok === 0 ? "absent" : "partial";
+  }
+  const m = /^(.*)\.([A-Za-z_$][\w$]*)$/.exec(requiredPath);
+  if (!m?.[1] || !m[2]) throw new Error(`bad required path ${requiredPath}`);
+  const key = m[2];
+  const parents = select(body, m[1]);
+  if (!parents.length) return "absent";
+  const ok = parents.filter(
+    (n) => isObject(n.value) && Object.prototype.hasOwnProperty.call(n.value, key),
+  ).length;
+  return ok === parents.length ? "present" : ok === 0 ? "absent" : "partial";
 }
 
 /** Every key observed at each entity path of `spec` across `bodies` (for a human re-baseline). */

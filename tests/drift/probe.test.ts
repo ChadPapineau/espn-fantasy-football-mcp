@@ -9,12 +9,21 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MANIFEST,
   EXIT,
+  RECORDING_MANIFEST,
   loadManifest,
+  rebaseline,
   rebaselineSources,
   runProbe,
   summarize,
+  viewSources,
 } from "../../scripts/probe.js";
-import { observeKeys, type DriftManifest } from "../../scripts/espn-fixture/drift.js";
+import {
+  MAX_ENUM_VALUES,
+  observeBodies,
+  observeKeys,
+  requiredPathStatus,
+  type DriftManifest,
+} from "../../scripts/espn-fixture/drift.js";
 import { READ_HOST, WRITE_HOST } from "../../scripts/espn-fixture/http.js";
 import { REMOVE_KEYS } from "../../scripts/espn-fixture/scrub.js";
 import { ROOT } from "../lint/helpers.js";
@@ -107,6 +116,49 @@ describe("the checked-in drift manifest", () => {
       ].sort();
       expect(observeKeys(patterns, bodies)).toEqual(spec.observed);
     }
+  });
+
+  it("`views` is current: regenerated from every recorded view (B1/CAT-08)", () => {
+    const src = viewSources(RECORDING_MANIFEST);
+    expect(Object.keys(manifest.views).sort()).toEqual(Object.keys(src).sort());
+    for (const [view, rels] of Object.entries(src)) {
+      const bodies = rels.map(
+        (rel) => JSON.parse(readFileSync(path.join(ROOT, "fixtures", rel), "utf8")) as never,
+      );
+      expect(manifest.views[view as keyof typeof manifest.views], view).toEqual({
+        sources: rels,
+        ...observeBodies(bodies),
+      });
+    }
+  });
+
+  it("every recorded view has a manifest entry with key sets, enums and array lengths", () => {
+    for (const v of [
+      "mSettings",
+      "mTeam",
+      "mRoster",
+      "mMatchup",
+      "mBoxscore",
+      "kona_player_info",
+      "proTeamSchedules_wl",
+      "mNav",
+    ]) {
+      const vm = manifest.views[v as keyof typeof manifest.views];
+      expect(vm, v).toBeDefined();
+      expect(Object.keys(vm?.observed ?? {}).length, v).toBeGreaterThan(0);
+      expect(Object.keys(vm?.array_lengths ?? {}).length, v).toBeGreaterThan(0);
+    }
+    // the meaning-changing split ids and the recorded acquisition types are enumerated
+    const roster = manifest.views.mRoster;
+    expect(
+      roster?.enums["$.teams[].roster.entries[].playerPoolEntry.player.stats[].statSourceId"],
+    ).toEqual([0, 1]);
+    expect(
+      manifest.views.mSettings?.enums["$.settings.acquisitionSettings.acquisitionType"],
+    ).toEqual(["WAIVERS_CONTINUOUS", "WAIVERS_TRADITIONAL"]);
+    // no member text and no identifier is ever an enum or a key
+    const text = JSON.stringify(manifest.views);
+    expect(text).not.toMatch(/Team [A-Z]\b|Example League|00000000-0000-4000-8000/);
   });
 
   it("`scrubbed` keys are exactly keys the scrubber removes", () => {
@@ -479,12 +531,15 @@ describe("usage and configuration (exit 2, before any request)", () => {
   });
 });
 
+type Mutable<T> = { -readonly [K in keyof T]: Mutable<T[K]> };
 describe("manifest validation rejects malformed specs", () => {
-  const good = (): DriftManifest =>
-    JSON.parse(readFileSync(DEFAULT_MANIFEST, "utf8")) as DriftManifest;
-  const mutations: [string, (m: DriftManifest) => void][] = [
-    ["version", (m) => ((m as { version: number }).version = 2)],
-    ["host", (m) => ((m as { host: string }).host = "")],
+  const good = (): Mutable<DriftManifest> =>
+    JSON.parse(readFileSync(DEFAULT_MANIFEST, "utf8")) as Mutable<DriftManifest>;
+  const anyView = (m: Mutable<DriftManifest>) =>
+    m.views.mSettings as unknown as Record<string, unknown> & { observed: Record<string, unknown> };
+  const mutations: [string, (m: Mutable<DriftManifest>) => void][] = [
+    ["version", (m) => (m.version = 2)],
+    ["host", (m) => (m.host = "")],
     ["views", (m) => (m.probes.host.views = [])],
     ["view name", (m) => (m.probes.host.views = ["mSettings&x"])],
     ["required empty", (m) => (m.probes.shape.required = {})],
@@ -495,6 +550,19 @@ describe("manifest validation rejects malformed specs", () => {
       (m) => ((m.probes.host.observed as Record<string, unknown>).$ = "settings"),
     ],
     ["enums pattern", (m) => (m.probes.host.enums = { "settings.x": [1] })],
+    ["$sources missing", (m) => delete (m as Partial<typeof m>).$sources],
+    [
+      "$sources not strings",
+      (m) => ((m.$sources as unknown as Record<string, unknown>).host = [1]),
+    ],
+    ["views missing", (m) => delete (m as Partial<typeof m>).views],
+    ["view entry name", (m) => ((m.views as Record<string, unknown>)["m&x"] = m.views.mSettings)],
+    ["view sources empty", (m) => (anyView(m).sources = [])],
+    ["view observed pattern", (m) => (anyView(m).observed.settings = ["x"])],
+    ["view enums value", (m) => (anyView(m).enums = { $: [{}] })],
+    ["view lengths inverted", (m) => (anyView(m).array_lengths = { "$.x": { min: 3, max: 1 } })],
+    ["view lengths fraction", (m) => (anyView(m).array_lengths = { "$.x": { min: 0.5, max: 1 } })],
+    ["view not object", (m) => ((m.views as Record<string, unknown>).mTeam = 7)],
   ];
   it.each(mutations)("%s", async (_name, mutate) => {
     const m = good();
@@ -506,6 +574,74 @@ describe("manifest validation rejects malformed specs", () => {
       const file = path.join(dir, "m.json");
       writeFileSync(file, JSON.stringify(m));
       expect(() => loadManifest(file)).toThrow(/drift manifest|pattern|bad key/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("observeBodies / requiredPathStatus (the per-view manifest generator)", () => {
+  it("records key sets, array lengths, enums; numeric-keyed objects are maps (values under {})", () => {
+    const o = observeBodies([
+      {
+        teams: [
+          { id: 1, abbrev: "ABC", status: "ACTIVE", stats: { "53": 1, "0": 2 }, lineupSlotId: 20 },
+          { id: 2, abbrev: "XYZ", status: "OUT", stats: {}, lineupSlotId: 4 },
+        ],
+      },
+      { teams: [] },
+    ] as never);
+    // an EMPTY object is an entity with no keys; a numeric-keyed one is a map (no key recorded)
+    expect(o.observed).toEqual({
+      $: ["teams"],
+      "$.teams[]": ["abbrev", "id", "lineupSlotId", "stats", "status"],
+      "$.teams[].stats": [],
+    });
+    expect(o.array_lengths).toEqual({ "$.teams": { min: 0, max: 2 } });
+    expect(o.enums).toEqual({
+      "$.teams[].lineupSlotId": [4, 20],
+      "$.teams[].status": ["ACTIVE", "OUT"],
+    });
+  });
+  it("member text is never an enum; GUID-keyed objects never leak keys; huge value sets are dropped", () => {
+    const o = observeBodies([
+      {
+        members: [{ displayName: "ABC", firstName: "XYZ", name: "QQQ" }],
+        byGuid: { "{00000000-0000-4000-8000-000000000001}": { x: 1 } },
+        codes: Array.from({ length: MAX_ENUM_VALUES + 1 }, (_, i) => ({ code: `C_${String(i)}` })),
+      },
+    ] as never);
+    expect(o.enums["$.members[].displayName"]).toBeUndefined();
+    expect(o.enums["$.codes[].code"]).toBeUndefined();
+    expect(JSON.stringify(o)).not.toContain("00000000-0000-4000-8000");
+    expect(o.observed["$.byGuid{}"]).toEqual(["x"]);
+  });
+  it("is deterministic and order-independent", () => {
+    const a = { teams: [{ b: 1, a: "X_Y" }, { c: true }] };
+    const b = { teams: [{ c: true }, { a: "X_Y", b: 1 }] };
+    expect(observeBodies([a, b] as never)).toEqual(observeBodies([b, a] as never));
+  });
+  it("requiredPathStatus: present / absent / partial, and `$[]` for a root array", () => {
+    const body = { teams: [{ roster: { entries: [] } }, { roster: {} }], players: [] } as never;
+    expect(requiredPathStatus(body, "$.teams[].roster")).toBe("present");
+    expect(requiredPathStatus(body, "$.teams[].roster.entries")).toBe("partial");
+    expect(requiredPathStatus(body, "$.teams[].record")).toBe("absent");
+    expect(requiredPathStatus(body, "$.schedule[].home")).toBe("absent");
+    expect(requiredPathStatus([1, 2] as never, "$[]")).toBe("present");
+    expect(requiredPathStatus([] as never, "$[]")).toBe("absent");
+    expect(requiredPathStatus(body, "$[]")).toBe("absent");
+    expect(() => requiredPathStatus(body, "teams")).toThrow();
+  });
+  it("rebaseline is idempotent: rewriting a copy of the committed manifest changes nothing", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(path.join(tmpdir(), "eff-drift-"));
+    try {
+      const file = path.join(dir, "m.json");
+      const before = readFileSync(DEFAULT_MANIFEST, "utf8");
+      writeFileSync(file, before);
+      await rebaseline(file, rebaselineSources(DEFAULT_MANIFEST));
+      expect(readFileSync(file, "utf8")).toBe(before);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

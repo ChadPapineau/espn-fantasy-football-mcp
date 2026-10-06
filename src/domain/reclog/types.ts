@@ -109,9 +109,8 @@ export type RecommendationRecordView = Omit<RecommendationRecord, "league_id">;
 
 /** Strips `league_id` at RUN time (an `Omit` alone would still serialise the key). */
 export function toRecordView(record: RecommendationRecord): RecommendationRecordView {
-  const view: Partial<RecommendationRecord> = { ...record };
-  delete view.league_id;
-  return view as RecommendationRecordView;
+  const { league_id: _leagueId, ...view } = record;
+  return view;
 }
 
 /** `espn_record_recommendation` output (plan 07 E12). */

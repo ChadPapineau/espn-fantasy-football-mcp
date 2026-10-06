@@ -7,7 +7,8 @@
 //                                                         [--manifest <file>] [--rebaseline]
 //   EFF_PROBE_LEAGUE_ID=<id> (environment only — never an argument, never printed) enables the shape
 //   probe on that PUBLIC league; no cookie is ever sent. --rebaseline is offline: it rewrites the
-//   `observed` key sets of the manifest from the recorded fixtures (a human step after re-recording).
+//   probes' `observed` key sets and regenerates the per-view `views` section (entity keys, enums,
+//   array lengths — plan 05 §3.1 step 4) from the recorded fixtures (a human step after re-recording).
 // Output: ONE JSON line on stdout; a one-line human summary on stderr when something is wrong.
 // Exit: 0 green or additive-only · 1 error · 2 usage/config · 4 drift (red) · 6 host moved ·
 //       7 unreachable (network, timeout, 429/5xx). It writes nothing (except --rebaseline).
@@ -15,9 +16,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { contentSha256, isObject, parseJsonStrict, type Json } from "./espn-fixture/canonical.js";
+import { isEspnView } from "../src/providers/espn/types.js";
 import {
   classifyResponse,
   diffBody,
+  observeBodies,
   observeKeys,
   validateManifest,
   type DriftManifest,
@@ -120,7 +123,7 @@ async function runCheck(
 ): Promise<CheckResult> {
   const base: CheckResult = {
     name,
-    views: spec.views,
+    views: [...spec.views],
     status: "error",
     findings: [],
     findings_truncated: 0,
@@ -258,7 +261,7 @@ export async function runProbe(
   if (hostOnly || !leagueId) {
     checks.push({
       name: "shape",
-      views: manifest.probes.shape.views,
+      views: [...manifest.probes.shape.views],
       status: "skipped",
       reason: hostOnly ? "--host-only" : "EFF_PROBE_LEAGUE_ID is not set",
       findings: [],
@@ -311,20 +314,72 @@ export function summarize(line: ProbeLine): string | null {
   return parts.join(" | ") || null;
 }
 
-/** Offline re-baseline: rewrites every probe's `observed` key sets from the recorded fixtures. */
+/** The recording manifest the per-view observations are generated from (plan 05 §3.1 step 4). */
+export const RECORDING_MANIFEST = path.join(REPO_ROOT, "fixtures", "espn", "manifest.json");
+
+/**
+ * The recorded fixtures of each whitelisted view, relative to `fixtures/`, from the recording
+ * manifest: every 200 body recorded as that view ALONE; a composite body (`mSettings&mNav&mTeam`)
+ * serves only a view that has no solo recording (mNav today). Skeletons (an unknown view) and
+ * error bodies are never a source. Sorted, deterministic.
+ */
+export function viewSources(recordingManifestFile: string): Record<string, string[]> {
+  const raw = parseJsonStrict(readFileSync(recordingManifestFile, "utf8"));
+  const files = isObject(raw) && Array.isArray(raw.files) ? raw.files : [];
+  const solo = new Map<string, string[]>();
+  const composite = new Map<string, string[]>();
+  for (const f of files) {
+    if (!isObject(f) || f.status !== 200 || typeof f.path !== "string") continue;
+    const views = Array.isArray(f.views)
+      ? f.views.filter((v): v is string => typeof v === "string")
+      : [];
+    if (!views.length || !views.every(isEspnView)) continue;
+    const rel = `espn/${f.path}`;
+    const into = views.length === 1 ? solo : composite;
+    for (const v of views) into.set(v, [...(into.get(v) ?? []), rel]);
+  }
+  const out: Record<string, string[]> = {};
+  for (const v of [...new Set([...solo.keys(), ...composite.keys()])].sort())
+    out[v] = [...(solo.get(v) ?? composite.get(v) ?? [])].sort();
+  return out;
+}
+
+/**
+ * Offline re-baseline: rewrites every probe's `observed` key sets from the fixtures named in
+ * `$sources`, and regenerates `views` (entity keys, enums, array lengths per recorded view) from
+ * `viewSrc` (default: the recording manifest). A human step after re-recording (plan 01 §7).
+ */
 export async function rebaseline(
   manifestFile: string,
   sources: { host: string[]; shape: string[] },
+  viewSrc: Record<string, string[]> = viewSources(RECORDING_MANIFEST),
 ): Promise<DriftManifest> {
   const { manifest } = loadManifest(manifestFile);
+  const m = manifest as unknown as {
+    probes: Record<
+      "host" | "shape",
+      { observed: Record<string, string[]> } & DriftManifest["probes"]["host"]
+    >;
+    views: Record<string, unknown>;
+  };
   for (const name of ["host", "shape"] as const) {
-    const spec = manifest.probes[name];
+    const spec = m.probes[name];
     const bodies = sources[name].map((f) => parseJsonStrict(readFileSync(f, "utf8")));
     const patterns = [
       ...new Set([...Object.keys(spec.required), ...Object.keys(spec.observed)]),
     ].sort();
     spec.observed = observeKeys(patterns, bodies);
   }
+  const views: Record<string, unknown> = {};
+  for (const [view, rels] of Object.entries(viewSrc).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  )) {
+    const bodies = rels.map((rel) =>
+      parseJsonStrict(readFileSync(path.join(REPO_ROOT, "fixtures", rel), "utf8")),
+    );
+    views[view] = { sources: rels, ...observeBodies(bodies) };
+  }
+  m.views = views;
   validateManifest(manifest);
   writeFileSync(manifestFile, await formatJson(manifest as unknown as Json));
   return manifest;

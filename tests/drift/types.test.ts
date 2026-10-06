@@ -1,15 +1,29 @@
 // types.test.ts — src/drift/types.ts (plan 01 §7; research 03 §A.2 P28 skeleton; plan 03 §1.3 exit 4):
 // status precedence host_moved > red (removed key or changed enum set) > additive > green, the probe
-// exit code, the required-paths seed covering every whitelisted view with no skeleton path, and the
-// signal severities. A 100 %-coverage module (plan 05 §7: src/drift/**).
+// exit code, the required-paths seed evaluated against the RECORDED skeleton (absent) and each
+// recorded fixture of the view (present) (B2), the one manifest typed exactly and parsed (B1), and
+// the signal severities. A 100 %-coverage module (plan 05 §7: src/drift/**).
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import committed from "../../fixtures/drift/manifest.json" with { type: "json" };
+import { contentSha256, type Json } from "../../scripts/espn-fixture/canonical.js";
+import {
+  parsePattern,
+  requiredPathStatus,
+  validateManifest,
+} from "../../scripts/espn-fixture/drift.js";
+import { DEFAULT_MANIFEST, loadManifest } from "../../scripts/probe.js";
 import { DRIFT_STATUSES, EXIT_CODES } from "../../src/config/schema.js";
 import {
   DRIFT_EXIT_CODE,
   MANIFEST_FORMAT_VERSION,
+  MANIFEST_HASH_ALGORITHM,
   MANIFEST_PATH,
   REQUIRED_PATHS_BY_VIEW,
+  REQUIRED_PATHS_UNVERIFIED,
+  type DriftManifest,
   SIGNAL_SEVERITY,
   SKELETON_PATHS,
   SKELETON_TOP_LEVEL_KEYS,
@@ -18,6 +32,7 @@ import {
   type ViewDiff,
 } from "../../src/drift/types.js";
 import { ESPN_VIEWS } from "../../src/providers/espn/types.js";
+import { ROOT } from "../lint/helpers.js";
 
 const diff = (over: Partial<ViewDiff> = {}): ViewDiff => ({
   view: "mSettings",
@@ -116,33 +131,132 @@ describe("probeExitCode", () => {
   });
 });
 
-describe("the required-path seed (skeleton detection)", () => {
-  it("covers exactly the whitelisted views", () => {
+describe("the required-path seed (skeleton detection, B2)", () => {
+  const REC = path.join(ROOT, "fixtures", "espn", "recorded");
+  const load = (rel: string) =>
+    JSON.parse(readFileSync(path.join(ROOT, "fixtures", rel), "utf8")) as Json;
+  const skeleton = load("espn/recorded/league-a/skeleton.json");
+  const seasonSkeleton = load("espn/recorded/season/skeleton.json");
+  const { manifest } = loadManifest(DEFAULT_MANIFEST);
+
+  it("covers exactly the whitelisted views, in the probe manifest's pattern notation", () => {
     expect(Object.keys(REQUIRED_PATHS_BY_VIEW).sort()).toEqual([...ESPN_VIEWS].sort());
-  });
-  it("every view requires at least one path, none of which a skeleton answer carries", () => {
     for (const [view, paths] of Object.entries(REQUIRED_PATHS_BY_VIEW)) {
       expect(paths.length, view).toBeGreaterThan(0);
       for (const p of paths) {
-        expect(SKELETON_PATHS, `${view}: ${p}`).not.toContain(p);
-        // a bare skeleton top-level key can never detect a renamed view
-        expect(SKELETON_TOP_LEVEL_KEYS, `${view}: ${p}`).not.toContain(p);
-        expect(p, `${view}: ${p}`).toMatch(
-          /^(?:<root>\[\]|[A-Za-z]+(?:\[\])?(?:\.[A-Za-z]+(?:\[\])?)*)$/,
-        );
+        expect(p, `${view}: ${p}`).toMatch(/^\$(?:\[\]|(?:\.[A-Za-z_]+(?:\[\])?)+)$/);
+        expect(() => parsePattern(p), p).not.toThrow();
       }
     }
   });
-  it("skeleton paths start from skeleton top-level keys", () => {
-    for (const p of SKELETON_PATHS)
-      expect(SKELETON_TOP_LEVEL_KEYS, p).toContain(p.split(/[.[]/)[0]);
+
+  it("every required path is ABSENT from the recorded skeletons (a renamed view is caught)", () => {
+    for (const [view, paths] of Object.entries(REQUIRED_PATHS_BY_VIEW))
+      for (const p of paths) {
+        expect(requiredPathStatus(skeleton, p), `${view}: ${p} (league skeleton)`).toBe("absent");
+        expect(requiredPathStatus(seasonSkeleton, p), `${view}: ${p} (season skeleton)`).toBe(
+          "absent",
+        );
+      }
+  });
+
+  it("every required path is PRESENT in each recorded fixture of its view (manifest views)", () => {
+    const verified = Object.entries(manifest.views).filter(
+      ([view]) => !(REQUIRED_PATHS_UNVERIFIED as readonly string[]).includes(view),
+    );
+    expect(verified.map(([v]) => v).sort()).toEqual([
+      "kona_player_info",
+      "mBoxscore",
+      "mMatchup",
+      "mNav",
+      "mRoster",
+      "mSettings",
+      "mTeam",
+      "proTeamSchedules_wl",
+    ]);
+    for (const [view, vm] of verified)
+      for (const rel of vm.sources)
+        for (const p of REQUIRED_PATHS_BY_VIEW[view as keyof typeof REQUIRED_PATHS_BY_VIEW])
+          expect(requiredPathStatus(load(rel), p), `${view}: ${p} in ${rel}`).toBe("present");
+  });
+
+  it("required ⊆ the manifest's observed keys for every recorded view (plan 05 §3.3)", () => {
+    for (const [view, vm] of Object.entries(manifest.views)) {
+      if ((REQUIRED_PATHS_UNVERIFIED as readonly string[]).includes(view)) continue;
+      for (const p of REQUIRED_PATHS_BY_VIEW[view as keyof typeof REQUIRED_PATHS_BY_VIEW]) {
+        if (p.endsWith("[]")) continue;
+        const dot = p.lastIndexOf(".");
+        expect(vm.observed[p.slice(0, dot)] ?? [], `${view}: ${p}`).toContain(p.slice(dot + 1));
+      }
+    }
+  });
+
+  it("mNav's one key is not supplied by its composite partners (mTeam, mSettings) — B2", () => {
+    for (const rel of [
+      "league-a/mTeam.json",
+      "league-a/mSettings.json",
+      "league-b/mTeam.json",
+      "league-c/mTeam.json",
+    ]) {
+      const body = JSON.parse(readFileSync(path.join(REC, rel), "utf8")) as Json;
+      expect(requiredPathStatus(body, "$.members[].isLeagueCreator"), rel).toBe("absent");
+    }
+    expect(manifest.probes.shape.required["$.members[]"]).toMatchObject({
+      isLeagueCreator: "boolean",
+    });
+  });
+
+  it("the probe's required sets contain the seed for every view it requests (one notation)", () => {
+    for (const probe of [manifest.probes.host, manifest.probes.shape])
+      for (const view of probe.views)
+        for (const p of REQUIRED_PATHS_BY_VIEW[view as keyof typeof REQUIRED_PATHS_BY_VIEW]) {
+          const dot = p.lastIndexOf(".");
+          expect(Object.keys(probe.required[p.slice(0, dot)] ?? {}), `${view}: ${p}`).toContain(
+            p.slice(dot + 1),
+          );
+        }
+  });
+
+  it("SKELETON_PATHS are exactly what the recorded league skeleton carries; none is required", () => {
+    for (const p of SKELETON_PATHS) {
+      expect(requiredPathStatus(skeleton, p), p).toBe("present");
+      expect(SKELETON_TOP_LEVEL_KEYS, p).toContain(p.slice(2).split(/[.[]/)[0]);
+      for (const [view, paths] of Object.entries(REQUIRED_PATHS_BY_VIEW))
+        expect(paths, `${view} requires a skeleton path ${p}`).not.toContain(p);
+    }
+    expect(Object.keys(skeleton as object).sort()).toEqual(
+      SKELETON_TOP_LEVEL_KEYS.filter((k) => k !== "draftDetail"),
+    );
+  });
+
+  it("REQUIRED_PATHS_UNVERIFIED only names views without a solo recording (the list can only shrink)", () => {
+    const solo = new Set(
+      (
+        JSON.parse(readFileSync(path.join(ROOT, "fixtures", "espn", "manifest.json"), "utf8")) as {
+          files: { views: string[]; status: number }[];
+        }
+      ).files
+        .filter((f) => f.status === 200 && f.views.length === 1)
+        .map((f) => f.views[0]),
+    );
+    for (const v of REQUIRED_PATHS_UNVERIFIED) expect(solo.has(v), v).toBe(false);
   });
 });
 
 describe("manifest and severities", () => {
-  it("manifest location and version", () => {
-    expect(MANIFEST_PATH).toBe("fixtures/espn/manifest.json");
+  it("ONE manifest: the probe's file, typed exactly by DriftManifest, parsed and validated", () => {
+    expect(MANIFEST_PATH).toBe("fixtures/drift/manifest.json");
+    expect(path.join(ROOT, MANIFEST_PATH)).toBe(DEFAULT_MANIFEST);
     expect(MANIFEST_FORMAT_VERSION).toBe(1);
+    expect(MANIFEST_HASH_ALGORITHM).toBe("sha256-canonical-json");
+    const parsed: DriftManifest = committed;
+    expect(parsed.version).toBe(MANIFEST_FORMAT_VERSION);
+    expect(() => {
+      validateManifest(JSON.parse(readFileSync(path.join(ROOT, MANIFEST_PATH), "utf8")));
+    }).not.toThrow();
+    const { sha256 } = loadManifest(DEFAULT_MANIFEST);
+    expect(sha256).toBe(contentSha256(JSON.parse(readFileSync(DEFAULT_MANIFEST, "utf8")) as Json));
+    expect(sha256).toMatch(/^[0-9a-f]{64}$/);
   });
   it("meaning-changing signals are errors; additive keys are counted", () => {
     expect(SIGNAL_SEVERITY).toEqual({

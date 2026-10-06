@@ -19,14 +19,28 @@ export type {
 /** `eff probe` / `eff doctor` exit code when drift is red or the host moved (plan 03 §1.3). */
 export const DRIFT_EXIT_CODE = EXIT_CODES.drift;
 
-/** The manifest file, relative to the repo (plan 01 §7). */
-export const MANIFEST_PATH = "fixtures/espn/manifest.json";
-/** The manifest format version (plan 03 §7: a newer manifest re-baselines on its first probe). */
+/**
+ * The ONE drift manifest, relative to the repo (plan 01 §7, plan 05 §3.1 step 4 — content as they
+ * specify; the FILE is the probe's, decision recorded): the daily probe's required/observed key
+ * sets (`probes`) and the per-view observations of every recorded view (`views`: entity key sets,
+ * enum values, array-length ranges, the host), regenerated together by
+ * `scripts/probe.ts --rebaseline` over the committed anonymised fixtures. scripts/probe.ts and
+ * src/drift read this same file. `fixtures/espn/manifest.json` is the recording/hash manifest only.
+ */
+export const MANIFEST_PATH = "fixtures/drift/manifest.json";
+/** The manifest format version (`version`; plan 03 §7: a newer manifest re-baselines on its first probe). */
 export const MANIFEST_FORMAT_VERSION = 1;
+/**
+ * How G1 `drift.manifest_hash` and the probe line's `manifest_sha256` are computed: sha256
+ * (lowercase hex) of the manifest's canonical JSON (keys sorted, no whitespace) — the same value
+ * in every process (scripts/espn-fixture/canonical.ts `contentSha256`).
+ */
+export const MANIFEST_HASH_ALGORITHM = "sha256-canonical-json" as const;
 
 /**
- * The keys of ESPN's skeleton response for ANY view, incl. unknown ones (research 03 §A.2 P28):
- * a required key that is in this set can never detect a renamed view.
+ * The top-level keys of ESPN's skeleton response for ANY view, incl. unknown ones (research 03
+ * §A.2 P28; the recorded `fixtures/espn/recorded/league-a/skeleton.json` has every key but
+ * `draftDetail`): a required key in this set can never detect a renamed view.
  */
 export const SKELETON_TOP_LEVEL_KEYS: readonly string[] = Object.freeze([
   "draftDetail",
@@ -40,67 +54,123 @@ export const SKELETON_TOP_LEVEL_KEYS: readonly string[] = Object.freeze([
   "status",
   "teams",
 ]);
-/** Skeleton paths that are present even for a bogus view (slim `teams[]`, `members[]`, `settings{name}`). */
+/**
+ * Paths present even for a bogus view — exactly what the recorded skeleton carries (slim `teams[]`
+ * with owners, `members[]` with names and the manager flag, `settings.name`, three `status`
+ * keys). tests/drift/types.test.ts evaluates every REQUIRED path against the recorded skeleton
+ * (absent there) and against a recorded fixture of the view (present there).
+ */
 export const SKELETON_PATHS: readonly string[] = Object.freeze([
-  "draftDetail.drafted",
-  "draftDetail.inProgress",
-  "settings.name",
-  "teams[].id",
-  "teams[].abbrev",
-  "teams[].name",
-  "members[].id",
+  "$.settings.name",
+  "$.status.currentMatchupPeriod",
+  "$.status.isActive",
+  "$.status.latestScoringPeriod",
+  "$.teams[].id",
+  "$.teams[].abbrev",
+  "$.teams[].owners",
+  "$.members[].id",
+  "$.members[].displayName",
+  "$.members[].isLeagueManager",
 ]);
 
 /**
  * The seed of required paths per view: the keys each view ADDS over the skeleton (research 03
  * §A.2). A response missing any of these is drift (`ESPN_DRIFT_DETECTED`), because ESPN answers an
- * unknown or renamed view with 200 and a skeleton. Paths: `a.b` objects, `[]` arrays, `<root>[]`
- * for a root array. The views/*.schema.ts required sets must contain these and stay a subset of the
- * manifest's observed keys (plan 05 §3.3).
+ * unknown or renamed view with 200 and a skeleton. Notation = the probe manifest's pattern
+ * language: `$` the root, `.key` a property, `[]` every array element; a path is present when its
+ * parent pattern selects ≥ 1 node and every selected node has the last key (`$[]`: the root is a
+ * non-empty array). The views/*.schema.ts required sets must contain these and stay a subset of
+ * the manifest's observed keys (plan 05 §3.3). `mNav` adds only `members[].isLeagueCreator`: its
+ * other keys are in the skeleton (`isLeagueManager`, `owners`) or come from `mTeam` too.
  */
 export const REQUIRED_PATHS_BY_VIEW: Readonly<Record<EspnView, readonly string[]>> = Object.freeze({
   mSettings: [
-    "settings.scoringSettings",
-    "settings.rosterSettings",
-    "settings.acquisitionSettings",
-    "settings.scheduleSettings",
+    "$.settings.scoringSettings",
+    "$.settings.rosterSettings",
+    "$.settings.acquisitionSettings",
+    "$.settings.scheduleSettings",
   ],
-  mNav: ["teams[].owners", "members[].isLeagueManager"],
-  mTeam: ["teams[].record", "teams[].transactionCounter", "teams[].waiverRank"],
-  mStandings: ["teams[].record"],
-  mRoster: ["teams[].roster.entries"],
-  mMatchup: ["schedule[].matchupPeriodId"],
-  mMatchupScore: ["schedule[].playoffTierType"],
-  mBoxscore: ["schedule[].home.rosterForCurrentScoringPeriod"],
-  mScoreboard: ["schedule[].home.totalPoints"],
-  mDraftDetail: ["draftDetail.picks"],
-  mTransactions2: ["transactions"],
-  mPendingTransactions: ["pendingTransactions"],
-  mPositionalRatings: ["positionAgainstOpponent.positionalRatings"],
-  kona_player_info: ["players"],
-  kona_playercard: ["players"],
-  kona_league_communication: ["topics"],
-  proTeamSchedules_wl: ["settings.proTeams"],
-  players_wl: ["<root>[]"],
+  mNav: ["$.members[].isLeagueCreator"],
+  mTeam: ["$.teams[].record", "$.teams[].transactionCounter", "$.teams[].waiverRank"],
+  mStandings: ["$.teams[].record"],
+  mRoster: ["$.teams[].roster.entries"],
+  mMatchup: ["$.schedule[].matchupPeriodId"],
+  mMatchupScore: ["$.schedule[].playoffTierType"],
+  mBoxscore: ["$.schedule[].home.rosterForCurrentScoringPeriod"],
+  mScoreboard: ["$.schedule[].home.totalPoints"],
+  mDraftDetail: ["$.draftDetail.picks"],
+  mTransactions2: ["$.transactions"],
+  mPendingTransactions: ["$.pendingTransactions"],
+  mPositionalRatings: ["$.positionAgainstOpponent.positionalRatings"],
+  kona_player_info: ["$.players"],
+  kona_playercard: ["$.players"],
+  kona_league_communication: ["$.topics"],
+  proTeamSchedules_wl: ["$.settings.proTeams"],
+  players_wl: ["$[]"],
 });
 
-/** Per-view observations in the manifest (plan 01 §7). */
+/**
+ * Views whose required set no recorded fixture verifies yet (no solo recording; mNav is verified
+ * on the recorded composite `mSettings&mNav&mTeam`). The list may only shrink: a test fails when
+ * a view here gains a recording without leaving it.
+ */
+export const REQUIRED_PATHS_UNVERIFIED: readonly EspnView[] = Object.freeze([
+  "mStandings",
+  "mMatchupScore",
+  "mScoreboard",
+  "mDraftDetail",
+  "mTransactions2",
+  "mPendingTransactions",
+  "mPositionalRatings",
+  "kona_playercard",
+  "kona_league_communication",
+  "players_wl",
+]);
+
+/** A required key's JSON type: one name or a `|` union (`integer|null`). */
+export type KeyType = string;
+/** A JSON scalar an enum observation may hold. */
+export type EnumValue = string | number | boolean | null;
+
+/** One probe's spec (fixtures/drift/manifest.json `probes.host` / `probes.shape`). */
+export interface ProbeSpec {
+  /** ESPN view names the probe requests, in order. */
+  readonly views: readonly string[];
+  /** Entity pattern → { key: type }. A missing key or a wrong type is red drift. */
+  readonly required: Readonly<Record<string, Readonly<Record<string, KeyType>>>>;
+  /** Entity pattern → every key seen in the recorded fixtures; anything else is additive drift. */
+  readonly observed: Readonly<Record<string, readonly string[]>>;
+  /** Array pattern → the fewest elements a healthy body has (an emptied list is red drift). */
+  readonly minItems?: Readonly<Record<string, number>>;
+  /** Value pattern → the allowed values; a value outside the set is red drift (plan 01 §7). */
+  readonly enums?: Readonly<Record<string, readonly EnumValue[]>>;
+  /** Entity pattern → keys ESPN sends that the scrubber removes: known, never additive. */
+  readonly scrubbed?: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * One view's observations (plan 01 §7 manifest; plan 05 §3.1 step 4), generated from the recorded
+ * fixtures named in `sources`: per-entity key sets, enum values, array-length ranges.
+ */
 export interface ViewManifest {
-  readonly top_level_keys: readonly string[];
-  /** Entity name (`team`, `rosterEntry`, `player`, `stats`, `scheduleItem`, `settings.*`, `status`) → keys. */
-  readonly entity_keys: Readonly<Record<string, readonly string[]>>;
-  /** JSON path → observed enum values. */
-  readonly enums: Readonly<Record<string, readonly string[]>>;
-  /** JSON path → observed array length range. */
+  /** Recorded fixture paths, relative to `fixtures/`. */
+  readonly sources: readonly string[];
+  /** Entity pattern (`$`, `$.teams[]`, `$.teams[].roster.entries[]`, `{}` = map values) → keys. */
+  readonly observed: Readonly<Record<string, readonly string[]>>;
+  /** Value pattern → observed enum values (in-call: an unknown value is a warning, plan 01 §7). */
+  readonly enums: Readonly<Record<string, readonly EnumValue[]>>;
+  /** Array pattern → observed length range. */
   readonly array_lengths: Readonly<Record<string, { readonly min: number; readonly max: number }>>;
 }
 
-/** The manifest (generated from the committed, anonymised fixtures — research 03 §F.3 step 4). */
+/** The drift manifest, exactly as fixtures/drift/manifest.json holds it. */
 export interface DriftManifest {
-  readonly format_version: number;
-  /** A fixed instant recorded at capture (never the header — research 03 §F.3 step 2). */
-  readonly captured_at: IsoInstant;
+  readonly $comment?: string;
+  /** The recorded fixtures each probe's `observed` came from (relative to `fixtures/`). */
+  readonly $sources: { readonly host: readonly string[]; readonly shape: readonly string[] };
+  readonly version: number;
   readonly host: string;
+  readonly probes: { readonly host: ProbeSpec; readonly shape: ProbeSpec };
   readonly views: Readonly<Partial<Record<EspnView, ViewManifest>>>;
 }
 
