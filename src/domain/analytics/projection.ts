@@ -541,7 +541,9 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
   if (run.partial)
     warnings.push(`partial: ${String(k)} of ${String(n)} samples before the CPU deadline`);
 
-  const players: ProjectedPlayer[] = plans.map(({ t, tr, assumptions, weeksOut, espnMissing }) => {
+  // post-processing (quantile sorts, ROS sums) is cooperative too: one player per step
+  type Plan = (typeof plans)[number];
+  const build = ({ t, tr, assumptions, weeksOut, espnMissing }: Plan): ProjectedPlayer => {
     const weeksP: ProjectedWeek[] = weeksOut.map((x) => ({
       ...x.info,
       dist:
@@ -615,7 +617,16 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
       assumptions,
     };
     return { target: t, projection, weeks: weeksP };
-  });
+  };
+  const players: ProjectedPlayer[] = [];
+  await runCooperative(
+    plans.length,
+    (i) => {
+      const plan = plans[i];
+      if (plan !== undefined) players.push(build(plan));
+    },
+    { pacer, deadlineMs: null },
+  );
 
   const inputs = mergeInputs(collectInputs(req.stamps ?? [], req.clock), req.inputs ?? []);
   return {
