@@ -61,9 +61,11 @@ export {
   MAX_RULES,
   type NormalizeOptions,
   normalizeSettings,
+  type ProviderScoringInput,
   renormalizeSettings,
   ROUNDING_MODES,
   settingsWarnings,
+  translateScoringInput,
   type UnmappedLog,
   unmappedIds,
 } from "./settings.js";

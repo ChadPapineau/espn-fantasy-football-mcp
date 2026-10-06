@@ -11,8 +11,10 @@ import {
   normalizeSettings,
   renormalizeSettings,
   settingsWarnings,
+  translateScoringInput,
   unmappedIds,
 } from "../../../src/domain/scoring/settings.js";
+import type { ScoringSettingsTranslator } from "../../../src/providers/espn/types.js";
 import { SETTINGS_HASH_RE, type ScoringSettings } from "../../../src/domain/scoring/types.js";
 import { item, settingsOf } from "./helpers.js";
 
@@ -335,5 +337,78 @@ describe("unmapped ids, logged once per settings_hash (plan 08 §3.1)", () => {
   });
   it.each([0, -1, 1.5, Number.NaN])("refuses capacity %s", (c) => {
     expect(() => createUnmappedLog(c)).toThrow(RangeError);
+  });
+});
+
+describe("translateScoringInput (the provider's injected ScoringSettingsTranslator)", () => {
+  it("is assignable to the provider's ScoringSettingsTranslator and equals normalizeSettings", () => {
+    const t: ScoringSettingsTranslator = translateScoringInput;
+    const out = t({
+      scoring_type: "H2H_POINTS",
+      items: [
+        { stat_id: 53, points: 0.5, overrides: {}, is_reverse: false },
+        { stat_id: 4, points: 5, overrides: { "15": 6 }, is_reverse: true },
+      ],
+      matchup_tie_rule: "SLOT_POINTS",
+      playoff_tie_rule: null,
+      home_bonus: 0,
+      playoff_home_bonus: 1,
+    });
+    expect(out).toEqual(
+      normalizeSettings({
+        scoringItems: [
+          { statId: 53, points: 0.5, pointsOverrides: {}, isReverseItem: false },
+          { statId: 4, points: 5, pointsOverrides: { "15": 6 }, isReverseItem: true },
+        ],
+        matchupTieRule: "SLOT_POINTS",
+        homeTeamBonus: 0,
+        playoffHomeTeamBonus: 1,
+      }),
+    );
+    expect(out.matchup).toEqual({
+      tie_rule: "SLOT_POINTS",
+      playoff_tie_rule: "NONE",
+      home_bonus: 0,
+      playoff_home_bonus: 1,
+    });
+    const nullTie = translateScoringInput({
+      scoring_type: "H2H_POINTS",
+      items: [],
+      matchup_tie_rule: null,
+      playoff_tie_rule: "NONE",
+      home_bonus: 0,
+      playoff_home_bonus: 0,
+    });
+    expect(nullTie.matchup.tie_rule).toBe("NONE");
+  });
+  it.each([
+    ["not an object", null],
+    ["no items", { scoring_type: "H2H_POINTS" }],
+    [
+      "an item not an object",
+      {
+        scoring_type: "H2H_POINTS",
+        items: [7],
+        matchup_tie_rule: null,
+        playoff_tie_rule: null,
+        home_bonus: 0,
+        playoff_home_bonus: 0,
+      },
+    ],
+    [
+      "an item with a bad stat id",
+      {
+        scoring_type: "H2H_POINTS",
+        items: [{ stat_id: -1, points: 1, overrides: {}, is_reverse: false }],
+        matchup_tie_rule: null,
+        playoff_tie_rule: null,
+        home_bonus: 0,
+        playoff_home_bonus: 0,
+      },
+    ],
+  ])("refuses %s (invalid_settings)", (_label, input) => {
+    expect(() => translateScoringInput(input as never)).toThrow(
+      expect.objectContaining({ code: "invalid_settings" }),
+    );
   });
 });

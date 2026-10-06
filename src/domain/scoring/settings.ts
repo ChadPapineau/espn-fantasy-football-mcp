@@ -337,6 +337,53 @@ export function normalizeSettings(input: unknown, opts: NormalizeOptions = {}): 
   });
 }
 
+/**
+ * The provider's value-checked scoring input — structurally `EspnScoringInput` in
+ * src/providers/espn/types.ts (the domain never imports a provider type; a test holds the two
+ * assignable).
+ */
+export interface ProviderScoringInput {
+  readonly scoring_type: string;
+  readonly items: readonly {
+    readonly stat_id: number;
+    readonly points: number;
+    readonly overrides: Readonly<Record<string, number>>;
+    readonly is_reverse: boolean;
+  }[];
+  readonly matchup_tie_rule: string | null;
+  readonly playoff_tie_rule: string | null;
+  readonly home_bonus: number;
+  readonly playoff_home_bonus: number;
+}
+
+/**
+ * The provider's `ScoringSettingsTranslator` (plan 08 §1 `normalizeSettings()` injected into the
+ * ESPN provider): its snake_case input → `normalizeSettings` (the same validation; a null tie rule
+ * is `NONE`). Throws `invalid_settings` on a malformed input.
+ */
+export function translateScoringInput(input: ProviderScoringInput): ScoringSettings {
+  const raw: unknown = input;
+  if (!isObject(raw) || !Array.isArray(raw.items))
+    throw bad("provider scoring input must carry items");
+  return normalizeSettings({
+    scoringItems: input.items.map((i) => {
+      const it: unknown = i;
+      return isObject(it)
+        ? {
+            statId: it.stat_id,
+            points: it.points,
+            pointsOverrides: it.overrides,
+            isReverseItem: it.is_reverse,
+          }
+        : it;
+    }),
+    matchupTieRule: input.matchup_tie_rule ?? undefined,
+    playoffMatchupTieRule: input.playoff_tie_rule ?? undefined,
+    homeTeamBonus: input.home_bonus,
+    playoffHomeTeamBonus: input.playoff_home_bonus,
+  });
+}
+
 /** ESPN ids of the unmapped rules (`canonical: null`), numerically sorted (plan 08 §3.1). */
 export function unmappedIds(settings: ScoringSettings): readonly string[] {
   return Object.freeze(
