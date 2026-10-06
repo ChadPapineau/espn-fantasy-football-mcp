@@ -229,6 +229,10 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
   },
 ]);
 
+// PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): the writes-phase `journal
+// reconcile` job (plan 06 §1.4 — hourly while any `sent_unknown` row exists) would join the table
+// above. No job writes to ESPN in this build, and none is listed.
+
 /** Every job name. */
 export const JOB_NAMES: readonly string[] = JOBS.map((j) => j.name);
 

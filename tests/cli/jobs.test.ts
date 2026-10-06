@@ -20,6 +20,7 @@ import {
 } from "../../src/cli/credential-check.js";
 import {
   dayFirstKickoff,
+  nextDayFirstKickoff,
   inSeasonWindow,
   isWorkingRun,
   startJob,
@@ -164,6 +165,15 @@ describe("pure helpers", () => {
     ]);
     expect(dayFirstKickoff(local, sunday)).toBe(new Date(2026, 9, 11, 13, 0).getTime());
     expect(dayFirstKickoff(local, now)).toBeNull();
+    // the next kickoff counts only when it is its own day's first; a game just after midnight local
+    // time is still found by the run an hour before it (the previous calendar day)
+    expect(nextDayFirstKickoff(local, sunday)).toBe(new Date(2026, 9, 11, 13, 0).getTime());
+    expect(nextDayFirstKickoff(local, new Date(2026, 9, 11, 14, 0).getTime())).toBeNull();
+    const midnight = sched([game(5, new Date(2026, 9, 12, 0, 15).toISOString())]);
+    expect(nextDayFirstKickoff(midnight, new Date(2026, 9, 11, 23, 10).getTime())).toBe(
+      new Date(2026, 9, 12, 0, 15).getTime(),
+    );
+    expect(nextDayFirstKickoff(sched([]), sunday)).toBeNull();
     expect(isWorkingRun(1000, 1000)).toBe(true);
     expect(isWorkingRun(1001, 1000)).toBe(false);
     expect(isWorkingRun(1000 - 3_600_000, 1000)).toBe(false);

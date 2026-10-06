@@ -205,6 +205,20 @@ export function dayFirstKickoff(schedule: ProSchedule, nowMs: number): number | 
   return first;
 }
 
+/**
+ * The next kickoff that is the FIRST of its own local calendar day, when it is the very next
+ * confirmed kickoff at or after now; else null. Judging the kickoff's day (not now's) keeps a game
+ * that starts shortly after midnight local time from being missed by the run an hour before it.
+ */
+export function nextDayFirstKickoff(schedule: ProSchedule, nowMs: number): number | null {
+  let next: number | null = null;
+  for (const g of schedule.games) {
+    const k = kickoffMs(g);
+    if (k !== null && k >= nowMs && (next === null || k < next)) next = k;
+  }
+  return next !== null && dayFirstKickoff(schedule, next) === next ? next : null;
+}
+
 /** Whether `nowMs` is the working run for `targetMs`: inside (target − window, target]. */
 export function isWorkingRun(
   nowMs: number,

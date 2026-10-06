@@ -31,11 +31,11 @@ import type { ScoringSettings } from "../domain/scoring/types.js";
 import type { StoreFactory } from "../store/types.js";
 import { localDay } from "./credential-check.js";
 import {
-  dayFirstKickoff,
   endJob,
   inSeasonWindow,
   isWorkingRun,
   jobFailure,
+  nextDayFirstKickoff,
   proScheduleOf,
   startJob,
   weekFirstKickoff,
@@ -568,7 +568,7 @@ export async function preKickoff(
   try {
     const now = io.clock.nowMs();
     const schedule = await proScheduleOf(run, config.season);
-    const first = schedule === null ? null : dayFirstKickoff(schedule, now);
+    const first = schedule === null ? null : nextDayFirstKickoff(schedule, now);
     if (first === null || !isWorkingRun(now, first - PRE_KICKOFF_MS)) {
       await writeLine(
         io.stdout,

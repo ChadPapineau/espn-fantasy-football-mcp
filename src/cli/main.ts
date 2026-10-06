@@ -33,6 +33,11 @@ import { status } from "./status.js";
 import { errorText, openStore } from "./store-access.js";
 import { uninstall } from "./uninstall.js";
 
+// PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): the writes-phase commands —
+// `eff confirm` (the out-of-band confirmation channel, plan 02 §4.2), `eff journal` and
+// `eff setup --enable-writes` (the typed acknowledgement, plan 02 §3.2) — would be dispatched here.
+// None exists in this build; an unknown flag or command is a usage error (exit 2).
+
 /** The subcommands (selftest-read is internal: run only by setup's one-shot LaunchAgent). */
 export const COMMANDS = [
   "serve",

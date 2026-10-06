@@ -441,3 +441,66 @@ describe("setup --page (loopback)", () => {
     noValues(io);
   });
 });
+
+describe("setup failure paths", () => {
+  it("--page: a busy explicit port is exit 2 with the owner; an interrupt stops it with nothing stored", async () => {
+    sb = sandbox();
+    const busy = await new Promise<import("node:net").Server>((resolve) => {
+      const s = createServer();
+      s.listen({ host: "127.0.0.1", port: 0 }, () => {
+        resolve(s);
+      });
+    });
+    const a = busy.address();
+    const port = typeof a === "object" && a !== null ? a.port : 0;
+    try {
+      const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0", EFF_SETUP_PORT: String(port) } });
+      expect(
+        await setup(
+          io,
+          { reset: false, storage: "file", seeding: undefined, serviceName: undefined, page: true },
+          { network: network(), selftest: selftest("ok") },
+        ),
+      ).toBe(2);
+      expect(io.err.text).toContain(`Port ${String(port)} is in use`);
+    } finally {
+      busy.close();
+    }
+    const ctl = new AbortController();
+    ctl.abort();
+    const io2 = makeIo(sb, {
+      env: { ESPN_LEAGUE_ID: "0", EFF_SETUP_PORT: String(await freePort()) },
+    });
+    expect(
+      await setup(
+        io2,
+        { reset: false, storage: "file", seeding: undefined, serviceName: undefined, page: true },
+        { network: network(), selftest: selftest("ok"), signal: ctl.signal },
+      ),
+    ).toBe(1);
+    expect(io2.out.text).toContain("Stopped: nothing was stored.");
+    expect(existsSync(path.join(sb.configDir, "session.json"))).toBe(false);
+  });
+  it("a store that cannot open is exit 1; a config.json that cannot be written fails closed", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0", EFF_CACHE_DIR: "/dev/null/nope" } });
+    expect(
+      await setup(
+        io,
+        { reset: false, storage: "file", seeding: undefined, serviceName: undefined, page: false },
+        { network: network() },
+      ),
+    ).toBe(1);
+    expect(io.err.text).toContain("store.sqlite could not be opened");
+    // a config dir that is a FILE: the seeding record and the setup record both refuse
+    const s2 = sandbox();
+    try {
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(s2.configDir, "not a dir");
+      const seed = makeIo(s2, { env: { ESPN_LEAGUE_ID: "0" } });
+      expect(await main(["setup", "--seeding", "espn_rule"], seed)).toBe(2);
+    } finally {
+      s2.cleanup();
+    }
+  });
+});
