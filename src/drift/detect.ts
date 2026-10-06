@@ -12,6 +12,8 @@ import {
   type DriftObservations,
   type DriftSignal,
   type DriftSignalKind,
+  type EnumValue,
+  type ViewObservations,
 } from "./types.js";
 
 /** Keys the fixture scrubber removes (scripts/espn-fixture/scrub.ts REMOVE_KEYS): known, never additive. */
@@ -47,6 +49,19 @@ export function enumToken(v: unknown): string | null {
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : null;
   if (typeof v === "string") return ENUM_TOKEN_RE.test(v) ? v : null;
   return null;
+}
+
+/**
+ * An object whose keys are ids, not schema — every key an integer (stats by stat id, games by
+ * period, players by position, acquisitions by matchup). The manifest generator walks such an
+ * object by value and records no keys for it (scripts/espn-fixture/drift.ts `isMapLike`); where an
+ * EMPTY instance was recorded as an entity with no keys, its ids must not read as additive drift.
+ * An ordinary object that gains an odd key is still reported (as `<key>`) — only all-integer maps are
+ * exempt, so one odd key can never hide other additions.
+ */
+export function isMapLike(o: Record<string, unknown>): boolean {
+  const keys = Object.keys(o);
+  return keys.length > 0 && keys.every((k) => /^-?[0-9]+$/.test(k));
 }
 
 function lastKey(pattern: string): string {
@@ -107,7 +122,7 @@ function observationSignals(
   for (const [pattern, keys] of Object.entries(obs.observed)) {
     const known = new Set(keys);
     for (const node of select(body, pattern)) {
-      if (!isJsonObject(node.value)) continue;
+      if (!isJsonObject(node.value) || isMapLike(node.value)) continue;
       for (const k of Object.keys(node.value)) {
         if (known.has(k) || SCRUBBED_KEYS.has(k)) continue;
         const path = `${pattern}.${/^[A-Za-z_$][\w$]*$/.test(k) ? k : "<key>"}`;
@@ -118,6 +133,38 @@ function observationSignals(
       }
     }
   }
+  return out;
+}
+
+/**
+ * The observations of a COMPOSITE request (several views in one response — research 03 §A.2: ESPN
+ * views compose additively into one object): at a pattern several requested views share (`$`,
+ * `$.settings`, `$.teams[]` …), the keys and enum values any of them was observed with are known,
+ * so `mSettings`+`mNav` does not report mSettings' `settings` keys as additive under mNav (nor
+ * mNav's `members`/`teams` under mSettings). Each view keeps only its own patterns.
+ */
+export function compositeObservations(
+  views: readonly EspnView[],
+  observations: DriftObservations,
+): DriftObservations {
+  const present = views.flatMap((v) => {
+    const o = observations[v];
+    return o === undefined ? [] : [[v, o] as const];
+  });
+  const union = <T>(
+    pick: (o: ViewObservations) => Readonly<Record<string, readonly T[]>>,
+    pattern: string,
+  ): T[] => [...new Set(present.flatMap(([, o]) => pick(o)[pattern] ?? []))];
+  const out: Partial<Record<EspnView, ViewObservations>> = {};
+  for (const [view, obs] of present)
+    out[view] = {
+      observed: Object.fromEntries(
+        Object.keys(obs.observed).map((p) => [p, union((o) => o.observed, p)]),
+      ),
+      enums: Object.fromEntries(
+        Object.keys(obs.enums).map((p) => [p, union<EnumValue>((o) => o.enums, p)]),
+      ),
+    };
   return out;
 }
 
@@ -133,8 +180,10 @@ export function checkResponse(
 ): DriftCheck {
   const { signals, skeleton } = requiredSignals(views, body);
   const drifted = signals.length > 0;
-  if (!drifted && observations !== undefined)
-    for (const view of views) signals.push(...observationSignals(view, body, observations[view]));
+  if (!drifted && observations !== undefined) {
+    const merged = views.length > 1 ? compositeObservations(views, observations) : observations;
+    for (const view of views) signals.push(...observationSignals(view, body, merged[view]));
+  }
   return {
     signals,
     drifted,

@@ -7,6 +7,7 @@
 // assumptions, widened on evidence. Ported from sibling @d72e03b, adapted (ESPN integer ids).
 import { z } from "zod/v4";
 import { GSIS_ID_RE, SEASON_MIN, TEAM_ID_MAX, TEAM_ID_MIN, isNflTeam } from "../config/schema.js";
+import { N_SIMS_MAX as MEASURED_N_SIMS_MAX } from "../domain/analytics/constants.js";
 import { ESPN_TO_NFLVERSE_TEAM } from "../domain/crosswalk/types.js";
 import { SETTINGS_HASH_RE } from "../domain/scoring/types.js";
 import {
@@ -60,9 +61,10 @@ export const BOUNDS = Object.freeze({
   sinceHours: { min: 1, max: 168, default: 72 },
   newsLimit: { min: 1, max: 50, default: 20 },
   sinceDays: { min: 1, max: 30, default: 7 },
-  nSims: { min: 1000, max: 20_000, default: 4000 },
+  /** The ceiling is the analytics module's measured one (one source: src/domain/analytics/constants.ts). */
+  nSims: { min: 1000, max: MEASURED_N_SIMS_MAX, default: 4000 },
   /** E3 `season`: the seeding simulator wants ≥ 10 000 paths (research 05 §2.4); same ceiling. */
-  nSimsSeason: { min: 1000, max: 20_000, default: 10_000 },
+  nSimsSeason: { min: 1000, max: MEASURED_N_SIMS_MAX, default: 10_000 },
   seed: { min: 0, max: 2 ** 31 - 1 },
   blendWeight: { min: 0, max: 1 },
   compareSwaps: { max: 5 },

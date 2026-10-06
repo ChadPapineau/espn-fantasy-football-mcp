@@ -3,6 +3,7 @@
 // with `pool`; E12's input schema; no league id argument). Adversarial: off-by-one at every bound,
 // duplicates, two selectors at once, hostile strings, unicode, oversized records.
 import fc from "fast-check";
+import { N_SIMS_MAX as ANALYTICS_N_SIMS_MAX } from "../../src/domain/analytics/constants.js";
 import { z } from "zod/v4";
 import { describe, expect, it } from "vitest";
 import {
@@ -75,6 +76,9 @@ describe("the bound table (plan 02 §5; changelog F61)", () => {
       8000, 20, 50,
     ]);
     expect(N_SIMS_MAX).toBe(BOUNDS.nSims.max);
+    // one source for the measured ceiling (plan 07 E1 A-7): the analytics module's constant
+    expect(N_SIMS_MAX).toBe(ANALYTICS_N_SIMS_MAX);
+    expect(BOUNDS.nSimsSeason.max).toBe(ANALYTICS_N_SIMS_MAX);
   });
   it.each([
     [weekSchema, 1, 18],

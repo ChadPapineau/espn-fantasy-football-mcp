@@ -18,6 +18,7 @@ import type {
   WeatherReader,
 } from "../../../src/domain/analytics/types.js";
 import type {
+  NflPlayersReader,
   PlayerUniverseReader,
   RosterWeeklyReader,
 } from "../../../src/domain/crosswalk/types.js";
@@ -390,7 +391,7 @@ describe("grounded in the real 2026 release files (2026-10-06)", () => {
 });
 
 describe("reader queries (one per domain reader method)", () => {
-  it("names exactly the reader methods of the domain ports, plus the pending crosswalk port", () => {
+  it("names exactly the reader methods of the domain ports, the crosswalk's included", () => {
     type Port<N extends string, I> = `${N}.${Extract<keyof I, string>}`;
     type Expected =
       | Port<"ProScheduleReader", ProScheduleReader>
@@ -400,9 +401,11 @@ describe("reader queries (one per domain reader method)", () => {
       | Port<"WeatherReader", WeatherReader>
       | Port<"RosterWeeklyReader", RosterWeeklyReader>
       | Port<"PlayerUniverseReader", PlayerUniverseReader>
-      | "NflPlayersReader.byEspnIds";
+      | Port<"NflPlayersReader", NflPlayersReader>;
     expectTypeOf<ReaderMethod>().toEqualTypeOf<Expected>();
-    expect(PENDING_PORT_READERS).toEqual(["NflPlayersReader.byEspnIds"]);
+    // the crosswalk module declared NflPlayersReader (src/domain/crosswalk/types.ts): none pending
+    expect(PENDING_PORT_READERS).toEqual([]);
+    expect(READER_QUERIES["NflPlayersReader.byEspnIds"].returns).toBe("NflPlayerRecord");
     for (const [k, r] of Object.entries(READER_QUERIES)) {
       expect(r.method).toBe(k);
       expect(r.statements.length).toBeGreaterThan(0);

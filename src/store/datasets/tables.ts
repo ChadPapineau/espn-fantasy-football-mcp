@@ -571,7 +571,8 @@ export const DS_TEAM_DEFENSE_WEEK = table({
   source: "nflverse:stats_player_week",
   upstream: `${RELEASES}/stats_player/stats_player_week_{season}.parquet`,
   season_key: "season",
-  row_filter: "player_id null/empty (the same rows as ds_stats_player_week are aggregated)",
+  row_filter:
+    "none: every row of the file is aggregated by team, including the team-level rows with no player_id (one holds a team-credited safety); those add defence stats only, never opponent yardage",
   description: "Team-defence week lines aggregated from player rows",
   columns: [
     int("season", false),
@@ -1029,7 +1030,7 @@ ORDER BY team, week`,
 WHERE season = :season AND game_id IN (SELECT value FROM json_each(:game_ids))`,
       ),
     ],
-    mapping: `nfl_team ← team; opponent ← opponent_team; line ← the D/ST StatLine of plan 08 §3.2 (dst_sack ← def_sacks, dst_int ← def_interceptions, dst_ff ← def_fumbles_forced, dst_fr ← fumble_recovery_opp, dst_int_td ← def_tds, dst_fr_td ← ${DST_FUMBLE_RETURN_TD_COLUMN}, return TDs ← special_teams_tds, dst_safety ← def_safeties, dst_blk ← def_fg_blocks + def_punt_blocks (+ def_pat_blocks per the league's rule), dst_kr_yd ← kickoff_return_yards, dst_pr_yd ← punt_return_yards, dst_pa_raw ← the opponent's score from statement 2 (final games only; definition (a)/(b) per plan 08 §3.2 U-6), dst_ya_raw ← opp_passing_yards − opp_sack_yards_lost + opp_rushing_yards ([U] ESPN's yards-allowed definition)); statement 2's game_ids are statement 1's game_id values`,
+    mapping: `nfl_team ← team; opponent ← opponent_team; line ← src/domain/scoring statLineFromTeamDefense (the one translator, plan 08 §3.2: dst_sack ← def_sacks, dst_int ← def_interceptions, dst_ff ← def_fumbles_forced, dst_fr ← fumble_recovery_opp, dst_int_td ← def_tds, dst_fr_td ← ${DST_FUMBLE_RETURN_TD_COLUMN}, dst_td ← their sum, ret_td_total ← special_teams_tds + def_tds + ${DST_FUMBLE_RETURN_TD_COLUMN}, dst_safety ← def_safeties, dst_blk ← def_fg_blocks + def_punt_blocks + def_pat_blocks (ESPN counts PAT blocks: 70/70 recorded weeks), kr_yd ← kickoff_return_yards, pr_yd ← punt_return_yards, dst_pa_raw ← the opponent's score from statement 2 net of the OPPONENT defence's interception- and fumble-return TDs and safeties (statement 1 read a second time for the opponent's row; final games only; U-6 settled, 69/70), dst_ya_raw ← opp_passing_yards + opp_rushing_yards − |opp_sack_yards_lost| (nflverse stores sack yards negative; 70/70)); statement 2's game_ids are statement 1's game_id values`,
   }),
   /** WeatherReader.forGames(gameIds) — the configured weather source's table, then the other. */
   "WeatherReader.forGames": reader({
@@ -1136,13 +1137,12 @@ WHERE season IN (SELECT value FROM json_each(:seasons))`,
       "as PlayerUniverseReader.all; statement 2's seasons are statement 1's distinct season values",
   }),
   /**
-   * NflPlayersReader.byEspnIds(espnIds) — the crosswalk fallback (research 04 §C step 2). PENDING
-   * PORT: no domain interface names it yet (src/domain/crosswalk/types.ts owns it); the store exposes
-   * it once the port exists.
+   * NflPlayersReader.byEspnIds(espnIds) — the crosswalk fallback (research 04 §C step 2). The port is
+   * src/domain/crosswalk/types.ts NflPlayersReader; the store exposes it as Store.nflPlayers.
    */
   "NflPlayersReader.byEspnIds": reader({
     method: "NflPlayersReader.byEspnIds",
-    returns: "NflPlayerRecord (pending port)",
+    returns: "NflPlayerRecord",
     statements: [
       stmt(
         "nflverse:players",
@@ -1160,7 +1160,9 @@ WHERE espn_id IN (SELECT value FROM json_each(:espn_ids)) ORDER BY espn_id`,
 /** A reader method key. */
 export type ReaderMethod = keyof typeof READER_QUERIES;
 
-/** Reader keys with no domain port yet (the store implements them once the port exists). */
-export const PENDING_PORT_READERS: readonly ReaderMethod[] = Object.freeze([
-  "NflPlayersReader.byEspnIds",
-]);
+/**
+ * Reader keys with no domain port yet (the store implements them once the port exists). Empty since
+ * the crosswalk module declared NflPlayersReader; kept as an export so a future pending port has one
+ * place to be named.
+ */
+export const PENDING_PORT_READERS: readonly ReaderMethod[] = Object.freeze([]);
