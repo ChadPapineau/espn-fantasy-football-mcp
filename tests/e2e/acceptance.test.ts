@@ -12,7 +12,8 @@
 // mean on the base and to points_only where the league is configured points_only; the mode agrees
 // with the sign of μ_m − μ_o under reading (a); no swap benches a lineup_locked starter (sunday-live).
 // A13a (retrospective): a call logged for the final week 4 is scored by espn_analyze_retrospective
-// (followed, realised, sample sizes with their caveats; the log text path-listed as untrusted).
+// (followed, realised, regret against the structured alternative offered, projection_vs_espn,
+// sample sizes with their caveats; the log text path-listed as untrusted).
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { priorityPremium } from "../../src/domain/analytics/waiverDp.js";
@@ -159,16 +160,59 @@ describe("A11a — start/sit on fx-10h", { timeout: 300_000 }, () => {
 });
 
 describe("A13a — a logged week-4 call is scored by the retrospective", { timeout: 300_000 }, () => {
-  it("record on the final week, then espn_analyze_retrospective(4): followed, realised, sample sizes, untrusted log text", async () => {
+  it("record on the final week, then espn_analyze_retrospective(4): followed, realised, regret, sample sizes, untrusted log text", async () => {
     const s = await open(null);
     const league = await ok(s, "espn_get_league");
     await ok(s, "espn_get_schedule", { weeks: [4] });
     const l4 = await ok(s, "espn_analyze_lineup", { week: 4, objective: "auto" });
+    const r4 = (l4.data as J).rec as {
+      subjects: {
+        player_id: number | null;
+        gsis_id: string | null;
+        role: string;
+        slot: string | null;
+      }[];
+      point_estimate: number;
+      distribution: unknown;
+    };
+    // the alternative offered: one starter swapped for a bench player who scored in week 4 — a
+    // structured alternative, so the retrospective can compute regret from the subjects
+    const box = await ok(s, "espn_get_box_score", { week: 4 });
+    const mineSide = ((box.data as J).matchups as { home: J; away: J | null }[])
+      .flatMap((m) => [m.home, m.away])
+      .find((x) => x !== null && x.team_id === 2) as {
+      players: { player_id: number; slot: string; points_espn: number | null }[];
+    };
+    const bench = mineSide.players.find(
+      (p) => p.slot === "BE" && typeof p.points_espn === "number",
+    );
+    expect(bench).toBeDefined();
+    const starts = r4.subjects.filter((x) => x.role === "start" && x.player_id !== null);
+    expect(starts.length).toBeGreaterThan(0);
+    const swapped = starts[0];
+    const altSubjects = [
+      ...r4.subjects.filter((x) => x !== swapped),
+      {
+        player_id: bench?.player_id ?? 0,
+        gsis_id: null,
+        role: "start",
+        slot: swapped?.slot ?? null,
+      },
+      { player_id: swapped?.player_id ?? 0, gsis_id: null, role: "sit", slot: null },
+    ];
     const rec = await ok(s, "espn_record_recommendation", {
       kind: "lineup",
       week: 4,
-      rec: (l4.data as J).rec,
-      alternatives: [],
+      rec: r4,
+      alternatives: [
+        {
+          action: "start the bench player instead",
+          subjects: altSubjects,
+          point_estimate: r4.point_estimate,
+          distribution: r4.distribution,
+          decision_metric_value: 0,
+        },
+      ],
       source_calls: [{ tool: "espn_analyze_lineup", request_id: (l4.meta as J).request_id }],
       settings_hash: ((league.data as J).scoring as J).settings_hash,
       followed_hint: "unknown",
@@ -178,7 +222,13 @@ describe("A13a — a logged week-4 call is scored by the retrospective", { timeo
     const retro = await ok(s, "espn_analyze_retrospective", { week: 4 });
     const data = retro.data as {
       final: boolean;
-      calls: { log_id: string; followed: boolean | null; realised: number | null }[];
+      calls: {
+        log_id: string;
+        followed: boolean | null;
+        realised: number | null;
+        regret: number | null;
+      }[];
+      metrics: { projection_vs_espn: J };
       sample_size: J;
       sample_size_caveats: string[];
     };
@@ -187,6 +237,8 @@ describe("A13a — a logged week-4 call is scored by the retrospective", { timeo
     expect(call).toBeDefined();
     expect(call?.followed).toBe(true);
     expect(typeof call?.realised).toBe("number");
+    expect(typeof call?.regret).toBe("number");
+    expect(data.metrics.projection_vs_espn).toHaveProperty("n_player_weeks");
     expect(Object.keys(data.sample_size).length).toBeGreaterThan(5);
     expect(data.sample_size_caveats.length).toBeGreaterThan(0);
     expect((retro.meta as { untrusted_fields: unknown[] }).untrusted_fields).toEqual(
