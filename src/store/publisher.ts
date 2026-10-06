@@ -381,6 +381,39 @@ export function openPublisher(
     return { ok: false, error: code };
   }
 
+  /**
+   * The `ok = 0` refresh_log row of a failed publish (best-effort once the publish itself failed): a
+   * SourceErrorCode outcome always means "the publisher tried to record it" (src/sources/runner.ts).
+   */
+  function recordFailure(
+    sourceId: DatasetSourceId,
+    releaseUpdatedAt: string | null,
+    startedAt: string,
+    code: SourceErrorCode,
+  ): void {
+    const now = clock.nowIso();
+    try {
+      patient("refresh_log", () => {
+        insertRefreshRow(deps, {
+          source: sourceId,
+          file: null,
+          file_version: null,
+          release_updated_at: releaseUpdatedAt,
+          seasons: [],
+          rows: null,
+          columns_hash: null,
+          started_at: startedAt,
+          finished_at: now,
+          ok: false,
+          error: code,
+          checked_at: now,
+        });
+      });
+    } catch {
+      // the store itself is unwritable: nothing more to record
+    }
+  }
+
   async function publish(
     sourceId: DatasetSourceId,
     version: string,
@@ -409,6 +442,7 @@ export function openPublisher(
       acquired = jobLock.acquire(job, process.pid, clock.nowIso(), PUBLISH_LOCK_STALE_MS);
     } catch {
       heldInProcess.delete(lockKey);
+      recordFailure(sourceId, releaseUpdatedAt, clock.nowIso(), "INTERNAL");
       return refuse("INTERNAL");
     }
     if (!acquired) {
@@ -420,13 +454,13 @@ export function openPublisher(
     let staging: string | null = null;
     let wdb: DatabaseSync | null = null;
     let writer: StagingWriter | null = null;
-    let recordFailure = true;
+    let recordFailureRow = true;
     try {
       recordLiveFile(sourceId, finalPath);
       // single-flight (plan 01 §5.7): another refresh may have published this very release since
       // the caller's unchanged-check; only checked_at advances (the release age basis).
       if (options?.skipIfCurrent === true && isCurrent(sourceId, version)) {
-        recordFailure = false; // a failed check write is not a failed publish
+        recordFailureRow = false; // a failed check write is not a failed publish
         patient(
           "refresh_log",
           () => {
@@ -517,7 +551,7 @@ export function openPublisher(
         });
       } catch (e) {
         if (commit.renamed) {
-          recordFailure = false; // the file IS live: no failure row
+          recordFailureRow = false; // the file IS live: no failure row
           throw new PublishError(PUBLISH_UNRECORDED);
         }
         throw e;
@@ -544,29 +578,7 @@ export function openPublisher(
       if (e instanceof PublishError && e.code === PUBLISH_UNRECORDED)
         return refuse(PUBLISH_UNRECORDED);
       const code = errorCode(e);
-      if (recordFailure) {
-        const now = clock.nowIso();
-        try {
-          patient("refresh_log", () => {
-            insertRefreshRow(deps, {
-              source: sourceId,
-              file: null,
-              file_version: null,
-              release_updated_at: releaseUpdatedAt,
-              seasons: [],
-              rows: null,
-              columns_hash: null,
-              started_at: startedAt,
-              finished_at: now,
-              ok: false,
-              error: code,
-              checked_at: now,
-            });
-          });
-        } catch {
-          // the failure row is best-effort once the publish itself failed
-        }
-      }
+      if (recordFailureRow) recordFailure(sourceId, releaseUpdatedAt, startedAt, code);
       return refuse(code);
     } finally {
       heldInProcess.delete(lockKey);

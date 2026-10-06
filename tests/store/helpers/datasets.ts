@@ -421,6 +421,8 @@ export function statsTables(): TableRows[] {
           fg_made: 3,
           fg_att: 4,
           fg_missed: 1,
+          fg_made_list: "25;35;52",
+          fg_missed_list: "45",
           fg_made_20_29: 1,
           fg_made_30_39: 1,
           fg_made_50_59: 1,

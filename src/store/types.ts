@@ -22,6 +22,7 @@ import type {
 import type { Clock } from "../domain/clock.js";
 import type {
   CrosswalkRepository,
+  NflPlayersReader,
   PlayerUniverseReader,
   RosterWeeklyReader,
 } from "../domain/crosswalk/types.js";
@@ -609,6 +610,8 @@ export interface Store {
   readonly datasets: DatasetReaders;
   readonly rosterWeekly: RosterWeeklyReader;
   readonly playerUniverse: PlayerUniverseReader;
+  /** The crosswalk's id fallback over the `nflverse:players` dataset file (research 04 §C step 2). */
+  readonly nflPlayers: NflPlayersReader;
   /** Re-opens any dataset whose refresh_log version changed (never an attach loop). */
   reopenChangedDatasets(): readonly DatasetSourceId[];
   backup(destPath: string): Promise<BackupResult>;

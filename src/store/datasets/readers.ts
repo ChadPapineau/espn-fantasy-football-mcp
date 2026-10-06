@@ -19,6 +19,8 @@ import type {
 } from "../../domain/analytics/types.js";
 import type {
   EspnPlayerIdentity,
+  NflPlayerRecord,
+  NflPlayersReader,
   NflRosterPlayer,
   PlayerUniverseReader,
   RosterWeeklyReader,
@@ -33,7 +35,13 @@ import {
 } from "../../domain/league/types.js";
 import type { DatasetConnection, DatasetConnections } from "./connections.js";
 import { epochMsToIso, impliedPoints } from "./derive.js";
-import { defenseRowToStatLine, playerRowToStatLine, sqlNum, type SqlRow } from "./statline.js";
+import {
+  espnPositionForNflverse,
+  statLineFromPlayerWeek,
+  statLineFromTeamDefense,
+  type PointsAllowedInput,
+} from "../../domain/scoring/index.js";
+import type { StatLine } from "../../domain/scoring/types.js";
 import { READER_QUERIES, type ReaderMethod } from "./tables.js";
 
 /** Most ids / weeks / teams one reader call accepts (a bounded statement). */
@@ -43,22 +51,19 @@ export const READER_SEASON_MIN = 1990;
 export const READER_SEASON_MAX = 2100;
 export const READER_WEEK_MAX = 22;
 
-/** One nflverse `players` row (the crosswalk's fallback; src/domain/crosswalk NflPlayerRecord). */
-export interface NflPlayerRow {
-  readonly gsis_id: string;
-  readonly espn_id: number | null;
-  /** Raw display name (matching only; never emitted unsanitised). */
-  readonly display_name: string;
-  readonly position: string | null;
-  readonly latest_team: NflTeam | null;
-  readonly jersey_number: number | null;
-  readonly status: string | null;
-  readonly last_season: number | null;
-}
+/** A row as SQLite returns it. */
+export type SqlRow = Readonly<Record<string, unknown>>;
 
-/** The nflverse players port (structurally the crosswalk's NflPlayersReader). */
-export interface NflPlayersPort {
-  byEspnIds(espnIds: readonly number[]): DatasetResult<NflPlayerRow>;
+/** Alias of the crosswalk's NflPlayerRecord (src/domain/crosswalk/types.ts). */
+export type NflPlayerRow = NflPlayerRecord;
+/** Alias of the crosswalk's NflPlayersReader (src/domain/crosswalk/types.ts). */
+export type NflPlayersPort = NflPlayersReader;
+
+/** A finite number from a SQLite value, else null. */
+export function sqlNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "bigint") return Number(v);
+  return null;
 }
 
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
@@ -116,7 +121,7 @@ export interface StoreReaders {
   readonly datasets: DatasetReaders;
   readonly rosterWeekly: RosterWeeklyReader;
   readonly playerUniverse: PlayerUniverseReader;
-  readonly nflPlayers: NflPlayersPort;
+  readonly nflPlayers: NflPlayersReader;
 }
 
 const NEVER_LOADED = Object.freeze({
@@ -308,6 +313,22 @@ export function createReaders(o: ReadersOptions): StoreReaders {
 
   // --- nflverse:stats_player_week ---------------------------------------------------------------
 
+  /** `toStatLine(nflverse)` of src/domain/scoring for a player row; null (warned) when untranslatable. */
+  function playerLine(r: SqlRow): StatLine | null {
+    const position =
+      espnPositionForNflverse(r.position) ?? espnPositionForNflverse(r.position_group);
+    if (position === null) {
+      warn("dataset_row_skipped_position");
+      return null;
+    }
+    try {
+      return statLineFromPlayerWeek(r, { position });
+    } catch {
+      warn("dataset_row_invalid");
+      return null;
+    }
+  }
+
   const playerWeeks: DatasetReaders["playerWeeks"] = {
     lines(gsisIds, s, weeks): DatasetResult<PlayerWeekLine> {
       const res = run("PlayerWeekReader.lines", 0, {
@@ -324,6 +345,8 @@ export function createReaders(o: ReadersOptions): StoreReaders {
           warn("dataset_row_skipped_team");
           continue;
         }
+        const line = playerLine(r);
+        if (line === null) continue;
         const targets = sqlNum(r.targets);
         const air = sqlNum(r.receiving_air_yards);
         rows.push({
@@ -333,7 +356,7 @@ export function createReaders(o: ReadersOptions): StoreReaders {
           nfl_team: t,
           opponent: team(r.opponent_team),
           position: str(r.position) ?? "",
-          line: playerRowToStatLine(r),
+          line,
           usage: {
             snaps: null,
             snap_pct: null,
@@ -357,18 +380,42 @@ export function createReaders(o: ReadersOptions): StoreReaders {
       return { rows, stamp: stampOf(res.conn) };
     },
 
+    /**
+     * Statement 1 for the requested teams, statement 1 again for their opponents (the defence TDs
+     * and safeties the opponent scored, which points allowed nets out — plan 08 §3.2 U-6, settled
+     * by the scoring module), statement 2 for the final scores (the schedules file; absent → no
+     * dst_pa_raw). Joined in code; the translator is src/domain/scoring's.
+     */
     defenseLines(teams, s, weeks): DatasetResult<TeamDefenseWeekLine> {
       const sn = season(s);
+      const weekParam = weekList(weeks);
       const res = run("PlayerWeekReader.defenseLines", 0, {
         season: sn,
-        weeks: weekList(weeks),
+        weeks: weekParam,
         teams: stringList(teams, "teams"),
       });
       if (res === null) return NEVER_LOADED;
+      const key = (week: unknown, t: unknown): string => `${String(week)}|${String(t)}`;
+      const byTeamWeek = new Map<string, SqlRow>();
+      for (const r of res.rows) byTeamWeek.set(key(r.week, r.team), r);
+      const opponents = [
+        ...new Set(
+          res.rows
+            .map((r) => str(r.opponent_team))
+            .filter((o): o is string => o !== null && !res.rows.some((x) => x.team === o)),
+        ),
+      ];
+      if (opponents.length > 0) {
+        const opp = run("PlayerWeekReader.defenseLines", 0, {
+          season: sn,
+          weeks: weekParam,
+          teams: JSON.stringify(opponents),
+        });
+        for (const r of opp?.rows ?? []) byTeamWeek.set(key(r.week, r.team), r);
+      }
       const gameIds = [
         ...new Set(res.rows.map((r) => str(r.game_id)).filter((g): g is string => g !== null)),
       ];
-      // Statement 2: points allowed from the schedules file (skipped when it is not loaded).
       const scores = new Map<string, SqlRow>();
       if (gameIds.length > 0) {
         const g = run("PlayerWeekReader.defenseLines", 1, {
@@ -388,21 +435,34 @@ export function createReaders(o: ReadersOptions): StoreReaders {
           continue;
         }
         const game = scores.get(str(r.game_id) ?? "");
-        let pa: number | null = null;
+        let pa: PointsAllowedInput | null = null;
         if (game !== undefined) {
           const as = sqlNum(game.away_score);
           const hs = sqlNum(game.home_score);
-          if (as !== null && hs !== null) {
-            if (game.home_team === t) pa = as;
-            else if (game.away_team === t) pa = hs;
+          const oppScore = game.home_team === t ? as : game.away_team === t ? hs : null;
+          if (as !== null && hs !== null && oppScore !== null) {
+            const o = byTeamWeek.get(key(r.week, r.opponent_team));
+            pa = {
+              score: oppScore,
+              opponent_int_tds: sqlNum(o?.def_tds) ?? 0,
+              opponent_fumble_tds: sqlNum(o?.fumble_recovery_tds_opp) ?? 0,
+              opponent_safeties: sqlNum(o?.def_safeties) ?? 0,
+            };
           }
+        }
+        let line: StatLine;
+        try {
+          line = statLineFromTeamDefense(r, { pointsAllowed: pa });
+        } catch {
+          warn("dataset_row_invalid");
+          continue;
         }
         rows.push({
           nfl_team: t,
           season: intOrNull(r.season) ?? sn,
           week: intOrNull(r.week) ?? 0,
           opponent: team(r.opponent_team),
-          line: defenseRowToStatLine(r, pa),
+          line,
         });
       }
       return { rows, stamp: stampOf(res.conn) };
@@ -574,13 +634,13 @@ export function createReaders(o: ReadersOptions): StoreReaders {
 
   // --- nflverse:players (the crosswalk's id fallback) --------------------------------------------
 
-  const nflPlayers: NflPlayersPort = {
-    byEspnIds(espnIds): DatasetResult<NflPlayerRow> {
+  const nflPlayers: NflPlayersReader = {
+    byEspnIds(espnIds): DatasetResult<NflPlayerRecord> {
       const res = run("NflPlayersReader.byEspnIds", 0, {
         espn_ids: JSON.stringify(idList(espnIds, "espnIds").filter((n) => n > 0)),
       });
       if (res === null) return NEVER_LOADED;
-      const rows: NflPlayerRow[] = [];
+      const rows: NflPlayerRecord[] = [];
       for (const r of res.rows) {
         const gsis = str(r.gsis_id);
         const name = str(r.display_name);

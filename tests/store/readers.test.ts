@@ -8,6 +8,7 @@ import { isUntrustedText } from "../../src/domain/league/types.js";
 import { READER_LIST_MAX } from "../../src/store/datasets/readers.js";
 import { nflPlayersReaderOf } from "../../src/store/store.js";
 import type { DatasetPublisher, Store } from "../../src/store/types.js";
+import { DS_STATS_PLAYER_WEEK } from "../../src/store/datasets/tables.js";
 import {
   GAME_W1,
   GAME_W1B,
@@ -22,6 +23,7 @@ import {
   publishTables,
   RELEASE,
   rosterWeeklyTables,
+  row,
   schedulesTables,
   statsTables,
   weatherTables,
@@ -259,13 +261,14 @@ describe("nflverse:stats_player_week", () => {
     });
     const k = res.rows.find((r) => r.gsis_id === GSIS_K);
     expect(k?.line.position_class).toBe("K");
+    // the scoring module's translator (src/domain/scoring/nflverse.ts) buckets the kick lists
     expect(k?.line.values).toMatchObject({
-      fg_0_39: 2,
-      fg_50_59: 1,
       fg_made_total: 3,
-      fg_miss_40_49: 1,
+      fg_miss_total: 1,
+      fg_att_total: 4,
       pat_made: 3,
     });
+    expect(k?.line.values.fg_yd).toBe(25 + 35 + 52);
     expect(k?.usage?.adot).toBeNull(); // targets 0
     expect(k?.opponent).toBeNull();
   });
@@ -286,9 +289,70 @@ describe("nflverse:stats_player_week", () => {
       dst_pa_raw: 20, // MIA scored 20 against BUF
       dst_ya_raw: 250 - 21 + 80,
     });
+    // points allowed nets out the opponent defence's return TDs (plan 08 §3.2 U-6, the scoring
+    // module's net_of_defense): BUF scored 27 with one interception-return TD → 21 against MIA
     const mia = res.rows.find((r) => r.nfl_team === "MIA");
-    expect(mia?.line.values.dst_pa_raw).toBe(27);
+    expect(mia?.line.values.dst_pa_raw).toBe(21);
     expect(mia?.line.present).not.toContain("dst_ya_raw"); // opponent offence columns null
+    // asking for MIA alone fetches BUF's row (a second run of statement 1) for the same answer
+    const alone = s.datasets.playerWeeks.defenseLines(["MIA"], 2026, [1]).rows;
+    expect(alone.map((r) => r.nfl_team)).toEqual(["MIA"]);
+    expect(alone[0]?.line.values.dst_pa_raw).toBe(21);
+  });
+
+  it("rows the translator cannot take are skipped and warned (no fantasy position; a bad kick list)", async () => {
+    const t2 = tempCache();
+    const p2 = openPublisher(t2);
+    const [players, defense] = statsTables();
+    const bad = [
+      row(DS_STATS_PLAYER_WEEK, {
+        player_id: "00-9000101",
+        position: "T",
+        position_group: "OL",
+        season: 2026,
+        week: 1,
+        season_type: "REG",
+        team: "BUF",
+      }),
+      row(DS_STATS_PLAYER_WEEK, {
+        player_id: "00-9000102",
+        position: "K",
+        season: 2026,
+        week: 1,
+        season_type: "REG",
+        team: "BUF",
+        fg_att: 1,
+        fg_made_list: "fifty",
+      }),
+      row(DS_STATS_PLAYER_WEEK, {
+        player_id: "00-9000103",
+        position: "OL",
+        position_group: "WR",
+        season: 2026,
+        week: 1,
+        season_type: "REG",
+        team: "BUF",
+        receptions: 2,
+      }),
+    ];
+    await publishTables(p2, "nflverse:stats_player_week", "st-bad", [
+      { spec: players!.spec, rows: [...players!.rows, ...bad] },
+      defense!,
+    ]);
+    const w: string[] = [];
+    const s2 = openStore(t2, { onWarning: (c) => w.push(c) });
+    const res = s2.datasets.playerWeeks.lines(
+      ["00-9000101", "00-9000102", "00-9000103"],
+      2026,
+      [1],
+    );
+    expect(res.rows.map((r) => r.gsis_id)).toEqual(["00-9000103"]); // position_group fallback
+    expect(res.rows[0]?.line.position).toBe(3);
+    expect(w).toContain("dataset_row_skipped_position");
+    expect(w).toContain("dataset_row_invalid");
+    s2.close();
+    p2.close();
+    t2.cleanup();
   });
 
   it("defenseLines without the schedules file: dst_pa_raw is absent, not zero", async () => {
@@ -396,7 +460,8 @@ describe("the crosswalk ports", () => {
   });
 
   it("nflPlayers.byEspnIds: the id fallback; latest_team kept only when an NflTeam", () => {
-    const rows = nflPlayersReaderOf(s)?.byEspnIds([9000010, 9000009, -1]).rows ?? [];
+    expect(nflPlayersReaderOf(s)).toBe(s.nflPlayers);
+    const rows = s.nflPlayers.byEspnIds([9000010, 9000009, -1]).rows;
     expect(rows).toEqual([
       {
         gsis_id: "00-9000009",

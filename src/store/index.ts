@@ -10,7 +10,6 @@ export { KEEP_WEEKLY_BACKUPS, pruneWeeklyBackups, weeklyBackupPath } from "./bac
 export { DATASET_META_TABLE, DS_SCHEMA_VERSION, datasetFileOf } from "./datasets/connections.js";
 export { JoinCeilingError, withDatasetJoin, joinSchemaName } from "./datasets/join.js";
 export type { NflPlayerRow, NflPlayersPort } from "./datasets/readers.js";
-export { defenseRowToStatLine, playerRowToStatLine } from "./datasets/statline.js";
 export { lockPathOf } from "./lock.js";
 export { MIGRATIONS, type Migration } from "./migrations/index.js";
 export { pruneStore, type PruneOptions, type PruneReport } from "./prune.js";

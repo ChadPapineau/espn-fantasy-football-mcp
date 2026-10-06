@@ -553,6 +553,22 @@ describe("single flight (job_lock)", () => {
   });
 });
 
+describe("a job lock that cannot be taken", () => {
+  it("is an INTERNAL outcome WITH its failure row (the runner relies on SourceErrorCode = recorded)", async () => {
+    const db = new DatabaseSync(t.storePath);
+    db.exec("DROP TABLE job_lock");
+    db.close();
+    expect(await publishTables(pub, "nflverse:injuries", "v1", injuriesTables())).toEqual({
+      ok: false,
+      error: "INTERNAL",
+    });
+    expect(storeRows("SELECT source, ok, error FROM refresh_log")).toEqual([
+      { source: "nflverse:injuries", ok: 0, error: "INTERNAL" },
+    ]);
+    expect(readdirSync(t.datasetDir)).toEqual([]);
+  });
+});
+
 describe("multi-process (plan 05 §2 `store`)", () => {
   it("torn publish: a child SIGKILLed mid-fill leaves the old file readable; its debris and lock are recovered", async () => {
     await publishTables(pub, "nflverse:injuries", "v1", injuriesTables());

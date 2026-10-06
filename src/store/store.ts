@@ -8,9 +8,10 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { assertSecureFile, ensureSecureDir, PathSecurityError } from "../config/paths.js";
 import type { Clock } from "../domain/clock.js";
+import type { NflPlayersReader } from "../domain/crosswalk/types.js";
 import { preMigrationBackupPath, prunePreMigrationBackups, vacuumInto } from "./backup.js";
 import { DatasetConnections } from "./datasets/connections.js";
-import { createReaders, type NflPlayersPort } from "./datasets/readers.js";
+import { createReaders } from "./datasets/readers.js";
 import { acquireLock, acquireLockSync, lockPathOf } from "./lock.js";
 import {
   applyMigrations,
@@ -67,7 +68,7 @@ export interface StoreInternalsView {
   readonly deps: RepoDeps;
   readonly datasetDir: string;
   readonly backupDir: string;
-  readonly nflPlayers: NflPlayersPort;
+  readonly nflPlayers: NflPlayersReader;
 }
 
 const internalsByStore = new WeakMap<object, StoreInternalsView>();
@@ -86,7 +87,7 @@ export function statementGuardOf(store: Store): StatementGuard | null {
  * The nflverse players port of an open store (the crosswalk's id fallback, research 04 §C step 2;
  * READER_QUERIES["NflPlayersReader.byEspnIds"]). Structurally the crosswalk's NflPlayersReader.
  */
-export function nflPlayersReaderOf(store: Store): NflPlayersPort | null {
+export function nflPlayersReaderOf(store: Store): NflPlayersReader | null {
   return internalsByStore.get(store)?.nflPlayers ?? null;
 }
 
@@ -251,6 +252,7 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
     datasets: readers.datasets,
     rosterWeekly: readers.rosterWeekly,
     playerUniverse: readers.playerUniverse,
+    nflPlayers: readers.nflPlayers,
     reopenChangedDatasets: () => connections.reopenChanged(),
     async backup(destPath): Promise<BackupResult> {
       if (closed) throw new Error("store: closed");
