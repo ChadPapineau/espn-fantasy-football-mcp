@@ -1678,3 +1678,98 @@ export interface TransactionsSeenRepository {
   list(since: IsoInstant | null, limit: number): readonly Transaction[];
   oldestSeen(): IsoInstant | null;
 }
+
+// --- the league model's input and digest (src/domain/league/*.ts; plan 01 §9 getRosterSlots /
+// getLeagueRules; plan 07 A1 `roster` + `rules`; research 03 §B.1 — the ESPN path of each field is
+// named in its comment). Additive (B1 league model): the provider maps a type-checked `mSettings`
+// body onto these wire-free shapes; the league model validates every bound itself and labels what
+// it cannot read in `unverified_fields` instead of guessing.
+
+/** `settings.rosterSettings` as the slot model reads it. */
+export interface RosterSettingsInput {
+  /** `lineupSlotCounts` — lineup-SLOT id (string key, `"0"`…`"99"`) → seats (0 = slot unused). */
+  readonly slot_counts: Readonly<Record<string, number>>;
+  /** `positionLimits` — POSITION id (string key) → max rostered; −1 = unlimited. */
+  readonly position_limits: Readonly<Record<string, number>>;
+  /** `lineupLocktimeType` (`INDIVIDUAL_GAME` observed on every recorded league). */
+  readonly lineup_lock_type: string | null;
+  /** `isUsingUndroppableList`. */
+  readonly undroppable_list: boolean | null;
+  /** `moveLimit` (−1 = unlimited). */
+  readonly move_limit: number | null;
+}
+
+/** `settings.acquisitionSettings` plus the two `status` waiver instants (epoch ms). */
+export interface WaiverSettingsInput extends AcquisitionSettingsInput {
+  /** `minimumBid` — meaningful only when a budget is used. */
+  readonly min_bid: number | null;
+  /** `waiverHours` — the waiver period a dropped player spends on waivers. */
+  readonly waiver_hours: number | null;
+  /** `waiverProcessDays[]` (may be empty — the recorded rolling league). */
+  readonly process_days: readonly string[] | null;
+  /** `waiverProcessHour` — read as ET, a fallback only (plan 06 §2; one recorded league contradicts it). */
+  readonly process_hour: number | null;
+  /** `matchupLimitPerScoringPeriod`. */
+  readonly matchup_limit_per_period: boolean | null;
+  /** `status.waiverNextExecutionDate` (absent on two of the three recorded leagues). */
+  readonly next_execution_ms: number | null;
+  /** `status.waiverLastExecutionDate`. */
+  readonly last_execution_ms: number | null;
+}
+
+/** `settings.scheduleSettings` as the playoff model reads it. */
+export interface ScheduleSettingsInput {
+  /** `matchupPeriodCount` — the regular season's matchup periods. */
+  readonly regular_season_matchups: number | null;
+  /** `matchupPeriods` — matchup period id (string key) → scoring periods (NFL weeks). */
+  readonly matchup_periods: Readonly<Record<string, readonly number[]>> | null;
+  /** `playoffTeamCount`. */
+  readonly playoff_team_count: number | null;
+  /** `playoffMatchupPeriodLength` — weeks per playoff round. */
+  readonly playoff_matchup_period_length: number | null;
+  /** `variablePlayoffMatchupPeriodLength`. */
+  readonly variable_playoff_length: boolean | null;
+  /** `playoffReseed`. */
+  readonly playoff_reseed: boolean | null;
+  /** `playoffSeedingRule` (`TOTAL_POINTS_SCORED` observed). */
+  readonly playoff_seeding_rule: string | null;
+  /** `playoffSeedingRuleBy` (meaning [U]; 0 and −1 observed). */
+  readonly playoff_seeding_rule_by: number | null;
+  /** `consolationLadderDisabled`. */
+  readonly consolation_ladder_disabled: boolean | null;
+}
+
+/** `settings.tradeSettings`. */
+export interface TradeSettingsInput {
+  /** `deadlineDate` (epoch ms). */
+  readonly deadline_ms: number | null;
+  readonly revision_hours: number | null;
+  readonly veto_votes_required: number | null;
+  /** `max` (−1 = unlimited). */
+  readonly max: number | null;
+}
+
+/** `settings.scoringSettings.matchupTieRule` / `playoffMatchupTieRule`. */
+export interface TieSettingsInput {
+  readonly matchup_tie_rule: string | null;
+  readonly playoff_tie_rule: string | null;
+}
+
+/** Everything the league model reads from one league's settings. */
+export interface LeagueSettingsInput {
+  readonly roster: RosterSettingsInput;
+  readonly acquisition: WaiverSettingsInput;
+  readonly schedule: ScheduleSettingsInput;
+  readonly trade: TradeSettingsInput;
+  readonly ties: TieSettingsInput;
+  /** `financeSettings`, keys in snake_case (`entry_fee`, `player_move_to_ir`, …); null when absent. */
+  readonly fees: Readonly<Record<string, number>> | null;
+}
+
+/** The league model's settings digest: A1's `roster` and `rules` plus its `unverified_fields`. */
+export interface LeagueSettingsDigest {
+  readonly roster: RosterSlots;
+  readonly rules: LeagueRules;
+  /** Sorted, fixed-vocabulary paths (never a raw input key or value). */
+  readonly unverified_fields: readonly string[];
+}
