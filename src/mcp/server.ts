@@ -1,6 +1,9 @@
 // server.ts — createServer (plan 01 §3.1/§4): one McpServer named `espn-fantasy-football-mcp-server`
 // whose `instructions` carry both mandatory sentences exactly once (plan 02 §6.3; plan 01 §4.1 the
-// ESPN sentence) plus a short static guide; tools/resources/prompts capabilities; `ttlMs` and
+// ESPN sentence) plus a short static guide; tools/resources/prompts capabilities, each declared
+// `listChanged: false` — the sets are fixed at process start and no list_changed is ever sent (plan
+// 01 §3.1, plan 02 §3.2, plan 07 §5.4; changelog R5), so initialize and server/discover advertise it
+// (the SDK would otherwise default the bit to true on the first registration); `ttlMs` and
 // `cacheScope: "private"` on every cacheable list (300 000 ms — the tool set is fixed at process
 // start); the registry's tools in order (EFF_TOOLSET), the PHASE W SEAM registration point (registers
 // nothing), the ten resources and the eight P0 prompts. No I/O here: the composition root injects
@@ -47,12 +50,26 @@ export function instructionsFor(
 
 const LIST_HINT: CacheHint = { ttlMs: LIST_TTL_MS, cacheScope: "private" };
 
+/**
+ * The capabilities the server declares: tools, resources and prompts with `listChanged: false`
+ * (the sets never change mid-session — no late registration, no list_changed; changelog R5).
+ */
+export const SERVER_CAPABILITIES = {
+  tools: { listChanged: false },
+  resources: { listChanged: false },
+  prompts: { listChanged: false },
+} as const;
+
 /** Builds the server (tools, resources, prompts) over the injected services. */
 export function createServer(services: McpServices, options: McpServerOptions): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, version: options.version },
     {
-      capabilities: { tools: {}, resources: {}, prompts: {} },
+      capabilities: {
+        tools: { ...SERVER_CAPABILITIES.tools },
+        resources: { ...SERVER_CAPABILITIES.resources },
+        prompts: { ...SERVER_CAPABILITIES.prompts },
+      },
       instructions: instructionsFor(options),
       cacheHints: {
         "tools/list": LIST_HINT,

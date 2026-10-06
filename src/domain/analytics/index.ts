@@ -57,6 +57,7 @@ export {
 export {
   analyzeLineup,
   bestLineup,
+  compareWarnings,
   bestLineupMean,
   fastLineupValue,
   lineupPlayerOf,

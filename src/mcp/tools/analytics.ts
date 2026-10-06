@@ -5,11 +5,14 @@
 // inputs are cached, else the cold start), E5 espn_analyze_waivers (priority premium Π(k, W) with
 // its band and `marginal`, the K/D-ST slice). The tools only assemble inputs; the engines in
 // src/domain/analytics are pure. Results are capped at 10 000 chars (C8), `meta.estimate: true`,
-// a deadline-stopped sampler returns `partial: true` and is never cached.
+// a deadline-stopped sampler returns `partial: true` and is never cached. The samplers' CPU deadline
+// is ANALYTICS_CPU_DEADLINE_MS unless the server options carry the test-only switch (cpuDeadlineMs:
+// null = off, plan 10 A8a; changelog R5). compare pairs E2 skips are named in warnings (R5).
 import { z } from "zod/v4";
 import {
   analyzeLineup,
   analyzeWaivers,
+  compareWarnings,
   lineupPlayerOf,
   pfContextOf,
   projectPlayers,
@@ -48,6 +51,7 @@ import type {
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import type { NflTeam } from "../../config/schema.js";
 import {
+  ANALYTICS_CPU_DEADLINE_MS,
   BOUNDS,
   analyticsFreshnessShape,
   detailShape,
@@ -214,6 +218,16 @@ function impliedTotals(
   return out;
 }
 
+/**
+ * The samplers' per-call CPU deadline (plan 07 E1 [A-7]): ANALYTICS_CPU_DEADLINE_MS, or the
+ * test-only switch in the server options (null = off — plan 10 A8a's injection invariance; never
+ * set by a production configuration, changelog R5).
+ */
+function cpuDeadlineOf(ctx: ToolContext): number | null {
+  const v = ctx.options.cpuDeadlineMs;
+  return v === undefined ? ANALYTICS_CPU_DEADLINE_MS : v;
+}
+
 /** Runs E1 over `subjects` (the projection every other engine starts from). */
 async function project(
   ctx: ToolContext,
@@ -253,6 +267,7 @@ async function project(
     rng: seededRng(o.seed),
     ...(o.n_sims === undefined ? {} : { n_sims: o.n_sims }),
     include_stat_line: o.include_stat_line === true,
+    deadline_ms: cpuDeadlineOf(ctx),
     inputs: toDataInputs(inputs, ctx.nowMs),
   });
 }
@@ -675,6 +690,7 @@ async function seasonContext(
       n_sims: BOUNDS.nSims.default,
       clock: ctx.services.clock,
       rng: seededRng(seed),
+      deadline_ms: cpuDeadlineOf(ctx),
     });
     const reading = sim.data.readings[0];
     return {
@@ -855,6 +871,7 @@ export const analyzeLineupTool = defineTool({
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
+    warnings.push(...compareWarnings(players, args.compare));
     if (!data.seeding.confirmed)
       warnings.push("seeding reading not confirmed: run the onboard Skill (eff setup --seeding)");
     return {

@@ -6,7 +6,9 @@
 // scoring translator; fixture mode swaps in the recorded fixtures and never holds a credential —
 // plan 05 §3.1 step 5), the status/auth ports G1/G2 read, the package texts (Skill bodies for the
 // prompts, the tool-output cheat-sheet), and the PHASE W SEAM registration-gate verdict (never all
-// hold). EFF_TEST_STUBS turns any network call or keychain access into exit 99 (plan 05 §4.2).
+// hold). EFF_TEST_STUBS turns any network call or keychain access into exit 99 (plan 05 §4.2); in
+// fixture mode it also turns the samplers' CPU deadline off (the test-only switch — plan 10 A8a's
+// injection invariance must not flake on a slow runner; changelog R5).
 // Nothing here runs a request or reads a secret.
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
@@ -421,11 +423,16 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     credentialRow: row,
     leagueId: config.leagueId,
   });
+  // the CPU-deadline switch (changelog R5): off only under the test stubs in fixture mode — both
+  // test-scope keys, so a production configuration always keeps the 8 s deadline
+  const deadlineOff = fixture && config.testStubs;
+  if (deadlineOff) logger.info("services.cpu_deadline_off", { reason: "test_stubs_fixture_mode" });
   const options: McpServerOptions = {
     version: VERSION,
     toolset: config.toolset,
     fixtureMode: fixture,
     ...(fixture ? { spikeNonce: randomBytes(6).toString("hex") } : {}),
+    ...(deadlineOff ? { cpuDeadlineMs: null } : {}),
     weatherSource: config.weatherSource,
     writesRequested: config.writesRequested,
     writeGates: { allHold: false, firstFailing: gates.firstFailing ?? "module_not_built" },

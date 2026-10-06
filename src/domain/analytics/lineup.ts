@@ -575,6 +575,50 @@ export function pfContextOf(
 
 // --- the engine -----------------------------------------------------------------------------------------
 
+/** A `compare` pair as E2 takes it (plan 07 E2). */
+interface ComparePair {
+  readonly out: number;
+  readonly in: number;
+}
+
+/**
+ * Why E2 cannot evaluate a `compare` pair against this roster — each reason names the player id:
+ * the same player out and in, a player not on the roster, or a locked player (a locked player never
+ * moves — A11a). Empty when the pair can be evaluated. analyzeLineup skips exactly the pairs with a
+ * reason and compareWarnings reports them, so a pair is never dropped silently (changelog R5).
+ */
+function compareIssues(byId: ReadonlyMap<number, LineupPlayer>, c: ComparePair): string[] {
+  if (c.out === c.in) return [`out and in are the same player ${String(c.out)}`];
+  const issues: string[] = [];
+  for (const id of [c.out, c.in]) {
+    const p = byId.get(id);
+    if (p === undefined) issues.push(`player ${String(id)} is not on the roster`);
+    else if (p.locked) issues.push(`player ${String(id)} is locked`);
+  }
+  return issues;
+}
+
+/**
+ * The warnings[] entries for the `compare` pairs analyzeLineup does not evaluate (one per pair,
+ * naming each offending player id; ids only — no third-party text). The tool adds them to the
+ * envelope's warnings (changelog R5).
+ */
+export function compareWarnings(
+  players: readonly LineupPlayer[],
+  compare: readonly ComparePair[] | undefined,
+): string[] {
+  const byId = new Map(players.map((p) => [p.player_id, p]));
+  const out: string[] = [];
+  for (const c of compare ?? []) {
+    const issues = compareIssues(byId, c);
+    if (issues.length > 0)
+      out.push(
+        `compare pair out ${String(c.out)} / in ${String(c.in)} not evaluated: ${issues.join("; ")}`,
+      );
+  }
+  return out;
+}
+
 interface Evaluated {
   readonly a: Assignment;
   readonly starters: LineupPlayer[];
@@ -785,7 +829,8 @@ export function analyzeLineup(req: LineupRequest): LineupData {
   for (const c of req.compare ?? []) {
     const o = byId.get(c.out);
     const i = byId.get(c.in);
-    if (o === undefined || i === undefined || o === i || o.locked || i.locked) continue;
+    // a pair with a reason is skipped here and reported by compareWarnings (never silently)
+    if (o === undefined || i === undefined || compareIssues(byId, c).length > 0) continue;
     if (flow.pairs.some((p) => p.out === o && p.in === i)) continue;
     comparePairs.push({ out: o, in: i, slot: slotIn(curA, o.player_id) });
   }

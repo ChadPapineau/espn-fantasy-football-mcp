@@ -3,12 +3,14 @@
 // never move and no swap benches a locked starter, `objective: auto` resolves to points_only under
 // reading (b) and to mean under (a), the mode follows sign(μ_m − μ_o) under (a), PF awareness
 // (exchange rate, maximise_pf, the PF cutoff under (b)), option values, conditionals, stack flags,
-// the ESPN cross-check, and invariance to hostile names.
+// the ESPN cross-check, compare pairs evaluated or warned by player id (never dropped silently —
+// changelog R5), and invariance to hostile names.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   analyzeLineup,
   bestLineupMean,
+  compareWarnings,
   lineupPlayerOf,
   pfContextOf,
   type LineupPlayer,
@@ -431,10 +433,70 @@ describe("option value, conditionals, stacks, cross-check", () => {
       }),
     );
     expect(out.swaps.find((s) => s.out === 1 && s.in === 12)?.delta_e).toBe(-5);
+    // the off-roster pair is not evaluated, and it is named rather than dropped silently (R5)
+    expect(out.swaps.some((s) => s.out === 99)).toBe(false);
+    expect(
+      compareWarnings(myRoster(), [
+        { out: 1, in: 12 },
+        { out: 99, in: 1 },
+      ]),
+    ).toEqual(["compare pair out 99 / in 1 not evaluated: player 99 is not on the roster"]);
     const ex = analyzeLineup(request({ exclude: [10] }));
     expect(ex.recommended_lineup.find((s) => s.player_id === 10)?.slot).toBe("BE");
     const fs = analyzeLineup(request({ force_start: [14] }));
     expect(fs.recommended_lineup.find((s) => s.player_id === 14)?.slot).not.toBe("BE");
+  });
+
+  it("compare pairs naming an off-roster, locked or repeated player are warned with the id (R5)", () => {
+    const players = myRoster().map((p) => (p.player_id === 3 ? { ...p, locked: true } : p));
+    const compare = [
+      { out: 3, in: 10 }, // a locked starter cannot be benched
+      { out: 2, in: 777 }, // the incoming player is not on the roster
+      { out: 555, in: 666 }, // neither is
+      { out: 11, in: 11 }, // the same player out and in
+      { out: 2, in: 10 }, // a legal pair: evaluated, no warning
+    ];
+    expect(compareWarnings(players, compare)).toEqual([
+      "compare pair out 3 / in 10 not evaluated: player 3 is locked",
+      "compare pair out 2 / in 777 not evaluated: player 777 is not on the roster",
+      "compare pair out 555 / in 666 not evaluated: player 555 is not on the roster; player 666 is not on the roster",
+      "compare pair out 11 / in 11 not evaluated: out and in are the same player 11",
+    ]);
+    const out = analyzeLineup(request({ players, compare }));
+    expect(out.swaps.some((s) => s.out === 3 || s.in === 777 || s.out === 555)).toBe(false);
+    expect(out.swaps.some((s) => s.out === 2 && s.in === 10)).toBe(true);
+    // a locked reserve named as the incoming player is warned too
+    const lockedIn = myRoster().map((p) => (p.player_id === 10 ? { ...p, locked: true } : p));
+    expect(compareWarnings(lockedIn, [{ out: 2, in: 10 }])).toEqual([
+      "compare pair out 2 / in 10 not evaluated: player 10 is locked",
+    ]);
+    expect(compareWarnings(players, undefined)).toEqual([]);
+    expect(compareWarnings(players, [])).toEqual([]);
+  });
+
+  it("property: every compare pair is either evaluated (a swap) or warned — never both, never neither", () => {
+    const ids = [...myRoster().map((p) => p.player_id), 98, 99];
+    fc.assert(
+      fc.property(
+        fc.array(fc.record({ out: fc.constantFrom(...ids), in: fc.constantFrom(...ids) }), {
+          maxLength: 5,
+        }),
+        fc.array(fc.boolean(), { minLength: 15, maxLength: 15 }),
+        (compare, locks) => {
+          const players = myRoster().map((p, i) => ({ ...p, locked: locks[i] ?? false }));
+          const out = analyzeLineup(request({ players, compare }));
+          const warned = compareWarnings(players, compare);
+          return compare.every((c) => {
+            const isWarned = warned.some((w) =>
+              w.startsWith(`compare pair out ${String(c.out)} / in ${String(c.in)} `),
+            );
+            const isSwap = out.swaps.some((s) => s.out === c.out && s.in === c.in);
+            return isWarned !== isSwap;
+          });
+        },
+      ),
+      { numRuns: 150 },
+    );
   });
 
   it("no change → no move, null deadline; the lock schedule groups kickoffs", () => {

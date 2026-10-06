@@ -223,4 +223,11 @@ export interface McpServerOptions {
   /** The four registration gates' verdict (PHASE W SEAM — NOT IMPLEMENTED: never all hold). */
   readonly writeGates: WriteGateVerdict;
   readonly texts: ServerTexts;
+  /**
+   * Test-only switch for the samplers' per-call CPU deadline (plan 10 A8a; changelog R5): omitted =
+   * ANALYTICS_CPU_DEADLINE_MS (8 s, production), null = off, a number = that many ms. Set only by a
+   * test's injected options or by the composition root under EFF_TEST_STUBS=1 in fixture mode —
+   * both test-scope keys, so no production configuration reaches it.
+   */
+  readonly cpuDeadlineMs?: number | null;
 }

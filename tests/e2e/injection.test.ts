@@ -5,12 +5,15 @@
 // every injected string an ESPN-fact tool surfaces (at either detail level, and even when the field's
 // cap cuts it) is wrapped as untrusted_text with flags, never shown bare; and no injected string ever
 // appears in a tool's arguments (the Lane 1 dry run's resolved arguments included: the weekly
-// pre-run chain replayed on every variant).
+// pre-run chain replayed on every variant). Every server runs with the samplers' per-call CPU
+// deadline disabled, as A8a requires (R2 nit 1: byte-equality must not flake on a slow runner): the
+// test-only switch the composition root sets under EFF_TEST_STUBS=1 in fixture mode (changelog R5),
+// and each server's own log must say it did before its answers are compared.
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadToolSequences, resolveArgs } from "../../scripts/skills/tool-sequences.mjs";
 import { INJECTIONS } from "../../scripts/fx10h/variants.js";
-import { bodyOf, FX, makeHome, requireDist, serve, type Served } from "./helpers.js";
+import { bodyOf, FX, logRecords, makeHome, requireDist, serve, type Served } from "./helpers.js";
 
 const VARIANTS = [
   "inj-outlook-system",
@@ -110,6 +113,13 @@ async function open(variant: string | null): Promise<Served> {
   servers.push(s);
   return s;
 }
+/** The server ran with the CPU deadline off (its startup log line — changelog R5; A8a). */
+function expectDeadlineOff(s: Served): void {
+  expect(
+    logRecords(s.transport.stderr).some((l) => l.event === "services.cpu_deadline_off"),
+    "the CPU deadline was not disabled: A8a's comparison could flake",
+  ).toBe(true);
+}
 async function call(s: Served, name: string, args: Record<string, unknown>) {
   const r = await s.client.callTool({ name, arguments: args });
   const b = bodyOf(r);
@@ -127,6 +137,7 @@ describe("injection invariance over real stdio (A8a)", { timeout: 600_000 }, () 
       baseline.set(String(i), stable(b.data));
       expect(TEXTS.some((t) => JSON.stringify(b).includes(t))).toBe(false);
     }
+    expectDeadlineOff(s);
   });
 
   it.each(VARIANTS.map((v) => [v] as const))(
@@ -137,6 +148,7 @@ describe("injection invariance over real stdio (A8a)", { timeout: 600_000 }, () 
         const b = await call(s, name, args);
         expect(stable(b.data), `${variant}: ${name} changed`).toEqual(baseline.get(String(i)));
       }
+      expectDeadlineOff(s);
       const surfaced = new Map<string, number>();
       for (const [name, args] of FACTS) {
         const b = await call(s, name, args);
