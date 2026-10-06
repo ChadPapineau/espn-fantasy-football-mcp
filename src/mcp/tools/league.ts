@@ -8,6 +8,7 @@
 import { z } from "zod/v4";
 import {
   DISPUTED_STAT_IDS,
+  familyVerification,
   isLeagueWideMismatch,
   scoringEngine,
   statLineFromEspn,
@@ -122,6 +123,8 @@ const scoringDigestSchema = z.strictObject({
             }),
           )
           .max(40),
+        verified: z.boolean(),
+        unverified_stat_ids: z.array(statId).max(40),
       }),
     )
     .max(40),
@@ -268,6 +271,7 @@ export function scoringDigest(
   settings: ScoringSettings,
   golden: ScoringDigest["golden"],
 ): ScoringDigest {
+  const verification = familyVerification(settings);
   return {
     items: settings.rules.map((r) => ({
       stat_id: r.platform_id,
@@ -279,10 +283,17 @@ export function scoringDigest(
       ),
       is_reverse: r.is_reverse,
     })),
-    families: settings.families.map((f) => ({
-      family: f.family,
-      members: f.members.map((m) => ({ stat_id: m.platform_id, lower: m.lower, upper: m.upper })),
-    })),
+    // plan 08 §6 step 6 / plan 10 B13: `verified: false` per family the golden has not verified
+    // (familyVerification returns one row per settings.families entry, in the same order)
+    families: settings.families.map((f, i) => {
+      const v = verification[i];
+      return {
+        family: f.family,
+        members: f.members.map((m) => ({ stat_id: m.platform_id, lower: m.lower, upper: m.upper })),
+        verified: v?.verified ?? false,
+        unverified_stat_ids: [...(v?.unverified_stat_ids ?? [])],
+      };
+    }),
     unmapped_stat_ids: [...unmappedIds(settings)],
     disputed_stat_ids: settings.rules
       .filter((r) => r.disputed && DISPUTED_STAT_IDS.includes(r.platform_id))

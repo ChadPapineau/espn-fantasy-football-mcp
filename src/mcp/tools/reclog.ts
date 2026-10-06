@@ -468,8 +468,8 @@ export const listRecommendations = defineTool({
         has_more: args.offset + items.length < page.total,
         next_offset: args.offset + items.length < page.total ? args.offset + items.length : null,
       },
+      // a read of the log is about no decision week: a record citing it is never held to a week
       listKey: "items",
-      ...(args.week === undefined || args.week === 0 ? {} : { week: args.week }),
     });
   },
 });

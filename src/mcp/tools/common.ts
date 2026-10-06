@@ -345,3 +345,17 @@ export function isDegradable(e: unknown): boolean {
 export function degradedViewWarning(view: string, what: string): string {
   return `espn:${view} unavailable: ${what}`;
 }
+
+/**
+ * Whether an error may be absorbed by an OPTIONAL ESPN read — a comparator or a labelled extra the
+ * result can honestly go without (D5's positional rating, B2's playercard beside its nflverse
+ * fallback): a degradable outage, a cookie state the read cannot satisfy, or a view the fixture
+ * league does not carry (fixture mode's `fixture_missing`). Anything else — a bug — propagates.
+ */
+export function isOptionalReadFailure(e: unknown): boolean {
+  if (isDegradable(e)) return true;
+  const code = (e as { effCode?: unknown } | null)?.effCode;
+  if (code === "ESPN_AUTH_REJECTED" || code === "ESPN_REQUIRES_COOKIES") return true;
+  const reason = (e as { effDetails?: { reason?: unknown } } | null)?.effDetails?.reason;
+  return (e as { name?: unknown } | null)?.name === "FixtureError" && reason === "fixture_missing";
+}

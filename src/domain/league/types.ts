@@ -1130,6 +1130,13 @@ export interface ScoringDigest {
       readonly lower: number;
       readonly upper: number | null;
     }[];
+    /**
+     * Additive (Phase 2, plan 08 §6 step 6; plan 10 B13): whether the recorded golden verifies this
+     * family for the league (src/domain/scoring/verification.ts `familyVerification`), and the
+     * members it scores that no recorded league has verified (`verified: false` per family).
+     */
+    readonly verified: boolean;
+    readonly unverified_stat_ids: readonly string[];
   }[];
   readonly unmapped_stat_ids: readonly string[];
   readonly disputed_stat_ids: readonly string[];

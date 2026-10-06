@@ -47,6 +47,7 @@ import { defineTool, roundDeep, type ToolContext } from "../define.js";
 import {
   crosswalkOf,
   isDegradable,
+  isOptionalReadFailure,
   leagueOf,
   leagueRef,
   optionalDataset,
@@ -71,7 +72,7 @@ import {
   ut,
   week,
 } from "./schemas.js";
-import { selectPlayers } from "./select.js";
+import { selectPlayers, universeOf } from "./select.js";
 
 // --- D1 espn_get_player_usage ----------------------------------------------------------------------
 
@@ -675,7 +676,7 @@ export const getDefenseProfile = defineTool({
       () => ctx.services.platform.getPositionalRatings(leagueRef(ctx), w, readOpts(ctx)),
       warnings,
     ).catch((e: unknown) => {
-      if (!isDegradable(e)) throw e;
+      if (!isOptionalReadFailure(e)) throw e;
       warnings.push("espn:mPositionalRatings unavailable: espn_positional_rating is null");
       return null;
     });
@@ -879,12 +880,8 @@ export const getNews = defineTool({
       }
     } else if (args.nfl_team !== undefined) {
       const team = args.nfl_team;
-      const uni = ctx.services.playerUniverse.all(league.ref.season);
-      if (uni.stamp === null)
-        throw new EffError("STALE_ONLY", {
-          hint: "That dataset was never loaded: run eff refresh in a terminal, then retry.",
-        });
-      gsis = uni.rows
+      const uni = await universeOf(ctx, league.ref.season, inputs, warnings);
+      gsis = uni
         .filter((r) => r.pro_team === team && r.espn_id > 0)
         .map((r) => crosswalkOf(ctx, r.espn_id, r.position_id).gsis_id)
         .filter((g): g is string => g !== null);

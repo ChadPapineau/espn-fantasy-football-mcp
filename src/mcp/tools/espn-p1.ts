@@ -40,6 +40,7 @@ import { defineTool, type ToolContext } from "../define.js";
 import {
   crosswalkOf,
   isDegradable,
+  isOptionalReadFailure,
   leagueOf,
   leagueRef,
   optionalDataset,
@@ -221,7 +222,7 @@ export const getPlayerStats = defineTool({
       );
       lines = got === null ? null : take(ctx, got, inputs);
     } catch (e) {
-      if (!isDegradable(e)) throw e;
+      if (!isOptionalReadFailure(e)) throw e;
       warnings.push(
         "espn:kona_playercard unavailable: weekly actuals unavailable; nflverse lines scored by the engine instead",
       );

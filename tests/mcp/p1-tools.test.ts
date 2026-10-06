@@ -19,6 +19,7 @@ import type {
 import type { FreshnessClassId } from "../../src/config/freshness.js";
 import type { DatasetSourceId } from "../../src/config/freshness.js";
 import { INJECTION_RELIABILITY_CAP } from "../../src/domain/evidence/index.js";
+import { familyVerification } from "../../src/domain/scoring/index.js";
 import { bareUntrusted, wrapUntrusted } from "../../src/domain/league/types.js";
 import { DEFENSE } from "../../src/mcp/tools/datasets-p1.js";
 import { coded, faulty } from "./helpers/faults.js";
@@ -129,6 +130,28 @@ describe("the P1 tools are registered under full only (plan 07 C3; plan 10 B10)"
     );
     expect(r).toBe(true);
     await c.close();
+  });
+});
+
+describe("A1 reports each scoring family's golden verification (plan 08 §6 step 6; plan 10 B13)", () => {
+  it("families[] carry verified and unverified_stat_ids, zipped from familyVerification", async () => {
+    const e = await ok("espn_get_league", { include: ["scoring"] });
+    const fams = (
+      e.data as {
+        scoring: {
+          families: { family: string; verified: boolean; unverified_stat_ids: string[] }[];
+        };
+      }
+    ).scoring.families;
+    const settings = (await world.services.platform.getScoringSettings(world.services.league))
+      .value;
+    const v = familyVerification(settings);
+    expect(fams.map((f) => f.family)).toEqual(v.map((x) => x.family));
+    fams.forEach((f, i) => {
+      expect(f.verified).toBe(v[i]?.verified);
+      expect(f.unverified_stat_ids).toEqual([...(v[i]?.unverified_stat_ids ?? [])]);
+      if (f.verified) expect(f.unverified_stat_ids).toEqual([]);
+    });
   });
 });
 

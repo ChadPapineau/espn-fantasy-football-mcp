@@ -90,6 +90,7 @@ import {
   type LeagueBasics,
 } from "./p1-common.js";
 import { rostersOf } from "./roster.js";
+import { universeOf, type UniverseRow } from "./select.js";
 import {
   count,
   dist,
@@ -498,15 +499,9 @@ export const cascadeSchema = z.strictObject({
   inputs: inputsSchema,
 });
 
-/** The NFL team's players ESPN lists (the local index), by ownership, the injured player first. */
-function teamPlayerIds(
-  ctx: ToolContext,
-  season: number,
-  proTeamId: number,
-  injured: number,
-): number[] {
-  const uni = ctx.services.playerUniverse.all(season);
-  const ids = uni.rows
+/** The NFL team's players in the player index, by ownership, the injured player first. */
+function teamPlayerIds(rows: readonly UniverseRow[], proTeamId: number, injured: number): number[] {
+  const ids = rows
     .filter((r) => r.pro_team_id === proTeamId && r.espn_id > 0 && r.espn_id !== injured)
     .filter((r) => [1, 2, 3, 4].includes(r.position_id))
     .sort((a, b) => (b.percent_owned ?? 0) - (a.percent_owned ?? 0) || a.espn_id - b.espn_id)
@@ -702,10 +697,9 @@ export const analyzeInjuryCascadeTool = defineTool({
       const g = args.player.gsis_ids[0];
       first = g === undefined ? undefined : ctx.services.crosswalk.byGsis(g)[0]?.espn_id;
     }
-    const known = first === undefined ? [] : ctx.services.playerUniverse.byIds([first]).rows;
-    const teamId0 = known[0]?.pro_team_id ?? 0;
-    const room =
-      first === undefined || teamId0 <= 0 ? [] : teamPlayerIds(ctx, season, teamId0, first);
+    const index = await universeOf(ctx, season, inputs, warnings);
+    const teamId0 = index.find((r) => r.espn_id === first)?.pro_team_id ?? 0;
+    const room = first === undefined || teamId0 <= 0 ? [] : teamPlayerIds(index, teamId0, first);
     const { player: inj, others } = await singlePlayer(ctx, args.player, b.w, inputs, room);
     if (inj.pro_team_id <= 0)
       throw new EffError("VALIDATION", { field: "player", reason: "no_nfl_team" });
@@ -1184,36 +1178,63 @@ export const activitySchema = z.strictObject({
   inputs: inputsSchema,
 });
 
-/** The league's transactions: this week's ESPN feed merged with the persisted history (A6). */
+/** The most per-week transaction reads one E11 call makes (ESPN's feed is per scoring period). */
+export const ACTIVITY_MAX_WEEKS = 3;
+
+/**
+ * The scoring periods a `since_days` window spans, newest first: the current one plus one per seven
+ * days, at most ACTIVITY_MAX_WEEKS (older weeks come from the persisted history only, said so).
+ */
+export function activityWeeks(w: Week, sinceDays: number): Week[] {
+  const want = Math.ceil(sinceDays / 7) + 1;
+  const out: Week[] = [];
+  for (let x = w; x >= 1 && out.length < Math.min(want, ACTIVITY_MAX_WEEKS); x--) out.push(x);
+  return out;
+}
+
+/** The league's transactions: the window's weekly ESPN feeds merged with the persisted history (A6). */
 async function transactionsOf(
   ctx: ToolContext,
   w: Week,
+  sinceDays: number,
   since: string,
   inputs: InputStamp[],
   warnings: string[],
 ): Promise<Transaction[]> {
   const byId = new Map<string, Transaction>();
-  const got = await withinBudget(
-    () =>
-      ctx.services.platform.listTransactions(
-        leagueRef(ctx),
-        {
-          types: ["FREEAGENT", "WAIVER", "WAIVER_ERROR", "TRADE_ACCEPT"],
-          week: w,
-          since,
-          count: BOUNDS.txnCount.max,
-          team_id: null,
-        },
-        readOpts(ctx),
-      ),
-    warnings,
-  ).catch((e: unknown) => {
-    if (!isDegradable(e) && (e as { effCode?: unknown }).effCode !== "ESPN_REQUIRES_COOKIES")
-      throw e;
+  const weeks = activityWeeks(w, sinceDays);
+  const state = { unavailable: false };
+  for (const week of weeks) {
+    const got = await withinBudget(
+      () =>
+        ctx.services.platform.listTransactions(
+          leagueRef(ctx),
+          {
+            types: ["FREEAGENT", "WAIVER", "WAIVER_ERROR", "TRADE_ACCEPT"],
+            week,
+            since,
+            count: BOUNDS.txnCount.max,
+            team_id: null,
+          },
+          readOpts(ctx),
+        ),
+      warnings,
+    ).catch((e: unknown) => {
+      if (!isDegradable(e) && (e as { effCode?: unknown }).effCode !== "ESPN_REQUIRES_COOKIES")
+        throw e;
+      state.unavailable = true;
+      return null;
+    });
+    if (got === null) break;
+    for (const t of take(ctx, got, inputs).items) byId.set(t.transaction_id, t);
+  }
+  if (state.unavailable)
     warnings.push("espn:mTransactions2 unavailable: the server's persisted history only");
-    return null;
-  });
-  for (const t of got === null ? [] : take(ctx, got, inputs).items) byId.set(t.transaction_id, t);
+  const covered = weeks[weeks.length - 1] ?? w;
+  if (Math.ceil(sinceDays / 7) + 1 > weeks.length && covered > 1)
+    warnings.push(
+      `weeks before ${String(covered)} come from the server's persisted history only (one feed read per week)`,
+    );
   for (const t of ctx.services.transactionsSeen.list(since, 1000))
     if (!byId.has(t.transaction_id)) byId.set(t.transaction_id, t);
   return [...byId.values()];
@@ -1242,7 +1263,7 @@ export const analyzeLeagueActivityTool = defineTool({
     const warnings: string[] = [];
     const b = await basicsOf(ctx, inputs, args);
     const since = new Date(ctx.nowMs - args.since_days * 24 * 3600 * 1000).toISOString();
-    const txns = await transactionsOf(ctx, b.w, since, inputs, warnings);
+    const txns = await transactionsOf(ctx, b.w, args.since_days, since, inputs, warnings);
     const standings = await standingsOrNull(ctx, inputs, warnings);
     const myTeam = b.league.my_team?.team_id ?? null;
     const rosters = await withinBudget(
