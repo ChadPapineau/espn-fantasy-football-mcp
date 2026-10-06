@@ -51,7 +51,8 @@ skills/
 │   └── evals/            tool_sequence.json · evals.json · trigger_eval.json
 └── README.md
 scripts/skills/           manifest.json (tool lists, tool_contract, the eight deny strings, the input
-                          contract) · _lib.mjs · build-skills.mjs · check-skills.mjs · tool-sequences.mjs
+                          contract of every P0 and P1 tool) · _lib.mjs · build-skills.mjs · check-skills.mjs ·
+                          tool-sequences.mjs · build-plugin-evals.mjs (the claude plugin eval suite)
 ```
 
 `node scripts/skills/build-skills.mjs` copies the shared references into every Skill, replaces each generated block in each body (the guardrails in every body; the output contract in every body but `apply` and `session-check`), and stamps `metadata.version` and `metadata.tool_contract`. It is idempotent; `--check` writes nothing and fails when anything is stale. Edit the source, never a copy.
@@ -78,6 +79,12 @@ scripts/skills/           manifest.json (tool lists, tool_contract, the eight de
 ## Lane 2 cases (`evals/evals.json`)
 
 The skill-creator schema — `{ skill_name, evals: [ { id, name, toolset, prompt, expected_output, files, expectations[] } ] }` — with the plan's case name (`ON-1`, `WK-4-E`, `SS-INJ`) beside the integer id. `files` names the fixture the runner stages: `evals/fixtures/fx-10h` or `evals/fixtures/fx-10h/<variant>`, materialised from `fixtures/espn/fx-10h`. Each expectation is one sentence ending with its grader: `(tool_used …)`, `(tool_order)`, `(regex: \`…\`)`, `(regex_absent: \`…\`)` (free) or `(llm)` / `(llm, judge sees both replies)` (paid). A write tool is never named — "No write tool was called" covers all of them. Every Skill has an `-INJ` case whose expected answer equals the base fixture's apart from a quotation and one flag line; refusing to answer fails it. `toolset` is stated per case: a P0 Skill's cases run under `core` except the ones its rule lists as its P1 branch (`WV-2`, `WV-3-E`, `SS-11-E`, under `full`); a P1 Skill's cases run under `full` except its one `-CORE` case, which runs under `core` and checks the Step 0 stop (a regex expectation on `EFF_TOOLSET=full` — plan 10 B10). `session-check`'s SC-2 prompt carries `<SYNTHETIC_ESPN_S2>`: the runner substitutes a freshly generated cookie-shaped value at run time (never committed) and checks the trace never contains it. `apply` is user-invoked, so its cases start from the slash command.
+
+## The plugin eval suite (`claude plugin eval` — Lane 2, plan 10 B15)
+
+`node scripts/skills/build-plugin-evals.mjs` turns every Skill's `evals/evals.json` and `evals/trigger_eval.json` into a `claude plugin eval` suite under `dist/plugin-evals/` (git-ignored; a build output, never committed): one case directory per Lane 2 case and per trigger (`prompt.md` + `graders/*.md`), each expectation's tag mapped mechanically — `(tool_order)` to a `tool_order` grader per consecutive pair of the tools it names, `(tool_used: …)` to `tool_used` on the qualified tool (`input_match <key> <value>`, `min`, `max`, `arm`; "every write tool …" to a trace guard; `Skill <name>` to routing; "no input_match on the substituted value / injected string" to a guard over every tool call's input), `(regex…)` to `regex` on the final message, `(llm)` to a rubric carrying the case's expected output, and `(llm, judge sees both replies)` to one carrying the base fixture's expected reply as the reference. Triggers become `tool_used: Skill` cases (negatives `min: 0, max: 0, arm: both`). SC-2's `<SYNTHETIC_ESPN_S2>` is replaced by a fresh cookie-shaped value per build.
+
+The harness has no MCP mock layer — a case's plugin starts its servers for real — so "mocks generated from fx-10h" are **eval plugins**: the bundle plus one server, `dist/cli.js serve` in fixture mode on the case's fx-10h variant with `EFF_TEST_STUBS=1` and the no-socket preload, under the toolset the case states. Their config and cache live in a fresh temp directory outside every git tree (the server refuses one inside). `--seed` (after `npm run build`) writes the recorded state NC-INJ-2 needs — a week-4 log entry whose note carries an order — through the real tools. Running it costs tokens and is manual: `claude plugin eval dist/plugin-evals/evals --allow-tools "mcp__plugin_espn-fantasy-football_espn-fantasy-football__*" …` (the generated README has the full command and the pass bar).
 
 ## Trigger evals (`evals/trigger_eval.json`)
 
