@@ -465,3 +465,74 @@ describe("Lane 2 coverage (plan 10 A9b)", () => {
     }
   });
 });
+
+describe("the manifest's input contracts bind to the registered tools (plan 09 §5.1 item 3)", () => {
+  /** The top-level keys of a tool's zod input (an object schema), or null when it is not one. */
+  const shapeOf = (input: unknown): Record<string, unknown> | null => {
+    const s = (input as { shape?: unknown }).shape;
+    return typeof s === "object" && s !== null ? (s as Record<string, unknown>) : null;
+  };
+  const optional = (field: unknown): boolean =>
+    (field as { safeParse: (v: unknown) => { success: boolean } }).safeParse(undefined).success;
+  const built = REGISTRY.filter((r) => r.tool !== null);
+
+  it("every P0 tool is built, and every built tool's input keys are the manifest's, required ones included", () => {
+    for (const r of REGISTRY.filter((x) => x.priority === "P0"))
+      expect(r.tool, `${r.name} is a P0 tool and must be built`).not.toBeNull();
+    let p1Built = 0;
+    for (const r of built) {
+      if (r.priority === "P1") p1Built++;
+      const shape = shapeOf(r.tool?.input);
+      expect(shape, `${r.name}: the input is an object schema`).not.toBeNull();
+      const real = Object.keys(shape ?? {}).sort();
+      const promised = Object.keys(manifest.inputs[r.name] ?? {}).sort();
+      // a Skill may only promise inputs the tool takes; the tool may take more (debug flags)
+      for (const k of promised) expect(real, `${r.name} has no input \`${k}\``).toContain(k);
+      const required = real.filter((k) => !optional(shape?.[k]));
+      expect([...(manifest.required_inputs[r.name] ?? [])].sort(), `${r.name} required`).toEqual(
+        required,
+      );
+    }
+    // the P1 rows bind as they are registered (Stage B2); the count is logged, never assumed
+    console.log(`[bundle] built P1 tools checked against the manifest: ${String(p1Built)} of 16`);
+  });
+
+  it("every literal argument the sequences promise parses under the built tool's own schema, templates stood in", () => {
+    let nextId = 4_000_000; // distinct stand-in ids: a selector refuses duplicates
+    const stand = (v: unknown, key: string): unknown => {
+      if (Array.isArray(v)) return v.map((x) => stand(x, key));
+      if (v === null || typeof v !== "object") return v;
+      const o = v as Json;
+      if ("$player" in o) return nextId++;
+      if ("$opponent" in o) return 10;
+      if ("$ids" in o) return [4379399];
+      if ("$source_calls" in o) return [{ tool: "espn_get_roster", request_id: "r-0123456789ab" }];
+      if ("$ref" in o) return undefined; // resolved at run time: checked by the dry run, not here
+      return Object.fromEntries(
+        Object.entries(o)
+          .map(([k, x]) => [k, stand(x, k)] as const)
+          .filter(([, x]) => x !== undefined),
+      );
+    };
+    let checked = 0;
+    for (const s of SKILLS) {
+      for (const q of readSequence(s).sequences) {
+        for (const st of q.steps) {
+          const def = REGISTRY.find((r) => r.name === st.tool)?.tool;
+          if (def === null || def === undefined || st.tool === "espn_record_recommendation")
+            continue;
+          const args = stand(st.args, "") as Json;
+          // a step whose required input is a $ref is resolved by the dry run only
+          if ((manifest.required_inputs[st.tool] ?? []).some((k) => !(k in args))) continue;
+          const parsed = def.input.safeParse(args);
+          expect(
+            parsed.success,
+            `${s}/${q.id}/${st.id}: ${JSON.stringify(parsed.error?.issues ?? [])}`,
+          ).toBe(true);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(100);
+  });
+});
