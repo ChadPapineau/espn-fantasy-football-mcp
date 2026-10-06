@@ -33,7 +33,7 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   supply-chain: `npm audit --omit=dev --audit-level=high`, no install scripts, licenses, full
   runtime tree; pack scan; process), `docs.yml` (Mermaid render with pinned mermaid-cli and an
   explicit `chrome-headless-shell` install, internal links, identifiers, plugin + Skills
-  structure and `claude plugin validate --strict`), `secrets.yml` (gitleaks pinned by version and
+  structure and `claude plugin validate --strict`), `secret-scan.yml` (workflow `secrets`; gitleaks pinned by version and
   sha256 over the full history and the tree, plus its self-test), Dependabot (monthly, grouped) and
   a pull-request template. Every action pinned by commit SHA; `contents: read`; no secrets.
 - **Plugin root (plan 09 §4, K8).** `.claude-plugin/plugin.json` (`espn-fantasy-football`,

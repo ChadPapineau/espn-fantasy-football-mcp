@@ -1,7 +1,7 @@
 # gitleaks configuration for espn-fantasy-football-mcp — plan 04 §4.3 (rule table), R6; HANDOFF
 # (public repo: no secrets, no personal identifiers — league ids and member GUIDs included).
 # Ported from sibling @d72e03b, adapted: Yahoo rules replaced by the ESPN rules below.
-# Runs: .github/workflows/secrets.yml (full history + the tree on every push/PR, and a self-test).
+# Runs: .github/workflows/secret-scan.yml (full history + the tree on every push/PR, and a self-test).
 # Self-test: scripts/ci/secret-fixtures.mjs GENERATES a must-flag file (every rule below must fire)
 # and a must-pass file (the documentation placeholders must not) at run time — no fake secret is
 # ever committed, so this config needs no path allowlist. Add a rule → add its case there.

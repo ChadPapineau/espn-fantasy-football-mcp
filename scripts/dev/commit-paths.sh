@@ -17,6 +17,7 @@
 #     blob being committed or in the message (exit 9)
 #   * the author/committer address is not a GitHub no-reply address (exit 10)
 #   * the message is not a Conventional Commit or carries an AI attribution trailer (exit 11)
+#   * an explicitly named file is git-ignored, so it would be left out silently (exit 12)
 #
 # How: a private index (GIT_INDEX_FILE) is built from HEAD, the paths are added to it, `git
 # commit-tree` + a compare-and-swap `update-ref` move the branch, and the shared index is realigned
@@ -33,6 +34,19 @@ for p in "$@"; do
   abs=${p:A}
   [[ $abs == $ROOT/* ]] || { print -u2 "commit-paths: outside the repo: $p"; exit 1; }
   rel+=("${abs#$ROOT/}")
+done
+
+# git-ignored files are never committed — so an explicitly named one is an error (it would be
+# dropped silently), and ignored files under a named directory are reported
+for r in "${rel[@]}"; do
+  if [[ -f $r ]] && git check-ignore -q --no-index -- "$r"; then
+    print -u2 "commit-paths: $r is git-ignored (.gitignore) and would be silently left out — rename it; nothing committed"
+    exit 12
+  fi
+  if [[ -d $r ]]; then
+    ignored=(${(0)"$(git ls-files -z --others --ignored --exclude-standard -- "$r")"})
+    (( ${#ignored} )) && print -u2 "commit-paths: note: ${#ignored} git-ignored file(s) under $r are NOT included: ${ignored[*]}"
+  fi
 done
 
 LOCK="$ROOT/.git/commit-paths.lock"

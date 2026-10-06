@@ -4,7 +4,7 @@
 // (Yahoo rules dropped; ESPN cookie/SWID/GUID/league-id/IPv4/home-path rules and the deny-list added).
 //
 // It runs locally BEFORE anything is committed (.githooks/pre-commit, .githooks/commit-msg and
-// scripts/dev/commit-paths.sh call it) and in CI (docs.yml `identifiers`, secrets.yml). gitleaks
+// scripts/dev/commit-paths.sh call it) and in CI (docs.yml `identifiers`, secret-scan.yml). gitleaks
 // (.gitleaks.toml) is the second, independent layer; GitHub push protection the third. Findings
 // print the rule id and file:line only — NEVER the matched value.
 //

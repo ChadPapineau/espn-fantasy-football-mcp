@@ -341,6 +341,20 @@ describe.skipIf(!HAS_ZSH)("scripts/dev/commit-paths.sh (macOS dev tool; zsh)", (
     expect(commitPaths(repo, ["fix: a", "types 2.ts"]).status).toBe(8);
   });
 
+  it("refuses an explicitly named git-ignored file (exit 12) and notes ignored files under a directory", () => {
+    const repo = makeRepo();
+    withOrigin(repo);
+    repo.write(".gitignore", "secrets.*\n");
+    repo.git(["add", ".gitignore"]);
+    expect(repo.git(["commit", "-qm", "chore: ignore"]).status).toBe(0);
+    repo.write("ci/secrets.yml", "name: x\n");
+    repo.write("ci/other.yml", "name: y\n");
+    expect(commitPaths(repo, ["ci: a", "ci/secrets.yml"]).status).toBe(12);
+    const r = commitPaths(repo, ["ci: b", "ci"]);
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toContain("1 git-ignored file(s) under ci are NOT included: ci/secrets.yml");
+  });
+
   it("never touches the shared index of other staged work", () => {
     const repo = makeRepo();
     withOrigin(repo);

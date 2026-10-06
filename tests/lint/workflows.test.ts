@@ -3,6 +3,7 @@
 // job sets of plan 04 §4.1–§4.3 as built in this stage. Ported from sibling @d72e03b, adapted: no
 // YAML parser is a dependency of this repo (plan 04 §2), so the workflows are read structurally —
 // a job is a two-space-indented key under `jobs:`.
+import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -199,8 +200,8 @@ describe("docs.yml (plan 04 §4.2)", () => {
   });
 });
 
-describe("secrets.yml (plan 04 §4.1, §4.3)", () => {
-  const text = load("secrets.yml");
+describe("secret-scan.yml — workflow `secrets` (plan 04 §4.1, §4.3)", () => {
+  const text = load("secret-scan.yml");
   const jobs = jobsOf(text);
   const job = (n: string) => jobs.get(n) ?? "";
 
@@ -225,6 +226,33 @@ describe("secrets.yml (plan 04 §4.1, §4.3)", () => {
   it("every gitleaks run redacts", () => {
     for (const m of text.matchAll(/gitleaks (?:git|dir) [^\n]*/g))
       expect(m[0]).toContain("--redact");
+  });
+});
+
+describe("no tooling file is git-ignored (the repo .gitignore ignores e.g. `secrets.*`)", () => {
+  it("every workflow, script, manifest and config file of the scaffold is committable", () => {
+    const candidates = [
+      ...readdirSync(dir).map((f) => `.github/workflows/${f}`),
+      ...readdirSync(path.join(ROOT, "scripts/ci")).map((f) => `scripts/ci/${f}`),
+      ...readdirSync(path.join(ROOT, "scripts/dev")).map((f) => `scripts/dev/${f}`),
+      ...readdirSync(path.join(ROOT, ".claude-plugin")).map((f) => `.claude-plugin/${f}`),
+      ...readdirSync(path.join(ROOT, ".githooks")).map((f) => `.githooks/${f}`),
+      ".github/dependabot.yml",
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      ".gitleaks.toml",
+      ".mcp.json",
+      ".npmrc",
+      ".nvmrc",
+      "scripts/eff-launch.sh",
+      "package-lock.json",
+      "CHANGELOG.md",
+    ];
+    const r = spawnSync("git", ["check-ignore", "--no-index", "--stdin"], {
+      cwd: ROOT,
+      input: candidates.join("\n"),
+      encoding: "utf8",
+    });
+    expect(r.stdout.trim()).toBe("");
   });
 });
 
