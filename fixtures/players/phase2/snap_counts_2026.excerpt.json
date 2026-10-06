@@ -1,0 +1,31 @@
+{
+  "$comment": "Phase-2 grounding excerpt for the fixture roster (fixtures/players/fixture-roster.json), see README.md. weeks 1-3: every row of a fixture-roster player's pfr_id. Generated on 2026-10-06 from the release file named in upstream; only the dataset contract's upstream columns (src/store/datasets/tables.ts phase2RequiredUpstreamColumns) are kept. Rows are in the .tsv beside this file: a header line of column names, then one row per line, one JSON literal per cell, in upstream order.",
+  "source": "nflverse:snap_counts",
+  "retrieved": "2026-10-06",
+  "upstream": {
+    "url": "https://github.com/nflverse/nflverse-data/releases/download/snap_counts/snap_counts_2026.parquet",
+    "updated_at": "2026-10-06T11:01:47Z",
+    "bytes": 83636,
+    "rows": 5970,
+    "sha256": "51549f93e1e70999bc8964b686ce27f6db324513017d59253a3daf6fa05ae310"
+  },
+  "selection": "nflverse data (snap counts from Pro-Football-Reference via nflverse), CC-BY 4.0",
+  "rows": 69,
+  "columns": [
+    "defense_pct",
+    "defense_snaps",
+    "game_id",
+    "game_type",
+    "offense_pct",
+    "offense_snaps",
+    "opponent",
+    "pfr_game_id",
+    "pfr_player_id",
+    "position",
+    "season",
+    "st_pct",
+    "st_snaps",
+    "team",
+    "week"
+  ]
+}

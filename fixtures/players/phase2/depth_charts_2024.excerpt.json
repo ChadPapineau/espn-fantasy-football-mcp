@@ -1,0 +1,27 @@
+{
+  "$comment": "Phase-2 grounding excerpt for the fixture roster (fixtures/players/fixture-roster.json), see README.md. the pre-2025 layout: weeks 1-2 rows of a fixture-roster player's gsis_id, plus three week-less SBBYE rows (dropped by the contract), one byte-identical duplicate pair (collapsed) and two blank depth_position rows (position fallback). Generated on 2026-10-06 from the release file named in upstream; only the dataset contract's upstream columns (src/store/datasets/tables.ts phase2RequiredUpstreamColumns) are kept. Rows are in the .tsv beside this file: a header line of column names, then one row per line, one JSON literal per cell, in upstream order.",
+  "source": "nflverse:depth_charts_history",
+  "retrieved": "2026-10-06",
+  "upstream": {
+    "url": "https://github.com/nflverse/nflverse-data/releases/download/depth_charts/depth_charts_2024.parquet",
+    "updated_at": "2025-02-13T07:32:56Z",
+    "bytes": 482923,
+    "rows": 37312,
+    "sha256": "2b5e72fa37f6a498238da30d619cd5d2fe883ffbfdbaaf637301893ad6c22097"
+  },
+  "selection": "nflverse data, CC-BY 4.0",
+  "rows": 49,
+  "columns": [
+    "club_code",
+    "depth_position",
+    "depth_team",
+    "formation",
+    "full_name",
+    "game_type",
+    "gsis_id",
+    "jersey_number",
+    "position",
+    "season",
+    "week"
+  ]
+}

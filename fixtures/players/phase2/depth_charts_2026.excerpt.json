@@ -1,0 +1,27 @@
+{
+  "$comment": "Phase-2 grounding excerpt for the fixture roster (fixtures/players/fixture-roster.json), see README.md. the newest 14 daily snapshots (2026-09-30T06:02:36Z to 2026-10-06T14:08:49Z): every row of a fixture-roster player's espn_id. Generated on 2026-10-06 from the release file named in upstream; only the dataset contract's upstream columns (src/store/datasets/tables.ts phase2RequiredUpstreamColumns) are kept. Rows are in the .tsv beside this file: a header line of column names, then one row per line, one JSON literal per cell, in upstream order.",
+  "source": "nflverse:depth_charts",
+  "retrieved": "2026-10-06",
+  "upstream": {
+    "url": "https://github.com/nflverse/nflverse-data/releases/download/depth_charts/depth_charts_2026.parquet",
+    "updated_at": "2026-10-06T14:08:58Z",
+    "bytes": 2812797,
+    "rows": 613196,
+    "sha256": "eb3eb03833a2dc53f5a629aabba1ec513b50c0b102c47a4f0d40a3ddb666ee12"
+  },
+  "selection": "nflverse data (depth charts from ESPN via nflverse), CC-BY 4.0",
+  "rows": 350,
+  "columns": [
+    "dt",
+    "espn_id",
+    "gsis_id",
+    "player_name",
+    "pos_abb",
+    "pos_grp",
+    "pos_grp_id",
+    "pos_id",
+    "pos_rank",
+    "pos_slot",
+    "team"
+  ]
+}

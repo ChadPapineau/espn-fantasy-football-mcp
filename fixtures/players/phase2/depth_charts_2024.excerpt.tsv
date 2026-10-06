@@ -1,0 +1,50 @@
+club_code	depth_position	depth_team	formation	full_name	game_type	gsis_id	jersey_number	position	season	week
+"ATL"	"RB"	"1"	"Offense"	"Bijan Robinson"	"REG"	"00-0038542"	"7"	"RB"	2024	1
+"ATL"	"TE"	"1"	"Offense"	"Kyle Pitts"	"REG"	"00-0036970"	"8"	"TE"	2024	1
+"ATL"	"TE"	"1"	"Offense"	"Kyle Pitts"	"REG"	"00-0036970"	"8"	"TE"	2024	2
+"ATL"	"RB"	"1"	"Offense"	"Bijan Robinson"	"REG"	"00-0038542"	"7"	"RB"	2024	2
+"BUF"	"QB"	"1"	"Offense"	"Josh Allen"	"REG"	"00-0034857"	"17"	"QB"	2024	1
+"BUF"	"RB"	"1"	"Offense"	"James Cook"	"REG"	"00-0037248"	"4"	"RB"	2024	1
+"BUF"	"QB"	"1"	"Offense"	"Josh Allen"	"REG"	"00-0034857"	"17"	"QB"	2024	2
+"BUF"	"RB"	"1"	"Offense"	"James Cook"	"REG"	"00-0037248"	"4"	"RB"	2024	2
+"CHI"	"WR"	"1"	"Offense"	"Keenan Allen"	"REG"	"00-0030279"	"13"	"WR"	2024	1
+"CHI"	"WR"	"1"	"Offense"	"Keenan Allen"	"REG"	"00-0030279"	"13"	"WR"	2024	2
+"CIN"	"QB"	"1"	"Offense"	"Joe Burrow"	"REG"	"00-0036442"	"9"	"QB"	2024	1
+"CIN"	"WR"	"1"	"Offense"	"Ja'Marr Chase"	"REG"	"00-0036900"	"1"	"WR"	2024	1
+"CIN"	"QB"	"1"	"Offense"	"Joe Burrow"	"REG"	"00-0036442"	"9"	"QB"	2024	2
+"CIN"	"WR"	"1"	"Offense"	"Ja'Marr Chase"	"REG"	"00-0036900"	"1"	"WR"	2024	2
+"BAL"	"RB"	"1"	"Offense"	"Derrick Henry"	"REG"	"00-0032764"	"22"	"RB"	2024	1
+"BAL"	"RB"	"1"	"Offense"	"Derrick Henry"	"REG"	"00-0032764"	"22"	"RB"	2024	2
+"DAL"	"K"	"1"	"Special Teams"	"Brandon Aubrey"	"REG"	"00-0037692"	"17"	"K"	2024	1
+"DAL"	"K"	"1"	"Special Teams"	"Brandon Aubrey"	"REG"	"00-0037692"	"17"	"K"	2024	2
+"DET"	"WR"	"1"	"Offense"	"Amon-Ra St. Brown"	"REG"	"00-0036963"	"14"	"WR"	2024	1
+"DET"	"WR"	"1"	"Offense"	"Amon-Ra St. Brown"	"REG"	"00-0036963"	"14"	"WR"	2024	2
+"GB"	"QB"	"1"	"Offense"	"Jordan Love"	"REG"	"00-0036264"	"10"	"QB"	2024	1
+"GB"	"QB"	"1"	"Offense"	"Jordan Love"	"REG"	"00-0036264"	"10"	"QB"	2024	2
+"MIN"	"WR"	"1"	"Offense"	"Justin Jefferson"	"REG"	"00-0036322"	"18"	"WR"	2024	1
+"MIN"	"WR"	"1"	"Offense"	"Justin Jefferson"	"REG"	"00-0036322"	"18"	"WR"	2024	2
+"NE"	"TE"	"1"	"Offense"	"Hunter Henry"	"REG"	"00-0033090"	"85"	"TE"	2024	1
+"NE"	"TE"	"1"	"Offense"	"Hunter Henry"	"REG"	"00-0033090"	"85"	"TE"	2024	2
+"ARI"	"TE"	"1"	"Offense"	"Trey McBride"	"REG"	"00-0037744"	"85"	"TE"	2024	1
+"ARI"	"TE"	"1"	"Offense"	"Trey McBride"	"REG"	"00-0037744"	"85"	"TE"	2024	2
+"LAC"	"WR"	"1"	"Offense"	"Josh Palmer"	"REG"	"00-0036988"	"5"	"WR"	2024	1
+"LAC"	"WR"	"1"	"Offense"	"Josh Palmer"	"REG"	"00-0036988"	"5"	"WR"	2024	2
+"SEA"	"WR"	"1"	"Offense"	"Jaxon Smith-Njigba"	"REG"	"00-0038543"	"11"	"WR"	2024	1
+"SEA"	"PR"	"2"	"Special Teams"	"Jaxon Smith-Njigba"	"REG"	"00-0038543"	"11"	"WR"	2024	1
+"SEA"	"WR"	"1"	"Offense"	"Jaxon Smith-Njigba"	"REG"	"00-0038543"	"11"	"WR"	2024	2
+"SEA"	"PR"	"2"	"Special Teams"	"Jaxon Smith-Njigba"	"REG"	"00-0038543"	"11"	"WR"	2024	2
+"JAX"	"RB"	"1"	"Offense"	"Travis Etienne"	"REG"	"00-0036973"	"1"	"RB"	2024	1
+"JAX"	"RB"	"1"	"Offense"	"Travis Etienne"	"REG"	"00-0036973"	"1"	"RB"	2024	2
+"HOU"	"QB"	"1"	"Offense"	"C.J. Stroud"	"REG"	"00-0039163"	"7"	"QB"	2024	1
+"HOU"	"RB"	"1"	"Offense"	"Joe Mixon"	"REG"	"00-0033897"	"28"	"RB"	2024	1
+"HOU"	"K"	"1"	"Special Teams"	"Ka'imi Fairbairn"	"REG"	"00-0032726"	"15"	"K"	2024	1
+"HOU"	"K"	"1"	"Special Teams"	"Ka'imi Fairbairn"	"REG"	"00-0032726"	"15"	"K"	2024	2
+"HOU"	"QB"	"1"	"Offense"	"C.J. Stroud"	"REG"	"00-0039163"	"7"	"QB"	2024	2
+"HOU"	"RB"	"1"	"Offense"	"Joe Mixon"	"REG"	"00-0033897"	"28"	"RB"	2024	2
+"KC"	"WR"	"2"	"Offense"	"Marquise Brown"	"SBBYE"	"00-0035662"	"5"	"WR"	2024	null
+"KC"	"LG"	"2"	"Offense"	"Mike Caliendo"	"SBBYE"	"00-0037207"	"66"	"G"	2024	null
+"KC"	"C"	"3"	"Offense"	"Mike Caliendo"	"SBBYE"	"00-0037207"	"66"	"G"	2024	null
+"ATL"	"NB"	"1"	"Defense"	"Dee Alford"	"REG"	"00-0037034"	"20"	"CB"	2024	1
+"ATL"	"NB"	"1"	"Defense"	"Dee Alford"	"REG"	"00-0037034"	"20"	"CB"	2024	1
+"BUF"	"\n    "	"3"	"Defense"	"Kameron Cline"	"REG"	"00-0035850"	"96"	"DE"	2024	1
+"CHI"	"\n    "	"3"	"Offense"	"Travis Homer"	"REG"	"00-0035594"	"20"	"RB"	2024	1

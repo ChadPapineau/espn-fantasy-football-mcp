@@ -16,9 +16,11 @@
 //     `parseDecimalId`, so they join ESPN's numeric ids directly; a malformed id → NULL (+ warning);
 //   - tables are created STRICT (ddlFor), so a type slip fails loudly at insert time.
 import { createHash } from "node:crypto";
-import type { DatasetSourceId } from "../../config/freshness.js";
+import type { DatasetSourceId, License } from "../../config/freshness.js";
 import { ESPN_READ_HOST_DEFAULT } from "../../config/schema.js";
+import type { UntrustedSource } from "../../domain/league/types.js";
 import type { DatasetColumn, DatasetColumnType, DatasetTableSpec } from "../types.js";
+import type { NewsSource } from "./derive.js";
 
 // --- contract types (extend the store's DatasetTableSpec; every contract IS a DatasetTableSpec) -----
 
@@ -1166,3 +1168,1238 @@ export type ReaderMethod = keyof typeof READER_QUERIES;
  * place to be named.
  */
 export const PENDING_PORT_READERS: readonly ReaderMethod[] = Object.freeze([]);
+
+// =====================================================================================================
+// Phase 2 — the usage / market / news datasets (plan 10 §3.2 sources; plan 01 §5.2 rows and §5.5; plan
+// 06 §1.3 jobs; plan 07 D1 D4 D5 D6, E5 signals; plan 08 §3.2, §4.3), grounded in the 2024, 2025 and
+// 2026 release files read on 2026-10-06 (docs/evals/phase2-datasets.md records URL, size, rows, codec,
+// kept columns and licence per dataset). ADDITIVE: nothing above this line changes.
+//
+// Conventions on top of the Phase-1 ones (header): REAL values pass through `finiteOrNull` (NaN and
+// ±Infinity → NULL); every column says whether its value is third-party free text (`untrusted`: the
+// plan 02 §6 provenance tag a reader wraps it with — null = an id, a number or a checked label).
+// History: the backtests' prior seasons (plan 10 §3.2 "two prior nflverse seasons"; D9; A-3) live in
+// their OWN dataset files (`<source>_history`, one per dataset, holding every prior season), so a
+// current-season refresh never rewrites them and each is one more read-only connection (plan 01 §5.5
+// — 25 contract files, all opened at once, no ATTACH: tests/store/datasets/phase2-connections.test.ts).
+// =====================================================================================================
+
+/** The Phase-2 dataset sources with a contract (plan 10 §3.2 scope; SOURCE_REGISTRY phase "2"). */
+export const PHASE_2_DATASET_SOURCES = [
+  "nflverse:stats_team_week",
+  "nflverse:pbp",
+  "nflverse:snap_counts",
+  "nflverse:depth_charts",
+  "ffopportunity:ep_weekly",
+  "sleeper:trending",
+  "news:rotowire",
+  "news:espn",
+  "news:cbs",
+] as const satisfies readonly DatasetSourceId[];
+/** A Phase-2 dataset source id. */
+export type Phase2DatasetSourceId = (typeof PHASE_2_DATASET_SOURCES)[number];
+
+/**
+ * Phase-2 SOURCE_REGISTRY sources deliberately WITHOUT a contract: not in plan 10 §3.2's source list
+ * and no domain port reads them (plan 06 lists them in the snaps job; a later phase adds them).
+ */
+export const PHASE_2_UNCONTRACTED_SOURCES = [
+  "nflverse:pfr_advstats",
+  "nflverse:ftn_charting",
+] as const satisfies readonly DatasetSourceId[];
+
+/** How many prior seasons Phase 2 loads for the soft backtests (plan 10 D9: 2 in Phase 2; A-3). */
+export const HISTORY_SEASON_COUNT = 2;
+
+/** The prior seasons a history file holds for a current season: [current − 2, current − 1]. */
+export function historySeasonsFor(currentSeason: number): readonly number[] {
+  if (!Number.isInteger(currentSeason) || currentSeason < 2001 || currentSeason > 2999)
+    throw new RangeError("dataset contract: invalid current season");
+  return Object.freeze(
+    Array.from(
+      { length: HISTORY_SEASON_COUNT },
+      (_, i) => currentSeason - HISTORY_SEASON_COUNT + i,
+    ),
+  );
+}
+
+/**
+ * The history dataset files: each repeats the tables of the current-season source it names, for the
+ * prior seasons only (B3/B6/B7 backtests: stats + defence lines, team stats, pbp, snaps, injuries,
+ * depth charts, expected points). nflverse `schedules` needs none (games.parquet holds every season:
+ * the runner adds the prior seasons to that source's `ctx.seasons`); `roster_weekly` needs none (the
+ * all-time `ds_nfl_players` maps gsis_id ↔ pfr_id / espn_id for any season).
+ */
+export const HISTORY_DATASET_SOURCES = [
+  "nflverse:stats_player_week_history",
+  "nflverse:stats_team_week_history",
+  "nflverse:pbp_history",
+  "nflverse:snap_counts_history",
+  "nflverse:injuries_history",
+  "nflverse:depth_charts_history",
+  "ffopportunity:ep_weekly_history",
+] as const;
+/** A history dataset source id (`<provider>:<dataset>_history`; fits config/paths SOURCE_ID_RE). */
+export type HistoryDatasetSourceId = (typeof HISTORY_DATASET_SOURCES)[number];
+
+/** The current-season source each history file repeats. */
+export const HISTORY_OF: Readonly<Record<HistoryDatasetSourceId, DatasetSourceId>> = Object.freeze({
+  "nflverse:stats_player_week_history": "nflverse:stats_player_week",
+  "nflverse:stats_team_week_history": "nflverse:stats_team_week",
+  "nflverse:pbp_history": "nflverse:pbp",
+  "nflverse:snap_counts_history": "nflverse:snap_counts",
+  "nflverse:injuries_history": "nflverse:injuries",
+  "nflverse:depth_charts_history": "nflverse:depth_charts",
+  "ffopportunity:ep_weekly_history": "ffopportunity:ep_weekly",
+});
+
+/** Every source a ds_* contract exists for: Phase 1, Phase 2 and the history files. */
+export type ContractSourceId =
+  Phase1DatasetSourceId | Phase2DatasetSourceId | HistoryDatasetSourceId;
+
+/** One Phase-2 column: provenance plus whether it is third-party free text. */
+export interface Phase2Column extends ContractColumn {
+  /** The `untrusted_text` tag a reader wraps the value with (plan 02 §6.2); null = not free text. */
+  readonly untrusted: UntrustedSource | null;
+}
+
+/** The upstream season files a table is filled from (inclusive bounds; null = open). */
+export interface SeasonRange {
+  readonly from: number | null;
+  readonly to: number | null;
+}
+
+/** A Phase-2 ds_* table. Assignable to `DatasetTableSpec`. */
+export interface Phase2TableContract extends DatasetTableSpec {
+  readonly columns: readonly Phase2Column[];
+  /** The current-season source whose file holds the table (a history-only table names its twin). */
+  readonly source: Phase2DatasetSourceId;
+  /** The history file that repeats the table for prior seasons, or null. */
+  readonly history: HistoryDatasetSourceId | null;
+  /** Upstream release file, endpoint or feed. */
+  readonly upstream: string;
+  readonly season_key: "season" | null;
+  /** Which upstream seasons' files have THIS layout (the depth-chart schema changed in 2025). */
+  readonly seasons: SeasonRange;
+  readonly row_filter: string | null;
+  readonly description: string;
+  /** The upstream licence (research 04 §E; SOURCE_REGISTRY). */
+  readonly license: License;
+}
+
+// --- Phase-2 column helpers ---------------------------------------------------------------------------
+
+const p2 = (
+  name: string,
+  type: DatasetColumnType,
+  nullable: boolean,
+  from: readonly string[] = [name],
+  derivation: string | null = null,
+  untrusted: UntrustedSource | null = null,
+): Phase2Column =>
+  Object.freeze({ name, type, nullable, from: Object.freeze([...from]), derivation, untrusted });
+const p2text = (name: string, nullable = true): Phase2Column => p2(name, "TEXT", nullable);
+const p2int = (name: string, nullable = true): Phase2Column => p2(name, "INTEGER", nullable);
+const p2real = (name: string, nullable = true): Phase2Column => p2(name, "REAL", nullable);
+const p2ints = (...names: string[]): Phase2Column[] => names.map((n) => p2int(n));
+const p2reals = (...names: string[]): Phase2Column[] => names.map((n) => p2real(n));
+const p2texts = (...names: string[]): Phase2Column[] => names.map((n) => p2text(n));
+/** A whole number stored as DOUBLE upstream → INTEGER. */
+const whole = (name: string, nullable = true, from = name): Phase2Column =>
+  p2(
+    name,
+    "INTEGER",
+    nullable,
+    [from],
+    `wholeNumber(${from}): whole DOUBLE → integer; a fraction or NaN → NULL`,
+  );
+/** A 0/1 DOUBLE indicator → INTEGER 0 | 1. */
+const ind = (name: string): Phase2Column =>
+  p2(name, "INTEGER", true, [name], `flag01(${name}): 0/1 DOUBLE → 0 | 1; else NULL`);
+
+const p2table = (t: Phase2TableContract): Phase2TableContract =>
+  Object.freeze({
+    ...t,
+    columns: Object.freeze([...t.columns]),
+    primary_key: t.primary_key ? Object.freeze([...t.primary_key]) : null,
+    indexes: Object.freeze(t.indexes.map((ix) => Object.freeze([...ix]))),
+    seasons: Object.freeze({ ...t.seasons }),
+  });
+
+const ANY_SEASON: SeasonRange = Object.freeze({ from: null, to: null });
+const FFO_RELEASES = "https://github.com/ffverse/ffopportunity/releases/download/latest-data";
+
+// --- nflverse:stats_team_week --------------------------------------------------------------------------
+
+/**
+ * The stat columns of `ds_stats_team_week`, verbatim nflverse names: the offence families of plan 08
+ * §3.2, the defence/return/kicking families the D/ST line and its cross-check need (the Phase-1
+ * `ds_team_defense_week` aggregation's agreement with these is the [U] plan 08 §3.2 names), and
+ * penalties/timeouts. Not kept: the punting (`pt_*`), game-winning-FG (`gwfg_*`), tackle and
+ * `*_distance` families — no Phase-2 consumer.
+ */
+export const TEAM_WEEK_STAT_COLUMNS: readonly Phase2Column[] = Object.freeze([
+  ...p2ints("completions", "attempts", "passing_yards", "passing_tds", "passing_interceptions"),
+  ...p2ints("sacks_suffered", "sack_yards_lost", "sack_fumbles", "sack_fumbles_lost"),
+  ...p2ints("passing_air_yards", "passing_yards_after_catch", "passing_first_downs"),
+  ...p2reals("passing_epa", "passing_cpoe"),
+  p2int("passing_2pt_conversions"),
+  ...p2ints("carries", "rushing_yards", "rushing_tds", "rushing_fumbles", "rushing_fumbles_lost"),
+  p2int("rushing_first_downs"),
+  p2real("rushing_epa"),
+  p2int("rushing_2pt_conversions"),
+  ...p2ints("receptions", "targets", "receiving_yards", "receiving_tds"),
+  ...p2ints("receiving_fumbles", "receiving_fumbles_lost", "receiving_air_yards"),
+  ...p2ints("receiving_yards_after_catch", "receiving_first_downs"),
+  p2real("receiving_epa"),
+  ...p2ints("receiving_2pt_conversions", "special_teams_tds"),
+  ...p2ints("def_tackles_for_loss", "def_fumbles_forced"),
+  ...p2reals("def_sacks", "def_sack_yards"),
+  ...p2ints("def_qb_hits", "def_interceptions", "def_interception_yards", "def_pass_defended"),
+  ...p2ints("def_tds", "def_fumbles", "def_safeties", "def_punt_blocks", "def_pat_blocks"),
+  ...p2ints("def_fg_blocks", "fumble_recovery_own", "fumble_recovery_opp"),
+  ...p2ints("fumble_recovery_yards_opp", "fumble_recovery_tds"),
+  ...p2ints("penalties", "penalty_yards", "timeouts", "fumbles_total", "fumbles_lost_total"),
+  ...p2ints("punt_returns", "punt_return_yards", "kickoff_returns", "kickoff_return_yards"),
+  ...p2ints("fg_made", "fg_att", "fg_missed", "fg_blocked", "fg_long"),
+  ...p2ints("fg_made_0_19", "fg_made_20_29", "fg_made_30_39", "fg_made_40_49"),
+  ...p2ints("fg_made_50_59", "fg_made_60_"),
+  ...p2ints("fg_missed_0_19", "fg_missed_20_29", "fg_missed_30_39", "fg_missed_40_49"),
+  ...p2ints("fg_missed_50_59", "fg_missed_60_"),
+  ...p2texts("fg_made_list", "fg_missed_list", "fg_blocked_list"),
+  ...p2ints("pat_made", "pat_att", "pat_missed", "pat_blocked"),
+]);
+
+/**
+ * `ds_stats_team_week` — one row per team-game, `stats_team/stats_team_week_{season}.parquet`.
+ * Observed 2026-10-06: 2026 128 rows (weeks 1–4, all REG), 2025 and 2024 570 rows each (544 REG +
+ * 26 POST); 138 columns, SNAPPY, identical across the three seasons; (season, week, team) unique;
+ * every game_id appears exactly twice (one row per side).
+ */
+export const DS_STATS_TEAM_WEEK = p2table({
+  name: "ds_stats_team_week",
+  source: "nflverse:stats_team_week",
+  history: "nflverse:stats_team_week_history",
+  upstream: `${RELEASES}/stats_team/stats_team_week_{season}.parquet`,
+  season_key: "season",
+  seasons: ANY_SEASON,
+  row_filter: "team null/empty",
+  description: "Weekly team stat lines: offence, defence, returns, kicking, penalties",
+  license: "CC-BY-4.0",
+  columns: [
+    p2int("season", false),
+    p2int("week", false),
+    p2text("team", false),
+    p2text("season_type", false), // REG | POST
+    p2text("game_id"),
+    p2text("opponent_team"),
+    ...TEAM_WEEK_STAT_COLUMNS,
+  ],
+  primary_key: ["season", "week", "team"],
+  indexes: [
+    ["team", "season", "week"],
+    ["season", "week", "opponent_team"],
+  ],
+});
+
+// --- nflverse:pbp ------------------------------------------------------------------------------------
+
+/**
+ * `ds_pbp` — the projected play-by-play subset (plan 01 §5.2 "ds_pbp (projected columns)"; plan 10
+ * §3.2: RZ/GL flags, `kick_distance`, `yards_gained` on TD plays, `defteam`, `xpass`, `pass_oe`, `epa`,
+ * `play_type`, `posteam`, the player ids), `pbp/play_by_play_{season}.parquet` (372 columns; 2026
+ * 11,155 plays, 2025 48,771, 2024 49,492; SNAPPY; identical schema). Kept: 51 columns. Every id is a
+ * gsis_id. Grounded: with `PBP_KEPT_PLAY_TYPES`, targets (`pass_attempt = 1 AND sack = 0 AND
+ * two_point_attempt = 0` with a receiver), carries (`rush_attempt = 1 AND two_point_attempt = 0` with
+ * a rusher), pass/rush/receiving TDs and FG attempts/makes equal stats_player_week on every
+ * player-week of 2024–2026 except one 2024 carry (PbpReader statements below use those definitions).
+ */
+export const DS_PBP = p2table({
+  name: "ds_pbp",
+  source: "nflverse:pbp",
+  history: "nflverse:pbp_history",
+  upstream: `${RELEASES}/pbp/play_by_play_{season}.parquet`,
+  season_key: "season",
+  seasons: ANY_SEASON,
+  row_filter:
+    "play_type not in PBP_KEPT_PLAY_TYPES (derive.ts): drops period/timeout markers (play_type null; 1,446 in 2024) and penalty-nullified `no_play` rows (4,936 in 2024); every kept play has posteam, defteam and yardline_100 (observed 2024–2026)",
+  description:
+    "Play-by-play subset: situation, RZ/GL flags, play type, players, TDs, kicks, EPA, xpass",
+  license: "CC-BY-4.0",
+  columns: [
+    p2int("season", false),
+    p2int("week", false),
+    p2text("season_type", false), // REG | POST
+    p2text("game_id", false),
+    whole("play_id", false),
+    p2text("posteam", false),
+    p2text("defteam", false),
+    whole("qtr"),
+    whole("down"),
+    whole("ydstogo"),
+    whole("yardline_100", false),
+    p2(
+      "rz",
+      "INTEGER",
+      false,
+      ["yardline_100"],
+      "redZoneFlag(yardline_100): 1 when yardline_100 ≤ 20 (RED_ZONE_YARDLINE), else 0",
+    ),
+    p2(
+      "gl",
+      "INTEGER",
+      false,
+      ["yardline_100"],
+      "goalLineFlag(yardline_100): 1 when yardline_100 ≤ 5 (GOAL_LINE_YARDLINE), else 0",
+    ),
+    ind("goal_to_go"),
+    p2text("play_type", false),
+    whole("yards_gained"), // on a TD play: the scoring play's length (plan 08 §4.3 long_td_bonus)
+    whole("air_yards"),
+    whole("return_yards"),
+    whole("kick_distance"), // FG / PAT distance (plan 08 §3.2 fg_* brackets)
+    ...[
+      "qb_dropback",
+      "qb_kneel",
+      "qb_spike",
+      "qb_scramble",
+      "pass_attempt",
+      "rush_attempt",
+      "complete_pass",
+      "sack",
+      "interception",
+      "fumble_lost",
+      "safety",
+      "touchdown",
+      "pass_touchdown",
+      "rush_touchdown",
+      "return_touchdown",
+      "two_point_attempt",
+    ].map(ind),
+    ...p2texts("two_point_conv_result", "extra_point_result", "field_goal_result"),
+    ...p2texts("td_team", "td_player_id", "passer_player_id", "receiver_player_id"),
+    ...p2texts("rusher_player_id", "kicker_player_id"),
+    ...p2texts("kickoff_returner_player_id", "punt_returner_player_id"),
+    ...p2reals("epa", "wp", "xpass", "pass_oe"),
+    ind("success"),
+  ],
+  primary_key: ["season", "game_id", "play_id"],
+  // Only the indexes the IN-list lookups need (PbpReader.playerUsage by receiver / rusher; team
+  // totals by posteam): every other statement filters on (season, week) first, ≤ ~2,700 plays a week.
+  // Measured 2024–2025: 12.2 MB of rows; each extra id index costs ~0.7 MB a season (A-11 ≈ 10 MB).
+  indexes: [
+    ["season", "week", "posteam"],
+    ["receiver_player_id", "season", "week"],
+    ["rusher_player_id", "season", "week"],
+  ],
+});
+
+// --- nflverse:snap_counts -------------------------------------------------------------------------------
+
+/**
+ * `ds_snap_counts` — offence/defence/special-teams snaps per player-game (PFR via nflverse), keyed by
+ * `pfr_player_id` — NO gsis_id upstream: readers map gsis_id → pfr_id through ds_roster_weekly, then
+ * ds_nfl_players (2026: 1,739 of 1,742 snap pfr ids are in players.parquet, 507/508 skill players).
+ * `snap_counts/snap_counts_{season}.parquet`: 2026 5,970 rows (weeks 1–4), 2025 26,613, 2024 26,615;
+ * 16 columns, SNAPPY; (season, week, pfr_player_id) unique; snaps are whole DOUBLEs, `*_pct` fractions
+ * 0–1. The player name column is not kept (joins are by id; one less untrusted surface).
+ */
+export const DS_SNAP_COUNTS = p2table({
+  name: "ds_snap_counts",
+  source: "nflverse:snap_counts",
+  history: "nflverse:snap_counts_history",
+  upstream: `${RELEASES}/snap_counts/snap_counts_{season}.parquet`,
+  season_key: "season",
+  seasons: ANY_SEASON,
+  row_filter: "pfr_player_id or team null/empty",
+  description: "Snap counts and shares per player-game (offence, defence, special teams)",
+  license: "CC-BY-4.0",
+  columns: [
+    p2int("season", false),
+    p2int("week", false),
+    p2text("game_type", false), // REG | WC | DIV | CON | SB
+    p2text("game_id", false),
+    p2text("pfr_game_id"),
+    p2text("pfr_player_id", false),
+    p2text("position"),
+    p2text("team", false),
+    p2text("opponent"),
+    whole("offense_snaps"),
+    p2("offense_pct", "REAL", true, ["offense_pct"], "fraction01(offense_pct): 0–1, else NULL"),
+    whole("defense_snaps"),
+    p2("defense_pct", "REAL", true, ["defense_pct"], "fraction01(defense_pct): 0–1, else NULL"),
+    whole("st_snaps"),
+    p2("st_pct", "REAL", true, ["st_pct"], "fraction01(st_pct): 0–1, else NULL"),
+  ],
+  primary_key: ["season", "week", "pfr_player_id"],
+  indexes: [
+    ["pfr_player_id", "season", "week"],
+    ["season", "week", "team"],
+  ],
+});
+
+// --- nflverse:depth_charts ------------------------------------------------------------------------------
+
+/** The season the depth-chart file switched to ESPN-keyed daily snapshots (Y-04 §B1 (b)). */
+export const DEPTH_CHARTS_SNAPSHOT_SCHEMA_FROM = 2025;
+
+/**
+ * `ds_depth_charts` — the 2025+ ESPN-keyed depth charts (research 04 §A #7: `espn_id` on every row,
+ * so the join to ESPN players needs no crosswalk), `depth_charts/depth_charts_{season}.parquet`: one
+ * full snapshot of all 32 teams per day (`dt`), NO season and NO week column (2026: 613,196 rows, 220
+ * snapshots 2026-03-22 → 2026-10-06; 2025: 554,215 rows, 221 snapshots). Stored as RUNS
+ * (`depthChartRuns`, derive.ts): an occupant's unbroken stay in a slot — 12,046 rows for 2026 and
+ * 18,254 for 2025 — so the chart as of any instant is one range predicate and the current chart is
+ * `valid_to_ms IS NULL`. `gsis_id` is null on 300 of 3,318 2026 espn ids (practice squad / new
+ * signings) — the espn_id is the key.
+ */
+export const DS_DEPTH_CHARTS = p2table({
+  name: "ds_depth_charts",
+  source: "nflverse:depth_charts",
+  history: "nflverse:depth_charts_history",
+  upstream: `${RELEASES}/depth_charts/depth_charts_{season}.parquet`,
+  season_key: "season",
+  seasons: { from: DEPTH_CHARTS_SNAPSHOT_SCHEMA_FROM, to: null },
+  row_filter:
+    "a snapshot row whose dt, espn_id, team, pos_grp_id, pos_id, pos_slot or pos_rank is malformed, or whose pos_grp/pos_abb fails DEPTH_LABEL_RE, is invalid (dropped + warned); consecutive snapshots of one occupant in one slot collapse into one run (depthChartRuns); a second row for a taken slot in one snapshot is dropped (none observed)",
+  description: "ESPN-keyed depth charts as occupancy runs (current chart: valid_to_ms IS NULL)",
+  license: "CC-BY-4.0",
+  columns: [
+    p2(
+      "season",
+      "INTEGER",
+      false,
+      [],
+      "the file's {season} (the 2025+ schema has no season column)",
+    ),
+    p2text("team", false),
+    p2(
+      "espn_id",
+      "INTEGER",
+      false,
+      ["espn_id"],
+      "parseDecimalId(espn_id); malformed → the row is invalid",
+    ),
+    p2text("gsis_id"),
+    p2(
+      "player_name",
+      "TEXT",
+      true,
+      ["player_name"],
+      "capText(player_name, 256)",
+      "nflverse.depth_charts.name",
+    ),
+    p2("pos_grp_id", "INTEGER", false, ["pos_grp_id"], "nonNegativeDecimal(pos_grp_id)"),
+    p2(
+      "pos_grp",
+      "TEXT",
+      false,
+      ["pos_grp"],
+      "depthLabel(pos_grp): DEPTH_LABEL_RE, else the row is invalid",
+    ),
+    p2("pos_id", "INTEGER", false, ["pos_id"], "nonNegativeDecimal(pos_id)"),
+    p2(
+      "pos_abb",
+      "TEXT",
+      false,
+      ["pos_abb"],
+      "depthLabel(pos_abb): DEPTH_LABEL_RE, else the row is invalid",
+    ),
+    p2int("pos_slot", false),
+    p2int("pos_rank", false),
+    p2(
+      "valid_from_ms",
+      "INTEGER",
+      false,
+      ["dt"],
+      "depthChartRuns: depthSnapshotMs(dt) of the run's first snapshot",
+    ),
+    p2(
+      "last_seen_ms",
+      "INTEGER",
+      false,
+      ["dt"],
+      "depthChartRuns: depthSnapshotMs(dt) of the run's last snapshot",
+    ),
+    p2(
+      "valid_to_ms",
+      "INTEGER",
+      true,
+      ["dt"],
+      "depthChartRuns: the team's next snapshot after last_seen_ms (exclusive); NULL = in the newest snapshot",
+    ),
+    p2("snapshots", "INTEGER", false, ["dt"], "depthChartRuns: snapshots the run spans"),
+  ],
+  primary_key: ["season", "team", "pos_grp_id", "pos_slot", "pos_rank", "valid_from_ms"],
+  indexes: [
+    ["season", "team", "valid_to_ms"],
+    ["espn_id", "season"],
+    ["gsis_id", "season"],
+  ],
+});
+
+/**
+ * `ds_depth_charts_legacy` — the ≤ 2024 weekly, gsis-keyed depth-chart layout (HISTORY file only; the
+ * 2024 backtest season), `depth_charts/depth_charts_{season}.parquet` with season/club_code/week/
+ * formation/depth_position/depth_team: 2024 37,312 rows, 15 columns, SNAPPY. 234 `SBBYE` rows have no
+ * week (dropped); 201 rows duplicate another exactly once derived (198 already byte-identical
+ * upstream) and collapse — no two DIFFERENT rows share a key; a blank `depth_position` (467 rows, e.g.
+ * "\n    ") falls back to `position`. No espn_id: readers join through gsis_id.
+ */
+export const DS_DEPTH_CHARTS_LEGACY = p2table({
+  name: "ds_depth_charts_legacy",
+  source: "nflverse:depth_charts",
+  history: "nflverse:depth_charts_history",
+  upstream: `${RELEASES}/depth_charts/depth_charts_{season}.parquet (seasons ≤ 2024 layout)`,
+  season_key: "season",
+  seasons: { from: null, to: DEPTH_CHARTS_SNAPSHOT_SCHEMA_FROM - 1 },
+  row_filter:
+    "week null (SBBYE rows) or gsis_id empty → dropped; exact duplicate rows collapse to one; two different rows with one key → the publish fails (schema_mismatch; none observed)",
+  description: "Weekly depth charts in the pre-2025 layout (history only)",
+  license: "CC-BY-4.0",
+  columns: [
+    p2int("season", false),
+    p2int("week", false),
+    p2text("game_type", false),
+    p2("team", "TEXT", false, ["club_code"], "verbatim club_code (renamed; nflverse spelling)"),
+    p2text("gsis_id", false),
+    p2(
+      "full_name",
+      "TEXT",
+      true,
+      ["full_name"],
+      "capText(full_name, 256)",
+      "nflverse.depth_charts.name",
+    ),
+    p2text("position"),
+    p2(
+      "formation",
+      "TEXT",
+      false,
+      ["formation"],
+      "depthLabel(formation): Offense | Defense | Special Teams",
+    ),
+    p2(
+      "pos_abb",
+      "TEXT",
+      false,
+      ["depth_position", "position"],
+      "depthLabel(emptyToNull(depth_position) ?? position); neither valid → the row is invalid",
+    ),
+    p2(
+      "depth_team",
+      "INTEGER",
+      false,
+      ["depth_team"],
+      "legacyDepthRank(depth_team): '1'–'9' → 1–9",
+    ),
+    p2("jersey_number", "INTEGER", true, ["jersey_number"], "jerseyNumber(jersey_number)"),
+  ],
+  primary_key: [
+    "season",
+    "week",
+    "game_type",
+    "team",
+    "formation",
+    "pos_abb",
+    "depth_team",
+    "gsis_id",
+  ],
+  indexes: [
+    ["season", "team", "week"],
+    ["gsis_id", "season", "week"],
+  ],
+});
+
+// --- ffopportunity:ep_weekly ------------------------------------------------------------------------------
+
+/**
+ * The player-level columns of `ds_ep_weekly` kept verbatim (REAL): actuals and model expectations per
+ * component, so xFP can be re-scored under the LEAGUE's scoring (E1 `player_sim`, plan 10 §3.2) rather
+ * than ffopportunity's own, plus the team denominators the shares need. Not kept: the `*_diff`
+ * columns (actual − exp) and the rest of the `*_team` family.
+ */
+export const EP_WEEKLY_COLUMNS: readonly Phase2Column[] = Object.freeze(
+  p2reals(
+    "pass_attempt", "rec_attempt", "rush_attempt", "pass_air_yards", "rec_air_yards",
+    "pass_completions", "receptions", "pass_completions_exp", "receptions_exp",
+    "pass_yards_gained", "rec_yards_gained", "rush_yards_gained",
+    "pass_yards_gained_exp", "rec_yards_gained_exp", "rush_yards_gained_exp",
+    "pass_touchdown", "rec_touchdown", "rush_touchdown",
+    "pass_touchdown_exp", "rec_touchdown_exp", "rush_touchdown_exp",
+    "pass_two_point_conv", "rec_two_point_conv", "rush_two_point_conv",
+    "pass_two_point_conv_exp", "rec_two_point_conv_exp", "rush_two_point_conv_exp",
+    "pass_first_down", "rec_first_down", "rush_first_down",
+    "pass_first_down_exp", "rec_first_down_exp", "rush_first_down_exp",
+    "pass_interception", "rec_interception", "pass_interception_exp", "rec_interception_exp",
+    "rec_fumble_lost", "rush_fumble_lost",
+    "pass_fantasy_points", "rec_fantasy_points", "rush_fantasy_points",
+    "pass_fantasy_points_exp", "rec_fantasy_points_exp", "rush_fantasy_points_exp",
+    "total_yards_gained", "total_yards_gained_exp", "total_touchdown", "total_touchdown_exp",
+    "total_first_down", "total_first_down_exp", "total_fantasy_points", "total_fantasy_points_exp",
+    "pass_attempt_team", "rec_attempt_team", "rush_attempt_team", "rec_air_yards_team",
+  ), // prettier-ignore
+);
+
+/**
+ * `ds_ep_weekly` — ffopportunity expected fantasy points per player-week (research 04 §B.3;
+ * CC-BY-SA 4.0 — share-alike: kept separable, attributed per SOURCE_REGISTRY),
+ * `ffverse/ffopportunity` release `latest-data`, `ep_weekly_{season}.parquet`: 2026 1,362 rows
+ * (weeks 1–4), 2025 6,054, 2024 6,005; 159 columns, SNAPPY. `season` is TEXT and `week` a DOUBLE
+ * upstream; `player_id` (= gsis_id) is null on team-level unattributed rows (97 in 2026, dropped);
+ * (season, week, player_id) unique otherwise.
+ */
+export const DS_EP_WEEKLY = p2table({
+  name: "ds_ep_weekly",
+  source: "ffopportunity:ep_weekly",
+  history: "ffopportunity:ep_weekly_history",
+  upstream: `${FFO_RELEASES}/ep_weekly_{season}.parquet`,
+  season_key: "season",
+  seasons: ANY_SEASON,
+  row_filter: "player_id null/empty (team-level unattributed opportunity rows)",
+  description: "Expected fantasy points and their components per player-week (ffopportunity)",
+  license: "CC-BY-SA-4.0",
+  columns: [
+    p2("season", "INTEGER", false, ["season"], "seasonFromText(season): the TEXT '2026' → 2026"),
+    whole("week", false),
+    p2text("game_id", false),
+    p2text("player_id", false), // = gsis_id
+    p2text("posteam", false),
+    p2text("position"),
+    ...EP_WEEKLY_COLUMNS,
+  ],
+  primary_key: ["season", "week", "player_id"],
+  indexes: [
+    ["player_id", "season", "week"],
+    ["season", "week", "posteam"],
+  ],
+});
+
+// --- sleeper:trending ------------------------------------------------------------------------------------
+
+/** The `lookback_hours` and `limit` the trending source requests (Sleeper's documented parameters). */
+export const SLEEPER_TRENDING_REQUEST = Object.freeze({ lookback_hours: 24, limit: 50 });
+
+/**
+ * `ds_trending` — Sleeper's trending adds and drops (SECONDARY: ESPN `ownership.percentChange` is the
+ * primary market signal, research 04 §A #13; non-commercial terms), `GET
+ * api.sleeper.app/v1/players/nfl/trending/{add|drop}` → `[{ "player_id": "4984", "count": 1234 }]`
+ * (shape observed by the sibling 2026-09-29, Y-04 §B4; not re-fetched here). One fresh file per
+ * refresh holds the latest two lists; `player_id` is a Sleeper id (digits, or a team code for a
+ * defence) mapped to gsis_id by readers through `ds_roster_weekly.sleeper_id`.
+ */
+export const DS_TRENDING = p2table({
+  name: "ds_trending",
+  source: "sleeper:trending",
+  history: null,
+  upstream:
+    "https://api.sleeper.app/v1/players/nfl/trending/{add|drop}?lookback_hours=24&limit=50 (JSON array)",
+  season_key: null,
+  seasons: ANY_SEASON,
+  row_filter:
+    "an entry whose player_id fails sleeperPlayerId or whose count is not a non-negative integer; a player_id repeated within one list keeps its first (highest) entry",
+  description: "Sleeper trending adds/drops (secondary market signal)",
+  license: "non-commercial",
+  columns: [
+    p2("kind", "TEXT", false, [], "the request path's {add|drop}"),
+    p2("sleeper_id", "TEXT", false, ["player_id"], "sleeperPlayerId(player_id)"),
+    p2("rank", "INTEGER", false, [], "1-based position in the response array"),
+    p2("count", "INTEGER", false, ["count"], "nonNegativeInt(count)"),
+    p2(
+      "lookback_hours",
+      "INTEGER",
+      false,
+      [],
+      "the request's lookback_hours (SLEEPER_TRENDING_REQUEST)",
+    ),
+    p2("as_of", "TEXT", false, [], "the fetch instant (injected Clock), UTC ISO-8601"),
+  ],
+  primary_key: ["kind", "sleeper_id"],
+  indexes: [["sleeper_id"], ["kind", "rank"]],
+});
+
+// --- news:rotowire / news:espn / news:cbs ---------------------------------------------------------------
+
+const NEWS_FEEDS = Object.freeze({
+  rotowire: "https://www.rotowire.com/rss/news.php?sport=NFL",
+  espn: "https://www.espn.com/espn/rss/nfl/news",
+  cbs: "https://www.cbssports.com/rss/headlines/nfl/",
+} satisfies Record<NewsSource, string>);
+
+/** The storage ceilings of the RSS text (code points; the wrapper caps lower at output). */
+export const NEWS_STORAGE_CAPS = Object.freeze({ title: 1000, blurb: 4000 });
+
+const newsTag = <K extends "title" | "blurb" | "url">(src: NewsSource, k: K) =>
+  `rss.${src}.${k}` as const satisfies UntrustedSource;
+
+const newsItems = (src: NewsSource, id: Phase2DatasetSourceId): Phase2TableContract =>
+  p2table({
+    name: "ds_news",
+    source: id,
+    history: null,
+    upstream: `${NEWS_FEEDS[src]} (RSS 2.0 <item>)`,
+    season_key: null,
+    seasons: ANY_SEASON,
+    row_filter:
+      "an item without a title, without a guid AND a link, or with an unparsable pubDate is invalid; items published more than NEWS_RETENTION_MS (30 d) before the fetch are not carried over; an item already in the previous file keeps its first_seen_ms (append + dedup by item_id, plan 01 §5.2)",
+    description: `RSS headlines (${src}); all text untrusted`,
+    license: "api-terms",
+    columns: [
+      p2("item_id", "TEXT", false, ["guid", "link"], `newsItemId('${src}', guid, link)`),
+      p2("source", "TEXT", false, [], `the constant '${src}' (NEWS_SOURCES)`),
+      p2("published_ms", "INTEGER", false, ["pubDate"], "rssDateMs(pubDate)"),
+      p2(
+        "first_seen_ms",
+        "INTEGER",
+        false,
+        [],
+        "the fetch instant of the item's first sighting (carried over)",
+      ),
+      p2(
+        "title",
+        "TEXT",
+        false,
+        ["title"],
+        `capText(title, NEWS_STORAGE_CAPS.title)`,
+        newsTag(src, "title"),
+      ),
+      p2(
+        "blurb",
+        "TEXT",
+        true,
+        ["description"],
+        `capText(description, NEWS_STORAGE_CAPS.blurb)`,
+        newsTag(src, "blurb"),
+      ),
+      p2("link", "TEXT", true, ["link"], "httpUrlOrNull(link)", newsTag(src, "url")),
+    ],
+    primary_key: ["item_id"],
+    indexes: [["published_ms"]],
+  });
+
+const newsPlayers = (src: NewsSource, id: Phase2DatasetSourceId): Phase2TableContract =>
+  p2table({
+    name: "ds_news_players",
+    source: id,
+    history: null,
+    upstream: `derived at load from the ${src} items (title + blurb) against the ESPN player universe`,
+    season_key: null,
+    seasons: ANY_SEASON,
+    row_filter: "refs of items not in ds_news are dropped",
+    description: `Players an RSS item (${src}) names, by deterministic match`,
+    license: "api-terms",
+    columns: [
+      p2("item_id", "TEXT", false, ["ds_news.item_id"], "the matched item's id"),
+      p2(
+        "espn_id",
+        "INTEGER",
+        false,
+        ["ds_players.espn_id", "ds_players.full_name", "ds_pro_teams.abbrev"],
+        "the news source's deterministic name matcher (plan 07 D6 players_matched; plan 02 §6.4 — rules, never a model) over the item's title and blurb against ds_players",
+      ),
+      p2(
+        "gsis_id",
+        "TEXT",
+        true,
+        ["crosswalk.gsis_id"],
+        "the crosswalk's gsis_id for espn_id at load; NULL when unpaired",
+      ),
+      p2("match_confidence", "REAL", false, [], "the matcher's confidence 0–1 by method"),
+      p2("match_method", "TEXT", false, [], "NEWS_MATCH_METHODS (derive.ts)"),
+    ],
+    primary_key: ["item_id", "espn_id"],
+    indexes: [["gsis_id"], ["espn_id"]],
+  });
+
+/** `ds_news` + `ds_news_players` of each RSS source (one dataset file per feed; identical layouts). */
+export const NEWS_TABLES: Readonly<
+  Record<"news:rotowire" | "news:espn" | "news:cbs", readonly Phase2TableContract[]>
+> = Object.freeze({
+  "news:rotowire": Object.freeze([
+    newsItems("rotowire", "news:rotowire"),
+    newsPlayers("rotowire", "news:rotowire"),
+  ]),
+  "news:espn": Object.freeze([newsItems("espn", "news:espn"), newsPlayers("espn", "news:espn")]),
+  "news:cbs": Object.freeze([newsItems("cbs", "news:cbs"), newsPlayers("cbs", "news:cbs")]),
+});
+
+// --- the Phase-2 + history registries -------------------------------------------------------------------
+
+/** Every Phase-2 ds_* table, by the source whose CURRENT-season file holds it. */
+export const PHASE_2_DATASET_TABLES: Readonly<
+  Record<Phase2DatasetSourceId, readonly Phase2TableContract[]>
+> = Object.freeze({
+  "nflverse:stats_team_week": Object.freeze([DS_STATS_TEAM_WEEK]),
+  "nflverse:pbp": Object.freeze([DS_PBP]),
+  "nflverse:snap_counts": Object.freeze([DS_SNAP_COUNTS]),
+  "nflverse:depth_charts": Object.freeze([DS_DEPTH_CHARTS]),
+  "ffopportunity:ep_weekly": Object.freeze([DS_EP_WEEKLY]),
+  "sleeper:trending": Object.freeze([DS_TRENDING]),
+  ...NEWS_TABLES,
+});
+
+/** Every Phase-2 table contract, flat (the legacy depth layout included). */
+export const ALL_PHASE_2_TABLES: readonly Phase2TableContract[] = Object.freeze([
+  ...PHASE_2_DATASET_SOURCES.flatMap((s) => PHASE_2_DATASET_TABLES[s]),
+  DS_DEPTH_CHARTS_LEGACY,
+]);
+
+/**
+ * The tables each history file holds: the SAME spec objects as its current-season source (so every
+ * reader statement runs on it unchanged), plus the pre-2025 depth-chart layout in the depth file.
+ */
+export const HISTORY_DATASET_TABLES: Readonly<
+  Record<HistoryDatasetSourceId, readonly (DatasetTableContract | Phase2TableContract)[]>
+> = Object.freeze({
+  "nflverse:stats_player_week_history": DATASET_TABLES["nflverse:stats_player_week"],
+  "nflverse:stats_team_week_history": PHASE_2_DATASET_TABLES["nflverse:stats_team_week"],
+  "nflverse:pbp_history": PHASE_2_DATASET_TABLES["nflverse:pbp"],
+  "nflverse:snap_counts_history": PHASE_2_DATASET_TABLES["nflverse:snap_counts"],
+  "nflverse:injuries_history": DATASET_TABLES["nflverse:injuries"],
+  "nflverse:depth_charts_history": Object.freeze([DS_DEPTH_CHARTS, DS_DEPTH_CHARTS_LEGACY]),
+  "ffopportunity:ep_weekly_history": PHASE_2_DATASET_TABLES["ffopportunity:ep_weekly"],
+});
+
+/** Every contract source: Phase 1, Phase 2, history (25 dataset files). */
+export const CONTRACT_DATASET_SOURCES: readonly ContractSourceId[] = Object.freeze([
+  ...PHASE_1_DATASET_SOURCES,
+  ...PHASE_2_DATASET_SOURCES,
+  ...HISTORY_DATASET_SOURCES,
+]);
+
+/** Whether `s` is a Phase-2 dataset source id. */
+export function isPhase2DatasetSource(s: string): s is Phase2DatasetSourceId {
+  return (PHASE_2_DATASET_SOURCES as readonly string[]).includes(s);
+}
+
+/** Whether `s` is a history dataset source id. */
+export function isHistoryDatasetSource(s: string): s is HistoryDatasetSourceId {
+  return (HISTORY_DATASET_SOURCES as readonly string[]).includes(s);
+}
+
+/** Whether `s` names a source with a ds_* contract. */
+export function isContractDatasetSource(s: string): s is ContractSourceId {
+  return (CONTRACT_DATASET_SOURCES as readonly string[]).includes(s);
+}
+
+/**
+ * The tables a contract source's file holds (Phase 1, Phase 2 or history); [] for any other id. The
+ * publisher and the connection manager use THIS (not Phase-1 `tablesFor`) once Phase-2 sources publish.
+ */
+export function contractTablesFor(source: string): readonly DatasetTableSpec[] {
+  if (isPhase1DatasetSource(source)) return DATASET_TABLES[source];
+  if (isPhase2DatasetSource(source)) return PHASE_2_DATASET_TABLES[source];
+  if (isHistoryDatasetSource(source)) return HISTORY_DATASET_TABLES[source];
+  return [];
+}
+
+/** The `ds_schema` columns hash of any contract source (equals `columnsHash` for Phase-1 ones). */
+export function contractColumnsHash(source: string): string {
+  return columnsHashOf(contractTablesFor(source));
+}
+
+/** The history file of a current-season source, or null (Phase-1 readers' prior seasons run there). */
+export function historyTwinOf(source: string): HistoryDatasetSourceId | null {
+  for (const h of HISTORY_DATASET_SOURCES) if (HISTORY_OF[h] === source) return h;
+  return null;
+}
+
+/** Whether `season` falls in a table's upstream layout range. */
+export function seasonInRange(r: SeasonRange, season: number): boolean {
+  return (r.from === null || season >= r.from) && (r.to === null || season <= r.to);
+}
+
+/** The parquet sources among Phase 2 and history (their `assertSchema` checks columns + codec). */
+export const PHASE_2_PARQUET_SOURCES = [
+  "nflverse:stats_team_week",
+  "nflverse:pbp",
+  "nflverse:snap_counts",
+  "nflverse:depth_charts",
+  "ffopportunity:ep_weekly",
+  ...HISTORY_DATASET_SOURCES,
+] as const satisfies readonly ContractSourceId[];
+
+/**
+ * The upstream parquet columns a Phase-2 or history source's file for `season` must carry (plan 01
+ * §5.5: a missing or renamed column fails the job, naming it — acceptance B1): the union of every
+ * `from` of the source's tables whose layout covers `season` (cross-dataset inputs `a.b` excluded).
+ * A history file of a Phase-1 dataset requires what its current source requires. Sorted, unique;
+ * [] for the JSON/RSS sources (their wire checks live in the source).
+ */
+export function phase2RequiredUpstreamColumns(
+  source: ContractSourceId,
+  season: number,
+): readonly string[] {
+  if (!(PHASE_2_PARQUET_SOURCES as readonly string[]).includes(source)) return [];
+  if (isHistoryDatasetSource(source) && isPhase1DatasetSource(HISTORY_OF[source]))
+    return requiredUpstreamColumns(HISTORY_OF[source]);
+  const out = new Set<string>();
+  for (const t of contractTablesFor(source) as readonly Phase2TableContract[]) {
+    if (!seasonInRange(t.seasons, season)) continue;
+    for (const c of t.columns) for (const f of c.from) if (!f.includes(".")) out.add(f);
+  }
+  return [...out].sort();
+}
+
+// --- Phase-2 reader queries ------------------------------------------------------------------------------
+
+/**
+ * One statement of a Phase-2 reader: like `ReaderStatement`, on ONE file's read-only connection.
+ * `history` names the history file the SAME SQL also runs on for a prior season (the reader picks the
+ * file whose `dataset_meta.seasons` holds the requested season; both when a window spans them).
+ */
+export interface Phase2ReaderStatement {
+  readonly source: ContractSourceId;
+  readonly history: HistoryDatasetSourceId | null;
+  readonly tables: readonly string[];
+  readonly params: readonly string[];
+  readonly sql: string;
+}
+
+/** A Phase-2 reader method's contract. */
+export interface Phase2ReaderContract {
+  /** `Interface.method` (a src/domain port, or a pending one — PHASE_2_PENDING_PORT_READERS). */
+  readonly method: string;
+  readonly returns: string;
+  readonly statements: readonly Phase2ReaderStatement[];
+  readonly mapping: string;
+}
+
+const p2stmt = (
+  source: ContractSourceId,
+  tables: readonly string[],
+  params: readonly string[],
+  sql: string,
+  history: HistoryDatasetSourceId | null = isHistoryDatasetSource(source)
+    ? null
+    : historyTwinOf(source),
+): Phase2ReaderStatement =>
+  Object.freeze({
+    source,
+    history,
+    tables: Object.freeze([...tables]),
+    params: Object.freeze([...params]),
+    sql,
+  });
+
+const p2reader = (r: Phase2ReaderContract): Phase2ReaderContract =>
+  Object.freeze({ ...r, statements: Object.freeze([...r.statements]) });
+
+const IN_LIST = (col: string, param: string): string =>
+  `${col} IN (SELECT value FROM json_each(:${param}))`;
+
+/** The pbp predicates the grounding pinned (equal to nflverse's own counting, see DS_PBP). */
+export const PBP_TARGET_SQL = "pass_attempt = 1 AND sack = 0 AND two_point_attempt = 0";
+export const PBP_CARRY_SQL = "rush_attempt = 1 AND two_point_attempt = 0";
+
+const newsRecent = (src: "news:rotowire" | "news:espn" | "news:cbs"): Phase2ReaderStatement =>
+  p2stmt(
+    src,
+    ["ds_news", "ds_news_players"],
+    ["since_ms", "gsis_ids", "limit"],
+    `SELECT n.* FROM ds_news AS n
+WHERE n.published_ms >= :since_ms
+  AND (:gsis_ids IS NULL OR EXISTS (SELECT 1 FROM ds_news_players AS p
+       WHERE p.item_id = n.item_id AND ${IN_LIST("p.gsis_id", "gsis_ids")}))
+ORDER BY n.published_ms DESC, n.item_id LIMIT :limit`,
+  );
+
+const newsRefs = (src: "news:rotowire" | "news:espn" | "news:cbs"): Phase2ReaderStatement =>
+  p2stmt(
+    src,
+    ["ds_news_players"],
+    ["item_ids"],
+    `SELECT * FROM ds_news_players WHERE ${IN_LIST("item_id", "item_ids")}
+ORDER BY item_id, match_confidence DESC, espn_id`,
+  );
+
+/** Every Phase-2 reader method, keyed `Interface.method`. */
+export const PHASE_2_READER_QUERIES = Object.freeze({
+  /** DepthChartReader.chart(season, teams) — the current (newest-snapshot) chart, or 2024's last week. */
+  "DepthChartReader.chart": p2reader({
+    method: "DepthChartReader.chart",
+    returns: "DepthChartRow",
+    statements: [
+      p2stmt(
+        "nflverse:depth_charts",
+        ["ds_depth_charts"],
+        ["season", "teams"],
+        `SELECT * FROM ds_depth_charts
+WHERE season = :season AND ${IN_LIST("team", "teams")} AND valid_to_ms IS NULL
+ORDER BY team, pos_grp_id, pos_slot, pos_rank`,
+      ),
+      p2stmt(
+        "nflverse:depth_charts_history",
+        ["ds_depth_charts_legacy"],
+        ["season", "teams"],
+        `SELECT d.* FROM ds_depth_charts_legacy AS d
+JOIN (SELECT team, MAX(week) AS week FROM ds_depth_charts_legacy
+      WHERE season = :season AND ${IN_LIST("team", "teams")} GROUP BY team) AS m
+  ON m.team = d.team AND m.week = d.week
+WHERE d.season = :season ORDER BY d.team, d.formation, d.pos_abb, d.depth_team, d.gsis_id`,
+      ),
+    ],
+    mapping:
+      "season ≥ DEPTH_CHARTS_SNAPSHOT_SCHEMA_FROM → statement 1 (current file, or its history twin for a prior season): week ← null (the 2025+ layout has no week), nfl_team ← team (non-NflTeam skipped and warned), pos_grp, pos_abb as-is (DEPTH_LABEL_RE held at load), rank ← pos_rank, gsis_id, espn_id as-is, name ← bareUntrusted(player_name ?? '', 'player_name') under 'nflverse.depth_charts.name'; an earlier season → statement 2 (history file): week as-is (the team's last listed week), pos_grp ← formation, pos_abb as-is, rank ← depth_team, espn_id ← null (join via gsis_id), name ← bareUntrusted(full_name) under the same tag",
+  }),
+  /** DepthChartReader.asOf(season, teams, atMs | week) — the chart in force at an instant (pending port). */
+  "DepthChartReader.asOf": p2reader({
+    method: "DepthChartReader.asOf",
+    returns: "DepthChartRow",
+    statements: [
+      p2stmt(
+        "nflverse:depth_charts",
+        ["ds_depth_charts"],
+        ["season", "teams", "at_ms"],
+        `SELECT * FROM ds_depth_charts
+WHERE season = :season AND ${IN_LIST("team", "teams")}
+  AND valid_from_ms <= :at_ms AND (valid_to_ms IS NULL OR :at_ms < valid_to_ms)
+ORDER BY team, pos_grp_id, pos_slot, pos_rank`,
+      ),
+      p2stmt(
+        "nflverse:depth_charts_history",
+        ["ds_depth_charts_legacy"],
+        ["season", "teams", "week"],
+        `SELECT * FROM ds_depth_charts_legacy
+WHERE season = :season AND week = :week AND ${IN_LIST("team", "teams")}
+ORDER BY team, formation, pos_abb, depth_team, gsis_id`,
+      ),
+    ],
+    mapping:
+      "as DepthChartReader.chart; statement 1 takes an epoch-ms instant (the B3/B6 backtests ask 'the chart at the week's first kickoff'), statement 2 (≤ 2024 layout) a week; a team with no snapshot at or before the instant returns no rows",
+  }),
+  /** EpWeeklyReader.rows(gsisIds, season, weeks) — ds_ep_weekly. */
+  "EpWeeklyReader.rows": p2reader({
+    method: "EpWeeklyReader.rows",
+    returns: "EpWeeklyRow",
+    statements: [
+      p2stmt(
+        "ffopportunity:ep_weekly",
+        ["ds_ep_weekly"],
+        ["season", "weeks", "gsis_ids"],
+        `SELECT * FROM ds_ep_weekly
+WHERE season = :season AND ${IN_LIST("week", "weeks")} AND ${IN_LIST("player_id", "gsis_ids")}
+ORDER BY player_id, week`,
+      ),
+    ],
+    mapping:
+      "gsis_id ← player_id; season, week as-is; xfp_total ← total_fantasy_points_exp (ffopportunity's own PPR scoring — a league-scored xFP is Σ the *_exp components × the league's weights, plan 08 §5); the component columns ride along for E1 player_sim; attribution 'ffopportunity (ffverse)', CC-BY-SA 4.0",
+  }),
+  /** NewsReader.recent(sinceIso, limit, gsisIds | null) — one statement pair per feed file. */
+  "NewsReader.recent": p2reader({
+    method: "NewsReader.recent",
+    returns: "NewsItem",
+    statements: [
+      newsRecent("news:rotowire"),
+      newsRecent("news:espn"),
+      newsRecent("news:cbs"),
+      newsRefs("news:rotowire"),
+      newsRefs("news:espn"),
+      newsRefs("news:cbs"),
+    ],
+    mapping:
+      "since_ms ← Date.parse(sinceIso); statements 1–3 per feed (a missing file is skipped and named in the stamp), merged newest first by (published_ms DESC, item_id), cut to `limit`; statements 4–6 with that feed's item_ids; id ← item_id; source ← source; published_at ← epochMsToIso(published_ms); title ← wrapUntrusted(title, 'rss.<source>.title'); blurb ← wrapUntrusted(blurb ?? '', 'rss.<source>.blurb'); url ← wrapUntrusted(link ?? '', 'rss.<source>.url') — never fetched, never a link; gsis_ids ← the refs' non-null gsis_id values (espn_id rides along for player_id); `gsis_ids = NULL` means every item",
+  }),
+  /** TrendingReader.latest() — ds_trending, then gsis ids from the roster file. */
+  "TrendingReader.latest": p2reader({
+    method: "TrendingReader.latest",
+    returns: "TrendingRow",
+    statements: [
+      p2stmt(
+        "sleeper:trending",
+        ["ds_trending"],
+        [],
+        `SELECT * FROM ds_trending ORDER BY kind, rank`,
+      ),
+      p2stmt(
+        "nflverse:roster_weekly",
+        ["ds_roster_weekly"],
+        ["sleeper_ids"],
+        `SELECT sleeper_id, gsis_id, season, week FROM ds_roster_weekly
+WHERE ${IN_LIST("sleeper_id", "sleeper_ids")}
+ORDER BY sleeper_id, season DESC, week DESC`,
+      ),
+    ],
+    mapping:
+      "sleeper_id, kind ('add' | 'drop'), count, as_of as-is; gsis_id ← statement 2's FIRST row per sleeper_id (newest season/week; null when absent or the roster file is missing; a defence's team code never matches); statement 2's sleeper_ids are statement 1's; labelled secondary (ESPN percentChange is primary)",
+  }),
+  /** SnapCountReader.counts(gsisIds, season, weeks) — pfr ids via the roster/players files (pending port). */
+  "SnapCountReader.counts": p2reader({
+    method: "SnapCountReader.counts",
+    returns: "SnapCountRow",
+    statements: [
+      p2stmt(
+        "nflverse:roster_weekly",
+        ["ds_roster_weekly"],
+        ["season", "gsis_ids"],
+        `SELECT DISTINCT gsis_id, pfr_id FROM ds_roster_weekly
+WHERE season = :season AND ${IN_LIST("gsis_id", "gsis_ids")} AND pfr_id IS NOT NULL
+ORDER BY gsis_id, pfr_id`,
+      ),
+      p2stmt(
+        "nflverse:players",
+        ["ds_nfl_players"],
+        ["gsis_ids"],
+        `SELECT gsis_id, pfr_id FROM ds_nfl_players
+WHERE ${IN_LIST("gsis_id", "gsis_ids")} AND pfr_id IS NOT NULL ORDER BY gsis_id`,
+      ),
+      p2stmt(
+        "nflverse:snap_counts",
+        ["ds_snap_counts"],
+        ["season", "weeks", "pfr_ids"],
+        `SELECT * FROM ds_snap_counts
+WHERE season = :season AND ${IN_LIST("week", "weeks")} AND ${IN_LIST("pfr_player_id", "pfr_ids")}
+ORDER BY pfr_player_id, week`,
+      ),
+    ],
+    mapping:
+      "pfr_id per gsis_id: statement 1 (the season's roster; one pfr_id per gsis_id observed) wins, else statement 2 (all-time players — the only path for a prior season, whose roster is not loaded); a gsis_id with two pfr_ids or a pfr_id claimed by two gsis_ids is dropped and warned (never guessed); statement 3's pfr_ids are those; row → { gsis_id, season, week, nfl_team ← team, snaps ← offense_snaps, snap_pct ← offense_pct, defense_snaps, st_snaps }",
+  }),
+  /** TeamWeekReader.lines(teams, season, weeks) — ds_stats_team_week (pending port). */
+  "TeamWeekReader.lines": p2reader({
+    method: "TeamWeekReader.lines",
+    returns: "TeamWeekLine",
+    statements: [
+      p2stmt(
+        "nflverse:stats_team_week",
+        ["ds_stats_team_week"],
+        ["season", "weeks", "teams"],
+        `SELECT * FROM ds_stats_team_week
+WHERE season = :season AND ${IN_LIST("week", "weeks")} AND ${IN_LIST("team", "teams")}
+ORDER BY team, week`,
+      ),
+    ],
+    mapping:
+      "nfl_team ← team, opponent ← opponent_team (non-NflTeam skipped and warned); the stat columns as-is (TEAM_WEEK_STAT_COLUMNS); carry_share denominators ← carries, target denominators ← targets; the D/ST cross-check reads def_* and fumble_recovery_* against ds_team_defense_week",
+  }),
+  /** PbpReader.playerUsage(gsisIds, season, weeks) — targets, carries, RZ/GL, team totals (pending port). */
+  "PbpReader.playerUsage": p2reader({
+    method: "PbpReader.playerUsage",
+    returns: "PbpUsageRow",
+    statements: [
+      p2stmt(
+        "nflverse:pbp",
+        ["ds_pbp"],
+        ["season", "weeks", "gsis_ids"],
+        `SELECT season, week, posteam AS team, receiver_player_id AS gsis_id,
+  COUNT(*) AS targets, SUM(rz) AS rz_targets, SUM(gl) AS gl_targets,
+  SUM(CASE WHEN complete_pass = 1 THEN 1 ELSE 0 END) AS receptions,
+  SUM(COALESCE(air_yards, 0)) AS air_yards
+FROM ds_pbp
+WHERE +season = :season AND ${IN_LIST("+week", "weeks")} AND ${IN_LIST("receiver_player_id", "gsis_ids")}
+  AND ${PBP_TARGET_SQL}
+GROUP BY season, week, posteam, receiver_player_id ORDER BY gsis_id, week, team`,
+      ),
+      p2stmt(
+        "nflverse:pbp",
+        ["ds_pbp"],
+        ["season", "weeks", "gsis_ids"],
+        `SELECT season, week, posteam AS team, rusher_player_id AS gsis_id,
+  COUNT(*) AS carries, SUM(rz) AS rz_carries, SUM(gl) AS gl_carries
+FROM ds_pbp
+WHERE +season = :season AND ${IN_LIST("+week", "weeks")} AND ${IN_LIST("rusher_player_id", "gsis_ids")}
+  AND ${PBP_CARRY_SQL}
+GROUP BY season, week, posteam, rusher_player_id ORDER BY gsis_id, week, team`,
+      ),
+      p2stmt(
+        "nflverse:pbp",
+        ["ds_pbp"],
+        ["season", "weeks", "teams"],
+        `SELECT season, week, posteam AS team,
+  SUM(CASE WHEN qb_dropback = 1 AND two_point_attempt = 0 THEN 1 ELSE 0 END) AS dropbacks,
+  SUM(CASE WHEN ${PBP_TARGET_SQL} AND receiver_player_id IS NOT NULL THEN 1 ELSE 0 END) AS targets,
+  SUM(CASE WHEN ${PBP_CARRY_SQL} AND rusher_player_id IS NOT NULL THEN 1 ELSE 0 END) AS carries,
+  SUM(CASE WHEN ${PBP_TARGET_SQL} AND receiver_player_id IS NOT NULL THEN rz ELSE 0 END) AS rz_targets,
+  SUM(CASE WHEN ${PBP_CARRY_SQL} AND rusher_player_id IS NOT NULL THEN rz ELSE 0 END) AS rz_carries,
+  SUM(CASE WHEN ${PBP_CARRY_SQL} AND rusher_player_id IS NOT NULL THEN gl ELSE 0 END) AS gl_carries
+FROM ds_pbp
+WHERE season = :season AND ${IN_LIST("week", "weeks")} AND ${IN_LIST("posteam", "teams")}
+GROUP BY season, week, posteam ORDER BY team, week`,
+      ),
+    ],
+    mapping:
+      "statements 1–2 carry a unary + on season/week so the planner takes the receiver/rusher index (no ANALYZE in a published file: 0.3 ms instead of 11 ms over a 2-season history file); per (gsis_id, week, team): targets, rz_targets, gl_targets, receptions, air_yards from statement 1; carries, rz_carries, gl_carries from statement 2 (absent → 0 when the week's pbp file is loaded, else null); statement 3's teams are the teams statements 1–2 returned; rz_share ← (rz_targets + rz_carries) / (team rz_targets + rz_carries), null when the team had none; routes_proxy ← SnapCountReader snap_pct × team dropbacks (named a proxy: research 04 #3)",
+  }),
+  /** PbpReader.scoringPlays(gsisIds, season, weeks) — TD lengths, kicks, 2-pt, return TDs (pending port). */
+  "PbpReader.scoringPlays": p2reader({
+    method: "PbpReader.scoringPlays",
+    returns: "PbpScoringPlay",
+    statements: [
+      p2stmt(
+        "nflverse:pbp",
+        ["ds_pbp"],
+        ["season", "weeks", "gsis_ids"],
+        `SELECT season, week, game_id, play_id, play_type, posteam, defteam, yards_gained, kick_distance,
+  field_goal_result, extra_point_result, two_point_attempt, two_point_conv_result, touchdown,
+  pass_touchdown, rush_touchdown, return_touchdown, td_team, td_player_id, passer_player_id,
+  receiver_player_id, rusher_player_id, kicker_player_id, kickoff_returner_player_id,
+  punt_returner_player_id
+FROM ds_pbp
+WHERE season = :season AND ${IN_LIST("week", "weeks")}
+  AND (touchdown = 1 OR two_point_attempt = 1 OR play_type IN ('field_goal', 'extra_point'))
+  AND (${IN_LIST("td_player_id", "gsis_ids")} OR ${IN_LIST("passer_player_id", "gsis_ids")}
+    OR ${IN_LIST("receiver_player_id", "gsis_ids")} OR ${IN_LIST("rusher_player_id", "gsis_ids")}
+    OR ${IN_LIST("kicker_player_id", "gsis_ids")})
+ORDER BY season, week, game_id, play_id`,
+      ),
+    ],
+    mapping:
+      "plan 08 §4.3 long_td_bonus: a pass TD's length = yards_gained for its passer and its receiver (td_player_id), a rush TD's for its rusher; plan 08 §3.2 fg_*: kick_distance + field_goal_result (made | missed | blocked) per kicker, bracketized to the league's bounds; kr_td / pr_td ← returnTdKind(play) (derive.ts); 2-pt by passer/receiver/rusher with two_point_conv_result = 'success'",
+  }),
+  /** PbpReader.teamProfile(teams, season, weeks) — the D5 defence profile by defteam (pending port). */
+  "PbpReader.teamProfile": p2reader({
+    method: "PbpReader.teamProfile",
+    returns: "PbpTeamProfileRow",
+    statements: [
+      p2stmt(
+        "nflverse:pbp",
+        ["ds_pbp"],
+        ["season", "weeks", "teams"],
+        `SELECT season, week, defteam AS team, COUNT(*) AS plays,
+  SUM(CASE WHEN qb_dropback = 1 THEN 1 ELSE 0 END) AS dropbacks,
+  SUM(CASE WHEN sack = 1 THEN 1 ELSE 0 END) AS sacks,
+  SUM(CASE WHEN interception = 1 THEN 1 ELSE 0 END) AS interceptions,
+  SUM(CASE WHEN fumble_lost = 1 THEN 1 ELSE 0 END) AS fumbles_lost,
+  SUM(CASE WHEN qb_dropback = 1 THEN epa ELSE 0 END) AS epa_dropback_sum,
+  SUM(CASE WHEN qb_dropback = 0 AND rush_attempt = 1 THEN epa ELSE 0 END) AS epa_rush_sum,
+  SUM(CASE WHEN qb_dropback = 0 AND rush_attempt = 1 THEN 1 ELSE 0 END) AS rushes,
+  AVG(pass_oe) AS pass_oe_mean, COUNT(pass_oe) AS pass_oe_n, AVG(xpass) AS xpass_mean
+FROM ds_pbp
+WHERE season = :season AND ${IN_LIST("week", "weeks")} AND ${IN_LIST("defteam", "teams")}
+  AND play_type IN ('pass', 'run') AND two_point_attempt = 0
+GROUP BY season, week, defteam ORDER BY team, week`,
+      ),
+    ],
+    mapping:
+      "per defence-week: pass_rate ← dropbacks / plays, sack_rate ← sacks / dropbacks, takeaway_rate ← (interceptions + fumbles_lost) / plays, epa_allowed.pass ← epa_dropback_sum / dropbacks, .rush ← epa_rush_sum / rushes, proe ← pass_oe_mean (nflverse's pass rate over expectation, percent points; null when pass_oe_n = 0); the shrinkage and windowing are E-layer (plan 07 D5)",
+  }),
+} satisfies Record<string, Phase2ReaderContract>);
+
+/** A Phase-2 reader method key. */
+export type Phase2ReaderMethod = keyof typeof PHASE_2_READER_QUERIES;
+
+/**
+ * Phase-2 reader keys with no domain port yet (src/domain/analytics/types.ts declares DepthChartReader
+ * .chart, EpWeeklyReader, NewsReader and TrendingReader only): the analytics module declares these
+ * ports, then the store implements them over the statements above.
+ */
+export const PHASE_2_PENDING_PORT_READERS: readonly Phase2ReaderMethod[] = Object.freeze([
+  "DepthChartReader.asOf",
+  "SnapCountReader.counts",
+  "TeamWeekReader.lines",
+  "PbpReader.playerUsage",
+  "PbpReader.scoringPlays",
+  "PbpReader.teamProfile",
+]);
+
+/**
+ * Phase-1 reader statements whose source has a history twin run unchanged on it for a prior season
+ * (`PlayerWeekReader.lines`/`defenseLines` on nflverse:stats_player_week_history, `InjuryReader
+ * .reports` on nflverse:injuries_history): READER_QUERIES stays as it is; this names the pairing.
+ */
+export const PHASE_1_HISTORY_TWINS: Readonly<
+  Partial<Record<Phase1DatasetSourceId, HistoryDatasetSourceId>>
+> = Object.freeze({
+  "nflverse:stats_player_week": "nflverse:stats_player_week_history",
+  "nflverse:injuries": "nflverse:injuries_history",
+});
