@@ -56,6 +56,7 @@ import {
   type TransportStatus,
   type TxnQuery,
 } from "../platform.js";
+import { EspnCredentialError } from "./credentials.js";
 import { EspnDriftError, EspnUpstreamError } from "./errors.js";
 import {
   boardProbeFilter,
@@ -307,18 +308,37 @@ export class EspnProvider implements FantasyPlatform {
     return latest === null ? true : week >= latest;
   }
 
-  private settingsRead(ref: LeagueRef, opts?: ReadOptions): Promise<ReadResult<SettingsRead>> {
+  private async settingsRead(
+    ref: LeagueRef,
+    opts?: ReadOptions,
+  ): Promise<ReadResult<SettingsRead>> {
     this.checkRef(ref);
-    return this.req.read(
-      {
-        target: this.league(ref, ["mSettings", "mNav"]),
-        filter: null,
-        leagueId: ref.league_id,
-        cookies: "auto",
-        parse: parseSettings,
-      },
-      opts,
-    );
+    // rejected and publicity unknown: the one anonymous read that learns settings.isPublic
+    const learning = this.req.cookies.needsPublicity();
+    try {
+      return await this.req.read(
+        {
+          target: this.league(ref, ["mSettings", "mNav"]),
+          filter: null,
+          leagueId: ref.league_id,
+          cookies: learning ? "never" : "auto",
+          parse: parseSettings,
+        },
+        opts,
+      );
+    } catch (e) {
+      // a private league answered the anonymous read with 401: the credential is still the problem
+      if (learning && (e as { effCode?: unknown } | null)?.effCode === "ESPN_REQUIRES_COOKIES")
+        throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
+      throw e;
+    }
+  }
+
+  /** The ref check, then (rejected, publicity unknown) the one anonymous settings read. */
+  private async prepare(ref: LeagueRef, opts?: ReadOptions): Promise<void> {
+    this.checkRef(ref);
+    if (this.req.cookies.needsPublicity())
+      await this.settingsRead(ref, opts).catch(() => undefined);
   }
 
   /** The league identity (teams + owners) — best effort: a failure leaves names as `Team <id>`. */
@@ -396,7 +416,7 @@ export class EspnProvider implements FantasyPlatform {
     week: Week,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly Roster[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const r = await this.req.read(
       {
@@ -461,7 +481,7 @@ export class EspnProvider implements FantasyPlatform {
     page: Page,
     opts?: ReadOptions,
   ): Promise<Stamped<PageOf<PlatformPlayer>>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const filter = playerFilter(this.poolFilter(q, page, ref.season), "league");
     const r = await this.req.read(
       {
@@ -521,7 +541,7 @@ export class EspnProvider implements FantasyPlatform {
     week: Week,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly PlatformPlayer[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const ids = this.checkIds(players, FILTER_IDS_MAX);
     const r = await this.konaById(ref, ids, week, opts);
     const counts = newCounts();
@@ -543,7 +563,7 @@ export class EspnProvider implements FantasyPlatform {
     weeks: readonly Week[],
     opts?: ReadOptions,
   ): Promise<Stamped<readonly (PlayerOutlook & { readonly player: PlayerRef })[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const ids = this.checkIds(players, FILTER_IDS_MAX);
     const week = weeks.length === 0 ? null : Math.max(...weeks);
     const r = await this.konaById(ref, ids, week ?? 0, opts);
@@ -562,7 +582,7 @@ export class EspnProvider implements FantasyPlatform {
     q: StatsQuery,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly PlatformStatLine[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const ids = this.checkIds(players, PLAYERCARD_IDS_MAX);
     const season = ref.season;
     const filter = playerFilter(
@@ -613,7 +633,7 @@ export class EspnProvider implements FantasyPlatform {
   }
 
   async getMatchups(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<readonly Matchup[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const r = await this.req.read(
       {
@@ -633,7 +653,7 @@ export class EspnProvider implements FantasyPlatform {
     week: Week,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly LiveMatchup[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const latest = id.settings?.status.latestScoringPeriod ?? null;
     const r = await this.req.read(
@@ -655,7 +675,7 @@ export class EspnProvider implements FantasyPlatform {
     week: Week,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly BoxScoreMatchup[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const periods = id.settings === null ? [week] : matchupPeriodsForWeek(id.settings, week);
     const r = await this.req.read(
@@ -684,7 +704,7 @@ export class EspnProvider implements FantasyPlatform {
     week: Week,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly NativeProjection[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const ids = this.checkIds(players, FILTER_IDS_MAX);
     const r = await this.req.read(
       {
@@ -704,7 +724,7 @@ export class EspnProvider implements FantasyPlatform {
   }
 
   async getStandings(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<Standings>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const r = await this.req.read(
       {
@@ -735,7 +755,7 @@ export class EspnProvider implements FantasyPlatform {
     q: TxnQuery,
     opts?: ReadOptions,
   ): Promise<Stamped<PageOf<Transaction>>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const r = await this.req.read(
       {
@@ -783,7 +803,7 @@ export class EspnProvider implements FantasyPlatform {
     ref: LeagueRef,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly Transaction[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const r = await this.req.read(
       {
@@ -808,7 +828,7 @@ export class EspnProvider implements FantasyPlatform {
     week: Week,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly PositionalRating[]>> {
-    this.checkRef(ref);
+    await this.prepare(ref, opts);
     const r = await this.req.read(
       {
         target: this.league(ref, ["mPositionalRatings"], week),
@@ -907,8 +927,20 @@ export class EspnProvider implements FantasyPlatform {
         ? result(false, "settings", null, null)
         : result(null, "settings", null, "not_configured");
     if (this.req.cookies.isPublic() === null) {
-      // learn publicity keylessly from the settings read (cache-first; one request when cold)
-      await this.settingsRead(ref).catch(() => undefined);
+      // learn publicity ANONYMOUSLY (cache-first; one keyless request when cold): a cookie-bearing
+      // 200 on a public league would prove nothing (plan 02 §2.1, R-5)
+      await this.req
+        .read(
+          {
+            target: this.league(ref, ["mSettings", "mNav"]),
+            filter: null,
+            leagueId: ref.league_id,
+            cookies: "never",
+            parse: parseSettings,
+          },
+          {},
+        )
+        .catch(() => undefined);
     }
     const isPublic = this.req.cookies.isPublic() === true;
     const probeOnce = (

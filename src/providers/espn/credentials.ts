@@ -81,6 +81,15 @@ export class CookieGate {
     if (typeof p === "boolean") this.publicity = p;
   }
 
+  /**
+   * Whether a keyless read must first learn `settings.isPublic` (plan 02 §2.1: in `rejected`, "the
+   * server tries anonymously once to learn settings.isPublic and remembers it"), so tools that work
+   * anonymously on a public league keep working while the cookie is rejected.
+   */
+  needsPublicity(): boolean {
+    return this.auth !== null && this.publicity === null && this.auth.state() === "rejected";
+  }
+
   /** Whether any credential is configured (no store read — the state label only). */
   configured(): boolean {
     return this.auth !== null && this.auth.state() !== "not_configured";

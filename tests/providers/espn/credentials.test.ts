@@ -186,3 +186,21 @@ describe("memberId and probeHeader", () => {
     expect(await new CookieGate(null, fixedClock(NOW_ISO), "server").probeHeader()).toBeNull();
   });
 });
+
+describe("needsPublicity (plan 02 §2.1: rejected → try anonymously once)", () => {
+  it("only while rejected with publicity unknown", () => {
+    const clock = fixedClock(NOW_ISO);
+    expect(new CookieGate(null, clock, "server").needsPublicity()).toBe(false);
+    expect(
+      new CookieGate(
+        new FakeAuthority("validated", { ok: true, header }),
+        clock,
+        "server",
+      ).needsPublicity(),
+    ).toBe(false);
+    const g = new CookieGate(new FakeAuthority("rejected", { ok: true, header }), clock, "server");
+    expect(g.needsPublicity()).toBe(true);
+    g.learnPublic(false);
+    expect(g.needsPublicity()).toBe(false);
+  });
+});

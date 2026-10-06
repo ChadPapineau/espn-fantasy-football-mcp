@@ -102,17 +102,47 @@ describe("401 / 403 on a cookie-bearing request (plan 02 §2.1)", () => {
       expect(fetch.calls.length).toBe(before);
     },
   );
-  it("after another process records validated, the next cookie-bearing call goes through (no restart)", async () => {
+  it("rejected with publicity unknown: ONE anonymous read learns it; then zero requests; validated again → through", async () => {
     const auth = new FakeAuthority("rejected", { ok: true, header: testCookieHeader(SWID) });
-    const fetch = scripted({ "mSettings&mNav": [() => jsonResponse(settingsBody(false))] });
-    const w = makeWorld({ fetch, credentials: auth });
+    const sent: (string | undefined)[] = [];
+    const w = makeWorld({
+      credentials: auth,
+      fetch: (_url, init) => {
+        const cookie = (init.headers as Record<string, string>).cookie;
+        sent.push(cookie);
+        return Promise.resolve(
+          cookie === undefined
+            ? jsonResponse(errBody("AUTH_LEAGUE_NOT_VISIBLE"), 401)
+            : jsonResponse(settingsBody(false)),
+        );
+      },
+    });
     await expect(w.provider.getLeague(w.ref)).rejects.toMatchObject({
       effCode: "ESPN_AUTH_REJECTED",
+      effDetails: { reason: "short_circuit" },
     });
-    expect(fetch.calls).toHaveLength(0);
+    expect(sent).toEqual([undefined]);
+    await expect(w.provider.getRosters(w.ref, 1)).rejects.toMatchObject({
+      effCode: "ESPN_AUTH_REJECTED",
+    });
+    expect(sent).toHaveLength(1);
     auth.current = "validated";
+    w.clock.advance(1000);
     await w.provider.getLeague(w.ref);
-    expect(fetch.calls).toHaveLength(1);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toContain("SWID=");
+  });
+  it("rejected on a PUBLIC league: tools keep working keyless after the one anonymous read", async () => {
+    const auth = new FakeAuthority("rejected", { ok: true, header: testCookieHeader(SWID) });
+    const fetch = scripted({
+      "mSettings&mNav": [() => jsonResponse(settingsBody(true))],
+      "mTeam&mStandings": [() => jsonResponse(loadFixture("recorded/league-a/mTeam.json"))],
+    });
+    const w = makeWorld({ fetch, credentials: auth });
+    const st = await w.provider.getStandings(w.ref);
+    expect(st.value.teams).toHaveLength(10);
+    expect(fetch.calls).toEqual(["mSettings&mNav", "mTeam&mStandings"]);
+    expect(w.sent.every((x) => x.headers.cookie === undefined)).toBe(true);
   });
   it("acceptance on a private league is re-recorded at most hourly while validated", async () => {
     const auth = new FakeAuthority("validated", { ok: true, header: testCookieHeader(SWID) });
