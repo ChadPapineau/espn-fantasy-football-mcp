@@ -531,7 +531,16 @@ export async function analyzeTrade(req: TradeRequest): Promise<TradeOutcome> {
         warnings,
         pacer,
       )
-    : searchPartners(req, ctx, horizon, dl.deadline, dl.passed === true, assumptions, warnings);
+    : searchPartners(
+        req,
+        ctx,
+        horizon,
+        dl.deadline,
+        dl.passed === true,
+        assumptions,
+        warnings,
+        pacer,
+      );
 }
 
 async function evaluateOffer(
@@ -603,7 +612,7 @@ async function evaluateOffer(
   const spans = deltaMe.p10 <= 0 && deltaMe.p90 >= 0;
   const counters =
     spans || deltaMe.p90 < 0
-      ? counterOffers(req, ctx, partner, offer, wMe, wP, deltaMe, deltaPartner)
+      ? await counterOffers(req, ctx, partner, offer, wMe, wP, deltaMe, deltaPartner, pacer)
       : [];
   const verdict: TradeEvaluationData["verdict"] = spans
     ? "fair"
@@ -852,7 +861,7 @@ function whyTheyAccept(
 }
 
 /** Counters: drop one of my given players, or add one of the partner's bench players to the get side. */
-function counterOffers(
+async function counterOffers(
   req: TradeRequest,
   ctx: Ctx,
   partner: TradeTeam,
@@ -861,7 +870,8 @@ function counterOffers(
   wP: readonly number[],
   dMe: Dist,
   dP: Dist,
-): TradeEvaluationData["counters"] {
+  pacer: Pacer,
+): Promise<TradeEvaluationData["counters"]> {
   const variants: { give: number[]; get: number[] }[] = [];
   if (offer.give.length >= 2)
     for (const id of offer.give)
@@ -878,13 +888,19 @@ function counterOffers(
   const sdMe = sigmaOf(dMe);
   const sdP = sigmaOf(dP);
   const out: { give: number[]; get: number[]; me: number; partner: number }[] = [];
-  for (const v of variants) {
-    const g = findPlayers(req.me.players, v.give);
-    const t = findPlayers(partner.players, v.get);
-    const m = evalSide(ctx, req.me.players, new Set(v.give), t, wMe, wire).delta;
-    const p = evalSide(ctx, partner.players, new Set(v.get), g, wP, wire).delta;
-    if (m > 0 && p >= TRADE.partnerEpsilon) out.push({ ...v, me: m, partner: p });
-  }
+  await runCooperative(
+    variants.length,
+    (i) => {
+      const v = variants[i];
+      if (v === undefined) return;
+      const g = findPlayers(req.me.players, v.give);
+      const t = findPlayers(partner.players, v.get);
+      const m = evalSide(ctx, req.me.players, new Set(v.give), t, wMe, wire).delta;
+      const p = evalSide(ctx, partner.players, new Set(v.get), g, wP, wire).delta;
+      if (m > 0 && p >= TRADE.partnerEpsilon) out.push({ ...v, me: m, partner: p });
+    },
+    { pacer, deadlineMs: null },
+  );
   return out
     .sort((a, b) => b.me - a.me || b.partner - a.partner)
     .slice(0, TRADE.maxCounters)
@@ -896,7 +912,7 @@ function counterOffers(
     }));
 }
 
-function searchPartners(
+async function searchPartners(
   req: TradeRequest,
   ctx: Ctx,
   horizon: "ros" | "playoffs",
@@ -904,7 +920,8 @@ function searchPartners(
   passed: boolean,
   assumptions: Assumption[],
   warnings: string[],
-): TradeOutcome {
+  pacer: Pacer,
+): Promise<TradeOutcome> {
   const search = req.find_partners;
   if (search === undefined || search === null)
     throw new AnalyticsError("invalid_request", "find_partners is required", "find_partners");
@@ -918,7 +935,21 @@ function searchPartners(
   const wire = req.free_agents ?? [];
   const wMe = weightsOf(req.weeks, req.rules, req.me, horizon);
   const league = [req.me, ...req.teams];
-  const partners: TradePartnersData["partners"][number][] = [];
+  // plan the work per team (cheap), then evaluate one (team, get, package) unit per cooperative step
+  interface Plan {
+    readonly team: TradeTeam;
+    readonly weak: string | null;
+    readonly wP: number[];
+    best: {
+      give: number[];
+      get: number[];
+      me: number;
+      partner: number;
+      moved: TradePlayer[];
+    } | null;
+  }
+  const plans: Plan[] = [];
+  const units: { plan: Plan; get: TradePlayer; give: number[] }[] = [];
   for (const t of [...req.teams].sort((a, b) => a.team_id - b.team_id)) {
     if (t.team_id === req.me.team_id) continue;
     const weak = weakestPosition(
@@ -939,32 +970,57 @@ function searchPartners(
           a.player_id - b.player_id,
       )
       .slice(0, TRADE.searchGives);
-    const wP = weightsOf(req.weeks, req.rules, t, horizon);
     const combos: number[][] = gives.map((g) => [g.player_id]);
     for (let i = 0; i < Math.min(3, gives.length); i++)
       for (let j = i + 1; j < Math.min(3, gives.length); j++)
         combos.push([gives[i]?.player_id ?? 0, gives[j]?.player_id ?? 0]);
-    let best: {
-      give: number[];
-      get: number[];
-      me: number;
-      partner: number;
-      moved: TradePlayer[];
-    } | null = null;
-    for (const g of gets)
-      for (const giveIds of combos) {
-        const gp = findPlayers(req.me.players, giveIds);
-        const m = evalSide(ctx, req.me.players, new Set(giveIds), [g], wMe, wire).delta;
-        const p = evalSide(ctx, t.players, new Set([g.player_id]), gp, wP, wire).delta;
-        if (p < TRADE.partnerEpsilon || m <= 0) continue;
-        if (
-          best === null ||
-          m > best.me + 1e-9 ||
-          (Math.abs(m - best.me) <= 1e-9 && p > best.partner)
-        )
-          best = { give: giveIds, get: [g.player_id], me: m, partner: p, moved: [...gp, g] };
-      }
+    const plan: Plan = {
+      team: t,
+      weak,
+      wP: weightsOf(req.weeks, req.rules, t, horizon),
+      best: null,
+    };
+    plans.push(plan);
+    for (const g of gets) for (const give of combos) units.push({ plan, get: g, give });
+  }
+  await runCooperative(
+    units.length,
+    (i) => {
+      const u = units[i];
+      if (u === undefined) return;
+      const gp = findPlayers(req.me.players, u.give);
+      const m = evalSide(ctx, req.me.players, new Set(u.give), [u.get], wMe, wire).delta;
+      const p = evalSide(
+        ctx,
+        u.plan.team.players,
+        new Set([u.get.player_id]),
+        gp,
+        u.plan.wP,
+        wire,
+      ).delta;
+      if (p < TRADE.partnerEpsilon || m <= 0) return;
+      const best = u.plan.best;
+      if (
+        best === null ||
+        m > best.me + 1e-9 ||
+        (Math.abs(m - best.me) <= 1e-9 && p > best.partner)
+      )
+        u.plan.best = {
+          give: u.give,
+          get: [u.get.player_id],
+          me: m,
+          partner: p,
+          moved: [...gp, u.get],
+        };
+    },
+    { pacer, deadlineMs: null },
+  );
+  const partners: TradePartnersData["partners"][number][] = [];
+  for (const plan of plans) {
+    const best = plan.best;
     if (best === null) continue;
+    const t = plan.team;
+    const weak = plan.weak;
     const sd = Math.sqrt(best.moved.reduce((s, p) => s + (rosCv(p.position) * own(p)) ** 2, 0));
     partners.push({
       team_id: t.team_id,

@@ -21,7 +21,13 @@ import { TRADE } from "../../../src/domain/analytics/marketConstants.js";
 import type { SeasonReading, TradeEvaluationData } from "../../../src/domain/analytics/types.js";
 import { wrapUntrusted } from "../../../src/domain/league/types.js";
 import type { SeedingMode } from "../../../src/config/schema.js";
-import { clockAndRng, instantPacer, referenceRules, referenceSlots } from "./helpers.js";
+import {
+  clockAndRng,
+  instantPacer,
+  referenceRules,
+  referenceSlots,
+  steppingPacer,
+} from "./helpers.js";
 import { SLOT, WEEKS, tp, tradeRoster } from "./p1-helpers.js";
 
 const name = (s: string) => wrapUntrusted(s, "espn.team.name");
@@ -373,6 +379,16 @@ describe("partner search (sib §5.7)", () => {
     expect(data.partners[0]?.team_id).toBe(2);
     expect(data.rec?.action).toMatch(/^propose to team 2/);
     expect(data.deadline).toBe("2026-12-02T17:00:00.000Z");
+  });
+  it("the search and the counters are cooperative: they yield between units (plan 01 §1.1)", async () => {
+    const pacer = steppingPacer(5);
+    await analyzeTrade(req({ offer: null, find_partners: { need_position: "WR" }, pacer }));
+    expect(pacer.yields).toBeGreaterThan(2);
+    const p2 = steppingPacer(5);
+    await analyzeTrade(
+      req({ offer: { partner_team_id: 2, give: [102, 104], get: [212] }, pacer: p2 }),
+    );
+    expect(p2.yields).toBeGreaterThan(2);
   });
   it("no partner gains → an empty list, a warning and no rec", async () => {
     const out = await analyzeTrade(req({ offer: null, find_partners: { need_position: "K" } }));
