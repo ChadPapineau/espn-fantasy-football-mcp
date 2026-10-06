@@ -599,7 +599,8 @@ function byPosition<T extends { readonly position: string }>(rows: readonly T[])
     if (list === undefined) m.set(r.position, [r]);
     else list.push(r);
   }
-  return [...m.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  // Map keys are unique, so no two entries compare equal
+  return [...m.entries()].sort(([a], [b]) => (a < b ? -1 : 1));
 }
 
 /** The projection block (research 05 §5 Projections, §8.4 #2) and its sample sizes. */
@@ -780,7 +781,7 @@ export function retroRec(
     decision_metric: "regret",
     drivers: [
       { name: "mean call regret", contribution: mean },
-      { name: "total swap regret", contribution: clamp(swapTotal) },
+      { name: "swap regret, season to date", contribution: clamp(swapTotal) },
     ],
     assumptions: [
       {

@@ -20,6 +20,7 @@ import {
   ESPN_PROJECTION,
   GAIN_ROLES,
   LAST_WEEK,
+  RETRO_BOUNDS,
   RETRO_METRIC_KEYS,
   RETRO_POSITION_RE,
   SubjectIndex,
@@ -58,6 +59,7 @@ import {
   type RecommendationRecord,
   type RetrospectiveData,
 } from "../../../src/domain/reclog/types.js";
+import { BOUNDS } from "../../../src/mcp/bounds.js";
 import { recSchema } from "../../../src/mcp/envelope.js";
 import {
   DST1,
@@ -443,6 +445,21 @@ describe("scoreCall", () => {
     expect(s.call).toMatchObject({ realised: 12, regret: -5, followed: false, decisive: null });
     expect(s.baseline_last_week).toBe(-5);
     expect(s.baseline_espn).toBe(0);
+  });
+
+  it("the best alternative is the highest-scoring one offered, whatever its position", () => {
+    const multi = record({
+      rec: rec({ subjects: [subj(WR1, "start")] }),
+      alternatives: [
+        alt({ action: "low", subjects: [subj(DST1, "start")] }),
+        alt({ action: "high", subjects: [subj(QB1, "start")] }),
+        alt({ action: "mid", subjects: [subj(QB2, "start")] }),
+        alt({ action: "unknown", subjects: [subj({ id: 77, gsis: null }, "start")] }),
+      ],
+    });
+    const s = scoreCall(multi, facts, roster, team);
+    expect(s.call.best_alternative).toBe("high");
+    expect(s.call.regret).toBe(25 - 12);
   });
 
   it("a call with no subjects scores nothing", () => {
@@ -1272,7 +1289,7 @@ describe("retroRec", () => {
     expect(r.distribution.p10).toBeLessThanOrEqual(r.distribution.p25);
     expect(r.distribution.p75).toBeLessThanOrEqual(r.distribution.p90);
     expect(r.as_of).toBe("2026-10-06T11:00:00Z");
-    expect(r.drivers[1]).toEqual({ name: "total swap regret", contribution: 27 });
+    expect(r.drivers[1]).toEqual({ name: "swap regret, season to date", contribution: 27 });
     expect(recSchema.safeParse(r).success).toBe(true);
   });
 
@@ -1380,5 +1397,13 @@ describe("projectionMetrics standalone", () => {
     expect(m.projection_vs_espn.n_player_weeks).toBe(1);
     expect(Object.keys(m.spearman_by_position)).toEqual(["RB"]);
     expect(Object.getPrototypeOf(m.projection_vs_espn.mae_by_position)).toBe(Object.prototype);
+  });
+});
+
+describe("RETRO_BOUNDS", () => {
+  it("mirrors the tool's week bound and E13's min_n range", () => {
+    expect(RETRO_BOUNDS.week).toEqual(BOUNDS.week);
+    expect(RETRO_BOUNDS.minN).toEqual({ min: 1, max: 10_000 });
+    expect(DEFAULT_MIN_N).toBe(30);
   });
 });
