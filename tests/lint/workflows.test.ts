@@ -209,10 +209,15 @@ describe("secret-scan.yml — workflow `secrets` (plan 04 §4.1, §4.3)", () => 
     const s = job("secrets");
     expect(s).toContain("fetch-depth: 0");
     expect(s).toContain(
-      'gitleaks git --no-banner --redact --config .gitleaks.toml --log-opts="--all" .',
+      'gitleaks git --no-banner --redact --config .gitleaks.toml --log-opts="--all"',
     );
-    expect(s).toContain("gitleaks dir --no-banner --redact --config .gitleaks.toml .");
+    expect(s).toContain("gitleaks dir --no-banner --redact --config .gitleaks.toml");
     expect(s).toContain("node scripts/dev/scan-secrets.mjs --all");
+    // value-free reports: both scans end in an --expect-none assertion and their own exit code
+    expect(
+      s.match(/assert-gitleaks "\$RUNNER_TEMP\/(?:history|tree)\.json" --expect-none/g),
+    ).toHaveLength(2);
+    expect(s.match(/\[ "\$rc" -eq 0 \]/g)).toHaveLength(2);
   });
 
   it("self-test: generated fixtures, every rule must fire, placeholders must not, scan-secrets agrees", () => {

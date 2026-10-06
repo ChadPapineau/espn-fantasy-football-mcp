@@ -11,7 +11,8 @@
 //       writes <dir>/must-flag.txt and <dir>/must-pass.txt (outside the repo, e.g. $RUNNER_TEMP)
 //   node scripts/ci/secret-fixtures.mjs assert-gitleaks <report.json> --expect-all|--expect-none
 //       --expect-all: every id in GITLEAKS_RULE_IDS fired at least once; --expect-none: no finding.
-//       A missing report counts as zero findings. Prints RuleID/File/StartLine only — never a value.
+//       A missing report counts as zero findings. Prints RuleID/File/StartLine/Commit only — never a
+//       value. secret-scan.yml also uses it to report the history and tree scans' findings.
 //   node scripts/ci/secret-fixtures.mjs assert-scan
 //       runs scripts/dev/scan-secrets.mjs on fresh copies (temp dir): every must-flag line must be
 //       reported with each of its expected rule ids, and must-pass must be clean.
@@ -240,7 +241,11 @@ export function assertGitleaks(findings, mode) {
   for (const f of findings) {
     const rule = typeof f?.RuleID === "string" ? f.RuleID : "?";
     fired.add(rule);
-    lines.push(`finding: rule=${rule} file=${String(f?.File)} line=${String(f?.StartLine)}`);
+    const commit =
+      typeof f?.Commit === "string" && f.Commit ? ` commit=${f.Commit.slice(0, 12)}` : "";
+    lines.push(
+      `finding: rule=${rule} file=${String(f?.File)} line=${String(f?.StartLine)}${commit}`,
+    );
   }
   if (mode === "--expect-none") {
     lines.push(

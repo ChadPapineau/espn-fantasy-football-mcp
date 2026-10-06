@@ -188,6 +188,13 @@ describe("assertGitleaks (the CI report check)", () => {
     expect(assertGitleaks([], "--expect-none").ok).toBe(true);
     expect(assertGitleaks(report(["brace-guid"]), "--expect-none").ok).toBe(false);
   });
+  it("names the commit of a history finding", () => {
+    const out = assertGitleaks(
+      [{ RuleID: "espn-league-id", File: "f", StartLine: 1, Commit: "3214f70048b63d92" }],
+      "--expect-none",
+    );
+    expect(out.lines.join()).toContain("commit=3214f70048b6");
+  });
   it("never prints a Secret or Match value; refuses a non-array", () => {
     const out = assertGitleaks(report(["brace-guid"]), "--expect-all").lines.join("\n");
     expect(out).not.toContain("S3CRET");

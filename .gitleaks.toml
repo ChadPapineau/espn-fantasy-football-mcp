@@ -113,3 +113,14 @@ regex = '''(?i)odds[_-]?api[_-]?key["']?\s*[:=]\s*["']?([0-9a-f]{32})\b'''
 secretGroup = 1
 keywords = ["odds"]
 tags = ["credential"]
+
+# --- History-only allowlist ---------------------------------------------------------------------
+
+[[allowlists]]
+# Commit 3214f70 (2026-09-30, the plan 10 §3.0 Z1 text) wrote an illustrative seven-digit league-id
+# example: the canonical dummy sequence "one to seven", not a league id (checked against the
+# owner's local deny-list: no match); a later commit reworded it ("a seven-digit leagueId= value").
+# It is that commit's only finding (custom and default rules). COMMITS-ONLY on purpose: a commit
+# list never matches a working-tree (`gitleaks dir`) scan, so the tree scan stays fully armed.
+description = "History-only false positive in commit 3214f70: the dummy seven-digit league id in plan 10 Z1 text"
+commits = ["3214f70048b63d9281377baf9cbf93c2a26a5b3c"]
