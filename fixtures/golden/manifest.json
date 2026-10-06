@@ -1,0 +1,59 @@
+{
+  "$comment": "Manifest of fixtures/golden (plan 05 §3.1 step 4): sha256 = canonical-JSON content hash (scripts/espn-fixture/canonical.ts contentSha256). Regenerate with tests/golden/freeze.ts after a deliberate engine change or a re-recording.",
+  "files": [
+    {
+      "path": "espn-recorded.json",
+      "sha256": "f9da7944730164288e7e66d7d131c65a05f3de427131b1ab24a13ea308462331"
+    }
+  ],
+  "sources": [
+    {
+      "path": "recorded/league-a/mBoxscore.sp1.json",
+      "sha256": "76492203abb2bdad8b02afcd1a00fa08a06bf754351f97ec7aa1fe0dcb3a781a"
+    },
+    {
+      "path": "recorded/league-a/mBoxscore.sp2.json",
+      "sha256": "2dc81af0a3c678f633ab9b0a1daff7a4a0116f70417cbcc844a10089637efa99"
+    },
+    {
+      "path": "recorded/league-a/mBoxscore.sp3.json",
+      "sha256": "0616b8bb16805fb987ac5d0d9467583ad27ed7657a7dbbc0d4dda02806807f88"
+    },
+    {
+      "path": "recorded/league-a/mSettings.json",
+      "sha256": "015b72c3fa673c245d7ca9a9c4e6c01e1f5a5e4b80c21ee6fc2cd7995fad509b"
+    },
+    {
+      "path": "recorded/league-b/mBoxscore.sp1.json",
+      "sha256": "019a61e73a7195ddb4cb8e3a36494ec0e5602e6201e54a8b09c74c2dbcce5a9d"
+    },
+    {
+      "path": "recorded/league-b/mBoxscore.sp2.json",
+      "sha256": "9f8c47ab9a50d52c56c673c2ed143bde819b1aa656733c50c9348fd4ce26a4f3"
+    },
+    {
+      "path": "recorded/league-b/mBoxscore.sp3.json",
+      "sha256": "c6529f6cfe0da89ad625fcf8ee2291691a03591cef3d9ec92b74e139d6c66fc9"
+    },
+    {
+      "path": "recorded/league-b/mSettings.json",
+      "sha256": "49ddcc5e86f5cad04f5cdd7a8eb0518da063b3b24fb3ba094ee4fa10d010f250"
+    },
+    {
+      "path": "recorded/league-c/mBoxscore.sp1.json",
+      "sha256": "ddfc9940d0f7cb34a1aa1d2d9c3d63235c199bdb24669171c36f0bfd4d2979fd"
+    },
+    {
+      "path": "recorded/league-c/mBoxscore.sp2.json",
+      "sha256": "13930412a282a515f51616926778ffd4c770ef122a1dcad4a9d5867d7e518bd2"
+    },
+    {
+      "path": "recorded/league-c/mBoxscore.sp3.json",
+      "sha256": "faa202aba7f387c555b327a078ff500450fb1cf8eae86e4aee1cfb430305a240"
+    },
+    {
+      "path": "recorded/league-c/mSettings.json",
+      "sha256": "19ab762064d5e5e3a92d78409ab81c58c828bf51392b19a490db3cb710d4a4d6"
+    }
+  ]
+}
