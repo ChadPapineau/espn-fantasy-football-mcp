@@ -4,7 +4,7 @@
 // grounded in the real 2026 parquet columns and codecs and in the recorded proTeamSchedules_wl, every
 // domain reader has statements over tables of its own source, and the DDL + every reader statement
 // run on node:sqlite — on real recorded rows, read-only, and with hostile parameters that stay data.
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -721,6 +721,93 @@ describe("DDL + statements on node:sqlite", () => {
       ro.exec("DELETE FROM ds_pro_schedule");
     }).toThrow();
     ro.close();
+  });
+});
+
+/** The recorded player index (B1 grounding re-recording); the block below runs once it is committed. */
+const PLAYERS_WL = new URL(
+  "../../../fixtures/espn/recorded/season/players_wl.json",
+  import.meta.url,
+);
+const ROSTER = new URL("../../../fixtures/players/fixture-roster.json", import.meta.url);
+
+/** ds_players rows from a players_wl body, by the contract's derivations (the source's job). */
+function playerRows(season: number, body: readonly Record<string, unknown>[]): DatasetRow[] {
+  const ints = (v: unknown): v is number[] =>
+    Array.isArray(v) && v.every((x) => Number.isInteger(x));
+  return body.map((p) => {
+    const own = (p.ownership as { percentOwned?: unknown } | undefined)?.percentOwned;
+    return {
+      season,
+      espn_id: p.id as number,
+      full_name: p.fullName as string,
+      first_name: derive.emptyToNull(p.firstName),
+      last_name: derive.emptyToNull(p.lastName),
+      position_id: p.defaultPositionId as number,
+      pro_team_id: p.proTeamId as number,
+      eligible_slots: ints(p.eligibleSlots) ? JSON.stringify(p.eligibleSlots) : null,
+      percent_owned:
+        typeof own === "number" && Number.isFinite(own) && own >= 0 && own <= 100 ? own : null,
+      droppable: derive.boolToInt(p.droppable),
+      last_news_date_ms: derive.epochMs(p.lastNewsDate),
+    };
+  });
+}
+
+describe.skipIf(!existsSync(PLAYERS_WL))("the recorded players_wl through ds_players", () => {
+  const body = existsSync(PLAYERS_WL)
+    ? (JSON.parse(readFileSync(PLAYERS_WL, "utf8")) as Record<string, unknown>[])
+    : [];
+
+  it("carries every field ds_players reads", () => {
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBeGreaterThan(2000);
+    const keys = new Set<string>();
+    for (const p of body) {
+      for (const [k, v] of Object.entries(p)) {
+        keys.add(k);
+        if (v !== null && typeof v === "object" && !Array.isArray(v))
+          for (const kk of Object.keys(v)) keys.add(`${k}.${kk}`);
+      }
+    }
+    for (const c of DS_PLAYERS.columns) for (const f of c.from) expect(keys, f).toContain(f);
+  });
+
+  it("loads into ds_players and serves every fixture-roster entry with its ESPN facts", () => {
+    const dbs = sourceDbs();
+    const db = dbOf(dbs, "espn:players");
+    for (const r of playerRows(2026, body)) insert(db, "ds_players", r);
+    for (const r of proTeamRows(2026)) insert(dbOf(dbs, "espn:pro_schedule"), "ds_pro_teams", r);
+    const all = run(dbs, stmtOf("PlayerUniverseReader.all"), { season: 2026 });
+    expect(all).toHaveLength(body.length);
+    expect(all.filter((r) => Number(r.espn_id) < 0).length).toBeGreaterThan(90);
+    const roster = JSON.parse(readFileSync(ROSTER, "utf8")) as {
+      players: {
+        espn_id: number;
+        espn_name: string;
+        espn_position_id: number;
+        espn_pro_team_id: number;
+      }[];
+      team_units: {
+        espn_id: number;
+        espn_name: string;
+        espn_position_id: number;
+        espn_pro_team_id: number;
+      }[];
+    };
+    const want = [...roster.players, ...roster.team_units];
+    const got = run(dbs, stmtOf("PlayerUniverseReader.byIds"), {
+      espn_ids: JSON.stringify(want.map((p) => p.espn_id)),
+    });
+    expect(got).toHaveLength(want.length);
+    const byId = new Map(got.map((r) => [Number(r.espn_id), r]));
+    for (const p of want)
+      expect(byId.get(p.espn_id), p.espn_name).toMatchObject({
+        full_name: p.espn_name,
+        position_id: p.espn_position_id,
+        pro_team_id: p.espn_pro_team_id,
+      });
+    closeAll(dbs);
   });
 });
 

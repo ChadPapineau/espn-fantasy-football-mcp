@@ -208,14 +208,21 @@ describe("fixture roster shape", () => {
 
 describe("the ESPN side is really in the recorded fixtures", () => {
   it.each([...players, ...units].map((p) => [p.espn_name, p] as const))(
-    "%s: id, name, position, team and box-score weeks match the recordings",
+    "%s: id, name, position, team and every claimed box-score week are in the recordings",
     (_n, p) => {
       const s = recorded.get(p.espn_id);
       expect(s, `ESPN id ${String(p.espn_id)} not in fixtures/espn/recorded`).toBeDefined();
       expect([...(s?.names ?? [])]).toContain(p.espn_name);
       expect([...(s?.positions ?? [])]).toEqual([p.espn_position_id]);
       expect([...(s?.teams ?? [])]).toContain(p.espn_pro_team_id);
-      expect(p.box_weeks).toEqual(boxOf(s));
+      // A claim, checked against the recordings (a re-recording that closes a withheld hole may add
+      // appearances, which is fine; one that removes a claimed appearance fails here).
+      const seen = boxOf(s);
+      for (const [league, weeks] of Object.entries(p.box_weeks)) {
+        expect(weeks).toEqual([...weeks].sort((a, b) => a - b));
+        for (const w of weeks)
+          expect(seen[league] ?? [], `${league} week ${String(w)}`).toContain(w);
+      }
     },
   );
 

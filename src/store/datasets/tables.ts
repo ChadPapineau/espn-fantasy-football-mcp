@@ -197,12 +197,13 @@ export const DS_PRO_TEAMS = table({
 
 /**
  * `ds_players` — the ESPN player universe from the keyless `players_wl` view with root-level
- * `filterActive` (research 03 §A.2 row 20: a JSON array, 2,663 rows / 664 KB on 2026-09-30) — C1's
- * local name index and the crosswalk's ESPN side (plan 07 C1; research 04 §C). `players_wl` carries
- * no jersey and no team abbreviation: the abbreviation comes from ds_pro_teams (another file — a
- * second statement), the jersey stays null (src/domain/crosswalk/types.ts `EspnPlayerIdentity`).
- * Not yet recorded keylessly (fixtures/espn/recorded/README.md "Not recorded yet"): the columns follow
- * research 03 §B's observed key list; the source's schema assertion is the verification.
+ * `filterActive` (research 03 §A.2 row 20: a JSON root array) — C1's local name index and the
+ * crosswalk's ESPN side (plan 07 C1; research 04 §C). Recorded 2026-10-06
+ * (fixtures/espn/recorded/season/players_wl.json): 2,669 rows sorted by id, exactly research 03 §B's
+ * keys plus `lastVideoDate` on 378 (not kept); 95 team units with negative ids (31 D/ST, 32 TQB,
+ * 32 HC); `ownership` absent on 1 row and `lastNewsDate` on 206 (→ NULL). `players_wl` carries no
+ * jersey and no team abbreviation: the abbreviation comes from ds_pro_teams (another file — a second
+ * statement), the jersey stays null (src/domain/crosswalk/types.ts `EspnPlayerIdentity`).
  */
 export const DS_PLAYERS = table({
   name: "ds_players",
@@ -218,7 +219,7 @@ export const DS_PLAYERS = table({
       "INTEGER",
       false,
       ["id"],
-      "verbatim (positive person id; D/ST and TQB units are negative)",
+      "verbatim (a person id is positive; D/ST, TQB and HC units are negative)",
     ),
     col("full_name", "TEXT", false, ["fullName"], "verbatim fullName (renamed)"),
     col("first_name", "TEXT", true, ["firstName"], "verbatim firstName (renamed)"),
