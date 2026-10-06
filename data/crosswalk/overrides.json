@@ -1,0 +1,5 @@
+{
+  "$comment": "Manual ESPN player id -> nflverse gsis_id overrides (research 04 §C step 3): the residue the nflverse id lookup and the name + team + position fallback cannot settle (a nickname nflverse does not share, an ESPN re-keyed player, a same-name pair). An override WINS over every other evidence; a disagreement with an id pair is reported as a diagnostic, never silently ignored. Schema (validated strictly by src/domain/crosswalk/overrides.ts parseCrosswalkOverrides; any other key, type or shape rejects the whole file): version is the literal 1; overrides is a list (at most 2000 rows) of { espn_id: a positive ESPN person id (never a D/ST, TQB or HC unit), gsis_id: 00-NNNNNNN, note: optional text <= 200 chars }; one row per ESPN id. The compiled copy CHECKED_IN_OVERRIDES in that file must list the same rows (a test holds them equal). Only public NFL identities belong here, never a fantasy league's name, team names or ids.",
+  "version": 1,
+  "overrides": []
+}

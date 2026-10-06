@@ -160,3 +160,36 @@ export interface PlayerUniverseReader {
   all(season: number): DatasetResult<EspnPlayerIdentity>;
   byIds(espnIds: readonly number[]): DatasetResult<EspnPlayerIdentity>;
 }
+
+// --- additions (crosswalk build, B1) ---------------------------------------------------------------
+
+/**
+ * ESPN team-unit position ids — HC 14, TQB 15, D/ST 16: never matched, never paired (a team unit's
+ * identity is its pro team). Wider than TEAM_UNIT_POSITIONS (display names) because the TQB unit
+ * (ids −15000 − proTeamId, verified on the recorded fixtures) is a team unit too.
+ */
+export const TEAM_UNIT_POSITION_IDS: readonly number[] = Object.freeze([14, 15, 16]);
+
+/**
+ * One nflverse `players` row the crosswalk's fallback reads (research 04 §C step 2: the espn_id ↔
+ * gsis_id pair for a player absent from the season's roster_weekly — free agents, retired or inactive
+ * players still on a fantasy IR). Field names are the `ds_nfl_players` columns
+ * (src/store/datasets/tables.ts READER_QUERIES["NflPlayersReader.byEspnIds"]).
+ */
+export interface NflPlayerRecord {
+  readonly gsis_id: string;
+  readonly espn_id: number | null;
+  /** Raw display name (matching only; never emitted unsanitised). */
+  readonly display_name: string;
+  readonly position: string | null;
+  readonly latest_team: NflTeam | null;
+  readonly jersey_number: number | null;
+  readonly status: string | null;
+  readonly last_season: number | null;
+}
+
+/** The nflverse players port (over the `nflverse:players` dataset file) — the id fallback. */
+export interface NflPlayersReader {
+  /** Rows whose `espn_id` is one of `espnIds` (ids that are not positive integers never match). */
+  byEspnIds(espnIds: readonly number[]): DatasetResult<NflPlayerRecord>;
+}
