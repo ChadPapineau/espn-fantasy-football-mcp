@@ -67,6 +67,11 @@ describe("full names", () => {
     expect(ids("Josh Allen's, Bills' 3-1 start")).toEqual([[3918298, "full_name_team"]]);
   });
 
+  it("needs the name capitalised (a lower-case phrase is not a mention)", () => {
+    expect(ids("fans of jordan love say")).toEqual([]);
+    expect(ids("JORDAN LOVE: Ruled out")).toEqual([[4036378, "full_name"]]);
+  });
+
   it("never lets a name span punctuation, nor the title's end and the blurb's start", () => {
     expect(ids("Notes: Bijan, Robinson Crusoe")).toEqual([]);
     expect(ids("Signed: Bijan | Robinson")).toEqual([]);

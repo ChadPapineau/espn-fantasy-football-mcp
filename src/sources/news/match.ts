@@ -6,7 +6,7 @@
 // Names are compared with the crosswalk's own normaliser (`mergeName`: ASCII fold, punctuation and
 // apostrophes dropped, so "C.J. Stroud" = "CJ Stroud" and "Smith-Njigba" = "Smith Njigba"'s key),
 // as whole-token n-grams that never cross punctuation. Three methods, in confidence order:
-//   full_name_team (0.95) — the full name AND the player's team named in the same item;
+//   full_name_team (0.95) — the full name (capitalised) AND the player's team named in the item;
 //   full_name      (0.80) — the full name, unique in the universe (a shared name needs the team);
 //   last_name_team (0.60) — a capitalised surname, the only player of that surname on a team the
 //                            item names, not part of someone else's full name.
@@ -250,7 +250,8 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
 
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i];
-      if (t === null || t === undefined) continue;
+      // a name in running text is capitalised: "jordan love" in lower case is not a mention
+      if (t?.capital !== true) continue;
       const entries = byFirst.get(t.norm);
       if (entries === undefined) continue;
       for (const e of entries) {
