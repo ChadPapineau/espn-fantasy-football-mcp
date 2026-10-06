@@ -43,7 +43,7 @@ import type { DatasetStamp } from "../../../src/domain/analytics/types.js";
 import { dist, steppingPacer } from "./helpers.js";
 
 describe("runCooperative", () => {
-  it("runs every step once, in order, yielding between batches of ≤ batchMs", async () => {
+  it("runs every step once, in order, yielding before, between and after batches of ≤ batchMs", async () => {
     const seen: number[] = [];
     const pacer = steppingPacer(1);
     const r = await runCooperative(500, (i) => seen.push(i), {
@@ -54,9 +54,36 @@ describe("runCooperative", () => {
     expect(seen).toEqual(Array.from({ length: 500 }, (_, i) => i));
     expect(r).toMatchObject({ completed: 500, partial: false });
     expect(r.batches).toBeGreaterThan(1);
-    expect(pacer.yields).toBe(r.batches - 1);
+    expect(pacer.yields).toBe(r.batches + 1);
     // a batch overruns its budget by at most the steps between two clock reads (adaptive ≥ 1)
     expect(r.max_batch_ms).toBeLessThanOrEqual(20);
+  });
+
+  it("A16a: the caller's work before and after a run never shares a turn with a batch", async () => {
+    // a yield before the first step and after the last: a synchronous prelude (a parse, a
+    // precompute) and postlude (assembling the answer) each get a turn of their own
+    for (const [units, deadlineMs] of [
+      [1, null],
+      [37, null],
+      [5_000, null],
+      [5_000, 30],
+    ] as const) {
+      let done = 0;
+      const at: number[] = [];
+      let t = 0;
+      const pacer = {
+        nowMs: () => (t += 1),
+        yieldToLoop: () => {
+          at.push(done);
+          return Promise.resolve();
+        },
+      };
+      const r = await runCooperative(units, () => (done += 1), { pacer, batchMs: 8, deadlineMs });
+      expect(at[0], `${String(units)}: first yield`).toBe(0);
+      expect(at.at(-1), `${String(units)}: last yield`).toBe(r.completed);
+      expect(at).toHaveLength(r.batches + 1);
+      expect(r.partial).toBe(deadlineMs !== null);
+    }
   });
 
   it("stops at the CPU deadline: partial, with the completed count", async () => {
@@ -71,10 +98,12 @@ describe("runCooperative", () => {
   });
 
   it("clamps the batch to 1..20 ms, handles zero units and refuses a bad count", async () => {
-    expect(await runCooperative(0, () => undefined, { pacer: steppingPacer(1) })).toMatchObject({
+    const idle = steppingPacer(1);
+    expect(await runCooperative(0, () => undefined, { pacer: idle })).toMatchObject({
       completed: 0,
       batches: 0,
     });
+    expect(idle.yields).toBe(0); // nothing to run: no turn given up
     const r = await runCooperative(50, () => undefined, {
       pacer: steppingPacer(1),
       batchMs: 500,
@@ -89,23 +118,35 @@ describe("runCooperative", () => {
     );
   });
 
-  it("the loop pacer yields through setImmediate: a timer queued before the run fires mid-run", async () => {
+  it("the loop pacer yields through setImmediate: queued work runs before the first step and mid-run", async () => {
     let t = 0;
     const clock = { nowMs: () => (t += 5), nowIso: () => new Date(t).toISOString() };
-    let fired = -1;
+    let before = -1;
+    let mid = -1;
+    let after = -1;
     let step = 0;
     setImmediate(() => {
-      fired = step;
+      before = step;
     });
     await runCooperative(
       200,
       () => {
         step += 1;
+        if (step === 1)
+          setImmediate(() => {
+            mid = step;
+          });
+        if (step === 200)
+          setImmediate(() => {
+            after = step;
+          });
       },
       { pacer: loopPacer(clock), batchMs: 10, deadlineMs: null },
     );
-    expect(fired).toBeGreaterThan(0);
-    expect(fired).toBeLessThan(200);
+    expect(before).toBe(0); // the turn before the first batch
+    expect(mid).toBeGreaterThan(1); // a turn between batches
+    expect(mid).toBeLessThan(200);
+    expect(after).toBe(200); // the turn after the last batch, before the run resolves
   });
 });
 

@@ -7,7 +7,7 @@
 // its ×0.5 / ×1.5 band — a candidate inside the band is `marginal`, never a crisp claim or pass, and
 // never enters `claim_list` (ADV OBJ-03, R2 nit 3); claim ⇔ s ≥ Π outside it; at k = N claim
 // anything positive; the Wednesday scramble list; p_clears_to_fa with its cold-start interval.
-// Cooperative over candidates. Pure. New here (the sibling's E5 was FAAB / K-DEF only).
+// Cooperative over (candidate, drop) units. Pure. New here (the sibling's E5 was FAAB / K-DEF only).
 import type { Clock } from "../clock.js";
 import { auditIr, type RosterSeat } from "../league/roster.js";
 import { nextWaiverRun, waiverOrderRuleOf } from "../league/rules.js";
@@ -465,60 +465,83 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
   const drops = activeMine
     .filter((p) => p.droppable !== false && !p.locked)
     .sort((a, b) => own(a) - own(b) || a.player_id - b.player_id);
-  // L(R − d) per drop and week does not depend on the candidate: solved once
+  // L(R − d) per drop and week does not depend on the candidate: solved once, cooperatively (one
+  // drop per step — a whole-roster precompute in one turn stalled the main loop, plan 10 A16a)
+  const pacer = req.pacer ?? loopPacer(req.clock);
   const restOf = new Map<WaiverPlayer | null, { players: WaiverPlayer[]; values: number[] }>();
   restOf.set(null, { players: activeMine, values: base });
-  for (const d of drops) {
-    const players = activeMine.filter((p) => p !== d);
-    restOf.set(d, {
-      players,
-      values: req.weeks.map((_, wi) => lineupValue(seatsPlan, players, wi)),
-    });
-  }
+  await runCooperative(
+    drops.length,
+    (i) => {
+      const d = drops[i];
+      if (d === undefined) return;
+      const players = activeMine.filter((p) => p !== d);
+      restOf.set(d, {
+        players,
+        values: req.weeks.map((_, wi) => lineupValue(seatsPlan, players, wi)),
+      });
+    },
+    { pacer, deadlineMs: null },
+  );
   if (req.include_drop === false)
     assumptions.push(A("no drop considered: surplus is the add alone", "include_drop"));
 
-  // per candidate: s over the best drop (or none when a seat is open), and the IR-move version
+  // per candidate: s over the best drop (or none when a seat is open), and the IR-move version.
+  // The cooperative unit is one (candidate, drop) gain — H assignments — and then one assembly step
+  // per candidate, so no step holds the main loop for a whole candidate's drops × weeks (A16a).
+  const byDrop = full && req.include_drop !== false;
+  const withIr = byDrop && irMovable.length > 0;
+  // the gains each candidate needs, in order: every drop (or only "no drop"), then the IR move
+  const options: readonly (WaiverPlayer | null)[] = byDrop
+    ? [...drops, ...(withIr ? [null] : [])]
+    : [null];
+  const prepared = pool.map((c) => {
+    const H = valueWeeks(c);
+    const roles = req.weeks
+      .slice(0, H)
+      .map((w, wi) => ({ week: w, p: round(roleHolds(c.position, c.injury_status, wi), 3) }));
+    const cAsBench: WaiverPlayer = { ...c, slot_id: BENCH };
+    return { c, H, roles, cAsBench, gains: new Array<number>(options.length).fill(0) };
+  });
+  const gainWith = (cand: (typeof prepared)[number], d: WaiverPlayer | null): number => {
+    const rest = restOf.get(d);
+    if (rest === undefined) return 0;
+    let s = 0;
+    for (let wi = 0; wi < cand.H; wi++) {
+      const pr = cand.roles[wi]?.p ?? 0;
+      const withP = lineupValue(seatsPlan, [...rest.players, cand.cAsBench], wi);
+      s += (weight[wi] ?? 1) * (pr * withP + (1 - pr) * (rest.values[wi] ?? 0) - (base[wi] ?? 0));
+    }
+    return s;
+  };
   const scored: Scored[] = [];
-  const pacer = req.pacer ?? loopPacer(req.clock);
+  const perCandidate = options.length + 1;
   await runCooperative(
-    pool.length,
-    (i) => {
-      const c = pool[i];
-      if (c === undefined) return;
-      const H = valueWeeks(c);
-      const roles = req.weeks
-        .slice(0, H)
-        .map((w, wi) => ({ week: w, p: round(roleHolds(c.position, c.injury_status, wi), 3) }));
-      const cAsBench: WaiverPlayer = { ...c, slot_id: BENCH };
-      const gainWith = (d: WaiverPlayer | null): number => {
-        const rest = restOf.get(d);
-        if (rest === undefined) return 0;
-        let s = 0;
-        for (let wi = 0; wi < H; wi++) {
-          const pr = roles[wi]?.p ?? 0;
-          const withP = lineupValue(seatsPlan, [...rest.players, cAsBench], wi);
-          s +=
-            (weight[wi] ?? 1) * (pr * withP + (1 - pr) * (rest.values[wi] ?? 0) - (base[wi] ?? 0));
-        }
-        return s;
-      };
+    prepared.length * perCandidate,
+    (u) => {
+      const cand = prepared[Math.floor(u / perCandidate)];
+      const j = u % perCandidate;
+      if (cand === undefined) return;
+      if (j < options.length) {
+        cand.gains[j] = gainWith(cand, options[j] ?? null);
+        return;
+      }
+      const { c, H, roles, gains } = cand;
       let s: number;
       let drop: WaiverPlayer | null = null;
-      if (!full || req.include_drop === false) s = gainWith(null);
+      if (!byDrop) s = gains[0] ?? 0;
       else {
         s = -Infinity;
-        for (const d of drops) {
-          const v = gainWith(d);
+        for (let di = 0; di < drops.length; di++) {
+          const v = gains[di] ?? 0;
           if (v > s + 1e-12) {
             s = v;
-            drop = d;
+            drop = drops[di] ?? null;
           }
         }
         if (drop === null) s = 0;
       }
-      const sIr =
-        full && irMovable.length > 0 && req.include_drop !== false ? gainWith(null) : null;
+      const sIr = withIr ? (gains[drops.length] ?? 0) : null;
       let mean = 0;
       let v = 0;
       const cv = cvOf(c.position, c.position_id, settings);

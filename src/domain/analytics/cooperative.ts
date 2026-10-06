@@ -56,9 +56,12 @@ const CHECK_MAX = 4096;
 
 /**
  * Runs `step(i)` for i = 0..units−1 in batches of at most `batchMs` of CPU, yielding to the event
- * loop between batches; stops early (partial) once the CPU spent reaches the deadline. Steps run in
- * index order exactly once each, so a deterministic step function gives a deterministic prefix.
- * Throws RangeError for a negative or non-integer `units`.
+ * loop before the first batch, between batches and after the last one; stops early (partial) once
+ * the CPU spent reaches the deadline. Steps run in index order exactly once each, so a deterministic
+ * step function gives a deterministic prefix. Throws RangeError for a negative or non-integer
+ * `units`. The yields around the run keep the caller's synchronous work before it (a parse, a
+ * precompute) and after it (assembling the answer) out of a batch's turn: chained, the two once
+ * made a 40–50 ms stall from 16 ms batches (plan 10 A16a's end-to-end probe).
  */
 export async function runCooperative(
   units: number,
@@ -74,6 +77,7 @@ export async function runCooperative(
   let batches = 0;
   let maxBatch = 0;
   let checkEvery = CHECK_MIN;
+  if (units > 0) await pacer.yieldToLoop();
   while (i < units) {
     const start = pacer.nowMs();
     let last = start;
@@ -93,11 +97,11 @@ export async function runCooperative(
     cpu += Math.max(0, elapsed);
     batches += 1;
     maxBatch = Math.max(maxBatch, elapsed);
+    await pacer.yieldToLoop();
     if (i >= units) break;
     if (deadline !== null && cpu >= deadline) {
       return { completed: i, partial: true, cpu_ms: cpu, batches, max_batch_ms: maxBatch };
     }
-    await pacer.yieldToLoop();
   }
   return { completed: i, partial: false, cpu_ms: cpu, batches, max_batch_ms: maxBatch };
 }
