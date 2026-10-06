@@ -24,6 +24,7 @@ import {
   createUpstreamBudget,
   degradedWarning,
   isEspnPlayerIdValue,
+  isPartialWarning,
   isUpstreamBudgetExhausted,
   partialWarning,
   type CheckAuthData,
@@ -171,6 +172,20 @@ describe("B3: UpstreamBudgetExhausted is a signal, not an error code", () => {
     expect(partialWarning({ view: "mMatchupScore", reason: "deadline" })).toBe(
       "partial: espn:mMatchupScore was not requested (the 20 s upstream deadline of this call passed); retry for it",
     );
+  });
+  it("isPartialWarning recognises partialWarning's lines (both reasons) and nothing else", () => {
+    for (const reason of ["budget", "deadline"] as const)
+      for (const view of ["mTeam", "proTeamSchedules_wl", "kona_player_info"] as const)
+        expect(isPartialWarning(partialWarning({ view, reason }))).toBe(true);
+    for (const w of [
+      "partial:",
+      "partial: espn:mTeam",
+      "standings unavailable: waiver rank unknown (cold-start premium at k = N/2)",
+      "candidates truncated to 5 of 25 to fit the 10000-character budget",
+      "espn:mTeam was not requested (the 3-request budget of this call was used)",
+      "",
+    ])
+      expect(isPartialWarning(w), w).toBe(false);
   });
   it("degradedWarning carries the code and the source tag", () => {
     expect(DEGRADED_CODES).toEqual([

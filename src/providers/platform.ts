@@ -239,6 +239,15 @@ export function partialWarning(missing: UpstreamBudgetExhausted["missing"]): str
 }
 
 /**
+ * Whether a `warnings[]` line is one `partialWarning` wrote (either reason). The envelope derives
+ * `partial: true` from it (plan 01 §4.2: true when the per-call budget was hit), so a tool that
+ * keeps the warning cannot forget the flag.
+ */
+export function isPartialWarning(w: string): boolean {
+  return w.startsWith("partial: espn:") && w.includes(" was not requested (");
+}
+
+/**
  * The fixed `warnings[]` line for a degraded read (never upstream text). `source` is the stamp's
  * provenance tag (`espn:mRoster`); buildEnvelope adds it automatically for every degraded input.
  */

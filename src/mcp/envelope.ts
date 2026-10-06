@@ -50,6 +50,7 @@ import {
   ESPN_PERSON_PLAYER_ID_MAX,
   degradedWarning,
   isEspnPlayerIdValue,
+  isPartialWarning,
   type StatusData,
 } from "../providers/platform.js";
 
@@ -404,7 +405,10 @@ export function buildEnvelope<D>(input: EnvelopeInput<D>): Envelope<D> {
     estimate: input.estimate === true,
     drift,
   };
-  const partial = input.partial === true;
+  // plan 01 §4.2: `partial` is true whenever this call's budget held a request back. Every such read
+  // leaves partialWarning's line (withinBudget), so the flag follows from it for every tool and
+  // resource, not only the ones that set it themselves.
+  const partial = input.partial === true || warnings.some(isPartialWarning);
   return input.page === undefined
     ? { data: input.data, meta, truncated: false, partial, warnings }
     : { data: input.data, meta, page: input.page, truncated: false, partial, warnings };

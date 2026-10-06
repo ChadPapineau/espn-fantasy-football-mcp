@@ -67,6 +67,7 @@ import {
   type InputStamp,
   type UntrustedSource,
 } from "../../src/mcp/envelope.js";
+import { partialWarning } from "../../src/providers/platform.js";
 
 const NOW = Date.parse("2026-10-05T18:00:00Z");
 const RID = "r-0123456789ab";
@@ -624,6 +625,17 @@ describe("buildEnvelope (plan 01 §4.2)", () => {
       ],
     });
     expect(later.meta.drift?.since).toBe("2026-10-03T10:00:00Z");
+  });
+  it("partial follows a budget-hit warning even when the tool does not set it (plan 01 §4.2)", () => {
+    const hit = partialWarning({ view: "proTeamSchedules_wl", reason: "budget" });
+    const late = partialWarning({ view: "mTeam", reason: "deadline" });
+    const base = { data: {}, requestId: RID, nowMs: NOW, inputs: [] };
+    expect(buildEnvelope({ ...base, warnings: [hit] }).partial).toBe(true);
+    expect(buildEnvelope({ ...base, warnings: ["x", late] }).partial).toBe(true);
+    // an explicit false never hides a budget hit; other warnings leave partial alone
+    expect(buildEnvelope({ ...base, partial: false, warnings: [hit] }).partial).toBe(true);
+    expect(buildEnvelope({ ...base, warnings: ["standings unavailable: x"] }).partial).toBe(false);
+    expect(buildEnvelope(base).partial).toBe(false);
   });
   it("lists wrapped fields and declared bare fields (player names), deduplicated", () => {
     const env = buildEnvelope({

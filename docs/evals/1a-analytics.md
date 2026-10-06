@@ -25,6 +25,16 @@ drift and demand sensitivities (`Π(1, 9)` = 26.8 / 23.2 at c = 0.15 / 0.35; 19.
   so the band is defined here and recorded as a decision, not claimed as a reproduction.
 - `k = N` claims anything positive (research 05 §1.2's rule; the DP's drift residual is not charged);
   a weekly-reset order makes the premium 0; an unknown order is read as move-to-last, said so.
+- **End to end on `fx-10h` (week 5), `tests/e2e/acceptance.test.ts`.** The tool reports `k = 2`,
+  `W = 12` and `Π(2, 12) = 26.95` (12 weeks after the claim week, the convention above). A9a's
+  text reads `W = 13` → 29.5 for this league; `Π(2, 13) = 29.5` is proven at domain level (above),
+  and which week index A9a means for `fx-10h` is open for a plan ruling. **Cold cache:** a
+  standalone first call spends its 3 requests (plan 01 §5.6) on settings, rosters and the pool,
+  so standings is the 4th read and is not made: `partial: true`, a warning naming `espn:mTeam`,
+  `k: null` and the cold-start premium at `k = ⌈N/2⌉` (13.95 here). Verdicts priced without the
+  rivals can move (here the claim list is empty both ways). The next call makes only that read and
+  answers exactly what a server warmed in the Skills' order answers (k, W, premium, band, claim /
+  marginal / scramble lists).
 
 ## Seeding simulator (research 05 §2.4; plan 10 A10a)
 

@@ -1,6 +1,8 @@
 // acceptance.test.ts — the hard parts of plan 10 A9a, A11a and A13a that the derived league can
 // carry, end to end over real stdio on fx-10h and its variants (the Skills' call order: the facts a
 // tool needs are read first, so the analytics answer from a warm cache inside their request budget).
+// The cold path is checked too: a standalone first call is partial and names the read it lacked
+// (plan 01 §5.6), and the next call answers what the Skills' order answers.
 //
 // A9a (waiver priority): the premium comes from the cold-start table and equals the domain DP at
 // the (k, W) the tool reports; the band is populated (low < premium < high); a candidate inside the
@@ -116,6 +118,76 @@ describe("A9a — waiver priority on fx-10h", { timeout: 300_000 }, () => {
     for (const c of cands) if (c.status === "FREEAGENT") expect(c.verdict).not.toBe("claim");
   });
 });
+
+describe(
+  "A9a on a cold cache — the tool's own path, no Skill warm-up",
+  { timeout: 300_000 },
+  () => {
+    it("a standalone first call is partial and names what it lacks; the next call is the Skills' answer", async () => {
+      const s = await open(null);
+      const args = { mode: "priority", detail: "full" };
+      const cold = await ok(s, "espn_analyze_waivers", args);
+      const cd = cold.data as J;
+      const coldWarnings = cold.warnings as string[];
+      // plan 01 §5.6: settings, rosters and the pool take the 3 requests; standings is the 4th
+      expect(cold.partial).toBe(true);
+      expect(coldWarnings.some((w) => w.startsWith("partial: espn:mTeam was not requested"))).toBe(
+        true,
+      );
+      expect(coldWarnings).toContain(
+        "standings unavailable: waiver rank unknown (cold-start premium at k = N/2)",
+      );
+      expect(cd.k).toBeNull();
+      expect(cd.premium_basis).toBe("cold_start_table");
+      expect(
+        Math.abs((cd.premium as number) - priorityPremium(Math.ceil(10 / 2), cd.W as number, 10)),
+      ).toBeLessThanOrEqual(0.5);
+      // the claim ⇔ s ≥ Π rule holds on the partial answer too (it is priced at the cold-start k)
+      const band = cd.premium_band as { low: number; high: number };
+      for (const c of cd.candidates as Candidate[])
+        if (c.status === "WAIVERS" && (c.s < band.low || c.s > band.high))
+          expect(c.verdict === "claim").toBe(c.s >= (cd.premium as number));
+      // the next call pays for the one read the cold call could not, and answers what a server warmed
+      // in the Skills' order answers
+      const next = await ok(s, "espn_analyze_waivers", args);
+      expect(next.partial).toBe(false);
+      expect((next.warnings as string[]).some((w) => w.startsWith("partial:"))).toBe(false);
+      const ref = await waivers(null);
+      const nd = next.data as J;
+      expect(nd.k).toBe(2);
+      for (const key of [
+        "k",
+        "W",
+        "premium",
+        "premium_band",
+        "premium_basis",
+        "claim_list",
+        "marginal",
+        "scramble_list",
+      ])
+        expect(nd[key], key).toEqual(ref.data[key]);
+    });
+
+    it("cold lineup and retrospective calls: partial is true exactly when the budget held a read back", async () => {
+      for (const [name, args] of [
+        ["espn_analyze_lineup", {}],
+        ["espn_analyze_retrospective", { week: 4 }],
+      ] as const) {
+        const s = await open(null);
+        const cold = await ok(s, name, args);
+        const hit = (cold.warnings as string[]).filter((w) => w.startsWith("partial: espn:"));
+        expect(hit.length, `${name}: the cold call is over budget on fx-10h`).toBeGreaterThan(0);
+        expect(cold.partial, name).toBe(true);
+        const next = await ok(s, name, args);
+        expect(
+          (next.warnings as string[]).some((w) => w.startsWith("partial:")),
+          name,
+        ).toBe(false);
+        expect(next.partial, name).toBe(false);
+      }
+    });
+  },
+);
 
 describe("A11a — start/sit on fx-10h", { timeout: 300_000 }, () => {
   async function lineup(
