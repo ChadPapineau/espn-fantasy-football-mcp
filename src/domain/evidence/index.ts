@@ -52,8 +52,12 @@ export {
   NEWS_FEED_KEYS,
   newsClaim,
   newsItemFromRow,
+  newsItemWithRefs,
+  readStoredNewsRef,
   readStoredNewsRow,
   type NewsClaimFields,
   type NewsFeed,
+  type NewsItemWithRefs,
+  type StoredNewsRef,
   type StoredNewsRow,
 } from "./news.js";

@@ -63,6 +63,9 @@ export const FUTURE_SKEW_MS = 24 * 60 * 60 * 1000;
 export const MAX_NEWS_ITEMS = 5_000;
 /** At most this many universe players are read (ESPN's active universe is ~2 700). */
 export const MAX_UNIVERSE_PLAYERS = 20_000;
+/** The statement the wiring reads the CURRENT file's rows with (`NewsSourceOptions.previous`). */
+export const PREVIOUS_NEWS_SQL =
+  "SELECT item_id, source, published_ms, first_seen_ms, title, blurb, link FROM ds_news";
 /** The RSS media types the GET asks for. */
 export const RSS_ACCEPT = "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1";
 

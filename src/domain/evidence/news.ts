@@ -88,6 +88,77 @@ export function newsItemFromRow(row: unknown, gsisIds: readonly unknown[] = []):
   };
 }
 
+/** One `ds_news_players` ref as stored (ids and the matcher's verdict — never text). */
+export interface StoredNewsRef {
+  readonly item_id: string;
+  readonly espn_id: number;
+  readonly gsis_id: string | null;
+  readonly match_confidence: number;
+  readonly match_method: "full_name_team" | "full_name" | "last_name_team";
+}
+
+const MATCH_METHODS = new Set(["full_name_team", "full_name", "last_name_team"]);
+
+/** A stored ref read back defensively (anything malformed → null). */
+export function readStoredNewsRef(row: unknown): StoredNewsRef | null {
+  if (typeof row !== "object" || row === null || Array.isArray(row)) return null;
+  const item_id = own(row, "item_id");
+  const espn_id = own(row, "espn_id");
+  const gsis = own(row, "gsis_id") ?? null;
+  const conf = own(row, "match_confidence");
+  const method = own(row, "match_method");
+  if (typeof item_id !== "string" || !ITEM_ID_RE.test(item_id)) return null;
+  if (typeof espn_id !== "number" || !Number.isSafeInteger(espn_id) || espn_id <= 0) return null;
+  if (typeof conf !== "number" || !(conf >= 0 && conf <= 1)) return null;
+  if (typeof method !== "string" || !MATCH_METHODS.has(method)) return null;
+  return {
+    item_id,
+    espn_id,
+    gsis_id: typeof gsis === "string" && GSIS_ID_RE.test(gsis) ? gsis : null,
+    match_confidence: conf,
+    match_method: method as StoredNewsRef["match_method"],
+  };
+}
+
+/** A `NewsItem` plus the refs D6's `players_matched` needs (ESPN id and confidence, not only gsis). */
+export interface NewsItemWithRefs extends NewsItem {
+  readonly refs: readonly Omit<StoredNewsRef, "item_id">[];
+}
+
+/**
+ * `newsItemFromRow` with the item's `ds_news_players` refs attached (refs of other items and
+ * malformed refs are ignored; best confidence first, then ESPN id); `gsis_ids` are the refs' paired
+ * ids. Null when the row does not read back.
+ */
+export function newsItemWithRefs(
+  row: unknown,
+  refRows: readonly unknown[],
+): NewsItemWithRefs | null {
+  const r = readStoredNewsRow(row);
+  if (r === null) return null;
+  const byId = new Map<number, Omit<StoredNewsRef, "item_id">>();
+  for (const x of refRows) {
+    const ref = readStoredNewsRef(x);
+    if (ref?.item_id !== r.item_id) continue;
+    const prev = byId.get(ref.espn_id);
+    if (prev === undefined || ref.match_confidence > prev.match_confidence)
+      byId.set(ref.espn_id, {
+        espn_id: ref.espn_id,
+        gsis_id: ref.gsis_id,
+        match_confidence: ref.match_confidence,
+        match_method: ref.match_method,
+      });
+  }
+  const refs = [...byId.values()].sort(
+    (a, b) => b.match_confidence - a.match_confidence || a.espn_id - b.espn_id,
+  );
+  const item = newsItemFromRow(
+    r,
+    refs.map((x) => x.gsis_id),
+  );
+  return item === null ? null : { ...item, refs };
+}
+
 /** The D6 fields derived from one item's text. */
 export interface NewsClaimFields {
   /** plan 07 D6 `claim` (type, direction, extractor) or null. */

@@ -14,6 +14,7 @@
 // text is never interpreted beyond that, and nothing of it is copied into a ref.
 import { GSIS_ID_RE, type NflTeam } from "../../config/schema.js";
 import { mergeName } from "../../domain/crosswalk/normalize.js";
+import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
 import { sanitizeText } from "../../domain/league/types.js";
 import type { NewsMatchMethod } from "../../store/datasets/derive.js";
 import { TEAM_WORDS, teamsMentioned } from "./teams.js";
@@ -41,6 +42,40 @@ export const MATCH_CONFIDENCE: Readonly<Record<NewsMatchMethod, number>> = Objec
   full_name: 0.8,
   last_name_team: 0.6,
 });
+
+/**
+ * The universe from the ESPN player dataset (`ds_players`: `espn_id`, `full_name`, `pro_team_id`;
+ * 0 = free agent) and the crosswalk's `espn_id → gsis_id` lookup — the refresh wiring's one call.
+ * Team units (negative ids) and malformed rows are skipped; a later row for the same id wins.
+ */
+export function universeFromEspnPlayers(
+  rows: readonly unknown[],
+  gsisOf: (espnId: number) => string | null,
+): NewsUniversePlayer[] {
+  const out = new Map<number, NewsUniversePlayer>();
+  for (const r of rows) {
+    if (r === null || typeof r !== "object") continue;
+    const o = r as Record<string, unknown>;
+    const id = Object.prototype.hasOwnProperty.call(o, "espn_id") ? o.espn_id : undefined;
+    const name = Object.prototype.hasOwnProperty.call(o, "full_name") ? o.full_name : undefined;
+    const team = Object.prototype.hasOwnProperty.call(o, "pro_team_id") ? o.pro_team_id : undefined;
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) continue;
+    if (typeof name !== "string" || name.length === 0 || name.length > 128) continue;
+    let gsis: string | null = null;
+    try {
+      const g = gsisOf(id);
+      gsis = typeof g === "string" && GSIS_ID_RE.test(g) ? g : null;
+    } catch {
+      gsis = null;
+    }
+    out.set(id, { espn_id: id, full_name: name, team: teamOfProTeamId(team), gsis_id: gsis });
+  }
+  return [...out.values()];
+}
+
+/** The `ds_players` statement the wiring reads the universe with (one season, persons only). */
+export const UNIVERSE_SQL =
+  "SELECT espn_id, full_name, pro_team_id FROM ds_players WHERE season = :season AND espn_id > 0 ORDER BY espn_id";
 
 /** At most this many refs per item (a roundup naming 30 players is not "about" each of them). */
 export const MAX_REFS_PER_ITEM = 10;

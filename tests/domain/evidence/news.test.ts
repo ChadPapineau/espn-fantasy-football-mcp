@@ -12,6 +12,8 @@ import {
   NEWS_FEED_KEYS,
   newsClaim,
   newsItemFromRow,
+  newsItemWithRefs,
+  readStoredNewsRef,
   readStoredNewsRow,
   RULE_IDS,
 } from "../../../src/domain/evidence/index.js";
@@ -107,6 +109,57 @@ describe("newsItemFromRow", () => {
     expect(NEWS_FEED_KEYS).toEqual(["rotowire", "espn", "cbs"]);
     expect(isNewsFeed("espn")).toBe(true);
     expect(isNewsFeed(1)).toBe(false);
+  });
+});
+
+describe("newsItemWithRefs", () => {
+  const ref = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    item_id: "0123456789abcdef0123456789abcdef",
+    espn_id: 4430807,
+    gsis_id: "00-0038542",
+    match_confidence: 0.8,
+    match_method: "full_name",
+    ...over,
+  });
+
+  it("attaches this item's refs, best first, and derives gsis_ids from them", () => {
+    const item = newsItemWithRefs(row(), [
+      ref({
+        espn_id: 3116385,
+        gsis_id: "00-0033897",
+        match_confidence: 0.6,
+        match_method: "last_name_team",
+      }),
+      ref(),
+      ref({ match_confidence: 0.95, match_method: "full_name_team" }), // same player, better
+      ref({ item_id: "f".repeat(32), espn_id: 1 }), // another item
+      ref({ espn_id: -16001 }),
+      ref({ match_method: "fuzzy" }),
+      ref({ match_confidence: 1.5 }),
+      ref({ gsis_id: "nope", espn_id: 7 }),
+      null,
+    ]);
+    expect(item?.refs).toEqual([
+      {
+        espn_id: 4430807,
+        gsis_id: "00-0038542",
+        match_confidence: 0.95,
+        match_method: "full_name_team",
+      },
+      { espn_id: 7, gsis_id: null, match_confidence: 0.8, match_method: "full_name" },
+      {
+        espn_id: 3116385,
+        gsis_id: "00-0033897",
+        match_confidence: 0.6,
+        match_method: "last_name_team",
+      },
+    ]);
+    expect(item?.gsis_ids).toEqual(["00-0033897", "00-0038542"]);
+    expect(newsItemWithRefs({ item_id: "x" }, [ref()])).toBeNull();
+    expect(newsItemWithRefs(row(), [])?.refs).toEqual([]);
+    expect(readStoredNewsRef(ref({ item_id: 3 }))).toBeNull();
+    expect(readStoredNewsRef([ref()])).toBeNull();
+    expect(readStoredNewsRef(ref({ gsis_id: undefined }))?.gsis_id).toBeNull();
   });
 });
 

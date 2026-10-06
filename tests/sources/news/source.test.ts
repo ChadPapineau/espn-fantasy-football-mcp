@@ -10,7 +10,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INJECTIONS } from "../../../scripts/fx10h/variants.js";
 import { SOURCE_REGISTRY } from "../../../src/config/freshness.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
-import { newsClaim, newsItemFromRow } from "../../../src/domain/evidence/index.js";
+import {
+  newsClaim,
+  newsItemFromRow,
+  newsItemWithRefs,
+} from "../../../src/domain/evidence/index.js";
 import type { ProGame } from "../../../src/domain/league/types.js";
 import { HttpError } from "../../../src/http/errors.js";
 import { fsTempArea, runRefresh, type RefreshDeps } from "../../../src/sources/runner.js";
@@ -24,16 +28,24 @@ import {
   NEWS_FEEDS,
   NEWS_FILE_FORMAT,
   newsSources,
+  PREVIOUS_NEWS_SQL,
   previousRowOf,
   quarterHourBucket,
   readNewsFile,
   RSS_ACCEPT,
+  UNIVERSE_SQL,
+  universeFromEspnPlayers,
   universePlayerOf,
   type NewsFile,
   type NewsSourceOptions,
 } from "../../../src/sources/news/index.js";
 import type { HttpGet } from "../../../src/sources/source.js";
-import { contractColumnsHash, NEWS_TABLES } from "../../../src/store/datasets/tables.js";
+import {
+  contractColumnsHash,
+  ddlFor,
+  DS_PLAYERS,
+  NEWS_TABLES,
+} from "../../../src/store/datasets/tables.js";
 import { NEWS_RETENTION_MS, newsItemId } from "../../../src/store/datasets/derive.js";
 import { fakeProSchedule, fakeRefreshLog, NO_DOWNLOAD, proGame } from "../runner/helpers.js";
 import { sqlitePublisher, sqliteWriter } from "../weather/helpers.js";
@@ -44,6 +56,7 @@ import {
   fakeGet,
   NEWS_NOW,
   NEWS_NOW_MS,
+  fixtureText,
   rosterUniverse,
   rss,
 } from "./helpers.js";
@@ -161,6 +174,18 @@ describe("news:* — end to end on the committed captures", () => {
       reliability_prior: 0.8,
     });
     expect(bigsby.url.untrusted_text.source).toBe("rss.espn.url");
+    // with the refs (D6 players_matched): the Bijan Robinson recap names the fixture-roster player
+    const refRows = rows(publisher.db, "SELECT * FROM ds_news_players");
+    const withRefs = rows(publisher.db, "SELECT * FROM ds_news")
+      .map((x) => newsItemWithRefs(x, refRows))
+      .filter((i) => (i?.refs.length ?? 0) > 0);
+    expect(
+      withRefs.map((i) => [i?.title.untrusted_text.value, i?.refs.map((r) => r.espn_id)]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["Bijan Robinson, Falcons make NFC South statement in rout of Saints", [4430807]],
+      ]),
+    );
   });
 
   it("the `news` job is the three feeds, each with its licence and freshness from the registry", () => {
@@ -580,6 +605,108 @@ describe("hostile feeds (plan 02 §6; plan 10 B8)", () => {
     expect(rows(publisher.db, "SELECT title FROM ds_news")[0]?.title).toBe("Player A caf�");
     if (r.status === "published")
       expect(r.warnings).toContain("the feed is not valid UTF-8 (invalid bytes replaced)");
+  });
+});
+
+describe("the wiring statements (the universe and the previous file, read from real tables)", () => {
+  it("UNIVERSE_SQL over ds_players + the crosswalk lookup yields the matcher universe", () => {
+    const db = new DatabaseSync(":memory:");
+    for (const sql of ddlFor(DS_PLAYERS)) db.exec(sql);
+    const roster = JSON.parse(fixtureText("fixtures/players/fixture-roster.json")) as {
+      players: {
+        espn_id: number;
+        espn_name: string;
+        espn_pro_team_id: number;
+        espn_position_id: number;
+        gsis_id: string;
+      }[];
+      team_units: { espn_id: number; espn_name?: string; espn_pro_team_id?: number }[];
+    };
+    const ins = db.prepare(
+      "INSERT INTO ds_players (season, espn_id, full_name, position_id, pro_team_id) VALUES (?, ?, ?, ?, ?)",
+    );
+    for (const p of roster.players)
+      ins.run(2026, p.espn_id, p.espn_name, p.espn_position_id, p.espn_pro_team_id);
+    ins.run(2026, -16001, "Falcons D/ST", 16, 1);
+    ins.run(2025, 1, "Last Season", 1, 1);
+    const gsis = new Map(roster.players.map((p) => [p.espn_id, p.gsis_id]));
+    const universe = universeFromEspnPlayers(
+      db.prepare(UNIVERSE_SQL).all({ season: 2026 }),
+      (id) => gsis.get(id) ?? null,
+    );
+    expect(universe).toHaveLength(roster.players.length);
+    expect(universe.find((p) => p.full_name === "Joe Mixon")).toMatchObject({
+      team: null,
+      gsis_id: "00-0033897",
+    });
+    expect(universe.find((p) => p.full_name === "Bijan Robinson")).toMatchObject({ team: "ATL" });
+    // a lookup that throws or returns garbage leaves the gsis id null
+    const bad = universeFromEspnPlayers(db.prepare(UNIVERSE_SQL).all({ season: 2026 }), (id) => {
+      if (id % 2 === 0) throw new Error("x");
+      return "not-gsis";
+    });
+    expect(bad.every((p) => p.gsis_id === null)).toBe(true);
+    expect(
+      universeFromEspnPlayers(
+        [null, 3, { espn_id: 5 }, { espn_id: 5, full_name: "A B", pro_team_id: 99 }],
+        () => null,
+      ),
+    ).toEqual([{ espn_id: 5, full_name: "A B", team: null, gsis_id: null }]);
+  });
+
+  it("two refreshes: PREVIOUS_NEWS_SQL on the first file feeds the second (append, dedup, first sighting kept)", async () => {
+    const first = deps(fakeGet({ [NEWS_FEEDS.rotowire.url]: CAPTURED.rotowire() }));
+    const r1 = await runRefresh(
+      { source: createNewsSource("rotowire", OPTS), seasons: [2026], week: 5 },
+      first.deps,
+    );
+    expect(r1.status).toBe("published");
+    const db1 = first.publisher.db;
+    if (db1 === null) throw new Error("first publish");
+    const previous = db1.prepare(PREVIOUS_NEWS_SQL).all();
+    const later = rss([
+      {
+        title: "Joe Mixon: Not joining Seattle after all",
+        guid: "nfl641059",
+        pubDate: "Tue, 06 Oct 2026 11:05:00 AM PDT",
+      },
+      {
+        title: "Bijan Robinson: Questionable for Week 5",
+        guid: "nfl641101",
+        pubDate: "Tue, 06 Oct 2026 1:40:00 PM PDT",
+      },
+    ]);
+    const second = deps(
+      fakeGet({ [NEWS_FEEDS.rotowire.url]: later }),
+      games(),
+      "2026-10-06T21:00:00.000Z",
+    );
+    const r2 = await runRefresh(
+      {
+        source: createNewsSource("rotowire", { ...OPTS, previous: () => previous }),
+        seasons: [2026],
+        week: 5,
+      },
+      second.deps,
+    );
+    expect(r2.status).toBe("published");
+    const news = rows(
+      second.publisher.db,
+      "SELECT item_id, first_seen_ms, title FROM ds_news ORDER BY published_ms DESC",
+    );
+    expect(news).toHaveLength(6);
+    expect(news[0]).toMatchObject({
+      title: "Bijan Robinson: Questionable for Week 5",
+      first_seen_ms: Date.parse("2026-10-06T21:00:00Z"),
+    });
+    expect(
+      news.find((x) => x.item_id === newsItemId("rotowire", "nfl641059", null))?.first_seen_ms,
+    ).toBe(NEWS_NOW_MS);
+    const refs = rows(
+      second.publisher.db,
+      "SELECT espn_id FROM ds_news_players ORDER BY espn_id",
+    ).map((x) => x.espn_id);
+    expect(refs).toEqual([3116385, 4360248, 4430807]);
   });
 });
 

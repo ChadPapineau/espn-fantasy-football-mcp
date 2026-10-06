@@ -16,6 +16,8 @@ export {
   MAX_REFS_PER_ITEM,
   type NewsPlayerRef,
   type NewsUniversePlayer,
+  UNIVERSE_SQL,
+  universeFromEspnPlayers,
   type PlayerMatcher,
 } from "./match.js";
 export {
@@ -30,6 +32,7 @@ export {
   MAX_UNIVERSE_PLAYERS,
   NEWS_FILE_FORMAT,
   newsSources,
+  PREVIOUS_NEWS_SQL,
   previousRowOf,
   quarterHourBucket,
   readNewsFile,
