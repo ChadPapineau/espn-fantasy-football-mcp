@@ -238,10 +238,15 @@ export interface SanitizedText {
  * whitespace collapsed, then capped at `cap` code points. Idempotent on its own output.
  */
 export function sanitizeText(raw: string, cap: number): SanitizedText {
+  return capCodePoints(sanitizeUncapped(raw, cap), cap);
+}
+
+/** `sanitizeText` before the code-point cap: the bounded pre-cut and the fixed-point clean. */
+function sanitizeUncapped(raw: string, cap: number): SanitizedText {
   if (!Number.isInteger(cap) || cap < 1)
     throw new RangeError("text: cap must be a positive integer");
   const precut = Math.max(cap * 8, 2048);
-  let truncated = raw.length > precut;
+  const truncated = raw.length > precut;
   let s = truncated ? raw.slice(0, precut) : raw;
   let stable = false;
   for (let i = 0; i < MAX_PASSES && !stable; i++) {
@@ -250,20 +255,29 @@ export function sanitizeText(raw: string, cap: number): SanitizedText {
     s = next;
   }
   if (!stable) s = sanitizePass(s.replace(/[&<>]/g, " "));
-  const cps = Array.from(s);
-  if (cps.length > cap) {
-    s = cps.slice(0, cap).join("").trimEnd();
-    truncated = true;
-  }
   return { value: s, truncated };
 }
 
+/** Cuts a sanitised text to `cap` code points (a cut sets `truncated`). */
+function capCodePoints(t: SanitizedText, cap: number): SanitizedText {
+  const cps = Array.from(t.value);
+  return cps.length > cap ? { value: cps.slice(0, cap).join("").trimEnd(), truncated: true } : t;
+}
+
+/** Each flag fires when any of its patterns matches (a flag may have several). */
 const FLAG_RES: readonly (readonly [InjectionFlag, RegExp])[] = [
   ["role_marker", /(?:^|[.!?:;]\s*)(?:system|assistant|user|developer)\s*:/i],
   [
     "imperative",
     /\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|all|your)\s+(?:instructions|prompts|rules|directions|guidelines)\b/i,
   ],
+  // the terse override without its noun: "IGNORE ALL PRIOR — …", "disregard the above"
+  [
+    "imperative",
+    /\b(?:ignore|disregard)\s+(?:(?:all|any|the|everything)\s+)?(?:previous|prior|above|earlier)\b/i,
+  ],
+  // the whole field is the bare verb: a team abbreviation "IGNORE" (research 05 §6 case 2)
+  ["imperative", /^[^\p{L}\p{N}]*(?:ignore|disregard)[^\p{L}\p{N}]*$/iu],
   [
     "second_person",
     /\byou\s+(?:must|should|need\s+to|have\s+to|are\s+required\s+to|will\s+now)\b/i,
@@ -334,8 +348,8 @@ export function injectionFlags(text: string): InjectionFlag[] {
   const folded = flagFold(text);
   const out: InjectionFlag[] = [];
   for (const f of INJECTION_FLAGS) {
-    const re = FLAG_RES.find(([name]) => name === f)?.[1];
-    if (re?.test(folded) === true || re?.test(text) === true) out.push(f);
+    const hit = FLAG_RES.some(([name, re]) => name === f && (re.test(folded) || re.test(text)));
+    if (hit) out.push(f);
   }
   return out;
 }
@@ -349,8 +363,17 @@ function codePoints(s: string): number {
 /** Wraps third-party text with the cap of its tag's class (plan 01 §4.4 `wrap(path, value, cap)`). */
 export function wrapUntrusted(raw: string, source: UntrustedSource): UntrustedText {
   if (!isUntrustedSource(source)) throw new RangeError("text: unregistered untrusted source tag");
-  const { value, truncated } = sanitizeText(raw, TEXT_CAPS[UNTRUSTED_SOURCE_CLASS[source]]);
+  const cap = TEXT_CAPS[UNTRUSTED_SOURCE_CLASS[source]];
+  const whole = sanitizeUncapped(raw, cap);
+  const { value, truncated } = capCodePoints(whole, cap);
+  // the flags read the whole sanitised text, not only the capped value: an instruction cut at the
+  // cap still reaches the output in part ("Division 1. Ignore previous inst"), and plan 10 A8a
+  // wants flags[] non-empty on every injected field
   const flags = injectionFlags(value);
+  if (whole.value !== value) {
+    const seen = new Set([...flags, ...injectionFlags(whole.value)]);
+    flags.splice(0, flags.length, ...INJECTION_FLAGS.filter((f) => seen.has(f)));
+  }
   const inner =
     flags.length > 0
       ? { value, source, chars: codePoints(value), truncated, flags }
