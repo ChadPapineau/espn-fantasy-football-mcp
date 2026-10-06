@@ -35,16 +35,19 @@ export const REPLACEMENT = Object.freeze({
   streamableMin: 0.9,
   /** A position's streamability is reported inside [0, this]. */
   streamabilityMax: 1.5,
-  /** Curve ranks reported per position (the baseline rank plus a margin, at most this many). */
-  curveMaxRank: 30,
+  /** Curve ranks reported per position (the baseline rank plus a margin, at most this many — research
+   * 05 §4.1 reads the curve to rank 20; past it VOR is ≈ 0). */
+  curveMaxRank: 20,
   curvePastBaseline: 2,
   /** A tier break is a gap ≥ max(tierGapMin, tierGapFactor × the median adjacent gap) [U]. */
   tierGapMin: 0.5,
   tierGapFactor: 2.5,
   maxTiers: 8,
   /** Players returned by default, and the most one call returns. */
-  defaultPlayers: 30,
+  defaultPlayers: 20,
   maxPlayers: 60,
+  /** Weekly-array weeks kept at `detail: compact` (plan 07 §5.2: "per-week arrays beyond three weeks"). */
+  compactWeeks: 3,
   /** Available players per position always listed (the waiver-relevant tail). */
   topAvailablePerPosition: 3,
   /** Players one call accepts (all rosters plus ≤ 3 pool pages, with margin). */
@@ -316,6 +319,11 @@ export interface ReplacementRequest {
   /** Bench-effect share per position from the league's bye-week lineups (A5); omitted = cold start. */
   readonly bench_share?: Readonly<Record<string, number>>;
   readonly max_players?: number;
+  /**
+   * Plan 07 C2 / §5.2: `compact` (default) keeps the first three weeks of each weekly array and drops
+   * `flex_allocation_trace`; `full` keeps everything. Every number a decision needs stays in both.
+   */
+  readonly detail?: "compact" | "full";
   readonly clock: Clock;
   readonly pacer?: Pacer;
   readonly deadline_ms?: number | null;
@@ -442,6 +450,7 @@ export async function analyzeReplacement(req: ReplacementRequest): Promise<Repla
     "max_players",
   );
   const horizon = req.horizon ?? "ros";
+  const compact = (req.detail ?? "compact") === "compact";
   const baselineMode = req.baseline ?? "both";
   const nWeeks = horizon === "week" ? 1 : req.weeks.length;
   const weeks = req.weeks.slice(0, nWeeks);
@@ -551,18 +560,21 @@ export async function analyzeReplacement(req: ReplacementRequest): Promise<Repla
     const streamability = round(Math.min(REPLACEMENT.streamabilityMax, n > 0 ? sum / n : 0), 3);
     streamabilityOf[pos] = streamability;
     const extra = ros.extra[pos] ?? 0;
+    const keep = <T>(xs: T[]): T[] => (compact ? xs.slice(0, REPLACEMENT.compactWeeks) : xs);
     positionsOut.push({
       position: pos,
-      starter_baseline_weekly: baselineMode === "stream" ? [] : starterWeekly,
+      starter_baseline_weekly: baselineMode === "stream" ? [] : keep(starterWeekly),
       starter_baseline_ros: round(base, 3),
-      stream_baseline_weekly: baselineMode === "starter" ? [] : streamWeekly,
+      stream_baseline_weekly: baselineMode === "starter" ? [] : keep(streamWeekly),
       curve,
       tiers: [...tierMap.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([tier, ids]) => ({ tier, player_ids: ids })),
       streamability,
       effective_starters: (ros.slotted[pos] ?? 0) + extra,
-      flex_allocation_trace: ros.trace.filter((t) => t.position_filled === pos),
+      ...(compact
+        ? {}
+        : { flex_allocation_trace: ros.trace.filter((t) => t.position_filled === pos) }),
     });
   }
 

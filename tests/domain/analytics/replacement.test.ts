@@ -302,7 +302,7 @@ function rq(over: Partial<ReplacementRequest> = {}): ReplacementRequest {
 
 describe("analyzeReplacement", () => {
   it("ROS baselines per game; the stream baseline is the best AVAILABLE player; streamability vs the last starter", async () => {
-    const out = await analyzeReplacement(rq());
+    const out = await analyzeReplacement(rq({ detail: "full" }));
     const rb = out.data.positions.find((p) => p.position === "RB");
     // RB: 4 dedicated + FLEX ×2 (RB 14 vs WR 13 → RB, then RB 13 vs WR 13 tie → RB first listed)
     expect(out.allocation.flex_split).toMatchObject({ RB: 2, WR: 0, TE: 0 });
@@ -356,6 +356,20 @@ describe("analyzeReplacement", () => {
     expect(qbOnly.data.format_notes.flex_split).toEqual({ rb: 2, wr: 0, te: 0 });
   });
 
+  it("detail: compact keeps three weeks of each weekly array and no flex trace; full keeps all", async () => {
+    const compact = await analyzeReplacement(rq());
+    expect(compact.data.positions.every((p) => p.starter_baseline_weekly.length === 3)).toBe(true);
+    expect(compact.data.positions.every((p) => p.flex_allocation_trace === undefined)).toBe(true);
+    const full = await analyzeReplacement(rq({ detail: "full" }));
+    expect(full.data.positions.every((p) => p.starter_baseline_weekly.length === 4)).toBe(true);
+    expect(
+      full.data.positions.find((p) => p.position === "RB")?.flex_allocation_trace,
+    ).toHaveLength(2);
+    // every decision number is the same at both levels
+    expect(compact.data.players).toEqual(full.data.players);
+    expect(compact.data.format_notes).toEqual(full.data.format_notes);
+  });
+
   it("horizon week reads only the first week; baseline modes drop the other weekly array", async () => {
     const wk = await analyzeReplacement(rq({ horizon: "week", players: pool({ byeWeek: 6 }) }));
     expect(wk.data.positions[0]?.starter_baseline_weekly).toHaveLength(1);
@@ -392,7 +406,9 @@ describe("analyzeReplacement", () => {
   });
 
   it("weekly allocations are cooperative: the CPU deadline returns partial with a warning", async () => {
-    const out = await analyzeReplacement(rq({ pacer: steppingPacer(5), deadline_ms: 8 }));
+    const out = await analyzeReplacement(
+      rq({ pacer: steppingPacer(5), deadline_ms: 8, detail: "full" }),
+    );
     expect(out.partial).toBe(true);
     expect(out.warnings.some((w) => w.startsWith("partial:"))).toBe(true);
     expect(out.data.positions[0]?.starter_baseline_weekly.length).toBeLessThan(W.length);

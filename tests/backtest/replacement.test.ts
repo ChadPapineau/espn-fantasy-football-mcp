@@ -235,6 +235,7 @@ describe("the full E4 engine on 2025 agrees with the kernel (real nflverse value
       weeks,
       positions: ["QB", "RB", "WR", "TE"],
       players,
+      detail: "full",
       clock: fixedClock("2026-10-06T12:00:00.000Z"),
       pacer: instantPacer,
       deadline_ms: null,
