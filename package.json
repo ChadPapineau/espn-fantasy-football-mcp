@@ -1,0 +1,61 @@
+{
+  "name": "espn-fantasy-football-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local stdio MCP server for format-aware fantasy-football analysis of your own ESPN league (read-only).",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "eff": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "scripts/eff-launch.sh",
+    "skills",
+    ".claude-plugin",
+    ".mcp.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=24.15"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint --max-warnings=0 .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run --project unit",
+    "test:coverage": "vitest run --project unit --coverage",
+    "test:process": "vitest run --project process --passWithNoTests",
+    "check:no-scripts": "node scripts/ci/check-no-scripts.mjs",
+    "check:licenses": "node scripts/ci/check-licenses.mjs",
+    "check:runtime-tree": "node scripts/ci/check-runtime-tree.mjs",
+    "check:coverage": "node scripts/ci/check-coverage.mjs",
+    "check:links": "node scripts/ci/check-links.mjs",
+    "check:skills-structure": "node scripts/ci/check-skills-structure.mjs",
+    "pack:scan": "node scripts/ci/scan-tarball.mjs",
+    "scan:secrets": "node scripts/dev/scan-secrets.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.2.0",
+    "@napi-rs/keyring": "2.1.0",
+    "hyparquet": "1.31.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.2.0",
+    "@types/node": "24.19.0",
+    "@vitest/coverage-v8": "5.0.3",
+    "eslint": "10.11.0",
+    "eslint-plugin-import-x": "4.17.1",
+    "fast-check": "4.10.2",
+    "prettier": "3.9.9",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.3"
+  }
+}

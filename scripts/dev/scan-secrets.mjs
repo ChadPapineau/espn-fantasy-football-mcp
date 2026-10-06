@@ -51,12 +51,18 @@ const ALLOWED_IPV4 = new Set(["127.0.0.1", "0.0.0.0"]);
 
 /** A home-directory name that is a placeholder: `<you>`, `<name>`, `$USER`, `${USER}`, `…`, `...`. */
 function isPlaceholderName(name) {
-  return /^<[^<>]*>$/.test(name) || /^\$\{?[A-Za-z_]\w*\}?$/.test(name) || /^(?:…|\.\.\.)$/.test(name);
+  return (
+    /^<[^<>]*>$/.test(name) || /^\$\{?[A-Za-z_]\w*\}?$/.test(name) || /^(?:…|\.\.\.)$/.test(name)
+  );
 }
 
 /** A cookie-header value that is plainly a placeholder (`<your value>`, `${SWID}`, `…`, `[redacted]`). */
 function isPlaceholderCookie(v) {
-  return v.length < 8 || /^(?:<|\$|\[|…|\.\.\.|\{X)/i.test(v) || /redacted|example|placeholder|your[-_]/i.test(v);
+  return (
+    v.length < 8 ||
+    /^(?:<|\$|\[|…|\.\.\.|\{X)/i.test(v) ||
+    /redacted|example|placeholder|your[-_]/i.test(v)
+  );
 }
 
 /** Shannon entropy in bits per character. */
@@ -85,6 +91,34 @@ export function looksLikeBareEspnS2(run) {
   return entropy(run) >= 4.0;
 }
 
+/** The espn_s2 cookie alphabet as a lookup table (ASCII only). */
+const COOKIE_CHAR = (() => {
+  const t = new Uint8Array(128);
+  for (const c of "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%+/=")
+    t[c.charCodeAt(0)] = 1;
+  return t;
+})();
+
+/**
+ * Every maximal run of ≥ 100 cookie-alphabet characters in `line`, in one linear pass.
+ * @param {string} line
+ * @returns {string[]}
+ */
+export function bareRuns(line) {
+  const out = [];
+  let start = -1;
+  for (let i = 0; i <= line.length; i++) {
+    const code = i < line.length ? line.charCodeAt(i) : 0;
+    if (code < 128 && COOKIE_CHAR[code] === 1) {
+      if (start < 0) start = i;
+    } else if (start >= 0) {
+      if (i - start >= 100) out.push(line.slice(start, i));
+      start = -1;
+    }
+  }
+  return out;
+}
+
 /** True when every octet is 0–255 and the address is not one of the two allowed literals. */
 function isReportableIpv4(addr) {
   const parts = addr.split(".");
@@ -93,8 +127,9 @@ function isReportableIpv4(addr) {
 }
 
 /**
- * @typedef {{ id: string, re: RegExp, group?: number, strict?: boolean,
- *             allow?: (m: RegExpExecArray) => boolean }} Rule
+ * @typedef {{ id: string, re?: RegExp, find?: (line: string) => string[], group?: number,
+ *             strict?: boolean, allow?: (m: RegExpExecArray) => boolean }} Rule
+ * find: a linear matcher used instead of `re` (returns the offending substrings).
  * strict: never suppressed by `scan-secrets: allow` and never by the generic placeholder words.
  * @type {Rule[]}
  */
@@ -103,18 +138,23 @@ export const RULES = [
   {
     // the bearer cookie with its name: 40 (plan 04 §4.1 identifiers row; gitleaks uses 80) chars
     id: "espn-s2-cookie",
-    re: new RegExp(String.raw`espn[_-]?s2["'\x60]?\s*(?:[:=]|=>)\s*["'\x60]?([A-Za-z0-9%+/=._-]{40,})`, "gi"),
+    re: new RegExp(
+      String.raw`espn[_-]?s2["'\x60]?\s*(?:[:=]|=>)\s*["'\x60]?([A-Za-z0-9%+/=._-]{40,8192})`,
+      "gi",
+    ),
     group: 1,
     strict: true,
-    // a dotted code path (`credentials.espnS2Value…`) has no digit; a real cookie always does
-    allow: (m) => !/\d/.test(m[1] ?? ""),
+    // not a cookie: a value with no digit (a real one always has one), or a dotted code path
+    // (`credentials.espnS2Value…` — base64 and URL-encoding never produce a ".")
+    allow: (m) =>
+      !/\d/.test(m[1] ?? "") || /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(m[1] ?? ""),
   },
   {
-    // a value pasted without its name
+    // a value pasted without its name — found by a linear scan (bareRuns), never a regex: a greedy
+    // class with look-arounds overflows V8's backtrack stack on a multi-megabyte line
     id: "espn-s2-bare",
-    re: /(?<![A-Za-z0-9%+/=])[A-Za-z0-9%+/=]{100,}(?![A-Za-z0-9%+/=])/g,
+    find: (line) => bareRuns(line).filter(looksLikeBareEspnS2),
     strict: true,
-    allow: (m) => !looksLikeBareEspnS2(m[0]),
   },
   {
     id: "espn-swid",
@@ -167,7 +207,7 @@ export const RULES = [
   {
     // /Users/<name>, /home/<name>, C:\Users\<name> (JSON-escaped too); placeholders are exempt
     id: "home-path",
-    re: /(?:\/(?:Users|home)\/|\b[A-Za-z]:(?:\\{1,2}|\/)Users(?:\\{1,2}|\/))(<[^<>\s]*>|[^/\\\s"'\x60<>()[\]{},;:|*?]+)/gi,
+    re: /(?:\/(?:Users|home)\/|\b[A-Za-z]:(?:\\{1,2}|\/)Users(?:\\{1,2}|\/))(<[^<>\s]{0,64}>|\$\{[A-Za-z_]\w{0,64}\}|[^/\\\s"'\x60<>()[\]{},;:|*?]{1,256})/gi,
     group: 1,
     strict: true,
     allow: (m) => isPlaceholderName(m[1] ?? ""),
@@ -181,11 +221,21 @@ export const RULES = [
     // not a mailbox: a no-reply/reserved address; the `git` SSH transport user (git@github.com:…);
     // or URL userinfo (https://user:pw@host — the authority of a scheme:// URL)
     allow: (m) =>
-      isPlaceholderEmail(m[0]) || /^git@/i.test(m[0]) || /\/\/[^/\s@]*$/.test(m.input.slice(0, m.index)),
+      isPlaceholderEmail(m[0]) ||
+      /^git@/i.test(m[0]) ||
+      /\/\/[^/\s@]*$/.test(m.input.slice(0, m.index)),
   },
-  { id: "private-key", strict: true, re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----/g },
+  {
+    id: "private-key",
+    strict: true,
+    re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----/g,
+  },
   // --- generic credentials ----------------------------------------------------------------------
-  { id: "odds-api-key", re: /odds[_-]?api[_-]?key["']?\s*[:=]\s*["']?([0-9a-f]{32})\b/gi, group: 1 },
+  {
+    id: "odds-api-key",
+    re: /odds[_-]?api[_-]?key["']?\s*[:=]\s*["']?([0-9a-f]{32})\b/gi,
+    group: 1,
+  },
   { id: "github-token", re: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/g },
   { id: "github-fine-grained-token", re: /\bgithub_pat_[A-Za-z0-9_]{50,}\b/g },
   { id: "npm-token", re: /\bnpm_[A-Za-z0-9]{36}\b/g },
@@ -254,7 +304,11 @@ const INVISIBLE = /[\u00AD\u180E\u200B-\u200F\u2060-\u2064\uFEFF]/g;
 
 /** NFKC, case-folded, curly quotes straightened, invisible characters removed. */
 export function normalise(s) {
-  return s.normalize("NFKC").toLowerCase().replace(/[‘’ʼ`]/g, "'").replace(INVISIBLE, "");
+  return s
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[‘’ʼ`]/g, "'")
+    .replace(INVISIBLE, "");
 }
 
 /**
@@ -273,7 +327,13 @@ function denylistPath() {
       /* fall through to the default */
     }
   }
-  const def = join(homedir(), ".local", "share", "espn-fantasy-football-mcp-dev", "scan-denylist.txt");
+  const def = join(
+    homedir(),
+    ".local",
+    "share",
+    "espn-fantasy-football-mcp-dev",
+    "scan-denylist.txt",
+  );
   return existsSync(def) ? def : null;
 }
 
@@ -305,50 +365,44 @@ function loadDenylist() {
   try {
     return parseDenylist(readFileSync(p, "utf8"));
   } catch {
-    throw new ScanError("the local deny-list exists but cannot be read — refusing to scan without it (path and contents not printed)");
+    throw new ScanError(
+      "the local deny-list exists but cannot be read — refusing to scan without it (path and contents not printed)",
+    );
   }
 }
 
 /**
- * Line numbers (1-based) where any deny-list form occurs: per line, and across line breaks (the
- * whole text with every whitespace run collapsed to one space, so a term wrapped onto two lines
- * still matches; reported at the line where the match starts).
+ * Line numbers (1-based) where any deny-list form occurs: within a line, or split across up to two
+ * line breaks (a wrapped name — each window of 2 and 3 consecutive lines is joined with whitespace
+ * collapsed; a window hit is reported at its first line). Memory stays proportional to the text.
  * @param {string} text
  * @param {string[]} deny
  * @returns {number[]}
  */
 export function denylistLines(text, deny) {
   if (!deny.length) return [];
+  const norm = text.split(/\r?\n/).map((l) => normalise(l).replace(/\s+/g, " ").trim());
+  const has = (/** @type {string} */ s) => {
+    const t = s.replace(/\s+/g, " ");
+    return deny.some((d) => t.includes(d));
+  };
   const hits = new Set();
-  const lines = text.split(/\r?\n/);
-  lines.forEach((line, i) => {
-    const n = normalise(line);
-    if (deny.some((d) => n.includes(d))) hits.add(i + 1);
-  });
-  // collapsed whole-text pass with an index -> line map
-  let collapsed = "";
-  /** @type {number[]} */
-  const lineOf = [];
-  let prevSpace = false;
-  lines.forEach((line, i) => {
-    for (const ch of normalise(line) + " ") {
-      const space = /\s/.test(ch);
-      if (space && prevSpace) continue;
-      collapsed += space ? " " : ch;
-      lineOf.push(i + 1);
-      prevSpace = space;
+  for (let i = 0; i < norm.length; i++) {
+    const a = norm[i] ?? "";
+    if (has(a)) {
+      hits.add(i + 1);
+      continue;
     }
-  });
-  for (const d of deny) {
-    let from = 0;
-    for (;;) {
-      const at = collapsed.indexOf(d, from);
-      if (at === -1) break;
-      hits.add(lineOf[at] ?? 1);
-      from = at + 1;
+    const b = norm[i + 1];
+    if (b === undefined) continue;
+    if (has(`${a} ${b}`) && !has(b)) {
+      hits.add(i + 1);
+      continue;
     }
+    const c = norm[i + 2];
+    if (c !== undefined && has(`${a} ${b} ${c}`) && !has(`${b} ${c}`)) hits.add(i + 1);
   }
-  return [...hits].sort((a, b) => a - b);
+  return [...hits].sort((x, y) => x - y);
 }
 
 // --- git plumbing ---------------------------------------------------------------------------------
@@ -362,7 +416,10 @@ function git(args, maxBuffer = 16 * 1024 * 1024) {
 function readBlob(sha, file) {
   const size = Number(git(["cat-file", "-s", sha]).toString("utf8").trim());
   if (!(size >= 0)) throw new ScanError(`cannot size the staged blob of ${file}`);
-  if (size > MAX_SCAN_BYTES) throw new ScanError(`${file} is ${String(size)} bytes, over the ${String(MAX_SCAN_BYTES)}-byte scan limit — it cannot be scanned, so it cannot be committed`);
+  if (size > MAX_SCAN_BYTES)
+    throw new ScanError(
+      `${file} is ${String(size)} bytes, over the ${String(MAX_SCAN_BYTES)}-byte scan limit — it cannot be scanned, so it cannot be committed`,
+    );
   return git(["cat-file", "blob", sha], MAX_SCAN_BYTES + 1024);
 }
 
@@ -383,7 +440,10 @@ function readWorktree(file) {
   const st = lstatSync(file);
   if (st.isSymbolicLink()) return Buffer.from(readlinkSync(file), "utf8");
   if (!st.isFile()) return null;
-  if (st.size > MAX_SCAN_BYTES) throw new ScanError(`${file} is ${String(st.size)} bytes, over the ${String(MAX_SCAN_BYTES)}-byte scan limit — it cannot be scanned`);
+  if (st.size > MAX_SCAN_BYTES)
+    throw new ScanError(
+      `${file} is ${String(st.size)} bytes, over the ${String(MAX_SCAN_BYTES)}-byte scan limit — it cannot be scanned`,
+    );
   return readFileSync(file);
 }
 
@@ -402,20 +462,34 @@ function isSymlink(file) {
  * @returns {{file: string, sha: string}[]}
  */
 function indexEntries() {
-  const raw = git(["diff", "--cached", "--raw", "-z", "--no-renames", "--no-abbrev", "--no-ext-diff", "--ignore-submodules=none"], 256 * 1024 * 1024)
+  const raw = git(
+    [
+      "diff",
+      "--cached",
+      "--raw",
+      "-z",
+      "--no-renames",
+      "--no-abbrev",
+      "--no-ext-diff",
+      "--ignore-submodules=none",
+    ],
+    256 * 1024 * 1024,
+  )
     .toString("utf8")
     .split("\0");
   const entries = [];
   for (let i = 0; i < raw.length; i++) {
     const meta = raw[i];
     if (!meta) continue;
-    if (!meta.startsWith(":")) throw new ScanError(`unexpected git diff --raw record: ${meta.slice(0, 40)}`);
+    if (!meta.startsWith(":"))
+      throw new ScanError(`unexpected git diff --raw record: ${meta.slice(0, 40)}`);
     const [, newMode, , newSha, status = ""] = meta.slice(1).split(" ");
     const paths = /^[RC]/.test(status) ? 2 : 1;
     const file = raw[i + paths] ?? "";
     i += paths;
     if (status.startsWith("D") || newMode === "000000" || newMode === "160000") continue;
-    if (!newSha || /^0+$/.test(newSha)) throw new ScanError(`${file}: no staged blob id (status ${status})`);
+    if (!newSha || /^0+$/.test(newSha))
+      throw new ScanError(`${file}: no staged blob id (status ${status})`);
     entries.push({ file, sha: newSha });
   }
   return entries;
@@ -451,19 +525,38 @@ export function scanText(label, text, deny) {
     const allowMarker = line.includes("scan-secrets: allow");
     for (const rule of RULES) {
       if (allowMarker && !rule.strict) continue;
-      rule.re.lastIndex = 0;
-      let m;
-      while ((m = rule.re.exec(line)) !== null) {
-        if (m[0] === "") {
-          rule.re.lastIndex++;
+      try {
+        if (rule.find) {
+          rule.find(line).forEach(() => findings.push(`${label}:${idx + 1}  [${rule.id}]`));
           continue;
         }
-        const value = rule.group ? (m[rule.group] ?? "") : m[0];
-        if (rule.allow && rule.allow(m)) continue;
-        if (!rule.strict && ["assigned-secret", "env-secret", "bearer-token"].includes(rule.id) && PLACEHOLDER.test(value)) continue;
-        // a filesystem path or URL named *_TOKEN_STORE / *_SECRET_FILE is a location, not a secret
-        if ((rule.id === "assigned-secret" || rule.id === "env-secret") && /^(?:~\/|\/|\.\.?\/|\$\{?[A-Z_]|https?:\/\/)/.test(value)) continue;
-        findings.push(`${label}:${idx + 1}  [${rule.id}]`);
+        const re = /** @type {RegExp} */ (rule.re);
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(line)) !== null) {
+          if (m[0] === "") {
+            re.lastIndex++;
+            continue;
+          }
+          const value = rule.group ? (m[rule.group] ?? "") : m[0];
+          if (rule.allow && rule.allow(m)) continue;
+          if (
+            !rule.strict &&
+            ["assigned-secret", "env-secret", "bearer-token"].includes(rule.id) &&
+            PLACEHOLDER.test(value)
+          )
+            continue;
+          // a filesystem path or URL named *_TOKEN_STORE / *_SECRET_FILE is a location, not a secret
+          if (
+            (rule.id === "assigned-secret" || rule.id === "env-secret") &&
+            /^(?:~\/|\/|\.\.?\/|\$\{?[A-Z_]|https?:\/\/)/.test(value)
+          )
+            continue;
+          findings.push(`${label}:${idx + 1}  [${rule.id}]`);
+        }
+      } catch {
+        // a rule that cannot evaluate a line is a finding, never "clean" (fail closed)
+        findings.push(`${label}:${idx + 1}  [scan-error:${rule.id}]`);
       }
     }
   });
@@ -514,12 +607,18 @@ function main() {
       }
     }
     if (all) {
-      for (const f of git(["ls-files", "-z"], 64 * 1024 * 1024).toString("utf8").split("\0").filter(Boolean)) {
+      for (const f of git(["ls-files", "-z"], 64 * 1024 * 1024)
+        .toString("utf8")
+        .split("\0")
+        .filter(Boolean)) {
         targets.push({ file: f, read: () => readWorktree(f) });
       }
     }
-    if (index) for (const { file, sha } of indexEntries()) targets.push({ file, read: () => readBlob(sha, file) });
-    for (const f of files) targets.push({ file: f, read: () => (staged ? readStaged(f) : readWorktree(f)) });
+    if (index)
+      for (const { file, sha } of indexEntries())
+        targets.push({ file, read: () => readBlob(sha, file) });
+    for (const f of files)
+      targets.push({ file: f, read: () => (staged ? readStaged(f) : readWorktree(f)) });
     if (message !== null) {
       const msgPath = message;
       targets.push({ file: "COMMIT_MESSAGE", read: () => readFileSync(msgPath) });
@@ -528,7 +627,9 @@ function main() {
     return fail(e);
   }
   if (!targets.length && !index && !identity) {
-    process.stderr.write("scan-secrets: no files given (use --all, --index, --message or pass paths)\n");
+    process.stderr.write(
+      "scan-secrets: no files given (use --all, --index, --message or pass paths)\n",
+    );
     process.exit(2);
   }
 
@@ -538,19 +639,26 @@ function main() {
   targets.forEach(({ file, read }, n) => {
     // a path is published too: it must not carry a personal identifier (reported without the path)
     if (file !== "COMMIT_MESSAGE" && denylistLines(file, deny).length) {
-      findings.push(`deny-list match in the path of scanned entry #${String(n + 1)} (path not printed)`);
+      findings.push(
+        `deny-list match in the path of scanned entry #${String(n + 1)} (path not printed)`,
+      );
     }
     let buf;
     try {
       buf = read();
     } catch (e) {
-      fail(e instanceof ScanError ? e : new Error(`cannot read ${file}: ${e instanceof Error ? e.message : String(e)}`));
+      fail(
+        e instanceof ScanError
+          ? e
+          : new Error(`cannot read ${file}: ${e instanceof Error ? e.message : String(e)}`),
+      );
     }
     if (!buf) return;
     if (isBinary(buf) && BINARY_EXT.test(file)) {
       binary++;
       // a binary file is not regex-scanned, but the deny-list still applies to its bytes as latin1
-      for (const l of denylistLines(buf.toString("latin1"), deny)) findings.push(`deny-list match in ${file}:${String(l)}`);
+      for (const l of denylistLines(buf.toString("latin1"), deny))
+        findings.push(`deny-list match in ${file}:${String(l)}`);
       return;
     }
     scanned++;
@@ -558,7 +666,9 @@ function main() {
   });
 
   if (findings.length) {
-    process.stderr.write(`scan-secrets: ${String(findings.length)} finding(s) — NOTHING may be committed until each is removed:\n`);
+    process.stderr.write(
+      `scan-secrets: ${String(findings.length)} finding(s) — NOTHING may be committed until each is removed:\n`,
+    );
     for (const f of findings) process.stderr.write(`  ${f}\n`);
     process.exit(1);
   }

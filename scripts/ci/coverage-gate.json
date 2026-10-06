@@ -1,0 +1,18 @@
+{
+  "$comment": "Coverage gate — plan 05 §7. Single source for vitest.config.ts thresholds and scripts/ci/check-coverage.mjs. The per-file 100 % entries are globs so they bind the moment each module exists. Only ever raised, never lowered to pass a build.",
+  "global": { "lines": 90, "branches": 85, "functions": 90, "statements": 90 },
+  "perFile100": [
+    "src/domain/scoring/**",
+    "src/domain/reclog/metrics.ts",
+    "src/domain/gate/**",
+    "src/providers/espn/path.ts",
+    "src/providers/espn/filter.ts",
+    "src/providers/espn/errors.ts",
+    "src/providers/espn/ids.ts",
+    "src/auth/file.ts",
+    "src/auth/format.ts",
+    "src/cli/log.ts",
+    "src/drift/**"
+  ],
+  "exclude": ["src/cli.ts", "src/**/*.d.ts", "src/**/generated/**"]
+}

@@ -130,12 +130,13 @@ espn-fantasy-football-mcp/
 
 **Runtime dependencies (the allow-list; adding one needs a row here with reason and rejected alternative):**
 
-| Package | Pinned at (2026-09-30) | Why | Rejected alternative |
+| Package | Pinned at (2026-09-30; **as built 2026-10-05**) | Why | Rejected alternative |
 |---|---|---|---|
-| `@modelcontextprotocol/server` | 2.2.0 [V-npm] | the SDK (plan 01 D2); brings `@modelcontextprotocol/core` 2.2.0 and `zod ^4.2.0` [V-npm] | v1 `@modelcontextprotocol/sdk` 1.31.0 (17 runtime deps) |
-| `zod` | 4.6.5 exact (or the SDK's resolved version) [V-npm] | tool schemas, view schemas, config schema | valibot |
-| `hyparquet` | 1.31.2 exact [V-npm: pure JS, MIT, zero deps; its `prepare` script runs only from a git checkout, not from the registry tarball] | nflverse/ffopportunity parquet (plan 01 D9) | `parquetjs`; DuckDB |
-| `@napi-rs/keyring` | 2.1.0 exact — plan 02 §7.2 items 1–4 **passed** (research 01 §30, verdict Safe; provenance attested); item 5 (the runtime prompt count) is verified by `doctor` #7 (ADV OBJ-19(a)) [V-npm: no install script; 12 optional platform packages; `darwin-arm64` is one `.node` file] | OS keychain for the cookie (plan 01 D12) | `keytar` (archived 2022, `prebuild-install`/`node-gyp` at install [V-03 §C.4]); `security` CLI (macOS-only, argv on write) |
+| `@modelcontextprotocol/server` | 2.2.0 [V-npm] — **built: `2.2.0` exact** (with `@modelcontextprotocol/core` `2.2.0`) | the SDK (plan 01 D2); brings `@modelcontextprotocol/core` 2.2.0 and `zod ^4.2.0` [V-npm] | v1 `@modelcontextprotocol/sdk` 1.31.0 (17 runtime deps) |
+| `zod` | 4.6.5 exact (or the SDK's resolved version) [V-npm] — **built: `4.6.5` exact** = what `^4.2.0` resolves; one zod in the tree | tool schemas, view schemas, config schema | valibot |
+| `hyparquet` | 1.31.2 exact [V-npm: pure JS, MIT, zero deps; its `prepare` script runs only from a git checkout, not from the registry tarball] — **built: `1.31.2` exact** (its registry `prepare` is the one explicit exception in `check-no-scripts`) | nflverse/ffopportunity parquet (plan 01 D9) | `parquetjs`; DuckDB |
+| `@napi-rs/keyring` | **built: `2.1.0` exact**; npm installs exactly one of its 12 prebuilt platform packages (e.g. `darwin-x64` on an Intel Mac, `linux-x64-gnu` on CI) — 2.1.0 exact — plan 02 §7.2 items 1–4 **passed** (research 01 §30, verdict Safe; provenance attested); item 5 (the runtime prompt count) is verified by `doctor` #7 (ADV OBJ-19(a)) [V-npm: no install script; 12 optional platform packages; `darwin-arm64` is one `.node` file] | OS keychain for the cookie (plan 01 D12) | `keytar` (archived 2022, `prebuild-install`/`node-gyp` at install [V-03 §C.4]); `security` CLI (macOS-only, argv on write) |
+| *(the whole runtime tree)* | **runtime tree: 6 packages** (as built 2026-10-05): the four above + `@modelcontextprotocol/core@2.2.0` + exactly one `@napi-rs/keyring-<platform>@2.1.0`; held exactly by `scripts/ci/runtime-allowlist.json` (`check:runtime-tree`, every depth) | `npm ls --depth=1` sees a transitive addition only at depth 1; the full-depth list sees all | — |
 
 Four direct runtime packages (six names with `core` and the platform package). Everything else is Node built-ins: `node:sqlite`, `fetch`, `node:crypto`, `node:zlib`, `node:util.parseArgs`, `node:fs/promises`, `node:child_process` (`execFile` with argument arrays only, for `osascript`, `lsof`, `launchctl`, `security`, `xattr`).
 

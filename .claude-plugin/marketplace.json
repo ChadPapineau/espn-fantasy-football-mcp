@@ -1,0 +1,19 @@
+{
+  "name": "espn-fantasy-football-mcp",
+  "owner": {
+    "name": "Chad Papineau",
+    "url": "https://github.com/ChadPapineau"
+  },
+  "metadata": {
+    "description": "The espn-fantasy-football plugin: this repository is its own marketplace."
+  },
+  "plugins": [
+    {
+      "name": "espn-fantasy-football",
+      "source": "./",
+      "description": "Format-aware fantasy-football analysis of your own ESPN league: a local, read-only MCP server plus decision Skills.",
+      "version": "0.0.0",
+      "license": "MIT"
+    }
+  ]
+}

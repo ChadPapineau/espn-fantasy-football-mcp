@@ -1,0 +1,26 @@
+{
+  "name": "espn-fantasy-football",
+  "version": "0.0.0",
+  "description": "Format-aware fantasy-football analysis of your own ESPN league: a local, read-only MCP server plus decision Skills.",
+  "author": {
+    "name": "Chad Papineau",
+    "url": "https://github.com/ChadPapineau"
+  },
+  "homepage": "https://github.com/ChadPapineau/espn-fantasy-football-mcp",
+  "repository": "https://github.com/ChadPapineau/espn-fantasy-football-mcp",
+  "license": "MIT",
+  "keywords": ["espn", "fantasy-football", "mcp", "read-only"],
+  "userConfig": {
+    "league_id": {
+      "type": "string",
+      "title": "ESPN league id",
+      "description": "The numeric leagueId from your ESPN league's URL. Kept in your Claude Code settings on this machine only."
+    },
+    "season": {
+      "type": "string",
+      "title": "Season",
+      "description": "The season year to read.",
+      "default": "2026"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+# .prettierignore — plan 04 §3. Ported from sibling @d72e03b, adapted. Markdown stays out of
+# prettier entirely (docs/**/*.md, README, SECURITY, CHANGELOG, the plan) so the adversarially
+# reviewed documents never churn from reformatting.
+*.md
+docs/**
+node_modules/
+dist/
+coverage/
+package-lock.json
+# Self-test fixtures are byte-exact on purpose (their checkers assert exact verdicts).
+scripts/ci/docs-check-selftest/
