@@ -34,6 +34,19 @@ export const RECLOG_TEXT_PATHS: readonly string[] = Object.freeze([
 ]);
 /** The provenance tag of every read-back free-text field. */
 export const RECLOG_UNTRUSTED_SOURCE = "store.recommendation_log";
+/**
+ * The model-authored text paths of `espn_analyze_retrospective` data (plan 07 E13, C15), relative to
+ * `data`: the tool path-lists them with source RECLOG_UNTRUSTED_SOURCE (`rec.action` there is the
+ * server's own text, not the log's).
+ */
+export const RETROSPECTIVE_TEXT_PATHS: readonly string[] = Object.freeze([
+  "calls[].recommended",
+  "calls[].best_alternative",
+]);
+/** The model-authored text paths of `espn_list_recommendations` data (plan 07 E14, C15). */
+export const RECOMMENDATION_LIST_TEXT_PATHS: readonly string[] = Object.freeze([
+  "items[].action_summary",
+]);
 
 /** Recommendation kinds (plan 07 E12 `kind`). */
 export const RECOMMENDATION_KINDS = [
