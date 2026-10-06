@@ -119,15 +119,86 @@ describe("the transition table (plan 02 §2.1)", () => {
 describe("observationEvent", () => {
   it.each([
     [{ kind: "rejected", by: "server" }, "cookie_rejected"],
-    [{ kind: "rejected", by: "setup" }, "cookie_rejected"],
+    // plan 02 §2.1: setup's own 401/403 deletes the value → not_configured, never `rejected`
+    [{ kind: "rejected", by: "setup" }, "setup_probe_rejected"],
     [{ kind: "rejected", by: "check_auth" }, "cookie_rejected"],
+    [{ kind: "rejected", by: "doctor" }, "cookie_rejected"],
+    [{ kind: "rejected", by: "daily_job" }, "cookie_rejected"],
     [{ kind: "accepted", by: "server" }, "cookie_accepted"],
     [{ kind: "accepted", by: "setup" }, "setup_probe_accepted"],
     [{ kind: "accepted", by: "doctor" }, "probe_accepted"],
     [{ kind: "accepted", by: "check_auth" }, "probe_accepted"],
     [{ kind: "accepted", by: "daily_job" }, "probe_accepted"],
+    [{ kind: "league_not_found", by: "setup" }, "setup_league_not_found"],
   ] as const)("%j → %s", (o, ev: CredentialEvent) => {
     expect(observationEvent(o)).toBe(ev);
+  });
+  it.each(["server", "doctor", "check_auth", "daily_job"] as const)(
+    "a 404 seen by %s is not a credential event (null — nothing recorded)",
+    (by) => {
+      expect(observationEvent({ kind: "league_not_found", by })).toBeNull();
+    },
+  );
+  it("property: every observation maps to a known event or null, never throws", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom<CredentialObservation["kind"]>("accepted", "rejected", "league_not_found"),
+        fc.constantFrom<CredentialObservation["by"]>(
+          "setup",
+          "server",
+          "doctor",
+          "check_auth",
+          "daily_job",
+        ),
+        (kind, by) => {
+          const ev = observationEvent({ kind, by });
+          return ev === null || (CREDENTIAL_EVENTS as readonly string[]).includes(ev);
+        },
+      ),
+    );
+  });
+});
+
+describe("the two setup failure paths (plan 02 §2.1 diagram; S2)", () => {
+  const stored = row("stored", {
+    last_rejected_at: T0,
+    rejected_since: T0,
+    rejected_view: "mSettings",
+    next_probe_at: T1,
+    board_probe_discriminates: true,
+  });
+  it.each([
+    ["setup probe 401/403", obs({ kind: "rejected", by: "setup", upstream_status: 401 })],
+    ["setup mSettings 404", obs({ kind: "league_not_found", by: "setup", upstream_status: 404 })],
+  ] as const)(
+    "%s → not_configured with every observation of the deleted value cleared",
+    (_n, o) => {
+      const out = applyObservation(stored, o);
+      expect(out).toEqual({
+        ...stored,
+        state: "not_configured",
+        stored_at: null,
+        last_accepted_at: null,
+        last_rejected_at: null,
+        rejected_since: null,
+        rejected_view: null,
+        next_probe_at: null,
+        board_probe_discriminates: null,
+        updated_at: T1,
+        updated_by: "setup",
+      });
+      // a not_configured row answers ESPN_REQUIRES_COOKIES, never ESPN_AUTH_REJECTED
+      expect(out.state).not.toBe("rejected");
+    },
+  );
+  it("a non-setup 404 leaves the row untouched (the identical object)", () => {
+    const v = row("validated");
+    expect(applyObservation(v, obs({ kind: "league_not_found", by: "check_auth" }))).toBe(v);
+    expect(applyObservation(v, obs({ kind: "league_not_found", by: "server" }))).toBe(v);
+  });
+  it("setup's rejection outside `stored` is not a transition (validated stays validated)", () => {
+    const v = row("validated");
+    expect(applyObservation(v, obs({ kind: "rejected", by: "setup" }))).toBe(v);
   });
 });
 

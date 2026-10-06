@@ -111,9 +111,15 @@ export interface ScoringSettings {
   readonly families: readonly BracketFamily[];
   readonly matchup: MatchupScoringRules;
   readonly rounding: { readonly mode: RoundingMode; readonly verified: boolean };
-  /** sha256 of canonical JSON of rules + families (order-independent), excluding `verified`. */
+  /**
+   * sha256 of canonical JSON of rules + families (order-independent), excluding `verified`, as 64
+   * LOWERCASE hex characters (SETTINGS_HASH_RE) — the engine emits it and E12 accepts only it.
+   */
   readonly settings_hash: string;
 }
+
+/** The one `settings_hash` encoding: sha256 as 64 lowercase hex chars (engine, A1, A5, B2, E12). */
+export const SETTINGS_HASH_RE = /^[0-9a-f]{64}$/;
 
 /** ESPN `statSourceId`: 0 actual, 1 projected (research 03 §B.2). */
 export type StatSourceId = 0 | 1;

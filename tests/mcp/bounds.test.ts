@@ -1,5 +1,5 @@
 // bounds.test.ts — src/mcp/bounds.ts (plan 02 §5 bounds: scoringPeriodId 0–22, a tool's week 1–18,
-// teamId 1–20, ≤ 25 ids, limit 1–100, offset 0–5 000, search ≤ 64; plan 07 legend PlayerSelector
+// teamId 1–999 (A-2 widened: a grammar bound, membership is the tool's), ≤ 25 ids, limit 1–100, offset 0–5 000, search ≤ 64; plan 07 legend PlayerSelector
 // with `pool`; E12's input schema; no league id argument). Adversarial: off-by-one at every bound,
 // duplicates, two selectors at once, hostile strings, unicode, oversized records.
 import fc from "fast-check";
@@ -8,6 +8,15 @@ import { describe, expect, it } from "vitest";
 import {
   ANALYTICS_CPU_DEADLINE_MS,
   BOUNDS,
+  NAME_SORT_OFFSET_REASON,
+  SETTINGS_HASH_RE,
+  assumeWeeksOutSchema,
+  nSimsSeasonSchema,
+  pfDeltaSchema,
+  pfWeightSchema,
+  positionsSchema,
+  recommendationKindsSchema,
+  sortOffsetAllowed,
   COOPERATIVE_BATCH_MS,
   MAX_LOOP_STALL_MS,
   N_SIMS_MAX,
@@ -55,7 +64,7 @@ describe("the bound table (plan 02 §5; changelog F61)", () => {
   it("states the plan's numbers", () => {
     expect(BOUNDS.scoringPeriod).toEqual({ min: 0, max: 22 });
     expect(BOUNDS.week).toEqual({ min: 1, max: 18 });
-    expect(BOUNDS.teamId).toEqual({ min: 1, max: 20 });
+    expect(BOUNDS.teamId).toEqual({ min: 1, max: 999 });
     expect(BOUNDS.limit).toEqual({ min: 1, max: 100, default: 25 });
     expect(BOUNDS.offset).toEqual({ min: 0, max: 5000, default: 0 });
     expect(BOUNDS.playerIds.max).toBe(25);
@@ -71,7 +80,7 @@ describe("the bound table (plan 02 §5; changelog F61)", () => {
     [weekSchema, 1, 18],
     [scoringPeriodSchema, 0, 22],
     [matchupPeriodSchema, 1, 17],
-    [teamIdSchema, 1, 20],
+    [teamIdSchema, 1, 999],
     [seedSchema, 0, 2 ** 31 - 1],
     [seasonSchema, 2018, 2100],
   ] as const)(
@@ -185,7 +194,8 @@ describe("PlayerSelector (plan 07 legend; T-11)", () => {
   it.each([
     [{}],
     [{ player_ids: [1], team_id: 3 }],
-    [{ team_id: 21 }],
+    [{ team_id: 1000 }],
+    [{ team_id: 0 }],
     [{ gsis_ids: ["00-0012345", "00-0012345"] }],
     [{ pool: { status: "ONTEAM", position: "QB", top: 5 } }],
     [{ pool: { status: "FREEAGENT", position: "QB", top: 51 } }],
@@ -206,6 +216,84 @@ describe("PlayerSelector (plan 07 legend; T-11)", () => {
       ok(outlookSelectorSchema, { player_ids: Array.from({ length: 13 }, (_, i) => i + 1) }),
     ).toBe(false);
     expect(ok(outlookSelectorSchema, { team_id: 1 })).toBe(true);
+  });
+});
+
+describe("CAT-14: the per-tool numeric inputs the plan names (E2, E3, E5, E7, E13)", () => {
+  it("every one has a bound row", () => {
+    expect(BOUNDS.pfWeight).toEqual({ min: 0, max: 1000 });
+    expect(BOUNDS.pfDelta).toEqual({ min: -500, max: 500 });
+    expect(BOUNDS.assumeWeeksOut).toEqual({ min: 0, max: 18 });
+    expect(BOUNDS.positions).toEqual({ min: 1, max: 8 });
+    expect(BOUNDS.kinds).toEqual({ min: 1, max: 14 });
+    expect(BOUNDS.nSimsSeason.default).toBe(10_000);
+    expect(BOUNDS.nSimsSeason.max).toBe(N_SIMS_MAX);
+  });
+  it("E3 season paths default to 10 000 (research 05 §2.4) under the same ceiling", () => {
+    expect(nSimsSeasonSchema.parse(undefined)).toBe(10_000);
+    expect(nSimsSchema.parse(undefined)).toBe(4000);
+    expect(ok(nSimsSeasonSchema, N_SIMS_MAX)).toBe(true);
+    expect(ok(nSimsSeasonSchema, N_SIMS_MAX + 1)).toBe(false);
+    expect(ok(nSimsSeasonSchema, 999)).toBe(false);
+  });
+  it.each([
+    [pfWeightSchema, [0, 0.5, 1000, null], [-0.001, 1000.5, Number.NaN, Infinity, "1"]],
+    [pfDeltaSchema, [-500, 0, 499.5, 500], [-500.5, 501, Number.NaN, -Infinity, null]],
+    [assumeWeeksOutSchema, [0, 18, null], [-1, 19, 2.5, Number.NaN, "3"]],
+  ] as const)(
+    "numeric bound %#: in-range in, out-of-range and non-numbers out",
+    (schema, good, bad) => {
+      for (const v of good) expect(ok(schema, v), String(v)).toBe(true);
+      for (const v of bad) expect(ok(schema, v), String(v)).toBe(false);
+    },
+  );
+  it("E5 positions[]: 1..8 distinct names in the position grammar", () => {
+    expect(ok(positionsSchema, ["K", "D/ST"])).toBe(true);
+    expect(ok(positionsSchema, [])).toBe(false);
+    expect(
+      ok(
+        positionsSchema,
+        Array.from({ length: 9 }, (_, i) => `P${String.fromCharCode(65 + i)}`),
+      ),
+    ).toBe(false);
+    expect(ok(positionsSchema, ["K", "K"])).toBe(false);
+    expect(ok(positionsSchema, ["K; DROP TABLE"])).toBe(false);
+    expect(ok(positionsSchema, ["ＱＢ"])).toBe(false);
+  });
+  it("E13 kinds[]: 1..14 distinct recommendation kinds", () => {
+    expect(ok(recommendationKindsSchema, ["lineup", "waiver"])).toBe(true);
+    expect(ok(recommendationKindsSchema, [])).toBe(false);
+    expect(ok(recommendationKindsSchema, ["lineup", "lineup"])).toBe(false);
+    expect(ok(recommendationKindsSchema, ["writes"])).toBe(false);
+  });
+  it("SETTINGS_HASH_RE: 64 lowercase hex — the one encoding E12 and the engine share", () => {
+    expect(SETTINGS_HASH_RE.test("a".repeat(64))).toBe(true);
+    for (const bad of [
+      "A".repeat(64),
+      "a".repeat(63),
+      "a".repeat(65),
+      "g".repeat(64),
+      `${"a".repeat(63)}\n`,
+    ])
+      expect(SETTINGS_HASH_RE.test(bad), JSON.stringify(bad)).toBe(false);
+  });
+});
+
+describe("CAT-06/M5: C2 sort → ESPN, and the one-page name sort", () => {
+  it("the enum is PLAYER_SORTS; only `name` refuses offset > 0", () => {
+    expect(playerSortSchema.options).toEqual([
+      "percOwned",
+      "percChanged",
+      "projection_week",
+      "projection_ros",
+      "draftRank",
+      "name",
+    ]);
+    for (const sort of playerSortSchema.options) {
+      expect(sortOffsetAllowed(sort, 0), sort).toBe(true);
+      expect(sortOffsetAllowed(sort, 25), sort).toBe(sort !== "name");
+    }
+    expect(NAME_SORT_OFFSET_REASON).toMatch(/^[a-z_]{1,40}$/);
   });
 });
 

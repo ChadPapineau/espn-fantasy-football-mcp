@@ -710,6 +710,7 @@ describe("stampToInput: the class basis decides state (plan 01 §5.4)", () => {
       provisional: true,
       cache: "hit",
       drift: { views: ["mRoster"], since: "2026-10-05T01:00:00Z", detail: "espn_get_status" },
+      degraded: null,
     };
     expect(stampToInput(p, NOW)).toMatchObject({
       state: "fresh",
@@ -891,10 +892,10 @@ describe("fitToBudget (20 000 chars; explicit truncation, never silent)", () => 
 describe("toToolResult (plan 01 §4.2)", () => {
   it("one text block with the same JSON; structuredContent only when asked", () => {
     const env = listEnv(1);
-    const s = toToolResult(env, true);
+    const s = toToolResult(env, { wireOutputSchema: true });
     expect(s.content[0].text).toBe(serializeEnvelope(env));
     expect(s.structuredContent).toEqual(JSON.parse(serializeEnvelope(env)));
-    expect("structuredContent" in toToolResult(env, false)).toBe(false);
+    expect("structuredContent" in toToolResult(env, { wireOutputSchema: false })).toBe(false);
   });
 });
 
@@ -989,10 +990,37 @@ describe("zod schemas: wrapper, meta, page, Dist, Rec", () => {
     expect(distSchema.safeParse({ ...dist, basis: "magic" }).success).toBe(false);
     expect(distSchema.safeParse({ ...dist, mean: Number.NaN }).success).toBe(false);
   });
-  it("playerIdSchema accepts ESPN ids and D/ST ids, nothing else", () => {
-    for (const ok of [1, 4_362_628, PLAYER_ID_MAX, -16_001, -16_034, -16_999])
+  it("playerIdSchema accepts ESPN person ids and team-unit ids (D/ST, TQB, HC), nothing else", () => {
+    for (const ok of [
+      1,
+      4_362_628,
+      PLAYER_ID_MAX,
+      -16_001,
+      -16_034,
+      -16_999,
+      // CAT-01: TQB ids −15000 − proTeamId are on the recorded league-a (slot 1)
+      -15_001,
+      -15_033,
+      -15_999,
+      -14_012,
+    ]) {
       expect(isEspnPlayerId(ok), String(ok)).toBe(true);
-    for (const bad of [0, -1, -15_999, -17_000, PLAYER_ID_MAX + 1, 1.5, Number.NaN]) {
+      expect(playerIdSchema.safeParse(ok).success, String(ok)).toBe(true);
+    }
+    for (const bad of [
+      0,
+      -1,
+      -15_000,
+      -16_000,
+      -14_000,
+      -13_999,
+      -17_000,
+      PLAYER_ID_MAX + 1,
+      1.5,
+      Number.NaN,
+      Infinity,
+      -Infinity,
+    ]) {
       expect(isEspnPlayerId(bad), String(bad)).toBe(false);
       expect(playerIdSchema.safeParse(bad).success).toBe(false);
     }

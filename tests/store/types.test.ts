@@ -1,8 +1,17 @@
 // types.test.ts — src/store/types.ts (plan 01 §5.1, §5.5, §9.2; plan 03 §1.1 step 3; plan 06 §1.3):
 // the version error (exit 1, no upstream text), the migration-001 table list and its consistency
 // with the write classes, the never-pruned list, the prune policy, and the attach ceiling.
-import { describe, expect, it } from "vitest";
+import fc from "fast-check";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { SourceErrorCode } from "../../src/config/freshness.js";
 import {
+  ESPN_REQUESTS_COLUMNS,
+  limiterDecision,
+  type CredentialStateRepository,
+  type CredentialStateRow,
+  type LimiterRepository,
+  type LimiterVerdict,
+  type RefreshLogRow,
   BUSY_TIMEOUT_MS,
   MAX_ON_DEMAND_ATTACHMENTS,
   MIGRATION_001_TABLES,
@@ -81,5 +90,106 @@ describe("connection constants", () => {
     expect(MAX_ON_DEMAND_ATTACHMENTS).toBe(8);
     expect(MAX_ON_DEMAND_ATTACHMENTS).toBeLessThan(SQLITE_ATTACH_LIMIT);
     expect(PUBLISH_ALREADY_CURRENT).toBe("already_current");
+  });
+});
+
+describe("B4: the limiter contract — one decision over every window and the daily cap", () => {
+  const T = Date.parse("2026-10-05T18:00:00Z");
+  const minute = { startMs: T - 60_000, max: 30 };
+  const second = { startMs: T - 1000, max: 1 };
+  it("records when every window has room and the cap is not reached", () => {
+    expect(
+      limiterDecision({
+        nowMs: T,
+        windows: [minute, second],
+        windowRows: [[], []],
+        dailyCap: null,
+      }),
+    ).toEqual({ ok: true });
+  });
+  it("a full minute window waits until its oldest row leaves the window", () => {
+    const rows = Array.from({ length: 30 }, (_, i) => T - 59_000 + i * 100);
+    expect(
+      limiterDecision({
+        nowMs: T,
+        windows: [minute, second],
+        windowRows: [rows, []],
+        dailyCap: null,
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "window",
+      retry_after_ms: 1000,
+    });
+  });
+  it("the per-second window refuses a second request inside 1 s", () => {
+    expect(
+      limiterDecision({
+        nowMs: T,
+        windows: [minute, second],
+        windowRows: [[T - 400], [T - 400]],
+        dailyCap: null,
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "window",
+      retry_after_ms: 600,
+    });
+  });
+  it("a full daily cap waits to the next day start; a window refusal takes precedence", () => {
+    const next = T + 6 * 3600 * 1000;
+    expect(
+      limiterDecision({
+        nowMs: T,
+        windows: [minute],
+        windowRows: [[]],
+        dailyCap: { max: 30, used: 30, nextDayStartMs: next },
+      }),
+    ).toEqual({ ok: false, reason: "daily_cap", retry_after_ms: 6 * 3600 * 1000 });
+    expect(
+      limiterDecision({
+        nowMs: T,
+        windows: [second],
+        windowRows: [[T - 10]],
+        dailyCap: { max: 30, used: 30, nextDayStartMs: next },
+      }),
+    ).toMatchObject({ ok: false, reason: "window" });
+    expect(
+      limiterDecision({
+        nowMs: T,
+        windows: [],
+        windowRows: [],
+        dailyCap: { max: 40, used: 39, nextDayStartMs: next },
+      }),
+    ).toEqual({ ok: true });
+  });
+  it("property: refused ⇔ some window is full or the cap is used up; the wait is ≥ 1 ms", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 35 }), fc.integer({ min: 0, max: 45 }), (n, used) => {
+        const rows = Array.from({ length: n }, (_, i) => T - 59_000 + i * 10);
+        const d = limiterDecision({
+          nowMs: T,
+          windows: [minute],
+          windowRows: [rows],
+          dailyCap: { max: 40, used, nextDayStartMs: T + 1000 },
+        });
+        const refuse = n >= 30 || used >= 40;
+        return d.ok === !refuse && (d.ok || d.retry_after_ms >= 1);
+      }),
+    );
+  });
+  it("espn_requests has the columns the caps, the breaker and the 304 count need (migration 001)", () => {
+    expect([...ESPN_REQUESTS_COLUMNS]).toEqual(["id", "ts", "keyless", "origin", "outcome"]);
+    expect(PRUNE_POLICY.espn_requests).toMatch(/48 hours/);
+  });
+});
+
+describe("M2: credential_state transitions serialise (type contract)", () => {
+  it("the repository exposes a read-modify-write `transition`", () => {
+    expectTypeOf<CredentialStateRepository["transition"]>()
+      .parameter(0)
+      .toEqualTypeOf<(row: CredentialStateRow | null) => CredentialStateRow | null>();
+    expectTypeOf<LimiterRepository["tryRecord"]>().returns.toEqualTypeOf<LimiterVerdict>();
+    expectTypeOf<RefreshLogRow["error"]>().toEqualTypeOf<SourceErrorCode | null>();
   });
 });

@@ -5,8 +5,13 @@
 // §1.1 busy_timeout 5000, §7 forward-only migrations with a VACUUM INTO backup; plan 06 §1.3 prune
 // and never-prune lists). The store implements the domain's repository ports and the store-side
 // ports below. Ported from sibling @d72e03b, adapted (ESPN tables; separate read-only connections).
-import type { DatasetSourceId } from "../config/freshness.js";
-import type { CredentialState, CredentialStoreKind, DriftStatus } from "../config/schema.js";
+import type { DatasetSourceId, SourceErrorCode } from "../config/freshness.js";
+import type {
+  CredentialState,
+  CredentialStoreKind,
+  DriftStatus,
+  RequestOutcome,
+} from "../config/schema.js";
 import type {
   BestEffortOutcome,
   DatasetReaders,
@@ -104,7 +109,8 @@ export const PRUNE_POLICY: Readonly<Partial<Record<StoreTable, string>>> = Objec
   points_cache: "bounded LRU",
   roster_snapshot: "older than 30 days",
   pool_snapshot: "older than 30 days",
-  espn_requests: "older than 10 minutes",
+  espn_requests:
+    "older than 48 hours (ESPN_REQUEST_ROW_TTL_MS: the daily caps and the breaker/304 counters read them)",
 });
 
 /** The write class of each table (schema_version is migration-only). */
@@ -220,8 +226,8 @@ export interface RefreshLogRow {
   readonly started_at: IsoInstant;
   readonly finished_at: IsoInstant;
   readonly ok: boolean;
-  /** Fixed-vocabulary error summary (never an upstream body). */
-  readonly error: string | null;
+  /** Fixed-vocabulary error code (never an upstream body). */
+  readonly error: SourceErrorCode | null;
   readonly checked_at: IsoInstant;
 }
 
@@ -267,14 +273,110 @@ export interface EspnCacheRepository {
   prune(before: IsoInstant): number;
 }
 
-/** espn_requests: the cross-process token bucket (plan 01 §6 — ≤ 30/min, rows pruned after 10 min). */
+/** Who sent an ESPN request: the MCP server, or a scheduled job (plan 06 caps count jobs only). */
+export type RequestOrigin = "server" | "job";
+
+/** The espn_requests columns (migration 001 — fixed now so day one needs no migration 002). */
+export const ESPN_REQUESTS_COLUMNS = ["id", "ts", "keyless", "origin", "outcome"] as const;
+
+/**
+ * One limiter check-and-record (plan 01 §6; plan 06 §1.4 + changelog V7): every window and the
+ * daily cap are checked and the row inserted in ONE `BEGIN IMMEDIATE`, so two processes cannot
+ * race past a cap. `windows` = the per-minute (ESPN_LIMITER.perMinute over 60 s) and per-second
+ * (ESPN_LIMITER.perSecond over 1 s) buckets; `dailyCap` = the job fleet's cap for this kind
+ * (ESPN_JOB_DAILY_CAPS), counted over JOB-origin rows of the same kind since `dayStart` — null for
+ * server-origin requests (the caps bind jobs only).
+ */
+export interface LimiterRequest {
+  readonly at: IsoInstant;
+  readonly keyless: boolean;
+  readonly origin: RequestOrigin;
+  readonly windows: readonly { readonly start: IsoInstant; readonly max: number }[];
+  readonly dailyCap: { readonly dayStart: IsoInstant; readonly max: number } | null;
+}
+
+/**
+ * The verdict: recorded (the row id, outcome `pending` until `recordOutcome`), or refused with the
+ * wait that frees a slot — `retry_after_ms` = (oldest row in the full window) + window − now, or
+ * the time to the next day start for a daily cap — which RATE_LIMITED's `retry_after_s` carries.
+ */
+export type LimiterVerdict =
+  | { readonly ok: true; readonly id: number }
+  | {
+      readonly ok: false;
+      readonly reason: "window" | "daily_cap";
+      readonly retry_after_ms: number;
+    };
+
+/** Today's requests by origin × kind (`eff status`, the job fleet, G1 `requests_today`). */
+export interface RequestCounts {
+  readonly server: { readonly cookie: number; readonly keyless: number };
+  readonly job: { readonly cookie: number; readonly keyless: number };
+}
+
+/**
+ * espn_requests: the cross-process token bucket (plan 01 §6) plus each request's outcome, from
+ * which any process derives the breaker (platform.ts `breakerFromOutcomes`) and the 304 count.
+ * Fail closed: a request whose row cannot be written is not sent (WRITE_CLASS `required`).
+ */
 export interface LimiterRepository {
-  /** Inserts a request row inside BEGIN IMMEDIATE iff fewer than `max` rows exist since `windowStart`. */
-  tryRecord(at: IsoInstant, windowStart: IsoInstant, max: number, keyless: boolean): boolean;
+  tryRecord(req: LimiterRequest): LimiterVerdict;
+  /** Sets the outcome of a recorded row once the request finished (retries keep the same row). */
+  recordOutcome(id: number, outcome: RequestOutcome): void;
   countSince(since: IsoInstant): number;
-  /** Requests today by kind, for the job fleet's two daily caps (plan 06; changelog V7). */
-  countToday(dayStart: IsoInstant): { readonly cookie: number; readonly keyless: number };
+  countToday(dayStart: IsoInstant): RequestCounts;
+  /** The newest outcomes, newest first (`breakerFromOutcomes` input), at most `limit`. */
+  recentOutcomes(
+    limit: number,
+  ): readonly { readonly at: IsoInstant; readonly outcome: RequestOutcome }[];
+  /** `not_modified` outcomes since `since` (G1 `etag_304_count`). */
+  count304Since(since: IsoInstant): number;
+  /** Deletes rows before `before` (ESPN_REQUEST_ROW_TTL_MS); returns rows removed. */
   prune(before: IsoInstant): number;
+}
+
+/**
+ * The limiter's pure decision over the rows already inside each window (what the store runs
+ * inside its BEGIN IMMEDIATE, and what tests check it against): refuse on the first full window
+ * (wait = oldest-in-window + window length − now), then on a full daily cap (wait = to `nextDayStart`).
+ * Times are epoch ms; `windowRows[i]` are the row times inside `windows[i]`, any order.
+ */
+export function limiterDecision(input: {
+  readonly nowMs: number;
+  readonly windows: readonly { readonly startMs: number; readonly max: number }[];
+  readonly windowRows: readonly (readonly number[])[];
+  readonly dailyCap: {
+    readonly max: number;
+    readonly used: number;
+    readonly nextDayStartMs: number;
+  } | null;
+}):
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly reason: "window" | "daily_cap";
+      readonly retry_after_ms: number;
+    } {
+  for (const [i, w] of input.windows.entries()) {
+    const rows = input.windowRows[i] ?? [];
+    if (rows.length >= w.max) {
+      const oldest = Math.min(...rows);
+      const length = input.nowMs - w.startMs;
+      return {
+        ok: false,
+        reason: "window",
+        retry_after_ms: Math.max(1, Math.ceil(oldest + length - input.nowMs)),
+      };
+    }
+  }
+  const cap = input.dailyCap;
+  if (cap !== null && cap.used >= cap.max)
+    return {
+      ok: false,
+      reason: "daily_cap",
+      retry_after_ms: Math.max(1, Math.ceil(cap.nextDayStartMs - input.nowMs)),
+    };
+  return { ok: true };
 }
 
 /** Who recorded a credential observation. */
@@ -305,7 +407,18 @@ export interface CredentialStateRow {
 /** credential_state (required; one row — single-league posture). */
 export interface CredentialStateRepository {
   get(): CredentialStateRow | null;
+  /** Setup's first write only; every later change goes through `transition`. */
   put(row: CredentialStateRow): void;
+  /**
+   * Read-modify-write under ONE `BEGIN IMMEDIATE` (plan 02 §2.1: the state is recorded by whichever
+   * process observes): `fn` gets the CURRENT row and returns the next (null = delete), so a
+   * concurrent `validated` from the daily job and a `rejected` from the server serialise instead of
+   * overwriting each other. src/auth/state.ts applies every observation through it
+   * (`row => row && applyObservation(row, o)`). Returns the row written.
+   */
+  transition(
+    fn: (row: CredentialStateRow | null) => CredentialStateRow | null,
+  ): CredentialStateRow | null;
   /** `eff setup --reset`, `eff uninstall`, a setup that deleted the value. */
   clear(): void;
 }

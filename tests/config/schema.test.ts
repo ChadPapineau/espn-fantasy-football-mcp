@@ -224,11 +224,13 @@ describe("season, team, enums, port", () => {
         ?.key,
     ).toBe("ESPN_SEASON");
   });
-  it("bounds ESPN_TEAM_ID 1..20 and EFF_SETUP_PORT 1024..65535", () => {
-    expect(loadConfig(input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_TEAM_ID: "20" } })).teamId).toBe(
-      20,
-    );
-    for (const bad of ["0", "21", "-1", "x", "1.5", "9999999"])
+  it("bounds ESPN_TEAM_ID 1..999 (a grammar bound, A-2 widened) and EFF_SETUP_PORT 1024..65535", () => {
+    // recorded leagues use non-contiguous ids above the team count; a churned league can pass 20
+    for (const ok of ["1", "16", "21", "57", "999"])
+      expect(loadConfig(input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_TEAM_ID: ok } })).teamId).toBe(
+        Number(ok),
+      );
+    for (const bad of ["0", "1000", "-1", "x", "1.5", "9999999", "1e2", "0x10", "+5"])
       expect(
         issuesOf(() => loadConfig(input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_TEAM_ID: bad } })))[0]
           ?.key,

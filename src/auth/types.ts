@@ -140,9 +140,13 @@ export type CookieHeaderResult =
   | { readonly ok: true; readonly header: CookieHeader }
   | { readonly ok: false; readonly reason: CookieUnavailable };
 
-/** A credential observation to record (plan 02 §2.1: only discriminating observations count). */
+/**
+ * A credential observation to record (plan 02 §2.1: only discriminating observations count).
+ * `league_not_found` is setup-only (mSettings 404: the league id is wrong — not a credential
+ * verdict); any other observer's 404 is never recorded (plan 07 G2: ESPN_LEAGUE_NOT_FOUND).
+ */
 export interface CredentialObservation {
-  readonly kind: "accepted" | "rejected";
+  readonly kind: "accepted" | "rejected" | "league_not_found";
   readonly at: string;
   readonly by: CredentialObserver;
   readonly upstream_status: number | null;
@@ -235,24 +239,52 @@ export function nextCredentialState(
   return CREDENTIAL_TRANSITIONS[state][event] ?? null;
 }
 
-/** The event an observation is: an ordinary request (server) vs a probe (setup, doctor, tool, job). */
-export function observationEvent(o: Pick<CredentialObservation, "kind" | "by">): CredentialEvent {
-  if (o.kind === "rejected") return "cookie_rejected";
+/**
+ * The event an observation is: an ordinary request (server) vs a probe (setup, doctor, tool, job).
+ * Setup's own probe is special (plan 02 §2.1 diagram): its 401/403 deletes the value
+ * (`setup_probe_rejected` → not_configured) and its mSettings 404 means a wrong league id
+ * (`setup_league_not_found` → not_configured). A `league_not_found` from anyone but setup is not
+ * an event at all (null — the caller records nothing).
+ */
+export function observationEvent(
+  o: Pick<CredentialObservation, "kind" | "by">,
+): CredentialEvent | null {
+  if (o.kind === "league_not_found") return o.by === "setup" ? "setup_league_not_found" : null;
+  if (o.kind === "rejected") return o.by === "setup" ? "setup_probe_rejected" : "cookie_rejected";
   if (o.by === "server") return "cookie_accepted";
   return o.by === "setup" ? "setup_probe_accepted" : "probe_accepted";
 }
 
 /**
- * The row after an observation (pure; the store writes it). An observation that is not a
- * transition from the row's state leaves the row unchanged — e.g. no acceptance is recorded while
- * `rejected` except by a probe (the short-circuit makes ordinary calls impossible there).
+ * The row after an observation (pure; the store writes it through
+ * `CredentialStateRepository.transition`). An observation that is not a transition from the row's
+ * state leaves the row unchanged — e.g. no acceptance is recorded while `rejected` except by a
+ * probe (the short-circuit makes ordinary calls impossible there). A transition to
+ * `not_configured` (setup's rejected probe or wrong league — the value was deleted) clears every
+ * observation of the deleted value: `stored_at`, `last_*`, `rejected_*`, `next_probe_at`.
  */
 export function applyObservation(
   row: CredentialStateRow,
   o: CredentialObservation,
 ): CredentialStateRow {
-  const next = nextCredentialState(row.state, observationEvent(o));
+  const event = observationEvent(o);
+  const next = event === null ? null : nextCredentialState(row.state, event);
   if (next === null) return row;
+  if (next === "not_configured") {
+    return {
+      ...row,
+      state: next,
+      stored_at: null,
+      last_accepted_at: null,
+      last_rejected_at: null,
+      rejected_since: null,
+      rejected_view: null,
+      next_probe_at: null,
+      board_probe_discriminates: null,
+      updated_at: o.at,
+      updated_by: o.by,
+    };
+  }
   if (o.kind === "accepted") {
     return {
       ...row,

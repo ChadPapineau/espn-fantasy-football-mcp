@@ -8,13 +8,14 @@
 import { z } from "zod/v4";
 import { GSIS_ID_RE, SEASON_MIN, TEAM_ID_MAX, TEAM_ID_MIN, isNflTeam } from "../config/schema.js";
 import { ESPN_TO_NFLVERSE_TEAM } from "../domain/crosswalk/types.js";
+import { SETTINGS_HASH_RE } from "../domain/scoring/types.js";
 import {
   CLIENT_REF_RE,
   LOG_ID_RE,
   RECOMMENDATION_KINDS,
   TOOL_NAME_RE,
 } from "../domain/reclog/types.js";
-import { ESPN_PRO_TEAM_ABBREVS } from "../providers/platform.js";
+import { ESPN_PRO_TEAM_ABBREVS, PLAYER_SORTS, PLAYER_SORT_MAP } from "../providers/platform.js";
 import {
   INVALID_ID_MESSAGE,
   PRINTABLE_RE,
@@ -25,7 +26,14 @@ import {
   recSchema,
 } from "./envelope.js";
 
-export { INVALID_ID_MESSAGE, PRINTABLE_RE, REQUEST_ID_RE, boundedTextSchema, playerIdSchema };
+export {
+  INVALID_ID_MESSAGE,
+  PRINTABLE_RE,
+  REQUEST_ID_RE,
+  SETTINGS_HASH_RE,
+  boundedTextSchema,
+  playerIdSchema,
+};
 
 // --- constants ------------------------------------------------------------------------------------
 
@@ -53,6 +61,8 @@ export const BOUNDS = Object.freeze({
   newsLimit: { min: 1, max: 50, default: 20 },
   sinceDays: { min: 1, max: 30, default: 7 },
   nSims: { min: 1000, max: 20_000, default: 4000 },
+  /** E3 `season`: the seeding simulator wants ≥ 10 000 paths (research 05 §2.4); same ceiling. */
+  nSimsSeason: { min: 1000, max: 20_000, default: 10_000 },
   seed: { min: 0, max: 2 ** 31 - 1 },
   blendWeight: { min: 0, max: 1 },
   compareSwaps: { max: 5 },
@@ -70,6 +80,16 @@ export const BOUNDS = Object.freeze({
   recNoteChars: 200,
   recordInputChars: 20_000,
   minN: { min: 1, max: 10_000, default: 30 },
+  /** E2 `pf_weight` (points-for weight in the blend objective; null = derived). */
+  pfWeight: { min: 0, max: 1000 },
+  /** E3 `scenarios[].pf_delta` (points added to a team's season PF). */
+  pfDelta: { min: -500, max: 500 },
+  /** E7 `assume_weeks_out` (null = from the report). */
+  assumeWeeksOut: { min: 0, max: 18 },
+  /** E5 `positions[]` length (positions validated against the league's own slots). */
+  positions: { min: 1, max: 8 },
+  /** E13 `kinds[]` length (the recommendation kinds). */
+  kinds: { min: 1, max: 14 },
 });
 
 /** The per-call CPU deadline of the samplers (plan 07 E1 A-7; plan 01 §1.1 cooperative batches). */
@@ -90,7 +110,7 @@ export const scoringPeriodSchema = int(BOUNDS.scoringPeriod.min, BOUNDS.scoringP
 export const weekSchema = int(BOUNDS.week.min, BOUNDS.week.max);
 /** `matchup_period` 1..17. */
 export const matchupPeriodSchema = int(BOUNDS.matchupPeriod.min, BOUNDS.matchupPeriod.max);
-/** `team_id` 1..20 (omitted = my team). */
+/** `team_id` 1..999 — a grammar bound; the tool checks membership against the league's `teams[].id` (→ NOT_FOUND). Omitted = my team. */
 export const teamIdSchema = int(BOUNDS.teamId.min, BOUNDS.teamId.max);
 /** A season with a static bound 2018..2100 — prefer `seasonSchemaFor(currentSeason)`. */
 export const seasonSchema = int(BOUNDS.season.min, BOUNDS.season.max);
@@ -197,8 +217,37 @@ export const logIdSchema = z.string().max(30).regex(LOG_ID_RE, { message: INVALI
 export const requestIdSchema = z.string().regex(REQUEST_ID_RE, { message: INVALID_ID_MESSAGE });
 /** E1/E3 `seed`. */
 export const seedSchema = int(BOUNDS.seed.min, BOUNDS.seed.max);
-/** E1/E3 `n_sims`. */
+/** E1/E3 (`pre`/`live`) `n_sims`. */
 export const nSimsSchema = int(BOUNDS.nSims.min, N_SIMS_MAX).default(BOUNDS.nSims.default);
+/** E3 `season` `n_sims`: the same ceiling, default 10 000 paths (research 05 §2.4). */
+export const nSimsSeasonSchema = int(BOUNDS.nSimsSeason.min, N_SIMS_MAX).default(
+  BOUNDS.nSimsSeason.default,
+);
+/** E2 `pf_weight`: 0..1000 or null (null/omitted = derived from the season simulator). */
+export const pfWeightSchema = z
+  .number()
+  .min(BOUNDS.pfWeight.min)
+  .max(BOUNDS.pfWeight.max)
+  .nullable();
+/** E3 `scenarios[].pf_delta`. */
+export const pfDeltaSchema = z.number().min(BOUNDS.pfDelta.min).max(BOUNDS.pfDelta.max);
+/** E7 `assume_weeks_out`: 0..18 or null. */
+export const assumeWeeksOutSchema = int(
+  BOUNDS.assumeWeeksOut.min,
+  BOUNDS.assumeWeeksOut.max,
+).nullable();
+/** E5 `positions[]`: 1..8 distinct position names (validated against the league's slots by the tool). */
+export const positionsSchema = z
+  .array(positionSchema)
+  .min(BOUNDS.positions.min)
+  .max(BOUNDS.positions.max)
+  .refine((a) => new Set(a).size === a.length, { message: "duplicate_positions" });
+/** E13 `kinds[]`: 1..14 distinct recommendation kinds. */
+export const recommendationKindsSchema = z
+  .array(z.enum(RECOMMENDATION_KINDS))
+  .min(BOUNDS.kinds.min)
+  .max(BOUNDS.kinds.max)
+  .refine((a) => new Set(a).size === a.length, { message: "duplicate_kinds" });
 /** A6 `count`. */
 export const txnCountSchema = int(BOUNDS.txnCount.min, BOUNDS.txnCount.max).default(
   BOUNDS.txnCount.default,
@@ -208,15 +257,21 @@ export const txnCountSchema = int(BOUNDS.txnCount.min, BOUNDS.txnCount.max).defa
 
 /** C2 `status`. */
 export const playerStatusSchema = z.enum(["FREEAGENT", "WAIVERS", "AVAILABLE", "ONTEAM", "ALL"]);
-/** C2 `sort`. */
-export const playerSortSchema = z.enum([
-  "percOwned",
-  "percChanged",
-  "projection_week",
-  "projection_ros",
-  "draftRank",
-  "name",
-]);
+/** C2 `sort` (PLAYER_SORT_MAP says how each becomes an ESPN sort; `name` sorts one page only). */
+export const playerSortSchema = z.enum(PLAYER_SORTS);
+/** The fixed reason a `sort: "name"` call with `offset > 0` is refused (VALIDATION). */
+export const NAME_SORT_OFFSET_REASON = "name_sort_single_page";
+/**
+ * Whether a C2 sort/offset pair is servable: a sort whose PLAYER_SORT_MAP entry has
+ * `offset_allowed: false` (only `name`) is refused past the first page — a client-side re-sort
+ * cannot be paged by offset (plan 07 C2).
+ */
+export function sortOffsetAllowed(
+  sort: z.output<typeof playerSortSchema>,
+  offset: number,
+): boolean {
+  return offset === 0 || PLAYER_SORT_MAP[sort].offset_allowed;
+}
 /** A6 `types`. */
 export const transactionTypesSchema = z
   .array(
@@ -293,7 +348,7 @@ export const recordRecommendationInputSchema = z
     rec: recSchema,
     alternatives: z.array(alternativeSchema).max(RECORD_LIMITS.alternatives).default([]),
     source_calls: z.array(sourceCallSchema).max(RECORD_LIMITS.sourceCalls).default([]),
-    settings_hash: z.string().regex(/^[0-9a-f]{64}$/),
+    settings_hash: z.string().regex(SETTINGS_HASH_RE),
     seeding_mode_used: z.enum(["espn_rule", "points_only", "both"]).optional(),
     followed_hint: z.enum(["unknown", "user_said_yes", "user_said_no"]).default("unknown"),
     client_ref: clientRefSchema.optional(),

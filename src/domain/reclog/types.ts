@@ -7,7 +7,7 @@
 // beside the immutable log row (sib critic C-02b). Ported from sibling @d72e03b, adapted.
 import type { SeedingMode } from "../../config/schema.js";
 import type { InputFreshness, Rec, RecSubject } from "../analytics/types.js";
-import type { IsoInstant, Week } from "../league/types.js";
+import type { BareText, IsoInstant, Week } from "../league/types.js";
 import type { Dist } from "../scoring/types.js";
 
 /** `log_id` grammar: `rec-` + a 26-char Crockford-base32 ULID. */
@@ -101,6 +101,19 @@ export interface RecommendationRecord extends RecordRecommendationInput {
   readonly recorded_at: IsoInstant;
 }
 
+/**
+ * The read-back form of a record (`espn-ff://rec/{log_id}`): the stored row WITHOUT `league_id`
+ * (plan 07 §4.1: the league id is never emitted; CLAUDE.md). Readers path-list RECLOG_TEXT_PATHS.
+ */
+export type RecommendationRecordView = Omit<RecommendationRecord, "league_id">;
+
+/** Strips `league_id` at RUN time (an `Omit` alone would still serialise the key). */
+export function toRecordView(record: RecommendationRecord): RecommendationRecordView {
+  const view: Partial<RecommendationRecord> = { ...record };
+  delete view.league_id;
+  return view as RecommendationRecordView;
+}
+
 /** `espn_record_recommendation` output (plan 07 E12). */
 export interface RecordResult {
   readonly log_id: string;
@@ -159,8 +172,8 @@ export interface RecommendationListItem {
   readonly kind: RecommendationKind;
   readonly week: Week;
   readonly recorded_at: IsoInstant;
-  /** Model-authored summary (untrusted on read). */
-  readonly action_summary: string;
+  /** Model-authored summary, sanitised and capped on read (BareText; path-listed — C15). */
+  readonly action_summary: BareText;
   readonly followed: boolean | null;
 }
 
@@ -217,10 +230,10 @@ export interface RetrospectiveCall {
   readonly followed: boolean | null;
   readonly regret: number | null;
   readonly decisive: boolean | null;
-  /** Model-authored (path-listed, source `store.recommendation_log`). */
-  readonly recommended: string;
-  /** Model-authored (path-listed). */
-  readonly best_alternative: string | null;
+  /** Model-authored, sanitised on read (BareText; path-listed, source `store.recommendation_log`). */
+  readonly recommended: BareText;
+  /** Model-authored, sanitised on read (BareText; path-listed). */
+  readonly best_alternative: BareText | null;
   readonly realised: number | null;
 }
 

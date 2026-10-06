@@ -271,12 +271,71 @@ const FLAG_RES: readonly (readonly [InjectionFlag, RegExp])[] = [
   ["json_like", /^\s*[{[]/],
 ];
 
-/** The injection flags of an already-sanitised text, in INJECTION_FLAGS order. */
+/**
+ * A small confusables fold: Cyrillic and Greek letters that render like Latin ones (a stylised
+ * team name can spell "ignore" with Cyrillic о/е). Applied only to the copy the flags are
+ * evaluated on — the wrapped `value` stays NFC.
+ */
+const CONFUSABLES: Readonly<Record<string, string>> = Object.freeze({
+  а: "a",
+  в: "b",
+  е: "e",
+  ё: "e",
+  к: "k",
+  м: "m",
+  н: "h",
+  о: "o",
+  р: "p",
+  с: "c",
+  т: "t",
+  у: "y",
+  х: "x",
+  і: "i",
+  ї: "i",
+  ј: "j",
+  ѕ: "s",
+  ԁ: "d",
+  ԛ: "q",
+  ԝ: "w",
+  ɡ: "g",
+  ı: "i",
+  α: "a",
+  β: "b",
+  ε: "e",
+  η: "n",
+  ι: "i",
+  κ: "k",
+  ν: "v",
+  ο: "o",
+  ρ: "p",
+  τ: "t",
+  υ: "u",
+  χ: "x",
+});
+const CONFUSABLE_RE = new RegExp(`[${Object.keys(CONFUSABLES).join("")}]`, "gu");
+
+/**
+ * The copy the flag regexes see: NFKC (fullwidth `ｉｇｎｏｒｅ`, mathematical alphanumerics `𝐢𝐠𝐧𝐨𝐫𝐞`,
+ * ligatures and compatibility forms fold to ASCII), lower-cased, confusables folded, any mark left
+ * by decomposition removed, whitespace collapsed (plan 07 C4/C14, M8).
+ */
+export function flagFold(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(CONFUSABLE_RE, (c) => CONFUSABLES[c] ?? c)
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .replace(/\s+/gu, " ");
+}
+
+/** The injection flags of an already-sanitised text, in INJECTION_FLAGS order (on `flagFold`). */
 export function injectionFlags(text: string): InjectionFlag[] {
+  const folded = flagFold(text);
   const out: InjectionFlag[] = [];
   for (const f of INJECTION_FLAGS) {
     const re = FLAG_RES.find(([name]) => name === f)?.[1];
-    if (re?.test(text) === true) out.push(f);
+    if (re?.test(folded) === true || re?.test(text) === true) out.push(f);
   }
   return out;
 }
@@ -339,7 +398,7 @@ export interface LeagueRef {
   readonly season: number;
 }
 
-/** A team reference. `team_id` is ESPN's team id (plan 02 §5: 1..20). */
+/** A team reference. `team_id` is ESPN's team id (a 1..999 grammar bound; membership checked against `teams[].id`). */
 export interface TeamRef {
   readonly league: LeagueRef;
   readonly team_id: number;
@@ -347,8 +406,9 @@ export interface TeamRef {
 
 /**
  * A player reference (plan 01 §9): the only cross-platform identity is `gsis_id` via the crosswalk.
- * `id` is ESPN's player id — D/ST entries carry negative ids (−16000 − proTeamId) [A: verify on the
- * first recorded fixture].
+ * `id` is ESPN's player id — team units carry negative ids `base − proTeamId`: D/ST −16000 and TQB
+ * −15000 (both verified on the recorded fixtures), HC −14000 [A] (src/providers/espn/types.ts
+ * ESPN_TEAM_UNIT_ID_RANGES). A team unit has no gsis id.
  */
 export interface PlayerRef {
   readonly platform: "espn";
@@ -367,6 +427,26 @@ export interface DriftMeta {
   readonly detail: "espn_get_status";
 }
 
+/** The codes a stale-cache answer carries into `warnings[]` (plan 01 §4.3, §5.7, §7). */
+export const DEGRADED_CODES = [
+  "ESPN_UPSTREAM_UNAVAILABLE",
+  "ESPN_HOST_MOVED",
+  "RATE_LIMITED",
+] as const;
+export type DegradedCode = (typeof DEGRADED_CODES)[number];
+
+/**
+ * Why a read was served from stale cache instead of failing (plan 01 §4.3 "stale cache within the
+ * hard limit is returned as data with this code in warnings"): the tool copies `code` into
+ * `warnings[]` (platform.ts `degradedWarning`). With NO usable cache the provider throws an Error
+ * whose `effCode` is the code instead. While `ESPN_HOST_MOVED`, the hard limit is suspended.
+ */
+export interface DegradedRead {
+  readonly code: DegradedCode;
+  readonly served: "stale_cache";
+  readonly hard_limit_suspended: boolean;
+}
+
 /**
  * Provenance of one platform read: enough for a tool to build its envelope without knowing the
  * provider. `source` is `espn:<view>` (or `espn:projection`); `as_of` is `x-fantasy-server-time`.
@@ -379,6 +459,8 @@ export interface PlatformStamp {
   readonly provisional: boolean;
   readonly cache: CacheOutcome;
   readonly drift: DriftMeta | null;
+  /** Non-null exactly when the read was answered from stale cache because ESPN failed. */
+  readonly degraded: DegradedRead | null;
 }
 
 /** A platform value with its provenance: what every seam read resolves to. */
@@ -470,26 +552,102 @@ export interface RosterSlots {
 /** The waiver system (plan 07 G1 `capabilities.waiver_system`). */
 export type WaiverSystem = "faab" | "priority_move_to_last" | "continuous" | "unknown";
 
-/** Waiver and acquisition rules — ESPN's own enums as strings where unverified (plan 01 §9). */
+/**
+ * Waiver and acquisition rules — ESPN's own enums as strings where unverified (plan 01 §9).
+ * Normalised by the helpers below; the recorded public leagues (research 03 §B.1, fixtures/espn/
+ * recorded) ground every rule: a FAAB league on `WAIVERS_CONTINUOUS`, a FAAB league and a rolling
+ * no-budget league on `WAIVERS_TRADITIONAL`.
+ */
 export interface WaiverRules {
-  /** `acquisitionType` (`WAIVERS_CONTINUOUS`; the non-FAAB value is [U]). */
+  /** `acquisitionType`: `WAIVERS_CONTINUOUS` or `WAIVERS_TRADITIONAL` observed; others kept as-is. */
   readonly type: string;
   readonly uses_budget: boolean | null;
+  /** FAAB budget — null unless `uses_budget` is true (a no-budget league still sends a number). */
   readonly budget: number | null;
   readonly min_bid: number | null;
   readonly waiver_hours: number | null;
+  /** `waiverProcessDays[]` — may be EMPTY (the recorded rolling league sends `[]`). */
   readonly process_days: readonly string[];
   /** `waiverProcessHour` — interpreted as ET, a fallback only (plan 06 §2; ADV OBJ-16). */
   readonly process_hour: number | null;
-  /** `waiverOrderReset` — meaning [U]. */
+  /** `waiverOrderReset` — false on the recorded rolling league, true on both FAAB leagues. */
   readonly order_reset: boolean | null;
   readonly next_execution: IsoInstant | null;
   readonly last_execution: IsoInstant | null;
-  /** null = unlimited (ESPN −1). */
+  /** Season acquisitions cap; null = unlimited (ESPN −1). */
   readonly acquisition_limit: number | null;
+  /**
+   * Per-matchup acquisitions cap; null = unlimited. ESPN sends 0 for "no limit" (every recorded
+   * league has 0 while teams made up to 4 adds in one matchup), and −1 elsewhere — both read null,
+   * so `adds_remaining` (E5, E9) is null, never 0, on such a league.
+   */
   readonly matchup_acquisition_limit: number | null;
+  /** `matchupLimitPerScoringPeriod`: the cap counts per scoring period (true) or per matchup [U]. */
+  readonly matchup_limit_per_period: boolean | null;
   /** Field names whose meaning is unverified (plan 07 A1 clean negative). */
   readonly unverified: readonly string[];
+}
+
+/** The raw acquisition settings the waiver normaliser reads (wire values, already type-checked). */
+export interface AcquisitionSettingsInput {
+  readonly acquisition_type: string | null;
+  readonly uses_budget: boolean | null;
+  readonly budget: number | null;
+  readonly order_reset: boolean | null;
+  readonly acquisition_limit: number | null;
+  readonly matchup_acquisition_limit: number | null;
+}
+
+/** A season cap: −1 (and any negative) = unlimited → null; a finite non-negative integer is kept. */
+export function normaliseAcquisitionLimit(raw: number | null): number | null {
+  return raw === null || !Number.isInteger(raw) || raw < 0 ? null : raw;
+}
+
+/** A per-matchup cap: ≤ 0 = unlimited → null (ESPN sends 0 for "no limit" — recorded evidence). */
+export function normaliseMatchupAcquisitionLimit(raw: number | null): number | null {
+  return raw === null || !Number.isInteger(raw) || raw <= 0 ? null : raw;
+}
+
+/** The FAAB budget, or null unless the league uses one. */
+export function normaliseAcquisitionBudget(
+  usesBudget: boolean | null,
+  budget: number | null,
+): number | null {
+  return usesBudget === true && budget !== null && Number.isFinite(budget) && budget >= 0
+    ? budget
+    : null;
+}
+
+/**
+ * The waiver system (plan 07 G1 `capabilities.waiver_system`), conservatively: a budget → `faab`;
+ * no budget on `WAIVERS_TRADITIONAL` without a weekly reset → `priority_move_to_last` (the recorded
+ * rolling league); no budget on `WAIVERS_CONTINUOUS` → `continuous`; anything else (an unknown
+ * type, a reset no-budget league, a null field) → `unknown`, never a guess.
+ */
+export function waiverSystemOf(a: AcquisitionSettingsInput): WaiverSystem {
+  if (a.uses_budget === true) return "faab";
+  if (a.uses_budget !== false) return "unknown";
+  if (a.acquisition_type === "WAIVERS_TRADITIONAL" && a.order_reset === false)
+    return "priority_move_to_last";
+  if (a.acquisition_type === "WAIVERS_CONTINUOUS") return "continuous";
+  return "unknown";
+}
+
+/** The conservative predicates of LeagueRules: unknown → null. */
+export function waiverPredicatesOf(system: WaiverSystem): {
+  readonly has_faab: boolean | null;
+  readonly is_move_to_last: boolean | null;
+} {
+  switch (system) {
+    case "faab":
+      return { has_faab: true, is_move_to_last: false };
+    case "priority_move_to_last":
+      return { has_faab: false, is_move_to_last: true };
+    case "continuous":
+      return { has_faab: false, is_move_to_last: null };
+    default:
+      return { has_faab: null, is_move_to_last: null };
+  }
 }
 
 /** Trade rules (plan 07 A1 `rules.trade`). */
@@ -1154,6 +1312,72 @@ export interface RosterData {
   };
 }
 
+/** Where a B2 split came from (plan 07 B2 incl. its degradation). */
+export type StatSplitSource = "actual" | "projected" | "nflverse";
+export const STAT_SPLIT_SOURCES: readonly StatSplitSource[] = Object.freeze([
+  "actual",
+  "projected",
+  "nflverse",
+]);
+
+/**
+ * Whether a B2 split is internally consistent: an `nflverse` split never carries an ESPN number
+ * or a golden verdict (`points_espn` and `match` null); `match` is non-null only when both the
+ * ESPN and the engine number exist.
+ */
+export function isConsistentStatSplit(s: {
+  readonly source: StatSplitSource;
+  readonly points_espn: number | null;
+  readonly engine_points: number | null;
+  readonly match: boolean | null;
+}): boolean {
+  if (s.source === "nflverse") return s.points_espn === null && s.match === null;
+  return s.match === null || (s.points_espn !== null && s.engine_points !== null);
+}
+
+/**
+ * B1 `all: true` (every team's roster from the same single mRoster request): the documented
+ * compact field set per player — the facts a rival-roster read needs, nothing per-player-heavy.
+ */
+export const ROSTER_ALL_PLAYER_FIELDS = [
+  "player_id",
+  "name",
+  "position",
+  "pro_team",
+  "slot",
+  "slot_class",
+  "lineup_locked",
+  "injury_status",
+  "projection_week_espn",
+] as const;
+export type RosterAllPlayerRow = Pick<RosterPlayerRow, (typeof ROSTER_ALL_PLAYER_FIELDS)[number]>;
+
+/** One team inside B1 `all: true`. */
+export interface RosterSummary {
+  readonly team_id: number;
+  readonly name: UntrustedText;
+  readonly is_mine: boolean;
+  readonly players: readonly RosterAllPlayerRow[];
+  /** The IR audit's verdict only (`ir.invalid`) — the full section is the single-team read. */
+  readonly ir_invalid: boolean;
+  readonly counts: RosterData["counts"];
+}
+
+/** The array `fitToBudget` halves for B1 `all: true` (ten compact rosters can exceed 20 000 chars). */
+export const ROSTER_ALL_LIST_KEY = "rosters";
+
+/**
+ * `espn_get_roster` data (plan 07 B1), discriminated on `scope`: one team in full, or — with
+ * `all: true` — every team in the compact form (one outputSchema for both inputs).
+ */
+export type RosterToolData =
+  | (RosterData & { readonly scope: "team" })
+  | {
+      readonly scope: "all";
+      readonly week: Week;
+      readonly rosters: readonly RosterSummary[];
+    };
+
 /** `espn_get_player_stats` data (plan 07 B2). */
 export interface PlayerStatsData {
   readonly players: readonly {
@@ -1164,7 +1388,11 @@ export interface PlayerStatsData {
     readonly splits: readonly {
       readonly season: number;
       readonly week: Week | null;
-      readonly source: "actual" | "projected";
+      /**
+       * `nflverse`: B2's degradation when `kona_playercard` drifts — nflverse lines scored by the
+       * engine, with `points_espn: null` and `match: null` (there is no ESPN number to match).
+       */
+      readonly source: StatSplitSource;
       readonly points_espn: number | null;
       readonly engine_points: number | null;
       readonly match: boolean | null;
@@ -1276,15 +1504,37 @@ export interface LeagueSettingsRow {
   readonly fetched_at: IsoInstant;
 }
 
+/** The health checks (plan 07 G1 `checks[].id`; plan 03 §5 #21–#23; plan 06 §1.4 T-08). */
+export const CHECK_IDS = [
+  "scoring_mismatch",
+  "settings_changed",
+  "ir_invalid",
+  "stale_credential",
+  "drift",
+] as const;
+export type CheckId = (typeof CHECK_IDS)[number];
+
+/**
+ * Who may acknowledge a check — a human act in a terminal, never a model-callable tool (an
+ * acknowledgement the model could make would let injected text silence a health check):
+ * `eff doctor --ack <check>`, or `eff setup --seeding` (the step `onboard` ends with, which
+ * acknowledges `settings_changed` up to the settings it showed the operator).
+ */
+export type CheckAcknowledger = "doctor" | "setup";
+
 /** A health check row (plan 07 G1 `checks[]`; plan 06 §1.4 T-08). */
 export interface CheckRow {
-  readonly id:
-    "scoring_mismatch" | "settings_changed" | "ir_invalid" | "stale_credential" | "drift";
+  readonly id: CheckId;
   readonly status: "ok" | "warn" | "fail";
   /** Fixed-vocabulary detail codes and numbers — never platform text. */
   readonly detail: Readonly<Record<string, string | number | boolean | null>>;
+  /** With `id`, the check's key: a newer raise of the same id is a different check. */
   readonly raised_at: IsoInstant;
+  /** The settings the check was raised against (`settings_changed`, `scoring_mismatch`); else null. */
+  readonly settings_hash: string | null;
   readonly acknowledged: boolean;
+  readonly acknowledged_at: IsoInstant | null;
+  readonly acknowledged_by: CheckAcknowledger | null;
 }
 
 /** league_settings + checks (required writes). */
@@ -1294,6 +1544,28 @@ export interface LeagueSettingsRepository {
   latest(leagueId: string, season: number): LeagueSettingsRow | null;
   raiseCheck(check: CheckRow): void;
   openChecks(): readonly CheckRow[];
+  /**
+   * Acknowledges every open check of `id` raised at or before `upTo` (plan 03 §5 #22 "since the
+   * last acknowledged settings_hash"); a check raised after `upTo` stays open. Returns the count.
+   */
+  acknowledgeChecks(id: CheckId, upTo: IsoInstant, by: CheckAcknowledger, at: IsoInstant): number;
+}
+
+/** Whether `check` is acknowledged by an `acknowledgeChecks(id, upTo, …)` call (the pure rule). */
+export function acknowledgementCovers(
+  check: Pick<CheckRow, "id" | "raised_at" | "acknowledged">,
+  id: CheckId,
+  upTo: IsoInstant,
+): boolean {
+  const raised = Date.parse(check.raised_at);
+  const limit = Date.parse(upTo);
+  return (
+    !check.acknowledged &&
+    check.id === id &&
+    Number.isFinite(raised) &&
+    Number.isFinite(limit) &&
+    raised <= limit
+  );
 }
 
 /** A nightly roster snapshot (plan 06 §1.4; `espn-ff://roster/snapshot`). */
@@ -1302,6 +1574,67 @@ export interface RosterSnapshot {
   readonly week: Week;
   readonly taken_at: IsoInstant;
   readonly roster: Roster;
+}
+
+/** One player's movement between two snapshots (ids and slot/status vocabulary only). */
+export interface RosterSnapshotDiff {
+  readonly added: readonly { readonly player_id: number; readonly slot: string }[];
+  readonly dropped: readonly { readonly player_id: number; readonly slot: string }[];
+  readonly slot_changes: readonly {
+    readonly player_id: number;
+    readonly from: string;
+    readonly to: string;
+  }[];
+  readonly injury_changes: readonly {
+    readonly player_id: number;
+    readonly from: InjuryStatus | null;
+    readonly to: InjuryStatus | null;
+  }[];
+}
+
+/** The diff from `prev` to `next` (`espn-ff://roster/snapshot`), each list sorted by player id. */
+export function diffRosterSnapshots(
+  prev: Pick<Roster, "entries">,
+  next: Pick<Roster, "entries">,
+): RosterSnapshotDiff {
+  const byId = (r: Pick<Roster, "entries">) => {
+    const m = new Map<number, RosterEntry>();
+    for (const e of r.entries) m.set(e.player.ref.id, e);
+    return m;
+  };
+  const a = byId(prev);
+  const b = byId(next);
+  const asc = <T extends { readonly player_id: number }>(xs: T[]): T[] =>
+    xs.sort((x, y) => x.player_id - y.player_id);
+  const added: { player_id: number; slot: string }[] = [];
+  const dropped: { player_id: number; slot: string }[] = [];
+  const slotChanges: { player_id: number; from: string; to: string }[] = [];
+  const injuryChanges: {
+    player_id: number;
+    from: InjuryStatus | null;
+    to: InjuryStatus | null;
+  }[] = [];
+  for (const [id, e] of b) {
+    const before = a.get(id);
+    if (before === undefined) {
+      added.push({ player_id: id, slot: e.slot });
+      continue;
+    }
+    if (before.slot !== e.slot) slotChanges.push({ player_id: id, from: before.slot, to: e.slot });
+    if (before.player.injury_status !== e.player.injury_status)
+      injuryChanges.push({
+        player_id: id,
+        from: before.player.injury_status,
+        to: e.player.injury_status,
+      });
+  }
+  for (const [id, e] of a) if (!b.has(id)) dropped.push({ player_id: id, slot: e.slot });
+  return {
+    added: asc(added),
+    dropped: asc(dropped),
+    slot_changes: asc(slotChanges),
+    injury_changes: asc(injuryChanges),
+  };
 }
 
 /** roster_snapshot (pruned after 30 days — plan 06 §1.3). */

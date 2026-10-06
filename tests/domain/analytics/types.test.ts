@@ -2,8 +2,18 @@
 // (never a two-decimal number — research 05 §3.2), the coin-flip rule per basis (|ΔP| under the
 // threshold or the interval spans 0), and the plan's constants (plan 07 E1–E11; research 05).
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
+  CLEARS_TO_FA_MIN_COLD_WIDTH,
+  isValidClearsToFa,
+  seedingStatus,
+  type ClearsToFa,
+  type LineupData,
+  type ScheduleAnalysisData,
+  type SeasonSimData,
+  type SeedingStatus,
+  type TradeEvaluationData,
+  type WaiverCandidate,
   ANALYTICS_RESULT_CHARS,
   COARSE_BAND_CUTOFFS,
   COIN_FLIP_DPWIN,
@@ -96,5 +106,61 @@ describe("analytics constants", () => {
   it("the analytics budget is half the result budget", () => {
     expect(ANALYTICS_RESULT_CHARS).toBe(10_000);
     expect(ANALYTICS_RESULT_CHARS * 2).toBe(RESULT_BUDGET_CHARS);
+  });
+});
+
+describe("CAT-02: seeding.confirmed — a clean-negative field on every reading-dependent result", () => {
+  it("is false until onboard records the reading (config seeding_confirmed_at)", () => {
+    expect(seedingStatus("espn_rule", null)).toEqual({ mode_used: "espn_rule", confirmed: false });
+    expect(seedingStatus("points_only", "")).toEqual({
+      mode_used: "points_only",
+      confirmed: false,
+    });
+    expect(seedingStatus("both", "2026-10-05T18:00:00.000Z")).toEqual({
+      mode_used: "both",
+      confirmed: true,
+    });
+    expect(Object.isFrozen(seedingStatus("espn_rule", null))).toBe(true);
+  });
+  it("E2, E3 season, E6 evaluation and E8 all carry it (type level)", () => {
+    expectTypeOf<LineupData["seeding"]>().toEqualTypeOf<SeedingStatus>();
+    expectTypeOf<SeasonSimData["seeding"]>().toEqualTypeOf<SeedingStatus>();
+    expectTypeOf<TradeEvaluationData["seeding"]>().toEqualTypeOf<SeedingStatus>();
+    expectTypeOf<ScheduleAnalysisData["seeding"]>().toEqualTypeOf<SeedingStatus>();
+  });
+});
+
+describe("CAT-03: E5 p_clears_to_fa carries its own interval (q_i is cold-start)", () => {
+  it("a cold-start result must have a non-degenerate interval containing p", () => {
+    expect(isValidClearsToFa({ p: 0.4, interval: [0.2, 0.6], basis: "cold_start" })).toBe(true);
+    expect(isValidClearsToFa({ p: 0.4, interval: [0.4, 0.4], basis: "cold_start" })).toBe(false);
+    expect(isValidClearsToFa({ p: 0.4, interval: [0.38, 0.42], basis: "cold_start" })).toBe(false);
+    expect(isValidClearsToFa({ p: 0.4, interval: [0.4, 0.4], basis: "league_fitted" })).toBe(true);
+    expect(isValidClearsToFa({ p: 0.7, interval: [0.2, 0.6], basis: "league_fitted" })).toBe(false);
+    expect(isValidClearsToFa({ p: Number.NaN, interval: [0, 1], basis: "cold_start" })).toBe(false);
+    expect(isValidClearsToFa({ p: 0.5, interval: [-0.1, 1], basis: "cold_start" })).toBe(false);
+    expect(CLEARS_TO_FA_MIN_COLD_WIDTH).toBe(0.05);
+    expectTypeOf<WaiverCandidate["p_clears_to_fa"]>().toEqualTypeOf<ClearsToFa | null>();
+  });
+  it("property: valid iff 0 ≤ lo ≤ p ≤ hi ≤ 1 (and width ≥ 0.05 when cold-start)", () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: -0.5, max: 1.5, noNaN: true }),
+        fc.double({ min: -0.5, max: 1.5, noNaN: true }),
+        fc.double({ min: -0.5, max: 1.5, noNaN: true }),
+        fc.constantFrom<"cold_start" | "league_fitted">("cold_start", "league_fitted"),
+        (p, lo, hi, basis) => {
+          const unit = (x: number) => x >= 0 && x <= 1;
+          const want =
+            unit(p) &&
+            unit(lo) &&
+            unit(hi) &&
+            lo <= p &&
+            p <= hi &&
+            (basis !== "cold_start" || hi - lo >= 0.05);
+          return isValidClearsToFa({ p, interval: [lo, hi], basis }) === want;
+        },
+      ),
+    );
   });
 });

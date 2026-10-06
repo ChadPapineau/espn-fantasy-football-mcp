@@ -27,6 +27,9 @@ import {
   assertNotFileProvider,
   assertNotSynced,
   assertOutsideRepo,
+  assertNotInAnyRepo,
+  gitWorkTreeOf,
+  GIT_WALK_MAX_LEVELS,
   assertSecureFile,
   backupDir,
   configFilePath,
@@ -216,6 +219,73 @@ describe("isInside / assertOutsideRepo", () => {
         assertOutsideRepo(path.join(ROOT, "fixtures", "x"), packageRoot());
       }),
     ).toBe("inside_repo");
+  });
+});
+
+describe("M7: assertNotInAnyRepo — any git working tree, not only this checkout", () => {
+  it("refuses a path inside another repository (a .git dir or a worktree's .git file)", () => {
+    const other = path.join(tmp.dir, "other-repo");
+    mkdirSync(path.join(other, ".git"), { recursive: true });
+    mkdirSync(path.join(other, "deep", "er"), { recursive: true });
+    expect(gitWorkTreeOf(path.join(other, "deep", "er", "config.json"))).toBe(
+      realpathOfExistingPrefix(other),
+    );
+    expect(
+      refusal(() => {
+        assertNotInAnyRepo(path.join(other, "deep", "not-yet", "session.json"));
+      }),
+    ).toBe("inside_repo");
+    const wt = path.join(tmp.dir, "worktree");
+    mkdirSync(wt);
+    writeFileSync(path.join(wt, ".git"), "gitdir: /elsewhere\n");
+    expect(
+      refusal(() => {
+        assertNotInAnyRepo(path.join(wt, "cache"));
+      }),
+    ).toBe("inside_repo");
+    expect(
+      refusal(() => {
+        assertNotInAnyRepo(path.join(tmp.dir, "plain", "cache"));
+      }),
+    ).toBe("no-throw");
+  });
+  it("follows a symlink that leads into a repository", () => {
+    const other = path.join(tmp.dir, "repo2");
+    mkdirSync(path.join(other, ".git"), { recursive: true });
+    mkdirSync(path.join(other, "data"));
+    const link = path.join(tmp.dir, "innocent");
+    symlinkSync(path.join(other, "data"), link);
+    expect(
+      refusal(() => {
+        assertNotInAnyRepo(path.join(link, "store.sqlite"));
+      }),
+    ).toBe("inside_repo");
+  });
+  it("this real checkout (and the case-changed spelling on darwin) is a working tree", () => {
+    expect(gitWorkTreeOf(path.join(ROOT, "src", "x"))).not.toBeNull();
+    if (process.platform === "darwin")
+      expect(gitWorkTreeOf(path.join(ROOT.toUpperCase(), "src", "x"))).not.toBeNull();
+  });
+  it("the walk is bounded and fails closed past the bound", () => {
+    let calls = 0;
+    const deep =
+      "/" + Array.from({ length: GIT_WALK_MAX_LEVELS + 10 }, (_, i) => `d${String(i)}`).join("/");
+    const r = gitWorkTreeOf(deep, () => {
+      calls++;
+      return false;
+    });
+    expect(calls).toBe(GIT_WALK_MAX_LEVELS);
+    expect(r).not.toBeNull();
+    expect(gitWorkTreeOf("/a/b", () => false)).toBeNull();
+  });
+  it("locationRefusals reports a foreign repository once, as inside_repo", () => {
+    const reasons = locationRefusals(path.join(tmp.dir, "x"), {
+      home: path.join(tmp.dir, "h"),
+      repoRoot: path.join(tmp.dir, "elsewhere"),
+      xattr: noXattrs,
+      gitEntry: (d) => d === realpathOfExistingPrefix(tmp.dir),
+    }).map((r) => r.reason);
+    expect(reasons).toEqual(["inside_repo"]);
   });
 });
 

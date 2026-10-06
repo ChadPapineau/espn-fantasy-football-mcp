@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { NFL_TEAMS, SEASON_MIN } from "../../../src/config/schema.js";
 import { ESPN_TO_NFLVERSE_TEAM } from "../../../src/domain/crosswalk/types.js";
 import { POSITION_CLASSES } from "../../../src/domain/scoring/types.js";
+import * as espnTypes from "../../../src/providers/espn/types.js";
 import {
   COMMUNICATION_VIEWS,
   ESPN_DST_PLAYER_ID_BASE,
@@ -229,5 +230,105 @@ describe("upstreamTypeOrUnknown (the only upstream strings that may surface)", (
   it("the family grammar is anchored", () => {
     expect(UPSTREAM_TYPE_FAMILY_RE.test("xAUTH_OK")).toBe(false);
     expect(UPSTREAM_TYPE_FAMILY_RE.test("AUTH_OK ")).toBe(false);
+  });
+});
+
+describe("CAT-01: team-unit id ranges keyed by position (research 03 §B.2; plan 02 §5 A-2)", () => {
+  it("D/ST 16 and TQB 15 are verified; HC 14 is assumed; ranges never overlap", () => {
+    expect(
+      espnTypes.ESPN_TEAM_UNIT_ID_RANGES.map((r) => [r.position_id, r.min, r.max, r.evidence]),
+    ).toEqual([
+      [16, -16999, -16001, "verified"],
+      [15, -15999, -15001, "verified"],
+      [14, -14999, -14001, "assumed"],
+    ]);
+    const all = espnTypes.ESPN_TEAM_UNIT_ID_RANGES;
+    for (const a of all)
+      for (const b of all)
+        if (a !== b) expect(a.max < b.min || b.max < a.min, `${a.name}/${b.name}`).toBe(true);
+    for (const r of all) expect(espnTypes.ESPN_POSITIONS[r.position_id]?.name).toBe(r.name);
+  });
+  it("every pro team's TQB and D/ST id round-trips to its pro-team id", () => {
+    for (const id of Object.keys(ESPN_PRO_TEAMS)
+      .map(Number)
+      .filter((i) => i > 0)) {
+      for (const base of [-16000, -15000]) {
+        const unit = base - id;
+        expect(espnTypes.isTeamUnitPlayerId(unit), String(unit)).toBe(true);
+        expect(espnTypes.teamUnitProTeamId(unit)).toBe(id);
+        expect(espnTypes.isEspnPlayerIdValue(unit)).toBe(true);
+      }
+    }
+    expect(espnTypes.ESPN_TQB_PLAYER_ID_BASE).toBe(-15000);
+  });
+  it("property: isEspnPlayerIdValue = person 1..99 999 999 ∪ the team-unit ranges, integers only", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: -20_000, max: 100_000_100 }), (n) => {
+        const inUnit =
+          (n <= -14_001 && n >= -14_999) ||
+          (n <= -15_001 && n >= -15_999) ||
+          (n <= -16_001 && n >= -16_999);
+        expect(espnTypes.isEspnPlayerIdValue(n)).toBe((n >= 1 && n <= 99_999_999) || inUnit);
+      }),
+      { numRuns: 2000 },
+    );
+    for (const bad of [1.5, Number.NaN, Infinity, -Infinity, -15_000.5])
+      expect(espnTypes.isEspnPlayerIdValue(bad)).toBe(false);
+    expect(espnTypes.teamUnitProTeamId(4_362_628)).toBeNull();
+    expect(espnTypes.teamUnitRangeOf(-15_000)).toBeNull();
+  });
+});
+
+describe("CAT-06/M5: PLAYER_SORT_MAP — every C2 sort maps onto an ESPN sort key", () => {
+  it("covers PLAYER_SORTS exactly, every key is a known ESPN sort key, frozen", () => {
+    expect(Object.keys(espnTypes.PLAYER_SORT_MAP)).toEqual([...espnTypes.PLAYER_SORTS]);
+    for (const [name, spec] of Object.entries(espnTypes.PLAYER_SORT_MAP)) {
+      expect(espnTypes.PLAYER_SORT_KEYS, name).toContain(spec.key);
+      expect(Object.isFrozen(spec)).toBe(true);
+    }
+    expect(Object.isFrozen(espnTypes.PLAYER_SORT_MAP)).toBe(true);
+  });
+  it("both projection sorts use sortAppliedStatTotal with a named split; name re-sorts one page", () => {
+    const m = espnTypes.PLAYER_SORT_MAP;
+    expect([m.projection_week.key, m.projection_week.split]).toEqual([
+      "sortAppliedStatTotal",
+      "weekly_projection",
+    ]);
+    expect([m.projection_ros.key, m.projection_ros.split]).toEqual([
+      "sortAppliedStatTotal",
+      "ros_projection",
+    ]);
+    expect(m.name).toMatchObject({
+      key: "sortPercOwned",
+      client_resort: "name",
+      offset_allowed: false,
+    });
+    for (const [n, s] of Object.entries(m)) {
+      if (n !== "name") expect(s.client_resort, n).toBeNull();
+      expect(s.offset_allowed, n).toBe(n !== "name");
+      if (s.key !== "sortAppliedStatTotal") expect(s.split, n).toBeNull();
+    }
+    // the observed requests (research 03 P09) are marked verified; the rest community
+    expect(m.percOwned.evidence).toBe("verified");
+    expect(m.draftRank).toMatchObject({ evidence: "verified", value: "STANDARD", sort_asc: true });
+    expect(m.percChanged.evidence).toBe("community");
+  });
+  it("`injured` is a post-filter; the fixed warnings are printable and carry no placeholders", () => {
+    expect(espnTypes.INJURED_FILTER_MODE).toBe("post_filter");
+    for (const w of Object.values(espnTypes.PLAYER_LIST_WARNINGS)) {
+      expect(w).toMatch(/^[\x20-\x7e]{20,400}$/);
+      expect(w).not.toMatch(/[{}<>]/);
+    }
+  });
+});
+
+describe("CAT-07: acquisition types — both recorded values are known", () => {
+  it("WAIVERS_CONTINUOUS and WAIVERS_TRADITIONAL; an unknown value is tolerated, not coerced", () => {
+    expect(espnTypes.ACQUISITION_SETTING_TYPES).toEqual([
+      "WAIVERS_CONTINUOUS",
+      "WAIVERS_TRADITIONAL",
+    ]);
+    expect(isKnownValue(espnTypes.ACQUISITION_SETTING_TYPES, "WAIVERS_TRADITIONAL")).toBe(true);
+    expect(isKnownValue(espnTypes.ACQUISITION_SETTING_TYPES, "WAIVERS_FAAB")).toBe(false);
   });
 });

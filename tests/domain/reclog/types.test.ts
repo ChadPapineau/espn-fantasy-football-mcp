@@ -2,8 +2,13 @@
 // `client_ref` deduplicate, and only within (league_id, season, week, kind, client_ref)), the
 // "n too small (k of N)" caveat (plan 07 E13 `min_n`, sib ADV OBJ-05), and the id grammars.
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { BareText } from "../../../src/domain/league/types.js";
 import {
+  toRecordView,
+  type RecommendationListItem,
+  type RecommendationRecordView,
+  type RetrospectiveCall,
   CLIENT_REF_RE,
   DECISION_METRIC_RE,
   DEFAULT_MIN_N,
@@ -140,5 +145,38 @@ describe("grammars and vocabularies", () => {
     expect(isUntrustedSource(RECLOG_UNTRUSTED_SOURCE)).toBe(true);
     expect(Object.isFrozen(RECLOG_TEXT_PATHS)).toBe(true);
     expect(RECLOG_TEXT_PATHS.length).toBeGreaterThan(0);
+  });
+});
+
+describe("CAT-09: the read-back view never carries league_id (espn-ff://rec/{log_id})", () => {
+  it("toRecordView strips the key at run time; everything else is kept", () => {
+    const record = {
+      league_id: "0",
+      season: 2026,
+      kind: "lineup",
+      week: 4,
+      rec: {} as never,
+      alternatives: [],
+      source_calls: [],
+      settings_hash: "a".repeat(64),
+      seeding_mode_used: null,
+      followed_hint: "unknown",
+      client_ref: null,
+      note: null,
+      log_id: "rec-01J9Z3K4M5N6P7Q8R9S0T1V2W3",
+      recorded_at: "2026-10-05T18:00:00.000Z",
+    } as const;
+    const view = toRecordView(record);
+    expect("league_id" in view).toBe(false);
+    expect(JSON.stringify(view)).not.toContain("league_id");
+    expect(view).toEqual(
+      Object.fromEntries(Object.entries(record).filter(([k]) => k !== "league_id")),
+    );
+    expectTypeOf<RecommendationRecordView>().not.toHaveProperty("league_id");
+  });
+  it("read-back strings are BareText (a raw string does not type-check)", () => {
+    expectTypeOf<RecommendationListItem["action_summary"]>().toEqualTypeOf<BareText>();
+    expectTypeOf<RetrospectiveCall["recommended"]>().toEqualTypeOf<BareText>();
+    expectTypeOf<RetrospectiveCall["best_alternative"]>().toEqualTypeOf<BareText | null>();
   });
 });

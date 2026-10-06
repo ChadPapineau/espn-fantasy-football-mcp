@@ -15,24 +15,43 @@ import {
   stampState,
   worseFreshness,
   type Attribution,
+  type BeyondHardLimit,
   type Freshness,
+  type FreshnessClassId,
   type FreshnessState,
   type TtlContext,
 } from "../config/freshness.js";
-import { GSIS_ID_RE } from "../config/schema.js";
+import { GSIS_ID_RE, type SeedingMode } from "../config/schema.js";
 import type { DatasetStamp, InputFreshness } from "../domain/analytics/types.js";
 import {
   INJECTION_FLAGS,
   TEXT_CAPS,
   UNTRUSTED_SOURCES,
+  UNTRUSTED_SOURCE_CLASS as UNTRUSTED_SOURCE_CLASS_MAP,
   isUntrustedSource,
   isUntrustedText,
+  type DegradedRead,
   type DriftMeta,
+  type IsoInstant,
+  type LeagueDigestData,
   type PlatformStamp,
+  type RosterSnapshotDiff,
+  type RosterSummary,
   type UntrustedSource,
+  type Week,
 } from "../domain/league/types.js";
-import { DECISION_METRIC_RE } from "../domain/reclog/types.js";
-import { ESPN_DST_PLAYER_ID_MAX, ESPN_DST_PLAYER_ID_MIN } from "../providers/platform.js";
+import {
+  DECISION_METRIC_RE,
+  type RecommendationListItem,
+  type RecommendationRecordView,
+} from "../domain/reclog/types.js";
+import type { BracketFamilyName, Canonical } from "../domain/scoring/types.js";
+import {
+  ESPN_PERSON_PLAYER_ID_MAX,
+  degradedWarning,
+  isEspnPlayerIdValue,
+  type StatusData,
+} from "../providers/platform.js";
 
 export {
   INJECTION_FLAGS,
@@ -185,6 +204,8 @@ export interface InputStamp {
   readonly drift?: DriftMeta | null;
   /** The input's period was provisional (any game `statsOfficial: false`). */
   readonly provisional?: boolean;
+  /** Served from stale cache because ESPN failed (PlatformStamp.degraded): its code is warned. */
+  readonly degraded?: DegradedRead | null;
 }
 
 /** The ONE conversion from a dataset or platform stamp to an envelope input (tools never classify). */
@@ -212,7 +233,9 @@ export function stampToInput(
     basis_at: st.basis_at,
     state: st.state,
   };
-  return isDataset ? base : { ...base, drift: stamp.drift, provisional: stamp.provisional };
+  return isDataset
+    ? base
+    : { ...base, drift: stamp.drift, provisional: stamp.provisional, degraded: stamp.degraded };
 }
 
 /** The `meta` block (plan 01 §4.2, plus `request_id`). */
@@ -331,6 +354,12 @@ export function buildEnvelope<D>(input: EnvelopeInput<D>): Envelope<D> {
     addSource(stamp.source);
     if (stamp.provisional === true) provisional = true;
     drift = mergeDrift(drift, stamp.drift);
+    if (stamp.degraded !== undefined && stamp.degraded !== null) {
+      // plan 01 §4.3: stale cache returned as data carries the upstream code in warnings
+      freshness = worseFreshness(freshness, "stale");
+      const w = degradedWarning(stamp.source, stamp.degraded);
+      if (!warnings.includes(w)) warnings.push(w);
+    }
     if (stamp.state !== "fresh") {
       freshness = worseFreshness(freshness, "stale");
       const basis = stamp.basis_at === undefined ? f : isoOrThrow(stamp.basis_at);
@@ -539,17 +568,68 @@ export interface ToolSuccessResult {
 }
 
 /**
- * The tool result for an envelope (plan 01 §4.2): the serialised JSON as the one text block, and
- * `structuredContent` only when `structured` (the list tools may drop it after the A11b spike, T-06).
+ * How a tool result is shaped, derived ONLY from whether the tool's outputSchema is on the wire
+ * (plan 01 §4; T-06): SDK 2.2.0's `validateToolOutput` rejects a result without
+ * `structuredContent` whenever the registered tool advertises an outputSchema, so the two are never
+ * set independently. With `wireOutputSchema: false` the SDK no longer validates the output, so the
+ * caller validates against the in-code zod schema itself (`validatedToolResult`).
  */
-export function toToolResult(env: Envelope<unknown>, structured: boolean): ToolSuccessResult {
+export interface ToolResultOptions {
+  readonly wireOutputSchema: boolean;
+}
+
+/**
+ * The tool result for an envelope (plan 01 §4.2): the serialised JSON as the one text block, plus
+ * `structuredContent` exactly when the outputSchema is advertised on the wire.
+ */
+export function toToolResult(env: Envelope<unknown>, opts: ToolResultOptions): ToolSuccessResult {
   const text = serializeEnvelope(env);
-  return structured
+  return opts.wireOutputSchema
     ? {
         content: [{ type: "text", text }],
         structuredContent: JSON.parse(text) as Record<string, unknown>,
       }
     : { content: [{ type: "text", text }] };
+}
+
+/** The outcome of validating an envelope against a tool's in-code output schema. */
+export type ValidatedResult =
+  | { readonly ok: true; readonly result: ToolSuccessResult }
+  | {
+      readonly ok: false;
+      /** Value-free issue summaries for the stderr log (path segments + zod codes). */
+      readonly issues: readonly { readonly path: string; readonly code: string }[];
+    };
+
+/**
+ * Validates the envelope EXACTLY as it will be serialised (a JSON round trip, so `undefined` keys
+ * and non-JSON values cannot pass) against the in-code `outputSchema`, in BOTH wire modes, then
+ * builds the result. An invalid envelope is the caller's INTERNAL (never sent).
+ */
+export function validatedToolResult(
+  env: Envelope<unknown>,
+  outputSchema: z.ZodType,
+  opts: ToolResultOptions,
+): ValidatedResult {
+  const parsed = outputSchema.safeParse(JSON.parse(serializeEnvelope(env)));
+  if (!parsed.success)
+    return {
+      ok: false,
+      issues: parsed.error.issues.slice(0, 5).map((i) => ({
+        path: i.path
+          .slice(0, 8)
+          .map((seg) =>
+            typeof seg === "number"
+              ? "[]"
+              : /^[A-Za-z0-9_]{1,40}$/.test(String(seg))
+                ? String(seg)
+                : "?",
+          )
+          .join("."),
+        code: i.code,
+      })),
+    };
+  return { ok: true, result: toToolResult(env, opts) };
 }
 
 // --- resources (plan 07 §4.1 `ttlMs` column) -------------------------------------------------------
@@ -567,6 +647,196 @@ export const RESOURCE_TTL_MS = Object.freeze({
   "espn-ff://rec/{log_id}": 86_400_000,
   "espn-ff://rec/week/{week}": 3_600_000,
 });
+
+// --- resource payloads (plan 07 §4.1 "Content" column) ---------------------------------------------
+//
+// Every resource is a read-side twin of tool data with the same envelope. No payload carries a
+// `league_id` (plan 07 §4.1 "the league id itself is not emitted"; CLAUDE.md): payloads use views
+// (RosterSummary, RecommendationRecordView), never the store rows that hold the id. A type-level
+// test walks every tool and resource payload for the key.
+
+/** `espn-ff://league`: the operator-configured identity — set by config, never by the model. */
+export interface LeagueResourceData {
+  readonly season: number;
+  /** null until `eff setup` resolved the team (plan 03 §2.1 step 6). */
+  readonly my_team_id: number | null;
+  readonly seeding_mode_configured: SeedingMode;
+  readonly seeding_confirmed: boolean;
+}
+
+/** One `espn-ff://game/stat-ids` row (research 03 §B.2's statId table; 103/104 flagged). */
+export interface StatIdResourceRow {
+  readonly stat_id: string;
+  readonly abbr: string;
+  /** Server-authored meaning (registry text, not third-party). */
+  readonly meaning: string;
+  readonly canonical: Canonical | null;
+  readonly family: BracketFamilyName | null;
+  readonly disputed: boolean;
+}
+/** `espn-ff://game/stat-ids`. */
+export interface StatIdResourceData {
+  readonly stat_ids: readonly StatIdResourceRow[];
+}
+
+/** One plan 01 §5.4 class row with its current age and state (`espn-ff://status/freshness`). */
+export interface FreshnessClassRow {
+  readonly class: FreshnessClassId;
+  readonly fresh_s: number | null;
+  readonly hard_limit_s: number | null;
+  readonly beyond_hard: BeyondHardLimit | null;
+  /** Age of the newest data of this class, or null when none was ever loaded. */
+  readonly age_s: number | null;
+  readonly state: FreshnessState | "never";
+}
+/** `espn-ff://status/freshness`: G1's `sources[]` plus the class table. */
+export interface FreshnessResourceData {
+  readonly sources: StatusData["sources"];
+  readonly classes: readonly FreshnessClassRow[];
+}
+
+/** `espn-ff://status/drift`: G1's `drift` block (ESPN-only). */
+export type DriftResourceData = StatusData["drift"];
+
+/** `espn-ff://roster/snapshot`: my team's latest nightly snapshot and its diff vs the previous one. */
+export interface RosterSnapshotResourceData {
+  readonly taken_at: IsoInstant;
+  readonly week: Week;
+  readonly roster: RosterSummary;
+  /** null when only one snapshot exists. */
+  readonly previous_taken_at: IsoInstant | null;
+  readonly diff: RosterSnapshotDiff | null;
+}
+
+/** One `espn-ff://rec/week/{week}` entry (summary form; `action_summary` is path-listed, C15). */
+export type RecWeekResourceItem = RecommendationListItem;
+/** `espn-ff://rec/week/{week}`. */
+export interface RecWeekResourceData {
+  readonly week: Week;
+  readonly items: readonly RecWeekResourceItem[];
+}
+
+/** `espn-ff://rec/{log_id}`: one entry WITHOUT `league_id`; RECLOG_TEXT_PATHS path-listed. */
+export type RecResourceData = RecommendationRecordView;
+
+/** Each resource's payload type, by URI (the tool twins' data types where one exists). */
+export interface ResourcePayloads {
+  readonly "espn-ff://league": LeagueResourceData;
+  readonly "espn-ff://league/settings": LeagueDigestData;
+  readonly "espn-ff://game/stat-ids": StatIdResourceData;
+  readonly "espn-ff://status": StatusData;
+  readonly "espn-ff://status/freshness": FreshnessResourceData;
+  readonly "espn-ff://status/drift": DriftResourceData;
+  readonly "espn-ff://roster/snapshot": RosterSnapshotResourceData;
+  /** The generated cheat-sheet (plan 09 §2) — server-authored text only. */
+  readonly "espn-ff://docs/tool-outputs": { readonly text: string };
+  readonly "espn-ff://rec/{log_id}": RecResourceData;
+  readonly "espn-ff://rec/week/{week}": RecWeekResourceData;
+}
+
+// --- tool families and annotations (plan 01 §4.1; plan 07 §2 "Annotations") -----------------------
+
+/** The plan 01 §4.1 families of the 34 read tools (writes are Phase W). */
+export type ToolFamily =
+  | "espn_fact"
+  | "espn_estimate"
+  | "analytics"
+  | "external_text"
+  | "dataset_read"
+  | "local_write"
+  | "ops";
+
+/** MCP tool annotations as plan 01 §4.1 lists them (hints to the client UI, not a boundary). */
+export interface ToolAnnotationHints {
+  readonly readOnlyHint: boolean;
+  readonly destructiveHint?: boolean;
+  readonly idempotentHint?: boolean;
+  readonly openWorldHint: boolean;
+}
+
+/** Family → annotations, verbatim from plan 01 §4.1's table. */
+export const TOOL_FAMILIES: Readonly<Record<ToolFamily, ToolAnnotationHints>> = Object.freeze({
+  espn_fact: Object.freeze({ readOnlyHint: true, idempotentHint: true, openWorldHint: true }),
+  espn_estimate: Object.freeze({ readOnlyHint: true, idempotentHint: true, openWorldHint: true }),
+  analytics: Object.freeze({ readOnlyHint: true, idempotentHint: false, openWorldHint: false }),
+  external_text: Object.freeze({ readOnlyHint: true, openWorldHint: true }),
+  dataset_read: Object.freeze({ readOnlyHint: true, idempotentHint: true, openWorldHint: false }),
+  local_write: Object.freeze({
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  }),
+  ops: Object.freeze({ readOnlyHint: true, openWorldHint: false }),
+});
+
+/** One read tool: its family, priority and any per-tool annotation the plan names. */
+export interface ToolFamilyEntry {
+  readonly id: string;
+  readonly family: ToolFamily;
+  readonly priority: "P0" | "P1";
+  /** The plan's named exceptions: D2/D3/D5 and G2 make an ESPN request (`openWorldHint: true`). */
+  readonly override?: Partial<ToolAnnotationHints>;
+}
+
+const tool = (
+  id: string,
+  family: ToolFamily,
+  priority: "P0" | "P1",
+  override?: Partial<ToolAnnotationHints>,
+): ToolFamilyEntry =>
+  Object.freeze(
+    override === undefined ? { id, family, priority } : { id, family, priority, override },
+  );
+
+const OPEN = Object.freeze({ openWorldHint: true });
+
+/** The 34 read tools (plan 07 §3; C3: 18 P0 + 16 P1), in registry order, with their family. */
+export const TOOL_FAMILY_OF: Readonly<Record<string, ToolFamilyEntry>> = Object.freeze({
+  espn_get_league: tool("A1", "espn_fact", "P0"),
+  espn_get_standings: tool("A2", "espn_fact", "P0"),
+  espn_get_scoreboard: tool("A3", "espn_fact", "P0"),
+  espn_get_live_scoreboard: tool("A4", "espn_fact", "P0"),
+  espn_get_box_score: tool("A5", "espn_fact", "P0"),
+  espn_list_transactions: tool("A6", "espn_fact", "P0"),
+  espn_get_roster: tool("B1", "espn_fact", "P0"),
+  espn_get_player_stats: tool("B2", "espn_fact", "P1"),
+  espn_search_players: tool("C1", "espn_fact", "P0"),
+  espn_list_players: tool("C2", "espn_fact", "P0"),
+  espn_get_projections: tool("C3", "espn_estimate", "P1"),
+  espn_get_player_outlook: tool("C4", "external_text", "P1"),
+  espn_get_player_usage: tool("D1", "dataset_read", "P1"),
+  espn_get_injuries: tool("D2", "dataset_read", "P0", OPEN),
+  espn_get_schedule: tool("D3", "dataset_read", "P0", OPEN),
+  espn_get_depth_chart: tool("D4", "dataset_read", "P1"),
+  espn_get_defense_profile: tool("D5", "dataset_read", "P1", OPEN),
+  espn_get_news: tool("D6", "external_text", "P1"),
+  espn_project_players: tool("E1", "analytics", "P0"),
+  espn_analyze_lineup: tool("E2", "analytics", "P0"),
+  espn_analyze_matchup: tool("E3", "analytics", "P1"),
+  espn_analyze_replacement: tool("E4", "analytics", "P1"),
+  espn_analyze_waivers: tool("E5", "analytics", "P0"),
+  espn_analyze_trade: tool("E6", "analytics", "P1"),
+  espn_analyze_injury_cascade: tool("E7", "analytics", "P1"),
+  espn_analyze_schedule: tool("E8", "analytics", "P1"),
+  espn_analyze_roster: tool("E9", "analytics", "P1"),
+  espn_analyze_evidence: tool("E10", "analytics", "P1"),
+  espn_analyze_league_activity: tool("E11", "analytics", "P1"),
+  espn_record_recommendation: tool("E12", "local_write", "P0"),
+  espn_analyze_retrospective: tool("E13", "analytics", "P0"),
+  espn_list_recommendations: tool("E14", "ops", "P1"),
+  espn_get_status: tool("G1", "ops", "P0"),
+  espn_check_auth: tool("G2", "ops", "P0", OPEN),
+});
+
+/** A read tool's annotations: its family's, with the plan's named per-tool override applied. */
+export function toolAnnotations(name: string): ToolAnnotationHints {
+  const entry = Object.prototype.hasOwnProperty.call(TOOL_FAMILY_OF, name)
+    ? TOOL_FAMILY_OF[name]
+    : undefined;
+  if (entry === undefined) throw new RangeError("envelope: unknown tool name");
+  return Object.freeze({ ...TOOL_FAMILIES[entry.family], ...entry.override });
+}
 
 // --- zod schemas: envelope, wrapper, Dist, Rec (plan 01 §4.2 "zod-typed"; plan 07 legend) -----------
 
@@ -591,14 +861,15 @@ export const REC_LIMITS = Object.freeze({
   inputs: 25,
 });
 
-/** ESPN player ids: 1..99 999 999, or a D/ST id in −16 999..−16 001 (plan 02 §5, A-2 widened). */
-export const PLAYER_ID_MAX = 99_999_999;
-/** Whether `n` is an acceptable ESPN player id. */
+/**
+ * ESPN player ids: a person 1..99 999 999, or a team-unit id from ESPN_TEAM_UNIT_ID_RANGES
+ * (D/ST −16 999..−16 001 and TQB −15 999..−15 001 verified on the recorded fixtures; HC [A]) —
+ * plan 02 §5, A-2 widened on evidence.
+ */
+export const PLAYER_ID_MAX = ESPN_PERSON_PLAYER_ID_MAX;
+/** Whether `n` is an acceptable ESPN player id (derived from the provider's id ranges). */
 export function isEspnPlayerId(n: number): boolean {
-  return (
-    Number.isInteger(n) &&
-    ((n >= 1 && n <= PLAYER_ID_MAX) || (n >= ESPN_DST_PLAYER_ID_MIN && n <= ESPN_DST_PLAYER_ID_MAX))
-  );
+  return isEspnPlayerIdValue(n);
 }
 /** An ESPN player id. */
 export const playerIdSchema = z
@@ -616,6 +887,117 @@ const sourceTagSchema = z.enum(
   UNTRUSTED_SOURCES as unknown as [UntrustedSource, ...UntrustedSource[]],
 );
 const freshnessSchema = z.enum(["fresh", "stale", "provisional"]);
+
+// --- bare untrusted text, marked in the schema (plan 01 §4.4 after A7a; plan 07 C15; plan 05 §2) ----
+
+/** The zod metadata key that marks a position as bare third-party text. */
+export const BARE_TEXT_META_KEY = "untrusted";
+
+/**
+ * A bare (unwrapped) third-party string at a known position — a player name, a read-back
+ * recommendation-log text: printable, capped at its source's class cap, and MARKED in the schema
+ * (`.meta({ untrusted: source })`) so `bareFieldsFromSchema` derives the `meta.untrusted_fields`
+ * path list from the outputSchema itself. A forgotten hand-declared path cannot happen, and the
+ * plan 05 §2 outputSchema walker sees every bare position.
+ */
+export function bareTextSchema(source: UntrustedSource) {
+  if (!isUntrustedSource(source))
+    throw new RangeError("envelope: unregistered untrusted source tag");
+  return z
+    .string()
+    .max(TEXT_CAPS[UNTRUSTED_SOURCE_CLASS_MAP[source]])
+    .regex(PRINTABLE_RE, { message: "unprintable_characters" })
+    .meta({ [BARE_TEXT_META_KEY]: source });
+}
+
+/** The marked source of a schema node, or null. */
+function bareSourceOf(schema: z.ZodType): UntrustedSource | null {
+  const m = schema.meta() as Record<string, unknown> | undefined;
+  const v = m?.[BARE_TEXT_META_KEY];
+  return typeof v === "string" && isUntrustedSource(v) ? v : null;
+}
+
+interface ZodDefLike {
+  readonly type: string;
+  readonly shape?: Readonly<Record<string, z.ZodType>>;
+  readonly element?: z.ZodType;
+  readonly innerType?: z.ZodType;
+  readonly options?: readonly z.ZodType[];
+  readonly valueType?: z.ZodType;
+  readonly in?: z.ZodType;
+  readonly out?: z.ZodType;
+  readonly left?: z.ZodType;
+  readonly right?: z.ZodType;
+  readonly items?: readonly z.ZodType[];
+  readonly rest?: z.ZodType | null;
+  readonly getter?: () => z.ZodType;
+}
+
+const defOf = (schema: z.ZodType): ZodDefLike =>
+  (schema as unknown as { _zod: { def: ZodDefLike } })._zod.def;
+
+/**
+ * Every bare-text position a `data` schema marks with `bareTextSchema`, as `meta.untrusted_fields`
+ * entries (`data.players[].name`), deduplicated, in schema order. Walks objects, arrays, tuples,
+ * optional/nullable/default/readonly/catch wrappers, unions (every option), intersections, pipes
+ * and lazies (depth-capped). A marked position under a RECORD (dynamic keys) cannot be written in
+ * the path grammar, so it throws — a tool may not hide a bare string there.
+ */
+export function bareFieldsFromSchema(dataSchema: z.ZodType): UntrustedField[] {
+  const out: UntrustedField[] = [];
+  const seen = new Set<string>();
+  const walk = (schema: z.ZodType, path: string, depth: number, underRecord: boolean): void => {
+    if (depth > MAX_WALK_DEPTH) return;
+    const src = bareSourceOf(schema);
+    if (src !== null) {
+      if (underRecord)
+        throw new RangeError("envelope: bare untrusted text under a record cannot be path-listed");
+      const key = `${path}\u0000${src}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ path, source: src });
+      }
+      return;
+    }
+    const def = defOf(schema);
+    switch (def.type) {
+      case "object":
+        for (const [k, child] of Object.entries(def.shape ?? {}))
+          walk(child, `${path}.${k}`, depth + 1, underRecord);
+        return;
+      case "array":
+        if (def.element) walk(def.element, `${path}[]`, depth + 1, underRecord);
+        return;
+      case "tuple":
+        for (const item of def.items ?? []) walk(item, `${path}[]`, depth + 1, underRecord);
+        if (def.rest) walk(def.rest, `${path}[]`, depth + 1, underRecord);
+        return;
+      case "record":
+        if (def.valueType) walk(def.valueType, `${path}.{}`, depth + 1, true);
+        return;
+      case "union":
+        for (const o of def.options ?? []) walk(o, path, depth + 1, underRecord);
+        return;
+      case "intersection":
+        if (def.left) walk(def.left, path, depth + 1, underRecord);
+        if (def.right) walk(def.right, path, depth + 1, underRecord);
+        return;
+      case "pipe":
+        if (def.in) walk(def.in, path, depth + 1, underRecord);
+        if (def.out) walk(def.out, path, depth + 1, underRecord);
+        return;
+      case "lazy":
+        if (def.getter) walk(def.getter(), path, depth + 1, underRecord);
+        return;
+      default:
+        if (def.innerType) walk(def.innerType, path, depth + 1, underRecord);
+    }
+  };
+  walk(dataSchema, "data", 0, false);
+  for (const f of out)
+    if (!FIELD_PATH_RE.test(f.path)) throw new RangeError("envelope: invalid derived field path");
+  return out;
+}
 
 /** The `untrusted_text` wrapper. */
 export const untrustedTextSchema = z.strictObject({

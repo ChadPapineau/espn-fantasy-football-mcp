@@ -73,7 +73,7 @@ const REFUSAL_TEXT: Readonly<Record<PathRefusal, string>> = Object.freeze({
   relative: "path must be absolute (or start with ~/)",
   home_user_form: "the ~user form is not supported; use ~/ or an absolute path",
   inside_repo:
-    "path is inside the repository checkout; config, cache and credentials must live outside it",
+    "path is inside a git working tree (this checkout or any other repository); config, cache and credentials must live outside every repository",
   synced_folder:
     "path is inside a cloud-synced folder (Documents, Desktop, iCloud Drive, CloudStorage); use ~/.config or ~/.cache",
   file_provider:
@@ -222,6 +222,51 @@ export function assertOutsideRepo(p: string, repoRoot: string, what = "path"): v
   if (spellings(p).some((c) => roots.some((r) => isInsideOnFs(c, r)))) {
     throw new PathSecurityError("inside_repo", p, what);
   }
+}
+
+/** The most directory levels the `.git` walk climbs (a path deeper than this is still refused). */
+export const GIT_WALK_MAX_LEVELS = 128;
+
+/** Whether `p` has a `.git` entry (a directory, or the file a worktree/submodule uses). */
+function hasGitEntry(dir: string): boolean {
+  try {
+    lstatSync(path.join(dir, ".git"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The nearest ancestor of `p` (itself included; symlinks in the existing prefix resolved) that
+ * holds a `.git` entry, or null. Bounded: at most GIT_WALK_MAX_LEVELS levels — a deeper path
+ * returns its own resolved form (refused: fail closed). `has` is injectable for tests.
+ */
+export function gitWorkTreeOf(
+  p: string,
+  has: (dir: string) => boolean = hasGitEntry,
+): string | null {
+  let dir = realpathOfExistingPrefix(p);
+  for (let i = 0; i < GIT_WALK_MAX_LEVELS; i++) {
+    if (has(dir)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return dir;
+}
+
+/**
+ * Throws `inside_repo` when `p` is inside ANY git working tree — another public repo (the owner's
+ * sibling) or a dotfiles repo, where `git add -A` would publish session.json, config.json (league
+ * and team ids) or store.sqlite (member GUIDs) — not only this checkout (M7; plan 02 §2.2).
+ */
+export function assertNotInAnyRepo(
+  p: string,
+  what = "path",
+  has: (dir: string) => boolean = hasGitEntry,
+): void {
+  if (gitWorkTreeOf(p, has) !== null) throw new PathSecurityError("inside_repo", p, what);
 }
 
 /** The cloud-synced folders under a macOS home (iCloud, CloudStorage, desktop sync clients). */
@@ -379,6 +424,8 @@ export interface LocationGuardOptions {
   readonly repoRoot: string;
   readonly xattr?: XattrReader;
   readonly what?: string;
+  /** Injectable `.git` probe (tests); defaults to an lstat of `<dir>/.git`. */
+  readonly gitEntry?: (dir: string) => boolean;
 }
 
 /**
@@ -399,6 +446,7 @@ export function locationRefusals(p: string, opts: LocationGuardOptions): PathSec
   };
   attempt(() => {
     assertOutsideRepo(p, opts.repoRoot, what);
+    assertNotInAnyRepo(p, what, opts.gitEntry);
   });
   attempt(() => {
     assertNotSynced(p, opts.home, what);

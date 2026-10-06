@@ -77,9 +77,15 @@ export function isLeagueId(s: string): boolean {
 }
 /** The first season the modern league route serves (research 03 §A.1; plan 02 §5). */
 export const SEASON_MIN = 2018;
-/** Team ids accepted anywhere (plan 02 §5, A-2: widened on evidence). */
+/**
+ * Team ids accepted anywhere — a GRAMMAR bound, not the league size (plan 02 §5, A-2: widened on
+ * evidence). The recorded public leagues show ids are neither contiguous nor bounded by the team
+ * count (a 12-team league uses 1–4, 6, 7, 10, 11, 13–16; a 10-team league reaches 11), so a
+ * long-lived league with team churn can exceed 20. Membership is checked at run time against the
+ * league's actual `teams[].id` (→ NOT_FOUND); code never assumes ids run 1..size.
+ */
 export const TEAM_ID_MIN = 1;
-export const TEAM_ID_MAX = 20;
+export const TEAM_ID_MAX = 999;
 /** The optional setup page's default port and fallback range (plan 03 §2.2, A-5). */
 export const SETUP_PORT_DEFAULT = 8790;
 export const SETUP_PORT_RANGE = Object.freeze({ min: 8790, max: 8799 });
@@ -116,6 +122,55 @@ export function isAllowedReadHost(host: string): boolean {
     ESPN_READ_HOST_RE.test(host) && host !== ESPN_WRITE_HOST && !host.startsWith("lm-api-writes")
   );
 }
+
+// --- ESPN transport policy (plan 01 §6; plan 06 §1.4 + changelog V7) ----------------------------
+//
+// Defined in config (the lowest layer) so the provider, the store's limiter, the job fleet, the
+// status tool and the per-source limits share ONE copy; src/providers/platform.ts re-exports them.
+
+/** The global, cross-process ESPN limiter: ≤ 30/min, ≤ 1/s sustained, ≤ 2 concurrent. */
+export const ESPN_LIMITER = Object.freeze({ perMinute: 30, perSecond: 1, concurrency: 2 });
+/** The circuit breaker: open for 5 min after 3 consecutive 5xx / 429 / timeouts. */
+export const ESPN_BREAKER = Object.freeze({ failures: 3, openMs: 300_000 });
+/**
+ * Backoff on 429 and 5xx: 1, 2, 4, 8 s with ±25 % full jitter, at most 3 attempts inside the
+ * per-call deadline; 400/401/403/404 and ENOTFOUND/ECONNREFUSED are never retried.
+ */
+export const ESPN_BACKOFF = Object.freeze({
+  baseMs: 1000,
+  maxMs: 8000,
+  jitter: 0.25,
+  maxAttempts: 3,
+});
+/** The job fleet's daily ESPN caps, enforced by the global limiter on JOB-origin rows only. */
+export const ESPN_JOB_DAILY_CAPS = Object.freeze({ cookie: 40, keyless: 30 });
+/**
+ * espn_requests rows older than this are pruned. Plan 01 §6 says 10 minutes, but the job caps are
+ * DAILY (plan 06 §1.4) and the breaker / 304 counters are read from the rows by other processes,
+ * so rows are kept 48 h — today's rows in any timezone (decision recorded; the steady state is
+ * tens of rows a day).
+ */
+export const ESPN_REQUEST_ROW_TTL_MS = 48 * 60 * 60 * 1000;
+
+/** One request's outcome, persisted in `espn_requests.outcome` so ANY process derives the state. */
+export const REQUEST_OUTCOMES = [
+  "pending",
+  "ok",
+  "not_modified",
+  "client_error",
+  "server_error",
+  "rate_limited",
+  "timeout",
+  "network_error",
+] as const;
+export type RequestOutcome = (typeof REQUEST_OUTCOMES)[number];
+
+/** The outcomes the breaker counts as failures (plan 01 §6: 5xx / 429 / timeouts). */
+export const BREAKER_FAILURE_OUTCOMES: readonly RequestOutcome[] = Object.freeze([
+  "server_error",
+  "rate_limited",
+  "timeout",
+]);
 
 // --- nflverse identity grammar (research 04 §C; plan 05 §2 domain/crosswalk) ----------------------
 

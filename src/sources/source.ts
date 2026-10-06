@@ -12,6 +12,7 @@ import type {
   License,
   RefreshJob,
 } from "../config/freshness.js";
+import { ESPN_JOB_DAILY_CAPS } from "../config/schema.js";
 import type { ProScheduleReader } from "../domain/analytics/types.js";
 import type { Clock } from "../domain/clock.js";
 import type { IsoInstant, Week } from "../domain/league/types.js";
@@ -47,7 +48,7 @@ export const SOURCE_RATE_LIMITS = Object.freeze({
   /** The Odds API ≤ 3/day. */
   odds: { minIntervalMs: 60 * 60 * 1000, maxPerDay: 3 },
   /** The keyless ESPN season views: counted against the jobs' keyless cap (≤ 30/day; changelog V7). */
-  espn_season: { minIntervalMs: 60 * 1000, maxPerDay: 30 },
+  espn_season: { minIntervalMs: 60 * 1000, maxPerDay: ESPN_JOB_DAILY_CAPS.keyless },
 } satisfies Record<string, RateLimit>);
 
 /** Release downloads time out after 60 s (plan 01 §6). */

@@ -31,6 +31,8 @@ import {
   type FreshnessState,
   type TtlContext,
 } from "../../src/config/freshness.js";
+import { SOURCE_ERROR_CODES, isSourceErrorCode } from "../../src/config/freshness.js";
+import { ERROR_CODES } from "../../src/mcp/errors.js";
 
 const classes = FRESHNESS_CLASS_IDS.map((id) => FRESHNESS_TABLE[id]);
 const contexts: TtlContext[] = [true, false].flatMap((inGameWindow) =>
@@ -310,5 +312,16 @@ describe("sources, licenses, attribution (plan 01 §4.2, §9; research 04 §E)",
       "ESPN:mRoster",
     ])
       expect(attributionFor(tag), tag).toBeNull();
+  });
+});
+
+describe("CAT-15: the source error vocabulary (G1 sources[].last_error, refresh_log.error)", () => {
+  it("its upper-case codes are plan 01 §4.3 codes; the rest are three refresh-only conditions", () => {
+    for (const c of SOURCE_ERROR_CODES)
+      if (c === c.toUpperCase()) expect(ERROR_CODES, c).toContain(c);
+      else expect(["schema_mismatch", "codec", "not_published"]).toContain(c);
+    expect(isSourceErrorCode("codec")).toBe(true);
+    expect(isSourceErrorCode("ECONNRESET: socket hang up")).toBe(false);
+    expect(isSourceErrorCode(undefined)).toBe(false);
   });
 });

@@ -371,6 +371,32 @@ export const ATTRIBUTIONS = Object.freeze({
   the_odds_api: Object.freeze({ source: "The Odds API", text: null, license: "api-terms", url: "https://the-odds-api.com/" }),
 } satisfies Record<string, Attribution>);
 
+/**
+ * The fixed vocabulary of a source's last error (refresh_log `error`; G1 `sources[].last_error`):
+ * plan 01 §4.3 codes a refresh can end in, plus three refresh-only conditions (an asserted column
+ * set or codec failed, or the season is not published upstream yet). Never an exception message
+ * or upstream text (plan 01 §4.3). tests/config/freshness.test.ts holds the upper-case ones to
+ * src/mcp/errors.ts ERROR_CODES (config may not import mcp).
+ */
+export const SOURCE_ERROR_CODES = [
+  "UPSTREAM_UNAVAILABLE",
+  "ESPN_UPSTREAM_UNAVAILABLE",
+  "ESPN_DRIFT_DETECTED",
+  "ESPN_HOST_MOVED",
+  "ESPN_AUTH_REJECTED",
+  "ESPN_REQUIRES_COOKIES",
+  "RATE_LIMITED",
+  "INTERNAL",
+  "schema_mismatch",
+  "codec",
+  "not_published",
+] as const;
+export type SourceErrorCode = (typeof SOURCE_ERROR_CODES)[number];
+/** Whether `v` is a SourceErrorCode (anything else is stored as `INTERNAL`). */
+export function isSourceErrorCode(v: unknown): v is SourceErrorCode {
+  return typeof v === "string" && (SOURCE_ERROR_CODES as readonly string[]).includes(v);
+}
+
 /** Every dataset source id a `DataSource` may carry (`<provider>:<dataset>`; plan 01 §9). */
 export const DATASET_SOURCE_IDS = [
   "espn:pro_schedule",

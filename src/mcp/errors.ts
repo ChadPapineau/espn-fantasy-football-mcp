@@ -232,15 +232,31 @@ export function newRequestId(): string {
 const SAFE_SEGMENT = /^[A-Za-z0-9_]{1,40}$/;
 const SAFE_REASON = /^[a-z_]{1,40}$/;
 const SAFE_JSON_PATH = /^[A-Za-z0-9_.[\]<>]{1,120}$/;
+/**
+ * The grammar of an error `field` — exactly what `safeFieldPath` can produce (`players.ids[2]`,
+ * `?`, `(root)`, `x (unknown key)`). A `field` from an EffError that does not match it is DROPPED,
+ * so a server path built from a model-supplied key can never echo attacker text (M6).
+ */
+export const SAFE_FIELD_RE = /^[A-Za-z0-9_.?[\]() ]{1,120}$/;
 
-/** Renders a zod issue path safely: odd segments become `?` (keys may be attacker-chosen). */
+/** The longest rendered field path (room left for the " (unknown key)" suffix under 120). */
+const FIELD_PATH_MAX = 100;
+
+/**
+ * Renders a zod issue path safely: odd segments become `?` (keys may be attacker-chosen); at most
+ * 8 segments and FIELD_PATH_MAX characters (segments past the cap are left off), so the result
+ * always matches SAFE_FIELD_RE.
+ */
 export function safeFieldPath(path: readonly PropertyKey[]): string {
   let out = "";
   for (const seg of path.slice(0, 8)) {
+    let next: string;
     if (typeof seg === "number" && Number.isInteger(seg) && seg >= 0 && seg < 100_000)
-      out += `[${String(seg)}]`;
-    else if (typeof seg === "string" && SAFE_SEGMENT.test(seg)) out += out === "" ? seg : `.${seg}`;
-    else out += out === "" ? "?" : ".?";
+      next = `[${String(seg)}]`;
+    else if (typeof seg === "string" && SAFE_SEGMENT.test(seg)) next = out === "" ? seg : `.${seg}`;
+    else next = out === "" ? "?" : ".?";
+    if (out.length + next.length > FIELD_PATH_MAX) break;
+    out += next;
   }
   return out === "" ? "(root)" : out;
 }
@@ -364,7 +380,8 @@ export function toToolError(e: unknown, requestId: string): ToolErrorResult {
     retryable: spec.retryable,
     request_id: REQUEST_ID_RE.test(requestId) ? requestId : "r-unknown",
   };
-  if (typeof details.field === "string") error.field = details.field.slice(0, 120);
+  if (typeof details.field === "string" && SAFE_FIELD_RE.test(details.field))
+    error.field = details.field;
   if (typeof details.reason === "string" && SAFE_REASON.test(details.reason))
     error.reason = details.reason;
   if (

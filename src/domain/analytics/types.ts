@@ -123,6 +123,29 @@ export interface AnalyticsResult {
   readonly inputs: readonly InputFreshness[];
 }
 
+/**
+ * The seeding reading a result used and whether the operator has confirmed it (plan 07 C9, C12,
+ * E2 objective resolution; ADV OBJ-13): `confirmed` stays false — a clean-negative field a test
+ * asserts — until `onboard` records the reading (`eff setup --seeding` → config
+ * `seeding_confirmed_at`). Carried by every result whose numbers depend on the reading: E2, E3
+ * `season`, E6 evaluation (its `delta_u.reading`) and E8 (weighted by E3).
+ */
+export interface SeedingStatus {
+  readonly mode_used: SeedingMode | "both";
+  readonly confirmed: boolean;
+}
+
+/** Builds SeedingStatus from the mode a call used and config's `seedingConfirmedAt` (null = never). */
+export function seedingStatus(
+  modeUsed: SeedingMode | "both",
+  seedingConfirmedAt: string | null,
+): SeedingStatus {
+  return Object.freeze({
+    mode_used: modeUsed,
+    confirmed: typeof seedingConfirmedAt === "string" && seedingConfirmedAt.length > 0,
+  });
+}
+
 // --- constants the engines and tests share (plan 07 §0, E1, E2, E5; research 05) -----------------
 
 /** v1 ships ESPN's mean as the point estimate (plan 01 D15; ADV OBJ-02). */
@@ -280,7 +303,9 @@ export interface ModeBasis {
 interface LineupDataBase extends AnalyticsResult {
   readonly objective_used: Objective;
   readonly objective_reason: string;
+  /** Plan 07 E2's field; always equal to `seeding.mode_used`. */
   readonly seeding_mode_used: SeedingMode | "both";
+  readonly seeding: SeedingStatus;
   readonly current_lineup: readonly LineupSlotAssignment[];
   readonly recommended_lineup: readonly LineupSlotAssignment[];
   readonly mode: MatchupMode;
@@ -419,6 +444,7 @@ export type SeasonScenario =
 /** E3 `season` data (plan 07 E3). The simulator itself is Phase 1a domain code (E2 needs it). */
 export interface SeasonSimData extends AnalyticsResult {
   readonly mode: "season";
+  readonly seeding: SeedingStatus;
   readonly readings: readonly SeasonReading[];
   readonly divergence: { readonly p_playoffs_delta_between_readings: number } | null;
   readonly playoff_pct_espn: number | null;
@@ -504,6 +530,29 @@ export interface KdstDetail {
   } | null;
 }
 
+/** Where a demand-model probability came from (cold-start table vs the league's own feed). */
+export type DemandBasis = "cold_start" | "league_fitted";
+
+/** E5 `p_clears_to_fa`: the point probability, its interval and the basis of `q_i`. */
+export interface ClearsToFa {
+  readonly p: number;
+  readonly interval: readonly [number, number];
+  readonly basis: DemandBasis;
+}
+
+/**
+ * Whether a ClearsToFa is well-formed: probabilities in [0, 1], `lo ≤ p ≤ hi`, and — while the
+ * basis is `cold_start` — a NON-degenerate interval (`hi − lo ≥ CLEARS_TO_FA_MIN_COLD_WIDTH`): a
+ * cold-start number must never read as certain.
+ */
+export const CLEARS_TO_FA_MIN_COLD_WIDTH = 0.05;
+export function isValidClearsToFa(c: ClearsToFa): boolean {
+  const [lo, hi] = c.interval;
+  const inUnit = (x: number) => Number.isFinite(x) && x >= 0 && x <= 1;
+  if (!inUnit(c.p) || !inUnit(lo) || !inUnit(hi) || lo > c.p || c.p > hi) return false;
+  return c.basis !== "cold_start" || hi - lo >= CLEARS_TO_FA_MIN_COLD_WIDTH;
+}
+
 /** One E5 candidate (plan 07 E5 `candidates[]`). */
 export interface WaiverCandidate {
   readonly player_id: number;
@@ -518,7 +567,11 @@ export interface WaiverCandidate {
   readonly s_with_ir_move: number | null;
   readonly p_role_holds: readonly { readonly week: Week; readonly p: number }[];
   readonly p_k_win: number | null;
-  readonly p_clears_to_fa: number | null;
+  /**
+   * P(the player clears waivers to free agency), with its own interval because `q_i` is cold-start
+   * (plan 07 E5 clean negative; research 05 §1.3) — null when the player is already a free agent.
+   */
+  readonly p_clears_to_fa: ClearsToFa | null;
   readonly demand: {
     readonly rivals_upgraded: readonly number[];
     readonly q_i: readonly { readonly team_id: number; readonly p: number }[];
@@ -597,7 +650,9 @@ export interface TradeEvaluationData extends AnalyticsResult {
   readonly kind: "evaluation";
   readonly delta_me: Dist;
   readonly delta_partner: Dist;
+  /** `delta_u.reading` is always `seeding.mode_used`. */
   readonly delta_u: DeltaU;
+  readonly seeding: SeedingStatus;
   readonly weekly_impact: readonly {
     readonly week: Week;
     readonly me: number;
@@ -710,6 +765,8 @@ export interface InjuryCascadeData extends AnalyticsResult {
 
 /** `espn_analyze_schedule` data (plan 07 E8). */
 export interface ScheduleAnalysisData extends AnalyticsResult {
+  /** The reading E3's `p_alive` weights were simulated under. */
+  readonly seeding: SeedingStatus;
   readonly weeks: readonly {
     readonly week: Week;
     readonly lineup_pts: Dist;

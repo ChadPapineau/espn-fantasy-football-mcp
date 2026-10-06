@@ -159,6 +159,115 @@ export const PLAYER_SORT_KEYS = [
 ] as const;
 export type PlayerSortKey = (typeof PLAYER_SORT_KEYS)[number];
 
+/** The plan 07 C2 `sort` values (`PlayerSort` in platform.ts; `playerSortSchema` in bounds.ts). */
+export const PLAYER_SORTS = [
+  "percOwned",
+  "percChanged",
+  "projection_week",
+  "projection_ros",
+  "draftRank",
+  "name",
+] as const;
+export type PlayerSortName = (typeof PLAYER_SORTS)[number];
+
+/**
+ * How one C2 `sort` becomes ESPN's filter (plan 07 C2; plan 01 §4.2: a `limit` always carries an
+ * ESPN sort). `split` names the stat split an applied-stat sort ranks by — the filter builder
+ * encodes it (the wire encoding is [V-community], research 03 §A.3). `name` has no ESPN key: it is
+ * fetched by `sortPercOwned` and re-sorted by name WITHIN the one returned page, so `offset > 0` is
+ * refused (VALIDATION, reason `name_sort_single_page`) and the tool adds PLAYER_LIST_WARNINGS
+ * `name_sort_page_only` — offset paging over a client-side re-sort would be wrong (plan 07 C2).
+ */
+export interface PlayerSortSpec {
+  readonly key: PlayerSortKey;
+  readonly sort_asc: boolean;
+  /** The sort object's `value` (`STANDARD` for draft ranks); null = none sent. */
+  readonly value: string | null;
+  /** The split an applied-stat sort ranks by; null for the other keys. */
+  readonly split: "weekly_projection" | "ros_projection" | null;
+  /** `verified` = observed on a recorded request (research 03 P09); else [V-community]. */
+  readonly evidence: "verified" | "community";
+  /** `name`: re-sorted by name inside the single returned page; null = ESPN's order is final. */
+  readonly client_resort: "name" | null;
+  /** Whether `offset > 0` is allowed with this sort. */
+  readonly offset_allowed: boolean;
+}
+
+const sortSpec = (s: PlayerSortSpec): PlayerSortSpec => Object.freeze(s);
+
+/** C2 `sort` → ESPN sort (frozen; the filter builder's only source). */
+export const PLAYER_SORT_MAP: Readonly<Record<PlayerSortName, PlayerSortSpec>> = Object.freeze({
+  percOwned: sortSpec({
+    key: "sortPercOwned",
+    sort_asc: false,
+    value: null,
+    split: null,
+    evidence: "verified",
+    client_resort: null,
+    offset_allowed: true,
+  }),
+  percChanged: sortSpec({
+    key: "sortPercChanged",
+    sort_asc: false,
+    value: null,
+    split: null,
+    evidence: "community",
+    client_resort: null,
+    offset_allowed: true,
+  }),
+  projection_week: sortSpec({
+    key: "sortAppliedStatTotal",
+    sort_asc: false,
+    value: null,
+    split: "weekly_projection",
+    evidence: "community",
+    client_resort: null,
+    offset_allowed: true,
+  }),
+  projection_ros: sortSpec({
+    key: "sortAppliedStatTotal",
+    sort_asc: false,
+    value: null,
+    split: "ros_projection",
+    evidence: "community",
+    client_resort: null,
+    offset_allowed: true,
+  }),
+  draftRank: sortSpec({
+    key: "sortDraftRanks",
+    sort_asc: true,
+    value: "STANDARD",
+    split: null,
+    evidence: "verified",
+    client_resort: null,
+    offset_allowed: true,
+  }),
+  name: sortSpec({
+    key: "sortPercOwned",
+    sort_asc: false,
+    value: null,
+    split: null,
+    evidence: "verified",
+    client_resort: "name",
+    offset_allowed: false,
+  }),
+});
+
+/**
+ * C2 `injured` is a POST-filter on the returned page (`filterInjured` is [U] — research 03 §A.3):
+ * the page keeps ESPN's order, `page.total` becomes null (the count header counts the unfiltered
+ * pool) and the tool adds PLAYER_LIST_WARNINGS `injured_post_filter`.
+ */
+export const INJURED_FILTER_MODE = "post_filter" as const;
+
+/** The fixed warnings C2 emits for the two client-side behaviours above (never upstream text). */
+export const PLAYER_LIST_WARNINGS = Object.freeze({
+  name_sort_page_only:
+    "sort name orders only this page (ESPN has no name sort): the page is the top players by ownership; use espn_search_players for a name",
+  injured_post_filter:
+    "injured filters this page after ESPN returned it, so page.total is unknown and the page may hold fewer than limit players",
+});
+
 // --- lineup-slot ids (research 03 §B.2 — NOT position ids) ------------------------------------------
 
 /** One lineup-slot id. `eligible` lists POSITION ids the slot accepts (descriptive; per-player
@@ -255,13 +364,81 @@ export const POSITIONAL_RATING_POSITION_IDS: readonly PositionId[] = Object.free
   [1, 2, 3, 4, 5, 16].map(asPositionId),
 );
 
+// --- team-unit player ids (research 03 §B.2; plan 02 §5 A-2 "widened on evidence") ---------------
+
 /**
- * D/ST player ids are negative: −(16000 + proTeamId) [A: community convention — verify on the first
- * recorded fixture; plan 02 A-2 widens bounds on evidence].
+ * One family of team-unit "players" (a whole pro team occupying a slot): their ids are negative,
+ * `base − proTeamId`, keyed by the unit's position id. `evidence` says whether a recorded fixture
+ * carries such ids (`verified`) or the range is the same convention extended by assumption [A].
  */
+export interface TeamUnitIdRange {
+  readonly position_id: PositionId;
+  readonly name: string;
+  readonly base: number;
+  readonly min: number;
+  readonly max: number;
+  readonly evidence: "verified" | "assumed";
+}
+
+const unit = (
+  positionId: number,
+  name: string,
+  base: number,
+  evidence: TeamUnitIdRange["evidence"],
+): TeamUnitIdRange =>
+  Object.freeze({
+    position_id: asPositionId(positionId),
+    name,
+    base,
+    min: base - 999,
+    max: base - 1,
+    evidence,
+  });
+
+/**
+ * The team-unit id ranges. D/ST (16) and TQB (15) are verified on the recorded public leagues
+ * (fixtures/espn/recorded: D/ST ids in every league, TQB ids −15000 − proTeamId in league-a's slot
+ * 1); HC (14) is the same convention, unobserved [A].
+ */
+export const ESPN_TEAM_UNIT_ID_RANGES: readonly TeamUnitIdRange[] = Object.freeze([
+  unit(16, "D/ST", -16000, "verified"),
+  unit(15, "TQB", -15000, "verified"),
+  unit(14, "HC", -14000, "assumed"),
+]);
+
+/** The team-unit range an id falls in, or null (every positive id is a person). */
+export function teamUnitRangeOf(id: number): TeamUnitIdRange | null {
+  if (!Number.isInteger(id)) return null;
+  return ESPN_TEAM_UNIT_ID_RANGES.find((r) => id >= r.min && id <= r.max) ?? null;
+}
+
+/** Whether `id` is a team-unit player id (D/ST, TQB or HC). */
+export function isTeamUnitPlayerId(id: number): boolean {
+  return teamUnitRangeOf(id) !== null;
+}
+
+/** The pro-team id a team-unit player id stands for (`base − id`), or null for a person's id. */
+export function teamUnitProTeamId(id: number): number | null {
+  const r = teamUnitRangeOf(id);
+  return r === null ? null : r.base - id;
+}
+
+/** The largest positive (person) ESPN player id accepted (plan 02 §5, A-2). */
+export const ESPN_PERSON_PLAYER_ID_MAX = 99_999_999;
+
+/** Whether `n` is an acceptable ESPN player id: a person 1..99 999 999 or a team-unit id. */
+export function isEspnPlayerIdValue(n: number): boolean {
+  return (
+    Number.isInteger(n) && ((n >= 1 && n <= ESPN_PERSON_PLAYER_ID_MAX) || isTeamUnitPlayerId(n))
+  );
+}
+
+/** D/ST player ids: −(16000 + proTeamId) — verified on the recorded fixtures. */
 export const ESPN_DST_PLAYER_ID_BASE = -16000;
 export const ESPN_DST_PLAYER_ID_MIN = -16999;
 export const ESPN_DST_PLAYER_ID_MAX = -16001;
+/** TQB (team quarterback) player ids: −(15000 + proTeamId) — verified on league-a. */
+export const ESPN_TQB_PLAYER_ID_BASE = -15000;
 
 // --- pro teams (research 03 §B.2, observed complete list; 31/32 unused) ----------------------------
 
@@ -290,8 +467,12 @@ export const ROSTER_ACQUISITION_TYPES = ["DRAFT", "ADD", "TRADE"] as const;
 export const TRANSACTION_ITEM_TYPES = ["ADD", "DROP", "LINEUP"] as const;
 /** PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; D11). Write `executionType`s; `VALIDATE` is a 400. */
 export const EXECUTION_TYPES = ["EXECUTE", "CANCEL"] as const;
-/** `acquisitionSettings.acquisitionType` (observed `WAIVERS_CONTINUOUS`; the non-FAAB value is [U]). */
-export const ACQUISITION_SETTING_TYPES = ["WAIVERS_CONTINUOUS"] as const;
+/**
+ * `acquisitionSettings.acquisitionType`, both observed on the recorded public leagues: CONTINUOUS
+ * on a FAAB league; TRADITIONAL on a FAAB league and on a rolling no-budget league (so the type
+ * alone does not say FAAB — `isUsingAcquisitionBudget` does; league/types.ts `waiverSystemOf`).
+ */
+export const ACQUISITION_SETTING_TYPES = ["WAIVERS_CONTINUOUS", "WAIVERS_TRADITIONAL"] as const;
 /** `waiverProcessDays[]` values. */
 export const WAIVER_PROCESS_DAYS = [
   "MONDAY",

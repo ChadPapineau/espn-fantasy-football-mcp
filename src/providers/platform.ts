@@ -12,17 +12,21 @@ import type {
   SeedingMode,
   Toolset,
 } from "../config/schema.js";
-import type { Freshness, License } from "../config/freshness.js";
+import type { Freshness, License, SourceErrorCode } from "../config/freshness.js";
+import { BREAKER_FAILURE_OUTCOMES, ESPN_BREAKER, type RequestOutcome } from "../config/schema.js";
 import type {
   CommitTicket,
   LineupMove,
   TradeRequest,
   TransactionRequest,
   WriteReceipt,
+  WriteRegistrationGate,
 } from "../domain/gate/types.js";
+import { DEGRADED_CODES } from "../domain/league/types.js";
 import type {
   BoxScoreMatchup,
   CheckRow,
+  DegradedRead,
   League,
   LeagueRef,
   LeagueRules,
@@ -49,19 +53,40 @@ import type {
   Week,
 } from "../domain/league/types.js";
 import type { ScoringSettings } from "../domain/scoring/types.js";
+import type { EspnView, PlayerSortName } from "./espn/types.js";
 
 export type * from "../domain/league/types.js";
+export { DEGRADED_CODES };
 export type { ScoringSettings } from "../domain/scoring/types.js";
+export {
+  BREAKER_FAILURE_OUTCOMES,
+  ESPN_BACKOFF,
+  ESPN_BREAKER,
+  ESPN_JOB_DAILY_CAPS,
+  ESPN_LIMITER,
+  ESPN_REQUEST_ROW_TTL_MS,
+  REQUEST_OUTCOMES,
+} from "../config/schema.js";
+export type { RequestOutcome } from "../config/schema.js";
 export {
   ESPN_DST_PLAYER_ID_MAX,
   ESPN_DST_PLAYER_ID_MIN,
+  ESPN_PERSON_PLAYER_ID_MAX,
   ESPN_PRO_TEAM_ABBREVS,
+  ESPN_TEAM_UNIT_ID_RANGES,
+  INJURED_FILTER_MODE,
   KNOWN_UPSTREAM_TYPES,
+  PLAYER_LIST_WARNINGS,
+  PLAYER_SORTS,
+  PLAYER_SORT_MAP,
   UPSTREAM_TYPE_FAMILY_RE,
+  isEspnPlayerIdValue,
   isEspnView,
+  isTeamUnitPlayerId,
+  teamUnitProTeamId,
   upstreamTypeOrUnknown,
 } from "./espn/types.js";
-export type { EspnView } from "./espn/types.js";
+export type { EspnView, PlayerSortName, PlayerSortSpec, TeamUnitIdRange } from "./espn/types.js";
 
 /** The marker every Phase W seam carries (a test greps for it). */
 export const WRITES_SEAM_MARKER =
@@ -127,9 +152,12 @@ export const ATTEMPT_TIMEOUT_MS = 15_000;
 export const FORCE_REFRESH_MIN_INTERVAL_MS = 60_000;
 
 /**
- * The upstream budget of one tool call, created by the tool handler and consumed by the provider.
- * `tryConsume()` is called before each upstream request; false → the provider must not send it
- * (the tool returns what it has with `partial: true` and names the missing input).
+ * The upstream budget of one tool call, created by the tool handler (`createUpstreamBudget`) and
+ * consumed by the provider. `tryConsume()` is called before each NEW upstream request; false → the
+ * provider must not send it and throws `UpstreamBudgetExhausted` (reason `budget`); a request whose
+ * start would fall past `deadline_at_ms` throws it with reason `deadline`. A RETRY of the same
+ * request does not consume budget (it is one request), but it counts against the deadline: a retry
+ * starts only if the deadline leaves room (plan 01 §6).
  */
 export interface UpstreamBudget {
   readonly request_id: string;
@@ -138,6 +166,125 @@ export interface UpstreamBudget {
   readonly signal: AbortSignal;
   used(): number;
   tryConsume(): boolean;
+  /** Whether a request or retry may still start at `nowMs` (before the deadline, not aborted). */
+  canStart(nowMs: number): boolean;
+}
+
+/**
+ * Creates one tool call's budget: `max` new requests (MAX_UPSTREAM_PER_CALL) and a deadline
+ * `deadlineMs` after `nowMs` (PER_CALL_DEADLINE_MS). The signal aborts when `abort()` is called
+ * (the caller's cancellation) — the deadline itself is enforced by `canStart`, never a timer, so
+ * creating a budget leaves nothing running.
+ */
+export function createUpstreamBudget(
+  requestId: string,
+  nowMs: number,
+  max: number = MAX_UPSTREAM_PER_CALL,
+  deadlineMs: number = PER_CALL_DEADLINE_MS,
+): UpstreamBudget & { abort(): void } {
+  if (!Number.isFinite(nowMs)) throw new RangeError("platform: nowMs must be finite");
+  if (!Number.isInteger(max) || max < 0 || max > MAX_UPSTREAM_PER_CALL)
+    throw new RangeError("platform: budget max must be an integer 0..MAX_UPSTREAM_PER_CALL");
+  if (!Number.isFinite(deadlineMs) || deadlineMs <= 0 || deadlineMs > PER_CALL_DEADLINE_MS)
+    throw new RangeError("platform: deadline must be in (0, PER_CALL_DEADLINE_MS]");
+  const controller = new AbortController();
+  const deadline = nowMs + deadlineMs;
+  let used = 0;
+  return Object.freeze({
+    request_id: requestId,
+    deadline_at_ms: deadline,
+    signal: controller.signal,
+    used: () => used,
+    tryConsume: () => {
+      if (controller.signal.aborted || used >= max) return false;
+      used++;
+      return true;
+    },
+    canStart: (at: number) => !controller.signal.aborted && Number.isFinite(at) && at < deadline,
+    abort: () => {
+      controller.abort();
+    },
+  });
+}
+
+/** Why a provider read could not send its request (plan 01 §5.6, §6). */
+export type BudgetShortfall = "budget" | "deadline";
+
+/**
+ * Thrown by the provider when a read needs a request the call's budget cannot pay for — the
+ * per-call cap (`budget`) or the ≤ 20 s deadline (`deadline`). Deliberately carries NO `effCode`:
+ * it is not an error result. A tool catches it, keeps what it has, sets `partial: true` and adds
+ * `partialWarning(missing)` to `warnings[]`. Uncaught, the mapper classifies it as INTERNAL — a
+ * tool bug, never a silent success.
+ */
+export class UpstreamBudgetExhausted extends Error {
+  readonly missing: { readonly view: EspnView; readonly reason: BudgetShortfall };
+  constructor(view: EspnView, reason: BudgetShortfall) {
+    super("upstream budget exhausted");
+    this.name = "UpstreamBudgetExhausted";
+    this.missing = Object.freeze({ view, reason });
+  }
+}
+
+/** Whether a thrown value is the budget signal (own class; never matched by message). */
+export function isUpstreamBudgetExhausted(e: unknown): e is UpstreamBudgetExhausted {
+  return e instanceof UpstreamBudgetExhausted;
+}
+
+/** The fixed `warnings[]` line a tool adds for a missing input (view names are whitelisted). */
+export function partialWarning(missing: UpstreamBudgetExhausted["missing"]): string {
+  return missing.reason === "budget"
+    ? `partial: espn:${missing.view} was not requested (the ${String(MAX_UPSTREAM_PER_CALL)}-request budget of this call was used); ask a narrower question for it`
+    : `partial: espn:${missing.view} was not requested (the ${String(PER_CALL_DEADLINE_MS / 1000)} s upstream deadline of this call passed); retry for it`;
+}
+
+/**
+ * The fixed `warnings[]` line for a degraded read (never upstream text). `source` is the stamp's
+ * provenance tag (`espn:mRoster`); buildEnvelope adds it automatically for every degraded input.
+ */
+export function degradedWarning(source: string, d: DegradedRead): string {
+  return `${d.code}: ${source} served from stale cache${d.hard_limit_suspended ? " (hard limit suspended while ESPN's host is moved)" : ""}`;
+}
+
+// --- transport status (plan 01 §6 breaker, §8 `eff status` limiter; plan 07 G1 `limiter`) ----------
+
+/** The transport's state, for `espn_get_status` (in-process) and `eff status` (from the rows). */
+export interface TransportStatus {
+  readonly breaker_open: boolean;
+  readonly breaker_open_until: string | null;
+  readonly consecutive_failures: number;
+  /** 304 answers today (`If-None-Match`; whether ESPN ever sends one is [U]). */
+  readonly etag_304_count: number;
+}
+
+/**
+ * The breaker state DERIVED from persisted outcomes (newest first) — the reading `eff status`,
+ * `eff doctor` and a second server use, since the in-process breaker lives in another process:
+ * open while the newest ESPN_BREAKER.failures outcomes are all failures and the newest of them is
+ * less than ESPN_BREAKER.openMs old. `pending` rows (in flight) are skipped. Pure.
+ */
+export function breakerFromOutcomes(
+  newestFirst: readonly { readonly at_ms: number; readonly outcome: RequestOutcome }[],
+  nowMs: number,
+): Pick<TransportStatus, "breaker_open" | "breaker_open_until" | "consecutive_failures"> {
+  let consecutive = 0;
+  let newestFailureMs: number | null = null;
+  for (const r of newestFirst) {
+    if (r.outcome === "pending") continue;
+    if (!BREAKER_FAILURE_OUTCOMES.includes(r.outcome)) break;
+    consecutive++;
+    newestFailureMs ??= r.at_ms;
+  }
+  const until =
+    newestFailureMs !== null && consecutive >= ESPN_BREAKER.failures
+      ? newestFailureMs + ESPN_BREAKER.openMs
+      : null;
+  const open = until !== null && Number.isFinite(nowMs) && nowMs < until;
+  return {
+    breaker_open: open,
+    breaker_open_until: open ? new Date(until).toISOString() : null,
+    consecutive_failures: consecutive,
+  };
 }
 
 /** Per-read options every seam read accepts (plan 07 §2 common inputs). */
@@ -151,9 +298,8 @@ export interface ReadOptions {
 
 /** C2 `status` filter: the pool statuses plus `AVAILABLE` (FA ∪ W) and `ALL`. */
 export type PlayerStatusFilter = PoolStatus | "AVAILABLE" | "ALL";
-/** C2 `sort`. */
-export type PlayerSort =
-  "percOwned" | "percChanged" | "projection_week" | "projection_ros" | "draftRank" | "name";
+/** C2 `sort` (mapped onto ESPN by PLAYER_SORT_MAP; `name` sorts one page only). */
+export type PlayerSort = PlayerSortName;
 
 /** A pool query (plan 07 C2). The provider maps it through the one filter builder. */
 export interface PlayerQuery {
@@ -162,6 +308,10 @@ export interface PlayerQuery {
   readonly position: string | null;
   readonly sort: PlayerSort;
   readonly week: Week;
+  /**
+   * A POST-filter on the returned page (INJURED_FILTER_MODE): the provider returns the page with
+   * `total: null`, and the tool adds PLAYER_LIST_WARNINGS.injured_post_filter.
+   */
   readonly injured: boolean | null;
 }
 
@@ -303,6 +453,12 @@ export interface FantasyPlatform {
   resolveOwnTeam(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<OwnTeamResolution>>;
   /** The one explicit credential probe (plan 07 G2), ≤ 1 per minute by the caller. */
   probeCredential(ref: LeagueRef): Promise<CredentialProbeResult>;
+  /**
+   * This process's transport state (breaker, consecutive failures, today's 304s). Another process
+   * (`eff status`, `eff doctor`) derives the same from `espn_requests.outcome` rows with
+   * `breakerFromOutcomes` and the limiter repository's `countToday`.
+   */
+  transportStatus(): TransportStatus;
 }
 
 // --- writes: PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11) --------------------
@@ -356,7 +512,8 @@ export interface StatusData {
     readonly stale_warning: boolean | null;
   };
   readonly capabilities: Omit<PlatformCapabilities, "discovered_at"> & {
-    readonly write_gate_failing: string | null;
+    /** PHASE W SEAM — `module_not_built` in this build (WRITE_GATE_FAILING_THIS_BUILD). */
+    readonly write_gate_failing: WriteRegistrationGate | "module_not_built" | null;
   };
   readonly league: {
     readonly season: number;
@@ -390,7 +547,8 @@ export interface StatusData {
     readonly age_s: number | null;
     readonly freshness: Freshness | "expired" | "never";
     readonly rows: number | null;
-    readonly last_error: string | null;
+    /** A fixed code (SOURCE_ERROR_CODES) — never an exception message or upstream text. */
+    readonly last_error: SourceErrorCode | null;
   }[];
   readonly crosswalk: {
     readonly matched: number;
@@ -421,8 +579,13 @@ export interface StatusData {
 export interface CheckAuthData {
   readonly accepted: boolean | null;
   readonly probe: "settings" | "board";
+  /** Fixed-vocabulary reason exactly when `accepted` is null (ADV OBJ-26); else null. */
+  readonly reason: CredentialProbeResult["reason"];
   readonly state: CredentialState;
   readonly upstream_status: number | null;
   readonly checked_at: string;
   readonly next_allowed_at: string;
 }
+
+/** What `write_gate_failing` reads in this build: the write module does not exist (D11). */
+export const WRITE_GATE_FAILING_THIS_BUILD = "module_not_built" as const;
