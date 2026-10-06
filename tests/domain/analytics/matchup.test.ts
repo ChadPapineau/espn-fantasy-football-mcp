@@ -161,6 +161,16 @@ describe("pre-week P(win)", () => {
     expect(a.data.interval[1]).toBeGreaterThanOrEqual(a.data.p_win);
   });
 
+  it("method defaults to Monte Carlo; an all-player_sim lineup reports basis player_sim", async () => {
+    const { method: _m, ...noMethod } = req();
+    const out = await analyzeMatchupWin({ ...noMethod, n_sims: 1000 });
+    expect(out.data.method).toBe("mc");
+    expect(out.completed_paths).toBe(1000);
+    expect(out.data.basis).toBe("position_cv");
+    const sim = roster(100).map((p) => mp({ ...p, points: { ...p.points, basis: "player_sim" } }));
+    expect((await analyzeMatchupWin(req({ me: sim }))).data.basis).toBe("player_sim");
+  });
+
   it("the CPU deadline stops the sampler: partial, the completed count, a warning", async () => {
     const out = await analyzeMatchupWin(
       req({ method: "mc", n_sims: 20_000, pacer: steppingPacer(1), deadline_ms: 30 }),

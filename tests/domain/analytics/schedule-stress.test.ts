@@ -344,6 +344,18 @@ describe("cooperative batching and hostile inputs", () => {
     );
   });
 
+  it("no pro schedule: fixes carry no deadline; of two options at a position the better one fills", async () => {
+    const { schedule: _s, ...noSchedule } = rq();
+    const out = await analyzeSchedule(noSchedule);
+    expect(out.data.fixes.length).toBeGreaterThan(0);
+    expect(out.data.fixes.every((f) => f.deadline === null)).toBe(true);
+    const better = await analyzeSchedule(
+      rq({ stream: [...stream(WEEKS), { position: "TE", week: 9, player_id: 913, points: 8.5 }] }),
+    );
+    const w9 = better.data.weeks.find((w) => w.week === 9);
+    expect(w9?.holes.find((h) => h.slot === "TE")?.replacement_player_id).toBe(913);
+  });
+
   it("a non-finite stream option is ignored; a fix deadline already past is null", async () => {
     const out = await analyzeSchedule(
       rq({

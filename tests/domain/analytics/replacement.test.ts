@@ -390,6 +390,34 @@ describe("analyzeReplacement", () => {
     );
   });
 
+  it("a week without a projection counts at the player's per-game value; a first-week bye reads 0 − stream", async () => {
+    const players = pool().map((p) =>
+      p.player_id === 1
+        ? {
+            ...p,
+            weeks: [
+              { mean: 25, bye: true },
+              null,
+              { mean: 25, bye: false },
+              { mean: 25, bye: false },
+            ],
+          }
+        : p,
+    );
+    const out = await analyzeReplacement(rq({ players, focus_player_ids: [1], detail: "full" }));
+    const qb = out.data.positions.find((p) => p.position === "QB");
+    const base = new Map(qb?.starter_baseline_weekly.map((x) => [x.week, x.points]));
+    const p1 = out.data.players.find((p) => p.player_id === 1);
+    const expected =
+      0 -
+      (base.get(5) ?? 0) +
+      (25 - (base.get(6) ?? 0)) +
+      (25 - (base.get(7) ?? 0)) +
+      (25 - (base.get(8) ?? 0));
+    expect(p1?.vor_ros.mean).toBeCloseTo(expected, 6);
+    expect(p1?.vor_weekly).toBeCloseTo(0 - 18, 6);
+  });
+
   it("streamCandidates: the best available per position and week, ties to the lower id", () => {
     // ids: rostered QB 1–4, RB 5–11, WR 12–18, TE 19–21, K 22–24, D/ST 25–27; available from 28
     const c = streamCandidates(pool(), W, ["QB", "K"]);

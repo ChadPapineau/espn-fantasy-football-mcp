@@ -405,6 +405,41 @@ describe("the IR section (research 05 §4.3; plan 10 B7)", () => {
     for (const r of [prog, poss, none]) expect(r.data.ir.hidden_bench_play?.risks.length).toBe(3);
   });
 
+  it("two cleared IR players: the plural action; no next run known → the timing warning without a time", async () => {
+    const players = [
+      ...roster().filter((p) => p.player_id !== 13 && p.player_id !== 14),
+      ap(20, "WR", 16, 21, { status: "ACTIVE" }),
+      ap(21, "RB", 6, 21, { status: null }),
+    ];
+    const out = await analyzeRoster(
+      rq({
+        players,
+        rules: { acquisition_limit: null, acquisitions_used: null, next_run_at: null },
+      }),
+    );
+    expect(out.data.rec.action).toMatch(/^roster INVALID: move 2 players out of IR/);
+    expect(out.data.ir.invalid_players).toEqual([20, 21]);
+    expect(out.data.ir.activation_timing_warning).toBe(
+      "activate an IR player after a waiver run, never the night before — a pending claim fails if the bench fills before it processes",
+    );
+    expect(out.data.rec.latest_execution_time).toBeNull();
+  });
+
+  it("no playoff weeks known: a stash is valued over the horizon, never zeroed by the playoff rule", async () => {
+    const players = [...roster(), ap(20, "WR", 16, 21, { status: "INJURY_RESERVE" })];
+    const out = await analyzeRoster(
+      rq({
+        players,
+        playoff_weeks: [],
+        trade_deadline_week: null,
+        current_week: 14,
+        weeks: [14, 15, 16, 17],
+      }),
+    );
+    expect(out.data.phase).toBe("mid");
+    expect(out.data.stash_values[0]?.playoff_horizon_note).toBeNull();
+  });
+
   it("an IR occupant whose status no ESPN page rules on is named, never silently counted", async () => {
     const out = await analyzeRoster(
       rq({ players: [...roster(), ap(20, "WR", 12, 21, { status: "DAY_TO_DAY" })] }),
