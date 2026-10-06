@@ -527,3 +527,44 @@ describe("runDoctor over a sandbox", () => {
     expect(text.out.text).toContain("eff doctor — espn-fantasy-football-mcp");
   });
 });
+
+describe("the keychain rows (#6–#8) over the in-memory keyring", () => {
+  it("a keychain holding a valid value: #6 ok (one store), #7 ok, #8 ok — and the value is never printed", async () => {
+    sb = sandbox();
+    const keyring = new FakeKeyring();
+    keyring.plant("espn-fantasy-football-mcp", "espn_s2", COOKIES.espn_s2);
+    keyring.plant("espn-fantasy-football-mcp", "SWID", COOKIES.swid);
+    keyring.plant(
+      "espn-fantasy-football-mcp",
+      "meta",
+      JSON.stringify(metaFor(COOKIES, "2026-10-01T00:00:00.000Z")),
+    );
+    const io = makeIo(sb, { keyring, env: { ESPN_LEAGUE_ID: "0" } });
+    const r = await runDoctor(io, { json: true, online: false, fix: false, yes: false });
+    expect(byId(r.rows, "credential_store")).toMatchObject({ status: "ok" });
+    expect(byId(r.rows, "credential_read").status).toBe("ok");
+    expect(byId(r.rows, "credential_format").status).toBe("ok");
+    expect(JSON.stringify(r)).not.toContain(COOKIES.espn_s2.slice(0, 16));
+    expect(JSON.stringify(r)).not.toContain(COOKIES.swid);
+  });
+  it("a keychain that cannot be read fails #6; an unavailable keychain reads as empty (exit 3)", async () => {
+    sb = sandbox();
+    const keyring = new FakeKeyring();
+    keyring.failOn = { op: "get", account: "meta", times: 5 };
+    const r = await runDoctor(makeIo(sb, { keyring, env: { ESPN_LEAGUE_ID: "0" } }), {
+      json: false,
+      online: false,
+      fix: false,
+      yes: false,
+    });
+    expect(byId(r.rows, "credential_store").status).toBe("fail");
+    const none = await runDoctor(
+      makeIo(sb, {
+        loadKeyring: () => Promise.reject(new Error("no addon")),
+        env: { ESPN_LEAGUE_ID: "0" },
+      }),
+      { json: false, online: false, fix: false, yes: false },
+    );
+    expect(byId(none.rows, "credential_store").status).toBe("credentials");
+  });
+});

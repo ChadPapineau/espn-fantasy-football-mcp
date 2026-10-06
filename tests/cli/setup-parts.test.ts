@@ -82,8 +82,9 @@ describe("terminal prompt", () => {
 });
 
 function listenOn(port: number): Promise<Server> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const s = createServer();
+    s.once("error", reject);
     s.listen({ host: "127.0.0.1", port }, () => {
       resolve(s);
     });
@@ -184,6 +185,33 @@ describe("setup page", () => {
         signal: pre.signal,
       }),
     ).toEqual({ kind: "interrupted" });
+  });
+  it("the default port busy: the page binds the next port of the 8790–8799 range and prints it", async () => {
+    sb = sandbox();
+    let held: Server | null = null;
+    try {
+      held = await listenOn(8790);
+    } catch {
+      held = null; // something else already holds 8790: the fallback is exercised all the same
+    }
+    const ctl = new AbortController();
+    let bound = 0;
+    const run = runSetupPage({
+      explicitPort: null,
+      exec: fakeExec().exec,
+      out: () => undefined,
+      signal: ctl.signal,
+      onListening: (_u, port) => {
+        bound = port;
+        ctl.abort();
+      },
+    });
+    const r = await run;
+    held?.close();
+    if (r.kind === "port_busy") return; // the whole range is taken on this machine
+    expect(r).toEqual({ kind: "interrupted" });
+    expect(bound).toBeGreaterThan(8790);
+    expect(bound).toBeLessThanOrEqual(8799);
   });
   it("GET serves the form only with the exact Host and token path; other paths are 404", async () => {
     sb = sandbox();
