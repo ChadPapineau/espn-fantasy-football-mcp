@@ -329,7 +329,7 @@ export function statLineFromTeamDefense(row: NflverseRow, opts: DefenseLineOptio
     dst_fr: col(row, "fumble_recovery_opp"),
     dst_int_td: intTd,
     dst_fr_td: frTd,
-    dst_ret_td: sumCols(row, ["def_tds", "fumble_recovery_tds_opp"]),
+    dst_td: sumCols(row, ["def_tds", "fumble_recovery_tds_opp"]),
     dst_safety: col(row, "def_safeties"),
     dst_blk: sumCols(row, ["def_fg_blocks", "def_punt_blocks", "def_pat_blocks"]),
     kr_yd: col(row, "kickoff_return_yards"),

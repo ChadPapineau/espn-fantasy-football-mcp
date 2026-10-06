@@ -295,7 +295,7 @@ describe("statLineFromTeamDefense", () => {
       dst_fr: 1,
       dst_int_td: 1,
       dst_fr_td: 0,
-      dst_ret_td: 1,
+      dst_td: 1,
       dst_safety: 0,
       dst_blk: 2,
       kr_yd: 80,

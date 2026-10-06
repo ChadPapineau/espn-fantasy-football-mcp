@@ -250,7 +250,9 @@ export const CANONICAL_DEFS: readonly CanonicalDef[] = Object.freeze([
   tier("dst_ya_500_549", DST, "dst_yards_allowed", "dst_ya_raw", 500, 549, "500–549 yards"),
   tier("dst_ya_550p", DST, "dst_yards_allowed", "dst_ya_raw", 550, null, "550+ yards allowed"),
   row("dst_blk_td", DEF_TD, "linear", null, "blocked kick returned for a TD", "ret_td_total"),
-  lin("dst_ret_td", DEF_TD, "interception or fumble return TD (combined)"),
+  // ESPN 94; the sibling hub's `dst_td` (every defensive TD) — never `dst_ret_td`, which the sibling uses for
+  // kick/punt-return TDs (one vocabulary for the shared projection store, plan 08 E2)
+  lin("dst_td", DEF_TD, "interception or fumble return TD (combined)"),
   lin("dst_int", DEF, "interceptions"),
   lin("dst_fr", DEF, "fumble recoveries"),
   lin("dst_blk", DEF, "blocked kicks (FG, punt and PAT — recorded)"),

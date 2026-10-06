@@ -1,0 +1,1959 @@
+{
+  "$comment": "P14 platform round trip (plan 08 §7 P14, §10): the sibling yahoo-fantasy-football-mcp's OWN normaliser output (`yahoo_settings`, frozen JSON — no shared code, plan 01 D3) for a canonical rule table both hubs share by name, and the sibling engine's points for 150 deterministic canonical lines. tests/property/scoring.test.ts scores the same lines under ESPN settings built from the same table and asserts identical points. Regenerate only when either registry changes the shared names.",
+  "sibling": {
+    "repository": "yahoo-fantasy-football-mcp",
+    "commit": "f6ba81e05639b52c7c052f2f7f8a256e103281f9",
+    "files": ["src/domain/scoring/settings.ts", "src/domain/scoring/engine.ts"]
+  },
+  "rule_table": [
+    { "canonical": "pass_yd", "points": 0.04, "position_type": "O" },
+    { "canonical": "pass_td", "points": 4, "position_type": "O" },
+    { "canonical": "pass_int", "points": -2, "position_type": "O" },
+    { "canonical": "pass_1d", "points": 0.25, "position_type": "O" },
+    { "canonical": "rush_att", "points": 0.1, "position_type": "O" },
+    { "canonical": "rush_yd", "points": 0.1, "position_type": "O" },
+    { "canonical": "rush_td", "points": 6, "position_type": "O" },
+    { "canonical": "rush_1d", "points": 0.5, "position_type": "O" },
+    { "canonical": "targets", "points": 0.1, "position_type": "O" },
+    { "canonical": "rec", "points": 0.5, "position_type": "O" },
+    { "canonical": "rec_yd", "points": 0.1, "position_type": "O" },
+    { "canonical": "rec_td", "points": 6, "position_type": "O" },
+    { "canonical": "rec_1d", "points": 0.5, "position_type": "O" },
+    { "canonical": "fum_lost", "points": -2, "position_type": "O" },
+    { "canonical": "fum", "points": -0.5, "position_type": "O" },
+    { "canonical": "pat_made", "points": 1, "position_type": "K" },
+    { "canonical": "pat_miss", "points": -1, "position_type": "K" },
+    { "canonical": "fg_40_49", "points": 4, "position_type": "K" },
+    { "canonical": "fg_50p", "points": 5, "position_type": "K" },
+    { "canonical": "dst_sack", "points": 1, "position_type": "DT" },
+    { "canonical": "dst_int", "points": 2, "position_type": "DT" },
+    { "canonical": "dst_safety", "points": 2, "position_type": "DT" },
+    { "canonical": "dst_blk", "points": 2, "position_type": "DT" },
+    { "canonical": "dst_td", "points": 6, "position_type": "DT" }
+  ],
+  "yahoo_settings": {
+    "platform": "yahoo",
+    "rules": [
+      {
+        "platform_id": "100",
+        "name": "Passing Yards",
+        "position_types": ["O"],
+        "modifier": 0.04,
+        "bonuses": [],
+        "canonical": "pass_yd"
+      },
+      {
+        "platform_id": "101",
+        "name": "Passing Touchdowns",
+        "position_types": ["O"],
+        "modifier": 4,
+        "bonuses": [],
+        "canonical": "pass_td"
+      },
+      {
+        "platform_id": "102",
+        "name": "Interceptions",
+        "position_types": ["O"],
+        "modifier": -2,
+        "bonuses": [],
+        "canonical": "pass_int"
+      },
+      {
+        "platform_id": "103",
+        "name": "Passing 1st Downs",
+        "position_types": ["O"],
+        "modifier": 0.25,
+        "bonuses": [],
+        "canonical": "pass_1d"
+      },
+      {
+        "platform_id": "104",
+        "name": "Rushing Attempts",
+        "position_types": ["O"],
+        "modifier": 0.1,
+        "bonuses": [],
+        "canonical": "rush_att"
+      },
+      {
+        "platform_id": "105",
+        "name": "Rushing Yards",
+        "position_types": ["O"],
+        "modifier": 0.1,
+        "bonuses": [],
+        "canonical": "rush_yd"
+      },
+      {
+        "platform_id": "106",
+        "name": "Rushing Touchdowns",
+        "position_types": ["O"],
+        "modifier": 6,
+        "bonuses": [],
+        "canonical": "rush_td"
+      },
+      {
+        "platform_id": "107",
+        "name": "Rushing 1st Downs",
+        "position_types": ["O"],
+        "modifier": 0.5,
+        "bonuses": [],
+        "canonical": "rush_1d"
+      },
+      {
+        "platform_id": "108",
+        "name": "Targets",
+        "position_types": ["O"],
+        "modifier": 0.1,
+        "bonuses": [],
+        "canonical": "targets"
+      },
+      {
+        "platform_id": "109",
+        "name": "Receptions",
+        "position_types": ["O"],
+        "modifier": 0.5,
+        "bonuses": [],
+        "canonical": "rec"
+      },
+      {
+        "platform_id": "110",
+        "name": "Receiving Yards",
+        "position_types": ["O"],
+        "modifier": 0.1,
+        "bonuses": [],
+        "canonical": "rec_yd"
+      },
+      {
+        "platform_id": "111",
+        "name": "Receiving Touchdowns",
+        "position_types": ["O"],
+        "modifier": 6,
+        "bonuses": [],
+        "canonical": "rec_td"
+      },
+      {
+        "platform_id": "112",
+        "name": "Receiving 1st Downs",
+        "position_types": ["O"],
+        "modifier": 0.5,
+        "bonuses": [],
+        "canonical": "rec_1d"
+      },
+      {
+        "platform_id": "113",
+        "name": "Fumbles Lost",
+        "position_types": ["O"],
+        "modifier": -2,
+        "bonuses": [],
+        "canonical": "fum_lost"
+      },
+      {
+        "platform_id": "114",
+        "name": "Fumbles",
+        "position_types": ["O"],
+        "modifier": -0.5,
+        "bonuses": [],
+        "canonical": "fum"
+      },
+      {
+        "platform_id": "115",
+        "name": "Point After Attempt Made",
+        "position_types": ["K"],
+        "modifier": 1,
+        "bonuses": [],
+        "canonical": "pat_made"
+      },
+      {
+        "platform_id": "116",
+        "name": "Point After Attempt Missed",
+        "position_types": ["K"],
+        "modifier": -1,
+        "bonuses": [],
+        "canonical": "pat_miss"
+      },
+      {
+        "platform_id": "117",
+        "name": "Field Goals 40-49 Yards",
+        "position_types": ["K"],
+        "modifier": 4,
+        "bonuses": [],
+        "canonical": "fg_40_49"
+      },
+      {
+        "platform_id": "118",
+        "name": "Field Goals 50+ Yards",
+        "position_types": ["K"],
+        "modifier": 5,
+        "bonuses": [],
+        "canonical": "fg_50p"
+      },
+      {
+        "platform_id": "119",
+        "name": "Sack",
+        "position_types": ["DT"],
+        "modifier": 1,
+        "bonuses": [],
+        "canonical": "dst_sack"
+      },
+      {
+        "platform_id": "120",
+        "name": "Interception",
+        "position_types": ["DT"],
+        "modifier": 2,
+        "bonuses": [],
+        "canonical": "dst_int"
+      },
+      {
+        "platform_id": "121",
+        "name": "Safety",
+        "position_types": ["DT"],
+        "modifier": 2,
+        "bonuses": [],
+        "canonical": "dst_safety"
+      },
+      {
+        "platform_id": "122",
+        "name": "Block Kick",
+        "position_types": ["DT"],
+        "modifier": 2,
+        "bonuses": [],
+        "canonical": "dst_blk"
+      },
+      {
+        "platform_id": "123",
+        "name": "Touchdown",
+        "position_types": ["DT"],
+        "modifier": 6,
+        "bonuses": [],
+        "canonical": "dst_td"
+      }
+    ],
+    "brackets": [
+      {
+        "family": "fg_distance",
+        "position_type": "K",
+        "members": [
+          { "canonical": "fg_40_49", "platform_id": "117", "lower": 40, "upper": 49 },
+          { "canonical": "fg_50p", "platform_id": "118", "lower": 50, "upper": null }
+        ],
+        "kind": "count"
+      }
+    ],
+    "uses_fractional_points": true,
+    "uses_negative_points": true,
+    "rounding": { "mode": "exact", "verified": false },
+    "negative_floor": { "scope": "none", "verified": false },
+    "settings_hash": "e9e5ec1f66e73e3a9dd933b6220aeee61b66179220dc8bcc7df0ca820c9a6955"
+  },
+  "cases": [
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 2,
+        "rush_att": 31,
+        "rush_td": 1,
+        "rush_1d": 8,
+        "targets": 15,
+        "rec": 12,
+        "rec_td": 4,
+        "rec_1d": 1,
+        "fum": 3
+      },
+      "yahoo_points": 51.6
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 47,
+        "pass_td": 0,
+        "pass_int": 4,
+        "pass_1d": 0,
+        "rush_att": 0,
+        "rush_yd": 106,
+        "rush_td": 0,
+        "targets": 2,
+        "rec": 9,
+        "rec_yd": 160,
+        "rec_td": 1,
+        "rec_1d": 10
+      },
+      "yahoo_points": 36.18
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 171,
+        "pass_td": 6,
+        "rush_att": 27,
+        "rush_yd": 229,
+        "rush_td": 2,
+        "rush_1d": 7,
+        "targets": 15,
+        "rec": 1,
+        "rec_yd": 57,
+        "rec_td": 1,
+        "fum": 3
+      },
+      "yahoo_points": 84.14
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_miss": 2, "fg_40_49": 0, "fg_50p": 3 },
+      "yahoo_points": 13
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 8, "dst_int": 1, "dst_safety": 1 },
+      "yahoo_points": 12
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 4,
+        "pass_1d": 14,
+        "rush_att": 23,
+        "rush_yd": 69,
+        "rush_td": 2,
+        "rush_1d": 4,
+        "targets": 7,
+        "rec_td": 3,
+        "rec_1d": 4,
+        "fum": 0
+      },
+      "yahoo_points": 63.4
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 184,
+        "pass_td": 6,
+        "pass_int": 0,
+        "rush_att": 33,
+        "rush_yd": 146,
+        "rush_td": 2,
+        "rush_1d": 0,
+        "targets": 7,
+        "rec_yd": 137,
+        "rec_td": 1,
+        "rec_1d": 0,
+        "fum": 2
+      },
+      "yahoo_points": 80.66
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 98,
+        "pass_td": 0,
+        "pass_int": 2,
+        "pass_1d": 0,
+        "rush_yd": 68,
+        "rush_td": 3,
+        "targets": 0,
+        "rec_yd": 40,
+        "rec_td": 2,
+        "rec_1d": 8,
+        "fum_lost": 2,
+        "fum": 3
+      },
+      "yahoo_points": 39.22
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 6, "pat_miss": 0, "fg_40_49": 1, "fg_50p": 0 },
+      "yahoo_points": 10
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 3, "dst_int": 0, "dst_safety": 1, "dst_td": 2 },
+      "yahoo_points": 17
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 127,
+        "pass_td": 2,
+        "pass_int": 1,
+        "rush_att": 27,
+        "rush_td": 2,
+        "rush_1d": 12,
+        "targets": 17,
+        "rec_td": 0,
+        "fum_lost": 0,
+        "fum": 2
+      },
+      "yahoo_points": 32.48
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 288,
+        "pass_td": 4,
+        "pass_int": 3,
+        "rush_att": 19,
+        "rush_yd": 110,
+        "rush_td": 2,
+        "rush_1d": 3,
+        "targets": 11,
+        "rec": 12,
+        "rec_yd": 221,
+        "rec_td": 3,
+        "fum_lost": 3,
+        "fum": 2
+      },
+      "yahoo_points": 88.12
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 140,
+        "pass_td": 5,
+        "pass_int": 2,
+        "pass_1d": 0,
+        "rush_yd": 111,
+        "rush_td": 2,
+        "targets": 10,
+        "rec": 8,
+        "rec_td": 4,
+        "rec_1d": 6,
+        "fum_lost": 2
+      },
+      "yahoo_points": 72.7
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 6, "pat_miss": 2, "fg_40_49": 3 },
+      "yahoo_points": 16
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 3, "dst_int": 4, "dst_safety": 0, "dst_blk": 2, "dst_td": 2 },
+      "yahoo_points": 27
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 101,
+        "pass_td": 2,
+        "pass_int": 2,
+        "pass_1d": 12,
+        "rush_att": 23,
+        "rush_yd": 3,
+        "rush_td": 3,
+        "rush_1d": 11,
+        "targets": 6,
+        "rec": 6,
+        "rec_yd": 143,
+        "rec_1d": 9,
+        "fum_lost": 0,
+        "fum": 2
+      },
+      "yahoo_points": 58.54
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 177,
+        "pass_td": 1,
+        "pass_int": 0,
+        "pass_1d": 24,
+        "rush_att": 23,
+        "rush_yd": 162,
+        "rush_td": 1,
+        "rush_1d": 0,
+        "rec": 6,
+        "rec_yd": 156,
+        "rec_td": 2,
+        "fum": 2
+      },
+      "yahoo_points": 71.18
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 355,
+        "pass_td": 0,
+        "pass_int": 2,
+        "pass_1d": 5,
+        "rush_att": 2,
+        "rush_yd": 5,
+        "rush_td": 2,
+        "rush_1d": 11,
+        "rec": 10,
+        "rec_yd": 176,
+        "rec_td": 1,
+        "rec_1d": 8,
+        "fum_lost": 0
+      },
+      "yahoo_points": 62.25
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 1, "pat_miss": 2, "fg_40_49": 1 },
+      "yahoo_points": 3
+    },
+    { "position_type": "DT", "values": { "dst_blk": 0 }, "yahoo_points": 0 },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 4,
+        "rush_att": 29,
+        "rush_yd": 170,
+        "rush_1d": 8,
+        "targets": 10,
+        "rec": 2,
+        "rec_yd": 129,
+        "rec_td": 0,
+        "fum": 1
+      },
+      "yahoo_points": 54.3
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_int": 2,
+        "rush_yd": 47,
+        "rush_1d": 1,
+        "targets": 5,
+        "rec": 5,
+        "fum_lost": 3
+      },
+      "yahoo_points": -1.8
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 76,
+        "pass_int": 1,
+        "pass_1d": 19,
+        "rush_att": 15,
+        "rush_yd": 158,
+        "rush_td": 0,
+        "targets": 6,
+        "rec": 4,
+        "rec_yd": 27,
+        "rec_td": 2,
+        "rec_1d": 1,
+        "fum_lost": 1
+      },
+      "yahoo_points": 38.89
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 2, "pat_miss": 1, "fg_40_49": 0, "fg_50p": 2 },
+      "yahoo_points": 11
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_int": 2, "dst_blk": 2, "dst_td": 0 },
+      "yahoo_points": 8
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 289,
+        "pass_td": 6,
+        "pass_int": 0,
+        "pass_1d": 25,
+        "rush_td": 2,
+        "targets": 1,
+        "rec_1d": 10,
+        "fum_lost": 1,
+        "fum": 1
+      },
+      "yahoo_points": 56.41
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 126,
+        "pass_td": 1,
+        "pass_int": 2,
+        "pass_1d": 10,
+        "rush_att": 5,
+        "rush_td": 0,
+        "rush_1d": 5,
+        "targets": 8,
+        "rec": 14,
+        "rec_yd": 92,
+        "rec_1d": 1,
+        "fum_lost": 2
+      },
+      "yahoo_points": 24.04
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 494,
+        "pass_int": 4,
+        "pass_1d": 21,
+        "rush_att": 9,
+        "rush_yd": 234,
+        "rush_td": 0,
+        "rec": 5,
+        "rec_yd": 205,
+        "rec_td": 0,
+        "rec_1d": 2,
+        "fum_lost": 2
+      },
+      "yahoo_points": 61.31
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 0, "pat_miss": 2, "fg_40_49": 0, "fg_50p": 1 },
+      "yahoo_points": 3
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 5, "dst_int": 0, "dst_safety": 0, "dst_blk": 1, "dst_td": 1 },
+      "yahoo_points": 13
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 96,
+        "pass_td": 5,
+        "pass_int": 0,
+        "pass_1d": 0,
+        "rush_att": 5,
+        "rush_1d": 9,
+        "targets": 16,
+        "rec": 7,
+        "rec_yd": 193,
+        "rec_1d": 7,
+        "fum_lost": 2,
+        "fum": 0
+      },
+      "yahoo_points": 52.74
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 170,
+        "pass_td": 5,
+        "pass_int": 2,
+        "pass_1d": 20,
+        "rush_att": 28,
+        "rush_td": 2,
+        "rush_1d": 10,
+        "rec_yd": 31,
+        "rec_td": 4,
+        "rec_1d": 2,
+        "fum_lost": 2,
+        "fum": 3
+      },
+      "yahoo_points": 70.2
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 371,
+        "pass_td": 6,
+        "pass_int": 1,
+        "pass_1d": 22,
+        "rush_att": 28,
+        "rush_yd": 249,
+        "rush_td": 0,
+        "rec": 3,
+        "rec_yd": 195,
+        "fum_lost": 1,
+        "fum": 1
+      },
+      "yahoo_points": 88.54
+    },
+    { "position_type": "K", "values": { "pat_miss": 0, "fg_40_49": 2 }, "yahoo_points": 8 },
+    { "position_type": "DT", "values": { "dst_blk": 2 }, "yahoo_points": 4 },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 3,
+        "pass_1d": 15,
+        "rush_att": 20,
+        "rush_td": 0,
+        "rec": 10,
+        "rec_yd": 150,
+        "rec_1d": 10,
+        "fum_lost": 2
+      },
+      "yahoo_points": 38.75
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 403,
+        "pass_td": 4,
+        "pass_int": 1,
+        "rush_att": 19,
+        "rush_1d": 2,
+        "targets": 12,
+        "rec_yd": 27,
+        "rec_td": 0,
+        "fum_lost": 3,
+        "fum": 3
+      },
+      "yahoo_points": 29.42
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 116,
+        "rush_att": 12,
+        "rush_td": 3,
+        "rush_1d": 10,
+        "rec_1d": 4,
+        "fum_lost": 1
+      },
+      "yahoo_points": 28.84
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 6, "pat_miss": 1, "fg_40_49": 0 },
+      "yahoo_points": 5
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_int": 1, "dst_safety": 1, "dst_blk": 0, "dst_td": 1 },
+      "yahoo_points": 10
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 411,
+        "pass_td": 1,
+        "pass_int": 2,
+        "rush_att": 35,
+        "rush_yd": 67,
+        "targets": 13,
+        "rec": 6,
+        "rec_td": 4,
+        "rec_1d": 10,
+        "fum_lost": 1,
+        "fum": 1
+      },
+      "yahoo_points": 57.44
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 249,
+        "pass_td": 1,
+        "pass_1d": 5,
+        "rush_att": 24,
+        "rush_td": 4,
+        "targets": 14,
+        "rec_td": 1,
+        "rec_1d": 3,
+        "fum": 0
+      },
+      "yahoo_points": 50.51
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 98,
+        "pass_1d": 21,
+        "rush_att": 16,
+        "rush_yd": 84,
+        "rush_td": 4,
+        "targets": 17,
+        "rec": 0,
+        "rec_td": 2,
+        "fum_lost": 1
+      },
+      "yahoo_points": 54.87
+    },
+    { "position_type": "K", "values": { "pat_miss": 0, "fg_50p": 3 }, "yahoo_points": 15 },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 1, "dst_int": 4, "dst_safety": 1, "dst_blk": 2, "dst_td": 1 },
+      "yahoo_points": 21
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 344,
+        "pass_td": 1,
+        "pass_int": 4,
+        "rush_att": 18,
+        "targets": 0,
+        "rec": 8,
+        "rec_yd": 101,
+        "rec_td": 0,
+        "fum": 1
+      },
+      "yahoo_points": 25.16
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 126,
+        "pass_td": 6,
+        "pass_int": 3,
+        "pass_1d": 21,
+        "rush_att": 7,
+        "rush_yd": 32,
+        "rush_td": 2,
+        "targets": 3,
+        "rec": 1,
+        "rec_yd": 151,
+        "rec_td": 3,
+        "rec_1d": 7,
+        "fum_lost": 2,
+        "fum": 3
+      },
+      "yahoo_points": 76.09
+    },
+    {
+      "position_type": "O",
+      "values": { "pass_yd": 347, "rush_td": 3, "rush_1d": 11, "rec_td": 3, "rec_1d": 2, "fum": 3 },
+      "yahoo_points": 54.88
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 1, "pat_miss": 0, "fg_50p": 2 },
+      "yahoo_points": 11
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 0, "dst_safety": 1, "dst_blk": 0 },
+      "yahoo_points": 2
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 429,
+        "pass_int": 3,
+        "rush_yd": 180,
+        "rush_td": 0,
+        "rush_1d": 4,
+        "targets": 9,
+        "rec": 15,
+        "rec_yd": 115,
+        "rec_td": 3,
+        "rec_1d": 9,
+        "fum_lost": 1,
+        "fum": 1
+      },
+      "yahoo_points": 71.06
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 420,
+        "pass_td": 0,
+        "pass_int": 1,
+        "rush_att": 34,
+        "rush_yd": 153,
+        "rush_1d": 4,
+        "targets": 17,
+        "rec_yd": 150,
+        "rec_td": 1,
+        "rec_1d": 7,
+        "fum_lost": 2,
+        "fum": 0
+      },
+      "yahoo_points": 57.7
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 3,
+        "pass_int": 4,
+        "pass_1d": 14,
+        "rush_att": 31,
+        "rush_yd": 244,
+        "rush_1d": 0,
+        "targets": 17,
+        "rec": 13,
+        "rec_td": 4,
+        "rec_1d": 8,
+        "fum_lost": 2
+      },
+      "yahoo_points": 67.2
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 5, "pat_miss": 0, "fg_40_49": 3, "fg_50p": 0 },
+      "yahoo_points": 17
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 6, "dst_int": 3, "dst_safety": 1, "dst_blk": 1, "dst_td": 2 },
+      "yahoo_points": 28
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 437,
+        "pass_td": 3,
+        "pass_int": 2,
+        "rush_att": 22,
+        "rush_yd": 0,
+        "rec": 8,
+        "rec_yd": 130,
+        "rec_td": 0,
+        "fum_lost": 1,
+        "fum": 3
+      },
+      "yahoo_points": 41.18
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 208,
+        "pass_td": 4,
+        "pass_1d": 1,
+        "rush_att": 0,
+        "rush_td": 3,
+        "rush_1d": 2,
+        "rec": 15,
+        "rec_yd": 44,
+        "rec_td": 2,
+        "rec_1d": 1,
+        "fum": 2
+      },
+      "yahoo_points": 66.97
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 433,
+        "pass_td": 1,
+        "pass_int": 4,
+        "rush_yd": 201,
+        "rush_td": 3,
+        "rush_1d": 0,
+        "targets": 12,
+        "rec_yd": 65,
+        "rec_td": 3,
+        "rec_1d": 5,
+        "fum_lost": 2
+      },
+      "yahoo_points": 75.62
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 2, "pat_miss": 2, "fg_40_49": 1, "fg_50p": 3 },
+      "yahoo_points": 19
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 0, "dst_int": 4, "dst_safety": 1, "dst_blk": 1 },
+      "yahoo_points": 12
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 399,
+        "pass_td": 4,
+        "pass_1d": 20,
+        "rush_att": 5,
+        "rush_yd": 132,
+        "rush_td": 2,
+        "rec": 14,
+        "rec_yd": 69,
+        "rec_1d": 0,
+        "fum_lost": 3
+      },
+      "yahoo_points": 70.56
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 151,
+        "pass_td": 3,
+        "pass_1d": 22,
+        "rush_td": 3,
+        "rush_1d": 1,
+        "targets": 0,
+        "rec": 10,
+        "fum_lost": 3,
+        "fum": 2
+      },
+      "yahoo_points": 40.04
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 0,
+        "pass_int": 2,
+        "pass_1d": 12,
+        "rush_att": 32,
+        "rush_yd": 65,
+        "targets": 0,
+        "rec": 1,
+        "rec_yd": 230,
+        "rec_td": 0,
+        "rec_1d": 9,
+        "fum_lost": 0
+      },
+      "yahoo_points": 36.7
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 4, "pat_miss": 2, "fg_40_49": 0 },
+      "yahoo_points": 2
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_safety": 0, "dst_blk": 2, "dst_td": 2 },
+      "yahoo_points": 16
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 3,
+        "pass_1d": 24,
+        "rush_att": 2,
+        "rush_1d": 1,
+        "targets": 15,
+        "rec": 4,
+        "rec_td": 2,
+        "rec_1d": 8,
+        "fum_lost": 1,
+        "fum": 3
+      },
+      "yahoo_points": 34.7
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 419,
+        "pass_int": 1,
+        "rush_yd": 98,
+        "rush_td": 1,
+        "rush_1d": 3,
+        "targets": 3,
+        "rec_yd": 67,
+        "rec_td": 0,
+        "rec_1d": 4
+      },
+      "yahoo_points": 41.06
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 138,
+        "pass_td": 6,
+        "pass_int": 2,
+        "pass_1d": 4,
+        "rush_att": 23,
+        "rush_yd": 226,
+        "targets": 15,
+        "fum_lost": 2,
+        "fum": 2
+      },
+      "yahoo_points": 47.92
+    },
+    { "position_type": "K", "values": { "fg_40_49": 2, "fg_50p": 2 }, "yahoo_points": 18 },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 0, "dst_int": 2, "dst_safety": 1, "dst_td": 2 },
+      "yahoo_points": 18
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 16,
+        "pass_td": 3,
+        "pass_int": 4,
+        "rush_att": 19,
+        "rush_yd": 179,
+        "rush_td": 4,
+        "targets": 5,
+        "rec_yd": 87,
+        "rec_td": 4,
+        "rec_1d": 0
+      },
+      "yahoo_points": 81.64
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 6,
+        "pass_1d": 7,
+        "rush_yd": 7,
+        "rush_td": 4,
+        "rush_1d": 4,
+        "targets": 9,
+        "fum_lost": 1,
+        "fum": 1
+      },
+      "yahoo_points": 50.85
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 324,
+        "pass_td": 4,
+        "pass_1d": 21,
+        "rush_att": 12,
+        "rush_yd": 119,
+        "rush_1d": 11,
+        "rec": 8,
+        "rec_yd": 101,
+        "rec_td": 2,
+        "fum_lost": 1,
+        "fum": 0
+      },
+      "yahoo_points": 76.91
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_miss": 0, "fg_40_49": 3, "fg_50p": 1 },
+      "yahoo_points": 17
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 0, "dst_int": 2, "dst_td": 0 },
+      "yahoo_points": 4
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 367,
+        "pass_td": 1,
+        "pass_int": 4,
+        "pass_1d": 16,
+        "targets": 8,
+        "rec_td": 1,
+        "rec_1d": 1,
+        "fum_lost": 2
+      },
+      "yahoo_points": 17.98
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 350,
+        "pass_int": 1,
+        "rush_att": 0,
+        "rush_yd": 231,
+        "rush_td": 0,
+        "rec": 3,
+        "rec_yd": -7,
+        "rec_td": 3,
+        "fum_lost": 0,
+        "fum": 3
+      },
+      "yahoo_points": 52.4
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 345,
+        "pass_td": 2,
+        "pass_int": 2,
+        "pass_1d": 10,
+        "rush_att": 30,
+        "rush_yd": 226,
+        "rush_1d": 2,
+        "targets": 11,
+        "rec": 14,
+        "rec_td": 3,
+        "rec_1d": 0,
+        "fum": 2
+      },
+      "yahoo_points": 72
+    },
+    { "position_type": "K", "values": { "pat_miss": 2 }, "yahoo_points": -2 },
+    { "position_type": "DT", "values": { "dst_safety": 0, "dst_td": 0 }, "yahoo_points": 0 },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 6,
+        "pass_int": 1,
+        "pass_1d": 22,
+        "rush_att": 27,
+        "rush_yd": 0,
+        "rush_td": 4,
+        "rush_1d": 4,
+        "targets": 13,
+        "rec_yd": 61,
+        "fum_lost": 3,
+        "fum": 0
+      },
+      "yahoo_points": 57.6
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 134,
+        "pass_td": 4,
+        "rush_att": 33,
+        "rush_td": 3,
+        "rush_1d": 1,
+        "rec": 4,
+        "rec_yd": 174,
+        "rec_td": 1,
+        "fum": 3
+      },
+      "yahoo_points": 67.06
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 489,
+        "pass_td": 3,
+        "pass_1d": 19,
+        "rush_att": 4,
+        "rush_yd": 158,
+        "rush_td": 1,
+        "targets": 9,
+        "rec_yd": 78,
+        "rec_td": 2,
+        "rec_1d": 3,
+        "fum": 0
+      },
+      "yahoo_points": 80.71
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 4, "pat_miss": 0, "fg_50p": 3 },
+      "yahoo_points": 19
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 8, "dst_int": 3, "dst_safety": 0, "dst_td": 0 },
+      "yahoo_points": 14
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 227,
+        "pass_td": 3,
+        "pass_int": 4,
+        "pass_1d": 19,
+        "rush_att": 22,
+        "rush_yd": 97,
+        "rush_td": 3,
+        "rush_1d": 8,
+        "targets": 4,
+        "rec": 14,
+        "rec_yd": 224,
+        "rec_td": 0,
+        "rec_1d": 4,
+        "fum_lost": 2,
+        "fum": 3
+      },
+      "yahoo_points": 78.03
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 237,
+        "pass_td": 0,
+        "pass_int": 0,
+        "pass_1d": 2,
+        "rec_td": 3,
+        "rec_1d": 10,
+        "fum_lost": 0,
+        "fum": 1
+      },
+      "yahoo_points": 32.48
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 236,
+        "pass_int": 0,
+        "rush_yd": 218,
+        "rush_1d": 2,
+        "targets": 3,
+        "rec": 7,
+        "rec_yd": 133,
+        "rec_td": 2,
+        "fum": 0
+      },
+      "yahoo_points": 61.34
+    },
+    { "position_type": "K", "values": { "pat_miss": 2, "fg_40_49": 1 }, "yahoo_points": 2 },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 2, "dst_safety": 0, "dst_blk": 2, "dst_td": 0 },
+      "yahoo_points": 6
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_int": 3,
+        "rush_att": 19,
+        "rush_yd": 50,
+        "rush_td": 1,
+        "rush_1d": 7,
+        "targets": 6,
+        "rec": 0,
+        "rec_yd": 241,
+        "rec_1d": 6,
+        "fum_lost": 2,
+        "fum": 3
+      },
+      "yahoo_points": 32.6
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 6,
+        "pass_int": 2,
+        "pass_1d": 1,
+        "rush_att": 19,
+        "rush_yd": 145,
+        "rush_td": 2,
+        "targets": 16,
+        "rec_yd": 189,
+        "rec_1d": 2,
+        "fum_lost": 1,
+        "fum": 1
+      },
+      "yahoo_points": 67.65
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 1,
+        "pass_int": 1,
+        "rush_att": 6,
+        "rush_yd": 91,
+        "rush_1d": 8,
+        "targets": 17,
+        "rec": 8,
+        "rec_td": 1,
+        "rec_1d": 2,
+        "fum_lost": 0
+      },
+      "yahoo_points": 28.4
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 4, "pat_miss": 2, "fg_40_49": 3 },
+      "yahoo_points": 14
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 0, "dst_int": 0, "dst_safety": 0, "dst_blk": 0, "dst_td": 2 },
+      "yahoo_points": 12
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 5,
+        "pass_int": 0,
+        "rush_att": 21,
+        "rush_yd": 74,
+        "rush_td": 4,
+        "rush_1d": 1,
+        "targets": 10,
+        "rec": 13,
+        "rec_yd": 250,
+        "rec_td": 4,
+        "rec_1d": 8,
+        "fum_lost": 3,
+        "fum": 3
+      },
+      "yahoo_points": 107
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 242,
+        "pass_td": 1,
+        "pass_int": 3,
+        "pass_1d": 4,
+        "rush_yd": 193,
+        "rush_td": 0,
+        "rush_1d": 4,
+        "rec": 2,
+        "rec_yd": 86,
+        "rec_td": 2
+      },
+      "yahoo_points": 51.58
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 312,
+        "pass_td": 6,
+        "pass_int": 1,
+        "pass_1d": 8,
+        "rush_att": 7,
+        "targets": 8,
+        "rec_yd": 104,
+        "rec_td": 1,
+        "rec_1d": 2,
+        "fum_lost": 3
+      },
+      "yahoo_points": 49.38
+    },
+    { "position_type": "K", "values": { "pat_made": 6, "fg_50p": 1 }, "yahoo_points": 11 },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 4, "dst_int": 3, "dst_blk": 2, "dst_td": 1 },
+      "yahoo_points": 20
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 1,
+        "pass_1d": 8,
+        "rush_yd": 37,
+        "rush_td": 2,
+        "rush_1d": 10,
+        "targets": 13,
+        "rec": 1,
+        "rec_yd": 56,
+        "rec_1d": 1,
+        "fum_lost": 1,
+        "fum": 2
+      },
+      "yahoo_points": 31.6
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 497,
+        "pass_td": 1,
+        "pass_int": 0,
+        "pass_1d": 22,
+        "rush_att": 35,
+        "rush_yd": 32,
+        "rush_td": 4,
+        "rush_1d": 12,
+        "targets": 4,
+        "rec_td": 3,
+        "rec_1d": 5
+      },
+      "yahoo_points": 86.98
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 4,
+        "pass_int": 1,
+        "pass_1d": 16,
+        "rush_att": 10,
+        "rush_yd": 100,
+        "rush_td": 2,
+        "rush_1d": 5,
+        "rec": 3,
+        "fum_lost": 2
+      },
+      "yahoo_points": 41
+    },
+    { "position_type": "K", "values": { "pat_made": 3, "pat_miss": 1 }, "yahoo_points": 2 },
+    { "position_type": "DT", "values": { "dst_sack": 1, "dst_td": 0 }, "yahoo_points": 1 },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 75,
+        "pass_td": 0,
+        "pass_int": 4,
+        "pass_1d": 21,
+        "rush_att": 11,
+        "rush_yd": 152,
+        "rush_td": 2,
+        "rush_1d": 10,
+        "targets": 18,
+        "rec": 14,
+        "rec_yd": 92,
+        "rec_td": 3,
+        "rec_1d": 2,
+        "fum": 1
+      },
+      "yahoo_points": 70.05
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 450,
+        "pass_int": 3,
+        "pass_1d": 17,
+        "rush_att": 19,
+        "rush_yd": 114,
+        "rush_td": 0,
+        "rec": 8,
+        "rec_td": 0,
+        "rec_1d": 6,
+        "fum": 1
+      },
+      "yahoo_points": 36.05
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 1,
+        "pass_int": 1,
+        "pass_1d": 19,
+        "rush_att": 33,
+        "rush_yd": 180,
+        "rush_td": 4,
+        "rec": 11,
+        "rec_yd": 82,
+        "rec_1d": 1,
+        "fum_lost": 1,
+        "fum": 2
+      },
+      "yahoo_points": 63.25
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 2, "pat_miss": 2, "fg_40_49": 1, "fg_50p": 0 },
+      "yahoo_points": 4
+    },
+    { "position_type": "DT", "values": { "dst_sack": 9, "dst_int": 3 }, "yahoo_points": 15 },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 1,
+        "pass_td": 1,
+        "pass_int": 2,
+        "pass_1d": 1,
+        "rush_yd": 36,
+        "rush_td": 1,
+        "rush_1d": 4,
+        "rec": 7,
+        "rec_1d": 4,
+        "fum": 3
+      },
+      "yahoo_points": 15.89
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 10,
+        "pass_1d": 13,
+        "rush_att": 32,
+        "rush_yd": 46,
+        "rush_td": 2,
+        "rush_1d": 2,
+        "targets": 7,
+        "rec_td": 0,
+        "rec_1d": 10
+      },
+      "yahoo_points": 30.15
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 4,
+        "pass_int": 3,
+        "rush_att": 8,
+        "rush_yd": 36,
+        "rush_td": 2,
+        "rush_1d": 2,
+        "targets": 3,
+        "rec": 6,
+        "rec_yd": 124,
+        "rec_td": 3,
+        "rec_1d": 10,
+        "fum_lost": 1,
+        "fum": 0
+      },
+      "yahoo_points": 64.1
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 1, "pat_miss": 0, "fg_40_49": 1, "fg_50p": 0 },
+      "yahoo_points": 5
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 5, "dst_int": 1, "dst_safety": 1, "dst_td": 1 },
+      "yahoo_points": 15
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 233,
+        "pass_td": 0,
+        "pass_int": 4,
+        "pass_1d": 7,
+        "rush_td": 3,
+        "rush_1d": 12,
+        "rec": 3,
+        "rec_yd": 117,
+        "rec_td": 3,
+        "rec_1d": 9,
+        "fum_lost": 3,
+        "fum": 1
+      },
+      "yahoo_points": 56.27
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 39,
+        "pass_int": 2,
+        "pass_1d": 24,
+        "rush_att": 28,
+        "rush_td": 0,
+        "targets": 4,
+        "rec": 8,
+        "rec_yd": 184,
+        "fum": 3
+      },
+      "yahoo_points": 27.66
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 348,
+        "pass_td": 6,
+        "pass_int": 1,
+        "rush_att": 13,
+        "rush_yd": 185,
+        "rush_1d": 7,
+        "rec": 7,
+        "rec_yd": 215,
+        "rec_td": 3,
+        "rec_1d": 6,
+        "fum_lost": 3,
+        "fum": 3
+      },
+      "yahoo_points": 97.72
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 7, "pat_miss": 0, "fg_40_49": 0 },
+      "yahoo_points": 7
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_int": 1, "dst_safety": 0, "dst_td": 1 },
+      "yahoo_points": 8
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 353,
+        "pass_td": 5,
+        "pass_int": 0,
+        "pass_1d": 7,
+        "rush_yd": 115,
+        "rush_td": 2,
+        "rush_1d": 1,
+        "targets": 7,
+        "rec": 12,
+        "rec_yd": 177,
+        "rec_td": 4,
+        "fum_lost": 2,
+        "fum": 0
+      },
+      "yahoo_points": 104.27
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_1d": 23,
+        "rush_td": 2,
+        "rush_1d": 7,
+        "targets": 2,
+        "rec": 6,
+        "rec_yd": 101,
+        "fum_lost": 0
+      },
+      "yahoo_points": 34.55
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 173,
+        "pass_int": 0,
+        "pass_1d": 3,
+        "rush_td": 3,
+        "rush_1d": 8,
+        "rec_yd": 99,
+        "rec_td": 3,
+        "rec_1d": 5,
+        "fum_lost": 0,
+        "fum": 2
+      },
+      "yahoo_points": 59.07
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 7, "pat_miss": 0, "fg_50p": 1 },
+      "yahoo_points": 12
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 1, "dst_int": 0, "dst_blk": 0 },
+      "yahoo_points": 1
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 462,
+        "pass_int": 0,
+        "pass_1d": 8,
+        "rush_yd": 97,
+        "rush_td": 1,
+        "rush_1d": 11,
+        "targets": 4,
+        "rec_yd": 7,
+        "rec_1d": 4,
+        "fum_lost": 1
+      },
+      "yahoo_points": 42.78
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 3,
+        "pass_1d": 18,
+        "rush_att": 35,
+        "rush_yd": 96,
+        "rush_td": 2,
+        "rush_1d": 4,
+        "targets": 5,
+        "rec": 4,
+        "fum": 1
+      },
+      "yahoo_points": 45.6
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 4,
+        "pass_1d": 13,
+        "rush_att": 30,
+        "rush_yd": 118,
+        "rush_td": 3,
+        "targets": 12,
+        "rec_td": 4,
+        "rec_1d": 9,
+        "fum_lost": 2
+      },
+      "yahoo_points": 77.75
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 1, "fg_40_49": 3, "fg_50p": 2 },
+      "yahoo_points": 23
+    },
+    { "position_type": "DT", "values": { "dst_safety": 1, "dst_blk": 1 }, "yahoo_points": 4 },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_int": 0,
+        "pass_1d": 4,
+        "rush_att": 12,
+        "rush_yd": 5,
+        "targets": 0,
+        "rec": 11,
+        "rec_yd": 55,
+        "rec_1d": 9,
+        "fum_lost": 0,
+        "fum": 0
+      },
+      "yahoo_points": 18.2
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 85,
+        "pass_int": 4,
+        "pass_1d": 0,
+        "rec_yd": 215,
+        "rec_td": 1,
+        "rec_1d": 4,
+        "fum_lost": 3,
+        "fum": 1
+      },
+      "yahoo_points": 18.4
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 22,
+        "pass_1d": 4,
+        "rush_att": 25,
+        "rush_yd": 213,
+        "rush_td": 0,
+        "rec": 6,
+        "rec_yd": 32,
+        "rec_td": 3,
+        "rec_1d": 5
+      },
+      "yahoo_points": 52.38
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_miss": 1, "fg_40_49": 2, "fg_50p": 2 },
+      "yahoo_points": 17
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_int": 0, "dst_safety": 0, "dst_blk": 2, "dst_td": 1 },
+      "yahoo_points": 10
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 120,
+        "pass_td": 2,
+        "rush_att": 31,
+        "rush_td": 3,
+        "targets": 17,
+        "rec": 1,
+        "rec_yd": 28,
+        "rec_td": 0,
+        "rec_1d": 2,
+        "fum_lost": 0,
+        "fum": 1
+      },
+      "yahoo_points": 39.4
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 140,
+        "pass_int": 0,
+        "pass_1d": 13,
+        "rush_att": 19,
+        "rush_td": 2,
+        "rush_1d": 4,
+        "targets": 0,
+        "rec": 8,
+        "rec_yd": 235,
+        "rec_td": 4,
+        "rec_1d": 8,
+        "fum_lost": 3
+      },
+      "yahoo_points": 74.25
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_int": 2,
+        "pass_1d": 11,
+        "rush_td": 2,
+        "rec": 11,
+        "rec_td": 0,
+        "fum_lost": 3,
+        "fum": 2
+      },
+      "yahoo_points": 9.25
+    },
+    { "position_type": "K", "values": { "pat_made": 3 }, "yahoo_points": 3 },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 6, "dst_int": 0, "dst_safety": 1, "dst_blk": 0, "dst_td": 2 },
+      "yahoo_points": 20
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_int": 2,
+        "rush_att": 24,
+        "rush_yd": 159,
+        "rush_td": 0,
+        "rush_1d": 9,
+        "rec": 6,
+        "rec_yd": 70,
+        "rec_1d": 4,
+        "fum_lost": 1
+      },
+      "yahoo_points": 28.8
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_td": 1,
+        "rush_att": 35,
+        "rush_td": 3,
+        "rush_1d": 11,
+        "targets": 8,
+        "rec_yd": 136,
+        "rec_td": 2,
+        "fum": 1
+      },
+      "yahoo_points": 56.9
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 0,
+        "pass_td": 3,
+        "pass_int": 1,
+        "pass_1d": 8,
+        "rush_yd": 188,
+        "rush_td": 0,
+        "rush_1d": 8,
+        "rec_yd": 57,
+        "rec_td": 3,
+        "rec_1d": 0,
+        "fum": 1
+      },
+      "yahoo_points": 58
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 7, "pat_miss": 1, "fg_40_49": 1, "fg_50p": 0 },
+      "yahoo_points": 10
+    },
+    {
+      "position_type": "DT",
+      "values": { "dst_sack": 0, "dst_int": 4, "dst_td": 1 },
+      "yahoo_points": 14
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 121,
+        "pass_td": 4,
+        "pass_int": 4,
+        "rush_att": 11,
+        "rush_yd": 195,
+        "rush_td": 4,
+        "targets": 10,
+        "rec": 7,
+        "rec_yd": 197,
+        "rec_td": 4,
+        "rec_1d": 6,
+        "fum_lost": 1,
+        "fum": 0
+      },
+      "yahoo_points": 106.64
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 29,
+        "pass_td": 2,
+        "pass_int": 3,
+        "rush_att": 29,
+        "rush_yd": 150,
+        "rush_td": 4,
+        "rush_1d": 11,
+        "targets": 4,
+        "rec": 6,
+        "rec_yd": 26,
+        "fum_lost": 0,
+        "fum": 0
+      },
+      "yahoo_points": 56.56
+    },
+    {
+      "position_type": "O",
+      "values": {
+        "pass_yd": 285,
+        "pass_td": 6,
+        "pass_int": 2,
+        "pass_1d": 15,
+        "rush_yd": 46,
+        "rush_td": 0,
+        "rush_1d": 3,
+        "rec": 2,
+        "rec_yd": 235,
+        "rec_1d": 10,
+        "fum_lost": 3
+      },
+      "yahoo_points": 64.75
+    },
+    {
+      "position_type": "K",
+      "values": { "pat_made": 3, "pat_miss": 1, "fg_40_49": 3, "fg_50p": 2 },
+      "yahoo_points": 24
+    },
+    { "position_type": "DT", "values": { "dst_safety": 0 }, "yahoo_points": 0 }
+  ]
+}

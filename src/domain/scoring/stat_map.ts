@@ -123,7 +123,7 @@ const ROWS: readonly (readonly [number, Canonical, string])[] = [
   [91, "dst_pa_7_13", "PA7"],
   [92, "dst_pa_14_17", "PA14"],
   [93, "dst_blk_td", "BLKKRTD"],
-  [94, "dst_ret_td", "DEFRETTD"],
+  [94, "dst_td", "DEFRETTD"],
   [95, "dst_int", "INT"],
   [96, "dst_fr", "FR"],
   [97, "dst_blk", "BLKK"],
@@ -263,6 +263,35 @@ export function positionClassOf(position: number): PositionClass {
   return cls;
 }
 
+/** The meaningful (statSourceId, statSplitTypeId) pairs (research 03 §B.2; plan 08 §3.3). */
+const VALID_SPLITS: ReadonlySet<string> = new Set(["0:0", "0:1", "1:0", "1:1", "1:2"]);
+
+/**
+ * A split's ids are meaning-changing enums (plan 01 §7): an unknown `statSourceId`, an unknown or
+ * impossible `statSplitTypeId` (`(0, 2)`), a non-integer season, or a week that does not fit the
+ * split type (a period for type 1, null otherwise; 0..22) fails the entry as drift.
+ */
+function checkSplit(split: StatSplit): StatSplit {
+  const raw: unknown = split;
+  if (raw === null || typeof raw !== "object")
+    throw new ScoringError("drift", "split must be an object");
+  const { source_id, split_type, season, week } = split as Record<keyof StatSplit, unknown>;
+  if (!VALID_SPLITS.has(`${String(source_id)}:${String(split_type)}`)) {
+    throw new ScoringError("drift", "unknown statSourceId / statSplitTypeId", [
+      `${String(source_id)}:${String(split_type)}`.slice(0, 20),
+    ]);
+  }
+  if (typeof season !== "number" || !Number.isInteger(season) || season < 2000 || season > 2100) {
+    throw new ScoringError("drift", "split season is not a year");
+  }
+  const weekly = split_type === 1;
+  const weekOk = weekly
+    ? typeof week === "number" && Number.isInteger(week) && week >= 0 && week <= 22
+    : week === null;
+  if (!weekOk) throw new ScoringError("drift", "split week does not fit its type");
+  return Object.freeze({ ...split });
+}
+
 /** `stats{statId: raw}` keys: decimal ids only. */
 const STAT_ID_RE = /^(0|[1-9]\d{0,3})$/;
 /** The most raw stats one entry may carry (ESPN sends ≈ 150 at most). */
@@ -317,7 +346,7 @@ export function statLineFromEspn(input: EspnLineInput, position: number): EspnLi
     position_class: cls,
     provisional: input.provisional === true,
     source: "espn",
-    ...(input.split === undefined ? {} : { split: Object.freeze({ ...input.split }) }),
+    ...(input.split === undefined ? {} : { split: checkSplit(input.split) }),
   };
   return Object.freeze({
     line: Object.freeze(line),
