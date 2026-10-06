@@ -13,7 +13,7 @@ import type {
   RefreshJob,
 } from "../config/freshness.js";
 import { ESPN_JOB_DAILY_CAPS } from "../config/schema.js";
-import type { ProScheduleReader } from "../domain/analytics/types.js";
+import type { NflGamesReader, ProScheduleReader } from "../domain/analytics/types.js";
 import type { Clock } from "../domain/clock.js";
 import type { IsoInstant, Week } from "../domain/league/types.js";
 import type { DatasetTableSpec, DatasetWriter, PublishStats } from "../store/types.js";
@@ -64,7 +64,16 @@ export const MAX_REDIRECT_HOPS = 3;
  */
 export type HttpGet = (
   url: string,
-  opts: { readonly signal: AbortSignal; readonly maxBytes: number; readonly accept?: string },
+  opts: {
+    readonly signal: AbortSignal;
+    readonly maxBytes: number;
+    readonly accept?: string;
+    /**
+     * The `X-Fantasy-Filter` header (additive, B1): accepted only for a URL on the ESPN read host
+     * (the keyless `players_wl` view needs a root-level `filterActive`); refused for any other host.
+     */
+    readonly fantasyFilter?: string;
+  },
 ) => Promise<{
   readonly status: number;
   readonly body: Uint8Array;
@@ -103,7 +112,14 @@ export interface SourceContext {
   /** The week the run targets (weather: the coming week); null for season-wide sources. */
   readonly week: Week | null;
   /** Already-published datasets a source is driven by (weather ← the pro schedule's outdoor games). */
-  readonly datasets: { readonly proSchedule: ProScheduleReader };
+  readonly datasets: {
+    readonly proSchedule: ProScheduleReader;
+    /**
+     * nflverse schedules (additive, B1; optional): the per-game roof a retractable-roof venue needs
+     * (weather fetches only when it says `open`/`outdoors`). Absent → such a venue is assumed closed.
+     */
+    readonly nflGames?: NflGamesReader;
+  };
   /** The run's private temp dir (created and removed by the runner). */
   readonly tempDir: string;
   /** Reports that a season's data is not published upstream yet (a new season's 404). */
