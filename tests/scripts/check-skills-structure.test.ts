@@ -1,6 +1,6 @@
 // check-skills-structure.test.ts — the plugin-root and Skills structure gate (plan 04 §4.2; plan 09
-// §4, §5.1, K4, K8; plan 10 §3.0 Z6): it passes on this repo with zero Skills and fails on every
-// manifest or Skill defect it names, hostile values included.
+// §4, §5.1, K4, K8; plan 10 §3.0 Z6): it passes on this repo with the eight P0 Skills and fails on
+// every manifest or Skill defect it names, hostile values included.
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,11 +41,12 @@ const server = (j: Record<string, unknown>) =>
   (j.mcpServers as Record<string, Server>)[PLUGIN_NAME]!;
 
 describe("this repository", () => {
-  it("passes: a valid plugin root and zero Skills (the CLI exits 0 with a vacuity warning)", () => {
+  it("passes: a valid plugin root and the eight P0 Skills (no vacuity warning)", () => {
     expect(checkPlugin(ROOT)).toEqual([]);
     const r = runCheck("check-skills-structure.mjs", []);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toContain("0 Skills present");
+    expect(r.stdout).toContain("8 Skill(s) structurally valid");
+    expect(r.stderr).not.toContain("0 Skills present");
   });
 
   it(".mcp.json launches /bin/sh with the shim and sets no EFF_CONFIG_DIR/EFF_CACHE_DIR", () => {

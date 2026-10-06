@@ -194,6 +194,10 @@ describe("docs.yml (plan 04 §4.2)", () => {
   it("skills: the structure check and claude plugin validate --strict on the root and the packed plugin", () => {
     const s = job("skills");
     expect(s).toContain("node scripts/ci/check-skills-structure.mjs");
+    expect(s).toContain("node scripts/skills/check-skills.mjs");
+    expect(s.indexOf("check-skills-structure.mjs")).toBeLessThan(
+      s.indexOf("scripts/skills/check-skills.mjs"),
+    );
     expect(s).toContain('plugin validate "$GITHUB_WORKSPACE" --strict');
     expect(s).toContain('/package/.claude-plugin/plugin.json" --strict');
     expect(s).toContain("--ignore-scripts");

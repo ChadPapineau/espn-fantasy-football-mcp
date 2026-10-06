@@ -138,6 +138,16 @@ describe("package.json", () => {
     expect(pkg.scripts?.["test:process"]).toBe("vitest run --project process --passWithNoTests");
   });
 
+  it("the Skills scripts run the dependency-free tooling (plan 09 §4, §5.1)", () => {
+    expect(pkg.scripts?.["build:skills"]).toBe("node scripts/skills/build-skills.mjs");
+    expect(pkg.scripts?.["check:skills"]).toBe("node scripts/skills/check-skills.mjs");
+    // the copy-install tree is the plan 09 §4 path; `npm run build` (tsc) never writes it
+    expect(pkg.scripts?.["build:skills:copy"]).toBe(
+      "node scripts/skills/build-skills.mjs --copy-out dist/skills-copy",
+    );
+    expect(pkg.scripts?.build).toBe("tsc -p tsconfig.build.json");
+  });
+
   it("defines the scaffold scripts", () => {
     for (const s of [
       "build",
@@ -154,8 +164,13 @@ describe("package.json", () => {
       "check:coverage",
       "check:links",
       "check:skills-structure",
+      "build:skills",
+      "build:skills:copy",
+      "check:skills",
       "pack:scan",
       "scan:secrets",
+      "eff",
+      "doctor",
     ]) {
       expect(pkg.scripts?.[s], s).toBeTypeOf("string");
     }

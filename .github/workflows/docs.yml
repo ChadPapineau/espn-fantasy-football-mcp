@@ -16,6 +16,9 @@
 #   installs it, with the same pinned puppeteer that mmdc loads (same `-p` list). No third-party
 #   install script runs at all. Chrome runs with --no-sandbox (scripts/ci/puppeteer-config.json)
 #   because Ubuntu 24.04 restricts unprivileged user namespaces. Runner only; never on a laptop.
+# - Skills Lane 1 items 1–6 (plan 09 §5.1: the build is current, frontmatter, tool names, evals,
+#   trigger collisions, identifiers) run dependency-free from scripts/skills/check-skills.mjs — no
+#   npm ci needed. Item 7, the fixture dry run of every tool_sequence.json, is tests/e2e (ci.yml).
 # - `claude plugin validate --strict` (plan 04 §4.2, T-01; plan 10 Z6) runs the pinned Claude Code
 #   CLI's linux-x64 platform package fetched with `npm pack` (registry sha512 verified by npm), run
 #   directly — no install script, no login, no token. It validates the marketplace at the root and
@@ -145,8 +148,10 @@ jobs:
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
-      - name: Plugin root + Skills structure (passes on zero Skills)
+      - name: Plugin root + Skills structure
         run: node scripts/ci/check-skills-structure.mjs
+      - name: Skills Lane 1, items 1-6 — the build is current, frontmatter, tools, evals, triggers, identifiers (plan 09 §5.1)
+        run: node scripts/skills/check-skills.mjs
       - name: claude plugin validate --strict — the marketplace and the plugin as it ships (plan 10 Z6)
         env:
           DISABLE_AUTOUPDATER: "1"

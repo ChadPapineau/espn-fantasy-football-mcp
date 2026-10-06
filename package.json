@@ -36,8 +36,13 @@
     "check:coverage": "node scripts/ci/check-coverage.mjs",
     "check:links": "node scripts/ci/check-links.mjs",
     "check:skills-structure": "node scripts/ci/check-skills-structure.mjs",
+    "build:skills": "node scripts/skills/build-skills.mjs",
+    "build:skills:copy": "node scripts/skills/build-skills.mjs --copy-out dist/skills-copy",
+    "check:skills": "node scripts/skills/check-skills.mjs",
     "pack:scan": "node scripts/ci/scan-tarball.mjs",
-    "scan:secrets": "node scripts/dev/scan-secrets.mjs"
+    "scan:secrets": "node scripts/dev/scan-secrets.mjs",
+    "eff": "node dist/cli.js",
+    "doctor": "node dist/cli.js doctor"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.2.0",
