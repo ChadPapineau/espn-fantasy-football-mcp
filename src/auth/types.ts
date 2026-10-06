@@ -89,8 +89,18 @@ export type FormatVerdict =
         | "too_short"
         | "too_long"
         | "whitespace_or_quote"
-        | "bad_characters";
+        | "bad_characters"
+        /** Additive (B1): the pasted value starts with its cookie name (`espn_s2=…`, `SWID=…`). */
+        | "includes_cookie_name";
     };
+
+/**
+ * Additive (B1): what the credential code needs from the logger (src/cli/log.ts `Logger` satisfies
+ * it structurally; src/auth may not import src/cli). Registered values are redacted in every form.
+ */
+export interface SecretRegistrar {
+  registerSecret(kind: string, value: string): void;
+}
 
 // --- the store seam (plan 02 §2.2) -------------------------------------------------------------
 
