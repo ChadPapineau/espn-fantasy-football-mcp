@@ -1,0 +1,378 @@
+{
+  "$comment": "Drift probe key manifest (plan 06 §1.2, plan 01 §7). `required` is hand-written from research 03 §A.2/§B: a missing key or a wrong type is red drift (exit 4). `observed` is every key seen in the recorded fixtures named in `$sources`; a key outside it is additive drift. Regenerate `observed` only after re-recording: scripts/dev/with-node.sh npx tsx scripts/probe.ts --rebaseline. tests/drift/probe.test.ts asserts required ⊆ observed and that `observed` is current.",
+  "$sources": {
+    "host": ["espn/recorded/season/proTeamSchedules_wl.json"],
+    "shape": ["espn/recorded/league-a/probe-shape.json"]
+  },
+  "version": 1,
+  "host": "lm-api-reads.fantasy.espn.com",
+  "probes": {
+    "host": {
+      "views": ["proTeamSchedules_wl"],
+      "required": {
+        "$": { "settings": "object" },
+        "$.settings": { "proTeams": "array" },
+        "$.settings.proTeams[]": {
+          "abbrev": "string",
+          "byeWeek": "integer",
+          "id": "integer",
+          "location": "string",
+          "name": "string",
+          "proGamesByScoringPeriod": "object"
+        },
+        "$.settings.proTeams[].proGamesByScoringPeriod{}[]": {
+          "awayProTeamId": "integer",
+          "date": "integer",
+          "homeProTeamId": "integer",
+          "id": "integer",
+          "scoringPeriodId": "integer",
+          "startTimeTBD": "boolean",
+          "statsOfficial": "boolean",
+          "validForLocking": "boolean"
+        }
+      },
+      "observed": {
+        "$": ["display", "settings"],
+        "$.settings": [
+          "defaultDraftPosition",
+          "draftLobbyMinimumLeagueCount",
+          "gameNotificationSettings",
+          "gated",
+          "playerOwnershipSettings",
+          "proTeams",
+          "readOnly",
+          "statIdToOverridePosition",
+          "teamActivityEnabled",
+          "typeNames"
+        ],
+        "$.settings.proTeams[]": [
+          "abbrev",
+          "byeWeek",
+          "id",
+          "location",
+          "name",
+          "proGamesByScoringPeriod",
+          "teamPlayersByPosition",
+          "universeId"
+        ],
+        "$.settings.proTeams[].proGamesByScoringPeriod{}[]": [
+          "awayProTeamId",
+          "date",
+          "homeProTeamId",
+          "id",
+          "scoringPeriodId",
+          "startTimeTBD",
+          "statsOfficial",
+          "validForLocking"
+        ]
+      },
+      "minItems": { "$.settings.proTeams": 32 },
+      "enums": {
+        "$.settings.proTeams[].id": [
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+          25, 26, 27, 28, 29, 30, 33, 34
+        ]
+      }
+    },
+    "shape": {
+      "views": ["mSettings", "mNav", "mTeam"],
+      "required": {
+        "$": {
+          "id": "integer",
+          "members": "array",
+          "scoringPeriodId": "integer",
+          "seasonId": "integer",
+          "settings": "object",
+          "status": "object",
+          "teams": "array"
+        },
+        "$.settings": {
+          "acquisitionSettings": "object",
+          "draftSettings": "object",
+          "isPublic": "boolean",
+          "name": "string",
+          "rosterSettings": "object",
+          "scheduleSettings": "object",
+          "scoringSettings": "object",
+          "size": "integer",
+          "tradeSettings": "object"
+        },
+        "$.settings.scoringSettings": {
+          "matchupTieRule": "string",
+          "playoffMatchupTieRule": "string",
+          "scoringItems": "array",
+          "scoringType": "string"
+        },
+        "$.settings.scoringSettings.scoringItems[]": { "points": "number", "statId": "integer" },
+        "$.settings.rosterSettings": {
+          "lineupLocktimeType": "string",
+          "lineupSlotCounts": "object",
+          "positionLimits": "object"
+        },
+        "$.settings.acquisitionSettings": {
+          "acquisitionBudget": "integer",
+          "acquisitionType": "string",
+          "isUsingAcquisitionBudget": "boolean",
+          "waiverHours": "integer",
+          "waiverOrderReset": "boolean"
+        },
+        "$.settings.scheduleSettings": {
+          "divisions": "array",
+          "matchupPeriodCount": "integer",
+          "matchupPeriodLength": "integer",
+          "matchupPeriods": "object",
+          "playoffMatchupPeriodLength": "integer",
+          "playoffReseed": "boolean",
+          "playoffSeedingRule": "string",
+          "playoffTeamCount": "integer"
+        },
+        "$.settings.draftSettings": { "type": "string" },
+        "$.settings.tradeSettings": { "deadlineDate": "integer" },
+        "$.status": {
+          "currentMatchupPeriod": "integer",
+          "finalScoringPeriod": "integer",
+          "firstScoringPeriod": "integer",
+          "isActive": "boolean",
+          "latestScoringPeriod": "integer",
+          "previousSeasons": "array"
+        },
+        "$.teams[]": {
+          "abbrev": "string",
+          "divisionId": "integer",
+          "id": "integer",
+          "logo": "string",
+          "name": "string",
+          "owners": "array",
+          "primaryOwner": "string",
+          "record": "object",
+          "waiverRank": "integer"
+        },
+        "$.teams[].record": { "overall": "object" },
+        "$.teams[].record.overall": {
+          "losses": "integer",
+          "percentage": "number",
+          "pointsAgainst": "number",
+          "pointsFor": "number",
+          "ties": "integer",
+          "wins": "integer"
+        },
+        "$.members[]": { "displayName": "string", "id": "string", "isLeagueManager": "boolean" }
+      },
+      "observed": {
+        "$": [
+          "draftDetail",
+          "gameId",
+          "id",
+          "members",
+          "scoringPeriodId",
+          "seasonId",
+          "segmentId",
+          "settings",
+          "status",
+          "teams"
+        ],
+        "$.members[]": [
+          "displayName",
+          "firstName",
+          "id",
+          "isLeagueCreator",
+          "isLeagueManager",
+          "lastName"
+        ],
+        "$.settings": [
+          "acquisitionSettings",
+          "draftSettings",
+          "financeSettings",
+          "isAutoReactivate",
+          "isCustomizable",
+          "isPublic",
+          "name",
+          "restrictionType",
+          "rosterSettings",
+          "scheduleSettings",
+          "scoringSettings",
+          "size",
+          "tradeSettings"
+        ],
+        "$.settings.acquisitionSettings": [
+          "acquisitionBudget",
+          "acquisitionLimit",
+          "acquisitionType",
+          "finalPlaceTransactionEligible",
+          "isUsingAcquisitionBudget",
+          "matchupAcquisitionLimit",
+          "matchupLimitPerScoringPeriod",
+          "minimumBid",
+          "transactionLockingEnabled",
+          "waiverHours",
+          "waiverOrderReset",
+          "waiverProcessDays",
+          "waiverProcessHour"
+        ],
+        "$.settings.draftSettings": [
+          "auctionBudget",
+          "availableDate",
+          "date",
+          "isTradingEnabled",
+          "keeperCount",
+          "keeperCountFuture",
+          "keeperOrderType",
+          "leagueSubType",
+          "orderType",
+          "pickOrder",
+          "timePerSelection",
+          "type"
+        ],
+        "$.settings.rosterSettings": [
+          "autoPilotTypeSupported",
+          "isBenchUnlimited",
+          "isUsingUndroppableList",
+          "lineupLocktimeType",
+          "lineupSlotCounts",
+          "lineupSlotStatLimits",
+          "moveLimit",
+          "positionLimits",
+          "rosterLocktimeType",
+          "universeIds"
+        ],
+        "$.settings.scheduleSettings": [
+          "consolationLadderDisabled",
+          "divisions",
+          "matchupPeriodCount",
+          "matchupPeriodLength",
+          "matchupPeriods",
+          "periodTypeId",
+          "playoffMatchupPeriodLength",
+          "playoffReseed",
+          "playoffSeedingRule",
+          "playoffSeedingRuleBy",
+          "playoffTeamCount",
+          "variablePlayoffMatchupPeriodLength"
+        ],
+        "$.settings.scoringSettings": [
+          "allowOutOfPositionScoring",
+          "homeTeamBonus",
+          "matchupTieRule",
+          "matchupTieRuleBy",
+          "playerRankType",
+          "playoffHomeTeamBonus",
+          "playoffMatchupTieRule",
+          "playoffMatchupTieRuleBy",
+          "scoringEnhancementType",
+          "scoringItems",
+          "scoringType"
+        ],
+        "$.settings.scoringSettings.scoringItems[]": [
+          "isReverseItem",
+          "leagueRanking",
+          "leagueTotal",
+          "points",
+          "pointsOverrides",
+          "statId"
+        ],
+        "$.settings.tradeSettings": [
+          "allowOutOfUniverse",
+          "deadlineDate",
+          "max",
+          "revisionHours",
+          "vetoVotesRequired"
+        ],
+        "$.status": [
+          "activatedDate",
+          "createdAsLeagueType",
+          "currentLeagueType",
+          "currentMatchupPeriod",
+          "finalScoringPeriod",
+          "firstScoringPeriod",
+          "isActive",
+          "isExpired",
+          "isFull",
+          "isPlayoffMatchupEdited",
+          "isToBeDeleted",
+          "isViewable",
+          "isWaiverOrderEdited",
+          "latestScoringPeriod",
+          "previousSeasons",
+          "standingsUpdateDate",
+          "teamsJoined",
+          "transactionScoringPeriod",
+          "waiverLastExecutionDate",
+          "waiverNextExecutionDate",
+          "waiverProcessStatus"
+        ],
+        "$.teams[]": [
+          "abbrev",
+          "currentProjectedRank",
+          "divisionId",
+          "draftDayProjectedRank",
+          "draftStrategy",
+          "eliminated",
+          "eliminationMatchupPeriod",
+          "id",
+          "isActive",
+          "isTransactionLocked",
+          "logo",
+          "logoType",
+          "name",
+          "owners",
+          "playoffSeed",
+          "points",
+          "pointsAdjusted",
+          "pointsDelta",
+          "primaryOwner",
+          "rankCalculatedFinal",
+          "rankFinal",
+          "record",
+          "tradeBlock",
+          "transactionCounter",
+          "valuesByStat",
+          "waiverRank"
+        ],
+        "$.teams[].record": ["away", "division", "home", "overall"],
+        "$.teams[].record.overall": [
+          "gamesBack",
+          "losses",
+          "percentage",
+          "pointsAgainst",
+          "pointsFor",
+          "streakLength",
+          "streakType",
+          "ties",
+          "wins"
+        ]
+      },
+      "minItems": { "$.teams": 2, "$.members": 1, "$.settings.scoringSettings.scoringItems": 1 },
+      "enums": {
+        "$.settings.rosterSettings.lineupSlotCounts{#}": [
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24",
+          "25"
+        ]
+      },
+      "scrubbed": { "$.members[]": ["notificationSettings"] }
+    }
+  }
+}

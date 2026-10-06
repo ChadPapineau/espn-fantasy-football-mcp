@@ -1,0 +1,3189 @@
+{
+  "$comment": "Recorded ESPN fixtures (evidence, plan 05 §3 fixture law): keyless captures of public leagues, scrubbed by scripts/scrub-fixture.ts (research 03 §F.3). sha256 = sha256 of the canonical JSON (sorted keys, no whitespace) of the scrubbed body; scoring.sha256 = the same over every scoring field (scrub.ts SCORING_KEYS), computed on the raw recording and re-verified on the scrubbed file. `pruned` keys were emptied (never a scoring key); `part` marks one response split along `array` to stay ≤ 1 MB; `withheld` lists units removed because a line of theirs matched the local repo deny-list (never committed). No league id, team name or member name of any recorded league is stored anywhere in this repo.",
+  "version": 1,
+  "host": "lm-api-reads.fantasy.espn.com",
+  "season": 2026,
+  "captured_at": "2026-10-06T03:05:14Z",
+  "scrub_rules_version": 1,
+  "leagues": {
+    "league-a": {
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      },
+      "final_boxscore_weeks": [1, 2, 3]
+    },
+    "league-b": {
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      },
+      "final_boxscore_weeks": [1, 2, 3]
+    },
+    "league-c": {
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      },
+      "final_boxscore_weeks": [1, 2, 3]
+    }
+  },
+  "files": [
+    {
+      "path": "recorded/errors/400-limit-missing-sort.json",
+      "league": null,
+      "views": ["kona_player_info"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_player_info",
+        "filter": { "players": { "limit": 5 } }
+      },
+      "status": 400,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:14Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": ["details", "messages"],
+      "bytes": 301,
+      "sha256": "150d4684fcc1513185680ff0997ec01bfef93d6388f476360c11709239ce92e9",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "format": null
+    },
+    {
+      "path": "recorded/errors/404-league-not-found.json",
+      "league": null,
+      "views": ["mSettings"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mSettings",
+        "filter": null
+      },
+      "status": 404,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:13Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": ["details", "messages"],
+      "bytes": 167,
+      "sha256": "b35e51c3ce0e5d1c48ad76c40bc7ba75867ee47da082831b8c89386266f096ee",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "format": null
+    },
+    {
+      "path": "recorded/league-a/kona_player_info.json",
+      "league": "league-a",
+      "views": ["kona_player_info"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_player_info&scoringPeriodId=4",
+        "filter": {
+          "players": {
+            "filterStatus": { "value": ["FREEAGENT", "WAIVERS"] },
+            "limit": 25,
+            "offset": 0,
+            "sortPercOwned": { "sortPriority": 1, "sortAsc": false },
+            "sortDraftRanks": { "sortPriority": 100, "sortAsc": true, "value": "STANDARD" }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "796",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:45Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": ["players", "positionAgainstOpponent"],
+      "bytes": 336357,
+      "sha256": "3876cc6eaf9b890073e00d08915178549404bba15601de0023b05778706fffa4",
+      "scoring": {
+        "entries": 25,
+        "sha256": "66897e95aa99493a3f06f9d0e26e8174af5b4872681eeeaf54dc312e9bddf71a"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mBoxscore.sp1.json",
+      "league": "league-a",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": 1,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=1",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [1] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "5",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:42Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": ["$.schedule[1]"],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 383036,
+      "sha256": "76492203abb2bdad8b02afcd1a00fa08a06bf754351f97ec7aa1fe0dcb3a781a",
+      "scoring": {
+        "entries": 411,
+        "sha256": "3315df5f2e0f73756cdd7f02cd58cf3344d937da9016220712e6c2633af05928"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mBoxscore.sp2.json",
+      "league": "league-a",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": 2,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=2",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [2] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "5",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:43Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": ["$.schedule[0]"],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 379696,
+      "sha256": "2dc81af0a3c678f633ab9b0a1daff7a4a0116f70417cbcc844a10089637efa99",
+      "scoring": {
+        "entries": 409,
+        "sha256": "3232591f734fb3050b91f2a6692f1ac784f70e9df73d7e1d3c4b693f8e2ed780"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mBoxscore.sp3.json",
+      "league": "league-a",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": 3,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=3",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [3] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "5",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:44Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 478518,
+      "sha256": "0616b8bb16805fb987ac5d0d9467583ad27ed7657a7dbbc0d4dda02806807f88",
+      "scoring": {
+        "entries": 519,
+        "sha256": "bd12b20f585c709d6141e3a37282097f7fc8d6c801eae05641294d6f273933ee"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mMatchup.json",
+      "league": "league-a",
+      "views": ["mMatchup"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchup",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:37Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [
+        "$.schedule[18].home.rosterForCurrentScoringPeriod.entries[13]",
+        "$.schedule[18].home.rosterForMatchupPeriod.entries[7]",
+        "$.teams[1].roster.entries[13]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 479287,
+      "sha256": "f80f5229ff1c48c354fa3ef5490a7a7f20028a66e0ba910d45951c85c32c8610",
+      "scoring": {
+        "entries": 639,
+        "sha256": "331e51149dfaf204ec32e8b1dfc7b3603fd3a6d16ad45fe1a02a334f7293f53f"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mRoster.sp1.p1.json",
+      "league": "league-a",
+      "views": ["mRoster"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=1",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:38Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[7]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[4].roster.entries[3]",
+        "$.teams[5].roster.entries[9]",
+        "$.teams[6].roster.entries[14]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 947753,
+      "sha256": "4847c86985d07739e66b940e013dd96b8a74a57749116f95164ec060caaaa1a8",
+      "scoring": {
+        "entries": 209,
+        "sha256": "4c53307a76393a91061b2c56a140571233a8393a19e8446608712124fcaad66c"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mRoster.sp1.p2.json",
+      "league": "league-a",
+      "views": ["mRoster"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=1",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:38Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[7]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[4].roster.entries[3]",
+        "$.teams[5].roster.entries[9]",
+        "$.teams[6].roster.entries[14]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 388858,
+      "sha256": "93d6bba14abd3da5e3c3a2f180718e0285062042b33f244627e678f6e8793045",
+      "scoring": {
+        "entries": 93,
+        "sha256": "4eeb816aa0d49d29c850024d40da3ffdc7ace39e2e840598d5d8de6e70db5d2a"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mRoster.sp2.p1.json",
+      "league": "league-a",
+      "views": ["mRoster"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=2",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:39Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[7]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[4].roster.entries[3]",
+        "$.teams[5].roster.entries[9]",
+        "$.teams[6].roster.entries[13]",
+        "$.teams[8].roster.entries[15]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 940724,
+      "sha256": "dc8bc6ab41ae0093509310a69a61a11f8d721b7b9934d8812b024668047ed54c",
+      "scoring": {
+        "entries": 180,
+        "sha256": "f96cdde1569ccb6929fbaeccb7c3d282fc9a21283f1870295d9e99176b173df2"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mRoster.sp2.p2.json",
+      "league": "league-a",
+      "views": ["mRoster"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=2",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:39Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[7]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[4].roster.entries[3]",
+        "$.teams[5].roster.entries[9]",
+        "$.teams[6].roster.entries[13]",
+        "$.teams[8].roster.entries[15]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 614705,
+      "sha256": "c3512185966bd9a8ec4bbdd188d9ea0257ed9558d28097883ef33be963df238d",
+      "scoring": {
+        "entries": 122,
+        "sha256": "551d8cd41fd9748981ff1143f0df89739b7e11ae7917736e230bb43ab7c0bb82"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mRoster.sp3.p1.json",
+      "league": "league-a",
+      "views": ["mRoster"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:41Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[7]",
+        "$.teams[4].roster.entries[3]",
+        "$.teams[5].roster.entries[9]",
+        "$.teams[6].roster.entries[13]",
+        "$.teams[8].roster.entries[14]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 943463,
+      "sha256": "a7e25e79364ccc91410e2b244b4f5852d9efd506246639d2122ea33f118e710b",
+      "scoring": {
+        "entries": 182,
+        "sha256": "30b68045537aab3a2489fe8029b7a2453667e22e99c655270d78a559c5711215"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mRoster.sp3.p2.json",
+      "league": "league-a",
+      "views": ["mRoster"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:41Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[7]",
+        "$.teams[4].roster.entries[3]",
+        "$.teams[5].roster.entries[9]",
+        "$.teams[6].roster.entries[13]",
+        "$.teams[8].roster.entries[14]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 634571,
+      "sha256": "410357a797e524461b35488cb24b00b57c968d339cb34fb00a8b304fd2844706",
+      "scoring": {
+        "entries": 126,
+        "sha256": "98a229fe0271ef3db6cfef6fdd62a7ffb7948d3457a544acac45b0429f240a6d"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mSettings.json",
+      "league": "league-a",
+      "views": ["mSettings"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mSettings",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "0",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:35Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status"
+      ],
+      "bytes": 10434,
+      "sha256": "015b72c3fa673c245d7ca9a9c4e6c01e1f5a5e4b80c21ee6fc2cd7995fad509b",
+      "scoring": {
+        "entries": 1,
+        "sha256": "a73aa4e6b756a948f67e46088b1871baf51cafac9d579ffe3c3407d8def0ed6b"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mTeam.json",
+      "league": "league-a",
+      "views": ["mTeam", "mStandings"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mTeam&view=mStandings",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:36Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "members",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 39315,
+      "sha256": "8480a6d775b10edb33d477acbd3519076db1055f0c9abcd55546d90160c5d3e9",
+      "scoring": {
+        "entries": 280,
+        "sha256": "d0bd2f12e0d2bdc14d5b60cce791280b7f6e36d8443c8e988dfb95359f668b20"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/probe-shape.json",
+      "league": "league-a",
+      "views": ["mSettings", "mNav", "mTeam"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mSettings&view=mNav&view=mTeam",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:47Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "members",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 33539,
+      "sha256": "7286f649b60eeb35fd3ffadd1d13c7707fa9c811d6af5c15d7b2bc1a8dcfdcc6",
+      "scoring": {
+        "entries": 91,
+        "sha256": "c214e32235e1d074d44f294403292f5cd6d7ca6ea9caedfa2a782ee5fc19a6bd"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/skeleton.json",
+      "league": "league-a",
+      "views": ["mBogusViewName"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBogusViewName",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "0",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:48Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "gameId",
+        "id",
+        "members",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 2373,
+      "sha256": "618fd246dda36d70a4523ce3d092b87f6e1ca9fd4dac6bb82ffc784e82721155",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/kona_player_info.json",
+      "league": "league-b",
+      "views": ["kona_player_info"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_player_info&scoringPeriodId=4",
+        "filter": {
+          "players": {
+            "filterStatus": { "value": ["FREEAGENT", "WAIVERS"] },
+            "limit": 25,
+            "offset": 0,
+            "sortPercOwned": { "sortPriority": 1, "sortAsc": false },
+            "sortDraftRanks": { "sortPriority": 100, "sortAsc": true, "value": "STANDARD" }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "901",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:00Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": ["players", "positionAgainstOpponent"],
+      "bytes": 367676,
+      "sha256": "2e9ccf3be4fd46cfc0347919e0820cba26e15fed2fe422af89cb59ab990ffd60",
+      "scoring": {
+        "entries": 25,
+        "sha256": "ecfea8729457632b45704d5e3a36db03a5e5873f4af2e2ea77b21e448c94d84e"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mBoxscore.sp1.json",
+      "league": "league-b",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": 1,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=1",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [1] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "5",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:56Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 454172,
+      "sha256": "019a61e73a7195ddb4cb8e3a36494ec0e5602e6201e54a8b09c74c2dbcce5a9d",
+      "scoring": {
+        "entries": 531,
+        "sha256": "b7b4959095d347889570526de253c5e97832076dc0a0087dddb64eaabcafddc6"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mBoxscore.sp2.json",
+      "league": "league-b",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": 2,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=2",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [2] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "5",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:57Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 448987,
+      "sha256": "9f8c47ab9a50d52c56c673c2ed143bde819b1aa656733c50c9348fd4ce26a4f3",
+      "scoring": {
+        "entries": 531,
+        "sha256": "5d013f7620946ad89c67883f437d458fde29e8388ec9d0069660fc0ace769c86"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mBoxscore.sp3.json",
+      "league": "league-b",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": 3,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=3",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [3] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "5",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:59Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": ["$.schedule[1]"],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 361223,
+      "sha256": "c6529f6cfe0da89ad625fcf8ee2291691a03591cef3d9ec92b74e139d6c66fc9",
+      "scoring": {
+        "entries": 425,
+        "sha256": "1788b6c614e9a90d6c620dedffc412f735e0db57161efe108994636875f9f9da"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mMatchup.json",
+      "league": "league-b",
+      "views": ["mMatchup"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchup",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:51Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [
+        "$.schedule[15].away.rosterForCurrentScoringPeriod.entries[12]",
+        "$.schedule[15].away.rosterForMatchupPeriod.entries[8]",
+        "$.teams[2].roster.entries[12]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 456135,
+      "sha256": "9708d5874a07b8d6d671f8ba4d298a009aab3f99ff9d3b2cd8d473203fb24b07",
+      "scoring": {
+        "entries": 746,
+        "sha256": "eae8a68d21e3cd3ed8c261de93e25cc1e402948e3ede426599cf37d713181b37"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mRoster.sp1.p1.json",
+      "league": "league-b",
+      "views": ["mRoster"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=1",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:53Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[0].roster.entries[4]",
+        "$.teams[3].roster.entries[14]",
+        "$.teams[5].roster.entries[6]",
+        "$.teams[9].roster.entries[7]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 1021901,
+      "sha256": "ea40909737ac9a066d15994372b3743b0168f9979af2a0937af752e9a82d7c0b",
+      "scoring": {
+        "entries": 242,
+        "sha256": "7ff810618975e1759a748344ce3a10861494f5b520cb2e608ec8498706d8e797"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mRoster.sp1.p2.json",
+      "league": "league-b",
+      "views": ["mRoster"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=1",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:53Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[0].roster.entries[4]",
+        "$.teams[3].roster.entries[14]",
+        "$.teams[5].roster.entries[6]",
+        "$.teams[9].roster.entries[7]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 260249,
+      "sha256": "68967698e4f8c9acc50f360c43008127ebb385ba1d814ad9e5812b2e751c2dce",
+      "scoring": {
+        "entries": 60,
+        "sha256": "c8e824defefd2c050b742b77de1e87a4503e2c4ed52bb3c72042e6dd1d3f8b91"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mRoster.sp2.p1.json",
+      "league": "league-b",
+      "views": ["mRoster"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=2",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:54Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[0].roster.entries[4]",
+        "$.teams[3].roster.entries[13]",
+        "$.teams[5].roster.entries[6]",
+        "$.teams[9].roster.entries[7]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 1048444,
+      "sha256": "0ffc65467d72e5bca7f0811b4bad086905ace6cf57575183ada55dba41003348",
+      "scoring": {
+        "entries": 211,
+        "sha256": "5a7d27429d7458342fff41b667eac1f5e3b77e61b2935c807aa75912ffcaae1e"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mRoster.sp2.p2.json",
+      "league": "league-b",
+      "views": ["mRoster"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=2",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:54Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[0].roster.entries[4]",
+        "$.teams[3].roster.entries[13]",
+        "$.teams[5].roster.entries[6]",
+        "$.teams[9].roster.entries[7]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 458206,
+      "sha256": "88e1a782a3a3d5fa0673eec8bb79e45230f6f42c81625b44e7bcc3069854a0a3",
+      "scoring": {
+        "entries": 91,
+        "sha256": "1553856a479bc82e18756bdfa38aa21d98e377cf80c149ca002daf1c97e17477"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mRoster.sp3.p1.json",
+      "league": "league-b",
+      "views": ["mRoster"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:55Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[0].roster.entries[4]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[3].roster.entries[13]",
+        "$.teams[5].roster.entries[6]",
+        "$.teams[9].roster.entries[7]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 1039157,
+      "sha256": "bc53d6eed2b4ae2e9d92334cc22d5256e9c34e360b0ffab7bb8f0950607e6108",
+      "scoring": {
+        "entries": 209,
+        "sha256": "10e9f51245e83209cfbeb10a6134680b6db5c0e86932711a1501c887bde24199"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mRoster.sp3.p2.json",
+      "league": "league-b",
+      "views": ["mRoster"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:55Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[0].roster.entries[4]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[3].roster.entries[13]",
+        "$.teams[5].roster.entries[6]",
+        "$.teams[9].roster.entries[7]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 452325,
+      "sha256": "fb8a34c314b95f059acf2465ef0bd99c6dac73b62d3f3c785460f80201066527",
+      "scoring": {
+        "entries": 91,
+        "sha256": "cbaafd2eec508507535cf681d85a054739c3c88e0d9b608fd4321414c782e604"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mSettings.json",
+      "league": "league-b",
+      "views": ["mSettings"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mSettings",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "0",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:49Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status"
+      ],
+      "bytes": 8390,
+      "sha256": "49ddcc5e86f5cad04f5cdd7a8eb0518da063b3b24fb3ba094ee4fa10d010f250",
+      "scoring": {
+        "entries": 1,
+        "sha256": "5a86b738372edd8daab452ee1fcd35a012e21b286c3394e450d5ca43ae307f4f"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mTeam.json",
+      "league": "league-b",
+      "views": ["mTeam", "mStandings"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mTeam&view=mStandings",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:04:50Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "members",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 37996,
+      "sha256": "6a533453756f5e660cadc497045b47590cbce2cbb6bedb19c573a940c8987e82",
+      "scoring": {
+        "entries": 280,
+        "sha256": "985364f43160ac604633d7cc59bda4d9239ccd2579d6a0a6068a7b60a1b5f3ad"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-c/kona_player_info.json",
+      "league": "league-c",
+      "views": ["kona_player_info"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_player_info&scoringPeriodId=4",
+        "filter": {
+          "players": {
+            "filterStatus": { "value": ["FREEAGENT", "WAIVERS"] },
+            "limit": 25,
+            "offset": 0,
+            "sortPercOwned": { "sortPriority": 1, "sortAsc": false },
+            "sortDraftRanks": { "sortPriority": 100, "sortAsc": true, "value": "STANDARD" }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "813",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:12Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": ["players", "positionAgainstOpponent"],
+      "bytes": 329014,
+      "sha256": "31059d6b0b41805ac57762e426fc328083f158ceed42e207f74840d821415145",
+      "scoring": {
+        "entries": 25,
+        "sha256": "1d407feec71372bbc2b35782ab909c2f6d351f70f15e12f7989ddae5ee2a59a7"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mBoxscore.sp1.json",
+      "league": "league-c",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": 1,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=1",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [1] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "6",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:08Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": ["$.schedule[0]"],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 574818,
+      "sha256": "ddfc9940d0f7cb34a1aa1d2d9c3d63235c199bdb24669171c36f0bfd4d2979fd",
+      "scoring": {
+        "entries": 651,
+        "sha256": "ccfab6642c533f40f4e98c90d59487988231032c96173c1028672912b6c3c860"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mBoxscore.sp2.json",
+      "league": "league-c",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": 2,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=2",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [2] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "6",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:09Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": ["$.schedule[0]"],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 564479,
+      "sha256": "13930412a282a515f51616926778ffd4c770ef122a1dcad4a9d5867d7e518bd2",
+      "scoring": {
+        "entries": 651,
+        "sha256": "2461388ed9ed61417e27420090849839d4dc0b82aec8958fffed2c79212823a0"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mBoxscore.sp3.json",
+      "league": "league-c",
+      "views": ["mBoxscore"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": 3,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mBoxscore&scoringPeriodId=3",
+        "filter": { "schedule": { "filterMatchupPeriodIds": { "value": [3] } } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-schedule-count": "6",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:11Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": ["$.schedule[1]"],
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 572552,
+      "sha256": "faa202aba7f387c555b327a078ff500450fb1cf8eae86e4aee1cfb430305a240",
+      "scoring": {
+        "entries": 661,
+        "sha256": "eb9b05c58fa107a29935ea8de8a9b5e4045fa27366174ab40d0e972a2259466a"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mMatchup.json",
+      "league": "league-c",
+      "views": ["mMatchup"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchup",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:04Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [
+        "$.schedule[18].away.rosterForCurrentScoringPeriod.entries[10]",
+        "$.schedule[18].away.rosterForMatchupPeriod.entries[10]",
+        "$.teams[2].roster.entries[10]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 687104,
+      "sha256": "b89130d4c522d311f8dcd58b4337d25cfb00022d2e5d0a0d894f2ed67529d3ff",
+      "scoring": {
+        "entries": 1011,
+        "sha256": "6dbdff7dbcedf2626ba90309cbcd05a89bd3fecfb96de0c049d9f8e7c11fc764"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mRoster.sp1.p1.json",
+      "league": "league-c",
+      "views": ["mRoster"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=1",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:05Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[1]",
+        "$.teams[2].roster.entries[15]",
+        "$.teams[6].roster.entries[9]",
+        "$.teams[9].roster.entries[10]",
+        "$.teams[10].roster.entries[7]",
+        "$.teams[11].roster.entries[5]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 983329,
+      "sha256": "0b2098078431b024b4a90dcd1589e5b903d7a34f66e8d55593a82df802506247",
+      "scoring": {
+        "entries": 232,
+        "sha256": "963935a32fbb4dd81e62b8e7f74790a758f34f257384080909aa87e6f20d0690"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mRoster.sp1.p2.json",
+      "league": "league-c",
+      "views": ["mRoster"],
+      "scoringPeriodId": 1,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=1",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:05Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 2, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[1]",
+        "$.teams[2].roster.entries[15]",
+        "$.teams[6].roster.entries[9]",
+        "$.teams[9].roster.entries[10]",
+        "$.teams[10].roster.entries[7]",
+        "$.teams[11].roster.entries[5]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 991300,
+      "sha256": "d948ecf901fa2f1e1f859b3c7b6584d866ce1015fb8edc696ae6178003b1cbd6",
+      "scoring": {
+        "entries": 226,
+        "sha256": "8d790ab6e9c694df51b8dd8e735e7e542424e60b3e6666fa0ba3a1695f6db8dd"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mRoster.sp2.p1.json",
+      "league": "league-c",
+      "views": ["mRoster"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=2",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:06Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 3, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[1]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[6].roster.entries[9]",
+        "$.teams[9].roster.entries[10]",
+        "$.teams[10].roster.entries[7]",
+        "$.teams[11].roster.entries[5]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 989171,
+      "sha256": "128d047e9da4dc662b76add1bfab80fd3fc8a0a6313669954769dd931e6c5def",
+      "scoring": {
+        "entries": 199,
+        "sha256": "238767e4cc7b46b431f9345e7870bf281aa26a08ee27e0c386bb3a10fc98424a"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mRoster.sp2.p2.json",
+      "league": "league-c",
+      "views": ["mRoster"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=2",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:06Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 3, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[1]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[6].roster.entries[9]",
+        "$.teams[9].roster.entries[10]",
+        "$.teams[10].roster.entries[7]",
+        "$.teams[11].roster.entries[5]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 969061,
+      "sha256": "8af8ba0802a647c0cf339f12b9c31fd48c6bb6ab067a811fa245315532bf205e",
+      "scoring": {
+        "entries": 193,
+        "sha256": "821b30839e3679b3ee8b3ff84464940edd5d0eca7687b54f7f210140444bb2bf"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mRoster.sp2.p3.json",
+      "league": "league-c",
+      "views": ["mRoster"],
+      "scoringPeriodId": 2,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=2",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:06Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 3, "of": 3, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[1]",
+        "$.teams[2].roster.entries[13]",
+        "$.teams[6].roster.entries[9]",
+        "$.teams[9].roster.entries[10]",
+        "$.teams[10].roster.entries[7]",
+        "$.teams[11].roster.entries[5]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 378688,
+      "sha256": "ab3366c1e80a2b929f219e6a6c4a357c0bdb4f905e663cacae48196c92896eb8",
+      "scoring": {
+        "entries": 74,
+        "sha256": "9245d284feddf54bbdff04ebcb3346f5e60a89cd7fdbf309b73135805b9355a1"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mRoster.sp3.p1.json",
+      "league": "league-c",
+      "views": ["mRoster"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:07Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 1, "of": 3, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[1]",
+        "$.teams[2].roster.entries[11]",
+        "$.teams[6].roster.entries[9]",
+        "$.teams[9].roster.entries[10]",
+        "$.teams[10].roster.entries[7]",
+        "$.teams[11].roster.entries[5]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 988146,
+      "sha256": "28c7b9f089fc3d29469e5a1e3a17790895102ad1c3070041a95dde48a56b7db2",
+      "scoring": {
+        "entries": 199,
+        "sha256": "2545c1ae9cfbb165c133971918b722be31596f4bea012e10b7d7b37c9ba1e7f9"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mRoster.sp3.p2.json",
+      "league": "league-c",
+      "views": ["mRoster"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:07Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 2, "of": 3, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[1]",
+        "$.teams[2].roster.entries[11]",
+        "$.teams[6].roster.entries[9]",
+        "$.teams[9].roster.entries[10]",
+        "$.teams[10].roster.entries[7]",
+        "$.teams[11].roster.entries[5]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 989808,
+      "sha256": "44061fdf18e41ac19166a5f186d58def516380cd2508b51702f3f56b7e518fb9",
+      "scoring": {
+        "entries": 199,
+        "sha256": "fd117cd93cddec058be3a543308884a6de243d40cfed4cafa0ae04b99305ce90"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mRoster.sp3.p3.json",
+      "league": "league-c",
+      "views": ["mRoster"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mRoster&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:07Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": { "index": 3, "of": 3, "array": "teams" },
+      "withheld": [
+        "$.teams[1].roster.entries[1]",
+        "$.teams[2].roster.entries[11]",
+        "$.teams[6].roster.entries[9]",
+        "$.teams[9].roster.entries[10]",
+        "$.teams[10].roster.entries[7]",
+        "$.teams[11].roster.entries[5]"
+      ],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 376188,
+      "sha256": "e9c2274b29d1af64317f3d47134aff07558c0318db693973236def64ab86ba48",
+      "scoring": {
+        "entries": 74,
+        "sha256": "843f513b4a635d6b266a7531380c36241481dc47bdae3e2cc5721bbe2543777e"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mSettings.json",
+      "league": "league-c",
+      "views": ["mSettings"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mSettings",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "0",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:01Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status"
+      ],
+      "bytes": 9873,
+      "sha256": "19ab762064d5e5e3a92d78409ab81c58c828bf51392b19a490db3cb710d4a4d6",
+      "scoring": {
+        "entries": 1,
+        "sha256": "5875bf7b67f1a3e86c96af34fe0d47d39a1c43813ab1952c283e5b0a1d5d9e0e"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mTeam.json",
+      "league": "league-c",
+      "views": ["mTeam", "mStandings"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mTeam&view=mStandings",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T03:05:02Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "members",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status",
+        "teams"
+      ],
+      "bytes": 45416,
+      "sha256": "69e658ce6a5c25f2eded50d4e0a8207613e9d9e3f12a4f93674bd4e9bbbbd158",
+      "scoring": {
+        "entries": 324,
+        "sha256": "15988a91316b3d2bfadcdc0fa078d1f8dcffcbc1c920dd7b886920d0c33209ce"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/season/proTeamSchedules_wl.json",
+      "league": null,
+      "views": ["proTeamSchedules_wl"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "season",
+        "path": "/apis/v3/games/ffl/seasons/2026",
+        "query": "view=proTeamSchedules_wl",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "max-age=300",
+        "content-type": "application/json;charset=utf-8"
+      },
+      "recorded_at": "2026-10-06T03:04:32Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": ["$.settings.proTeams[16].teamPlayersByPosition"],
+      "stats_official": null,
+      "top_level_keys": ["display", "settings"],
+      "bytes": 130779,
+      "sha256": "52a182ff39b44a9d1577f7e1461f0b2a8dff2aeceaa383a1cfbf3a00c349f14b",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "format": null
+    },
+    {
+      "path": "recorded/season/skeleton.json",
+      "league": null,
+      "views": ["mBogusViewName"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "season",
+        "path": "/apis/v3/games/ffl/seasons/2026",
+        "query": "view=mBogusViewName",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "max-age=300",
+        "content-type": "application/json;charset=utf-8"
+      },
+      "recorded_at": "2026-10-06T03:04:34Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "stats_official": null,
+      "top_level_keys": [
+        "abbrev",
+        "active",
+        "currentScoringPeriod",
+        "display",
+        "displayOrder",
+        "endDate",
+        "gameId",
+        "id",
+        "name",
+        "startDate"
+      ],
+      "bytes": 226,
+      "sha256": "a4e32758e402603c7ad9ecae6a9449731f505906920b24854b7f267e47a49f23",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "format": null
+    }
+  ],
+  "withheld_files": []
+}
