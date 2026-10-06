@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fakeEspnS2, fakeGuid } from "../../scripts/ci/secret-fixtures.mjs";
 import { UNTRUSTED_TEXT_RULE } from "../../src/mcp/envelope.js";
 import {
   ESPN_FREE_TEXT_CLAUSE,
@@ -88,6 +89,34 @@ describe("the eight P0 prompts", () => {
         (x: unknown) => x,
       );
       expect(e, `${name} ${JSON.stringify(args)}`).not.toBeNull();
+    }
+  });
+
+  it("apply refuses a credential-shaped `what` (never copied into the prompt) and does not echo it", async () => {
+    const s2 = fakeEspnS2("prompt-apply", 120);
+    const guid = fakeGuid("prompt-apply");
+    for (const what of [
+      `espn_s2=${s2.slice(0, 60)}`,
+      `SWID: {${guid}}`,
+      s2.slice(0, 150),
+      `add the kicker ${s2.slice(0, 120)} now`,
+      `start {${guid}}`,
+      `start %7B${guid}%7D`,
+    ]) {
+      const e = await client.getPrompt({ name: "espn.apply", arguments: { what } }).then(
+        () => null,
+        (x: unknown) => x,
+      );
+      expect(e, what.slice(0, 20)).not.toBeNull();
+      const o = e as { message?: unknown; code?: unknown; data?: unknown };
+      const text = JSON.stringify({ m: o.message, code: o.code, data: o.data });
+      expect(text).not.toContain(guid);
+      expect(text).not.toContain(s2.slice(0, 40));
+    }
+    // ordinary instructions still pass: ids, a percentage, a team abbreviation
+    for (const what of ["start player 4361050 over 3116406", "bench the DST (60% owned) — KC"]) {
+      const r = await client.getPrompt({ name: "espn.apply", arguments: { what } });
+      expect((r.messages as Msg[])[0]?.content.text).toContain(JSON.stringify(what));
     }
   });
 

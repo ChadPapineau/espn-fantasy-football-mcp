@@ -336,7 +336,78 @@ describe("fixture mode over stdio", () => {
     expect(await r.code).toBe(EXIT.ok);
   });
 
-  it("EOF: an in-flight call finishes before the store closes (the SDK transport drops its reply)", async () => {
+  it("resources/read of an unknown or invalid URI answers -32602 without echoing it, at any size", async () => {
+    const r = start(tempEnv());
+    await ready(r);
+    const pieces = [
+      fakeEspnS2("serve-uri", 80),
+      fakeGuid("serve-uri"),
+      fakeIpv4("serve-uri"),
+      "evil\u0000\u001b[2Juri‮",
+    ];
+    const hostile = `espn-ff://x?espn_s2=${pieces[0] ?? ""}&SWID={${pieces[1] ?? ""}}&ip=${pieces[2] ?? ""}&n=${pieces[3] ?? ""}`;
+    r.send({ jsonrpc: "2.0", id: 61, method: "resources/read", params: { uri: hostile } });
+    // not a URL at all: the SDK's "is invalid" reply
+    r.send({
+      jsonrpc: "2.0",
+      id: 62,
+      method: "resources/read",
+      params: { uri: `not a uri ${pieces.join(" ")}` },
+    });
+    // megabytes in, a constant-size reply out (no amplification): a 2 MB non-URL (the "is invalid"
+    // path), a 900 kB URL that matches nothing, and a 2 MB URL (the SDK's template matcher refuses
+    // a URI over 1 000 000 chars with -32603 and a length-only message)
+    const bigInvalid = `bad ${"Ab9%2F ".repeat(300_000)}`;
+    const bigUnmatched = `espn-ff://${"Ab9%2F".repeat(150_000)}`;
+    const bigOverCap = `espn-ff://${"Ab9%2F".repeat(350_000)}`;
+    r.send({ jsonrpc: "2.0", id: 63, method: "resources/read", params: { uri: bigInvalid } });
+    r.send({ jsonrpc: "2.0", id: 66, method: "resources/read", params: { uri: bigUnmatched } });
+    r.send({ jsonrpc: "2.0", id: 67, method: "resources/read", params: { uri: bigOverCap } });
+    const notFound = await r.reply(61);
+    const invalid = await r.reply(62);
+    expect(notFound.error).toEqual({
+      code: -32602,
+      message: "Resource not found",
+      data: { uri: "" },
+    });
+    expect(invalid.error).toEqual({
+      code: -32602,
+      message: "Resource URI is invalid",
+      data: { uri: "", reason: "invalid_uri" },
+    });
+    expect((await r.reply(63)).error).toEqual(invalid.error);
+    expect((await r.reply(66)).error).toEqual(notFound.error);
+    expect((await r.reply(67)).error).toMatchObject({ code: -32603 });
+    for (const id of [63, 66, 67])
+      expect(JSON.stringify(r.frames.find((f) => f.id === id)).length).toBeLessThan(200);
+    for (const piece of pieces) expect(r.raw()).not.toContain(JSON.stringify(piece).slice(1, -1));
+    expect(r.raw()).not.toContain("evil");
+    expect(r.raw()).not.toContain("Ab9%2F");
+    // a template URI with no row answers with the template, never the caller's id
+    r.send({
+      jsonrpc: "2.0",
+      id: 64,
+      method: "resources/read",
+      params: { uri: `espn-ff://rec/${fakeGuid("serve-rec")}` },
+    });
+    expect((await r.reply(64)).error).toMatchObject({
+      code: -32602,
+      data: { uri: "espn-ff://rec/{log_id}" },
+    });
+    expect(r.raw()).not.toContain(fakeGuid("serve-rec"));
+    // a registered resource still reads normally
+    r.send({
+      jsonrpc: "2.0",
+      id: 65,
+      method: "resources/read",
+      params: { uri: "espn-ff://status" },
+    });
+    expect((await r.reply(65)).result).toBeDefined();
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+  });
+
+  it("EOF: an in-flight call finishes and its reply is written before the store closes", async () => {
     const r = start(tempEnv());
     await ready(r);
     r.send({
@@ -351,6 +422,88 @@ describe("fixture mode over stdio", () => {
     expect(events.indexOf("tool.end")).toBeGreaterThan(events.indexOf("serve.shutdown"));
     expect(events).not.toContain("serve.drain_timeout");
     expect(events).not.toContain("store.close_failed");
+    expect(r.logs.find((l) => eventOf(l) === "serve.shutdown")).toMatchObject({ reason: "stdin" });
+    // the drained call's reply reaches the client (SIGTERM's behaviour; stdout is still open)
+    const reply = r.frames.find((f) => f.id === 7);
+    expect(reply?.result).toBeDefined();
+    expect(reply?.error).toBeUndefined();
+  });
+
+  it("EOF right behind a resource read, a prompt and a call: every reply is written (exit 0)", async () => {
+    const r = start(tempEnv());
+    await ready(r);
+    // all three are still queued in the SDK's dispatch pump when EOF lands
+    r.send({
+      jsonrpc: "2.0",
+      id: 71,
+      method: "resources/read",
+      params: { uri: "espn-ff://league" },
+    });
+    r.send({ jsonrpc: "2.0", id: 72, method: "prompts/get", params: { name: "espn.waivers" } });
+    r.send({
+      jsonrpc: "2.0",
+      id: 73,
+      method: "tools/call",
+      params: { name: "espn_get_status", arguments: {} },
+    });
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+    for (const id of [71, 72, 73]) {
+      const f = r.frames.find((x) => x.id === id);
+      expect(f?.result, `reply ${String(id)}`).toBeDefined();
+    }
+    expect(r.logs.map(eventOf)).not.toContain("serve.drain_timeout");
+  });
+
+  it("a cancelled request does not hold the drain (the SDK sends it no reply)", async () => {
+    const r = start(tempEnv());
+    await ready(r);
+    r.send({
+      jsonrpc: "2.0",
+      id: 74,
+      method: "tools/call",
+      params: { name: "espn_get_standings", arguments: {} },
+    });
+    r.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 74 } });
+    // a malformed cancellation (no usable id) is ignored
+    r.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: null } });
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+    expect(r.logs.map(eventOf)).not.toContain("serve.drain_timeout");
+  });
+
+  it("a stdin that ended before serve() wired its listeners still shuts down (exit 0)", async () => {
+    const stdin = new PassThrough();
+    stdin.end();
+    stdin.resume();
+    await new Promise((res) => stdin.once("end", res));
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    let err = "";
+    stderr.on("data", (c: Buffer) => (err += c.toString("utf8")));
+    const code = await serve(
+      { argv: [], env: tempEnv(), stdin, stdout, stderr },
+      { clock: runningClock(T0), signals: false, packageRoot: ROOT },
+    );
+    expect(code).toBe(EXIT.ok);
+    expect(err).toContain('"event":"serve.shutdown"');
+    expect(err).toContain('"reason":"stdin"');
+  });
+
+  it("a stdin error is logged without crashing; the server answers on and EOF exits 0", async () => {
+    const r = start(tempEnv());
+    await ready(r);
+    r.stdin.emit("error", new Error("read EIO"));
+    expect(await r.log("transport.error")).toMatchObject({ error: "Error" });
+    r.send({
+      jsonrpc: "2.0",
+      id: 75,
+      method: "tools/call",
+      params: { name: "espn_get_status", arguments: {} },
+    });
+    expect((await r.reply(75)).result).toBeDefined();
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
   });
 
   it("a drain shorter than the call logs drain_timeout and still closes (exit 0)", async () => {
@@ -614,5 +767,72 @@ describe("withoutEchoedName", () => {
       error: { message: string };
     };
     expect(huge.error.message).toBe("Tool not found");
+  });
+
+  const errData = (message: string, data?: unknown, id: number | string = 1): JSONRPCMessage => ({
+    jsonrpc: "2.0",
+    id,
+    error: { code: -32602, message, ...(data === undefined ? {} : { data }) },
+  });
+  it("drops the URI from the SDK's resources/read misses: message and data.uri; keys, code, id stay", () => {
+    expect(
+      withoutEchoedName(errData("Resource not found: espn-ff://x", { uri: "espn-ff://x" }, "r")),
+    ).toEqual(errData("Resource not found", { uri: "" }, "r"));
+    expect(
+      withoutEchoedName(
+        errData("Resource URI ::: is invalid", { uri: ":::", reason: "invalid_uri" }),
+      ),
+    ).toEqual(errData("Resource URI is invalid", { uri: "", reason: "invalid_uri" }));
+    expect(withoutEchoedName(errData("Resource espn-ff://x disabled"))).toEqual(
+      errData("Resource disabled"),
+    );
+    // data without a uri key keeps its value; data that is not an object (it could only be the
+    // echo) is dropped
+    expect(withoutEchoedName(errData("Resource not found: x", { other: 1 }))).toEqual(
+      errData("Resource not found", { other: 1 }),
+    );
+    for (const d of ["espn-ff://x", ["espn-ff://x"], 7, null])
+      expect(withoutEchoedName(errData("Resource not found: espn-ff://x", d))).toEqual(
+        errData("Resource not found"),
+      );
+  });
+  it("leaves our own template misses and other resource text alone", () => {
+    for (const m of [
+      errData("not found", { uri: "espn-ff://rec/{log_id}" }),
+      errData("Resource not found"), // nothing echoed
+      errData("Resources not found: x", { uri: "x" }),
+      errData("Resource URI is invalid"),
+    ])
+      expect(withoutEchoedName(m)).toBe(m);
+  });
+  it("property: whatever the URI, a resources/read miss carries none of it (huge, unicode, controls)", () => {
+    fc.assert(
+      fc.property(fc.string({ minLength: 1, maxLength: 200, unit: "binary" }), (uri) => {
+        const nf = withoutEchoedName(errData(`Resource not found: ${uri}`, { uri })) as {
+          error: unknown;
+        };
+        expect(nf.error).toEqual({
+          code: -32602,
+          message: "Resource not found",
+          data: { uri: "" },
+        });
+        const inv = withoutEchoedName(
+          errData(`Resource URI ${uri} is invalid`, { uri, reason: "invalid_uri" }),
+        ) as { error: unknown };
+        expect(inv.error).toEqual({
+          code: -32602,
+          message: "Resource URI is invalid",
+          data: { uri: "", reason: "invalid_uri" },
+        });
+        const dis = withoutEchoedName(errData(`Resource ${uri} disabled`)) as {
+          error: { message: string };
+        };
+        // `Resource template <x> disabled` is the template rule's (same outcome: no echo)
+        expect(["Resource disabled", "Resource template disabled"]).toContain(dis.error.message);
+      }),
+    );
+    const big = "\u0007espn_s2=".repeat(250_000);
+    const huge = withoutEchoedName(errData(`Resource not found: ${big}`, { uri: big }));
+    expect(JSON.stringify(huge).length).toBeLessThan(200);
   });
 });

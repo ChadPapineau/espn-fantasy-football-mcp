@@ -7,13 +7,16 @@
 // ceiling → exit 5; a second SIGINT forces the close; a crash exits 1). stdout carries ONLY MCP
 // frames: every log line is JSON on stderr. Ported from sibling @5daa625 (src/cli/serve.ts), adapted.
 import { homedir } from "node:os";
-import type { Readable, Writable } from "node:stream";
+import { PassThrough, type Readable, type Writable } from "node:stream";
 import { parseArgs } from "node:util";
 import {
   INVALID_REQUEST,
   STDIO_DEFAULT_MAX_BUFFER_SIZE,
   deserializeMessage,
   isJSONRPCErrorResponse,
+  isJSONRPCNotification,
+  isJSONRPCRequest,
+  isJSONRPCResultResponse,
   type JSONRPCErrorResponse,
   type JSONRPCMessage,
 } from "@modelcontextprotocol/server";
@@ -128,17 +131,49 @@ export function invalidRequestReply(line: string): JSONRPCErrorResponse | null {
 const ECHOED_NAME_RE = /^(Tool|Prompt|Resource template) [\s\S]* (not found|disabled)$/;
 
 /**
+ * The SDK's resources/read misses, each carrying the caller's URI: `Resource not found: <uri>`
+ * (data `{ uri }`), `Resource URI <uri> is invalid` (data `{ uri, reason }`), `Resource <uri>
+ * disabled`. Our own template misses say `not found` with the template URI and never match.
+ */
+const ECHOED_URI_RULES: readonly (readonly [RegExp, string])[] = [
+  [/^Resource not found: [\s\S]*$/, "Resource not found"],
+  [/^Resource URI [\s\S]* is invalid$/, "Resource URI is invalid"],
+  [/^Resource (?!template )[\s\S]* disabled$/, "Resource disabled"],
+];
+
+/**
+ * The error's `data` with an echoed `uri` emptied (its keys kept, so a client still reads `{ uri }`
+ * as resource-not-found); `data` that is not an object could only be the echo, and goes.
+ */
+function withoutEchoedUri(data: unknown): Record<string, unknown> | undefined {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
+  const o = data as Record<string, unknown>;
+  return Object.prototype.hasOwnProperty.call(o, "uri") ? { ...o, uri: "" } : o;
+}
+
+/**
  * The reply with the caller's string taken out of an SDK "unknown name" error. The SDK answers a
  * call to an unregistered tool or prompt (or an unknown resource template) with -32602 and the name
- * verbatim — control characters and cookie-, GUID- or IP-shaped text included; the code stays, the
- * echo goes (the caller knows what it sent). Every other message passes unchanged.
+ * verbatim, and a resources/read miss with the URI twice (in the message and in `data.uri`), with
+ * control characters and cookie-, GUID- or IP-shaped text included, at any size. The code and the
+ * shape of `data` stay; the echo goes (the caller knows what it sent). Every other message passes
+ * unchanged.
  */
 export function withoutEchoedName(message: JSONRPCMessage): JSONRPCMessage {
   if (!isJSONRPCErrorResponse(message)) return message;
   const m = ECHOED_NAME_RE.exec(message.error.message);
-  if (m === null) return message;
-  const text = `${m[1] ?? "Tool"} ${m[2] ?? "not found"}`;
-  return { ...message, error: { ...message.error, message: text } };
+  if (m !== null) {
+    const text = `${m[1] ?? "Tool"} ${m[2] ?? "not found"}`;
+    return { ...message, error: { ...message.error, message: text } };
+  }
+  const rule = ECHOED_URI_RULES.find(([re]) => re.test(message.error.message));
+  if (rule === undefined) return message;
+  const { data, ...rest } = message.error;
+  const kept = withoutEchoedUri(data);
+  return {
+    ...message,
+    error: { ...rest, message: rule[1], ...(kept === undefined ? {} : { data: kept }) },
+  };
 }
 
 /** Watches stdin's lines beside the SDK transport and answers each invalid request. */
@@ -255,6 +290,8 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
   let wiring: Wiring | null = null;
   let handle: StdioServerHandle | null = null;
   let inflight = 0;
+  /** Request ids read from the wire and not yet answered (or cancelled): the drain waits for them. */
+  const pending = new Set<string | number>();
   let resolveExit!: (code: number) => void;
   const exited = new Promise<number>((r) => {
     resolveExit = r;
@@ -292,8 +329,10 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       if (internals.closeDelayMs !== undefined && internals.closeDelayMs > 0)
         await new Promise((r) => setTimeout(r, internals.closeDelayMs));
       const drainUntil = Date.now() + (internals.drainMs ?? 3000);
-      while (inflight > 0 && Date.now() < drainUntil) await new Promise((r) => setTimeout(r, 20));
-      if (inflight > 0) logger.warn("serve.drain_timeout", { inflight });
+      const busy = (): boolean => inflight > 0 || pending.size > 0;
+      while (busy() && Date.now() < drainUntil) await new Promise((r) => setTimeout(r, 20));
+      if (busy())
+        logger.warn("serve.drain_timeout", { inflight: Math.max(inflight, pending.size) });
       try {
         await handle?.close();
       } catch {
@@ -438,18 +477,49 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
         },
       },
     };
-    const transport = new StdioServerTransport(
-      opts.stdin as unknown as Readable,
-      opts.stdout as unknown as Writable,
-    );
+    // The SDK transport reads a proxy of stdin that never ends by itself: on stdin EOF the transport
+    // would close at once and drop the reply of a call still in flight. EOF runs the shutdown
+    // (onEnd), whose drain lets that call answer before handle.close() ends the transport, as for
+    // SIGTERM. The transport's own stdin error listener moves to the real stream.
+    const input = new PassThrough();
+    opts.stdin.pipe(input, { end: false });
+    const onStdinError = (e: unknown): void => {
+      logger.warn("transport.error", { error: e instanceof Error ? e.name : "unknown" });
+    };
+    opts.stdin.on("error", onStdinError);
+    cleanups.push(() => {
+      opts.stdin.unpipe(input);
+      opts.stdin.off("error", onStdinError);
+    });
+    const transport = new StdioServerTransport(input, opts.stdout as unknown as Writable);
     const sdkSend = transport.send.bind(transport);
-    transport.send = (message) => sdkSend(withoutEchoedName(message));
+    transport.send = (message) => {
+      if (
+        (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) &&
+        message.id !== undefined
+      )
+        pending.delete(message.id);
+      return sdkSend(withoutEchoedName(message));
+    };
     handle = serveStdio(() => createServer(services, w.options), {
       transport,
       onerror: (e) => {
         logger.warn("transport.error", { error: e.name });
       },
     });
+    // A request counts as in flight from the moment it is read, not from when its handler starts:
+    // serveStdio queues each message and dispatches it from an async pump, so a request followed at
+    // once by EOF would otherwise be uncounted when the drain looks (resources and prompts included).
+    // A cancellation settles it (the SDK sends no reply to a cancelled request).
+    const sdkOnMessage = transport.onmessage;
+    transport.onmessage = (message) => {
+      if (isJSONRPCRequest(message)) pending.add(message.id);
+      else if (isJSONRPCNotification(message) && message.method === "notifications/cancelled") {
+        const id = (message.params as { requestId?: unknown } | undefined)?.requestId;
+        if (typeof id === "string" || typeof id === "number") pending.delete(id);
+      }
+      sdkOnMessage?.(message);
+    };
     // the transport closes itself on a frame over its read cap and pauses stdin: run the close
     // sequence instead of idling deaf (serveStdio installs its own onclose; wrap it after the call)
     const sdkOnClose = transport.onclose;
@@ -457,6 +527,9 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       sdkOnClose?.();
       void shutdown("transport_closed", EXIT.ok);
     };
+    // a stdin that ended before serve() wired onEnd emits no `end` (the transport used to check)
+    const raw = opts.stdin as Partial<Pick<Readable, "readableEnded" | "destroyed">>;
+    if (raw.readableEnded === true || raw.destroyed === true) void shutdown("stdin", EXIT.ok);
     cleanups.push(
       watchInvalidRequests(
         opts.stdin,

@@ -7,7 +7,7 @@
 // Prompts hold no logic and never call tools. Ported from sibling @5daa625, adapted (eight prompts).
 import type { GetPromptResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
-import { PRINTABLE_RE, UNTRUSTED_TEXT_RULE } from "../envelope.js";
+import { boundedTextSchema, UNTRUSTED_TEXT_RULE } from "../envelope.js";
 import { leagueSettingsText } from "../resources/index.js";
 import type { McpServerOptions, McpServices, ServerTexts } from "../services.js";
 
@@ -26,8 +26,12 @@ const weekArg = z
   .string()
   .regex(/^(?:[1-9]|1[0-8])$/)
   .optional();
-/** A short printable free-text argument (the user's own words; quoted, never interpreted here). */
-const textArg = (max: number) => z.string().min(1).max(max).regex(PRINTABLE_RE);
+/**
+ * A short free-text argument (the user's own words; quoted, never interpreted here): printable,
+ * capped and never credential-shaped (B1, as every model-supplied text) — a pasted cookie or SWID is
+ * refused by the schema, never copied into the prompt text.
+ */
+const textArg = (max: number) => boundedTextSchema(max).min(1);
 
 /** One prompt row: name, the Skill directory it is generated from, its argument schema. */
 export interface PromptSpec {
