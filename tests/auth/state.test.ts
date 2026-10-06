@@ -396,6 +396,19 @@ describe("the short-circuit (plan 02 §2.1; plan 10 A2b: zero requests while rej
     w.repo.row = stateRow({ state: "validated", stored_at: T0, last_accepted_at: T3 });
     expect((await auth.getCookieHeader()).ok).toBe(true);
   });
+  it("startup in rejected from a row without stored_at: the stored value is taken as the rejected one", async () => {
+    const w = world({
+      row: stateRow({ state: "rejected", stored_at: null, last_rejected_at: T1 }),
+    });
+    const auth = w.make();
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "rejected" });
+    expect(w.store.reads).toBe(0);
+    // a later `eff setup` (new storedAt) still lifts it
+    const fresh = fakeCookies("rerun-null");
+    w.store.set(fresh, T3);
+    w.repo.row = stateRow({ state: "stored", stored_at: T3 });
+    expect(await auth.getCookieHeader()).toEqual({ ok: true, header: buildCookieHeader(fresh) });
+  });
   it("startup in rejected with an unparseable rejection time: any validated row lifts it", async () => {
     const w = world({
       row: stateRow({

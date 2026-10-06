@@ -206,6 +206,9 @@ export function createCredentialAuthority(
     }
     if (meta === null) return nothingStored();
 
+    // a rejection whose value is unknown (a row without stored_at) is taken to be the stored one:
+    // never send a cookie that may be the rejected one; a later `eff setup` still lifts it
+    if (state === "rejected") rejectedStoredAt ??= meta.storedAt;
     if (state === "rejected" && meta.storedAt === rejectedStoredAt) {
       // the short-circuit: zero requests unless another process accepted this value since
       const row = readRow();
