@@ -519,6 +519,12 @@ describe("host moved, non-JSON, malformed, oversized (plan 01 §4.3, §7; plan 0
     expect(w.drift.row?.host_moved_at).toBe(NOW_ISO);
     expect(w.provider.transportStatus().breaker_open).toBe(true);
     expect(auth.observations).toEqual([]);
+    // the next call sends nothing and still says the host moved (not a generic outage)
+    await expect(w.provider.getLeague(w.ref)).rejects.toMatchObject({
+      effCode: "ESPN_HOST_MOVED",
+      effDetails: { reason: "breaker_open" },
+    });
+    expect(urls).toHaveLength(1);
   });
   it("a non-JSON 200 (HTML) is ESPN_HOST_MOVED and never parsed as data; a good answer later clears it", async () => {
     const fetch = scripted({

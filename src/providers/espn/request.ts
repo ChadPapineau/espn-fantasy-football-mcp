@@ -300,7 +300,13 @@ export class EspnRequester {
       };
     };
 
-    if (this.limiter.breaker.isOpen()) return fallback(new EspnBreakerOpenError());
+    // while the host is moved (drift_state), an open breaker reports the move, not an outage
+    if (this.limiter.breaker.isOpen())
+      return fallback(
+        this.hostMoved()
+          ? new EspnUpstreamError("host_moved", { view, reason: "breaker_open" })
+          : new EspnBreakerOpenError(),
+      );
 
     let joined = false;
     let promise: Promise<Fresh>;

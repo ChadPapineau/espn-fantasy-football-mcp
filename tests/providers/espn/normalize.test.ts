@@ -501,3 +501,271 @@ describe("pro schedule, projections, small helpers", () => {
     );
   });
 });
+
+describe("sparse bodies: every optional field absent reads as null, never a guess", () => {
+  const minimalSettings = mSettingsSchema.parse({
+    id: 0,
+    seasonId: SEASON,
+    scoringPeriodId: 1,
+    status: {
+      currentMatchupPeriod: 1,
+      latestScoringPeriod: 1,
+      isActive: true,
+      finalScoringPeriod: 17,
+      firstScoringPeriod: 1,
+    },
+    settings: {
+      name: "League",
+      size: 4,
+      scoringSettings: { scoringType: "H2H_POINTS", scoringItems: [{ statId: 53, points: 0.5 }] },
+      rosterSettings: {
+        lineupSlotCounts: { "0": 1, "20": 2, "77": 1, "21": 0, x: 3 },
+        positionLimits: { "1": 2, "8": 1, "16": 0, y: 1 },
+      },
+      acquisitionSettings: {},
+      scheduleSettings: { divisions: [{ id: 3 }] },
+    },
+  });
+  it("league / slots / rules / scoring input", () => {
+    const league = normalizeLeague(minimalSettings, ref, null, null, false);
+    expect(league).toMatchObject({
+      is_public: null,
+      my_team: null,
+      previous_seasons: [],
+      waiver_last_execution: null,
+      playoff_matchup_edited: null,
+    });
+    expect(league.clock).toMatchObject({ transaction_scoring_period: null, is_expired: null });
+    expect(league.divisions[0]?.name.untrusted_text.value).toBe("Division 3");
+    const slots = normalizeRosterSlots(minimalSettings);
+    expect(slots.slots.map((s) => [s.name, s.count, s.eligible_positions.length])).toEqual([
+      ["QB", 1, 1],
+      ["BE", 2, 14],
+      ["slot_77", 1, 0],
+    ]);
+    expect(slots).toMatchObject({
+      lineup_lock_type: null,
+      undroppable_list: null,
+      move_limit: null,
+      position_limits: { QB: 2 },
+    });
+    const rules = normalizeLeagueRules(minimalSettings);
+    expect(rules).toMatchObject({
+      waiver_system: "unknown",
+      waiver: {
+        type: "UNKNOWN",
+        uses_budget: null,
+        budget: null,
+        waiver_hours: null,
+        process_days: [],
+        order_reset: null,
+        matchup_limit_per_period: null,
+      },
+      trade: { deadline: null, revision_hours: null, max: null },
+      playoffs: {
+        seeding_rule: "UNKNOWN",
+        reseed: null,
+        consolation: null,
+        variable_length: null,
+        regular_season_matchups: null,
+        playoff_weeks: [],
+        matchup_periods: {},
+      },
+      ties: { matchup_tie_rule: null, playoff_tie_rule: null },
+      fees: null,
+    });
+    expect(scoringInputOf(minimalSettings)).toEqual({
+      scoring_type: "H2H_POINTS",
+      items: [{ stat_id: 53, points: 0.5, overrides: {}, is_reverse: false }],
+      matchup_tie_rule: null,
+      playoff_tie_rule: null,
+      home_bonus: 0,
+      playoff_home_bonus: 0,
+    });
+    expect(matchupPeriodsForWeek(minimalSettings, 1)).toEqual([]);
+  });
+  it("a player with every optional field absent; an out-of-grammar position is dropped and counted", () => {
+    const counts = newCounts();
+    const bare = {
+      id: 9,
+      fullName: "X Y",
+      defaultPositionId: 2,
+      eligibleSlots: [2, 120],
+      proTeamId: 31,
+    } as WirePlayer;
+    const p = normalizePlayer(
+      bare,
+      null,
+      { season: SEASON, week: 1, byeWeeks: new Map([[31, 7]]) },
+      counts,
+    );
+    expect(p).toMatchObject({
+      pro_team: null,
+      jersey: null,
+      bye_week: 7,
+      injury_status: null,
+      injured: false,
+      droppable: null,
+      status: null,
+      on_team_id: null,
+      ownership: null,
+      projection_week_espn: null,
+      projection_ros_espn: null,
+      rank_week_espn: null,
+      draft_rank_espn: null,
+      has_outlook: false,
+      eligible_slots: ["RB"],
+    });
+    expect(
+      normalizePlayer(
+        { ...bare, defaultPositionId: -1 },
+        null,
+        { season: SEASON, week: null },
+        counts,
+      ),
+    ).toBeNull();
+    expect(counts.rows_dropped).toBe(1);
+    const ranked = {
+      ...bare,
+      rankings: {
+        "1": [
+          null,
+          { rank: 0, rankType: "STANDARD" },
+          { rank: 12, rankType: "PPR" },
+          { rank: 7, rankType: "STANDARD" },
+        ],
+        "2": "x",
+      },
+      draftRanksByRankType: { STANDARD: { rank: 0 } },
+    } as WirePlayer;
+    expect(normalizePlayer(ranked, null, { season: SEASON, week: 1 }, counts)).toMatchObject({
+      rank_week_espn: 7,
+      draft_rank_espn: null,
+    });
+    expect(
+      normalizePlayer(
+        { ...ranked, draftRanksByRankType: { STANDARD: "x" } },
+        null,
+        { season: SEASON, week: 2 },
+        counts,
+      )?.rank_week_espn,
+    ).toBeNull();
+  });
+  it("rosters and box scores drop rows with an out-of-grammar slot (counted); unknown splits are counted", () => {
+    const roster = mRosterSchema.parse(loadRoster("league-a", 3));
+    const t0 = roster.teams[0]!;
+    const broken = {
+      ...roster,
+      teams: [
+        {
+          ...t0,
+          roster: {
+            ...t0.roster,
+            entries: [
+              { ...t0.roster.entries[0]!, lineupSlotId: 150 },
+              ...t0.roster.entries.slice(1),
+            ],
+          },
+        },
+      ],
+    };
+    const counts = newCounts();
+    const r = normalizeRosters(broken, ref, 3, null, null, { season: SEASON, week: 3 }, counts);
+    expect(r[0]?.entries).toHaveLength(t0.roster.entries.length - 1);
+    expect(r[0]?.team_name.untrusted_text.value).toBe(`Team ${String(t0.id)}`);
+    expect(counts.rows_dropped).toBe(1);
+    const box = mBoxscoreSchema.parse(loadFixture("recorded/league-b/mBoxscore.sp3.json"));
+    const row = box.schedule[0]!;
+    const e0 = row.home.rosterForCurrentScoringPeriod.entries[0]!;
+    const weird = { ...e0, lineupSlotId: 150 };
+    const odd = {
+      ...e0,
+      playerPoolEntry: {
+        ...e0.playerPoolEntry,
+        player: {
+          ...e0.playerPoolEntry.player,
+          stats: [
+            ...(e0.playerPoolEntry.player.stats ?? []),
+            { seasonId: SEASON, scoringPeriodId: 3, statSourceId: 9, statSplitTypeId: 1 },
+          ],
+        },
+      },
+    };
+    const sparse = {
+      ...box,
+      teams: null,
+      schedule: [
+        {
+          ...row,
+          away: null,
+          home: {
+            ...row.home,
+            totalPoints: null,
+            rosterForCurrentScoringPeriod: { entries: [weird, odd] },
+          },
+        },
+      ],
+    };
+    const c2 = newCounts();
+    const out = normalizeBoxScores(sparse, 3, SEASON, true, null, c2);
+    expect(out[0]).toMatchObject({ away: null, home: { total_points: null } });
+    expect(out[0]?.home.entries).toHaveLength(1);
+    expect(out[0]?.home.entries[0]?.game_state).toBe("in");
+    expect(c2).toMatchObject({ rows_dropped: 1, stat_entries_failed: 1 });
+  });
+  it("standings without settings; live rows of other weeks are skipped; ratings keys filtered", () => {
+    const team = mTeamSchema.parse(loadFixture("recorded/league-c/mTeam.json"));
+    const t = team.teams[0]!;
+    const sparseTeam = {
+      ...team,
+      teams: [
+        {
+          ...t,
+          playoffSeed: 0,
+          rankCalculatedFinal: null,
+          record: { overall: { wins: 0, losses: 0, ties: 0 } },
+          transactionCounter: { acquisitions: 0, drops: 0, trades: 0 },
+          waiverRank: Number.NaN,
+          currentSimulationResults: null,
+        },
+      ],
+    };
+    const st = normalizeStandings(sparseTeam, null, null);
+    expect(st.teams[0]).toMatchObject({
+      rank: null,
+      playoff_seed: null,
+      pct: null,
+      points_for: 0,
+      streak: null,
+      waiver_rank: null,
+      playoff_pct_espn: null,
+    });
+    expect(st.waiver_order).toEqual([]);
+    expect(st.playoff_line).toEqual({ team_count: null, seeding_rule: "UNKNOWN", bye_seeds: null });
+    const live = mMatchupScoreSchema.parse(loadFixture("recorded/league-a/mMatchupScore.sp4.json"));
+    expect(normalizeLiveMatchups(live, 9, null, null)).toEqual([]);
+    const bye = {
+      ...live,
+      schedule: [{ ...live.schedule.find((r) => r.matchupPeriodId === 4)!, away: null }],
+    };
+    expect(normalizeLiveMatchups(bye, 4, null, 99)[0]).toMatchObject({
+      away: null,
+      is_mine: false,
+    });
+    expect(
+      normalizePositionalRatings({
+        positionAgainstOpponent: {
+          positionalRatings: {
+            "1": {
+              average: 1,
+              ratingsByOpponent: { "2": { average: 3, rank: 4 }, bad: { average: 1, rank: 1 } },
+            },
+            "8": { average: 1 },
+            x: { average: 1 },
+            "2": { average: 1 },
+          },
+        },
+      }),
+    ).toEqual([{ position_id: 1, opponent_pro_team_id: 2, average: 3, rank: 4 }]);
+  });
+});
