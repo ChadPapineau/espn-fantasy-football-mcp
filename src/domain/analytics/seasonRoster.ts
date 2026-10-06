@@ -1,0 +1,71 @@
+// seasonRoster.ts — the public surface of the Phase-2 season and roster engines (plan 10 §3.2, B7,
+// B9; plan 07 E3 `pre` / `live` and the fitted `season`, E4 replacement, E8 schedule, E9 roster).
+// A separate barrel, like ./phase2.ts for the market engines, so ./index.ts (the P0 surface) changes
+// only by one re-export line; the contract types stay in ./types.ts.
+export {
+  LIVE,
+  actionableSlots,
+  analyzeMatchupWin,
+  canMove,
+  cholesky,
+  contributionOf,
+  distQuantile,
+  fractionRemaining,
+  liveMoments,
+  matchupPlayerOf,
+  type Contribution,
+  type LiveStatus,
+  type MatchupPlayer,
+  type MatchupWinOutcome,
+  type MatchupWinRequest,
+} from "./matchup.js";
+export {
+  fittedWeekly,
+  projectionModel,
+  simulateFittedSeason,
+  teamWeekOf,
+  type FittedSeasonOutcome,
+  type FittedSeasonRequest,
+  type TeamWeekProjection,
+} from "./seasonFit.js";
+export {
+  REPLACEMENT,
+  allocate,
+  allocationPlanOf,
+  analyzeReplacement,
+  expectedExcess,
+  gapTiers,
+  planPositions,
+  replacementDepth,
+  streamCandidates,
+  type AllocationEntry,
+  type AllocationOutcome,
+  type AllocationPlan,
+  type ReplacementOutcome,
+  type ReplacementPlayer,
+  type ReplacementRequest,
+  type ReplacementWeek,
+} from "./replacement.js";
+export {
+  SCHEDULE,
+  SCHEDULE_EVIDENCE_NOTE,
+  analyzeSchedule,
+  solveWeek,
+  typicalValue,
+  type ScheduleOutcome,
+  type SchedulePlayer,
+  type ScheduleRequest,
+  type StreamOption,
+} from "./scheduleStress.js";
+export {
+  COLD_STREAMABILITY,
+  HIDDEN_BENCH_RISKS,
+  ROSTER_AUDIT,
+  analyzeRoster,
+  benchTemplate,
+  returnCurve,
+  type AuditPlayer,
+  type HandcuffCase,
+  type RosterAuditOutcome,
+  type RosterAuditRequest,
+} from "./rosterAudit.js";
