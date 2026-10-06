@@ -388,6 +388,13 @@ For a reader who reads nothing else. The full record is `docs/plan/adversarial-l
 7. **Reach-session detection is a heuristic.** Bounded because writes are unbuilt — but the sentence must keep saying "unsupported", never "safe".
 8. **The plan is unbuilt.** Its acceptance criteria are tests, and the tests are the next adversary.
 
+## B1 — measurements and records written back during the build (2026-10-06)
+
+Not adversarial rulings: the numbers and pointers the plan said the build would write back.
+
+- **A7a sizes** · plan 07 §5.1 (a "Measured" table after the per-turn paragraph) and plan 10 §2 (the token-sizes row) · `tools/list` under `core` 17 669 chars ≈ 4 418 tokens (ceiling 20 000), 19 631 with the ≤ 120-char fallback in every description, the Skills listing 2 597 chars (ceiling 4 600), and the per-tool result sizes; consequences recorded there: no C10 lever, `core` stays the default, the ceilings stay.
+- **A2a list** · plan 10 §2 (the translator-agreement row: the producer is `tests/golden/translator-agreement.test.ts`; the list lives in `docs/evals/1a-translator-agreement.md`) · the row said "CI" only while A2a asks for the list in `docs/evals/`; both now hold.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |

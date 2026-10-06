@@ -46,7 +46,7 @@
 | Drift probe: host answers JSON; manifest key set unchanged; a replayed fixture with a renamed key fails loudly | Phase 0 | `scripts/probe.ts` → `eff probe`; `tests/drift/` | launchd log; `probe_log`; CI |
 | Engine properties (plan 08 §7 P1–P16; 100 % coverage) | Phase 1a | `tests/property/scoring.test.ts` | CI job summary |
 | Engine golden vs **recorded** ESPN fixtures: per stat ≤ 0.005, per total ≤ 0.01, every rostered player-week, ≥ 3 weeks | Phase 1a (the probe league's recorded weeks) → 1b (the reference league; live `eff smoke`) | `tests/domain/scoring/golden.test.ts`; `espn_get_box_score.match` | CI; `docs/evals/` |
-| Translator agreement ESPN vs nflverse (plan 08 P15) | Phase 1a | `tests/domain/scoring/agreement.test.ts` | CI |
+| Translator agreement ESPN vs nflverse (plan 08 P15) | Phase 1a | `tests/golden/translator-agreement.test.ts` | CI; the list of raw differences > 1 yard / > 1 event and the conventions observed in `docs/evals/1a-translator-agreement.md` (A2a; the test fails when the page differs from the run) |
 | Start/sit regret vs "last week's points" and "start by ESPN projection" | Phase 1a (soft, fixture weeks) → Phase 3 (hard, held-out seasons) | `espn_analyze_retrospective`; `tests/backtest/lineup.test.ts` | `docs/evals/<date>.md` + the `retro` report |
 | Projection CRPS/MAE vs ESPN's own projection, by position | Phase 1b (prospective, week by week) → Phase 3 (hard) | `espn_analyze_retrospective.projection_vs_espn`; `tests/backtest/projection.test.ts` | same |
 | `P(win)` Brier vs ESPN `winProbability`; `P(playoffs)` Brier vs ESPN `playoffPct` | Phase 1b (needs `scoreboard_snapshot`) → Phase 3 (hard) | same | same |
@@ -55,7 +55,7 @@
 | K/D-ST rank correlation vs "last week" and "lowest implied total" | Phase 1a (soft) → Phase 3 (hard) | `tests/backtest/kdef.test.ts` | `docs/evals/` |
 | Skills Lane 1 (structural + fixture dry run + injection invariance) | Phase 1a | `check:skills` | CI |
 | Skills Lane 2 (model-graded) | Phase 1b, pre-release | `claude plugin eval` | `docs/evals/` |
-| Token sizes vs plan 07 §5.1; **per-turn fixed cost** (`tools/list` bytes under `core`/`full`, Skills listing chars) vs the ceilings | Phase 1a | `tests/mcp/size.test.ts` (fixture mode) | CI job summary; copied into plan 07 §5.1 |
+| Token sizes vs plan 07 §5.1; **per-turn fixed cost** (`tools/list` bytes under `core`/`full`, Skills listing chars) vs the ceilings | Phase 1a | `tests/mcp/size.test.ts` (fixture mode) | CI job summary; copied into plan 07 §5.1. **Measured 1a** (`64b0fc7`, 2026-10-06): `core` **17 669 chars ≈ 4 418 tokens** (18 tools; ceiling 20 000 ≈ 5 000); with the ≤ 120-char fallback in every description 19 631; `full` = `core` until B2; Skills listing **2 597 chars** (ceiling 4 600) |
 | Client copy count (does the client forward `structuredContent` and `text`?) and `instructions` delivery (does the model see the server `instructions`? — the nonce, ADV OBJ-24) | Phase 1b week one | the `espn_debug_echo` spike | HANDOFF "Stack facts" |
 | ESPN request count per day (the ToS posture) | Phase 1b | `espn_get_status.limiter.requests_today`; `eff status` | `eff status`; the pre-release checklist |
 
