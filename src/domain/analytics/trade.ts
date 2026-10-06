@@ -166,15 +166,22 @@ function fastOf(ctx: Ctx, p: TradePlayer, wi: number, pass: Pass): FastPlayer {
 const activeOf = (players: readonly TradePlayer[]): TradePlayer[] =>
   players.filter((p) => slotClassOf(p.slot_id) !== "ir");
 
-/** L(players, w) for every value week. */
+/**
+ * L(players, w) for every value week. Weeks whose player values are identical (a rest-of-season total
+ * shared evenly, a healthy roster) are solved once: the assignment depends only on the values.
+ */
 function lineupWeeks(ctx: Ctx, players: readonly TradePlayer[], pass: Pass): number[] {
   const act = activeOf(players);
-  return ctx.weeks.map((_, wi) =>
-    fastLineupValue(
-      ctx.seats,
-      act.map((p) => fastOf(ctx, p, wi, pass)),
-    ),
-  );
+  const memo = new Map<string, number>();
+  return ctx.weeks.map((_, wi) => {
+    const fast = act.map((p) => fastOf(ctx, p, wi, pass));
+    const key = fast.map((f) => f.value).join(",");
+    const hit = memo.get(key);
+    if (hit !== undefined) return hit;
+    const v = fastLineupValue(ctx.seats, fast);
+    memo.set(key, v);
+    return v;
+  });
 }
 
 /** One side's roster change: the roster after, the drops, the wire fills. */
