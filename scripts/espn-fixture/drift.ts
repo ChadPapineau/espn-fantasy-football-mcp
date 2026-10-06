@@ -349,13 +349,25 @@ const ENUM_STRING_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
 /** More distinct values than this at one pattern → not an enum (dropped from the manifest). */
 export const MAX_ENUM_VALUES = 64;
 const KEY_RE = /^[A-Za-z_$][\w$]*$/;
-const MAX_OBSERVE_DEPTH = 24;
+/** Nodes deeper than this are not observed (both manifests; a hostile body cannot recurse us). */
+export const MAX_OBSERVE_DEPTH = 24;
+
+/**
+ * Whether a leaf value at `key` is an enum observation (the one rule both manifests use): an
+ * UPPER_SNAKE string outside the member/editor text keys, or an integer of a closed vocabulary.
+ */
+export function isEnumValue(key: string, v: Json): v is string | number {
+  return (
+    (typeof v === "string" && !TEXT_KEYS.has(key) && ENUM_STRING_RE.test(v)) ||
+    (typeof v === "number" && Number.isInteger(v) && INTEGER_ENUM_KEYS.has(key))
+  );
+}
 
 /**
  * An object whose keys are data, not schema — every key numeric (stats by stat id, points by
  * period, slot counts) or any key outside the pattern grammar: its VALUES are walked under `{}`.
  */
-function isMapLike(o: Record<string, Json>): boolean {
+export function isMapLike(o: Record<string, Json>): boolean {
   const keys = Object.keys(o);
   return (
     keys.length > 0 &&
@@ -399,10 +411,7 @@ export function observeBodies(bodies: readonly Json[]): Omit<ViewManifest, "sour
       return;
     }
     if (key === null) return;
-    const isEnum =
-      (typeof v === "string" && !TEXT_KEYS.has(key) && ENUM_STRING_RE.test(v)) ||
-      (typeof v === "number" && Number.isInteger(v) && INTEGER_ENUM_KEYS.has(key));
-    if (isEnum) {
+    if (isEnumValue(key, v)) {
       const set = enums.get(pattern) ?? new Set<string | number>();
       set.add(v);
       enums.set(pattern, set);
