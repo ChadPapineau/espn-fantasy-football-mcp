@@ -80,17 +80,34 @@ export {
 export {
   coerceScalar,
   type DefenseLineOptions,
+  type DefenseScores,
+  defenseScoresFromPlays,
+  DST_POINTS_ALLOWED_EVIDENCE,
   espnPositionForNflverse,
   type LineOptions,
+  LONG_TD_CANONICALS,
+  type LongTdCounts,
+  longTdCounts,
+  MAX_PLAYS,
   type NflverseRow,
   parseKickList,
   type PlayerWeekOptions,
   pointsAllowed,
   type PointsAllowedDefinition,
+  pointsAllowedFromTeamWeek,
   type PointsAllowedInput,
   statLineFromPlayerWeek,
   statLineFromTeamDefense,
+  yardsAllowedFromTeamWeek,
 } from "./nflverse.js";
+export {
+  FAMILY_EVIDENCE,
+  type FamilyEvidence,
+  type FamilyVerification,
+  familyVerification,
+  GOLDEN_COVERED_STAT_IDS,
+  scoresForClass,
+} from "./verification.js";
 
 /** The engine as one object (plan 08 E1; the ScoringEngine contract). */
 export const scoringEngine: ScoringEngine = Object.freeze({ score, scoreSamples, explain, verify });
