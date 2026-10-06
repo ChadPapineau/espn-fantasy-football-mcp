@@ -12,7 +12,7 @@ The two rules every result is read under, verbatim:
 
 **Shapes.** `Dist` = `{ mean, p10, p25, p50, p75, p90, p_zero, basis }` — `basis: "position_cv"` in v1 (a position-level spread around ESPN's mean). `Rec` = `{ action, subjects[], lineup, point_estimate, distribution, delta_vs_next { value, p10, p90 }, decision_metric, drivers[] { name, contribution }, assumptions[] { text, revisit_trigger }, confidence { role_games, inputs[] }, as_of, latest_execution_time, no_move, log_id }` — `log_id` is filled only by `espn_record_recommendation`. ESPN's numbers end in `_espn` and are never averaged into ours silently.
 
-| Tool | Use it for | Compact fields a Skill reads | Re-fetch |
+| Tool | Use it for | Compact fields a Skill reads | Re-fetch (class TTL) |
 |---|---|---|---|
 | `espn_get_status` | version, credential state, drift, checks — zero ESPN requests | `server.tool_contract`, `server.toolset`, `credential.state`, `credential.stale_warning`, `credential.age_days`, `drift.status`, `capabilities.write`, `league.seeding_confirmed`, `checks[]` (with `include_checks: true`) | once per session |
 | `espn_check_auth` | the one explicit credential probe (≤ 1 per minute) | `accepted` (true, false, or null when the probe cannot tell on this league), `reason`, `probe`, `state`, `next_allowed_at` | at most once per turn |

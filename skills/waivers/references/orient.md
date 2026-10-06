@@ -19,7 +19,7 @@
 
 **Which league.** If any tool named `ff_<something>` (the owner's separate Yahoo server, under whatever name it was installed) is also visible in this session and the user's message names no platform, **ask which league before any recommendation** — unless the conversation already established one, in which case name the league the answer is for in the first line.
 
-**Toolset.** A step labelled `(P1; …)` or `**P1:**` runs only when `server.toolset` is `full`; under `core` take the P0 path that step names, or skip it and say so.
+**Toolset.** A step labelled `(P1; …)` or `**P1:**` runs only when `server.toolset` is `full`; under `core` take the P0 path that step names, or skip it and say so. A whole P1 Skill reads `server.toolset` too and, under `core`, stops with: "this Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client".
 
 ### What still works when a view drifts (plan 01 §7)
 
@@ -35,7 +35,7 @@
 
 ### Never re-fetch within a session
 
-**Never re-fetch anything already in the conversation under its class TTL.** A result whose `meta.age_s` is under its class TTL is reused verbatim (the TTL column in references/tool-outputs.md is authoritative).
+**Never re-fetch anything already in the conversation under its class TTL.** A result whose `meta.age_s` is under its class TTL is reused verbatim (the Re-fetch column in references/tool-outputs.md is authoritative).
 
 | Data | Rule |
 |---|---|
