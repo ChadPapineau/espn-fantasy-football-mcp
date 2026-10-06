@@ -168,6 +168,31 @@ describe("CAT-05: bareTextSchema marks positions; bareFieldsFromSchema derives t
     for (const f of bareFieldsFromSchema(dataSchema)) expect(f.path).toMatch(FIELD_PATH_RE);
   });
 
+  it("walks intersections, pipes (transforms), tuple rests, readonly and catch wrappers", () => {
+    const n = bareTextSchema("espn.player.name");
+    const s = z.strictObject({
+      both: z.intersection(z.object({ a: n }), z.object({ b: n })),
+      piped: n.transform((x) => x.trim()),
+      piped2: z.string().pipe(n),
+      rest: z.tuple([z.number()], n),
+      ro: z.strictObject({ r: n }).readonly(),
+      caught: n.catch("x"),
+      deep: z.lazy(() => z.lazy(() => z.strictObject({ d: n }))),
+      // a record of unmarked values is fine (only a MARKED position under a record is refused)
+      counts: z.record(z.string(), z.number()),
+    });
+    expect(bareFieldsFromSchema(s).map((f) => f.path)).toEqual([
+      "data.both.a",
+      "data.both.b",
+      "data.piped",
+      "data.piped2",
+      "data.rest[]",
+      "data.ro.r",
+      "data.caught",
+      "data.deep.d",
+    ]);
+  });
+
   it("refuses a marked position under a record (dynamic keys cannot be path-listed)", () => {
     expect(() => bareFieldsFromSchema(z.strictObject({ by: z.record(z.string(), name) }))).toThrow(
       /record/,
