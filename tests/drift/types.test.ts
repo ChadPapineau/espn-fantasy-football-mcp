@@ -166,12 +166,15 @@ describe("the required-path seed (skeleton detection, B2)", () => {
     );
     expect(verified.map(([v]) => v).sort()).toEqual([
       "kona_player_info",
+      "kona_playercard",
       "mBoxscore",
       "mMatchup",
+      "mMatchupScore",
       "mNav",
       "mRoster",
       "mSettings",
       "mTeam",
+      "players_wl",
       "proTeamSchedules_wl",
     ]);
     for (const [view, vm] of verified)
