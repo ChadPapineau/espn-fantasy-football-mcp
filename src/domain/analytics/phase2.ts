@@ -70,7 +70,6 @@ export {
 } from "./cascade.js";
 export {
   analyzeEvidence,
-  extractClaim,
   isEvidenceSource,
   type EvidenceOutcome,
   type EvidencePlayer,

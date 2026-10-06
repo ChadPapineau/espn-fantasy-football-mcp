@@ -24,7 +24,6 @@ describe("phase2.ts", () => {
       "faabBid",
       "lambdaOf",
       "pricePerPoint",
-      "extractClaim",
       "positionGaps",
     ] as const)
       expect(typeof P2[name]).toBe("function");

@@ -1,23 +1,32 @@
-// evidence.ts — E10 `espn_analyze_evidence`, the deterministic P1 part (plan 07 E10; plan 10 B8;
-// research 05 §6 rules 1–5; sib research 05 §10.1–§10.4): every text item (ESPN's outlooks, RSS
-// headlines, the user's pasted claim, the official report) is structured by the `rules_v1` claim
-// extractor into {type, direction} and weighted by a HAND-SET reliability row per source class ×
-// claim type (`calibration_state.note: "priors are hand-set"` on every result; `posterior: null`
-// until the calibrated table — P2); `seasonOutlook` decays to zero by week 4 unless `lastNewsDate`
-// moved (rule 2); STRUCTURED FIELDS WIN (rule 3): `injuryStatus`, the IR slot, the lineup lock,
-// `waiverProcessDate` and the usage numbers are compared with the claims and a disagreement is
-// flagged in both directions (narrative > numbers → `unconfirmed_narrative`; numbers > narrative →
-// `quiet_role_change`; a structured availability field contradicted → `availability_conflict`);
-// league-member strings are never inputs (rule 4); and the recommendation is computed from the
-// structured fields and the usage only, so it is INVARIANT to the text except for the flag (rule
-// 5). Text is data with a reliability score; it is never an instruction (plan 02 §6.4). Pure. New.
+// evidence.ts — E10 `espn_analyze_evidence`, the deterministic P1 engine (plan 07 E10; plan 10 B8;
+// research 05 §6 rules 1–5; sib research 05 §10.1–§10.4). It composes the evidence domain
+// (src/domain/evidence: the `rules_v1` claim extractor, the hand-set source reliabilities with the
+// season-outlook decay and the injection cap, the class-based `injury_status` comparator and
+// `calibration_state`) into the E10 result: every text item (ESPN's outlooks, RSS headlines, the
+// user's pasted claim) becomes a typed claim with its reliability; the official report is official
+// evidence; STRUCTURED FIELDS WIN (rule 3) — the injury status (and the official report), the
+// official practice participation, the IR slot, the lineup lock, `waiverProcessDate` and the usage
+// numbers are compared with the claims and a disagreement is flagged in both directions (narrative >
+// numbers → `unconfirmed_narrative`; numbers > narrative → `quiet_role_change`; a structured
+// availability field contradicted → `availability_conflict`); league-member strings never enter
+// (rule 4); `posterior: null` until the calibrated table (P2); and the recommendation is computed
+// from the structured fields and the usage only, so it is INVARIANT to the text except for the flag
+// (rule 5). Text is data with a reliability score; it is never an instruction (plan 02 §6.4). Pure.
 import type { Clock } from "../clock.js";
 import {
-  flagFold,
+  calibrationState,
+  claimFold,
+  extractClaim,
+  reliabilityOf,
+  reliabilitySourceOf,
+  structuredDisagreement,
+  type Designation,
+  type RulesV1Claim,
+} from "../evidence/index.js";
+import { slotClassOf } from "../league/slots.js";
+import {
   INJECTION_FLAGS,
-  sanitizeText,
-  TEXT_CAPS,
-  UNTRUSTED_SOURCE_CLASS,
+  isIrEligible,
   wrapUntrusted,
   type BareText,
   type ClaimExtract,
@@ -28,12 +37,10 @@ import {
   type UntrustedText,
   type Week,
 } from "../league/types.js";
-import { slotClassOf } from "../league/slots.js";
-import { isIrEligible } from "../league/types.js";
 import { P_ACTIVE_BY_STATUS } from "./constants.js";
 import { ensure } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
-import { EVIDENCE, RELIABILITY } from "./marketConstants.js";
+import { EVIDENCE, OFFICIAL_RELIABILITY } from "./marketConstants.js";
 import { meanOf, round, zeroDist } from "./math.js";
 import type { UsageWeek } from "./usageSignals.js";
 import {
@@ -44,58 +51,15 @@ import {
   type Rec,
 } from "./types.js";
 
-// --- rules_v1: the deterministic claim extractor ----------------------------------------------------
-
 type ClaimType = ClaimExtract["type"];
 
-const RE = {
-  availabilityUp:
-    /\b(cleared to (play|return)|cleared|will play|expected to play|set to play|active for|available|returns? to (practice|action)|returned to (practice|action)|activated|good to go|no injury designation|out of ir)\b/,
-  availabilityDown:
-    /\b(ruled out|will not play|won'?t play|inactive|doubtful|questionable|game[- ]time decision|injured reserve|placed on ir|season[- ]ending|out indefinitely|suspended|will miss|to miss|miss (the|this|next)|sidelined)\b|\bout\b(?! of\b)/,
-  transaction:
-    /\b(signed|re-?signed|released|waived|traded|acquired|claimed off waivers|elevated|promoted from the practice squad|designated to return)\b/,
-  health:
-    /\b(mri|x-?rays?|sprain(ed)?|strain(ed)?|hamstring|ankle|knee|concussion|fracture(d)?|broken|torn|surgery|limited|full (practice|participant|participation)|did not practice|did not participate|dnp|setback|soreness|illness|rehab)\b/,
-  role: /\b(start(s|ing|er)?|lead back|bell-?cow|workload|snaps?|featured|feature back|demoted|benched|depth chart|committee|rb1|wr1|te1|qb1|target share|more work|bigger role|expanded role|reduced role|first-team|second-team|backup|touches|carries|targets)\b/,
-  coaching: /\b(coach(es)?|coordinator|expects|plans to|hopes to|intends to|wants to)\b/,
-  up: /\b(cleared|will play|expected to play|set to play|available|returns?|returned|activated|good to go|full (practice|participant|participation)|start(s|ing|er)?|promoted|more work|bigger role|expanded role|featured|lead back|bell-?cow|first-team|signed|upgraded|increase(d)?|out of ir)\b/,
-  down: /\b(ruled out|will not play|won'?t play|inactive|doubtful|injured reserve|placed on|setback|surgery|torn|fracture(d)?|limited|did not practice|did not participate|dnp|demoted|benched|reduced role|backup|released|waived|suspended|season[- ]ending|downgraded|decrease(d)?|miss(es)?|sidelined)\b|\bout\b(?! of\b)/,
-  practiceFull: /\bfull (practice|participant|participation)\b|\bpracticed fully\b/,
-  practiceLimited: /\blimited\b/,
-  practiceDnp: /\b(did not practice|did not participate|dnp|sat out practice)\b/,
+/** Structured-field checks that are not claim types (the comparator's own patterns, on folded text). */
+const CHECK = {
   irMove: /\b(move (him )?(to|into) (the )?ir|put (him )?on ir|stash (him )?(in|on) ir)\b/,
   lockTiming:
     /\b(before (the |thursday'?s |sunday'?s |monday'?s )?(lock|kickoff)|still time to (start|swap|move|bench))\b/,
-  noWaivers:
-    /\b(free agent now|available now|no waivers|skip(s)? waivers|already cleared waivers)\b/,
+  noWaivers: /\b(free agent now|available now|no waivers|skips? waivers|already cleared waivers)\b/,
 } as const;
-
-const count = (re: RegExp, s: string): number => {
-  const g = new RegExp(re.source, "g");
-  return [...s.matchAll(g)].length;
-};
-
-/**
- * `rules_v1`: the claim type (availability before transaction, health, role and coaching intent;
- * `other` when nothing matches) and its direction (up/down keyword counts; a tie is neutral) on the
- * sanitised, folded text. Deterministic; the text is only matched, never executed.
- */
-export function extractClaim(text: string): ClaimExtract {
-  const s = flagFold(sanitizeText(text, TEXT_CAPS.player_outlook).value);
-  let type: ClaimType = "other";
-  if (RE.availabilityUp.test(s) || RE.availabilityDown.test(s)) type = "availability";
-  else if (RE.transaction.test(s)) type = "transaction";
-  else if (RE.health.test(s)) type = "health";
-  else if (RE.role.test(s)) type = "role";
-  else if (RE.coaching.test(s)) type = "coaching_intent";
-  const up = count(RE.up, s);
-  const down = count(RE.down, s);
-  const direction = up > down ? "up" : down > up ? "down" : "neutral";
-  return { type, direction, extractor: "rules_v1" };
-}
-
-// --- E10 ----------------------------------------------------------------------------------------------
 
 /** One already-wrapped text item and when it was published. */
 export interface EvidenceText {
@@ -138,7 +102,7 @@ export interface EvidenceRequest {
     readonly time?: IsoInstant;
     readonly type?: ClaimType;
   } | null;
-  /** Scored claims in the calibration table (P2 feeds it); default 0. */
+  /** Scored claims in the calibration table (P2 feeds it; Phase 2 always 0). */
   readonly calibration_n?: number;
   readonly week: Week;
   readonly clock: Clock;
@@ -154,20 +118,35 @@ export interface EvidenceOutcome {
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 const UNAVAILABLE: ReadonlySet<string> = new Set(["OUT", "INJURY_RESERVE", "SUSPENSION"]);
 
-function reliabilityClass(source: UntrustedSource): keyof typeof RELIABILITY {
-  if (source.startsWith("nflverse.injuries")) return "official";
-  if (source.startsWith("espn.player")) return "espn_outlook";
-  if (source.startsWith("rss.")) return "news";
-  return "user";
+/** The official report's own labels (nflverse enums, not free text) as designations. */
+function officialDesignation(label: string): Designation | null {
+  const s = claimFold(label);
+  if (/\b(did not participate|did not practice|dnp)\b/.test(s)) return "practice_dnp";
+  if (/\blimited\b/.test(s)) return "practice_limited";
+  if (/\bfull\b/.test(s)) return "practice_full";
+  if (/\bout\b/.test(s)) return "out";
+  if (/\bdoubtful\b/.test(s)) return "doubtful";
+  if (/\bquestionable\b/.test(s)) return "questionable";
+  return null;
+}
+
+/** Whether a source tag is one E10 reads as a claim (never a league-member string — rule 4). */
+export function isEvidenceSource(source: UntrustedSource): boolean {
+  return reliabilitySourceOf(source) !== null;
 }
 
 interface Item {
   readonly source: UntrustedSource;
   readonly claim: UntrustedText;
-  readonly extract: ClaimExtract;
+  /** The extract (null = no claim → type `other`). */
+  readonly extract: RulesV1Claim | null;
+  readonly type: ClaimType;
+  readonly direction: ClaimExtract["direction"];
   readonly folded: string;
   readonly time: IsoInstant | null;
   readonly official: boolean;
+  readonly reliability: number;
+  readonly decayed: boolean;
 }
 
 /** The usage move: the latest game against the mean of up to four before it. */
@@ -203,80 +182,97 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
   const nowMs = req.clock.nowMs();
   const p = req.player;
   const warnings: string[] = [];
+  const newsMoved =
+    p.last_news_at !== null && nowMs - Date.parse(p.last_news_at) <= EVIDENCE.newsFreshMs;
 
-  // structure every text (the user's claim wrapped here; the official report as official evidence)
+  // structure every text claim (rule 1), weighted by the hand-set table (rule 2), never league text (rule 4)
   const items: Item[] = [];
-  let ignored = 0;
-  for (const t of req.texts) {
-    const src = t.text.untrusted_text.source;
-    // league-member strings never enter the reliability model (rule 4)
-    if (!isEvidenceSource(src)) {
-      ignored += 1;
-      continue;
-    }
+  const addText = (
+    wrapped: UntrustedText,
+    time: IsoInstant | null,
+    typeOverride?: ClaimType,
+  ): boolean => {
+    const src = wrapped.untrusted_text.source;
+    const rs = reliabilitySourceOf(src);
+    if (rs === null) return false;
+    const ex = extractClaim(wrapped.untrusted_text.value);
+    const type = typeOverride ?? ex?.type ?? "other";
+    const rel = reliabilityOf(rs, type, {
+      flags: wrapped.untrusted_text.flags ?? [],
+      week: req.week,
+      news_moved: newsMoved,
+    });
     items.push({
       source: src,
-      claim: t.text,
-      extract: extractClaim(t.text.untrusted_text.value),
-      folded: flagFold(t.text.untrusted_text.value),
-      time: t.time,
+      claim: wrapped,
+      extract: ex,
+      type,
+      direction: ex?.direction ?? "neutral",
+      folded: claimFold(wrapped.untrusted_text.value),
+      time,
       official: false,
+      reliability: rel.reliability ?? 0,
+      decayed: rel.decayed,
     });
-  }
+    return true;
+  };
+  let ignored = 0;
+  for (const t of req.texts) if (!addText(t.text, t.time)) ignored += 1;
   if (ignored > 0)
     warnings.push(
       `${String(ignored)} text item(s) from a non-claim source ignored (league-member text is display-only)`,
     );
   const userClaim = req.claim ?? null;
-  if (userClaim !== null) {
-    const wrapped = wrapUntrusted(userClaim.text, "user.claim.text");
-    const ex = extractClaim(wrapped.untrusted_text.value);
-    items.push({
-      source: "user.claim.text",
-      claim: wrapped,
-      extract: userClaim.type === undefined ? ex : { ...ex, type: userClaim.type },
-      folded: flagFold(wrapped.untrusted_text.value),
-      time: userClaim.time ?? null,
-      official: false,
-    });
-  }
+  if (userClaim !== null)
+    addText(
+      wrapUntrusted(userClaim.text, "user.claim.text"),
+      userClaim.time ?? null,
+      userClaim.type,
+    );
+
+  // the official report: structured, official evidence (its labels are nflverse enums)
   const off = req.official ?? null;
   const lastPractice = off?.practice[off.practice.length - 1] ?? null;
-  if (off !== null && off.report_status !== null) {
-    const w = wrapUntrusted(off.report_status, "nflverse.injuries.report_status");
+  const addOfficial = (
+    raw: string,
+    source: "nflverse.injuries.report_status" | "nflverse.injuries.practice_status",
+    type: "availability" | "health",
+  ): Designation | null => {
+    const wrapped = wrapUntrusted(raw, source);
+    const d = officialDesignation(wrapped.untrusted_text.value);
+    const down =
+      d === "out" || d === "doubtful" || d === "practice_dnp" || d === "practice_limited";
     items.push({
-      source: "nflverse.injuries.report_status",
-      claim: w,
-      extract: { ...extractClaim(w.untrusted_text.value), type: "availability" },
-      folded: flagFold(w.untrusted_text.value),
-      time: off.as_of,
+      source,
+      claim: wrapped,
+      extract: null,
+      type,
+      direction: d === null ? "neutral" : down ? "down" : d === "practice_full" ? "up" : "neutral",
+      folded: claimFold(wrapped.untrusted_text.value),
+      time: off?.as_of ?? null,
       official: true,
+      reliability: OFFICIAL_RELIABILITY[type],
+      decayed: false,
     });
-  }
-  if (off !== null && lastPractice !== null) {
-    const w = wrapUntrusted(
-      `${lastPractice.day}: ${lastPractice.status}`,
-      "nflverse.injuries.practice_status",
-    );
-    items.push({
-      source: "nflverse.injuries.practice_status",
-      claim: w,
-      extract: { ...extractClaim(w.untrusted_text.value), type: "health" },
-      folded: flagFold(w.untrusted_text.value),
-      time: off.as_of,
-      official: true,
-    });
-  }
+    return d;
+  };
+  const offStatus =
+    off !== null && off.report_status !== null
+      ? addOfficial(off.report_status, "nflverse.injuries.report_status", "availability")
+      : null;
+  const offPractice =
+    off !== null && lastPractice !== null
+      ? addOfficial(
+          `${lastPractice.day}: ${lastPractice.status}`,
+          "nflverse.injuries.practice_status",
+          "health",
+        )
+      : null;
 
   // the structured facts
   const status = p.injury_status;
-  const offOut =
-    off?.report_status !== null &&
-    off?.report_status !== undefined &&
-    /\bout\b/i.test(off.report_status);
+  const offOut = offStatus === "out";
   const unavailable = (status !== null && UNAVAILABLE.has(status)) || offOut;
-  const available = !unavailable && (status === null || status === "ACTIVE");
-  const officialPractice = lastPractice === null ? null : flagFold(lastPractice.status);
   const move = usageMove(req.usage ?? []);
   const roleUp =
     (move.snap !== null && move.snap >= EVIDENCE.roleConfirmSnap) ||
@@ -286,51 +282,44 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
     (move.share !== null && move.share <= -EVIDENCE.roleConfirmShare);
   const inIr = p.slot_id !== null && slotClassOf(p.slot_id) === "ir";
 
-  // comparisons: structured fields win (rule 3); the first, most important disagreement is named
+  // comparisons: structured fields win (rule 3); the most important disagreement is named
   type Disagree = NonNullable<EvidenceData["structured_disagrees"]>;
   const found: Disagree[] = [];
   const claimsOnly = items.filter((i) => !i.official);
+  const facts = { injury_status: status ?? (offOut ? "OUT" : null) };
   for (const it of claimsOnly) {
     const s = it.folded;
-    const e = it.extract;
-    if (e.type === "availability" && e.direction === "up" && unavailable)
+    const d = structuredDisagreement(it.extract, facts);
+    if (d !== null)
       found.push({
         field: "injury_status",
-        structured_value: status ?? "OUT (official report)",
-        claim_value: "available",
+        structured_value:
+          status === null ? `${d.structured_value} (official report)` : d.structured_value,
+        claim_value: d.claim_value,
       });
-    if (e.type === "availability" && e.direction === "down" && available)
+    const cd = it.extract?.designation ?? null;
+    if ((cd === "practice_limited" || cd === "practice_full") && offPractice === "practice_dnp")
       found.push({
         field: "injury_status",
-        structured_value: status ?? "ACTIVE",
-        claim_value: "unavailable",
+        structured_value: "official practice: did not participate",
+        claim_value: cd,
       });
-    if (officialPractice !== null) {
-      const offDnp = RE.practiceDnp.test(officialPractice);
-      const offFull = RE.practiceFull.test(officialPractice) || /\bfull\b/.test(officialPractice);
-      if ((RE.practiceLimited.test(s) || RE.practiceFull.test(s)) && offDnp)
-        found.push({
-          field: "injury_status",
-          structured_value: "official practice: did not participate",
-          claim_value: RE.practiceFull.test(s) ? "full practice" : "limited practice",
-        });
-      else if (RE.practiceDnp.test(s) && offFull)
-        found.push({
-          field: "injury_status",
-          structured_value: "official practice: full",
-          claim_value: "did not practice",
-        });
-    }
-    if (RE.irMove.test(s) && !isIrEligible(status) && !inIr)
+    else if (cd === "practice_dnp" && offPractice === "practice_full")
+      found.push({
+        field: "injury_status",
+        structured_value: "official practice: full",
+        claim_value: cd,
+      });
+    if (CHECK.irMove.test(s) && !isIrEligible(status) && !inIr)
       found.push({
         field: "lineup_slot",
         structured_value: `not IR-eligible (${status ?? "no designation"})`,
         claim_value: "IR move",
       });
-    if (RE.lockTiming.test(s) && p.lineup_locked === true)
+    if (CHECK.lockTiming.test(s) && p.lineup_locked === true)
       found.push({ field: "lineup_locked", structured_value: true, claim_value: false });
     if (
-      RE.noWaivers.test(s) &&
+      CHECK.noWaivers.test(s) &&
       p.waiver_process_date !== null &&
       Date.parse(p.waiver_process_date) > nowMs
     )
@@ -339,13 +328,13 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
         structured_value: p.waiver_process_date,
         claim_value: "free agent now",
       });
-    if (e.type === "role" && e.direction === "up" && !roleUp && (req.usage ?? []).length > 0)
+    if (it.type === "role" && it.direction === "up" && !roleUp && (req.usage ?? []).length > 0)
       found.push({
         field: "stats",
         structured_value: move.latestSnap ?? 0,
         claim_value: "role up",
       });
-    if (e.type === "role" && e.direction === "down" && roleUp)
+    if (it.type === "role" && it.direction === "down" && roleUp)
       found.push({
         field: "stats",
         structured_value: move.latestSnap ?? 0,
@@ -361,10 +350,8 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
   ];
   found.sort((a, b) => order.indexOf(a.field) - order.indexOf(b.field));
   const disagree = found[0] ?? null;
-  const roleClaims = claimsOnly.filter(
-    (i) => i.extract.type === "role" || i.extract.type === "availability",
-  );
-  const typed = claimsOnly.filter((i) => i.extract.type !== "other");
+  const roleClaims = claimsOnly.filter((i) => i.type === "role" || i.type === "availability");
+  const typed = claimsOnly.filter((i) => i.type !== "other");
   const flag: EvidenceData["flag"] =
     disagree !== null && disagree.field !== "stats"
       ? "availability_conflict"
@@ -376,30 +363,16 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
             ? "consistent"
             : "no_claim";
 
-  // the evidence list with hand-set reliabilities and the season-outlook decay (rule 2)
-  const newsMoved =
-    p.last_news_at !== null && nowMs - Date.parse(p.last_news_at) <= EVIDENCE.newsFreshMs;
-  const evidence: EvidenceData["evidence"] = items.slice(0, EVIDENCE.maxEvidence).map((it) => {
-    const cls = reliabilityClass(it.source);
-    const base = RELIABILITY[cls]?.[it.extract.type] ?? 0;
-    let decayed = false;
-    let weight = 1;
-    if (it.source === "espn.player.season_outlook" && !newsMoved) {
-      const d = EVIDENCE.seasonOutlookDecayWeek;
-      weight = Math.max(0, 1 - Math.max(0, req.week - 1) / Math.max(1, d - 1));
-      decayed = req.week >= d;
-    }
-    return {
-      source: it.source,
-      claim: it.claim,
-      type: it.extract.type,
-      direction: it.extract.direction,
-      reliability: round(base * weight, 3),
-      time: it.time,
-      official: it.official,
-      decayed,
-    };
-  });
+  const evidence: EvidenceData["evidence"] = items.slice(0, EVIDENCE.maxEvidence).map((it) => ({
+    source: it.source,
+    claim: it.claim,
+    type: it.type,
+    direction: it.direction,
+    reliability: round(it.reliability, 3),
+    time: it.time,
+    official: it.official,
+    decayed: it.decayed,
+  }));
   if (items.length > EVIDENCE.maxEvidence)
     warnings.push(`${String(items.length - EVIDENCE.maxEvidence)} evidence items not listed (cap)`);
 
@@ -450,7 +423,6 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
         ? "espn_analyze_trade"
         : "espn_analyze_waivers",
   );
-  const n = req.calibration_n ?? 0;
 
   // the recommendation: structured fields and usage only — invariant to every text (rule 5)
   const structuredAction =
@@ -492,25 +464,14 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
       injection_flags,
       prior: prior.p_active === null && prior.role_shares === null ? null : prior,
       evidence,
+      // the merge is P2 (sib ADV OBJ-21): never shown before the calibrated table exists
       posterior: null,
       what_would_confirm: confirm,
       consequence: { affects, re_run: reRun },
-      calibration_state: { table_n: n, note: "priors are hand-set" },
+      calibration_state: calibrationState(req.calibration_n ?? 0),
       rec,
       inputs,
     },
     warnings,
   };
-}
-
-/** Whether a source tag is one E10 reads as a claim (never a league-member string — rule 4). */
-export function isEvidenceSource(source: UntrustedSource): boolean {
-  const cls = UNTRUSTED_SOURCE_CLASS[source];
-  return (
-    cls === "player_outlook" ||
-    cls === "news_title" ||
-    cls === "news_blurb" ||
-    cls === "claim_text" ||
-    source.startsWith("nflverse.injuries")
-  );
 }

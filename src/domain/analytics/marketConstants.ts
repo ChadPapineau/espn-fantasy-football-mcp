@@ -233,49 +233,14 @@ export const CASCADE = Object.freeze({
 // --- E10 evidence (research 05 §6; sib research 05 §10) -----------------------------------------------
 
 /**
- * Hand-set reliability priors by source class × claim type (plan 07 E10: "priors are hand-set"
- * until the calibration table holds 200 scored claims) [U]. Coaching intent starts low (sib §10).
+ * The reliability of OFFICIAL evidence (the nflverse injury report and practice participation —
+ * structured enums, not free text) [U]. Text claims take the evidence domain's hand-set table
+ * (src/domain/evidence/reliability.ts) — one table, never two.
  */
-export const RELIABILITY: Readonly<Record<string, Readonly<Record<string, number>>>> =
-  Object.freeze({
-    official: Object.freeze({
-      availability: 0.9,
-      health: 0.85,
-      role: 0.6,
-      coaching_intent: 0.4,
-      transaction: 0.95,
-      other: 0.5,
-    }),
-    espn_outlook: Object.freeze({
-      availability: 0.6,
-      health: 0.55,
-      role: 0.5,
-      coaching_intent: 0.3,
-      transaction: 0.7,
-      other: 0.3,
-    }),
-    news: Object.freeze({
-      availability: 0.65,
-      health: 0.6,
-      role: 0.5,
-      coaching_intent: 0.3,
-      transaction: 0.8,
-      other: 0.3,
-    }),
-    user: Object.freeze({
-      availability: 0.4,
-      health: 0.4,
-      role: 0.35,
-      coaching_intent: 0.25,
-      transaction: 0.5,
-      other: 0.2,
-    }),
-  });
+export const OFFICIAL_RELIABILITY = Object.freeze({ availability: 0.9, health: 0.85 });
 
 /** E10 constants. */
 export const EVIDENCE = Object.freeze({
-  /** `seasonOutlook` decays to zero weight by this week unless `lastNewsDate` moved (research 05 §6 rule 2). */
-  seasonOutlookDecayWeek: 4,
   /** `lastNewsDate` within this window counts as "moved". */
   newsFreshMs: 7 * 24 * 3600 * 1000,
   /** A role claim is confirmed by a usage jump this large (snap or opportunity share). */

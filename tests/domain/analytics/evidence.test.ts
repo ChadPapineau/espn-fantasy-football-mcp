@@ -5,23 +5,19 @@
 // against an official DNP is an availability conflict, a usage jump with no coverage is a quiet role
 // change, a "more work" outlook with flat usage is an unconfirmed narrative; `calibration_state.note`
 // on every result, `posterior: null`; the season outlook decays; league-member text never enters;
-// and the recommendation is INVARIANT to any text (a property). The `rules_v1` extractor is scored on
-// a hand-labelled synthetic set (the 50-real-item precision check needs fetched RSS — open issue).
-// Injection texts here are inert test data, quoted from research 05 §6.
+// and the recommendation is INVARIANT to any text (a property). The extractor, the reliability table
+// and the injury-status comparator are the evidence domain's (tests/domain/evidence covers them, the
+// B8 labelled set included); this file tests their composition into E10. Injection texts here are
+// inert test data, quoted from research 05 §6.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   analyzeEvidence,
-  extractClaim,
   isEvidenceSource,
   type EvidenceRequest,
 } from "../../../src/domain/analytics/evidence.js";
 import type { UsageWeek } from "../../../src/domain/analytics/usageSignals.js";
-import {
-  wrapUntrusted,
-  type ClaimExtract,
-  type UntrustedSource,
-} from "../../../src/domain/league/types.js";
+import { wrapUntrusted, type UntrustedSource } from "../../../src/domain/league/types.js";
 import { bare, clockAndRng } from "./helpers.js";
 
 const NOW = "2026-10-06T20:00:00.000Z";
@@ -84,7 +80,7 @@ describe("structured fields win (research 05 §6 rule 3)", () => {
     expect(data.structured_disagrees).toEqual({
       field: "injury_status",
       structured_value: "OUT",
-      claim_value: "available",
+      claim_value: "cleared",
     });
     expect(data.evidence[0]).toMatchObject({
       type: "availability",
@@ -155,7 +151,7 @@ describe("structured fields win (research 05 §6 rule 3)", () => {
     );
     expect(down.data.structured_disagrees).toMatchObject({
       field: "injury_status",
-      claim_value: "unavailable",
+      claim_value: "out",
     });
     const ir = analyzeEvidence(
       req({
@@ -201,12 +197,16 @@ describe("structured fields win (research 05 §6 rule 3)", () => {
 });
 
 describe("text is data (research 05 §6 rules 1, 2, 4, 5; plan 10 B8)", () => {
-  it("calibration_state.note on every result; posterior null at P1 even past 200 claims", () => {
-    for (const n of [0, 199, 250]) {
+  it("calibration_state.note on every result (hand-set below 200 claims); posterior null at P1", () => {
+    for (const n of [0, 199]) {
       const { data } = analyzeEvidence(req({ calibration_n: n }));
       expect(data.calibration_state).toEqual({ table_n: n, note: "priors are hand-set" });
       expect(data.posterior).toBeNull();
     }
+    // the merge is P2: even a calibrated count shows no posterior here
+    const late = analyzeEvidence(req({ calibration_n: 250 })).data;
+    expect(late.calibration_state).toEqual({ table_n: 250, note: null });
+    expect(late.posterior).toBeNull();
   });
   it("NC-INJ / case 1: a system-prompt outlook is flagged and quoted, the rec unchanged", () => {
     const base = analyzeEvidence(req({ player: { ...req().player, roster: "mine", slot_id: 2 } }));
@@ -246,7 +246,7 @@ describe("text is data (research 05 §6 rules 1, 2, 4, 5; plan 10 B8)", () => {
     expect(data.rec.no_move).toBe(true);
   });
   it("the season outlook decays to zero weight by week 4 unless lastNewsDate moved", () => {
-    const so = [text("A full workload is expected this season.", "espn.player.season_outlook")];
+    const so = [text("He will be the starter this season.", "espn.player.season_outlook")];
     const w2 = analyzeEvidence(req({ week: 2, texts: so })).data.evidence[0];
     const w5 = analyzeEvidence(req({ week: 5, texts: so })).data.evidence[0];
     const fresh = analyzeEvidence(
@@ -256,10 +256,11 @@ describe("text is data (research 05 §6 rules 1, 2, 4, 5; plan 10 B8)", () => {
         player: { ...req().player, last_news_at: "2026-10-05T12:00:00.000Z" },
       }),
     ).data.evidence[0];
-    expect(w2?.decayed).toBe(false);
-    expect(w2?.reliability).toBeCloseTo(0.5 * (2 / 3), 3);
+    // the evidence domain's table: a season-outlook role claim is 0.45, decaying linearly to 0 by week 4
+    expect(w2).toMatchObject({ type: "role", decayed: true });
+    expect(w2?.reliability).toBeCloseTo(0.45 * (2 / 3), 3);
     expect(w5).toMatchObject({ decayed: true, reliability: 0 });
-    expect(fresh).toMatchObject({ decayed: false, reliability: 0.5 });
+    expect(fresh).toMatchObject({ decayed: false, reliability: 0.45 });
   });
   it("league-member strings never enter (rule 4)", () => {
     const out = analyzeEvidence(
@@ -274,7 +275,8 @@ describe("text is data (research 05 §6 rules 1, 2, 4, 5; plan 10 B8)", () => {
     expect(out.warnings[0]).toMatch(/non-claim source ignored/);
     expect(isEvidenceSource("espn.team.trade_block")).toBe(false);
     expect(isEvidenceSource("espn.player.outlook")).toBe(true);
-    expect(isEvidenceSource("nflverse.injuries.practice_status")).toBe(true);
+    // the official report enters as official evidence (request.official), never as a text claim
+    expect(isEvidenceSource("nflverse.injuries.practice_status")).toBe(false);
   });
   it("property: the recommendation is invariant to any text, any source, any claim (rule 5)", () => {
     const sources: UntrustedSource[] = [
@@ -319,85 +321,5 @@ describe("text is data (research 05 §6 rules 1, 2, 4, 5; plan 10 B8)", () => {
     const out = analyzeEvidence(req({ texts: many }));
     expect(out.data.evidence).toHaveLength(12);
     expect(out.warnings[0]).toMatch(/not listed/);
-  });
-});
-
-/** A hand-labelled synthetic set: generic headline shapes (no real names). */
-const LABELLED: readonly [string, ClaimExtract["type"], ClaimExtract["direction"]][] = [
-  ["Ruled out for Sunday with a knee injury", "availability", "down"],
-  ["Will not play Thursday night", "availability", "down"],
-  ["Listed as doubtful for Week 6", "availability", "down"],
-  ["Placed on injured reserve after the setback", "availability", "down"],
-  ["Is out for the season with a torn ACL", "availability", "down"],
-  ["Cleared to play after passing protocol", "availability", "up"],
-  ["Expected to play Sunday despite the ankle", "availability", "up"],
-  ["Returned to practice in full on Friday", "availability", "up"],
-  ["Activated from injured reserve ahead of the game", "availability", "up"],
-  ["Good to go for the opener", "availability", "up"],
-  ["Inactive for Monday's game", "availability", "down"],
-  ["Sidelined by a hamstring strain this week", "availability", "down"],
-  ["Will miss the next two games", "availability", "down"],
-  ["Suspended three games by the league", "availability", "down"],
-  ["Is questionable to return", "availability", "down"],
-  ["Signed to the active roster", "transaction", "up"],
-  ["Released by the team on Tuesday", "transaction", "down"],
-  ["Waived with an injury designation", "transaction", "down"],
-  ["Traded to a division rival", "transaction", "neutral"],
-  ["Claimed off waivers by a contender", "transaction", "neutral"],
-  ["Underwent an MRI on his ankle", "health", "neutral"],
-  ["Was limited at practice with a knee issue", "health", "down"],
-  ["Practiced fully on Thursday", "health", "up"],
-  ["Did not practice Wednesday due to illness", "health", "down"],
-  ["Dealing with ankle soreness", "health", "neutral"],
-  ["Will have surgery on his wrist", "health", "down"],
-  ["Suffered a concussion in the third quarter", "health", "neutral"],
-  ["Has a fractured finger but is expected to play", "availability", "up"],
-  ["Will start in place of the injured veteran", "role", "up"],
-  ["Took over as the lead back in the second half", "role", "up"],
-  ["Was demoted to the second-team offense", "role", "down"],
-  ["Benched after two fumbles", "role", "down"],
-  ["Is in line for a bigger role", "role", "up"],
-  ["Saw a reduced role in the snap counts", "role", "down"],
-  ["Remains the backup behind the starter", "role", "down"],
-  ["Earned first-team reps this week", "role", "up"],
-  ["Out-snapped the starter in a committee", "role", "up"],
-  ["Coach expects him to be heavily involved", "coaching_intent", "neutral"],
-  ["The coordinator plans to use him more", "coaching_intent", "neutral"],
-  ["The head coach hopes to expand his workload", "coaching_intent", "up"],
-  ["Posted a career-high receiving line", "other", "neutral"],
-  ["Caught two touchdowns in the win", "other", "neutral"],
-  ["Celebrated his birthday with teammates", "other", "neutral"],
-  ["Spoke to reporters after the game", "other", "neutral"],
-  ["Featured heavily in the red zone", "role", "up"],
-  ["Upgraded to a full participant", "health", "up"],
-  ["Downgraded to out on the final report", "availability", "down"],
-  ["Set to play through the shoulder issue", "availability", "up"],
-  ["Is a game-time decision", "availability", "down"],
-  ["Expected to be available after the bye", "availability", "up"],
-];
-
-describe("rules_v1 on the hand-labelled set (B8's real-item check needs fetched news)", () => {
-  it("type and direction each ≥ 0.8 accuracy on 50 items", () => {
-    expect(LABELLED).toHaveLength(50);
-    let type = 0;
-    let dir = 0;
-    for (const [t, ty, d] of LABELLED) {
-      const c = extractClaim(t);
-      if (c.type === ty) type += 1;
-      if (c.direction === d) dir += 1;
-      expect(c.extractor).toBe("rules_v1");
-    }
-    expect(type / 50).toBeGreaterThanOrEqual(0.8);
-    expect(dir / 50).toBeGreaterThanOrEqual(0.8);
-  });
-  it("'out of IR' is not an 'out'; HTML and zero-width tricks are sanitised first", () => {
-    expect(extractClaim("Cleared: move him out of IR").direction).toBe("up");
-    expect(extractClaim("<b>ruled</b> out").direction).toBe("down");
-    expect(extractClaim("rul​ed out").type).toBe("availability");
-    expect(extractClaim("")).toEqual({
-      type: "other",
-      direction: "neutral",
-      extractor: "rules_v1",
-    });
   });
 });
