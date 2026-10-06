@@ -136,6 +136,16 @@ describe("package.json", () => {
     expect(pkg.scripts?.test).toBe("vitest run --project unit");
     expect(pkg.scripts?.["test:coverage"]).toBe("vitest run --project unit --coverage");
     expect(pkg.scripts?.["test:process"]).toBe("vitest run --project process --passWithNoTests");
+    expect(pkg.scripts?.["test:e2e"]).toBe("vitest run --project process tests/e2e");
+  });
+
+  it("smoke runs the SDK stdio smoke against the built server (plan 04 §4.1; plan 10 A3a)", () => {
+    expect(pkg.scripts?.smoke).toBe("node tests/smoke/run-smoke.mjs");
+  });
+
+  it("the derived fixture league is generated and checked by scripts/gen-fixtures.ts (plan 09 §4)", () => {
+    expect(pkg.scripts?.["fixtures:gen"]).toBe("tsx scripts/gen-fixtures.ts");
+    expect(pkg.scripts?.["fixtures:check"]).toBe("tsx scripts/gen-fixtures.ts --check");
   });
 
   it("the Skills scripts run the dependency-free tooling (plan 09 §4, §5.1)", () => {
@@ -167,6 +177,10 @@ describe("package.json", () => {
       "build:skills",
       "build:skills:copy",
       "check:skills",
+      "smoke",
+      "test:e2e",
+      "fixtures:gen",
+      "fixtures:check",
       "pack:scan",
       "scan:secrets",
       "eff",

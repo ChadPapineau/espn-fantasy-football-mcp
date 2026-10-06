@@ -80,11 +80,12 @@ describe.each(files)("%s", (file) => {
     expect(off).toBe(checkouts);
   });
 
-  it("bounds every job with a timeout and runs on a pinned ubuntu image", () => {
+  it("bounds every job with a timeout and runs on a pinned image (ubuntu; the -macos jobs macOS)", () => {
     expect(jobs.size).toBeGreaterThan(0);
     for (const [name, block] of jobs) {
       expect(block, name).toMatch(/^ {4}timeout-minutes: \d+$/m);
-      expect(block, name).toMatch(/^ {4}runs-on: ubuntu-24\.04$/m);
+      if (name.endsWith("-macos")) expect(block, name).toMatch(/^ {4}runs-on: macos-15$/m);
+      else expect(block, name).toMatch(/^ {4}runs-on: ubuntu-24\.04$/m);
     }
   });
 
@@ -110,10 +111,43 @@ describe("ci.yml (plan 04 §4.1)", () => {
     expect(text).toMatch(/^on:\n {2}push:\n {2}pull_request:\n/m);
   });
 
-  it("has the plan 04 §4.1 jobs built in this stage", () => {
+  it("has the plan 04 §4.1 jobs, process-macos and smoke included", () => {
     expect([...jobs.keys()]).toEqual(
-      expect.arrayContaining(["lint", "typecheck", "test", "supply-chain", "pack", "process"]),
+      expect.arrayContaining([
+        "lint",
+        "typecheck",
+        "test",
+        "supply-chain",
+        "pack",
+        "process",
+        "process-macos",
+        "smoke",
+      ]),
     );
+  });
+
+  it("process runs against the built dist; macOS only weekly or on demand, with the keychain round trip (A15a)", () => {
+    const p = job("process");
+    expect(p.indexOf("npm run build")).toBeLessThan(p.indexOf("npm run test:process"));
+    expect(step(p, "suites against dist")).toContain('EFF_PROCESS_TEST_DIST: "1"');
+    const mac = job("process-macos");
+    expect(mac).toContain(
+      "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+    );
+    expect(mac.indexOf("npm run build")).toBeLessThan(mac.indexOf("npm run test:process"));
+    expect(mac).toContain('EFF_KEYCHAIN_PROCESS_TEST: "1"');
+    expect(text).toMatch(/^ {2}schedule:\n {4}- cron: "[0-9* ]+"/m);
+  });
+
+  it("smoke builds, runs the SDK smoke and the Inspector pinned to an exact version (A3a)", () => {
+    const sm = job("smoke");
+    expect(sm).toMatch(/INSPECTOR: "@modelcontextprotocol\/inspector@\d+\.\d+\.\d+"/);
+    expect(sm.indexOf("npm run build")).toBeLessThan(sm.indexOf("npm run smoke"));
+    expect(sm).toContain('npx --yes "$INSPECTOR" --cli');
+    expect(sm).toContain('--method "$method" --format json');
+    expect(sm).toContain("tests/smoke/fixture-serve.mjs");
+    expect(sm).toContain("tests/smoke/assert-inspector.mjs");
+    expect(step(sm, "MCP Inspector CLI")).toContain('npm_config_ignore_scripts: "true"');
   });
 
   it.each([
