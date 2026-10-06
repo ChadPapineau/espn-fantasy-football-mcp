@@ -5,6 +5,13 @@
 // src/domain verbatim — the store may not import src/sources. Ported from sibling @521f9f3, adapted
 // (plan 08's ESPN canonical vocabulary: separate 2-pt ids, ESPN FG buckets incl. attempts/misses,
 // ESPN position ids on the line, the D/ST line of ds_team_defense_week).
+//
+// NOT THE SCORING PATH (integration, 2026-10-06): every StatLine the server scores comes from
+// src/domain/scoring/nflverse.ts (statLineFromPlayerWeek / statLineFromTeamDefense — the one
+// translator, measured against ESPN on every recorded player-week; the store's readers use it).
+// This module's translator predates those measurements (some canonical names and the yards-allowed
+// sign differ) and stays as the source's own column-coverage map; nothing in src outside
+// src/sources/nflverse may import its translators (tests/integration/one-translator.test.ts).
 import {
   asPositionId,
   type Canonical,

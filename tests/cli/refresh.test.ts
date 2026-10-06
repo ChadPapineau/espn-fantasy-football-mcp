@@ -1,5 +1,5 @@
 // refresh.test.ts — `eff refresh` (plan 06 J3, §1.3; plan 01 §5.5): target planning (the ESPN season
-// sources are "not available in this build" until a source registers), seasons, the coming week,
+// sources plan through the default registry), seasons, the coming week,
 // result lines and JSON (fixed fields, terminal-safe warnings), fixture mode refused, a failed source
 // → exit 1 + one failure notification, and the crosswalk chain after a published daily source.
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,22 +45,43 @@ const published: RefreshResult = {
 };
 
 describe("planning", () => {
-  it("knows every target; the ESPN season jobs are unavailable in this build", () => {
+  it("knows every target; every Phase-1a job has its sources (the ESPN season sources included)", () => {
     sb = sandbox();
     expect(isRefreshTarget("all")).toBe(true);
     expect(isRefreshTarget("nflverse:snaps")).toBe(false);
     expect(REFRESH_TARGETS).toContain("nflverse:players");
     expect(availableRefreshJobs()).toEqual([
+      "espn:schedule",
+      "espn:players",
       "nflverse:schedules",
       "nflverse:daily",
       "nflverse:stats",
       "weather",
     ]);
     const all = planTarget("all", { weatherSource: "nws" });
-    expect(all.filter((s) => s.kind === "unavailable").map((s) => s.job)).toEqual([
-      "espn:schedule",
-      "espn:players",
-    ]);
+    expect(all.filter((s) => s.kind === "unavailable")).toEqual([]);
+    expect(
+      planTarget("espn:schedule", {
+        weatherSource: "nws",
+        espnReadHost: "lm-api-reads.fantasy.espn.com",
+      }).map((s) => (s.kind === "source" ? s.source.id : s.job)),
+    ).toEqual(["espn:pro_schedule"]);
+    expect(
+      planTarget("espn:players", { weatherSource: "nws" }).map((s) =>
+        s.kind === "source" ? s.source.id : s.job,
+      ),
+    ).toEqual(["espn:players"]);
+    // a registry without a job's sources still plans it as unavailable
+    const none: SourceRegistry = {
+      byJob: (job) =>
+        job === "weather" ? null : DEFAULT_REGISTRY.byJob(job, { weatherSource: "nws" }),
+    };
+    expect(availableRefreshJobs(none)).not.toContain("weather");
+    expect(
+      planTarget("all", { weatherSource: "nws" }, none)
+        .filter((s) => s.kind === "unavailable")
+        .map((s) => s.job),
+    ).toEqual(["weather"]);
     const ids = all.flatMap((s) => (s.kind === "source" ? [s.source.id] : []));
     expect(ids.indexOf("nflverse:schedules")).toBeLessThan(ids.indexOf("weather:nws"));
     expect(
@@ -215,6 +236,27 @@ describe("refresh", () => {
     sb = sandbox();
     const io = makeIo(sb, { fetch: noNetwork });
     const { config, log } = await loadLenientRuntime(io);
+    const registry: SourceRegistry = { byJob: () => null };
+    expect(
+      await refresh(
+        io,
+        config,
+        log,
+        { target: "espn:schedule", force: false, notify: false, json: true, registry },
+        new AbortController().signal,
+      ),
+    ).toBe(1);
+    expect(JSON.parse(io.out.text)).toMatchObject({
+      target: "espn:schedule",
+      results: [],
+      unavailable: ["espn:schedule"],
+    });
+  });
+
+  it("an ESPN season refresh goes through the limiter as a keyless job request; offline it fails with ESPN_UPSTREAM_UNAVAILABLE", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { fetch: noNetwork });
+    const { config, log } = await loadLenientRuntime(io);
     expect(
       await refresh(
         io,
@@ -224,11 +266,14 @@ describe("refresh", () => {
         new AbortController().signal,
       ),
     ).toBe(1);
-    expect(JSON.parse(io.out.text)).toMatchObject({
-      target: "espn:schedule",
-      results: [],
-      unavailable: ["espn:schedule"],
-    });
+    const out = JSON.parse(io.out.text) as {
+      results: { source: string; status: string; error?: string }[];
+      unavailable: string[];
+    };
+    expect(out.unavailable).toEqual([]);
+    expect(out.results).toMatchObject([
+      { source: "espn:pro_schedule", status: "failed", error: "ESPN_UPSTREAM_UNAVAILABLE" },
+    ]);
   });
   it("a failing source: exit 1, a refresh_log failure row, one rate-limited failure notification", async () => {
     sb = sandbox();

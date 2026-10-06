@@ -75,14 +75,14 @@ describe("job table", () => {
     // the cookie jobs exist and the credential check is the only one exempt by name
     expect(JOBS.filter((j) => j.cookies).map((j) => j.name)).toContain("credential-check");
   });
-  it("availableJobs drops the refresh jobs whose sources this build does not ship", () => {
+  it("availableJobs: every refresh job of this build is installable (the ESPN season jobs included)", () => {
     sb = sandbox();
     const names = availableJobs().map((j) => j.name);
-    expect(names).not.toContain("refresh-espn-schedule");
-    expect(names).not.toContain("refresh-espn-players");
+    expect(names).toContain("refresh-espn-schedule");
+    expect(names).toContain("refresh-espn-players");
     expect(names).toContain("refresh-nflverse-daily");
     expect(names).toContain("probe");
-    expect(() => jobsFor("refresh-espn-schedule")).toThrow(/not available in this build/);
+    expect(jobsFor("refresh-espn-schedule").map((j) => j.name)).toEqual(["refresh-espn-schedule"]);
     expect(() => jobsFor("nope")).toThrow(/unknown job/);
     expect(jobsFor("probe, probe ,store-prune").map((j) => j.name)).toEqual([
       "probe",
@@ -212,9 +212,8 @@ describe("install-launchd / uninstall-launchd", () => {
     expect(await installLaunchd(io, config, { jobs: undefined, dryRun: true })).toBe(0);
     expect(io.out.text).toContain("<plist");
     expect(io.out.text).toContain("# would run: /bin/launchctl bootstrap gui/501");
-    expect(io.err.text).toContain(
-      "not available in this build (not installed): refresh-espn-schedule, refresh-espn-players",
-    );
+    expect(io.err.text).not.toContain("not available in this build");
+    expect(io.out.text).toContain("refresh-espn-schedule");
     expect(existsSync(launchAgentsDir(sb.home))).toBe(false);
   });
   it("refuses off macOS (2), without a build (1), and under a file-provider directory (1)", async () => {

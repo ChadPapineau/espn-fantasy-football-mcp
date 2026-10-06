@@ -23,6 +23,9 @@ import { NFLVERSE_SOURCES } from "../sources/nflverse/index.js";
 import { fsTempArea, isRefreshSuccess, runRefresh, type RefreshResult } from "../sources/runner.js";
 import type { DataSource } from "../sources/source.js";
 import { weatherSourceFor } from "../sources/weather/index.js";
+import { espnSeasonSources } from "../sources/espn_season/index.js";
+import { ESPN_READ_HOST_DEFAULT } from "../config/schema.js";
+import { seasonGet } from "./espn-http.js";
 import type { ProScheduleReader } from "../domain/analytics/types.js";
 import { storeFactory } from "../store/index.js";
 import type { StoreFactory } from "../store/types.js";
@@ -60,22 +63,27 @@ export function isRefreshTarget(s: string): s is RefreshTarget {
 }
 
 /**
- * The DataSources this build ships, per refresh job. The two keyless ESPN season sources
- * (`espn:pro_schedule`, `espn:players` — plan 04 §1 `src/sources/espn_season/`) are not built yet:
- * their jobs report `not available in this build` until a source registers here.
+ * The DataSources this build ships, per refresh job (the two keyless ESPN season sources —
+ * `espn:pro_schedule`, `espn:players`, src/sources/espn_season/ — over the configured read host). A
+ * job with no source reports `not available in this build`.
  */
 export interface SourceRegistry {
-  readonly byJob: (
-    job: RefreshJob,
-    config: Pick<LenientConfig, "weatherSource">,
-  ) => readonly DataSource[] | null;
+  readonly byJob: (job: RefreshJob, config: RegistryConfig) => readonly DataSource[] | null;
 }
+
+/** What the registry reads of the config. */
+export type RegistryConfig = Pick<LenientConfig, "weatherSource"> &
+  Partial<Pick<LenientConfig, "espnReadHost">>;
 
 /** The registry of this build. */
 export const DEFAULT_REGISTRY: SourceRegistry = {
   byJob: (job, config) => {
     const S = NFLVERSE_SOURCES;
     switch (job) {
+      case "espn:schedule":
+        return [espnSeasonSources(config.espnReadHost ?? ESPN_READ_HOST_DEFAULT).proSchedule];
+      case "espn:players":
+        return [espnSeasonSources(config.espnReadHost ?? ESPN_READ_HOST_DEFAULT).players];
       case "nflverse:schedules":
         return [S["nflverse:schedules"]];
       case "nflverse:daily":
@@ -103,7 +111,7 @@ export type PlannedStep =
 /** The ordered steps of a target (the season sources first, then schedules, so weather sees them). */
 export function planTarget(
   target: RefreshTarget,
-  config: Pick<LenientConfig, "weatherSource">,
+  config: RegistryConfig,
   registry: SourceRegistry = DEFAULT_REGISTRY,
 ): PlannedStep[] {
   const ofJob = (job: RefreshJob): PlannedStep[] => {
@@ -328,6 +336,14 @@ export async function refresh(
     return EXIT.error;
   }
   const temp = fsTempArea(tmpDir);
+  // the keyless ESPN season views go through the cross-process limiter (the jobs' keyless cap,
+  // plan 06 §1.4): one row per request, its outcome recorded — like every other ESPN request
+  const espnGet = seasonGet({
+    http,
+    limiter: store.repos.limiter,
+    clock: io.clock,
+    origin: "job",
+  });
   const results: RefreshResult[] = [];
   const lines: string[] = [];
   const unavailable: RefreshJob[] = [];
@@ -353,7 +369,7 @@ export async function refresh(
           ...(opts.force ? { force: true } : {}),
         },
         {
-          http: http.get,
+          http: step.source.id.startsWith("espn:") ? espnGet : http.get,
           download: http.download,
           clock: io.clock,
           rng,

@@ -6,7 +6,12 @@
 // 01 §6: a request whose row cannot be written is not sent; the jobs' daily caps), and records its
 // outcome for the breaker view. Bodies are parsed only where a check needs them; a board body is
 // discarded unread (plan 02 §2.1).
-import { HttpError, requestOutcomeOf } from "../http/errors.js";
+import {
+  HTTP_ERROR_KINDS,
+  HttpError,
+  requestOutcomeOf,
+  type HttpErrorKind,
+} from "../http/errors.js";
 import type { HttpClient } from "../http/client.js";
 import type { Clock } from "../domain/clock.js";
 import { boardProbeFilter } from "../providers/espn/filter.js";
@@ -16,6 +21,7 @@ import type { SetupNetwork, TeamResolution } from "../auth/setup.js";
 import type { CookieHeader } from "../auth/types.js";
 import type { LimiterRepository, RequestOrigin } from "../store/types.js";
 import type { RequestOutcome } from "../config/schema.js";
+import type { HttpGet } from "../sources/source.js";
 
 /** One answered request: the status, the (capped) body and the headers. */
 export interface EspnAnswer {
@@ -113,6 +119,44 @@ export async function espnRequest(
     record("network_error");
     return { error: "network" };
   }
+}
+
+/**
+ * An HttpGet for the keyless ESPN season sources (src/sources/espn_season): each GET is one
+ * `espnRequest` (the limiter row, the outcome, a 3xx refused as a host move) with no cookie, and a
+ * non-2xx answer or a refusal becomes the HttpError the refresh runner classifies (404 → the season
+ * is not published yet; 429/5xx → retried; a spent daily cap → RATE_LIMITED). A limiter that cannot
+ * record the request sends nothing (INTERNAL).
+ */
+export function seasonGet(deps: EspnHttpDeps): HttpGet {
+  return async (url, opts) => {
+    const host = new URL(url).hostname;
+    const r = await espnRequest(deps, {
+      url,
+      cookie: null,
+      ...(opts.fantasyFilter === undefined ? {} : { fantasyFilter: opts.fantasyFilter }),
+      maxBytes: opts.maxBytes,
+    });
+    if ("error" in r) {
+      if (r.error === "daily_cap")
+        throw new HttpError({ kind: "quota_exhausted", host, espn: true });
+      if (r.error === "rate_limited")
+        throw new HttpError({ kind: "rate_limited", host, espn: true });
+      if (r.error === "host_moved")
+        throw new HttpError({ kind: "redirect_refused", host, espn: true });
+      if (r.error === "limiter_unavailable" || r.error === "no_limiter")
+        throw new Error("espn season: the limiter could not record the request");
+      const kind = (HTTP_ERROR_KINDS as readonly string[]).includes(r.error)
+        ? (r.error as HttpErrorKind)
+        : "network";
+      throw new HttpError({ kind, host, espn: true });
+    }
+    if (r.status < 200 || r.status > 299) {
+      const kind = r.status === 429 ? "rate_limited" : r.status >= 500 ? "http_5xx" : "http_4xx";
+      throw new HttpError({ kind, host, status: r.status, espn: true });
+    }
+    return { status: r.status, body: r.body, headers: r.headers, final_url: url };
+  };
 }
 
 /** Parses a JSON body (bounded by the client); null when it is not JSON. */
