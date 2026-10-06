@@ -1,5 +1,5 @@
 // size.test.ts — the per-turn fixed cost and the result budgets, measured (plan 07 §5.1, C3, C8,
-// C10; [A-4]: `core` tools/list ≤ 20 000 chars ≈ 5 k tokens, `full` ≤ 35 000, the Skills listing
+// C10; plan 10 B12; [A-4]: `core` tools/list ≤ 20 000 chars ≈ 5 k tokens, `full` (34) ≤ 35 000, the Skills listing
 // ≤ 4 600 chars — token-derived, downward-only ceilings; ADV OBJ-24: the ≤ 120-char short form of
 // the rule must still fit if it ever returns to every description). Results: lists ≤ 20 000 chars,
 // analytics ≤ 10 000 by construction. The measured numbers are printed for plan 10 §2's ledger.
@@ -51,15 +51,27 @@ describe("the per-turn fixed cost (definitions)", () => {
     expect(fallback).toBeLessThanOrEqual(CEILINGS.core);
   });
 
-  it("full tools/list fits 35 000 chars", async () => {
+  it("full tools/list (34 tools) fits 35 000 chars (plan 10 B12)", async () => {
     const c = await connect(world, { options: { toolset: "full", fixtureMode: false } });
-    const chars = JSON.stringify((await c.client.listTools()).tools).length;
-    console.log(`[size] full tools/list: ${String(chars)} chars (built tools only until B2)`);
+    const { tools } = await c.client.listTools();
+    const chars = JSON.stringify(tools).length;
+    console.log(
+      `[size] full tools/list: ${String(chars)} chars ≈ ${String(tokens(chars))} tokens (${String(tools.length)} tools)`,
+    );
+    expect(tools).toHaveLength(34);
     expect(chars).toBeLessThanOrEqual(CEILINGS.full);
+    // the ≤ 120-char short form of the rule in every description (ADV OBJ-24) — measured, reported
+    const fallback = chars + tools.length * (UNTRUSTED_RULE_SHORT.length + 1);
+    console.log(
+      `[size] full with the ≤ 120-char fallback in every description: ${String(fallback)} chars`,
+    );
+    const p = JSON.stringify((await c.client.listPrompts()).prompts).length;
+    console.log(`[size] full prompts/list (13 prompts): ${String(p)} chars`);
+    expect(p).toBeLessThanOrEqual(3_000);
     await c.close();
   });
 
-  it("the Skills listing (P0 descriptions) fits 4 600 chars; prompts and resources lists are small", async () => {
+  it("the Skills listing (all 13 descriptions) fits 4 600 chars; prompts and resources lists are small", async () => {
     let total = 0;
     for (const s of PROMPT_SKILLS) {
       const text = readFileSync(path.join(ROOT, "skills", s, "SKILL.md"), "utf8");
@@ -67,7 +79,8 @@ describe("the per-turn fixed cost (definitions)", () => {
       expect(m, s).not.toBeNull();
       total += (m?.[1] ?? "").length;
     }
-    console.log(`[size] Skills listing: ${String(total)} chars (8 P0 Skills)`);
+    expect(PROMPT_SKILLS).toHaveLength(13);
+    console.log(`[size] Skills listing: ${String(total)} chars (13 Skills)`);
     expect(total).toBeLessThanOrEqual(CEILINGS.skills);
     const prompts = JSON.stringify((await client.listPrompts()).prompts).length;
     const resources = JSON.stringify((await client.listResources()).resources).length;
@@ -94,6 +107,27 @@ describe("result budgets (plan 01 §4.2; plan 07 C8)", () => {
     ["espn_get_schedule", { weeks: [4, 5, 6] }],
     ["espn_get_status", { include_checks: true }],
   ];
+  const fullListCalls: [string, Record<string, unknown>][] = [
+    ["espn_get_player_stats", { players: { team_id: 1 }, type: "season", detail: "full" }],
+    ["espn_get_projections", { players: { team_id: 1 }, horizon: "ros", week: 4 }],
+    ["espn_get_player_outlook", { players: { team_id: 1 }, include_season_outlook: true }],
+    ["espn_get_player_usage", { players: { team_id: 1 } }],
+    ["espn_get_player_usage", { players: { team_id: 1 }, detail: "full" }],
+    ["espn_get_defense_profile", {}],
+    ["espn_get_defense_profile", { position: "RB" }],
+    ["espn_list_recommendations", {}],
+  ];
+  const fullAnalyticsCalls: [string, Record<string, unknown>][] = [
+    ["espn_analyze_matchup", { week: 4 }],
+    ["espn_analyze_matchup", { mode: "season", seeding_mode: "both", n_sims: 2000 }],
+    ["espn_analyze_replacement", {}],
+    ["espn_analyze_replacement", { detail: "full" }],
+    ["espn_analyze_schedule", {}],
+    ["espn_analyze_roster", {}],
+    ["espn_analyze_trade", { find_partners: { need_position: "WR" } }],
+    ["espn_analyze_league_activity", {}],
+    ["espn_analyze_waivers", { detail: "full" }],
+  ];
   const analyticsCalls: [string, Record<string, unknown>][] = [
     ["espn_project_players", { players: { team_id: 1 }, horizon: "week", week: 4 }],
     ["espn_project_players", { players: { team_id: 1 }, horizon: "ros", week: 4, detail: "full" }],
@@ -115,6 +149,27 @@ describe("result budgets (plan 01 §4.2; plan 07 C8)", () => {
         ).toBe(true);
     }
   });
+
+  it("under full: the P1 lists ≤ 20 000 chars, the P1 analytics ≤ 10 000 (compact vs full measured)", async () => {
+    const c = await connect(world, { options: { toolset: "full", fixtureMode: false } });
+    await call(c.client, "espn_get_roster", { week: 4 });
+    await call(c.client, "espn_get_standings");
+    for (const [name, args] of fullListCalls) {
+      const r = await call(c.client, name, args);
+      expect(r.isError, `${name} ${JSON.stringify(r.body).slice(0, 200)}`).toBe(false);
+      const chars = JSON.stringify(r.body).length;
+      console.log(`[size] ${name} ${JSON.stringify(args)}: ${String(chars)} chars`);
+      expect(chars).toBeLessThanOrEqual(RESULT_BUDGET_CHARS);
+    }
+    for (const [name, args] of fullAnalyticsCalls) {
+      const r = await call(c.client, name, args);
+      expect(r.isError, `${name} ${JSON.stringify(r.body).slice(0, 200)}`).toBe(false);
+      const chars = JSON.stringify(r.body).length;
+      console.log(`[size] ${name} ${JSON.stringify(args)}: ${String(chars)} chars`);
+      expect(chars).toBeLessThanOrEqual(ANALYTICS_BUDGET_CHARS);
+    }
+    await c.close();
+  }, 120_000);
 
   it("analytics results stay within 10 000 chars by construction", async () => {
     for (const [name, args] of analyticsCalls) {

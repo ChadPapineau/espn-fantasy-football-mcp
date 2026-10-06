@@ -74,7 +74,7 @@ export function readPackageText(file: string): string | null {
   }
 }
 
-/** The Skill directories whose bodies become prompts (plan 07 §4.2: the eight P0 Skills). */
+/** The Skill directories whose bodies become prompts (plan 07 §4.2: the eight P0 and the five P1 Skills). */
 export const PROMPT_SKILLS: readonly string[] = Object.freeze([
   "onboard",
   "weekly",
@@ -84,6 +84,12 @@ export const PROMPT_SKILLS: readonly string[] = Object.freeze([
   "apply",
   "session-check",
   "waivers",
+  // the five P1 Skills (plan 09 P1; their prompts register under EFF_TOOLSET=full)
+  "trade",
+  "injury-cascade",
+  "schedule-plan",
+  "roster-audit",
+  "news-check",
 ]);
 
 /** The Skill bodies and the cheat-sheet (plan 07 §4.2 prompts; §4.1 espn-ff://docs/tool-outputs). */

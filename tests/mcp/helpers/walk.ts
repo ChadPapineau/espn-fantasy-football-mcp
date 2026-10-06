@@ -67,6 +67,26 @@ export const SERVER_PROSE: ReadonlySet<string> = new Set([
   "data.metrics.brier.p_playoffs.espn",
   "data.metrics.brier.p_role_holds.ours",
   "data.metrics.brier.p_k_win.ours",
+  // the P1 tools' fixed server text (plan 10 §3.2): notes, gaps, verdicts, risks — never third-party
+  "data.note",
+  "data.notes[]",
+  "data.players[].data_gaps[]",
+  "data.evidence_note",
+  "data.why_they_accept[]",
+  "data.pass_down_back_note",
+  "data.fixes[].action",
+  "data.playoff_weeks.evidence_note",
+  "data.playoff_weeks.week17_rest_risk.note",
+  "data.bench_template.basis",
+  "data.stash_values[].verdict",
+  "data.stash_values[].playoff_horizon_note",
+  "data.handcuff_values[].verdict",
+  "data.consolidation_candidates[].target_profile",
+  "data.ir.hidden_bench_play.risks[]",
+  "data.ir.activation_timing_warning",
+  "data.what_would_confirm[]",
+  "data.calibration_state.note",
+  "data.readings[].scenarios_applied[]",
 ]);
 
 /** The violations of the A6 rule in one envelope (empty = compliant). */

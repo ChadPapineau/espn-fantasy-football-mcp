@@ -22,6 +22,7 @@ import {
 import {
   RECLOG_TEXT_PATHS,
   RECLOG_UNTRUSTED_SOURCE,
+  RECOMMENDATION_KINDS,
   type RecommendationRecord,
   type RecommendationRecordView,
   type RecordResult,
@@ -31,6 +32,8 @@ import { kickoffMsOf } from "../../domain/league/schedule.js";
 import {
   BOUNDS,
   analyticsFreshnessShape,
+  limitSchema,
+  offsetSchema,
   recommendationKindsSchema,
   recordRecommendationInputSchema,
   weekSchema,
@@ -408,3 +411,65 @@ export function recWeekItems(ctx: ToolContext, w: Week) {
     .forWeek(ref.league_id, ref.season, w)
     .map((r) => toListItem(r, ctx.services.recommendationLog.outcome(r.log_id)));
 }
+
+// --- E14 espn_list_recommendations -----------------------------------------------------------------
+
+/** E14 data (plan 07 E14): the log's summary rows, newest first; free text under C15. */
+export const recommendationListSchema = z.strictObject({
+  items: z
+    .array(
+      z.strictObject({
+        log_id: logId,
+        kind: z.enum(RECOMMENDATION_KINDS),
+        week,
+        recorded_at: iso,
+        action_summary: recLogText,
+        followed: z.boolean().nullable(),
+      }),
+    )
+    .max(BOUNDS.limit.max),
+});
+
+/** E14 `espn_list_recommendations` (P1; the tool twin of espn-ff://rec/*). */
+export const listRecommendations = defineTool({
+  name: "espn_list_recommendations",
+  description:
+    "Browse the recommendation log (this league, this season), newest first: kind, week, a summary and whether it was followed.",
+  input: z.strictObject({
+    week: z.number().int().min(0).max(BOUNDS.week.max).optional(),
+    kind: z.enum(RECOMMENDATION_KINDS).optional(),
+    limit: limitSchema,
+    offset: offsetSchema,
+  }),
+  data: recommendationListSchema,
+  budget: "list",
+  pageable: true,
+  run: (args, ctx) => {
+    const ref = leagueRef(ctx);
+    const page = ctx.services.recommendationLog.list({
+      league_id: ref.league_id,
+      season: ref.season,
+      week: args.week ?? null,
+      kind: args.kind ?? null,
+      limit: args.limit,
+      offset: args.offset,
+    });
+    const items = page.items.slice(0, args.limit);
+    return Promise.resolve({
+      data: { items },
+      inputs: [],
+      extraSources: ["store:recommendation_log"],
+      bareFields: [{ path: "data.items[].action_summary", source: REC_SOURCE }],
+      page: {
+        limit: args.limit,
+        offset: args.offset,
+        count: items.length,
+        total: page.total,
+        has_more: args.offset + items.length < page.total,
+        next_offset: args.offset + items.length < page.total ? args.offset + items.length : null,
+      },
+      listKey: "items",
+      ...(args.week === undefined || args.week === 0 ? {} : { week: args.week }),
+    });
+  },
+});

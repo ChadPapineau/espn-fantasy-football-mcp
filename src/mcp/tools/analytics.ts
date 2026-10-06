@@ -112,17 +112,20 @@ import {
   week,
 } from "./schemas.js";
 import { selectPlayers } from "./select.js";
+import { analyzeWaiversP1 } from "../../domain/analytics/phase2.js";
+import { waiverP1Extras } from "./market-p1.js";
+import { projectMany } from "./p1-common.js";
 
 // --- shared engine inputs ------------------------------------------------------------------------
 
 /** One player the engines see: the platform record and its crosswalk gsis id. */
-interface Subject {
+export interface Subject {
   readonly p: PlatformPlayer;
   readonly gsis: string | null;
 }
 
 /** The seed a call uses: the argument, an injected source (tests), else stable in the inputs. */
-function seedOf(ctx: ToolContext, explicit: number | undefined, key: string): number {
+export function seedOf(ctx: ToolContext, explicit: number | undefined, key: string): number {
   if (explicit !== undefined) return explicit;
   const injected = ctx.services.newSeed?.();
   return injected ?? seedFrom(key);
@@ -133,7 +136,7 @@ function seedOf(ctx: ToolContext, explicit: number | undefined, key: string): nu
  * season's weeks before `w` and the prior season. D/ST units read the team-defence lines. A dataset
  * never loaded leaves the trailing window empty and says so (E1 degradation: ESPN-anchored, CV only).
  */
-function trailingFor(
+export function trailingFor(
   ctx: ToolContext,
   subjects: readonly Subject[],
   season: number,
@@ -192,7 +195,7 @@ function trailingFor(
 }
 
 /** Implied team totals by ESPN pro-team id, joined on the ESPN game id (research 04 §B.1.6). */
-function impliedTotals(
+export function impliedTotals(
   ctx: ToolContext,
   schedule: ProSchedule,
   season: number,
@@ -223,13 +226,13 @@ function impliedTotals(
  * test-only switch in the server options (null = off — plan 10 A8a's injection invariance; never
  * set by a production configuration, changelog R5).
  */
-function cpuDeadlineOf(ctx: ToolContext): number | null {
+export function cpuDeadlineOf(ctx: ToolContext): number | null {
   const v = ctx.options.cpuDeadlineMs;
   return v === undefined ? ANALYTICS_CPU_DEADLINE_MS : v;
 }
 
 /** Runs E1 over `subjects` (the projection every other engine starts from). */
-async function project(
+export async function project(
   ctx: ToolContext,
   subjects: readonly Subject[],
   o: {
@@ -548,7 +551,7 @@ export const lineupSchema = z.discriminatedUnion("basis", [
 ]);
 
 /** The matchup period of a week and the opponent of `team` in it (null on a bye or unknown). */
-function opponentIn(
+export function opponentIn(
   matchups: readonly Matchup[],
   period: number | null,
   team: number,
@@ -563,7 +566,7 @@ function opponentIn(
 }
 
 /** The matchup period listing `w` (lowest id). */
-function periodOf(rules: LeagueRules, w: Week): number | null {
+export function periodOf(rules: LeagueRules, w: Week): number | null {
   let best: number | null = null;
   for (const [k, ws] of Object.entries(rules.playoffs.matchup_periods))
     if (ws.includes(w) && (best === null || Number(k) < best)) best = Number(k);
@@ -641,7 +644,7 @@ export function standingsFromMatchups(
 }
 
 /** The PF exchange rate and context from the seeding simulator (reading (a)); null → cold start. */
-async function seasonContext(
+export async function seasonContext(
   ctx: ToolContext,
   league: League,
   rules: LeagueRules,
@@ -986,7 +989,7 @@ const kdstSchema = z
   })
   .nullable();
 
-const candidateSchema = z.strictObject({
+export const candidateSchema = z.strictObject({
   player_id: playerId,
   name: playerName,
   position,
@@ -1033,6 +1036,11 @@ const candidateSchema = z.strictObject({
   flip_driver: serverText,
   invalidators: z.array(serverText).max(10),
   kdst: kdstSchema,
+  /** FAAB mode only (P1, additive): this candidate's own bid, P(win | bid), its expected net value. */
+  bid: z
+    .strictObject({ b_star: z.number(), p_win: prob, expected_net: z.number() })
+    .nullable()
+    .optional(),
 });
 
 /** E5 data (plan 07 E5; WaiversData). */
@@ -1074,7 +1082,7 @@ export const waiversSchema = z.strictObject({
 });
 
 /** A waiver-engine player from a platform record and its value weeks. */
-function waiverPlayerOf(
+export function waiverPlayerOf(
   p: PlatformPlayer,
   slotId: number,
   locked: boolean,
@@ -1099,10 +1107,10 @@ function waiverPlayerOf(
 }
 
 /** The K/D-ST positions (plan 07 C5). */
-const KDST = new Set(["K", "D/ST"]);
+export const KDST = new Set(["K", "D/ST"]);
 
 /** The pool page E5 reads: one sorted page, filtered to the positions asked. */
-async function candidatePool(
+export async function candidatePool(
   ctx: ToolContext,
   w: Week,
   positions: readonly string[] | undefined,
@@ -1170,8 +1178,11 @@ export const analyzeWaiversTool = defineTool({
     const settings = await settingsOf(ctx, inputs);
     const slots: RosterSlots = await slotsOf(ctx, inputs);
     const rules = await rulesOf(ctx, inputs);
-    if (args.value_source === "ensemble")
-      warnings.push("value_source ensemble is P1: valued on ESPN's rest-of-season projection");
+    const p1 = ctx.options.toolset === "full";
+    if (args.value_source === "ensemble" && !p1)
+      warnings.push(
+        "value_source ensemble needs EFF_TOOLSET=full: valued on ESPN's rest-of-season projection",
+      );
     const rosters = await rostersOf(ctx, w, inputs, warnings, args, team);
     const mine: Roster | undefined = rosters.find((r) => r.team.team_id === team);
     if (mine === undefined) throw new EffError("NOT_FOUND");
@@ -1232,7 +1243,7 @@ export const analyzeWaiversTool = defineTool({
         };
       });
     const myRank = standings?.teams.find((t) => t.team_id === team)?.waiver_rank ?? null;
-    const out = await analyzeWaivers({
+    const p0Request = {
       roster: slots,
       rules,
       league_size: league.size,
@@ -1253,7 +1264,72 @@ export const analyzeWaiversTool = defineTool({
       adds_remaining: null,
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
-    });
+    };
+    // P1 (EFF_TOOLSET=full): E1 values (`ensemble`), usage signals, rival rosters, Sleeper's
+    // secondary trend, the learned mechanics and FAAB bidding (plan 07 E5 P1; plan 10 B3, B4)
+    const out = !p1
+      ? await analyzeWaivers(p0Request)
+      : await (async () => {
+          const ensemble = args.value_source !== "espn_ros";
+          let mineV = minePlayers;
+          let candV = candidates;
+          if (ensemble) {
+            const sched = await withinBudget(
+              () => scheduleOf(ctx, league.ref.season, inputs, allowStale),
+              warnings,
+            ).catch(() => null);
+            const proj = await projectMany(
+              ctx,
+              [...mine.entries.map((e) => e.player), ...pool]
+                .filter((p, i, xs) => xs.findIndex((x) => x.ref.id === p.ref.id) === i)
+                .map((p) => ({ p, gsis: gsis(p) })),
+              {
+                league,
+                settings,
+                schedule: sched?.schedule ?? { season: league.ref.season, games: [], teams: [] },
+                horizon: "ros",
+                week: w,
+                seed: seedOf(ctx, undefined, ["e5p1", league.ref.season, w, team].join("|")),
+                allowStale,
+              },
+              inputs,
+              warnings,
+            );
+            const e1 = (id: number, fallback: readonly (number | null)[]): (number | null)[] => {
+              const pp = proj.byId.get(id);
+              if (pp === undefined) return [...fallback];
+              return weeks.map(
+                (x, i) => pp.weeks.find((y) => y.week === x)?.dist.mean ?? fallback[i] ?? null,
+              );
+            };
+            mineV = minePlayers.map((m) => ({ ...m, weekly: e1(m.player_id, m.weekly) }));
+            candV = candidates.map((c) => ({ ...c, weekly: e1(c.player_id, c.weekly) }));
+          }
+          const extras = waiverP1Extras(
+            ctx,
+            { league, settings, slots, rules, w },
+            candV,
+            rosters,
+            team,
+            standings,
+            weeks,
+            inputs,
+            warnings,
+            allowStale,
+          );
+          return analyzeWaiversP1({
+            ...p0Request,
+            mine: mineV,
+            candidates: candV,
+            value_basis: ensemble ? "ensemble" : "espn_ros",
+            usage: extras.usage,
+            rival_rosters: extras.rival_rosters,
+            sleeper_trend: extras.sleeper_trend,
+            mechanics: extras.mechanics,
+            faab: extras.faab === null ? null : { ...extras.faab, reserve: args.reserve },
+            inputs: toDataInputs(inputs, ctx.nowMs),
+          });
+        })();
     const full = args.detail === "full";
     const data = full
       ? out.data

@@ -1,6 +1,6 @@
 // registry.ts — the ONE ordered tool list (plan 01 §3.1: registration order is fixed here, then
-// filtered in order by EFF_TOOLSET; plan 07 C3: `core` = the 18 P0 tools; the 16 P1 slots are
-// declared for Stage B2 and register nothing until their tools exist). The write tools are the
+// filtered in order by EFF_TOOLSET; plan 07 C3: `core` = the 18 P0 tools; `full` adds the 16 P1
+// tools of plan 10 §3.2 = 34). The write tools are the
 // PHASE W SEAM: their names are declared, their registration point is below, and NOTHING registers
 // there — the module is not built (plan 10 §3.W; D11) and plan 02 §3.2's four gates can never all
 // hold in this build. The tool set is decided at process start and never changes (no list_changed).
@@ -8,7 +8,21 @@ import type { Toolset } from "../config/schema.js";
 import type { AnyToolDefinition } from "./define.js";
 import type { WriteGateVerdict } from "./services.js";
 import { analyzeLineupTool, analyzeWaiversTool, projectPlayersTool } from "./tools/analytics.js";
+import {
+  analyzeMatchupTool,
+  analyzeReplacementTool,
+  analyzeRosterTool,
+  analyzeScheduleTool,
+} from "./tools/analytics-p1.js";
 import { getInjuries, getSchedule } from "./tools/datasets.js";
+import { getDefenseProfile, getDepthChart, getNews, getPlayerUsage } from "./tools/datasets-p1.js";
+import { getPlayerOutlook, getPlayerStats, getProjections } from "./tools/espn-p1.js";
+import {
+  analyzeEvidenceTool,
+  analyzeInjuryCascadeTool,
+  analyzeLeagueActivityTool,
+  analyzeTradeTool,
+} from "./tools/market-p1.js";
 import {
   getBoxScore,
   getLeague,
@@ -19,7 +33,7 @@ import {
 } from "./tools/league.js";
 import { checkAuth, getStatus } from "./tools/ops.js";
 import { listPlayers, searchPlayers } from "./tools/players.js";
-import { analyzeRetrospective, recordRecommendation } from "./tools/reclog.js";
+import { analyzeRetrospective, listRecommendations, recordRecommendation } from "./tools/reclog.js";
 import { getRoster } from "./tools/roster.js";
 
 /** The tool contract the Skills are stamped with (scripts/skills/_lib.mjs reads this literal). */
@@ -28,7 +42,7 @@ export const TOOL_CONTRACT = 1;
 /** Priority of a registry slot (plan 07 legend). */
 export type Priority = "P0" | "P1";
 
-/** One registry row: a catalog id, its priority, and the tool — null for a declared P1 slot. */
+/** One registry row: a catalog id, its priority, and the tool (null only for a declared, unbuilt slot). */
 export interface RegistryEntry {
   readonly id: string;
   readonly name: string;
@@ -63,23 +77,23 @@ export const REGISTRY: readonly RegistryEntry[] = Object.freeze([
   row("E13", "espn_analyze_retrospective", "P0", analyzeRetrospective),
   row("G1", "espn_get_status", "P0", getStatus),
   row("G2", "espn_check_auth", "P0", checkAuth),
-  // P1 slots (Stage B2): declared so `full`'s order is fixed now; nothing registers until built.
-  row("B2", "espn_get_player_stats", "P1", null),
-  row("C3", "espn_get_projections", "P1", null),
-  row("C4", "espn_get_player_outlook", "P1", null),
-  row("D1", "espn_get_player_usage", "P1", null),
-  row("D4", "espn_get_depth_chart", "P1", null),
-  row("D5", "espn_get_defense_profile", "P1", null),
-  row("D6", "espn_get_news", "P1", null),
-  row("E3", "espn_analyze_matchup", "P1", null),
-  row("E4", "espn_analyze_replacement", "P1", null),
-  row("E6", "espn_analyze_trade", "P1", null),
-  row("E7", "espn_analyze_injury_cascade", "P1", null),
-  row("E8", "espn_analyze_schedule", "P1", null),
-  row("E9", "espn_analyze_roster", "P1", null),
-  row("E10", "espn_analyze_evidence", "P1", null),
-  row("E11", "espn_analyze_league_activity", "P1", null),
-  row("E14", "espn_list_recommendations", "P1", null),
+  // P1 (Stage B2, plan 10 §3.2): registered under EFF_TOOLSET=full only, after the 18 (C3).
+  row("B2", "espn_get_player_stats", "P1", getPlayerStats),
+  row("C3", "espn_get_projections", "P1", getProjections),
+  row("C4", "espn_get_player_outlook", "P1", getPlayerOutlook),
+  row("D1", "espn_get_player_usage", "P1", getPlayerUsage),
+  row("D4", "espn_get_depth_chart", "P1", getDepthChart),
+  row("D5", "espn_get_defense_profile", "P1", getDefenseProfile),
+  row("D6", "espn_get_news", "P1", getNews),
+  row("E3", "espn_analyze_matchup", "P1", analyzeMatchupTool),
+  row("E4", "espn_analyze_replacement", "P1", analyzeReplacementTool),
+  row("E6", "espn_analyze_trade", "P1", analyzeTradeTool),
+  row("E7", "espn_analyze_injury_cascade", "P1", analyzeInjuryCascadeTool),
+  row("E8", "espn_analyze_schedule", "P1", analyzeScheduleTool),
+  row("E9", "espn_analyze_roster", "P1", analyzeRosterTool),
+  row("E10", "espn_analyze_evidence", "P1", analyzeEvidenceTool),
+  row("E11", "espn_analyze_league_activity", "P1", analyzeLeagueActivityTool),
+  row("E14", "espn_list_recommendations", "P1", listRecommendations),
 ]);
 
 /** The tools a toolset registers, in registry order (`core` = P0; `full` adds the built P1 tools). */

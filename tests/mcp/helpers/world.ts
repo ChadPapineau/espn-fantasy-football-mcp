@@ -158,6 +158,16 @@ export function fixtureFetchPlus(league: LeagueSlot, requests: string[]): FetchL
         }
         return json(readJson(`recorded/${league}/kona_player_info.json`));
       }
+      // P1 views a recording cannot key by every filter (plan 05 §3): the league's recorded
+      // kona_playercard for any id subset, and mPositionalRatings as embedded in every pool page
+      if (views.length === 1 && views[0] === "kona_playercard")
+        return json(readJson(`recorded/${league}/kona_playercard.json`));
+      if (views.length === 1 && views[0] === "mPositionalRatings") {
+        const page = readJson(`recorded/${league}/kona_player_info.json`) as {
+          positionAgainstOpponent?: unknown;
+        };
+        return json({ positionAgainstOpponent: page.positionAgainstOpponent ?? {} });
+      }
       if (views.length === 1 && views[0] === "mTransactions2")
         return json({ transactions: embeddedTransactions(league) });
       if (views.length === 1 && views[0] === "mPendingTransactions")

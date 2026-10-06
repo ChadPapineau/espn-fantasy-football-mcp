@@ -34,7 +34,7 @@ import {
   spikeLine,
 } from "../../src/mcp/server.js";
 import { DEBUG_ECHO_TEXT, DEBUG_TOOL_NAME } from "../../src/mcp/tools/debug.js";
-import { PROMPTS } from "../../src/mcp/prompts/index.js";
+import { ALL_PROMPTS, PROMPTS } from "../../src/mcp/prompts/index.js";
 import { ROOT, call, connect, makeWorld, type World } from "./helpers/world.js";
 
 const expected = JSON.parse(
@@ -79,14 +79,17 @@ describe("tools/list (A3a)", () => {
     expect(new Set(expected.full).size).toBe(34);
   });
 
-  it("full registers the built tools in catalog order (the P1 slots are declared, not built, until B2)", async () => {
+  it("full registers all 34 tools in catalog order: the 18, then the 16 P1 tools (plan 10 B10)", async () => {
     const { client, close } = await connect(world, {
       options: { toolset: "full", fixtureMode: false },
     });
     const names = (await client.listTools()).tools.map((t) => t.name);
-    expect(names).toEqual(expected.full.filter((n) => toolNames("full").includes(n)));
+    expect(names).toEqual(expected.full);
+    expect(names).toHaveLength(34);
+    expect(names.slice(0, 18)).toEqual(expected.core);
     expect(toolsFor("full").map((t) => t.name)).toEqual(toolNames("full"));
-    expect(REGISTRY.filter((e) => e.priority === "P1").every((e) => e.tool === null)).toBe(true);
+    expect(REGISTRY.every((e) => e.tool !== null)).toBe(true);
+    expect(REGISTRY.filter((e) => e.priority === "P1")).toHaveLength(16);
     await close();
   });
 
@@ -269,9 +272,8 @@ describe("lists carry ttlMs + cacheScope private (plan 01 §3.1)", () => {
     await close();
   });
 
-  it("prompts/list has exactly the eight P0 prompts, in plan 07 §4.2 order", async () => {
-    const { client, close } = await connect(world);
-    expect((await client.listPrompts()).prompts.map((p) => p.name)).toEqual([
+  it("prompts/list has exactly the eight P0 prompts under core, 13 under full, in plan 07 §4.2 order", async () => {
+    const p0 = [
       "espn.onboard",
       "espn.weekly",
       "espn.start_sit",
@@ -280,9 +282,22 @@ describe("lists carry ttlMs + cacheScope private (plan 01 §3.1)", () => {
       "espn.apply",
       "espn.session",
       "espn.waivers",
+    ];
+    const { client, close } = await connect(world);
+    expect((await client.listPrompts()).prompts.map((p) => p.name)).toEqual(p0);
+    await close();
+    const f = await connect(world, { options: { toolset: "full" } });
+    expect((await f.client.listPrompts()).prompts.map((p) => p.name)).toEqual([
+      ...p0,
+      "espn.trade",
+      "espn.injury",
+      "espn.schedule",
+      "espn.roster_audit",
+      "espn.check",
     ]);
     expect(PROMPTS).toHaveLength(8);
-    await close();
+    expect(ALL_PROMPTS).toHaveLength(13);
+    await f.close();
   });
 });
 
