@@ -17,12 +17,16 @@ working directory is iCloud-managed, so nothing secret ever lives in it.
 
 ## ▶ NEXT STEP
 
-**BUILD APPROVED (Chad, 2026-10-05).** Program: `docs/scratch/build-program.md` (stages A → B1 →
-B2 → owner stop → C → D). Work happens in the clone at `~/Developer/espn-fantasy-football-mcp`
-(outside iCloud) on branch `build/phase-1`; the `~/Documents` checkout is retired. Agent rules:
-`CLAUDE.md`. Effort: routine building at "Extra"; the QA/pentest stage (C) needs "Ultracode" —
-the orchestrator stops after B2 and asks Chad to (1) run `eff setup` in a terminal, (2) switch to
-Ultracode, (3) reply "go". Read `docs/scratch/build-program.md` § RESUME HERE for the current stage.
+**Stage A ✅ (2026-10-06, `bd64cba`). Stage B1 (`effmcp-core`, Phase 1a + 1b, the 18 P0 tools) is next / running.** Program: `docs/scratch/build-program.md`. Clone: `~/Developer/espn-fantasy-football-mcp`, branch `build/phase-1`. Agent rules: `CLAUDE.md`. Effort: routine building at "Extra"; after B2 the orchestrator stops and asks Chad to (1) run `eff setup` in a terminal, (2) switch to Ultracode, (3) reply "go" for Stage C (QA/pentest).
+
+## Build facts (Stage A, verified by the orchestrator 2026-10-06)
+
+- **Stage A** (`effmcp-foundation`, 7 agents) is green on `build/phase-1` @ `bd64cba`: independent gate passed with zero fix rounds; CI `ci`, `docs`, `secrets` green; 2,103 unit tests; coverage ≈ 99.4 %; runtime tree = the 4 pinned packages of plan 04 §2 (6 names incl. `core` and the keyring platform package; this Mac is **Intel → `@napi-rs/keyring-darwin-x64`**; CI is linux-x64-gnu).
+- **Contract layer** (code against these; additive edits only, by the owning module): `src/providers/platform.ts` (FantasyPlatform; `FantasyPlatformWrites` declared and marked **PHASE W SEAM — NOT IMPLEMENTED**, `writes:false`), `src/providers/espn/types.ts`, `src/auth/types.ts`, `src/drift/types.ts`, `src/domain/gate/{types.ts,README.md}` (where the write module would integrate), `src/sources/source.ts`, `src/store/types.ts`, `src/domain/{scoring,league,analytics,reclog,crosswalk}/types.ts`, `src/domain/clock.ts`, `src/mcp/{envelope,errors,bounds}.ts`, `src/config/{schema,paths,freshness}.ts`, `src/cli/log.ts`.
+- **Secret tooling:** commit only via `scripts/dev/commit-paths.sh`; `.githooks/pre-commit` + `commit-msg` active (core.hooksPath set locally); `scan-secrets.mjs` has the ESPN rules + `--identity` + the owner's local deny-list (outside the repo; never printed; numeric terms match whole tokens only). gitleaks runs in CI with ESPN rules; history allowlists exist only for two dummy test values, by commit SHA. The secrets workflow file is `.github/workflows/secret-scan.yml` (the repo `.gitignore` ignores `secrets.*`).
+- **Fixtures** (`fixtures/espn/recorded/`, scrubbed, ~22 MB, manifest with provenance hashes): `league-a` = 10-team standard, FAAB, TQB + 5 FLEX; `league-b` = 10-team **half-PPR**, FAAB, standard lineup; `league-c` = 12-team **6-pt pass TD**, **rolling (non-FAAB) waivers**, RB/WR + WR/TE flexes. Each has `mSettings`, `mTeam`, `mMatchup`, `mRoster` sp1–3, `mBoxscore` sp1–3 (all games final), `kona_player_info`; plus `season/` (pro schedules) and `errors/`. Some units are **withheld** (deny-list false positives: one player id and digit runs) and listed value-free in the manifest; ≥ 3 final weeks per league remain for the golden.
+- **Phase 0 tools:** `scripts/probe.ts` (keyless drift probe; exits 0/4 drift/6 host moved/7 unreachable/2 config; live run green), `scripts/record-fixture.ts --public` (keyless, refuses cookies, ≥ 1.2 s spacing, request cap), `scripts/scrub-fixture.ts` (deterministic, deny-list abort; withholding opt-in and logged).
+- **Carried into B1:** record the views not yet captured — `mMatchupScore`, solo `mNav`, `kona_player_info` with `filterIds`, `kona_playercard`, `players_wl` (needs the `/seasons/{s}/players` route) — and re-record to close the withheld holes (the pipeline now replaces a deny-listed player-name leaf with `Player <id>`); the per-entity drift manifest generator (plan 05 §3.1 step 4); the logger must also redact a case-changed copy of a registered secret; Z4's launchd schedule + `probe_log` + notification (CLI stage); the Phase W test asserts the write-host literal appears only in `src/config/schema.ts` (refuse the host by importing that constant, never by spelling it).
 
 ## The findings that shape the product (verified by the orchestrator)
 

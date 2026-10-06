@@ -26,4 +26,5 @@ passed to agents in their prompts and kept in local environment/config only — 
 
 ## RESUME HERE
 
-Stage A not started (program written 2026-10-05).
+- Stage A ✅ 2026-10-06 — workflow `effmcp-foundation` (run `wf_b6bfaf03-11c`), gate green with 0 fix rounds at `bd64cba`; CI green. Facts in `docs/HANDOFF.md` → "Build facts (Stage A)".
+- Stage B1 — launching `effmcp-core` (Phase 1a + 1b). If interrupted, resume the run with its `scriptPath` + `resumeFromRunId` (completed agents replay from cache), after checking `git log` on the branch for what landed.
