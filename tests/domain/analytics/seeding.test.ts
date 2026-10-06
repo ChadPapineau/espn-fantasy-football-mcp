@@ -1,10 +1,15 @@
-// seeding.test.ts — the seeding simulator as a domain unit test (plan 10 A10a; research 05 §2.4):
-// a 3-team toy league whose P(playoffs) is computed by hand (quadrature, independent of the
-// simulator) under both readings at 20 000 paths; the research run's qualitative findings on a
-// ten-team state that carries every recorded fact of that run (T4/T8/T2 4-4, PF ranks 3/5/7, T4's
-// PF 908); the marginal-values table populated and `pf_per_win` finite under (a), null under (b);
-// the exact tiebreak chains, division winners first, the bracket's bye rule; determinism by seed,
-// pathwise monotone marginal values (common random numbers), partial runs, hostile inputs.
+// seeding.test.ts — the seeding simulator as a domain unit test (plan 10 A10a as ruled in changelog
+// R5-2; research 05 §2.4). A10a's hard parts: a 3-team toy league whose P(playoffs) is computed by
+// hand (quadrature, independent of the simulator) under both readings at 20 000 paths (±0.02); the
+// marginal-values table populated and `pf_per_win` finite under (a), null under (b); the research's
+// qualitative claims (the variance sign flips with the cutoff; T2 a favourite under (a), a bubble
+// team under (b)) on a ten-team state that carries every recorded fact of that run (T4/T8/T2 4-4,
+// PF ranks 3/5/7, T4's PF 908). SOFT (reported in docs/evals/1a-analytics.md): the ten-team table's
+// cells — the research drew the other seven teams' weeks 1–8 once from an unpublished seeded run
+// (seeding_mc.py, never committed; a Python RNG cannot be reproduced from JS), so those checks are a
+// reconstruction sanity bound (0.05), not the plan's tolerance. Also: the exact tiebreak chains,
+// division winners first, the bracket's bye rule; determinism by seed, pathwise monotone marginal
+// values (common random numbers), partial runs, hostile inputs.
 import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -109,8 +114,10 @@ describe("A10a: a 3-team toy league, P(playoffs) by hand under both readings (ha
 
 // The research run's facts (research 05 §2.4; docs/scratch notes): true means 122…100 (T0…T9), σ 20,
 // a 14-week round-robin (9 rounds + rounds 1–5), state after week 8; T4 (μ 112) 4-4 with PF 908 (3rd),
-// T8 (μ 103) 4-4 (7th in PF), T2 (μ 116) 4-4 (5th in PF). The run's other teams were not recorded:
-// this state carries every recorded fact and was found by search (docs/evals/1a-analytics.md).
+// T8 (μ 103) 4-4 (7th in PF), T2 (μ 116) 4-4 (5th in PF). The run's other teams were not recorded —
+// the state after week 8 was one seeded draw of seeding_mc.py, which was never committed (changelog
+// R5-2): this state carries every recorded fact and was found by search (docs/evals/1a-analytics.md),
+// so the table's cells are a reconstruction sanity bound here, never A10a's hard tolerance.
 const MU = [122, 119, 116, 114, 112, 110, 108, 106, 103, 100];
 const WINS = [7, 3, 4, 0, 4, 7, 1, 6, 4, 4];
 const PF = [937.4, 1128.5, 846.3, 840.7, 908, 845.5, 907.9, 836.5, 841.4, 812.6];
@@ -146,7 +153,7 @@ function tenTeam(me: number, mode: "espn_rule" | "points_only"): SeasonSimReques
   });
 }
 
-describe("A10a: the research run's ten-team state (research 05 §2.4)", () => {
+describe("A10a: the research run's ten-team state (research 05 §2.4; R5-2)", () => {
   const TABLE = {
     espn_rule: { 4: 0.826, 8: 0.331, 2: 0.857 },
     points_only: { 4: 0.969, 8: 0.133, 2: 0.757 },
@@ -165,7 +172,7 @@ describe("A10a: the research run's ten-team state (research 05 §2.4)", () => {
   }, 120_000);
 
   it.each([4, 8, 2] as const)(
-    "T%i's P(playoffs) is within 0.05 of the table under both readings",
+    "soft — reconstruction sanity bound, not the plan tolerance: T%i's P(playoffs) within 0.05 of the table under both readings",
     (t) => {
       for (const mode of ["espn_rule", "points_only"] as const)
         expect(Math.abs((reading(t, mode)?.p_playoffs ?? 0) - TABLE[mode][t]), mode).toBeLessThan(
@@ -174,7 +181,7 @@ describe("A10a: the research run's ten-team state (research 05 §2.4)", () => {
     },
   );
 
-  it("marginal values the state search never targeted match the table within 0.05", () => {
+  it("soft — reconstruction sanity bound: marginal values the state search never targeted within 0.05 of the table", () => {
     // cells are ΔP(playoffs) / ΔP(bye) from research 05 §2.4's table
     const cells: [
       number,
@@ -200,7 +207,7 @@ describe("A10a: the research run's ten-team state (research 05 §2.4)", () => {
       ).toBeLessThan(0.05);
   });
 
-  it("the marginal-values table is populated; pf_per_win is finite under (a) and null under (b)", () => {
+  it("hard: the marginal-values table is populated; pf_per_win is finite under (a) and null under (b)", () => {
     for (const mode of ["espn_rule", "points_only"] as const)
       expect(Object.keys(reading(4, mode)?.marginal_values ?? {}).sort()).toEqual([
         "plus_1_win",
@@ -215,7 +222,7 @@ describe("A10a: the research run's ten-team state (research 05 §2.4)", () => {
     expect(reading(4, "points_only")?.pf_per_win).toBeNull();
   });
 
-  it("research findings that do not depend on the unrecorded teams", () => {
+  it("hard: the research's qualitative findings, which do not depend on the unrecorded teams", () => {
     const t4a = reading(4, "espn_rule");
     const t4b = reading(4, "points_only");
     // (a): a past win is worth far more than 40 PF — one win is many PF of exchange rate

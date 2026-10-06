@@ -1,9 +1,11 @@
 // waivers.test.ts — E5 priority mode on a reference-format scenario (plan 10 A9a hard parts): k = 2,
-// W = 13 → Π(2, 13) within 0.5 of 29.5 with premium_basis cold_start_table; the band populated and
-// every candidate inside it `marginal`, listed in marginal[] and never in claim_list[]; claim ⇔
-// s ≥ Π outside it; k = N claims anything positive with a non-empty scramble list; an open IR seat
-// gives s_with_ir_move ≥ s; after the run no claim targets a free agent; the K/D-ST slice by the
-// bracket model with a two-week look-ahead (also in a FAAB league); p_clears_to_fa intervals valid.
+// claim week 4, so W = 13 — research 05 §1.2's usable weeks AFTER this week's claim (weeks 5–17;
+// changelog R5-1) → Π(2, 13) within 0.5 of 29.5 with premium_basis cold_start_table; the band
+// populated and every candidate inside it `marginal`, listed in marginal[] and never in
+// claim_list[]; claim ⇔ s ≥ Π outside it; k = N claims anything positive with a non-empty scramble
+// list; an open IR seat gives s_with_ir_move ≥ s; after the run no claim targets a free agent; the
+// K/D-ST slice by the bracket model with a two-week look-ahead (also in a FAAB league);
+// p_clears_to_fa intervals valid.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {

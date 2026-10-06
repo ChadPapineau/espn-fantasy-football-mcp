@@ -1,7 +1,8 @@
 // waiver-dp.test.ts — the waiver-priority DP (research 05 §1.2): the cold-start Π(k, W) table cell
-// for cell (Π(2, 13) within 0.5 of 29.5 — plan 10 A9a), V(1,16) / V(10,16), the drift and demand
-// sensitivities the research quotes, the band at ×0.5 / ×1.5, and the monotonicity the option
-// argument implies (Π falls with k, rises with W, unspent priority after the last run is worth 0).
+// for cell (Π(2, 13) within 0.5 of 29.5 — plan 10 A9a (i), changelog R5-1), V(1,16) / V(10,16),
+// the drift and demand sensitivities the research quotes, the band at ×0.5 / ×1.5, and the
+// monotonicity the option argument implies (Π falls with k, rises with W, unspent priority after the
+// last run is worth 0).
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
@@ -27,7 +28,7 @@ const TABLE: readonly (readonly number[])[] = [
 const WS = [1, 3, 5, 7, 9, 11, 13, 15];
 
 describe("the cold-start Π(k, W) table (research 05 §1.2)", () => {
-  it("Π(2, 13) is within 0.5 of 29.5 (plan 10 A9a, hard)", () => {
+  it("Π(2, 13) is within 0.5 of 29.5 (plan 10 A9a (i), hard)", () => {
     expect(Math.abs(priorityPremium(2, 13, 10) - 29.5)).toBeLessThan(0.5);
   });
 
