@@ -1,0 +1,12 @@
+{
+  "details": [
+    {
+      "message": "Synthetic: league not visible to this caller",
+      "metaData": null,
+      "resolution": null,
+      "shortMessage": "Synthetic: league not visible to this caller",
+      "type": "AUTH_LEAGUE_NOT_VISIBLE"
+    }
+  ],
+  "messages": ["Synthetic: league not visible to this caller"]
+}

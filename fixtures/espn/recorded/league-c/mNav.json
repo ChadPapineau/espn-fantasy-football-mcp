@@ -1,0 +1,40 @@
+{
+  "draftDetail": { "completeDate": 1788399827103, "drafted": true, "inProgress": false },
+  "gameId": 1,
+  "id": 0,
+  "members": [
+    { "displayName": "Member 1", "firstName": "", "id": "{00000000-0000-4000-8000-000000000001}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 2", "firstName": "", "id": "{00000000-0000-4000-8000-000000000002}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 3", "firstName": "", "id": "{00000000-0000-4000-8000-000000000003}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 4", "firstName": "", "id": "{00000000-0000-4000-8000-000000000004}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 5", "firstName": "", "id": "{00000000-0000-4000-8000-000000000005}", "isLeagueCreator": false, "isLeagueManager": true, "lastName": "" },
+    { "displayName": "Member 6", "firstName": "", "id": "{00000000-0000-4000-8000-000000000006}", "isLeagueCreator": true, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 7", "firstName": "", "id": "{00000000-0000-4000-8000-000000000007}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 8", "firstName": "", "id": "{00000000-0000-4000-8000-000000000008}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 9", "firstName": "", "id": "{00000000-0000-4000-8000-000000000009}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 10", "firstName": "", "id": "{00000000-0000-4000-8000-00000000000A}", "isLeagueCreator": false, "isLeagueManager": true, "lastName": "" },
+    { "displayName": "Member 11", "firstName": "", "id": "{00000000-0000-4000-8000-00000000000B}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 12", "firstName": "", "id": "{00000000-0000-4000-8000-00000000000C}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" },
+    { "displayName": "Member 13", "firstName": "", "id": "{00000000-0000-4000-8000-00000000000D}", "isLeagueCreator": false, "isLeagueManager": true, "lastName": "" },
+    { "displayName": "Member 14", "firstName": "", "id": "{00000000-0000-4000-8000-00000000000E}", "isLeagueCreator": false, "isLeagueManager": false, "lastName": "" }
+  ],
+  "scoringPeriodId": 4,
+  "seasonId": 2026,
+  "segmentId": 0,
+  "settings": { "acquisitionSettings": { "isUsingAcquisitionBudget": false }, "draftSettings": { "keeperCount": 3 }, "isCustomizable": true, "isPublic": true, "name": "Example League 3", "rosterSettings": { "isUsingUndroppableList": true }, "scoringSettings": { "scoringType": "H2H_POINTS" } },
+  "status": { "activatedDate": 1777399861302, "createdAsLeagueType": 0, "currentLeagueType": 0, "currentMatchupPeriod": 4, "finalScoringPeriod": 17, "firstScoringPeriod": 1, "isActive": true, "isExpired": false, "isFull": true, "isPlayoffMatchupEdited": false, "isToBeDeleted": false, "isViewable": true, "isWaiverOrderEdited": false, "latestScoringPeriod": 4, "previousSeasons": [2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025], "standingsUpdateDate": 1791186447932, "teamsJoined": 12, "transactionScoringPeriod": 4, "waiverLastExecutionDate": 1791186447732, "waiverProcessStatus": { "2026-09-04T07:03:45.266+00:00": 1, "2026-09-16T07:14:17.903+00:00": 2, "2026-09-23T07:41:52.572+00:00": 1, "2026-09-30T07:09:49.141+00:00": 4 } },
+  "teams": [
+    { "abbrev": "TA", "id": 1, "logo": "", "logoType": "VECTOR", "name": "Team A", "owners": ["{00000000-0000-4000-8000-000000000006}", "{00000000-0000-4000-8000-00000000000A}"] },
+    { "abbrev": "TB", "id": 2, "logo": "", "logoType": "CUSTOM_VALID", "name": "Team B", "owners": ["{00000000-0000-4000-8000-00000000000B}"] },
+    { "abbrev": "TC", "id": 3, "logo": "", "logoType": "CUSTOM_VALID", "name": "Team C", "owners": ["{00000000-0000-4000-8000-00000000000D}"] },
+    { "abbrev": "TD", "id": 4, "logo": "", "logoType": "VECTOR", "name": "Team D", "owners": ["{00000000-0000-4000-8000-000000000008}"] },
+    { "abbrev": "TF", "id": 6, "logo": "", "logoType": "VECTOR", "name": "Team F", "owners": ["{00000000-0000-4000-8000-000000000005}"] },
+    { "abbrev": "TG", "id": 7, "logo": "", "logoType": "CUSTOM_VALID", "name": "Team G", "owners": ["{00000000-0000-4000-8000-000000000009}", "{00000000-0000-4000-8000-000000000003}"] },
+    { "abbrev": "TJ", "id": 10, "logo": "", "logoType": "VECTOR", "name": "Team J", "owners": ["{00000000-0000-4000-8000-000000000001}"] },
+    { "abbrev": "TK", "id": 11, "logo": "", "logoType": "VECTOR", "name": "Team K", "owners": ["{00000000-0000-4000-8000-000000000004}"] },
+    { "abbrev": "TM", "id": 13, "logo": "", "logoType": "VECTOR", "name": "Team M", "owners": ["{00000000-0000-4000-8000-000000000007}"] },
+    { "abbrev": "TN", "id": 14, "logo": "", "logoType": "VECTOR", "name": "Team N", "owners": ["{00000000-0000-4000-8000-00000000000E}"] },
+    { "abbrev": "TO", "id": 15, "logo": "", "logoType": "VECTOR", "name": "Team O", "owners": ["{00000000-0000-4000-8000-000000000002}"] },
+    { "abbrev": "TP", "id": 16, "logo": "", "logoType": "VECTOR", "name": "Team P", "owners": ["{00000000-0000-4000-8000-00000000000C}"] }
+  ]
+}

@@ -456,6 +456,30 @@ describe("root-array bodies (players_wl): split, withhold, replace — value-fre
     expect(JSON.stringify(r.manifest)).not.toContain(term);
   });
 
+  it("a name replaced in a unit that the same round withholds is not reported as replaced (any unit order)", async () => {
+    const run = await makeRawRun(path.join(dir(), "raw"), { count: 1 });
+    const env = readRaw(run.rawDir, "league-a", "mBoxscore.sp1");
+    if (!env) throw new Error("missing capture");
+    const body = JSON.parse(env.bodyText) as JsonObject;
+    const home = (body.schedule as JsonObject[])[0]?.home as JsonObject;
+    const entries = (home.rosterForCurrentScoringPeriod as JsonObject).entries as JsonObject[];
+    const name = ["Gridiron", "Hero"].join(" ");
+    const other = ["Zephyr", "Quokka"].join("");
+    entries[0]!.note = other; // earlier line: not replaceable → the whole row
+    ((entries[1]?.playerPoolEntry as JsonObject).player as JsonObject).fullName = name; // later line
+    writeRaw(run.rawDir, { ...env, bodyText: JSON.stringify(body) });
+    const r = await scrubRun({
+      rawDir: run.rawDir,
+      outRoot: path.join(dir(), "out"),
+      scan: inProcessScan([name, other]),
+      withholdDenylisted: true,
+      dryRun: true,
+    });
+    const box = r.manifest.files.find((f) => f.path === "recorded/league-a/mBoxscore.sp1.json");
+    expect(box?.withheld).toEqual(["$.schedule[0]"]);
+    expect(box?.replaced).toEqual([]);
+  });
+
   it("replaceableNameLeaves / withholdUnit / deriveIncomplete on root rows and one-line players", () => {
     const body = canonicalize({
       players: [{ id: 7, player: { id: 70, fullName: "A B", firstName: "A", lastName: "B" } }],

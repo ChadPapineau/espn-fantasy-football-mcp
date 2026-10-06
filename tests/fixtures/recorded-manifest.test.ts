@@ -3,7 +3,10 @@
 // deliberate, reviewed change), plan 10 §3.0 Z7 / §3.1a (≥ 3 recorded final mBoxscore weeks per
 // league with its own mSettings; every scoring field hashes to the recorded original — ADV OBJ-01;
 // recorded = evidence, `derived: false` — ADV OBJ-21), research 03 §F.3 step 3 (no identifier in any
-// committed fixture). Hermetic: in-process scanner rules, no local deny-list, no network.
+// committed fixture), the B1 views (plan 05 §3.1; plan 07 A4/B2/C1) and their cross-view agreement
+// (mMatchupScore = mBoxscore totals; kona_playercard weekly actuals = mBoxscore lines), and the
+// synthetic error bodies (fixture law: error bodies only). Hermetic: in-process scanner rules, no
+// local deny-list, no network.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -36,10 +39,30 @@ const manifest = JSON.parse(
   readFileSync(path.join(ESPN, "manifest.json"), "utf8"),
 ) as FixtureManifest;
 const files = manifest.files;
-const read = (e: ManifestEntry): { text: string; body: Json } => {
+const read = (e: { path: string }): { text: string; body: Json } => {
   const text = readFileSync(path.join(ESPN, e.path), "utf8");
   return { text, body: parseJsonStrict(text) };
 };
+const keysOf = (b: Json): string[] => (Array.isArray(b) ? [] : Object.keys(b as JsonObject).sort());
+/** The whole response of an entry: a split one re-assembled from its parts in index order. */
+function wholeBody(e: ManifestEntry): Json {
+  if (e.part === null) return read(e).body;
+  const base = e.path.replace(/\.p\d+\.json$/, "");
+  const parts = files
+    .filter((f) => f.part !== null && f.path.replace(/\.p\d+\.json$/, "") === base)
+    .sort((a, b) => (a.part?.index ?? 0) - (b.part?.index ?? 0));
+  const bodies = parts.map((p) => read(p).body);
+  const array = e.part.array;
+  if (array === "$") return bodies.flatMap((b) => (Array.isArray(b) ? b : []));
+  const objs = bodies as JsonObject[];
+  return { ...objs[0], [array]: objs.flatMap((b) => (b[array] as Json[] | undefined) ?? []) };
+}
+const entryAt = (p: string): ManifestEntry => {
+  const e = files.find((f) => f.path === p);
+  if (!e) throw new Error(`no manifest entry ${p}`);
+  return e;
+};
+const LEAGUES = Object.keys(manifest.leagues).sort();
 const GUID_ANY = /[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/g;
 
 describe("fixtures/espn/manifest.json", () => {
@@ -64,8 +87,11 @@ describe("fixtures/espn/manifest.json", () => {
       expect(f.scrub_rules_version).toBe(SCRUB_RULES_VERSION);
       expect(f.path.startsWith("recorded/")).toBe(true);
       expect(f.request.path).toMatch(
-        /^\/apis\/v3\/games\/ffl\/seasons\/\d{4}(?:\/segments\/0\/leagues\/0)?$/,
+        /^\/apis\/v3\/games\/ffl\/seasons\/\d{4}(?:\/players|\/segments\/0\/leagues\/0(?:\/communication\/)?)?$/,
       );
+      // the route names the path (research 03 §A.1): league, season, players, communication
+      expect(f.request.path.endsWith("/players")).toBe(f.request.route === "players");
+      expect(f.request.path.endsWith("/communication/")).toBe(f.request.route === "communication");
       expect(f.request.path).toContain(`/seasons/${String(manifest.season)}`);
       for (const h of Object.keys(f.headers))
         expect(KEEP_HEADERS as readonly string[]).toContain(h);
@@ -113,23 +139,14 @@ describe("fixtures/espn/manifest.json", () => {
 
   it("CAT-12: `incomplete` re-derives from the committed bodies and the withheld paths", () => {
     for (const e of files) {
-      let whole: Json;
-      if (e.part === null) whole = read(e).body;
-      else {
-        const base = e.path.replace(/\.p\d+\.json$/, "");
-        const parts = files
-          .filter((f) => f.part !== null && f.path.replace(/\.p\d+\.json$/, "") === base)
-          .sort((a, b) => (a.part?.index ?? 0) - (b.part?.index ?? 0));
-        const bodies = parts.map((p) => read(p).body as JsonObject);
-        const array = e.part.array;
-        whole = {
-          ...bodies[0],
-          [array]: bodies.flatMap((b) => (b[array] as Json[] | undefined) ?? []),
-        };
-      }
-      expect(e.incomplete, e.path).toEqual(deriveIncomplete(whole, e.withheld));
+      expect(e.incomplete, e.path).toEqual(deriveIncomplete(wholeBody(e), e.withheld));
       expect(e.incomplete === null, e.path).toBe(e.withheld.length === 0);
-      for (const r of e.replaced) expect(r).toMatch(/\.player\.(?:fullName|firstName|lastName)$/);
+      for (const r of e.replaced)
+        expect(r).toMatch(/(?:\.player|^\$\[\d+\])\.(?:fullName|firstName|lastName)$/);
+      // a replaced leaf never sits inside a withheld unit (it would be gone, not replaced)
+      for (const r of e.replaced)
+        for (const w of e.withheld)
+          expect(r === w || r.startsWith(`${w}.`) || r.startsWith(`${w}[`)).toBe(false);
     }
     // the artefacts are visible: some box-score weeks are missing a matchup, some rosters an entry
     expect(files.some((f) => (f.incomplete?.matchups_missing ?? 0) > 0)).toBe(true);
@@ -147,12 +164,240 @@ describe("fixtures/espn/manifest.json", () => {
       expect(parts.map((p) => p.part?.index)).toEqual(parts.map((_, i) => i + 1));
       for (const p of parts) expect(p.part?.of).toBe(parts.length);
       const array = parts[0]?.part?.array ?? "";
-      const bodies = parts.map((p) => read(p).body as JsonObject);
-      const rest = (b: JsonObject) =>
-        JSON.stringify(Object.fromEntries(Object.entries(b).filter(([k]) => k !== array)));
-      for (const b of bodies) expect(rest(b)).toBe(rest(bodies[0] ?? {}));
+      const bodies = parts.map((p) => read(p).body);
+      if (array === "$") {
+        for (const b of bodies) expect(Array.isArray(b)).toBe(true);
+      } else {
+        const rest = (b: Json) =>
+          JSON.stringify(
+            Object.fromEntries(Object.entries(b as JsonObject).filter(([k]) => k !== array)),
+          );
+        for (const b of bodies) expect(rest(b)).toBe(rest(bodies[0] ?? {}));
+      }
+      // each part's id_range is its first and last element id (canonical order: by id)
+      parts.forEach((p, i) => {
+        const items = (
+          array === "$" ? bodies[i] : (bodies[i] as JsonObject)[array]
+        ) as JsonObject[];
+        if (p.part?.id_range)
+          expect(p.part.id_range).toEqual({
+            first: items[0]?.id,
+            last: items[items.length - 1]?.id,
+          });
+      });
     }
   });
+});
+
+describe("the B1 views (plan 05 §3.1; plan 07 A4, B2, C1)", () => {
+  it("every league has mMatchupScore for its current week and its last final box-score week", () => {
+    for (const slot of LEAGUES) {
+      const settings = read(entryAt(`recorded/${slot}/mSettings.json`)).body as JsonObject;
+      const status = settings.status as JsonObject;
+      const finalWeek = Math.max(...(manifest.leagues[slot]?.final_boxscore_weeks ?? []));
+      const score = files.filter((f) => f.league === slot && f.views[0] === "mMatchupScore");
+      expect(score.map((f) => f.scoringPeriodId).sort()).toEqual(
+        [finalWeek, status.latestScoringPeriod as number].sort(),
+      );
+      for (const f of score) {
+        expect(f.views).toEqual(["mMatchupScore"]);
+        expect(f.request.filter).toBeNull(); // as the live scoreboard asks (plan 07 A4)
+        const body = read(f).body as JsonObject;
+        const rows = body.schedule as JsonObject[];
+        expect(rows.every((r) => typeof r.playoffTierType === "string")).toBe(true);
+        // the league's CURRENT period carries the live fields whatever period was asked for;
+        // the requested period's rows carry its roster lines (research 03 §B.4 — observed here:
+        // a past week has rosterForCurrentScoringPeriod and totalProjectedPoints, never the live set)
+        const current = status.currentMatchupPeriod as number;
+        for (const r of rows.filter((x) => x.matchupPeriodId === current)) {
+          const home = r.home as JsonObject;
+          for (const k of ["totalPointsLive", "totalProjectedPointsLive", "winProbability"])
+            expect(typeof home[k], `${f.path} ${k}`).toBe("number");
+        }
+        const asked = rows.filter((r) => r.matchupPeriodId === f.scoringPeriodId);
+        expect(asked.length).toBeGreaterThan(0);
+        for (const r of asked) {
+          const home = r.home as JsonObject;
+          expect(Array.isArray((home.rosterForCurrentScoringPeriod as JsonObject).entries)).toBe(
+            true,
+          );
+          if (f.scoringPeriodId !== current) expect(home).not.toHaveProperty("totalPointsLive");
+        }
+      }
+      expect(
+        entryAt(`recorded/${slot}/mMatchupScore.sp${String(finalWeek)}.json`).stats_official,
+      ).toBe(true);
+    }
+  });
+
+  it("solo mNav: every member carries both commissioner flags; exactly one creator", () => {
+    for (const slot of LEAGUES) {
+      const e = entryAt(`recorded/${slot}/mNav.json`);
+      expect(e.views).toEqual(["mNav"]);
+      const members = (read(e).body as JsonObject).members as JsonObject[];
+      expect(members.length).toBeGreaterThan(0);
+      for (const m of members) {
+        expect(typeof m.isLeagueCreator).toBe("boolean");
+        expect(typeof m.isLeagueManager).toBe("boolean");
+      }
+      expect(members.filter((m) => m.isLeagueCreator === true)).toHaveLength(1);
+    }
+  });
+
+  it("the filterIds captures return exactly the ≤ 25 requested ids, incl. rostered players", () => {
+    for (const slot of LEAGUES) {
+      for (const name of ["kona_player_info.ids", "kona_playercard"]) {
+        const e = entryAt(`recorded/${slot}/${name}.json`);
+        const want = ((e.request.filter as JsonObject).players as JsonObject).filterIds as {
+          value: number[];
+        };
+        expect(want.value.length).toBeGreaterThan(0);
+        expect(want.value.length).toBeLessThanOrEqual(25);
+        const got = ((read(e).body as JsonObject).players as JsonObject[]).map((p) => p.id);
+        expect([...got].sort((a, b) => (a as number) - (b as number))).toEqual(want.value);
+        expect(e.headers["x-fantasy-filter-player-count"]).toBe(String(want.value.length));
+        expect(e.pruned).toEqual([]); // the player shape is kept whole
+      }
+      const players = (
+        read(entryAt(`recorded/${slot}/kona_player_info.ids.json`)).body as JsonObject
+      ).players as JsonObject[];
+      expect(players.filter((p) => p.status === "ONTEAM").length).toBeGreaterThan(10);
+      expect(players.some((p) => p.status !== "ONTEAM")).toBe(true);
+    }
+  });
+
+  it("players_wl: the season index as a root array in id order; the count header accounts for every row", () => {
+    const e = entryAt("recorded/season/players_wl.json");
+    expect(e.request).toMatchObject({
+      route: "players",
+      filter: { filterActive: { value: true } },
+    });
+    const rows = wholeBody(e) as JsonObject[];
+    expect(Array.isArray(rows)).toBe(true);
+    const ids = rows.map((r) => r.id as number);
+    expect(ids).toEqual([...ids].sort((a, b) => a - b));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(rows.length + (e.incomplete?.rows_missing ?? 0)).toBe(
+      Number(e.headers["x-fantasy-filter-player-count"]),
+    );
+    for (const r of rows.slice(0, 50))
+      for (const k of ["defaultPositionId", "eligibleSlots", "fullName", "id", "proTeamId"])
+        expect(r, k).toHaveProperty(k);
+    for (const f of files.filter((x) => x.path.startsWith("recorded/season/players_wl")))
+      expect(f.bytes).toBeLessThanOrEqual(MAX_FIXTURE_BYTES);
+  });
+
+  it("the keyless 401 is recorded with ESPN's typed envelope; the private-league 401 is synthetic", () => {
+    const e = entryAt("recorded/errors/401-communication-not-visible.json");
+    expect(e.status).toBe(401);
+    expect(e.request.route).toBe("communication");
+    const body = read(e).body as { details: { type: string }[]; messages: string[] };
+    expect(body.details.map((d) => d.type)).toEqual(["AUTH_COMMUNICATION_NOT_VISIBLE"]);
+    expect(Object.keys(body).sort()).toEqual(["details", "messages"]);
+  });
+});
+
+describe("cross-view agreement of the recorded evidence", () => {
+  it("mMatchupScore team totals equal the box score's for the same final week (every recorded row)", () => {
+    for (const slot of LEAGUES) {
+      const w = Math.max(...(manifest.leagues[slot]?.final_boxscore_weeks ?? []));
+      const score = read(entryAt(`recorded/${slot}/mMatchupScore.sp${String(w)}.json`))
+        .body as JsonObject;
+      const box = read(entryAt(`recorded/${slot}/mBoxscore.sp${String(w)}.json`))
+        .body as JsonObject;
+      const rows = box.schedule as JsonObject[];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        const m = (score.schedule as JsonObject[]).find((r) => r.id === row.id);
+        expect(m, `${slot} row ${JSON.stringify(row.id)}`).toBeDefined();
+        for (const side of ["home", "away"]) {
+          const b = row[side] as JsonObject | undefined;
+          if (!b) continue;
+          const s = m?.[side] as JsonObject;
+          expect(s.teamId).toBe(b.teamId);
+          expect(s.totalPoints).toBe(b.totalPoints);
+        }
+      }
+    }
+  });
+
+  it("kona_playercard weekly actuals equal the box-score lines of the same player-weeks (B2 evidence)", () => {
+    for (const slot of LEAGUES) {
+      const card = (read(entryAt(`recorded/${slot}/kona_playercard.json`)).body as JsonObject)
+        .players as JsonObject[];
+      let compared = 0;
+      for (const w of manifest.leagues[slot]?.final_boxscore_weeks ?? []) {
+        const box = read(entryAt(`recorded/${slot}/mBoxscore.sp${String(w)}.json`))
+          .body as JsonObject;
+        const lines = new Map<number, JsonObject>();
+        for (const row of box.schedule as JsonObject[])
+          for (const side of ["home", "away"]) {
+            const roster = (row[side] as JsonObject | undefined)?.rosterForCurrentScoringPeriod as
+              JsonObject | undefined;
+            for (const e of (roster?.entries as JsonObject[] | undefined) ?? []) {
+              const stats = ((e.playerPoolEntry as JsonObject).player as JsonObject)
+                .stats as JsonObject[];
+              const actual = stats.find(
+                (x) => x.statSourceId === 0 && x.statSplitTypeId === 1 && x.scoringPeriodId === w,
+              );
+              if (actual) lines.set(e.playerId as number, actual);
+            }
+          }
+        for (const p of card) {
+          const actual = ((p.player as JsonObject).stats as JsonObject[]).find(
+            (x) =>
+              x.statSourceId === 0 &&
+              x.statSplitTypeId === 1 &&
+              x.scoringPeriodId === w &&
+              x.seasonId === manifest.season,
+          );
+          const line = lines.get(p.id as number);
+          if (!actual || !line) continue;
+          compared++;
+          expect(actual.id).toBe(line.id);
+          expect(actual.appliedTotal).toBe(line.appliedTotal);
+          expect(actual.appliedStats).toEqual(line.appliedStats);
+          expect(actual.stats).toEqual(line.stats);
+        }
+      }
+      expect(compared, slot).toBeGreaterThan(20);
+    }
+  });
+});
+
+describe("synthetic error bodies (fixture law: error bodies only, never evidence)", () => {
+  const synthetic = manifest.synthetic_files ?? [];
+  it("lists exactly the files on disk under synthetic/, apart from recorded/", () => {
+    const onDisk = readdirSync(path.join(ESPN, "synthetic"), {
+      recursive: true,
+      withFileTypes: true,
+    })
+      .filter((d) => d.isFile() && d.name.endsWith(".json"))
+      .map((d) => path.relative(ESPN, path.join(d.parentPath, d.name)).split(path.sep).join("/"))
+      .sort();
+    expect(synthetic.map((s) => s.path).sort()).toEqual(onDisk);
+    expect(onDisk.length).toBeGreaterThan(0);
+    for (const s of synthetic) expect(files.some((f) => f.path === s.path)).toBe(false);
+  });
+  it.each(synthetic.map((s) => [s.path, s] as const))(
+    "%s: error-only, hashed, no scoring field, clean",
+    async (_p, s) => {
+      const { text, body } = read(s);
+      expect(s.synthetic).toBe(true);
+      expect(s.kind).toBe("error");
+      expect(s.status).toBeGreaterThanOrEqual(400);
+      expect(s.path.startsWith("synthetic/errors/")).toBe(true);
+      expect(s.basis).toMatch(/research 03/);
+      expect(contentSha256(body)).toBe(s.sha256);
+      expect(scoringProjection(body)).toEqual(s.scoring);
+      expect(s.scoring.entries).toBe(0);
+      expect(keysOf(body)).toEqual(s.top_level_keys);
+      expect(s.top_level_keys).toEqual(["details", "messages"]);
+      expect(statSync(path.join(ESPN, s.path)).size).toBe(s.bytes);
+      expect(await formatJson(body)).toBe(text);
+      expect(scanText(s.path, text, [])).toEqual([]);
+    },
+  );
 });
 
 describe.each(files.map((f) => [f.path, f] as const))("%s", (_p, entry) => {
@@ -165,7 +410,7 @@ describe.each(files.map((f) => [f.path, f] as const))("%s", (_p, entry) => {
     expect(bytes).toBe(entry.bytes);
     expect(bytes).toBeLessThanOrEqual(MAX_FIXTURE_BYTES);
     expect(await formatJson(body, "recorded")).toBe(text); // exactly what the scrubber writes
-    expect(Object.keys(body as JsonObject).sort()).toEqual(entry.top_level_keys);
+    expect(keysOf(body)).toEqual(entry.top_level_keys);
   });
 
   it("carries no identifier: scanner rules clean, every GUID fake, placeholders only", () => {

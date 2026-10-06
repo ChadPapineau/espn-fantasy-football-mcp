@@ -384,8 +384,11 @@
   "views": {
     "kona_player_info": {
       "sources": [
+        "espn/recorded/league-a/kona_player_info.ids.json",
         "espn/recorded/league-a/kona_player_info.json",
+        "espn/recorded/league-b/kona_player_info.ids.json",
         "espn/recorded/league-b/kona_player_info.json",
+        "espn/recorded/league-c/kona_player_info.ids.json",
         "espn/recorded/league-c/kona_player_info.json"
       ],
       "observed": {
@@ -508,23 +511,220 @@
         "$.players[].player.draftRanksByRankType.SUPERFLEX.rankType": ["SUPERFLEX"],
         "$.players[].player.injuryStatus": ["ACTIVE", "INJURY_RESERVE", "OUT", "QUESTIONABLE"],
         "$.players[].player.proTeamId": [
-          0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-          26, 27, 28, 29, 30, 33, 34
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+          25, 26, 27, 28, 29, 30, 33, 34
         ],
         "$.players[].player.rankings{}[].rankType": ["PPR", "STANDARD", "SUPERFLEX"],
         "$.players[].player.stats[].proTeamId": [
-          0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-          26, 27, 28, 29, 30, 33, 34
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+          25, 26, 27, 28, 29, 30, 33, 34
         ],
         "$.players[].player.stats[].statSourceId": [0, 1],
         "$.players[].player.stats[].statSplitTypeId": [0, 1, 2],
-        "$.players[].status": ["FREEAGENT", "WAIVERS"]
+        "$.players[].status": ["FREEAGENT", "ONTEAM", "WAIVERS"]
       },
       "array_lengths": {
         "$.players": { "min": 25, "max": 25 },
         "$.players[].player.eligibleSlots": { "min": 3, "max": 10 },
         "$.players[].player.rankings{}": { "min": 0, "max": 15 },
         "$.players[].player.stats": { "min": 3, "max": 7 }
+      }
+    },
+    "kona_playercard": {
+      "sources": [
+        "espn/recorded/league-a/kona_playercard.json",
+        "espn/recorded/league-b/kona_playercard.json",
+        "espn/recorded/league-c/kona_playercard.json"
+      ],
+      "observed": {
+        "$": ["players"],
+        "$.players[]": [
+          "appliedStatTotal",
+          "draftAuctionValue",
+          "droppedByEliminatedTeam",
+          "id",
+          "keeperValue",
+          "keeperValueFuture",
+          "lineupLocked",
+          "onTeamId",
+          "player",
+          "ratings",
+          "rosterLocked",
+          "status",
+          "tradeBlock",
+          "tradeLocked",
+          "transactions",
+          "waiverDate",
+          "waiverProcessDate"
+        ],
+        "$.players[].player": [
+          "active",
+          "defaultPositionId",
+          "draftRanksByRankType",
+          "droppable",
+          "eligibleSlots",
+          "firstName",
+          "fullName",
+          "id",
+          "injured",
+          "injuryDetails",
+          "injuryStatus",
+          "invalid",
+          "jersey",
+          "lastName",
+          "lastNewsDate",
+          "lastVideoDate",
+          "laterality",
+          "outlooks",
+          "ownership",
+          "proTeamId",
+          "rankings",
+          "seasonOutlook",
+          "stance",
+          "stats",
+          "universeId"
+        ],
+        "$.players[].player.draftRanksByRankType": ["ELIMINATION", "PPR", "STANDARD", "SUPERFLEX"],
+        "$.players[].player.draftRanksByRankType.ELIMINATION": [
+          "auctionValue",
+          "rank",
+          "rankSourceId",
+          "rankType",
+          "slotId"
+        ],
+        "$.players[].player.draftRanksByRankType.PPR": [
+          "auctionValue",
+          "rank",
+          "rankSourceId",
+          "rankType",
+          "slotId"
+        ],
+        "$.players[].player.draftRanksByRankType.STANDARD": [
+          "auctionValue",
+          "rank",
+          "rankSourceId",
+          "rankType",
+          "slotId"
+        ],
+        "$.players[].player.draftRanksByRankType.SUPERFLEX": [
+          "auctionValue",
+          "rank",
+          "rankSourceId",
+          "rankType",
+          "slotId"
+        ],
+        "$.players[].player.injuryDetails": ["expectedReturnDate", "outForSeason", "type"],
+        "$.players[].player.outlooks": ["id", "outlooksByWeek"],
+        "$.players[].player.ownership": [
+          "auctionValueAverage",
+          "auctionValueAverageChange",
+          "averageDraftPosition",
+          "averageDraftPositionPercentChange",
+          "percentChange",
+          "percentOwned",
+          "percentStarted"
+        ],
+        "$.players[].player.rankings{}[]": [
+          "auctionValue",
+          "rank",
+          "rankSourceId",
+          "rankType",
+          "slotId"
+        ],
+        "$.players[].player.stats[]": [
+          "appliedAverage",
+          "appliedStats",
+          "appliedTotal",
+          "externalId",
+          "id",
+          "proTeamId",
+          "scoringPeriodId",
+          "seasonId",
+          "statSourceId",
+          "statSplitTypeId",
+          "stats",
+          "variance"
+        ],
+        "$.players[].player.stats[].appliedStats": [],
+        "$.players[].player.stats[].stats": [],
+        "$.players[].ratings{}": ["positionalRanking", "totalRanking", "totalRating"],
+        "$.players[].tradeBlock": [],
+        "$.players[].transactions[]": [
+          "acceptedDate",
+          "bidAmount",
+          "executionType",
+          "expirationDate",
+          "id",
+          "isActingAsTeamOwner",
+          "isLeagueManager",
+          "isPending",
+          "items",
+          "memberId",
+          "processDate",
+          "proposedDate",
+          "rating",
+          "relatedTransactionId",
+          "scoringPeriodId",
+          "skipTransactionCounters",
+          "status",
+          "subOrder",
+          "teamActions",
+          "teamId",
+          "type"
+        ],
+        "$.players[].transactions[].items[]": [
+          "acquisitionBudget",
+          "fromLineupSlotId",
+          "fromTeamId",
+          "isKeeper",
+          "overallPickNumber",
+          "playerId",
+          "toLineupSlotId",
+          "toTeamId",
+          "type"
+        ]
+      },
+      "enums": {
+        "$.players[].player.defaultPositionId": [1, 2, 3, 4, 5, 15, 16],
+        "$.players[].player.draftRanksByRankType.ELIMINATION.rankType": ["ELIMINATION"],
+        "$.players[].player.draftRanksByRankType.PPR.rankType": ["PPR"],
+        "$.players[].player.draftRanksByRankType.STANDARD.rankType": ["STANDARD"],
+        "$.players[].player.draftRanksByRankType.SUPERFLEX.rankType": ["SUPERFLEX"],
+        "$.players[].player.injuryStatus": ["ACTIVE", "INJURY_RESERVE", "OUT", "QUESTIONABLE"],
+        "$.players[].player.laterality": ["NONE"],
+        "$.players[].player.proTeamId": [
+          1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24, 26, 27, 29,
+          30, 33, 34
+        ],
+        "$.players[].player.rankings{}[].rankType": ["PPR", "STANDARD", "SUPERFLEX"],
+        "$.players[].player.stance": ["NONE"],
+        "$.players[].player.stats[].proTeamId": [
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+          26, 27, 29, 30, 33, 34
+        ],
+        "$.players[].player.stats[].statSourceId": [0, 1],
+        "$.players[].player.stats[].statSplitTypeId": [0, 1],
+        "$.players[].status": ["ONTEAM", "WAIVERS"],
+        "$.players[].transactions[].executionType": ["EXECUTE", "PROCESS"],
+        "$.players[].transactions[].items[].type": ["ADD", "DRAFT", "DROP", "TRADE"],
+        "$.players[].transactions[].status": ["EXECUTED"],
+        "$.players[].transactions[].teamActions{}": ["ACCEPTED"],
+        "$.players[].transactions[].type": [
+          "DRAFT",
+          "FREEAGENT",
+          "ROSTER",
+          "TRADE_ACCEPT",
+          "WAIVER"
+        ]
+      },
+      "array_lengths": {
+        "$.players": { "min": 25, "max": 25 },
+        "$.players[].player.eligibleSlots": { "min": 3, "max": 8 },
+        "$.players[].player.injuryDetails.expectedReturnDate": { "min": 3, "max": 3 },
+        "$.players[].player.rankings{}": { "min": 1, "max": 14 },
+        "$.players[].player.stats": { "min": 6, "max": 20 },
+        "$.players[].transactions": { "min": 0, "max": 3 },
+        "$.players[].transactions[].items": { "min": 1, "max": 3 }
       }
     },
     "mBoxscore": {
@@ -1326,8 +1526,189 @@
         "$.teams[].roster.entries[].playerPoolEntry.player.eligibleSlots": { "min": 3, "max": 8 }
       }
     },
+    "mMatchupScore": {
+      "sources": [
+        "espn/recorded/league-a/mMatchupScore.sp3.json",
+        "espn/recorded/league-a/mMatchupScore.sp4.json",
+        "espn/recorded/league-b/mMatchupScore.sp3.json",
+        "espn/recorded/league-b/mMatchupScore.sp4.json",
+        "espn/recorded/league-c/mMatchupScore.sp3.json",
+        "espn/recorded/league-c/mMatchupScore.sp4.json"
+      ],
+      "observed": {
+        "$": [
+          "draftDetail",
+          "gameId",
+          "id",
+          "schedule",
+          "scoringPeriodId",
+          "seasonId",
+          "segmentId",
+          "status"
+        ],
+        "$.draftDetail": ["drafted", "inProgress"],
+        "$.schedule[]": ["away", "home", "id", "matchupPeriodId", "playoffTierType", "winner"],
+        "$.schedule[].away": [
+          "adjustment",
+          "cumulativeScore",
+          "cumulativeScoreLive",
+          "eliminationMatchupPeriod",
+          "pointsByScoringPeriod",
+          "rosterForCurrentScoringPeriod",
+          "rosterForMatchupPeriodDelayed",
+          "teamId",
+          "tiebreak",
+          "totalPoints",
+          "totalPointsLive",
+          "totalProjectedPoints",
+          "totalProjectedPointsLive",
+          "winProbability"
+        ],
+        "$.schedule[].away.cumulativeScore": ["losses", "statBySlot", "ties", "wins"],
+        "$.schedule[].away.cumulativeScoreLive": ["losses", "statBySlot", "ties", "wins"],
+        "$.schedule[].away.rosterForCurrentScoringPeriod": ["appliedStatTotal", "entries"],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[]": [
+          "lineupSlotId",
+          "playerPoolEntry"
+        ],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry": ["player"],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player": [
+          "stats"
+        ],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[]": [
+          "appliedStats",
+          "appliedTotal",
+          "appliedTotalCeiling",
+          "proTeamId",
+          "scoringPeriodId",
+          "seasonId",
+          "statSourceId",
+          "statSplitTypeId",
+          "stats",
+          "variance"
+        ],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].appliedStats": [],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].stats": [],
+        "$.schedule[].away.rosterForMatchupPeriodDelayed": ["entries"],
+        "$.schedule[].home": [
+          "adjustment",
+          "cumulativeScore",
+          "cumulativeScoreLive",
+          "eliminationMatchupPeriod",
+          "pointsByScoringPeriod",
+          "rosterForCurrentScoringPeriod",
+          "rosterForMatchupPeriodDelayed",
+          "teamId",
+          "tiebreak",
+          "totalPoints",
+          "totalPointsLive",
+          "totalProjectedPoints",
+          "totalProjectedPointsLive",
+          "winProbability"
+        ],
+        "$.schedule[].home.cumulativeScore": ["losses", "statBySlot", "ties", "wins"],
+        "$.schedule[].home.cumulativeScoreLive": ["losses", "statBySlot", "ties", "wins"],
+        "$.schedule[].home.rosterForCurrentScoringPeriod": ["appliedStatTotal", "entries"],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[]": [
+          "lineupSlotId",
+          "playerPoolEntry"
+        ],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry": ["player"],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player": [
+          "stats"
+        ],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[]": [
+          "appliedStats",
+          "appliedTotal",
+          "appliedTotalCeiling",
+          "proTeamId",
+          "scoringPeriodId",
+          "seasonId",
+          "statSourceId",
+          "statSplitTypeId",
+          "stats",
+          "variance"
+        ],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].appliedStats": [],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].stats": [],
+        "$.schedule[].home.rosterForMatchupPeriodDelayed": ["entries"],
+        "$.status": [
+          "activatedDate",
+          "createdAsLeagueType",
+          "currentLeagueType",
+          "currentMatchupPeriod",
+          "finalScoringPeriod",
+          "firstScoringPeriod",
+          "isActive",
+          "isExpired",
+          "isFull",
+          "isPlayoffMatchupEdited",
+          "isToBeDeleted",
+          "isViewable",
+          "isWaiverOrderEdited",
+          "latestScoringPeriod",
+          "previousSeasons",
+          "standingsUpdateDate",
+          "teamsJoined",
+          "transactionScoringPeriod",
+          "waiverLastExecutionDate",
+          "waiverNextExecutionDate",
+          "waiverProcessStatus"
+        ]
+      },
+      "enums": {
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].lineupSlotId": [
+          0, 1, 2, 3, 4, 5, 6, 16, 17, 20, 21, 23
+        ],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].proTeamId": [
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+          25, 26, 27, 28, 29, 30, 33, 34
+        ],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].statSourceId": [
+          0, 1
+        ],
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].statSplitTypeId": [
+          1
+        ],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].lineupSlotId": [
+          0, 1, 2, 3, 4, 5, 6, 16, 17, 20, 21, 23
+        ],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].proTeamId": [
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+          25, 26, 27, 28, 29, 30, 33, 34
+        ],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].statSourceId": [
+          0, 1
+        ],
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats[].statSplitTypeId": [
+          1
+        ],
+        "$.schedule[].playoffTierType": ["NONE"],
+        "$.schedule[].winner": ["AWAY", "HOME", "UNDECIDED"]
+      },
+      "array_lengths": {
+        "$.schedule": { "min": 75, "max": 84 },
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries": { "min": 15, "max": 21 },
+        "$.schedule[].away.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats": {
+          "min": 2,
+          "max": 2
+        },
+        "$.schedule[].away.rosterForMatchupPeriodDelayed.entries": { "min": 0, "max": 0 },
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries": { "min": 15, "max": 21 },
+        "$.schedule[].home.rosterForCurrentScoringPeriod.entries[].playerPoolEntry.player.stats": {
+          "min": 0,
+          "max": 2
+        },
+        "$.schedule[].home.rosterForMatchupPeriodDelayed.entries": { "min": 0, "max": 0 },
+        "$.status.previousSeasons": { "min": 8, "max": 20 }
+      }
+    },
     "mNav": {
-      "sources": ["espn/recorded/league-a/probe-shape.json"],
+      "sources": [
+        "espn/recorded/league-a/mNav.json",
+        "espn/recorded/league-b/mNav.json",
+        "espn/recorded/league-c/mNav.json"
+      ],
       "observed": {
         "$": [
           "draftDetail",
@@ -1353,113 +1734,16 @@
         "$.settings": [
           "acquisitionSettings",
           "draftSettings",
-          "financeSettings",
-          "isAutoReactivate",
           "isCustomizable",
           "isPublic",
           "name",
-          "restrictionType",
           "rosterSettings",
-          "scheduleSettings",
-          "scoringSettings",
-          "size",
-          "tradeSettings"
+          "scoringSettings"
         ],
-        "$.settings.acquisitionSettings": [
-          "acquisitionBudget",
-          "acquisitionLimit",
-          "acquisitionType",
-          "finalPlaceTransactionEligible",
-          "isUsingAcquisitionBudget",
-          "matchupAcquisitionLimit",
-          "matchupLimitPerScoringPeriod",
-          "minimumBid",
-          "transactionLockingEnabled",
-          "waiverHours",
-          "waiverOrderReset",
-          "waiverProcessDays",
-          "waiverProcessHour"
-        ],
-        "$.settings.draftSettings": [
-          "auctionBudget",
-          "availableDate",
-          "date",
-          "isTradingEnabled",
-          "keeperCount",
-          "keeperCountFuture",
-          "keeperOrderType",
-          "leagueSubType",
-          "orderType",
-          "pickOrder",
-          "timePerSelection",
-          "type"
-        ],
-        "$.settings.financeSettings": [
-          "entryFee",
-          "miscFee",
-          "perLoss",
-          "perTrade",
-          "playerAcquisition",
-          "playerDrop",
-          "playerMoveToActive",
-          "playerMoveToIR"
-        ],
-        "$.settings.rosterSettings": [
-          "autoPilotTypeSupported",
-          "isBenchUnlimited",
-          "isUsingUndroppableList",
-          "lineupLocktimeType",
-          "lineupSlotCounts",
-          "lineupSlotStatLimits",
-          "moveLimit",
-          "positionLimits",
-          "rosterLocktimeType",
-          "universeIds"
-        ],
-        "$.settings.rosterSettings.lineupSlotStatLimits": [],
-        "$.settings.scheduleSettings": [
-          "consolationLadderDisabled",
-          "divisions",
-          "matchupPeriodCount",
-          "matchupPeriodLength",
-          "matchupPeriods",
-          "periodTypeId",
-          "playoffMatchupPeriodLength",
-          "playoffReseed",
-          "playoffSeedingRule",
-          "playoffSeedingRuleBy",
-          "playoffTeamCount",
-          "variablePlayoffMatchupPeriodLength"
-        ],
-        "$.settings.scheduleSettings.divisions[]": ["id", "name", "size"],
-        "$.settings.scoringSettings": [
-          "allowOutOfPositionScoring",
-          "homeTeamBonus",
-          "matchupTieRule",
-          "matchupTieRuleBy",
-          "playerRankType",
-          "playoffHomeTeamBonus",
-          "playoffMatchupTieRule",
-          "playoffMatchupTieRuleBy",
-          "scoringEnhancementType",
-          "scoringItems",
-          "scoringType"
-        ],
-        "$.settings.scoringSettings.scoringItems[]": [
-          "isReverseItem",
-          "leagueRanking",
-          "leagueTotal",
-          "points",
-          "pointsOverrides",
-          "statId"
-        ],
-        "$.settings.tradeSettings": [
-          "allowOutOfUniverse",
-          "deadlineDate",
-          "max",
-          "revisionHours",
-          "vetoVotesRequired"
-        ],
+        "$.settings.acquisitionSettings": ["isUsingAcquisitionBudget"],
+        "$.settings.draftSettings": ["keeperCount"],
+        "$.settings.rosterSettings": ["isUsingUndroppableList"],
+        "$.settings.scoringSettings": ["scoringType"],
         "$.status": [
           "activatedDate",
           "createdAsLeagueType",
@@ -1483,128 +1767,16 @@
           "waiverNextExecutionDate",
           "waiverProcessStatus"
         ],
-        "$.teams[]": [
-          "abbrev",
-          "currentProjectedRank",
-          "divisionId",
-          "draftDayProjectedRank",
-          "draftStrategy",
-          "eliminated",
-          "eliminationMatchupPeriod",
-          "id",
-          "isActive",
-          "isTransactionLocked",
-          "logo",
-          "logoType",
-          "name",
-          "owners",
-          "playoffSeed",
-          "points",
-          "pointsAdjusted",
-          "pointsDelta",
-          "primaryOwner",
-          "rankCalculatedFinal",
-          "rankFinal",
-          "record",
-          "tradeBlock",
-          "transactionCounter",
-          "valuesByStat",
-          "waiverRank"
-        ],
-        "$.teams[].draftStrategy": [],
-        "$.teams[].record": ["away", "division", "home", "overall"],
-        "$.teams[].record.away": [
-          "gamesBack",
-          "losses",
-          "percentage",
-          "pointsAgainst",
-          "pointsFor",
-          "streakLength",
-          "streakType",
-          "ties",
-          "wins"
-        ],
-        "$.teams[].record.division": [
-          "gamesBack",
-          "losses",
-          "percentage",
-          "pointsAgainst",
-          "pointsFor",
-          "streakLength",
-          "streakType",
-          "ties",
-          "wins"
-        ],
-        "$.teams[].record.home": [
-          "gamesBack",
-          "losses",
-          "percentage",
-          "pointsAgainst",
-          "pointsFor",
-          "streakLength",
-          "streakType",
-          "ties",
-          "wins"
-        ],
-        "$.teams[].record.overall": [
-          "gamesBack",
-          "losses",
-          "percentage",
-          "pointsAgainst",
-          "pointsFor",
-          "streakLength",
-          "streakType",
-          "ties",
-          "wins"
-        ],
-        "$.teams[].tradeBlock": [],
-        "$.teams[].transactionCounter": [
-          "acquisitionBudgetSpent",
-          "acquisitions",
-          "drops",
-          "matchupAcquisitionTotals",
-          "misc",
-          "moveToActive",
-          "moveToIR",
-          "paid",
-          "teamCharges",
-          "trades"
-        ],
-        "$.teams[].transactionCounter.matchupAcquisitionTotals": []
+        "$.teams[]": ["abbrev", "id", "logo", "logoType", "name", "owners"]
       },
       "enums": {
-        "$.settings.acquisitionSettings.acquisitionType": ["WAIVERS_CONTINUOUS"],
-        "$.settings.acquisitionSettings.waiverProcessDays[]": ["SUNDAY", "THURSDAY"],
-        "$.settings.draftSettings.keeperOrderType": ["TRADITIONAL"],
-        "$.settings.draftSettings.leagueSubType": ["NONE"],
-        "$.settings.draftSettings.orderType": ["MANUAL"],
-        "$.settings.draftSettings.type": ["SNAKE"],
-        "$.settings.restrictionType": ["NONE"],
-        "$.settings.rosterSettings.autoPilotTypeSupported": ["NONE"],
-        "$.settings.rosterSettings.lineupLocktimeType": ["INDIVIDUAL_GAME"],
-        "$.settings.rosterSettings.rosterLocktimeType": ["INDIVIDUAL_GAME"],
-        "$.settings.scheduleSettings.playoffSeedingRule": ["TOTAL_POINTS_SCORED"],
-        "$.settings.scoringSettings.matchupTieRule": ["SLOT_POINTS"],
-        "$.settings.scoringSettings.playerRankType": ["STANDARD"],
-        "$.settings.scoringSettings.playoffMatchupTieRule": ["NONE"],
-        "$.settings.scoringSettings.scoringEnhancementType": ["NONE"],
         "$.settings.scoringSettings.scoringType": ["H2H_POINTS"],
-        "$.teams[].logoType": ["CUSTOM_VALID", "VECTOR"],
-        "$.teams[].record.away.streakType": ["LOSS", "WIN"],
-        "$.teams[].record.division.streakType": ["LOSS", "WIN"],
-        "$.teams[].record.home.streakType": ["LOSS", "WIN"],
-        "$.teams[].record.overall.streakType": ["LOSS", "WIN"]
+        "$.teams[].logoType": ["CUSTOM_VALID", "VECTOR"]
       },
       "array_lengths": {
-        "$.members": { "min": 11, "max": 11 },
-        "$.settings.acquisitionSettings.waiverProcessDays": { "min": 2, "max": 2 },
-        "$.settings.draftSettings.pickOrder": { "min": 10, "max": 10 },
-        "$.settings.rosterSettings.universeIds": { "min": 1, "max": 1 },
-        "$.settings.scheduleSettings.divisions": { "min": 1, "max": 1 },
-        "$.settings.scheduleSettings.matchupPeriods{}": { "min": 1, "max": 1 },
-        "$.settings.scoringSettings.scoringItems": { "min": 50, "max": 50 },
-        "$.status.previousSeasons": { "min": 8, "max": 8 },
-        "$.teams": { "min": 10, "max": 10 },
+        "$.members": { "min": 11, "max": 14 },
+        "$.status.previousSeasons": { "min": 8, "max": 20 },
+        "$.teams": { "min": 10, "max": 12 },
         "$.teams[].owners": { "min": 1, "max": 2 }
       }
     },
@@ -2534,6 +2706,37 @@
         "$.status.previousSeasons": { "min": 8, "max": 20 },
         "$.teams": { "min": 10, "max": 12 },
         "$.teams[].owners": { "min": 1, "max": 2 }
+      }
+    },
+    "players_wl": {
+      "sources": ["espn/recorded/season/players_wl.json"],
+      "observed": {
+        "$[]": [
+          "defaultPositionId",
+          "droppable",
+          "eligibleSlots",
+          "firstName",
+          "fullName",
+          "id",
+          "lastName",
+          "lastNewsDate",
+          "lastVideoDate",
+          "ownership",
+          "proTeamId",
+          "universeId"
+        ],
+        "$[].ownership": ["percentOwned"]
+      },
+      "enums": {
+        "$[].defaultPositionId": [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 15, 16],
+        "$[].proTeamId": [
+          0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+          25, 26, 27, 28, 29, 30, 33, 34
+        ]
+      },
+      "array_lengths": {
+        "$": { "min": 2669, "max": 2669 },
+        "$[].eligibleSlots": { "min": 3, "max": 10 }
       }
     },
     "proTeamSchedules_wl": {

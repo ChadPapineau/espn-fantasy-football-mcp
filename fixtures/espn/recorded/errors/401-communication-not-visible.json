@@ -1,0 +1,1 @@
+{ "details": [{ "message": "You are not authorized to view this communication group.", "metaData": null, "resolution": null, "shortMessage": "You are not authorized to view this communication group.", "type": "AUTH_COMMUNICATION_NOT_VISIBLE" }], "messages": ["You are not authorized to view this communication group."] }

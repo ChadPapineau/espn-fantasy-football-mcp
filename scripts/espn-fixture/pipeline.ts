@@ -1143,20 +1143,14 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
         withholdFile = true;
         break;
       }
-      for (const u of units) {
-        const p = formatPath(u.segs);
-        if (u.action === "replace") replaced.push(p);
-        else {
-          withheld.push(p);
-          // a replaced leaf inside a now-withheld unit is no longer "replaced" — it is gone
-          for (let i = replaced.length - 1; i >= 0; i--)
-            if (
-              replaced[i] === p ||
-              replaced[i]?.startsWith(`${p}.`) ||
-              replaced[i]?.startsWith(`${p}[`)
-            )
-              replaced.splice(i, 1);
-        }
+      for (const u of units)
+        (u.action === "replace" ? replaced : withheld).push(formatPath(u.segs));
+      // a replaced leaf inside a withheld unit (this round or an earlier one, whatever the order
+      // the units came in) is no longer "replaced" — it is gone
+      for (let i = replaced.length - 1; i >= 0; i--) {
+        const r = replaced[i] ?? "";
+        if (withheld.some((w) => r === w || r.startsWith(`${w}.`) || r.startsWith(`${w}[`)))
+          replaced.splice(i, 1);
       }
       body = applyUnits(body, units);
       rawBody = applyUnits(rawBody, units);

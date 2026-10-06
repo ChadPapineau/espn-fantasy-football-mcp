@@ -24,7 +24,7 @@
         "lastNewsDate": 1791152426000,
         "lastVideoDate": 1789328345000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 561 chars]", "3": "[outlook 673 chars]", "4": "[outlook 626 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 3.83, "auctionValueAverageChange": 0.2, "averageDraftPosition": 107.89, "averageDraftPositionPercentChange": 1.91, "date": 1791253821413, "leagueType": 0, "percentChange": -0.04, "percentOwned": 85.6, "percentStarted": 28.68 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 3.81, "auctionValueAverageChange": 0.12, "averageDraftPosition": 107.78, "averageDraftPositionPercentChange": 2.01, "date": 1791261016612, "leagueType": 0, "percentChange": -0.03, "percentOwned": 85.6, "percentStarted": 28.68 },
         "proTeamId": 10,
         "rankings": {
           "0": [
@@ -146,7 +146,7 @@
         "lastNewsDate": 1791173338000,
         "lastVideoDate": 1791172641000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 490 chars]", "3": "[outlook 554 chars]", "4": "[outlook 465 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 1.26, "auctionValueAverageChange": 0.03, "averageDraftPosition": 131.01, "averageDraftPositionPercentChange": 1.05, "date": 1791253817953, "leagueType": 0, "percentChange": -0.06, "percentOwned": 82.22, "percentStarted": 44.95 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 1.25, "auctionValueAverageChange": 0.02, "averageDraftPosition": 130.91, "averageDraftPositionPercentChange": 1.2, "date": 1791261013268, "leagueType": 0, "percentChange": -0.06, "percentOwned": 82.22, "percentStarted": 44.95 },
         "proTeamId": 8,
         "rankings": {
           "0": [
@@ -291,7 +291,7 @@
         "lastNewsDate": 1791154921000,
         "lastVideoDate": 1790867129000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 502 chars]", "3": "[outlook 539 chars]", "4": "[outlook 629 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.95, "auctionValueAverageChange": 0, "averageDraftPosition": 139.73, "averageDraftPositionPercentChange": 0.39, "date": 1791253818055, "leagueType": 0, "percentChange": -0.06, "percentOwned": 78.99, "percentStarted": 32.24 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.95, "auctionValueAverageChange": -0.01, "averageDraftPosition": 139.73, "averageDraftPositionPercentChange": 0.35, "date": 1791261013393, "leagueType": 0, "percentChange": -0.06, "percentOwned": 78.99, "percentStarted": 32.24 },
         "proTeamId": 33,
         "rankings": {
           "0": [
@@ -415,7 +415,7 @@
         "lastNewsDate": 1791174787000,
         "lastVideoDate": 1790549516000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 605 chars]", "3": "[outlook 362 chars]", "4": "[outlook 477 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 1.13, "auctionValueAverageChange": -0.06, "averageDraftPosition": 135.65, "averageDraftPositionPercentChange": -0.84, "date": 1791253819107, "leagueType": 0, "percentChange": -0.06, "percentOwned": 78.77, "percentStarted": 29.3 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 1.12, "auctionValueAverageChange": -0.06, "averageDraftPosition": 135.72, "averageDraftPositionPercentChange": -0.87, "date": 1791261014403, "leagueType": 0, "percentChange": -0.06, "percentOwned": 78.77, "percentStarted": 29.3 },
         "proTeamId": 6,
         "rankings": {
           "0": [
@@ -538,7 +538,7 @@
         "lastName": "Dicker",
         "lastNewsDate": 1791164836000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 554 chars]", "3": "[outlook 605 chars]", "4": "[outlook 662 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 1.1, "auctionValueAverageChange": 0, "averageDraftPosition": 118.16, "averageDraftPositionPercentChange": -2.28, "date": 1791253819513, "leagueType": 0, "percentChange": 0, "percentOwned": 78.71, "percentStarted": 69.54 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 1.1, "auctionValueAverageChange": 0, "averageDraftPosition": 118.16, "averageDraftPositionPercentChange": -2.26, "date": 1791261014863, "leagueType": 0, "percentChange": 0, "percentOwned": 78.72, "percentStarted": 69.54 },
         "proTeamId": 24,
         "rankings": {
           "0": [
@@ -652,7 +652,7 @@
         "id": -16007,
         "injured": false,
         "lastName": "D/ST",
-        "ownership": { "activityLevel": null, "auctionValueAverage": 1.14, "auctionValueAverageChange": -0.01, "averageDraftPosition": 106.47, "averageDraftPositionPercentChange": -1.93, "date": 1791253817326, "leagueType": 0, "percentChange": 0.01, "percentOwned": 76.66, "percentStarted": 46.62 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 1.14, "auctionValueAverageChange": -0.01, "averageDraftPosition": 106.51, "averageDraftPositionPercentChange": -1.96, "date": 1791261012591, "leagueType": 0, "percentChange": 0.01, "percentOwned": 76.66, "percentStarted": 46.63 },
         "proTeamId": 7,
         "rankings": {
           "0": [
@@ -813,7 +813,7 @@
         "lastNewsDate": 1791164374000,
         "lastVideoDate": 1790693717000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 621 chars]", "3": "[outlook 585 chars]", "4": "[outlook 524 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 1.53, "auctionValueAverageChange": -0.07, "averageDraftPosition": 130.3, "averageDraftPositionPercentChange": 0.09, "date": 1791253819783, "leagueType": 0, "percentChange": -0.05, "percentOwned": 76.4, "percentStarted": 21.61 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 1.52, "auctionValueAverageChange": -0.07, "averageDraftPosition": 130.33, "averageDraftPositionPercentChange": 0.05, "date": 1791261015084, "leagueType": 0, "percentChange": -0.05, "percentOwned": 76.4, "percentStarted": 21.61 },
         "proTeamId": 7,
         "rankings": {
           "0": [
@@ -970,7 +970,7 @@
         "lastNewsDate": 1791152137000,
         "lastVideoDate": 1791138558000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 718 chars]", "3": "[outlook 819 chars]", "4": "[outlook 589 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 1.05, "auctionValueAverageChange": -0.05, "averageDraftPosition": 138.29, "averageDraftPositionPercentChange": 0.25, "date": 1791253820431, "leagueType": 0, "percentChange": -0.05, "percentOwned": 66.88, "percentStarted": 4.81 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 1.05, "auctionValueAverageChange": -0.05, "averageDraftPosition": 138.31, "averageDraftPositionPercentChange": 0.27, "date": 1791261015599, "leagueType": 0, "percentChange": -0.05, "percentOwned": 66.88, "percentStarted": 4.81 },
         "proTeamId": 30,
         "rankings": {
           "0": [
@@ -1094,7 +1094,7 @@
         "lastNewsDate": 1791175189000,
         "lastVideoDate": 1790538323000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 616 chars]", "3": "[outlook 839 chars]", "4": "[outlook 636 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 1.32, "auctionValueAverageChange": -0.06, "averageDraftPosition": 128.68, "averageDraftPositionPercentChange": 0.55, "date": 1791253820563, "leagueType": 0, "percentChange": -0.03, "percentOwned": 64.76, "percentStarted": 7.22 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 1.32, "auctionValueAverageChange": -0.05, "averageDraftPosition": 128.7, "averageDraftPositionPercentChange": 0.6, "date": 1791261015727, "leagueType": 0, "percentChange": -0.03, "percentOwned": 64.76, "percentStarted": 7.22 },
         "proTeamId": 10,
         "rankings": {
           "0": [
@@ -1212,9 +1212,9 @@
         "injuryStatus": "ACTIVE",
         "jersey": "41",
         "lastName": "Kamara",
-        "lastNewsDate": 1790985780000,
+        "lastNewsDate": 1791260123000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 586 chars]", "3": "[outlook 544 chars]", "4": "[outlook 660 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.18, "auctionValueAverageChange": -0.02, "averageDraftPosition": 160.37, "averageDraftPositionPercentChange": 0.15, "date": 1791253817998, "leagueType": 0, "percentChange": -0.71, "percentOwned": 64.69, "percentStarted": 20.87 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.18, "auctionValueAverageChange": -0.02, "averageDraftPosition": 160.3, "averageDraftPositionPercentChange": 0.24, "date": 1791261013322, "leagueType": 0, "percentChange": -0.7, "percentOwned": 64.68, "percentStarted": 20.87 },
         "proTeamId": 18,
         "rankings": {
           "0": [
@@ -1284,8 +1284,8 @@
         "seasonOutlook": "[outlook 632 chars]",
         "stats": [
           { "appliedAverage": 7.654545454545453, "appliedTotal": 84.2, "externalId": "2025", "id": "002025", "proTeamId": 0, "scoringPeriodId": 0, "seasonId": 2025, "statSourceId": 0, "statSplitTypeId": 0, "stats": { "23": 131, "24": 471, "25": 1, "27": 90, "28": 43, "29": 19, "30": 13, "31": 3, "33": 23, "34": 9, "39": 3.59541985, "40": 42.81818182, "41": 33, "42": 186, "47": 32, "48": 15, "49": 6, "50": 3, "53": 33, "54": 2, "58": 39, "59": 202, "60": 5.63636364, "61": 16.90909091, "65": 2, "66": 2, "67": 2, "68": 2, "69": 2, "70": 2, "71": 1, "72": 2, "73": 2, "108": 1, "109": 1, "155": 2, "156": 9, "158": 6, "180": 1, "210": 11, "212": 21, "213": 7 } },
-          { "appliedAverage": 9.866666666666665, "appliedTotal": 29.6, "externalId": "2026", "id": "002026", "proTeamId": 0, "scoringPeriodId": 0, "seasonId": 2026, "statSourceId": 0, "statSplitTypeId": 0, "stats": { "23": 25, "24": 74, "25": 2, "27": 14, "28": 6, "29": 2, "30": 1, "33": 3, "39": 2.96, "40": 24.66666667, "41": 11, "42": 47, "47": 9, "48": 3, "49": 1, "50": 1, "53": 11, "54": 2, "58": 14, "59": 57, "60": 4.27272727, "61": 15.66666667, "65": 1, "66": 1, "155": 1, "156": 1, "158": 12, "179": 2, "210": 3, "212": 6, "213": 1 } },
-          { "appliedTotal": 20.3, "externalId": "401872979", "id": "01401872979", "proTeamId": 18, "scoringPeriodId": 4, "seasonId": 2026, "statSourceId": 0, "statSplitTypeId": 1, "stats": { "23": 7, "24": 23, "25": 2, "27": 4, "28": 2, "29": 1, "33": 1, "39": 3.286, "40": 23, "41": 5, "42": 35, "47": 7, "48": 3, "49": 1, "50": 1, "53": 5, "54": 1, "58": 7, "59": 37, "60": 7, "61": 35, "158": 12, "179": 2, "210": 1, "212": 3, "213": 1 } },
+          { "appliedAverage": 9.866666666666665, "appliedTotal": 29.6, "externalId": "2026", "id": "002026", "proTeamId": 0, "scoringPeriodId": 0, "seasonId": 2026, "statSourceId": 0, "statSplitTypeId": 0, "stats": { "23": 25, "24": 74, "25": 2, "27": 14, "28": 6, "29": 2, "30": 1, "33": 3, "39": 2.96, "40": 24.66666667, "41": 11, "42": 47, "47": 9, "48": 3, "49": 1, "50": 1, "53": 11, "54": 2, "58": 14, "59": 57, "60": 4.27272727, "61": 15.66666667, "65": 1, "66": 1, "155": 1, "156": 2, "158": 12, "179": 2, "210": 3, "212": 6, "213": 1 } },
+          { "appliedTotal": 20.3, "externalId": "401872979", "id": "01401872979", "proTeamId": 18, "scoringPeriodId": 4, "seasonId": 2026, "statSourceId": 0, "statSplitTypeId": 1, "stats": { "23": 7, "24": 23, "25": 2, "27": 4, "28": 2, "29": 1, "33": 1, "39": 3.286, "40": 23, "41": 5, "42": 35, "47": 7, "48": 3, "49": 1, "50": 1, "53": 5, "54": 1, "58": 7, "59": 37, "60": 7, "61": 35, "156": 1, "158": 12, "179": 2, "210": 1, "212": 3, "213": 1 } },
           { "appliedAverage": 13.592176473294119, "appliedTotal": 231.06700005, "externalId": "2025", "id": "102025", "proTeamId": 0, "scoringPeriodId": 0, "seasonId": 2025, "statSourceId": 1, "statSplitTypeId": 0, "stats": { "23": 216.4401272, "24": 917.0351979, "25": 6.044929436, "26": 0.312950017, "27": 183, "28": 91, "29": 45, "30": 36, "31": 18, "33": 43, "34": 21, "35": 0.443797023, "36": 0.310657916, "37": 2.175146898, "38": 0.074229418, "39": 4.236900106, "40": 53.94324694, "42": 582.2282642, "43": 1.69176393, "44": 0.098533328, "45": 0.060848113, "46": 0.039764242, "47": 116, "48": 58, "49": 29, "50": 23, "51": 11, "53": 71.2698157, "56": 0.581089743, "57": 0.017971848, "58": 94.64804823, "60": 8.16935274, "61": 34.24872143, "62": 0.411483346, "63": 0.008105322, "66": 1.385799781, "67": 0.456318781, "68": 1.842118562, "70": 0.637467899, "71": 0.255538517, "72": 0.893006416, "73": 0.893006416, "210": 17, "212": 50.69191073, "213": 31.84239161 } },
           { "appliedAverage": 6.899100988461539, "appliedTotal": 89.68831285, "externalId": "2026", "id": "102026", "proTeamId": 0, "scoringPeriodId": 0, "seasonId": 2026, "statSourceId": 1, "statSplitTypeId": 0, "stats": { "23": 100.418257, "24": 411.1840002, "25": 2.398914563, "26": 0.170479436, "27": 82, "28": 41, "29": 20, "30": 16, "31": 8, "33": 20, "34": 10, "35": 0.197660444, "36": 0.138362311, "37": 0.586069409, "38": 0.0200003, "39": 4.094713576, "40": 31.62953848, "42": 173.4387897, "43": 0.624517697, "44": 0.03524601, "45": 0.027496439, "46": 0.017968923, "47": 34, "48": 17, "49": 8, "50": 6, "51": 3, "53": 27.15381594, "56": 0.068193678, "57": 0.002109083, "58": 33.44767539, "60": 6.387271318, "61": 13.34144536, "62": 0.205725446, "63": 0.004243717, "66": 0.759190654, "67": 0.205290591, "68": 0.964481245, "70": 0.349227701, "71": 0.114962731, "72": 0.464190432, "73": 0.464190432, "210": 13, "212": 23.35734672, "213": 10.34819652 } },
           { "appliedTotal": 9.18618268, "externalId": "20264", "id": "1120264", "proTeamId": 0, "scoringPeriodId": 4, "seasonId": 2026, "statSourceId": 1, "statSplitTypeId": 1, "stats": { "23": 10.4518657, "24": 38.90980244, "25": 0.270644145, "26": 0.0181, "27": 7, "28": 3, "29": 1, "30": 1, "33": 2, "34": 1, "35": 0.021020695, "36": 0.0147, "37": 0.0661, "38": 0.00226, "39": 3.722761423, "40": 38.90980244, "42": 18.64124276, "43": 0.076454172, "44": 0.004063699, "45": 0.002205022, "46": 0.001440982, "47": 3, "48": 1, "53": 2.795771335, "56": 0.008110056, "57": 0.000251, "58": 3.484166164, "60": 6.667656446, "61": 18.64124276, "62": 0.022180621, "63": 0.000441, "66": 0.079019085, "67": 0.021136828, "68": 0.100155913, "70": 0.036348779, "71": 0.011836624, "72": 0.048185403, "73": 0.048185403, "210": 1, "212": 2.272433566, "213": 1.114934134 } },
@@ -1317,7 +1317,7 @@
         "id": -16012,
         "injured": false,
         "lastName": "D/ST",
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.21, "auctionValueAverageChange": -0.01, "averageDraftPosition": 153.09, "averageDraftPositionPercentChange": -0.16, "date": 1791253817314, "leagueType": 0, "percentChange": -0.04, "percentOwned": 63.53, "percentStarted": 55.69 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.21, "auctionValueAverageChange": -0.02, "averageDraftPosition": 153.12, "averageDraftPositionPercentChange": -0.16, "date": 1791261012584, "leagueType": 0, "percentChange": -0.04, "percentOwned": 63.52, "percentStarted": 55.68 },
         "proTeamId": 12,
         "rankings": {
           "0": [
@@ -1482,7 +1482,7 @@
         "lastName": "Loop",
         "lastNewsDate": 1791166740000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 511 chars]", "3": "[outlook 447 chars]", "4": "[outlook 536 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.58, "auctionValueAverageChange": 0, "averageDraftPosition": 151.07, "averageDraftPositionPercentChange": 0.86, "date": 1791253821189, "leagueType": 0, "percentChange": -0.04, "percentOwned": 63.11, "percentStarted": 58.76 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.57, "auctionValueAverageChange": 0, "averageDraftPosition": 151.08, "averageDraftPositionPercentChange": 0.87, "date": 1791261016375, "leagueType": 0, "percentChange": -0.04, "percentOwned": 63.11, "percentStarted": 58.76 },
         "proTeamId": 33,
         "rankings": {
           "0": [
@@ -1602,7 +1602,7 @@
         "lastName": "Shakir",
         "lastNewsDate": 1791245633000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 434 chars]", "3": "[outlook 454 chars]", "4": "[outlook 438 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.88, "auctionValueAverageChange": -0.01, "averageDraftPosition": 143.71, "averageDraftPositionPercentChange": 0.43, "date": 1791253819680, "leagueType": 0, "percentChange": -0.03, "percentOwned": 61.9, "percentStarted": 7.37 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.88, "auctionValueAverageChange": -0.01, "averageDraftPosition": 143.74, "averageDraftPositionPercentChange": 0.43, "date": 1791261014992, "leagueType": 0, "percentChange": -0.03, "percentOwned": 61.89, "percentStarted": 7.37 },
         "proTeamId": 2,
         "rankings": {
           "0": [
@@ -1713,7 +1713,7 @@
         "lastName": "Bates",
         "lastNewsDate": 1791214783000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 492 chars]", "3": "[outlook 493 chars]", "4": "[outlook 481 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.61, "auctionValueAverageChange": -0.01, "averageDraftPosition": 160.33, "averageDraftPositionPercentChange": 0.4, "date": 1791253821126, "leagueType": 0, "percentChange": -0.05, "percentOwned": 60.3, "percentStarted": 54.56 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.6, "auctionValueAverageChange": -0.02, "averageDraftPosition": 160.27, "averageDraftPositionPercentChange": 0.36, "date": 1791261016335, "leagueType": 0, "percentChange": -0.05, "percentOwned": 60.29, "percentStarted": 54.56 },
         "proTeamId": 8,
         "rankings": {
           "0": [
@@ -1829,7 +1829,7 @@
         "lastNewsDate": 1791154488000,
         "lastVideoDate": 1791141016000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 594 chars]", "3": "[outlook 588 chars]", "4": "[outlook 386 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.88, "auctionValueAverageChange": 0, "averageDraftPosition": 155.66, "averageDraftPositionPercentChange": 1.36, "date": 1791253819435, "leagueType": 0, "percentChange": -0.04, "percentOwned": 58.43, "percentStarted": 8.43 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.87, "auctionValueAverageChange": 0, "averageDraftPosition": 155.58, "averageDraftPositionPercentChange": 1.37, "date": 1791261014797, "leagueType": 0, "percentChange": -0.04, "percentOwned": 58.43, "percentStarted": 8.43 },
         "proTeamId": 17,
         "rankings": {
           "0": [
@@ -1946,7 +1946,7 @@
         "lastNewsDate": 1791150110000,
         "lastVideoDate": 1790693286000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 483 chars]", "3": "[outlook 549 chars]", "4": "[outlook 500 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.32, "auctionValueAverageChange": 0, "averageDraftPosition": 155.4, "averageDraftPositionPercentChange": -0.03, "date": 1791253821606, "leagueType": 0, "percentChange": -0.09, "percentOwned": 58.19, "percentStarted": 17.85 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.31, "auctionValueAverageChange": 0, "averageDraftPosition": 155.51, "averageDraftPositionPercentChange": -0.07, "date": 1791261016780, "leagueType": 0, "percentChange": -0.09, "percentOwned": 58.19, "percentStarted": 17.85 },
         "proTeamId": 20,
         "rankings": {
           "0": [
@@ -2067,7 +2067,7 @@
         "lastNewsDate": 1791247051000,
         "lastVideoDate": 1790260667000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 465 chars]", "3": "[outlook 603 chars]", "4": "[outlook 613 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.19, "auctionValueAverageChange": -0.01, "averageDraftPosition": 164.12, "averageDraftPositionPercentChange": -1.11, "date": 1791253818089, "leagueType": 0, "percentChange": -0.11, "percentOwned": 57.63, "percentStarted": 25.62 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.19, "auctionValueAverageChange": -0.02, "averageDraftPosition": 164.14, "averageDraftPositionPercentChange": -1.08, "date": 1791261013430, "leagueType": 0, "percentChange": -0.11, "percentOwned": 57.62, "percentStarted": 25.62 },
         "proTeamId": 34,
         "rankings": {
           "0": [
@@ -2190,7 +2190,7 @@
         "lastName": "Wicks",
         "lastNewsDate": 1791252013000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 430 chars]", "3": "[outlook 538 chars]", "4": "[outlook 410 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.22, "auctionValueAverageChange": 0, "averageDraftPosition": 165.08, "averageDraftPositionPercentChange": -0.78, "date": 1791253820029, "leagueType": 0, "percentChange": 0.01, "percentOwned": 55.29, "percentStarted": 21.95 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.22, "auctionValueAverageChange": 0, "averageDraftPosition": 165.11, "averageDraftPositionPercentChange": -0.77, "date": 1791261015269, "leagueType": 0, "percentChange": 0.02, "percentOwned": 55.28, "percentStarted": 21.95 },
         "proTeamId": 21,
         "rankings": {
           "0": [
@@ -2308,7 +2308,7 @@
         "lastNewsDate": 1791164290000,
         "lastVideoDate": 1789340403000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 534 chars]", "3": "[outlook 496 chars]", "4": "[outlook 567 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.15, "auctionValueAverageChange": 0.01, "averageDraftPosition": 162.56, "averageDraftPositionPercentChange": 1.25, "date": 1791253818731, "leagueType": 0, "percentChange": -0.05, "percentOwned": 54.68, "percentStarted": 13.4 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.15, "auctionValueAverageChange": 0.01, "averageDraftPosition": 162.37, "averageDraftPositionPercentChange": 1.29, "date": 1791261013958, "leagueType": 0, "percentChange": -0.05, "percentOwned": 54.68, "percentStarted": 13.4 },
         "proTeamId": 16,
         "rankings": {
           "0": [
@@ -2431,7 +2431,7 @@
         "lastName": "Mason",
         "lastNewsDate": 1789584883000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 521 chars]", "3": "[outlook 301 chars]", "4": "[outlook 292 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.65, "auctionValueAverageChange": 0.01, "averageDraftPosition": 162.76, "averageDraftPositionPercentChange": 0.14, "date": 1791253819360, "leagueType": 0, "percentChange": -0.07, "percentOwned": 53.92, "percentStarted": 0.3 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.64, "auctionValueAverageChange": 0, "averageDraftPosition": 162.79, "averageDraftPositionPercentChange": 0.13, "date": 1791261014688, "leagueType": 0, "percentChange": -0.07, "percentOwned": 53.91, "percentStarted": 0.3 },
         "proTeamId": 16,
         "rankings": {
           "0": [
@@ -2507,7 +2507,7 @@
         "lastNewsDate": 1791248508000,
         "lastVideoDate": 1783085583000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 445 chars]", "3": "[outlook 409 chars]", "4": "[outlook 398 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.83, "auctionValueAverageChange": -0.03, "averageDraftPosition": 150.48, "averageDraftPositionPercentChange": -0.01, "date": 1791253821382, "leagueType": 0, "percentChange": 0.03, "percentOwned": 53.54, "percentStarted": 7.85 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.84, "auctionValueAverageChange": -0.02, "averageDraftPosition": 150.54, "averageDraftPositionPercentChange": -0.02, "date": 1791261016564, "leagueType": 0, "percentChange": 0.03, "percentOwned": 53.54, "percentStarted": 7.85 },
         "proTeamId": 21,
         "rankings": {
           "0": [
@@ -2626,7 +2626,7 @@
         "lastNewsDate": 1791163576000,
         "lastVideoDate": 1789049438000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 282 chars]", "3": "[outlook 500 chars]", "4": "[outlook 538 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.41, "auctionValueAverageChange": -0.02, "averageDraftPosition": 154.56, "averageDraftPositionPercentChange": -0.82, "date": 1791253818328, "leagueType": 0, "percentChange": -0.05, "percentOwned": 53.24, "percentStarted": 26.02 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.4, "auctionValueAverageChange": -0.02, "averageDraftPosition": 154.63, "averageDraftPositionPercentChange": -0.85, "date": 1791264612363, "leagueType": 0, "percentChange": -0.05, "percentOwned": 53.24, "percentStarted": 26.02 },
         "proTeamId": 26,
         "rankings": {
           "0": [
@@ -2765,7 +2765,7 @@
         "lastNewsDate": 1791247834000,
         "lastVideoDate": 1790540169000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 426 chars]", "3": "[outlook 619 chars]", "4": "[outlook 587 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.7, "auctionValueAverageChange": 0, "averageDraftPosition": 160.28, "averageDraftPositionPercentChange": 0.14, "date": 1791253820069, "leagueType": 0, "percentChange": -0.05, "percentOwned": 51.82, "percentStarted": 6.2 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.7, "auctionValueAverageChange": 0, "averageDraftPosition": 160.31, "averageDraftPositionPercentChange": 0.13, "date": 1791261015314, "leagueType": 0, "percentChange": -0.05, "percentOwned": 51.82, "percentStarted": 6.2 },
         "proTeamId": 34,
         "rankings": {
           "0": [
@@ -2911,7 +2911,7 @@
         "lastNewsDate": 1791154829000,
         "lastVideoDate": 1789934547000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 765 chars]", "3": "[outlook 561 chars]", "4": "[outlook 593 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.23, "auctionValueAverageChange": -0.02, "averageDraftPosition": 159.52, "averageDraftPositionPercentChange": -0.82, "date": 1791253818739, "leagueType": 0, "percentChange": -0.08, "percentOwned": 51.11, "percentStarted": 16.96 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.23, "auctionValueAverageChange": -0.02, "averageDraftPosition": 159.51, "averageDraftPositionPercentChange": -0.79, "date": 1791261013974, "leagueType": 0, "percentChange": -0.08, "percentOwned": 51.11, "percentStarted": 16.95 },
         "proTeamId": 9,
         "rankings": {
           "0": [
@@ -3059,7 +3059,7 @@
         "lastNewsDate": 1790917806000,
         "lastVideoDate": 1786816632000,
         "outlooks": { "outlooksByWeek": { "2": "[outlook 685 chars]", "3": "[outlook 506 chars]", "4": "[outlook 515 chars]" } },
-        "ownership": { "activityLevel": null, "auctionValueAverage": 0.6, "auctionValueAverageChange": 0, "averageDraftPosition": 159.89, "averageDraftPositionPercentChange": 0.53, "date": 1791253821368, "leagueType": 0, "percentChange": -0.04, "percentOwned": 50.79, "percentStarted": 3.9 },
+        "ownership": { "activityLevel": null, "auctionValueAverage": 0.6, "auctionValueAverageChange": 0, "averageDraftPosition": 159.88, "averageDraftPositionPercentChange": 0.54, "date": 1791257422494, "leagueType": 0, "percentChange": -0.04, "percentOwned": 50.79, "percentStarted": 3.9 },
         "proTeamId": 5,
         "rankings": {
           "0": [

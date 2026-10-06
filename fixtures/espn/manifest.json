@@ -1,9 +1,9 @@
 {
-  "$comment": "Recorded ESPN fixtures (evidence, plan 05 §3 fixture law): keyless captures of public leagues, scrubbed by scripts/scrub-fixture.ts (research 03 §F.3). sha256 = sha256 of the canonical JSON (sorted keys, no whitespace) of the scrubbed body; scoring.sha256 = the same over every scoring field (scrub.ts SCORING_KEYS), computed on the raw recording and re-verified on the scrubbed file. `pruned` keys were emptied (never a scoring key); `part` marks one response split along `array` to stay ≤ 1 MB; `withheld` lists units removed because a line of theirs matched the local repo deny-list (never committed). No league id, team name or member name of any recorded league is stored anywhere in this repo.",
+  "$comment": "Recorded ESPN fixtures (evidence, plan 05 §3 fixture law): keyless captures of public leagues, scrubbed by scripts/scrub-fixture.ts (research 03 §F.3). sha256 = sha256 of the canonical JSON (sorted keys, no whitespace) of the scrubbed body; scoring.sha256 = the same over every scoring field (scrub.ts SCORING_KEYS), computed on the raw recording and re-verified on the scrubbed file. `pruned` keys were emptied (never a scoring key); `part` marks one response split along `array` to stay ≤ 1 MB; `withheld` lists units removed because a line of theirs matched the local repo deny-list (never committed); `replaced` lists public player-name leaves set to `Player <id>` instead; `synthetic_files` are hand-written error bodies (never evidence, never a scoring field). No league id, team name or member name of any recorded league is stored anywhere in this repo.",
   "version": 1,
   "host": "lm-api-reads.fantasy.espn.com",
   "season": 2026,
-  "captured_at": "2026-10-06T03:05:14Z",
+  "captured_at": "2026-10-06T06:28:53Z",
   "scrub_rules_version": 1,
   "leagues": {
     "league-a": {
@@ -101,7 +101,7 @@
         "content-type": "application/json;charset=utf-8",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:14Z",
+      "recorded_at": "2026-10-06T06:28:52Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": [],
@@ -113,6 +113,42 @@
       "top_level_keys": ["details", "messages"],
       "bytes": 301,
       "sha256": "150d4684fcc1513185680ff0997ec01bfef93d6388f476360c11709239ce92e9",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "format": null
+    },
+    {
+      "path": "recorded/errors/401-communication-not-visible.json",
+      "league": null,
+      "views": ["kona_league_communication"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "communication",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0/communication/",
+        "query": "view=kona_league_communication",
+        "filter": null
+      },
+      "status": 401,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:53Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": ["details", "messages"],
+      "bytes": 321,
+      "sha256": "63ce86ecb36bd5a492305c78e2fb45219800d35c565f8bff5f460769ee56e4ab",
       "scoring": {
         "entries": 0,
         "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
@@ -137,7 +173,7 @@
         "content-type": "application/json;charset=utf-8",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:13Z",
+      "recorded_at": "2026-10-06T06:28:51Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": [],
@@ -154,6 +190,67 @@
         "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
       },
       "format": null
+    },
+    {
+      "path": "recorded/league-a/kona_player_info.ids.json",
+      "league": "league-a",
+      "views": ["kona_player_info"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_player_info&scoringPeriodId=4",
+        "filter": {
+          "players": {
+            "filterIds": {
+              "value": [
+                -16034, -16023, -15030, -15017, -15007, -15002, 3042519, 3116365, 3128429, 3915416,
+                4035538, 4241389, 4259545, 4361050, 4361579, 4374302, 4427366, 4429160, 4430878,
+                4567104, 4572680, 4595348, 4685278, 4695883, 4832955
+              ]
+            }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "25",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:12Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": ["players", "positionAgainstOpponent"],
+      "bytes": 349971,
+      "sha256": "563c2aaaceea6d7b46783101c4f7ae7849b6b5d26ad875c683f9a56f31f8227b",
+      "scoring": {
+        "entries": 25,
+        "sha256": "6d719bc5c83c366d4d268d40c6d19fbdd65cb8e9fb4a28d4961ab918c50aa89b"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
     },
     {
       "path": "recorded/league-a/kona_player_info.json",
@@ -182,7 +279,7 @@
         "x-fantasy-filter-player-count": "796",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:45Z",
+      "recorded_at": "2026-10-06T06:28:05Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": [],
@@ -192,11 +289,76 @@
       "incomplete": null,
       "stats_official": null,
       "top_level_keys": ["players", "positionAgainstOpponent"],
-      "bytes": 336357,
-      "sha256": "3876cc6eaf9b890073e00d08915178549404bba15601de0023b05778706fffa4",
+      "bytes": 336374,
+      "sha256": "587050dc594f3be053e0aa5c963f0477ddfcacae34c9532bc721d5c50a737588",
       "scoring": {
         "entries": 25,
-        "sha256": "66897e95aa99493a3f06f9d0e26e8174af5b4872681eeeaf54dc312e9bddf71a"
+        "sha256": "634e320fcae36780cf6232b2ce83acd8941f94c1b4027694382199b2b7a1a838"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/kona_playercard.json",
+      "league": "league-a",
+      "views": ["kona_playercard"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_playercard",
+        "filter": {
+          "players": {
+            "filterIds": {
+              "value": [
+                -16034, -16023, -15030, -15017, -15007, -15002, 3042519, 3116365, 3128429, 3915416,
+                4035538, 4241389, 4259545, 4361050, 4361579, 4374302, 4427366, 4429160, 4430878,
+                4567104, 4572680, 4595348, 4685278, 4695883, 4832955
+              ]
+            },
+            "filterStatsForTopScoringPeriodIds": {
+              "value": 17,
+              "additionalValue": ["002026", "102026", "002025"]
+            }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "25",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:13Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": ["players"],
+      "bytes": 487737,
+      "sha256": "94e23bba2bbc5bf55fd5f4eefd67dd926e65caef842d292b2ba6638494593212",
+      "scoring": {
+        "entries": 50,
+        "sha256": "b62a1f488cf1fcc51597187347e6916bc9aa7ac102aa36784ad1a59fc5d2725a"
       },
       "format": {
         "teams": 10,
@@ -233,7 +395,7 @@
         "x-fantasy-filter-schedule-count": "5",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:42Z",
+      "recorded_at": "2026-10-06T06:28:01Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -295,7 +457,7 @@
         "x-fantasy-filter-schedule-count": "5",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:43Z",
+      "recorded_at": "2026-10-06T06:28:03Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -357,7 +519,7 @@
         "x-fantasy-filter-schedule-count": "5",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:44Z",
+      "recorded_at": "2026-10-06T06:28:04Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -419,7 +581,7 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:37Z",
+      "recorded_at": "2026-10-06T06:27:57Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -443,11 +605,193 @@
         "status",
         "teams"
       ],
-      "bytes": 479287,
-      "sha256": "f80f5229ff1c48c354fa3ef5490a7a7f20028a66e0ba910d45951c85c32c8610",
+      "bytes": 479286,
+      "sha256": "1f8e7be84056dce63d241c125e94177078c2d620bcaf5861c6f3b4d7e9c14bb3",
       "scoring": {
         "entries": 639,
-        "sha256": "331e51149dfaf204ec32e8b1dfc7b3603fd3a6d16ad45fe1a02a334f7293f53f"
+        "sha256": "3ce84c70687eaede6832526d9d98f0cfc5a55c7235161155093a7b3a81b34941"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mMatchupScore.sp3.json",
+      "league": "league-a",
+      "views": ["mMatchupScore"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchupScore&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:07Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status"
+      ],
+      "bytes": 367527,
+      "sha256": "388ed8598f9c38557b771260bfdcc9f289f40e61113562e0a8d19c18c66b4154",
+      "scoring": {
+        "entries": 434,
+        "sha256": "04694701f3484c3820381541dd0b1bf80f4d6a57c331e4125e47cdc97042990f"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mMatchupScore.sp4.json",
+      "league": "league-a",
+      "views": ["mMatchupScore"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchupScore&scoringPeriodId=4",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "952",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:06Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status"
+      ],
+      "bytes": 359050,
+      "sha256": "f84771ccd23c979c9f9561f58e8c1322fd46b3405443c3d5eabe02386b889f6e",
+      "scoring": {
+        "entries": 426,
+        "sha256": "94cea99f7b2805ed4da15d6f2942b467ff5440a59331141dd474bf91644b30ad"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_CONTINUOUS",
+        "faab_budget": 200,
+        "flex_slots": 5,
+        "lineup_slots": { "TQB": 1, "D/ST": 1, "K": 1, "BE": 7, "IR": 2, "FLEX": 5 },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-a/mNav.json",
+      "league": "league-a",
+      "views": ["mNav"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mNav",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "0",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:09Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "members",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 4755,
+      "sha256": "676dd52cdadf923dea78cae56b33763c67c0fdc798056e8e2229c868b514f0a6",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
       },
       "format": {
         "teams": 10,
@@ -484,20 +828,14 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:38Z",
+      "recorded_at": "2026-10-06T06:27:58Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[7]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[4].roster.entries[3]",
-        "$.teams[5].roster.entries[9]",
-        "$.teams[6].roster.entries[14]"
-      ],
+      "part": { "index": 1, "of": 2, "array": "teams", "id_range": { "first": 1, "last": 8 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 5, 6, 8], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -509,11 +847,11 @@
         "status",
         "teams"
       ],
-      "bytes": 947753,
-      "sha256": "4847c86985d07739e66b940e013dd96b8a74a57749116f95164ec060caaaa1a8",
+      "bytes": 983478,
+      "sha256": "d7d5b6d65b157ad935429c27392d06740ab962c9fbfdc5cc50596bf1db161f22",
       "scoring": {
-        "entries": 209,
-        "sha256": "4c53307a76393a91061b2c56a140571233a8393a19e8446608712124fcaad66c"
+        "entries": 217,
+        "sha256": "85004a2367cde381941384f19f64deabb12e19de7d7fdcea5fbd1911c216b3e3"
       },
       "format": {
         "teams": 10,
@@ -550,20 +888,14 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:38Z",
+      "recorded_at": "2026-10-06T06:27:58Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[7]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[4].roster.entries[3]",
-        "$.teams[5].roster.entries[9]",
-        "$.teams[6].roster.entries[14]"
-      ],
+      "part": { "index": 2, "of": 2, "array": "teams", "id_range": { "first": 9, "last": 11 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 5, 6, 8], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -575,11 +907,11 @@
         "status",
         "teams"
       ],
-      "bytes": 388858,
-      "sha256": "93d6bba14abd3da5e3c3a2f180718e0285062042b33f244627e678f6e8793045",
+      "bytes": 388875,
+      "sha256": "fe1ec979013bd3b4bd89f7458fa84f8cfa98f8254c26c86999c37d80aa3cb64e",
       "scoring": {
         "entries": 93,
-        "sha256": "4eeb816aa0d49d29c850024d40da3ffdc7ace39e2e840598d5d8de6e70db5d2a"
+        "sha256": "9ac8d93306a878166028a11fa0685875013272a98557cf7c9a0f754cf4369e28"
       },
       "format": {
         "teams": 10,
@@ -616,21 +948,14 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:39Z",
+      "recorded_at": "2026-10-06T06:27:59Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[7]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[4].roster.entries[3]",
-        "$.teams[5].roster.entries[9]",
-        "$.teams[6].roster.entries[13]",
-        "$.teams[8].roster.entries[15]"
-      ],
+      "part": { "index": 1, "of": 2, "array": "teams", "id_range": { "first": 1, "last": 6 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 5, 6, 8, 10], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -642,11 +967,11 @@
         "status",
         "teams"
       ],
-      "bytes": 940724,
-      "sha256": "dc8bc6ab41ae0093509310a69a61a11f8d721b7b9934d8812b024668047ed54c",
+      "bytes": 972145,
+      "sha256": "3d27abd3c6cf4b30b06fc4d7a9a17d9ff3ee0c261f3d8ca983cfac8d8b9a5c1c",
       "scoring": {
-        "entries": 180,
-        "sha256": "f96cdde1569ccb6929fbaeccb7c3d282fc9a21283f1870295d9e99176b173df2"
+        "entries": 186,
+        "sha256": "4bf705e8a0c35da1403ca18d9402b27f5a25227b3260d2cab2eeca2ba342e0ca"
       },
       "format": {
         "teams": 10,
@@ -683,21 +1008,14 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:39Z",
+      "recorded_at": "2026-10-06T06:27:59Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[7]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[4].roster.entries[3]",
-        "$.teams[5].roster.entries[9]",
-        "$.teams[6].roster.entries[13]",
-        "$.teams[8].roster.entries[15]"
-      ],
+      "part": { "index": 2, "of": 2, "array": "teams", "id_range": { "first": 8, "last": 11 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 5, 6, 8, 10], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -709,11 +1027,11 @@
         "status",
         "teams"
       ],
-      "bytes": 614705,
-      "sha256": "c3512185966bd9a8ec4bbdd188d9ea0257ed9558d28097883ef33be963df238d",
+      "bytes": 633658,
+      "sha256": "03b01c6761bd3472292a50700a533d558a1380c77c034f1f5bf5f817263440d4",
       "scoring": {
-        "entries": 122,
-        "sha256": "551d8cd41fd9748981ff1143f0df89739b7e11ae7917736e230bb43ab7c0bb82"
+        "entries": 126,
+        "sha256": "13007399af66b0e7b7ab5d8652594b0cd5a8ee91f20c99593f2dcbd597e4ad98"
       },
       "format": {
         "teams": 10,
@@ -750,20 +1068,14 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:41Z",
+      "recorded_at": "2026-10-06T06:28:00Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[7]",
-        "$.teams[4].roster.entries[3]",
-        "$.teams[5].roster.entries[9]",
-        "$.teams[6].roster.entries[13]",
-        "$.teams[8].roster.entries[14]"
-      ],
+      "part": { "index": 1, "of": 2, "array": "teams", "id_range": { "first": 1, "last": 6 } },
+      "withheld": [],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 5, 6, 8, 10], "matchups_missing": 0 },
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -775,11 +1087,11 @@
         "status",
         "teams"
       ],
-      "bytes": 943463,
-      "sha256": "a7e25e79364ccc91410e2b244b4f5852d9efd506246639d2122ea33f118e710b",
+      "bytes": 974749,
+      "sha256": "eb9bcfacf2aa5ab704aded04e2b864fc41a28868551866a771d21a9881782fa7",
       "scoring": {
-        "entries": 182,
-        "sha256": "30b68045537aab3a2489fe8029b7a2453667e22e99c655270d78a559c5711215"
+        "entries": 188,
+        "sha256": "ec12ab2bdb525ad6e7bc7dac883958130fc8e16d4d1cf5b6e0b90d2bb23a1ab1"
       },
       "format": {
         "teams": 10,
@@ -816,20 +1128,14 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:41Z",
+      "recorded_at": "2026-10-06T06:28:00Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[7]",
-        "$.teams[4].roster.entries[3]",
-        "$.teams[5].roster.entries[9]",
-        "$.teams[6].roster.entries[13]",
-        "$.teams[8].roster.entries[14]"
-      ],
+      "part": { "index": 2, "of": 2, "array": "teams", "id_range": { "first": 8, "last": 11 } },
+      "withheld": [],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 5, 6, 8, 10], "matchups_missing": 0 },
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -841,11 +1147,11 @@
         "status",
         "teams"
       ],
-      "bytes": 634571,
-      "sha256": "410357a797e524461b35488cb24b00b57c968d339cb34fb00a8b304fd2844706",
+      "bytes": 653424,
+      "sha256": "7e41f1108d3dc5ebc3681ba2c431ee79aebcc41e160b0365d7f29ecfd58a34d3",
       "scoring": {
-        "entries": 126,
-        "sha256": "98a229fe0271ef3db6cfef6fdd62a7ffb7948d3457a544acac45b0429f240a6d"
+        "entries": 130,
+        "sha256": "bae48913609f382afcb57c4d267f55f2cdc293085f1de0924f3cdb4159913f69"
       },
       "format": {
         "teams": 10,
@@ -882,7 +1188,7 @@
         "x-fantasy-filter-player-count": "0",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:35Z",
+      "recorded_at": "2026-10-06T06:27:54Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -942,7 +1248,7 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:36Z",
+      "recorded_at": "2026-10-06T06:27:55Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -963,11 +1269,11 @@
         "status",
         "teams"
       ],
-      "bytes": 39315,
-      "sha256": "8480a6d775b10edb33d477acbd3519076db1055f0c9abcd55546d90160c5d3e9",
+      "bytes": 39285,
+      "sha256": "2dbeaf8b1359fd430ce4e79ed95b743eb5d5a7b03c7f52065487cc1456c7e727",
       "scoring": {
         "entries": 280,
-        "sha256": "d0bd2f12e0d2bdc14d5b60cce791280b7f6e36d8443c8e988dfb95359f668b20"
+        "sha256": "d0514a9bfea08c112ff4fd97a5304983718bc2ad3f6e2df78b017e9ee508db74"
       },
       "format": {
         "teams": 10,
@@ -1004,7 +1310,7 @@
         "x-fantasy-filter-player-count": "952",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:47Z",
+      "recorded_at": "2026-10-06T06:28:10Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -1066,7 +1372,7 @@
         "x-fantasy-filter-player-count": "0",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:48Z",
+      "recorded_at": "2026-10-06T06:28:11Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -1109,6 +1415,76 @@
       }
     },
     {
+      "path": "recorded/league-b/kona_player_info.ids.json",
+      "league": "league-b",
+      "views": ["kona_player_info"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_player_info&scoringPeriodId=4",
+        "filter": {
+          "players": {
+            "filterIds": {
+              "value": [
+                -16034, -16019, 2473037, 3046779, 3055899, 3116365, 3139477, 3917315, 4035687,
+                4239993, 4242355, 4258173, 4360689, 4362081, 4362628, 4426338, 4429023, 4430027,
+                4432620, 4567750, 4574716, 4683062, 4686658, 4723086, 4871023
+              ]
+            }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "25",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:30Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": ["players", "positionAgainstOpponent"],
+      "bytes": 372632,
+      "sha256": "dbda6794124934a2c3c9a9595f2956c74f3217f6a511407f17695a1b8e5c1e05",
+      "scoring": {
+        "entries": 25,
+        "sha256": "7d1b57f1be51dad0010bcb437d4f86ba97efce1c30b1c6d1182135636ed73cf5"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
       "path": "recorded/league-b/kona_player_info.json",
       "league": "league-b",
       "views": ["kona_player_info"],
@@ -1135,7 +1511,7 @@
         "x-fantasy-filter-player-count": "901",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:00Z",
+      "recorded_at": "2026-10-06T06:28:25Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": [],
@@ -1145,11 +1521,85 @@
       "incomplete": null,
       "stats_official": null,
       "top_level_keys": ["players", "positionAgainstOpponent"],
-      "bytes": 367676,
-      "sha256": "2e9ccf3be4fd46cfc0347919e0820cba26e15fed2fe422af89cb59ab990ffd60",
+      "bytes": 367686,
+      "sha256": "f8e7515cf6f66e0586f24dfac33b8d93263f9019d0fb7d614e4669fc3bba46fd",
       "scoring": {
         "entries": 25,
-        "sha256": "ecfea8729457632b45704d5e3a36db03a5e5873f4af2e2ea77b21e448c94d84e"
+        "sha256": "a1a75b469399ea90fcf9084c1c35dc78435e8d4f5c98a8c5d7bfa30099eae93f"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/kona_playercard.json",
+      "league": "league-b",
+      "views": ["kona_playercard"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_playercard",
+        "filter": {
+          "players": {
+            "filterIds": {
+              "value": [
+                -16034, -16019, 2473037, 3046779, 3055899, 3116365, 3139477, 3917315, 4035687,
+                4239993, 4242355, 4258173, 4360689, 4362081, 4362628, 4426338, 4429023, 4430027,
+                4432620, 4567750, 4574716, 4683062, 4686658, 4723086, 4871023
+              ]
+            },
+            "filterStatsForTopScoringPeriodIds": {
+              "value": 17,
+              "additionalValue": ["002026", "102026", "002025"]
+            }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "25",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:32Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": ["players"],
+      "bytes": 468968,
+      "sha256": "9504ff2a1498d37558507090d46b019b236ac2b1ded8ce46cc18c0faab8f9710",
+      "scoring": {
+        "entries": 50,
+        "sha256": "a4a4905b06b866eef8fcdd2c33be8496b9c9359b691fbf7a000752c046d64680"
       },
       "format": {
         "teams": 10,
@@ -1195,7 +1645,7 @@
         "x-fantasy-filter-schedule-count": "5",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:56Z",
+      "recorded_at": "2026-10-06T06:28:22Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -1266,7 +1716,7 @@
         "x-fantasy-filter-schedule-count": "5",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:57Z",
+      "recorded_at": "2026-10-06T06:28:23Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -1337,7 +1787,7 @@
         "x-fantasy-filter-schedule-count": "5",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:59Z",
+      "recorded_at": "2026-10-06T06:28:24Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -1408,7 +1858,7 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:51Z",
+      "recorded_at": "2026-10-06T06:28:17Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -1432,11 +1882,220 @@
         "status",
         "teams"
       ],
-      "bytes": 456135,
-      "sha256": "9708d5874a07b8d6d671f8ba4d298a009aab3f99ff9d3b2cd8d473203fb24b07",
+      "bytes": 456167,
+      "sha256": "7e4d071227d2f47800bbb0a45073ed0af50c9d98ee75345a1a7e1eb2826c0971",
       "scoring": {
         "entries": 746,
-        "sha256": "eae8a68d21e3cd3ed8c261de93e25cc1e402948e3ede426599cf37d713181b37"
+        "sha256": "5e48c2d4e78503e0988ea31388563f13058c30793a9f226ee4ab550d22b1c757"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mMatchupScore.sp3.json",
+      "league": "league-b",
+      "views": ["mMatchupScore"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchupScore&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:28Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status"
+      ],
+      "bytes": 356980,
+      "sha256": "2ca7b40b3b23482be0b04343cc4a6fc1ccd41f55c55bbf27c6c5a06b572cde29",
+      "scoring": {
+        "entries": 540,
+        "sha256": "d0e6d1eb03418872608a356d29ce731d01d19524ee8eabbee2ea33d55aeb0029"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mMatchupScore.sp4.json",
+      "league": "league-b",
+      "views": ["mMatchupScore"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchupScore&scoringPeriodId=4",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:27Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status"
+      ],
+      "bytes": 345501,
+      "sha256": "8234a306eca5e2a3616047a0e776d403bc7eb75daec7584664c65401ec70a8f1",
+      "scoring": {
+        "entries": 530,
+        "sha256": "9a203c860b8a407950926e42b37206060faa01dad5127e957e9e597ba8d40b13"
+      },
+      "format": {
+        "teams": 10,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0.5,
+        "ppr": "half",
+        "pass_td_points": 4,
+        "waivers": "faab",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": 200,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "WR": 2,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 6,
+          "FLEX": 1
+        },
+        "playoff_teams": 4,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-b/mNav.json",
+      "league": "league-b",
+      "views": ["mNav"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mNav",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "0",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:29Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "members",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 4518,
+      "sha256": "3348f68cbf5253b51c2eb9a45318fac44b52ffaa72b539b7a2c9ed95b15c03c9",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
       },
       "format": {
         "teams": 10,
@@ -1482,19 +2141,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:53Z",
+      "recorded_at": "2026-10-06T06:28:18Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[0].roster.entries[4]",
-        "$.teams[3].roster.entries[14]",
-        "$.teams[5].roster.entries[6]",
-        "$.teams[9].roster.entries[7]"
-      ],
+      "part": { "index": 1, "of": 2, "array": "teams", "id_range": { "first": 1, "last": 8 } },
+      "withheld": [],
       "replaced": [],
-      "incomplete": { "team_ids": [1, 4, 6, 10], "matchups_missing": 0 },
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1506,11 +2160,11 @@
         "status",
         "teams"
       ],
-      "bytes": 1021901,
-      "sha256": "ea40909737ac9a066d15994372b3743b0168f9979af2a0937af752e9a82d7c0b",
+      "bytes": 1047989,
+      "sha256": "b4a82da62296cf57a89576dddf7e5596e4cc961ab55c2722adeef853d036c91b",
       "scoring": {
-        "entries": 242,
-        "sha256": "7ff810618975e1759a748344ce3a10861494f5b520cb2e608ec8498706d8e797"
+        "entries": 248,
+        "sha256": "0c6f68df8a6e306a35593cbb66aca657c83da595c2455595bfafe4fe3f65af96"
       },
       "format": {
         "teams": 10,
@@ -1556,19 +2210,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:53Z",
+      "recorded_at": "2026-10-06T06:28:18Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[0].roster.entries[4]",
-        "$.teams[3].roster.entries[14]",
-        "$.teams[5].roster.entries[6]",
-        "$.teams[9].roster.entries[7]"
-      ],
+      "part": { "index": 2, "of": 2, "array": "teams", "id_range": { "first": 9, "last": 10 } },
+      "withheld": [],
       "replaced": [],
-      "incomplete": { "team_ids": [1, 4, 6, 10], "matchups_missing": 0 },
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1580,11 +2229,11 @@
         "status",
         "teams"
       ],
-      "bytes": 260249,
-      "sha256": "68967698e4f8c9acc50f360c43008127ebb385ba1d814ad9e5812b2e751c2dce",
+      "bytes": 270324,
+      "sha256": "64bfb736a445171631a85d72e3123ad492ce4c01240e705485cbb88d4bcf67f1",
       "scoring": {
-        "entries": 60,
-        "sha256": "c8e824defefd2c050b742b77de1e87a4503e2c4ed52bb3c72042e6dd1d3f8b91"
+        "entries": 62,
+        "sha256": "dee23ff9523d597fcb4f253dde4e150e2c5508d4a5cedbfde4d4613d9fe7c45f"
       },
       "format": {
         "teams": 10,
@@ -1630,19 +2279,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:54Z",
+      "recorded_at": "2026-10-06T06:28:19Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[0].roster.entries[4]",
-        "$.teams[3].roster.entries[13]",
-        "$.teams[5].roster.entries[6]",
-        "$.teams[9].roster.entries[7]"
-      ],
+      "part": { "index": 1, "of": 2, "array": "teams", "id_range": { "first": 1, "last": 6 } },
+      "withheld": [],
       "replaced": [],
-      "incomplete": { "team_ids": [1, 4, 6, 10], "matchups_missing": 0 },
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1654,11 +2298,11 @@
         "status",
         "teams"
       ],
-      "bytes": 1048444,
-      "sha256": "0ffc65467d72e5bca7f0811b4bad086905ace6cf57575183ada55dba41003348",
+      "bytes": 920423,
+      "sha256": "5c6499c976a135a1ac90f5e7a4d7c4528fa7911c47ea3936fe0cbc15eca59b21",
       "scoring": {
-        "entries": 211,
-        "sha256": "5a7d27429d7458342fff41b667eac1f5e3b77e61b2935c807aa75912ffcaae1e"
+        "entries": 186,
+        "sha256": "270da29725489a7d01b87cec8229ea86c8b50ed0f8b1862b8a79149bed9f7393"
       },
       "format": {
         "teams": 10,
@@ -1704,19 +2348,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:54Z",
+      "recorded_at": "2026-10-06T06:28:19Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[0].roster.entries[4]",
-        "$.teams[3].roster.entries[13]",
-        "$.teams[5].roster.entries[6]",
-        "$.teams[9].roster.entries[7]"
-      ],
+      "part": { "index": 2, "of": 2, "array": "teams", "id_range": { "first": 7, "last": 10 } },
+      "withheld": [],
       "replaced": [],
-      "incomplete": { "team_ids": [1, 4, 6, 10], "matchups_missing": 0 },
+      "incomplete": null,
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1728,11 +2367,11 @@
         "status",
         "teams"
       ],
-      "bytes": 458206,
-      "sha256": "88e1a782a3a3d5fa0673eec8bb79e45230f6f42c81625b44e7bcc3069854a0a3",
+      "bytes": 629050,
+      "sha256": "f34cd4ec6fb6ce51545664a123119ee25b8d4027d216b614bed1aebc3a1224c7",
       "scoring": {
-        "entries": 91,
-        "sha256": "1553856a479bc82e18756bdfa38aa21d98e377cf80c149ca002daf1c97e17477"
+        "entries": 124,
+        "sha256": "6c0f4d23bc1cecdfdefe70656308e7bf26ac7d8b07969f4403a44b65b3601158"
       },
       "format": {
         "teams": 10,
@@ -1778,20 +2417,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:55Z",
+      "recorded_at": "2026-10-06T06:28:21Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[0].roster.entries[4]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[3].roster.entries[13]",
-        "$.teams[5].roster.entries[6]",
-        "$.teams[9].roster.entries[7]"
-      ],
+      "part": { "index": 1, "of": 2, "array": "teams", "id_range": { "first": 1, "last": 6 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [1, 3, 4, 6, 10], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1803,11 +2436,11 @@
         "status",
         "teams"
       ],
-      "bytes": 1039157,
-      "sha256": "bc53d6eed2b4ae2e9d92334cc22d5256e9c34e360b0ffab7bb8f0950607e6108",
+      "bytes": 912880,
+      "sha256": "6494be19c67701a8a6c68f5c5981f01eafa66f92545e38030699b4c0e4891db6",
       "scoring": {
-        "entries": 209,
-        "sha256": "10e9f51245e83209cfbeb10a6134680b6db5c0e86932711a1501c887bde24199"
+        "entries": 184,
+        "sha256": "efbd05ae4de613f19e70e823751f58a8667b79c00ca9165b701bc26d4f5c82ad"
       },
       "format": {
         "teams": 10,
@@ -1853,20 +2486,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:55Z",
+      "recorded_at": "2026-10-06T06:28:21Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[0].roster.entries[4]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[3].roster.entries[13]",
-        "$.teams[5].roster.entries[6]",
-        "$.teams[9].roster.entries[7]"
-      ],
+      "part": { "index": 2, "of": 2, "array": "teams", "id_range": { "first": 7, "last": 10 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [1, 3, 4, 6, 10], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -1878,11 +2505,11 @@
         "status",
         "teams"
       ],
-      "bytes": 452325,
-      "sha256": "fb8a34c314b95f059acf2465ef0bd99c6dac73b62d3f3c785460f80201066527",
+      "bytes": 621181,
+      "sha256": "0b3025d005fd897370cc7fcde1c5ea10b5384cf02a8d6a7f5b02a66ebb93f4dc",
       "scoring": {
-        "entries": 91,
-        "sha256": "cbaafd2eec508507535cf681d85a054739c3c88e0d9b608fd4321414c782e604"
+        "entries": 124,
+        "sha256": "56c91e2a837496177a771c8afece77bdbf873339fa8fd3bc9873c594d2fdafc6"
       },
       "format": {
         "teams": 10,
@@ -1928,7 +2555,7 @@
         "x-fantasy-filter-player-count": "0",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:49Z",
+      "recorded_at": "2026-10-06T06:28:15Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -1997,7 +2624,7 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:04:50Z",
+      "recorded_at": "2026-10-06T06:28:16Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -2018,11 +2645,11 @@
         "status",
         "teams"
       ],
-      "bytes": 37996,
-      "sha256": "6a533453756f5e660cadc497045b47590cbce2cbb6bedb19c573a940c8987e82",
+      "bytes": 37972,
+      "sha256": "f82fdee2110923889a1932fcdfee1d6f1f019cd6fcc55bdfed2dc9859b591592",
       "scoring": {
         "entries": 280,
-        "sha256": "985364f43160ac604633d7cc59bda4d9239ccd2579d6a0a6068a7b60a1b5f3ad"
+        "sha256": "a6e8022fa453b7aad744aa186c6603cc49d71874a8b52d71ff6e409498d56171"
       },
       "format": {
         "teams": 10,
@@ -2047,6 +2674,79 @@
         "playoff_teams": 4,
         "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
         "regular_season_matchups": 15
+      }
+    },
+    {
+      "path": "recorded/league-c/kona_player_info.ids.json",
+      "league": "league-c",
+      "views": ["kona_player_info"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_player_info&scoringPeriodId=4",
+        "filter": {
+          "players": {
+            "filterIds": {
+              "value": [
+                -16034, -16033, -16030, -16021, -16014, -16001, 2971573, 3052587, 3149687, 3918298,
+                4038815, 4241463, 4360234, 4361579, 4374302, 4427366, 4428557, 4429501, 4432577,
+                4569587, 4597500, 4678008, 4685702, 4702555, 4870847
+              ]
+            }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "25",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:48Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": ["players", "positionAgainstOpponent"],
+      "bytes": 356067,
+      "sha256": "951a20babf03c4dda3944e2bed92fe0dc99a5edd9c95ef21a465fef4e180a3d5",
+      "scoring": {
+        "entries": 25,
+        "sha256": "cf30c865f0c29eda1b426a72c54f4c9086c00a9e088e05d2335f2f284c046499"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
       }
     },
     {
@@ -2076,7 +2776,7 @@
         "x-fantasy-filter-player-count": "813",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:12Z",
+      "recorded_at": "2026-10-06T06:28:44Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": [],
@@ -2086,11 +2786,88 @@
       "incomplete": null,
       "stats_official": null,
       "top_level_keys": ["players", "positionAgainstOpponent"],
-      "bytes": 329014,
-      "sha256": "31059d6b0b41805ac57762e426fc328083f158ceed42e207f74840d821415145",
+      "bytes": 329056,
+      "sha256": "6891c3c87133fb12b5506509bdcb82a1b63ebdf883f8d7e22808c957e3627dec",
       "scoring": {
         "entries": 25,
-        "sha256": "1d407feec71372bbc2b35782ab909c2f6d351f70f15e12f7989ddae5ee2a59a7"
+        "sha256": "a5ec8f151f3faeee90882640c3820d1d0ba1b3d6b5d11d87d53914ec3859e723"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/kona_playercard.json",
+      "league": "league-c",
+      "views": ["kona_playercard"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=kona_playercard",
+        "filter": {
+          "players": {
+            "filterIds": {
+              "value": [
+                -16034, -16033, -16030, -16021, -16014, -16001, 2971573, 3052587, 3149687, 3918298,
+                4038815, 4241463, 4360234, 4361579, 4374302, 4427366, 4428557, 4429501, 4432577,
+                4569587, 4597500, 4678008, 4685702, 4702555, 4870847
+              ]
+            },
+            "filterStatsForTopScoringPeriodIds": {
+              "value": 17,
+              "additionalValue": ["002026", "102026", "002025"]
+            }
+          }
+        }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "25",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:49Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": ["players"],
+      "bytes": 484636,
+      "sha256": "6a0139c8c351bc9ea32de181022e8a45614222855db19d8f8b2510ac45f2b5ec",
+      "scoring": {
+        "entries": 50,
+        "sha256": "a3940d3106db738eaf5e6a91cf8f6bf3d5f0cd2435f70d15ff4002a3e31fcb9a"
       },
       "format": {
         "teams": 12,
@@ -2139,7 +2916,7 @@
         "x-fantasy-filter-schedule-count": "6",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:08Z",
+      "recorded_at": "2026-10-06T06:28:40Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -2213,7 +2990,7 @@
         "x-fantasy-filter-schedule-count": "6",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:09Z",
+      "recorded_at": "2026-10-06T06:28:41Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -2287,7 +3064,7 @@
         "x-fantasy-filter-schedule-count": "6",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:11Z",
+      "recorded_at": "2026-10-06T06:28:43Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -2361,7 +3138,7 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:04Z",
+      "recorded_at": "2026-10-06T06:28:35Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -2385,11 +3162,229 @@
         "status",
         "teams"
       ],
-      "bytes": 687104,
-      "sha256": "b89130d4c522d311f8dcd58b4337d25cfb00022d2e5d0a0d894f2ed67529d3ff",
+      "bytes": 687112,
+      "sha256": "e7b54923f92bd702d6f47fa54806b98f0a653345bcda8b3c88d7d4af123311b9",
       "scoring": {
         "entries": 1011,
-        "sha256": "6dbdff7dbcedf2626ba90309cbcd05a89bd3fecfb96de0c049d9f8e7c11fc764"
+        "sha256": "d90a29816dd51e6bf083506df5a24fde87cd671cd76e963d8922528fba9ae6f6"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mMatchupScore.sp3.json",
+      "league": "league-c",
+      "views": ["mMatchupScore"],
+      "scoringPeriodId": 3,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchupScore&scoringPeriodId=3",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:46Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status"
+      ],
+      "bytes": 544411,
+      "sha256": "8f8709fe43cefad54801b72daffda9f0403489289a92c0d1531b68e5b364dd1b",
+      "scoring": {
+        "entries": 680,
+        "sha256": "e587c84154f9fcbf0d6758221b06bcb4dfdd3a2a44fdad1bb549e7f90bc23b23"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mMatchupScore.sp4.json",
+      "league": "league-c",
+      "views": ["mMatchupScore"],
+      "scoringPeriodId": 4,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mMatchupScore&scoringPeriodId=4",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "1051",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:45Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": true,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "schedule",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "status"
+      ],
+      "bytes": 539726,
+      "sha256": "527a9fd2051b59f5a908ad4dcba9d23c1f61acc6228297273feb8caf89d4323f",
+      "scoring": {
+        "entries": 670,
+        "sha256": "ea42bec47c2efd99491005bb5c1758ce9e82927b725419642b35d597b95648c4"
+      },
+      "format": {
+        "teams": 12,
+        "scoring_type": "H2H_POINTS",
+        "reception_points": 0,
+        "ppr": "standard",
+        "pass_td_points": 6,
+        "waivers": "rolling",
+        "acquisition_type": "WAIVERS_TRADITIONAL",
+        "faab_budget": null,
+        "flex_slots": 1,
+        "lineup_slots": {
+          "QB": 1,
+          "RB": 2,
+          "RB/WR": 1,
+          "WR": 2,
+          "WR/TE": 1,
+          "TE": 1,
+          "D/ST": 1,
+          "K": 1,
+          "BE": 8,
+          "IR": 2,
+          "FLEX": 1
+        },
+        "playoff_teams": 8,
+        "playoff_seeding_rule": "TOTAL_POINTS_SCORED",
+        "regular_season_matchups": 14
+      }
+    },
+    {
+      "path": "recorded/league-c/mNav.json",
+      "league": "league-c",
+      "views": ["mNav"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "league",
+        "path": "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0",
+        "query": "view=mNav",
+        "filter": null
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "must-revalidate",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "0",
+        "x-fantasy-role": "NONE"
+      },
+      "recorded_at": "2026-10-06T06:28:47Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": ["rankings"],
+      "part": null,
+      "withheld": [],
+      "replaced": [],
+      "incomplete": null,
+      "stats_official": null,
+      "top_level_keys": [
+        "draftDetail",
+        "gameId",
+        "id",
+        "members",
+        "scoringPeriodId",
+        "seasonId",
+        "segmentId",
+        "settings",
+        "status",
+        "teams"
+      ],
+      "bytes": 5446,
+      "sha256": "197d6a997e293293869d3fe14dd99bf4624a740653138feedee388fec9a8c90b",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
       },
       "format": {
         "teams": 12,
@@ -2438,21 +3433,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:05Z",
+      "recorded_at": "2026-10-06T06:28:36Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[1]",
-        "$.teams[2].roster.entries[15]",
-        "$.teams[6].roster.entries[9]",
-        "$.teams[9].roster.entries[10]",
-        "$.teams[10].roster.entries[7]",
-        "$.teams[11].roster.entries[5]"
-      ],
+      "part": { "index": 1, "of": 2, "array": "teams", "id_range": { "first": 1, "last": 7 } },
+      "withheld": ["$.teams[2].roster.entries[15]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2464,11 +3452,11 @@
         "status",
         "teams"
       ],
-      "bytes": 983329,
-      "sha256": "0b2098078431b024b4a90dcd1589e5b903d7a34f66e8d55593a82df802506247",
+      "bytes": 993644,
+      "sha256": "3c9d2cb726fc09587602304409eaa12bc0c4a4327c1e98653f953a941ccb26fc",
       "scoring": {
-        "entries": 232,
-        "sha256": "963935a32fbb4dd81e62b8e7f74790a758f34f257384080909aa87e6f20d0690"
+        "entries": 234,
+        "sha256": "059a599fc30e24e8c24edc1ede00a99920ba61272c3ef0a552b83f6fd970d174"
       },
       "format": {
         "teams": 12,
@@ -2517,21 +3505,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:05Z",
+      "recorded_at": "2026-10-06T06:28:36Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 2, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[1]",
-        "$.teams[2].roster.entries[15]",
-        "$.teams[6].roster.entries[9]",
-        "$.teams[9].roster.entries[10]",
-        "$.teams[10].roster.entries[7]",
-        "$.teams[11].roster.entries[5]"
-      ],
+      "part": { "index": 2, "of": 2, "array": "teams", "id_range": { "first": 10, "last": 16 } },
+      "withheld": ["$.teams[2].roster.entries[15]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2543,11 +3524,11 @@
         "status",
         "teams"
       ],
-      "bytes": 991300,
-      "sha256": "d948ecf901fa2f1e1f859b3c7b6584d866ce1015fb8edc696ae6178003b1cbd6",
+      "bytes": 1029130,
+      "sha256": "a7c30db8c7bbbe011bf63d1b03377dc4a5ce4e96f5e12f34c3d4109bb533e40a",
       "scoring": {
-        "entries": 226,
-        "sha256": "8d790ab6e9c694df51b8dd8e735e7e542424e60b3e6666fa0ba3a1695f6db8dd"
+        "entries": 234,
+        "sha256": "b27666660b04fcb8ba96dec72d96353fe9916bd5dd33ed49351e6742f86477cf"
       },
       "format": {
         "teams": 12,
@@ -2596,21 +3577,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:06Z",
+      "recorded_at": "2026-10-06T06:28:38Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 3, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[1]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[6].roster.entries[9]",
-        "$.teams[9].roster.entries[10]",
-        "$.teams[10].roster.entries[7]",
-        "$.teams[11].roster.entries[5]"
-      ],
+      "part": { "index": 1, "of": 3, "array": "teams", "id_range": { "first": 1, "last": 6 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2622,11 +3596,11 @@
         "status",
         "teams"
       ],
-      "bytes": 989171,
-      "sha256": "128d047e9da4dc662b76add1bfab80fd3fc8a0a6313669954769dd931e6c5def",
+      "bytes": 1001448,
+      "sha256": "91458b0f03a60897bcea7b04d482eb3050fdf9b3551ad97b3fc21797eac2e951",
       "scoring": {
-        "entries": 199,
-        "sha256": "238767e4cc7b46b431f9345e7870bf281aa26a08ee27e0c386bb3a10fc98424a"
+        "entries": 201,
+        "sha256": "73493026a5c99ab56f4f6e0d69460e5f58af01eafaf6f05778cb8785bbd1e832"
       },
       "format": {
         "teams": 12,
@@ -2675,21 +3649,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:06Z",
+      "recorded_at": "2026-10-06T06:28:38Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 3, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[1]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[6].roster.entries[9]",
-        "$.teams[9].roster.entries[10]",
-        "$.teams[10].roster.entries[7]",
-        "$.teams[11].roster.entries[5]"
-      ],
+      "part": { "index": 2, "of": 3, "array": "teams", "id_range": { "first": 7, "last": 14 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2701,11 +3668,11 @@
         "status",
         "teams"
       ],
-      "bytes": 969061,
-      "sha256": "8af8ba0802a647c0cf339f12b9c31fd48c6bb6ab067a811fa245315532bf205e",
+      "bytes": 988742,
+      "sha256": "d99bec8a6ce9ed7b8935ba7ebbaa3a47f1cd2211215a08d2672df1b66afe03ef",
       "scoring": {
-        "entries": 193,
-        "sha256": "821b30839e3679b3ee8b3ff84464940edd5d0eca7687b54f7f210140444bb2bf"
+        "entries": 197,
+        "sha256": "83e9f7ce09638e05afd370b9eca3cab3117a2c3d84983aa789f68a6dffd304f9"
       },
       "format": {
         "teams": 12,
@@ -2754,21 +3721,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:06Z",
+      "recorded_at": "2026-10-06T06:28:38Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 3, "of": 3, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[1]",
-        "$.teams[2].roster.entries[13]",
-        "$.teams[6].roster.entries[9]",
-        "$.teams[9].roster.entries[10]",
-        "$.teams[10].roster.entries[7]",
-        "$.teams[11].roster.entries[5]"
-      ],
+      "part": { "index": 3, "of": 3, "array": "teams", "id_range": { "first": 15, "last": 16 } },
+      "withheld": ["$.teams[2].roster.entries[13]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2780,11 +3740,11 @@
         "status",
         "teams"
       ],
-      "bytes": 378688,
-      "sha256": "ab3366c1e80a2b929f219e6a6c4a357c0bdb4f905e663cacae48196c92896eb8",
+      "bytes": 403517,
+      "sha256": "d0faa23367942e89fb1bd0f158ccff9af6a462a8d3f3bf65529f12a06eda2922",
       "scoring": {
-        "entries": 74,
-        "sha256": "9245d284feddf54bbdff04ebcb3346f5e60a89cd7fdbf309b73135805b9355a1"
+        "entries": 78,
+        "sha256": "1f78c589817323ef2cd8fc0a23b95ec53ecfe9791366ab60819843d3269c1887"
       },
       "format": {
         "teams": 12,
@@ -2833,21 +3793,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:07Z",
+      "recorded_at": "2026-10-06T06:28:39Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 1, "of": 3, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[1]",
-        "$.teams[2].roster.entries[11]",
-        "$.teams[6].roster.entries[9]",
-        "$.teams[9].roster.entries[10]",
-        "$.teams[10].roster.entries[7]",
-        "$.teams[11].roster.entries[5]"
-      ],
+      "part": { "index": 1, "of": 3, "array": "teams", "id_range": { "first": 1, "last": 6 } },
+      "withheld": ["$.teams[2].roster.entries[11]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2859,11 +3812,11 @@
         "status",
         "teams"
       ],
-      "bytes": 988146,
-      "sha256": "28c7b9f089fc3d29469e5a1e3a17790895102ad1c3070041a95dde48a56b7db2",
+      "bytes": 1000308,
+      "sha256": "5aea71abaa0b7929b581d7bcb5f27f62c37305ace9ee0f995568ebe37aa7684f",
       "scoring": {
-        "entries": 199,
-        "sha256": "2545c1ae9cfbb165c133971918b722be31596f4bea012e10b7d7b37c9ba1e7f9"
+        "entries": 201,
+        "sha256": "91136ae6bffda9bf81d616f51ea55336d455e2132f27ecc080d914503a9ca745"
       },
       "format": {
         "teams": 12,
@@ -2912,21 +3865,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:07Z",
+      "recorded_at": "2026-10-06T06:28:39Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 2, "of": 3, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[1]",
-        "$.teams[2].roster.entries[11]",
-        "$.teams[6].roster.entries[9]",
-        "$.teams[9].roster.entries[10]",
-        "$.teams[10].roster.entries[7]",
-        "$.teams[11].roster.entries[5]"
-      ],
+      "part": { "index": 2, "of": 3, "array": "teams", "id_range": { "first": 7, "last": 14 } },
+      "withheld": ["$.teams[2].roster.entries[11]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -2938,11 +3884,11 @@
         "status",
         "teams"
       ],
-      "bytes": 989808,
-      "sha256": "44061fdf18e41ac19166a5f186d58def516380cd2508b51702f3f56b7e518fb9",
+      "bytes": 1009351,
+      "sha256": "5a7465a0bd2893a69d0748cfa6f50e15a0ce162532986aaaeafeafd283853f93",
       "scoring": {
-        "entries": 199,
-        "sha256": "fd117cd93cddec058be3a543308884a6de243d40cfed4cafa0ae04b99305ce90"
+        "entries": 203,
+        "sha256": "b5e8f807eadfbe19a34fe64609c511da452b089a9ea426d77ff00cde1c08f732"
       },
       "format": {
         "teams": 12,
@@ -2991,21 +3937,14 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:07Z",
+      "recorded_at": "2026-10-06T06:28:39Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
-      "part": { "index": 3, "of": 3, "array": "teams" },
-      "withheld": [
-        "$.teams[1].roster.entries[1]",
-        "$.teams[2].roster.entries[11]",
-        "$.teams[6].roster.entries[9]",
-        "$.teams[9].roster.entries[10]",
-        "$.teams[10].roster.entries[7]",
-        "$.teams[11].roster.entries[5]"
-      ],
+      "part": { "index": 3, "of": 3, "array": "teams", "id_range": { "first": 15, "last": 16 } },
+      "withheld": ["$.teams[2].roster.entries[11]"],
       "replaced": [],
-      "incomplete": { "team_ids": [2, 3, 10, 14, 15, 16], "matchups_missing": 0 },
+      "incomplete": { "team_ids": [3], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": [
         "draftDetail",
@@ -3017,11 +3956,11 @@
         "status",
         "teams"
       ],
-      "bytes": 376188,
-      "sha256": "e9c2274b29d1af64317f3d47134aff07558c0318db693973236def64ab86ba48",
+      "bytes": 401010,
+      "sha256": "b9b14bff71e1230a6fdd61e53e12de55b90b38ee4f2e5dd2e96f037213b8d54e",
       "scoring": {
-        "entries": 74,
-        "sha256": "843f513b4a635d6b266a7531380c36241481dc47bdae3e2cc5721bbe2543777e"
+        "entries": 78,
+        "sha256": "a4d26118fadda7a88ba2b811846053f5c1cda30985c0fee653e10500f0bb64b3"
       },
       "format": {
         "teams": 12,
@@ -3070,7 +4009,7 @@
         "x-fantasy-filter-player-count": "0",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:01Z",
+      "recorded_at": "2026-10-06T06:28:33Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -3142,7 +4081,7 @@
         "x-fantasy-filter-player-count": "1051",
         "x-fantasy-role": "NONE"
       },
-      "recorded_at": "2026-10-06T03:05:02Z",
+      "recorded_at": "2026-10-06T06:28:34Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": ["rankings"],
@@ -3163,11 +4102,11 @@
         "status",
         "teams"
       ],
-      "bytes": 45416,
-      "sha256": "69e658ce6a5c25f2eded50d4e0a8207613e9d9e3f12a4f93674bd4e9bbbbd158",
+      "bytes": 45363,
+      "sha256": "4c0f68a08d05c7428f02a9d832956cded6af7dee85e3eb2ca2f44b2011decd67",
       "scoring": {
         "entries": 324,
-        "sha256": "15988a91316b3d2bfadcdc0fa078d1f8dcffcbc1c920dd7b886920d0c33209ce"
+        "sha256": "dd7634d0fc1c23c600a17f57c5f64a0ee3b3761ea125014b2f163c4a1db75030"
       },
       "format": {
         "teams": 12,
@@ -3198,6 +4137,42 @@
       }
     },
     {
+      "path": "recorded/season/players_wl.json",
+      "league": null,
+      "views": ["players_wl"],
+      "scoringPeriodId": null,
+      "matchupPeriodId": null,
+      "request": {
+        "route": "players",
+        "path": "/apis/v3/games/ffl/seasons/2026/players",
+        "query": "view=players_wl",
+        "filter": { "filterActive": { "value": true } }
+      },
+      "status": 200,
+      "headers": {
+        "cache-control": "max-age=300",
+        "content-type": "application/json;charset=utf-8",
+        "x-fantasy-filter-player-count": "2670"
+      },
+      "recorded_at": "2026-10-06T06:27:53Z",
+      "derived": false,
+      "scrub_rules_version": 1,
+      "pruned": [],
+      "part": null,
+      "withheld": ["$[16]"],
+      "replaced": [],
+      "incomplete": { "team_ids": [], "matchups_missing": 0, "rows_missing": 1 },
+      "stats_official": null,
+      "top_level_keys": [],
+      "bytes": 754210,
+      "sha256": "565710ece04db866e62c422fa9b1fc41d7a6c0f5fd86775eb620bea59b1556ea",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "format": null
+    },
+    {
       "path": "recorded/season/proTeamSchedules_wl.json",
       "league": null,
       "views": ["proTeamSchedules_wl"],
@@ -3214,7 +4189,7 @@
         "cache-control": "max-age=300",
         "content-type": "application/json;charset=utf-8"
       },
-      "recorded_at": "2026-10-06T03:04:32Z",
+      "recorded_at": "2026-10-06T06:27:51Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": [],
@@ -3224,8 +4199,8 @@
       "incomplete": { "team_ids": [], "matchups_missing": 0 },
       "stats_official": null,
       "top_level_keys": ["display", "settings"],
-      "bytes": 130779,
-      "sha256": "52a182ff39b44a9d1577f7e1461f0b2a8dff2aeceaa383a1cfbf3a00c349f14b",
+      "bytes": 130777,
+      "sha256": "92287c1c411fba26fa7b4cd90411eefb3337e4e6472a5892951ac7cabf73efdb",
       "scoring": {
         "entries": 0,
         "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
@@ -3249,7 +4224,7 @@
         "cache-control": "max-age=300",
         "content-type": "application/json;charset=utf-8"
       },
-      "recorded_at": "2026-10-06T03:04:34Z",
+      "recorded_at": "2026-10-06T06:27:52Z",
       "derived": false,
       "scrub_rules_version": 1,
       "pruned": [],
@@ -3279,5 +4254,23 @@
       "format": null
     }
   ],
-  "withheld_files": []
+  "withheld_files": [],
+  "synthetic_files": [
+    {
+      "path": "synthetic/errors/401-league-not-visible.json",
+      "synthetic": true,
+      "kind": "error",
+      "views": ["mSettings"],
+      "status": 401,
+      "basis": "research 03 §A.4 (the constant error envelope, recorded for 400/401/404) + §G.1 #1 (type AUTH_LEAGUE_NOT_VISIBLE, community-sourced); message prose is a placeholder",
+      "headers": { "content-type": "application/json;charset=utf-8" },
+      "top_level_keys": ["details", "messages"],
+      "bytes": 324,
+      "sha256": "5f4c4a2974202e6cf46b8ffbdd5bf50651e35b0c0c8818a4ff44ead39453f6a3",
+      "scoring": {
+        "entries": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    }
+  ]
 }
