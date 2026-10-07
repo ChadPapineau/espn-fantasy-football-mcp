@@ -624,6 +624,37 @@ describe("D5 espn_get_defense_profile", () => {
     expect(spied.data).toEqual((await ok("espn_get_defense_profile", { position: "WR" })).data);
   });
 
+  it("a refresh published between two weeks' statements: the window is read again as one statement", async () => {
+    // a turn between weeks lets a publish land mid-call (connections.ts re-opens a new version);
+    // one answer must read one file version, so a changed version re-reads the whole window
+    const real = world.services.datasets.playerWeeks;
+    const calls: number[][] = [];
+    const c = await withReaders({
+      playerWeeks: {
+        ...real,
+        lines: (ids, season, weeks, opts) => {
+          calls.push([...weeks]);
+          const r = real.lines(ids, season, weeks, opts);
+          // from the second single-week statement on, the file is a newer version
+          const bumped = calls.length >= 2 && weeks.length === 1;
+          return r.stamp === null || !bumped
+            ? r
+            : { rows: r.rows, stamp: { ...r.stamp, file_version: `${r.stamp.file_version}+1` } };
+        },
+      },
+    });
+    let e: Env;
+    try {
+      e = await ok("espn_get_defense_profile", { position: "WR" }, c.client);
+    } finally {
+      await c.close();
+    }
+    expect(calls.slice(0, 2).map((w) => w.length)).toEqual([1, 1]); // stopped at the change
+    expect(calls).toHaveLength(3);
+    expect((calls[2] ?? []).length).toBeGreaterThan(1); // the window, one statement
+    expect(e.data).toEqual((await ok("espn_get_defense_profile", { position: "WR" })).data);
+  });
+
   it("validation: window_weeks 4..17; a position outside the six", async () => {
     expect((await err("espn_get_defense_profile", { window_weeks: 3 })).code).toBe("VALIDATION");
     expect((await err("espn_get_defense_profile", { position: "LB" })).code).toBe("VALIDATION");

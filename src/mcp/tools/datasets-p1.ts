@@ -21,6 +21,7 @@ import type {
   NewsItem,
   PbpTeamProfileRow,
   PlayerUsageData,
+  PlayerWeekLine,
   UsageGameRow,
 } from "../../domain/analytics/types.js";
 import { newsClaim } from "../../domain/evidence/index.js";
@@ -693,12 +694,8 @@ export const getDefenseProfile = defineTool({
         // than one SQLite statement or one ≤ 20 ms CPU batch; plan 10 A16a; ADV OBJ-07)
         let li: InputStamp | null = null;
         const scored: { readonly gsis: string; readonly a: Allowed }[] = [];
-        for (const [k, wk] of weeks.entries()) {
-          await turn();
-          const r = ctx.services.datasets.playerWeeks.lines(gsis, season, [wk], { usage: false });
-          const stamp = requiredDataset(r, ctx.nowMs, allowStale);
-          if (k === 0) li = stamp; // one file, one stamp: every week reads the same file
-          for (const l of r.rows) {
+        const scoreRows = (rows: readonly PlayerWeekLine[]): void => {
+          for (const l of rows) {
             const pos = l.position === "FB" ? "RB" : l.position;
             if (!(pos in DEFENSE_POSITIONS) || pos === "D/ST" || l.opponent === null) continue;
             let pts: number;
@@ -718,6 +715,30 @@ export const getDefenseProfile = defineTool({
               },
             });
           }
+        };
+        let version: string | null = null;
+        let mixed = false;
+        for (const [k, wk] of weeks.entries()) {
+          await turn();
+          const r = ctx.services.datasets.playerWeeks.lines(gsis, season, [wk], { usage: false });
+          const stamp = requiredDataset(r, ctx.nowMs, allowStale);
+          const v = r.stamp?.file_version ?? null;
+          if (k === 0) {
+            li = stamp;
+            version = v;
+          } else if (v !== version) {
+            mixed = true; // a refresh published a new file between two weeks' statements
+            break;
+          }
+          scoreRows(r.rows);
+        }
+        if (mixed) {
+          // one answer reads one file version: the window again as one statement (the rare case)
+          scored.length = 0;
+          await turn();
+          const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks, { usage: false });
+          li = requiredDataset(r, ctx.nowMs, allowStale);
+          scoreRows(r.rows);
         }
         if (li !== null) inputs.push(li);
         await turn();
