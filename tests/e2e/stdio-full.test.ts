@@ -307,6 +307,13 @@ describe(
       const news = by.get("news") as { data: { items: unknown[] }; meta: { source: string[] } };
       expect(news.data.items.length).toBeGreaterThan(0);
       expect(news.meta.source.some((x) => x.startsWith("news:"))).toBe(true);
+      const defense = by.get("defense") as {
+        data: { defenses: { pace_plays_per_game: number | null; pass_rate: number | null }[] };
+        meta: { source: string[] };
+      };
+      expect(defense.meta.source).toContain("nflverse:pbp");
+      expect(defense.data.defenses[0]?.pace_plays_per_game).toBeGreaterThan(0);
+      expect(defense.data.defenses[0]?.pass_rate).toBeGreaterThan(0);
       const usage = by.get("usage") as { meta: { source: string[] } };
       expect(usage.meta.source).toContain("nflverse:stats_player_week");
       expect(usage.meta.source).toContain("ffopportunity:ep_weekly");

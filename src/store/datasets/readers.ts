@@ -715,6 +715,7 @@ export function createReaders(o: ReadersOptions): StoreReaders {
     weather,
     news: phase2.news,
     trending: phase2.trending,
+    pbp: phase2.pbp,
   };
 
   return { datasets, rosterWeekly, playerUniverse, nflPlayers };

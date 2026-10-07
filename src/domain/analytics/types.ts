@@ -1431,6 +1431,37 @@ export interface TrendingReader {
   latest(): DatasetResult<TrendingRow>;
 }
 
+/**
+ * One defence-week of the pbp team profile (nflverse pbp, by `defteam`; plan 07 D5): counts over the
+ * run/pass plays it faced, and the sums the rates and EPA are built from (tables.ts
+ * `PbpReader.teamProfile` — the shrinkage and windowing are the tool's).
+ */
+export interface PbpTeamProfileRow {
+  readonly nfl_team: NflTeam;
+  readonly season: number;
+  readonly week: Week;
+  readonly plays: number;
+  readonly dropbacks: number;
+  readonly sacks: number;
+  readonly interceptions: number;
+  readonly fumbles_lost: number;
+  readonly epa_dropback_sum: number | null;
+  readonly epa_rush_sum: number | null;
+  readonly rushes: number;
+  /** nflverse's pass rate over expectation, mean over the plays that carry it (percent points). */
+  readonly pass_oe_mean: number | null;
+  readonly pass_oe_n: number;
+}
+
+/** Read-only port over `nflverse:pbp` (the D5 team profile; added in Phase 2 — plan 10 §3.2). */
+export interface PbpReader {
+  teamProfile(
+    teams: readonly NflTeam[],
+    season: number,
+    weeks: readonly Week[],
+  ): DatasetResult<PbpTeamProfileRow>;
+}
+
 /** Every dataset port the analytics need, bundled for injection. */
 export interface DatasetReaders {
   readonly proSchedule: ProScheduleReader;
@@ -1442,6 +1473,8 @@ export interface DatasetReaders {
   readonly weather: WeatherReader;
   readonly news: NewsReader;
   readonly trending: TrendingReader;
+  /** The pbp team profile (optional: a reader bundle built before Phase 2 has none). */
+  readonly pbp?: PbpReader;
 }
 
 // --- projection stores (plan 08 §5, §9; plan 01 §9.2 `projection`, `espn_projection`) ---------------

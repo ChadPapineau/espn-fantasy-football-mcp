@@ -19,6 +19,7 @@ import type {
   DepthChartRow,
   NewsData,
   NewsItem,
+  PbpTeamProfileRow,
   PlayerUsageData,
   UsageGameRow,
 } from "../../domain/analytics/types.js";
@@ -588,6 +589,48 @@ export function matchupMultiplier(
   return { shrink_w: shrink, multiplier: Math.min(3, Math.max(0, m)) };
 }
 
+/** One defence's pbp profile over the window (raw rates; null where a denominator is 0). */
+export function teamProfileOf(rows: readonly PbpTeamProfileRow[]): {
+  readonly pace_plays_per_game: number | null;
+  readonly pass_rate: number | null;
+  readonly proe: number | null;
+  readonly sack_rate: number | null;
+  readonly takeaway_rate: number | null;
+  readonly epa_allowed: { readonly pass: number; readonly rush: number } | null;
+} {
+  const sum = (f: (r: PbpTeamProfileRow) => number): number => rows.reduce((a, r) => a + f(r), 0);
+  const games = new Set(rows.map((r) => r.week)).size;
+  const plays = sum((r) => r.plays);
+  const dropbacks = sum((r) => r.dropbacks);
+  const rushes = sum((r) => r.rushes);
+  const oeN = sum((r) => r.pass_oe_n);
+  const ratio = (a: number, b: number): number | null =>
+    b > 0 && Number.isFinite(a) ? Math.min(1, Math.max(0, a / b)) : null;
+  const epaPass = rows.every((r) => r.epa_dropback_sum !== null)
+    ? sum((r) => r.epa_dropback_sum ?? 0)
+    : null;
+  const epaRush = rows.every((r) => r.epa_rush_sum !== null)
+    ? sum((r) => r.epa_rush_sum ?? 0)
+    : null;
+  return {
+    pace_plays_per_game: games > 0 ? plays / games : null,
+    pass_rate: ratio(dropbacks, plays),
+    proe: oeN > 0 ? sum((r) => (r.pass_oe_mean ?? 0) * r.pass_oe_n) / oeN : null,
+    sack_rate: ratio(
+      sum((r) => r.sacks),
+      dropbacks,
+    ),
+    takeaway_rate: ratio(
+      sum((r) => r.interceptions + r.fumbles_lost),
+      plays,
+    ),
+    epa_allowed:
+      epaPass !== null && epaRush !== null && dropbacks > 0 && rushes > 0
+        ? { pass: epaPass / dropbacks, rush: epaRush / rushes }
+        : null,
+  };
+}
+
 /** D5 `espn_get_defense_profile`. */
 export const getDefenseProfile = defineTool({
   name: "espn_get_defense_profile",
@@ -695,6 +738,23 @@ export const getDefenseProfile = defineTool({
       for (let id = 1; id <= 34; id++) if (teamOfProTeamId(id) === t) return id;
       return null;
     };
+    // the pbp team profile (nflverse pbp by defteam): raw window rates — pace, pass rate, PROE,
+    // sack and takeaway rates, EPA allowed per dropback / rush (plan 07 D5)
+    const profileOf = new Map<NflTeam, ReturnType<typeof teamProfileOf>>();
+    const pbp = ctx.services.datasets.pbp;
+    if (pbp !== undefined && weeks.length > 0 && want.length > 0) {
+      const prof = pbp.teamProfile(want, season, weeks);
+      const pi = optionalDataset(prof, ctx.nowMs, allowStale);
+      if (pi !== null) {
+        inputs.push(pi);
+        for (const t of want)
+          profileOf.set(t, teamProfileOf(prof.rows.filter((r) => r.nfl_team === t)));
+      }
+    }
+    if (profileOf.size === 0)
+      warnings.push(
+        "nflverse:pbp not loaded: pace, pass rate, PROE, sack, takeaway and EPA are null",
+      );
     const defenses: DefenseProfileData["defenses"][number][] = want.map((t) => {
       const afpa: Record<string, DefenseProfileData["defenses"][number]["afpa"][string]> = {};
       let games = 0;
@@ -719,24 +779,22 @@ export const getDefenseProfile = defineTool({
               : { average: rr.average, rank: Math.trunc(rr.rank) },
         };
       }
+      const pr = profileOf.get(t) ?? null;
       return {
         nfl_team: espnTeamOf(t),
         window_games: games,
         afpa,
-        // pace, pass rate, PROE, pressure, sack and takeaway rates and EPA need the pbp team profile,
-        // which the store's readers do not serve yet: null, said so
-        pace_plays_per_game: null,
-        pass_rate: null,
-        proe: null,
+        pace_plays_per_game: pr?.pace_plays_per_game ?? null,
+        pass_rate: pr?.pass_rate ?? null,
+        proe: pr?.proe ?? null,
+        // pressure is not in the pbp subset the store keeps (tables.ts DS_PBP): null, said so
         pressure_rate: null,
-        sack_rate: null,
-        takeaway_rate: null,
-        epa_allowed: null,
+        sack_rate: pr?.sack_rate ?? null,
+        takeaway_rate: pr?.takeaway_rate ?? null,
+        epa_allowed: pr?.epa_allowed ?? null,
       };
     });
-    warnings.push(
-      "pace, pass rate, PROE, pressure, sack, takeaway and EPA profiles need the pbp team profile reader: null in this build",
-    );
+    warnings.push("pressure is not in the stored pbp subset: pressure_rate is null");
     // our numbers, rounded as every analytics number is (plan 07 C8): list budget, compact rows
     const data = roundDeep({
       defenses,

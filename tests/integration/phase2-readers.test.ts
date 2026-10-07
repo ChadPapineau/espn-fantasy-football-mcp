@@ -201,6 +201,27 @@ describe("PlayerWeekReader.lines gains the snap-count and pbp extras", () => {
   });
 });
 
+describe("PbpReader.teamProfile (the D5 profile, by defteam)", () => {
+  it("one row per defence-week of the excerpt's games; counts consistent; a prior season reads the history file", () => {
+    const pbp = store.datasets.pbp;
+    expect(pbp).toBeDefined();
+    const r = pbp?.teamProfile(["DET", "NO"], SEASON, [1, 2, 3]);
+    expect(r?.stamp?.source).toBe("nflverse:pbp");
+    // 2026_01_NO_DET: each side's defence faced the other's run/pass plays in week 1
+    expect(r?.rows.map((x) => `${x.nfl_team}:${String(x.week)}`).sort()).toEqual(["DET:1", "NO:1"]);
+    for (const x of r?.rows ?? []) {
+      expect(x.plays).toBeGreaterThan(40);
+      expect(x.dropbacks).toBeLessThanOrEqual(x.plays);
+      expect(x.sacks).toBeLessThanOrEqual(x.dropbacks);
+      expect(x.rushes).toBeLessThanOrEqual(x.plays);
+      expect(x.epa_dropback_sum === null || Number.isFinite(x.epa_dropback_sum)).toBe(true);
+    }
+    const prior = pbp?.teamProfile(["SEA", "DET"], 2024, [4]);
+    expect(prior?.stamp?.source).toBe("nflverse:pbp_history");
+    expect(prior?.rows).toHaveLength(2);
+  });
+});
+
 describe("NewsReader.recent", () => {
   it("merges the three feeds newest first; every string wrapped; refs carry match confidence", () => {
     const r = store.datasets.news.recent("2026-09-01T00:00:00.000Z", 200, null);

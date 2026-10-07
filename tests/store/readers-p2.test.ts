@@ -268,6 +268,58 @@ describe("TrendingReader.latest", () => {
   });
 });
 
+describe("PbpReader.teamProfile", () => {
+  it("aggregates the run/pass plays a defence faced; two-point tries excluded; never loaded without the file", async () => {
+    expect(s.datasets.pbp?.teamProfile(["MIA"], 2026, [1])).toEqual({ rows: [], stamp: null });
+    const play = (n: number, v: Record<string, string | number | null>) =>
+      full(DS_PBP, {
+        season: 2026,
+        week: 1,
+        game_id: "2026_01_BUF_MIA",
+        play_id: n,
+        posteam: "BUF",
+        defteam: "MIA",
+        two_point_attempt: 0,
+        sack: 0,
+        qb_dropback: 0,
+        rush_attempt: 0,
+        ...v,
+      });
+    await publishTables(pub, "nflverse:pbp", "b1", [
+      {
+        spec: DS_PBP,
+        rows: [
+          play(1, { play_type: "pass", qb_dropback: 1, epa: 0.5, pass_oe: 10 }),
+          play(2, { play_type: "pass", qb_dropback: 1, sack: 1, epa: -1.5, pass_oe: -4 }),
+          play(3, { play_type: "run", rush_attempt: 1, epa: 0.25, interception: 0 }),
+          play(4, { play_type: "pass", qb_dropback: 1, interception: 1, epa: -2 }),
+          play(5, { play_type: "run", rush_attempt: 1, two_point_attempt: 1, epa: 9 }),
+          play(6, { play_type: "punt", epa: 9 }),
+        ],
+      },
+    ]);
+    const r = s.datasets.pbp?.teamProfile(["MIA", "BUF"], 2026, [1]);
+    expect(r?.stamp?.source).toBe("nflverse:pbp");
+    expect(r?.rows).toEqual([
+      {
+        nfl_team: "MIA",
+        season: 2026,
+        week: 1,
+        plays: 4,
+        dropbacks: 3,
+        sacks: 1,
+        interceptions: 1,
+        fumbles_lost: 0,
+        epa_dropback_sum: -3,
+        epa_rush_sum: 0.25,
+        rushes: 1,
+        pass_oe_mean: 3,
+        pass_oe_n: 2,
+      },
+    ]);
+  });
+});
+
 describe("PlayerWeekReader.lines — the snap-count and pbp extras", () => {
   async function publishStats(
     season: number,
