@@ -1,7 +1,7 @@
 # Phase 2 acceptance — B1–B15, item by item
 
 Scope: plan 10 §3.2's acceptance list, as it stood when Stage B2's integration closed (2026-10-06,
-branch `build/phase-1`), updated after the B2a gate's round 1 (2026-10-07; the last section). Every row names its status and where the evidence lives. **met** = the
+branch `build/phase-1`), updated after the B2a gate's rounds 1 and 2 (2026-10-07; the last two sections). Every row names its status and where the evidence lives. **met** = the
 criterion holds and a test in CI holds it; **soft_reported** = the plan's soft number is reported
 (its hard parts are met); **needs_live** = it can only be shown against the live league or a live
 model run; **needs_time** = it needs weeks of data that do not exist yet. Exit gate (plan 10 §3.2):
@@ -18,7 +18,7 @@ replays every Skill's `core` and `full` tool sequences the same way;
 |---|---|---|
 | **B1** sources load through `eff refresh`; a renamed column fails naming it; `eff status` shows licence and age; off-season < 2 s, exit 0 | met | `tests/sources/nflverse/phase2-*.test.ts`, `tests/sources/{ffopportunity,sleeper,news}/`, `tests/cli/refresh.test.ts` (the off-season test now covers the history twins, gated on the current season), `tests/cli/store-commands.test.ts` (`eff status`: each source's licence and age). The allow-list carries the four feed hosts; the first real `eff refresh all` is the owner's |
 | **B2** usage trailing summaries for ≥ 95 % of rostered players; `routes_proxy` present and labelled; `xfp_gap` non-null wherever ffopportunity has the player | met for the rostered players D1 models (QB/RB/WR/TE/K) · **ruling requested** on the denominator | [`tests/integration/b2-usage-coverage.test.ts`](../../tests/integration/b2-usage-coverage.test.ts) and the stdio leg in `stdio-full`: on the seeded `fx-10h`, every team, **131 of 134** rostered QB/RB/WR/TE/K (97.8 %) carry a trailing window (the skill positions alone also ≥ 95 %); over **all 145** rostered entries it is 131/145 = **90.3 %**, because the 11 rostered D/ST have no player row in any usage source (D1: "no usage model for D/ST") — the all-rostered share is capped at 134/145 = 92.4 % by construction, so B2's "≥ 95 % of rostered players" cannot hold literally on any league with a rostered D/ST. The three uncovered players have no 2026 game in weeks 1–3. The seed now carries [`fixtures/fx10h-usage/`](../../fixtures/fx10h-usage/ATTRIBUTION.md) (the usage rows of every fx-10h rostered QB/RB/WR/TE/K the shared excerpts lack, from the 2026-10-06 release files); before, the excerpts covered 23 of 145. `routes_proxy` is on every game row with the note "routes are a snap-share proxy (04 #3)" (a value where the pbp excerpt covers the team-week: team dropbacks); `xfp_gap` non-null on every game row ffopportunity covers (207 of 210 rows read) |
-| **B3** waiver detection | soft_reported (hard met) | [`phase2-analytics.md`](phase2-analytics.md) §B3: the usage detector's precision is about half the points-only detector's at equal picks with the cold-start thresholds (Phase 3 tunes them); hard: numeric evidence on every signal, `percent_change` never a signal, `value_basis: ensemble` with the Π rule holding |
+| **B3** waiver detection | soft_reported (hard met) | [`phase2-analytics.md`](phase2-analytics.md) §B3: the usage detector's precision is about half the points-only detector's at equal picks with the cold-start thresholds (Phase 3 tunes them); hard: numeric evidence on every signal, `percent_change` never a signal, `value_basis: ensemble` with the Π rule holding — at the tool level with signals present since gate round 2 (`tests/mcp/p1-tools.test.ts`, "B3 hard parts with signals present": on the recorded leagues E5's free-agent candidates carry no usage rows, so the earlier tool-level loops ran over empty `signals[]`) |
 | **B4** demand model | soft_reported (hard met) | §B4 there: two runs on `fx-10h` are not evidence; `learned.second_claim_at_new_position` flips from null on a same-run-pair fixture |
 | **B5** trade evaluator | soft_reported (hard met) | §B5 there: Δ-sign accuracy is not computable (no recorded trade on the fixtures) — measured on the live league as trades happen; hard: implied drop on every uneven trade, `fair` iff the interval spans 0, ΔU under the configured reading and under `both` on `seeding-unknown`, the deadline from `tradeSettings` |
 | **B6** cascade | soft_reported (hard met) | §B6 there: the top-beneficiary hit rate does not yet beat next-man-up; hard: `hypothesis_only` rule, shares never above the vacated share, IR eligibility from the structured status only |
@@ -41,3 +41,49 @@ replays every Skill's `core` and `full` tool sequences the same way;
 - **The injury-cascade sequences price only the available beneficiaries.** With the fx-10h usage rows the cascade now names beneficiaries, and the Lane 1 sequence passed every one to `espn_analyze_waivers` — rostered ones included, against SKILL.md step 5 ("the available beneficiaries' `player_id`s"), so a roster of only rostered beneficiaries was a NOT_FOUND. `$ids` takes `where` (`{ "status": ["FREEAGENT", "WAIVERS"] }`), checked by `check:skills` and documented in `skills/README.md`.
 - **A latent overflow fixed.** fast-check found `toStatLine` passing a ±Infinity sum of two finite FG-miss buckets; overflowed sums are now dropped and reported.
 
+
+## Gate round 2 (2026-10-07) — what the fixer changed, and what stays open
+
+The gate found no code defect; it reported three hard items it could not show met as written
+(B2's denominator, B7's one cell, B11 Lane 2 / B15) and four soft ones. The soft ones were fixed at
+their root where a fix exists:
+
+- **Stall headroom (A16a).** A CPU profile of the built server on the seeded `fx-10h`, aligned with
+  a 1 ms gap probe, located the long turns. (1) `runCooperative` paced the next chunk from the last
+  chunk alone, so cheap steps ran up to the budget and then a heavy one (the trade partner search's
+  first package per team, whose roster is not yet memoised): 25–32 ms turns. The prediction now
+  takes the larger of the last pace and the longest chunk timed so far in the run, so a batch passes
+  the budget only on a chunk longer than every chunk before it (`tests/domain/analytics/kernels.test.ts`:
+  a fast-check property and the trade-shaped case; both fail on the old pacing). (2)
+  `COOPERATIVE.batchMs` 16 → 12 ms (plan 03 §1.2 allows ≤ 20). (3) D5 `espn_get_defense_profile` read and
+  scored its whole window (every NFL rostered player × 10 weeks by default) as one macrotask:
+  40–55 ms on `fx-10h`, far more on a live mid-season window — a plan 03 §1.2 breach the suite did
+  not measure. It now reads one statement per week, each scored in its own turn, re-sorted to the
+  single statement's order (the numbers cannot move; tested), with a re-read as one statement if a
+  publish lands between two weeks; D6 extracts claims five items per turn. (4) `latency.test.ts`
+  now also holds the warm P1 reads to the 50 ms bound. Measured after the fix (process suite on
+  this Mac): `core` analytics 17.1 ms, `full` analytics 28 ms, warm P1 reads 17.1 ms (the gate's
+  run: 44.8 ms; the scratch probe over three rounds per call: 22–29 ms, D5 22–33 ms cold).
+- **B3 at the tool level.** A positive control (`tests/mcp/p1-tools.test.ts`, "B3 hard parts with
+  signals present") gives E5's candidates a crosswalk pair and per-week rows through the dataset
+  ports and requires `xfp_gap` (and `snap_jump` when four weeks are read, as on league-a) to fire,
+  then checks every candidate's signals
+  (finite value, finite numeric evidence, never `percent_change`, which stays in `demand`). On the
+  recorded leagues themselves the free-agent candidates still have no usage rows — B3's numbers
+  are the historical-season backtest's (`phase2-analytics.md`), not `fx-10h`'s.
+- **The supplement's UUIDs.** `fixtures/fx10h-usage/ATTRIBUTION.md` carries the note
+  `fixtures/nflverse/ATTRIBUTION.md` has: its 1,008 UUID-shaped values are nflverse's public player
+  ids (`sportradar_id`, `smart_id`), never member GUIDs; `fx10h-usage.test.ts` holds the claim.
+
+Open, for the orchestrator or the owner (no code change closes them):
+
+- **B2's denominator** — 131/134 = 97.8 % of the rostered players D1 models; 131/145 = 90.3 % over
+  every rostered entry, capped at 92.4 % by the 11 rostered D/ST no usage source covers.
+- **B7's one cell** — 2024 TE rank 3: 3.593 under the league's scoring vs the table's 3.2; 3.193 on
+  research 05's nflverse basis, where all 36 cells are within 0.3.
+- **B11 Lane 2 and B15's graders** — one `claude plugin eval` run (`npm run build && npm run
+  build:plugin-evals -- --seed --seed-datasets`, 274 cases): it spends the owner's tokens and
+  publishes its report to claude.ai by default, so it needs the owner's go.
+- **B8's held-out set** — 6 held-out items (16 claims pooled) is a sanity check, not an estimate;
+  growing it needs new captures of the public feeds over several days, by an engineer whose brief
+  allows the fetch, labelled before `rules_v1` runs on them (`fixtures/news/labelled/README.md`).
