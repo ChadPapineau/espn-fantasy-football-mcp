@@ -6,9 +6,13 @@
 // 05 §4.1's table within 0.3 points per game and its flex split (2025 RB 7 / WR 3, 2024 WR 6 / RB 4,
 // TE 0) exactly; the season-totals variant and §3.2's QB totals as a cross-check; the full E4
 // engine (`analyzeReplacement`) on the same season agrees with the kernel. One table cell is a
-// recorded discrepancy (2024 TE rank 3: the table prints 3.2, the release file gives 3.6 — the
+// recorded discrepancy (2024 TE rank 3: the table prints 3.2, the shipped score gives 3.6 — the
 // next rank is 3.1; every baseline and the other 35 cells agree within 0.3), asserted at its
-// measured value so a change in either direction is seen.
+// measured value so a change in either direction is seen. Its cause is the scoring basis, not the
+// engine: that TE's week-2 own fumble-recovery TD (ESPN stat 63, 6 points, which the league
+// scores) is not in nflverse's line, which research 05 scored — 6 points over 15 games is the 0.4;
+// on research 05's own basis (`researchBasis`) every cell, this one included, is within 0.3. The
+// cell awaits an orchestrator ruling (plan 10 B7 against the table as written).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -30,6 +34,7 @@ import {
   RESEARCH_05_TABLE,
   entriesOf,
   playerSeasons,
+  researchBasis,
   type PlayerSeason,
 } from "./helpers/replacement-data.js";
 import { BACKTEST_POSITIONS, ROOT, loadBacktestSeason } from "./helpers/waiver-excerpt.js";
@@ -37,7 +42,7 @@ import { referenceSettings, rowPoints } from "./helpers/waivers.js";
 
 /** Research 05 §4.1's tolerance (plan 10 B7). */
 const PPG_TOL = 0.3;
-/** The one table cell the release file does not reproduce (see the header). */
+/** The one table cell the shipped (league) scoring does not reproduce (see the header). */
 const KNOWN_CELL = { season: 2024, position: "TE", rank: 3, table: 3.2, measured: 3.6 } as const;
 
 /** fx-10h's own roster settings — the reference league (research 05 §0). */
@@ -163,6 +168,22 @@ describe.each([2025, 2024] as const)("research 05 §4.1, %i (per game, ≥ 8 GP)
           expect(cell).toBe(KNOWN_CELL.table);
           expect(Math.abs(got - KNOWN_CELL.measured)).toBeLessThan(0.05);
         } else expect(Math.abs(got - cell), `${pos} rank ${String(rank)}`).toBeLessThan(PPG_TOL);
+      }
+    }
+  });
+
+  it("on research 05's own scoring basis every VOR cell is within 0.3 ppg — the recorded cell included", () => {
+    // the one cell the shipped score misses by more than 0.3 is a scoring-definition difference,
+    // not an engine defect: research 05 §4.1 scored nflverse's line (a return TD counted, an own
+    // fumble-recovery TD not); the league — and the shipped engine — score ESPN stat 63 and no
+    // return TD. On the research basis the table reproduces cell for cell.
+    const research = playerSeasons(season, settings, researchBasis) ?? [];
+    const a = allocate(entriesOf(research, "per_game"), allocationPlanOf(roster), 10);
+    for (const pos of BACKTEST_POSITIONS) {
+      const ranked = a.ranked[pos] ?? [];
+      for (const [rank, cell] of table.vor[pos]) {
+        const got = (ranked[rank - 1]?.value ?? Number.NaN) - (a.baseline[pos] ?? 0);
+        expect(Math.abs(got - cell), `${pos} rank ${String(rank)}`).toBeLessThan(PPG_TOL);
       }
     }
   });

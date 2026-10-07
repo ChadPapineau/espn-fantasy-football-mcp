@@ -92,9 +92,14 @@ export interface PlayerSeason {
 /**
  * Every QB/RB/WR/TE player-season of the committed excerpt, scored row by row (a game = one weekly
  * row; the position is the player's most frequent `position_group`, ties to the first seen). Null
- * while the season is not committed.
+ * while the season is not committed. `adjust` adds points to a row's score (a different scoring
+ * basis, e.g. research 05's — see `researchBasis`).
  */
-export function playerSeasons(season: number, settings: ScoringSettings): PlayerSeason[] | null {
+export function playerSeasons(
+  season: number,
+  settings: ScoringSettings,
+  adjust: (row: Readonly<Record<string, unknown>>) => number = () => 0,
+): PlayerSeason[] | null {
   const rows = loadBacktestSeason(season, REPLACEMENT_DATA_DIR);
   if (rows === null) return null;
   const acc = new Map<
@@ -108,7 +113,7 @@ export function playerSeasons(season: number, settings: ScoringSettings): Player
     const e = acc.get(id) ?? { votes: new Map<BacktestPosition, number>(), games: 0, points: 0 };
     e.votes.set(pos, (e.votes.get(pos) ?? 0) + 1);
     e.games += 1;
-    e.points += rowPoints(r, settings);
+    e.points += rowPoints(r, settings) + adjust(r);
     acc.set(id, e);
   }
   const out: PlayerSeason[] = [];
@@ -118,6 +123,22 @@ export function playerSeasons(season: number, settings: ScoringSettings): Player
     if (best !== null) out.push({ id, position: best, games: e.games, points: e.points });
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/**
+ * Research 05 §4.1's scoring basis (its `qb_vor.py`: nflverse `fantasy_points` + 1 per pass TD +
+ * 0.5 per reception) as an adjustment to the shipped score: it counts a return TD (nflverse
+ * `special_teams_tds`, which the reference league does not score) and not an own fumble-recovery
+ * TD (ESPN stat 63, which the league scores at 6). The shipped engine follows the league.
+ */
+export function researchBasis(row: Readonly<Record<string, unknown>>): number {
+  const n = (k: string): number => {
+    const v = row[k];
+    return typeof v === "number" ? v : 0;
+  };
+  return (
+    6 * n("special_teams_tds") - 6 * Math.min(n("fumble_recovery_tds"), n("fumble_recovery_own"))
+  );
 }
 
 /** The allocation entries of a season: per game (≥ MIN_GAMES) or season totals (every player). */
