@@ -286,6 +286,11 @@ const tradeSideSchema = playerIdsSchema.refine((a) => a.length <= BOUNDS.tradeSi
   message: "too_big",
 });
 
+// PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): a write module would let the
+// user act on an accepted evaluation through `espn_prepare_trade` / `espn_commit_trade` (plan 07
+// §3.F F5–F6, the later gate). Nothing here prepares, proposes or sends a trade: the evaluation is
+// read-only and the user makes any offer in the ESPN app.
+
 /** E6 `espn_analyze_trade`. */
 export const analyzeTradeTool = defineTool({
   name: "espn_analyze_trade",
@@ -405,6 +410,10 @@ export const analyzeTradeTool = defineTool({
       if (r.team.team_id !== me) others.push(await teamOfRoster(r, r.team.team_id === partnerId));
     if (args.offer !== undefined && mGot === null)
       warnings.push("season simulation unavailable: ΔU from the cold-start PF-per-win rate");
+    if (args.risk !== "auto")
+      warnings.push(
+        "risk preference is not modelled: Δ and its [p10, p90] interval are reported for you to weigh",
+      );
     const pool = await poolOf(ctx, b.w, inputs, warnings);
     const out = await analyzeTrade({
       roster: b.slots,

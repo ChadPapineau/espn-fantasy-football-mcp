@@ -871,6 +871,12 @@ describe("E6 espn_analyze_trade", () => {
     expect(
       (both.data as { delta_u: { reading: string; by_reading: unknown[] } }).delta_u.by_reading,
     ).toHaveLength(2);
+    const risky = await ok("espn_analyze_trade", {
+      offer: { partner_team_id: 2, give: give.slice(0, 1), get },
+      risk: "floor",
+      seed: 4,
+    });
+    expect(risky.warnings.some((w) => w.includes("risk preference is not modelled"))).toBe(true);
   }, 60_000);
 
   it("partner search returns proposals keyed by team id with the give/get the Skill re-offers", async () => {

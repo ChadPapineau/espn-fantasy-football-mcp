@@ -1265,6 +1265,8 @@ export const analyzeWaiversTool = defineTool({
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
     };
+    // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; D11): the claim list is advice only; a write module
+    // would hand it to `espn_prepare_transaction` (plan 07 §3.F F3–F4). No claim is ever sent here.
     // P1 (EFF_TOOLSET=full): E1 values (`ensemble`), usage signals, rival rosters, Sleeper's
     // secondary trend, the learned mechanics and FAAB bidding (plan 07 E5 P1; plan 10 B3, B4)
     const out = !p1

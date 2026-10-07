@@ -1,5 +1,5 @@
 {
-  "$comment": "The production tool lists (plan 07 C3; plan 10 A3a): `core` = the 18 P0 tools in registry order (EFF_TOOLSET=core, the default); `full` = the whole catalog EFF_TOOLSET=full registers once Stage B2 builds the 16 P1 tools (registry order: the 18, then the P1 slots). Until then `full` registers only the built tools, in this order (tests/mcp/server.test.ts). The fixture-mode-only espn_debug_echo is never listed here.",
+  "$comment": "The production tool lists (plan 07 C3; plan 10 A3a, B10): `core` = the 18 P0 tools in registry order (EFF_TOOLSET=core, the default); `full` = all 34 read tools EFF_TOOLSET=full registers (registry order: the 18, then the 16 P1 tools — tests/mcp/server.test.ts). No write tool is ever listed (PHASE W SEAM — NOT IMPLEMENTED). The fixture-mode-only espn_debug_echo is never listed here.",
   "core": [
     "espn_get_league",
     "espn_get_standings",
