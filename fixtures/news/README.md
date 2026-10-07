@@ -31,6 +31,22 @@ Only the items that were new since the first capture: 1 from RotoWire and 5 from
 new item was removed for privacy — it named a person's health). Same treatment as above. They back
 `labelled/holdout.json`.
 
+## UUID-shaped values are public CBS article ids, not member GUIDs
+
+CBS Sports' feed gives every item a `<guid isPermaLink="false">` that is a bare UUID (35 in
+`captured/cbs.xml`, 5 in `captured/holdout-cbs.xml`). They are CBS's public identifiers of its
+articles, kept verbatim like every guid here — not ESPN member GUIDs (an ESPN member id is always a
+brace-wrapped SWID GUID: research 03 §B.3) and never anyone's fantasy-league identity. The same
+values recur where those items are referred to: the `guid` of each CBS item in
+`labelled/items.json` and `labelled/holdout.json`, and one assertion in
+`tests/sources/news/xml.test.ts`. The ESPN rules of `scripts/dev/scan-secrets.mjs` and
+`.gitleaks.toml` match the brace or `SWID` forms only, so they pass these by design; the
+"every GUID in the fake range" check applies to ESPN fixtures (`fixtures/espn/`), not to these
+captures. The same note stands for nflverse's player ids in `../nflverse/ATTRIBUTION.md` and
+`../fx10h-usage/ATTRIBUTION.md`; `tests/sources/news/fixture-ids.test.ts` holds this one (every
+UUID-shaped value under `fixtures/news/` is a CBS item's guid, none brace-wrapped, none in the
+fixture pseudonym range `{00000000-0000-4000-8000-0000000000NN}`).
+
 ## `labelled/` — the plan 10 B8 hand-labelled set
 
 See [`labelled/README.md`](labelled/README.md): the labelling rules, the measured precision, and
