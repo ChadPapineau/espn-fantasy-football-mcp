@@ -92,6 +92,49 @@ function lineOf(values: Readonly<Record<Canonical, number>>, positionId: number)
   };
 }
 
+/** Most recent trailing games the opportunity rates are read from (E1's trailing window). */
+export const OPPORTUNITY_WINDOW_GAMES = 6;
+
+/**
+ * A player's opportunity inputs from E1's own trailing lines (the nflverse stat lines through the
+ * plan 08 translator — targets, carries, receptions, yards, touchdowns): the most recent
+ * OPPORTUNITY_WINDOW_GAMES lines, per-game volume and the efficiency rates (null where a denominator
+ * is 0 — playerSimDist then uses its priors). Null for a position the simulation does not cover or
+ * with no line at all; `hasOpportunityInputs` holds the games floor.
+ */
+export function opportunityFromLines(
+  position: string,
+  positionId: number,
+  lines: readonly { readonly season: number; readonly week: number; readonly line: StatLine }[],
+): OpportunityInputs | null {
+  if (!SIM_POSITIONS.has(position) || lines.length === 0) return null;
+  const recent = [...lines]
+    .sort((a, b) => b.season - a.season || b.week - a.week)
+    .slice(0, OPPORTUNITY_WINDOW_GAMES);
+  const sum = (k: Canonical): number =>
+    recent.reduce((acc, x) => {
+      const v = x.line.values[k];
+      return acc + (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    }, 0);
+  const g = recent.length;
+  const targets = sum("targets");
+  const carries = sum("rush_att");
+  const rec = sum("rec");
+  const per = (a: number, b: number): number | null => (b > 0 ? a / b : null);
+  return {
+    position,
+    position_id: positionId,
+    games: g,
+    targets_pg: targets / g,
+    carries_pg: carries / g,
+    catch_rate: per(rec, targets),
+    yards_per_reception: per(sum("rec_yd"), rec),
+    yards_per_carry: per(sum("rush_yd"), carries),
+    td_per_target: per(sum("rec_td"), targets),
+    td_per_carry: per(sum("rush_td"), carries),
+  };
+}
+
 /**
  * The `player_sim` distribution of one player-week, or null when the opportunity inputs do not
  * exist. `espn_mean` anchors the mean (v1); `p_active` sets the zero mass (floored as in E1).

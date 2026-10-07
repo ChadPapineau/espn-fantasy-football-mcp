@@ -272,6 +272,9 @@ export async function project(
     include_stat_line: o.include_stat_line === true,
     deadline_ms: cpuDeadlineOf(ctx),
     inputs: toDataInputs(inputs, ctx.nowMs),
+    // the P1 player_sim basis where the opportunity inputs exist (plan 10 §3.2): under full only,
+    // so the P0 core toolset's projections are unchanged
+    player_sim: ctx.options.toolset === "full",
   });
 }
 

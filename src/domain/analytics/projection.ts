@@ -5,7 +5,9 @@
 // draws at a shrunk trailing rate) — and the 25 % disagreement flag; research 05 §5 Projections).
 // Samples are drawn in cooperative batches under the 8 s CPU deadline (plan 01 §1.1; `partial`
 // with the completed count). Pure: settings, engine, clock, rng and pacer are injected. New here
-// (the sibling's v1-trailing had no native projection); its sampler shape is ported.
+// (the sibling's v1-trailing had no native projection); its sampler shape is ported. P1 (plan 10
+// §3.2): with `player_sim` an RB/WR/TE week whose trailing lines hold ≥ 3 games takes the volume ×
+// efficiency simulation's distribution (playerSim.ts) around the same ESPN mean.
 import type { Clock, Rng } from "../clock.js";
 import { GAME_DAY_WINDOW_MS } from "./types.js";
 import { gamesOfWeek, kickoffMsOf, opponentOf, teamGame } from "../league/schedule.js";
@@ -35,6 +37,8 @@ import {
   TURNOVER_STATS,
 } from "./constants.js";
 import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
+import { PLAYER_SIM } from "./marketConstants.js";
+import { opportunityFromLines, playerSimDist } from "./playerSim.js";
 import { AnalyticsError, ensure } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs } from "./inputs.js";
 import {
@@ -150,6 +154,13 @@ export interface ProjectionRequest {
   readonly include_stat_line?: boolean;
   readonly stamps?: readonly AnyStamp[];
   readonly inputs?: readonly InputFreshness[];
+  /**
+   * The P1 `player_sim` basis (plan 10 §3.2 "E1's player_sim basis where the opportunity inputs
+   * exist"; playerSim.ts): an RB/WR/TE week with ≥ PLAYER_SIM.minGames trailing games gets the
+   * volume × efficiency simulation's distribution around the SAME mean (ESPN's — weight_espn 1.0);
+   * the rest stay `position_cv`. Default false (the P0 `core` toolset is unchanged).
+   */
+  readonly player_sim?: boolean;
 }
 
 /** What the other engines need from one projected week. */
@@ -544,6 +555,30 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
   // post-processing (quantile sorts, ROS sums) is cooperative too: one player per step
   type Plan = (typeof plans)[number];
   const build = ({ t, tr, assumptions, weeksOut, espnMissing }: Plan): ProjectedPlayer => {
+    // the P1 player_sim basis (see ProjectionRequest.player_sim): E1's own trailing lines
+    const opportunity =
+      req.player_sim === true
+        ? opportunityFromLines(
+            t.position,
+            t.position_id,
+            t.trailing.filter(
+              (l) => (l.season === req.season && l.week < req.week) || l.season === req.season - 1,
+            ),
+          )
+        : null;
+    const simOf = (x: (typeof weeksOut)[number]): Dist | null => {
+      if (opportunity === null || x.task === null || k === 0) return null;
+      return (
+        playerSimDist({
+          opportunity,
+          settings,
+          espn_mean: x.mean,
+          p_active: x.task.pShape,
+          n_sims: Math.min(k, PLAYER_SIM.defaultSamples),
+          rng: req.rng.fork(`e1_sim:${String(t.player_id ?? t.gsis_id ?? "")}:${String(x.w)}`),
+        })?.dist ?? null
+      );
+    };
     const weeksP: ProjectedWeek[] = weeksOut.map((x) => ({
       ...x.info,
       dist:
@@ -551,7 +586,7 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
           ? x.mean === 0
             ? zeroDist("position_cv")
             : { ...zeroDist("position_cv"), mean: round(x.mean), p_zero: 0 }
-          : distFromSamples(x.task.samples.subarray(0, k), "position_cv", x.mean),
+          : (simOf(x) ?? distFromSamples(x.task.samples.subarray(0, k), "position_cv", x.mean)),
     }));
     const pw: ProjectionWeek[] = weeksP.map((w) => {
       const pct =
