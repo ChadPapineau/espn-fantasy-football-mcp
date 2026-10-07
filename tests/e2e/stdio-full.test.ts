@@ -347,6 +347,34 @@ describe(
       expect(status.data.credential.present).toBe(false);
       expect(status.data.capabilities.write.lineup).toBe(false);
 
+      // B2 over stdio, every team (tests/integration/b2-usage-coverage.test.ts holds the details):
+      // ≥ 95 % of the rostered players D1 models (QB/RB/WR/TE/K) carry a trailing window; a D/ST
+      // never does (no player row in any usage source)
+      let modelled = 0;
+      let withWindow = 0;
+      for (let team = 1; team <= 10; team++) {
+        const r = await client.callTool({
+          name: "espn_get_player_usage",
+          arguments: { players: { team_id: team }, window: 4 },
+        });
+        expect(r.isError, `usage team ${String(team)}`).not.toBe(true);
+        const players = (
+          bodyOf(r) as {
+            data: { players: { position: string; trailing: { window_games: number } }[] };
+          }
+        ).data.players;
+        for (const p of players) {
+          if (p.position === "D/ST") {
+            expect(p.trailing.window_games).toBe(0);
+            continue;
+          }
+          modelled++;
+          if (p.trailing.window_games > 0) withWindow++;
+        }
+      }
+      expect(modelled).toBeGreaterThanOrEqual(130);
+      expect(withWindow / modelled).toBeGreaterThanOrEqual(0.95);
+
       const echo = await client.callTool({ name: DEBUG_TOOL, arguments: {} });
       expect(echo.isError).not.toBe(true);
       const { exit, ms } = await s.stop();

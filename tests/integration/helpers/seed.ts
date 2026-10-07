@@ -4,7 +4,9 @@
 // universe from the recorded season views, the nflverse Phase-1 and Phase-2 excerpts and their
 // history twins, ffopportunity's expected points, Sleeper's trending lists and the three captured
 // RSS feeds — exactly as `eff refresh all` would wire them (src/cli/refresh.ts DEFAULT_REGISTRY,
-// defaultSeasons, newsInputs), then the crosswalk is rebuilt. The weather job is left out (its
+// defaultSeasons, newsInputs), then the crosswalk is rebuilt. The four usage files (weekly rosters,
+// player stats, snap counts, expected points) carry fixtures/fx10h-usage's rows too, so every
+// rostered QB/RB/WR/TE/K of the fixture league has the usage a live refresh would load (plan 10 B2). The weather job is left out (its
 // venues need the coming week's outdoor games; Phase 1's own suites cover it). Used by the in-process
 // integration suite, the stdio end-to-end suite (a seeded cache the built server then serves) and
 // the plugin-eval seed.
@@ -28,6 +30,7 @@ import { storeFactory } from "../../../src/store/index.js";
 import type { Store } from "../../../src/store/types.js";
 import { publishEspnDatasets } from "../../mcp/helpers/world.js";
 import { fakeHttp, type Route } from "../../sources/nflverse/helpers/harness.js";
+import { withFx10hUsage } from "../../sources/nflverse/helpers/fx10h-usage.js";
 import { allFixtureRoutes } from "../../sources/nflverse/helpers/phase2-fixtures.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
@@ -40,7 +43,7 @@ export const SEED_JOBS: readonly RefreshJob[] = REFRESH_JOBS_BUILT.filter(
 
 /** Every committed fixture at the URL it stands in for (release files, Sleeper, the RSS feeds). */
 export function seedRoutes(): Map<string, Route> {
-  const routes = new Map<string, Route>(allFixtureRoutes());
+  const routes = new Map<string, Route>(withFx10hUsage(allFixtureRoutes()));
   routes.set(sleeperTrendingUrl("add"), bytes("fixtures/sleeper/trending-add.json"));
   routes.set(sleeperTrendingUrl("drop"), bytes("fixtures/sleeper/trending-drop.json"));
   for (const f of Object.values(NEWS_FEEDS))
