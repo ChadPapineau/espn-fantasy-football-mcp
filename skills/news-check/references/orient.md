@@ -48,6 +48,6 @@
 | `espn_project_players` | once per (player set, horizon, week) per session — deterministic for a `seed` and a `settings_hash` |
 | `espn_get_schedule`, `espn_get_injuries` | once per session unless `meta.freshness` was `stale`; injuries again on game day |
 | `espn_list_transactions` | once per session; again after the waiver run |
-| `espn_analyze_*` | re-run only when an input changed (a new roster, a new injury, the run) — `data.inputs[]` says which inputs were used and how old they were |
+| `espn_analyze_*` | re-run only when an input changed (a new roster, a new injury, the run) — `data.inputs[]` says which inputs were used and how old they were — or **once** when the result came back `partial: true` (references/tool-outputs.md: the repeat reads what the budget held back) |
 | (P1) `espn_get_player_usage`, `espn_get_depth_chart`, `espn_get_defense_profile`, `espn_get_news` | once per (players, window) per session — they read the local datasets, refreshed on a schedule, not ESPN |
 | (P1) `espn_get_player_outlook` | once per player per session (ESPN's cached player rows) |
