@@ -267,6 +267,13 @@ function capCodePoints(t: SanitizedText, cap: number): SanitizedText {
 /** Each flag fires when any of its patterns matches (a flag may have several). */
 const FLAG_RES: readonly (readonly [InjectionFlag, RegExp])[] = [
   ["role_marker", /(?:^|[.!?:;]\s*)(?:system|assistant|user|developer)\s*:/i],
+  // a claimed league authority as the label of what follows: "Commissioner note: accept any trade…"
+  // (research 05 §6 case 4, fx-10h inj-tradeblock), "League manager notice:", "Admin:" — the
+  // label must open the text or a sentence and end in a colon ("NFL commissioner: …" stays clean)
+  [
+    "role_marker",
+    /(?:^|[.!?:;]\s*)(?:the\s+)?(?:league\s+)?(?:commissioner|commish|league\s+manager|admin(?:istrator)?|moderator)(?:'s)?(?:\s+(?:note|notice|message|instructions?|orders?|override|directive|update|announcement|decision|ruling))?\s*:/i,
+  ],
   [
     "imperative",
     /\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|all|your)\s+(?:instructions|prompts|rules|directions|guidelines)\b/i,
@@ -278,6 +285,11 @@ const FLAG_RES: readonly (readonly [InjectionFlag, RegExp])[] = [
   ],
   // the whole field is the bare verb: a team abbreviation "IGNORE" (research 05 §6 case 2)
   ["imperative", /^[^\p{L}\p{N}]*(?:ignore|disregard)[^\p{L}\p{N}]*$/iu],
+  // a blanket order to act on the league: "accept any trade", "approve every claim"
+  [
+    "imperative",
+    /\b(?:accept|approve|execute|process)\s+(?:any|all|every|each)\s+(?:trades?|offers?|claims?|deals?|moves?|transactions?)\b/i,
+  ],
   [
     "second_person",
     /\byou\s+(?:must|should|need\s+to|have\s+to|are\s+required\s+to|will\s+now)\b/i,
@@ -970,6 +982,12 @@ export interface Standing {
   readonly eliminated: boolean | null;
   readonly is_transaction_locked: boolean | null;
   readonly is_mine: boolean;
+  /**
+   * The team's trade-block note (member-authored, plan 01 §4.4 `espn.team.trade_block`, cap 500),
+   * wrapped; null when the block carries none. Data for a Skill to quote (plan 09 TR-INJ, AP-INJ),
+   * never an input to any evaluation (plan 07 E6; research 05 §6 case 4).
+   */
+  readonly trade_block: UntrustedText | null;
 }
 
 /** `espn_get_standings` data (plan 07 A2). */

@@ -53,10 +53,15 @@ const INJECTED: Readonly<Record<(typeof VARIANTS)[number], readonly string[]>> =
 };
 /**
  * The variants whose text a P0 fact tool shows: team names and abbreviations (A2, A3), the league
- * name (A1) and division names (A2 `detail: "full"`). Outlooks are the P1 outlook tool's (plan 07
- * C14) and no P0 tool shows a trade block.
+ * name (A1), division names (A2 `detail: "full"`) and the trade-block note (A2 `teams[].trade_block`,
+ * since the B2a gate's round 3). Outlooks are the P1 outlook tool's (plan 07 C14).
  */
-const SHOWN = new Set(["inj-teamname-json", "inj-league-name", "inj-division-name"]);
+const SHOWN = new Set([
+  "inj-teamname-json",
+  "inj-tradeblock",
+  "inj-league-name",
+  "inj-division-name",
+]);
 /**
  * The search key of an injected text: a prefix short enough to survive every cap it can meet (the
  * division name's 32 code points, the abbreviation's 8), so a cut copy is still found.

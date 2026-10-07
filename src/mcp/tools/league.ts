@@ -1,6 +1,7 @@
 // league.ts — the ESPN-fact league tools (plan 07 §3.A): A1 espn_get_league (the settings digest
 // incl. the seeding reading flagged until confirmed — C12 — and the golden state), A2
-// espn_get_standings, A3 espn_get_scoreboard, A4 espn_get_live_scoreboard (ESPN's live numbers,
+// espn_get_standings (each team's trade-block note wrapped, `espn.team.trade_block` — plan 01 §4.4;
+// data a Skill quotes, never an input — plan 09 TR-INJ), A3 espn_get_scoreboard, A4 espn_get_live_scoreboard (ESPN's live numbers,
 // labelled; degrades to A3's results), A5 espn_get_box_score (the engine's recomputation and the
 // golden `match` per stat and per total — C6, plan 08 §6), A6 espn_list_transactions (ESPN's feed
 // merged with transactions_seen; the provisional community shape degrades to partial — ADV OBJ-19(c)).
@@ -495,6 +496,7 @@ export const standingsSchema = z.strictObject({
         eliminated: z.boolean().nullable(),
         is_transaction_locked: z.boolean().nullable(),
         is_mine: z.boolean(),
+        trade_block: ut.nullable(),
       }),
     )
     .max(40),

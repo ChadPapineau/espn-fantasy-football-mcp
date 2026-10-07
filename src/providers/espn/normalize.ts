@@ -162,6 +162,20 @@ export function teamAbbrev(t: WireTeamNames): UntrustedText {
   return wrapUntrusted(typeof t.abbrev === "string" ? t.abbrev : "", "espn.team.abbrev");
 }
 
+/**
+ * A team's trade-block note (`teams[].tradeBlock.note`, member-authored — plan 01 §4.4: wrapped,
+ * source `espn.team.trade_block`, cap 500), or null: ESPN sends `{}` for an empty block, and any
+ * other shape, a non-string note or one that sanitises to nothing is no note. Data to quote, never
+ * an input (plan 07 E6; research 05 §6 case 4).
+ */
+export function tradeBlockNote(raw: unknown): UntrustedText | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const note = (raw as { readonly note?: unknown }).note;
+  if (typeof note !== "string") return null;
+  const w = wrapUntrusted(note, "espn.team.trade_block");
+  return w.untrusted_text.chars === 0 ? null : w;
+}
+
 /** The identity from an `mNav` body (teams with owners, members with their flags — no names). */
 export function identityFromNav(nav: WireNavBody): LeagueIdentity {
   const teams = new Map<number, TeamIdentity>();
@@ -808,6 +822,7 @@ export function normalizeStandings(
       is_transaction_locked:
         typeof t.isTransactionLocked === "boolean" ? t.isTransactionLocked : null,
       is_mine: myTeam === t.id,
+      trade_block: tradeBlockNote(t.tradeBlock),
     };
   });
   const order = [...teams]

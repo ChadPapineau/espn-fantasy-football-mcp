@@ -159,6 +159,12 @@ export const standingTeamSchema = z.looseObject({
   eliminated: optBool,
   isTransactionLocked: optBool,
   currentSimulationResults: z.looseObject({ playoffPct: optNum }).nullish(),
+  /**
+   * Member-authored (research 03 §B.5): `{}` when empty; the note, when set, at `note` (the fx-10h
+   * `inj-tradeblock` shape, research 05 §6 case 4). Any shape is accepted — the normaliser reads a
+   * string `note` or nothing (plan 01 §4.4: wrapped, source `espn.team.trade_block`, cap 500).
+   */
+  tradeBlock: z.unknown().optional(),
 });
 
 /** `mTeam` (composed with `mStandings` in one request — plan 01 §5.6). */

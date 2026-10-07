@@ -216,15 +216,26 @@ function wrappedNeedles(body: unknown): string[] {
   return out;
 }
 
+const VARIANTS = [
+  "inj-outlook-system",
+  "inj-teamname-json",
+  "inj-ir-cleared",
+  "inj-tradeblock",
+  "inj-league-name",
+  "inj-division-name",
+] as const;
+
 /**
  * Which calls must show each variant's planted text, wrapped (measured 2026-10-06): outlooks reach
- * C4 and E10, team names the standings / scoreboards and E11, the league name A1, division names A2.
- * No tool shows a trade block (no P0 or P1 tool reads it), so inj-tradeblock has no positive control.
+ * C4 and E10, team names the standings / scoreboards and E11, the league name A1, division names A2,
+ * and the trade-block note A2's `teams[].trade_block` (since the B2a gate's round 3 — before, no tool
+ * showed it, so inj-tradeblock had no positive control). Every variant has one now.
  */
-const SHOWN_BY: Partial<Record<string, readonly string[]>> = {
+const SHOWN_BY: Readonly<Record<(typeof VARIANTS)[number], readonly string[]>> = {
   "inj-outlook-system": ["outlook", "evidence"],
   "inj-teamname-json": ["standings", "scoreboard", "activity"],
   "inj-ir-cleared": ["outlook"],
+  "inj-tradeblock": ["standings"],
   "inj-league-name": ["league"],
   "inj-division-name": ["standings"],
 };
@@ -392,15 +403,6 @@ describe(
   },
 );
 
-const VARIANTS = [
-  "inj-outlook-system",
-  "inj-teamname-json",
-  "inj-ir-cleared",
-  "inj-tradeblock",
-  "inj-league-name",
-  "inj-division-name",
-] as const;
-
 describe(
   "plan 10 B8: no planted string outside a wrapper or a listed path, in any output of the 34 tools",
   { timeout: 900_000 },
@@ -429,8 +431,8 @@ describe(
         // the positive control: the planted text DID reach the outputs, wrapped (the variants a tool
         // shows), so a clean walk is a real result, not an absent string
         const shown = answered.filter((a) => wrappedNeedles(a.body).length > 0).map((a) => a.id);
-        if (SHOWN_BY[variant] !== undefined)
-          for (const id of SHOWN_BY[variant]) expect(shown, `${variant}: ${id}`).toContain(id);
+        expect(SHOWN_BY[variant].length, variant).toBeGreaterThan(0);
+        for (const id of SHOWN_BY[variant]) expect(shown, `${variant}: ${id}`).toContain(id);
         // B8: calibration_state.note on every E10 result; on inj-ir-cleared the OUT player in IR
         // whose outlook claims he is cleared → structured_disagrees names injury_status
         const ev = answered.find((a) => a.id === "evidence")?.body.data as {
