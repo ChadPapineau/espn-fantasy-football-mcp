@@ -4,7 +4,7 @@
 // `data.inputs[]` and the error mapping fields.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { fixedClock, seededRng } from "../../../src/domain/clock.js";
+import { fixedClock, seededRng, threadCpuClock } from "../../../src/domain/clock.js";
 import { loopPacer, runCooperative } from "../../../src/domain/analytics/cooperative.js";
 import { FORBIDDEN, solveAssignment } from "../../../src/domain/analytics/assignment.js";
 import { AnalyticsError, ensure } from "../../../src/domain/analytics/errors.js";
@@ -116,6 +116,93 @@ describe("runCooperative", () => {
     await expect(runCooperative(1.5, () => undefined, { pacer: steppingPacer(1) })).rejects.toThrow(
       RangeError,
     );
+  });
+
+  it("A16a: a coarse step never makes a batch of batchMs plus one more step", async () => {
+    // 10 ms steps against a 16 ms batch: one step per batch (the next would overrun), never two
+    for (const stepMs of [10, 6, 3]) {
+      let wall = 0;
+      const pacer = { nowMs: () => wall, yieldToLoop: () => Promise.resolve() };
+      const r = await runCooperative(40, () => (wall += stepMs), {
+        pacer,
+        batchMs: 16,
+        deadlineMs: null,
+      });
+      expect(r.completed).toBe(40);
+      expect(r.max_batch_ms, `${String(stepMs)} ms steps`).toBeLessThanOrEqual(16);
+    }
+    // a step longer than the batch still runs (one per batch) — progress is never blocked
+    let wall = 0;
+    const slow = { nowMs: () => wall, yieldToLoop: () => Promise.resolve() };
+    const r = await runCooperative(5, () => (wall += 25), { pacer: slow, batchMs: 16 });
+    expect(r).toMatchObject({ completed: 5, partial: false, batches: 5 });
+  });
+
+  it("the deadline counts the thread's CPU: a machine asleep mid-batch never cuts the run short", async () => {
+    // wall time jumps 60 s inside one batch (a Maintenance Sleep, a preempted process); the thread
+    // spent 0.1 ms of CPU per step — 400 steps are 40 ms of CPU, far under an 8 s deadline
+    let wall = 0;
+    let cpu = 0;
+    let step = 0;
+    const pacer = {
+      nowMs: () => wall,
+      cpuMs: () => cpu,
+      yieldToLoop: () => Promise.resolve(),
+    };
+    const r = await runCooperative(
+      400,
+      () => {
+        step += 1;
+        cpu += 0.1;
+        wall += step === 7 ? 60_000 : 0.1;
+      },
+      { pacer, batchMs: 16, deadlineMs: 8000 },
+    );
+    expect(r).toMatchObject({ completed: 400, partial: false });
+    expect(r.cpu_ms).toBeCloseTo(40, 6);
+    // the stall a heartbeat would see is still the wall time of that batch
+    expect(r.max_batch_ms).toBeGreaterThanOrEqual(60_000);
+  });
+
+  it("the deadline still stops a run that spends the CPU: partial, the completed count", async () => {
+    let wall = 0;
+    let cpu = 0;
+    const pacer = {
+      nowMs: () => wall,
+      cpuMs: () => cpu,
+      yieldToLoop: () => Promise.resolve(),
+    };
+    const r = await runCooperative(
+      10_000,
+      () => {
+        cpu += 1;
+        wall += 1;
+      },
+      { pacer, batchMs: 10, deadlineMs: 100 },
+    );
+    expect(r.partial).toBe(true);
+    expect(r.completed).toBeGreaterThanOrEqual(100);
+    expect(r.completed).toBeLessThan(10_000);
+    expect(r.cpu_ms).toBeGreaterThanOrEqual(100);
+    // 0 ms: one step, then partial (the R5-m3 switch's tool-level contract)
+    const zero = await runCooperative(10, () => (cpu += 0.01), { pacer, deadlineMs: 0 });
+    expect(zero).toMatchObject({ completed: 1, partial: true });
+  });
+
+  it("the loop pacer reads the injected CPU meter; the real one is finite and never goes back", () => {
+    let c = 3;
+    const pacer = loopPacer(fixedClock(0), { cpuMs: () => (c += 2) });
+    expect(pacer.cpuMs?.()).toBe(5);
+    expect(pacer.cpuMs?.()).toBe(7);
+    const real = loopPacer(fixedClock(0));
+    const a = real.cpuMs?.() ?? Number.NaN;
+    let x = 0;
+    for (let i = 0; i < 200_000; i++) x += Math.sqrt(i);
+    const b = real.cpuMs?.() ?? Number.NaN;
+    expect(x).toBeGreaterThan(0);
+    expect(Number.isFinite(a)).toBe(true);
+    expect(b).toBeGreaterThanOrEqual(a);
+    expect(threadCpuClock.cpuMs()).toBeGreaterThanOrEqual(b);
   });
 
   it("the loop pacer yields through setImmediate: queued work runs before the first step and mid-run", async () => {

@@ -3,8 +3,11 @@
 // plan 07 E1 [A-7]: in production the deadline is 8 s and a call past it is `partial: true`).
 // The switch is McpServerOptions.cpuDeadlineMs: omitted = ANALYTICS_CPU_DEADLINE_MS, null = off, a
 // number = that deadline. The tools honour it (a 0 ms deadline stops E1 after its first sample,
-// both through espn_project_players and through E2's projection); the composition root sets it to
-// null only under EFF_TEST_STUBS=1 in fixture mode — both test-scope keys — and logs that it did.
+// both through espn_project_players and through E2's projection); a season run inside a tool (E2,
+// E6, E8, E9) cut short by it names its completed paths and sets `partial`; the deadline counts the
+// thread's CPU, so wall time the process did not run (a sleeping machine) never fires it; the
+// composition root sets it to null only under EFF_TEST_STUBS=1 in fixture mode — both test-scope
+// keys — and logs that it did.
 import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -45,6 +48,9 @@ function stable(v: unknown): unknown {
 }
 const deadlineWarning = (e: Env): string[] =>
   e.warnings.filter((w) => /^partial: \d+ of \d+ samples before the CPU deadline$/.test(w));
+/** The seeding simulator's line: a season run inside a tool stopped at the deadline. */
+const seasonWarning = (e: Env): string[] =>
+  e.warnings.filter((w) => /^partial: \d+ of \d+ paths before the CPU deadline$/.test(w));
 
 describe("the tools honour the injected switch", () => {
   it("omitted: the production 8 s deadline — a 4 000-sample call completes", async () => {
@@ -80,12 +86,81 @@ describe("the tools honour the injected switch", () => {
       const b = await run(off.client, name, args);
       expect(b.partial).toBe(false);
       expect(deadlineWarning(b)).toEqual([]);
-      // the deadline never fired here, so switching it off changes no number
+      expect(seasonWarning(b)).toEqual([]);
+      // the deadline counts CPU, never wall time: it never fires on fx-10h, so it is not partial and
+      // switching it off changes no number (a run cut short would say so — the describe below)
+      expect(a.partial, name).toBe(false);
+      expect([...deadlineWarning(a), ...seasonWarning(a)], name).toEqual([]);
       expect(stable(b.data)).toEqual(stable(a.data));
     }
     await prod.close();
     await off.close();
   });
+});
+
+describe("a season run cut short inside a tool is said: warning + partial (plan 07 E1 [A-7])", () => {
+  // every tool that runs the seeding simulator for a number it reports — E2's PF exchange rate, E6's
+  // ΔU, E8's P(alive), E9's season read — carries the run's "paths" line and its flag
+  async function rosters(c: Client): Promise<{ give: number[]; get: number[] }> {
+    type P = { player_id: number; slot: string }[];
+    const mine = (await run(c, "espn_get_roster", { week: 4 })).data.players as P;
+    const theirs = (await run(c, "espn_get_roster", { week: 4, team_id: 2 })).data.players as P;
+    return {
+      give: mine
+        .filter((p) => p.slot !== "IR")
+        .slice(0, 1)
+        .map((p) => p.player_id),
+      get: theirs
+        .filter((p) => p.slot !== "IR")
+        .slice(0, 1)
+        .map((p) => p.player_id),
+    };
+  }
+  const calls = (o: { give: number[]; get: number[] }) =>
+    [
+      ["espn_analyze_lineup", { week: 4, seed: 7 }],
+      ["espn_analyze_trade", { offer: { partner_team_id: 2, ...o }, seed: 4 }],
+      ["espn_analyze_schedule", { seed: 2 }],
+      ["espn_analyze_roster", { seed: 2 }],
+    ] as const;
+
+  it("0 ms: every season-backed number names the completed path count and sets partial", async () => {
+    const { client, close } = await connect(world, {
+      options: { toolset: "full", cpuDeadlineMs: 0 },
+    });
+    for (const [name, args] of calls(await rosters(client))) {
+      const e = await run(client, name, args);
+      expect(seasonWarning(e), name).toHaveLength(1);
+      expect(seasonWarning(e)[0], name).toMatch(/^partial: 1 of \d+ paths/);
+      expect(e.partial, name).toBe(true);
+    }
+    await close();
+  }, 120_000);
+
+  it("off: the same calls run every path — no line, not partial", async () => {
+    const { client, close } = await connect(world, {
+      options: { toolset: "full", cpuDeadlineMs: null },
+    });
+    for (const [name, args] of calls(await rosters(client))) {
+      const e = await run(client, name, args);
+      expect(seasonWarning(e), name).toEqual([]);
+      expect(e.partial, name).toBe(false);
+    }
+    await close();
+  }, 120_000);
+
+  it("E6: ΔU from the one path the 0 ms run completed is flagged, never passed off as complete", async () => {
+    const zero = await connect(world, { options: { toolset: "full", cpuDeadlineMs: 0 } });
+    const off = await connect(world, { options: { toolset: "full", cpuDeadlineMs: null } });
+    const args = { offer: { partner_team_id: 2, ...(await rosters(off.client)) }, seed: 4 };
+    const z = await run(zero.client, "espn_analyze_trade", args);
+    const f = await run(off.client, "espn_analyze_trade", args);
+    // the cut-short run is the one marked partial, whatever its numbers came to
+    expect([z.partial, f.partial]).toEqual([true, false]);
+    expect(seasonWarning(z).length).toBe(1);
+    await zero.close();
+    await off.close();
+  }, 120_000);
 });
 
 describe("the composition root sets the switch only under EFF_TEST_STUBS=1 in fixture mode", () => {

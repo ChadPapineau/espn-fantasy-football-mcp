@@ -67,7 +67,7 @@ import {
 import { toDataInputs, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import { defineTool, type ToolContext, type ToolOutput } from "../define.js";
-import { seedOf, waiverPlayerOf, type Subject } from "./analytics.js";
+import { carryOutcome, seedOf, waiverPlayerOf, type Subject } from "./analytics.js";
 import {
   crosswalkOf,
   isDegradable,
@@ -372,9 +372,11 @@ export const analyzeTradeTool = defineTool({
       return null;
     });
     const standings = await standingsOrNull(ctx, inputs, warnings);
+    // a deadline-stopped season run gives ΔU from fewer paths: its warning and flag reach the envelope
+    const sims = { partial: false };
     const readingsFor = async (team: number) => {
       if (mGot === null) return null;
-      const sim = await runSeason(ctx, {
+      const out = await runSeason(ctx, {
         league: b.league,
         rules: b.rules,
         matchups: take(ctx, mGot, inputs),
@@ -387,7 +389,8 @@ export const analyzeTradeTool = defineTool({
         marginal: true,
         through_playoffs: true,
       });
-      return sim?.data.readings ?? null;
+      if (carryOutcome(out, warnings)) sims.partial = true;
+      return out?.data.readings ?? null;
     };
     const aliveOf = (readings: Awaited<ReturnType<typeof readingsFor>>): Record<string, number> => {
       const out: Record<string, number> = {};
@@ -446,7 +449,7 @@ export const analyzeTradeTool = defineTool({
       inputs,
       warnings: [...warnings, ...out.warnings],
       estimate: true,
-      partial: warnings.some((x) => x.startsWith("partial:")),
+      partial: sims.partial || warnings.some((x) => x.startsWith("partial:")),
       listKey: data.kind === "evaluation" ? "counters" : "partners",
       week: b.w,
     };

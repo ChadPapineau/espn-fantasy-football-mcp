@@ -60,18 +60,22 @@ function hostileFetch(inner: FetchLike): FetchLike {
 
 let clean: World;
 let bad: World;
-let cleanClient: Client;
 let badClient: Client;
+/** The invariance pair: the CPU deadline off, so byte-equality cannot flake (plan 10 A8a; R5-m3). */
+let cleanOff: Client;
+let badOff: Client;
 const closers: (() => Promise<void>)[] = [];
 
 beforeAll(async () => {
   clean = await makeWorld();
   bad = await makeWorld({ wrapFetch: hostileFetch });
-  const a = await connect(clean);
   const b = await connect(bad);
-  cleanClient = a.client;
+  const c = await connect(clean, { options: { cpuDeadlineMs: null } });
+  const d = await connect(bad, { options: { cpuDeadlineMs: null } });
   badClient = b.client;
-  closers.push(a.close, b.close);
+  cleanOff = c.client;
+  badOff = d.client;
+  closers.push(b.close, c.close, d.close);
 }, 120_000);
 afterAll(async () => {
   for (const c of closers) await c();
@@ -147,7 +151,7 @@ describe("hostile names are data, never instructions", () => {
     );
   });
 
-  it("invariance: the lineup recommendation is identical with and without the hostile text", async () => {
+  it("invariance: the lineup recommendation is identical with and without the hostile text (deadline off, A8a)", async () => {
     const strip = (d: unknown): unknown =>
       JSON.parse(
         JSON.stringify(d, (k, v: unknown) =>
@@ -159,8 +163,8 @@ describe("hostile names are data, never instructions", () => {
       ["espn_analyze_waivers", { positions: ["D/ST"] }],
       ["espn_project_players", { players: { team_id: 1 }, horizon: "week", week: 4, seed: 5 }],
     ] as const) {
-      const a = await call(cleanClient, name, args);
-      const b = await call(badClient, name, args);
+      const a = await call(cleanOff, name, args);
+      const b = await call(badOff, name, args);
       expect(strip(b.body.data), name).toEqual(strip(a.body.data));
     }
   });

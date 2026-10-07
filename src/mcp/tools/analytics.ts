@@ -233,6 +233,22 @@ export function cpuDeadlineOf(ctx: ToolContext): number | null {
   return v === undefined ? ANALYTICS_CPU_DEADLINE_MS : v;
 }
 
+/**
+ * Carries an inner sampler's outcome into the calling tool (plan 07 E1 [A-7]; the envelope rule of
+ * plan 01 §4.2): its warnings — the "partial: k of n paths before the CPU deadline" line included —
+ * join the call's (each once), and its `partial` is returned for the caller's own flag, so a number
+ * built from fewer paths is never reported as complete. No cache holds a season simulation: the
+ * per-call memo keeps only the league reads (plan 07 E1: a `partial` result is never cached).
+ */
+export function carryOutcome(
+  out: { readonly partial: boolean; readonly warnings: readonly string[] } | null,
+  warnings: string[],
+): boolean {
+  if (out === null) return false;
+  for (const w of out.warnings) if (!warnings.includes(w)) warnings.push(w);
+  return out.partial;
+}
+
 /** Runs E1 over `subjects` (the projection every other engine starts from). */
 export async function project(
   ctx: ToolContext,
@@ -702,6 +718,8 @@ export async function seasonContext(
       rng: seededRng(seed),
       deadline_ms: cpuDeadlineOf(ctx),
     });
+    // a deadline-stopped run's exchange rate comes from fewer paths: say so (warning + partial)
+    carryOutcome(sim, warnings);
     const reading = sim.data.readings[0];
     return {
       pf_per_win: reading?.pf_per_win ?? null,

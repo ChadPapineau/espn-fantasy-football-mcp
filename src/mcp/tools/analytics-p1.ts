@@ -62,7 +62,15 @@ import {
 import { toDataInputs, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import { defineTool, type ToolContext, type ToolOutput } from "../define.js";
-import { cpuDeadlineOf, opponentIn, periodOf, project, seedOf, type Subject } from "./analytics.js";
+import {
+  carryOutcome,
+  cpuDeadlineOf,
+  opponentIn,
+  periodOf,
+  project,
+  seedOf,
+  type Subject,
+} from "./analytics.js";
 import {
   crosswalkOf,
   isDegradable,
@@ -915,6 +923,7 @@ export const analyzeScheduleTool = defineTool({
     // P(alive) from E3 `season` under the reading in use (cold start; weight 1 when unreadable)
     const reading = readingOf(ctx, "config");
     let alive: { week: Week; p: number }[] | null = null;
+    let simPartial = false;
     const mGot = await withinBudget(
       () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
       warnings,
@@ -936,6 +945,8 @@ export const analyzeScheduleTool = defineTool({
         marginal: false,
         through_playoffs: true,
       });
+      // a deadline-stopped run's P(alive) comes from fewer paths: its warning and flag carry
+      simPartial = carryOutcome(sim, warnings);
       alive = sim?.data.readings[0]?.p_alive_by_week.map((x) => ({ week: x.week, p: x.p })) ?? null;
     }
     if (alive === null)
@@ -971,7 +982,8 @@ export const analyzeScheduleTool = defineTool({
       inputs,
       warnings: [...warnings, ...out.warnings],
       estimate: true,
-      partial: out.partial || proj.partial || warnings.some((x) => x.startsWith("partial:")),
+      partial:
+        out.partial || proj.partial || simPartial || warnings.some((x) => x.startsWith("partial:")),
       listKey: "weeks",
       week: b.w,
     };
@@ -1172,6 +1184,7 @@ export const analyzeRosterTool = defineTool({
       eliminated: boolean;
       p_alive_by_week: { week: Week; p: number }[];
     } | null = null;
+    let simPartial = false;
     if (args.competing === "auto") {
       const mGot = await withinBudget(
         () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
@@ -1194,6 +1207,8 @@ export const analyzeRosterTool = defineTool({
           marginal: false,
           through_playoffs: true,
         });
+        // a deadline-stopped run's season read comes from fewer paths: its warning and flag carry
+        simPartial = carryOutcome(sim, warnings);
         const r0 = sim?.data.readings[0];
         if (r0 !== undefined)
           season = {
@@ -1250,7 +1265,13 @@ export const analyzeRosterTool = defineTool({
       inputs,
       warnings: [...warnings, ...repl.warnings.slice(0, 2), ...out.warnings],
       estimate: true,
-      partial: out.partial || proj.partial || warnings.some((x) => x.startsWith("partial:")),
+      // E4's streamability under the deadline counts too (its partial line leads its warnings)
+      partial:
+        out.partial ||
+        proj.partial ||
+        repl.partial ||
+        simPartial ||
+        warnings.some((x) => x.startsWith("partial:")),
       listKey: "bench_plan",
       week: b.w,
     };

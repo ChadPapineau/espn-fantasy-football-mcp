@@ -48,6 +48,23 @@ export const systemClock: Clock = Object.freeze({
   nowIso: () => new Date(Date.now()).toISOString(),
 });
 
+/**
+ * The calling thread's CPU time (plan 07 E1 [A-7]: the samplers' deadline is a CPU deadline). Unlike
+ * the wall clock it does not advance while the process is preempted or the machine sleeps.
+ */
+export interface CpuClock {
+  /** Milliseconds of CPU (user + system) the calling thread has used. */
+  cpuMs(): number;
+}
+
+/** The real thread CPU meter (`process.threadCpuUsage`). The only place in src/domain that reads it. */
+export const threadCpuClock: CpuClock = Object.freeze({
+  cpuMs: () => {
+    const u = process.threadCpuUsage();
+    return (u.user + u.system) / 1000;
+  },
+});
+
 /** A deterministic clock for tests, starting at `start` (epoch ms or ISO string). */
 export function fixedClock(start: number | string): FixedClock {
   const toMs = (at: number | string): number => {

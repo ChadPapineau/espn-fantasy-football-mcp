@@ -598,18 +598,12 @@ describe("E1 espn_project_players", () => {
   });
 
   it("deterministic for a seed; a rest-of-season horizon is compact (≤ 3 weeks) unless full", async () => {
-    const a = await ok("espn_project_players", {
-      players: { player_ids: [4361050] },
-      horizon: "week",
-      week: 4,
-      seed: 11,
-    });
-    const b = await ok("espn_project_players", {
-      players: { player_ids: [4361050] },
-      horizon: "week",
-      week: 4,
-      seed: 11,
-    });
+    // determinism is compared with the CPU deadline off (plan 08 P12; R5-m3)
+    const off = await connect(world, { options: { cpuDeadlineMs: null } });
+    const args = { players: { player_ids: [4361050] }, horizon: "week", week: 4, seed: 11 };
+    const a = await ok("espn_project_players", args, off.client);
+    const b = await ok("espn_project_players", args, off.client);
+    await off.close();
     expect(a.data.projections).toEqual(b.data.projections);
     const ros = await ok("espn_project_players", {
       players: { player_ids: [4361050] },
