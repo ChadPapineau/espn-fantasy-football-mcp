@@ -1,7 +1,7 @@
 # ci — the product gate on every push (any branch) and every PR. Spec: plan 04 §4.1 (jobs lint,
 # typecheck, test, supply-chain, pack, process, smoke), plan 05 §7 (coverage gate), plan 05 §4.2 +
 # plan 10 A15a (process and end-to-end suites: ubuntu on every push, macOS weekly / on demand), plan
-# 10 A3a (the Inspector smoke in fixture mode), plan 04 R5 (ubuntu, Node from .nvmrc), R11 (full
+# 10 A3a + B10 (the Inspector smoke in fixture mode, core and full), plan 04 R5 (ubuntu, Node from .nvmrc), R11 (full
 # runtime tree). Ported from sibling @d72e03b, adapted.
 #
 # Choices, and why
@@ -266,23 +266,25 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
-      - name: SDK stdio smoke — both protocol eras (tools, instructions, resources, prompts, G1, G2, G3)
+      - name: SDK stdio smoke — both protocol eras × core and full (tools, instructions, resources, prompts, G1, G2, G3)
         run: npm run smoke
-      - name: MCP Inspector CLI (pinned) — tools/list, resources, templates, prompts in fixture mode
+      - name: MCP Inspector CLI (pinned) — tools/list, resources, templates, prompts in fixture mode, core and full (plan 10 A3a, B10)
         env:
           npm_config_ignore_scripts: "true"
         run: |
           set -euo pipefail
-          out="$RUNNER_TEMP/inspector"
-          mkdir -p "$out"
           cd "$RUNNER_TEMP"
-          for method in tools/list resources/list resources/templates/list prompts/list; do
-            file="$out/$(echo "$method" | tr / _).json"
-            timeout 180 npx --yes "$INSPECTOR" --cli \
-              node "$GITHUB_WORKSPACE/tests/smoke/fixture-serve.mjs" \
-              --method "$method" --format json > "$file"
-            echo "$method: $(wc -c < "$file") bytes"
+          for toolset in core full; do
+            out="$RUNNER_TEMP/inspector-$toolset"
+            mkdir -p "$out"
+            for method in tools/list resources/list resources/templates/list prompts/list; do
+              file="$out/$(echo "$method" | tr / _).json"
+              timeout 180 npx --yes "$INSPECTOR" --cli \
+                node "$GITHUB_WORKSPACE/tests/smoke/fixture-serve.mjs" "$toolset" \
+                --method "$method" --format json > "$file"
+              echo "$toolset $method: $(wc -c < "$file") bytes"
+            done
+            node "$GITHUB_WORKSPACE/tests/smoke/assert-inspector.mjs" --toolset "$toolset" \
+              "$out/tools_list.json" "$out/resources_list.json" \
+              "$out/resources_templates_list.json" "$out/prompts_list.json"
           done
-          node "$GITHUB_WORKSPACE/tests/smoke/assert-inspector.mjs" \
-            "$out/tools_list.json" "$out/resources_list.json" \
-            "$out/resources_templates_list.json" "$out/prompts_list.json"

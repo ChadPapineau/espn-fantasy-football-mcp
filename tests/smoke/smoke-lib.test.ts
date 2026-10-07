@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEBUG_TOOL,
+  EXPECTED_P1_PROMPTS,
   EXPECTED_PROMPTS,
   EXPECTED_RESOURCES,
   EXPECTED_TEMPLATES,
@@ -15,16 +16,19 @@ import {
   checkPrompts,
   checkResources,
   checkToolNames,
+  expectedPrompts,
   fixtureEnv,
   inspectorResult,
   readExpectedTools,
+  SMOKE_TOOLSETS,
+  toolsetArg,
 } from "./smoke-lib.mjs";
 import {
   MANDATORY_SENTENCES as SRC_SENTENCES,
   RESOURCE_TTL_MS,
   UNTRUSTED_POINTER,
 } from "../../src/mcp/envelope.js";
-import { PROMPTS } from "../../src/mcp/prompts/index.js";
+import { ALL_PROMPTS, P1_PROMPTS, PROMPTS } from "../../src/mcp/prompts/index.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
 import { DEBUG_TOOL_NAME } from "../../src/mcp/tools/debug.js";
 import { rmSync } from "node:fs";
@@ -40,6 +44,20 @@ describe("pinned to src", () => {
     const keys = Object.keys(RESOURCE_TTL_MS);
     expect([...EXPECTED_RESOURCES, ...EXPECTED_TEMPLATES].sort()).toEqual([...keys].sort());
     expect([...EXPECTED_PROMPTS].sort()).toEqual(PROMPTS.map((p) => p.name).sort());
+    // the five P1 prompts, listed under full only (13 there — plan 10 B10)
+    expect([...EXPECTED_P1_PROMPTS].sort()).toEqual(P1_PROMPTS.map((p) => p.name).sort());
+    expect([...expectedPrompts("full")].sort()).toEqual(ALL_PROMPTS.map((p) => p.name).sort());
+    expect(expectedPrompts("full")).toHaveLength(13);
+    expect(expectedPrompts("core")).toEqual(EXPECTED_PROMPTS);
+    expect(SMOKE_TOOLSETS).toEqual(["core", "full"]);
+  });
+
+  it("toolsetArg: absent → core; core | full as given; anything else null", () => {
+    expect(toolsetArg(undefined)).toBe("core");
+    expect(toolsetArg("core")).toBe("core");
+    expect(toolsetArg("full")).toBe("full");
+    for (const bad of ["", "FULL", "--method", "full ", null, 1])
+      expect(toolsetArg(bad)).toBeNull();
   });
 
   it("expected-tools.json: core is the registry's P0 rows in order, full every row", () => {
@@ -62,6 +80,12 @@ describe("pinned to src", () => {
         expect(env[k]?.startsWith(root)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+    const full = fixtureEnv({ toolset: "full" });
+    try {
+      expect(full.env.EFF_TOOLSET).toBe("full");
+    } finally {
+      rmSync(full.root, { recursive: true, force: true });
     }
   });
 });
@@ -164,6 +188,14 @@ describe("checkResources and checkPrompts", () => {
         .length,
     ).toBe(1);
     expect(checkPrompts({}).length).toBe(1);
+  });
+  it("under full: the 13 pass, the eight alone fail; under core the 13 fail", () => {
+    const all = expectedPrompts("full").map((name) => ({ name }));
+    expect(checkPrompts({ prompts: all }, "full")).toEqual([]);
+    expect(
+      checkPrompts({ prompts: EXPECTED_PROMPTS.map((name) => ({ name })) }, "full"),
+    ).toHaveLength(1);
+    expect(checkPrompts({ prompts: all }, "core")).toHaveLength(1);
   });
 });
 

@@ -148,6 +148,10 @@ describe("ci.yml (plan 04 §4.1)", () => {
     expect(sm).toContain("tests/smoke/fixture-serve.mjs");
     expect(sm).toContain("tests/smoke/assert-inspector.mjs");
     expect(step(sm, "MCP Inspector CLI")).toContain('npm_config_ignore_scripts: "true"');
+    // plan 10 B10: the Inspector lists both toolsets (18 / 34 tools, 8 / 13 prompts)
+    expect(sm).toContain("for toolset in core full; do");
+    expect(sm).toContain('fixture-serve.mjs" "$toolset"');
+    expect(sm).toContain('assert-inspector.mjs" --toolset "$toolset"');
   });
 
   it.each([

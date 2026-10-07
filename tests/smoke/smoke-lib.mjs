@@ -1,5 +1,5 @@
 // @ts-check
-// smoke-lib.mjs — the Phase-1a smoke assertions (plan 10 A3a; plan 04 §4.1 `smoke`), shared by the
+// smoke-lib.mjs — the smoke assertions (plan 10 A3a under core, B10 under full; plan 04 §4.1 `smoke`), shared by the
 // SDK stdio smoke (run-smoke.mjs, `npm run smoke`), the Inspector CLI check in CI
 // (assert-inspector.mjs) and their unit tests (tests/smoke/smoke-lib.test.ts, which also pins every
 // constant here to src/). Dependency-free: every check takes plain data and returns a list of
@@ -50,6 +50,35 @@ export const EXPECTED_PROMPTS = Object.freeze([
   "espn.session",
   "espn.waivers",
 ]);
+/** The five P1 prompts, listed under EFF_TOOLSET=full only (13 there — plan 10 B10). */
+export const EXPECTED_P1_PROMPTS = Object.freeze([
+  "espn.trade",
+  "espn.injury",
+  "espn.schedule",
+  "espn.roster_audit",
+  "espn.check",
+]);
+/** The toolsets the smoke runs under (plan 10 A3a core; B10 full). */
+export const SMOKE_TOOLSETS = Object.freeze(/** @type {const} */ (["core", "full"]));
+
+/**
+ * The prompts a toolset lists: the eight P0 under `core`, all 13 under `full`.
+ * @param {"core" | "full"} toolset
+ * @returns {readonly string[]}
+ */
+export function expectedPrompts(toolset) {
+  return toolset === "full" ? [...EXPECTED_PROMPTS, ...EXPECTED_P1_PROMPTS] : EXPECTED_PROMPTS;
+}
+
+/**
+ * A toolset name from a command-line argument (`core` when absent); anything else is null.
+ * @param {unknown} arg
+ * @returns {"core" | "full" | null}
+ */
+export function toolsetArg(arg) {
+  if (arg === undefined) return "core";
+  return arg === "core" || arg === "full" ? arg : null;
+}
 
 /** A write tool name (plan 02 §4: espn_prepare_* / espn_commit_*). */
 const WRITE_TOOL_RE = /^espn_(?:prepare|commit)_/;
@@ -192,16 +221,18 @@ export function checkResources(list, templates, opts) {
 }
 
 /**
- * prompts/list: exactly the eight P0 prompts (A3a).
+ * prompts/list: exactly the toolset's prompts — the eight P0 under core (A3a), 13 under full (B10).
  * @param {unknown} list
+ * @param {"core" | "full"} [toolset] which toolset's prompt set (default core)
  * @returns {string[]}
  */
-export function checkPrompts(list) {
+export function checkPrompts(list, toolset = "core") {
   if (!isRecord(list) || !Array.isArray(list.prompts)) return ["prompts/list: no `prompts` array"];
   const names = list.prompts.map((p) => (isRecord(p) ? String(p.name) : "?"));
-  return [...names].sort().join(",") === [...EXPECTED_PROMPTS].sort().join(",")
+  const want = expectedPrompts(toolset === "full" ? "full" : "core");
+  return [...names].sort().join(",") === [...want].sort().join(",")
     ? []
-    : [`prompts/list: expected ${JSON.stringify(EXPECTED_PROMPTS)}, got ${JSON.stringify(names)}`];
+    : [`prompts/list: expected ${JSON.stringify(want)}, got ${JSON.stringify(names)}`];
 }
 
 /**
@@ -219,9 +250,9 @@ export function inspectorResult(parsed) {
 /**
  * A private fixture home for a server process: temp root (0700) with home/, config/ and cache/
  * (0700); EFF_FIXTURE_DIR the derived Skills league fixtures/espn/fx-10h (Team 02), league id 0, the
- * core toolset, and EFF_TEST_STUBS (any network or keychain access exits 99). Never touches
- * ~/.config, ~/.cache or a keychain.
- * @param {{ root?: string, logLevel?: string }} [opts]
+ * toolset (`core` unless `opts.toolset` says `full`), and EFF_TEST_STUBS (any network or keychain
+ * access exits 99). Never touches ~/.config, ~/.cache or a keychain.
+ * @param {{ root?: string, logLevel?: string, toolset?: "core" | "full" }} [opts]
  * @returns {{ root: string, env: Record<string, string> }}
  */
 export function fixtureEnv(opts = {}) {
@@ -240,7 +271,7 @@ export function fixtureEnv(opts = {}) {
       ESPN_LEAGUE_ID: "0",
       ESPN_SEASON: "2026",
       ESPN_TEAM_ID: "2",
-      EFF_TOOLSET: "core",
+      EFF_TOOLSET: opts.toolset ?? "core",
       EFF_TEST_STUBS: "1",
       EFF_LOG_LEVEL: opts.logLevel ?? "info",
     },

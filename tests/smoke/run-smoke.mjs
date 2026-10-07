@@ -1,11 +1,12 @@
 // @ts-check
-// run-smoke.mjs — `npm run smoke`: the A3a smoke (plan 10 §3.1a; plan 04 §4.1) against the BUILT
-// server over real stdio, in fixture mode on the derived league fx-10h (EFF_TOOLSET=core): `node
-// dist/cli.js serve` spawned by the SDK's StdioClientTransport, once per protocol era (legacy
-// `initialize`; 2026-07-28 discovery). Asserts tools/list = tests/smoke/expected-tools.json (+
-// espn_debug_echo, fixture mode only), no espn_prepare_*/espn_commit_*, every description ends with
+// run-smoke.mjs — `npm run smoke`: the A3a / B10 smoke (plan 10 §3.1a, §3.2; plan 04 §4.1) against the
+// BUILT server over real stdio, in fixture mode on the derived league fx-10h, under EFF_TOOLSET=core
+// AND EFF_TOOLSET=full: `node dist/cli.js serve` spawned by the SDK's StdioClientTransport, once per
+// protocol era (legacy `initialize`; 2026-07-28 discovery) per toolset. Asserts tools/list = the
+// toolset's list in tests/smoke/expected-tools.json (18 / 34, + espn_debug_echo, fixture mode only),
+// no espn_prepare_*/espn_commit_*, every description ends with
 // the pointer and carries no mandatory sentence, each mandatory sentence exactly once in the
-// instructions, the ten resources (ttlMs + cacheScope in the modern era), the eight prompts,
+// instructions, the ten resources (ttlMs + cacheScope in the modern era), the toolset's prompts (8 / 13),
 // espn_get_league's untrusted name and source, espn_get_status's credential and write capability,
 // G2 answering with no credential, the G3 nonce only in structuredContent, a clean stdin-EOF
 // shutdown and no error-level stderr line. No network; temp dirs only. Exit 0 = pass, 1 = a check
@@ -24,6 +25,7 @@ import {
   checkToolNames,
   fixtureEnv,
   readExpectedTools,
+  SMOKE_TOOLSETS,
 } from "./smoke-lib.mjs";
 
 const ENTRY = path.join(REPO_ROOT, "dist", "cli.js");
@@ -36,12 +38,13 @@ function bodyOf(r) {
 }
 
 /**
- * One era: spawn, list, check, close; returns the problems.
+ * One era under one toolset: spawn, list, check, close; returns the problems.
  * @param {"legacy" | "modern"} era
+ * @param {"core" | "full"} toolset
  * @returns {Promise<string[]>}
  */
-async function runEra(era) {
-  const { root, env } = fixtureEnv();
+async function runEra(era, toolset) {
+  const { root, env } = fixtureEnv({ toolset });
   /** @type {string[]} */
   const problems = [];
   /** @type {string[]} */
@@ -66,7 +69,7 @@ async function runEra(era) {
     problems.push(
       ...checkToolNames(
         tools.tools.map((t) => t.name),
-        readExpectedTools().core,
+        readExpectedTools()[toolset],
         { fixtureMode: true },
       ),
       ...checkDescriptions(tools.tools),
@@ -74,7 +77,7 @@ async function runEra(era) {
       ...checkResources(await client.listResources(), await client.listResourceTemplates(), {
         requireCacheHints: era === "modern",
       }),
-      ...checkPrompts(await client.listPrompts()),
+      ...checkPrompts(await client.listPrompts(), toolset),
     );
     const league = bodyOf(await client.callTool({ name: "espn_get_league", arguments: {} }));
     const data = /** @type {{ league?: { name?: { untrusted_text?: { value?: unknown } } } }} */ (
@@ -106,7 +109,7 @@ async function runEra(era) {
     else if (JSON.stringify(echo.content).includes(nonce))
       problems.push(`${DEBUG_TOOL}: the nonce leaked into the text content`);
     process.stdout.write(
-      `smoke[${era}]: ${String(client.getNegotiatedProtocolVersion())}, connect ${String(connectMs)} ms, ${String(tools.tools.length)} tools\n`,
+      `smoke[${era}/${toolset}]: ${String(client.getNegotiatedProtocolVersion())}, connect ${String(connectMs)} ms, ${String(tools.tools.length)} tools\n`,
     );
   } catch (e) {
     problems.push(`${era}: ${e instanceof Error ? e.message : String(e)}`);
@@ -131,14 +134,17 @@ async function runEra(era) {
   }
   if (!lines.some((l) => l.includes('"event":"serve.shutdown"') && l.includes('"reason":"stdin"')))
     problems.push(`${era}: no clean stdin-EOF shutdown logged`);
-  return problems.map((p) => `[${era}] ${p}`);
+  return problems.map((p) => `[${era}/${toolset}] ${p}`);
 }
 
 if (!existsSync(ENTRY)) {
   process.stderr.write("smoke: dist/cli.js is missing — run `npm run build` first\n");
   process.exit(2);
 }
-const problems = [...(await runEra("legacy")), ...(await runEra("modern"))];
+/** @type {string[]} */
+const problems = [];
+for (const toolset of SMOKE_TOOLSETS)
+  problems.push(...(await runEra("legacy", toolset)), ...(await runEra("modern", toolset)));
 for (const p of problems) process.stderr.write(`smoke: FAIL ${p}\n`);
 process.stdout.write(
   problems.length === 0 ? "smoke: PASS\n" : `smoke: ${String(problems.length)} problem(s)\n`,
