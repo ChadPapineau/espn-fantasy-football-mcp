@@ -166,7 +166,8 @@ describe("ADV OBJ-22: no attach loop — every source at once", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("all 21 dataset source ids are opened at once, each its own connection", async () => {
+  it("every dataset source id (28, the history files included) is opened at once, each its own connection", async () => {
+    expect(DATASET_SOURCE_IDS).toHaveLength(28);
     for (const src of DATASET_SOURCE_IDS)
       expect((await publishTables(pub, src, "v1", emptyTables(src))).ok).toBe(true);
     const s = open();

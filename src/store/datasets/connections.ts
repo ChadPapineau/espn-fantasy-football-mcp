@@ -15,7 +15,7 @@ import type { Clock } from "../../domain/clock.js";
 import { currentRefreshRow, refreshRowFor } from "../repos/ops.js";
 import { openDatasetConnection, type StatementGuard } from "../sqlite.js";
 import type { OpenDataset } from "../types.js";
-import { columnsHash, isPhase1DatasetSource, tablesFor } from "./tables.js";
+import { contractColumnsHash, contractTablesFor, isContractDatasetSource } from "./tables.js";
 
 /** The metadata table the publisher stamps into every dataset file (not a ds_* table). */
 export const DATASET_META_TABLE = "dataset_meta";
@@ -76,7 +76,8 @@ export type DatasetRefusal =
 
 /**
  * Whether an open dataset connection holds a file this binary serves for `source`: stamped with
- * this source and layout, the contract's columns hash (Phase-1 sources), every contract table.
+ * this source and layout, the contract's columns hash (every contract source: Phase 1, Phase 2 and
+ * the history files), every contract table.
  * Returns the meta, or the refusal code.
  */
 export function checkDatasetFile(
@@ -94,9 +95,9 @@ export function checkDatasetFile(
   if (meta.source !== source) return { ok: false, code: "dataset_source_mismatch" };
   if (parseDsSchema(meta.ds_schema) !== DS_SCHEMA_VERSION)
     return { ok: false, code: "dataset_schema_mismatch" };
-  if (isPhase1DatasetSource(source) && meta.columns_hash !== columnsHash(source))
+  if (isContractDatasetSource(source) && meta.columns_hash !== contractColumnsHash(source))
     return { ok: false, code: "dataset_schema_mismatch" };
-  const want = tablesFor(source).map((t) => t.name);
+  const want = contractTablesFor(source).map((t) => t.name);
   if (want.length > 0) {
     const have = new Set(
       (

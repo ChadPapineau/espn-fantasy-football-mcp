@@ -3,8 +3,11 @@
 // JSON-array list parameters (`json_each`, so no caller value is spliced into SQL) and applying each
 // entry's `mapping`. A method that needs two files runs two statements and joins in code. A dataset
 // whose file is not loaded answers `{ rows: [], stamp: null }` — the contract's "never loaded" outcome,
-// never an exception. Phase-2 ports (depth charts, EP, news, trending) have no file yet and answer the
-// same. Ported from sibling @cf3b015, adapted (separate connections; ESPN pro schedule and players).
+// never an exception. A prior season's statement runs on the source's history file (PHASE_1_HISTORY_
+// TWINS: stats, injuries) when the current file does not hold it; the Phase-2 ports (depth charts, EP,
+// news, trending) and the usage extras `lines()` gains from the snap-count and pbp files are
+// readers-p2.ts. Ported from sibling @cf3b015, adapted (separate connections; ESPN pro schedule and
+// players).
 import { isNflTeam, type NflTeam, type WeatherSource } from "../../config/schema.js";
 import type {
   DatasetReaders,
@@ -42,7 +45,9 @@ import {
   type PointsAllowedInput,
 } from "../../domain/scoring/index.js";
 import type { StatLine } from "../../domain/scoring/types.js";
-import { READER_QUERIES, type ReaderMethod } from "./tables.js";
+import { PHASE_1_HISTORY_TWINS, READER_QUERIES, type ReaderMethod } from "./tables.js";
+import { createPhase2Readers, seasonsOf, usageKeyOf, type UsageKey } from "./readers-p2.js";
+import type { DatasetSourceId } from "../../config/freshness.js";
 
 /** Most ids / weeks / teams one reader call accepts (a bounded statement). */
 export const READER_LIST_MAX = 100_000;
@@ -132,6 +137,24 @@ const NEVER_LOADED = Object.freeze({
 export function createReaders(o: ReadersOptions): StoreReaders {
   const { connections, warn } = o;
 
+  /**
+   * The connection to read `source` from for `season`: the current file when it holds the season (or
+   * no season / no history file applies), else the history file when IT holds it, else whichever is
+   * loaded (a loaded file without the season answers no rows, stamped); null when neither is.
+   */
+  function connFor(
+    source: DatasetSourceId,
+    history: DatasetSourceId | null,
+    s: number | null,
+  ): DatasetConnection | null {
+    const cur = connections.use(source);
+    if (s === null || history === null) return cur;
+    if (cur !== null && seasonsOf(cur).includes(s)) return cur;
+    const h = connections.use(history);
+    if (h !== null && seasonsOf(h).includes(s)) return h;
+    return cur ?? h;
+  }
+
   /** Runs statement `i` of a reader method on its source's connection; null when not loaded. */
   function run(
     method: ReaderMethod,
@@ -140,13 +163,19 @@ export function createReaders(o: ReadersOptions): StoreReaders {
   ): { rows: SqlRow[]; conn: DatasetConnection } | null {
     const st = READER_QUERIES[method].statements[i];
     if (st === undefined) throw new Error(`store: ${method} has no statement ${String(i)}`);
-    const conn = connections.use(st.source);
+    const twin = (PHASE_1_HISTORY_TWINS as Partial<Record<string, DatasetSourceId>>)[st.source];
+    const conn = connFor(
+      st.source,
+      twin ?? null,
+      typeof params.season === "number" ? params.season : null,
+    );
     if (conn === null) return null;
     const rows = conn.db.prepare(st.sql).all(params) as unknown as SqlRow[];
     return { rows, conn };
   }
 
   const stampOf = (c: DatasetConnection): DatasetStamp => connections.stamp(c);
+  const phase2 = createPhase2Readers({ connFor, stampOf, warn });
 
   // --- espn:pro_schedule ------------------------------------------------------------------------
 
@@ -337,6 +366,17 @@ export function createReaders(o: ReadersOptions): StoreReaders {
         gsis_ids: stringList(gsisIds, "gsisIds"),
       });
       if (res === null) return NEVER_LOADED;
+      // the snap-count and pbp extras of these player-weeks (readers-p2.ts; null fields when the
+      // snap-count / pbp files are not loaded)
+      const keys: UsageKey[] = [];
+      for (const r of res.rows) {
+        const t = team(r.team);
+        const gsis = str(r.player_id);
+        const w = intOrNull(r.week);
+        if (t !== null && gsis !== null && w !== null)
+          keys.push({ gsis_id: gsis, week: w, nfl_team: t });
+      }
+      const extras = phase2.usageExtras(keys, season(s));
       const rows: PlayerWeekLine[] = [];
       for (const r of res.rows) {
         const t = team(r.team);
@@ -349,6 +389,7 @@ export function createReaders(o: ReadersOptions): StoreReaders {
         if (line === null) continue;
         const targets = sqlNum(r.targets);
         const air = sqlNum(r.receiving_air_yards);
+        const x = extras.get(usageKeyOf(gsis, intOrNull(r.week) ?? 0));
         rows.push({
           gsis_id: gsis,
           season: intOrNull(r.season) ?? s,
@@ -358,9 +399,9 @@ export function createReaders(o: ReadersOptions): StoreReaders {
           position: str(r.position) ?? "",
           line,
           usage: {
-            snaps: null,
-            snap_pct: null,
-            routes_proxy: null,
+            snaps: x?.snaps ?? null,
+            snap_pct: x?.snap_pct ?? null,
+            routes_proxy: x?.routes_proxy ?? null,
             targets,
             target_share: sqlNum(r.target_share),
             air_yards: air,
@@ -369,10 +410,10 @@ export function createReaders(o: ReadersOptions): StoreReaders {
             wopr: sqlNum(r.wopr),
             racr: sqlNum(r.racr),
             carries: sqlNum(r.carries),
-            carry_share: null,
-            rz_targets: null,
-            rz_carries: null,
-            gl_carries: null,
+            carry_share: x?.carry_share ?? null,
+            rz_targets: x?.rz_targets ?? null,
+            rz_carries: x?.rz_carries ?? null,
+            gl_carries: x?.gl_carries ?? null,
             xfp_ep: null,
           },
         });
@@ -663,18 +704,17 @@ export function createReaders(o: ReadersOptions): StoreReaders {
     },
   };
 
-  const neverLoaded = <T>(): DatasetResult<T> => NEVER_LOADED;
   const datasets: DatasetReaders = {
     proSchedule,
     nflGames,
     injuries,
     playerWeeks,
-    // Phase-2 sources (plan 10 §3.2): no dataset file exists in this phase — never loaded.
-    depthCharts: { chart: () => neverLoaded() },
-    epWeekly: { rows: () => neverLoaded() },
+    // the Phase-2 ports (plan 10 §3.2): readers-p2.ts
+    depthCharts: phase2.depthCharts,
+    epWeekly: phase2.epWeekly,
     weather,
-    news: { recent: () => neverLoaded() },
-    trending: { latest: () => neverLoaded() },
+    news: phase2.news,
+    trending: phase2.trending,
   };
 
   return { datasets, rosterWeekly, playerUniverse, nflPlayers };

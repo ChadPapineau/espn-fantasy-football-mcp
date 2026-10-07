@@ -27,6 +27,7 @@ import {
 import {
   emptyTables,
   injuriesTables,
+  probeSpec,
   proScheduleTables,
   publishTables,
   row,
@@ -660,16 +661,47 @@ describe("multi-process (plan 05 §2 `store`)", () => {
   });
 });
 
-describe("a Phase-2 source (no contract tables) publishes its own tables", () => {
+describe("a source with no ds_* contract publishes its own tables", () => {
   it("columns hash over what it created", async () => {
     const out = await publishTables(
+      pub,
+      "nflverse:pfr_advstats",
+      "v1",
+      emptyTables("nflverse:pfr_advstats"),
+    );
+    expect(out.ok).toBe(true);
+    expect(existsSync(path.join(t.datasetDir, "nflverse__pfr_advstats.sqlite"))).toBe(true);
+  });
+});
+
+describe("Phase-2 and history files are held to their contract (src/store/datasets/tables.ts)", () => {
+  it("a Phase-2 source publishes with its contract tables, and is refused without them", async () => {
+    const ok = await publishTables(
       pub,
       "sleeper:trending",
       "bucket-1",
       emptyTables("sleeper:trending"),
     );
-    expect(out.ok).toBe(true);
+    expect(ok.ok).toBe(true);
     expect(existsSync(path.join(t.datasetDir, "sleeper__trending.sqlite"))).toBe(true);
+    const probe = await publishTables(pub, "news:espn", "bucket-1", [
+      { spec: probeSpec("news:espn"), rows: [] },
+    ]);
+    expect(probe).toMatchObject({ ok: false, error: "schema_mismatch" });
+  });
+
+  it("a history file needs every table of its contract (the depth file: both layouts)", async () => {
+    const both = emptyTables("nflverse:depth_charts_history");
+    expect(both.map((x) => x.spec.name).sort()).toEqual([
+      "ds_depth_charts",
+      "ds_depth_charts_legacy",
+    ]);
+    const one = await publishTables(pub, "nflverse:depth_charts_history", "h1", both.slice(0, 1));
+    expect(one).toMatchObject({ ok: false, error: "schema_mismatch" });
+    const ok = await publishTables(pub, "nflverse:depth_charts_history", "h1", both, {
+      seasons: [2024, 2025],
+    });
+    expect(ok.ok).toBe(true);
   });
 });
 

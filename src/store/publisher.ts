@@ -34,12 +34,12 @@ import {
   DS_SCHEMA_VERSION,
 } from "./datasets/connections.js";
 import {
-  columnsHash,
   columnsHashOf,
+  contractColumnsHash,
+  contractTablesFor,
   ddlFor,
-  isPhase1DatasetSource,
+  isContractDatasetSource,
   quoteIdentifier,
-  tablesFor,
 } from "./datasets/tables.js";
 import { MIGRATIONS, type Migration } from "./migrations/index.js";
 import { createPseudonymizer } from "./pseudonym.js";
@@ -480,12 +480,13 @@ export function openPublisher(
       writer = new StagingWriter(staging, wdb);
       const stats = checkStats(await fill(writer));
       writer.close();
-      // A file the server would refuse is never published: every contract table, this layout.
+      // A file the server would refuse is never published: every contract table, this layout —
+      // Phase 1, Phase 2 and the history files alike (their contract: src/store/datasets/tables.ts).
       const created = writer.created;
-      if (!tablesFor(sourceId).every((t) => writer?.counts.has(t.name) === true))
+      if (!contractTablesFor(sourceId).every((t) => writer?.counts.has(t.name) === true))
         throw new PublishError("schema_mismatch");
       const hash = columnsHashOf(created);
-      if (isPhase1DatasetSource(sourceId) && hash !== columnsHash(sourceId))
+      if (isContractDatasetSource(sourceId) && hash !== contractColumnsHash(sourceId))
         throw new PublishError("schema_mismatch");
       if (stats.columns_hash !== hash) throw new PublishError("schema_mismatch");
       let rows = 0;

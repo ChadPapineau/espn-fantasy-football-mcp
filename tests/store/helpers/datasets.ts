@@ -16,7 +16,7 @@ import {
   DS_VENUES,
   DS_WEATHER_NWS,
   DS_WEATHER_OPEN_METEO,
-  tablesFor,
+  contractTablesFor,
 } from "../../../src/store/datasets/tables.js";
 import type {
   DatasetPublisher,
@@ -73,7 +73,7 @@ export function publishTables(
   );
 }
 
-/** A probe table for a source with no Phase-1 contract (Phase-2 sources in the 11-source test). */
+/** A probe table for a source with no ds_* contract (the uncontracted Phase-2 ones, odds). */
 export function probeSpec(source: DatasetSourceId): DatasetTableSpec {
   return {
     name: `ds_probe_${source.replace(":", "_")}`,
@@ -86,9 +86,13 @@ export function probeSpec(source: DatasetSourceId): DatasetTableSpec {
   };
 }
 
-/** The contract tables of a source with no rows (or a probe table with one row for Phase-2 ones). */
+/**
+ * The contract tables of a source with no rows — Phase 1, Phase 2 and the history files alike (the
+ * publisher refuses a contract file without them) — or a probe table with one row for a source with
+ * no contract.
+ */
 export function emptyTables(source: DatasetSourceId): TableRows[] {
-  const contract = tablesFor(source);
+  const contract = contractTablesFor(source);
   if (contract.length > 0) return contract.map((spec) => ({ spec, rows: [] }));
   const spec = probeSpec(source);
   return [{ spec, rows: [{ id: 1, label: source }] }];
