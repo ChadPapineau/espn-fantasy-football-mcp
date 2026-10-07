@@ -72,6 +72,41 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   bounds (startup, warm-cache reads, E1/E2/E5 budgets, event-loop stall). CI runs them in the
   `process` job, a `smoke` job drives the built server with the pinned Inspector CLI, and a weekly
   `process-macos` job runs the keychain process tests.
+- **Phase 2 data sources (plan 10 §3.2).** nflverse `stats_team_week`, the play-by-play projected
+  subset, `snap_counts` and the ESPN-keyed `depth_charts`; ffopportunity `ep_weekly`; Sleeper's
+  trending adds and drops (a secondary signal); the RotoWire, ESPN and CBS RSS headlines (all text
+  wrapped as `untrusted_text`, a deterministic player matcher, no entity expansion); and the two
+  prior seasons of each nflverse / ffopportunity dataset in their own history files for the soft
+  backtests. Each loads through `eff refresh` with its schema assertion (a renamed column fails
+  naming it), shows its licence and age in `eff status`, and exits 0 without a request outside the
+  season; the launchd jobs cover them. The HTTP allow-list gains exactly `api.sleeper.app`,
+  `www.rotowire.com`, `www.espn.com` and `www.cbssports.com` (the cookie path still refuses them).
+- **The Phase 2 dataset readers.** Depth charts (current snapshot runs; the 2024 legacy layout),
+  expected points, news with player refs and match confidence, trending with gsis ids, the pbp team
+  profile, and usage extras on the weekly player lines — snaps and snap share, red-zone and
+  goal-line volume, the team's red-zone opportunities, carry share and a routes proxy. A prior
+  season reads from its history file; Phase 2 and history files are validated against their
+  contract on publish and on open.
+- **The 16 P1 tools under `EFF_TOOLSET=full` (plan 07 P1).** Player stats, ESPN projections and
+  outlooks, usage, depth charts, defence profiles (opponent-adjusted points allowed, pace, pass
+  rate, PROE, sack and takeaway rates, EPA allowed), news, the matchup engine (pre, live and the
+  fitted season), replacement level, trades (evaluation and partner search), the injury cascade,
+  the schedule stress test, the roster audit, evidence weighing (the `rules_v1` claim extractor and
+  hand-set reliability priors), league activity, and the recommendation log; waivers gain usage
+  signals, rival demand, learned claim mechanics and FAAB bids; E1 gains the `player_sim` basis for
+  RB/WR/TE weeks with three or more recent games (under `full` only — `core` is unchanged). `core`
+  stays at 18 tools; no write tool in either set.
+- **The five P1 Skills and prompts (plan 09 P1).** `trade`, `injury-cascade`, `schedule-plan`,
+  `roster-audit`, `news-check`; `waivers`' usage and FAAB branches, `start-sit`'s live P(win); the
+  five P1 prompts (13 under `full`); the plugin-eval suite generator (`npm run build:plugin-evals`,
+  `--seed-datasets` to load the committed excerpts into the eval servers).
+- **`scripts/run-weekly.ts`.** The weekly pre-run as a headless Agent SDK session against the
+  server, write and shell tools denied by name.
+- **End-to-end proof under `full`.** The built server over real stdio on a seeded `fx-10h` cache:
+  34 tools in registry order, every one called and its envelope checked, the plan 10 B8 walk over
+  every output on all six injected-text variants, every Skill's `full` tool sequence, the P1
+  latency budgets and the event-loop stall bound; the SDK and Inspector smokes run under both
+  toolsets.
 
 ### Fixed
 
@@ -82,3 +117,9 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   64 KiB and before building an envelope.
 - **Record recommendation.** An onboarding record may cite the last final week's box score.
 - **Bounds.** `n_sims` is capped at the measured `N_SIMS_MAX`.
+- **Refresh spacing.** A release refresh no longer waits 15 minutes between its version poll and
+  its downloads: the GitHub poll keeps its 15-minute limit and a run's assets are spaced 1 s apart.
+- **Event-loop stalls in the P1 tools.** The provider's freshness context is reused for a second
+  instead of re-reading the season's schedule on every read, a large fresh body yields between its
+  parse, drift check, schema check and cache strip, and the heavier P1 tools yield between their
+  synchronous steps (measured 37 ms worst case against the 50 ms bound).

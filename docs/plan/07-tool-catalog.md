@@ -402,6 +402,18 @@ Claude Code warns at 10 000 tokens and truncates at 25 000 by default (06 via si
 | Skills listing (the 8 P0 descriptions) | **2 597 chars** | 4 600 | 2 003 chars |
 | `prompts/list` + `resources/list` + templates | 1 073 + 1 436 + 362 = 2 871 chars | (5 000, the test's bound) | — |
 
+**Measured (Phase 2, plan 10 B12 — the same test with the 16 P1 tools registered, `build/phase-1` @ `f37ebfe`, 2026-10-06).**
+
+| Per-turn fixed cost | measured | ceiling [A-4] | headroom |
+|---|---:|---:|---:|
+| `tools/list` under `full` (34 tools, `outputSchema` on the wire for every tool) | **32 999 chars ≈ 8 250 tokens** | 35 000 chars | 2 001 chars |
+| the same with the ≤ 120-char short form in every description (ADV OBJ-24 fallback) | 36 705 chars | 35 000 | **over by 1 705** — the fallback under `full` would need C10's first lever (`outputSchema` off the wire) |
+| `tools/list` under `core` | 17 669 chars (unchanged) | 20 000 | 2 331 chars |
+| Skills listing (all 13 descriptions) | **4 178 chars** | 4 600 | 422 chars |
+| `prompts/list` under `full` (13 prompts) | 1 811 chars | — | — |
+
+P1 results at the size test's calls (league-a, `compact` unless noted): `espn_get_player_stats` (season, `full`) 4 847; `espn_get_projections` (ROS) 3 259; `espn_get_player_outlook` (with the season outlook) 3 500; `espn_get_player_usage` (16 players) 7 707 / 7 872 `full` — ≈ 480 chars a player, above the ~300 the per-player planning figure assumed; `espn_analyze_matchup` 3 779 (`pre`) / 4 826 (`season`, both readings); `espn_analyze_replacement` 9 659 / 9 809 `full` (trimmed to its budget); `espn_analyze_schedule` 7 571; `espn_analyze_roster` 6 865; `espn_analyze_trade` (partner search) 4 194; `espn_analyze_league_activity` 7 972; `espn_analyze_waivers` under `full`, `full` detail, 9 051 — every list ≤ 20 000 and every analytics result ≤ C8's 10 000. **The measured `compact`/`full` ratio is ≈ 0.98** on this fixture (the full-only arrays are short on a three-week excerpt), not the ~0.5 the §5.2 drop list implies for a full season: §5.2's drops stand, and the ratio is re-measured on the live league. **Consequences (D3 re-decided on this measurement):** `core` stays the default — `full` sits at 94 % of its ceiling, not "far under" it (C3's trigger), and its ADV OBJ-24 fallback does not fit without the `outputSchema` lever; the ceilings stay where they are.
+
 Results at the size test's calls (serialised chars, the whole envelope): `espn_get_league` 10 439; `espn_get_standings` 7 933; `espn_get_scoreboard` (week 2) 2 934; `espn_get_live_scoreboard` 3 457; `espn_get_box_score` (all matchups) 7 939; `espn_get_roster` 12 364; `espn_list_players` 17 816 (default) / 17 821 (`limit: 100`); `espn_get_schedule` (3 weeks) 17 053; `espn_get_status` (with checks) 2 908 — every one ≤ the 20 000 worst case above; `espn_project_players` 5 869 (`week`) / 5 760 (`ros`, `full`); `espn_analyze_lineup` 8 973; `espn_analyze_waivers` (K) 7 355; `espn_analyze_retrospective` 4 294 — every one ≤ C8's 10 000. **Consequences:** C10's first lever is not needed (`outputSchema` stays on the wire for every tool); `core` stays the default (C3's trigger is "far under its ceiling", and 88 % of it is not); the ceilings stay where they are — lowering `core` below 19 631 would leave no room for the ADV OBJ-24 fallback, and the Skills ceiling is held for the 13 Skills of Phase 2 (13 × ≤ 350 chars).
 
 ### 5.2 What `detail: "compact"` drops (and why the Skills can rely on it)

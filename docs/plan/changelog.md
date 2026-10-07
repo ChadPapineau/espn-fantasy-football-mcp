@@ -409,6 +409,17 @@ Not adversarial rulings: the numbers and pointers the plan said the build would 
 
 Implementer's notes on R5: the switch adds no configuration key — a new test-scope key would change plan 03 §3, plan 05 §3.1's "three test-scope keys", the README Testing table and the schema test — so it rides `EFF_TEST_STUBS`, which already exists only for tests and, with fixture mode, already makes every network call or keychain access exit; every stubbed fixture-mode run (the e2e and smoke suites) therefore runs without the deadline, which changes no answer there (the worst `fx-10h` call is far below 8 s; `tests/mcp/cpu-deadline.test.ts` shows off and on agree) and removes a flake source. The README Testing row for `EFF_TEST_STUBS` does not yet mention this side effect (a docs follow-up). The A9a tool-level test runs in process (the real composition root in fixture mode on `fx-10h`, under coverage on every push); the stdio leg of the same assertion stays in `tests/e2e/acceptance.test.ts`.
 
+## B2 — measurements and records written back during the build (2026-10-06)
+
+Not adversarial rulings: the numbers the plan said Phase 2 would write back, and the integration's
+build-time choices where the plan was silent (each also in `docs/HANDOFF.md` → "Build facts (Stage B2)").
+
+- **B12 sizes** · plan 07 §5.1 (a second "Measured" table, Phase 2) · `tools/list` under `full` 32 999 chars ≈ 8 250 tokens (ceiling 35 000); the ADV OBJ-24 short-form fallback would be 36 705 under `full` (over — it would need C10's `outputSchema` lever); the Skills listing over all 13 Skills 4 178 chars (ceiling 4 600); `compact`/`full` ≈ 0.98 on the three-week excerpt; D3 re-decided: `core` stays the default.
+- **History files** · plan 10 §3.2 "two prior nflverse seasons" · the seven `<source>_history` files are registered dataset sources (licence, attribution, freshness and job of their current source) and refresh with their current job, gated on the CURRENT season being in progress (B1: outside the season every job exits 0 with no request); `--seasons` runs them regardless.
+- **Release politeness** · plan 01 §6 · the 15-minute GitHub limit is the `timestamp.txt` poll's; a run's asset downloads are spaced 1 s apart (before, every request of a run waited 15 minutes for the previous one).
+- **E1 `player_sim`** · plan 10 §3.2 · registered under `EFF_TOOLSET=full` only (an RB/WR/TE week with ≥ 3 trailing games; the same ESPN mean), so the P0 `core` projections are unchanged; E2's reporting stays sign-and-band because K and D/ST never take the basis.
+- **Main-loop stall** · plan 10 A16a, ADV OBJ-07 · the bound holds for the P1 tools too (worst measured 37 ms): the provider's freshness context is reused for 1 s, a large fresh body yields between its phases, and the heavier P1 tools yield between their synchronous steps.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |

@@ -1247,7 +1247,7 @@ Only where you would expect. The planned server makes **no telemetry, error-repo
 | `api.open-meteo.com`, `api.weather.gov` | Stadium forecasts for upcoming outdoor games | Weather |
 | `api.the-odds-api.com` | Requests with your own API key, only if you set one | Optional secondary betting lines |
 | `api.sleeper.app` | Requests for league-agnostic trending lists | A secondary demand signal |
-| `rotowire.com`, `espn.com` (RSS) | Feed fetches | News headlines |
+| `www.rotowire.com`, `www.espn.com`, `www.cbssports.com` (RSS) | Feed fetches, never with a cookie | News headlines |
 | ESPN's fantasy **write** host | Nothing, unless the write module is built and enabled | — |
 
 Tool results go to the MCP client you connected — that is the point of the tool — so your league's data reaches the model you are chatting with, under that client's own terms. Nothing else leaves your machine.
@@ -1282,7 +1282,7 @@ This design was informed by research, not built from anyone else's code. Nothing
 | US National Weather Service (`api.weather.gov`) | Weather, alternative source | Public domain |
 | [The Odds API](https://the-odds-api.com/) | Optional secondary betting lines | Its own terms; free tier, key required |
 | Sleeper API | A secondary trending signal | Free for non-commercial use |
-| RotoWire and ESPN RSS | News headlines | Headlines only, treated as untrusted text |
+| RotoWire, ESPN and CBS Sports RSS | News headlines | Headlines only, treated as untrusted text |
 | ESPN Fantasy (unofficial API) | League data and ESPN's own projections | **No licence and no affiliation.** Subject to the Disney Terms of Use; never commercial; see the [disclosure](#terms-of-use-and-account-risk) |
 
 **Protocol and tooling.** The [Model Context Protocol](https://modelcontextprotocol.io/) specification and its official TypeScript SDK; the MCP Inspector; `zod`, `hyparquet` and `@napi-rs/keyring` (the four planned runtime packages, each exact-pinned); Anthropic's published guidance on building MCP servers and authoring Skills; and the sibling project `yahoo-fantasy-football-mcp`, whose platform-agnostic research and adversarial rulings are reused here by citation.

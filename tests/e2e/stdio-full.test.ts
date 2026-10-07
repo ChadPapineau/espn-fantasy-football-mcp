@@ -314,6 +314,27 @@ describe(
       expect(defense.meta.source).toContain("nflverse:pbp");
       expect(defense.data.defenses[0]?.pace_plays_per_game).toBeGreaterThan(0);
       expect(defense.data.defenses[0]?.pass_rate).toBeGreaterThan(0);
+      // B2: routes_proxy present and labelled; xfp_gap non-null wherever ffopportunity has the
+      // player-week (and the league's points exist)
+      const usageFull = by.get("usage_full") as {
+        data: {
+          notes: string[];
+          players: {
+            games?: {
+              routes_proxy?: unknown;
+              xfp_ep: number | null;
+              points_league: number | null;
+              xfp_gap: number | null;
+            }[];
+          }[];
+        };
+      };
+      expect(usageFull.data.notes).toContain("routes are a snap-share proxy (04 #3)");
+      const rows = usageFull.data.players.flatMap((p) => p.games ?? []);
+      for (const g of rows) {
+        expect(g).toHaveProperty("routes_proxy");
+        if (g.xfp_ep !== null && g.points_league !== null) expect(g.xfp_gap).not.toBeNull();
+      }
       const usage = by.get("usage") as { meta: { source: string[] } };
       expect(usage.meta.source).toContain("nflverse:stats_player_week");
       expect(usage.meta.source).toContain("ffopportunity:ep_weekly");
