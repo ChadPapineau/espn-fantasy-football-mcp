@@ -26,6 +26,7 @@ import type {
 import { newsItemWithRefs, readStoredNewsRow } from "../../domain/evidence/index.js";
 import { bareUntrusted, type IsoInstant, type Week } from "../../domain/league/types.js";
 import type { DatasetConnection } from "./connections.js";
+import { DEPTH_LABEL_OTHER, DEPTH_LABELS } from "./derive.js";
 import {
   DEPTH_CHARTS_SNAPSHOT_SCHEMA_FROM,
   PHASE_2_READER_QUERIES,
@@ -135,6 +136,19 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
 
   // --- DepthChartReader.chart ------------------------------------------------------------------
 
+  /**
+   * A stored depth label held to the closed vocabulary once more on the way out (the publisher
+   * already wrote DEPTH_LABELS or OTHER — derive.ts depthLabel): anything else reads as OTHER,
+   * counted, so a label is never third-party text in a tool result.
+   */
+  const label = (v: unknown): string | null => {
+    const t = str(v);
+    if (t === null) return null;
+    if (t === DEPTH_LABEL_OTHER || DEPTH_LABELS.has(t)) return t;
+    d.warn("dataset_label_other");
+    return DEPTH_LABEL_OTHER;
+  };
+
   const depthCharts: DepthChartReader = {
     chart(season, teams): DatasetResult<DepthChartRow> {
       const list = JSON.stringify([...new Set(teams)]);
@@ -146,8 +160,8 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
       const rows: DepthChartRow[] = [];
       for (const r of res.rows) {
         const t = team(r.team);
-        const grp = str(snapshot ? r.pos_grp : r.formation);
-        const abb = str(r.pos_abb);
+        const grp = label(snapshot ? r.pos_grp : r.formation);
+        const abb = label(r.pos_abb);
         const rank = int(snapshot ? r.pos_rank : r.depth_team);
         if (t === null || grp === null || abb === null || rank === null) {
           d.warn("dataset_row_skipped");

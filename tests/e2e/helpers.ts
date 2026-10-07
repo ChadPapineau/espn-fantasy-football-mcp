@@ -6,6 +6,11 @@
 // owns, so it can end stdin itself and observe the real exit code and timing. No network, no
 // ~/.config, no ~/.cache, no keychain.
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { backupDir, datasetDir, storePath } from "../../src/config/paths.js";
+import { derivedLeagueClock } from "../../src/providers/espn/fixture-league.js";
+import { storeFactory } from "../../src/store/index.js";
+import { runningClock } from "../mcp/helpers/world.js";
+import { seedDatasets, type SeedReport } from "../integration/helpers/seed.js";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -70,6 +75,41 @@ export function makeHome(
       rmSync(root, { recursive: true, force: true });
     },
   };
+}
+
+/**
+ * Seeds a home's cache with every fixture-backed dataset source of `full` (plan 10 §3.2 — the state
+ * an `eff refresh all` leaves), published through the real runner + publisher at the fixture
+ * league's own clock (so the built server, which starts its clock there, reads every file fresh),
+ * then rebuilds the crosswalk. The server is spawned on this cache afterwards; no network.
+ */
+export async function seedHome(home: E2eHome, fixtureDir: string = FX): Promise<SeedReport> {
+  const at = derivedLeagueClock(fixtureDir);
+  if (at === null) throw new Error(`${fixtureDir} has no derived-league clock`);
+  const clock = runningClock(at);
+  const t = {
+    storePath: storePath(home.cache),
+    datasetDir: datasetDir(home.cache),
+    cache: home.cache,
+    clock,
+    season: 2026,
+  };
+  const store = storeFactory.open({
+    path: t.storePath,
+    datasetDir: t.datasetDir,
+    backupDir: backupDir(home.cache),
+    clock,
+    migrate: true,
+  });
+  try {
+    const report = await seedDatasets(store, t);
+    const failed = report.results.filter((r) => r.status !== "published");
+    if (failed.length > 0)
+      throw new Error(`seed: ${failed.map((r) => `${r.source} ${r.status}`).join(", ")}`);
+    return report;
+  } finally {
+    store.close();
+  }
 }
 
 /** How the child ended. */

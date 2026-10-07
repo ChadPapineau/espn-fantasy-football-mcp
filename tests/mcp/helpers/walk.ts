@@ -87,6 +87,14 @@ export const SERVER_PROSE: ReadonlySet<string> = new Set([
   "data.what_would_confirm[]",
   "data.calibration_state.note",
   "data.readings[].scenarios_applied[]",
+  // E10's comparator values: a status code, a designation code or a fixed phrase ("IR move", "role
+  // up", "official practice: full") — src/domain/analytics/evidence.ts; the user's claim text itself
+  // only ever appears wrapped, in evidence[].claim
+  "data.structured_disagrees.structured_value",
+  "data.structured_disagrees.claim_value",
+  // D4's depth-chart group labels: the closed DEPTH_LABELS vocabulary (or OTHER), enforced at publish
+  // and again by the reader (src/store/datasets/readers-p2.ts) — never third-party free text
+  "data.teams[].groups[].pos_grp",
 ]);
 
 /** The violations of the A6 rule in one envelope (empty = compliant). */
