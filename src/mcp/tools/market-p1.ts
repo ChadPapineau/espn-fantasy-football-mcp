@@ -76,6 +76,7 @@ import {
   readOpts,
   take,
   teamOf,
+  turn,
   withinBudget,
 } from "./common.js";
 import {
@@ -714,6 +715,7 @@ export const analyzeInjuryCascadeTool = defineTool({
       first = g === undefined ? undefined : ctx.services.crosswalk.byGsis(g)[0]?.espn_id;
     }
     const index = await universeOf(ctx, season, inputs, warnings);
+    await turn();
     const teamId0 = index.find((r) => r.espn_id === first)?.pro_team_id ?? 0;
     const room = first === undefined || teamId0 <= 0 ? [] : teamPlayerIds(index, teamId0, first);
     const { player: inj, others } = await singlePlayer(ctx, args.player, b.w, inputs, room);
@@ -731,6 +733,7 @@ export const analyzeInjuryCascadeTool = defineTool({
       p,
       gsis: crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id,
     }));
+    await turn();
     const now = usageOf(
       ctx,
       subjects,
@@ -740,6 +743,7 @@ export const analyzeInjuryCascadeTool = defineTool({
       allowStale,
       inputs,
     );
+    await turn();
     const prior = usageOf(
       ctx,
       subjects,
@@ -840,6 +844,7 @@ export const analyzeInjuryCascadeTool = defineTool({
           ? game.lines.implied.home
           : game.lines.implied.away;
     const tmById = new Map(teammates.map((p) => [p.ref.id, p]));
+    await turn();
     const out = await analyzeInjuryCascade({
       injured: {
         player_id: inj.ref.id,
@@ -1038,6 +1043,7 @@ export const analyzeEvidenceTool = defineTool({
       }
     }
     // usage (D1's rows) as the detector reads them
+    await turn();
     const u = usageOf(
       ctx,
       [{ p, gsis }],

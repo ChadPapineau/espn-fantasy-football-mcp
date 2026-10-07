@@ -1,7 +1,9 @@
 // provider-yield.test.ts — the stall fix in the provider's read (plan 03 §1.2; plan 10 A16a): a
 // warm read of a LARGE cached body (a 10-team roster, ~1 MB) yields to the event loop before its
 // synchronous parse, so a tool's several reads never run as one macrotask; a small cached body
-// (settings) does not yield, so coalescing and ordering are unchanged.
+// (settings) does not yield, so coalescing and ordering are unchanged. A COLD read of a large body
+// lets the loop run between its parse, drift check, schema check and cache strip (the full-toolset
+// stall probe found those phases at ~100 ms as one macrotask).
 import { describe, expect, it } from "vitest";
 import { YIELD_BEFORE_PARSE_CHARS } from "../../src/providers/espn/request.js";
 import { makeWorld } from "../providers/espn/helpers.js";
@@ -30,5 +32,28 @@ describe("the provider yields before parsing a large cached body", () => {
     expect(await yieldsDuring(() => w.provider.getRosters(w.ref, 3))).toBe(true);
     // the settings body is small: served without a yield (microtasks only)
     expect(await yieldsDuring(() => w.provider.getLeague(w.ref))).toBe(false);
+  });
+});
+
+/** How many loop turns (a self-requeuing setImmediate) ran while `work` was pending. */
+async function turnsDuring(work: () => Promise<unknown>): Promise<number> {
+  let turns = 0;
+  let done = false;
+  const tick = (): void => {
+    if (done) return;
+    turns++;
+    setImmediate(tick);
+  };
+  setImmediate(tick);
+  await work();
+  done = true;
+  return turns;
+}
+
+describe("the provider yields between the phases of a large fresh body", () => {
+  it("a cold roster read lets the loop turn at least three times (parse, drift, schema, strip)", async () => {
+    const w = makeWorld({ slot: "league-b" });
+    await w.provider.getLeague(w.ref);
+    expect(await turnsDuring(() => w.provider.getRosters(w.ref, 3))).toBeGreaterThanOrEqual(3);
   });
 });

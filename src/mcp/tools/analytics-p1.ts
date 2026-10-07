@@ -71,6 +71,7 @@ import {
   scheduleOf,
   take,
   teamOf,
+  turn,
   withinBudget,
 } from "./common.js";
 import {
@@ -378,6 +379,7 @@ export const analyzeMatchupTool = defineTool({
         allowStale,
       );
       if (rosters !== null && rosters.length >= 2) {
+        await turn();
         const proj = await projectMany(
           ctx,
           subjectsOf(
@@ -397,11 +399,13 @@ export const analyzeMatchupTool = defineTool({
           warnings,
         );
         projections = new Map();
+        await turn();
         for (const r of rosters) {
           const lp = lineupOf(ctx, r, proj.byId, schedule, b, b.w).players;
           projections.set(r.team.team_id, [teamWeekOf(b.slots, lp, b.w)]);
         }
       } else warnings.push("rosters unavailable: the season uses the cold-start weekly model");
+      await turn();
       const playoffPct = standings?.teams.find((t) => t.team_id === team)?.playoff_pct_espn ?? null;
       const out = await runSeason(ctx, {
         league: b.league,
@@ -450,6 +454,7 @@ export const analyzeMatchupTool = defineTool({
     if (opp === undefined)
       throw new EffError("NOT_FOUND", { field: "week", reason: "no_opponent" });
     const schedule = await scheduleOrEmpty(ctx, b.league.ref.season, inputs, warnings, allowStale);
+    await turn();
     const proj = await project(
       ctx,
       subjectsOf(
@@ -519,6 +524,7 @@ export const analyzeMatchupTool = defineTool({
             },
           };
     if (cross === null) warnings.push("espn:mMatchupScore unavailable: espn_cross_check is null");
+    await turn();
     const out = await analyzeMatchupWin({
       mode: args.mode,
       roster: b.slots,

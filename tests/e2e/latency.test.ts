@@ -5,7 +5,9 @@
 // for 32 players at n_sims 4000 < 3 s; the analytics that run the seeding simulator (E2's exchange
 // rate, E5's P(alive)) < 5 s; and the server's main loop never stalls more than 50 ms during any
 // analytics call (an event-loop delay probe inside the server process —
-// tests/e2e/fixtures/heartbeat.cjs; ADV OBJ-07). The measured numbers are printed for the report.
+// tests/e2e/fixtures/heartbeat.cjs; ADV OBJ-07). Under EFF_TOOLSET=full on a seeded cache the same
+// rules carry to the P1 tools: every P1 read tool warm < 500 ms, every P1 analytics call inside the
+// 8 s per-call deadline with the loop stall ≤ 50 ms. The measured numbers are printed for the report.
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
@@ -13,6 +15,7 @@ import {
   logRecords,
   makeHome,
   requireDist,
+  seedHome,
   serve,
   type Served,
 } from "./helpers.js";
@@ -162,3 +165,119 @@ describe("latency on fx-10h over real stdio (A15a, A16a)", { timeout: 300_000 },
       if (k.startsWith("warm_") && ANALYTICS.has(k.slice(5))) expect(report[k]).toBeLessThan(500);
   });
 });
+
+// --- EFF_TOOLSET=full: the 16 P1 tools on a seeded cache (A16a's rules carried to plan 10 §3.2) -------
+
+/** The P1 read tools (facts and dataset reads): A16a's warm < 500 ms rule. */
+const P1_READS: readonly [string, Record<string, unknown>][] = [
+  ["espn_get_player_stats", { players: { team_id: 2 }, type: "week", week: 4 }],
+  ["espn_get_projections", { players: { team_id: 2 }, horizon: "ros" }],
+  ["espn_get_player_outlook", { players: { team_id: 2 } }],
+  ["espn_get_player_usage", { players: { team_id: 2 }, window: 3 }],
+  ["espn_get_depth_chart", { nfl_team: "DET" }],
+  ["espn_get_defense_profile", { nfl_team: "DET" }],
+  ["espn_get_news", { since_hours: 168, limit: 20 }],
+  ["espn_list_recommendations", {}],
+];
+/** The P1 analytics: under the 8 s per-call deadline, the main loop never stalled > 50 ms. */
+const P1_ANALYTICS: readonly [string, Record<string, unknown>][] = [
+  ["espn_analyze_matchup", { week: 5, mode: "pre", seed: 1 }],
+  ["espn_analyze_matchup", { mode: "season", seed: 4 }],
+  ["espn_analyze_replacement", {}],
+  ["espn_analyze_trade", { find_partners: { need_position: "WR" }, seed: 2 }],
+  ["espn_analyze_injury_cascade", { player: { gsis_ids: ["00-0037248"] } }],
+  ["espn_analyze_schedule", {}],
+  ["espn_analyze_roster", { seed: 3 }],
+  ["espn_analyze_evidence", { player: { gsis_ids: ["00-0037248"] } }],
+  ["espn_analyze_league_activity", {}],
+  ["espn_analyze_waivers", { mode: "auto", phase: "auto" }],
+];
+
+describe(
+  "latency under EFF_TOOLSET=full on a seeded fx-10h over real stdio (A16a carried to the P1 tools)",
+  { timeout: 600_000 },
+  () => {
+    const homeFull = makeHome({ env: { EFF_TOOLSET: "full" } });
+    let f: Served | null = null;
+    afterAll(async () => {
+      if (f !== null) await f.stop();
+      homeFull.cleanup();
+    });
+    const report: Record<string, number> = {};
+
+    let lastWarnings: string[] = [];
+    async function timedFull(name: string, args: Record<string, unknown>): Promise<number> {
+      if (f === null) throw new Error("not served");
+      const t0 = performance.now();
+      const r = await f.client.callTool({ name, arguments: args }, { timeout: 120_000 });
+      const ms = performance.now() - t0;
+      const b = bodyOf(r);
+      expect(r.isError, `${name}: ${JSON.stringify(b).slice(0, 300)}`).not.toBe(true);
+      lastWarnings = (b.warnings as string[] | undefined) ?? [];
+      return ms;
+    }
+    async function heartbeatFull(): Promise<number> {
+      if (f === null) throw new Error("not served");
+      const before = f.transport.stderr.length;
+      f.transport.signal("SIGUSR2");
+      const end = Date.now() + 5000;
+      for (;;) {
+        const rec = logRecords(f.transport.stderr.slice(before)).find(
+          (l) => l.event === "e2e.heartbeat",
+        );
+        if (rec !== undefined) return rec.max_ms as number;
+        if (Date.now() > end) throw new Error("no heartbeat line");
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    }
+
+    it("startup < 1 s; every P1 read tool warm < 500 ms", async () => {
+      requireDist();
+      await seedHome(homeFull);
+      f = await serve(homeFull, { preloads: [HEARTBEAT] });
+      report.startup_ms = Math.round(f.connectMs);
+      expect(f.connectMs).toBeLessThan(1000);
+      await timedFull("espn_get_league", {});
+      await timedFull("espn_get_roster", { week: 5 });
+      for (const [name, args] of P1_READS) await timedFull(name, args); // cold
+      const slow: string[] = [];
+      for (const [name, args] of P1_READS) {
+        const ms = await timedFull(name, args);
+        // fx-10h records no mPositionalRatings / kona_playercard: a tool's OPTIONAL comparator read of
+        // those views goes upstream on every call (the fixture refuses it, the tool degrades and says
+        // so) and waits on the per-second ESPN limiter — not a warm call. Production caches the views
+        // for a day. Such a call is held to the limiter window instead, and must name the view.
+        const upstream = lastWarnings.find((w) =>
+          /^espn:(mPositionalRatings|kona_playercard) unavailable/.test(w),
+        );
+        if (upstream !== undefined) {
+          report[`upstream_${name}`] = Math.round(ms);
+          if (ms >= 2000) slow.push(`${name} ${String(Math.round(ms))} ms (${upstream})`);
+          continue;
+        }
+        report[`warm_${name}`] = Math.round(ms);
+        if (ms >= 500) slow.push(`${name} ${String(Math.round(ms))} ms`);
+      }
+      expect(slow).toEqual([]);
+      // the dataset reads never went upstream
+      for (const n of ["espn_get_player_usage", "espn_get_depth_chart", "espn_get_news"])
+        expect(report[`warm_${n}`], n).toBeLessThan(500);
+    });
+
+    it("every P1 analytics call < 8 s (the per-call deadline); the main loop never stalls > 50 ms", async () => {
+      await heartbeatFull();
+      const slow: string[] = [];
+      for (const [name, args] of P1_ANALYTICS) {
+        const ms = await timedFull(name, args);
+        const key = `${name}${typeof args.mode === "string" ? `_${args.mode}` : ""}`;
+        report[key] = Math.round(ms);
+        if (ms >= 8000) slow.push(`${key} ${String(Math.round(ms))} ms`);
+      }
+      const stall = await heartbeatFull();
+      report.max_loop_stall_ms = Math.round(stall * 10) / 10;
+      process.stdout.write(`latency report (full): ${JSON.stringify(report)}\n`);
+      expect(slow).toEqual([]);
+      expect(stall).toBeLessThanOrEqual(50);
+    });
+  },
+);

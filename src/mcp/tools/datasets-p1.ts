@@ -55,6 +55,7 @@ import {
   requiredDataset,
   settingsOf,
   take,
+  turn,
   weekOf,
   withinBudget,
 } from "./common.js";
@@ -244,7 +245,9 @@ export const getPlayerUsage = defineTool({
     }));
     const season = league.ref.season;
     const thisWeeks: Week[] = Array.from({ length: Math.max(0, w) }, (_, i) => i + 1);
+    await turn();
     const now = usageOf(ctx, subjects, season, thisWeeks, settings, allowStale, inputs);
+    if (args.include_prior_season) await turn();
     const prior: Map<number, UsageRead> | null = args.include_prior_season
       ? usageOf(
           ctx,

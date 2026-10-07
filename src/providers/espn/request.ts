@@ -609,14 +609,20 @@ export class EspnRequester {
     cacheable: boolean,
   ): Promise<Fresh> {
     const view = primaryView(spec.target);
+    // A large fresh body is parsed, drift-checked, schema-checked and stripped for the cache — each
+    // tens of ms on a 1 MB roster; the event loop runs between the phases (the 50 ms stall bound,
+    // plan 10 A16a; ADV OBJ-07 — found by the end-to-end stall probe), as `read` does for a hit.
+    const large = answer.bodyText.length > YIELD_BEFORE_PARSE_CHARS;
     let body: unknown;
     try {
       body = parseJsonSafe(answer.bodyText);
     } catch {
       throw new EspnUpstreamError("malformed", { view, upstream_status: answer.status });
     }
+    if (large) await yieldToLoop();
     const check = checkResponse(spec.target.views, body, this.deps.observations);
     if (check.drifted) throw this.driftError(check.signals);
+    if (large) await yieldToLoop();
     let parsed: unknown;
     try {
       parsed = spec.parse(body);
@@ -624,6 +630,7 @@ export class EspnRequester {
       if (e instanceof SchemaSignals) throw this.driftError(e.signals);
       throw e;
     }
+    if (large) await yieldToLoop();
     this.reportSoftSignals(check.signals);
     this.cookies.learnFromBody(body);
     if (cookieBearing) await this.cookies.observe("accepted", answer.status, view);

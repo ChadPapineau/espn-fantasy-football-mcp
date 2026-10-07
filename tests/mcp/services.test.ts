@@ -21,6 +21,7 @@ import {
   stripFrontmatter,
   stubbedFetch,
   stubbedKeyring,
+  TTL_CONTEXT_MEMO_MS,
   ttlContextFrom,
   withProbeAccess,
 } from "../../src/services/index.js";
@@ -177,6 +178,41 @@ describe("the provider's context from the stored pro schedule", () => {
       inSeason: true,
     });
     expect(periodProvisionalFrom(broken)(2026, 1)).toBeNull();
+  });
+
+  it("the TTL context is computed once per TTL_CONTEXT_MEMO_MS, a failure never memoised", () => {
+    let reads = 0;
+    let fail = false;
+    let now = Date.parse("2026-10-06T12:00:00.000Z");
+    const counted = {
+      datasets: {
+        proSchedule: {
+          games: () => {
+            reads++;
+            if (fail) throw new Error("x");
+            return { rows: [], stamp: null };
+          },
+        },
+      },
+    } as unknown as Store;
+    const ctx = ttlContextFrom(counted, 2026, { nowMs: () => now, nowIso: () => "" });
+    ctx();
+    ctx();
+    expect(reads).toBe(1);
+    now += TTL_CONTEXT_MEMO_MS - 1;
+    ctx();
+    expect(reads).toBe(1);
+    now += 1;
+    ctx();
+    expect(reads).toBe(2);
+    now -= 5_000; // a clock that stepped back recomputes
+    ctx();
+    expect(reads).toBe(3);
+    fail = true;
+    now += 60_000;
+    expect(ctx()).toEqual({ inGameWindow: false, gameDay: false, inSeason: true });
+    ctx();
+    expect(reads).toBe(5);
   });
 });
 

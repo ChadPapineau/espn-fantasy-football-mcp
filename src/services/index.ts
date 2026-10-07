@@ -176,9 +176,21 @@ export function withProbeAccess(
   };
 }
 
+/**
+ * How long one computed freshness context is reused (ms). Every ESPN read asks for it, and computing
+ * it reads the whole season's pro schedule (≈ 10 ms) — per read, that alone pushed a tool's several
+ * reads past the 50 ms main-loop stall bound (plan 10 A16a; ADV OBJ-07 — found by the end-to-end
+ * stall probe). The context changes only at game boundaries, so a second's reuse changes no TTL.
+ */
+export const TTL_CONTEXT_MEMO_MS = 1000;
+
 /** The freshness context the provider's TTLs read, from the stored pro schedule (plan 01 §5.2). */
 export function ttlContextFrom(store: Store, season: number, clock: Clock): () => TtlContext {
+  let memo: { readonly at: number; readonly value: TtlContext } | null = null;
   return () => {
+    const at = clock.nowMs();
+    if (memo !== null && at >= memo.at && at - memo.at < TTL_CONTEXT_MEMO_MS) return memo.value;
+    memo = null;
     try {
       const games = store.datasets.proSchedule.games(season, null).rows;
       const now = clock.nowMs();
@@ -196,7 +208,9 @@ export function ttlContextFrom(store: Store, season: number, clock: Clock): () =
         kicks.length === 0 ||
         (now >= Math.min(...kicks) - 14 * 86_400_000 &&
           now <= Math.max(...kicks) + 14 * 86_400_000);
-      return { inGameWindow: inGameWindow(flags, now), gameDay, inSeason };
+      const value = { inGameWindow: inGameWindow(flags, now), gameDay, inSeason };
+      memo = { at, value };
+      return value;
     } catch {
       return { inGameWindow: false, gameDay: false, inSeason: true };
     }

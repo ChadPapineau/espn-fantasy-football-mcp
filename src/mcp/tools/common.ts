@@ -359,3 +359,15 @@ export function isOptionalReadFailure(e: unknown): boolean {
   const reason = (e as { effDetails?: { reason?: unknown } } | null)?.effDetails?.reason;
   return (e as { name?: unknown } | null)?.name === "FixtureError" && reason === "fixture_missing";
 }
+
+/**
+ * Lets the event loop run (timers, stdin, the shutdown handler) before the next synchronous step of
+ * a tool: a cached roster parse, the player-index mapping and the dataset reads each take ~10–25 ms,
+ * and chained as one macrotask they passed the 50 ms main-loop stall bound (plan 03 §1.2; plan 10
+ * A16a; ADV OBJ-07 — found by the full-toolset stall probe). Costs one setImmediate.
+ */
+export function turn(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
