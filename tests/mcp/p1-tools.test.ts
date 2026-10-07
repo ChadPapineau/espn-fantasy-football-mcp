@@ -1159,6 +1159,130 @@ describe("E5 espn_analyze_waivers under full (plan 10 B3 hard parts)", () => {
     expect((espn.data as { value_basis: string }).value_basis).toBe("espn_ros");
   });
 
+  it("B3 hard parts with signals present: a held snap jump and an unpaid xFP window, every candidate checked", async () => {
+    // the positive control the checks above lack (the B2a gate's round 2): the free agents E5
+    // ranks have no crosswalk pair and no usage rows in the recorded excerpts, so every
+    // candidate's signals[] was empty and "every signal cites a number" held vacuously. Here each
+    // candidate is paired (a synthetic GSIS id where the store has none) and given one row per
+    // week through the ports — a snap share of 0.20, then 0.62+ over the last two games (a held
+    // jump, research 05 §4.1) and 60 expected points a game against the template line's actual
+    // points (opportunity not yet paid) — and the hard parts are checked on every candidate
+    const base = (await ok("espn_analyze_waivers", { detail: "full" })).data as {
+      candidates: { player_id: number }[];
+    };
+    const xw = world.services.crosswalk;
+    const tplPair = myRoster.map((p) => xw.get(p.player_id)).find((p) => p !== null);
+    if (tplPair == null) throw new Error("no crosswalk pair on my roster");
+    const synthetic = new Map<number, string>();
+    for (const [i, cnd] of base.candidates.entries())
+      if (cnd.player_id > 0 && xw.get(cnd.player_id) === null)
+        synthetic.set(cnd.player_id, `00-0099${String(i).padStart(3, "0")}`);
+    const cand = new Set<string>([
+      ...synthetic.values(),
+      ...base.candidates
+        .map((cnd) => (cnd.player_id > 0 ? (xw.get(cnd.player_id)?.gsis_id ?? null) : null))
+        .filter((g): g is string => g !== null),
+    ]);
+    expect(cand.size).toBeGreaterThan(0);
+    const crosswalk: typeof xw = {
+      get: (id) => {
+        const g = synthetic.get(id);
+        return g === undefined ? xw.get(id) : { ...tplPair, espn_id: id, gsis_id: g };
+      },
+      byGsis: (g) => {
+        for (const [id, sg] of synthetic)
+          if (sg === g) return [{ ...tplPair, espn_id: id, gsis_id: g }];
+        return xw.byGsis(g);
+      },
+      count: () => xw.count(),
+    };
+    const real = world.services.datasets.playerWeeks;
+    const tplGsis = myRoster.map((p) => p.gsis_id).filter((g): g is string => g !== null);
+    const weeksSeen: number[][] = [];
+    const playerWeeks: typeof real = {
+      ...real,
+      lines: (ids, season, weeks, opts) => {
+        const res = real.lines(ids, season, weeks, opts);
+        const wanted = ids.filter((g) => cand.has(g));
+        if (res.stamp === null || opts?.usage === false || wanted.length === 0) return res;
+        const ws = [...weeks].sort((a, b) => a - b);
+        weeksSeen.push(ws);
+        const tpl = real.lines(tplGsis, season, ws).rows.find((r) => r.usage !== null);
+        const usage = tpl?.usage;
+        if (tpl === undefined || usage == null) throw new Error("no template line with usage");
+        const have = new Set(res.rows.map((r) => r.gsis_id));
+        const synth = wanted
+          .filter((g) => !have.has(g))
+          .flatMap((g) =>
+            ws.map((wk, k) => ({
+              ...tpl,
+              gsis_id: g,
+              week: wk,
+              usage: { ...usage, snap_pct: k >= ws.length - 2 ? 0.62 + 0.01 * k : 0.2 },
+            })),
+          );
+        return { rows: [...res.rows, ...synth], stamp: res.stamp };
+      },
+    };
+    const c = await connect(world, {
+      options: { toolset: "full" },
+      services: {
+        crosswalk,
+        datasets: {
+          ...world.services.datasets,
+          playerWeeks,
+          epWeekly: {
+            rows: (ids, season, weeks) => ({
+              rows: ids
+                .filter((g) => cand.has(g))
+                .flatMap((g) => weeks.map((week) => ({ gsis_id: g, season, week, xfp_total: 60 }))),
+              stamp: stamp("ffopportunity:ep_weekly", "ffopportunity_ep_weekly"),
+            }),
+          },
+        },
+      },
+    });
+    let e: Env;
+    try {
+      e = await ok("espn_analyze_waivers", { detail: "full" }, c.client);
+    } finally {
+      await c.close();
+    }
+    const d = e.data as {
+      mode_used: string;
+      value_basis: string;
+      premium_band: { low: number; high: number };
+      candidates: {
+        status: string;
+        s: number;
+        verdict: string;
+        signals: { kind: string; value: number; evidence: unknown }[];
+        demand: { percent_change: number | null };
+      }[];
+    };
+    expect(d.value_basis).toBe("ensemble");
+    const all = d.candidates.flatMap((x) => x.signals);
+    const kinds = new Set(all.map((sg) => sg.kind));
+    expect(all.length).toBeGreaterThan(0);
+    expect(kinds.has("xfp_gap")).toBe(true);
+    // a jump needs two baseline games before the two held ones
+    if (weeksSeen.some((ws) => ws.length >= 4)) expect(kinds.has("snap_jump")).toBe(true);
+    for (const x of d.candidates) {
+      for (const sg of x.signals) {
+        expect(Number.isFinite(sg.value)).toBe(true);
+        expect(typeof sg.evidence).toBe("number");
+        expect(Number.isFinite(sg.evidence as number)).toBe(true);
+        expect(sg.kind).not.toBe("percent_change");
+      }
+      // ESPN's percent_change stays in demand (a competition signal), never among the signals
+      expect(JSON.stringify(x.signals)).not.toContain("percent");
+      expect(x.demand).toHaveProperty("percent_change");
+      if (d.mode_used !== "priority" || x.status !== "WAIVERS") continue;
+      if (x.verdict === "claim") expect(x.s).toBeGreaterThan(d.premium_band.high - 1e-6);
+      if (x.verdict === "pass") expect(x.s).toBeLessThan(d.premium_band.low + 1e-6);
+    }
+  });
+
   it("under core the P0 engine answers and an ensemble request is named, not honoured", async () => {
     const c = await connect(world);
     // league-a is FAAB: at P0 only the K/D-ST slice bids (all positions are P1)
