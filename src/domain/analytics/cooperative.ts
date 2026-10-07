@@ -59,8 +59,9 @@ export interface CooperativeResult {
   readonly cpu_ms: number;
   readonly batches: number;
   /**
-   * The longest single batch (the stall a heartbeat would see): within batchMs unless one chunk of
-   * steps ran longer than predicted from the previous one (a single step longer than batchMs).
+   * The longest single batch (the stall a heartbeat would see): within batchMs unless a batch's
+   * last chunk of steps took longer than every chunk before it in the run, or one chunk alone took
+   * batchMs or more (see runCooperative).
    */
   readonly max_batch_ms: number;
 }
@@ -80,7 +81,13 @@ const CHECK_MAX = 4096;
  * prefix. Throws RangeError for a negative or non-integer `units`. The yields around the run keep
  * the caller's synchronous work before it (a parse, a precompute) and after it (assembling the
  * answer) out of a batch's turn: chained, the two once made a 40–50 ms stall from 16 ms batches
- * (plan 10 A16a's end-to-end probe).
+ * (plan 10 A16a's end-to-end probe). A batch also ends before a chunk predicted to overrun it,
+ * predicted from the larger of the last chunk's pace and the longest chunk timed so far in the run
+ * (capped at batchMs; a chunk's time bounds every step in it): steps of uneven cost (a trade
+ * package whose partner roster is not yet memoised, a bench audit) otherwise ran a batch of cheap
+ * steps up to batchMs and then one heavy step past it. So a batch passes batchMs only where no
+ * prediction could help: its first chunk (which always runs — progress is never blocked), a chunk
+ * longer than every chunk the run timed before it, or a chunk that alone takes batchMs or more.
  */
 export async function runCooperative(
   units: number,
@@ -96,6 +103,8 @@ export async function runCooperative(
   let batches = 0;
   let maxBatch = 0;
   let checkEvery = CHECK_MIN;
+  /** The longest chunk timed in this run (ms, ≤ batchMs) — an upper bound on any one step seen. */
+  let heaviest = 0;
   if (units > 0) await pacer.yieldToLoop();
   while (i < units) {
     const start = pacer.nowMs();
@@ -110,6 +119,7 @@ export async function runCooperative(
       const gap = now - last;
       last = now;
       const perStep = gap / Math.max(1, i - from);
+      heaviest = Math.max(heaviest, Math.min(batchMs, gap));
       if (gap < 0.5 && checkEvery < CHECK_MAX) checkEvery *= 2;
       else if (gap > 2 && checkEvery > CHECK_MIN) checkEvery = Math.max(CHECK_MIN, checkEvery >> 1);
       elapsed = now - start;
@@ -117,8 +127,11 @@ export async function runCooperative(
       if (deadline !== null && cpu + elapsed >= deadline) break;
       // the next chunk would run the batch past batchMs: yield first. A coarse step (a trade package,
       // a bench audit: several ms each) otherwise made a batch of batchMs plus one more step —
-      // ~30 ms turns from 16 ms batches, measured by the end-to-end stall probe (plan 10 A16a)
-      if (elapsed + perStep * Math.min(checkEvery, units - i) > batchMs) break;
+      // ~30 ms turns from 16 ms batches, measured by the end-to-end stall probe (plan 10 A16a). The
+      // prediction is the larger of the last chunk's pace and the longest chunk timed: after a run
+      // of cheap steps the next one may be a heavy one (a partner roster not yet memoised)
+      const next = Math.max(perStep * Math.min(checkEvery, units - i), heaviest);
+      if (elapsed + next > batchMs) break;
     }
     cpu += Math.max(0, pacer.cpuMs === undefined ? elapsed : pacer.cpuMs() - cpuStart);
     batches += 1;

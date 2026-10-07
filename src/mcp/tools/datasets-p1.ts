@@ -686,28 +686,47 @@ export const getDefenseProfile = defineTool({
       const gsis = rIn === null ? [] : [...new Set(roster.rows.map((r) => r.gsis_id))];
       if (rIn !== null) inputs.push(rIn);
       if (gsis.length > 0) {
-        // points allowed need the stat lines only (no usage extras)
-        const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks, { usage: false });
-        const li = requiredDataset(r, ctx.nowMs, allowStale);
-        if (li !== null) inputs.push(li);
-        for (const l of r.rows) {
-          const pos = l.position === "FB" ? "RB" : l.position;
-          if (!(pos in DEFENSE_POSITIONS) || pos === "D/ST" || l.opponent === null) continue;
-          let pts: number;
-          try {
-            pts = score(l.line, settings).points;
-          } catch {
-            continue;
+        // points allowed need the stat lines only (no usage extras). One statement per week, each
+        // week's lines scored in a turn of its own: the window over the whole NFL roster as one
+        // read + score was a single macrotask (~10 000 player-weeks at the default 10 weeks) that
+        // blocked the loop past the 50 ms stall bound (plan 03 §1.2 — the loop never blocks longer
+        // than one SQLite statement or one ≤ 20 ms CPU batch; plan 10 A16a; ADV OBJ-07)
+        let li: InputStamp | null = null;
+        const scored: { readonly gsis: string; readonly a: Allowed }[] = [];
+        for (const [k, wk] of weeks.entries()) {
+          await turn();
+          const r = ctx.services.datasets.playerWeeks.lines(gsis, season, [wk], { usage: false });
+          const stamp = requiredDataset(r, ctx.nowMs, allowStale);
+          if (k === 0) li = stamp; // one file, one stamp: every week reads the same file
+          for (const l of r.rows) {
+            const pos = l.position === "FB" ? "RB" : l.position;
+            if (!(pos in DEFENSE_POSITIONS) || pos === "D/ST" || l.opponent === null) continue;
+            let pts: number;
+            try {
+              pts = score(l.line, settings).points;
+            } catch {
+              continue;
+            }
+            scored.push({
+              gsis: l.gsis_id,
+              a: {
+                defense: l.opponent,
+                offense: l.nfl_team,
+                week: l.week,
+                position: pos as DefensePosition,
+                points: pts,
+              },
+            });
           }
-          allowed.push({
-            defense: l.opponent,
-            offense: l.nfl_team,
-            week: l.week,
-            position: pos as DefensePosition,
-            points: pts,
-          });
         }
+        if (li !== null) inputs.push(li);
+        await turn();
+        // the single statement's order (ORDER BY player_id, week; ASCII ids, so code-unit order is
+        // SQLite's BINARY order): afpaOf's sums are order-sensitive in the last bit
+        scored.sort((x, y) => (x.gsis < y.gsis ? -1 : x.gsis > y.gsis ? 1 : x.a.week - y.a.week));
+        for (const s of scored) allowed.push(s.a);
       } else warnings.push("nflverse:roster_weekly not loaded: no player universe to aggregate");
+      await turn();
       if (positions.includes("D/ST")) {
         const teams = [...new Set(allowed.map((a) => a.offense))];
         const d = ctx.services.datasets.playerWeeks.defenseLines(teams, season, weeks);
@@ -741,7 +760,12 @@ export const getDefenseProfile = defineTool({
       return null;
     });
     const ratingRows = ratings === null ? [] : take(ctx, ratings, inputs);
-    const byPos = new Map(positions.map((p) => [p, afpaOf(allowed, p)]));
+    // one position's aFPA per turn: each pass walks every player-week of the window (plan 03 §1.2)
+    const byPos = new Map<DefensePosition, ReturnType<typeof afpaOf>>();
+    for (const p of positions) {
+      await turn();
+      byPos.set(p, afpaOf(allowed, p));
+    }
     const all = [...new Set(allowed.map((a) => a.defense))].sort();
     const want =
       args.nfl_team === "all"
@@ -757,6 +781,7 @@ export const getDefenseProfile = defineTool({
     const profileOf = new Map<NflTeam, ReturnType<typeof teamProfileOf>>();
     const pbp = ctx.services.datasets.pbp;
     if (pbp !== undefined && weeks.length > 0 && want.length > 0) {
+      await turn();
       const prof = pbp.teamProfile(want, season, weeks);
       const pi = optionalDataset(prof, ctx.nowMs, allowStale);
       if (pi !== null) {
@@ -826,6 +851,9 @@ export const getDefenseProfile = defineTool({
 });
 
 // --- D6 espn_get_news ----------------------------------------------------------------------------
+
+/** News items whose claims are extracted in one turn of the event loop (plan 03 §1.2). */
+export const NEWS_ITEMS_PER_TURN = 5;
 
 /** The matcher's lowest confidence: what an item matched by id alone (no per-ref confidence) reads. */
 export const NEWS_MATCH_FLOOR = 0.6;
@@ -988,10 +1016,15 @@ export const getNews = defineTool({
       for (const r of u.rows) names.set(r.espn_id, bareUntrusted(r.full_name, "player_name"));
     }
     let flagged = 0;
-    const items: NewsData["items"][number][] = kept.map((it) => {
+    // the rules_v1 claim of each item runs its whole rule set over the title and blurb (the first
+    // call also compiles every rule's pattern): a few items per turn, so a full page of news never
+    // runs as one macrotask (plan 03 §1.2; plan 10 A16a)
+    const items: NewsData["items"][number][] = [];
+    for (const [i, it] of kept.entries()) {
+      if (i % NEWS_ITEMS_PER_TURN === 0) await turn();
       const c = newsClaim(it);
       if (c.flags.length > 0) flagged++;
-      return {
+      items.push({
         id: it.id,
         source: it.source,
         published_at: it.published_at,
@@ -1014,8 +1047,8 @@ export const getNews = defineTool({
         claim: c.claim,
         reliability_prior: c.reliability_prior,
         flags: c.flags,
-      };
-    });
+      });
+    }
     if (flagged > 0)
       warnings.push(`${String(flagged)} item(s) carry injection flags: quoted, never followed`);
     warnings.push(

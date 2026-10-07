@@ -7,7 +7,9 @@
 // analytics call (an event-loop delay probe inside the server process —
 // tests/e2e/fixtures/heartbeat.cjs; ADV OBJ-07). Under EFF_TOOLSET=full on a seeded cache the same
 // rules carry to the P1 tools: every P1 read tool warm < 500 ms, every P1 analytics call inside the
-// 8 s per-call deadline with the loop stall ≤ 50 ms. The measured numbers are printed for the report.
+// 8 s per-call deadline with the loop stall ≤ 50 ms, and the warm P1 reads hold the same stall bound
+// (plan 03 §1.2: the loop never blocks longer than one SQLite statement or one ≤ 20 ms CPU batch).
+// The measured numbers are printed for the report.
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
@@ -241,6 +243,7 @@ describe(
       await timedFull("espn_get_roster", { week: 5 });
       for (const [name, args] of P1_READS) await timedFull(name, args); // cold
       const slow: string[] = [];
+      await heartbeatFull(); // a fresh stall window: the warm reads below
       for (const [name, args] of P1_READS) {
         const ms = await timedFull(name, args);
         // fx-10h records no mPositionalRatings / kona_playercard: a tool's OPTIONAL comparator read of
@@ -258,7 +261,12 @@ describe(
         report[`warm_${name}`] = Math.round(ms);
         if (ms >= 500) slow.push(`${name} ${String(Math.round(ms))} ms`);
       }
+      // plan 03 §1.2: the loop never blocks longer than one statement or one ≤ 20 ms batch — D5's
+      // window of player-weeks as one read + score once stalled it 40–55 ms here (B2a gate round 2)
+      const readStall = await heartbeatFull();
+      report.max_loop_stall_reads_ms = Math.round(readStall * 10) / 10;
       expect(slow).toEqual([]);
+      expect(readStall).toBeLessThanOrEqual(50);
       // the dataset reads never went upstream
       for (const n of ["espn_get_player_usage", "espn_get_depth_chart", "espn_get_news"])
         expect(report[`warm_${n}`], n).toBeLessThan(500);

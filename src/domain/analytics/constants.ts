@@ -115,8 +115,11 @@ export const N_SIMS_MAX = SIMS.max;
 
 /** Cooperative batching (plan 01 §1.1, plan 03 §1.2; ADV OBJ-07). */
 export const COOPERATIVE = Object.freeze({
-  /** Yield to the event loop after at most this much CPU in one batch (≤ 20 ms). */
-  batchMs: 16,
+  /**
+   * Yield to the event loop after at most this much CPU in one batch (≤ 20 ms). 12 ms (16 until the
+   * B2a gate's round 2) leaves the 50 ms stall bound room for a preempted batch on a loaded machine.
+   */
+  batchMs: 12,
   /** The per-call CPU deadline; past it a call returns `partial: true` (plan 07 E1; A16a). */
   deadlineMs: 8000,
   /** Steps between clock reads inside a batch (a clock read per step would dominate). */

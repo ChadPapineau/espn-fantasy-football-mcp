@@ -101,8 +101,11 @@ the figures below were *measured once* on the development Mac (Intel, Node 24):
 `N_SIMS_MAX = 20 000` (`src/domain/analytics/constants.ts`, mirrored by `src/mcp/bounds.ts`): the
 worst in-bounds call is held by `maxTotalSamples`, not by `n_sims`, so 20 000 leaves the worst call
 at ~21 % of the CPU deadline uninstrumented (coverage instrumentation runs ~3× slower and still
-fits). Samplers yield every ≤ 16 ms of CPU (`COOPERATIVE.batchMs`), adaptively reading the clock
-about once per millisecond; post-processing (quantile sorts) is batched too.
+fits). Samplers yield every ≤ 12 ms of CPU (`COOPERATIVE.batchMs`; 16 ms until the B2a gate's
+round 2), adaptively reading the clock about once per millisecond, and a batch ends early when the
+longest chunk of steps timed so far in the run would overrun it (steps of uneven cost — a trade
+package whose partner roster is not yet memoised — once ran 15 ms of cheap steps and then a heavy
+one); post-processing (quantile sorts) is batched too.
 
 **The CPU deadline is switchable by tests only (changelog R5).** The tools pass
 `ANALYTICS_CPU_DEADLINE_MS` (8 s) to E1 and the seeding simulator unless the server options carry

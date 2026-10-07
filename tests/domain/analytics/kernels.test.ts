@@ -138,6 +138,79 @@ describe("runCooperative", () => {
     expect(r).toMatchObject({ completed: 5, partial: false, batches: 5 });
   });
 
+  it("A16a: cheap steps then a heavy one seen before never make a batch past batchMs", async () => {
+    // the trade partner search's shape: a team's first package is heavy (its roster not yet
+    // memoised, ~10 ms), the rest cheap (1 ms). Pacing from the last step alone ran 15 ms of cheap
+    // steps and then the heavy one — a 25 ms turn. Once a heavy step has been timed, the batch
+    // yields early enough for it: only the very first heavy step can pass the budget
+    const costs = Array.from({ length: 400 }, (_, i) => (i % 25 === 7 ? 10 : 1));
+    let wall = 0;
+    const batches: number[] = [];
+    let batchStart = 0;
+    const pacer = {
+      nowMs: () => wall,
+      yieldToLoop: () => {
+        if (wall > batchStart) batches.push(wall - batchStart);
+        batchStart = wall;
+        return Promise.resolve();
+      },
+    };
+    const r = await runCooperative(400, (i) => (wall += costs[i] ?? 0), {
+      pacer,
+      batchMs: 16,
+      deadlineMs: null,
+    });
+    expect(r).toMatchObject({ completed: 400, partial: false });
+    expect(batches.filter((b) => b > 16)).toHaveLength(1); // the first heavy step only
+    expect(Math.max(...batches.slice(batches.findIndex((b) => b > 16) + 1))).toBeLessThanOrEqual(
+      16,
+    );
+  });
+
+  it("A16a property: a batch passes batchMs only on a chunk longer than every chunk before it", async () => {
+    // steps of 0.5..15.9 ms are each timed alone (a chunk of one step: the clock is read after every
+    // step at this pace), so the claim is about steps: any batch over budget ends on a record step
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.double({ min: 0.5, max: 15.9, noNaN: true }), { minLength: 1, maxLength: 120 }),
+        async (costs) => {
+          let wall = 0;
+          let done = 0;
+          const ends: { at: number; done: number }[] = [{ at: 0, done: 0 }];
+          const pacer = {
+            nowMs: () => wall,
+            yieldToLoop: () => {
+              ends.push({ at: wall, done });
+              return Promise.resolve();
+            },
+          };
+          const r = await runCooperative(
+            costs.length,
+            (i) => {
+              wall += costs[i] ?? 0;
+              done += 1;
+            },
+            { pacer, batchMs: 16, deadlineMs: null },
+          );
+          expect(r.completed).toBe(costs.length);
+          for (let k = 1; k < ends.length; k++) {
+            const a = ends[k - 1];
+            const b = ends[k];
+            if (a === undefined || b === undefined || b.done === a.done) continue;
+            if (b.at - a.at <= 16 + 1e-9) continue;
+            const last = costs[b.done - 1] ?? 0;
+            const before = costs.slice(0, b.done - 1);
+            expect(
+              before.every((c) => c < last),
+              `batch ${String(k)} over budget`,
+            ).toBe(true);
+          }
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+
   it("the deadline counts the thread's CPU: a machine asleep mid-batch never cuts the run short", async () => {
     // wall time jumps 60 s inside one batch (a Maintenance Sleep, a preempted process); the thread
     // spent 0.1 ms of CPU per step — 400 steps are 40 ms of CPU, far under an 8 s deadline

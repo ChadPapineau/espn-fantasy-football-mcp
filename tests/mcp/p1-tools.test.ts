@@ -574,6 +574,56 @@ describe("D5 espn_get_defense_profile", () => {
     await c.close();
   });
 
+  it("plan 03 §1.2 / A16a: one statement per week, a turn between weeks, the single statement's order", async () => {
+    // the window over the whole NFL roster was one read + score of every player-week (~10 000 at
+    // the default 10 weeks): one macrotask past the 50 ms stall bound. Each week is now its own
+    // statement, scored in its own turn; a ticker on setImmediate shows the loop ran between them
+    const real = world.services.datasets.playerWeeks;
+    let ticks = 0;
+    let on = true;
+    const tick = (): void => {
+      ticks += 1;
+      if (on) setImmediate(tick);
+    };
+    const calls: { ids: readonly string[]; season: number; weeks: number[]; at: number }[] = [];
+    const c = await withReaders({
+      playerWeeks: {
+        ...real,
+        lines: (ids, season, weeks, opts) => {
+          calls.push({ ids, season, weeks: [...weeks], at: ticks });
+          return real.lines(ids, season, weeks, opts);
+        },
+      },
+    });
+    setImmediate(tick);
+    let spied: Env;
+    try {
+      spied = await ok("espn_get_defense_profile", { position: "WR" }, c.client);
+    } finally {
+      on = false;
+      await c.close();
+    }
+    expect(calls.length).toBeGreaterThan(1);
+    for (const x of calls) expect(x.weeks).toHaveLength(1);
+    for (let k = 1; k < calls.length; k++)
+      expect(calls[k]?.at ?? 0).toBeGreaterThan(calls[k - 1]?.at ?? 0);
+    // the per-week rows, re-sorted as the tool sorts them, are the single statement's rows in order
+    // (ORDER BY player_id, week) — so afpaOf sums in the same order and the numbers cannot move
+    const first = calls[0];
+    if (first === undefined) throw new Error("no lines call");
+    const weeks = calls.map((x) => x.weeks[0] ?? 0);
+    const key = (r: { gsis_id: string; week: number }): string => `${r.gsis_id}|${String(r.week)}`;
+    const single = real.lines(first.ids, first.season, weeks, { usage: false }).rows.map(key);
+    const perWeek = weeks
+      .flatMap((w) => real.lines(first.ids, first.season, [w], { usage: false }).rows)
+      .sort((x, y) => (x.gsis_id < y.gsis_id ? -1 : x.gsis_id > y.gsis_id ? 1 : x.week - y.week))
+      .map(key);
+    expect(single.length).toBeGreaterThan(0);
+    expect(perWeek).toEqual(single);
+    // and the spied client answered exactly as the default one
+    expect(spied.data).toEqual((await ok("espn_get_defense_profile", { position: "WR" })).data);
+  });
+
   it("validation: window_weeks 4..17; a position outside the six", async () => {
     expect((await err("espn_get_defense_profile", { window_weeks: 3 })).code).toBe("VALIDATION");
     expect((await err("espn_get_defense_profile", { position: "LB" })).code).toBe("VALIDATION");
