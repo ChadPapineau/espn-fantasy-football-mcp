@@ -33,6 +33,9 @@
 // Usage: node scripts/skills/build-plugin-evals.mjs [--out <dir>] [--root <repo>] [--node <path>]
 //          [--state <dir>]   the servers' state root (default: a fresh temp directory)
 //          [--seed]          also write the recorded state some cases need (needs dist/ built)
+//          [--seed-datasets] also seed every `full` eval server's cache with the committed dataset
+//                            excerpts (scripts/seed-fixture-datasets.ts through the pinned tsx dev
+//                            dependency; the real runner and publisher, no network)
 // Exit:  0 written · 1 a problem (nothing half-written is left) · 2 usage error.
 // Zero dependencies.
 import { spawn } from "node:child_process";
@@ -833,7 +836,7 @@ function readme(o) {
     "",
     "## Limits of this build",
     "",
-    "- Datasets: fixture mode publishes no nflverse, ffopportunity, news or Sleeper dataset into an eval server's cache, so the usage-, depth-chart- and news-backed answers (WV-2, NC-2, NC-3, the cascade's usage evidence) degrade to `data_gaps` until the cache is seeded with the committed excerpts.",
+    "- Datasets: fixture mode publishes no nflverse, ffopportunity, news or Sleeper dataset into an eval server's cache by itself; build with `--seed-datasets` so the usage-, depth-chart- and news-backed answers (WV-2, NC-2, NC-3, the cascade's usage evidence) read the committed excerpts instead of degrading to `data_gaps`.",
     "- Credential states: a variant's `harness` block (auth-rejected, public-league, writes-on) is not reproduced by a fixture-mode server — those cases see `not_configured`.",
     "- `(llm, judge sees both replies)` graders carry the base case's expected reply as the reference; for a strict comparison replace one with a `type: baseline` grader whose `baseline_file` is the base case's `trace.jsonl` from a passing run.",
     "",
@@ -998,6 +1001,54 @@ export async function seedLogWeek4(o) {
 }
 
 /**
+ * Seed every `full` eval server's cache with the committed dataset excerpts (`--seed-datasets`):
+ * `node --import tsx scripts/seed-fixture-datasets.ts <EFF_CACHE_DIR> <EFF_FIXTURE_DIR>` per plugin
+ * whose server runs under EFF_TOOLSET=full (the P1 tools are the ones that read the datasets).
+ * @param {{ root: string, out: string, node: string, plugins: string[], spawnImpl?: SpawnLike,
+ *   timeoutMs?: number }} o
+ * @returns {Promise<string[]>} one line per seeded plugin
+ */
+export async function seedDatasetStates(o) {
+  const spawnImpl = o.spawnImpl ?? /** @type {SpawnLike} */ (/** @type {unknown} */ (spawn));
+  /** @type {string[]} */
+  const done = [];
+  for (const key of o.plugins) {
+    const mcp = /** @type {unknown} */ (
+      JSON.parse(readFileSync(path.join(o.out, "plugins", key, ".mcp.json"), "utf8"))
+    );
+    const servers =
+      isRecord(mcp) && isRecord(mcp["mcpServers"]) ? Object.values(mcp["mcpServers"]) : [];
+    const server = servers[0];
+    if (!isRecord(server) || !isRecord(server["env"])) throw new Error(`${key}: no server env`);
+    const env = /** @type {Record<string, string>} */ (server["env"]);
+    if (env["EFF_TOOLSET"] !== "full") continue;
+    const cache = env["EFF_CACHE_DIR"];
+    const fixture = env["EFF_FIXTURE_DIR"];
+    if (typeof cache !== "string" || typeof fixture !== "string")
+      throw new Error(`${key}: no cache or fixture directory in the server env`);
+    const child = spawnImpl(
+      o.node,
+      ["--import", "tsx", path.join(o.root, "scripts", "seed-fixture-datasets.ts"), cache, fixture],
+      { env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    child.stdin.end();
+    const code = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill();
+        resolve(null);
+      }, o.timeoutMs ?? 300_000);
+      child.on("exit", (c) => {
+        clearTimeout(timer);
+        resolve(c);
+      });
+    });
+    if (code !== 0) throw new Error(`${key}: the dataset seed exited ${String(code)}`);
+    done.push(`${key}: datasets seeded`);
+  }
+  return done;
+}
+
+/**
  * Write every seed the built suite needs (`--seed`).
  * @param {{ root: string, out: string, node: string, seedNeeded: string[], spawnImpl?: SpawnLike }} o
  * @returns {Promise<string[]>} one line per seed written
@@ -1042,8 +1093,9 @@ export async function main(argv) {
   /** @type {string | undefined} */
   let state;
   let seed = false;
+  let seedDatasets = false;
   const usage =
-    "usage: build-plugin-evals.mjs [--out <dir>] [--root <dir>] [--node <path>] [--state <dir>] [--seed]";
+    "usage: build-plugin-evals.mjs [--out <dir>] [--root <dir>] [--node <path>] [--state <dir>] [--seed] [--seed-datasets]";
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--root" && argv[i + 1] !== undefined) root = path.resolve(argv[++i] ?? "");
@@ -1051,6 +1103,7 @@ export async function main(argv) {
     else if (a === "--node" && argv[i + 1] !== undefined) node = path.resolve(argv[++i] ?? "");
     else if (a === "--state" && argv[i + 1] !== undefined) state = path.resolve(argv[++i] ?? "");
     else if (a === "--seed") seed = true;
+    else if (a === "--seed-datasets") seedDatasets = true;
     else {
       process.stderr.write(`build-plugin-evals: unexpected argument ${String(a)}\n${usage}\n`);
       return 2;
@@ -1087,6 +1140,20 @@ export async function main(argv) {
     process.stdout.write(
       `build-plugin-evals: note: run again with --seed (after npm run build) for ${r.seedNeeded.join(", ")}\n`,
     );
+  }
+  if (seedDatasets) {
+    try {
+      for (const l of await seedDatasetStates({
+        root: root ?? REPO_ROOT,
+        out: r.out,
+        node: node ?? process.execPath,
+        plugins: r.plugins,
+      }))
+        process.stdout.write(`build-plugin-evals: seed ${l}\n`);
+    } catch (e) {
+      process.stderr.write(`build-plugin-evals: --seed-datasets failed: ${errMsg(e)}\n`);
+      return 1;
+    }
   }
   return 0;
 }

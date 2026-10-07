@@ -156,6 +156,8 @@ describe("package.json", () => {
       "node scripts/skills/build-skills.mjs --copy-out dist/skills-copy",
     );
     expect(pkg.scripts?.build).toBe("tsc -p tsconfig.build.json");
+    // plan 10 B15: the plugin-eval suite is generated into git-ignored dist/plugin-evals
+    expect(pkg.scripts?.["build:plugin-evals"]).toBe("node scripts/skills/build-plugin-evals.mjs");
   });
 
   it("defines the scaffold scripts", () => {

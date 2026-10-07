@@ -41,6 +41,7 @@
     "build:skills": "node scripts/skills/build-skills.mjs",
     "build:skills:copy": "node scripts/skills/build-skills.mjs --copy-out dist/skills-copy",
     "check:skills": "node scripts/skills/check-skills.mjs",
+    "build:plugin-evals": "node scripts/skills/build-plugin-evals.mjs",
     "fixtures:gen": "tsx scripts/gen-fixtures.ts",
     "fixtures:check": "tsx scripts/gen-fixtures.ts --check",
     "pack:scan": "node scripts/ci/scan-tarball.mjs",

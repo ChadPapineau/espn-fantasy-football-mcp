@@ -49,6 +49,7 @@ import {
   serverEnv,
   syntheticCookie,
   toolInputPattern,
+  seedDatasetStates,
   writeSeeds,
   yamlFrontmatter,
 } from "../../scripts/skills/build-plugin-evals.mjs";
@@ -853,6 +854,59 @@ describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () =
     expect(s.spawned[0]?.env.EFF_CACHE_DIR?.startsWith(r.state!)).toBe(true);
     expect(s.spawned[0]?.env.PATH).toBeDefined();
     expect(await writeSeeds({ root: t.root, out, node: "/n", seedNeeded: [] })).toEqual([]);
+  });
+
+  it("seedDatasetStates seeds only the full servers' caches, through the seed script, and fails on a bad exit", async () => {
+    const t = repoWithFixtures();
+    const out = temp("eff-pe-out-");
+    const r = buildPluginEvals({ root: t.root, out, node: "/n" });
+    cleanups.push(() => {
+      if (r.state) rmSync(r.state, { recursive: true, force: true });
+    });
+    const calls: { cmd: string; args: string[]; env: Record<string, string> }[] = [];
+    const spawnWith =
+      (code: number | null) =>
+      (cmd: string, args: string[], o: { env: Record<string, string> }) => {
+        calls.push({ cmd, args, env: o.env });
+        const ev = new EventEmitter();
+        setImmediate(() => ev.emit("exit", code));
+        return {
+          stdin: new PassThrough(),
+          stdout: new PassThrough(),
+          on: (e: "exit", fn: (c: number | null) => void) => ev.on(e, fn),
+          kill: () => undefined,
+        };
+      };
+    const done = await seedDatasetStates({
+      root: t.root,
+      out,
+      node: "/n",
+      plugins: r.plugins,
+      spawnImpl: spawnWith(0),
+    });
+    const full = r.plugins.filter((k) => k.includes("--full"));
+    expect(full.length).toBeGreaterThan(0);
+    expect(done).toEqual(full.map((k) => `${k}: datasets seeded`));
+    for (const c of calls) {
+      expect(c.cmd).toBe("/n");
+      expect(c.args.slice(0, 3)).toEqual([
+        "--import",
+        "tsx",
+        path.join(t.root, "scripts", "seed-fixture-datasets.ts"),
+      ]);
+      expect(c.args[3]?.startsWith(r.state!)).toBe(true);
+      // only PATH reaches the seed process (no other env)
+      expect(Object.keys(c.env)).toEqual(["PATH"]);
+    }
+    await expect(
+      seedDatasetStates({
+        root: t.root,
+        out,
+        node: "/n",
+        plugins: r.plugins,
+        spawnImpl: spawnWith(1),
+      }),
+    ).rejects.toThrow(/the dataset seed exited 1/);
   });
 
   it("rpcOver ignores notifications and answers for unknown ids", async () => {
