@@ -256,6 +256,35 @@ describe("toStatLine(nflverse) on real fixture rows", () => {
     );
   });
 
+  it("a sum of finite values that overflows never reaches the line (the fast-check counterexample)", () => {
+    // two FG-miss buckets near the double limit sum to -Infinity: dropped and reported, as is a
+    // derived total (attempts = made + missed) and the D/ST yards-allowed difference
+    const k = translatePlayerWeek({
+      position: "K",
+      fg_missed_0_19: -2.6943844178718717e293,
+      fg_missed_20_29: -1.7976931348623131e308,
+      fg_made_0_19: 1,
+    });
+    expect(k.line?.values.fgm_0_39).toBeUndefined();
+    expect(k.line?.present).not.toContain("fgm_0_39");
+    expect(k.issues).toContainEqual({ column: "fgm_0_39", issue: "sum not finite" });
+    expect(Object.values(k.line?.values ?? {}).every((v) => Number.isFinite(v))).toBe(true);
+    const big = translatePlayerWeek({
+      position: "K",
+      fg_made_40_49: 1.7e308,
+      fg_missed_40_49: 1.7e308,
+    });
+    expect(big.line?.values.fga_40_49).toBeUndefined();
+    expect(big.issues).toContainEqual({ column: "fga_40_49", issue: "sum not finite" });
+    const d = toDefenseStatLine({
+      opp_passing_yards: 1.7e308,
+      opp_sack_yards_lost: -1.7e308,
+      opp_rushing_yards: 1,
+    });
+    expect(d.line?.values.dst_ya_raw).toBeUndefined();
+    expect(d.issues).toContainEqual({ column: "dst_ya_raw", issue: "sum not finite" });
+  });
+
   it("property: any row → NaN-free values, present = sorted keys, never throws", () => {
     const value = fc.oneof(
       fc.constant(null),

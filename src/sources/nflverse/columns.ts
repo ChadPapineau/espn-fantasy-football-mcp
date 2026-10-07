@@ -269,12 +269,23 @@ function sumColumns(
   return total;
 }
 
+/**
+ * The line of `values`. Every input is finite, but a sum of finite values can still overflow (two
+ * values near ±1.8e308 make ±Infinity — a fast-check counterexample on two FG-miss buckets): such a
+ * value never reaches the line (it stays NaN-free and finite by construction) and is reported.
+ */
 function buildLine(
   values: Record<string, number>,
   position: PositionId,
   positionClass: PositionClass,
   provisional: boolean,
+  issues: TranslationIssue[],
 ): StatLine {
+  for (const [k, v] of Object.entries(values))
+    if (!Number.isFinite(v)) {
+      issues.push({ column: k, issue: "sum not finite" });
+      Reflect.deleteProperty(values, k);
+    }
   return Object.freeze({
     values: Object.freeze(values),
     present: Object.freeze(Object.keys(values).sort()),
@@ -391,7 +402,7 @@ export function translatePlayerWeek(
     if (v !== null) values[x.canonical] = v;
   }
   if (cls === "K") Object.assign(values, fgBuckets(row, issues));
-  return { line: buildLine(values, position, cls, opts.provisional ?? false), issues };
+  return { line: buildLine(values, position, cls, opts.provisional ?? false, issues), issues };
 }
 
 /** `toStatLine(nflverse)` (plan 08 §3.2): the line only (null when no position id is known). */
@@ -453,7 +464,10 @@ export function toDefenseStatLine(
   const sackYds = numeric(row.opp_sack_yards_lost).value;
   const rush = numeric(row.opp_rushing_yards).value;
   if (pass !== null && sackYds !== null && rush !== null) values.dst_ya_raw = pass - sackYds + rush;
-  return { line: buildLine(values, DST_POSITION, "DST", opts.provisional ?? false), issues };
+  return {
+    line: buildLine(values, DST_POSITION, "DST", opts.provisional ?? false, issues),
+    issues,
+  };
 }
 
 /**
