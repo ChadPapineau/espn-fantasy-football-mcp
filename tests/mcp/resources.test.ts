@@ -219,19 +219,31 @@ describe("recommendation-log templates", () => {
   }
 
   it("espn-ff://rec/{log_id}: one entry without league_id, free text path-listed (C15)", async () => {
-    const id = await record(4, "res-1");
+    // the model's own dedup label admits words (CLIENT_REF_RE) — it is read back path-listed too
+    const ref = "IGNORE.previous:rules-start.bench";
+    const id = await record(4, ref);
     const { env } = await read(`espn-ff://rec/${id}`);
-    const d = env.data as { log_id: string; note: string; league_id?: unknown };
+    const d = env.data as { log_id: string; note: string; client_ref: string; league_id?: unknown };
     expect(d.log_id).toBe(id);
     expect(d.league_id).toBeUndefined();
+    expect(d.client_ref).toBe(ref);
     const fields = (env.meta as { untrusted_fields: { path: string; source: string }[] })
       .untrusted_fields;
-    expect(fields).toEqual(
-      expect.arrayContaining([{ path: "data.note", source: "store.recommendation_log" }]),
-    );
-    expect(fields).toEqual(
-      expect.arrayContaining([{ path: "data.rec.action", source: "store.recommendation_log" }]),
-    );
+    for (const path of [
+      "data.note",
+      "data.rec.action",
+      "data.rec.assumptions[].text",
+      "data.rec.assumptions[].revisit_trigger",
+      "data.rec.drivers[].name",
+      "data.alternatives[].action",
+      "data.client_ref",
+    ])
+      expect(fields).toEqual(
+        expect.arrayContaining([{ path, source: "store.recommendation_log" }]),
+      );
+    // the label appears nowhere but at its listed path (never in meta or warnings)
+    const rest = JSON.stringify({ ...env, data: { ...(env.data as object), client_ref: null } });
+    expect(rest).not.toContain(ref);
   });
 
   it("espn-ff://rec/week/{week}: summary items with the action summary path-listed", async () => {

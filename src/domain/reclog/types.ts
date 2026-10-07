@@ -22,7 +22,9 @@ export const CLIENT_REF_RE = /^[A-Za-z0-9._:-]{1,64}$/;
 /**
  * Every model-authored free-text path in a stored record, relative to the record. Every reader
  * (E13, E14, `espn-ff://rec/{log_id}`, `espn-ff://rec/week/{week}`) path-lists these, prefixed
- * with its own `data…` path, with source RECLOG_UNTRUSTED_SOURCE (plan 07 C15).
+ * with its own `data…` path, with source RECLOG_UNTRUSTED_SOURCE (plan 07 C15). `client_ref` is
+ * the model's own label (CLIENT_REF_RE admits words — "ignore.previous:rules"), so it is listed
+ * too although C15's enumeration predates it (the B2a gate's round 3).
  */
 export const RECLOG_TEXT_PATHS: readonly string[] = Object.freeze([
   "rec.action",
@@ -31,6 +33,7 @@ export const RECLOG_TEXT_PATHS: readonly string[] = Object.freeze([
   "rec.drivers[].name",
   "alternatives[].action",
   "note",
+  "client_ref",
 ]);
 /** The provenance tag of every read-back free-text field. */
 export const RECLOG_UNTRUSTED_SOURCE = "store.recommendation_log";

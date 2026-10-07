@@ -544,6 +544,7 @@ export function readBackView(record: RecommendationRecord): RecommendationRecord
     },
     alternatives: view.alternatives.map((a) => ({ ...a, action: readBack(a.action) })),
     note: view.note === null ? null : readBack(view.note),
+    client_ref: view.client_ref === null ? null : readBack(view.client_ref),
   };
 }
 
