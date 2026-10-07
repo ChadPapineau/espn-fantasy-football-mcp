@@ -6,6 +6,7 @@
 // deterministic by seed; `opportunityFromLines` reads volume and efficiency from the stat lines.
 import { describe, expect, it } from "vitest";
 import {
+  PLAYER_SIM_E1_SAMPLES,
   projectPlayers,
   type ProjectionRequest,
   type ProjectionTarget,
@@ -139,6 +140,17 @@ describe("E1 player_sim (P1)", () => {
       }),
     );
     expect(prior?.basis).toBe("player_sim");
+  });
+});
+
+describe("E1 player_sim cost bound", () => {
+  it("only the first target week of a ROS horizon is simulated; later weeks keep position_cv", async () => {
+    const out = await projectPlayers(request({ player_sim: true, horizon: "ros" }));
+    const weeks = out.players[0]?.weeks ?? [];
+    expect(weeks.length).toBeGreaterThan(5);
+    expect(weeks[0]?.dist.basis).toBe("player_sim");
+    for (const w of weeks.slice(1)) expect(w.dist.basis).toBe("position_cv");
+    expect(PLAYER_SIM_E1_SAMPLES).toBe(1000);
   });
 });
 

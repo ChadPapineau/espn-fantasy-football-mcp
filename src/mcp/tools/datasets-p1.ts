@@ -686,7 +686,8 @@ export const getDefenseProfile = defineTool({
       const gsis = rIn === null ? [] : [...new Set(roster.rows.map((r) => r.gsis_id))];
       if (rIn !== null) inputs.push(rIn);
       if (gsis.length > 0) {
-        const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks);
+        // points allowed need the stat lines only (no usage extras)
+        const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks, { usage: false });
         const li = requiredDataset(r, ctx.nowMs, allowStale);
         if (li !== null) inputs.push(li);
         for (const l of r.rows) {

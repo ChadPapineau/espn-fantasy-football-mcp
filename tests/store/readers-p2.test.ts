@@ -402,6 +402,10 @@ describe("PlayerWeekReader.lines — the snap-count and pbp extras", () => {
     expect(by.get(B)?.snap_pct).toBeNull();
     expect(by.get(C)?.snap_pct).toBeNull();
     expect(by.get(D)).toMatchObject({ snaps: 40, snap_pct: 0.62 });
+    // usage: false skips the extras (a caller that needs only the stat lines)
+    const bare = s.datasets.playerWeeks.lines([D], 2026, [1], { usage: false });
+    expect(bare.rows[0]?.usage).toMatchObject({ snaps: null, snap_pct: null, rz_team: null });
+    expect(bare.rows[0]?.line).toEqual(r.rows.find((x) => x.gsis_id === D)?.line);
     expect(warnings.filter((w) => w === "dataset_pfr_id_ambiguous").length).toBeGreaterThanOrEqual(
       2,
     );

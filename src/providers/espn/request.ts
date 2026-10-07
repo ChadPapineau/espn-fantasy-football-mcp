@@ -151,6 +151,30 @@ interface Fresh {
 /** A cached body longer than this yields to the event loop before it is parsed (see `read`). */
 export const YIELD_BEFORE_PARSE_CHARS = 64 * 1024;
 
+/** Parsed cache bodies kept per parse function (see `parseCached`). */
+export const PARSED_MEMO_MAX = 16;
+
+/**
+ * Freezes a parsed body in place, every nested object and array (iterative — no recursion limit):
+ * a memoised value is shared by every later read of the same stored entry, so a consumer that
+ * tried to change it would throw instead of corrupting the next read.
+ */
+export function deepFreeze<T>(value: T): T {
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const v = stack.pop();
+    if (typeof v !== "object" || v === null || Object.isFrozen(v)) continue;
+    Object.freeze(v);
+    for (const x of Object.values(v)) if (typeof x === "object" && x !== null) stack.push(x);
+  }
+  return value;
+}
+
+/** What identifies one stored version of a cache entry for the parse memo. */
+function memoStamp(e: EspnCacheEntry): string {
+  return `${e.fetched_at}|${e.etag ?? ""}|${String(e.parsed_json.length)}`;
+}
+
 /** Lets the event loop run (timers, stdin, the shutdown handler) before the next synchronous step. */
 export function yieldToLoop(): Promise<void> {
   return new Promise((resolve) => {
@@ -179,6 +203,16 @@ export class EspnRequester {
   private readonly coalescer = new Coalescer<Fresh>();
   private readonly gate = new ForceRefreshGate();
   private readonly reportedSignals = new Set<string>();
+  /**
+   * Parsed cache bodies per parse function and cache key, valid while the stored entry is the same
+   * (fetched_at, etag, length): a warm read of an unchanged entry skips the JSON parse and the view
+   * schema (≈ 20 ms on a 1 MB roster — the largest synchronous step of most tool calls; plan 10 A16a
+   * stall bound). At most PARSED_MEMO_MAX keys per parse function; values deep-frozen.
+   */
+  private readonly parsedMemo = new WeakMap<
+    object,
+    Map<string, { readonly stamp: string; readonly value: unknown }>
+  >();
   private notModified = { day: 0, count: 0 };
 
   constructor(deps: RequestDeps) {
@@ -260,13 +294,35 @@ export class EspnRequester {
     };
   }
 
+  /** The memoised parse of an unchanged stored entry, or undefined. */
+  private memoOf<T>(spec: ReadSpec<T>, e: EspnCacheEntry): T | undefined {
+    const hit = this.parsedMemo.get(spec.parse)?.get(e.key);
+    return hit?.stamp === memoStamp(e) ? (hit.value as T) : undefined;
+  }
+
   /** Parses a cached body; null when it no longer matches the schemas (then it is refetched). */
   private parseCached<T>(spec: ReadSpec<T>, e: EspnCacheEntry): T | null {
+    const memo = this.memoOf(spec, e);
+    if (memo !== undefined) return memo;
+    let value: T;
     try {
-      return spec.parse(parseJsonSafe(e.parsed_json));
+      value = deepFreeze(spec.parse(parseJsonSafe(e.parsed_json)));
     } catch {
       return null;
     }
+    let byKey = this.parsedMemo.get(spec.parse);
+    if (byKey === undefined) {
+      byKey = new Map();
+      this.parsedMemo.set(spec.parse, byKey);
+    }
+    byKey.delete(e.key);
+    byKey.set(e.key, { stamp: memoStamp(e), value });
+    while (byKey.size > PARSED_MEMO_MAX) {
+      const oldest = byKey.keys().next();
+      if (oldest.done === true) break;
+      byKey.delete(oldest.value);
+    }
+    return value;
   }
 
   /** The read (see the file header). */
@@ -282,7 +338,12 @@ export class EspnRequester {
     // macrotask and block the event loop past the 50 ms stall bound (plan 03 §1.2; plan 10 A16a —
     // found by the end-to-end stall probe): a yield before each large parse lets timers and stdin
     // run between them. Small bodies (settings, standings) parse in well under a millisecond.
-    if (entry !== null && entry.parsed_json.length > YIELD_BEFORE_PARSE_CHARS) await yieldToLoop();
+    if (
+      entry !== null &&
+      entry.parsed_json.length > YIELD_BEFORE_PARSE_CHARS &&
+      this.memoOf(spec, entry) === undefined
+    )
+      await yieldToLoop();
     const cached = entry === null ? null : this.parseCached(spec, entry);
     const usable = entry !== null && cached !== null ? { entry, value: cached } : null;
     const now = this.deps.clock.nowMs();
@@ -642,10 +703,13 @@ export class EspnRequester {
     const fetchedAt = this.deps.clock.nowIso();
     const serverTime = serverTimeIso(answer.headers["x-fantasy-server-time"]);
     if (cacheable) {
+      // the cache strip of a large body walks it whole: the loop runs before and after it
+      const stripped = stripForCache(body);
+      if (large) await yieldToLoop();
       try {
         this.deps.cache.put({
           key,
-          parsed_json: JSON.stringify(stripForCache(body)),
+          parsed_json: JSON.stringify(stripped),
           fetched_at: fetchedAt,
           server_time: serverTime,
           etag: answer.headers.etag ?? null,

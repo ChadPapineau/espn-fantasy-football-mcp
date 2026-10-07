@@ -3,9 +3,11 @@
 // synchronous parse, so a tool's several reads never run as one macrotask; a small cached body
 // (settings) does not yield, so coalescing and ordering are unchanged. A COLD read of a large body
 // lets the loop run between its parse, drift check, schema check and cache strip (the full-toolset
-// stall probe found those phases at ~100 ms as one macrotask).
+// stall probe found those phases at ~100 ms as one macrotask). A warm read of an UNCHANGED stored
+// entry is served from the parse memo (deep-frozen): no parse, no yield; a new stored version
+// parses again.
 import { describe, expect, it } from "vitest";
-import { YIELD_BEFORE_PARSE_CHARS } from "../../src/providers/espn/request.js";
+import { deepFreeze, YIELD_BEFORE_PARSE_CHARS } from "../../src/providers/espn/request.js";
 import { makeWorld } from "../providers/espn/helpers.js";
 
 /** Whether a setImmediate queued just before `work` starts runs before `work` resolves. */
@@ -55,5 +57,42 @@ describe("the provider yields between the phases of a large fresh body", () => {
     const w = makeWorld({ slot: "league-b" });
     await w.provider.getLeague(w.ref);
     expect(await turnsDuring(() => w.provider.getRosters(w.ref, 3))).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("the parse memo", () => {
+  it("a second warm read of the unchanged entry skips the parse (no yield, equal value); a new stored version parses again", async () => {
+    const w = makeWorld({ slot: "league-b" });
+    await w.provider.getLeague(w.ref);
+    const cold = await w.provider.getRosters(w.ref, 3);
+    expect(await yieldsDuring(() => w.provider.getRosters(w.ref, 3))).toBe(true); // parses, memoises
+    let warm: unknown;
+    expect(
+      await yieldsDuring(async () => {
+        warm = await w.provider.getRosters(w.ref, 3);
+      }),
+    ).toBe(false);
+    expect(JSON.stringify((warm as { value: unknown }).value)).toBe(JSON.stringify(cold.value));
+    // the stored entry changes (a re-fetch writes a new fetched_at): parsed again
+    const key = [...w.cache.map.keys()].find((k) => k.includes("mRoster")) ?? "";
+    const e = w.cache.map.get(key);
+    if (e === undefined) throw new Error("no roster entry");
+    w.cache.map.set(key, {
+      ...e,
+      fetched_at: new Date(Date.parse(e.fetched_at) + 1000).toISOString(),
+    });
+    expect(await yieldsDuring(() => w.provider.getRosters(w.ref, 3))).toBe(true);
+  });
+
+  it("deepFreeze freezes every nested object and array, tolerates cycles and primitives", () => {
+    const v: { a: { b: number[] }; c?: unknown } = { a: { b: [1, 2] } };
+    v.c = v;
+    expect(deepFreeze(v)).toBe(v);
+    expect(Object.isFrozen(v) && Object.isFrozen(v.a) && Object.isFrozen(v.a.b)).toBe(true);
+    expect(() => {
+      v.a.b.push(3);
+    }).toThrow(TypeError);
+    expect(deepFreeze(5)).toBe(5);
+    expect(deepFreeze(null)).toBeNull();
   });
 });

@@ -46,7 +46,13 @@ import {
 } from "../../domain/scoring/index.js";
 import type { StatLine } from "../../domain/scoring/types.js";
 import { PHASE_1_HISTORY_TWINS, READER_QUERIES, type ReaderMethod } from "./tables.js";
-import { createPhase2Readers, seasonsOf, usageKeyOf, type UsageKey } from "./readers-p2.js";
+import {
+  createPhase2Readers,
+  seasonsOf,
+  usageKeyOf,
+  type UsageExtras,
+  type UsageKey,
+} from "./readers-p2.js";
 import type { DatasetSourceId } from "../../config/freshness.js";
 
 /** Most ids / weeks / teams one reader call accepts (a bounded statement). */
@@ -359,7 +365,7 @@ export function createReaders(o: ReadersOptions): StoreReaders {
   }
 
   const playerWeeks: DatasetReaders["playerWeeks"] = {
-    lines(gsisIds, s, weeks): DatasetResult<PlayerWeekLine> {
+    lines(gsisIds, s, weeks, opts): DatasetResult<PlayerWeekLine> {
       const res = run("PlayerWeekReader.lines", 0, {
         season: season(s),
         weeks: weekList(weeks),
@@ -376,7 +382,10 @@ export function createReaders(o: ReadersOptions): StoreReaders {
         if (t !== null && gsis !== null && w !== null)
           keys.push({ gsis_id: gsis, week: w, nfl_team: t });
       }
-      const extras = phase2.usageExtras(keys, season(s));
+      const extras =
+        opts?.usage === false
+          ? new Map<string, UsageExtras>()
+          : phase2.usageExtras(keys, season(s));
       const rows: PlayerWeekLine[] = [];
       for (const r of res.rows) {
         const t = team(r.team);

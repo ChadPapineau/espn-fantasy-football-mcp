@@ -417,6 +417,8 @@ export const analyzeTradeTool = defineTool({
         "risk preference is not modelled: Δ and its [p10, p90] interval are reported for you to weigh",
       );
     const pool = await poolOf(ctx, b.w, inputs, warnings);
+    // the teams' players were mapped synchronously above: the loop runs before the engine
+    await turn();
     const out = await analyzeTrade({
       roster: b.slots,
       rules: b.rules,

@@ -6,8 +6,8 @@
 // Samples are drawn in cooperative batches under the 8 s CPU deadline (plan 01 §1.1; `partial`
 // with the completed count). Pure: settings, engine, clock, rng and pacer are injected. New here
 // (the sibling's v1-trailing had no native projection); its sampler shape is ported. P1 (plan 10
-// §3.2): with `player_sim` an RB/WR/TE week whose trailing lines hold ≥ 3 games takes the volume ×
-// efficiency simulation's distribution (playerSim.ts) around the same ESPN mean.
+// §3.2): with `player_sim` an RB/WR/TE's first target week, when his trailing lines hold ≥ 3 games,
+// takes the volume × efficiency simulation's distribution (playerSim.ts) around the same ESPN mean.
 import type { Clock, Rng } from "../clock.js";
 import { GAME_DAY_WINDOW_MS } from "./types.js";
 import { gamesOfWeek, kickoffMsOf, opponentOf, teamGame } from "../league/schedule.js";
@@ -37,7 +37,6 @@ import {
   TURNOVER_STATS,
 } from "./constants.js";
 import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
-import { PLAYER_SIM } from "./marketConstants.js";
 import { opportunityFromLines, playerSimDist } from "./playerSim.js";
 import { AnalyticsError, ensure } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs } from "./inputs.js";
@@ -156,12 +155,16 @@ export interface ProjectionRequest {
   readonly inputs?: readonly InputFreshness[];
   /**
    * The P1 `player_sim` basis (plan 10 §3.2 "E1's player_sim basis where the opportunity inputs
-   * exist"; playerSim.ts): an RB/WR/TE week with ≥ PLAYER_SIM.minGames trailing games gets the
-   * volume × efficiency simulation's distribution around the SAME mean (ESPN's — weight_espn 1.0);
-   * the rest stay `position_cv`. Default false (the P0 `core` toolset is unchanged).
+   * exist"; playerSim.ts): an RB/WR/TE's FIRST target week, with ≥ PLAYER_SIM.minGames trailing
+   * games, gets the volume × efficiency simulation's distribution around the SAME mean (ESPN's —
+   * weight_espn 1.0); later weeks and everyone else stay `position_cv`. Default false (the P0
+   * `core` toolset is unchanged).
    */
   readonly player_sim?: boolean;
 }
+
+/** Samples of E1's `player_sim` simulation (one per player, the first target week). */
+export const PLAYER_SIM_E1_SAMPLES = 1000;
 
 /** What the other engines need from one projected week. */
 export interface ProjectedWeek {
@@ -393,7 +396,7 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
   for (let w = req.week; w <= Math.max(req.week, req.final_week); w++) allWeeks.push(w);
   const gamesByWeek = new Map(allWeeks.map((w) => [w, gamesOfWeek(req.schedule, w)]));
   const tasks: Task[] = [];
-  const plans = req.targets.map((t, pi) => {
+  const planOf = (t: ProjectionTarget, pi: number) => {
     const assumptions: Assumption[] = [];
     const cv = positionCv(t.position, t.position_id, settings);
     const tr = trailingOf(t, req.season, req.week, settings);
@@ -536,11 +539,23 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
       });
     });
     return { t, tr, assumptions, weeksOut, espnMissing };
-  });
+  };
+  // the per-player plans (trailing lines scored, weekly means, tasks) are built cooperatively too —
+  // one target per step, in order, so the tasks and their streams are exactly as before — keeping a
+  // 60-target call's set-up from running as one long macrotask (plan 10 A16a's 50 ms stall bound)
+  const pacer = req.pacer ?? loopPacer(req.clock);
+  const plans: ReturnType<typeof planOf>[] = [];
+  await runCooperative(
+    req.targets.length,
+    (pi) => {
+      const t = req.targets[pi];
+      if (t !== undefined) plans.push(planOf(t, pi));
+    },
+    { pacer, deadlineMs: null },
+  );
 
   // the sampler: sample-index-major, so a deadline-stopped run leaves every player-week with the
   // same number of samples; each task draws from its own forked stream (batching never shifts it)
-  const pacer = req.pacer ?? loopPacer(req.clock);
   const run = await runCooperative(
     n,
     (s) => {
@@ -566,15 +581,17 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
             ),
           )
         : null;
+    // the first target week only (the decision week the trailing rates describe); one simulation
+    // per player keeps E1 inside its CPU and stall budgets (~7 ms at 1 000 samples)
     const simOf = (x: (typeof weeksOut)[number]): Dist | null => {
-      if (opportunity === null || x.task === null || k === 0) return null;
+      if (opportunity === null || x.task === null || k === 0 || x !== weeksOut[0]) return null;
       return (
         playerSimDist({
           opportunity,
           settings,
           espn_mean: x.mean,
           p_active: x.task.pShape,
-          n_sims: Math.min(k, PLAYER_SIM.defaultSamples),
+          n_sims: Math.min(k, PLAYER_SIM_E1_SAMPLES),
           rng: req.rng.fork(`e1_sim:${String(t.player_id ?? t.gsis_id ?? "")}:${String(x.w)}`),
         })?.dist ?? null
       );

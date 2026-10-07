@@ -87,6 +87,7 @@ import {
   slotsOf,
   take,
   teamOf,
+  turn,
   weekOf,
   withinBudget,
 } from "./common.js";
@@ -158,7 +159,8 @@ export function trailingFor(
       [season - 1, prior],
     ] as const) {
       if (weeks.length === 0) continue;
-      const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks);
+      // stat lines only: E1 scores them, it never reads the usage extras
+      const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks, { usage: false });
       const input = optionalDataset(r, ctx.nowMs, allowStale);
       if (input === null) continue;
       loaded = true;
@@ -257,6 +259,8 @@ export async function project(
       ? [o.week]
       : Array.from({ length: lastWeek - o.week + 1 }, (_, i) => o.week + i);
   const implied = impliedTotals(ctx, o.schedule, season, weeks, inputs, o.allowStale);
+  // the trailing reads and their scoring are one synchronous step: the loop runs before sampling
+  await turn();
   return projectPlayers({
     targets: subjects.map((s) => targetOf(s.p, s.gsis, trailing.get(s.p.ref.id) ?? [])),
     season,

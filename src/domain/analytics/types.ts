@@ -1392,10 +1392,15 @@ export interface InjuryReader {
 
 /** Read-only port over `nflverse:stats_player_week` (+ snaps) and team defence lines. */
 export interface PlayerWeekReader {
+  /**
+   * `opts.usage: false` skips the snap-count / pbp usage extras (their fields read null) — for a
+   * caller that needs only the stat lines (E1's trailing lines, D5's points allowed); default true.
+   */
   lines(
     gsisIds: readonly string[],
     season: number,
     weeks: readonly Week[],
+    opts?: { readonly usage?: boolean },
   ): DatasetResult<PlayerWeekLine>;
   defenseLines(
     teams: readonly NflTeam[],

@@ -150,7 +150,16 @@ interface Ctx {
   readonly capacity: number;
   readonly irSeats: number;
   readonly eligible: Map<TradePlayer, ReadonlySet<number>>;
+  /**
+   * L(players) per (player ids, week values), for the whole request: the partner search and the
+   * counters re-solve the same rosters week after week, and each step must stay a short macrotask
+   * (plan 10 A16a's 50 ms stall bound). Bounded by LINEUP_MEMO_MAX.
+   */
+  readonly lineups: Map<string, number>;
 }
+
+/** Most memoised lineup values one trade request keeps. */
+const LINEUP_MEMO_MAX = 100_000;
 
 function fastOf(ctx: Ctx, p: TradePlayer, wi: number, pass: Pass): FastPlayer {
   let eligible = ctx.eligible.get(p);
@@ -174,14 +183,15 @@ const activeOf = (players: readonly TradePlayer[]): TradePlayer[] =>
  */
 function lineupWeeks(ctx: Ctx, players: readonly TradePlayer[], pass: Pass): number[] {
   const act = activeOf(players);
-  const memo = new Map<string, number>();
+  const ids = act.map((p) => p.player_id).join(",");
   return ctx.weeks.map((_, wi) => {
     const fast = act.map((p) => fastOf(ctx, p, wi, pass));
-    const key = fast.map((f) => f.value).join(",");
-    const hit = memo.get(key);
+    // the players (their eligibility) and their values decide the assignment, nothing else
+    const key = `${ids}|${fast.map((f) => f.value).join(",")}`;
+    const hit = ctx.lineups.get(key);
     if (hit !== undefined) return hit;
     const v = fastLineupValue(ctx.seats, fast);
-    memo.set(key, v);
+    if (ctx.lineups.size < LINEUP_MEMO_MAX) ctx.lineups.set(key, v);
     return v;
   });
 }
@@ -495,6 +505,7 @@ export async function analyzeTrade(req: TradeRequest): Promise<TradeOutcome> {
     capacity: req.roster.starters + req.roster.bench,
     irSeats: req.roster.ir,
     eligible: new Map(),
+    lineups: new Map(),
   };
   const horizon = req.horizon ?? "ros";
   const nowMs = req.clock.nowMs();
