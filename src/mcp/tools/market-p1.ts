@@ -287,9 +287,9 @@ const tradeSideSchema = playerIdsSchema.refine((a) => a.length <= BOUNDS.tradeSi
 });
 
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): a write module would let the
-// user act on an accepted evaluation through `espn_prepare_trade` / `espn_commit_trade` (plan 07
-// §3.F F5–F6, the later gate). Nothing here prepares, proposes or sends a trade: the evaluation is
-// read-only and the user makes any offer in the ESPN app.
+// user act on an accepted evaluation through its trade prepare/commit pair (plan 07 §3.F F5–F6, the
+// later gate). Nothing here prepares, proposes or sends a trade: the evaluation is read-only and the
+// user makes any offer in the ESPN app.
 
 /** E6 `espn_analyze_trade`. */
 export const analyzeTradeTool = defineTool({
