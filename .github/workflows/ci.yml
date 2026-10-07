@@ -201,7 +201,9 @@ jobs:
   process:
     name: process
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # the full-toolset stdio suites (34 tools on seven seeded servers, the Skills' full sequences)
+    # add ~5 min to the ~6 min of the core ones (plan 10 B8, B10, B11)
+    timeout-minutes: 30
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -1,5 +1,8 @@
-// skills-dry-run.test.ts — Skills Lane 1 item 7 (plan 09 §5.1; plan 10 A14a, A13a): every P0
-// Skill's evals/tool_sequence.json replayed against the BUILT server in fixture mode over real stdio,
+// skills-dry-run.test.ts — Skills Lane 1 item 7 (plan 09 §5.1; plan 10 A14a, A13a; B11 under full):
+// every P0 Skill's evals/tool_sequence.json replayed against the BUILT server in fixture mode over
+// real stdio under EFF_TOOLSET=core, and every `full` sequence (the five P1 Skills and the P1
+// branches of start-sit, waivers, weekly and stream-kdef) under EFF_TOOLSET=full on a SEEDED cache
+// (tests/e2e/helpers.ts seedHome — the Phase-2 datasets an `eff refresh all` leaves),
 // on fx-10h or the sequence's variant (one server per variant — the manifest's own clock and env).
 // `$ref` / `$source_calls` / `$opponent` / `$player` resolve from the earlier steps' envelopes
 // (scripts/skills/tool-sequences.mjs); every resolved argument set passes the tool's own zod input
@@ -15,7 +18,16 @@ import {
   outcomeAllowed,
   resolveArgs,
 } from "../../scripts/skills/tool-sequences.mjs";
-import { bodyOf, FX, makeHome, requireDist, serve, type Served } from "./helpers.js";
+import {
+  bodyOf,
+  FX,
+  makeHome,
+  requireDist,
+  ROOT,
+  seedHome,
+  serve,
+  type Served,
+} from "./helpers.js";
 
 interface Step {
   readonly id: string;
@@ -92,12 +104,29 @@ function checkRecs(label: string, body: unknown): void {
   visit(body);
 }
 
-async function replay(s: Served, seq: Seq): Promise<string[]> {
+async function replay(s: Served, seq: Seq, skipped: string[] = []): Promise<string[]> {
   const results = new Map<string, { tool: string; result: unknown }>();
   const outcomes: string[] = [];
+  const skippedIds = new Set<string>();
   for (const step of seq.steps) {
     const label = `${seq.skill}/${seq.id}/${step.id} (${step.tool})`;
-    const args = resolveArgs(step.args, results) as Record<string, unknown>;
+    let args: Record<string, unknown>;
+    try {
+      args = resolveArgs(step.args, results) as Record<string, unknown>;
+    } catch (e) {
+      // a step fed by an earlier list that is EMPTY on the fixture data (the cascade's beneficiaries
+      // when the injured player's usage has no teammate in the excerpt) is skipped and reported;
+      // the caller holds which steps may be skipped
+      const msg = String(e);
+      const fed = [...skippedIds].some((id) => msg.includes(`step ${id} has no result`));
+      if (/\$ids .*no player_id/.test(msg) || fed) {
+        skipped.push(label);
+        skippedIds.add(step.id);
+        outcomes.push(`${step.id}:skipped`);
+        continue;
+      }
+      throw e;
+    }
     const parsed = inputOf(step.tool).safeParse(args);
     expect(parsed.success, `${label}: the resolved arguments fail the tool's input schema`).toBe(
       true,
@@ -158,6 +187,69 @@ describe(
       } finally {
         home.cleanup();
       }
+    });
+  },
+);
+
+// --- B11: the `full` sequences over real stdio on a seeded cache ------------------------------------
+
+const FULL_SEQUENCES: Seq[] = loadToolSequences(ROOT, { toolset: "full" }).flatMap((s) =>
+  s.sequences.map((q) => ({
+    skill: s.skill,
+    id: q.id,
+    variant: q.fixture_variant,
+    teamId: typeof s.fixture.team_id === "number" ? s.fixture.team_id : 2,
+    steps: q.steps,
+  })),
+);
+const FULL_VARIANTS = [...new Set(FULL_SEQUENCES.map((s) => s.variant))];
+
+describe(
+  "Skills Lane 1 dry run under full: every full sequence against the built server on a seeded cache (plan 10 B11)",
+  { timeout: 900_000 },
+  () => {
+    it("covers the five P1 Skills and the P1 branches of four P0 Skills", () => {
+      expect([...new Set(FULL_SEQUENCES.map((s) => s.skill))].sort()).toEqual([
+        "injury-cascade",
+        "news-check",
+        "roster-audit",
+        "schedule-plan",
+        "start-sit",
+        "stream-kdef",
+        "trade",
+        "waivers",
+        "weekly",
+      ]);
+    });
+
+    it.each(FULL_VARIANTS.map((v) => [v ?? "base"] as const))("fx-10h %s (full)", async (name) => {
+      requireDist();
+      const variant = name === "base" ? null : name;
+      const dir = variant === null ? FX : path.join(FX, variant);
+      const seqs = FULL_SEQUENCES.filter((s) => s.variant === variant);
+      const { teamUnset, env } = variantEnv(variant);
+      const team = seqs[0]?.teamId ?? 2;
+      const home = makeHome({
+        fixtureDir: dir,
+        teamId: teamUnset ? null : team,
+        env: { ...env, EFF_TOOLSET: "full" },
+      });
+      const skipped: string[] = [];
+      try {
+        await seedHome(home, dir);
+        const s = await serve(home);
+        for (const seq of seqs) {
+          const outcomes = await replay(s, seq, skipped);
+          expect(outcomes.length).toBe(seq.steps.length);
+        }
+        const { exit } = await s.stop();
+        expect(exit.code).toBe(0);
+      } finally {
+        home.cleanup();
+      }
+      // only a cascade-fed step may be skipped, never anything else
+      for (const l of skipped)
+        expect(l, "skipped step").toMatch(/^injury-cascade\/.*\/(?:waivers|log\w*|record\w*) /);
     });
   },
 );
