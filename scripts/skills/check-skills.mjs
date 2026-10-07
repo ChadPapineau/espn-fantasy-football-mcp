@@ -1119,8 +1119,8 @@ export const IDS_MAX = 25;
  * the user's matchup in that step's scoreboard), `{ $player: { step, slot, eligible?,
  * injury_status? } }` (the first player of an earlier roster step in that slot, optionally eligible
  * for another slot and carrying an ESPN injury status) or `{ $ids: { from: "<earlier step>.<path>",
- * key, max? } }` (the distinct numeric `key` values of the array at that path, at most `max`); any
- * other `$` key is an error.
+ * key, max?, where? } }` (the distinct numeric `key` values of the array at that path, at most `max`,
+ * of the rows whose `where` fields hold a listed value); any other `$` key is an error.
  * @param {unknown} v
  * @param {Map<string, string>} earlier step id → tool
  * @param {string} where
@@ -1184,6 +1184,21 @@ function checkRefs(v, earlier, where, errors) {
       const from = isRecord(val) ? val["from"] : undefined;
       const m = typeof from === "string" ? REF_RE.exec(from) : null;
       const max = isRecord(val) ? val["max"] : undefined;
+      const filter = isRecord(val) ? val["where"] : undefined;
+      // where: { <field>: [1..8 string/number/boolean/null values] } (at most 4 fields)
+      const whereOk =
+        filter === undefined ||
+        (isRecord(filter) &&
+          Object.keys(filter).length >= 1 &&
+          Object.keys(filter).length <= 4 &&
+          Object.entries(filter).every(
+            ([f, vals]) =>
+              /^[a-z][a-z0-9_]{0,39}$/.test(f) &&
+              Array.isArray(vals) &&
+              vals.length >= 1 &&
+              vals.length <= 8 &&
+              vals.every((x) => x === null || ["string", "number", "boolean"].includes(typeof x)),
+          ));
       const ok =
         isRecord(val) &&
         m !== null &&
@@ -1191,10 +1206,11 @@ function checkRefs(v, earlier, where, errors) {
         /^[a-z][a-z0-9_]{0,39}$/.test(val["key"]) &&
         (max === undefined ||
           (typeof max === "number" && Number.isInteger(max) && max >= 1 && max <= IDS_MAX)) &&
-        Object.keys(val).every((x) => ["from", "key", "max"].includes(x));
+        whereOk &&
+        Object.keys(val).every((x) => ["from", "key", "max", "where"].includes(x));
       if (!ok)
         errors.push(
-          `${where}: $ids must be { from: "<step id>.<path>", key: <field>, max?: 1..${String(IDS_MAX)} }`,
+          `${where}: $ids must be { from: "<step id>.<path>", key: <field>, max?: 1..${String(IDS_MAX)}, where?: { <field>: [values] } }`,
         );
       else if (!earlier.has(m[1] ?? ""))
         errors.push(`${where}: $ids "${String(from)}" names no earlier step`);

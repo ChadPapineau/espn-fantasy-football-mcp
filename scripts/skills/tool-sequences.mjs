@@ -180,10 +180,12 @@ export function playerOf(result, spec) {
 /**
  * The distinct numeric `key` values of the array at `from` (`<step>.<path>`), in order, at most
  * `max` (default IDS_MAX): `{ $ids: { from: "cascade.data.beneficiaries", key: "player_id" } }`
- * becomes the beneficiaries' ESPN ids (null ids — an unmapped player — are skipped). Throws when
+ * becomes the beneficiaries' ESPN ids (null ids — an unmapped player — are skipped). `where`
+ * keeps only the rows whose field holds one of the listed values — `{ status: ["FREEAGENT",
+ * "WAIVERS"] }` is "the AVAILABLE beneficiaries" a Skill prices as waiver candidates. Throws when
  * the path is not an array or no id is left: a tool's id list is never sent empty.
  * @param {ReadonlyMap<string, StepResult>} results
- * @param {{ from: string, key: string, max?: number }} spec
+ * @param {{ from: string, key: string, max?: number, where?: Record<string, readonly unknown[]> }} spec
  * @returns {number[]}
  */
 export function idsOf(results, spec) {
@@ -194,12 +196,18 @@ export function idsOf(results, spec) {
   if (!Array.isArray(list)) throw new Error(`$ids "${spec.from}": not an array`);
   /** @type {number[]} */
   const out = [];
+  const where = Object.entries(spec.where ?? {});
   for (const row of list) {
+    if (where.length > 0 && !(isRecord(row) && where.every(([f, ok]) => ok.includes(row[f]))))
+      continue;
     const v = isRecord(row) ? row[spec.key] : undefined;
     if (typeof v === "number" && Number.isInteger(v) && !out.includes(v)) out.push(v);
     if (out.length >= (spec.max ?? IDS_MAX)) break;
   }
-  if (out.length === 0) throw new Error(`$ids "${spec.from}": no ${spec.key} in the list`);
+  if (out.length === 0)
+    throw new Error(
+      `$ids "${spec.from}": no ${spec.key} in the list${where.length > 0 ? " (after where)" : ""}`,
+    );
   return out;
 }
 
@@ -209,7 +217,7 @@ export function idsOf(results, spec) {
  * `[{ tool, request_id }]` from those steps (`meta.request_id`); every `{ $opponent: "<step>" }`
  * becomes the opponent's `team_id` from that scoreboard step; every `{ $player: { step, slot,
  * eligible?, injury_status? } }` becomes a `player_id` from that roster step; every `{ $ids: {
- * from, key, max? } }` becomes a list of ids (idsOf). Plain values are deep-copied.
+ * from, key, max?, where? } }` becomes a list of ids (idsOf). Plain values are deep-copied.
  * @param {unknown} template
  * @param {ReadonlyMap<string, StepResult>} results completed steps by id
  * @returns {unknown}
@@ -261,13 +269,24 @@ export function resolveArgs(template, results) {
   if (Object.hasOwn(template, "$ids")) {
     const spec = template["$ids"];
     if (!isRecord(spec) || typeof spec["from"] !== "string" || typeof spec["key"] !== "string") {
-      throw new Error("$ids must be { from, key, max? }");
+      throw new Error("$ids must be { from, key, max?, where? }");
     }
     const max = spec["max"];
+    const filter = spec["where"];
+    /** @type {Record<string, unknown[]>} */
+    const where = {};
+    if (filter !== undefined) {
+      if (!isRecord(filter) || !Object.values(filter).every((v) => Array.isArray(v)))
+        throw new Error("$ids where must be { <field>: [values] }");
+      // Object.fromEntries-style own keys only (a `__proto__` field stays a field)
+      for (const [f, v] of Object.entries(filter))
+        Object.defineProperty(where, f, { value: v, enumerable: true });
+    }
     return idsOf(results, {
       from: spec["from"],
       key: spec["key"],
       ...(typeof max === "number" ? { max } : {}),
+      ...(filter === undefined ? {} : { where }),
     });
   }
   // Object.fromEntries defines own properties, so a `__proto__` key stays a key (an assignment

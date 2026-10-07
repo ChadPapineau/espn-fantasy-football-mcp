@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.10): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, on fx-10h (Team 02; week 5; before the waiver run). The injured player is resolved from the user's roster: the player in IR (`report`), or the OUT player on the bench with an IR slot open (`ir_move`, ir-open). The beneficiaries priced by espn_analyze_waivers are the cascade's own (`$ids`). Format: skills/README.md#tool-sequences.",
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.10): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, on fx-10h (Team 02; week 5; before the waiver run). The injured player is resolved from the user's roster: the player in IR (`report`), or the OUT player on the bench with an IR slot open (`ir_move`, ir-open). The beneficiaries priced by espn_analyze_waivers are the cascade's own AVAILABLE ones (`$ids` where status is FREEAGENT or WAIVERS — SKILL.md step 5: a rostered beneficiary is not a waiver candidate). Format: skills/README.md#tool-sequences.",
   "schema_version": 1,
   "skill": "injury-cascade",
   "tool_contract": 1,
@@ -73,7 +73,12 @@
             "mode": "auto",
             "phase": "auto",
             "candidates": {
-              "$ids": { "from": "cascade.data.beneficiaries", "key": "player_id", "max": 5 }
+              "$ids": {
+                "from": "cascade.data.beneficiaries",
+                "key": "player_id",
+                "max": 5,
+                "where": { "status": ["FREEAGENT", "WAIVERS"] }
+              }
             }
           }
         },
@@ -175,7 +180,12 @@
             "mode": "auto",
             "phase": "auto",
             "candidates": {
-              "$ids": { "from": "cascade.data.beneficiaries", "key": "player_id", "max": 5 }
+              "$ids": {
+                "from": "cascade.data.beneficiaries",
+                "key": "player_id",
+                "max": 5,
+                "where": { "status": ["FREEAGENT", "WAIVERS"] }
+              }
             }
           }
         },

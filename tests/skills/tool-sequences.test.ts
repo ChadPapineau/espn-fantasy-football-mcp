@@ -224,6 +224,48 @@ describe("resolveArgs", () => {
     ).toEqual({ out: 14, q: 13, candidates: [21, 22, 24], top2: [21, 22] });
   });
 
+  it("$ids where keeps only the rows whose field holds a listed value (the AVAILABLE beneficiaries)", () => {
+    const r = new Map([
+      [
+        "c",
+        {
+          tool: "espn_analyze_injury_cascade",
+          result: envelope({
+            b: [
+              { player_id: 1, status: "ONTEAM" },
+              { player_id: 2, status: "FREEAGENT" },
+              { player_id: 3, status: null },
+              { player_id: 4, status: "WAIVERS" },
+              { player_id: 5 },
+              "junk",
+              { player_id: 6, status: "WAIVERS", injured: true },
+            ],
+          }),
+        },
+      ],
+    ]);
+    const where = { status: ["FREEAGENT", "WAIVERS"] };
+    expect(idsOf(r, { from: "c.data.b", key: "player_id", where })).toEqual([2, 4, 6]);
+    expect(idsOf(r, { from: "c.data.b", key: "player_id", where, max: 2 })).toEqual([2, 4]);
+    // every field must match; null is a value like any other
+    expect(
+      idsOf(r, {
+        from: "c.data.b",
+        key: "player_id",
+        where: { status: ["WAIVERS"], injured: [true] },
+      }),
+    ).toEqual([6]);
+    expect(idsOf(r, { from: "c.data.b", key: "player_id", where: { status: [null] } })).toEqual([
+      3,
+    ]);
+    expect(() =>
+      idsOf(r, { from: "c.data.b", key: "player_id", where: { status: ["SUSPENDED"] } }),
+    ).toThrow(/no player_id in the list \(after where\)/);
+    expect(resolveArgs({ c: { $ids: { from: "c.data.b", key: "player_id", where } } }, r)).toEqual({
+      c: [2, 4, 6],
+    });
+  });
+
   it("idsOf refuses an unknown step, a non-array, and a list with no id left — never an empty id list", () => {
     expect(() => idsOf(results, { from: "nope.data.x", key: "player_id" })).toThrow(
       /step nope has no result/,
@@ -298,7 +340,21 @@ describe("resolveArgs", () => {
       { $player: { step: "roster", slot: "BE", injury_status: "SUSPENSION" } },
       /no player in BE with status SUSPENSION/,
     ],
-    [{ $ids: "cascade.data.beneficiaries" }, /\$ids must be \{ from, key, max\? \}/],
+    [{ $ids: "cascade.data.beneficiaries" }, /\$ids must be \{ from, key, max\?, where\? \}/],
+    [
+      { $ids: { from: "cascade.data.beneficiaries", key: "player_id", where: { status: "X" } } },
+      /\$ids where must be/,
+    ],
+    [
+      {
+        $ids: {
+          from: "cascade.data.beneficiaries",
+          key: "player_id",
+          where: { status: ["ONTEAM"] },
+        },
+      },
+      /no player_id in the list \(after where\)/,
+    ],
     [{ $ids: { from: "cascade.data.beneficiaries" } }, /\$ids must be/],
   ])("throws on %j", (template, re) => {
     expect(() => resolveArgs(template, results)).toThrow(re);

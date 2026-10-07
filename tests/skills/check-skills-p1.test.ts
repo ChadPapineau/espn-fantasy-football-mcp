@@ -4,6 +4,8 @@
 // fails on a mutated private copy — the toolset stated per sequence and per case, the Step 0 stop,
 // the per-Skill sequence promises, the trade/claim argument shapes, the new templates, and the
 // trigger collisions across all thirteen.
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import fc from "fast-check";
 import {
@@ -531,12 +533,40 @@ describe("the new templates", () => {
     });
     const e = errorsOf(t);
     expect(e).toMatch(
-      /\$ids must be \{ from: "<step id>\.<path>", key: <field>, max\?: 1\.\.25 \}/,
+      /\$ids must be \{ from: "<step id>\.<path>", key: <field>, max\?: 1\.\.25, where\?: \{ <field>: \[values\] \} \}/,
     );
     expect(e).toMatch(/\$ids "record\.data\.x" names no earlier step/);
     expect(e).toMatch(
       /\$player must be \{ step: <earlier espn_get_roster step>, slot, eligible\?, injury_status\? \}/,
     );
+  });
+
+  it("refuses a malformed $ids where (not a field → values map, an empty list, an object value)", () => {
+    for (const where of [
+      "status",
+      {},
+      { status: [] },
+      { status: "FREEAGENT" },
+      { status: [{ x: 1 }] },
+      { Status: ["FREEAGENT"] },
+      { a: [1], b: [1], c: [1], d: [1], e: [1] },
+    ]) {
+      const t = fresh();
+      t.editJson(SEQ("injury-cascade"), (j) => {
+        step(j, "report", "waivers").args.candidates = {
+          $ids: { from: "cascade.data.beneficiaries", key: "player_id", where },
+        };
+      });
+      expect(errorsOf(t), JSON.stringify(where)).toMatch(/\$ids must be/);
+    }
+  });
+
+  it("the shipped injury-cascade sequences price only the AVAILABLE beneficiaries (SKILL.md step 5)", () => {
+    const j = JSON.parse(readFileSync(path.join(ROOT, SEQ("injury-cascade")), "utf8")) as Json;
+    for (const id of ["report", "ir_move"]) {
+      const c = (step(j, id, "waivers").args.candidates as Json).$ids as Json;
+      expect(c.where, id).toEqual({ status: ["FREEAGENT", "WAIVERS"] });
+    }
   });
 
   it("refuses a $ids cap outside 1..IDS_MAX", () => {
