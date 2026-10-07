@@ -6,8 +6,9 @@
 // `expect` allows, and every `rec` carries an ordered interval. The Phase-2 dataset ports the store
 // does not serve yet (depth charts, ep_weekly, news, trending) are injected LOADED and empty — the
 // state a refreshed install is in on a quiet day — so the replay tests the tools, not a missing
-// reader. The stdio twin of this replay belongs to tests/e2e (the built server); this one runs under
-// coverage on every push.
+// reader. The stdio twin of this replay belongs to tests/e2e (the built server); this in-process one
+// runs on every push in the PROCESS project (no coverage instrumentation, one file at a time): a whole
+// Skill's sequence is a wall-clock-heavy run, kept out of the unit project's parallel workers.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -19,7 +20,13 @@ import {
 import type { DatasetReaders, DatasetStamp } from "../../src/domain/analytics/types.js";
 import type { DatasetSourceId, FreshnessClassId } from "../../src/config/freshness.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
-import { ESPN_FIXTURES, ROOT, connect, makeWorld } from "./helpers/world.js";
+import {
+  ESPN_FIXTURES,
+  ROOT,
+  TEST_CALL_TIMEOUT_MS,
+  connect,
+  makeWorld,
+} from "../mcp/helpers/world.js";
 
 interface Step {
   readonly id: string;
@@ -141,6 +148,8 @@ describe("the Skills' full sequences against the P1 tools (in process, fixture m
       });
       try {
         for (const seq of seqs) {
+          // each sequence is its own session: past the limiter's 60 s window (30 requests a minute)
+          world.clock.advance(61_000);
           const results = new Map<string, { tool: string; result: unknown }>();
           const skippedIds = new Set<string>();
           for (const step of seq.steps) {
@@ -161,7 +170,10 @@ describe("the Skills' full sequences against the P1 tools (in process, fixture m
               throw e;
             }
             expect(inputOf(step.tool).safeParse(args).success, `${label}: arguments`).toBe(true);
-            const r = (await client.callTool({ name: step.tool, arguments: args })) as {
+            const r = (await client.callTool(
+              { name: step.tool, arguments: args },
+              { timeout: TEST_CALL_TIMEOUT_MS },
+            )) as {
               isError?: boolean;
               content: { text: string }[];
             };

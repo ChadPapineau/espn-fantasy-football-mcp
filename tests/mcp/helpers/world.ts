@@ -498,12 +498,19 @@ export function body(r: unknown): Record<string, unknown> {
   return JSON.parse(first.text) as Record<string, unknown>;
 }
 
+/**
+ * The client-side request timeout of a test call: generous, because an analytics call under coverage
+ * instrumentation and a loaded CI runner can take several times its real-time cost (the SDK's own
+ * default is 60 s). The server's own per-call deadlines are what the tests assert, never this.
+ */
+export const TEST_CALL_TIMEOUT_MS = 300_000;
+
 /** Calls a tool and returns `{ isError, body }`. */
 export async function call(
   client: Client,
   name: string,
   args: Record<string, unknown> = {},
 ): Promise<{ isError: boolean; body: Record<string, unknown>; raw: unknown }> {
-  const r = await client.callTool({ name, arguments: args });
+  const r = await client.callTool({ name, arguments: args }, { timeout: TEST_CALL_TIMEOUT_MS });
   return { isError: (r as { isError?: boolean }).isError === true, body: body(r), raw: r };
 }

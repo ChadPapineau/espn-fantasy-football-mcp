@@ -885,7 +885,7 @@ describe("E6 espn_analyze_trade", () => {
     expect(d.kind).toBe("partners");
     expect(d.partners.length).toBeLessThanOrEqual(2);
     for (const p of d.partners) expect(p.proposal.get.length).toBeGreaterThan(0);
-  }, 60_000);
+  }, 240_000);
 
   it("validation: exactly one of offer/find_partners; players must be on each side; the partner exists", async () => {
     expect((await err("espn_analyze_trade", {})).code).toBe("VALIDATION");
@@ -1114,5 +1114,120 @@ describe("E5 espn_analyze_waivers under full (plan 10 B3 hard parts)", () => {
     expect((e.data as { value_basis: string }).value_basis).toBe("espn_ros");
     expect(e.warnings.some((w) => w.includes("EFF_TOOLSET=full"))).toBe(true);
     await c.close();
+  });
+});
+
+// --- the degradation matrix (plan 01 §7 per tool; plan 07 §2 "which inputs it can lose") ----------
+
+describe("P1 degradation matrix: an optional input lost is named; a required one is a coded error", () => {
+  /** A client whose platform reads fail as given. */
+  async function broken(faults: Parameters<typeof faulty>[1]) {
+    return connect(world, {
+      options: { toolset: "full" },
+      services: faulty(world.services, faults),
+    });
+  }
+
+  it("E3: the schedule of matchups past this call's budget is RATE_LIMITED (a retry fits)", async () => {
+    const c = await broken({ getMatchups: "budget" });
+    expect((await err("espn_analyze_matchup", { week: 4 }, c.client)).code).toBe("RATE_LIMITED");
+    await c.close();
+  });
+
+  it("E3 season without standings reads the results; live without box scores counts 0 so far", async () => {
+    const c = await broken({
+      getStandings: coded("ESPN_UPSTREAM_UNAVAILABLE"),
+      getBoxScores: coded("ESPN_UPSTREAM_UNAVAILABLE"),
+    });
+    const s = await ok("espn_analyze_matchup", { mode: "season", n_sims: 1000, seed: 2 }, c.client);
+    expect(s.warnings.some((w) => w.includes("standings unavailable"))).toBe(true);
+    const l = await ok("espn_analyze_matchup", { week: 3, mode: "live", seed: 2 }, c.client);
+    expect(l.warnings.some((w) => w.includes("points so far unknown"))).toBe(true);
+    await c.close();
+  });
+
+  it("a non-degradable failure of an optional read still propagates as the coded error", async () => {
+    const c = await broken({ getLiveMatchups: coded("INTERNAL") });
+    expect((await err("espn_analyze_matchup", { week: 4 }, c.client)).code).toBe("INTERNAL");
+    await c.close();
+  });
+
+  it("E9 without the season simulation reads competing as yes; eliminated is honoured", async () => {
+    const c = await broken({ getMatchups: coded("ESPN_UPSTREAM_UNAVAILABLE") });
+    const e = await ok("espn_analyze_roster", { seed: 1 }, c.client);
+    expect(e.warnings.some((w) => w.includes("competing read as yes"))).toBe(true);
+    const x = await ok("espn_analyze_roster", { competing: "eliminated", seed: 1 }, c.client);
+    expect((x.data as { competing: string }).competing).toBe("eliminated");
+    await c.close();
+  });
+
+  it("E6 without the season simulation converts Δ at the cold-start rate, said so", async () => {
+    const c = await broken({ getMatchups: coded("ESPN_UPSTREAM_UNAVAILABLE") });
+    const give = [myRoster.find((p) => p.slot !== "IR")?.player_id ?? 0];
+    const get = [rival.find((p) => p.slot !== "IR")?.player_id ?? 0];
+    const e = await ok(
+      "espn_analyze_trade",
+      { offer: { partner_team_id: 2, give, get }, seed: 1 },
+      c.client,
+    );
+    expect(e.warnings.some((w) => w.includes("cold-start PF-per-win"))).toBe(true);
+    expect((e.data as { delta_u: { basis: string } }).delta_u.basis).toBe("cold_start");
+    await c.close();
+  }, 60_000);
+
+  it("E7 without the rosters: no verdicts, said so", async () => {
+    const c = await broken({ getRosters: coded("ESPN_UPSTREAM_UNAVAILABLE") });
+    const pid = pooled.find((p) => p.position === "WR")?.player_id ?? pooled[0]?.player_id ?? 0;
+    const e = await ok("espn_analyze_injury_cascade", { player: { player_ids: [pid] } }, c.client);
+    expect(e.warnings.some((w) => w.includes("verdicts are null"))).toBe(true);
+    await c.close();
+  });
+
+  it("E11 without standings or rosters still digests the feed; rival needs can be skipped", async () => {
+    const e = await ok("espn_analyze_league_activity", { include_rival_needs: false });
+    expect((e.data as { rival_needs: unknown[] }).rival_needs).toEqual([]);
+    const c = await broken({ getStandings: coded("ESPN_UPSTREAM_UNAVAILABLE") });
+    const s = await ok("espn_analyze_league_activity", {}, c.client);
+    expect(
+      (s.data as { transactions: { by_team: unknown[] } }).transactions.by_team.length,
+    ).toBeGreaterThan(0);
+    await c.close();
+  });
+
+  it("E4 one week; E8 without the playoffs; D5 D/ST at full detail; C4 by ids; B2 last season", async () => {
+    const w = await ok("espn_analyze_replacement", { horizon: "week", week: 4 });
+    expect((w.data as { positions: unknown[] }).positions.length).toBeGreaterThan(0);
+    const s = await ok("espn_analyze_schedule", { include_playoffs: false, seed: 1 });
+    const rules = (await ok("espn_get_league", { include: ["rules"] })).data as {
+      rules: { playoffs: { playoff_weeks: number[] } };
+    };
+    const po = rules.rules.playoffs.playoff_weeks;
+    expect(po.length).toBeGreaterThan(0);
+    expect((s.data as { weeks: { week: number }[] }).weeks.some((x) => po.includes(x.week))).toBe(
+      false,
+    );
+    const d = await ok("espn_get_defense_profile", { position: "D/ST", detail: "full" });
+    expect(Array.isArray(d.data.defenses)).toBe(true);
+    const ids = pooled.slice(0, 2).map((p) => p.player_id);
+    const o = await ok("espn_get_player_outlook", { players: { player_ids: ids }, weeks: [3, 4] });
+    expect((o.data.players as unknown[]).length).toBeGreaterThan(0);
+    const b = await ok("espn_get_player_stats", {
+      players: { player_ids: ids },
+      type: "prior_season",
+    });
+    expect(Array.isArray(b.data.players)).toBe(true);
+  }, 60_000);
+
+  it("E10 on a rival's player and on a free agent: the roster class follows ESPN's status", async () => {
+    const rivalId = pooled.find((p) => p.player_id !== myRoster[0]?.player_id)?.player_id ?? 0;
+    const r = await ok("espn_analyze_evidence", { player: { player_ids: [rivalId] } });
+    expect(r.data).toHaveProperty("flag");
+    const fa = (await ok("espn_list_players", { status: "FREEAGENT", limit: 5 })).data.players as {
+      player_id: number;
+    }[];
+    if (fa[0] !== undefined) {
+      const e = await ok("espn_analyze_evidence", { player: { player_ids: [fa[0].player_id] } });
+      expect(e.data).toHaveProperty("evidence");
+    }
   });
 });

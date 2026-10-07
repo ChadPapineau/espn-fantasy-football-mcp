@@ -275,6 +275,13 @@ export const tradeSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+/**
+ * The best free agents the trade engine may fill a freed seat from (the pool page is sorted by ESPN's
+ * rest-of-season projection; a seat is filled from the top, so a short list is the same answer at a
+ * fraction of the cost of the whole page).
+ */
+export const TRADE_WIRE_MAX = 12;
+
 const tradeSideSchema = playerIdsSchema.refine((a) => a.length <= BOUNDS.tradeSide.max, {
   message: "too_big",
 });
@@ -413,7 +420,7 @@ export const analyzeTradeTool = defineTool({
         mode: ctx.services.seedingMode,
         confirmed_at: ctx.services.seedingConfirmedAt,
       },
-      free_agents: pool.map((p) => tradePlayerOf(ctx, p, 20, weeks)),
+      free_agents: pool.slice(0, TRADE_WIRE_MAX).map((p) => tradePlayerOf(ctx, p, 20, weeks)),
       clock: ctx.services.clock,
       rng: seededRng(seed),
       inputs: toDataInputs(inputs, ctx.nowMs),

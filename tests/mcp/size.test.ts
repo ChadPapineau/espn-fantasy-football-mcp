@@ -169,7 +169,7 @@ describe("result budgets (plan 01 §4.2; plan 07 C8)", () => {
       expect(chars).toBeLessThanOrEqual(ANALYTICS_BUDGET_CHARS);
     }
     await c.close();
-  }, 120_000);
+  }, 300_000);
 
   it("analytics results stay within 10 000 chars by construction", async () => {
     for (const [name, args] of analyticsCalls) {
