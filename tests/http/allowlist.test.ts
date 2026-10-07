@@ -137,10 +137,15 @@ describe("checkUrl", () => {
     ["https://[::1]/x", "host_not_allowed"],
     ["https://localhost/x", "host_not_allowed"],
     ["https://gіthub.com/x", "host_not_allowed"],
-    ["https://www.espn.com/fantasy/", "host_not_allowed"],
+    // www.espn.com and api.sleeper.app are allowed data hosts (the RSS feed, Sleeper's trending
+    // list — plan 10 §3.2); their neighbours are not (exact-host matching), and the ESPN-mode
+    // (cookie) path refuses www.espn.com outright (tests/http/espn-get.test.ts)
+    ["https://espn.com/fantasy/", "host_not_allowed"],
+    ["https://www.espn.com.evil.example/fantasy/", "host_not_allowed"],
     ["https://fantasy.espn.com/x", "host_not_allowed"],
     [`https://${ESPN_WRITE_HOST}/apis/v3/games/ffl`, "host_not_allowed"],
-    ["https://api.sleeper.app/v1/state/nfl", "host_not_allowed"],
+    ["https://sleeper.app/v1/state/nfl", "host_not_allowed"],
+    ["https://rotowire.com/rss/news.php?sport=NFL", "host_not_allowed"],
     ["not a url", "invalid_url"],
     ["", "invalid_url"],
     [`https://github.com/${"a".repeat(MAX_URL_CHARS)}`, "invalid_url"],

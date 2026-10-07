@@ -30,6 +30,9 @@ export function validateRateLimit(limit: RateLimit): void {
     throw new RangeError("limiter: minIntervalMs must be a finite number ≥ 0");
   if (limit.maxPerDay !== null && (!Number.isSafeInteger(limit.maxPerDay) || limit.maxPerDay < 0))
     throw new RangeError("limiter: maxPerDay must be null or an integer ≥ 0");
+  const d = limit.downloadMinIntervalMs;
+  if (d !== undefined && (!Number.isFinite(d) || d < 0))
+    throw new RangeError("limiter: downloadMinIntervalMs must be a finite number ≥ 0");
 }
 
 /** Builds a limiter for one source. */

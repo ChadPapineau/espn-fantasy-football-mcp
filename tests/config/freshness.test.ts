@@ -287,7 +287,32 @@ describe("sources, licenses, attribution (plan 01 §4.2, §9; research 04 §E)",
       "nflverse:depth_charts",
       "nflverse:roster_weekly",
       "nflverse:players",
+      "nflverse:injuries_history",
+      "nflverse:depth_charts_history",
     ]);
+  });
+  it("each history file carries its current source's class, license, attribution and job (phase 2)", () => {
+    const pairs = [
+      ["nflverse:stats_player_week_history", "nflverse:stats_player_week"],
+      ["nflverse:stats_team_week_history", "nflverse:stats_team_week"],
+      ["nflverse:pbp_history", "nflverse:pbp"],
+      ["nflverse:snap_counts_history", "nflverse:snap_counts"],
+      ["nflverse:injuries_history", "nflverse:injuries"],
+      ["nflverse:depth_charts_history", "nflverse:depth_charts"],
+      ["ffopportunity:ep_weekly_history", "ffopportunity:ep_weekly"],
+    ] as const;
+    for (const [h, cur] of pairs) {
+      const a = SOURCE_REGISTRY[h];
+      const b = SOURCE_REGISTRY[cur];
+      expect([a.freshness, a.license, a.attribution, a.job], h).toEqual([
+        b.freshness,
+        b.license,
+        b.attribution,
+        b.job,
+      ]);
+      expect(a.phase, h).toBe("2");
+    }
+    expect(DATASET_SOURCE_IDS.filter((id) => id.endsWith("_history"))).toHaveLength(7);
   });
   it("the ESPN layer is labelled espn-unofficial and keeps the no-affiliation line", () => {
     expect(SOURCE_REGISTRY["espn:pro_schedule"].license).toBe("espn-unofficial");

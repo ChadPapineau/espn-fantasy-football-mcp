@@ -420,6 +420,16 @@ export const DATASET_SOURCE_IDS = [
   "weather:open_meteo",
   "weather:nws",
   "odds:the_odds_api",
+  // the Phase-2 history files: the two prior seasons of a current-season source, in their own
+  // dataset file (plan 10 §3.2 "two prior nflverse seasons"; D9; A-3; src/store/datasets/tables.ts
+  // HISTORY_DATASET_SOURCES), written by the same job as their current source
+  "nflverse:stats_player_week_history",
+  "nflverse:stats_team_week_history",
+  "nflverse:pbp_history",
+  "nflverse:snap_counts_history",
+  "nflverse:injuries_history",
+  "nflverse:depth_charts_history",
+  "ffopportunity:ep_weekly_history",
 ] as const;
 export type DatasetSourceId = (typeof DATASET_SOURCE_IDS)[number];
 
@@ -483,6 +493,13 @@ export const SOURCE_REGISTRY: Readonly<Record<DatasetSourceId, SourceInfo>> = Ob
   "weather:open_meteo": src("weather:open_meteo", "weather", ATTRIBUTIONS.open_meteo, "weather", "1a"),
   "weather:nws": src("weather:nws", "weather", ATTRIBUTIONS.nws, "weather", "1a"),
   "odds:the_odds_api": src("odds:the_odds_api", "odds", ATTRIBUTIONS.the_odds_api, "odds", "later"),
+  "nflverse:stats_player_week_history": src("nflverse:stats_player_week_history", "nflverse_stats_player_week", ATTRIBUTIONS.nflverse, "nflverse:stats", "2"),
+  "nflverse:stats_team_week_history": src("nflverse:stats_team_week_history", "nflverse_stats_team_week", ATTRIBUTIONS.nflverse, "nflverse:stats", "2"),
+  "nflverse:pbp_history": src("nflverse:pbp_history", "nflverse_pbp", ATTRIBUTIONS.nflverse, "nflverse:stats", "2"),
+  "nflverse:snap_counts_history": src("nflverse:snap_counts_history", "nflverse_snap_counts", ATTRIBUTIONS.nflverse, "nflverse:snaps", "2"),
+  "nflverse:injuries_history": src("nflverse:injuries_history", "nflverse_injuries", ATTRIBUTIONS.nflverse, "nflverse:daily", "2"),
+  "nflverse:depth_charts_history": src("nflverse:depth_charts_history", "nflverse_depth_charts", ATTRIBUTIONS.nflverse, "nflverse:daily", "2"),
+  "ffopportunity:ep_weekly_history": src("ffopportunity:ep_weekly_history", "ffopportunity_ep_weekly", ATTRIBUTIONS.ffopportunity, "ffopportunity", "2"),
 });
 
 /** Whether a string is a known dataset source id. */

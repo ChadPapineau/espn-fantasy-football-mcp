@@ -33,12 +33,21 @@ export interface TempFile {
 export interface RateLimit {
   readonly minIntervalMs: number;
   readonly maxPerDay: number | null;
+  /**
+   * When set, a run's DOWNLOADS are spaced by this instead of `minIntervalMs` (their own limiter, its
+   * own day count): `minIntervalMs` then governs the GETs alone — the release poll plan 01 §6 limits
+   * to one per 15 min — and a run's release assets are not held 15 min apart (integration fix).
+   */
+  readonly downloadMinIntervalMs?: number;
 }
 
 /** The per-source limits plan 01 §6 names. */
 export const SOURCE_RATE_LIMITS = Object.freeze({
-  /** GitHub releases: poll `timestamp.txt` at most every 15 min; never the GitHub API in the hot path. */
-  github_release: { minIntervalMs: 15 * 60 * 1000, maxPerDay: null },
+  /**
+   * GitHub releases: poll `timestamp.txt` at most every 15 min; never the GitHub API in the hot path.
+   * The poll is the limit (plan 01 §6); a run's asset downloads after it are spaced 1 s apart.
+   */
+  github_release: { minIntervalMs: 15 * 60 * 1000, maxPerDay: null, downloadMinIntervalMs: 1_000 },
   /** Sleeper ≤ 10/min. */
   sleeper: { minIntervalMs: 6_000, maxPerDay: null },
   /** Open-Meteo / NWS ≤ 1 per venue per hour (the runner keys it per venue). */

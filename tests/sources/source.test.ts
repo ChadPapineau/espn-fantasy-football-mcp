@@ -11,7 +11,12 @@ import {
 
 describe("source politeness and limits", () => {
   it("per-source limits match plan 01 §6", () => {
-    expect(SOURCE_RATE_LIMITS.github_release).toEqual({ minIntervalMs: 900_000, maxPerDay: null });
+    // the 15-min limit is the release poll's; a run's asset downloads are spaced 1 s apart
+    expect(SOURCE_RATE_LIMITS.github_release).toEqual({
+      minIntervalMs: 900_000,
+      maxPerDay: null,
+      downloadMinIntervalMs: 1_000,
+    });
     expect(SOURCE_RATE_LIMITS.sleeper.minIntervalMs).toBe(6_000);
     expect(SOURCE_RATE_LIMITS.weather.minIntervalMs).toBe(3_600_000);
     expect(SOURCE_RATE_LIMITS.rss.minIntervalMs).toBe(900_000);

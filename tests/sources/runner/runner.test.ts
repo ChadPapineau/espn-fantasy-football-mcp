@@ -29,7 +29,12 @@ import {
   type RefreshResult,
   type TempArea,
 } from "../../../src/sources/runner.js";
-import type { HttpDownload, HttpGet, SchemaReport } from "../../../src/sources/source.js";
+import {
+  SOURCE_RATE_LIMITS,
+  type HttpDownload,
+  type HttpGet,
+  type SchemaReport,
+} from "../../../src/sources/source.js";
 import { PUBLISH_ALREADY_CURRENT } from "../../../src/store/types.js";
 import { captureLog, netError } from "../../http/helpers.js";
 import {
@@ -166,6 +171,54 @@ describe("happy path", () => {
     expectStatus(r, "published");
     expect(calls).toHaveLength(3);
     expect(sleeps).toEqual([900, 900]);
+  });
+
+  it("a limit with downloadMinIntervalMs spaces the downloads by it and the GETs by minIntervalMs (no 15-min wait between a poll and its assets)", async () => {
+    const calls: string[] = [];
+    const http: HttpGet = (url) => {
+      calls.push(url);
+      return Promise.resolve({ status: 200, body: new Uint8Array(), headers: {}, final_url: url });
+    };
+    const download: HttpDownload = (url, o) => {
+      calls.push(url);
+      return Promise.resolve({ status: 200, bytes: 0, headers: {}, final_url: url, path: o.dest });
+    };
+    const src = fakeSource({
+      limiter: SOURCE_RATE_LIMITS.github_release,
+      version: async (ctx) => {
+        await ctx.http("https://github.com/timestamp.txt", { signal: ctx.signal, maxBytes: 64 });
+        return { version: "v", released_at: null };
+      },
+      fetch: async (_v, ctx) => {
+        for (const f of ["a", "b", "c"])
+          await ctx.download(`https://github.com/${f}`, {
+            signal: ctx.signal,
+            maxBytes: 9,
+            dest: join(ctx.tempDir, f),
+          });
+        return [];
+      },
+    });
+    const r = await runRefresh({ source: src, seasons: [2026], week: 5 }, deps({ http, download }));
+    expectStatus(r, "published");
+    expect(calls).toHaveLength(4);
+    // the poll and the first asset never wait for each other; assets are 1 s apart
+    expect(sleeps).toEqual([1_000, 1_000]);
+    expect(sleeps.every((ms) => ms < SOURCE_RATE_LIMITS.github_release.minIntervalMs)).toBe(true);
+  });
+
+  it("an invalid downloadMinIntervalMs is an internal failure, never a throw", async () => {
+    const r = await runRefresh(
+      {
+        source: fakeSource({
+          limiter: { minIntervalMs: 0, maxPerDay: null, downloadMinIntervalMs: -1 },
+        }),
+        seasons: [2026],
+        week: 5,
+      },
+      deps(),
+    );
+    expect(r.status).toBe("failed");
   });
 
   it("runRefreshJob runs the job's sources in order", async () => {

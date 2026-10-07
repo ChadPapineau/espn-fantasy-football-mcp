@@ -428,13 +428,24 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
       }
     }
 
-    const limiter = createRateLimiter(source.limiter, { nowMs: () => deps.clock.nowMs(), sleep });
+    const limiterDeps = { nowMs: () => deps.clock.nowMs(), sleep };
+    const limiter = createRateLimiter(source.limiter, limiterDeps);
+    // A source whose limit names a download spacing gets a second limiter for its downloads (the
+    // GitHub poll limit governs the poll, not the assets a run fetches after it — plan 01 §6).
+    const downloadInterval = source.limiter.downloadMinIntervalMs;
+    const downloads =
+      downloadInterval === undefined
+        ? limiter
+        : createRateLimiter(
+            { minIntervalMs: downloadInterval, maxPerDay: source.limiter.maxPerDay },
+            limiterDeps,
+          );
     const notPublished = new Set<number>();
     const runDir = await deps.temp.create(id);
     dir = runDir;
     const ctx: SourceContext = {
       http: limitGet(deps.http, limiter),
-      download: limitDownload(deps.download, limiter),
+      download: limitDownload(deps.download, downloads),
       signal,
       clock: deps.clock,
       seasons: req.seasons,

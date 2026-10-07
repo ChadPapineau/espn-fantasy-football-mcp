@@ -135,10 +135,15 @@ function full(
 
 describe("Phase-2 contract shape", () => {
   it("covers every Phase-2 dataset source of SOURCE_REGISTRY, minus the two named as uncontracted", () => {
+    // the history files are registered phase-2 sources too (their own dataset files)
     const phase2 = DATASET_SOURCE_IDS.filter((id) => SOURCE_REGISTRY[id].phase === "2");
-    expect([...PHASE_2_DATASET_SOURCES, ...PHASE_2_UNCONTRACTED_SOURCES].sort()).toEqual(
-      [...phase2].sort(),
-    );
+    expect(
+      [
+        ...PHASE_2_DATASET_SOURCES,
+        ...PHASE_2_UNCONTRACTED_SOURCES,
+        ...HISTORY_DATASET_SOURCES,
+      ].sort(),
+    ).toEqual([...phase2].sort());
     expect(
       PHASE_2_DATASET_SOURCES.filter((s) =>
         (PHASE_2_UNCONTRACTED_SOURCES as readonly string[]).includes(s),
@@ -344,13 +349,13 @@ describe("Phase-2 contract shape", () => {
 });
 
 describe("history files (plan 10 §3.2 two prior seasons; D9; A-3)", () => {
-  it("are their own dataset files: valid source ids, distinct stems, not yet in DATASET_SOURCE_IDS", () => {
+  it("are their own dataset files: valid source ids, distinct stems, registered in DATASET_SOURCE_IDS", () => {
     const stems = new Set<string>();
     for (const h of HISTORY_DATASET_SOURCES) {
       expect(h).toMatch(SOURCE_ID_RE);
       expect(h.endsWith("_history")).toBe(true);
       stems.add(datasetFileStem(h));
-      expect((DATASET_SOURCE_IDS as readonly string[]).includes(h)).toBe(false);
+      expect((DATASET_SOURCE_IDS as readonly string[]).includes(h)).toBe(true);
       expect(isContractDatasetSource(HISTORY_OF[h])).toBe(true);
       expect(historyTwinOf(HISTORY_OF[h])).toBe(h);
     }

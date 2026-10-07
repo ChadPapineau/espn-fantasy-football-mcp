@@ -2,7 +2,7 @@
 // against BEFORE it is made (plan 02 S12 + §7.1 "Host allow-list"; §8 threats 10, 18; plan 01 §6).
 // Two disjoint modes: ESPN mode = the configured read host ONLY (`lm-api-reads…`, or the operator
 // override EFF_ESPN_READ_HOST accepted only under ^[a-z0-9-]+\.fantasy\.espn\.com$ — so a cookie can
-// never leave *.fantasy.espn.com); data mode = the Phase-1a data-source hosts. The ESPN write host is
+// never leave *.fantasy.espn.com); data mode = the data-source hosts (Phase 1 and the Phase-2 keyless feeds). The ESPN write host is
 // in neither and is refused by an explicit check even if a caller hands it in as the read host
 // (PHASE W SEAM — NOT IMPLEMENTED: a write module would add its host here, behind plan 02 §3.2's four
 // gates). `release-assets.githubusercontent.com` is a recorded deviation (GitHub release downloads
@@ -10,7 +10,12 @@
 import { ESPN_READ_HOST_DEFAULT, ESPN_WRITE_HOST, isAllowedReadHost } from "../config/schema.js";
 import { HttpError } from "./errors.js";
 
-/** The Phase-1a/1b data-source hosts: nflverse releases on GitHub, Open-Meteo, NWS. */
+/**
+ * The data-source hosts: nflverse / ffopportunity releases on GitHub, Open-Meteo, NWS (Phase 1), and
+ * the Phase-2 keyless sources (plan 10 §3.2; plan 02 §7.1): Sleeper's public trending endpoint and
+ * the three RSS feeds (RotoWire, ESPN, CBS — the exact `www.` hosts the feeds answer on without a
+ * redirect, verified 2026-10-06). None is an ESPN fantasy host, so no cookie can ever reach one.
+ */
 export const DATA_SOURCE_HOSTS: readonly string[] = Object.freeze([
   "github.com",
   "objects.githubusercontent.com",
@@ -18,6 +23,10 @@ export const DATA_SOURCE_HOSTS: readonly string[] = Object.freeze([
   "raw.githubusercontent.com",
   "api.open-meteo.com",
   "api.weather.gov",
+  "api.sleeper.app",
+  "www.rotowire.com",
+  "www.espn.com",
+  "www.cbssports.com",
 ]);
 
 /**

@@ -14,6 +14,7 @@ import type {
   DataSource,
   HttpDownload,
   HttpGet,
+  RateLimit,
   ReleaseVersion,
   SchemaReport,
   SourceContext,
@@ -52,7 +53,7 @@ export interface FakeSourceOpts {
   id?: DatasetSourceId;
   versioning?: "release" | "time_bucket";
   seasonGate?: "always" | "in_season";
-  limiter?: { minIntervalMs: number; maxPerDay: number | null };
+  limiter?: RateLimit;
   version?: (ctx: SourceContext, n: number) => Promise<ReleaseVersion | null>;
   fetch?: (v: ReleaseVersion, ctx: SourceContext, n: number) => Promise<readonly TempFile[]>;
   assertSchema?: (files: readonly TempFile[]) => Promise<SchemaReport>;

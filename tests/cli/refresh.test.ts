@@ -10,6 +10,7 @@ import {
   comingWeek,
   defaultSeasons,
   describeResult,
+  historySkip,
   historyTwinsOf,
   isHistorySource,
   newsInputs,
@@ -154,7 +155,7 @@ describe("planning", () => {
       "ffopportunity",
     ] as const)
       for (const t of historyTwinsOf(job)) expect(isDatasetSourceId(t.id)).toBe(true);
-    expect(isHistorySource({ id: "nflverse:pbp_history" as never })).toBe(true);
+    expect(isHistorySource({ id: "nflverse:pbp_history" })).toBe(true);
     expect(isHistorySource(NFLVERSE_SOURCES["nflverse:players"])).toBe(false);
   });
 
@@ -186,6 +187,67 @@ describe("planning", () => {
     expect(newsInputs(() => null, sb.dir, "cbs").universe?.(ctx)).toEqual([]);
   });
 
+  it("the seven registered history twins join their jobs, each gated on the CURRENT season (plan 10 B1)", () => {
+    const twins = (["nflverse:stats", "nflverse:snaps", "nflverse:daily", "ffopportunity"] as const)
+      .flatMap((j) => historyTwinsOf(j))
+      .map((t) => t.id)
+      .sort();
+    expect(twins).toEqual([
+      "ffopportunity:ep_weekly_history",
+      "nflverse:depth_charts_history",
+      "nflverse:injuries_history",
+      "nflverse:pbp_history",
+      "nflverse:snap_counts_history",
+      "nflverse:stats_player_week_history",
+      "nflverse:stats_team_week_history",
+    ]);
+    const game = (kickoff: string) => ({
+      espn_game_id: 1,
+      season: 2026,
+      week: 5,
+      kickoff,
+      start_time_tbd: false,
+      valid_for_locking: true,
+      stats_official: false,
+      home_pro_team_id: 1,
+      away_pro_team_id: 2,
+    });
+    const schedule = (rows: ReturnType<typeof game>[] | null) => ({
+      games: () => ({
+        rows: rows ?? [],
+        stamp: rows === null ? null : ({ source: "espn:pro_schedule" } as never),
+      }),
+      teams: () => ({ rows: [], stamp: null }),
+    });
+    const now = Date.parse("2026-10-06T12:00:00.000Z");
+    const twin = { id: "nflverse:pbp_history" } as never;
+    const inSeason = schedule([game("2026-10-08T00:15:00.000Z")]);
+    const offSeason = schedule([game("2026-01-04T18:00:00.000Z")]);
+    expect(historySkip(twin, inSeason, 2026, now, null)).toBeNull();
+    expect(historySkip(twin, offSeason, 2026, now, null)).toEqual({
+      status: "skipped",
+      source: "nflverse:pbp_history",
+      reason: "off_season",
+    });
+    expect(historySkip(twin, schedule(null), 2026, now, null)).toMatchObject({
+      reason: "schedule_never_loaded",
+    });
+    const throwing = {
+      games: () => {
+        throw new Error("closed");
+      },
+      teams: () => ({ rows: [], stamp: null }),
+    };
+    expect(historySkip(twin, throwing, 2026, now, null)).toMatchObject({
+      reason: "schedule_never_loaded",
+    });
+    // an explicit --seasons runs it; a current-season source is never gated here
+    expect(historySkip(twin, offSeason, 2026, now, [2024, 2025])).toBeNull();
+    expect(
+      historySkip(NFLVERSE_SOURCES["nflverse:players"], offSeason, 2026, now, null),
+    ).toBeNull();
+  });
+
   it("seasons: defaults carry the previous season for stats, two for schedules; --seasons is validated", () => {
     sb = sandbox();
     expect(defaultSeasons(NFLVERSE_SOURCES["nflverse:stats_player_week"], 2026)).toEqual([
@@ -195,10 +257,7 @@ describe("planning", () => {
       2024, 2025, 2026,
     ]);
     expect(
-      defaultSeasons(
-        { ...NFLVERSE_SOURCES["nflverse:players"], id: "nflverse:pbp_history" as never },
-        2026,
-      ),
+      defaultSeasons({ ...NFLVERSE_SOURCES["nflverse:players"], id: "nflverse:pbp_history" }, 2026),
     ).toEqual([2024, 2025]);
     expect(defaultSeasons(NFLVERSE_SOURCES["nflverse:injuries"], 2026)).toEqual([2026]);
     expect(parseSeasons(" 2026,2025,2026 ")).toEqual([2025, 2026]);

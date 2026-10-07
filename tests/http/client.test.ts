@@ -52,8 +52,13 @@ describe("allow-list (plan 02 §7.1): refused before any request", () => {
     ["https://evil.example/x", "host_not_allowed"],
     ["https://github.com.evil.example/x", "host_not_allowed"],
     ["https://127.0.0.1/x", "host_not_allowed"],
-    ["https://www.espn.com/fantasy/", "host_not_allowed"],
-    ["https://api.sleeper.app/v1/state/nfl", "host_not_allowed"],
+    // www.espn.com and api.sleeper.app are allowed data hosts (the RSS feed, Sleeper's trending
+    // list — plan 10 §3.2); their neighbours are not (exact-host matching), and the ESPN-mode
+    // (cookie) path refuses www.espn.com outright (tests/http/espn-get.test.ts)
+    ["https://espn.com/fantasy/", "host_not_allowed"],
+    ["https://www.espn.com.evil.example/fantasy/", "host_not_allowed"],
+    ["https://sleeper.app/v1/state/nfl", "host_not_allowed"],
+    ["https://rotowire.com/rss/news.php?sport=NFL", "host_not_allowed"],
     ["not a url", "invalid_url"],
     ["", "invalid_url"],
   ];

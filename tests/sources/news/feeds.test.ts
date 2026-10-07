@@ -26,8 +26,10 @@ describe("NEWS_FEEDS", () => {
     expect(NEWS_FEED_HOSTS).toEqual(["www.rotowire.com", "www.espn.com", "www.cbssports.com"]);
   });
 
-  it("every request URL passes the allow-list policy once its host is listed (https, default port, exact host)", () => {
-    const allow = [...DATA_SOURCE_HOSTS, ...NEWS_FEED_HOSTS, SLEEPER_HOST];
+  it("every request URL passes the real allow-list (https, default port, exact host)", () => {
+    // the hosts are listed in src/http's allow-list itself (no test-side widening)
+    for (const h of [...NEWS_FEED_HOSTS, SLEEPER_HOST]) expect(DATA_SOURCE_HOSTS).toContain(h);
+    const allow = DATA_SOURCE_HOSTS;
     for (const f of Object.values(NEWS_FEEDS)) expect(checkUrl(f.url, allow).hostname).toBe(f.host);
     expect(checkUrl(sleeperTrendingUrl("add"), allow).hostname).toBe(SLEEPER_HOST);
     // and none of them is an ESPN fantasy host (no cookie can ever be attached to these requests)

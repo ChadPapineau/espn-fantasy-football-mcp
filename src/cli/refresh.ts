@@ -42,7 +42,13 @@ import {
   NFLVERSE_SOURCES,
 } from "../sources/nflverse/index.js";
 import { SLEEPER_TRENDING_SOURCE } from "../sources/sleeper/index.js";
-import { fsTempArea, isRefreshSuccess, runRefresh, type RefreshResult } from "../sources/runner.js";
+import {
+  fsTempArea,
+  isRefreshSuccess,
+  runRefresh,
+  seasonState,
+  type RefreshResult,
+} from "../sources/runner.js";
 import type { DataSource } from "../sources/source.js";
 import { weatherSourceFor } from "../sources/weather/index.js";
 import { espnSeasonSources } from "../sources/espn_season/index.js";
@@ -158,6 +164,34 @@ export function historyTwinsOf(job: RefreshJob): DataSource[] {
 /** Whether a source is a history twin (its seasons are the two before the current one). */
 export function isHistorySource(source: Pick<DataSource, "id">): boolean {
   return (source.id as string).endsWith("_history");
+}
+
+/**
+ * Whether a history twin runs now (plan 10 B1: outside the season every job exits 0 in < 2 s with no
+ * request). A twin is `always`-gated at the runner — its own seasons are never in season — so it is
+ * gated HERE on the CURRENT season, exactly as the runner gates an in-season source; an explicit
+ * `--seasons` runs it regardless (the owner asked for those seasons). Returns the skip, or null.
+ */
+export function historySkip(
+  source: Pick<DataSource, "id">,
+  schedule: ProScheduleReader,
+  season: number,
+  nowMs: number,
+  seasonsOverride: readonly number[] | null,
+): RefreshResult | null {
+  if (!isHistorySource(source) || seasonsOverride !== null) return null;
+  let state;
+  try {
+    state = seasonState(schedule, season, nowMs);
+  } catch {
+    state = "never_loaded" as const;
+  }
+  if (state === "in_season") return null;
+  return {
+    status: "skipped",
+    source: source.id,
+    reason: state === "off_season" ? "off_season" : "schedule_never_loaded",
+  };
 }
 
 /** The registry of this build. */
@@ -514,6 +548,18 @@ export async function refresh(
         continue;
       }
       store.reopenChangedDatasets();
+      const gated = historySkip(
+        step.source,
+        store.datasets.proSchedule,
+        config.season,
+        io.clock.nowMs(),
+        seasonsOverride,
+      );
+      if (gated !== null) {
+        results.push(gated);
+        lines.push(describeResult(gated));
+        continue;
+      }
       const week =
         step.source.job === "weather"
           ? comingWeek(store.datasets.proSchedule, config.season, io.clock.nowMs())

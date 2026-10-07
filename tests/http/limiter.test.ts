@@ -104,6 +104,8 @@ describe("createRateLimiter", () => {
     [{ minIntervalMs: Number.NaN, maxPerDay: null }],
     [{ minIntervalMs: 0, maxPerDay: -1 }],
     [{ minIntervalMs: 0, maxPerDay: 1.5 }],
+    [{ minIntervalMs: 0, maxPerDay: null, downloadMinIntervalMs: -1 }],
+    [{ minIntervalMs: 0, maxPerDay: null, downloadMinIntervalMs: Number.POSITIVE_INFINITY }],
   ])("validateRateLimit(%j) throws", (limit) => {
     expect(() => {
       validateRateLimit(limit);
