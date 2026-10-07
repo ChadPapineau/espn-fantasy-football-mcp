@@ -1,7 +1,7 @@
 # Phase 2 acceptance — B1–B15, item by item
 
 Scope: plan 10 §3.2's acceptance list, as it stood when Stage B2's integration closed (2026-10-06,
-branch `build/phase-1`), updated after the B2a gate's rounds 1 and 2 (2026-10-07; the last two sections). Every row names its status and where the evidence lives. **met** = the
+branch `build/phase-1`), updated after the B2a gate's rounds 1–3 (2026-10-07; the last three sections). Every row names its status and where the evidence lives. **met** = the
 criterion holds and a test in CI holds it; **soft_reported** = the plan's soft number is reported
 (its hard parts are met); **needs_live** = it can only be shown against the live league or a live
 model run; **needs_time** = it needs weeks of data that do not exist yet. Exit gate (plan 10 §3.2):
@@ -23,8 +23,8 @@ replays every Skill's `core` and `full` tool sequences the same way;
 | **B5** trade evaluator | soft_reported (hard met) | §B5 there: Δ-sign accuracy is not computable (no recorded trade on the fixtures) — measured on the live league as trades happen; hard: implied drop on every uneven trade, `fair` iff the interval spans 0, ΔU under the configured reading and under `both` on `seeding-unknown`, the deadline from `tradeSettings` |
 | **B6** cascade | soft_reported (hard met) | §B6 there: the top-beneficiary hit rate does not yet beat next-man-up; hard: `hypothesis_only` rule, shares never above the vacated share, IR eligibility from the structured status only |
 | **B7** replacement, schedule, roster | met, one VOR cell **pending ruling** | `tests/backtest/replacement.test.ts`: 2024 and 2025 baselines and 35 of 36 VOR cells within 0.3 ppg under the shipped (league) score, flex splits 7/3 and 4/6. 2024 TE rank 3 reads 3.593 against the table's 3.2: that TE's week-2 own fumble-recovery TD (ESPN stat 63, 6 points, scored by the reference league and by the engine) is not in nflverse's `fantasy_points`, the line research 05's `qb_vor.py` scored — 6 points over 15 games is the 0.4. On research 05's own basis (`researchBasis`: a return TD counted, an own-recovery TD not) **every** cell of both seasons is within 0.3 (this one 3.193); the shipped-score cell stays pinned at its measured value until the orchestrator rules (plan 10 B7 against the table as written). IR first on `ir-invalid`, the hidden-bench play's three risks, `qb_bench == 0` only at `streamability.QB ≥ 0.9` |
-| **B8** evidence and news | met | `stdio-full`: on all six injected-text variants no planted string appears outside an `untrusted_text` wrapper or a `meta.untrusted_fields[]` path in any of the 34 tools' outputs (warnings and meta included), with a positive control per shown variant; `structured_disagrees` names `injury_status` on `inj-ir-cleared`; `calibration_state.note` on every E10 result; `rules_v1` precision 1.00 on 71 labelled real items (65 in-sample, 6 held out; 16 claims, all correct — `tests/domain/evidence/labelled.test.ts`, [`fixtures/news/labelled/README.md`](../../fixtures/news/labelled/README.md)) |
-| **B9** live and fitted season | met | `tests/mcp/p1-fx10h.test.ts`, `tests/domain/analytics/matchup.test.ts`: final/live/pending on `sunday-live`, no locked seat actionable; `start-sit`'s live branch in the `full` dry run; the fitted season within 0.05 of the cold start for my team (0.982 vs 0.952) |
+| **B8** evidence and news | met | `stdio-full`: on all six injected-text variants no planted string appears outside an `untrusted_text` wrapper or a `meta.untrusted_fields[]` path in any of the 34 tools' outputs (warnings and meta included), with a positive control on every variant (the trade-block note through A2 since gate round 3); `structured_disagrees` names `injury_status` on `inj-ir-cleared`; `calibration_state.note` on every E10 result; `rules_v1` precision 1.00 on 71 labelled real items (65 in-sample, 6 held out; 16 claims, all correct — `tests/domain/evidence/labelled.test.ts`, [`fixtures/news/labelled/README.md`](../../fixtures/news/labelled/README.md)) |
+| **B9** live and fitted season | met | `tests/mcp/p1-fx10h.test.ts`, `tests/domain/analytics/matchup.test.ts`: final/live/pending on `sunday-live`, no locked seat actionable; on a cold cache the box score is read first and a live call without its live facts conditions nothing (`live: null`, `partial`; gate round 3); `start-sit`'s live branch in the `full` dry run; the fitted season within 0.05 of the cold start for my team (0.982 vs 0.952) |
 | **B10** Inspector smoke | met | `npm run smoke` and the CI Inspector step under both toolsets: 18 / 34 tools in order, no write tool, 8 / 13 prompts; every P1 Skill's Step 0 under `core` names `EFF_TOOLSET=full` (`check:skills`, the `-CORE` cases) |
 | **B11** Skills | met (Lane 1) · needs_live (Lane 2 — owner's action) | Lane 1 for all 13 (`check:skills`, the collision check across 13, the stdio dry runs under `core` and `full`). Lane 2 (the WV-2/TR-*/IC-*/SP-*/RA-*/NC-*/-INJ cases) is a `claude plugin eval` run: agent runs plus `llm` graders that cost tokens, and its report is published to claude.ai by default — the owner's call, not a build agent's. The suite is generated and dataset-seeded: `npm run build && npm run build:plugin-evals -- --seed --seed-datasets` (274 cases, 32 eval plugins) |
 | **B12** token sizes | met | `tests/mcp/size.test.ts`: `full` `tools/list` 32 999 ≤ 35 000; compact/full ≈ 0.98 recorded; plan 07 §5.1 updated; D3 re-decided (`core` stays the default) |
@@ -87,3 +87,63 @@ Open, for the orchestrator or the owner (no code change closes them):
 - **B8's held-out set** — 6 held-out items (16 claims pooled) is a sanity check, not an estimate;
   growing it needs new captures of the public feeds over several days, by an engineer whose brief
   allows the fetch, labelled before `rules_v1` runs on them (`fixtures/news/labelled/README.md`).
+
+## Gate round 3 (2026-10-07) — what the fixer changed, and what stays open
+
+The gate again found the three hard items it cannot show met as written (B2's denominator, B7's
+one cell, B11 Lane 2 / B15) and five soft ones. The soft ones are fixed at their root:
+
+- **E3 live never fabricates (plan 01 §5.6–§5.7).** Two defects behind one symptom. (1) A week the
+  pro schedule holds no game for (before any `eff refresh`, or the keyless read held back by the
+  budget) read as **everyone's bye**: `lockPlan` gave each player `game_state: "bye"` (its own
+  `bye` flag said false) and `matchupPlayerOf` read a missing row as a bye, so E3 live put all 18
+  starters in `players_final` at 0 points — `p_win` 0.5 on `[0.5, 0.5]`, `mu = sigma = 0`. An
+  unknown week is now `tbd` (no lock instant, never `all_locked`; `tbd_player_ids` lists the
+  players), and a missing row is `tbd`. (2) The first live call in a game window spent the 3-request
+  budget on mSettings, mRoster and mMatchup, so the box score was never read and every started
+  player scored 0 so far (`p_win` 0.504 against the true 0.237). Live now reads the box score first
+  and takes this period's pairing from it (mMatchup only when the box score cannot name the
+  opponent; `pre` keeps its order), then the pro schedule; and a live call missing either live fact
+  conditions nothing: the lineups as set at their pre-game distributions, `live: null`,
+  `partial: true`, the omission an assumption and a warning ("live conditioning unavailable: … not
+  read; p_win is the pre-game number …"). Measured on `sunday-live` (unit worlds): before any
+  refresh, first call `live: null`, `p_win` 0.496 on [0.393, 0.599], second call live 0.258;
+  with the schedule stored, the **first** call is already live (0.257, the same points so far as the
+  second), only ESPN's cross-check held back (`partial`, named). Tests: `matchup.test.ts`
+  (live-unread case, `tbd` default), `schedule.test.ts` (an unknown week), `p1-fx10h.test.ts`
+  ("sunday-live on a COLD cache", both orders), `p1-tools.test.ts` (box score lost → nothing
+  conditioned; mMatchup past the budget → live still answers).
+- **The Skills handle `partial: true`.** Plan 01 §5.6's "the Skill then asks a narrower question"
+  was in no SKILL.md. `tool-outputs.md` (also `espn-ff://docs/tool-outputs`) now says what
+  `partial` means and what to do — say what is missing, call the same tool once more (the first
+  call's reads are cached), else ask the narrower question; the output contract (generated into
+  every recommending SKILL.md) never presents a partial number as the answer; `orient.md`'s
+  re-fetch table allows that one repeat; `start-sit`'s live step names E3's two partial shapes.
+- **The trade-block note reaches a tool, wrapped.** No tool read `teams[].tradeBlock`, so
+  `inj-tradeblock` had no positive control and plan 09 TR-INJ ("the note quoted with source
+  `espn.team.trade_block`") could not pass. A2 `espn_get_standings` now carries
+  `teams[].trade_block` (plan 01 §4.4: `untrusted_text`, source `espn.team.trade_block`, cap 500;
+  null for ESPN's empty `{}` or any other shape); the injection flags gained a claimed-authority
+  `role_marker` ("Commissioner note:", "League manager notice:", "Admin:" opening a sentence) and a
+  blanket-order `imperative` ("accept any trade", "approve every claim") — none fires on the 71
+  labelled real headlines. B8's walk now requires a positive control on **every** variant
+  (`stdio-full`: `inj-tradeblock` → `standings`; `injection.test.ts`: shown and flagged); E6's
+  result is unchanged by the note (`p1-fx10h.test.ts`). The trade Skill reads the note from step
+  3's standings.
+- **`client_ref` is path-listed on read-back.** `RECLOG_TEXT_PATHS` lists it (its grammar admits
+  words — `IGNORE.previous:rules`), so `espn-ff://rec/{log_id}` lists `data.client_ref` with
+  source `store.recommendation_log`, read back through the same filter.
+- **The CBS guids' note.** `fixtures/news/README.md` says the 40 UUID-shaped CBS `<guid>` values
+  (and their copies in the labelled sets and one `xml.test.ts` assertion) are public article ids,
+  not member GUIDs; `tests/sources/news/fixture-ids.test.ts` holds it.
+
+Open, for the orchestrator or the owner (no code change closes them; evidence unchanged):
+
+- **B2's denominator** — 131/134 = 97.8 % of the rostered players D1 models; 131/145 = 90.3 % over
+  every rostered entry, capped at 92.4 % by the 11 rostered D/ST no usage source covers.
+- **B7's one cell** — 2024 TE rank 3: 3.593 under the league's scoring vs the table's 3.2; 3.193 on
+  research 05's nflverse basis, where all 36 cells are within 0.3.
+- **B11 Lane 2 and B15's graders** — one `claude plugin eval` run (`npm run build && npm run
+  build:plugin-evals -- --seed --seed-datasets`, 274 cases): the owner's tokens and a report
+  published to claude.ai by default, so it needs the owner's go. TR-INJ can pass now that the note
+  is shown.
