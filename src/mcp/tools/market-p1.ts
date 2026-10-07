@@ -86,6 +86,7 @@ import {
   receptionPoints,
   required,
   runSeason,
+  rzShareOf,
   usageOf,
   valueWeeks,
   type LeagueBasics,
@@ -545,7 +546,7 @@ function sharesOf(
         return g.carries === null || !(t > 0) ? null : g.carries / t;
       }),
     ),
-    rz_share: null,
+    rz_share: rzShareOf(games),
     snap_pct: meanFinite(games.map((g) => g.snap_pct)),
   };
 }
@@ -791,6 +792,12 @@ export const analyzeInjuryCascadeTool = defineTool({
     };
     const teamTargets = meanFinite([...targetsBy.values()].map(median)) ?? 0;
     const teamCarries = meanFinite([...tcNow.values()]) ?? 0;
+    // the team's red-zone opportunities per game (nflverse pbp, the weeks it covers)
+    const rzByWeek = new Map<number, number>();
+    for (const s of subjects)
+      for (const g of games(s.p.ref.id, false))
+        if (g.rz_team !== null && g.rz_team !== undefined) rzByWeek.set(g.week, g.rz_team);
+    const teamRz = meanFinite([...rzByWeek.values()]) ?? 0;
     const cascadeMates: CascadeTeammate[] = teammates.map((p) => {
       const g = games(p.ref.id, false);
       const gp = games(p.ref.id, true);
@@ -814,7 +821,11 @@ export const analyzeInjuryCascadeTool = defineTool({
             ? null
             : (() => {
                 const s = sharesOf(w0, new Map([...tcNow, ...tcPrior]));
-                return { target_share: s.target_share, carry_share: s.carry_share, rz_share: null };
+                return {
+                  target_share: s.target_share,
+                  carry_share: s.carry_share,
+                  rz_share: s.rz_share,
+                };
               })(),
         percent_change: p.ownership?.percent_change ?? null,
         availability: { status: p.status, waiver_process_date: p.waiver_process_date },
@@ -856,7 +867,7 @@ export const analyzeInjuryCascadeTool = defineTool({
         usage: {
           target_share: injShares.target_share,
           carry_share: injShares.carry_share,
-          rz_share: null,
+          rz_share: injShares.rz_share,
         },
         weekly: valueWeeks(inj, weeks),
         mine:
@@ -865,7 +876,7 @@ export const analyzeInjuryCascadeTool = defineTool({
             : { slot_id: myEntry.slot_id, eligible_slot_ids: inj.eligible_slot_ids },
       },
       teammates: cascadeMates.slice(0, 40),
-      team_volume: { targets: teamTargets, carries: teamCarries, rz: 0 },
+      team_volume: { targets: teamTargets, carries: teamCarries, rz: teamRz },
       team_games_without: without.length + withoutPrior.length,
       weeks,
       ...(args.assume_weeks_out === undefined ? {} : { assume_weeks_out: args.assume_weeks_out }),
@@ -883,9 +894,8 @@ export const analyzeInjuryCascadeTool = defineTool({
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
     if (mine === null) warnings.push("my roster unavailable: claim/pass verdicts are null");
-    warnings.push(
-      "red-zone shares need the pbp usage reader: the rz components are 0 in this build",
-    );
+    if (rzByWeek.size === 0)
+      warnings.push("nflverse:pbp does not cover these weeks: the red-zone components are 0");
     return {
       data: { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) },
       inputs,
@@ -1053,7 +1063,7 @@ export const analyzeEvidenceTool = defineTool({
       allowStale,
       inputs,
     );
-    const usage = (u.byId.get(p.ref.id)?.games ?? []).map((g) => usageWeekOf(g, null));
+    const usage = (u.byId.get(p.ref.id)?.games ?? []).map((g) => usageWeekOf(g, g.rz_team ?? null));
     // texts: ESPN's outlooks and the RSS items about him — wrapped at the source, never followed
     const texts: EvidenceText[] = [];
     const ol = await withinBudget(
@@ -1412,7 +1422,10 @@ export function waiverP1Extras(
   const usage = new Map<number, SignalInput>();
   for (const c of candidates) {
     const games = u.byId.get(c.player_id)?.games ?? [];
-    usage.set(c.player_id, { position: c.position, games: games.map((g) => usageWeekOf(g, null)) });
+    usage.set(c.player_id, {
+      position: c.position,
+      games: games.map((g) => usageWeekOf(g, g.rz_team ?? null)),
+    });
   }
   if (u.gaps.length > 0) warnings.push(`usage signals limited: ${u.gaps[0] ?? ""}`.slice(0, 200));
   // Sleeper trending adds (secondary; ESPN's percentChange is primary)

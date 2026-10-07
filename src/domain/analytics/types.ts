@@ -1070,6 +1070,12 @@ export interface UsageGameRow {
   readonly rz_targets: number | null;
   readonly rz_carries: number | null;
   readonly gl_carries: number | null;
+  /**
+   * The player's team's red-zone opportunities that week (its targets + carries inside the 20, nflverse
+   * pbp) — the rz_share denominator; absent or null when the pbp file does not cover the week (added
+   * in Phase 2 — plan 10 §3.2).
+   */
+  readonly rz_team?: number | null;
   readonly xfp_ep: number | null;
   readonly points_league: number | null;
   readonly xfp_gap: number | null;

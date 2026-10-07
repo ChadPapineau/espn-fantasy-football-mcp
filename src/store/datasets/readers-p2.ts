@@ -63,6 +63,8 @@ export interface UsageExtras {
   readonly rz_targets: number | null;
   readonly rz_carries: number | null;
   readonly gl_carries: number | null;
+  /** The team's red-zone targets + carries that week (rz_share's denominator); null uncovered. */
+  readonly rz_team: number | null;
 }
 
 /** One player-week the extras are asked for (the stats line's own team). */
@@ -470,6 +472,7 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
         rz_targets: count(rzT),
         rz_carries: count(rzC),
         gl_carries: count(glC),
+        rz_team: covered ? (num(tw.rz_targets) ?? 0) + (num(tw.rz_carries) ?? 0) : null,
       });
     }
     return out;

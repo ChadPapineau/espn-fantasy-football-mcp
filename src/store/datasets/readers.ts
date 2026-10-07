@@ -414,6 +414,7 @@ export function createReaders(o: ReadersOptions): StoreReaders {
             rz_targets: x?.rz_targets ?? null,
             rz_carries: x?.rz_carries ?? null,
             gl_carries: x?.gl_carries ?? null,
+            rz_team: x?.rz_team ?? null,
             xfp_ep: null,
           },
         });

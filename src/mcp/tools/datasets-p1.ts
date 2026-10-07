@@ -61,7 +61,14 @@ import {
   withinBudget,
 } from "./common.js";
 import { SELECTOR_HINT } from "./espn-p1.js";
-import { espnTeamOf, meanFinite, nflverseTeam, usageOf, type UsageRead } from "./p1-common.js";
+import {
+  espnTeamOf,
+  meanFinite,
+  nflverseTeam,
+  rzShareOf,
+  usageOf,
+  type UsageRead,
+} from "./p1-common.js";
 import {
   count,
   gsisOrNull,
@@ -102,6 +109,8 @@ const usageGameSchema = z.strictObject({
   rz_targets: count.nullable(),
   rz_carries: count.nullable(),
   gl_carries: count.nullable(),
+  // the team's red-zone opportunities that week (rz_share's denominator; nflverse pbp)
+  rz_team: count.nullable().optional(),
   xfp_ep: z.number().min(-100).max(200).nullable(),
   points_league: z.number().min(-100).max(200).nullable(),
   xfp_gap: z.number().min(-300).max(300).nullable(),
@@ -173,7 +182,10 @@ export function trailingOf(
   const routes = sum((g) => g.routes_proxy);
   const gaps = last.map((g) => g.xfp_gap).filter((x): x is number => x !== null);
   // the change point: E5's own held-jump detector over the season's games (one source of truth)
-  const signals = detectSignals({ position, games: games.map((g) => usageWeekOf(g, null)) });
+  const signals = detectSignals({
+    position,
+    games: games.map((g) => usageWeekOf(g, g.rz_team ?? null)),
+  });
   const jumps = signals.filter((s) => s.kind in CHANGE_METRIC);
   const top = jumps.sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
   const latest = games[games.length - 1];
@@ -182,8 +194,9 @@ export function trailingOf(
     snap_pct: meanFinite(last.map((g) => g.snap_pct)),
     target_share: meanFinite(last.map((g) => g.target_share)),
     carry_share: meanFinite(last.map((g) => g.carry_share)),
-    // the team's red-zone denominator (PbpReader.playerUsage) is not served yet: a share needs it
-    rz_share: null,
+    // the player's red-zone opportunities over his team's (nflverse pbp), over the window's covered
+    // weeks; null when the pbp file covers none of them
+    rz_share: rzShareOf(last),
     wopr: meanFinite(last.map((g) => g.wopr)),
     tprr_proxy:
       targets === null || routes === null || !(routes > 0) ? null : Math.min(10, targets / routes),

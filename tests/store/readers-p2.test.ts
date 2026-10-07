@@ -408,6 +408,7 @@ describe("PlayerWeekReader.lines — the snap-count and pbp extras", () => {
     // no pbp file: the red-zone fields stay null (unknown, never 0)
     expect(by.get(D)?.rz_carries).toBeNull();
     expect(by.get(D)?.routes_proxy).toBeNull();
+    expect(by.get(D)?.rz_team).toBeNull();
   });
 
   it("pbp: red-zone and goal-line carries, carry share and the routes proxy; a player with no plays in a covered week reads 0", async () => {
@@ -485,6 +486,8 @@ describe("PlayerWeekReader.lines — the snap-count and pbp extras", () => {
       carry_share: 2 / 3,
       snap_pct: 0.5,
       routes_proxy: 0.5 * 2,
+      // the team's red-zone targets + carries that week: plays 1, 3 and 4
+      rz_team: 3,
     });
     expect(by.get(B)).toMatchObject({
       rz_carries: 1,

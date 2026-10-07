@@ -350,6 +350,7 @@ export function usageOf(
         carry_share: u?.carry_share ?? null,
         rz_targets: u?.rz_targets ?? null,
         rz_carries: u?.rz_carries ?? null,
+        rz_team: u?.rz_team ?? null,
         gl_carries: u?.gl_carries ?? null,
         xfp_ep: xfp,
         points_league: pts,
@@ -373,6 +374,22 @@ export function usageOf(
     });
   }
   return { byId, gaps };
+}
+
+/**
+ * A player's red-zone share over games: Σ(his RZ targets + carries) ÷ Σ(his team's), over the weeks
+ * the pbp file covers (`rz_team` known and > 0); null when none is covered. Clamped to [0, 1].
+ */
+export function rzShareOf(games: readonly UsageGameRow[]): number | null {
+  let mine = 0;
+  let team = 0;
+  for (const g of games) {
+    const t = g.rz_team;
+    if (t === null || t === undefined || !(t > 0)) continue;
+    mine += (g.rz_targets ?? 0) + (g.rz_carries ?? 0);
+    team += t;
+  }
+  return team > 0 ? Math.min(1, Math.max(0, mine / team)) : null;
 }
 
 /** Distinct, in order. */
