@@ -39,3 +39,17 @@ snap counts and expected points weeks 1–3.
 The weekly-rosters and player-stats files are a later upload than the one the shared excerpts were
 cut from (same day, same schema); the rows added here belong to players the shared excerpts do not
 carry, so the union never holds two versions of one row (`tests/sources/nflverse/fx10h-usage.test.ts`).
+
+## UUID-shaped values are public NFL player ids, not member GUIDs
+
+`roster_weekly_2026.supplement` carries UUID-shaped values (1,008 of them, in its `sportradar_id`
+and `smart_id` columns only) outside the fixture pseudonym range
+(`{00000000-0000-4000-8000-0000000000NN}`). They are nflverse's public identifiers of NFL players —
+published in the release file named above, unchanged here — not ESPN member GUIDs (an ESPN member
+id is always a brace-wrapped SWID GUID: research 03 §B.3) and never anyone's fantasy-league
+identity. The ESPN rules of `scripts/dev/scan-secrets.mjs` and `.gitleaks.toml` match the brace or
+`SWID` forms only, so they pass these columns by design; a literal "every GUID in the fake range"
+check applies to ESPN fixtures (`fixtures/espn/`), not to this public dataset. The same note stands
+in `../nflverse/ATTRIBUTION.md` for the shared excerpts;
+`tests/sources/nflverse/fx10h-usage.test.ts` holds the claim (no UUID in any other column or any
+other supplement, none brace-wrapped, none in the fake range).

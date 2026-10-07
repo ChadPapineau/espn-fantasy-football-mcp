@@ -3,7 +3,8 @@
 // supplement has its shared excerpt's exact schema and stamps, adds only rows the shared excerpt
 // lacks (no key twice in the union), only for players on an fx-10h roster, only in the shared
 // excerpt's week range, and the seed serves the union at the release URL (a parquet with both row
-// sets) while every other suite's routes stay the shared excerpts alone.
+// sets) while every other suite's routes stay the shared excerpts alone; its UUID-shaped values are
+// public player ids in two roster columns, as ATTRIBUTION.md says (the B2a gate's round 2).
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { parquetMetadata, parquetReadObjects } from "hyparquet";
@@ -137,5 +138,45 @@ describe("the fx-10h usage supplements", () => {
       expect(Number(parquetMetadata(ab(sharedBytes)).num_rows)).toBe(t.base.rows.length);
     }
     expect(() => withFx10hUsage(new Map())).toThrow(/no shared excerpt is served/);
+  });
+
+  it("UUID-shaped values are public player ids in sportradar_id / smart_id only, as ATTRIBUTION.md says", () => {
+    // the scanners' ESPN rules match the braced / SWID forms only, so this note is what tells a
+    // reader the supplement's UUIDs are nflverse's public NFL player ids, never member GUIDs
+    const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+    const PUBLIC_ID_COLUMNS = new Set(["sportradar_id", "smart_id"]);
+    let inColumns = 0;
+    for (const f of m.files)
+      for (const r of supplementTables(f).rows)
+        for (const [col, v] of Object.entries(r)) {
+          if (typeof v !== "string" || v.match(UUID) === null) continue;
+          expect(`${f.dataset} ${col}`).toMatch(
+            /^nflverse:roster_weekly (sportradar_id|smart_id)$/,
+          );
+          expect(PUBLIC_ID_COLUMNS.has(col)).toBe(true);
+          expect(v).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+          inColumns += 1;
+        }
+    // the raw files hold exactly those (none in a header, a stamp or another cell), none braced,
+    // none in the fixture pseudonym range of member GUIDs
+    const files = (d: string): string[] =>
+      readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? files(path.join(d, e.name)) : [path.join(d, e.name)],
+      );
+    let raw = 0;
+    for (const p of files(path.join(ROOT, "fixtures/fx10h-usage"))) {
+      if (p.endsWith("ATTRIBUTION.md")) continue;
+      const text = readFileSync(p, "utf8");
+      const found = text.match(UUID) ?? [];
+      raw += found.length;
+      expect(text, p).not.toMatch(/\{[0-9a-f]{8}-[0-9a-f]{4}-/i);
+      for (const u of found)
+        expect(u.toLowerCase().startsWith("00000000-0000-4000-8000-"), u).toBe(false);
+    }
+    expect(inColumns).toBeGreaterThan(0);
+    expect(raw).toBe(inColumns);
+    const md = readFileSync(path.join(ROOT, "fixtures/fx10h-usage/ATTRIBUTION.md"), "utf8");
+    expect(md).toContain("## UUID-shaped values are public NFL player ids, not member GUIDs");
+    expect(md).toContain(`(${inColumns.toLocaleString("en-US")} of them, in its \`sportradar_id\``);
   });
 });
