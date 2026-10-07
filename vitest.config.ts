@@ -38,6 +38,16 @@ export const PROCESS_TESTS = [
 /** The unit project's per-test hang detector (a timeout is not a budget; budgets live in `process`). */
 export const UNIT_TEST_TIMEOUT_MS = 30_000;
 
+/**
+ * The unit project's forks: half the logical CPUs — one per physical core on a hyper-threaded
+ * machine (this repo's Intel Mac: 6 of 12; a 4-vCPU CI runner: 2). Many unit tests spawn a child
+ * process (the scanners over the whole tree, the CLIs, the fixture tools) and coverage adds CPU per
+ * fork, so vitest's default of one fork per logical CPU less one oversubscribed the machine (11
+ * forks, load ≈ 34 on 12 threads) until the hang detectors above tripped on healthy tests — the
+ * documented local gate (`npm run test:coverage`) must reproduce, not depend on an idle machine.
+ */
+export const UNIT_MAX_WORKERS = "50%";
+
 export default defineConfig({
   test: {
     environment: "node",
@@ -51,6 +61,7 @@ export default defineConfig({
           include: ["tests/**/*.test.ts"],
           exclude: [...PROCESS_TESTS, "**/node_modules/**"],
           testTimeout: UNIT_TEST_TIMEOUT_MS,
+          maxWorkers: UNIT_MAX_WORKERS,
         },
       },
       {

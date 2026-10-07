@@ -4,7 +4,11 @@
 import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import config, { PROCESS_TESTS, UNIT_TEST_TIMEOUT_MS } from "../../vitest.config.js";
+import config, {
+  PROCESS_TESTS,
+  UNIT_MAX_WORKERS,
+  UNIT_TEST_TIMEOUT_MS,
+} from "../../vitest.config.js";
 import { ROOT } from "./helpers.js";
 
 interface ProjectTest {
@@ -13,6 +17,7 @@ interface ProjectTest {
   exclude?: string[];
   testTimeout?: number;
   fileParallelism?: boolean;
+  maxWorkers?: number | string;
 }
 const projects = (config.test?.projects ?? []) as { test: ProjectTest }[];
 const project = (name: string): ProjectTest => {
@@ -76,6 +81,13 @@ describe("vitest projects partition the test files", () => {
     expect(unit.testTimeout).toBe(UNIT_TEST_TIMEOUT_MS);
     expect(UNIT_TEST_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
     expect(UNIT_TEST_TIMEOUT_MS).toBeLessThanOrEqual(60_000);
+  });
+
+  it("the unit project runs one fork per physical core, not one per logical CPU", () => {
+    // its tests spawn child processes and coverage adds CPU per fork: the default oversubscribed a
+    // hyper-threaded machine until healthy tests hit the hang detector (the B2a gate, round 1)
+    expect(unit.maxWorkers).toBe(UNIT_MAX_WORKERS);
+    expect(UNIT_MAX_WORKERS).toBe("50%");
   });
 });
 
