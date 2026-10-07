@@ -8,6 +8,8 @@ import { runCheck, tempDir, writeTree } from "../lint/helpers.js";
 
 const FILES = [
   "dist",
+  "!dist/plugin-evals",
+  "!dist/skills-copy",
   "scripts/eff-launch.sh",
   "skills",
   ".claude-plugin",
@@ -59,6 +61,9 @@ describe("classify", () => {
     ["../etc/passwd", "escapes"],
     ["/etc/passwd", "escapes"],
     ["dist/inner.tgz", "tarball"],
+    // generated local outputs under dist/ never ship (package.json `files` negations)
+    ["dist/plugin-evals/plugins/base--core/.mcp.json", "negation"],
+    ["dist/skills-copy/start-sit/SKILL.md", "negation"],
   ])("rejects %s (%s)", (f, why) => {
     expect(classify(f, FILES) ?? "").toContain(why);
   });

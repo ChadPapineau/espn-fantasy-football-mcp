@@ -53,6 +53,10 @@ describe("package.json", () => {
     expect(pkg.engines).toEqual({ node: ">=24.15" });
     expect(pkg.files).toEqual([
       "dist",
+      // generated local outputs under dist/ are never packed (the plugin-eval suite embeds local
+      // paths; the Skills copy tree duplicates skills/)
+      "!dist/plugin-evals",
+      "!dist/skills-copy",
       "scripts/eff-launch.sh",
       "skills",
       ".claude-plugin",

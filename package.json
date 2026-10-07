@@ -10,6 +10,8 @@
   },
   "files": [
     "dist",
+    "!dist/plugin-evals",
+    "!dist/skills-copy",
     "scripts/eff-launch.sh",
     "skills",
     ".claude-plugin",

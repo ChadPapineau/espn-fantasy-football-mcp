@@ -56,10 +56,15 @@ export function classify(file, filesGlobs) {
   for (const f of FORBIDDEN) if (f.re.test(file)) return f.why;
   if (/\.ya?ml$/i.test(file) && !file.startsWith("skills/")) return "*.yaml outside skills/";
   if (ALWAYS.has(file)) return null;
-  const inFiles = filesGlobs.some((g) => {
+  const covers = (/** @type {string} */ g) => {
     const clean = g.replace(/^\.\//, "").replace(/\/+$/, "");
     return file === clean || file.startsWith(`${clean}/`);
-  });
+  };
+  // a negated entry ("!dist/plugin-evals") excludes what it names: generated local outputs under
+  // dist/ (the plugin-eval suite, the Skills copy tree) must never ship even when present
+  if (filesGlobs.some((g) => g.startsWith("!") && covers(g.slice(1))))
+    return "excluded by a package.json `files` negation";
+  const inFiles = filesGlobs.some((g) => !g.startsWith("!") && covers(g));
   return inFiles ? null : "not covered by package.json `files`";
 }
 
