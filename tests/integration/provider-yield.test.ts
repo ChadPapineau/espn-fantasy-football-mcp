@@ -52,6 +52,25 @@ async function turnsDuring(work: () => Promise<unknown>): Promise<number> {
   return turns;
 }
 
+describe("the provider parses a large cached body in turns of its own", () => {
+  it("JSON, view schema and freeze each get a turn (a cold 1 MB roster made a 30–40 ms block)", async () => {
+    const w = makeWorld({ slot: "league-b" });
+    await w.provider.getLeague(w.ref);
+    await w.provider.getRosters(w.ref, 3);
+    // a new stored version: the warm read parses it (no memo) — at least three loop turns
+    const key = [...w.cache.map.keys()].find((k) => k.includes("mRoster")) ?? "";
+    const e = w.cache.map.get(key);
+    if (e === undefined) throw new Error("no roster entry");
+    w.cache.map.set(key, {
+      ...e,
+      fetched_at: new Date(Date.parse(e.fetched_at) + 1).toISOString(),
+    });
+    expect(await turnsDuring(() => w.provider.getRosters(w.ref, 3))).toBeGreaterThanOrEqual(3);
+    // memoised now: no turn at all
+    expect(await turnsDuring(() => w.provider.getRosters(w.ref, 3))).toBe(0);
+  });
+});
+
 describe("the provider yields between the phases of a large fresh body", () => {
   it("a cold roster read lets the loop turn at least three times (parse, drift, schema, strip)", async () => {
     const w = makeWorld({ slot: "league-b" });

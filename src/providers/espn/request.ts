@@ -300,13 +300,24 @@ export class EspnRequester {
     return hit?.stamp === memoStamp(e) ? (hit.value as T) : undefined;
   }
 
-  /** Parses a cached body; null when it no longer matches the schemas (then it is refetched). */
-  private parseCached<T>(spec: ReadSpec<T>, e: EspnCacheEntry): T | null {
+  /**
+   * Parses a cached body; null when it no longer matches the schemas (then it is refetched). A large
+   * body (over YIELD_BEFORE_PARSE_CHARS) is parsed in turns of its own — the JSON, the view schema,
+   * the freeze — with the event loop running before each: in one turn the three made a 30–40 ms
+   * synchronous block on a cold 1 MB roster (plan 10 A16a's end-to-end stall probe).
+   */
+  private async parseCached<T>(spec: ReadSpec<T>, e: EspnCacheEntry): Promise<T | null> {
     const memo = this.memoOf(spec, e);
     if (memo !== undefined) return memo;
+    const large = e.parsed_json.length > YIELD_BEFORE_PARSE_CHARS;
     let value: T;
     try {
-      value = deepFreeze(spec.parse(parseJsonSafe(e.parsed_json)));
+      if (large) await yieldToLoop();
+      const raw = parseJsonSafe(e.parsed_json);
+      if (large) await yieldToLoop();
+      const parsed = spec.parse(raw);
+      if (large) await yieldToLoop();
+      value = deepFreeze(parsed);
     } catch {
       return null;
     }
@@ -333,18 +344,12 @@ export class EspnRequester {
     const cacheable = !views.some((v) => UNCACHED_VIEWS.includes(v));
     const key = cacheKey(spec.target, spec.leagueId, spec.filter);
     const entry = cacheable ? this.cacheGet(key) : null;
-    // A large cached body is parsed and schema-checked synchronously (≈ 15 ms for a 1 MB roster).
-    // Cache hits resolve as microtasks, so a tool's several reads would otherwise run as ONE
-    // macrotask and block the event loop past the 50 ms stall bound (plan 03 §1.2; plan 10 A16a —
-    // found by the end-to-end stall probe): a yield before each large parse lets timers and stdin
-    // run between them. Small bodies (settings, standings) parse in well under a millisecond.
-    if (
-      entry !== null &&
-      entry.parsed_json.length > YIELD_BEFORE_PARSE_CHARS &&
-      this.memoOf(spec, entry) === undefined
-    )
-      await yieldToLoop();
-    const cached = entry === null ? null : this.parseCached(spec, entry);
+    // A large cached body's parse and schema check take tens of ms (a 1 MB roster). Cache hits
+    // resolve as microtasks, so a tool's several reads would otherwise run as ONE macrotask and block
+    // the event loop past the 50 ms stall bound (plan 03 §1.2; plan 10 A16a — found by the
+    // end-to-end stall probe): parseCached gives each large parse's phases turns of their own. Small
+    // bodies (settings, standings) parse in well under a millisecond; a memoised parse is free.
+    const cached = entry === null ? null : await this.parseCached(spec, entry);
     const usable = entry !== null && cached !== null ? { entry, value: cached } : null;
     const now = this.deps.clock.nowMs();
     const force = opts.force_refresh === true && this.gate.allow(key, now);

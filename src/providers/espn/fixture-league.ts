@@ -278,21 +278,35 @@ export function poolQuery(
   const offset = numberOr(f.offset, 0);
   const limit = f.limit === undefined ? total : numberOr(f.limit, total);
   const page = keyed.slice(offset, offset + limit).map(({ e }) => trimSplits(e, sp));
-  return { body: { ...structuredClone(pool.response), players: page }, total };
+  return { body: { ...pool.response, players: page }, total };
 }
 
-/** Keeps the season splits and weeks sp−1 and sp (the recorded views' rhythm); all when sp is null. */
+/**
+ * Keeps the season splits and weeks sp−1 and sp (the recorded views' rhythm); all when sp is null.
+ * The answer is serialised at once and never mutated, so only the objects on the changed path are
+ * copied (the pool file stays shared and untouched): a deep copy of every page entry was the larger
+ * part of a ~40 ms synchronous turn on a cold pool read (plan 10 A16a's end-to-end stall probe).
+ */
 function trimSplits(e: JsonObject, sp: number | null): JsonObject {
-  const out = structuredClone(e);
-  if (sp === null) return out;
-  const p = isObject(out.player) ? out.player : null;
-  if (p !== null && Array.isArray(p.stats))
-    p.stats = p.stats.filter(
-      (s) =>
-        isObject(s) &&
-        (s.scoringPeriodId === 0 || s.scoringPeriodId === sp || s.scoringPeriodId === sp - 1),
-    );
-  return out;
+  const p = isObject(e.player) ? e.player : null;
+  if (sp === null || p === null || !Array.isArray(p.stats)) return { ...e };
+  const stats = p.stats.filter(
+    (s) =>
+      isObject(s) &&
+      (s.scoringPeriodId === 0 || s.scoringPeriodId === sp || s.scoringPeriodId === sp - 1),
+  );
+  return { ...e, player: { ...p, stats } };
+}
+
+/**
+ * Lets the event loop run between the fetch's synchronous phases (a file read and parse, a pool
+ * query, a serialisation): real I/O would, and the 50 ms stall bound is measured in fixture mode
+ * (plan 10 A16a; plan 05 §0).
+ */
+function turn(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
 }
 
 // --- the fetch -------------------------------------------------------------------------------------
@@ -326,7 +340,7 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
   const manifest = readDerivedManifest(opts.dir);
   if (manifest === null) throw new RangeError("fixture mode: not a derived fixture league");
   const root = path.resolve(opts.dir, manifest.root);
-  const read = (rel: string): unknown => {
+  const read = async (rel: string): Promise<unknown> => {
     if (rel === "" || path.isAbsolute(rel) || rel.split(/[\\/]/).includes(".."))
       throw new FixtureError("fixture_missing", "manifest path refused");
     const abs = path.resolve(root, rel);
@@ -335,16 +349,24 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
     const text = readFileSync(abs, "utf8");
     if (text.length > DERIVED_FILE_MAX_BYTES)
       throw new FixtureError("fixture_missing", "fixture file too large");
-    return JSON.parse(text) as unknown;
+    await turn();
+    const body = JSON.parse(text) as unknown;
+    await turn();
+    return body;
   };
-  const cache = new Map<DerivedView, unknown>();
-  const bodyOf = (v: DerivedView): unknown => {
+  // a view's body is read and patched once, then shared (never mutated: answers copy what they change)
+  const cache = new Map<DerivedView, Promise<unknown>>();
+  const bodyOf = (v: DerivedView): Promise<unknown> => {
     const hit = cache.get(v);
     if (hit !== undefined) return hit;
-    let body = read(v.path);
-    if (v.patch !== undefined) body = applyJsonPatch(body, read(v.patch));
-    cache.set(v, body);
-    return body;
+    const p = (async () => {
+      const body = await read(v.path);
+      return v.patch === undefined ? body : applyJsonPatch(body, await read(v.patch));
+    })();
+    cache.set(v, p);
+    // a failed read is not kept: the next request reads the file again
+    p.catch(() => cache.delete(v));
+    return p;
   };
   const viewKey = (views: readonly string[]): string => [...views].sort().join(",");
   const find = (route: string, season: number, views: readonly string[], sp: number | null) =>
@@ -370,18 +392,26 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
         v.views.includes(view) &&
         v.scoringPeriodId === null,
     );
-  const respond = (body: unknown, headers: Record<string, string> = {}): Promise<Response> =>
-    Promise.resolve(
-      new Response(JSON.stringify(body), { status: 200, headers: { ...JSON_HEADERS, ...headers } }),
-    );
+  /** The answer, serialised on a turn of its own (a pool page or a roster is ~1 MB of JSON). */
+  const respond = async (
+    body: unknown,
+    headers: Record<string, string> = {},
+  ): Promise<Response> => {
+    await turn();
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { ...JSON_HEADERS, ...headers },
+    });
+  };
 
-  return (url: string, init: RequestInit): Promise<Response> => {
+  return async (url: string, init: RequestInit): Promise<Response> => {
     const u = new URL(url);
     if (headerOf(init, "cookie") !== null)
-      return Promise.reject(new FixtureError("fixture_cookie_refused", u.pathname));
+      throw new FixtureError("fixture_cookie_refused", u.pathname);
     const query = u.search.slice(1);
-    const missing = (): Promise<Response> =>
-      Promise.reject(new FixtureError("fixture_missing", `${u.pathname}?${query}`));
+    const missing = (): never => {
+      throw new FixtureError("fixture_missing", `${u.pathname}?${query}`);
+    };
     const rawFilter = headerOf(init, HEADER_FILTER.toLowerCase());
     let filter: unknown = null;
     if (rawFilter !== null) {
@@ -403,19 +433,19 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
       const seasonRoute = season(SEASON_RE);
       if (seasonRoute !== null) {
         const v = find("season", seasonRoute, views, null);
-        return v === undefined ? missing() : respond(bodyOf(v));
+        return v === undefined ? missing() : await respond(await bodyOf(v));
       }
       const playersRoute = season(PLAYERS_RE);
       if (playersRoute !== null) {
         const v = find("players", playersRoute, views, null);
-        return v === undefined ? missing() : respond(bodyOf(v));
+        return v === undefined ? missing() : await respond(await bodyOf(v));
       }
       const leagueSeason = season(LEAGUE_RE);
       if (leagueSeason === null || views.length === 0) return missing();
       if (views.length === 1 && views[0] === "kona_player_info") {
         const v = manifest.views.find((x) => x.pool === true && x.season === leagueSeason);
         if (v === undefined) return missing();
-        const pool = bodyOf(v) as { response?: unknown; entries?: unknown };
+        const pool = (await bodyOf(v)) as { response?: unknown; entries?: unknown };
         const entries = Array.isArray(pool.entries) ? pool.entries.filter(isObject) : [];
         const { body, total } = poolQuery(
           { response: isObject(pool.response) ? pool.response : {}, entries },
@@ -423,20 +453,25 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
           sp,
           leagueSeason,
         );
-        return respond(body, { [HEADER_PLAYER_COUNT]: String(total) });
+        return await respond(body, { [HEADER_PLAYER_COUNT]: String(total) });
       }
-      let v =
+      const v =
         find("league", leagueSeason, views, sp) ??
         (sp === null ? undefined : find("league", leagueSeason, views, null));
+      // the shared bodies are never mutated: the filters below replace top-level keys on a copy,
+      // and composeBodies builds new objects
       let body: unknown;
-      if (v !== undefined) body = structuredClone(bodyOf(v));
-      else {
+      if (v !== undefined) {
+        const one = await bodyOf(v);
+        body = isObject(one) ? { ...one } : one;
+      } else {
         const parts = views.map((x) => containing(leagueSeason, x, sp));
         if (parts.some((p) => p === undefined)) return missing();
-        body = (parts as DerivedView[])
-          .map((p) => structuredClone(bodyOf(p)))
-          .reduce((acc, b) => composeBodies(acc, b));
-        v = parts[0];
+        const bodies: unknown[] = [];
+        for (const p of parts as DerivedView[]) bodies.push(await bodyOf(p));
+        // one part reduces to the shared body itself: copy it like the single-view case
+        const composed = bodies.reduce((acc, b) => composeBodies(acc, b));
+        body = isObject(composed) ? { ...composed } : composed;
       }
       const headers: Record<string, string> = {};
       if (
@@ -464,10 +499,10 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
         );
         headers[HEADER_TRANSACTION_COUNT] = String(body.transactions.length);
       }
-      return respond(body, headers);
+      return await respond(body, headers);
     } catch (e) {
-      if (e instanceof FixtureError) return Promise.reject(e);
-      return Promise.reject(new FixtureError("fixture_missing", `${u.pathname}?${query}`));
+      if (e instanceof FixtureError) throw e;
+      throw new FixtureError("fixture_missing", `${u.pathname}?${query}`);
     }
   };
 }

@@ -377,6 +377,62 @@ describe("routing over fx-10h", () => {
     expect(last.body.seasonId).toBe(2025);
   });
 
+  it("answers never change the shared bodies: a filtered or trimmed answer, then the whole one", async () => {
+    // a fresh fetch, so this test reads the files itself (its own cache)
+    const f = createDerivedLeagueFetch({ dir: FX });
+    const json = async (url: string, filter?: string) =>
+      (await (
+        await f(url, filter === undefined ? {} : { headers: { "X-Fantasy-Filter": filter } })
+      ).json()) as Record<string, unknown>;
+    const box = `${LEAGUE}?view=mBoxscore&scoringPeriodId=4`;
+    const n = ((await json(box)).schedule as unknown[]).length;
+    expect(n).toBeGreaterThan(0);
+    expect((await json(box, scheduleFilter([3]))).schedule).toEqual([]);
+    expect(((await json(box)).schedule as unknown[]).length).toBe(n);
+    const tx = `${LEAGUE}?view=mTransactions2`;
+    const all = ((await json(tx)).transactions as unknown[]).length;
+    await json(tx, transactionsFilter(["WAIVER_ERROR"]));
+    expect(((await json(tx)).transactions as unknown[]).length).toBe(all);
+    // a trimmed pool page keeps weeks sp−1, sp and the season; the pool itself keeps every week
+    interface Page {
+      players: { id: number; player: { stats: { scoringPeriodId: number }[] } }[];
+    }
+    const page = (sp: string) =>
+      json(
+        `${LEAGUE}?view=kona_player_info${sp}`,
+        playerFilter(
+          { filterStatus: ["ONTEAM"], limit: 1, offset: 0, sorts: sortTerms("percOwned", 2026, 5) },
+          "league",
+        ),
+      ) as unknown as Promise<Page>;
+    const periods = (p: Page) => new Set(p.players[0]?.player.stats.map((x) => x.scoringPeriodId));
+    const before = periods(await page(""));
+    const trimmed = periods(await page("&scoringPeriodId=5"));
+    expect([...trimmed].every((x) => [0, 4, 5].includes(x))).toBe(true);
+    expect(before.size).toBeGreaterThan(trimmed.size);
+    expect(periods(await page(""))).toEqual(before);
+  });
+
+  it("the fetch yields to the event loop between its phases (plan 10 A16a: as real I/O would)", async () => {
+    const f = createDerivedLeagueFetch({ dir: FX });
+    let turns = 0;
+    let done = false;
+    const spin = (): void => {
+      if (done) return;
+      turns += 1;
+      setImmediate(spin);
+    };
+    setImmediate(spin);
+    // a cold read (file, parse, answer) and a warm one (answer) each give up the loop
+    const cold = await f(`${LEAGUE}?view=mRoster&scoringPeriodId=5`, {});
+    const atCold = turns;
+    const warm = await f(`${LEAGUE}?view=mRoster&scoringPeriodId=5`, {});
+    done = true;
+    expect([cold.status, warm.status]).toEqual([200, 200]);
+    expect(atCold).toBeGreaterThanOrEqual(3);
+    expect(turns - atCold).toBeGreaterThanOrEqual(1);
+  });
+
   it("a variant serves the base body plus its patch", async () => {
     const k10 = createDerivedLeagueFetch({ dir: path.join(FX, "k10") });
     const r = await k10(`${LEAGUE}?view=mTeam&view=mStandings`, {});
