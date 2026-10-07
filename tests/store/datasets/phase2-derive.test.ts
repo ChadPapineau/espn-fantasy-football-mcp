@@ -102,7 +102,8 @@ describe("numeric coercions of nflverse DOUBLE columns", () => {
     fc.assert(
       fc.property(fc.double(), (d) => {
         const f = flag01(d);
-        if (d === 0 || d === 1) expect(f).toBe(d);
+        // -0 is a 0 flag too, stored as +0 (Object.is would tell them apart)
+        if (d === 0 || d === 1) expect(f).toBe(d === 0 ? 0 : 1);
         else expect(f).toBeNull();
       }),
     );

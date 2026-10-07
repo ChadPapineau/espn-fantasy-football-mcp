@@ -499,18 +499,33 @@ describe("the manifest's input contracts bind to the registered tools (plan 09 Â
 
   it("every literal argument the sequences promise parses under the built tool's own schema, templates stood in", () => {
     let nextId = 4_000_000; // distinct stand-in ids: a selector refuses duplicates
-    const stand = (v: unknown, key: string): unknown => {
-      if (Array.isArray(v)) return v.map((x) => stand(x, key));
+    // A `$ref` NESTED inside an argument object resolves at run time to a value of a known shape
+    // (the key says which); it is stood in by that shape so the rest of the object is still checked.
+    // An unknown nested key fails here (add its stand-in), never silently drops the object.
+    const nestedRef: Readonly<Record<string, () => unknown>> = {
+      nfl_team: () => "BUF",
+      partner_team_id: () => 3,
+      give: () => [nextId++],
+      get: () => [nextId++],
+    };
+    const stand = (v: unknown, key: string, depth: number): unknown => {
+      if (Array.isArray(v)) return v.map((x) => stand(x, key, depth));
       if (v === null || typeof v !== "object") return v;
       const o = v as Json;
       if ("$player" in o) return nextId++;
       if ("$opponent" in o) return 10;
       if ("$ids" in o) return [4379399];
       if ("$source_calls" in o) return [{ tool: "espn_get_roster", request_id: "r-0123456789ab" }];
-      if ("$ref" in o) return undefined; // resolved at run time: checked by the dry run, not here
+      if ("$ref" in o) {
+        // top level: resolved at run time, checked by the dry run, not here
+        if (depth <= 1) return undefined;
+        const make = nestedRef[key];
+        if (make === undefined) throw new Error(`no stand-in for a nested $ref at ${key}`);
+        return make();
+      }
       return Object.fromEntries(
         Object.entries(o)
-          .map(([k, x]) => [k, stand(x, k)] as const)
+          .map(([k, x]) => [k, stand(x, k, depth + 1)] as const)
           .filter(([, x]) => x !== undefined),
       );
     };
@@ -521,7 +536,7 @@ describe("the manifest's input contracts bind to the registered tools (plan 09 Â
           const def = REGISTRY.find((r) => r.name === st.tool)?.tool;
           if (def === null || def === undefined || st.tool === "espn_record_recommendation")
             continue;
-          const args = stand(st.args, "") as Json;
+          const args = stand(st.args, "", 0) as Json;
           // a step whose required input is a $ref is resolved by the dry run only
           if ((manifest.required_inputs[st.tool] ?? []).some((k) => !(k in args))) continue;
           const parsed = def.input.safeParse(args);
