@@ -15,9 +15,19 @@ explicit human confirmation the model cannot forge. News and ESPN free text
 (team/owner names, player outlooks) are data, not instructions. The
 working directory is iCloud-managed, so nothing secret ever lives in it.
 
-## ▶ NEXT STEP
+## ▶ NEXT STEP — PAUSED 2026-10-07 at a clean boundary (Chad: "pause"; resume on the word "resume")
 
-**Stage A ✅ (2026-10-06, `bd64cba`). Stage B1 (`effmcp-core`, Phase 1a + 1b, the 18 P0 tools) is next / running.** Program: `docs/scratch/build-program.md`. Clone: `~/Developer/espn-fantasy-football-mcp`, branch `build/phase-1`. Agent rules: `CLAUDE.md`. Effort: routine building at "Extra"; after B2 the orchestrator stops and asks Chad to (1) run `eff setup` in a terminal, (2) switch to Ultracode, (3) reply "go" for Stage C (QA/pentest).
+**State at pause:** branch `build/phase-1` @ `b72a917` + the R5-3–R5-5 docs commit; tree clean; HEAD == origin; CI green (ci, docs, secrets). Stages **A ✅ · B1 ✅ · B2a ✅** (all 34 read tools under `EFF_TOOLSET=full`, 18 under `core`; 13 Skills; 13 prompts; Phase 2 sources). B2a's gate found no code defect in its last round; its three open items were scope rulings, recorded as R5-3–R5-5 in `docs/plan/changelog.md`. Nothing is running.
+
+**On "resume", do exactly this:**
+1. `cd ~/Developer/espn-fantasy-football-mcp && git status && git fetch && git log -1` — expect a clean tree on `build/phase-1`, HEAD == origin; `gh run list --branch build/phase-1 --limit 3` green. Read `CLAUDE.md`.
+2. Keep the Mac awake for the run (the app's keep-awake request, or tell Chad): on 2026-10-06 the Mac sleeping killed an agent mid-task.
+3. Launch **Stage B2b** (Phase 3 model wave) with the saved script: `Workflow({ scriptPath: "<repo>/docs/scratch/workflows/effmcp-expansion-b.js", args: { probe_league_ids: "<the three public probe-league ids from the orchestrator's local memory — never commit them>" } })`. Routine building runs at Chad's "Extra" effort.
+4. When B2b ends: verify at source (gate verdict, CI, scan-secrets --all, identity, tree clean); rule on any plan-text disputes the gate raises (record as R6-n in the changelog); update this section.
+5. **OWNER STOP** — ask Chad to: (a) run `eff setup` in a terminal (hidden-input cookie entry; never in chat); (b) switch the effort level to **Ultracode**; (c) reply "go".
+6. Stage **C** (QA + penetration testing, loop until two clean rounds; includes the B11 Lane 2 / B15 `claude plugin eval` runs and the live-league acceptance items) → Stage **D** (final gate, merge `build/phase-1` → `main`, README status ✅, install the launch config + Skills for Chad).
+
+Optional: `docs/scratch/workflows/effmcp-b2a-gate.js` re-runs B2a's independent gate from the repo state (not needed — B2a is closed by the R5 rulings).
 
 ## Build facts (Stage A, verified by the orchestrator 2026-10-06)
 
@@ -371,3 +381,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-10-07 — B2a gate round 1 RED → fixer: deadline honesty (E2/E6/E8/E9), CPU-counted deadline, stall headroom, unit-fork cap, the overflow fix, `fixtures/fx10h-usage/` (B2 131/134 modelled), B7's cell explained; rulings requested on B2's denominator and B7's cell; B11 Lane 2 / B15 stay the owner's `claude plugin eval` run.
 - 2026-10-07 — B2a gate round 2 RED (no code defect; three hard items need rulings or the owner) → fixer: stall headroom at root (cooperative pacing, 12 ms batches, D5/D6 turns, the reads' stall bound), B3's tool-level positive control, the `fx10h-usage` UUID note; rulings still requested on B2's denominator and B7's cell; B11 Lane 2 / B15 stay the owner's run.
 - 2026-10-07 — B2a gate round 3 RED (the same three hard items; five soft) → fixer: E3 live on a cold cache (unknown week = `tbd`, box score first, nothing conditioned without live facts — `partial`), the Skills' `partial: true` handling, A2's wrapped trade-block note (B8 positive control on every variant), `client_ref` path-listed, the CBS guid note; rulings still requested on B2's denominator and B7's cell; B11 Lane 2 / B15 stay the owner's run.
+- 2026-10-07 — Stage B2a ✅: 17 agents (integration killed by the Mac sleeping after committing its fixes; the gate's 3 fix rounds completed the work); last gate round: no code defect; rulings R5-3 (B2 denominator), R5-4 (B7 basis), R5-5 (Lane 2/B15 to Stage C). Paused at Chad's request; resume steps in ▶ NEXT STEP.

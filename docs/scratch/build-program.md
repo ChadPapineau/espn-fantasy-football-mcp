@@ -26,5 +26,10 @@ passed to agents in their prompts and kept in local environment/config only — 
 
 ## RESUME HERE
 
-- Stage A ✅ 2026-10-06 — workflow `effmcp-foundation` (run `wf_b6bfaf03-11c`), gate green with 0 fix rounds at `bd64cba`; CI green. Facts in `docs/HANDOFF.md` → "Build facts (Stage A)".
-- Stage B1 — launching `effmcp-core` (Phase 1a + 1b). If interrupted, resume the run with its `scriptPath` + `resumeFromRunId` (completed agents replay from cache), after checking `git log` on the branch for what landed.
+**PAUSED 2026-10-07** at a clean boundary — see `docs/HANDOFF.md` ▶ NEXT STEP for the exact resume steps.
+
+- Stage A ✅ 2026-10-06 (`effmcp-foundation`, gate green at `bd64cba`).
+- Stage B1 ✅ 2026-10-06 (`effmcp-core`, 23 agents; closed by rulings R5-1/R5-2).
+- Stage B2a ✅ 2026-10-07 (`effmcp-expansion-a`, 17 agents; closed by rulings R5-3–R5-5; HEAD `b72a917` + docs).
+- **Next: Stage B2b** — `docs/scratch/workflows/effmcp-expansion-b.js` with `args.probe_league_ids` (from local memory; never committed).
+- Then: owner stop (eff setup + Ultracode + "go") → Stage C (QA/pentest, incl. Lane 2 + B15) → Stage D (merge + install).

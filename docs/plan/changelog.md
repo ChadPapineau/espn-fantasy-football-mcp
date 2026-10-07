@@ -409,6 +409,12 @@ Not adversarial rulings: the numbers and pointers the plan said the build would 
 
 Implementer's notes on R5: the switch adds no configuration key — a new test-scope key would change plan 03 §3, plan 05 §3.1's "three test-scope keys", the README Testing table and the schema test — so it rides `EFF_TEST_STUBS`, which already exists only for tests and, with fixture mode, already makes every network call or keychain access exit; every stubbed fixture-mode run (the e2e and smoke suites) therefore runs without the deadline, which changes no answer there (the worst `fx-10h` call is far below 8 s; `tests/mcp/cpu-deadline.test.ts` shows off and on agree) and removes a flake source. The README Testing row for `EFF_TEST_STUBS` does not yet mention this side effect (a docs follow-up). The A9a tool-level test runs in process (the real composition root in fixture mode on `fx-10h`, under coverage on every push); the stdio leg of the same assertion stays in `tests/e2e/acceptance.test.ts`.
 
+| R5-3 (B2) | The ≥ 95 % usage-coverage bar counts the rostered players D1 models (QB/RB/WR/TE); D/ST and K have no snap or target usage. Measured independently over stdio on fx-10h: 131/134 = 97.8 % (met); 131/145 = 90.3 % if D/ST and K were counted | plan 10 B2 annotation; no code change |
+| R5-4 (B7) | The replacement-level regression is checked on research 05 §4.1's computation basis, where all 36 VOR cells reproduce within 0.3 ppg and the flex splits are exact; under the shipped league scoring 35/36 match and the 2024 TE rank-3 cell (3.593 vs 3.2) differs only by scoring basis, shown cell for cell | plan 10 B7 annotation; `tests/backtest/replacement.test.ts` (already present) |
+| R5-5 (B11 Lane 2, B15) | Every Lane 2 and plugin-eval grader — free or llm — grades a real `claude plugin eval` agent run, which plan 10 D7 makes a manual, pre-release lane; they run in Stage C (QA, owner's Ultracode session), not in the B2a gate. Lane 1 (all 13 Skills) stays hard and is green | plan 10 B11, B15, Phase 2 exit gate |
+
+**Stage B2a outcome (2026-10-07):** after these rulings the B2a gate's round-4 run found no code defect; every command and checks (1)–(8) passed at `b72a917`; CI green. The integration agent was killed by the Mac sleeping, after committing its last fixes (`7b4786b`, `9375366`); the gate's three fix rounds carried the integration work to completion.
+
 ## B2 — measurements and records written back during the build (2026-10-06)
 
 Not adversarial rulings: the numbers the plan said Phase 2 would write back, and the integration's
