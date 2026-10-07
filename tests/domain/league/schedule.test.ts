@@ -361,15 +361,37 @@ describe("lockPlan on hand-made schedules", () => {
       latest_execution_time: null,
     });
   });
-  it("a week without games: nobody is on bye, nothing locks, nothing is all-locked", () => {
-    const plan = lockPlan([{ player_id: 1, pro_team_id: 1 }], weekly([]), 3, "INDIVIDUAL_GAME", 0);
+  it("a week without games (an empty or unread schedule): nobody is on bye — each team player is tbd, nothing locks, nothing is all-locked", () => {
+    const plan = lockPlan(
+      [
+        { player_id: 1, pro_team_id: 1 },
+        { player_id: 2, pro_team_id: 2, lineup_locked: true },
+        { player_id: 3, pro_team_id: 0 },
+      ],
+      weekly([]),
+      3,
+      "INDIVIDUAL_GAME",
+      0,
+    );
     expect(plan).toMatchObject({
       bye_player_ids: [],
+      no_team_player_ids: [3],
+      tbd_player_ids: [1, 2],
+      locked_player_ids: [2],
       schedule: [],
+      // ESPN's flag locks player 2, but player 1's game is unknown: never "everything is locked"
       all_locked: false,
       latest_execution_time: null,
     });
-    expect(plan.players[0]?.game_state).toBe("bye");
+    // an unknown game is not a bye (E3 live would score it final at 0) — it is tbd
+    expect(plan.players.map((p) => [p.game_state, p.bye, p.tbd, p.lock_at])).toEqual([
+      ["tbd", false, true, null],
+      ["tbd", false, true, null],
+      ["bye", false, false, null],
+    ]);
+    // the same players in a week that has games keep their real states
+    const some = lockPlan([{ player_id: 1, pro_team_id: 1 }], S, 1, "INDIVIDUAL_GAME", 0);
+    expect(some.players[0]?.game_state).not.toBe("tbd");
   });
   it("latestExecutionTime skips passed and invalid instants", () => {
     expect(

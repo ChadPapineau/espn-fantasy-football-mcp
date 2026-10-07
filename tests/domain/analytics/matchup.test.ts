@@ -214,7 +214,7 @@ describe("live conditioning", () => {
     expect(contributionOf(mp(p, "final", 30, kick), "me", "pre", NOW).status).toBe("pending");
   });
 
-  it("matchupPlayerOf: the lock plan's game state and kickoff, ESPN's actual; no lock row → a bye", () => {
+  it("matchupPlayerOf: the lock plan's game state and kickoff, ESPN's actual; no lock row → tbd, never a bye", () => {
     const p = player(1, "WR", 12, 4);
     const k = new Date(NOW - 3600_000).toISOString();
     expect(matchupPlayerOf(p, { game_state: "in", kickoff: k }, 7.5)).toEqual({
@@ -223,7 +223,13 @@ describe("live conditioning", () => {
       points_so_far: 7.5,
       kickoff_ms: NOW - 3600_000,
     });
-    expect(matchupPlayerOf(p, null, null)).toMatchObject({ game_state: "bye", kickoff_ms: null });
+    // an unknown game is not a bye: a live call keeps his whole distribution (never final at 0)
+    expect(matchupPlayerOf(p, null, null)).toMatchObject({ game_state: "tbd", kickoff_ms: null });
+    expect(contributionOf(matchupPlayerOf(p, null, null), "me", "live", NOW)).toMatchObject({
+      status: "pending",
+      rem_mean: 12,
+      fraction_remaining: 1,
+    });
     expect(
       matchupPlayerOf(p, { game_state: "tbd", kickoff: "nonsense" }, null).kickoff_ms,
     ).toBeNull();
@@ -293,6 +299,67 @@ describe("live conditioning", () => {
     );
     expect(out.data.p_win).toBeGreaterThan(0.99);
     expect(out.data.espn_cross_check).toEqual(cross);
+  });
+
+  it("live facts unread: nothing conditioned — the pre-game P(win) of the lineups as set, live null, partial, said", async () => {
+    // the gate's cold call: the box score unread (no actuals) while the schedule says the games
+    // are final or under way — before the fix every one of them scored 0
+    const kick = NOW - 0.5 * LIVE.gameMs;
+    const asSet = (base: number, scale: number) =>
+      roster(base, scale).map((p, i) =>
+        i < 4 ? mp({ ...p, locked: true }, i < 2 ? "final" : "in", null, kick) : mp(p),
+      );
+    const me = asSet(100, 1);
+    const opp = asSet(200, 0.95);
+    const unread = ["the box score's points so far (espn:mBoxscore)"];
+    for (const method of ["normal", "mc"] as const) {
+      const out = await analyzeMatchupWin(
+        req({ mode: "live", method, me, opponent: opp, live_unread: unread }),
+      );
+      // the same number as the pre-game read of the SAME lineups (live: the opponent's lineup as set)
+      const pre = await analyzeMatchupWin(
+        req({
+          mode: "live",
+          method,
+          me: me.map((x) => mp(x.player)),
+          opponent: opp.map((x) => mp(x.player)),
+        }),
+      );
+      expect(out.data.p_win).toBe(pre.data.p_win);
+      expect(out.data.interval).toEqual(pre.data.interval);
+      expect(out.data.mu_m).toBe(pre.data.mu_m);
+      expect(out.data.sigma_m).toBeGreaterThan(0);
+      expect(out.data.interval[1]).toBeGreaterThan(out.data.interval[0]);
+      expect(out.data.live).toBeNull();
+      expect(out.partial).toBe(true);
+      expect(out.data.mode).toBe("live");
+      expect(out.data.rec.action).toMatch(/pre-game win probability.*live facts not read/);
+      expect(out.data.rec.drivers.map((d) => d.name)).toEqual(["projected_margin"]);
+      expect(out.data.rec.assumptions.map((a) => a.text).join("\n")).toContain(
+        "live facts not read (the box score's points so far (espn:mBoxscore))",
+      );
+      expect(out.warnings).toContain(
+        "live conditioning unavailable: the box score's points so far (espn:mBoxscore) not read; p_win is the pre-game number for the lineups as set (live: null) — call again for the live one",
+      );
+      // no conditioned-only warning leaks in ("scored 0" would be the fabrication)
+      expect(out.warnings.some((w) => w.includes("scored 0"))).toBe(false);
+      // locked seats stay unactionable: the lock facts are not live facts
+      expect(out.data.actionable_slots).toEqual(pre.data.actionable_slots);
+    }
+    // both missing are named once each, deduplicated; pre ignores the field
+    const both = await analyzeMatchupWin(
+      req({ mode: "live", me, opponent: opp, live_unread: [...unread, "x", "x"] }),
+    );
+    expect(both.warnings.filter((w) => w.startsWith("live conditioning unavailable"))).toEqual([
+      `live conditioning unavailable: ${unread[0] ?? ""} and x not read; p_win is the pre-game number for the lineups as set (live: null) — call again for the live one`,
+    ]);
+    const pre = await analyzeMatchupWin(req({ mode: "pre", live_unread: unread }));
+    expect(pre.partial).toBe(false);
+    expect(pre.warnings.some((w) => w.startsWith("live conditioning"))).toBe(false);
+    // an empty list is a read: conditioned as before
+    const read = await analyzeMatchupWin(req({ mode: "live", me, opponent: opp, live_unread: [] }));
+    expect(read.data.live?.players_final.length).toBe(4);
+    expect(read.partial).toBe(false);
   });
 
   it("warnings: a live player without a kickoff, a final player without an actual", async () => {

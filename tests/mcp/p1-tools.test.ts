@@ -1345,7 +1345,16 @@ describe("P1 degradation matrix: an optional input lost is named; a required one
     await c.close();
   });
 
-  it("E3 season without standings reads the results; live without box scores counts 0 so far", async () => {
+  it("E3 live names the opponent from the box score it reads first: no season-schedule read, no RATE_LIMITED", async () => {
+    const c = await broken({ getMatchups: "budget" });
+    const l = await ok("espn_analyze_matchup", { week: 3, mode: "live", seed: 2 }, c.client);
+    const d = l.data as { live: { players_final: number[] } | null };
+    expect(d.live?.players_final.length).toBeGreaterThan(0);
+    expect(l.warnings.some((w) => w.includes("espn:mMatchup was not requested"))).toBe(false);
+    await c.close();
+  });
+
+  it("E3 season without standings reads the results; live without box scores conditions nothing (never 0 so far)", async () => {
     const c = await broken({
       getStandings: coded("ESPN_UPSTREAM_UNAVAILABLE"),
       getBoxScores: coded("ESPN_UPSTREAM_UNAVAILABLE"),
@@ -1353,7 +1362,23 @@ describe("P1 degradation matrix: an optional input lost is named; a required one
     const s = await ok("espn_analyze_matchup", { mode: "season", n_sims: 1000, seed: 2 }, c.client);
     expect(s.warnings.some((w) => w.includes("standings unavailable"))).toBe(true);
     const l = await ok("espn_analyze_matchup", { week: 3, mode: "live", seed: 2 }, c.client);
-    expect(l.warnings.some((w) => w.includes("points so far unknown"))).toBe(true);
+    expect(l.warnings).toContain(
+      "espn:mBoxscore unavailable: points so far unknown (nothing conditioned)",
+    );
+    // week 3 is final on the schedule: without the box score every starter used to be a final at
+    // 0 points (p_win 0.5 on a zero-width interval); now the pre-game number, said, partial
+    const d = l.data as { live: unknown; sigma_m: number; interval: [number, number] };
+    expect(d.live).toBeNull();
+    expect(d.sigma_m).toBeGreaterThan(0);
+    expect(d.interval[1]).toBeGreaterThan(d.interval[0]);
+    expect(l.partial).toBe(true);
+    expect(
+      l.warnings.some((w) =>
+        w.startsWith(
+          "live conditioning unavailable: the box score's points so far (espn:mBoxscore) not read",
+        ),
+      ),
+    ).toBe(true);
     await c.close();
   });
 

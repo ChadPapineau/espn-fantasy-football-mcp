@@ -8,10 +8,14 @@
 // actual (`appliedTotal`, statSourceId 0); a game IN PROGRESS keeps the points so far and adds the
 // remaining fraction of the pre-game distribution (mean × f, variance × f — independent increments;
 // f from the kickoff and a nominal game length, research 04 §B.1.7: ESPN carries no per-player
-// in-game clock); a PENDING game keeps the full distribution. `actionable_slots` lists only my
-// starting seats whose occupant can still move (never a locked, live or final player; an empty seat
-// only when an unlocked eligible reserve can fill it). ESPN's own live win probability is the
-// labelled cross-check, never an input. Pure: clock, rng and pacer injected.
+// in-game clock); a PENDING game keeps the full distribution. A live call WITHOUT its live facts
+// (the box score unread, the week's pro games unknown) conditions nothing — plan 01 §5.6–§5.7,
+// never fabricate: the lineups as set at their pre-game distributions, `live: null`, `partial`,
+// the omission an assumption (an unread actual is not 0 points, an unknown game not a bye).
+// `actionable_slots` lists only my starting seats whose occupant can still move (never a locked,
+// live or final player; an empty seat only when an unlocked eligible reserve can fill it). ESPN's
+// own live win probability is the labelled cross-check, never an input. Pure: clock, rng and
+// pacer injected.
 // Ported from sibling @e70c47b (src/domain/analytics/matchup.ts: distQuantile, cholesky, the copula
 // sampler, the interval shift), adapted: ESPN slots and locks, live conditioning, cooperative MC.
 import type { Clock, Rng } from "../clock.js";
@@ -79,12 +83,24 @@ export interface MatchupWinRequest {
   readonly deadline_ms?: number | null;
   readonly stamps?: readonly AnyStamp[];
   readonly inputs?: readonly InputFreshness[];
+  /**
+   * `live` only: the live facts this call could not read, one fixed phrase each (the box score's
+   * points so far, the pro schedule's game states), or empty / absent when both were read. Without
+   * them nothing is conditioned (plan 01 §5.6–§5.7: return what it has, never fabricate — an unread
+   * box score is not 0 points and an unknown game is not a bye): every started player keeps his whole
+   * pre-game distribution on the lineups as set, `live` is null, the omission is an assumption and a
+   * warning, and the outcome is `partial`.
+   */
+  readonly live_unread?: readonly string[];
 }
 
 /** E3 `pre` / `live`'s outcome. */
 export interface MatchupWinOutcome {
   readonly data: MatchupWinData;
-  /** The Monte-Carlo sampler stopped at the CPU deadline (`partial`, never cached). */
+  /**
+   * `partial` (never cached): the Monte-Carlo sampler stopped at the CPU deadline, or a live call
+   * ran without the live facts it names (`live_unread`).
+   */
   readonly partial: boolean;
   /** Paths completed (0 for `method: normal`). */
   readonly completed_paths: number;
@@ -94,7 +110,8 @@ export interface MatchupWinOutcome {
 /**
  * A MatchupPlayer from E2's LineupPlayer, the player's lock-plan row (his game's state and kickoff
  * from the pro schedule) and ESPN's actual this period (the box score's `actual.applied_total`). No
- * lock row (no NFL team) reads as a bye.
+ * lock row reads as `tbd` — his game is unknown, which is neither a bye nor a final (a no-team
+ * player's row says `bye` itself), so a live call keeps his pre-game distribution.
  */
 export function matchupPlayerOf(
   player: LineupPlayer,
@@ -105,7 +122,7 @@ export function matchupPlayerOf(
   const ms = k === null ? null : Date.parse(k);
   return {
     player,
-    game_state: lock?.game_state ?? "bye",
+    game_state: lock?.game_state ?? "tbd",
     points_so_far: actual,
     kickoff_ms: ms === null || !Number.isFinite(ms) ? null : ms,
   };
@@ -337,6 +354,10 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
   const mode = req.mode;
   const assumptions: Assumption[] = [];
   const warnings: string[] = [];
+  // live facts this call did not read: nothing is conditioned on them (an unread box score is not
+  // 0 points, an unknown game is not a bye) — every started player keeps his pre-game distribution
+  const unread = mode === "live" ? [...new Set(req.live_unread ?? [])] : [];
+  const conditioned = unread.length === 0;
 
   const myStarters = req.me.filter((p) => isStart(req.roster, p.player.slot_id));
   let oppStarters: MatchupPlayer[];
@@ -359,7 +380,17 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
     assumptions.push(
       A("both lineups as set: only unlocked seats can still change", "a lineup is edited"),
     );
-    if ([...myStarters, ...oppStarters].some((p) => p.game_state === "in"))
+    if (!conditioned) {
+      assumptions.push(
+        A(
+          `live facts not read (${unread.join("; ")}): every started player is scored from his pre-game projection, with no points so far and no game state`,
+          "the same call again reads them (what this call read is cached)",
+        ),
+      );
+      warnings.push(
+        `live conditioning unavailable: ${unread.join(" and ")} not read; p_win is the pre-game number for the lineups as set (live: null) — call again for the live one`,
+      );
+    } else if ([...myStarters, ...oppStarters].some((p) => p.game_state === "in"))
       assumptions.push(
         A(
           `a game in progress scores its points so far plus the remaining fraction of the pre-game projection (a ${String(Math.round(LIVE.gameMs / 60000))}-minute game; ESPN sends no in-game clock)`,
@@ -369,14 +400,14 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
     const unknownKick = [...myStarters, ...oppStarters].filter(
       (p) => p.game_state === "in" && p.kickoff_ms === null,
     ).length;
-    if (unknownKick > 0)
+    if (conditioned && unknownKick > 0)
       warnings.push(
         `${String(unknownKick)} live players without a kickoff: half the game assumed to remain`,
       );
     const finalNoPoints = [...myStarters, ...oppStarters].filter(
       (p) => p.game_state === "final" && p.points_so_far === null,
     ).length;
-    if (finalNoPoints > 0)
+    if (conditioned && finalNoPoints > 0)
       warnings.push(`${String(finalNoPoints)} finished players without an ESPN actual: scored 0`);
   }
   if (myStarters.length === 0)
@@ -384,8 +415,9 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
   if (oppStarters.length === 0)
     throw new AnalyticsError("invalid_request", "the opponent's lineup has no starter", "week");
 
-  const mine = myStarters.map((p) => contributionOf(p, "me", mode, nowMs));
-  const theirs = oppStarters.map((p) => contributionOf(p, "opp", mode, nowMs));
+  const scoring = conditioned ? mode : "pre";
+  const mine = myStarters.map((p) => contributionOf(p, "me", scoring, nowMs));
+  const theirs = oppStarters.map((p) => contributionOf(p, "opp", scoring, nowMs));
   const mo = liveMoments(mine, theirs);
   const dMu = mo.mu_m - mo.mu_o;
   const sd = Math.sqrt(Math.max(0, mo.v_m + mo.v_o - 2 * mo.cov));
@@ -465,7 +497,7 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
       .sort((a, b) => a - b);
   const both = [...mine, ...theirs];
   const live: MatchupWinData["live"] =
-    mode === "pre"
+    mode === "pre" || !conditioned
       ? null
       : {
           players_final: sortedIds(both, "final"),
@@ -507,9 +539,11 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
     action:
       mode === "pre"
         ? "no lineup action: pre-week win probability of the current lineup"
-        : actionable.length === 0
-          ? "nothing actionable: every starting seat is locked"
-          : "no lineup action: live win probability of the lineup as set",
+        : !conditioned
+          ? "no lineup action: pre-game win probability of the lineups as set (live facts not read)"
+          : actionable.length === 0
+            ? "nothing actionable: every starting seat is locked"
+            : "no lineup action: live win probability of the lineup as set",
     subjects,
     lineup: null,
     point_estimate: round(mo.mu_m),
@@ -555,7 +589,7 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
       rec,
       inputs,
     },
-    partial,
+    partial: partial || !conditioned,
     completed_paths: completed,
     warnings,
   };

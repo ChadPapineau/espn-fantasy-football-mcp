@@ -376,6 +376,7 @@ export interface MatchupWinData extends AnalyticsResult {
   readonly cov: number;
   readonly method: WinProbMethod;
   readonly basis: DistBasis;
+  /** null for `pre`, and for a `live` call that could not read its live facts (`partial`). */
   readonly live: {
     readonly players_final: readonly number[];
     readonly players_live: readonly {

@@ -261,7 +261,9 @@ const sortedIds = (xs: readonly number[]): readonly number[] =>
  * player locks at his own game's displayable kickoff — Thursday, Saturday, Monday and international
  * games included — while a bye or no-team player has no lock instant and a TBD game has none yet;
  * under `first_kickoff` everyone locks at the week's first known kickoff. A player is `locked` when
- * ESPN says so or his lock instant has passed (inclusive).
+ * ESPN says so or his lock instant has passed (inclusive). A week the schedule holds no game for (an
+ * empty or unread schedule) is unknown, never a league-wide bye: each player with an NFL team is
+ * `tbd` — no lock instant, game state `tbd`, never `all_locked`.
  */
 export function lockPlan(
   subjects: readonly LockSubject[],
@@ -280,7 +282,9 @@ export function lockPlan(
     const noTeam = team === null || team === FREE_AGENT_PRO_TEAM_ID;
     const game = noTeam ? null : teamGame(weekGames, team);
     const kickoffMs = game === null ? null : kickoffMsOf(game);
-    const tbd = game !== null && kickoffMs === null;
+    // a week the schedule carries no game for is unknown, not everyone's bye: his game time is TBD
+    const unknownWeek = !noTeam && weekGames.length === 0;
+    const tbd = (game !== null && kickoffMs === null) || unknownWeek;
     const lockMs = rule === "per_game" ? kickoffMs : firstKnown;
     const locked = s.lineup_locked === true || (lockMs !== null && nowMs >= lockMs);
     if (lockMs !== null) byLock.set(lockMs, [...(byLock.get(lockMs) ?? []), s.player_id]);
@@ -295,7 +299,7 @@ export function lockPlan(
         kickoff,
         window: kickoffWindowOf(kickoff),
         lock_at: lockMs === null ? null : toIso(lockMs),
-        game_state: gameStateOf(game, nowMs),
+        game_state: unknownWeek ? "tbd" : gameStateOf(game, nowMs),
         locked,
         bye: !noTeam && game === null && weekGames.length > 0,
         no_team: noTeam,

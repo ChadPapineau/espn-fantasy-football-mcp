@@ -1,14 +1,16 @@
 // analytics-p1.ts — the season and roster engines as P1 tools (plan 07 §3.E, registered under
 // EFF_TOOLSET=full; plan 10 B7, B9): E3 espn_analyze_matchup (`pre`/`live` H2H P(win) — live
-// conditioning from the PRO SCHEDULE's game state, never the box score's period-level one; no locked
-// seat is ever actionable — and `season`, the seeding simulator under the configured reading or
-// `both` when passed explicitly, fitted from E1 team weeks when the rosters are readable, else the
-// cold start — ADV OBJ-13), E4 espn_analyze_replacement (replacement level by allocation under this
-// format), E8 espn_analyze_schedule (the week-by-week stress test weighted by E3's P(alive)) and E9
-// espn_analyze_roster (bench construction and the IR section — first when the roster is invalid).
-// League-wide players are valued at E1 v1's own point estimate (ESPN's weekly means, weight_espn =
-// 1.0 — ADV OBJ-02) without sampling; E1 sampling runs only for the players a result is about, so a
-// call stays inside the 8 s CPU deadline. Results are capped at 10 000 chars (C8), `meta.estimate`.
+// conditioning from the PRO SCHEDULE's game state, never the box score's period-level one, the box
+// score read first; without either live fact nothing is conditioned and the result is `partial`,
+// plan 01 §5.6–§5.7; no locked seat is ever actionable — and `season`, the seeding simulator under
+// the configured reading or `both` when passed explicitly, fitted from E1 team weeks when the
+// rosters are readable, else the cold start — ADV OBJ-13), E4 espn_analyze_replacement (replacement
+// level by allocation under this format), E8 espn_analyze_schedule (the week-by-week stress test
+// weighted by E3's P(alive)) and E9 espn_analyze_roster (bench construction and the IR section —
+// first when the roster is invalid). League-wide players are valued at E1 v1's own point estimate
+// (ESPN's weekly means, weight_espn = 1.0 — ADV OBJ-02) without sampling; E1 sampling runs only for
+// the players a result is about, so a call stays inside the 8 s CPU deadline. Results are capped at
+// 10 000 chars (C8), `meta.estimate`.
 import { z } from "zod/v4";
 import {
   analyzeMatchupWin,
@@ -80,6 +82,7 @@ import {
   take,
   teamOf,
   turn,
+  weekGames,
   withinBudget,
 } from "./common.js";
 import {
@@ -452,16 +455,53 @@ export const analyzeMatchupTool = defineTool({
       };
     }
 
-    // pre / live: my lineup as set against the opponent's
+    // pre / live: my lineup as set against the opponent's. Live reads what its conditioning needs
+    // first (plan 01 §5.6: a cold call's 3 requests): the box score — the points so far AND this
+    // period's pairing, so the opponent needs no season-schedule read — then the pro schedule (the
+    // game states; the dataset, 0 requests once refreshed); mMatchup only when the box score cannot
+    // name the opponent; ESPN's live numbers, a cross-check, last.
     const rosters = await rostersOf(ctx, b.w, inputs, warnings, args, team);
     const mine = rosters.find((r) => r.team.team_id === team);
     if (mine === undefined) throw new EffError("NOT_FOUND");
-    const matchups = await matchupsOf(ctx, inputs, args);
-    const oppId = opponentIn(matchups, periodOf(b.rules, b.w), team);
+    const actual = new Map<number, number | null>();
+    const liveUnread: string[] = [];
+    let oppId: number | null | undefined;
+    if (args.mode === "live") {
+      const box = await withinBudget(
+        () => ctx.services.platform.getBoxScores(leagueRef(ctx), b.w, readOpts(ctx, args)),
+        warnings,
+      ).catch((e: unknown) => {
+        if (!isDegradable(e)) throw e;
+        warnings.push("espn:mBoxscore unavailable: points so far unknown (nothing conditioned)");
+        return null;
+      });
+      const boxRows = box === null ? [] : take(ctx, box, inputs);
+      for (const m of boxRows)
+        for (const side of [m.home, m.away])
+          for (const e of side?.entries ?? [])
+            actual.set(e.player.ref.id, e.actual?.applied_total ?? null);
+      if (box === null) liveUnread.push("the box score's points so far (espn:mBoxscore)");
+      const pair = boxRows.find((m) => m.home.team_id === team || m.away?.team_id === team);
+      if (pair !== undefined)
+        oppId =
+          pair.away === null
+            ? null
+            : pair.home.team_id === team
+              ? pair.away.team_id
+              : pair.home.team_id;
+    }
+    const pairedIn = async (): Promise<number | null> =>
+      opponentIn(await matchupsOf(ctx, inputs, args), periodOf(b.rules, b.w), team);
+    // pre: the season schedule before the pro schedule, as before (a cold call without the
+    // dataset still answers, lock times unknown)
+    if (args.mode === "pre") oppId = await pairedIn();
+    const schedule = await scheduleOrEmpty(ctx, b.league.ref.season, inputs, warnings, allowStale);
+    if (args.mode === "live" && weekGames(schedule, b.w).length === 0)
+      liveUnread.push(`the pro schedule's week-${String(b.w)} game states`);
+    if (oppId === undefined) oppId = await pairedIn();
     const opp = oppId === null ? undefined : rosters.find((r) => r.team.team_id === oppId);
     if (opp === undefined)
       throw new EffError("NOT_FOUND", { field: "week", reason: "no_opponent" });
-    const schedule = await scheduleOrEmpty(ctx, b.league.ref.season, inputs, warnings, allowStale);
     await turn();
     const proj = await project(
       ctx,
@@ -484,22 +524,8 @@ export const analyzeMatchupTool = defineTool({
     const projBy = new Map<number, ProjectedPlayer>(
       proj.players.map((x) => [x.target.player_id ?? 0, x]),
     );
-    // live: ESPN's actual so far per player (the box score), the game state from the PRO schedule
-    const actual = new Map<number, number | null>();
-    if (args.mode === "live") {
-      const box = await withinBudget(
-        () => ctx.services.platform.getBoxScores(leagueRef(ctx), b.w, readOpts(ctx, args)),
-        warnings,
-      ).catch((e: unknown) => {
-        if (!isDegradable(e)) throw e;
-        warnings.push("espn:mBoxscore unavailable: points so far unknown (treated as 0)");
-        return null;
-      });
-      for (const m of box === null ? [] : take(ctx, box, inputs))
-        for (const side of [m.home, m.away])
-          for (const e of side?.entries ?? [])
-            actual.set(e.player.ref.id, e.actual?.applied_total ?? null);
-    }
+    // live: ESPN's actual so far per player (the box score, read above), the game state from the
+    // PRO schedule
     const sideOf = (r: Roster): MatchupPlayer[] => {
       const { players, plan } = lineupOf(ctx, r, projBy, schedule, b, b.w);
       return players.map((p) =>
@@ -545,6 +571,7 @@ export const analyzeMatchupTool = defineTool({
       rng: seededRng(seed),
       deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
+      live_unread: liveUnread,
     });
     const data: MatchupToolData = { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) };
     return {
