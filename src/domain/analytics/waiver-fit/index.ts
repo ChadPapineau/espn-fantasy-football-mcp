@@ -21,6 +21,7 @@ export {
   type DriftFit,
   type DriftObservation,
 } from "./drift.js";
+export { fitPremiumFromFeed, weekOfFromTransactions } from "./feed.js";
 export {
   RESEARCH_W_COLUMNS,
   comparePremium,

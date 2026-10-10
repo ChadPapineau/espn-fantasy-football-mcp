@@ -72,7 +72,10 @@ reproduces none of the nine: these leagues seed by record.
 
 **Code:** `src/domain/analytics/waiver-fit/` — `fitSurplusDistribution` (+ `surplusRate`,
 `surplusObservationsFromRuns`), `fitDrift` (+ `driftFromClaimRuns`, `driftFromAcquisitions`),
-`fitLeaguePremium`, `comparePremium`, `calibrateClearsToFa`, `clearProbability`, `fitDemandScale`;
+`fitLeaguePremium`, `comparePremium`, `calibrateClearsToFa`, `clearProbability`, `fitDemandScale`,
+and `fitPremiumFromFeed` — the one call for the E5 tool: persisted transactions (drift from the
+processed claims, each run's week from ESPN's `scoring_period`), else the standings' acquisition
+totals (the bound), plus the logged E5 runs (the surplus);
 `src/domain/analytics/waiverDp.ts` gains `rates` (the DP solved from any rate distribution,
 validated by `isValidRateDistribution`) and a bounded table cache; `src/domain/analytics/waivers.ts`
 gains `premium_fit` — E5 reports `premium_basis: "league_fitted"` and reads Π and its band from the
