@@ -6,7 +6,8 @@
 // H2H → division → PA → coin; research 05 §2.1) with division winners first when the league has
 // more than one division (reading (a)), PF only under reading (b); the bracket with the bye rule of
 // research 05 §2.3; marginal values by re-running from perturbed states on common random numbers.
-// Cooperative batches under the CPU deadline (plan 01 §1.1). Pure. New here.
+// Cooperative batches under the CPU deadline (plan 01 §1.1). Phase 3 (plan 10 C4; additive):
+// `rankFinalStandings` applies the same chain once to a finished season. Pure. New here.
 import type { Clock, Rng } from "../clock.js";
 import type { SeedingMode } from "../../config/schema.js";
 import type { Week } from "../league/types.js";
@@ -310,6 +311,114 @@ const bracketSize = (p: number): number => {
   while (b < p) b *= 2;
   return b;
 };
+
+// --- final standings (Phase 3, plan 10 C4; research 05 §2.4 "Evaluation", §8.4 #5; additive) --------
+// The simulator's own chain — `tiebreakChain` and `rankAll`, the code every simulated path ranks
+// with — applied once to a finished season's standings and decided games, so the seeding
+// reproduction (src/domain/analytics/seeding-reproduce/) tests exactly what the simulator does.
+
+/** One team's final regular-season standing. */
+export interface FinalStandingTeam {
+  readonly team_id: number;
+  readonly division_id: number | null;
+  readonly wins: number;
+  readonly losses: number;
+  readonly ties: number;
+  readonly points_for: number;
+  readonly points_against: number;
+}
+
+/** The decided outcomes a final game may carry. */
+const FINAL_WINNERS = Object.freeze(["HOME", "AWAY", "TIE"] as const);
+
+/** One decided regular-season game (the head-to-head and division records read these). */
+export interface FinalGame {
+  readonly home: number;
+  readonly away: number;
+  readonly winner: "HOME" | "AWAY" | "TIE";
+}
+
+/** A final-standings ranking request. */
+export interface FinalRankingRequest {
+  readonly teams: readonly FinalStandingTeam[];
+  readonly games: readonly FinalGame[];
+  readonly mode: SeedingMode;
+  /** `playoffSeedingRule`. */
+  readonly rule: string;
+  /**
+   * Truncates the chain to its first `levels` levels (default: the whole chain). Teams still tied
+   * keep their order in `teams` — so ranking `teams` and its reverse agree exactly when no tie
+   * survives the first `levels` levels.
+   */
+  readonly levels?: number;
+  /** The coin flip's order: `forward` — earlier in `teams` wins; `reverse` — later wins. */
+  readonly coin?: "forward" | "reverse";
+}
+
+/** The ranking: team ids, seed 1 first, and the chain it applied. */
+export interface FinalRanking {
+  readonly order: readonly number[];
+  readonly chain: readonly TieLevel[];
+  readonly divisions_first: boolean;
+  readonly known_rule: boolean;
+}
+
+/**
+ * Ranks a finished season under a reading with the simulator's chain: division winners first when
+ * the league has more than one division (reading (a) only), then the chain of `rule`. Throws
+ * AnalyticsError `invalid_request` on a malformed season (duplicate or unknown teams, a team
+ * playing itself, a non-finite or negative standing).
+ */
+export function rankFinalStandings(req: FinalRankingRequest): FinalRanking {
+  const n = req.teams.length;
+  ensure(n >= 2 && n <= SEEDING.maxTeams, "team count out of range", "teams");
+  const idx = new Map<number, number>();
+  req.teams.forEach((t, i) => idx.set(t.team_id, i));
+  ensure(idx.size === n, "duplicate team id", "teams");
+  for (const t of req.teams)
+    ensure(
+      Number.isInteger(t.team_id) &&
+        [t.wins, t.losses, t.ties, t.points_for, t.points_against].every(
+          (x) => Number.isFinite(x) && x >= 0,
+        ),
+      "standings must be finite and non-negative",
+      "teams",
+    );
+  const results: Result[] = req.games.map((g) => {
+    const a = idx.get(g.home);
+    const b = idx.get(g.away);
+    ensure(a !== undefined && b !== undefined && a !== b, "a game names an unknown team", "games");
+    ensure((FINAL_WINNERS as readonly string[]).includes(g.winner), "a game is undecided", "games");
+    return { a, b, winner: g.winner === "HOME" ? 0 : g.winner === "AWAY" ? 1 : 2 };
+  });
+  const levels = req.levels;
+  ensure(
+    levels === undefined || (Number.isInteger(levels) && levels >= 0),
+    "levels must be a non-negative integer",
+    "levels",
+  );
+  const { chain, known } = tiebreakChain(req.mode, req.rule);
+  const divIds = [
+    ...new Set(req.teams.map((t) => t.division_id).filter((d): d is number => d !== null)),
+  ];
+  const divisionsFirst = req.mode === "espn_rule" && divIds.length > 1;
+  const agg: Agg = {
+    n,
+    wins: Float64Array.from(req.teams.map((t) => t.wins)),
+    losses: Float64Array.from(req.teams.map((t) => t.losses)),
+    ties: Float64Array.from(req.teams.map((t) => t.ties)),
+    pf: Float64Array.from(req.teams.map((t) => t.points_for)),
+    pa: Float64Array.from(req.teams.map((t) => t.points_against)),
+    div: Int32Array.from(
+      req.teams.map((t) => (t.division_id === null ? -1 : divIds.indexOf(t.division_id))),
+    ),
+    coin: Float64Array.from({ length: n }, (_, i) => (req.coin === "reverse" ? i + 1 : n - i)),
+    results,
+  };
+  const used = levels === undefined ? chain : chain.slice(0, levels);
+  const order = rankAll(used, divisionsFirst, agg).map((i) => req.teams[i]?.team_id ?? -1);
+  return { order, chain, divisions_first: divisionsFirst, known_rule: known };
+}
 
 // --- the run -----------------------------------------------------------------------------------------
 
