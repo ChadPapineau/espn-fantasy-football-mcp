@@ -29,8 +29,11 @@ Any change to E1, E2, `totals.ts` or the history fixtures changes these numbers:
 - **Held-out seasons:** `league-b`'s recorded **2024 and 2025** seasons
   (`fixtures/espn/recorded/history/<season>/league-b`, keyless and scrubbed; docs/evals/phase3-data.md)
   — the only league-seasons whose box scores carry ESPN's weekly projection beside each rostered
-  player's actual, 17 scoring periods each, ten teams, half-PPR. Nothing is fitted on them: every
-  model parameter is a shipped constant, so both seasons are out of sample.
+  player's actual, 17 scoring periods each, ten teams, half-PPR. Nothing is fitted on them here:
+  every model parameter is a shipped constant. Two of those constants were measured by research 05
+  §3.2 on the same NFL seasons from public nflverse data, not on this league — the QB weekly CV
+  (2025) and the same-team correlations (2024–2025) — so "held out" covers every choice this replay
+  makes, not the research behind those two numbers.
 - **Decisions:** every team-week whose roster is complete (a team-week with a withheld entry is
   skipped — the manifest's `incomplete`). Nobody is locked: the decision is pre-week.
 - **Distributions:** E1 as shipped, for every rostered player of the week — ESPN's weekly projection
