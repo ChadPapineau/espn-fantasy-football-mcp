@@ -16,11 +16,10 @@ export function normalizeDesignation(d: string | null | undefined): string {
   const t = d.trim();
   if (t.length === 0) return "";
   if (DESIGNATIONS.has(t)) return t;
+  // ESPN's enum, and any case of the official words (QUESTIONABLE, doubtful, Out …)
   const upper = t.toUpperCase();
-  if (Object.hasOwn(ESPN_DESIGNATION, upper)) return ESPN_DESIGNATION[upper] ?? "";
-  const title = t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
-  if (DESIGNATIONS.has(title)) return title;
-  return "Questionable";
+  const mapped = Object.hasOwn(ESPN_DESIGNATION, upper) ? ESPN_DESIGNATION[upper] : undefined;
+  return mapped ?? "Questionable";
 }
 
 /** A practice participation in the table's vocabulary (FP / LP / DNP, "" = none or unknown). */

@@ -67,6 +67,8 @@ export {
 export type { FitOptions, FitProposal, FitStep, ParamChange, TunableParam } from "./fit.js";
 export { buildMatchupTable, espnRatingOf, matchupMult } from "./matchup.js";
 export type { MatchupRow } from "./matchup.js";
+export { applyTunedOverrides, TUNED_NAME_TO_V2_PATH } from "./overrides.js";
+export type { TunedApplication } from "./overrides.js";
 export { covered, crpsGamma, crpsSample, crpsSorted, pinball, spearmanWithin } from "./metrics.js";
 export { ensembleMean, pinDist, projectV2, v2SampleCount } from "./project.js";
 export { buildV2Priors, shrinkRate } from "./rates.js";

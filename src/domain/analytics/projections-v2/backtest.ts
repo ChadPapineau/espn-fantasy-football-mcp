@@ -474,9 +474,10 @@ function q7(sorted: Float64Array, q: number): number {
 }
 
 /** The v2 forecast of a record (optionally rescaled to an ensemble mean). */
-export function v2Forecast(r: BacktestRecord, mean?: number): Forecast {
+export function v2Forecast(r: BacktestRecord, target?: number): Forecast {
   let s = r.v2_sorted;
-  if (mean !== undefined && Number.isFinite(mean)) {
+  const mean = target !== undefined && Number.isFinite(target) ? target : undefined;
+  if (mean !== undefined) {
     const f = r.v2_mean > 0 ? mean / r.v2_mean : Number.NaN;
     if (f >= 1 / V2_SIMS.maxRescale && f <= V2_SIMS.maxRescale) s = s.map((x) => x * f);
     else return gammaForecast(mean, r.cv, r.actual, 1);

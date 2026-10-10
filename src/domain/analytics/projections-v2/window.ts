@@ -113,7 +113,8 @@ export function detectChangePoint(
     }
     const g = chrono[start]?.game;
     const m = metrics[start];
-    if (g === undefined || m === null || m === undefined) return null;
+    // qualifies(start) held, so both exist
+    if (g === undefined || m == null) return null;
     return { index: start, cp: { season: g.season, week: g.week, metric: m.metric, delta } };
   }
   return null;

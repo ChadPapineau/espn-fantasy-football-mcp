@@ -2,7 +2,8 @@
 // research 05 §3.2: turnovers widen the QB's left tail because bad games carry them): for each
 // (cv_eff_qb, int_eff_power) on a grid, the 2023 QB cases' simulated draws give the within-case CV
 // of yards per attempt and corr(INT, non-turnover points); the real within-player figures of the
-// same population are printed beside them. Not a test and never run by CI.
+// same population are printed beside them. The other parameters are DEFAULT_V2_PARAMS'. Not a test and
+// never run by CI.
 //
 //   scripts/dev/with-node.sh npx tsx tests/domain/analytics/projections-v2/helpers/run-calibrate-qb.ts
 import {
@@ -83,7 +84,7 @@ const out: unknown[] = [
   },
 ];
 for (const coupling of [0.75, 1])
-  for (const driveTd of [0, 0.1, 0.2, 0.3]) {
+  for (const driveTd of [0, 0.1, 0.176, 0.2, 0.3]) {
     const roleScale = 0.5;
     const power = 1;
     const cvEff = 0.05;

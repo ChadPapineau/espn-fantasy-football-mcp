@@ -91,14 +91,15 @@ export const DEFAULT_V2_PARAMS: V2Params = Object.freeze({
      * draw at half the others', a small efficiency draw coupled to the pass-volume draw (within-QB
      * corr(attempts, yards per attempt) −0.16 in 2023), interceptions drawn from the incompletions
      * and costing their drive's remaining yards and touchdown chance (within-QB corr(INT, non-turnover
-     * points) −0.13 in 2023; the simulation gives −0.13 at these values).
+     * points) −0.13 in 2023). At these values the 2023 QB cases simulate −0.13, −0.16 and a median
+     * yards-per-attempt CV of 0.25 (real 0.24).
      */
     qb_role_scale: 0.5,
     cv_eff_qb: 0.05,
     int_eff_power: 1,
-    int_drive_yards: 20,
-    int_drive_td: 0.165,
-    script_coupling: 1,
+    int_drive_yards: 21,
+    int_drive_td: 0.176,
+    script_coupling: 0.75,
     cv_yds_catch: 0.7,
     cv_yds_carry: 1.8,
     cv_yds_cmp: 0.5,
