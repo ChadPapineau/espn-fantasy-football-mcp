@@ -4,7 +4,8 @@
 // unchanged run is instant in or out of season), a history run refuses the current season, a past
 // season's 404 always fails (never "not published"), a current-season 404 within its grace period is
 // reported as not published; the contract's expected columns per season; the shared URL builder and
-// stamp reader refuse unsafe names and unparseable stamps.
+// stamp reader refuse unsafe names and unparseable stamps. Phase 3 (plan 10 §3.3, D9): a history
+// file holds the three backtest seasons whatever the run names, so the version names them.
 import { afterEach, describe, expect, it } from "vitest";
 import { epWeeklyHistorySource } from "../../../src/sources/ffopportunity/index.js";
 import {
@@ -29,7 +30,7 @@ import { injuriesSource } from "../../../src/sources/nflverse/injuries.js";
 import { HISTORY_OF, phase2UpstreamKinds } from "../../../src/store/datasets/tables.js";
 import { REL } from "./helpers/fixtures.js";
 import { makeCtx, proGame, type Ctx } from "./helpers/harness.js";
-import { phase2FixtureRoutes } from "./helpers/phase2-fixtures.js";
+import { historyRunRoutes, phase2FixtureRoutes } from "./helpers/phase2-fixtures.js";
 
 const open: Ctx[] = [];
 afterEach(() => {
@@ -50,7 +51,7 @@ describe("history versions: the month and the seasons, no request", () => {
     for (const h of HISTORY) {
       const c = ctxOf([2024, 2025], { routes: new Map() });
       const v = await h.version(c.ctx);
-      expect(v, h.id).toEqual({ version: "h2026-10_2024-2025", released_at: null });
+      expect(v, h.id).toEqual({ version: "h2026-10_2023-2024-2025", released_at: null });
       expect(c.calls, h.id).toEqual([]);
     }
   });
@@ -65,9 +66,9 @@ describe("history versions: the month and the seasons, no request", () => {
   });
 
   it("the prior seasons a refresh covers follow config defaultSeason (July rollover)", () => {
-    expect(historyRefreshSeasons(Date.parse("2026-10-06T12:00:00Z"))).toEqual([2024, 2025]);
-    expect(historyRefreshSeasons(Date.parse("2027-03-01T12:00:00Z"))).toEqual([2024, 2025]);
-    expect(historyRefreshSeasons(Date.parse("2027-07-01T00:00:00Z"))).toEqual([2025, 2026]);
+    expect(historyRefreshSeasons(Date.parse("2026-10-06T12:00:00Z"))).toEqual([2023, 2024, 2025]);
+    expect(historyRefreshSeasons(Date.parse("2027-03-01T12:00:00Z"))).toEqual([2023, 2024, 2025]);
+    expect(historyRefreshSeasons(Date.parse("2027-07-01T00:00:00Z"))).toEqual([2024, 2025, 2026]);
   });
 
   it("a history run refuses the current season (or later) and malformed seasons", async () => {
@@ -98,7 +99,7 @@ describe("history versions: the month and the seasons, no request", () => {
 
 describe("missing upstream files", () => {
   it("a past season's 404 fails the history run and leaves nothing behind", async () => {
-    const routes = phase2FixtureRoutes();
+    const routes = historyRunRoutes();
     routes.delete(`${REL}/pbp/play_by_play_2024.parquet`);
     const c = ctxOf([2024, 2025], { routes });
     await expect(

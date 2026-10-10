@@ -1,17 +1,23 @@
 // phase2-rewrite.ts — hostile variants of the Phase-2 fixture files (rewrite.ts's changes — renamed /
 // dropped / retyped columns, a foreign codec label, edited rows, extra columns — over the excerpts of
 // phase2-fixtures.ts), written with the test-only parquet writer. The rows are the real rows; only
-// the named change differs.
+// the named change differs. Phase 3, additive: the same over the 2023 excerpts of
+// history-fixtures.ts (`rewriteHistory`), through one shared `rewriteExcerpt`.
+import type { FixtureHeader, Row } from "./fixtures.js";
+import { hFixture, hRows } from "./history-fixtures.js";
 import { p2Fixture, p2Rows } from "./phase2-fixtures.js";
 import { writeParquet, type WriterColumn } from "./parquet-writer.js";
 import type { Rewrite } from "./rewrite.js";
 
 export type { Rewrite } from "./rewrite.js";
 
-/** Rewrites the excerpt `<dataset>@<season>` with the given changes; returns parquet bytes. */
-export function rewritePhase2(key: string, change: Rewrite = {}): Uint8Array {
-  const f = p2Fixture(key);
-  let rows = p2Rows(key);
+/** Writes an excerpt's (copied) rows under its schema with the given changes; returns parquet bytes. */
+export function rewriteExcerpt(
+  f: Pick<FixtureHeader, "schema" | "key_value">,
+  original: Row[],
+  change: Rewrite = {},
+): Uint8Array {
+  let rows = original;
   if (change.rows) rows = change.rows(rows);
   const cols: WriterColumn[] = [];
   for (const el of f.schema) {
@@ -41,4 +47,14 @@ export function rewritePhase2(key: string, change: Rewrite = {}): Uint8Array {
   }
   for (const e of change.extra ?? []) cols.push({ ...e, values: rows.map((): unknown => null) });
   return writeParquet(cols, { keyValue: f.key_value, ...change.options });
+}
+
+/** Rewrites the excerpt `<dataset>@<season>` with the given changes; returns parquet bytes. */
+export function rewritePhase2(key: string, change: Rewrite = {}): Uint8Array {
+  return rewriteExcerpt(p2Fixture(key), p2Rows(key), change);
+}
+
+/** Rewrites the 2023 excerpt `<dataset>@2023` (fixtures/history/) with the given changes. */
+export function rewriteHistory(key: string, change: Rewrite = {}): Uint8Array {
+  return rewriteExcerpt(hFixture(key), hRows(key), change);
 }

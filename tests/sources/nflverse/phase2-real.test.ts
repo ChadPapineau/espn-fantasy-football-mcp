@@ -5,19 +5,20 @@
 // `ffopportunity_timestamp.txt`); every file must hash to tests/store/datasets/observed-phase2.ts,
 // so the counts below are the grounding's exactly. The files are served through the fake HttpGet —
 // no test touches the network — and published into a real STRICT SQLite writer. Skipped in CI.
+// Phase 3 (plan 10 §3.3, D9): a history twin now always holds the three backtest seasons, so the
+// history files are grounded over the real 2023–2025 files in phase3-real.test.ts (whose totals are
+// 2023 plus the two-season counts this file recorded: 1,140 team-weeks, 85,713 / 12,550 pbp rows,
+// 53,228 snap rows, 18,254 runs + 36,877 legacy depth rows, 11,217 / 842 ep rows).
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   FFOPPORTUNITY_RELEASE_BASE,
-  epWeeklyHistorySource,
   epWeeklySource,
 } from "../../../src/sources/ffopportunity/index.js";
 import {
-  NFLVERSE_HISTORY_SOURCES,
   NFLVERSE_PHASE_2_SOURCES,
-  type HistoryDataSource,
   type NflversePublishStats,
 } from "../../../src/sources/nflverse/index.js";
 import type { DataSource } from "../../../src/sources/source.js";
@@ -71,7 +72,7 @@ afterAll(() => {
 });
 
 async function run(
-  source: DataSource | HistoryDataSource,
+  source: DataSource,
   seasons: number[],
   r: Map<string, Route>,
 ): Promise<{ stats: NflversePublishStats; ms: number; w: SqliteWriter }> {
@@ -95,36 +96,26 @@ const rowsOf = (s: NflversePublishStats): Record<string, number> =>
 describe.skipIf(!enabled)("the Phase-2 sources over the real 2024–2026 release files", () => {
   const r = enabled ? routes() : new Map<string, Route>();
   const P = NFLVERSE_PHASE_2_SOURCES;
-  const H = NFLVERSE_HISTORY_SOURCES;
 
-  it("stats_team_week: 128 rows (2026), 1,140 (history)", async () => {
+  it("stats_team_week: 128 rows (2026)", async () => {
     expect(rowsOf((await run(P["nflverse:stats_team_week"], [2026], r)).stats)).toEqual({
       ds_stats_team_week: 128,
     });
-    const h = await run(H["nflverse:stats_team_week_history"], [2024, 2025], r);
-    expect(rowsOf(h.stats)).toEqual({ ds_stats_team_week: 1140 });
   });
 
-  it("pbp: 9,640 kept / 1,515 dropped (2026); 85,713 / 12,550 (history)", async () => {
+  it("pbp: 9,640 kept / 1,515 dropped (2026)", async () => {
     const cur = await run(P["nflverse:pbp"], [2026], r);
     expect(rowsOf(cur.stats)).toEqual({ ds_pbp: 9640 });
     expect(cur.stats.warnings.join("\n")).toContain("dropped 1515 row(s)");
-    const h = await run(H["nflverse:pbp_history"], [2024, 2025], r);
-    expect(rowsOf(h.stats)).toEqual({ ds_pbp: 85713 });
-    expect(h.stats.warnings.join("\n")).toContain("dropped 12550 row(s)");
-    expect(h.stats.seasons).toEqual([2024, 2025]);
   });
 
-  it("snap_counts: 5,970 (2026); 53,228 (history)", async () => {
+  it("snap_counts: 5,970 (2026)", async () => {
     expect(rowsOf((await run(P["nflverse:snap_counts"], [2026], r)).stats)).toEqual({
       ds_snap_counts: 5970,
     });
-    expect(rowsOf((await run(H["nflverse:snap_counts_history"], [2024, 2025], r)).stats)).toEqual({
-      ds_snap_counts: 53228,
-    });
   });
 
-  it("depth_charts: 12,046 runs (2026); 18,254 runs + 36,877 legacy rows (history)", async () => {
+  it("depth_charts: 12,046 runs (2026)", async () => {
     const cur = await run(P["nflverse:depth_charts"], [2026], r);
     expect(rowsOf(cur.stats)).toEqual({ ds_depth_charts: 12046 });
     expect(cur.stats.warnings).toEqual([]);
@@ -132,28 +123,11 @@ describe.skipIf(!enabled)("the Phase-2 sources over the real 2024–2026 release
       "SELECT COUNT(*) AS n FROM ds_depth_charts WHERE valid_to_ms IS NULL",
     )[0] as { n: number };
     expect(current.n).toBe(2288);
-    const h = await run(H["nflverse:depth_charts_history"], [2024, 2025], r);
-    expect(rowsOf(h.stats)).toEqual({ ds_depth_charts: 18254, ds_depth_charts_legacy: 36877 });
-    expect(h.stats.warnings).toEqual([
-      "ds_depth_charts_legacy: dropped 201 row(s) — exact duplicate row collapsed",
-      "ds_depth_charts_legacy: dropped 234 row(s) — week null (SBBYE rows)",
-    ]);
   });
 
-  it("ep_weekly: 1,265 kept / 97 team-level (2026); 11,217 / 842 (history)", async () => {
+  it("ep_weekly: 1,265 kept / 97 team-level (2026)", async () => {
     const cur = await run(epWeeklySource, [2026], r);
     expect(rowsOf(cur.stats)).toEqual({ ds_ep_weekly: 1265 });
     expect(cur.stats.warnings.join("\n")).toContain("dropped 97 row(s)");
-    const h = await run(epWeeklyHistorySource, [2024, 2025], r);
-    expect(rowsOf(h.stats)).toEqual({ ds_ep_weekly: 11217 });
-    expect(h.stats.warnings.join("\n")).toContain("dropped 842 row(s)");
-  });
-
-  it("the Phase-1 history twins publish the prior seasons with the Phase-1 loaders", async () => {
-    const st = await run(H["nflverse:stats_player_week_history"], [2024, 2025], r);
-    expect(st.stats.seasons).toEqual([2024, 2025]);
-    expect(rowsOf(st.stats).ds_stats_player_week).toBeGreaterThan(38_000);
-    const inj = await run(H["nflverse:injuries_history"], [2024, 2025], r);
-    expect(rowsOf(inj.stats).ds_injuries).toBeGreaterThan(12_000);
   });
 });

@@ -2,7 +2,10 @@
 // `sources/*`; plan 10 §3.1a): version from timestamp.txt → fetch through a fake HttpGet/HttpDownload
 // serving parquet rebuilt from fixtures/nflverse → assertSchema → publish into a real STRICT SQLite
 // DatasetWriter, then the store's own reader SQL (tables.ts READER_QUERIES) over the published file.
-// The schedules' ESPN game ids join the recorded proTeamSchedules_wl exactly. No network.
+// The schedules' ESPN game ids join the recorded proTeamSchedules_wl exactly. No network. Phase 3
+// (plan 10 §3.3, D9): the schedules file always holds the backtest seasons [current − 3, current − 1]
+// besides the run's own (seasons.ts) — at the fixed clock (2026-10-06) 2023–2025; the Phase-1 games
+// excerpt holds 2025 and 2026, so a [2026] run also stores 2025's games.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { SOURCE_REGISTRY } from "../../../src/config/freshness.js";
@@ -115,17 +118,22 @@ describe("registry fields (plan 05 §2 `sources/*`: license, attribution, job, l
 describe("nflverse:schedules", () => {
   it("publishes the 2026 games: ESPN ids, DST-aware kickoffs, roof, venues, lines", async () => {
     const { report, stats, w, files, c } = await run(schedulesSource, [2026]);
-    expect(files.map((f) => f.season)).toEqual([2026]);
+    // the run's season plus the backtest seasons, from ONE download
+    expect(files.map((f) => f.season)).toEqual([2023, 2024, 2025, 2026]);
     expect(c.calls).toEqual([`${REL}/schedules/timestamp.txt`, `${REL}/schedules/games.parquet`]);
     expect(report.extra_columns).toContain("referee"); // not kept, tolerated, reported
-    expect(report.files).toEqual([
-      { season: 2026, rows: 557, nflverse_timestamp: "2026-10-06 01:46:36 EDT" },
-    ]);
+    expect(report.files).toEqual(
+      [2023, 2024, 2025, 2026].map((season) => ({
+        season,
+        rows: 557,
+        nflverse_timestamp: "2026-10-06 01:46:36 EDT",
+      })),
+    );
     expect(stats.tables).toEqual([
-      { name: "ds_schedules", rows: 272 },
+      { name: "ds_schedules", rows: 272 + 285 },
       { name: "ds_venues", rows: VENUES.length },
     ]);
-    expect(stats.seasons).toEqual([2026]);
+    expect(stats.seasons).toEqual([2025, 2026]);
     expect(stats.columns_hash).toBe(columnsHash("nflverse:schedules"));
     expect(stats.warnings).toEqual([]);
     expect(
@@ -146,7 +154,9 @@ describe("nflverse:schedules", () => {
       venue_id: "LON02",
     });
     expect(n(w, "SELECT COUNT(*) AS n FROM ds_schedules WHERE roof = ''")).toBe(0);
-    expect(n(w, "SELECT COUNT(*) AS n FROM ds_schedules WHERE roof IS NULL")).toBe(34);
+    expect(
+      n(w, "SELECT COUNT(*) AS n FROM ds_schedules WHERE season = 2026 AND roof IS NULL"),
+    ).toBe(34);
     expect(
       n(
         w,
@@ -215,9 +225,9 @@ describe("nflverse:schedules", () => {
     expect(withLines).toBe(79);
   });
 
-  it("covers the requested seasons only, from one download", async () => {
+  it("covers the requested seasons (plus the backtest seasons), from one download", async () => {
     const { stats, w, files, c } = await run(schedulesSource, [2025, 2026, 2025]);
-    expect(files.map((f) => f.season)).toEqual([2025, 2026]);
+    expect(files.map((f) => f.season)).toEqual([2023, 2024, 2025, 2026]);
     expect(c.calls.filter((u) => u.endsWith("games.parquet"))).toHaveLength(1);
     expect(stats.seasons).toEqual([2025, 2026]);
     expect(w.all("SELECT season, COUNT(*) AS n FROM ds_schedules GROUP BY season")).toEqual([

@@ -5,7 +5,9 @@
 // assertSchema → publish into a real STRICT SQLite writer; the contract's own reader SQL
 // (tables.ts PHASE_2_READER_QUERIES) over the published files; the pbp counting reproduces
 // nflverse's stats_player_week for every player of the fixture games (current AND prior seasons);
-// and the current sources go through the REAL runner + publisher. No network.
+// and the current sources go through the REAL runner + publisher. No network. Phase 3 (plan 10 §3.3,
+// D9): a history twin's file holds the three backtest seasons whatever the run names, so its runs
+// here (the CLI's two-season default) also load the 2023 excerpts (fixtures/history/).
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -46,10 +48,13 @@ import {
 import { storeFactory } from "../../../src/store/index.js";
 import { FX, REL, fixtureRows, type Row } from "./helpers/fixtures.js";
 import { SqliteWriter, makeCtx, proGame, type Ctx, type Route } from "./helpers/harness.js";
-import { P2, p2Rows, phase2FixtureRoutes } from "./helpers/phase2-fixtures.js";
+import { GAME_2023, hRows } from "./helpers/history-fixtures.js";
+import { P2, p2Rows, historyRunRoutes } from "./helpers/phase2-fixtures.js";
 import { rewritePhase2 } from "./helpers/phase2-rewrite.js";
 
-const ROUTES = phase2FixtureRoutes();
+const ROUTES = historyRunRoutes();
+/** The seasons a history file holds after a run of [2024, 2025] at the fixed clock (2026-10-06). */
+const HELD = [2023, 2024, 2025];
 const CURRENT: readonly DataSource[] = [
   statsTeamWeekSource,
   pbpSource,
@@ -179,9 +184,9 @@ describe("nflverse:stats_team_week", () => {
 
   it("history: the prior seasons' rows (REG and POST) in their own file", async () => {
     const r = await run(NFLVERSE_HISTORY_SOURCES["nflverse:stats_team_week_history"], [2024, 2025]);
-    expect(rowsOf(r.stats)).toEqual({ ds_stats_team_week: 6 });
-    expect(r.stats.seasons).toEqual([2024, 2025]);
-    expect(r.version).toBe("h2026-10_2024-2025");
+    expect(rowsOf(r.stats)).toEqual({ ds_stats_team_week: 9 });
+    expect(r.stats.seasons).toEqual(HELD);
+    expect(r.version).toBe("h2026-10_2023-2024-2025");
     expect(r.c.calls.every((u) => !u.endsWith("timestamp.txt"))).toBe(true);
     expect(r.w.all("SELECT DISTINCT season_type FROM ds_stats_team_week ORDER BY 1")).toEqual([
       { season_type: "POST" },
@@ -242,15 +247,18 @@ describe("nflverse:pbp — the projected subset", () => {
 
   it("history: both prior games reproduce their stats_player_week twins too", async () => {
     const r = await run(NFLVERSE_HISTORY_SOURCES["nflverse:pbp_history"], [2024, 2025]);
-    expect(r.stats.seasons).toEqual([2024, 2025]);
+    expect(r.stats.seasons).toEqual(HELD);
     let n = 0;
-    for (const season of [2024, 2025]) {
-      const stats = p2Rows(`nflverse:stats_player_week@${String(season)}`).filter(
+    for (const season of HELD) {
+      const key = `nflverse:stats_player_week@${String(season)}`;
+      const stats = (season === 2023 ? hRows(key) : p2Rows(key)).filter(
         (s) => s.player_id !== null,
       );
-      n += compareWithStats(r.w, season, stats);
+      const one = compareWithStats(r.w, season, stats);
+      expect(one, String(season)).toBeGreaterThan(20);
+      n += one;
     }
-    expect(n).toBeGreaterThan(50);
+    expect(n).toBeGreaterThan(75);
   });
 });
 
@@ -334,7 +342,8 @@ describe("nflverse:snap_counts", () => {
       .all({ season: 2026, weeks: "[1]", pfr_ids: JSON.stringify(pfr) });
     expect(got.length).toBe(pfr.length);
     const h = await run(NFLVERSE_HISTORY_SOURCES["nflverse:snap_counts_history"], [2024, 2025]);
-    expect(rowsOf(h.stats)).toEqual({ ds_snap_counts: 95 + 91 });
+    expect(rowsOf(h.stats)).toEqual({ ds_snap_counts: 95 + 91 + 92 });
+    expect(h.stats.seasons).toEqual(HELD);
   });
 });
 
@@ -378,11 +387,34 @@ describe("nflverse:depth_charts — ESPN-keyed occupancy runs", () => {
     expect(Object.keys(t)).toEqual(["ds_depth_charts", "ds_depth_charts_legacy"]);
     expect(t.ds_depth_charts).toBeGreaterThan(0);
     expect(r.stats.columns_hash).toBe(contractColumnsHash("nflverse:depth_charts_history"));
+    // 2024: 1 duplicate + 3 SBBYE; 2023 (fixtures/history): 2 duplicates + 3 SBBYE, 13 rows whose
+    // label is outside DEPTH_LABELS (kept as OTHER) and 2 whose label fails the grammar (dropped)
+    const raw2023 = hRows("nflverse:depth_charts@2023");
     expect(r.stats.warnings).toEqual([
-      "ds_depth_charts_legacy: dropped 1 row(s) — exact duplicate row collapsed",
-      "ds_depth_charts_legacy: dropped 3 row(s) — week null (SBBYE rows)",
+      "ds_depth_charts_legacy: 13 row(s) — pos_abb label outside DEPTH_LABELS stored as 'OTHER'",
+      "ds_depth_charts_legacy: dropped 2 row(s) — null pos_abb",
+      "ds_depth_charts_legacy: dropped 3 row(s) — exact duplicate row collapsed",
+      "ds_depth_charts_legacy: dropped 6 row(s) — week null (SBBYE rows)",
     ]);
-    expect(t.ds_depth_charts_legacy).toBe(legacyRaw.length - 4);
+    expect(t.ds_depth_charts_legacy).toBe(legacyRaw.length - 4 + raw2023.length - 7);
+    expect(r.stats.seasons).toEqual(HELD);
+    expect(
+      one(r.w, "SELECT COUNT(*) AS n FROM ds_depth_charts_legacy WHERE pos_abb = 'OTHER'").n,
+    ).toBe(13);
+    // no upstream label text outside the vocabulary is stored (the backslash label never lands)
+    expect(
+      r.w.all(
+        "SELECT pos_abb FROM ds_depth_charts_legacy WHERE instr(pos_abb, char(92)) > 0 OR instr(formation, char(92)) > 0",
+      ),
+    ).toEqual([]);
+    const chart2023 = r.w.db
+      .prepare(sqlOf("DepthChartReader.chart", 1))
+      .all({ season: 2023, teams: '["BUF","CIN"]' });
+    expect(chart2023.length).toBeGreaterThan(40);
+    // each team's last listed week (an edge row of a later week stands for its team's chart)
+    const lastWeek = new Map(chart2023.map((x) => [String(x.team), Number(x.week)]));
+    expect([...lastWeek.keys()].sort()).toEqual(["BUF", "CIN"]);
+    for (const x of chart2023) expect(x.week).toBe(lastWeek.get(String(x.team)));
     // a blank depth_position falls back to position
     const blank = legacyRaw.find(
       (x) =>
@@ -429,8 +461,13 @@ describe("ffopportunity:ep_weekly", () => {
 
   it("history: both prior games' player rows", async () => {
     const r = await run(epWeeklyHistorySource, [2024, 2025]);
-    expect(rowsOf(r.stats)).toEqual({ ds_ep_weekly: 40 });
-    expect(r.stats.seasons).toEqual([2024, 2025]);
+    const teamLevel2023 = hRows("ffopportunity:ep_weekly@2023").filter((x) => x.player_id === null);
+    expect(teamLevel2023.length).toBeGreaterThan(0);
+    expect(rowsOf(r.stats)).toEqual({ ds_ep_weekly: 40 + 21 - teamLevel2023.length });
+    expect(r.stats.seasons).toEqual(HELD);
+    expect(r.w.all("SELECT DISTINCT game_id FROM ds_ep_weekly WHERE season = 2023")).toEqual([
+      { game_id: GAME_2023 },
+    ]);
   });
 });
 
@@ -447,20 +484,29 @@ describe("the Phase-1 history twins (stats_player_week, injuries) over prior sea
       .all("SELECT season, week, team FROM ds_team_defense_week ORDER BY season, team")
       .map((x) => `${String(x.season)}/${String(x.week)}/${String(x.team)}`);
     expect(teams).toEqual(
-      expect.arrayContaining(["2024/4/DET", "2024/4/SEA", "2025/7/DAL", "2025/7/WAS"]),
+      expect.arrayContaining([
+        "2023/9/BUF",
+        "2023/9/CIN",
+        "2024/4/DET",
+        "2024/4/SEA",
+        "2025/7/DAL",
+        "2025/7/WAS",
+      ]),
     );
     expect(t.ds_team_defense_week).toBe(teams.length);
     expect(r.stats.columns_hash).toBe(contractColumnsHash("nflverse:stats_player_week_history"));
     expect(r.c.calls.filter((u) => u.endsWith(".parquet"))).toEqual([
+      `${REL}/stats_player/stats_player_week_2023.parquet`,
       `${REL}/stats_player/stats_player_week_2024.parquet`,
       `${REL}/stats_player/stats_player_week_2025.parquet`,
     ]);
+    expect(r.stats.seasons).toEqual(HELD);
   });
 
   it("injuries_history: the 2024 file (no season_type, an extra column dropped) loads", async () => {
     const r = await run(NFLVERSE_HISTORY_SOURCES["nflverse:injuries_history"], [2024, 2025]);
-    expect(rowsOf(r.stats)).toEqual({ ds_injuries: 30 + 29 });
-    expect(r.stats.seasons).toEqual([2024, 2025]);
+    expect(rowsOf(r.stats)).toEqual({ ds_injuries: 30 + 29 + 16 });
+    expect(r.stats.seasons).toEqual(HELD);
   });
 });
 

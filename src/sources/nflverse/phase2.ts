@@ -10,6 +10,8 @@
 //   * each source comes with its HISTORY twin (`<source>_history`, tables.ts HISTORY_DATASET_SOURCES:
 //     the two prior seasons for the soft backtests, plan 10 §3.2 [A-3]) — same URLs, same loader,
 //     its own file, a monthly version bucket (see `historyVersion`).
+// Phase 3 (plan 10 §3.3 "≥ 3 historical seasons", D9), additive: a history file holds at least the
+// backtest seasons [current − 3, current − 1] whatever a run names (`historyFileSeasons`, seasons.ts).
 // Rows are built from the contract's own `derivation` text (`rowBuilder`): a column whose derivation
 // this module does not know and no source overrides throws at module load, so a contract change
 // cannot silently store the wrong value. Every upstream value is data; nothing here interprets text.
@@ -23,7 +25,6 @@ import {
   HISTORY_OF,
   contractColumnsHash,
   contractTablesFor,
-  historySeasonsFor,
   isHistoryDatasetSource,
   isPhase1DatasetSource,
   phase2UpstreamKinds,
@@ -63,6 +64,7 @@ import {
 } from "./release.js";
 import { TableLoader, asInt, asReal, asText, type RawRow } from "./rows.js";
 import { EXPECTED_COLUMNS, isNflverseSourceId } from "./schemas.js";
+import { backtestSeasons, withBacktestSeasons } from "./seasons.js";
 
 /** The current-season Phase-2 parquet sources (tables.ts PHASE_2_PARQUET_SOURCES minus history). */
 export const PHASE_2_PARQUET_CURRENT = [
@@ -239,9 +241,14 @@ export function historyBucket(nowMs: number): string {
   return `${String(d.getUTCFullYear())}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-/** The prior seasons a history refresh covers now: [current − 2, current − 1] (tables.ts). */
+/**
+ * The prior seasons a history refresh covers now. Phase 3 (plan 10 §3.3, D9): the backtest seasons
+ * [current − 3, current − 1] (seasons.ts `backtestSeasons`; tables.ts `backtestSeasonsFor`), which
+ * every history file holds whatever a run names (`historyFileSeasons`). Phase 2 covered two
+ * (tables.ts `historySeasonsFor`, kept as Phase 2's record).
+ */
 export function historyRefreshSeasons(nowMs: number): readonly number[] {
-  return historySeasonsFor(defaultSeason(nowMs));
+  return backtestSeasons(nowMs);
 }
 
 /**
@@ -264,7 +271,20 @@ export function historyRunSeasons(id: string, ctx: SourceContext): readonly numb
 }
 
 /**
- * A history source's version: `h<YYYY-MM>_<s1>-<s2>…` — the UTC month and the seasons, with NO
+ * The seasons a history FILE holds after a run (plan 10 §3.3 [A-3], D9): the run's seasons
+ * (`historyRunSeasons` — validated, every one before the current season, else it throws) united with
+ * the backtest seasons [current − 3, current − 1], ascending (seasons.ts `withBacktestSeasons`). A
+ * history file is published whole, so a run naming fewer seasons — the CLI's two-season default, a
+ * one-off `--seasons 2024` — still writes all three; an explicit older season (`--seasons 2019`) adds
+ * to them. An empty run stays empty (no request).
+ */
+export function historyFileSeasons(id: string, ctx: SourceContext): readonly number[] {
+  return withBacktestSeasons(historyRunSeasons(id, ctx), ctx.clock.nowMs());
+}
+
+/**
+ * A history source's version: `h<YYYY-MM>_<s1>-<s2>…` — the UTC month and the seasons the file will
+ * hold (`historyFileSeasons`, ascending; Phase 3: at least the three backtest seasons), with NO
  * network request. Prior seasons are final (an nflverse rebuild of a past season is rare: the 2024
  * depth-chart file is dated 2025-02-13), while the release tag's `timestamp.txt` moves with every
  * current-season rebuild (several times a game day), so polling it would re-download ~41 MB of
@@ -272,7 +292,7 @@ export function historyRunSeasons(id: string, ctx: SourceContext): readonly numb
  * set (a new current season) or `--force` republishes at once; an unchanged run makes no request.
  */
 export function historyVersion(id: string, ctx: SourceContext): ReleaseVersion {
-  const seasons = historyRunSeasons(id, ctx);
+  const seasons = historyFileSeasons(id, ctx);
   return {
     version: `h${historyBucket(ctx.clock.nowMs())}_${seasons.join("-")}`,
     released_at: null,
@@ -390,7 +410,7 @@ export function makePhase2Sources(def: Phase2SourceDef): Phase2SourcePair {
       fetchSeasonFiles(
         ctx,
         historyId.replace(":", "-"),
-        historyRunSeasons(historyId, ctx),
+        historyFileSeasons(historyId, ctx),
         urlOf,
         maxBytes,
       ),
@@ -406,7 +426,7 @@ export function makePhase2Sources(def: Phase2SourceDef): Phase2SourcePair {
  * The history twin of a Phase-1 nflverse source (`stats_player_week`, `injuries`): the current
  * source's own fetch and publish over the prior seasons (same tables, so the same columns hash —
  * checked here) and its expected columns (reported under the history id), versioned by
- * `historyVersion`.
+ * `historyVersion`; it fetches `historyFileSeasons` (Phase 3: at least the backtest seasons).
  */
 export function phase1HistorySource(
   id: HistoryDatasetSourceId,
@@ -429,7 +449,7 @@ export function phase1HistorySource(
     version: (ctx: SourceContext): Promise<ReleaseVersion | null> =>
       settle(() => historyVersion(id, ctx)),
     fetch: async (v: ReleaseVersion, ctx: SourceContext): Promise<readonly TempFile[]> =>
-      current.fetch(v, { ...ctx, seasons: historyRunSeasons(id, ctx) }),
+      current.fetch(v, { ...ctx, seasons: historyFileSeasons(id, ctx) }),
     // the Phase-1 source's expected columns, reported under the history id
     assertSchema: (files: readonly TempFile[]): Promise<NflverseSchemaReport> =>
       assertSchemaOf(id, files, (f) => expectedColumnsFor(id, f.season)),

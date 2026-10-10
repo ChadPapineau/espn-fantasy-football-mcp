@@ -3,7 +3,9 @@
 // other modules call (plan 08 §3.2 toStatLine(nflverse); the release timestamp parser). Phase 2
 // (plan 10 §3.2), additive: stats_team_week, the pbp subset, snap_counts, depth_charts and the
 // history twins of every dataset the backtests read (NFLVERSE_PHASE_2_SOURCES,
-// NFLVERSE_HISTORY_SOURCES; ffopportunity's are in src/sources/ffopportunity/).
+// NFLVERSE_HISTORY_SOURCES; ffopportunity's are in src/sources/ffopportunity/). Phase 3 (plan 10 §3.3
+// "≥ 3 historical seasons"), additive: the historical season selection (seasons.ts) — every history
+// file and the schedules file hold the backtest seasons [current − 3, current − 1].
 import type { DataSource } from "../source.js";
 import { injuriesSource } from "./injuries.js";
 import { playersSource } from "./players.js";
@@ -46,6 +48,7 @@ export {
   PHASE_2_PARQUET_CURRENT,
   expectedColumnsFor,
   historyBucket,
+  historyFileSeasons,
   historyRefreshSeasons,
   historyRunSeasons,
   historyVersion,
@@ -60,6 +63,7 @@ export {
   type PublishTarget,
   type ReleaseRef,
 } from "./phase2.js";
+export { backtestSeasons, withBacktestContext, withBacktestSeasons } from "./seasons.js";
 export { snapCountsSource, snapCountsSources } from "./snap-counts.js";
 export { statsTeamWeekSource, statsTeamWeekSources } from "./stats-team-week.js";
 export { defensiveFumbleReturnTds } from "./team-defense.js";

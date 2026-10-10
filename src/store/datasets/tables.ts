@@ -1224,6 +1224,27 @@ export function historySeasonsFor(currentSeason: number): readonly number[] {
 }
 
 /**
+ * How many prior seasons the history files hold from Phase 3 on (plan 10 §3.3 "≥ 3 historical
+ * seasons", D9 "≥ 3 in Phase 3", A-3): the held-out backtests C1–C7 need three. ADDITIVE (Phase 3):
+ * HISTORY_SEASON_COUNT above stays Phase 2's count; the history sources hold at least these
+ * seasons whatever a run names (src/sources/nflverse/seasons.ts), and `nflverse:schedules` holds them
+ * too (its one file covers every season). Grounded on the 2023–2025 files: docs/evals/phase3-data.md.
+ */
+export const BACKTEST_SEASON_COUNT = 3;
+
+/** The prior seasons the history files hold from Phase 3 on: [current − 3, current − 1], ascending. */
+export function backtestSeasonsFor(currentSeason: number): readonly number[] {
+  if (!Number.isInteger(currentSeason) || currentSeason < 2001 || currentSeason > 2999)
+    throw new RangeError("dataset contract: invalid current season");
+  return Object.freeze(
+    Array.from(
+      { length: BACKTEST_SEASON_COUNT },
+      (_, i) => currentSeason - BACKTEST_SEASON_COUNT + i,
+    ),
+  );
+}
+
+/**
  * The history dataset files: each repeats the tables of the current-season source it names, for the
  * prior seasons only (B3/B6/B7 backtests: stats + defence lines, team stats, pbp, snaps, injuries,
  * depth charts, expected points). nflverse `schedules` needs none (games.parquet holds every season:

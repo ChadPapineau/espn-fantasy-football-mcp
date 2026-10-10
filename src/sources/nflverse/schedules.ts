@@ -5,6 +5,9 @@
 // (derive.ts, DST-aware); roof "" → NULL; lines: spread_line + = HOME favoured (nflverse dictionary),
 // implied team totals home = (total + spread) / 2, away = (total − spread) / 2. Ported from sibling
 // @521f9f3, adapted (ESPN game id, venue cross-check against the ESPN-driven weather path).
+// Phase 3 (plan 10 §3.3 "≥ 3 historical seasons", D9), additive: the file always holds the backtest
+// seasons [current − 3, current − 1] besides the run's own (seasons.ts `withBacktestContext`) — the
+// held-out backtests read their games and lines here, and a publish rewrites the whole file.
 import type { GameLines } from "../../domain/analytics/types.js";
 import {
   impliedPoints,
@@ -12,9 +15,10 @@ import {
   normalizeRoof,
 } from "../../store/datasets/derive.js";
 import { DS_SCHEDULES, DS_VENUES } from "../../store/datasets/tables.js";
-import type { DataSource } from "../source.js";
+import type { DataSource, ReleaseVersion, SourceContext, TempFile } from "../source.js";
 import { resolveVenueId, venueForGame, venueRows } from "../venues.js";
 import { eachRow, makeNflverseSource } from "./base.js";
+import { withBacktestContext } from "./seasons.js";
 import {
   TableLoader,
   asInt,
@@ -57,8 +61,8 @@ export function gameLines(row: RawRow): GameLinesView | null {
   };
 }
 
-/** The schedules DataSource. */
-export const schedulesSource: DataSource = makeNflverseSource({
+/** The schedules DataSource as Phase 1 built it: exactly the run's seasons. */
+const runSeasonsSchedulesSource: DataSource = makeNflverseSource({
   id: "nflverse:schedules",
   tag: "schedules",
   file: { all: "games.parquet", seasonless: false },
@@ -101,4 +105,18 @@ export const schedulesSource: DataSource = makeNflverseSource({
     }
     return { loaders: [games, venues], warnings };
   },
+});
+
+/**
+ * The schedules DataSource: Phase 1's, with the run's seasons widened to hold the backtest seasons
+ * (seasons.ts `withBacktestContext`) in both the version (so a grown season set republishes) and the
+ * fetch (one download either way: games.parquet holds every season).
+ */
+export const schedulesSource: DataSource = Object.freeze({
+  ...runSeasonsSchedulesSource,
+  // async: a malformed run season rejects (never a synchronous throw from a DataSource method)
+  version: async (ctx: SourceContext): Promise<ReleaseVersion | null> =>
+    runSeasonsSchedulesSource.version(withBacktestContext(ctx)),
+  fetch: async (v: ReleaseVersion, ctx: SourceContext): Promise<readonly TempFile[]> =>
+    runSeasonsSchedulesSource.fetch(v, withBacktestContext(ctx)),
 });

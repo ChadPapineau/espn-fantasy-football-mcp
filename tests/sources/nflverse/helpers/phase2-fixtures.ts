@@ -2,8 +2,10 @@
 // fixtures/ffopportunity/, CC-BY-SA 4.0 — plan 05 §3; plan 10 §3.2) and the parquet files the tests
 // rebuild from them, in the Phase-1 format (fixtures.ts: a JSON header + TSV parts of JSON cells).
 // `phase2FixtureRoutes()` serves every excerpt at the release URL it stands in for (plus the tags'
-// timestamp.txt) through the harness's fake HttpGet; `allFixtureRoutes()` adds the Phase-1 ones, for
-// a world that publishes every nflverse/ffopportunity source through the real runner. No network.
+// timestamp.txt) through the harness's fake HttpGet; `allFixtureRoutes()` adds the Phase-1 ones and
+// the third backtest season (history-fixtures.ts: 2023, plan 10 §3.3 — every history twin now asks
+// for it), for a world that publishes every nflverse/ffopportunity source through the real runner.
+// No network.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -14,6 +16,7 @@ import {
   type ManifestFile,
   type Row,
 } from "./fixtures.js";
+import { historyFixtureRoutes } from "./history-fixtures.js";
 import { writeParquet } from "./parquet-writer.js";
 import { decodeTsv } from "./tsv.js";
 
@@ -116,10 +119,21 @@ export function phase2FixtureRoutes(): Map<string, Uint8Array> {
   return routes;
 }
 
-/** The Phase-1 routes (fixtures.ts) plus the Phase-2 ones. */
+/**
+ * The Phase-1 routes (fixtures.ts), the Phase-2 ones, and the 2023 history ones (the games route
+ * then serves the Phase-1 excerpt merged with 2023's week-9 games).
+ */
 export function allFixtureRoutes(): Map<string, Uint8Array> {
   const out = fixtureRoutes();
   for (const [k, v] of phase2FixtureRoutes()) out.set(k, v);
+  for (const [k, v] of historyFixtureRoutes()) out.set(k, v);
+  return out;
+}
+
+/** The Phase-2 routes plus the 2023 history ones: what a history twin's run now asks for. */
+export function historyRunRoutes(): Map<string, Uint8Array> {
+  const out = phase2FixtureRoutes();
+  for (const [k, v] of historyFixtureRoutes()) out.set(k, v);
   return out;
 }
 
