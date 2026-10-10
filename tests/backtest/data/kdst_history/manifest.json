@@ -1,0 +1,112 @@
+{
+  "$comment": "nflverse data (CC-BY 4.0, see README.md) derived for plan 10 §3.3 C7 by tests/backtest/helpers/make-kdst-history.ts; read by tests/backtest/helpers/kdst-history.ts, which re-hashes every file. `upstream` pins every release file it was cut from.",
+  "retrieved": "2026-10-10",
+  "seasons": [2023, 2024, 2025],
+  "final_week": 17,
+  "files": [
+    {
+      "path": "games.tsv",
+      "rows": 768,
+      "bytes": 47973,
+      "sha256": "9e6681ecfeda5e3cd595f43959c9780f7638298ea5eb535acb541f9fd7246180"
+    },
+    {
+      "path": "dst.tsv",
+      "rows": 1536,
+      "bytes": 144794,
+      "sha256": "14b4a2f9a726b921f771008383fdbba4ff3eb6c7466cc1f9139f0e275b427a09"
+    },
+    {
+      "path": "k.tsv",
+      "rows": 1534,
+      "bytes": 77865,
+      "sha256": "3c7b353b03fcd3bb0965313fdbd549deefe2a2cb720b54794abe2603e40a4312"
+    }
+  ],
+  "upstream": [
+    {
+      "file": "schedules_games.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.parquet",
+      "bytes": 522027,
+      "sha256": "68ab1450807fec52a026f08c896d09482b6117105decfd268e4fa48df8846662",
+      "rows": 7548,
+      "nflverse_timestamp": "2026-10-10 16:16:26 EDT"
+    },
+    {
+      "file": "stats_player_stats_player_week_2023.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2023.parquet",
+      "bytes": 846050,
+      "sha256": "ac776fbd7c9fefdb4069b72304f4c5fa05ae417acd49f6e4e27be14b9d7a4bbc",
+      "rows": 18643,
+      "nflverse_timestamp": "2026-10-10 11:19:24 EDT"
+    },
+    {
+      "file": "stats_team_stats_team_week_2023.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2023.parquet",
+      "bytes": 128136,
+      "sha256": "a155e2a9cb2a6bff1b254f747a33603c43aa5a1117c26d203b44e5bfb83339b1",
+      "rows": 570,
+      "nflverse_timestamp": "2026-10-10 11:19:34 EDT"
+    },
+    {
+      "file": "pbp_play_by_play_2023.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_2023.parquet",
+      "bytes": 20534088,
+      "sha256": "bd3484731408def6b0ec93225bba2bd7b2c65769ca707a2b9444d891abdc6776",
+      "rows": 49665,
+      "nflverse_timestamp": "2026-10-10 11:17:28 EDT"
+    },
+    {
+      "file": "stats_player_stats_player_week_2024.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2024.parquet",
+      "bytes": 849243,
+      "sha256": "847569d194ca3d96b5efcf91e6eac5e18780fc47568a713fd545a82d29d155c1",
+      "rows": 18983,
+      "nflverse_timestamp": "2026-10-10 11:19:24 EDT"
+    },
+    {
+      "file": "stats_team_stats_team_week_2024.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2024.parquet",
+      "bytes": 128118,
+      "sha256": "c95aca86417589edb34b5001c11ba4bab869394fd3d51e475ff0958dda1669fc",
+      "rows": 570,
+      "nflverse_timestamp": "2026-10-10 11:19:34 EDT"
+    },
+    {
+      "file": "pbp_play_by_play_2024.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_2024.parquet",
+      "bytes": 20597560,
+      "sha256": "3fd2896bc0b911b615142d2f1fabae54a4bbba5ab7b73b28187b118ef8af6a3b",
+      "rows": 49492,
+      "nflverse_timestamp": "2026-10-10 11:17:28 EDT"
+    },
+    {
+      "file": "stats_player_stats_player_week_2025.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2025.parquet",
+      "bytes": 855077,
+      "sha256": "2a461becaa9adb3c93a3074a3a31f1e960162a50163371a2d34e28393b5fff10",
+      "rows": 19422,
+      "nflverse_timestamp": "2026-10-10 11:19:24 EDT"
+    },
+    {
+      "file": "stats_team_stats_team_week_2025.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_2025.parquet",
+      "bytes": 128766,
+      "sha256": "ec168d98ebbcb0d14d1049ba690e55a629fe6e4f00aaa8a700c309d9dad6d34d",
+      "rows": 570,
+      "nflverse_timestamp": "2026-10-10 11:19:34 EDT"
+    },
+    {
+      "file": "pbp_play_by_play_2025.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_2025.parquet",
+      "bytes": 20337029,
+      "sha256": "c6ecedd6d678cc37ed316b23ef84ee1ec6abb69c514bb11868a7ebd5a367df29",
+      "rows": 48771,
+      "nflverse_timestamp": "2026-10-10 11:17:28 EDT"
+    }
+  ],
+  "notes": [
+    "2023 wk 16 NE: pbp special-teams TDs 1 vs stats 0",
+    "2024 wk 4 ATL: pbp special-teams TDs 1 vs stats 0"
+  ]
+}

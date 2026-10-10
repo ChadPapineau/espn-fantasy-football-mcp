@@ -5,6 +5,11 @@
 // Deterministic: tier probabilities from the gamma CDF, every point value from the scoring engine
 // under the league's S (never a hard-coded tier table). Pure. Ported in spirit from sibling
 // @f6ba81e (src/domain/analytics/kdef.ts); the ESPN brackets and the deterministic quadrature are new.
+// Phase 3 (plan 10 §3.3 C7, measured on 2023–2025 in docs/evals/phase3-kdst-news.md): the rare-event
+// constant carries every TD member a D/ST line holds (ESPN 94, 103, 104, 101, 102, 93, 105), so a
+// league that scores the INT-, fumble-, kick-, punt- or blocked-kick-return TD items (every recorded
+// league does; none scores the combined 94) gets them — before, only safeties and blocks counted;
+// takeaways carry forced fumbles (106) for a league that scores them.
 import { score as engineScore } from "../scoring/engine.js";
 import {
   asPositionId,
@@ -32,6 +37,29 @@ export interface KdstExpectation {
   readonly implied_total: number | null;
   readonly opp_implied_total: number | null;
 }
+
+/**
+ * Rare D/ST events per team-game (plan 10 §3.3 C7; sibling research 05 §8.2 "a small league-average
+ * constant … re-fit to this league's S"): nflverse 2023–2025, regular-season weeks 1–17, all 1,536
+ * team-games of tests/backtest/data/kdst_history, through the shipped translator (the line members
+ * a realised D/ST week carries, so S scores the expectation exactly as it scores the week).
+ * `dst_td` (94) = INT- + fumble-return TDs; `ret_td_total` (105) = every return TD, defensive and
+ * special-teams. Held equal to the history by tests/backtest/kdst-history.test.ts.
+ */
+export const DST_RARE_RATES: Readonly<Record<Canonical, number>> = Object.freeze({
+  dst_td: 0.0944,
+  dst_int_td: 0.0632,
+  dst_fr_td: 0.0313,
+  kr_td: 0.0111,
+  pr_td: 0.0176,
+  dst_blk_td: 0.0085,
+  ret_td_total: 0.1322,
+  dst_safety: 0.0273,
+  dst_blk: 0.071,
+});
+
+/** Forced fumbles per team-game (ESPN 106), the same history; scaled like the other takeaways. */
+export const DST_FF_RATE = 0.7663;
 
 const DST_POSITION = 16;
 const K_POSITION = 5;
@@ -85,7 +113,8 @@ function tierPoints(settings: ScoringSettings): {
  * A D/ST's expectation against an opponent whose implied total is `oppImplied` (null → the league
  * average): points allowed ~ Gamma(mean = oppImplied, cv), integer-rounded by continuity; yards
  * allowed ~ Gamma(mean = base × (opp / league)^β, cv) in 10-yard steps; sacks and takeaways
- * Poisson at rates scaled (league / opp)^β; return TDs, safeties and blocks constant. Every tier's
+ * Poisson at rates scaled (league / opp)^β (forced fumbles with the takeaways); return and
+ * defensive TDs, safeties and blocks constant at `DST_RARE_RATES`. Every tier's
  * points come from scoring a one-stat line under S, so the league's own brackets decide.
  */
 export function dstExpectation(
@@ -116,14 +145,10 @@ export function dstExpectation(
   const sacks = scoreOf(settings, { dst_sack: r.dst_sack * scale }, DST_POSITION);
   const takeaways = scoreOf(
     settings,
-    { dst_int: r.dst_int * scale, dst_fr: r.dst_fr * scale },
+    { dst_int: r.dst_int * scale, dst_fr: r.dst_fr * scale, dst_ff: DST_FF_RATE * scale },
     DST_POSITION,
   );
-  const rare = scoreOf(
-    settings,
-    { dst_td: r.dst_td, dst_safety: r.dst_safety, dst_blk: r.dst_blk },
-    DST_POSITION,
-  );
+  const rare = scoreOf(settings, DST_RARE_RATES, DST_POSITION);
   return {
     e: round(brackets + sacks + takeaways + rare, 3),
     brackets_e: round(brackets, 3),
