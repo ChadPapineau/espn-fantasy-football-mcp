@@ -7,7 +7,9 @@
 // its ×0.5 / ×1.5 band — a candidate inside the band is `marginal`, never a crisp claim or pass, and
 // never enters `claim_list` (ADV OBJ-03, R2 nit 3); claim ⇔ s ≥ Π outside it; at k = N claim
 // anything positive; the Wednesday scramble list; p_clears_to_fa with its cold-start interval.
-// Cooperative over (candidate, drop) units. Pure. New here (the sibling's E5 was FAAB / K-DEF only).
+// Cooperative over (candidate, drop) units. Phase 3 (plan 10 C5; additive): `premium_fit` swaps in the
+// premium re-solved from the league's own feed (`premium_basis: "league_fitted"`).
+// Pure. New here (the sibling's E5 was FAAB / K-DEF only).
 import type { Clock } from "../clock.js";
 import { auditIr, type RosterSeat } from "../league/roster.js";
 import { nextWaiverRun, waiverOrderRuleOf } from "../league/rules.js";
@@ -37,7 +39,7 @@ import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
 import { newestAsOf } from "./inputs.js";
 import { clamp, normalDist, round, zeroDist } from "./math.js";
 import { positionCv, type ImpliedTotal } from "./projection.js";
-import { demandOf, solvePremiumTable } from "./waiverDp.js";
+import { demandOf, solvePremiumTable, type PremiumTable } from "./waiverDp.js";
 import {
   CLEARS_TO_FA_MIN_COLD_WIDTH,
   PREMIUM_BAND_MULTIPLIERS,
@@ -45,6 +47,7 @@ import {
   type ClearsToFa,
   type InputFreshness,
   type KdstDetail,
+  type PremiumBasis,
   type Rec,
   type RecSubject,
   type WaiverCandidate,
@@ -125,6 +128,23 @@ export interface WaiverRequest {
   readonly clock: Clock;
   readonly pacer?: Pacer;
   readonly inputs?: readonly InputFreshness[];
+  /**
+   * The premium re-solved from the league's own feed (Phase 3, plan 10 C5; waiver-fit/
+   * `fitLeaguePremium`; additive). Used only when its basis is `league_fitted` and it was solved
+   * for this league's size; otherwise the cold-start table (said in a warning when sizes differ).
+   */
+  readonly premium_fit?: PremiumFitInput | null;
+}
+
+/** The fitted premium E5 can read (structurally waiver-fit's `LeaguePremiumFit`). */
+export interface PremiumFitInput {
+  readonly basis: PremiumBasis;
+  readonly teams: number;
+  readonly base: PremiumTable;
+  readonly low: PremiumTable;
+  readonly high: PremiumTable;
+  /** One generated line for the assumptions. */
+  readonly summary: string;
 }
 
 /** E5's outcome. */
@@ -340,11 +360,22 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       ),
     );
   const atLast = k >= N;
-  const tables = {
-    base: solvePremiumTable({ teams: N }),
-    low: solvePremiumTable({ teams: N, surplusScale: PREMIUM_BAND_MULTIPLIERS.low }),
-    high: solvePremiumTable({ teams: N, surplusScale: PREMIUM_BAND_MULTIPLIERS.high }),
-  };
+  // the league-fitted premium when the feed re-solved it for this league size (Phase 3, plan 10 C5)
+  const fit = req.premium_fit ?? null;
+  const fitted = fit !== null && fit.basis === "league_fitted" && fit.teams === N;
+  if (fit !== null && fit.basis === "league_fitted" && fit.teams !== N)
+    warnings.push(
+      `the fitted premium was solved for ${String(fit.teams)} teams, not ${String(N)}: the cold-start table is used`,
+    );
+  if (fitted)
+    assumptions.push(A(fit.summary, "the league's feed grows or the wire changes character"));
+  const tables = fitted
+    ? { base: fit.base, low: fit.low, high: fit.high }
+    : {
+        base: solvePremiumTable({ teams: N }),
+        low: solvePremiumTable({ teams: N, surplusScale: PREMIUM_BAND_MULTIPLIERS.low }),
+        high: solvePremiumTable({ teams: N, surplusScale: PREMIUM_BAND_MULTIPLIERS.high }),
+      };
   const premium = atLast || modeUsed === "faab" ? 0 : round(tables.base.premium(k, wEff), 3);
   const band =
     atLast || modeUsed === "faab"
@@ -818,7 +849,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       W: round(wEff, 3),
       premium,
       premium_band: band,
-      premium_basis: "cold_start_table",
+      premium_basis: fitted ? "league_fitted" : "cold_start_table",
       per_week_threshold: perWeek,
       value_basis: "espn_ros",
       candidates: ranked,

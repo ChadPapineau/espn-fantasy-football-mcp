@@ -8,6 +8,8 @@
 // threshold at horizon W + 1; that convention reproduces every cell (Π(2, 13) = 29.5, V(1, 16) =
 // 95.8). The premium band re-solves at ×0.5 / ×1.5 surplus (plan 07 E5; ADV OBJ-03): the surplus
 // values scale, the demand curve keeps reading the base rate (decision recorded). Pure; memoised.
+// Phase 3 (plan 10 §3.3, C5; additive): `rates` re-solves the DP from a league's own surplus
+// distribution (src/domain/analytics/waiver-fit/), with `drift` its fitted c.
 // New here (the sibling is a FAAB league).
 import { WAIVER_DP } from "./constants.js";
 import { PREMIUM_BAND_MULTIPLIERS } from "./types.js";
@@ -20,8 +22,37 @@ export interface WaiverDpParams {
   readonly surplusScale?: number;
   /** Multiplies the demand curve (sensitivity checks only). */
   readonly demandScale?: number;
-  /** Overrides the drift c (sensitivity checks only). */
+  /** Overrides the drift c (sensitivity checks; Phase 3: the league-fitted drift, waiver-fit/). */
   readonly drift?: number;
+  /**
+   * Overrides the per-week surplus-rate distribution of the best weekly claim (Phase 3, plan 10
+   * §3.3 / C5: the league's own distribution, `premium_basis: "league_fitted"`; additive). Every
+   * `r` finite and ≥ 0, every `p` finite and ≥ 0, Σ p = 1 within 1e-6; omitted = WAIVER_DP.rates.
+   */
+  readonly rates?: readonly { readonly r: number; readonly p: number }[];
+}
+
+/** Whether a rate distribution is usable by the DP (see WaiverDpParams.rates). */
+export function isValidRateDistribution(
+  rates: readonly { readonly r: number; readonly p: number }[],
+): boolean {
+  if (!Array.isArray(rates) || rates.length === 0 || rates.length > 64) return false;
+  let sum = 0;
+  for (const x of rates as readonly unknown[]) {
+    if (typeof x !== "object" || x === null) return false;
+    const { r, p } = x as { readonly r?: unknown; readonly p?: unknown };
+    if (
+      typeof r !== "number" ||
+      typeof p !== "number" ||
+      !Number.isFinite(r) ||
+      r < 0 ||
+      !Number.isFinite(p) ||
+      p < 0
+    )
+      return false;
+    sum += p;
+  }
+  return Math.abs(sum - 1) <= 1e-6;
 }
 
 /** A solved table: Π and V by position k (1..N) and the research's W (weeks after this one). */
@@ -34,6 +65,8 @@ export interface PremiumTable {
 }
 
 const CACHE = new Map<string, PremiumTable>();
+/** Solved tables kept (fitted distributions add keys; the oldest is evicted past this — additive). */
+const CACHE_MAX = 64;
 
 function binomialRow(n: number, c: number): number[] {
   // P(D = d) for D ~ Binomial(n, c), d = 0..n
@@ -60,7 +93,14 @@ export function solvePremiumTable(params: WaiverDpParams): PremiumTable {
     !(c >= 0 && c < 1)
   )
     throw new RangeError("waiverDp: bad sensitivity parameter");
-  const key = `${String(n)}:${String(scale)}:${String(dScale)}:${String(c)}`;
+  if (params.rates !== undefined && !isValidRateDistribution(params.rates))
+    throw new RangeError("waiverDp: bad rate distribution");
+  const rates = params.rates ?? WAIVER_DP.rates;
+  const ratesKey =
+    params.rates === undefined
+      ? ""
+      : `:${params.rates.map((x) => `${String(x.r)}/${String(x.p)}`).join(",")}`;
+  const key = `${String(n)}:${String(scale)}:${String(dScale)}:${String(c)}${ratesKey}`;
   const hit = CACHE.get(key);
   if (hit !== undefined) return hit;
 
@@ -83,7 +123,7 @@ export function solvePremiumTable(params: WaiverDpParams): PremiumTable {
     const next = vpass.map((v, k) => {
       if (k === 0) return 0;
       let e = 0;
-      for (const { r, p } of WAIVER_DP.rates) {
+      for (const { r, p } of rates) {
         const surplus = r * scale * h;
         e += p * (1 - q(r)) ** (k - 1) * Math.max(surplus - rd(pih, k), 0);
       }
@@ -107,6 +147,10 @@ export function solvePremiumTable(params: WaiverDpParams): PremiumTable {
     premium: (k: number, W: number) => look(Pi, k, W),
     value: (k: number, W: number) => look(V, k, W),
   });
+  if (CACHE.size >= CACHE_MAX) {
+    const oldest = CACHE.keys().next().value;
+    if (oldest !== undefined) CACHE.delete(oldest);
+  }
   CACHE.set(key, table);
   return table;
 }
