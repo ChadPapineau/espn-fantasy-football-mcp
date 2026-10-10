@@ -1,0 +1,537 @@
+// make-excerpt.ts — writes tests/domain/analytics/projections-v2/data/ (plan 10 C1, D9: the
+// projection backtest over three nflverse seasons; research 05 §8.4 #2) from release files
+// downloaded by hand (the grounding step of plan 10 §3.3 — no agent, test or CI job fetches). Not a
+// test and never run by CI. Afterwards run prettier on the JSON files and review the diff (the
+// scanner runs at commit).
+//
+//   scripts/dev/with-node.sh npx tsx tests/domain/analytics/projections-v2/helpers/make-excerpt.ts \
+//     <download-dir> <players.parquet>
+//
+// <download-dir> holds, per season s in 2023–2025, the files the history refresh names
+// (src/sources/nflverse): stats_player_stats_player_week_<s>.parquet, snap_counts_snap_counts_<s>,
+// pbp_play_by_play_<s>, stats_team_stats_team_week_<s>, injuries_injuries_<s>,
+// ffopportunity_ep_weekly_<s>, and schedules_games.parquet. <players.parquet> is nflverse's
+// players file (the pfr_id and espn_id crosswalks). Row rules: regular season, weeks 1–18, QB/RB/
+// WR/TE; nothing of any fantasy league except the ESPN player ids league-b's recorded box scores
+// name (public NFL player ids).
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { parquetMetadata, parquetReadObjects } from "hyparquet";
+import { encodeTsv, tsvRow } from "../../../../sources/nflverse/helpers/tsv.js";
+import {
+  DATA_DIR,
+  EP_WEEK_COLUMNS,
+  EXCERPT_LAST_WEEK,
+  EXCERPT_POSITIONS,
+  EXCERPT_SEASONS,
+  FFOPP_REL,
+  INJURY_WEEK_COLUMNS,
+  MAX_PART_BYTES,
+  NFLVERSE_REL,
+  PLAYER_WEEK_COLUMNS,
+  ROOT,
+  TEAM_WEEK_COLUMNS,
+  XWALK_COLUMNS,
+  type ExcerptFile,
+  type ExcerptManifest,
+  type ExcerptTable,
+  type ExcerptUpstream,
+} from "./excerpt-format.js";
+
+type Row = Record<string, unknown>;
+
+const [dlArg, playersArg] = process.argv.slice(2);
+if (dlArg === undefined || playersArg === undefined)
+  throw new Error("usage: make-excerpt.ts <download-dir> <players.parquet>");
+const DL: string = dlArg;
+const PLAYERS: string = playersArg;
+
+const sha = (b: Uint8Array | string): string => createHash("sha256").update(b).digest("hex");
+const num = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v)
+    ? v
+    : typeof v === "bigint"
+      ? Number(v)
+      : typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v)
+        ? Number(v)
+        : null;
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+const r4 = (v: number | null): number | null => (v === null ? null : Math.round(v * 1e4) / 1e4);
+
+interface Read {
+  readonly rows: Row[];
+  readonly upstream: ExcerptUpstream;
+}
+
+async function read(path: string, url: string, columns: readonly string[]): Promise<Read> {
+  const buf = readFileSync(path);
+  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  const metadata = parquetMetadata(ab);
+  const rows = (await parquetReadObjects({ file: ab, metadata, columns: [...columns] })) as Row[];
+  return { rows, upstream: { url, bytes: buf.byteLength, sha256: sha(buf) } };
+}
+
+const isPos = (p: unknown): boolean => (EXCERPT_POSITIONS as readonly unknown[]).includes(p);
+const regWeek = (w: unknown): boolean =>
+  typeof w === "number" && Number.isInteger(w) && w >= 1 && w <= EXCERPT_LAST_WEEK;
+
+mkdirSync(DATA_DIR, { recursive: true });
+for (const f of readdirSync(DATA_DIR))
+  if (f.endsWith(".tsv") || f.endsWith(".excerpt.json")) rmSync(join(DATA_DIR, f));
+const files: ExcerptFile[] = [];
+
+/** Writes one table's header + parts and records it in the manifest. */
+function writeTable(
+  table: ExcerptTable,
+  season: number | null,
+  columns: readonly string[],
+  values: readonly (readonly unknown[])[],
+  upstream: readonly ExcerptUpstream[],
+  licence: ExcerptFile["licence"],
+  rule: string,
+): void {
+  const stem = season === null ? `${table}.excerpt` : `${table}_${String(season)}.excerpt`;
+  const schema = columns.map((name) => ({ name }));
+  const headerBytes = Buffer.byteLength(encodeTsv(schema, []));
+  const parts: { name: string; text: string; rows: number }[] = [];
+  let start = 0;
+  do {
+    let end = start;
+    let size = headerBytes;
+    while (end < values.length) {
+      const line = Buffer.byteLength(tsvRow(values[end] ?? [])) + 1;
+      if (end > start && size + line > MAX_PART_BYTES) break;
+      size += line;
+      end++;
+    }
+    parts.push({
+      name: `${stem}.${String(parts.length + 1)}.tsv`,
+      text: encodeTsv(schema, values.slice(start, end)),
+      rows: end - start,
+    });
+    start = end;
+  } while (start < values.length);
+  for (const p of parts) writeFileSync(join(DATA_DIR, p.name), p.text);
+  const header = {
+    $comment: `${licence === "CC-BY-SA-4.0" ? "ffopportunity data, CC BY-SA 4.0" : "nflverse data, CC-BY 4.0"} (see README.md): ${rule}. Rows are in the .tsv parts: a header line of column names, then one row per line, one JSON literal per cell. Generated by tests/domain/analytics/projections-v2/helpers/make-excerpt.ts.`,
+    columns,
+    rows: values.length,
+    parts: parts.map((p) => p.name),
+  };
+  writeFileSync(join(DATA_DIR, `${stem}.json`), `${JSON.stringify(header, null, 2)}\n`);
+  files.push({
+    path: `${stem}.json`,
+    table,
+    season,
+    licence,
+    rows: values.length,
+    columns,
+    parts: parts.map((p) => ({
+      path: p.name,
+      rows: p.rows,
+      bytes: Buffer.byteLength(p.text),
+      sha256: sha(p.text),
+    })),
+    upstream,
+  });
+}
+
+// --- crosswalks (nflverse players) ------------------------------------------------------------------
+const playersRead = await read(PLAYERS, `${NFLVERSE_REL}/players/players.parquet`, [
+  "gsis_id",
+  "pfr_id",
+  "espn_id",
+]);
+const pfrToGsis = new Map<string, string>();
+const espnToGsis = new Map<string, string>();
+for (const r of playersRead.rows) {
+  const g = str(r.gsis_id);
+  if (g === null || !/^00-\d{7}$/.test(g)) continue;
+  const pfr = str(r.pfr_id);
+  if (pfr !== null) pfrToGsis.set(pfr, g);
+  const espn = str(r.espn_id);
+  if (espn !== null && /^\d+$/.test(espn)) espnToGsis.set(espn, g);
+}
+
+// --- schedules (one file, every season) -------------------------------------------------------------
+const gamesRead = await read(
+  join(DL, "schedules_games.parquet"),
+  `${NFLVERSE_REL}/schedules/games.parquet`,
+  [
+    "season",
+    "game_type",
+    "week",
+    "home_team",
+    "away_team",
+    "home_score",
+    "away_score",
+    "spread_line",
+    "total_line",
+    "roof",
+    "temp",
+    "wind",
+  ],
+);
+
+for (const season of EXCERPT_SEASONS) {
+  const s = String(season);
+  // ---- pbp: per player red-zone / goal-line counts; per team plays, dropbacks, rz plays, xpass ----
+  const pbp = await read(
+    join(DL, `pbp_play_by_play_${s}.parquet`),
+    `${NFLVERSE_REL}/pbp/play_by_play_${s}.parquet`,
+    [
+      "season_type",
+      "week",
+      "posteam",
+      "play_type",
+      "yardline_100",
+      "pass_attempt",
+      "rush_attempt",
+      "qb_dropback",
+      "sack",
+      "two_point_attempt",
+      "receiver_player_id",
+      "rusher_player_id",
+      "xpass",
+      "pass_touchdown",
+      "rush_touchdown",
+    ],
+  );
+  interface PbpCounts {
+    rz_t: number;
+    rz_c: number;
+    gl_c: number;
+    rz_rtd: number;
+    rz_utd: number;
+    gl_utd: number;
+  }
+  const blank = (): PbpCounts => ({ rz_t: 0, rz_c: 0, gl_c: 0, rz_rtd: 0, rz_utd: 0, gl_utd: 0 });
+  const pbpPlayer = new Map<string, PbpCounts>();
+  const pbpTeam = new Map<
+    string,
+    { plays: number; db: number; ru: number; rz: number; xs: number; xn: number }
+  >();
+  for (const p of pbp.rows) {
+    if (p.season_type !== "REG" || !regWeek(p.week)) continue;
+    if (num(p.two_point_attempt) === 1) continue;
+    const pt = str(p.play_type);
+    if (pt !== "pass" && pt !== "run") continue;
+    const team = str(p.posteam);
+    if (team === null) continue;
+    const wk = Number(p.week);
+    const yl = num(p.yardline_100);
+    const rz = yl !== null && yl <= 20;
+    const gl = yl !== null && yl <= 5;
+    const tk = `${team}|${String(wk)}`;
+    const t = pbpTeam.get(tk) ?? { plays: 0, db: 0, ru: 0, rz: 0, xs: 0, xn: 0 };
+    const dropback = num(p.qb_dropback) === 1;
+    const rush = num(p.rush_attempt) === 1;
+    const pass = num(p.pass_attempt) === 1;
+    t.plays += 1;
+    if (dropback) t.db += 1;
+    else if (rush) t.ru += 1;
+    if (rz && (pass || rush) && num(p.sack) !== 1) t.rz += 1;
+    const xp = num(p.xpass);
+    if (xp !== null) {
+      t.xs += xp;
+      t.xn += 1;
+    }
+    pbpTeam.set(tk, t);
+    if (!rz) continue;
+    const rec = str(p.receiver_player_id);
+    if (pass && num(p.sack) !== 1 && rec !== null) {
+      const k = `${rec}|${String(wk)}`;
+      const e = pbpPlayer.get(k) ?? blank();
+      e.rz_t += 1;
+      if (num(p.pass_touchdown) === 1) e.rz_rtd += 1;
+      pbpPlayer.set(k, e);
+    }
+    const rusher = str(p.rusher_player_id);
+    if (rush && rusher !== null) {
+      const k = `${rusher}|${String(wk)}`;
+      const e = pbpPlayer.get(k) ?? blank();
+      const td = num(p.rush_touchdown) === 1;
+      e.rz_c += 1;
+      if (td) e.rz_utd += 1;
+      if (gl) {
+        e.gl_c += 1;
+        if (td) e.gl_utd += 1;
+      }
+      pbpPlayer.set(k, e);
+    }
+  }
+
+  // ---- snap counts (pfr id → gsis via the players file) ----
+  const snaps = await read(
+    join(DL, `snap_counts_snap_counts_${s}.parquet`),
+    `${NFLVERSE_REL}/snap_counts/snap_counts_${s}.parquet`,
+    ["game_type", "week", "pfr_player_id", "offense_snaps", "offense_pct"],
+  );
+  const snapOf = new Map<string, { n: number | null; pct: number | null }>();
+  for (const r of snaps.rows) {
+    if (r.game_type !== "REG" || !regWeek(r.week)) continue;
+    const pfr = str(r.pfr_player_id);
+    const g = pfr === null ? undefined : pfrToGsis.get(pfr);
+    if (g === undefined) continue;
+    snapOf.set(`${g}|${String(r.week)}`, {
+      n: num(r.offense_snaps),
+      pct: r4(num(r.offense_pct)),
+    });
+  }
+
+  // ---- player weeks ----
+  const stats = await read(
+    join(DL, `stats_player_stats_player_week_${s}.parquet`),
+    `${NFLVERSE_REL}/stats_player/stats_player_week_${s}.parquet`,
+    [...PLAYER_WEEK_COLUMNS.slice(0, 29), "position_group", "season_type"],
+  );
+  const pw = stats.rows
+    .filter(
+      (r) =>
+        r.season_type === "REG" &&
+        r.season === season &&
+        regWeek(r.week) &&
+        isPos(r.position_group) &&
+        typeof r.player_id === "string",
+    )
+    .sort(
+      (a, b) =>
+        Number(a.week) - Number(b.week) || String(a.player_id).localeCompare(String(b.player_id)),
+    );
+  const pwValues = pw.map((r) => {
+    const k = `${String(r.player_id)}|${String(r.week)}`;
+    const sn = snapOf.get(k);
+    const pb = pbpPlayer.get(k);
+    return PLAYER_WEEK_COLUMNS.map((c) => {
+      if (c === "position") return r.position_group;
+      if (c === "offense_snaps") return sn?.n ?? null;
+      if (c === "offense_pct") return sn?.pct ?? null;
+      if (c === "rz_targets") return pb?.rz_t ?? 0;
+      if (c === "rz_carries") return pb?.rz_c ?? 0;
+      if (c === "gl_carries") return pb?.gl_c ?? 0;
+      if (c === "rz_rec_tds") return pb?.rz_rtd ?? 0;
+      if (c === "rz_rush_tds") return pb?.rz_utd ?? 0;
+      if (c === "gl_rush_tds") return pb?.gl_utd ?? 0;
+      const v = r[c];
+      if (typeof v === "string") return v;
+      return num(v);
+    });
+  });
+  writeTable(
+    "player_week",
+    season,
+    PLAYER_WEEK_COLUMNS,
+    pwValues,
+    [stats.upstream, snaps.upstream, pbp.upstream, playersRead.upstream],
+    "CC-BY-4.0",
+    `the ${s} regular-season player-weeks (weeks 1-${String(EXCERPT_LAST_WEEK)}) of position_group QB/RB/WR/TE from stats_player_week_${s} (the scoring and opportunity columns), joined to snap_counts_${s} on the players file's pfr_id, with red-zone (yardline_100 <= 20) targets, carries and their touchdowns and goal-line (<= 5) carries and their touchdowns counted from play_by_play_${s} (two-point tries excluded)`,
+  );
+
+  // ---- team weeks ----
+  const team = await read(
+    join(DL, `stats_team_stats_team_week_${s}.parquet`),
+    `${NFLVERSE_REL}/stats_team/stats_team_week_${s}.parquet`,
+    [
+      "season",
+      "week",
+      "team",
+      "season_type",
+      "opponent_team",
+      "attempts",
+      "sacks_suffered",
+      "carries",
+      "targets",
+    ],
+  );
+  const games = gamesRead.rows.filter(
+    (g) => g.season === season && g.game_type === "REG" && regWeek(g.week),
+  );
+  const gameOf = (t: string, w: number): Row | undefined =>
+    games.find((g) => g.week === w && (g.home_team === t || g.away_team === t));
+  const tw = team.rows
+    .filter((r) => r.season_type === "REG" && r.season === season && regWeek(r.week))
+    .sort(
+      (a, b) => Number(a.week) - Number(b.week) || String(a.team).localeCompare(String(b.team)),
+    );
+  const twValues = tw.map((r) => {
+    const t = String(r.team);
+    const w = Number(r.week);
+    const g = gameOf(t, w);
+    const home = g === undefined ? null : g.home_team === t;
+    const spreadHome = g === undefined ? null : num(g.spread_line);
+    const spread = spreadHome === null || home === null ? null : home ? spreadHome : -spreadHome;
+    const pf = g === undefined ? null : num(home === true ? g.home_score : g.away_score);
+    const pa = g === undefined ? null : num(home === true ? g.away_score : g.home_score);
+    const p = pbpTeam.get(`${t}|${String(w)}`);
+    const out: Record<string, unknown> = {
+      team: t,
+      season,
+      week: w,
+      opponent: str(r.opponent_team),
+      home,
+      attempts: num(r.attempts),
+      sacks_suffered: num(r.sacks_suffered),
+      carries: num(r.carries),
+      targets: num(r.targets),
+      points_for: pf,
+      points_against: pa,
+      spread,
+      total_line: g === undefined ? null : num(g.total_line),
+      roof: g === undefined ? null : str(g.roof),
+      temp: g === undefined ? null : num(g.temp),
+      wind: g === undefined ? null : num(g.wind),
+      plays: p?.plays ?? null,
+      dropbacks: p?.db ?? null,
+      rushes: p?.ru ?? null,
+      rz_plays: p?.rz ?? null,
+      xpass_sum: p === undefined ? null : r4(p.xs),
+      xpass_n: p?.xn ?? null,
+    };
+    return TEAM_WEEK_COLUMNS.map((c) => out[c] ?? null);
+  });
+  writeTable(
+    "team_week",
+    season,
+    TEAM_WEEK_COLUMNS,
+    twValues,
+    [team.upstream, gamesRead.upstream, pbp.upstream],
+    "CC-BY-4.0",
+    `the ${s} regular-season team-weeks (weeks 1-${String(EXCERPT_LAST_WEEK)}) of stats_team_week_${s} (offensive volume), joined to schedules/games.parquet (score, the market line from the team's side: spread > 0 = favoured, total_line, roof, temp, wind) and to play_by_play_${s} (pass/run plays, dropbacks, designed rushes, red-zone plays, the sum and count of xpass)`,
+  );
+
+  // ---- injury reports ----
+  const inj = await read(
+    join(DL, `injuries_injuries_${s}.parquet`),
+    `${NFLVERSE_REL}/injuries/injuries_${s}.parquet`,
+    [
+      "season",
+      "game_type",
+      "team",
+      "week",
+      "gsis_id",
+      "position",
+      "report_status",
+      "practice_status",
+    ],
+  );
+  const seen = new Set<string>();
+  const ijValues: unknown[][] = [];
+  for (const r of [...inj.rows].sort(
+    (a, b) => Number(a.week) - Number(b.week) || String(a.gsis_id).localeCompare(String(b.gsis_id)),
+  )) {
+    if (r.game_type !== "REG" || r.season !== season || !regWeek(r.week)) continue;
+    if (!isPos(r.position) || typeof r.gsis_id !== "string") continue;
+    const k = `${r.gsis_id}|${String(r.week)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const clean = (v: unknown): string | null => {
+      const t = str(v)?.trim() ?? "";
+      return t.length > 0 ? t : null;
+    };
+    ijValues.push([
+      r.gsis_id,
+      season,
+      Number(r.week),
+      str(r.team),
+      str(r.position),
+      clean(r.report_status),
+      clean(r.practice_status),
+    ]);
+  }
+  writeTable(
+    "injury_week",
+    season,
+    INJURY_WEEK_COLUMNS,
+    ijValues,
+    [inj.upstream],
+    "CC-BY-4.0",
+    `the ${s} regular-season final injury-report rows (weeks 1-${String(EXCERPT_LAST_WEEK)}) of injuries_${s} for QB/RB/WR/TE: the report and practice status only (whitespace-only statuses read as null; the first row of a duplicated player-week kept)`,
+  );
+
+  // ---- expected points (ffopportunity, CC BY-SA) ----
+  const ep = await read(
+    join(DL, `ffopportunity_ep_weekly_${s}.parquet`),
+    `${FFOPP_REL}/ep_weekly_${s}.parquet`,
+    [...EP_WEEK_COLUMNS, "position"],
+  );
+  const epValues = ep.rows
+    .filter(
+      (r) =>
+        num(r.season) === season &&
+        regWeek(num(r.week)) &&
+        isPos(r.position) &&
+        typeof r.player_id === "string",
+    )
+    .sort(
+      (a, b) =>
+        Number(a.week) - Number(b.week) || String(a.player_id).localeCompare(String(b.player_id)),
+    )
+    .map((r) =>
+      EP_WEEK_COLUMNS.map((c) =>
+        c === "player_id" ? r.player_id : c === "season" ? season : r4(num(r[c])),
+      ),
+    );
+  writeTable(
+    "ep_week",
+    season,
+    EP_WEEK_COLUMNS,
+    epValues,
+    [ep.upstream],
+    "CC-BY-SA-4.0",
+    `the ${s} rows (weeks 1-${String(EXCERPT_LAST_WEEK)}) of ep_weekly_${s} for QB/RB/WR/TE players: the expected receptions, touchdowns, interceptions and fantasy points, rounded to 4 decimals`,
+  );
+}
+
+// ---- the ESPN → GSIS crosswalk of league-b's recorded box-score players (QB/RB/WR/TE) ----
+const espnIds = new Set<string>();
+for (const season of [2024, 2025]) {
+  const dir = join(ROOT, "fixtures/espn/recorded/history", String(season), "league-b");
+  for (const f of readdirSync(dir).filter((x) => x.startsWith("mBoxscore."))) {
+    const body = JSON.parse(readFileSync(join(dir, f), "utf8")) as {
+      schedule?: {
+        home?: { rosterForCurrentScoringPeriod?: { entries?: Row[] } };
+        away?: { rosterForCurrentScoringPeriod?: { entries?: Row[] } };
+      }[];
+    };
+    for (const m of body.schedule ?? [])
+      for (const side of [m.home, m.away])
+        for (const e of side?.rosterForCurrentScoringPeriod?.entries ?? []) {
+          const pe = e.playerPoolEntry as { player?: { id?: number; defaultPositionId?: number } };
+          const pos = pe.player?.defaultPositionId;
+          if (pe.player?.id !== undefined && pos !== undefined && pos >= 1 && pos <= 4)
+            espnIds.add(String(pe.player.id));
+        }
+  }
+}
+const xValues = [...espnIds]
+  .sort((a, b) => Number(a) - Number(b))
+  .flatMap((id) => {
+    const g = espnToGsis.get(id);
+    return g === undefined ? [] : [[id, g]];
+  });
+writeTable(
+  "espn_xwalk",
+  null,
+  XWALK_COLUMNS,
+  xValues,
+  [playersRead.upstream],
+  "CC-BY-4.0",
+  `the espn_id -> gsis_id pairs of players.parquet for the QB/RB/WR/TE players in league-b's recorded 2024-2025 box scores (fixtures/espn/recorded/history; ${String(espnIds.size - xValues.length)} of ${String(espnIds.size)} ids have no nflverse row)`,
+);
+
+const manifest: ExcerptManifest = {
+  $comment:
+    "The plan 10 C1 projection-backtest excerpt (research 05 §8.4 #2): nflverse data (CC-BY 4.0) and ffopportunity data (CC BY-SA 4.0, the ep_week files only) — see README.md. Generated by tests/domain/analytics/projections-v2/helpers/make-excerpt.ts; read by tests/domain/analytics/projections-v2/helpers/data.ts, which re-hashes every part.",
+  retrieved: new Date().toISOString().slice(0, 10),
+  files,
+};
+writeFileSync(join(DATA_DIR, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+console.error(
+  files
+    .map(
+      (f) =>
+        `${f.path} ${String(f.rows)} rows ${String(f.parts.reduce((a, p) => a + p.bytes, 0))} B in ${String(f.parts.length)} parts`,
+    )
+    .join("\n"),
+);
