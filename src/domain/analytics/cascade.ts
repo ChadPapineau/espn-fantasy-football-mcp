@@ -12,6 +12,12 @@
 // status only — eligible only for OUT / INJURY_RESERVE (research 05 §4.3; plan 10 B6); a claim /
 // pass per beneficiary from E5 through an injected evaluator (plan 07 E7 "from E5"). ESPN's outlook
 // text is not an input (it is a claim for E10). Pure. New here.
+// Phase 3 (plan 10 §3.3 "the redistribution prior table from pbp history", C6) — cascade v2, an
+// additive path: when the request carries `priors` (cascade-priors/ — the table built from 2023–2025
+// pbp absences) and the injured player is an RB, WR or TE, the prior split is the table's
+// `vacated × f[position, team context][role]` (cascade-priors/predict.ts) instead of the affinity
+// heuristic; the team-evidence blend, the cap at the vacated share and everything downstream are
+// unchanged. Without `priors` (or for a QB) the v1 path below runs exactly as before.
 import type { Clock } from "../clock.js";
 import { auditIr, type RosterSeat } from "../league/roster.js";
 import { slotClassOf, slotNameOf } from "../league/slots.js";
@@ -25,6 +31,8 @@ import type {
   Week,
 } from "../league/types.js";
 import { P_ACTIVE_BY_STATUS } from "./constants.js";
+import { isInjuredPosition, priorSplit, type PriorSplit } from "./cascade-priors/predict.js";
+import type { CascadePriorTable } from "./cascade-priors/types.js";
 import { ensure } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
 import { AFFINITY, CASCADE } from "./marketConstants.js";
@@ -71,6 +79,8 @@ export interface CascadeTeammate {
   } | null;
   /** His own projection per horizon week (a backup QB's baseline). */
   readonly weekly?: readonly (number | null)[];
+  /** v2: his depth-chart rank at his position (the role tie-break; null/absent = unlisted). */
+  readonly depth_rank?: number | null;
 }
 
 /** The injured player. */
@@ -129,6 +139,8 @@ export interface CascadeRequest {
   ) => Promise<ReadonlyMap<number, WaiverVerdict>>;
   readonly clock: Clock;
   readonly inputs?: readonly InputFreshness[];
+  /** v2 (Phase 3): the redistribution prior table; absent/null → the v1 role-affinity split. */
+  readonly priors?: CascadePriorTable | null;
 }
 
 /** E7's outcome. */
@@ -188,17 +200,53 @@ interface Alloc {
   readonly delta: Record<Component, number>;
 }
 
+/** "2023–2025" (or one season, or "no seasons") — the table's span in an assumption. */
+const seasonSpan = (s: readonly number[]): string =>
+  s.length === 0
+    ? "no seasons"
+    : s.length === 1
+      ? String(s[0])
+      : `${String(s[0])}–${String(s[s.length - 1])}`;
+
+/** P(active) of a teammate from his ESPN status (an unknown status reads as active). */
+const pActiveOf = (m: CascadeTeammate): number =>
+  m.injury_status !== null && Object.hasOwn(P_ACTIVE_BY_STATUS, m.injury_status)
+    ? (P_ACTIVE_BY_STATUS[m.injury_status] ?? 1)
+    : 1;
+
+/** Cascade v2's inputs to `redistribute` (Phase 3): the prior table and the team's volume. */
+export interface RedistributeV2 {
+  readonly priors: CascadePriorTable;
+  readonly team_volume: { readonly targets: number; readonly carries: number; readonly rz: number };
+}
+
+/** Which prior the split used (v2 adds the table's context cell). */
+export type RedistributeBasis =
+  | { readonly kind: "affinity" }
+  | {
+      readonly kind: "table";
+      readonly context: PriorSplit["context"];
+      readonly pooled: boolean;
+      readonly roles: PriorSplit["roles"];
+    };
+
 /**
  * The redistribution (shares of team volume): per component, a retained fraction of the vacated
- * share split by affinity × own share (+ floor) × P(active); blended with the team's own evidence
- * when it exists and capped so the sum never exceeds the vacated share (plan 10 B6).
+ * share split by affinity × own share (+ floor) × P(active) — or, v2, the prior table's split; blended
+ * with the team's own evidence when it exists and capped so the sum never exceeds the vacated share
+ * (plan 10 B6).
  */
 export function redistribute(
   injured: Pick<CascadeInjured, "position" | "usage">,
   mates: readonly CascadeTeammate[],
   teamGames: number,
   receptionPoints: number,
-): { readonly vacated: Record<Component, number>; readonly allocs: Alloc[] } {
+  v2?: RedistributeV2 | null,
+): {
+  readonly vacated: Record<Component, number>;
+  readonly allocs: Alloc[];
+  readonly basis: RedistributeBasis;
+} {
   const table = AFFINITY[injured.position] ?? AFFINITY.WR;
   const vacated = {
     targets: share(injured.usage, "targets"),
@@ -208,6 +256,31 @@ export function redistribute(
   const evidence = teamGames >= CASCADE.teamEvidenceMinGames;
   const wTeam = evidence ? teamGames / (teamGames + CASCADE.teamEvidenceShrink) : 0;
   const allocs: Alloc[] = mates.map((m) => ({ mate: m, delta: { targets: 0, carries: 0, rz: 0 } }));
+  // v2: the prior table's split (RB / WR / TE injured; a QB keeps the v1 path)
+  let split: PriorSplit | null = null;
+  if (v2 !== undefined && v2 !== null && isInjuredPosition(injured.position)) {
+    const tv = v2.team_volume;
+    const vol = { targets: nonNeg(tv.targets), carries: nonNeg(tv.carries), rz: nonNeg(tv.rz) };
+    split = priorSplit(
+      v2.priors,
+      injured.position,
+      vacated,
+      vol,
+      mates.map((m, i) => ({
+        position: m.position,
+        opportunities:
+          share(m.usage, "targets") * vol.targets + share(m.usage, "carries") * vol.carries,
+        main:
+          injured.position === "RB"
+            ? share(m.usage, "carries") * vol.carries
+            : share(m.usage, "targets") * vol.targets,
+        depth:
+          typeof m.depth_rank === "number" && Number.isFinite(m.depth_rank) ? m.depth_rank : null,
+        key: String(i).padStart(4, "0"),
+        p_active: pActiveOf(m),
+      })),
+    );
+  }
   for (const c of COMPONENTS) {
     const v = vacated[c];
     if (!(v > 0)) continue;
@@ -217,15 +290,15 @@ export function redistribute(
       // reception points elevate the pass-down back: his target affinity rises with the PPR value
       if (c === "targets" && m.position === "RB" && injured.position === "RB")
         a *= 1 + Math.max(0, receptionPoints);
-      const pa =
-        m.injury_status !== null && Object.hasOwn(P_ACTIVE_BY_STATUS, m.injury_status)
-          ? (P_ACTIVE_BY_STATUS[m.injury_status] ?? 1)
-          : 1;
-      return a * (share(m.usage, c) + CASCADE.shareFloor) * pa;
+      return a * (share(m.usage, c) + CASCADE.shareFloor) * pActiveOf(m);
     });
     const total = raw.reduce((s, x) => s + x, 0);
     const retained = CASCADE.retention[c] * v;
-    const prior = raw.map((x) => (total > 0 ? (retained * x) / total : 0));
+    const table2 = split;
+    const prior =
+      table2 === null
+        ? raw.map((x) => (total > 0 ? (retained * x) / total : 0))
+        : mates.map((_, i) => table2.delta[i]?.[c] ?? 0);
     const observed = mates.map((m) => {
       const ws = m.without_starter ?? null;
       return ws === null ? null : Math.max(0, share(ws, c) - share(m.usage, c));
@@ -241,7 +314,11 @@ export function redistribute(
       if (a !== undefined) a.delta[c] = x;
     });
   }
-  return { vacated, allocs };
+  const basis: RedistributeBasis =
+    split === null
+      ? { kind: "affinity" }
+      : { kind: "table", context: split.context, pooled: split.pooled, roles: split.roles };
+  return { vacated, allocs, basis };
 }
 
 /** E7. Throws AnalyticsError `invalid_request` on malformed bounds. */
@@ -288,17 +365,28 @@ export async function analyzeInjuryCascade(req: CascadeRequest): Promise<Cascade
     rz: nonNeg(req.team_volume.rz) * factor,
   };
   const mates = req.teammates.filter((m) => m.player_id === null || m.player_id !== inj.player_id);
-  const { vacated, allocs } = redistribute(
+  const priors = req.priors ?? null;
+  const { vacated, allocs, basis } = redistribute(
     inj,
     mates,
     req.team_games_without,
     req.reception_points,
+    priors === null ? null : { priors, team_volume: req.team_volume },
   );
   const evidenceTeam = req.team_games_without >= CASCADE.teamEvidenceMinGames;
+  if (basis.kind === "table" && priors !== null)
+    assumptions.push(
+      A(
+        `the prior split is the redistribution table from pbp history (${String(priors.absences)} starter absences, ${seasonSpan(priors.seasons)}; ${basis.pooled ? `the ${inj.position} pooled row` : `${inj.position} absences on a ${basis.context.tilt}-leaning team with a ${basis.context.hold === "lead" ? "lead" : "shared"} role`}), not 1:1 inheritance`,
+        "two games without the starter",
+      ),
+    );
   if (!evidenceTeam)
     assumptions.push(
       A(
-        "no team evidence without the starter: the split is the role-affinity prior, not this team's history",
+        basis.kind === "table"
+          ? "no team evidence without the starter: the split is the league-wide prior table, not this team's history"
+          : "no team evidence without the starter: the split is the role-affinity prior, not this team's history",
         "two games without the starter",
       ),
     );
