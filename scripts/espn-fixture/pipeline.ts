@@ -1007,94 +1007,62 @@ export async function planSplit(
   return ranges;
 }
 
+/** One scrubbed capture on its way to a committed file (scrubRun, history.ts). */
+export interface PendingCapture {
+  env: RawEnvelope;
+  /** The output path without `.json`, relative to the fixtures root (`recorded/<slot>/<name>`). */
+  base: string;
+  /** The season of the request (the scrubbed request path names it). */
+  season: number;
+  scrubbed: Json;
+  /** The raw body in canonical order (the scoring-projection identity is checked against it). */
+  rawCanonical: Json;
+  pruned: string[];
+  /** The league's format summary for league bodies, else null. */
+  format: LeagueFormat | null;
+}
+
+export interface FreezeOptions {
+  scan: (text: string, label: string) => { clean: boolean; findings: string[]; error?: string };
+  maxBytes: number;
+  withholdDenylisted: boolean;
+  log: (s: string) => void;
+  /** The verification context of a slot: its own GUID map, the run's union of names and ids. */
+  verifyCtxOf: (slot: string) => LeagueScrubContext;
+  /**
+   * The unit a deny-listed line withholds (default withholdUnit: a box score's whole matchup row,
+   * the golden's unit). history.ts passes historyWithholdUnit (the roster entry first).
+   */
+  unitOf?: (view: string, segs: readonly Seg[]) => { segs: Seg[]; action: "omit" | "empty" } | null;
+}
+
+export interface FreezeResult {
+  entries: ManifestEntry[];
+  outputs: { rel: string; text: string }[];
+  problems: string[];
+  withheldFiles: string[];
+}
+
 /**
- * Scrubs every capture of a raw run, verifies all of them (union of every league's captured names
- * and ids, the repo scanner with its local deny-list, the scoring-projection identity, the size cap)
- * and only then writes the fixtures and the manifest — an abort leaves the repo untouched.
+ * The freeze half of a scrub run (plan 05 §3.1 steps 2–4): per capture, the in-process verification,
+ * the repo scanner with its local deny-list (deny-list-only findings withhold their units when
+ * allowed, then re-scan), the lossless split past the size cap, the scoring-projection identity and
+ * the manifest entry with its provenance hashes. Writes nothing: the caller writes only when
+ * `problems` is empty (an abort leaves the repo untouched).
  */
-export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
-  const log = opts.log ?? (() => undefined);
-  const scan = opts.scan ?? ((t: string, l: string) => scanWithRepoScanner(t, l));
-  const maxBytes = opts.maxBytes ?? MAX_FIXTURE_BYTES;
-  const inventory = rawInventory(opts.rawDir);
-  if (!inventory.length) throw new ScrubAbort("the raw directory holds no captures");
-
-  const contexts = new Map<string, LeagueScrubContext>();
-  const ctxOf = (slot: string): LeagueScrubContext => {
-    let c = contexts.get(slot);
-    if (!c) {
-      const i = LEAGUE_SLOTS.indexOf(slot as (typeof LEAGUE_SLOTS)[number]);
-      c = createLeagueContext(i >= 0 ? i + 1 : 1);
-      contexts.set(slot, c);
-    }
-    return c;
-  };
-
-  interface Pending {
-    env: RawEnvelope;
-    scrubbed: Json;
-    rawCanonical: Json;
-    pruned: string[];
-  }
-  const pending: Pending[] = [];
-  const formats = new Map<string, LeagueFormat>();
-  let season: number | null = null;
-  let capturedAt = "";
-
-  for (const { slot, names } of inventory) {
-    for (const name of names) {
-      const env = readRaw(opts.rawDir, slot, name);
-      if (!env) continue;
-      const s = seasonOf(env);
-      if (season !== null && s !== season)
-        throw new ScrubAbort("captures from more than one season in one run");
-      season = s;
-      if (env.recorded_at > capturedAt) capturedAt = env.recorded_at;
-      let raw: Json;
-      try {
-        raw = parseJsonStrict(env.bodyText);
-      } catch (e) {
-        throw new ScrubAbort(
-          `${slot}/${name}: body is not usable JSON (${e instanceof Error ? e.message : String(e)})`,
-        );
-      }
-      const view = env.views[0] ?? "";
-      const keepOrder = KEEP_ORDER[view];
-      const pruned =
-        env.kind === "league" && !PRUNE_EXEMPT_VIEWS.has(view)
-          ? [...new Set([...DEFAULT_PRUNE, ...(opts.prune ?? [])])].sort()
-          : [];
-      const scrubbed = scrubBody(raw, env.kind, ctxOf(slot), {
-        prune: pruned,
-        ...(keepOrder ? { keepOrder } : {}),
-      });
-      const rawCanonical = canonicalize(raw, keepOrder ? { keepOrder } : {});
-      if (name === "mSettings" && env.kind === "league") formats.set(slot, leagueFormat(raw));
-      pending.push({ env, scrubbed, rawCanonical, pruned });
-    }
-  }
-  if (season === null) throw new ScrubAbort("no captures");
-
-  // the union of every league's captured names and ids applies to every file of the run
-  const unionTerms = new Set<string>();
-  const unionIds = new Set<string>();
-  for (const c of contexts.values()) {
-    for (const t of c.denyTerms) unionTerms.add(t);
-    for (const id of c.realLeagueIds) unionIds.add(id);
-  }
-
+export async function freezeCaptures(
+  pending: readonly PendingCapture[],
+  opts: FreezeOptions,
+): Promise<FreezeResult> {
+  const { scan, maxBytes, log } = opts;
+  const unitOf = opts.unitOf ?? withholdUnit;
   const outputs: { rel: string; text: string }[] = [];
   const entries: ManifestEntry[] = [];
   const problems: string[] = [];
   const withheldFiles: string[] = [];
   for (const p of pending) {
-    const { env } = p;
-    const base = `recorded/${env.slot}/${env.name}`;
-    const verifyCtx: LeagueScrubContext = {
-      ...ctxOf(env.slot),
-      denyTerms: unionTerms,
-      realLeagueIds: unionIds,
-    };
+    const { env, base, season } = p;
+    const verifyCtx = opts.verifyCtxOf(env.slot);
     for (const v of verifyScrubbed(p.scrubbed, env.kind, verifyCtx))
       problems.push(`${base}.json: ${v.rule} at ${v.path}`);
 
@@ -1134,7 +1102,7 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
             (rep) =>
               !replaced.includes(formatPath(rep.segs)) && rep.value !== leafAt(body, rep.segs),
           );
-        const fallback = usable ? null : withholdUnit(env.views[0] ?? "", segs);
+        const fallback = usable ? null : unitOf(env.views[0] ?? "", segs);
         if (!usable && fallback === null) withholdFile = true;
         for (const u of usable ? reps : fallback ? [fallback] : [])
           if (!units.some((x) => JSON.stringify(x.segs) === JSON.stringify(u.segs))) units.push(u);
@@ -1253,11 +1221,112 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
         bytes,
         sha256: contentSha256(part.body),
         scoring,
-        format: leagueSlot ? (formats.get(leagueSlot) ?? null) : null,
+        format: leagueSlot ? p.format : null,
       });
       outputs.push({ rel: part.rel, text });
     }
   }
+  return { entries, outputs, problems, withheldFiles };
+}
+
+/**
+ * Scrubs every capture of a raw run, verifies all of them (union of every league's captured names
+ * and ids, the repo scanner with its local deny-list, the scoring-projection identity, the size cap)
+ * and only then writes the fixtures and the manifest — an abort leaves the repo untouched.
+ */
+export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
+  const log = opts.log ?? (() => undefined);
+  const scan = opts.scan ?? ((t: string, l: string) => scanWithRepoScanner(t, l));
+  const maxBytes = opts.maxBytes ?? MAX_FIXTURE_BYTES;
+  const inventory = rawInventory(opts.rawDir);
+  if (!inventory.length) throw new ScrubAbort("the raw directory holds no captures");
+
+  const contexts = new Map<string, LeagueScrubContext>();
+  const ctxOf = (slot: string): LeagueScrubContext => {
+    let c = contexts.get(slot);
+    if (!c) {
+      const i = LEAGUE_SLOTS.indexOf(slot as (typeof LEAGUE_SLOTS)[number]);
+      c = createLeagueContext(i >= 0 ? i + 1 : 1);
+      contexts.set(slot, c);
+    }
+    return c;
+  };
+
+  interface Pending {
+    env: RawEnvelope;
+    scrubbed: Json;
+    rawCanonical: Json;
+    pruned: string[];
+  }
+  const pending: Pending[] = [];
+  const formats = new Map<string, LeagueFormat>();
+  let season: number | null = null;
+  let capturedAt = "";
+
+  for (const { slot, names } of inventory) {
+    for (const name of names) {
+      const env = readRaw(opts.rawDir, slot, name);
+      if (!env) continue;
+      const s = seasonOf(env);
+      if (season !== null && s !== season)
+        throw new ScrubAbort("captures from more than one season in one run");
+      season = s;
+      if (env.recorded_at > capturedAt) capturedAt = env.recorded_at;
+      let raw: Json;
+      try {
+        raw = parseJsonStrict(env.bodyText);
+      } catch (e) {
+        throw new ScrubAbort(
+          `${slot}/${name}: body is not usable JSON (${e instanceof Error ? e.message : String(e)})`,
+        );
+      }
+      const view = env.views[0] ?? "";
+      const keepOrder = KEEP_ORDER[view];
+      const pruned =
+        env.kind === "league" && !PRUNE_EXEMPT_VIEWS.has(view)
+          ? [...new Set([...DEFAULT_PRUNE, ...(opts.prune ?? [])])].sort()
+          : [];
+      const scrubbed = scrubBody(raw, env.kind, ctxOf(slot), {
+        prune: pruned,
+        ...(keepOrder ? { keepOrder } : {}),
+      });
+      const rawCanonical = canonicalize(raw, keepOrder ? { keepOrder } : {});
+      if (name === "mSettings" && env.kind === "league") formats.set(slot, leagueFormat(raw));
+      pending.push({ env, scrubbed, rawCanonical, pruned });
+    }
+  }
+  if (season === null) throw new ScrubAbort("no captures");
+
+  // the union of every league's captured names and ids applies to every file of the run
+  const unionTerms = new Set<string>();
+  const unionIds = new Set<string>();
+  for (const c of contexts.values()) {
+    for (const t of c.denyTerms) unionTerms.add(t);
+    for (const id of c.realLeagueIds) unionIds.add(id);
+  }
+
+  const frozen = await freezeCaptures(
+    pending.map((p) => ({
+      env: p.env,
+      base: `recorded/${p.env.slot}/${p.env.name}`,
+      season: season,
+      scrubbed: p.scrubbed,
+      rawCanonical: p.rawCanonical,
+      pruned: p.pruned,
+      format:
+        p.env.kind === "league" && p.env.slot.startsWith("league-")
+          ? (formats.get(p.env.slot) ?? null)
+          : null,
+    })),
+    {
+      scan,
+      maxBytes,
+      withholdDenylisted: opts.withholdDenylisted === true,
+      log,
+      verifyCtxOf: (slot) => ({ ...ctxOf(slot), denyTerms: unionTerms, realLeagueIds: unionIds }),
+    },
+  );
+  const { outputs, entries, problems, withheldFiles } = frozen;
   const blanked = [...new Set([...contexts.values()].flatMap((c) => [...c.blanked]))].sort();
   const synthetic = await syntheticOutputs(opts.synthetic ?? SYNTHETIC_ERRORS, scan, problems);
   outputs.push(...synthetic.outputs);

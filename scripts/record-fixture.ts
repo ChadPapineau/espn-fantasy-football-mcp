@@ -4,7 +4,8 @@
 // headers OUTSIDE the repo), plan 10 §3.0 Z7 and §3.1a/b (the recorded evidence of the 1a golden;
 // ADV OBJ-01, OBJ-21; the B1 views: mMatchupScore current + final, solo mNav, kona_player_info and
 // kona_playercard by filterIds, players_wl, the keyless 401), research 03 §D.3 (polite usage). Then
-// it scrubs (scrub-fixture.ts).
+// it scrubs (scrub-fixture.ts). `--history` records the finished previous seasons instead (plan 10
+// §3.3 C1/C3/C4 inputs; scripts/espn-fixture/history.ts).
 //
 // Usage:
 //   EFF_PROBE_LEAGUE_IDS=<id>,<id>,… scripts/dev/with-node.sh npx tsx scripts/record-fixture.ts --public
@@ -15,6 +16,18 @@
 //   league-a, league-b, … and are NEVER written into the repo or printed. No cookie is ever sent:
 //   the run refuses to start if any cookie variable or argument is present. A re-run reuses stored
 //   raw captures (no request is repeated). Exit: 0 ok · 1 error · 2 usage/refused.
+//
+//   EFF_PROBE_LEAGUE_IDS=<id>,<id>,… scripts/dev/with-node.sh npx tsx scripts/record-fixture.ts --public
+//       --history [--seasons 2025,2024,2023] [--projections <slot>|none] [--projection-seasons 2025,2024]
+//       [--raw-dir <dir outside the repo>] [--out <fixtures/espn>] [--max-requests <n ≤ 90>]
+//       [--prune <key,…>] [--no-scrub | --scrub-only] [--withhold-denylisted]
+//   The finished previous seasons (default: the three before the current one) of every league:
+//   mSettings, mTeam + mStandings, mMatchup, and every final week's mBoxscore (ESPN's weekly
+//   projections) for the projections slot (default league-b) in the projection seasons (default the
+//   two most recent). Each slot is bound to the committed current-season fixture by its
+//   previousSeasons; a season ESPN does not serve keylessly is recorded as such, never retried.
+//   Output: fixtures/espn/recorded/history/<season>/<slot>/ + recorded/history/manifest.json.
+//   --scrub-only re-scrubs a stored raw run (no network, no league id needed).
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -43,6 +56,7 @@ import {
   seasonPlan,
   type RequestSpec,
 } from "./espn-fixture/pipeline.js";
+import { HistoryRefusal, parseHistoryArgs, recordHistory } from "./espn-fixture/history.js";
 import { ScrubAbort } from "./espn-fixture/scrub.js";
 
 /** The most requests one run may ever send (the B1 recording brief: ≤ 80). */
@@ -327,7 +341,34 @@ export async function record(o: RecordOptions, deps: RecordDeps = {}): Promise<v
     );
 }
 
+/** `--history`: the finished previous seasons (scripts/espn-fixture/history.ts). */
+export async function mainHistory(
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv,
+  now: Date,
+): Promise<number> {
+  let o;
+  try {
+    o = parseHistoryArgs(argv, env, now);
+  } catch (e) {
+    process.stderr.write(`record: ${e instanceof Error ? e.message : String(e)}\n`);
+    return 2;
+  }
+  try {
+    await recordHistory(o);
+    return 0;
+  } catch (e) {
+    process.stderr.write(`record: ${e instanceof Error ? e.message : String(e)}\n`);
+    if (e instanceof ScrubAbort) for (const w of e.where) process.stderr.write(`  ${w}\n`);
+    return e instanceof HistoryRefusal ? 2 : 1;
+  }
+}
+
 async function main(): Promise<void> {
+  if (process.argv.slice(2).includes("--history")) {
+    process.exitCode = await mainHistory(process.argv.slice(2), process.env, new Date());
+    return;
+  }
   let opts: RecordOptions;
   try {
     opts = parseArgs(process.argv.slice(2), process.env, new Date());
