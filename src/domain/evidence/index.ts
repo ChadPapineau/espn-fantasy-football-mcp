@@ -1,6 +1,7 @@
 // index.ts — the evidence domain (plan 07 D6 claim extract, E10 deterministic parts; research 05 §6;
 // plan 02 §6.4; plan 10 B8): the `rules_v1` claim extractor, the hand-set source reliability model,
-// the structured-field comparator, and the stored-row → `NewsItem` wrapper. Pure; no I/O.
+// the structured-field comparator, the stored-row → `NewsItem` wrapper, and (Phase 3, plan 10 §3.3
+// C8) the per-source calibration table with E10's posterior over it. Pure; no I/O.
 export {
   availabilityClass,
   CLAIM_DIRECTIONS,
@@ -41,6 +42,44 @@ export {
   type ReliabilitySource,
   type ScoredClaimType,
 } from "./reliability.js";
+export {
+  buildCalibrationTable,
+  CALIBRATION,
+  CALIBRATION_SOURCES,
+  calibrationSourceOf,
+  calibrationStateOf,
+  claimOutcome,
+  claimSignal,
+  evidencePosterior,
+  fitLlr,
+  handSetLlr,
+  handSetReliability,
+  isTextSource,
+  mergePActive,
+  OFFICIAL_CALIBRATION_SOURCES,
+  posteriorEvidenceOf,
+  POSTERIOR_MIN_N,
+  PRACTICE_REPORT_HISTORY,
+  practiceHistoryClaims,
+  PRIOR_STATUSES,
+  priorStatusOf,
+  readScoredClaim,
+  rowOf,
+  SCORED_CLAIM_TYPES,
+  signalSign,
+  type CalibrationRow,
+  type CalibrationSource,
+  type CalibrationTable,
+  type ClaimOutcomeFacts,
+  type ClaimSignal,
+  type E10EvidenceItem,
+  type EvidencePosterior,
+  type OfficialCalibrationSource,
+  type PosteriorEvidence,
+  type PosteriorInput,
+  type PriorStatus,
+  type ScoredClaim,
+} from "./calibration.js";
 export {
   statusClass,
   structuredDisagreement,

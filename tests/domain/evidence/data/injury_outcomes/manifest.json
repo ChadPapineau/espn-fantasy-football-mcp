@@ -1,0 +1,84 @@
+{
+  "$comment": "nflverse data (CC-BY 4.0, see README.md) aggregated for plan 10 §3.3 C8 by tests/domain/evidence/helpers/make-injury-outcomes.ts; read by tests/domain/evidence/helpers/injury-outcomes.ts, which re-hashes the file. `upstream` pins every release file it was cut from.",
+  "retrieved": "2026-10-10",
+  "outcome": "played = took at least one offensive, defensive or special-teams snap in that week's game",
+  "file": {
+    "path": "outcomes.tsv",
+    "rows": 2681,
+    "bytes": 162592,
+    "sha256": "b26fe605343d9d306be66100316ca361501bc3daba8dd3bb223ab8211b5ff7b9"
+  },
+  "seasons": [
+    {
+      "season": 2023,
+      "report_rows": 5451,
+      "labelled": 5313,
+      "unlabelled": 138,
+      "no_game": 0
+    },
+    {
+      "season": 2024,
+      "report_rows": 5954,
+      "labelled": 5826,
+      "unlabelled": 128,
+      "no_game": 0
+    },
+    {
+      "season": 2025,
+      "report_rows": 5783,
+      "labelled": 5633,
+      "unlabelled": 150,
+      "no_game": 0
+    }
+  ],
+  "upstream": [
+    {
+      "file": "injuries_injuries_2023.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2023.parquet",
+      "bytes": 126566,
+      "sha256": "5d8d881aabd613c3172231b33ac0b4397b3f383498f5e4509c31f3c77c3402a3",
+      "rows": 5599,
+      "nflverse_timestamp": "2026-10-10 09:33:05 EDT"
+    },
+    {
+      "file": "snap_counts_snap_counts_2023.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/snap_counts/snap_counts_2023.parquet",
+      "bytes": 237882,
+      "sha256": "97873cab365dfb39286bc1de3ac772fa4b51f09cce52ae5f8317e006cc007f62",
+      "rows": 26540,
+      "nflverse_timestamp": "2026-10-09 07:01:35 EDT"
+    },
+    {
+      "file": "injuries_injuries_2024.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2024.parquet",
+      "bytes": 139253,
+      "sha256": "7ebabbba930a70bc7e4d257c7c41ca8708f147a4cdd4100956abcfbaf70f7fc1",
+      "rows": 6215,
+      "nflverse_timestamp": "2026-10-10 09:33:05 EDT"
+    },
+    {
+      "file": "snap_counts_snap_counts_2024.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/snap_counts/snap_counts_2024.parquet",
+      "bytes": 240862,
+      "sha256": "9ec66a0c755939b329d4eba3f90e716bb874b5a6544f325ba220f003991ff99f",
+      "rows": 26615,
+      "nflverse_timestamp": "2026-10-09 07:01:35 EDT"
+    },
+    {
+      "file": "injuries_injuries_2025.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_2025.parquet",
+      "bytes": 97472,
+      "sha256": "c7637c2f6347194426a8582a984aac82a6bf8ab06af72cdd96666a2e0733ab24",
+      "rows": 6068,
+      "nflverse_timestamp": "2026-10-10 09:33:05 EDT"
+    },
+    {
+      "file": "snap_counts_snap_counts_2025.parquet",
+      "url": "https://github.com/nflverse/nflverse-data/releases/download/snap_counts/snap_counts_2025.parquet",
+      "bytes": 242046,
+      "sha256": "47220218fecda7af7ee5b0272a8ecce7c1bfb1f4e1f0a2c8c90047571728ce20",
+      "rows": 26613,
+      "nflverse_timestamp": "2026-10-09 07:01:35 EDT"
+    }
+  ]
+}
