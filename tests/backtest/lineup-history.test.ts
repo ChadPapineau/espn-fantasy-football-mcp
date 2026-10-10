@@ -103,8 +103,9 @@ describe("C2 start/sit on the held-out seasons", () => {
 
   it("(hard) the switch evidence recomputed from the player_sim replay equals the committed record", () => {
     const evidence = switchEvidenceOf(sim.rows);
-    expect(evidence).toEqual(OBJECTIVE_SWITCH_RECORD.evidence);
-    expect(decideObjectiveSwitch(evidence)).toEqual(OBJECTIVE_SWITCH_RECORD.decision);
+    const why = `E1/E2 changed since the record: review, then set OBJECTIVE_SWITCH_RECORD (src/domain/analytics/calibration/objectiveSwitch.ts) to evidence ${JSON.stringify(evidence)} and decision ${JSON.stringify(decideObjectiveSwitch(evidence))}`;
+    expect(evidence, why).toEqual(OBJECTIVE_SWITCH_RECORD.evidence);
+    expect(decideObjectiveSwitch(evidence), why).toEqual(OBJECTIVE_SWITCH_RECORD.decision);
   });
 
   it("(hard) auto resolves as the committed record says on every replayed team-week", () => {
@@ -126,6 +127,7 @@ describe("C2 start/sit on the held-out seasons", () => {
   });
 
   it("(soft, reported) the numbers in docs/evals/phase3-startsit.md are this replay's", () => {
-    for (const [name, body] of Object.entries(sections())) expect(docSection(name)).toBe(body);
+    for (const [name, body] of Object.entries(sections()))
+      expect(docSection(name), `section ${name}: rerun with UPDATE_EVALS=1 and review`).toBe(body);
   });
 });

@@ -212,6 +212,7 @@ describe("C3 P(win) and P(playoffs) against ESPN", () => {
   });
 
   it("(soft, reported) the comparator section of docs/evals/phase3-startsit.md is this replay's", () => {
-    for (const [name, body] of Object.entries(sections())) expect(docSection(name)).toBe(body);
+    for (const [name, body] of Object.entries(sections()))
+      expect(docSection(name), `section ${name}: rerun with UPDATE_EVALS=1 and review`).toBe(body);
   });
 });
