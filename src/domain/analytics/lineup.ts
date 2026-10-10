@@ -6,7 +6,9 @@
 // protect | chase | neutral | maximise_pf (the variance sign from μ_m − μ_o under (a), plus
 // maximise_pf when the PF tiebreak is in play and P(win) is saturated; under (b) a position
 // relative to the season PF cutoff); Thursday / Monday / late-game option values; ESPN's
-// projection as the labelled cross-check. Pure.
+// projection as the labelled cross-check. Pure. Phase 3 (plan 10 C2, additive): `auto` on an
+// all-player_sim lineup under reading (a) reads the committed switch record (calibration/
+// objectiveSwitch.ts) — `pwin` only when the held-out replay showed it beats `mean` on regret.
 // Ported from sibling @f6ba81e (src/domain/analytics/lineup.ts), adapted: ESPN slot ids and
 // eligibleSlots, the reading-driven objective and modes, the PF exchange rate, numeric player ids.
 import type { Clock } from "../clock.js";
@@ -31,6 +33,11 @@ import type {
 import { at } from "../scoring/numeric.js";
 import type { Dist, DistBasis } from "../scoring/types.js";
 import { FORBIDDEN, solveAssignment } from "./assignment.js";
+import {
+  OBJECTIVE_SWITCH_RECORD,
+  autoObjectiveForPlayerSim,
+  type ObjectiveSwitchRecord,
+} from "./calibration/objectiveSwitch.js";
 import { LINEUP, Z90 } from "./constants.js";
 import { ensure } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
@@ -151,6 +158,12 @@ export interface LineupRequest {
   readonly compare?: readonly { readonly out: number; readonly in: number }[];
   readonly clock: Clock;
   readonly inputs?: readonly InputFreshness[];
+  /**
+   * The auto-default switch record (plan 10 C2; calibration/objectiveSwitch.ts): under reading (a)
+   * an all-player_sim lineup resolves `auto` to `pwin` only when the record switches. Omitted → the
+   * committed record (additive, Phase 3).
+   */
+  readonly objective_switch?: ObjectiveSwitchRecord;
 }
 
 // --- the solve ---------------------------------------------------------------------------------------
@@ -680,6 +693,14 @@ export function analyzeLineup(req: LineupRequest): LineupData {
     if (reading === "points_only") {
       objective = "points_only";
       reason = "auto: the points_only reading seeds by points for, so every point counts the same";
+    } else if (
+      basis === "player_sim" &&
+      autoObjectiveForPlayerSim(req.objective_switch ?? OBJECTIVE_SWITCH_RECORD) === "pwin"
+    ) {
+      // plan 10 C2 / plan 07 E2: the committed switch record shows pwin beats mean on regret
+      objective = "pwin";
+      reason =
+        "auto: espn_rule with player_sim — pwin beat mean on regret in the held-out replay (plan 10 C2)";
     } else {
       objective = "mean";
       reason =
