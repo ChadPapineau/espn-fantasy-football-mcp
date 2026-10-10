@@ -1,7 +1,9 @@
 // predict.ts — cascade v2's split from the redistribution prior table (plan 10 §3.3, C6; plan 07 E7;
 // sib research 05 §6.1–§6.2): each teammate's ROLE (his position and rank among the remaining
-// teammates at it, by opportunities per game with the starter — the same rule the table was built
-// with), the TEAM CONTEXT (pass tilt from the team's volume, the starter's hold on his main
+// teammates at it — by opportunities per game with the starter, except at the injured player's
+// position, where the successor rule ranks by the starter's own kind of opportunity and puts the
+// receivers behind the two remaining starters in depth-chart order; the same rule the table was
+// built with), the TEAM CONTEXT (pass tilt from the team's volume, the starter's hold on his main
 // component), and per component the expected share gain `vacated × f[cell][role]`, clamped ≥ 0,
 // times P(active), the sum capped at the vacated share (plan 10 B6: beneficiaries never inherit more
 // than was vacated). One implementation serves the table builder and E7, so a role means the same
