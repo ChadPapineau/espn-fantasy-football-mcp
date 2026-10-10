@@ -230,12 +230,79 @@ export interface BrierEntry {
   readonly n: number;
 }
 
-/** A proposed (never applied) parameter change — P2; always empty in v1 (plan 07 E13). */
+/**
+ * A proposed (never applied) parameter change (plan 07 E13). Empty in v1; from Phase 3 the
+ * retrospective proposes re-fitted projection parameters and only a human-run `eff tune --apply`
+ * applies them (plan 10 §3.3, C9; src/domain/reclog/tune.ts).
+ */
 export interface ParameterChange {
   readonly parameter: string;
   readonly current: number;
   readonly proposed: number;
   readonly evidence_n: number;
+}
+
+// --- Phase 3: parameter proposals (plan 10 §3.3 "the weekly re-fit … proposed by retro and applied
+// only by a human-run eff tune --apply", C9; sib research 05 §12.4–§12.5). Additive. --------------
+
+/** The grammar of a tunable parameter name: ≤ 40 chars (the E13 wire bound), `base` or `base.key`. */
+export const PARAMETER_NAME_RE =
+  /^(?=.{1,40}$)[a-z][a-z0-9_]{0,23}(?:\.[A-Za-z][A-Za-z0-9_]{0,23})?$/;
+
+/** How a parameter is re-fitted (src/domain/reclog/tune.ts). */
+export type TuneFitKind = "ewm_half_life" | "shrinkage_k" | "matchup_beta" | "weight_espn";
+
+/** Why a tunable parameter was or was not proposed this week. */
+export type ProposalOutcome =
+  "proposed" | "no_change" | "n_too_small" | "current_unknown" | "not_held";
+
+/** One proposal with its evidence: the loss at the current value and at the proposed one. */
+export interface ParameterProposal extends ParameterChange {
+  readonly fit: TuneFitKind;
+  /** The fit's loss (mean squared or absolute error, per fit) at the value in effect. */
+  readonly loss_current: number;
+  /** The same loss at the proposed value (strictly lower, and lower in both halves of the window). */
+  readonly loss_proposed: number;
+}
+
+/** One registry parameter's evaluation, proposed or not (why not is the outcome). */
+export interface ParameterEvaluation {
+  readonly parameter: string;
+  readonly fit: TuneFitKind;
+  readonly evidence_n: number;
+  readonly outcome: ProposalOutcome;
+  /** The value in effect (the applied override, else the value the model reported using). */
+  readonly current: number | null;
+  /** The unshrunk best fit on the window; null when not fitted. */
+  readonly fitted: number | null;
+}
+
+/**
+ * What one retrospective proposes (persisted by the retro tool, read by `eff tune`): the proposals,
+ * every parameter's evaluation, and a content hash the human matches between retro and the CLI.
+ */
+export interface ParameterProposalSet {
+  readonly schema: 1;
+  readonly created_at: IsoInstant;
+  readonly season: number;
+  /** The scored week (proposals are made on final weeks only). */
+  readonly week: Week;
+  /** The season-to-date window the fits read. */
+  readonly window: { readonly first_week: Week; readonly last_week: Week };
+  readonly proposals: readonly ParameterProposal[];
+  readonly evaluated: readonly ParameterEvaluation[];
+  /** sha256 (64 lowercase hex) of the canonical (season, week, proposals) — the set's id. */
+  readonly hash: string;
+}
+
+/**
+ * Where the retrospective persists proposal sets and `eff tune` reads the newest one (a store table,
+ * never pruned — the audit trail of what was proposed). The league id is local-only, never emitted.
+ */
+export interface ParameterProposalRepository {
+  put(leagueId: string, set: ParameterProposalSet): void;
+  /** The newest set of a league's season, or null when none was stored. */
+  latest(leagueId: string, season: number): ParameterProposalSet | null;
 }
 
 /** One scored call (plan 07 E13 `calls[]`). */
@@ -296,9 +363,13 @@ export interface RetrospectiveData {
       }
     >
   >;
-  /** Phase 3 (plan 10 C8); null in v1. */
+  /**
+   * Phase 3 (plan 10 C9): the projection-error attribution as a flat map (src/domain/reclog/
+   * attribution.ts `attributionMap` — the key grammar is documented there); null when the caller
+   * passed no attribution rows.
+   */
   readonly attribution: Readonly<Record<string, number>> | null;
-  /** P2; always empty in v1. */
+  /** Phase 3: the first MAX_WIRE_PROPOSALS proposals (never applied here — `eff tune --apply`). */
   readonly parameter_changes_proposed: readonly ParameterChange[];
   readonly sample_size_caveats: readonly string[];
   readonly rec: Rec;

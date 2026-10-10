@@ -5,6 +5,9 @@
 // is read back sanitised and path-listed; plan 10 §2 n-per-metric; research 05 §5 Calibration,
 // §8.4 #2/#5/#7). Pure: the tool gathers records, facts, rosters and forecasts and passes them in.
 // Ported from sibling @cf3b015, adapted (ESPN ids, baselines, comparators, season-to-date pooling).
+// Phase 3 (plan 10 §3.3, C9 — additive): with attribution rows the week's projection error is
+// attributed by layer (attribution.ts), every projection-backed call gets its own decomposition, and
+// on a final week the re-fitted parameters are proposed (tune.ts) — never applied here.
 
 import {
   correctionsWindowOpen,
@@ -26,7 +29,15 @@ import {
   type SlotClass,
   type Week,
 } from "../league/types.js";
-import type { Dist } from "../scoring/types.js";
+import type { Dist, ScoringSettings } from "../scoring/types.js";
+import {
+  attributeCall,
+  attributePlayerWeek,
+  attributionMap,
+  type AttributionRow,
+  type CallAttribution,
+  type PlayerWeekAttribution,
+} from "./attribution.js";
 import {
   MAX_ABS_VALUE,
   at,
@@ -43,6 +54,7 @@ import {
   type ProbabilityOutcome,
 } from "./metrics.js";
 import { isIsoInstant } from "./record.js";
+import { proposeParameterChanges, wireProposals, type TunedParameters } from "./tune.js";
 import {
   DEFAULT_MIN_N,
   RECOMMENDATION_KINDS,
@@ -50,6 +62,7 @@ import {
   toRecordView,
   type BrierEntry,
   type NTooSmall,
+  type ParameterProposalSet,
   type RecommendationKind,
   type RecommendationListItem,
   type RecommendationOutcome,
@@ -177,6 +190,22 @@ export interface RetrospectiveInput {
   readonly min_n: number;
   /** Every contributing input with its freshness (plan 07 §2). */
   readonly inputs: readonly InputFreshness[];
+  /**
+   * Phase 3 (plan 10 C9; additive): the projected player-weeks to attribute, pooled season-to-date
+   * like the forecasts. Absent or null → `attribution: null` and no proposals (the v1 behaviour).
+   */
+  readonly attribution?: RetrospectiveAttributionInput | null;
+}
+
+/** What the attribution and the parameter proposals read (plan 10 §3.3). */
+export interface RetrospectiveAttributionInput {
+  readonly rows: readonly AttributionRow[];
+  /** The league's scoring (the layers are in league points). */
+  readonly scoring: ScoringSettings;
+  /** The applied overrides (`eff tune --apply`); null = none. */
+  readonly tuned: TunedParameters | null;
+  /** The league's season (the proposal set is per season). */
+  readonly season: number;
 }
 
 /** The assembled retrospective, the outcome rows to persist, and fixed-vocabulary warnings. */
@@ -188,6 +217,13 @@ export interface RetrospectiveResult {
   readonly outcomes: readonly RecommendationOutcome[];
   /** Envelope warnings (counts only; never third-party or model-authored text). */
   readonly warnings: readonly string[];
+  /** One per scored call of `week`, in `calls[]` order; empty without attribution rows (C9). */
+  readonly call_attribution: readonly CallAttribution[];
+  /**
+   * The parameter proposals to persist (ParameterProposalRepository) for `eff tune`: null without
+   * attribution rows or while the scored week is provisional (proposals read final weeks only).
+   */
+  readonly proposal_set: ParameterProposalSet | null;
 }
 
 // --- subject index -----------------------------------------------------------------------------------
@@ -802,6 +838,77 @@ export function retroRec(
   };
 }
 
+// --- Phase 3: attribution and proposals (plan 10 C9) ---------------------------------------------
+
+/**
+ * The window's attributed player-weeks: rows in weeks 1..`week` (later ones skipped — no
+ * look-ahead), one per (week, player_id) (the first wins), refusals counted in `warn` (counts only).
+ */
+export function attributeWindow(
+  rows: readonly AttributionRow[],
+  scoring: ScoringSettings,
+  week: Week,
+  warn: (count: number, what: string) => void,
+): PlayerWeekAttribution[] {
+  const out: PlayerWeekAttribution[] = [];
+  const seen = new Set<string>();
+  let invalid = 0;
+  let unscorable = 0;
+  let future = 0;
+  let duplicate = 0;
+  for (const row of rows) {
+    const raw: unknown = row;
+    if (typeof raw !== "object" || raw === null || !isWeek(row.week)) {
+      invalid++;
+      continue;
+    }
+    if (row.week > week) {
+      future++;
+      continue;
+    }
+    const r = attributePlayerWeek(row, scoring);
+    if (!r.ok) {
+      if (r.reason === "invalid_row") invalid++;
+      else unscorable++;
+      continue;
+    }
+    if (typeof r.value.player_id === "number") {
+      const key = `${String(r.value.week)}:${String(r.value.player_id)}`;
+      if (seen.has(key)) {
+        duplicate++;
+        continue;
+      }
+      seen.add(key);
+    }
+    out.push(r.value);
+  }
+  warn(invalid, "attribution rows excluded (invalid row)");
+  warn(unscorable, "attribution rows excluded (a line the engine cannot score)");
+  warn(future, "attribution rows after the scored week skipped");
+  warn(duplicate, "duplicate attribution player-weeks skipped");
+  return out;
+}
+
+/**
+ * The retrospective's `rec` once proposals exist: still a no-move (`no_move: true`) — the tool
+ * never applies a parameter; the human does, in a terminal, with `eff tune --apply`.
+ */
+export function withProposals(rec: Rec, set: ParameterProposalSet | null): Rec {
+  if (set === null || set.proposals.length === 0) return rec;
+  const n = set.proposals.length;
+  return {
+    ...rec,
+    action: `${String(n)} parameter change${n === 1 ? "" : "s"} proposed from the season-to-date window; review, then apply only with eff tune --apply in your own terminal`,
+    assumptions: [
+      ...rec.assumptions,
+      {
+        text: "Each proposal is shrunk toward the value in effect, moves one step at most and beats it in both halves of the window",
+        revisit_trigger: "the next final week's retrospective",
+      },
+    ],
+  };
+}
+
 // --- assembly --------------------------------------------------------------------------------------
 
 /**
@@ -926,12 +1033,16 @@ export function buildRetrospective(input: RetrospectiveInput, clock: Clock): Ret
   // score every call of every window week; calls[] are the scored week's
   const pooled: ScoredCall[] = [];
   let calls: RetrospectiveCall[] = [];
+  let weekRecords: RecommendationRecord[] = [];
   for (const { sw, records } of scoredWeeks) {
     const facts = factIndex(sw.facts);
     const roster = rosterIndex(sw.roster);
     const scored = records.map((r) => scoreCall(r, facts, roster, sw.team_result));
     pooled.push(...scored);
-    if (sw.week === week) calls = scored.map((s) => s.call);
+    if (sw.week === week) {
+      calls = scored.map((s) => s.call);
+      weekRecords = records;
+    }
   }
   const swaps = pooled.flatMap((s) => s.swaps);
   const lastWeek = pooled.flatMap((s) =>
@@ -1066,6 +1177,41 @@ export function buildRetrospective(input: RetrospectiveInput, clock: Clock): Ret
 
   const { final, corrections_window_open } = weekStatus(input.games, clock.nowMs());
   const swapTotal = stableSum(swaps);
+
+  // attribution and the parameter proposals (Phase 3, plan 10 C9): only with attribution rows
+  let attribution: Record<string, number> | null = null;
+  let callAttribution: CallAttribution[] = [];
+  let proposalSet: ParameterProposalSet | null = null;
+  if (input.attribution !== undefined && input.attribution !== null) {
+    const a = input.attribution;
+    const attributed = attributeWindow(a.rows, a.scoring, week, warn);
+    for (const r of attributed) windowWeeks.add(r.week);
+    const index = new SubjectIndex(
+      attributed
+        .filter((r) => r.week === week)
+        .map((r) => ({ player_id: r.player_id, gsis_id: r.gsis_id, value: r })),
+      (x, y) => x === y,
+    );
+    callAttribution = weekRecords.map((r, i) => attributeCall(r, i, (s) => index.get(s)));
+    const agg = attributionMap(attributed, callAttribution, minN);
+    attribution = { ...agg.map };
+    sampleSize.attribution = {
+      n: agg.n,
+      n_needed: minN,
+      weeks_to_n30_estimate: weeksToN(agg.n, minN, windowWeeks.size),
+    };
+    caveats.push(...agg.caveats);
+    if (final)
+      proposalSet = proposeParameterChanges({
+        rows: attributed,
+        tuned: a.tuned,
+        weight_espn: weightEspn,
+        season: a.season,
+        week,
+        created_at: clock.nowIso(),
+      });
+    else caveats.push("parameter proposals: made on final weeks only (this week is provisional)");
+  }
   const data: RetrospectiveData = {
     week,
     final,
@@ -1097,10 +1243,10 @@ export function buildRetrospective(input: RetrospectiveInput, clock: Clock): Ret
       spearman_by_position: proj.spearman_by_position,
     },
     sample_size: sampleSize,
-    attribution: null,
-    parameter_changes_proposed: [],
+    attribution,
+    parameter_changes_proposed: wireProposals(proposalSet),
     sample_size_caveats: caveats,
-    rec: retroRec(calls, swapTotal, input.inputs, clock),
+    rec: withProposals(retroRec(calls, swapTotal, input.inputs, clock), proposalSet),
     inputs: [...input.inputs],
   };
   const scoredAt = clock.nowIso();
@@ -1109,6 +1255,8 @@ export function buildRetrospective(input: RetrospectiveInput, clock: Clock): Ret
     provisional: !final,
     outcomes: calls.map((c) => outcomeOf(c, scoredAt, final)),
     warnings,
+    call_attribution: callAttribution,
+    proposal_set: proposalSet,
   };
 }
 

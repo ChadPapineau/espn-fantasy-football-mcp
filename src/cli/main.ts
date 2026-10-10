@@ -31,6 +31,7 @@ import {
 } from "./snapshot.js";
 import { status } from "./status.js";
 import { errorText, openStore } from "./store-access.js";
+import { tune } from "./tune.js";
 import { uninstall } from "./uninstall.js";
 
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): the writes-phase commands —
@@ -58,6 +59,7 @@ export const COMMANDS = [
   "backup",
   "prune",
   "uninstall",
+  "tune",
   "version",
   "help",
   "selftest-read",
@@ -98,6 +100,9 @@ export const USAGE = `usage: eff <command> [options]
   prune [--notify]            drop expired cache rows, old snapshots, debris
   uninstall [--yes] [--dry-run] [--keep-config] [--export-log <path>]
                               remove the jobs, the stored cookies and the data (asks each step)
+  tune [--revert] [--apply] [--json]
+                              the retrospective's parameter proposals: a dry-run diff by default;
+                              --apply writes them (you, in your own terminal; asks to confirm)
   version [--json]            print the version
   help                        this text
 
@@ -174,6 +179,10 @@ const SPECS: Readonly<Record<string, { options: Options; positionals: number }>>
       "keep-config": { type: "boolean" },
       "export-log": { type: "string" },
     },
+    positionals: 0,
+  },
+  tune: {
+    options: { apply: { type: "boolean" }, revert: { type: "boolean" }, json: { type: "boolean" } },
     positionals: 0,
   },
   version: { options: { json: { type: "boolean" } }, positionals: 0 },
@@ -453,6 +462,13 @@ export async function main(
         return await backup(io, config, log, { to: str(p, "to"), notify: flag(p, "notify") });
       case "prune":
         return await prune(io, config, log, { notify: flag(p, "notify") });
+      case "tune":
+        // human-run only (plan 10 C9): never in a launchd job, never reachable from `serve`
+        return await tune(io, config, log, {
+          apply: flag(p, "apply"),
+          revert: flag(p, "revert"),
+          json: flag(p, "json"),
+        });
       case "uninstall":
         return await uninstall(io, config, log, {
           yes: flag(p, "yes"),
