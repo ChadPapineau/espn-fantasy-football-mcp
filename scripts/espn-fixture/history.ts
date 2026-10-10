@@ -688,6 +688,10 @@ export interface HistoryScrubResult {
   blanked: string[];
 }
 
+/** The season a committed history entry belongs to (its path names it). */
+const seasonOfEntry = (e: ManifestEntry): number =>
+  Number(/^recorded\/history\/(\d{4})\//.exec(e.path)?.[1]);
+
 /** The season directories of a raw history run, ascending (four-digit names only). */
 export function historySeasonDirs(rawDir: string): number[] {
   if (!existsSync(rawDir)) return [];
@@ -872,7 +876,7 @@ export async function scrubHistory(opts: HistoryScrubOptions): Promise<HistorySc
   // per league: the served seasons' summaries (value-free counts) and the not-served ones
   for (const e of entries) {
     if (e.views[0] !== "mMatchup" || e.league === null) continue;
-    const season = Number(/history\/(\d{4})\//.exec(e.path)?.[1]);
+    const season = seasonOfEntry(e);
     matchupBodies.set(
       `${String(season)}|${e.league}`,
       wholeOf(entries, outputs, e.path.replace(/(?:\.p\d+)?\.json$/, "")),
@@ -946,9 +950,15 @@ export async function scrubHistory(opts: HistoryScrubOptions): Promise<HistorySc
       not_attempted: latestPrev.filter((s) => !tried.has(s)),
     };
   }
-  const run = existsSync(path.join(opts.rawDir, "run.json"))
-    ? (JSON.parse(readFileSync(path.join(opts.rawDir, "run.json"), "utf8")) as Partial<HistoryRun>)
-    : {};
+  // the projections are what the box scores hold (never a claim read back from the raw dir)
+  const boxSlots = [
+    ...new Set(entries.filter((e) => e.views[0] === "mBoxscore").map((e) => e.league)),
+  ];
+  if (boxSlots.length > 1 || boxSlots.includes(null))
+    throw new ScrubAbort("box scores of more than one league slot in one history run");
+  const boxSeasons = [
+    ...new Set(entries.filter((e) => e.views[0] === "mBoxscore").map((e) => seasonOfEntry(e))),
+  ].sort((a, b) => a - b);
   const manifest: HistoryManifest = {
     $comment:
       "Recorded ESPN fixtures of the probe leagues' finished PREVIOUS seasons (evidence, plan 05 §3 fixture law; plan 10 §3.3 C1/C3/C4 inputs): keyless captures, scrubbed by scripts/record-fixture.ts --history (research 03 §F.3), one GUID pseudonym map per league across seasons. `files[]` has the shape of fixtures/espn/manifest.json's entries (paths relative to fixtures/espn; sha256 = sha256 of the canonical JSON of the scrubbed body; scoring.sha256 over every scoring field, computed on the raw recording and re-verified on the scrubbed file; `withheld` lists units removed because a line of theirs matched the local deny-list — in a box score the roster entry, never a value). `leagues[slot].seasons[season]` summarises each attempted season value-free (served or the typed 4xx; finished; teams; playoff seeds; box-score weeks; weekly projections = statSourceId 1, statSplitTypeId 1); `not_attempted` lists the previous seasons ESPN lists that this run did not request. Kept apart from fixtures/espn/manifest.json, whose hash the drift entity manifest binds. No league id, team name or member name of any recorded league is stored anywhere in this repo.",
@@ -958,12 +968,7 @@ export async function scrubHistory(opts: HistoryScrubOptions): Promise<HistorySc
     captured_at: capturedAt,
     scrub_rules_version: SCRUB_RULES_VERSION,
     seasons: [...new Set(seasons)].sort((a, b) => a - b),
-    projections: {
-      slot: typeof run.projections?.slot === "string" ? run.projections.slot : null,
-      seasons: Array.isArray(run.projections?.seasons)
-        ? [...run.projections.seasons].sort((a, b) => a - b)
-        : [],
-    },
+    projections: { slot: boxSlots[0] ?? null, seasons: boxSeasons },
     leagues,
     files: entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
     withheld_files: withheldFiles.sort(),

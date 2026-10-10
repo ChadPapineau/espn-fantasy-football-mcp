@@ -5,7 +5,7 @@
 // plan 05 §3.1 steps 1–4 (raw OUTSIDE the repo; the deny-list abort; byte-identical reruns;
 // provenance hashes), research 03 §D.3 (≥ 1.2 s spacing; a cap fixed before the first request; a
 // 4xx is never retried), §F.3 (placeholders only). No network; adversarial by default.
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -464,6 +464,61 @@ describe("recordHistory — keyless, polite, read host only", () => {
     expect(r.fake.calls).toHaveLength(n);
     expect(readManifest(r.o.outRoot).seasons).toEqual([2025]);
   });
+
+  it("a transport failure or a 5xx stops the run: no retry, nothing written, the stored captures kept for a resume", async () => {
+    const r = rig({ argv: ["--seasons", "2025", "--projection-seasons", "2025"] });
+    let calls = 0;
+    const flaky = (input: string, init: RequestInit) => {
+      calls++;
+      if (calls === 3) return Promise.reject(new TypeError("socket hang up"));
+      return r.fake.fetch(input, init);
+    };
+    await expect(
+      recordHistory(r.o, {
+        fetch: flaky,
+        sleep: () => Promise.resolve(),
+        clock: () => 0,
+        log: () => undefined,
+        scan: inProcessScan(),
+      }),
+    ).rejects.toThrow(/network error/);
+    expect(calls).toBe(3);
+    expect(existsSync(path.join(r.o.outRoot, "recorded", "history"))).toBe(false);
+    expect(filesUnder(r.o.rawDir)).toEqual(
+      expect.arrayContaining([
+        "2025/season/proTeamSchedules_wl.json",
+        "2025/league-a/mSettings.json",
+      ]),
+    );
+    const s503 = (input: string, init: RequestInit) =>
+      new URL(input).searchParams.getAll("view").includes("mTeam")
+        ? Promise.resolve(new Response("{}", { status: 503 }))
+        : r.fake.fetch(input, init);
+    await expect(
+      recordHistory(r.o, {
+        fetch: s503,
+        sleep: () => Promise.resolve(),
+        clock: () => 0,
+        log: () => undefined,
+        scan: inProcessScan(),
+      }),
+    ).rejects.toThrow(/unexpected HTTP 503 — stopping/);
+    // a 5xx on mSettings is not "not served": it stops the run too
+    const settings503 = (input: string, init: RequestInit) =>
+      new URL(input).searchParams.getAll("view").includes("mSettings")
+        ? Promise.resolve(new Response("{}", { status: 503 }))
+        : r.fake.fetch(input, init);
+    const fresh = rig({ argv: ["--seasons", "2024", "--projections", "none"] });
+    await expect(
+      recordHistory(fresh.o, {
+        fetch: settings503,
+        sleep: () => Promise.resolve(),
+        clock: () => 0,
+        log: () => undefined,
+        scan: inProcessScan(),
+      }),
+    ).rejects.toThrow(/unexpected HTTP 503/);
+  });
 });
 
 describe("scrubHistory — the committed history and its manifest", () => {
@@ -628,6 +683,62 @@ describe("scrubHistory — the committed history and its manifest", () => {
     await expect(
       scrubHistory({ rawDir: r.o.rawDir, outRoot: r.o.outRoot, scan: inProcessScan() }),
     ).rejects.toThrow(/names another season/);
+  });
+
+  it("refuses a non-200 capture other than a not-served mSettings, a body that is not JSON, and captures without their mSettings", async () => {
+    const r = rig({ argv: ["--seasons", "2025", "--projections", "none", "--no-scrub"] });
+    await r.run();
+    const team = path.join(r.o.rawDir, "2025", "league-a", "mTeam.json");
+    const settings = path.join(r.o.rawDir, "2025", "league-a", "mSettings.json");
+    const original = readFileSync(team, "utf8");
+    const scrub = () =>
+      scrubHistory({ rawDir: r.o.rawDir, outRoot: r.o.outRoot, scan: inProcessScan() });
+    writeFileSync(team, JSON.stringify({ ...(JSON.parse(original) as object), status: 503 }));
+    await expect(scrub()).rejects.toThrow(/2025 league-a\/mTeam: HTTP 503 where 200 was required/);
+    writeFileSync(
+      team,
+      JSON.stringify({ ...(JSON.parse(original) as object), bodyText: "{not json" }),
+    );
+    await expect(scrub()).rejects.toThrow(/mTeam: body is not usable JSON/);
+    writeFileSync(team, original);
+    const s = readFileSync(settings, "utf8");
+    // a not-served mSettings (a stored 4xx) next to other captures of that league-season
+    writeFileSync(settings, JSON.stringify({ ...(JSON.parse(s) as object), status: 404 }));
+    await expect(scrub()).rejects.toThrow(
+      /2025 league-a: captures without that season's mSettings/,
+    );
+    expect(existsSync(path.join(r.o.outRoot, HISTORY_MANIFEST_REL))).toBe(false);
+  });
+
+  it("the manifest's projections are what the box scores hold, with or without the raw run file", async () => {
+    const r = rig({
+      argv: ["--seasons", "2025,2024", "--projection-seasons", "2024", "--no-scrub"],
+    });
+    await r.run();
+    rmSync(path.join(r.o.rawDir, "run.json"));
+    const res = await scrubHistory({
+      rawDir: r.o.rawDir,
+      outRoot: r.o.outRoot,
+      scan: inProcessScan(),
+      dryRun: true,
+    });
+    expect(res.manifest.projections).toEqual({ slot: "league-b", seasons: [2024] });
+    // box scores of two slots in one run are refused (the recorder never makes them)
+    const src = path.join(r.o.rawDir, "2024", "league-b", "mBoxscore.sp1.json");
+    mkdirSync(path.join(r.o.rawDir, "2024", "league-a"), { recursive: true });
+    const env = JSON.parse(readFileSync(src, "utf8")) as { slot: string };
+    writeFileSync(
+      path.join(r.o.rawDir, "2024", "league-a", "mBoxscore.sp1.json"),
+      JSON.stringify({ ...env, slot: "league-a" }),
+    );
+    await expect(
+      scrubHistory({
+        rawDir: r.o.rawDir,
+        outRoot: r.o.outRoot,
+        scan: inProcessScan(),
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/box scores of more than one league slot/);
   });
 
   it("fixture mode serves a previous season from the history manifest (C4/C3 consumers)", async () => {
