@@ -272,7 +272,7 @@ export async function tune(
     if (set.proposals.length === 0) notes.push("the retrospective proposed no change this week");
   }
 
-  const report = (applied: false): TuneReport => ({
+  const report = (): TuneReport => ({
     mode: opts.apply ? "apply" : "dry_run",
     kind: plan.kind,
     file: { path: file, state: !current.ok ? "invalid" : current.present ? "ok" : "absent" },
@@ -289,12 +289,12 @@ export async function tune(
           },
     changes: plan.changes,
     refused: plan.refused,
-    applied,
+    applied: false,
     notes,
   });
   const print = async (): Promise<void> => {
     if (opts.json) {
-      await out(JSON.stringify(report(false)));
+      await out(JSON.stringify(report()));
       return;
     }
     await out(`eff tune${opts.revert ? " --revert" : ""}${opts.apply ? " --apply" : ""} — ${file}`);
