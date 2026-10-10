@@ -74,6 +74,7 @@ describe("readScoredClaim — a stored record read back defensively", () => {
     ["a negative prior", { ...claim(), prior_p: -0.1 }],
     ["a NaN prior", { ...claim(), prior_p: Number.NaN }],
     ["a string outcome", { ...claim(), active: "yes" }],
+    ["a string borne_out", { ...claim(), borne_out: "true" }],
     ["no outcome at all", { ...claim(), active: null, borne_out: null }],
     ["a zero count", { ...claim(), count: 0 }],
     ["a fractional count", { ...claim(), count: 1.5 }],
@@ -245,6 +246,11 @@ describe("fitLlr — the row ratio's MAP", () => {
     const p = 1 / (1 + Math.exp(-(offset + llr)));
     expect(p).toBeGreaterThan(0.79);
     expect(p).toBeLessThan(0.81);
+  });
+
+  it("reads an unweighted datum as one claim", () => {
+    const one = fitLlr([{ offset: 0.3, active: true }], 0);
+    expect(one).toEqual(fitLlr([{ offset: 0.3, active: true, w: 1 }], 0));
   });
 
   it("returns the bracket edge when the data push past it", () => {

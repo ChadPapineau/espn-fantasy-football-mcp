@@ -379,7 +379,7 @@ const rowKey = (
  * CALIBRATION.maxClaims are read). Rows are sorted by key; `table_n` counts the text sources only.
  */
 export function buildCalibrationTable(claims: readonly unknown[]): CalibrationTable {
-  const groups = new Map<string, ScoredClaim[]>();
+  const groups = new Map<string, { readonly first: ScoredClaim; readonly cs: ScoredClaim[] }>();
   let dropped = 0;
   let total = 0;
   let text = 0;
@@ -394,14 +394,13 @@ export function buildCalibrationTable(claims: readonly unknown[]): CalibrationTa
     if (isTextSource(c.source)) text += w;
     const k = rowKey(c.source, c.type, c.signal, priorStatusOf(c.prior_status));
     const g = groups.get(k);
-    if (g === undefined) groups.set(k, [c]);
-    else g.push(c);
+    if (g === undefined) groups.set(k, { first: c, cs: [c] });
+    else g.cs.push(c);
   }
   dropped += Math.max(0, claims.length - CALIBRATION.maxClaims);
   const rows: CalibrationRow[] = [];
-  for (const [key, cs] of [...groups].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
-    const first = cs[0];
-    if (first === undefined) continue;
+  // keys are unique, so the order is total without an equality case
+  for (const [key, { first, cs }] of [...groups].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     let n = 0;
     let k = 0;
     // identical (offset, outcome) pairs fitted once, weighted (bounded work for a large history)
@@ -497,7 +496,7 @@ export function mergePActive(
       latest.set(e.source, e);
   }
   if (latest.size === 0) return priorP;
-  let x = offsetOf(priorP) ?? 0;
+  let x = logit(Math.min(priorP, 1 - CALIBRATION.priorEps));
   for (const e of latest.values()) {
     const type = e.type as "availability" | "health";
     const row = rowOf(table, e.source, type, e.signal, priorStatus);
