@@ -235,8 +235,8 @@ ESPN's pre-week `winProbability` exists only in the scoreboard snapshots the pre
 run stores (`eff` snapshot job, T-07) and its `playoffPct` only in an in-season `mTeam`. Every
 finished season lacks both (the backtest scans every history fixture), so both comparisons are
 `needs_time`: the code path runs end to end — our forecast per replayed week / checkpoint, ESPN's
-number from a snapshot through the same reader the retrospective uses (the latest snapshot at or
-before the week's first kickoff), Brier per period, `met` only when ours is ≤ ESPN's in every
+number from a stored `scoreboard_snapshot` through `preWeekSnapshot` (the latest snapshot at
+or before the week's first kickoff) → `espnNumbersOf` → `attachEspn`, Brier per period, `met` only when ours is ≤ ESPN's in every
 compared period — and it starts comparing the first week a pre-kickoff snapshot and a final result
 both exist.
 

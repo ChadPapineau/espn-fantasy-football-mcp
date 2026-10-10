@@ -39,6 +39,7 @@ export {
   type ObjectiveSwitchStatus,
 } from "./objectiveSwitch.js";
 export {
+  attachEspn,
   compareWithEspn,
   espnNumbersOf,
   preWeekSnapshot,

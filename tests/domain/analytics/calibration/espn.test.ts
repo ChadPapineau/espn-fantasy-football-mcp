@@ -6,6 +6,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  attachEspn,
   compareWithEspn,
   espnNumbersOf,
   preWeekSnapshot,
@@ -218,5 +219,35 @@ describe("preWeekSnapshot / espnNumbersOf", () => {
       playoff_pct: new Map(),
       skipped: 0,
     });
+  });
+});
+
+describe("attachEspn — the chain from a snapshot to a comparison", () => {
+  it("attaches the pre-week snapshot's number per team; a team or week without one stays null", () => {
+    const kickoff = Date.parse("2026-10-01T17:00:00.000Z");
+    // a synthetic pre-week snapshot (not ESPN data): team 1 at 0.6, team 2 at 0.4
+    const pre = snap(4, "2026-10-01T12:00:00.000Z", [
+      [1, 0.6],
+      [2, 0.4],
+    ]);
+    const ours: ComparatorRow[] = [
+      { season: 2026, period: 4, team_id: 1, ours: 0.7, espn: null, outcome: true },
+      { season: 2026, period: 4, team_id: 2, ours: 0.3, espn: null, outcome: false },
+      { season: 2026, period: 4, team_id: 3, ours: 0.5, espn: null, outcome: true },
+      { season: 2026, period: 5, team_id: 1, ours: 0.5, espn: null, outcome: false },
+    ];
+    const rows = attachEspn(
+      ours,
+      (r) => espnNumbersOf(preWeekSnapshot([pre], r.period, kickoff)).win_probability,
+    );
+    expect(rows.map((x) => x.espn)).toEqual([0.6, 0.4, null, null]);
+    const c = compareWithEspn("win_probability", rows);
+    expect(c.status).toBe("met");
+    expect(c.periods).toHaveLength(1);
+    expect(c.periods_without_espn).toBe(1);
+    expect(c.periods[0]?.brier_ours).toBeCloseTo(0.09, 6);
+    expect(c.periods[0]?.brier_espn).toBeCloseTo(0.16, 6);
+    // the input rows are not mutated
+    expect(ours.every((x) => x.espn === null)).toBe(true);
   });
 });

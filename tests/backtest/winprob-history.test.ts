@@ -4,7 +4,7 @@
 // here by scanning every history fixture), so both comparisons are `needs_time` — the code path is
 // proven: our forecasts on every replayed week (the held-out start/sit replay's P(win) of the lineups
 // as played) and on every finished league-season at weeks 4, 8 and 12 (the shipped seeding simulator's
-// P(playoffs)), joined to ESPN's numbers through the same snapshot reader the retrospective uses, and
+// P(playoffs)), joined to ESPN's numbers through preWeekSnapshot → espnNumbersOf → attachEspn, and
 // the recorded 2026 snapshots shown to be post-kickoff (excluded — never compared as pre-week).
 // Hard: no comparison reports a pass without an ESPN number; our P(playoffs) beats the base-rate
 // forecast at every checkpoint. Reported (docs/evals/phase3-startsit.md, held equal): the tables.
@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  attachEspn,
   compareWithEspn,
   espnNumbersOf,
   preWeekSnapshot,
@@ -157,7 +158,13 @@ describe("C3 P(win) and P(playoffs) against ESPN", () => {
   });
 
   it("(hard) P(win): no replayed week has a pre-week snapshot → needs_time over every week, never a pass", () => {
-    const rows = weeklyRows(cv);
+    // the finished seasons hold no scoreboard snapshot: the chain attaches nothing
+    const snapshots: ScoreboardSnapshot[] = [];
+    const rows = attachEspn(
+      weeklyRows(cv),
+      (r) => espnNumbersOf(preWeekSnapshot(snapshots, r.period, null)).win_probability,
+    );
+    expect(rows.every((r) => r.espn === null)).toBe(true);
     expect(rows.length).toBeGreaterThanOrEqual(250);
     const c = compareWithEspn("win_probability", rows);
     expect(c.status).toBe("needs_time");

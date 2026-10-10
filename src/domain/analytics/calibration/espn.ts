@@ -204,3 +204,15 @@ export function espnNumbersOf(snapshot: ScoreboardSnapshot | null): EspnSnapshot
   }
   return { win_probability: wp, playoff_pct: pct, skipped };
 }
+
+/**
+ * Our forecasts with ESPN's number attached per team (the chain: `preWeekSnapshot` → `espnNumbersOf`
+ * → this → `compareWithEspn`). `numbersFor` returns the period's numbers by team (an empty map when
+ * no snapshot exists — the forecast keeps `espn: null`).
+ */
+export function attachEspn(
+  rows: readonly ComparatorRow[],
+  numbersFor: (row: ComparatorRow) => ReadonlyMap<number, number>,
+): ComparatorRow[] {
+  return rows.map((r) => ({ ...r, espn: numbersFor(r).get(r.team_id) ?? null }));
+}
