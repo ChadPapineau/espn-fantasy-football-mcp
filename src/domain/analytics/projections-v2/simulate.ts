@@ -359,11 +359,8 @@ export function simPoints(lines: readonly StatLine[], settings: ScoringSettings)
   return out;
 }
 
-/**
- * The expected line (fractional counts) of a player-week if active — the stat_line_expectation of
- * plan 07 E1 and the drivers' basis (linear in the stats; bonuses need the simulation).
- */
-export function expectedCounts(e: V2Expectation): Readonly<Record<Canonical, number>> {
+/** The expected counts of a player-week if active, rounded to 3 decimals (one struct, two views). */
+function expectedStruct(e: V2Expectation) {
   const qb = e.position === "QB";
   const att = qb ? e.pass_att : 0;
   const sacks = qb ? e.team_dropbacks * e.sack_per_dropback : 0;
@@ -373,7 +370,7 @@ export function expectedCounts(e: V2Expectation): Readonly<Record<Canonical, num
   const recTd = e.targets * e.td_per_target;
   const rushTd = e.carries * e.td_per_carry;
   const r = (x: number): number => Math.round(x * 1000) / 1000;
-  return Object.freeze({
+  return {
     pass_att: r(att),
     pass_cmp: r(cmp),
     pass_yd: r(cmp * e.yards_per_cmp),
@@ -389,29 +386,37 @@ export function expectedCounts(e: V2Expectation): Readonly<Record<Canonical, num
     rec_td: r(recTd),
     fum_lost: r((rec + e.carries + sacks) * e.fumble_per_touch),
     two_pt_total: r((passTd + recTd + rushTd) * e.two_pt_per_td),
-  });
+  };
+}
+
+/**
+ * The expected line (fractional counts) of a player-week if active — the stat_line_expectation of
+ * plan 07 E1 and the drivers' basis (linear in the stats; bonuses need the simulation).
+ */
+export function expectedCounts(e: V2Expectation): Readonly<Record<Canonical, number>> {
+  return Object.freeze(expectedStruct(e));
 }
 
 /** The expected counts as a canonical line the engine can score (2-pt tries by position). */
 export function expectedLine(e: V2Expectation): StatLine {
-  const c = expectedCounts(e);
-  const two = c.two_pt_total ?? 0;
+  const c = expectedStruct(e);
+  const two = c.two_pt_total;
   return lineFromCounts(
     {
-      pass_att: c.pass_att ?? 0,
-      pass_cmp: c.pass_cmp ?? 0,
-      pass_yd: c.pass_yd ?? 0,
-      pass_td: c.pass_td ?? 0,
-      pass_int: c.pass_int ?? 0,
-      sacks: c.sacked ?? 0,
-      rush_att: c.rush_att ?? 0,
-      rush_yd: c.rush_yd ?? 0,
-      rush_td: c.rush_td ?? 0,
-      targets: c.targets ?? 0,
-      rec: c.rec ?? 0,
-      rec_yd: c.rec_yd ?? 0,
-      rec_td: c.rec_td ?? 0,
-      fum_lost: c.fum_lost ?? 0,
+      pass_att: c.pass_att,
+      pass_cmp: c.pass_cmp,
+      pass_yd: c.pass_yd,
+      pass_td: c.pass_td,
+      pass_int: c.pass_int,
+      sacks: c.sacked,
+      rush_att: c.rush_att,
+      rush_yd: c.rush_yd,
+      rush_td: c.rush_td,
+      targets: c.targets,
+      rec: c.rec,
+      rec_yd: c.rec_yd,
+      rec_td: c.rec_td,
+      fum_lost: c.fum_lost,
       pass_2pt: e.position === "QB" ? two : 0,
       rush_2pt: e.position === "RB" ? two : 0,
       rec_2pt: e.position === "WR" || e.position === "TE" ? two : 0,
