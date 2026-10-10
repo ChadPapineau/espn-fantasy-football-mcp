@@ -128,6 +128,51 @@ the committed excerpts. Both are asked of the integration and the plan 06 owner 
   refuses when `CLAUDECODE` is set or under a launchd label, and the human must type `apply`.
   `--revert` undoes the last change set. It is not in the launchd job list and cannot be reached
   from `serve`.
+- **On recorded ESPN data now** (`tests/domain/reclog/attribution-espn.test.ts`): every league-b
+  box-score entry is attributed through `attributionRowFromEspn`. That covers the current season's
+  weeks 1–3 and the finished 2024–2025 seasons' weeks 1–17. ESPN's own weekly projection stands in
+  as the model, so this is the code path E13 runs.
+  - The identity holds on every row.
+  - The `scoring` layer is within the golden's 0.01: the engine is ESPN's scorer.
+  - A did-not-play entry is all availability.
+  - The soft number below is ESPN's projection error by layer, under league-b's half-PPR scoring.
+    ESPN publishes no P(active), so read as 1: a did-not-play week is all availability, and a played
+    week has none.
+
+<!-- espn-attribution:start -->
+4815 player-weeks; error = ESPN appliedTotal − ESPN's projected appliedTotal: mean -0.29, MAE 4.924.
+
+| Layer | Mean | MAE | Share of Σ MAE |
+|---|---|---|---|
+| availability | -0.003 | 0.003 | 0 % |
+| opportunity | -0.221 | 1.891 | 26 % |
+| efficiency | -0.163 | 1.775 | 25 % |
+| touchdowns | 0.031 | 2.577 | 36 % |
+| turnovers | 0.033 | 0.266 | 4 % |
+| other | 0.033 | 0.712 | 10 % |
+| anchor | 0 | 0 | 0 % |
+| scoring | 0 | 0 | 0 % |
+
+| Position | n | Error MAE | Availability MAE | Opportunity MAE | Efficiency MAE | Touchdowns MAE |
+|---|---|---|---|---|---|---|
+| QB | 486 | 6.125 | 0 | 1.96 | 1.883 | 4.205 |
+| RB | 1508 | 5.008 | 0.003 | 1.97 | 1.997 | 3.089 |
+| WR | 1556 | 5.07 | 0.007 | 2.539 | 2.37 | 2.784 |
+| TE | 549 | 4.242 | 0 | 2.244 | 1.7 | 2.502 |
+| K | 352 | 3.809 | 0 | 0 | 0 | 0 |
+| D/ST | 364 | 4.455 | 0 | 0 | 0 | 0 |
+<!-- espn-attribution:end -->
+
+  Reading:
+  - On league-b, touchdowns are the largest single source of ESPN's weekly error (about a third
+    of the summed MAE), then opportunity and efficiency at about a quarter each. The model's
+    location-based TD layer (sib §1 step 5) is therefore the one to watch.
+  - Availability is near zero because ESPN projects 0 for a player it expects to sit. Anchor is 0
+    because ESPN's projected `appliedTotal` equals the engine on ESPN's projected line.
+  - One row in two seasons breaks the golden's 0.01 and lands in `scoring`: a kicker's 6 rushing
+    yards (stat 24), which ESPN scores and the engine's class gating does not. It is reported to
+    the scoring owner.
+
 - **needs_time / needs wiring:** live numbers need the E13 tool to pass attribution rows. Those
   rows join stored projections, which v2 must store with an active-conditional expectation and a
   trace. Proposal sets need a store table, and the projection model must read the overrides. All

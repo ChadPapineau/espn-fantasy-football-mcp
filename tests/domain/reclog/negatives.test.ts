@@ -114,16 +114,16 @@ describe("small statistics", () => {
 describe("verdict rules (synthetic)", () => {
   it("waiver: the shipped DP's own numbers", () => {
     const [hoard, never] = waiverChecks(10);
-    expect(hoard?.product).toMatchObject({
+    expect(hoard.product).toMatchObject({
       v_1_16: 95.8,
       v_n_16: 48.5,
       threshold_k1_10_weeks_left: 2.5,
     });
-    expect(hoard?.verdict).toBe("holds");
-    expect(never?.verdict).toBe("holds");
-    expect(never?.product.p_clear_r4_5).toBeLessThan(0.05);
+    expect(hoard.verdict).toBe("holds");
+    expect(never.verdict).toBe("holds");
+    expect(never.product.p_clear_r4_5).toBeLessThan(0.05);
     // a 2-team league: the one rival rarely claims — the threshold is tiny, nothing changes
-    expect(waiverChecks(2)[1]?.verdict).toBe("overturned");
+    expect(waiverChecks(2)[1].verdict).toBe("overturned");
   });
 
   it("QB scarcity: overturned when QB1 − QB12 exceeds both RB1's and WR1's VOR", () => {
@@ -205,9 +205,9 @@ describe("verdict rules (synthetic)", () => {
       for (let k = 0; k < 4; k++)
         schedule.push({ season: 2025, week: w, team: `O${String(k)}`, opponent: `D${String(k)}` });
     const [dvp, sos] = dvpChecks(synth(rows, { schedule }));
-    expect(dvp?.product.mean_r).toBe(1);
-    expect(dvp?.verdict).toBe("overturned");
-    expect(sos?.verdict).toBe("overturned");
+    expect(dvp.product.mean_r).toBe(1);
+    expect(dvp.verdict).toBe("overturned");
+    expect(sos.verdict).toBe("overturned");
   });
 
   const league = (

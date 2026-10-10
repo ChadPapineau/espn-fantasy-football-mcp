@@ -19,7 +19,7 @@
 import type { ModelVersion, SubjectRole } from "../analytics/types.js";
 import type { Week } from "../league/types.js";
 import { score } from "../scoring/engine.js";
-import { positionClassOf } from "../scoring/stat_map.js";
+import { positionClassOf, statLineFromEspn } from "../scoring/stat_map.js";
 import {
   CANONICAL_NAME_RE,
   asPositionId,
@@ -544,6 +544,78 @@ export function attributePlayerWeek(
       weather_lift: multiplierLift(row.realised_points, modelMean, trace?.weather_mult ?? null),
       trace,
     },
+  };
+}
+
+// --- the ESPN box-score row (what the E13 tool joins) ------------------------------------------------
+
+/** ESPN's games-played stat id (210 → `gp`): 1 on every weekly actual line of a player who played. */
+export const ESPN_GP_STAT_ID = "210";
+
+/**
+ * Whether an ESPN weekly actual line (`actual.raw`) says the player played: gp ≥ 1; without a gp
+ * entry, any non-zero stat. A did-not-play entry carries an empty stats map (recorded fixtures).
+ */
+export function playedFromEspn(raw: Readonly<Record<string, number>> | null): boolean {
+  if (raw === null) return false;
+  if (Object.hasOwn(raw, ESPN_GP_STAT_ID)) return (raw[ESPN_GP_STAT_ID] ?? 0) >= 1;
+  return Object.values(raw).some((v) => typeof v === "number" && v !== 0);
+}
+
+/** One projected player-week as the store and the box score give it (plan 07 E13 data: A5 + store). */
+export interface EspnAttributionSource {
+  readonly week: Week;
+  readonly player_id: number;
+  readonly gsis_id: string | null;
+  readonly position: string;
+  readonly position_id: number;
+  readonly model_version: ModelVersion;
+  /** The stored projection's expected line, conditional on playing (`projection.expectation_json`). */
+  readonly expectation: Readonly<Record<Canonical, number>>;
+  /** The point estimate the tool reported for the week. */
+  readonly reported_mean: number;
+  readonly p_active: number | null;
+  /** The box-score entry's `actual.raw` (ESPN `stats{statId: raw}`); null = no actual line. */
+  readonly actual_raw: Readonly<Record<string, number>> | null;
+  /** The entry's `actual.applied_total`; null = unknown (no row is built). */
+  readonly applied_total: number | null;
+  readonly espn_mean: number | null;
+  readonly trace: ProjectionTrace | null;
+}
+
+/**
+ * The AttributionRow of an ESPN box-score week: the realised line is the entry's ESPN stats through
+ * the plan 08 id table (ESPN lines are scored as sent, so the `scoring` layer is the golden's
+ * residual, ≈ 0), `active` by playedFromEspn, realised = ESPN `appliedTotal`. Null when the applied
+ * total is unknown or the ESPN stats fail the translator (drift — the caller counts it).
+ */
+export function attributionRowFromEspn(src: EspnAttributionSource): AttributionRow | null {
+  if (src.applied_total === null) return null;
+  const active = playedFromEspn(src.actual_raw);
+  let realised: Record<Canonical, number> = {};
+  if (active && src.actual_raw !== null) {
+    try {
+      realised = { ...statLineFromEspn({ raw: src.actual_raw }, src.position_id).line.values };
+    } catch {
+      return null;
+    }
+  }
+  return {
+    week: src.week,
+    player_id: src.player_id,
+    gsis_id: src.gsis_id,
+    position: src.position,
+    position_id: src.position_id,
+    model_version: src.model_version,
+    reported_mean: src.reported_mean,
+    p_active: src.p_active,
+    expected: src.expectation,
+    active,
+    realised,
+    realised_source: "espn",
+    realised_points: src.applied_total,
+    espn_mean: src.espn_mean,
+    trace: src.trace,
   };
 }
 
