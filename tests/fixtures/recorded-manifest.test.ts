@@ -67,12 +67,14 @@ const GUID_ANY = /[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0
 
 describe("fixtures/espn/manifest.json", () => {
   it("lists exactly the files on disk under recorded/ (no orphan, no ghost)", () => {
+    // recorded/history/ (previous seasons) has its own manifest: tests/fixtures/history-manifest.test.ts
     const onDisk = readdirSync(path.join(ESPN, "recorded"), {
       recursive: true,
       withFileTypes: true,
     })
       .filter((d) => d.isFile() && d.name.endsWith(".json"))
       .map((d) => path.relative(ESPN, path.join(d.parentPath, d.name)).split(path.sep).join("/"))
+      .filter((p) => !p.startsWith("recorded/history/"))
       .sort();
     expect(files.map((f) => f.path).sort()).toEqual(onDisk);
     expect(manifest.withheld_files).toEqual([]);
