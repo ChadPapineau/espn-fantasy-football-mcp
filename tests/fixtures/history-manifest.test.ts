@@ -36,6 +36,12 @@ import {
   scoringProjection,
 } from "../../scripts/espn-fixture/scrub.js";
 import { createFixtureFetch } from "../../src/providers/espn/fixture.js";
+import {
+  historyBody,
+  historyEntries,
+  historyFixtureFetch,
+  servedSeasons,
+} from "./helpers/history-fixtures.js";
 import { ROOT } from "../lint/helpers.js";
 
 const ESPN = path.join(ROOT, "fixtures", "espn");
@@ -474,6 +480,34 @@ describe.each(files.map((f) => [f.path, f] as const))("%s", (_p, entry) => {
         expect(m.displayName).toMatch(/^Member \d{1,3}$/);
         for (const k of ["firstName", "lastName"]) if (k in m) expect(m[k]).toBe("");
       }
+    }
+  });
+});
+
+describe("helpers/history-fixtures.ts (the read API for Phase 3 tests)", () => {
+  it("historyBody re-assembles a split response exactly as the manifest describes it", () => {
+    const split = files.find((f) => f.part !== null && f.views[0] === "mMatchup");
+    if (!split) throw new Error("no split mMatchup recorded");
+    const [, , season, slot] = split.path.split("/");
+    const body = historyBody(Number(season), slot ?? "", "mMatchup");
+    expect(body).toEqual(whole(split.path.replace(/\.p\d+\.json$/, "")));
+    expect(
+      historyEntries(Number(season), slot ?? "", "mMatchup").map((e) => e.part?.index),
+    ).toEqual([1, 2]);
+    expect(() => historyBody(2019, "league-a", "mTeam")).toThrow(/no history fixture/);
+  });
+
+  it("servedSeasons lists each slot's served seasons ascending; historyFixtureFetch serves them", async () => {
+    for (const slot of SLOTS) {
+      const seasons = servedSeasons(slot).map(([s]) => s);
+      expect(seasons).toEqual([...manifest.seasons]);
+      const f = historyFixtureFetch(slot);
+      const res = await f(
+        `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${String(seasons[0])}/segments/0/leagues/0?view=mTeam&view=mStandings`,
+        {},
+      );
+      const body = (await res.json()) as { teams: { playoffSeed: number }[] };
+      expect(body.teams.length).toBeGreaterThanOrEqual(10);
     }
   });
 });
