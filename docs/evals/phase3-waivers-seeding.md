@@ -66,7 +66,9 @@ tests; points-against's direction (fewer is better) stays [U] as in the simulato
 reproduces none of the nine: these leagues seed by record.
 
 **Needs the live league (Stage C):** the owner's league's own previous seasons
-(`status.previousSeasons`) — the same code path, fed by live provider reads.
+(`status.previousSeasons`) — the same code path, fed by live provider reads. **Not covered here:**
+the probe leagues' older listed seasons (2006–2022, outside the recording's request cap; pre-2018
+seasons sit on the untested `leagueHistory` route — `docs/evals/phase3-data.md`).
 
 ## C5 — the fitted waiver DP
 
@@ -160,7 +162,7 @@ Every start position 1–10 × 200 seeded paths per season, common random number
 | 2025 | trending_strike | 2.0 | 0.9 | 23.5 | 21.3 |
 | 2025 | hindsight | 13.0 | 8.7 | 60.0 | 521.2 |
 
-**C5, surplus per successful claim, fitted rule vs trending (≥ +10 % in both seasons):** 2024 -32.6 %; 2025 -1.8 % → **not met** (soft).
+**C5, surplus per successful claim, fitted rule vs trending (≥ +10 % in both seasons):** 2024 −32.6 %; 2025 −1.8 % → **not met** (soft).
 <!-- waivers:end -->
 
 **Reading the replay.** The rule loses to trending per successful claim in 2024 (−32.6 %) and ties
@@ -169,10 +171,11 @@ bottleneck: replacing the cold-start Π with the fitted one moves the rule's per
 under 2 % (15.6 → 15.3, 16.5 → 16.4) — the strike decides *whether* to claim, and the forecast that
 ranks *whom* is the A9a harness's trailing-4 points per game, which reacts to a role change a
 week or more after "most points last week" does. C5's comparison therefore needs the Phase 3
-opportunity forecast (`v2-opportunity`, the projection role's work) as the replay's `s`: the
-harness takes any forecast, and this test re-runs unchanged once one is wired. The diagnostic
-`trending_strike` is mixed (2024 18.8 vs 22.7, 2025 23.5 vs 16.8 per claim, on 1–1.5 successful
-claims a season), so it does not show the strike adding value to the trending pick either.
+opportunity forecast (`v2-opportunity`, the projection role's work) as the replay's `s` — the A9a
+harness's `forecastSurplus` swapped for it; the fit, the premium and this test need no change. The
+diagnostic `trending_strike` is mixed (2024 18.8 vs 22.7, 2025 23.5 vs 16.8 per claim, on 0.9–1.4
+successful claims a season), so it does not show the strike adding value to the trending pick
+either.
 
 **The calibration** (research 05 §1.6 eval 2 and "working"). The probe leagues' finished seasons
 carry no `mTransactions2` (keyless), so their claim feed is not visible. What is visible is every
@@ -189,7 +192,7 @@ P(clears_to_FA) on league-b's real drops (2024, 2025): a player dropped between 
 | season | drops | skipped (withheld next week) | observed clear rate | mean predicted (cold) | in the large (cold) | worst judged decile (cold) | within ±10 (cold) | λ fitted on the other season | in the large (λ) | worst judged decile (λ) | within ±10 (λ) | clear rate, two-week window |
 |---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|---:|
 | 2024 | 182 | 21 | 96.2 | 46.9 | +49.2 | 93.8 | **no** | 0.07 | +2.1 | 13.2 | **no** | 80.8 |
-| 2025 | 178 | 10 | 93.8 | 47.2 | +46.6 | 85.6 | **no** | 0.05 (at the bound) | -1.8 | 2.2 | yes | 82.0 |
+| 2025 | 178 | 10 | 93.8 | 47.2 | +46.6 | 85.6 | **no** | 0.05 (at the bound) | −1.8 | 2.2 | yes | 82.0 |
 
 **C5, P(clears_to_FA) within ±10 points (n ≥ 30 per season, so not soft by n):** cold-start demand **not met**; with the demand scale fitted on the other season **not met** (soft).
 <!-- clears:end -->

@@ -336,7 +336,7 @@ function waiversSection(w: World): string {
     `**C5, surplus per successful claim, fitted rule vs trending (≥ +10 % in both seasons):** ${verdicts
       .map(
         (v) =>
-          `${String(v.s)} ${v.ratio === null ? "—" : `${v.ratio >= 0 ? "+" : ""}${f1(v.ratio * 100)} %`}`,
+          `${String(v.s)} ${v.ratio === null ? "—" : `${v.ratio >= 0 ? "+" : "−"}${f1(Math.abs(v.ratio) * 100)} %`}`,
       )
       .join("; ")} → **${met ? "met" : "not met"}** (soft).`,
   );

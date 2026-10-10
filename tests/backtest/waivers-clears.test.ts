@@ -191,7 +191,7 @@ beforeAll(() => {
 
 const pct = (x: number | null): string => (x === null ? "—" : (x * 100).toFixed(1));
 const signed = (x: number | null): string =>
-  x === null ? "—" : `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}`;
+  x === null ? "—" : `${x >= 0 ? "+" : "−"}${(Math.abs(x) * 100).toFixed(1)}`;
 
 function clearsSection(): string {
   const lines = [
