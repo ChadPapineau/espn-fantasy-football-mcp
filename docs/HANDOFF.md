@@ -101,6 +101,19 @@ Optional: `docs/scratch/workflows/effmcp-b2a-gate.js` re-runs B2a's independent 
   the orchestrator (R6):** C2's ESPN-regret clause and ±5-per-decile clause, research 05 §1.3's
   demand intercept, research 05 §2.4's k = 4 — evidence in `docs/evals/phase3-summary.md` →
   "Rulings requested".
+- **Gate round 2 (2026-10-11, fixer):** the gate stayed RED on C2 alone — hard, and blocked only on
+  the R6 rulings above (no code can make `mean` differ from ESPN's projection at `weight_espn` 1.0,
+  and ±5 per decile cannot be resolved on 47–49 forecasts); the C2/C3 backtests re-run green at
+  HEAD, numbers unchanged. Its two minor transport findings fixed at root in `src/cli/serve.ts`,
+  each with tests in `tests/mcp/serve.test.ts` (failing without the fix): a stdin line that is not
+  JSON is answered -32700 Parse error with no id (JSON-RPC 2.0 §5.1; MCP's error response makes `id`
+  optional and has no null), one reply per line, never an echo, a line over the read cap left to the
+  transport, a multi-byte character split across chunks decoded whole; a tools/call argument key
+  `__proto__` — which the SDK's zod-record re-parse of `arguments` dropped before the strict schema
+  ran — is carried under a stand-in no tool declares (held for all 34 tools) and answers a coded
+  VALIDATION `(root) (unknown key)` like any unknown key, top level and nested, no prototype touched.
+  **Still for the orchestrator:** R6 (C2's two clauses; the two soft rulings) and this file's
+  ▶ NEXT STEP, which still describes the 2026-10-07 pause (its step 4 is the orchestrator's).
 
 ## The findings that shape the product (verified by the orchestrator)
 

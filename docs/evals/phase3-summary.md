@@ -69,7 +69,12 @@ Status vocabulary: **met** · **not_met** · **soft_reported** (a soft item, rep
    above ESPN's), or move the ESPN clause to needs_time behind B14.
 2. **C2, ±5 per decile.** Unresolved on both bases (position_cv 5.6 on n = 49; v2 8.5 on n = 47 —
    both under-confident, consistent family-wise); ≈ 355 forecasts per central decile are needed and
-   two ten-team seasons give 47–70. E2's own `p_win_after` under v2 is within ±5 (met).
+   two ten-team seasons give 47–70. E2's own `p_win_after` under v2 is within ±5 (met). No sign of
+   a dispersion defect behind the miss (gate round 2 re-read of the committed tables): the adjacent
+   decile pair 0.2–0.3 / 0.7–0.8 leans the other way on both bases (over-confident by 4.7 / 4.8 on
+   n = 16), and the reliability term of the Brier decomposition is 0.0020 (position_cv) / 0.0031
+   (v2) against a resolution of 0.026–0.028 — the pattern of sampling noise, so the dispersion is not
+   re-fitted on the held-out seasons.
 3. **C5's cold-start demand intercept (research 05 §1.3).** League-b's real drops cleared 94–96 %
    against the cold curve's 63 %; the curve fitted on the other season puts q0 at 0.004–0.007 per
    rival (a tenth of 0.05) with no slope, within ±2.4 points. Revise the intercept, or keep the cold

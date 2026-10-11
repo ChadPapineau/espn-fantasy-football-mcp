@@ -483,6 +483,19 @@ the plan was silent (each also in `docs/HANDOFF.md` → "Build facts (Stage B2b)
 - **The fixture tooling's write host** · CLAUDE.md, plan 10 §3.W · `scripts/espn-fixture/http.ts`
   imports `ESPN_WRITE_HOST`; the Phase W test scans `scripts/` as well as `src/`.
 
+**B2b gate, fix round 2 (2026-10-11)** — records, each with tests (`tests/mcp/serve.test.ts`):
+
+- **A stdin line that is not JSON** · plan 01 §3.1 (silent on it), JSON-RPC 2.0 §5.1 ·
+  `src/cli/serve.ts` answers it -32700 Parse error, one reply per line, with **no** `id` (its id
+  cannot be read; MCP's error response makes `id` optional and its RequestId has no null — the SDK's
+  own message schema rejects `id: null`); never an echo of the line. Until now it was logged only.
+- **A tools/call argument key `__proto__`** · plan 02 §5 (`__proto__` keys are rejected by the
+  schemas' `.strict()`), plan 01 §4 · the SDK re-parses `arguments` as a zod record, which drops a
+  `__proto__` key, so the strict input schema never saw it and the call answered as if it were absent.
+  The transport now carries that key under a stand-in no tool declares (held for all 34 tools), so it
+  answers a coded VALIDATION `(root) (unknown key)` like any unknown key; nested keys were already
+  rejected by the nested strict objects (now tested). No prototype is touched; the key is never echoed.
+
 **Rulings requested (for R6)** (evidence in `docs/evals/phase3-summary.md` → "Rulings requested"):
 C2's regret vs "start by ESPN's projection" — identical lineups on **both** toolsets as shipped at
 `weight_espn` 1.0 (the A11a / R2 nit 2 structure; Phase 3 changes the distribution's shape, not its
