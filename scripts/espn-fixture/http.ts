@@ -4,11 +4,16 @@
 // ONLY, never a cookie, redirects never followed, bodies capped, requests spaced and counted.
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { ESPN_WRITE_HOST } from "../../src/config/schema.js";
 
 /** The only host this module will ever contact (research 03 §A.1). */
 export const READ_HOST = "lm-api-reads.fantasy.espn.com";
-/** The write host — refused unconditionally (CLAUDE.md "Security"; plan 10 §3.W not built). */
-export const WRITE_HOST = "lm-api-writes.fantasy.espn.com";
+/**
+ * The write host — refused unconditionally (CLAUDE.md "Security"; plan 10 §3.W not built). Imported
+ * from its one spelling in src/config/schema.ts, never spelled here (the Phase W test scans scripts/
+ * as well as src/ for the literal).
+ */
+export const WRITE_HOST = ESPN_WRITE_HOST;
 export const API_ROOT = `https://${READ_HOST}/apis/v3/games/ffl`;
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");

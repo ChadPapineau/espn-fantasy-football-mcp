@@ -1,12 +1,14 @@
 // types.test.ts — src/domain/gate (PHASE W SEAM — NOT IMPLEMENTED; plan 10 §3.W; owner decision
 // D11). Asserts the seam stays a seam: the marker on every declared seam, no write-only file, the
-// seven write tool names nowhere else in src, the write host only where the read-host override
-// refuses it, `writes`/`writesEnabled` literal false; and that the declared constants match plan
-// 02 §3.2–§4.4 (journal transitions incl. `voided_code`/`voided_cancelled`, terminal states).
+// seven write tool names nowhere else in src, the write host spelled only where the read-host
+// override refuses it (src/ and scripts/ scanned; the fixture tooling imports the constant),
+// `writes`/`writesEnabled` literal false; and that the declared constants match plan 02 §3.2–§4.4
+// (journal transitions incl. `voided_code`/`voided_cancelled`, terminal states).
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { ESPN_WRITE_HOST } from "../../../src/config/schema.js";
+import { WRITE_HOST } from "../../../scripts/espn-fixture/http.js";
 import {
   CONFIRMATION_CHANNELS,
   GATE_CONSTANTS,
@@ -82,12 +84,19 @@ describe("the seam stays a seam", () => {
   });
   it("the write host literal appears only in src/config/schema.ts (where the read-host override refuses it)", () => {
     const allowed = path.join(SRC, "config", "schema.ts");
-    // every file under src/, prose included (the gate README names the constant, not the host)
-    for (const f of tsFiles(SRC, true)) {
+    // every file under src/ and scripts/ (the fixture and probe tooling refuses the host by
+    // importing the constant, never by spelling it), prose included — the gate README names the
+    // constant, not the host
+    const files = [...tsFiles(SRC, true), ...tsFiles(path.join(ROOT, "scripts"), true)];
+    expect(files.some((f) => f.endsWith(path.join("scripts", "espn-fixture", "http.ts")))).toBe(
+      true,
+    );
+    for (const f of files) {
       if (f === allowed) continue;
       expect(readFileSync(f, "utf8").includes("lm-api-writes"), path.relative(ROOT, f)).toBe(false);
     }
     expect(ESPN_WRITE_HOST).toBe("lm-api-writes.fantasy.espn.com");
+    expect(WRITE_HOST).toBe(ESPN_WRITE_HOST);
   });
   it("capabilities say read-only with literal false write flags", () => {
     const caps = espnCapabilities("faab", "2026-10-05T00:00:00Z");
