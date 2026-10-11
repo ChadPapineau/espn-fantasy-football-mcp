@@ -116,7 +116,13 @@ import { selectPlayers } from "./select.js";
 import { analyzeWaiversP1 } from "../../domain/analytics/phase2.js";
 import { waiverP1Extras } from "./market-p1.js";
 import { projectMany } from "./p1-common.js";
-import { fitPremiumFromFeed, WAIVER_FIT } from "../../domain/analytics/waiver-fit/index.js";
+import {
+  fitPremiumFromHistory,
+  seasonFeedFromTransactions,
+  transactionsBySeason,
+  WAIVER_FIT,
+  type LeaguePremiumFit,
+} from "../../domain/analytics/waiver-fit/index.js";
 import { mergeV2, runV2, storeProjections, type V2Run } from "./projection-v2.js";
 
 // --- shared engine inputs ------------------------------------------------------------------------
@@ -1212,12 +1218,26 @@ export async function candidatePool(
       );
 }
 
+/** The regular season's last scoring period from the rules (null when unknown). */
+export function regularSeasonLastWeek(rules: LeagueRules): number | null {
+  const reg = rules.playoffs.regular_season_matchups;
+  if (reg === null || !Number.isInteger(reg) || reg < 1) return null;
+  let last = 0;
+  for (const [k, ws] of Object.entries(rules.playoffs.matchup_periods))
+    if (Number(k) <= reg) for (const x of ws) last = Math.max(last, x);
+  return last > 0 ? last : null;
+}
+
 /**
- * The league-fitted premium (Phase 3, plan 10 C5; waiver-fit/feed.ts fitPremiumFromFeed): the waiver
- * runs E5 priced for this league's season, the persisted transactions (processed claims give the
- * drift; without any, the standings' acquisition totals bound it) and the played matchup periods.
- * Null when the store keeps no runs yet; a fit below a regular season of runs stays on the cold-start
- * table (E5 ignores it) and the reason is said once.
+ * The league-fitted premium (Phase 3, plan 10 C5; Stage C, changelog R6-3 — waiver-fit/history.ts
+ * fitPremiumFromHistory). The league's previous seasons' transactions kept in `transactions_seen`
+ * are its own feed: the demand curve (its drops and whether another team's claim took them) and the
+ * drift fitted from them make the basis `league_fitted` from the first call — no request is spent
+ * here, the store holds them (read value-free: a past player's value is not in the store). Without
+ * history, the waiver runs E5 priced this season re-solve Π at 13 runs (the path for a league with
+ * no history); the current season's processed claims, else the standings' acquisition totals, give
+ * the drift. Null when the store holds neither history nor runs (E5 then states the cold start
+ * itself); a cold fit says why once.
  */
 export function leaguePremiumFit(
   ctx: ToolContext,
@@ -1226,24 +1246,48 @@ export function leaguePremiumFit(
   w: Week,
   standings: Standings | null,
   warnings: string[],
-): ReturnType<typeof fitPremiumFromFeed> | null {
-  const repo = ctx.services.waiverRuns;
-  if (repo === undefined) return null;
+): LeaguePremiumFit | null {
   try {
-    const runs = repo.list(leagueRef(ctx).league_id, league.ref.season);
-    if (runs.length === 0) return null;
-    const period = periodOf(rules, w) ?? w;
-    const fit = fitPremiumFromFeed({
-      teams: league.size,
-      transactions: ctx.services.transactionsSeen.list(null, 1000),
-      standings: standings?.teams ?? [],
-      periods_played: Array.from({ length: Math.max(0, period - 1) }, (_, i) => i + 1),
-      runs: runs.map((r) => ({ W: r.W, candidates: r.surplus.map((x) => ({ s: x })) })),
-    });
-    if (fit.basis !== "league_fitted")
-      warnings.push(
-        `premium stays on the cold-start table: the league's feed holds ${String(runs.length)} priced waiver run(s), ${String(WAIVER_FIT.minRuns)} needed`,
+    const season = league.ref.season;
+    const bySeason = transactionsBySeason(ctx.services.transactionsSeen.list(null, 1000));
+    const regular = regularSeasonLastWeek(rules);
+    const feeds = [...bySeason.keys()]
+      .filter((s) => s < season)
+      .sort((a, b) => b - a)
+      .slice(0, WAIVER_FIT.history.maxSeasons)
+      .map((s) =>
+        seasonFeedFromTransactions({
+          season: s,
+          transactions: bySeason.get(s) ?? [],
+          regular_season_weeks: regular,
+        }),
       );
+    const repo = ctx.services.waiverRuns;
+    const runs = repo === undefined ? [] : repo.list(leagueRef(ctx).league_id, season);
+    const evidence = feeds.filter((f) => f.outcomes.length > 0 || f.claim_runs > 0);
+    if (evidence.length === 0 && runs.length === 0) return null;
+    const period = periodOf(rules, w) ?? w;
+    const fit = fitPremiumFromHistory({
+      teams: league.size,
+      feeds,
+      runs: runs.map((r) => ({ W: r.W, candidates: r.surplus.map((x) => ({ s: x })) })),
+      current: {
+        season,
+        transactions: bySeason.get(season) ?? [],
+        standings: standings?.teams ?? [],
+        periods_played: Array.from({ length: Math.max(0, period - 1) }, (_, i) => i + 1),
+      },
+    });
+    if (fit.basis !== "league_fitted") {
+      const n = evidence.reduce((x, f) => x + f.outcomes.length, 0);
+      const history =
+        evidence.length === 0
+          ? "no previous-season transactions of this league are stored"
+          : `its previous seasons (${evidence.map((f) => String(f.season)).join(", ")}) show ${String(n)} waiver candidate(s) with a visible fate, ${String(WAIVER_FIT.history.minOutcomes)} needed`;
+      warnings.push(
+        `premium and demand stay on the cold-start tables: ${history}; ${String(runs.length)} of ${String(WAIVER_FIT.minRuns)} priced waiver runs logged`,
+      );
+    }
     return fit;
   } catch (e) {
     ctx.services.logger.warn("e5.premium_fit_unavailable", {
@@ -1383,9 +1427,10 @@ export const analyzeWaiversTool = defineTool({
         };
       });
     const myRank = standings?.teams.find((t) => t.team_id === team)?.waiver_rank ?? null;
-    // Phase 3 (plan 10 C5; research 05 §1.6 eval 3): the premium re-solved from this league's own
-    // feed — the waiver runs E5 priced (store) and the persisted transactions' drift — once it
-    // holds a regular season of runs; until then the cold-start table, said once
+    // Phase 3 (plan 10 C5; research 05 §1.6 eval 3) and Stage C (R6-3): the premium re-solved from
+    // this league's own feed — its previous seasons' transactions (demand curve and drift, from the
+    // first call), else a regular season of runs E5 priced (store); until then the cold-start table,
+    // said once with its measured miss
     const premiumFit = leaguePremiumFit(ctx, league, rules, w, standings, warnings);
     const p0Request = {
       roster: slots,

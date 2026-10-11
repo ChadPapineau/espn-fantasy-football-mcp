@@ -16,8 +16,11 @@
 // the rule never claims below the premium it was given, v2 forecasts most candidate-weeks, the
 // replay is deterministic, the drift bound is read through the provider. The numbers are written
 // to docs/evals/phase3-waivers-seeding.md (UPDATE_EVALS=1; equality asserted otherwise).
+// Stage C (changelog R6-3): the Π miss E5 states with the cold start (WAIVER_FIT.coldStartMiss) is
+// held equal to this measurement.
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  WAIVER_FIT,
   comparePremium,
   driftFromAcquisitions,
   fitDrift,
@@ -487,6 +490,15 @@ describe("C5 — the fitted DP on the replay league (hard parts)", () => {
       expect(d.fit.basis).toBe("prior_within_acquisition_bound");
       expect(d.fit.c).toBe(0.25);
     }
+  });
+
+  it("E5's stated cold-start miss for Π is this measurement (changelog R6-3: WAIVER_FIT.coldStartMiss)", () => {
+    const pc = comparePremium(world.runs.v2.pooled, { ks: [1, 10], Ws: [9] });
+    const ratios = pc.map((c) => Math.round((c.ratio ?? 0) * 100) / 100);
+    expect(WAIVER_FIT.coldStartMiss.premiumRatio).toEqual({
+      min: Math.min(...ratios),
+      max: Math.max(...ratios),
+    });
   });
 
   it("the numbers are the ones in docs/evals/phase3-waivers-seeding.md", () => {

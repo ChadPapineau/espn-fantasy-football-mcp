@@ -10,6 +10,8 @@
 // values scale, the demand curve keeps reading the base rate (decision recorded). Pure; memoised.
 // Phase 3 (plan 10 §3.3, C5; additive): `rates` re-solves the DP from a league's own surplus
 // distribution (src/domain/analytics/waiver-fit/), with `drift` its fitted c.
+// Stage C (changelog R6-3; additive): `demandCurve` re-solves it with the league's own demand curve
+// (intercept and slope fitted from its previous seasons — waiver-fit/history.ts).
 // New here (the sibling is a FAAB league).
 import { WAIVER_DP } from "./constants.js";
 import { PREMIUM_BAND_MULTIPLIERS } from "./types.js";
@@ -30,6 +32,12 @@ export interface WaiverDpParams {
    * `r` finite and ≥ 0, every `p` finite and ≥ 0, Σ p = 1 within 1e-6; omitted = WAIVER_DP.rates.
    */
   readonly rates?: readonly { readonly r: number; readonly p: number }[];
+  /**
+   * Overrides the demand curve q(r) = min(qCap, q0 + q1·r) (Stage C, changelog R6-3: the league's
+   * own curve fitted from its previous seasons; additive). Both finite and ≥ 0; omitted = the cold
+   * start (WAIVER_DP.q0, WAIVER_DP.q1). `demandScale` still multiplies it.
+   */
+  readonly demandCurve?: { readonly q0: number; readonly q1: number };
 }
 
 /** Whether a rate distribution is usable by the DP (see WaiverDpParams.rates). */
@@ -53,6 +61,20 @@ export function isValidRateDistribution(
     sum += p;
   }
   return Math.abs(sum - 1) <= 1e-6;
+}
+
+/** Whether a value is a usable demand curve: an object with finite q0, q1 ≥ 0 (checked at run time). */
+export function isDemandCurve(x: unknown): x is { readonly q0: number; readonly q1: number } {
+  if (typeof x !== "object" || x === null) return false;
+  const { q0, q1 } = x as { readonly q0?: unknown; readonly q1?: unknown };
+  return (
+    typeof q0 === "number" &&
+    typeof q1 === "number" &&
+    Number.isFinite(q0) &&
+    Number.isFinite(q1) &&
+    q0 >= 0 &&
+    q1 >= 0
+  );
 }
 
 /** A solved table: Π and V by position k (1..N) and the research's W (weeks after this one). */
@@ -95,18 +117,23 @@ export function solvePremiumTable(params: WaiverDpParams): PremiumTable {
     throw new RangeError("waiverDp: bad sensitivity parameter");
   if (params.rates !== undefined && !isValidRateDistribution(params.rates))
     throw new RangeError("waiverDp: bad rate distribution");
+  const curve = params.demandCurve;
+  if (curve !== undefined && !isDemandCurve(curve))
+    throw new RangeError("waiverDp: bad demand curve");
+  const q0 = curve?.q0 ?? WAIVER_DP.q0;
+  const q1 = curve?.q1 ?? WAIVER_DP.q1;
   const rates = params.rates ?? WAIVER_DP.rates;
   const ratesKey =
     params.rates === undefined
       ? ""
       : `:${params.rates.map((x) => `${String(x.r)}/${String(x.p)}`).join(",")}`;
-  const key = `${String(n)}:${String(scale)}:${String(dScale)}:${String(c)}${ratesKey}`;
+  const curveKey = curve === undefined ? "" : `:q${String(q0)}/${String(q1)}`;
+  const key = `${String(n)}:${String(scale)}:${String(dScale)}:${String(c)}${ratesKey}${curveKey}`;
   const hit = CACHE.get(key);
   if (hit !== undefined) return hit;
 
   const H = WAIVER_DP.maxHorizon + 1;
-  const q = (r: number): number =>
-    Math.min(WAIVER_DP.qCap, (WAIVER_DP.q0 + WAIVER_DP.q1 * r) * dScale);
+  const q = (r: number): number => Math.min(WAIVER_DP.qCap, (q0 + q1 * r) * dScale);
   const rows = Array.from({ length: n + 1 }, (_, k) => (k >= 1 ? binomialRow(k - 1, c) : []));
   // V[h][k], Pi[h][k] for h = 0..H (the DP's horizon: the claim's value spans h weeks); index 0 of
   // each row is unused (positions are 1-based)

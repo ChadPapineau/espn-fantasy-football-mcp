@@ -14,7 +14,10 @@
 //     premium in a FAAB one), a shaded first-price bid per candidate, `claim` iff the best bid has a
 //     positive expected net, the claim list ranked by it, the top claim's bid as `data.faab`.
 // claim ⇔ s ≥ Π outside the band, and `marginal` inside it, hold exactly as P0 computed them (plan 10
-// B3: "the Π rule still holds for every candidate"). Pure. New here.
+// B3: "the Π rule still holds for every candidate"). Stage C (changelog R6-3; additive): with no
+// fitted logistic, the league's previous-season demand curve (the premium fit's) replaces the cold
+// start's at each rival's own lineup gain, and the cold-start statement is re-derived for P1 (the
+// warm fit or the history curve makes the demand part not cold; FAAB has no premium). Pure. New here.
 import { isKdst } from "./kdst.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
 import { loopPacer, runCooperative } from "./cooperative.js";
@@ -34,6 +37,7 @@ import { clamp, round, zeroDist } from "./math.js";
 import { newestAsOf } from "./inputs.js";
 import { detectSignals, type SignalInput } from "./usageSignals.js";
 import { demandOf } from "./waiverDp.js";
+import { COLD_START_REVISIT, coldStartNote, curveDemand } from "./waiver-fit/history.js";
 import {
   analyzeWaivers,
   type WaiverOutcome,
@@ -234,6 +238,24 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
   }
 
   const fit = req.demand_fit ?? null;
+  // the league's previous-season curve (Stage C, R6-3) — used where P1 would read the cold start
+  const pf = req.premium_fit ?? null;
+  const premiumFitted = pf !== null && pf.basis === "league_fitted" && pf.teams === N;
+  const historyCurve = premiumFitted ? (pf.demand_curve ?? null) : null;
+  const qAt = (x: number, scale = 1): number =>
+    curveDemand(historyCurve, x, scale) ?? demandOf(x, scale);
+  // P0's cold-start statement re-derived for P1, in place (its demand model and mode differ: the
+  // warm fit or the history curve makes the demand part not cold; FAAB has no premium)
+  const coldNote = coldStartNote(
+    !faabMode && d.premium_basis !== "league_fitted",
+    fit === null && historyCurve === null,
+    fit === null && historyCurve?.basis === "intercept",
+  );
+  const coldAt = assumptions.findIndex((a) => a.revisit_trigger === COLD_START_REVISIT);
+  if (coldAt >= 0) {
+    if (coldNote === null) assumptions.splice(coldAt, 1);
+    else assumptions[coldAt] = A(coldNote, COLD_START_REVISIT);
+  } else if (coldNote !== null) assumptions.push(A(coldNote, COLD_START_REVISIT));
   const usage = req.usage ?? null;
   const trendOf = req.sleeper_trend ?? null;
   const kMine =
@@ -302,9 +324,9 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
         const x = up ?? rate;
         return {
           team_id: rv.team_id,
-          p: round(demandOf(x), 4),
-          lo: round(Math.min(1, demandOf(x, WAIVERS.demandBand.low)), 4),
-          hi: round(Math.min(1, demandOf(x, WAIVERS.demandBand.high)), 4),
+          p: round(qAt(x), 4),
+          lo: round(Math.min(1, qAt(x, WAIVERS.demandBand.low)), 4),
+          hi: round(Math.min(1, qAt(x, WAIVERS.demandBand.high)), 4),
         };
       });
     } else {
@@ -328,7 +350,7 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
         able.reduce((s, q) => s * (1 - clamp(f(q), 0, 1)), 1);
       const p = prod((q) => q.p);
       const interval: readonly [number, number] =
-        fit !== null
+        fit !== null || historyCurve !== null
           ? [
               round(
                 Math.min(
@@ -353,7 +375,7 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
       clears = {
         p: round(p, 4),
         interval,
-        basis: fit !== null ? "league_fitted" : "cold_start",
+        basis: fit !== null || historyCurve !== null ? "league_fitted" : "cold_start",
       } satisfies ClearsToFa;
       pk = round(
         able.filter((q) => ahead.has(q.team_id)).reduce((s, q) => s * (1 - q.p), 1),
@@ -466,11 +488,17 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
     );
   else if (upgrades.size > 0)
     assumptions.push(
-      A(
-        "q_i is the cold-start curve read at each rival's own lineup gain (no fitted demand model)",
-        "the league's claim history supports a fit",
-      ),
+      historyCurve !== null
+        ? A(
+            "q_i is the league's previous-season demand curve read at each rival's own lineup gain (no fitted logistic yet)",
+            "the league's claim history supports a fit",
+          )
+        : A(
+            "q_i is the cold-start curve read at each rival's own lineup gain (no fitted demand model)",
+            "the league's claim history supports a fit",
+          ),
     );
+
   if (faabMode) {
     assumptions.push(
       A(

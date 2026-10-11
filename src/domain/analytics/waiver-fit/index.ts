@@ -2,17 +2,20 @@
 // `premium_basis: "league_fitted"`; research 05 §1.6 evals 2–3): the surplus distribution and drift
 // c from the league's feed, the re-solved premium and its band, the fitted-vs-cold comparison, and
 // the P(clears_to_FA) calibration with its demand-scale and demand-curve fits. Pure. New here (Phase 3).
+// Stage C (changelog R6-3): the league's previous seasons as its own feed (history.ts).
 export {
   calibrateClearsToFa,
   clearProbability,
   clearProbabilityCurve,
   demandCurveOf,
   fitDemandCurve,
+  fitDemandIntercept,
   fitDemandScale,
   type ClearsCalibration,
   type ClearsObservation,
   type ClearsOutcome,
   type DemandCurveFit,
+  type DemandInterceptFit,
   type DemandScaleFit,
   type ReliabilityBin,
 } from "./calibration.js";
@@ -30,9 +33,24 @@ export {
   RESEARCH_W_COLUMNS,
   comparePremium,
   fitLeaguePremium,
+  type FittedDemandCurve,
   type LeaguePremiumFit,
   type PremiumCell,
+  type PremiumHistory,
 } from "./fit.js";
+export {
+  COLD_START_REVISIT,
+  coldStartNote,
+  curveDemand,
+  fitHistoryDemand,
+  fitPremiumFromHistory,
+  seasonFeedFromTransactions,
+  seasonOfInstant,
+  transactionsBySeason,
+  type HistoryDemandFit,
+  type HistoryOutcome,
+  type SeasonWaiverFeed,
+} from "./history.js";
 export {
   fitSurplusDistribution,
   surplusObservationsFromRuns,

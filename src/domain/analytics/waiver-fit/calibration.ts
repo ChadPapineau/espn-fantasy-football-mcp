@@ -7,6 +7,7 @@
 // maximises the outcomes' likelihood (golden-section search on log λ — deterministic). The B2b fix
 // adds the curve fit: intercept q0 and slope q1 by maximum likelihood (coordinate golden-section on
 // their logs — deterministic), because one multiplier cannot move the intercept without the slope.
+// Stage C (changelog R6-3, additive): `fitDemandIntercept` — the intercept alone, the slope held.
 // Pure. New here.
 import { WAIVER_DP } from "../constants.js";
 import { round } from "../math.js";
@@ -238,6 +239,54 @@ export interface DemandCurveFit {
   readonly at_bound: { readonly q0: boolean; readonly q1: boolean };
 }
 
+/** Golden-section maximum of f on [log min, log max] (60 steps); returns the argmax (not its log). */
+function goldenLog(f: (x: number) => number, min: number, max: number): number {
+  let a = Math.log(min);
+  let b = Math.log(max);
+  const g = (Math.sqrt(5) - 1) / 2;
+  let c = b - g * (b - a);
+  let d = a + g * (b - a);
+  let fc = f(Math.exp(c));
+  let fd = f(Math.exp(d));
+  for (let i = 0; i < 60; i++) {
+    if (fc >= fd) {
+      b = d;
+      d = c;
+      fd = fc;
+      c = b - g * (b - a);
+      fc = f(Math.exp(c));
+    } else {
+      a = c;
+      c = d;
+      fc = fd;
+      d = a + g * (b - a);
+      fd = f(Math.exp(d));
+    }
+  }
+  return Math.exp((a + b) / 2);
+}
+
+/** The usable outcomes (finite r, at least one rival, a boolean fate). */
+function usableOutcomes(outcomes: readonly ClearsOutcome[]): ClearsOutcome[] {
+  return outcomes.filter(
+    (o) =>
+      Number.isFinite(o.r) &&
+      Number.isFinite(o.rivals) &&
+      o.rivals >= 1 &&
+      typeof o.cleared === "boolean",
+  );
+}
+
+/** Mean log-likelihood of the outcomes under the curve (q0, q1). */
+function curveLogLikelihood(ok: readonly ClearsOutcome[], q0: number, q1: number): number {
+  let s = 0;
+  for (const o of ok) {
+    const p = clearProbabilityCurve(o.r, o.rivals, q0, q1);
+    s += Math.log(Math.min(1 - EPS, Math.max(EPS, o.cleared ? p : 1 - p)));
+  }
+  return s / ok.length;
+}
+
 /**
  * Maximum-likelihood intercept and slope of the demand curve for the observed clears (n ≥ 1; else
  * the cold start): alternating golden-section searches on log q0 and log q1 inside
@@ -271,37 +320,11 @@ export function fitDemandCurve(outcomes: readonly ClearsOutcome[]): DemandCurveF
     return s / ok.length;
   };
   const B = WAIVER_FIT.demandCurve;
-  /** Golden-section maximum of f on [log min, log max]; returns the argmax (not its log). */
-  const golden = (f: (x: number) => number, min: number, max: number): number => {
-    let a = Math.log(min);
-    let b = Math.log(max);
-    const g = (Math.sqrt(5) - 1) / 2;
-    let c = b - g * (b - a);
-    let d = a + g * (b - a);
-    let fc = f(Math.exp(c));
-    let fd = f(Math.exp(d));
-    for (let i = 0; i < 60; i++) {
-      if (fc >= fd) {
-        b = d;
-        d = c;
-        fd = fc;
-        c = b - g * (b - a);
-        fc = f(Math.exp(c));
-      } else {
-        a = c;
-        c = d;
-        fc = fd;
-        d = a + g * (b - a);
-        fd = f(Math.exp(d));
-      }
-    }
-    return Math.exp((a + b) / 2);
-  };
   let q0 = cold.q0;
   let q1 = cold.q1;
   for (let pass = 0; pass < 40; pass++) {
-    const n0 = golden((x) => ll(x, q1), B.q0.min, B.q0.max);
-    const n1 = golden((x) => ll(n0, x), B.q1.min, B.q1.max);
+    const n0 = goldenLog((x) => ll(x, q1), B.q0.min, B.q0.max);
+    const n1 = goldenLog((x) => ll(n0, x), B.q1.min, B.q1.max);
     const moved = Math.abs(Math.log(n0 / q0)) + Math.abs(Math.log(n1 / q1));
     q0 = n0;
     q1 = n1;
@@ -319,5 +342,55 @@ export function fitDemandCurve(outcomes: readonly ClearsOutcome[]): DemandCurveF
       q0: near(q0, B.q0.min, B.q0.max),
       q1: near(q1, B.q1.min, B.q1.max),
     }),
+  });
+}
+
+/** The fitted intercept with the slope held (Stage C, changelog R6-3). */
+export interface DemandInterceptFit {
+  readonly q0: number;
+  /** The slope held fixed (not fitted). */
+  readonly q1: number;
+  readonly n: number;
+  readonly rejected: number;
+  /** Mean log-likelihood at the fit and at the cold start (q0 0.05, the same q1). */
+  readonly log_likelihood: number | null;
+  readonly log_likelihood_cold: number | null;
+  /** The intercept's optimum sits on a search bound. */
+  readonly at_bound: boolean;
+}
+
+/**
+ * Maximum-likelihood intercept q0 of the demand curve with its slope held at `q1` (Stage C,
+ * changelog R6-3: the intercept — demand for a player worth nothing — is what a league's dropped
+ * players identify; the slope needs claims at value). Golden-section on log q0 inside
+ * WAIVER_FIT.demandCurve.q0 — deterministic. No usable outcome → the cold intercept.
+ */
+export function fitDemandIntercept(
+  outcomes: readonly ClearsOutcome[],
+  q1: number = WAIVER_DP.q1,
+): DemandInterceptFit {
+  const ok = usableOutcomes(outcomes);
+  const rejected = outcomes.length - ok.length;
+  const slope = Number.isFinite(q1) && q1 >= 0 ? q1 : WAIVER_DP.q1;
+  if (ok.length === 0)
+    return Object.freeze({
+      q0: WAIVER_DP.q0,
+      q1: slope,
+      n: 0,
+      rejected,
+      log_likelihood: null,
+      log_likelihood_cold: null,
+      at_bound: false,
+    });
+  const B = WAIVER_FIT.demandCurve.q0;
+  const q0 = goldenLog((x) => curveLogLikelihood(ok, x, slope), B.min, B.max);
+  return Object.freeze({
+    q0: round(q0, 5),
+    q1: slope,
+    n: ok.length,
+    rejected,
+    log_likelihood: round(curveLogLikelihood(ok, q0, slope), 5),
+    log_likelihood_cold: round(curveLogLikelihood(ok, WAIVER_DP.q0, slope), 5),
+    at_bound: q0 <= B.min * 1.001 || q0 >= B.max * 0.999,
   });
 }

@@ -8,7 +8,10 @@
 // never enters `claim_list` (ADV OBJ-03, R2 nit 3); claim ⇔ s ≥ Π outside it; at k = N claim
 // anything positive; the Wednesday scramble list; p_clears_to_fa with its cold-start interval.
 // Cooperative over (candidate, drop) units. Phase 3 (plan 10 C5; additive): `premium_fit` swaps in the
-// premium re-solved from the league's own feed (`premium_basis: "league_fitted"`).
+// premium re-solved from the league's own feed (`premium_basis: "league_fitted"`). Stage C (changelog
+// R6-3; additive): a fit from the league's previous seasons also carries its demand curve, which
+// then prices p_k_win, p_clears_to_fa (basis `league_fitted`) and q_i; whenever the cold start is
+// served E5 says so and states its measured miss (an assumption).
 // Pure. New here (the sibling's E5 was FAAB / K-DEF only).
 import type { Clock } from "../clock.js";
 import { auditIr, type RosterSeat } from "../league/roster.js";
@@ -40,6 +43,7 @@ import { newestAsOf } from "./inputs.js";
 import { clamp, normalDist, round, zeroDist } from "./math.js";
 import { positionCv, type ImpliedTotal } from "./projection.js";
 import { demandOf, solvePremiumTable, type PremiumTable } from "./waiverDp.js";
+import { COLD_START_REVISIT, coldStartNote, curveDemand } from "./waiver-fit/history.js";
 import {
   CLEARS_TO_FA_MIN_COLD_WIDTH,
   PREMIUM_BAND_MULTIPLIERS,
@@ -145,6 +149,16 @@ export interface PremiumFitInput {
   readonly high: PremiumTable;
   /** One generated line for the assumptions. */
   readonly summary: string;
+  /**
+   * The league's own demand curve, fitted from its previous seasons (Stage C, changelog R6-3;
+   * additive): used for q_i, p_k_win and p_clears_to_fa when the fit is used; absent = cold start.
+   */
+  readonly demand_curve?: {
+    readonly q0: number;
+    readonly q1: number;
+    /** `intercept`: the slope is the cold start's (said with its measured miss). */
+    readonly basis?: "curve" | "intercept";
+  } | null;
 }
 
 /** E5's outcome. */
@@ -369,6 +383,17 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     );
   if (fitted)
     assumptions.push(A(fit.summary, "the league's feed grows or the wire changes character"));
+  // the league's own demand curve (Stage C, R6-3) when the fit carries one; else the cold start's —
+  // said, with its measured miss, whichever part is cold
+  const curve = fitted ? (fit.demand_curve ?? null) : null;
+  const qOf = (r: number, scale = 1): number => curveDemand(curve, r, scale) ?? demandOf(r, scale);
+  // (the premium is 0 by construction in FAAB mode: only the demand part can be cold there)
+  const coldNote = coldStartNote(
+    !fitted && modeUsed !== "faab",
+    curve === null,
+    curve?.basis === "intercept",
+  );
+  if (coldNote !== null) assumptions.push(A(coldNote, COLD_START_REVISIT));
   const tables = fitted
     ? { base: fit.base, low: fit.low, high: fit.high }
     : {
@@ -630,7 +655,8 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     { pacer, deadlineMs: null },
   );
 
-  // demand (research 05 §1.3, cold start): every rival not IR-blocked claims with q(r)
+  // demand (research 05 §1.3; the league's own curve when fitted, else the cold start): every
+  // rival not IR-blocked claims with q(r)
   const ahead = req.rivals.filter((r) => r.waiver_rank !== null && r.waiver_rank < k);
   const blocked = req.rivals
     .filter((r) => r.ir_blocked)
@@ -640,14 +666,14 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
   const aheadAble = ahead.filter((r) => !r.ir_blocked).length;
   const candidates: WaiverCandidate[] = scored.map((x) => {
     const r = x.horizon > 0 ? Math.max(0, x.s) / x.horizon : 0;
-    const q = demandOf(r);
-    const pClear = (scale: number): number => (1 - Math.min(1, demandOf(r, scale))) ** able.length;
+    const q = qOf(r);
+    const pClear = (scale: number): number => (1 - Math.min(1, qOf(r, scale))) ** able.length;
     let clears: ClearsToFa | null = null;
     if (x.c.status === "WAIVERS") {
       const p = pClear(1);
       let lo = pClear(WAIVERS.demandBand.high);
       let hi = pClear(WAIVERS.demandBand.low);
-      if (hi - lo < CLEARS_TO_FA_MIN_COLD_WIDTH) {
+      if (curve === null && hi - lo < CLEARS_TO_FA_MIN_COLD_WIDTH) {
         const half = CLEARS_TO_FA_MIN_COLD_WIDTH / 2;
         lo = Math.max(0, Math.min(lo, p - half));
         hi = Math.min(1, Math.max(hi, p + half));
@@ -659,7 +685,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       clears = {
         p: round(p, 4),
         interval: [round(Math.min(lo, p), 4), round(Math.max(hi, p), 4)],
-        basis: "cold_start",
+        basis: curve === null ? "cold_start" : "league_fitted",
       };
     }
     const inBand = band.low < band.high && x.s >= band.low && x.s <= band.high;

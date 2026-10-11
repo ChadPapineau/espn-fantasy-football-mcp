@@ -14,8 +14,11 @@
 // whose next-week roster had an entry withheld by the scrub is skipped (the withheld entry could
 // be the "dropped" player). The held-out demand scale and the held-out demand curve (intercept and
 // slope fitted separately — the B2b fix): fitted on one season, scored on the other.
+// Stage C (changelog R6-3): the P(clears_to_FA) miss E5 states with the cold start
+// (WAIVER_FIT.coldStartMiss) is held equal to this measurement.
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  WAIVER_FIT,
   calibrateClearsToFa,
   clearProbability,
   clearProbabilityCurve,
@@ -284,6 +287,16 @@ describe("C5 — P(clears_to_FA) on league-b's recorded drops", () => {
         (r?.scale.log_likelihood ?? 0) - 1e-6,
       );
     }
+  });
+
+  it("E5's stated cold-start miss for P(clears_to_FA) is this measurement (changelog R6-3: WAIVER_FIT.coldStartMiss)", () => {
+    const misses = SEASONS.map(
+      (s) => Math.round((runs.get(s)?.cold.in_the_large ?? 0) * 1000) / 10,
+    );
+    expect(WAIVER_FIT.coldStartMiss.clearsPoints).toEqual({
+      min: Math.min(...misses),
+      max: Math.max(...misses),
+    });
   });
 
   it("the numbers are the ones in docs/evals/phase3-waivers-seeding.md", () => {
