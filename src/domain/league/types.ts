@@ -1179,6 +1179,15 @@ export interface SeedingEvidence {
     readonly record_rank: number | null;
     readonly pf_rank: number | null;
   }[];
+  /**
+   * Stage C (additive): how the evidence was computed — `reproduction`, the previous season's exact
+   * reproduction with the full tiebreak chain (src/domain/analytics/seeding-reproduce/evidence.ts),
+   * or `standings`, the standings-only orders when last season's schedule or settings could not be
+   * read (src/domain/league/seeding.ts seedingEvidence).
+   */
+  readonly method: "reproduction" | "standings";
+  /** The reproduction's finding codes (seeding-reproduce REPRODUCTION_FINDINGS); [] for `standings`. */
+  readonly findings: readonly string[];
 }
 
 /** A1 `seeding` section (plan 07 C12): the operator's reading, flagged until confirmed. */

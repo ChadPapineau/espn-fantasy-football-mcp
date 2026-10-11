@@ -197,7 +197,11 @@ export interface EspnProviderDeps {
 
 interface SettingsRead {
   readonly settings: WireSettingsBody;
-  readonly nav: WireNavBody;
+  /**
+   * The identity part; null on a previous season's read (`mSettings` alone — `settingsRead`), where
+   * every caller degrades to no identity.
+   */
+  readonly nav: WireNavBody | null;
 }
 
 /** Parses one view's part of a body or throws the drift signals (request.ts records them). */
@@ -212,6 +216,13 @@ const parseSettings = (b: unknown): SettingsRead => ({
   settings: must("mSettings", mSettingsSchema, b),
   nav: must("mNav", mNavSchema, b),
 });
+const parseSettingsAlone = (b: unknown): SettingsRead => ({
+  settings: must("mSettings", mSettingsSchema, b),
+  nav: null,
+});
+/** A league identity, or null for a read that carried none (a previous season's `mSettings` alone). */
+const identityOf = (nav: WireNavBody | null): LeagueIdentity | null =>
+  nav === null ? null : identityFromNav(nav);
 const parseRoster = (b: unknown): WireRosterBody => must("mRoster", mRosterSchema, b);
 const parseTeam = (b: unknown): WireTeamBody => {
   must("mStandings", mStandingsSchema, b);
@@ -315,17 +326,29 @@ export class EspnProvider implements FantasyPlatform {
     this.checkRef(ref);
     // rejected and publicity unknown: the one anonymous read that learns settings.isPublic
     const learning = this.req.cookies.needsPublicity();
-    try {
-      return await this.req.read(
+    const read = (
+      views: readonly LeagueView[],
+      parse: (b: unknown) => SettingsRead,
+    ): Promise<ReadResult<SettingsRead>> =>
+      this.req.read(
         {
-          target: this.league(ref, ["mSettings", "mNav"]),
+          target: this.league(ref, views),
           filter: null,
           leagueId: ref.league_id,
           cookies: learning ? "never" : "auto",
-          parse: parseSettings,
+          parse,
         },
         opts,
       );
+    try {
+      // a previous season reads mSettings alone (Stage C): a finished season's rules, scoring, slots
+      // and bracket-edit flag are all any caller needs of it, and all its recorded history holds
+      // (fixtures/espn/recorded/history); its identity is not read — every caller degrades to no
+      // identity (my team from ESPN_TEAM_ID). One request either way, so A1's seeding evidence
+      // (standings, schedule and settings of the previous season) fits the per-call budget
+      if (ref.season < this.deps.config.season)
+        return await read(["mSettings"], parseSettingsAlone);
+      return await read(["mSettings", "mNav"], parseSettings);
     } catch (e) {
       // a private league answered the anonymous read with 401: the credential is still the problem
       if (learning && (e as { effCode?: unknown } | null)?.effCode === "ESPN_REQUIRES_COOKIES")
@@ -352,7 +375,9 @@ export class EspnProvider implements FantasyPlatform {
   }> {
     try {
       const s = await this.settingsRead(ref, opts);
-      const identity = identityFromNav(s.value.nav);
+      const identity = identityOf(s.value.nav);
+      if (identity === null)
+        return { identity: null, settings: s.value.settings, myTeam: this.deps.config.teamId };
       const swid = await this.req.cookies.memberId().catch(() => null);
       return {
         identity,
@@ -385,9 +410,13 @@ export class EspnProvider implements FantasyPlatform {
 
   async getLeague(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<League>> {
     const r = await this.settingsRead(ref, opts);
-    const identity = identityFromNav(r.value.nav);
+    const identity = identityOf(r.value.nav);
     const swid = await this.req.cookies.memberId().catch(() => null);
-    const mine = myTeamId(identity, swid, this.deps.config.teamId);
+    // no identity (a previous season): my team is the operator's ESPN_TEAM_ID, named Team <id>
+    const mine =
+      identity === null
+        ? this.deps.config.teamId
+        : myTeamId(identity, swid, this.deps.config.teamId);
     return this.stamped(
       r,
       normalizeLeague(r.value.settings, ref, identity, mine, isCommissioner(identity, swid)),
@@ -884,9 +913,10 @@ export class EspnProvider implements FantasyPlatform {
 
   async resolveOwnTeam(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<OwnTeamResolution>> {
     const r = await this.settingsRead(ref, opts);
-    const identity = identityFromNav(r.value.nav);
+    const identity = identityOf(r.value.nav);
     const swid = await this.req.cookies.memberId().catch(() => null);
     if (swid === null) return this.stamped(r, { team_id: null, reason: "no_credential" });
+    if (identity === null) return this.stamped(r, { team_id: null, reason: "no_match" });
     const s = swid.toUpperCase();
     const hits = [...identity.teams.values()].filter((t) =>
       t.owners.some((o) => o.toUpperCase() === s),

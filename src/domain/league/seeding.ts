@@ -184,6 +184,8 @@ export function seedingEvidence(
     playoff_edited: opts.playoff_edited,
     suggests,
     table: Object.freeze(table),
+    method: "standings",
+    findings: Object.freeze([]),
   });
 }
 

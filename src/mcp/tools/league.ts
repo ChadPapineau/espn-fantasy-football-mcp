@@ -21,6 +21,12 @@ import { matchupPeriodOfWeek } from "../../domain/league/rules.js";
 import { weekGameState } from "../../domain/league/schedule.js";
 import { seedingDigest, seedingEvidence } from "../../domain/league/seeding.js";
 import {
+  REPRODUCTION_FINDINGS,
+  reproduceSeason,
+  reproductionInputFrom,
+  seedingEvidenceFromReproduction,
+} from "../../domain/analytics/seeding-reproduce/index.js";
+import {
   LEAGUE_DIGEST_SECTIONS,
   type BoxScoreData,
   type BoxScoreEntry,
@@ -223,6 +229,8 @@ const seedingEvidenceSchema = z.strictObject({
       }),
     )
     .max(40),
+  method: z.enum(["reproduction", "standings"]),
+  findings: z.array(z.enum(REPRODUCTION_FINDINGS)).max(REPRODUCTION_FINDINGS.length),
 });
 
 /** A1 data (plan 07 A1; LeagueDigestData) — a section is present only when included. */
@@ -316,7 +324,13 @@ export function goldenFor(ctx: ToolContext, settings: ScoringSettings): ScoringD
   };
 }
 
-/** Last season's seed-vs-PF table (onboard's one-time evidence — ADV OBJ-13); null on failure. */
+/**
+ * Last season's seed table (onboard's one-time evidence — ADV OBJ-13): the previous season's exact
+ * reproduction with the simulator's tiebreak chain (Stage C; `reproduceSeason` over that season's
+ * standings, schedule, playoff settings and bracket-edit flag — the C4 reading), else the
+ * standings-only orders when its schedule or settings cannot be read (said); null when even its
+ * standings cannot.
+ */
 async function evidenceOf(
   ctx: ToolContext,
   seasonY: number,
@@ -327,30 +341,74 @@ async function evidenceOf(
 ): Promise<SeedingEvidence | null> {
   const prev = seasonY - 1;
   if (prev < BOUNDS.season.min) return null;
+  const ref = leagueRef(ctx, prev);
+  let standings: Standings;
   try {
     const got = await withinBudget(
-      () => ctx.services.platform.getStandings(leagueRef(ctx, prev), readOpts(ctx)),
+      () => ctx.services.platform.getStandings(ref, readOpts(ctx)),
       warnings,
     );
     if (got === null) return null;
-    const st = take(ctx, got, inputs);
-    return seedingEvidence(
-      prev,
-      st.teams.map((t) => ({
-        team_id: t.team_id,
-        seed: t.playoff_seed,
-        division_id: t.division_id,
-        wins: t.wins,
-        losses: t.losses,
-        ties: t.ties,
-        points_for: t.points_for,
-      })),
-      { team_count: teamCount, seeding_rule: rule, playoff_edited: null },
-    );
+    standings = take(ctx, got, inputs);
   } catch {
     warnings.push("seeding evidence unavailable: last season could not be read");
     return null;
   }
+  try {
+    const mu = await withinBudget(
+      () => ctx.services.platform.getMatchups(ref, readOpts(ctx)),
+      warnings,
+    );
+    const rules =
+      mu === null
+        ? null
+        : await withinBudget(
+            () => ctx.services.platform.getLeagueRules(ref, readOpts(ctx)),
+            warnings,
+          );
+    if (mu !== null && rules !== null) {
+      const matchups = take(ctx, mu, inputs);
+      const prevRules = take(ctx, rules, inputs);
+      // the bracket-edit flag is best effort: unknown (null) when the league read fails
+      const lg = await withinBudget(
+        () => ctx.services.platform.getLeague(ref, readOpts(ctx)),
+        warnings,
+      ).catch(() => null);
+      const league = lg === null ? null : take(ctx, lg, inputs);
+      const reproduction = reproduceSeason(
+        reproductionInputFrom({
+          season: prev,
+          standings: standings.teams,
+          matchups,
+          rules: prevRules,
+          league,
+        }),
+      );
+      return seedingEvidenceFromReproduction(
+        reproduction,
+        league?.playoff_matchup_edited ?? null,
+        new Map(standings.teams.map((t) => [t.team_id, t.playoff_seed])),
+      );
+    }
+  } catch {
+    // fall through to the standings-only comparison, said
+  }
+  warnings.push(
+    "seeding evidence: last season's schedule or settings could not be read: the standings-only comparison is shown",
+  );
+  return seedingEvidence(
+    prev,
+    standings.teams.map((t) => ({
+      team_id: t.team_id,
+      seed: t.playoff_seed,
+      division_id: t.division_id,
+      wins: t.wins,
+      losses: t.losses,
+      ties: t.ties,
+      points_for: t.points_for,
+    })),
+    { team_count: teamCount, seeding_rule: rule, playoff_edited: null },
+  );
 }
 
 /** The A1 digest (also espn-ff://league/settings). */

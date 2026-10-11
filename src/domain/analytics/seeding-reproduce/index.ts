@@ -9,6 +9,7 @@ export {
   reproductionInputFrom,
   summarizeReproductions,
 } from "./reproduce.js";
+export { findingCodes, readingMatches, seedingEvidenceFromReproduction } from "./evidence.js";
 export {
   REPRODUCTION_FINDINGS,
   type ReadingReproduction,
