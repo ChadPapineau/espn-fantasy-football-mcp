@@ -83,6 +83,27 @@ describe("the provider reads a previous season with mSettings alone (its recorde
     expect(new URL(w.sent[0]?.url ?? "").searchParams.getAll("view")).toEqual(["mSettings"]);
   });
 
+  it("fixture mode without that season's recording asks for its settings once per process (never re-sent by each identity read)", async () => {
+    const w = makeWorld({ slot: "league-a" });
+    const prev = { ...w.ref, season: SEASON - 1 };
+    const first = await w.provider.getLeagueRules(prev).catch((x: unknown) => x);
+    expect((first as { effDetails?: { reason?: unknown } }).effDetails?.reason).toBe(
+      "fixture_missing",
+    );
+    await w.provider.getLeagueRules(prev).catch(() => undefined);
+    await w.provider.getStandings(prev).catch(() => undefined);
+    const settingsAsks = w.sent.filter((x) => {
+      const u = new URL(x.url);
+      return (
+        u.pathname.includes(`/seasons/${String(SEASON - 1)}/`) &&
+        u.searchParams.getAll("view").includes("mSettings")
+      );
+    });
+    expect(settingsAsks).toHaveLength(1);
+    // the current season is untouched by it
+    expect((await w.provider.getLeagueRules(w.ref)).value.playoffs.seeding_rule).toBeTruthy();
+  });
+
   it("a previous season's credential and HTTP answers keep their codes (nothing is masked)", async () => {
     for (const status of [401, 404]) {
       const w = makeWorld({

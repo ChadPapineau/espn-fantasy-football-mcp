@@ -257,6 +257,8 @@ export class EspnProvider implements FantasyPlatform {
   private readonly deps: EspnProviderDeps;
   private readonly req: EspnRequester;
   private readonly host: string;
+  /** Previous seasons fixture mode holds no settings recording for (settingsRead): the error, kept. */
+  private readonly settingsMissing = new Map<number, Error>();
 
   constructor(deps: EspnProviderDeps) {
     this.deps = deps;
@@ -346,8 +348,22 @@ export class EspnProvider implements FantasyPlatform {
       // (fixtures/espn/recorded/history); its identity is not read — every caller degrades to no
       // identity (my team from ESPN_TEAM_ID). One request either way, so A1's seeding evidence
       // (standings, schedule and settings of the previous season) fits the per-call budget
-      if (ref.season < this.deps.config.season)
-        return await read(["mSettings"], parseSettingsAlone);
+      if (ref.season < this.deps.config.season) {
+        // fixture mode without a recording of that season: said once, never re-asked (a missing
+        // recording never appears mid-process, and every identity read would otherwise re-send it)
+        const missing = this.settingsMissing.get(ref.season);
+        if (missing !== undefined) throw missing;
+        try {
+          return await read(["mSettings"], parseSettingsAlone);
+        } catch (e) {
+          if (
+            e instanceof Error &&
+            (e as { effDetails?: { reason?: unknown } }).effDetails?.reason === "fixture_missing"
+          )
+            this.settingsMissing.set(ref.season, e);
+          throw e;
+        }
+      }
       return await read(["mSettings", "mNav"], parseSettings);
     } catch (e) {
       // a private league answered the anonymous read with 401: the credential is still the problem

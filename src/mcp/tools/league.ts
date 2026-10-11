@@ -327,9 +327,11 @@ export function goldenFor(ctx: ToolContext, settings: ScoringSettings): ScoringD
 /**
  * Last season's seed table (onboard's one-time evidence — ADV OBJ-13): the previous season's exact
  * reproduction with the simulator's tiebreak chain (Stage C; `reproduceSeason` over that season's
- * standings, schedule, playoff settings and bracket-edit flag — the C4 reading), else the
- * standings-only orders when its schedule or settings cannot be read (said); null when even its
- * standings cannot.
+ * playoff settings, standings, schedule and bracket-edit flag — the C4 reading), else the
+ * standings-only orders when its settings or schedule cannot be read (said); null when even its
+ * standings cannot. The settings are read first: without them nothing can be reproduced, and the
+ * league read and every identity read of that season then reuse them (cached) — three requests in
+ * all (settings, standings, schedule), the per-call budget once this season's settings are cached.
  */
 async function evidenceOf(
   ctx: ToolContext,
@@ -342,6 +344,10 @@ async function evidenceOf(
   const prev = seasonY - 1;
   if (prev < BOUNDS.season.min) return null;
   const ref = leagueRef(ctx, prev);
+  const rules = await withinBudget(
+    () => ctx.services.platform.getLeagueRules(ref, readOpts(ctx)),
+    warnings,
+  ).catch(() => null);
   let standings: Standings;
   try {
     const got = await withinBudget(
@@ -354,44 +360,39 @@ async function evidenceOf(
     warnings.push("seeding evidence unavailable: last season could not be read");
     return null;
   }
-  try {
-    const mu = await withinBudget(
-      () => ctx.services.platform.getMatchups(ref, readOpts(ctx)),
-      warnings,
-    );
-    const rules =
-      mu === null
-        ? null
-        : await withinBudget(
-            () => ctx.services.platform.getLeagueRules(ref, readOpts(ctx)),
-            warnings,
-          );
-    if (mu !== null && rules !== null) {
-      const matchups = take(ctx, mu, inputs);
-      const prevRules = take(ctx, rules, inputs);
-      // the bracket-edit flag is best effort: unknown (null) when the league read fails
-      const lg = await withinBudget(
-        () => ctx.services.platform.getLeague(ref, readOpts(ctx)),
+  if (rules !== null) {
+    try {
+      const mu = await withinBudget(
+        () => ctx.services.platform.getMatchups(ref, readOpts(ctx)),
         warnings,
-      ).catch(() => null);
-      const league = lg === null ? null : take(ctx, lg, inputs);
-      const reproduction = reproduceSeason(
-        reproductionInputFrom({
-          season: prev,
-          standings: standings.teams,
-          matchups,
-          rules: prevRules,
-          league,
-        }),
       );
-      return seedingEvidenceFromReproduction(
-        reproduction,
-        league?.playoff_matchup_edited ?? null,
-        new Map(standings.teams.map((t) => [t.team_id, t.playoff_seed])),
-      );
+      if (mu !== null) {
+        const matchups = take(ctx, mu, inputs);
+        const prevRules = take(ctx, rules, inputs);
+        // the bracket-edit flag is best effort: unknown (null) when the league read fails
+        const lg = await withinBudget(
+          () => ctx.services.platform.getLeague(ref, readOpts(ctx)),
+          warnings,
+        ).catch(() => null);
+        const league = lg === null ? null : take(ctx, lg, inputs);
+        const reproduction = reproduceSeason(
+          reproductionInputFrom({
+            season: prev,
+            standings: standings.teams,
+            matchups,
+            rules: prevRules,
+            league,
+          }),
+        );
+        return seedingEvidenceFromReproduction(
+          reproduction,
+          league?.playoff_matchup_edited ?? null,
+          new Map(standings.teams.map((t) => [t.team_id, t.playoff_seed])),
+        );
+      }
+    } catch {
+      // fall through to the standings-only comparison, said
     }
-  } catch {
-    // fall through to the standings-only comparison, said
   }
   warnings.push(
     "seeding evidence: last season's schedule or settings could not be read: the standings-only comparison is shown",
