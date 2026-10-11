@@ -268,15 +268,23 @@ export async function projectV2(req: V2Request): Promise<V2Outcome> {
   if (run.partial)
     warnings.push(`partial: ${String(k)} of ${String(n)} samples before the CPU deadline`);
 
-  // phase 3 — scoring and assembly, one target per step
+  // phase 3 — scoring and assembly: the own simulation of a target is scored in one step and its
+  // anchored simulation (with the assembly) in the next, so no step scores more than one sample set
+  // (two scoreSamples passes in one step overran the 50 ms stall bound on a slower machine)
   const projections: Projection[] = [];
   const details: V2PlayerDetail[] = [];
+  const owns: (Dist | null)[] = plans.map(() => null);
   await runCooperative(
-    plans.length,
-    (i) => {
+    plans.length * 2,
+    (j) => {
+      const i = Math.floor(j / 2);
       const p = plans[i];
       if (p === undefined) return;
-      const built = assemble(p, settings, k, req);
+      if (j % 2 === 0) {
+        owns[i] = ownDist(p, settings, k);
+        return;
+      }
+      const built = assemble(p, settings, k, req, owns[i] ?? null);
       if (built.projection !== null) projections.push(built.projection);
       details.push(built.detail);
     },
@@ -355,11 +363,19 @@ function driversOf(
 }
 
 /** Builds one target's Projection (null when skipped) and detail. */
+/** A modelled target's own player_sim Dist (a point mass at 0 when ruled out or unsampled). */
+function ownDist(p: Plan, settings: ScoringSettings, k: number): Dist | null {
+  if (p.result === null) return null;
+  if (p.active.p === 0 || k === 0) return zeroDist("player_sim");
+  return simDist(linesOf(p.buf, 0, k, p.result.expectation.position_id), settings);
+}
+
 function assemble(
   p: Plan,
   settings: ScoringSettings,
   k: number,
   req: V2Request,
+  ownIn: Dist | null,
 ): { projection: Projection | null; detail: V2PlayerDetail } {
   const t = p.target;
   const espn = fin(t.espn_mean) ? t.espn_mean : null;
@@ -385,10 +401,8 @@ function assemble(
   const r = p.result;
   const e = r.expectation;
   const ruledOut = p.active.p === 0;
-  const own: Dist =
-    ruledOut || k === 0
-      ? zeroDist("player_sim")
-      : simDist(linesOf(p.buf, 0, k, e.position_id), settings);
+  // scored in the step before (phase 3); recomputed only when a caller passes none
+  const own: Dist = ownIn ?? ownDist(p, settings, k) ?? zeroDist("player_sim");
   const ens = ensembleMean(espn, own.mean, p.weight);
   let served: Dist;
   const assumptions = [...p.assumptions];

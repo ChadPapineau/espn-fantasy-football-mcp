@@ -21,6 +21,8 @@ interface Proj {
   role_confidence_games: number;
 }
 
+let lastWarnings: string[] = [];
+
 async function projections(toolset: "core" | "full"): Promise<Proj[]> {
   const c = await connect(world, { options: { toolset } });
   try {
@@ -33,6 +35,7 @@ async function projections(toolset: "core" | "full"): Promise<Proj[]> {
       seed: 11,
     });
     expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+    lastWarnings = (r.body as { warnings: string[] }).warnings;
     return (r.body.data as { projections: Proj[] }).projections;
   } finally {
     await c.close();
@@ -43,6 +46,11 @@ describe("espn_project_players: player_sim under full, position_cv under core", 
   it("same means; player_sim exactly for RB/WR/TE with ≥ 3 trailing games under full", async () => {
     const core = await projections("core");
     const full = await projections("full");
+    // this world publishes no stats_team_week: Phase 3's v2-opportunity cannot run and says so —
+    // P2's player_sim (below) serves, the answer never fails (plan 10 §3.3)
+    expect(lastWarnings).toContain(
+      "v2-opportunity: nflverse:stats_team_week not loaded: v1-ensemble serves",
+    );
     expect(core.every((p) => p.weeks.every((w) => w.points.basis === "position_cv"))).toBe(true);
     expect(full.map((p) => p.player_id)).toEqual(core.map((p) => p.player_id));
     full.forEach((p, i) => {

@@ -417,15 +417,28 @@ export function buildEnvelope<D>(input: EnvelopeInput<D>): Envelope<D> {
 /** One analytics `data.inputs[]` row (plan 07 §2) — the domain's InputFreshness. */
 export type DataInput = InputFreshness;
 
-/** The analytics `data.inputs[]` rows for the stamps the envelope used (an expired input reads `stale`). */
+/**
+ * The analytics `data.inputs[]` rows for the stamps the envelope used (an expired input reads
+ * `stale`). Identical rows (the same source, version, age and freshness — a file or view read more
+ * than once by one call) appear once: a repeat carries no information and only spends the C8 budget.
+ */
 export function toDataInputs(inputs: readonly InputStamp[], nowMs: number): DataInput[] {
   if (!Number.isFinite(nowMs)) throw new RangeError("envelope: nowMs must be finite");
-  return inputs.map((i) => ({
-    source: i.source,
-    as_of: new Date(isoOrThrow(i.as_of)).toISOString(),
-    age_s: Math.max(0, Math.floor((nowMs - isoOrThrow(i.fetched_at)) / 1000)),
-    freshness: i.state === "fresh" ? (i.provisional === true ? "provisional" : "fresh") : "stale",
-  }));
+  const out: DataInput[] = [];
+  const seen = new Set<string>();
+  for (const i of inputs) {
+    const row: DataInput = {
+      source: i.source,
+      as_of: new Date(isoOrThrow(i.as_of)).toISOString(),
+      age_s: Math.max(0, Math.floor((nowMs - isoOrThrow(i.fetched_at)) / 1000)),
+      freshness: i.state === "fresh" ? (i.provisional === true ? "provisional" : "fresh") : "stale",
+    };
+    const key = `${row.source}|${row.as_of}|${String(row.age_s)}|${row.freshness}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
 }
 
 /** Serialises an envelope (the one `text` block and the size the budget measures). */

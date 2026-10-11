@@ -198,10 +198,28 @@ export function availabilityOf(
   };
 }
 
+/**
+ * Adds a dataset stamp unless the call already carries the same one (source, version instant and
+ * fetch instant): v2 re-reads files v1 already stamped (the stats file, the weekly rosters), and a
+ * repeated row would only spend the C8 size budget.
+ */
+export function addInput(inputs: InputStamp[], st: InputStamp): void {
+  if (
+    inputs.some(
+      (i) => i.source === st.source && i.as_of === st.as_of && i.fetched_at === st.fetched_at,
+    )
+  )
+    return;
+  inputs.push(st);
+}
+
 /** The process-wide matchup-table memo (keyed by season, week, S and both files' versions). */
 const MATCHUP_MEMO = new Map<string, V2MatchupTable | null>();
 /** Most tables kept (a server sees one league; a week change adds one). */
 export const MATCHUP_MEMO_MAX = 8;
+
+/** Player-weeks the matchup table scores per turn of the event loop. */
+export const MATCHUP_SCORE_PER_TURN = 400;
 
 /** Clears the memo (tests). */
 export function clearMatchupMemo(): void {
@@ -235,7 +253,7 @@ export async function matchupTableFor(
     warnings.push("v2-opportunity: no player universe for the matchup table: the multiplier is 1");
     return null;
   }
-  inputs.push(rIn);
+  addInput(inputs, rIn);
   const rows: MatchupRow[] = [];
   let version: string | null = null;
   for (let w = 1; w < week; w++) {
@@ -246,13 +264,15 @@ export async function matchupTableFor(
     const v = r.stamp?.file_version ?? null;
     if (version === null) {
       version = v;
-      inputs.push(stamp);
+      addInput(inputs, stamp);
     } else if (v !== version) {
       // a refresh published a new file between two weeks: answer without the table this call
       warnings.push("v2-opportunity: the stats file changed mid-read: the matchup multiplier is 1");
       return null;
     }
-    for (const l of r.rows) {
+    for (const [n, l] of r.rows.entries()) {
+      // a week of the whole NFL is scored in slices, a turn between (plan 03 §1.2: no long task)
+      if (n > 0 && n % MATCHUP_SCORE_PER_TURN === 0) await turn();
       const pos = l.position === "FB" ? "RB" : l.position;
       if (!isV2Position(pos)) continue;
       let pts: number;
@@ -340,11 +360,14 @@ export async function runV2(
   for (const [yr, weeks] of windows) {
     if (weeks.length === 0) continue;
     await turn();
-    const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks, { usage: true });
+    // the usage extras (snap share, red-zone counts) for the current season only: the prior
+    // season's eighteen weeks of them were one long statement (the stall bound), and v2 reads the
+    // role metric and location from the recent games first (null → opportunity share / xTD)
+    const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks, { usage: yr === season });
     const st = optionalDataset(r, ctx.nowMs, o.allowStale);
     if (st === null) continue;
     anyLines = true;
-    inputs.push(st);
+    addInput(inputs, st);
     lines.push(...r.rows);
   }
   if (!anyLines) return notLoaded("nflverse:stats_player_week");
@@ -355,7 +378,7 @@ export async function runV2(
     const r = ctx.services.datasets.epWeekly.rows(gsis, yr, weeks);
     const st = optionalDataset(r, ctx.nowMs, o.allowStale);
     if (st === null) continue;
-    inputs.push(st);
+    addInput(inputs, st);
     for (const e of r.rows)
       xtd.set(`${e.gsis_id}|${String(e.season)}|${String(e.week)}`, {
         rec: e.x_rec_td ?? null,
@@ -389,7 +412,7 @@ export async function runV2(
     await turn();
     const g = ctx.services.datasets.nflGames.games(yr, target);
     const gi = optionalDataset(g, ctx.nowMs, o.allowStale);
-    if (gi !== null) inputs.push(gi);
+    if (gi !== null) addInput(inputs, gi);
     const side = new Map<string, ReturnType<typeof teamSideOf>>();
     for (const row of g.rows)
       for (const t of [row.home, row.away]) {
@@ -407,7 +430,7 @@ export async function runV2(
     const st = optionalDataset(r, ctx.nowMs, o.allowStale);
     if (st === null) continue;
     anyTeam = true;
-    inputs.push(st);
+    addInput(inputs, st);
     for (const t of r.rows) {
       if (t.season_type !== "REG") continue;
       const s = side.get(`${t.nfl_team}|${String(t.week)}`) ?? null;
@@ -435,7 +458,7 @@ export async function runV2(
     await turn();
     const wx = ctx.services.datasets.weather.forGames(ids);
     const wi = optionalDataset(wx, ctx.nowMs, o.allowStale);
-    if (wi !== null) inputs.push(wi);
+    if (wi !== null) addInput(inputs, wi);
     const obs = new Map(wx.rows.map((r) => [r.game_id, r]));
     for (const [t, g] of gameIdOf) {
       const roof = g.roof !== null && ROOFS.has(g.roof) ? (g.roof as V2Roof) : null;
@@ -462,7 +485,7 @@ export async function runV2(
   await turn();
   const reports = ctx.services.datasets.injuries.reports(season, o.week, gsis);
   const ri = optionalDataset(reports, ctx.nowMs, o.allowStale);
-  if (ri !== null) inputs.push(ri);
+  if (ri !== null) addInput(inputs, ri);
   const reportOf = new Map(reports.rows.map((r) => [r.gsis_id, r]));
 
   const nowMs = ctx.nowMs;
@@ -511,7 +534,7 @@ export async function runV2(
     opponents,
     matchup,
     params: tuned.params,
-    weight_espn: tuned.weight_espn ?? WEIGHT_ESPN_V2,
+    weight_espn: weightEspnOf(ctx),
     n_sims: o.n_sims ?? V2_SIMS.default,
     clock: ctx.services.clock,
     rng: o.rng,

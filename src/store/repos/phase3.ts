@@ -9,7 +9,11 @@
 import { createHash } from "node:crypto";
 import { ESPN_LEAGUE_ID_RE } from "../../config/schema.js";
 import type { WaiverRunRecord, WaiverRunRepository } from "../../domain/analytics/types.js";
-import { readScoredClaim, type ScoredClaim } from "../../domain/evidence/calibration.js";
+import {
+  CALIBRATION,
+  readScoredClaim,
+  type ScoredClaim,
+} from "../../domain/evidence/calibration.js";
 import { validateProposalSet } from "../../domain/reclog/tune.js";
 import type {
   LoggedClaim,
@@ -38,8 +42,8 @@ import {
 export const PROPOSAL_JSON_MAX = 256 * 1024;
 /** Most surplus values one waiver run keeps (E5's candidate pool is smaller). */
 export const WAIVER_RUN_SURPLUS_MAX = 200;
-/** Most scored claims one read returns. */
-export const SCORED_CLAIMS_MAX = 100_000;
+/** Most scored claims one read returns: the calibration table reads at most this many. */
+export const SCORED_CLAIMS_MAX = CALIBRATION.maxClaims;
 
 const leagueOf = (v: unknown): string => matching(v, ESPN_LEAGUE_ID_RE, "league_id");
 
