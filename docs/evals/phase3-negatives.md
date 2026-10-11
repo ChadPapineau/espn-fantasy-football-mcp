@@ -100,9 +100,37 @@ refresh has loaded the three backtest seasons:
    tests/domain/reclog/negatives.test.ts` regenerates the two marked sections, and the same test
    without the variable fails while they are stale.
 
-**Not built yet:** the plan 06 job row and a runner that reads the store's history files instead of
-the committed excerpts. Both are asked of the integration and the plan 06 owner in this module's
-`needs_from_others`. Until then the job is the test above: a manual, pre-release, zero-token run.
+**The runner over the store's history files (Stage C).** `runNegativesFromStore`
+(`src/domain/reclog/negatives-runner.ts`) builds `negativesReport`'s input from the store's read
+ports instead of the committed excerpts:
+
+- **Player-weeks:** every QB/RB/WR/TE week 1–17 of each backtest season through
+  `PlayerWeekReader.lines` — a prior season reads its `<source>_history` file — in id chunks of
+  2,000, a repeated (player, week) row kept once, FB read as RB (as E1 reads it).
+- **Points:** each line scored by the shipped engine under the league's then-current settings and the
+  two variants (5 → 4 pt pass TD, −2 → −1 INT; `withRulePoints`, the rule's position overrides
+  cleared).
+- **Schedule:** both sides of every regular-season game (weeks 1–18) through `NflGamesReader`.
+- **League seasons:** the league's finished seasons as the caller reads them from the platform
+  (`leagueSeasonFrom` over `getStandings` and `getLeagueRules` of a previous season — the settings
+  read a previous season answers with `mSettings` alone).
+- **Universe:** a port (`PlayerWeekReader` reads by id). The store-backed one is
+  `universeFromDepthCharts`: every QB/RB/HB/FB/WR/TE on any team's depth chart that season (the
+  depth charts' history file), an ESPN-only row crossed to its GSIS id through the nflverse players
+  file.
+- **Counted, never silent:** per season the universe size, the player-weeks kept, the rows skipped
+  (a position not modelled, a line the engine refused), the schedule sides and the stats file's
+  version; a season the store does not hold is listed (`missing_seasons`) and left out of the
+  checks.
+
+Held by `tests/domain/reclog/negatives-runner.test.ts`: over ports serving exactly the committed
+history (the 2024–2025 player-weeks as the store's `PlayerWeekLine`s, the committed schedule, the
+nine probe-league seasons read through the provider) the runner's report **equals** the committed
+run above, check for check (5,587 and 5,752 player-weeks read, nothing skipped, no season missing).
+
+**Still to wire (not this module's paths):** the plan 06 §1.5 job that calls the runner with the real
+store's readers and the platform's previous seasons and rewrites this file's two sections from its
+report. Until then the job is the test above: a manual, pre-release, zero-token run.
 
 ## C9 — retrospective attribution and `eff tune` (status)
 
