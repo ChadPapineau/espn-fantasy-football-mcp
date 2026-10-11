@@ -1,7 +1,8 @@
 // serve.test.ts — `eff serve` in-process (plan 03 §1.1–§1.3; plan 05 §4.2): usage and config errors
 // exit 2; the store's open failures (newer → 1 with plan 03 §7's message, pending migration → 1, an
 // unsafe path → 2, anything else → 1); fixture mode answers initialize, tools/list and a call with
-// ONLY JSON-RPC frames on stdout; an invalid request gets -32600 under its id; stdin EOF, stdout
+// ONLY JSON-RPC frames on stdout; an invalid request gets -32600 under its id, a line that is not
+// JSON -32700 with no id; a tools/call argument key `__proto__` is a coded VALIDATION; stdin EOF, stdout
 // EPIPE, an over-cap frame, SIGTERM/SIGINT/SIGHUP and reparenting all run the single-flight close
 // (exit 0); in-flight reads are drained; a stuck close exits 5 at the deadline; a second SIGINT
 // forces it; a crash exits 1. The spawned-process twin is tests/process/serve.test.ts.
@@ -11,16 +12,23 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import fc from "fast-check";
-import type { JSONRPCMessage } from "@modelcontextprotocol/server";
+import { STDIO_DEFAULT_MAX_BUFFER_SIZE, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { fakeEspnS2, fakeGuid, fakeIpv4 } from "../../scripts/ci/secret-fixtures.mjs";
 import {
   EXIT,
+  PROTO_KEY_STANDIN,
   invalidRequestReply,
   newerStoreMessage,
+  parseErrorReply,
   serve,
+  stdinLineReply,
+  watchInvalidRequests,
+  withProtoKeyCarried,
   withoutEchoedName,
   type ServeInternals,
 } from "../../src/cli/serve.js";
+import { toolsFor } from "../../src/mcp/registry.js";
+import { createLogger } from "../../src/cli/log.js";
 import { PathSecurityError } from "../../src/config/paths.js";
 import { storeFactory } from "../../src/store/index.js";
 import {
@@ -289,14 +297,105 @@ describe("fixture mode over stdio", () => {
     expect(r.raw().endsWith("\n")).toBe(true);
   });
 
-  it("an invalid request is answered -32600 under its id; an unparseable line is logged, not answered", async () => {
+  it("an invalid request is answered -32600 under its id; a line that is not JSON -32700 with no id", async () => {
     const r = start(tempEnv());
     await ready(r);
     r.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 41, method: 5 })}\n`);
     r.stdin.write("{this is not json\r\n\n");
+    r.stdin.write("this is not json\n");
     const bad = await r.reply(41);
     expect(bad.error).toEqual({ code: -32600, message: "Invalid Request" });
+    const parseErrors = await until(
+      () => {
+        const p = r.frames.filter(
+          (f) => (f.error as { code?: number } | undefined)?.code === -32700,
+        );
+        return p.length >= 2 ? p : undefined;
+      },
+      15_000,
+      "two -32700 replies",
+    );
+    // one reply per unparseable line (the blank line is skipped); no id: it could not be read, and
+    // MCP's RequestId has no null
+    expect(parseErrors).toEqual([
+      { jsonrpc: "2.0", error: { code: -32700, message: "Parse error" } },
+      { jsonrpc: "2.0", error: { code: -32700, message: "Parse error" } },
+    ]);
+    expect(r.raw()).not.toContain("this is not json");
     await r.log("transport.parse_error");
+    // the server still answers
+    r.send({ jsonrpc: "2.0", id: 42, method: "tools/list", params: {} });
+    expect((await r.reply(42)).result).toBeDefined();
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+    expect(
+      r.frames.filter((f) => (f.error as { code?: number } | undefined)?.code === -32700),
+    ).toHaveLength(2);
+  });
+
+  it("a multi-byte character split across two writes is one valid line, not a parse error", async () => {
+    const r = start(tempEnv());
+    await ready(r);
+    const line = Buffer.from(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 43, method: "tools/list", params: { _meta: { note: "\u00e9\u{1F3C8}" } } })}\n`,
+      "utf8",
+    );
+    const cut = line.indexOf(Buffer.from("\u{1F3C8}", "utf8")) + 2; // inside the 4-byte character
+    r.stdin.write(line.subarray(0, cut));
+    await new Promise((res) => setTimeout(res, 20));
+    r.stdin.write(line.subarray(cut));
+    expect((await r.reply(43)).result).toBeDefined();
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+    expect(r.frames.some((f) => (f.error as { code?: number } | undefined)?.code === -32700)).toBe(
+      false,
+    );
+  });
+
+  it("a tools/call argument key __proto__ is a coded VALIDATION like any unknown key (top level and nested)", async () => {
+    const r = start(tempEnv());
+    await ready(r);
+    const before = Object.getOwnPropertyNames(Object.prototype).sort();
+    // raw lines: an own `__proto__` key exists only in JSON text (a JS literal would set a prototype)
+    const raw = (id: number, name: string, args: string): void => {
+      r.stdin.write(
+        `{"jsonrpc":"2.0","id":${String(id)},"method":"tools/call","params":{"name":"${name}","arguments":${args}}}\n`,
+      );
+    };
+    const toolError = (f: Msg): Record<string, unknown> => {
+      const res = f.result as { isError?: boolean; content: { text: string }[] };
+      expect(res.isError).toBe(true);
+      return (JSON.parse(res.content[0]?.text ?? "{}") as { error: Record<string, unknown> }).error;
+    };
+    raw(71, "espn_get_league", '{"__proto__":{"polluted":"yes-71"}}');
+    raw(72, "espn_get_status", '{"__proto__":null}');
+    raw(73, "espn_get_league", '{"include":["rules"],"__proto__":{"include":["bogus"]}}');
+    raw(74, "espn_get_injuries", '{"players":{"__proto__":{"x":1},"team_id":1}}');
+    for (const id of [71, 72, 73]) {
+      const e = toolError(await r.reply(id));
+      expect(e).toMatchObject({
+        code: "VALIDATION",
+        field: "(root) (unknown key)",
+        reason: "unrecognized_keys",
+      });
+    }
+    expect(toolError(await r.reply(74)).code).toBe("VALIDATION");
+    // controls: the same calls without the key answer (not VALIDATION)
+    raw(75, "espn_get_league", "{}");
+    raw(76, "espn_get_league", '{"include":["rules"]}');
+    raw(77, "espn_get_injuries", '{"players":{"team_id":1}}');
+    for (const id of [75, 76]) {
+      const res = (await r.reply(id)).result as { isError?: boolean };
+      expect(res.isError ?? false).toBe(false);
+    }
+    const nested = (await r.reply(77)).result as { isError?: boolean; content: { text: string }[] };
+    if (nested.isError === true) expect(toolError(await r.reply(77)).code).not.toBe("VALIDATION");
+    // nothing reached a prototype, nothing was echoed, and the carry is logged value-free
+    expect(Object.getOwnPropertyNames(Object.prototype).sort()).toEqual(before);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(r.raw()).not.toContain("yes-71");
+    expect(r.raw()).not.toContain("__proto__");
+    expect(await r.log("transport.proto_key")).toMatchObject({ method: "tools/call" });
     r.stdin.end();
     expect(await r.code).toBe(EXIT.ok);
   });
@@ -721,6 +820,219 @@ describe("invalidRequestReply", () => {
       invalidRequestReply(`{"jsonrpc":"1.0","id":"${"a".repeat(257)}","method":"x"}`),
     ).toBeNull();
     expect(invalidRequestReply('{"jsonrpc":"1.0","id":{"a":1},"method":"x"}')).toBeNull();
+  });
+});
+
+describe("stdinLineReply", () => {
+  const PARSE = { jsonrpc: "2.0", error: { code: -32700, message: "Parse error" } };
+  it("a line that is not JSON gets -32700 with no id; everything else as invalidRequestReply", () => {
+    for (const line of [
+      "not json",
+      "this is not json",
+      "{this is not json",
+      "{",
+      '{"a":1',
+      "'x'",
+      "NaN",
+      "\u0000",
+    ])
+      expect(stdinLineReply(line)).toEqual(PARSE);
+    expect(Object.hasOwn(stdinLineReply("not json") ?? {}, "id")).toBe(false);
+    expect(stdinLineReply('{"jsonrpc":"2.0","id":1,"method":5}')).toEqual(
+      invalidRequestReply('{"jsonrpc":"2.0","id":1,"method":5}'),
+    );
+    for (const line of [
+      '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+      "[1,2]",
+      "null",
+      "5",
+      '"x"',
+    ])
+      expect(stdinLineReply(line)).toBeNull();
+    // a fresh object per reply: one caller mutating it cannot change the next
+    expect(parseErrorReply()).not.toBe(parseErrorReply());
+    expect(parseErrorReply()).toEqual(PARSE);
+  });
+  it("property: -32700 exactly when JSON.parse rejects the line; never an echo of it", () => {
+    fc.assert(
+      fc.property(fc.oneof(fc.string({ unit: "binary" }), fc.json()), (line) => {
+        let parses = true;
+        try {
+          JSON.parse(line);
+        } catch {
+          parses = false;
+        }
+        const r = stdinLineReply(line);
+        if (!parses) expect(r).toEqual(PARSE);
+        else expect(r?.error.code ?? null).not.toBe(-32700);
+        if (r !== null && line.length > 12) expect(JSON.stringify(r)).not.toContain(line);
+      }),
+    );
+  });
+});
+
+describe("watchInvalidRequests", () => {
+  const MAX = STDIO_DEFAULT_MAX_BUFFER_SIZE;
+  function watch(): { stdin: PassThrough; replies: unknown[]; events: string[]; stop: () => void } {
+    const stdin = new PassThrough();
+    const replies: unknown[] = [];
+    const events: string[] = [];
+    const logger = createLogger({
+      level: "debug",
+      sink: (line) => {
+        events.push(String((JSON.parse(line) as { event?: unknown }).event));
+      },
+    });
+    const stop = watchInvalidRequests(stdin, (m) => replies.push(m), logger);
+    return { stdin, replies, events, stop };
+  }
+  const PARSE = { jsonrpc: "2.0", error: { code: -32700, message: "Parse error" } };
+
+  it("answers each unparseable line and each invalid request; skips blank and valid lines", () => {
+    const w = watch();
+    w.stdin.write('not json\n\n  \r\n{"jsonrpc":"2.0","id":7,"method":5}\r\n');
+    w.stdin.write('{"jsonrpc":"2.0","id":8,"method":"tools/list"}\nnot');
+    expect(w.replies).toEqual([
+      PARSE,
+      { jsonrpc: "2.0", id: 7, error: { code: -32600, message: "Invalid Request" } },
+    ]);
+    w.stdin.write(" json either\n"); // the line completes across two chunks
+    expect(w.replies).toHaveLength(3);
+    expect(w.replies[2]).toEqual(PARSE);
+    expect(w.events).toEqual([
+      "transport.parse_error",
+      "transport.invalid_request",
+      "transport.parse_error",
+    ]);
+    w.stop();
+    w.stdin.write("not json\n");
+    expect(w.replies).toHaveLength(3);
+  });
+
+  it("a line over the read cap is never judged, in one chunk or across many; the next line is", () => {
+    const w = watch();
+    w.stdin.write(`${"x".repeat(MAX + 5)}\n`);
+    expect(w.replies).toEqual([]);
+    // across chunks: the remainder passes the cap mid-line; its tail after the reset is not a line
+    w.stdin.write("y".repeat(MAX - 10));
+    w.stdin.write("y".repeat(20));
+    w.stdin.write("tail of the long line\nnot json\n");
+    expect(w.replies).toEqual([PARSE]);
+    w.stop();
+  });
+
+  it("a multi-byte character split across chunks is decoded whole", () => {
+    const w = watch();
+    const line = Buffer.from('{"jsonrpc":"2.0","id":"\u00e9\u{1F3C8}","method":5}\n', "utf8");
+    const cut = line.indexOf(Buffer.from("\u{1F3C8}", "utf8")) + 1;
+    w.stdin.write(line.subarray(0, cut));
+    w.stdin.write(line.subarray(cut));
+    expect(w.replies).toEqual([
+      {
+        jsonrpc: "2.0",
+        id: "\u00e9\u{1F3C8}",
+        error: { code: -32600, message: "Invalid Request" },
+      },
+    ]);
+    w.stop();
+  });
+});
+
+describe("withProtoKeyCarried", () => {
+  /** An object with an own enumerable `__proto__` data property (what JSON.parse builds). */
+  const withOwnProto = (rest: Record<string, unknown>, value: unknown): Record<string, unknown> => {
+    const o: Record<string, unknown> = {};
+    Object.defineProperty(o, "__proto__", {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    return Object.assign(o, rest);
+  };
+  const call = (args: unknown, method = "tools/call"): JSONRPCMessage => ({
+    jsonrpc: "2.0",
+    id: 9,
+    method,
+    params: { name: "espn_get_league", arguments: args },
+  });
+  const argsOf = (m: JSONRPCMessage): Record<string, unknown> =>
+    (m as unknown as { params: { arguments: Record<string, unknown> } }).params.arguments;
+
+  it("carries a top-level own __proto__ key under the stand-in; the value and every other key unchanged", () => {
+    const payload = { include: ["bogus"] };
+    const msg = JSON.parse(
+      '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"espn_get_league","arguments":{"week":3,"__proto__":{"include":["bogus"]}},"_meta":{"k":1}}}',
+    ) as JSONRPCMessage;
+    const out = withProtoKeyCarried(msg);
+    expect(out).not.toBe(msg);
+    const a = argsOf(out);
+    expect(Object.keys(a)).toEqual(["week", PROTO_KEY_STANDIN]);
+    expect(Object.hasOwn(a, "__proto__")).toBe(false);
+    expect(Object.getPrototypeOf(a)).toBe(Object.prototype);
+    expect(a[PROTO_KEY_STANDIN]).toEqual(payload);
+    expect((out as unknown as { params: { _meta: unknown; name: string } }).params).toMatchObject({
+      name: "espn_get_league",
+      _meta: { k: 1 },
+    });
+    expect((out as { id: number }).id).toBe(9);
+    // the input is not modified
+    expect(Object.hasOwn(argsOf(msg), "__proto__")).toBe(true);
+    expect(({} as Record<string, unknown>).include).toBeUndefined();
+  });
+
+  it("returns every other message as is (the same object)", () => {
+    const own = withOwnProto({ week: 1 }, { x: 1 });
+    for (const m of [
+      call({ week: 1 }),
+      call({ players: withOwnProto({ team_id: 1 }, { x: 1 }) }), // nested: the strict schema sees it
+      call(own, "prompts/get"),
+      call(own, "resources/read"),
+      call([own]),
+      call(null),
+      call("x"),
+      { jsonrpc: "2.0", id: 9, method: "tools/call" },
+      { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "x" } },
+      { jsonrpc: "2.0", method: "notifications/initialized" },
+      { jsonrpc: "2.0", id: 9, result: { arguments: own } },
+      { jsonrpc: "2.0", id: 9, error: { code: -32600, message: "Invalid Request" } },
+    ] as JSONRPCMessage[])
+      expect(withProtoKeyCarried(m)).toBe(m);
+  });
+
+  it("property: the carried arguments are the input's with only that key renamed", () => {
+    fc.assert(
+      fc.property(
+        fc.dictionary(
+          fc.string().filter((k) => k !== "__proto__" && k !== PROTO_KEY_STANDIN),
+          fc.jsonValue(),
+        ),
+        fc.jsonValue(),
+        (rest, value) => {
+          const args = withOwnProto(rest, value);
+          const out = argsOf(withProtoKeyCarried(call(args)));
+          expect(Object.hasOwn(out, "__proto__")).toBe(false);
+          expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+          expect(Object.keys(out).sort()).toEqual([...Object.keys(rest), PROTO_KEY_STANDIN].sort());
+          expect(out[PROTO_KEY_STANDIN]).toBe(value);
+          for (const k of Object.keys(rest)) expect(out[k]).toBe(rest[k]);
+        },
+      ),
+    );
+  });
+
+  it("no tool of either toolset declares the stand-in: its strict schema rejects it as an unknown key", () => {
+    const tools = [
+      ...new Map([...toolsFor("core"), ...toolsFor("full")].map((t) => [t.name, t])).values(),
+    ];
+    expect(tools.length).toBeGreaterThanOrEqual(34);
+    for (const t of tools) {
+      const r = t.input.safeParse({ [PROTO_KEY_STANDIN]: 1 });
+      expect(r.success, t.name).toBe(false);
+      const unknown = r.error?.issues.find((i) => i.code === "unrecognized_keys");
+      expect(unknown, t.name).toBeDefined();
+      expect((unknown as { keys: string[] }).keys).toContain(PROTO_KEY_STANDIN);
+    }
   });
 });
 

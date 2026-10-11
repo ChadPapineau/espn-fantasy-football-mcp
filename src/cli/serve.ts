@@ -5,12 +5,17 @@
 // the primary signal — / SIGTERM / SIGINT / SIGHUP / stdout EPIPE / reparenting → one single-flight
 // drain (reads ≤ 3 s) and close (WAL checkpoint, store closed, the secret dropped) under a 10 s hard
 // ceiling → exit 5; a second SIGINT forces the close; a crash exits 1). stdout carries ONLY MCP
-// frames: every log line is JSON on stderr. Ported from sibling @5daa625 (src/cli/serve.ts), adapted.
+// frames: every log line is JSON on stderr. A stdin line the SDK transport would drop is answered
+// (-32700 for a line that is not JSON, -32600 for an invalid request with a usable id), and a
+// tools/call argument key `__proto__` reaches the tool's strict schema (plan 02 §5) instead of being
+// dropped by the SDK's re-parse. Ported from sibling @5daa625 (src/cli/serve.ts), adapted.
 import { homedir } from "node:os";
 import { PassThrough, type Readable, type Writable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import { parseArgs } from "node:util";
 import {
   INVALID_REQUEST,
+  PARSE_ERROR,
   STDIO_DEFAULT_MAX_BUFFER_SIZE,
   deserializeMessage,
   isJSONRPCErrorResponse,
@@ -98,19 +103,40 @@ export function newerStoreMessage(storeVersion: number, binaryVersion: number): 
 // --- malformed requests --------------------------------------------------------------------------
 
 /**
- * The reply a stdin line deserves when the SDK transport would drop it silently: a line that parses
- * as JSON but is not a valid JSON-RPC message and is a REQUEST with a usable id (a string ≤ 256
- * chars, or a finite number) gets -32600 Invalid Request under that id. Everything else is null: a
- * valid message (the SDK answers it), a notification or a response, an array, a null/object id, and
- * an unparseable line (its id is unreadable; it is logged instead).
+ * The reply to a stdin line that is not JSON at all: -32700 Parse error (JSON-RPC 2.0 §5.1). Its id
+ * cannot be read, so the reply carries none — MCP's error response makes `id` optional and its
+ * RequestId has no null (the SDK's own message schema rejects `id: null`, the form JSON-RPC 2.0
+ * alone would use). A fresh object per call.
  */
-export function invalidRequestReply(line: string): JSONRPCErrorResponse | null {
+export function parseErrorReply(): JSONRPCErrorResponse {
+  return { jsonrpc: "2.0", error: { code: PARSE_ERROR, message: "Parse error" } };
+}
+
+/**
+ * The reply a stdin line deserves when the SDK transport would drop it silently (the transport hands
+ * every line it cannot read to `onerror` and answers nothing): a line that is not JSON gets -32700
+ * Parse error with no id (`parseErrorReply`); a line that parses as JSON but is not a valid JSON-RPC
+ * message and is a REQUEST with a usable id (a string ≤ 256 chars, or a finite number) gets -32600
+ * Invalid Request under that id. Everything else is null: a valid message (the SDK answers it), a
+ * notification or a response, an array, a null/object id.
+ */
+export function stdinLineReply(line: string): JSONRPCErrorResponse | null {
   let raw: unknown;
   try {
     raw = JSON.parse(line);
   } catch {
-    return null;
+    return parseErrorReply();
   }
+  return invalidRequestOf(raw, line);
+}
+
+/** `stdinLineReply` restricted to the -32600 case (null for an unparseable line). */
+export function invalidRequestReply(line: string): JSONRPCErrorResponse | null {
+  const r = stdinLineReply(line);
+  return r !== null && r.error.code === INVALID_REQUEST ? r : null;
+}
+
+function invalidRequestOf(raw: unknown, line: string): JSONRPCErrorResponse | null {
   try {
     deserializeMessage(line);
     return null;
@@ -125,6 +151,39 @@ export function invalidRequestReply(line: string): JSONRPCErrorResponse | null {
     (typeof id === "string" && id.length <= 256) || (typeof id === "number" && Number.isFinite(id));
   if (!usable) return null;
   return { jsonrpc: "2.0", id, error: { code: INVALID_REQUEST, message: "Invalid Request" } };
+}
+
+/**
+ * The name a tools/call argument key `__proto__` is carried under past the SDK. No tool declares it
+ * (tests/mcp/serve.test.ts holds that for every tool of both toolsets), so the tool's strict input
+ * schema reports it as an unknown key.
+ */
+export const PROTO_KEY_STANDIN = "__proto__ (own key)";
+
+/**
+ * A tools/call whose `arguments` carry an own `__proto__` key, with that key carried under
+ * `PROTO_KEY_STANDIN` (its value and every other key unchanged). The SDK re-parses `arguments` as a
+ * zod record before the handler runs, and zod never copies a `__proto__` key into the object it
+ * builds, so the tool's strict schema (plan 01 §4; plan 02 §5: `__proto__` keys are rejected by the
+ * schemas' `.strict()`) would never see it and the call would answer as if the key were absent.
+ * Carried under a name no tool declares, it is an unknown key like any other: a coded VALIDATION
+ * (`(root) (unknown key)`), the key never echoed. A deeper `__proto__` key needs no carrying: the
+ * SDK passes argument values through untouched and the nested strict objects reject it. Every
+ * other message is returned as is (the same object). The copies define own data properties only,
+ * so no prototype is ever set.
+ */
+export function withProtoKeyCarried(message: JSONRPCMessage): JSONRPCMessage {
+  if (!isJSONRPCRequest(message) || message.method !== "tools/call") return message;
+  const params: unknown = message.params;
+  if (typeof params !== "object" || params === null || Array.isArray(params)) return message;
+  if (!Object.prototype.hasOwnProperty.call(params, "arguments")) return message;
+  const args: unknown = (params as Record<string, unknown>).arguments;
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return message;
+  if (!Object.prototype.hasOwnProperty.call(args, "__proto__")) return message;
+  const carried = Object.fromEntries(
+    Object.entries(args).map(([k, v]) => [k === "__proto__" ? PROTO_KEY_STANDIN : k, v] as const),
+  );
+  return { ...message, params: { ...(params as Record<string, unknown>), arguments: carried } };
 }
 
 /** The SDK's "unknown name" replies: `Tool <name> not found`, `Prompt <name> disabled`, … */
@@ -176,33 +235,45 @@ export function withoutEchoedName(message: JSONRPCMessage): JSONRPCMessage {
   };
 }
 
-/** Watches stdin's lines beside the SDK transport and answers each invalid request. */
-function watchInvalidRequests(
+/**
+ * Watches stdin's lines beside the SDK transport and answers each one `stdinLineReply` answers (a
+ * line over the read cap — the transport refuses it and closes — is never judged). Returns the
+ * unsubscribe.
+ */
+export function watchInvalidRequests(
   stdin: NodeJS.ReadableStream,
   reply: (msg: JSONRPCErrorResponse) => void,
   logger: Logger,
 ): () => void {
   let buf = "";
+  // inside a line longer than the read cap: its rest up to the next newline is not a line of its own
+  let overflowed = false;
+  // a multi-byte character split across two chunks is decoded whole
+  const decoder = new StringDecoder("utf8");
   const onData = (chunk: Buffer | string): void => {
-    buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    if (buf.length > STDIO_DEFAULT_MAX_BUFFER_SIZE) buf = "";
+    buf += typeof chunk === "string" ? chunk : decoder.write(chunk);
     let i = buf.indexOf("\n");
     while (i >= 0) {
       const line = buf.slice(0, i).replace(/\r$/, "");
       buf = buf.slice(i + 1);
       i = buf.indexOf("\n");
-      if (line.trim() === "") continue;
-      const r = invalidRequestReply(line);
-      if (r !== null) {
-        logger.warn("transport.invalid_request", { code: INVALID_REQUEST });
-        reply(r);
+      if (overflowed) {
+        overflowed = false;
         continue;
       }
-      try {
-        JSON.parse(line);
-      } catch {
+      // a line over the read cap is the transport's to refuse (it closes itself): never judged here
+      if (line.length > STDIO_DEFAULT_MAX_BUFFER_SIZE) continue;
+      if (line.trim() === "") continue;
+      const r = stdinLineReply(line);
+      if (r === null) continue;
+      if (r.error.code === PARSE_ERROR)
         logger.warn("transport.parse_error", { bytes: line.length });
-      }
+      else logger.warn("transport.invalid_request", { code: INVALID_REQUEST });
+      reply(r);
+    }
+    if (buf.length > STDIO_DEFAULT_MAX_BUFFER_SIZE) {
+      buf = "";
+      overflowed = true;
     }
   };
   stdin.on("data", onData);
@@ -511,6 +582,8 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     // serveStdio queues each message and dispatches it from an async pump, so a request followed at
     // once by EOF would otherwise be uncounted when the drain looks (resources and prompts included).
     // A cancellation settles it (the SDK sends no reply to a cancelled request).
+    // A tools/call argument named `__proto__` is carried past the SDK's re-parse so the tool's strict
+    // schema rejects it like any unknown key (withProtoKeyCarried).
     const sdkOnMessage = transport.onmessage;
     transport.onmessage = (message) => {
       if (isJSONRPCRequest(message)) pending.add(message.id);
@@ -518,7 +591,9 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
         const id = (message.params as { requestId?: unknown } | undefined)?.requestId;
         if (typeof id === "string" || typeof id === "number") pending.delete(id);
       }
-      sdkOnMessage?.(message);
+      const carried = withProtoKeyCarried(message);
+      if (carried !== message) logger.warn("transport.proto_key", { method: "tools/call" });
+      sdkOnMessage?.(carried);
     };
     // the transport closes itself on a frame over its read cap and pauses stdin: run the close
     // sequence instead of idling deaf (serveStdio installs its own onclose; wrap it after the call)
