@@ -2,7 +2,10 @@
 // `season` — Phase-1a domain code because E2's PF exchange rate needs it; plan 10 A10a): ≥ 10 000
 // paths; every remaining matchup drawn from each team's weekly Normal(μ, σ) (E1's lineup when
 // given, else the cold-start model: the season-to-date mean shrunk n/(n+4) toward the league mean,
-// σ pooled); the exact tiebreak chain per `playoffSeedingRule` (TOTAL_POINTS_SCORED: win % → PF →
+// σ pooled, and — Phase 3, B2b fix — the mean's own uncertainty drawn once per path from its
+// posterior, sd σ/√(n+4), the normal–normal model the n/(n+4) shrinkage implies; without it every
+// path knew each team's true strength and early-season P(playoffs) was over-confident: research 05
+// §8.4 #5's checkpoints, docs/evals/phase3-startsit.md); the exact tiebreak chain per `playoffSeedingRule` (TOTAL_POINTS_SCORED: win % → PF →
 // H2H → division → PA → coin; research 05 §2.1) with division winners first when the league has
 // more than one division (reading (a)), PF only under reading (b); the bracket with the bye rule of
 // research 05 §2.3; marginal values by re-running from perturbed states on common random numbers.
@@ -36,8 +39,16 @@ export interface SeasonTeam {
   readonly ties: number;
   readonly points_for: number;
   readonly points_against: number;
-  /** The team's weekly lineup total from E1 (mean, sd); null → the cold-start model. */
-  readonly weekly?: { readonly mu: number; readonly sigma: number } | null;
+  /**
+   * The team's weekly lineup total from E1 (mean, sd); null → the cold-start model. `mean_sd`: the
+   * posterior sd of `mu` itself, drawn once per path (seasonFit.ts sets it for an E1 prior updated
+   * by the season's evidence); absent or 0 → `mu` is taken as known.
+   */
+  readonly weekly?: {
+    readonly mu: number;
+    readonly sigma: number;
+    readonly mean_sd?: number;
+  } | null;
 }
 
 /** A decided regular-season matchup (mMatchup `schedule[]` with a winner). */
@@ -444,14 +455,28 @@ interface Tally {
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 
-/** The weekly models: E1's when given, else the cold-start shrunk mean and pooled σ. */
+/**
+ * The posterior sd of a cold-start team's true weekly mean after `games` games: the shrinkage
+ * weight n/(n + k) is the normal–normal posterior's with prior variance σ²/k, whose posterior
+ * variance is σ²/(n + k) (k = SEEDING.shrinkGames). Same σ as the weekly draws (pooled).
+ */
+export function coldStartMeanSd(sigma: number, games: number): number {
+  const n = Math.max(0, Number.isFinite(games) ? games : 0);
+  return sigma > 0 && Number.isFinite(sigma) ? sigma / Math.sqrt(n + SEEDING.shrinkGames) : 0;
+}
+
+/**
+ * The weekly models: E1's when given (its mean known unless it carries `mean_sd`), else the
+ * cold-start shrunk mean, pooled σ and the mean's posterior sd (`meanSd`, drawn once per path).
+ */
 function models(
   req: SeasonSimRequest,
   assumptions: Assumption[],
-): { mu: Float64Array; sigma: Float64Array } {
+): { mu: Float64Array; sigma: Float64Array; meanSd: Float64Array } {
   const n = req.teams.length;
   const mu = new Float64Array(n);
   const sigma = new Float64Array(n);
+  const meanSd = new Float64Array(n);
   const games = req.teams.map((t) => t.wins + t.losses + t.ties);
   const totalGames = games.reduce((a, b) => a + b, 0);
   const totalPf = req.teams.reduce((a, t) => a + t.points_for, 0);
@@ -485,6 +510,8 @@ function models(
     ) {
       mu[i] = t.weekly.mu;
       sigma[i] = t.weekly.sigma;
+      const ms = t.weekly.mean_sd;
+      meanSd[i] = typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : 0;
       return;
     }
     cold += 1;
@@ -492,17 +519,18 @@ function models(
     const w = ng / (ng + SEEDING.shrinkGames);
     mu[i] = leagueMean + w * ((seasonMean[i] ?? leagueMean) - leagueMean);
     sigma[i] = pooled;
+    meanSd[i] = coldStartMeanSd(pooled, ng);
   });
   if (cold > 0)
     assumptions.push(
       A(
         totalGames > 0
-          ? `cold-start weekly model for ${String(cold)} teams: season mean shrunk n/(n+${String(SEEDING.shrinkGames)}) toward the league mean, pooled σ ${String(round(pooled, 1))}`
-          : `no week played: every cold-start team is Normal(${String(SEEDING.defaultMean)}, ${String(SEEDING.defaultSigma)})`,
+          ? `cold-start weekly model for ${String(cold)} teams: season mean shrunk n/(n+${String(SEEDING.shrinkGames)}) toward the league mean, its uncertainty drawn per path (sd σ/√(n+${String(SEEDING.shrinkGames)})), pooled σ ${String(round(pooled, 1))}`
+          : `no week played: every cold-start team is Normal(${String(SEEDING.defaultMean)}, ${String(SEEDING.defaultSigma)}), its mean uncertain by ${String(round(coldStartMeanSd(SEEDING.defaultSigma, 0), 1))} per path`,
         "E1 lineup projections for every team are passed in",
       ),
     );
-  return { mu, sigma };
+  return { mu, sigma, meanSd };
 }
 
 /**
@@ -559,7 +587,8 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
       : [req.seeding_mode === "config" ? req.seeding_config.mode : req.seeding_mode];
   const assumptions: Assumption[] = [];
   const warnings: string[] = [];
-  const { mu, sigma } = models(req, assumptions);
+  const { mu, sigma, meanSd } = models(req, assumptions);
+  const uncertainMeans = meanSd.some((x) => x > 0);
   const divIds = [
     ...new Set(req.teams.map((t) => t.division_id).filter((d): d is number => d !== null)),
   ];
@@ -670,6 +699,10 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
   const zg = new Float64Array(2 * G);
   const zp = new Float64Array(Math.max(1, bracketRounds) * n);
   const coin = new Float64Array(n);
+  // each path's draw of every cold-start team's true mean (its own stream: E1-modelled teams draw
+  // nothing, and the game draws of the "season" stream are the same with or without it)
+  const zm = new Float64Array(n);
+  const meanStream = req.rng.fork("season_mean");
   const stream = req.rng.fork("season");
   const wins = new Float64Array(n);
   const losses = new Float64Array(n);
@@ -688,9 +721,10 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
     pf.set(pf0);
     pa.set(pa0);
     for (const p of playedPairs) p.live.winner = p.orig.winner;
-    const muMe = rd(mu, me) + (v === "plus_3_ppw" ? SEEDING.plusPointsPerWeek : 0);
+    const pathMean = (i: number): number => rd(mu, i) + rd(meanSd, i) * rd(zm, i);
+    const muMe = pathMean(me) + (v === "plus_3_ppw" ? SEEDING.plusPointsPerWeek : 0);
     const sgMe = rd(sigma, me) * (v === "sigma_x0_7" ? 0.7 : v === "sigma_x1_4" ? 1.4 : 1);
-    const mOf = (i: number): number => (i === me ? muMe : rd(mu, i));
+    const mOf = (i: number): number => (i === me ? muMe : pathMean(i));
     const sOf = (i: number): number => (i === me ? sgMe : rd(sigma, i));
     if (v === "plus_1_win" && canFlip) {
       add(wins, me, 1);
@@ -779,6 +813,7 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
   const run = await runCooperative(
     nSims,
     () => {
+      if (uncertainMeans) for (let i = 0; i < n; i++) zm[i] = normalDraw(meanStream);
       for (let i = 0; i < 2 * G; i++) zg[i] = normalDraw(stream);
       for (let i = 0; i < zp.length; i++) zp[i] = normalDraw(stream);
       for (let i = 0; i < n; i++) coin[i] = stream.next();

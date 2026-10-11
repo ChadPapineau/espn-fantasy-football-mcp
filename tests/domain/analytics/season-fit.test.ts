@@ -93,15 +93,46 @@ function request(over: Partial<FittedSeasonRequest> = {}): FittedSeasonRequest {
 }
 
 describe("the fitted weekly model", () => {
-  it("E1's projection is the prior the season-to-date mean updates at n/(n+4); σ from E1", () => {
+  it("E1's projection is the prior the season-to-date mean updates at n/(n+4); σ from E1; μ uncertain by σ/√(n+4)", () => {
     const prior = { mu: 110, sigma: 22 };
-    // 4 games, 480 PF → season mean 120; w = 4/8 → 110 + 0.5 × 10
+    // 4 games, 480 PF → season mean 120; w = 4/8 → 110 + 0.5 × 10; the posterior sd 22/√8
     expect(fittedWeekly({ wins: 2, losses: 2, ties: 0, points_for: 480 }, prior)).toEqual({
       mu: 115,
       sigma: 22,
+      mean_sd: 22 / Math.sqrt(8),
     });
-    expect(fittedWeekly({ wins: 0, losses: 0, ties: 0, points_for: 0 }, prior)).toEqual(prior);
+    // no game: the prior itself, uncertain by its prior sd σ/√4
+    expect(fittedWeekly({ wins: 0, losses: 0, ties: 0, points_for: 0 }, prior)).toEqual({
+      ...prior,
+      mean_sd: 11,
+    });
     expect(SEEDING.shrinkGames).toBe(4);
+  });
+
+  it("property: μ's uncertainty is σ/√(n+4) exactly and never grows as games accrue; 0 for a σ of 0", () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: 0, max: 60, noNaN: true }),
+        fc.integer({ min: 0, max: 16 }),
+        (sigma, n) => {
+          const fit = (games: number) =>
+            fittedWeekly(
+              { wins: games, losses: 0, ties: 0, points_for: 100 * games },
+              { mu: 100, sigma },
+            );
+          const a = fit(n);
+          const b = fit(n + 1);
+          return (
+            b.mean_sd <= a.mean_sd &&
+            a.mean_sd === sigma / Math.sqrt(n + SEEDING.shrinkGames) &&
+            a.mean_sd >= 0
+          );
+        },
+      ),
+    );
+    expect(
+      fittedWeekly({ wins: 3, losses: 0, ties: 0, points_for: 300 }, { mu: 100, sigma: 0 }).mean_sd,
+    ).toBe(0);
   });
 
   it("property: the fitted mean lies between E1's mean and the season mean, nearer the season as games accrue", () => {

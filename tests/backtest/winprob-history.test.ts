@@ -7,7 +7,10 @@
 // P(playoffs)), joined to ESPN's numbers through preWeekSnapshot → espnNumbersOf → attachEspn, and
 // the recorded 2026 snapshots shown to be post-kickoff (excluded — never compared as pre-week).
 // Hard: no comparison reports a pass without an ESPN number; our P(playoffs) beats the base-rate
-// forecast at every checkpoint. Reported (docs/evals/phase3-startsit.md, held equal): the tables.
+// forecast at every checkpoint; drawing each cold-start team's mean from its posterior (the B2b
+// fix) beats the same models with the mean taken as known, at every checkpoint. Reported
+// (docs/evals/phase3-startsit.md, held equal): the tables, the inconsistent deciles, and how much
+// team strength persisted in each recorded league-season (the shrinkage constant's evidence).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -26,6 +29,7 @@ import { mMatchupScoreSchema, mTeamSchema } from "../../src/providers/espn/views
 import {
   playoffRows,
   playoffSeasons,
+  seasonPersistence,
   PLAYOFF_CHECKPOINTS,
 } from "../domain/analytics/calibration/helpers/playoffs-history.js";
 import {
@@ -43,6 +47,7 @@ import { LEAGUES, MANIFEST, readRecorded } from "../golden/recorded.js";
 
 let cv: HistoryReplay;
 let playoffs: ComparatorRow[];
+let knownMeans: ComparatorRow[];
 
 /** Our weekly P(win) rows from the replay: the lineups as played, ESPN's number absent. */
 const weeklyRows = (rp: HistoryReplay): ComparatorRow[] =>
@@ -108,12 +113,12 @@ const sections = (): Record<string, string> => {
   const lines = [
     comparatorSection(rows),
     "",
-    "Our P(playoffs) per checkpoint (the seeding simulator, cold-start weekly models):",
+    "Our P(playoffs) per checkpoint (the seeding simulator, cold-start weekly models with each team's mean drawn from its posterior per path):",
     "",
   ];
   lines.push(
-    "| checkpoint week | team-seasons | our Brier | base-rate Brier | calibration status |",
-    "|---:|---:|---:|---:|---|",
+    "| checkpoint week | team-seasons | our Brier | base-rate Brier | calibration status | deciles inconsistent with their forecasts (n, mean forecast → made) |",
+    "|---:|---:|---:|---:|---|---|",
   );
   for (const k of PLAYOFF_CHECKPOINTS) {
     const xs = playoffs.filter((r) => r.period === k);
@@ -121,8 +126,14 @@ const sections = (): Record<string, string> => {
     const b = xs.reduce((s, r) => s + (r.ours - (r.outcome ? 1 : 0)) ** 2, 0) / xs.length;
     const base = xs.reduce((s, r) => s + (rate - (r.outcome ? 1 : 0)) ** 2, 0) / xs.length;
     const rel = reliabilityByDecile(xs.map((r) => ({ p: r.ours, outcome: r.outcome })));
+    const off = rel.bins
+      .filter((x) => x.consistent === false)
+      .map(
+        (x) =>
+          `${x.lo.toFixed(1)}–${x.hi.toFixed(1)} (${String(x.n)}, ${(x.mean_p ?? 0).toFixed(3)} → ${(x.rate ?? 0).toFixed(3)})`,
+      );
     lines.push(
-      `| ${String(k)} | ${String(xs.length)} | ${b.toFixed(4)} | ${base.toFixed(4)} | \`${rel.status}\` |`,
+      `| ${String(k)} | ${String(xs.length)} | ${b.toFixed(4)} | ${base.toFixed(4)} | \`${rel.status}\` | ${off.length === 0 ? "none" : off.join("; ")} |`,
     );
   }
   const snaps = recordedSnapshots();
@@ -133,14 +144,26 @@ const sections = (): Record<string, string> => {
     "",
     `The recorded 2026 scoreboards (three leagues, matchup period 4): ${String(wp.length)} ESPN \`winProbability\` values, ${String(wp.filter((p) => p === 0 || p === 1).length)} of them exactly 0 or 1; ${String(pct.length)} \`playoffPct\` values. Taken after week 4's first kickoff: ${String(snaps.length - pre.length)} of ${String(snaps.length)} — not pre-week numbers, so the comparator reads none of them; week 4's results are not recorded either.`,
   );
-  return { comparator: lines.join("\n") };
+  const persistence = [
+    "| league | season | teams | regular-season weeks | weekly σ | between-team τ of true means | implied k = σ²/τ² (shipped: 4) | first-half vs second-half correlation |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|",
+    ...playoffSeasons().map((ps) => {
+      const p = seasonPersistence(ps);
+      return `| ${p.slot} | ${String(p.season)} | ${String(p.teams)} | ${String(p.games)} | ${p.sigma.toFixed(1)} | ${p.tau.toFixed(1)} | ${p.k === null ? "— (τ² ≤ 0)" : p.k.toFixed(1)} | ${p.half_corr.toFixed(2)} |`;
+    }),
+  ];
+  return { comparator: lines.join("\n"), persistence: persistence.join("\n") };
 };
 
 beforeAll(async () => {
   cv = await replayHistory("position_cv");
   playoffs = [];
+  knownMeans = [];
   for (const ps of playoffSeasons())
-    for (const k of PLAYOFF_CHECKPOINTS) playoffs.push(...(await playoffRows(ps, k)));
+    for (const k of PLAYOFF_CHECKPOINTS) {
+      playoffs.push(...(await playoffRows(ps, k)));
+      knownMeans.push(...(await playoffRows(ps, k, { known_means: true })));
+    }
   if (process.env.UPDATE_EVALS === "1")
     for (const [name, body] of Object.entries(sections())) writeDocSection(name, body);
 }, 900_000);
@@ -193,6 +216,23 @@ describe("C3 P(win) and P(playoffs) against ESPN", () => {
       expect(
         playoffs.filter((r) => r.group === ps.slot && r.season === ps.season && r.outcome).length,
       ).toBe(PLAYOFF_CHECKPOINTS.length * ps.team_count);
+  });
+
+  it("(hard) drawing each cold-start team's mean from its posterior beats taking it as known, at every checkpoint (Brier; the B2b fix)", () => {
+    const brier = (rows: readonly ComparatorRow[]): number =>
+      rows.reduce((s, r) => s + (r.ours - (r.outcome ? 1 : 0)) ** 2, 0) / rows.length;
+    for (const k of PLAYOFF_CHECKPOINTS) {
+      const drawn = playoffs.filter((r) => r.period === k);
+      const known = knownMeans.filter((r) => r.period === k);
+      expect(drawn.length).toBe(known.length);
+      expect(brier(drawn)).toBeLessThan(brier(known));
+    }
+    // the known-mean run is more extreme: further from ½ on average where the order is uncertain
+    const spread = (rows: readonly ComparatorRow[]): number =>
+      rows.reduce((s, r) => s + Math.abs(r.ours - 0.5), 0) / rows.length;
+    expect(spread(playoffs.filter((r) => r.period === 4))).toBeLessThan(
+      spread(knownMeans.filter((r) => r.period === 4)),
+    );
   });
 
   it("(hard) the snapshot path on the recorded 2026 scoreboards: ESPN's numbers read, a post-kickoff snapshot never used as pre-week", () => {

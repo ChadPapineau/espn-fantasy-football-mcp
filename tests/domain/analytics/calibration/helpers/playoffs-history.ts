@@ -3,8 +3,9 @@
 // the committed history (fixtures/espn/recorded/history/<season>/<slot>: mSettings, mTeam, mMatchup)
 // and every checkpoint week, the standings and schedule as they stood after that week go through
 // the shipped seeding simulator (`simulateSeason`, cold-start weekly models — the season-to-date mean
-// shrunk toward the league mean with a pooled σ — under the league's own seeding rule, reading (a))
-// once per team; the outcome is the team's final `playoffSeed` within the playoff field. ESPN's
+// shrunk toward the league mean with a pooled σ, the mean drawn from its posterior per path — under
+// the league's own seeding rule, reading (a)) once per team (`known_means`: the same models with the
+// mean taken as known — the simulator before the B2b fix, kept as the comparison); the outcome is the team's final `playoffSeed` within the playoff field. ESPN's
 // `playoffPct` is absent from every finished season (only in-season mTeam carries
 // `currentSimulationResults`), so every row's ESPN number is null. Team names are never read.
 import { simulateSeason } from "../../../../../src/domain/analytics/seeding.js";
@@ -87,8 +88,16 @@ export function playoffSeasons(): PlayoffSeason[] {
   return out;
 }
 
-/** The standings and schedule after `checkpoint`, our P(playoffs) per team, and the outcome. */
-export async function playoffRows(ps: PlayoffSeason, checkpoint: number): Promise<ComparatorRow[]> {
+/**
+ * The standings and schedule after `checkpoint`, our P(playoffs) per team, and the outcome. With
+ * `known_means` every team runs on its cold-start model (μ, σ) as an explicit weekly model without
+ * `mean_sd` — no mean uncertainty, the comparison for the fix.
+ */
+export async function playoffRows(
+  ps: PlayoffSeason,
+  checkpoint: number,
+  opts: { readonly known_means?: boolean } = {},
+): Promise<ComparatorRow[]> {
   const regular = ps.rows.filter(
     (r) => r.matchupPeriodId <= ps.regular_periods && r.away !== undefined && r.away !== null,
   );
@@ -135,14 +144,40 @@ export async function playoffRows(ps: PlayoffSeason, checkpoint: number): Promis
       points_against: pa,
     };
   });
-  const rows: ComparatorRow[] = [];
-  for (const t of ps.teams) {
-    const out = await simulateSeason({
+  const playoff = {
+    team_count: ps.team_count,
+    seeding_rule: ps.rule,
+    reseed: ps.reseed,
+    rounds: [],
+  };
+  let simTeams: SeasonTeam[] = teams;
+  if (opts.known_means === true) {
+    // the cold models (μ and σ are the same whichever team is `me`)
+    const cold = await simulateSeason({
       teams,
       played,
       remaining,
+      me: teams[0]?.team_id ?? 0,
+      playoff,
+      seeding_mode: "espn_rule",
+      seeding_config: { mode: "espn_rule", confirmed_at: null },
+      n_sims: 1000,
+      marginal: false,
+      clock: fixedClock(Date.UTC(ps.season, 9, 1)),
+      rng: seededRng(1),
+      pacer: instantPacer,
+      deadline_ms: null,
+    });
+    simTeams = teams.map((t) => ({ ...t, weekly: cold.models.get(t.team_id) ?? null }));
+  }
+  const rows: ComparatorRow[] = [];
+  for (const t of ps.teams) {
+    const out = await simulateSeason({
+      teams: simTeams,
+      played,
+      remaining,
       me: t.team_id,
-      playoff: { team_count: ps.team_count, seeding_rule: ps.rule, reseed: ps.reseed, rounds: [] },
+      playoff,
       seeding_mode: "espn_rule",
       seeding_config: { mode: "espn_rule", confirmed_at: null },
       n_sims: N_SIMS,
@@ -165,4 +200,77 @@ export async function playoffRows(ps: PlayoffSeason, checkpoint: number): Promis
     });
   }
   return rows;
+}
+
+/** How much a league-season's team strength persisted (the cold start's shrinkage assumes k = 4). */
+export interface SeasonPersistence {
+  readonly slot: string;
+  readonly season: number;
+  readonly teams: number;
+  readonly games: number;
+  /** Pooled weekly sd of a team's score around its season mean. */
+  readonly sigma: number;
+  /** Between-team sd of true weekly means (method of moments; 0 when the estimate is ≤ 0). */
+  readonly tau: number;
+  /** σ²/τ² — the shrinkage constant the season implies (null when τ² ≤ 0: no persistence). */
+  readonly k: number | null;
+  /** Correlation of the teams' first-half and second-half mean scores. */
+  readonly half_corr: number;
+}
+
+/** The persistence of one finished league-season's regular-season scoring. */
+export function seasonPersistence(ps: PlayoffSeason): SeasonPersistence {
+  const scores = new Map<number, { period: number; points: number }[]>();
+  for (const r of ps.rows) {
+    if (r.matchupPeriodId > ps.regular_periods || r.away === undefined || r.away === null) continue;
+    for (const side of [r.home, r.away]) {
+      const list = scores.get(side.teamId) ?? [];
+      list.push({ period: r.matchupPeriodId, points: side.totalPoints });
+      scores.set(side.teamId, list);
+    }
+  }
+  const mean = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const means: number[] = [];
+  const first: number[] = [];
+  const second: number[] = [];
+  let ss = 0;
+  let cnt = 0;
+  const half = ps.regular_periods / 2;
+  for (const list of scores.values()) {
+    const m = mean(list.map((x) => x.points));
+    means.push(m);
+    for (const x of list) {
+      ss += (x.points - m) ** 2;
+      cnt += 1;
+    }
+    first.push(mean(list.filter((x) => x.period <= half).map((x) => x.points)));
+    second.push(mean(list.filter((x) => x.period > half).map((x) => x.points)));
+  }
+  const n = means.length;
+  const s2 = ss / (cnt - n);
+  const mm = mean(means);
+  const vMeans = means.reduce((a, b) => a + (b - mm) ** 2, 0) / (n - 1);
+  const tau2 = vMeans - s2 / ps.regular_periods;
+  const mf = mean(first);
+  const ms = mean(second);
+  let cov = 0;
+  let vf = 0;
+  let vs = 0;
+  for (let i = 0; i < n; i++) {
+    const a = (first[i] ?? 0) - mf;
+    const b = (second[i] ?? 0) - ms;
+    cov += a * b;
+    vf += a * a;
+    vs += b * b;
+  }
+  return {
+    slot: ps.slot,
+    season: ps.season,
+    teams: n,
+    games: ps.regular_periods,
+    sigma: Math.sqrt(s2),
+    tau: Math.sqrt(Math.max(0, tau2)),
+    k: tau2 > 0 ? s2 / tau2 : null,
+    half_corr: cov / Math.sqrt(vf * vs),
+  };
 }

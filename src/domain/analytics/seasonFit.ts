@@ -4,8 +4,10 @@
 // result within 0.05 on the base fixture). Each team's weekly model is its E1 lineup projection used
 // as the PRIOR the season-to-date evidence updates with the cold start's own weight: μ = μ_E1 +
 // n/(n+4) · (season mean − μ_E1), σ = E1's lineup σ (the position-CV spread with the same-team
-// correlations) — the cold start is the same formula with the league mean as the prior, so the two
-// share their evidence term and differ only where the rosters do. A team without projections keeps
+// correlations), and the posterior sd of μ, σ/√(n+4), drawn once per path by the simulator (B2b
+// fix: the normal–normal model behind the n/(n+4) weight — the cold start draws the same) — the cold
+// start is the same formula with the league mean as the prior, so the two share their evidence term
+// and differ only where the rosters do. A team without projections keeps
 // the simulator's cold start (named in the assumptions). The simulation itself is seeding.ts
 // (Phase 1a domain code, cooperative under the CPU deadline). Pure. New here.
 import type { RosterSlots, Week } from "../league/types.js";
@@ -14,6 +16,7 @@ import { ensure } from "./errors.js";
 import { bestLineup, type LineupPlayer } from "./lineup.js";
 import { round } from "./math.js";
 import {
+  coldStartMeanSd,
   simulateSeason,
   type SeasonSimOutcome,
   type SeasonSimRequest,
@@ -65,16 +68,21 @@ export function projectionModel(
 
 /**
  * The fitted weekly model of one team: E1's projection as the prior, updated by the season-to-date
- * mean with weight n/(n + SEEDING.shrinkGames) (the cold start's weight); σ from E1.
+ * mean with weight n/(n + SEEDING.shrinkGames) (the cold start's weight); σ from E1; `mean_sd` the
+ * posterior sd of μ that weight implies, σ/√(n + SEEDING.shrinkGames) (coldStartMeanSd).
  */
 export function fittedWeekly(
   team: Pick<SeasonTeam, "wins" | "losses" | "ties" | "points_for">,
   prior: { readonly mu: number; readonly sigma: number },
-): { readonly mu: number; readonly sigma: number } {
+): { readonly mu: number; readonly sigma: number; readonly mean_sd: number } {
   const n = team.wins + team.losses + team.ties;
-  if (n <= 0) return { mu: prior.mu, sigma: prior.sigma };
+  if (n <= 0) return { mu: prior.mu, sigma: prior.sigma, mean_sd: coldStartMeanSd(prior.sigma, 0) };
   const w = n / (n + SEEDING.shrinkGames);
-  return { mu: prior.mu + w * (team.points_for / n - prior.mu), sigma: prior.sigma };
+  return {
+    mu: prior.mu + w * (team.points_for / n - prior.mu),
+    sigma: prior.sigma,
+    mean_sd: coldStartMeanSd(prior.sigma, n),
+  };
 }
 
 /** A fitted-season request: the simulator's request plus each team's E1 projection weeks. */
@@ -117,7 +125,7 @@ export async function simulateFittedSeason(req: FittedSeasonRequest): Promise<Fi
     fitted.length === 0
       ? null
       : A(
-          `fitted weekly model for ${String(fitted.length)} teams: the E1 lineup projection updated by the season-to-date mean at n/(n+${String(SEEDING.shrinkGames)}), σ from E1`,
+          `fitted weekly model for ${String(fitted.length)} teams: the E1 lineup projection updated by the season-to-date mean at n/(n+${String(SEEDING.shrinkGames)}), its uncertainty drawn per path (sd σ/√(n+${String(SEEDING.shrinkGames)})), σ from E1`,
           "the projections or the standings change",
         );
   const rec = sim.data.rec;

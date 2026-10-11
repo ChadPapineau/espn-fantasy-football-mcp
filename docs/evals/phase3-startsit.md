@@ -24,7 +24,7 @@ changes these numbers: rerun, review, commit.
 | C2 "did it matter" | **reported** | the product's lineup differs from the manager's in 149 of 272 head-to-head team-weeks and flips 20 results (10 to a win, 10 to a loss), on both bases |
 | C2 regret test → `auto` default | **implemented and tested on v2; no switch** | on what `full` serves, pwin and mean differ in 8 team-weeks of 308 (< 30) and pwin's regret is not below mean's in 2025 after week 3; and no replayed lineup is all-player_sim (K and D/ST keep position_cv), so the switch could not apply to any of them: `auto` stays `mean` |
 | C3 `P(win)` vs `winProbability` | **needs_time**, code path proven | 0 replayed weeks with a pre-week snapshot (finished seasons carry none; the recorded 2026 scoreboards were taken after kickoff); our Brier on all 272 replayed forecasts 0.2233 |
-| C3 `P(playoffs)` vs `playoffPct` | **needs_time**, code path proven | finished seasons carry no `playoffPct`; our P(playoffs) on 9 league-seasons × weeks 4/8/12 beats the base rate at every checkpoint (Brier 0.214 / 0.159 / 0.094 vs 0.250) but is over-confident at weeks 4 and 8 |
+| C3 `P(playoffs)` vs `playoffPct` | **needs_time**, code path proven | finished seasons carry no `playoffPct`; our P(playoffs) on 9 league-seasons × weeks 4/8/12 beats the base rate at every checkpoint (Brier 0.209 / 0.155 / 0.094 vs 0.250, after the B2b fix that draws each team's mean from its posterior — was 0.214 / 0.159 / 0.094); one decile each at weeks 4 and 8 is still inconsistent (see "The B2b fix") |
 
 ## The replay
 
@@ -275,15 +275,15 @@ both exist.
 | comparison | status | periods with an ESPN number | periods without | our forecasts | our Brier (all) | compared forecasts | our Brier (compared) | ESPN's Brier (compared) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | P(win) vs `winProbability`, every replayed week (league-b 2024–2025, position_cv) | `needs_time` | 0 | 34 | 272 | 0.2233 | 0 | — | — |
-| P(playoffs) vs `playoffPct`, 9 finished league-seasons × weeks 4/8/12 | `needs_time` | 0 | 27 | 294 | 0.1558 | 0 | — | — |
+| P(playoffs) vs `playoffPct`, 9 finished league-seasons × weeks 4/8/12 | `needs_time` | 0 | 27 | 294 | 0.1525 | 0 | — | — |
 
-Our P(playoffs) per checkpoint (the seeding simulator, cold-start weekly models):
+Our P(playoffs) per checkpoint (the seeding simulator, cold-start weekly models with each team's mean drawn from its posterior per path):
 
-| checkpoint week | team-seasons | our Brier | base-rate Brier | calibration status |
-|---:|---:|---:|---:|---|
-| 4 | 98 | 0.2140 | 0.2499 | `not_met` |
-| 8 | 98 | 0.1594 | 0.2499 | `not_met` |
-| 12 | 98 | 0.0942 | 0.2499 | `met` |
+| checkpoint week | team-seasons | our Brier | base-rate Brier | calibration status | deciles inconsistent with their forecasts (n, mean forecast → made) |
+|---:|---:|---:|---:|---|---|
+| 4 | 98 | 0.2089 | 0.2499 | `not_met` | 0.0–0.1 (12, 0.048 → 0.250) |
+| 8 | 98 | 0.1550 | 0.2499 | `not_met` | 0.7–0.8 (7, 0.751 → 0.286) |
+| 12 | 98 | 0.0936 | 0.2499 | `met` | none |
 
 The recorded 2026 scoreboards (three leagues, matchup period 4): 32 ESPN `winProbability` values, 32 of them exactly 0 or 1; 32 `playoffPct` values. Taken after week 4's first kickoff: 3 of 3 — not pre-week numbers, so the comparator reads none of them; week 4's results are not recorded either.
 <!-- comparator:end -->
@@ -291,9 +291,38 @@ The recorded 2026 scoreboards (three leagues, matchup period 4): 32 ESPN `winPro
 Reading it: the recorded 2026 scoreboards are not pre-week numbers — they were captured on the
 Tuesday after week 4's games (every `winProbability` already 0 or 1), which is exactly the case the
 snapshot reader must refuse. Our P(playoffs) from the shipped seeding simulator beats always
-forecasting the base rate at every checkpoint, but at weeks 4 and 8 it is over-confident: at week 4,
-20 team-seasons forecast at ≈ 4 % made the playoffs 5 times (25 %), and 14 forecast at ≈ 96 % made it
-11 times (79 %) — inconsistent with the forecasts at the family-wise level. The cold-start weekly
-model shrinks each team's mean toward the league's but samples no uncertainty in that mean, so early
-in a season the simulated paths are too sure of the order. That is a finding for the seeding
-simulator's owner, not a C3 verdict (C3 needs ESPN's number beside ours).
+forecasting the base rate at every checkpoint.
+
+**The B2b fix (the seeding simulator's over-confidence).** Before it, the cold-start weekly model
+shrank each team's mean toward the league's but took that mean as known on every path, so early in a
+season the paths were too sure of the order (week 4: 20 team-seasons forecast at ≈ 4 % made the
+playoffs 5 times; Brier 0.2140 / 0.1594 / 0.0942 at weeks 4 / 8 / 12). The simulator now draws
+each cold-start team's mean once per path from its posterior, sd σ/√(n + 4) — the normal–normal
+model the shipped n/(n + 4) shrinkage already implies, so no parameter was added or fitted — and an
+E1-fitted team (seasonFit.ts) carries the same posterior sd. Brier improves at every checkpoint
+(table above; the backtest asserts it against the same models with the mean taken as known, on
+common random numbers). **What remains (for the orchestrator / the simulator's owner):** one decile
+at week 4 (12 forecasts at ≈ 5 %, 3 made it) and one at week 8 (7 at ≈ 75 %, 2 made it) are still
+inconsistent family-wise. The likely cause is the shrinkage constant itself, not the sampling: how
+much a team's strength persists differs widely between the recorded league-seasons (table below,
+generated by the same backtest) — in five of nine a team's first-half scoring says almost nothing
+about its second half — while research 05's k = 4 assumes strong persistence in every league. A
+one-off sensitivity run (not shipped, not committed) with k estimated empirical-Bayes from the
+season's own games before each checkpoint lowered Brier further (≈ 0.197–0.200 / 0.147–0.148 /
+0.091) and made week 8 consistent, but week 4's lowest decile stayed inconsistent under every variant
+tried; choosing k on these nine seasons would make them no longer held out, so the constant is
+unchanged and the choice is left to a ruling. Not a C3 verdict (C3 needs ESPN's number beside ours).
+
+<!-- persistence:start -->
+| league | season | teams | regular-season weeks | weekly σ | between-team τ of true means | implied k = σ²/τ² (shipped: 4) | first-half vs second-half correlation |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| league-a | 2023 | 10 | 14 | 24.4 | 0.0 | — (τ² ≤ 0) | -0.08 |
+| league-a | 2024 | 10 | 14 | 22.7 | 3.7 | 37.7 | 0.13 |
+| league-a | 2025 | 12 | 14 | 20.6 | 2.7 | 58.0 | -0.11 |
+| league-b | 2023 | 10 | 15 | 22.4 | 4.6 | 23.6 | -0.11 |
+| league-b | 2024 | 10 | 15 | 21.3 | 7.1 | 9.1 | 0.63 |
+| league-b | 2025 | 10 | 15 | 21.0 | 8.4 | 6.2 | 0.40 |
+| league-c | 2023 | 12 | 14 | 22.6 | 4.4 | 26.0 | -0.06 |
+| league-c | 2024 | 12 | 14 | 20.4 | 9.0 | 5.1 | 0.64 |
+| league-c | 2025 | 12 | 14 | 25.3 | 16.1 | 2.5 | 0.74 |
+<!-- persistence:end -->

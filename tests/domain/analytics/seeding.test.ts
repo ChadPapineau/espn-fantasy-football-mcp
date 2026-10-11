@@ -14,6 +14,7 @@ import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   bracketOrder,
+  coldStartMeanSd,
   simulateSeason,
   tiebreakChain,
   type SeasonSimRequest,
@@ -524,6 +525,51 @@ describe("determinism, monotone marginal values, partial runs, hostile input", (
       }),
     );
     expect(none.models.get(1)).toEqual({ mu: 100, sigma: 20 });
+  });
+
+  it("the cold start draws each team's mean from its posterior, sd σ/√(n+4): the same run as E1 models carrying that mean_sd, and less sure than a known mean (B2b)", async () => {
+    const cold = await simulateSeason(small(1));
+    expect(coldStartMeanSd(20, 0)).toBe(10);
+    expect(coldStartMeanSd(20, 12)).toBe(5);
+    expect(coldStartMeanSd(0, 4)).toBe(0);
+    expect(coldStartMeanSd(Number.NaN, 4)).toBe(0);
+    expect(coldStartMeanSd(20, Number.NaN)).toBe(10);
+    expect(
+      cold.data.rec.assumptions.some((a) => a.text.includes("uncertainty drawn per path")),
+    ).toBe(true);
+    // the cold models as explicit weekly models carrying the cold start's posterior sd → identical
+    const req = small(1);
+    const withSd = req.teams.map((t) => {
+      const m = cold.models.get(t.team_id) ?? { mu: 0, sigma: 0 };
+      const n = t.wins + t.losses + t.ties;
+      return { ...t, weekly: { ...m, mean_sd: coldStartMeanSd(m.sigma, n) } };
+    });
+    const same = await simulateSeason({ ...req, teams: withSd });
+    for (const [i, r] of same.data.readings.entries()) {
+      const c = cold.data.readings[i];
+      expect(Math.abs(r.p_playoffs - (c?.p_playoffs ?? -1))).toBeLessThan(0.002);
+      expect(Math.abs(r.p_bye - (c?.p_bye ?? -1))).toBeLessThan(0.002);
+    }
+    // the same means taken as known (mean_sd absent, 0 or hostile) → a sharper, different outlook
+    // for the leader; a hostile mean_sd reads as 0, never NaN
+    const known = (ms: number | undefined) =>
+      simulateSeason({
+        ...req,
+        me: 2,
+        teams: withSd.map((t) => ({
+          ...t,
+          weekly: {
+            mu: t.weekly.mu,
+            sigma: t.weekly.sigma,
+            ...(ms === undefined ? {} : { mean_sd: ms }),
+          },
+        })),
+      });
+    const leaderCold = await simulateSeason({ ...req, me: 2 });
+    const a = (await known(undefined)).data.readings[0]?.p_playoffs ?? -1;
+    for (const ms of [0, -3, Number.NaN, Number.POSITIVE_INFINITY])
+      expect((await known(ms)).data.readings[0]?.p_playoffs).toBe(a);
+    expect(a).toBeGreaterThan(leaderCold.data.readings[0]?.p_playoffs ?? 2);
   });
 
   it("a CPU deadline stops the run: partial with the completed path count", async () => {
