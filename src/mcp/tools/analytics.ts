@@ -117,7 +117,7 @@ import { analyzeWaiversP1 } from "../../domain/analytics/phase2.js";
 import { waiverP1Extras } from "./market-p1.js";
 import { projectMany } from "./p1-common.js";
 import { fitPremiumFromFeed, WAIVER_FIT } from "../../domain/analytics/waiver-fit/index.js";
-import { mergeV2, runV2, storeV2 } from "./projection-v2.js";
+import { mergeV2, runV2, storeProjections, type V2Run } from "./projection-v2.js";
 
 // --- shared engine inputs ------------------------------------------------------------------------
 
@@ -303,40 +303,44 @@ export async function project(
     // so the P0 core toolset's projections are unchanged
     player_sim: ctx.options.toolset === "full",
   });
-  if (ctx.options.toolset !== "full") return v1;
-  // Phase 3 (plan 10 §3.3; plan 07 E1 → v2-opportunity): the first target week of every QB/RB/WR/TE
-  // whose opportunity inputs exist is served by v2 (basis player_sim; ESPN's mean stays the point
-  // estimate at weight_espn 1.0); everyone else keeps v1 (projection-v2.ts)
-  try {
-    const run = await runV2(
-      ctx,
-      subjects,
-      v1,
-      {
-        season,
-        week: o.week,
-        settings: o.settings,
-        rng: seededRng(o.seed).fork("v2"),
-        allowStale: o.allowStale,
-        ...(o.v2_n_sims === undefined ? {} : { n_sims: o.v2_n_sims }),
-        include_stat_line: o.include_stat_line === true,
-        deadline_ms: cpuDeadlineOf(ctx),
-      },
-      inputs,
-      warnings,
-    );
-    const merged = mergeV2(v1, run, o.include_stat_line === true);
-    // the retrospective's attribution reads these (plan 10 C9; best-effort, deduplicated)
-    await storeV2(ctx, run, season, o.week, inputs);
-    return merged;
-  } catch (e) {
-    // an optional layer never fails the call: v1 serves, said once (no third-party text)
-    ctx.services.logger.warn("e1.v2_unavailable", {
-      error: e instanceof Error ? e.name : "unknown",
-    });
-    warnings.push("v2-opportunity unavailable for this call: v1-ensemble serves");
-    return v1;
-  }
+  // Phase 3 (plan 10 §3.3; plan 07 E1 → v2-opportunity): under full, the first target week of every
+  // QB/RB/WR/TE whose opportunity inputs exist is served by v2 (basis player_sim; ESPN's mean stays
+  // the point estimate at weight_espn 1.0); everyone else keeps v1 (projection-v2.ts)
+  let out = v1;
+  let run: V2Run | null = null;
+  if (ctx.options.toolset === "full")
+    try {
+      run = await runV2(
+        ctx,
+        subjects,
+        v1,
+        {
+          season,
+          week: o.week,
+          settings: o.settings,
+          rng: seededRng(o.seed).fork("v2"),
+          allowStale: o.allowStale,
+          ...(o.v2_n_sims === undefined ? {} : { n_sims: o.v2_n_sims }),
+          include_stat_line: o.include_stat_line === true,
+          deadline_ms: cpuDeadlineOf(ctx),
+        },
+        inputs,
+        warnings,
+      );
+      out = mergeV2(v1, run, o.include_stat_line === true);
+    } catch (e) {
+      // an optional layer never fails the call: v1 serves, said once (no third-party text)
+      ctx.services.logger.warn("e1.v2_unavailable", {
+        error: e instanceof Error ? e.name : "unknown",
+      });
+      warnings.push("v2-opportunity unavailable for this call: v1-ensemble serves");
+      run = null;
+      out = v1;
+    }
+  // every first-week projection is stored for the retrospective's attribution (plan 08 §5; plan 10
+  // C9): best-effort, deduplicated, never failing the call
+  await storeProjections(ctx, out, run, season, o.week, inputs);
+  return out;
 }
 
 // --- E1 espn_project_players ----------------------------------------------------------------------

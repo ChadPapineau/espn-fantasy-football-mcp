@@ -47,7 +47,8 @@ When `followed` is null for any call, `espn_list_transactions` with `count: 40` 
 - The Brier table: ours beside ESPN's number where ESPN has one (win probability, playoff odds).
 - `sample_size` per metric, and **"n too small"** by name for `p_win`, `p_playoffs` and `p_k_win` until each reaches `n ≥ 30` (a season has about 14 matchups — `p_win` stays small all year; swap regret and projection CRPS reach 30 within weeks, so lead with those).
 - The corrections-window note when it is open.
-- Proposed parameter changes, if the tool gives any — proposed, never applied.
+- `attribution`: where last week's projection error came from, by layer (`availability`, `opportunity`, `efficiency`, `touchdowns`, …) — per call with `calls.<i>.<layer>`; aggregates stay "n too small" below `n_player_weeks` 30.
+- Proposed parameter changes, if the tool gives any — proposed, never applied. Only the owner applies them, by running `eff tune --apply` in their own terminal; never run it, and never ask to run it, from chat.
 
 ## Guardrails specific to retro
 - Never score a call by its outcome alone.

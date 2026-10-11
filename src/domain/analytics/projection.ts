@@ -188,6 +188,12 @@ export interface ProjectedPlayer {
   readonly target: ProjectionTarget;
   readonly projection: Projection;
   readonly weeks: readonly ProjectedWeek[];
+  /**
+   * The trailing window's expected canonical line (conditional on playing — nflverse rows are games
+   * played), whether or not the caller asked for `stat_line_expectation`: what the projection store
+   * keeps for the retrospective's attribution (plan 08 §5; plan 10 C9). Empty without a trailing line.
+   */
+  readonly expectation?: Readonly<Record<Canonical, number>>;
 }
 
 /** E1's outcome: the tool's `data`, the detail other engines consume, and envelope flags. */
@@ -668,7 +674,7 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
       role_confidence_games: tr.games,
       assumptions,
     };
-    return { target: t, projection, weeks: weeksP };
+    return { target: t, projection, weeks: weeksP, expectation: tr.expectation };
   };
   const players: ProjectedPlayer[] = [];
   await runCooperative(

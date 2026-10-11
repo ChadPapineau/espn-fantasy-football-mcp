@@ -11,7 +11,8 @@
 // string ever appears outside an `untrusted_text` wrapper or a `meta.untrusted_fields[]` path in any
 // output (warnings and meta included), the walk over all outputs. Hostile input: every tool, every
 // top-level input key, six hostile values each — a typed VALIDATION refusal (never INTERNAL, never
-// the planted text echoed, never a stack frame), and the server keeps answering.
+// the planted text echoed, never a stack frame), and the server keeps answering. Phase 3: E1 under
+// full answers model_version v2-opportunity with player_sim weeks around ESPN's mean.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -352,6 +353,27 @@ describe(
       const usage = by.get("usage") as { meta: { source: string[] } };
       expect(usage.meta.source).toContain("nflverse:stats_player_week");
       expect(usage.meta.source).toContain("ffopportunity:ep_weekly");
+      // Phase 3 (plan 10 §3.3, C1): E1 under full serves v2-opportunity to the modelled players
+      // whose opportunity inputs exist — basis player_sim around ESPN's mean (weight_espn 1.0)
+      const proj = by.get("project") as {
+        data: {
+          model_version: string;
+          projections: {
+            position: string;
+            weeks: {
+              points: { basis: string };
+              inputs: { espn: number | null; weight_espn: number };
+            }[];
+          }[];
+        };
+      };
+      expect(proj.data.model_version).toBe("v2-opportunity");
+      const sim = proj.data.projections.filter((p) => p.weeks[0]?.points.basis === "player_sim");
+      expect(sim.length).toBeGreaterThan(0);
+      for (const p of sim) {
+        expect(["QB", "RB", "WR", "TE"]).toContain(p.position);
+        if (p.weeks[0]?.inputs.espn !== null) expect(p.weeks[0]?.inputs.weight_espn).toBe(1);
+      }
       const status = by.get("status") as {
         data: { credential: { present: boolean }; capabilities: { write: { lineup: boolean } } };
       };

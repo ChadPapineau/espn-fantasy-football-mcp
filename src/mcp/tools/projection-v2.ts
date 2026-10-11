@@ -652,49 +652,79 @@ export function mergeV2(
 export const STORE_PER_TURN = 10;
 
 /**
- * Stores each v2-served player's projection for the retrospective (plan 08 §5 `projection`; plan 10
- * C9: the attribution joins it to the final box score): the expected line CONDITIONAL ON PLAYING,
- * the P(active) used, the reported mean and the tuning trace — no samples (attribution needs none).
+ * Stores each projected player's FIRST-WEEK projection for the retrospective (plan 08 §5
+ * `projection`; plan 10 C9: the attribution joins it to the final box score), so every call E1 backs
+ * — lineup, waivers, trade, any toolset — can be attributed: a v2-served player's expected line
+ * CONDITIONAL ON PLAYING with its P(active), reported mean and tuning trace (`v2-opportunity`); any
+ * other player with a trailing window its v1 trailing expectation (games played — conditional too),
+ * P(active) and reported mean, no trace (`v1-ensemble`). No samples (attribution needs none).
  * Best-effort: a busy store skips a row; a row with the same inputs and expectation as the newest
- * earlier one adds nothing (repo dedup), so repeated calls do not grow the table.
+ * earlier one adds nothing (repo dedup), so repeated calls do not grow the table. Never throws.
  */
-export async function storeV2(
+export async function storeProjections(
   ctx: ToolContext,
-  run: V2Run,
+  out: ProjectionOutcome,
+  run: V2Run | null,
   season: number,
   week: Week,
   inputs: readonly InputStamp[],
 ): Promise<number> {
-  const out = run.outcome;
-  if (out === null) return 0;
   const asOf = inputs.reduce<string | null>(
     (m, i) => (m === null || i.as_of > m ? i.as_of : m),
     null,
   );
   const madeAt = ctx.services.clock.nowIso();
+  const v2 = new Map<number, V2PlayerDetail>();
+  for (const d of run?.outcome?.details ?? [])
+    if (d.player_id !== null && d.expectation !== null && d.dist !== null) v2.set(d.player_id, d);
   let stored = 0;
   let k = 0;
-  for (const d of out.details) {
-    if (d.player_id === null || d.player_id === 0 || d.expectation === null || d.dist === null)
-      continue;
+  for (const pp of out.players) {
+    const id = pp.target.player_id;
+    const w0 = pp.weeks[0];
+    if (id === null || id === 0 || w0?.week !== week || w0.bye) continue;
+    const d = v2.get(id);
+    const v1Exp = pp.expectation ?? {};
+    if (d === undefined && Object.keys(v1Exp).length === 0) continue;
+    const exp = d?.expectation ?? null;
+    const dist = d?.dist ?? null;
     if (k > 0 && k % STORE_PER_TURN === 0) await turn();
     k += 1;
     try {
-      const r = ctx.services.projections.put({
-        player_id: d.player_id,
-        gsis_id: d.gsis_id,
-        season,
-        week,
-        model_version: MODEL_VERSION_V2,
-        made_at: madeAt,
-        inputs_as_of: asOf ?? madeAt,
-        expectation: expectedCounts(d.expectation),
-        samples: [],
-        p_active: d.p_active,
-        reported_mean: d.dist.mean,
-        trace:
-          d.trace === undefined ? null : (d.trace as unknown as Readonly<Record<string, unknown>>),
-      });
+      const r = ctx.services.projections.put(
+        d === undefined || exp === null || dist === null
+          ? {
+              player_id: id,
+              gsis_id: pp.target.gsis_id,
+              season,
+              week,
+              model_version: "v1-ensemble",
+              made_at: madeAt,
+              inputs_as_of: asOf ?? madeAt,
+              expectation: v1Exp,
+              samples: [],
+              p_active: w0.p_active,
+              reported_mean: w0.dist.mean,
+              trace: null,
+            }
+          : {
+              player_id: id,
+              gsis_id: d.gsis_id,
+              season,
+              week,
+              model_version: MODEL_VERSION_V2,
+              made_at: madeAt,
+              inputs_as_of: asOf ?? madeAt,
+              expectation: expectedCounts(exp),
+              samples: [],
+              p_active: d.p_active,
+              reported_mean: dist.mean,
+              trace:
+                d.trace === undefined
+                  ? null
+                  : (d.trace as unknown as Readonly<Record<string, unknown>>),
+            },
+      );
       if (r.written) stored += 1;
     } catch {
       // a row the store refuses is skipped: the answer never depends on the write

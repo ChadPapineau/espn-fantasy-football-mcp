@@ -1,7 +1,7 @@
 // retro-p3.ts — E13's Phase 3 inputs (plan 07 E13; plan 10 §3.3 C8, C9): the attribution rows of the
 // re-fit window — every box-score entry of the last ATTRIBUTION_WINDOW_WEEKS weeks that carries a
-// v2-opportunity projection STORED BEFORE ITS GAME'S KICKOFF (projection.getAsOf — no post-lock run
-// leaks the outcome), joined to ESPN's actual line (src/domain/reclog/attribution.ts
+// projection STORED BEFORE ITS GAME'S KICKOFF (projection.getAsOf, the newer of v2-opportunity and
+// v1-ensemble — no post-lock run leaks the outcome), joined to ESPN's actual line (src/domain/reclog/attribution.ts
 // attributionRowFromEspn), its stored trace filled with the realised shares and rates
 // (src/domain/reclog/realised.ts; team volume from nflverse stats_team_week); the applied tuned
 // overrides as the retrospective's `tuned`; and the scoring of E10's logged news claims once their
@@ -99,13 +99,18 @@ export async function attributionRows(
       seen.add(id);
       const lock = kick.get(e.player.pro_team_id);
       if (lock === undefined) continue; // no known kickoff: a pre-lock read cannot be guaranteed
-      const stored = ctx.services.projections.getAsOf(
-        id,
-        season,
-        x,
-        MODEL_VERSION_V2,
-        new Date(lock).toISOString(),
-      );
+      // the newest projection made before the game's kickoff, whichever model served it
+      const before = new Date(lock).toISOString();
+      const v2 = ctx.services.projections.getAsOf(id, season, x, MODEL_VERSION_V2, before);
+      const v1 = ctx.services.projections.getAsOf(id, season, x, "v1-ensemble", before);
+      const stored =
+        v2 === null
+          ? v1
+          : v1 === null
+            ? v2
+            : Date.parse(v1.made_at) > Date.parse(v2.made_at)
+              ? v1
+              : v2;
       if (stored === null) continue;
       const reported = stored.reported_mean ?? null;
       if (reported === null) continue;

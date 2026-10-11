@@ -75,9 +75,13 @@ afterAll(() => {
   world.cleanup();
 });
 
-async function tool(name: string, args: Record<string, unknown>) {
+async function tool(
+  name: string,
+  args: Record<string, unknown>,
+  toolset: "core" | "full" = "full",
+) {
   clearMatchupMemo();
-  const c = await connect(world, { options: { toolset: "full" } });
+  const c = await connect(world, { options: { toolset } });
   try {
     const r = await call(c.client, name, args);
     expect(r.isError, `${name}: ${JSON.stringify(r.body).slice(0, 400)}`).toBe(false);
@@ -123,10 +127,57 @@ describe("C9: E1 stores v2 projections; E13 attributes the ones stored before ki
     }
   });
 
+  it("under core, E1 stores v1-ensemble projections (trailing expectation, P(active), reported mean)", async () => {
+    const roster = (
+      await tool(
+        "espn_get_roster",
+        { team_id: manifest.my_team_id, week: manifest.current_week },
+        "core",
+      )
+    ).data.players as { player_id: number; position: string }[];
+    const ids = roster.map((p) => p.player_id).slice(0, 6);
+    const e1 = await tool(
+      "espn_project_players",
+      { players: { player_ids: ids }, horizon: "week", seed: 5 },
+      "core",
+    );
+    expect(e1.data.model_version).toBe("v1-ensemble");
+    const rows = ids
+      .map((id) =>
+        world.store.repos.projections.latest(id, SEASON, manifest.current_week, "v1-ensemble"),
+      )
+      .filter((r) => r !== null);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r.trace).toBeNull();
+      expect(typeof r.reported_mean).toBe("number");
+      expect(Object.keys(r.expectation).length).toBeGreaterThan(0);
+    }
+  });
+
   it("E13 joins week-4 projections stored before kickoff to the box scores; a post-kickoff one is never read", async () => {
     const players = week4Players()
       .filter((p) => p.pos >= 2 && p.pos <= 4)
       .slice(0, 12);
+    // one more player backed by a v1-ensemble row (E1 under core stores those): attributed too
+    const v1Player = week4Players().find(
+      (p) => p.pos >= 1 && p.pos <= 4 && !players.some((x) => x.id === p.id),
+    );
+    if (v1Player !== undefined)
+      world.store.repos.projections.put({
+        player_id: v1Player.id,
+        gsis_id: null,
+        season: SEASON,
+        week: 4,
+        model_version: "v1-ensemble",
+        made_at: "2026-09-21T12:00:00.000Z",
+        inputs_as_of: "2026-09-21T12:00:00.000Z",
+        expectation: { pass_att: 30, pass_cmp: 20, pass_yd: 230, rush_att: 3 },
+        samples: [],
+        p_active: 1,
+        reported_mean: 15,
+        trace: null,
+      });
     for (const p of players)
       world.store.repos.projections.put({
         player_id: p.id,
@@ -143,7 +194,9 @@ describe("C9: E1 stores v2 projections; E13 attributes the ones stored before ki
         trace: null,
       });
     // one projection made AFTER the season's last week-4 kickoff (2026-10-01 onward): never read
-    const late = week4Players().find((p) => p.pos === 2 && !players.some((x) => x.id === p.id));
+    const late = week4Players().find(
+      (p) => p.pos === 2 && !players.some((x) => x.id === p.id) && p.id !== v1Player?.id,
+    );
     if (late !== undefined)
       world.store.repos.projections.put({
         player_id: late.id,
@@ -162,7 +215,7 @@ describe("C9: E1 stores v2 projections; E13 attributes the ones stored before ki
     const r = await tool("espn_analyze_retrospective", { week: 4 });
     const attr = r.data.attribution as Record<string, number> | null;
     expect(attr).not.toBeNull();
-    expect(attr?.n_player_weeks).toBe(players.length);
+    expect(attr?.n_player_weeks).toBe(players.length + (v1Player === undefined ? 0 : 1));
     for (const k of Object.keys(attr ?? {})) expect(k).toMatch(ATTRIBUTION_KEY_RE);
     // proposals are made only with enough evidence; none is ever applied by the server
     expect(r.data.parameter_changes_proposed).toEqual([]);
