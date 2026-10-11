@@ -2,12 +2,17 @@
 // within ±10 points … soft where n < 30"; research 05 §8.4 reliability by decile): bins, Brier, the
 // in-the-large gap, judged bins only, the soft flag, hostile observations rejected; the clears
 // probability is E5's formula; the scale fit recovers a planted multiplier and says when it hits
-// a bound.
+// a bound; the curve fit (B2b) recovers a planted intercept and slope separately and says when one
+// sits on a bound.
 import { describe, expect, it } from "vitest";
+import { WAIVER_DP } from "../../../../src/domain/analytics/constants.js";
 import {
   WAIVER_FIT,
   calibrateClearsToFa,
   clearProbability,
+  clearProbabilityCurve,
+  demandCurveOf,
+  fitDemandCurve,
   fitDemandScale,
   type ClearsObservation,
   type ClearsOutcome,
@@ -136,5 +141,88 @@ describe("fitDemandScale", () => {
       log_likelihood_cold: null,
       at_bound: false,
     });
+  });
+});
+
+describe("fitDemandCurve (intercept and slope separately — the B2b fix)", () => {
+  /** Outcomes whose clear frequencies match the curve (q0, q1) exactly (deterministic). */
+  function planted(q0: number, q1: number): ClearsOutcome[] {
+    const out: ClearsOutcome[] = [];
+    for (const r of [0, 0.5, 1, 2, 4, 6]) {
+      const p = clearProbabilityCurve(r, 9, q0, q1);
+      const n = 600;
+      const k = Math.round(n * p);
+      for (let i = 0; i < n; i++) out.push({ r, rivals: 9, cleared: i < k });
+    }
+    return out;
+  }
+
+  it("the curve is the cold start's at (0.05, 0.08), capped at qCap; hostile parameters read as 0", () => {
+    for (const r of [0, 0.3, 1, 2.5, 7, 20, Number.NaN, -1])
+      expect(demandCurveOf(r, WAIVER_DP.q0, WAIVER_DP.q1)).toBeCloseTo(demandOf(r), 12);
+    expect(demandCurveOf(100, 0.5, 1)).toBe(WAIVER_DP.qCap);
+    expect(demandCurveOf(2, Number.NaN, -3)).toBe(0);
+    expect(clearProbabilityCurve(2, 0, 0.1, 0.1)).toBe(1);
+    expect(clearProbabilityCurve(2, Number.NaN, 0.1, 0.1)).toBe(1);
+    for (const r of [0, 1, 3])
+      expect(clearProbabilityCurve(r, 9, WAIVER_DP.q0, WAIVER_DP.q1)).toBeCloseTo(
+        clearProbability(r, 9),
+        12,
+      );
+  });
+
+  it("recovers a planted intercept and slope — where one multiplier cannot — and beats the cold curve", () => {
+    for (const [q0, q1] of [
+      [0.005, 0.03],
+      [0.02, 0.15],
+      [0.08, 0.01],
+    ] as const) {
+      const outcomes = planted(q0, q1);
+      const f = fitDemandCurve(outcomes);
+      expect(Math.abs(f.q0 - q0) / q0, `q0 ${String(q0)}`).toBeLessThan(0.1);
+      expect(Math.abs(f.q1 - q1) / q1, `q1 ${String(q1)}`).toBeLessThan(0.1);
+      expect(f.at_bound).toEqual({ q0: false, q1: false });
+      expect(f.n).toBe(3600);
+      expect(f.log_likelihood ?? -1).toBeGreaterThanOrEqual((f.log_likelihood_cold ?? 0) - 1e-9);
+      // the curve fits at least as well as the best multiplier on the cold curve
+      const s = fitDemandScale(outcomes);
+      expect(f.log_likelihood ?? -1).toBeGreaterThanOrEqual((s.log_likelihood ?? 0) - 1e-6);
+    }
+  });
+
+  it("demand that does not rise with the rate: the slope sits on its lower bound, said; no usable outcome → the cold start", () => {
+    const flat: ClearsOutcome[] = [];
+    for (const r of [0, 1, 2, 4])
+      for (let i = 0; i < 300; i++) flat.push({ r, rivals: 9, cleared: i >= 15 });
+    const f = fitDemandCurve(flat);
+    expect(f.at_bound.q1).toBe(true);
+    expect(f.at_bound.q0).toBe(false);
+    // 5 % claimed by nine rivals → a per-rival demand near 1 − 0.95^(1/9)
+    expect(Math.abs(f.q0 - (1 - 0.95 ** (1 / 9)))).toBeLessThan(0.001);
+    const none = fitDemandCurve([
+      { r: Number.NaN, rivals: 9, cleared: true },
+      { r: 1, rivals: 0, cleared: true },
+      { r: 1, rivals: 3, cleared: "no" as unknown as boolean },
+    ]);
+    expect(none).toEqual({
+      q0: WAIVER_DP.q0,
+      q1: WAIVER_DP.q1,
+      n: 0,
+      rejected: 3,
+      log_likelihood: null,
+      log_likelihood_cold: null,
+      at_bound: { q0: false, q1: false },
+    });
+  });
+
+  it("is deterministic and keeps its parameters inside the bounds", () => {
+    const outcomes = planted(0.01, 0.05);
+    expect(fitDemandCurve(outcomes)).toEqual(fitDemandCurve(outcomes));
+    const all = fitDemandCurve(
+      Array.from({ length: 40 }, (_, i) => ({ r: i % 5, rivals: 9, cleared: false })),
+    );
+    expect(all.q0).toBeLessThanOrEqual(WAIVER_FIT.demandCurve.q0.max);
+    expect(all.q1).toBeLessThanOrEqual(WAIVER_FIT.demandCurve.q1.max);
+    expect(all.q0).toBeGreaterThanOrEqual(WAIVER_FIT.demandCurve.q0.min);
   });
 });

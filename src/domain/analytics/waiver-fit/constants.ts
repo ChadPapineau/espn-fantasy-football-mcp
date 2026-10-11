@@ -36,4 +36,14 @@ export const WAIVER_FIT = Object.freeze({
   tolerance: 0.1,
   /** The demand-scale search bounds (a multiplier on the cold-start q(r)). */
   demandScale: Object.freeze({ min: 0.05, max: 5 }),
+  /**
+   * The demand-curve search bounds (B2b fix: research 05 §1.3's intercept and slope fitted
+   * separately, q(r) = min(qCap, q0 + q1·r) — a pure multiplier cannot fit both the near-zero demand
+   * for a dropped bench player and the demand for a real target). q0 per rival per run; q1 per
+   * point-per-week of surplus. Both bounds hold the cold start (0.05, 0.08) well inside.
+   */
+  demandCurve: Object.freeze({
+    q0: Object.freeze({ min: 0.0005, max: 0.5 }),
+    q1: Object.freeze({ min: 0.0005, max: 1 }),
+  }),
 });

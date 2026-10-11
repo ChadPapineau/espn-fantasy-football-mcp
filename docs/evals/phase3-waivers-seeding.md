@@ -9,9 +9,9 @@ never appear: league slots, seasons, team ids and codes only.
 | item | verdict | numbers |
 |---|---|---|
 | C4 — `playoffSeed` reproduced exactly under reading (a) on ≥ 2 finished seasons; any other season written up | **met (hard)** | 9 of 9 recorded league-seasons (three probe leagues × 2023–2025), every team's seed, not only the playoff field; no season needed a written-up exception |
-| C5 — fitted Π compared with the cold-start table | **done** | the replay league's own feed averages 2.14 (2024) and 2.96 (2025) points per week against the cold start's 1.96 (9–51 % richer); fitted on both seasons, Π ×1.14 (k = 1) to ×1.32 (k = 10) at W = 9 |
-| C5 — the rule's surplus per successful claim ≥ +10 % over "claim the top trending player", ≥ 2 replayed seasons | **not met (soft)** | fitted rule vs trending: 2024 −32.6 %, 2025 −1.8 % |
-| C5 — P(clears_to_FA) within ±10 points where the league's history allows | **not met (soft)** | league-b's real drops (n = 182, 178): the cold-start curve under-predicts clears by 47–49 points; a demand scale fitted on the other season brings calibration-in-the-large within ±2.1 points, but 2024's worst decile stays 13.2 points off |
+| C5 — fitted Π compared with the cold-start table | **done** | on the v2-opportunity feed the replay league's own wire averages 3.43 (2024) and 1.55 (2025) points per week against the cold start's 1.96; fitted on both seasons, Π ×0.96 (k = 1) to ×1.23 (k = 10) at W = 9 (on the trailing-4 feed ×1.14 to ×1.32) |
+| C5 — the rule's surplus per successful claim ≥ +10 % over "claim the top trending player", ≥ 2 replayed seasons | **met (soft)** on the Phase 3 forecast — B2b fix | with v2-opportunity's week-ahead forecast as the rule's `s`: fitted rule vs trending 2024 **+18.2 %**, 2025 **+66.7 %**; on the A9a harness's trailing-4 forecast (the number the gate saw) 2024 −32.6 %, 2025 −1.8 % |
+| C5 — P(clears_to_FA) within ±10 points where the league's history allows | **met (soft) with the league-fitted curve; not met for the cold start** — ruling requested on research 05 §1.3 | league-b's real drops (n = 182, 178): the cold-start curve under-predicts clears by 47–49 points; the demand curve fitted on the other season (intercept and slope separately — B2b fix) is within ±2.4 points (one judged decile each — the predictions concentrate in 0.9–1.0 — and the slope sits on its lower bound); the multiplier-only fit stays 13.2 points off in 2024. E5 still serves the cold start until the owner's league's claim feed exists |
 
 ## C4 — seeding reproduction
 
@@ -99,26 +99,29 @@ is lower — never set to the bound itself when the bound is higher. The band st
 surplus, so the band is exactly 0.5 Π and 1.5 Π (a property test holds it).
 
 <!-- premium:start -->
-The replay league's own feed — one run per claim week (weeks 2–14), the best available player's forecast surplus as a per-week rate — and the distribution fitted from it (the cold-start table as a Dirichlet prior worth 8 runs):
+The replay league's own feed — one run per claim week (weeks 2–14), the best available player's forecast surplus as a per-week rate — under each forecaster, and the distribution fitted from it (the cold-start table as a Dirichlet prior worth 8 runs):
 
-| feed | runs | observed mean r | fitted mean r | cold-start mean r | p at r = 0 / 1 / 2.5 / 4.5 / 7 / 10 / 14 / 20 | clamped above 20 |
-|---|---:|---:|---:|---:|---|---:|
-| 2024 | 13 | 2.14 | 2.07 | 1.96 | 0.31 / 0.16 / 0.28 / 0.22 / 0.02 / 0.01 / 0.00 / 0.00 | 0 |
-| 2025 | 13 | 2.96 | 2.58 | 1.96 | 0.29 / 0.18 / 0.23 / 0.13 / 0.17 / 0.01 / 0.00 / 0.00 | 0 |
-| 2024 + 2025 | 26 | 2.55 | 2.41 | 1.96 | 0.30 / 0.14 / 0.27 / 0.18 / 0.10 / 0.00 / 0.00 / 0.00 | 0 |
+| forecast | feed | runs | observed mean r | fitted mean r | cold-start mean r | p at r = 0 / 1 / 2.5 / 4.5 / 7 / 10 / 14 / 20 | clamped above 20 |
+|---|---|---:|---:|---:|---:|---|---:|
+| v2-opportunity | 2024 | 13 | 3.43 | 2.87 | 1.96 | 0.12 / 0.20 / 0.25 / 0.39 / 0.03 / 0.01 / 0.00 / 0.00 | 0 |
+| v2-opportunity | 2025 | 13 | 1.55 | 1.71 | 1.96 | 0.20 / 0.40 / 0.29 / 0.08 / 0.02 / 0.01 / 0.00 / 0.00 | 0 |
+| v2-opportunity | 2024 + 2025 | 26 | 2.49 | 2.37 | 1.96 | 0.13 / 0.30 / 0.29 / 0.26 / 0.02 / 0.00 / 0.00 / 0.00 | 0 |
+| trailing-4 | 2024 | 13 | 2.14 | 2.07 | 1.96 | 0.31 / 0.16 / 0.28 / 0.22 / 0.02 / 0.01 / 0.00 / 0.00 | 0 |
+| trailing-4 | 2025 | 13 | 2.96 | 2.58 | 1.96 | 0.29 / 0.18 / 0.23 / 0.13 / 0.17 / 0.01 / 0.00 / 0.00 | 0 |
+| trailing-4 | 2024 + 2025 | 26 | 2.55 | 2.41 | 1.96 | 0.30 / 0.14 / 0.27 / 0.18 / 0.10 / 0.00 / 0.00 / 0.00 | 0 |
 
-Π(k, W) in ROS points, fitted on the pooled feed (drift c = 0.25, demand the cold-start curve) against the cold-start table (research 05 §1.2), `fitted / cold`:
+Π(k, W) in ROS points, fitted on the pooled v2-opportunity feed (drift c = 0.25, demand the cold-start curve) against the cold-start table (research 05 §1.2), `fitted / cold`:
 
 | k \ W | 1 | 3 | 5 | 7 | 9 | 11 | 13 | 15 |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 2.3 / 1.8 | 8.5 / 6.8 | 15.1 / 12.8 | 21.6 / 18.9 | 28.5 / 25.0 | 35.5 / 31.1 | 42.7 / 37.5 | 49.9 / 44.0 |
-| 2 | 1.6 / 1.2 | 6.4 / 4.9 | 11.9 / 9.5 | 17.4 / 14.4 | 22.8 / 19.5 | 28.4 / 24.5 | 34.0 / 29.5 | 39.6 / 34.5 |
-| 3 | 1.1 / 0.9 | 4.9 / 3.7 | 9.5 / 7.2 | 14.1 / 11.2 | 18.6 / 15.4 | 23.2 / 19.6 | 27.8 / 23.7 | 32.4 / 27.8 |
-| 5 | 0.5 / 0.5 | 2.9 / 2.2 | 6.0 / 4.4 | 9.2 / 6.9 | 12.4 / 9.7 | 15.6 / 12.5 | 18.8 / 15.4 | 22.0 / 18.2 |
-| 7 | 0.3 / 0.3 | 1.7 / 1.4 | 3.7 / 2.8 | 5.8 / 4.3 | 8.0 / 6.1 | 10.1 / 7.9 | 12.3 / 9.7 | 14.4 / 11.6 |
-| 10 | 0.1 / 0.1 | 0.6 / 0.5 | 1.5 / 1.2 | 2.4 / 1.8 | 3.4 / 2.6 | 4.3 / 3.4 | 5.3 / 4.1 | 6.2 / 4.9 |
+| 1 | 2.2 / 1.8 | 7.4 / 6.8 | 13.0 / 12.8 | 18.5 / 18.9 | 23.9 / 25.0 | 29.3 / 31.1 | 34.7 / 37.5 | 40.1 / 44.0 |
+| 2 | 1.6 / 1.2 | 5.8 / 4.9 | 10.6 / 9.5 | 15.4 / 14.4 | 20.1 / 19.5 | 24.8 / 24.5 | 29.4 / 29.5 | 34.1 / 34.5 |
+| 3 | 1.2 / 0.9 | 4.6 / 3.7 | 8.6 / 7.2 | 12.8 / 11.2 | 16.9 / 15.4 | 20.9 / 19.6 | 24.9 / 23.7 | 28.9 / 27.8 |
+| 5 | 0.6 / 0.5 | 2.9 / 2.2 | 5.6 / 4.4 | 8.5 / 6.9 | 11.5 / 9.7 | 14.4 / 12.5 | 17.3 / 15.4 | 20.2 / 18.2 |
+| 7 | 0.3 / 0.3 | 1.8 / 1.4 | 3.5 / 2.8 | 5.4 / 4.3 | 7.4 / 6.1 | 9.4 / 7.9 | 11.3 / 9.7 | 13.3 / 11.6 |
+| 10 | 0.1 / 0.1 | 0.7 / 0.5 | 1.5 / 1.2 | 2.3 / 1.8 | 3.2 / 2.6 | 4.0 / 3.4 | 4.9 / 4.1 | 5.7 / 4.9 |
 
-Value of the order at the season's start, V(k, 16): fitted 108.5 / 55.0 for k = 1 / 10 against the cold start's 95.8 / 48.5. How far the cold-start table was off (research 05 §1.6 eval 3): Π(1, 9) ×1.14, Π(5, 9) ×1.28, Π(10, 9) ×1.32. Season by season: Π(2, 13) fitted on 2024 = 28.8, on 2025 = 38.6, cold 29.5.
+Value of the order at the season's start, V(k, 16): fitted 100.5 / 57.7 for k = 1 / 10 against the cold start's 95.8 / 48.5. How far the cold-start table was off (research 05 §1.6 eval 3): Π(1, 9) ×0.96, Π(5, 9) ×1.18, Π(10, 9) ×1.23. Season by season: Π(2, 13) fitted on 2024 = 35.2, on 2025 = 21.8, cold 29.5. On the trailing-4 feed instead: Π(1, 9) ×1.14, Π(10, 9) ×1.32; Π(2, 13) fitted on 2024 = 28.8, on 2025 = 38.6.
 
 Drift evidence from the probe leagues' recorded seasons — the share of team-weeks with an acquisition (`matchupAcquisitionTotals`, regular season). It bounds c from above only (free-agent adds count there too), so c stays the cold-start 0.25 unless the bound is lower:
 
@@ -147,35 +150,54 @@ which a live league could not have). `trending_strike` is a diagnostic beyond re
 trending pick, claimed only when its forecast clears the fitted Π.
 
 <!-- waivers:start -->
-Every start position 1–10 × 200 seeded paths per season, common random numbers across policies; `rule_fitted` uses the premium fitted on the other season's feed (held out), `rule_cold` the cold-start table:
+Every start position 1–10 × 200 seeded paths per season, common random numbers across policies within a forecaster; `rule_fitted` uses the premium fitted on the other season's feed of the same forecaster (held out), `rule_cold` the cold-start table. The forecast is the rule's `s` (and the rivals' demand reads it); `trending` and `hindsight` choose without it. v2-opportunity forecast 11686 candidate-weeks (913 from the next game after a bye); 1158 candidate-weeks the C1 excerpt does not cover kept the trailing-4 forecast:
 
-| season | policy | claims / season | successful / season | surplus per successful claim | surplus / season |
-|---:|---|---:|---:|---:|---:|
-| 2024 | rule_fitted | 22.4 | 5.2 | 15.3 | 80.3 |
-| 2024 | rule_cold | 23.5 | 5.8 | 15.6 | 89.6 |
-| 2024 | trending | 13.0 | 6.8 | 22.7 | 154.5 |
-| 2024 | trending_strike | 3.0 | 1.4 | 18.8 | 25.4 |
-| 2024 | hindsight | 13.0 | 8.3 | 68.5 | 569.2 |
-| 2025 | rule_fitted | 23.4 | 5.6 | 16.4 | 92.9 |
-| 2025 | rule_cold | 23.7 | 5.8 | 16.5 | 95.2 |
-| 2025 | trending | 13.0 | 7.9 | 16.8 | 132.5 |
-| 2025 | trending_strike | 2.0 | 0.9 | 23.5 | 21.3 |
-| 2025 | hindsight | 13.0 | 8.7 | 60.0 | 521.2 |
+| forecast | season | policy | claims / season | successful / season | surplus per successful claim | surplus / season |
+|---|---:|---|---:|---:|---:|---:|
+| v2-opportunity | 2024 | rule_fitted | 24.2 | 8.4 | 23.7 | 198.6 |
+| v2-opportunity | 2024 | rule_cold | 22.7 | 7.8 | 23.3 | 181.5 |
+| v2-opportunity | 2024 | trending | 13.0 | 8.7 | 20.1 | 174.8 |
+| v2-opportunity | 2024 | trending_strike | 0.2 | 0.1 | 45.1 | 4.3 |
+| v2-opportunity | 2024 | hindsight | 13.0 | 8.2 | 68.6 | 559.3 |
+| v2-opportunity | 2025 | rule_fitted | 14.1 | 4.8 | 27.1 | 131.0 |
+| v2-opportunity | 2025 | rule_cold | 19.1 | 6.6 | 30.3 | 199.3 |
+| v2-opportunity | 2025 | trending | 13.0 | 8.6 | 16.2 | 140.0 |
+| v2-opportunity | 2025 | trending_strike | 0.0 | 0.0 | 0.0 | 0.0 |
+| v2-opportunity | 2025 | hindsight | 13.0 | 8.1 | 57.9 | 468.7 |
+| trailing-4 | 2024 | rule_fitted | 22.4 | 5.2 | 15.3 | 80.3 |
+| trailing-4 | 2024 | rule_cold | 23.5 | 5.8 | 15.6 | 89.6 |
+| trailing-4 | 2024 | trending | 13.0 | 6.8 | 22.7 | 154.5 |
+| trailing-4 | 2024 | trending_strike | 3.0 | 1.4 | 18.8 | 25.4 |
+| trailing-4 | 2024 | hindsight | 13.0 | 8.3 | 68.5 | 569.2 |
+| trailing-4 | 2025 | rule_fitted | 23.4 | 5.6 | 16.4 | 92.9 |
+| trailing-4 | 2025 | rule_cold | 23.7 | 5.8 | 16.5 | 95.2 |
+| trailing-4 | 2025 | trending | 13.0 | 7.9 | 16.8 | 132.5 |
+| trailing-4 | 2025 | trending_strike | 2.0 | 0.9 | 23.5 | 21.3 |
+| trailing-4 | 2025 | hindsight | 13.0 | 8.7 | 60.0 | 521.2 |
 
-**C5, surplus per successful claim, fitted rule vs trending (≥ +10 % in both seasons):** 2024 −32.6 %; 2025 −1.8 % → **not met** (soft).
+**C5, surplus per successful claim, fitted rule vs trending (≥ +10 % in both seasons), on the Phase 3 forecast (v2-opportunity):** 2024 +18.2 %; 2025 +66.7 % → **met** (soft). On the A9a harness's trailing-4 forecast: 2024 −32.6 %; 2025 −1.8 % → not met.
 <!-- waivers:end -->
 
-**Reading the replay.** The rule loses to trending per successful claim in 2024 (−32.6 %) and ties
-it in 2025 (−1.8 %); it also realises less surplus per season in both. The premium is not the
-bottleneck: replacing the cold-start Π with the fitted one moves the rule's per-claim surplus by
-under 2 % (15.6 → 15.3, 16.5 → 16.4) — the strike decides *whether* to claim, and the forecast that
-ranks *whom* is the A9a harness's trailing-4 points per game, which reacts to a role change a
-week or more after "most points last week" does. C5's comparison therefore needs the Phase 3
-opportunity forecast (`v2-opportunity`, the projection role's work) as the replay's `s` — the A9a
-harness's `forecastSurplus` swapped for it; the fit, the premium and this test need no change. The
-diagnostic `trending_strike` is mixed (2024 18.8 vs 22.7, 2025 23.5 vs 16.8 per claim, on 0.9–1.4
-successful claims a season), so it does not show the strike adding value to the trending pick
-either.
+**Reading the replay.** The bottleneck the first build named was the forecast, not the premium: on
+the A9a harness's trailing-4 points per game the rule lost to trending per successful claim in 2024
+(−32.6 %) and tied it in 2025 (−1.8 %), and replacing the cold-start Π with the fitted one moved the
+rule's per-claim surplus by under 2 % — the strike decides *whether* to claim, the forecast decides
+*whom*, and a trailing-4 rate reacts to a role change a week or more after "most points last week"
+does. The B2b fix swaps in the Phase 3 opportunity forecast (`tests/backtest/helpers/v2-forecast.ts`:
+`v2-opportunity`'s expected points if active for the candidate's next game — EWM shares with change
+points, shrinkage per rate, location-based TDs, the market line, the regressed matchup — read as of
+the claim week from the committed C1 excerpt, over replacement, held with the same P(role holds)
+prior); the fit, the premium, the strike and the harness are unchanged. On it the fitted rule beats
+trending per successful claim by +18.2 % (2024) and +66.7 % (2025), and realises more surplus per
+season in 2024 (198.6 vs 174.8) though not in 2025 (131.0 vs 140.0: the 2024-fitted premium is
+richer than 2025's wire, so the rule claims less — 4.8 successful claims against trending's 8.6; the
+cold-start table, which claims more, realised 199.3). The forecast also feeds the rivals' demand in
+the harness, so trending's own numbers move with it (common random numbers hold within a
+forecaster). Caveats: the replay league has no ESPN projections for free agents, so v2's own mean
+stands in for E1's (which anchors on ESPN's at `weight_espn` 1.0); 1,158 candidate-weeks the C1
+excerpt does not cover keep the trailing-4 forecast (counted in the table's lead-in). The diagnostic
+`trending_strike` almost never fires on v2's forecast (0.2 and 0 claims a season): the trending
+pick's v2 surplus rarely clears the fitted premium.
 
 **The calibration** (research 05 §1.6 eval 2 and "working"). The probe leagues' finished seasons
 carry no `mTransactions2` (keyless), so their claim feed is not visible. What is visible is every
@@ -194,17 +216,30 @@ P(clears_to_FA) on league-b's real drops (2024, 2025): a player dropped between 
 | 2024 | 182 | 21 | 96.2 | 46.9 | +49.2 | 93.8 | **no** | 0.07 | +2.1 | 13.2 | **no** | 80.8 |
 | 2025 | 178 | 10 | 93.8 | 47.2 | +46.6 | 85.6 | **no** | 0.05 (at the bound) | −1.8 | 2.2 | yes | 82.0 |
 
-**C5, P(clears_to_FA) within ±10 points (n ≥ 30 per season, so not soft by n):** cold-start demand **not met**; with the demand scale fitted on the other season **not met** (soft).
+The demand curve fitted on the other season (intercept q0 per rival and slope q1, maximum likelihood — the B2b fix; the cold start is q0 0.05, q1 0.08):
+
+| season | q0 fitted on the other season | q1 fitted on the other season | in the large (curve) | worst judged decile (curve) | judged deciles | within ±10 (curve) |
+|---:|---:|---:|---:|---:|---:|---|
+| 2024 | 0.0068 | 0.0005 (at the bound) | +2.4 | 2.4 | 1 | yes |
+| 2025 | 0.0043 | 0.0005 (at the bound) | −2.1 | 2.1 | 1 | yes |
+
+**C5, P(clears_to_FA) within ±10 points (n ≥ 30 per season, so not soft by n):** cold-start demand **not met**; with the demand scale fitted on the other season **not met**; with the demand curve fitted on the other season **met** (soft).
 <!-- clears:end -->
 
 **Reading the calibration.** E5's cold-start demand gives every rival a 5 % chance of claiming even
 a worthless player (q(0) = 0.05), so with nine rivals it predicts a dropped bench player clears only
-63 % of the time; in `league-b` 94–96 % cleared the next week. The demand multiplier the other
-season's drops want is at or near the search's lower bound (λ ≈ 0.05–0.07): a pure multiplier on
-q0 + q1·r cannot fit both the near-zero demand for dropped players and the demand for real targets,
-so calibration-in-the-large comes right (within ±2.1 points) while one season's worst decile stays
-13 points off. λ is reported, **not** applied to the premium: it comes from dropped players in a
-FAAB league, not from a priority league's claims.
+63 % of the time; in `league-b` 94–96 % cleared the next week. A pure multiplier on q0 + q1·r
+(λ ≈ 0.05–0.07, at or near its bound) cannot fit both the near-zero demand for dropped players and
+the demand for real targets, so calibration-in-the-large came right while 2024's worst decile stayed
+13.2 points off. The B2b fix fits the intercept and the slope separately (`fitDemandCurve`, maximum
+likelihood, held out on the other season): q0 ≈ 0.004–0.007 per rival — a tenth of research 05
+§1.3's 0.05 — and a slope on its lower bound (in this FAAB league a dropped player's demand does not
+rise with his projection; 7 and 11 of the ≈ 180 drops were claimed), within ±2.4 points in both
+seasons. Read with care: the predictions then concentrate in 0.9–1.0, so one decile is judged per
+season, and the evidence is dropped players in a FAAB league, not a priority league's claims. The
+curve is reported, **not** applied to E5: E5 keeps the cold-start curve (said in its output) until
+the owner's league's own claim feed exists; whether research 05 §1.3's intercept should change is a
+ruling (the numbers are here).
 
 ## Decisions (the plan was silent)
 
@@ -218,6 +253,12 @@ FAAB league, not from a priority league's claims.
   coin flip explains a failure only for the reading it hit and only when ESPN's seeds follow that
   chain everywhere above it.
 - The replay's held-out protocol fits each season's premium on the other season.
+- C5's verdict is read on the Phase 3 forecast (v2-opportunity's week-ahead expected points over
+  replacement, held with the P(role holds) prior); the trailing-4 forecast is reported beside it. A
+  candidate the C1 excerpt does not hold keeps the trailing-4 forecast; a bye projects his next game
+  from the same as-of.
+- The demand-curve fit searches q0 in [0.0005, 0.5] and q1 in [0.0005, 1] (the cold start well
+  inside) and flags a parameter on its bound.
 - The clears calibration uses the next-week re-add as "claimed"; the two-week window is reported.
 
 ## Needs time or the live league

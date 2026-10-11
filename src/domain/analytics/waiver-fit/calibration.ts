@@ -4,7 +4,11 @@
 // E5's clears probability is (1 − q(r))^m — m rivals able to claim, q the demand curve
 // (waiverDp.ts `demandOf`, waivers.ts); the calibration compares those predictions with realised
 // outcomes (did the player clear unclaimed), and the scale fit finds the multiplier λ on q that
-// maximises the outcomes' likelihood (golden-section search on log λ — deterministic). Pure. New here.
+// maximises the outcomes' likelihood (golden-section search on log λ — deterministic). The B2b fix
+// adds the curve fit: intercept q0 and slope q1 by maximum likelihood (coordinate golden-section on
+// their logs — deterministic), because one multiplier cannot move the intercept without the slope.
+// Pure. New here.
+import { WAIVER_DP } from "../constants.js";
 import { round } from "../math.js";
 import { demandOf } from "../waiverDp.js";
 import { WAIVER_FIT } from "./constants.js";
@@ -204,5 +208,116 @@ export function fitDemandScale(outcomes: readonly ClearsOutcome[]): DemandScaleF
     log_likelihood: round(ll(scale), 5),
     log_likelihood_cold: round(ll(1), 5),
     at_bound: atBound,
+  });
+}
+
+/** The demand curve at a per-week rate r with its own intercept and slope (capped at WAIVER_DP.qCap). */
+export function demandCurveOf(r: number, q0: number, q1: number): number {
+  const a = Number.isFinite(q0) && q0 > 0 ? q0 : 0;
+  const b = Number.isFinite(q1) && q1 > 0 ? q1 : 0;
+  const x = Number.isFinite(r) && r > 0 ? r : 0;
+  return Math.min(WAIVER_DP.qCap, a + b * x);
+}
+
+/** P(clears_to_FA) for a per-week rate r and m able rivals under the curve (q0, q1). */
+export function clearProbabilityCurve(r: number, rivals: number, q0: number, q1: number): number {
+  const m = Number.isFinite(rivals) && rivals > 0 ? Math.floor(rivals) : 0;
+  return (1 - demandCurveOf(r, q0, q1)) ** m;
+}
+
+/** The fitted demand curve. */
+export interface DemandCurveFit {
+  readonly q0: number;
+  readonly q1: number;
+  readonly n: number;
+  readonly rejected: number;
+  /** Mean log-likelihood at the fit and at the cold start (q0 0.05, q1 0.08). */
+  readonly log_likelihood: number | null;
+  readonly log_likelihood_cold: number | null;
+  /** Which parameter's optimum sits on a search bound (the data want a value outside it). */
+  readonly at_bound: { readonly q0: boolean; readonly q1: boolean };
+}
+
+/**
+ * Maximum-likelihood intercept and slope of the demand curve for the observed clears (n ≥ 1; else
+ * the cold start): alternating golden-section searches on log q0 and log q1 inside
+ * WAIVER_FIT.demandCurve, from the cold start, until neither moves. Deterministic.
+ */
+export function fitDemandCurve(outcomes: readonly ClearsOutcome[]): DemandCurveFit {
+  const ok = outcomes.filter(
+    (o) =>
+      Number.isFinite(o.r) &&
+      Number.isFinite(o.rivals) &&
+      o.rivals >= 1 &&
+      typeof o.cleared === "boolean",
+  );
+  const rejected = outcomes.length - ok.length;
+  const cold: { readonly q0: number; readonly q1: number } = { q0: WAIVER_DP.q0, q1: WAIVER_DP.q1 };
+  if (ok.length === 0)
+    return Object.freeze({
+      ...cold,
+      n: 0,
+      rejected,
+      log_likelihood: null,
+      log_likelihood_cold: null,
+      at_bound: Object.freeze({ q0: false, q1: false }),
+    });
+  const ll = (q0: number, q1: number): number => {
+    let s = 0;
+    for (const o of ok) {
+      const p = clearProbabilityCurve(o.r, o.rivals, q0, q1);
+      s += Math.log(Math.min(1 - EPS, Math.max(EPS, o.cleared ? p : 1 - p)));
+    }
+    return s / ok.length;
+  };
+  const B = WAIVER_FIT.demandCurve;
+  /** Golden-section maximum of f on [log min, log max]; returns the argmax (not its log). */
+  const golden = (f: (x: number) => number, min: number, max: number): number => {
+    let a = Math.log(min);
+    let b = Math.log(max);
+    const g = (Math.sqrt(5) - 1) / 2;
+    let c = b - g * (b - a);
+    let d = a + g * (b - a);
+    let fc = f(Math.exp(c));
+    let fd = f(Math.exp(d));
+    for (let i = 0; i < 60; i++) {
+      if (fc >= fd) {
+        b = d;
+        d = c;
+        fd = fc;
+        c = b - g * (b - a);
+        fc = f(Math.exp(c));
+      } else {
+        a = c;
+        c = d;
+        fc = fd;
+        d = a + g * (b - a);
+        fd = f(Math.exp(d));
+      }
+    }
+    return Math.exp((a + b) / 2);
+  };
+  let q0 = cold.q0;
+  let q1 = cold.q1;
+  for (let pass = 0; pass < 40; pass++) {
+    const n0 = golden((x) => ll(x, q1), B.q0.min, B.q0.max);
+    const n1 = golden((x) => ll(n0, x), B.q1.min, B.q1.max);
+    const moved = Math.abs(Math.log(n0 / q0)) + Math.abs(Math.log(n1 / q1));
+    q0 = n0;
+    q1 = n1;
+    if (moved < 1e-6) break;
+  }
+  const near = (x: number, lo: number, hi: number): boolean => x <= lo * 1.001 || x >= hi * 0.999;
+  return Object.freeze({
+    q0: round(q0, 5),
+    q1: round(q1, 5),
+    n: ok.length,
+    rejected,
+    log_likelihood: round(ll(q0, q1), 5),
+    log_likelihood_cold: round(ll(cold.q0, cold.q1), 5),
+    at_bound: Object.freeze({
+      q0: near(q0, B.q0.min, B.q0.max),
+      q1: near(q1, B.q1.min, B.q1.max),
+    }),
   });
 }

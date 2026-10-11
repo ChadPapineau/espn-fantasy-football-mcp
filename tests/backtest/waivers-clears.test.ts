@@ -12,14 +12,18 @@
 // dropped players are a subset of the pool; league-b is a FAAB league; a re-add the next week may be
 // a free-agent pickup after the player cleared (the two-week window is the looser reading). A team
 // whose next-week roster had an entry withheld by the scrub is skipped (the withheld entry could
-// be the "dropped" player). The held-out demand scale: fitted on one season, scored on the other.
+// be the "dropped" player). The held-out demand scale and the held-out demand curve (intercept and
+// slope fitted separately — the B2b fix): fitted on one season, scored on the other.
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   calibrateClearsToFa,
   clearProbability,
+  clearProbabilityCurve,
+  fitDemandCurve,
   fitDemandScale,
   type ClearsCalibration,
   type ClearsOutcome,
+  type DemandCurveFit,
   type DemandScaleFit,
 } from "../../src/domain/analytics/waiver-fit/index.js";
 import { newCounts, normalizeBoxScores } from "../../src/providers/espn/normalize.js";
@@ -155,6 +159,8 @@ interface SeasonRun {
   readonly coldTwo: ClearsCalibration;
   readonly scale: DemandScaleFit;
   readonly fitted: ClearsCalibration;
+  readonly curve: DemandCurveFit;
+  readonly curved: ClearsCalibration;
 }
 
 const runs = new Map<number, SeasonRun>();
@@ -165,6 +171,7 @@ beforeAll(() => {
     const other = raw.get(s === 2024 ? 2025 : 2024);
     if (own === undefined || other === undefined) throw new Error("missing season");
     const scale = fitDemandScale(other.drops);
+    const curve = fitDemandCurve(other.drops);
     runs.set(s, {
       season: s,
       drops: own.drops,
@@ -182,6 +189,13 @@ beforeAll(() => {
       fitted: calibrateClearsToFa(
         own.drops.map((d) => ({
           p: clearProbability(d.r, d.rivals, scale.scale),
+          cleared: d.cleared,
+        })),
+      ),
+      curve,
+      curved: calibrateClearsToFa(
+        own.drops.map((d) => ({
+          p: clearProbabilityCurve(d.r, d.rivals, curve.q0, curve.q1),
           cleared: d.cleared,
         })),
       ),
@@ -207,12 +221,28 @@ function clearsSection(): string {
       `| ${String(s)} | ${String(r.cold.n)} | ${String(r.skipped)} | ${pct(r.cold.base_rate)} | ${pct(r.cold.mean_p)} | ${signed(r.cold.in_the_large)} | ${pct(r.cold.max_abs_deviation)} | ${r.cold.within_tolerance === null ? "—" : r.cold.within_tolerance ? "yes" : "**no**"} | ${r.scale.scale.toFixed(2)}${r.scale.at_bound ? " (at the bound)" : ""} | ${signed(r.fitted.in_the_large)} | ${pct(r.fitted.max_abs_deviation)} | ${r.fitted.within_tolerance === null ? "—" : r.fitted.within_tolerance ? "yes" : "**no**"} | ${pct(r.coldTwo.base_rate)} |`,
     );
   }
+  lines.push(
+    "",
+    "The demand curve fitted on the other season (intercept q0 per rival and slope q1, maximum likelihood — the B2b fix; the cold start is q0 0.05, q1 0.08):",
+    "",
+    "| season | q0 fitted on the other season | q1 fitted on the other season | in the large (curve) | worst judged decile (curve) | judged deciles | within ±10 (curve) |",
+    "|---:|---:|---:|---:|---:|---:|---|",
+  );
+  for (const s of SEASONS) {
+    const r = runs.get(s);
+    if (r === undefined) continue;
+    const bound = (b: boolean): string => (b ? " (at the bound)" : "");
+    lines.push(
+      `| ${String(s)} | ${r.curve.q0.toFixed(4)}${bound(r.curve.at_bound.q0)} | ${r.curve.q1.toFixed(4)}${bound(r.curve.at_bound.q1)} | ${signed(r.curved.in_the_large)} | ${pct(r.curved.max_abs_deviation)} | ${String(r.curved.bins.filter((b) => b.judged).length)} | ${r.curved.within_tolerance === null ? "—" : r.curved.within_tolerance ? "yes" : "**no**"} |`,
+    );
+  }
   const all = SEASONS.map((s) => runs.get(s));
   const coldOk = all.every((r) => r?.cold.within_tolerance === true);
   const fitOk = all.every((r) => r?.fitted.within_tolerance === true);
+  const curveOk = all.every((r) => r?.curved.within_tolerance === true);
   lines.push(
     "",
-    `**C5, P(clears_to_FA) within ±10 points (n ≥ 30 per season, so not soft by n):** cold-start demand **${coldOk ? "met" : "not met"}**; with the demand scale fitted on the other season **${fitOk ? "met" : "not met"}** (soft).`,
+    `**C5, P(clears_to_FA) within ±10 points (n ≥ 30 per season, so not soft by n):** cold-start demand **${coldOk ? "met" : "not met"}**; with the demand scale fitted on the other season **${fitOk ? "met" : "not met"}**; with the demand curve fitted on the other season **${curveOk ? "met" : "not met"}** (soft).`,
   );
   return lines.join("\n");
 }
@@ -239,6 +269,19 @@ describe("C5 — P(clears_to_FA) on league-b's recorded drops", () => {
       expect(Number.isFinite(r?.scale.scale)).toBe(true);
       expect(r?.scale.log_likelihood ?? -1).toBeGreaterThanOrEqual(
         (r?.scale.log_likelihood_cold ?? 0) - 1e-9,
+      );
+    }
+  });
+
+  it("the held-out demand curve is a likelihood optimum at least as good as the cold curve and the best multiplier on its own season", () => {
+    for (const s of SEASONS) {
+      const r = runs.get(s);
+      expect(r?.curve.n ?? 0).toBeGreaterThanOrEqual(30);
+      expect(r?.curve.log_likelihood ?? -1).toBeGreaterThanOrEqual(
+        (r?.curve.log_likelihood_cold ?? 0) - 1e-9,
+      );
+      expect(r?.curve.log_likelihood ?? -1).toBeGreaterThanOrEqual(
+        (r?.scale.log_likelihood ?? 0) - 1e-6,
       );
     }
   });

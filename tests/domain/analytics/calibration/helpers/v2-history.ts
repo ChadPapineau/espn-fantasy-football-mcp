@@ -87,10 +87,23 @@ export function espnToGsis(): ReadonlyMap<number, string> {
   return xwalkMemo;
 }
 
-const gamesMemo = new Map<string, readonly V2Game[]>();
-const playerMemo = new Map<BacktestWorld, ReadonlyMap<string, BacktestPlayer>>();
-const rowsMemo: { rows: MatchupRow[] | null } = { rows: null };
-const tableMemo = new Map<string, V2MatchupTable | null>();
+/** Per-world memos (a world is built once and never mutated). */
+interface WorldMemo {
+  readonly games: Map<string, readonly V2Game[]>;
+  players: ReadonlyMap<string, BacktestPlayer> | null;
+  rows: MatchupRow[] | null;
+  readonly tables: Map<string, V2MatchupTable | null>;
+  readonly teamGames: Map<string, V2TeamGame[]>;
+}
+const memos = new WeakMap<BacktestWorld, WorldMemo>();
+function memoOf(world: BacktestWorld): WorldMemo {
+  let m = memos.get(world);
+  if (m === undefined) {
+    m = { games: new Map(), players: null, rows: null, tables: new Map(), teamGames: new Map() };
+    memos.set(world, m);
+  }
+  return m;
+}
 
 /** A player's games as the store hands them to v2 for (season, week) (see the header). */
 export function storeGames(
@@ -99,12 +112,9 @@ export function storeGames(
   season: number,
   week: number,
 ): V2Game[] {
-  let byId = playerMemo.get(world);
-  if (byId === undefined) {
-    byId = new Map(world.players.map((x) => [x.gsis_id, x]));
-    playerMemo.set(world, byId);
-  }
-  const p = byId.get(gsis);
+  const memo = memoOf(world);
+  memo.players ??= new Map(world.players.map((x) => [x.gsis_id, x]));
+  const p = memo.players.get(gsis);
   if (p === undefined) return [];
   const out: V2Game[] = [];
   for (const g of p.games) {
@@ -148,14 +158,33 @@ export function storeGames(
   return out;
 }
 
-function memoGames(world: BacktestWorld, gsis: string, season: number, week: number): V2Game[] {
+/** storeGames, memoised per world (the same player-week is asked for by several replays). */
+export function memoGames(
+  world: BacktestWorld,
+  gsis: string,
+  season: number,
+  week: number,
+): V2Game[] {
+  const memo = memoOf(world);
   const key = `${gsis}|${String(season)}|${String(week)}`;
-  let g = gamesMemo.get(key);
+  let g = memo.games.get(key);
   if (g === undefined) {
     g = storeGames(world, gsis, season, week);
-    gamesMemo.set(key, g);
+    memo.games.set(key, g);
   }
   return [...g];
+}
+
+/** storeTeamGames, memoised per world. */
+export function memoTeamGames(world: BacktestWorld, season: number, week: number): V2TeamGame[] {
+  const memo = memoOf(world);
+  const key = `${String(season)}|${String(week)}`;
+  let t = memo.teamGames.get(key);
+  if (t === undefined) {
+    t = storeTeamGames(world, season, week);
+    memo.teamGames.set(key, t);
+  }
+  return t;
 }
 
 /** The team-games the store hands v2 for (season, week): no game of the target week or later. */
@@ -170,13 +199,18 @@ export function storeTeamGames(world: BacktestWorld, season: number, week: numbe
 }
 
 /** The season's regressed matchup table before `week` (null in week 1, as matchupTableFor). */
-function matchupFor(world: BacktestWorld, season: number, week: number): V2MatchupTable | null {
+export function matchupFor(
+  world: BacktestWorld,
+  season: number,
+  week: number,
+): V2MatchupTable | null {
   if (week <= 1) return null;
+  const memo = memoOf(world);
   const key = `${String(season)}|${String(week)}`;
-  if (tableMemo.has(key)) return tableMemo.get(key) ?? null;
-  rowsMemo.rows ??= matchupRows(world);
-  const table = buildMatchupTable(rowsMemo.rows, season, week);
-  tableMemo.set(key, table);
+  if (memo.tables.has(key)) return memo.tables.get(key) ?? null;
+  memo.rows ??= matchupRows(world);
+  const table = buildMatchupTable(memo.rows, season, week);
+  memo.tables.set(key, table);
   return table;
 }
 
@@ -207,7 +241,7 @@ export async function v2WeekOverlay(
   }
   const dists = new Map<number, Dist>();
   if (eligible.length === 0) return { dists, skipped };
-  const teamGames = storeTeamGames(world, s.season, week);
+  const teamGames = memoTeamGames(world, s.season, week);
   const markets: Record<string, V2Market> = {};
   const opponents: Record<string, string | null> = {};
   const weather: Record<string, V2Weather> = {};

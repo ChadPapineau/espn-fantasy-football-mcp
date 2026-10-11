@@ -186,6 +186,13 @@ export function forecastSurplus(s: Season, id: string, t: number): number {
   return v;
 }
 
+/**
+ * A forecaster of the rule's surplus `s` for player `id` at claim week `t` (the default is the A9a
+ * harness's trailing-4 `forecastSurplus`; plan 10 C5's Phase 3 replay passes the v2-opportunity
+ * forecast — tests/backtest/helpers/v2-forecast.ts).
+ */
+export type SurplusForecaster = (s: Season, id: string, t: number) => number;
+
 /** One available player at a claim week. */
 export interface Candidate {
   readonly id: string;
@@ -198,14 +205,18 @@ export interface Candidate {
 }
 
 /** The available players at week t (not rostered by the rank rule), every quantity precomputed. */
-export function candidatesAt(s: Season, t: number): Candidate[] {
+export function candidatesAt(
+  s: Season,
+  t: number,
+  forecast: SurplusForecaster = forecastSurplus,
+): Candidate[] {
   const rostered = rosteredAt(s, t);
   const out: Candidate[] = [];
   for (const id of s.points.keys()) {
     if (rostered.has(id) || !s.position.has(id)) continue;
     out.push({
       id,
-      f: forecastSurplus(s, id, t),
+      f: forecast(s, id, t),
       h: hindsightSurplus(s, id, t),
       last: ptsOf(s, id, t - 1) ?? 0,
     });
@@ -289,8 +300,8 @@ export interface Pool {
 }
 
 /** The pool of claim week t. */
-export function poolAt(s: Season, t: number): Pool {
-  const c = candidatesAt(s, t);
+export function poolAt(s: Season, t: number, forecast: SurplusForecaster = forecastSurplus): Pool {
+  const c = candidatesAt(s, t, forecast);
   return {
     byForecast: [...c].sort((a, b) => b.f - a.f || a.id.localeCompare(b.id)),
     byLast: [...c].sort((a, b) => b.last - a.last || b.f - a.f || a.id.localeCompare(b.id)),
@@ -299,8 +310,11 @@ export function poolAt(s: Season, t: number): Pool {
 }
 
 /** Every claim week's pool of one season. */
-export function poolsFor(s: Season): Map<number, Pool> {
-  return new Map(REPLAY.claimWeeks.map((t) => [t, poolAt(s, t)] as const));
+export function poolsFor(
+  s: Season,
+  forecast: SurplusForecaster = forecastSurplus,
+): Map<number, Pool> {
+  return new Map(REPLAY.claimWeeks.map((t) => [t, poolAt(s, t, forecast)] as const));
 }
 
 /** The targets a policy submits this run, best first (each order is sorted descending). */
