@@ -92,7 +92,7 @@ export type V2Skip =
 /** The most regular-season weeks a prior season's window reads (nflverse REG weeks 1–18). */
 export const V2_PRIOR_WEEKS = 18;
 
-/** Samples per player when E1 is called in bulk (projectMany — trade, waivers, schedule). */
+/** Samples per player when E1 is called in bulk (projectMany — matchup, waivers, schedule, roster). */
 export const V2_BULK_SIMS = V2_SIMS.min;
 
 /** The ensemble weight in effect: a human-applied tuned value, else the shipped one. */
@@ -654,7 +654,7 @@ export const STORE_PER_TURN = 10;
 /**
  * Stores each projected player's FIRST-WEEK projection for the retrospective (plan 08 §5
  * `projection`; plan 10 C9: the attribution joins it to the final box score), so every call E1 backs
- * — lineup, waivers, trade, any toolset — can be attributed: a v2-served player's expected line
+ * — lineup, matchup, waivers, schedule, roster, any toolset — can be attributed: a v2-served player's expected line
  * CONDITIONAL ON PLAYING with its P(active), reported mean and tuning trace (`v2-opportunity`); any
  * other player with a trailing window its v1 trailing expectation (games played — conditional too),
  * P(active) and reported mean, no trace (`v1-ensemble`). No samples (attribution needs none).

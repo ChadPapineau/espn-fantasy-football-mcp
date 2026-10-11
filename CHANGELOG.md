@@ -108,8 +108,44 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   latency budgets and the event-loop stall bound; the SDK and Inspector smokes run under both
   toolsets.
 
+- **Phase 3 — the model wave (plan 10 §3.3; `docs/evals/phase3-summary.md`).** E1 under
+  `EFF_TOOLSET=full` serves `model_version: "v2-opportunity"`: for every QB/RB/WR/TE with a game
+  history, the first target week's distribution is the opportunity simulation (market-anchored team
+  volume, shares with change points, shrinkage per rate, location-based touchdowns from
+  ffopportunity, a regressed matchup with ESPN's rating as a comparator, outdoor weather, P(active)
+  from the designation and practice trend, the turnover model) around ESPN's mean —
+  `weight_espn` stays 1.0 because no backtest under the league's scoring showed a mixture beating
+  ESPN alone; K, D/ST and players without history keep the v1 distribution and say why. Held out on
+  2024 and 2025, v2 beats a trailing-4 baseline on CRPS (−11 %) and within-position Spearman with
+  80 % intervals that cover 77.6–79.4 %. The injury cascade reads a redistribution prior table
+  built from 145 historical starter absences (2023–2025 play-by-play). The waiver premium is re-solved from the
+  league's own priced waiver runs once a season of them is logged (`premium_basis:
+  "league_fitted"`). The seeding chain reproduces every team's `playoffSeed` on all nine recorded
+  finished seasons. The K/D-ST model's rare events score every return-TD item a league uses. E10
+  reads a per-source calibration table (the official practice report's 2023–2025 history plus the
+  news claims the retrospective scores) and shows a posterior once 200 news claims are scored. The
+  retrospective attributes each projection-backed call's error by layer (availability, opportunity,
+  efficiency, touchdowns, turnovers, anchor, scoring) and stores weekly parameter proposals.
+- **`eff tune [--apply] [--revert]` — human-only.** Shows the newest proposal set; `--apply` writes
+  `<config>/tuned-parameters.json` (0600) only when the owner types the confirmation word in an
+  interactive terminal — refused in an agent session, under launchd and off a terminal; never
+  scheduled. The server reads the file once at its next start; `eff uninstall` removes it.
+- **Store migration 002.** `parameter_proposal`, `waiver_run` and `scored_claim` (never pruned) and
+  three attribution columns on `projection`; a v1 store migrates on the next start with a
+  pre-migration backup.
+
+### Changed
+
+- **Every E1 call stores its first-week projections** (best-effort, deduplicated) — the
+  retrospective's attribution input; analytics answers list each input in `data.inputs` once.
+- **E2's `auto` objective** follows the committed regret-test record: `mean` (the held-out replay
+  found too few lineups where `pwin` differs to switch).
+
 ### Fixed
 
+- **Phase 3 event-loop stalls.** v2's scoring scores one sample set per cooperative step and the
+  matchup table scores a week in slices: every `full` analytics call stays under the 50 ms stall
+  bound (29 ms worst, measured over stdio).
 - **Drift.** A composite read (several views in one request) is compared against the union of its
   views' observations, and integer-keyed maps no longer read as additive drift.
 - **Event-loop stalls on large cached bodies.** JSON without `__proto__` or escapes parses on the

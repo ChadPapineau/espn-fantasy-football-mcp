@@ -267,7 +267,7 @@ export async function project(
     readonly allowStale: boolean;
     /**
      * v2-opportunity's samples per player (full only — plan 10 §3.3): default its own 2 000; the
-     * bulk callers (projectMany) pass V2_BULK_SIMS so a 160-player trade search stays in budget.
+     * bulk callers (projectMany) pass V2_BULK_SIMS so a many-roster season run stays in budget.
      */
     readonly v2_n_sims?: number;
   },

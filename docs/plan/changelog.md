@@ -426,6 +426,46 @@ build-time choices where the plan was silent (each also in `docs/HANDOFF.md` →
 - **E1 `player_sim`** · plan 10 §3.2 · registered under `EFF_TOOLSET=full` only (an RB/WR/TE week with ≥ 3 trailing games; the same ESPN mean), so the P0 `core` projections are unchanged; E2's reporting stays sign-and-band because K and D/ST never take the basis.
 - **Main-loop stall** · plan 10 A16a, ADV OBJ-07 · the bound holds for the P1 tools too (worst measured 37 ms): the provider's freshness context is reused for 1 s, a large fresh body yields between its phases, and the heavier P1 tools yield between their synchronous steps.
 
+## B3 — measurements and records written back during the build (2026-10-10)
+
+Not adversarial rulings: the numbers Phase 3 writes back and the integration's build-time choices where
+the plan was silent (each also in `docs/HANDOFF.md` → "Build facts (Stage B2b)"; item by item in
+`docs/evals/phase3-summary.md`). Rulings the stage requests are listed last, for R6.
+
+- **C1 → E1** · plan 07 E1, plan 10 §3.3 · under `EFF_TOOLSET=full` E1 answers `model_version:
+  "v2-opportunity"`: the first target week of every QB/RB/WR/TE with a game history is v2's
+  `player_sim` distribution around ESPN's mean; K, D/ST, byes and players without history keep v1
+  (said per player); `core` is unchanged. `weight_espn` ships 1.0 (B14's rule: no mixture beat ESPN
+  alone beyond Monte-Carlo noise on the held-out seasons); a human-applied tuned weight is read at
+  start. The bulk callers use v2's smallest sample count (200).
+- **Store migration 002** · plan 01 §9.2, plan 06 §1.3, plan 08 §9 · `parameter_proposal` (C9),
+  `waiver_run` (C5), `scored_claim` (C8), all never pruned; `projection` gains `p_active`,
+  `reported_mean`, `trace_json`. Every E1 call stores each projected player's first-week projection
+  (v2 with its trace, else v1's trailing expectation), so E13 attributes every call E1 backs.
+- **E5 `league_fitted`** · plan 07 E5, plan 10 C5 · E5 logs each priority run it prices (the newest
+  call before the run wins); Π is re-solved from the league's own feed at 13 logged runs (one regular
+  season), the cold-start table below that with the reason said.
+- **E10 calibration** · plan 07 E10, plan 10 C8 · E10 reads the calibration table (the official
+  practice report's 2023–2025 history plus the league's scored claims), logs each scorable news claim
+  value-free, and E13 scores the logged claims once final; the posterior shows at 200 scored news
+  claims.
+- **E2 `auto`** · plan 07 E2, plan 10 C2 · follows the committed switch record: `insufficient` →
+  `mean`.
+- **Plan 06 §1.5** · two rows: the pre-season negatives re-check (C10, a recurring job) and `eff tune`
+  (owner only, never launchd).
+- **The C8 budget** · plan 07 C8 · analytics `data.inputs[]` lists identical rows once (v2's re-reads
+  had pushed E2's answer to 10 793 chars; 9 810 now).
+- **Main-loop stall** · plan 10 A16a · v2's scoring scores one sample set per cooperative step; worst
+  measured over stdio 29.3 ms under `full`.
+- **Research 04 §G item 1** · ESPN's stored weekly projections on finished seasons are game-day values
+  (0 exactly for inactives); C1's ESPN clause is evaluated at game time.
+
+**Rulings requested (for R6):** C2's regret vs "start by ESPN's projection" under `core` (identical
+lineups at `weight_espn` 1.0 — the A11a / R2 nit 2 structure); C2's ±5-per-decile criterion under
+`core` (unresolved: 5.6 points on 49 forecasts per decile, ≈ 355 needed; met under `full`); research
+05 §1.3's cold-start demand intercept (league-b's real drops cleared 94–96 % of the time against the
+curve's 63 %).
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |

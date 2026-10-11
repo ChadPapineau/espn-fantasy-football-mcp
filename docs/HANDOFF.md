@@ -49,6 +49,43 @@ Optional: `docs/scratch/workflows/effmcp-b2a-gate.js` re-runs B2a's independent 
 - **Gate round 3 (2026-10-07, fixer):** the soft items fixed at root — E3 live never fabricates: an unknown pro-schedule week is `tbd`, never everyone's bye (`lockPlan`, `matchupPlayerOf`), the box score is read first and names the opponent (mMatchup only as a fallback; `pre` keeps its order), and a live call missing the box score or the game states conditions nothing (`live: null`, `partial`, the pre-game number, said); the Skills handle `partial: true` (`tool-outputs.md`, the output contract, `orient.md`'s one repeat, `start-sit`'s live step); A2 carries `teams[].trade_block` wrapped (`espn.team.trade_block`, cap 500) and the flags see a claimed-authority label and a blanket order, so `inj-tradeblock` has a positive control and plan 09 TR-INJ can pass; `client_ref` path-listed on read-back; the CBS guid note (`fixtures/news/README.md`, held by `tests/sources/news/fixture-ids.test.ts`). **Still open for the orchestrator / owner:** B2's denominator, B7's one cell, the owner's `claude plugin eval` run (B11 Lane 2, B15). Record: `docs/evals/phase2-acceptance.md` → "Gate round 3".
 - **Still open (not this stage's to close):** waiver orders are not persisted before/after a run, so `learned.*` stays null on the live league; E7 has no cold-start share prior (no beneficiaries without usage); the trade partner search has no CPU deadline (1.9–3.7 s measured); E8's matchup multipliers are not wired; `PbpReader.scoringPlays` (long-TD counts for nflverse lines) and the opponent-team-week D/ST path (70/70) are not wired into the readers; README status is still "planned" (Stage D).
 
+## Build facts (Stage B2b — Phase 3 integration, 2026-10-10; for the orchestrator to verify)
+
+- **Acceptance (plan 10 §3.3), item by item in `docs/evals/phase3-summary.md`:** met — C1 (held out
+  2024 / 2025: CRPS −11 % vs trailing-4, Spearman up, coverage 79.4 % / 77.6 %, the ensemble beats
+  ESPN's mean-only CRPS at game time), C4 (9 of 9 seasons exact under reading (a)), C6 (MAE 0.1427 vs
+  0.1718 / 0.1693; hits 52 vs 43 / 42 of 145), C7, C9 (wired end to end: every E1 call stores its
+  first-week projection, E13 attributes the ones stored before kickoff, proposals persist, only
+  `eff tune --apply` applies), C10 (10 negatives re-checked, a plan 06 §1.5 job); C2 met where it can
+  hold, **two rulings requested** (regret vs ESPN under `core`; ±5 per decile under `core`);
+  needs_time — C3 (no pre-week scoreboard snapshot exists yet), B14 (≥ 8 weeks of snapshots), C8's
+  `table_n ≥ 200` and the live proposal evidence; soft_reported — C5 (rule vs trending −32.6 % /
+  −1.8 %; P(clears) off 47–49 points cold), C8 (practice channel: augmented Brier below
+  designation-only both seasons).
+- **Wired into the product:** E1 serves `v2-opportunity` under `full` (store inputs: nflverse
+  player-weeks + usage, ffopportunity xTD, `stats_team_week` through a new optional `TeamWeekReader`
+  port, schedules, weather, the practice report, a memoised matchup table; tuned overrides read at
+  start); E5 `league_fitted` from 13 logged runs; E7 cascade v2 (`CASCADE_PRIORS` + depth ranks);
+  E10 the calibration table and claim logging; E13 attribution, proposal persistence, claim scoring;
+  store migration 002 (`parameter_proposal`, `waiver_run`, `scored_claim`, three `projection`
+  columns); `eff uninstall` removes `tuned-parameters.json`; plan 06 §1.5 gains the negatives
+  re-check and `eff tune` rows; README lists `eff tune` as human-only; the retro Skill and the
+  cheat-sheet document the attribution keys and that proposals are applied only by the owner.
+- **Measured (seeded fx-10h over real stdio):** worst main-loop stall 29.3 ms (`full` analytics),
+  15.9 ms (P1 warm reads), 14.4 ms (`core`); P1 analytics 0.07–3.0 s; startup ≈ 0.54 s; E2's `full`
+  answer 9,810 chars (budget 10,000).
+- **Cross-module fixes recorded:** `projections-v2/project.ts` (the ruled-out label reads the shipped
+  weight; scoring split across two cooperative steps; the trace attached), `analytics/projection.ts`
+  (`ProjectedPlayer.expectation`, additive), `analytics/evidence.ts` (the calibration table, the
+  posterior, `claims` in the outcome), `reclog/attribution.ts` (`ATTRIBUTION_KEY_RE`), `cli/tune.ts`
+  (the repository seam), `cli/uninstall.ts`, `mcp/envelope.ts` (`toDataInputs` drops identical rows),
+  the store's readers (xTD fields, the team-week port), the A6 walk helper (E13's attribution keys).
+- **Open (not this stage's to close):** the per-position interval calibration (QB narrow), a v2
+  replay for C2's `full` basis, the seeding simulator's over-confidence at weeks 4 and 8, A1's
+  `seeding_evidence` via `reproduceSeason` (and the provider's `mSettings`-only history read), a v2
+  forecast for C5's replay, `league-a`'s return yards in the D/ST line, a negatives runner over the
+  store's history files.
+
 ## The findings that shape the product (verified by the orchestrator)
 
 1. **ESPN's API is unofficial, cookie-authenticated, and drifts
@@ -382,3 +419,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-10-07 — B2a gate round 2 RED (no code defect; three hard items need rulings or the owner) → fixer: stall headroom at root (cooperative pacing, 12 ms batches, D5/D6 turns, the reads' stall bound), B3's tool-level positive control, the `fx10h-usage` UUID note; rulings still requested on B2's denominator and B7's cell; B11 Lane 2 / B15 stay the owner's run.
 - 2026-10-07 — B2a gate round 3 RED (the same three hard items; five soft) → fixer: E3 live on a cold cache (unknown week = `tbd`, box score first, nothing conditioned without live facts — `partial`), the Skills' `partial: true` handling, A2's wrapped trade-block note (B8 positive control on every variant), `client_ref` path-listed, the CBS guid note; rulings still requested on B2's denominator and B7's cell; B11 Lane 2 / B15 stay the owner's run.
 - 2026-10-07 — Stage B2a ✅: 17 agents (integration killed by the Mac sleeping after committing its fixes; the gate's 3 fix rounds completed the work); last gate round: no code defect; rulings R5-3 (B2 denominator), R5-4 (B7 basis), R5-5 (Lane 2/B15 to Stage C). Paused at Chad's request; resume steps in ▶ NEXT STEP.
+- 2026-10-10 — Stage B2b integration (Phase 3): v2-opportunity in E1 under `full`, store migration 002, E5 `league_fitted`, E7 cascade v2, E10 calibration, E13 attribution and proposals, `eff tune` on the real store; C1–C10 in `docs/evals/phase3-summary.md`; facts in "Build facts (Stage B2b)". The B2b gate is the orchestrator's next step.
