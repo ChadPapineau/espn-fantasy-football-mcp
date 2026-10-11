@@ -160,7 +160,9 @@ export function decideObjectiveSwitch(e: ObjectiveSwitchEvidence): ObjectiveSwit
  * EFF_TOOLSET=full serves — E1's player_sim distributions, `v2-opportunity` for every QB/RB/WR/TE it
  * models (Phase 3), the Phase 2 basis for the rest (docs/evals/phase3-startsit.md). Held equal to a
  * fresh replay by tests/backtest/lineup-history.test.ts; a changed model lands a new record by a
- * reviewed commit.
+ * reviewed commit. Stage C (v2's centred interception drive cost, which changes the served QB
+ * distributions): the 2024 pwin regrets moved (12.2096 → 12.2677, after week 3 12.2044 → 12.2748)
+ * on the same 3 differing team-weeks; the decision is unchanged (`insufficient`, 8 < 30).
  */
 export const OBJECTIVE_SWITCH_RECORD: ObjectiveSwitchRecord = deepFreeze({
   evidence: {
@@ -172,10 +174,10 @@ export const OBJECTIVE_SWITCH_RECORD: ObjectiveSwitchRecord = deepFreeze({
         n: 154,
         n_differing: 3,
         regret_mean: 12.2475,
-        regret_pwin: 12.2096,
+        regret_pwin: 12.2677,
         n_later: 127,
         regret_mean_later: 12.2157,
-        regret_pwin_later: 12.2044,
+        regret_pwin_later: 12.2748,
       },
       {
         season: 2025,
@@ -194,6 +196,8 @@ export const OBJECTIVE_SWITCH_RECORD: ObjectiveSwitchRecord = deepFreeze({
     switch: false,
     reasons: [
       "pwin and mean differ in 8 team-week(s) < 30 required",
+      "2024: pwin regret 12.2677 is not below mean's 12.2475",
+      "2024 after week 3: pwin regret 12.2748 is not below mean's 12.2157",
       "2025 after week 3: pwin regret 14.5389 is not below mean's 14.4287",
     ],
   },

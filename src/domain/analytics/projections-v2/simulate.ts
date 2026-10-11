@@ -22,7 +22,7 @@ import {
 } from "../../scoring/types.js";
 import { gammaDraw, gammaMultiplier, poissonDraw } from "../math.js";
 import { PROJECTION_SOURCE_V2 } from "./constants.js";
-import type { V2Expectation, V2Params } from "./types.js";
+import type { V2Expectation, V2Params, V2PositionDispersion } from "./types.js";
 
 /** The canonical keys every simulated line carries, sorted (one frozen array shared by all lines). */
 const LINE_KEYS: readonly Canonical[] = Object.freeze(
@@ -161,6 +161,39 @@ function gammaSum(rng: Rng, count: number, mean: number, cv: number): number {
   return mean * cv * cv * gammaDraw(rng, shape);
 }
 
+/** Every multiplier 1: the global model (an anchored simulation, or no `sim.position`). */
+export const NO_DISPERSION: V2PositionDispersion = Object.freeze({
+  role: 1,
+  yds_cmp: 1,
+  yds_catch: 1,
+  yds_carry: 1,
+});
+
+/**
+ * The per-position dispersion a simulation of `e` applies: `sim.position[e.position]` for the
+ * model's own simulation; none for the ensemble's anchored one (its mean is ESPN's — types.ts). A
+ * multiplier that is not a finite non-negative number reads as 1.
+ */
+export function dispersionOf(params: V2Params, e: V2Expectation): V2PositionDispersion {
+  const p = e.anchored === true ? undefined : params.sim.position?.[e.position];
+  if (p === undefined) return NO_DISPERSION;
+  const ok = (x: number): number => (Number.isFinite(x) && x >= 0 ? x : 1);
+  // the hot path (once per sample): a valid entry is returned as is, no allocation
+  if (
+    ok(p.role) === p.role &&
+    ok(p.yds_cmp) === p.yds_cmp &&
+    ok(p.yds_catch) === p.yds_catch &&
+    ok(p.yds_carry) === p.yds_carry
+  )
+    return p;
+  return {
+    role: ok(p.role),
+    yds_cmp: ok(p.yds_cmp),
+    yds_catch: ok(p.yds_catch),
+    yds_carry: ok(p.yds_carry),
+  };
+}
+
 /** The role draw's CV: wider while the role is young (sib §1 Output shape: role confidence). */
 export function shareCv(params: V2Params, roleGames: number): number {
   const base = Math.max(0, params.sim.cv_share);
@@ -211,6 +244,9 @@ export function simulateInto(
   buf.fill(0, offset, offset + SAMPLE_WIDTH);
   if (rng.next() >= pActive) return;
   const s = params.sim;
+  // the own simulation's per-position dispersion (never the anchored one's — types.ts sim.position);
+  // every multiplier is 1 when absent, so the draws and their order are the global model's
+  const d = dispersionOf(params, e);
   const common = gammaMultiplier(rng, s.cv_common);
   const passM = gammaMultiplier(rng, s.cv_pass);
   const rushM = gammaMultiplier(rng, s.cv_rush);
@@ -218,7 +254,8 @@ export function simulateInto(
     rng,
     shareCv(params, e.role_games) *
       (e.position === "QB" ? s.qb_role_scale : 1) *
-      Math.max(0, e.role_cv_scale ?? 1),
+      Math.max(0, e.role_cv_scale ?? 1) *
+      d.role,
   );
   // the game's efficiency: a good day lifts yards per event and touchdown rates together and cuts
   // the interception rate — the negative INT–points correlation nflverse shows (QB r −0.06 to −0.18,
@@ -241,24 +278,40 @@ export function simulateInto(
     cmp = binomialDraw(rng, passAtt, e.cmp_rate);
     // an interception is an attempt not completed (drawn from the incompletions), more likely in a
     // bad game, and it ends the drive: the yards and touchdown chance the drive would still have
-    // produced are lost — together these give nflverse's negative INT–points correlation
+    // produced are lost — together these give nflverse's negative INT–points correlation. The cost
+    // is CENTRED on the game's expected interceptions (Stage C): the shrunk yards-per-completion and
+    // TD-per-attempt rates are measured on games that already lost their average INT-ended drives,
+    // so only an interception beyond the game's expectation costs a drive (one fewer returns one).
+    // Uncentred, every simulated QB-week lost its expected interceptions' drives twice — 1.28 points
+    // a game on the 2023 cases (the simulation's mean 14.85 against its own expected line's 16.12 and
+    // the actual 16.00), the cause of the narrow-looking QB interval (docs/evals/phase3-projections.md).
+    // Centring on the game's own expectation (not the week's) keeps the per-attempt moments: a constant
+    // offset in yards would read as yards per attempt falling with attempts
     const inc = passAtt - cmp;
     const pInt = e.cmp_rate < 1 ? e.int_per_att / (1 - e.cmp_rate) : 0;
-    ints = binomialDraw(rng, inc, Math.min(1, pInt * eff ** -s.int_eff_power));
+    const pIntGame = Math.min(1, pInt * eff ** -s.int_eff_power);
+    ints = binomialDraw(rng, inc, pIntGame);
+    const extraInts = ints - inc * pIntGame;
     passYd = Math.round(
       Math.max(
         0,
-        gammaSum(rng, cmp, e.yards_per_cmp * eff, s.cv_yds_cmp) - ints * s.int_drive_yards,
+        gammaSum(rng, cmp, e.yards_per_cmp * eff, s.cv_yds_cmp * d.yds_cmp) -
+          extraInts * s.int_drive_yards,
       ),
     );
-    passTd = poissonDraw(rng, Math.max(0, passAtt * e.td_per_att * eff - ints * s.int_drive_td));
+    passTd = poissonDraw(
+      rng,
+      Math.max(0, passAtt * e.td_per_att * eff - extraInts * s.int_drive_td),
+    );
   }
   const targets = poissonDraw(rng, e.targets * common * passM * role);
   const rec = binomialDraw(rng, targets, e.catch_rate);
-  const recYd = Math.round(gammaSum(rng, rec, e.yards_per_rec * eff, s.cv_yds_catch));
+  const recYd = Math.round(gammaSum(rng, rec, e.yards_per_rec * eff, s.cv_yds_catch * d.yds_catch));
   const recTd = poissonDraw(rng, targets * e.td_per_target * eff);
   const carries = poissonDraw(rng, e.carries * common * rushM * role);
-  const rushYd = Math.round(gammaSum(rng, carries, e.yards_per_carry * base, s.cv_yds_carry));
+  const rushYd = Math.round(
+    gammaSum(rng, carries, e.yards_per_carry * base, s.cv_yds_carry * d.yds_carry),
+  );
   const rushTd = poissonDraw(rng, carries * e.td_per_carry * base);
   const fumLost = poissonDraw(rng, (rec + carries + sacks) * e.fumble_per_touch);
   const twoPt = poissonDraw(rng, (passTd + rushTd + recTd) * e.two_pt_per_td);

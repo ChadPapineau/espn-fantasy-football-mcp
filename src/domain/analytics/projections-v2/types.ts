@@ -252,7 +252,27 @@ export interface V2Params {
     readonly cv_yds_cmp: number;
     /** The role draw's CV multiplier when the simulation is anchored to the ensemble's mean. */
     readonly anchor_role_scale: number;
+    /**
+     * Per-position dispersion of the model's OWN simulation (Stage C; fitted on 2023 only — docs/
+     * evals/phase3-projections.md "Per-position dispersion"): multipliers on the global CVs above.
+     * The anchored (ensemble) simulation never reads them — its mean is ESPN's, not the model's own,
+     * so the own estimate's uncertainty is not its to carry. Absent = 1 everywhere.
+     */
+    readonly position?: Readonly<Record<V2Position, V2PositionDispersion>>;
   };
+}
+
+/** One position's multipliers on the own simulation's CVs (1 = the global value). */
+export interface V2PositionDispersion {
+  /**
+   * The role draw (the player's share of his team's volume — the own estimate's main uncertainty;
+   * the game-script draws stay global: a team's game is not a position's).
+   */
+  readonly role: number;
+  /** The per-event yardage CVs: per completion, per catch, per carry. */
+  readonly yds_cmp: number;
+  readonly yds_catch: number;
+  readonly yds_carry: number;
 }
 
 /** One rate's shrinkage, as shown (sib §1 Output shape: "the shrinkage applied per rate (n, k)"). */
@@ -307,6 +327,11 @@ export interface V2Expectation {
    * simulation sets `sim.anchor_role_scale` — an external mean already carries role information).
    */
   readonly role_cv_scale?: number;
+  /**
+   * The ensemble's anchored simulation (ensemble.ts anchorExpectation sets it): the own simulation's
+   * per-position dispersion (`sim.position`) is not applied — the mean is an external one.
+   */
+  readonly anchored?: boolean;
   /** Games behind the window. */
   readonly games: number;
   readonly shrinkage: readonly V2Shrinkage[];

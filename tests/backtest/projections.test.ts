@@ -13,6 +13,7 @@
 // numbers are written to docs/evals/phase3-projections.md by helpers/run-backtest.ts.
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  BACKTEST_MODELS,
   backtestCases,
   espnModels,
   evaluateCases,
@@ -37,12 +38,20 @@ import {
 
 const HELD_OUT = [2024, 2025] as const;
 const SEED = 20_261_010;
+const POSITIONS = ["QB", "RB", "WR", "TE"] as const;
 const summaries = new Map<number, SeasonSummary>();
+/** The training season's records (2023 weeks 4–17, the cases every parameter was fitted on). */
+let training: BacktestRecord[] = [];
 const espn = new Map<number, Record<string, ModelScore>>();
 let espnRecords: BacktestRecord[] = [];
 
 beforeAll(() => {
   const world = buildWorld("reference", referenceLeagueSettings());
+  training = evaluateCases(
+    world,
+    backtestCases(world, 2023, 4, 17).filter((c) => c.relevant),
+    { seed: SEED },
+  );
   for (const season of HELD_OUT) {
     const cases = backtestCases(world, season).filter((c) => c.relevant);
     summaries.set(season, summarizeSeason(evaluateCases(world, cases, { seed: SEED }), season));
@@ -106,6 +115,40 @@ describe("plan 10 C1 — v2-opportunity vs trailing-4 on the held-out seasons", 
       );
     });
   }
+});
+
+describe('Stage C — the per-position interval (docs/evals/phase3-projections.md "Per-position dispersion")', () => {
+  it("on the training season the QB simulation's mean is on target (the centred drive cost) and every position's p10–p90 covers 80 % ± 5", () => {
+    const qb = training.filter((r) => r.position === "QB");
+    const bias = qb.reduce((a, r) => a + r.v2_mean - r.actual, 0) / qb.length;
+    // uncentred, the simulation lost 1.28 points a QB-week (14.85 against an actual 16.00)
+    expect(Math.abs(bias)).toBeLessThan(0.5);
+    for (const pos of POSITIONS) {
+      const cov = scoreModel(
+        training.filter((r) => r.position === pos),
+        BACKTEST_MODELS.v2,
+      ).coverage80;
+      expect(Math.abs((cov ?? 0) - BACKTEST_V2.coverageNominal), pos).toBeLessThanOrEqual(
+        BACKTEST_V2.coverageTolerance,
+      );
+    }
+  });
+
+  for (const season of HELD_OUT)
+    it(`${String(season)}: the SERVED distribution (the ensemble at the shipped weight, game time) covers 80 % ± 5 at every position`, () => {
+      const served = espnModels(buildWorld("league-b", leagueBSettings(2025)), [WEIGHT_ESPN_V2], {
+        seed: SEED,
+      })[`ensemble_${WEIGHT_ESPN_V2.toFixed(2)}`];
+      if (served === undefined) throw new Error("no served model");
+      for (const pos of POSITIONS) {
+        const rs = espnRecords.filter((r) => r.season === season && r.position === pos);
+        expect(rs.length, pos).toBeGreaterThan(200);
+        const cov = scoreModel(rs, served).coverage80 ?? 0;
+        expect(Math.abs(cov - BACKTEST_V2.coverageNominal), pos).toBeLessThanOrEqual(
+          BACKTEST_V2.coverageTolerance,
+        );
+      }
+    });
 });
 
 describe("plan 10 C1 — the ensemble vs ESPN's mean-only projection (league-b's recorded box scores)", () => {

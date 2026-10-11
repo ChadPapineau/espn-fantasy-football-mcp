@@ -271,8 +271,13 @@ describe("ensemble anchoring", () => {
     expect(a.factor).toBeCloseTo(1.4, 9);
     if (a.expectation === null) throw new Error("expected an anchor");
     expect(activePoints(a.expectation, s)).toBeCloseTo(base * 1.4, 0);
+    // at the own mean the volume is unchanged, but the anchored expectation is still its own object,
+    // marked `anchored` (the own simulation's per-position dispersion stays off it — Stage C)
     const same = anchorExpectation(e, 1, base, s);
-    expect(same.expectation).toBe(e);
+    expect(same.expectation).toEqual({ ...e, anchored: true });
+    expect(same.expectation).not.toBe(e);
+    expect(a.expectation.anchored).toBe(true);
+    expect(e.anchored).toBeUndefined();
     expect(anchorExpectation(e, 1, base * 10, s).expectation).toBeNull();
     expect(anchorExpectation(e, 1, 0, s).expectation).toBeNull();
     const idle = { ...e, targets: 0, carries: 0 };

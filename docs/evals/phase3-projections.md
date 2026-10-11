@@ -8,18 +8,24 @@ measured by the committed code on committed data; nothing is estimated.
 Owner paths: `src/domain/analytics/projections-v2/**`, `tests/domain/analytics/projections-v2/**`
 (the excerpt in `data/`, its generator and loaders in `helpers/`), `tests/backtest/projections.test.ts`.
 
+**Stage C (round 0, 2026-10-11):** the open item "QB's p10–p90 is narrow, RB slightly" is closed at
+its root — the interception drive cost was counted twice in every simulated QB-week (see
+"Per-position interval"); the per-position dispersion fitted on 2023 alone accepts no move. Every
+number below is the re-run after that fix (the previous values are in the git history of this file).
+
 ## Summary
 
 | Item | Status | Numbers (2024 / 2025, held out) |
 |---|---|---|
-| C1 — v2 beats trailing-4 on CRPS | **met** (hard, tested) | 3.594 vs 4.056 (−11.4 %) / 3.645 vs 4.107 (−11.2 %) |
+| C1 — v2 beats trailing-4 on CRPS | **met** (hard, tested) | 3.589 vs 4.056 (−11.5 %) / 3.645 vs 4.107 (−11.2 %) |
 | C1 — … and on within-position Spearman | **met** | 0.471 vs 0.370 / 0.443 vs 0.337 (68 position-weeks each) |
-| C1 — the gain is not concentrated in weeks 1–3 | **met** | weeks 4–17 alone: 3.639 vs 4.068 / 3.676 vs 4.118; weeks 1–3 carry 24.6 % / 22.2 % of the gain |
-| C1 — p10–p90 coverage 80 % ± 5 | **met** | 79.4 % / 77.6 % |
-| C1 — the ensemble beats ESPN's mean-only projection (positional CV) on CRPS, matches its Spearman | **met at game time** (see "ESPN") | 3.481 vs 3.508 / 3.485 vs 3.504; Spearman identical (0.468 / 0.460) |
+| C1 — the gain is not concentrated in weeks 1–3 | **met** | weeks 4–17 alone: 3.629 vs 4.068 / 3.674 vs 4.118; weeks 1–3 carry 23.7 % / 21.9 % of the gain |
+| C1 — p10–p90 coverage 80 % ± 5 | **met** | 80.0 % / 78.0 % |
+| Per-position p10–p90 (Stage C) | **QB fixed** (its mean at the root; its dispersion fitted on 2023); 2025 QB and RB reported | v2's own, held out: QB 80.4 % / 73.6 % (was 76.7 / 71.5), RB 78.9 / 74.9, WR 79.9 / 80.7, TE 81.9 / 80.6; on 2023 (training) QB 80.5, RB 80.1. **Served** (the ensemble at game time): QB 83.8 / 82.0 (was 85.5 / 84.0), RB 82.6 / 81.9, WR 80.4 / 82.6, TE 81.5 / 81.8 — every position within ± 5 (tested) |
+| C1 — the ensemble beats ESPN's mean-only projection (positional CV) on CRPS, matches its Spearman | **met at game time** (see "ESPN") | 3.479 vs 3.508 / 3.485 vs 3.504; Spearman identical (0.468 / 0.460) |
 | `weight_espn` | **stays 1.0** | the 0.75 mixture won MAE in both seasons and CRPS in 2025, tied 2024's CRPS inside Monte-Carlo noise; 0.5 lost 2024's CRPS |
 | B14 (prospective, ≥ 8 weeks of pre-game snapshots) | **needs_time** — code path proven | the same harness (`externalCases` → `evaluateCases` → `espnModels`) runs on any ESPN projection rows |
-| Turnover model widens the QB left tail | **met** (tested) | interceptions moment-matched to 2023: within-QB corr(INT, non-turnover points) −0.130 real, −0.129 simulated |
+| Turnover model widens the QB left tail | **met** (tested) | interceptions moment-matched to 2023: within-QB corr(INT, non-turnover points) −0.130 real, −0.129 simulated; Stage C centred the drive cost on the game's expected interceptions (it no longer moves the QB's mean) and re-matched it on 2023 |
 
 ## The data
 
@@ -71,18 +77,31 @@ attempts, ≥ 6 games):
 | 2023 within-QB | real | v2 simulation |
 |---|---:|---:|
 | corr(INT, non-turnover points) | −0.130 | −0.129 |
-| corr(attempts, yards per attempt) | −0.159 | −0.162 |
-| CV of yards per attempt (median) | 0.240 | 0.247 |
+| corr(attempts, yards per attempt) | −0.160 | −0.158 |
+| CV of yards per attempt (median) | 0.241 | 0.223 |
 
 (2024: −0.048 / −0.152; 2025: −0.175 / −0.186 — not used.) The model now draws interceptions from
 the incompletions (an INT is an attempt not completed), couples a game-efficiency draw to the pass-
 volume draw (a pass-heavy game is usually a trailing, less efficient one; coupling 0.75), and lets
-each interception end its drive (21 yards and 0.176 of a touchdown no longer produced) —
+each interception end its drive (24 yards and 0.2 of a touchdown no longer produced — Stage C's values) —
 `helpers/run-calibrate-qb.ts` moment-matched these three on 2023 with the other parameters at their
 fitted values. With them, adding the turnover penalty moves the QB's p10 down further
 than his mean and widens p10–p90 (`expectation-simulate.test.ts`), and `turnoverTail` gives the exact
-P(turnover points ≤ −4) for the expected volume (a double Poisson sum). Remaining gap: the simulated
-yards-per-attempt CV (0.29) is above the real 0.24 — the drive-cost term adds variance; recorded.
+P(turnover points ≤ −4) for the expected volume (a double Poisson sum). The simulated
+yards-per-attempt CV (0.22) is now a little under the real 0.24 (it was above, 0.25–0.29, before
+Stage C); recorded.
+
+**Stage C — the drive cost is centred, then re-matched.** Charged in full, the cost removed every
+simulated QB-week's *expected* interception-ended drives a second time (the shrunk yards and
+touchdown rates are measured on games that already lost them): the simulation's QB mean ran 1.28
+points under its own expected line on the 2023 cases. Only an interception beyond the game's own
+expectation (its incompletions × the game's interception rate) now costs a drive, and one fewer
+returns one. Centring on the week's expectation instead would add a constant number of yards to every
+simulated game, which reads as yards per attempt falling with attempts (corr −0.23 against the real
+−0.16). Centred, the cost carried less of the INT–points correlation (−0.109 at the old 0.176 TD /
+21 yards), so `run-calibrate-qb.ts` re-matched it on the same 2023 cases: **0.2 TD / 24 yards**,
+which simulates the three moments in the table above. The section "Per-position interval" has the
+finding and the held-out effect.
 
 ## Tuning (2023 weeks 4–17; sib §1-Evaluation)
 
@@ -103,8 +122,10 @@ extrapolated past the grid. `prior_season_weight` (0.6) is untunable on 2023 (th
 2022) and stays a choice [U].
 
 Transfer to the held-out seasons: the untuned defaults scored 3.637 / 3.667 CRPS; the 2023 fit
-scores 3.594 / 3.645. (The QB calibration was re-matched after the fit — coupling 1 → 0.75, drive
-cost 0.165 → 0.176 TD — without re-running the CRPS search; it moves only QB numbers.)
+scores 3.594 / 3.645, and 3.589 / 3.645 after Stage C. (The QB calibration was re-matched after the
+fit — coupling 1 → 0.75, drive cost 0.165 → 0.176 TD — without re-running the CRPS search; Stage C
+centred the drive cost on the game's expected interceptions and re-matched it, 0.176 → 0.2 TD, 21 → 24
+yards; both move only QB numbers.)
 
 **P(active)** (`fitAvailability`, k = 10 toward sib §3.5's Questionable 0.71 / Doubtful 0.059), from
 the 2023 listed cases (n played / n): Questionable + full practice 38/45, + limited 93/139, + did not
@@ -126,14 +147,14 @@ asserts the C1 lines, `helpers/run-backtest.ts` prints these tables.
 
 | 2024 (n 3,433) | CRPS | MAE | Spearman | coverage | pinball p10 / p50 / p90 |
 |---|---:|---:|---:|---:|---|
-| **v2-opportunity** | **3.594** | **5.21** | **0.471** | **79.4 %** | 0.848 / 2.575 / 1.376 |
+| **v2-opportunity** | **3.589** | **5.21** | **0.471** | **80.0 %** | 0.849 / 2.566 / 1.372 |
 | trailing-4 | 4.056 | 5.75 | 0.370 | 61.5 % | 1.077 / 2.763 / 1.644 |
 | trailing-4 + P(active) | 3.888 | 5.56 | 0.419 | 66.0 % | 0.938 / 2.687 / 1.617 |
 | season-to-date | 3.979 | 5.53 | 0.385 | 61.1 % | 1.040 / 2.701 / 1.650 |
 
 | 2025 (n 3,320) | CRPS | MAE | Spearman | coverage | pinball p10 / p50 / p90 |
 |---|---:|---:|---:|---:|---|
-| **v2-opportunity** | **3.645** | **5.28** | **0.443** | **77.6 %** | 0.871 / 2.596 / 1.407 |
+| **v2-opportunity** | **3.645** | **5.29** | **0.443** | **78.0 %** | 0.872 / 2.591 / 1.407 |
 | trailing-4 | 4.107 | 5.83 | 0.337 | 62.4 % | 1.082 / 2.795 / 1.697 |
 | trailing-4 + P(active) | 4.013 | 5.70 | 0.361 | 65.5 % | 0.998 / 2.750 / 1.691 |
 | season-to-date | 4.037 | 5.62 | 0.372 | 62.0 % | 1.042 / 2.725 / 1.722 |
@@ -142,18 +163,84 @@ By position, v2 vs trailing-4 (CRPS · Spearman · v2 coverage):
 
 | | 2024 | 2025 |
 |---|---|---|
-| QB | 4.897 vs 5.704 · 0.481 vs 0.332 · 76.7 % | 5.195 vs 6.185 · 0.396 vs 0.269 · **71.5 %** |
+| QB | 4.866 vs 5.704 · 0.481 vs 0.332 · 80.4 % | 5.192 vs 6.185 · 0.395 vs 0.269 · **73.6 %** |
 | RB | 3.487 vs 3.905 · 0.576 vs 0.502 · 78.9 % | 3.734 vs 4.087 · 0.550 vs 0.482 · 74.9 % |
 | WR | 3.463 vs 3.893 · 0.457 vs 0.343 · 79.9 % | 3.253 vs 3.591 · 0.454 vs 0.379 · 80.7 % |
 | TE | 2.748 vs 3.003 · 0.369 vs 0.303 · 81.9 % | 2.892 vs 3.294 · 0.373 vs 0.220 · 80.6 % |
 
-Weeks 1–3 vs 4–17 (v2 vs trailing-4 CRPS): 2024 3.404 vs 4.006 (n 649) and 3.639 vs 4.068 (n
-2,784); 2025 3.513 vs 4.057 (n 626) and 3.676 vs 4.118 (n 2,694). The unfiltered population (no
-relevance floor; 5,645 / 5,772 cases, 100 draws): v2 2.807 / 2.754 vs trailing-4 3.163 / 3.114,
-Spearman 0.616 / 0.615 vs 0.554 / 0.551, coverage 81.5 % / 81.1 %.
+Weeks 1–3 vs 4–17 (v2 vs trailing-4 CRPS): 2024 3.421 vs 4.006 (n 649) and 3.629 vs 4.068 (n
+2,784); 2025 3.520 vs 4.057 (n 626) and 3.674 vs 4.118 (n 2,694). The unfiltered population (no
+relevance floor; 5,645 / 5,772 cases, 100 draws): v2 2.806 / 2.755 vs trailing-4 3.163 / 3.114,
+Spearman 0.616 / 0.615 vs 0.554 / 0.551, coverage 81.9 % / 81.4 %.
 
-Weak spot, recorded: the QB interval is too narrow (71.5 % in 2025; the overall gate holds) and RB
-slightly narrow — the tuned dispersions are global, not per position.
+The per-position interval is the next section's (Stage C): QB's narrowness was mostly a mean defect,
+fixed, then its dispersion was fitted on 2023; 2025's QB interval (73.6 %) and RB's (74.9 %) stay
+narrow and are reported, not re-fitted.
+
+## Per-position interval (Stage C — the phase3-summary "Open" item)
+
+**The finding (2023, the training season only).** Before the fix, the 2023 cases (weeks 4–17) showed
+QB coverage 76.0 % with the misses on the high side (10.0 % below p10, 14.0 % above p90) and the
+simulation's QB mean 1.16 points under the actual. Splitting the QB-week into its components (each
+count's mean squared error against the simulation's own variance, 400 draws per case) found no
+single source that widening fixes: attempts and passing yards under-dispersed (ratios 1.18 and
+1.48), touchdowns and rushing yards over-dispersed (0.82, 0.83). Every dispersion knob tried —
+the QB role draw, the efficiency draw, the per-completion yardage CV, all game-level volume draws
+together — raised CRPS as it raised coverage. Scaling the QB mean by 1.07 instead lowered CRPS (4.80 →
+4.74) **and** reached 79.5 % with symmetric tails: the QB interval looked narrow because its centre
+was low.
+
+**The cause — and the fix (`simulate.ts`, `constants.ts`).** The simulation's QB mean was 14.85 points
+against its own expected line's 16.12 and the actual 16.00 (2023 cases): the interception drive cost
+(each interception ends its drive, so the yards and touchdown chance the drive would still have
+produced are lost — research 05 §3.2's negative INT–points correlation) was charged in full on every
+interception, but the shrunk yards-per-completion and touchdown-per-attempt rates it is applied to
+are measured on games that already lost their average interception-ended drives. Every simulated
+QB-week lost its expected interceptions' drives twice — 1.28 points. The cost is now centred on the
+game's own expected interceptions and re-matched on 2023 (0.176 TD / 21 yards → 0.2 / 24 — "The
+turnover model" above): the simulation's QB mean is 16.09 (expected line 16.12, actual 16.00). The
+anchored (served) simulation carried the same double count, which its final pin to ESPN's mean turned
+into an ≈ 8 % stretch of every QB distribution — the served QB interval was wide (85.5 % / 84.0 %) for
+the same reason the own one looked narrow.
+
+**The per-position dispersion, fitted on 2023 alone (`fit.ts` `fitPositionDispersion`,
+`helpers/run-fit-dispersion.ts`).** The model's own simulation now has a per-position dispersion
+(`sim.position`: the role draw and the per-event yardage CVs, as multipliers of the global values).
+The anchored simulation never reads it: it carries the own estimate's uncertainty, which an external
+mean does not. Fitted by the module's coordinate descent (CRPS, 1 000 draws, common seeds, its 0.2 %
+acceptance gate) on the 2023 weeks 4–17 cases of QB (420) and RB (737), after the drive-cost fix:
+
+- **QB — accepted:** role draw × 1.25 and yardage per completion × 2.5. CRPS 4.749 → 4.732, coverage
+  78.6 % → 80.5 %, tails 10.5 % / 9.0 %. The QB terms were moment-matched to each QB's game-to-game
+  spread around his own season (a yards-per-attempt CV of 0.24); a forecast must also carry the
+  uncertainty of the QB's expected rates, which that moment does not hold.
+- **RB — no move lowers CRPS:** RB's 2023 coverage is 80.1 % as is, so the RB entry stays neutral.
+- **WR and TE — not re-fitted:** their held-out coverage holds; neutral entries.
+
+**Held out, per position** (2024 / 2025; nothing above was set from these seasons):
+
+| p10–p90 coverage | QB | RB | WR | TE | all |
+|---|---|---|---|---|---|
+| v2's own, before | 76.7 / 71.5 | 78.9 / 74.9 | 79.9 / 80.7 | 81.9 / 80.6 | 79.4 / 77.6 |
+| v2's own, after | **80.4 / 73.6** | 78.9 / 74.9 | 79.9 / 80.7 | 81.9 / 80.6 | 80.0 / 78.0 |
+| served (ensemble 1.0, game time), before | 85.5 / 84.0 | 82.6 / 81.9 | 80.4 / 82.6 | 81.5 / 81.8 | 81.9 / 82.4 |
+| served (ensemble 1.0, game time), after | **83.8 / 82.0** | 82.6 / 81.9 | 80.4 / 82.6 | 81.5 / 81.8 | 81.7 / 82.1 |
+
+QB CRPS: own 4.897 → 4.866 (2024), 5.195 → 5.192 (2025); served 4.445 → 4.429, 4.207 → 4.202.
+`tests/backtest/projections.test.ts` now holds three things:
+
+- the training season's QB mean within 0.5 points of the actual;
+- every position's 2023 coverage within 80 % ± 5;
+- the **served** distribution's coverage within 80 % ± 5 at every position, in both held-out seasons.
+
+**Still narrow, reported (not re-fitted on held-out data):**
+
+- **2025 QBs (73.6 %) miss low.** 17.2 % of QB-weeks fall below p10. The model over-predicts QBs by
+  1.10 points that season, against +0.51 in 2024 and +0.09 in 2023. That is a season-level drop in
+  QB scoring the 2023-fitted model cannot see.
+- **2025 RBs (74.9 %) sit at the band's edge,** with both tails near 12.5 %.
+- **What the tools show is the served distribution,** and it covers 82.0 % (QB) and 81.9 % (RB) in
+  2025.
 
 ## C1 against ESPN (league-b's recorded box scores, under league-b's S: half-PPR, 4-pt pass TD)
 
@@ -173,23 +260,25 @@ is reported beside it.
 | Game time | 2024 CRPS | MAE | Spearman | cov. | 2025 CRPS | MAE | Spearman | cov. |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | ESPN mean + positional CV | 3.508 | 5.057 | 0.468 | 77.2 % | 3.504 | 5.099 | 0.460 | 77.6 % |
-| **ensemble, weight 1.0 (served)** | **3.481** | 5.057 | 0.468 | 81.9 % | **3.485** | 5.099 | 0.460 | 82.4 % |
-| ensemble 1.0, plain rescale (sensitivity) | 3.487 | 5.057 | 0.468 | 83.3 % | 3.481 | 5.099 | 0.460 | 82.8 % |
-| ensemble 0.75 | 3.482 | 5.024 | 0.473 | 81.6 % | 3.470 | 5.040 | 0.457 | 81.4 % |
-| ensemble 0.5 | 3.497 | 5.015 | 0.473 | 81.8 % | 3.477 | 5.012 | 0.447 | 81.4 % |
-| v2 own (weight 0) | 3.620 | 5.093 | 0.442 | 80.5 % | 3.562 | 5.039 | 0.420 | 79.1 % |
+| **ensemble, weight 1.0 (served)** | **3.479** | 5.057 | 0.468 | 81.7 % | **3.485** | 5.099 | 0.460 | 82.1 % |
+| ensemble 1.0, plain rescale (sensitivity) | 3.486 | 5.057 | 0.468 | 83.4 % | 3.481 | 5.099 | 0.460 | 83.0 % |
+| ensemble 0.75 | 3.478 | 5.022 | 0.476 | 81.5 % | 3.468 | 5.039 | 0.459 | 81.3 % |
+| ensemble 0.5 | 3.492 | 5.011 | 0.478 | 81.8 % | 3.472 | 5.007 | 0.448 | 81.4 % |
+| v2 own (weight 0) | 3.604 | 5.076 | 0.442 | 80.8 % | 3.550 | 5.020 | 0.423 | 79.7 % |
 
-By position (ensemble vs ESPN): QB 4.445 vs 4.444 (a tie) / 4.207 vs 4.237; RB 3.281 vs 3.324 /
-3.577 vs 3.610; WR 3.578 vs 3.604 / 3.344 vs 3.348; TE 2.931 vs 2.948 / 2.957 vs 2.968.
-Monte-Carlo check (three seeds × 1 000 draws): the weight-1.0 ensemble beats ESPN + positional CV by
-0.016–0.023 CRPS in every seed and season — far outside the evaluation's noise (≈ 0.002 at 1 000
-draws, ≈ 0.005 at the test's 200).
+By position (ensemble vs ESPN, CRPS · coverage): QB 4.429 vs 4.444 · 83.8 % vs 74.6 % / 4.202 vs
+4.237 · 82.0 % vs 76.2 %; RB 3.281 vs 3.324 · 82.6 % vs 78.4 % / 3.577 vs 3.610 · 81.9 % vs 76.9 %;
+WR 3.578 vs 3.604 · 80.4 % vs 76.4 % / 3.344 vs 3.348 · 82.6 % vs 78.5 %; TE 2.931 vs 2.948 · 81.5 %
+vs 78.6 % / 2.957 vs 2.968 · 81.8 % vs 78.5 %. (Before Stage C's centred drive cost QB was 4.445 vs
+4.444 — a tie — and 85.5 % / 84.0 % coverage.) Monte-Carlo check (three seeds × 1 000 draws): the
+weight-1.0 ensemble beats ESPN + positional CV by 0.016–0.024 CRPS in every seed and season — far
+outside the evaluation's noise (≈ 0.002 at 1 000 draws, ≈ 0.005 at the test's 200).
 
 **Pre-game** (v2's P(active) from the final injury report, while ESPN's number knows the
-inactives): ESPN + positional CV 3.508 / 3.504, the ensemble 3.508 / 3.504 — a tie. At three seeds
-× 1 000 draws the pre-game ensemble trails by 0.002–0.008. The whole gap is the Questionable group
-(249 cases: 3.14 vs 2.76 — our zero mass on players ESPN's number already knows are active); on the
-3,606 undesignated cases the pre-game ensemble already wins (3.726 vs 3.749). Read: the opportunity
+inactives): ESPN + positional CV 3.508 / 3.504, the ensemble 3.505 / 3.503 — a tie. At three seeds
+× 1 000 draws the pre-game ensemble trails by 0.002–0.005. The whole gap is the Questionable group
+(249 cases: 3.13 vs 2.76 — our zero mass on players ESPN's number already knows are active); on the
+3,606 undesignated cases the pre-game ensemble already wins (3.721 vs 3.749). Read: the opportunity
 simulation's shape beats the positional CV whenever both sides hold the same availability
 information.
 
@@ -201,9 +290,9 @@ Monte-Carlo noise (`BACKTEST_V2.crpsNoise` = 0.005). At three seeds × 1 000 dra
 
 | vs weight 1.0 | 2024 CRPS | 2024 MAE | 2025 CRPS | 2025 MAE |
 |---|---|---|---|---|
-| 0.75 | +0.0021 / −0.0004 / −0.0020 (tie) | −0.033 to −0.035 | −0.010 to −0.012 | −0.058 to −0.060 |
-| 0.5 | +0.021 to +0.023 (loses) | −0.043 to −0.046 | −0.003 to −0.006 | −0.086 to −0.089 |
-| 0.9 (not a plan weight) | −0.001 to −0.005 | −0.016 to −0.017 | −0.006 to −0.009 | −0.027 |
+| 0.75 | +0.0002 / −0.0010 / −0.0021 (tie) | −0.032 to −0.034 | −0.011 to −0.012 | −0.057 to −0.058 |
+| 0.5 | +0.016 to +0.019 (loses) | −0.043 to −0.047 | −0.004 to −0.006 | −0.087 to −0.088 |
+| 0.9 (not a plan weight) | −0.003 | −0.015 to −0.016 | −0.004 to −0.009 | −0.026 |
 
 So **`weight_espn` stays 1.0** (constants.ts `WEIGHT_ESPN_V2`; `tests/backtest/projections.test.ts`
 asserts the shipped constant agrees with the rule). Read with care: the mixtures consistently cut

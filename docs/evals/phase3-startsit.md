@@ -21,7 +21,7 @@ changes these numbers: rerun, review, commit.
 | C2 regret vs "start by last week's points" | **met** (hard) — below in both seasons, on both bases | about 13.4 points per team-week lower (below) |
 | C2 regret vs "start by ESPN's projection" | **not attainable at `weight_espn = 1.0` on either basis** — ruling requested (R6) | E2's lineup *is* ESPN's in all 308 team-weeks under `core` **and** under `full`: every distribution either toolset serves has ESPN's projection as its mean (position_cv by construction; v2-opportunity pinned to it — 0 of 4,045 player_sim player-weeks off ESPN's mean, coverage table), so the `mean` objective (what `auto` resolves to) picks the same assignment by the same numbers. "Below" could come only from `pwin` (gated by the regret test below, which cannot fire) or from a weight below 1.0 (gated by B14, ADV OBJ-02). The earlier `full` margin (0.04 / 0.0006 points per team-week) was Phase 2 player_sim's 3× rescale clamp, a basis `full` no longer serves to anyone v2 models; it is gone on v2 |
 | C2 E2's own `p_win_after` (R6-2's named finding, Stage C) | **not a defect** — sampling noise; engine unchanged | reliability 0.0114 / 0.0110 against a calibrated forecaster's mean 0.0060 / 0.0059 and 95th percentile 0.0144 (P = 0.104 / 0.118); margin slope 1.01 (0.47–1.55), standardised mean square 1.041 / 0.997 (0.78–1.25); the optimiser's selection bias is real in level (3.88 vs 2.75 points below projection per team-week) but sits on both sides of E2's counterfactual and cancels; the 0.2–0.3 tail: 12 matchups, the favourite ahead by 12.7 / 6.9 points against 18.4 / 19.2 forecast. Section "E2's own `p_win_after`" |
-| C2 `P(win)` within ±5 per decile | **unresolved on both bases** — ruling requested (R6) | as played: position_cv two mirrored deciles miss by 0.6 points (5.6, n = 49 each); v2-opportunity by 3.5 points (8.5, n = 47 each) — both under-confident, both inside the deciles' Wilson intervals, family-wise consistent, where resolving ±5 needs ≈ 355 forecasts per decile; Brier 0.2233 / 0.2235 vs 0.25; the reliability term 0.0020 / 0.0031 is below the ≈ 0.0060 a perfectly calibrated forecaster issuing the same forecasts expects from sampling alone. E2's own `p_win_after` under v2: every checked decile within 4.9 points (`met`) |
+| C2 `P(win)` within ±5 per decile | **unresolved on both bases** — ruling requested (R6) | as played: position_cv two mirrored deciles miss by 0.6 points (5.6, n = 49 each); v2-opportunity by 3.4 points (8.4, n = 47 each) — both under-confident, both inside the deciles' Wilson intervals, family-wise consistent, where resolving ±5 needs ≈ 355 forecasts per decile; Brier 0.2233 / 0.2236 vs 0.25; the reliability term 0.0020 / 0.0031 is below the ≈ 0.0060 a perfectly calibrated forecaster issuing the same forecasts expects from sampling alone. E2's own `p_win_after` under v2: every checked decile within 4.9 points (`met`) |
 | C2 "did it matter" | **reported** | the product's lineup differs from the manager's in 149 of 272 head-to-head team-weeks and flips 20 results (10 to a win, 10 to a loss), on both bases |
 | C2 regret test → `auto` default | **implemented and tested on v2; no switch** | on what `full` serves, pwin and mean differ in 8 team-weeks of 308 (< 30) and pwin's regret is not below mean's in 2025 after week 3; and no replayed lineup is all-player_sim (K and D/ST keep position_cv), so the switch could not apply to any of them: `auto` stays `mean` |
 | C3 `P(win)` vs `winProbability` | **needs_time**, code path proven | 0 replayed weeks with a pre-week snapshot (finished seasons carry none; the recorded 2026 scoreboards were taken after kickoff); our Brier on all 272 replayed forecasts 0.2233 |
@@ -97,9 +97,9 @@ Mean regret per team-week (points), weeks ≥ 2:
 | position_cv (`core`) | 2024 | 145 | 12.13 | 12.13 | 12.20 | 12.13 | 26.25 | 12.74 |
 | position_cv (`core`) | 2025 | 145 | 14.43 | 14.43 | 14.12 | 14.43 | 27.20 | 14.68 |
 | position_cv (`core`) | **both** | 290 | 13.28 | 13.28 | 13.16 | 13.28 | 26.72 | 13.71 |
-| v2-opportunity where modelled (`full`) | 2024 | 145 | 12.13 | 12.13 | 12.09 | 12.13 | 26.25 | 12.74 |
+| v2-opportunity where modelled (`full`) | 2024 | 145 | 12.13 | 12.13 | 12.15 | 12.13 | 26.25 | 12.74 |
 | v2-opportunity where modelled (`full`) | 2025 | 145 | 14.43 | 14.43 | 14.42 | 14.43 | 27.20 | 14.68 |
-| v2-opportunity where modelled (`full`) | **both** | 290 | 13.28 | 13.28 | 13.26 | 13.28 | 26.72 | 13.71 |
+| v2-opportunity where modelled (`full`) | **both** | 290 | 13.28 | 13.28 | 13.29 | 13.28 | 26.72 | 13.71 |
 <!-- regret:end -->
 
 E2 `auto` (the product's default) against each baseline, per season:
@@ -127,8 +127,9 @@ projection as every player's mean and `auto` resolves to `mean`: the same exact 
 same numbers — an identity, not a measurement (the test asserts the reason: no served mean departs
 from ESPN's). `pwin` is the only E2 rule that can differ: under position_cv it had the lower pooled
 regret (13.16 against 13.28) only because of 2025 (worse in 2024; 7 differing team-weeks of 308);
-under v2 it was lower in both seasons overall (12.09 / 14.42 against 12.13 / 14.43) but not in 2025
-after week 3, on 8 differing team-weeks. The manager's own lineups carried 0.25–0.6 points more
+under v2 it was lower only in 2025 overall (14.42 against 14.43; in 2024 12.15 against 12.13 since
+Stage C centred v2's interception drive cost, which moved the served QB distributions — before, 12.09)
+and not in 2025 after week 3, on the same 8 differing team-weeks. The manager's own lineups carried 0.25–0.6 points more
 regret per team-week than E2's.
 
 **For the orchestrator (R6):** at `weight_espn = 1.0` "regret below 'start by ESPN's projection'" is
@@ -153,12 +154,14 @@ Evidence basis: what `full` serves — player_sim (v2-opportunity for every QB/R
 
 | season | team-weeks | pwin ≠ mean | regret: mean | regret: pwin | team-weeks after week 3 | regret after week 3: mean | regret after week 3: pwin |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| 2024 | 154 | 3 | 12.2475 | 12.2096 | 127 | 12.2157 | 12.2044 |
+| 2024 | 154 | 3 | 12.2475 | 12.2677 | 127 | 12.2157 | 12.2748 |
 | 2025 | 154 | 5 | 14.5460 | 14.5219 | 127 | 14.4287 | 14.5389 |
 
 **Decision: `insufficient`** — pwin does not become the `auto` default for player_sim.
 
 - pwin and mean differ in 8 team-week(s) < 30 required
+- 2024: pwin regret 12.2677 is not below mean's 12.2475
+- 2024 after week 3: pwin regret 12.2748 is not below mean's 12.2157
 - 2025 after week 3: pwin regret 14.5389 is not below mean's 14.4287
 <!-- switch:end -->
 
@@ -201,42 +204,42 @@ inconsistent decile.
 | 0.7–0.8 | 12 | 0.734 | 0.417 | -31.8 | 0.193–0.680 | 300 | insufficient_n | yes |
 | 0.8–0.9 | 3 | 0.836 | 1.000 | 16.4 | 0.439–1.000 | 212 | insufficient_n | yes |
 
-**v2-opportunity where modelled (`full`) — P(win) of the two lineups as played vs the result (primary):** status `unresolved`; 272 forecasts; Brier 0.2235 (coin flip 0.2500; reliability 0.0031 — a perfectly calibrated forecaster issuing these forecasts expects 0.0060 from sampling alone; resolution 0.0278, uncertainty 0.2500); checked deciles 4, outside ±5: 3, 6; largest checked gap 8.5 points; family-wise consistent: yes.
+**v2-opportunity where modelled (`full`) — P(win) of the two lineups as played vs the result (primary):** status `unresolved`; 272 forecasts; Brier 0.2236 (coin flip 0.2500; reliability 0.0031 — a perfectly calibrated forecaster issuing these forecasts expects 0.0060 from sampling alone; resolution 0.0278, uncertainty 0.2500); checked deciles 4, outside ±5: 3, 6; largest checked gap 8.4 points; family-wise consistent: yes.
 
 | decile | forecasts | mean P(win) | won | gap (points) | Wilson 95 % | n to resolve ±5 | verdict | consistent |
 |---|---:|---:|---:|---:|---|---:|---|---|
-| 0.0–0.1 | 1 | 0.015 | 0.000 | -1.5 | 0.000–0.793 | 24 | insufficient_n | yes |
+| 0.0–0.1 | 1 | 0.015 | 0.000 | -1.5 | 0.000–0.793 | 23 | insufficient_n | yes |
+| 0.1–0.2 | 2 | 0.158 | 0.000 | -15.8 | 0.000–0.658 | 205 | insufficient_n | yes |
+| 0.2–0.3 | 16 | 0.263 | 0.313 | 4.9 | 0.142–0.556 | 298 | insufficient_n | yes |
+| 0.3–0.4 | 47 | 0.361 | 0.277 | -8.4 | 0.169–0.418 | 355 | outside | yes |
+| 0.4–0.5 | 70 | 0.454 | 0.457 | 0.4 | 0.346–0.573 | 381 | within | yes |
+| 0.5–0.6 | 70 | 0.546 | 0.543 | -0.4 | 0.427–0.654 | 381 | within | yes |
+| 0.6–0.7 | 47 | 0.639 | 0.723 | 8.4 | 0.582–0.831 | 355 | outside | yes |
+| 0.7–0.8 | 16 | 0.737 | 0.688 | -4.9 | 0.444–0.858 | 298 | insufficient_n | yes |
+| 0.8–0.9 | 2 | 0.842 | 1.000 | 15.8 | 0.342–1.000 | 205 | insufficient_n | yes |
+| 0.9–1.0 | 1 | 0.985 | 1.000 | 1.5 | 0.207–1.000 | 23 | insufficient_n | yes |
+
+**v2-opportunity where modelled (`full`) — E2's `p_win_after` (auto lineup vs the opponent's best-by-mean lineup) vs its counterfactual result:** status `met`; 272 forecasts; Brier 0.2439 (coin flip 0.2500; reliability 0.0110 — a perfectly calibrated forecaster issuing these forecasts expects 0.0059 from sampling alone; resolution 0.0147, uncertainty 0.2500); checked deciles 4, outside ±5: none; largest checked gap 4.9 points; family-wise consistent: yes.
+
+| decile | forecasts | mean P(win) | won | gap (points) | Wilson 95 % | n to resolve ±5 | verdict | consistent |
+|---|---:|---:|---:|---:|---|---:|---|---|
 | 0.1–0.2 | 2 | 0.157 | 0.000 | -15.7 | 0.000–0.658 | 204 | insufficient_n | yes |
-| 0.2–0.3 | 16 | 0.265 | 0.313 | 4.8 | 0.142–0.556 | 300 | insufficient_n | yes |
-| 0.3–0.4 | 47 | 0.362 | 0.277 | -8.5 | 0.169–0.418 | 355 | outside | yes |
-| 0.4–0.5 | 70 | 0.454 | 0.457 | 0.3 | 0.346–0.573 | 381 | within | yes |
-| 0.5–0.6 | 70 | 0.546 | 0.543 | -0.3 | 0.427–0.654 | 381 | within | yes |
-| 0.6–0.7 | 47 | 0.638 | 0.723 | 8.5 | 0.582–0.831 | 355 | outside | yes |
-| 0.7–0.8 | 16 | 0.735 | 0.688 | -4.8 | 0.444–0.858 | 300 | insufficient_n | yes |
-| 0.8–0.9 | 2 | 0.843 | 1.000 | 15.7 | 0.342–1.000 | 204 | insufficient_n | yes |
-| 0.9–1.0 | 1 | 0.985 | 1.000 | 1.5 | 0.207–1.000 | 24 | insufficient_n | yes |
-
-**v2-opportunity where modelled (`full`) — E2's `p_win_after` (auto lineup vs the opponent's best-by-mean lineup) vs its counterfactual result:** status `met`; 272 forecasts; Brier 0.2437 (coin flip 0.2500; reliability 0.0110 — a perfectly calibrated forecaster issuing these forecasts expects 0.0059 from sampling alone; resolution 0.0147, uncertainty 0.2500); checked deciles 4, outside ±5: none; largest checked gap 4.9 points; family-wise consistent: yes.
-
-| decile | forecasts | mean P(win) | won | gap (points) | Wilson 95 % | n to resolve ±5 | verdict | consistent |
-|---|---:|---:|---:|---:|---|---:|---|---|
-| 0.1–0.2 | 2 | 0.158 | 0.000 | -15.8 | 0.000–0.658 | 204 | insufficient_n | yes |
-| 0.2–0.3 | 12 | 0.263 | 0.583 | 32.0 | 0.320–0.807 | 298 | insufficient_n | yes |
-| 0.3–0.4 | 38 | 0.355 | 0.368 | 1.4 | 0.234–0.527 | 352 | within | yes |
+| 0.2–0.3 | 12 | 0.261 | 0.583 | 32.2 | 0.320–0.807 | 297 | insufficient_n | yes |
+| 0.3–0.4 | 38 | 0.354 | 0.368 | 1.5 | 0.234–0.527 | 352 | within | yes |
 | 0.4–0.5 | 84 | 0.454 | 0.405 | -4.9 | 0.306–0.512 | 381 | within | yes |
 | 0.5–0.6 | 84 | 0.546 | 0.595 | 4.9 | 0.488–0.694 | 381 | within | yes |
-| 0.6–0.7 | 38 | 0.645 | 0.632 | -1.4 | 0.473–0.766 | 352 | within | yes |
-| 0.7–0.8 | 12 | 0.737 | 0.417 | -32.0 | 0.193–0.680 | 298 | insufficient_n | yes |
+| 0.6–0.7 | 38 | 0.646 | 0.632 | -1.5 | 0.473–0.766 | 352 | within | yes |
+| 0.7–0.8 | 12 | 0.739 | 0.417 | -32.2 | 0.193–0.680 | 297 | insufficient_n | yes |
 | 0.8–0.9 | 2 | 0.843 | 1.000 | 15.7 | 0.342–1.000 | 204 | insufficient_n | yes |
 <!-- calibration:end -->
 
 Reading it: the forecasts cluster near ½ (half-PPR, ten teams, ESPN means — most matchups are close
 to even on paper), so deciles 0–2 and 7–9 hold too few matchups to check. Where the deciles are full
 the model is close: within a point at 0.4–0.6 on both bases. The miss at 0.3–0.4 / 0.6–0.7 is an
-under-confidence on both bases — 5.6 points on 49 matchups (position_cv), 8.5 on 47 (v2) — each
+under-confidence on both bases — 5.6 points on 49 matchups (position_cv), 8.4 on 47 (v2) — each
 inside the decile's Wilson interval; ±5 cannot be resolved there below ≈ 355 forecasts. The sign is
 consistent with C1's finding that, at game time, the served intervals run slightly wide for players
-known to be active (the ensemble's p10–p90 covered 81.9 % / 82.4 % against 80 %): a wider spread per
+known to be active (the ensemble's p10–p90 covered 81.7 % / 82.1 % against 80 %): a wider spread per
 player is a wider spread per lineup, so P(win) leans toward ½. No dispersion is re-fitted here — the
 held-out seasons would then not be held out. E2's own `p_win_after` (scored against its
 counterfactual, the opponent's best-by-mean lineup) is `met` under v2 (within 4.9 points in every
@@ -282,8 +285,8 @@ and realised totals, now carried in the replay's head-to-head facts).
 |---|---|---:|---:|---:|---:|---:|---|---|
 | position_cv (`core`) | P(win) of the two lineups as played (primary) | 136 (272) | 0.0020 | 0.0060 | 0.0143 | 0.869 | 1.23 (0.81–1.65) | 0.898 (0.78–1.25) |
 | position_cv (`core`) | E2's `p_win_after` (auto vs the opponent's best-by-mean lineup) | 136 (272) | 0.0114 | 0.0060 | 0.0144 | 0.104 | 1.01 (0.47–1.55) | 1.041 (0.78–1.25) |
-| v2-opportunity where modelled (`full`) | P(win) of the two lineups as played (primary) | 136 (272) | 0.0031 | 0.0060 | 0.0145 | 0.713 | 1.23 (0.81–1.65) | 0.859 (0.78–1.25) |
-| v2-opportunity where modelled (`full`) | E2's `p_win_after` (auto vs the opponent's best-by-mean lineup) | 136 (272) | 0.0110 | 0.0059 | 0.0144 | 0.118 | 1.01 (0.47–1.55) | 0.997 (0.78–1.25) |
+| v2-opportunity where modelled (`full`) | P(win) of the two lineups as played (primary) | 136 (272) | 0.0031 | 0.0060 | 0.0145 | 0.714 | 1.23 (0.81–1.65) | 0.868 (0.78–1.25) |
+| v2-opportunity where modelled (`full`) | E2's `p_win_after` (auto vs the opponent's best-by-mean lineup) | 136 (272) | 0.0110 | 0.0059 | 0.0144 | 0.115 | 1.01 (0.47–1.55) | 1.007 (0.78–1.25) |
 
 | basis | head-to-head sides | my lineup: realised − projected, as played | …E2's best-by-mean lineup | the opponent's best-by-mean − as played: projected | …realised |
 |---|---:|---:|---:|---:|---:|
@@ -293,14 +296,14 @@ and realised totals, now carried in the replay's head-to-head facts).
 | basis | E2's `p_win_after` decile (the underdog's side; its mirror is 0.7–0.8) | matchups | mean forecast | underdog won | …by < 10 points | forecast margin | realised margin (± 1 SE) | binomial P(≥ won), before multiplicity |
 |---|---|---:|---:|---:|---:|---:|---|---:|
 | position_cv (`core`) | 0.2–0.3 | 12 | 0.266 | 7 | 4 | -18.4 | -12.7 ± 8.9 | 0.020 |
-| v2-opportunity where modelled (`full`) | 0.2–0.3 | 12 | 0.263 | 7 | 4 | -19.2 | -6.9 ± 7.0 | 0.019 |
+| v2-opportunity where modelled (`full`) | 0.2–0.3 | 12 | 0.261 | 7 | 4 | -19.2 | -6.9 ± 7.0 | 0.018 |
 <!-- pwin-after:end -->
 
 Reading it — **not a defect; the engine is unchanged, so the calibration block above is the same
 before and after this investigation** (both families, both bases):
 
 - **The floor is a mean, not a bound.** A perfectly calibrated forecaster issuing exactly these
-  forecasts exceeds 0.0114 / 0.0110 one time in ten (P = 0.104 / 0.118; its 95th percentile is
+  forecasts exceeds 0.0114 / 0.0110 one time in ten (P = 0.104 / 0.115; its 95th percentile is
   0.0144). Mirrored deciles move together and the two sparse tail deciles weigh as much as the full
   central ones, so the term has few degrees of freedom and a spread about as large as its mean:
   "twice the floor" is ordinary. The primary family sits at P = 0.87 / 0.71.
@@ -314,7 +317,7 @@ before and after this investigation** (both families, both bases):
 - **The mechanisms that would make it a defect are absent.** Across all 136 margins the slope is
   1.01 (95 % CI 0.47–1.55): no regression toward 0, which is what a selection bias favouring the
   side with the higher projection, or over-dispersed means, would produce. The standardised
-  residual's mean square is 1.041 / 0.997 inside 0.78–1.25: the spread is right.
+  residual's mean square is 1.041 / 1.007 inside 0.78–1.25: the spread is right.
 - **The optimiser's selection bias is real — in level, on both sides.** A best-by-mean lineup
   realises 3.88 points below its projected total per team-week against 2.75 for the lineup as played,
   and the opponent's best-by-mean lineup out-projects his lineup as played by 1.29 points but

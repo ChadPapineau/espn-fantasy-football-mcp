@@ -91,19 +91,38 @@ export const DEFAULT_V2_PARAMS: V2Params = Object.freeze({
      * draw at half the others', a small efficiency draw coupled to the pass-volume draw (within-QB
      * corr(attempts, yards per attempt) −0.16 in 2023), interceptions drawn from the incompletions
      * and costing their drive's remaining yards and touchdown chance (within-QB corr(INT, non-turnover
-     * points) −0.13 in 2023). At these values the 2023 QB cases simulate −0.13, −0.16 and a median
-     * yards-per-attempt CV of 0.25 (real 0.24).
+     * points) −0.13 in 2023). Stage C: the drive cost is centred on the game's expected
+     * interceptions (simulate.ts — uncentred, it removed every QB-week's average INT-ended drives a
+     * second time, 1.28 points), and the cost re-matched on the same 2023 cases: 0.176 TD / 21 yards
+     * → 0.2 / 24. At these values the 2023 QB cases simulate −0.129, −0.158 and a median
+     * yards-per-attempt CV of 0.223 (real −0.130, −0.160, 0.241).
      */
     qb_role_scale: 0.5,
     cv_eff_qb: 0.05,
     int_eff_power: 1,
-    int_drive_yards: 21,
-    int_drive_td: 0.176,
+    int_drive_yards: 24,
+    int_drive_td: 0.2,
     script_coupling: 0.75,
     cv_yds_catch: 0.7,
     cv_yds_carry: 1.8,
     cv_yds_cmp: 0.5,
     anchor_role_scale: 1,
+    /**
+     * [fit] the own simulation's per-position dispersion (Stage C; the anchored simulation never
+     * reads it — types.ts), fitted on the 2023 weeks 4–17 cases only (helpers/run-fit-dispersion.ts,
+     * 1 000 draws, fit.ts DISPERSION_TUNING, the fitter's 0.2 % acceptance gate), after the drive
+     * cost was centred and re-matched: QB role draw × 1.25 and yardage per completion × 2.5 (CRPS
+     * 4.749 → 4.732, coverage 78.6 % → 80.5 %, the tails 10.5 % / 9.0 %) — the own estimate's
+     * uncertainty, which the within-QB moments the QB terms were matched to (each QB around his own
+     * season) do not hold; no RB move lowers CRPS (RB's 2023 coverage is 80.1 % as is); WR and TE are
+     * not re-fitted (their held-out coverage holds). docs/evals/phase3-projections.md.
+     */
+    position: Object.freeze({
+      QB: Object.freeze({ role: 1.25, yds_cmp: 2.5, yds_catch: 1, yds_carry: 1 }),
+      RB: Object.freeze({ role: 1, yds_cmp: 1, yds_catch: 1, yds_carry: 1 }),
+      WR: Object.freeze({ role: 1, yds_cmp: 1, yds_catch: 1, yds_carry: 1 }),
+      TE: Object.freeze({ role: 1, yds_cmp: 1, yds_catch: 1, yds_carry: 1 }),
+    }),
   }),
 });
 
@@ -115,6 +134,8 @@ export const V2_PARAM_BOUNDS = Object.freeze({
   matchup_beta: Object.freeze([0, 1] as const),
   k: Object.freeze([1, 5000] as const),
   cv: Object.freeze([0, 2] as const),
+  /** The own simulation's per-position dispersion multipliers (`sim.position.<pos>.<cv>`). */
+  dispersion: Object.freeze([0.25, 4] as const),
 });
 
 /** Positional priors [V-data, 2023 excerpt: QB/RB/WR/TE regular-season weeks 1–18]. */

@@ -106,7 +106,7 @@ interface Plan {
   readonly rng: Rng;
   /** The own simulation's counts (SAMPLE_WIDTH per sample). */
   readonly buf: Float64Array;
-  /** The ensemble's anchored expectation and its simulation, when it differs from the own. */
+  /** The ensemble's anchored expectation (null: no ESPN mean, weight 0, ruled out, anchor failed). */
   readonly anchored: V2Expectation | null;
   readonly abuf: Float64Array;
   readonly arng: Rng;
@@ -227,8 +227,10 @@ export async function projectV2(req: V2Request): Promise<V2Outcome> {
           settings,
           params.sim.anchor_role_scale,
         );
+        // the anchored expectation is always its own simulation (marked `anchored`: the own
+        // simulation's per-position dispersion does not apply to an external mean)
         if (a.expectation === null) anchorFailed = espn > 0;
-        else if (a.expectation !== result.expectation) anchored = a.expectation;
+        else anchored = a.expectation;
       }
     }
     const key = `${String(t.player_id ?? t.gsis_id ?? i)}:${String(req.week)}`;

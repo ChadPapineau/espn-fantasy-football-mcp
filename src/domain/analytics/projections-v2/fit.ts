@@ -15,7 +15,7 @@ import {
   type BacktestOptions,
   type BacktestWorld,
 } from "./backtest.js";
-import type { V2Params } from "./types.js";
+import type { V2Params, V2Position } from "./types.js";
 
 /** A tunable parameter: a dotted path into V2Params and its candidate values. */
 export interface TunableParam {
@@ -54,6 +54,33 @@ export const DEFAULT_TUNING: readonly TunableParam[] = Object.freeze([
   { path: "sim.cv_yds_carry", grid: [0.9, 1.1, 1.4, 1.8] },
   { path: "sim.cv_yds_cmp", grid: [0.5, 0.6, 0.85, 1.1] },
 ]);
+
+/**
+ * The own simulation's per-position dispersion search (Stage C; `sim.position` — types.ts): the role
+ * draw and the yardage CVs each position's line carries. Fitted per position on that position's
+ * cases (`fitPositionDispersion`), on the training season only.
+ */
+export const DISPERSION_TUNING: Readonly<Record<V2Position, readonly TunableParam[]>> =
+  Object.freeze({
+    QB: Object.freeze([
+      { path: "sim.position.QB.role", grid: [0.75, 1, 1.25, 1.5, 2] },
+      { path: "sim.position.QB.yds_cmp", grid: [1, 1.5, 2, 2.5, 3] },
+      { path: "sim.position.QB.yds_carry", grid: [0.6, 0.8, 1, 1.25] },
+    ]),
+    RB: Object.freeze([
+      { path: "sim.position.RB.role", grid: [0.75, 1, 1.25, 1.5, 2] },
+      { path: "sim.position.RB.yds_catch", grid: [0.75, 1, 1.5, 2, 2.5] },
+      { path: "sim.position.RB.yds_carry", grid: [0.6, 0.8, 1, 1.25] },
+    ]),
+    WR: Object.freeze([
+      { path: "sim.position.WR.role", grid: [0.75, 1, 1.25, 1.5, 2] },
+      { path: "sim.position.WR.yds_catch", grid: [0.75, 1, 1.5, 2, 2.5] },
+    ]),
+    TE: Object.freeze([
+      { path: "sim.position.TE.role", grid: [0.75, 1, 1.25, 1.5, 2] },
+      { path: "sim.position.TE.yds_catch", grid: [0.75, 1, 1.5, 2, 2.5] },
+    ]),
+  });
 
 /** A value at a dotted path of the parameters (NaN when the path does not name a number). */
 export function paramAt(p: V2Params, path: string): number {
@@ -97,9 +124,11 @@ export function inBounds(path: string, value: number): boolean {
             ? b.matchup_beta
             : path.startsWith("k.")
               ? b.k
-              : path.startsWith("sim.")
-                ? b.cv
-                : [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
+              : path.startsWith("sim.position.")
+                ? b.dispersion
+                : path.startsWith("sim.")
+                  ? b.cv
+                  : [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
   return value >= range[0] && value <= range[1];
 }
 
@@ -188,6 +217,40 @@ export function fitV2Params(
     evaluations,
     accepted,
   };
+}
+
+/** One position's dispersion fit (a proposal over that position's cases). */
+export interface PositionDispersionFit {
+  readonly position: V2Position;
+  readonly cases: number;
+  readonly proposal: FitProposal;
+}
+
+/**
+ * Fits the own simulation's per-position dispersion (`DISPERSION_TUNING`), one position at a time on
+ * that position's cases only (its multipliers move no other position's draws), each from the
+ * previous position's result, so the returned parameters carry every accepted fit. A proposal: the
+ * caller decides what to commit (constants.ts), and only training-season cases may be passed.
+ */
+export function fitPositionDispersion(
+  world: BacktestWorld,
+  cases: readonly BacktestCase[],
+  positions: readonly V2Position[],
+  start: V2Params = DEFAULT_V2_PARAMS,
+  opts: FitOptions = {},
+): { readonly params: V2Params; readonly fits: readonly PositionDispersionFit[] } {
+  let params = start;
+  const fits: PositionDispersionFit[] = [];
+  for (const position of positions) {
+    const own = cases.filter((c) => c.position === position);
+    const proposal = fitV2Params(world, own, params, {
+      ...opts,
+      tuning: opts.tuning ?? DISPERSION_TUNING[position],
+    });
+    params = proposal.params;
+    fits.push({ position, cases: own.length, proposal });
+  }
+  return { params, fits };
 }
 
 /** One proposed change for `eff tune` (C9: shown as a diff, applied only by a human). */

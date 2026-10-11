@@ -6,7 +6,9 @@
 // in opportunities), so the expected opportunities are scaled by f = target / own-active-mean before
 // simulating (counts are Poisson, so the spread grows like √f, not like f) and a final rescale of the
 // simulated points pins the mean exactly. A factor outside [1/maxRescale, maxRescale], or no own
-// volume at all, leaves the caller on the positional-CV gamma. Pure. New here.
+// volume at all, leaves the caller on the positional-CV gamma. The anchored expectation is marked
+// `anchored`, so the own simulation's per-position dispersion (Stage C, `sim.position`) stays off it:
+// that dispersion is the own mean's uncertainty, which ESPN's mean does not carry. Pure. New here.
 import { score } from "../../scoring/engine.js";
 import type { ScoringSettings } from "../../scoring/types.js";
 import { V2_SIMS } from "./constants.js";
@@ -57,8 +59,14 @@ export function anchorExpectation(
   if (!(f >= 1 / V2_SIMS.maxRescale && f <= V2_SIMS.maxRescale))
     return { expectation: null, factor: f };
   const scaled = Math.abs(f - 1) < 1e-9 ? e : scaleVolume(e, f);
+  // always a new expectation marked `anchored`: the own simulation's per-position dispersion is the
+  // own mean's uncertainty, which an external mean does not carry (simulate.ts dispersionOf)
   return {
-    expectation: roleScale === 1 ? scaled : { ...scaled, role_cv_scale: roleScale },
+    expectation: {
+      ...scaled,
+      anchored: true,
+      ...(roleScale === 1 ? {} : { role_cv_scale: roleScale }),
+    },
     factor: f,
   };
 }
