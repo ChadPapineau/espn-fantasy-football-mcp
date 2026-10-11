@@ -139,7 +139,12 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 - **Every E1 call stores its first-week projections** (best-effort, deduplicated) — the
   retrospective's attribution input; analytics answers list each input in `data.inputs` once.
 - **E2's `auto` objective** follows the committed regret-test record: `mean` (the held-out replay
-  found too few lineups where `pwin` differs to switch).
+  of what `full` serves — v2-opportunity — found too few lineups where `pwin` differs to switch).
+- **The seeding simulator samples each team's strength.** A team modelled from its season to date
+  (the cold start, or an E1 projection updated by it) now has its weekly mean drawn once per
+  simulated season from its posterior (sd σ/√(n + 4)), so early-season P(playoffs) — and E2's
+  points-for exchange rate — is no longer over-confident about the order; on nine recorded
+  league-seasons the Brier score improves at weeks 4, 8 and 12.
 
 ### Fixed
 
@@ -153,6 +158,8 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   64 KiB and before building an envelope.
 - **Record recommendation.** An onboarding record may cite the last final week's box score.
 - **Bounds.** `n_sims` is capped at the measured `N_SIMS_MAX`.
+- **Write host spelled once.** The keyless fixture and probe tooling refuses the ESPN write host by
+  importing the one constant in `src/config/schema.ts`; the Phase W test scans `scripts/` too.
 - **Refresh spacing.** A release refresh no longer waits 15 minutes between its version poll and
   its downloads: the GitHub poll keeps its 15-minute limit and a run's assets are spaced 1 s apart.
 - **Event-loop stalls in the P1 tools.** The provider's freshness context is reused for a second

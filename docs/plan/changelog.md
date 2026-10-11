@@ -450,7 +450,8 @@ the plan was silent (each also in `docs/HANDOFF.md` → "Build facts (Stage B2b)
   value-free, and E13 scores the logged claims once final; the posterior shows at 200 scored news
   claims.
 - **E2 `auto`** · plan 07 E2, plan 10 C2 · follows the committed switch record: `insufficient` →
-  `mean`.
+  `mean`. (Fix round 1: the record is re-derived from the replay of what `full` serves —
+  v2-opportunity — 8 differing team-weeks; still `insufficient`.)
 - **Plan 06 §1.5** · two rows: the pre-season negatives re-check (C10, a recurring job) and `eff tune`
   (owner only, never launchd).
 - **The C8 budget** · plan 07 C8 · analytics `data.inputs[]` lists identical rows once (v2's re-reads
@@ -460,11 +461,37 @@ the plan was silent (each also in `docs/HANDOFF.md` → "Build facts (Stage B2b)
 - **Research 04 §G item 1** · ESPN's stored weekly projections on finished seasons are game-day values
   (0 exactly for inactives); C1's ESPN clause is evaluated at game time.
 
-**Rulings requested (for R6):** C2's regret vs "start by ESPN's projection" under `core` (identical
-lineups at `weight_espn` 1.0 — the A11a / R2 nit 2 structure); C2's ±5-per-decile criterion under
-`core` (unresolved: 5.6 points on 49 forecasts per decile, ≈ 355 needed; met under `full`); research
-05 §1.3's cold-start demand intercept (league-b's real drops cleared 94–96 % of the time against the
-curve's 63 %).
+**B2b gate, fix round 1 (2026-10-10)** — records, each with tests:
+
+- **C2's `full` basis is the shipped model** · plan 10 C2 · the held-out start/sit replay's `full`
+  basis overlays v2-opportunity's served first-week Dist for every QB/RB/WR/TE it models (the merge
+  `analytics.ts` performs), its request assembled from the committed C1 excerpt the way the store
+  assembles it, availability at game time (ESPN's game-day projections); 4,044 v2 player-weeks over
+  2024–2025, 484 of them QBs. On v2, as on core, every served mean is ESPN's, so E2's lineup equals
+  "start by ESPN's projection" in all 308 team-weeks (asserted as the reason).
+- **The seeding simulator's posterior mean draw** · plan 07 E3 Method (silent on it), research 05
+  §2.4, §8.4 #5 · every cold-start team's weekly mean is drawn once per path from its posterior,
+  sd σ/√(n + 4) — the normal–normal model the shipped n/(n + 4) shrinkage implies (no new
+  parameter); an E1-fitted team carries the same sd (`SeasonTeam.weekly.mean_sd`); a plain E1 weekly
+  model keeps a known mean. P(playoffs) Brier on the nine recorded league-seasons 0.214 / 0.159 /
+  0.094 → 0.209 / 0.155 / 0.094 at weeks 4 / 8 / 12.
+- **C5's replay forecast** · plan 10 C5, research 05 §8.4 #4 · the rule's `s` is v2-opportunity's
+  week-ahead expected points over replacement (the trailing-4 forecast reported beside it): fitted
+  rule vs trending +18.2 % / +66.7 % per successful claim.
+- **The demand curve fit** · plan 10 C5 · `fitDemandCurve` (intercept and slope separately) beside
+  `fitDemandScale`; held out on league-b's drops it is within ±2.4 points; reported, not applied to E5.
+- **The fixture tooling's write host** · CLAUDE.md, plan 10 §3.W · `scripts/espn-fixture/http.ts`
+  imports `ESPN_WRITE_HOST`; the Phase W test scans `scripts/` as well as `src/`.
+
+**Rulings requested (for R6)** (evidence in `docs/evals/phase3-summary.md` → "Rulings requested"):
+C2's regret vs "start by ESPN's projection" — identical lineups on **both** toolsets as shipped at
+`weight_espn` 1.0 (the A11a / R2 nit 2 structure; Phase 3 changes the distribution's shape, not its
+mean); C2's ±5-per-decile criterion — unresolved on both bases (5.6 on n = 49 under `core`, 8.5 on
+n = 47 under `full`; ≈ 355 per decile needed); research 05 §1.3's cold-start demand intercept
+(league-b's real drops cleared 94–96 % against the curve's 63 %; the curve fitted on the other season
+puts q0 at 0.004–0.007 per rival); research 05 §2.4's shrinkage constant k = 4 in the seeding
+simulator (the recorded seasons imply k 2.5–58; one decile each at weeks 4 and 8 still inconsistent
+after the posterior draw); C1's ESPN clause at game time (accepted by the gate).
 
 ## Reviews (re-run on every version bump of the named dependency)
 

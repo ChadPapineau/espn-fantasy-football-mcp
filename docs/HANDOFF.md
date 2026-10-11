@@ -57,11 +57,13 @@ Optional: `docs/scratch/workflows/effmcp-b2a-gate.js` re-runs B2a's independent 
   0.1718 / 0.1693; hits 52 vs 43 / 42 of 145), C7, C9 (wired end to end: every E1 call stores its
   first-week projection, E13 attributes the ones stored before kickoff, proposals persist, only
   `eff tune --apply` applies), C10 (10 negatives re-checked, a plan 06 §1.5 job); C2 met where it can
-  hold, **two rulings requested** (regret vs ESPN under `core`; ±5 per decile under `core`);
-  needs_time — C3 (no pre-week scoreboard snapshot exists yet), B14 (≥ 8 weeks of snapshots), C8's
-  `table_n ≥ 200` and the live proposal evidence; soft_reported — C5 (rule vs trending −32.6 % /
-  −1.8 %; P(clears) off 47–49 points cold), C8 (practice channel: augmented Brier below
-  designation-only both seasons).
+  hold, **two rulings requested** (regret vs ESPN — identical lineups on both toolsets at
+  `weight_espn` 1.0; ±5 per decile unresolved on both bases — after gate round 1 the `full` basis is
+  v2-opportunity); needs_time — C3 (no pre-week scoreboard snapshot exists yet), B14 (≥ 8 weeks of
+  snapshots), C8's `table_n ≥ 200` and the live proposal evidence; soft_reported — C5 (after gate
+  round 1: rule vs trending +18.2 % / +66.7 % on the Phase 3 forecast; P(clears) within ±2.4 points
+  with the held-out fitted curve, off 47–49 points cold), C8 (practice channel: augmented Brier
+  below designation-only both seasons).
 - **Wired into the product:** E1 serves `v2-opportunity` under `full` (store inputs: nflverse
   player-weeks + usage, ffopportunity xTD, `stats_team_week` through a new optional `TeamWeekReader`
   port, schedules, weather, the practice report, a memoised matchup table; tuned overrides read at
@@ -80,11 +82,25 @@ Optional: `docs/scratch/workflows/effmcp-b2a-gate.js` re-runs B2a's independent 
   posterior, `claims` in the outcome), `reclog/attribution.ts` (`ATTRIBUTION_KEY_RE`), `cli/tune.ts`
   (the repository seam), `cli/uninstall.ts`, `mcp/envelope.ts` (`toDataInputs` drops identical rows),
   the store's readers (xTD fields, the team-week port), the A6 walk helper (E13's attribution keys).
-- **Open (not this stage's to close):** the per-position interval calibration (QB narrow), a v2
-  replay for C2's `full` basis, the seeding simulator's over-confidence at weeks 4 and 8, A1's
-  `seeding_evidence` via `reproduceSeason` (and the provider's `mSettings`-only history read), a v2
-  forecast for C5's replay, `league-a`'s return yards in the D/ST line, a negatives runner over the
-  store's history files.
+- **Open (not this stage's to close):** the per-position interval calibration (QB narrow), A1's
+  `seeding_evidence` via `reproduceSeason` (and the provider's `mSettings`-only history read),
+  `league-a`'s return yards in the D/ST line, a negatives runner over the store's history files, E5
+  applying a league-fitted demand curve once the owner's claim feed exists.
+- **Gate round 1 (2026-10-10, fixer):** the gate was RED on C2 (hard, waiting on rulings) and on
+  C2's `full` evidence not testing the shipped model. Fixed at root, each with tests: C2's `full`
+  basis replays v2-opportunity as `full` serves it (`tests/domain/analytics/calibration/helpers/
+  v2-history.ts`; 4,044 v2 player-weeks incl. 484 QB weeks) — on v2, as on core, every served mean is
+  ESPN's, so E2's lineup equals "start by ESPN's projection" in all 308 team-weeks (the earlier
+  `full` margin was Phase 2's rescale clamp); P(win) per decile unresolved on both bases (5.6 / 8.5
+  points on n = 49 / 47); the switch record re-derived from v2 (still `insufficient`). The seeding
+  simulator draws each cold-start / E1-fitted team's mean from its posterior (Brier better at every
+  checkpoint; one decile each at weeks 4 and 8 still inconsistent — the shrinkage constant). C5's
+  replay ranks on v2's forecast: fitted rule vs trending +18.2 % / +66.7 % (met); the held-out
+  demand curve (`fitDemandCurve`) calibrates P(clears) within ±2.4 points (the cold start does not).
+  The fixture tooling imports the write-host constant; the Phase W test scans `scripts/`. **Open for
+  the orchestrator (R6):** C2's ESPN-regret clause and ±5-per-decile clause, research 05 §1.3's
+  demand intercept, research 05 §2.4's k = 4 — evidence in `docs/evals/phase3-summary.md` →
+  "Rulings requested".
 
 ## The findings that shape the product (verified by the orchestrator)
 
@@ -420,3 +436,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-10-07 — B2a gate round 3 RED (the same three hard items; five soft) → fixer: E3 live on a cold cache (unknown week = `tbd`, box score first, nothing conditioned without live facts — `partial`), the Skills' `partial: true` handling, A2's wrapped trade-block note (B8 positive control on every variant), `client_ref` path-listed, the CBS guid note; rulings still requested on B2's denominator and B7's cell; B11 Lane 2 / B15 stay the owner's run.
 - 2026-10-07 — Stage B2a ✅: 17 agents (integration killed by the Mac sleeping after committing its fixes; the gate's 3 fix rounds completed the work); last gate round: no code defect; rulings R5-3 (B2 denominator), R5-4 (B7 basis), R5-5 (Lane 2/B15 to Stage C). Paused at Chad's request; resume steps in ▶ NEXT STEP.
 - 2026-10-10 — Stage B2b integration (Phase 3): v2-opportunity in E1 under `full`, store migration 002, E5 `league_fitted`, E7 cascade v2, E10 calibration, E13 attribution and proposals, `eff tune` on the real store; C1–C10 in `docs/evals/phase3-summary.md`; facts in "Build facts (Stage B2b)". The B2b gate is the orchestrator's next step.
+- 2026-10-10 — B2b gate round 1 RED (C2 waiting on rulings; C2's `full` evidence on Phase 2's model) → fixer: C2 replayed on v2-opportunity (identical-to-ESPN lineups on both bases, shown structural), the seeding simulator's posterior mean draw, C5 on the Phase 3 forecast (rule vs trending met) and the league-fitted demand curve, the fixture tooling's write-host import; rulings requested for R6 (C2 × 2, research 05 §1.3, research 05 §2.4's k).
