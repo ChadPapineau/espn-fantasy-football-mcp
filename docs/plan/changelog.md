@@ -496,6 +496,18 @@ the plan was silent (each also in `docs/HANDOFF.md` → "Build facts (Stage B2b)
   answers a coded VALIDATION `(root) (unknown key)` like any unknown key; nested keys were already
   rejected by the nested strict objects (now tested). No prototype is touched; the key is never echoed.
 
+**B2b gate, fix round 3 (2026-10-11)** — no code defect; one evidence record, with tests
+(`tests/domain/analytics/calibration/reliability.test.ts`):
+
+- **The reliability term's calibrated floor** · plan 10 C2, sib research 05 §12.1 (the Brier
+  decomposition) · `reliabilityByDecile` carries `reliability_if_calibrated` = (1/N) Σ_k (1/n_k)
+  Σ_{i∈k} p_i(1 − p_i), the reliability term a perfectly calibrated forecaster issuing the same
+  forecasts expects from sampling alone (additive field; no verdict reads it). On the held-out replay
+  the as-played P(win) term is 0.0020 (`core`) / 0.0031 (`full`) against ≈ 0.0060 — below the floor;
+  E2's counterfactual `p_win_after` 0.0114 / 0.0110 against ≈ 0.0059 (`docs/evals/phase3-startsit.md`,
+  regenerated; ruling 2 in `docs/evals/phase3-summary.md` now cites it and lists two options). No
+  criterion, threshold or verdict changed.
+
 **Rulings requested (for R6)** (evidence in `docs/evals/phase3-summary.md` → "Rulings requested"):
 C2's regret vs "start by ESPN's projection" — identical lineups on **both** toolsets as shipped at
 `weight_espn` 1.0 (the A11a / R2 nit 2 structure; Phase 3 changes the distribution's shape, not its

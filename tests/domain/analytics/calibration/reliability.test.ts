@@ -2,9 +2,12 @@
 // of the evaluator": a calibrated synthetic forecaster passes, a miscalibrated one fails): the
 // Wilson interval, the normal quantile, the forecasts needed to resolve ±5, and the verdicts —
 // met (calibrated, large n), not_met (a resolvable miss; an inconsistent decile), unresolved (a
-// literal miss the sample cannot resolve), insufficient_n — plus hostile input and properties.
+// literal miss the sample cannot resolve), insufficient_n — plus hostile input and properties; and
+// the reliability term a perfectly calibrated forecaster would expect (exact on hand-computed cases,
+// matched by a seeded Monte-Carlo of calibrated outcomes, bounded by a property).
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { seededRng } from "../../../../src/domain/clock.js";
 import {
   CALIBRATION,
   nToResolve,
@@ -13,7 +16,7 @@ import {
   wilsonInterval,
 } from "../../../../src/domain/analytics/calibration/index.js";
 import { AnalyticsError } from "../../../../src/domain/analytics/errors.js";
-import { brierScore } from "../../../../src/domain/reclog/metrics.js";
+import { brierScore, brierWithDecomposition } from "../../../../src/domain/reclog/metrics.js";
 
 /** n forecasts at p, of which exactly round(rate × n) happen. */
 function block(p: number, n: number, rate: number): { p: number; outcome: boolean }[] {
@@ -187,6 +190,68 @@ describe("reliabilityByDecile", () => {
           }
           expect(["met", "not_met", "unresolved", "insufficient_n"]).toContain(r.status);
           expect(r.brier.value).toBeCloseTo(brierScore(pairs), 12);
+        },
+      ),
+    );
+  });
+});
+
+describe("reliability_if_calibrated — the noise floor of the reliability term", () => {
+  it("is (1/N) Σ_k (1/n_k) Σ p(1 − p) on hand-computed cases", () => {
+    // two deciles: 10 forecasts at 0.3, 20 at 0.6 → (0.21 + 0.24) / 30
+    const two = reliabilityByDecile([...block(0.3, 10, 0.3), ...block(0.6, 20, 0.6)]);
+    expect(two.reliability_if_calibrated).toBeCloseTo((0.3 * 0.7 + 0.6 * 0.4) / 30, 12);
+    // forecasts that differ inside one decile: the bin's mean of p(1 − p), weighed once
+    const mixed = reliabilityByDecile([
+      { p: 0.31, outcome: true },
+      { p: 0.39, outcome: false },
+    ]);
+    expect(mixed.reliability_if_calibrated).toBeCloseTo((0.31 * 0.69 + 0.39 * 0.61) / 2 / 2, 12);
+    // certain forecasts carry no sampling noise
+    const sure = reliabilityByDecile([...block(0, 5, 0), ...block(1, 5, 1)]);
+    expect(sure.reliability_if_calibrated).toBe(0);
+    // it reads the forecasts only: the outcomes do not move it, the observed term does
+    const flipped = reliabilityByDecile([...block(0.3, 10, 1), ...block(0.6, 20, 0)]);
+    expect(flipped.reliability_if_calibrated).toBe(two.reliability_if_calibrated);
+    expect(flipped.brier.decomposition.reliability).toBeGreaterThan(
+      two.brier.decomposition.reliability,
+    );
+  });
+
+  it("matches the mean reliability term of calibrated outcomes (seeded Monte-Carlo)", () => {
+    // 272 forecasts spread like a season replay's (clustered near ½), outcomes ~ Bernoulli(p)
+    const rng = seededRng(20261011);
+    const ps = Array.from({ length: 272 }, () => 0.5 + (rng.next() + rng.next() - 1) * 0.45);
+    const expected = reliabilityByDecile(
+      ps.map((p) => ({ p, outcome: false })),
+    ).reliability_if_calibrated;
+    const reps = 4000;
+    let sum = 0;
+    for (let r = 0; r < reps; r++) {
+      const pairs = ps.map((p) => ({ p, outcome: rng.next() < p }));
+      sum += brierWithDecomposition(pairs).decomposition.reliability;
+    }
+    // the replicate mean's standard error is ≈ 1–2 % of the value at 4 000 replicates
+    expect(sum / reps).toBeGreaterThan(expected * 0.95);
+    expect(sum / reps).toBeLessThan(expected * 1.05);
+  });
+
+  it("(property) 0 ≤ floor ≤ ¼ × filled deciles / N; independent of the outcomes", () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({ p: fc.double({ min: 0, max: 1, noNaN: true }), outcome: fc.boolean() }),
+          { minLength: 1, maxLength: 300 },
+        ),
+        (pairs) => {
+          const r = reliabilityByDecile(pairs);
+          const filled = r.bins.filter((b) => b.n > 0).length;
+          expect(r.reliability_if_calibrated).toBeGreaterThanOrEqual(0);
+          expect(r.reliability_if_calibrated).toBeLessThanOrEqual((0.25 * filled) / r.n + 1e-12);
+          const inverted = reliabilityByDecile(
+            pairs.map(({ p, outcome }) => ({ p, outcome: !outcome })),
+          );
+          expect(inverted.reliability_if_calibrated).toBe(r.reliability_if_calibrated);
         },
       ),
     );

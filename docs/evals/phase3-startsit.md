@@ -20,7 +20,7 @@ changes these numbers: rerun, review, commit.
 |---|---|---|
 | C2 regret vs "start by last week's points" | **met** (hard) — below in both seasons, on both bases | about 13.4 points per team-week lower (below) |
 | C2 regret vs "start by ESPN's projection" | **not attainable at `weight_espn = 1.0` on either basis** — ruling requested (R6) | E2's lineup *is* ESPN's in all 308 team-weeks under `core` **and** under `full`: every distribution either toolset serves has ESPN's projection as its mean (position_cv by construction; v2-opportunity pinned to it — 0 of 4,045 player_sim player-weeks off ESPN's mean, coverage table), so the `mean` objective (what `auto` resolves to) picks the same assignment by the same numbers. "Below" could come only from `pwin` (gated by the regret test below, which cannot fire) or from a weight below 1.0 (gated by B14, ADV OBJ-02). The earlier `full` margin (0.04 / 0.0006 points per team-week) was Phase 2 player_sim's 3× rescale clamp, a basis `full` no longer serves to anyone v2 models; it is gone on v2 |
-| C2 `P(win)` within ±5 per decile | **unresolved on both bases** — ruling requested (R6) | as played: position_cv two mirrored deciles miss by 0.6 points (5.6, n = 49 each); v2-opportunity by 3.5 points (8.5, n = 47 each) — both under-confident, both inside the deciles' Wilson intervals, family-wise consistent, where resolving ±5 needs ≈ 355 forecasts per decile; Brier 0.2233 / 0.2235 vs 0.25. E2's own `p_win_after` under v2: every checked decile within 4.9 points (`met`) |
+| C2 `P(win)` within ±5 per decile | **unresolved on both bases** — ruling requested (R6) | as played: position_cv two mirrored deciles miss by 0.6 points (5.6, n = 49 each); v2-opportunity by 3.5 points (8.5, n = 47 each) — both under-confident, both inside the deciles' Wilson intervals, family-wise consistent, where resolving ±5 needs ≈ 355 forecasts per decile; Brier 0.2233 / 0.2235 vs 0.25; the reliability term 0.0020 / 0.0031 is below the ≈ 0.0060 a perfectly calibrated forecaster issuing the same forecasts expects from sampling alone. E2's own `p_win_after` under v2: every checked decile within 4.9 points (`met`) |
 | C2 "did it matter" | **reported** | the product's lineup differs from the manager's in 149 of 272 head-to-head team-weeks and flips 20 results (10 to a win, 10 to a loss), on both bases |
 | C2 regret test → `auto` default | **implemented and tested on v2; no switch** | on what `full` serves, pwin and mean differ in 8 team-weeks of 308 (< 30) and pwin's regret is not below mean's in 2025 after week 3; and no replayed lineup is all-player_sim (K and D/ST keep position_cv), so the switch could not apply to any of them: `auto` stays `mean` |
 | C3 `P(win)` vs `winProbability` | **needs_time**, code path proven | 0 replayed weeks with a pre-week snapshot (finished seasons carry none; the recorded 2026 scoreboards were taken after kickoff); our Brier on all 272 replayed forecasts 0.2233 |
@@ -172,7 +172,7 @@ where the sample cannot resolve ±5, every decile consistent; `not_met` = a reso
 inconsistent decile.
 
 <!-- calibration:start -->
-**position_cv (`core`) — P(win) of the two lineups as played vs the result (primary):** status `unresolved`; 272 forecasts; Brier 0.2233 (coin flip 0.2500; reliability 0.0020, resolution 0.0264, uncertainty 0.2500); checked deciles 4, outside ±5: 3, 6; largest checked gap 5.6 points; family-wise consistent: yes.
+**position_cv (`core`) — P(win) of the two lineups as played vs the result (primary):** status `unresolved`; 272 forecasts; Brier 0.2233 (coin flip 0.2500; reliability 0.0020 — a perfectly calibrated forecaster issuing these forecasts expects 0.0060 from sampling alone; resolution 0.0264, uncertainty 0.2500); checked deciles 4, outside ±5: 3, 6; largest checked gap 5.6 points; family-wise consistent: yes.
 
 | decile | forecasts | mean P(win) | won | gap (points) | Wilson 95 % | n to resolve ±5 | verdict | consistent |
 |---|---:|---:|---:|---:|---|---:|---|---|
@@ -187,7 +187,7 @@ inconsistent decile.
 | 0.8–0.9 | 3 | 0.837 | 1.000 | 16.3 | 0.439–1.000 | 210 | insufficient_n | yes |
 | 0.9–1.0 | 1 | 0.990 | 1.000 | 1.0 | 0.207–1.000 | 16 | insufficient_n | yes |
 
-**position_cv (`core`) — E2's `p_win_after` (auto lineup vs the opponent's best-by-mean lineup) vs its counterfactual result:** status `unresolved`; 272 forecasts; Brier 0.2436 (coin flip 0.2500; reliability 0.0114, resolution 0.0157, uncertainty 0.2500); checked deciles 4, outside ±5: 4, 5; largest checked gap 5.2 points; family-wise consistent: yes.
+**position_cv (`core`) — E2's `p_win_after` (auto lineup vs the opponent's best-by-mean lineup) vs its counterfactual result:** status `unresolved`; 272 forecasts; Brier 0.2436 (coin flip 0.2500; reliability 0.0114 — a perfectly calibrated forecaster issuing these forecasts expects 0.0059 from sampling alone; resolution 0.0157, uncertainty 0.2500); checked deciles 4, outside ±5: 4, 5; largest checked gap 5.2 points; family-wise consistent: yes.
 
 | decile | forecasts | mean P(win) | won | gap (points) | Wilson 95 % | n to resolve ±5 | verdict | consistent |
 |---|---:|---:|---:|---:|---|---:|---|---|
@@ -200,7 +200,7 @@ inconsistent decile.
 | 0.7–0.8 | 12 | 0.734 | 0.417 | -31.8 | 0.193–0.680 | 300 | insufficient_n | yes |
 | 0.8–0.9 | 3 | 0.836 | 1.000 | 16.4 | 0.439–1.000 | 212 | insufficient_n | yes |
 
-**v2-opportunity where modelled (`full`) — P(win) of the two lineups as played vs the result (primary):** status `unresolved`; 272 forecasts; Brier 0.2235 (coin flip 0.2500; reliability 0.0031, resolution 0.0278, uncertainty 0.2500); checked deciles 4, outside ±5: 3, 6; largest checked gap 8.5 points; family-wise consistent: yes.
+**v2-opportunity where modelled (`full`) — P(win) of the two lineups as played vs the result (primary):** status `unresolved`; 272 forecasts; Brier 0.2235 (coin flip 0.2500; reliability 0.0031 — a perfectly calibrated forecaster issuing these forecasts expects 0.0060 from sampling alone; resolution 0.0278, uncertainty 0.2500); checked deciles 4, outside ±5: 3, 6; largest checked gap 8.5 points; family-wise consistent: yes.
 
 | decile | forecasts | mean P(win) | won | gap (points) | Wilson 95 % | n to resolve ±5 | verdict | consistent |
 |---|---:|---:|---:|---:|---|---:|---|---|
@@ -215,7 +215,7 @@ inconsistent decile.
 | 0.8–0.9 | 2 | 0.843 | 1.000 | 15.7 | 0.342–1.000 | 204 | insufficient_n | yes |
 | 0.9–1.0 | 1 | 0.985 | 1.000 | 1.5 | 0.207–1.000 | 24 | insufficient_n | yes |
 
-**v2-opportunity where modelled (`full`) — E2's `p_win_after` (auto lineup vs the opponent's best-by-mean lineup) vs its counterfactual result:** status `met`; 272 forecasts; Brier 0.2437 (coin flip 0.2500; reliability 0.0110, resolution 0.0147, uncertainty 0.2500); checked deciles 4, outside ±5: none; largest checked gap 4.9 points; family-wise consistent: yes.
+**v2-opportunity where modelled (`full`) — E2's `p_win_after` (auto lineup vs the opponent's best-by-mean lineup) vs its counterfactual result:** status `met`; 272 forecasts; Brier 0.2437 (coin flip 0.2500; reliability 0.0110 — a perfectly calibrated forecaster issuing these forecasts expects 0.0059 from sampling alone; resolution 0.0147, uncertainty 0.2500); checked deciles 4, outside ±5: none; largest checked gap 4.9 points; family-wise consistent: yes.
 
 | decile | forecasts | mean P(win) | won | gap (points) | Wilson 95 % | n to resolve ±5 | verdict | consistent |
 |---|---:|---:|---:|---:|---|---:|---|---|
@@ -241,6 +241,16 @@ held-out seasons would then not be held out. E2's own `p_win_after` (scored agai
 counterfactual, the opponent's best-by-mean lineup) is `met` under v2 (within 4.9 points in every
 checked decile) and `unresolved` under position_cv (5.2 on 82); its Brier (0.244) is worse than the
 as-played forecast's because both best-by-mean lineups carry the optimiser's upward bias on the mean.
+**The noise floor (B2b gate round 3).** The yardstick for the decomposition's reliability term is
+what a perfectly calibrated forecaster issuing the same 272 forecasts would score from sampling alone
+(`reliability_if_calibrated`, printed in each family's line above; exact formula and a seeded
+Monte-Carlo in `tests/domain/analytics/calibration/reliability.test.ts`). The primary family sits
+**below** it on both bases — 0.0020 (position_cv) and 0.0031 (v2) against ≈ 0.0060 — so the decile
+misses are no larger than calibrated forecasts produce on this sample; a dispersion defect large
+enough for ten-team deciles to see would put the term above the floor. E2's own `p_win_after` sits
+above it (0.0114 / 0.0110 against ≈ 0.0059), the optimiser's selection bias named above, in a family
+whose literal ±5 is `met` under v2. Each matchup contributes both sides, so the term's spread is
+about twice an independent sample's; the floor is its expectation either way.
 **For the orchestrator (R6):** two seasons of a ten-team league (136 decided matchups, 272 forecasts)
 fill the central deciles with 47–70 forecasts each, so the literal ±5-per-decile criterion is a
 multi-season measurement (≈ 355 per central decile); this report keeps the literal numbers and flags

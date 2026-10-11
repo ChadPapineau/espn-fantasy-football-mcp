@@ -10,7 +10,10 @@
 // ten 95 % intervals would flag a perfectly calibrated forecaster four times in ten). The verdict
 // separates a gap the sample can resolve, or a decile inconsistent with its forecasts (`not_met`),
 // from a literal miss the sample cannot resolve (`unresolved` — reported with the literal numbers,
-// never tolerated or hidden). Pure. New here.
+// never tolerated or hidden). Beside the Brier decomposition's reliability term the report carries
+// the term a perfectly calibrated forecaster issuing the same forecasts would expect from sampling
+// alone (B2b gate round 3: the yardstick for reading the observed term as noise or as miscalibration
+// — a comparison with the resolution term is not one). Pure. New here.
 import {
   RELIABILITY_BINS,
   at,
@@ -103,6 +106,13 @@ export interface ReliabilityReport {
   readonly max_checked_gap: number | null;
   /** Every non-empty decile is consistent with its forecasts at the family-wise level. */
   readonly consistent: boolean;
+  /**
+   * The expected value of `brier.decomposition.reliability` (same bins) if every outcome were drawn
+   * independently from its own forecast — a perfectly calibrated forecaster issuing exactly these
+   * forecasts: (1/N) Σ_k (1/n_k) Σ_{i∈k} p_i(1 − p_i). An observed term at or below it is what
+   * sampling alone produces; one well above it points to miscalibration the deciles can see.
+   */
+  readonly reliability_if_calibrated: number;
   readonly status: CalibrationStatus;
 }
 
@@ -232,6 +242,24 @@ export function reliabilityByDecile(
     max_checked_gap:
       checked.length === 0 ? null : Math.max(...checked.map((b) => Math.abs(b.gap ?? 0))),
     consistent,
+    reliability_if_calibrated: reliabilityIfCalibrated(
+      groups.map((g) => g.p),
+      pairs.length,
+    ),
     status,
   };
+}
+
+/**
+ * E[reliability term] for forecasts grouped as `bins` when each outcome is an independent
+ * Bernoulli(p_i): within bin k the gap ō_k − f̄_k has mean 0 and variance Σ p_i(1 − p_i) / n_k², and
+ * the term weighs its square by n_k / N.
+ */
+function reliabilityIfCalibrated(bins: readonly (readonly number[])[], n: number): number {
+  const terms: number[] = [];
+  for (const ps of bins) {
+    if (ps.length === 0) continue;
+    terms.push(stableSum(ps.map((p) => p * (1 - p))) / ps.length);
+  }
+  return stableSum(terms) / n;
 }

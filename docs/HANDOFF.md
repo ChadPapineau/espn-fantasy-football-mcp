@@ -15,19 +15,20 @@ explicit human confirmation the model cannot forge. News and ESPN free text
 (team/owner names, player outlooks) are data, not instructions. The
 working directory is iCloud-managed, so nothing secret ever lives in it.
 
-## ▶ NEXT STEP — PAUSED 2026-10-07 at a clean boundary (Chad: "pause"; resume on the word "resume")
+## ▶ NEXT STEP — Stage B2b built; its gate is RED on rulings alone (2026-10-11): the orchestrator rules R6, then re-gates
 
-**State at pause:** branch `build/phase-1` @ `b72a917` + the R5-3–R5-5 docs commit; tree clean; HEAD == origin; CI green (ci, docs, secrets). Stages **A ✅ · B1 ✅ · B2a ✅** (all 34 read tools under `EFF_TOOLSET=full`, 18 under `core`; 13 Skills; 13 prompts; Phase 2 sources). B2a's gate found no code defect in its last round; its three open items were scope rulings, recorded as R5-3–R5-5 in `docs/plan/changelog.md`. Nothing is running.
+**State:** branch `build/phase-1` @ the B2b gate fix-round-3 commit (on `226f21f`); HEAD == origin; CI green (ci, docs, secrets) on `226f21f`, the round-3 commit's run checked by the fixer. Stages **A ✅ · B1 ✅ · B2a ✅ · B2b built** (Phase 3, plan 10 §3.3: C1–C10 item by item in `docs/evals/phase3-summary.md`). The B2b gate's last two fix rounds found **no code defect**; it stays RED only on **C2** (hard), whose two clauses are plan-text disputes waiting on R6 — no code can make them pass as written. The workflow (`effmcp-expansion-b.js`) ends after its gate round 3; nothing of B2b's runs afterwards.
 
 **On "resume", do exactly this:**
-1. `cd ~/Developer/espn-fantasy-football-mcp && git status && git fetch && git log -1` — expect a clean tree on `build/phase-1`, HEAD == origin; `gh run list --branch build/phase-1 --limit 3` green. Read `CLAUDE.md`.
-2. Keep the Mac awake for the run (the app's keep-awake request, or tell Chad): on 2026-10-06 the Mac sleeping killed an agent mid-task.
-3. Launch **Stage B2b** (Phase 3 model wave) with the saved script: `Workflow({ scriptPath: "<repo>/docs/scratch/workflows/effmcp-expansion-b.js", args: { probe_league_ids: "<the three public probe-league ids from the orchestrator's local memory — never commit them>" } })`. Routine building runs at Chad's "Extra" effort.
-4. When B2b ends: verify at source (gate verdict, CI, scan-secrets --all, identity, tree clean); rule on any plan-text disputes the gate raises (record as R6-n in the changelog); update this section.
+1. `cd ~/Developer/espn-fantasy-football-mcp && git status && git fetch && git log -1` — expect a clean tree on `build/phase-1`, HEAD == origin; `gh run list --branch build/phase-1 --limit 3` green; `node scripts/dev/scan-secrets.mjs --all` clean; commit identity = the GitHub no-reply address. Read `CLAUDE.md`. Keep the Mac awake for any run (the app's keep-awake request, or tell Chad).
+2. **Rule R6** — record each ruling as R6-n in `docs/plan/changelog.md` (a new "R6 — build-time rulings" section after B3, in R5's table form; B3's "Rulings requested (for R6)" list points to it) and annotate plan 10 §3.3 the way R5 annotated B2 / B7. Evidence and the options per item: `docs/evals/phase3-summary.md` → "Rulings requested"; the numbers: `docs/evals/phase3-startsit.md`, `docs/evals/phase3-waivers-seeding.md`.
+   - **C2 (hard), regret vs "start by ESPN's projection":** E2's lineup is ESPN's in 308 of 308 team-weeks on both toolsets at `weight_espn` 1.0 (difference 0.0000) — the plan 10 A11a structure R2 nit 2 ruled "not informative in v1". Options: apply R2 nit 2 to C2, or move the clause behind B14 (needs_time).
+   - **C2 (hard), ±5 per decile:** misses 5.6 points on n = 49 (`core`) and 8.5 on n = 47 (`full`), inside the Wilson intervals, family-wise consistent, the reliability term (0.0020 / 0.0031) below the ≈ 0.0060 a perfectly calibrated forecaster scores on the same forecasts; ≈ 355 forecasts per central decile resolve ±5. Options: literal ±5 as needs_time until then (`not_met` only on a resolvable miss or an inconsistent decile), or family-wise consistency + the reliability floor as the hard part with ±5 reported.
+   - **Soft (not blocking):** research 05 §1.3's cold-start demand intercept (C5: P(clears) off 47–49 points cold, within ±2.4 fitted); research 05 §2.4's k = 4 (one inconsistent decile each at weeks 4 and 8); C1's ESPN clause at game time (accepted by the gate — record it).
+3. **Re-run B2b's independent gate on the ruled text.** No standalone B2b gate script exists yet (B2a's is `docs/scratch/workflows/effmcp-b2a-gate.js`); derive one from the gate prompt in `effmcp-expansion-b.js` (its "independent release gatekeeper for Stage B2b" block) without the build phases. A ruling that changes code (e.g., a different k) goes to a fixer with tests before the gate.
+4. When the gate is green: update this section and the Log; `docs/scratch/build-program.md` marks B2b done.
 5. **OWNER STOP** — ask Chad to: (a) run `eff setup` in a terminal (hidden-input cookie entry; never in chat); (b) switch the effort level to **Ultracode**; (c) reply "go".
-6. Stage **C** (QA + penetration testing, loop until two clean rounds; includes the B11 Lane 2 / B15 `claude plugin eval` runs and the live-league acceptance items) → Stage **D** (final gate, merge `build/phase-1` → `main`, README status ✅, install the launch config + Skills for Chad).
-
-Optional: `docs/scratch/workflows/effmcp-b2a-gate.js` re-runs B2a's independent gate from the repo state (not needed — B2a is closed by the R5 rulings).
+6. Stage **C** (QA + penetration testing, loop until two clean rounds; includes the B11 Lane 2 / B15 `claude plugin eval` runs and the live-league acceptance items — C3, B14 and C8's `table_n` accrue in season) → Stage **D** (final gate, merge `build/phase-1` → `main`, README status ✅, install the launch config + Skills for Chad).
 
 ## Build facts (Stage A, verified by the orchestrator 2026-10-06)
 
@@ -113,7 +114,20 @@ Optional: `docs/scratch/workflows/effmcp-b2a-gate.js` re-runs B2a's independent 
   ran — is carried under a stand-in no tool declares (held for all 34 tools) and answers a coded
   VALIDATION `(root) (unknown key)` like any unknown key, top level and nested, no prototype touched.
   **Still for the orchestrator:** R6 (C2's two clauses; the two soft rulings) and this file's
-  ▶ NEXT STEP, which still describes the 2026-10-07 pause (its step 4 is the orchestrator's).
+  ▶ NEXT STEP, which still described the 2026-10-07 pause (rewritten in round 3).
+- **Gate round 3 (2026-10-11, fixer):** the gate stayed RED on C2 alone (hard, a plan-text dispute,
+  no R6 ruling yet) plus a stale ▶ NEXT STEP; no failed check. No code defect: the C2/C3 backtests
+  and the calibration suite re-run green at `226f21f`, `tsc --noEmit` clean, numbers unchanged.
+  Done at root: ▶ NEXT STEP rewritten to the B2b state (the R6 items with their evidence and options,
+  the re-gate, then the owner stop); C2's ±5 evidence made test-held — `reliabilityByDecile` carries
+  `reliability_if_calibrated`, the reliability term a perfectly calibrated forecaster issuing the same
+  forecasts expects from sampling alone (exact cases, a seeded Monte-Carlo, a bound property in
+  `tests/domain/analytics/calibration/reliability.test.ts`): the as-played P(win) term is 0.0020
+  (`core`) / 0.0031 (`full`) against ≈ 0.0060 — below the floor, so the decile misses are consistent
+  with sampling noise on this sample (E2's counterfactual `p_win_after` sits above it, 0.011, the optimiser's
+  selection bias already named). `docs/evals/phase3-startsit.md` regenerated (only those lines
+  change) and ruling 2 in `docs/evals/phase3-summary.md` now cites the floor and lists two options.
+  No criterion, threshold or verdict changed. **For the orchestrator:** R6 (step 2 above).
 
 ## The findings that shape the product (verified by the orchestrator)
 
@@ -450,3 +464,5 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-10-07 — Stage B2a ✅: 17 agents (integration killed by the Mac sleeping after committing its fixes; the gate's 3 fix rounds completed the work); last gate round: no code defect; rulings R5-3 (B2 denominator), R5-4 (B7 basis), R5-5 (Lane 2/B15 to Stage C). Paused at Chad's request; resume steps in ▶ NEXT STEP.
 - 2026-10-10 — Stage B2b integration (Phase 3): v2-opportunity in E1 under `full`, store migration 002, E5 `league_fitted`, E7 cascade v2, E10 calibration, E13 attribution and proposals, `eff tune` on the real store; C1–C10 in `docs/evals/phase3-summary.md`; facts in "Build facts (Stage B2b)". The B2b gate is the orchestrator's next step.
 - 2026-10-10 — B2b gate round 1 RED (C2 waiting on rulings; C2's `full` evidence on Phase 2's model) → fixer: C2 replayed on v2-opportunity (identical-to-ESPN lineups on both bases, shown structural), the seeding simulator's posterior mean draw, C5 on the Phase 3 forecast (rule vs trending met) and the league-fitted demand curve, the fixture tooling's write-host import; rulings requested for R6 (C2 × 2, research 05 §1.3, research 05 §2.4's k).
+- 2026-10-11 — B2b gate round 2 RED (C2 alone, waiting on R6) → fixer: the two transport findings (`-32700` for a non-JSON stdin line; a `__proto__` argument key reaches the strict schema).
+- 2026-10-11 — B2b gate round 3 RED (C2 alone, waiting on R6; ▶ NEXT STEP stale) → fixer: ▶ NEXT STEP rewritten to the B2b state; C2's calibration evidence gains the reliability term's calibrated floor (test-held; the as-played term sits below it). Next: the orchestrator rules R6 and re-gates.
