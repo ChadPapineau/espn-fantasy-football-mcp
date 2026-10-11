@@ -299,6 +299,74 @@ describe("C8: E10 logs claims and reads the calibration table; E13 scores them",
   });
 });
 
+describe("C8/C9: the retrospective's one-week-later and trace paths", () => {
+  it("scores a role claim one week later from the snap shares around it", async () => {
+    // a rostered RB of the fixture league with snap counts in the seeded 2026 weeks (fx10h-usage)
+    expect(week4Players().some((x) => x.id === 4379399)).toBe(true);
+    world.store.repos.scoredClaims.log(
+      L,
+      {
+        season: SEASON,
+        week: 3,
+        player_id: 4379399,
+        claim: {
+          source: "rss.rotowire",
+          type: "role",
+          signal: "up",
+          prior_status: null,
+          prior_p: 1,
+        },
+      },
+      "2026-09-18T00:00:00.000Z",
+    );
+    const role = () =>
+      world.store.repos.scoredClaims
+        .pending(L, SEASON, 3)
+        .filter((c) => c.claim.type === "role" && c.player_id === 4379399);
+    expect(role()).toHaveLength(1);
+    await tool("espn_analyze_retrospective", { week: 4 });
+    expect(role()).toHaveLength(0);
+  });
+
+  it("a stored v2 trace is read back and carried into the attribution (realised from the week)", async () => {
+    const p = week4Players().find((x) => x.pos === 3 && x.id !== 4379399);
+    expect(p).toBeDefined();
+    world.store.repos.projections.put({
+      player_id: p?.id ?? 0,
+      gsis_id: null,
+      season: SEASON,
+      week: 4,
+      model_version: "v2-opportunity",
+      made_at: "2026-09-22T12:00:00.000Z",
+      inputs_as_of: "2026-09-22T12:00:00.000Z",
+      expectation: { targets: 7, rec: 4.6, rec_yd: 55 },
+      samples: [],
+      p_active: 1,
+      reported_mean: 10.5,
+      trace: {
+        matchup: { z: 0.05, beta: 0.5 },
+        weather_mult: null,
+        shares: [{ name: "target_share", history: [0.18, 0.2], half_life: 8, realised: null }],
+        rates: [
+          {
+            name: "catch_rate",
+            n_obs: 15,
+            observed: 0.66,
+            prior: 0.62,
+            k: 10,
+            realised: null,
+            realised_n: 0,
+          },
+        ],
+      },
+    });
+    const r = await tool("espn_analyze_retrospective", { week: 4 });
+    const attr = r.data.attribution as Record<string, number>;
+    // the matchup lift is counted for the traced row (reported beside the layers, never inside)
+    expect(attr["matchup_lift.n"]).toBeGreaterThanOrEqual(1);
+  });
+});
+
 describe("C5: E5 logs its priority runs and re-solves the premium from 13 of them", () => {
   it("cold-start until the feed holds a regular season of runs, then league_fitted", async () => {
     const first = await tool("espn_analyze_waivers", { mode: "priority" });

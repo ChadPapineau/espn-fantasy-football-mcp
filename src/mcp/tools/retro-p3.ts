@@ -28,6 +28,9 @@ import { leagueRef, optionalDataset, turn } from "./common.js";
 /** Weeks of box scores the attribution reads (the re-fit window ends at the scored week). */
 export const ATTRIBUTION_WINDOW_WEEKS = 8;
 
+/** Box-score entries joined per turn of the event loop (plan 03 §1.2; plan 10 A16a). */
+export const ATTRIBUTION_PER_TURN = 25;
+
 /** The applied overrides as the retrospective's TunedParameters (history is the CLI's, not read). */
 export function tunedDocOf(ctx: ToolContext): TunedParameters | null {
   const t = ctx.options.tuned;
@@ -93,7 +96,9 @@ export async function attributionRows(
         });
     }
     const seen = new Set<number>();
-    for (const e of entries) {
+    for (const [n, e] of entries.entries()) {
+      // two indexed reads and one translation per entry: a turn every ATTRIBUTION_PER_TURN
+      if (n > 0 && n % ATTRIBUTION_PER_TURN === 0) await turn();
       const id = e.player.ref.id;
       if (seen.has(id)) continue;
       seen.add(id);
