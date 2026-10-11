@@ -26,10 +26,10 @@ passed to agents in their prompts and kept in local environment/config only — 
 
 ## RESUME HERE
 
-**PAUSED 2026-10-07** at a clean boundary — see `docs/HANDOFF.md` ▶ NEXT STEP for the exact resume steps.
+**OWNER STOP (2026-10-11)** — see `docs/HANDOFF.md` ▶ NEXT STEP for what Chad does and the exact launch on "go".
 
 - Stage A ✅ 2026-10-06 (`effmcp-foundation`, gate green at `bd64cba`).
 - Stage B1 ✅ 2026-10-06 (`effmcp-core`, 23 agents; closed by rulings R5-1/R5-2).
-- Stage B2a ✅ 2026-10-07 (`effmcp-expansion-a`, 17 agents; closed by rulings R5-3–R5-5; HEAD `b72a917` + docs).
-- **Next: Stage B2b** — `docs/scratch/workflows/effmcp-expansion-b.js` with `args.probe_league_ids` (from local memory; never committed).
-- Then: owner stop (eff setup + Ultracode + "go") → Stage C (QA/pentest, incl. Lane 2 + B15) → Stage D (merge + install).
+- Stage B2a ✅ 2026-10-07 (`effmcp-expansion-a`, 17 agents; closed by rulings R5-3–R5-5).
+- Stage B2b ✅ 2026-10-11 (`effmcp-expansion-b`, 16 agents; closed by rulings R6-1–R6-5; gate verified `787c463`).
+- **Next: owner stop** (eff setup + league id to the orchestrator + Ultracode + "go") → **Stage C** `docs/scratch/workflows/effmcp-qa-pentest.js` (args from local memory; never committed) → Stage D (merge + install).
