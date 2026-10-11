@@ -13,7 +13,12 @@
 // never tolerated or hidden). Beside the Brier decomposition's reliability term the report carries
 // the term a perfectly calibrated forecaster issuing the same forecasts would expect from sampling
 // alone (B2b gate round 3: the yardstick for reading the observed term as noise or as miscalibration
-// — a comparison with the resolution term is not one). Pure. New here.
+// — a comparison with the resolution term is not one). Stage C (changelog R6-2): the floor is the
+// term's MEAN; `reliabilityNull` adds its whole sampling distribution under calibration — a seeded
+// Monte-Carlo that draws one outcome per independent event and, for a mirrored family (each
+// matchup scored from both sides), gives the mirror the complementary outcome — so "twice the
+// floor" can be read as a p-value instead of a ratio. Pure (the Rng is injected). New here.
+import type { Rng } from "../../clock.js";
 import {
   RELIABILITY_BINS,
   at,
@@ -36,6 +41,11 @@ export const CALIBRATION = Object.freeze({
   alpha: 0.05,
   /** Most forecasts one report accepts (a season replay holds a few hundred). */
   maxForecasts: 200_000,
+  /** Monte-Carlo draws of the calibrated forecaster's reliability term (reliabilityNull default). */
+  nullSims: 10_000,
+  /** Fewest / most draws reliabilityNull accepts. */
+  minNullSims: 100,
+  maxNullSims: 200_000,
 });
 
 /** The standard normal quantile Φ⁻¹(p) for p in (0, 1), by bisection on normalCdf (|error| < 1e-9). */
@@ -262,4 +272,150 @@ function reliabilityIfCalibrated(bins: readonly (readonly number[])[], n: number
     terms.push(stableSum(ps.map((p) => p * (1 - p))) / ps.length);
   }
   return stableSum(terms) / n;
+}
+
+/** The calibrated forecaster's sampling distribution of the reliability term (changelog R6-2). */
+export interface ReliabilityNull {
+  /** The observed reliability term of the scored forecasts (every side). */
+  readonly observed: number;
+  /** Independent events drawn (a matchup counts once). */
+  readonly events: number;
+  /** Forecasts scored: `events`, or 2 × `events` when mirrored. */
+  readonly forecasts: number;
+  readonly mirrored: boolean;
+  readonly sims: number;
+  /** Mean simulated term (its expectation is `reliability_if_calibrated` of the same forecasts). */
+  readonly mean: number;
+  /** 95th / 99th percentile of the simulated term. */
+  readonly q95: number;
+  readonly q99: number;
+  /**
+   * (1 + #{simulated ≥ observed}) / (1 + sims): how often a perfectly calibrated forecaster issuing
+   * exactly these forecasts scores a term at least as large (the Monte-Carlo p-value; never 0).
+   */
+  readonly p_value: number;
+}
+
+/** The fixed part of the term: each forecast's bin, each bin's size and mean forecast. */
+interface BinPlan {
+  readonly bin: readonly number[];
+  readonly size: readonly number[];
+  readonly meanP: readonly number[];
+}
+
+function binPlan(ps: readonly number[], bins: number): BinPlan {
+  const bin = ps.map((p) => binIndex(p, bins));
+  const size = new Array<number>(bins).fill(0);
+  const sums: number[][] = Array.from({ length: bins }, () => []);
+  ps.forEach((p, i) => {
+    const k = at(bin, i);
+    size[k] = at(size, k) + 1;
+    at(sums, k).push(p);
+  });
+  return { bin, size, meanP: sums.map((s) => (s.length === 0 ? 0 : stableSum(s) / s.length)) };
+}
+
+/** Σ_k n_k (f̄_k − ō_k)² / N for one set of outcomes (the Brier decomposition's reliability). */
+function reliabilityTerm(plan: BinPlan, outcomes: readonly boolean[], hits: number[]): number {
+  hits.fill(0);
+  outcomes.forEach((o, i) => {
+    if (o) {
+      const k = at(plan.bin, i);
+      hits[k] = at(hits, k) + 1;
+    }
+  });
+  let term = 0;
+  plan.size.forEach((n, k) => {
+    if (n > 0) term += n * (at(plan.meanP, k) - at(hits, k) / n) ** 2;
+  });
+  return term / outcomes.length;
+}
+
+/**
+ * The reliability term's distribution under perfect calibration (changelog R6-2, Stage C): every
+ * event's outcome drawn from its own forecast, `sims` times. `events` lists each INDEPENDENT event
+ * once with its forecast and observed outcome; `mirrored` scores every event from both sides — the
+ * forecast p with the outcome and 1 − p with its complement, as a head-to-head family that counts
+ * each matchup for both teams does — so the mirror's outcome is never drawn independently (two
+ * mirrored deciles move together, which roughly doubles the term's spread; the mean is unchanged).
+ * Deterministic for a given Rng state. Throws AnalyticsError `invalid_request` on an empty or
+ * oversized list, a malformed event, or bad options.
+ */
+export function reliabilityNull(
+  events: readonly ProbabilityOutcome[],
+  opts: {
+    readonly rng: Rng;
+    readonly mirrored?: boolean;
+    readonly sims?: number;
+    readonly bins?: number;
+  },
+): ReliabilityNull {
+  const sims = opts.sims ?? CALIBRATION.nullSims;
+  const bins = opts.bins ?? RELIABILITY_BINS;
+  const mirrored = opts.mirrored === true;
+  ensure(
+    Number.isInteger(sims) && sims >= CALIBRATION.minNullSims && sims <= CALIBRATION.maxNullSims,
+    "sims out of range",
+    "sims",
+  );
+  ensure(Number.isInteger(bins) && bins >= 1 && bins <= 100, "bins must be 1..100", "bins");
+  ensure(
+    typeof (opts.rng as Partial<Rng> | undefined)?.next === "function",
+    "an rng is required",
+    "rng",
+  );
+  const list: unknown = events;
+  ensure(
+    Array.isArray(list) &&
+      list.length >= 1 &&
+      list.length * (mirrored ? 2 : 1) <= CALIBRATION.maxForecasts,
+    "event count out of range",
+    "events",
+  );
+  try {
+    brierWithDecomposition(events, bins);
+  } catch {
+    ensure(false, "an event must be a probability in [0, 1] with a boolean outcome", "events");
+  }
+  const scored = mirrored
+    ? events.flatMap((e) => [e, { p: 1 - e.p, outcome: !e.outcome }])
+    : [...events];
+  const plan = binPlan(
+    scored.map((x) => x.p),
+    bins,
+  );
+  const hits = new Array<number>(bins).fill(0);
+  const observed = reliabilityTerm(
+    plan,
+    scored.map((x) => x.outcome),
+    hits,
+  );
+  const draws = new Array<number>(sims);
+  const outcomes = new Array<boolean>(scored.length).fill(false);
+  let atLeast = 0;
+  for (let s = 0; s < sims; s++) {
+    events.forEach((e, i) => {
+      const o = opts.rng.next() < e.p;
+      if (mirrored) {
+        outcomes[2 * i] = o;
+        outcomes[2 * i + 1] = !o;
+      } else outcomes[i] = o;
+    });
+    const term = reliabilityTerm(plan, outcomes, hits);
+    draws[s] = term;
+    if (term >= observed - EPS) atLeast += 1;
+  }
+  const sorted = [...draws].sort((a, b) => a - b);
+  const quantile = (q: number): number => at(sorted, Math.max(0, Math.ceil(q * sims) - 1));
+  return {
+    observed,
+    events: events.length,
+    forecasts: scored.length,
+    mirrored,
+    sims,
+    mean: stableSum(draws) / sims,
+    q95: quantile(0.95),
+    q99: quantile(0.99),
+    p_value: (1 + atLeast) / (1 + sims),
+  };
 }

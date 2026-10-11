@@ -14,12 +14,16 @@ import {
 import { AnalyticsError } from "../../../../src/domain/analytics/errors.js";
 import { row } from "./helpers/roster.js";
 
+const pair = { mu_m: 100, mu_o: 100, sd: 30, real_m: 0, real_o: 0 };
 const h2h = (opponent_total: number) => ({
   outcome_played: null,
   p_win_played: 0.5,
   p_win_auto: 0.5,
   outcome_auto: null,
   opponent_total,
+  opponent_id: null,
+  played: pair,
+  auto: pair,
 });
 
 describe("regretOf / compareRegret", () => {

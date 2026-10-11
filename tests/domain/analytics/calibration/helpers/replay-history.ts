@@ -217,6 +217,7 @@ export async function replaySeason(
           roster: s.roster,
           players: asPlayers(t.entries),
           opponent: opp === null ? null : asPlayers(opp.entries),
+          ...(opp === null ? {} : { opponent_id: opp.team_id }),
           realised,
           espn_projection: espn,
           last_week: prev,

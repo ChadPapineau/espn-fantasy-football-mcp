@@ -1,9 +1,17 @@
 // index.ts — the start/sit and win-probability calibration surface (plan 10 C2, C3): the held-out
 // replay of one team-week (replay.ts), regret comparisons and the "did it matter" share (regret.ts),
-// P(win) reliability per decile (reliability.ts), the auto-default switch rule and its committed
-// record (objectiveSwitch.ts), and the comparison with ESPN's winProbability / playoffPct
-// (espn.ts). E2 imports objectiveSwitch.ts directly (never this barrel — replay.ts imports E2).
-export { START_SIT_RULES, type StartSitH2h, type StartSitRow, type StartSitRule } from "./types.js";
+// P(win) reliability per decile and the calibrated forecaster's sampling distribution of its
+// reliability term (reliability.ts), the forecast margin's calibration (margin.ts; changelog R6-2),
+// the auto-default switch rule and its committed record (objectiveSwitch.ts), and the comparison
+// with ESPN's winProbability / playoffPct (espn.ts). E2 imports objectiveSwitch.ts directly (never
+// this barrel — replay.ts imports E2).
+export {
+  START_SIT_RULES,
+  type H2hPairFacts,
+  type StartSitH2h,
+  type StartSitRow,
+  type StartSitRule,
+} from "./types.js";
 export { replayStartSit, type StartSitTeamWeek } from "./replay.js";
 export {
   beatsInEverySeason,
@@ -20,12 +28,22 @@ export {
   nToResolve,
   normalQuantile,
   reliabilityByDecile,
+  reliabilityNull,
   wilsonInterval,
   type BinVerdict,
   type CalibrationStatus,
   type ReliabilityBin,
+  type ReliabilityNull,
   type ReliabilityReport,
 } from "./reliability.js";
+export {
+  MARGIN,
+  chiSquareQuantile,
+  marginCalibration,
+  tQuantile,
+  type MarginCalibration,
+  type MarginForecast,
+} from "./margin.js";
 export {
   OBJECTIVE_SWITCH_RECORD,
   SWITCH_RULE,

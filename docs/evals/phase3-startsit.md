@@ -14,12 +14,13 @@ fail when a table here differs from what a fresh replay computes. Regenerate wit
 Any change to E1 (v1 or v2-opportunity), E2, `totals.ts`, the history fixtures or the C1 excerpt
 changes these numbers: rerun, review, commit.
 
-## Verdicts (2026-10-10; the `full` basis re-run on v2-opportunity in the B2b fix round)
+## Verdicts (2026-10-10; the `full` basis re-run on v2-opportunity in the B2b fix round; R6-2 in Stage C, 2026-10-11)
 
 | item | verdict | evidence |
 |---|---|---|
 | C2 regret vs "start by last week's points" | **met** (hard) — below in both seasons, on both bases | about 13.4 points per team-week lower (below) |
 | C2 regret vs "start by ESPN's projection" | **not attainable at `weight_espn = 1.0` on either basis** — ruling requested (R6) | E2's lineup *is* ESPN's in all 308 team-weeks under `core` **and** under `full`: every distribution either toolset serves has ESPN's projection as its mean (position_cv by construction; v2-opportunity pinned to it — 0 of 4,045 player_sim player-weeks off ESPN's mean, coverage table), so the `mean` objective (what `auto` resolves to) picks the same assignment by the same numbers. "Below" could come only from `pwin` (gated by the regret test below, which cannot fire) or from a weight below 1.0 (gated by B14, ADV OBJ-02). The earlier `full` margin (0.04 / 0.0006 points per team-week) was Phase 2 player_sim's 3× rescale clamp, a basis `full` no longer serves to anyone v2 models; it is gone on v2 |
+| C2 E2's own `p_win_after` (R6-2's named finding, Stage C) | **not a defect** — sampling noise; engine unchanged | reliability 0.0114 / 0.0110 against a calibrated forecaster's mean 0.0060 / 0.0059 and 95th percentile 0.0144 (P = 0.104 / 0.118); margin slope 1.01 (0.47–1.55), standardised mean square 1.041 / 0.997 (0.78–1.25); the optimiser's selection bias is real in level (3.88 vs 2.75 points below projection per team-week) but sits on both sides of E2's counterfactual and cancels; the 0.2–0.3 tail: 12 matchups, the favourite ahead by 12.7 / 6.9 points against 18.4 / 19.2 forecast. Section "E2's own `p_win_after`" |
 | C2 `P(win)` within ±5 per decile | **unresolved on both bases** — ruling requested (R6) | as played: position_cv two mirrored deciles miss by 0.6 points (5.6, n = 49 each); v2-opportunity by 3.5 points (8.5, n = 47 each) — both under-confident, both inside the deciles' Wilson intervals, family-wise consistent, where resolving ±5 needs ≈ 355 forecasts per decile; Brier 0.2233 / 0.2235 vs 0.25; the reliability term 0.0020 / 0.0031 is below the ≈ 0.0060 a perfectly calibrated forecaster issuing the same forecasts expects from sampling alone. E2's own `p_win_after` under v2: every checked decile within 4.9 points (`met`) |
 | C2 "did it matter" | **reported** | the product's lineup differs from the manager's in 149 of 272 head-to-head team-weeks and flips 20 results (10 to a win, 10 to a loss), on both bases |
 | C2 regret test → `auto` default | **implemented and tested on v2; no switch** | on what `full` serves, pwin and mean differ in 8 team-weeks of 308 (< 30) and pwin's regret is not below mean's in 2025 after week 3; and no replayed lineup is all-player_sim (K and D/ST keep position_cv), so the switch could not apply to any of them: `auto` stays `mean` |
@@ -240,7 +241,10 @@ player is a wider spread per lineup, so P(win) leans toward ½. No dispersion is
 held-out seasons would then not be held out. E2's own `p_win_after` (scored against its
 counterfactual, the opponent's best-by-mean lineup) is `met` under v2 (within 4.9 points in every
 checked decile) and `unresolved` under position_cv (5.2 on 82); its Brier (0.244) is worse than the
-as-played forecast's because both best-by-mean lineups carry the optimiser's upward bias on the mean.
+as-played forecast's mostly through resolution (0.0157 / 0.0147 against 0.0264 / 0.0278): two
+best-by-mean lineups are closer on paper than two lineups as played, which include the manager's
+mistakes the forecast calls correctly. (The B2b text blamed the optimiser's selection bias; Stage C
+showed that bias cancels in this family — see "E2's own `p_win_after`" below.)
 **The noise floor (B2b gate round 3).** The yardstick for the decomposition's reliability term is
 what a perfectly calibrated forecaster issuing the same 272 forecasts would score from sampling alone
 (`reliability_if_calibrated`, printed in each family's line above; exact formula and a seeded
@@ -248,13 +252,89 @@ Monte-Carlo in `tests/domain/analytics/calibration/reliability.test.ts`). The pr
 **below** it on both bases — 0.0020 (position_cv) and 0.0031 (v2) against ≈ 0.0060 — so the decile
 misses are no larger than calibrated forecasts produce on this sample; a dispersion defect large
 enough for ten-team deciles to see would put the term above the floor. E2's own `p_win_after` sits
-above it (0.0114 / 0.0110 against ≈ 0.0059), the optimiser's selection bias named above, in a family
-whose literal ±5 is `met` under v2. Each matchup contributes both sides, so the term's spread is
-about twice an independent sample's; the floor is its expectation either way.
+above it (0.0114 / 0.0110 against ≈ 0.0059), in a family whose literal ±5 is `met` under v2 — R6-2
+named it for Stage C, and the next section shows it is sampling noise (P = 0.10 / 0.12 against the
+calibrated forecaster's whole distribution, not only its mean). Each matchup contributes both sides,
+so the term's spread is about twice an independent sample's; the floor is its expectation either way.
 **For the orchestrator (R6):** two seasons of a ten-team league (136 decided matchups, 272 forecasts)
 fill the central deciles with 47–70 forecasts each, so the literal ±5-per-decile criterion is a
 multi-season measurement (≈ 355 per central decile); this report keeps the literal numbers and flags
 `unresolved` instead of passing or failing on noise.
+
+## C2 — E2's own `p_win_after`: the R6-2 finding (Stage C)
+
+**What R6-2 named** (`docs/plan/changelog.md` §R6): E2's own `p_win_after` — the number the tool
+shows — carries a reliability term about twice its calibrated-forecaster floor (0.0114 / 0.0110
+against ≈ 0.0059), and its sparse tails run the wrong way (0.2–0.3: forecast 0.27, the underdog won 7
+of 12; mirrored at 0.7–0.8); the B2b report attributed it to the optimiser's selection bias on both
+best-by-mean lineups. Reproduced exactly on both bases (the calibration block above). Investigated
+with three tools added to `src/domain/analytics/calibration/` and generated below by
+`tests/backtest/lineup-history.test.ts`: the reliability term's whole sampling distribution under
+calibration (`reliabilityNull`: 10 000 seeded draws, one outcome per matchup, its mirror the
+complement — the family scores every matchup from both sides), the margin calibration
+(`marginCalibration`: the realised margin's slope on the forecast margin and the standardised
+residual's mean square, one side per matchup — every one of the 136 matchups carries a margin, while
+a tail decile holds a dozen binary results), and the selection bias in level (each pair's projected
+and realised totals, now carried in the replay's head-to-head facts).
+
+<!-- pwin-after:start -->
+| basis | forecast family | matchups (forecasts) | reliability term | calibrated forecaster: mean | …95th percentile | P(term ≥ observed) | margin slope (95 % CI) | mean squared standardised residual (range if the spread is right) |
+|---|---|---:|---:|---:|---:|---:|---|---|
+| position_cv (`core`) | P(win) of the two lineups as played (primary) | 136 (272) | 0.0020 | 0.0060 | 0.0143 | 0.869 | 1.23 (0.81–1.65) | 0.898 (0.78–1.25) |
+| position_cv (`core`) | E2's `p_win_after` (auto vs the opponent's best-by-mean lineup) | 136 (272) | 0.0114 | 0.0060 | 0.0144 | 0.104 | 1.01 (0.47–1.55) | 1.041 (0.78–1.25) |
+| v2-opportunity where modelled (`full`) | P(win) of the two lineups as played (primary) | 136 (272) | 0.0031 | 0.0060 | 0.0145 | 0.713 | 1.23 (0.81–1.65) | 0.859 (0.78–1.25) |
+| v2-opportunity where modelled (`full`) | E2's `p_win_after` (auto vs the opponent's best-by-mean lineup) | 136 (272) | 0.0110 | 0.0059 | 0.0144 | 0.118 | 1.01 (0.47–1.55) | 0.997 (0.78–1.25) |
+
+| basis | head-to-head sides | my lineup: realised − projected, as played | …E2's best-by-mean lineup | the opponent's best-by-mean − as played: projected | …realised |
+|---|---:|---:|---:|---:|---:|
+| position_cv (`core`) | 272 | -2.75 | -3.88 | 1.29 | 0.16 |
+| v2-opportunity where modelled (`full`) | 272 | -2.75 | -3.88 | 1.29 | 0.16 |
+
+| basis | E2's `p_win_after` decile (the underdog's side; its mirror is 0.7–0.8) | matchups | mean forecast | underdog won | …by < 10 points | forecast margin | realised margin (± 1 SE) | binomial P(≥ won), before multiplicity |
+|---|---|---:|---:|---:|---:|---:|---|---:|
+| position_cv (`core`) | 0.2–0.3 | 12 | 0.266 | 7 | 4 | -18.4 | -12.7 ± 8.9 | 0.020 |
+| v2-opportunity where modelled (`full`) | 0.2–0.3 | 12 | 0.263 | 7 | 4 | -19.2 | -6.9 ± 7.0 | 0.019 |
+<!-- pwin-after:end -->
+
+Reading it — **not a defect; the engine is unchanged, so the calibration block above is the same
+before and after this investigation** (both families, both bases):
+
+- **The floor is a mean, not a bound.** A perfectly calibrated forecaster issuing exactly these
+  forecasts exceeds 0.0114 / 0.0110 one time in ten (P = 0.104 / 0.118; its 95th percentile is
+  0.0144). Mirrored deciles move together and the two sparse tail deciles weigh as much as the full
+  central ones, so the term has few degrees of freedom and a spread about as large as its mean:
+  "twice the floor" is ordinary. The primary family sits at P = 0.87 / 0.71.
+- **The tails are a dozen binary results.** The twelve 0.2–0.3 matchups (the 0.7–0.8 ones seen from
+  the other side) carry 0.0089 of the 0.0114 (2 × 12 × 0.318² / 272, from the decile table). By
+  their margins the favourite out-scored the underdog by 12.7 points against a forecast 18.4
+  (position_cv; within one standard error; 6.9 against 19.2 under v2, 1.8 standard errors), and four
+  of the underdog's seven wins were by fewer than ten points. Seven or more underdog wins has a
+  binomial tail of 0.02 for that one decile — the worst of four independent decile pairs, and
+  family-wise consistent, as the decile table already says.
+- **The mechanisms that would make it a defect are absent.** Across all 136 margins the slope is
+  1.01 (95 % CI 0.47–1.55): no regression toward 0, which is what a selection bias favouring the
+  side with the higher projection, or over-dispersed means, would produce. The standardised
+  residual's mean square is 1.041 / 0.997 inside 0.78–1.25: the spread is right.
+- **The optimiser's selection bias is real — in level, on both sides.** A best-by-mean lineup
+  realises 3.88 points below its projected total per team-week against 2.75 for the lineup as played,
+  and the opponent's best-by-mean lineup out-projects his lineup as played by 1.29 points but
+  out-scores it by 0.16. E2's counterfactual pits one best-by-mean lineup against another, so the bias
+  cancels in the margin (summed over both sides of every matchup the margin's error is exactly 0) and
+  leaves `p_win_after` unbiased. The B2b attribution was wrong; this section supersedes it. A
+  selection-bias correction or a re-fitted dispersion here would fit noise — and the fixtures carry
+  ESPN's weekly projections only for the held-out 2024–2025 seasons, so nothing could be fitted on
+  2023 without touching them.
+
+Held (`tests/backtest/lineup-history.test.ts`, R6-2 cases, both bases, both families): every
+head-to-head side has its complementary mirror; the reliability term inside the calibrated
+distribution (P ≥ 0.05, below its 95th percentile); slope interval holding 1; the mean square inside
+its range; the selection bias larger for a best-by-mean lineup than for the lineup as played, and
+cancelling in E2's margin. **Reported, not changed:** a comparison between a best-by-mean lineup and
+one that is not leans by the level gap — about 1.1 points of projected total, ≈ 1.5 points of P(win)
+at the matchups' ≈ 30-point spread — which touches E2's projected gain over the current lineup
+(`e_points_after − e_points_before`, projected 1.29 against 0.16 realised on average here) and
+`p_win_before` against the opponent's best-by-mean lineup, not `p_win_after`; below what two seasons
+resolve.
 
 ## C2 — did it matter
 

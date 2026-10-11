@@ -2,8 +2,9 @@
 // and their realised points (hindsight ≥ every rule; ESPN's projection and last week's points as the
 // same exact assignment by those numbers; the manager's lineup as played), the head-to-head facts
 // (the as-played P(win) is the model's normal approximation of the two lineups as played, the auto
-// lineup's counterfactual against the opponent's best-by-mean lineup, ties null), the switch record
-// passed through to E2, and refusals (an empty roster, a locked player).
+// lineup's counterfactual against the opponent's best-by-mean lineup, ties null; since Stage C each
+// pair's projected and realised totals and the opponent's id — Φ(margin / sd) is the stored P(win)),
+// the switch record passed through to E2, and refusals (an empty roster, a locked player).
 import { describe, expect, it } from "vitest";
 import {
   replayStartSit,
@@ -11,7 +12,8 @@ import {
 } from "../../../../src/domain/analytics/calibration/index.js";
 import { AnalyticsError } from "../../../../src/domain/analytics/errors.js";
 import { bestLineup, type LineupPlayer } from "../../../../src/domain/analytics/lineup.js";
-import { pairMoments, pWinNormal } from "../../../../src/domain/analytics/totals.js";
+import { normalCdf } from "../../../../src/domain/analytics/math.js";
+import { diffSd, pairMoments, pWinNormal } from "../../../../src/domain/analytics/totals.js";
 import { slotClassOf } from "../../../../src/domain/league/slots.js";
 import { clockAndRng, referenceSlots } from "../helpers.js";
 import { roster } from "./helpers/roster.js";
@@ -109,6 +111,49 @@ describe("replayStartSit", () => {
     expect(h?.outcome_played).toBe((r.realised.manager ?? 0) > oppTotal);
     expect(h?.p_win_auto).toBeGreaterThan(0);
     expect(typeof h?.outcome_auto).toBe("boolean");
+  });
+
+  it("carries each pair's projected and realised totals: Φ(margin / sd) is the stored P(win); the opponent's id when given", () => {
+    const tw = teamWeek({ opponent_id: 2 });
+    const r = replayStartSit(tw);
+    const h = r.h2h;
+    if (h === null) throw new Error("expected head-to-head facts");
+    expect(h.opponent_id).toBe(2);
+    expect(replayStartSit(teamWeek()).h2h?.opponent_id).toBeNull();
+    const member = (p: LineupPlayer) => ({
+      player_id: p.player_id,
+      position: p.position,
+      pro_team_id: p.pro_team_id,
+      points: p.points,
+    });
+    const real = (ids: readonly number[]): number =>
+      Math.round(ids.reduce((s, id) => s + (tw.realised.get(id) ?? 0), 0) * 100) / 100;
+    // as played
+    const mine = tw.players.filter(starts);
+    const theirs = (tw.opponent ?? []).filter(starts);
+    const pm = pairMoments(mine.map(member), theirs.map(member));
+    expect(h.played.mu_m).toBeCloseTo(pm.mu_m, 6);
+    expect(h.played.mu_o).toBeCloseTo(pm.mu_o, 6);
+    expect(h.played.sd).toBeCloseTo(diffSd(pm), 6);
+    expect(h.played.real_m).toBe(r.realised.manager);
+    expect(h.played.real_o).toBe(h.opponent_total);
+    expect(normalCdf((h.played.mu_m - h.played.mu_o) / h.played.sd)).toBeCloseTo(h.p_win_played, 5);
+    // the auto counterfactual: E2's lineup against the opponent's best-by-mean lineup
+    const autoIds = new Set((r.lineup_key.auto ?? "").split(",").map(Number));
+    const oppBest = bestLineup(tw.roster, tw.opponent ?? []);
+    const pa = pairMoments(
+      tw.players.filter((p) => autoIds.has(p.player_id)).map(member),
+      oppBest.map(member),
+    );
+    expect(h.auto.mu_m).toBeCloseTo(pa.mu_m, 6);
+    expect(h.auto.mu_o).toBeCloseTo(pa.mu_o, 6);
+    expect(h.auto.real_m).toBe(r.realised.auto);
+    expect(h.auto.real_o).toBe(real(oppBest.map((p) => p.player_id)));
+    // E2's p_win_after is rounded to 4 digits
+    expect(
+      Math.abs(normalCdf((h.auto.mu_m - h.auto.mu_o) / h.auto.sd) - h.p_win_auto),
+    ).toBeLessThan(1e-4);
+    expect(h.outcome_auto).toBe(h.auto.real_m > h.auto.real_o);
   });
 
   it("a tie reads null; no h2h flag or no opponent → no head-to-head facts; no last week → null rule", () => {

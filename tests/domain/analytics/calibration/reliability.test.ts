@@ -4,7 +4,10 @@
 // met (calibrated, large n), not_met (a resolvable miss; an inconsistent decile), unresolved (a
 // literal miss the sample cannot resolve), insufficient_n — plus hostile input and properties; and
 // the reliability term a perfectly calibrated forecaster would expect (exact on hand-computed cases,
-// matched by a seeded Monte-Carlo of calibrated outcomes, bounded by a property).
+// matched by a seeded Monte-Carlo of calibrated outcomes, bounded by a property); and (Stage C,
+// changelog R6-2) that term's whole sampling distribution under calibration — the observed term
+// exactly the decomposition's, its mean the floor, a mirrored family's spread wider than an
+// independent one's, p-values uniform under calibration and tiny under gross miscalibration.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { seededRng } from "../../../../src/domain/clock.js";
@@ -13,6 +16,7 @@ import {
   nToResolve,
   normalQuantile,
   reliabilityByDecile,
+  reliabilityNull,
   wilsonInterval,
 } from "../../../../src/domain/analytics/calibration/index.js";
 import { AnalyticsError } from "../../../../src/domain/analytics/errors.js";
@@ -255,5 +259,138 @@ describe("reliability_if_calibrated — the noise floor of the reliability term"
         },
       ),
     );
+  });
+});
+
+describe("reliabilityNull — the calibrated forecaster's sampling distribution of the term (R6-2)", () => {
+  /** 136 forecasts clustered near ½ like a season replay's (one side per matchup). */
+  const spread = (seed: number, n = 136): number[] => {
+    const rng = seededRng(seed);
+    return Array.from({ length: n }, () => 0.5 + (rng.next() + rng.next() - 1) * 0.45);
+  };
+  const calibratedEvents = (ps: readonly number[], seed: number) => {
+    const rng = seededRng(seed);
+    return ps.map((p) => ({ p, outcome: rng.next() < p }));
+  };
+  const mirror = (xs: readonly { p: number; outcome: boolean }[]) =>
+    xs.flatMap((e) => [e, { p: 1 - e.p, outcome: !e.outcome }]);
+
+  it("scores exactly the decomposition's reliability term, mirrored or not (property)", () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({ p: fc.double({ min: 0, max: 1, noNaN: true }), outcome: fc.boolean() }),
+          { minLength: 1, maxLength: 120 },
+        ),
+        fc.boolean(),
+        (events, mirrored) => {
+          const r = reliabilityNull(events, { rng: seededRng(7), mirrored, sims: 100 });
+          const scored = mirrored ? mirror(events) : events;
+          expect(r.observed).toBeCloseTo(
+            brierWithDecomposition(scored).decomposition.reliability,
+            12,
+          );
+          expect(r.forecasts).toBe(scored.length);
+          expect(r.events).toBe(events.length);
+          expect(r.mirrored).toBe(mirrored);
+          expect(r.p_value).toBeGreaterThan(0);
+          expect(r.p_value).toBeLessThanOrEqual(1);
+          expect(r.q95).toBeLessThanOrEqual(r.q99);
+          expect(r.mean).toBeGreaterThanOrEqual(0);
+        },
+      ),
+      { numRuns: 60 },
+    );
+  });
+
+  it("its mean is the floor (reliability_if_calibrated of the same forecasts), mirrored or not", () => {
+    const events = calibratedEvents(spread(11), 12);
+    for (const mirrored of [false, true]) {
+      const r = reliabilityNull(events, { rng: seededRng(13), mirrored, sims: 20_000 });
+      const floor = reliabilityByDecile(
+        mirrored ? mirror(events) : events,
+      ).reliability_if_calibrated;
+      expect(Math.abs(r.mean - floor) / floor).toBeLessThan(0.03);
+      expect(r.q95).toBeGreaterThan(r.mean);
+    }
+  });
+
+  it("a mirrored family's term spreads wider than the same forecasts drawn independently", () => {
+    const events = calibratedEvents(spread(21), 22);
+    const mirrored = reliabilityNull(events, { rng: seededRng(23), mirrored: true, sims: 20_000 });
+    // the same 272 forecasts as 272 independent events
+    const independent = reliabilityNull(mirror(events), { rng: seededRng(23), sims: 20_000 });
+    expect(mirrored.forecasts).toBe(independent.forecasts);
+    expect(Math.abs(mirrored.mean - independent.mean) / independent.mean).toBeLessThan(0.05);
+    expect(mirrored.q95 - mirrored.mean).toBeGreaterThan(
+      1.2 * (independent.q95 - independent.mean),
+    );
+  });
+
+  it("p-values: 1 for a term of 0, 1/(sims + 1) for gross miscalibration, uniform under calibration", () => {
+    // every bin's realised rate equals its forecast → observed 0 → every draw is ≥ it
+    const exact = [...block(0.3, 10, 0.3), ...block(0.6, 20, 0.6)];
+    const zero = reliabilityNull(exact, { rng: seededRng(1), sims: 500 });
+    expect(zero.observed).toBeCloseTo(0, 12);
+    expect(zero.p_value).toBe(1);
+    // forecasts of 0.9 that never happen, 0.1 that always do
+    const wrong = [...block(0.9, 100, 0), ...block(0.1, 100, 1)];
+    const r = reliabilityNull(wrong, { rng: seededRng(2), sims: 1000 });
+    expect(r.p_value).toBe(1 / 1001);
+    expect(r.observed).toBeGreaterThan(r.q99);
+    // calibrated datasets: about 5 % of p-values fall below 0.05 (400 datasets, 200 draws each)
+    const ps = spread(31);
+    let below = 0;
+    const reps = 400;
+    for (let i = 0; i < reps; i++) {
+      const events = calibratedEvents(ps, 1000 + i);
+      if (
+        reliabilityNull(events, { rng: seededRng(5000 + i), mirrored: true, sims: 200 }).p_value <
+        0.05
+      )
+        below += 1;
+    }
+    // binomial sd at 400 × 0.05 is ≈ 4.4 datasets
+    expect(below / reps).toBeGreaterThan(0.015);
+    expect(below / reps).toBeLessThan(0.095);
+  });
+
+  it("is deterministic for a seed and close across seeds", () => {
+    const events = calibratedEvents(spread(41), 42);
+    const a = reliabilityNull(events, { rng: seededRng(43), mirrored: true });
+    const b = reliabilityNull(events, { rng: seededRng(43), mirrored: true });
+    expect(a).toEqual(b);
+    const c = reliabilityNull(events, { rng: seededRng(44), mirrored: true });
+    expect(Math.abs(a.p_value - c.p_value)).toBeLessThan(0.03);
+    expect(a.sims).toBe(CALIBRATION.nullSims);
+  });
+
+  it("refuses hostile input with a typed error", () => {
+    const rng = seededRng(1);
+    const bad: unknown[] = [
+      [],
+      [{ p: Number.NaN, outcome: true }],
+      [{ p: 1.2, outcome: true }],
+      [{ p: 0.5, outcome: "yes" }],
+      [null],
+      "not an array",
+    ];
+    for (const b of bad)
+      expect(() => reliabilityNull(b as { p: number; outcome: boolean }[], { rng })).toThrow(
+        AnalyticsError,
+      );
+    const ok = block(0.5, 10, 0.5);
+    for (const sims of [0, 99, 1.5, 200_001, Number.NaN])
+      expect(() => reliabilityNull(ok, { rng, sims })).toThrow(AnalyticsError);
+    expect(() => reliabilityNull(ok, { rng, bins: 0 })).toThrow(AnalyticsError);
+    expect(() => reliabilityNull(ok, { rng, bins: 101 })).toThrow(AnalyticsError);
+    expect(() =>
+      reliabilityNull(ok, { rng: undefined as unknown as ReturnType<typeof seededRng> }),
+    ).toThrow(AnalyticsError);
+    const huge = Array.from({ length: CALIBRATION.maxForecasts / 2 + 1 }, () => ({
+      p: 0.5,
+      outcome: true,
+    }));
+    expect(() => reliabilityNull(huge, { rng, mirrored: true, sims: 100 })).toThrow(AnalyticsError);
   });
 });

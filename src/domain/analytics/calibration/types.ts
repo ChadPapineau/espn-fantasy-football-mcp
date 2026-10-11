@@ -3,8 +3,9 @@
 // (the hindsight-best legal lineup, E2 under `auto`, `mean` and `pwin`, the two baselines plan 10
 // A11a names — "start by ESPN's projection" and "start by last week's points" — and the manager's
 // lineup as played), and the head-to-head facts the P(win) calibration and the "did it matter" share
-// read. Types only (no runtime import of the engines, so lineup.ts can read the switch record). New
-// here.
+// read — since Stage C (changelog R6-2) with each pair's projected and realised totals, so the
+// margin calibration can read them. Types only (no runtime import of the engines, so lineup.ts can
+// read the switch record). New here.
 import type { DistBasis, Objective } from "../types.js";
 
 /** The decision rules a replayed team-week records (plan 10 C2, A11a). */
@@ -21,6 +22,23 @@ export const START_SIT_RULES = Object.freeze([
 /** One decision rule. */
 export type StartSitRule = (typeof START_SIT_RULES)[number];
 
+/**
+ * One pair of lineups in a head-to-head — what a P(win) of the pair stands on (changelog R6-2,
+ * Stage C: the margin calibration reads the margins, not only the binary result).
+ */
+export interface H2hPairFacts {
+  /** My lineup's projected total (Σ served means). */
+  readonly mu_m: number;
+  /** The opponent lineup's projected total. */
+  readonly mu_o: number;
+  /** sd of M − O under the normal approximation (totals.ts `diffSd`). */
+  readonly sd: number;
+  /** My lineup's realised total. */
+  readonly real_m: number;
+  /** The opponent lineup's realised total. */
+  readonly real_o: number;
+}
+
 /** The head-to-head facts of a team-week whose matchup is decided by this week's points. */
 export interface StartSitH2h {
   /** My as-played starters out-scored the opponent's as-played starters; null on a tie. */
@@ -33,6 +51,12 @@ export interface StartSitH2h {
   readonly outcome_auto: boolean | null;
   /** The opponent's realised as-played total. */
   readonly opponent_total: number;
+  /** The opponent's team id — pairs a matchup's two mirrored sides; null when the caller gave none. */
+  readonly opponent_id: number | null;
+  /** The two lineups as played (the pair behind `p_win_played`). */
+  readonly played: H2hPairFacts;
+  /** The auto lineup vs the opponent's best-by-mean lineup (the pair behind `p_win_auto`). */
+  readonly auto: H2hPairFacts;
 }
 
 /** One replayed team-week (every realised total rounded to 0.01 — ESPN's resolution). */

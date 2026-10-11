@@ -1,15 +1,24 @@
 // startsit-report.ts — the generated sections of docs/evals/phase3-startsit.md (plan 10 C2, C3): the
 // tests assert each committed section equals what a fresh held-out replay computes; UPDATE_EVALS=1
 // rewrites a section (the same convention as docs/evals/1a-backtest.md). Numbers only — no team or
-// player name ever enters the doc (ids are not written either: every line is an aggregate).
+// player name ever enters the doc (ids are not written either: every line is an aggregate). Stage C
+// (changelog R6-2) adds the `pwin-after` section: each P(win) family against the calibrated
+// forecaster's sampling distribution of its reliability term, its margin calibration, the
+// optimiser's selection bias in level, and the sparse tail decile read by its margins.
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { seededRng } from "../../../../../src/domain/clock.js";
 import {
   compareRegret,
   didItMatter,
+  marginCalibration,
   reliabilityByDecile,
+  reliabilityNull,
   regretOf,
   type EspnComparison,
+  type H2hPairFacts,
+  type MarginCalibration,
+  type ReliabilityNull,
   type ObjectiveSwitchDecision,
   type ObjectiveSwitchEvidence,
   type ReliabilityReport,
@@ -249,5 +258,161 @@ export function comparatorSection(rows: readonly { label: string; c: EspnCompari
     lines.push(
       `| ${label} | \`${c.status}\` | ${String(c.periods.length)} | ${String(c.periods_without_espn)} | ${String(c.n_ours)} | ${f(c.brier_ours_all, 4)} | ${String(c.n_compared)} | ${f(c.brier_ours_compared, 4)} | ${f(c.brier_espn_compared, 4)} |`,
     );
+  return lines.join("\n");
+}
+
+/** One side per matchup (the lower team id): a mirrored family's independent events. */
+export function oneSidePerMatchup(rows: readonly StartSitRow[]): StartSitRow[] {
+  return rows.filter(
+    (r) => r.h2h !== null && r.h2h.opponent_id !== null && r.team_id < r.h2h.opponent_id,
+  );
+}
+
+/** The seeded draws behind every null distribution in the doc (deterministic, per basis and family). */
+export const NULL_SEED = 20261011;
+
+/** A P(win) family's reliability term against the calibrated forecaster's distribution (R6-2). */
+export function familyNull(
+  rp: HistoryReplay,
+  family: "played" | "auto",
+  sims?: number,
+): ReliabilityNull {
+  const events = pwinPairs(oneSidePerMatchup(rp.rows), family);
+  return reliabilityNull(events, {
+    rng: seededRng(NULL_SEED).fork(`${rp.basis}:${family}`),
+    mirrored: true,
+    ...(sims === undefined ? {} : { sims }),
+  });
+}
+
+/** A P(win) family's margin calibration, one side per matchup (R6-2). */
+export function familyMargins(rp: HistoryReplay, family: "played" | "auto"): MarginCalibration {
+  return marginCalibration(
+    oneSidePerMatchup(rp.rows).flatMap((r) => {
+      const h = r.h2h;
+      if (h === null) return [];
+      const x: H2hPairFacts = family === "played" ? h.played : h.auto;
+      return [{ mean: x.mu_m - x.mu_o, sd: x.sd, realised: x.real_m - x.real_o }];
+    }),
+  );
+}
+
+/** The optimiser's selection bias in level, every head-to-head side (R6-2). */
+export interface SelectionLevel {
+  readonly n: number;
+  /** Mean realised − projected total of my lineup as played. */
+  readonly played: number;
+  /** …of E2's best-by-mean (auto) lineup. */
+  readonly auto: number;
+  /** Mean projected total of the opponent's best-by-mean lineup minus his lineup as played. */
+  readonly opp_projected_gap: number;
+  /** …the same in realised points. */
+  readonly opp_realised_gap: number;
+}
+
+export function selectionLevel(rows: readonly StartSitRow[]): SelectionLevel {
+  const hs = rows.flatMap((r) => (r.h2h === null ? [] : [r.h2h]));
+  const mean = (f: (h: (typeof hs)[number]) => number): number =>
+    hs.reduce((s, h) => s + f(h), 0) / Math.max(1, hs.length);
+  return {
+    n: hs.length,
+    played: mean((h) => h.played.real_m - h.played.mu_m),
+    auto: mean((h) => h.auto.real_m - h.auto.mu_m),
+    opp_projected_gap: mean((h) => h.auto.mu_o - h.played.mu_o),
+    opp_realised_gap: mean((h) => h.auto.real_o - h.played.real_o),
+  };
+}
+
+/** The exact binomial upper tail P(X ≥ k | n, p). */
+export function binomialUpperTail(k: number, n: number, p: number): number {
+  let total = 0;
+  let c = 1;
+  for (let i = 0; i <= n; i++) {
+    if (i > 0) c = (c * (n - i + 1)) / i;
+    if (i >= k) total += c * p ** i * (1 - p) ** (n - i);
+  }
+  return Math.min(1, total);
+}
+
+/** E2's p_win_after decile [lo, hi) read from the underdog's side: binary results and margins. */
+export interface TailDecile {
+  readonly n: number;
+  readonly mean_p: number;
+  readonly wins: number;
+  /** Underdog wins by fewer than 10 points. */
+  readonly close_wins: number;
+  readonly forecast_margin: number;
+  readonly realised_margin: number;
+  /** Standard error of the mean realised margin (the residuals' spread / √n). */
+  readonly realised_se: number;
+  /** P(≥ wins | n, mean_p) before any multiplicity over the deciles. */
+  readonly binomial_p: number;
+}
+
+export function tailDecile(rows: readonly StartSitRow[], lo: number, hi: number): TailDecile {
+  const xs = rows
+    .flatMap((r) => (r.h2h === null ? [] : [r.h2h]))
+    .filter((h) => h.outcome_auto !== null && h.p_win_auto >= lo && h.p_win_auto < hi);
+  const n = xs.length;
+  const mean = (f: (h: (typeof xs)[number]) => number): number =>
+    xs.reduce((s, h) => s + f(h), 0) / Math.max(1, n);
+  const d = (h: (typeof xs)[number]): number => h.auto.mu_m - h.auto.mu_o;
+  const rd = (h: (typeof xs)[number]): number => h.auto.real_m - h.auto.real_o;
+  const resid = Math.sqrt(mean((h) => (rd(h) - d(h)) ** 2));
+  const wins = xs.filter((h) => h.outcome_auto === true).length;
+  const meanP = mean((h) => h.p_win_auto);
+  return {
+    n,
+    mean_p: meanP,
+    wins,
+    close_wins: xs.filter((h) => h.outcome_auto === true && rd(h) < 10).length,
+    forecast_margin: mean(d),
+    realised_margin: mean(rd),
+    realised_se: resid / Math.sqrt(Math.max(1, n)),
+    binomial_p: binomialUpperTail(wins, n, meanP),
+  };
+}
+
+const FAMILY_LABEL = {
+  played: "P(win) of the two lineups as played (primary)",
+  auto: "E2's `p_win_after` (auto vs the opponent's best-by-mean lineup)",
+} as const;
+
+/** The R6-2 investigation, generated (docs/evals/phase3-startsit.md `pwin-after`). */
+export function pwinAfterSection(replays: readonly HistoryReplay[]): string {
+  const lines = [
+    "| basis | forecast family | matchups (forecasts) | reliability term | calibrated forecaster: mean | …95th percentile | P(term ≥ observed) | margin slope (95 % CI) | mean squared standardised residual (range if the spread is right) |",
+    "|---|---|---:|---:|---:|---:|---:|---|---|",
+  ];
+  for (const rp of replays)
+    for (const family of ["played", "auto"] as const) {
+      const nu = familyNull(rp, family);
+      const m = familyMargins(rp, family);
+      lines.push(
+        `| ${BASIS_LABEL(rp.basis)} | ${FAMILY_LABEL[family]} | ${String(nu.events)} (${String(nu.forecasts)}) | ${f(nu.observed, 4)} | ${f(nu.mean, 4)} | ${f(nu.q95, 4)} | ${f(nu.p_value, 3)} | ${f(m.slope, 2)} (${f(m.slope_ci[0], 2)}–${f(m.slope_ci[1], 2)}) | ${f(m.z2, 3)} (${f(m.z2_range[0], 2)}–${f(m.z2_range[1], 2)}) |`,
+      );
+    }
+  lines.push(
+    "",
+    "| basis | head-to-head sides | my lineup: realised − projected, as played | …E2's best-by-mean lineup | the opponent's best-by-mean − as played: projected | …realised |",
+    "|---|---:|---:|---:|---:|---:|",
+  );
+  for (const rp of replays) {
+    const s = selectionLevel(rp.rows);
+    lines.push(
+      `| ${BASIS_LABEL(rp.basis)} | ${String(s.n)} | ${f(s.played)} | ${f(s.auto)} | ${f(s.opp_projected_gap)} | ${f(s.opp_realised_gap)} |`,
+    );
+  }
+  lines.push(
+    "",
+    "| basis | E2's `p_win_after` decile (the underdog's side; its mirror is 0.7–0.8) | matchups | mean forecast | underdog won | …by < 10 points | forecast margin | realised margin (± 1 SE) | binomial P(≥ won), before multiplicity |",
+    "|---|---|---:|---:|---:|---:|---:|---|---:|",
+  );
+  for (const rp of replays) {
+    const t = tailDecile(rp.rows, 0.2, 0.3);
+    lines.push(
+      `| ${BASIS_LABEL(rp.basis)} | 0.2–0.3 | ${String(t.n)} | ${f(t.mean_p, 3)} | ${String(t.wins)} | ${String(t.close_wins)} | ${f(t.forecast_margin, 1)} | ${f(t.realised_margin, 1)} ± ${f(t.realised_se, 1)} | ${f(t.binomial_p, 3)} |`,
+    );
+  }
   return lines.join("\n");
 }

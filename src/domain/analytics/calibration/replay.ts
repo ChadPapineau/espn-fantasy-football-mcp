@@ -6,8 +6,10 @@
 // starters are realised at ESPN's actual points. Where the matchup is decided by this week's points,
 // the row also carries the model's P(win) of the two lineups as played (the matchup's forecast — the
 // event ESPN's winProbability forecasts too) and E2's own `p_win_after` with its counterfactual
-// outcome (the recommended lineup against the opponent's best-by-mean lineup, as E2 assumes). The
-// decision is pre-week: nobody is locked. Pure; the caller supplies the Dists (any model). New here.
+// outcome (the recommended lineup against the opponent's best-by-mean lineup, as E2 assumes) — and,
+// since Stage C (changelog R6-2), both pairs' projected and realised totals and the opponent's id,
+// for the margin calibration. The decision is pre-week: nobody is locked. Pure; the caller supplies
+// the Dists (any model). New here.
 import type { Clock } from "../../clock.js";
 import type { SeedingMode } from "../../../config/schema.js";
 import { slotClassOf } from "../../league/slots.js";
@@ -16,10 +18,10 @@ import type { Dist } from "../../scoring/types.js";
 import { ensure } from "../errors.js";
 import { analyzeLineup, bestLineup, type LineupPlayer } from "../lineup.js";
 import { round } from "../math.js";
-import { pairMoments, pWinNormal, type TotalMember } from "../totals.js";
+import { diffSd, pairMoments, pWinNormal, type PairMoments, type TotalMember } from "../totals.js";
 import type { LineupData, ObjectiveArg } from "../types.js";
 import type { ObjectiveSwitchRecord } from "./objectiveSwitch.js";
-import type { StartSitRow, StartSitRule } from "./types.js";
+import type { H2hPairFacts, StartSitRow, StartSitRule } from "./types.js";
 
 /** One team-week to replay (built by the backtest harness from a recorded box score and E1). */
 export interface StartSitTeamWeek {
@@ -31,6 +33,8 @@ export interface StartSitTeamWeek {
   readonly players: readonly LineupPlayer[];
   /** The opponent's roster the same way, or null (no opponent). */
   readonly opponent: readonly LineupPlayer[] | null;
+  /** The opponent's team id (carried into the head-to-head facts; additive, Stage C). */
+  readonly opponent_id?: number;
   /** Realised points per player id (both rosters); a missing id realises 0 (did not play). */
   readonly realised: ReadonlyMap<number, number>;
   /** ESPN's weekly projection per player id (the baseline); a missing id projects 0. */
@@ -139,23 +143,40 @@ export function replayStartSit(tw: StartSitTeamWeek): StartSitRow {
     realised[rule] = ids === null ? null : real(ids);
     lineupKey[rule] = ids === null ? null : keyOf(ids);
   }
+  const autoIds = new Set(lineups.auto);
   let h2h: StartSitRow["h2h"] = null;
   if (tw.h2h && opponent !== null && auto.p_win_after !== null) {
     const oppPlayed = opponent.filter((p) => isStartSlot(p.slot_id));
     const mePlayed = tw.players.filter((p) => isStartSlot(p.slot_id));
+    const oppBestPlayers = bestLineup(tw.roster, opponent);
+    const meAuto = tw.players.filter((p) => autoIds.has(p.player_id));
     const oppTotal = real(oppPlayed.map((p) => p.player_id));
-    const oppBest = real(bestLineup(tw.roster, opponent).map((p) => p.player_id));
+    const oppBest = real(oppBestPlayers.map((p) => p.player_id));
     const sPlayed = sign(realised.manager ?? 0, oppTotal);
     const sAuto = sign(realised.auto ?? 0, oppBest);
+    const pmPlayed = pairMoments(mePlayed.map(member), oppPlayed.map(member));
+    const facts = (pm: PairMoments, realM: number, realO: number): H2hPairFacts => ({
+      mu_m: round(pm.mu_m, 6),
+      mu_o: round(pm.mu_o, 6),
+      sd: round(diffSd(pm), 6),
+      real_m: realM,
+      real_o: realO,
+    });
     h2h = {
       outcome_played: sPlayed === 0 ? null : sPlayed > 0,
-      p_win_played: round(pWinNormal(pairMoments(mePlayed.map(member), oppPlayed.map(member))), 6),
+      p_win_played: round(pWinNormal(pmPlayed), 6),
       p_win_auto: round(auto.p_win_after, 6),
       outcome_auto: sAuto === 0 ? null : sAuto > 0,
       opponent_total: oppTotal,
+      opponent_id: tw.opponent_id ?? null,
+      played: facts(pmPlayed, realised.manager ?? 0, oppTotal),
+      auto: facts(
+        pairMoments(meAuto.map(member), oppBestPlayers.map(member)),
+        realised.auto ?? 0,
+        oppBest,
+      ),
     };
   }
-  const autoIds = new Set(lineups.auto);
   const autoStarters = auto.recommended_lineup.filter((s) => autoIds.has(s.player_id));
   return {
     season: tw.season,
