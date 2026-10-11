@@ -524,6 +524,11 @@ export interface KdstDetail {
   readonly sacks_e: number | null;
   readonly takeaways_e: number | null;
   readonly rare_c: number | null;
+  /**
+   * Stage C (additive): return yards (kick, punt) as a constant, scored under the league's S — 0
+   * where the league does not score them; null for a kicker (kdst.ts `returns_e`).
+   */
+  readonly returns_e: number | null;
   readonly next_week: {
     readonly opponent: string | null;
     readonly implied_total: number | null;

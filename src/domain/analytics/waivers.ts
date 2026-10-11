@@ -628,6 +628,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
           sacks_e: e0?.sacks_e ?? null,
           takeaways_e: e0?.takeaways_e ?? null,
           rare_c: e0?.rare_c ?? null,
+          returns_e: e0?.returns_e ?? null,
           next_week:
             w1 === undefined || look < 1
               ? null

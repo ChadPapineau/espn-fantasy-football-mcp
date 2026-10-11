@@ -829,6 +829,57 @@ export function c7Section(rows: readonly Summary[]): string {
   return lines.join("\n");
 }
 
+/** One scoring × season row of the return-yards check (Stage C: `returns_e`). */
+export interface ReturnsRow {
+  readonly scoring: string;
+  readonly season: number;
+  readonly team_weeks: number;
+  readonly kr_yd: number;
+  readonly pr_yd: number;
+  /** The realised return-yard points per team-game under S. */
+  readonly realised: number;
+  /** The model's `returns_e` (the 2023-fitted constant scored under S). */
+  readonly model: number;
+}
+
+/** The return-yard members of a D/ST line (ESPN 114, 115). */
+export const DST_RETURN_CANONICALS: readonly Canonical[] = Object.freeze(["kr_yd", "pr_yd"]);
+
+/** Realised return yards and their points per scoring × season against the model's constant. */
+export function returnsRows(h: KdstHistory): ReturnsRow[] {
+  const out: ReturnsRow[] = [];
+  for (const sc of scorings()) {
+    const model = dstExpectation(sc.settings, null).returns_e ?? Number.NaN;
+    for (const season of KDST_HISTORY_SEASONS) {
+      const rows = h.dst.filter((r) => n(r.season) === season);
+      const lines = rows.map((r) => dstLine(r));
+      out.push({
+        scoring: sc.name,
+        season,
+        team_weeks: rows.length,
+        kr_yd: mean(lines.map((l) => l.values.kr_yd ?? 0)),
+        pr_yd: mean(lines.map((l) => l.values.pr_yd ?? 0)),
+        realised: mean(lines.map((l) => pointsOf(only(l, DST_RETURN_CANONICALS), sc.settings))),
+        model,
+      });
+    }
+  }
+  return out;
+}
+
+/** The return-yards table (fitted on 2023; 2024–2025 held out). */
+export function returnsSection(rows: readonly ReturnsRow[]): string {
+  const lines = [
+    "| scoring | season | team-games | kick return yd / game | punt return yd / game | realised return pts | model `returns_e` | model − realised |",
+    "|---|---|---:|---:|---:|---:|---:|---:|",
+  ];
+  for (const r of rows)
+    lines.push(
+      `| ${r.scoring} | ${String(r.season)}${r.season === 2023 ? " (fit)" : " (held out)"} | ${String(r.team_weeks)} | ${f2(r.kr_yd)} | ${f2(r.pr_yd)} | ${f3(r.realised)} | ${f3(r.model)} | ${f3(Math.abs(r.model - r.realised) < 5e-4 ? 0 : r.model - r.realised)} |`,
+    );
+  return lines.join("\n");
+}
+
 /** The cross-check table and the D/ST mismatches. */
 export function espnSection(rows: readonly EspnCheck[]): string {
   const lines = [

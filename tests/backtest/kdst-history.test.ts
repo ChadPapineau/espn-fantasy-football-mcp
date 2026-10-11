@@ -15,6 +15,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   DST_FF_RATE,
   DST_RARE_RATES,
+  DST_RETURN_YARDS,
   dstExpectation,
   kickerExpectation,
 } from "../../src/domain/analytics/kdst.js";
@@ -37,12 +38,15 @@ import {
   rareShare,
   ratesSection,
   replayPosition,
+  returnsRows,
+  returnsSection,
   scorings,
   summarise,
   writeEvalDocSection,
   type EspnCheck,
   type KdstHistory,
   type RareShare,
+  type ReturnsRow,
   type Summary,
   type WeekEval,
 } from "./helpers/kdst-history.js";
@@ -53,6 +57,7 @@ let summaries: Summary[];
 let rare: RareShare[];
 let espn: EspnCheck[];
 let rateRows: { label: string; rates: Readonly<Record<string, number>> }[];
+let returns: ReturnsRow[];
 const MODEL_RATES: Readonly<Record<string, number>> = {
   ...DST_RARE_RATES,
   dst_sack: KDST.rates.dst_sack,
@@ -75,6 +80,7 @@ beforeAll(() => {
     rare.push(rareShare(h, sc.settings, sc.name));
   }
   espn = espnCrossCheck(h);
+  returns = returnsRows(h);
   rateRows = [
     ...KDST_HISTORY_SEASONS.map((s) => ({ label: String(s), rates: observedDstRates(h, [s]) })),
     { label: "pooled", rates: observedDstRates(h) },
@@ -85,6 +91,7 @@ beforeAll(() => {
     writeEvalDocSection("c7-rates", ratesSection(rateRows, MODEL_RATES));
     writeEvalDocSection("c7-espn", espnSection(espn));
     writeEvalDocSection("c7-kick", kickSection(kickRows(h)));
+    writeEvalDocSection("c7-returns", returnsSection(returns));
   }
 }, 120_000);
 
@@ -171,6 +178,41 @@ describe("C7 (hard) — beats last week's score clearly", () => {
       expect(s.rho_gain.mean, label).toBeGreaterThan(0);
       expect(s.mae_model, label).toBeLessThan(s.mae_last);
     }
+  });
+});
+
+describe("Stage C — the D/ST line carries return yards (returns_e), fitted on 2023 only", () => {
+  it("DST_RETURN_YARDS is the 2023 season's kick and punt return yards per team-game (3 dp); 2024–2025 never set it", () => {
+    const fit = returns.filter((r) => r.season === 2023);
+    const dp3 = (x: number): number => Math.round(x * 1e3) / 1e3;
+    for (const r of fit) {
+      expect(DST_RETURN_YARDS.kr_yd, r.scoring).toBe(dp3(r.kr_yd));
+      expect(DST_RETURN_YARDS.pr_yd, r.scoring).toBe(dp3(r.pr_yd));
+    }
+  });
+
+  it("returns_e is those yards scored under the league's S: the 2023 mean exactly, 0 where the league does not score them", () => {
+    for (const r of returns.filter((x) => x.season === 2023)) {
+      expect(Math.abs(r.model - r.realised), r.scoring).toBeLessThan(0.005);
+      if (r.scoring !== "league-a") expect(r.model, r.scoring).toBe(0);
+    }
+    // league-a scores 114 and 115: a positive constant carried inside e
+    const a = scorings().find((sc) => sc.name === "league-a");
+    if (a === undefined) throw new Error("no league-a");
+    const e = dstExpectation(a.settings, 21);
+    expect(e.returns_e ?? 0).toBeGreaterThan(0.5);
+    const parts =
+      e.brackets_e + (e.sacks_e ?? 0) + (e.takeaways_e ?? 0) + (e.rare_c ?? 0) + (e.returns_e ?? 0);
+    expect(Math.abs(e.e - parts)).toBeLessThan(0.005);
+    expect(kickerExpectation(a.settings, 21).returns_e).toBeNull();
+  });
+
+  it("(reported) the held-out drift: the 2024 and 2025 kickoff rules multiplied kick-return yards — the table, asserted equal to the doc", () => {
+    const held = returns.filter((r) => r.scoring === "league-a" && r.season !== 2023);
+    expect(held.map((r) => r.season)).toEqual([2024, 2025]);
+    // the 2023 constant runs low in both held-out seasons (a ruling request, not a refit here)
+    for (const r of held) expect(r.model).toBeLessThan(r.realised);
+    expect(evalDocSection("c7-returns")).toBe(returnsSection(returns));
   });
 });
 

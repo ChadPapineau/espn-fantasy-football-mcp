@@ -9,7 +9,9 @@
 // constant carries every TD member a D/ST line holds (ESPN 94, 103, 104, 101, 102, 93, 105), so a
 // league that scores the INT-, fumble-, kick-, punt- or blocked-kick-return TD items (every recorded
 // league does; none scores the combined 94) gets them — before, only safeties and blocks counted;
-// takeaways carry forced fumbles (106) for a league that scores them.
+// takeaways carry forced fumbles (106) for a league that scores them. Stage C (docs/evals/phase3-summary
+// "Open"): the line carries return yards (ESPN 114 kick, 115 punt) at `DST_RETURN_YARDS`, so a league
+// that scores them (`league-a` does) gets `returns_e`; 0 for a league that does not.
 import { score as engineScore } from "../scoring/engine.js";
 import {
   asPositionId,
@@ -33,6 +35,11 @@ export interface KdstExpectation {
   readonly takeaways_e: number | null;
   /** Rare D/ST events (return TDs, safeties, blocks) as a constant (sibling research 05 §8.2). */
   readonly rare_c: number | null;
+  /**
+   * Return yards (kick, punt) as a constant: their expected points under the league's S — 0 where the
+   * league does not score them; null for a kicker (Stage C).
+   */
+  readonly returns_e: number | null;
   /** The implied totals read (null → the league average was assumed). */
   readonly implied_total: number | null;
   readonly opp_implied_total: number | null;
@@ -60,6 +67,20 @@ export const DST_RARE_RATES: Readonly<Record<Canonical, number>> = Object.freeze
 
 /** Forced fumbles per team-game (ESPN 106), the same history; scaled like the other takeaways. */
 export const DST_FF_RATE = 0.7663;
+
+/**
+ * Return yards per team-game (ESPN 114 `kr_yd`, 115 `pr_yd`) [V-data, fitted on 2023 ONLY — the
+ * held-out 2024–2025 seasons never set it]: nflverse 2023 regular-season weeks 1–17, all 512
+ * team-games of tests/backtest/data/kdst_history (`kickoff_return_yards`, `punt_return_yards` — the
+ * columns the shipped translator reads). Held equal to that season by tests/backtest/kdst-history.test.ts,
+ * which also reports the held-out drift: the 2024 kickoff rule and the 2025 touchback change took kick
+ * returns from 24.7 to 46.5 and 100.7 yards a team-game (punt returns 16.8 → 15.9, 15.8) — a ruling
+ * request (docs/evals/phase3-kdst-news.md), not a refit here.
+ */
+export const DST_RETURN_YARDS: Readonly<Record<Canonical, number>> = Object.freeze({
+  kr_yd: 24.709,
+  pr_yd: 16.811,
+});
 
 const DST_POSITION = 16;
 const K_POSITION = 5;
@@ -114,7 +135,8 @@ function tierPoints(settings: ScoringSettings): {
  * average): points allowed ~ Gamma(mean = oppImplied, cv), integer-rounded by continuity; yards
  * allowed ~ Gamma(mean = base × (opp / league)^β, cv) in 10-yard steps; sacks and takeaways
  * Poisson at rates scaled (league / opp)^β (forced fumbles with the takeaways); return and
- * defensive TDs, safeties and blocks constant at `DST_RARE_RATES`. Every tier's
+ * defensive TDs, safeties and blocks constant at `DST_RARE_RATES`, return yards at
+ * `DST_RETURN_YARDS`. Every tier's
  * points come from scoring a one-stat line under S, so the league's own brackets decide.
  */
 export function dstExpectation(
@@ -149,12 +171,14 @@ export function dstExpectation(
     DST_POSITION,
   );
   const rare = scoreOf(settings, DST_RARE_RATES, DST_POSITION);
+  const returns = scoreOf(settings, DST_RETURN_YARDS, DST_POSITION);
   return {
-    e: round(brackets + sacks + takeaways + rare, 3),
+    e: round(brackets + sacks + takeaways + rare + returns, 3),
     brackets_e: round(brackets, 3),
     sacks_e: round(sacks, 3),
     takeaways_e: round(takeaways, 3),
     rare_c: round(rare, 3),
+    returns_e: round(returns, 3),
     implied_total: finitePositive(teamImplied) ? teamImplied : null,
     opp_implied_total: finitePositive(oppImplied) ? oppImplied : null,
   };
@@ -217,6 +241,7 @@ export function kickerExpectation(
     sacks_e: null,
     takeaways_e: null,
     rare_c: null,
+    returns_e: null,
     implied_total: finitePositive(implied) ? implied : null,
     opp_implied_total: finitePositive(oppImplied) ? oppImplied : null,
   };

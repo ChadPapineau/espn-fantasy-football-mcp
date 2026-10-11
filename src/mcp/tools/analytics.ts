@@ -1052,6 +1052,7 @@ const kdstSchema = z
     sacks_e: z.number().nullable(),
     takeaways_e: z.number().nullable(),
     rare_c: z.number().nullable(),
+    returns_e: z.number().nullable(),
     next_week: z
       .strictObject({
         opponent: z
