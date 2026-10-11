@@ -61,20 +61,20 @@ const RULE_LABEL: Readonly<Record<StartSitRule, string>> = {
 };
 
 const BASIS_LABEL = (b: HistoryReplay["basis"]): string =>
-  b === "position_cv" ? "position_cv (`core`)" : "player_sim where available (`full`)";
+  b === "position_cv" ? "position_cv (`core`)" : "v2-opportunity where modelled (`full`)";
 
 /** The replay's coverage per basis and season. */
 export function coverageSection(replays: readonly HistoryReplay[]): string {
   const lines = [
-    "| basis | season | team-weeks replayed | skipped (withheld entry) | not head-to-head | head-to-head with a result | player-weeks without an ESPN projection | starters on player_sim | player_sim player-weeks | …mean ≠ ESPN's (> 0.01) |",
-    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| basis | season | team-weeks replayed | skipped (withheld entry) | not head-to-head | head-to-head with a result | player-weeks without an ESPN projection | starters on player_sim | player_sim player-weeks | …served by v2-opportunity | …of them QB | …mean ≠ ESPN's (> 0.01) |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
   ];
   for (const rp of replays)
     for (const s of rp.seasons) {
       const h2h = s.rows.filter((r) => r.h2h !== null && r.h2h.outcome_played !== null).length;
       const share = s.rows.reduce((a, r) => a + r.player_sim_share, 0) / Math.max(1, s.rows.length);
       lines.push(
-        `| ${BASIS_LABEL(rp.basis)} | ${String(s.season)} | ${String(s.rows.length)} | ${String(s.skipped_incomplete)} | ${String(s.not_h2h)} | ${String(h2h)} | ${String(s.no_projection)} | ${pct(share)} | ${String(s.player_sim_weeks)} | ${String(s.player_sim_off_espn)} |`,
+        `| ${BASIS_LABEL(rp.basis)} | ${String(s.season)} | ${String(s.rows.length)} | ${String(s.skipped_incomplete)} | ${String(s.not_h2h)} | ${String(h2h)} | ${String(s.no_projection)} | ${pct(share)} | ${String(s.player_sim_weeks)} | ${String(s.v2_weeks)} | ${String(s.v2_qb_weeks)} | ${String(s.player_sim_off_espn)} |`,
       );
     }
   return lines.join("\n");
@@ -146,10 +146,18 @@ export function baselineSection(replays: readonly HistoryReplay[]): string {
   return lines.join("\n");
 }
 
-/** The switch rule's evidence and decision. */
-export function switchSection(e: ObjectiveSwitchEvidence, d: ObjectiveSwitchDecision): string {
+/**
+ * The switch rule's evidence and decision; `allSim` = replayed team-weeks whose whole lineup was
+ * player_sim (the only lineups the switch could ever apply to), of `n` replayed.
+ */
+export function switchSection(
+  e: ObjectiveSwitchEvidence,
+  d: ObjectiveSwitchDecision,
+  allSim: number,
+  n: number,
+): string {
   const lines = [
-    `Evidence basis: ${e.basis} where the opportunity inputs exist — ${pct(e.player_sim_share)} of the replayed starters (QB, K and D/ST keep position_cv in E1).`,
+    `Evidence basis: what \`full\` serves — player_sim (v2-opportunity for every QB/RB/WR/TE it models, else Phase 2's basis) on ${pct(e.player_sim_share)} of the replayed starters; K and D/ST keep position_cv, so ${String(allSim)} of ${String(n)} replayed lineups are all-player_sim (the only lineups the switch could apply to).`,
     "",
     "| season | team-weeks | pwin ≠ mean | regret: mean | regret: pwin | team-weeks after week 3 | regret after week 3: mean | regret after week 3: pwin |",
     "|---:|---:|---:|---:|---:|---:|---:|---:|",

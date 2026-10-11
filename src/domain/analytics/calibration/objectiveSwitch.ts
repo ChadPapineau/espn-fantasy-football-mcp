@@ -3,9 +3,10 @@
 // E2 objective resolution: `pwin` when basis = player_sim AND C2 has shown it beats mean on regret;
 // research 05 §8.4 "every claim of improvement must hold in both seasons and not be concentrated in
 // weeks 1–3"; research 05 §8.4 / sib §12.6 "no conclusion from fewer than ~30 calls"). The evidence is
-// the held-out replay's per-season mean regret of the two objectives on player_sim distributions
-// (tests/backtest/lineup-history.test.ts recomputes it and holds the committed record below equal to
-// it — docs/evals/phase3-startsit.md carries the same numbers); the decision is a pure function of
+// the held-out replay's per-season mean regret of the two objectives on the player_sim distributions
+// EFF_TOOLSET=full serves — v2-opportunity wherever it models (tests/backtest/lineup-history.test.ts
+// recomputes it and holds the committed record below equal to it — docs/evals/phase3-startsit.md
+// carries the same numbers); the decision is a pure function of
 // the evidence, and E2 reads the committed record (lineup.ts). Nothing here re-fits at run time: a
 // new record lands by a reviewed commit, the same posture as `eff tune --apply` (plan 10 §3.3).
 // Types and data only — no engine import (lineup.ts imports this file). New here.
@@ -155,34 +156,36 @@ export function decideObjectiveSwitch(e: ObjectiveSwitchEvidence): ObjectiveSwit
 }
 
 /**
- * The committed record: the held-out replay of `league-b`'s 2024 and 2025 seasons on E1's
- * player_sim distributions (docs/evals/phase3-startsit.md). Held equal to a fresh replay by
- * tests/backtest/lineup-history.test.ts; a changed model lands a new record by a reviewed commit.
+ * The committed record: the held-out replay of `league-b`'s 2024 and 2025 seasons on what
+ * EFF_TOOLSET=full serves — E1's player_sim distributions, `v2-opportunity` for every QB/RB/WR/TE it
+ * models (Phase 3), the Phase 2 basis for the rest (docs/evals/phase3-startsit.md). Held equal to a
+ * fresh replay by tests/backtest/lineup-history.test.ts; a changed model lands a new record by a
+ * reviewed commit.
  */
 export const OBJECTIVE_SWITCH_RECORD: ObjectiveSwitchRecord = deepFreeze({
   evidence: {
     basis: "player_sim",
-    player_sim_share: 0.5747,
+    player_sim_share: 0.7742,
     seasons: [
       {
         season: 2024,
         n: 154,
-        n_differing: 4,
-        regret_mean: 12.2099,
-        regret_pwin: 12.3891,
+        n_differing: 3,
+        regret_mean: 12.2475,
+        regret_pwin: 12.2096,
         n_later: 127,
-        regret_mean_later: 12.1701,
-        regret_pwin_later: 12.3874,
+        regret_mean_later: 12.2157,
+        regret_pwin_later: 12.2044,
       },
       {
         season: 2025,
         n: 154,
         n_differing: 5,
-        regret_mean: 14.5453,
-        regret_pwin: 14.5508,
+        regret_mean: 14.546,
+        regret_pwin: 14.5219,
         n_later: 127,
-        regret_mean_later: 14.4334,
-        regret_pwin_later: 14.4896,
+        regret_mean_later: 14.4287,
+        regret_pwin_later: 14.5389,
       },
     ],
   },
@@ -190,11 +193,8 @@ export const OBJECTIVE_SWITCH_RECORD: ObjectiveSwitchRecord = deepFreeze({
     status: "insufficient",
     switch: false,
     reasons: [
-      "pwin and mean differ in 9 team-week(s) < 30 required",
-      "2024: pwin regret 12.3891 is not below mean's 12.2099",
-      "2024 after week 3: pwin regret 12.3874 is not below mean's 12.1701",
-      "2025: pwin regret 14.5508 is not below mean's 14.5453",
-      "2025 after week 3: pwin regret 14.4896 is not below mean's 14.4334",
+      "pwin and mean differ in 8 team-week(s) < 30 required",
+      "2025 after week 3: pwin regret 14.5389 is not below mean's 14.4287",
     ],
   },
   source: "docs/evals/phase3-startsit.md",
