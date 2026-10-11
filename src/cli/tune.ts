@@ -80,17 +80,15 @@ export function tunedParametersPath(configDir: string): string {
   return path.join(configDir, TUNED_PARAMETERS_FILE_NAME);
 }
 
-/** The repository seam: the store's proposal table once this build's store has one. */
+/**
+ * The repository seam: the store's proposal table (migration 002). Read through `unknown`, because a
+ * store opened from an older binary's repository set (or a narrow test fake) may lack it — then null.
+ */
 export function proposalRepositoryOf(repos: StoreRepositories): ParameterProposalRepository | null {
-  const r = (repos as StoreRepositories & { readonly parameterProposals?: unknown })
-    .parameterProposals;
-  if (
-    typeof r === "object" &&
-    r !== null &&
-    typeof (r as ParameterProposalRepository).latest === "function"
-  )
-    return r as ParameterProposalRepository;
-  return null;
+  const r: unknown = (repos as { readonly parameterProposals?: unknown }).parameterProposals;
+  if (typeof r !== "object" || r === null) return null;
+  const latest: unknown = (r as { readonly latest?: unknown }).latest;
+  return typeof latest === "function" ? (r as ParameterProposalRepository) : null;
 }
 
 /** The default lookup: the existing store, opened without creating or migrating it. */
