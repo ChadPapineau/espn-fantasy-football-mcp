@@ -52,6 +52,7 @@ import { EffError } from "../errors.js";
 import type { ToolContext } from "../define.js";
 import { cpuDeadlineOf, project, standingsFromMatchups, type Subject } from "./analytics.js";
 import { leagueOf, optionalDataset, rulesOf, settingsOf, slotsOf, weekOf } from "./common.js";
+import { V2_BULK_SIMS } from "./projection-v2.js";
 
 /** What every P1 analytics tool reads about the league once per call. */
 export interface LeagueBasics {
@@ -129,6 +130,9 @@ export async function projectMany(
         n_sims: o.n_sims ?? BOUNDS.nSims.min,
         seed: o.seed + i,
         allowStale: o.allowStale,
+        // v2-opportunity in bulk (full only): its smallest sample count keeps a many-roster search
+        // inside the CPU and stall budgets (plan 10 A16a); E1 called directly uses 2 000
+        v2_n_sims: V2_BULK_SIMS,
       },
       // each chunk re-reads the same dataset stamps: keep one copy of each in `inputs`
       i === 0 ? inputs : [],

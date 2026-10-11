@@ -4,12 +4,15 @@
 // 07 E13: last week's calls scored by regret and proper scoring rules against two baselines and
 // ESPN's own numbers, "n too small" until min_n; the outcome rows are persisted beside the immutable
 // log). Read-back text is model-authored and untrusted (C15): sanitised and path-listed with source
-// `store.recommendation_log` on every read. Also the espn-ff://rec/* resource payloads.
+// `store.recommendation_log` on every read. Also the espn-ff://rec/* resource payloads. Phase 3 (plan
+// 10 C8, C9 — retro-p3.ts): attribution over the stored v2 projections, the proposal set persisted
+// for a human-run `eff tune` (never applied here), and E10's logged claims scored once final.
 import { z } from "zod/v4";
 import { SHIPPED_WEIGHT_ESPN } from "../../domain/analytics/index.js";
 import { seededRng } from "../../domain/clock.js";
 import { weekGameState } from "../../domain/league/schedule.js";
 import type { BoxScoreMatchup, Week } from "../../domain/league/types.js";
+import { ATTRIBUTION_KEY_RE } from "../../domain/reclog/attribution.js";
 import { RecordValidationError, buildRecord } from "../../domain/reclog/record.js";
 import {
   buildRetrospective,
@@ -46,11 +49,13 @@ import {
   leagueRef,
   readOpts,
   scheduleOf,
+  settingsOf,
   take,
   teamOf,
   weekOf,
   withinBudget,
 } from "./common.js";
+import { attributionRows, scoreClaims, tunedDocOf } from "./retro-p3.js";
 import {
   count,
   inputs as inputsSchema,
@@ -349,6 +354,25 @@ export const analyzeRetrospective = defineTool({
     const sched = await withinBudget(() => scheduleOf(ctx, season, inputs), warnings).catch(
       () => null,
     );
+    // Phase 3 (plan 10 C9): the attribution rows of the re-fit window — v2 projections stored before
+    // their game joined to the final box scores — and the applied overrides; ESPN's box scores of
+    // earlier weeks are cached reads (final weeks), each within the call's budget
+    const settings = await withinBudget(() => settingsOf(ctx, inputs), warnings).catch(() => null);
+    const boxCache = new Map<Week, readonly BoxScoreMatchup[] | null>([[w, boxes]]);
+    const boxesOf = async (x: Week): Promise<readonly BoxScoreMatchup[] | null> => {
+      if (boxCache.has(x)) return boxCache.get(x) ?? null;
+      const got = await withinBudget(
+        () => ctx.services.platform.getBoxScores(ref, x, readOpts(ctx, args)),
+        warnings,
+      ).catch(() => null);
+      const v = got === null ? null : take(ctx, got, inputs);
+      boxCache.set(x, v);
+      return v;
+    };
+    const attrRows =
+      settings === null
+        ? []
+        : await attributionRows(ctx, season, w, boxesOf, sched?.schedule ?? null, inputs, warnings);
     const games = (sched?.schedule.games ?? [])
       .filter((g) => g.week === w)
       .map((g) => ({
@@ -367,9 +391,23 @@ export const analyzeRetrospective = defineTool({
         weight_espn: SHIPPED_WEIGHT_ESPN,
         min_n: args.min_n,
         inputs: toDataInputs(inputs, ctx.nowMs),
+        attribution:
+          settings === null
+            ? null
+            : { rows: attrRows, scoring: settings, tuned: tunedDocOf(ctx), season },
       },
       ctx.services.clock,
     );
+    // the proposal set (final weeks only) is persisted for a human-run `eff tune` — never applied
+    // here (plan 10 C9; plan 07 E13 "propose, never apply")
+    if (r.proposal_set !== null && ctx.services.parameterProposals !== undefined)
+      try {
+        ctx.services.parameterProposals.put(ref.league_id, r.proposal_set);
+      } catch {
+        warnings.push("the parameter proposal set could not be stored (the store was busy)");
+      }
+    // E10's logged news claims whose game is final are scored into the calibration table (C8)
+    if (!r.provisional) await scoreClaims(ctx, season, w, boxes, gsisOf);
     for (const o of r.outcomes) {
       try {
         ctx.services.recommendationLog.recordOutcome(o);
@@ -377,7 +415,17 @@ export const analyzeRetrospective = defineTool({
         warnings.push("an outcome row could not be persisted (the store was busy)");
       }
     }
-    const data: RetrospectiveData = r.data;
+    // the attribution map's keys are server-composed (ATTRIBUTION_KEY_RE); anything else is dropped
+    const attr = r.data.attribution;
+    const data: RetrospectiveData =
+      attr === null
+        ? r.data
+        : {
+            ...r.data,
+            attribution: Object.fromEntries(
+              Object.entries(attr).filter(([k]) => ATTRIBUTION_KEY_RE.test(k)),
+            ),
+          };
     return {
       data,
       inputs,

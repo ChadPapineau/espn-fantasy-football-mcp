@@ -36,6 +36,11 @@ import {
 import { limiterRepository } from "./repos/limiter.js";
 import { jobLockRepository, refreshLogRepository, writeJournalRepository } from "./repos/ops.js";
 import { espnProjectionRepository, projectionRepository } from "./repos/projection.js";
+import {
+  parameterProposalRepository,
+  scoredClaimRepository,
+  waiverRunRepository,
+} from "./repos/phase3.js";
 import { recommendationLogRepository } from "./repos/reclog.js";
 import { createPrivateFile, openStoreConnection, StatementGuard, WriteExecutor } from "./sqlite.js";
 import {
@@ -190,6 +195,10 @@ function buildRepos(deps: RepoDeps): StoreRepositories {
     recommendationLog: recommendationLogRepository(deps),
     // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): reads of an empty table.
     writeJournal: writeJournalRepository(deps),
+    // Phase 3 (plan 10 §3.3; migration 002)
+    parameterProposals: parameterProposalRepository(deps),
+    waiverRuns: waiverRunRepository(deps),
+    scoredClaims: scoredClaimRepository(deps),
   });
 }
 

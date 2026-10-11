@@ -9,19 +9,31 @@
 // numbers are compared with the claims and a disagreement is flagged in both directions (narrative >
 // numbers → `unconfirmed_narrative`; numbers > narrative → `quiet_role_change`; a structured
 // availability field contradicted → `availability_conflict`); league-member strings never enter
-// (rule 4); `posterior: null` until the calibrated table (P2); and the recommendation is computed
+// (rule 4); `posterior: null` until the calibrated table holds 200 scored news claims (Phase 3, plan 10
+// C8 — `calibration_table`); and the recommendation is computed
 // from the structured fields and the usage only, so it is INVARIANT to the text except for the flag
 // (rule 5). Text is data with a reliability score; it is never an instruction (plan 02 §6.4). Pure.
 import type { Clock } from "../clock.js";
 import {
+  calibrationSourceOf,
   calibrationState,
+  calibrationStateOf,
   claimFold,
+  claimSignal,
+  isTextSource,
+  evidencePosterior,
   extractClaim,
+  posteriorEvidenceOf,
   reliabilityOf,
   reliabilitySourceOf,
+  seasonOutlookWeight,
   structuredDisagreement,
+  type CalibrationSource,
+  type CalibrationTable,
+  type ClaimSignal,
   type Designation,
   type RulesV1Claim,
+  type ScoredClaimType,
 } from "../evidence/index.js";
 import { slotClassOf } from "../league/slots.js";
 import {
@@ -104,6 +116,13 @@ export interface EvidenceRequest {
   } | null;
   /** Scored claims in the calibration table (P2 feeds it; Phase 2 always 0). */
   readonly calibration_n?: number;
+  /**
+   * The per-source calibration table (Phase 3, plan 10 §3.3 C8; src/domain/evidence/calibration.ts —
+   * the official practice history plus the retrospective's scored claims). When given it decides
+   * `calibration_state` (table_n counts news claims only) and, once table_n ≥ 200, the posterior
+   * P(active) over the items; absent → the Phase 2 behaviour from `calibration_n`.
+   */
+  readonly calibration_table?: CalibrationTable | null;
   readonly week: Week;
   readonly clock: Clock;
   readonly inputs?: readonly InputFreshness[];
@@ -113,7 +132,25 @@ export interface EvidenceRequest {
 export interface EvidenceOutcome {
   readonly data: EvidenceData;
   readonly warnings: readonly string[];
+  /**
+   * The scorable news claims of this call, value-free (Phase 3, plan 10 C8): each text item's
+   * calibration source, type and signal — what the retrospective scores into the calibration table
+   * once the game is final. Official items (the prior's own basis) and unscorable types are left out.
+   */
+  readonly claims: readonly {
+    readonly source: CalibrationSource;
+    readonly type: ScoredClaimType;
+    readonly signal: ClaimSignal;
+  }[];
 }
+
+/** The claim types the retrospective can score (calibration.ts claimOutcome). */
+const LOGGED_CLAIM_TYPES: readonly ScoredClaimType[] = [
+  "availability",
+  "health",
+  "role",
+  "coaching_intent",
+];
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 const UNAVAILABLE: ReadonlySet<string> = new Set(["OUT", "INJURY_RESERVE", "SUSPENSION"]);
@@ -147,6 +184,8 @@ interface Item {
   readonly official: boolean;
   readonly reliability: number;
   readonly decayed: boolean;
+  /** The designation the item carries (the extract's, or the official label's) — the table's key. */
+  readonly designation: Designation | null;
 }
 
 /** The usage move: the latest game against the mean of up to four before it. */
@@ -213,6 +252,7 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
       official: false,
       reliability: rel.reliability ?? 0,
       decayed: rel.decayed,
+      designation: ex?.designation ?? null,
     });
     return true;
   };
@@ -253,6 +293,7 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
       official: true,
       reliability: OFFICIAL_RELIABILITY[type],
       decayed: false,
+      designation: d,
     });
     return d;
   };
@@ -398,6 +439,37 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
     p_active: pActive === null ? null : round(pActive, 3),
     role_shares: Object.keys(shares).length > 0 ? shares : null,
   };
+  // the posterior over the calibrated table (Phase 3, plan 10 C8): null until table_n ≥ 200 news
+  // claims; injection-flagged items weigh 0, a decayed outlook its decay (calibration.ts merge rules)
+  const table = req.calibration_table ?? null;
+  const calState =
+    table === null ? calibrationState(req.calibration_n ?? 0) : calibrationStateOf(table);
+  const posteriorRaw =
+    table === null
+      ? null
+      : evidencePosterior({
+          prior: prior.p_active === null && prior.role_shares === null ? null : prior,
+          prior_status: status,
+          evidence: posteriorEvidenceOf(
+            items.map((it) => ({
+              source: it.source,
+              type: it.type,
+              direction: it.direction,
+              designation: it.designation,
+              time: it.time,
+              flags: it.claim.untrusted_text.flags ?? [],
+              ...(it.decayed ? { decay: seasonOutlookWeight(req.week, newsMoved) } : {}),
+            })),
+          ),
+          table,
+        });
+  const posterior =
+    posteriorRaw === null
+      ? null
+      : {
+          p_active: posteriorRaw.p_active === null ? null : round(posteriorRaw.p_active, 3),
+          role_shares: posteriorRaw.role_shares,
+        };
 
   const confirm: string[] = [];
   if (flag === "availability_conflict")
@@ -446,10 +518,19 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
         "structured fields win: no text changes this recommendation",
         "never (research 05 §6 rule 3)",
       ),
-      A(
-        "source reliabilities are hand-set priors",
-        `the calibration table reaches ${String(EVIDENCE_POSTERIOR_MIN_N)} scored claims`,
-      ),
+      ...(posterior === null
+        ? [
+            A(
+              "source reliabilities are hand-set priors",
+              `the calibration table reaches ${String(EVIDENCE_POSTERIOR_MIN_N)} scored claims`,
+            ),
+          ]
+        : [
+            A(
+              "source reliabilities come from the calibration table of scored claims",
+              "the retrospective scores more claims",
+            ),
+          ]),
     ],
     confidence: { role_games: (req.usage ?? []).length, inputs },
     as_of: newestAsOf(inputs, req.clock.nowIso()),
@@ -464,14 +545,34 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
       injection_flags,
       prior: prior.p_active === null && prior.role_shares === null ? null : prior,
       evidence,
-      // the merge is P2 (sib ADV OBJ-21): never shown before the calibrated table exists
-      posterior: null,
+      // the merge is P2 (sib ADV OBJ-21): never shown before the calibrated table holds 200 news claims
+      posterior,
       what_would_confirm: confirm,
       consequence: { affects, re_run: reRun },
-      calibration_state: calibrationState(req.calibration_n ?? 0),
+      calibration_state: calState,
       rec,
       inputs,
     },
     warnings,
+    claims: loggedClaimsOf(items),
   };
+}
+
+/** The scorable text claims of a call, one per (source, type, signal) (see EvidenceOutcome.claims). */
+function loggedClaimsOf(items: readonly Item[]): EvidenceOutcome["claims"] {
+  const out: EvidenceOutcome["claims"][number][] = [];
+  const seen = new Set<string>();
+  for (const it of items) {
+    if (it.official) continue;
+    const source = calibrationSourceOf(it.source);
+    if (source === null || !isTextSource(source)) continue;
+    const type = it.type;
+    if (type === "other" || !LOGGED_CLAIM_TYPES.includes(type)) continue;
+    const signal = claimSignal(it.designation, it.direction);
+    const k = `${source}|${type}|${signal}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ source, type, signal });
+  }
+  return out;
 }

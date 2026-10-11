@@ -127,6 +127,8 @@ describe("projectV2", () => {
     const w = out.data.projections[0]?.weeks[0];
     expect(w?.points).toMatchObject({ mean: 0, p90: 0, p_zero: 1 });
     expect(w?.p_active).toBe(0);
+    // the label reads as v1's: the shipped weight on ESPN's mean, whatever the designation
+    expect(w?.inputs.weight_espn).toBe(1);
     expect(out.data.projections[0]?.assumptions.some((a) => a.text.includes("rules him out"))).toBe(
       true,
     );

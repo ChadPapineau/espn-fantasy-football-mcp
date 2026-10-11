@@ -3,8 +3,9 @@
 // or on the server-prose allow-list (fixed engine/tool text, never third-party); every object key
 // passes the envelope's key grammar; and nothing anywhere carries a member GUID or an IP literal.
 // Ported from sibling @5daa625 (tests/mcp/helpers/walk.ts), adapted (ESPN prose paths, GUID/IP scan).
+import { ATTRIBUTION_KEY_RE } from "../../../src/domain/reclog/attribution.js";
 import { RETRO_METRIC_KEYS } from "../../../src/domain/reclog/retrospective.js";
-import { isUntrustedText, objectKeyViolations } from "../../../src/mcp/envelope.js";
+import { OUTPUT_KEY_RE, isUntrustedText, objectKeyViolations } from "../../../src/mcp/envelope.js";
 
 /** One string leaf of `data`, outside wrappers, with its normalised path (`[]` for indices). */
 export interface Leaf {
@@ -112,9 +113,15 @@ export function envelopeViolations(env: {
   }
   // E13's `sample_size` keys are the fixed RETRO_METRIC_KEYS vocabulary (dotted metric paths)
   const sampleKeys = Object.keys((env.data as { sample_size?: object }).sample_size ?? {});
-  const fixed = sampleKeys.every((k) => (RETRO_METRIC_KEYS as readonly string[]).includes(k));
+  // (plus keys the grammar admits anyway — Phase 3's `attribution` sample size)
+  const fixed = sampleKeys.every(
+    (k) => (RETRO_METRIC_KEYS as readonly string[]).includes(k) || OUTPUT_KEY_RE.test(k),
+  );
+  // and its `attribution` keys the server-composed ATTRIBUTION_KEY_RE grammar (Phase 3, plan 10 C9)
+  const attrKeys = Object.keys((env.data as { attribution?: object | null }).attribution ?? {});
+  const attrFixed = attrKeys.every((k) => ATTRIBUTION_KEY_RE.test(k));
   const keys = objectKeyViolations(env.data).filter(
-    (p) => !(fixed && p === "data.sample_size.{?}"),
+    (p) => !(fixed && p === "data.sample_size.{?}") && !(attrFixed && p === "data.attribution.{?}"),
   );
   return [...new Set([...bad, ...keys])];
 }

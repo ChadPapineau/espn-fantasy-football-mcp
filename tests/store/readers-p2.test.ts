@@ -6,6 +6,7 @@
 // matches; a gsis id with two pfr ids, or a pfr id claimed by two gsis ids, is never guessed; and a
 // prior season is read from the history file. Every id and name is invented (00-90xxxxx, "Test").
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { NflTeam } from "../../src/config/schema.js";
 import { isUntrustedText } from "../../src/domain/league/types.js";
 import {
   DS_DEPTH_CHARTS,
@@ -15,6 +16,7 @@ import {
   DS_ROSTER_WEEKLY,
   DS_SNAP_COUNTS,
   DS_STATS_PLAYER_WEEK,
+  DS_STATS_TEAM_WEEK,
   DS_TEAM_DEFENSE_WEEK,
   DS_TRENDING,
   NEWS_TABLES,
@@ -121,10 +123,18 @@ describe("DepthChartReader.chart (ds_depth_charts runs)", () => {
 
 describe("EpWeeklyReader.rows", () => {
   it("current season from the current file, a prior one from the history file; ids bound as data", async () => {
-    const e = (season: number, gsis: string, xfp: number | null) =>
-      full(DS_EP_WEEKLY, { season, week: 1, player_id: gsis, total_fantasy_points_exp: xfp });
+    const e = (season: number, gsis: string, xfp: number | null, xtd: number | null = null) =>
+      full(DS_EP_WEEKLY, {
+        season,
+        week: 1,
+        player_id: gsis,
+        total_fantasy_points_exp: xfp,
+        rec_touchdown_exp: xtd,
+        rush_touchdown_exp: xtd === null ? null : xtd / 2,
+        pass_touchdown_exp: null,
+      });
     await publishTables(pub, "ffopportunity:ep_weekly", "e1", [
-      { spec: DS_EP_WEEKLY, rows: [e(2026, A, 12.5), e(2026, B, null)] },
+      { spec: DS_EP_WEEKLY, rows: [e(2026, A, 12.5, 0.4), e(2026, B, null)] },
     ]);
     await publishTables(
       pub,
@@ -134,9 +144,26 @@ describe("EpWeeklyReader.rows", () => {
       { seasons: [2024, 2025] },
     );
     const now = s.datasets.epWeekly.rows([A, B, "x') OR 1=1 --"], 2026, [1]);
+    // Phase 3 (plan 10 §3.3): the location-based expected TDs v2-opportunity reads ride along
     expect(now.rows).toEqual([
-      { gsis_id: A, season: 2026, week: 1, xfp_total: 12.5 },
-      { gsis_id: B, season: 2026, week: 1, xfp_total: null },
+      {
+        gsis_id: A,
+        season: 2026,
+        week: 1,
+        xfp_total: 12.5,
+        x_rec_td: 0.4,
+        x_rush_td: 0.2,
+        x_pass_td: null,
+      },
+      {
+        gsis_id: B,
+        season: 2026,
+        week: 1,
+        xfp_total: null,
+        x_rec_td: null,
+        x_rush_td: null,
+        x_pass_td: null,
+      },
     ]);
     const prior = s.datasets.epWeekly.rows([A], 2025, [1]);
     expect(prior.stamp?.source).toBe("ffopportunity:ep_weekly_history");
@@ -316,6 +343,95 @@ describe("PbpReader.teamProfile", () => {
         pass_oe_mean: 3,
         pass_oe_n: 2,
       },
+    ]);
+  });
+});
+
+describe("TeamWeekReader.lines (Phase 3 — v2-opportunity's team volume)", () => {
+  it("serves each team-game's attempts, sacks and carries; a prior season from the history file; hostile rows skipped", async () => {
+    expect(s.datasets.teamWeek?.lines(["MIA"], 2026, [1])).toEqual({ rows: [], stamp: null });
+    const tw = (
+      season: number,
+      team: string,
+      opp: string | null,
+      v: Record<string, number | null>,
+    ) =>
+      full(DS_STATS_TEAM_WEEK, {
+        season,
+        week: 1,
+        team,
+        season_type: "REG",
+        game_id: `${String(season)}_01_${team}`,
+        opponent_team: opp,
+        ...v,
+      });
+    await publishTables(pub, "nflverse:stats_team_week", "t1", [
+      {
+        spec: DS_STATS_TEAM_WEEK,
+        rows: [
+          tw(2026, "MIA", "BUF", { attempts: 33, sacks_suffered: 2, carries: 25 }),
+          tw(2026, "BUF", "MIA", { attempts: 30, sacks_suffered: null, carries: -4 }),
+          // a team outside the NflTeam set is skipped and counted, never served
+          tw(2026, "XXX", "MIA", { attempts: 1, sacks_suffered: 0, carries: 1 }),
+          // an opponent outside the set reads null (warned), the row is kept
+          tw(2026, "NYJ", "ZZZ", { attempts: 28, sacks_suffered: 1, carries: 20 }),
+        ],
+      },
+    ]);
+    await publishTables(
+      pub,
+      "nflverse:stats_team_week_history",
+      "h1",
+      [
+        {
+          spec: DS_STATS_TEAM_WEEK,
+          rows: [tw(2025, "MIA", "NE", { attempts: 40, sacks_suffered: 3, carries: 18 })],
+        },
+      ],
+      { seasons: [2024, 2025] },
+    );
+    // hostile team strings are bound as data (never SQL): typed NflTeam at the port, so cast here
+    const hostile = ["XXX", "x') OR 1=1 --"] as unknown as NflTeam[];
+    const r = s.datasets.teamWeek?.lines(["MIA", "BUF", "NYJ", ...hostile], 2026, [1]);
+    expect(r?.stamp?.source).toBe("nflverse:stats_team_week");
+    expect(r?.rows).toEqual([
+      {
+        nfl_team: "BUF",
+        season: 2026,
+        week: 1,
+        opponent: "MIA",
+        season_type: "REG",
+        attempts: 30,
+        sacks: null,
+        carries: null,
+      },
+      {
+        nfl_team: "MIA",
+        season: 2026,
+        week: 1,
+        opponent: "BUF",
+        season_type: "REG",
+        attempts: 33,
+        sacks: 2,
+        carries: 25,
+      },
+      {
+        nfl_team: "NYJ",
+        season: 2026,
+        week: 1,
+        opponent: null,
+        season_type: "REG",
+        attempts: 28,
+        sacks: 1,
+        carries: 20,
+      },
+    ]);
+    expect(warnings).toContain("dataset_row_skipped");
+    expect(warnings).toContain("dataset_team_unknown");
+    const prior = s.datasets.teamWeek?.lines(["MIA"], 2025, [1]);
+    expect(prior?.stamp?.source).toBe("nflverse:stats_team_week_history");
+    expect(prior?.rows.map((x) => [x.nfl_team, x.attempts, x.sacks, x.carries])).toEqual([
+      ["MIA", 40, 3, 18],
     ]);
   });
 });

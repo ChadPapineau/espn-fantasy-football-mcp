@@ -18,6 +18,7 @@ import type {
   DatasetReaders,
   EspnProjectionRepository,
   ProjectionRepository,
+  WaiverRunRepository,
 } from "../domain/analytics/types.js";
 import type { Clock } from "../domain/clock.js";
 import type {
@@ -35,7 +36,11 @@ import type {
   ScoreboardSnapshotRepository,
   TransactionsSeenRepository,
 } from "../domain/league/types.js";
-import type { RecommendationLogRepository } from "../domain/reclog/types.js";
+import type {
+  ParameterProposalRepository,
+  RecommendationLogRepository,
+  ScoredClaimRepository,
+} from "../domain/reclog/types.js";
 
 export type { BestEffortOutcome } from "../domain/analytics/types.js";
 
@@ -130,7 +135,13 @@ export const MIGRATION_001_TABLES = [
    */
   "guid_pseudonym",
 ] as const;
-export type StoreTable = (typeof MIGRATION_001_TABLES)[number];
+/** The tables migration 002 adds (plan 10 §3.3 — src/store/migrations/002_phase3.ts). */
+export const MIGRATION_002_TABLES = ["parameter_proposal", "waiver_run", "scored_claim"] as const;
+
+/** Every store table this binary's migrations create, in migration order. */
+export const STORE_TABLES = Object.freeze([...MIGRATION_001_TABLES, ...MIGRATION_002_TABLES]);
+export type StoreTable =
+  (typeof MIGRATION_001_TABLES)[number] | (typeof MIGRATION_002_TABLES)[number];
 
 /** Never pruned (plan 06 §1.3; plan 08 §9): the backtest corpus and the log's referents. */
 export const NEVER_PRUNED_TABLES: readonly StoreTable[] = Object.freeze([
@@ -143,6 +154,12 @@ export const NEVER_PRUNED_TABLES: readonly StoreTable[] = Object.freeze([
   "write_journal",
   /** Pruning it would renumber the pseudonyms the never-pruned rows already carry. */
   "guid_pseudonym",
+  /** Phase 3 (plan 10 C9): every proposal set — what `eff tune` shows and a human may apply. */
+  "parameter_proposal",
+  /** Phase 3 (plan 10 C5): the league's own surplus feed the fitted premium re-solves from. */
+  "waiver_run",
+  /** Phase 3 (plan 10 C8): the scored news claims the calibration table reads. */
+  "scored_claim",
 ]);
 
 /** What `store prune` removes, per table (plan 06 §1.3). */
@@ -180,6 +197,12 @@ export const WRITE_CLASS: Readonly<Record<Exclude<StoreTable, "schema_version">,
     checks: "required",
     write_journal: "required",
     guid_pseudonym: "required",
+    /** Written by the retrospective (E13); `eff tune` must be able to rely on what it read. */
+    parameter_proposal: "required",
+    /** Logged beside an E5 answer: a busy store costs one run of the feed, never the answer. */
+    waiver_run: "best_effort",
+    /** Logged beside an E10 answer and scored by E13: a busy store skips one claim. */
+    scored_claim: "best_effort",
   });
 
 // --- dataset files (plan 01 §5.5) -------------------------------------------------------------------
@@ -561,6 +584,12 @@ export interface StoreRepositories {
   readonly recommendationLog: RecommendationLogRepository;
   /** PHASE W SEAM — the empty table's counts (G1 `journal` is null in this build). */
   readonly writeJournal: WriteJournalRepository;
+  /** Phase 3 (plan 10 C9; migration 002): the retrospective's proposal sets `eff tune` reads. */
+  readonly parameterProposals: ParameterProposalRepository;
+  /** Phase 3 (plan 10 C5; migration 002): the waiver runs E5 priced — the fitted premium's feed. */
+  readonly waiverRuns: WaiverRunRepository;
+  /** Phase 3 (plan 10 C8; migration 002): E10's logged news claims, scored by the retrospective. */
+  readonly scoredClaims: ScoredClaimRepository;
 }
 
 // --- the store -------------------------------------------------------------------------------------

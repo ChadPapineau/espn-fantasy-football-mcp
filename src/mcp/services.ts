@@ -17,6 +17,7 @@ import type {
   DatasetReaders,
   EspnProjectionRepository,
   ProjectionRepository,
+  WaiverRunRepository,
 } from "../domain/analytics/types.js";
 import type { Clock } from "../domain/clock.js";
 import type {
@@ -37,7 +38,11 @@ import type {
   Stamped,
   TransactionsSeenRepository,
 } from "../domain/league/types.js";
-import type { RecommendationLogRepository } from "../domain/reclog/types.js";
+import type {
+  ParameterProposalRepository,
+  RecommendationLogRepository,
+  ScoredClaimRepository,
+} from "../domain/reclog/types.js";
 import type {
   CredentialProbeResult,
   FantasyPlatform,
@@ -191,6 +196,16 @@ export interface McpServices {
   readonly poolSnapshots: Pick<PoolSnapshotRepository, "latestTwo">;
   readonly scoreboardSnapshots: Pick<ScoreboardSnapshotRepository, "forWeek">;
   readonly leagueSettings: Pick<LeagueSettingsRepository, "latest" | "openChecks">;
+  /**
+   * Phase 3 (plan 10 §3.3; migration 002). Optional so a services bundle built before Phase 3 (and
+   * the narrower test fakes) still type-checks; the composition root always sets them.
+   * The retrospective persists its proposal sets here; only `eff tune` reads them (C9).
+   */
+  readonly parameterProposals?: Pick<ParameterProposalRepository, "put">;
+  /** E5's priced waiver runs — the league's own surplus feed for the fitted premium (C5). */
+  readonly waiverRuns?: WaiverRunRepository;
+  /** E10's logged news claims; the retrospective scores them, E10 reads the scored rows (C8). */
+  readonly scoredClaims?: ScoredClaimRepository;
   readonly refreshLog: SourceLogPort;
   readonly status: StatusPort;
   readonly auth: AuthPort;
@@ -230,4 +245,17 @@ export interface McpServerOptions {
    * both test-scope keys, so no production configuration reaches it.
    */
   readonly cpuDeadlineMs?: number | null;
+  /**
+   * The applied tuned parameters (`<config>/tuned-parameters.json` — written only by a human-run
+   * `eff tune --apply`, plan 10 §3.3 and C9): read ONCE at server start by the composition root and
+   * never written by the server; E1's v2-opportunity reads them through `applyTunedOverrides`.
+   * Absent or null = the model's own constants (no file, or an unusable one — logged, never guessed).
+   */
+  readonly tuned?: TunedOverrides | null;
+}
+
+/** The applied overrides E1 reads (src/domain/reclog/tune.ts TunedParameters.values, validated). */
+export interface TunedOverrides {
+  readonly values: Readonly<Record<string, number>>;
+  readonly updated_at: string | null;
 }

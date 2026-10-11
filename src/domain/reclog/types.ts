@@ -6,7 +6,8 @@
 // (league, season, week, kind, client_ref) tuple (sib QA-1-061); a scored outcome is persisted
 // beside the immutable log row (sib critic C-02b). Ported from sibling @d72e03b, adapted.
 import type { SeedingMode } from "../../config/schema.js";
-import type { InputFreshness, Rec, RecSubject } from "../analytics/types.js";
+import type { BestEffortOutcome, InputFreshness, Rec, RecSubject } from "../analytics/types.js";
+import type { ScoredClaim } from "../evidence/calibration.js";
 import type { BareText, IsoInstant, Week } from "../league/types.js";
 import type { Dist } from "../scoring/types.js";
 
@@ -303,6 +304,42 @@ export interface ParameterProposalRepository {
   put(leagueId: string, set: ParameterProposalSet): void;
   /** The newest set of a league's season, or null when none was stored. */
   latest(leagueId: string, season: number): ParameterProposalSet | null;
+}
+
+/**
+ * One news claim E10 weighed, logged for the calibration table (plan 10 C8; migration 002
+ * `scored_claim`): value-free — the calibration source, the claim type, its signal and the structured
+ * prior it was made against; never the text. Scored once the player-week is final.
+ */
+export interface LoggedClaim {
+  readonly season: number;
+  readonly week: Week;
+  readonly player_id: number;
+  readonly claim: Pick<ScoredClaim, "source" | "type" | "signal" | "prior_status" | "prior_p">;
+}
+
+/** A logged claim still waiting for its outcome, with its store key. */
+export interface PendingClaim extends LoggedClaim {
+  readonly key: string;
+}
+
+/**
+ * `scored_claim` (best-effort writes, never pruned; the league id is local-only, never emitted): E10
+ * logs, the retrospective (E13) scores with `claimOutcome`, E10 reads the scored rows into the table.
+ */
+export interface ScoredClaimRepository {
+  /** Logs a claim once (idempotent per player-week, source, type and signal). */
+  log(leagueId: string, c: LoggedClaim, loggedAt: IsoInstant): BestEffortOutcome;
+  /** The league's unscored claims of a week. */
+  pending(leagueId: string, season: number, week: Week): readonly PendingClaim[];
+  /** Records a claim's outcome (a second scoring of the same key changes nothing). */
+  score(
+    key: string,
+    outcome: { readonly active: boolean | null; readonly borne_out: boolean | null },
+    scoredAt: IsoInstant,
+  ): BestEffortOutcome;
+  /** The league's scored claims (every season), newest first, at most `limit`. */
+  scored(leagueId: string, limit: number): readonly ScoredClaim[];
 }
 
 /** One scored call (plan 07 E13 `calls[]`). */

@@ -27,6 +27,11 @@ import { readSecureFile } from "../config/paths.js";
 import type { Config } from "../config/schema.js";
 import type { Clock } from "../domain/clock.js";
 import { CHECKED_IN_OVERRIDES } from "../domain/crosswalk/overrides.js";
+import {
+  TUNED_PARAMETERS_FILE_NAME,
+  TUNED_PARAMETERS_MAX_BYTES,
+  parseTunedParameters,
+} from "../domain/reclog/tune.js";
 import { translateScoringInput } from "../domain/scoring/index.js";
 import { loadObservations, parseDiffs } from "../drift/index.js";
 import { MANIFEST_PATH, type DriftObservations } from "../drift/types.js";
@@ -38,6 +43,7 @@ import type {
   McpServerOptions,
   McpServices,
   ServerTexts,
+  TunedOverrides,
 } from "../mcp/services.js";
 import { createEspnProvider, type EspnProvider, type FetchLike } from "../providers/espn/index.js";
 import type { LeagueRef } from "../providers/platform.js";
@@ -107,6 +113,37 @@ export function loadTexts(root: string): ServerTexts {
       path.join(root, "skills", "_shared", "references", "tool-outputs.md"),
     ),
   };
+}
+
+/**
+ * The applied tuned parameters (plan 10 §3.3, C9): `<configDir>/tuned-parameters.json`, written only
+ * by a human-run `eff tune --apply`. Read once at start, private-file rules (no symlink, 0600, owner,
+ * size cap) and the strict document parser; absent → null; unusable → null with a value-free warning
+ * (the server then runs on the model's own constants — never a guess, never a write).
+ */
+export function loadTunedOverrides(configDir: string, logger: McpLogger): TunedOverrides | null {
+  if (configDir === "") return null;
+  let text: string | null;
+  try {
+    text = readSecureFile(path.join(configDir, TUNED_PARAMETERS_FILE_NAME), {
+      requirePrivate: true,
+      maxBytes: TUNED_PARAMETERS_MAX_BYTES,
+      what: TUNED_PARAMETERS_FILE_NAME,
+    });
+  } catch {
+    logger.warn("tune.file_unreadable");
+    return null;
+  }
+  if (text === null) return null;
+  try {
+    const doc = parseTunedParameters(text);
+    const n = Object.keys(doc.values).length;
+    if (n > 0) logger.info("tune.overrides_loaded", { count: n });
+    return { values: doc.values, updated_at: doc.updated_at };
+  } catch {
+    logger.warn("tune.file_invalid");
+    return null;
+  }
 }
 
 /** The drift observations the package ships (fixtures/drift/manifest.json), or undefined. */
@@ -377,6 +414,10 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     poolSnapshots: store.repos.poolSnapshots,
     scoreboardSnapshots: store.repos.scoreboardSnapshots,
     leagueSettings: store.repos.leagueSettings,
+    // Phase 3 (plan 10 §3.3; migration 002): proposal sets (C9), waiver runs (C5), claims (C8)
+    parameterProposals: store.repos.parameterProposals,
+    waiverRuns: store.repos.waiverRuns,
+    scoredClaims: store.repos.scoredClaims,
     refreshLog: store.repos.refreshLog,
     status: {
       credential: credentialView,
@@ -454,6 +495,7 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     ...(fixture ? { spikeNonce: randomBytes(6).toString("hex") } : {}),
     ...(deadlineOff ? { cpuDeadlineMs: null } : {}),
     weatherSource: config.weatherSource,
+    tuned: loadTunedOverrides(config.configDir, logger),
     writesRequested: config.writesRequested,
     writeGates: { allHold: false, firstFailing: gates.firstFailing ?? "module_not_built" },
     texts: args.texts ?? loadTexts(args.packageRoot),

@@ -111,6 +111,21 @@ export const CALL_ROLE_WEIGHT: Readonly<Record<SubjectRole, number>> = Object.fr
 /** Per-call keys reach the wire for at most this many projection-backed calls (token budget). */
 export const MAX_WIRE_CALLS = 20;
 
+const LAYER_ALT = ATTRIBUTION_LAYERS.join("|");
+/**
+ * The grammar of every `data.attribution` key (`attributionMap`): fixed words, the layer names, a
+ * display position (ATTRIBUTION_POSITION_RE) and a call index — server-composed, so no third-party
+ * string can form one. The tool keeps only keys matching it and the A6 walk admits exactly these
+ * dotted keys (the envelope's OUTPUT_KEY_RE has no dot; the precedent is E13's RETRO_METRIC_KEYS).
+ */
+export const ATTRIBUTION_KEY_RE = new RegExp(
+  `^(?:n_player_weeks|calls\\.(?:projection_backed|complete|unbacked)|error\\.(?:mean|mae)` +
+    `|(?:${LAYER_ALT})\\.(?:mean|mae)` +
+    `|[A-Z][A-Za-z/]{0,9}\\.(?:n|error\\.mae|(?:${LAYER_ALT})\\.mae)` +
+    `|(?:matchup_lift|weather_lift)\\.(?:n|mean)` +
+    `|calls\\.[0-9]{1,3}\\.(?:error|complete|${LAYER_ALT}))$`,
+);
+
 // --- inputs ----------------------------------------------------------------------------------------
 
 /** One EWM share window the opportunity layer used (oldest game first) and the realised share. */

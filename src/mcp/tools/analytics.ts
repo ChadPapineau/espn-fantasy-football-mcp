@@ -116,6 +116,8 @@ import { selectPlayers } from "./select.js";
 import { analyzeWaiversP1 } from "../../domain/analytics/phase2.js";
 import { waiverP1Extras } from "./market-p1.js";
 import { projectMany } from "./p1-common.js";
+import { fitPremiumFromFeed, WAIVER_FIT } from "../../domain/analytics/waiver-fit/index.js";
+import { mergeV2, runV2, storeV2 } from "./projection-v2.js";
 
 // --- shared engine inputs ------------------------------------------------------------------------
 
@@ -263,6 +265,11 @@ export async function project(
     readonly seed: number;
     readonly include_stat_line?: boolean;
     readonly allowStale: boolean;
+    /**
+     * v2-opportunity's samples per player (full only — plan 10 §3.3): default its own 2 000; the
+     * bulk callers (projectMany) pass V2_BULK_SIMS so a 160-player trade search stays in budget.
+     */
+    readonly v2_n_sims?: number;
   },
   inputs: InputStamp[],
   warnings: string[],
@@ -277,7 +284,7 @@ export async function project(
   const implied = impliedTotals(ctx, o.schedule, season, weeks, inputs, o.allowStale);
   // the trailing reads and their scoring are one synchronous step: the loop runs before sampling
   await turn();
-  return projectPlayers({
+  const v1 = await projectPlayers({
     targets: subjects.map((s) => targetOf(s.p, s.gsis, trailing.get(s.p.ref.id) ?? [])),
     season,
     horizon: o.horizon,
@@ -296,6 +303,40 @@ export async function project(
     // so the P0 core toolset's projections are unchanged
     player_sim: ctx.options.toolset === "full",
   });
+  if (ctx.options.toolset !== "full") return v1;
+  // Phase 3 (plan 10 §3.3; plan 07 E1 → v2-opportunity): the first target week of every QB/RB/WR/TE
+  // whose opportunity inputs exist is served by v2 (basis player_sim; ESPN's mean stays the point
+  // estimate at weight_espn 1.0); everyone else keeps v1 (projection-v2.ts)
+  try {
+    const run = await runV2(
+      ctx,
+      subjects,
+      v1,
+      {
+        season,
+        week: o.week,
+        settings: o.settings,
+        rng: seededRng(o.seed).fork("v2"),
+        allowStale: o.allowStale,
+        ...(o.v2_n_sims === undefined ? {} : { n_sims: o.v2_n_sims }),
+        include_stat_line: o.include_stat_line === true,
+        deadline_ms: cpuDeadlineOf(ctx),
+      },
+      inputs,
+      warnings,
+    );
+    const merged = mergeV2(v1, run, o.include_stat_line === true);
+    // the retrospective's attribution reads these (plan 10 C9; best-effort, deduplicated)
+    await storeV2(ctx, run, season, o.week, inputs);
+    return merged;
+  } catch (e) {
+    // an optional layer never fails the call: v1 serves, said once (no third-party text)
+    ctx.services.logger.warn("e1.v2_unavailable", {
+      error: e instanceof Error ? e.name : "unknown",
+    });
+    warnings.push("v2-opportunity unavailable for this call: v1-ensemble serves");
+    return v1;
+  }
 }
 
 // --- E1 espn_project_players ----------------------------------------------------------------------
@@ -1167,6 +1208,76 @@ export async function candidatePool(
       );
 }
 
+/**
+ * The league-fitted premium (Phase 3, plan 10 C5; waiver-fit/feed.ts fitPremiumFromFeed): the waiver
+ * runs E5 priced for this league's season, the persisted transactions (processed claims give the
+ * drift; without any, the standings' acquisition totals bound it) and the played matchup periods.
+ * Null when the store keeps no runs yet; a fit below a regular season of runs stays on the cold-start
+ * table (E5 ignores it) and the reason is said once.
+ */
+export function leaguePremiumFit(
+  ctx: ToolContext,
+  league: League,
+  rules: LeagueRules,
+  w: Week,
+  standings: Standings | null,
+  warnings: string[],
+): ReturnType<typeof fitPremiumFromFeed> | null {
+  const repo = ctx.services.waiverRuns;
+  if (repo === undefined) return null;
+  try {
+    const runs = repo.list(leagueRef(ctx).league_id, league.ref.season);
+    if (runs.length === 0) return null;
+    const period = periodOf(rules, w) ?? w;
+    const fit = fitPremiumFromFeed({
+      teams: league.size,
+      transactions: ctx.services.transactionsSeen.list(null, 1000),
+      standings: standings?.teams ?? [],
+      periods_played: Array.from({ length: Math.max(0, period - 1) }, (_, i) => i + 1),
+      runs: runs.map((r) => ({ W: r.W, candidates: r.surplus.map((x) => ({ s: x })) })),
+    });
+    if (fit.basis !== "league_fitted")
+      warnings.push(
+        `premium stays on the cold-start table: the league's feed holds ${String(runs.length)} priced waiver run(s), ${String(WAIVER_FIT.minRuns)} needed`,
+      );
+    return fit;
+  } catch (e) {
+    ctx.services.logger.warn("e5.premium_fit_unavailable", {
+      error: e instanceof Error ? e.name : "unknown",
+    });
+    return null;
+  }
+}
+
+/** Logs the waiver run an E5 answer priced (priority mode, a known next run; plan 10 C5). */
+export function logWaiverRun(
+  ctx: ToolContext,
+  season: number,
+  data: {
+    readonly mode_used: string;
+    readonly next_run_at: string | null;
+    readonly W: number;
+    readonly candidates: readonly { readonly s: number }[];
+  },
+): void {
+  const repo = ctx.services.waiverRuns;
+  if (repo === undefined || data.mode_used !== "priority" || data.next_run_at === null) return;
+  try {
+    repo.put(
+      leagueRef(ctx).league_id,
+      {
+        season,
+        run_at: data.next_run_at,
+        W: data.W,
+        surplus: data.candidates.map((c) => c.s).filter((x) => Number.isFinite(x)),
+      },
+      ctx.services.clock.nowIso(),
+    );
+  } catch {
+    // a run the store refuses is skipped, never fatal to the answer
+  }
+}
+
 /** E5 `espn_analyze_waivers`. */
 export const analyzeWaiversTool = defineTool({
   name: "espn_analyze_waivers",
@@ -1268,6 +1379,10 @@ export const analyzeWaiversTool = defineTool({
         };
       });
     const myRank = standings?.teams.find((t) => t.team_id === team)?.waiver_rank ?? null;
+    // Phase 3 (plan 10 C5; research 05 §1.6 eval 3): the premium re-solved from this league's own
+    // feed — the waiver runs E5 priced (store) and the persisted transactions' drift — once it
+    // holds a regular season of runs; until then the cold-start table, said once
+    const premiumFit = leaguePremiumFit(ctx, league, rules, w, standings, warnings);
     const p0Request = {
       roster: slots,
       rules,
@@ -1287,6 +1402,7 @@ export const analyzeWaiversTool = defineTool({
       settings,
       kdst,
       adds_remaining: null,
+      premium_fit: premiumFit,
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
     };
@@ -1357,6 +1473,9 @@ export const analyzeWaiversTool = defineTool({
             inputs: toDataInputs(inputs, ctx.nowMs),
           });
         })();
+    // the run this call priced joins the league's feed (priority mode only; the newest call before
+    // the run wins — best-effort, a busy store skips it)
+    logWaiverRun(ctx, league.ref.season, out.data);
     const full = args.detail === "full";
     const data = full
       ? out.data

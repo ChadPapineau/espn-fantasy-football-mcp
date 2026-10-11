@@ -101,6 +101,25 @@ function seedNeverPruned(age: number): void {
     "INSERT INTO guid_pseudonym (guid_sha256, n) VALUES (?, (SELECT COALESCE(MAX(n), 0) + 1 FROM guid_pseudonym))",
     String(age).padStart(64, "f"),
   );
+  // Phase 3 (migration 002): every new table is never pruned
+  runSql(
+    "INSERT INTO parameter_proposal (league_id, season, week, hash, created_at, created_ms, set_json) VALUES ('0', 2026, 1, ?, ?, ?, '{}')",
+    String(age).padStart(64, "0").slice(-64),
+    at,
+    NOW - age,
+  );
+  runSql(
+    "INSERT INTO waiver_run (league_id, season, run_at, run_ms, w, surplus_json, updated_at) VALUES ('0', 2026, ?, ?, 12, '[]', ?)",
+    at,
+    NOW - age,
+    at,
+  );
+  runSql(
+    "INSERT INTO scored_claim (claim_key, league_id, season, week, player_id, logged_at, logged_ms, claim_json) VALUES (?, '0', 2026, 1, 1, ?, ?, '{}')",
+    String(age).padStart(64, "c").slice(-64),
+    at,
+    NOW - age,
+  );
 }
 
 describe("the prune targets", () => {

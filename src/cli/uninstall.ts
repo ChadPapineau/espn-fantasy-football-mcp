@@ -35,6 +35,7 @@ import {
   STORE_FILE_NAME,
 } from "../config/paths.js";
 import type { LenientConfig } from "../config/schema.js";
+import { TUNED_PARAMETERS_FILE_NAME } from "../domain/reclog/tune.js";
 import type { Store, StoreFactory } from "../store/types.js";
 import { bothCredentialStores } from "./espn-stack.js";
 import { EXIT } from "./exit.js";
@@ -71,7 +72,8 @@ const CACHE_DIRS: readonly { readonly name: string; readonly re: RegExp }[] = [
   { name: RUN_TEMP_DIR_NAME, re: RUN_TMP_RE },
 ];
 /** Plain files of ours inside the config dir (session.json is removed by the credential step). */
-const CONFIG_FILES = [CONFIG_FILE_NAME, GATE_KEY_FILE_NAME];
+// the human-applied tuned parameters (`eff tune --apply`, plan 10 C9) live in the config dir too
+const CONFIG_FILES = [CONFIG_FILE_NAME, GATE_KEY_FILE_NAME, TUNED_PARAMETERS_FILE_NAME];
 
 function kind(p: string): "file" | "dir" | "symlink" | "other" | null {
   try {

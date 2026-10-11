@@ -23,6 +23,8 @@ import type {
   NewsReader,
   PbpReader,
   PbpTeamProfileRow,
+  TeamWeekLine,
+  TeamWeekReader,
   TrendingReader,
   TrendingRow,
 } from "../../domain/analytics/types.js";
@@ -120,6 +122,7 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
   readonly news: NewsReader;
   readonly trending: TrendingReader;
   readonly pbp: PbpReader;
+  readonly teamWeek: TeamWeekReader;
   readonly usageExtras: (
     keys: readonly UsageKey[],
     season: number,
@@ -218,6 +221,10 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
           season: s,
           week: w,
           xfp_total: num(r.total_fantasy_points_exp),
+          // the location-based expected TDs v2-opportunity reads (plan 10 §3.3; sib §1 step 5)
+          x_rec_td: num(r.rec_touchdown_exp),
+          x_rush_td: num(r.rush_touchdown_exp),
+          x_pass_td: num(r.pass_touchdown_exp),
         });
       }
       return { rows, stamp: d.stampOf(res.conn) };
@@ -362,6 +369,55 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
     },
   };
 
+  // --- TeamWeekReader.lines ------------------------------------------------------------------------
+
+  /**
+   * One team-game's offensive volume (plan 10 §3.3 — v2-opportunity's team volume): the statement's
+   * own columns, an opponent outside the NflTeam set reads null (warned), a row without a valid team
+   * or week is skipped and counted. History-routed like every Phase-2 statement.
+   */
+  const teamWeek: TeamWeekReader = {
+    lines(teams, season, weeks): DatasetResult<TeamWeekLine> {
+      const res = run(
+        "TeamWeekReader.lines",
+        0,
+        {
+          season,
+          weeks: JSON.stringify([...new Set(weeks)]),
+          teams: JSON.stringify([...new Set(teams)]),
+        },
+        season,
+      );
+      if (res === null) return NEVER_LOADED;
+      const rows: TeamWeekLine[] = [];
+      for (const r of res.rows) {
+        const t = team(r.team);
+        const w = int(r.week);
+        if (t === null || w === null) {
+          d.warn("dataset_row_skipped");
+          continue;
+        }
+        const opp = r.opponent_team === null ? null : team(r.opponent_team);
+        if (r.opponent_team !== null && opp === null) d.warn("dataset_team_unknown");
+        const nonNeg = (v: unknown): number | null => {
+          const n = int(v);
+          return n !== null && n >= 0 ? n : null;
+        };
+        rows.push({
+          nfl_team: t,
+          season: int(r.season) ?? season,
+          week: w,
+          opponent: opp,
+          season_type: str(r.season_type) ?? "REG",
+          attempts: nonNeg(r.attempts),
+          sacks: nonNeg(r.sacks_suffered),
+          carries: nonNeg(r.carries),
+        });
+      }
+      return { rows, stamp: d.stampOf(res.conn) };
+    },
+  };
+
   // --- the usage extras: SnapCountReader.counts + PbpReader.playerUsage --------------------------
 
   /** gsis_id → pfr_id for `season` (statement 1 wins, else statement 2; conflicts dropped). */
@@ -478,5 +534,5 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
     return out;
   }
 
-  return { depthCharts, epWeekly, news, trending, pbp, usageExtras };
+  return { depthCharts, epWeekly, news, trending, pbp, teamWeek, usageExtras };
 }

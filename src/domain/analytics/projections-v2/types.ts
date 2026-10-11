@@ -9,6 +9,7 @@ import type { Canonical, Dist, ScoringSettings } from "../../scoring/types.js";
 import type { Pacer } from "../cooperative.js";
 import type { Assumption, Driver, InputFreshness, PActiveBasis, ProjectionData } from "../types.js";
 import type { AnyStamp } from "../inputs.js";
+import type { V2Trace } from "./trace.js";
 
 /** The positions the opportunity model covers (K and D/ST stream apart — research 05 §5 K/D-ST). */
 export type V2Position = "QB" | "RB" | "WR" | "TE";
@@ -391,6 +392,11 @@ export interface V2PlayerDetail {
   /** The turnover model's left tail (research 05 §3.2). */
   readonly turnover: V2TurnoverTail | null;
   readonly stat_line_expectation?: Readonly<Record<Canonical, number>>;
+  /**
+   * The tuning trace (trace.ts; plan 10 C9 — the retrospective's re-fit reads it from the stored
+   * projection). Absent on a skipped player.
+   */
+  readonly trace?: V2Trace;
   /** Why no v2 projection was made (position not modelled, no game history, no team). */
   readonly skipped: string | null;
 }

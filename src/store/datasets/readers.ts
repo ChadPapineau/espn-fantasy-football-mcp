@@ -726,6 +726,8 @@ export function createReaders(o: ReadersOptions): StoreReaders {
     news: phase2.news,
     trending: phase2.trending,
     pbp: phase2.pbp,
+    // Phase 3 (plan 10 §3.3): the team-game volume v2-opportunity reads
+    teamWeek: phase2.teamWeek,
   };
 
   return { datasets, rosterWeekly, playerUniverse, nflPlayers };

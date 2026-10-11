@@ -16,6 +16,8 @@ import {
   BUSY_TIMEOUT_MS,
   MAX_ON_DEMAND_ATTACHMENTS,
   MIGRATION_001_TABLES,
+  MIGRATION_002_TABLES,
+  STORE_TABLES,
   NEVER_PRUNED_TABLES,
   PRUNE_POLICY,
   PUBLISH_ALREADY_CURRENT,
@@ -60,9 +62,18 @@ describe("tables", () => {
     ])
       expect(MIGRATION_001_TABLES).toContain(t);
   });
+  it("migration 002 (Phase 3): distinct new names, none of them in 001, all never pruned", () => {
+    expect(new Set(STORE_TABLES).size).toBe(STORE_TABLES.length);
+    for (const t of MIGRATION_002_TABLES) {
+      expect(t).toMatch(/^[a-z][a-z0-9_]*$/);
+      expect(MIGRATION_001_TABLES as readonly string[]).not.toContain(t);
+      expect(NEVER_PRUNED_TABLES).toContain(t);
+    }
+    expect(STORE_TABLES).toEqual([...MIGRATION_001_TABLES, ...MIGRATION_002_TABLES]);
+  });
   it("every table but schema_version has exactly one write class", () => {
     const classed = Object.keys(WRITE_CLASS).sort();
-    expect(classed).toEqual(MIGRATION_001_TABLES.filter((t) => t !== "schema_version").sort());
+    expect(classed).toEqual(STORE_TABLES.filter((t) => t !== "schema_version").sort());
     for (const c of Object.values(WRITE_CLASS)) expect(["best_effort", "required"]).toContain(c);
   });
   it("the request ledger fails closed; only caches are best-effort", () => {
@@ -74,14 +85,16 @@ describe("tables", () => {
         .filter(([, c]) => c === "best_effort")
         .map(([t]) => t)
         .sort(),
-    ).toEqual(["espn_cache", "points_cache", "projection"]);
+    ).toEqual(["espn_cache", "points_cache", "projection", "scored_claim", "waiver_run"]);
+    // the proposal sets `eff tune` reads are a required write: a set is stored or the call says so
+    expect(WRITE_CLASS.parameter_proposal).toBe("required");
   });
   it("never-pruned and pruned tables are disjoint subsets of the migration", () => {
     for (const t of NEVER_PRUNED_TABLES) {
-      expect(MIGRATION_001_TABLES).toContain(t);
+      expect(STORE_TABLES).toContain(t);
       expect(PRUNE_POLICY[t], t).toBeUndefined();
     }
-    for (const t of Object.keys(PRUNE_POLICY)) expect(MIGRATION_001_TABLES).toContain(t);
+    for (const t of Object.keys(PRUNE_POLICY)) expect(STORE_TABLES).toContain(t);
     expect(NEVER_PRUNED_TABLES).toContain("recommendation_log");
     expect(NEVER_PRUNED_TABLES).toContain("recommendation_outcome");
     expect(Object.isFrozen(NEVER_PRUNED_TABLES)).toBe(true);

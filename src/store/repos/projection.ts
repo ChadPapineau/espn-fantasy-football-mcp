@@ -3,7 +3,8 @@
 // projections made before lock; samples stored compressed (plan 08 §9 `samples_blob`). A run whose
 // recorded inputs equal those of the newest earlier row adds no row (sib QA-1-031). And
 // `espn_projection` (plan 06 §1.4 snapshots — the prospective backtest corpus; required writes,
-// never pruned). Ported from sibling @cf3b015, adapted (ESPN player ids; deflate codec).
+// never pruned). Ported from sibling @cf3b015, adapted (ESPN player ids; deflate codec). Phase 3
+// (plan 10 C9; migration 002): a v2 row also carries P(active), the reported mean and the trace.
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { GSIS_ID_RE } from "../../config/schema.js";
 import type {
@@ -79,19 +80,43 @@ interface Row {
   inputs_as_of: string;
   expectation_json: string;
   samples: Uint8Array;
+  /** Migration 002 (plan 10 C9); null on rows written before it. */
+  p_active: number | null;
+  reported_mean: number | null;
+  trace_json: string | null;
 }
 
-const toStored = (r: Row): StoredProjection => ({
-  player_id: num(r.player_id),
-  gsis_id: r.gsis_id,
-  season: num(r.season),
-  week: num(r.week),
-  model_version: r.model_version as ModelVersion,
-  made_at: r.made_at,
-  inputs_as_of: r.inputs_as_of,
-  expectation: parseJson(r.expectation_json),
-  samples: decodeSamples(r.samples),
-});
+/** Largest stored v2 tuning trace (shares and rates of one player-week). */
+export const TRACE_JSON_MAX = 64 * 1024;
+
+const toStored = (r: Row): StoredProjection => {
+  let trace: Readonly<Record<string, unknown>> | null = null;
+  if (r.trace_json !== null) {
+    try {
+      const t = parseJson<unknown>(r.trace_json);
+      trace =
+        typeof t === "object" && t !== null && !Array.isArray(t)
+          ? (t as Record<string, unknown>)
+          : null;
+    } catch {
+      trace = null; // a corrupt trace reads as none (the attribution then skips the tuning layers)
+    }
+  }
+  return {
+    player_id: num(r.player_id),
+    gsis_id: r.gsis_id,
+    season: num(r.season),
+    week: num(r.week),
+    model_version: r.model_version as ModelVersion,
+    made_at: r.made_at,
+    inputs_as_of: r.inputs_as_of,
+    expectation: parseJson(r.expectation_json),
+    samples: decodeSamples(r.samples),
+    p_active: r.p_active,
+    reported_mean: r.reported_mean,
+    trace,
+  };
+};
 
 /** The newest earlier row of the key recorded the same inputs_as_of and expectation. */
 const REPEATS_PREVIOUS_SQL = `SELECT 1 FROM (
@@ -118,6 +143,15 @@ export function projectionRepository({ db, writes }: RepoDeps): ProjectionReposi
       const madeMs = isoMs(p.made_at, "made_at");
       isoMs(p.inputs_as_of, "inputs_as_of");
       const expectation = JSON.stringify(checkStatMap(p.expectation, "expectation"));
+      const pActive = p.p_active ?? null;
+      if (pActive !== null && (finite(pActive, "p_active") < 0 || pActive > 1))
+        throw new RangeError("store: p_active must be in [0, 1]");
+      const reported =
+        p.reported_mean === undefined || p.reported_mean === null
+          ? null
+          : finite(p.reported_mean, "reported_mean");
+      const trace =
+        p.trace === undefined || p.trace === null ? null : toJson(p.trace, "trace", TRACE_JSON_MAX);
       const key = {
         player: p.player_id,
         season: p.season,
@@ -133,10 +167,20 @@ export function projectionRepository({ db, writes }: RepoDeps): ProjectionReposi
       return writes.bestEffort(() => {
         db.prepare(
           `INSERT OR IGNORE INTO projection
-           (player_id, gsis_id, season, week, model_version, made_at, made_ms, inputs_as_of, expectation_json, samples)
-           SELECT :player, :gsis, :season, :week, :model, :made_at, :made, :inputs, :expectation, :samples
+           (player_id, gsis_id, season, week, model_version, made_at, made_ms, inputs_as_of, expectation_json, samples,
+            p_active, reported_mean, trace_json)
+           SELECT :player, :gsis, :season, :week, :model, :made_at, :made, :inputs, :expectation, :samples,
+            :p_active, :reported, :trace
            WHERE NOT EXISTS (${REPEATS_PREVIOUS_SQL})`,
-        ).run({ ...key, gsis: p.gsis_id, made_at: p.made_at, samples });
+        ).run({
+          ...key,
+          gsis: p.gsis_id,
+          made_at: p.made_at,
+          samples,
+          p_active: pActive,
+          reported,
+          trace,
+        });
       });
     },
     latest(playerId, season, week, model) {

@@ -41,10 +41,22 @@ import type {
   WaiverPlayer,
   WaiverRequest,
 } from "../../domain/analytics/waivers.js";
+import { CASCADE_PRIORS } from "../../domain/analytics/cascade-priors/index.js";
+import {
+  CALIBRATION,
+  buildCalibrationTable,
+  practiceHistoryClaims,
+  type CalibrationSource,
+  type CalibrationTable,
+  type ClaimSignal,
+  type ScoredClaim,
+  type ScoredClaimType,
+} from "../../domain/evidence/index.js";
 import { seededRng } from "../../domain/clock.js";
 import { auditIr, seatsOf } from "../../domain/league/roster.js";
 import { remainingWeeks } from "../../domain/league/rules.js";
 import type {
+  InjuryStatus,
   PlatformPlayer,
   Roster,
   Standings,
@@ -803,6 +815,29 @@ export const analyzeInjuryCascadeTool = defineTool({
       for (const g of games(s.p.ref.id, false))
         if (g.rz_team !== null && g.rz_team !== undefined) rzByWeek.set(g.week, g.rz_team);
     const teamRz = meanFinite([...rzByWeek.values()]) ?? 0;
+    // the depth chart's rank of each teammate at his own position (the cascade's receiver role rule
+    // reads it — plan 10 C6; cascade-priors/predict.ts): the newest snapshot of his team's chart
+    const injTeam = nflverseTeam(inj.pro_team);
+    const depthRankOf = new Map<number, number>();
+    const mateById = new Map(teammates.map((p) => [p.ref.id, p]));
+    if (injTeam !== null) {
+      await turn();
+      const dc = ctx.services.datasets.depthCharts.chart(season, [injTeam]);
+      const di = optionalDataset(dc, ctx.nowMs, allowStale);
+      if (di !== null) {
+        inputs.push(di);
+        const byGsis = new Map(subjects.map((s) => [s.gsis, s.p]));
+        for (const row of dc.rows) {
+          const pl =
+            (row.espn_id === null ? undefined : mateById.get(row.espn_id)) ??
+            (row.gsis_id === null ? undefined : byGsis.get(row.gsis_id));
+          if (pl === undefined) continue;
+          if (row.pos_abb !== pl.position) continue;
+          const cur = depthRankOf.get(pl.ref.id);
+          if (cur === undefined || row.rank < cur) depthRankOf.set(pl.ref.id, row.rank);
+        }
+      } else warnings.push("nflverse:depth_charts not loaded: the receiver role rule reads usage");
+    }
     const cascadeMates: CascadeTeammate[] = teammates.map((p) => {
       const g = games(p.ref.id, false);
       const gp = games(p.ref.id, true);
@@ -835,6 +870,7 @@ export const analyzeInjuryCascadeTool = defineTool({
         percent_change: p.ownership?.percent_change ?? null,
         availability: { status: p.status, waiver_process_date: p.waiver_process_date },
         weekly: valueWeeks(p, weeks),
+        depth_rank: depthRankOf.get(p.ref.id) ?? null,
       };
     });
     const myTeam = b.league.my_team?.team_id ?? null;
@@ -881,6 +917,8 @@ export const analyzeInjuryCascadeTool = defineTool({
             : { slot_id: myEntry.slot_id, eligible_slot_ids: inj.eligible_slot_ids },
       },
       teammates: cascadeMates.slice(0, 40),
+      // cascade v2 (plan 10 §3.3, C6): the redistribution prior table from pbp history
+      priors: CASCADE_PRIORS,
       team_volume: { targets: teamTargets, carries: teamCarries, rz: teamRz },
       team_games_without: without.length + withoutPrior.length,
       weeks,
@@ -914,6 +952,65 @@ export const analyzeInjuryCascadeTool = defineTool({
 });
 
 // --- E10 espn_analyze_evidence -------------------------------------------------------------------
+
+/** The official practice report's seed (constant; built once per process). */
+let practiceSeed: readonly ScoredClaim[] | null = null;
+
+/** The calibration table E10 reads: the history seed plus this league's scored claims (plan 10 C8). */
+export function calibrationTableOf(ctx: ToolContext): CalibrationTable {
+  practiceSeed ??= Object.freeze(practiceHistoryClaims());
+  let stored: readonly ScoredClaim[] = [];
+  try {
+    stored =
+      ctx.services.scoredClaims?.scored(leagueRef(ctx).league_id, CALIBRATION.maxClaims) ?? [];
+  } catch {
+    stored = []; // a busy or unreadable store reads as no scored claim (the note stays)
+  }
+  return buildCalibrationTable([...practiceSeed, ...stored]);
+}
+
+/**
+ * Logs E10's scorable claims (value-free: source, type, signal, the structured prior) for the
+ * retrospective to score once the week is final (plan 10 C8; best-effort — a busy store skips them).
+ */
+export function logClaims(
+  ctx: ToolContext,
+  season: number,
+  week: number,
+  playerId: number,
+  status: InjuryStatus | null,
+  priorP: number | null,
+  claims: readonly {
+    readonly source: CalibrationSource;
+    readonly type: ScoredClaimType;
+    readonly signal: ClaimSignal;
+  }[],
+): void {
+  const repo = ctx.services.scoredClaims;
+  if (repo === undefined || claims.length === 0) return;
+  const league = leagueRef(ctx).league_id;
+  for (const c of claims)
+    try {
+      repo.log(
+        league,
+        {
+          season,
+          week,
+          player_id: playerId,
+          claim: {
+            source: c.source,
+            type: c.type,
+            signal: c.signal,
+            prior_status: status === "ACTIVE" ? null : status,
+            prior_p: priorP,
+          },
+        },
+        ctx.services.clock.nowIso(),
+      );
+    } catch {
+      // a claim the store refuses is skipped, never fatal to the answer
+    }
+}
 
 /** E10 data (plan 07 E10; EvidenceData). */
 export const evidenceSchema = z.strictObject({
@@ -1123,11 +1220,24 @@ export const analyzeEvidenceTool = defineTool({
               ...(args.claim.type === undefined ? {} : { type: args.claim.type }),
             },
           }),
-      calibration_n: 0,
+      // the per-source calibration table (Phase 3, plan 10 C8): the official practice report's
+      // labelled history plus every claim the retrospective scored for this league; table_n counts
+      // the news claims only, so the posterior stays null until 200 of them are scored
+      calibration_table: calibrationTableOf(ctx),
       week: b.w,
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
+    // this call's scorable news claims, logged value-free for the retrospective to score (C8)
+    logClaims(
+      ctx,
+      season,
+      b.w,
+      p.ref.id,
+      p.injury_status,
+      out.data.prior?.p_active ?? null,
+      out.claims,
+    );
     return {
       data: { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) },
       inputs,

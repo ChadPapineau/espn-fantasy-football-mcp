@@ -460,11 +460,22 @@ describe("the default lookup: the store, read-only", () => {
     expect(exists(storePath(sb.cacheDir))).toBe(false);
   });
 
-  it("this build's real store has no proposal table yet → unsupported", async () => {
+  it("the real store (migration 002) keeps proposal sets: none, then the stored set, read-only", async () => {
     const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" } });
     const { config: c, log } = await loadLenientRuntime(io);
     openStore(c, fixedClock(NOW), log, { migrate: true }).close();
-    expect(storeProposals(io, log)(c)).toEqual({ kind: "unsupported" });
+    expect(storeProposals(io, log)(c)).toEqual({ kind: "none" });
+    // the retrospective's write (E13 persists r.proposal_set through the same repository)
+    const st = openStore(c, fixedClock(NOW), log, { migrate: true });
+    const repo = proposalRepositoryOf(st.repos);
+    expect(repo).not.toBeNull();
+    repo?.put("0", proposalSet());
+    st.close();
+    expect(storeProposals(io, log)(c)).toEqual({ kind: "found", set: proposalSet() });
+  });
+
+  it("a store without the proposal repository reads as unsupported", () => {
+    expect(proposalRepositoryOf({} as unknown as StoreRepositories)).toBeNull();
   });
 
   function fakeFactory(latest: () => unknown): StoreFactory {

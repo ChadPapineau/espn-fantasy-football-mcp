@@ -86,6 +86,14 @@ export {
   zeroLine,
 } from "./simulate.js";
 export { teamVolume } from "./team.js";
+export { TRACE_HISTORY_MAX, traceV2 } from "./trace.js";
+export type {
+  V2Trace,
+  V2TraceRate,
+  V2TraceRateName,
+  V2TraceShare,
+  V2TraceShareName,
+} from "./trace.js";
 export type { TeamVolume } from "./team.js";
 export { eventPoints, turnoverRates, turnoverTail } from "./turnover.js";
 export type { TurnoverRates } from "./turnover.js";

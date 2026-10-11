@@ -2477,7 +2477,9 @@ export type Phase2ReaderMethod = keyof typeof PHASE_2_READER_QUERIES;
 /**
  * Phase-2 reader keys with no domain port yet (src/domain/analytics/types.ts declares DepthChartReader
  * .chart, EpWeeklyReader, NewsReader and TrendingReader only): the analytics module declares these
- * ports, then the store implements them over the statements above.
+ * ports, then the store implements them over the statements above. `PbpReader.teamProfile` (Phase 2)
+ * and `TeamWeekReader.lines` (Phase 3) are implemented as OPTIONAL ports of DatasetReaders (a bundle
+ * built before them has none), so they stay named here.
  */
 export const PHASE_2_PENDING_PORT_READERS: readonly Phase2ReaderMethod[] = Object.freeze([
   "DepthChartReader.asOf",

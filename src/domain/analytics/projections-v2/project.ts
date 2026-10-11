@@ -43,6 +43,7 @@ import {
   simulateInto,
 } from "./simulate.js";
 import type { TeamVolume } from "./team.js";
+import { traceV2, type V2Trace } from "./trace.js";
 import { turnoverTail } from "./turnover.js";
 import type {
   V2ActiveEstimate,
@@ -98,6 +99,8 @@ export function pinDist(d: Dist, mean: number): Dist {
 interface Plan {
   readonly target: V2Target;
   readonly result: ExpectationResult | null;
+  /** The tuning trace (plan 10 C9), when modelled. */
+  readonly trace: V2Trace | null;
   readonly skipped: string | null;
   readonly active: V2ActiveEstimate;
   readonly rng: Rng;
@@ -211,9 +214,11 @@ export async function projectV2(req: V2Request): Promise<V2Outcome> {
     let anchored: V2Expectation | null = null;
     let anchorFailed = false;
     let w = 0;
-    if (result !== null && espn !== null && active.p > 0) {
+    // the weight on ESPN's mean is reported whenever ESPN has one (E1's label, as v1 reports it —
+    // a ruled-out player included); the anchored simulation runs only for a player who may play
+    if (result !== null && espn !== null) {
       w = weight;
-      if (w > 0) {
+      if (w > 0 && active.p > 0) {
         const ownDet = activePoints(result.expectation, settings) * active.p;
         const a = anchorExpectation(
           result.expectation,
@@ -230,6 +235,8 @@ export async function projectV2(req: V2Request): Promise<V2Outcome> {
     return {
       target: t,
       result,
+      trace:
+        result === null ? null : traceV2(result, t.games, req.season, req.week, teamIndex, params),
       skipped: typeof out === "string" ? out : null,
       active,
       rng: req.rng.fork(`v2:${key}`),
@@ -468,6 +475,7 @@ function assemble(
       },
       turnover: tail,
       ...(req.include_stat_line === true ? { stat_line_expectation: expectedCounts(e) } : {}),
+      ...(p.trace === null ? {} : { trace: p.trace }),
       skipped: null,
     },
   };

@@ -1337,6 +1337,14 @@ export interface EpWeeklyRow {
   readonly season: number;
   readonly week: Week;
   readonly xfp_total: number | null;
+  /**
+   * ffopportunity's location-based expected touchdowns that week (`rec_touchdown_exp`,
+   * `rush_touchdown_exp`, `pass_touchdown_exp`) — v2-opportunity's touchdown layer (sib research 05
+   * §1 step 5; plan 10 §3.3). Optional: a reader built before Phase 3 has none (absent = unknown).
+   */
+  readonly x_rec_td?: number | null;
+  readonly x_rush_td?: number | null;
+  readonly x_pass_td?: number | null;
 }
 
 /** Game-venue weather (Open-Meteo / NWS). */
@@ -1424,6 +1432,32 @@ export interface EpWeeklyReader {
   ): DatasetResult<EpWeeklyRow>;
 }
 
+/**
+ * One team-game's offensive volume (nflverse `stats_team_week`; plan 10 §3.3 — v2-opportunity's team
+ * volume, sib research 05 §1 step 1): pass attempts, sacks suffered and carries as the file counts
+ * them (dropbacks = attempts + sacks).
+ */
+export interface TeamWeekLine {
+  readonly nfl_team: NflTeam;
+  readonly season: number;
+  readonly week: Week;
+  readonly opponent: NflTeam | null;
+  /** `REG` or `POST`. */
+  readonly season_type: string;
+  readonly attempts: number | null;
+  readonly sacks: number | null;
+  readonly carries: number | null;
+}
+
+/** Read-only port over `nflverse:stats_team_week` (added in Phase 3 — plan 10 §3.3). */
+export interface TeamWeekReader {
+  lines(
+    teams: readonly NflTeam[],
+    season: number,
+    weeks: readonly Week[],
+  ): DatasetResult<TeamWeekLine>;
+}
+
 /** Read-only port over the weather datasets. */
 export interface WeatherReader {
   forGames(gameIds: readonly string[]): DatasetResult<WeatherObservation>;
@@ -1487,6 +1521,8 @@ export interface DatasetReaders {
   readonly trending: TrendingReader;
   /** The pbp team profile (optional: a reader bundle built before Phase 2 has none). */
   readonly pbp?: PbpReader;
+  /** Team-game volume (optional: a reader bundle built before Phase 3 has none). */
+  readonly teamWeek?: TeamWeekReader;
 }
 
 // --- projection stores (plan 08 §5, §9; plan 01 §9.2 `projection`, `espn_projection`) ---------------
@@ -1511,6 +1547,16 @@ export interface StoredProjection {
   readonly inputs_as_of: IsoInstant;
   readonly expectation: Readonly<Record<Canonical, number>>;
   readonly samples: readonly StatLine[];
+  /**
+   * Phase 3 (plan 10 C9; migration 002): the P(active) the projection used, the point estimate the
+   * tool reported (Dist.mean — ESPN's mean while weight_espn = 1.0) and the model's tuning trace
+   * (src/domain/reclog/attribution.ts ProjectionTrace, as plain JSON). Absent / null = not recorded
+   * (a v1 row, or a row written before migration 002). `expectation` is the line CONDITIONAL ON
+   * PLAYING for a v2 row.
+   */
+  readonly p_active?: number | null;
+  readonly reported_mean?: number | null;
+  readonly trace?: Readonly<Record<string, unknown>> | null;
 }
 
 /** `projection` (best-effort, never pruned). */
@@ -1530,6 +1576,26 @@ export interface ProjectionRepository {
     model: ModelVersion,
     before: IsoInstant,
   ): StoredProjection | null;
+}
+
+/**
+ * One waiver processing run E5 priced (Phase 3, plan 10 C5; migration 002 `waiver_run`): the run's
+ * instant (status.waiverNextExecutionDate at the call), the usable weeks `W` after it and the
+ * candidates' surplus `s` at the last priority-mode call before it — waiver-fit's feed.
+ */
+export interface WaiverRunRecord {
+  readonly season: number;
+  readonly run_at: IsoInstant;
+  readonly W: number;
+  readonly surplus: readonly number[];
+}
+
+/** `waiver_run` (best-effort writes, never pruned; the league id is local-only, never emitted). */
+export interface WaiverRunRepository {
+  /** Upserts the run (the newest call before the run wins). */
+  put(leagueId: string, run: WaiverRunRecord, updatedAt: IsoInstant): BestEffortOutcome;
+  /** The league's runs of a season, oldest first. */
+  list(leagueId: string, season: number): readonly WaiverRunRecord[];
 }
 
 /** One ESPN projection snapshot — the prospective backtest corpus (plan 06 §1.4; plan 08 §5). */
