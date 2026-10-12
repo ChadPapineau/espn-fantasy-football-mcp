@@ -24,7 +24,13 @@ import {
   type SourceContext,
   type TempFile,
 } from "../source.js";
-import { checkParquet, openParquet, readRowGroups, type ColumnTypeMismatch } from "./parquet.js";
+import {
+  assertDecodable,
+  checkParquet,
+  openParquet,
+  readRowGroups,
+  type ColumnTypeMismatch,
+} from "./parquet.js";
 import type { ColumnKind } from "./schemas.js";
 import {
   MAX_RELEASE_FILE_BYTES,
@@ -131,7 +137,16 @@ export async function assertSchemaOf(
     }
     let check;
     try {
-      check = checkParquet((await openParquet(f.path, maxBytes)).metadata, expected);
+      const opened = await openParquet(f.path, maxBytes);
+      check = checkParquet(opened.metadata, expected);
+      // the decode bounds (parquet-bounds.ts) once the columns, types and codecs are right: a file
+      // whose pages claim more than they hold fails here, before publish decodes a row
+      if (
+        check.missing.length === 0 &&
+        check.mismatches.length === 0 &&
+        check.badCodecs.length === 0
+      )
+        assertDecodable(opened, Object.keys(expected));
     } catch (err) {
       unreadable = true;
       const why = err instanceof NflverseSourceError ? err.message : "unreadable file";

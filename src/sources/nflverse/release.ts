@@ -37,8 +37,9 @@ export const TIMESTAMP_MAX_BYTES = 256;
 export const MAX_RELEASE_FILE_BYTES = 16 * 1024 * 1024;
 /**
  * Cap per pbp release file (Phase 2): a full season is ~21 MB (2024: 20,597,560 B; 2025: 20,337,029 B,
- * observed 2026-10-06), so 64 MiB leaves 3× headroom while still refusing a runaway body. The file
- * is read whole by hyparquet, so this also bounds the run's peak memory.
+ * observed 2026-10-06), so 64 MiB leaves 3× headroom while still refusing a runaway body. It bounds
+ * the download and the file held in memory, not the decode — a few bytes can claim millions of
+ * values; parquet-bounds.ts PARQUET_DECODE_LIMITS bounds that.
  */
 export const PBP_MAX_FILE_BYTES = 64 * 1024 * 1024;
 /** The oldest and newest season a URL may be built for (nflverse starts in 1999). */

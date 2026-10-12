@@ -191,9 +191,20 @@ describe("codec assertion (plan 01 D9; ADV OBJ-19(d))", () => {
 
   it("SNAPPY and UNCOMPRESSED both pass, stored either way", async () => {
     for (const codec of ["SNAPPY", "UNCOMPRESSED"] as const) {
-      const r = await assert(injuriesSource, rewrite(FX.injuries, { codec: { full_name: codec } }));
+      const r = await assert(
+        injuriesSource,
+        rewrite(FX.injuries, { codec: { full_name: codec }, options: { storage: codec } }),
+      );
       expect(r.ok).toBe(true);
     }
+    // a chunk labelled UNCOMPRESSED whose pages are compressed never decodes: since the decode
+    // bounds (Stage C) the assertion reads its pages and refuses it, not only publish
+    const mislabelled = await assert(
+      injuriesSource,
+      rewrite(FX.injuries, { codec: { full_name: "UNCOMPRESSED" } }),
+    );
+    expect(mislabelled).toMatchObject({ ok: false, error: "schema_mismatch" });
+    expect(mislabelled.warnings.join("\n")).toMatch(/uncompressed page's sizes disagree/);
     const raw = await assert(
       injuriesSource,
       rewrite(FX.injuries, { options: { storage: "UNCOMPRESSED" } }),
