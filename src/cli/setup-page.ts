@@ -59,6 +59,15 @@ export function portBusyMessage(port: number | null, owner: string | null): stri
   return `Port ${String(port)} is in use${owner === null ? "" : ` by ${owner}`}. Set EFF_SETUP_PORT to a free port or run 'eff setup' (no page needed).`;
 }
 
+/**
+ * The page's referrer policy (the `<meta>` and the response header). `same-origin`: the browser
+ * sends the page's own Origin (and Referer) on its form POST, and neither to any other origin — the
+ * token in the path never leaves 127.0.0.1. NOT `no-referrer`: under it the Fetch standard serialises
+ * a non-CORS POST's Origin as `null` (and drops the Referer), so the Origin rule refused every real
+ * browser submission and the page could never store anything.
+ */
+export const REFERRER_POLICY = "same-origin";
+
 const esc = (s: string): string =>
   s
     .replaceAll("&", "&amp;")
@@ -70,7 +79,7 @@ const esc = (s: string): string =>
 export function formHtml(token: string, notice: string | null): string {
   const items = SETUP_TEXT.instructions.map((l) => `<li>${esc(l.trim())}</li>`).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>eff setup</title>
-<meta name="referrer" content="no-referrer"><style>body{font:15px system-ui;max-width:40em;margin:2em auto;padding:0 1em}input{width:100%;font:14px monospace;margin:.3em 0 1em}</style></head>
+<meta name="referrer" content="${REFERRER_POLICY}"><style>body{font:15px system-ui;max-width:40em;margin:2em auto;padding:0 1em}input{width:100%;font:14px monospace;margin:.3em 0 1em}</style></head>
 <body><h1>Connect your ESPN league</h1><ul>${items}</ul>${notice === null ? "" : `<p><strong>${esc(notice)}</strong></p>`}
 <form method="post" action="/setup/${esc(token)}" autocomplete="off"><input type="hidden" name="token" value="${esc(token)}">
 <label>SWID<input name="swid" spellcheck="false" autocomplete="off"></label>
@@ -100,7 +109,7 @@ function send(res: ServerResponse, status: number, html: string | null): void {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
+    "referrer-policy": REFERRER_POLICY,
     "x-frame-options": "DENY",
     "content-security-policy":
       "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",

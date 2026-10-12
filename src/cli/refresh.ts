@@ -365,6 +365,39 @@ export function comingWeek(
   return best?.week ?? null;
 }
 
+/** The local hours a `--game-day-cadence` run works on a day without a game (every 6 h). */
+export const OFF_DAY_HOURS: readonly number[] = Object.freeze([0, 6, 12, 18]);
+
+/**
+ * Whether a `--game-day-cadence` wake works (plan 06 §1.3: the game-day cadence comes from the
+ * schedule itself, never from weekday names baked into a plist; §2 fixed wakes that self-select):
+ * every wake on a local day the pro schedule has a kickoff on — Wednesday, Friday and Saturday game
+ * days included — and, on any other day, only the wakes in the first half hour of 00, 06, 12 and
+ * 18 h. A schedule that was never loaded (or cannot be read) works every wake: the refresh is what
+ * loads it.
+ */
+export function gameDayCadenceWorks(
+  schedule: ProScheduleReader,
+  season: number,
+  nowMs: number,
+): boolean {
+  const d = new Date(nowMs);
+  if (OFF_DAY_HOURS.includes(d.getHours()) && d.getMinutes() < 30) return true;
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+  try {
+    const games = schedule.games(season, null);
+    if (games.stamp === null) return true;
+    return games.rows.some((g) => {
+      if (g.kickoff === null) return false;
+      const k = Date.parse(g.kickoff);
+      return Number.isFinite(k) && k >= start && k < end;
+    });
+  } catch {
+    return true;
+  }
+}
+
 /** Most warning lines printed under one result; the rest are counted. */
 export const MAX_WARNING_LINES = 5;
 /** Longest warning line printed. */
@@ -450,6 +483,8 @@ export interface RefreshOptions {
   readonly force: boolean;
   readonly notify: boolean;
   readonly json: boolean;
+  /** `--game-day-cadence` (the launchd schedule jobs): off a game day, only the 6-hourly wakes work. */
+  readonly gameDayCadence?: boolean;
   /** Test hooks (never reachable from argv). */
   readonly factory?: StoreFactory;
   readonly registry?: SourceRegistry;
@@ -506,6 +541,19 @@ export async function refresh(
     await writeLine(io.stderr, `eff refresh: the store could not be opened: ${errorText(e)}`);
     if (opts.notify) await notifier.failure(job, "store");
     return EXIT.error;
+  }
+
+  if (
+    opts.gameDayCadence === true &&
+    !gameDayCadenceWorks(store.datasets.proSchedule, config.season, io.clock.nowMs())
+  ) {
+    publisher.close();
+    store.close();
+    await writeLine(
+      io.stdout,
+      `${job}: no game today and not a 6-hourly wake — nothing to do (no request)`,
+    );
+    return EXIT.ok;
   }
 
   const http = createHttpClient({

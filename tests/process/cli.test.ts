@@ -159,7 +159,7 @@ describe("eff (process)", () => {
         { preload: [NO_NETWORK] },
       );
       expect(r.code).toBe(0);
-      expect(r.stdout).toContain("claude mcp add --scope user");
+      expect(r.stdout).toContain("claude mcp add espn-fantasy-football --scope user");
       expect(r.stderr).toContain("file-provider (iCloud) or synced directory");
     },
   );

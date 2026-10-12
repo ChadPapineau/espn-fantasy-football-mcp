@@ -309,8 +309,12 @@ export async function snapshotPool(
     const why = poolWorkingRun(now, state);
     const anchor = stateNumber(state, "pool.anchor");
     if (why === null) {
-      // refresh the anchor only when it is unknown or passed (one cached settings read at most)
-      if (anchor === null || now >= anchor) {
+      // refresh the anchor only when it is unknown, or passed AND worked (one cached settings read
+      // at most). A passed anchor whose working run is still due — the wake inside [anchor,
+      // anchor + 1 h) — is kept: replacing it there with the NEXT waiver run (nextWaiverRun returns
+      // instants strictly after now) meant the wake at anchor + 1 h found a future anchor and the
+      // waiver-relative working run never fired (plan 06 §1.4, ADV OBJ-16).
+      if (anchor === null || (now >= anchor && stateNumber(state, "pool.worked") === anchor)) {
         const rules = (await run.stack.provider.getLeagueRules(ref)).value;
         const next = nextWaiverRun(rules.waiver, now);
         const at = next.at === null ? null : Date.parse(next.at);

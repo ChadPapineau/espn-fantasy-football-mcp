@@ -50,6 +50,7 @@ import {
   jobToken,
   safeNotificationText,
 } from "../../src/cli/notify.js";
+import { launchEnv } from "../../src/cli/print-config.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { fakeExec, fakePackage, fakeXattr, makeIo, sandbox, type Sandbox } from "./helpers.js";
 
@@ -164,6 +165,40 @@ describe("plists", () => {
     );
     expect(() => xmlEscape("a\u0001b")).toThrow(/control/);
   });
+  it("jobEnv gives the jobs every env-sourced server key print-config gives the server (one config)", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, {
+      env: {
+        ESPN_LEAGUE_ID: "0",
+        EFF_ESPN_READ_HOST: "alt.fantasy.espn.com",
+        ESPN_TEAM_ID: "3",
+        EFF_SEEDING_MODE: "points_only",
+        EFF_TOOLSET: "full",
+      },
+    });
+    const { config } = await loadLenientRuntime(io);
+    const env = jobEnv(config);
+    expect(env).toMatchObject({
+      ESPN_LEAGUE_ID: "0",
+      EFF_ESPN_READ_HOST: "alt.fantasy.espn.com",
+      ESPN_TEAM_ID: "3",
+      EFF_SEEDING_MODE: "points_only",
+      EFF_TOOLSET: "full",
+    });
+    // the same keys as the client's env block, except the always-present log level
+    const { EFF_LOG_LEVEL: _level, ...server } = launchEnv(config);
+    expect(env).toEqual(server);
+    // and they reach the plist itself
+    const xml = renderPlist({
+      job: JOBS.find((j) => j.name === "credential-check")!,
+      node: "/n/node",
+      entry: "/p/dist/cli.js",
+      env,
+      home: sb.home,
+    });
+    for (const k of ["ESPN_TEAM_ID", "EFF_ESPN_READ_HOST", "EFF_SEEDING_MODE"])
+      expect(xml).toContain(`<key>${k}</key>`);
+  });
   it("jobEnv copies env-sourced non-secret keys only — never the credential keys or a secret", async () => {
     sb = sandbox();
     const io = makeIo(sb, {
@@ -254,7 +289,7 @@ describe("install-launchd / uninstall-launchd", () => {
   it("refuses off macOS (2), without a build (1), and under a file-provider directory (1)", async () => {
     sb = sandbox();
     const unbuilt = fakePackage(sb, { built: false });
-    const io = makeIo(sb, { packageRoot: unbuilt });
+    const io = makeIo(sb, { packageRoot: unbuilt, env: { ESPN_LEAGUE_ID: "0" } });
     const { config } = await loadLenientRuntime(io);
     expect(await installLaunchd(io, config, { jobs: undefined, dryRun: false })).toBe(2);
     const mac = makeIo(sb, { packageRoot: unbuilt, platform: "darwin" });
@@ -274,6 +309,36 @@ describe("install-launchd / uninstall-launchd", () => {
     expect(existsSync(launchAgentsDir(sb.home))).toBe(false);
     const noUid = makeIo(sb, { packageRoot: built, platform: "darwin", uid: null });
     expect(await installLaunchd(noUid, config, { jobs: "probe", dryRun: false })).toBe(1);
+  });
+  it("refuses to install cookie jobs when no league id resolves (they would exit 2 on every run)", async () => {
+    sb = sandbox();
+    const root = fakePackage(sb);
+    const { exec, calls } = fakeExec();
+    const io = makeIo(sb, { packageRoot: root, platform: "darwin", exec });
+    const { config } = await loadLenientRuntime(io);
+    expect(config.leagueId).toBeNull();
+    expect(await installLaunchd(io, config, { jobs: undefined, dryRun: false })).toBe(2);
+    expect(io.err.text).toContain("ESPN_LEAGUE_ID is not set");
+    expect(io.err.text).toContain("credential-check");
+    expect(io.err.text).toContain("Nothing was installed");
+    expect(calls).toEqual([]);
+    expect(existsSync(launchAgentsDir(sb.home))).toBe(false);
+    // the dry run warns the same way
+    const dry = makeIo(sb, { packageRoot: root });
+    expect(await installLaunchd(dry, config, { jobs: undefined, dryRun: true })).toBe(0);
+    expect(dry.err.text).toContain("warning: ESPN_LEAGUE_ID is not set");
+    // keyless jobs need no league id
+    const keyless = makeIo(sb, { packageRoot: root, platform: "darwin", exec: fakeExec().exec });
+    expect(await installLaunchd(keyless, config, { jobs: "probe", dryRun: false })).toBe(0);
+    // a league id recorded in config.json is read by the jobs themselves: no refusal
+    mkdirSync(sb.configDir, { recursive: true, mode: 0o700 });
+    writeFileSync(path.join(sb.configDir, "config.json"), JSON.stringify({ ESPN_LEAGUE_ID: "0" }), {
+      mode: 0o600,
+    });
+    const fileIo = makeIo(sb, { packageRoot: root, platform: "darwin", exec: fakeExec().exec });
+    const fileCfg = (await loadLenientRuntime(fileIo)).config;
+    expect(fileCfg.leagueId).toBe("0");
+    expect(await installLaunchd(fileIo, fileCfg, { jobs: undefined, dryRun: false })).toBe(0);
   });
   it("installs on macOS through launchctl and reports a failed bootstrap", async () => {
     sb = sandbox();

@@ -141,7 +141,8 @@ describe("espn-http", () => {
           { url: base, cookie: null },
         ),
       ).toEqual({ error: "rate_limited" });
-      expect(slept).toBe(10);
+      // a window that stays full is waited for until the total budget is spent, then refused
+      expect(slept).toBe(MAX_LIMITER_WAIT_MS);
       const long = {
         ...store.repos.limiter,
         tryRecord: () => ({

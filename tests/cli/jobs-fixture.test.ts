@@ -191,3 +191,20 @@ describe("working runs over the recorded league", () => {
     expect(pk.io.out.text).toMatch(/Before kickoff|no problems found/);
   });
 });
+
+describe("snapshot pool over launchd's hourly wakes (plan 06 §1.4, ADV OBJ-16)", () => {
+  it("each waiver run gets its working run 1 h later; the anchor is kept until that run fires", async () => {
+    sb = sandbox();
+    // league-a's waivers process on Thu and Sun (waiverNextExecutionDate 2026-10-08T16:00Z): the
+    // hourly wakes from Thu 10:00Z to Sun 19:00Z, a fresh process (and clock) per wake
+    const start = Date.parse("2026-10-08T10:00:00.000Z");
+    const worked: string[] = [];
+    for (let h = 0; h <= 81; h++) {
+      const at = new Date(start + h * 3_600_000).toISOString();
+      const r = await runtime(at);
+      expect(await snapshotPool(r.io, r.config, r.log, { notify: false })).toBe(0);
+      if (r.io.out.text.includes("(waivers)")) worked.push(at);
+    }
+    expect(worked).toEqual(["2026-10-08T17:00:00.000Z", "2026-10-11T17:00:00.000Z"]);
+  }, 60_000);
+});

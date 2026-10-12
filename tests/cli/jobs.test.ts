@@ -23,6 +23,7 @@ import {
   nextDayFirstKickoff,
   inSeasonWindow,
   isWorkingRun,
+  WAKE_GRACE_MS,
   startJob,
   endJob,
   weekFirstKickoff,
@@ -174,10 +175,14 @@ describe("pure helpers", () => {
       new Date(2026, 9, 12, 0, 15).getTime(),
     );
     expect(nextDayFirstKickoff(sched([]), sunday)).toBeNull();
+    // (target − 60 min + grace, target + grace]: the wake at the target works even when launchd
+    // starts it a little after the minute; the wake an hour earlier does not
     expect(isWorkingRun(1000, 1000)).toBe(true);
-    expect(isWorkingRun(1001, 1000)).toBe(false);
+    expect(isWorkingRun(1000 + WAKE_GRACE_MS, 1000)).toBe(true);
+    expect(isWorkingRun(1001 + WAKE_GRACE_MS, 1000)).toBe(false);
+    expect(isWorkingRun(1000 - 3_600_000 + WAKE_GRACE_MS, 1000)).toBe(false);
+    expect(isWorkingRun(1001 - 3_600_000 + WAKE_GRACE_MS, 1000)).toBe(true);
     expect(isWorkingRun(1000 - 3_600_000, 1000)).toBe(false);
-    expect(isWorkingRun(1000 - 3_599_999, 1000)).toBe(true);
   });
   it("poolWorkingRun: 1 h after the anchor (once per anchor), or Tuesday 06:xx once a day", () => {
     sb = sandbox();

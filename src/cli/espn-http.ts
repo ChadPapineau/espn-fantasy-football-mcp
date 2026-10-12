@@ -46,12 +46,22 @@ export interface EspnHttpDeps {
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-/** The longest a CLI request waits for a full limiter window before it reports `rate_limited`. */
+/**
+ * The longest a CLI request waits, in total, for full limiter windows before it reports
+ * `rate_limited` (the sum of every wait: a window that is still full when the timer fires — the store
+ * counts its boundary millisecond as inside — is waited for again, as the provider's limiter does).
+ */
 export const MAX_LIMITER_WAIT_MS = 5_000;
 
-const realSleep = (ms: number): Promise<void> =>
+/**
+ * The real wait: a REFERENCED timer. While a CLI request waits for the limiter nothing else may hold
+ * the event loop (undici's idle keep-alive sockets are unreferenced), so an unreferenced timer let
+ * Node end the process mid-command with exit 13 ("unsettled top-level await") before the request
+ * was sent and before any output was written. The wait is bounded by MAX_LIMITER_WAIT_MS.
+ */
+export const limiterSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
-    setTimeout(resolve, ms).unref();
+    setTimeout(resolve, Math.max(0, ms));
   });
 
 function outcomeOfStatus(status: number): RequestOutcome {
@@ -62,7 +72,11 @@ function outcomeOfStatus(status: number): RequestOutcome {
   return "client_error";
 }
 
-/** One ESPN GET under the limiter (one attempt: the CLI never retries a probe). */
+/**
+ * One ESPN GET under the limiter (one send: the CLI never retries a probe). A full window is waited
+ * for — again and again while it stays full — until the waits would exceed MAX_LIMITER_WAIT_MS in
+ * total; then `rate_limited`, with nothing sent. A spent daily cap is refused at once.
+ */
 export async function espnRequest(
   deps: EspnHttpDeps,
   req: {
@@ -72,27 +86,35 @@ export async function espnRequest(
     readonly maxBytes?: number;
   },
 ): Promise<EspnAnswer | EspnFailure> {
-  if (deps.limiter === null) return { error: "no_limiter" };
+  const limiter = deps.limiter;
+  if (limiter === null) return { error: "no_limiter" };
   const keyless = req.cookie === null;
-  const sleep = deps.sleep ?? realSleep;
-  let id: number | null = null;
-  for (let attempt = 0; attempt < 2 && id === null; attempt++) {
+  const sleep = deps.sleep ?? limiterSleep;
+  let waited = 0;
+  let id: number;
+  for (;;) {
     let verdict;
     try {
-      verdict = deps.limiter.tryRecord(limiterRequest(deps.clock.nowMs(), keyless, deps.origin));
+      verdict = limiter.tryRecord(limiterRequest(deps.clock.nowMs(), keyless, deps.origin));
     } catch {
       return { error: "limiter_unavailable" };
     }
-    if (verdict.ok) id = verdict.id;
-    else if (verdict.reason === "daily_cap") return { error: "daily_cap" };
-    else if (attempt === 0 && verdict.retry_after_ms <= MAX_LIMITER_WAIT_MS)
-      await sleep(verdict.retry_after_ms);
-    else return { error: "rate_limited" };
+    if (verdict.ok) {
+      id = verdict.id;
+      break;
+    }
+    if (verdict.reason === "daily_cap") return { error: "daily_cap" };
+    // the store's windows count their boundary millisecond as inside: a retry that wakes exactly on
+    // it is refused again, so the wait repeats (at least 1 ms each time) until the budget is spent
+    const wait = Math.max(1, Math.ceil(verdict.retry_after_ms));
+    if (!Number.isFinite(wait) || waited + wait > MAX_LIMITER_WAIT_MS)
+      return { error: "rate_limited" };
+    waited += wait;
+    await sleep(wait);
   }
-  if (id === null) return { error: "rate_limited" };
   const record = (o: RequestOutcome): void => {
     try {
-      deps.limiter?.recordOutcome(id, o);
+      limiter.recordOutcome(id, o);
     } catch {
       // the row stays `pending`; the breaker view ignores pending rows
     }

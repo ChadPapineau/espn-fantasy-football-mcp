@@ -63,14 +63,24 @@ function resolvedValue(config: LenientConfig, key: ConfigKey): string | null {
   }
 }
 
-/** The env block: EFF_LOG_LEVEL always; env-sourced non-secret keys; the dir overrides. */
-export function launchEnv(config: LenientConfig): Record<string, string> {
+/**
+ * The non-secret server keys whose value came from the ENVIRONMENT (the ones a launched process
+ * cannot read from config.json). Shared by the client's env block (here) and every launchd plist
+ * (src/cli/launchd.ts jobEnv), so the server and the jobs run on one configuration (plan 06 §2).
+ */
+export function envSourcedServerKeys(config: LenientConfig): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of COPIED_FROM_ENV) {
     if (config.origins[key] !== "env") continue;
     const v = resolvedValue(config, key);
     if (v !== null) env[key] = v;
   }
+  return env;
+}
+
+/** The env block: EFF_LOG_LEVEL always; env-sourced non-secret keys; the dir overrides. */
+export function launchEnv(config: LenientConfig): Record<string, string> {
+  const env: Record<string, string> = envSourcedServerKeys(config);
   if (config.origins.EFF_CONFIG_DIR === "env") env.EFF_CONFIG_DIR = config.configDir;
   if (config.origins.EFF_CACHE_DIR === "env") env.EFF_CACHE_DIR = config.cacheDir;
   env.EFF_LOG_LEVEL = config.logLevel;
@@ -118,11 +128,17 @@ export function shellQuote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
-/** The `claude mcp add` command line (plan 03 §4.2): user scope; `--` separates the command. */
+/**
+ * The `claude mcp add` command line (plan 03 §4.2): user scope; `--` separates the command. The
+ * server NAME comes right after `add`, before every option: Claude Code's `-e, --env <env...>` is
+ * variadic, so a name placed after the `--env` pairs is swallowed as one more `K=V` value and the
+ * whole command is refused ("Invalid environment variable format") — `claude mcp add --help` puts
+ * the name first.
+ */
 export function codeCommand(spec: LaunchSpec): string {
-  const words = ["claude", "mcp", "add", "--scope", "user", "--transport", "stdio"];
+  const words = ["claude", "mcp", "add", SERVER_NAME, "--scope", "user", "--transport", "stdio"];
   for (const [k, v] of Object.entries(spec.env)) words.push("--env", `${k}=${v}`);
-  words.push(SERVER_NAME, "--", spec.command, ...spec.args);
+  words.push("--", spec.command, ...spec.args);
   return words.map(shellQuote).join(" ");
 }
 

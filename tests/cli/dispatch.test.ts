@@ -48,7 +48,9 @@ describe("main reaches every subcommand", () => {
     );
     store.close();
     const cases: [string[], number][] = [
-      [["credential-check"], 0],
+      // the daily probe is exempt from the gate; nothing is stored, so it sends nothing and exits 3
+      // (plan 03 §1.3: credentials not configured)
+      [["credential-check"], 3],
       [["snapshot", "roster"], 0],
       [["snapshot", "roster", "--pre-kickoff"], 0],
       [["snapshot", "projections"], 0],
@@ -62,14 +64,18 @@ describe("main reaches every subcommand", () => {
       expect(await main(argv, io), argv.join(" ")).toBe(code);
     }
   });
-  it("check-auth with nothing stored reports accepted: null without a request", async () => {
+  it("check-auth with nothing stored: accepted null, no request, exit 3 (not configured) — and no minute spent", async () => {
     sb = sandbox();
-    const io = makeIo(sb, {
-      env: { ESPN_LEAGUE_ID: "0", EFF_CREDENTIAL_STORE: "file" },
-      fetch: noNetwork,
-    });
-    const code = await main(["check-auth", "--json"], io);
-    expect([0, 1]).toContain(code);
+    const env = { ESPN_LEAGUE_ID: "0", EFF_CREDENTIAL_STORE: "file" };
+    const io = makeIo(sb, { env, fetch: noNetwork });
+    // plan 03 §1.3: 3 = credentials not configured or rejected (doctor #16 maps it the same way)
+    expect(await main(["check-auth", "--json"], io)).toBe(3);
+    expect(JSON.parse(io.out.text)).toMatchObject({ accepted: null, reason: "not_configured" });
+    // no probe was sent, so the once-a-minute allowance was not spent: a second call answers too
+    const again = makeIo(sb, { env, fetch: noNetwork });
+    expect(await main(["check-auth"], again)).toBe(3);
+    expect(again.err.text).not.toContain("at most one probe per minute");
+    expect(again.out.text).toContain("run `eff setup`");
   });
   it("selftest-read refuses a missing flag (usage)", async () => {
     sb = sandbox();

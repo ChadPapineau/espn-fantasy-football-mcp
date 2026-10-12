@@ -100,9 +100,18 @@ async function probeOnce(
   }
 }
 
-function exitOf(r: CredentialProbeResult | { readonly error: string }): number {
+/** Whether the probe found nothing stored (then no request was sent). */
+function notConfigured(r: CredentialProbeResult | { readonly error: string }): boolean {
+  return !("error" in r) && r.accepted === null && r.reason === "not_configured";
+}
+
+/**
+ * The exit code of a probe (plan 03 §1.3: 3 = credentials not configured OR rejected — as doctor
+ * #16 maps it; a script running `eff check-auth && …` must not read a missing credential as success).
+ */
+export function exitOf(r: CredentialProbeResult | { readonly error: string }): number {
   if ("error" in r) return r.error === "ESPN_LEAGUE_NOT_FOUND" ? EXIT.usage : EXIT.error;
-  return r.accepted === false ? EXIT.credentials : EXIT.ok;
+  return r.accepted === false || notConfigured(r) ? EXIT.credentials : EXIT.ok;
 }
 
 /** `eff credential-check` (the daily job). */
@@ -217,6 +226,8 @@ export async function checkAuth(
   try {
     updateJobState(config.cacheDir, { "checkauth.last": now });
     const r = await probeOnce(io, config, store, log, "check_auth");
+    // nothing stored → no request was sent: the once-a-minute allowance is not spent
+    if (notConfigured(r)) updateJobState(config.cacheDir, { "checkauth.last": last });
     if (opts.json) await writeLine(io.stdout, JSON.stringify(r));
     else if ("error" in r)
       await writeLine(io.stdout, `check-auth: the probe could not complete (${r.error})`);

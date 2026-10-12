@@ -77,9 +77,10 @@ export const USAGE = `usage: eff <command> [options]
   doctor [--json] [--online] [--fix [--yes]] [--ack <check>] [--client-config <path>] [--client-log <path>]
                               diagnose the install; exit code = worst finding
   check-auth [--json]         one credential probe now (at most once a minute)
-  refresh <target> [--seasons 2025,2026] [--force] [--notify] [--json]
+  refresh <target> [--seasons 2025,2026] [--force] [--notify] [--json] [--game-day-cadence]
                               targets: all | espn:schedule | espn:players | nflverse:schedules |
                               nflverse:daily | nflverse:stats | weather | nflverse:<source>
+                              (--game-day-cadence: off a game day only the 00/06/12/18 h wakes run)
   probe [--host-only] [--notify] [--json]
                               the keyless ESPN drift probe (exit 4 on drift)
   snapshot roster|pool|projections [--pre-kickoff] [--notify]
@@ -142,6 +143,7 @@ const SPECS: Readonly<Record<string, { options: Options; positionals: number }>>
       force: { type: "boolean" },
       notify: { type: "boolean" },
       json: { type: "boolean" },
+      "game-day-cadence": { type: "boolean" },
     },
     positionals: 1,
   },
@@ -410,6 +412,7 @@ export async function main(
             force: flag(p, "force"),
             notify: flag(p, "notify"),
             json: flag(p, "json"),
+            gameDayCadence: flag(p, "game-day-cadence"),
           },
           signal,
         );

@@ -1005,10 +1005,12 @@ Three further keys exist for tests only and are deliberately absent from `.env.e
 **Claude Code** — one command, user scope:
 
 ```sh
-claude mcp add --scope user --transport stdio \
+claude mcp add espn-fantasy-football --scope user --transport stdio \
   --env ESPN_LEAGUE_ID=0000000 --env ESPN_SEASON=2026 --env EFF_LOG_LEVEL=info \
-  espn-fantasy-football -- "/absolute/path/to/node" "/absolute/path/to/espn-fantasy-football-mcp/dist/cli.js" serve
+  -- "/absolute/path/to/node" "/absolute/path/to/espn-fantasy-football-mcp/dist/cli.js" serve
 ```
+
+The server name comes first: `--env` takes several values, so a name written after the `--env` pairs would be read as one more of them and Claude Code would refuse the command.
 
 **Claude Code plugin** — the repository root is planned to be a plugin root whose `.mcp.json` carries variables only, no secrets and no absolute user paths:
 

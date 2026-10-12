@@ -57,7 +57,7 @@ describe("print-config", () => {
     expect(io.out.text).not.toContain("EFF_CREDENTIAL");
     expect(io.err.text).toContain("claude_desktop_config.json");
   });
-  it("code: a shell-quoted `claude mcp add --scope user … -- <node> <dist> serve` line (spaces safe)", async () => {
+  it("code: a shell-quoted `claude mcp add <name> --scope user … -- <node> <dist> serve` line (spaces safe)", async () => {
     sb = sandbox();
     const spaced = path.join(sb.dir, "My Repo's dir");
     mkdirSync(path.join(spaced, "dist"), { recursive: true });
@@ -66,8 +66,10 @@ describe("print-config", () => {
     const { config } = await loadLenientRuntime(io);
     expect(await printConfig(io, config, "code")).toBe(0);
     const line = io.out.text.trim();
-    expect(line.startsWith("claude mcp add --scope user --transport stdio")).toBe(true);
-    expect(line).toContain(`${SERVER_NAME} -- `);
+    expect(line.startsWith(`claude mcp add ${SERVER_NAME} --scope user --transport stdio`)).toBe(
+      true,
+    );
+    expect(line).toContain(" -- ");
     expect(line).toContain(`'${spaced.replaceAll("'", `'\\''`)}/dist/cli.js' serve`);
     expect(io.err.text).toContain("ESPN_LEAGUE_ID is not set");
     expect(shellQuote("")).toBe("''");
@@ -139,5 +141,85 @@ describe("print-config", () => {
     };
     expect(doc.mcpServers[SERVER_NAME]?.env.A).toBe("x y");
     expect(codeCommand(spec)).toContain("--env 'A=x y'");
+  });
+});
+
+/** POSIX words of a line quoted by `shellQuote` (bare words and '…' with '\'' escapes). */
+function shellWords(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inWord = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i] ?? "";
+    if (c === "'") {
+      const end = line.indexOf("'", i + 1);
+      cur += line.slice(i + 1, end);
+      i = end;
+      inWord = true;
+    } else if (c === "\\") {
+      cur += line[i + 1] ?? "";
+      i++;
+      inWord = true;
+    } else if (c === " ") {
+      if (inWord) out.push(cur);
+      cur = "";
+      inWord = false;
+    } else {
+      cur += c;
+      inWord = true;
+    }
+  }
+  if (inWord) out.push(cur);
+  return out;
+}
+
+/**
+ * How Claude Code reads `claude mcp add` (commander): `--scope` and `--transport` take one value;
+ * `-e, --env <env...>` is VARIADIC — it takes every following word that does not start with `-`;
+ * `--` ends the options. Returns the positionals, the env values and the command after `--`.
+ */
+function parseMcpAdd(words: readonly string[]): {
+  positionals: string[];
+  env: string[];
+  command: string[];
+} {
+  const positionals: string[] = [];
+  const env: string[] = [];
+  let i = 3; // after `claude mcp add`
+  while (i < words.length) {
+    const w = words[i] ?? "";
+    if (w === "--") return { positionals, env, command: words.slice(i + 1) };
+    if (w === "--env" || w === "-e") {
+      i++;
+      while (i < words.length && !(words[i] ?? "").startsWith("-")) env.push(words[i++] ?? "");
+      continue;
+    }
+    if (w === "--scope" || w === "--transport" || w === "-s" || w === "-t") {
+      i += 2;
+      continue;
+    }
+    positionals.push(w);
+    i++;
+  }
+  return { positionals, env, command: [] };
+}
+
+describe("the printed `claude mcp add` is accepted by Claude Code's option parser", () => {
+  it("the server name is the positional, every --env value is K=V, the command follows --", () => {
+    const spec = {
+      command: "/abs/node",
+      args: ["/abs/My Repo/dist/cli.js", "serve"],
+      env: { ESPN_LEAGUE_ID: "0", ESPN_SEASON: "2026", EFF_LOG_LEVEL: "info" },
+    };
+    const words = shellWords(codeCommand(spec));
+    expect(words.slice(0, 3)).toEqual(["claude", "mcp", "add"]);
+    const parsed = parseMcpAdd(words);
+    // the variadic --env must not swallow the name (Claude Code then refuses the whole command)
+    expect(parsed.positionals).toEqual([SERVER_NAME]);
+    expect(parsed.env).toEqual(["ESPN_LEAGUE_ID=0", "ESPN_SEASON=2026", "EFF_LOG_LEVEL=info"]);
+    for (const e of parsed.env) expect(e).toMatch(/^[A-Za-z_][A-Za-z0-9_]*=/);
+    expect(parsed.command).toEqual(["/abs/node", "/abs/My Repo/dist/cli.js", "serve"]);
+    expect(words).toContain("--scope");
+    expect(words[words.indexOf("--scope") + 1]).toBe("user");
   });
 });

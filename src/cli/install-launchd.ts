@@ -43,6 +43,22 @@ export function jobsFor(spec: string | undefined, registry?: SourceRegistry): La
   }
 }
 
+/**
+ * Why the selected jobs cannot run on this configuration, or null: a cookie job reads the league
+ * with the strict configuration (ESPN_LEAGUE_ID required), so a plist written without a league id —
+ * none in this shell's environment for the plist to carry, and none in config.json for the job to
+ * read — exits 2 at config load on every run, silently (no refresh_log row, no notification).
+ */
+export function missingLeagueProblem(
+  config: LenientConfig,
+  jobs: readonly LaunchdJob[],
+): string | null {
+  if (config.leagueId !== null) return null;
+  const needing = jobs.filter((j) => j.cookies).map((j) => j.name);
+  if (needing.length === 0) return null;
+  return `ESPN_LEAGUE_ID is not set (neither in this shell's environment nor in config.json): ${needing.join(", ")} would exit 2 on every run`;
+}
+
 /** `eff install-launchd`. */
 export async function installLaunchd(
   io: CliIo,
@@ -57,7 +73,12 @@ export async function installLaunchd(
   const entry = distEntry(io.packageRoot);
   const env = jobEnv(config);
   const unavailable = JOBS.filter((j) => !availableJobs(opts.registry).includes(j));
+  const noLeague = missingLeagueProblem(config, jobs);
+  const noLeagueFix =
+    "export ESPN_LEAGUE_ID=<id from the league URL> (or record it in config.json) and re-run, or pick keyless jobs only with --jobs";
   if (opts.dryRun) {
+    if (noLeague !== null)
+      await writeLine(io.stderr, `eff install-launchd: warning: ${noLeague} — ${noLeagueFix}`);
     if (!existsSync(entry))
       await writeLine(
         io.stderr,
@@ -88,6 +109,11 @@ export async function installLaunchd(
       `eff install-launchd: dry run — ${String(jobs.length)} job(s), nothing written`,
     );
     return EXIT.ok;
+  }
+  if (noLeague !== null) {
+    await writeLine(io.stderr, `eff install-launchd: refused — ${noLeague}.`);
+    await writeLine(io.stderr, `  ${noLeagueFix}. Nothing was installed.`);
+    return EXIT.usage;
   }
   if (io.platform !== "darwin") {
     await writeLine(

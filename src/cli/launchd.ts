@@ -13,6 +13,7 @@ import path from "node:path";
 import type { DatasetSourceId, RefreshJob } from "../config/freshness.js";
 import type { LenientConfig } from "../config/schema.js";
 import type { Exec } from "./io.js";
+import { envSourcedServerKeys } from "./print-config.js";
 
 /** The LaunchAgent label prefix. Generic on purpose: no owner/user identifier in a label. */
 export const LABEL_PREFIX = "io.github.espn-fantasy-football-mcp.eff";
@@ -54,16 +55,17 @@ const WED = 3;
 const THU = 4;
 const FRI = 5;
 const SAT = 6;
+// the usual NFL game days, for the stats refresh's afternoon runs only: every kickoff- or game-day-
+// relative job below wakes EVERY day and self-selects from the pro schedule's own dates (plan 06
+// §1.3/§1.4, §2), because the schedule has Wednesday, Friday and Saturday game days too (opening
+// week, Thanksgiving week, the late-season Saturdays and Christmas)
 const GAME_DAYS = [THU, SUN, MON] as const;
-const OTHER_DAYS = [TUE, WED, FRI, SAT] as const;
 const EVERY_DAY = [SUN, MON, TUE, WED, THU, FRI, SAT] as const;
 
 const at = (Hour: number, Minute: number, Weekday?: number): CalendarEntry =>
   Weekday === undefined ? { Hour, Minute } : { Weekday, Hour, Minute };
 const hourly = (days: readonly number[], Minute: number): CalendarEntry[] =>
   days.map((Weekday) => ({ Weekday, Minute }));
-const every6h = (days: readonly number[], Minute: number): CalendarEntry[] =>
-  days.flatMap((d) => [0, 6, 12, 18].map((h) => at(h, Minute, d)));
 
 /**
  * The jobs (plan 06 §1.2–§1.4; plan 10 §3.1a/§3.1b "Jobs"), local time. Every job is idempotent
@@ -80,10 +82,13 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
     sources: [],
   },
   {
+    // wakes hourly every day; `--game-day-cadence` works every wake on a game day (any day the pro
+    // schedule has a kickoff) and only the 00/06/12/18 wakes otherwise (src/cli/refresh.ts)
     name: "refresh-espn-schedule",
-    argv: ["refresh", "espn:schedule", "--notify"],
-    description: "refresh espn:schedule — hourly Thu/Sun/Mon, every 6 h otherwise",
-    calendar: [...hourly(GAME_DAYS, 0), ...every6h(OTHER_DAYS, 0)],
+    argv: ["refresh", "espn:schedule", "--notify", "--game-day-cadence"],
+    description:
+      "refresh espn:schedule — hourly on game days (from the schedule), every 6 h otherwise",
+    calendar: hourly(EVERY_DAY, 0),
     cookies: false,
     refreshJob: "espn:schedule",
     sources: ["espn:pro_schedule"],
@@ -172,10 +177,13 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
     sources: ["news:rotowire", "news:espn", "news:cbs"],
   },
   {
+    // wakes every 30 min every day; `--game-day-cadence` as above (off a game day: 00:00, 06:00,
+    // 12:00 and 18:00 only)
     name: "refresh-nflverse-schedules",
-    argv: ["refresh", "nflverse:schedules", "--notify"],
-    description: "refresh nflverse:schedules — every 30 min Thu/Sun/Mon, every 6 h otherwise",
-    calendar: [...hourly(GAME_DAYS, 0), ...hourly(GAME_DAYS, 30), ...every6h(OTHER_DAYS, 15)],
+    argv: ["refresh", "nflverse:schedules", "--notify", "--game-day-cadence"],
+    description:
+      "refresh nflverse:schedules — every 30 min on game days (from the schedule), every 6 h otherwise",
+    calendar: [...hourly(EVERY_DAY, 0), ...hourly(EVERY_DAY, 30)],
     cookies: false,
     refreshJob: "nflverse:schedules",
     sources: ["nflverse:schedules"],
@@ -220,8 +228,8 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
     name: "snapshot-roster-gameday",
     argv: ["snapshot", "roster", "--pre-kickoff", "--notify"],
     description:
-      "roster + scoreboard snapshot 30 min before the week's first kickoff — wakes hourly Thu/Sun/Mon",
-    calendar: hourly(GAME_DAYS, 0),
+      "roster + scoreboard snapshot 30 min before the week's first kickoff — wakes hourly every day",
+    calendar: hourly(EVERY_DAY, 0),
     cookies: true,
     refreshJob: null,
     sources: [],
@@ -266,9 +274,8 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
   {
     name: "pre-kickoff",
     argv: ["pre-kickoff", "--notify"],
-    description:
-      "pre-kickoff check 60 min before the day's first kickoff — wakes hourly Thu/Sun/Mon",
-    calendar: hourly(GAME_DAYS, 0),
+    description: "pre-kickoff check 60 min before the day's first kickoff — wakes hourly every day",
+    calendar: hourly(EVERY_DAY, 0),
     cookies: true,
     refreshJob: null,
     sources: [],
@@ -341,23 +348,20 @@ export function xmlEscape(s: string): string {
 }
 
 /**
- * The EnvironmentVariables of every plist (plan 06 §2): the non-secret keys the jobs cannot read
- * from config.json — the values that came from the ENVIRONMENT (ESPN_LEAGUE_ID, ESPN_SEASON,
- * EFF_PROBE_LEAGUE_ID, EFF_LOG_LEVEL, EFF_WEATHER_SOURCE) — plus EFF_CONFIG_DIR / EFF_CACHE_DIR only
- * when overridden. Never EFF_CREDENTIAL_STORE / EFF_CREDENTIAL_FILE (plan 03 §3), never a secret,
- * never a test-scope key.
+ * The EnvironmentVariables of every plist (plan 06 §2: the jobs, the CLI and the server share ONE
+ * configuration): the non-secret server keys the jobs cannot read from config.json — every value
+ * that came from the ENVIRONMENT, the same set `eff print-config` gives the server (ESPN_LEAGUE_ID,
+ * ESPN_SEASON, ESPN_TEAM_ID, EFF_TOOLSET, EFF_SEEDING_MODE, EFF_WEATHER_SOURCE, EFF_PROBE_LEAGUE_ID,
+ * EFF_ESPN_READ_HOST — so an emergency read-host override or a team id set in the shell reaches the
+ * jobs too) plus EFF_LOG_LEVEL — and EFF_CONFIG_DIR / EFF_CACHE_DIR only when overridden. Never
+ * EFF_CREDENTIAL_STORE / EFF_CREDENTIAL_FILE (plan 03 §3), never a secret, never a test-scope key.
  */
 export function jobEnv(config: LenientConfig): Record<string, string> {
-  const env: Record<string, string> = {};
+  const env: Record<string, string> = { ...envSourcedServerKeys(config) };
   const o = config.origins;
   if (o.EFF_CONFIG_DIR === "env") env.EFF_CONFIG_DIR = config.configDir;
   if (o.EFF_CACHE_DIR === "env") env.EFF_CACHE_DIR = config.cacheDir;
-  if (o.ESPN_LEAGUE_ID === "env" && config.leagueId !== null) env.ESPN_LEAGUE_ID = config.leagueId;
-  if (o.ESPN_SEASON === "env") env.ESPN_SEASON = String(config.season);
-  if (o.EFF_PROBE_LEAGUE_ID === "env" && config.probeLeagueId !== null)
-    env.EFF_PROBE_LEAGUE_ID = config.probeLeagueId;
   if (o.EFF_LOG_LEVEL === "env") env.EFF_LOG_LEVEL = config.logLevel;
-  if (o.EFF_WEATHER_SOURCE === "env") env.EFF_WEATHER_SOURCE = config.weatherSource;
   return env;
 }
 

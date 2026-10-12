@@ -219,11 +219,24 @@ export function nextDayFirstKickoff(schedule: ProSchedule, nowMs: number): numbe
   return next !== null && dayFirstKickoff(schedule, next) === next ? next : null;
 }
 
-/** Whether `nowMs` is the working run for `targetMs`: inside (target − window, target]. */
+/**
+ * How late after its calendar minute a launchd wake may start and still count as that wake: launchd
+ * starts a job a few milliseconds to seconds after :00 (more after a sleep), so a wake planned for
+ * exactly the target instant always arrives just AFTER it.
+ */
+export const WAKE_GRACE_MS = 5 * 60_000;
+
+/**
+ * Whether `nowMs` is the working run for `targetMs`: inside (target − window + grace, target +
+ * grace] — one wake of an hourly cadence, the one at (or the last before) the target, launch latency
+ * included. Without the grace a target on the hour (a 13:00 kickoff's 12:00 pre-kickoff run) was
+ * missed by the 12:00:00.3 wake and worked by the 11:00 one, two hours before kickoff.
+ */
 export function isWorkingRun(
   nowMs: number,
   targetMs: number,
   windowMs = WORKING_WINDOW_MS,
+  graceMs = WAKE_GRACE_MS,
 ): boolean {
-  return nowMs > targetMs - windowMs && nowMs <= targetMs;
+  return nowMs > targetMs - windowMs + graceMs && nowMs <= targetMs + graceMs;
 }
