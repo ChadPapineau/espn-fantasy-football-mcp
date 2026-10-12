@@ -174,8 +174,29 @@ export function expectedWeeks(
   return { p25: prior[0], p50: prior[1], p75: prior[2], basis: "prior" };
 }
 
-/** P(the starter is still out) `i` weeks ahead (0 = this week), with a one-week revision tail. */
-export function stillOut(w: InjuryCascadeData["expected_weeks"], i: number): number {
+/**
+ * P(the starter is still out) `i` weeks ahead (0 = this week), with a one-week revision tail. This
+ * week, on the status prior (no reported or assumed timeline), a designation the product carries a
+ * P(active) base rate for reads that rate — 1 − P(active): 0.29 for Questionable / Day-to-day, 0.941
+ * for Doubtful, 1 for Out / IR / Suspension (constants.ts P_ACTIVE_BY_STATUS, sib research 05 §3.5,
+ * the same rate E1, E2 and E5 use) — never the quantile ladder's coarse 0.5 / 0.75 steps, which
+ * overstated a Questionable starter's absence ~1.7× and understated a Doubtful one's (Stage C). Later
+ * weeks, a timeline, and a status without a base rate (none, ACTIVE, unknown: the cascade was asked
+ * for anyway) keep the ladder.
+ */
+export function stillOut(
+  w: InjuryCascadeData["expected_weeks"],
+  i: number,
+  status: InjuryStatus | null = null,
+): number {
+  if (
+    i === 0 &&
+    w.basis === "prior" &&
+    status !== null &&
+    Object.hasOwn(CASCADE.weeksPrior, status) &&
+    Object.hasOwn(P_ACTIVE_BY_STATUS, status)
+  )
+    return clamp(1 - (P_ACTIVE_BY_STATUS[status] ?? 0), 0, 1);
   if (i < w.p25) return 1;
   if (i < w.p50) return 0.75;
   if (i < w.p75) return 0.5;
@@ -411,7 +432,7 @@ export async function analyzeInjuryCascade(req: CascadeRequest): Promise<Cascade
     const pprz = CASCADE.efficiency.tdPerRzOpportunity * CASCADE.efficiency.tdPoints;
     const perGame = opp.targets * ppt + opp.carries * ppc + opp.rz * pprz;
     const byWeek = req.weeks.map((w, i) => {
-      const out = stillOut(weeksOut, i);
+      const out = stillOut(weeksOut, i, inj.injury_status);
       let delta = out * perGame;
       if (qbCase && m.position === "QB") {
         const starter = nonNeg(inj.weekly?.[i]);
@@ -423,7 +444,10 @@ export async function analyzeInjuryCascade(req: CascadeRequest): Promise<Cascade
     const total = a.delta.targets + a.delta.carries + a.delta.rz;
     const group = samePosTotal.get(m.position) ?? 0;
     const dominance = group > 0 ? total / group : qbCase && m.position === "QB" ? 1 : 0;
-    const pRole = round(stillOut(weeksOut, 0) * (1 - CASCADE.committeeRisk * (1 - dominance)), 3);
+    const pRole = round(
+      stillOut(weeksOut, 0, inj.injury_status) * (1 - CASCADE.committeeRisk * (1 - dominance)),
+      3,
+    );
     const rec = m.recent ?? null;
     const usageConfirmed =
       rec !== null &&

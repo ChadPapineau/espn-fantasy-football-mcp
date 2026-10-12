@@ -4,7 +4,8 @@
 // shares never sum above the vacated share (component by component, with or without team evidence),
 // `hypothesis_only` is true whenever team_games = 0 ∧ usage_confirmed = false ∧ market_move = null,
 // `ir_consequence.ir_eligible` is true only for OUT / INJURY_RESERVE (the structured status, never
-// text); E5's verdicts reach the available beneficiaries only; a backup QB inherits the role.
+// text); E5's verdicts reach the available beneficiaries only; a backup QB inherits the role; this
+// week's P(still out) on the status prior is the product's own 1 − P(active) (Stage C).
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
@@ -15,6 +16,7 @@ import {
   type CascadeRequest,
   type CascadeTeammate,
 } from "../../../src/domain/analytics/cascade.js";
+import { P_ACTIVE_BY_STATUS } from "../../../src/domain/analytics/constants.js";
 import { CASCADE } from "../../../src/domain/analytics/marketConstants.js";
 import {
   ESPN_INJURY_STATUSES,
@@ -440,6 +442,60 @@ describe("E5 verdicts, the QB case, timing helpers", () => {
       CASCADE.tailAfterP75,
       0,
     ]);
+  });
+  it("Stage C: this week's P(still out) on the status prior is 1 − P(active), the product's own base rate", () => {
+    // regression: the quantile ladder read Questionable / Day-to-day as 0.5 and Doubtful as 0.75
+    // at week 0, against P_ACTIVE_BY_STATUS's 0.71 / 0.059 (sib research 05 §3.5)
+    const cases: [string, number][] = [
+      ["QUESTIONABLE", 1 - (P_ACTIVE_BY_STATUS.QUESTIONABLE ?? 0)],
+      ["DAY_TO_DAY", 1 - (P_ACTIVE_BY_STATUS.DAY_TO_DAY ?? 0)],
+      ["DOUBTFUL", 1 - (P_ACTIVE_BY_STATUS.DOUBTFUL ?? 0)],
+      ["OUT", 1],
+      ["INJURY_RESERVE", 1],
+      ["SUSPENSION", 1],
+    ];
+    for (const [status, p] of cases) {
+      const w = expectedWeeks(status, null);
+      expect(stillOut(w, 0, status)).toBeCloseTo(p, 9);
+      // later weeks keep the ladder (and never rise above this week)
+      for (let i = 1; i <= 12; i++) {
+        expect(stillOut(w, i, status)).toBe(stillOut(w, i));
+        expect(stillOut(w, i, status)).toBeLessThanOrEqual(stillOut(w, 0, status) + 1e-12);
+      }
+    }
+    expect(stillOut(expectedWeeks("QUESTIONABLE", null), 0, "QUESTIONABLE")).toBeCloseTo(0.29, 9);
+    expect(stillOut(expectedWeeks("DOUBTFUL", null), 0, "DOUBTFUL")).toBeCloseTo(0.941, 9);
+    // a reported / assumed timeline, and a status without a base rate, keep the ladder
+    expect(stillOut(expectedWeeks("QUESTIONABLE", 1), 0, "QUESTIONABLE")).toBe(1);
+    expect(stillOut(expectedWeeks(null, null), 0, null)).toBe(1);
+    expect(stillOut(expectedWeeks("ACTIVE", null), 0, "ACTIVE")).toBe(1);
+    expect(stillOut(expectedWeeks("SOMETHING_NEW", null), 0, "SOMETHING_NEW")).toBe(1);
+  });
+  it("Stage C: a Questionable starter's beneficiaries get 0.29 × the role this week, a Doubtful one's 0.941", async () => {
+    const out = await analyzeInjuryCascade(req());
+    const perGame = new Map(
+      out.data.beneficiaries.map((b) => [b.player_id, b.delta_proj_by_week[0]?.delta ?? 0]),
+    );
+    const pRoleOut = new Map(
+      out.data.beneficiaries.map((b) => [b.player_id, b.p_role_holds] as const),
+    );
+    for (const [status, pOut] of [
+      ["QUESTIONABLE", 0.29],
+      ["DOUBTFUL", 0.941],
+    ] as const) {
+      const { data } = await analyzeInjuryCascade(
+        req({ injured: { ...req().injured, injury_status: status } }),
+      );
+      expect(data.beneficiaries.length).toBeGreaterThan(0);
+      for (const b of data.beneficiaries) {
+        // week 0: the OUT starter's full per-game delta (P(still out) 1) scaled by 1 − P(active)
+        expect(b.delta_proj_by_week[0]?.delta).toBeCloseTo(
+          (perGame.get(b.player_id) ?? 0) * pOut,
+          2,
+        );
+        expect(b.p_role_holds).toBeCloseTo((pRoleOut.get(b.player_id) ?? 0) * pOut, 2);
+      }
+    }
   });
   it("refuses an out-of-range horizon", async () => {
     await expect(analyzeInjuryCascade(req({ weeks: [] }))).rejects.toMatchObject({
