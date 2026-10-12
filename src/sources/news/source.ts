@@ -16,6 +16,11 @@
 // NEWS_RETENTION_MS before the fetch is not carried, promotional items and invalid items are dropped
 // and counted. Player refs are recomputed for every kept item against the current universe.
 // Nothing in an item is ever acted on: the text is stored, matched for ids, and nothing else.
+// A run parses its feed once (Stage C remediation news-rss-quadratic-children): `assertSchema`
+// parses the file and hands the document to the row build, and `publish` reuses the file and
+// document `assertSchema` read for the same TempFile (it reads and parses itself when it is called
+// without one — publish never trusts that the assertion ran). Extra item fields are named up to
+// MAX_EXTRA_FIELDS_NAMED, the rest counted in one warning.
 import { writeFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { GSIS_ID_RE, isNflTeam } from "../../config/schema.js";
@@ -48,6 +53,7 @@ import {
   parseRss,
   RSS_IGNORED_CHILDREN,
   RSS_ITEM_FIELDS,
+  type RssDocument,
   type RssItem,
 } from "./xml.js";
 
@@ -66,6 +72,8 @@ export const MAX_UNIVERSE_PLAYERS = 20_000;
 /** The statement the wiring reads the CURRENT file's rows with (`NewsSourceOptions.previous`). */
 export const PREVIOUS_NEWS_SQL =
   "SELECT item_id, source, published_ms, first_seen_ms, title, blurb, link FROM ds_news";
+/** Extra item fields named one per warning; the rest are counted in one more (a hostile feed may carry thousands). */
+export const MAX_EXTRA_FIELDS_NAMED = 20;
 /** The RSS media types the GET asks for. */
 export const RSS_ACCEPT = "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1";
 
@@ -228,9 +236,15 @@ export interface NewsBuild {
   readonly warnings: readonly string[];
 }
 
-/** Builds the `ds_news` and `ds_news_players` rows of a temp file (pure, deterministic). */
-export function buildNewsRows(file: NewsFile, opts: { readonly refs?: boolean } = {}): NewsBuild {
-  const doc = parseRss(file.xml);
+/**
+ * Builds the `ds_news` and `ds_news_players` rows of a temp file (pure, deterministic). `doc` is the
+ * file's already-parsed feed (`parseRss(file.xml)`); omitted, the feed is parsed here.
+ */
+export function buildNewsRows(
+  file: NewsFile,
+  opts: { readonly refs?: boolean; readonly doc?: RssDocument } = {},
+): NewsBuild {
+  const doc = opts.doc ?? parseRss(file.xml);
   const counts = {
     invalid: 0,
     promo: 0,
@@ -334,9 +348,15 @@ const bad = (warning: string, missing: readonly string[] = []): SchemaReport => 
 
 const SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$/;
 
-/** The schema assertion of one feed file (plan 01 §5.5; plan 10 B1: a renamed field is named). */
-export function assertNewsShape(file: NewsFile): SchemaReport {
-  const doc = parseRss(file.xml);
+/**
+ * The schema assertion of one feed file (plan 01 §5.5; plan 10 B1: a renamed field is named). `doc`
+ * is the file's already-parsed feed; omitted, the feed is parsed here — once, for the shape and the
+ * row count alike.
+ */
+export function assertNewsShape(
+  file: NewsFile,
+  doc: RssDocument = parseRss(file.xml),
+): SchemaReport {
   if (doc.root !== "rss") return bad("the feed is not an RSS 2.0 document", ["rss"]);
   if (!doc.channel) return bad("the feed has no channel", ["channel"]);
   const missing: string[] = [];
@@ -353,10 +373,14 @@ export function assertNewsShape(file: NewsFile): SchemaReport {
       doc.items.flatMap((i) => i.children).filter((c) => !known.has(c) && SAFE_NAME.test(c)),
     ),
   ].sort();
-  const built = buildNewsRows(file, { refs: false });
+  const built = buildNewsRows(file, { refs: false, doc });
   const warnings = [...file.warnings, ...built.warnings];
   if (doc.items.length === 0) warnings.push("the feed has no items");
-  for (const c of extra) warnings.push(`extra item field ${c}`);
+  for (const c of extra.slice(0, MAX_EXTRA_FIELDS_NAMED)) warnings.push(`extra item field ${c}`);
+  if (extra.length > MAX_EXTRA_FIELDS_NAMED)
+    warnings.push(
+      `… and ${String(extra.length - MAX_EXTRA_FIELDS_NAMED)} more extra item field(s)`,
+    );
   return {
     ok: missing.length === 0,
     missing_columns: missing,
@@ -375,6 +399,9 @@ export function createNewsSource(feed: NewsSource, opts: NewsSourceOptions = {})
   const [itemsTable, refsTable] = tables;
   if (itemsTable === undefined || refsTable === undefined)
     throw new Error("news: the dataset contract lacks the news tables");
+  // The file and feed `assertSchema` read, keyed by the run's TempFile (the runner hands publish
+  // the same objects): publish reuses them instead of reading and parsing the feed again.
+  const asserted = new WeakMap<TempFile, { readonly file: NewsFile; readonly doc: RssDocument }>();
   return Object.freeze({
     id: spec.id,
     license: info.license,
@@ -435,14 +462,19 @@ export function createNewsSource(feed: NewsSource, opts: NewsSourceOptions = {})
       } catch {
         return bad("the news file is unreadable");
       }
-      return assertNewsShape(file);
+      const doc = parseRss(file.xml);
+      const report = assertNewsShape(file, doc);
+      if (report.ok) asserted.set(first, { file, doc });
+      return report;
     },
 
     async publish(files: readonly TempFile[], into: DatasetWriter): Promise<PublishStats> {
       const first = files[0];
       if (first === undefined) throw new Error("news: nothing to publish");
-      const file = await readNewsFile(first.path, feed);
-      const built = buildNewsRows(file);
+      const memo = asserted.get(first);
+      asserted.delete(first);
+      const file = memo?.file ?? (await readNewsFile(first.path, feed));
+      const built = buildNewsRows(file, { doc: memo?.doc ?? parseRss(file.xml) });
       into.createTable(itemsTable);
       into.createTable(refsTable);
       const n = built.news.length === 0 ? 0 : into.insert(itemsTable.name, built.news);

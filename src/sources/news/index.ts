@@ -26,6 +26,7 @@ export {
   createNewsSource,
   FUTURE_SKEW_MS,
   itemRowOf,
+  MAX_EXTRA_FIELDS_NAMED,
   MAX_NEWS_FILE_BYTES,
   MAX_NEWS_ITEMS,
   MAX_RSS_BYTES,

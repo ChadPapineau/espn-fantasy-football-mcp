@@ -24,6 +24,7 @@ import {
   createNewsSource,
   FUTURE_SKEW_MS,
   itemRowOf,
+  MAX_EXTRA_FIELDS_NAMED,
   MAX_RSS_BYTES,
   NEWS_FEEDS,
   NEWS_FILE_FORMAT,
@@ -407,6 +408,52 @@ describe("the schema assertion (plan 10 B1)", () => {
     expect(r.status).toBe("failed");
     expect(publisher.calls).toBe(0);
     expect(refreshLog.rows.at(-1)).toMatchObject({ ok: false, error: "schema_mismatch" });
+  });
+
+  it("names at most MAX_EXTRA_FIELDS_NAMED extra fields and counts the rest in one warning", () => {
+    // Stage C news-rss-quadratic-children: one warning per distinct name made 80 000 warnings
+    const extras = Array.from({ length: 30 }, (_, i) => `<x${String(i).padStart(2, "0")}/>`).join(
+      "",
+    );
+    const r = assertNewsShape(file(rss([{ extra: extras }], { raw: true })));
+    expect(r.ok).toBe(true);
+    expect(r.extra_columns).toHaveLength(30);
+    const named = r.warnings.filter((w) => w.startsWith("extra item field "));
+    expect(named).toHaveLength(MAX_EXTRA_FIELDS_NAMED);
+    expect(r.warnings).toContain(
+      `… and ${String(30 - MAX_EXTRA_FIELDS_NAMED)} more extra item field(s)`,
+    );
+  });
+
+  it("publish reuses the file and feed assertSchema read (one read and one parse per run)", async () => {
+    const http = fakeGet({ [NEWS_FEEDS.espn.url]: CAPTURED.espn() });
+    const src = createNewsSource("espn", OPTS);
+    const { deps: d } = deps(http);
+    const tempDir = join(root, "run");
+    const { mkdir, rm: remove } = await import("node:fs/promises");
+    await mkdir(tempDir);
+    const files = await src.fetch(
+      { version: "v", released_at: null },
+      {
+        http: d.http,
+        download: NO_DOWNLOAD,
+        signal: new AbortController().signal,
+        clock: d.clock,
+        seasons: [2026],
+        week: 5,
+        datasets: { proSchedule: d.proSchedule },
+        tempDir,
+        notPublished: () => undefined,
+      },
+    );
+    expect((await src.assertSchema(files)).ok).toBe(true);
+    // the temp file is gone: publish can only succeed on what assertSchema already read
+    await remove(tempDir, { recursive: true, force: true });
+    const db = new DatabaseSync(":memory:");
+    const stats = await src.publish(files, sqliteWriter(db));
+    expect(stats.tables[0]?.rows).toBe(25);
+    // a second publish of the same files is not served from the memo: it reads (and fails here)
+    await expect(src.publish(files, sqliteWriter(new DatabaseSync(":memory:")))).rejects.toThrow();
   });
 
   it("refuses a malformed temp file", async () => {

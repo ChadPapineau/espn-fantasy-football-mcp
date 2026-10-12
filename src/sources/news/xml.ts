@@ -9,9 +9,11 @@
 // processing instruction, or interpret a field's text — markup inside a field (escaped or not) is
 // kept as text and stripped by the plan 02 §6.2 sanitiser at output. Only the five XML entities and
 // numeric references are decoded, in one pass (so `&amp;lt;` reads `&lt;`). Bounded work: one
-// left-to-right scan with indexOf, a depth ceiling, an item ceiling and a per-field character
-// ceiling (the excess is dropped and counted). Malformed input never throws; it yields what was
-// read plus warnings, and `assertSchema` decides.
+// left-to-right scan with indexOf, a depth ceiling, an item ceiling, a per-field character ceiling
+// and a per-item ceiling on the child names recorded (the excess is dropped and counted; a child
+// name is looked up in a Set, so an item with thousands of distinct children stays linear — Stage C
+// remediation news-rss-quadratic-children). Malformed input never throws; it yields what was read
+// plus warnings, and `assertSchema` decides.
 
 /** The ceilings of one parse. */
 export interface RssLimits {
@@ -19,6 +21,8 @@ export interface RssLimits {
   /** Characters kept per field (the excess is dropped; the storage cap is lower still). */
   readonly maxFieldChars: number;
   readonly maxDepth: number;
+  /** Distinct child names recorded per item (the real feeds use 5–15); later ones are counted. */
+  readonly maxChildNames: number;
 }
 
 /** Defaults: far above the real feeds (5–40 items, fields < 1 kB) and far below the 2 MiB body cap. */
@@ -26,6 +30,7 @@ export const RSS_LIMITS: RssLimits = Object.freeze({
   maxItems: 500,
   maxFieldChars: 16_384,
   maxDepth: 64,
+  maxChildNames: 64,
 });
 
 /** The item children whose text is captured. */
@@ -70,6 +75,8 @@ export interface RssDocument {
   readonly truncated_fields: number;
   /** Items beyond `maxItems` (not read). */
   readonly dropped_items: number;
+  /** Item child elements whose name was not recorded (past `maxChildNames` distinct names). */
+  readonly unrecorded_children: number;
   readonly warnings: readonly string[];
 }
 
@@ -147,6 +154,8 @@ interface OpenItem {
   depth: number;
   fields: Partial<Record<RssItemField, string>>;
   children: string[];
+  /** `children` as a Set: the membership test is O(1) (an Array scan made a wide item quadratic). */
+  seen: Set<string>;
 }
 
 /** Parses an RSS document (never throws; see the header for what it refuses to do). */
@@ -159,6 +168,7 @@ export function parseRss(xml: string, limits: RssLimits = RSS_LIMITS): RssDocume
   let doctype = false;
   let truncated = 0;
   let dropped = 0;
+  let unrecorded = 0;
   let item: OpenItem | null = null;
   let cap: Capture | null = null;
 
@@ -268,8 +278,12 @@ export function parseRss(xml: string, limits: RssLimits = RSS_LIMITS): RssDocume
     }
     const parentIsChannel = depth === 2 && stack[0] === "rss" && stack[1] === "channel";
     if (depth === 1 && stack[0] === "rss" && name === "channel") channel = true;
-    if (item !== null && depth === item.depth && !item.children.includes(name))
-      item.children.push(name);
+    if (item !== null && depth === item.depth && !item.seen.has(name)) {
+      if (item.children.length < limits.maxChildNames) {
+        item.children.push(name);
+        item.seen.add(name);
+      } else unrecorded++;
+    }
     if (selfClosing) continue;
     if (depth + 1 > limits.maxDepth) {
       warnings.push("the document nests deeper than the depth ceiling; the rest is not read");
@@ -280,7 +294,7 @@ export function parseRss(xml: string, limits: RssLimits = RSS_LIMITS): RssDocume
       if (items.length >= limits.maxItems) {
         dropped++;
       } else {
-        item = { depth: depth + 1, fields: {}, children: [] };
+        item = { depth: depth + 1, fields: {}, children: [], seen: new Set() };
       }
     } else if (
       item !== null &&
@@ -296,6 +310,10 @@ export function parseRss(xml: string, limits: RssLimits = RSS_LIMITS): RssDocume
     warnings.push(`${String(truncated)} field(s) longer than the field ceiling were cut`);
   if (dropped > 0)
     warnings.push(`${String(dropped)} item(s) beyond the item ceiling were not read`);
+  if (unrecorded > 0)
+    warnings.push(
+      `${String(unrecorded)} item child element(s) past the per-item name ceiling were not recorded`,
+    );
   if (doctype) warnings.push("a DOCTYPE was present and skipped (no entity is ever expanded)");
   return {
     root,
@@ -304,6 +322,7 @@ export function parseRss(xml: string, limits: RssLimits = RSS_LIMITS): RssDocume
     doctype,
     truncated_fields: truncated,
     dropped_items: dropped,
+    unrecorded_children: unrecorded,
     warnings,
   };
 }

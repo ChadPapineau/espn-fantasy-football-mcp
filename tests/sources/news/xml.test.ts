@@ -203,6 +203,35 @@ describe("hostile fields", () => {
     expect(d.items[0]?.children).toEqual(["title", "enclosure"]);
   });
 
+  it("an item with ~150 000 distinct children stays linear: names past the ceiling are counted, fields still read", () => {
+    // Stage C news-rss-quadratic-children: an Array scan per child made this ~60 s (O(N²)) and kept
+    // every name; a Set keeps it linear and the per-item ceiling bounds what is recorded.
+    const n = 150_000;
+    const junk = Array.from({ length: n }, (_, i) => `<a${String(i)}/>`).join("");
+    const xml = `<rss><channel><item><title>T</title><guid>g</guid>${junk}<pubDate>Tue, 06 Oct 2026 18:00:00 GMT</pubDate></item></channel></rss>`;
+    expect(xml.length).toBeLessThan(2 * 1024 * 1024);
+    const t0 = performance.now();
+    const d = parseRss(xml);
+    expect(performance.now() - t0).toBeLessThan(10_000); // a hang detector, not a budget
+    const item = d.items[0];
+    expect(item?.children).toHaveLength(RSS_LIMITS.maxChildNames);
+    expect(item?.children.slice(0, 3)).toEqual(["title", "guid", "a0"]);
+    expect(item?.pubDate).toBe("Tue, 06 Oct 2026 18:00:00 GMT");
+    expect(d.unrecorded_children).toBe(n + 3 - RSS_LIMITS.maxChildNames);
+    expect(d.warnings).toEqual([
+      `${String(n + 3 - RSS_LIMITS.maxChildNames)} item child element(s) past the per-item name ceiling were not recorded`,
+    ]);
+  });
+
+  it("a repeated child name is recorded once and never counted past the ceiling", () => {
+    const d = parseRss(
+      `<rss><channel><item><title>A</title>${"<category>x</category>".repeat(500)}</item></channel></rss>`,
+      { ...RSS_LIMITS, maxChildNames: 2 },
+    );
+    expect(d.items[0]?.children).toEqual(["title", "category"]);
+    expect(d.unrecorded_children).toBe(0);
+  });
+
   it("never throws, whatever the input (property)", () => {
     fc.assert(
       fc.property(
