@@ -97,18 +97,29 @@ export interface CredentialView {
   readonly next_probe_at: string | null;
 }
 
-/** The drift_state row as G1 reads it (diff already parsed by the composition root). */
+/** One view's drift paths (the drift_state row's diff_json / additive_json entries, parsed). */
+export interface DriftViewDiff {
+  readonly view: string;
+  readonly removed: readonly string[];
+  readonly added: readonly string[];
+  readonly enums: readonly string[];
+}
+
+/** The drift_state row as G1 reads it (diffs already parsed by the composition root). */
 export interface DriftView {
   readonly status: DriftStatus;
   readonly since: string | null;
   readonly last_probe_at: string | null;
   readonly manifest_hash: string | null;
-  readonly diff: readonly {
-    readonly view: string;
-    readonly removed: readonly string[];
-    readonly added: readonly string[];
-    readonly enums: readonly string[];
-  }[];
+  /** The failing diff (removed required keys, skeletons). */
+  readonly diff: readonly DriftViewDiff[];
+  /**
+   * The additive-drift list (new keys and enum values — the row's `additive_json`; plan 07 §4.1
+   * espn-ff://status/drift "the additive-drift list"). Optional and additive: G1 merges it into the
+   * diff it shows, so an `additive` status names its paths (Stage C finding
+   * `status-drift-diff-unwrapped-strings`).
+   */
+  readonly additive?: readonly DriftViewDiff[];
 }
 
 /** The limiter rows as G1 reads them (from espn_requests, so a second process agrees). */
@@ -160,6 +171,14 @@ export interface ServerTexts {
   readonly skills: Readonly<Record<string, string | null>>;
   /** skills/_shared/references/tool-outputs.md (served as espn-ff://docs/tool-outputs). */
   readonly tool_outputs: string | null;
+  /**
+   * skills/<name>/references/<file>.md, keyed by Skill directory then file name (`orient.md`,
+   * `onboard-log-entry.md`); null or absent = not installed. A prompt carries the references its
+   * Skill body links (plan 09 §6: the prompts are the Skill delivery path where no Skill loader
+   * exists, and a prompt-only client cannot open a file). Optional and additive: the composition
+   * root fills it from the package.
+   */
+  readonly references?: Readonly<Record<string, Readonly<Record<string, string | null>>>>;
 }
 
 /** The scoring golden's in-process state (A5 updates it; A1 reports it — plan 07 A1 `golden`). */

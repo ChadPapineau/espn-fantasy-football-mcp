@@ -22,7 +22,7 @@ import { readTrace, traceWithRealised } from "../../domain/reclog/realised.js";
 import type { TunedParameters } from "../../domain/reclog/tune.js";
 import type { NflTeam } from "../../config/schema.js";
 import type { InputStamp } from "../envelope.js";
-import type { ToolContext } from "../define.js";
+import { beforeSideEffect, type ToolContext } from "../define.js";
 import { leagueRef, optionalDataset, turn } from "./common.js";
 
 /** Weeks of box scores the attribution reads (the re-fit window ends at the scored week). */
@@ -178,6 +178,7 @@ export async function scoreClaims(
 ): Promise<number> {
   const repo = ctx.services.scoredClaims;
   if (repo === undefined) return 0;
+  beforeSideEffect(ctx);
   const league = leagueRef(ctx).league_id;
   const box = new Map<number, Readonly<Record<string, number>> | null>();
   for (const m of boxes)

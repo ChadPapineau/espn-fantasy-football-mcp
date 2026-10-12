@@ -9,6 +9,7 @@ import {
   RESOURCE_TTL_MS,
   UNTRUSTED_TEXT_RULE,
 } from "../../src/mcp/envelope.js";
+import { ERROR_TABLE, SERVER_HINTS, SERVER_MESSAGES } from "../../src/mcp/errors.js";
 import { TOOL_OUTPUTS_FALLBACK, toolOutputsText } from "../../src/mcp/resources/index.js";
 import { envelopeViolations, identifierLeaks } from "./helpers/walk.js";
 import { call, connect, makeWorld, type World } from "./helpers/world.js";
@@ -139,7 +140,13 @@ describe("static resources", () => {
 
   it("espn-ff://roster/snapshot: NOT_FOUND before a snapshot, then the snapshot and its diff", async () => {
     const none = await read("espn-ff://roster/snapshot");
-    expect((none.env.error as { code: string }).code).toBe("NOT_FOUND");
+    const e = none.env.error as { code: string; message: string; hint: string };
+    expect(e.code).toBe("NOT_FOUND");
+    // Stage C `resources-roster-snapshot-not-found-text`: says that no snapshot exists yet and how
+    // to take one — never "the requested team, player or week is not in this league"
+    expect(e.message).toBe(SERVER_MESSAGES.rosterSnapshotNone);
+    expect(e.hint).toBe(SERVER_HINTS.rosterSnapshotNone);
+    expect(e.message).not.toBe(ERROR_TABLE.NOT_FOUND.message);
     const r2 = await world.services.platform.getRoster(
       { league: world.services.league, team_id: 1 },
       2,

@@ -21,7 +21,6 @@ import {
   RESULT_BUDGET_CHARS,
   TRUNCATION_HINTS,
   UNTRUSTED_TEXT_RULE,
-  buildEnvelope,
   fitToBudget,
   serializeEnvelope,
   type InputStamp,
@@ -30,17 +29,25 @@ import {
   type StatIdResourceData,
   type UntrustedField,
 } from "../envelope.js";
-import { EffError, describeForLog, newRequestId, toToolError } from "../errors.js";
-import { toolContext, type ToolContext } from "../define.js";
+import {
+  EffError,
+  SERVER_HINTS,
+  SERVER_MESSAGES,
+  describeForLog,
+  fromBudgetSignal,
+  newRequestId,
+  toToolError,
+} from "../errors.js";
+import { envelopeOf, toolContext, type AnyToolDefinition, type ToolContext } from "../define.js";
 import type { McpServerOptions, McpServices } from "../services.js";
-import { leagueDigest } from "../tools/league.js";
-import { driftReport, freshnessReport, statusSnapshot } from "../tools/ops.js";
+import { getLeague } from "../tools/league.js";
+import { driftReport, freshnessReport, getStatus } from "../tools/ops.js";
 import { REC_SOURCE, recWeekItems, recordTextFields, recordView } from "../tools/reclog.js";
 import { rosterSummary } from "../tools/roster.js";
 import { slotsOf } from "../tools/common.js";
 import { createUpstreamBudget } from "../../providers/platform.js";
 
-/** What a resource body returns (the envelope's inputs). */
+/** What a resource body returns (the envelope's inputs — a tool twin's ToolOutput fits). */
 interface ResourceOutput {
   readonly data: unknown;
   readonly inputs: readonly InputStamp[];
@@ -48,6 +55,26 @@ interface ResourceOutput {
   readonly bareFields?: readonly UntrustedField[];
   readonly extraSources?: readonly string[];
   readonly listKey?: string;
+  readonly partial?: boolean;
+  readonly provisional?: boolean;
+  readonly correctionsWindowOpen?: boolean;
+  readonly estimate?: boolean;
+}
+
+/** A resource with no tool twin: list-budget, no schema-marked bare paths beyond its own. */
+const NO_TWIN = Object.freeze({
+  budget: "list" as const,
+  bareFields: [] as readonly UntrustedField[],
+});
+/** What a resource takes from its tool twin (plan 07 §4.1 "Twin of"). */
+type Twin = Pick<AnyToolDefinition, "budget" | "bareFields">;
+
+/**
+ * A twin resource's body: the tool's own run with its default arguments, so the resource carries
+ * the tool's data AND its warnings (espn_get_status's stale-credential and drift lines included).
+ */
+function twinBody(def: AnyToolDefinition): (ctx: ToolContext) => Promise<ResourceOutput> {
+  return (ctx) => def.run(def.input.parse({}) as never, ctx);
 }
 
 const JSON_MIME = "application/json";
@@ -65,28 +92,26 @@ export function toolOutputsText(options: McpServerOptions): string {
   return out;
 }
 
-/** Runs a resource body into one JSON content block (envelope, or the coded error body). */
+/**
+ * Runs a resource body into one JSON content block (envelope, or the coded error body). The
+ * envelope is built by the tools' own builder (`envelopeOf`) with the twin's schema-marked bare
+ * paths, so a resource carries exactly what its tool twin carries — the injection-flag line in
+ * `warnings[]`, `partial`, `provisional` — for the same data (plan 07 §4.1, C14).
+ */
 export async function readAsEnvelope(
   uri: string,
   services: McpServices,
   options: McpServerOptions,
   body: (ctx: ToolContext) => Promise<ResourceOutput>,
   budget: number = RESULT_BUDGET_CHARS,
+  twin: Twin = NO_TWIN,
 ): Promise<ReadResourceResult> {
   const requestId = newRequestId();
   try {
     services.beforeCall?.();
     const ctx = toolContext({ requestId }, services, options);
     const out = await body(ctx);
-    const env = buildEnvelope({
-      data: out.data,
-      requestId,
-      nowMs: ctx.nowMs,
-      inputs: out.inputs,
-      ...(out.warnings === undefined ? {} : { warnings: out.warnings }),
-      ...(out.bareFields === undefined ? {} : { bareFields: out.bareFields }),
-      ...(out.extraSources === undefined ? {} : { extraSources: out.extraSources }),
-    });
+    const env = envelopeOf(out, ctx, twin);
     const fit = fitToBudget(env, budget, out.listKey, {
       pageable: false,
       hint: TRUNCATION_HINTS.narrow,
@@ -96,8 +121,10 @@ export async function readAsEnvelope(
   } catch (e) {
     if (e instanceof ResourceNotFoundError) throw e;
     services.logger.warn("resource.error", { request_id: requestId, error: describeForLog(e) });
+    // a required read the per-call budget stopped is coded, as in a tool (errors.ts fromBudgetSignal)
+    const coded = fromBudgetSignal(e);
     return {
-      contents: [{ uri, mimeType: JSON_MIME, text: toToolError(e, requestId).content[0].text }],
+      contents: [{ uri, mimeType: JSON_MIME, text: toToolError(coded, requestId).content[0].text }],
     };
   }
 }
@@ -116,8 +143,13 @@ export async function leagueSettingsText(
   services: McpServices,
   options: McpServerOptions,
 ): Promise<string | null> {
-  const r = await readAsEnvelope("espn-ff://league/settings", services, options, async (ctx) =>
-    leagueDigest(ctx, {}),
+  const r = await readAsEnvelope(
+    "espn-ff://league/settings",
+    services,
+    options,
+    twinBody(getLeague),
+    RESULT_BUDGET_CHARS,
+    getLeague,
   );
   const c = r.contents[0];
   const text = c !== undefined && "text" in c && typeof c.text === "string" ? c.text : null;
@@ -159,12 +191,13 @@ export function registerResources(
     description: string,
     body: (ctx: ToolContext) => Promise<ResourceOutput>,
     budget: number = RESULT_BUDGET_CHARS,
+    twin: Twin = NO_TWIN,
   ): void => {
     server.registerResource(
       name,
       uri,
       { description, mimeType: JSON_MIME, cacheHint: hint(uri) },
-      (u) => readAsEnvelope(u.href, services, options, body, budget),
+      (u) => readAsEnvelope(u.href, services, options, body, budget, twin),
     );
   };
 
@@ -178,7 +211,9 @@ export function registerResources(
     "league_settings",
     "espn-ff://league/settings",
     "The league settings digest (same data as espn_get_league).",
-    async (ctx) => leagueDigest(ctx, {}),
+    twinBody(getLeague),
+    RESULT_BUDGET_CHARS,
+    getLeague,
   );
   reg(
     "stat_ids",
@@ -194,11 +229,9 @@ export function registerResources(
     "status",
     "espn-ff://status",
     "Server status (espn_get_status without checks).",
-    async (ctx) => ({
-      data: await statusSnapshot(ctx, false),
-      inputs: [],
-      extraSources: ["store:status"],
-    }),
+    twinBody(getStatus),
+    RESULT_BUDGET_CHARS,
+    getStatus,
   );
   reg(
     "status_freshness",
@@ -216,7 +249,7 @@ export function registerResources(
     "espn-ff://status/drift",
     "What changed at ESPN: the drift status, the manifest diff and the affected tools.",
     (ctx) =>
-      Promise.resolve({ data: driftReport(ctx), inputs: [], extraSources: ["store:drift_state"] }),
+      Promise.resolve({ ...driftReport(ctx), inputs: [], extraSources: ["store:drift_state"] }),
   );
   reg(
     "roster_snapshot",
@@ -224,10 +257,15 @@ export function registerResources(
     "My team's latest nightly roster snapshot and its diff against the previous one (zero ESPN requests).",
     async (ctx) => {
       const team = ctx.services.configuredTeamId;
-      if (team === null) throw new EffError("NOT_FOUND");
+      if (team === null) throw new EffError("NOT_FOUND", { hint: SERVER_HINTS.myTeamUnresolved });
       const two = ctx.services.rosterSnapshots.latestTwo(team);
       const latest = two[0];
-      if (latest === undefined) throw new EffError("NOT_FOUND");
+      // nothing stored yet is its own answer, never "a team, player or week not in this league"
+      if (latest === undefined)
+        throw new EffError("NOT_FOUND", {
+          message: SERVER_MESSAGES.rosterSnapshotNone,
+          hint: SERVER_HINTS.rosterSnapshotNone,
+        });
       const inputs: InputStamp[] = [];
       const slots = await slotsOf(ctx, inputs);
       const prev = two[1] ?? null;

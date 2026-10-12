@@ -10,7 +10,11 @@
 import { randomBytes } from "node:crypto";
 import type { StandardSchemaWithJSON } from "@modelcontextprotocol/server";
 import type { z } from "zod/v4";
-import { isEspnView, upstreamTypeOrUnknown } from "../providers/platform.js";
+import {
+  isEspnView,
+  isUpstreamBudgetExhausted,
+  upstreamTypeOrUnknown,
+} from "../providers/platform.js";
 import { INVALID_ID_MESSAGE, REQUEST_ID_RE, type ToolSuccessResult } from "./envelope.js";
 
 /** Every tool error code (plan 01 §4.3; UPSTREAM_UNAVAILABLE is the shared name of §0.4). */
@@ -152,8 +156,21 @@ export const SERVER_HINTS = Object.freeze({
   seasonTooOld: "Seasons before 2018 use a different ESPN route and are not supported.",
   scoringRefused: "Scoring does not reproduce ESPN for this league: run the onboard Skill.",
   checkAuthTooSoon: "espn_check_auth runs at most once per minute; wait retry_after_s seconds.",
+  rosterSnapshotNone:
+    "In a terminal run: eff snapshot roster (eff install-launchd takes one every night), then read it again.",
 });
 const SERVER_HINT_SET: ReadonlySet<string> = new Set(Object.values(SERVER_HINTS));
+
+/**
+ * Server-authored messages that may replace a table message where the table's words would mislead
+ * (plan 01 §4.3: "error messages are fixed strings from a table" — this is that table's second
+ * column, never text from a file or upstream). A resource with nothing stored yet is not "a team,
+ * player or week not in this league" (Stage C finding `resources-roster-snapshot-not-found-text`).
+ */
+export const SERVER_MESSAGES = Object.freeze({
+  rosterSnapshotNone: "No roster snapshot has been taken yet.",
+});
+const SERVER_MESSAGE_SET: ReadonlySet<string> = new Set(Object.values(SERVER_MESSAGES));
 
 /** Value-free extras an error may carry into the result (each re-validated by the mapper). */
 export interface EffErrorDetails {
@@ -171,6 +188,8 @@ export interface EffErrorDetails {
   readonly path?: string;
   /** One of SERVER_HINTS. */
   readonly hint?: string;
+  /** One of SERVER_MESSAGES. */
+  readonly message?: string;
 }
 
 /**
@@ -261,6 +280,22 @@ export function safeFieldPath(path: readonly PropertyKey[]): string {
   return out === "" ? "(root)" : out;
 }
 
+/**
+ * A REQUIRED read the call's upstream budget stopped (plan 01 §5.6, §6), as the coded error the call
+ * answers: the per-call request cap → RATE_LIMITED with a 1 s retry (the reads before it are cached,
+ * so the retry fits); the ≤ 20 s deadline → ESPN_UPSTREAM_UNAVAILABLE ("past the deadline the call
+ * returns stale data or partial: true — or ESPN_UPSTREAM_UNAVAILABLE when nothing is cached").
+ * Any other value is returned unchanged. The raw signal itself still classifies as INTERNAL
+ * (classifyError): it is converted only where a tool or resource body let it escape — the read
+ * that body could not answer without (Stage C finding `espn-deadline-budget-exhausted-internal`).
+ */
+export function fromBudgetSignal(e: unknown): unknown {
+  if (!isUpstreamBudgetExhausted(e)) return e;
+  return e.missing.reason === "budget"
+    ? new EffError("RATE_LIMITED", { retry_after_s: 1 }, { cause: e })
+    : new EffError("ESPN_UPSTREAM_UNAVAILABLE", {}, { cause: e });
+}
+
 /** Network failure codes that classify as ESPN_UPSTREAM_UNAVAILABLE (plan 01 §6), never INTERNAL. */
 export const NETWORK_ERROR_CODES: ReadonlySet<string> = new Set([
   "ENOTFOUND",
@@ -320,6 +355,8 @@ function sanitizeDetails(raw: unknown): EffErrorDetails {
   if (typeof path === "string" && SAFE_JSON_PATH.test(path)) out.path = path;
   const hint = ownProp(raw, "hint");
   if (typeof hint === "string" && SERVER_HINT_SET.has(hint)) out.hint = hint;
+  const message = ownProp(raw, "message");
+  if (typeof message === "string" && SERVER_MESSAGE_SET.has(message)) out.message = message;
   const reason = ownProp(raw, "reason");
   if (typeof reason === "string" && SAFE_REASON.test(reason)) out.reason = reason;
   return out;
@@ -372,7 +409,10 @@ export function toToolError(e: unknown, requestId: string): ToolErrorResult {
   const spec = ERROR_TABLE[code];
   const error: Record<string, unknown> = {
     code,
-    message: spec.message,
+    message:
+      typeof details.message === "string" && SERVER_MESSAGE_SET.has(details.message)
+        ? details.message
+        : spec.message,
     hint:
       typeof details.hint === "string" && SERVER_HINT_SET.has(details.hint)
         ? details.hint
@@ -459,6 +499,11 @@ export function deferValidation(schema: z.ZodType): StandardSchemaWithJSON<unkno
 export interface HandlerContext {
   /** This call's request id: put it in `meta.request_id` and every log line. */
   readonly requestId: string;
+  /**
+   * The transport's request context, passed through untouched (the SDK's `ctx`: its abort signal,
+   * `_meta.progressToken`, the notifier — read by define.ts through call.ts controlsFromRequest).
+   */
+  readonly extra?: unknown;
 }
 
 /** Options for `wrapHandler`. */
@@ -475,13 +520,13 @@ export function wrapHandler<S extends z.ZodType>(
   schema: S,
   fn: (args: z.output<S>, ctx: HandlerContext) => Promise<ToolSuccessResult> | ToolSuccessResult,
   opts: WrapOptions = {},
-): (raw: unknown) => Promise<ToolSuccessResult | ToolWireErrorResult> {
-  return async (raw: unknown) => {
+): (raw: unknown, extra?: unknown) => Promise<ToolSuccessResult | ToolWireErrorResult> {
+  return async (raw: unknown, extra?: unknown) => {
     const requestId = (opts.newId ?? newRequestId)();
     try {
       const parsed = schema.safeParse(raw ?? {});
       if (!parsed.success) return toWireError(parsed.error, requestId);
-      return await fn(parsed.data, { requestId });
+      return await fn(parsed.data, extra === undefined ? { requestId } : { requestId, extra });
     } catch (e) {
       try {
         opts.onError?.(e, requestId);

@@ -14,6 +14,7 @@ import type {
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
 import { createUpstreamBudget, type UpstreamBudget } from "../providers/platform.js";
+import { CallCancelled, controlsFromRequest, productionCallPacer, type CallPacer } from "./call.js";
 import {
   ANALYTICS_BUDGET_CHARS,
   RESULT_BUDGET_CHARS,
@@ -29,13 +30,20 @@ import {
   toolAnnotations,
   validatedToolResult,
   type BudgetTrim,
+  type Envelope,
   type InputStamp,
   type PageInfo,
   type ToolFamily,
   type ToolSuccessResult,
   type UntrustedField,
 } from "./envelope.js";
-import { EffError, describeForLog, wrapHandler, type HandlerContext } from "./errors.js";
+import {
+  EffError,
+  describeForLog,
+  fromBudgetSignal,
+  wrapHandler,
+  type HandlerContext,
+} from "./errors.js";
 import type { McpLogger, McpServerOptions, McpServices } from "./services.js";
 
 /** The tool-name grammar (plan 01 §4.1): `espn_<verb>_<resource>`, ≤ 40 characters. */
@@ -103,6 +111,12 @@ export function recentCall(services: McpServices, requestId: string): CallRecord
 
 /** Per-call context a tool implementation receives. */
 export interface ToolContext extends HandlerContext {
+  /**
+   * This call's cooperative pacer (call.ts): every engine the tool runs takes `pacer: ctx.pacer`, so
+   * the 8 s CPU deadline is one budget per CALL, a cancelled call stops at its next batch boundary,
+   * and a request with a progressToken gets notifications/progress.
+   */
+  readonly pacer: CallPacer;
   /** The call's instant, read once from the injected Clock. */
   readonly nowMs: number;
   readonly services: McpServices;
@@ -360,13 +374,31 @@ export function outputSchemaOf(def: Pick<AnyToolDefinition, "data">): z.ZodType 
   return s;
 }
 
-/** Builds the per-call context (the budget's clock is the injected one). */
+/**
+ * Builds the per-call context (the budget's clock is the injected one). The client's cancellation
+ * aborts the call's ESPN budget too, so no new request starts once the client has gone (plan 01 §6:
+ * `abort()` is "the caller's cancellation").
+ */
 export function toolContext(
   base: HandlerContext,
   services: McpServices,
   options: McpServerOptions,
 ): ToolContext {
   const nowMs = services.clock.nowMs();
+  const controls = controlsFromRequest(base.extra);
+  const budget = createUpstreamBudget(base.requestId, nowMs);
+  const signal = controls.signal;
+  if (signal !== undefined) {
+    if (signal.aborted) budget.abort();
+    else
+      signal.addEventListener(
+        "abort",
+        () => {
+          budget.abort();
+        },
+        { once: true },
+      );
+  }
   return {
     requestId: base.requestId,
     nowMs,
@@ -374,8 +406,18 @@ export function toolContext(
     options,
     log: services.logger,
     memo: new Map(),
-    budget: createUpstreamBudget(base.requestId, nowMs),
+    budget,
+    pacer: productionCallPacer(services.clock, controls),
   };
+}
+
+/**
+ * The guard before a call's side effect (a store write: projections, a waiver run, a claim, a
+ * proposal, a log entry): a call the client cancelled stops here and writes nothing (MCP
+ * cancellation; Stage C finding `mcp-request-extra-dropped`).
+ */
+export function beforeSideEffect(ctx: Pick<ToolContext, "pacer">): void {
+  ctx.pacer.throwIfCancelled();
 }
 
 /** The most injection-flag warnings one result carries (one per distinct path and source). */
@@ -408,6 +450,36 @@ export function injectionWarnings(data: unknown): string[] {
   return out;
 }
 
+/**
+ * The envelope of one tool OR resource output — the one builder both paths use, so a resource is
+ * identical to its tool twin (plan 07 §4.1: "the same envelope"): analytics numbers rounded, the
+ * twin's schema-marked bare paths listed, and the deterministic injection flags surfaced in
+ * `warnings[]` (plan 07 C14) — a resource built any other way dropped that line (Stage C finding
+ * `resources-injection-warning-dropped`), and every prompt embeds espn-ff://league/settings.
+ */
+export function envelopeOf(
+  out: Omit<ToolOutput<unknown>, "inputs"> & { readonly inputs: readonly InputStamp[] },
+  ctx: { readonly requestId: string; readonly nowMs: number },
+  twin: { readonly budget: "list" | "analytics"; readonly bareFields: readonly UntrustedField[] },
+): Envelope<unknown> {
+  return buildEnvelope({
+    data: twin.budget === "analytics" ? roundDeep(out.data) : out.data,
+    requestId: ctx.requestId,
+    nowMs: ctx.nowMs,
+    inputs: out.inputs,
+    ...(out.extraSources === undefined ? {} : { extraSources: out.extraSources }),
+    ...(out.provisional === undefined ? {} : { provisional: out.provisional }),
+    ...(out.correctionsWindowOpen === undefined
+      ? {}
+      : { correctionsWindowOpen: out.correctionsWindowOpen }),
+    ...(out.estimate === undefined ? {} : { estimate: out.estimate }),
+    bareFields: [...twin.bareFields, ...(out.bareFields ?? [])],
+    ...(out.page === undefined ? {} : { page: out.page }),
+    ...(out.partial === undefined ? {} : { partial: out.partial }),
+    warnings: [...(out.warnings ?? []), ...injectionWarnings(out.data)],
+  });
+}
+
 /** Runs a tool body and turns its output into the tool result (budget, validation, structure). */
 export async function runTool(
   def: AnyToolDefinition,
@@ -421,28 +493,36 @@ export async function runTool(
   const ctx = toolContext(base, services, options);
   const started = performance.now();
   log.debug("tool.start", { request_id: ctx.requestId, tool: def.name });
-  const out = await def.run(args as never, ctx);
+  let out: ToolOutput<unknown>;
+  try {
+    ctx.pacer.throwIfCancelled();
+    out = await def.run(args as never, ctx);
+    // a call cancelled while its last step ran is not answered (the transport drops the reply)
+    ctx.pacer.throwIfCancelled();
+  } catch (e) {
+    if (e instanceof CallCancelled) {
+      log.info("tool.cancelled", {
+        request_id: ctx.requestId,
+        tool: def.name,
+        ms: Math.round(performance.now() - started),
+        cpu_ms: Math.round(ctx.pacer.spentMs()),
+      });
+      throw e;
+    }
+    // a required read the per-call budget stopped is the call's coded answer (RATE_LIMITED or
+    // ESPN_UPSTREAM_UNAVAILABLE — plan 01 §5.6, §6), never INTERNAL; logged, so a forgotten
+    // optional read (which should have been partial) still shows in the server log
+    const mapped = fromBudgetSignal(e);
+    if (mapped !== e)
+      log.warn("tool.budget_stopped_required_read", { request_id: ctx.requestId, tool: def.name });
+    throw mapped;
+  }
   // the envelope is built, fitted and schema-checked synchronously (tens of ms for an analytics
   // result): a yield first keeps it a macrotask of its own (plan 03 §1.2 stall bound; plan 10 A16a)
   await new Promise<void>((resolve) => {
     setImmediate(resolve);
   });
-  const env = buildEnvelope({
-    data: def.budget === "analytics" ? roundDeep(out.data) : out.data,
-    requestId: ctx.requestId,
-    nowMs: ctx.nowMs,
-    inputs: out.inputs,
-    ...(out.extraSources === undefined ? {} : { extraSources: out.extraSources }),
-    ...(out.provisional === undefined ? {} : { provisional: out.provisional }),
-    ...(out.correctionsWindowOpen === undefined
-      ? {}
-      : { correctionsWindowOpen: out.correctionsWindowOpen }),
-    ...(out.estimate === undefined ? {} : { estimate: out.estimate }),
-    bareFields: [...def.bareFields, ...(out.bareFields ?? [])],
-    ...(out.page === undefined ? {} : { page: out.page }),
-    ...(out.partial === undefined ? {} : { partial: out.partial }),
-    warnings: [...(out.warnings ?? []), ...injectionWarnings(out.data)],
-  });
+  const env = envelopeOf(out, ctx, def);
   const budget = def.budget === "analytics" ? ANALYTICS_BUDGET_CHARS : RESULT_BUDGET_CHARS;
   const fit = fitToBudget(env, budget, out.listKey, {
     pageable: def.pageable === true,
@@ -469,6 +549,7 @@ export async function runTool(
     request_id: ctx.requestId,
     tool: def.name,
     ms: Math.round(performance.now() - started),
+    cpu_ms: Math.round(ctx.pacer.spentMs()),
     upstream: ctx.budget.used(),
     size: serializeEnvelope(fit.envelope).length,
     truncated: fit.envelope.truncated,
@@ -490,14 +571,17 @@ export function registerDefinedTool(
     (args, base) => runTool(def, args, base, services, options),
     {
       onError: (e, requestId) => {
+        // a cancelled call is not an error (runTool logged tool.cancelled; no reply is sent)
+        if (e instanceof CallCancelled) return;
         log.warn("tool.error", { request_id: requestId, tool: def.name, error: describeForLog(e) });
       },
     },
   );
-  const handler = async (raw: unknown): ReturnType<typeof wrapped> => {
+  // the SDK's request context (abort signal, progressToken, notifier) rides along to the call
+  const handler = async (raw: unknown, extra?: unknown): ReturnType<typeof wrapped> => {
     services.inflight?.enter();
     try {
-      return await wrapped(raw);
+      return await wrapped(raw, extra);
     } finally {
       services.inflight?.exit();
     }

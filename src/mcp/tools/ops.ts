@@ -29,6 +29,7 @@ import {
 import type { FreshnessClassRow, FreshnessResourceData } from "../envelope.js";
 import { EffError, SERVER_HINTS } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
+import type { DriftView } from "../services.js";
 import { TOOL_CONTRACT } from "../contract.js";
 import { leagueRef } from "./common.js";
 import { count, iso, isoNull } from "./schemas.js";
@@ -88,6 +89,20 @@ const sourceRow = z.strictObject({
   last_error: z.string().max(40).nullable(),
 });
 
+/**
+ * The grammar of a drift path as the detector writes it (src/drift/detect.ts): `$`, then ESPN key
+ * segments in identifier form (a key outside it is recorded as `<key>`) and `[]` array markers —
+ * the ESPN key vocabulary, no whitespace, never prose. Only paths in this grammar leave the server
+ * (Stage C finding `status-drift-diff-unwrapped-strings`): the drift diff carries ESPN's own key
+ * names, so a value outside it is dropped and counted, never shown.
+ */
+export const DRIFT_PATH_RE = /^\$(?:\.(?:[A-Za-z_$][\w$]{0,63}|<key>)|\[\]){0,12}$/;
+/** A new enum value: a drift path, `=`, and the detector's enum token (or `?`). */
+export const DRIFT_ENUM_RE =
+  /^\$(?:\.(?:[A-Za-z_$][\w$]{0,63}|<key>)|\[\]){0,12}=(?:[A-Z0-9_]{1,64}|\?)$/;
+/** An ESPN view name as the drift row carries it. */
+const DRIFT_VIEW_RE = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/;
+
 const driftBlock = z.strictObject({
   status: z.enum(DRIFT_STATUSES),
   last_probe_at: isoNull,
@@ -95,15 +110,61 @@ const driftBlock = z.strictObject({
   diff: z
     .array(
       z.strictObject({
-        view: z.string().max(40),
-        removed: z.array(z.string().max(200)).max(200),
-        added: z.array(z.string().max(200)).max(200),
-        enums: z.array(z.string().max(200)).max(200),
+        view: z.string().regex(DRIFT_VIEW_RE),
+        removed: z.array(z.string().max(200).regex(DRIFT_PATH_RE)).max(200),
+        added: z.array(z.string().max(200).regex(DRIFT_PATH_RE)).max(200),
+        enums: z.array(z.string().max(200).regex(DRIFT_ENUM_RE)).max(200),
       }),
     )
     .max(30),
   affected_tools: z.array(z.string().max(40)).max(40),
 });
+
+type DriftDiff = StatusData["drift"]["diff"];
+
+/**
+ * The drift diff as G1 and espn-ff://status/drift show it (plan 07 §4.1: "the current manifest
+ * diff, the additive-drift list"): the failing diff, then the additive list (new keys and enum
+ * values) when the store hands it over, merged per view; every path checked against the detector's
+ * grammar (DRIFT_PATH_RE / DRIFT_ENUM_RE) and anything outside it dropped and counted.
+ */
+export function shownDriftDiff(view: DriftView): { diff: DriftDiff; dropped: number } {
+  let dropped = 0;
+  const keep = (xs: readonly string[], re: RegExp): string[] => {
+    const out: string[] = [];
+    for (const x of xs) {
+      if (typeof x === "string" && x.length <= 200 && re.test(x)) {
+        if (!out.includes(x) && out.length < 200) out.push(x);
+      } else dropped++;
+    }
+    return out;
+  };
+  const byView = new Map<string, { removed: string[]; added: string[]; enums: string[] }>();
+  for (const d of [...view.diff, ...(view.additive ?? [])]) {
+    if (!DRIFT_VIEW_RE.test(d.view)) {
+      dropped += d.removed.length + d.added.length + d.enums.length;
+      continue;
+    }
+    const cur = byView.get(d.view) ?? { removed: [], added: [], enums: [] };
+    for (const x of keep(d.removed, DRIFT_PATH_RE))
+      if (!cur.removed.includes(x)) cur.removed.push(x);
+    for (const x of keep(d.added, DRIFT_PATH_RE)) if (!cur.added.includes(x)) cur.added.push(x);
+    for (const x of keep(d.enums, DRIFT_ENUM_RE)) if (!cur.enums.includes(x)) cur.enums.push(x);
+    byView.set(d.view, cur);
+  }
+  const diff = [...byView.entries()].slice(0, 30).map(([v, d]) => ({
+    view: v,
+    removed: d.removed.slice(0, 200),
+    added: d.added.slice(0, 200),
+    enums: d.enums.slice(0, 200),
+  }));
+  return { diff, dropped };
+}
+
+/** The fixed warning for drift paths outside the grammar (counted, never shown). */
+export function droppedDriftWarning(n: number): string {
+  return `drift diff: ${String(n)} path(s) outside the ESPN key grammar omitted (eff status lists the row)`;
+}
 
 /** G1 data (plan 07 G1; src/providers/platform.ts StatusData). */
 export const statusDataSchema = z.strictObject({
@@ -262,6 +323,7 @@ async function cachedOnly<T>(
 export async function statusSnapshot(
   ctx: ToolContext,
   includeChecks: boolean,
+  droppedDrift?: (n: number) => void,
 ): Promise<StatusData> {
   const s = ctx.services;
   const ref = leagueRef(ctx);
@@ -270,6 +332,8 @@ export async function statusSnapshot(
   const league = await cachedOnly(ctx, (budget) => s.platform.getLeague(ref, { budget }));
   const rules = await cachedOnly(ctx, (budget) => s.platform.getLeagueRules(ref, { budget }));
   const drift = s.status.drift();
+  const shown = shownDriftDiff(drift);
+  droppedDrift?.(shown.dropped);
   const limiter = s.status.limiter(ctx.nowMs);
   const transport = s.transport();
   const store = s.status.store();
@@ -359,8 +423,8 @@ export async function statusSnapshot(
       status: drift.status,
       last_probe_at: drift.last_probe_at,
       manifest_hash: drift.manifest_hash,
-      diff: drift.diff,
-      affected_tools: affectedTools(drift.diff.map((d) => d.view)),
+      diff: shown.diff,
+      affected_tools: affectedTools(shown.diff.map((d) => d.view)),
     },
     limiter: {
       requests_last_minute: limiter.requests_last_minute,
@@ -402,8 +466,10 @@ export const getStatus = defineTool({
   data: statusDataSchema,
   budget: "list",
   run: async (args, ctx) => {
-    const data = await statusSnapshot(ctx, args.include_checks);
     const warnings: string[] = [];
+    const data = await statusSnapshot(ctx, args.include_checks, (n) => {
+      if (n > 0) warnings.push(droppedDriftWarning(n));
+    });
     if (data.credential.stale_warning === true)
       warnings.push(`credential stored ${String(data.credential.age_days)} days ago`);
     if (data.drift.status !== "green") warnings.push(`drift status is ${data.drift.status}`);
@@ -507,15 +573,22 @@ export const freshnessResourceSchema = z.strictObject({
     .max(60),
 });
 
-/** The drift resource's data (G1's `drift` block — ESPN-only). */
-export function driftReport(ctx: ToolContext): StatusData["drift"] {
+/** The drift resource's data (G1's `drift` block — ESPN-only) and its warnings. */
+export function driftReport(ctx: ToolContext): {
+  data: StatusData["drift"];
+  warnings: string[];
+} {
   const d = ctx.services.status.drift();
+  const shown = shownDriftDiff(d);
   return {
-    status: d.status,
-    last_probe_at: d.last_probe_at,
-    manifest_hash: d.manifest_hash,
-    diff: d.diff,
-    affected_tools: affectedTools(d.diff.map((x) => x.view)),
+    data: {
+      status: d.status,
+      last_probe_at: d.last_probe_at,
+      manifest_hash: d.manifest_hash,
+      diff: shown.diff,
+      affected_tools: affectedTools(shown.diff.map((x) => x.view)),
+    },
+    warnings: shown.dropped > 0 ? [droppedDriftWarning(shown.dropped)] : [],
   };
 }
 

@@ -73,7 +73,8 @@ import {
 } from "../bounds.js";
 import { toDataInputs, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
-import { defineTool, type ToolContext } from "../define.js";
+import { beforeSideEffect, defineTool, type ToolContext } from "../define.js";
+import { remainingDeadline } from "../call.js";
 import {
   crosswalkOf,
   leagueOf,
@@ -232,13 +233,16 @@ export function impliedTotals(
 }
 
 /**
- * The samplers' per-call CPU deadline (plan 07 E1 [A-7]): ANALYTICS_CPU_DEADLINE_MS, or the
- * test-only switch in the server options (null = off — plan 10 A8a's injection invariance; never
- * set by a production configuration, changelog R5).
+ * What remains of the call's CPU deadline for the next cooperative run (plan 07 E1 [A-7], E3: "the
+ * 8 s per-CALL CPU deadline"): ANALYTICS_CPU_DEADLINE_MS — or the test-only switch in the server
+ * options (null = off — plan 10 A8a's injection invariance; never set by a production
+ * configuration, changelog R5) — less the CPU this call's batches have already spent (call.ts). Read
+ * it when the run starts: every run of one call draws on the same budget, so E1's v1 + v2 and E3's
+ * season chain stop at 8 s in total (Stage C finding `analytics-cpu-deadline-per-run`).
  */
 export function cpuDeadlineOf(ctx: ToolContext): number | null {
   const v = ctx.options.cpuDeadlineMs;
-  return v === undefined ? ANALYTICS_CPU_DEADLINE_MS : v;
+  return remainingDeadline(v === undefined ? ANALYTICS_CPU_DEADLINE_MS : v, ctx.pacer.spentMs());
 }
 
 /**
@@ -300,6 +304,7 @@ export async function project(
     schedule: o.schedule,
     implied_totals: implied,
     clock: ctx.services.clock,
+    pacer: ctx.pacer,
     rng: seededRng(o.seed),
     ...(o.n_sims === undefined ? {} : { n_sims: o.n_sims }),
     include_stat_line: o.include_stat_line === true,
@@ -766,6 +771,7 @@ export async function seasonContext(
       seeding_config: { mode: "espn_rule", confirmed_at: ctx.services.seedingConfirmedAt },
       n_sims: BOUNDS.nSims.default,
       clock: ctx.services.clock,
+      pacer: ctx.pacer,
       rng: seededRng(seed),
       deadline_ms: cpuDeadlineOf(ctx),
     });
@@ -960,7 +966,7 @@ export const analyzeLineupTool = defineTool({
       estimate: true,
       partial: proj.partial || warnings.some((x) => x.startsWith("partial:")),
       listKey: "swaps",
-      trims: LINEUP_TRIMS,
+      trims: lineupTrims(data),
       week: w,
     };
   },
@@ -972,75 +978,156 @@ const arr = (d: unknown, k: string): unknown[] => {
   return Array.isArray(v) ? v : [];
 };
 
+/** One E2/E5 budget step (envelope.ts BudgetTrim with a required key). */
+export type AnalyticsTrim = (d: unknown) => { data: unknown; warning: string; key: string } | null;
+
+/** The rec's confidence inputs go first in every analytics answer: `data.inputs` carries them. */
+export const REC_INPUTS_TRIM: AnalyticsTrim = (d) => {
+  const rec = (d as Obj).rec as Obj | null | undefined;
+  const conf = rec?.confidence as Obj | undefined;
+  if (rec === null || rec === undefined || conf === undefined) return null;
+  if (!Array.isArray(conf.inputs) || conf.inputs.length === 0) return null;
+  return {
+    data: { ...(d as Obj), rec: { ...rec, confidence: { ...conf, inputs: [] } } },
+    warning: "rec.confidence.inputs omitted (data.inputs carries them)",
+    key: "rec_inputs",
+  };
+};
+
 /**
- * E2's budget steps before `swaps` is halved (plan 07 C8: capped by construction, never silent):
- * unchanged slots leave `current_lineup` (they repeat `recommended_lineup`), the lock schedule goes
- * (espn_get_roster carries it), the rec's confidence inputs go (`data.inputs` carries them), then the
- * cross-check, stack flags and conditionals are halved.
+ * The players E2 moves: every player whose slot differs between `current_lineup` and
+ * `recommended_lineup`, or who appears in only one of them. Read from the UNTRIMMED answer, so each
+ * budget step below is independent of the order the earlier ones ran in.
  */
-export const LINEUP_TRIMS: readonly ((
-  d: unknown,
-) => { data: unknown; warning: string; key: string } | null)[] = [
-  (d) => {
-    const rec = arr(d, "recommended_lineup") as Obj[];
-    const cur = arr(d, "current_lineup") as Obj[];
-    const same = (c: Obj): boolean =>
-      rec.some((r) => r.slot === c.slot && r.player_id === c.player_id);
-    const kept = cur.filter((c) => !same(c));
-    if (kept.length === cur.length) return null;
-    return {
-      data: { ...(d as Obj), current_lineup: kept },
-      warning:
-        "current_lineup lists only the slots that change (the rest equal recommended_lineup)",
-      key: "current_lineup",
+export function movedPlayers(d: unknown): ReadonlySet<number> {
+  const slotOf = (rows: unknown[]): Map<unknown, unknown> =>
+    new Map((rows as Obj[]).map((r) => [r.player_id, r.slot]));
+  const cur = slotOf(arr(d, "current_lineup"));
+  const rec = slotOf(arr(d, "recommended_lineup"));
+  const out = new Set<number>();
+  for (const [p, s] of cur) if (rec.get(p) !== s && typeof p === "number") out.add(p);
+  for (const [p, s] of rec) if (cur.get(p) !== s && typeof p === "number") out.add(p);
+  return out;
+}
+
+const BENCH_SLOTS: ReadonlySet<unknown> = new Set(["BE", "IR"]);
+
+/**
+ * E2's budget steps before `swaps` is halved (plan 07 C8 and §5.1: an analytics answer is capped at
+ * 10 000 chars BY CONSTRUCTION, never silent — every step adds one fixed warning). Each step removes
+ * a repeat before it removes information: the slots that do not change leave `current_lineup` (they
+ * repeat `recommended_lineup`), the lock schedule goes (espn_get_roster carries it), the rec's
+ * confidence inputs go (`data.inputs` carries them), the bench and IR rows that do not change leave
+ * `recommended_lineup` (espn_get_roster carries them), `rec.subjects` keeps the players who move
+ * (`rec.lineup` carries the whole lineup), `current_lineup` goes (its rows repeat the moved
+ * players' rows of `recommended_lineup`; `swaps` and `rec.subjects` name every from-slot), the
+ * cross-check, stack flags and conditionals are halved, the unchanged starters leave
+ * `recommended_lineup` (`rec.lineup` still names them), and last the moved rows and the rec's
+ * drivers are halved. With every step taken the answer is the fixed fields plus `rec.lineup`, so an
+ * `exclude`/`force_start` that changes many slots trims instead of failing (Stage C:
+ * `lineup-exclude-over-budget-internal`).
+ */
+export function lineupTrims(untrimmed: unknown): readonly AnalyticsTrim[] {
+  const moved = movedPlayers(untrimmed);
+  const hasMoved = (r: Obj): boolean => typeof r.player_id === "number" && moved.has(r.player_id);
+  const keepRows = (key: string, keep: (r: Obj) => boolean, warning: string): AnalyticsTrim => {
+    return (d) => {
+      const rows = arr(d, key) as Obj[];
+      const kept = rows.filter(keep);
+      if (kept.length === rows.length) return null;
+      return { data: { ...(d as Obj), [key]: kept }, warning, key };
     };
-  },
-  (d) =>
-    arr(d, "lock_schedule").length === 0
-      ? null
-      : {
-          data: { ...(d as Obj), lock_schedule: [] },
-          warning: "lock_schedule omitted to fit the budget: espn_get_roster carries it",
-          key: "lock_schedule",
+  };
+  return [
+    keepRows(
+      "current_lineup",
+      hasMoved,
+      "current_lineup lists only the slots that change (the rest equal recommended_lineup)",
+    ),
+    (d) =>
+      arr(d, "lock_schedule").length === 0
+        ? null
+        : {
+            data: { ...(d as Obj), lock_schedule: [] },
+            warning: "lock_schedule omitted (espn_get_roster carries it)",
+            key: "lock_schedule",
+          },
+    REC_INPUTS_TRIM,
+    keepRows(
+      "recommended_lineup",
+      (r) => !BENCH_SLOTS.has(r.slot) || hasMoved(r),
+      "recommended_lineup omits the bench and IR rows that do not change (espn_get_roster carries them)",
+    ),
+    (d) => {
+      const rec = (d as Obj).rec as Obj;
+      const subjects = Array.isArray(rec.subjects) ? (rec.subjects as Obj[]) : [];
+      const kept = subjects.filter(hasMoved);
+      if (kept.length === subjects.length) return null;
+      return {
+        data: { ...(d as Obj), rec: { ...rec, subjects: kept } },
+        warning: "rec.subjects lists only the players who move (rec.lineup carries the lineup)",
+        key: "rec_subjects",
+      };
+    },
+    (d) =>
+      arr(d, "current_lineup").length === 0
+        ? null
+        : {
+            data: { ...(d as Obj), current_lineup: [] },
+            warning:
+              "current_lineup omitted (swaps and rec.subjects name every slot a moved player leaves)",
+            key: "current_lineup",
+          },
+    (d) => {
+      const x = (d as Obj).espn_cross_check as Obj;
+      const list = Array.isArray(x.starter_disagreements) ? x.starter_disagreements : [];
+      if (list.length === 0) return null;
+      return {
+        data: {
+          ...(d as Obj),
+          espn_cross_check: { starter_disagreements: list.slice(0, Math.floor(list.length / 2)) },
         },
-  (d) => {
-    const rec = (d as Obj).rec as Obj;
-    const conf = rec.confidence as Obj;
-    if (!Array.isArray(conf.inputs) || conf.inputs.length === 0) return null;
-    return {
-      data: { ...(d as Obj), rec: { ...rec, confidence: { ...conf, inputs: [] } } },
-      warning: "rec.confidence.inputs omitted to fit the budget: data.inputs carries them",
-      key: "rec_inputs",
-    };
-  },
-  (d) => {
-    const x = (d as Obj).espn_cross_check as Obj;
-    const list = Array.isArray(x.starter_disagreements) ? x.starter_disagreements : [];
-    if (list.length === 0) return null;
-    return {
-      data: {
-        ...(d as Obj),
-        espn_cross_check: { starter_disagreements: list.slice(0, Math.floor(list.length / 2)) },
-      },
-      warning: "espn_cross_check.starter_disagreements truncated to fit the budget",
-      key: "cross_check",
-    };
-  },
-  (d) => {
-    const s = arr(d, "stack_flags");
-    const c = arr(d, "conditionals");
-    if (s.length === 0 && c.length === 0) return null;
-    return {
-      data: {
-        ...(d as Obj),
-        stack_flags: s.slice(0, Math.floor(s.length / 2)),
-        conditionals: c.slice(0, Math.floor(c.length / 2)),
-      },
-      warning: "stack_flags and conditionals truncated to fit the budget",
-      key: "flags",
-    };
-  },
-];
+        warning: "espn_cross_check.starter_disagreements truncated to fit the budget",
+        key: "cross_check",
+      };
+    },
+    (d) => {
+      const s = arr(d, "stack_flags");
+      const c = arr(d, "conditionals");
+      if (s.length === 0 && c.length === 0) return null;
+      return {
+        data: {
+          ...(d as Obj),
+          stack_flags: s.slice(0, Math.floor(s.length / 2)),
+          conditionals: c.slice(0, Math.floor(c.length / 2)),
+        },
+        warning: "stack_flags and conditionals truncated to fit the budget",
+        key: "flags",
+      };
+    },
+    keepRows(
+      "recommended_lineup",
+      hasMoved,
+      "recommended_lineup lists only the players who move (rec.lineup carries the whole lineup)",
+    ),
+    (d) => {
+      const rows = arr(d, "recommended_lineup");
+      const rec = (d as Obj).rec as Obj;
+      const drivers = Array.isArray(rec.drivers) ? rec.drivers : [];
+      if (rows.length === 0 && drivers.length === 0) return null;
+      return {
+        data: {
+          ...(d as Obj),
+          recommended_lineup: rows.slice(0, Math.floor(rows.length / 2)),
+          rec: { ...rec, drivers: drivers.slice(0, Math.floor(drivers.length / 2)) },
+        },
+        warning:
+          "recommended_lineup and rec.drivers truncated to fit the budget (rec.lineup and swaps name every change)",
+        key: "moved_rows",
+      };
+    },
+  ];
+}
 
 // --- E5 espn_analyze_waivers -----------------------------------------------------------------------
 
@@ -1298,6 +1385,44 @@ export function leaguePremiumFit(
   }
 }
 
+/** The E5 arguments that decide whether a call prices the league's run as its feed means it. */
+export interface WaiverRunArgs {
+  readonly positions?: readonly string[] | undefined;
+  readonly candidates?: readonly number[] | undefined;
+  readonly horizon_weeks?: number | undefined;
+  readonly look_ahead?: number | undefined;
+  readonly phase: string;
+  readonly value_source: string;
+  readonly include_drop: boolean;
+}
+
+/**
+ * Whether an E5 call priced the waiver RUN the way the league feed reads it (research 05 §1.2, §1.6
+ * eval 3: each logged run's best `s` is "the best claimable player's surplus" — over the whole wire,
+ * for my team, on the default horizon and value basis): no `positions` or `candidates` filter, no
+ * `horizon_weeks` or `look_ahead`, `phase`/`value_source` auto, the drop counted, and the team the
+ * call is about is my own team. Only such a call is logged: a K/D-ST slice (stream-kdef), a
+ * hand-picked `candidates` list (injury-cascade) or a rival's team_id upserted the same run row and
+ * biased the fitted Π (Stage C finding `waivers-run-log-overwritten`).
+ */
+export function pricesWholeWireRun(
+  args: WaiverRunArgs,
+  team: number,
+  myTeam: number | null,
+): boolean {
+  return (
+    myTeam !== null &&
+    team === myTeam &&
+    args.positions === undefined &&
+    args.candidates === undefined &&
+    args.horizon_weeks === undefined &&
+    args.look_ahead === undefined &&
+    args.phase === "auto" &&
+    args.value_source === "auto" &&
+    args.include_drop
+  );
+}
+
 /** Logs the waiver run an E5 answer priced (priority mode, a known next run; plan 10 C5). */
 export function logWaiverRun(
   ctx: ToolContext,
@@ -1311,6 +1436,7 @@ export function logWaiverRun(
 ): void {
   const repo = ctx.services.waiverRuns;
   if (repo === undefined || data.mode_used !== "priority" || data.next_run_at === null) return;
+  beforeSideEffect(ctx);
   try {
     repo.put(
       leagueRef(ctx).league_id,
@@ -1454,6 +1580,7 @@ export const analyzeWaiversTool = defineTool({
       adds_remaining: null,
       premium_fit: premiumFit,
       clock: ctx.services.clock,
+      pacer: ctx.pacer,
       inputs: toDataInputs(inputs, ctx.nowMs),
     };
     // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; D11): the claim list is advice only; a write module
@@ -1523,9 +1650,10 @@ export const analyzeWaiversTool = defineTool({
             inputs: toDataInputs(inputs, ctx.nowMs),
           });
         })();
-    // the run this call priced joins the league's feed (priority mode only; the newest call before
-    // the run wins — best-effort, a busy store skips it)
-    logWaiverRun(ctx, league.ref.season, out.data);
+    // the run this call priced joins the league's feed (priority mode only; the newest whole-wire
+    // call of my own team before the run wins — best-effort, a busy store skips it)
+    if (pricesWholeWireRun(args, team, league.my_team?.team_id ?? ctx.services.configuredTeamId))
+      logWaiverRun(ctx, league.ref.season, out.data);
     const full = args.detail === "full";
     const data = full
       ? out.data
@@ -1553,11 +1681,9 @@ export const analyzeWaiversTool = defineTool({
  * (`data.inputs` carries them), then candidates leave from the end one at a time (the engine orders
  * them best first) — the id lists keep naming every candidate.
  */
-export function waiverTrims(
-  total: number,
-): readonly ((d: unknown) => { data: unknown; warning: string; key: string } | null)[] {
+export function waiverTrims(total: number): readonly AnalyticsTrim[] {
   return [
-    LINEUP_TRIMS[2] as (d: unknown) => { data: unknown; warning: string; key: string } | null,
+    REC_INPUTS_TRIM,
     (d) => {
       const list = arr(d, "candidates");
       if (list.length <= 1) return null;

@@ -6,6 +6,7 @@
 import { ATTRIBUTION_KEY_RE } from "../../../src/domain/reclog/attribution.js";
 import { RETRO_METRIC_KEYS } from "../../../src/domain/reclog/retrospective.js";
 import { OUTPUT_KEY_RE, isUntrustedText, objectKeyViolations } from "../../../src/mcp/envelope.js";
+import { DRIFT_ENUM_RE, DRIFT_PATH_RE } from "../../../src/mcp/tools/ops.js";
 
 /** One string leaf of `data`, outside wrappers, with its normalised path (`[]` for indices). */
 export interface Leaf {
@@ -98,6 +99,21 @@ export const SERVER_PROSE: ReadonlySet<string> = new Set([
   "data.teams[].groups[].pos_grp",
 ]);
 
+/**
+ * The drift diff's paths (G1 `data.drift.diff[]`, espn-ff://status/drift `data.diff[]`): codes in
+ * the detector's own grammar — `$`, identifier-form ESPN keys or `<key>`, `[]` markers, an enum
+ * token after `=` — never prose (src/mcp/tools/ops.ts DRIFT_PATH_RE / DRIFT_ENUM_RE, which the
+ * server enforces before a path leaves). A value outside the grammar is still a violation.
+ */
+export const DRIFT_PATH_GRAMMAR: ReadonlyMap<string, RegExp> = new Map([
+  ["data.drift.diff[].removed[]", DRIFT_PATH_RE],
+  ["data.drift.diff[].added[]", DRIFT_PATH_RE],
+  ["data.drift.diff[].enums[]", DRIFT_ENUM_RE],
+  ["data.diff[].removed[]", DRIFT_PATH_RE],
+  ["data.diff[].added[]", DRIFT_PATH_RE],
+  ["data.diff[].enums[]", DRIFT_ENUM_RE],
+]);
+
 /** The violations of the A6 rule in one envelope (empty = compliant). */
 export function envelopeViolations(env: {
   data: unknown;
@@ -109,6 +125,7 @@ export function envelopeViolations(env: {
     if (listed.has(l.path)) continue;
     if (CODE_LIKE.test(l.value)) continue;
     if (SERVER_PROSE.has(l.path)) continue;
+    if (DRIFT_PATH_GRAMMAR.get(l.path)?.test(l.value) === true) continue;
     bad.push(l.path);
   }
   // E13's `sample_size` keys are the fixed RETRO_METRIC_KEYS vocabulary (dotted metric paths)

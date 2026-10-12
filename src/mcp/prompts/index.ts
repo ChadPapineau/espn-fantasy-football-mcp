@@ -1,17 +1,24 @@
 // prompts/index.ts — the thirteen prompts (plan 07 §4.2; plan 09 §1): the eight P0 — espn.onboard,
-// espn.weekly [week], espn.start_sit [week], espn.stream <K|DST>, espn.retro [week], espn.apply
+// espn.weekly [week], espn.start_sit [week], espn.stream <K|DST|D/ST>, espn.retro [week], espn.apply
 // <what>, espn.session, espn.waivers — and the five P1 — espn.trade <offer>, espn.injury <player>,
 // espn.schedule, espn.roster_audit, espn.check <claim>. "A Skill's prompt has its Skill's priority":
 // the P1 prompts register under EFF_TOOLSET=full only, beside the P1 tools their Skills call (core
 // lists the eight). Each returns the Skill body (read from skills/<name>/SKILL.md by the
-// composition root — generated, never authored here) as the user message, the embedded
-// espn-ff://league/settings resource when it is readable, and both guardrail sentences (plan 02
-// §6.3's and research 06 §A.3 rule 5's ESPN clause — plan 01 §4.1: prompts state the rule).
-// Prompts hold no logic and never call tools. Ported from sibling @5daa625, adapted (13 prompts).
-import type { GetPromptResult, McpServer } from "@modelcontextprotocol/server";
+// composition root — generated, never authored here) as the user message with the reference files
+// the body links appended (plan 09 §6: a prompt-only client cannot open them), the embedded
+// espn-ff://league/settings resource when it is readable, the espn-ff://docs/tool-outputs resource
+// when the body links references/tool-outputs.md, and both guardrail sentences (plan 02 §6.3's and
+// research 06 §A.3 rule 5's ESPN clause — plan 01 §4.1: prompts state the rule). An omitted
+// `arguments` object reads as {}. Prompts hold no logic and never call tools.
+// Ported from sibling @5daa625, adapted (13 prompts).
+import type {
+  GetPromptResult,
+  McpServer,
+  StandardSchemaWithJSON,
+} from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
 import { boundedTextSchema, UNTRUSTED_TEXT_RULE } from "../envelope.js";
-import { leagueSettingsText } from "../resources/index.js";
+import { leagueSettingsText, toolOutputsText } from "../resources/index.js";
 import type { McpServerOptions, McpServices, ServerTexts } from "../services.js";
 
 /** The ESPN clause of the Skill guardrail (research 06 §A.3 rule 5), verbatim. */
@@ -42,6 +49,12 @@ export interface PromptSpec {
   readonly skill: string;
   readonly description: string;
   readonly args: z.ZodObject;
+  /**
+   * Argument values rewritten into the tools' vocabulary before they reach the prompt text, keyed
+   * by argument name: the Skill carries the value straight into tool arguments, so it must be a
+   * spelling the tools accept (espn.stream's `DST` → `D/ST`).
+   */
+  readonly toolVocabulary?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /** The Skill's priority: P1 prompts register under EFF_TOOLSET=full only. */
   readonly priority: "P0" | "P1";
 }
@@ -73,7 +86,12 @@ export const PROMPTS: readonly PromptSpec[] = Object.freeze([
     name: "espn.stream",
     skill: "stream-kdef",
     description: "Stream a kicker or a defence/special teams.",
-    args: z.object({ position: z.enum(["K", "DST"]) }),
+    // plan 07 §4.2 spells the argument `<K|DST>`; the tools stream-kdef calls (espn_list_players
+    // `position`, espn_analyze_waivers `positions`) accept only ESPN's `D/ST`, and the Skill's own
+    // argument hint is `[K | D/ST]` — so both spellings are accepted and the prompt hands the model
+    // `D/ST` (Stage C finding `prompts-stream-dst-spelling`)
+    args: z.object({ position: z.enum(["K", "DST", "D/ST"]) }),
+    toolVocabulary: { position: { DST: "D/ST" } },
     priority: "P0",
   },
   {
@@ -146,14 +164,66 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
   },
 ]);
 
-/** The prompt's user text: any missing guardrail sentence, the Skill body, the arguments. */
+/** A reference link in a Skill body (`references/orient.md`). */
+const REFERENCE_LINK_RE = /references\/([a-z0-9][a-z0-9-]{0,63}\.md)/g;
+/** The reference served as the espn-ff://docs/tool-outputs resource (embedded, never inlined). */
+export const TOOL_OUTPUTS_REFERENCE = "tool-outputs.md";
+/** The resource a prompt embeds for `references/tool-outputs.md`. */
+export const TOOL_OUTPUTS_URI = "espn-ff://docs/tool-outputs";
+
+/**
+ * The reference files a Skill body links that the prompt must carry, in order of first link: every
+ * `references/<file>.md` except tool-outputs.md (the embedded espn-ff://docs/tool-outputs resource)
+ * and the files the body already carries inline (`BEGIN GENERATED FROM _shared/references/<file>`
+ * blocks — the guardrails and the output contract).
+ */
+export function linkedReferences(body: string): string[] {
+  const out: string[] = [];
+  for (const m of body.matchAll(REFERENCE_LINK_RE)) {
+    const file = m[1];
+    if (file === undefined || file === TOOL_OUTPUTS_REFERENCE || out.includes(file)) continue;
+    if (body.includes(`BEGIN GENERATED FROM _shared/references/${file}`)) continue;
+    out.push(file);
+  }
+  return out;
+}
+
+/**
+ * The references section a prompt appends: each linked reference under a `### references/<file>`
+ * heading the body's links resolve to (Stage C finding `prompts-skill-references-unreachable`: a
+ * prompt-only client cannot open `references/orient.md` — Step 0's routing, the onboarding log entry
+ * — so the prompt carries them). A file the installation lacks is named as missing, never guessed.
+ */
+export function referencesSection(texts: ServerTexts, skill: string, body: string): string {
+  const files = linkedReferences(body);
+  const refs = texts.references?.[skill] ?? {};
+  const parts: string[] = [];
+  for (const file of files) {
+    const t = Object.hasOwn(refs, file) ? refs[file] : null;
+    parts.push(
+      t === null || t === undefined || t.trim() === ""
+        ? `### references/${file}\n\n(not installed with this server: follow the body and the tool descriptions)`
+        : `### references/${file}\n\n${t.trim()}`,
+    );
+  }
+  if (body.includes(`references/${TOOL_OUTPUTS_REFERENCE}`))
+    parts.push(
+      `### references/${TOOL_OUTPUTS_REFERENCE}\n\nEmbedded below as the ${TOOL_OUTPUTS_URI} resource.`,
+    );
+  return parts.length === 0
+    ? ""
+    : `\n\n## References (the files this Skill links, carried with the prompt)\n\n${parts.join("\n\n")}`;
+}
+
+/** The prompt's user text: any missing guardrail sentence, the Skill body, its references, the arguments. */
 export function promptText(
   texts: ServerTexts,
   skill: string,
   args: Readonly<Record<string, string | undefined>>,
 ): string {
+  const installed = texts.skills[skill];
   const body =
-    texts.skills[skill] ??
+    installed ??
     "This Skill's body is not installed; follow the tool descriptions and espn-ff://docs/tool-outputs directly.";
   const argLine = Object.entries(args)
     .filter((e): e is [string, string] => typeof e[1] === "string")
@@ -162,7 +232,9 @@ export function promptText(
   const head = PROMPT_GUARDRAILS.filter((s) => !body.includes(s))
     .map((s) => `> ${s}\n\n`)
     .join("");
-  return `${head}${body.trim()}${argLine === "" ? "" : `\n\nArguments: ${argLine}`}\n`;
+  const refs =
+    installed === null || installed === undefined ? "" : referencesSection(texts, skill, body);
+  return `${head}${body.trim()}${refs}${argLine === "" ? "" : `\n\nArguments: ${argLine}`}\n`;
 }
 
 /** All thirteen prompts, in plan 07 §4.2 order (the eight P0, then the five P1). */
@@ -173,6 +245,39 @@ export function promptsFor(toolset: McpServerOptions["toolset"]): readonly Promp
   return toolset === "full" ? ALL_PROMPTS : PROMPTS;
 }
 
+/**
+ * The schema a prompt registers: its zod object, with `arguments` OMITTED read as `{}`. MCP's
+ * GetPromptRequest makes `arguments` optional, but the SDK parses `params.arguments` (undefined)
+ * against the object schema and refuses with -32602 — so a prompt whose arguments are all optional
+ * (espn.weekly, espn.start_sit, espn.retro [week]) failed on any client that sends no arguments
+ * object (Stage C finding `prompts-optional-args-omitted-refused`). A required argument still
+ * fails, now on the argument itself. Advertised as the object's own JSON Schema (prompts/list).
+ */
+export function promptArgsSchema(args: z.ZodObject): StandardSchemaWithJSON {
+  const std = args["~standard"] as unknown as StandardSchemaWithJSON["~standard"];
+  return {
+    "~standard": {
+      version: 1,
+      vendor: "eff-prompt-args",
+      validate: (value: unknown) => std.validate(value ?? {}),
+      jsonSchema: std.jsonSchema,
+    },
+  };
+}
+
+/** The prompt's arguments in the tools' vocabulary (PromptSpec.toolVocabulary). */
+export function toToolVocabulary(
+  spec: Pick<PromptSpec, "toolVocabulary">,
+  args: Readonly<Record<string, string | undefined>>,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(args)) {
+    const map = spec.toolVocabulary?.[k];
+    out[k] = v !== undefined && map !== undefined && Object.hasOwn(map, v) ? map[v] : v;
+  }
+  return out;
+}
+
 /** Registers the toolset's prompts (eight under `core`, 13 under `full`). */
 export function registerPrompts(
   server: McpServer,
@@ -181,8 +286,9 @@ export function registerPrompts(
 ): void {
   for (const p of promptsFor(options.toolset)) {
     const build = async (raw: Readonly<Record<string, unknown>>): Promise<GetPromptResult> => {
-      const args: Record<string, string | undefined> = {};
-      for (const [k, v] of Object.entries(raw)) if (typeof v === "string") args[k] = v;
+      const given: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries(raw)) if (typeof v === "string") given[k] = v;
+      const args = toToolVocabulary(p, given);
       const messages: GetPromptResult["messages"] = [
         {
           role: "user",
@@ -202,14 +308,30 @@ export function registerPrompts(
             },
           },
         });
+      // the field cheat-sheet the body links as references/tool-outputs.md, as the resource it is
+      const body = options.texts.skills[p.skill];
+      if (typeof body === "string" && body.includes(`references/${TOOL_OUTPUTS_REFERENCE}`))
+        messages.push({
+          role: "user",
+          content: {
+            type: "resource",
+            resource: {
+              uri: TOOL_OUTPUTS_URI,
+              mimeType: "text/markdown",
+              text: toolOutputsText(options),
+            },
+          },
+        });
       return { description: p.description, messages };
     };
     // an argument-less prompt has no argsSchema: a client may omit `arguments` entirely
     if (Object.keys(p.args.shape).length === 0)
       server.registerPrompt(p.name, { description: p.description }, () => build({}));
     else
-      server.registerPrompt(p.name, { description: p.description, argsSchema: p.args }, (raw) =>
-        build(raw),
+      server.registerPrompt(
+        p.name,
+        { description: p.description, argsSchema: promptArgsSchema(p.args) },
+        (raw) => build(raw as Readonly<Record<string, unknown>>),
       );
   }
 }

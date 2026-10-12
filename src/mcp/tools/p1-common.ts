@@ -45,10 +45,9 @@ import type {
 } from "../../domain/league/types.js";
 import { score } from "../../domain/scoring/index.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
-import { isUpstreamBudgetExhausted } from "../../providers/platform.js";
 import { BOUNDS } from "../bounds.js";
 import type { InputStamp } from "../envelope.js";
-import { EffError } from "../errors.js";
+import { fromBudgetSignal } from "../errors.js";
 import type { ToolContext } from "../define.js";
 import { cpuDeadlineOf, project, standingsFromMatchups, type Subject } from "./analytics.js";
 import { leagueOf, optionalDataset, rulesOf, settingsOf, slotsOf, weekOf } from "./common.js";
@@ -225,6 +224,7 @@ export async function runSeason(
     marginal: r.marginal,
     ...(r.playoff_pct_espn === undefined ? {} : { playoff_pct_espn: r.playoff_pct_espn }),
     clock: ctx.services.clock,
+    pacer: ctx.pacer,
     rng: seededRng(r.seed),
     deadline_ms: cpuDeadlineOf(ctx),
   };
@@ -408,15 +408,14 @@ export function meanFinite(xs: readonly (number | null | undefined)[]): number |
 }
 
 /**
- * A read the call cannot answer without: past this call's upstream budget it becomes RATE_LIMITED
- * with a 1 s retry (the reads before it are cached, so the retry fits — plan 01 §5.6), never an
- * INTERNAL "tool bug".
+ * A read the call cannot answer without: past this call's request cap it becomes RATE_LIMITED with
+ * a 1 s retry (the reads before it are cached, so the retry fits — plan 01 §5.6), past its deadline
+ * ESPN_UPSTREAM_UNAVAILABLE (plan 01 §6) — never an INTERNAL "tool bug" (errors.ts fromBudgetSignal).
  */
 export async function required<T>(read: () => Promise<T>): Promise<T> {
   try {
     return await read();
   } catch (e) {
-    if (isUpstreamBudgetExhausted(e)) throw new EffError("RATE_LIMITED", { retry_after_s: 1 });
-    throw e;
+    throw fromBudgetSignal(e);
   }
 }

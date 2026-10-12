@@ -71,6 +71,7 @@ import {
   type UsageRead,
 } from "./p1-common.js";
 import {
+  asGsisId,
   count,
   gsisOrNull,
   iso,
@@ -418,8 +419,9 @@ export const getDepthChart = defineTool({
         POS_ABB_RE.test(r.pos_abb) &&
         (wanted === null || wanted.has(r.pos_abb) || wanted.has(r.pos_grp)),
     );
-    // snaps beside the chart (sib §6.1): the mean snap share over the last three weeks
-    const gsis = [...new Set(rows.map((r) => r.gsis_id).filter((g): g is string => g !== null))];
+    // snaps beside the chart (sib §6.1): the mean snap share over the last three weeks — keyed by
+    // the GSIS ids only (a row's non-GSIS id is no key into the usage rows or the crosswalk)
+    const gsis = [...new Set(rows.map((r) => asGsisId(r.gsis_id)).filter((g) => g !== null))];
     const recent: Week[] = [w - 3, w - 2, w - 1].filter((x) => x >= 1);
     const snapBy = new Map<string, number | null>();
     if (gsis.length > 0 && recent.length > 0) {
@@ -440,19 +442,17 @@ export const getDepthChart = defineTool({
       DepthChartData["teams"][number]["groups"][number]["slots"][number][]
     >();
     for (const r of rows) {
+      const g = asGsisId(r.gsis_id);
       const pid =
-        r.espn_id ??
-        (r.gsis_id === null
-          ? null
-          : (ctx.services.crosswalk.byGsis(r.gsis_id)[0]?.espn_id ?? null));
+        r.espn_id ?? (g === null ? null : (ctx.services.crosswalk.byGsis(g)[0]?.espn_id ?? null));
       const list = groups.get(r.pos_grp) ?? [];
       list.push({
         pos_abb: r.pos_abb,
         rank: Math.max(0, Math.min(20, Math.trunc(r.rank))),
-        gsis_id: r.gsis_id,
+        gsis_id: g,
         player_id: pid !== null && pid > 0 ? pid : null,
         name: r.name,
-        snap_pct_last3: r.gsis_id === null ? null : clampProb(snapBy.get(r.gsis_id) ?? null),
+        snap_pct_last3: g === null ? null : clampProb(snapBy.get(g) ?? null),
       });
       groups.set(r.pos_grp, list);
     }
@@ -929,7 +929,7 @@ function refsOf(item: NewsItem): readonly {
       if (typeof r !== "object" || r === null) continue;
       const o = r as Record<string, unknown>;
       const e = typeof o.espn_id === "number" && Number.isSafeInteger(o.espn_id) ? o.espn_id : null;
-      const g = typeof o.gsis_id === "string" ? o.gsis_id : null;
+      const g = asGsisId(o.gsis_id);
       const c =
         typeof o.match_confidence === "number" && o.match_confidence >= 0 && o.match_confidence <= 1
           ? o.match_confidence
@@ -940,6 +940,8 @@ function refsOf(item: NewsItem): readonly {
   }
   return item.gsis_ids
     .slice(0, 10)
+    .map(asGsisId)
+    .filter((g) => g !== null)
     .map((g) => ({ espn_id: null, gsis_id: g, c: NEWS_MATCH_FLOOR }));
 }
 

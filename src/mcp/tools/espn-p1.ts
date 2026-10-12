@@ -581,8 +581,10 @@ export const getPlayerOutlook = defineTool({
       if (got !== null) outlooks = take(ctx, got, inputs);
     } catch (e) {
       if (!isDegradable(e)) throw e;
+      // the paragraphs ARE the answer: their absence makes it partial (Stage C finding
+      // `envelope-partial-missing-view-e4-e12`; the "partial:" line convention of plan 07 §2)
       warnings.push(
-        "espn:kona_player_info unavailable: the ESPN outlook paragraphs are missing (espn_get_news has headlines)",
+        "partial: espn:kona_player_info unavailable: the ESPN outlook paragraphs are missing (espn_get_news has headlines)",
       );
     }
     const byId = new Map(outlooks.map((o) => [o.player.id, o]));
@@ -611,6 +613,13 @@ export const getPlayerOutlook = defineTool({
         };
       }),
     };
-    return { data, inputs, warnings, listKey: "players", week: current };
+    return {
+      data,
+      inputs,
+      warnings,
+      partial: warnings.some((x) => x.startsWith("partial:")),
+      listKey: "players",
+      week: current,
+    };
   },
 });

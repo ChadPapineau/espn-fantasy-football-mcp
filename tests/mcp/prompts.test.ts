@@ -125,9 +125,12 @@ describe("the thirteen prompts", () => {
   });
 
   it("week arguments are 1..18; stream is K or DST; apply/trade/injury/check text is bounded and printable", async () => {
+    // the text, the settings resource and the cheat-sheet the body links (references/tool-outputs.md)
     expect(
-      (await client.getPrompt({ name: "espn.weekly", arguments: { week: "7" } })).messages.length,
-    ).toBe(2);
+      (await client.getPrompt({ name: "espn.weekly", arguments: { week: "7" } })).messages.map(
+        (m) => (m.content.type === "resource" ? m.content.resource.uri : m.content.type),
+      ),
+    ).toEqual(["text", "espn-ff://league/settings", "espn-ff://docs/tool-outputs"]);
     for (const [name, args] of [
       ["espn.weekly", { week: "19" }],
       ["espn.start_sit", { week: "0" }],
@@ -207,7 +210,12 @@ describe("the thirteen prompts", () => {
     };
     const c = await connect(world, { services: s });
     const r = await c.client.getPrompt({ name: "espn.session" });
-    expect(r.messages).toHaveLength(1);
+    // no settings resource; the text and the cheat-sheet its body links remain
+    expect(
+      r.messages.map((m) =>
+        m.content.type === "resource" ? m.content.resource.uri : m.content.type,
+      ),
+    ).toEqual(["text", "espn-ff://docs/tool-outputs"]);
     await c.close();
   });
 });

@@ -31,6 +31,17 @@ export const recLogText = bareTextSchema("store.recommendation_log");
 export const playerId = playerIdSchema;
 export const gsisId = z.string().regex(GSIS_ID_RE);
 export const gsisOrNull = gsisId.nullable();
+/**
+ * A dataset's player id as a `gsis_id` output: the value when it is a GSIS id (`00-0012345`), else
+ * null. nflverse files carry other id shapes for some rows (the 2026 depth charts give a few players
+ * placeholder ids `AAA999999`); passing one through made the output schema refuse the WHOLE answer
+ * as INTERNAL (Stage C finding `tools-depth-chart-nongsis-id-internal`). Every tool that copies a
+ * dataset row's id into `gsis_id` goes through this guard; the row still answers, keyed by its
+ * ESPN id when it has one.
+ */
+export function asGsisId(v: unknown): string | null {
+  return typeof v === "string" && GSIS_ID_RE.test(v) ? v : null;
+}
 export const logId = z.string().regex(LOG_ID_RE);
 /** An ESPN team id (a grammar bound; membership is checked by the tool). */
 export const teamId = z.number().int().min(1).max(999);

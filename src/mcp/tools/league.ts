@@ -325,6 +325,44 @@ export function goldenFor(ctx: ToolContext, settings: ScoringSettings): ScoringD
 }
 
 /**
+ * The past seasons ESPN answered ESPN_LEAGUE_NOT_FOUND for, per provider (one per server process):
+ * a league's earlier seasons never appear later, so a season before the league's first is asked
+ * once per session, never again (Stage C finding `espn-missing-season-404-not-cached`: the seeding
+ * evidence of a first-season league re-sent three 404s on every call, each spending the 30/min
+ * window). Only seasons before the configured one are remembered.
+ */
+const ABSENT_SEASONS = new WeakMap<object, Set<number>>();
+
+function absentSeasons(ctx: ToolContext): Set<number> {
+  const key = ctx.services.platform as object;
+  let set = ABSENT_SEASONS.get(key);
+  if (set === undefined) {
+    set = new Set();
+    ABSENT_SEASONS.set(key, set);
+  }
+  return set;
+}
+
+function isLeagueNotFound(e: unknown): boolean {
+  return (e as { effCode?: unknown } | null)?.effCode === "ESPN_LEAGUE_NOT_FOUND";
+}
+
+/** Remembers a past season ESPN has no league for (a no-op for anything else). */
+export function rememberAbsentSeason(ctx: ToolContext, season: number, e: unknown): void {
+  if (isLeagueNotFound(e) && season < ctx.services.league.season) absentSeasons(ctx).add(season);
+}
+
+/** ESPN_LEAGUE_NOT_FOUND without a request for a past season already known absent. */
+export function refuseAbsentSeason(ctx: ToolContext, season: number): void {
+  if (season < ctx.services.league.season && absentSeasons(ctx).has(season))
+    throw new EffError("ESPN_LEAGUE_NOT_FOUND");
+}
+
+/** The fixed warning for evidence that cannot exist: the league has no previous season on ESPN. */
+export const NO_PREVIOUS_SEASON_WARNING =
+  "seeding evidence unavailable: ESPN has no previous season of this league (its first season)";
+
+/**
  * Last season's seed table (onboard's one-time evidence — ADV OBJ-13): the previous season's exact
  * reproduction with the simulator's tiebreak chain (Stage C; `reproduceSeason` over that season's
  * playoff settings, standings, schedule and bracket-edit flag — the C4 reading), else the
@@ -343,11 +381,26 @@ async function evidenceOf(
 ): Promise<SeedingEvidence | null> {
   const prev = seasonY - 1;
   if (prev < BOUNDS.season.min) return null;
+  // a season ESPN already answered "no such league" for is not asked again this session
+  if (absentSeasons(ctx).has(prev)) {
+    warnings.push(NO_PREVIOUS_SEASON_WARNING);
+    return null;
+  }
   const ref = leagueRef(ctx, prev);
-  const rules = await withinBudget(
+  const ABSENT = Symbol("absent");
+  const read = await withinBudget(
     () => ctx.services.platform.getLeagueRules(ref, readOpts(ctx)),
     warnings,
-  ).catch(() => null);
+  ).catch((e: unknown) => {
+    rememberAbsentSeason(ctx, prev, e);
+    return isLeagueNotFound(e) ? ABSENT : null;
+  });
+  // no league that season: its standings would 404 too — no further request
+  if (read === ABSENT) {
+    warnings.push(NO_PREVIOUS_SEASON_WARNING);
+    return null;
+  }
+  const rules = read;
   let standings: Standings;
   try {
     const got = await withinBudget(
@@ -356,8 +409,13 @@ async function evidenceOf(
     );
     if (got === null) return null;
     standings = take(ctx, got, inputs);
-  } catch {
-    warnings.push("seeding evidence unavailable: last season could not be read");
+  } catch (e) {
+    rememberAbsentSeason(ctx, prev, e);
+    warnings.push(
+      isLeagueNotFound(e)
+        ? NO_PREVIOUS_SEASON_WARNING
+        : "seeding evidence unavailable: last season could not be read",
+    );
     return null;
   }
   if (rules !== null) {
@@ -432,7 +490,12 @@ export async function leagueDigest(
   );
   const ref = leagueRef(ctx, seasonY);
   const opts = readOpts(ctx, args);
-  const lg = await ctx.services.platform.getLeague(ref, opts);
+  // a past season ESPN already answered "no such league" for is answered without a request
+  refuseAbsentSeason(ctx, seasonY);
+  const lg = await ctx.services.platform.getLeague(ref, opts).catch((e: unknown) => {
+    rememberAbsentSeason(ctx, seasonY, e);
+    throw e;
+  });
   inputs.push(platformInput(ctx, lg.stamp));
   const league = lg.value;
   const rules = (await ctx.services.platform.getLeagueRules(ref, readOpts(ctx))).value;

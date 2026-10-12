@@ -568,6 +568,7 @@ export const analyzeMatchupTool = defineTool({
       n_sims: args.n_sims ?? BOUNDS.nSims.default,
       espn_cross_check: cross,
       clock: ctx.services.clock,
+      pacer: ctx.pacer,
       rng: seededRng(seed),
       deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
@@ -655,8 +656,10 @@ async function poolOf(
     warnings,
   ).catch((e: unknown) => {
     if (!isDegradable(e)) throw e;
+    // an analytics tool that loses an input answers `partial: true` (plan 07 §2 Degradation; Stage C
+    // finding `envelope-partial-missing-view-e4-e12`): the "partial:" line, which every caller's flag reads
     warnings.push(
-      "espn:kona_player_info unavailable: no free-agent pool (stream baselines proxied)",
+      "partial: espn:kona_player_info unavailable: no free-agent pool (stream baselines proxied)",
     );
     return null;
   });
@@ -805,6 +808,7 @@ export const analyzeReplacementTool = defineTool({
       ...(mine === undefined ? {} : { focus_player_ids: mine.entries.map((e) => e.player.ref.id) }),
       detail: args.detail,
       clock: ctx.services.clock,
+      pacer: ctx.pacer,
       deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
@@ -999,6 +1003,7 @@ export const analyzeScheduleTool = defineTool({
       stream: streamCandidates(streamPlayers, weeks, positions),
       schedule,
       clock: ctx.services.clock,
+      pacer: ctx.pacer,
       deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
@@ -1196,6 +1201,7 @@ export const analyzeRosterTool = defineTool({
       weeks,
       players: leaguePlayers(rosters, pool, weeks),
       clock: ctx.services.clock,
+      pacer: ctx.pacer,
       deadline_ms: cpuDeadlineOf(ctx),
     });
     const streamability: Record<string, number> = {};
@@ -1281,6 +1287,7 @@ export const analyzeRosterTool = defineTool({
         next_run_at: b.rules.waiver.next_execution,
       },
       clock: ctx.services.clock,
+      pacer: ctx.pacer,
       deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
     });

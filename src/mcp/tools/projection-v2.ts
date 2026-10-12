@@ -50,7 +50,7 @@ import { score } from "../../domain/scoring/engine.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import type { NflTeam } from "../../config/schema.js";
 import { toDataInputs, type InputStamp } from "../envelope.js";
-import type { ToolContext } from "../define.js";
+import { beforeSideEffect, type ToolContext } from "../define.js";
 import { optionalDataset, turn } from "./common.js";
 
 /** One E1 subject (analytics.ts Subject — repeated here to keep this module import-cycle free). */
@@ -537,6 +537,7 @@ export async function runV2(
     weight_espn: weightEspnOf(ctx),
     n_sims: o.n_sims ?? V2_SIMS.default,
     clock: ctx.services.clock,
+    pacer: ctx.pacer,
     rng: o.rng,
     deadline_ms: o.deadline_ms,
     include_stat_line: o.include_stat_line === true,
@@ -669,6 +670,8 @@ export async function storeProjections(
   week: Week,
   inputs: readonly InputStamp[],
 ): Promise<number> {
+  // a call the client cancelled stores nothing (MCP cancellation; define.ts beforeSideEffect)
+  beforeSideEffect(ctx);
   const asOf = inputs.reduce<string | null>(
     (m, i) => (m === null || i.as_of > m ? i.as_of : m),
     null,
@@ -688,7 +691,10 @@ export async function storeProjections(
     if (d === undefined && Object.keys(v1Exp).length === 0) continue;
     const exp = d?.expectation ?? null;
     const dist = d?.dist ?? null;
-    if (k > 0 && k % STORE_PER_TURN === 0) await turn();
+    if (k > 0 && k % STORE_PER_TURN === 0) {
+      await turn();
+      beforeSideEffect(ctx);
+    }
     k += 1;
     try {
       const r = ctx.services.projections.put(

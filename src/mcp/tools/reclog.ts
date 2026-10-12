@@ -43,7 +43,7 @@ import {
 } from "../bounds.js";
 import { toDataInputs, type InputStamp, type UntrustedField } from "../envelope.js";
 import { EffError } from "../errors.js";
-import { defineTool, recentCall, type ToolContext } from "../define.js";
+import { beforeSideEffect, defineTool, recentCall, type ToolContext } from "../define.js";
 import {
   leagueOf,
   leagueRef,
@@ -143,6 +143,7 @@ export const recordRecommendation = defineTool({
       throw e;
     }
     const { log_id: _minted, recorded_at: at, ...input } = record;
+    beforeSideEffect(ctx);
     const r: RecordResult = ctx.services.recommendationLog.record(input, at);
     return Promise.resolve({
       data: r,
@@ -400,12 +401,14 @@ export const analyzeRetrospective = defineTool({
     );
     // the proposal set (final weeks only) is persisted for a human-run `eff tune` — never applied
     // here (plan 10 C9; plan 07 E13 "propose, never apply")
-    if (r.proposal_set !== null && ctx.services.parameterProposals !== undefined)
+    if (r.proposal_set !== null && ctx.services.parameterProposals !== undefined) {
+      beforeSideEffect(ctx);
       try {
         ctx.services.parameterProposals.put(ref.league_id, r.proposal_set);
       } catch {
         warnings.push("the parameter proposal set could not be stored (the store was busy)");
       }
+    }
     // E10's logged news claims whose game is final are scored into the calibration table (C8)
     if (!r.provisional) await scoreClaims(ctx, season, w, boxes, gsisOf);
     for (const o of r.outcomes) {

@@ -78,7 +78,7 @@ import {
 } from "../bounds.js";
 import { toDataInputs, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
-import { defineTool, type ToolContext, type ToolOutput } from "../define.js";
+import { beforeSideEffect, defineTool, type ToolContext, type ToolOutput } from "../define.js";
 import { carryOutcome, seedOf, waiverPlayerOf, type Subject } from "./analytics.js";
 import {
   crosswalkOf,
@@ -191,6 +191,8 @@ async function poolOf(
     warnings,
   ).catch((e: unknown) => {
     if (!isDegradable(e)) throw e;
+    // never silent: the answer goes without the free-agent pool, so it is partial (plan 07 §2)
+    warnings.push("partial: espn:kona_player_info unavailable: no free-agent pool");
     return null;
   });
   return got === null ? [] : take(ctx, got, inputs).items.filter((p) => p.status !== "ONTEAM");
@@ -450,6 +452,7 @@ export const analyzeTradeTool = defineTool({
       },
       free_agents: pool.slice(0, TRADE_WIRE_MAX).map((p) => tradePlayerOf(ctx, p, 20, weeks)),
       clock: ctx.services.clock,
+      pacer: ctx.pacer,
       rng: seededRng(seed),
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
@@ -643,6 +646,7 @@ export function waiverBase(
       }),
     settings: b.settings,
     clock: ctx.services.clock,
+    pacer: ctx.pacer,
   };
 }
 
@@ -988,6 +992,7 @@ export function logClaims(
 ): void {
   const repo = ctx.services.scoredClaims;
   if (repo === undefined || claims.length === 0) return;
+  beforeSideEffect(ctx);
   const league = leagueRef(ctx).league_id;
   for (const c of claims)
     try {
@@ -1173,7 +1178,7 @@ export const analyzeEvidenceTool = defineTool({
       warnings,
     ).catch((e: unknown) => {
       if (!isDegradable(e)) throw e;
-      warnings.push("espn:kona_player_info unavailable: no ESPN outlook in the evidence");
+      warnings.push("partial: espn:kona_player_info unavailable: no ESPN outlook in the evidence");
       return null;
     });
     for (const o of ol === null ? [] : take(ctx, ol, inputs)) {
