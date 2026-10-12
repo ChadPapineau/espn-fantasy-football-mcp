@@ -11,8 +11,8 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_get_league, then espn_get_roster, then espn_get_box_score, then espn_record_recommendation (tool_order)",
-        "The reply states the half-point reception value (regex: `half-PPR|0\\.5 (points? )?per reception`)",
-        "The reply states five points per passing touchdown (regex: `5 (points|pts) per passing`)",
+        "The reply states the half-point reception value — any correct wording, prose or a table row (regex: `half[- ]?(?:a[- ])?(?:point[- ]|pt[- ])?(?:PPR|per reception|per catch)|(?<![\\d.])0?\\.5[- ]?(?:pts?|points?)?[- ]?(?:PPR|per reception|per catch|per rec\\b)|\\brec(?:eption)?s?\\b[^\\n\\d]{0,24}(?<![\\d.])0?\\.5(?!\\d)`)",
+        "The reply states five points per passing touchdown — any correct wording, prose or a table row (regex: `(?<![\\d.])5[- ]?(?:pts?|points?)?[- ]?(?:per|for an?|for each|for every|a)? ?pass(?:ing)?[- ]?(?:TDs?|touchdowns?)\\b|(?<![\\d.])5 ?(?:pts?|points?) per pass(?:ing)?\\b|\\bpass(?:ing)?[- ]?(?:TDs?|touchdowns?)\\b[^\\n\\d]{0,30}(?<![\\d.])5(?![\\d.])|\\bTD pass(?:es)?\\b[^\\n\\d]{0,30}(?<![\\d.])5(?![\\d.])`)",
         "The reply names the waiver system as move-to-last or rolling priority (regex: `move-to-last|rolling`)",
         "The reply reports match or mismatch for the sampled players (regex: `\\bmatch\\b|mismatch`)",
         "The reply mentions the IR slots (regex: `\\bIR\\b`)",

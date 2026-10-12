@@ -552,7 +552,7 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "SC",
       kinds: [],
       records: false,
-      requiredCases: ["SC-1", "SC-2", "SC-3", "SC-4", "SC-INJ"],
+      requiredCases: ["SC-1", "SC-2", "SC-3", "SC-4", "SC-INJ", "SC-6"],
       body: [/DevTools/, /eff setup/, /espn_check_auth/, /once/i, /fantasy\.espn\.com/],
       sequences: (seqs) => {
         /** @type {string[]} */
@@ -1556,10 +1556,54 @@ export function graderOf(e) {
   return m && GRADERS.includes(m[1] ?? "") ? (m[1] ?? null) : null;
 }
 
+/** The most earlier turns a multi-turn case may replay, and the longest one (characters). */
+export const HISTORY_MAX_TURNS = 8;
+export const HISTORY_TURN_MAX_CHARS = 2000;
+
 /**
- * Validate one evals.json (skill-creator schema plus `name` and `toolset` per case).
+ * Problems with a case's `history` (the earlier turns a multi-turn case replays before its prompt —
+ * `claude -p` runs one turn, so a "after the user says done" check needs them): an even number
+ * (2–HISTORY_MAX_TURNS) of `{ role, text }` turns, user first, alternating, the assistant last (the
+ * case's prompt is the next user turn); every text 1–HISTORY_TURN_MAX_CHARS characters.
+ * @param {unknown} h
+ * @param {string} w
+ * @returns {string[]}
+ */
+export function historyProblems(h, w) {
+  if (!Array.isArray(h) || h.length < 2 || h.length > HISTORY_MAX_TURNS || h.length % 2 !== 0)
+    return [
+      `${w}: history must be an even number (2–${String(HISTORY_MAX_TURNS)}) of turns, user first, the assistant last`,
+    ];
+  /** @type {string[]} */
+  const errors = [];
+  h.forEach((t, i) => {
+    const role = i % 2 === 0 ? "user" : "assistant";
+    if (!isRecord(t) || Object.keys(t).some((k) => k !== "role" && k !== "text"))
+      errors.push(`${w}.history[${String(i)}]: must be { "role", "text" }`);
+    else if (t["role"] !== role)
+      errors.push(
+        `${w}.history[${String(i)}]: role must be "${role}" (turns alternate, user first)`,
+      );
+    else if (
+      typeof t["text"] !== "string" ||
+      t["text"].trim() === "" ||
+      t["text"].length > HISTORY_TURN_MAX_CHARS
+    )
+      errors.push(
+        `${w}.history[${String(i)}]: text must be 1–${String(HISTORY_TURN_MAX_CHARS)} chars`,
+      );
+  });
+  return errors;
+}
+
+/**
+ * Validate one evals.json (skill-creator schema plus `name` and `toolset` per case, and the optional
+ * `history` of a multi-turn case). A user-invoked Skill (`disable-model-invocation: true`) is run
+ * only by the user typing its slash command, so every case's prompt starts with
+ * `/<plugin>:<skill> ` — a natural-language prompt would test a model that may not run it.
  * @param {unknown} raw
- * @param {{ skill: string, where: string, manifest: import("./_lib.mjs").Manifest, rule?: SkillRule }} ctx
+ * @param {{ skill: string, where: string, manifest: import("./_lib.mjs").Manifest, rule?: SkillRule,
+ *   userInvoked?: boolean }} ctx
  * @returns {string[]}
  */
 export function validateEvals(raw, ctx) {
@@ -1587,9 +1631,16 @@ export function validateEvals(raw, ctx) {
     }
     const extra = Object.keys(c).filter(
       (k) =>
-        !["id", "name", "toolset", "prompt", "expected_output", "files", "expectations"].includes(
-          k,
-        ),
+        ![
+          "id",
+          "name",
+          "toolset",
+          "prompt",
+          "expected_output",
+          "files",
+          "expectations",
+          "history",
+        ].includes(k),
     );
     if (extra.length) errors.push(`${w}: unknown keys ${extra.join(", ")}`);
     const id = c["id"];
@@ -1642,6 +1693,14 @@ export function validateEvals(raw, ctx) {
     const p = c["prompt"];
     if (typeof p !== "string" || p.trim() === "" || p.length > 2000)
       errors.push(`${w}: prompt must be 1–2000 chars`);
+    else if (ctx.userInvoked) {
+      const slash = `/${manifest.plugin}:${ctx.skill}`;
+      if (!p.startsWith(`${slash} `) || p.slice(slash.length).trim() === "")
+        errors.push(
+          `${w}: ${ctx.skill} is user-invoked (disable-model-invocation), so the prompt is the user typing "${slash} <the agreed change>"`,
+        );
+    }
+    if (c["history"] !== undefined) errors.push(...historyProblems(c["history"], w));
     const eo = c["expected_output"];
     if (typeof eo !== "string" || eo.trim().length < 20)
       errors.push(`${w}: expected_output must describe success`);
@@ -2238,6 +2297,7 @@ export function checkSkills(opts = {}) {
           skill,
           where: `${rel}/evals/evals.json`,
           manifest,
+          userInvoked: fm?.data["disable-model-invocation"] === true,
           ...(rule ? { rule } : {}),
         }),
       );

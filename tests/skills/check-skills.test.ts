@@ -14,6 +14,7 @@ import {
   checkArgType,
   checkSkills,
   graderOf,
+  historyProblems,
   identifierFindings,
   jaccard,
   main,
@@ -926,11 +927,149 @@ describe("evals.json — Lane 2 cases (plan 09 §5.2; research 06 §D.0)", () =>
     ],
     ["an unknown case key", "retro", (j) => (cases(j)[0]!.phase = "1a"), /unknown keys phase/],
     ["a wrong skill_name", "retro", (j) => (j.skill_name = "weekly"), /skill_name must be "retro"/],
+    // apply is user-invoked (disable-model-invocation): the CLI refuses the model, so a case whose
+    // prompt is natural language tests a run in which the Skill's procedure never loads (Stage C
+    // finding eval-apply-model-invocation-triggers)
+    [
+      "a user-invoked Skill's case without its slash command",
+      "apply",
+      (j) => (cases(j)[0]!.prompt = "Apply the lineup we agreed."),
+      /apply is user-invoked \(disable-model-invocation\), so the prompt is the user typing "\/espn-fantasy-football:apply <the agreed change>"/,
+    ],
+    [
+      "a user-invoked Skill's slash command with nothing after it",
+      "apply",
+      (j) => (cases(j)[0]!.prompt = "/espn-fantasy-football:apply  "),
+      /apply is user-invoked/,
+    ],
+    [
+      "another Skill's slash command in a user-invoked Skill's case",
+      "apply",
+      (j) => (cases(j)[0]!.prompt = "/espn-fantasy-football:start-sit Apply it"),
+      /apply is user-invoked/,
+    ],
+    // the two-turn case (Stage C finding eval-sc1-single-turn-unsatisfiable)
+    [
+      "a missing two-turn session-check case",
+      "session-check",
+      (j) => (j.evals = cases(j).filter((c) => c.name !== "SC-6")),
+      /missing case SC-6/,
+    ],
+    [
+      "a history that does not start with the user",
+      "session-check",
+      (j) => {
+        const c = cases(j).find((x) => x.name === "SC-6")!;
+        c.history = [
+          { role: "assistant", text: "a" },
+          { role: "user", text: "b" },
+        ];
+      },
+      /history\[0\]: role must be "user"/,
+    ],
+    [
+      "a history that ends on the user's turn",
+      "session-check",
+      (j) => {
+        const c = cases(j).find((x) => x.name === "SC-6")!;
+        c.history = [{ role: "user", text: "a" }];
+      },
+      /history must be an even number \(2–8\) of turns/,
+    ],
+    [
+      "a history turn with an empty text",
+      "session-check",
+      (j) => {
+        const c = cases(j).find((x) => x.name === "SC-6")!;
+        c.history = [
+          { role: "user", text: "a" },
+          { role: "assistant", text: "  " },
+        ];
+      },
+      /history\[1\]: text must be 1–2000 chars/,
+    ],
+    [
+      "a history turn with an unknown key",
+      "session-check",
+      (j) => {
+        const c = cases(j).find((x) => x.name === "SC-6")!;
+        c.history = [
+          { role: "user", text: "a", tool: "espn_get_status" },
+          { role: "assistant", text: "b" },
+        ];
+      },
+      /history\[0\]: must be \{ "role", "text" \}/,
+    ],
+    [
+      "a history that is not a list",
+      "session-check",
+      (j) => (cases(j).find((x) => x.name === "SC-6")!.history = "it says rejected"),
+      /history must be an even number/,
+    ],
   ];
   it.each(mutations)("fails on %s", (_label, skill, mutate, re) => {
     const t = fresh();
     t.editJson(EVALS(skill), mutate);
     expect(errorsOf(t)).toMatch(re);
+  });
+
+  it("every committed apply case is the user typing the slash command; no other Skill's case needs one", () => {
+    const t = fresh();
+    for (const c of cases(t.readJson(EVALS("apply")) as Json))
+      expect(String(c.prompt)).toMatch(/^\/espn-fantasy-football:apply \S/);
+    // the slash-command rule binds only the user-invoked Skill
+    t.editJson(EVALS("retro"), (j) => {
+      cases(j)[0]!.prompt = "How did last week's advice do?";
+    });
+    expect(errorsOf(t)).not.toMatch(/user-invoked/);
+  });
+
+  it("SC-1 grades the first turn only (no probe before the user says done); SC-6 replays it and grades the probe", () => {
+    const t = fresh();
+    const all = cases(t.readJson(EVALS("session-check")) as Json);
+    const sc1 = all.find((c) => c.name === "SC-1")!;
+    const sc6 = all.find((c) => c.name === "SC-6")!;
+    expect(sc1.history).toBeUndefined();
+    expect(sc1.expectations as string[]).toContain(
+      "espn_check_auth was not called before the user said done (tool_used: min 0 max 0)",
+    );
+    expect((sc1.expectations as string[]).some((e) => e.includes("min 1 max 1"))).toBe(false);
+    const h = sc6.history as { role: string; text: string }[];
+    expect(h.map((x) => x.role)).toEqual(["user", "assistant"]);
+    expect(h[0]!.text).toBe(sc1.prompt);
+    expect(h[1]!.text).toMatch(/eff setup/);
+    expect(h[1]!.text).toMatch(/Tell me when you have run eff setup/);
+    expect(sc6.prompt).toMatch(/^done/);
+    expect(sc6.expectations as string[]).toContain(
+      "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",
+    );
+  });
+
+  it("validates a history on its own (historyProblems)", () => {
+    expect(
+      historyProblems(
+        [
+          { role: "user", text: "a" },
+          { role: "assistant", text: "b" },
+        ],
+        "w",
+      ),
+    ).toEqual([]);
+    expect(historyProblems(Array(10).fill({ role: "user", text: "a" }), "w").join()).toMatch(
+      /even number \(2–8\)/,
+    );
+    expect(
+      historyProblems(
+        [
+          { role: "user", text: "a" },
+          { role: "assistant", text: "x".repeat(2001) },
+        ],
+        "w",
+      ).join(),
+    ).toMatch(/text must be 1–2000 chars/);
+    expect(historyProblems([null, { role: "assistant", text: "b" }], "w").join()).toMatch(
+      /must be \{ "role", "text" \}/,
+    );
   });
 
   it("reads the grader tag at the end of a sentence, a regex pattern with parentheses included", () => {

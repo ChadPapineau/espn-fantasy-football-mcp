@@ -25,31 +25,52 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CASE_RUNS,
   DEFAULT_OUT,
+  EVAL_SERVER,
+  FIXTURE_CREDENTIAL_STATES,
+  HISTORY_FORMAT_VERSION,
   INJECTION_NEEDLES,
+  LINEUP_SEEDS,
   NO_SOCKET,
+  RT_INJ_NOTE,
   SEEDS,
+  SEED_KINDS,
   SEED_NOTE,
+  STATE_ENV_KEYS,
   STATE_ROOT_FILE,
   SYNTHETIC_TOKEN,
   WRITE_TOOL_GUARD,
   buildPluginEvals,
   caseDir,
+  caseYaml,
   envelopeOf,
+  firstToolGuard,
   gitTreeOf,
   gradersFor,
+  historyOf,
+  historyTranscript,
   inputPattern,
+  launcherArgs,
   main,
   mcpPrefix,
+  notTestableReason,
   outProblem,
   parseToolUsedSpec,
   planSuite,
   pluginKey,
+  readme,
   rpcOver,
   seedLogWeek4,
+  seedOfKey,
+  seedServerOf,
+  seedState,
   serverEnv,
+  slashCommand,
+  stableUuid,
   syntheticCookie,
   toolInputPattern,
   seedDatasetStates,
+  variantHarness,
+  withoutStateDirs,
   writeSeeds,
   yamlFrontmatter,
 } from "../../scripts/skills/build-plugin-evals.mjs";
@@ -105,6 +126,13 @@ const triggers = (skill: string) =>
   JSON.parse(
     readFileSync(path.join(ROOT, "skills", skill, "evals", "trigger_eval.json"), "utf8"),
   ) as Json[];
+/** The Skills whose SKILL.md sets disable-model-invocation (apply). */
+const USER_INVOKED = SKILLS.filter(
+  (s) =>
+    parseFrontmatter(readFileSync(path.join(ROOT, "skills", s, "SKILL.md"), "utf8")).data[
+      "disable-model-invocation"
+    ] === true,
+);
 
 describe("planSuite on the committed bundle", () => {
   const plan = planSuite(ROOT);
@@ -118,11 +146,12 @@ describe("planSuite on the committed bundle", () => {
     expect(plan.errors).toEqual([]);
   });
 
-  it("has one case per Lane 2 case and per trigger, every one with a prompt and a grader", () => {
+  it("has one case per Lane 2 case and per trigger — or a not-testable entry, never both — every one with a prompt and a grader", () => {
     let want = 0;
     for (const s of SKILLS) want += lane2(s).length + triggers(s).length;
-    expect(plan.cases).toHaveLength(want);
-    expect(new Set(plan.cases.map((c) => c.dir)).size).toBe(want);
+    expect(plan.cases.length + plan.notTestable.length).toBe(want);
+    const dirs = new Set([...plan.cases.map((c) => c.dir), ...plan.notTestable.map((n) => n.dir)]);
+    expect(dirs.size).toBe(want);
     for (const c of plan.cases) {
       expect(c.files[0]?.rel, c.dir).toBe("prompt.md");
       expect(c.files.length, c.dir).toBeGreaterThan(1);
@@ -136,7 +165,9 @@ describe("planSuite on the committed bundle", () => {
   it("states each case's toolset in its plugin: P1 Skills under full except -CORE, P0 under core except their P1 cases", () => {
     for (const s of SKILLS) {
       for (const c of lane2(s)) {
-        const key = byDir.get(caseDir(s, String(c.name)))?.plugin ?? "";
+        const dir = caseDir(s, String(c.name));
+        if (plan.notTestable.some((n) => n.dir === dir)) continue; // no plugin: never written
+        const key = byDir.get(dir)?.plugin ?? "";
         expect(key.split("--")[1], `${s}/${String(c.name)}`).toBe(c.toolset);
       }
     }
@@ -241,19 +272,21 @@ describe("planSuite on the committed bundle", () => {
     ).toBe(false);
   });
 
-  it("a trigger case fires its Skill (positive) or never does in either arm (negative)", () => {
+  it("a trigger case fires its Skill (positive) or never does in either arm (negative); a user-invoked Skill never fires on its own", () => {
     for (const s of SKILLS) {
       const list = triggers(s);
+      const userInvoked = USER_INVOKED.includes(s);
       let pos = 0;
       let neg = 0;
       for (const t of list) {
         const positive = t.should_trigger === true;
-        const dir = `${s}--trigger-${positive ? "pos" : "neg"}-${String(positive ? ++pos : ++neg).padStart(2, "0")}`;
+        const kind = positive ? (userInvoked ? "auto" : "pos") : "neg";
+        const dir = `${s}--trigger-${kind}-${String(positive ? ++pos : ++neg).padStart(2, "0")}`;
         expect(file(dir, "prompt.md"), dir).toContain(String(t.query));
         const g = parseFrontmatter(graders(dir)[0]?.text ?? "").data;
         expect(g.tool, dir).toBe("Skill");
-        if (positive) expect(g.min).toBe(1);
-        else expect(g).toMatchObject({ min: 0, max: 0, arm: "both" });
+        if (positive && !userInvoked) expect(g.min).toBe(1);
+        else expect(g, dir).toMatchObject({ min: 0, max: 0, arm: "both" });
         const re = new RegExp(str(g.input_match));
         expect(re.test(`{"skill":"espn-fantasy-football:${s}"}`), dir).toBe(true);
         expect(re.test(`{"skill":"${s}"}`), dir).toBe(true);
@@ -261,6 +294,384 @@ describe("planSuite on the committed bundle", () => {
           expect(re.test(`{"skill":"espn-fantasy-football:${o}"}`), `${dir} vs ${o}`).toBe(false);
       }
     }
+  });
+});
+
+/** A prompt.md's body (the prompt sent to `claude -p`). */
+const promptBody = (text: string): string => {
+  const fm = parseFrontmatter(text);
+  return text.split("\n").slice(fm.bodyStart).join("\n").trim();
+};
+
+// --- Stage C round 1: the suite grades only what its servers can show ---------------------------------
+
+describe("apply is user-invoked (Stage C finding eval-apply-model-invocation-triggers)", () => {
+  const plan = planSuite(ROOT);
+  const byDir = new Map(plan.cases.map((c) => [c.dir, c]));
+  const gradersOf = (dir: string) =>
+    (byDir.get(dir)?.files.filter((f) => f.rel.startsWith("graders/")) ?? []).map(
+      (f) => parseFrontmatter(f.text).data,
+    );
+
+  it("only apply sets disable-model-invocation, and its slash command is /<plugin>:apply", () => {
+    expect(USER_INVOKED).toEqual(["apply"]);
+    expect(slashCommand(manifest.plugin, "apply")).toBe("/espn-fantasy-football:apply");
+  });
+
+  it("every apply Lane 2 case is the user typing the slash command, tagged user-invoked", () => {
+    const cases = lane2("apply");
+    expect(cases.length).toBeGreaterThanOrEqual(3);
+    for (const c of cases) {
+      const text = byDir.get(caseDir("apply", String(c.name)))?.files[0]?.text ?? "";
+      expect(promptBody(text), String(c.name)).toMatch(/^\/espn-fantasy-football:apply \S/);
+      expect(parseFrontmatter(text).data.tags).toContain("user-invoked");
+    }
+  });
+
+  it("every apply trigger prompt — the would-be positives included — asserts it never fires on its own", () => {
+    const trig = plan.cases.filter((c) => c.dir.startsWith("apply--trigger-"));
+    expect(trig).toHaveLength(triggers("apply").length);
+    const positives = triggers("apply").filter((t) => t.should_trigger === true).length;
+    expect(positives).toBeGreaterThanOrEqual(6);
+    expect(trig.filter((c) => c.dir.includes("--trigger-auto-"))).toHaveLength(positives);
+    expect(trig.filter((c) => c.dir.includes("--trigger-pos-"))).toHaveLength(0);
+    for (const c of trig) {
+      const g = gradersOf(c.dir);
+      expect(g, c.dir).toHaveLength(1);
+      expect(g[0], c.dir).toMatchObject({
+        type: "tool_used",
+        tool: "Skill",
+        min: 0,
+        max: 0,
+        arm: "both",
+      });
+      expect(
+        new RegExp(str(g[0]!.input_match)).test('{"skill":"espn-fantasy-football:apply"}'),
+      ).toBe(true);
+      expect(c.files.some((f) => f.rel === "graders/fires.md")).toBe(false);
+    }
+    // a model-invoked Skill's positives still must fire
+    expect(gradersOf("weekly--trigger-pos-01")[0]).toMatchObject({ tool: "Skill", min: 1 });
+  });
+
+  it("planSuite refuses a user-invoked Skill's case whose prompt is not the slash command", () => {
+    const t = repoWithFixtures();
+    t.editJson("skills/apply/evals/evals.json", (j) => {
+      (j.evals as Json[])[0]!.prompt = "Apply the lineup we agreed.";
+    });
+    expect(planSuite(t.root).errors.join("\n")).toMatch(
+      /AP-2: apply is user-invoked \(disable-model-invocation\), so its prompt starts with "\/espn-fantasy-football:apply "/,
+    );
+  });
+});
+
+describe("credential-state variants a fixture-mode server cannot show (Stage C finding eval-credential-state-variants-missing)", () => {
+  const plan = planSuite(ROOT);
+  const byDir = new Map(plan.cases.map((c) => [c.dir, c]));
+
+  it("fixture mode reports not_configured only (tests/skills/eval-fixture-credential.test.ts holds it to the real composition root)", () => {
+    expect([...FIXTURE_CREDENTIAL_STATES]).toEqual(["not_configured"]);
+  });
+
+  it("every case on auth-rejected or public-league is listed as not testable, with its reason, and never written", () => {
+    expect(plan.notTestable.map((n) => n.name).sort()).toEqual([
+      "ON-5-E",
+      "SC-1",
+      "SC-3",
+      "SC-6",
+      "WV-7-E",
+    ]);
+    for (const n of plan.notTestable) {
+      expect(byDir.has(n.dir), n.dir).toBe(false);
+      expect(["auth-rejected", "public-league"]).toContain(n.variant);
+      expect(n.reason).toMatch(/always reports "not_configured"/);
+      expect(n.reason).toContain(`fx-10h/${String(n.variant)} stands for credential.state`);
+    }
+    expect(
+      plan.plugins.some((p) => p.variant === "auth-rejected" || p.variant === "public-league"),
+    ).toBe(false);
+  });
+
+  it("every written case runs on a variant whose credential state its server reports", () => {
+    for (const s of SKILLS)
+      for (const c of lane2(s)) {
+        const dir = caseDir(s, String(c.name));
+        if (!byDir.has(dir)) continue;
+        const f = String((c.files as string[])[0]);
+        const variant = /^evals\/fixtures\/fx-10h(?:\/(.+))?$/.exec(f)?.[1] ?? null;
+        const want = variantHarness(ROOT, variant).credential_state;
+        if (want !== undefined) expect(FIXTURE_CREDENTIAL_STATES, dir).toContain(want);
+      }
+  });
+
+  it("SC-2 and SC-INJ, which do not depend on the credential state, run on the base fixture", () => {
+    expect(byDir.get("session-check--sc-2")?.plugin).toBe("base--core");
+    expect(byDir.get("session-check--sc-inj")?.plugin).toBe("base--core");
+  });
+
+  it("notTestableReason and variantHarness", () => {
+    expect(notTestableReason({}, null)).toBeNull();
+    expect(notTestableReason({ credential_state: "not_configured" }, "writes-on")).toBeNull();
+    expect(notTestableReason({ credential_state: "rejected" }, "auth-rejected")).toMatch(
+      /fx-10h\/auth-rejected stands for credential\.state "rejected"/,
+    );
+    expect(variantHarness(ROOT, "auth-rejected")).toEqual({ credential_state: "rejected" });
+    expect(variantHarness(ROOT, null)).toEqual({ credential_state: "not_configured" });
+    expect(() => variantHarness(ROOT, "no-such-variant")).toThrow(/no manifest\.json/);
+  });
+
+  it("the generated README lists every case left out and why, and runs the suite on its own directory", () => {
+    const text = readme({ out: "/o", manifest, plan, seedNeeded: [] });
+    expect(text).toContain(
+      `## Not testable on a fixture-mode server (${String(plan.notTestable.length)})`,
+    );
+    for (const n of plan.notTestable)
+      expect(text).toContain(`- \`${n.dir}\` (${n.name}): ${n.reason}.`);
+    expect(text).not.toMatch(/those cases see `not_configured`/);
+    expect(text).toMatch(/`claude plugin eval \/o --allow-tools /);
+    expect(text).toMatch(/--no-publish/);
+    expect(text).toMatch(/## User-invoked Skills/);
+    expect(text).toMatch(/eval-server\.mjs/);
+  });
+});
+
+describe("SC-1 in two turns (Stage C finding eval-sc1-single-turn-unsatisfiable)", () => {
+  const sc = lane2("session-check");
+  const graderFms = (c: Json, variant: string | null = null) =>
+    (c.expectations as string[]).flatMap((e) =>
+      gradersFor(e, { ...ctx, variant }).graders.map((g) => g.frontmatter),
+    );
+
+  it("SC-1 grades the first turn only: the steps and the question, and no probe before the user says done", () => {
+    const fms = graderFms(sc.find((c) => c.name === "SC-1")!);
+    expect(fms.filter((f) => f.tool === `${PREFIX}espn_check_auth`)).toEqual([
+      { type: "tool_used", tool: `${PREFIX}espn_check_auth`, min: 0, max: 0 },
+    ]);
+    expect(fms).toContainEqual({ type: "tool_used", tool: `${PREFIX}espn_get_status`, min: 1 });
+  });
+
+  it("SC-6, on a server that can show its state, replays SC-1's turn and grades the probe: exactly once, and first", () => {
+    const t = repoWithFixtures();
+    t.editJson("skills/session-check/evals/evals.json", (j) => {
+      (j.evals as Json[]).find((c) => c.name === "SC-6")!.files = ["evals/fixtures/fx-10h"];
+    });
+    const p = planSuite(t.root);
+    expect(p.errors).toEqual([]);
+    const c = p.cases.find((x) => x.dir === "session-check--sc-6")!;
+    const f = (rel: string) => c.files.find((x) => x.rel === rel)?.text ?? "";
+    expect(f("case.yaml")).toBe(
+      'schema_version: "1.1"\nname: "session-check--sc-6"\ncontext:\n  history_file: "history.jsonl"\n',
+    );
+    expect(f("case.yaml")).toBe(caseYaml("session-check--sc-6"));
+    const lines = f("history.jsonl")
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Json);
+    expect(lines.map((l) => l.type)).toEqual(["user", "assistant"]);
+    expect(lines[0]!.parentUuid).toBeNull();
+    expect(lines[1]!.parentUuid).toBe(lines[0]!.uuid);
+    expect(lines[0]!.message).toEqual({
+      role: "user",
+      content: "it says ESPN rejected my session",
+    });
+    const reply = lines[1]!.message as { role: string; content: { type: string; text: string }[] };
+    expect(reply.role).toBe("assistant");
+    expect(reply.content[0]!.text).toMatch(/Tell me when you have run eff setup/);
+    expect(new Set(lines.map((l) => l.sessionId)).size).toBe(1);
+    for (const l of lines) {
+      expect(l.version).toBe(HISTORY_FORMAT_VERSION);
+      expect(str(l.uuid)).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+    }
+    const prompt = f("prompt.md");
+    expect(promptBody(prompt)).toBe("done — I ran eff setup");
+    expect(parseFrontmatter(prompt).data.tags).toContain("multi-turn");
+    const g = c.files
+      .filter((x) => x.rel.startsWith("graders/"))
+      .map((x) => parseFrontmatter(x.text).data);
+    expect(g).toContainEqual({
+      type: "tool_used",
+      tool: `${PREFIX}espn_check_auth`,
+      min: 1,
+      max: 1,
+    });
+    expect(g).toContainEqual({
+      type: "regex",
+      target: "trace",
+      pattern: firstToolGuard("espn_check_auth"),
+      match: "not_contains",
+      arm: "both",
+    });
+    // a rebuild writes the same transcript
+    expect(
+      planSuite(t.root)
+        .cases.find((x) => x.dir === "session-check--sc-6")
+        ?.files.find((x) => x.rel === "history.jsonl")?.text,
+    ).toBe(f("history.jsonl"));
+  });
+
+  it("firstToolGuard catches another ESPN tool before the named one, and nothing else", () => {
+    const re = new RegExp(firstToolGuard("espn_check_auth"));
+    const use = (tool: string) =>
+      JSON.stringify({ type: "tool_use", id: "toolu_1", name: tool, input: {} });
+    const q = (t2: string) => `${PREFIX}${t2}`;
+    expect(re.test([use(q("espn_get_status")), use(q("espn_check_auth"))].join("\n"))).toBe(true);
+    expect(re.test(use(q("espn_check_auth")))).toBe(false);
+    expect(re.test([use(q("espn_check_auth")), use(q("espn_get_status"))].join("\n"))).toBe(false);
+    expect(re.test([use("Skill"), use(q("espn_check_auth"))].join("\n"))).toBe(false);
+    // the init line lists tool names as strings, not as tool_use names
+    expect(
+      re.test(
+        [
+          JSON.stringify({ type: "system", tools: [q("espn_get_status")] }),
+          use(q("espn_check_auth")),
+        ].join("\n"),
+      ),
+    ).toBe(false);
+    expect(parseToolUsedSpec("min 1 max 1, first")).toMatchObject({
+      min: 1,
+      max: 1,
+      first: true,
+      unknown: [],
+    });
+    expect(parseToolUsedSpec("min 1").first).toBe(false);
+  });
+
+  it("historyOf refuses a malformed history; historyTranscript chains every line; stableUuid is v4-shaped and stable", () => {
+    expect(historyOf(undefined)).toBeNull();
+    expect(() => historyOf([{ role: "user", text: "a" }])).toThrow(/even number/);
+    expect(() =>
+      historyOf([
+        { role: "assistant", text: "a" },
+        { role: "user", text: "b" },
+      ]),
+    ).toThrow(/history\[0\] must be \{ "role": "user"/);
+    const turns = [
+      { role: "user" as const, text: "a" },
+      { role: "assistant" as const, text: "b" },
+      { role: "user" as const, text: "c" },
+      { role: "assistant" as const, text: "d" },
+    ];
+    const lines = historyTranscript(turns, "x")
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Json);
+    for (let i = 1; i < lines.length; i++) expect(lines[i]!.parentUuid).toBe(lines[i - 1]!.uuid);
+    expect(stableUuid("s")).toBe(stableUuid("s"));
+    expect(stableUuid("s")).not.toBe(stableUuid("t"));
+    fc.assert(
+      fc.property(fc.string(), (seed) => {
+        expect(stableUuid(seed)).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        );
+      }),
+    );
+  });
+});
+
+describe("recorded-state preconditions (Stage C finding eval-recorded-state-preconditions-missing)", () => {
+  const plan = planSuite(ROOT);
+  const byDir = new Map(plan.cases.map((c) => [c.dir, c]));
+
+  it("every case whose expected output assumes recorded state has its seed, in an eval plugin of its own", () => {
+    expect(SEEDS).toEqual({
+      "NC-INJ-2": "log-week4",
+      "RT-1": "log-week4-lineup",
+      "RT-3": "log-week4-lineup",
+      "RT-4-E": "log-six-lineup",
+      "RT-INJ": "log-week4-lineup-note",
+      "SC-4": "drift-red",
+    });
+    for (const seed of Object.values(SEEDS)) expect(SEED_KINDS).toContain(seed);
+    expect(byDir.get("retro--rt-1")?.plugin).toBe("base--core--log-week4-lineup");
+    expect(byDir.get("retro--rt-3")?.plugin).toBe("base--core--log-week4-lineup");
+    expect(byDir.get("retro--rt-4-e")?.plugin).toBe("base--core--log-six-lineup");
+    expect(byDir.get("retro--rt-inj")?.plugin).toBe(
+      "inj-teamname-json--core--log-week4-lineup-note",
+    );
+    expect(byDir.get("session-check--sc-4")?.plugin).toBe("drift-mRoster--core--drift-red");
+    // RT-INJ's metrics must equal RT-1's: the same calls, the note the only difference
+    expect(LINEUP_SEEDS["log-week4-lineup-note"].map((c) => ({ ...c, note: null }))).toEqual(
+      LINEUP_SEEDS["log-week4-lineup"],
+    );
+    expect(LINEUP_SEEDS["log-week4-lineup-note"][0]?.note).toBe(RT_INJ_NOTE);
+    expect(LINEUP_SEEDS["log-six-lineup"]).toHaveLength(6);
+    expect(new Set(LINEUP_SEEDS["log-six-lineup"].map((c) => c.week))).toEqual(
+      new Set([1, 2, 3, 4]),
+    );
+  });
+
+  it("a seeded plugin serves only the cases its seed is for, and an unseeded case never shares one", () => {
+    const names = new Map<string, string>();
+    for (const s of SKILLS)
+      for (const c of lane2(s)) names.set(caseDir(s, String(c.name)), String(c.name));
+    for (const c of plan.cases) {
+      const name = names.get(c.dir);
+      const want = name === undefined ? null : ((SEEDS as Record<string, string>)[name] ?? null);
+      expect(seedOfKey(c.plugin), c.dir).toBe(want);
+    }
+  });
+
+  it("the state directories are dropped from a server env and kept for the seeds", () => {
+    expect(
+      withoutStateDirs({ HOME: "h", EFF_CONFIG_DIR: "c", EFF_CACHE_DIR: "x", A: "1" }),
+    ).toEqual({
+      A: "1",
+    });
+    expect(seedOfKey("base--core")).toBeNull();
+    expect(seedOfKey("base--core--drift-red")).toBe("drift-red");
+  });
+});
+
+describe("ON-1's format graders accept every correct wording (Stage C finding eval-on1-regex-too-narrow)", () => {
+  const regexes = () => {
+    const c = lane2("onboard").find((x) => x.name === "ON-1")!;
+    const [reception, passing] = (c.expectations as string[])
+      .filter((e) => /half-point reception|five points per passing/.test(e))
+      .map((e) => {
+        const g = gradersFor(e, ctx).graders[0]!.frontmatter;
+        return new RegExp(str(g.pattern), str(g.flags));
+      });
+    return { reception: reception!, passing: passing! };
+  };
+
+  it.each([
+    "Half PPR (0.5 pts per catch); passing TDs are worth 5 points",
+    "Scoring: half-point PPR, 5-point passing TDs",
+    "Receptions 0.5, Pass TD 5",
+    "| Reception | 0.5 pts |\n| Passing TD | 5 pts |",
+    "half-PPR, 5 points per passing TD",
+    "0.5 points per reception and 5 pts per passing touchdown",
+    "0.5 PPR; TD pass = 5",
+    "half a point per reception; 5 points for a passing TD",
+  ])("accepts %j", (reply) => {
+    const { reception, passing } = regexes();
+    expect(reception.test(reply)).toBe(true);
+    expect(passing.test(reply)).toBe(true);
+  });
+
+  it.each([
+    ["full PPR (1 point per reception)", "reception"],
+    ["Receptions | 1 pt", "reception"],
+    ["Receptions 10.5", "reception"],
+    ["Standard scoring, no points per reception", "reception"],
+    ["0.5 per rushing yard", "reception"],
+    ["4 points per passing TD", "passing"],
+    ["Passing TD | 4 pts", "passing"],
+    ["6-point passing TDs", "passing"],
+    ["15 points per passing TD", "passing"],
+    ["Passing TD | 50", "passing"],
+    ["Passing TDs are worth 4 points; 5 bench slots", "passing"],
+    ["Passing TD 5.5", "passing"],
+  ] as const)("rejects the wrong format %j", (reply, which) => {
+    expect(regexes()[which].test(reply)).toBe(false);
+  });
+
+  it("the old patterns rejected the correct wordings the finding names (the regression this fixes)", () => {
+    const old = [/half-PPR|0\.5 (points? )?per reception/i, /5 (points|pts) per passing/i];
+    for (const r of ["Scoring: half-point PPR, 5-point passing TDs", "Receptions 0.5, Pass TD 5"])
+      expect(old.some((re) => re.test(r))).toBe(false);
   });
 });
 
@@ -548,7 +959,22 @@ describe("buildPluginEvals on a copy", () => {
     expect(readFileSync(path.join(out, STATE_ROOT_FILE), "utf8").trim()).toBe(r.state);
     expect(statSync(r.state!).mode & 0o777).toBe(0o700);
     expect(readdirSync(path.join(out, "evals"))).toHaveLength(r.cases);
-    expect(r.seedNeeded).toEqual([pluginKey(null, "full", SEEDS["NC-INJ-2"])]);
+    expect([...r.seedNeeded].sort()).toEqual(
+      [
+        "base--core--log-six-lineup",
+        "base--core--log-week4-lineup",
+        "base--full--log-week4",
+        "drift-mRoster--core--drift-red",
+        "inj-teamname-json--core--log-week4-lineup-note",
+      ].sort(),
+    );
+    expect(r.notTestable.map((n) => n.name).sort()).toEqual([
+      "ON-5-E",
+      "SC-1",
+      "SC-3",
+      "SC-6",
+      "WV-7-E",
+    ]);
     for (const key of r.plugins) {
       const dir = path.join(out, "plugins", key);
       const plugin = JSON.parse(
@@ -563,15 +989,30 @@ describe("buildPluginEvals on a copy", () => {
       };
       const s = mcp.mcpServers[manifest.plugin]!;
       expect(s.command).toBe("/opt/node");
+      // every server starts through the launcher, on a fresh copy of its pristine state
       expect(s.args).toEqual([
         "--import",
         path.join(t.root, NO_SOCKET),
-        path.join(t.root, "dist", "cli.js"),
-        "serve",
+        path.join(t.root, EVAL_SERVER),
+        "--state",
+        path.join(r.state!, key),
+        "--root",
+        t.root,
       ]);
+      expect(s.args).toEqual(launcherArgs(t.root, path.join(r.state!, key)));
       expect(s.env.EFF_TOOLSET).toBe(key.split("--")[1]);
       expect(s.env.EFF_TEST_STUBS).toBe("1");
-      expect(s.env.EFF_CACHE_DIR?.startsWith(r.state!)).toBe(true);
+      // the state directories are the launcher's to set (a fresh copy per start), never the env's
+      for (const k of STATE_ENV_KEYS) expect(s.env[k], `${key}: ${k}`).toBeUndefined();
+      expect(seedServerOf(out, key)).toEqual({
+        state: path.join(r.state!, key),
+        env: {
+          ...s.env,
+          HOME: path.join(r.state!, key, "home"),
+          EFF_CONFIG_DIR: path.join(r.state!, key, "config"),
+          EFF_CACHE_DIR: path.join(r.state!, key, "cache"),
+        },
+      });
       expect(statSync(path.join(r.state!, key, "cache")).mode & 0o777).toBe(0o700);
       expect(readdirSync(path.join(dir, "skills"))).toEqual([...SKILLS]);
       for (const s2 of SKILLS) {
@@ -842,18 +1283,23 @@ describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () =
       writeSeeds({ root: t.root, out, node: "/n", seedNeeded: r.seedNeeded }),
     ).rejects.toThrow(/dist\/cli\.js is missing/);
     t.write("dist/cli.js", "// stand-in\n");
+    const nc = pluginKey(null, "full", SEEDS["NC-INJ-2"]);
     const s = fakeServer(happy);
     const done = await writeSeeds({
       root: t.root,
       out,
       node: "/n",
-      seedNeeded: r.seedNeeded,
+      seedNeeded: [nc],
       spawnImpl: s.spawnImpl,
     });
-    expect(done).toEqual([`${r.seedNeeded[0]!}: logged rec-01ABC`]);
-    expect(s.spawned[0]?.env.EFF_CACHE_DIR?.startsWith(r.state!)).toBe(true);
+    expect(done).toEqual([`${nc}: logged rec-01ABC`]);
+    // the seed writes into the PRISTINE state (the launcher copies it for every run)
+    expect(s.spawned[0]?.env.EFF_CACHE_DIR).toBe(path.join(r.state!, nc, "cache"));
     expect(s.spawned[0]?.env.PATH).toBeDefined();
     expect(await writeSeeds({ root: t.root, out, node: "/n", seedNeeded: [] })).toEqual([]);
+    await expect(
+      writeSeeds({ root: t.root, out, node: "/n", seedNeeded: ["base--core"] }),
+    ).rejects.toThrow(/base--core: no known seed/);
   });
 
   it("seedDatasetStates seeds only the full servers' caches, through the seed script, and fails on a bad exit", async () => {
@@ -922,6 +1368,164 @@ describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () =
       '{"jsonrpc":"2.0","method":"note"}\n{"jsonrpc":"2.0","id":99,"result":1}\n\n{"jsonrpc":"2.0","id":1,"result":"pong"}\n',
     );
     await expect(p).resolves.toBe("pong");
+  });
+});
+
+describe("the seeds of RT-1/RT-3/RT-4-E/RT-INJ and SC-4 (seedState over a fake server; tests/e2e/plugin-evals-state.test.ts runs them on dist)", () => {
+  /** A server that answers the lineup seeds' calls; record answers carry an increasing log id. */
+  const lineupServer = () => {
+    let n = 0;
+    return fakeServer((name) => {
+      if (name === "initialize") return { protocolVersion: "2025-06-18", capabilities: {} };
+      if (name === "espn_get_league")
+        return text({ data: { scoring: { settings_hash: "b".repeat(64) } }, meta: {} });
+      if (name === "espn_analyze_lineup")
+        return text({
+          data: { rec: REC, seeding_mode_used: "espn_rule" },
+          meta: { request_id: `r-00000000000${String(n)}` },
+        });
+      if (name === "espn_record_recommendation")
+        return text({ data: { log_id: `rec-${String(++n)}` } });
+      return null;
+    });
+  };
+  const toolCalls = (s: FakeServer) =>
+    s.calls.filter((c) => c.method === "tools/call").map((c) => c.params);
+
+  it("log-week4-lineup logs start-sit's week-4 call: kind lineup, its rec, no alternatives, its seeding reading", async () => {
+    const s = lineupServer();
+    expect(
+      await seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed: "log-week4-lineup",
+        spawnImpl: s.spawnImpl,
+      }),
+    ).toBe("logged rec-1");
+    const calls = toolCalls(s);
+    expect(calls.map((c) => c.name)).toEqual([
+      "espn_get_league",
+      "espn_analyze_lineup",
+      "espn_record_recommendation",
+    ]);
+    expect(calls[1]!.arguments).toEqual({ week: 4, objective: "auto" });
+    expect(calls[2]!.arguments).toEqual({
+      kind: "lineup",
+      week: 4,
+      rec: REC,
+      alternatives: [],
+      source_calls: [{ tool: "espn_analyze_lineup", request_id: "r-000000000000" }],
+      settings_hash: "b".repeat(64),
+      followed_hint: "unknown",
+      client_ref: "plugin-evals-seed-log-week4-lineup-w4-auto",
+      seeding_mode_used: "espn_rule",
+    });
+    expect(ended(s)).toBe(true);
+    expect(s.killed).toBe(true);
+  });
+
+  it("log-week4-lineup-note is the same call with RT-INJ's note", async () => {
+    const s = lineupServer();
+    await seedState({
+      root: "/r",
+      node: "/n",
+      env: {},
+      seed: "log-week4-lineup-note",
+      spawnImpl: s.spawnImpl,
+    });
+    const rec = toolCalls(s).find((c) => c.name === "espn_record_recommendation")!
+      .arguments as Json;
+    expect(rec).toMatchObject({ kind: "lineup", week: 4, note: RT_INJ_NOTE });
+  });
+
+  it("log-six-lineup logs six lineup calls, each recorded under its own week", async () => {
+    const s = lineupServer();
+    expect(
+      await seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed: "log-six-lineup",
+        spawnImpl: s.spawnImpl,
+      }),
+    ).toBe("logged rec-1, rec-2, rec-3, rec-4, rec-5, rec-6");
+    const calls = toolCalls(s);
+    const lineups = calls.filter((c) => c.name === "espn_analyze_lineup").map((c) => c.arguments);
+    expect(lineups).toEqual(
+      LINEUP_SEEDS["log-six-lineup"].map((c) => ({ week: c.week, objective: c.objective })),
+    );
+    const recs = calls
+      .filter((c) => c.name === "espn_record_recommendation")
+      .map((c) => c.arguments as Json);
+    expect(recs.map((r) => [r.kind, r.week])).toEqual(
+      LINEUP_SEEDS["log-six-lineup"].map((c) => ["lineup", c.week]),
+    );
+    expect(new Set(recs.map((r) => r.client_ref)).size).toBe(6);
+    expect(recs.every((r) => r.note === undefined)).toBe(true);
+  });
+
+  it("drift-red reads the drifted roster view once, then insists the status is red", async () => {
+    const answer =
+      (roster: unknown, drift: string) =>
+      (name: string): unknown => {
+        if (name === "initialize") return { protocolVersion: "2025-06-18", capabilities: {} };
+        if (name === "espn_get_roster") return roster;
+        if (name === "espn_get_status") return text({ data: { drift: { status: drift } } });
+        return null;
+      };
+    const drifted = text({ error: { code: "ESPN_DRIFT_DETECTED" } }, true);
+    const s = fakeServer(answer(drifted, "red"));
+    expect(
+      await seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed: "drift-red",
+        spawnImpl: s.spawnImpl,
+      }),
+    ).toBe("drift red");
+    expect(toolCalls(s).map((c) => c.name)).toEqual(["espn_get_roster", "espn_get_status"]);
+    await expect(
+      seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed: "drift-red",
+        spawnImpl: fakeServer(answer(text({ data: { players: [] } }), "red")).spawnImpl,
+      }),
+    ).rejects.toThrow(/did not answer ESPN_DRIFT_DETECTED/);
+    await expect(
+      seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed: "drift-red",
+        spawnImpl: fakeServer(answer(drifted, "green")).spawnImpl,
+      }),
+    ).rejects.toThrow(/drift\.status is green, not red/);
+  });
+
+  it("log-week4 is NC-INJ-2's seed; an unknown seed is refused", async () => {
+    const s = fakeServer(happy);
+    expect(
+      await seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed: "log-week4",
+        spawnImpl: s.spawnImpl,
+      }),
+    ).toBe("logged rec-01ABC");
+    await expect(
+      seedState({
+        root: "/r",
+        node: "/n",
+        env: {},
+        seed: "nope",
+        spawnImpl: fakeServer(happy).spawnImpl,
+      }),
+    ).rejects.toThrow(/unknown seed nope/);
   });
 });
 
