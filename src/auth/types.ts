@@ -129,6 +129,24 @@ export interface CredentialStoreWriter {
 /** A backend: the keychain (`@napi-rs/keyring`, only in src/auth/keychain.ts) or the 0600 file. */
 export type CredentialStore = CredentialStoreReader & CredentialStoreWriter;
 
+/** Where the install's store is recorded now: a kind, or null when nothing records one. */
+export type CredentialStoreRecord = () => CredentialStoreKind | null;
+
+/**
+ * Additive (Stage C): a reader that follows the store the install records (src/auth/stores.ts
+ * `openCredentialStore`). `eff setup --storage …` moves the one store of the install (plan 02 §2.2)
+ * and records the new kind in the `credential_state` row it writes; the authority binds that row
+ * here, so a process that started on the other backend — the server — reads where setup wrote, the
+ * probe read included, with no restart (plan 02 §2.2 "Multiple processes"; plan 03 L6, §6).
+ * Construction and binding touch neither backend.
+ */
+export interface FollowingCredentialStoreReader extends CredentialStoreReader {
+  /** The backend in use now (it can change between operations). */
+  readonly kind: CredentialStoreKind;
+  /** Before every operation the store moves to the backend `record` names (null: stays put). */
+  followRecord(record: CredentialStoreRecord): void;
+}
+
 // --- the cookie-header port (plan 01 §10) ------------------------------------------------------
 
 /** A Cookie header value (`espn_s2=…; SWID=…`). Branded; never logged (the logger redacts it). */
@@ -169,7 +187,12 @@ export interface CredentialObservation {
  * observation recorder that persists to `credential_state`. Implemented in src/auth/state.ts.
  */
 export interface CredentialAuthority {
-  /** The current state label (from the store.sqlite row at startup; never a keychain read). */
+  /**
+   * The current state label: from the store.sqlite row at startup, never a credential-store read.
+   * While `not_configured` it re-reads the row, so a value `eff setup` stored since in another
+   * terminal shows in the label (`espn_get_status`, the provider's `configured()`) with no restart
+   * (plan 03 L6).
+   */
   state(): CredentialState;
   /**
    * The header for a cookie-bearing request. In `rejected` it returns the typed failure WITHOUT

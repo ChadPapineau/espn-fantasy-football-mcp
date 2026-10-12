@@ -1,7 +1,9 @@
 // stores.ts — opening the credential stores (plan 02 §2.2 "One store per install"; plan 03 §3:
-// the store config.json records selects it for every process) and the presence check `eff doctor`
-// #6 uses ("exactly one store exists — fails when both the keychain `meta` item and session.json
-// are present"). Opening a store touches nothing: the keychain addon loads on first use.
+// the store config.json records selects it for every process, and a running process follows a
+// later `eff setup --storage …` — plan 02 §2.2 "Multiple processes", plan 03 L6) and the presence
+// check `eff doctor` #6 uses ("exactly one store exists — fails when both the keychain `meta` item
+// and session.json are present"). Opening a store touches nothing: the keychain addon loads on
+// first use.
 import type { XattrReader } from "../config/paths.js";
 import type { CredentialStoreKind } from "../config/schema.js";
 import { createFileCredentialStore, type FileCredentialStore } from "./file.js";
@@ -20,6 +22,8 @@ import {
   SELFTEST_TIMEOUT_MS,
   type CredentialStore,
   type CredentialStoreReader,
+  type CredentialStoreRecord,
+  type FollowingCredentialStoreReader,
 } from "./types.js";
 
 /** Everything needed to open either store. */
@@ -57,13 +61,50 @@ export function openCredentialStores(cfg: CredentialStoreConfig): CredentialStor
   };
 }
 
-/** The store `kind` names (the one config.json records). */
+/**
+ * The install's one store (plan 02 §2.2): both backends opened from the configuration, every
+ * operation sent to the one in use. It starts on the kind config.json recorded; once a record is
+ * bound (src/auth/state.ts binds the `credential_state` row's `store`), each operation first moves
+ * to the backend the record names — so `eff setup --storage …` in another terminal is followed with
+ * no restart (plan 02 §2.2 "Multiple processes"; plan 03 L6). The record only ever picks one of
+ * these two backends: no path, service or other setting comes from it.
+ */
+export interface InstallCredentialStore extends CredentialStore, FollowingCredentialStoreReader {
+  readonly kind: CredentialStoreKind;
+}
+
+/** The install's store, starting on the `kind` config.json records. Touches nothing. */
 export function openCredentialStore(
   kind: CredentialStoreKind,
   cfg: CredentialStoreConfig,
-): CredentialStore {
+): InstallCredentialStore {
   const pair = openCredentialStores(cfg);
-  return kind === "keychain" ? pair.keychain : pair.file;
+  let current: CredentialStoreKind = kind;
+  let record: CredentialStoreRecord | null = null;
+  /** The backend this operation goes to (chosen synchronously, when the operation starts). */
+  const backend = (): CredentialStore => {
+    let next: CredentialStoreKind | null = null;
+    try {
+      next = record?.() ?? null;
+    } catch {
+      next = null; // an unreadable record keeps the backend in use
+    }
+    if (next === "keychain" || next === "file") current = next;
+    return current === "keychain" ? pair.keychain : pair.file;
+  };
+  return {
+    get kind(): CredentialStoreKind {
+      return current;
+    },
+    followRecord: (r) => {
+      record = r;
+    },
+    read: () => backend().read(),
+    readMeta: () => backend().readMeta(),
+    exists: () => backend().exists(),
+    write: (cookies, meta) => backend().write(cookies, meta),
+    delete: () => backend().delete(),
+  };
 }
 
 /** Presence of each store, without reading a secret (keychain: the `meta` item; file: a stat). */
