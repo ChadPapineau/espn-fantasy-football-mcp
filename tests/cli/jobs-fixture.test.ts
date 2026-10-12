@@ -9,7 +9,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildEspnStack } from "../../src/cli/espn-stack.js";
 import { dayFirstKickoff, weekFirstKickoff } from "../../src/cli/espn-jobs.js";
-import { readJobState, updateJobState } from "../../src/cli/job-state.js";
+import { checkHealthChecks } from "../../src/cli/doctor.js";
+import { readJobState, stateNumber, updateJobState } from "../../src/cli/job-state.js";
 import { loadRuntime } from "../../src/cli/runtime.js";
 import {
   preKickoff,
@@ -269,20 +270,33 @@ describe("the nightly IR-validity check alerts on every transition to invalid (p
     expect(await snapshotRoster(io, config, log, { notify: true, preKickoff: false })).toBe(0);
     const notified = calls.some((c) => c.args.join(" ").includes("IR slot holds"));
     const line = io.out.text.split("\n").some((l) => l.startsWith("IR invalid"));
-    return { notified, line, text: io.out.text };
+    // doctor #23 as `eff doctor` computes it (the store's open checks + the snapshot's IR state)
+    const store = openStore(config, io.clock, log, { migrate: false });
+    let row23;
+    try {
+      row23 = checkHealthChecks(
+        store,
+        stateNumber(readJobState(config.cacheDir), "ir.valid_since"),
+      ).find((r) => r.id === "ir_invalid");
+    } finally {
+      store.close();
+    }
+    return { notified, line, text: io.out.text, doctor23: row23?.status };
   }
 
   it("healthy-in-IR → alert; fixed → said; healthy-in-IR again → alerted AGAIN (an old check is still open)", async () => {
     sb = sandbox();
     const n1 = await night("2026-10-06T06:00:00.000Z", "ACTIVE");
-    expect([n1.line, n1.notified]).toEqual([true, true]);
+    expect([n1.line, n1.notified, n1.doctor23]).toEqual([true, true, "fail"]);
     const n2 = await night("2026-10-07T06:00:00.000Z", "INJURY_RESERVE");
     expect([n2.line, n2.notified]).toEqual([false, false]);
     expect(n2.text).toContain("IR valid again");
+    // the fixed IR no longer fails doctor #23 (the old record is described, not counted)
+    expect(n2.doctor23).toBe("ok");
     const n3 = await night("2026-10-08T06:00:00.000Z", "ACTIVE");
-    expect([n3.line, n3.notified]).toEqual([true, true]);
+    expect([n3.line, n3.notified, n3.doctor23]).toEqual([true, true, "fail"]);
     // a night that stays invalid does not repeat the alert
     const n4 = await night("2026-10-09T06:00:00.000Z", "ACTIVE");
-    expect([n4.line, n4.notified]).toEqual([false, false]);
+    expect([n4.line, n4.notified, n4.doctor23]).toEqual([false, false, "fail"]);
   });
 });

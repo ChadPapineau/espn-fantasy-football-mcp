@@ -25,7 +25,7 @@ import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
 import { JOBS, installedPlists } from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
-import { jobRunRecords, readJobState, type JobRunRecord } from "./job-state.js";
+import { jobRunRecords, readJobState, stateNumber, type JobRunRecord } from "./job-state.js";
 import { seasonState } from "../sources/runner.js";
 import type { Logger } from "./log.js";
 import { openExistingStore, type ExistingStore } from "./store-access.js";
@@ -207,6 +207,8 @@ export interface StatusReport {
     readonly id: string;
     readonly status: string;
     readonly raised_at: string;
+    /** An ir_invalid check the nightly snapshot has since seen resolved (IR valid again). */
+    readonly resolved_since: string | null;
   }[];
   readonly launchd: {
     readonly supported: boolean;
@@ -401,7 +403,9 @@ export function collectStatus(
         ? null
         : store.repos.limiter.countToday(new Date(utcDayStart(now)).toISOString());
     const installed = installedPlists(io.home).map((p) => p.job);
-    const jobs = jobRunRecords(readJobState(config.cacheDir), RECORDED_JOBS);
+    const jobState = readJobState(config.cacheDir);
+    const jobs = jobRunRecords(jobState, RECORDED_JOBS);
+    const irValidSince = stateNumber(jobState, "ir.valid_since");
     const snapshots = store === null ? null : snapshotStatus(store, config.teamId);
     let inSeason = false;
     try {
@@ -447,9 +451,17 @@ export function collectStatus(
       checks:
         store === null
           ? []
-          : store.repos.leagueSettings
-              .openChecks()
-              .map((c) => ({ id: c.id, status: c.status, raised_at: c.raised_at })),
+          : store.repos.leagueSettings.openChecks().map((c) => ({
+              id: c.id,
+              status: c.status,
+              raised_at: c.raised_at,
+              resolved_since:
+                c.id === "ir_invalid" &&
+                irValidSince !== null &&
+                Date.parse(c.raised_at) <= irValidSince
+                  ? new Date(irValidSince).toISOString()
+                  : null,
+            })),
       launchd: {
         supported: io.platform === "darwin",
         installed,
@@ -552,7 +564,11 @@ export function renderStatus(r: StatusReport): string[] {
   if (r.checks.length > 0) {
     out.push("");
     for (const c of r.checks)
-      out.push(`check ${c.id}: ${c.status} (raised ${c.raised_at}) — \`eff doctor\``);
+      out.push(
+        c.resolved_since === null
+          ? `check ${c.id}: ${c.status} (raised ${c.raised_at}) — \`eff doctor\``
+          : `check ${c.id}: resolved since ${c.resolved_since} (raised ${c.raised_at}; \`eff doctor --ack ${c.id}\` clears the record)`,
+      );
   }
   out.push("");
   if (!r.launchd.supported)

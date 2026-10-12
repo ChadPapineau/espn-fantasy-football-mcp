@@ -51,7 +51,7 @@ import { onlineRows } from "./doctor-online.js";
 import { exitCodeFor, row, type DoctorRow, type RowStatus } from "./doctor-rows.js";
 import { bothCredentialStores } from "./espn-stack.js";
 import { writeLine, distEntry, type CliIo } from "./io.js";
-import { jobRunRecords, readJobState, stateToken } from "./job-state.js";
+import { jobRunRecords, readJobState, stateNumber, stateToken } from "./job-state.js";
 import { installedPlists, JOB_NAMES, LAUNCHCTL, labelOf, launchctl } from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
 import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
@@ -1309,8 +1309,16 @@ export async function checkSetupPort(io: CliIo, config: LenientConfig | null): P
   );
 }
 
-/** Rows 21–23: the open health checks (plan 03 §5, T-08). */
-export function checkHealthChecks(store: Store | null): DoctorRow[] {
+/**
+ * Rows 21–23: the open health checks (plan 03 §5, T-08). `irValidSinceMs` is when the nightly roster
+ * snapshot last saw the user's IR valid again (job-state `ir.valid_since`): an ir_invalid check
+ * raised before it describes a state that no longer holds, so #23 passes and says how to clear the
+ * record (only `eff doctor --ack` closes a check row in this build).
+ */
+export function checkHealthChecks(
+  store: Store | null,
+  irValidSinceMs: number | null = null,
+): DoctorRow[] {
   const titles = {
     scoring_mismatch: [21, "Scoring golden"],
     settings_changed: [22, "Settings changed"],
@@ -1320,7 +1328,21 @@ export function checkHealthChecks(store: Store | null): DoctorRow[] {
     return Object.entries(titles).map(([id, [n, t]]) => row(n, id, t, "skip", "store not open"));
   const open = store.repos.leagueSettings.openChecks().filter((c) => !c.acknowledged);
   return Object.entries(titles).map(([id, [n, t]]) => {
-    const hits = open.filter((c) => c.id === id);
+    const all = open.filter((c) => c.id === id);
+    const hits =
+      id === "ir_invalid" && irValidSinceMs !== null
+        ? all.filter((c) => !(Date.parse(c.raised_at) <= irValidSinceMs))
+        : all;
+    if (all.length > 0 && hits.length === 0)
+      return row(
+        n,
+        id,
+        t,
+        "ok",
+        `IR valid again since ${new Date(irValidSinceMs ?? 0).toISOString()} (nightly roster snapshot)`,
+        null,
+        [`${String(all.length)} older record(s) stay open until \`eff doctor --ack ir_invalid\``],
+      );
     if (hits.length === 0) return row(n, id, t, "ok", "no open check");
     const worst = hits.some((c) => c.status === "fail") ? "fail" : "warn";
     const details = hits.slice(0, 5).map(
@@ -1692,7 +1714,12 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
       rows.push(...(await onlineRows(io, config, store, log)));
     }
     rows.push(await checkSetupPort(io, config));
-    rows.push(...checkHealthChecks(store));
+    rows.push(
+      ...checkHealthChecks(
+        store,
+        config === null ? null : stateNumber(readJobState(config.cacheDir), "ir.valid_since"),
+      ),
+    );
     rows.push(checkStaleBuild(io.packageRoot));
     rows.push(checkClientLog(opts.clientLog ?? defaultClientLog(io.home), secrets));
   } finally {

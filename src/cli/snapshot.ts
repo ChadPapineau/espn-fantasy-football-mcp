@@ -212,6 +212,11 @@ export async function snapshotRoster(
       const ir = auditIr(seatsOf(mine), slots);
       const prevIrValid = prev === undefined ? null : !auditIr(seatsOf(prev.roster), slots).invalid;
       const openIr = hasOpenCheck(run, "ir_invalid");
+      // when IR was last seen valid again (doctor #23 / status read it: an older open check no
+      // longer describes the roster); an invalid IR clears it
+      if (ir.invalid) updateJobState(config.cacheDir, { "ir.valid_since": null });
+      else if (stateNumber(readJobState(config.cacheDir), "ir.valid_since") === null)
+        updateJobState(config.cacheDir, { "ir.valid_since": Date.parse(takenAt) });
       if (!ir.invalid && openIr && prevIrValid === false)
         lines.push(
           "IR valid again — the open ir_invalid check stays until `eff doctor --ack ir_invalid`",
