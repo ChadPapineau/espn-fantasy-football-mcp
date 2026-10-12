@@ -172,6 +172,13 @@ describe("a later complete answer clears the drift (drift-red-never-clears)", ()
     expect(w.recovered(["mSettings", "mNav"])).toBe(before);
     expect(w.recovered()).toBe(before);
     expect(repo.puts).toBe(puts);
+    // a row without a removed key (additive only) has nothing a view could clear
+    const additiveOnly = new Repo();
+    const wa = new DriftStateWriter(additiveOnly, fixedClock(T0), H);
+    const row = wa.record([additive("mTeam", "$.teams[].x")]);
+    expect(row?.status).toBe("additive");
+    expect(wa.recovered(["mTeam", "mSettings"])).toBe(row);
+    expect(additiveOnly.puts).toBe(1);
     // a schema-level key is not the probe's to clear: no write either
     w.record([missing("mSettings", DEEP)]);
     const p2 = repo.puts;

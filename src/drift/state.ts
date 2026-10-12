@@ -176,6 +176,9 @@ export function applyRecovered(
   verification: Verification = "schema",
 ): DriftStateRow {
   const moved = row.status === "host_moved";
+  // only a red row holds removed keys: any other row, or no verified view, has nothing to clear
+  // (the common case — every good answer — returns before any parse)
+  if (!moved && (views.length === 0 || row.status !== "red")) return row;
   const diffs = parseDiffs(row.diff_json);
   let cleared = false;
   const next: ViewDiff[] = [];
