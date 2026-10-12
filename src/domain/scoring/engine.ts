@@ -1,6 +1,7 @@
 // engine.ts — the pure scorer (plan 08 E1: `score`, `scoreSamples`, `explain`; no I/O, no clock, no
 // randomness): §3.4 class gating and per-POSITION overrides inside `score`, §4.1 exclusive tiers
-// asserted / derived lines bracketized, §4.2–§4.3 bonuses, per-N and long-TD (underivable), §4.6
+// asserted per game (an ESPN season split carries game counts) / derived lines bracketized, §4.2
+// (exclusive yardage tiers, A-2) – §4.3 bonuses, per-N and long-TD (underivable), §4.6
 // exact arithmetic and the verified rounding rule (E4), §4.7 missing vs unknown and `complete`,
 // §5 / E5 distributions over SCORED SAMPLES. Ported from sibling @cf3b015 (compile memo, evaluate,
 // quantiles, scoreSamples), adapted to ESPN's id-keyed rules and families.
@@ -130,6 +131,20 @@ type Regime = "espn" | "projection" | "derived";
 /** Slack for ESPN's projected tier probabilities (they sum to 1 ± 2e-9 — recorded). */
 const EXCLUSIVE_SLACK = 1e-6;
 
+/**
+ * Whether a line is ONE game, the unit plan 08 §4.1 asserts exclusivity on ("Σ members ≤ 1 per
+ * exclusive family per game"). Derived and projection lines are one week by construction; an ESPN
+ * line is one game unless its split is a season or preseason aggregate (statSplitTypeId 0 or 2),
+ * whose tier members are game COUNTS (recorded: a D/ST season line carries 91 = 3, a QB's 17 = 2,
+ * and ESPN's appliedStats pay count × points). Only the ESPN translator's split can lift the bound.
+ */
+function isOneGame(line: StatLine, regime: Regime): boolean {
+  if (regime !== "espn") return true;
+  const splitType: unknown = (line.split as { split_type?: unknown } | null | undefined)
+    ?.split_type;
+  return splitType !== 0 && splitType !== 2;
+}
+
 interface Evaluation {
   readonly result: ScoreResult;
   /** Per compiled family: the member values used (line or derived), or null when absent. */
@@ -185,24 +200,33 @@ function checkLine(line: StatLine): {
 function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): Evaluation {
   const compiled = compile(settings);
   const { values, keys, regime } = checkLine(line);
+  const oneGame = isOneGame(line, regime);
   const t = compiled.byClass[line.position_class];
   const get = (c: Canonical): number | undefined =>
     Object.hasOwn(values, c) ? values[c] : undefined;
   const derived = new Map<Canonical, number>();
 
-  // families: assert exclusivity on what the line carries; bracketize a scalar for derived lines
+  // families: assert exclusivity on what the line carries (per game; a count is never negative);
+  // bracketize a scalar for derived lines
   const familyValues: (readonly number[] | null)[] = [];
   for (const f of t.families) {
     const carried: number[] = [];
     for (const c of f.all_members) {
       const v = get(c);
       if (v === undefined) continue;
-      if (f.family.exclusive && (v < 0 || v > 1 + EXCLUSIVE_SLACK)) {
+      if (f.family.exclusive && v < 0) {
+        throw new ScoringError(
+          "bracket_exclusivity",
+          oneGame ? "tier member is not in [0, 1]" : "tier member count is negative",
+          [f.key, c],
+        );
+      }
+      if (f.family.exclusive && oneGame && v > 1 + EXCLUSIVE_SLACK) {
         throw new ScoringError("bracket_exclusivity", "tier member is not in [0, 1]", [f.key, c]);
       }
       carried.push(v);
     }
-    if (f.family.exclusive && stableSum(carried) > 1 + EXCLUSIVE_SLACK) {
+    if (f.family.exclusive && oneGame && stableSum(carried) > 1 + EXCLUSIVE_SLACK) {
       throw new ScoringError("bracket_exclusivity", "two exclusive tiers set in one game", [f.key]);
     }
     const scalar = get(f.family.scalar);
@@ -290,8 +314,10 @@ function evaluate(line: StatLine, settings: ScoringSettings, detail: boolean): E
  * Scores one canonical line under normalised settings (plan 08 §2, §3.4, §4): rules gated by the
  * line's class, the per-POSITION override used where one exists, ESPN lines scored as sent
  * (pre-bucketed), derived and projection lines bracketized from their scalars, exclusivity of tier
- * families asserted. Throws `invalid_line` (malformed line), `bracket_exclusivity` (two tiers set,
- * a tier outside [0, 1]) or `invalid_settings` / `bracket_bounds` (hand-built settings).
+ * families asserted per game (an ESPN season or preseason split's members are game counts: only
+ * their sign is checked). Throws `invalid_line` (malformed line), `bracket_exclusivity` (two tiers
+ * set in one game, a tier outside [0, 1], a negative count) or `invalid_settings` /
+ * `bracket_bounds` (hand-built settings).
  */
 export function score(line: StatLine, settings: ScoringSettings): ScoreResult {
   return evaluate(line, settings, true).result;

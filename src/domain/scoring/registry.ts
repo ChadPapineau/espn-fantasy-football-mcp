@@ -7,16 +7,18 @@ import { CANONICAL_NAME_RE } from "./types.js";
 
 /**
  * How a family's members relate to its scalar (plan 08 §4):
- * - `tier` — exclusive indicators over a partition (PA/YA tiers, HC margins): one member per game;
+ * - `tier` — exclusive indicators over a partition, at most one member per game (a gap pays none):
+ *   PA/YA tiers, HC margins, and the yardage-game bonuses — plan 08 A-2, settled on the recordings:
+ *   17/37/56 mean a 300–399 / 100–199 yard game, so a 400+ passing game sets 18 and never 17, a
+ *   200+ rushing or receiving game 38/57 and never 37/56, on every recorded weekly actual, and
+ *   ESPN's appliedStats pay only the top tier (tests/golden/engine-families.test.ts);
  * - `count` — per-bucket counts over a partition (FG distance buckets: a kicker can make two 40–49
  *   FGs and a 52 in one game — 13 recorded K weeks hit two buckets);
- * - `threshold` — cumulative indicators, a member pays when the scalar reaches its lower bound
- *   (yardage-game bonuses, plan 08 A-2);
  * - `length` — per-play length thresholds (long-TD bonuses): cumulative on ESPN (a single 50+ yd TD
  *   sets both the 40+ and the 50+ id — recorded), underivable from weekly totals except as zero;
  * - `per_n` — `max(0, ⌊scalar / N⌋)` with N in `lower` (recorded: every per-N id on 712 lines).
  */
-export type FamilyKind = "tier" | "count" | "threshold" | "length" | "per_n";
+export type FamilyKind = "tier" | "count" | "length" | "per_n";
 
 /** Each family's kind. */
 export const FAMILY_KIND: Readonly<Record<BracketFamilyName, FamilyKind>> = Object.freeze({
@@ -26,7 +28,7 @@ export const FAMILY_KIND: Readonly<Record<BracketFamilyName, FamilyKind>> = Obje
   dst_points_allowed: "tier",
   dst_yards_allowed: "tier",
   margin: "tier",
-  yardage_bonus: "threshold",
+  yardage_bonus: "tier",
   long_td_bonus: "length",
   per_n_yards: "per_n",
 });

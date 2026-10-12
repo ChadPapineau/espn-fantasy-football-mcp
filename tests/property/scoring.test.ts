@@ -209,7 +209,7 @@ describe("P4 bracket exclusivity", () => {
   });
 });
 
-describe("P5 bonus monotonicity", () => {
+describe("P5 bonus monotonicity (A-2 settled: the yardage bonuses are exclusive game tiers)", () => {
   const s = normalizeSettings({
     scoringItems: [
       { statId: 24, points: 0.1 },
@@ -228,7 +228,43 @@ describe("P5 bonus monotonicity", () => {
       ),
     );
   });
-  it("E[bonus] from samples equals P(stat ≥ target) × points", () => {
+  it("random tier points: non-decreasing whenever the top tier pays at least the lower one", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 10_000 }).map((x) => x / 1000),
+        fc.integer({ min: 0, max: 10_000 }).map((x) => x / 1000),
+        fc.constantFrom([24, 37, 38, "rush_yd"] as const, [42, 56, 57, "rec_yd"] as const),
+        fc.integer({ min: -20, max: 400 }),
+        fc.integer({ min: 0, max: 300 }),
+        (a, extra, [base, lo, hi, stat], y, d) => {
+          const t = normalizeSettings({
+            scoringItems: [
+              { statId: base, points: 0.1 },
+              { statId: lo, points: a },
+              { statId: hi, points: a + extra },
+            ],
+          });
+          return (
+            score(lineOf({ [stat]: y }, 2, "nflverse"), t).points <=
+            score(lineOf({ [stat]: y + d }, 2, "nflverse"), t).points
+          );
+        },
+      ),
+    );
+  });
+  it("a top tier paying less than the lower one makes the score drop at its bound — as ESPN scores it", () => {
+    const t = normalizeSettings({
+      scoringItems: [
+        { statId: 24, points: 0.1 },
+        { statId: 37, points: 3 },
+        { statId: 38, points: 2 },
+      ],
+    });
+    expect(score(lineOf({ rush_yd: 199 }, 2, "nflverse"), t).points).toBe(22.9);
+    expect(score(lineOf({ rush_yd: 200 }, 2, "nflverse"), t).points).toBe(22);
+    expect(score(lineOf({ rush_yd: 200, rush_yd_200: 1 }, 2, "espn"), t).points).toBe(22);
+  });
+  it("E[bonus] from samples equals Σ P(stat in tier) × the tier's points", () => {
     fc.assert(
       fc.property(
         fc.array(fc.integer({ min: 0, max: 260 }), { minLength: 1, maxLength: 60 }),
@@ -238,7 +274,7 @@ describe("P5 bonus monotonicity", () => {
             s,
             "player_sim",
           );
-          const p100 = ys.filter((y) => y >= 100).length / ys.length;
+          const p100 = ys.filter((y) => y >= 100 && y <= 199).length / ys.length;
           const p200 = ys.filter((y) => y >= 200).length / ys.length;
           const meanYd = ys.reduce((a, b) => a + b, 0) / ys.length;
           return (
@@ -589,9 +625,11 @@ describe("P15 translator agreement (synthetic rows; the fixture set is tests/gol
       (id, i) => ({ statId: id, points: (i % 5) + 0.5 }),
     ),
   });
-  /** What ESPN's pre-bucketed line would carry for the same raw week (per-N, threshold bonuses). */
+  /** What ESPN's pre-bucketed line carries for the same raw week (per-N; one yardage tier — A-2). */
   const espnFrom = (r: Record<string, number>) => {
     const per = (v: number, n: number) => Math.max(0, Math.floor(v / n));
+    const tier = (v: number | undefined, lo: number, hi: number | null) =>
+      (v ?? 0) >= lo && (hi === null || (v ?? 0) <= hi) ? 1 : 0;
     const raw: Record<string, number> = {
       "3": r.passing_yards ?? 0,
       "4": r.passing_tds ?? 0,
@@ -606,12 +644,13 @@ describe("P15 translator agreement (synthetic rows; the fixture set is tests/gol
       "28": per(r.rushing_yards ?? 0, 10),
       "48": per(r.receiving_yards ?? 0, 10),
       "54": per(r.receptions ?? 0, 5),
-      "17": (r.passing_yards ?? 0) >= 300 ? 1 : 0,
-      "18": (r.passing_yards ?? 0) >= 400 ? 1 : 0,
-      "37": (r.rushing_yards ?? 0) >= 100 ? 1 : 0,
-      "38": (r.rushing_yards ?? 0) >= 200 ? 1 : 0,
-      "56": (r.receiving_yards ?? 0) >= 100 ? 1 : 0,
-      "57": (r.receiving_yards ?? 0) >= 200 ? 1 : 0,
+      // a 300–399 / 100–199 yard game sets the lower id, a 400+ / 200+ game the top id only (recorded)
+      "17": tier(r.passing_yards, 300, 399),
+      "18": tier(r.passing_yards, 400, null),
+      "37": tier(r.rushing_yards, 100, 199),
+      "38": tier(r.rushing_yards, 200, null),
+      "56": tier(r.receiving_yards, 100, 199),
+      "57": tier(r.receiving_yards, 200, null),
     };
     return statLineFromEspn({ raw }, 1).line;
   };

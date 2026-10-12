@@ -37,12 +37,36 @@ export class GoldenPathError extends Error {
  * marked derived, and a body or scoring projection whose sha256 differs from the manifest.
  */
 export function readRecorded(rel: string): Json {
+  return guardedRead(rel, MANIFEST.files);
+}
+
+/** The previous seasons' recordings (`recorded/history/`, their own manifest — evidence too). */
+const HISTORY_MANIFEST = JSON.parse(
+  readFileSync(path.join(RECORDED, "history/manifest.json"), "utf8"),
+) as { readonly files: readonly ManifestFile[] };
+
+/** Every recorded (never derived) file path of both manifests, relative to fixtures/espn/recorded. */
+export function recordedFiles(): readonly string[] {
+  return [...MANIFEST.files, ...HISTORY_MANIFEST.files]
+    .filter((f) => !f.derived && f.path.startsWith("recorded/"))
+    .map((f) => f.path.slice("recorded/".length));
+}
+
+/**
+ * `readRecorded` for any recorded file of either manifest — the current season's (fixtures/espn/
+ * manifest.json) or the previous seasons' (recorded/history/manifest.json) — with the same guards.
+ */
+export function readAnyRecorded(rel: string): Json {
+  return guardedRead(rel, [...MANIFEST.files, ...HISTORY_MANIFEST.files]);
+}
+
+function guardedRead(rel: string, files: readonly ManifestFile[]): Json {
   const abs = path.resolve(RECORDED, rel);
   if (!abs.startsWith(RECORDED + path.sep)) {
     throw new GoldenPathError(`golden path guard: ${rel} is outside fixtures/espn/recorded`);
   }
   const key = `recorded/${path.relative(RECORDED, abs).split(path.sep).join("/")}`;
-  const entry = MANIFEST.files.find((f) => f.path === key);
+  const entry = files.find((f) => f.path === key);
   if (entry === undefined)
     throw new GoldenPathError(`golden path guard: ${key} is not in the manifest`);
   if (entry.derived) throw new GoldenPathError(`golden path guard: ${key} is derived`);

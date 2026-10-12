@@ -55,10 +55,26 @@ report the result per family (`families[].verified`, `unverified_stat_ids`) — 
   them), and the HC margin items (no head-coach line is recorded; league-a lists 161–166 with the HC
   override at 0). League-a scores the YA tier 128 (under 100 yards), but no recorded game or
   projection ever triggered it, so league-a's `dst_yards_allowed` is reported unverified on 128.
-- **`yardage_bonus` — open on plan 08 A-2.** The 300–399 / 100–199 indicators fire exactly at their
-  lower bound on every recorded line, but no recorded game reached 400 passing or 200 rushing or
-  receiving yards, so whether 17, 37 and 56 also pay above their upper bound (the engine's
-  cumulative reading) is unobserved. A test fails as soon as a re-recording holds such a game.
+- **`yardage_bonus` — verified; plan 08 A-2 settled: exclusive game tiers.** The rostered final
+  weeks hold no 400-yard passing or 200-yard rushing or receiving game, but the other recorded
+  files do (week-4 matchup scores, rosters, the player cards, the previous seasons' box scores):
+  over every distinct recorded weekly actual (9,435 player-week yardage lines), each indicator is 1
+  exactly when the game's yardage lies inside its bounds, and the 26 games at or above the top tier
+  (15 passing 400+, 8 rushing and 3 receiving 200+) set only 18 / 38 / 57 — never 17 / 37 / 56.
+  League-c scores all six ids, and ESPN's `appliedStats` on its four such games pay the top tier
+  alone (3 for 18, 2 for 38). The engine had read A-2 as cumulative and paid both tiers on every
+  line it bracketizes itself (nflverse lines, the `player_sim` and v2-opportunity samples), +2 per
+  400-yard passing game and +1 per 200-yard rushing or receiving game in league-c; it now pays the
+  one tier holding the yardage, and the golden test re-scores each recorded league-c game from its
+  yardage alone (109 bonus games) and matches ESPN's applied bonus on every one.
+- **Exclusivity is per game (plan 08 §4.1).** A season split (`statSplitTypeId` 0) carries each tier
+  member's game count (a D/ST's 91 = 3, a QB's 17 = 2) and ESPN pays count × points. The engine
+  asserted "at most one tier" on such lines too, so every D/ST season split threw and
+  `espn_get_player_stats` (season) showed no engine total for it. Only an ESPN season or preseason
+  split now lifts the per-game bound (a negative count is still drift; a derived line cannot claim
+  the split): the 1,113 recorded season splits with ESPN's per-stat values score with every tier
+  member matching ESPN — 107 of them carry a D/ST tier count above 1 and 230 a yardage-tier count
+  above 1.
 - **The D/ST points-allowed derivation (plan 08 U-6) — pinned, 70/70.** ESPN's stat 120 is the
   opponent's final score net of its defence's interception- and fumble-return TDs against this
   team's offence (6 each — the try after them still counts) and of its safeties (2 each, a penalty
@@ -168,11 +184,11 @@ report the result per family (`families[].verified`, `unverified_stat_ids`) — 
 | per_n_yards | 232 | `per_n_fg_yd_att_25` | every 25 | — | — | 96 | no — no recorded league scores it (D8) |
 | per_n_yards | 233 | `per_n_fg_yd_att_50` | every 50 | — | — | 78 | no — no recorded league scores it (D8) |
 | per_n_yards | 234 | `per_n_fg_yd_att_100` | every 100 | — | — | 41 | no — no recorded league scores it (D8) |
-| yardage_bonus | 17 | `pass_yd_300` | 300–399 | league-c | 65 | 17 | no — A-2 open |
+| yardage_bonus | 17 | `pass_yd_300` | 300–399 | league-c | 65 | 17 | yes |
 | yardage_bonus | 18 | `pass_yd_400` | 400–∞ | league-c | 56 | 0 | yes |
-| yardage_bonus | 37 | `rush_yd_100` | 100–199 | league-c | 305 | 35 | no — A-2 open |
+| yardage_bonus | 37 | `rush_yd_100` | 100–199 | league-c | 305 | 35 | yes |
 | yardage_bonus | 38 | `rush_yd_200` | 200–∞ | league-c | 295 | 0 | yes |
-| yardage_bonus | 56 | `rec_yd_100` | 100–199 | league-c | 380 | 59 | no — A-2 open |
+| yardage_bonus | 56 | `rec_yd_100` | 100–199 | league-c | 380 | 59 | yes |
 | yardage_bonus | 57 | `rec_yd_200` | 200–∞ | league-c | 360 | 0 | yes |
 
 | family | derivation | basis |
@@ -182,7 +198,7 @@ report the result per family (`families[].verified`, `unverified_stat_ids`) — 
 | fg_miss | verified | missed buckets 82/79 golden on two leagues; raw 76 = 200 + 203; blocked kicks count as misses (E8) |
 | dst_points_allowed | verified | tier indicators = bracketize(stat 120) on all 70 recorded D/ST weeks; points allowed net of defensive return TDs and safeties, 70/70 (U-6 pinned) |
 | dst_yards_allowed | verified | tier indicators = bracketize(stat 127) on all 70 recorded D/ST weeks; yards allowed = passing + rushing − sack yards, 70/70 |
-| yardage_bonus | verified (open: 17, 37, 56) | indicators fire at the lower bound on every recorded line; no recorded 400-yard passing or 200-yard rushing/receiving game, so whether 17/37/56 also pay above their upper bound is open (A-2) |
+| yardage_bonus | verified | exclusive game tiers (A-2 settled): each indicator is 1 iff the yardage is in its bounds on 9,435 recorded weekly lines; the 26 games over the top tier (15 pass 400+, 8 rush, 3 rec 200+) set only it, and ESPN pays only it |
 | long_td_bonus | verified | cumulative on every recorded line (a 50+ yard TD sets the 40+ id too); ds_pbp TD lengths reproduce 15/16/35/36/45/46 on 530/530 recorded player-weeks |
 | per_n_yards | verified | max(0, floor(scalar / N)) on every recorded per-N value, actual and projected (15,434; a negative scalar omits the id) |
 | margin | unverified | no head-coach line is recorded and no line carries a margin stat (161–172) |

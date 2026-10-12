@@ -87,13 +87,27 @@ describe("plan 08 §8 edge cases", () => {
     expect(r.points).toBe(6);
     expect(r.contributions.map((c) => c.platform_id)).toEqual(["102"]);
   });
-  it("400-yard passing game in a league scoring 17 and 18 → both pay on a derived line (A-2); ESPN lines as sent", () => {
+  it("400-yard passing game in a league scoring 17 and 18 → 18 only, as ESPN's line shows (A-2 settled: the fixture decided); ESPN lines as sent", () => {
     const s = settingsOf([item(17, 2), item(18, 3)]);
-    expect(score(line({ pass_yd: 412 }, 1), s).points).toBe(5);
+    expect(score(line({ pass_yd: 412 }, 1), s).points).toBe(3);
+    expect(score(line({ pass_yd: 412 }, 1, "projection:v2-opportunity"), s).points).toBe(3);
     expect(score(espnLine({ 3: 412, 18: 1 }, 1), s).points).toBe(3);
+    expect(score(line({ pass_yd: 412 }, 1), s).points).toBe(
+      score(espnLine({ 3: 412, 18: 1 }, 1), s).points,
+    );
   });
-  it("multi-target bonus (100+ and 200+ on rush_yd) → both pay when both thresholds are met", () => {
-    expect(score(line({ rush_yd: 205 }, 2), settingsOf([item(37, 1), item(38, 2)])).points).toBe(3);
+  it("multi-target bonus (100+ and 200+ on rush_yd) → the one tier holding the game pays (exclusive, recorded)", () => {
+    const s = settingsOf([item(37, 1), item(38, 2)]);
+    expect(score(line({ rush_yd: 205 }, 2), s).points).toBe(2);
+    expect(score(line({ rush_yd: 150 }, 2), s).points).toBe(1);
+    expect(score(line({ rec_yd: 230 }, 3), settingsOf([item(56, 1), item(57, 2)])).points).toBe(2);
+  });
+  it("a one-game ESPN line with two yardage tiers set (bad upstream data) → drift, never a score", () => {
+    expect(() =>
+      score(espnLine({ 3: 412, 17: 1, 18: 1 }, 1), settingsOf([item(17, 2), item(18, 3)])),
+    ).toThrow(
+      expect.objectContaining({ code: "bracket_exclusivity", detail: ["yardage_bonus:pass_yd"] }),
+    );
   });
   it("2-pt conversions under 62 and under 19/26/44 → one canonical value each; both → a warning", () => {
     expect(score(espnLine({ 62: 1 }, 2), settingsOf([item(62, 2)])).points).toBe(2);

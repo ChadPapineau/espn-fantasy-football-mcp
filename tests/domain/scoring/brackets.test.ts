@@ -1,5 +1,7 @@
 // brackets.test.ts — src/domain/scoring/brackets.ts (plan 08 §4.1: families from the ids present in S,
-// overlap = error naming both ids, gap = complete_range false; bracketize for derived lines; P4).
+// overlap = error naming both ids, gap = complete_range false; bracketize for derived lines; P4;
+// §4.2 / A-2: the yardage-game bonuses are exclusive game tiers, as the recordings show).
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   bracketize,
@@ -74,14 +76,25 @@ describe("buildFamilies", () => {
       expect.objectContaining({ code: "bracket_bounds", detail: named }),
     );
   });
-  it("threshold, length and per-N families never check a partition", () => {
-    const [bonus] = families([17, 18]);
+  it("yardage bonuses are exclusive game tiers (plan 08 A-2, settled on the recordings)", () => {
+    const bonus = only([18, 17]);
     expect(bonus).toMatchObject({
       family: "yardage_bonus",
       scalar: "pass_yd",
-      exclusive: false,
+      exclusive: true,
       complete_range: true,
     });
+    expect(familyKind(bonus)).toBe("tier");
+    expect(bonus.members.map((m) => [m.platform_id, m.lower, m.upper])).toEqual([
+      ["17", 300, 399],
+      ["18", 400, null],
+    ]);
+    // a league scoring only the top tier pays nothing for a 300–399 game (a legal gap)
+    expect(only([18])).toMatchObject({ exclusive: true, complete_range: false });
+    expect(only([37, 38])).toMatchObject({ scalar: "rush_yd", exclusive: true });
+    expect(only([56, 57])).toMatchObject({ scalar: "rec_yd", exclusive: true });
+  });
+  it("length and per-N families never check a partition", () => {
     expect(only([15, 16])).toMatchObject({
       family: "long_td_bonus",
       scalar: "pass_td",
@@ -160,11 +173,35 @@ describe("bracketize (P4)", () => {
   it("negative yards allowed fall in the open-low tier", () => {
     expect(bracketize(only([128, 129]), -12)).toEqual([1, 0]);
   });
-  it("threshold bonuses are cumulative (A-2): a 412-yd game sets 300+ and 400+", () => {
-    const [bonus] = families([17, 18]);
-    expect(bracketize(bonus!, 412)).toEqual([1, 1]);
-    expect(bracketize(bonus!, 300)).toEqual([1, 0]);
-    expect(bracketize(bonus!, 299.9)).toEqual([0, 0]);
+  it("yardage bonuses pay the one tier holding the game (A-2, recorded): a 412-yd game sets 400+ only", () => {
+    const bonus = only([17, 18]);
+    expect(bracketize(bonus, 412)).toEqual([0, 1]);
+    expect(bracketize(bonus, 400)).toEqual([0, 1]);
+    expect(bracketize(bonus, 399)).toEqual([1, 0]);
+    expect(bracketize(bonus, 300)).toEqual([1, 0]);
+    expect(bracketize(bonus, 299.9)).toEqual([0, 0]);
+    expect(bracketize(only([37, 38]), 205)).toEqual([0, 1]);
+    expect(bracketize(only([56, 57]), 150)).toEqual([1, 0]);
+    // 17 is "a 300–399 yard game": it never pays above 399, even when 18 is not scored
+    expect(bracketize(only([17]), 412)).toEqual([0]);
+    expect(bracketize(only([18]), 350)).toEqual([0]);
+  });
+  it("property: a yardage-bonus vector sets at most one member — the one whose bounds hold the yardage", () => {
+    const fams = [only([17, 18]), only([37, 38]), only([56, 57]), only([17]), only([38])];
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...fams),
+        fc.double({ min: -100, max: 1000, noNaN: true }),
+        (f, yd) => {
+          const v = bracketize(f, yd)!;
+          expect(v.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1);
+          f.members.forEach((m, i) => {
+            const inside = yd >= m.lower && (m.upper === null || yd <= m.upper);
+            expect(v[i]).toBe(inside ? 1 : 0);
+          });
+        },
+      ),
+    );
   });
   it("per-N is max(0, ⌊scalar/N⌋) — negative yards give 0 (recorded)", () => {
     const pern = only([5, 6, 8]);

@@ -1,8 +1,9 @@
 // brackets.ts — bracket families built from the ids present in S (plan 08 E3, §4.1: members filtered
 // to S, sorted, partition asserted — an overlap is an error naming both ids, a gap is legal and
 // recorded as complete_range: false), and `bracketize(family, scalar)` for derived lines (§4.1
-// "Scoring a derived line"; P4). Ported from sibling @cf3b015 (contiguity, bracketize), adapted to
-// ESPN's id-keyed bounds (no name parsing).
+// "Scoring a derived line"; P4; §4.2's yardage-game bonuses are exclusive tiers — A-2, settled on
+// the recordings). Ported from sibling @cf3b015 (contiguity, bracketize), adapted to ESPN's id-keyed
+// bounds (no name parsing).
 import { ScoringError } from "./errors.js";
 import { at, finiteWithin, MAX_ABS_STAT } from "./numeric.js";
 import { CANONICAL_DEFS, canonicalDef, FAMILY_KIND, type FamilyKind } from "./registry.js";
@@ -77,7 +78,8 @@ function partitionComplete(
  * The families of a rule set (plan 08 §4.1): every mapped rule whose canonical is a family member
  * in the registry joins its (family, scalar) group; members are sorted by bounds; partition
  * families are checked (overlap → `bracket_bounds`); `exclusive` is true for `tier` families
- * only — FG buckets are counts (recorded), bonuses cumulative (A-2). Ordered by class, name, scalar.
+ * only — PA/YA tiers, margins and the yardage-game bonuses (A-2: exclusive, recorded); FG buckets
+ * are counts (recorded), long-TD ids cumulative. Ordered by class, name, scalar.
  */
 export function buildFamilies(rules: readonly ScoringRule[]): readonly BracketFamily[] {
   const groups = new Map<
@@ -137,11 +139,11 @@ const within = (m: BracketMember, x: number): boolean =>
 /**
  * The member values a derived line gets from its scalar (plan 08 §4.1, P4), in member order:
  * `tier`/`count` — one-hot on the member whose inclusive bounds hold the scalar, all zero in a gap
- * or outside the members (one kick, one bucket); `threshold` — 1 for every member whose lower bound
- * the scalar reaches (cumulative, A-2); `per_n` — `max(0, ⌊scalar / N⌋)` (recorded on every per-N
- * id: −5 yards gives 0, never −1); `length` — all zero when the scalar (a TD count) is ≤ 0, else
- * null: a weekly total cannot say how long its TDs were (underivable, plan 08 §4.3). A non-finite
- * or absurd scalar throws `invalid_line`.
+ * or outside the members (one kick, one bucket; one yardage-game tier — a 412-yard passing game
+ * sets 400+ only, as ESPN's own lines do, A-2); `per_n` — `max(0, ⌊scalar / N⌋)` (recorded on
+ * every per-N id: −5 yards gives 0, never −1); `length` — all zero when the scalar (a TD count) is
+ * ≤ 0, else null: a weekly total cannot say how long its TDs were (underivable, plan 08 §4.3). A
+ * non-finite or absurd scalar throws `invalid_line`.
  */
 export function bracketize(family: BracketFamily, scalar: number): readonly number[] | null {
   if (!finiteWithin(scalar, MAX_ABS_STAT)) {
@@ -156,8 +158,6 @@ export function bracketize(family: BracketFamily, scalar: number): readonly numb
       const hit = members.findIndex((m) => within(m, scalar));
       return members.map((_, i) => (i === hit ? 1 : 0));
     }
-    case "threshold":
-      return members.map((m) => (scalar >= m.lower ? 1 : 0));
     case "per_n":
       return members.map((m) => (scalar > 0 ? Math.floor(scalar / m.lower) : 0));
     case "length":

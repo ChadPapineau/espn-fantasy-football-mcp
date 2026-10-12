@@ -1,6 +1,7 @@
 // engine.test.ts — src/domain/scoring/engine.ts (plan 08 E1, §3.4 gating and position overrides, §4.1
-// exclusive tiers and derived lines, §4.2–4.3 bonuses / per-N / long-TD, §4.6 E4, §4.7 complete,
-// §5 E5 samples). Hand-built inputs only (plan 05 §3 fixture law: never golden evidence).
+// exclusive tiers (per game: an ESPN season split carries counts) and derived lines, §4.2–4.3
+// bonuses (A-2: exclusive yardage tiers) / per-N / long-TD, §4.6 E4, §4.7 complete, §5 E5 samples).
+// Hand-built inputs only (plan 05 §3 fixture law: never golden evidence).
 import { describe, expect, it } from "vitest";
 import {
   explain,
@@ -10,6 +11,7 @@ import {
   sumPoints,
 } from "../../../src/domain/scoring/engine.js";
 import { renormalizeSettings } from "../../../src/domain/scoring/settings.js";
+import { statLineFromEspn } from "../../../src/domain/scoring/stat_map.js";
 import type { ScoringSettings, StatLine } from "../../../src/domain/scoring/types.js";
 import { asPositionId } from "../../../src/domain/scoring/types.js";
 import { espnLine, item, line, settingsOf } from "./helpers.js";
@@ -157,6 +159,47 @@ describe("score: exclusive tiers (plan 08 §4.1)", () => {
     const r = score(espnLine({ 89: 0.2, 90: 0.3, 91: 0.5 }, DST), s);
     expect(r.points).toBe(3.7);
   });
+  it("exclusivity is per GAME: a season or preseason ESPN split carries tier COUNTS and scores them", () => {
+    const season = (raw: Record<string, number>, position: number, split_type: 0 | 2 = 0) =>
+      statLineFromEspn(
+        {
+          raw,
+          split: { source_id: split_type === 2 ? 1 : 0, split_type, season: 2026, week: null },
+        },
+        position,
+      ).line;
+    // a D/ST season: one shutout, three 7–13 games (recorded shape: 91 = 3 on a season line)
+    expect(score(season({ 89: 1, 91: 3, 120: 21 }, DST), s).points).toBe(14);
+    // a QB season with two 300–399 games and one 400+ game: 2 × 2 + 1 × 3
+    const yb = settingsOf([item(17, 2), item(18, 3)]);
+    expect(score(season({ 3: 1500, 17: 2, 18: 1 }, QB), yb).points).toBe(7);
+    // ESPN's preseason projection: expected game counts, fractional and above 1
+    expect(score(season({ 3: 4100, 17: 4.6, 18: 1.2 }, QB, 2), yb).points).toBe(12.8);
+    // a count is never negative, on any line
+    expect(() => score(season({ 89: -1 }, DST), s)).toThrow(
+      expect.objectContaining({
+        code: "bracket_exclusivity",
+        detail: ["dst_points_allowed:dst_pa_raw", "dst_pa_0"],
+      }),
+    );
+  });
+  it("only an ESPN aggregate split lifts the per-game bound: weekly splits and other sources keep it", () => {
+    const weekly = statLineFromEspn(
+      { raw: { 89: 1, 90: 1 }, split: { source_id: 0, split_type: 1, season: 2026, week: 3 } },
+      DST,
+    ).line;
+    expect(() => score(weekly, s)).toThrow(
+      expect.objectContaining({ code: "bracket_exclusivity" }),
+    );
+    // a derived line cannot claim to be a season aggregate to escape the check
+    const forged = {
+      ...line({ dst_pa_0: 1, dst_pa_1_6: 1 }, DST, "nflverse"),
+      split: { source_id: 0, split_type: 0, season: 2026, week: null },
+    } as StatLine;
+    expect(() => score(forged, s)).toThrow(
+      expect.objectContaining({ code: "bracket_exclusivity" }),
+    );
+  });
   it("an ESPN line is never bracketized: raw 120 with no tier scores 0 (game not played)", () => {
     expect(score(espnLine({ 120: 0 }, DST), s)).toMatchObject({ points: 0, complete: true });
     expect(score(espnLine({ 120: 0 }, DST, true), s)).toMatchObject({ points: 0, complete: false });
@@ -188,17 +231,21 @@ describe("score: derived and projection lines (plan 08 §4.1–§4.3)", () => {
     expect(score(line({ dst_pa_raw: 15 }, DST), s).points).toBe(1);
     expect(score(line({ dst_pa_raw: 30 }, DST), s).points).toBe(0);
   });
-  it("derives cumulative yardage bonuses and per-N items from the yardage", () => {
+  it("derives the one yardage tier holding the game (A-2: exclusive, recorded) and per-N items", () => {
     const r = score(line({ pass_yd: 412, pass_td: 0 }, QB), s);
     expect(r.contributions.map((c) => [c.canonical, c.value, c.kind])).toEqual([
       ["pass_td", 0, "linear"],
       ["per_n_pass_yd_25", 16, "linear"],
       ["pass_td_40", 0, "bonus"],
       ["pass_td_50", 0, "bonus"],
-      ["pass_yd_300", 1, "bonus"],
+      ["pass_yd_300", 0, "bonus"],
       ["pass_yd_400", 1, "bonus"],
     ]);
-    expect(r).toMatchObject({ points: 21, complete: true, underivable: [] });
+    expect(r).toMatchObject({ points: 19, complete: true, underivable: [] });
+    const mid = score(line({ pass_yd: 350, pass_td: 0 }, QB, "projection:v2-opportunity"), s);
+    expect(mid.contributions.filter((c) => c.kind === "bonus" && c.value !== 0)).toMatchObject([
+      { canonical: "pass_yd_300", value: 1, points: 2 },
+    ]);
   });
   it("long-TD bonuses are underivable from a weekly TD count > 0 (complete: false)", () => {
     const r = score(line({ pass_yd: 250, pass_td: 2 }, QB), s);
@@ -315,13 +362,28 @@ describe("scoreSamples (plan 08 §5, E5)", () => {
       "yardage_bonus:rush_yd",
     ]);
   });
-  it("uses ESPN's fractional bonus probabilities, capped at 1 per sample", () => {
+  it("a sample above the top tier pays only the top tier: E = P(100–199) × 5 + P(200+) × 10", () => {
+    const r = scoreSamples([rb(250), rb(150), rb(50), rb(210)], s, "player_sim");
+    // linear 0.1/yd: (25 + 15 + 5 + 21) / 4 = 16.5; bonuses (10 + 5 + 0 + 10) / 4 = 6.25
+    expect(r.mean_of_exact).toBe(22.75);
+    expect(r.dist.mean).toBe(22.75);
+    expect(r.bonus_probability).toEqual({ rush_yd_100: 0.25, rush_yd_200: 0.5 });
+    expect(r.bracket_probability["yardage_bonus:rush_yd"]).toEqual([0.25, 0.5]);
+  });
+  it("uses ESPN's fractional tier probabilities as sent; a bonus count above 1 is capped at 1 per sample", () => {
     const r = scoreSamples(
-      [line({ rush_yd: 75, rush_yd_100: 0.251, rush_yd_200: 2 }, RB, "espn")],
+      [line({ rush_yd: 75, rush_yd_100: 0.251, rush_yd_200: 0.04 }, RB, "espn")],
       s,
       "player_sim",
     );
-    expect(r.bonus_probability).toEqual({ rush_yd_100: 0.251, rush_yd_200: 1 });
+    expect(r.bonus_probability).toEqual({ rush_yd_100: 0.251, rush_yd_200: 0.04 });
+    // two 40+ yard TDs in one game: a count (long_td_bonus), capped at 1 as a probability
+    const td = scoreSamples(
+      [line({ rush_td: 2, rush_td_40: 2 }, RB, "espn")],
+      settingsOf([item(35, 2)]),
+      "player_sim",
+    );
+    expect(td.bonus_probability).toEqual({ rush_td_40: 1 });
   });
   it.each([
     ["an unknown basis", [rb(1)], "mean"],

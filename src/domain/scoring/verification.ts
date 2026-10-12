@@ -25,8 +25,8 @@ export interface FamilyEvidence {
   /** Whether a derived line's member values are reproduced on ESPN's raw values. */
   readonly derivation: "verified" | "unverified";
   /**
-   * Members whose derived-line semantics stay open although the family's are evidenced (plan 08
-   * A-2: whether a 300–399 indicator also pays above 399 — no recorded 400-yard game).
+   * Members whose derived-line semantics stay open although the family's are evidenced (empty
+   * today: plan 08 A-2 — whether a 300–399 indicator also pays above 399 — is settled, exclusive).
    */
   readonly derivation_open_stat_ids: readonly string[];
   /** Server-authored summary of the evidence (registry text, never third-party). */
@@ -64,8 +64,7 @@ export const FAMILY_EVIDENCE: Readonly<Record<BracketFamilyName, FamilyEvidence>
   ),
   yardage_bonus: ev(
     "verified",
-    "indicators fire at the lower bound on every recorded line; no recorded 400-yard passing or 200-yard rushing/receiving game, so whether 17/37/56 also pay above their upper bound is open (A-2)",
-    ["17", "37", "56"],
+    "exclusive game tiers (A-2 settled): each indicator is 1 iff the yardage is in its bounds on 9,435 recorded weekly lines; the 26 games over the top tier (15 pass 400+, 8 rush, 3 rec 200+) set only it, and ESPN pays only it",
   ),
   long_td_bonus: ev(
     "verified",

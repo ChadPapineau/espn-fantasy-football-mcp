@@ -96,9 +96,17 @@ describe("familyVerification (what espn_get_league reports per family — plan 0
       ["fg_distance:kick_distance", false, ["74"]],
     ]);
   });
-  it("A-2: 17 alone is open; 18 alone is verified", () => {
-    expect(rows(settingsOf([item(17, 2)]))).toEqual([["yardage_bonus:pass_yd", false, ["17"]]]);
+  it("A-2 settled (exclusive game tiers, recorded): 17 alone, 18 alone and both are verified", () => {
+    expect(FAMILY_EVIDENCE.yardage_bonus).toMatchObject({
+      derivation: "verified",
+      derivation_open_stat_ids: [],
+    });
+    expect(rows(settingsOf([item(17, 2)]))).toEqual([["yardage_bonus:pass_yd", true, []]]);
     expect(rows(settingsOf([item(18, 3)]))).toEqual([["yardage_bonus:pass_yd", true, []]]);
+    expect(rows(settingsOf([item(37, 1), item(38, 2), item(56, 1), item(57, 2)]))).toEqual([
+      ["yardage_bonus:rec_yd", true, []],
+      ["yardage_bonus:rush_yd", true, []],
+    ]);
   });
   it("121 at 0 is ignored; 121 scored is unverified", () => {
     expect(rows(settingsOf([item(92, 0, { "16": 1 }), item(121, 0, { "16": 0 })]))).toEqual([

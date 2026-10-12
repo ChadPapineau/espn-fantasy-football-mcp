@@ -90,7 +90,7 @@ export interface BracketFamily {
   position_class: PositionClass;
   scalar: Canonical;                               // the raw scalar the family brackets, e.g. "dst_pa_raw", "kick_distance", "pass_yd"
   members: { canonical: Canonical; platform_id: string; lower: number; upper: number | null }[]; // from the fixed bound table, filtered to the ids present in S, sorted
-  exclusive: boolean;                              // true for distance / PA / YA tiers (exactly one indicator per game); false for bonuses (cumulative thresholds)
+  exclusive: boolean;                              // true for distance / PA / YA tiers (exactly one indicator per game) and the yardage-game bonuses (at most one per game — A-2 settled); false for long-TD bonuses (cumulative)
   complete_range: boolean;                         // the members present in S partition the scalar's range with no gap or overlap
 }
 export interface ScoringSettings {
@@ -214,7 +214,7 @@ points(line, settings) = Σ_{rule ∈ rules, rule.applies_to ∋ line.position_c
 
 ### 4.2 Yardage-game bonuses (`yardage_bonus`: 17/18, 37/38, 56/57)
 
-Cumulative indicators, not exclusive: a 412-yard passing game scores **both** 17 and 18 when a league scores both [A-2 — verified by the first golden run containing a 400-yard game; ESPN's own line will show whether 17 is also set]. `E[bonus] = P(yards ≥ target) × pts` from samples — never `[E[yards] ≥ target] × pts` (sib 08 §4.2).
+Exclusive game tiers, not cumulative [A-2 — **settled 2026-10-11 by the recordings**; the plan had assumed cumulative and left it to "ESPN's own line"]: 17 / 37 / 56 mean a 300–399 / 100–199 yard game, so a 412-yard passing game sets **18 only** and a 205-yard rushing game 38 only. On every recorded weekly actual each indicator is 1 exactly when the yardage lies inside its bounds (the 26 games at or above a top tier never set the lower one), and ESPN's `appliedStats` pay the top tier alone (`docs/evals/phase2-engine-families.md`). `E[bonus] = Σ_m P(yards ∈ m) × pts_m` from samples — never `[E[yards] ∈ m] × pts` (sib 08 §4.2).
 
 ### 4.3 Long-TD bonuses and per-N-yard items
 
@@ -290,7 +290,7 @@ A projection is stored **once** per `(gsis_id, season, week, model_version)` as 
 | P2 | **Homogeneity in a modifier**: perturb one item's `points` by δ → total moves by exactly `δ × value` | random rule, δ ∈ [−5, 5] |
 | P3 | **Override precedence**: perturb `overrides[pos]` → only lines with that position move; perturb `points` → only lines *without* an override for their position move | random positions |
 | P4 | **Bracket exclusivity**: `bracketize` sets exactly one member for any scalar inside a complete range and none inside a recorded gap; removing one member changes only lines whose scalar falls in it | random contiguous families with and without gaps |
-| P5 | **Bonus monotonicity**: `score` is non-decreasing in a stat that carries only positive bonuses; `E[bonus]` from samples equals `P(stat ≥ target) × pts` within MC error | random targets/points |
+| P5 | **Bonus monotonicity**: `score` is non-decreasing in a stat that carries only positive bonuses; `E[bonus]` from samples equals `P(stat ≥ target) × pts` within MC error [A-2 settled: the yardage bonuses are exclusive tiers, so `E[bonus] = Σ_m P(stat ∈ m) × pts_m` and the score is non-decreasing when a tier's points do not decrease with its bounds — a league paying the lower tier more drops at the bound, as ESPN does] | random targets/points |
 | P6 | **Class gating**: a stat counted under `O` never counts under `DST` and vice versa; a line whose class is outside a rule's `applies_to` contributes 0 for that rule | lines with both O and DST stats |
 | P7 | **Unmapped / ignored / underivable**: an unknown ESPN id in `S` changes no score and appears in `unmapped[]` once per hash; an unknown canonical in a line appears in `ignored[]`; a long-TD id in `S` with an nflverse line sets `underivable[]` and `complete: false` | random extra ids |
 | P8 | **Normaliser idempotence and hash stability**: `normalize(normalize(s)) = normalize(s)`; reordering `scoringItems[]` or the keys of `pointsOverrides` does not change `settings_hash`; changing any `points` or override does | permutations |
@@ -323,8 +323,8 @@ A projection is stored **once** per `(gsis_id, season, week, model_version)` as 
 | D/ST line with two exclusive tiers set (bad upstream data) | drift (`INTERNAL` naming the family); never a score | §4.1 |
 | D/ST return TD in a week with exactly one of 103/104 | the golden orientation passes; the swap fails (E9 settled) | E9 |
 | Offensive player with a return TD | counts under 101/102 (or 105 if the league uses the union) only; D/ST ids untouched | §4.4 |
-| 400-yard passing game in a league scoring 17 and 18 | both pay [A-2]; or 18 only if ESPN's line shows 17 unset — the fixture decides | §4.2 |
-| Multi-target bonus (100+ and 200+ on `rush_yd`) | both pay when both thresholds are met | 05 §7 |
+| 400-yard passing game in a league scoring 17 and 18 | 18 only — ESPN's line shows 17 unset (A-2 settled: the fixture decided) | §4.2 |
+| Multi-target bonus (100–199 and 200+ on `rush_yd`) | the one tier holding the game pays (205 yards → 38 only — recorded) | §4.2; 05 §7 |
 | 2-pt conversions in a league using 62 and one using 19/26/44 | one canonical value each; a league with both → normaliser warning | §3.1 |
 | QB fumble lost on a sack | counts (nflverse `sack_fumbles_lost` in the sum); ESPN's 72 carries it | §3.2 |
 | A line whose fumbles are all `sack_fumbles_lost` | 72 = n; 68 = n; `S` decides which scores | 05 §7 adversarial |
@@ -363,7 +363,7 @@ A projection is stored **once** per `(gsis_id, season, week, model_version)` as 
 | # | Assumption / unverified | Verify by |
 |---|---|---|
 | A-1 | Exact nflverse column names in §3.2 (`passing_interceptions`, `carries`, `sack_fumbles_lost`, `def_fumbles_recovered`, `kick_distance`, …) | the loader's schema assertion on the first `eff refresh nflverse` (plan 01 §5.5); one file |
-| A-2 | Yardage-game bonuses are cumulative on ESPN (a 400-yard game sets both 17 and 18) | the first fixture week containing one; ESPN's own `stats{}` shows the indicators |
+| A-2 | Yardage-game bonuses are cumulative on ESPN (a 400-yard game sets both 17 and 18) — **settled 2026-10-11: exclusive** (a 400-yard game sets 18, never 17; 26 recorded games at or above a top tier) | the recorded fixtures' own `stats{}` and `appliedStats` (`tests/golden/engine-families.test.ts`) |
 | A-3 | Decimal-scaled integer arithmetic avoids float drift at 2 dp for any realistic line | property P9/P11 with adversarial magnitudes |
 | U (03 §G.1 #9; 05 §9.1 #10) | 103 vs 104 order | E9's mutation test on a recorded D/ST return-TD week |
 | U (05 §9.1 #10) | `per_n_yards` semantics; `isReverseItem`, `allowOutOfPositionScoring`, `scoringEnhancementType`, `SLOT_POINTS`; ESPN's rounding of `appliedTotal` | the golden run (E4); a second fixture league for the per-N items (plan 10 D8) |
