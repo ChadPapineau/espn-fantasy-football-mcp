@@ -18,8 +18,12 @@
 //     --identity        refuse an author or committer address that is not a GitHub no-reply address
 //                       (<id>+<login>@users.noreply.github.com); the address itself is never printed
 //     --message <file>  scan a commit message (it is published with the commit)
-// Exit: 0 clean · 1 findings · 2 usage/IO error, or content it cannot scan (it fails closed: a file
-// too large to read is an error, and a NUL byte only skips a file whose name is a binary format).
+// Exit: 0 clean · 1 findings — content it cannot read included: an archive, a document container,
+// a compressed stream or a database (by its BYTES, whatever its name), or bytes that are neither
+// text nor a recognised binary format are refused (S5, S7) · 2 usage/IO error (a file too large to
+// read is an error, never skipped). It reads UTF-8, and UTF-16/UTF-32 with a byte-order mark; gzip is
+// decompressed; only a binary whose bytes carry its extension's format magic is skipped, and the
+// deny-list still reads its bytes. Details: "what a blob IS" below.
 //
 // Suppression: a line containing `scan-secrets: allow` skips the GENERIC rules on that line only.
 // It never suppresses the ESPN credential rules, a private key, or the deny-list (gitleaks in CI
@@ -383,19 +387,256 @@ export function isGithubNoreply(addr) {
   return /^(?:\d+\+)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})@users\.noreply\.github\.com$/i.test(addr);
 }
 
-/** A NUL byte skips a file only when its name is one of these binary formats. */
-const BINARY_EXT =
-  /\.(?:png|jpe?g|gif|webp|ico|icns|bmp|tiff?|avif|heic|pdf|jar|woff2?|ttf|otf|eot|wasm|mp3|mp4|m4a|mov|wav|ogg|webm|docx|xlsx|pptx|node|dylib|so|o|a|class|bin)$/i;
+// --- what a blob IS (its bytes decide, never only its name) ---------------------------------------
+//
+// The scanner reads UTF-8 text, and UTF-16 / UTF-32 text that starts with a byte-order mark; it
+// decompresses gzip; it skips (deny-list on the raw bytes only) a binary whose bytes carry the magic
+// number of the opaque format its extension names (an image, audio, video, font, wasm or native
+// object). Everything else is REFUSED (fail closed): an archive, a document container (.docx/.xlsx/
+// .pptx/.odt/.numbers/.epub/.jar are zip files, a .pdf carries Flate streams), a compressed stream or
+// a database — detected by content (magic number, or a zip record anywhere: a zip appended to another
+// file still opens) and by extension — and any other content that is neither text nor a recognised
+// binary (a raw deflate or brotli stream, legacy-encoded text, UTF-16 without a byte-order mark that
+// is not plain ASCII). A rule cannot see into compressed bytes, so "clean" would be a lie.
+
 /**
- * Archives and databases that no rule can read (S5: a compressed raw capture or a store dump
- * would skip every identifier rule): refused outright — fail closed — unless the path is on the
- * reviewed allow-list below (empty today). gzip (`.gz`, `.tgz`) is decompressed and scanned instead.
+ * Archives, document containers, compressed streams and databases refused by NAME (S5: a compressed
+ * raw capture or a store dump would skip every identifier rule) — fail closed — unless the path is on
+ * the reviewed allow-list below (empty today). gzip (`.gz`, `.tgz`, `.svgz`) is decompressed and
+ * scanned instead. Content sniffing (containerKind) refuses the same formats under any other name.
  */
 export const REFUSED_EXT =
-  /\.(?:zip|7z|xz|zst|zstd|bz2|lz4|lzma|rar|tar|sqlite|sqlite3|db|db3|parquet|arrow|feather|ipc|duckdb)$/i;
-export const GZIP_EXT = /\.(?:gz|tgz)$/i;
+  /\.(?:zip|jar|war|ear|aar|apk|aab|ipa|xpi|crx|whl|egg|nupkg|vsix|docx|docm|dotx|dotm|xlsx|xlsm|xlsb|xltx|xltm|pptx|pptm|potx|potm|ppsx|odt|ods|odp|odg|odf|ott|ots|otp|numbers|pages|key|epub|kmz|3mf|xps|oxps|usdz|sketch|pdf|doc|xls|ppt|msg|msi|cab|woff2?|7z|xz|zst|zstd|bz2|lz4|lzma|lz|lzo|br|z|rar|tar|iso|dmg|pkg|deb|rpm|sqlite|sqlite3|db|db3|parquet|arrow|feather|ipc|duckdb)$/i;
+export const GZIP_EXT = /\.(?:gz|tgz|svgz)$/i;
 /** Reviewed binary paths that may be committed despite REFUSED_EXT (none). */
 export const REVIEWED_BINARY_ALLOWLIST = Object.freeze(new Set([]));
+/** gzip layers it peels before refusing (a gzip inside a gzip inside a gzip is refused). */
+export const MAX_GZIP_LAYERS = 3;
+
+/** @param {Buffer} b @param {number} off @param {readonly number[]} bytes */
+const bytesAt = (b, off, bytes) =>
+  b.length >= off + bytes.length && bytes.every((x, i) => b[off + i] === x);
+/** @param {Buffer} b @param {number} off @param {string} s  (latin1: one char per byte) */
+const asciiAt = (b, off, s) =>
+  b.length >= off + s.length && b.toString("latin1", off, off + s.length) === s;
+
+const ZIP_RECORDS = ["PK\x03\x04", "PK\x01\x02", "PK\x05\x06", "PK\x07\x08"].map((s) =>
+  Buffer.from(s, "latin1"),
+);
+
+/**
+ * Container, compressed and database formats by their bytes, whatever the file is called.
+ * @type {readonly { kind: string, label: string, test: (b: Buffer) => boolean }[]}
+ */
+export const CONTAINER_FORMATS = Object.freeze([
+  { kind: "gzip", label: "gzip stream", test: (b) => bytesAt(b, 0, [0x1f, 0x8b]) },
+  {
+    // a zip record at any offset: a zip reader starts from the end record, so a zip appended to an
+    // image or a text file is still a zip (four bytes with two control characters: never text)
+    kind: "zip",
+    label: "zip container (.zip/.docx/.xlsx/.pptx/.odt/.numbers/.epub/.jar …)",
+    test: (b) => ZIP_RECORDS.some((r) => b.includes(r)),
+  },
+  {
+    // readers accept the header anywhere in the first KiB
+    kind: "pdf",
+    label: "PDF (its streams are compressed)",
+    test: (b) => b.subarray(0, 1024).includes("%PDF-", 0, "latin1"),
+  },
+  {
+    kind: "bzip2",
+    label: "bzip2 stream",
+    test: (b) =>
+      asciiAt(b, 0, "BZh") &&
+      b[3] !== undefined &&
+      b[3] >= 0x31 &&
+      b[3] <= 0x39 &&
+      (bytesAt(b, 4, [0x31, 0x41, 0x59, 0x26, 0x53, 0x59]) ||
+        bytesAt(b, 4, [0x17, 0x72, 0x45, 0x38, 0x50, 0x90])),
+  },
+  { kind: "xz", label: "xz stream", test: (b) => bytesAt(b, 0, [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0]) },
+  { kind: "zstd", label: "zstd stream", test: (b) => bytesAt(b, 0, [0x28, 0xb5, 0x2f, 0xfd]) },
+  { kind: "lz4", label: "lz4 stream", test: (b) => bytesAt(b, 0, [0x04, 0x22, 0x4d, 0x18]) },
+  { kind: "lzip", label: "lzip stream", test: (b) => bytesAt(b, 0, [0x4c, 0x5a, 0x49, 0x50, 1]) },
+  {
+    kind: "compress",
+    label: "compress/LZH stream",
+    test: (b) => bytesAt(b, 0, [0x1f, 0x9d]) || bytesAt(b, 0, [0x1f, 0xa0]),
+  },
+  {
+    kind: "7z",
+    label: "7z archive",
+    test: (b) => bytesAt(b, 0, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]),
+  },
+  {
+    kind: "rar",
+    label: "RAR archive",
+    test: (b) => bytesAt(b, 0, [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]),
+  },
+  {
+    kind: "cab",
+    label: "cabinet archive",
+    test: (b) => bytesAt(b, 0, [0x4d, 0x53, 0x43, 0x46, 0, 0, 0, 0]),
+  },
+  {
+    kind: "cfb",
+    label: "OLE compound document (.doc/.xls/.ppt/.msg/.msi)",
+    test: (b) => bytesAt(b, 0, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+  },
+  { kind: "ar", label: "ar archive (.a/.deb)", test: (b) => asciiAt(b, 0, "!<arch>\n") },
+  {
+    kind: "xar",
+    label: "xar archive (.pkg/.xip)",
+    test: (b) => bytesAt(b, 0, [0x78, 0x61, 0x72, 0x21, 0]),
+  },
+  { kind: "rpm", label: "RPM package", test: (b) => bytesAt(b, 0, [0xed, 0xab, 0xee, 0xdb]) },
+  {
+    kind: "tar",
+    label: "tar archive",
+    test: (b) => asciiAt(b, 257, "ustar\0") || asciiAt(b, 257, "ustar  \0"),
+  },
+  { kind: "iso", label: "ISO 9660 image", test: (b) => asciiAt(b, 0x8001, "CD001") },
+  {
+    kind: "dmg",
+    label: "disk image",
+    test: (b) => b.length >= 512 && asciiAt(b, b.length - 512, "koly"),
+  },
+  {
+    kind: "woff",
+    label: "compressed web font (WOFF/WOFF2)",
+    test: (b) =>
+      (asciiAt(b, 0, "wOFF") || asciiAt(b, 0, "wOF2")) &&
+      (bytesAt(b, 4, [0, 1, 0, 0]) || asciiAt(b, 4, "OTTO") || asciiAt(b, 4, "true")),
+  },
+  { kind: "sqlite", label: "SQLite database", test: (b) => asciiAt(b, 0, "SQLite format 3\0") },
+  {
+    kind: "parquet",
+    label: "Parquet file",
+    test: (b) => b.length >= 8 && asciiAt(b, 0, "PAR1") && asciiAt(b, b.length - 4, "PAR1"),
+  },
+  { kind: "arrow", label: "Arrow IPC file", test: (b) => asciiAt(b, 0, "ARROW1\0\0") },
+  {
+    kind: "feather",
+    label: "Feather file",
+    test: (b) => b.length >= 8 && asciiAt(b, 0, "FEA1") && asciiAt(b, b.length - 4, "FEA1"),
+  },
+]);
+
+/**
+ * The container / compressed / database format a blob's bytes carry, or null.
+ * @param {Buffer} buf
+ * @returns {{ kind: string, label: string } | null}
+ */
+export function containerKind(buf) {
+  for (const f of CONTAINER_FORMATS) if (f.test(buf)) return { kind: f.kind, label: f.label };
+  return null;
+}
+
+const MACHO = [
+  [0xfe, 0xed, 0xfa, 0xce],
+  [0xfe, 0xed, 0xfa, 0xcf],
+  [0xce, 0xfa, 0xed, 0xfe],
+  [0xcf, 0xfa, 0xed, 0xfe],
+  [0xca, 0xfe, 0xba, 0xbe],
+];
+/**
+ * Opaque binary formats a commit may carry, each by extension AND magic number: such a file is not
+ * regex-scanned (its bytes are not text), but the deny-list still reads them. A file with one of
+ * these extensions whose bytes do not carry the magic is not that format: it is read as text, or
+ * refused.
+ * @type {readonly { ext: RegExp, test: (b: Buffer) => boolean }[]}
+ */
+export const OPAQUE_FORMATS = Object.freeze([
+  { ext: /\.png$/i, test: (b) => bytesAt(b, 0, [0x89, 0x50, 0x4e, 0x47]) },
+  { ext: /\.jpe?g$/i, test: (b) => bytesAt(b, 0, [0xff, 0xd8, 0xff]) },
+  { ext: /\.gif$/i, test: (b) => asciiAt(b, 0, "GIF87a") || asciiAt(b, 0, "GIF89a") },
+  { ext: /\.webp$/i, test: (b) => asciiAt(b, 0, "RIFF") && asciiAt(b, 8, "WEBP") },
+  {
+    ext: /\.(?:ico|cur)$/i,
+    test: (b) => bytesAt(b, 0, [0, 0, 1, 0]) || bytesAt(b, 0, [0, 0, 2, 0]),
+  },
+  { ext: /\.icns$/i, test: (b) => asciiAt(b, 0, "icns") },
+  { ext: /\.bmp$/i, test: (b) => asciiAt(b, 0, "BM") },
+  {
+    ext: /\.tiff?$/i,
+    test: (b) => bytesAt(b, 0, [0x49, 0x49, 0x2a, 0]) || bytesAt(b, 0, [0x4d, 0x4d, 0, 0x2a]),
+  },
+  { ext: /\.(?:avif|heic|heif|mp4|m4a|mov)$/i, test: (b) => asciiAt(b, 4, "ftyp") },
+  {
+    ext: /\.mp3$/i,
+    test: (b) => asciiAt(b, 0, "ID3") || (b[0] === 0xff && ((b[1] ?? 0) & 0xe0) === 0xe0),
+  },
+  { ext: /\.wav$/i, test: (b) => asciiAt(b, 0, "RIFF") && asciiAt(b, 8, "WAVE") },
+  { ext: /\.ogg$/i, test: (b) => asciiAt(b, 0, "OggS") },
+  { ext: /\.webm$/i, test: (b) => bytesAt(b, 0, [0x1a, 0x45, 0xdf, 0xa3]) },
+  {
+    ext: /\.(?:ttf|otf)$/i,
+    test: (b) => bytesAt(b, 0, [0, 1, 0, 0]) || asciiAt(b, 0, "OTTO") || asciiAt(b, 0, "true"),
+  },
+  { ext: /\.wasm$/i, test: (b) => bytesAt(b, 0, [0, 0x61, 0x73, 0x6d]) },
+  {
+    ext: /\.(?:node|so|dylib|o|bin)$/i,
+    test: (b) =>
+      bytesAt(b, 0, [0x7f, 0x45, 0x4c, 0x46]) ||
+      MACHO.some((m) => bytesAt(b, 0, m)) ||
+      asciiAt(b, 0, "MZ"),
+  },
+  { ext: /\.class$/i, test: (b) => bytesAt(b, 0, [0xca, 0xfe, 0xba, 0xbe]) },
+]);
+
+/**
+ * True when `name` is an opaque binary format and `buf` carries that format's magic number.
+ * @param {string} name
+ * @param {Buffer} buf
+ */
+export function isOpaqueBinary(name, buf) {
+  return OPAQUE_FORMATS.some((f) => f.ext.test(name) && f.test(buf));
+}
+
+const UTF8_STRICT = new TextDecoder("utf-8", { fatal: true });
+const UTF16LE_STRICT = new TextDecoder("utf-16le", { fatal: true });
+const UTF16BE_STRICT = new TextDecoder("utf-16be", { fatal: true });
+
+/** @param {Buffer} b @param {boolean} le @returns {string | null} */
+function decodeUtf32(b, le) {
+  if (b.length % 4 !== 0) return null;
+  const parts = [];
+  for (let i = 0; i < b.length; i += 4) {
+    const cp = le ? b.readUInt32LE(i) : b.readUInt32BE(i);
+    if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return null;
+    parts.push(String.fromCodePoint(cp));
+  }
+  return parts.join("");
+}
+
+/**
+ * The text a blob holds, or null when it is not text the scanner can read: UTF-8 (a byte-order mark
+ * is dropped), or UTF-16 / UTF-32 in either byte order when a byte-order mark says so (S7: a UTF-16
+ * file read as UTF-8 has a NUL between every pair of characters, so no rule could ever match it).
+ * Malformed text is not text (fail closed).
+ * @param {Buffer} buf
+ * @returns {{ encoding: string, text: string } | null}
+ */
+export function decodeText(buf) {
+  try {
+    if (bytesAt(buf, 0, [0xff, 0xfe, 0, 0])) {
+      const text = decodeUtf32(buf.subarray(4), true);
+      return text === null ? null : { encoding: "utf-32le", text };
+    }
+    if (bytesAt(buf, 0, [0, 0, 0xfe, 0xff])) {
+      const text = decodeUtf32(buf.subarray(4), false);
+      return text === null ? null : { encoding: "utf-32be", text };
+    }
+    if (bytesAt(buf, 0, [0xff, 0xfe]))
+      return { encoding: "utf-16le", text: UTF16LE_STRICT.decode(buf.subarray(2)) };
+    if (bytesAt(buf, 0, [0xfe, 0xff]))
+      return { encoding: "utf-16be", text: UTF16BE_STRICT.decode(buf.subarray(2)) };
+    // the decoder drops a UTF-8 byte-order mark itself
+    return { encoding: "utf-8", text: UTF8_STRICT.decode(buf) };
+  } catch {
+    return null;
+  }
+}
 
 /** The largest file it reads; anything larger is an error, never skipped. */
 const MAX_SCAN_BYTES = (() => {
@@ -685,13 +926,87 @@ function identEmail(which) {
   return m?.[1] ?? "";
 }
 
-function isBinary(buf) {
-  const n = Math.min(buf.length, 8192);
-  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
-  return false;
-}
-
 // --- the scan -------------------------------------------------------------------------------------
+
+/**
+ * Scan one blob by what its bytes are (see "what a blob IS" above): text is scanned (a text holding
+ * NUL characters — interleaved UTF-16 without a byte-order mark, a stray NUL — is scanned a second
+ * time with them removed, so a value spread across NULs is still one value); gzip is peeled and its
+ * content scanned the same way; a recognised opaque binary is skipped with the deny-list over its
+ * raw bytes; anything else is refused (fail closed — the deny-list still reads its raw bytes).
+ * Findings carry `label`, never a matched value.
+ * @param {string} label  the path reported (the published name)
+ * @param {Buffer} buf
+ * @param {string[]} deny
+ * @param {{ name?: string, layers?: number }} [o]  name: the name whose extension applies (a peeled
+ *   gzip's inner name); layers: gzip layers already peeled
+ * @returns {{ findings: string[], scanned: number, binary: number }}
+ */
+export function scanBlob(label, buf, deny, o = {}) {
+  const name = o.name ?? label;
+  const layers = o.layers ?? 0;
+  /** @type {{ findings: string[], scanned: number, binary: number }} */
+  const out = { findings: [], scanned: 0, binary: 0 };
+  const rawDeny = () => {
+    for (const l of denylistLines(buf.toString("latin1"), deny))
+      out.findings.push(`deny-list match in ${label}:${String(l)}`);
+  };
+  /** @param {string} why */
+  const refuse = (why) => {
+    out.findings.push(`${label}  [unscannable-archive-or-database] (${why})`);
+    rawDeny();
+    return out;
+  };
+  const allowlisted = REVIEWED_BINARY_ALLOWLIST.has(label);
+  const container = containerKind(buf);
+  if (container?.kind === "gzip" || (container === null && GZIP_EXT.test(name))) {
+    if (layers >= MAX_GZIP_LAYERS)
+      return refuse(`gzip nested ${String(layers + 1)} deep — refused, not peeled`);
+    let inner;
+    try {
+      inner = gunzipSync(buf, { maxOutputLength: MAX_SCAN_BYTES });
+    } catch {
+      return refuse("gzip could not be decompressed within the scan limit");
+    }
+    const innerName = name
+      .replace(/\.tgz$/i, ".tar")
+      .replace(/\.svgz$/i, ".svg")
+      .replace(/\.gz$/i, "");
+    return scanBlob(label, inner, deny, { name: innerName, layers: layers + 1 });
+  }
+  if (!allowlisted) {
+    if (container !== null)
+      return refuse(
+        `its bytes are a ${container.label}, which no rule can read, so it cannot be committed`,
+      );
+    if (REFUSED_EXT.test(name))
+      return refuse("an archive or database cannot be scanned, so it cannot be committed");
+  }
+  const decoded = decodeText(buf);
+  if (decoded !== null) {
+    out.scanned++;
+    const primary = scanText(label, decoded.text, deny);
+    out.findings.push(...primary);
+    if (decoded.text.includes("\u0000")) {
+      // the same text with its NULs removed: interleaved UTF-16 (no byte-order mark) or UTF-32
+      // read as UTF-8, or a value split by NUL bytes — reported only where it adds a finding
+      const viewLabel = `${label} (NUL bytes removed)`;
+      const seen = new Set(primary.map((f) => f.replace(label, "\u0000")));
+      for (const f of scanText(viewLabel, decoded.text.replaceAll("\u0000", ""), deny))
+        if (!seen.has(f.replace(viewLabel, "\u0000"))) out.findings.push(f);
+    }
+    return out;
+  }
+  if (allowlisted || isOpaqueBinary(name, buf)) {
+    out.binary++;
+    // a binary file is not regex-scanned, but the deny-list still applies to its bytes as latin1
+    rawDeny();
+    return out;
+  }
+  return refuse(
+    "its bytes are neither UTF-8 text (nor UTF-16/UTF-32 with a byte-order mark) nor a recognised binary format with its extension — re-save it as UTF-8",
+  );
+}
 
 /**
  * Scan one text. Returns finding labels (`<label>:<line>  [<rule>]`, or the deny-list form) —
@@ -905,31 +1220,10 @@ function main() {
       );
     }
     if (!buf) return;
-    if (REFUSED_EXT.test(file) && !REVIEWED_BINARY_ALLOWLIST.has(file)) {
-      findings.push(
-        `${file}  [unscannable-archive-or-database] (an archive or database cannot be scanned, so it cannot be committed)`,
-      );
-      return;
-    }
-    if (GZIP_EXT.test(file)) {
-      try {
-        buf = gunzipSync(buf, { maxOutputLength: MAX_SCAN_BYTES });
-      } catch {
-        findings.push(
-          `${file}  [unscannable-archive-or-database] (gzip could not be decompressed within the scan limit)`,
-        );
-        return;
-      }
-    }
-    if (isBinary(buf) && BINARY_EXT.test(file)) {
-      binary++;
-      // a binary file is not regex-scanned, but the deny-list still applies to its bytes as latin1
-      for (const l of denylistLines(buf.toString("latin1"), deny))
-        findings.push(`deny-list match in ${file}:${String(l)}`);
-      return;
-    }
-    scanned++;
-    findings.push(...scanText(file, buf.toString("utf8"), deny));
+    const r = scanBlob(file, buf, deny);
+    findings.push(...r.findings);
+    scanned += r.scanned;
+    binary += r.binary;
   });
 
   if (findings.length) {

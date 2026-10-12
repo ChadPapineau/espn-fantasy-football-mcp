@@ -7,14 +7,20 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { brotliCompressSync, crc32, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
 import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FAKE_GUID,
+  MAX_GZIP_LAYERS,
   NUMERIC_ALNUM_BOUNDARY,
   SKELETON_MIN,
+  containerKind,
   decodeLayers,
+  decodeText,
+  isOpaqueBinary,
   numericTermRe,
+  scanBlob,
   skeleton,
   denylistLines,
   entropy,
@@ -758,5 +764,423 @@ describe("fails closed on content it cannot scan", () => {
     });
     expect(`${r.stdout}${r.stderr}`).toMatch(/scan-secrets: clean/);
     expect(r.status).toBe(0);
+  });
+});
+
+// --- S7: a blob is read by what its BYTES are, never only by its name -----------------------------
+// (Stage C findings: a zip/Flate document container passed as "clean" under .xlsx/.docx/.pptx/.jar/
+// .pdf (a binary extension) or .numbers/.odt (decoded as UTF-8 garbage) while the same bytes as .zip
+// were refused; a UTF-16 file was read as UTF-8 with a NUL between every pair of characters, so no
+// rule and no numeric deny-list term could ever match.) Every value below is fake and assembled.
+
+/** A minimal one-entry zip archive — what .docx/.xlsx/.pptx/.odt/.numbers/.epub/.jar files are. */
+function zipOf(entry: string, data: Buffer, method: 0 | 8 = 8): Buffer {
+  const body = method === 8 ? deflateRawSync(data) : data;
+  const name = Buffer.from(entry);
+  const lfh = Buffer.alloc(30);
+  lfh.writeUInt32LE(0x04034b50, 0);
+  lfh.writeUInt16LE(20, 4);
+  lfh.writeUInt16LE(method, 8);
+  lfh.writeUInt32LE(crc32(data), 14);
+  lfh.writeUInt32LE(body.length, 18);
+  lfh.writeUInt32LE(data.length, 22);
+  lfh.writeUInt16LE(name.length, 26);
+  const cdh = Buffer.alloc(46);
+  cdh.writeUInt32LE(0x02014b50, 0);
+  cdh.writeUInt16LE(20, 4);
+  cdh.writeUInt16LE(20, 6);
+  cdh.writeUInt16LE(method, 10);
+  cdh.writeUInt32LE(crc32(data), 16);
+  cdh.writeUInt32LE(body.length, 20);
+  cdh.writeUInt32LE(data.length, 24);
+  cdh.writeUInt16LE(name.length, 28);
+  const local = Buffer.concat([lfh, name, body]);
+  const central = Buffer.concat([cdh, name]);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(central.length, 12);
+  eocd.writeUInt32LE(local.length, 16);
+  return Buffer.concat([local, central, eocd]);
+}
+
+const LEAK_ID = ["5555", "1234", "567"].join("");
+const LEAK_TEAM = ["Zorblax", "Wanderers"].join(" ");
+/** One line per identifier rule the finding names: a league id, a mailbox, a SWID, a home path. */
+const LEAK_LINES = () => [
+  `ESPN_LEAGUE_ID=${LEAK_ID}`,
+  `contact: ${at("jane.q.fakeperson", "gmail.com")}`,
+  kv("SWID", "=", `{${fakeGuid("s7")}}`),
+  `home ${homePath("Users", "janefake")}`,
+];
+const LEAK_RULES = ["espn-league-id", "email-address", "espn-swid", "brace-guid", "home-path"];
+const leakText = () => `${LEAK_LINES().join("\n")}\n`;
+const leakXml = () => Buffer.from(`<t>${LEAK_LINES().join(" ")} ${LEAK_TEAM}</t>`);
+const DENY = () => parseDenylist(`${LEAK_ID}\n${LEAK_TEAM}\n`);
+const ruleIds = (findings: string[]) =>
+  [...new Set(findings.map((f) => /\[([a-z0-9-]+)\]$/.exec(f)?.[1] ?? ""))].filter(Boolean).sort();
+const noLeakS7 = (out: string) => {
+  expect(out).not.toContain(LEAK_ID);
+  for (const w of LEAK_TEAM.toLowerCase().split(" ")) expect(out.toLowerCase()).not.toContain(w);
+};
+
+describe("S7: document containers and compressed streams are refused by their bytes, whatever the name", () => {
+  function scanFiles(files: Record<string, Buffer>, args?: string[]) {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, "deny.txt"), `${LEAK_ID}\n${LEAK_TEAM}\n`);
+    for (const [n, b] of Object.entries(files)) writeFileSync(path.join(tmp.dir, n), b);
+    return scan(tmp.dir, args ?? ["--", ...Object.keys(files)], {
+      EFF_SCAN_DENYLIST: path.join(tmp.dir, "deny.txt"),
+    });
+  }
+
+  it.each([
+    "report.xlsx",
+    "report.docx",
+    "deck.pptx",
+    "lib.jar",
+    "sheet.numbers",
+    "doc.odt",
+    "book.epub",
+    "report.zip",
+    "notes.md",
+    "shot.png",
+    "blob.bin",
+    "README",
+  ])("refuses a deflated zip container named %s (the repro: exit 1, never clean)", (name) => {
+    const r = scanFiles({ [name]: zipOf("xl/worksheets/sheet1.xml", leakXml()) });
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toContain(`${name}  [unscannable-archive-or-database]`);
+    expect(r.out).toMatch(/zip container/);
+    expect(r.out).not.toContain("scan-secrets: clean");
+    noLeakS7(r.out);
+  });
+
+  it("refuses a stored (uncompressed) zip too, and a zip appended to a genuine PNG (a polyglot)", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+    const r = scanFiles({
+      "stored.docx": zipOf("word/document.xml", leakXml(), 0),
+      "poly.png": Buffer.concat([png, Buffer.alloc(64, 7), zipOf("a.xml", leakXml())]),
+    });
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("stored.docx  [unscannable-archive-or-database]");
+    expect(r.out).toContain("poly.png  [unscannable-archive-or-database]");
+    noLeakS7(r.out);
+  });
+
+  it("refuses a PDF whose stream is FlateDecode-compressed, as .pdf and under a text name; an ASCII-armoured PDF too", () => {
+    const stream = deflateSync(leakXml());
+    const pdf = Buffer.concat([
+      Buffer.from(
+        `%PDF-1.4\n1 0 obj\n<< /Length ${String(stream.length)} /Filter /FlateDecode >>\nstream\n`,
+      ),
+      stream,
+      Buffer.from("\nendstream\nendobj\n%%EOF\n"),
+    ]);
+    const hex = `%PDF-1.4\n1 0 obj\n<< /Filter [/ASCIIHexDecode /FlateDecode] >>\nstream\n${stream.toString("hex")}>\nendstream\nendobj\n%%EOF\n`;
+    const r = scanFiles({
+      "report.pdf": pdf,
+      "report.txt": pdf,
+      "armoured.md": Buffer.from(hex),
+    });
+    expect(r.status).toBe(1);
+    for (const n of ["report.pdf", "report.txt", "armoured.md"])
+      expect(r.out).toContain(`${n}  [unscannable-archive-or-database]`);
+    expect(r.out).toMatch(/PDF/);
+    noLeakS7(r.out);
+  });
+
+  it.each([
+    ["xz", Buffer.concat([Buffer.from([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0]), leakXml()])],
+    ["zstd", Buffer.concat([Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), leakXml()])],
+    [
+      "bzip2",
+      Buffer.concat([Buffer.from("BZh9"), Buffer.from([0x31, 0x41, 0x59, 0x26, 0x53, 0x59])]),
+    ],
+    ["7z", Buffer.concat([Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]), leakXml()])],
+    ["SQLite", Buffer.concat([Buffer.from("SQLite format 3\0"), leakXml()])],
+    [
+      "OLE compound document",
+      Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), leakXml()]),
+    ],
+    [
+      "tar",
+      (() => {
+        const b = Buffer.alloc(1024);
+        b.write("data.xml", 0);
+        b.write("ustar\0", 257, "latin1");
+        leakXml().copy(b, 512);
+        return b;
+      })(),
+    ],
+    [
+      "WOFF2",
+      Buffer.concat([
+        Buffer.from("wOF2"),
+        Buffer.from([0, 1, 0, 0]),
+        brotliCompressSync(leakXml()),
+      ]),
+    ],
+  ])("refuses a %s by its bytes under an innocent name", (_kind, bytes) => {
+    const r = scanFiles({ "data.md": bytes });
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toContain("data.md  [unscannable-archive-or-database]");
+    noLeakS7(r.out);
+  });
+
+  it.each([
+    ["a raw deflate stream", () => deflateRawSync(leakXml())],
+    ["a brotli stream", () => brotliCompressSync(leakXml())],
+    ["legacy (latin-1) text", () => Buffer.from(`café ${LEAK_LINES().join(" ")}`, "latin1")],
+    [
+      "random bytes",
+      () => Buffer.from(Array.from({ length: 256 }, (_v, i) => (i * 37 + 129) & 0xff)),
+    ],
+  ])(
+    "refuses %s — neither text nor a recognised binary — and the deny-list still reads it",
+    (_why, make) => {
+      for (const name of ["x.dat", "notes.md", "pic.png", "lib.so"]) {
+        const r = scanBlob(name, make(), DENY());
+        expect(r.scanned, name).toBe(0);
+        expect(r.binary, name).toBe(0);
+        expect(
+          r.findings.some((f) => f.startsWith(`${name}  [unscannable-archive-or-database]`)),
+        ).toBe(true);
+      }
+      const raw = Buffer.concat([Buffer.from([0x89, 0, 0xff]), Buffer.from(LEAK_TEAM)]);
+      expect(scanBlob("pic.png", raw, DENY()).findings).toContain("deny-list match in pic.png:1");
+    },
+  );
+
+  it("peels gzip by its bytes under any name and scans what is inside; a gzip of a zip is refused; nesting is bounded", () => {
+    const text = Buffer.from(leakText());
+    expect(ruleIds(scanBlob("notes.md", gzipSync(text), []).findings)).toEqual(
+      [...LEAK_RULES].sort(),
+    );
+    const nest = (b: Buffer, n: number): Buffer => (n === 0 ? b : nest(gzipSync(b), n - 1));
+    expect(ruleIds(scanBlob("x.txt", nest(text, MAX_GZIP_LAYERS), []).findings)).toEqual(
+      [...LEAK_RULES].sort(),
+    );
+    const deep = scanBlob("x.txt", nest(text, MAX_GZIP_LAYERS + 1), []).findings;
+    expect(deep.some((f) => f.includes("[unscannable-archive-or-database] (gzip nested"))).toBe(
+      true,
+    );
+    const gzZip = scanBlob("cap.json.gz", gzipSync(zipOf("a.xml", leakXml())), []).findings;
+    expect(gzZip.some((f) => f.startsWith("cap.json.gz  [unscannable-archive-or-database]"))).toBe(
+      true,
+    );
+    // a .tgz is a gzip'd tar: refused once peeled
+    const tar = Buffer.alloc(1024);
+    tar.write("ustar\0", 257, "latin1");
+    expect(scanBlob("a.tgz", gzipSync(tar), []).findings.join()).toMatch(/tar archive/);
+  });
+
+  it("still skips a genuine opaque binary (magic + extension) with the deny-list on its bytes; a lookalike name alone skips nothing", () => {
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]),
+      Buffer.from(LEAK_TEAM),
+    ]);
+    const r = scanBlob("a.png", png, DENY());
+    expect(r.binary).toBe(1);
+    // the PNG signature carries "\r\n" and "\n": the term sits on the third latin1 "line"
+    expect(r.findings).toEqual(["deny-list match in a.png:3"]);
+    expect(isOpaqueBinary("a.png", png)).toBe(true);
+    expect(isOpaqueBinary("a.jpg", png)).toBe(false); // the magic of another format
+    expect(isOpaqueBinary("a.txt", png)).toBe(false); // not an opaque extension
+    // valid UTF-8 named .png is text: every rule runs
+    expect(ruleIds(scanBlob("shot.png", Buffer.from(leakText()), []).findings)).toEqual(
+      [...LEAK_RULES].sort(),
+    );
+    expect(containerKind(png)).toBeNull();
+    expect(containerKind(zipOf("a", Buffer.from("x")))?.kind).toBe("zip");
+  });
+
+  it("the commit gates refuse the same bytes: --index (pre-commit, commit-paths.sh) and --all (CI)", () => {
+    tmp = tempDir("eff-scan-");
+    const env = {
+      EFF_SCAN_DENYLIST: path.join(tmp.dir, "deny.txt"),
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+    };
+    writeFileSync(env.EFF_SCAN_DENYLIST, `${LEAK_ID}\n${LEAK_TEAM}\n`);
+    writeFileSync(path.join(tmp.dir, "report.xlsx"), zipOf("xl/sheet1.xml", leakXml()));
+    writeFileSync(
+      path.join(tmp.dir, "u16.md"),
+      Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(leakText(), "utf16le")]),
+    );
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: tmp?.dir, env: { ...process.env, ...env }, encoding: "utf8" });
+    expect(git(["init", "-q"]).status).toBe(0);
+    expect(git(["add", "report.xlsx", "u16.md"]).status).toBe(0);
+    for (const args of [["--index"], ["--all"]]) {
+      const r = scan(tmp.dir, args, env);
+      expect(r.status, `${args.join(" ")}: ${r.out}`).toBe(1);
+      expect(r.out).toContain("report.xlsx  [unscannable-archive-or-database]");
+      expect(r.out).toContain("u16.md:1  [espn-league-id]");
+      expect(r.out).toContain("deny-list match in u16.md:1");
+      noLeakS7(r.out);
+    }
+  });
+});
+
+describe("S7: UTF-16 and UTF-32 text is decoded, never read as NUL-interleaved UTF-8", () => {
+  /** The text's code points (the leak lines are ASCII). */
+  const codePoints = (t: string): number[] => {
+    const out: number[] = [];
+    for (const c of t) out.push(c.codePointAt(0) ?? 0);
+    return out;
+  };
+  const BOM: Record<string, (t: string) => Buffer> = {
+    "UTF-16LE with a byte-order mark": (t) =>
+      Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(t, "utf16le")]),
+    "UTF-16BE with a byte-order mark": (t) =>
+      Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(t, "utf16le").swap16()]),
+    "UTF-32LE with a byte-order mark": (t) => {
+      const cps = codePoints(t);
+      const b = Buffer.alloc(4 + cps.length * 4);
+      b.writeUInt32LE(0xfeff, 0);
+      cps.forEach((cp, i) => b.writeUInt32LE(cp, 4 + i * 4));
+      return b;
+    },
+    "UTF-32BE with a byte-order mark": (t) => {
+      const cps = codePoints(t);
+      const b = Buffer.alloc(4 + cps.length * 4);
+      b.writeUInt32BE(0xfeff, 0);
+      cps.forEach((cp, i) => b.writeUInt32BE(cp, 4 + i * 4));
+      return b;
+    },
+    "UTF-8 with a byte-order mark": (t) =>
+      Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(t)]),
+  };
+
+  it.each(Object.keys(BOM))(
+    "%s: the same findings as UTF-8, line for line, deny-list included",
+    (enc) => {
+      const want = scanBlob("u.md", Buffer.from(leakText()), DENY()).findings;
+      expect(ruleIds(want)).toEqual([...LEAK_RULES].sort());
+      expect(want).toContain("deny-list match in u.md:1");
+      const got = scanBlob(
+        "u.md",
+        (BOM[enc] ?? ((t: string) => Buffer.from(t)))(leakText()),
+        DENY(),
+      );
+      expect(got.scanned).toBe(1);
+      expect(got.findings).toEqual(want);
+    },
+  );
+
+  it("the repro over the CLI: u16.md is flagged exactly like u8.md (exit 1, six findings)", () => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, "deny.txt"), `${LEAK_ID}\n`);
+    writeFileSync(path.join(tmp.dir, "u8.md"), leakText());
+    writeFileSync(
+      path.join(tmp.dir, "u16.md"),
+      (BOM["UTF-16LE with a byte-order mark"] ?? Buffer.from)(leakText()),
+    );
+    const env = { EFF_SCAN_DENYLIST: path.join(tmp.dir, "deny.txt") };
+    const u8 = scan(tmp.dir, ["--", "u8.md"], env);
+    const u16 = scan(tmp.dir, ["--", "u16.md"], env);
+    expect(u8.status).toBe(1);
+    expect(u16.status, u16.out).toBe(1);
+    expect(u16.out.replaceAll("u16.md", "F")).toBe(u8.out.replaceAll("u8.md", "F"));
+    noLeakS7(u16.out);
+  });
+
+  it.each([
+    ["UTF-16LE without a byte-order mark", (t: string) => Buffer.from(t, "utf16le")],
+    ["UTF-16BE without a byte-order mark", (t: string) => Buffer.from(t, "utf16le").swap16()],
+    [
+      "UTF-16LE at an odd offset",
+      (t: string) => Buffer.concat([Buffer.from("x"), Buffer.from(t, "utf16le")]),
+    ],
+    [
+      "UTF-32LE without a byte-order mark",
+      (t: string) =>
+        Buffer.concat(
+          codePoints(t).map((cp) => {
+            const b = Buffer.alloc(4);
+            b.writeUInt32LE(cp);
+            return b;
+          }),
+        ),
+    ],
+    ["values split by stray NUL bytes", (t: string) => Buffer.from(t.split("").join("\0"))],
+  ])(
+    "%s (ASCII): every rule and the numeric deny-list term still match (NULs removed)",
+    (_why, enc) => {
+      const r = scanBlob("n.md", enc(leakText()), DENY());
+      expect(r.scanned).toBe(1);
+      expect(ruleIds(r.findings)).toEqual([...LEAK_RULES].sort());
+      expect(r.findings.some((f) => f.startsWith("deny-list match in n.md"))).toBe(true);
+      expect(r.findings.every((f) => !f.includes(LEAK_ID))).toBe(true);
+    },
+  );
+
+  it("a stray NUL in UTF-8 text adds no duplicate finding; a value only visible without NULs is reported on the view", () => {
+    const one = scanBlob("a.md", Buffer.from(`intro\n\0\ntoken = ${TOKEN}\n`), []).findings;
+    expect(one).toEqual(["a.md:3  [github-token]"]);
+    const split = scanBlob(
+      "b.md",
+      Buffer.from(`token = ${TOKEN.split("").join("\0")}\n`),
+      [],
+    ).findings;
+    expect(split).toEqual(["b.md (NUL bytes removed):1  [github-token]"]);
+  });
+
+  it.each([
+    ["UTF-16 with a byte-order mark but an odd length", Buffer.from([0xff, 0xfe, 0x41, 0, 0x42])],
+    ["UTF-16 with a lone surrogate", Buffer.from([0xff, 0xfe, 0x00, 0xd8, 0x41, 0x00])],
+    ["UTF-32 with a code point past U+10FFFF", Buffer.from([0xff, 0xfe, 0, 0, 0, 0, 0x11, 0])],
+    [
+      "UTF-16 without a byte-order mark holding a non-ASCII letter",
+      Buffer.from(`café ${LEAK_ID}`, "utf16le"),
+    ],
+  ])("refuses %s (malformed or undeclared text is not text — fail closed)", (_why, b) => {
+    const r = scanBlob("m.md", b, DENY());
+    expect(r.scanned).toBe(0);
+    expect(r.findings.some((f) => f.startsWith("m.md  [unscannable-archive-or-database]"))).toBe(
+      true,
+    );
+  });
+
+  it("decodeText: the encodings it reads, and null for what it cannot", () => {
+    expect(decodeText(Buffer.from("plain"))).toEqual({ encoding: "utf-8", text: "plain" });
+    expect(decodeText(Buffer.from([0xef, 0xbb, 0xbf, 0x61]))).toEqual({
+      encoding: "utf-8",
+      text: "a",
+    });
+    expect(decodeText(Buffer.from([0xff, 0xfe, 0x61, 0]))).toEqual({
+      encoding: "utf-16le",
+      text: "a",
+    });
+    expect(decodeText(Buffer.from([0xfe, 0xff, 0, 0x61]))).toEqual({
+      encoding: "utf-16be",
+      text: "a",
+    });
+    expect(decodeText(Buffer.from([0, 0, 0xfe, 0xff, 0, 0, 0, 0x61]))).toEqual({
+      encoding: "utf-32be",
+      text: "a",
+    });
+    expect(decodeText(Buffer.from([0xc3]))).toBeNull();
+  });
+
+  it("property: an identifier line is flagged in every encoding a text editor or a shell redirect writes", () => {
+    const encoders = [
+      (t: string) => Buffer.from(t),
+      ...Object.values(BOM),
+      (t: string) => Buffer.from(t, "utf16le"),
+      (t: string) => Buffer.from(t, "utf16le").swap16(),
+    ];
+    const word = fc.stringMatching(/^[A-Za-z][A-Za-z ]{0,20}$/);
+    fc.assert(
+      fc.property(word, word, fc.integer({ min: 0, max: encoders.length - 1 }), (a, b, k) => {
+        const line = `${a} ${at("jane.q.fakeperson", "gmail.com")} ${b}\n`;
+        const enc = encoders[k] ?? ((t: string) => Buffer.from(t));
+        const r = scanBlob("p.md", enc(line), []);
+        expect(ruleIds(r.findings)).toContain("email-address");
+      }),
+      { numRuns: 200 },
+    );
   });
 });
