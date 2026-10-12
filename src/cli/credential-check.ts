@@ -15,7 +15,14 @@ import type { Store, StoreFactory } from "../store/types.js";
 import { buildEspnStack, effCodeOf } from "./espn-stack.js";
 import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
-import { readJobState, stateNumber, stateToken, updateJobState } from "./job-state.js";
+import {
+  readJobState,
+  recordJobIdle,
+  recordJobRun,
+  stateNumber,
+  stateToken,
+  updateJobState,
+} from "./job-state.js";
 import type { Logger } from "./log.js";
 import { createNotifier, type Notifier } from "./notify.js";
 import { errorText, openStore } from "./store-access.js";
@@ -114,6 +121,9 @@ export function exitOf(r: CredentialProbeResult | { readonly error: string }): n
   return r.accepted === false || notConfigured(r) ? EXIT.credentials : EXIT.ok;
 }
 
+/** The daily job's name (its run records, notifications and launchd label). */
+const JOB = "credential-check";
+
 /** `eff credential-check` (the daily job). */
 export async function credentialCheck(
   io: CliIo,
@@ -142,12 +152,14 @@ export async function credentialCheck(
       io.stderr,
       `eff credential-check: the store could not be opened: ${errorText(e)}`,
     );
+    recordJobRun(config.cacheDir, JOB, io.clock.nowMs(), { ok: false, error: "store" });
     if (opts.notify) await notifier.failure("credential-check", "store");
     return EXIT.error;
   }
   try {
     const row = store.repos.credentialState.get();
     if (row?.league_id !== config.leagueId || row.state === "not_configured") {
+      recordJobIdle(config.cacheDir, JOB, io.clock.nowMs());
       await writeLine(
         io.stdout,
         "credential-check: no credential stored for this league — nothing to probe (run `eff setup`)",
@@ -161,6 +173,7 @@ export async function credentialCheck(
       stateToken(state, "credcheck.day") === day ? (stateNumber(state, "credcheck.count") ?? 0) : 0;
     const inSeason = seasonState(store.datasets.proSchedule, config.season, now) === "in_season";
     if (!dailyProbeAllowed(count, inSeason)) {
+      recordJobIdle(config.cacheDir, JOB, now);
       await writeLine(
         io.stdout,
         `credential-check: today's probe cap is reached (${inSeason ? "2 in season" : "1 off-season"}) — nothing sent`,
@@ -171,6 +184,7 @@ export async function credentialCheck(
     const wasRejected = row.state === "rejected";
     const r = await probeOnce(io, config, store, log, "daily_job");
     if ("error" in r) {
+      recordJobRun(config.cacheDir, JOB, now, { ok: false, error: r.error });
       await writeLine(
         io.stdout,
         `credential-check: the probe could not complete (${r.error}); the state is unchanged`,
@@ -179,6 +193,16 @@ export async function credentialCheck(
       return exitOf(r);
     }
     await writeLine(io.stdout, `credential-check: ${verdictLine(r)}`);
+    recordJobRun(
+      config.cacheDir,
+      JOB,
+      now,
+      r.accepted === false
+        ? { ok: false, error: "ESPN_AUTH_REJECTED" }
+        : notConfigured(r)
+          ? { ok: false, error: "not_configured" }
+          : { ok: true },
+    );
     if (opts.notify) {
       if (r.accepted === false) await notifyRejectionOnce(store, config.cacheDir, notifier);
       else if (r.accepted === true && wasRejected) {

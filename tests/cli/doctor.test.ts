@@ -172,6 +172,36 @@ describe("rows #1–#3, #12, #13, #24, #25 (pure)", () => {
     expect(checkClientSecrecy([scanClientConfig("code", f)]).status).toBe("ok");
     expect(checkClientSecrecy([]).status).toBe("skip");
   });
+  it("#2/#3 also read Claude Code's LOCAL-scope entries (projects[dir].mcpServers, the `claude mcp add` default)", () => {
+    sb = sandbox();
+    const s2 = fakeEspnS2("doctor-local-scope", 220);
+    const f = path.join(sb.dir, "claude.json");
+    writeFileSync(
+      f,
+      JSON.stringify({
+        projects: {
+          "/some/dir": {
+            mcpServers: {
+              "espn-fantasy-football": {
+                command: "/x/node",
+                args: ["/x/dist/cli.js", "serve"],
+                env: { ESPN_LEAGUE_ID: "0", PASTED: s2 },
+              },
+            },
+          },
+          "/other": { allowedTools: [] },
+        },
+      }),
+    );
+    const scan = scanClientConfig("code", f);
+    expect(scan.entries.map((e) => e.name)).toEqual(["espn-fantasy-football"]);
+    const r = checkClientSecrecy([scan]);
+    expect(r.status).toBe("config");
+    expect(JSON.stringify(r)).not.toContain(s2.slice(0, 16));
+    // the same entry at the top level is found the same way
+    writeFileSync(f, JSON.stringify({ mcpServers: { x: { env: { PASTED: s2 } } } }));
+    expect(checkClientSecrecy([scanClientConfig("code", f)]).status).toBe("config");
+  });
   it("#12 npmrc, #24 stale dist (checkout only)", () => {
     sb = sandbox();
     expect(checkNpmrc(sb.dir).status).toBe("na");

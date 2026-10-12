@@ -23,8 +23,10 @@ import type { RefreshLogRow, Store, StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
 import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
-import { installedPlists } from "./launchd.js";
+import { JOBS, installedPlists } from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
+import { jobRunRecords, readJobState, type JobRunRecord } from "./job-state.js";
+import { seasonState } from "../sources/runner.js";
 import type { Logger } from "./log.js";
 import { openExistingStore, type ExistingStore } from "./store-access.js";
 
@@ -211,6 +213,81 @@ export interface StatusReport {
     readonly installed: readonly string[];
     readonly missing: readonly string[];
   };
+  /** The credentialed jobs' last runs (plan 06 J2: failure visible without reading logs). */
+  readonly jobs: readonly JobRunRecord[];
+  /** The newest snapshot of each kind (null = none stored, or not knowable: no team id). */
+  readonly snapshots: {
+    readonly roster_last_at: string | null;
+    readonly pool_last_at: string | null;
+    readonly projections_last_at: string | null;
+  } | null;
+  /**
+   * The red flags of plan 06 §3 that the sections above do not already carry, as fixed codes:
+   * `probe_stale` (no successful drift probe in 36 h), `snapshots_missing` (in season, no roster
+   * snapshot in 36 h or no projection snapshot in 4 days) and `job_failing:<job>` (its last run
+   * failed).
+   */
+  readonly alerts: readonly string[];
+}
+
+/** A drift probe older than this is stale (plan 06 §3). */
+export const PROBE_STALE_MS = 36 * 3_600_000;
+/** The nightly roster snapshot is missing after this (plan 06 §3 "snapshots missing"). */
+export const ROSTER_SNAPSHOT_STALE_MS = 36 * 3_600_000;
+/** The projection snapshot (Tue/Thu/Sun) is missing after this. */
+export const PROJECTION_SNAPSHOT_STALE_MS = 4 * 86_400_000;
+
+/** The credentialed jobs whose runs are recorded in job-state.json (the launchd job names). */
+export const RECORDED_JOBS: readonly string[] = JOBS.filter((j) => j.cookies).map((j) => j.name);
+
+/** The newest snapshots in the store (never throws: a read error is "unknown"). */
+export function snapshotStatus(
+  store: Store,
+  teamId: number | null,
+): NonNullable<StatusReport["snapshots"]> {
+  const safe = <T>(f: () => T): T | null => {
+    try {
+      return f();
+    } catch {
+      return null;
+    }
+  };
+  return {
+    roster_last_at:
+      teamId === null
+        ? null
+        : (safe(() => store.repos.rosterSnapshots.latestTwo(teamId)[0]?.taken_at ?? null) ?? null),
+    pool_last_at: safe(() => store.repos.poolSnapshots.latestTwo()[0]?.taken_at ?? null) ?? null,
+    projections_last_at: safe(() => store.repos.espnProjections.lastSnapshotAt()) ?? null,
+  };
+}
+
+/** The plan 06 §3 alerts (fixed codes; see StatusReport.alerts). */
+export function statusAlerts(input: {
+  readonly nowMs: number;
+  readonly lastProbeSuccessAt: string | null | undefined;
+  readonly inSeason: boolean;
+  readonly leagueConfigured: boolean;
+  readonly teamKnown: boolean;
+  readonly snapshots: StatusReport["snapshots"];
+  readonly jobs: readonly JobRunRecord[];
+}): string[] {
+  const out: string[] = [];
+  const age = (iso: string | null | undefined): number =>
+    iso === null || iso === undefined ? Infinity : input.nowMs - Date.parse(iso);
+  if (input.lastProbeSuccessAt !== undefined && !(age(input.lastProbeSuccessAt) <= PROBE_STALE_MS))
+    out.push("probe_stale");
+  const snap = input.snapshots;
+  if (
+    snap !== null &&
+    input.inSeason &&
+    input.leagueConfigured &&
+    ((input.teamKnown && !(age(snap.roster_last_at) <= ROSTER_SNAPSHOT_STALE_MS)) ||
+      !(age(snap.projections_last_at) <= PROJECTION_SNAPSHOT_STALE_MS))
+  )
+    out.push("snapshots_missing");
+  for (const j of input.jobs) if (j.ok === false) out.push(`job_failing:${j.job}`);
+  return out;
 }
 
 function storeBlock(ex: ExistingStore, config: LenientConfig): StatusReport["store"] {
@@ -324,6 +401,16 @@ export function collectStatus(
         ? null
         : store.repos.limiter.countToday(new Date(utcDayStart(now)).toISOString());
     const installed = installedPlists(io.home).map((p) => p.job);
+    const jobs = jobRunRecords(readJobState(config.cacheDir), RECORDED_JOBS);
+    const snapshots = store === null ? null : snapshotStatus(store, config.teamId);
+    let inSeason = false;
+    try {
+      inSeason =
+        store !== null &&
+        seasonState(store.datasets.proSchedule, config.season, now) === "in_season";
+    } catch {
+      inSeason = false;
+    }
     return {
       version: VERSION,
       node: io.nodeVersion,
@@ -370,6 +457,17 @@ export function collectStatus(
           .map((j) => j.name)
           .filter((j) => !installed.includes(j)),
       },
+      jobs,
+      snapshots,
+      alerts: statusAlerts({
+        nowMs: now,
+        lastProbeSuccessAt: store === null ? undefined : (probe?.at ?? null),
+        inSeason,
+        leagueConfigured: config.leagueId !== null,
+        teamKnown: config.teamId !== null,
+        snapshots,
+        jobs,
+      }),
     };
   } finally {
     if (ex.kind === "open") ex.store.close();
@@ -465,6 +563,32 @@ export function renderStatus(r: StatusReport): string[] {
     out.push(
       `launchd: ${String(r.launchd.installed.length)} job(s) installed${r.launchd.missing.length > 0 ? ` (missing: ${r.launchd.missing.join(", ")})` : ""} — \`eff doctor\` checks they are loaded`,
     );
+  const ran = r.jobs.filter((j) => j.last_run_at !== null || j.last_idle_at !== null);
+  if (ran.length > 0) {
+    out.push("");
+    for (const j of ran)
+      out.push(
+        `job ${j.job.padEnd(24)} ${
+          j.last_run_at === null
+            ? "no working run yet"
+            : j.ok === true
+              ? `ok at ${j.last_run_at}`
+              : `FAILED (${j.error ?? "?"}) at ${j.last_run_at}, ${String(j.consecutive_failures)} in a row`
+        }${j.last_idle_at === null ? "" : `; last wake ${j.last_idle_at}`}`,
+      );
+  }
+  if (r.snapshots !== null)
+    out.push(
+      `snapshots: roster ${r.snapshots.roster_last_at ?? "none"}, pool ${r.snapshots.pool_last_at ?? "none"}, projections ${r.snapshots.projections_last_at ?? "none"}`,
+    );
+  for (const a of r.alerts) {
+    if (a === "probe_stale")
+      out.push("ALERT: no successful drift probe in 36 h — `eff probe` (and check the probe job)");
+    else if (a === "snapshots_missing")
+      out.push("ALERT: snapshots are missing in season — check the snapshot jobs (`eff doctor`)");
+    else if (a.startsWith("job_failing:"))
+      out.push(`ALERT: ${a.slice("job_failing:".length)} failed on its last run — \`eff doctor\``);
+  }
   for (const w of r.config.warnings) out.push(`warning: ${w}`);
   return out;
 }

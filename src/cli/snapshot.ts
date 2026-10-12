@@ -35,6 +35,8 @@ import {
   inSeasonWindow,
   isWorkingRun,
   jobFailure,
+  jobIdle,
+  jobWorked,
   nextDayFirstKickoff,
   proScheduleOf,
   startJob,
@@ -43,7 +45,13 @@ import {
 } from "./espn-jobs.js";
 import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
-import { readJobState, stateNumber, stateToken, updateJobState } from "./job-state.js";
+import {
+  readJobState,
+  recordJobRun,
+  stateNumber,
+  stateToken,
+  updateJobState,
+} from "./job-state.js";
 import type { Logger } from "./log.js";
 
 /** The positions `snapshot pool` pages (plan 06 §1.4: QB/RB/WR/TE/K/D-ST). */
@@ -155,12 +163,14 @@ export async function snapshotRoster(
     const now = io.clock.nowMs();
     const schedule = await proScheduleOf(run, config.season);
     if (schedule !== null && !inSeasonWindow(schedule, now)) {
+      jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: off-season — nothing to do`);
       return EXIT.ok;
     }
     if (opts.preKickoff) {
       const first = schedule === null ? null : weekFirstKickoff(schedule, now);
       if (first === null || !isWorkingRun(now, first.at - ROSTER_PRE_KICKOFF_MS)) {
+        jobIdle(io, config, job);
         await writeLine(
           io.stdout,
           `${job}: not the run before the week's first kickoff — nothing to do`,
@@ -192,10 +202,19 @@ export async function snapshotRoster(
         lines.push(text);
         if (opts.notify) await run.notifier.info(text);
       }
-      // the daily IR-validity check (T-08): a healthy player in IR blocks every add
+      // the daily IR-validity check (T-08): a healthy player in IR blocks every add. It alerts on
+      // every TRANSITION to invalid — no open check yet, or the previous snapshot's IR was valid —
+      // so an IR that was fixed and then went invalid again is alerted again, even while an older
+      // check is still open (nothing in this build can close a check but `eff doctor --ack`).
       const slots = (await run.stack.provider.getRosterSlots(ref)).value;
       const ir = auditIr(seatsOf(mine), slots);
-      if (ir.invalid && !hasOpenCheck(run, "ir_invalid")) {
+      const prevIrValid = prev === undefined ? null : !auditIr(seatsOf(prev.roster), slots).invalid;
+      const openIr = hasOpenCheck(run, "ir_invalid");
+      if (!ir.invalid && openIr && prevIrValid === false)
+        lines.push(
+          "IR valid again — the open ir_invalid check stays until `eff doctor --ack ir_invalid`",
+        );
+      if (ir.invalid && (!openIr || prevIrValid === true)) {
         run.store.repos.leagueSettings.raiseCheck(
           check(
             "ir_invalid",
@@ -262,6 +281,7 @@ export async function snapshotRoster(
       lines.push(`scoreboard snapshot stored (${String(live.length)} matchup(s))`);
     }
     for (const l of lines) await writeLine(io.stdout, l);
+    jobWorked(io, config, job);
     return EXIT.ok;
   } catch (e) {
     return await jobFailure(io, config, run, job, e, opts.notify);
@@ -321,11 +341,13 @@ export async function snapshotPool(
         if (at !== null && Number.isFinite(at) && at !== anchor)
           updateJobState(config.cacheDir, { "pool.anchor": at, "pool.anchor_basis": next.basis });
       }
+      jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: not a working run — nothing to do`);
       return EXIT.ok;
     }
     const schedule = await proScheduleOf(run, config.season);
     if (schedule !== null && !inSeasonWindow(schedule, now)) {
+      jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: off-season — nothing to do`);
       return EXIT.ok;
     }
@@ -370,6 +392,7 @@ export async function snapshotPool(
       await writeLine(io.stdout, text);
       if (opts.notify) await run.notifier.info(text);
     }
+    jobWorked(io, config, job);
     return EXIT.ok;
   } catch (e) {
     return await jobFailure(io, config, run, job, e, opts.notify);
@@ -428,6 +451,7 @@ export async function snapshotProjections(
     const now = io.clock.nowMs();
     const schedule = await proScheduleOf(run, config.season);
     if (schedule !== null && !inSeasonWindow(schedule, now)) {
+      jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: off-season — nothing to do`);
       return EXIT.ok;
     }
@@ -459,6 +483,7 @@ export async function snapshotProjections(
       io.stdout,
       `${job}: ${String(n)} ESPN projection row(s) stored for week ${String(week)}`,
     );
+    jobWorked(io, config, job);
     return EXIT.ok;
   } catch (e) {
     return await jobFailure(io, config, run, job, e, opts.notify);
@@ -484,6 +509,7 @@ export async function transactionsAppend(
     const done = stateNumber(state, "transactions.after");
     const due = poolAt !== null && now >= poolAt + TRANSACTIONS_AFTER_POOL_MS && done !== poolAt;
     if (!due && !opts.force) {
+      jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: not 30 min after a pool run — nothing to do`);
       return EXIT.ok;
     }
@@ -503,6 +529,7 @@ export async function transactionsAppend(
       io.stdout,
       `${job}: ${String(added)} new transaction(s) appended (week ${String(week)})`,
     );
+    jobWorked(io, config, job);
     return EXIT.ok;
   } catch (e) {
     return await jobFailure(io, config, run, job, e, opts.notify);
@@ -574,6 +601,7 @@ export async function preKickoff(
     const schedule = await proScheduleOf(run, config.season);
     const first = schedule === null ? null : nextDayFirstKickoff(schedule, now);
     if (first === null || !isWorkingRun(now, first - PRE_KICKOFF_MS)) {
+      jobIdle(io, config, job);
       await writeLine(
         io.stdout,
         `${job}: not the run before today's first kickoff — nothing to do`,
@@ -581,11 +609,14 @@ export async function preKickoff(
       return EXIT.ok;
     }
     if (config.teamId === null) {
+      // a configuration gap, recorded as a failed run so `eff status` and doctor #11 show it
+      recordJobRun(config.cacheDir, job, now, { ok: false, error: "no_team_id" });
       await writeLine(io.stdout, `${job}: ESPN_TEAM_ID is not recorded — run \`eff setup\``);
       return EXIT.ok;
     }
     const [latest] = run.store.repos.rosterSnapshots.latestTwo(config.teamId);
     if (latest === undefined) {
+      jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: no roster snapshot yet — nothing to judge`);
       return EXIT.ok;
     }
@@ -604,6 +635,7 @@ export async function preKickoff(
     const text = preKickoffText(f, stale);
     await writeLine(io.stdout, text ?? `${job}: no problems found`);
     if (text !== null && opts.notify) await run.notifier.info(text);
+    jobWorked(io, config, job);
     return EXIT.ok;
   } catch (e) {
     return await jobFailure(io, config, run, job, e, opts.notify);

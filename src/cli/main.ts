@@ -19,6 +19,7 @@ import { createNotifier } from "./notify.js";
 import { printConfig } from "./print-config.js";
 import { probe } from "./probe.js";
 import { refresh } from "./refresh.js";
+import type { Logger } from "./log.js";
 import { bootLevel, loadLenientRuntime, loadRuntime, makeLogger } from "./runtime.js";
 import { selftestRead } from "./selftest-agent.js";
 import { setup } from "./setup.js";
@@ -32,7 +33,7 @@ import {
 import { status } from "./status.js";
 import { errorText, openStore } from "./store-access.js";
 import { tune } from "./tune.js";
-import { uninstall } from "./uninstall.js";
+import { fallbackUninstallConfig, uninstall, type UninstallConfig } from "./uninstall.js";
 
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): the writes-phase commands —
 // `eff confirm` (the out-of-band confirmation channel, plan 02 §4.2), `eff journal` and
@@ -397,6 +398,30 @@ export async function main(
         }
       }
     }
+    if (command === "uninstall") {
+      // a config.json that cannot be read must not block the removal of the credentials, the jobs
+      // and the data (plan 03 §8): the directories come from the environment alone
+      let rt: { config: UninstallConfig; log: Logger };
+      try {
+        rt = await loadLenientRuntime(io);
+      } catch (e) {
+        if (!(e instanceof ConfigError)) throw e;
+        try {
+          rt = {
+            config: fallbackUninstallConfig(io.env, io.home, e.issues),
+            log: bootLog,
+          };
+        } catch {
+          return EXIT.usage;
+        }
+      }
+      return await uninstall(io, rt.config, rt.log, {
+        yes: flag(p, "yes"),
+        dryRun: flag(p, "dry-run"),
+        keepConfig: flag(p, "keep-config"),
+        exportLog: str(p, "export-log"),
+      });
+    }
     const { config, log } = await loadLenientRuntime(io);
     switch (command) {
       case "status":
@@ -471,13 +496,6 @@ export async function main(
           apply: flag(p, "apply"),
           revert: flag(p, "revert"),
           json: flag(p, "json"),
-        });
-      case "uninstall":
-        return await uninstall(io, config, log, {
-          yes: flag(p, "yes"),
-          dryRun: flag(p, "dry-run"),
-          keepConfig: flag(p, "keep-config"),
-          exportLog: str(p, "export-log"),
         });
       default:
         throw new UsageError(`unknown command${safeName(command)}`);

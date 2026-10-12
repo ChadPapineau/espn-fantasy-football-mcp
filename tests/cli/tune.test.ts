@@ -559,6 +559,24 @@ describe("dispatch, and where tune can never run from", () => {
     ).toBeNull();
   });
 
+  it("the guard is documented as a hurdle, not a boundary (an unset CLAUDECODE under a pty passes it)", () => {
+    // the bypass the Stage C pen test used: CLAUDECODE unset, both streams a (pseudo-)terminal
+    expect(applyContextRefusal(ttyIo({}))).toBeNull();
+    // so no doc may claim the guard stops a model; each says what it is and what bounds a change
+    const src = readFileSync(path.join(ROOT, "src", "cli", "tune.ts"), "utf8");
+    expect(src).not.toMatch(/it cannot type into the owner's\s*\/\/?\s*terminal/);
+    expect(src).not.toMatch(/cannot type into the owner/);
+    const guardDoc = src.slice(
+      src.lastIndexOf("/**", src.indexOf("export function applyContextRefusal")),
+    );
+    expect(guardDoc).toMatch(/HURDLE/);
+    expect(guardDoc).toMatch(/NOT a security boundary/);
+    expect(guardDoc).toMatch(/registry validation/);
+    const readme = readFileSync(path.join(ROOT, "README.md"), "utf8");
+    const row = readme.split("\n").find((l) => l.startsWith("| `eff tune"));
+    expect(row).toMatch(/hurdle, not a security boundary/);
+  });
+
   it("no launchd job runs tune", () => {
     for (const j of JOBS) expect(j.argv[0]).not.toBe("tune");
   });

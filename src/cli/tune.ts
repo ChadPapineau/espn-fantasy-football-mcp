@@ -8,7 +8,10 @@
 // the 0700 config dir outside every repository and synced folder — and only when a human runs it:
 // stdin and stdout must be an interactive terminal, the shell must not belong to an agent session
 // (CLAUDECODE) or a launchd job (XPC_SERVICE_NAME = one of our labels), and the human must type the
-// confirmation word. `--revert` undoes the last applied change set under the same rules. Never
+// confirmation word — a HURDLE, not a boundary (plan 02 §4.2's reasoning for every TTY check): a
+// model with a shell can unset the variable and allocate a pty. What bounds an applied change is the
+// registry validation and the per-parameter bounds, re-checked here on every run (the store is never
+// trusted). `--revert` undoes the last applied change set under the same rules. Never
 // dispatched by `serve` (the MCP layer cannot import src/cli — eslint's layer rule) and never in the
 // launchd job list (src/cli/launchd.ts JOBS). Network: none. Keychain: none. New here.
 import path from "node:path";
@@ -118,9 +121,13 @@ export function storeProposals(io: CliIo, log: Logger, factory?: StoreFactory) {
 }
 
 /**
- * Why `--apply` must not run here, or null: an agent session's shell, a launchd job, or a stream
- * that is not an interactive terminal. (A model can drive a shell; it cannot type into the owner's
- * terminal — the same reason `eff setup` reads the cookie only there.)
+ * Why `--apply` must not run here, or null: an agent session's shell (CLAUDECODE set), a launchd job,
+ * or a stream that is not an interactive terminal. This is a HURDLE against an accidental or casual
+ * apply, NOT a security boundary: an agent with a shell can unset CLAUDECODE and run the command
+ * under a pty (`script`), and then nothing here can tell it from the owner's terminal (plan 02 §4.2:
+ * "a hurdle a pty defeats, not a proof"). What actually bounds an applied change is planApply's
+ * registry validation and per-parameter bounds — and an agent with a shell could write
+ * tuned-parameters.json directly anyway.
  */
 export function applyContextRefusal(io: CliIo): string | null {
   if ((io.env.CLAUDECODE ?? "") !== "")

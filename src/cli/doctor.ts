@@ -51,8 +51,8 @@ import { onlineRows } from "./doctor-online.js";
 import { exitCodeFor, row, type DoctorRow, type RowStatus } from "./doctor-rows.js";
 import { bothCredentialStores } from "./espn-stack.js";
 import { writeLine, distEntry, type CliIo } from "./io.js";
-import { readJobState, stateToken } from "./job-state.js";
-import { installedPlists, LAUNCHCTL, labelOf, launchctl } from "./launchd.js";
+import { jobRunRecords, readJobState, stateToken } from "./job-state.js";
+import { installedPlists, JOB_NAMES, LAUNCHCTL, labelOf, launchctl } from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
 import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
 import {
@@ -206,12 +206,11 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
   } catch {
     return { ...empty, state: "invalid" };
   }
-  const servers = isObj(parsed) ? parsed.mcpServers : undefined;
   const entries: { name: string; spec: Record<string, unknown> }[] = [];
   const envs: Record<string, unknown>[] = [];
   let others = 0;
   let siblingInstalled = false;
-  if (isObj(servers)) {
+  for (const servers of serverMaps(parsed)) {
     for (const [name, spec] of Object.entries(servers)) {
       if (!isObj(spec)) continue;
       if (isObj(spec.env)) envs.push(spec.env);
@@ -221,6 +220,25 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
     }
   }
   return { client, file, state: "ok", entries, envs, others, siblingInstalled };
+}
+
+/** Most `projects[*]` entries of ~/.claude.json scanned (a bound on a file the user owns). */
+export const MAX_CLIENT_PROJECTS = 1000;
+
+/**
+ * Every `mcpServers` map of a client config: the top-level one (Claude Desktop; Claude Code's user
+ * scope) and each `projects["<dir>"].mcpServers` (Claude Code's LOCAL scope — `claude mcp add`'s
+ * default — which a cookie pasted into an `--env` lands in; a scan of the top level alone reported
+ * "no client env block to check" for it, plan 03 §5 #2/#3).
+ */
+export function serverMaps(parsed: unknown): Record<string, unknown>[] {
+  if (!isObj(parsed)) return [];
+  const out: Record<string, unknown>[] = [];
+  if (isObj(parsed.mcpServers)) out.push(parsed.mcpServers);
+  if (isObj(parsed.projects))
+    for (const p of Object.values(parsed.projects).slice(0, MAX_CLIENT_PROJECTS))
+      if (isObj(p) && isObj(p.mcpServers)) out.push(p.mcpServers);
+  return out;
 }
 
 async function nodeVersionOf(io: CliIo, command: string): Promise<string | null> {
@@ -1141,6 +1159,10 @@ export async function checkLaunchd(
   if (installed.length === 0)
     return row(11, "launchd", title, "warn", "no jobs installed", "`eff install-launchd`", details);
   let status: RowStatus = "ok";
+  let failing = 0;
+  const records = new Map(
+    jobRunRecords(readJobState(config.cacheDir), JOB_NAMES).map((r) => [r.job, r] as const),
+  );
   for (const { job } of installed) {
     const r = await io.exec(LAUNCHCTL, launchctl.print(io.uid, labelOf(job)));
     const loaded = r.code === 0;
@@ -1150,6 +1172,18 @@ export async function checkLaunchd(
       .map((s) => (store === null ? null : store.repos.refreshLog.latest(s)))
       .filter((x) => x !== null)
       .map((x) => `${x.source} ${x.ok ? "ok" : `failed (${x.error ?? "?"})`} at ${x.finished_at}`);
+    // the jobs without a dataset source record their runs in job-state.json (plan 06 J2)
+    const rec = records.get(job);
+    if (rec?.last_run_at != null)
+      runs.push(
+        rec.ok === true
+          ? `ok at ${rec.last_run_at}`
+          : `FAILED (${rec.error ?? "?"}) at ${rec.last_run_at}, ${String(rec.consecutive_failures)} in a row`,
+      );
+    if (rec?.ok === false) {
+      failing++;
+      status = "warn";
+    }
     details.push(
       `${job}: ${loaded ? "loaded" : "NOT loaded"}${runs.length > 0 ? `; last run ${runs.join("; ")}` : ""}`,
     );
@@ -1168,8 +1202,14 @@ export async function checkLaunchd(
     status,
     status === "ok"
       ? `${String(installed.length)} job(s) installed and loaded`
-      : "some jobs are missing or not loaded",
-    status === "ok" ? null : "`eff install-launchd` (re-running is safe)",
+      : failing > 0
+        ? `${String(failing)} job(s) failed on their last run${missing.length > 0 ? "; some jobs are missing or not loaded" : ""}`
+        : "some jobs are missing or not loaded",
+    status === "ok"
+      ? null
+      : failing > 0
+        ? "see each job's last error below and its log under ~/Library/Logs/espn-fantasy-football-mcp/; `eff status` lists the runs"
+        : "`eff install-launchd` (re-running is safe)",
     details,
   );
 }

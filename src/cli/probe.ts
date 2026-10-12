@@ -23,7 +23,13 @@ import type { DriftObservations } from "../drift/types.js";
 import { createHttpClient, type HttpClient } from "../http/client.js";
 import { leagueTarget, seasonTarget } from "../providers/espn/path.js";
 import type { EspnView } from "../providers/espn/types.js";
-import type { LimiterRepository, ProbeLogRow, Store, StoreFactory } from "../store/types.js";
+import type {
+  LimiterRepository,
+  ProbeLogRow,
+  RequestOrigin,
+  Store,
+  StoreFactory,
+} from "../store/types.js";
 import { driftObservations } from "./espn-stack.js";
 import { espnRequest, jsonBody, type EspnAnswer } from "./espn-http.js";
 import { EXIT } from "./exit.js";
@@ -55,6 +61,12 @@ export interface ProbeDeps {
   readonly clock: Clock;
   readonly host: string;
   readonly observations: DriftObservations | undefined;
+  /**
+   * Whose request the limiter row records: `job` (the launchd drift probe — counted against the
+   * jobs' daily keyless cap, plan 06 §1.4 + changelog V7) or `server` (an interactive run: `eff
+   * doctor --online`, a manual `eff probe` — never charged to the jobs' cap). Default `job`.
+   */
+  readonly origin?: RequestOrigin;
 }
 
 /** The server time an answer reports (x-fantasy-server-time epoch ms, else Date), or null. */
@@ -106,7 +118,7 @@ export async function hostProbe(deps: ProbeDeps, season: number): Promise<ProbeC
   const views: EspnView[] = ["proTeamSchedules_wl"];
   const url = seasonTarget({ host: deps.host, season, views: ["proTeamSchedules_wl"] }).url;
   const r = await espnRequest(
-    { http: deps.http, limiter: deps.limiter, clock: deps.clock, origin: "job" },
+    { http: deps.http, limiter: deps.limiter, clock: deps.clock, origin: deps.origin ?? "job" },
     { url, cookie: null },
   );
   if ("error" in r) {
@@ -159,7 +171,7 @@ export async function shapeProbe(
     views: ["mSettings", "mNav", "mTeam"],
   }).url;
   const r = await espnRequest(
-    { http: deps.http, limiter: deps.limiter, clock: deps.clock, origin: "job" },
+    { http: deps.http, limiter: deps.limiter, clock: deps.clock, origin: deps.origin ?? "job" },
     { url, cookie: null },
   );
   if ("error" in r) {
@@ -341,6 +353,8 @@ export async function probe(
       clock: io.clock,
       host: config.espnReadHost,
       observations: driftObservations(io, log),
+      // the launchd job runs `probe --notify`; a run without it is someone at a terminal
+      origin: opts.notify ? "job" : "server",
     };
     const before = store.repos.driftState.get()?.status ?? "green";
     const checks: ProbeCheck[] = [await hostProbe(deps, config.season)];

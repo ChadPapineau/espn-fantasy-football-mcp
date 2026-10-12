@@ -149,6 +149,8 @@ export async function onlineRows(
         clock: io.clock,
         host: config.espnReadHost,
         observations: driftObservations(io, log),
+        // an interactive diagnosis: never charged to the launchd jobs' daily keyless cap
+        origin: "server",
       },
       config.season,
     );

@@ -208,3 +208,81 @@ describe("snapshot pool over launchd's hourly wakes (plan 06 §1.4, ADV OBJ-16)"
     expect(worked).toEqual(["2026-10-08T17:00:00.000Z", "2026-10-11T17:00:00.000Z"]);
   }, 60_000);
 });
+
+describe("the nightly IR-validity check alerts on every transition to invalid (plan 06 §1.4, T-08)", () => {
+  /** league-a with team 1's IR-slot (21) player in `status` this night. */
+  function leagueWithIr(status: string) {
+    return fakeFetch((url) => {
+      const u = new URL(url);
+      const views = u.searchParams.getAll("view");
+      if (views.includes("proTeamSchedules_wl"))
+        return jsonRes(rec("season/proTeamSchedules_wl.json"));
+      if (!u.pathname.includes("/leagues/0")) return new Response(null, { status: 404 });
+      const parts: Record<string, unknown>[] = [];
+      for (const v of views) {
+        if (v === "mSettings") parts.push(rec("league-a/mSettings.json"));
+        else if (v === "mNav") parts.push(rec("league-a/mNav.json"));
+        else if (v === "mTeam" || v === "mStandings") parts.push(rec("league-a/mTeam.json"));
+        else if (v === "mRoster") {
+          const a = rec("league-a/mRoster.sp3.p1.json") as { teams: Record<string, unknown>[] };
+          const b = rec("league-a/mRoster.sp3.p2.json") as { teams: Record<string, unknown>[] };
+          for (const t of a.teams as {
+            id: number;
+            roster: {
+              entries: {
+                lineupSlotId: number;
+                playerPoolEntry: { player: { injuryStatus: string; injured: boolean } };
+              }[];
+            };
+          }[])
+            if (t.id === 1)
+              for (const e of t.roster.entries)
+                if (e.lineupSlotId === 21) {
+                  e.playerPoolEntry.player.injuryStatus = status;
+                  e.playerPoolEntry.player.injured = status !== "ACTIVE";
+                }
+          parts.push({ ...a, teams: [...a.teams, ...b.teams] });
+        } else if (v === "mBoxscore") parts.push(rec("league-a/mBoxscore.sp3.json"));
+        else return jsonRes({ messages: ["no fixture"] }, 404);
+      }
+      return jsonRes(merge(...parts));
+    });
+  }
+
+  async function night(at: string, status: string) {
+    const f = leagueWithIr(status);
+    const { exec, calls } = fakeExec();
+    const io = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock(at),
+      platform: "darwin",
+      exec,
+      packageRoot: fakePackage(sb),
+      env: {
+        ESPN_LEAGUE_ID: "0",
+        EFF_CREDENTIAL_STORE: "file",
+        ESPN_SEASON: "2026",
+        ESPN_TEAM_ID: "1",
+      },
+    });
+    const { config, log } = await loadRuntime(io);
+    expect(await snapshotRoster(io, config, log, { notify: true, preKickoff: false })).toBe(0);
+    const notified = calls.some((c) => c.args.join(" ").includes("IR slot holds"));
+    const line = io.out.text.split("\n").some((l) => l.startsWith("IR invalid"));
+    return { notified, line, text: io.out.text };
+  }
+
+  it("healthy-in-IR → alert; fixed → said; healthy-in-IR again → alerted AGAIN (an old check is still open)", async () => {
+    sb = sandbox();
+    const n1 = await night("2026-10-06T06:00:00.000Z", "ACTIVE");
+    expect([n1.line, n1.notified]).toEqual([true, true]);
+    const n2 = await night("2026-10-07T06:00:00.000Z", "INJURY_RESERVE");
+    expect([n2.line, n2.notified]).toEqual([false, false]);
+    expect(n2.text).toContain("IR valid again");
+    const n3 = await night("2026-10-08T06:00:00.000Z", "ACTIVE");
+    expect([n3.line, n3.notified]).toEqual([true, true]);
+    // a night that stays invalid does not repeat the alert
+    const n4 = await night("2026-10-09T06:00:00.000Z", "ACTIVE");
+    expect([n4.line, n4.notified]).toEqual([false, false]);
+  });
+});

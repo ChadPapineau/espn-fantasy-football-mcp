@@ -21,14 +21,14 @@ import {
 } from "node:fs";
 import path from "node:path";
 import {
-  assertNotSynced,
-  assertOutsideRepo,
   backupDir,
   ensureSecureDir,
   insecureAncestors,
+  locationRefusals,
   PathSecurityError,
   resolveAbsolute,
   runTempDir,
+  type XattrReader,
 } from "../config/paths.js";
 import type { LenientConfig } from "../config/schema.js";
 import { pruneStore, pruneWeeklyBackups, weeklyBackupPath } from "../store/index.js";
@@ -88,10 +88,19 @@ export async function prune(
 
 /**
  * Validates a `--to` destination and returns where the file will be written: the parent resolved to
- * its real path plus the file name. Never a synced folder, never the checkout, never a directory
- * others can write into without the sticky bit. Every refusal is a UsageError (exit 2).
+ * its real path plus the file name. The SAME location rule as the config, cache and credential paths
+ * (config/paths `locationRefusals`): never inside ANY git work tree (this checkout, the owner's
+ * sibling repo, a dotfiles repo — a later `git add -A` would publish the store or the export, whose
+ * records carry league ids), never a synced folder by name, never a directory carrying a
+ * file-provider attribute (iCloud Drive, CloudStorage clients), and never a directory others can
+ * write into without the sticky bit. Every refusal is a UsageError (exit 2).
  */
-export function resolveBackupDestination(to: string, home: string, repoRoot: string): string {
+export function resolveBackupDestination(
+  to: string,
+  home: string,
+  repoRoot: string,
+  xattr?: XattrReader,
+): string {
   let abs: string;
   try {
     abs = resolveAbsolute(to, home, "--to");
@@ -111,14 +120,14 @@ export function resolveBackupDestination(to: string, home: string, repoRoot: str
   if (!statSync(realParent).isDirectory())
     throw new UsageError(`backup: --to: ${parent} is not a directory`);
   const dest = path.join(realParent, name);
-  try {
-    assertNotSynced(abs, home, "--to");
-    assertNotSynced(dest, home, "--to");
-    assertOutsideRepo(abs, repoRoot, "--to");
-    assertOutsideRepo(dest, repoRoot, "--to");
-  } catch (e) {
-    if (e instanceof PathSecurityError) throw new UsageError(`backup: --to: ${e.detail}`);
-    throw e;
+  for (const p of [abs, dest]) {
+    const refused = locationRefusals(p, {
+      home,
+      repoRoot,
+      what: "--to",
+      ...(xattr === undefined ? {} : { xattr }),
+    })[0];
+    if (refused !== undefined) throw new UsageError(`backup: --to: ${refused.detail}`);
   }
   if (insecureAncestors(dest).length > 0)
     throw new UsageError(
@@ -191,7 +200,9 @@ export async function backup(
     cacheDir: config.cacheDir,
   });
   const userDest =
-    opts.to === undefined ? null : resolveBackupDestination(opts.to, io.home, io.packageRoot);
+    opts.to === undefined
+      ? null
+      : resolveBackupDestination(opts.to, io.home, io.packageRoot, io.xattr);
   let rotated: string[] = [];
   try {
     if (userDest !== null && exists(userDest)) throw new Error("backup destination already exists");

@@ -25,7 +25,7 @@ import {
 } from "../../src/cli/status.js";
 import { openStore } from "../../src/cli/store-access.js";
 import { stateRow } from "../auth/helpers.js";
-import { fakeExec, makeIo, sandbox, type Sandbox } from "./helpers.js";
+import { ROOT, fakeExec, fakeXattr, makeIo, sandbox, type Sandbox } from "./helpers.js";
 
 let sb: Sandbox;
 afterEach(() => {
@@ -110,6 +110,38 @@ describe("prune and backup", () => {
     const link = path.join(sb.dir, "out", "link.sqlite");
     symlinkSync(path.join(sb.dir, "nowhere"), link);
     expect(() => copyToNewPrivateFile(dest, link)).toThrow(/already exists/);
+  });
+  it("backup --to / uninstall --export-log refuse ANY git work tree and file-provider directories (the location rule)", async () => {
+    sb = sandbox();
+    const other = path.join(sb.dir, "sibling-repo");
+    mkdirSync(path.join(other, ".git"), { recursive: true, mode: 0o700 });
+    mkdirSync(path.join(other, "notes"), { mode: 0o700 });
+    // another repository than this checkout (the owner's sibling, a dotfiles repo): a later
+    // `git add -A` there would publish the store or the export
+    expect(() =>
+      resolveBackupDestination(path.join(other, "notes", "log.json"), sb.home, ROOT),
+    ).toThrow(/inside a git working tree|git/);
+    // a directory carrying a file-provider attribute (iCloud Drive / CloudStorage), by xattr
+    const drive = path.join(sb.home, "Drive");
+    mkdirSync(drive, { recursive: true, mode: 0o700 });
+    const marked = fakeXattr({ [drive]: ["com.apple.file-provider-domain-id"] });
+    expect(() =>
+      resolveBackupDestination(path.join(drive, "store.sqlite"), sb.home, ROOT, marked),
+    ).toThrow(/file-provider|iCloud/);
+    // a plain private directory outside every repository is accepted
+    const ok = path.join(sb.dir, "exports");
+    mkdirSync(ok, { mode: 0o700 });
+    expect(resolveBackupDestination(path.join(ok, "x.json"), sb.home, ROOT, fakeXattr())).toBe(
+      path.join(ok, "x.json"),
+    );
+    // the CLI paths use the io's reader: the backup command refuses the marked directory (exit 2)
+    const { io, config, log, store } = await withStore();
+    store.close();
+    const mio = makeIo(sb, { xattr: marked });
+    await expect(
+      backup(mio, config, log, { to: path.join(drive, "store.sqlite"), notify: false }),
+    ).rejects.toThrow(/file-provider|iCloud/);
+    expect(io).toBeDefined();
   });
 });
 

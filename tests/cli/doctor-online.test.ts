@@ -9,6 +9,7 @@ import { sessionFileBody } from "../../src/auth/file.js";
 import { metaFor } from "../../src/auth/upgrade.js";
 import { onlineRows } from "../../src/cli/doctor-online.js";
 import { runDoctor } from "../../src/cli/doctor.js";
+import { probe } from "../../src/cli/probe.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
 import { composeBodies } from "../../src/providers/espn/index.js";
@@ -155,6 +156,41 @@ describe("doctor --online", () => {
       expect(rows.find((x) => x.n === 16)?.status).toBe("config");
     } finally {
       store.close();
+    }
+  });
+});
+
+describe("interactive keyless probes are never charged to the jobs' daily cap (plan 06 §1.4, V7)", () => {
+  it("doctor --online records its host probe as origin server; the launchd probe (--notify) as job", async () => {
+    sb = sandbox();
+    const f = espn({ anon: 200, cookie: 200, nflverse: 200 });
+    const io = makeIo(sb, { fetch: f.fetch, clock: movingClock(), packageRoot: fakePackage(sb) });
+    const { config, log } = await loadLenientRuntime(io);
+    const store = openStore(config, io.clock, log, { migrate: true });
+    const day = "2026-10-06T00:00:00.000Z";
+    try {
+      await onlineRows(io, config, store, log);
+      const counts = store.repos.limiter.countToday(day);
+      expect(counts.job.keyless).toBe(0);
+      expect(counts.server.keyless).toBeGreaterThanOrEqual(1);
+    } finally {
+      store.close();
+    }
+    // a manual `eff probe` (no --notify) is someone at a terminal: origin server too
+    const manual = makeIo(sb, { fetch: f.fetch, clock: movingClock("2026-10-06T19:00:00.000Z") });
+    const m = await loadLenientRuntime(manual);
+    await probe(manual, m.config, m.log, { hostOnly: true, notify: false, json: true });
+    // the launchd job (`probe --notify`) is the job fleet's
+    const job = makeIo(sb, { fetch: f.fetch, clock: movingClock("2026-10-06T20:00:00.000Z") });
+    const j = await loadLenientRuntime(job);
+    await probe(job, j.config, j.log, { hostOnly: true, notify: true, json: true });
+    const after = openStore(config, io.clock, log, { migrate: false });
+    try {
+      const counts = after.repos.limiter.countToday(day);
+      expect(counts.job.keyless).toBe(1);
+      expect(counts.server.keyless).toBeGreaterThanOrEqual(2);
+    } finally {
+      after.close();
     }
   });
 });

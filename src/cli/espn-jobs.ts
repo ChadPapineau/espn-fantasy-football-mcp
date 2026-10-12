@@ -14,6 +14,7 @@ import { buildEspnStack, effCodeOf, type EspnStack } from "./espn-stack.js";
 import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
 import type { Logger } from "./log.js";
+import { recordJobIdle, recordJobRun } from "./job-state.js";
 import { createNotifier, type Notifier } from "./notify.js";
 import { errorText, openStore } from "./store-access.js";
 
@@ -61,6 +62,7 @@ export async function startJob(
     });
   } catch (e) {
     await writeLine(io.stderr, `eff ${job}: the store could not be opened: ${errorText(e)}`);
+    recordJobRun(config.cacheDir, job, io.clock.nowMs(), { ok: false, error: "store" });
     if (opts.notify) await notifier.failure(job, "store");
     return EXIT.error;
   }
@@ -73,6 +75,7 @@ export async function startJob(
     }
     if (row?.league_id === config.leagueId && row.state === "rejected") {
       store.close();
+      jobIdle(io, config, job);
       await writeLine(
         io.stdout,
         `${job}: the stored cookies are rejected — waiting for the daily credential check or \`eff setup\` (no request sent)`,
@@ -89,6 +92,7 @@ export async function startJob(
   }
   if (!locked) {
     store.close();
+    jobIdle(io, config, job);
     await writeLine(io.stdout, `${job}: another run holds the job lock — nothing done`);
     return EXIT.ok;
   }
@@ -107,7 +111,23 @@ export function endJob(io: CliIo, run: JobRun): void {
   run.store.close();
 }
 
-/** Maps a provider failure to the job's exit code, notifying as plan 06 §1.4 says. */
+/**
+ * Records a run that did its work (plan 06 J2: every run is visible in `eff status` and doctor #11;
+ * the credentialed jobs have no dataset source, so their runs live in job-state.json).
+ */
+export function jobWorked(io: CliIo, config: Pick<Config, "cacheDir">, job: string): void {
+  recordJobRun(config.cacheDir, job, io.clock.nowMs(), { ok: true });
+}
+
+/** Records a wake with nothing to do (the job is alive; its last run is kept). */
+export function jobIdle(io: CliIo, config: Pick<Config, "cacheDir">, job: string): void {
+  recordJobIdle(config.cacheDir, job, io.clock.nowMs());
+}
+
+/**
+ * Maps a provider failure to the job's exit code, notifying as plan 06 §1.4 says, and records the
+ * failed run with its code (a 401 included — plan 06 §1.4 `ok = 0` on a rejection).
+ */
 export async function jobFailure(
   io: CliIo,
   config: Config,
@@ -117,6 +137,7 @@ export async function jobFailure(
   notify: boolean,
 ): Promise<number> {
   const code = effCodeOf(e);
+  recordJobRun(config.cacheDir, job, io.clock.nowMs(), { ok: false, error: code });
   if (code === "ESPN_AUTH_REJECTED") {
     await writeLine(
       io.stdout,
