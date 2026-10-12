@@ -43,7 +43,8 @@ import {
   weekFirstKickoff,
   type JobRun,
 } from "./espn-jobs.js";
-import { EXIT } from "./exit.js";
+import { effCodeOf } from "./espn-stack.js";
+import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
 import {
   readJobState,
@@ -53,6 +54,7 @@ import {
   updateJobState,
 } from "./job-state.js";
 import type { Logger } from "./log.js";
+import { parseSeasons } from "./refresh.js";
 
 /** The positions `snapshot pool` pages (plan 06 §1.4: QB/RB/WR/TE/K/D-ST). */
 export const POOL_POSITIONS = ["QB", "RB", "WR", "TE", "K", "D/ST"] as const;
@@ -528,6 +530,120 @@ export async function transactionsAppend(
     await writeLine(
       io.stdout,
       `${job}: ${String(added)} new transaction(s) appended (week ${String(week)})`,
+    );
+    jobWorked(io, config, job);
+    return EXIT.ok;
+  } catch (e) {
+    return await jobFailure(io, config, run, job, e, opts.notify);
+  } finally {
+    endJob(io, run);
+  }
+}
+
+/** The previous seasons a backfill reads by default (the waiver fit's history window, R6-3). */
+export const BACKFILL_DEFAULT_SEASONS = 2;
+/** At most this many seasons per backfill run (each costs a settings read plus one per week). */
+export const BACKFILL_MAX_SEASONS = 3;
+/** One week's transactions page (mTransactions2 holds the whole week; the cap only bounds it). */
+export const BACKFILL_WEEK_COUNT = 1000;
+
+/** What a backfill did for one season (counts and codes only). */
+export interface BackfillSeason {
+  readonly season: number;
+  readonly weeks: number;
+  readonly read: number;
+  readonly added: number;
+  /** A fixed code when ESPN does not serve the season to these cookies (it is skipped). */
+  readonly skipped: string | null;
+}
+
+/**
+ * `eff transactions --backfill [--seasons 2024,2025]` (changelog R6-3; plan 07 E5 "the league's
+ * own feed"): appends each previous season's transactions — every scoring period's mTransactions2,
+ * cookies required on a private league — to transactions_seen, so E5 fits the league's demand curve
+ * and premium from its own history on the first call instead of after 13 logged runs. Run by the
+ * owner (an interactive `server` origin: never the jobs' daily caps), read host only, under the
+ * limiter; idempotent (appendNew dedups by transaction id). Default: the league's newest
+ * BACKFILL_DEFAULT_SEASONS previous seasons; a season ESPN does not serve is skipped and said.
+ */
+export async function transactionsBackfill(
+  io: CliIo,
+  config: Config,
+  log: Logger,
+  opts: SnapshotOptions & { readonly seasons: string | undefined },
+): Promise<number> {
+  const job = "transactions-backfill";
+  let asked: number[] | null = null;
+  if (opts.seasons !== undefined) {
+    asked = parseSeasons(opts.seasons);
+    if (asked.some((y) => y >= config.season))
+      throw new UsageError(
+        `transactions --backfill: --seasons takes previous seasons only (before ${String(config.season)})`,
+      );
+    if (asked.length > BACKFILL_MAX_SEASONS)
+      throw new UsageError(
+        `transactions --backfill: at most ${String(BACKFILL_MAX_SEASONS)} seasons per run`,
+      );
+  }
+  const run = await startJob(io, config, log, job, { ...opts, origin: "server" });
+  if (typeof run === "number") return run;
+  try {
+    const ref = run.stack.ref;
+    const seasons =
+      asked ??
+      [...(await run.stack.provider.getLeague(ref)).value.previous_seasons]
+        .filter((y) => y < config.season)
+        .sort((a, b) => b - a)
+        .slice(0, BACKFILL_DEFAULT_SEASONS);
+    if (seasons.length === 0) {
+      jobIdle(io, config, job);
+      await writeLine(io.stdout, `${job}: the league has no previous season to read`);
+      return EXIT.ok;
+    }
+    const done: BackfillSeason[] = [];
+    for (const season of seasons) {
+      const sref = { ...ref, season };
+      let first: number;
+      let last: number;
+      try {
+        const clock = (await run.stack.provider.getLeague(sref)).value.clock;
+        first = Math.max(1, clock.first_scoring_period);
+        last = Math.max(first, clock.final_scoring_period);
+      } catch (e) {
+        const code = effCodeOf(e);
+        // a season this league (or these cookies) cannot read is skipped, never fatal
+        if (code === "ESPN_LEAGUE_NOT_FOUND" || code === "ESPN_REQUIRES_COOKIES") {
+          done.push({ season, weeks: 0, read: 0, added: 0, skipped: code });
+          continue;
+        }
+        throw e;
+      }
+      let read = 0;
+      let added = 0;
+      for (let week = first; week <= last; week++) {
+        const page = await run.stack.provider.listTransactions(sref, {
+          types: TRANSACTION_TYPES,
+          week,
+          since: null,
+          count: BACKFILL_WEEK_COUNT,
+          team_id: null,
+        });
+        read += page.value.items.length;
+        added += run.store.repos.transactionsSeen.appendNew(page.value.items, io.clock.nowIso());
+      }
+      done.push({ season, weeks: last - first + 1, read, added, skipped: null });
+    }
+    for (const d of done)
+      await writeLine(
+        io.stdout,
+        d.skipped === null
+          ? `${job}: season ${String(d.season)}: ${String(d.weeks)} week(s) read, ${String(d.read)} transaction(s), ${String(d.added)} new`
+          : `${job}: season ${String(d.season)}: not served (${d.skipped}) — skipped`,
+      );
+    const total = done.reduce((a, d) => a + d.added, 0);
+    await writeLine(
+      io.stdout,
+      `${job}: ${String(total)} new transaction(s) stored — espn_analyze_waivers fits its premium from them`,
     );
     jobWorked(io, config, job);
     return EXIT.ok;

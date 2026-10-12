@@ -51,9 +51,12 @@ export function readJobState(cacheDir: string): Record<string, JobStateValue> {
 
 /** The lock file that serialises read-modify-write updates across concurrently running jobs. */
 export const JOB_STATE_LOCK = `${JOB_STATE_FILE}.lock`;
-/** How long an update waits for the lock, and when a lock is stale (a crashed writer). */
-const LOCK_WAIT_MS = 2_000;
-const LOCK_STALE_MS = 10_000;
+/**
+ * How long an update waits for the lock (an update holds it for one read plus one fsynced write —
+ * milliseconds, more on a loaded or sleeping Mac), and when a lock is stale (a crashed writer).
+ */
+const LOCK_WAIT_MS = 15_000;
+const LOCK_STALE_MS = 30_000;
 
 function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -64,7 +67,8 @@ function sleepSync(ms: number): void {
  * broken). Several launchd jobs wake on the same minute (the hourly pool snapshot, the pre-kickoff
  * check and the game-day roster snapshot at :00): without the lock two read-modify-write updates
  * could interleave and one job's keys — a waiver anchor, a run record — be lost. Without the lock
- * after LOCK_WAIT_MS the update still runs (fail open: a lost stamp can only repeat a notification).
+ * after LOCK_WAIT_MS the update still runs (fail open: an update is never refused; a key lost then
+ * is written again by the job's next run).
  */
 function withStateLock<T>(cacheDir: string, fn: () => T): T {
   const lock = path.join(cacheDir, JOB_STATE_LOCK);

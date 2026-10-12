@@ -8,7 +8,7 @@
 import type { Config } from "../config/schema.js";
 import type { ProGame, ProSchedule } from "../providers/platform.js";
 import { SEASON_WINDOW_DAYS } from "../sources/runner.js";
-import type { Store, StoreFactory } from "../store/types.js";
+import type { RequestOrigin, Store, StoreFactory } from "../store/types.js";
 import { notifyRejectionOnce } from "./credential-check.js";
 import { buildEspnStack, effCodeOf, type EspnStack } from "./espn-stack.js";
 import { EXIT } from "./exit.js";
@@ -35,6 +35,12 @@ export interface JobRun {
 export interface JobOptions {
   readonly notify: boolean;
   readonly factory?: StoreFactory;
+  /**
+   * Whose requests these are (default `job`: the launchd fleet, counted against its daily caps —
+   * plan 06 §1.4 + changelog V7). A run the owner starts by hand (`eff transactions --backfill`) is
+   * `server`: it never spends the jobs' daily allowance.
+   */
+  readonly origin?: RequestOrigin;
 }
 
 /**
@@ -96,7 +102,10 @@ export async function startJob(
     await writeLine(io.stdout, `${job}: another run holds the job lock — nothing done`);
     return EXIT.ok;
   }
-  const stack = buildEspnStack(io, config, store, log, { origin: "job", observer: "daily_job" });
+  const stack = buildEspnStack(io, config, store, log, {
+    origin: opts.origin ?? "job",
+    observer: (opts.origin ?? "job") === "job" ? "daily_job" : "server",
+  });
   return { store, stack, notifier, lockName };
 }
 

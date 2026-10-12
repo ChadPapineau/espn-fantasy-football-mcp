@@ -29,7 +29,9 @@ import {
   snapshotProjections,
   snapshotRoster,
   transactionsAppend,
+  transactionsBackfill,
 } from "./snapshot.js";
+import { smoke } from "./smoke.js";
 import { status } from "./status.js";
 import { errorText, openStore } from "./store-access.js";
 import { tune } from "./tune.js";
@@ -61,6 +63,7 @@ export const COMMANDS = [
   "prune",
   "uninstall",
   "tune",
+  "smoke",
   "version",
   "help",
   "selftest-read",
@@ -88,6 +91,9 @@ export const USAGE = `usage: eff <command> [options]
                               the ESPN snapshot jobs (cookies; read-only)
   transactions [--force] [--notify]
                               append unseen league transactions
+  transactions --backfill [--seasons 2024,2025]
+                              store the league's previous seasons' transactions (the waiver fit's
+                              own history; cookies on a private league; you run it once)
   credential-check [--notify] the daily credential probe (launchd)
   pre-kickoff [--notify]      the check before the day's first kickoff (launchd)
   crosswalk rebuild [--notify]
@@ -105,6 +111,8 @@ export const USAGE = `usage: eff <command> [options]
   tune [--revert] [--apply] [--json]
                               the retrospective's parameter proposals: a dry-run diff by default;
                               --apply writes them (you, in your own terminal; asks to confirm)
+  smoke [--week N] [--json]   the live smoke against your league: settings, one roster, one pool
+                              page, one completed week scored per stat, the probe diff (never CI)
   version [--json]            print the version
   help                        this text
 
@@ -161,7 +169,12 @@ const SPECS: Readonly<Record<string, { options: Options; positionals: number }>>
     positionals: 1,
   },
   transactions: {
-    options: { force: { type: "boolean" }, notify: { type: "boolean" } },
+    options: {
+      force: { type: "boolean" },
+      notify: { type: "boolean" },
+      backfill: { type: "boolean" },
+      seasons: { type: "string" },
+    },
     positionals: 0,
   },
   "credential-check": { options: { notify: { type: "boolean" } }, positionals: 0 },
@@ -188,6 +201,7 @@ const SPECS: Readonly<Record<string, { options: Options; positionals: number }>>
     options: { apply: { type: "boolean" }, revert: { type: "boolean" }, json: { type: "boolean" } },
     positionals: 0,
   },
+  smoke: { options: { json: { type: "boolean" }, week: { type: "string" } }, positionals: 0 },
   version: { options: { json: { type: "boolean" } }, positionals: 0 },
   help: { options: {}, positionals: 0 },
   "selftest-read": {
@@ -364,9 +378,14 @@ export async function main(
         break;
     }
     if (
-      ["check-auth", "credential-check", "snapshot", "transactions", "pre-kickoff"].includes(
-        command,
-      )
+      [
+        "check-auth",
+        "credential-check",
+        "snapshot",
+        "transactions",
+        "pre-kickoff",
+        "smoke",
+      ].includes(command)
     ) {
       const { config, log } = await loadRuntime(io);
       switch (command) {
@@ -375,12 +394,21 @@ export async function main(
         case "credential-check":
           return await credentialCheck(io, config, log, { notify: flag(p, "notify") });
         case "transactions":
+          if (flag(p, "backfill"))
+            return await transactionsBackfill(io, config, log, {
+              notify: flag(p, "notify"),
+              seasons: str(p, "seasons"),
+            });
+          if (str(p, "seasons") !== undefined)
+            throw new UsageError("transactions: --seasons applies to --backfill only");
           return await transactionsAppend(io, config, log, {
             notify: flag(p, "notify"),
             force: flag(p, "force"),
           });
         case "pre-kickoff":
           return await preKickoff(io, config, log, { notify: flag(p, "notify") });
+        case "smoke":
+          return await smoke(io, config, log, { json: flag(p, "json"), week: str(p, "week") });
         default: {
           const what = p.positionals[0];
           if (what === "roster")
