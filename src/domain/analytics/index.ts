@@ -23,7 +23,9 @@ export { AnalyticsError, ensure, type AnalyticsErrorCode } from "./errors.js";
 export { collectInputs, mergeInputs, newestAsOf, type AnyStamp } from "./inputs.js";
 export {
   loopPacer,
+  pendingTurns,
   runCooperative,
+  yieldTurn,
   type CooperativeOptions,
   type CooperativeResult,
   type Pacer,
@@ -41,6 +43,7 @@ export {
   type TotalMember,
 } from "./totals.js";
 export {
+  espnRosLastWeek,
   pActiveOf,
   positionCv,
   projectPlayers,

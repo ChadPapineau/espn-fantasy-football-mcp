@@ -12,11 +12,17 @@
 // R6-3; additive): a fit from the league's previous seasons also carries its demand curve, which
 // then prices p_k_win, p_clears_to_fa (basis `league_fitted`) and q_i; whenever the cold start is
 // served E5 says so and states its measured miss (an assumption).
+// Stage C (claim timing): a FREEAGENT add executes now, a WAIVERS claim at its run — so a claim's drop
+// is any player droppable AT THE RUN (after the scoring period rolls over nobody is locked; the call's
+// lock state binds only an add made now), and the claim week counts only for a claim that executes
+// before the candidate's game that week (a run after this week's games first plays next week: W, the
+// value and s start there). The pro schedule's kickoffs decide; without one, the call-time locks do
+// (said). ESPN's rest-of-season total is shared through NFL week 18 (weeklyValues).
 // Pure. New here (the sibling's E5 was FAAB / K-DEF only).
 import type { Clock } from "../clock.js";
 import { auditIr, type RosterSeat } from "../league/roster.js";
 import { nextWaiverRun, waiverOrderRuleOf } from "../league/rules.js";
-import { opponentOf, teamGame } from "../league/schedule.js";
+import { kickoffMsOf, opponentOf, teamGame } from "../league/schedule.js";
 import type {
   BareText,
   InjuryStatus,
@@ -29,6 +35,7 @@ import type {
 import type { Dist, ScoringSettings } from "../scoring/types.js";
 import {
   DEFAULT_CV,
+  NFL_REGULAR_SEASON,
   POSITION_CV,
   P_ACTIVE_BY_STATUS,
   ROLE_HOLDS,
@@ -101,7 +108,10 @@ export interface WaiverRequest {
   readonly roster: RosterSlots;
   readonly rules: LeagueRules;
   readonly league_size: number;
-  /** The claim week (the scoring period a claim made now first plays). */
+  /**
+   * The current scoring period — the first value week. An add made now first plays it; a WAIVERS
+   * claim whose run executes after this week's games first plays the next value week (Stage C).
+   */
   readonly week: Week;
   /** The value weeks, ascending, the claim week first (rules.ts `remainingWeeks`). */
   readonly weeks: readonly Week[];
@@ -122,6 +132,12 @@ export interface WaiverRequest {
   readonly alive_by_week?: Readonly<Record<string, number>>;
   /** The league's S (required for the K/D-ST bracket model and the QB CV). */
   readonly settings?: ScoringSettings | null;
+  /**
+   * The pro schedule (Stage C; additive): this week's kickoffs decide which players a claim can still
+   * add or drop at its run and whether the claim reaches this week. Absent → the K/D-ST slice's
+   * schedule, else the call-time lock state of my roster (an assumption says so).
+   */
+  readonly schedule?: Pick<ProSchedule, "games"> | null;
   /** The pro schedule and implied totals for the K/D-ST model; null → ESPN's projections as given. */
   readonly kdst?: {
     readonly schedule: Pick<ProSchedule, "games" | "teams">;
@@ -231,25 +247,68 @@ function lineupValue(
 }
 
 /**
- * Weekly values for the waiver engine from ESPN's numbers (helper for the tools): ESPN's weekly
- * projection for the claim week, then ESPN's rest-of-season total (split (1,0), the claim week
- * included) less that week, shared evenly over the remaining weeks with a game; a bye week is 0.
+ * Weekly values for the engines from ESPN's numbers (helper for the tools; E1 v1's own point estimate
+ * at weight_espn 1.0): ESPN's weekly projection for the as-of week (`from_week`, default the first
+ * value week — the current scoring period ESPN's numbers are as of), then ESPN's rest-of-season total
+ * (split (1,0), the as-of week included) less that week, shared evenly over the player's remaining
+ * games THROUGH THE NFL SEASON'S LAST WEEK (`ros_last_week`, default 18 — research 04 §B.1.1; the
+ * pro schedule's last week when the caller has it), not over the value weeks: ESPN's total runs past
+ * the league's final scoring period, and a caller may ask for a few weeks only (Stage C — spreading it
+ * over the value weeks put week 18's game, or a whole season, into them). A bye week is 0; a value
+ * week before the as-of week is unknown (null).
  */
 export function weeklyValues(
   weeks: readonly Week[],
   espnWeek: number | null,
   espnRos: number | null,
   byeWeek: number | null,
+  opts: { readonly ros_last_week?: Week; readonly from_week?: Week } = {},
 ): (number | null)[] {
-  const playing = weeks.map((w) => w !== byeWeek);
-  const shared = weeks.filter(
-    (_, i) => playing[i] === true && !(i === 0 && espnWeek !== null),
-  ).length;
+  const from = opts.from_week ?? weeks[0];
+  if (from === undefined) return [];
+  const lastValue = weeks.reduce((m, w) => Math.max(m, w), from);
+  const rosLast = opts.ros_last_week ?? NFL_REGULAR_SEASON.lastWeek;
+  // the weeks ESPN's total covers (capped: a malformed week never widens the loop)
+  const end = Math.min(from + WAIVERS.maxWeeks, Math.max(rosLast, lastValue));
+  let shared = 0;
+  for (let w = from; w <= end; w++)
+    if (w !== byeWeek && !(w === from && espnWeek !== null)) shared++;
   const rest =
     espnRos === null ? null : Math.max(0, espnRos - (espnWeek ?? 0)) / Math.max(1, shared);
-  return weeks.map((_, i) =>
-    playing[i] !== true ? 0 : i === 0 && espnWeek !== null ? espnWeek : rest,
+  return weeks.map((w) =>
+    w < from ? null : w === byeWeek ? 0 : w === from && espnWeek !== null ? espnWeek : rest,
   );
+}
+
+/** This week's kickoffs from the pro schedule. */
+interface WeekKickoffs {
+  /** The earliest and latest KNOWN kickoff (ms). */
+  readonly first: number;
+  readonly last: number;
+  /** pro team id → his game's kickoff (ms; +∞ when TBD — not started, whatever the run). */
+  readonly byTeam: ReadonlyMap<number, number>;
+}
+
+/**
+ * The week's kickoffs, or null when the schedule has no game with a known kickoff that week (unknown,
+ * not a bye week). A TBD kickoff is a placeholder (research 04 §B.1.6): his own game reads as not yet
+ * started, and it never stands in for the week's first or last game.
+ */
+function weekKickoffs(schedule: Pick<ProSchedule, "games">, week: Week): WeekKickoffs | null {
+  const byTeam = new Map<number, number>();
+  let first = Number.POSITIVE_INFINITY;
+  let last = Number.NEGATIVE_INFINITY;
+  for (const g of schedule.games) {
+    if (g.week !== week) continue;
+    const known = kickoffMsOf(g);
+    const k = known ?? Number.POSITIVE_INFINITY;
+    byTeam.set(g.home_pro_team_id, k);
+    byTeam.set(g.away_pro_team_id, k);
+    if (known === null) continue;
+    first = Math.min(first, known);
+    last = Math.max(last, known);
+  }
+  return Number.isFinite(first) ? { first, last, byTeam } : null;
 }
 
 interface Scored {
@@ -327,7 +386,52 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       ),
     );
 
-  // W: the usable weeks AFTER the claim week, playoff weeks weighted by P(alive)
+  // claim timing (Stage C): when an add or a claim executes and what it can still reach this week —
+  // a FREEAGENT add now; a WAIVERS claim at its run (the player's own waiver date, else the next run)
+  const sched = req.schedule ?? req.kdst?.schedule ?? null;
+  const kick = sched === null ? null : weekKickoffs(sched, req.week);
+  const nextMs = next.at === null ? null : Date.parse(next.at);
+  const nextAt = nextMs !== null && Number.isFinite(nextMs) ? nextMs : null;
+  // without a known run time or schedule: this week is read as in progress once a game has started
+  // (a kickoff passed, else a player on my roster locked) — a claim then runs after it
+  const activeOf = (p: WaiverPlayer): boolean =>
+    req.roster.slots.find((sl) => sl.slot_id === p.slot_id)?.class !== "ir";
+  const inProgress =
+    kick !== null ? kick.first <= nowMs : req.mine.some((p) => activeOf(p) && p.locked);
+  const execOf = (c: WaiverCandidateInput): number | null => {
+    if (c.status === "FREEAGENT") return nowMs;
+    const own = c.waiver_process_date === null ? Number.NaN : Date.parse(c.waiver_process_date);
+    return Number.isFinite(own) && own > nowMs ? own : nextAt;
+  };
+  /** The claim executes after this week's last kickoff: it first plays the next value week. */
+  const closedAt = (at: number | null): boolean =>
+    kick !== null && at !== null ? kick.last <= at : inProgress;
+  /** His game this week has started by `at` (ESPN's lock now, else the schedule's kickoff). */
+  const startedBy = (p: WaiverPlayer, at: number | null): boolean => {
+    if (p.locked) return true;
+    if (kick === null || at === null || p.pro_team_id === null) return false;
+    const k = kick.byTeam.get(p.pro_team_id);
+    return k !== undefined && k <= at;
+  };
+  const runClosed = closedAt(nextAt);
+  const nextWeek = String(req.weeks[1] ?? req.week + 1);
+  if (runClosed)
+    assumptions.push(
+      kick !== null && nextAt !== null
+        ? A(
+            `the next waiver run is after this week's last kickoff: a claim first plays week ${nextWeek} — this week's value does not count and any droppable player may be its drop`,
+            "a game this week kicks off after the run",
+          )
+        : A(
+            `this week is in progress and the run's timing against its games is unknown (${kick === null ? "no pro schedule" : "no run time"}): a waiver claim is read as running after them — it first plays week ${nextWeek}`,
+            kick === null
+              ? "the pro schedule is available"
+              : "status.waiverNextExecutionDate is present",
+          ),
+    );
+
+  // W: the usable weeks AFTER the claim week, playoff weeks weighted by P(alive) — the claim week is
+  // the next value week when the run executes after this week's games (Stage C)
   const playoffWeeks = new Set(req.rules.playoffs.playoff_weeks);
   const alive = (w: Week): number => {
     const v = req.alive_by_week?.[String(w)];
@@ -342,9 +446,11 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       ),
     );
   const weight = req.weeks.map((w) => (playoffWeeks.has(w) ? alive(w) : 1));
-  const W = req.weeks
-    .slice(1)
-    .reduce((s, w, i) => s + (weight[i + 1] ?? 1) * (w > req.week ? 1 : 0), 0);
+  const claimIdx = runClosed ? 1 : 0;
+  const W = req.weeks.reduce(
+    (s, w, i) => s + (i > claimIdx && w > req.week ? (weight[i] ?? 1) : 0),
+    0,
+  );
 
   // the premium
   const orderRule = waiverOrderRuleOf(waiver);
@@ -502,9 +608,11 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       ),
     );
   const mine = req.mine.map(withModel);
+  // a free agent whose game has started cannot be added now; a WAIVERS candidate's claim runs later
+  // (his week-0 value is what it cannot reach — below), so a lock never removes him
   const pool = req.candidates
     .filter((c) => positions === null || positions.length === 0 || positions.includes(c.position))
-    .filter((c) => !c.locked)
+    .filter((c) => !(c.status === "FREEAGENT" && c.locked))
     .map((c) => withModel(c));
   const lockedOut = req.candidates.length - pool.length;
   if (lockedOut > 0 && positions === null)
@@ -515,11 +623,14 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
   const seatsPlan = seatPlan(req.roster);
   const base = req.weeks.map((_, wi) => lineupValue(seatsPlan, activeMine, wi));
   // drop candidates, least valuable first: equal lineup losses (bench players who never start) are
-  // broken by the player's own projected total — the bench effect (research 05 §4.1)
+  // broken by the player's own projected total — the bench effect (research 05 §4.1). Every
+  // droppable player is solved once; which of them a candidate may drop depends on when its add or
+  // claim executes (Stage C: an add now drops only a player whose game has not started; a claim at
+  // its run, a player not locked then — anyone, once the period has rolled over)
   const own = (p: WaiverPlayer): number =>
     p.weekly.reduce<number>((a, v) => a + Math.max(0, v ?? 0), 0);
   const drops = activeMine
-    .filter((p) => p.droppable !== false && !p.locked)
+    .filter((p) => p.droppable !== false)
     .sort((a, b) => own(a) - own(b) || a.player_id - b.player_id);
   // L(R − d) per drop and week does not depend on the candidate: solved once, cooperatively (one
   // drop per step — a whole-roster precompute in one turn stalled the main loop, plan 10 A16a)
@@ -547,23 +658,44 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
   // per candidate, so no step holds the main loop for a whole candidate's drops × weeks (A16a).
   const byDrop = full && req.include_drop !== false;
   const withIr = byDrop && irMovable.length > 0;
-  // the gains each candidate needs, in order: every drop (or only "no drop"), then the IR move
-  const options: readonly (WaiverPlayer | null)[] = byDrop
-    ? [...drops, ...(withIr ? [null] : [])]
-    : [null];
   const prepared = pool.map((c) => {
     const H = valueWeeks(c);
+    // when the add / claim executes and the first value week it reaches (Stage C)
+    const at = execOf(c);
+    const skip = c.status === "WAIVERS" && closedAt(at) ? 1 : 0;
+    // the claim week reached before his game: his week-0 value only if it has not started by then
+    const reach0 = skip === 0 && !startedBy(c, at);
     const roles = req.weeks
       .slice(0, H)
       .map((w, wi) => ({ week: w, p: round(roleHolds(c.position, c.injury_status, wi), 3) }));
-    const cAsBench: WaiverPlayer = { ...c, slot_id: BENCH };
-    return { c, H, roles, cAsBench, gains: new Array<number>(options.length).fill(0) };
+    const cAsBench: WaiverPlayer = {
+      ...c,
+      slot_id: BENCH,
+      weekly: reach0 ? c.weekly : c.weekly.map((v, wi) => (wi === 0 ? 0 : v)),
+    };
+    // the drops this candidate may name: not locked when it executes (a skipped claim week means
+    // the run is after the period's games — nobody is locked then)
+    const allowed = byDrop ? drops.filter((d) => skip === 1 || !startedBy(d, at)) : [];
+    // the gains it needs, in order: every allowed drop (or only "no drop"), then the IR move
+    const options: readonly (WaiverPlayer | null)[] = byDrop
+      ? [...allowed, ...(withIr ? [null] : [])]
+      : [null];
+    return {
+      c,
+      H,
+      skip,
+      roles,
+      cAsBench,
+      allowed,
+      options,
+      gains: new Array<number>(options.length).fill(0),
+    };
   });
   const gainWith = (cand: (typeof prepared)[number], d: WaiverPlayer | null): number => {
     const rest = restOf.get(d);
     if (rest === undefined) return 0;
     let s = 0;
-    for (let wi = 0; wi < cand.H; wi++) {
+    for (let wi = cand.skip; wi < cand.H; wi++) {
       const pr = cand.roles[wi]?.p ?? 0;
       const withP = lineupValue(seatsPlan, [...rest.players, cand.cAsBench], wi);
       s += (weight[wi] ?? 1) * (pr * withP + (1 - pr) * (rest.values[wi] ?? 0) - (base[wi] ?? 0));
@@ -571,38 +703,42 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     return s;
   };
   const scored: Scored[] = [];
-  const perCandidate = options.length + 1;
+  // (candidate, option) units, then one assembly unit per candidate (j = −1)
+  const units = prepared.flatMap((cand) => [
+    ...cand.options.map((_, j) => ({ cand, j })),
+    { cand, j: -1 },
+  ]);
   await runCooperative(
-    prepared.length * perCandidate,
+    units.length,
     (u) => {
-      const cand = prepared[Math.floor(u / perCandidate)];
-      const j = u % perCandidate;
-      if (cand === undefined) return;
-      if (j < options.length) {
-        cand.gains[j] = gainWith(cand, options[j] ?? null);
+      const unit = units[u];
+      if (unit === undefined) return;
+      const { cand, j } = unit;
+      if (j >= 0) {
+        cand.gains[j] = gainWith(cand, cand.options[j] ?? null);
         return;
       }
-      const { c, H, roles, gains } = cand;
+      const { c, H, skip, roles, gains, allowed, cAsBench } = cand;
       let s: number;
       let drop: WaiverPlayer | null = null;
       if (!byDrop) s = gains[0] ?? 0;
       else {
         s = -Infinity;
-        for (let di = 0; di < drops.length; di++) {
+        for (let di = 0; di < allowed.length; di++) {
           const v = gains[di] ?? 0;
           if (v > s + 1e-12) {
             s = v;
-            drop = drops[di] ?? null;
+            drop = allowed[di] ?? null;
           }
         }
         if (drop === null) s = 0;
       }
-      const sIr = withIr ? (gains[drops.length] ?? 0) : null;
+      const sIr = withIr ? (gains[allowed.length] ?? 0) : null;
       let mean = 0;
       let v = 0;
       const cv = cvOf(c.position, c.position_id, settings);
-      for (let wi = 0; wi < H; wi++) {
-        const x = Math.max(0, c.weekly[wi] ?? 0) * (roles[wi]?.p ?? 0) * (weight[wi] ?? 1);
+      for (let wi = skip; wi < H; wi++) {
+        const x = Math.max(0, cAsBench.weekly[wi] ?? 0) * (roles[wi]?.p ?? 0) * (weight[wi] ?? 1);
         mean += x;
         v += (cv * x) ** 2;
       }
@@ -650,7 +786,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
         value: mean === 0 ? zeroDist("position_cv") : normalDist(mean, Math.sqrt(v), "position_cv"),
         roles,
         kdst: detail,
-        horizon: H,
+        horizon: H - skip,
       });
     },
     { pacer, deadlineMs: null },

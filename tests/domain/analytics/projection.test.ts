@@ -2,10 +2,12 @@
 // (weight_espn = 1.0) for every active player-week; the trailing line scored through the engine
 // shapes the spread (the QB CV follows the pass-TD value — research 05 §3.2 — and the turnover
 // left tail) and raises the 25 % disagreement flag; availability, byes, missing inputs, the ROS
-// share, determinism by seed, the CPU deadline's partial result, bounds and hostile inputs.
+// share (ESPN's total runs through NFL week 18 — Stage C), determinism by seed, the CPU deadline's
+// partial result, bounds and hostile inputs.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  espnRosLastWeek,
   pActiveOf,
   positionCv,
   projectPlayers,
@@ -377,6 +379,71 @@ describe("rest of season", () => {
     );
     const w = out.data.projections[0]?.weeks;
     expect(w?.map((x) => x.points.mean)).toEqual([18, 30, 12]);
+  });
+
+  it("Stage C: ESPN's ROS total runs through NFL week 18 — week 18's game never leaks into the league's weeks", async () => {
+    // regression (research 04 §B.1.1): a WR projected 15 every week, first target week 15, ESPN's
+    // ROS = weeks 15–18 = 60, the league's final scoring period 17. Before: 15 / 22.5 / 22.5, ROS 60
+    const out = await projectPlayers(
+      request({
+        horizon: "ros",
+        week: 15,
+        final_week: 17,
+        schedule: proSchedule(SEASON, [15, 16, 17, 18]),
+        targets: [target({ position: "WR", position_id: 3, espn_week: 15, espn_ros: 60 })],
+      }),
+    );
+    const p = out.data.projections[0];
+    expect(p?.weeks.map((w) => w.week)).toEqual([15, 16, 17]);
+    for (const w of p?.weeks ?? []) expect(w.points.mean).toBeCloseTo(15, 9);
+    expect(p?.ros_total?.mean).toBeCloseTo(45, 3);
+  });
+
+  it("Stage C: a full 18-week schedule — the per-game ROS value, the bye at 0, the fantasy weeks' sum only", async () => {
+    // week 5, bye week 9, ESPN week 15.9 and ROS 214.99 over 13 games (weeks 5–18): per game after
+    // week 5 = (214.99 − 15.9) / 12 = 16.59 (the live fixture's player: E1 showed 18.099 before)
+    const out = await projectPlayers(
+      request({
+        horizon: "ros",
+        week: 5,
+        final_week: 17,
+        schedule: proSchedule(
+          SEASON,
+          Array.from({ length: 18 }, (_, i) => i + 1),
+          {
+            byes: { "9": [1, 2] },
+          },
+        ),
+        targets: [target({ position: "WR", position_id: 3, espn_week: 15.9, espn_ros: 214.99 })],
+      }),
+    );
+    const p = out.data.projections[0];
+    const per = (214.99 - 15.9) / 12;
+    expect(p?.weeks.map((w) => w.week)).toEqual(WEEKS.slice(4));
+    expect(p?.weeks[0]?.points.mean).toBe(15.9);
+    for (const w of p?.weeks.slice(1) ?? [])
+      if (w.week === 9) expect(w.points.mean).toBe(0);
+      else expect(w.points.mean).toBeCloseTo(per, 2);
+    // weeks 5–17 = 15.9 + 11 games (week 9 a bye, week 18 outside the league) — not 214.99
+    expect(p?.ros_total?.mean).toBeCloseTo(15.9 + 11 * per, 2);
+  });
+
+  it("Stage C: with no game in the schedule the window ends at the season's last NFL week (18; 17 before 2021)", async () => {
+    const empty = { games: [], teams: [] };
+    const now = await projectPlayers(
+      request({
+        horizon: "ros",
+        week: 15,
+        final_week: 17,
+        schedule: empty,
+        targets: [target({ espn_week: 15, espn_ros: 60 })],
+      }),
+    );
+    expect(now.data.projections[0]?.weeks.map((w) => w.points.mean)).toEqual([15, 15, 15]);
+    expect(espnRosLastWeek(empty, 2026)).toBe(18);
+    expect(espnRosLastWeek(empty, 2020)).toBe(17);
+    expect(espnRosLastWeek(proSchedule(SEASON, [1, 2, 18]), SEASON)).toBe(18);
+    expect(espnRosLastWeek(proSchedule(SEASON, WEEKS), SEASON)).toBe(17);
   });
 
   it("a week horizon shares the ROS total over the whole season left, never one week", async () => {

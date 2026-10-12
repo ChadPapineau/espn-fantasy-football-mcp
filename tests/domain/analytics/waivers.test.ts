@@ -373,11 +373,270 @@ describe("the K/D-ST slice (plan 07 C5)", () => {
   });
 });
 
+// --- Stage C: claim timing — a WAIVERS claim executes at its run, a FREEAGENT add now ---------------
+// Week 5 of 2026 (weeks 5–17): Thursday night = teams 1/2 (Fri 00:15Z), Monday night = teams 30/31
+// (Tue 00:15Z), everyone else Sunday 17:00Z; teams 12 and 32 on their bye. Player p's team is
+// (id % 32) + 1, so my QB (1) plays Thursday, WR 11 (team 12) is on his bye, the rest play Sunday.
+describe("Stage C: claim timing (the run, not the call, decides locks and the claim week)", () => {
+  const W5 = Array.from({ length: 13 }, (_, i) => 5 + i);
+  const THU = Date.UTC(2026, 9, 1, 0, 15);
+  const SUN = Date.UTC(2026, 9, 4, 17, 0);
+  const MON = Date.UTC(2026, 9, 6, 0, 15);
+  const schedule = proSchedule(2026, [...W5, 18], {
+    byes: { "5": [12, 32] },
+    kickoffMs: (w, home) =>
+      w !== 5
+        ? Date.UTC(2026, 8, 6 + 7 * (w - 1), 17, 0)
+        : home === 1
+          ? THU
+          : home === 30
+            ? MON
+            : SUN,
+  });
+  const q = (id: number, position: string, perWeek: number, slot: number, over = {}) =>
+    p(id, position, perWeek, slot, { weekly: W5.map(() => perWeek), ...over });
+  const L = { locked: true };
+  /** My roster on Sunday afternoon of week 5: every player whose game started is locked. */
+  const sunday = (): WaiverPlayer[] => [
+    q(1, "QB", 18, SLOT.QB, L),
+    q(2, "RB", 14, SLOT.RB, L),
+    q(3, "RB", 10, SLOT.RB, L),
+    q(4, "WR", 12, SLOT.WR, L),
+    q(5, "WR", 8, SLOT.WR, L),
+    q(6, "TE", 8, SLOT.TE, L),
+    q(7, "RB", 7.5, SLOT.FLEX, L),
+    q(8, "D/ST", 7, SLOT.DST, L),
+    q(9, "K", 8, SLOT.K, L),
+    q(10, "RB", 6, SLOT.BE, L),
+    q(11, "WR", 11, SLOT.BE, { weekly: W5.map((w) => (w === 5 ? 0 : 11)) }), // bye: unlocked
+    q(12, "WR", 1, SLOT.BE, L),
+    q(13, "TE", 1, SLOT.BE, L),
+    q(14, "RB", 0.5, SLOT.BE, L),
+  ];
+  const unlocked = (r: WaiverPlayer[]): WaiverPlayer[] => r.map((x) => ({ ...x, locked: false }));
+  const cand = (id: number, perWeek: number, over: Partial<WaiverCandidateInput> = {}) => ({
+    ...c(id, "RB", perWeek, "WAIVERS"),
+    weekly: W5.map(() => perWeek),
+    ...over,
+  });
+  const spike = (id: number) => cand(id, 0, { weekly: W5.map((w) => (w === 5 ? 25 : 0)) });
+  const at = (iso: string, over: Partial<WaiverRequest> = {}): WaiverRequest =>
+    request({
+      week: 5,
+      weeks: W5,
+      k: 10,
+      clock: clockAndRng(iso).clock,
+      rivals: Array.from({ length: 9 }, (_, i) => ({
+        team_id: i + 2,
+        waiver_rank: i + 1,
+        ir_blocked: false,
+      })),
+      ...over,
+    });
+  const SUNDAY = "2026-10-04T20:00:00.000Z"; // after Sunday's kickoffs, before Monday night
+  const one = async (r: WaiverRequest, id: number) => {
+    const out = await analyzeWaivers(r);
+    return { x: byId(out.data, id), data: out.data };
+  };
+
+  it("Sunday: a WAIVERS claim's drop is chosen among every droppable player — the call's locks do not bind a claim run Wednesday", async () => {
+    // regression: the locked bench left only the bye-week WR 11 as the drop — pass, s = −28.9
+    const locked = await one(
+      at(SUNDAY, { mine: sunday(), candidates: [cand(101, 9)], schedule }),
+      101,
+    );
+    const free = await one(
+      at(SUNDAY, { mine: unlocked(sunday()), candidates: [cand(101, 9)], schedule }),
+      101,
+    );
+    expect(locked.x?.verdict).toBe("claim");
+    expect(locked.x?.conditional_drop?.player_id).toBe(14);
+    expect(locked.x?.s).toBeGreaterThan(0);
+    // the same answer whatever the call-time lock state
+    expect(locked.x).toEqual(free.x);
+    expect(locked.data.W).toBe(free.data.W);
+  });
+
+  it("Sunday: the run is after this week's games — the claim first plays week 6 (W, s and the value start there)", async () => {
+    const out = await one(
+      at(SUNDAY, { mine: sunday(), candidates: [spike(102), cand(101, 9)], schedule }),
+      102,
+    );
+    // regression: a candidate whose only value is week 5 (already played) was a claim, s = 14
+    expect(out.x).toMatchObject({ s: 0, verdict: "pass" });
+    expect(out.x?.value.mean).toBe(0);
+    // W counts the weeks after week 6: 7..17 = 11 (12 when the claim week was taken as week 5)
+    expect(out.data.W).toBe(11);
+    expect(out.data.rec.assumptions.some((a) => a.text.includes("first plays week 6"))).toBe(true);
+  });
+
+  it("without a pro schedule, a locked roster reads the week as in progress (said): the same claim, the same drop", async () => {
+    const sched = await one(
+      at(SUNDAY, { mine: sunday(), candidates: [cand(101, 9)], schedule }),
+      101,
+    );
+    const none = await one(at(SUNDAY, { mine: sunday(), candidates: [cand(101, 9)] }), 101);
+    expect(none.x).toEqual(sched.x);
+    expect(none.data.W).toBe(11);
+    expect(
+      none.data.rec.assumptions.some(
+        (a) => a.text.includes("no pro schedule") && a.text.includes("week 6"),
+      ),
+    ).toBe(true);
+    const spiked = await one(at(SUNDAY, { mine: sunday(), candidates: [spike(102)] }), 102);
+    expect(spiked.x).toMatchObject({ s: 0, verdict: "pass" });
+  });
+
+  it("before the week (run Wednesday, before Thursday night): the claim reaches week 5 — W 12, the spike counts", async () => {
+    const rules = referenceRules({
+      next_ms: Date.UTC(2026, 8, 30, 7, 0),
+      last_ms: Date.UTC(2026, 8, 23, 7, 0),
+    });
+    const out = await one(
+      at("2026-09-29T20:00:00.000Z", {
+        rules,
+        mine: unlocked(sunday()),
+        candidates: [spike(102)],
+        schedule,
+      }),
+      102,
+    );
+    expect(out.data.W).toBe(12);
+    expect(out.x?.s).toBeGreaterThan(0);
+    expect(out.data.rec.assumptions.some((a) => a.text.includes("first plays week"))).toBe(false);
+  });
+
+  it("a mid-week run (Friday 03:00 ET): a Sunday player's claim reaches week 5, a Thursday player's does not; a Thursday starter cannot be its drop", async () => {
+    const thu = "2026-10-01T03:00:00.000Z"; // after Thursday night's kickoff
+    const run = "2026-10-02T07:00:00.000Z";
+    // team 1 plays Thursday (id 32 → team 1); team 5 plays Sunday (id 4 → team 5)
+    const mk = (id: number) =>
+      cand(id, 0, { weekly: W5.map((w) => (w === 5 ? 25 : 0)), waiver_process_date: run });
+    const roster = unlocked(sunday()).map((x) => (x.player_id === 1 ? { ...x, locked: true } : x));
+    // my QB (Thursday, locked now and at the run) is never the drop; make him the cheapest one
+    const cheapQb = roster.map((x) => (x.player_id === 1 ? { ...x, weekly: W5.map(() => 0) } : x));
+    const out = await analyzeWaivers(
+      at(thu, { mine: cheapQb, candidates: [mk(32 * 3), mk(4 + 32 * 3)], schedule }),
+    );
+    const thursdayGuy = byId(out.data, 96); // 96 % 32 = 0 → team 1 (Thursday)
+    const sundayGuy = byId(out.data, 100); // 100 % 32 = 4 → team 5 (Sunday)
+    expect(thursdayGuy?.s).toBe(0);
+    expect(sundayGuy?.s).toBeGreaterThan(0);
+    for (const x of out.data.candidates) expect(x.conditional_drop?.player_id).not.toBe(1);
+  });
+
+  it("a FREEAGENT add is made now: its drop is never a player whose game has started", async () => {
+    const out = await one(
+      at(SUNDAY, {
+        mine: sunday(),
+        candidates: [{ ...cand(103, 9), status: "FREEAGENT" as const }],
+        schedule,
+      }),
+      103,
+    );
+    // only WR 11 (bye) is unlocked: the add's drop must be him or none
+    expect([11, undefined]).toContain(out.x?.conditional_drop?.player_id);
+  });
+
+  it("a TBD kickoff is a placeholder: his own game reads as not started, but it never keeps the week open past the run", async () => {
+    // Monday night (teams 30/31) without a kickoff time: player 29 → team 30
+    const tbd = proSchedule(2026, [...W5, 18], {
+      byes: { "5": [12, 32] },
+      kickoffMs: (w, home) =>
+        w !== 5
+          ? Date.UTC(2026, 8, 6 + 7 * (w - 1), 17, 0)
+          : home === 1
+            ? THU
+            : home === 30
+              ? null
+              : SUN,
+    });
+    const onlyWeek5 = { weekly: W5.map((w) => (w === 5 ? 25 : 0)) };
+    // an add made now reaches his (not yet started) game this week; my RB 14 also plays in the TBD
+    // game (team 31), so he is not locked yet and can be the add's drop
+    const mondayBench = sunday().map((x) =>
+      x.player_id === 14 ? { ...x, locked: false, pro_team_id: 31 } : x,
+    );
+    const fa = await one(
+      at(SUNDAY, {
+        mine: mondayBench,
+        candidates: [{ ...cand(29, 0, onlyWeek5), status: "FREEAGENT" as const }],
+        schedule: tbd,
+      }),
+      29,
+    );
+    expect(fa.x?.s).toBeGreaterThan(0);
+    expect(fa.x?.verdict).toBe("fa_add_now");
+    expect(fa.x?.conditional_drop?.player_id).toBe(14);
+    // a claim run Wednesday: the last KNOWN kickoff (Sunday) is before it — next week first
+    const claim = await one(
+      at(SUNDAY, { mine: sunday(), candidates: [cand(29, 0, onlyWeek5)], schedule: tbd }),
+      29,
+    );
+    expect(claim.x).toMatchObject({ s: 0, verdict: "pass" });
+    expect(claim.data.W).toBe(11);
+  });
+});
+
 describe("helpers and bounds", () => {
   it("weeklyValues: ESPN's week, the ROS share over the remaining playing weeks, 0 on the bye", () => {
-    expect(weeklyValues([4, 5, 6, 7], 12, 48, 6)).toEqual([12, 18, 0, 18]);
-    expect(weeklyValues([4, 5], null, 30, null)).toEqual([15, 15]);
+    // a season whose last NFL week is 7 (ros_last_week): ESPN's ROS total covers weeks 4–7
+    expect(weeklyValues([4, 5, 6, 7], 12, 48, 6, { ros_last_week: 7 })).toEqual([12, 18, 0, 18]);
+    expect(weeklyValues([4, 5], null, 30, null, { ros_last_week: 5 })).toEqual([15, 15]);
     expect(weeklyValues([4, 5], null, null, null)).toEqual([null, null]);
+    expect(weeklyValues([], 12, 48, null)).toEqual([]);
+  });
+
+  it("Stage C: ESPN's ROS total runs through NFL week 18 — shared over the games to week 18, never over the league's weeks only", () => {
+    // regression (research 04 §B.1.1): a WR projected 15 every week; claim week 15; the league ends
+    // at 17; ESPN's ROS = weeks 15–18 = 60. Before: 15 / 22.5 / 22.5 (week 18 spread into 16–17)
+    expect(weeklyValues([15, 16, 17], 15, 60, null)).toEqual([15, 15, 15]);
+    // week 6, a week-10 bye, league weeks 6–17: ROS = 12 games × 15 through week 18
+    const w6 = Array.from({ length: 12 }, (_, i) => 6 + i);
+    const v6 = weeklyValues(w6, 15, 15 * 12, 10);
+    expect(v6.map((x) => (x === null ? null : Math.round(x * 1e9) / 1e9))).toEqual(
+      w6.map((w) => (w === 10 ? 0 : 15)),
+    );
+    // the value weeks' sum is the fantasy season only (week 18's game left out): 11 × 15
+    expect(v6.reduce<number>((s, x) => s + (x ?? 0), 0)).toBeCloseTo(15 * 11, 9);
+    // a caller asking for a few weeks gets the per-game value, never the whole season spread over them
+    expect(weeklyValues([6, 7, 8, 9], 15, 15 * 12, 10)).toEqual([15, 15, 15, 15]);
+    // the pro schedule's last week, when the caller has it, sets the window (a 17-week season)
+    expect(weeklyValues([15, 16, 17], 15, 45, null, { ros_last_week: 17 })).toEqual([15, 15, 15]);
+    // ESPN's numbers are as of `from_week`: a value week before it is unknown, never a guess
+    expect(weeklyValues([5, 6, 7], 10, 10 + 12 * 12, null, { from_week: 6 })).toEqual([
+      null,
+      10,
+      12,
+    ]);
+  });
+
+  it("property: per-game value × games through week 18 + ESPN's week = ESPN's ROS total", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 17 }),
+        fc.integer({ min: 1, max: 17 }),
+        fc.option(fc.integer({ min: 1, max: 18 }), { nil: null }),
+        fc.double({ min: 0, max: 40, noNaN: true }),
+        fc.double({ min: 0, max: 400, noNaN: true }),
+        (from, len, bye, wk, extra) => {
+          const weeks = Array.from({ length: 18 - from + 1 }, (_, i) => from + i).slice(0, len);
+          const espnWeek = bye === from ? null : wk;
+          const ros = (espnWeek ?? 0) + extra;
+          const games = Array.from({ length: 18 - from + 1 }, (_, i) => from + i).filter(
+            (w) => w !== bye && !(w === from && espnWeek !== null),
+          ).length;
+          const v = weeklyValues(weeks, espnWeek, ros, bye);
+          const per = games === 0 ? null : extra / games;
+          weeks.forEach((w, i) => {
+            const x = v[i] ?? null;
+            if (w === bye) expect(x).toBe(0);
+            else if (w === from && espnWeek !== null) expect(x).toBe(espnWeek);
+            else if (per !== null) expect(x).toBeCloseTo(per, 9);
+          });
+        },
+      ),
+    );
   });
 
   it("roleHolds decays weekly and discounts an injury that recovers", () => {
@@ -453,17 +712,29 @@ describe("the remaining paths", () => {
     expect(out.data.rec.assumptions.some((a) => a.text.includes("roster is invalid"))).toBe(true);
   });
 
-  it("locked candidates are skipped with a count; missing weekly values read 0", async () => {
+  it("a locked free agent is skipped with a count (an add is now); a locked WAIVERS candidate stays, his claim week unreached; missing weekly values read 0", async () => {
     const out = await analyzeWaivers(
       request({
         candidates: [
-          c(401, "WR", 14, "WAIVERS", { locked: true }),
+          c(401, "WR", 14, "FREEAGENT", { locked: true }),
           c(402, "WR", 0, "WAIVERS", { weekly: WEEKS.map(() => null) }),
+          c(403, "WR", 14, "WAIVERS", { locked: true }),
         ],
       }),
     );
-    expect(out.data.candidates.map((x) => x.player_id)).toEqual([402]);
-    expect(out.warnings.some((w) => w.includes("game started"))).toBe(true);
+    expect(out.data.candidates.map((x) => x.player_id).sort((a, b) => a - b)).toEqual([402, 403]);
+    expect(out.warnings.some((w) => w.includes("1 candidates skipped (game started)"))).toBe(true);
+    // Stage C: his claim runs after his game this week — valued from the next week, never dropped
+    const same = await analyzeWaivers(request({ candidates: [c(403, "WR", 14, "WAIVERS")] }));
+    const unreached = await analyzeWaivers(
+      request({
+        candidates: [
+          c(403, "WR", 14, "WAIVERS", { weekly: WEEKS.map((_, i) => (i === 0 ? 0 : 14)) }),
+        ],
+      }),
+    );
+    expect(byId(out.data, 403)?.s).toBe(byId(unreached.data, 403)?.s);
+    expect(byId(out.data, 403)?.s).toBeLessThan(byId(same.data, 403)?.s ?? 0);
     expect(byId(out.data, 402)).toMatchObject({ s: 0, verdict: "pass" });
     expect(byId(out.data, 402)?.value.p_zero).toBe(1);
   });

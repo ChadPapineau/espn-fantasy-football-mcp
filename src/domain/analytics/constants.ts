@@ -64,6 +64,21 @@ export const P_ACTIVE_BY_STATUS: Readonly<Record<string, number>> = Object.freez
  */
 export const P_ACTIVE_SHAPE_FLOOR = 0.5;
 
+/**
+ * The NFL regular season's last week (= ESPN scoring period), where ESPN's rest-of-season projection
+ * ends: the (statSourceId 1, statSplitTypeId 0) total is the sum of the weekly projections from the
+ * current week through this week, whatever the league's final scoring period (research 04 §B.1.1,
+ * V-observed 2026: weeks 4–18 for 272 of 299 players; the recorded league-a / league-b
+ * `kona_player_info`: every player projected for 13 games (stat 210) has 13 games in weeks 5–18 and 12
+ * in weeks 5–17). 18 since the 17-game season (2021), 17 before. The engines read the week from the
+ * pro schedule when it carries one (its last week with a game); this is the fallback (Stage C).
+ */
+export const NFL_REGULAR_SEASON = Object.freeze({
+  lastWeek: 18,
+  lastWeekBefore: 17,
+  eighteenWeeksSince: 2021,
+});
+
 /** The trailing nflverse window that shapes the distribution (sibling research 05 §1 step 2). */
 export const TRAILING = Object.freeze({
   /** Most games kept in the window. */

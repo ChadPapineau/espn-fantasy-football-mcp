@@ -8,9 +8,18 @@
 // (the sibling's v1-trailing had no native projection); its sampler shape is ported. P1 (plan 10
 // §3.2): with `player_sim` an RB/WR/TE's first target week, when his trailing lines hold ≥ 3 games,
 // takes the volume × efficiency simulation's distribution (playerSim.ts) around the same ESPN mean.
+// Stage C: ESPN's rest-of-season total runs through the NFL season's last week (18), past the
+// league's final scoring period, so it is shared over the player's games through that week and only
+// the league's weeks are kept (espnRosLastWeek; research 04 §B.1.1).
 import type { Clock, Rng } from "../clock.js";
 import { GAME_DAY_WINDOW_MS } from "./types.js";
-import { gamesOfWeek, kickoffMsOf, opponentOf, teamGame } from "../league/schedule.js";
+import {
+  gamesOfWeek,
+  kickoffMsOf,
+  opponentOf,
+  scheduledWeeks,
+  teamGame,
+} from "../league/schedule.js";
 import type { BareText, InjuryStatus, PlatformPlayer, ProSchedule, Week } from "../league/types.js";
 import { score as engineScore } from "../scoring/engine.js";
 import { positionClassOf } from "../scoring/stat_map.js";
@@ -25,6 +34,7 @@ import {
   DEFAULT_CV,
   LIMITS,
   MODEL_VERSION,
+  NFL_REGULAR_SEASON,
   P_ACTIVE_BY_STATUS,
   P_ACTIVE_SHAPE_FLOOR,
   POSITION_CV,
@@ -82,7 +92,10 @@ export interface ProjectionTarget {
   readonly injury_status: InjuryStatus | null;
   /** ESPN's weekly projection for the first target week under this league's S (split (1,1)). */
   readonly espn_week: number | null;
-  /** ESPN's rest-of-season projection (split (1,0)). */
+  /**
+   * ESPN's rest-of-season projection (split (1,0)): the first target week through the NFL regular
+   * season's last week (18), NOT the league's final scoring period — see espnRosLastWeek.
+   */
   readonly espn_ros: number | null;
   /** ESPN weekly projections for further weeks, keyed by week, when the tool has them. */
   readonly espn_by_week?: Readonly<Record<string, number>>;
@@ -318,6 +331,23 @@ function trailingOf(
   };
 }
 
+/**
+ * The last week ESPN's rest-of-season total (split (1,0)) runs through: the NFL regular season's last
+ * week — the pro schedule's last week with a game when it carries any, else 18 (17 before 2021) —
+ * never the league's final scoring period (research 04 §B.1.1; constants.ts NFL_REGULAR_SEASON).
+ * Capped at LIMITS.maxWeeks (a malformed schedule never widens a loop).
+ */
+export function espnRosLastWeek(schedule: Pick<ProSchedule, "games">, season: number): Week {
+  const weeks = scheduledWeeks(schedule).filter((w) => Number.isInteger(w) && w >= 1);
+  const last =
+    weeks.length > 0
+      ? (weeks[weeks.length - 1] ?? NFL_REGULAR_SEASON.lastWeek)
+      : season >= NFL_REGULAR_SEASON.eighteenWeeksSince
+        ? NFL_REGULAR_SEASON.lastWeek
+        : NFL_REGULAR_SEASON.lastWeekBefore;
+  return Math.min(LIMITS.maxWeeks, last);
+}
+
 /** The weeks a horizon covers (`season` = the rest of the season, decision recorded). */
 function horizonWeeks(req: ProjectionRequest): Week[] {
   if (req.horizon === "week") return [req.week];
@@ -398,8 +428,13 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
   for (const r of req.implied_totals ?? [])
     implied.set(`${String(r.week)}:${String(r.pro_team_id)}`, r.implied);
 
+  // the weeks ESPN's ROS total covers: from the first target week through the NFL season's last
+  // week (18), which runs past the league's final scoring period (17 in a 14 + 3 league) — the total
+  // is shared over the player's games in ALL of them and only the horizon's weeks are kept, so
+  // week 18's game never leaks into weeks ≤ 17 (Stage C; research 04 §B.1.1)
+  const shareEnd = Math.max(req.week, req.final_week, espnRosLastWeek(req.schedule, req.season));
   const allWeeks: Week[] = [];
-  for (let w = req.week; w <= Math.max(req.week, req.final_week); w++) allWeeks.push(w);
+  for (let w = req.week; w <= shareEnd; w++) allWeeks.push(w);
   const gamesByWeek = new Map(allWeeks.map((w) => [w, gamesOfWeek(req.schedule, w)]));
   const tasks: Task[] = [];
   const planOf = (t: ProjectionTarget, pi: number) => {
@@ -414,7 +449,8 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
       cls === "O" ? Math.min(0, eventPoints(settings, TURNOVER_STATS.fum, t.position_id)) : 0;
     const noTeam = t.pro_team_id === null || t.pro_team_id === 0;
     // per-week ESPN means: the weekly projection, then any further weekly values, then the ROS total
-    // shared evenly over the remaining weeks (to the final week, whatever the horizon) with a game
+    // shared evenly over the remaining weeks with a game through the NFL season's last week (past
+    // the league's final week, whatever the horizon)
     const gameOf = allWeeks.map((w) => {
       const wg = gamesByWeek.get(w) ?? [];
       const g = noTeam ? null : teamGame(wg, t.pro_team_id);
