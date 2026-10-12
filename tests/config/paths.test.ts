@@ -17,6 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   APP_DIR_NAME,
@@ -172,6 +173,43 @@ describe("isInside / assertOutsideRepo", () => {
     expect(isInside("/a", "/a/b")).toBe(false);
     expect(isInside("/a/b/../c", "/a/b")).toBe(false);
   });
+  it("a child whose first component merely starts with '..' is inside (only '..' itself leaves)", () => {
+    // path.relative gives "..x" here: a name, not a step up (Stage C: paths-isinside-dotdot-prefix).
+    expect(isInside("/u/Dropbox/..x", "/u/Dropbox")).toBe(true);
+    expect(isInside("/u/Dropbox/..", "/u/Dropbox")).toBe(false);
+    expect(isInside("/u/Dropbox/..x/y/session.json", "/u/Dropbox")).toBe(true);
+    expect(isInside("/u/Dropbox/...", "/u/Dropbox")).toBe(true);
+    expect(isInside("/u/Dropbox/.../..", "/u/Dropbox")).toBe(true);
+    expect(isInside("/u/Dropbox/..x/../..", "/u/Dropbox")).toBe(false);
+    expect(isInside("/u/..x", "/u/Dropbox")).toBe(false);
+    expect(isInside("/u/Dropbox..x", "/u/Dropbox")).toBe(false);
+    expect(isInside("/..x", "/")).toBe(true);
+    expect(isInsideOnFs("/U/DROPBOX/..X/f", "/u/Dropbox", "darwin")).toBe(true);
+    expect(isInsideOnFs("/u/Dropbox/..x", "/u/Dropbox", "linux")).toBe(true);
+  });
+  it("property: every descendant is inside and no strict ancestor or sibling is", () => {
+    // Segment names drawn so that '..'-prefixed and dot-only names are common.
+    const seg = fc
+      .tuple(fc.constantFrom("", ".", "..", "...", "..x", "x"), fc.stringMatching(/^[a-z.]{0,4}$/))
+      .map(([a, b]) => a + b)
+      .filter((s) => s !== "" && s !== "." && s !== "..");
+    fc.assert(
+      fc.property(
+        fc.array(seg, { minLength: 1, maxLength: 3 }),
+        fc.array(seg, { minLength: 1, maxLength: 3 }),
+        seg,
+        (base, below, sib) => {
+          const parent = path.join("/", ...base);
+          const child = path.join(parent, ...below);
+          expect(isInside(child, parent)).toBe(true);
+          expect(isInside(parent, child)).toBe(false);
+          const sibling = path.join(path.dirname(parent), sib);
+          expect(isInside(sibling, parent)).toBe(sibling === parent);
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
   it("pathKey folds case and normalisation on darwin only", () => {
     expect(pathKey("/A/José", "darwin")).toBe("/a/josé");
     expect(pathKey("/A/B", "linux")).toBe("/A/B");
@@ -204,6 +242,27 @@ describe("isInside / assertOutsideRepo", () => {
     expect(
       refusal(() => {
         assertOutsideRepo(path.join(tmp.dir, "repo-sibling"), repo);
+      }),
+    ).toBe("no-throw");
+  });
+  it("refuses a '..'-prefixed directory inside the checkout (existing or not)", () => {
+    const repo = path.join(tmp.dir, "repo");
+    mkdirSync(path.join(repo, "..made"), { recursive: true });
+    for (const p of [
+      path.join(repo, "..eff"),
+      path.join(repo, "..eff", "session.json"),
+      path.join(repo, "..made", "cache"),
+      path.join(repo, "...", "x"),
+    ])
+      expect(
+        refusal(() => {
+          assertOutsideRepo(p, repo);
+        }),
+        p,
+      ).toBe("inside_repo");
+    expect(
+      refusal(() => {
+        assertOutsideRepo(path.join(tmp.dir, "..repo"), repo);
       }),
     ).toBe("no-throw");
   });
@@ -316,6 +375,16 @@ describe("assertNotSynced (iCloud Desktop & Documents, iCloud Drive, CloudStorag
     "Dropbox/eff",
     "Google Drive/eff",
     "OneDrive/eff",
+    // a first component that merely starts with ".." is still inside the synced folder
+    "Documents/..eff",
+    "Desktop/..x",
+    "Library/Mobile Documents/..x",
+    "Library/CloudStorage/..x/eff",
+    "Dropbox/..eff",
+    "Dropbox/..eff/session.json",
+    "Dropbox/...",
+    "Google Drive/..x",
+    "OneDrive/..x",
   ])("refuses %s", (rel) => {
     expect(
       refusal(() => {
@@ -332,8 +401,19 @@ describe("assertNotSynced (iCloud Desktop & Documents, iCloud Drive, CloudStorag
       }),
     ).toBe("synced_folder");
   });
+  it("refuses a '..'-prefixed directory that exists inside a synced folder, and a ~/OneDrive* one", () => {
+    mkdirSync(path.join(tmp.dir, "Dropbox", "..eff"), { recursive: true });
+    mkdirSync(path.join(tmp.dir, "OneDrive - Example Org", "..x"), { recursive: true });
+    for (const rel of ["Dropbox/..eff", "Dropbox/..eff/cache", "OneDrive - Example Org/..x/eff"])
+      expect(
+        refusal(() => {
+          assertNotSynced(path.join(tmp.dir, rel), tmp.dir);
+        }),
+        rel,
+      ).toBe("synced_folder");
+  });
   it("allows ~/.config, ~/.cache and a lookalike name", () => {
-    for (const rel of [".config/eff", ".cache/eff", "DocumentsArchive/eff"])
+    for (const rel of [".config/eff", ".cache/eff", "DocumentsArchive/eff", "..Dropbox/eff"])
       expect(
         refusal(() => {
           assertNotSynced(path.join(tmp.dir, rel), tmp.dir);
@@ -392,6 +472,15 @@ describe("file-provider xattr check (plan 02 §2.2 iCloud check)", () => {
       path.join(home, ".config"),
     ]);
     expect(xattrCheckChain(home, home)).toEqual([home]);
+  });
+
+  it("a '..'-prefixed directory under home is under home: its chain stops below home", () => {
+    const home = tmp.dir;
+    mkdirSync(path.join(home, "..eff", "c"), { recursive: true });
+    expect(xattrCheckChain(path.join(home, "..eff", "c", "new"), home)).toEqual([
+      path.join(home, "..eff", "c"),
+      path.join(home, "..eff"),
+    ]);
   });
 
   it("outside home the chain stops below the filesystem root", () => {
@@ -475,6 +564,32 @@ describe("file-provider xattr check (plan 02 §2.2 iCloud check)", () => {
     expect(
       locationRefusals(path.join(home, "ok"), { home, repoRoot: repo, xattr: noXattrs }),
     ).toEqual([]);
+  });
+
+  it("locationRefusals: a '..'-prefixed directory in a synced folder with no xattr and no .git is refused", () => {
+    // A sync client that sets no file-provider xattr leaves the name rule as the only guard.
+    const home = tmp.dir;
+    const repo = path.join(tmp.dir, "repo");
+    mkdirSync(repo);
+    const none = (): boolean => false;
+    for (const rel of ["Dropbox/..eff", "Dropbox/..eff/session.json", "Google Drive/..x/cache"])
+      expect(
+        locationRefusals(path.join(home, rel), {
+          home,
+          repoRoot: repo,
+          xattr: noXattrs,
+          gitEntry: none,
+        }).map((r) => r.reason),
+        rel,
+      ).toEqual(["synced_folder"]);
+    expect(
+      locationRefusals(path.join(repo, "..eff"), {
+        home,
+        repoRoot: repo,
+        xattr: noXattrs,
+        gitEntry: none,
+      }).map((r) => r.reason),
+    ).toEqual(["inside_repo"]);
   });
 });
 

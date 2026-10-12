@@ -169,10 +169,18 @@ export function packageRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
-/** Whether `child` equals `parent` or lies beneath it (pure path arithmetic, no I/O). */
+/**
+ * Whether `child` equals `parent` or lies beneath it (pure path arithmetic, no I/O). Only a first
+ * component that IS `..` leaves `parent`: `path.relative` returns `..x` for a child named `..x`,
+ * which is a name inside `parent`, so a text-prefix test on `..` would let `~/Dropbox/..eff` past
+ * the synced-folder rule and `<checkout>/..x` past the checkout rule (Stage C,
+ * paths-isinside-dotdot-prefix).
+ */
 export function isInside(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  if (rel === "") return true;
+  const first = rel.split(path.sep, 1)[0];
+  return first !== ".." && !path.isAbsolute(rel);
 }
 
 /**

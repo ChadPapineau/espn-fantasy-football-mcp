@@ -576,6 +576,24 @@ describe("credential store and file: the recorded value wins (plan 03 §3; chang
       )[0]?.key,
     ).toBe("EFF_CREDENTIAL_FILE");
   });
+  it("a credential file under a '..'-prefixed directory of a synced folder is refused like any other", () => {
+    // Stage C (paths-isinside-dotdot-prefix): "..eff" is a name inside ~/Dropbox, not a step up.
+    for (const p of ["~/Dropbox/..eff/session.json", "~/Dropbox/eff/session.json"]) {
+      const issues = issuesOf(() =>
+        loadConfig(
+          input({
+            env: { ESPN_LEAGUE_ID: LEAGUE, EFF_CREDENTIAL_STORE: "file", EFF_CREDENTIAL_FILE: p },
+          }),
+        ),
+      );
+      expect(issues, p).toEqual([
+        expect.objectContaining({
+          key: "EFF_CREDENTIAL_FILE",
+          reason: expect.stringContaining("cloud-synced folder") as unknown,
+        }),
+      ]);
+    }
+  });
 });
 
 describe("directories: outside the repo, not synced, no file-provider xattr", () => {
@@ -592,6 +610,30 @@ describe("directories: outside the repo, not synced, no file-provider xattr", ()
       ),
     );
     expect(issues.map((i) => i.key)).toEqual(["EFF_CONFIG_DIR", "EFF_CACHE_DIR"]);
+  });
+  it("refuses config and cache dirs under a '..'-prefixed directory of a synced folder", () => {
+    mkdirSync(path.join(tmp.dir, "Dropbox", "..eff"), { recursive: true });
+    const issues = issuesOf(() =>
+      loadConfig(
+        input({
+          env: {
+            ESPN_LEAGUE_ID: LEAGUE,
+            EFF_CONFIG_DIR: "~/Google Drive/..eff/conf",
+            EFF_CACHE_DIR: "~/Dropbox/..eff",
+          },
+        }),
+      ),
+    );
+    expect(issues).toEqual([
+      expect.objectContaining({
+        key: "EFF_CONFIG_DIR",
+        reason: expect.stringContaining("cloud-synced folder") as unknown,
+      }),
+      expect.objectContaining({
+        key: "EFF_CACHE_DIR",
+        reason: expect.stringContaining("cloud-synced folder") as unknown,
+      }),
+    ]);
   });
   it("refuses a file-provider-managed config dir, and fails closed when xattrs are unreadable", () => {
     const managed = path.join(tmp.dir, "managed");
