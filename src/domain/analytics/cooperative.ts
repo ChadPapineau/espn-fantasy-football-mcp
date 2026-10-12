@@ -5,6 +5,9 @@
 // cached; ADV OBJ-07). Time comes from an injected Pacer (the Clock), never Date.now. A batch's length
 // (the stall a heartbeat sees) is wall time; the deadline counts the thread's CPU when the pacer can
 // read it, so a sleeping machine or a preempted process never cuts a run short. New here.
+// Stage C: every run yields through ONE process-wide turn gate (yieldTurn), so parallel analytics
+// calls share the loop — one batch per turn however many runs are in flight — instead of each run's
+// setImmediate putting its batch into the same turn (N × batchMs of stall at N calls).
 import { threadCpuClock, type Clock, type CpuClock } from "../clock.js";
 import { COOPERATIVE } from "./constants.js";
 
@@ -21,18 +24,67 @@ export interface Pacer {
   cpuMs?(): number;
 }
 
+// --- the process-wide turn gate ----------------------------------------------------------------------
+
+/** Waiters for a turn, first come first served. */
+const turnQueue: (() => void)[] = [];
+/**
+ * The real `setImmediate`, read once at load: a test that later installs fake timers must not swallow
+ * the gate's pending release (the queue's flag would then stay set and every later run would wait).
+ */
+const nextTurn: (fn: () => void) => unknown = globalThis.setImmediate.bind(globalThis);
+/** A release is scheduled (an immediate of `releaseTurn` is pending) — the queue's one invariant. */
+let releasing = false;
+
+/** Releases the head waiter; its slice runs in this turn's microtasks, the next waiter's next turn. */
+function releaseTurn(): void {
+  const next = turnQueue.shift();
+  if (next === undefined) {
+    releasing = false;
+    return;
+  }
+  next();
+  // an immediate queued from inside an immediate callback runs in the NEXT loop iteration: timers,
+  // stdin, the ppid watchdog and the shutdown handler run between two released slices
+  if (turnQueue.length > 0) nextTurn(releaseTurn);
+  else releasing = false;
+}
+
+/**
+ * Lets the event loop run before the caller's next synchronous slice, through ONE process-wide gate
+ * (Stage C; plan 03 §1.2's ≤ 50 ms stall bound "during any analytics call", ADV OBJ-07): the gate
+ * releases one waiter per event-loop turn, first come first served, so N cooperative runs in flight —
+ * Claude issues tool calls in parallel, and nothing limits them — run N slices over N turns, never N
+ * slices in one. A plain `setImmediate` per run did the latter: Node runs every immediate queued
+ * before a check phase in that phase, each followed by its microtasks, so N runs each resuming from
+ * their own immediate ran N batches back to back — measured over stdio, a heartbeat stalled 72 ms at
+ * 6 parallel `espn_analyze_lineup` calls and 117 ms at 10 (core). Any layer whose synchronous slices
+ * should share the bound may yield here too.
+ */
+export function yieldTurn(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    turnQueue.push(resolve);
+    if (!releasing) {
+      releasing = true;
+      nextTurn(releaseTurn);
+    }
+  });
+}
+
+/** Waiters queued for a turn now (diagnostics and tests). */
+export function pendingTurns(): number {
+  return turnQueue.length;
+}
+
 /**
  * The production pacer: the injected clock for a batch's length, the thread's CPU for the deadline,
- * `setImmediate` to yield (plan 03 §1.2).
+ * the process-wide turn gate to yield (plan 03 §1.2; `yieldTurn`).
  */
 export function loopPacer(clock: Clock, cpu: CpuClock = threadCpuClock): Pacer {
   return Object.freeze({
     nowMs: () => clock.nowMs(),
     cpuMs: () => cpu.cpuMs(),
-    yieldToLoop: () =>
-      new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      }),
+    yieldToLoop: yieldTurn,
   });
 }
 

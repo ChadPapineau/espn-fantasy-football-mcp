@@ -5,7 +5,12 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { fixedClock, seededRng, threadCpuClock } from "../../../src/domain/clock.js";
-import { loopPacer, runCooperative } from "../../../src/domain/analytics/cooperative.js";
+import {
+  loopPacer,
+  pendingTurns,
+  runCooperative,
+  yieldTurn,
+} from "../../../src/domain/analytics/cooperative.js";
 import { FORBIDDEN, solveAssignment } from "../../../src/domain/analytics/assignment.js";
 import { AnalyticsError, ensure } from "../../../src/domain/analytics/errors.js";
 import { collectInputs, mergeInputs, newestAsOf } from "../../../src/domain/analytics/inputs.js";
@@ -307,6 +312,107 @@ describe("runCooperative", () => {
     expect(mid).toBeGreaterThan(1); // a turn between batches
     expect(mid).toBeLessThan(200);
     expect(after).toBe(200); // the turn after the last batch, before the run resolves
+  });
+
+  // Stage C (finding: parallel analytics calls stalled the loop N × batchMs): every run yields
+  // through one process-wide gate, which releases one slice per event-loop turn
+  it("Stage C: N runs in flight run one batch per event-loop turn, never N", async () => {
+    // a ticker marks event-loop turns: one immediate per turn, rescheduled from inside itself
+    let tick = 0;
+    let ticking = true;
+    const ticker = (): void => {
+      tick += 1;
+      if (ticking) setImmediate(ticker);
+    };
+    setImmediate(ticker);
+    // each step costs 1 ms of the injected clock; 4 ms batches → 10 batches a run
+    let t = 0;
+    const clock = { nowMs: () => t, nowIso: () => new Date(t).toISOString() };
+    const runsByTick = new Map<number, Set<number>>();
+    const N = 6;
+    const results = await Promise.all(
+      Array.from({ length: N }, (_, r) =>
+        runCooperative(
+          40,
+          () => {
+            t += 1;
+            const s = runsByTick.get(tick) ?? new Set<number>();
+            s.add(r);
+            runsByTick.set(tick, s);
+          },
+          { pacer: loopPacer(clock), batchMs: 4, deadlineMs: null },
+        ),
+      ),
+    );
+    ticking = false;
+    for (const r of results) expect(r).toMatchObject({ completed: 40, partial: false });
+    expect(results.reduce((s, r) => s + r.batches, 0)).toBe(N * 10);
+    // regression: every run's batch ran in the same turn (N runs per turn)
+    for (const runs of runsByTick.values()) expect(runs.size).toBe(1);
+    expect(runsByTick.size).toBeGreaterThanOrEqual(N * 10);
+    expect(pendingTurns()).toBe(0);
+  });
+
+  it("Stage C: the gate is fair (first come, first served) and timers run between released slices", async () => {
+    const order: number[] = [];
+    let timerFired = -1;
+    const spin = (ms: number): void => {
+      const end = performance.now() + ms;
+      while (performance.now() < end) {
+        /* a slice's synchronous work */
+      }
+    };
+    const waiters = Array.from({ length: 4 }, (_, i) =>
+      yieldTurn().then(() => {
+        order.push(i);
+        if (i === 0) setTimeout(() => (timerFired = order.length), 0);
+        // long enough for a 0 ms timer (≥ 1 ms in Node) to be due at the next timers phase
+        spin(3);
+      }),
+    );
+    await Promise.all(waiters);
+    expect(order).toEqual([0, 1, 2, 3]);
+    // a whole loop iteration (timers phase included) separates two released slices
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    // the timer set in slice 0 fires before slice 1 is released (the next turn's timers phase)
+    expect(timerFired).toBe(1);
+  });
+
+  it("Stage C: six parallel CPU-bound runs — the main thread's CPU between two turns is one batch, never six", async () => {
+    // the A16a bound, several runs at once: a heartbeat measures the main thread's CPU between two
+    // turns (thread CPU, so a preempted process on a loaded machine is never counted as a stall)
+    const busy = (ms: number): void => {
+      const end = performance.now() + ms;
+      while (performance.now() < end) {
+        /* spin */
+      }
+    };
+    const real = { nowMs: () => performance.now(), nowIso: () => new Date().toISOString() };
+    let last = threadCpuClock.cpuMs();
+    let worst = 0;
+    let beating = true;
+    const beat = (): void => {
+      const now = threadCpuClock.cpuMs();
+      worst = Math.max(worst, now - last);
+      last = now;
+      if (beating) setImmediate(beat);
+    };
+    setImmediate(beat);
+    const res = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        runCooperative(
+          200,
+          () => {
+            busy(0.4);
+          },
+          { pacer: loopPacer(real), deadlineMs: null },
+        ),
+      ),
+    );
+    beating = false;
+    for (const r of res) expect(r.completed).toBe(200);
+    // before: every run's batch in one turn — ≈ 6 × 12 ms ≈ 72 ms of CPU between two heartbeats
+    expect(worst).toBeLessThan(30);
   });
 });
 
