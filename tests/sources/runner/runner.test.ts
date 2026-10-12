@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SOURCE_ERROR_CODES } from "../../../src/config/freshness.js";
 import { fixedClock, seededRng } from "../../../src/domain/clock.js";
 import { HttpError } from "../../../src/http/errors.js";
+import { createNewsSource } from "../../../src/sources/news/source.js";
 import {
   datasetFilePresent,
   DEFAULT_BASE_DELAY_MS,
@@ -18,6 +19,8 @@ import {
   fsTempArea,
   isRefreshSuccess,
   JOB_LOCKED_ERROR,
+  MAX_PUBLISH_WARNINGS,
+  publishWarnings,
   PUBLISH_UNRECORDED_ERROR,
   PUBLISHED_UNRECORDED_MESSAGE,
   runRefresh,
@@ -37,6 +40,7 @@ import {
 } from "../../../src/sources/source.js";
 import { PUBLISH_ALREADY_CURRENT } from "../../../src/store/types.js";
 import { captureLog, netError } from "../../http/helpers.js";
+import { rss } from "../news/helpers.js";
 import {
   fakeProSchedule,
   fakePublisher,
@@ -612,6 +616,106 @@ describe("a failure publishes nothing and leaves one ok=0 row (plan 06 J2)", () 
     expect(sourceErrorFor(new HttpError({ kind: "dns" }), "weather:nws")).toBe(
       "UPSTREAM_UNAVAILABLE",
     );
+  });
+});
+
+describe("publish-step warnings reach the result (Stage C: sources-publish-warnings-discarded)", () => {
+  it("the counted drops a source's publish returns are carried after the schema warnings, deduplicated", async () => {
+    const src = fakeSource({
+      publish: () =>
+        Promise.resolve({
+          ...STATS,
+          warnings: [
+            "espn:players: 2669 entries skipped (no id, name, position or team)",
+            "extra column new_col", // also a schema warning: carried once
+            "",
+            7,
+          ],
+        } as typeof STATS),
+    });
+    const r = await runRefresh({ source: src, seasons: [2026], week: null }, deps());
+    expectStatus(r, "published");
+    expect(r.warnings).toEqual([
+      "extra column new_col",
+      "espn:players: 2669 entries skipped (no id, name, position or team)",
+    ]);
+  });
+
+  it("publishWarnings: strings only, capped with a count; none without a warnings array", () => {
+    expect(publishWarnings(STATS)).toEqual([]);
+    expect(publishWarnings({ ...STATS, warnings: "x" } as typeof STATS)).toEqual([]);
+    const many = Array.from({ length: MAX_PUBLISH_WARNINGS + 3 }, (_, i) => `w${String(i)}`);
+    const out = publishWarnings({ ...STATS, warnings: many } as typeof STATS);
+    expect(out).toHaveLength(MAX_PUBLISH_WARNINGS + 1);
+    expect(out.at(-1)).toBe("… and 3 more publish warning(s)");
+  });
+});
+
+describe("a retry waits the backoff, never the politeness interval (Stage C: sources-retry-waits-min-interval)", () => {
+  it("RSS (15-min spacing): a 503 then success sleeps one jittered backoff, not 15 minutes", async () => {
+    let n = 0;
+    const http: HttpGet = (url) =>
+      n++ === 0
+        ? Promise.reject(new HttpError({ kind: "http_5xx", status: 503 }))
+        : Promise.resolve({
+            status: 200,
+            body: new TextEncoder().encode(rss([{ title: "A" }])),
+            headers: {},
+            final_url: url,
+          });
+    const src = createNewsSource("espn");
+    const r = await runRefresh({ source: src, seasons: [2026], week: null }, deps({ http }));
+    expectStatus(r, "published");
+    expect(n).toBe(2);
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeLessThan(DEFAULT_BASE_DELAY_MS);
+  });
+
+  it("the release poll (15 min) retried after a 5xx: no 15-minute sleep; distinct requests of one attempt stay spaced", async () => {
+    let gets = 0;
+    const http: HttpGet = (url) => {
+      gets++;
+      return gets === 2
+        ? Promise.reject(new HttpError({ kind: "http_5xx", status: 502 }))
+        : Promise.resolve({ status: 200, body: new Uint8Array(), headers: {}, final_url: url });
+    };
+    const src = fakeSource({
+      limiter: SOURCE_RATE_LIMITS.github_release,
+      version: async (ctx) => {
+        // two distinct polls per attempt: the second waits the interval, the retry does not
+        await ctx.http("https://github.com/a/timestamp.txt", { signal: ctx.signal, maxBytes: 64 });
+        await ctx.http("https://github.com/b/timestamp.txt", { signal: ctx.signal, maxBytes: 64 });
+        return { version: "v", released_at: null };
+      },
+    });
+    const r = await runRefresh({ source: src, seasons: [2026], week: null }, deps({ http }));
+    expectStatus(r, "published");
+    const poll = SOURCE_RATE_LIMITS.github_release.minIntervalMs;
+    // attempt 1: a, (spaced) b → 502; backoff; attempt 2: a (fresh window), (spaced) b
+    expect(sleeps.filter((ms) => ms === poll)).toHaveLength(2);
+    expect(sleeps.filter((ms) => ms !== poll)).toHaveLength(1);
+    expect(sleeps.find((ms) => ms !== poll)).toBeLessThan(DEFAULT_BASE_DELAY_MS);
+    expect(sleeps.indexOf(poll)).toBe(0);
+    expect(sleeps[1]).toBeLessThan(DEFAULT_BASE_DELAY_MS);
+    expect(sleeps[2]).toBe(poll);
+  });
+
+  it("the per-day cap counts every attempt's requests (a retry never renews the cap)", async () => {
+    let gets = 0;
+    const http: HttpGet = () => {
+      gets++;
+      return Promise.reject(new HttpError({ kind: "http_5xx", status: 503 }));
+    };
+    const src = fakeSource({
+      limiter: { minIntervalMs: 0, maxPerDay: 1 },
+      version: async (ctx) => {
+        await ctx.http("https://github.com/t", { signal: ctx.signal, maxBytes: 64 });
+        return { version: "v", released_at: null };
+      },
+    });
+    const r = await runRefresh({ source: src, seasons: [2026], week: null }, deps({ http }));
+    expectStatus(r, "failed");
+    expect(gets).toBe(1); // the retry is refused by the cap (quota_exhausted, never retried)
   });
 });
 

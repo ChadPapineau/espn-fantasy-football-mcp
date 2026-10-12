@@ -10,6 +10,11 @@
 // Ported from sibling @cf3b015, adapted (ESPN SourceContext: the pro schedule drives season gating
 // and weather; a run-scoped temp dir; time-bucket versions short-circuit too, which keeps weather at
 // ≤ 1 request per venue per hour; ESPN-scoped error codes; no dataset_meta repair path).
+// Stage C remediation: a published result carries the warnings the source's publish step returned
+// (the counted drops and skips — `PublishStats` with `warnings`), deduplicated after the schema
+// check's; and a retry waits only the jittered backoff — the per-source politeness interval spaces a
+// run's distinct requests and each retry attempt starts a fresh spacing window, while the per-day
+// caps count every attempt's requests (plan 01 §5.7 "retry 3× with jitter inside one run" vs §6).
 import { mkdtemp, rm } from "node:fs/promises";
 import { statSync } from "node:fs";
 import { join } from "node:path";
@@ -23,7 +28,7 @@ import type { NflGamesReader, ProScheduleReader } from "../domain/analytics/type
 import type { Clock, Rng } from "../domain/clock.js";
 import type { IsoInstant, Week } from "../domain/league/types.js";
 import { HttpError, isNetworkFailure, isRetryableError } from "../http/errors.js";
-import { createRateLimiter, limitDownload, limitGet } from "../http/limiter.js";
+import { createRateLimiter, validateRateLimit, type RateLimiter } from "../http/limiter.js";
 import { abortableSleep, type Sleep } from "../http/sleep.js";
 import {
   PUBLISH_ALREADY_CURRENT,
@@ -288,6 +293,22 @@ function errorCodeFor(e: unknown, signal: AbortSignal): RefreshErrorCode {
   return isNetworkFailure(e) ? "network" : "internal";
 }
 
+/** At most this many publish-step warnings are carried into a result (the rest are counted). */
+export const MAX_PUBLISH_WARNINGS = 50;
+
+/**
+ * The warnings a source's publish step returned (`PublishStats` extended with `warnings`, as the
+ * nflverse, depth-chart and ESPN season sources do): strings only, at most MAX_PUBLISH_WARNINGS.
+ */
+export function publishWarnings(stats: PublishStats): readonly string[] {
+  const raw = (stats as { readonly warnings?: unknown }).warnings;
+  if (!Array.isArray(raw)) return [];
+  const lines = raw.filter((w): w is string => typeof w === "string" && w.length > 0);
+  if (lines.length <= MAX_PUBLISH_WARNINGS) return lines;
+  const more = lines.length - MAX_PUBLISH_WARNINGS;
+  return [...lines.slice(0, MAX_PUBLISH_WARNINGS), `… and ${String(more)} more publish warning(s)`];
+}
+
 /** The warning a published result carries for a season dropped as not yet published. */
 export function notPublishedWarning(id: DatasetSourceId, season: number): string {
   return `${id} season ${String(season)}: not published upstream yet — skipped (the other seasons were published)`;
@@ -382,7 +403,14 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
     return fail(code, sourceErrorFor(e, id), messageFor(e), null, code !== "aborted");
   };
 
-  /** Runs `step` with retries on retryable failures. */
+  /** Starts a fresh politeness window (set once the run's limits are validated). */
+  let freshSpacing = (): void => undefined;
+
+  /**
+   * Runs `step` with retries on retryable failures. A retry waits the jittered backoff (Retry-After
+   * raising it), then starts a fresh spacing window: the politeness interval never adds itself to
+   * the backoff (a 15-minute poll limit would otherwise hold a retried RSS or release poll 15 min).
+   */
   const withRetry = async <T>(step: () => Promise<T>): Promise<T> => {
     for (let attempt = 1; ; attempt++) {
       attempts++;
@@ -395,6 +423,7 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
         const delay = Math.min(cap, Math.max(backoff, hinted));
         deps.log?.info("refresh.retry", { source: id, attempt, delay_ms: delay });
         await sleep(delay, signal);
+        freshSpacing();
       }
     }
   };
@@ -429,23 +458,44 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
     }
 
     const limiterDeps = { nowMs: () => deps.clock.nowMs(), sleep };
-    const limiter = createRateLimiter(source.limiter, limiterDeps);
+    validateRateLimit(source.limiter);
     // A source whose limit names a download spacing gets a second limiter for its downloads (the
-    // GitHub poll limit governs the poll, not the assets a run fetches after it — plan 01 §6).
+    // GitHub poll limit governs the poll, not the assets a run fetches after it — plan 01 §6),
+    // with its own day count; otherwise GETs and downloads share one spacing and one day count.
+    // Spacing and day caps are separate limiters: a retry renews the spacing (withRetry) and the
+    // caps keep counting every request of the run.
     const downloadInterval = source.limiter.downloadMinIntervalMs;
-    const downloads =
-      downloadInterval === undefined
-        ? limiter
-        : createRateLimiter(
-            { minIntervalMs: downloadInterval, maxPerDay: source.limiter.maxPerDay },
-            limiterDeps,
-          );
+    const dayCap = (): RateLimiter =>
+      createRateLimiter({ minIntervalMs: 0, maxPerDay: source.limiter.maxPerDay }, limiterDeps);
+    const getCap = dayCap();
+    const downloadCap = downloadInterval === undefined ? getCap : dayCap();
+    let getSpacing: RateLimiter;
+    let downloadSpacing: RateLimiter;
+    freshSpacing = () => {
+      getSpacing = createRateLimiter(
+        { minIntervalMs: source.limiter.minIntervalMs, maxPerDay: null },
+        limiterDeps,
+      );
+      downloadSpacing =
+        downloadInterval === undefined
+          ? getSpacing
+          : createRateLimiter({ minIntervalMs: downloadInterval, maxPerDay: null }, limiterDeps);
+    };
+    freshSpacing();
     const notPublished = new Set<number>();
     const runDir = await deps.temp.create(id);
     dir = runDir;
     const ctx: SourceContext = {
-      http: limitGet(deps.http, limiter),
-      download: limitDownload(deps.download, downloads),
+      http: async (url, opts) => {
+        await getSpacing.acquire(opts.signal);
+        await getCap.acquire(opts.signal);
+        return deps.http(url, opts);
+      },
+      download: async (url, opts) => {
+        await downloadSpacing.acquire(opts.signal);
+        await downloadCap.acquire(opts.signal);
+        return deps.download(url, opts);
+      },
       signal,
       clock: deps.clock,
       seasons: req.seasons,
@@ -591,7 +641,9 @@ export async function runRefresh(req: RefreshRequest, deps: RefreshDeps): Promis
       file_version: outcome.file_version,
       stats: outcome.stats,
       attempts,
-      warnings: [...seasonWarnings, ...report.warnings],
+      warnings: [
+        ...new Set([...seasonWarnings, ...report.warnings, ...publishWarnings(outcome.stats)]),
+      ],
     };
   } catch {
     return fail("internal", "INTERNAL", "the refresh runner failed");
