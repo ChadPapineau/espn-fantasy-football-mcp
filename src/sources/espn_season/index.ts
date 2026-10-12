@@ -8,6 +8,12 @@
 // fresh dataset file. Versioning is a time bucket (no release marker exists): the hour for the
 // schedule (it runs hourly on game days), the UTC day for the player index; the runner skips a
 // bucket already published. A new season's 404 is "not published yet".
+// The schema assertion is the drift gate (plan 01 §5.5 "missing/renamed → job fails loudly, previous
+// load stays"; plan 10 B1 "fails naming the column"): a body that yields no games or no players, or
+// in which an entry misses or mistypes a field the drift manifest marks required
+// (fixtures/drift/manifest.json `probes.host.required` — the per-period map and every game's epoch
+// `date` included), fails with `schema_mismatch` naming the field, so a drifted body never replaces
+// the good dataset (a schedule without kickoffs would read off-season and stop every in-season job).
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { SOURCE_REGISTRY } from "../../config/freshness.js";
@@ -39,6 +45,14 @@ export const ESPN_SEASON_MAX_BYTES = 8 * 1024 * 1024;
 export const PLAYERS_WL_FILTER = '{"filterActive":{"value":true}}';
 /** Most rows a season view may yield (a guard against a runaway body; 2026: 272 games, 2,669 players). */
 export const MAX_SEASON_ROWS = 20_000;
+/**
+ * The share of players_wl entries that may be skipped (no id, name, position or team, or a duplicate
+ * id) before the view counts as drifted: the recorded 2026 index skips 0 of 2,669, a renamed or
+ * retyped field skips them all.
+ */
+export const MAX_SKIPPED_PLAYER_SHARE = 0.01;
+/** ESPN's free-agent pseudo-team (id 0): listed with an empty per-period map, plays no game. */
+export const FREE_AGENT_PRO_TEAM_ID = 0;
 
 /** A season source failure with a fixed refresh_log code (never upstream text). */
 export class EspnSeasonSourceError extends Error {
@@ -54,11 +68,45 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v);
 
+/** The rows of one proTeamSchedules_wl body plus what the drift gate needs to know about it. */
+export interface ProScheduleParse {
+  readonly games: DatasetRow[];
+  readonly teams: DatasetRow[];
+  /** Team or game entries not published (a field the row needs is missing or mistyped). */
+  readonly skipped: number;
+  /** Entries missing or mistyping a field the drift manifest marks required (rows kept or not). */
+  readonly invalid: number;
+  /** The required fields (manifest spelling) that failed in at least one entry, sorted. */
+  readonly failed_fields: readonly string[];
+  /** Pro teams (the free-agent pseudo-team excluded) that play in no published game. */
+  readonly teams_without_games: number;
+}
+
+/** The required fields of one `settings.proTeams[]` entry that fail (drift manifest `probes.host`). */
+function teamFailures(t: unknown): string[] {
+  if (!isObj(t)) return ["settings.proTeams"];
+  const out: string[] = [];
+  if (!isInt(t.id)) out.push("id");
+  if (typeof t.abbrev !== "string" || t.abbrev === "") out.push("abbrev");
+  if (!isInt(t.byeWeek)) out.push("byeWeek");
+  if (!isObj(t.proGamesByScoringPeriod)) out.push("proGamesByScoringPeriod");
+  return out;
+}
+
+/** The required fields of one game entry that fail (an epoch-ms integer `date` included). */
+function gameFailures(g: unknown): string[] {
+  if (!isObj(g)) return ["proGamesByScoringPeriod"];
+  const out: string[] = [];
+  for (const k of ["id", "scoringPeriodId", "homeProTeamId", "awayProTeamId"] as const)
+    if (!isInt(g[k])) out.push(k);
+  if (epochMs(g.date) === null) out.push("date");
+  for (const k of ["startTimeTBD", "validForLocking", "statsOfficial"] as const)
+    if (boolToInt(g[k]) === null) out.push(k);
+  return out;
+}
+
 /** The rows of one proTeamSchedules_wl body (games collapsed by id; conflicting duplicates throw). */
-export function proScheduleRows(
-  body: unknown,
-  season: number,
-): { games: DatasetRow[]; teams: DatasetRow[]; skipped: number } {
+export function proScheduleRows(body: unknown, season: number): ProScheduleParse {
   const proTeams = isObj(body) && isObj(body.settings) ? body.settings.proTeams : undefined;
   if (!Array.isArray(proTeams))
     throw new EspnSeasonSourceError(
@@ -67,8 +115,17 @@ export function proScheduleRows(
     );
   const games = new Map<number, DatasetRow>();
   const teams: DatasetRow[] = [];
+  const failed = new Set<string>();
+  const playing = new Set<number>();
   let skipped = 0;
+  let invalid = 0;
+  const note = (failures: readonly string[]): void => {
+    if (failures.length === 0) return;
+    invalid++;
+    for (const f of failures) failed.add(f);
+  };
   for (const t of proTeams) {
+    note(teamFailures(t));
     if (!isObj(t) || !isInt(t.id) || typeof t.abbrev !== "string" || t.abbrev === "") {
       skipped++;
       continue;
@@ -84,8 +141,12 @@ export function proScheduleRows(
     const byPeriod = t.proGamesByScoringPeriod;
     if (!isObj(byPeriod)) continue;
     for (const list of Object.values(byPeriod)) {
-      if (!Array.isArray(list)) continue;
+      if (!Array.isArray(list)) {
+        note(["proGamesByScoringPeriod"]);
+        continue;
+      }
       for (const g of list) {
+        note(gameFailures(g));
         const row = gameRow(g, season);
         if (row === null) {
           skipped++;
@@ -99,17 +160,25 @@ export function proScheduleRows(
             "proTeamSchedules_wl: one game id listed with different fields",
           );
         games.set(id, row);
+        playing.add(row.home_pro_team_id as number);
+        playing.add(row.away_pro_team_id as number);
         if (games.size > MAX_SEASON_ROWS)
           throw new EspnSeasonSourceError("schema_mismatch", "proTeamSchedules_wl: too many games");
       }
     }
   }
+  const idle = teams.filter(
+    (t) => t.pro_team_id !== FREE_AGENT_PRO_TEAM_ID && !playing.has(t.pro_team_id as number),
+  ).length;
   return {
     games: [...games.values()].sort(
       (a, b) => (a.espn_game_id as number) - (b.espn_game_id as number),
     ),
     teams,
     skipped,
+    invalid,
+    failed_fields: [...failed].sort(),
+    teams_without_games: idle,
   };
 }
 
@@ -133,28 +202,45 @@ function gameRow(g: unknown, season: number): DatasetRow | null {
   };
 }
 
+/** The rows of one players_wl body plus what the drift gate needs to know about it. */
+export interface PlayersParse {
+  readonly rows: DatasetRow[];
+  /** Entries not published: a required field missing or mistyped, or a duplicate id. */
+  readonly skipped: number;
+  /** Entries the body held (the skipped share's denominator). */
+  readonly entries: number;
+  /** The required fields that failed in at least one entry (`id` also for a duplicate), sorted. */
+  readonly failed_fields: readonly string[];
+}
+
 /** The rows of one players_wl body (a root array; rows without id/name/position/team skipped). */
-export function playersRows(
-  body: unknown,
-  season: number,
-): { rows: DatasetRow[]; skipped: number } {
+export function playersRows(body: unknown, season: number): PlayersParse {
   if (!Array.isArray(body))
     throw new EspnSeasonSourceError("schema_mismatch", "players_wl: not a root array");
   if (body.length > MAX_SEASON_ROWS)
     throw new EspnSeasonSourceError("schema_mismatch", "players_wl: too many players");
   const seen = new Set<number>();
   const rows: DatasetRow[] = [];
+  const failed = new Set<string>();
   let skipped = 0;
   for (const p of body) {
+    if (!isObj(p)) {
+      failed.add("players_wl");
+      skipped++;
+      continue;
+    }
     if (
-      !isObj(p) ||
       !isInt(p.id) ||
+      seen.has(p.id) ||
       typeof p.fullName !== "string" ||
       p.fullName === "" ||
       !isInt(p.defaultPositionId) ||
-      !isInt(p.proTeamId) ||
-      seen.has(p.id)
+      !isInt(p.proTeamId)
     ) {
+      if (!isInt(p.id) || seen.has(p.id)) failed.add("id");
+      if (typeof p.fullName !== "string" || p.fullName === "") failed.add("fullName");
+      if (!isInt(p.defaultPositionId)) failed.add("defaultPositionId");
+      if (!isInt(p.proTeamId)) failed.add("proTeamId");
       skipped++;
       continue;
     }
@@ -178,7 +264,70 @@ export function playersRows(
       last_news_date_ms: epochMs(p.lastNewsDate),
     });
   }
-  return { rows: rows.sort((a, b) => (a.espn_id as number) - (b.espn_id as number)), skipped };
+  return {
+    rows: rows.sort((a, b) => (a.espn_id as number) - (b.espn_id as number)),
+    skipped,
+    entries: body.length,
+    failed_fields: [...failed].sort(),
+  };
+}
+
+/** What the drift gate decides about one season view body. */
+export interface SeasonViewCheck {
+  /** Rows the body would publish (games for the schedule, players for the index). */
+  readonly rows: number;
+  /** The fields that failed (manifest spelling; plan 10 B1 names them), sorted; empty = passes. */
+  readonly fields: readonly string[];
+  /** One server-authored line per problem (counts and field names only, never upstream text). */
+  readonly problems: readonly string[];
+}
+
+/**
+ * The drift gate over a proTeamSchedules_wl body: it passes only when it yields games, every team
+ * and game entry carries the drift manifest's required fields with their types (an epoch-ms `date`
+ * per game — a kickoff the season gate and the in-game TTLs read), and every pro team but the
+ * free-agent pseudo-team plays in at least one game. Throws EspnSeasonSourceError on a body with no
+ * `settings.proTeams[]` (the caller reports it).
+ */
+export function checkProSchedule(body: unknown, season: number): SeasonViewCheck {
+  const r = proScheduleRows(body, season);
+  const fields = new Set(r.failed_fields);
+  const problems: string[] = [];
+  if (r.invalid > 0)
+    problems.push(
+      `${String(r.invalid)} team or game entries miss or mistype a required field (${r.failed_fields.join(", ")})`,
+    );
+  if (r.games.length === 0) {
+    fields.add("proGamesByScoringPeriod");
+    problems.push("no games");
+  }
+  if (r.teams_without_games > 0) {
+    fields.add("proGamesByScoringPeriod");
+    problems.push(`${String(r.teams_without_games)} pro team(s) play in no game`);
+  }
+  return { rows: r.games.length, fields: [...fields].sort(), problems };
+}
+
+/**
+ * The drift gate over a players_wl body: it passes only when it yields players and at most
+ * MAX_SKIPPED_PLAYER_SHARE of its entries are skipped. Throws EspnSeasonSourceError on a body that
+ * is not a root array (the caller reports it).
+ */
+export function checkPlayers(body: unknown, season: number): SeasonViewCheck {
+  const r = playersRows(body, season);
+  const fields = new Set(r.failed_fields);
+  const problems: string[] = [];
+  if (r.rows.length === 0) {
+    if (fields.size === 0) fields.add("players_wl");
+    problems.push(`no players (${String(r.entries)} entries)`);
+  } else if (r.skipped > r.entries * MAX_SKIPPED_PLAYER_SHARE) {
+    problems.push(
+      `${String(r.skipped)} of ${String(r.entries)} entries skipped (${r.failed_fields.join(", ")})`,
+    );
+  } else {
+    fields.clear(); // a tolerated skip: publish reports the count
+  }
+  return { rows: r.rows.length, fields: [...fields].sort(), problems };
 }
 
 /** `YYYYMMDDHH` (UTC) of an instant, or `YYYYMMDD` for a day bucket. */
@@ -195,7 +344,7 @@ interface SpecOf {
   readonly url: (season: number) => string;
   readonly filter: string | null;
   readonly tables: DataSource["tables"];
-  readonly count: (body: unknown, season: number) => number;
+  readonly check: (body: unknown, season: number) => SeasonViewCheck;
   readonly write: (
     files: readonly { season: number; body: unknown }[],
     into: DatasetWriter,
@@ -268,21 +417,29 @@ function makeSource(spec: SpecOf): DataSource {
     },
     async assertSchema(files: readonly TempFile[]): Promise<SchemaReport> {
       let rows = 0;
-      const missing: string[] = [];
+      const missing = new Set<string>();
+      const warnings: string[] = [];
       for (const f of files) {
+        const label = `${spec.view} season ${String(f.season ?? 0)}`;
         try {
-          rows += spec.count(await readBody(f), f.season ?? 0);
+          const c = spec.check(await readBody(f), f.season ?? 0);
+          rows += c.rows;
+          for (const field of c.fields) missing.add(field);
+          for (const p of c.problems) warnings.push(`${label}: ${p}`);
         } catch (e) {
-          missing.push(e instanceof EspnSeasonSourceError ? e.message : `${spec.view}: unreadable`);
+          const why = e instanceof EspnSeasonSourceError ? e.message : `${spec.view}: unreadable`;
+          missing.add(why);
+          warnings.push(`${label}: ${why}`);
         }
       }
+      if (files.length === 0) warnings.push(`${spec.view}: no files to check`);
       return {
-        ok: missing.length === 0 && files.length > 0,
-        missing_columns: missing,
+        ok: missing.size === 0 && files.length > 0 && rows > 0,
+        missing_columns: [...missing],
         extra_columns: [],
         bad_codecs: [],
         rows,
-        warnings: [],
+        warnings,
       };
     },
     async publish(files: readonly TempFile[], into: DatasetWriter): Promise<PublishStats> {
@@ -316,7 +473,7 @@ export function espnSeasonSources(readHost: string = ESPN_READ_HOST_DEFAULT): {
     url: (s) => `${base(s)}?view=proTeamSchedules_wl`,
     filter: null,
     tables: [DS_PRO_SCHEDULE, DS_PRO_TEAMS],
-    count: (b, s) => proScheduleRows(b, s).games.length,
+    check: checkProSchedule,
     write: (bodies, into) => {
       into.createTable(DS_PRO_SCHEDULE);
       into.createTable(DS_PRO_TEAMS);
@@ -349,7 +506,7 @@ export function espnSeasonSources(readHost: string = ESPN_READ_HOST_DEFAULT): {
     url: (s) => `${base(s)}/players?view=players_wl`,
     filter: PLAYERS_WL_FILTER,
     tables: [DS_PLAYERS],
-    count: (b, s) => playersRows(b, s).rows.length,
+    check: checkPlayers,
     write: (bodies, into) => {
       into.createTable(DS_PLAYERS);
       let n = 0;
