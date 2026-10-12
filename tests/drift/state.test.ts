@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { fixedClock } from "../../src/domain/clock.js";
 import {
-  applyHostRecovered,
+  applyRecovered,
   applySignals,
   driftMetaFor,
   DriftStateWriter,
@@ -13,6 +13,7 @@ import {
   MAX_DIFF_PATHS,
   parseDiffs,
   scoringRefusal,
+  settingsDriftPath,
   statusOf,
 } from "../../src/drift/state.js";
 import type { DriftSignal, DriftStateRepository, DriftStateRow } from "../../src/drift/types.js";
@@ -141,12 +142,11 @@ describe("statusOf / applySignals", () => {
     expect(moved).toMatchObject({ status: "host_moved", host_moved_at: T0, since: T0 });
     const again = applySignals(moved, [missing("mRoster", "$.teams[].roster.entries")], H, T1);
     expect(again).toMatchObject({ status: "host_moved", host_moved_at: T0, since: T0 });
-    const back = applyHostRecovered(again, H, T1);
+    const back = applyRecovered(again, H, T1);
     expect(back).toMatchObject({ status: "red", host_moved_at: null, since: T0 });
-    const clean = applyHostRecovered(moved, H, T1);
+    const clean = applyRecovered(moved, H, T1);
     expect(clean).toMatchObject({ status: "green", since: null, host_moved_at: null });
-    expect(applyHostRecovered(moved, "other.fantasy.espn.com", T1)).toBe(moved);
-    expect(applyHostRecovered(back, H, T1)).toBe(back);
+    expect(applyRecovered(back, H, T1)).toBe(back);
   });
 });
 
@@ -156,6 +156,7 @@ describe("DriftStateWriter", () => {
     const w = new DriftStateWriter(repo, fixedClock(T0), H);
     expect(w.record([])).toBeNull();
     expect(w.recovered()).toBeNull();
+    expect(w.recovered(["mSettings"])).toBeNull();
     const r = w.record([{ kind: "host_moved", view: "mRoster", path: "$", value: null }]);
     expect(r?.status).toBe("host_moved");
     expect(w.current()).toBe(repo.row);
@@ -201,5 +202,33 @@ describe("meta.drift and the scoring refusal", () => {
     expect(scoringRefusal(red)).toBeNull();
     expect(scoringRefusal({ ...settingsRed, status: "additive" })).toBeNull();
     expect(scoringRefusal(null)).toBeNull();
+  });
+  it("settingsDriftPath names the key that is missing (error-path form), null exactly when scoring is allowed", () => {
+    const acq = applySignals(null, [missing("mSettings", "$.settings.acquisitionSettings")], H, T0);
+    expect(settingsDriftPath(acq)).toBe("settings.acquisitionSettings");
+    expect(settingsDriftPath(settingsRed)).toBe("settings.scoringSettings");
+    // another view's drift listed first does not hide the mSettings key
+    const both = applySignals(red, [missing("mSettings", "$.settings.rosterSettings")], H, T1);
+    expect(settingsDriftPath(both)).toBe("settings.rosterSettings");
+    for (const row of [
+      null,
+      red,
+      { ...acq, status: "additive" as const },
+      { ...acq, status: "green" as const },
+    ])
+      expect(settingsDriftPath(row)).toBeNull();
+    expect(settingsDriftPath({ ...acq, status: "host_moved" })).toBe(
+      "settings.acquisitionSettings",
+    );
+  });
+  it("a tampered stored path outside the pattern grammar still refuses, named `<key>`; it never throws", () => {
+    const tampered = {
+      ...settingsRed,
+      diff_json: JSON.stringify([
+        { view: "mSettings", removed: ["$.settings.odd-key"], added: [], enums: [] },
+      ]),
+    };
+    expect(settingsDriftPath(tampered)).toBe("<key>");
+    expect(scoringRefusal(tampered)).toBe("settings_drift");
   });
 });

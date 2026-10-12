@@ -1,16 +1,20 @@
 // manifest.test.ts — src/drift/manifest.ts (plan 01 §7; plan 05 §3.3): both committed manifests load
 // (the probe manifest's `views` and the entity manifest's whole-response views), the entity
 // manifest's shape equals the mirror type in src/drift/types.ts (the generator's, held equal), and a
-// malformed manifest throws — it never reads as "no drift". 100 % (plan 05 §7).
+// malformed manifest throws — it never reads as "no drift"; the manifest identity drift_state records
+// (plan 03 §7 re-baseline) equals the fixture pipeline's content hash. 100 % (plan 05 §7).
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { contentSha256, type Json } from "../../scripts/espn-fixture/canonical.js";
 import {
   ENTITY_MANIFEST_PATH as GENERATOR_PATH,
   ENTITY_MANIFEST_VERSION as GENERATOR_VERSION,
 } from "../../scripts/espn-fixture/entity-manifest.js";
 import {
+  loadDriftManifest,
   loadObservations,
+  manifestIdentity,
   MAX_MANIFEST_BYTES,
   observationsFrom,
   parseViewObservations,
@@ -127,5 +131,38 @@ describe("malformed manifests throw", () => {
     const bad = path.join(tmp.dir, "bad.json");
     writeFileSync(bad, "{");
     expect(() => loadObservations(bad)).toThrow(SyntaxError);
+  });
+});
+
+describe("the manifest identity drift_state records (plan 03 §7)", () => {
+  it("the committed manifest: sha256 of its canonical JSON (the pipeline's contentSha256) and its version", () => {
+    const file = path.join(ROOT, MANIFEST_PATH);
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Json;
+    const loaded = loadDriftManifest(file);
+    expect(loaded.identity).toEqual({ hash: contentSha256(raw), version: 1 });
+    expect(loaded.identity.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(loaded.observations).toEqual(loadObservations(file));
+  });
+  it("whitespace- and key-order-independent; arrays keep their order; `__proto__` stays data", () => {
+    const a = manifestIdentity({ version: 1, views: {}, x: { b: [2, 1], a: null } });
+    const b = manifestIdentity(
+      JSON.parse('{ "x": {"a": null, "b": [2,1]}, "views": {}, "version": 1 }'),
+    );
+    expect(a).toEqual(b);
+    expect(manifestIdentity({ version: 1, views: {}, x: { a: null, b: [1, 2] } }).hash).not.toBe(
+      a.hash,
+    );
+    const odd = JSON.parse('{"version":1,"views":{},"__proto__":{"polluted":true}}') as Json;
+    expect(manifestIdentity(odd).hash).toBe(contentSha256(odd));
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(manifestIdentity({ version: 7, views: {} }).version).toBe(7);
+  });
+  it.each([
+    ["not an object", [1]],
+    ["no version", { views: {} }],
+    ["a fractional version", { version: 1.5, views: {} }],
+    ["a string version", { version: "1", views: {} }],
+  ])("refuses %s", (_name, m) => {
+    expect(() => manifestIdentity(m)).toThrow(/drift manifest/);
   });
 });

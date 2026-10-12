@@ -36,6 +36,16 @@ export const MANIFEST_FORMAT_VERSION = 1;
  * in every process (scripts/espn-fixture/canonical.ts `contentSha256`).
  */
 export const MANIFEST_HASH_ALGORITHM = "sha256-canonical-json" as const;
+/**
+ * The identity of the manifest a process judges against, as `drift_state` records it
+ * (`manifest_hash`, `manifest_version` — plan 03 §7: a binary with a newer manifest re-baselines
+ * on its first probe). `hash` per MANIFEST_HASH_ALGORITHM (64 lowercase hex), `version` the
+ * manifest's `version` field.
+ */
+export interface ManifestIdentity {
+  readonly hash: string;
+  readonly version: number;
+}
 
 /**
  * The top-level keys of ESPN's skeleton response for ANY view, incl. unknown ones (research 03
