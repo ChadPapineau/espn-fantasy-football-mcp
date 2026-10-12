@@ -202,6 +202,39 @@ describe(".githooks/commit-msg checks and scans the message", () => {
     repo.git(["add", "a.txt"]);
     expect(repo.git(["commit", "-qm", "feat(scope): add a\n\nbody line"]).status).toBe(0);
   });
+
+  // Stage C finding: `git commit -m`/`-F` publish `#` lines verbatim, so the hook must not ignore them
+  it.each([
+    ["a #-prefixed first line before the real subject", "#wip: not conventional\nfeat: x"],
+    [
+      "a # Co-Authored-By trailer",
+      `feat: x\n\n# Co-Authored-By: Claude <${["claude", "example.invalid"].join("@")}>`,
+    ],
+  ])("refuses %s (git commit -m keeps the line)", (_why, msg) => {
+    const repo = makeRepo();
+    const before = head(repo);
+    repo.write("a.txt", "hello\n");
+    repo.git(["add", "a.txt"]);
+    const r = repo.git(["commit", "-qm", msg]);
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toMatch(/check-commit-msg: refused/);
+    expect(head(repo)).toBe(before);
+  });
+
+  it("an edited message still commits: git's template comments follow the subject and git drops them", () => {
+    const repo = makeRepo();
+    const editor = path.join(repo.home, "editor.sh");
+    writeFileSync(
+      editor,
+      '#!/bin/sh\n{ printf "feat: edited\\n\\nbody line\\n"; cat "$1"; } > "$1.new" && mv "$1.new" "$1"\n',
+    );
+    chmodSync(editor, 0o755);
+    repo.write("a.txt", "hello\n");
+    repo.git(["add", "a.txt"]);
+    const r = repo.git(["commit", "-q"], { GIT_EDITOR: editor });
+    expect(r.status, r.out).toBe(0);
+    expect(repo.git(["log", "-1", "--format=%B"]).out).toBe("feat: edited\n\nbody line\n\n");
+  });
 });
 
 describe("commit identity guard: GitHub no-reply only", () => {
@@ -308,6 +341,34 @@ describe.skipIf(!HAS_ZSH)("scripts/dev/commit-paths.sh (macOS dev tool; zsh)", (
     ["non-conventional", "update stuff"],
     ["AI trailer", "fix: a\\n\\nCo-Authored-By: Claude Opus <noreply@anthropic.com>"],
   ])("refuses a %s message (exit 11)", (_why, msg) => {
+    const repo = makeRepo();
+    withOrigin(repo);
+    const before = head(repo);
+    repo.write("a.txt", "hello\n");
+    expect(commitPaths(repo, [msg, "a.txt"]).status).toBe(11);
+    expect(head(repo)).toBe(before);
+  });
+
+  it("cleans comment lines BEFORE the check, the scan and commit-tree: what is checked is what is published", () => {
+    const repo = makeRepo();
+    const bare = withOrigin(repo);
+    repo.write("a.txt", "hello\n");
+    const anthropic = ["noreply", "anthropic.com"].join("@");
+    const r = commitPaths(repo, [
+      `#wip: not conventional\\nfeat: x\\n\\n# Co-Authored-By: Claude <${anthropic}>`,
+      "a.txt",
+    ]);
+    expect(r.status, r.out).toBe(0);
+    const published = originLog(bare);
+    expect(published).toBe("feat: x\n\n");
+    expect(published).not.toContain("#");
+    expect(published.toLowerCase()).not.toContain("co-authored-by");
+  });
+
+  it.each([
+    ["only a comment line", "#wip: not conventional"],
+    ["a non-conventional subject behind a comment", "# feat: hidden\\nupdate stuff"],
+  ])("refuses %s once cleaned (exit 11)", (_why, msg) => {
     const repo = makeRepo();
     withOrigin(repo);
     const before = head(repo);

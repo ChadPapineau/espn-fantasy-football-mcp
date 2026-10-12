@@ -5,8 +5,10 @@
 # itself is scanned and checked).
 #
 # Usage (any cwd):  scripts/dev/commit-paths.sh "<conventional subject>\n\n<body>" <path>...
-#   A literal "\n" in the message becomes a newline. <path> may be a file or a directory you own;
-#   additions, edits and deletions under it are included; git-ignored files never are.
+#   A literal "\n" in the message becomes a newline; the message is then cleaned like an edited
+#   `git commit` message (`git stripspace --strip-comments`: `#` comment lines dropped) and that one
+#   cleaned text is what is checked, scanned and committed. <path> may be a file or a directory you
+#   own; additions, edits and deletions under it are included; git-ignored files never are.
 #
 # Refuses (nothing committed) when:
 #   * the branch is main/master, or HEAD is detached (exit 7)
@@ -79,7 +81,11 @@ IDX=$(mktemp -u "${TMPDIR:-/tmp}/eff-idx.XXXXXX")
 ERR=$(mktemp "${TMPDIR:-/tmp}/eff-push.XXXXXX")
 MSG=$(mktemp "${TMPDIR:-/tmp}/eff-msg.XXXXXX")
 trap 'rm -rf "$LOCK"; rm -f "$IDX" "$ERR" "$MSG"' EXIT INT TERM HUP
-print -r -- "$msg" > "$MSG"
+# cleaned the way `git commit` cleans an edited message (comment lines dropped — core.commentChar —,
+# trailing whitespace and blank-line runs collapsed) BEFORE the check, the scan and commit-tree read
+# the SAME file: `git commit-tree -F` keeps `#` lines verbatim, so a check that ignored them would
+# pass a `#…` subject or a `# Co-Authored-By:` trailer that is then published
+print -r -- "$msg" | git stripspace --strip-comments > "$MSG"
 
 # the message first: it is published with the commit
 "$ROOT/scripts/dev/with-node.sh" node "$ROOT/scripts/dev/check-commit-msg.mjs" "$MSG" \

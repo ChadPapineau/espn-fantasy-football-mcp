@@ -19,7 +19,7 @@ describe("checkMessage", () => {
     "Merge branch 'build/phase-1'",
     'Revert "feat: x"',
     "fixup! feat: x",
-    "# a git comment line\nfeat: real subject",
+    "feat: x\n\n#123 is a body line, published and harmless",
     "\n\nfeat: after blank lines",
   ])("accepts %j", (m) => {
     expect(checkMessage(m)).toBeNull();
@@ -35,6 +35,9 @@ describe("checkMessage", () => {
     ["empty subject", "feat: "],
     ["bad scope", "feat(a b): x"],
     ["too long", `feat: ${"x".repeat(MAX_SUBJECT)}`],
+    // published verbatim by `git commit -m`/`-F` and `git commit-tree -F` (Stage C finding)
+    ["a comment line before the subject", "# a git comment line\nfeat: real subject"],
+    ["a #-prefixed non-conventional first line", "#wip: not conventional\nfeat: x"],
   ])("refuses %s", (_why, m) => {
     expect(checkMessage(m)).not.toBeNull();
   });
@@ -45,6 +48,11 @@ describe("checkMessage", () => {
     `feat: x\n\nCo-authored-by: GitHub Copilot <${["copilot", "github.com"].join("@")}>`,
     "feat: x\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
     `feat: x\n\nsigned ${NOREPLY_ANTHROPIC}`,
+    // behind a comment character, a quote marker or a bullet: still published by -m/-F/commit-tree
+    `feat: x\n\n# Co-Authored-By: Claude <${["claude", "example.invalid"].join("@")}>`,
+    "feat: x\n\n> co-authored-by: Copilot",
+    "feat: x\n\n- Co-authored-by: Gemini",
+    `#wip: not conventional\nfeat: x\n\n# Co-Authored-By: Claude <${NOREPLY_ANTHROPIC}>`,
   ])("refuses an AI attribution: %j", (m) => {
     expect(checkMessage(m)).toMatch(/AI attribution/);
   });
@@ -74,5 +82,21 @@ describe("CLI", () => {
     expect(run([path.join(tmp.dir, "bad")]).status).toBe(1);
     expect(run([]).status).toBe(2);
     expect(run([path.join(tmp.dir, "missing")]).status).toBe(2);
+  });
+
+  it("the Stage C repro: a #-prefixed first line and a # Co-Authored-By trailer are refused (exit 1)", () => {
+    tmp = tempDir();
+    const msg = path.join(tmp.dir, "msg");
+    writeFileSync(
+      msg,
+      `#wip: not conventional\nfeat: x\n\n# Co-Authored-By: Claude <${NOREPLY_ANTHROPIC}>\n`,
+    );
+    const r = run([msg]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/AI attribution/);
+    writeFileSync(msg, "#wip: not conventional\nfeat: x\n");
+    const s = run([msg]);
+    expect(s.status).toBe(1);
+    expect(s.stderr).toMatch(/starts with "#"/);
   });
 });
