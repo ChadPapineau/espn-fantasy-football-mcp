@@ -8,12 +8,20 @@
 // frames: every log line is JSON on stderr. A stdin line the SDK transport would drop is answered
 // (-32700 for a line that is not JSON, -32600 for an invalid request with a usable id), and a
 // tools/call argument key `__proto__` reaches the tool's strict schema (plan 02 §5) instead of being
-// dropped by the SDK's re-parse. Ported from sibling @5daa625 (src/cli/serve.ts), adapted.
+// dropped by the SDK's re-parse. A JSON-RPC batch (an array line; MCP 2025-03-26 §Batching: a
+// server MUST support receiving them) is answered with ONE array of the responses, `[]` with a single
+// -32600; the SDK's invalid-params replies (-32603 carrying a raw zod issue dump, or the URI-length
+// refusal) become -32602 "Invalid params"; an open `subscriptions/listen` (a stream, answered only at
+// teardown) never holds the drain; and the process resolves its exit code only once stdout has
+// flushed every reply (a reply queued in the stream when `process.exit` runs is lost).
+// Ported from sibling @5daa625 (src/cli/serve.ts), adapted.
 import { homedir } from "node:os";
 import { PassThrough, type Readable, type Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { parseArgs } from "node:util";
 import {
+  INTERNAL_ERROR,
+  INVALID_PARAMS,
   INVALID_REQUEST,
   PARSE_ERROR,
   STDIO_DEFAULT_MAX_BUFFER_SIZE,
@@ -235,15 +243,184 @@ export function withoutEchoedName(message: JSONRPCMessage): JSONRPCMessage {
   };
 }
 
+/** The SDK's refusal of an over-long resource URI (its message; the URI itself is not echoed). */
+const URI_TOO_LONG_RE = /^URI exceeds maximum length of \d+ characters \(got \d+\)$/;
+
+/**
+ * Whether an SDK -32603 is really a refusal of the CALLER's parameters: its message is the raw zod
+ * issue array of the request schema (every issue's path starts at `params`), or the URI-length
+ * refusal. A server-side failure — anything else — stays -32603.
+ */
+export function isInvalidParamsDump(message: string): boolean {
+  if (URI_TOO_LONG_RE.test(message)) return true;
+  if (!message.startsWith("[")) return false;
+  let issues: unknown;
+  try {
+    issues = JSON.parse(message);
+  } catch {
+    return false;
+  }
+  return (
+    Array.isArray(issues) &&
+    issues.length > 0 &&
+    issues.every(
+      (i) =>
+        typeof i === "object" &&
+        i !== null &&
+        typeof (i as { code?: unknown }).code === "string" &&
+        Array.isArray((i as { path?: unknown }).path) &&
+        (i as { path: unknown[] }).path[0] === "params",
+    )
+  );
+}
+
+/**
+ * The reply with the SDK's invalid-params errors coded as such (JSON-RPC 2.0 §5.1: -32602 is the
+ * caller's invalid method parameters, -32603 the server's internal error): initialize without
+ * `clientInfo`, prompts/get with a non-string argument, resources/read with a non-string or
+ * over-long `uri` — all answered -32603 with a multi-line zod dump by the SDK — become -32602
+ * "Invalid params", short and fixed (the dump's paths and expectations are dropped; tools/call
+ * already answers -32602 itself). Every other message passes unchanged.
+ */
+export function withInvalidParamsCoded(message: JSONRPCMessage): JSONRPCMessage {
+  if (!isJSONRPCErrorResponse(message) || message.error.code !== INTERNAL_ERROR) return message;
+  if (!isInvalidParamsDump(message.error.message)) return message;
+  return { ...message, error: { code: INVALID_PARAMS, message: "Invalid params" } };
+}
+
+/** The single reply to an empty batch `[]` (JSON-RPC 2.0 §6), with no id (as for -32700). */
+export function emptyBatchReply(): JSONRPCErrorResponse {
+  return { jsonrpc: "2.0", error: { code: INVALID_REQUEST, message: "Invalid Request" } };
+}
+
+/** One element of a batch: a message to deliver, or the -32600 reply an invalid element gets. */
+export type BatchElement =
+  | { readonly kind: "message"; readonly message: JSONRPCMessage }
+  | { readonly kind: "invalid"; readonly reply: JSONRPCErrorResponse };
+
+/**
+ * Splits a batch (JSON-RPC 2.0 §6): each element that is a valid JSON-RPC message is delivered as if
+ * it had arrived alone; an invalid element is answered -32600 Invalid Request — under its id when it
+ * is a request with a usable one, else with no id (never an echo of the element).
+ */
+export function batchElements(batch: readonly unknown[]): BatchElement[] {
+  return batch.map((el): BatchElement => {
+    const line = JSON.stringify(el);
+    try {
+      return { kind: "message", message: deserializeMessage(line) };
+    } catch {
+      return {
+        kind: "invalid",
+        reply: invalidRequestOf(el, line) ?? {
+          jsonrpc: "2.0",
+          error: { code: INVALID_REQUEST, message: "Invalid Request" },
+        },
+      };
+    }
+  });
+}
+
+/**
+ * Collects the responses of open batches (JSON-RPC 2.0 §6: the server answers a batch with ONE
+ * array holding a response per request, in no particular order; a batch of notifications only gets
+ * nothing). `claim` takes a response whose id belongs to an open batch — it is then written with
+ * its batch, not alone; `cancel` settles a cancelled request (the SDK answers it nothing); `flush`
+ * writes every open batch's collected replies (the close sequence).
+ */
+export class BatchReplies {
+  private readonly open: {
+    readonly expect: Set<string | number>;
+    readonly replies: JSONRPCMessage[];
+  }[] = [];
+  private readonly write: (replies: readonly JSONRPCMessage[]) => void;
+  constructor(write: (replies: readonly JSONRPCMessage[]) => void) {
+    this.write = write;
+  }
+
+  /** Opens a batch expecting `ids` (its requests), with `replies` already known (invalid elements). */
+  begin(ids: readonly (string | number)[], replies: readonly JSONRPCMessage[]): void {
+    const b = { expect: new Set(ids), replies: [...replies] };
+    if (b.expect.size === 0) {
+      if (b.replies.length > 0) this.write(b.replies);
+      return;
+    }
+    this.open.push(b);
+  }
+
+  /** Whether `id` is awaited by an open batch. */
+  has(id: string | number): boolean {
+    return this.open.some((b) => b.expect.has(id));
+  }
+
+  /** Takes a response for an open batch (true) — written with the batch once it is complete. */
+  claim(message: JSONRPCMessage): boolean {
+    if (!(isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message))) return false;
+    const id = message.id;
+    if (id === undefined) return false;
+    const b = this.open.find((x) => x.expect.has(id));
+    if (b === undefined) return false;
+    b.expect.delete(id);
+    b.replies.push(message);
+    this.settle(b);
+    return true;
+  }
+
+  /** A cancelled batched request: nothing will answer it. */
+  cancel(id: string | number): void {
+    const b = this.open.find((x) => x.expect.has(id));
+    if (b === undefined) return;
+    b.expect.delete(id);
+    this.settle(b);
+  }
+
+  /** Writes every open batch's collected replies now (the close sequence: nothing more will come). */
+  flush(): void {
+    for (const b of this.open.splice(0)) if (b.replies.length > 0) this.write(b.replies);
+  }
+
+  /** Open batches. */
+  get size(): number {
+    return this.open.length;
+  }
+
+  private settle(b: (typeof this.open)[number]): void {
+    if (b.expect.size > 0) return;
+    this.open.splice(this.open.indexOf(b), 1);
+    if (b.replies.length > 0) this.write(b.replies);
+  }
+}
+
+/**
+ * Resolves once `stream` has handed every queued byte to the OS (`writableLength` 0), it ended or
+ * was destroyed (nothing more can be delivered). `process.exit` discards what is still queued in a
+ * stdout pipe, so `serve` resolves its exit code only after this (bounded by the close deadline).
+ */
+export function whenFlushed(stream: NodeJS.WritableStream): Promise<void> {
+  const w = stream as Partial<Writable>;
+  const done = (): boolean =>
+    w.destroyed === true || w.writableFinished === true || (w.writableLength ?? 0) === 0;
+  if (done()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const tick = setInterval(() => {
+      if (done()) {
+        clearInterval(tick);
+        resolve();
+      }
+    }, 10);
+  });
+}
+
 /**
  * Watches stdin's lines beside the SDK transport and answers each one `stdinLineReply` answers (a
- * line over the read cap — the transport refuses it and closes — is never judged). Returns the
- * unsubscribe.
+ * line over the read cap — the transport refuses it and closes — is never judged); a line that is a
+ * JSON array (a batch, which the SDK transport drops) goes to `batch`, `[]` gets one -32600.
+ * Returns the unsubscribe.
  */
 export function watchInvalidRequests(
   stdin: NodeJS.ReadableStream,
   reply: (msg: JSONRPCErrorResponse) => void,
   logger: Logger,
+  batch?: (elements: readonly unknown[]) => void,
 ): () => void {
   let buf = "";
   // inside a line longer than the read cap: its rest up to the next newline is not a line of its own
@@ -264,6 +441,21 @@ export function watchInvalidRequests(
       // a line over the read cap is the transport's to refuse (it closes itself): never judged here
       if (line.length > STDIO_DEFAULT_MAX_BUFFER_SIZE) continue;
       if (line.trim() === "") continue;
+      if (batch !== undefined && line.trimStart().startsWith("[")) {
+        let arr: unknown = null;
+        try {
+          arr = JSON.parse(line);
+        } catch {
+          arr = null;
+        }
+        if (Array.isArray(arr)) {
+          if (arr.length === 0) {
+            logger.warn("transport.invalid_request", { code: INVALID_REQUEST, batch: 0 });
+            reply(emptyBatchReply());
+          } else batch(arr);
+          continue;
+        }
+      }
       const r = stdinLineReply(line);
       if (r === null) continue;
       if (r.error.code === PARSE_ERROR)
@@ -361,8 +553,13 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
   let wiring: Wiring | null = null;
   let handle: StdioServerHandle | null = null;
   let inflight = 0;
-  /** Request ids read from the wire and not yet answered (or cancelled): the drain waits for them. */
+  /**
+   * Request ids read from the wire and not yet answered (or cancelled): the drain waits for them. A
+   * `subscriptions/listen` is not one: it is a stream the SDK answers only at teardown (inside
+   * handle.close(), after the drain), so counting it held every close for the whole drain window.
+   */
   const pending = new Set<string | number>();
+  let batches: BatchReplies | null = null;
   let resolveExit!: (code: number) => void;
   const exited = new Promise<number>((r) => {
     resolveExit = r;
@@ -404,11 +601,14 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       while (busy() && Date.now() < drainUntil) await new Promise((r) => setTimeout(r, 20));
       if (busy())
         logger.warn("serve.drain_timeout", { inflight: Math.max(inflight, pending.size) });
+      // a batch still missing a reply gets what it has: nothing more will be answered
+      batches?.flush();
       try {
         await handle?.close();
       } catch {
         // the transport is already gone
       }
+      batches?.flush();
       try {
         wiring?.close();
       } catch {
@@ -420,6 +620,9 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
         logger.error("store.close_failed", { error: e instanceof Error ? e.name : "unknown" });
         code = code === EXIT.ok ? EXIT.error : code;
       }
+      // every reply handed to stdout reaches the client before the exit code is resolved (the CLI
+      // entry exits the process at once); a client that never reads is bounded by the deadline
+      await whenFlushed(opts.stdout);
       clearTimeout(deadline);
       finish(code);
     })();
@@ -564,13 +767,24 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     });
     const transport = new StdioServerTransport(input, opts.stdout as unknown as Writable);
     const sdkSend = transport.send.bind(transport);
+    const batchReplies = new BatchReplies((replies) => {
+      // one line, one array (JSON-RPC 2.0 §6); written straight to stdout in arrival order
+      try {
+        opts.stdout.write(`${JSON.stringify(replies)}\n`);
+      } catch {
+        // stdout already gone: the shutdown path handles it
+      }
+    });
+    batches = batchReplies;
     transport.send = (message) => {
       if (
         (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) &&
         message.id !== undefined
       )
         pending.delete(message.id);
-      return sdkSend(withoutEchoedName(message));
+      const outbound = withInvalidParamsCoded(withoutEchoedName(message));
+      if (batchReplies.claim(outbound)) return Promise.resolve();
+      return sdkSend(outbound);
     };
     handle = serveStdio(() => createServer(services, w.options), {
       transport,
@@ -586,10 +800,14 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     // schema rejects it like any unknown key (withProtoKeyCarried).
     const sdkOnMessage = transport.onmessage;
     transport.onmessage = (message) => {
-      if (isJSONRPCRequest(message)) pending.add(message.id);
-      else if (isJSONRPCNotification(message) && message.method === "notifications/cancelled") {
+      if (isJSONRPCRequest(message)) {
+        if (message.method !== "subscriptions/listen") pending.add(message.id);
+      } else if (isJSONRPCNotification(message) && message.method === "notifications/cancelled") {
         const id = (message.params as { requestId?: unknown } | undefined)?.requestId;
-        if (typeof id === "string" || typeof id === "number") pending.delete(id);
+        if (typeof id === "string" || typeof id === "number") {
+          pending.delete(id);
+          batchReplies.cancel(id);
+        }
       }
       const carried = withProtoKeyCarried(message);
       if (carried !== message) logger.warn("transport.proto_key", { method: "tools/call" });
@@ -614,6 +832,23 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
           });
         },
         logger,
+        (elements) => {
+          // a batch: each valid element goes through the same path as a line of its own (pending,
+          // the __proto__ carry, the SDK); the responses come back as ONE array (BatchReplies)
+          const split = batchElements(elements);
+          const ids = split.flatMap((e) =>
+            e.kind === "message" &&
+            isJSONRPCRequest(e.message) &&
+            e.message.method !== "subscriptions/listen" &&
+            !batchReplies.has(e.message.id)
+              ? [e.message.id]
+              : [],
+          );
+          const invalid = split.flatMap((e) => (e.kind === "invalid" ? [e.reply] : []));
+          logger.info("transport.batch", { size: elements.length, requests: ids.length });
+          batchReplies.begin(ids, invalid);
+          for (const e of split) if (e.kind === "message") transport.onmessage?.(e.message);
+        },
       ),
     );
     logger.info("serve.ready", {

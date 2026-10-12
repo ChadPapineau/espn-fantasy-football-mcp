@@ -455,7 +455,8 @@ describe("fixture mode over stdio", () => {
     });
     // megabytes in, a constant-size reply out (no amplification): a 2 MB non-URL (the "is invalid"
     // path), a 900 kB URL that matches nothing, and a 2 MB URL (the SDK's template matcher refuses
-    // a URI over 1 000 000 chars with -32603 and a length-only message)
+    // a URI over 1 000 000 chars — the SDK's -32603 length refusal is the caller's invalid params:
+    // -32602 "Invalid params", JSON-RPC 2.0 §5.1)
     const bigInvalid = `bad ${"Ab9%2F ".repeat(300_000)}`;
     const bigUnmatched = `espn-ff://${"Ab9%2F".repeat(150_000)}`;
     const bigOverCap = `espn-ff://${"Ab9%2F".repeat(350_000)}`;
@@ -476,7 +477,7 @@ describe("fixture mode over stdio", () => {
     });
     expect((await r.reply(63)).error).toEqual(invalid.error);
     expect((await r.reply(66)).error).toEqual(notFound.error);
-    expect((await r.reply(67)).error).toMatchObject({ code: -32603 });
+    expect((await r.reply(67)).error).toEqual({ code: -32602, message: "Invalid params" });
     for (const id of [63, 66, 67])
       expect(JSON.stringify(r.frames.find((f) => f.id === id)).length).toBeLessThan(200);
     for (const piece of pieces) expect(r.raw()).not.toContain(JSON.stringify(piece).slice(1, -1));
