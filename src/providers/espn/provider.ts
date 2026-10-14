@@ -212,11 +212,12 @@ export interface EspnProviderDeps {
    */
   readonly periodProvisional?: (season: number, week: number) => boolean | null;
   /**
-   * The store's pro-schedule dataset (the composition root wires it, like `ttlContext`): every
-   * PlatformPlayer's `bye_week` comes from it, by the rule `espn_get_roster` applies (plan 07 A4/B1/C2
-   * `bye_week`; the weekly-value consumers — E4–E7, E11 — zero a player's bye week from it). Not
-   * wired, a season it does not hold, or a read that throws → `bye_week` null, said by the field;
-   * never an extra ESPN request.
+   * The store's pro-schedule dataset: every PlatformPlayer's `bye_week` comes from it, by the rule
+   * `espn_get_roster` applies (plan 07 A4/B1/C2 `bye_week`; the weekly-value consumers — E4–E7,
+   * E11 — zero a player's bye week from it). Nothing else supplies it, so every composition root
+   * must pass `proSchedule: store.datasets.proSchedule` to createEspnProvider. Not wired, a season
+   * it does not hold, or a read that throws → `bye_week` null, said by the field; never an extra
+   * ESPN request.
    */
   readonly proSchedule?: ProScheduleDataset;
   readonly sleep?: Sleep;

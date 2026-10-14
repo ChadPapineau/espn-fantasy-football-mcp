@@ -165,14 +165,20 @@ export type SlotVerdict =
  * then the bucket's windows and the jobs' daily caps): refused `concurrency` (wait
  * IN_FLIGHT_POLL_MS, nothing written) while ESPN_LIMITER.concurrency `pending` rows are live in any
  * process, else the repository's verdict (and, when it admits the send, the `pending` row that
- * holds the slot until its outcome is written). Every recorder of `espn_requests` takes its slot
- * here — EspnLimiter.acquire, and any caller that sends ESPN requests outside the provider — so the
- * cap binds them all. Throws what the repository throws (the caller fails closed).
+ * holds the slot until its outcome is written). Throws what the repository throws (the caller fails
+ * closed).
  *
- * The count and the insert are two statements, not one transaction; the ≤ 1/s window closes the
- * gap: a row another process inserts after this count and before this insert carries a time within
- * a second of this request's `at` (unless that process waited over a second for the store's lock),
- * so the insert is refused and the caller's next attempt counts again.
+ * The cap binds exactly the sends that take their slot here. EspnLimiter.acquire takes one for every
+ * provider attempt; a caller outside the provider that records its rows with
+ * LimiterRepository.tryRecord itself still counts against the windows and the daily caps, but is
+ * outside the in-flight cap until it takes its slot here as well.
+ *
+ * The count and the insert are two statements, not one transaction. The ≤ 1/s window closes the gap
+ * only while this request's `at` is under a second old when its row is inserted: a row another
+ * process inserts between this count and this insert is then inside that window, so the insert is
+ * refused and the caller's next attempt counts again. A process that stalls a second or more between
+ * the two (a wait for the store's write lock, up to its busy timeout, or a paused process) can still
+ * put a third request in flight; only a count inside the store's own BEGIN IMMEDIATE closes that.
  */
 export function trySlot(repo: LimiterRepository, req: LimiterRequest): SlotVerdict {
   if (

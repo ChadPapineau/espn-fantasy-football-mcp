@@ -12,6 +12,7 @@ import { weeklyValues } from "../../../src/domain/analytics/waivers.js";
 import { byeWeekOf } from "../../../src/domain/league/schedule.js";
 import type { PlatformPlayer, ProSchedule } from "../../../src/domain/league/types.js";
 import { fixedClock } from "../../../src/domain/clock.js";
+import { createEspnProvider } from "../../../src/providers/espn/index.js";
 import { normalizeProSchedule } from "../../../src/providers/espn/normalize.js";
 import {
   BYE_WEEKS_MEMO_MS,
@@ -22,7 +23,15 @@ import type { WireProScheduleBody } from "../../../src/providers/espn/views/inde
 import { storeFactory } from "../../../src/store/index.js";
 import { tempDir } from "../../lint/helpers.js";
 import { publishEspnDatasets } from "../../mcp/helpers/world.js";
-import { loadFixture, makeWorld, NOW_ISO, SEASON } from "./helpers.js";
+import {
+  FIXTURES,
+  LEAGUE_ID,
+  loadFixture,
+  makeWorld,
+  NOW_ISO,
+  SEASON,
+  stubScoring,
+} from "./helpers.js";
 
 const FREE_AGENT_TEAM = 0;
 const schedule = (): ProSchedule =>
@@ -141,6 +150,56 @@ describe("bye_week from the wired pro-schedule dataset", () => {
       expectByes(rostered, schedule());
       // the byes cost no ESPN request: the season view is never asked for
       expect(w.sent.some((x) => x.url.includes("proTeamSchedules"))).toBe(false);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("createEspnProvider forwards it: the composition root's own call, over the real store, in fixture mode", async () => {
+    // the call src/services and the CLI stack make, plus the one wiring line
+    // (`proSchedule: store.datasets.proSchedule`): the factory must hand the port to the provider
+    tmp = tempDir("eff-bye-factory-");
+    const clock = fixedClock(NOW_ISO);
+    const storePath = path.join(tmp.dir, "store.sqlite");
+    const datasetDir = path.join(tmp.dir, "datasets");
+    const store = storeFactory.open({
+      path: storePath,
+      datasetDir,
+      backupDir: path.join(tmp.dir, "backups"),
+      clock,
+      migrate: true,
+    });
+    try {
+      await publishEspnDatasets({ storePath, datasetDir, clock });
+      store.reopenChangedDatasets();
+      const build = (wired: boolean) =>
+        createEspnProvider({
+          config: {
+            leagueId: LEAGUE_ID,
+            season: SEASON,
+            teamId: null,
+            espnReadHost: "lm-api-reads.fantasy.espn.com",
+            fixtureRecord: false,
+            fixtureDir: FIXTURES,
+          },
+          repos: store.repos,
+          credentials: null,
+          clock,
+          scoring: stubScoring,
+          ...(wired ? { proSchedule: store.datasets.proSchedule } : {}),
+        });
+      const ref = { platform: "espn" as const, league_id: LEAGUE_ID, season: SEASON };
+      const wired = build(true);
+      await wired.getLeague(ref); // the settings read first: one request per limiter second
+      clock.advance(1001);
+      const rostered = rosteredOf(await wired.getRosters(ref, 3));
+      expect(rostered.length).toBeGreaterThan(100);
+      expectByes(rostered, schedule());
+      // the same answer (cache hits on the same store) without the line: every bye is null
+      const unwired = rosteredOf(await build(false).getRosters(ref, 3));
+      expect(unwired.map((p) => p.ref.id)).toEqual(rostered.map((p) => p.ref.id));
+      expect(unwired.every((p) => p.bye_week === null)).toBe(true);
+      expect(store.repos.limiter.countSince("2026-10-06T00:00:00.000Z")).toBe(2);
     } finally {
       store.close();
     }
