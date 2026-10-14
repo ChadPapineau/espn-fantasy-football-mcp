@@ -1,18 +1,30 @@
 // prune.test.ts — `eff store prune` (plan 06 §1.3; plan 01 §5.5, §5.8; T-07): each rule (ESPN cache past
 // its longest finite hard limit, snapshots older than 30 days, the bounded points_cache LRU,
 // espn_requests past 48 h, dataset debris and unnamable files, backups beyond two versions / four
-// weeks) — and the never-pruned tables are untouched: same rows after, and the statement trace shows
-// no DELETE/UPDATE on any of them (property over random contents).
-import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+// weeks, the run directories a killed refresh left under <cache>/tmp) — and the never-pruned tables
+// are untouched: same rows after, and the statement trace shows no DELETE/UPDATE on any of them
+// (property over random contents).
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { constants as C, DatabaseSync } from "node:sqlite";
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runTempDir } from "../../src/config/paths.js";
 import {
   ESPN_CACHE_PRUNE_MS,
   POINTS_CACHE_MAX_ROWS,
   PRUNE_TARGETS,
   pruneStore,
+  RUN_TEMP_STALE_MS,
+  RUN_TEMP_WALK_MAX,
   SNAPSHOT_RETENTION_MS,
 } from "../../src/store/prune.js";
 import { publishJob } from "../../src/store/publisher.js";
@@ -184,6 +196,7 @@ describe("pruneStore", () => {
     for (const tname of NEVER_PRUNED_TABLES) expect(count(tname), tname).toBe(1);
     expect(report.files_removed).toEqual([]);
     expect(report.backups_removed).toEqual([]);
+    expect(report.temp_runs_removed).toEqual([]);
     expect(POINTS_CACHE_MAX_ROWS).toBeGreaterThan(1000);
   });
 
@@ -280,6 +293,156 @@ describe("pruneStore", () => {
     expect(report.backups_removed).toEqual(["store-2026-09-01.sqlite", "store.sqlite.bak-v1"]);
     // the published dataset is still served
     expect(s.datasets.injuries.reports(2026, 3, null).stamp?.file_version).toBe("v1");
+  });
+
+  // Stage C, store-prune-skips-tmp-runs: a refresh killed with SIGKILL (a launchd timeout, a reboot)
+  // leaves <cache>/tmp/<source>-XXXXXX with its partial downloads; prune never swept them, so only
+  // uninstall did. The store clock is NOW; mtimes are set relative to it.
+  describe("stale run directories under <cache>/tmp", () => {
+    const tmp = (): string => runTempDir(t.cache);
+    const at = (p: string, ms: number): void => {
+      utimesSync(p, ms / 1000, ms / 1000);
+    };
+    /** A run directory with one partial download, every entry last modified at `ms`. */
+    const runDir = (name: string, ms: number, bytes = 1024): string => {
+      const d = path.join(tmp(), name);
+      mkdirSync(d, { recursive: true, mode: 0o700 });
+      const f = path.join(d, "pbp_2026.parquet.part");
+      writeFileSync(f, Buffer.alloc(bytes), { mode: 0o600 });
+      at(f, ms);
+      at(d, ms);
+      return d;
+    };
+
+    beforeEach(() => {
+      mkdirSync(tmp(), { recursive: true, mode: 0o700 });
+    });
+
+    it("a 30-day-old killed run's folder goes (whole tree); a live run's stays", () => {
+      const dead = runDir("nflverse_pbp-a1B2c3", NOW - 30 * DAY, 1024 * 1024);
+      const live = runDir("nflverse_stats-Zz9Yy8", NOW - 60_000);
+      const report = pruneStore(s);
+      expect(report.temp_runs_removed).toEqual(["nflverse_pbp-a1B2c3"]);
+      expect(existsSync(dead)).toBe(false);
+      expect(existsSync(live)).toBe(true);
+      expect(readdirSync(tmp())).toEqual(["nflverse_stats-Zz9Yy8"]);
+    });
+
+    it("an old folder with ONE fresh entry deep inside is a live run: kept", () => {
+      const d = runDir("nflverse_pbp-a1B2c3", NOW - 30 * DAY);
+      const inner = path.join(d, "eff-pbp-Q1w2E3");
+      mkdirSync(inner, { mode: 0o700 });
+      const f = path.join(inner, "chunk.part");
+      writeFileSync(f, "x", { mode: 0o600 });
+      at(f, NOW - 5 * 60_000); // still downloading
+      at(inner, NOW - 30 * DAY);
+      at(d, NOW - 30 * DAY);
+      expect(pruneStore(s).temp_runs_removed).toEqual([]);
+      expect(existsSync(f)).toBe(true);
+    });
+
+    it("the bound: untouched for exactly RUN_TEMP_STALE_MS stays, one ms more goes; it is an option", () => {
+      runDir("espn_players-AAAAAA", NOW - RUN_TEMP_STALE_MS);
+      runDir("espn_players-BBBBBB", NOW - RUN_TEMP_STALE_MS - 1000);
+      runDir("backup-CCCCCC", NOW - 2 * 60 * 60_000);
+      expect(pruneStore(s).temp_runs_removed).toEqual(["espn_players-BBBBBB"]);
+      expect(pruneStore(s, { runTempMaxAgeMs: 60 * 60_000 }).temp_runs_removed).toEqual([
+        "backup-CCCCCC",
+        "espn_players-AAAAAA",
+      ]);
+      expect(() => pruneStore(s, { runTempMaxAgeMs: -1 })).toThrow(RangeError);
+    });
+
+    it("never touches what is not a private run directory of ours", () => {
+      const old = NOW - 90 * DAY;
+      const keep = (n: string): string => path.join(tmp(), n);
+      writeFileSync(keep("loose-AAAAAA"), "x", { mode: 0o600 }); // a file, not a run directory
+      at(keep("loose-AAAAAA"), old);
+      runDir("not a run dir", old); // wrong name shape
+      runDir("x-short", old); // a 5-char suffix is not mkdtemp's
+      const shared = runDir("shared_run-DDDDDD", old);
+      chmodSync(shared, 0o750); // group-readable: not mkdtemp's 0700
+      at(shared, old);
+      const target = path.join(t.root, "elsewhere");
+      mkdirSync(target, { mode: 0o700 });
+      writeFileSync(path.join(target, "precious"), "x", { mode: 0o600 });
+      symlinkSync(target, keep("linked_run-EEEEEE")); // a symlink: never followed or removed
+      expect(pruneStore(s).temp_runs_removed).toEqual([]);
+      expect(readdirSync(tmp()).sort()).toEqual(
+        [
+          "linked_run-EEEEEE",
+          "loose-AAAAAA",
+          "not a run dir",
+          "shared_run-DDDDDD",
+          "x-short",
+        ].sort(),
+      );
+      expect(existsSync(path.join(target, "precious"))).toBe(true);
+    });
+
+    it("a tree past the walk bound is kept (judged live), never half-removed", () => {
+      const d = runDir("nflverse_pbp-a1B2c3", NOW - 30 * DAY);
+      for (let i = 0; i <= RUN_TEMP_WALK_MAX; i++) {
+        const f = path.join(d, `f${String(i)}`);
+        writeFileSync(f, "", { mode: 0o600 });
+        at(f, NOW - 30 * DAY);
+      }
+      at(d, NOW - 30 * DAY);
+      expect(pruneStore(s).temp_runs_removed).toEqual([]);
+      expect(readdirSync(d).length).toBe(RUN_TEMP_WALK_MAX + 2);
+    });
+
+    it("a tmp dir that is not ours (group-writable, or a symlink) is never swept; absent is fine", () => {
+      runDir("nflverse_pbp-a1B2c3", NOW - 30 * DAY);
+      chmodSync(tmp(), 0o770);
+      expect(pruneStore(s).temp_runs_removed).toEqual([]);
+      chmodSync(tmp(), 0o700);
+      // an explicit runTempDir (here: a symlink to the real one) — refused, never followed
+      const link = path.join(t.root, "tmp-link");
+      symlinkSync(tmp(), link);
+      expect(pruneStore(s, { runTempDir: link }).temp_runs_removed).toEqual([]);
+      expect(pruneStore(s, { runTempDir: null }).temp_runs_removed).toEqual([]);
+      expect(pruneStore(s, { runTempDir: path.join(t.root, "absent") }).temp_runs_removed).toEqual(
+        [],
+      );
+      expect(() => pruneStore(s, { runTempDir: "relative/tmp" })).toThrow(RangeError);
+      // files: false leaves run directories alone too
+      expect(pruneStore(s, { files: false }).temp_runs_removed).toEqual([]);
+      expect(pruneStore(s).temp_runs_removed).toEqual(["nflverse_pbp-a1B2c3"]);
+    });
+
+    it("a store laid out outside the cache layout sweeps nothing by default", () => {
+      runDir("nflverse_pbp-a1B2c3", NOW - 30 * DAY);
+      const odd = openStore(t, { backupDir: path.join(t.root, "other-backups") });
+      try {
+        expect(pruneStore(odd).temp_runs_removed).toEqual([]);
+        expect(pruneStore(odd, { runTempDir: tmp() }).temp_runs_removed).toEqual([
+          "nflverse_pbp-a1B2c3",
+        ]);
+      } finally {
+        odd.close();
+      }
+    });
+
+    it("a stale tree it cannot fully remove is skipped, never fails the prune; the others still go", () => {
+      const stuck = runDir("nflverse_pbp-a1B2c3", NOW - 30 * DAY);
+      const ro = path.join(stuck, "eff-pbp-Q1w2E3");
+      mkdirSync(ro, { mode: 0o700 });
+      writeFileSync(path.join(ro, "chunk.part"), "x", { mode: 0o600 });
+      at(path.join(ro, "chunk.part"), NOW - 30 * DAY);
+      chmodSync(ro, 0o500); // its entries cannot be unlinked
+      at(ro, NOW - 30 * DAY);
+      at(stuck, NOW - 30 * DAY);
+      runDir("espn_players-AAAAAA", NOW - 30 * DAY);
+      try {
+        const report = pruneStore(s);
+        expect(report.temp_runs_removed).toEqual(["espn_players-AAAAAA"]);
+        expect(existsSync(path.join(ro, "chunk.part"))).toBe(true);
+        expect(report.rows.espn_cache).toBe(0); // the row prune still ran and reported
+      } finally {
+        chmodSync(ro, 0o700);
+      }
+    });
   });
 
   it("refuses bad options and a store it did not open", () => {
