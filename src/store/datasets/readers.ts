@@ -6,8 +6,9 @@
 // never an exception. A prior season's statement runs on the source's history file (PHASE_1_HISTORY_
 // TWINS: stats, injuries) when the current file does not hold it; the Phase-2 ports (depth charts, EP,
 // news, trending) and the usage extras `lines()` gains from the snap-count and pbp files are
-// readers-p2.ts. Ported from sibling @cf3b015, adapted (separate connections; ESPN pro schedule and
-// players).
+// readers-p2.ts. A row a mapping cannot place is skipped and counted: each read reports one warning
+// per code with its count (createWarningTally), never one per row. Ported from sibling @cf3b015,
+// adapted (separate connections; ESPN pro schedule and players).
 import { isNflTeam, type NflTeam, type WeatherSource } from "../../config/schema.js";
 import type {
   DatasetReaders,
@@ -124,7 +125,70 @@ function idList(v: readonly number[], what: string): number[] {
 export interface ReadersOptions {
   readonly connections: DatasetConnections;
   readonly weatherFirst: WeatherSource;
+  /** The store's warning sink: one call per code per read, `count` the rows it covers. */
+  readonly warn: (code: string, detail: { readonly count: number }) => void;
+}
+
+/** A per-read warning tally (createWarningTally). */
+export interface WarningTally {
+  /** Counts `code` inside a read; outside one it reaches the sink at once with count 1. */
   readonly warn: (code: string) => void;
+  /**
+   * `fn` as one read: every code counted while it runs — nested reads included — reaches the sink
+   * once, with its count, when the outermost read returns or throws.
+   */
+  readonly scoped: <A extends unknown[], R>(fn: (...args: A) => R) => (...args: A) => R;
+}
+
+/**
+ * The readers' warning tally: a mapping that skips a row counts it, and each read reports one line
+ * per code with the count — never one line per row (a full player-universe read skips hundreds of
+ * offensive-line and long-snapper rows; one P1 call wrote 835 warn lines into the client's MCP log —
+ * Stage C, store-dataset-row-skip-log-flood). Reads are synchronous (node:sqlite), so a depth
+ * counter delimits the outermost one. A throwing sink never breaks a read or loses the others.
+ */
+export function createWarningTally(
+  sink: (code: string, detail: { readonly count: number }) => void,
+): WarningTally {
+  let depth = 0;
+  const counts = new Map<string, number>();
+  const emit = (code: string, count: number): void => {
+    try {
+      sink(code, { count });
+    } catch {
+      // a throwing warning sink must never break a read
+    }
+  };
+  const flush = (): void => {
+    const all = [...counts];
+    counts.clear();
+    for (const [code, count] of all) emit(code, count);
+  };
+  return {
+    warn(code) {
+      if (depth === 0) emit(code, 1);
+      else counts.set(code, (counts.get(code) ?? 0) + 1);
+    },
+    scoped<A extends unknown[], R>(fn: (...args: A) => R) {
+      return (...args: A): R => {
+        depth++;
+        try {
+          return fn(...args);
+        } finally {
+          depth--;
+          if (depth === 0) flush();
+        }
+      };
+    },
+  };
+}
+
+/** `port` with every method run as one read of `tally` (same keys; non-function values kept). */
+function scopedPort<T extends object>(port: T, tally: WarningTally): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(port))
+    out[k] = typeof v === "function" ? tally.scoped(v as (...args: unknown[]) => unknown) : v;
+  return out as unknown as T;
 }
 
 /** The readers a store serves. */
@@ -141,7 +205,9 @@ const NEVER_LOADED = Object.freeze({
 }) as DatasetResult<never>;
 
 export function createReaders(o: ReadersOptions): StoreReaders {
-  const { connections, warn } = o;
+  const { connections } = o;
+  const tally = createWarningTally(o.warn);
+  const warn = tally.warn;
 
   /**
    * The connection to read `source` from for `season`: the current file when it holds the season (or
@@ -714,21 +780,28 @@ export function createReaders(o: ReadersOptions): StoreReaders {
     },
   };
 
+  // every port method is one read of the tally: its skipped rows reach the sink as one count per code
+  const read = <T extends object>(port: T): T => scopedPort(port, tally);
   const datasets: DatasetReaders = {
-    proSchedule,
-    nflGames,
-    injuries,
-    playerWeeks,
+    proSchedule: read(proSchedule),
+    nflGames: read(nflGames),
+    injuries: read(injuries),
+    playerWeeks: read(playerWeeks),
     // the Phase-2 ports (plan 10 §3.2): readers-p2.ts
-    depthCharts: phase2.depthCharts,
-    epWeekly: phase2.epWeekly,
-    weather,
-    news: phase2.news,
-    trending: phase2.trending,
-    pbp: phase2.pbp,
+    depthCharts: read(phase2.depthCharts),
+    epWeekly: read(phase2.epWeekly),
+    weather: read(weather),
+    news: read(phase2.news),
+    trending: read(phase2.trending),
+    pbp: read(phase2.pbp),
     // Phase 3 (plan 10 §3.3): the team-game volume v2-opportunity reads
-    teamWeek: phase2.teamWeek,
+    teamWeek: read(phase2.teamWeek),
   };
 
-  return { datasets, rosterWeekly, playerUniverse, nflPlayers };
+  return {
+    datasets,
+    rosterWeekly: read(rosterWeekly),
+    playerUniverse: read(playerUniverse),
+    nflPlayers: read(nflPlayers),
+  };
 }

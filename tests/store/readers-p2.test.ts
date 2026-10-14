@@ -40,7 +40,12 @@ beforeEach(() => {
   t = tempCache("eff-p2-");
   pub = openPublisher(t);
   warnings = [];
-  s = openStore(t, { onWarning: (c) => warnings.push(c) });
+  // one warning per code per read carries the count of rows it covers: expanded per row here
+  s = openStore(t, {
+    onWarning: (c, d) => {
+      for (let i = 0; i < (d?.count ?? 1); i++) warnings.push(c);
+    },
+  });
 });
 afterEach(() => {
   s.close();

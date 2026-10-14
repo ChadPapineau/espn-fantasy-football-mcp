@@ -594,6 +594,12 @@ export interface StoreRepositories {
 
 // --- the store -------------------------------------------------------------------------------------
 
+/** What a store warning covers (StoreOpenOptions.onWarning). */
+export interface StoreWarningDetail {
+  /** How many rows or events of this code the warning summarises (≥ 1). */
+  readonly count: number;
+}
+
 /** How to open the store. */
 export interface StoreOpenOptions {
   readonly path: string;
@@ -602,8 +608,13 @@ export interface StoreOpenOptions {
   readonly clock: Clock;
   /** Run pending migrations (under BEGIN IMMEDIATE, after a VACUUM INTO backup). */
   readonly migrate: boolean;
-  /** Receives fixed-vocabulary warning codes; the store itself never logs. */
-  readonly onWarning?: (code: string) => void;
+  /**
+   * Receives fixed-vocabulary warning codes; the store itself never logs. A dataset read reports
+   * each code once, when the read returns, with `detail.count` the rows or events it covers (one
+   * summary per code per read — never one call per skipped row; Stage C,
+   * store-dataset-row-skip-log-flood); a warning raised outside a read arrives with count 1.
+   */
+  readonly onWarning?: (code: string, detail?: StoreWarningDetail) => void;
   /** Which weather table `WeatherReader.forGames` consults first (EFF_WEATHER_SOURCE; default open-meteo). */
   readonly weatherSource?: WeatherSource;
   /**

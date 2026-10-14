@@ -52,6 +52,7 @@ import {
   type Store,
   type StoreOpenOptions,
   type StoreRepositories,
+  type StoreWarningDetail,
 } from "./types.js";
 
 /** Test/tooling hooks (not part of the StoreFactory contract). */
@@ -224,9 +225,9 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
     db.close();
     throw e;
   }
-  const warn = (code: string): void => {
+  const warn = (code: string, detail: StoreWarningDetail = { count: 1 }): void => {
     try {
-      opts.onWarning?.(code);
+      opts.onWarning?.(code, detail);
     } catch {
       // a throwing warning sink must never break a read
     }
