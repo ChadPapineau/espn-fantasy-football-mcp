@@ -79,6 +79,28 @@ export const NFL_REGULAR_SEASON = Object.freeze({
   eighteenWeeksSince: 2021,
 });
 
+/**
+ * Which games ESPN's rest-of-season total (split (1,0)) counts — its START, beside its end above
+ * (Stage C round 2; research 04 §B.1.1; the recorded fixtures). The start moves with the games, not
+ * with the scoring period: on the Tuesday before week 4 kicked off the total summed weeks 4–18
+ * (research 04, 272 of 299 players), while on the recorded leagues — captured after every week-4
+ * game was final (`statsOfficial`) with the scoring period still 4 — every healthy player's stat 210
+ * (`gp`) equals his games in weeks 5–18 (13; weeks 4–18 would be 14): a played game is out of the
+ * total. An injured player's `gp` is smaller (12, 11, 10, 3 in the recordings): ESPN counts only the
+ * games it projects him to play. A D/ST's total is a full-season figure: every recorded D/ST carries
+ * `gp` 17, and research 04's 27 misses are its sample's 27 D/STs. A game under way (kicked off, not
+ * yet official) is read as out of the total — the moment ESPN locks him; whether ESPN drops it at
+ * kickoff or once final is [U] (the evidence holds only the states before and after the games), and
+ * the kickoff never goes stale the way a cached `statsOfficial` can. ESPN's own count, when the
+ * provider carries it, removes the question.
+ */
+export const ESPN_ROS = Object.freeze({
+  /** ESPN position ids whose (1,0) total spans the whole season (D/ST). */
+  fullSeasonPositionIds: Object.freeze<number[]>([16]),
+  /** The largest believable stat-210 count (an 18-week season holds 17 games per team). */
+  maxGames: 20,
+});
+
 /** The trailing nflverse window that shapes the distribution (sibling research 05 §1 step 2). */
 export const TRAILING = Object.freeze({
   /** Most games kept in the window. */

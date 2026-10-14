@@ -47,6 +47,12 @@ export {
   pActiveOf,
   positionCv,
   projectPlayers,
+  rosGamesOf,
+  rosMissed,
+  rosShare,
+  rosWeeksOf,
+  rosWeekValue,
+  rosWindow,
   targetOf,
   type ImpliedTotal,
   type ProjectedPlayer,
@@ -55,6 +61,9 @@ export {
   type ProjectionOutcome,
   type ProjectionRequest,
   type ProjectionTarget,
+  type RosWeek,
+  type RosWindow,
+  type RosWindowBasis,
   type TrailingLine,
 } from "./projection.js";
 export {
@@ -95,12 +104,14 @@ export {
 export {
   analyzeWaivers,
   roleHolds,
+  rosShareOptsOf,
   weeklyValues,
   type WaiverCandidateInput,
   type WaiverOutcome,
   type WaiverPlayer,
   type WaiverRequest,
   type WaiverRival,
+  type WeeklyValuesOpts,
 } from "./waivers.js";
 export {
   dstExpectation,

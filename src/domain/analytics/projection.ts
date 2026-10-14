@@ -10,7 +10,10 @@
 // takes the volume × efficiency simulation's distribution (playerSim.ts) around the same ESPN mean.
 // Stage C: ESPN's rest-of-season total runs through the NFL season's last week (18), past the
 // league's final scoring period, so it is shared over the player's games through that week and only
-// the league's weeks are kept (espnRosLastWeek; research 04 §B.1.1).
+// the league's weeks are kept (espnRosLastWeek; research 04 §B.1.1). Round 2: its START moves with
+// the games — a game already under way or played is out of the total (the recorded post-game state),
+// ESPN's own game count (stat 210) wins when the provider carries it, and a D/ST's total spans the
+// whole season (rosWindow; constants.ts ESPN_ROS).
 import type { Clock, Rng } from "../clock.js";
 import { GAME_DAY_WINDOW_MS } from "./types.js";
 import {
@@ -20,7 +23,14 @@ import {
   scheduledWeeks,
   teamGame,
 } from "../league/schedule.js";
-import type { BareText, InjuryStatus, PlatformPlayer, ProSchedule, Week } from "../league/types.js";
+import type {
+  BareText,
+  InjuryStatus,
+  PlatformPlayer,
+  ProGame,
+  ProSchedule,
+  Week,
+} from "../league/types.js";
 import { score as engineScore } from "../scoring/engine.js";
 import { positionClassOf } from "../scoring/stat_map.js";
 import {
@@ -32,6 +42,7 @@ import {
 } from "../scoring/types.js";
 import {
   DEFAULT_CV,
+  ESPN_ROS,
   LIMITS,
   MODEL_VERSION,
   NFL_REGULAR_SEASON,
@@ -93,17 +104,27 @@ export interface ProjectionTarget {
   /** ESPN's weekly projection for the first target week under this league's S (split (1,1)). */
   readonly espn_week: number | null;
   /**
-   * ESPN's rest-of-season projection (split (1,0)): the first target week through the NFL regular
-   * season's last week (18), NOT the league's final scoring period — see espnRosLastWeek.
+   * ESPN's rest-of-season projection (split (1,0)): the player's games not yet played through the NFL
+   * regular season's last week (18, NOT the league's final scoring period — espnRosLastWeek); a D/ST's
+   * is a full-season figure (rosWindow).
    */
   readonly espn_ros: number | null;
+  /**
+   * ESPN's own count of the games in `espn_ros` (stat 210 of the split), when the provider carries
+   * it: the total covers his last that-many games through week 18 (rosWindow). Absent/null → the
+   * pro schedule's kickoffs at the clock decide.
+   */
+  readonly espn_ros_games?: number | null;
   /** ESPN weekly projections for further weeks, keyed by week, when the tool has them. */
   readonly espn_by_week?: Readonly<Record<string, number>>;
   /** Trailing lines; only `season`'s weeks before the first target week and the prior season count. */
   readonly trailing: readonly TrailingLine[];
 }
 
-/** A target from a PlatformPlayer (the provider's normalised player) plus the crosswalk's gsis id. */
+/**
+ * A target from a PlatformPlayer (the provider's normalised player) plus the crosswalk's gsis id.
+ * `projection_ros_games_espn` (stat 210 of the ROS split) is carried when the provider has it.
+ */
 export function targetOf(
   p: Pick<
     PlatformPlayer,
@@ -115,10 +136,11 @@ export function targetOf(
     | "injury_status"
     | "projection_week_espn"
     | "projection_ros_espn"
-  >,
+  > & { readonly projection_ros_games_espn?: number | null },
   gsisId: string | null,
   trailing: readonly TrailingLine[] = [],
 ): ProjectionTarget {
+  const games = p.projection_ros_games_espn;
   return {
     player_id: p.ref.id,
     gsis_id: gsisId,
@@ -129,6 +151,7 @@ export function targetOf(
     injury_status: p.injury_status,
     espn_week: p.projection_week_espn,
     espn_ros: p.projection_ros_espn,
+    ...(games === undefined ? {} : { espn_ros_games: games }),
     trailing,
   };
 }
@@ -348,6 +371,150 @@ export function espnRosLastWeek(schedule: Pick<ProSchedule, "games">, season: nu
   return Math.min(LIMITS.maxWeeks, last);
 }
 
+/** One NFL week of a player's season as ESPN's rest-of-season total sees it (rosWindow's input). */
+export interface RosWeek {
+  readonly week: Week;
+  /** He has a game: false on a bye or without an NFL team; a week the schedule lacks reads true. */
+  readonly playing: boolean;
+  /** His game has kicked off or is final at the clock (false: not yet, or unknown). */
+  readonly started: boolean;
+  /** His game's kickoff is known and still ahead of the clock. */
+  readonly ahead: boolean;
+}
+
+/** How a player's ROS window was read: ESPN's own game count, a D/ST's season, or the clock. */
+export type RosWindowBasis = "espn_games" | "full_season" | "remaining_games";
+
+/** The weeks ESPN's rest-of-season total counts for one player. */
+export interface RosWindow {
+  readonly covered: ReadonlySet<Week>;
+  readonly basis: RosWindowBasis;
+}
+
+/** A week's ROS state from his game (null: none in the week) at `nowMs` (rosWeeksOf, E1). */
+function rosStateOf(
+  g: ProGame | null,
+  scheduled: boolean,
+  noTeam: boolean,
+  nowMs: number,
+): Omit<RosWeek, "week"> {
+  const k = g === null ? null : kickoffMsOf(g);
+  const final = g?.stats_official === true;
+  return {
+    playing: !noTeam && (g !== null || !scheduled),
+    started: final || (k !== null && k <= nowMs),
+    ahead: !final && k !== null && k > nowMs,
+  };
+}
+
+/**
+ * A player's weeks 1..`last` from the pro schedule at `nowMs` — what rosWindow reads (exported for
+ * the tools: weeklyValues's `ros_weeks`). Without an NFL team (null or 0) no week is playing.
+ */
+export function rosWeeksOf(
+  schedule: Pick<ProSchedule, "games">,
+  proTeamId: number | null,
+  last: Week,
+  nowMs: number,
+): RosWeek[] {
+  const teamId = proTeamId === null || proTeamId === 0 ? null : proTeamId;
+  const out: RosWeek[] = [];
+  const end = Math.min(LIMITS.maxWeeks, last);
+  for (let w = 1; w <= end; w++) {
+    const wg = gamesOfWeek(schedule, w);
+    const g = teamId === null ? null : teamGame(wg, teamId);
+    out.push({ week: w, ...rosStateOf(g, wg.length > 0, teamId === null, nowMs) });
+  }
+  return out;
+}
+
+/** ESPN's stat-210 game count when it is believable for this total (else null: the clock decides). */
+export function rosGamesOf(games: number | null | undefined, total: number | null): number | null {
+  if (games === undefined || games === null || !Number.isInteger(games)) return null;
+  if (games < 0 || games > ESPN_ROS.maxGames) return null;
+  // no game cannot carry points: a positive total with a 0 count is contradictory, never trusted
+  if (games === 0 && total !== null && total > 0) return null;
+  return games;
+}
+
+/**
+ * The weeks ESPN's rest-of-season total (split (1,0)) counts for one player, from his season (weeks
+ * 1..the NFL season's last week, ascending) — constants.ts ESPN_ROS:
+ * - ESPN's own game count (stat 210, rosGamesOf) when the provider carries it: his LAST `games`
+ *   games through the season's last week; an earlier game is out — played, or one ESPN projects him
+ *   to miss (an injury: read as his next games, the only placement a count allows);
+ * - else a D/ST's total spans the whole season (every playing week);
+ * - else his games not yet started: from the as-of week `from` on, plus an earlier week whose
+ *   kickoff is known to be ahead (asked about next week while this one is unplayed). A week with no
+ *   known kickoff counts from `from` on: an unknown schedule never moves the start.
+ */
+export function rosWindow(
+  weeks: readonly RosWeek[],
+  o: {
+    readonly from: Week;
+    readonly games?: number | null;
+    readonly full_season?: boolean;
+  },
+): RosWindow {
+  const playing = weeks.filter((x) => x.playing);
+  const g = o.games;
+  if (g !== undefined && g !== null && Number.isInteger(g) && g >= 0 && g <= ESPN_ROS.maxGames)
+    return {
+      covered: new Set(playing.slice(Math.max(0, playing.length - g)).map((x) => x.week)),
+      basis: "espn_games",
+    };
+  if (o.full_season === true)
+    return { covered: new Set(playing.map((x) => x.week)), basis: "full_season" };
+  return {
+    covered: new Set(
+      playing.filter((x) => (x.week >= o.from ? !x.started : x.ahead)).map((x) => x.week),
+    ),
+    basis: "remaining_games",
+  };
+}
+
+/**
+ * ESPN's per-game share of its rest-of-season total: what the total leaves after the weekly values
+ * given for weeks it covers (the as-of week's projection, any further weekly projection), shared
+ * evenly over its other covered weeks — never negative; null without a total or a week to share it
+ * over. A weekly value for a week the total no longer counts (a played game) is never subtracted.
+ */
+export function rosShare(
+  total: number | null,
+  covered: ReadonlySet<Week>,
+  explicit: ReadonlyMap<Week, number>,
+): number | null {
+  if (total === null || !Number.isFinite(total)) return null;
+  let known = 0;
+  let open = 0;
+  for (const w of covered) {
+    const v = explicit.get(w);
+    if (v === undefined) open += 1;
+    else known += v;
+  }
+  return open > 0 ? Math.max(0, total - known) / open : null;
+}
+
+/** ESPN's own game count leaves out this playing week's game though it is still to come. */
+export function rosMissed(window: RosWindow, week: RosWeek): boolean {
+  return (
+    window.basis === "espn_games" && week.playing && !week.started && !window.covered.has(week.week)
+  );
+}
+
+/**
+ * ESPN's number for one playing week without a weekly value of its own: 0 where ESPN's own count
+ * leaves out a game still to come (projected missed — rosMissed); else the share — the per-game value
+ * where the total covers the week, and the neutral estimate for a game already played.
+ */
+export function rosWeekValue(
+  window: RosWindow,
+  week: RosWeek,
+  share: number | null,
+): number | null {
+  return rosMissed(window, week) ? 0 : share;
+}
+
 /** The weeks a horizon covers (`season` = the rest of the season, decision recorded). */
 function horizonWeeks(req: ProjectionRequest): Week[] {
   if (req.horizon === "week") return [req.week];
@@ -428,14 +595,15 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
   for (const r of req.implied_totals ?? [])
     implied.set(`${String(r.week)}:${String(r.pro_team_id)}`, r.implied);
 
-  // the weeks ESPN's ROS total covers: from the first target week through the NFL season's last
-  // week (18), which runs past the league's final scoring period (17 in a 14 + 3 league) — the total
-  // is shared over the player's games in ALL of them and only the horizon's weeks are kept, so
-  // week 18's game never leaks into weeks ≤ 17 (Stage C; research 04 §B.1.1)
+  // the season ESPN's ROS total is read against: weeks 1 through the NFL season's last week (18),
+  // which runs past the league's final scoring period (17 in a 14 + 3 league) — the total is shared
+  // over the games it still counts (rosWindow: ESPN's own count, a D/ST's season, else the games
+  // not yet started) and only the horizon's weeks are kept, so week 18's game never leaks into weeks
+  // ≤ 17 and a played game's points never leak into the weeks left (Stage C; research 04 §B.1.1)
   const shareEnd = Math.max(req.week, req.final_week, espnRosLastWeek(req.schedule, req.season));
-  const allWeeks: Week[] = [];
-  for (let w = req.week; w <= shareEnd; w++) allWeeks.push(w);
-  const gamesByWeek = new Map(allWeeks.map((w) => [w, gamesOfWeek(req.schedule, w)]));
+  const seasonWeeks: Week[] = [];
+  for (let w = 1; w <= shareEnd; w++) seasonWeeks.push(w);
+  const gamesByWeek = new Map(seasonWeeks.map((w) => [w, gamesOfWeek(req.schedule, w)]));
   const tasks: Task[] = [];
   const planOf = (t: ProjectionTarget, pi: number) => {
     const assumptions: Assumption[] = [];
@@ -447,30 +615,32 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
       cls === "O" ? Math.min(0, eventPoints(settings, TURNOVER_STATS.int, t.position_id)) : 0;
     const penFum =
       cls === "O" ? Math.min(0, eventPoints(settings, TURNOVER_STATS.fum, t.position_id)) : 0;
-    const noTeam = t.pro_team_id === null || t.pro_team_id === 0;
+    const team = t.pro_team_id === null || t.pro_team_id === 0 ? null : t.pro_team_id;
+    const noTeam = team === null;
     // per-week ESPN means: the weekly projection, then any further weekly values, then the ROS total
-    // shared evenly over the remaining weeks with a game through the NFL season's last week (past
-    // the league's final week, whatever the horizon)
-    const gameOf = allWeeks.map((w) => {
-      const wg = gamesByWeek.get(w) ?? [];
-      const g = noTeam ? null : teamGame(wg, t.pro_team_id);
-      return { w, g, scheduled: wg.length > 0 };
-    });
-    const playing = gameOf.map((x) => !noTeam && (x.g !== null || !x.scheduled));
-    const explicit = allWeeks.map((w, i) => {
-      if (i === 0 && t.espn_week !== null) return t.espn_week;
+    // shared evenly over the games it still counts through the NFL season's last week (past the
+    // league's final week, whatever the horizon) — rosWindow
+    const gameOf = new Map(
+      seasonWeeks.map((w) => {
+        const wg = gamesByWeek.get(w) ?? [];
+        const g = team === null ? null : teamGame(wg, team);
+        return [w, { week: w, g, ...rosStateOf(g, wg.length > 0, noTeam, nowMs) }] as const;
+      }),
+    );
+    // the weekly values given: ESPN's projection for the first target week, then any further week's
+    const explicit = new Map<Week, number>();
+    if (t.espn_week !== null) explicit.set(req.week, t.espn_week);
+    for (const w of seasonWeeks) {
       const v = t.espn_by_week?.[String(w)];
-      return v !== undefined && Number.isFinite(v) ? v : null;
+      if (!explicit.has(w) && v !== undefined && Number.isFinite(v)) explicit.set(w, v);
+    }
+    const window = rosWindow([...gameOf.values()], {
+      from: req.week,
+      games: rosGamesOf(t.espn_ros_games, t.espn_ros),
+      full_season: ESPN_ROS.fullSeasonPositionIds.includes(t.position_id),
     });
-    const shareWeeks = allWeeks.filter(
-      (_, i) => playing[i] === true && explicit[i] === null,
-    ).length;
-    const explicitSum = explicit.reduce<number>((acc, v) => acc + (v ?? 0), 0);
-    const perWeekRos =
-      t.espn_ros !== null && shareWeeks > 0
-        ? Math.max(0, t.espn_ros - explicitSum) / shareWeeks
-        : null;
-    const espnMissing = explicit.every((v) => v === null) && t.espn_ros === null;
+    const perWeekRos = rosShare(t.espn_ros, window.covered, explicit);
+    const espnMissing = explicit.size === 0 && t.espn_ros === null;
     if (espnMissing)
       assumptions.push(
         A(
@@ -489,6 +659,18 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
       );
     if (noTeam)
       assumptions.push(A("the player has no NFL team: no game, 0 points", "an NFL team signs him"));
+    // weeks of the horizon ESPN's own game count leaves out though his game is still to come
+    const missed = weeks.filter((w) => {
+      const x = gameOf.get(w);
+      return x !== undefined && !explicit.has(w) && rosMissed(window, x);
+    });
+    if (missed.length > 0 && t.espn_ros !== null)
+      assumptions.push(
+        A(
+          `ESPN's rest-of-season total counts ${String(window.covered.size)} of his games: week${missed.length === 1 ? "" : "s"} ${missed.map(String).join(", ")} read as missed (0)`,
+          "ESPN's game count or his status changes",
+        ),
+      );
     const weeksOut: {
       w: Week;
       espn: number | null;
@@ -496,12 +678,15 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
       task: Task | null;
       info: Omit<ProjectedWeek, "dist">;
     }[] = [];
-    gameOf.slice(0, weeks.length).forEach(({ w, g }, wi) => {
+    weeks.forEach((w, wi) => {
+      const x = gameOf.get(w);
+      const g = x?.g ?? null;
       const kickoff = g === null ? null : kickoffMsOf(g);
-      const oppId = g === null || noTeam ? null : opponentOf(g, t.pro_team_id);
+      const oppId = g === null || team === null ? null : opponentOf(g, team);
       const impl = noTeam ? null : (implied.get(`${String(w)}:${String(t.pro_team_id)}`) ?? null);
-      const isPlaying = playing[wi] === true;
-      const espn = !isPlaying ? null : (explicit[wi] ?? perWeekRos);
+      const isPlaying = x?.playing === true;
+      const espn =
+        x?.playing === true ? (explicit.get(w) ?? rosWeekValue(window, x, perWeekRos)) : null;
       const avail =
         wi === 0 ? pActiveOf(t.injury_status, kickoff, nowMs) : { p: 1, basis: "none" as const };
       const mean = !isPlaying ? 0 : (espn ?? (espnMissing ? (tr.own ?? 0) : 0));
@@ -582,6 +767,7 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
     });
     return { t, tr, assumptions, weeksOut, espnMissing };
   };
+  // (every horizon week lies inside the season read above: shareEnd ≥ the horizon's last week)
   // the per-player plans (trailing lines scored, weekly means, tasks) are built cooperatively too —
   // one target per step, in order, so the tasks and their streams are exactly as before — keeping a
   // 60-target call's set-up from running as one long macrotask (plan 10 A16a's 50 ms stall bound)

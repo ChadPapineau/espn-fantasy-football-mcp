@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeWaivers,
   roleHolds,
+  rosShareOptsOf,
   weeklyValues,
   type WaiverCandidateInput,
   type WaiverPlayer,
@@ -18,6 +19,7 @@ import {
 } from "../../../src/domain/analytics/waivers.js";
 import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
 import { isValidClearsToFa } from "../../../src/domain/analytics/types.js";
+import { TEXT_CAPS } from "../../../src/domain/league/types.js";
 import {
   bare,
   clockAndRng,
@@ -470,21 +472,134 @@ describe("Stage C: claim timing (the run, not the call, decides locks and the cl
     expect(out.data.rec.assumptions.some((a) => a.text.includes("first plays week 6"))).toBe(true);
   });
 
-  it("without a pro schedule, a locked roster reads the week as in progress (said): the same claim, the same drop", async () => {
+  it("without a pro schedule, a locked roster reads the week as in progress (said): valued from week 6, and a player locked now is never the drop — the better locked drop is said", async () => {
+    // Stage C round 2 (the verifier's rule): unplaced, the run may come before this week's games
+    // end, when a player locked now is still locked — so the call's lock binds the drop, and the
+    // drop the claim would make once the period has rolled over is said with its surplus
     const sched = await one(
       at(SUNDAY, { mine: sunday(), candidates: [cand(101, 9)], schedule }),
       101,
     );
     const none = await one(at(SUNDAY, { mine: sunday(), candidates: [cand(101, 9)] }), 101);
-    expect(none.x).toEqual(sched.x);
     expect(none.data.W).toBe(11);
+    expect(none.x?.conditional_drop?.player_id).toBe(11); // the only player not locked now
+    for (const x of none.data.candidates)
+      expect(
+        sunday().find((m) => m.player_id === x.conditional_drop?.player_id)?.locked ?? false,
+      ).toBe(false);
     expect(
       none.data.rec.assumptions.some(
         (a) => a.text.includes("no pro schedule") && a.text.includes("week 6"),
       ),
     ).toBe(true);
+    // the scheduled answer (run Wednesday, after the games: drop 14) is the one said
+    expect(sched.x?.conditional_drop?.player_id).toBe(14);
+    const said = none.data.rec.assumptions.find((a) => a.text.includes("never a claim's drop"));
+    expect(said?.text).toContain(`101 dropping 14, s = ${String(sched.x?.s)}`);
+    // the week-5-only candidate gets nothing from week 5 (in progress): a pass whatever the drop —
+    // here the forced drop of WR 11 makes s negative (with any drop allowed it was 0)
     const spiked = await one(at(SUNDAY, { mine: sunday(), candidates: [spike(102)] }), 102);
-    expect(spiked.x).toMatchObject({ s: 0, verdict: "pass" });
+    expect(spiked.x?.verdict).toBe("pass");
+    expect(spiked.x?.value.mean).toBe(0);
+    expect(spiked.x?.s ?? 1).toBeLessThanOrEqual(0);
+  });
+
+  it("Stage C round 2: every droppable player locked (Monday night) — the claim can only process after the rollover, so any player may be its drop (said): the scheduled answer", async () => {
+    // without this, "never a locked drop" left no drop at all at the end of the week (every claim a
+    // pass) — the recorded post-game state is this one
+    const monday = "2026-10-06T02:00:00.000Z"; // after Monday night's kickoff
+    const all = sunday().map((x) => ({ ...x, locked: true }));
+    const none = await one(at(monday, { mine: all, candidates: [cand(101, 9)] }), 101);
+    const sched = await one(at(monday, { mine: all, candidates: [cand(101, 9)], schedule }), 101);
+    expect(sched.x?.conditional_drop?.player_id).toBe(14);
+    expect(none.x).toEqual(sched.x);
+    expect(
+      none.data.rec.assumptions.some((a) =>
+        a.text.startsWith("every droppable player of mine is locked now"),
+      ),
+    ).toBe(true);
+    expect(none.data.rec.assumptions.some((a) => a.text.includes("never a claim's drop"))).toBe(
+      false,
+    );
+  });
+
+  it("Stage C round 2: the mid-week run without a schedule never names the locked Thursday QB as the drop (the verifier's case)", async () => {
+    // regression: unplaced, a locked roster read "the claim runs after the week" and allowed every
+    // drop — both candidates named my locked Thursday QB (worth 0), whom ESPN cannot drop before
+    // the period rolls over (the Friday 03:00 ET run is inside it)
+    const thu = "2026-10-01T03:00:00.000Z";
+    const run = "2026-10-02T07:00:00.000Z";
+    const mk = (id: number) =>
+      cand(id, 0, { weekly: W5.map((w) => (w === 5 ? 25 : 0)), waiver_process_date: run });
+    const roster = unlocked(sunday()).map((x) =>
+      x.player_id === 1 ? { ...x, locked: true, weekly: W5.map(() => 0) } : x,
+    );
+    const out = await analyzeWaivers(at(thu, { mine: roster, candidates: [mk(96), mk(100)] }));
+    for (const x of out.data.candidates) {
+      expect(x.conditional_drop?.player_id).not.toBe(1);
+      expect(roster.find((m) => m.player_id === x.conditional_drop?.player_id)?.locked).toBe(false);
+    }
+    // the same call with the schedule: the drop is player 14 there too, and the Sunday player's
+    // claim reaches week 5 (the schedule places the run before his game)
+    const sched = await analyzeWaivers(
+      at(thu, { mine: roster, candidates: [mk(96), mk(100)], schedule }),
+    );
+    expect(byId(sched.data, 100)?.conditional_drop?.player_id).toBe(14);
+    expect(byId(sched.data, 100)?.s).toBeGreaterThan(0);
+  });
+
+  it("Stage C round 2: without a schedule and with nothing locked the reading is said (symptom 2's silent credit)", async () => {
+    // the verifier's case (a): Sunday morning, none of my players kicked off yet, the claim runs
+    // Wednesday — without the schedule this week is read as not started, and now that is said
+    const out = await one(
+      at("2026-10-04T14:00:00.000Z", { mine: unlocked(sunday()), candidates: [spike(102)] }),
+      102,
+    );
+    expect(
+      out.data.rec.assumptions.some(
+        (a) => a.text.includes("no pro schedule") && a.text.includes("read as not started"),
+      ),
+    ).toBe(true);
+    // with the schedule the run is placed after the week: the spike is unreachable — pass, s 0
+    const sched = await one(
+      at("2026-10-04T14:00:00.000Z", {
+        mine: unlocked(sunday()),
+        candidates: [spike(102)],
+        schedule,
+      }),
+      102,
+    );
+    expect(sched.x).toMatchObject({ s: 0, verdict: "pass" });
+    expect(sched.data.rec.assumptions.some((a) => a.text.includes("read as not started"))).toBe(
+      false,
+    );
+  });
+
+  it("Stage C round 2: a candidate whose own waiver time is on the other side of the week's games than the next run is valued at his time — said", async () => {
+    // Friday call of week 5; the next run is after the week (Wednesday), but one claim clears at its
+    // own time Saturday 07:00Z — before Sunday's games: his claim reaches week 5
+    const fri = "2026-10-02T12:00:00.000Z";
+    const own = "2026-10-03T07:00:00.000Z";
+    const rules = referenceRules({
+      next_ms: Date.UTC(2026, 9, 7, 7, 0),
+      last_ms: Date.UTC(2026, 8, 30, 7, 0),
+    });
+    const out = await analyzeWaivers(
+      at(fri, {
+        rules,
+        mine: unlocked(sunday()),
+        candidates: [cand(100, 9, { waiver_process_date: own }), cand(101, 9)],
+        schedule,
+      }),
+    );
+    const early = byId(out.data, 100);
+    const late = byId(out.data, 101);
+    expect(early?.s ?? 0).toBeGreaterThan(late?.s ?? 0); // week 5 counted for his claim only
+    expect(
+      out.data.rec.assumptions.some(
+        (a) => a.text.includes("1 candidate clears at his own waiver time") && a.text.includes("W"),
+      ),
+    ).toBe(true);
   });
 
   it("before the week (run Wednesday, before Thursday night): the claim reaches week 5 — W 12, the spike counts", async () => {
@@ -523,6 +638,32 @@ describe("Stage C: claim timing (the run, not the call, decides locks and the cl
     expect(thursdayGuy?.s).toBe(0);
     expect(sundayGuy?.s).toBeGreaterThan(0);
     for (const x of out.data.candidates) expect(x.conditional_drop?.player_id).not.toBe(1);
+  });
+
+  it("Stage C round 2: every timing statement fits the Rec's text cap (the tool's schema refuses a longer one)", async () => {
+    // a found defect: lines over TEXT_CAPS.rec_log_text made the tool answer INTERNAL
+    const many = Array.from({ length: 12 }, (_, i) => cand(200 + i, 30 + i * 9));
+    const runs = [
+      at(SUNDAY, { mine: sunday(), candidates: many }),
+      at(SUNDAY, { mine: sunday(), candidates: many, schedule }),
+      at("2026-10-04T14:00:00.000Z", { mine: unlocked(sunday()), candidates: many }),
+      at("2026-10-02T12:00:00.000Z", {
+        mine: unlocked(sunday()),
+        candidates: [cand(100, 9, { waiver_process_date: "2026-10-03T07:00:00.000Z" }), ...many],
+        schedule,
+      }),
+      at(SUNDAY, { rules: referenceRules({ next_ms: null }), mine: sunday(), candidates: many }),
+    ];
+    for (const r of runs) {
+      const out = await analyzeWaivers(r);
+      expect(out.data.rec.assumptions.length).toBeLessThanOrEqual(20);
+      for (const a of out.data.rec.assumptions) {
+        expect(a.text.length, a.text).toBeLessThanOrEqual(TEXT_CAPS.rec_log_text);
+        expect(a.revisit_trigger.length, a.revisit_trigger).toBeLessThanOrEqual(
+          TEXT_CAPS.rec_log_text,
+        );
+      }
+    }
   });
 
   it("a FREEAGENT add is made now: its drop is never a player whose game has started", async () => {
@@ -609,6 +750,50 @@ describe("helpers and bounds", () => {
       10,
       12,
     ]);
+  });
+
+  it("Stage C round 2: with the schedule at the clock, a played as-of week keeps its projection and is never subtracted; ESPN's own count and a D/ST's season", () => {
+    // weeks 5–18, bye 9; the clock after week 5's games: ESPN's 15 × 12 is his 12 games in 6–18
+    const sched = proSchedule(
+      2026,
+      Array.from({ length: 18 }, (_, i) => i + 1),
+      { byes: { "9": [1, 2] } },
+    );
+    const after = Date.parse("2026-10-06T12:00:00.000Z");
+    const before = Date.parse("2026-10-01T12:00:00.000Z");
+    const w = Array.from({ length: 13 }, (_, i) => 5 + i); // the league's weeks 5–17
+    const optsAt = (now: number, over: Partial<Parameters<typeof rosShareOptsOf>[0]> = {}) =>
+      rosShareOptsOf({ pro_team_id: 1, position_id: 3, ...over }, sched, 2026, now);
+    // regression: before round 2 the total less week 5's projection was shared — (180 − 15.9) ÷ 12
+    const post = weeklyValues(w, 15.9, 15 * 12, 9, optsAt(after));
+    expect(post[0]).toBe(15.9);
+    post.slice(1).forEach((v, i) => {
+      expect(v).toBeCloseTo(w[i + 1] === 9 ? 0 : 15, 9);
+    });
+    // before the week's games the same call subtracts it: ESPN's 15 × 13 holds week 5
+    const pre = weeklyValues(w, 15, 15 * 13, 9, optsAt(before));
+    pre.forEach((v, i) => {
+      expect(v).toBeCloseTo(w[i] === 9 ? 0 : 15, 9);
+    });
+    // without the schedule the reading before the games stands (the default, unchanged)
+    expect(weeklyValues(w, 15, 15 * 13, 9)).toEqual(pre.map((v) => (v === 0 ? 0 : 15)));
+    // ESPN's count: 10 of his 12 games left — weeks 6, 7 missed, 16 a game after
+    const hurt = weeklyValues(w, 0, 16 * 10, 9, {
+      ...optsAt(after, { projection_ros_games_espn: 10 }),
+    });
+    expect(hurt.slice(0, 3)).toEqual([0, 0, 0]);
+    hurt.slice(3).forEach((v, i) => {
+      expect(v).toBeCloseTo(w[i + 3] === 9 ? 0 : 16, 9);
+    });
+    // a D/ST's total spans its season: (102 − 6) over its other 16 games
+    const dst = weeklyValues(w, 6, 102, 9, optsAt(after, { position_id: 16 }));
+    dst.forEach((v, i) => {
+      expect(v).toBeCloseTo(w[i] === 9 ? 0 : 6, 9);
+    });
+    // without an NFL team no week plays
+    expect(
+      weeklyValues(w, 6, 60, null, optsAt(after, { pro_team_id: 0 })).every((v) => v === 0),
+    ).toBe(true);
   });
 
   it("property: per-game value × games through week 18 + ESPN's week = ESPN's ROS total", () => {
