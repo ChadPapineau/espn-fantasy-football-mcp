@@ -3,12 +3,16 @@
 // private copy, adversarially (hostile strings, unicode, boundaries); the identifier rules never
 // echo what they matched.
 import { randomBytes } from "node:crypto";
-import { rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import path from "node:path";
 import fc from "fast-check";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+  CLIENT_LISTING_VERSION,
   DESCRIPTION_MAX,
   GAME_DAY_PROMPTS,
+  LISTING_MAX,
+  LISTING_SEPARATOR,
   SKILLS_LISTING_MAX,
   bodyRecordKinds,
   checkArgType,
@@ -17,10 +21,13 @@ import {
   historyProblems,
   identifierFindings,
   jaccard,
+  listingNote,
+  listingText,
   main,
   phrases,
   recKindOf,
   routeScore,
+  skillsListing,
   timeReference,
   tokenize,
   toolRefs,
@@ -278,6 +285,189 @@ describe("frontmatter (plan 09 §2, §5.1 item 1)", () => {
         t.read("skills/retro/SKILL.md").replace("name: retro", `name: zz-${n}`),
       );
     expect(errorsOf(t)).toMatch(new RegExp(`ceiling ${String(SKILLS_LISTING_MAX)}`));
+  });
+});
+
+describe("the Skills listing as Claude Code sends it (Stage C finding skills-listing-budget-undercounted)", () => {
+  interface Listed {
+    name: string;
+    description: string;
+    whenToUse?: string | undefined;
+    userInvoked?: boolean | undefined;
+  }
+  /**
+   * Claude Code 2.1.238's own listing code, transcribed from its shipped CLI: a Skill's text is
+   * `description - when_to_use` (the description alone without one), cut at 1 536 UTF-16 units with
+   * an ellipsis; each line is `- <name>: <text>`, where a plugin Skill's name is `<plugin>:<skill>`;
+   * a disable-model-invocation Skill is filtered out before the listing is built.
+   */
+  const client = (plugin: string, skills: readonly Listed[]): string =>
+    skills
+      .filter((s) => s.userInvoked !== true)
+      .map((s) => {
+        const t = s.whenToUse ? `${s.description} - ${s.whenToUse}` : s.description;
+        return `- ${plugin}:${s.name}: ${t.length > 1536 ? `${t.slice(0, 1535)}…` : t}`;
+      })
+      .join("\n");
+  /** The committed bundle read straight from the files, with the finding's own regexes. */
+  const bundle = (): Listed[] =>
+    readdirSync(path.join(ROOT, "skills"))
+      .filter((s) => existsSync(path.join(ROOT, "skills", s, "SKILL.md")))
+      .sort()
+      .map((s) => {
+        const text = readFileSync(path.join(ROOT, "skills", s, "SKILL.md"), "utf8");
+        return {
+          name: s,
+          description: /^description: (.*)$/m.exec(text)?.[1] ?? "",
+          whenToUse: /^when_to_use: (.*)$/m.exec(text)?.[1] ?? "",
+          userInvoked: /^disable-model-invocation: true$/m.test(text),
+        };
+      });
+  /** Code points — what the descriptions-only count and the old per-Skill rule summed. */
+  const codePoints = (s: string): number => Array.from(s).length;
+  const noteOf = (root: string): string => {
+    const notes = checkSkills({ root, scan: false }).notes.filter((n) =>
+      n.includes("Skills listing"),
+    );
+    expect(notes).toHaveLength(1);
+    return notes[0] ?? "";
+  };
+
+  it("listingText: when_to_use is listed after the description and costs characters like it; the cut is at 1 536 UTF-16 units", () => {
+    expect(LISTING_SEPARATOR).toBe(" - ");
+    expect(LISTING_MAX).toBe(1536);
+    expect(listingText("Does X in the user's ESPN league.", "x, y")).toBe(
+      "Does X in the user's ESPN league. - x, y",
+    );
+    expect(listingText("Only a description.")).toBe("Only a description.");
+    expect(listingText("Only a description.", "")).toBe("Only a description.");
+    const exact = "d".repeat(1000);
+    const w = "w".repeat(1536 - 1000 - 3);
+    expect(listingText(exact, w)).toHaveLength(1536);
+    expect(listingText(exact, `${w}w`)).toBe(`${exact} - ${"w".repeat(532)}…`);
+    expect(listingText(exact, `${w}w`)).toHaveLength(1536);
+    // a character outside the BMP is two UTF-16 units: the client counts units, not code points
+    const astral = "\u{1F3C8}".repeat(767);
+    expect(codePoints(astral)).toBe(767);
+    expect(listingText(astral, "a")).toHaveLength(1536);
+    expect(listingText(astral, "a").endsWith("…")).toBe(true);
+  });
+
+  it("skillsListing is the client's listing code on any frontmatter: one line per model-invocable Skill (property)", () => {
+    const text = fc.string({ unit: "binary", maxLength: 1700 });
+    const skill = fc.record({
+      name: fc.stringMatching(/^[a-z0-9]{1,12}(?:-[a-z0-9]{1,12})?$/),
+      description: text,
+      whenToUse: fc.option(text, { nil: undefined }),
+      userInvoked: fc.boolean(),
+    });
+    fc.assert(
+      fc.property(fc.array(skill, { maxLength: 15 }), (skills) => {
+        expect(skillsListing("espn-fantasy-football", skills)).toBe(
+          client("espn-fantasy-football", skills),
+        );
+      }),
+      { numRuns: 300 },
+    );
+    const two = skillsListing("p", [
+      { name: "a", description: "A in the user's ESPN league.", whenToUse: "alpha, beta" },
+      { name: "apply", description: "Applies.", whenToUse: "apply", userInvoked: true },
+      { name: "b", description: "B in the user's ESPN league." },
+    ]);
+    expect(two).toBe(
+      "- p:a: A in the user's ESPN league. - alpha, beta\n- p:b: B in the user's ESPN league.",
+    );
+  });
+
+  it("the committed bundle: the run reports the listing a client receives — every model-invocable Skill's description AND when_to_use, its name and separators — never the descriptions alone", () => {
+    const skills = bundle();
+    expect(skills).toHaveLength(13);
+    const listing = client("espn-fantasy-football", skills);
+    const listed = skills.filter((s) => s.userInvoked !== true);
+    expect(listed.map((s) => s.name)).not.toContain("apply");
+    expect(listed).toHaveLength(12);
+    expect(listing.split("\n")).toHaveLength(12);
+    const descriptions = skills.reduce((n, s) => n + codePoints(s.description), 0);
+    // the undercount the finding names: every listed when_to_use is in the listing, after its
+    // description, with the Skill's plugin-qualified name in front
+    for (const s of listed) {
+      expect(s.whenToUse, s.name).not.toBe("");
+      expect(listing).toContain(
+        `- espn-fantasy-football:${s.name}: ${s.description} - ${s.whenToUse ?? ""}`,
+      );
+    }
+    expect(listing.length).toBeGreaterThan(descriptions);
+    const note = noteOf(ROOT);
+    expect(note).toContain(
+      `Claude Code ${CLIENT_LISTING_VERSION} sends every turn is ${String(listing.length)} chars over the 12 model-invocable Skill(s)`,
+    );
+    expect(note).toContain(`descriptions alone: ${String(descriptions)}`);
+    expect(note).toContain(`ceiling ${String(SKILLS_LISTING_MAX)}`);
+    if (listing.length > SKILLS_LISTING_MAX)
+      expect(note).toContain(`OVER by ${String(listing.length - SKILLS_LISTING_MAX)}`);
+    else expect(note).not.toMatch(/OVER/);
+    console.log(
+      `[size] Skills listing as Claude Code sends it: ${String(listing.length)} chars (12 Skills; descriptions alone ${String(descriptions)})`,
+    );
+  });
+
+  it("a longer when_to_use grows the reported listing by exactly its length, the descriptions-only figure not at all (the regression)", () => {
+    const before = noteOf(ROOT);
+    const t = fresh();
+    t.edit("skills/retro/SKILL.md", /^when_to_use: .*$/m, `$&, ${"q".repeat(498)}`);
+    const after = noteOf(t.root);
+    const size = (n: string): number => Number(/is (\d+) chars/.exec(n)?.[1]);
+    const desc = (n: string): number => Number(/descriptions alone: (\d+)/.exec(n)?.[1]);
+    expect(size(after) - size(before)).toBe(500);
+    expect(desc(after)).toBe(desc(before));
+    t.cleanup();
+    // a disable-model-invocation Skill costs nothing, whatever its frontmatter
+    const u = fresh();
+    u.edit("skills/apply/SKILL.md", /^when_to_use: .*$/m, `$&, ${"q".repeat(498)}`);
+    expect(size(noteOf(u.root))).toBe(size(before));
+  });
+
+  it("the per-Skill cap counts the separator and UTF-16 units, exactly where the client cuts", () => {
+    const d =
+      /^description: (.*)$/m.exec(
+        readFileSync(path.join(ROOT, "skills/retro/SKILL.md"), "utf8"),
+      )?.[1] ?? "";
+    // 1 534 code points summed (the old rule's pass) — 1 537 as the client lists it
+    const fill = "r".repeat(1537 - 3 - d.length);
+    expect(codePoints(d) + fill.length).toBe(1534);
+    const t = fresh();
+    t.edit("skills/retro/SKILL.md", /^when_to_use: (.*)$/m, `when_to_use: ${fill}`);
+    expect(errorsOf(t)).toMatch(
+      /description - when_to_use is 1537 chars as Claude Code lists it \(max 1536/,
+    );
+    t.cleanup();
+    // a football is one code point and two UTF-16 units: 1 533 code points summed, 1 537 as listed
+    const ball = `${"r".repeat(1537 - 3 - 2 - d.length)}\u{1F3C8}`;
+    expect(codePoints(d) + codePoints(ball)).toBe(1533);
+    const u = fresh();
+    u.edit("skills/retro/SKILL.md", /^when_to_use: (.*)$/m, `when_to_use: ${ball}`);
+    expect(errorsOf(u)).toMatch(/description - when_to_use is 1537 chars as Claude Code lists it/);
+    u.cleanup();
+    // at the cap exactly: not an error
+    const v = fresh();
+    v.edit(
+      "skills/retro/SKILL.md",
+      /^when_to_use: (.*)$/m,
+      `when_to_use: ${"r".repeat(1536 - 3 - d.length)}`,
+    );
+    expect(errorsOf(v)).not.toMatch(/as Claude Code lists it/);
+  });
+
+  it("listingNote names the overrun and what closes it, and nothing when the listing fits", () => {
+    const fits = listingNote("x".repeat(SKILLS_LISTING_MAX), [{}, { userInvoked: true }], 100);
+    expect(fits).toContain(
+      `is ${String(SKILLS_LISTING_MAX)} chars over the 1 model-invocable Skill(s)`,
+    );
+    expect(fits).not.toMatch(/OVER/);
+    const over = listingNote("x".repeat(SKILLS_LISTING_MAX + 7), [{}, {}], 100);
+    expect(over).toContain("OVER by 7");
+    expect(over).toContain("skills-listing-budget-undercounted");
+    expect(over).toContain("never raised");
   });
 });
 

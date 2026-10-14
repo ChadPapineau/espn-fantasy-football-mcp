@@ -42,9 +42,22 @@ import {
 export const DESCRIPTION_MAX = 350;
 /** The platform's hard cap on `description` (research 06 §A.0). */
 export const DESCRIPTION_HARD_MAX = 1024;
-/** Claude Code truncates description + when_to_use at 1 536 characters. */
+/**
+ * Claude Code cuts one Skill's listed text (`description - when_to_use`) at 1 536 UTF-16 code units,
+ * the last of them an ellipsis (plan 09 §2; the listing code of CLIENT_LISTING_VERSION).
+ */
 export const LISTING_MAX = 1536;
-/** plan 07 §5.1 [A-4]: the whole Skills listing (every description) ≤ 4 600 characters. */
+/** What Claude Code puts between `description` and `when_to_use` in a Skill's listed text. */
+export const LISTING_SEPARATOR = " - ";
+/**
+ * The Claude Code release whose Skills-listing code `skillsListing` reproduces (read in its shipped
+ * CLI; the plugin-eval suite targets the same release — build-plugin-evals.mjs HISTORY_FORMAT_VERSION).
+ */
+export const CLIENT_LISTING_VERSION = "2.1.238";
+/**
+ * plan 07 §5.1 [A-4]: the Skills listing ≤ 4 600 characters — a token-derived, downward-only ceiling
+ * on what the client sends every turn (`skillsListing`), never raised.
+ */
 export const SKILLS_LISTING_MAX = 4600;
 /** plan 09 §2: SKILL.md body ≤ 500 lines. */
 export const BODY_MAX_LINES = 500;
@@ -2116,6 +2129,8 @@ export function checkSkills(opts = {}) {
   /** @type {TriggerSkill[]} */
   const triggerSkills = [];
   let listingChars = 0;
+  /** @type {{ name: string, description: string, whenToUse: string, userInvoked: boolean }[]} */
+  const listingSkills = [];
   for (const skill of listed.skills) {
     const dir = path.join(skillsRoot, skill);
     const rel = `skills/${skill}`;
@@ -2136,6 +2151,14 @@ export function checkSkills(opts = {}) {
       const r = checkFrontmatter(fm.data, { skill, rel, version, manifest, errors });
       whenToUse = r.whenToUse;
       listingChars += r.descriptionChars;
+      const d = fm.data["description"];
+      if (typeof d === "string")
+        listingSkills.push({
+          name: skill,
+          description: d,
+          whenToUse,
+          userInvoked: fm.data["disable-model-invocation"] === true,
+        });
     }
 
     // body (plan 09 §5.1 item 2)
@@ -2315,6 +2338,14 @@ export function checkSkills(opts = {}) {
       `the Skills listing is ${String(listingChars)} description characters (plan 07 §5.1 [A-4] ceiling ${String(SKILLS_LISTING_MAX)})`,
     );
   }
+  // the listing as the client sends it every turn (skillsListing), reported on every run beside the
+  // descriptions-only gate above; over the ceiling it is the open Stage C finding
+  // skills-listing-budget-undercounted, which only shorter Skill frontmatter can close (the ceiling
+  // is never raised — plan 07 §5.1 [A-4])
+  if (manifest) {
+    const listing = skillsListing(manifest.plugin, listingSkills);
+    notes.push(listingNote(listing, listingSkills, listingChars));
+  }
 
   // every file under skills/: size, identifiers and the secret scanner (plan 09 §5.1 item 6)
   const all = walkFiles(skillsRoot, root);
@@ -2332,6 +2363,55 @@ export function checkSkills(opts = {}) {
   }
   if (opts.scan !== false) errors.push(...scanSecrets(root, all.files, opts.scanEnv));
   return { errors, notes, skills: listed.skills };
+}
+
+/**
+ * One Skill's text in the Skills listing, as Claude Code builds it (CLIENT_LISTING_VERSION): the
+ * description, then LISTING_SEPARATOR and `when_to_use` when there is one — so `when_to_use` costs
+ * listing characters every turn exactly like the description — cut to LISTING_MAX UTF-16 code units,
+ * the last of them an ellipsis.
+ * @param {string} description
+ * @param {string | undefined} [whenToUse]
+ * @returns {string}
+ */
+export function listingText(description, whenToUse) {
+  const t = whenToUse ? `${description}${LISTING_SEPARATOR}${whenToUse}` : description;
+  return t.length > LISTING_MAX ? `${t.slice(0, LISTING_MAX - 1)}…` : t;
+}
+
+/**
+ * The plugin's part of the Skills listing Claude Code sends the model (CLIENT_LISTING_VERSION): one
+ * `- <plugin>:<name>: <listingText>` line per Skill the model can invoke, joined by newlines. A
+ * `disable-model-invocation: true` Skill (apply) is never listed, so it costs nothing. Its length is
+ * the per-turn fixed cost plan 07 §5.1 [A-4] budgets (Stage C finding
+ * skills-listing-budget-undercounted: the descriptions alone leave out every `when_to_use`, the
+ * names and the separators the client sends).
+ * @param {string} plugin the plugin name (manifest `plugin`)
+ * @param {readonly { name: string, description: string, whenToUse?: string | undefined,
+ *   userInvoked?: boolean | undefined }[]} skills
+ * @returns {string}
+ */
+export function skillsListing(plugin, skills) {
+  return skills
+    .filter((s) => s.userInvoked !== true)
+    .map((s) => `- ${plugin}:${s.name}: ${listingText(s.description, s.whenToUse)}`)
+    .join("\n");
+}
+
+/**
+ * The run's note on the listing: its size as the client sends it, the descriptions-only figure plan
+ * 07 §5.1's tables recorded, the ceiling, and — over it — by how much and what closes it.
+ * @param {string} listing skillsListing's text
+ * @param {readonly { userInvoked?: boolean | undefined }[]} skills
+ * @param {number} descriptionChars every Skill's description, summed (code points)
+ * @returns {string}
+ */
+export function listingNote(listing, skills, descriptionChars) {
+  const listed = skills.filter((s) => s.userInvoked !== true).length;
+  const head = `the Skills listing Claude Code ${CLIENT_LISTING_VERSION} sends every turn is ${String(listing.length)} chars over the ${String(listed)} model-invocable Skill(s) (descriptions alone: ${String(descriptionChars)}; plan 07 §5.1 [A-4] ceiling ${String(SKILLS_LISTING_MAX)})`;
+  return listing.length > SKILLS_LISTING_MAX
+    ? `${head} — OVER by ${String(listing.length - SKILLS_LISTING_MAX)}: open Stage C finding skills-listing-budget-undercounted; only shorter description / when_to_use frontmatter closes it (the ceiling is never raised)`
+    : head;
 }
 
 /**
@@ -2382,9 +2462,11 @@ export function checkFrontmatter(data, ctx) {
     errors.push(`${f}: when_to_use is required (the trigger phrases)`);
   else {
     whenToUse = w;
-    if (typeof d === "string" && [...d].length + [...w].length > LISTING_MAX) {
+    // measured as the client lists it: UTF-16 code units, the separator included (listingText)
+    const listed = typeof d === "string" ? `${d}${LISTING_SEPARATOR}${w}`.length : 0;
+    if (listed > LISTING_MAX) {
       errors.push(
-        `${f}: description + when_to_use is ${String([...d].length + [...w].length)} chars (max ${String(LISTING_MAX)})`,
+        `${f}: description - when_to_use is ${String(listed)} chars as Claude Code lists it (max ${String(LISTING_MAX)}: the rest is cut)`,
       );
     }
   }
