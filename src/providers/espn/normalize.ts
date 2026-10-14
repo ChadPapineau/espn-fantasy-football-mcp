@@ -48,6 +48,8 @@ import {
   type Transaction,
   type UntrustedText,
 } from "../../domain/league/types.js";
+import { byeSeedsOf } from "../../domain/league/rules.js";
+import { byeWeekOf } from "../../domain/league/schedule.js";
 import type { StatSourceId, StatSplitTypeId } from "../../domain/scoring/types.js";
 import { decodePosition, decodeSlot, isIdInteger, proTeamAbbrev } from "./ids.js";
 import {
@@ -515,6 +517,10 @@ export function normalizeLeagueRules(body: WireSettingsBody): LeagueRules {
   for (const [k, v] of Object.entries(s.financeSettings ?? {}))
     if (/^[A-Za-z]{1,40}$/.test(k) && typeof v === "number" && Number.isFinite(v)) fees[k] = v;
   const unverified = ["waiver.type", "waiver.order_reset"];
+  // seeds idle in round one: the bracket arithmetic of research 05 §2.3 [V-docs] (plan 07 A1) —
+  // 6 of 10 → seeds 1 and 2; unknown (and listed unverified) only without a usable team count
+  const teamCount = finite(sch.playoffTeamCount);
+  const byeSeeds = byeSeedsOf(teamCount);
   return {
     waiver: {
       type: input.acquisition_type ?? "UNKNOWN",
@@ -540,7 +546,7 @@ export function normalizeLeagueRules(body: WireSettingsBody): LeagueRules {
       max: finite(t?.max) === null || (t?.max ?? -1) < 0 ? null : (t?.max ?? null),
     },
     playoffs: {
-      team_count: finite(sch.playoffTeamCount),
+      team_count: teamCount,
       seeding_rule: token(sch.playoffSeedingRule) ?? "UNKNOWN",
       seeding_rule_by: finite(sch.playoffSeedingRuleBy),
       reseed: typeof sch.playoffReseed === "boolean" ? sch.playoffReseed : null,
@@ -554,7 +560,7 @@ export function normalizeLeagueRules(body: WireSettingsBody): LeagueRules {
       regular_season_matchups: regular,
       matchup_periods: matchupPeriods,
       playoff_weeks: playoffWeeks,
-      bye_seeds: null,
+      bye_seeds: byeSeeds,
     },
     ties: {
       matchup_tie_rule: token(s.scoringSettings.matchupTieRule),
@@ -563,7 +569,7 @@ export function normalizeLeagueRules(body: WireSettingsBody): LeagueRules {
     fees: Object.keys(fees).length === 0 ? null : fees,
     waiver_system: system,
     predicates: waiverPredicatesOf(system),
-    unverified_fields: [...unverified, "playoffs.bye_seeds"],
+    unverified_fields: byeSeeds === null ? [...unverified, "playoffs.bye_seeds"] : unverified,
   };
 }
 
@@ -718,7 +724,10 @@ export function gameStateOf(hasActual: boolean, provisional: boolean): GameState
   return provisional ? "pre" : "bye";
 }
 
-/** Per-player box scores with appliedStats (mBoxscore; plan 07 A5 — the golden's input). */
+/**
+ * Per-player box scores with appliedStats (mBoxscore; plan 07 A5 — the golden's input); `byeWeeks`
+ * (the pro schedule's, when known) fills each player's `bye_week` as every other player read does.
+ */
 export function normalizeBoxScores(
   body: WireBoxscoreBody,
   week: number,
@@ -726,14 +735,16 @@ export function normalizeBoxScores(
   provisional: boolean,
   identity: LeagueIdentity | null,
   counts: NormalizeCounts,
+  byeWeeks?: ReadonlyMap<number, number>,
 ): BoxScoreMatchup[] {
+  const ctx: PlayerContext = byeWeeks === undefined ? { season, week } : { season, week, byeWeeks };
   const bodyNames = new Map<number, UntrustedText>();
   for (const t of body.teams ?? []) bodyNames.set(t.id, teamName(t));
   const side = (s: WireBoxscoreBody["schedule"][number]["home"]): BoxScoreSide => {
     const entries: BoxScoreEntry[] = [];
     for (const e of s.rosterForCurrentScoringPeriod.entries) {
       const p = e.playerPoolEntry.player;
-      const player = normalizePlayer(p, null, { season, week }, counts);
+      const player = normalizePlayer(p, null, ctx, counts);
       if (player === null || !isIdInteger(e.lineupSlotId)) {
         if (player !== null) counts.rows_dropped++;
         continue;
@@ -836,7 +847,7 @@ export function normalizeStandings(
     playoff_line: {
       team_count: finite(sch?.playoffTeamCount),
       seeding_rule: token(sch?.playoffSeedingRule) ?? "UNKNOWN",
-      bye_seeds: null,
+      bye_seeds: byeSeedsOf(finite(sch?.playoffTeamCount)),
     },
     divisions: (sch?.divisions ?? []).map((d) => ({
       id: d.id,
@@ -994,9 +1005,16 @@ export function normalizeProSchedule(body: WireProScheduleBody, season: number):
   };
 }
 
-/** Pro-team id → bye week, from a pro schedule. */
+/**
+ * Pro-team id → bye week, from a pro schedule — the domain's rule (`byeWeekOf`: ESPN's `byeWeek`,
+ * else the week the games show the team idle), the one `espn_get_roster` applies, so every
+ * PlatformPlayer and every roster row agree.
+ */
 export function byeWeeksOf(s: ProSchedule): Map<number, number> {
   const m = new Map<number, number>();
-  for (const t of s.teams) if (t.bye_week !== null) m.set(t.id, t.bye_week);
+  for (const t of s.teams) {
+    const w = byeWeekOf(s, t.id);
+    if (w !== null) m.set(t.id, w);
+  }
   return m;
 }

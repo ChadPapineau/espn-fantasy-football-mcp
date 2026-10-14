@@ -14,13 +14,13 @@ import type { DriftObservations } from "../../drift/types.js";
 import type { RequestOrigin, StoreRepositories } from "../../store/types.js";
 import { createFixtureFetch } from "./fixture.js";
 import { createDerivedLeagueFetch, readDerivedManifest } from "./fixture-league.js";
-import { EspnProvider } from "./provider.js";
+import { EspnProvider, type ProScheduleDataset } from "./provider.js";
 import { EspnProviderError, type ProviderLog } from "./request.js";
 import type { FetchLike } from "./transport.js";
 import type { ScoringSettingsTranslator } from "./types.js";
 
 export { EspnProvider, ESPN_PROVIDER_WRITES, PLAYERCARD_IDS_MAX } from "./provider.js";
-export type { EspnProviderDeps } from "./provider.js";
+export type { EspnProviderDeps, ProScheduleDataset } from "./provider.js";
 export { createFixtureFetch, FixtureError, composeBodies } from "./fixture.js";
 export {
   applyJsonPatch,
@@ -83,6 +83,11 @@ export interface CreateEspnProviderOptions {
   readonly observations?: DriftObservations;
   readonly ttlContext?: () => TtlContext;
   readonly periodProvisional?: (season: number, week: number) => boolean | null;
+  /**
+   * The store's pro-schedule dataset (`store.datasets.proSchedule`): every player's `bye_week`
+   * (EspnProviderDeps.proSchedule). Without it `bye_week` is null.
+   */
+  readonly proSchedule?: ProScheduleDataset;
   readonly log?: ProviderLog;
 }
 
@@ -112,6 +117,7 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     ...(o.observations === undefined ? {} : { observations: o.observations }),
     ...(o.ttlContext === undefined ? {} : { ttlContext: o.ttlContext }),
     ...(o.periodProvisional === undefined ? {} : { periodProvisional: o.periodProvisional }),
+    ...(o.proSchedule === undefined ? {} : { proSchedule: o.proSchedule }),
     ...(o.log === undefined ? {} : { log: o.log }),
   });
 }

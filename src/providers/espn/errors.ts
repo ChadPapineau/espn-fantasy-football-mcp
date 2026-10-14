@@ -7,6 +7,7 @@
 // 429/5xx/timeouts retryable; ENOTFOUND/ECONNREFUSED never; a 3xx or a non-JSON 2xx → ESPN_HOST_MOVED.
 // Errors carry an own `effCode`/`effDetails` (a provider may not import src/mcp).
 import type { RequestOutcome } from "../../config/schema.js";
+import { kindForCode } from "../../http/errors.js";
 import type { EspnRoute } from "./path.js";
 import { upstreamTypeOrUnknown, type EspnView } from "./types.js";
 
@@ -234,25 +235,62 @@ export const FAIL_FAST_NETWORK_CODES: ReadonlySet<string> = new Set([
 
 function ownCode(e: unknown): string | null {
   if (typeof e !== "object" || e === null) return null;
-  const c = Object.prototype.hasOwnProperty.call(e, "code")
-    ? (e as { code?: unknown }).code
-    : undefined;
-  return typeof c === "string" ? c : null;
+  try {
+    const c = Object.prototype.hasOwnProperty.call(e, "code")
+      ? (e as { code?: unknown }).code
+      : undefined;
+    return typeof c === "string" ? c : null;
+  } catch {
+    return null;
+  }
 }
 
+function ownName(e: unknown): string | null {
+  if (!(e instanceof Error)) return null;
+  try {
+    return typeof e.name === "string" ? e.name : null;
+  } catch {
+    return null;
+  }
+}
+
+function causeOf(e: unknown): unknown {
+  if (!(e instanceof Error)) return undefined;
+  try {
+    return e.cause;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The runtime's connect-phase timeout (undici's 10 s connect timer). */
+const CONNECT_TIMEOUT_CODE = "UND_ERR_CONNECT_TIMEOUT";
+
 /**
- * Classifies a thrown fetch failure: our own attempt timeout → `timeout` (retryable, counted by the
- * breaker); a fail-fast DNS/refused code anywhere in the cause chain → `network` (never retried);
- * anything else (resets, sockets, `fetch failed`) → `network_transient` (retryable).
+ * Classifies a thrown fetch failure: our own attempt timeout → `timeout` (`attempt_timeout`;
+ * retryable, counted by the breaker); a fail-fast DNS/refused code anywhere in the cause chain →
+ * `network` (never retried); a timeout the runtime itself raised before our timer fired → `timeout`
+ * too — Node's fetch gives up on a black-holed address after ≈ 10 s with `fetch failed` ←
+ * `UND_ERR_CONNECT_TIMEOUT` (`connect_timeout`), inside the 15 s attempt timer, and plan 01 §6 / ADV
+ * OBJ-20 and plan 05 §4.1's black-hole row need the breaker to count it; any other runtime timeout
+ * (`ETIMEDOUT`, undici's headers/body timers, a `TimeoutError`) is `runtime_timeout`. The timeout
+ * codes are src/http's (`kindForCode`), so the two classifiers agree on what a timeout is. Anything
+ * else (resets, sockets, a bare `fetch failed`) → `network_transient` (retryable, not counted).
  */
 export function classifyThrown(e: unknown, timedOut: boolean, view: EspnView): EspnUpstreamError {
   if (timedOut) return new EspnUpstreamError("timeout", { view, reason: "attempt_timeout" });
   let cur: unknown = e;
-  for (let depth = 0; depth < 4 && cur !== undefined && cur !== null; depth++) {
+  let runtimeTimeout: "connect_timeout" | "runtime_timeout" | null = null;
+  for (let depth = 0; depth < 5 && cur !== undefined && cur !== null; depth++) {
     const code = ownCode(cur);
     if (code !== null && FAIL_FAST_NETWORK_CODES.has(code))
       return new EspnUpstreamError("network", { view, reason: "unreachable" }, { cause: e });
-    cur = cur instanceof Error ? cur.cause : undefined;
+    if (code === CONNECT_TIMEOUT_CODE) runtimeTimeout = "connect_timeout";
+    else if ((code !== null && kindForCode(code) === "timeout") || ownName(cur) === "TimeoutError")
+      runtimeTimeout ??= "runtime_timeout";
+    cur = causeOf(cur);
   }
+  if (runtimeTimeout !== null)
+    return new EspnUpstreamError("timeout", { view, reason: runtimeTimeout }, { cause: e });
   return new EspnUpstreamError("network_transient", { view, reason: "network" }, { cause: e });
 }

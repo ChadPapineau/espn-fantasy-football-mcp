@@ -23,7 +23,9 @@ import type {
   PlayerOutlook,
   PlayerRef,
   PositionalRating,
+  ProGame,
   ProSchedule,
+  ProTeam,
   ProjectionHorizon,
   Roster,
   RosterSlots,
@@ -69,6 +71,7 @@ import {
 import { slotIdsForName } from "./ids.js";
 import type { Sleep } from "./limiter.js";
 import {
+  byeWeeksOf,
   identityFromNav,
   isCommissioner,
   matchupPeriodsForWeek,
@@ -92,6 +95,7 @@ import {
   scoringInputOf,
   type LeagueIdentity,
   type NormalizeCounts,
+  type PlayerContext,
 } from "./normalize.js";
 import {
   communicationTarget,
@@ -118,6 +122,7 @@ import {
   type ScoringSettingsTranslator,
 } from "./types.js";
 import {
+  absentAsEmpty,
   konaPlayerInfoSchema,
   konaPlayercardSchema,
   mBoxscoreSchema,
@@ -156,6 +161,23 @@ export const ESPN_PROVIDER_WRITES = WRITES_SEAM_MARKER;
 export const PLAYERCARD_TOP_PERIODS = 17;
 /** ≤ 25 ids per `kona_playercard` request (plan 07 B2; plan 02 §5). */
 export const PLAYERCARD_IDS_MAX = 25;
+/**
+ * How long one season's bye map is reused (ms): reading the pro-schedule dataset costs ≈ 10 ms of
+ * main loop (the TTL context memoises it for the same reason — plan 10 A16a); byes do not move
+ * within a minute, and a dataset loaded meanwhile is seen within one.
+ */
+export const BYE_WEEKS_MEMO_MS = 60_000;
+
+/**
+ * The store's pro-schedule dataset as the provider reads it — structurally src/store's
+ * `datasets.proSchedule` (the analytics `ProScheduleReader`), so a composition root wires
+ * `proSchedule: store.datasets.proSchedule` as is. A season the dataset does not hold reads as no
+ * teams.
+ */
+export interface ProScheduleDataset {
+  teams(season: number): { readonly rows: readonly ProTeam[] };
+  games(season: number, weeks: null): { readonly rows: readonly ProGame[] };
+}
 
 /** What the provider needs, injected (no ambient state; tests inject every port). */
 export interface EspnProviderDeps {
@@ -189,6 +211,14 @@ export interface EspnProviderDeps {
    * pro schedule dataset when wired; default: the current season's latest scoring period and later.
    */
   readonly periodProvisional?: (season: number, week: number) => boolean | null;
+  /**
+   * The store's pro-schedule dataset (the composition root wires it, like `ttlContext`): every
+   * PlatformPlayer's `bye_week` comes from it, by the rule `espn_get_roster` applies (plan 07 A4/B1/C2
+   * `bye_week`; the weekly-value consumers — E4–E7, E11 — zero a player's bye week from it). Not
+   * wired, a season it does not hold, or a read that throws → `bye_week` null, said by the field;
+   * never an extra ESPN request.
+   */
+  readonly proSchedule?: ProScheduleDataset;
   readonly sleep?: Sleep;
   readonly random?: () => number;
   readonly log?: ProviderLog;
@@ -242,8 +272,13 @@ const parsePro = (b: unknown): WireProScheduleBody =>
 const parsePlayersWl = (b: unknown): WirePlayersWlBody => must("players_wl", playersWlSchema, b);
 const parseTxns = (b: unknown): readonly unknown[] =>
   must("mTransactions2", mTransactions2Schema, b).transactions;
+/**
+ * The pending list; absent on an answer to the recognised view, it means nothing is pending
+ * (views `absentAsEmpty`, ABSENT_MEANS_EMPTY) — the in-call check excused exactly that case.
+ */
 const parsePending = (b: unknown): readonly unknown[] =>
-  must("mPendingTransactions", mPendingTransactionsSchema, b).pendingTransactions;
+  must("mPendingTransactions", mPendingTransactionsSchema, absentAsEmpty("mPendingTransactions", b))
+    .pendingTransactions;
 
 /** A non-negative integer header (`x-fantasy-filter-*-count`), or null. */
 function countHeader(h: Readonly<Record<string, string>>, name: string): number | null {
@@ -259,6 +294,11 @@ export class EspnProvider implements FantasyPlatform {
   private readonly host: string;
   /** Previous seasons fixture mode holds no settings recording for (settingsRead): the error, kept. */
   private readonly settingsMissing = new Map<number, Error>();
+  /** Each season's bye map (null: no schedule loaded) and when it was read (`byeWeeks`). */
+  private readonly byeMemo = new Map<
+    number,
+    { readonly at: number; readonly map: ReadonlyMap<number, number> | null }
+  >();
 
   constructor(deps: EspnProviderDeps) {
     this.deps = deps;
@@ -307,6 +347,38 @@ export class EspnProvider implements FantasyPlatform {
       views,
       scoringPeriodId: sp,
     });
+  }
+
+  /**
+   * Pro-team id → bye week for `season` from the wired pro-schedule dataset (memoised
+   * BYE_WEEKS_MEMO_MS per season), or undefined when none is wired or the dataset holds no teams for
+   * the season. A throwing read counts as not loaded (and is memoised like any answer).
+   */
+  private byeWeeks(season: number): ReadonlyMap<number, number> | undefined {
+    const source = this.deps.proSchedule;
+    if (source === undefined) return undefined;
+    const now = this.deps.clock.nowMs();
+    const hit = this.byeMemo.get(season);
+    if (hit !== undefined && now >= hit.at && now - hit.at < BYE_WEEKS_MEMO_MS)
+      return hit.map ?? undefined;
+    let map: ReadonlyMap<number, number> | null = null;
+    try {
+      const teams = source.teams(season).rows;
+      if (teams.length > 0) {
+        const schedule: ProSchedule = { season, teams, games: source.games(season, null).rows };
+        map = byeWeeksOf(schedule);
+      }
+    } catch {
+      map = null;
+    }
+    this.byeMemo.set(season, { at: now, map });
+    return map ?? undefined;
+  }
+
+  /** The player context of `season`/`week`, with that season's byes when known. */
+  private playerContext(season: number, week: Week | null): PlayerContext {
+    const byeWeeks = this.byeWeeks(season);
+    return byeWeeks === undefined ? { season, week } : { season, week, byeWeeks };
   }
 
   private counted(view: EspnView, counts: NormalizeCounts): void {
@@ -481,7 +553,7 @@ export class EspnProvider implements FantasyPlatform {
       week,
       id.identity,
       id.myTeam,
-      { season: ref.season, week },
+      this.playerContext(ref.season, week),
       counts,
     );
     this.counted("mRoster", counts);
@@ -539,8 +611,9 @@ export class EspnProvider implements FantasyPlatform {
       opts,
     );
     const counts = newCounts();
+    const ctx = this.playerContext(ref.season, q.week);
     let items = r.value.players
-      .map((pe) => normalizePlayer(pe.player, pe, { season: ref.season, week: q.week }, counts))
+      .map((pe) => normalizePlayer(pe.player, pe, ctx, counts))
       .filter((p): p is PlatformPlayer => p !== null);
     if (q.sort === "name")
       items = [...items].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -590,9 +663,10 @@ export class EspnProvider implements FantasyPlatform {
     const ids = this.checkIds(players, FILTER_IDS_MAX);
     const r = await this.konaById(ref, ids, week, opts);
     const counts = newCounts();
+    const ctx = this.playerContext(ref.season, week);
     const byId = new Map<number, PlatformPlayer>();
     for (const pe of r.value.players) {
-      const p = normalizePlayer(pe.player, pe, { season: ref.season, week }, counts);
+      const p = normalizePlayer(pe.player, pe, ctx, counts);
       if (p !== null) byId.set(p.ref.id, p);
     }
     this.counted("kona_player_info", counts);
@@ -737,7 +811,15 @@ export class EspnProvider implements FantasyPlatform {
     );
     const counts = newCounts();
     const prov = this.provisional(ref.season, week, r.value.status?.latestScoringPeriod ?? null);
-    const box = normalizeBoxScores(r.value, week, ref.season, prov, id.identity, counts);
+    const box = normalizeBoxScores(
+      r.value,
+      week,
+      ref.season,
+      prov,
+      id.identity,
+      counts,
+      this.byeWeeks(ref.season),
+    );
     this.counted("mBoxscore", counts);
     return this.stamped(r, box);
   }
@@ -920,8 +1002,9 @@ export class EspnProvider implements FantasyPlatform {
       opts,
     );
     const counts = newCounts();
+    const ctx = this.playerContext(season, null);
     const out = r.value
-      .map((p) => normalizePlayer(p, null, { season, week: null }, counts))
+      .map((p) => normalizePlayer(p, null, ctx, counts))
       .filter((p): p is PlatformPlayer => p !== null);
     this.counted("players_wl", counts);
     return this.stamped(r, out);
@@ -948,6 +1031,7 @@ export class EspnProvider implements FantasyPlatform {
    * public league the board probe (`kona_league_communication`, limit 1, body discarded) with an
    * anonymous control first — a control that is not 401 means the probe does not discriminate here.
    * Never cached; exempt from the short-circuit only when the authority offers probe access.
+   * Nothing stored (whatever the startup label said) → not_configured with zero requests.
    */
   async probeCredential(ref: LeagueRef): Promise<CredentialProbeResult> {
     this.checkRef(ref);
@@ -965,7 +1049,11 @@ export class EspnProvider implements FantasyPlatform {
       reason,
       checked_at: checkedAt(),
     });
-    if (!this.req.cookies.configured()) return result(null, "settings", null, "not_configured");
+    // a label of "nothing stored" is not the store: a value `eff setup` stored while this process
+    // ran (or items a wiped cache lost the row of) is loaded first, so it is probed and its
+    // acceptance lands on a row that describes it (plan 02 §2.2; plan 03 §1.1 step 4 [A-3]); any
+    // other label already sends the probe to the store (probeHeader)
+    if (!this.req.cookies.configured()) await this.req.cookies.syncWithStore();
     const header = await this.req.cookies.probeHeader();
     if (header === null) return result(null, "settings", null, "not_configured");
     if (!header.ok)

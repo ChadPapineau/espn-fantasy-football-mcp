@@ -1,10 +1,13 @@
 // limiter.ts — the ESPN request governor (plan 01 §6; plan 06 §1.4 + changelog V7): ONE cross-process
 // token bucket kept in the store's `espn_requests` table (≤ 30/min, ≤ 1/s, checked and recorded in one
 // BEGIN IMMEDIATE by the LimiterRepository — coded against src/store/types.ts, injected in tests), the
-// job fleet's daily caps (job-origin rows only), ≤ 2 concurrent in this process, fail-closed (a row
-// that cannot be written means the request is not sent), the circuit breaker (open 5 min after 3
-// consecutive 5xx / 429 / timeouts — in process AND derived from the persisted outcomes, so a second
-// process sees it), and the backoff schedule (1, 2, 4, 8 s, ±25 % full jitter).
+// job fleet's daily caps (job-origin rows only), ≤ 2 concurrent ACROSS processes (an in-process
+// semaphore plus the `pending` rows every process writes — plan 01 §6 D7 "one global limiter, shared
+// by every tool and every process"), fail-closed (a row that cannot be written means the request is
+// not sent), one row per upstream request — every retry attempt is a request of its own (plan 01 §6
+// "each request inserts a row"), the circuit breaker (open 5 min after 3 consecutive 5xx / 429 /
+// timeouts — in process AND derived from the persisted outcomes, so a second process sees it), and
+// the backoff schedule (1, 2, 4, 8 s, ±25 % full jitter).
 import {
   BREAKER_FAILURE_OUTCOMES,
   ESPN_BACKOFF,
@@ -15,7 +18,12 @@ import {
 } from "../../config/schema.js";
 import type { Clock } from "../../domain/clock.js";
 import { breakerFromOutcomes, type TransportStatus } from "../platform.js";
-import type { LimiterRepository, LimiterRequest, RequestOrigin } from "../../store/types.js";
+import type {
+  LimiterRepository,
+  LimiterRequest,
+  LimiterVerdict,
+  RequestOrigin,
+} from "../../store/types.js";
 
 /** Waits `ms`; rejects when `signal` aborts. Injected so tests run on fake time. */
 export type Sleep = (ms: number, signal: AbortSignal | null) => Promise<void>;
@@ -45,7 +53,7 @@ export const realSleep: Sleep = (ms, signal) =>
 export class EspnRateLimitedError extends Error {
   readonly effCode = "RATE_LIMITED" as const;
   readonly effDetails: { readonly retry_after_s: number; readonly reason: string };
-  constructor(retryAfterMs: number, reason: "window" | "daily_cap") {
+  constructor(retryAfterMs: number, reason: "window" | "daily_cap" | "concurrency") {
     super("espn: rate limited by the local limiter");
     this.name = "EspnRateLimitedError";
     this.effDetails = Object.freeze({
@@ -114,6 +122,65 @@ export function backoffMs(attempt: number, random: number): number {
   const base = Math.min(ESPN_BACKOFF.maxMs, ESPN_BACKOFF.baseMs * 2 ** Math.max(0, attempt - 1));
   const r = Number.isFinite(random) ? Math.min(Math.max(random, 0), 1) : 0.5;
   return Math.round(base * (1 + ESPN_BACKOFF.jitter * (2 * r - 1)));
+}
+
+/**
+ * A `pending` row older than this is no longer in flight (its process died before recording the
+ * outcome): one attempt lasts at most ATTEMPT_TIMEOUT_MS (15 s) in the provider and 20 s in the
+ * CLI's requests (src/cli/espn-http.ts), so 30 s bounds every live one.
+ */
+export const IN_FLIGHT_MAX_AGE_MS = 30_000;
+/** How often a send waiting for a cross-process concurrency slot looks again. */
+export const IN_FLIGHT_POLL_MS = 250;
+/**
+ * How many of the newest rows hold every possibly-live `pending` row: the bucket admits at most
+ * ESPN_LIMITER.perMinute rows in any 60 s, and IN_FLIGHT_MAX_AGE_MS is shorter than that.
+ */
+const IN_FLIGHT_SCAN_ROWS = ESPN_LIMITER.perMinute;
+
+/**
+ * Requests in flight in EVERY process at `nowMs`: the `pending` rows (recorded, outcome not yet
+ * written) of the last IN_FLIGHT_MAX_AGE_MS, newest first as `recentOutcomes` returns them. Pure.
+ */
+export function inFlightOf(
+  newestFirst: readonly { readonly at: string; readonly outcome: RequestOutcome }[],
+  nowMs: number,
+): number {
+  let n = 0;
+  for (const r of newestFirst) {
+    const at = Date.parse(r.at);
+    if (!Number.isFinite(at) || nowMs - at > IN_FLIGHT_MAX_AGE_MS) continue;
+    if (r.outcome === "pending") n++;
+  }
+  return n;
+}
+
+/** A send's verdict: the bucket's (LimiterVerdict), or no free in-flight slot across processes. */
+export type SlotVerdict =
+  | LimiterVerdict
+  | { readonly ok: false; readonly reason: "concurrency"; readonly retry_after_ms: number };
+
+/**
+ * One send's slot under the ONE global limiter (plan 01 §6 D7: ≤ 2 in flight across every process,
+ * then the bucket's windows and the jobs' daily caps): refused `concurrency` (wait
+ * IN_FLIGHT_POLL_MS, nothing written) while ESPN_LIMITER.concurrency `pending` rows are live in any
+ * process, else the repository's verdict (and, when it admits the send, the `pending` row that
+ * holds the slot until its outcome is written). Every recorder of `espn_requests` takes its slot
+ * here — EspnLimiter.acquire, and any caller that sends ESPN requests outside the provider — so the
+ * cap binds them all. Throws what the repository throws (the caller fails closed).
+ *
+ * The count and the insert are two statements, not one transaction; the ≤ 1/s window closes the
+ * gap: a row another process inserts after this count and before this insert carries a time within
+ * a second of this request's `at` (unless that process waited over a second for the store's lock),
+ * so the insert is refused and the caller's next attempt counts again.
+ */
+export function trySlot(repo: LimiterRepository, req: LimiterRequest): SlotVerdict {
+  if (
+    inFlightOf(repo.recentOutcomes(IN_FLIGHT_SCAN_ROWS), Date.parse(req.at)) >=
+    ESPN_LIMITER.concurrency
+  )
+    return { ok: false, reason: "concurrency", retry_after_ms: IN_FLIGHT_POLL_MS };
+  return repo.tryRecord(req);
 }
 
 /** A counting semaphore (in-process concurrency ≤ ESPN_LIMITER.concurrency). */
@@ -205,7 +272,10 @@ export class Breaker {
   }
 }
 
-/** A recorded send: release it with the request's final outcome (retries keep the same row). */
+/**
+ * A recorded send: release it with that request's outcome. One ticket is ONE upstream request — a
+ * retry acquires a ticket (and a row) of its own (plan 01 §6).
+ */
 export interface LimiterTicket {
   readonly id: number;
   finish(outcome: RequestOutcome): void;
@@ -240,9 +310,10 @@ export class EspnLimiter {
   }
 
   /**
-   * Waits for a concurrency slot and a bucket slot, then records the send (one row per request).
-   * A wait that would pass `deadlineAtMs` is refused as RATE_LIMITED (with the wait); a daily cap
-   * is refused at once; a row that cannot be written refuses fail-closed.
+   * Waits for a concurrency slot (in this process, then across processes — `trySlot`) and a bucket
+   * slot, then records the send (one row per upstream request). A wait that would pass
+   * `deadlineAtMs` is refused as RATE_LIMITED (with the wait); a daily cap is refused at once; rows
+   * that cannot be read or written refuse fail-closed.
    */
   async acquire(opts: {
     readonly keyless: boolean;
@@ -258,26 +329,39 @@ export class EspnLimiter {
       }
     };
     try {
+      // the concurrency waits are counted as well as timed: a clock that does not move (a test's
+      // fixed clock) cannot keep the loop alive past the deadline's number of polls
+      let polls: number | null = null;
       for (;;) {
         const now = this.deps.clock.nowMs();
-        let verdict;
+        let verdict: SlotVerdict;
         try {
-          verdict = this.deps.repo.tryRecord(limiterRequest(now, opts.keyless, this.deps.origin));
+          verdict = trySlot(this.deps.repo, limiterRequest(now, opts.keyless, this.deps.origin));
         } catch (e) {
           throw new EspnLimiterUnavailableError(e);
+        }
+        if (!verdict.ok && verdict.reason === "concurrency") {
+          polls ??= Math.max(0, Math.floor((opts.deadlineAtMs - now) / IN_FLIGHT_POLL_MS));
+          if (now + verdict.retry_after_ms >= opts.deadlineAtMs || polls <= 0)
+            throw new EspnRateLimitedError(verdict.retry_after_ms, "concurrency");
+          polls--;
+          this.deps.onEvent?.("limiter.wait_concurrency");
+          await this.sleep(verdict.retry_after_ms, opts.signal);
+          continue;
         }
         if (verdict.ok) {
           const id = verdict.id;
           return {
             id,
             finish: (outcome) => {
-              releaseSlot();
               this.breaker.record(outcome);
+              // the outcome first: a waiter released by the slot counts this row as finished
               try {
                 this.deps.repo.recordOutcome(id, outcome);
               } catch {
                 this.deps.onEvent?.("limiter.outcome_unwritten");
               }
+              releaseSlot();
             },
           };
         }

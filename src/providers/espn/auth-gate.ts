@@ -1,6 +1,8 @@
 // auth-gate.ts — the provider's side of the credential rules (plan 02 §2.1; plan 01 §10): the
 // provider never reads a store — it asks the injected CredentialAuthority for the Cookie header and
-// reports discriminating observations. Season routes are always keyless; a league known public is
+// reports discriminating observations; the startup state label never stands in for that ask (a
+// value stored by `eff setup` while the server runs is found on the next cookie-bearing call — plan
+// 02 §2.2, plan 03 §1.1 step 4). Season routes are always keyless; a league known public is
 // read keyless (cookies cannot be tested there, and a 200 is not an acceptance); `rejected`
 // short-circuits with ESPN_AUTH_REJECTED and ZERO requests (unless the league is public); a view
 // that needs cookies with none stored is ESPN_REQUIRES_COOKIES, also with zero requests. The SWID
@@ -90,7 +92,11 @@ export class CookieGate {
     return this.auth !== null && this.publicity === null && this.auth.state() === "rejected";
   }
 
-  /** Whether any credential is configured (no store read — the state label only). */
+  /**
+   * Whether the state label says a credential is configured (no store read). A label only: it is
+   * set at startup from the store.sqlite row and corrected by the authority on its next store read,
+   * so it is never the reason to skip asking the authority (see forRequest).
+   */
   configured(): boolean {
     return this.auth !== null && this.auth.state() !== "not_configured";
   }
@@ -102,20 +108,30 @@ export class CookieGate {
   /**
    * The Cookie header for one request, or null for a keyless request; throws the short-circuit
    * (ESPN_AUTH_REJECTED) or ESPN_REQUIRES_COOKIES without any request being made.
+   *
+   * A cookie-bearing request asks the authority even while the label reads `not_configured`: the
+   * authority reads the stored `storedAt` on every ask, so a value `eff setup` stored in another
+   * process (a fresh install, after `--reset`, or a wiped cache with the items still stored) is
+   * picked up on this very call, no restart (plan 02 §2.2 "Multiple processes"; plan 03 §1.1 step 4
+   * [A-3], §6 L6). Nothing stored → the authority says `not_configured` and the rules below apply.
    */
   async forRequest(use: CookieUse, route: EspnRoute): Promise<string | null> {
     if (use === "never" || route === "season" || route === "players") return null;
-    if (this.auth === null || this.auth.state() === "not_configured") {
+    if (this.auth === null) {
       if (use === "required" && this.publicity !== true) this.requires();
       return null;
     }
     if (use === "auto" && this.publicity === true) return null;
+    const labelledNone = !this.configured();
     const r = await this.auth.getCookieHeader();
     if (r.ok) {
       this.swid = swidFromHeader(r.header);
       return r.header;
     }
-    if (r.reason === "not_configured") {
+    // nothing stored — or a store that cannot be read while nothing was ever recorded as stored (a
+    // keychain that will not load on an install that never ran setup): no credential, as before
+    // this call asked; an unreadable store behind a recorded value stays INTERNAL (doctor #6/#7)
+    if (r.reason === "not_configured" || (labelledNone && r.reason === "unreadable")) {
       if (use === "required" && this.publicity !== true) this.requires();
       return null;
     }
@@ -160,13 +176,31 @@ export class CookieGate {
     }
   }
 
-  /** The stored SWID (read lazily through the header), or null when none is available. */
+  /**
+   * The stored SWID (read lazily through the header), or null when none is available. Asks the
+   * authority whatever the label says, as forRequest does: a value stored after startup is found.
+   */
   async memberId(): Promise<string | null> {
     if (this.swid !== null) return this.swid;
-    if (!this.configured() || this.auth === null) return null;
+    if (this.auth === null) return null;
     const r = await this.auth.getCookieHeader();
     if (r.ok) this.swid = swidFromHeader(r.header);
     return this.swid;
+  }
+
+  /**
+   * Asks the authority once so its label and the `credential_state` row follow the store (a value
+   * stored since startup is loaded and its row recreated when a wiped cache lost it — plan 03 §1.1
+   * step 4 [A-3]); the answer itself is not used. Never throws.
+   */
+  async syncWithStore(): Promise<void> {
+    if (this.auth === null) return;
+    try {
+      const r = await this.auth.getCookieHeader();
+      if (r.ok) this.swid = swidFromHeader(r.header);
+    } catch {
+      // an unreadable store is the probe header's to report
+    }
   }
 
   /** The probe's header (exempt from the short-circuit when the authority offers it). */

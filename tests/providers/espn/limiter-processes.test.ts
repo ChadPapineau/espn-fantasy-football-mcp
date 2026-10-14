@@ -20,7 +20,13 @@ afterEach(() => {
   tmp = undefined;
 });
 
-function runChild(args: string[]): Promise<{ sent: number; refused: number }> {
+interface ChildResult {
+  readonly sent: number;
+  readonly refused: number;
+  readonly held: readonly (readonly [number, number])[];
+}
+
+function runChild(args: string[]): Promise<ChildResult> {
   return new Promise((resolve, reject) => {
     const p = spawn(process.execPath, ["--import", "tsx", CHILD, ...args], {
       cwd: ROOT,
@@ -33,10 +39,7 @@ function runChild(args: string[]): Promise<{ sent: number; refused: number }> {
     p.on("error", reject);
     p.on("close", (code) => {
       if (code !== 0) reject(new Error(`child exited ${String(code)}: ${err.slice(0, 500)}`));
-      else
-        resolve(
-          JSON.parse(out.trim().split("\n").at(-1) ?? "{}") as { sent: number; refused: number },
-        );
+      else resolve(JSON.parse(out.trim().split("\n").at(-1) ?? "{}") as ChildResult);
     });
   });
 }
@@ -53,6 +56,22 @@ function assertWindows(ts: readonly number[]): void {
   }
   // 40 asked, at most 30 fit in the first minute — the rest waited or were refused
   expect(ts.filter((x) => x < ts[0]! + 60_000).length).toBeLessThanOrEqual(ESPN_LIMITER.perMinute);
+}
+
+/** The most intervals open at once (an interval holds [start, end); a touch is no overlap). */
+function maxOverlap(intervals: readonly (readonly [number, number])[]): number {
+  const edges = intervals.flatMap(([s, e]): [number, number][] => [
+    [s, 1],
+    [e, -1],
+  ]);
+  edges.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  let open = 0;
+  let max = 0;
+  for (const [, d] of edges) {
+    open += d;
+    max = Math.max(max, open);
+  }
+  return max;
 }
 
 describe("two processes share one bucket (plan 01 §6)", () => {
@@ -100,5 +119,27 @@ describe("two processes share one bucket (plan 01 §6)", () => {
     db.close();
     expect(ts.length).toBe(a.sent + b.sent);
     assertWindows(ts);
+  }, 60_000);
+
+  // Stage C (limiter-concurrency-per-process): plan 01 §6 D7's ≤ 2 concurrent is global — each
+  // process alone would hold 2 (its semaphore), so two held 4 at once before the cross-process cap
+  it("≤ 2 requests in flight across two processes over the REAL store (each wants 4 at once)", async () => {
+    tmp = tempDir("eff-limiter-inflight-");
+    const file = path.join(tmp.dir, "store.sqlite");
+    const setup = storeFactory.open({
+      path: file,
+      datasetDir: path.join(tmp.dir, "datasets"),
+      backupDir: path.join(tmp.dir, "backups"),
+      clock: fixedClock("2026-10-06T12:00:00Z"),
+      migrate: true,
+    });
+    setup.close();
+    const base = Date.parse("2026-10-06T12:00:00Z");
+    // each child: 4 concurrent acquisitions, each request held 3 virtual seconds
+    const args = [file, "4", String(base), String(Date.now() + 1500), "40", "store", "3000"];
+    const [a, b] = await Promise.all([runChild(args), runChild(args)]);
+    expect(a.sent + a.refused + b.sent + b.refused).toBe(8);
+    expect(a.sent + b.sent).toBeGreaterThanOrEqual(4);
+    expect(maxOverlap([...a.held, ...b.held])).toBeLessThanOrEqual(ESPN_LIMITER.concurrency);
   }, 60_000);
 });

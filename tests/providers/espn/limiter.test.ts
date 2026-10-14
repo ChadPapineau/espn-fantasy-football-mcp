@@ -13,9 +13,13 @@ import {
   EspnLimiter,
   EspnLimiterUnavailableError,
   EspnRateLimitedError,
+  IN_FLIGHT_MAX_AGE_MS,
+  IN_FLIGHT_POLL_MS,
+  inFlightOf,
   limiterRequest,
   realSleep,
   Semaphore,
+  trySlot,
   utcDayStart,
 } from "../../../src/providers/espn/limiter.js";
 import { MemoryLimiterRepo, NOW_ISO } from "./helpers.js";
@@ -273,6 +277,239 @@ describe("EspnLimiter", () => {
     (await c).finish("ok");
     b.finish("ok");
     expect(l.inFlight).toBe(0);
+  });
+  // Stage C (limiter-concurrency-per-process): plan 01 §6 D7's "≤ 2 concurrent" is the ONE global
+  // limiter's — the server, a launchd job and a second client share it; it was an in-process
+  // semaphore only, so two processes held four requests in flight
+  it("never more than 2 in flight ACROSS processes: a second process waits for a slot", async () => {
+    const clock = fixedClock(NOW_ISO);
+    const repo = new MemoryLimiterRepo();
+    const waits: number[] = [];
+    let onWait = (): void => undefined;
+    const sleep = (ms: number): Promise<void> => {
+      waits.push(ms);
+      clock.advance(ms);
+      onWait();
+      return Promise.resolve();
+    };
+    const server = new EspnLimiter({ repo, clock, origin: "server", sleep });
+    const job = new EspnLimiter({ repo, clock, origin: "job", sleep });
+    const pending = (): number => repo.rows.filter((r) => r.outcome === "pending").length;
+    const deadline = (): number => clock.nowMs() + 20_000;
+    const a = await server.acquire({ keyless: true, deadlineAtMs: deadline(), signal: null });
+    clock.advance(1000);
+    const b = await job.acquire({ keyless: true, deadlineAtMs: deadline(), signal: null });
+    clock.advance(1000);
+    expect(pending()).toBe(2);
+    // a third request, from a process holding only one of them, waits until one finishes
+    let polls = 0;
+    onWait = () => {
+      polls++;
+      expect(pending()).toBe(2);
+      if (polls === 3) a.finish("ok");
+    };
+    const c = await job.acquire({ keyless: true, deadlineAtMs: deadline(), signal: null });
+    expect(waits).toEqual([IN_FLIGHT_POLL_MS, IN_FLIGHT_POLL_MS, IN_FLIGHT_POLL_MS]);
+    expect(pending()).toBe(2);
+    expect(repo.rows.map((r) => r.outcome)).toEqual(["ok", "pending", "pending"]);
+    b.finish("ok");
+    c.finish("ok");
+    expect(pending()).toBe(0);
+    expect(server.inFlight + job.inFlight).toBe(0);
+  });
+  it("a pending row past IN_FLIGHT_MAX_AGE_MS (a process that died mid-request) holds no slot", async () => {
+    const repo = new MemoryLimiterRepo();
+    for (const [i, age] of [IN_FLIGHT_MAX_AGE_MS + 1, IN_FLIGHT_MAX_AGE_MS + 5000].entries())
+      repo.rows.push({
+        id: 50 + i,
+        at: T0 - age,
+        keyless: true,
+        origin: "job",
+        outcome: "pending",
+      });
+    const waits: number[] = [];
+    const l = new EspnLimiter({
+      repo,
+      clock: fixedClock(NOW_ISO),
+      origin: "server",
+      sleep: (ms) => (waits.push(ms), Promise.resolve()),
+    });
+    (await l.acquire({ keyless: true, deadlineAtMs: T0 + 20_000, signal: null })).finish("ok");
+    expect(waits).toEqual([]);
+  });
+  it("no slot before the deadline → RATE_LIMITED (concurrency), nothing recorded, the slot released", async () => {
+    const repo = new MemoryLimiterRepo();
+    for (const [i, age] of [3000, 2000].entries())
+      repo.rows.push({
+        id: 60 + i,
+        at: T0 - age,
+        keyless: true,
+        origin: "job",
+        outcome: "pending",
+      });
+    const clock = fixedClock(NOW_ISO);
+    const l = new EspnLimiter({
+      repo,
+      clock,
+      origin: "server",
+      sleep: (ms) => (clock.advance(ms), Promise.resolve()),
+    });
+    const e = await l
+      .acquire({ keyless: true, deadlineAtMs: T0 + 1000, signal: null })
+      .catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(EspnRateLimitedError);
+    expect((e as EspnRateLimitedError).effDetails).toEqual({
+      retry_after_s: 1,
+      reason: "concurrency",
+    });
+    expect(repo.rows).toHaveLength(2);
+    expect(l.inFlight).toBe(0);
+  });
+  it("a clock that never moves cannot hold the wait open: the deadline's number of polls, then refused", async () => {
+    const repo = new MemoryLimiterRepo();
+    for (const [i, age] of [3000, 2000].entries())
+      repo.rows.push({
+        id: 70 + i,
+        at: T0 - age,
+        keyless: true,
+        origin: "job",
+        outcome: "pending",
+      });
+    const waits: number[] = [];
+    const l = new EspnLimiter({
+      repo,
+      clock: fixedClock(NOW_ISO),
+      origin: "server",
+      sleep: (ms) => (waits.push(ms), Promise.resolve()),
+    });
+    const e = await l
+      .acquire({ keyless: true, deadlineAtMs: T0 + 2000, signal: null })
+      .catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(EspnRateLimitedError);
+    expect((e as EspnRateLimitedError).effDetails.reason).toBe("concurrency");
+    expect(waits).toHaveLength(2000 / IN_FLIGHT_POLL_MS);
+    expect(l.inFlight).toBe(0);
+  });
+  it("rows that cannot be read refuse fail-closed (like a row that cannot be written)", async () => {
+    const repo = new MemoryLimiterRepo();
+    repo.recentOutcomes = () => {
+      throw new Error("store busy");
+    };
+    const l = new EspnLimiter({ repo, clock: fixedClock(NOW_ISO), origin: "server" });
+    const e = await l
+      .acquire({ keyless: true, deadlineAtMs: T0 + 20_000, signal: null })
+      .catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(EspnLimiterUnavailableError);
+    expect(repo.rows).toHaveLength(0);
+    expect(l.inFlight).toBe(0);
+  });
+  it("inFlightOf counts only live pending rows", () => {
+    const at = (ms: number): string => new Date(T0 - ms).toISOString();
+    expect(
+      inFlightOf(
+        [
+          { at: at(0), outcome: "pending" },
+          { at: at(1000), outcome: "ok" },
+          { at: at(IN_FLIGHT_MAX_AGE_MS), outcome: "pending" },
+          { at: at(IN_FLIGHT_MAX_AGE_MS + 1), outcome: "pending" },
+          { at: "not a time", outcome: "pending" },
+        ],
+        T0,
+      ),
+    ).toBe(2);
+    expect(inFlightOf([], T0)).toBe(0);
+  });
+  it("trySlot: the one rule every recorder takes its slot by (in-flight cap first, then the bucket)", () => {
+    const repo = new MemoryLimiterRepo();
+    // two live requests anywhere: refused `concurrency`, nothing written, the poll interval as wait
+    for (const [i, age] of [1500, 500].entries())
+      repo.rows.push({
+        id: 80 + i,
+        at: T0 - age,
+        keyless: true,
+        origin: "job",
+        outcome: "pending",
+      });
+    expect(trySlot(repo, limiterRequest(T0 + 2000, false, "server"))).toEqual({
+      ok: false,
+      reason: "concurrency",
+      retry_after_ms: IN_FLIGHT_POLL_MS,
+    });
+    expect(repo.rows).toHaveLength(2);
+    // one of them finished: the bucket decides — inside a second of the last row it is the window
+    repo.rows[1]!.outcome = "ok";
+    expect(trySlot(repo, limiterRequest(T0, false, "server"))).toMatchObject({
+      ok: false,
+      reason: "window",
+    });
+    const v = trySlot(repo, limiterRequest(T0 + 1000, false, "server"));
+    expect(v).toMatchObject({ ok: true });
+    expect(repo.rows.at(-1)).toMatchObject({ at: T0 + 1000, outcome: "pending" });
+    // that row now holds the second slot: the next send waits for one of the two to finish
+    expect(trySlot(repo, limiterRequest(T0 + 3000, true, "job"))).toMatchObject({
+      reason: "concurrency",
+    });
+    // a repository that cannot be read or written throws; the caller fails closed
+    const broken = new MemoryLimiterRepo();
+    broken.recentOutcomes = () => {
+      throw new Error("store busy");
+    };
+    expect(() => trySlot(broken, limiterRequest(T0, true, "server"))).toThrow("store busy");
+  });
+  it("property: two processes, any arrival pattern and request lengths, never > 2 in flight", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.record({
+            proc: fc.integer({ min: 0, max: 1 }),
+            gap: fc.integer({ min: 0, max: 1500 }),
+            hold: fc.integer({ min: 0, max: 4 }),
+          }),
+          { minLength: 1, maxLength: 24 },
+        ),
+        async (plan) => {
+          const clock = fixedClock(NOW_ISO);
+          const repo = new MemoryLimiterRepo();
+          // a request finishes after `hold` ticks (a tick: one acquisition step or one wait)
+          const open: { proc: number; ticket: { finish(o: "ok"): void }; left: number }[] = [];
+          let maxPending = 0;
+          const tick = (): void => {
+            for (const o of open) o.left--;
+            for (const o of open.filter((x) => x.left < 0)) o.ticket.finish("ok");
+            open.splice(0, open.length, ...open.filter((x) => x.left >= 0));
+          };
+          const sleep = (ms: number): Promise<void> => {
+            clock.advance(ms);
+            tick();
+            return Promise.resolve();
+          };
+          const procs = [0, 1].map(
+            (i) => new EspnLimiter({ repo, clock, origin: i === 0 ? "server" : "job", sleep }),
+          );
+          for (const step of plan) {
+            clock.advance(step.gap);
+            // the process's own semaphore wait: time passes until one of its requests finishes
+            while (open.filter((o) => o.proc === step.proc).length >= ESPN_LIMITER.concurrency) {
+              clock.advance(100);
+              tick();
+            }
+            const t = await procs[step.proc]!.acquire({
+              keyless: false,
+              deadlineAtMs: clock.nowMs() + 600_000,
+              signal: null,
+            }).catch(() => null);
+            maxPending = Math.max(
+              maxPending,
+              repo.rows.filter((r) => r.outcome === "pending").length,
+            );
+            if (t !== null) open.push({ proc: step.proc, ticket: t, left: step.hold });
+            tick();
+          }
+          expect(maxPending).toBeLessThanOrEqual(ESPN_LIMITER.concurrency);
+        },
+      ),
+      { numRuns: 60 },
+    );
   });
   it("property: any arrival pattern never exceeds 30 per 60 s or 1 per second", async () => {
     await fc.assert(

@@ -1,8 +1,9 @@
 // request.ts — the read pipeline every provider method goes through (plan 01 §5.3 cache-first, §5.6
 // the per-call budget, §6 limiter/backoff/breaker/deadline, §7 in-call drift; plan 02 §2.1 the
 // credential rules): cache → (fresh: done) → breaker → budget → coalesce → cookie decision →
-// limiter → attempts (429/5xx/timeouts retried with jitter inside the ≤ 20 s deadline; 400/401/403/
-// 404 and fail-fast network codes never) → classify → JSON → drift + schema → cache write. A failure
+// (limiter → attempt)+ (each attempt its own limiter row; 429/5xx/timeouts retried with jitter inside
+// the ≤ 20 s deadline, never sooner than the backoff, never once the breaker is open; 400/401/403/404
+// and fail-fast network codes never) → classify → JSON → drift + schema → cache write. A failure
 // falls back to the cached entry within its hard limit (`degraded`), or past it under `allow_stale`
 // or while the host is moved; never an upstream body in any error.
 import {
@@ -22,7 +23,7 @@ import {
   type DegradedRead,
   type PlatformStamp,
 } from "../../domain/league/types.js";
-import { checkResponse, failsResponse } from "../../drift/detect.js";
+import { checkResponse, failsResponse, type DriftCheck } from "../../drift/detect.js";
 import { errorPath } from "../../drift/pattern.js";
 import { DriftStateWriter, driftMetaFor } from "../../drift/state.js";
 import type { DriftObservations, DriftSignal } from "../../drift/types.js";
@@ -49,12 +50,21 @@ import {
   UNCACHED_VIEWS,
 } from "./cache.js";
 import { classifyAnswer, EspnDriftError, EspnUpstreamError } from "./errors.js";
-import { backoffMs, EspnBreakerOpenError, EspnLimiter, realSleep, type Sleep } from "./limiter.js";
+import {
+  backoffMs,
+  EspnBreakerOpenError,
+  EspnLimiter,
+  EspnRateLimitedError,
+  realSleep,
+  type LimiterTicket,
+  type Sleep,
+} from "./limiter.js";
 import { primaryView, type EspnTarget } from "./path.js";
 import { sendAttempt, type AttemptAnswer, type FetchLike } from "./transport.js";
 import { CookieGate, type CookieUse } from "./auth-gate.js";
 import { ESPN_BACKOFF } from "../../config/schema.js";
 import type { EspnView } from "./types.js";
+import { absentMeansEmptyPaths } from "./views/index.js";
 
 /** Thrown inside a parse function when the body does not match a view schema (internal). */
 export class SchemaSignals extends Error {
@@ -452,6 +462,43 @@ export class EspnRequester {
     return new EspnDriftError(view, errorPath(first?.path ?? "$"));
   }
 
+  /**
+   * The in-call drift check (plan 01 §7) with the seed paths whose absence means "none" on this
+   * answer (views `absentMeansEmptyPaths`: listed in ABSENT_MEANS_EMPTY, on an answer to a
+   * recognised view) read as empty lists: such a signal is never drift and never reaches
+   * `drift_state`; a view whose only failing signals they are is judged without them, and every
+   * other signal — an unrecognised-view skeleton included — stands as the detector gave it.
+   */
+  private checkBody(views: readonly EspnView[], body: unknown): DriftCheck {
+    const check = checkResponse(views, body, this.deps.observations);
+    if (!check.drifted) return check;
+    const excused = (s: DriftSignal): boolean =>
+      (s.kind === "skeleton" || s.kind === "missing_required_key") &&
+      absentMeansEmptyPaths(s.view, body).includes(s.path);
+    const failing = check.signals.filter(failsResponse);
+    if (!failing.some(excused)) return check;
+    for (const s of failing.filter(excused))
+      this.deps.log?.debug("espn.absent_means_empty", { view: s.view, path: s.path });
+    if (failing.some((s) => !excused(s))) {
+      const signals = check.signals.filter((s) => !excused(s));
+      return {
+        signals,
+        drifted: true,
+        skeleton: signals.some((s) => s.kind === "skeleton"),
+        first: signals.find(failsResponse) ?? null,
+      };
+    }
+    // every failing signal is an absent list: the views they name pass (their enum/additive
+    // observations, if a manifest ever records any, are not read on this answer); the other views
+    // are checked as usual, observations included
+    const cleared = new Set(failing.map((s) => s.view));
+    return checkResponse(
+      views.filter((v) => !cleared.has(v)),
+      body,
+      this.deps.observations,
+    );
+  }
+
   /** Records the non-failing signals once per process (enum and additive drift are counted, not fatal). */
   private reportSoftSignals(signals: readonly DriftSignal[]): void {
     const fresh = signals.filter((s) => {
@@ -470,7 +517,27 @@ export class EspnRequester {
     }
   }
 
-  /** One fresh upstream read (inside the coalescer): cookie → limiter → attempts → JSON → drift → cache. */
+  /**
+   * The wait before retry `attempt` (1-based): the backoff schedule, never shortened by a
+   * `Retry-After` — a hint longer than the backoff lengthens it, a shorter one (`0`) does not
+   * collapse the retries into a burst (plan 01 §6 "honour Retry-After" inside the 1/2/4 s floor).
+   */
+  private retryWaitMs(err: EspnUpstreamError, attempt: number): number {
+    return Math.max(
+      backoffMs(attempt, this.deps.random?.() ?? Math.random()),
+      err.retryAfterMs ?? 0,
+    );
+  }
+
+  /**
+   * One fresh upstream read (inside the coalescer): cookie → (limiter → attempt)+ → JSON → drift →
+   * cache. Every attempt — the first and each retry — is one upstream request and passes the limiter
+   * on its own (its own `espn_requests` row: the 30/min and 1/s windows, the job fleet's daily caps,
+   * the cross-process concurrency cap; plan 01 §6 "each request inserts a row … before sending").
+   * A retry is not a new request for the call's budget (platform.ts UpstreamBudget) but must fit the
+   * deadline; one the limiter cannot fit before the deadline ends the read with the last upstream
+   * failure, and none is sent once the breaker is open.
+   */
   private async fetchFresh<T>(
     spec: ReadSpec<T>,
     entry: EspnCacheEntry | null,
@@ -483,16 +550,22 @@ export class EspnRequester {
     const deadline = opts.budget?.deadline_at_ms ?? this.deps.clock.nowMs() + PER_CALL_DEADLINE_MS;
     const signal = opts.budget?.signal ?? null;
     const cookie = await this.cookies.forRequest(spec.cookies, target.route);
-    const ticket = await this.limiter.acquire({
-      keyless: cookie === null,
-      deadlineAtMs: deadline,
-      signal,
-    });
-    let outcome: RequestOutcome = "network_error";
-    try {
-      let attempt = 0;
-      for (;;) {
-        attempt++;
+    let last: EspnUpstreamError | null = null;
+    for (let attempt = 1; ; attempt++) {
+      let ticket: LimiterTicket;
+      try {
+        ticket = await this.limiter.acquire({
+          keyless: cookie === null,
+          deadlineAtMs: deadline,
+          signal,
+        });
+      } catch (e) {
+        if (last !== null && e instanceof EspnRateLimitedError) throw last;
+        throw e;
+      }
+      let outcome: RequestOutcome = "network_error";
+      let wait: number;
+      try {
         const now = this.deps.clock.nowMs();
         const timeoutMs = Math.min(
           this.deps.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS,
@@ -533,28 +606,22 @@ export class EspnRequester {
             return await this.success(spec, answer, cookie !== null, key, cacheable);
           }
         }
+        if (!(failure instanceof EspnUpstreamError)) throw failure;
         const err = failure;
-        if (err instanceof EspnUpstreamError) {
-          outcome = err.outcome;
-          await this.afterFailure(err, cookie !== null, view);
-          const wait =
-            err.retryAfterMs ?? backoffMs(attempt, this.deps.random?.() ?? Math.random());
-          if (
-            err.retryable &&
-            attempt < ESPN_BACKOFF.maxAttempts &&
-            opts.budget?.canStart(this.deps.clock.nowMs() + wait) !== false &&
-            this.deps.clock.nowMs() + wait < deadline
-          ) {
-            this.limiter.breaker.record(err.outcome);
-            this.deps.log?.debug("espn.retry", { view, attempt, kind: err.kind });
-            await (this.deps.sleep ?? realSleep)(wait, signal);
-            continue;
-          }
-        }
-        throw err;
+        outcome = err.outcome;
+        last = err;
+        await this.afterFailure(err, cookie !== null, view);
+        if (!err.retryable || attempt >= ESPN_BACKOFF.maxAttempts) throw err;
+        wait = this.retryWaitMs(err, attempt);
+        const at = this.deps.clock.nowMs() + wait;
+        if (opts.budget?.canStart(at) === false || at >= deadline) throw err;
+      } finally {
+        ticket.finish(outcome);
       }
-    } finally {
-      ticket.finish(outcome);
+      // the breaker opened (this read's failures or another process's): no further request
+      if (this.limiter.breaker.isOpen()) throw last;
+      this.deps.log?.debug("espn.retry", { view, attempt, kind: last.kind });
+      await (this.deps.sleep ?? realSleep)(wait, signal);
     }
   }
 
@@ -686,7 +753,7 @@ export class EspnRequester {
       throw new EspnUpstreamError("malformed", { view, upstream_status: answer.status });
     }
     if (large) await yieldToLoop();
-    const check = checkResponse(spec.target.views, body, this.deps.observations);
+    const check = this.checkBody(spec.target.views, body);
     if (check.drifted) throw this.driftError(check.signals);
     if (large) await yieldToLoop();
     let parsed: unknown;
@@ -701,7 +768,10 @@ export class EspnRequester {
     this.cookies.learnFromBody(body);
     if (cookieBearing) await this.cookies.observe("accepted", answer.status, view);
     try {
-      this.drift.recovered();
+      // this answer passed every requested view's required keys AND its schema: drift is a fact
+      // about the latest answer, so the views it verified clear their removed keys (src/drift
+      // applyRecovered, `schema`) — and a good answer from the configured host ends a host move
+      this.drift.recovered(spec.target.views, "schema");
     } catch {
       this.deps.log?.warn("espn.drift_state.write_failed");
     }

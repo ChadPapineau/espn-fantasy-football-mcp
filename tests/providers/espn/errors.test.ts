@@ -6,6 +6,8 @@
 // only the allow-listed fields.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { BREAKER_FAILURE_OUTCOMES } from "../../../src/config/schema.js";
+import { classifyFetchError } from "../../../src/http/errors.js";
 import { toToolError } from "../../../src/mcp/errors.js";
 import {
   classifyAnswer,
@@ -287,6 +289,101 @@ describe("thrown network failures", () => {
     expect(classifyThrown("a string", false, "mRoster").kind).toBe("network_transient");
     expect(classifyThrown(null, false, "mRoster").kind).toBe("network_transient");
     expect(classifyThrown({ code: 5 }, false, "mRoster").kind).toBe("network_transient");
+  });
+  // Stage C (espn-connect-timeout-not-breaker-counted): Node's fetch gives up on a black-holed
+  // address after ≈ 10 s — `TypeError: fetch failed` ← `UND_ERR_CONNECT_TIMEOUT` — before the 15 s
+  // attempt timer, so `timedOut` is false; it was `network_transient`, which the breaker never counts
+  it("a timeout the runtime raised before our timer (connect / headers / body / ETIMEDOUT / TimeoutError) → timeout, counted", () => {
+    const wrapped = (code: string): unknown =>
+      new TypeError("fetch failed", {
+        cause: Object.assign(new Error("Connect Timeout Error"), { code }),
+      });
+    for (const [code, reason] of [
+      ["UND_ERR_CONNECT_TIMEOUT", "connect_timeout"],
+      ["UND_ERR_HEADERS_TIMEOUT", "runtime_timeout"],
+      ["UND_ERR_BODY_TIMEOUT", "runtime_timeout"],
+      ["ETIMEDOUT", "runtime_timeout"],
+    ] as const) {
+      const e = classifyThrown(wrapped(code), false, "mRoster");
+      expect(e, code).toMatchObject({
+        kind: "timeout",
+        outcome: "timeout",
+        retryable: true,
+        effCode: "ESPN_UPSTREAM_UNAVAILABLE",
+        effDetails: { view: "mRoster", reason },
+      });
+      expect(BREAKER_FAILURE_OUTCOMES).toContain(e.outcome);
+      // the shared http classifier says the same (the two never disagree on a timeout)
+      expect(classifyFetchError(wrapped(code), null, null, true).kind, code).toBe("timeout");
+    }
+    const timeoutError = new DOMException("signal timed out", "TimeoutError");
+    expect(classifyThrown(timeoutError, false, "mRoster")).toMatchObject({
+      kind: "timeout",
+      effDetails: { reason: "runtime_timeout" },
+    });
+    expect(classifyFetchError(timeoutError, null, null, true).kind).toBe("timeout");
+    // our own timer is named as such, whatever the error says
+    expect(classifyThrown(wrapped("UND_ERR_CONNECT_TIMEOUT"), true, "mRoster").effDetails).toEqual({
+      view: "mRoster",
+      reason: "attempt_timeout",
+    });
+    // deeper in the chain, still found; the connect timeout is named wherever it sits; a fail-fast
+    // code anywhere still wins (never retried)
+    const deep = new TypeError("fetch failed", {
+      cause: new Error("wrap", { cause: Object.assign(new Error("t"), { code: "ETIMEDOUT" }) }),
+    });
+    expect(classifyThrown(deep, false, "mRoster").kind).toBe("timeout");
+    const named = new TypeError("fetch failed", {
+      cause: Object.assign(new DOMException("t", "TimeoutError"), {
+        cause: Object.assign(new Error("c"), { code: "UND_ERR_CONNECT_TIMEOUT" }),
+      }),
+    });
+    expect(classifyThrown(named, false, "mRoster").effDetails.reason).toBe("connect_timeout");
+    const connectFirst = new TypeError("fetch failed", {
+      cause: Object.assign(
+        new Error("c", { cause: Object.assign(new Error("t"), { code: "ETIMEDOUT" }) }),
+        { code: "UND_ERR_CONNECT_TIMEOUT" },
+      ),
+    });
+    expect(classifyThrown(connectFirst, false, "mRoster").effDetails.reason).toBe(
+      "connect_timeout",
+    );
+    // a reset is still transient, not a timeout
+    expect(classifyThrown(wrapped("ECONNRESET"), false, "mRoster").kind).toBe("network_transient");
+    const both = new TypeError("fetch failed", {
+      cause: Object.assign(
+        new Error("t", { cause: Object.assign(new Error("d"), { code: "ENOTFOUND" }) }),
+        {
+          code: "UND_ERR_CONNECT_TIMEOUT",
+        },
+      ),
+    });
+    expect(classifyThrown(both, false, "mRoster").kind).toBe("network");
+    // an error whose name is not a string, or whose name getter throws, reads as no name
+    const odd = Object.assign(new Error("x"), { name: 5 as unknown as string });
+    expect(classifyThrown(odd, false, "mRoster").kind).toBe("network_transient");
+    const hostile = new Error("x");
+    Object.defineProperty(hostile, "name", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(classifyThrown(hostile, false, "mRoster").kind).toBe("network_transient");
+    // a code or cause getter that throws is no code and no cause: never an exception out of here
+    const badCode = new Error("x");
+    Object.defineProperty(badCode, "code", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(classifyThrown(badCode, false, "mRoster").kind).toBe("network_transient");
+    const badCause = new TypeError("fetch failed");
+    Object.defineProperty(badCause, "cause", {
+      get() {
+        throw new Error("boom");
+      },
+    });
+    expect(classifyThrown(badCause, false, "mRoster").kind).toBe("network_transient");
   });
 });
 

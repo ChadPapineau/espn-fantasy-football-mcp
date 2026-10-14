@@ -290,11 +290,16 @@ describe("drift in call (plan 01 §7)", () => {
       effDetails: { view: "mRoster", path: "teams[].roster.entries[].playerId" },
     });
   });
-  it("mSettings drift refuses to score and every read carries meta.drift (T-14)", async () => {
+  it("mSettings drift refuses to score and every read carries meta.drift (T-14) — while the drift is present", async () => {
     const broken = structuredClone(settingsBody(true)) as { settings: Record<string, unknown> };
     delete broken.settings.scoringSettings;
     const fetch = scripted({
-      "mSettings&mNav": [() => jsonResponse(broken), () => jsonResponse(settingsBody(true))],
+      "mSettings&mNav": [
+        () => jsonResponse(broken),
+        () => jsonResponse(broken),
+        () => jsonResponse(broken),
+        () => jsonResponse(settingsBody(true)),
+      ],
       "mTeam&mStandings": [() => jsonResponse(loadFixture("recorded/league-a/mTeam.json"))],
     });
     const w = makeWorld({ fetch });
@@ -308,6 +313,11 @@ describe("drift in call (plan 01 §7)", () => {
     await expect(w.provider.getScoringSettings(w.ref)).rejects.toMatchObject({
       effDetails: { path: "settings.scoringSettings" },
     });
+    // a complete mSettings answer verifies the view: its removed key clears and scoring resumes
+    // (src/drift applyRecovered — drift is a fact about the latest answer, not a latch)
+    await expect(w.provider.getScoringSettings(w.ref)).resolves.toBeTruthy();
+    expect(w.provider.scoringRefusal()).toBeNull();
+    expect(w.drift.row?.status).toBe("green");
   });
   it("unknown enum values are counted once (soft), never fatal", async () => {
     const kona = structuredClone(loadFixture("recorded/league-a/kona_player_info.json")) as {
@@ -382,7 +392,7 @@ describe("status codes (never retried: 400/401/403/404)", () => {
     expect(fetch.calls).toHaveLength(1);
     expect(logs).toContain("espn.request.failed");
   });
-  it("429 → RATE_LIMITED after 3 attempts with backoff (1 s, 2 s); no 4th attempt", async () => {
+  it("429 → RATE_LIMITED after 3 attempts with backoff (1 s, 2 s); no 4th attempt; one limiter row per attempt", async () => {
     const fetch = scripted({ proTeamSchedules_wl: [() => jsonResponse({}, 429)] });
     const w = makeWorld({ fetch });
     await expect(w.provider.getProSchedule(SEASON)).rejects.toMatchObject({
@@ -390,8 +400,12 @@ describe("status codes (never retried: 400/401/403/404)", () => {
     });
     expect(fetch.calls).toHaveLength(3);
     expect(w.sleeps).toEqual([1000, 2000]);
-    expect(w.limiter.rows).toHaveLength(1);
-    expect(w.limiter.rows[0]?.outcome).toBe("rate_limited");
+    // every attempt is an upstream request: each has its own espn_requests row (plan 01 §6)
+    expect(w.limiter.rows.map((r) => r.outcome)).toEqual([
+      "rate_limited",
+      "rate_limited",
+      "rate_limited",
+    ]);
   });
   it("Retry-After is honoured when ESPN ever sends one", async () => {
     const fetch = scripted({
