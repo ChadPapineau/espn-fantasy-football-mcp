@@ -3,6 +3,10 @@
 // sib QA-1-061 the dedup scope is the whole RECORD_DEDUP_SCOPE). Required writes. Free text in a
 // stored record is model-authored and untrusted on read (plan 07 C15): the store returns it raw,
 // except `action_summary`, which is sanitised to BareText here; readers path-list RECLOG_TEXT_PATHS.
+// One league-week holds at most RECORDS_PER_WEEK_MAX rows and RECORD_WEEK_BYTES_MAX stored bytes, so
+// every week read (`forWeek`: E13, espn-ff://rec/week) is one bounded statement plus parse however
+// long the never-pruned log grows (plan 03 §1.2's stall bound; Stage C,
+// reclog-retrospective-unbounded-read).
 // Ported from sibling @cf3b015, adapted (ESPN league ids; settings_hash required).
 import { randomBytes } from "node:crypto";
 import { ESPN_LEAGUE_ID_RE, SEEDING_MODES } from "../../config/schema.js";
@@ -49,6 +53,37 @@ export const LIST_OFFSET_MAX = 10_000;
 export const NOTE_MAX = 200;
 /** Largest stored record. */
 export const RECORD_JSON_MAX = 1024 * 1024;
+/**
+ * Records one league-week holds (every kind; a deduplicated re-record adds none). Normal use is 5–20
+ * a week. `forWeek` reads a whole week in one synchronous statement plus a parse per row, and the
+ * log is never pruned (T-07), so without this bound the read grew with every record E12 accepted
+ * (400 records in one week: E13 stalled the main loop 71 ms). At the bound — about 2 MB — the read
+ * costs ≈ 11 ms (p95 ≈ 18 ms on the development Mac; tests/store/reclog-week.perf.test.ts holds the
+ * p95 under 25 ms). A caller reading several weeks yields between them (plan 03 §1.2: one statement
+ * per turn).
+ */
+export const RECORDS_PER_WEEK_MAX = 100;
+/**
+ * Stored bytes (UTF-8, after pseudonymisation) one league-week holds: twice RECORD_JSON_MAX, so any
+ * record the store accepts fits an empty week, and about RECORDS_PER_WEEK_MAX E12 inputs at their
+ * 20 000-char cap (BOUNDS.recordInputChars). Bounds the week's read when its records are large.
+ */
+export const RECORD_WEEK_BYTES_MAX = 2 * RECORD_JSON_MAX;
+
+/**
+ * A record refused because its league-week is full (RECORDS_PER_WEEK_MAX rows, or the record would
+ * carry the week past RECORD_WEEK_BYTES_MAX). Carries a VALIDATION `effCode` (src/mcp/errors.ts
+ * reads it): the tool answers a typed refusal with reason `week_record_limit`, never INTERNAL;
+ * nothing is written.
+ */
+export class RecordWeekFullError extends Error {
+  readonly effCode = "VALIDATION" as const;
+  readonly effDetails = { reason: "week_record_limit" } as const;
+  constructor() {
+    super("store: this league-week already holds the most recommendations one week may hold");
+    this.name = "RecordWeekFullError";
+  }
+}
 
 /** A `rec-` + ULID log id: 48-bit time from `ms`, 80 random bits (LOG_ID_RE). */
 export function newLogId(ms: number): string {
@@ -136,6 +171,21 @@ export function recommendationLogRepository({
               deduplicated: true,
             };
         }
+        // the text as stored (a refusal below rolls back any pseudonym row this added)
+        const stored = pseudonyms.apply(json);
+        // the week's bound, checked inside the same write transaction (BEGIN IMMEDIATE), so two
+        // recorders can never both take the last place; bytes on both sides (CAST AS BLOB = UTF-8)
+        const held = db
+          .prepare(
+            `SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(CAST(record_json AS BLOB))), 0) AS bytes
+             FROM recommendation_log WHERE league_id = ? AND season = ? AND week = ?`,
+          )
+          .get(input.league_id, input.season, input.week) as { n: number; bytes: number };
+        if (
+          num(held.n) >= RECORDS_PER_WEEK_MAX ||
+          num(held.bytes) + Buffer.byteLength(stored, "utf8") > RECORD_WEEK_BYTES_MAX
+        )
+          throw new RecordWeekFullError();
         const logId = newLogId(ms);
         db.prepare(
           `INSERT INTO recommendation_log
@@ -151,7 +201,7 @@ export function recommendationLogRepository({
           ms,
           input.settings_hash,
           input.client_ref,
-          pseudonyms.apply(json),
+          stored,
         );
         return {
           log_id: logId,
