@@ -23,7 +23,8 @@
 // text nor a recognised binary format are refused (S5, S7) · 2 usage/IO error (a file too large to
 // read is an error, never skipped). It reads UTF-8, and UTF-16/UTF-32 with a byte-order mark; gzip is
 // decompressed; only a binary whose bytes carry its extension's format magic is skipped, and the
-// deny-list still reads its bytes. Details: "what a blob IS" below.
+// deny-list still reads its bytes — as latin1, as UTF-8 and, when they hold NULs, without them and as
+// UTF-16 (rawDenyViews). Details: "what a blob IS" below.
 //
 // Suppression: a line containing `scan-secrets: allow` skips the GENERIC rules on that line only.
 // It never suppresses the ESPN credential rules, a private key, or the deny-list (gitleaks in CI
@@ -390,14 +391,15 @@ export function isGithubNoreply(addr) {
 // --- what a blob IS (its bytes decide, never only its name) ---------------------------------------
 //
 // The scanner reads UTF-8 text, and UTF-16 / UTF-32 text that starts with a byte-order mark; it
-// decompresses gzip; it skips (deny-list on the raw bytes only) a binary whose bytes carry the magic
-// number of the opaque format its extension names (an image, audio, video, font, wasm or native
-// object). Everything else is REFUSED (fail closed): an archive, a document container (.docx/.xlsx/
-// .pptx/.odt/.numbers/.epub/.jar are zip files, a .pdf carries Flate streams), a compressed stream or
-// a database — detected by content (magic number, or a zip record anywhere: a zip appended to another
-// file still opens) and by extension — and any other content that is neither text nor a recognised
-// binary (a raw deflate or brotli stream, legacy-encoded text, UTF-16 without a byte-order mark that
-// is not plain ASCII). A rule cannot see into compressed bytes, so "clean" would be a lie.
+// decompresses gzip; it skips (deny-list on the raw bytes only, in every reading rawDenyViews gives)
+// a binary whose bytes carry the magic number of the opaque format its extension names (an image,
+// audio, video, font, wasm or native object). Everything else is REFUSED (fail closed): an archive,
+// a document container (.docx/.xlsx/.pptx/.odt/.numbers/.epub/.jar are zip files, a .pdf carries
+// Flate streams), a compressed stream or a database — detected by content (magic number, or a zip
+// record anywhere: a zip appended to another file still opens) and by extension — and any other
+// content that is neither text nor a recognised binary (a raw deflate or brotli stream,
+// legacy-encoded text, UTF-16 without a byte-order mark that is not plain ASCII). A rule cannot see
+// into compressed bytes, so "clean" would be a lie.
 
 /**
  * Archives, document containers, compressed streams and databases refused by NAME (S5: a compressed
@@ -591,6 +593,29 @@ export const OPAQUE_FORMATS = Object.freeze([
  */
 export function isOpaqueBinary(name, buf) {
   return OPAQUE_FORMATS.some((f) => f.ext.test(name) && f.test(buf));
+}
+
+/**
+ * The texts the deny-list reads in bytes no rule decodes — a binary it skips, content it refuses:
+ * the bytes one per character (latin1); as UTF-8, where a non-ASCII term is stored as UTF-8 (an image's
+ * XMP or iTXt metadata); and, when the bytes hold NULs, without them and as UTF-16 in both byte orders
+ * and alignments, where a term is stored as UTF-16 (EXIF XP* tags, ID3 frames, Windows resources).
+ * Read as latin1 only, those terms were never seen (Stage C finding scan-utf16-fails-open, its binary
+ * half). Each view is another reading of the same bytes, never a decompression; they are produced
+ * one at a time, so a large blob never holds them all at once.
+ * @param {Buffer} buf
+ * @returns {Generator<string>}
+ */
+export function* rawDenyViews(buf) {
+  yield buf.toString("latin1");
+  yield buf.toString("utf8");
+  if (!buf.includes(0)) return;
+  yield buf.toString("latin1").replaceAll("\u0000", "");
+  for (const off of [0, 1]) {
+    const b = buf.subarray(off, off + ((buf.length - off) & ~1));
+    yield b.toString("utf16le");
+    yield Buffer.from(b).swap16().toString("utf16le");
+  }
 }
 
 const UTF8_STRICT = new TextDecoder("utf-8", { fatal: true });
@@ -948,7 +973,11 @@ export function scanBlob(label, buf, deny, o = {}) {
   /** @type {{ findings: string[], scanned: number, binary: number }} */
   const out = { findings: [], scanned: 0, binary: 0 };
   const rawDeny = () => {
-    for (const l of denylistLines(buf.toString("latin1"), deny))
+    if (!deny.length) return;
+    // every reading of the raw bytes (rawDenyViews); one finding per line, whichever view saw it
+    const lines = new Set();
+    for (const view of rawDenyViews(buf)) for (const l of denylistLines(view, deny)) lines.add(l);
+    for (const l of [...lines].sort((x, y) => x - y))
       out.findings.push(`deny-list match in ${label}:${String(l)}`);
   };
   /** @param {string} why */

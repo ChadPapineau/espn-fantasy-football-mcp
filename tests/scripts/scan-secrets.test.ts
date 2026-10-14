@@ -29,6 +29,7 @@ import {
   looksLikeBareEspnS2,
   normalise,
   parseDenylist,
+  rawDenyViews,
   scanText,
 } from "../../scripts/dev/scan-secrets.mjs";
 import { fakeEspnS2, fakeGuid } from "../../scripts/ci/secret-fixtures.mjs";
@@ -1182,5 +1183,73 @@ describe("S7: UTF-16 and UTF-32 text is decoded, never read as NUL-interleaved U
       }),
       { numRuns: 200 },
     );
+  });
+});
+
+// Stage C finding scan-utf16-fails-open, its binary half: the deny-list read a skipped binary (and
+// refused content) as latin1 only, so a term stored as UTF-16 (EXIF XP* tags, ID3 frames, Windows
+// resources) or a non-ASCII term stored as UTF-8 (XMP, PNG iTXt) was never seen. A numeric term
+// (the league id) has no skeleton fallback, so in UTF-16 it was missed outright.
+describe("the deny-list reads a skipped or refused blob in every byte reading", () => {
+  const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  /** A deny-list term with letters outside ASCII (synthetic). */
+  const ACCENTED = ["Ñandú", "Rovers"].join(" ");
+  const deny = () => parseDenylist(`${LEAK_ID}\n${LEAK_TEAM}\n${ACCENTED}\n`);
+  const png = (...parts: Buffer[]) =>
+    Buffer.concat([PNG_MAGIC, Buffer.from([0, 0, 0, 13]), ...parts]);
+  const utf16be = (s: string) => Buffer.from(s, "utf16le").swap16();
+
+  it.each([
+    ["the league id as UTF-16LE", () => Buffer.from(`id ${LEAK_ID} `, "utf16le")],
+    ["the league id as UTF-16BE", () => utf16be(`id ${LEAK_ID} `)],
+    [
+      "the league id as UTF-16LE at an odd offset",
+      () => Buffer.concat([Buffer.from([7]), Buffer.from(`id ${LEAK_ID} `, "utf16le")]),
+    ],
+    ["a non-ASCII team name as UTF-8", () => Buffer.from(`artist=${ACCENTED};`, "utf8")],
+    ["a non-ASCII team name as UTF-16LE", () => Buffer.from(`artist=${ACCENTED};`, "utf16le")],
+    [
+      "a non-ASCII team name as UTF-16BE at an odd offset",
+      () => Buffer.concat([Buffer.from([7]), utf16be(`artist=${ACCENTED};`)]),
+    ],
+  ])(
+    "a genuine PNG carrying %s is still skipped, and the deny-list matches it",
+    (_label, field) => {
+      const r = scanBlob("shot.png", png(field()), deny());
+      expect(r.binary).toBe(1);
+      expect(r.findings.length).toBeGreaterThanOrEqual(1);
+      expect(r.findings.every((f) => /^deny-list match in shot\.png:\d+$/.test(f))).toBe(true);
+      noLeakS7(r.findings.join("\n"));
+    },
+  );
+
+  it("content it refuses is read the same way (a raw deflate stream beside a UTF-16 league id)", () => {
+    const blob = Buffer.concat([
+      deflateRawSync(Buffer.from("x".repeat(64))),
+      Buffer.from(` ${LEAK_ID} `, "utf16le"),
+    ]);
+    const r = scanBlob("blob.dat", blob, deny());
+    expect(r.findings.some((f) => f.includes("[unscannable-archive-or-database]"))).toBe(true);
+    expect(r.findings.some((f) => f.startsWith("deny-list match in blob.dat:"))).toBe(true);
+  });
+
+  it("one finding per line, whichever readings see it; nothing without a term; nothing printed", () => {
+    // ASCII: the latin1, UTF-8 and NUL-free readings all see it — reported once
+    const once = scanBlob("shot.png", png(Buffer.from(LEAK_TEAM)), deny());
+    expect(once.findings).toEqual(["deny-list match in shot.png:3"]);
+    expect(
+      scanBlob("shot.png", png(Buffer.from("nothing here", "utf16le")), deny()).findings,
+    ).toEqual([]);
+    expect(scanBlob("shot.png", png(Buffer.from(LEAK_TEAM)), []).findings).toEqual([]);
+  });
+
+  it("rawDenyViews: latin1 and UTF-8 always; without NULs and as UTF-16 (both orders, both alignments) when NULs are there", () => {
+    const ascii = Buffer.from("abc");
+    expect([...rawDenyViews(ascii)]).toEqual(["abc", "abc"]);
+    const le = Buffer.from("Té", "utf16le");
+    const views = [...rawDenyViews(le)];
+    expect(views).toHaveLength(7);
+    expect(views).toContain("Té");
+    expect([...rawDenyViews(Buffer.concat([Buffer.from([1]), utf16be("Té")]))]).toContain("Té");
   });
 });
