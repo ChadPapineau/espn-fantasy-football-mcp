@@ -1,7 +1,8 @@
 // backup.test.ts — consistent backups (plan 03 L7 / §7; T-15(b); plan 06 §1.3 `store backup`): VACUUM
 // INTO a fresh 0600 file under the process lock, including another process's committed rows that
 // live only in its WAL; an existing destination is refused; a held lock is waited for; weekly paths
-// and their keep-4 retention; and the process lock itself (exclusive, stale/dead holders broken).
+// and their keep-4 retention (a new name always ranks newest, so no backup is deleted by its own
+// rotation); and the process lock itself (exclusive, stale/dead holders broken).
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +14,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   KEEP_WEEKLY_BACKUPS,
@@ -146,6 +148,153 @@ describe("weekly backups (keep 4)", () => {
     ]);
     expect(() => pruneWeeklyBackups(t.backupDir, 0)).toThrow(RangeError);
     expect(pruneWeeklyBackups(path.join(t.backupDir, "absent"))).toEqual([]);
+  });
+
+  // Stage C, store-backup-rotation-deletes-newest: `eff backup` names the file, writes it, then
+  // rotates (src/cli/maintenance.ts: weeklyBackupPath → Store.backup → pruneWeeklyBackups). Once the
+  // rotation had deleted the day's bare-named first backup, the next same-day run took the bare name
+  // again; the bare name ranks as the day's FIRST, so that run's own rotation deleted the copy it had
+  // just written and the command still reported success. A new name now always ranks newest, or the
+  // backup is refused before anything is written.
+  const listing = (): string[] => {
+    try {
+      return readdirSync(t.backupDir).sort();
+    } catch {
+      return [];
+    }
+  };
+  /** One `eff backup` without the store (a placeholder file): name, write, rotate. */
+  const backupOnce = (nowMs: number): string => {
+    mkdirSync(t.backupDir, { recursive: true, mode: 0o700 });
+    const dest = weeklyBackupPath(t.backupDir, nowMs);
+    writeFileSync(dest, "x", { mode: 0o600, flag: "wx" });
+    pruneWeeklyBackups(t.backupDir);
+    return path.basename(dest);
+  };
+
+  it("six same-day `eff backup` runs through Store.backup: each survives its own rotation, the newest four remain", async () => {
+    const t0 = Date.parse("2026-10-11T14:00:00.000Z");
+    mkdirSync(t.backupDir, { recursive: true, mode: 0o700 });
+    const written: string[] = [];
+    const removedPerRun: string[][] = [];
+    for (let i = 0; i < 6; i++) {
+      const dest = weeklyBackupPath(t.backupDir, t0 + i * 1000);
+      const res = await s.backup(dest); // VACUUM INTO under the process lock, as the CLI runs it
+      expect(res.path).toBe(dest);
+      const removed = pruneWeeklyBackups(t.backupDir);
+      removedPerRun.push(removed);
+      const name = path.basename(dest);
+      written.push(name);
+      // the copy this run reported writing is still there after its own rotation
+      expect(removed, `run ${String(i + 1)}`).not.toContain(name);
+      expect(existsSync(dest), `run ${String(i + 1)}`).toBe(true);
+      expect(rowsIn(dest)).toBe(0); // a complete database, readable on its own
+    }
+    expect(written[0]).toBe("store-2026-10-11.sqlite");
+    expect(new Set(written).size).toBe(6); // the bare name is never taken back
+    expect(listing()).toEqual(written.slice(2).sort());
+    // runs 5 and 6 each rotated out exactly the oldest copy
+    expect(removedPerRun.slice(4)).toEqual([[written[0]], [written[1]]]);
+  });
+
+  it("a same-day clock that reads earlier still names a backup newer than the day's others", () => {
+    mkdirSync(t.backupDir, { recursive: true, mode: 0o700 });
+    const late = Date.parse("2026-10-11T20:00:00.000Z");
+    writeFileSync(path.join(t.backupDir, "store-2026-10-11.sqlite"), "x", { mode: 0o600 });
+    writeFileSync(path.join(t.backupDir, `store-2026-10-11-${String(late)}.sqlite`), "x", {
+      mode: 0o600,
+    });
+    expect(weeklyBackupPath(t.backupDir, late - 60_000)).toBe(
+      path.join(t.backupDir, `store-2026-10-11-${String(late + 1)}.sqlite`),
+    );
+    // a suffix no newer name can follow is refused, never written and then pruned
+    writeFileSync(path.join(t.backupDir, "store-2026-10-11-9999999999999999.sqlite"), "x", {
+      mode: 0o600,
+    });
+    expect(() => weeklyBackupPath(t.backupDir, late)).toThrow(RangeError);
+    // the next day is unaffected; an unreadable directory names the bare file
+    expect(weeklyBackupPath(t.backupDir, Date.parse("2026-10-12T01:00:00.000Z"))).toBe(
+      path.join(t.backupDir, "store-2026-10-12.sqlite"),
+    );
+    const absent = path.join(t.backupDir, "absent");
+    expect(weeklyBackupPath(absent, late)).toBe(path.join(absent, "store-2026-10-11.sqlite"));
+    expect(() => weeklyBackupPath(t.backupDir, Number.NaN)).toThrow(RangeError);
+  });
+
+  it("a clock behind a backup already taken (a later-dated one exists): refused, nothing written or deleted", () => {
+    mkdirSync(t.backupDir, { recursive: true, mode: 0o700 });
+    const future = ["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23"];
+    for (const d of future)
+      writeFileSync(path.join(t.backupDir, `store-${d}.sqlite`), "x", { mode: 0o600 });
+    const before = listing();
+    // the bare name for 2026-10-11 would rank below four newer copies: its own rotation would
+    // delete it — so no name is offered at all
+    expect(() => weeklyBackupPath(t.backupDir, Date.parse("2026-10-11T14:00:00.000Z"))).toThrow(
+      /dated after 2026-10-11/,
+    );
+    expect(listing()).toEqual(before);
+    expect(pruneWeeklyBackups(t.backupDir)).toEqual([]);
+    // one later-dated copy is enough to refuse (a new name must rank newest, not merely survive)
+    for (const d of future.slice(1)) rmSync(path.join(t.backupDir, `store-${d}.sqlite`));
+    expect(() => weeklyBackupPath(t.backupDir, Date.parse("2026-10-19T23:59:59.999Z"))).toThrow(
+      RangeError,
+    );
+    // from the later day on, names resume
+    expect(weeklyBackupPath(t.backupDir, Date.parse("2026-10-20T08:00:00.000Z"))).toBe(
+      path.join(
+        t.backupDir,
+        `store-2026-10-20-${String(Date.parse("2026-10-20T08:00:00.000Z"))}.sqlite`,
+      ),
+    );
+    // other files in the directory never matter
+    writeFileSync(path.join(t.backupDir, "store.sqlite.bak-v9"), "x", { mode: 0o600 });
+    writeFileSync(path.join(t.backupDir, "store-2099-01-01.sqlite.part"), "x", { mode: 0o600 });
+    expect(weeklyBackupPath(t.backupDir, Date.parse("2026-10-21T08:00:00.000Z"))).toBe(
+      path.join(t.backupDir, "store-2026-10-21.sqlite"),
+    );
+  });
+
+  it("property: over any run of backups — clock steps forward or back — each is refused untouched or survives its rotation; the newest four written remain", () => {
+    const day0 = Date.parse("2026-09-06T00:00:00.000Z");
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            dayStep: fc.integer({ min: -1, max: 2 }),
+            msInDay: fc.integer({ min: 0, max: 86_399_999 }),
+          }),
+          { minLength: 1, maxLength: 14 },
+        ),
+        (runs) => {
+          rmSync(t.backupDir, { recursive: true, force: true });
+          let day = 0;
+          let newestDay = -Infinity;
+          const written: string[] = [];
+          for (const r of runs) {
+            day += r.dayStep;
+            const nowMs = day0 + day * 86_400_000 + r.msInDay;
+            const before = listing();
+            let name: string;
+            try {
+              name = backupOnce(nowMs);
+            } catch (e) {
+              // refused only when a later-dated backup exists, and then nothing changed
+              if (!(e instanceof RangeError) || !(newestDay > day)) return false;
+              if (JSON.stringify(listing()) !== JSON.stringify(before)) return false;
+              continue;
+            }
+            newestDay = Math.max(newestDay, day);
+            written.push(name);
+            if (!listing().includes(name)) return false;
+          }
+          return (
+            new Set(written).size === written.length &&
+            JSON.stringify(listing()) === JSON.stringify(written.slice(-KEEP_WEEKLY_BACKUPS).sort())
+          );
+        },
+      ),
+      { numRuns: 80 },
+    );
   });
 });
 

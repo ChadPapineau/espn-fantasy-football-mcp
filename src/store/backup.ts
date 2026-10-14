@@ -86,7 +86,10 @@ export function prunePreMigrationBackups(backupDir: string): string[] {
 
 const WEEKLY_RE = /^store-(\d{4}-\d{2}-\d{2})(?:-(\d{1,16}))?\.sqlite$/;
 
-/** Newest first: by date, then by the same-day `-<ms>` suffix (none = the day's first). */
+/**
+ * Newest first: by date, then by the same-day `-<ms>` suffix (none = the day's first — the order
+ * weeklyBackupPath names them in).
+ */
 function weeklyNewestFirst(a: string, b: string): number {
   const ma = WEEKLY_RE.exec(a);
   const mb = WEEKLY_RE.exec(b);
@@ -96,11 +99,49 @@ function weeklyNewestFirst(a: string, b: string): number {
   return Number(mb?.[2] ?? 0) - Number(ma?.[2] ?? 0);
 }
 
-/** `<backups>/store-<YYYY-MM-DD>.sqlite` for the UTC date of `nowMs` (a `-<ms>` suffix if taken). */
+/** The largest same-day suffix WEEKLY_RE accepts and Number holds exactly. */
+const WEEKLY_SUFFIX_MAX = Math.min(Number.MAX_SAFE_INTEGER, 10 ** 16 - 1);
+
+/**
+ * The path of the next weekly `store backup`: a name that ranks NEWEST among the directory's weekly
+ * backups (weeklyNewestFirst), so the rotation that follows the backup can never delete the copy it
+ * just wrote. `<backups>/store-<YYYY-MM-DD>.sqlite` for the UTC date of `nowMs` while that day holds
+ * no weekly backup; otherwise `store-<day>-<ms>.sqlite` with `<ms>` strictly above every suffix the
+ * day already holds (`nowMs`, or one more than the largest when the clock reads earlier). The bare
+ * name ranks as the day's FIRST backup, so it may only name the day's first: taking it again after
+ * the rotation had deleted it ranked the newest copy oldest, and `eff backup` deleted what it had
+ * just written while reporting success (Stage C, store-backup-rotation-deletes-newest). When no name
+ * can rank newest — a weekly backup dated after the clock's day exists (the clock reads earlier than
+ * a backup already taken), or the day's suffixes are exhausted — it throws: the backup is refused,
+ * never written and then pruned.
+ */
 export function weeklyBackupPath(backupDir: string, nowMs: number): string {
+  if (!Number.isFinite(nowMs)) throw new RangeError("store: the backup clock is not a time");
   const day = new Date(nowMs).toISOString().slice(0, 10);
-  const base = path.join(backupDir, `store-${day}.sqlite`);
-  return exists(base) ? path.join(backupDir, `store-${day}-${String(nowMs)}.sqlite`) : base;
+  let names: string[];
+  try {
+    names = readdirSync(backupDir);
+  } catch {
+    names = [];
+  }
+  let dayTaken = false;
+  let largest = -1;
+  for (const n of names) {
+    const m = WEEKLY_RE.exec(n);
+    if (m?.[1] === undefined) continue;
+    if (m[1] > day)
+      throw new RangeError(
+        `store: a weekly backup dated after ${day} exists, so no new backup would rank newest (is the clock behind?)`,
+      );
+    if (m[1] !== day) continue;
+    dayTaken = true;
+    if (m[2] !== undefined) largest = Math.max(largest, Number(m[2]));
+  }
+  if (!dayTaken) return path.join(backupDir, `store-${day}.sqlite`);
+  const suffix = Math.max(Math.trunc(nowMs), largest + 1);
+  if (!Number.isSafeInteger(suffix) || suffix > WEEKLY_SUFFIX_MAX)
+    throw new RangeError("store: no weekly backup name ranks after the day's existing backups");
+  return path.join(backupDir, `store-${day}-${String(suffix)}.sqlite`);
 }
 
 /** Deletes weekly backups beyond the newest `keep` (by name: date, then suffix); returns names. */
