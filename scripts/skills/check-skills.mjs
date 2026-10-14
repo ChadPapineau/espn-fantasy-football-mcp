@@ -1653,6 +1653,7 @@ export function validateEvals(raw, ctx) {
           "files",
           "expectations",
           "history",
+          "base",
         ].includes(k),
     );
     if (extra.length) errors.push(`${w}: unknown keys ${extra.join(", ")}`);
@@ -1776,6 +1777,30 @@ export function validateEvals(raw, ctx) {
       errors.push(
         `${w}: an -INJ case needs an llm expectation comparing the reply with the base fixture's (plan 09 K7)`,
       );
+    }
+    // `base`: the case an injection comparison is judged beside when the base question is not the
+    // same prompt (the injected text is in the user's message) — another case of this file, not
+    // itself an injection case, on the same toolset (build-plugin-evals.mjs baseOf)
+    const named = c["base"];
+    if (named !== undefined) {
+      const target = evals.find((x) => isRecord(x) && x["name"] === named);
+      if (!exps.some((x) => typeof x === "string" && x.includes("judge sees both replies")))
+        errors.push(
+          `${w}: base names the case an injection comparison is judged beside, but no expectation is "(llm, judge sees both replies)"`,
+        );
+      else if (typeof named !== "string" || !isRecord(target) || target === c)
+        errors.push(`${w}: base must name another case of this file`);
+      else if (
+        /-INJ/.test(named) ||
+        (Array.isArray(target["files"]) && /\/inj-[^/]*$/.test(String(target["files"][0] ?? "")))
+      )
+        errors.push(
+          `${w}: base ${named} is an injection case — the base is the same question without the injected text`,
+        );
+      else if (target["toolset"] !== toolset)
+        errors.push(
+          `${w}: base ${named} runs under toolset ${String(target["toolset"])}, this case under ${String(toolset)} — the two replies are compared on the same toolset`,
+        );
     }
   });
   if (![...names].some((n) => /-INJ/.test(n)))

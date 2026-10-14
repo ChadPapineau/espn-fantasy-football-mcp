@@ -1196,11 +1196,60 @@ describe("evals.json — Lane 2 cases (plan 09 §5.2; research 06 §D.0)", () =>
       (j) => (cases(j).find((x) => x.name === "SC-6")!.history = "it says rejected"),
       /history must be an even number/,
     ],
+    // `base`: the case an injection comparison is judged beside when the injected text is in the
+    // prompt (Stage C finding eval-injection-invariance-prose-reference)
+    [
+      "a base naming no case of the file",
+      "stream-kdef",
+      (j) => (cases(j).find((x) => x.name === "KD-INJ")!.base = "KD-9"),
+      /base must name another case of this file/,
+    ],
+    [
+      "a base naming the case itself",
+      "stream-kdef",
+      (j) => (cases(j).find((x) => x.name === "KD-INJ")!.base = "KD-INJ"),
+      /base must name another case of this file/,
+    ],
+    [
+      "a base that is an injection case",
+      "start-sit",
+      (j) => (cases(j).find((x) => x.name === "SS-INJ-2")!.base = "SS-INJ"),
+      /base SS-INJ is an injection case/,
+    ],
+    [
+      "a base on another toolset",
+      "start-sit",
+      (j) => (cases(j).find((x) => x.name === "SS-INJ-2")!.base = "SS-11-E"),
+      /base SS-11-E runs under toolset full, this case under core/,
+    ],
+    [
+      "a base on a case that is no injection comparison",
+      "stream-kdef",
+      (j) => (cases(j).find((x) => x.name === "KD-1")!.base = "KD-4-E"),
+      /base names the case an injection comparison is judged beside/,
+    ],
+    [
+      "a base that is not a name",
+      "stream-kdef",
+      (j) => (cases(j).find((x) => x.name === "KD-INJ")!.base = 1),
+      /base must name another case of this file/,
+    ],
   ];
   it.each(mutations)("fails on %s", (_label, skill, mutate, re) => {
     const t = fresh();
     t.editJson(EVALS(skill), mutate);
     expect(errorsOf(t)).toMatch(re);
+  });
+
+  it("an injection case may name its base question (base), which the plugin-eval build then judges it beside", () => {
+    const t = fresh();
+    t.editJson(EVALS("stream-kdef"), (j) => {
+      cases(j).find((x) => x.name === "KD-INJ")!.base = "KD-1";
+    });
+    t.editJson(EVALS("start-sit"), (j) => {
+      cases(j).find((x) => x.name === "SS-INJ-2")!.base = "SS-7";
+    });
+    expect(errorsOf(t)).toBe("");
   });
 
   it("every committed apply case is the user typing the slash command; no other Skill's case needs one", () => {
