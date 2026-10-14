@@ -532,6 +532,15 @@ after the posterior draw); C1's ESPN clause at game time (accepted by the gate).
 
 **Stage B2b outcome (2026-10-11):** after these rulings, C1–C4, C6, C7 and C9 are met (C2 under R6-1/R6-2; C3 needs_time with the code path proven — finished seasons carry no pre-week `winProbability` or `playoffPct`); C5 and C8 soft, reported with numbers; B14 needs_time (`weight_espn` stays 1.0). As at B2a, no re-gate: the rulings change no code, the last gate round verified `787c463` with every check passing, and Stage C's independent QA re-verifies the whole product.
 
+## R7 — Stage C rulings (2026-10-13/14)
+
+**Trigger:** Stage C's round-1 remediation (QA + penetration testing; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`). Build-time rulings; each supersedes the older text it names.
+
+| id | ruling | what changed (file §) |
+|---|---|---|
+| R7-1 (lineup no-move) | Plan 09 guardrail 9 governs what the user is told and what is logged: a swap inside the coin-flip band is `no_move: true` and is logged as a no-move, which the retrospective scores as "keep". E2's mean-optimal assignment (the `lineup` field) is unchanged, so C2's replay of E2's assignment and R6-1's identity with ESPN's lineup still hold; the regret of the "keep unless outside the band" policy is reported beside it (soft) | plan 09 guardrail 9 and plan 10 C2 read together; E2 and the reclog (Stage C remediation) |
+| R7-2 (B11 Lane 2, B15) | `claude plugin eval` refuses to start on this account ("currently in early access"), so no Lane 2 case or B15 grader can run here; the gate is not worked around. Lane 1 (all 13 Skills, offline) stays hard and green; the static findings the lane produced (H1–M5, L1–L4) are fixed as ordinary Stage C findings. If the owner's own `claude update` + `claude plugin eval` shows the feature enabled, the suite runs before release; otherwise B11 Lane 2 and B15 are recorded as not runnable (tooling gated), not as met | plan 10 B11, B15 (status at Stage D); `docs/evals/stage-c-plugin-eval.md` |
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |

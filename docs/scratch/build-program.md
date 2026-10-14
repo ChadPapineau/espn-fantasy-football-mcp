@@ -26,10 +26,8 @@ passed to agents in their prompts and kept in local environment/config only — 
 
 ## RESUME HERE
 
-**OWNER STOP (2026-10-11)** — see `docs/HANDOFF.md` ▶ NEXT STEP for what Chad does and the exact launch on "go".
+**Stage C in progress — PAUSED 2026-10-14 at a safe point** (weekly usage 29 %). See `docs/HANDOFF.md` ▶ NEXT STEP for the exact resume.
 
-- Stage A ✅ 2026-10-06 (`effmcp-foundation`, gate green at `bd64cba`).
-- Stage B1 ✅ 2026-10-06 (`effmcp-core`, 23 agents; closed by rulings R5-1/R5-2).
-- Stage B2a ✅ 2026-10-07 (`effmcp-expansion-a`, 17 agents; closed by rulings R5-3–R5-5).
-- Stage B2b ✅ 2026-10-11 (`effmcp-expansion-b`, 16 agents; closed by rulings R6-1–R6-5; gate verified `787c463`).
-- **Next: owner stop** (eff setup + league id to the orchestrator + Ultracode + "go") → **Stage C** `docs/scratch/workflows/effmcp-qa-pentest.js` (args from local memory; never committed) → Stage D (merge + install).
+- Stages A ✅ · B1 ✅ · B2a ✅ · B2b ✅ (rulings R5, R6). Owner stop ✅ (2026-10-11).
+- Stage C: round 0 ✅, live lane ✅ (`docs/evals/stage-c-live.md`), plugin-eval lane blocked (R7-2), round 1: 93 confirmed → 62 fixed and re-verified, 29 open.
+- **Next:** `docs/scratch/workflows/effmcp-qa-pentest-continue.js` with the saved resume args (outside the repo) → rounds until two dry → final gate → Stage D.
