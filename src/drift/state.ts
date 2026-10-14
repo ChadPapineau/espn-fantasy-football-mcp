@@ -14,6 +14,11 @@
 // operator override's recovery (plan 01 §7, ADV OBJ-06; finding drift-host-override-never-recovers).
 // A newer manifest re-baselines the row (plan 03 §7: `applyManifest` discards the diff computed
 // against the old manifest, records the new `manifest_hash` / `manifest_version`, says so).
+// A probe run is one transform (`applyProbe`, the daily probe of plan 01 §7 / plan 06 §1.2 — the
+// drift module's second entry point): re-baseline on the manifest it judged against, clear what each
+// of its JSON answers verified at the required-key seed (each view of a composite answer on its
+// own), record what it found (a key this run found missing stands), end a host move on a good
+// answer when no answer of the run moved, stamp `last_probe_at`.
 import type { Clock } from "../domain/clock.js";
 import type { DriftMeta } from "../domain/league/types.js";
 import { isEspnView, type EspnView } from "../providers/espn/types.js";
@@ -151,8 +156,52 @@ export function applySignals(
  */
 export type Verification = "schema" | "required_paths";
 
-function clearedBy(view: EspnView, path: string, verification: Verification): boolean {
-  return verification === "schema" || REQUIRED_PATHS_BY_VIEW[view].includes(path);
+/** The removed keys a verification covers: every one of the view (`schema`), or the seed's. */
+const COVERS: Readonly<Record<Verification, (view: EspnView, path: string) => boolean>> = {
+  schema: () => true,
+  required_paths: (view, path) => REQUIRED_PATHS_BY_VIEW[view].includes(path),
+};
+
+/**
+ * The one recovery core (pure): clears each removed key of `views` that `clears` accepts and, when
+ * `endMove`, ends a host move (the row then names `host`). The status follows what remains; a move
+ * that is not ended keeps its `host_moved_at`. Nothing to change → the same object.
+ */
+function recover(
+  row: DriftStateRow,
+  host: string,
+  nowIso: string,
+  views: readonly EspnView[],
+  clears: (view: EspnView, path: string) => boolean,
+  endMove: boolean,
+): DriftStateRow {
+  const moved = row.status === "host_moved";
+  const ending = moved && endMove;
+  // only a red or a host-moved row can hold removed keys (statusOf): any other row, or no verified
+  // view, has nothing to clear (the common case — every good answer — returns before any parse)
+  if (!ending && (views.length === 0 || (row.status !== "red" && !moved))) return row;
+  const diffs = parseDiffs(row.diff_json);
+  let cleared = false;
+  const next: ViewDiff[] = [];
+  for (const d of diffs) {
+    const removed = views.includes(d.view)
+      ? d.removed.filter((p) => !clears(d.view, p))
+      : d.removed;
+    if (removed.length !== d.removed.length) cleared = true;
+    if (removed.length + d.added.length + d.enums.length > 0) next.push({ ...d, removed });
+  }
+  if (!ending && !cleared) return row;
+  const stillMoved = moved && !ending;
+  const status = statusOf(stillMoved, next, parseDiffs(row.additive_json));
+  return {
+    ...row,
+    status,
+    since: status === "red" || stillMoved ? (row.since ?? nowIso) : null,
+    host: ending ? host : row.host,
+    host_moved_at: stillMoved ? row.host_moved_at : null,
+    diff_json: JSON.stringify(next),
+    updated_at: nowIso,
+  };
 }
 
 /**
@@ -175,31 +224,7 @@ export function applyRecovered(
   views: readonly EspnView[] = [],
   verification: Verification = "schema",
 ): DriftStateRow {
-  const moved = row.status === "host_moved";
-  // only a red row holds removed keys: any other row, or no verified view, has nothing to clear
-  // (the common case — every good answer — returns before any parse)
-  if (!moved && (views.length === 0 || row.status !== "red")) return row;
-  const diffs = parseDiffs(row.diff_json);
-  let cleared = false;
-  const next: ViewDiff[] = [];
-  for (const d of diffs) {
-    const removed = views.includes(d.view)
-      ? d.removed.filter((p) => !clearedBy(d.view, p, verification))
-      : d.removed;
-    if (removed.length !== d.removed.length) cleared = true;
-    if (removed.length + d.added.length + d.enums.length > 0) next.push({ ...d, removed });
-  }
-  if (!moved && !cleared) return row;
-  const status = statusOf(false, next, parseDiffs(row.additive_json));
-  return {
-    ...row,
-    status,
-    since: status === "red" ? (row.since ?? nowIso) : null,
-    host: moved ? host : row.host,
-    host_moved_at: null,
-    diff_json: JSON.stringify(next),
-    updated_at: nowIso,
-  };
+  return recover(row, host, nowIso, views, COVERS[verification], true);
 }
 
 /** The outcome of `applyManifest`: the row to store and whether the diff was re-baselined. */
@@ -249,6 +274,82 @@ export function applyManifest(
   };
 }
 
+/**
+ * One answer of a probe run, as drift_state needs it (the CLI's `ProbeCheck` is one, structurally):
+ * the views the request asked for, its verdict — `green` / `additive` / `red` are a JSON body the
+ * detector judged; `host_moved` a 3xx, a non-JSON 200 or a refused keyless read; `unreachable`,
+ * `config` and `skipped` no answer to judge — and the detector's signals on it.
+ */
+export interface ProbeAnswer {
+  readonly views: readonly EspnView[];
+  readonly status: DriftStatus | "unreachable" | "config" | "skipped";
+  readonly signals: readonly DriftSignal[];
+}
+
+/** The outcome of a probe run (`applyProbe`): the row to store; `rebaselined` — say so. */
+export type ProbeOutcome = ManifestOutcome;
+
+/** An answer that moved: the verdict says so or a signal does (it verifies nothing). */
+function movedAnswer(a: ProbeAnswer): boolean {
+  return a.status === "host_moved" || a.signals.some((s) => s.kind === "host_moved");
+}
+
+/** A good JSON answer from the configured host: judged, nothing failing (it ends a host move). */
+function goodAnswer(a: ProbeAnswer): boolean {
+  return (a.status === "green" || a.status === "additive") && !a.signals.some(failsResponse);
+}
+
+/**
+ * The views a probe answer verified at the required-key seed (the probe runs no view schema —
+ * `required_paths`): every requested view of a JSON answer the detector judged (`green`,
+ * `additive`, `red`) that none of its failing signals names — each view of a composite answer on
+ * its own, so a key missing under `mTeam` leaves `mSettings` verified by the same body; none for an
+ * answer that moved or was never judged (unreachable, refused, skipped).
+ */
+export function probeVerifiedViews(a: ProbeAnswer): EspnView[] {
+  const judged = a.status === "green" || a.status === "additive" || a.status === "red";
+  if (!judged || movedAnswer(a)) return [];
+  const failing = new Set(a.signals.filter(failsResponse).map((s) => s.view));
+  return a.views.filter((v) => !failing.has(v));
+}
+
+/**
+ * The row after one probe run (plan 01 §7 "The daily probe", plan 06 §1.2; pure), in this order:
+ * 1. the manifest the run judged against (`applyManifest`; plan 03 §7 — a newer one re-baselines
+ *    and the outcome says so; null when the checkout ships none);
+ * 2. what each answer verified clears (`probeVerifiedViews`, the seed's keys only — a schema-level
+ *    key waits for an in-call answer of its view), a host move untouched — except a key the run
+ *    itself found missing (another of its answers named it): that drift never lapsed and keeps its
+ *    `since`;
+ * 3. what the run found is recorded (`applySignals`);
+ * 4. a host move ends when an answer of the run was good and none moved (the configured host
+ *    serves JSON again — the in-call rule; the row then names `host`);
+ * 5. `last_probe_at` is the run's time (written on every run, even one whose checks were skipped).
+ */
+export function applyProbe(
+  row: DriftStateRow | null,
+  answers: readonly ProbeAnswer[],
+  manifest: ManifestIdentity | null,
+  host: string,
+  nowIso: string,
+): ProbeOutcome {
+  const base =
+    manifest === null ? { row, rebaselined: false } : applyManifest(row, manifest, host, nowIso);
+  const signals = answers.flatMap((a) => a.signals);
+  const found = new Set(signals.filter(failsResponse).map((s) => `${s.view}|${s.path}`));
+  const clears = (view: EspnView, path: string): boolean =>
+    COVERS.required_paths(view, path) && !found.has(`${view}|${path}`);
+  let next = base.row ?? emptyRow(host, nowIso);
+  for (const a of answers) next = recover(next, host, nowIso, probeVerifiedViews(a), clears, false);
+  next = applySignals(next, signals, host, nowIso);
+  if (!answers.some(movedAnswer) && answers.some(goodAnswer))
+    next = recover(next, host, nowIso, [], clears, true);
+  return {
+    row: { ...next, last_probe_at: nowIso, updated_at: nowIso },
+    rebaselined: base.rebaselined,
+  };
+}
+
 /** Writes the row (a `required` write — plan 01 §9.2); the caller decides what a failure means. */
 export class DriftStateWriter {
   private readonly repo: DriftStateRepository;
@@ -272,9 +373,12 @@ export class DriftStateWriter {
 
   /**
    * A good JSON answer arrived from this writer's (the configured) host and verified `views`
-   * (`applyRecovered`): ends a host move and clears the verified views' removed keys. The provider
-   * passes the views of every answer it parsed (`schema`); the probe the views of its green checks
-   * (`required_paths`). Writes only when something changed. Returns the row now stored.
+   * (`applyRecovered`): ends a host move and clears the verified views' removed keys. Every answer
+   * that verified a view must report it, or the drift it ended outlives it: the provider passes the
+   * views of each answer it parsed (`schema`) — a 200, and equally a 304 whose revalidated cached
+   * body parses again (ESPN answers conditional reads with 304: both are the latest answer for
+   * their views); a probe run records through `probed`. Writes only when something changed.
+   * Returns the row now stored.
    */
   recovered(
     views: readonly EspnView[] = [],
@@ -288,14 +392,25 @@ export class DriftStateWriter {
   }
 
   /**
-   * Records the manifest this process judges against (`applyManifest`; the probe calls it before
-   * recording its signals). Writes only when something changed; `rebaselined` says the old diff
-   * was discarded.
+   * Records the manifest this process judges against (`applyManifest`; a probe run does it first,
+   * inside `probed`). Writes only when something changed; `rebaselined` says the old diff was
+   * discarded.
    */
   rebaseline(manifest: ManifestIdentity): ManifestOutcome {
     const current = this.repo.get();
     const out = applyManifest(current, manifest, this.host, this.clock.nowIso());
     if (out.row !== current) this.repo.put(out.row);
+    return out;
+  }
+
+  /**
+   * Records one probe run (`applyProbe`: the manifest, what its answers verified, what they found,
+   * the host move, `last_probe_at`) — the whole drift_state side of `eff probe`. Always writes
+   * (`last_probe_at` moves); `rebaselined` says a newer manifest discarded the old diff.
+   */
+  probed(answers: readonly ProbeAnswer[], manifest: ManifestIdentity | null = null): ProbeOutcome {
+    const out = applyProbe(this.repo.get(), answers, manifest, this.host, this.clock.nowIso());
+    this.repo.put(out.row);
     return out;
   }
 
