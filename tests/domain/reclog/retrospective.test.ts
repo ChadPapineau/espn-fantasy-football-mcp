@@ -4,8 +4,12 @@
 // while weight_espn = 1.0, swap regret, projection vs ESPN (paired CRPS/MAE), coverage, Spearman, the
 // Brier suite with ESPN's comparators and "n too small (k of 30)", sample_size and caveats, the
 // week-N-logged / week-N+1-scored flow, the evaluation of the evaluator end to end, and hostile
-// rows (NaN, duplicates, look-ahead, misfiled weeks, injection text in the log's free text).
+// rows (NaN, duplicates, look-ahead, misfiled weeks, injection text in the log's free text), and
+// only decisions as calls (KIND_ROLES: the notes — the retrospective's own `retro` entry,
+// `onboarding`, `executed` — are never scored; Stage C reclog-retrospective-scores-own-retro; the
+// same flow through the tools is in retrospective-tool.test.ts).
 // Ported from sibling @cf3b015, adapted.
+import fc from "fast-check";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { GameFlags } from "../../../src/config/freshness.js";
 import type { InputFreshness } from "../../../src/domain/analytics/types.js";
@@ -19,11 +23,13 @@ import {
   DEFAULT_MIN_N,
   ESPN_PROJECTION,
   GAIN_ROLES,
+  KIND_ROLES,
   LAST_WEEK,
   RETRO_BOUNDS,
   RETRO_METRIC_KEYS,
   RETRO_POSITION_RE,
   SubjectIndex,
+  UNSCORED_KINDS,
   baselineRegret,
   brierEntry,
   brierOrCaveat,
@@ -45,6 +51,7 @@ import {
   valueOf,
   weekStatus,
   weeksToN,
+  type KindRole,
   type PlayerForecast,
   type PlayerWeekFact,
   type ProbabilityForecasts,
@@ -54,8 +61,10 @@ import {
 } from "../../../src/domain/reclog/retrospective.js";
 import {
   RECLOG_TEXT_PATHS,
+  RECOMMENDATION_KINDS,
   RECOMMENDATION_LIST_TEXT_PATHS,
   RETROSPECTIVE_TEXT_PATHS,
+  type RecommendationKind,
   type RecommendationRecord,
   type RetrospectiveData,
 } from "../../../src/domain/reclog/types.js";
@@ -1006,6 +1015,263 @@ describe("buildRetrospective — the week's calls, pooled metrics, sample sizes"
       buildRetrospective(retroInput({ min_n: 10_000 }), clock()).data.sample_size.swap_regret!
         .n_needed,
     ).toBe(10_000);
+  });
+});
+
+describe("buildRetrospective — only decisions are calls (KIND_ROLES)", () => {
+  /** The retro Skill's step 5: the retrospective's own rec logged under the scored week. */
+  const retroEntry = (r: RetrospectiveData["rec"], week = 4, at = "2026-10-06T12:05:00Z") =>
+    buildRecord(
+      input({
+        kind: "retro",
+        week,
+        rec: r,
+        alternatives: [],
+        source_calls: [{ tool: "espn_analyze_retrospective", request_id: "r-0123456789ab" }],
+        seeding_mode_used: null,
+      }),
+      { clock: fixedClock(at), rng: seededRng(week) },
+    );
+  /** skills/onboard's log entry: a no-move with no subject and no alternative. */
+  const onboardingEntry = (week = 4) =>
+    buildRecord(
+      input({
+        kind: "onboarding",
+        week,
+        rec: rec({
+          action: "Onboarding: league format restated, scoring self-check shown",
+          subjects: [],
+          point_estimate: 0,
+          distribution: pointDist(0),
+          delta_vs_next: { value: 0, p10: 0, p90: 0 },
+          decision_metric: "golden_mismatch_share",
+          drivers: [],
+          latest_execution_time: null,
+          no_move: true,
+        }),
+        alternatives: [],
+        source_calls: [{ tool: "espn_get_box_score", request_id: "r-0123456789ac" }],
+        seeding_mode_used: null,
+        client_ref: "onboard-setup",
+      }),
+      { clock: fixedClock("2026-10-01T09:00:00Z"), rng: seededRng(40 + week) },
+    );
+  /**
+   * plan 09 §3 apply's write path (a write build only — never this one): the record that a logged
+   * decision was carried out, its rec copied, `client_ref` naming the decision's log id.
+   */
+  const executedEntry = (source: RecommendationRecord) =>
+    record({
+      ...source,
+      kind: "executed",
+      log_id: "rec-01K6D0000000000000000000X1",
+      recorded_at: "2026-10-01T16:00:00.000Z",
+      followed_hint: "user_said_yes",
+      client_ref: source.log_id,
+    });
+
+  it("asked twice, the second answer does not score the first retrospective's own log entry", () => {
+    const first = buildRetrospective(retroInput(), clock());
+    const logged = retroEntry(first.data.rec);
+    const second = buildRetrospective(
+      retroInput({ weeks: [week3(), week4({ records: [...week4Calls(), logged] })] }),
+      clock(),
+    );
+    expect(second.data.calls.map((c) => c.kind)).not.toContain("retro");
+    expect(second.data.calls.map((c) => c.log_id)).not.toContain(logged.log_id);
+    // nothing in the answer moves: no call, no outcome row, no warning, the same rec
+    expect(second.data).toEqual(first.data);
+    expect(second.outcomes).toEqual(first.outcomes);
+    expect(second.warnings).toEqual([]);
+    // so the retro Skill's "followed is null for a call" step is not triggered by its own entry
+    expect(second.data.calls.filter((c) => c.followed === null).map((c) => c.kind)).toEqual(
+      first.data.calls.filter((c) => c.followed === null).map((c) => c.kind),
+    );
+  });
+
+  it("an onboarding entry is not a call; neither kind counts in an earlier pooled week", () => {
+    const base = buildRetrospective(retroInput({ min_n: 1 }), clock());
+    const w3 = week3();
+    const r = buildRetrospective(
+      retroInput({
+        min_n: 1,
+        weeks: [
+          {
+            ...w3,
+            records: [
+              ...w3.records,
+              // week 3's own retrospective, logged on its Tuesday (its rec as of that day)
+              retroEntry(
+                retroRec([], 0, [], fixedClock("2026-09-29T11:00:00Z")),
+                3,
+                "2026-09-29T12:00:00Z",
+              ),
+            ],
+          },
+          week4({ records: [onboardingEntry(), ...week4Calls()] }),
+        ],
+      }),
+      clock(),
+    );
+    expect(r.data).toEqual(base.data);
+    expect(r.outcomes).toEqual(base.outcomes);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("an unscored entry shaped like a decision is still not scored (the kind decides, not the shape)", () => {
+    const base = buildRetrospective(retroInput({ min_n: 1 }), clock());
+    // a retro / onboarding / executed record carrying a lineup call's subjects and alternatives
+    const shaped = (kind: "retro" | "onboarding" | "executed", log_id: string) =>
+      record({ ...week4Calls()[1]!, kind, log_id, recorded_at: "2026-10-01T15:00:00.000Z" });
+    const r = buildRetrospective(
+      retroInput({
+        min_n: 1,
+        weeks: [
+          week3(),
+          week4({
+            records: [
+              ...week4Calls(),
+              shaped("retro", "rec-01K6D0000000000000000000R1"),
+              shaped("onboarding", "rec-01K6D0000000000000000000N1"),
+              shaped("executed", "rec-01K6D0000000000000000000E1"),
+            ],
+          }),
+        ],
+      }),
+      clock(),
+    );
+    expect(r.data).toEqual(base.data);
+    expect(r.data.metrics.swap_regret).toEqual(base.data.metrics.swap_regret);
+    expect(r.outcomes.map((o) => o.log_id)).toEqual(base.outcomes.map((o) => o.log_id));
+  });
+
+  it("an executed record of a logged decision does not score that decision a second time", () => {
+    const base = buildRetrospective(retroInput({ min_n: 1 }), clock());
+    const calls = week4Calls();
+    const lineupB = calls[1]!; // the bad lineup call: regret 10, swap 10, ESPN baseline 10
+    const r = buildRetrospective(
+      retroInput({
+        min_n: 1,
+        weeks: [week3(), week4({ records: [...calls, executedEntry(lineupB)] })],
+      }),
+      clock(),
+    );
+    // the decision is scored once, as itself: one call B, the same mean regret, swaps, baselines
+    expect(r.data.calls.filter((c) => c.regret === 10).map((c) => c.log_id)).toEqual([
+      lineupB.log_id,
+    ]);
+    expect(r.data.calls.map((c) => c.kind)).not.toContain("executed");
+    expect(r.data.rec.point_estimate).toBe(base.data.rec.point_estimate);
+    expect(r.data.metrics.swap_regret).toEqual(base.data.metrics.swap_regret);
+    expect(r.data.baselines).toEqual(base.data.baselines);
+    expect(r.data).toEqual(base.data);
+    expect(r.outcomes).toEqual(base.outcomes);
+  });
+
+  it("a kinds filter naming an unscored kind scores nothing for it and says so", () => {
+    const records = [
+      ...week4Calls(),
+      onboardingEntry(),
+      retroEntry(retroRec([], 0, INPUTS, clock())),
+    ];
+    const weeks = [week3(), week4({ records })];
+    const only = buildRetrospective(retroInput({ kinds: ["retro"], weeks }), clock());
+    expect(only.data.calls).toEqual([]);
+    expect(only.outcomes).toEqual([]);
+    expect(only.data.metrics.swap_regret.n).toBe(0);
+    expect(only.warnings).toEqual([
+      "retrospective: kind retro is not a decision and is never scored",
+    ]);
+    const mixed = buildRetrospective(
+      retroInput({ kinds: ["retro", "lineup", "executed", "onboarding"], weeks }),
+      clock(),
+    );
+    expect(mixed.data.calls.map((c) => c.log_id.slice(-1))).toEqual(["A", "B"]);
+    expect(mixed.warnings).toEqual([
+      "retrospective: kinds onboarding, retro, executed are not decisions and are never scored",
+    ]);
+    // a decision-only filter carries no such warning
+    expect(buildRetrospective(retroInput({ kinds: ["stream"], weeks }), clock()).warnings).toEqual(
+      [],
+    );
+  });
+
+  it("property: adding unscored entries anywhere in the window never changes the answer", () => {
+    const base = buildRetrospective(retroInput({ min_n: 1 }), clock());
+    const decisions = week4Calls();
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            week: fc.constantFrom(3, 4),
+            kind: fc.constantFrom(...UNSCORED_KINDS),
+            shape: fc.nat({ max: decisions.length - 1 }),
+            hint: fc.constantFrom("unknown", "user_said_yes", "user_said_no"),
+            minute: fc.nat({ max: 59 }),
+          }),
+          { maxLength: 8 },
+        ),
+        (extra) => {
+          const extraRecords = extra.map((e, i) =>
+            record({
+              ...decisions[e.shape]!,
+              kind: e.kind,
+              week: e.week,
+              followed_hint: e.hint,
+              log_id: `rec-01K6D000000000000000000X${String(i).padStart(2, "0")}`,
+              recorded_at: `2026-10-01T12:${String(e.minute).padStart(2, "0")}:00.000Z`,
+            }),
+          );
+          const w3 = week3();
+          const r = buildRetrospective(
+            retroInput({
+              min_n: 1,
+              weeks: [
+                { ...w3, records: [...w3.records, ...extraRecords.filter((x) => x.week === 3)] },
+                week4({ records: [...extraRecords.filter((x) => x.week === 4), ...decisions] }),
+              ],
+            }),
+            clock(),
+          );
+          expect(r.data).toEqual(base.data);
+          expect(r.outcomes).toEqual(base.outcomes);
+          expect(r.warnings).toEqual([]);
+        },
+      ),
+      { numRuns: 200, seed: 20261011 },
+    );
+  });
+
+  it("every decision kind is a call and no note is, each alone in the week", () => {
+    const shape = week4Calls()[1]!; // a lineup call with subjects and an alternative
+    for (const kind of RECOMMENDATION_KINDS) {
+      const one = record({ ...shape, kind, log_id: "rec-01K6D0000000000000000000K1" });
+      const r = buildRetrospective(
+        retroInput({ min_n: 1, weeks: [week4({ records: [one] })] }),
+        clock(),
+      );
+      const scored = KIND_ROLES[kind] === "decision";
+      expect(
+        r.data.calls.map((c) => c.kind),
+        kind,
+      ).toEqual(scored ? [kind] : []);
+      expect(
+        r.outcomes.map((o) => o.log_id),
+        kind,
+      ).toEqual(scored ? [one.log_id] : []);
+    }
+  });
+
+  it("KIND_ROLES: total over the log's kinds; the notes are retro, onboarding and executed", () => {
+    expectTypeOf(KIND_ROLES).toEqualTypeOf<Readonly<Record<RecommendationKind, KindRole>>>();
+    expect(Object.keys(KIND_ROLES).sort()).toEqual([...RECOMMENDATION_KINDS].sort());
+    expect(Object.isFrozen(KIND_ROLES)).toBe(true);
+    expect([...UNSCORED_KINDS].sort()).toEqual(["executed", "onboarding", "retro"]);
+    for (const k of RECOMMENDATION_KINDS)
+      expect(UNSCORED_KINDS.has(k), k).toBe(KIND_ROLES[k] === "note");
+    // the scored families are decisions
+    for (const k of [...DECISIVE_KINDS, ...BASELINE_KINDS])
+      expect(KIND_ROLES[k], k).toBe("decision");
   });
 });
 

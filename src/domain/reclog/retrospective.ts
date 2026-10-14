@@ -8,6 +8,9 @@
 // Phase 3 (plan 10 §3.3, C9 — additive): with attribution rows the week's projection error is
 // attributed by layer (attribution.ts), every projection-backed call gets its own decomposition, and
 // on a final week the re-fitted parameters are proposed (tune.ts) — never applied here.
+// Only decisions are scored (plan 07 E13 "score last week's calls"): every log kind is classified in
+// KIND_ROLES, a total map the compiler holds to RECOMMENDATION_KINDS, and the log's notes
+// (UNSCORED_KINDS — the retrospective's own `retro` report, `onboarding`, `executed`) are never calls.
 
 import {
   correctionsWindowOpen,
@@ -331,6 +334,47 @@ export const DECISIVE_KINDS: ReadonlySet<RecommendationKind> = new Set<Recommend
   "lineup",
   "stream",
 ]);
+/** What a log entry is to the retrospective: a decision it scores, or a note it never scores. */
+export type KindRole = "decision" | "note";
+/**
+ * The role of every log kind (plan 07 E12 `kind`). E13 scores "last week's calls" — the decisions —
+ * and plan 09 §3 retro reads their `followed` to decide whether to look at the transactions, so a
+ * note scored as a call puts a non-decision in the answer and a `followed: null` that sends the
+ * Skill to the transactions for nothing. The notes (plan 09 §3):
+ * - `retro` — the retrospective's own report, logged by the retro Skill after every run: a no-move
+ *   ("Keep the model unchanged…") carrying the regret spread of the calls it scored;
+ * - `onboarding` — the setup restatement (skills/onboard): the scoring self-check, no subject to
+ *   follow and no alternative;
+ * - `executed` — logged by `apply` on its write path only (plan 10 §3.W; this build has none): the
+ *   record that an earlier logged decision was carried out (`client_ref` = that decision's log id),
+ *   so the decision is scored once, as itself, never a second time under this kind.
+ * Every other kind is a recommendation the user could follow. Total over RecommendationKind, so a
+ * kind added to RECOMMENDATION_KINDS does not compile until it is classified here.
+ */
+export const KIND_ROLES: Readonly<Record<RecommendationKind, KindRole>> = Object.freeze({
+  lineup: "decision",
+  waiver: "decision",
+  stream: "decision",
+  trade: "decision",
+  cascade: "decision",
+  schedule: "decision",
+  roster: "decision",
+  evidence: "decision",
+  matchup: "decision",
+  onboarding: "note",
+  retro: "note",
+  executed: "note",
+  weekly: "decision",
+  session: "decision",
+} satisfies Record<RecommendationKind, KindRole>);
+/**
+ * The notes of KIND_ROLES: they stay in the log (E12, E14, `espn-ff://rec/*`) and are never in
+ * `calls[]`, swap regret, the baselines or the attribution, and get no outcome row — whatever the
+ * `kinds` filter says (a filter naming one is answered with a warning, never a score).
+ */
+export const UNSCORED_KINDS: ReadonlySet<RecommendationKind> = new Set<RecommendationKind>(
+  RECOMMENDATION_KINDS.filter((k) => KIND_ROLES[k] === "note"),
+);
 /** Kinds scored against the two start/sit baselines (research 05 §8.4 #7, #8). */
 export const BASELINE_KINDS: ReadonlySet<RecommendationKind> = new Set<RecommendationKind>([
   "lineup",
@@ -968,8 +1012,9 @@ function isWeek(w: unknown): w is Week {
  * while `weight_espn` ≥ 1), projection-vs-ESPN, swap regret, the Brier suite with ESPN's comparators,
  * coverage, Spearman, `sample_size` per metric (n, n_needed = min_n, weeks to reach it) and one caveat
  * per metric under min_n, attribution null and no parameter proposals (P2), plus the outcome rows to
- * persist. Throws RangeError on an invalid week, min_n, weight_espn or kinds filter; bad rows are
- * excluded and counted in `warnings`, never fatal.
+ * persist. Only decisions are calls: a note of KIND_ROLES (UNSCORED_KINDS) is skipped whatever the
+ * filter (a filter naming one gets a warning). Throws RangeError on an invalid week, min_n,
+ * weight_espn or kinds filter; bad rows are excluded and counted in `warnings`, never fatal.
  */
 export function buildRetrospective(input: RetrospectiveInput, clock: Clock): RetrospectiveResult {
   const { week, min_n: minN, weight_espn: weightEspn } = input;
@@ -988,6 +1033,15 @@ export function buildRetrospective(input: RetrospectiveInput, clock: Clock): Ret
     if (count > 0) warnings.push(`retrospective: ${String(count)} ${what}`);
   };
   const kinds = input.kinds === null ? null : new Set<RecommendationKind>(input.kinds);
+  if (kinds !== null) {
+    const unscored = RECOMMENDATION_KINDS.filter((k) => kinds.has(k) && UNSCORED_KINDS.has(k));
+    if (unscored.length > 0)
+      warnings.push(
+        unscored.length === 1
+          ? `retrospective: kind ${unscored.join("")} is not a decision and is never scored`
+          : `retrospective: kinds ${unscored.join(", ")} are not decisions and are never scored`,
+      );
+  }
   const inWindow = (w: unknown): boolean => isWeek(w) && w <= week;
   const windowWeeks = new Set<Week>();
 
@@ -1021,6 +1075,9 @@ export function buildRetrospective(input: RetrospectiveInput, clock: Clock): Ret
         continue;
       }
       seenIds.add(r.log_id);
+      // a note (KIND_ROLES: the retrospective's own entry, onboarding's, an executed record) is
+      // never a call, whatever the kinds filter says
+      if (UNSCORED_KINDS.has(r.kind)) continue;
       if (kinds === null || kinds.has(r.kind)) records.push(r);
     }
     scoredWeeks.push({ sw, records: records.sort(compareRecords) });
