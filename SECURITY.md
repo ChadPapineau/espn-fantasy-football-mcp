@@ -161,8 +161,12 @@ report that a pinned dependency has a published advisory is in scope.
 
 ## Untrusted text
 
-Team and owner names, ESPN player outlooks, news headlines and dataset text are **data, never
-instructions**. The plan wraps every such field as `untrusted_text` (capped, stripped,
-source-tagged). A way to make text from one of those fields act as an instruction to the server —
+Team and owner names, ESPN player outlooks, news headlines, player names, dataset text and anything
+read back from the recommendation log are **data, never instructions**. Text written by league
+members, the commissioner or an editor is wrapped as `untrusted_text` (capped, stripped,
+source-tagged); player names, the official injury report's statuses, depth-chart names and
+recommendation-log read-back arrive as plain strings whose paths `meta.untrusted_fields[]` lists
+with their source, under the same rule. A way to make text from one of those fields act as an
+instruction to the server —
 as opposed to persuading the model, which the server cannot fully prevent and says so — is in
 scope.

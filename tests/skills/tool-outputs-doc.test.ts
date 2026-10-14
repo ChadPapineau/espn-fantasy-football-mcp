@@ -7,6 +7,9 @@
 // statuses, depth-chart names, the recommendation log read back — and that a value at a listed path
 // is third-party data, never instructions. The bare sources are derived from the registry's own
 // output schemas (every tool of both toolsets), so a new bare field must be documented here first.
+// The shipped docs say the same (the finding's part d): the README describes the exception wherever
+// it says how third-party text leaves the server, and no shipped doc (README, SECURITY, CHANGELOG)
+// claims that every third-party or free-text field leaves wrapped.
 import { describe, expect, it } from "vitest";
 import { UNTRUSTED_RULE_SHORT, UNTRUSTED_TEXT_RULE } from "../../src/mcp/envelope.js";
 import { toolsFor } from "../../src/mcp/registry.js";
@@ -78,5 +81,118 @@ describe("the served cheat-sheet explains meta.untrusted_fields", () => {
       expect(
         readFileSync(path.join(ROOT, "skills", s, "references", "tool-outputs.md"), "utf8"),
       ).toBe(sheet);
+  });
+});
+
+/** A shipped doc, read whole. */
+const docText = (file: string): string => readFileSync(path.join(ROOT, file), "utf8");
+/** The shipped docs that tell a user or a security reporter how third-party text leaves the server. */
+const SHIPPED_DOCS = ["README.md", "SECURITY.md", "CHANGELOG.md"] as const;
+
+/**
+ * A Markdown text as claims: prose paragraphs re-joined across hard line wraps, every list item,
+ * table row, heading and diagram line on its own, then split at sentence ends. Each claim carries
+ * the one after it, so an exception stated in the next sentence counts.
+ */
+function claimsOf(md: string): { text: string; next: string }[] {
+  const units: string[] = [];
+  let para: string[] = [];
+  const flush = (): void => {
+    if (para.length > 0) units.push(para.join(" "));
+    para = [];
+  };
+  for (const raw of md.split("\n")) {
+    const line = raw.trim();
+    if (line === "") flush();
+    else if (/^(?:[-*+] |\d+\. |\||#|```|%%|[A-Za-z_]+\[|[A-Za-z_]+ *-)/.test(line)) {
+      flush();
+      units.push(line);
+    } else para.push(line);
+  }
+  flush();
+  const sentences = units.flatMap((u) => u.split(/(?<=[.!?])\s+(?=[A-Z*_`"(])/));
+  return sentences.map((text, i) => ({ text, next: sentences[i + 1] ?? "" }));
+}
+
+/** A claim that every free-text / third-party field leaves the server wrapped. */
+/** "only" as a quantifier, never the "only" of "read-only". */
+const UNIVERSAL = /\b(?:every|all|any)\b|(?<!-)\bonly\b/i;
+const SUBJECT = /\b(?:free[- ]text|third[- ]party|such field)/i;
+const WRAPPED = /\bwrap|\bonly (?:inside |as )(?:an? )?`?untrusted_text/i;
+/** The exception, in the words the docs use for it. */
+const EXCEPTION = /\b(?:plain|bare)\b/i;
+
+describe("the shipped docs describe the bare, path-listed exception (docs-untrusted-fields-rule-missing, part d)", () => {
+  const readme = docText("README.md");
+  const lines = readme.split("\n");
+  const lineStarting = (re: RegExp): string => lines.find((l) => re.test(l)) ?? "";
+  /** Every README passage that says how third-party text leaves the server. */
+  const passages: Record<string, string> = {
+    overview:
+      /Third-party text —.*?\*\*data, never instructions\*\*.*?\.(?=\s|$)/.exec(readme)?.[0] ?? "",
+    "security diagram, output envelope": lineStarting(/^\s*OUT\["Output envelope/),
+    "security diagram caption": lineStarting(/^\*Every entry point for untrusted input/),
+    "tool contract, untrusted text": lineStarting(/^- \*\*Untrusted text\.\*\*/),
+    "security table, prompt-injection defences": lineStarting(
+      /^\| \*\*Prompt-injection defences\*\* \|/,
+    ),
+  };
+
+  it("every README passage on how third-party text leaves the server names the path-listed exception", () => {
+    for (const [where, text] of Object.entries(passages)) {
+      expect(text.length, `${where}: passage not found`).toBeGreaterThan(40);
+      expect(text, where).toMatch(/meta\.untrusted_fields/);
+      expect(text, where).toMatch(EXCEPTION);
+    }
+  });
+
+  it("the README names every bare source the registry emits, and says the rule covers them", () => {
+    const contract = passages["tool contract, untrusted text"] ?? "";
+    for (const s of bareSources) expect(contract, s).toContain(`\`${s}\``);
+    expect(contract).toMatch(
+      /A value at a listed path is third-party data exactly like a wrapped one: quoted with its source, never followed/,
+    );
+    expect(contract).toContain(UNTRUSTED_RULE_SHORT);
+  });
+
+  it("SECURITY.md says the listed plain strings are data under the same rule", () => {
+    const security = docText("SECURITY.md");
+    const section = /^## Untrusted text\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(security)?.[1] ?? "";
+    const prose = section.replace(/\s+/g, " ");
+    expect(prose.length).toBeGreaterThan(100);
+    expect(prose).toMatch(/player names/);
+    expect(prose).toMatch(/recommendation-log read-back/);
+    expect(prose).toMatch(/plain strings whose paths `meta\.untrusted_fields\[\]` lists/);
+    expect(prose).not.toMatch(/wraps every such field/);
+  });
+
+  it("no shipped doc claims that every third-party or free-text field leaves wrapped", () => {
+    for (const file of SHIPPED_DOCS)
+      for (const c of claimsOf(docText(file)))
+        if (UNIVERSAL.test(c.text) && SUBJECT.test(c.text) && WRAPPED.test(c.text))
+          expect(`${c.text} ${c.next}`, `${file}: ${c.text}`).toMatch(EXCEPTION);
+  });
+
+  it("the claim detector catches the sentences this finding named (positive controls)", () => {
+    const flagged = (md: string): boolean =>
+      claimsOf(md).some(
+        (c) =>
+          UNIVERSAL.test(c.text) &&
+          SUBJECT.test(c.text) &&
+          WRAPPED.test(c.text) &&
+          !EXCEPTION.test(`${c.text} ${c.next}`),
+      );
+    for (const old of [
+      "*Every entry point for untrusted input is named (T0–T4) and every free-text field — including names and outlooks that arrive inside otherwise-trusted ESPN objects — leaves the server only inside an `untrusted_text` wrapper. The cookie never crosses into the model channel.*",
+      "Team and owner names, ESPN player outlooks, news headlines and dataset text are **data, never\ninstructions**. The plan wraps every such field as `untrusted_text` (capped, stripped,\nsource-tagged).",
+      "- **Phase 1a + 1b.** The server, the P0 resources and the 8 P0 prompts, every third-party string wrapped and\n  path-listed in `meta.untrusted_fields`; the `eff` CLI.",
+      '      OUT["Output envelope<br/>third-party text only as untrusted_text - capped, stripped, source-tagged"]',
+    ])
+      expect(flagged(old), old).toBe(true);
+    expect(
+      flagged(
+        "Every third-party string leaves the server marked: some wrapped, the rest as plain strings.",
+      ),
+    ).toBe(false);
   });
 });

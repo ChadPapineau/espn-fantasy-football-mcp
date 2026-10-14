@@ -44,8 +44,9 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 - **Phase 1a + 1b, read-only (plans 01–10).** The local stdio MCP server with the 18 P0 tools
   (league, roster, players, schedule, standings, matchups and box scores, injuries, transactions,
   status; E1 projections, E2 start/sit, E5 waiver priority with the K/D-ST slice, E12 record and
-  E13 retrospective), the P0 resources and the 8 P0 prompts, every third-party string wrapped and
-  path-listed in `meta.untrusted_fields`; the `eff` CLI (serve, doctor, setup, refresh, launchd and
+  E13 retrospective), the P0 resources and the 8 P0 prompts, every third-party string path-listed
+  in `meta.untrusted_fields` — wrapped as `untrusted_text`, or a plain string for player names, the
+  injury report's statuses and recommendation-log read-back; the `eff` CLI (serve, doctor, setup, refresh, launchd and
   the rest); the ESPN provider (one path and filter builder, view schemas, classifier, cross-process
   limiter, cache, normalisers, in-call drift detector); the format-aware scoring engine with the
   per-stat golden over the recorded leagues; the `node:sqlite` store; nflverse and weather data
