@@ -998,7 +998,6 @@ Three further keys exist for tests only and are deliberately absent from `.env.e
       "args": ["/absolute/path/to/espn-fantasy-football-mcp/dist/cli.js", "serve"],
       "env": {
         "ESPN_LEAGUE_ID": "0000000",
-        "ESPN_SEASON": "2026",
         "EFF_LOG_LEVEL": "info"
       }
     }
@@ -1010,7 +1009,7 @@ Three further keys exist for tests only and are deliberately absent from `.env.e
 
 ```sh
 claude mcp add espn-fantasy-football --scope user --transport stdio \
-  --env ESPN_LEAGUE_ID=0000000 --env ESPN_SEASON=2026 --env EFF_LOG_LEVEL=info \
+  --env ESPN_LEAGUE_ID=0000000 --env EFF_LOG_LEVEL=info \
   -- "/absolute/path/to/node" "/absolute/path/to/espn-fantasy-football-mcp/dist/cli.js" serve
 ```
 
@@ -1034,8 +1033,11 @@ The server name comes first: `--env` takes several values, so a name written aft
 }
 ```
 
+**The plugin's options are its server's environment.** Set them at install (`--config KEY=VALUE`) or later with `/plugin configure espn-fantasy-football@espn-fantasy-football-mcp`, then restart the client. `league_id` sets `ESPN_LEAGUE_ID`. `season` sets `ESPN_SEASON` and is empty by default, so the server reads the current NFL season exactly as the `eff` CLI and the launchd jobs do; a year there pins this server alone. `toolset` sets `EFF_TOOLSET` and is empty by default, which leaves `config.json`'s value, else `core`; `full` registers the 34 read tools the five P1 Skills need — their Step 0 stops under `core` and asks for exactly this. An empty option is unset to the server, and because the plugin sets these three itself, a value exported in your shell never reaches its server for them. The `eff` CLI does not read the plugin's options: `"EFF_TOOLSET": "full"` in `config.json`, with the option left empty, is the one place the server, `eff status` and `eff doctor` all read.
+
 What to get right:
 
+- **No season in a launch configuration.** Leave `ESPN_SEASON` out and every process reads the current NFL season (the calendar year from July on); a pinned year stays pinned when the next season starts, while the `eff` CLI and the jobs move on. `eff print-config` writes it only when you set it.
 - **Absolute paths, always.** GUI clients start servers with a minimal `PATH`, and a relative path resolves against the client's working directory. `command` must be the absolute path of the Node binary — under a version manager such as `fnm` that is a *versioned* path, so re-run `eff print-config` and `eff install-launchd` after changing Node versions. `eff doctor` checks that the configured binary is Node ≥ 24.15 and matches the one you are running.
 - **Paths that contain spaces.** In JSON each path is its own string, so spaces need no escaping — but never split one path across two `args` entries. On the command line, wrap each path in double quotes exactly as shown. Letting `eff print-config` emit both forms is the point of the command.
 - **Keep the runtime outside cloud-synced folders.** The `dist/cli.js` and `node_modules` the configuration points at must not sit in an iCloud-managed or other file-provider directory; `eff print-config` warns and `eff doctor` fails if they do.

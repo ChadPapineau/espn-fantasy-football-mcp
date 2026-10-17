@@ -37,8 +37,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   sha256 over the full history and the tree, plus its self-test), Dependabot (monthly, grouped) and
   a pull-request template. Every action pinned by commit SHA; `contents: read`; no secrets.
 - **Plugin root (plan 09 §4, K8).** `.claude-plugin/plugin.json` (`espn-fantasy-football`,
-  `userConfig` for the league id and season) and `marketplace.json` (the repo is its own
-  marketplace), `.mcp.json` launching `/bin/sh scripts/eff-launch.sh serve` with no
+  `userConfig` for the league id, the season and the toolset — the season and the toolset empty
+  by default, so the server reads the current NFL season like the `eff` CLI and the jobs, and
+  `config.json`'s toolset or `core`; the toolset option set to `full` gives a plugin install the
+  tools the five P1 Skills need) and `marketplace.json` (the repo is its own marketplace),
+  `.mcp.json` launching `/bin/sh scripts/eff-launch.sh serve` with no
   `EFF_CONFIG_DIR`/`EFF_CACHE_DIR`, and the POSIX launch shim that resolves a Node >= 24.15 in a
   fixed order and prints the exact fix when none is found.
 - **Phase 1a + 1b, read-only (plans 01–10).** The local stdio MCP server with the 18 P0 tools

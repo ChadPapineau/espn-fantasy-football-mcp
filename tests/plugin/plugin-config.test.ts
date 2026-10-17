@@ -138,8 +138,8 @@ describe("toolset: EFF_TOOLSET=full is reachable through the plugin's own option
   });
 
   it("the option is named by the setting the P1 Skills' Step 0 stop text tells the user to set", () => {
-    const stop = read("skills/_shared/references/orient.md");
-    expect(stop).toContain("set `EFF_TOOLSET=full` in the server's env and restart the client");
+    // the stop text (plan 09 §2 orient.md) names the setting; the plugin's option carries its name
+    expect(read("skills/_shared/references/orient.md")).toContain("`EFF_TOOLSET=full`");
     const toolset = readPlugin().manifest.userConfig?.toolset;
     expect(toolset?.title).toContain("EFF_TOOLSET");
     expect(toolset?.description).toMatch(/\bfull\b/);
