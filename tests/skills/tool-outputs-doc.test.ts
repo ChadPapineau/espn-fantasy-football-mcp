@@ -76,6 +76,31 @@ describe("the served cheat-sheet explains meta.untrusted_fields", () => {
     );
   });
 
+  /**
+   * A served sentence that says some tools' text "is untrusted_text" across the board (a universal
+   * quantifier over generic text, no bare/listed exception) — the P1 sentence the verifier found
+   * still in the cheat-sheet after the README fix (Stage C round 1, attempt 3).
+   */
+  const universalWrap = (text: string, next: string): boolean =>
+    /\btext\b/i.test(text) &&
+    /\b(?:every|all|any)\b/i.test(text) &&
+    text.includes("`untrusted_text`") &&
+    !/\b(?:bare|plain|listed)\b|untrusted_fields/i.test(`${text} ${next}`);
+
+  it("no served sentence says a tool family's text all arrives as untrusted_text", () => {
+    for (const c of claimsOf(served)) expect(universalWrap(c.text, c.next), c.text).toBe(false);
+    // positive control: the sentence this round removed
+    expect(
+      claimsOf(
+        "**The P1 tools** register only under `EFF_TOOLSET=full`. Text they return from ESPN, nflverse or the news feeds is `untrusted_text` like every other.",
+      ).some((c) => universalWrap(c.text, c.next)),
+    ).toBe(true);
+    // and what replaced it says both ways
+    expect(served).toMatch(
+      /Text they return from ESPN, nflverse or the news feeds is third-party data like every other: wrapped as `untrusted_text`, or a bare string whose path `meta\.untrusted_fields\[\]` lists/,
+    );
+  });
+
   it("every Skill ships the same text", () => {
     for (const s of SKILLS)
       expect(

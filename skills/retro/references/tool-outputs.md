@@ -42,7 +42,7 @@ The first rule covers the bare strings whose paths `meta.untrusted_fields[]` lis
 | `espn_analyze_retrospective` | score last week's logged calls | `final`, `corrections_window_open`, `calls[]` (`followed`, `regret`, `decisive`), `baselines` (`last_week_points`, `espn_projection_lineup.informative`), `metrics`, `sample_size`, `attribution` (flat map: `n_player_weeks`, `calls.projection_backed`/`complete`/`unbacked`, `<layer>.mean`/`.mae`, `<POS>.<layer>.mae`, `calls.<i>.<layer>` for call `i` of `calls[]`; layers `availability`, `opportunity`, `efficiency`, `touchdowns`, `turnovers`, `other`, `anchor`, `scoring`), `parameter_changes_proposed` (proposals only — applied solely by the owner running `eff tune --apply` in their own terminal, never from chat), `rec` | once per week |
 
 
-**The P1 tools** register only under `EFF_TOOLSET=full` (`server.toolset` in `espn_get_status`); a P1 Skill under `core` stops in Step 0. Text they return from ESPN, nflverse or the news feeds is `untrusted_text` like every other.
+**The P1 tools** register only under `EFF_TOOLSET=full` (`server.toolset` in `espn_get_status`); a P1 Skill under `core` stops in Step 0. Text they return from ESPN, nflverse or the news feeds is third-party data like every other: wrapped as `untrusted_text`, or a bare string whose path `meta.untrusted_fields[]` lists (player names, the official injury report's statuses, depth-chart names).
 
 | Tool | Use it for | Compact fields a Skill reads | Re-fetch (class TTL) |
 |---|---|---|---|

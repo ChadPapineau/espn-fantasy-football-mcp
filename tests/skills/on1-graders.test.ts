@@ -242,8 +242,26 @@ const VALUE_FIRST = [
   "**{V}** per {T}",
   "{V} per {T} (stat {ID})",
 ];
+/**
+ * Every way a digest row or a short line puts the value BEFORE its label — LABEL_FIRST's mirror
+ * images (Stage C round 1, attempt 3: the verifier showed a correct digest in these layouts failing
+ * while its label-first twin passed): a value cell then the label cell, the stat id between, a value
+ * then a colon or a dash then the label.
+ */
+const LABEL_SECOND = [
+  "{V}: {L}",
+  "{V} — {L}",
+  "{V} – {L}",
+  "| {V} | {L} |",
+  "| {V} | {ID} | {L} |",
+  "**{V}** | {L}",
+  "{V} | {L}",
+  "- **{V}** — {L}",
+];
 const labelFirst = (labels: readonly string[], values: readonly string[], id: string): string[] =>
   cross(cross(labels, values), LABEL_FIRST).map(([[L, V], t]) => fill(t, { L, V, ID: id }));
+const labelSecond = (labels: readonly string[], values: readonly string[], id: string): string[] =>
+  cross(cross(labels, values), LABEL_SECOND).map(([[L, V], t]) => fill(t, { L, V, ID: id }));
 const valueFirst = (
   values: readonly string[],
   terms: readonly (readonly [string, string])[],
@@ -333,6 +351,7 @@ function receptionCorpus(): { right: string[]; wrong: string[] } {
   ];
   const right = [
     ...labelFirst(labels, values, "53"),
+    ...labelSecond(labels, values, "53"),
     ...valueFirst(firstValues, terms, "53"),
     // the format's names
     "half-PPR",
@@ -387,6 +406,7 @@ function receptionCorpus(): { right: string[]; wrong: string[] } {
   ];
   const wrong = [
     ...labelFirst(labels, wrongValues, "53"),
+    ...labelSecond(labels, wrongValues, "53"),
     ...valueFirst(
       [
         "1 point",
@@ -510,7 +530,10 @@ function passingCorpus(): { right: string[]; wrong: string[] } {
   ];
   const right = [
     ...labelFirst(labels, values, "4"),
+    ...labelSecond(labels, values, "4"),
     ...valueFirst(firstValues, terms, "4"),
+    "TD (pass): 5",
+    "Touchdowns (passing): 5 points",
     // the tool's own words
     `| ${abbr} | 4 | ${String(points)} |`,
     `| 4 | ${abbr} | ${String(points)} |`,
@@ -553,6 +576,9 @@ function passingCorpus(): { right: string[]; wrong: string[] } {
   ];
   const wrong = [
     ...labelFirst(labels, wrongValues, "4"),
+    ...labelSecond(labels, wrongValues, "4"),
+    "TD (pass): 4",
+    "TD (rush): 5, TD (pass): 4",
     ...valueFirst(
       ["4", "4 points", "6 pts", "four points", "6-point", "4-pt", "15 points", "5.5", "0.5"],
       terms,
