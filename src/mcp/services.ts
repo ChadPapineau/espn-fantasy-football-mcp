@@ -114,10 +114,11 @@ export interface DriftView {
   /** The failing diff (removed required keys, skeletons). */
   readonly diff: readonly DriftViewDiff[];
   /**
-   * The additive-drift list (new keys and enum values — the row's `additive_json`; plan 07 §4.1
-   * espn-ff://status/drift "the additive-drift list"). Optional and additive: G1 merges it into the
-   * diff it shows, so an `additive` status names its paths (Stage C finding
-   * `status-drift-diff-unwrapped-strings`).
+   * The additive-drift list (new keys and enum values — the row's `additive_json`, parsed like
+   * `diff_json`: `parseDiffs(row.additive_json)`; plan 07 §4.1 espn-ff://status/drift "the
+   * additive-drift list"). Optional and additive: G1 merges it into the diff it shows, so an
+   * `additive` status names its paths (Stage C finding `status-drift-diff-unwrapped-strings`) —
+   * absent, an additive status shows an empty diff.
    */
   readonly additive?: readonly DriftViewDiff[];
 }
@@ -174,9 +175,11 @@ export interface ServerTexts {
   /**
    * skills/<name>/references/<file>.md, keyed by Skill directory then file name (`orient.md`,
    * `onboard-log-entry.md`); null or absent = not installed. A prompt carries the references its
-   * Skill body links (plan 09 §6: the prompts are the Skill delivery path where no Skill loader
-   * exists, and a prompt-only client cannot open a file). Optional and additive: the composition
-   * root fills it from the package.
+   * Skill body links, and the ones those link (plan 09 §6: the prompts are the Skill delivery path
+   * where no Skill loader exists, and a prompt-only client cannot open a file). Optional and
+   * additive: the composition root fills it with `referenceTextsFor(skills, read)`
+   * (src/mcp/prompts) over its bounded package read — absent, every prompt names its references as
+   * "not installed".
    */
   readonly references?: Readonly<Record<string, Readonly<Record<string, string | null>>>>;
 }

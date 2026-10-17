@@ -7,27 +7,35 @@
 // appends every linked reference under a `### references/<file>` heading its link resolves to
 // (except the blocks the body already inlines), embeds references/tool-outputs.md as the
 // espn-ff://docs/tool-outputs resource, and names a file the installation lacks as missing.
-// The reference texts reach the server through ServerTexts.references (the composition root's
-// loader — injected here exactly as it reads them: skills/<skill>/references/<file>.md).
-import { readFileSync, readdirSync } from "node:fs";
+// Attempt 2: the references a carried reference links are carried too (the closure — a carried
+// file's own link was otherwise left for the client to open), and the texts reach the server
+// through ONE loader contract, `referenceTextsFor(skills, read)`: the composition root's call with
+// its bounded package read of skills/<skill>/references/<file> — exercised here with that exact
+// read over this package, so every link in all 13 prompts is shown to resolve once it is wired.
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ServerTexts } from "../../src/mcp/services.js";
-import { ALL_PROMPTS, linkedReferences, promptText } from "../../src/mcp/prompts/index.js";
+import {
+  ALL_PROMPTS,
+  REFERENCE_FILE_RE,
+  TOOL_OUTPUTS_URI,
+  carriedReferences,
+  linkedReferences,
+  linksToolOutputs,
+  promptText,
+  referenceTextsFor,
+} from "../../src/mcp/prompts/index.js";
 import { ROOT, connect, makeWorld, type World } from "./helpers/world.js";
 
-/** Every prompt Skill's references, read the way the composition root's loader reads them. */
-function referencesFromPackage(): NonNullable<ServerTexts["references"]> {
-  const out: Record<string, Record<string, string>> = {};
-  for (const p of ALL_PROMPTS) {
-    const dir = path.join(ROOT, "skills", p.skill, "references");
-    const files: Record<string, string> = {};
-    for (const f of readdirSync(dir))
-      if (f.endsWith(".md")) files[f] = readFileSync(path.join(dir, f), "utf8");
-    out[p.skill] = files;
+/** The composition root's read: skills/<skill>/references/<file> of this package, or null. */
+function packageRead(skill: string, file: string): string | null {
+  try {
+    return readFileSync(path.join(ROOT, "skills", skill, "references", file), "utf8");
+  } catch {
+    return null;
   }
-  return out;
 }
 
 let world: World;
@@ -36,7 +44,10 @@ let close: () => Promise<void>;
 let texts: ServerTexts;
 beforeAll(async () => {
   world = await makeWorld({ publishEspn: false });
-  texts = { ...world.options.texts, references: referencesFromPackage() };
+  texts = {
+    ...world.options.texts,
+    references: referenceTextsFor(world.options.texts.skills, packageRead),
+  };
   ({ client, close } = await connect(world, { options: { toolset: "full", texts } }));
 }, 120_000);
 afterAll(async () => {
@@ -58,7 +69,7 @@ function argsFor(name: string): Record<string, string> {
   return m[name] ?? {};
 }
 
-describe("every prompt resolves every reference its body links (plan 09 §4, §6)", () => {
+describe("every prompt resolves every reference its text links (plan 09 §4, §6)", () => {
   it.each(ALL_PROMPTS.map((p) => [p.name]))("%s", async (name) => {
     const r = await client.getPrompt({ name, arguments: argsFor(name) });
     const text = textOf(r);
@@ -99,13 +110,106 @@ describe("every prompt resolves every reference its body links (plan 09 §4, §6
   });
 });
 
-describe("linkedReferences / promptText", () => {
+describe("referenceTextsFor — the composition root's loader contract", () => {
+  it("over this package: every file a prompt carries is read, exactly once, nothing else", () => {
+    const calls: string[] = [];
+    const refs = referenceTextsFor(texts.skills, (skill, file) => {
+      calls.push(`${skill}/${file}`);
+      return packageRead(skill, file);
+    });
+    expect(new Set(calls).size).toBe(calls.length);
+    for (const p of ALL_PROMPTS) {
+      const body = texts.skills[p.skill];
+      if (typeof body !== "string") throw new Error(`no body for ${p.skill}`);
+      const files = carriedReferences(body, (f) => refs[p.skill]?.[f]);
+      expect(Object.keys(refs[p.skill] ?? {}).sort(), p.skill).toEqual([...files].sort());
+      for (const f of files)
+        expect(refs[p.skill]?.[f], `${p.skill}/${f}`).toEqual(expect.any(String));
+    }
+    for (const c of calls) expect(REFERENCE_FILE_RE.test(c.split("/")[1] ?? ""), c).toBe(true);
+  });
+
+  it("a read that throws or returns nothing is null — the prompt names it missing", () => {
+    const skills = { a: "Step 0 in references/orient.md and references/log.md." };
+    const refs = referenceTextsFor(skills, (_skill, file) => {
+      if (file === "orient.md") throw new Error("EACCES");
+      return "   ";
+    });
+    expect(refs).toEqual({ a: { "orient.md": null, "log.md": null } });
+    const t = promptText({ skills, tool_outputs: null, references: refs }, "a", {});
+    expect(t).toContain("### references/orient.md\n\n(not installed");
+    expect(t).toContain("### references/log.md\n\n(not installed");
+  });
+
+  it("reads only one-component names under a Skill directory name, never a path", () => {
+    const seen: string[] = [];
+    const refs = referenceTextsFor(
+      {
+        ok: "see references/../secret.md, references/sub/x.md, references/X.md, references/a.md",
+        "../up": "references/orient.md",
+        Bad: "references/orient.md",
+        none: null,
+      },
+      (skill, file) => {
+        seen.push(`${skill}|${file}`);
+        return "text";
+      },
+    );
+    expect(seen).toEqual(["ok|a.md"]);
+    expect(refs).toEqual({ ok: { "a.md": "text" } });
+  });
+});
+
+describe("carriedReferences / linkedReferences / promptText", () => {
   it("skips the inlined blocks and tool-outputs; keeps the order of first link", () => {
     const body =
       "See [o](references/orient.md) and references/log.md, again references/orient.md; " +
       "fields in references/tool-outputs.md.\n<!-- BEGIN GENERATED FROM _shared/references/guardrails.md -->\n" +
       "references/guardrails.md";
     expect(linkedReferences(body)).toEqual(["orient.md", "log.md"]);
+  });
+
+  it("carries the references a carried reference links, transitively, each once", () => {
+    // body → a.md → b.md → c.md (and back to a.md); b.md also links the cheat-sheet and the
+    // guardrails the body inlines: the prompt carries a, b, c, embeds the cheat-sheet, and never
+    // re-carries an inlined block
+    const skills = {
+      x:
+        "Start with references/a.md.\n<!-- BEGIN GENERATED FROM _shared/references/guardrails.md -->\n" +
+        "guardrails inline\n<!-- END GENERATED FROM _shared/references/guardrails.md -->",
+    };
+    const files: Record<string, string> = {
+      "a.md": "A: then references/b.md",
+      "b.md":
+        "B: fields in references/tool-outputs.md, rules in references/guardrails.md, then references/c.md",
+      "c.md": "C: back to references/a.md",
+    };
+    const refs = referenceTextsFor(skills, (_s, f) => files[f] ?? null);
+    expect(refs).toEqual({ x: files });
+    const t: ServerTexts = { skills, tool_outputs: null, references: refs };
+    expect(carriedReferences(skills.x, (f) => refs.x?.[f])).toEqual(["a.md", "b.md", "c.md"]);
+    const text = promptText(t, "x", {});
+    for (const [f, body] of Object.entries(files))
+      expect(text, f).toContain(`### references/${f}\n\n${body}`);
+    expect(text).not.toContain("### references/guardrails.md");
+    expect(text).toContain(`Embedded below as the ${TOOL_OUTPUTS_URI} resource.`);
+    expect(linksToolOutputs(t, "x", skills.x)).toBe(true);
+    expect(linksToolOutputs({ ...t, references: {} }, "x", skills.x)).toBe(false);
+  });
+
+  it("the prompt embeds the cheat-sheet a carried reference links (the body does not)", async () => {
+    const skills = { ...texts.skills, onboard: "Step 0 is in references/orient.md." };
+    const references = { onboard: { "orient.md": "Fields: references/tool-outputs.md." } };
+    const c = await connect(world, {
+      options: { texts: { skills, tool_outputs: texts.tool_outputs, references } },
+    });
+    const r = await c.client.getPrompt({ name: "espn.onboard" });
+    await c.close();
+    const uris = r.messages
+      .filter((m) => m.content.type === "resource")
+      .map((m) => (m.content as { resource: { uri: string } }).resource.uri);
+    expect(uris).toContain(TOOL_OUTPUTS_URI);
+    expect(textOf(r)).toContain("### references/orient.md\n\nFields: references/tool-outputs.md.");
   });
 
   it("a reference the installation lacks is named as missing, never guessed", () => {

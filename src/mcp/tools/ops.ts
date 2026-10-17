@@ -90,16 +90,30 @@ const sourceRow = z.strictObject({
 });
 
 /**
- * The grammar of a drift path as the detector writes it (src/drift/detect.ts): `$`, then ESPN key
- * segments in identifier form (a key outside it is recorded as `<key>`) and `[]` array markers —
- * the ESPN key vocabulary, no whitespace, never prose. Only paths in this grammar leave the server
- * (Stage C finding `status-drift-diff-unwrapped-strings`): the drift diff carries ESPN's own key
- * names, so a value outside it is dropped and counted, never shown.
+ * The most steps a shown drift path has. Every path the shipped manifest's patterns yield fits with
+ * room to spare (the deepest is 12 — an additive key under an 11-step pattern; held by
+ * tests/mcp/drift-diff.test.ts over every pattern); the 200-character cap bounds a path anyway.
  */
-export const DRIFT_PATH_RE = /^\$(?:\.(?:[A-Za-z_$][\w$]{0,63}|<key>)|\[\]){0,12}$/;
-/** A new enum value: a drift path, `=`, and the detector's enum token (or `?`). */
-export const DRIFT_ENUM_RE =
-  /^\$(?:\.(?:[A-Za-z_$][\w$]{0,63}|<key>)|\[\]){0,12}=(?:[A-Z0-9_]{1,64}|\?)$/;
+export const DRIFT_PATH_MAX_STEPS = 16;
+/** Up to DRIFT_PATH_MAX_STEPS steps of the drift path language (`.key`, `.<key>`, `[]`, `{}`). */
+const DRIFT_STEPS = `(?:\\.(?:[A-Za-z_$][\\w$]{0,63}|<key>)|\\[\\]|\\{\\}){0,${String(DRIFT_PATH_MAX_STEPS)}}`;
+/**
+ * The grammar of a drift path as the detector writes it (src/drift/pattern.ts, detect.ts): `$`, then
+ * the path language's steps — `.key` in identifier form (a key outside it is recorded as `<key>`),
+ * `[]` every array element, `{}` every value of an object (the manifest's map-like patterns:
+ * `scoreByStat{}`, `rankings{}[]`, `positionalRatings{}`, `proGamesByScoringPeriod{}[]`) — the ESPN
+ * key vocabulary, no whitespace, never prose. Only paths in this grammar leave the server (Stage C
+ * finding `status-drift-diff-unwrapped-strings`): the drift diff carries ESPN's own key names, so a
+ * value outside it is dropped and counted, never shown. Without the `{}` step, fifteen paths the
+ * detector writes from the shipped manifest were dropped (attempt 2 of that finding).
+ */
+export const DRIFT_PATH_RE = new RegExp(`^\\$${DRIFT_STEPS}$`);
+/**
+ * A new enum value: a drift path, `=`, and the detector's enum token (detect.ts enumToken: an ESPN
+ * token, or an integer — written as `String(v)`, so a negative one carries its `-`) or `?` (a value
+ * outside both).
+ */
+export const DRIFT_ENUM_RE = new RegExp(`^\\$${DRIFT_STEPS}=(?:[A-Z0-9_]{1,64}|-[0-9]{1,21}|\\?)$`);
 /** An ESPN view name as the drift row carries it. */
 const DRIFT_VIEW_RE = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/;
 
