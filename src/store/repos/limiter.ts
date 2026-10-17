@@ -29,6 +29,7 @@ function checkRequest(req: LimiterRequest): {
   atMs: number;
   windows: { startMs: number; max: number }[];
   cap: { dayStartMs: number; max: number } | null;
+  inFlight: { sinceMs: number; max: number; retryAfterMs: number } | null;
 } {
   const atMs = isoMs(req.at, "at");
   bool(req.keyless, "keyless");
@@ -45,14 +46,39 @@ function checkRequest(req: LimiterRequest): {
     if (dayStartMs > atMs) throw new RangeError("store: the day cannot start after the request");
     cap = { dayStartMs, max: intIn(req.dailyCap.max, 0, LIMITER_MAX_PER_WINDOW, "daily cap") };
   }
-  return { atMs, windows, cap };
+  let inFlight: { sinceMs: number; max: number; retryAfterMs: number } | null = null;
+  if (req.inFlight !== undefined && req.inFlight !== null) {
+    const sinceMs = isoMs(req.inFlight.since, "inFlight since");
+    if (sinceMs > atMs)
+      throw new RangeError("store: the in-flight window cannot start after the request");
+    inFlight = {
+      sinceMs,
+      max: intIn(req.inFlight.max, 1, LIMITER_MAX_PER_WINDOW, "in-flight max"),
+      retryAfterMs: intIn(req.inFlight.retry_after_ms, 1, DAY_MS, "in-flight retry_after_ms"),
+    };
+  }
+  return { atMs, windows, cap, inFlight };
 }
 
 export function limiterRepository({ db, writes }: RepoDeps): LimiterRepository {
   return {
     tryRecord(req): LimiterVerdict {
-      const { atMs, windows, cap } = checkRequest(req);
+      const { atMs, windows, cap, inFlight } = checkRequest(req);
       return writes.requiredTx("espn_requests", () => {
+        // the in-flight cap, counted inside this BEGIN IMMEDIATE: no other process can insert a
+        // pending row between this count and this insert (limiter-concurrency-per-process)
+        const pending =
+          inFlight === null
+            ? 0
+            : num(
+                (
+                  db
+                    .prepare(
+                      "SELECT COUNT(*) AS n FROM espn_requests WHERE outcome = 'pending' AND ts >= ?",
+                    )
+                    .get(inFlight.sinceMs) as { n: number }
+                ).n,
+              );
         const inWindow = db.prepare("SELECT ts FROM espn_requests WHERE ts >= ? ORDER BY ts");
         const windowRows = windows.map((w) =>
           (inWindow.all(w.startMs) as unknown as { ts: number }[]).map((r) => num(r.ts)),
@@ -75,6 +101,10 @@ export function limiterRepository({ db, writes }: RepoDeps): LimiterRepository {
           windowRows,
           dailyCap:
             cap === null ? null : { max: cap.max, used, nextDayStartMs: cap.dayStartMs + DAY_MS },
+          inFlight:
+            inFlight === null
+              ? null
+              : { max: inFlight.max, pending, retryAfterMs: inFlight.retryAfterMs },
         });
         if (!verdict.ok) return verdict;
         const id = db

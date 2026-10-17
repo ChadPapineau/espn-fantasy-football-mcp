@@ -135,6 +135,7 @@ describe("the inclusive window boundary (rate_limited regression)", () => {
             return { ok: false as const, reason: "window" as const, retry_after_ms: 700 };
           },
           recordOutcome: () => undefined,
+          recentOutcomes: () => [],
         } as never,
         clock: fixedClock("2026-10-06T18:00:00.000Z"),
         origin: "server",
@@ -150,5 +151,88 @@ describe("the inclusive window boundary (rate_limited regression)", () => {
     expect(slept).toBeLessThanOrEqual(MAX_LIMITER_WAIT_MS);
     expect(slept).toBe(7 * 700);
     expect(checks).toBe(8);
+  });
+});
+
+describe("the CLI's requests take their slot under the cross-process in-flight cap (limiter-concurrency-per-process)", () => {
+  it("two requests in flight in other processes: the CLI waits for a slot and sends once one finishes; never a third in flight", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { clock: fixedClock("2026-10-06T18:00:00.000Z") });
+    const { config, log } = await loadLenientRuntime(io);
+    const store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      const repo = store.repos.limiter;
+      const t0 = io.clock.nowMs();
+      // the server and a launchd job each hold a request in flight (pending rows)
+      const a = repo.tryRecord({
+        at: new Date(t0 - 4000).toISOString(),
+        keyless: true,
+        origin: "server",
+        windows: [],
+        dailyCap: null,
+      });
+      const b = repo.tryRecord({
+        at: new Date(t0 - 2000).toISOString(),
+        keyless: true,
+        origin: "job",
+        windows: [],
+        dailyCap: null,
+      });
+      if (!a.ok || !b.ok) throw new Error("setup rows refused");
+      const sent: string[] = [];
+      let waits = 0;
+      const r = await espnRequest(
+        {
+          http: okHttp(sent),
+          limiter: repo,
+          clock: io.clock,
+          origin: "server",
+          sleep: (ms) => {
+            waits += 1;
+            // while the CLI waits, nothing it sends; after the second wait one request finishes
+            expect(sent).toHaveLength(0);
+            if (waits === 2) repo.recordOutcome(a.id, "ok");
+            io.clock.advance(ms);
+            return Promise.resolve();
+          },
+        },
+        { url: URL0, cookie: null },
+      );
+      expect("status" in r && r.status).toBe(200);
+      expect(sent).toHaveLength(1);
+      expect(waits).toBeGreaterThanOrEqual(2);
+      // b is still in flight and another process starts one more: the slots are full for good —
+      // the CLI waits its budget out and reports rate_limited, nothing sent, no row written
+      const c = repo.tryRecord({
+        at: new Date(io.clock.nowMs() - 1000).toISOString(),
+        keyless: true,
+        origin: "job",
+        windows: [],
+        dailyCap: null,
+      });
+      expect(c.ok).toBe(true);
+      const rows = repo.countSince(new Date(t0 - 60_000).toISOString());
+      const sent2: string[] = [];
+      let slept = 0;
+      const refused = await espnRequest(
+        {
+          http: okHttp(sent2),
+          limiter: repo,
+          clock: io.clock,
+          origin: "server",
+          sleep: (ms) => {
+            slept += ms;
+            return Promise.resolve();
+          },
+        },
+        { url: URL0, cookie: null },
+      );
+      expect(refused).toEqual({ error: "rate_limited" });
+      expect(sent2).toHaveLength(0);
+      expect(slept).toBeLessThanOrEqual(MAX_LIMITER_WAIT_MS);
+      expect(repo.countSince(new Date(t0 - 60_000).toISOString())).toBe(rows);
+    } finally {
+      store.close();
+    }
   });
 });

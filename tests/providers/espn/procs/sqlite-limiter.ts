@@ -29,6 +29,9 @@ export function openSqliteLimiter(file: string): LimiterRepository & { close(): 
   const recent = db.prepare(
     "SELECT ts, outcome FROM espn_requests ORDER BY ts DESC, id DESC LIMIT ?",
   );
+  const pendingSince = db.prepare(
+    "SELECT COUNT(*) AS n FROM espn_requests WHERE outcome = 'pending' AND ts >= ?",
+  );
   return {
     tryRecord(req: LimiterRequest): LimiterVerdict {
       const now = Date.parse(req.at);
@@ -37,11 +40,21 @@ export function openSqliteLimiter(file: string): LimiterRepository & { close(): 
         const windowRows = req.windows.map((w) =>
           inWindow.all(Date.parse(w.start)).map((r) => (r as { ts: number }).ts),
         );
+        const f = req.inFlight ?? null;
         const d = limiterDecision({
           nowMs: now,
           windows: req.windows.map((w) => ({ startMs: Date.parse(w.start), max: w.max })),
           windowRows,
           dailyCap: null,
+          // the in-flight cap counted inside this BEGIN IMMEDIATE, as the store does
+          inFlight:
+            f === null
+              ? null
+              : {
+                  max: f.max,
+                  pending: (pendingSince.get(Date.parse(f.since)) as { n: number }).n,
+                  retryAfterMs: f.retry_after_ms,
+                },
         });
         if (!d.ok) {
           db.exec("COMMIT");

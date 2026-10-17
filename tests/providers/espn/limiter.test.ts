@@ -3,6 +3,9 @@
 // more than 2 in flight; the daily caps bind job rows only; fail closed when the row cannot be
 // written; the breaker opens after 3 consecutive 5xx/429/timeouts (in process AND from another
 // process's rows) and closes after 5 min; the backoff is 1, 2, 4, 8 s ±25 %.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { ESPN_BREAKER, ESPN_JOB_DAILY_CAPS, ESPN_LIMITER } from "../../../src/config/schema.js";
@@ -22,7 +25,22 @@ import {
   trySlot,
   utcDayStart,
 } from "../../../src/providers/espn/limiter.js";
+import { storeFactory } from "../../../src/store/index.js";
 import { MemoryLimiterRepo, NOW_ISO } from "./helpers.js";
+
+/** A clock that starts at `startMs` and runs with real time, plus `advance` jumps. */
+function runningClockAt(startMs: number) {
+  let base = startMs;
+  const origin = performance.now();
+  const now = (): number => Math.floor(base + (performance.now() - origin));
+  return {
+    nowMs: now,
+    nowIso: () => new Date(now()).toISOString(),
+    advance(ms: number) {
+      base += ms;
+    },
+  };
+}
 
 const T0 = Date.parse(NOW_ISO);
 
@@ -544,5 +562,113 @@ describe("EspnLimiter", () => {
       ),
       { numRuns: 60 },
     );
+  });
+});
+
+describe("Stage C: the in-flight cap is decided inside the store's transaction; an unsent request writes no row", () => {
+  /** The real store (src/store) in a temp directory. */
+  function realStore() {
+    const dir = mkdtempSync(path.join(tmpdir(), "eff-limiter-"));
+    const store = storeFactory.open({
+      path: path.join(dir, "store.sqlite"),
+      datasetDir: path.join(dir, "datasets"),
+      backupDir: path.join(dir, "backups"),
+      clock: fixedClock(NOW_ISO),
+      migrate: true,
+    });
+    return {
+      repo: store.repos.limiter,
+      close: () => {
+        store.close();
+        rmSync(dir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  it("limiter-concurrency-per-process: another process's rows inserted after this one counted — refused inside the transaction, nothing written", () => {
+    const s = realStore();
+    try {
+      // another process put two requests in flight (its rows, outcome still pending)
+      for (const at of [T0 - 4000, T0 - 2000])
+        expect(s.repo.tryRecord(limiterRequest(at, true, "job")).ok).toBe(true);
+      // this process counted before those inserts (a stalled process, a busy lock): its read of
+      // the in-flight rows is stale — the count inside the store's BEGIN IMMEDIATE still refuses
+      const stale = { ...s.repo, recentOutcomes: () => [] };
+      expect(trySlot(stale, limiterRequest(T0, false, "server"))).toEqual({
+        ok: false,
+        reason: "concurrency",
+        retry_after_ms: IN_FLIGHT_POLL_MS,
+      });
+      expect(s.repo.countSince(new Date(T0 - 60_000).toISOString())).toBe(2);
+      // a pending row older than IN_FLIGHT_MAX_AGE_MS holds no slot (its process died): once the
+      // first is that old, one slot is free again
+      expect(
+        trySlot(stale, limiterRequest(T0 - 4000 + IN_FLIGHT_MAX_AGE_MS + 1, false, "server")),
+      ).toMatchObject({ ok: true });
+    } finally {
+      s.close();
+    }
+  });
+
+  it("espn-deadline-budget-exhausted-internal: a read queued behind two hung requests is refused at its deadline — RATE_LIMITED, no row", async () => {
+    const repo = new MemoryLimiterRepo();
+    const clock = runningClockAt(T0);
+    const l = new EspnLimiter({ repo, clock, origin: "server" });
+    const a = await l.acquire({
+      keyless: true,
+      deadlineAtMs: clock.nowMs() + 20_000,
+      signal: null,
+    });
+    clock.advance(1_100);
+    const b = await l.acquire({
+      keyless: true,
+      deadlineAtMs: clock.nowMs() + 20_000,
+      signal: null,
+    });
+    expect(repo.rows).toHaveLength(2);
+    // the third waits for an in-process slot only until its deadline (wall time: 120 ms here)
+    const started = performance.now();
+    const e = await l
+      .acquire({ keyless: true, deadlineAtMs: clock.nowMs() + 120, signal: null })
+      .catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(EspnRateLimitedError);
+    expect((e as EspnRateLimitedError).effDetails.reason).toBe("concurrency");
+    expect(performance.now() - started).toBeLessThan(5_000);
+    // nothing was recorded for the request that was never sent
+    expect(repo.rows).toHaveLength(2);
+    a.finish("ok");
+    b.finish("ok");
+    expect(l.inFlight).toBe(0);
+  });
+
+  it("a send whose deadline passed while it waited for the window is refused before its row is written", async () => {
+    const repo = new MemoryLimiterRepo();
+    const clock = fixedClock(NOW_ISO);
+    const l = new EspnLimiter({ repo, clock, origin: "server" });
+    const e = await l
+      .acquire({ keyless: true, deadlineAtMs: T0, signal: null })
+      .catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(EspnRateLimitedError);
+    expect(repo.rows).toHaveLength(0);
+    // a ticket carries the instant it was recorded at, always before its deadline
+    const t = await l.acquire({ keyless: true, deadlineAtMs: T0 + 10_000, signal: null });
+    expect(t.atMs).toBe(T0);
+    t.finish("ok");
+  });
+
+  it("the bounded semaphore: a freed slot wins over the bound; a cancelled wait holds nothing", async () => {
+    const sem = new Semaphore(1);
+    expect(await sem.acquire(0)).toBe(true);
+    expect(await sem.acquire(0)).toBe(false);
+    const waiting = sem.acquire(5_000);
+    sem.release();
+    expect(await waiting).toBe(true);
+    const ctl = new AbortController();
+    const cancelled = sem.acquire(5_000, ctl.signal);
+    ctl.abort();
+    expect(await cancelled).toBe(false);
+    sem.release();
+    expect(sem.inFlight).toBe(0);
+    expect(await sem.acquire(0)).toBe(true);
   });
 });

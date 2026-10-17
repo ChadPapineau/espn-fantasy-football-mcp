@@ -79,10 +79,22 @@ export class MemoryLimiterRepo implements LimiterRepository {
       this.rows.filter((r) => r.at > Date.parse(w.start) && r.at <= now).map((r) => r.at),
     );
     const cap = req.dailyCap;
+    const f = req.inFlight ?? null;
     const decision = limiterDecision({
       nowMs: now,
       windows: req.windows.map((w) => ({ startMs: Date.parse(w.start), max: w.max })),
       windowRows,
+      // the store's in-flight count, inside the same "transaction" (this call)
+      inFlight:
+        f === null
+          ? null
+          : {
+              max: f.max,
+              pending: this.rows.filter(
+                (r) => r.outcome === "pending" && r.at >= Date.parse(f.since),
+              ).length,
+              retryAfterMs: f.retry_after_ms,
+            },
       dailyCap:
         cap === null
           ? null

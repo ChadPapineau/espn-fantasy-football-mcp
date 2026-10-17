@@ -15,7 +15,7 @@ import {
 import type { HttpClient } from "../http/client.js";
 import type { Clock } from "../domain/clock.js";
 import { boardProbeFilter } from "../providers/espn/filter.js";
-import { limiterRequest } from "../providers/espn/limiter.js";
+import { limiterRequest, trySlot } from "../providers/espn/limiter.js";
 import { communicationTarget, leagueTarget } from "../providers/espn/path.js";
 import type { SetupNetwork, TeamResolution } from "../auth/setup.js";
 import type { CookieHeader } from "../auth/types.js";
@@ -73,9 +73,13 @@ function outcomeOfStatus(status: number): RequestOutcome {
 }
 
 /**
- * One ESPN GET under the limiter (one send: the CLI never retries a probe). A full window is waited
- * for — again and again while it stays full — until the waits would exceed MAX_LIMITER_WAIT_MS in
- * total; then `rate_limited`, with nothing sent. A spent daily cap is refused at once.
+ * One ESPN GET under the limiter (one send: the CLI never retries a probe). It takes its slot as
+ * every ESPN request does (trySlot: the cross-process in-flight cap of plan 01 §6 D7, decided inside
+ * the store's transaction, then the windows and the jobs' daily caps — Stage C finding
+ * limiter-concurrency-per-process: this path recorded its row with tryRecord alone, outside the
+ * cap). A full window or no free in-flight slot is waited for — again and again while it stays so —
+ * until the waits would exceed MAX_LIMITER_WAIT_MS in total; then `rate_limited`, with nothing
+ * sent. A spent daily cap is refused at once.
  */
 export async function espnRequest(
   deps: EspnHttpDeps,
@@ -95,7 +99,7 @@ export async function espnRequest(
   for (;;) {
     let verdict;
     try {
-      verdict = limiter.tryRecord(limiterRequest(deps.clock.nowMs(), keyless, deps.origin));
+      verdict = trySlot(limiter, limiterRequest(deps.clock.nowMs(), keyless, deps.origin));
     } catch {
       return { error: "limiter_unavailable" };
     }

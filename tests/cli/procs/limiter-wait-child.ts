@@ -18,6 +18,7 @@ const limiter = {
       : { ok: true as const, id: 1 };
   },
   recordOutcome: () => undefined,
+  recentOutcomes: () => [],
 } as unknown as LimiterRepository;
 const r = await espnRequest(
   {

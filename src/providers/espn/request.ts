@@ -575,10 +575,12 @@ export class EspnRequester {
       let outcome: RequestOutcome = "network_error";
       let wait: number;
       try {
-        const now = this.deps.clock.nowMs();
+        // the limiter recorded the send only before the deadline (it refuses one that cannot
+        // start, so no unsent request spends the window): the attempt has what the deadline leaves
+        // from that instant
         const timeoutMs = Math.min(
           this.deps.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS,
-          deadline - now,
+          deadline - ticket.atMs,
         );
         if (timeoutMs <= 0) throw new UpstreamBudgetExhausted(view, "deadline");
         let answer: AttemptAnswer | null = null;

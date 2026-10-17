@@ -156,9 +156,7 @@ export function inFlightOf(
 }
 
 /** A send's verdict: the bucket's (LimiterVerdict), or no free in-flight slot across processes. */
-export type SlotVerdict =
-  | LimiterVerdict
-  | { readonly ok: false; readonly reason: "concurrency"; readonly retry_after_ms: number };
+export type SlotVerdict = LimiterVerdict;
 
 /**
  * One send's slot under the ONE global limiter (plan 01 §6 D7: ≤ 2 in flight across every process,
@@ -166,30 +164,36 @@ export type SlotVerdict =
  * IN_FLIGHT_POLL_MS, nothing written) while ESPN_LIMITER.concurrency `pending` rows are live in any
  * process, else the repository's verdict (and, when it admits the send, the `pending` row that
  * holds the slot until its outcome is written). Throws what the repository throws (the caller fails
- * closed).
+ * closed). Every ESPN request takes its slot here: the provider's attempts (EspnLimiter.acquire) and
+ * the CLI's own probes and season reads (src/cli/espn-http.ts espnRequest).
  *
- * The cap binds exactly the sends that take their slot here. EspnLimiter.acquire takes one for every
- * provider attempt; a caller outside the provider that records its rows with
- * LimiterRepository.tryRecord itself still counts against the windows and the daily caps, but is
- * outside the in-flight cap until it takes its slot here as well.
- *
- * The count and the insert are two statements, not one transaction. The ≤ 1/s window closes the gap
- * only while this request's `at` is under a second old when its row is inserted: a row another
- * process inserts between this count and this insert is then inside that window, so the insert is
- * refused and the caller's next attempt counts again. A process that stalls a second or more between
- * the two (a wait for the store's write lock, up to its busy timeout, or a paused process) can still
- * put a third request in flight; only a count inside the store's own BEGIN IMMEDIATE closes that.
+ * The cap is decided INSIDE the repository's BEGIN IMMEDIATE (LimiterRequest.inFlight: the store
+ * counts the live pending rows in the same transaction as it checks the windows and inserts the
+ * row), so no other process can insert a row between the count and the insert, however long this
+ * one stalls (Stage C finding limiter-concurrency-per-process). The count here first is only a
+ * cheap early refusal that takes no write lock while the slots are visibly full.
  */
 export function trySlot(repo: LimiterRepository, req: LimiterRequest): SlotVerdict {
-  if (
-    inFlightOf(repo.recentOutcomes(IN_FLIGHT_SCAN_ROWS), Date.parse(req.at)) >=
-    ESPN_LIMITER.concurrency
-  )
+  const at = Date.parse(req.at);
+  if (inFlightOf(repo.recentOutcomes(IN_FLIGHT_SCAN_ROWS), at) >= ESPN_LIMITER.concurrency)
     return { ok: false, reason: "concurrency", retry_after_ms: IN_FLIGHT_POLL_MS };
-  return repo.tryRecord(req);
+  return repo.tryRecord({
+    ...req,
+    inFlight: {
+      max: ESPN_LIMITER.concurrency,
+      since: new Date(at - IN_FLIGHT_MAX_AGE_MS).toISOString(),
+      retry_after_ms: IN_FLIGHT_POLL_MS,
+    },
+  });
 }
 
-/** A counting semaphore (in-process concurrency ≤ ESPN_LIMITER.concurrency). */
+/**
+ * A counting semaphore (in-process concurrency ≤ ESPN_LIMITER.concurrency), first come first served.
+ * A wait is bounded: `acquire(waitMs, signal)` gives up (false, nothing held) once `waitMs` of wall
+ * time pass or the signal aborts — a read queued behind two hung requests no longer waits past its
+ * call's deadline (Stage C finding espn-deadline-budget-exhausted-internal). The bound is a real,
+ * unreferenced timer: it never keeps the process alive, and a slot freed first always wins.
+ */
 export class Semaphore {
   private active = 0;
   private readonly waiters: (() => void)[] = [];
@@ -200,15 +204,48 @@ export class Semaphore {
   get inFlight(): number {
     return this.active;
   }
-  async acquire(): Promise<void> {
+  /** Waits for a slot: true when held, false when the wait gave up (the bound or the signal). */
+  async acquire(
+    waitMs: number = Number.POSITIVE_INFINITY,
+    signal: AbortSignal | null = null,
+  ): Promise<boolean> {
     if (this.active < this.max) {
       this.active++;
-      return;
+      return true;
     }
-    await new Promise<void>((resolve) => this.waiters.push(resolve));
+    if (!(waitMs > 0) || signal?.aborted === true) return false;
+    return new Promise<boolean>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let done = false;
+      const settle = (granted: boolean): void => {
+        if (done) return;
+        done = true;
+        if (timer !== null) clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(granted);
+      };
+      const waiter = (): void => {
+        settle(true);
+      };
+      const giveUp = (): void => {
+        const i = this.waiters.indexOf(waiter);
+        if (i >= 0) this.waiters.splice(i, 1);
+        settle(false);
+      };
+      const onAbort = (): void => {
+        giveUp();
+      };
+      this.waiters.push(waiter);
+      if (Number.isFinite(waitMs)) {
+        timer = setTimeout(giveUp, waitMs);
+        timer.unref();
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
   release(): void {
     const next = this.waiters.shift();
+    // the slot passes to the next waiter as is (active unchanged), else it is freed
     if (next !== undefined) next();
     else this.active = Math.max(0, this.active - 1);
   }
@@ -284,6 +321,8 @@ export class Breaker {
  */
 export interface LimiterTicket {
   readonly id: number;
+  /** The instant the send was recorded at (always before the deadline it was acquired under). */
+  readonly atMs: number;
   finish(outcome: RequestOutcome): void;
 }
 
@@ -326,7 +365,11 @@ export class EspnLimiter {
     readonly deadlineAtMs: number;
     readonly signal: AbortSignal | null;
   }): Promise<LimiterTicket> {
-    await this.sem.acquire();
+    // the in-process slot is waited for only until the deadline: a read queued behind hung requests
+    // is refused (RATE_LIMITED, concurrency) instead of sending after its call gave up
+    const waitMs = opts.deadlineAtMs - this.deps.clock.nowMs();
+    if (!(await this.sem.acquire(waitMs, opts.signal)))
+      throw new EspnRateLimitedError(Math.max(IN_FLIGHT_POLL_MS, waitMs), "concurrency");
     let held = true;
     const releaseSlot = (): void => {
       if (held) {
@@ -340,6 +383,10 @@ export class EspnLimiter {
       let polls: number | null = null;
       for (;;) {
         const now = this.deps.clock.nowMs();
+        // a request that can no longer start inside its deadline is never recorded: an unsent
+        // request must not spend the 30/min window (espn-deadline-budget-exhausted-internal)
+        if (now >= opts.deadlineAtMs)
+          throw new EspnRateLimitedError(IN_FLIGHT_POLL_MS, "concurrency");
         let verdict: SlotVerdict;
         try {
           verdict = trySlot(this.deps.repo, limiterRequest(now, opts.keyless, this.deps.origin));
@@ -359,6 +406,7 @@ export class EspnLimiter {
           const id = verdict.id;
           return {
             id,
+            atMs: now,
             finish: (outcome) => {
               this.breaker.record(outcome);
               // the outcome first: a waiter released by the slot counts this row as finished

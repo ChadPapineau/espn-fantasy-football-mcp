@@ -385,6 +385,18 @@ export interface LimiterRequest {
   readonly origin: RequestOrigin;
   readonly windows: readonly { readonly start: IsoInstant; readonly max: number }[];
   readonly dailyCap: { readonly dayStart: IsoInstant; readonly max: number } | null;
+  /**
+   * The in-flight cap (plan 01 §6 D7: ≤ 2 concurrent across every process), counted INSIDE the same
+   * BEGIN IMMEDIATE as the windows, so two processes can never both see a free slot (Stage C finding
+   * limiter-concurrency-per-process): the `pending` rows recorded at or after `since` (an older one
+   * holds no slot — its process died before writing the outcome). At `max` the request is refused
+   * `concurrency` with `retry_after_ms`, nothing written. Absent or null: no in-flight cap.
+   */
+  readonly inFlight?: {
+    readonly max: number;
+    readonly since: IsoInstant;
+    readonly retry_after_ms: number;
+  } | null;
 }
 
 /**
@@ -396,7 +408,7 @@ export type LimiterVerdict =
   | { readonly ok: true; readonly id: number }
   | {
       readonly ok: false;
-      readonly reason: "window" | "daily_cap";
+      readonly reason: "window" | "daily_cap" | "concurrency";
       readonly retry_after_ms: number;
     };
 
@@ -442,13 +454,22 @@ export function limiterDecision(input: {
     readonly used: number;
     readonly nextDayStartMs: number;
   } | null;
+  /** The live `pending` rows against the in-flight cap (LimiterRequest.inFlight); absent: none. */
+  readonly inFlight?: {
+    readonly max: number;
+    readonly pending: number;
+    readonly retryAfterMs: number;
+  } | null;
 }):
   | { readonly ok: true }
   | {
       readonly ok: false;
-      readonly reason: "window" | "daily_cap";
+      readonly reason: "window" | "daily_cap" | "concurrency";
       readonly retry_after_ms: number;
     } {
+  const f = input.inFlight;
+  if (f !== undefined && f !== null && f.pending >= f.max)
+    return { ok: false, reason: "concurrency", retry_after_ms: Math.max(1, f.retryAfterMs) };
   for (const [i, w] of input.windows.entries()) {
     const rows = input.windowRows[i] ?? [];
     if (rows.length >= w.max) {
