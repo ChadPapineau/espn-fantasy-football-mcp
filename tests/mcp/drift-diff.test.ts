@@ -13,7 +13,7 @@
 // (additive keys and new enum values under a `{}` step) were dropped as "outside the grammar", so an
 // additive status under those views still named nothing; the chain test below drives the REAL
 // detector over recorded answers through the drift_state transform into the shown diff.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -221,22 +221,25 @@ describe("shownDriftDiff", () => {
 // --- the whole chain: detector → drift_state → the shown diff -----------------------------------
 
 const RECORDED = path.join(ROOT, "fixtures", "espn", "recorded");
-const LEAGUES = ["league-a", "league-b", "league-c"] as const;
-/** Each manifest view's recorded good answers (scrubbed keyless captures; mStandings rides mTeam). */
-const VIEW_FILES: Readonly<Record<string, readonly string[]>> = {
-  mSettings: LEAGUES.map((l) => `${l}/mSettings.json`),
-  mTeam: LEAGUES.map((l) => `${l}/mTeam.json`),
-  mStandings: LEAGUES.map((l) => `${l}/mTeam.json`),
-  mNav: LEAGUES.map((l) => `${l}/mNav.json`),
-  mMatchup: LEAGUES.map((l) => `${l}/mMatchup.json`),
-  mMatchupScore: LEAGUES.map((l) => `${l}/mMatchupScore.sp3.json`),
-  mRoster: LEAGUES.flatMap((l) => [`${l}/mRoster.sp1.p1.json`, `${l}/mRoster.sp3.p2.json`]),
-  mBoxscore: LEAGUES.map((l) => `${l}/mBoxscore.sp1.json`),
-  kona_player_info: LEAGUES.map((l) => `${l}/kona_player_info.json`),
-  kona_playercard: LEAGUES.map((l) => `${l}/kona_playercard.json`),
-  players_wl: ["season/players_wl.json"],
-  proTeamSchedules_wl: ["season/proTeamSchedules_wl.json"],
-};
+/** The recorded answer directories: the three public leagues and the season views. */
+const ANSWER_DIRS = ["league-a", "league-b", "league-c", "season"] as const;
+/** A view recorded inside another view's answers (mStandings rides mTeam). */
+const RECORDED_AS: Readonly<Record<string, string>> = { mStandings: "mTeam" };
+
+/**
+ * Every recorded answer of a view (scrubbed keyless captures): each `<view>.json` and
+ * `<view>.<split>….json` (`mRoster.sp1.p1.json`, `kona_player_info.ids.json`) in the answer
+ * directories, so the test follows the fixtures as they are re-recorded.
+ */
+function recordedAnswers(view: string): string[] {
+  const name = RECORDED_AS[view] ?? view;
+  return ANSWER_DIRS.flatMap((d) =>
+    readdirSync(path.join(RECORDED, d))
+      .filter((f) => f.endsWith(".json") && (f === `${name}.json` || f.startsWith(`${name}.`)))
+      .sort()
+      .map((f) => path.join(d, f)),
+  );
+}
 
 const T_ISO = "2026-10-06T11:00:00.000Z";
 const READ_HOST = "lm-api-reads.fantasy.espn.com";
@@ -278,14 +281,16 @@ const plantableScalar = (v: unknown): boolean => typeof v === "string" || typeof
 /**
  * Plants one new key (identifier-form, and one outside it) at every observed pattern and one
  * unknown value at every enum pattern the manifest records for `view`, each in the first recorded
- * answer with a node for it, and returns the answers with what the detector must report.
+ * answer with a node for it, and returns the answers with what the detector must report. Only
+ * answers the detector passes as they were recorded are used (a clean baseline: every signal after
+ * planting is the planting's).
  */
 function plantedAnswers(view: EspnView, obs: ReturnType<typeof loadObservations>): PlantedAnswer[] {
   const o = obs[view];
   if (o === undefined) return [];
-  const bodies = (VIEW_FILES[view] ?? []).map(
-    (f) => JSON.parse(readFileSync(path.join(RECORDED, f), "utf8")) as unknown,
-  );
+  const bodies = recordedAnswers(view)
+    .map((f) => JSON.parse(readFileSync(path.join(RECORDED, f), "utf8")) as unknown)
+    .filter((b) => checkResponse([view], b, obs).signals.length === 0);
   const out: PlantedAnswer[] = [];
   const slot = (bi: number, kind: Planting["kind"]): PlantedAnswer => {
     let s = out.find(
@@ -357,19 +362,22 @@ describe("every path the detector writes from the shipped manifest is shown (att
         const d = shown.diff.find((x) => x.view === view);
         for (const p of plantings) {
           expect(p.kind === "added" ? d?.added : d?.enums, `${view} ${p.path}`).toContain(p.path);
-          planted.add(p.pattern);
+          planted.add(`${view}|${p.pattern}`);
         }
       }
     }
-    // the defect's patterns — under an object-values step — are among those exercised
-    const curly = views.flatMap((v) =>
-      [...Object.keys(obs[v]?.observed ?? {}), ...Object.keys(obs[v]?.enums ?? {})].filter((p) =>
-        p.includes("{}"),
+    const patterns = views.flatMap((v) =>
+      [...Object.keys(obs[v]?.observed ?? {}), ...Object.keys(obs[v]?.enums ?? {})].map(
+        (p) => `${v}|${p}`,
       ),
     );
+    // the defect's patterns — under an object-values step — are all exercised, and nearly every
+    // other one (the rest are mTeam's settings patterns, which its recorded answers do not carry;
+    // mSettings' answers exercise the same patterns)
+    const curly = patterns.filter((p) => p.includes("{}"));
     expect(curly.length).toBeGreaterThan(0);
     for (const p of curly) expect(planted, p).toContain(p);
-    expect(planted.size).toBeGreaterThan(200);
+    expect(planted.size / patterns.length).toBeGreaterThan(0.9);
   });
 
   it("every required key the detector can report missing is shown in removed[]", () => {
