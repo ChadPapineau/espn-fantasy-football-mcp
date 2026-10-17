@@ -1,9 +1,13 @@
 # docs — validates the documents and the identifiers on every push: every ```mermaid block must
 # render, every internal Markdown link must resolve, no tracked file may carry a secret or a personal
 # identifier, and the plugin root + Skills must be structurally valid. Spec: plan 04 §4.2 (mermaid,
-# links, identifiers, skills; `docs-current` arrives with src/config/schema.ts), R7, R11; plan 10
-# §3.0 Z1, Z2, Z6. Ported from sibling @d72e03b, adapted. Every checker first proves it can FAIL
-# (scripts/ci/docs-check-selftest/, scripts/ci/secret-fixtures.mjs) before its pass is trusted.
+# links, identifiers, skills), R7, R11; plan 10 §3.0 Z1, Z2, Z6. NOT YET BUILT: plan 04 §4.2's
+# `docs-current` job (`check:docs`) — it needs the plan 04 §6 generators (scripts/gen-config-docs.ts,
+# scripts/gen-tool-docs.ts), a `check:docs` script and the generated regions in README.md and
+# skills/_shared/references/tool-outputs.md, and lands with them (added alone it could only fail;
+# Stage C finding docs-current-check-missing). Ported from sibling @d72e03b, adapted. Every checker
+# first proves it can FAIL (scripts/ci/docs-check-selftest/, scripts/ci/secret-fixtures.mjs) before
+# its pass is trusted.
 #
 # Choices, and why
 # - Mermaid is rendered with @mermaid-js/mermaid-cli, the reference renderer (plan 04 R7), via

@@ -6,7 +6,7 @@
 // Stage C finding ci-commit-identity-unchecked) is also RUN: its `run:` block, cut out of ci.yml
 // exactly as YAML reads it, is executed against throwaway repositories and this clone's history.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ROOT, tempDir } from "./helpers.js";
@@ -327,6 +327,7 @@ describe("ci.yml commit identity — authors and committers after the baseline, 
     expect(script).toContain("isGithubNoreply");
     // the raw addresses as published, NUL-separated, never rewritten through a .mailmap
     expect(script).toContain('"--format=%H%x00%ae%x00%ce"');
+    expect(script).toContain('"--no-use-mailmap"');
     expect(script).not.toMatch(/%[ac]E/);
     // a refusal fails the job: nothing swallows it
     expect(text).not.toMatch(/continue-on-error|\|\| true|set \+e/);
@@ -406,6 +407,22 @@ describe("ci.yml commit identity — authors and committers after the baseline, 
       expect(res.out).not.toContain("@");
     },
   );
+
+  it("a committed .mailmap cannot launder an address: the raw author and committer are what is checked", () => {
+    const r = makeRepo();
+    r.git(["config", "log.mailmap", "true"]);
+    writeFileSync(path.join(r.dir, ".mailmap"), `Probe <${NOREPLY}> <${MACHINE}>\n`);
+    r.git(["add", ".mailmap"]);
+    const bad = r.commit("chore: map the machine address to a no-reply one", MACHINE);
+    const res = runStep(r.dir, {
+      IDENTITY_BASELINE: r.base,
+      HEAD_SHA: r.git(["rev-parse", "HEAD"]),
+    });
+    expect(res.status, res.out).toBe(1);
+    expect(res.out).toContain(`::error::commit ${bad}: the author address`);
+    expect(res.out).toContain(`::error::commit ${bad}: the committer address`);
+    expect(res.out).not.toContain("@");
+  });
 
   it("refuses a merge commit made with a machine-derived identity (`git merge` runs no pre-commit hook)", () => {
     const r = makeRepo();

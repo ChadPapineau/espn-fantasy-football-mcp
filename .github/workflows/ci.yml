@@ -104,8 +104,9 @@ jobs:
             refused++;
             console.log(`::error::${what}: the ${role} address is not a GitHub no-reply address (address not printed)`);
           };
-          // the raw addresses as published (%ae, %ce), never the .mailmap-rewritten capital-E forms
-          const f = git(["log", "-z", "--format=%H%x00%ae%x00%ce", range]).split("\0");
+          // the raw addresses as published (%ae, %ce): never the .mailmap-rewritten capital-E forms,
+          // and no signature output (a log.showSignature setting) mixed into the records
+          const f = git(["log", "--no-use-mailmap", "--no-show-signature", "-z", "--format=%H%x00%ae%x00%ce", range]).split("\0");
           if (f.at(-1) === "") f.pop();
           if (f.length % 3 !== 0) {
             console.log("::error::unexpected git log output — the commit identities cannot be verified");
