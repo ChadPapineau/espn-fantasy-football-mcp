@@ -541,6 +541,19 @@ after the posterior draw); C1's ESPN clause at game time (accepted by the gate).
 | R7-1 (lineup no-move) | Plan 09 guardrail 9 governs what the user is told and what is logged: a swap inside the coin-flip band is `no_move: true` and is logged as a no-move, which the retrospective scores as "keep". E2's mean-optimal assignment (the `lineup` field) is unchanged, so C2's replay of E2's assignment and R6-1's identity with ESPN's lineup still hold; the regret of the "keep unless outside the band" policy is reported beside it (soft) | plan 09 guardrail 9 and plan 10 C2 read together; E2 and the reclog (Stage C remediation) |
 | R7-2 (B11 Lane 2, B15) | `claude plugin eval` refuses to start on this account ("currently in early access"), so no Lane 2 case or B15 grader can run here; the gate is not worked around. Lane 1 (all 13 Skills, offline) stays hard and green; the static findings the lane produced (H1–M5, L1–L4) are fixed as ordinary Stage C findings. If the owner's own `claude update` + `claude plugin eval` shows the feature enabled, the suite runs before release; otherwise B11 Lane 2 and B15 are recorded as not runnable (tooling gated), not as met | plan 10 B11, B15 (status at Stage D); `docs/evals/stage-c-plugin-eval.md` |
 
+## B4 — records written back during Stage C (2026-10-17)
+
+These are not rulings. They record what Stage C built where the plan names an artefact that did not exist.
+
+- **A10b's question set** · plan 05 §6, plan 10 A10b, README Testing · The set is `tests/evals/read-only.xml`: ten `qa_pair`s in mcp-builder's `evaluation.md` format, over `fx-10h` at N = 4 under the default toolset, built from the tools in fixture mode.
+  - Plan 05 §6's drafts 3, 4, 5 and 9 are unchanged.
+  - Drafts 1 and 10 are reworded so that each has one reading.
+  - Drafts 2, 6, 7 and 8 are adapted under that section's own rule ("read-only, independent, stable, single-answer"). As drafted, 6 has three correct answers; 7 comes to 0, which an empty search also gives; and 8 asks for a season-to-date split that no tool serves on the fixture.
+  - The reasons, question by question, are in `docs/evals/model-driven-evals.md`.
+  - `tests/evals/read-only.test.ts` re-derives every answer from the tools under both toolsets on every push, and refuses an answer that is not unique.
+  - The run (≥ 8/10) has not happened: it is manual, comes before a release and spends model tokens.
+  - Three things are open for the owner before the runner can be trusted, in `docs/evals/model-driven-evals.md` → *Running it*: it needs an Anthropic API key, and CLAUDE.md allows free services only; it needs a current model id; and read statically, it has a defect in how it encodes tool results.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |

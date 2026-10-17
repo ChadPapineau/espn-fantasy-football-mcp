@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Model-driven evals (plan 05 §6, plan 10 A10b): ten read-only questions over the frozen fixture
+     league fixtures/espn/fx-10h (league id 0; weeks 1-4 final, week 5 not yet played), answered by a
+     model through the server's tools alone. Format: mcp-builder evaluation.md. The record (how the set
+     was built, what changed from the plan's drafts and why, how to run it): docs/evals/model-driven-evals.md.
+     Every answer is re-derived from the tools on every push by tests/evals/read-only.test.ts. -->
+<evaluation>
+   <qa_pair>
+      <question>Over fantasy weeks 1 to 4 of this league, find the week in which all ten teams' points added together were the highest. In that week, which team lost its matchup by the widest margin? Answer with the team's name exactly as the league shows it (for example: Team 05).</question>
+      <answer>Team 08</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Among the players in Team 03's RB, WR, TE and FLEX lineup slots for week 5, find the one with the lowest ESPN week-5 projection. How many players who are not on any team in the league (free agents or players on waivers) and who are eligible for the FLEX slot have a higher ESPN week-5 projection than him? Answer with an integer.</question>
+      <answer>23</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Under this league's scoring settings, how many fantasy points does a kicker score for one made 45-yard field goal? Answer with the number only.</question>
+      <answer>4</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which player did Team 03 have in its FLEX lineup slot in week 4? Answer with the player's full name.</question>
+      <answer>Chuba Hubbard</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>True or false: the team seeded first after week 4 would still be seeded first if ties in the standings were broken by head-to-head results instead of by total points for. Answer with exactly True or False.</question>
+      <answer>True</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Team 01's starting quarterback in week 4 plays for an NFL team that has its bye later in the season. How many other NFL teams have their bye in that same week? Answer with an integer.</question>
+      <answer>3</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Consider the waiver claims that succeeded in week 2: count only executed waiver claims that added a player, and ignore free-agent pickups and failed claims. How many of the players added by those claims are no longer on the roster of the team that claimed them in week 5? Answer with an integer.</question>
+      <answer>3</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which player on Team 02's week-5 roster has the largest gap between his ESPN rest-of-season projection and the fantasy points he actually scored in weeks 1 to 4 combined? Answer with the player's full name.</question>
+      <answer>Drake Maye</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>Which ESPN stat id does this league score for a reception, and is one reception worth exactly half a point? Answer as the stat id and true or false, separated by a comma with no space (for example: 99,false).</question>
+      <answer>53,true</answer>
+   </qa_pair>
+   <qa_pair>
+      <question>In week 3, what was Team 02's actual points total minus the sum of ESPN's projections for the nine players it started? Answer with a number rounded to one decimal place (for example: -3.4).</question>
+      <answer>7.5</answer>
+   </qa_pair>
+</evaluation>

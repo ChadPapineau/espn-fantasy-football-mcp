@@ -212,6 +212,8 @@ Built exactly as `evaluation.md` prescribes, with the fixture league (id `0`, we
 
 Answers are recorded by solving each with the tools; stored as `tests/evals/read-only.xml` in the `<evaluation><qa_pair>` format. Running: `python scripts/evaluation.py -t stdio -c node -a dist/cli.js serve -e EFF_FIXTURE_DIR=<abs> -e ESPN_LEAGUE_ID=0 -o docs/evals/<date>.md tests/evals/read-only.xml` (needs `pip install anthropic mcp` and `ANTHROPIC_API_KEY` [V-evaluation.md "Setup"]). Pass bar **≥ 8/10 [A-1]**; the report's "agent feedback on the tools" is triaged into description fixes. The only test that consumes model tokens; before a release and after any tool-description change.
 
+*(Built in Stage C, 2026-10-17. This is a record, not a ruling. The file is `tests/evals/read-only.xml`, over `fx-10h` with N = 4, under the default toolset. Questions 3, 4, 5 and 9 are as drafted. Questions 1 and 10 are reworded so that each has one reading. Questions 2, 6, 7 and 8 are adapted by this section's own rule, so that each has a single answer that the tools serve on that fixture. The reasons, the answer key and the run procedure are in [`docs/evals/model-driven-evals.md`](../evals/model-driven-evals.md). `tests/evals/read-only.test.ts` re-derives every answer from the tools on every push. The run itself stays manual and pre-release.)*
+
 ---
 
 ## 7. Coverage gate
