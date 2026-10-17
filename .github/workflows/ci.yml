@@ -15,6 +15,18 @@
 #   false so the job token never lands in .git/config.
 # - Concurrency cancels superseded runs for PRs and for pushes to any branch but main; a run on main
 #   is never cancelled — a cancelled run on main is a commit without a verdict.
+# - lint's commit identity step (CLAUDE.md "Security": commit metadata is published): the local
+#   guards (.githooks/pre-commit, commit-paths.sh → scan-secrets --identity) are skipped by a clone
+#   without core.hooksPath, `git merge` (pre-merge-commit), a cherry-pick or a GitHub web merge
+#   (the account's commit email), so CI refuses — before npm ci, so its verdict never waits on
+#   ESLint — every commit after IDENTITY_BASELINE (the newest commit made before the no-reply rule;
+#   it and its ancestors are the accepted history residual, HANDOFF 2026-10-05) whose author or
+#   committer is not a GitHub no-reply address, and every annotated tag whose tagger is not. The
+#   whole post-baseline history on every event, never only the pushed range: a new branch, a
+#   force-push or a manual run has no usable range. The rule is scan-secrets.mjs's isGithubNoreply,
+#   imported, plus a GitHub App's `<id>+<slug>[bot]` form (Dependabot's PR commits); GitHub's own
+#   `noreply@github.com` is accepted as committer or tagger only (web merges, signed bot commits).
+#   It prints the commit or tag and the role, never an address.
 # - smoke: the MCP Inspector CLI is pinned EXACTLY (npx pins are not Dependabot-managed — bump
 #   deliberately) and runs from $RUNNER_TEMP with npm_config_ignore_scripts=true, so neither the
 #   project .npmrc nor an install script of the Inspector's own tree is involved. It drives the built
@@ -48,7 +60,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Check out (history for the commit-message check)
+      - name: Check out (history for the commit identity and commit-message checks)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -58,6 +70,63 @@ jobs:
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
+      - name: Commit identity — authors and committers after the baseline, and taggers, are GitHub no-reply addresses (CLAUDE.md)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # The newest commit made before the no-reply rule (docs/HANDOFF.md "Decisions made",
+          # 2026-10-05): it and its ancestors carry a machine-derived address — the accepted history
+          # residual. Everything after it is checked on every event.
+          IDENTITY_BASELINE: f9eebbf0b9d1f2cfe3bbc4aa673bc82adff86c62
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${IDENTITY_BASELINE}^{commit}" 2>/dev/null; then
+            echo "::error::the identity baseline ${IDENTITY_BASELINE} is not in this checkout — the commit identities cannot be verified"
+            exit 1
+          fi
+          RANGE="${IDENTITY_BASELINE}..${HEAD_SHA}" node --input-type=module <<'JS'
+          import { execFileSync } from "node:child_process";
+          import path from "node:path";
+          import { pathToFileURL } from "node:url";
+          // the rule commit-paths.sh and the pre-commit hook apply locally (scan-secrets --identity)
+          const scanner = path.join(process.env.GITHUB_WORKSPACE, "scripts/dev/scan-secrets.mjs");
+          const { isGithubNoreply } = await import(pathToFileURL(scanner).href);
+          // a GitHub App's no-reply address: Dependabot authors its PR commits with one
+          const BOT = /^\d+\+[a-z0-9](?:[a-z0-9-]{0,38})\[bot\]@users\.noreply\.github\.com$/i;
+          const noreply = (a) => isGithubNoreply(a) || BOT.test(a);
+          // GitHub's own committer (web merges, Dependabot's signed commits) names no person:
+          // accepted as a committer or tagger, never as an author
+          const WEB_FLOW = "noreply@github.com";
+          const range = process.env.RANGE;
+          const git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+          let refused = 0;
+          // the object and the role only: an address is never printed
+          const refuse = (what, role) => {
+            refused++;
+            console.log(`::error::${what}: the ${role} address is not a GitHub no-reply address (address not printed)`);
+          };
+          // the raw addresses as published (%ae, %ce), never the .mailmap-rewritten capital-E forms
+          const f = git(["log", "-z", "--format=%H%x00%ae%x00%ce", range]).split("\0");
+          if (f.at(-1) === "") f.pop();
+          if (f.length % 3 !== 0) {
+            console.log("::error::unexpected git log output — the commit identities cannot be verified");
+            process.exit(1);
+          }
+          for (let i = 0; i < f.length; i += 3) {
+            const [sha, author, committer] = f.slice(i, i + 3);
+            if (!noreply(author)) refuse(`commit ${sha}`, "author");
+            if (!noreply(committer) && committer.toLowerCase() !== WEB_FLOW) refuse(`commit ${sha}`, "committer");
+          }
+          // an annotated tag publishes its tagger too (a release tag, plan 04 §4.4); a lightweight one names no one
+          let tags = 0;
+          for (const line of git(["for-each-ref", "--format=%(objecttype)%00%(refname)%00%(taggeremail:trim)", "refs/tags"]).split("\n")) {
+            const [type, ref, tagger = ""] = line.split("\0");
+            if (type !== "tag") continue;
+            tags++;
+            if (!noreply(tagger) && tagger.toLowerCase() !== WEB_FLOW) refuse(`tag ${ref}`, "tagger");
+          }
+          console.log(`checked the author and committer of ${f.length / 3} commit(s) in ${range} and the tagger of ${tags} annotated tag(s)`);
+          if (refused) process.exit(1);
+          JS
       - name: No source path is git-ignored (S6 — an over-broad pattern drops a file silently)
         run: |
           set -euo pipefail

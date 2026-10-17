@@ -9,6 +9,7 @@
 - [ ] **No secrets, no identifiers.** Nothing in this PR contains an ESPN cookie (`espn_s2`, `SWID`), a token, key or password, an email address, a league id, a team or member name, a member GUID outside `{00000000-0000-4000-8000-0000000000NN}`, an IP address or an absolute home path — the owner's or a public probe league's (the repo is public; `CLAUDE.md`). `secrets`, `secrets-selftest` and `docs / identifiers` are green.
 - [ ] **Fixtures are anonymised** (`docs/research/03-espn-api.md` §F.3): league id `0`, "Example League", "Team A"…; recorded from public leagues, keyless.
 - [ ] **Committed with `scripts/dev/commit-paths.sh`** (or a plain `git commit` through `.githooks`); explicit paths only — no `git add -A` / `-u` / directory adds; never `--no-verify`.
+- [ ] **Commit identity.** Every commit's author and committer, and any annotated tag's tagger, is a GitHub no-reply address (`<id>+<login>@users.noreply.github.com`) — never one git derived from the machine's user and host names. `ci / lint` refuses any other, merges and cherry-picks included.
 - [ ] **Conventional Commit** title and commits (`feat|fix|docs|test|chore|refactor|perf|ci|build(scope): subject`); **no AI attribution trailer**.
 - [ ] **Read-only.** No write path is built; the Phase W seam stays declared and unimplemented (owner decision D11); no request can reach the ESPN write host.
 - [ ] **Dependencies.** No new runtime dependency without a plan 04 §2 row and a reviewed `scripts/ci/runtime-allowlist.json`; every version exact; no install script.
