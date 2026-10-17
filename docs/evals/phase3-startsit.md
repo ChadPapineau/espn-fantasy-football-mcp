@@ -409,11 +409,12 @@ Reading it — **reported, no verdict (soft)**:
   those calls are no-moves; the other 12 / 11 make a change, 3 of them holding a coin flip beside it.
 - **Holding the coin flips costs nothing measurable here.** The advice's regret is 13.33 / 13.28
   points per team-week against 13.40 for E2's assignment, both seasons pooled (one cell above it:
-  `core` 2024, +0.02); it stays far below "start by last week's points" (−13.4) and at or below
-  "start by ESPN's projection". The lineup kept was set with game-day news, so this is the case most
-  favourable to "keep"; live, the lineup E2 is handed may be stale, and the retrospective — which
-  scores each logged no-move as "keep" and prices the held change through the alternative E2 offers
-  (its best-by-mean lineup) — is the measurement that decides.
+  `core` 2024, +0.02); it stays far below "start by last week's points" (−13.4), and pooled below
+  "start by ESPN's projection" too (the same +0.02 in `core` 2024: E2's assignment is ESPN's lineup).
+  The lineup kept was set with game-day news, so this is the case most favourable to "keep"; live,
+  the lineup E2 is handed may be stale, and the retrospective — which scores each logged no-move as
+  "keep" and prices the held change against E2's best-by-mean lineup offered as the alternative
+  (`lineupAlternatives`) — is the measurement that decides.
 - **Did it matter:** the advice and the assignment differ in 140 / 141 of the 272 head-to-head
   team-weeks and would flip 19 results, 10 to a win and 9 to a loss — a coin flip, as the band says.
 - C2's hard clauses and R6-1 are unaffected: they judge `rec.lineup`, and every section above
