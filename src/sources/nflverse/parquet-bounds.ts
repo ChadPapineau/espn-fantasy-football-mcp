@@ -3,13 +3,18 @@
 // assertion; plan 02 §6.1 #3: release files are upstream data). hyparquet decodes what a file
 // claims: an RLE run longer than its page writes past the page's value count, a row group's
 // num_rows builds that many row objects whatever its pages hold, a footer varint of a million bytes
-// is a quadratic BigInt, a list length allocates before it is read. A 1.5 KB file could abort the
+// is a quadratic BigInt, a list length allocates before it is read, and a footer whose schema list
+// is millions of one-byte elements makes parquetMetadata build one retained object per element
+// (~150 B each: an 8 MB footer of empty structs is > 1 GB of heap). A 1.5 KB file could abort the
 // refresh with a fatal out-of-memory. So nothing reaches hyparquet unchecked:
 //
 //   • the footer is walked first by a bounded thrift-compact reader that mirrors hyparquet's own
 //     traversal (same field and element rules, same int32 varint arithmetic) and refuses a varint
 //     longer than its type allows, a list or binary longer than the bytes left, a nesting deeper
-//     than PARQUET_DECODE_LIMITS.maxThriftDepth, or an element type parquet never uses;
+//     than PARQUET_DECODE_LIMITS.maxThriftDepth, MORE thrift elements than maxThriftNodes (so the
+//     count of objects parquetMetadata will materialise from the footer is bounded, whatever shape
+//     the footer takes — an element costs ≥ 1 byte but hyparquet retains it as a ~150 B object), or
+//     an element type parquet never uses;
 //   • before a row group is decoded, every page of every column chunk the contract reads is walked
 //     the way hyparquet's flat-column reader walks it: each page header (the same bounded reader),
 //     its sizes (inside the chunk, at most maxPageBytes uncompressed), its type (DATA_PAGE and
@@ -25,7 +30,10 @@
 //     capped.
 //
 // Every refusal is NflverseSourceError `corrupt` (refresh_log `schema_mismatch`): the run fails
-// loudly before any large allocation and the previous dataset stays served.
+// loudly before any large allocation and the previous dataset stays served. The caps bound the
+// decode to a FINITE, non-fatal size — not to a small one: the heaviest real file decodes within
+// ~1 GB, and an adversarial file at the cell cap peaks ~1.7 GB (measured, one row group and one
+// file at a time) rather than the unbounded fatal abort this fixes.
 import { snappyUncompress } from "hyparquet";
 import type { FileMetaData, SchemaElement } from "hyparquet";
 import { NflverseSourceError } from "./release.js";
@@ -45,21 +53,31 @@ export interface ParquetDecodeLimits {
   readonly maxDecodedBytes: number;
   /** Nesting of thrift structs and lists (parquet metadata nests ~8 deep). */
   readonly maxThriftDepth: number;
+  /**
+   * Thrift elements (struct fields + list entries) the footer may hold. hyparquet retains ~one
+   * object per element (~150 B), so this bounds the heap parquetMetadata builds from the footer,
+   * whatever its shape; a real footer holds ~20 k (pbp's 372 columns with statistics).
+   */
+  readonly maxThriftNodes: number;
 }
 
 /**
  * The bounds, with headroom over the releases surveyed on 2026-10-10 (2023–2025 files of every tag
- * read): the largest file holds 554,215 rows (depth_charts 2025, 12 columns ≈ 6.7 M cells), the
- * most cells are pbp's (all 372 columns ≈ 18.5 M values + 1.7 M dictionary entries; the contract
- * reads ~49 of them), the largest page is 1.1 MB uncompressed and the most page bytes 27 MB (pbp,
- * all columns). At these caps one file's decode stays within a few hundred MB whatever it claims.
+ * read): the largest file holds 613,196 rows (depth_charts 2026, 11 contract columns ≈ 6.7 M cells,
+ * the most of any contract), the largest page is 1.1 MB uncompressed and the most page bytes 27 MB
+ * (pbp, all columns), and the widest footer holds ~20 k thrift elements (pbp, 372 columns with
+ * statistics). The caps leave ≥ 2.5× over every real file and bound one file's decode to a FINITE
+ * size: the heaviest real file within ~1 GB, an adversarial file at the cell cap to ~1.7 GB peak
+ * (the narrowest contract, 17 columns, 1<<24 / 17 ≈ 987 k rows; measured — 2.7 GB at the former
+ * 1<<25) — never the unbounded fatal out-of-memory that an unchecked footer or page claim caused.
  */
 export const PARQUET_DECODE_LIMITS: ParquetDecodeLimits = Object.freeze({
   maxRows: 1 << 21,
-  maxCells: 1 << 25,
+  maxCells: 1 << 24,
   maxPageBytes: 16 * 1024 * 1024,
   maxDecodedBytes: 256 * 1024 * 1024,
   maxThriftDepth: 32,
+  maxThriftNodes: 1 << 20,
 });
 
 const corrupt = (what: string): NflverseSourceError =>
@@ -72,7 +90,19 @@ interface Cursor {
   readonly b: Uint8Array;
   o: number;
   readonly end: number;
+  /** Thrift elements read so far through this cursor (bounds parquetMetadata's object count). */
+  nodes: number;
+  /** The element budget (PARQUET_DECODE_LIMITS.maxThriftNodes); reading past it refuses. */
+  readonly maxNodes: number;
 }
+
+/** A cursor over `b[o, end)` with a fresh thrift-element budget (default: the shipped bound). */
+const cursorAt = (
+  b: Uint8Array,
+  o: number,
+  end: number,
+  maxNodes: number = PARQUET_DECODE_LIMITS.maxThriftNodes,
+): Cursor => ({ b, o, end, nodes: 0, maxNodes });
 
 /** Element types of the thrift compact protocol (hyparquet's thrift.js). */
 const T = {
@@ -127,6 +157,8 @@ function skipVarint64(c: Cursor): void {
 }
 
 function readElement(c: Cursor, type: number, depth: number, keep: boolean): ThriftValue {
+  // One object per element is what parquetMetadata retains; bound their count whatever the shape.
+  if (++c.nodes > c.maxNodes) throw new ThriftBounds("more thrift elements than a footer may hold");
   switch (type) {
     case T.TRUE:
       return true;
@@ -199,15 +231,19 @@ function readStruct(c: Cursor, depth: number, keep: boolean): ThriftStruct {
 /**
  * Walks a parquet footer before hyparquet parses it (the metadata struct starting `metadata_length`
  * bytes before the trailing length + magic, read — as hyparquet reads it — over the whole buffer).
- * Throws NflverseSourceError `not_parquet` on anything the bounded reader refuses.
+ * Throws NflverseSourceError `not_parquet` on anything the bounded reader refuses, including a footer
+ * holding more than `limits.maxThriftNodes` elements (parquetMetadata would build one object each).
  */
-export function assertBoundedFooter(file: Uint8Array): void {
+export function assertBoundedFooter(
+  file: Uint8Array,
+  limits: ParquetDecodeLimits = PARQUET_DECODE_LIMITS,
+): void {
   const n = file.length;
   const len = n >= 8 ? new DataView(file.buffer, file.byteOffset, n).getUint32(n - 8, true) : -1;
   if (len < 0 || len > n - 8)
     throw new NflverseSourceError("not_parquet", "nflverse: unreadable parquet footer");
   try {
-    readStruct({ b: file, o: n - 8 - len, end: n }, 0, false);
+    readStruct(cursorAt(file, n - 8 - len, n, limits.maxThriftNodes), 0, false);
   } catch (e) {
     if (e instanceof ThriftBounds)
       throw new NflverseSourceError("not_parquet", "nflverse: unreadable parquet footer");
@@ -302,7 +338,7 @@ function walkHybrid(
   expected: number,
   countOne: boolean,
 ): number {
-  const c: Cursor = { b, o: start, end };
+  const c: Cursor = cursorAt(b, start, end);
   let seen = 0;
   let ones = 0;
   try {
@@ -494,7 +530,7 @@ function scanChunk(
   // hyparquet: an absent repetition type counts as optional (getMaxDefinitionLevel)
   const optional = el.repetition_type !== "REQUIRED";
   const perEntry = minEntryBytes(el);
-  const c: Cursor = { b: chunk, o: 0, end: chunk.length };
+  const c: Cursor = cursorAt(chunk, 0, chunk.length, limits.maxThriftNodes);
   let values = 0;
   while (values < groupRows) {
     if (c.o >= chunk.length - 1) break; // hyparquet: the end of the chunk

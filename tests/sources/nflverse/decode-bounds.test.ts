@@ -32,6 +32,7 @@ import {
   concat,
   defRun,
   ENC,
+  footerNodeBomb,
   forContract,
   hostileParquet,
   nullPage,
@@ -476,6 +477,22 @@ describe("file-level checks (metadata the decode trusts)", () => {
       { column: "gsis_id", expected: "string", found: "REPEATED BYTE_ARRAY/UTF8" },
     ]);
   });
+
+  // The default cell cap bounds the peak of a WITHIN-cap file (every page honest): the narrowest
+  // contract at the cap builds one row object per row. The cap was tightened to 1<<24 so that worst
+  // case peaks ~1.7 GB, not the ~2.7 GB that 1<<25 allowed; 1<<24 still clears every real file (the
+  // most cells of any contract is depth_charts 2026, 613,196 rows × 11 cols ≈ 6.7 M, a 2.5× margin).
+  it("the default cell cap refuses a file the looser pre-fix cap allowed (nine columns at max rows)", async () => {
+    const rows = PARQUET_DECODE_LIMITS.maxRows; // 1<<21
+    const names = Array.from({ length: 9 }, (_, i) => `c${String(i)}`);
+    const wide = hostileParquet({
+      groupRows: rows,
+      columns: names.map((name) => ({ name, type: "INT32" as const, pages: [nullPage(rows)] })),
+    });
+    // 9 × (1<<21) = 18.9 M cells: over the shipped 1<<24 (16.8 M), under the old 1<<25 (33.6 M)
+    await expect(scan(wide, names)).rejects.toThrow(/more cells than the decode bound/);
+    await scan(wide, names, { ...PARQUET_DECODE_LIMITS, maxCells: 1 << 25 });
+  });
 });
 
 describe("the footer is walked by a bounded reader before hyparquet parses it", () => {
@@ -555,6 +572,43 @@ describe("the footer is walked by a bounded reader before hyparquet parses it", 
     const bytes = withTail([]);
     const t0 = performance.now();
     for (let i = 0; i < 100; i++) assertBoundedFooter(bytes);
+    expect(performance.now() - t0).toBeLessThan(5_000); // a hang detector, not a budget
+  });
+
+  // The amplification the first fix missed: the bounded walk bounded per-element structure, nesting
+  // and byte-lengths, but NOT the element COUNT. A footer whose schema list is millions of one-byte
+  // empty structs passed the walk, then parquetMetadata built one retained object per element — a
+  // few MB of footer became gigabytes of heap and the refresh aborted with a fatal OOM (no
+  // refresh_log row, later sources skipped: the finding, by a vector the page scan never sees).
+  it("refuses a footer with more thrift elements than the node bound, however small each is", () => {
+    // accepted below the bound (a real footer holds ~20k elements), refused above it
+    expect(() => {
+      assertBoundedFooter(footerNodeBomb(1000));
+    }).not.toThrow();
+    expect(() => {
+      assertBoundedFooter(footerNodeBomb(PARQUET_DECODE_LIMITS.maxThriftNodes + 100_000));
+    }).toThrow(NflverseSourceError);
+  });
+
+  it("the node bound scales with the limit given (the walk stays O(bound), not O(file))", () => {
+    const bomb = footerNodeBomb(50);
+    expect(() => {
+      assertBoundedFooter(bomb, { ...PARQUET_DECODE_LIMITS, maxThriftNodes: 40 });
+    }).toThrow(/unreadable parquet footer/);
+    expect(() => {
+      assertBoundedFooter(bomb, { ...PARQUET_DECODE_LIMITS, maxThriftNodes: 1000 });
+    }).not.toThrow();
+  });
+
+  it("openParquet refuses the node bomb by the bounded walk, before hyparquet allocates", async () => {
+    // ~2 MB of footer: at HEAD before the node bound this reached parquetMetadata and, scaled to the
+    // release caps, aborted the process; now the walk refuses it first and openParquet never decodes.
+    const bomb = footerNodeBomb(2_000_000);
+    const t0 = performance.now();
+    await expect(openParquet(file(bomb).path)).rejects.toMatchObject({
+      reason: "not_parquet",
+      message: "nflverse: unreadable parquet footer",
+    });
     expect(performance.now() - t0).toBeLessThan(5_000); // a hang detector, not a budget
   });
 });

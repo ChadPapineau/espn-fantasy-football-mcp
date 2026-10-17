@@ -312,3 +312,24 @@ export function forContract(
     })),
   });
 }
+
+/**
+ * A file whose footer is `PAR1`, a thrift metadata struct whose schema LIST holds `n` EMPTY structs
+ * (one STOP byte each), its length and `PAR1` — the footer-amplification bomb. The bounded walk and
+ * hyparquet both read `n` elements; hyparquet retains an object per element, so a few MB of footer
+ * becomes gigabytes of heap unless the walk bounds the element count. Not a decodable file (it has
+ * no row groups): it exists only to reach `assertBoundedFooter` / `openParquet` with `n` footer
+ * nodes. `n` empty structs cost `n` bytes, so the file is ~`n` bytes.
+ */
+export function footerNodeBomb(n: number): Uint8Array {
+  const head: number[] = [0x15, 0x02, 0x19, 0xfc]; // field 1 I32 (version 1), field 2 LIST<STRUCT>
+  uvarint(head, n); // the list size (>= 15, so it is a varint after the 0xfc header)
+  const footerLen = head.length + n + 1; // n empty-struct STOP bytes, then the outer struct STOP
+  const out = new Uint8Array(4 + footerLen + 8);
+  out.set([0x50, 0x41, 0x52, 0x31], 0);
+  out.set(head, 4);
+  // the n + 1 trailing bytes are already zero (n empty structs + the outer STOP)
+  new DataView(out.buffer).setUint32(4 + footerLen, footerLen, true);
+  out.set([0x50, 0x41, 0x52, 0x31], 4 + footerLen + 4);
+  return out;
+}
