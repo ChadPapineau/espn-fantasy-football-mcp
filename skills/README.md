@@ -35,8 +35,8 @@ Each one's Step 0 reads `server.toolset` and, under `core`, stops with: "this Sk
 
 ## Install
 
-- **Claude Code (plugin):** `claude plugin marketplace add <owner>/espn-fantasy-football-mcp`, then `claude plugin install espn-fantasy-football@espn-fantasy-football-mcp`; in development, `claude --plugin-dir .`. The Skills appear as `/espn-fantasy-football:<name>`.
-- **Copy install:** `node scripts/skills/build-skills.mjs --copy-out dist/skills-copy`, then copy `dist/skills-copy/espn-*` into `~/.claude/skills/` (renamed `espn-<name>` so they never collide with another bundle; standard frontmatter only). Register the server under the key `espn-fantasy-football` (`eff print-config --client code`) — the Skills' `disallowed-tools` strings name that key.
+- **Claude Code (plugin — the Skills and the server):** from the built runtime clone (`npm ci && npm run build` done; README Quickstart step 5), `claude plugin marketplace add ~/src/espn-fantasy-football-mcp`, then `claude plugin install espn-fantasy-football@espn-fantasy-football-mcp`; in development, `claude --plugin-dir .` on a built checkout. Never from GitHub: the plugin's server runs `dist/cli.js`, a build output git never carries, so a git install's server cannot start. The Skills appear as `/espn-fantasy-football:<name>`.
+- **Copy install (instead of the plugin, never beside it):** `node scripts/skills/build-skills.mjs --copy-out dist/skills-copy`, then copy `dist/skills-copy/espn-*` into `~/.claude/skills/` (renamed `espn-<name>` so they never collide with another bundle; standard frontmatter only). Register the server under the key `espn-fantasy-football` (`eff print-config --client code`) — the Skills' `disallowed-tools` strings name that key. Beside the plugin, that entry would register the server a second time and list every tool twice.
 - **Claude Desktop / claude.ai chat:** zip one `dist/skills-copy/espn-<name>` folder and upload it; configure the server separately (`eff print-config --client desktop`).
 
 ## Layout and generation

@@ -64,7 +64,7 @@ Intentions of a solo, part-time maintainer — not guarantees:
 - ESPN's and Disney's own services, APIs, accounts and web properties. This project has no
   relationship with them and cannot fix them; report problems in their products to them.
 - Third-party data providers (nflverse, ffopportunity, Sleeper, Open-Meteo, the US National
-  Weather Service, The Odds API, RSS publishers) and their content.
+  Weather Service, RSS publishers) and their content.
 - The prior-art repositories audited in
   [`docs/research/01-repo-security-audit.md`](docs/research/01-repo-security-audit.md). That audit
   records what was found in *their* code and histories without reproducing any secret value;

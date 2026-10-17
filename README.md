@@ -148,7 +148,7 @@ Every row below is traceable to the tool catalog ([`docs/plan/07-tool-catalog.md
 | Tool | What it does | Source | Priority | Status |
 |---|---|---|---|---|
 | `espn_get_injuries` | ESPN's injury status (what the league enforces) beside the official practice report (why), with `ir_eligible` and a first-cut probability of playing with its basis; on game day availability comes from ESPN's status alone | ESPN rows · nflverse `injuries` | P0 | 📋 |
-| `espn_get_schedule` | Kickoffs, byes, lock and final flags from ESPN, joined on the ESPN game id to betting lines (→ implied team totals), roof, surface, rest days and weather | ESPN keyless pro schedule · nflverse `schedules` · Open-Meteo / NWS · The Odds API (optional) | P0 | 📋 |
+| `espn_get_schedule` | Kickoffs, byes, lock and final flags from ESPN, joined on the ESPN game id to betting lines (→ implied team totals), roof, surface, rest days and weather | ESPN keyless pro schedule · nflverse `schedules` (the lines; no keyed odds API — plan 10 D13) · Open-Meteo / NWS | P0 | 📋 |
 | `espn_get_player_usage` | Per-game opportunity and efficiency inputs, trailing-window summaries with change points, the expected-points gap; `routes_proxy` is named honestly because no free in-season route data exists | nflverse `stats_player_week`, `snap_counts`, play-by-play subset · ffopportunity | P1 | 📋 |
 | `espn_get_depth_chart` | A team's depth chart with the snap-share cross-check beside it | nflverse `depth_charts` (keyed by ESPN ids) | P1 | 📋 |
 | `espn_get_defense_profile` | Regressed opponent adjustments and pace/pressure profiles, with ESPN's own position-vs-opponent rating as a labelled comparator column — never a raw points-allowed table | nflverse team stats and play-by-play · ESPN `mPositionalRatings` | P1 | 📋 |
@@ -240,7 +240,6 @@ flowchart LR
   subgraph DATA["External data sources"]
     NFLV["nflverse and ffopportunity<br/>GitHub release files"]
     WX["Open-Meteo and NWS<br/>weather"]
-    ODDS["The Odds API<br/>optional, needs a key"]
     SLP["Sleeper trending<br/>secondary signal"]
   end
   subgraph FEEDS["News feeds - untrusted text"]
@@ -263,7 +262,6 @@ flowchart LR
   JOBS -- "daily drift probe - keyless with a probe league" --> ESPNS
   JOBS -- "version poll, then parquet" --> NFLV
   JOBS --> WX
-  JOBS --> ODDS
   JOBS --> SLP
   JOBS --> RSS
 ```
@@ -324,7 +322,7 @@ flowchart TB
     NV["nflverse release files<br/>player stats, snaps, play-by-play subset, injuries, depth charts, weekly rosters, schedules and lines<br/>nightly and on game days, timestamp.txt is the version"]
     FFO["ffopportunity expected points<br/>daily"]
     ESV["ESPN keyless season views<br/>pro schedule every 6 h and hourly on game days, player universe daily"]
-    OTH["Weather hourly before kickoff, news every 15 min, Sleeper trending every 30 min,<br/>odds up to 3 times a day if a key is set"]
+    OTH["Weather hourly before kickoff, news every 15 min,<br/>Sleeper trending every 30 min"]
   end
   subgraph REF["eff refresh - a separate process under launchd, never inside the server"]
     POLL["Poll the version"]
@@ -474,7 +472,7 @@ flowchart LR
   end
   ESPNR["ESPN read host<br/>facts trusted after validation, free text NOT trusted"]
   ESPNW["ESPN write host<br/>not in the allow-list unless the write module is enabled"]
-  DATA["nflverse, ffopportunity, Sleeper, weather, odds<br/>numbers trusted after schema assertion, text NOT trusted"]
+  DATA["nflverse, ffopportunity, Sleeper, weather<br/>numbers trusted after schema assertion, text NOT trusted"]
   NEWS["News RSS<br/>trusted for nothing"]
   HUMAN -- "T0 chat" --> CLIENT
   CLIENT -- "T1 model-authored tool arguments" --> IN
@@ -612,7 +610,7 @@ timeline
         Gated on D0 : eff setup and the keychain store : live ESPN provider under the limiter
         Live checks : scoring self-check against the real league : snapshots and the credential check : model-graded Skill evals : tag v0.1.0 when both halves are green
     section Phase 2 - Usage, market and the P1 engines, L
-        Sources : snaps, play-by-play subset, ffopportunity, depth charts, news, Sleeper trending, optional odds
+        Sources : snaps, play-by-play subset, ffopportunity, depth charts, news, Sleeper trending
         Tools and Skills : 16 P1 tools, 34 under full : 5 P1 Skills : usage-first waiver detection : tag v0.2.0
     section Phase 3 - Model wave, L
         Opportunity-model projections : waiver premium fitted from league history : seeding simulator reproduces past seasons : held-out-season backtests : tag v0.3.0
@@ -859,9 +857,13 @@ eff setup
 eff doctor
 eff doctor --online
 
-# 5. Print the launch configuration with resolved absolute paths, and add it to your client
+# 5. Connect each client ONCE - one server registration per client, or every tool is listed twice.
+#    Claude Code (and the Claude Desktop Code tab): the plugin, added from THIS BUILT CLONE - it brings the
+#    Skills and the server. Not from GitHub: a git install has no dist/ (a build output), so its server cannot start.
+claude plugin marketplace add ~/src/espn-fantasy-football-mcp
+claude plugin install espn-fantasy-football@espn-fantasy-football-mcp --config league_id="$ESPN_LEAGUE_ID"
+#    Claude Desktop chat ignores a plugin's server: print its launch configuration (absolute paths) and add it
 eff print-config --client desktop
-eff print-config --client code
 
 # 6. Schedule the zero-token jobs: the daily drift probe, dataset refreshes, nightly snapshots
 eff install-launchd
@@ -872,10 +874,11 @@ Notes on the steps:
 - **`eff` is the package's CLI** (`dist/cli.js`). In a clone you would run it as `node dist/cli.js <subcommand>`; `npm install -g` from the release tarball puts `eff` on your `PATH` and is the recommended runtime location when your checkout lives in a cloud-synced directory. Either way the client configuration uses absolute paths (step 5), because GUI clients do not have your shell's `PATH`.
 - **`npm ci`, never `npm install`**, with `ignore-scripts=true` and exact pins: the lockfile's integrity hashes are the provenance.
 - **Step 3 fails at setup time, not mid-week.** A mis-pasted cookie is rejected by one definitive check against your league and deleted again.
-- **Skills** install in Claude Code as a plugin — `claude plugin marketplace add <owner>/espn-fantasy-football-mcp`, then `claude plugin install espn-fantasy-football@espn-fantasy-football-mcp` — or by copying the `espn-<name>` Skill directories into `~/.claude/skills/`. In Claude Desktop chat the Skills load from the plugin or from per-Skill zips, and the server is added through the manual configuration of step 5. The `espn.<workflow>` prompts work wherever prompts do.
+- **The plugin comes from your built clone, not from GitHub.** Its server is the launch shim `scripts/eff-launch.sh`, which runs `dist/cli.js` — a build output that git never carries. A plugin added from GitHub (`<owner>/<repo>`) is that git tree: Claude Code installs its locked dependencies but builds nothing, so the shim exits with "dist/cli.js is missing" in every session. Added from the built clone, the install copies the clone, `dist/` included, into Claude Code's plugin cache and installs the locked dependencies there (`npm ci --ignore-scripts`, Claude Code 2.1.238); the cache never builds anything.
+- **One registration per client.** In Claude Code the plugin registers the server itself — its tools appear as `mcp__plugin_espn-fantasy-football_espn-fantasy-football__espn_<tool>`. `eff print-config --client code` prints the other route, a user-scope `claude mcp add` entry for Claude Code without the plugin (the Skills then copied into `~/.claude/skills/`: `node scripts/skills/build-skills.mjs --copy-out dist/skills-copy`, then the `espn-<name>` directories): use it **instead of the plugin, never beside it** — both at once start two servers and list every tool twice. Claude Desktop chat ignores a plugin's server, so it always takes step 5's `eff print-config --client desktop`; its Skills load from the plugin or from per-Skill zips. The `espn.<workflow>` prompts work wherever prompts do.
 - **First use:** run the `onboard` Skill (`/espn-fantasy-football:onboard` from the plugin, `/espn-onboard` from a copy install, or the `espn.onboard` prompt). It restates your league's format, checks the scoring engine against ESPN's own points per stat, and asks the one question settings cannot answer — how your league seeds its playoffs.
-- **Upgrade:** `git pull && npm ci && npm run build` in the runtime clone, then `eff doctor`; re-run `eff print-config` and `eff install-launchd` whenever the Node path changed.
-- **Uninstall:** `eff uninstall` removes the launchd jobs, both possible credential stores, the cache and (after asking) the configuration directory; it prints — and does not edit — the client configuration entry to remove, and it tells you that deleting local copies does **not** invalidate the ESPN session itself.
+- **Upgrade:** `git pull && npm ci && npm run build` in the runtime clone, then refresh the plugin's copy of it: `claude plugin marketplace update espn-fantasy-football-mcp` and `claude plugin update espn-fantasy-football@espn-fantasy-football-mcp` copy in a new version; at an unchanged version (a development build) the update keeps the old copy, so `claude plugin uninstall espn-fantasy-football@espn-fantasy-football-mcp` and install it again as in step 5. Restart the client, then `eff doctor`; re-run `eff print-config` and `eff install-launchd` whenever the Node path changed.
+- **Uninstall:** `eff uninstall` removes the launchd jobs, both possible credential stores, the cache and (after asking) the configuration directory; it prints — and does not edit — the client configuration entry to remove, and it tells you that deleting local copies does **not** invalidate the ESPN session itself. The plugin goes with `claude plugin uninstall espn-fantasy-football@espn-fantasy-football-mcp`, then `claude plugin marketplace remove espn-fantasy-football-mcp`.
 
 ---
 
@@ -973,7 +976,7 @@ Nobody could establish how long `espn_s2` lives — community reports say "weeks
 | `# EFF_PROBE_LEAGUE_ID=0000000` | a public league id (unset) | A **public** league used by the daily keyless drift probe and for the recorded test fixtures. Configure it locally; never commit a real value |
 | `# EFF_ESPN_READ_HOST=lm-api-reads.fantasy.espn.com` | a host name (unset) | **Emergency override if ESPN moves its API host again.** Accepted only when it matches `^[a-z0-9-]+\.fantasy\.espn\.com$`, so cookies can never be sent outside `*.fantasy.espn.com`. It covers only a move inside that domain; the permanent fix is a release |
 | `EFF_ENABLE_WRITES=false` | `true` · `false` (`false`) | The write module is **not built in v1** and is off by default. If it is ever built, its tools register — when the server starts, from what setup recorded — only when this is exactly `true` **and** `eff setup --enable-writes` has recorded a typed acknowledgement **and** `eff setup` has recorded your own team, resolved from the stored `SWID`, **and** the local store records the credential as validated — and every write still needs an explicit human confirmation through a channel the model does not author |
-| `# ODDS_API_KEY=` | a key (unset) | Optional, for secondary betting lines from The Odds API. Leave unset to disable. Never logged |
+| `# ODDS_API_KEY=` | a key (unset) | Reserved: accepted but unused — no keyed odds API is built (plan 10 D13; the betting lines come from nflverse `schedules`), so setting it changes nothing. Never logged |
 | `# WEATHER_API_KEY=` | a key (unset) | Optional and reserved: the two planned weather sources need no key. Never logged |
 | `# EFF_NODE=` | an absolute path (unset) | **Launcher only.** The Node binary the plugin launch script (`scripts/eff-launch.sh`) should use. Unset means it is resolved automatically |
 
@@ -1003,7 +1006,7 @@ Three further keys exist for tests only and are deliberately absent from `.env.e
 }
 ```
 
-**Claude Code** — one command, user scope:
+**Claude Code without the plugin** — one command, user scope, for Skills copied into `~/.claude/skills/`. Use it instead of the plugin, never beside it: the plugin registers the server itself, and two registrations list every tool twice.
 
 ```sh
 claude mcp add espn-fantasy-football --scope user --transport stdio \
@@ -1013,16 +1016,19 @@ claude mcp add espn-fantasy-football --scope user --transport stdio \
 
 The server name comes first: `--env` takes several values, so a name written after the `--env` pairs would be read as one more of them and Claude Code would refuse the command.
 
-**Claude Code plugin** — the repository root is planned to be a plugin root whose `.mcp.json` carries variables only, no secrets and no absolute user paths:
+**Claude Code plugin** — the repository root is a plugin root whose `.mcp.json` carries variables only, no secrets and no absolute user paths. The shim runs `${CLAUDE_PLUGIN_ROOT}/dist/cli.js`, and `dist/` is not in git, so the plugin is installed from the built clone (Quickstart step 5), never from GitHub:
 
 ```json
 {
-  "espn-fantasy-football": {
-    "command": "/bin/sh",
-    "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/eff-launch.sh", "serve"],
-    "env": {
-      "ESPN_LEAGUE_ID": "${user_config.league_id}",
-      "ESPN_SEASON": "${user_config.season}"
+  "mcpServers": {
+    "espn-fantasy-football": {
+      "command": "/bin/sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/eff-launch.sh", "serve"],
+      "env": {
+        "ESPN_LEAGUE_ID": "${user_config.league_id}",
+        "ESPN_SEASON": "${user_config.season}",
+        "EFF_TOOLSET": "${user_config.toolset}"
+      }
     }
   }
 }
@@ -1033,7 +1039,7 @@ What to get right:
 - **Absolute paths, always.** GUI clients start servers with a minimal `PATH`, and a relative path resolves against the client's working directory. `command` must be the absolute path of the Node binary — under a version manager such as `fnm` that is a *versioned* path, so re-run `eff print-config` and `eff install-launchd` after changing Node versions. `eff doctor` checks that the configured binary is Node ≥ 24.15 and matches the one you are running.
 - **Paths that contain spaces.** In JSON each path is its own string, so spaces need no escaping — but never split one path across two `args` entries. On the command line, wrap each path in double quotes exactly as shown. Letting `eff print-config` emit both forms is the point of the command.
 - **Keep the runtime outside cloud-synced folders.** The `dist/cli.js` and `node_modules` the configuration points at must not sit in an iCloud-managed or other file-provider directory; `eff print-config` warns and `eff doctor` fails if they do.
-- **The configuration key is `espn-fantasy-football`.** Clients namespace tools by this key (in Claude Code the tools appear as `mcp__espn-fantasy-football__espn_<tool>`). Keep it distinct from the sibling Yahoo server's key so the two never collide.
+- **The configuration key is `espn-fantasy-football`.** Clients namespace tools by this key (in Claude Code the tools appear as `mcp__espn-fantasy-football__espn_<tool>`, or as `mcp__plugin_espn-fantasy-football_espn-fantasy-football__espn_<tool>` from the plugin). Keep it distinct from the sibling Yahoo server's key so the two never collide, and register it once per client: the plugin or a `claude mcp add` entry, never both.
 - **`env` holds non-secret settings only.** Never put `espn_s2` or `SWID` there.
 - **The plugin launches through `/bin/sh` and a small shim**, `scripts/eff-launch.sh`, which resolves a Node ≥ 24.15 deterministically (an `EFF_NODE` override, then the `fnm`/`nvm` default, then `/opt/homebrew/bin`, then `command -v node`) and fails with the exact fix if it finds none. `/bin/sh` is absolute on every macOS and needs neither a `PATH` nor an executable bit on the shim. Credentials never live under the plugin root.
 - **One configuration directory and one cache directory for everything.** By default the server, the `eff` CLI and the launchd jobs all use `~/.config/espn-fantasy-football-mcp` and `~/.cache/espn-fantasy-football-mcp`. `EFF_CONFIG_DIR`/`EFF_CACHE_DIR` overrides are supported for a client-configuration install: `eff print-config` writes them into the client configuration and `eff install-launchd` into the job definitions. A plugin install uses the default directories only, because the plugin's `.mcp.json` cannot carry per-user values for them and a plugin launched by a GUI client does not reliably inherit your shell environment — to use an override, launch the server from a client configuration instead. `EFF_NODE` is optional for the plugin's shim for the same reason: without it, the shim falls back to its resolution order. `eff doctor` warns when an override is set, because a server started by the plugin would not see it.
@@ -1153,11 +1159,17 @@ The untrusted-text rule the server declares to the model, verbatim from the plan
 npm run check:skills
 
 # Lane 2 - model-graded, costs tokens; run manually before a release and after any Skill or tool-description change.
-# Mocks are generated from the fixture league; a run never starts the real server.
-claude plugin eval . --json results.json --trust-plugin --model <pinned> --judge-model <pinned> --ablation none --max-cost-usd 20
+# The suite is a build output, never committed: every Skill's evals/evals.json and trigger_eval.json become cases
+# under dist/plugin-evals/, each run against an eval plugin whose one server is dist/cli.js in fixture mode on
+# fx-10h (no network, no cookie). The suite's generated README.md has the whole sequence: the injection cases'
+# base runs first, then --baselines, then the suite.
+npm run build
+npm run build:plugin-evals -- --seed-datasets --seed
+# then, from an empty directory, with the suite directory as the target (--no-publish keeps the report local):
+claude plugin eval /absolute/path/to/espn-fantasy-football-mcp/dist/plugin-evals --allow-tools "mcp__plugin_espn-fantasy-football_espn-fantasy-football__*" --json results.json --model <pinned> --judge-model <pinned> --ablation none --no-publish --max-cost-usd 20
 ```
 
-The pass bar for Lane 2: every free grader passes, the model-graded rubric reaches 80 %, every positive trigger fires and no negative does — and an injection case that "passes" by refusing to answer fails.
+The pass bar for Lane 2: every free grader passes, the model-graded rubric reaches 80 %, every positive trigger fires and no negative does — and an injection case that "passes" by refusing to answer fails. `claude plugin eval` is in early access: where an account does not have it, the command refuses to start ("currently in early access"), and plan 10 B11 Lane 2 and B15 are then recorded as not runnable, never as met (ruling R7-2 in [`docs/plan/changelog.md`](docs/plan/changelog.md)).
 
 ---
 
@@ -1247,9 +1259,8 @@ Only where you would expect. The planned server makes **no telemetry, error-repo
 | Host | What is sent | Why |
 |---|---|---|
 | ESPN's fantasy read host (`lm-api-reads.fantasy.espn.com`, or an operator override inside `*.fantasy.espn.com`) | Read requests for your league, with your cookies | The league data itself |
-| `github.com` and its release-download hosts | Version polls and file downloads — nothing about your league | nflverse and ffopportunity datasets |
+| `github.com` and its download hosts `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `raw.githubusercontent.com` | Version polls and file downloads — nothing about your league | nflverse and ffopportunity datasets, betting lines included (nflverse `schedules`) |
 | `api.open-meteo.com`, `api.weather.gov` | Stadium forecasts for upcoming outdoor games | Weather |
-| `api.the-odds-api.com` | Requests with your own API key, only if you set one | Optional secondary betting lines |
 | `api.sleeper.app` | Requests for league-agnostic trending lists | A secondary demand signal |
 | `www.rotowire.com`, `www.espn.com`, `www.cbssports.com` (RSS) | Feed fetches, never with a cookie | News headlines |
 | ESPN's fantasy **write** host | Nothing, unless the write module is built and enabled | — |
@@ -1284,7 +1295,6 @@ This design was informed by research, not built from anyone else's code. Nothing
 | FTN charting via nflverse; [ffopportunity](https://github.com/ffverse/ffopportunity) | Expected fantasy points and charting-derived inputs | CC-BY-SA 4.0 — attribution; share-alike attaches to redistributed derived data |
 | [Open-Meteo](https://open-meteo.com/) | Weather for outdoor games | CC-BY 4.0 data; the free API is for non-commercial use |
 | US National Weather Service (`api.weather.gov`) | Weather, alternative source | Public domain |
-| [The Odds API](https://the-odds-api.com/) | Optional secondary betting lines | Its own terms; free tier, key required |
 | Sleeper API | A secondary trending signal | Free for non-commercial use |
 | RotoWire, ESPN and CBS Sports RSS | News headlines | Headlines only, treated as untrusted text |
 | ESPN Fantasy (unofficial API) | League data and ESPN's own projections | **No licence and no affiliation.** Subject to the Disney Terms of Use; never commercial; see the [disclosure](#terms-of-use-and-account-risk) |

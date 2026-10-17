@@ -272,7 +272,7 @@ export const CONFIG_KEY_SPECS: readonly ConfigKeySpec[] = Object.freeze([
   spec("EFF_PROBE_LEAGUE_ID", "server", "A public ESPN league id for the keyless drift probe. Local only; never commit a real value.", null, { file: true }),
   spec("EFF_ESPN_READ_HOST", "server", "Emergency read-host override; must match ^[a-z0-9-]+\\.fantasy\\.espn\\.com$ and is never the write host.", ESPN_READ_HOST_DEFAULT, { file: true }),
   spec("EFF_ENABLE_WRITES", "server", "Inert: the write module is not built (plan 10 §3.W; D11). Exactly true or false; env only.", "false", { status: "writes" }),
-  spec("ODDS_API_KEY", "server", "Optional The Odds API key (secondary lines). Env only; never logged.", null, { secret: true }),
+  spec("ODDS_API_KEY", "server", "Reserved; no keyed odds API is built (plan 10 D13: lines from nflverse schedules). Env only; never logged.", null, { secret: true, status: "reserved" }),
   spec("WEATHER_API_KEY", "server", "Reserved; unused by Open-Meteo and NWS. Env only; never logged.", null, { secret: true, status: "reserved" }),
   spec("EFF_NODE", "launcher", "Absolute Node path for scripts/eff-launch.sh (the plugin shim). Unset: resolved automatically.", null),
   spec("EFF_FIXTURE_DIR", "test", "Fixture mode: serve recorded, anonymised fixtures from this absolute directory.", null),
