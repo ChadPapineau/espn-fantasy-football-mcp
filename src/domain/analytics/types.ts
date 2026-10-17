@@ -102,6 +102,13 @@ export interface RecLineupSlot {
 export interface Rec {
   readonly action: string;
   readonly subjects: readonly RecSubject[];
+  /**
+   * Lineup recs: E2's mean-optimal assignment, the lineup C2 replays (changelog R7-1 keeps its
+   * starters; interchangeable entrants' seats follow E2's re-seating). When E2 holds a coin flip,
+   * `subjects`, `action`, `point_estimate`, `distribution`, `delta_vs_next` and `no_move` describe
+   * the lineup the user is told to set — the current one with only the changes outside the
+   * coin-flip band made — and this field still shows every change made.
+   */
   readonly lineup: readonly RecLineupSlot[] | null;
   readonly point_estimate: number;
   readonly distribution: Dist;
@@ -242,14 +249,20 @@ export function toCoarseDelta(delta: number): CoarseDelta {
   return { sign, band };
 }
 
-/** Whether a swap is a coin flip (|ΔP(win)| under the basis threshold, or its interval spans 0). */
+/**
+ * Whether a swap is a coin flip (|ΔP(win)| under the basis threshold, or its interval spans 0).
+ * `deltaPwin: null` — no ΔP(win) to read (no opponent roster, or a points objective where this
+ * week's opponent does not matter): the interval alone decides (changelog R7-1).
+ */
 export function isCoinFlip(
   basis: DistBasis,
-  deltaPwin: number,
+  deltaPwin: number | null,
   interval: readonly [number, number],
 ): boolean {
+  const spans = interval[0] <= 0 && interval[1] >= 0;
+  if (deltaPwin === null) return spans;
   if (!Number.isFinite(deltaPwin)) return true;
-  return Math.abs(deltaPwin) < COIN_FLIP_DPWIN[basis] || (interval[0] <= 0 && interval[1] >= 0);
+  return Math.abs(deltaPwin) < COIN_FLIP_DPWIN[basis] || spans;
 }
 
 /** One slot assignment in a lineup. */
@@ -338,6 +351,11 @@ interface LineupDataBase extends AnalyticsResult {
   };
   readonly lock_schedule: readonly LockScheduleEntry[];
   readonly latest_execution_time: IsoInstant | null;
+  /**
+   * True when E2 tells the user to change nothing: the current lineup is already its best, or every
+   * change from it to `recommended_lineup` is held as a coin flip (plan 09 §2 guardrail 9 — a Δ
+   * whose interval includes 0 is "no move"; changelog R7-1). Equal to `rec.no_move`.
+   */
   readonly no_move: boolean;
   readonly rec: Rec;
 }

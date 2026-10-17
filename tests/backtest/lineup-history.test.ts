@@ -16,6 +16,10 @@
 // inside a calibrated forecaster's sampling distribution of the reliability term (seeded, one draw
 // per matchup) and their margins are neither regressed toward 0 nor mis-spread; the optimiser's
 // selection bias is real in level but appears on both sides of E2's counterfactual, so it cancels.
+// Stage C (changelog R7-1): every C2 clause above judges E2's assignment (`rec.lineup`), which the
+// no-move rule leaves unchanged; the lineup E2 tells the user to set ("keep unless outside the
+// band") is replayed beside it — structurally the manager's lineup with only decisive changes made
+// (hard), its regret reported (soft, the `keep-band` section).
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   OBJECTIVE_SWITCH_RECORD,
@@ -41,6 +45,8 @@ import {
   docSection,
   familyMargins,
   familyNull,
+  keepBandCounts,
+  keepBandSection,
   oneSidePerMatchup,
   pwinAfterSection,
   pwinPairs,
@@ -72,6 +78,7 @@ const sections = (): Record<string, string> => {
     calibration: calibrationSection(both),
     "pwin-after": pwinAfterSection(both),
     matter: didItMatterSection(both),
+    "keep-band": keepBandSection(both),
   };
 };
 
@@ -231,6 +238,31 @@ describe("C2 start/sit on the held-out seasons", () => {
       const err = sides.reduce((a, x) => a + (x.real_m - x.real_o) - (x.mu_m - x.mu_o), 0);
       expect(Math.abs(err)).toBeLessThan(1e-6 * sides.length);
       expect(familyMargins(rp, "auto").slope_consistent).toBe(true);
+    }
+  });
+
+  it("(hard, R7-1) E2's advice is the lineup it was handed with only decisive changes made; its assignment is untouched", () => {
+    for (const rp of [cv, full]) {
+      let changed = 0;
+      for (const r of rp.rows) {
+        const k = r.lineup_key;
+        expect(k.keep_band).not.toBeNull();
+        // nothing to change: the advice is the lineup as played, which is E2's assignment too
+        if (k.auto === k.manager) expect(k.keep_band).toBe(k.manager);
+        else changed += 1;
+        // the advice is a legal lineup, so the hindsight best bounds it
+        expect(r.realised.keep_band ?? Infinity).toBeLessThanOrEqual(
+          (r.realised.hindsight ?? 0) + 1e-9,
+        );
+      }
+      const c = keepBandCounts(rp.rows);
+      expect(c.changed).toBe(changed);
+      expect(c.all_held + c.some_made).toBe(c.changed);
+      // position-level spreads make most changes coin flips (the dispute's count: 154 of 166 on
+      // core) — the policy holds them, so the advice keeps the as-played lineup in most changed weeks
+      expect(c.all_held).toBeGreaterThan(c.some_made);
+      // R6-1 still holds on E2's assignment (asserted above); the advice is a different lineup
+      expect(compareRegret(rp.rows, "auto", "espn_projection").pooled.diff).toBe(0);
     }
   });
 

@@ -79,6 +79,7 @@ export function roster(base = 0, basis: DistBasis = "position_cv"): LineupPlayer
 const RULES: readonly StartSitRule[] = [
   "hindsight",
   "auto",
+  "keep_band",
   "mean",
   "pwin",
   "espn_projection",

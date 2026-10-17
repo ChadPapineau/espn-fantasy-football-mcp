@@ -4,14 +4,22 @@
 // A11a names — "start by ESPN's projection" and "start by last week's points" — and the manager's
 // lineup as played), and the head-to-head facts the P(win) calibration and the "did it matter" share
 // read — since Stage C (changelog R6-2) with each pair's projected and realised totals, so the
-// margin calibration can read them. Types only (no runtime import of the engines, so lineup.ts can
-// read the switch record). New here.
+// margin calibration can read them; and (changelog R7-1) the lineup E2 tells the user to set under
+// `auto` — "keep unless outside the band", the current lineup with only the changes outside the
+// coin-flip band made — whose regret is reported beside its assignment's (soft). Types only (no
+// runtime import of the engines, so lineup.ts can read the switch record). New here.
 import type { DistBasis, Objective } from "../types.js";
 
-/** The decision rules a replayed team-week records (plan 10 C2, A11a). */
+/**
+ * The decision rules a replayed team-week records (plan 10 C2, A11a). `auto` is E2's mean-optimal
+ * assignment (`rec.lineup` — what C2 and R6-1 judge); `keep_band` is what E2 under `auto` tells the
+ * user to set (its start subjects — R7-1): in the replay the current lineup is the manager's as
+ * played, so a no-move keeps it.
+ */
 export const START_SIT_RULES = Object.freeze([
   "hindsight",
   "auto",
+  "keep_band",
   "mean",
   "pwin",
   "espn_projection",

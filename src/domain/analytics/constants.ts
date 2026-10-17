@@ -207,6 +207,11 @@ export const LINEUP = Object.freeze({
   maxPlayers: 60,
   /** `compare[]` pairs evaluated (plan 07 E2 ≤ 5). */
   maxCompare: 5,
+  /**
+   * Entrants re-seated among the seats they take when a change is held (changelog R7-1): up to 5!
+   * = 120 seatings, each one slot flow; past it the solve's own seating stands.
+   */
+  maxReseatEntrants: 5,
 });
 
 // --- E3 seeding simulator ---------------------------------------------------------------------------

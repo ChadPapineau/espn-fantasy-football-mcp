@@ -4,7 +4,8 @@
 // reading (b) and to mean under (a), the mode follows sign(μ_m − μ_o) under (a), PF awareness
 // (exchange rate, maximise_pf, the PF cutoff under (b)), option values, conditionals, stack flags,
 // the ESPN cross-check, compare pairs evaluated or warned by player id (never dropped silently —
-// changelog R5), and invariance to hostile names.
+// changelog R5), and invariance to hostile names. The no-move rule's own cases (changelog R7-1) are
+// in lineup-no-move.test.ts; here the coin-flip and the decisive versions of the bench upgrades.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
@@ -73,6 +74,16 @@ function myRoster(): LineupPlayer[] {
   ];
 }
 
+/**
+ * The same roster with the two starters the bench upgrades replace nearly scoreless (1 point each),
+ * so both upgrades are decisive — each Δ interval excludes 0 — and E2 makes them (changelog R7-1).
+ */
+function decisiveRoster(): LineupPlayer[] {
+  return myRoster().map((p) =>
+    p.player_id === 5 || p.player_id === 7 ? { ...p, points: dist(1, 0.6) } : p,
+  );
+}
+
 function oppRoster(mean: number): LineupPlayer[] {
   const per = mean / 9;
   return myRoster().map((p, i) => ({
@@ -112,6 +123,28 @@ describe("the exact assignment", () => {
     expect(slotOf.get(15)).toBe("IR");
     expect(out.e_points_after).toBeCloseTo(20 + 14 + 12 + 13 + 11 + 9 + 9 + 7 + 8, 6);
     expect(out.e_points_after).toBeCloseTo(bestLineupMean(referenceSlots(), myRoster()), 6);
+    expect(out.rec.lineup).toHaveLength(9);
+    expect(out.swaps).toHaveLength(2);
+    expect(out.basis).toBe("position_cv");
+    expect(out.p_win_reporting).toBe("sign_and_band");
+    for (const s of out.swaps) expect(Object.keys(s.delta_pwin).sort()).toEqual(["band", "sign"]);
+    // at position-level spreads both upgrades are coin flips (each Δ interval includes 0): the advice
+    // holds them — no move, the bench players sit — while the assignment above is unchanged (R7-1)
+    expect(out.swaps.every((s) => s.coin_flip)).toBe(true);
+    expect(out.no_move).toBe(true);
+    expect(out.rec.action).toBe("keep the current lineup");
+    expect(
+      out.rec.subjects
+        .filter((s) => s.role === "sit")
+        .map((s) => s.player_id)
+        .sort(),
+    ).toEqual([10, 11]);
+  });
+
+  it("decisive upgrades are made: both bench players start, the two starters they replace sit", () => {
+    const out = analyzeLineup(request({ players: decisiveRoster() }));
+    expect(out.swaps).toHaveLength(2);
+    expect(out.swaps.some((s) => s.coin_flip)).toBe(false);
     expect(out.no_move).toBe(false);
     expect(out.rec.action).toBe("make 2 lineup changes");
     expect(
@@ -120,11 +153,11 @@ describe("the exact assignment", () => {
         .map((s) => s.player_id)
         .sort(),
     ).toEqual([5, 7]);
-    expect(out.rec.lineup).toHaveLength(9);
-    expect(out.swaps).toHaveLength(2);
-    expect(out.basis).toBe("position_cv");
-    expect(out.p_win_reporting).toBe("sign_and_band");
-    for (const s of out.swaps) expect(Object.keys(s.delta_pwin).sort()).toEqual(["band", "sign"]);
+    const starts = out.rec.subjects.filter((s) => s.role === "start").map((s) => s.player_id ?? -1);
+    expect([...starts].sort((a, b) => a - b)).toEqual(
+      (out.rec.lineup ?? []).map((s) => s.player_id).sort((a, b) => a - b),
+    );
+    expect(out.rec.delta_vs_next.p10).toBeGreaterThan(0);
   });
 
   it("property: the lineup is legal and no random legal lineup beats its mean", () => {
@@ -397,11 +430,20 @@ describe("option value, conditionals, stacks, cross-check", () => {
   });
 
   it("if a Questionable starter is ruled out, the best reserve still unlocked takes his seat", () => {
-    const players = myRoster().map((p) => (p.player_id === 2 ? { ...p, p_active: 0.71 } : p));
+    const players = decisiveRoster().map((p) => (p.player_id === 2 ? { ...p, p_active: 0.71 } : p));
     const out = analyzeLineup(request({ players }));
     const c = out.conditionals.find((x) => x.if.player_id === 2);
+    // RB 10 starts in the lineup E2 advises, so the best reserve left for the RB seat is RB 14
     expect(c?.then.in).toBe(14);
     expect(c?.if.decided_by).toBe(new Date(Date.parse(SUNDAY) - 90 * 60_000).toISOString());
+  });
+
+  it("the conditionals follow the lineup E2 tells the user to set: a held entrant is the reserve (R7-1)", () => {
+    const players = myRoster().map((p) => (p.player_id === 2 ? { ...p, p_active: 0.71 } : p));
+    const out = analyzeLineup(request({ players }));
+    expect(out.no_move).toBe(true);
+    // the coin flip that would start RB 10 is held, so RB 10 is the reserve for the RB seat
+    expect(out.conditionals.find((x) => x.if.player_id === 2)?.then.in).toBe(10);
   });
 
   it("a QB–WR stack is flagged with the reading's advice", () => {

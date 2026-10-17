@@ -14,7 +14,7 @@ fail when a table here differs from what a fresh replay computes. Regenerate wit
 Any change to E1 (v1 or v2-opportunity), E2, `totals.ts`, the history fixtures or the C1 excerpt
 changes these numbers: rerun, review, commit.
 
-## Verdicts (2026-10-10; the `full` basis re-run on v2-opportunity in the B2b fix round; R6-2 in Stage C, 2026-10-11)
+## Verdicts (2026-10-10; the `full` basis re-run on v2-opportunity in the B2b fix round; R6-2 in Stage C, 2026-10-11; R7-1, 2026-10-17)
 
 | item | verdict | evidence |
 |---|---|---|
@@ -23,6 +23,7 @@ changes these numbers: rerun, review, commit.
 | C2 E2's own `p_win_after` (R6-2's named finding, Stage C) | **not a defect** — sampling noise; engine unchanged | reliability 0.0114 / 0.0110 against a calibrated forecaster's mean 0.0060 / 0.0059 and 95th percentile 0.0144 (P = 0.104 / 0.118); margin slope 1.01 (0.47–1.55), standardised mean square 1.041 / 0.997 (0.78–1.25); the optimiser's selection bias is real in level (3.88 vs 2.75 points below projection per team-week) but sits on both sides of E2's counterfactual and cancels; the 0.2–0.3 tail: 12 matchups, the favourite ahead by 12.7 / 6.9 points against 18.4 / 19.2 forecast. Section "E2's own `p_win_after`" |
 | C2 `P(win)` within ±5 per decile | **unresolved on both bases** — ruling requested (R6) | as played: position_cv two mirrored deciles miss by 0.6 points (5.6, n = 49 each); v2-opportunity by 3.4 points (8.4, n = 47 each) — both under-confident, both inside the deciles' Wilson intervals, family-wise consistent, where resolving ±5 needs ≈ 355 forecasts per decile; Brier 0.2233 / 0.2236 vs 0.25; the reliability term 0.0020 / 0.0031 is below the ≈ 0.0060 a perfectly calibrated forecaster issuing the same forecasts expects from sampling alone. E2's own `p_win_after` under v2: every checked decile within 4.9 points (`met`) |
 | C2 "did it matter" | **reported** | the product's lineup differs from the manager's in 149 of 272 head-to-head team-weeks and flips 20 results (10 to a win, 10 to a loss), on both bases |
+| C2 the advice E2 gives — keep unless outside the band (R7-1, Stage C) | **reported (soft)** | E2's assignment (`rec.lineup`, every clause here) is unchanged; the lineup the user is told to set holds each coin flip — no move in 154 / 155 of the 166 team-weeks the assignment changes — at a regret of 13.33 / 13.28 points per team-week against the assignment's 13.40. Section "The advice E2 gives" |
 | C2 regret test → `auto` default | **implemented and tested on v2; no switch** | on what `full` serves, pwin and mean differ in 8 team-weeks of 308 (< 30) and pwin's regret is not below mean's in 2025 after week 3; and no replayed lineup is all-player_sim (K and D/ST keep position_cv), so the switch could not apply to any of them: `auto` stays `mean` |
 | C3 `P(win)` vs `winProbability` | **needs_time**, code path proven | 0 replayed weeks with a pre-week snapshot (finished seasons carry none; the recorded 2026 scoreboards were taken after kickoff); our Brier on all 272 replayed forecasts 0.2233 |
 | C3 `P(playoffs)` vs `playoffPct` | **needs_time**, code path proven | finished seasons carry no `playoffPct`; our P(playoffs) on 9 league-seasons × weeks 4/8/12 beats the base rate at every checkpoint (Brier 0.209 / 0.155 / 0.094 vs 0.250, after the B2b fix that draws each team's mean from its posterior — was 0.214 / 0.159 / 0.094); one decile each at weeks 4 and 8 is still inconsistent (see "The B2b fix") |
@@ -352,6 +353,72 @@ the rule's lineup would have flipped the result against the opponent's realised 
 | v2-opportunity where modelled (`full`) | E2 `auto` (the product) vs the manager's lineup as played | 272 | 149 | 20 | 10 | 10 | 13.4 % | 7.3 % |
 | v2-opportunity where modelled (`full`) | E2 `pwin` vs E2 `mean` | 272 | 8 | 1 | 1 | 0 | 12.5 % | 0.4 % |
 <!-- matter:end -->
+
+## C2 — the advice E2 gives: keep unless outside the band (changelog R7-1, soft)
+
+**What R7-1 rules** (`docs/plan/changelog.md` §R7): plan 09 guardrail 9 — a Δ whose interval
+includes 0 is "no move" — governs what the user is told and what is logged. E2 now decides each
+change from the current lineup to its mean-optimal assignment on that change's own numbers (the
+ones `swaps[]` shows): a coin flip (`coin_flip: true` — its Δ interval includes 0, or, where this
+week's opponent decides it, |ΔP(win)| is under the basis threshold) is held; a seat that scores a
+known 0 (empty, a player on bye or ruled out) is priced exactly and filled whenever the entrant is
+expected to score; a `force_start` / `exclude` is always made. A call with every change held is
+`no_move: true` and is logged and scored as "keep". E2's assignment — `rec.lineup`, which every C2
+clause above judges, and R6-1's identity with ESPN's lineup — is unchanged; the lineup E2 tells the
+user to set is its start subjects (rule `keep_band` in the replay:
+`src/domain/analytics/calibration/replay.ts`). In the replay E2 is handed the manager's lineup as
+played, which was set with game-day news, so "keep" starts from a well-informed lineup; live, it
+starts from whatever is set when E2 is asked. Soft: reported, no verdict.
+
+<!-- keep-band:start -->
+| basis | season | team-weeks | E2's assignment changes the lineup | …every change held (no move) | …some change made | …of them holding a coin flip | regret: E2's assignment (`auto`) | regret: keep unless outside the band | difference | regret: the manager's lineup as played |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| position_cv (`core`) | 2024 | 154 | 78 | 70 | 8 | 1 | 12.2475 | 12.2687 | 0.0212 | 12.7386 |
+| position_cv (`core`) | 2025 | 154 | 88 | 84 | 4 | 2 | 14.5460 | 14.3961 | -0.1499 | 14.6261 |
+| position_cv (`core`) | **both** | 308 | 166 | 154 | 12 | 3 | 13.3968 | 13.3324 | -0.0644 | 13.6823 |
+| v2-opportunity where modelled (`full`) | 2024 | 154 | 78 | 71 | 7 | 1 | 12.2475 | 12.1603 | -0.0873 | 12.7386 |
+| v2-opportunity where modelled (`full`) | 2025 | 154 | 88 | 84 | 4 | 2 | 14.5460 | 14.3961 | -0.1499 | 14.6261 |
+| v2-opportunity where modelled (`full`) | **both** | 308 | 166 | 155 | 11 | 3 | 13.3968 | 13.2782 | -0.1186 | 13.6823 |
+
+| basis | the advice vs | season | team-weeks | regret: the advice | regret: the other rule | difference | identical lineups |
+|---|---|---:|---:|---:|---:|---:|---:|
+| position_cv (`core`) | start by last week's points | 2024 | 145 | 12.1247 | 26.2516 | -14.1269 | 3 |
+| position_cv (`core`) | start by last week's points | 2025 | 145 | 14.4319 | 27.1982 | -12.7663 | 6 |
+| position_cv (`core`) | start by last week's points | **both** | 290 | 13.2783 | 26.7249 | -13.4466 | 9 |
+| position_cv (`core`) | start by ESPN's projection | 2024 | 154 | 12.2687 | 12.2475 | 0.0212 | 83 |
+| position_cv (`core`) | start by ESPN's projection | 2025 | 154 | 14.3961 | 14.5460 | -0.1499 | 68 |
+| position_cv (`core`) | start by ESPN's projection | **both** | 308 | 13.3324 | 13.3968 | -0.0644 | 151 |
+| v2-opportunity where modelled (`full`) | start by last week's points | 2024 | 145 | 12.1247 | 26.2516 | -14.1269 | 3 |
+| v2-opportunity where modelled (`full`) | start by last week's points | 2025 | 145 | 14.4319 | 27.1982 | -12.7663 | 6 |
+| v2-opportunity where modelled (`full`) | start by last week's points | **both** | 290 | 13.2783 | 26.7249 | -13.4466 | 9 |
+| v2-opportunity where modelled (`full`) | start by ESPN's projection | 2024 | 154 | 12.1603 | 12.2475 | -0.0873 | 82 |
+| v2-opportunity where modelled (`full`) | start by ESPN's projection | 2025 | 154 | 14.3961 | 14.5460 | -0.1499 | 68 |
+| v2-opportunity where modelled (`full`) | start by ESPN's projection | **both** | 308 | 13.2782 | 13.3968 | -0.1186 | 150 |
+
+| basis | rule vs reference | head-to-head team-weeks | lineups differ | result flips | → a win | → a loss | share of differing | share of all |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| position_cv (`core`) | keep unless outside the band (E2's advice, R7-1) vs E2 `auto` (the product) | 272 | 140 | 19 | 10 | 9 | 13.6 % | 7.0 % |
+| v2-opportunity where modelled (`full`) | keep unless outside the band (E2's advice, R7-1) vs E2 `auto` (the product) | 272 | 141 | 19 | 10 | 9 | 13.5 % | 7.0 % |
+<!-- keep-band:end -->
+
+Reading it — **reported, no verdict (soft)**:
+
+- **E2's assignment changes the lineup it is handed in 166 of 308 team-weeks, and in 154 (`core`)
+  / 155 (`full`) of them every change is a coin flip** — at position-level spreads a swap's p10–p90
+  interval includes 0 unless the entrant out-projects the starter several times over. Under R7-1
+  those calls are no-moves; the other 12 / 11 make a change, 3 of them holding a coin flip beside it.
+- **Holding the coin flips costs nothing measurable here.** The advice's regret is 13.33 / 13.28
+  points per team-week against 13.40 for E2's assignment, both seasons pooled (one cell above it:
+  `core` 2024, +0.02); it stays far below "start by last week's points" (−13.4) and at or below
+  "start by ESPN's projection". The lineup kept was set with game-day news, so this is the case most
+  favourable to "keep"; live, the lineup E2 is handed may be stale, and the retrospective — which
+  scores each logged no-move as "keep" and prices the held change through the alternative E2 offers
+  (its best-by-mean lineup) — is the measurement that decides.
+- **Did it matter:** the advice and the assignment differ in 140 / 141 of the 272 head-to-head
+  team-weeks and would flip 19 results, 10 to a win and 9 to a loss — a coin flip, as the band says.
+- C2's hard clauses and R6-1 are unaffected: they judge `rec.lineup`, and every section above
+  regenerates byte-identical with the rule in place (`tests/backtest/lineup-history.test.ts` holds
+  the advice structurally: the lineup handed in whenever the assignment is it, never above hindsight).
 
 ## C3 — against ESPN's `winProbability` and `playoffPct`
 

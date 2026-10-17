@@ -122,40 +122,66 @@ describe("forecasts in the retrospective's shapes", () => {
 });
 
 describe("alternatives for the log (E12)", () => {
-  it("a lineup change offers 'keep the current lineup'; no move offers nothing", () => {
-    const data = {
-      no_move: false,
+  const row = (slot: string, player_id: number, mean: number) => ({
+    slot,
+    player_id,
+    name: bare("a"),
+    points: dist(mean),
+    lock_at: null,
+    percent_started: null,
+  });
+  const start = (player_id: number, slot: string) => ({
+    player_id,
+    gsis_id: null,
+    role: "start" as const,
+    slot,
+  });
+  const sit = (player_id: number) => ({
+    player_id,
+    gsis_id: null,
+    role: "sit" as const,
+    slot: "BE",
+  });
+  // the current lineup starts QB 1; E2's best-by-mean lineup starts QB 2 instead
+  const lineup = (over: { no_move: boolean; subjects: unknown[] }): LineupData =>
+    ({
+      no_move: over.no_move,
       basis: "position_cv",
       e_points_before: 98,
-      current_lineup: [
-        {
-          slot: "QB",
-          player_id: 1,
-          name: bare("a"),
-          points: dist(20),
-          lock_at: null,
-          percent_started: null,
-        },
-        {
-          slot: "BE",
-          player_id: 2,
-          name: bare("b"),
-          points: dist(5),
-          lock_at: null,
-          percent_started: null,
-        },
-      ],
-      rec: { distribution: dist(103, 0.2) },
-    } as unknown as LineupData;
-    const alts = lineupAlternatives(data);
+      e_points_after: 103,
+      current_lineup: [row("QB", 1, 20), row("BE", 2, 25)],
+      recommended_lineup: [row("QB", 2, 25), row("BE", 1, 20)],
+      rec: { distribution: dist(103, 0.2), subjects: over.subjects },
+    }) as unknown as LineupData;
+
+  it("a lineup change offers 'keep the current lineup'", () => {
+    const alts = lineupAlternatives(lineup({ no_move: false, subjects: [start(2, "QB"), sit(1)] }));
     expect(alts).toHaveLength(1);
     expect(alts[0]).toMatchObject({
       action: "keep the current lineup",
       point_estimate: 98,
       decision_metric_value: 98,
     });
-    expect(alts[0]?.subjects).toEqual([{ player_id: 1, gsis_id: null, role: "start", slot: "QB" }]);
-    expect(lineupAlternatives({ ...data, no_move: true })).toEqual([]);
+    expect(alts[0]?.subjects).toEqual([start(1, "QB")]);
+  });
+
+  it("a no-move that holds a coin flip offers E2's best-by-mean lineup, the coin flip made (R7-1)", () => {
+    const alts = lineupAlternatives(lineup({ no_move: true, subjects: [start(1, "QB"), sit(2)] }));
+    expect(alts).toHaveLength(1);
+    expect(alts[0]).toMatchObject({
+      action: "set the best-by-mean lineup, every coin flip made",
+      point_estimate: 103,
+      decision_metric_value: 103,
+    });
+    expect(alts[0]?.subjects).toEqual([start(2, "QB"), { ...sit(1), slot: "QB" }]);
+  });
+
+  it("nothing to change offers nothing", () => {
+    const same = {
+      ...lineup({ no_move: true, subjects: [start(1, "QB")] }),
+      recommended_lineup: [row("QB", 1, 20), row("BE", 2, 5)],
+    } as unknown as LineupData;
+    expect(lineupAlternatives(same)).toEqual([]);
   });
 
   it("a claim offers 'make no claim'", () => {

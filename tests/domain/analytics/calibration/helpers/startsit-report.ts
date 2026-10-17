@@ -4,7 +4,9 @@
 // player name ever enters the doc (ids are not written either: every line is an aggregate). Stage C
 // (changelog R6-2) adds the `pwin-after` section: each P(win) family against the calibrated
 // forecaster's sampling distribution of its reliability term, its margin calibration, the
-// optimiser's selection bias in level, and the sparse tail decile read by its margins.
+// optimiser's selection bias in level, and the sparse tail decile read by its margins; changelog
+// R7-1 the `keep-band` section: the regret of the lineup E2 tells the user to set beside its
+// assignment's.
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { seededRng } from "../../../../../src/domain/clock.js";
@@ -62,6 +64,7 @@ const pct = (x: number | null): string => (x === null ? "—" : `${(x * 100).toF
 const RULE_LABEL: Readonly<Record<StartSitRule, string>> = {
   hindsight: "hindsight best",
   auto: "E2 `auto` (the product)",
+  keep_band: "keep unless outside the band (E2's advice, R7-1)",
   mean: "E2 `mean`",
   pwin: "E2 `pwin`",
   espn_projection: "start by ESPN's projection",
@@ -245,6 +248,95 @@ export function didItMatterSection(replays: readonly HistoryReplay[]): string {
         `| ${BASIS_LABEL(rp.basis)} | ${RULE_LABEL[a]} vs ${RULE_LABEL[b]} | ${String(d.n_h2h)} | ${String(d.n_changed)} | ${String(d.n_decisive)} | ${String(d.n_helped)} | ${String(d.n_hurt)} | ${pct(d.share_of_changed)} | ${pct(d.share_of_all)} |`,
       );
     }
+  return lines.join("\n");
+}
+
+/** The R7-1 policy's team-weeks: how often E2's advice keeps the lineup it was handed. */
+export interface KeepBandCounts {
+  readonly n: number;
+  /** E2's assignment differs from the lineup it was handed (the manager's, as played). */
+  readonly changed: number;
+  /** …and every change is held: the advice is no move. */
+  readonly all_held: number;
+  /** …and some change is made. */
+  readonly some_made: number;
+  /** …of those, the advice still holds at least one coin flip. */
+  readonly some_held: number;
+}
+
+export function keepBandCounts(rows: readonly StartSitRow[]): KeepBandCounts {
+  let changed = 0;
+  let allHeld = 0;
+  let someMade = 0;
+  let someHeld = 0;
+  for (const r of rows) {
+    const k = r.lineup_key;
+    if (k.auto === k.manager) continue;
+    changed += 1;
+    if (k.keep_band === k.manager) allHeld += 1;
+    else {
+      someMade += 1;
+      if (k.keep_band !== k.auto) someHeld += 1;
+    }
+  }
+  return {
+    n: rows.length,
+    changed,
+    all_held: allHeld,
+    some_made: someMade,
+    some_held: someHeld,
+  };
+}
+
+/**
+ * Changelog R7-1 (soft): the regret of "keep unless outside the band" — the lineup E2 under `auto`
+ * tells the user to set — beside its mean-optimal assignment's (`auto`, what C2 judges), per basis
+ * and season, with both baselines, the manager's lineup and the "did it matter" share against `auto`.
+ */
+export function keepBandSection(replays: readonly HistoryReplay[]): string {
+  const lines = [
+    "| basis | season | team-weeks | E2's assignment changes the lineup | …every change held (no move) | …some change made | …of them holding a coin flip | regret: E2's assignment (`auto`) | regret: keep unless outside the band | difference | regret: the manager's lineup as played |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+  ];
+  for (const rp of replays) {
+    const seasons = [...new Set(rp.rows.map((r) => r.season))].sort((a, b) => a - b);
+    for (const s of [...seasons, null]) {
+      const rows = rp.rows.filter((r) => s === null || r.season === s);
+      const c = keepBandCounts(rows);
+      const a = meanRegret(rows, "auto");
+      const k = meanRegret(rows, "keep_band");
+      lines.push(
+        `| ${BASIS_LABEL(rp.basis)} | ${s === null ? "**both**" : String(s)} | ${String(c.n)} | ${String(c.changed)} | ${String(c.all_held)} | ${String(c.some_made)} | ${String(c.some_held)} | ${f(a, 4)} | ${f(k, 4)} | ${f(a === null || k === null ? null : k - a, 4)} | ${f(meanRegret(rows, "manager"), 4)} |`,
+      );
+    }
+  }
+  lines.push(
+    "",
+    "| basis | the advice vs | season | team-weeks | regret: the advice | regret: the other rule | difference | identical lineups |",
+    "|---|---|---:|---:|---:|---:|---:|---:|",
+  );
+  for (const rp of replays)
+    for (const [b, from] of [
+      ["last_week", 2],
+      ["espn_projection", 1],
+    ] as const) {
+      const c = compareRegret(rp.rows, "keep_band", b, { from_week: from });
+      for (const x of [...c.by_season, c.pooled])
+        lines.push(
+          `| ${BASIS_LABEL(rp.basis)} | ${RULE_LABEL[b]} | ${x.season === null ? "**both**" : String(x.season)} | ${String(x.n)} | ${f(x.mean_a, 4)} | ${f(x.mean_b, 4)} | ${f(x.diff, 4)} | ${String(x.identical)} |`,
+        );
+    }
+  lines.push(
+    "",
+    "| basis | rule vs reference | head-to-head team-weeks | lineups differ | result flips | → a win | → a loss | share of differing | share of all |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+  );
+  for (const rp of replays) {
+    const d = didItMatter(rp.rows, "keep_band", "auto");
+    lines.push(
+      `| ${BASIS_LABEL(rp.basis)} | ${RULE_LABEL.keep_band} vs ${RULE_LABEL.auto} | ${String(d.n_h2h)} | ${String(d.n_changed)} | ${String(d.n_decisive)} | ${String(d.n_helped)} | ${String(d.n_hurt)} | ${pct(d.share_of_changed)} | ${pct(d.share_of_all)} |`,
+    );
+  }
   return lines.join("\n");
 }
 

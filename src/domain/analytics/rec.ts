@@ -112,29 +112,69 @@ export function pActiveForecastsOf(
 }
 
 /**
- * The alternative an E2 result offers the log (E12 `alternatives[]`): keeping the current lineup —
- * the no-op every lineup change is measured against (research 05 §8.1 #7). Empty when the
- * recommendation is already no move.
+ * The alternatives an E2 result offers the log (E12 `alternatives[]`), each scored against the call
+ * the rec logs: keeping the current lineup — the no-op every lineup change is measured against
+ * (research 05 §8.1 #7) — whenever the rec is a move; and E2's best-by-mean lineup with every change
+ * made (`recommended_lineup`) whenever the rec holds a coin flip (changelog R7-1: a no-move, or a
+ * move that holds some changes), so the retrospective prices what holding cost. Empty when the
+ * current lineup is already the best. A player `only_unlocked` leaves out of the two lineup views is
+ * locked, so he starts (or sits) in every option as he does in the rec.
  */
 export function lineupAlternatives(data: LineupData): Alternative[] {
-  if (data.no_move) return [];
-  const starters = data.current_lineup.filter((s) => s.slot !== "BE" && s.slot !== "IR");
-  const subjects: RecSubject[] = starters.map((s) => ({
+  const starting = (rows: LineupData["current_lineup"]) =>
+    rows.filter((s) => s.slot !== "BE" && s.slot !== "IR");
+  const shown = new Set(data.recommended_lineup.map((s) => s.player_id));
+  const lockedStarts = data.rec.subjects.filter(
+    (s) => s.role === "start" && s.player_id !== null && !shown.has(s.player_id),
+  );
+  const start = (s: { player_id: number; slot: string }): RecSubject => ({
     player_id: s.player_id,
     gsis_id: null,
     role: "start",
     slot: s.slot,
-  }));
+  });
+  const cur = starting(data.current_lineup);
+  const best = starting(data.recommended_lineup);
+  const ids = (xs: readonly { readonly player_id: number | null }[]): string =>
+    xs
+      .map((x) => x.player_id ?? -1)
+      .sort((a, b) => a - b)
+      .join(",");
+  const toldStarts = data.rec.subjects.filter(
+    (s) => s.role === "start" && s.player_id !== null && shown.has(s.player_id),
+  );
   const sd = sigmaOf(data.rec.distribution);
-  return [
-    {
+  const out: Alternative[] = [];
+  if (!data.no_move)
+    out.push({
       action: "keep the current lineup",
-      subjects,
+      subjects: [...cur.map(start), ...lockedStarts],
       point_estimate: data.e_points_before,
       distribution: normalDist(data.e_points_before, sd, data.basis),
       decision_metric_value: data.e_points_before,
-    },
-  ];
+    });
+  if (ids(best) !== ids(toldStarts)) {
+    const bestIds = new Set(best.map((s) => s.player_id));
+    out.push({
+      action: "set the best-by-mean lineup, every coin flip made",
+      subjects: [
+        ...best.map(start),
+        ...lockedStarts,
+        ...cur
+          .filter((s) => !bestIds.has(s.player_id))
+          .map((s): RecSubject => ({
+            player_id: s.player_id,
+            gsis_id: null,
+            role: "sit",
+            slot: s.slot,
+          })),
+      ],
+      point_estimate: data.e_points_after,
+      distribution: normalDist(data.e_points_after, sd, data.basis),
+      decision_metric_value: data.e_points_after,
+    });
+  }
+  return out;
 }
 
 /** The alternative an E5 result offers the log: no claim this run (priority kept). */

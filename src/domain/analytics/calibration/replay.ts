@@ -8,8 +8,9 @@
 // event ESPN's winProbability forecasts too) and E2's own `p_win_after` with its counterfactual
 // outcome (the recommended lineup against the opponent's best-by-mean lineup, as E2 assumes) — and,
 // since Stage C (changelog R6-2), both pairs' projected and realised totals and the opponent's id,
-// for the margin calibration. The decision is pre-week: nobody is locked. Pure; the caller supplies
-// the Dists (any model). New here.
+// for the margin calibration; and (changelog R7-1) the lineup E2 under `auto` tells the user to set
+// (`keep_band`: the manager's lineup with only the changes outside the coin-flip band made). The
+// decision is pre-week: nobody is locked. Pure; the caller supplies the Dists (any model). New here.
 import type { Clock } from "../../clock.js";
 import type { SeedingMode } from "../../../config/schema.js";
 import { slotClassOf } from "../../league/slots.js";
@@ -83,6 +84,10 @@ const keyOf = (ids: readonly number[]): string =>
 
 const recStarters = (d: LineupData): number[] => (d.rec.lineup ?? []).map((s) => s.player_id);
 
+/** The starters E2 tells the user to set (changelog R7-1: the rec's start subjects). */
+const toldStarters = (d: LineupData): number[] =>
+  d.rec.subjects.flatMap((s) => (s.role === "start" && s.player_id !== null ? [s.player_id] : []));
+
 /** +1 / −1 / 0 — who out-scored whom (to 0.01). */
 const sign = (a: number, b: number): -1 | 0 | 1 => {
   const d = round(a - b, 2);
@@ -131,6 +136,7 @@ export function replayStartSit(tw: StartSitTeamWeek): StartSitRow {
   const lineups: Record<StartSitRule, number[] | null> = {
     hindsight,
     auto: recStarters(auto),
+    keep_band: toldStarters(auto),
     mean: recStarters(mean),
     pwin: recStarters(pwin),
     espn_projection: espn,

@@ -89,6 +89,27 @@ describe("replayStartSit", () => {
     expect(r.player_sim_share).toBe(0);
   });
 
+  it("keep_band is what E2 under auto tells the user to set (R7-1): the lineup as played unless a change is decisive", () => {
+    // both bench upgrades are coin flips at position-level spreads: the advice keeps the manager's
+    // lineup while E2's assignment (auto) starts them
+    const tw = teamWeek();
+    const r = replayStartSit(tw);
+    expect(r.lineup_key.auto).not.toBe(r.lineup_key.manager);
+    expect(r.lineup_key.keep_band).toBe(r.lineup_key.manager);
+    expect(r.realised.keep_band).toBe(r.realised.manager);
+    // the WR the bench WR would replace now scores 1: that change is decisive and made, the RB coin
+    // flip still held
+    const players = tw.players.map((p) =>
+      p.player_id === 5 ? { ...p, points: { ...p.points, mean: 1, p10: 0.2, p90: 1.8 } } : p,
+    );
+    const d = replayStartSit({ ...tw, players });
+    const told = (d.lineup_key.keep_band ?? "").split(",").map(Number);
+    expect(told).toContain(11);
+    expect(told).not.toContain(10);
+    expect(d.lineup_key.keep_band).not.toBe(d.lineup_key.auto);
+    expect(d.realised.keep_band ?? 0).toBeLessThanOrEqual(d.realised.hindsight ?? 0);
+  });
+
   it("carries the head-to-head facts: as-played P(win), the auto counterfactual, the opponent's total", () => {
     const tw = teamWeek();
     const r = replayStartSit(tw);
