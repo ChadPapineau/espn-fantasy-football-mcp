@@ -1,6 +1,6 @@
 ---
 name: session-check
-description: Diagnoses and repairs this assistant's ESPN session in the user's ESPN league when tools stop working — reads whether cookies are stored, their age and when ESPN last accepted them, explains the error, walks through copying them in DevTools and running eff setup in a terminal, then verifies once. Never handles a cookie in chat.
+description: Diagnoses and fixes this assistant's ESPN session in the user's ESPN league when tools stop working — cookie state, what the error means, and re-running eff setup in a terminal. Never handles a cookie in chat.
 when_to_use: stopped working, can't see my team, 401, unauthorized, expired, cookie, espn_s2, SWID, not logged in, ESPN rejected, session valid, how old, eff setup, re-setup
 argument-hint: "[nothing]"
 disallowed-tools:

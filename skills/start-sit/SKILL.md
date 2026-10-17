@@ -1,7 +1,7 @@
 ---
 name: start-sit
-description: Decides start, sit and flex questions in the user's ESPN league — compares projected point ranges and the change in win chance (or in points, under points-only seeding), handles lock times, Questionable tags and ESPN's projection as a labelled cross-check, and once games start, late scratches, what can still change and live odds.
-when_to_use: who should I start, start or sit, flex, who do I play, is my lineup right, should I start X, Thursday night, Questionable, inactive, late scratch, game-time decision, who goes in, still change, live odds, my odds, am I going to win
+description: Decides start, sit and flex questions in the user's ESPN league from projected ranges and win chance, with lock times, Questionable tags and, once games start, late scratches, what can still change and live odds.
+when_to_use: who should I start, start or sit, flex, who do I play, is my lineup right, should I start X, Thursday night, Questionable, inactive, late scratch, game-time decision, who goes in, still change, my odds, am I going to win
 argument-hint: "[week] [player A or player B]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup

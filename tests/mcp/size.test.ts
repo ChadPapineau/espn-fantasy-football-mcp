@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { parseFrontmatter, readManifest } from "../../scripts/skills/_lib.mjs";
+import { SKILLS_LISTING_MAX, skillsListing } from "../../scripts/skills/check-skills.mjs";
 import {
   ANALYTICS_BUDGET_CHARS,
   RESULT_BUDGET_CHARS,
@@ -71,17 +73,33 @@ describe("the per-turn fixed cost (definitions)", () => {
     await c.close();
   });
 
-  it("the Skills listing (all 13 descriptions) fits 4 600 chars; prompts and resources lists are small", async () => {
-    let total = 0;
-    for (const s of PROMPT_SKILLS) {
-      const text = readFileSync(path.join(ROOT, "skills", s, "SKILL.md"), "utf8");
-      const m = /^description: (.*)$/m.exec(text);
-      expect(m, s).not.toBeNull();
-      total += (m?.[1] ?? "").length;
-    }
+  it("the Skills listing as Claude Code sends it (every model-invocable Skill's name, description and when_to_use) fits 4 600 chars; prompts and resources lists are small", async () => {
+    // the client's listing, built by the one implementation Lane 1 gates on (check-skills.mjs
+    // skillsListing) — never the descriptions alone, which leave out every when_to_use, name and
+    // separator the client sends (Stage C finding skills-listing-budget-undercounted)
     expect(PROMPT_SKILLS).toHaveLength(13);
-    console.log(`[size] Skills listing: ${String(total)} chars (13 Skills)`);
-    expect(total).toBeLessThanOrEqual(CEILINGS.skills);
+    const skills = PROMPT_SKILLS.map((s) => {
+      const { data } = parseFrontmatter(
+        readFileSync(path.join(ROOT, "skills", s, "SKILL.md"), "utf8"),
+      );
+      const { description, when_to_use: whenToUse } = data;
+      if (typeof description !== "string" || typeof whenToUse !== "string")
+        throw new Error(`skills/${s}/SKILL.md: description and when_to_use must be strings`);
+      return {
+        name: s,
+        description,
+        whenToUse,
+        userInvoked: data["disable-model-invocation"] === true,
+      };
+    });
+    const listed = skills.filter((s) => !s.userInvoked).length;
+    expect(listed).toBe(12);
+    const listing = skillsListing(readManifest(ROOT).plugin, skills);
+    console.log(
+      `[size] Skills listing as Claude Code sends it: ${String(listing.length)} chars (${String(listed)} model-invocable Skills)`,
+    );
+    expect(CEILINGS.skills).toBe(SKILLS_LISTING_MAX);
+    expect(listing.length).toBeLessThanOrEqual(CEILINGS.skills);
     const prompts = JSON.stringify((await client.listPrompts()).prompts).length;
     const resources = JSON.stringify((await client.listResources()).resources).length;
     const templates = JSON.stringify(

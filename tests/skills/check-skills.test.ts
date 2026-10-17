@@ -22,6 +22,7 @@ import {
   identifierFindings,
   jaccard,
   listingNote,
+  listingProblem,
   listingText,
   main,
   phrases,
@@ -151,7 +152,7 @@ describe("frontmatter (plan 09 §2, §5.1 item 1)", () => {
         t.edit(
           "skills/retro/SKILL.md",
           /^when_to_use: (.*)$/m,
-          `when_to_use: ${"review, ".repeat(160)}regret`,
+          `when_to_use: ${"review, ".repeat(200)}regret`,
         );
       },
       /max 1536/,
@@ -259,32 +260,20 @@ describe("frontmatter (plan 09 §2, §5.1 item 1)", () => {
     expect(e).toMatch(/stale generated file/);
   });
 
-  it("fails when the whole listing exceeds plan 07's 4 600 characters", () => {
+  it("fails when more listed Skills push the whole listing past plan 07's 4 600 characters", () => {
     const t = fresh();
-    for (const s of [
-      "apply",
-      "onboard",
-      "retro",
-      "session-check",
-      "start-sit",
-      "stream-kdef",
-      "waivers",
-      "weekly",
-    ]) {
-      t.edit(
-        `skills/${s}/SKILL.md`,
-        /^description: (.*)$/m,
-        `description: ${"z".repeat(DESCRIPTION_MAX - 30)} in the user's ESPN league`,
-      );
-    }
-    // eight descriptions of 350 = 2 800: under the ceiling — then add a ninth, tenth… as copies
     expect(errorsOf(t)).not.toMatch(/Skills listing/);
-    for (const n of ["a1", "a2", "a3", "a4", "a5", "a6"])
+    // three more model-invocable Skills (copies of retro): every one adds its listed line
+    for (const n of ["a1", "a2", "a3"])
       t.write(
         `skills/zz-${n}/SKILL.md`,
         t.read("skills/retro/SKILL.md").replace("name: retro", `name: zz-${n}`),
       );
-    expect(errorsOf(t)).toMatch(new RegExp(`ceiling ${String(SKILLS_LISTING_MAX)}`));
+    expect(errorsOf(t)).toMatch(
+      new RegExp(
+        `Skills listing Claude Code .* over the 15 model-invocable Skill\\(s\\) \\(plan 07 §5\\.1 \\[A-4\\] ceiling ${String(SKILLS_LISTING_MAX)}\\), over by \\d+`,
+      ),
+    );
   });
 });
 
@@ -309,13 +298,13 @@ describe("the Skills listing as Claude Code sends it (Stage C finding skills-lis
         return `- ${plugin}:${s.name}: ${t.length > 1536 ? `${t.slice(0, 1535)}…` : t}`;
       })
       .join("\n");
-  /** The committed bundle read straight from the files, with the finding's own regexes. */
-  const bundle = (): Listed[] =>
-    readdirSync(path.join(ROOT, "skills"))
-      .filter((s) => existsSync(path.join(ROOT, "skills", s, "SKILL.md")))
+  /** A bundle read straight from the files, with the finding's own regexes. */
+  const bundle = (root = ROOT): Listed[] =>
+    readdirSync(path.join(root, "skills"))
+      .filter((s) => existsSync(path.join(root, "skills", s, "SKILL.md")))
       .sort()
       .map((s) => {
-        const text = readFileSync(path.join(ROOT, "skills", s, "SKILL.md"), "utf8");
+        const text = readFileSync(path.join(root, "skills", s, "SKILL.md"), "utf8");
         return {
           name: s,
           description: /^description: (.*)$/m.exec(text)?.[1] ?? "",
@@ -325,12 +314,25 @@ describe("the Skills listing as Claude Code sends it (Stage C finding skills-lis
       });
   /** Code points — what the descriptions-only count and the old per-Skill rule summed. */
   const codePoints = (s: string): number => Array.from(s).length;
+  /** Every Skill's description, summed — the quantity the old gate measured instead of the listing. */
+  const descriptionsAlone = (root = ROOT): number =>
+    bundle(root).reduce((n, s) => n + codePoints(s.description), 0);
   const noteOf = (root: string): string => {
     const notes = checkSkills({ root, scan: false }).notes.filter((n) =>
       n.includes("Skills listing"),
     );
     expect(notes).toHaveLength(1);
     return notes[0] ?? "";
+  };
+  const size = (n: string): number => Number(/is (\d+) chars/.exec(n)?.[1]);
+  /** The run's listing errors only (a padded phrase may also trip the trigger checks). */
+  const listingErrors = (t: TempRepo): string[] =>
+    checkSkills({ root: t.root, scan: false }).errors.filter((e) => e.includes("Skills listing"));
+  /** Pad retro's when_to_use so the listing grows by exactly `by` chars (a new phrase when it can). */
+  const padRetro = (t: TempRepo, by: number): void => {
+    if (by <= 0) return;
+    const pad = by >= 3 ? `, ${"q".repeat(by - 2)}` : "q".repeat(by);
+    t.edit("skills/retro/SKILL.md", /^when_to_use: .*$/m, `$&${pad}`);
   };
 
   it("listingText: when_to_use is listed after the description and costs characters like it; the cut is at 1 536 UTF-16 units", () => {
@@ -379,7 +381,7 @@ describe("the Skills listing as Claude Code sends it (Stage C finding skills-lis
     );
   });
 
-  it("the committed bundle: the run reports the listing a client receives — every model-invocable Skill's description AND when_to_use, its name and separators — never the descriptions alone", () => {
+  it("the committed bundle: the listing a client receives — every model-invocable Skill's description AND when_to_use, its name and separators — fits plan 07's 4 600 chars", () => {
     const skills = bundle();
     expect(skills).toHaveLength(13);
     const listing = client("espn-fantasy-football", skills);
@@ -387,7 +389,6 @@ describe("the Skills listing as Claude Code sends it (Stage C finding skills-lis
     expect(listed.map((s) => s.name)).not.toContain("apply");
     expect(listed).toHaveLength(12);
     expect(listing.split("\n")).toHaveLength(12);
-    const descriptions = skills.reduce((n, s) => n + codePoints(s.description), 0);
     // the undercount the finding names: every listed when_to_use is in the listing, after its
     // description, with the Skill's plugin-qualified name in front
     for (const s of listed) {
@@ -396,35 +397,62 @@ describe("the Skills listing as Claude Code sends it (Stage C finding skills-lis
         `- espn-fantasy-football:${s.name}: ${s.description} - ${s.whenToUse ?? ""}`,
       );
     }
-    expect(listing.length).toBeGreaterThan(descriptions);
+    expect(listing.length).toBeGreaterThan(descriptionsAlone());
+    // the budget itself: the listing as sent, never the descriptions alone, is under the ceiling
+    expect(listing.length).toBeLessThanOrEqual(SKILLS_LISTING_MAX);
     const note = noteOf(ROOT);
-    expect(note).toContain(
-      `Claude Code ${CLIENT_LISTING_VERSION} sends every turn is ${String(listing.length)} chars over the 12 model-invocable Skill(s)`,
+    expect(note).toBe(
+      `the Skills listing Claude Code ${CLIENT_LISTING_VERSION} sends every turn is ${String(listing.length)} chars over the 12 model-invocable Skill(s) (plan 07 §5.1 [A-4] ceiling ${String(SKILLS_LISTING_MAX)}), headroom ${String(SKILLS_LISTING_MAX - listing.length)}`,
     );
-    expect(note).toContain(`descriptions alone: ${String(descriptions)}`);
-    expect(note).toContain(`ceiling ${String(SKILLS_LISTING_MAX)}`);
-    if (listing.length > SKILLS_LISTING_MAX)
-      expect(note).toContain(`OVER by ${String(listing.length - SKILLS_LISTING_MAX)}`);
-    else expect(note).not.toMatch(/OVER/);
+    expect(checkSkills({ root: ROOT, scan: false }).errors.join("\n")).not.toMatch(
+      /Skills listing/,
+    );
     console.log(
-      `[size] Skills listing as Claude Code sends it: ${String(listing.length)} chars (12 Skills; descriptions alone ${String(descriptions)})`,
+      `[size] Skills listing as Claude Code sends it: ${String(listing.length)} chars (12 Skills; ceiling ${String(SKILLS_LISTING_MAX)})`,
     );
   });
 
-  it("a longer when_to_use grows the reported listing by exactly its length, the descriptions-only figure not at all (the regression)", () => {
+  it("the gate measures the listing as sent: one char over the ceiling fails though the descriptions alone fit; at the ceiling it passes (the regression)", () => {
+    const base = size(noteOf(ROOT));
+    expect(base).toBeLessThanOrEqual(SKILLS_LISTING_MAX);
+    // one char over, all of it when_to_use: the descriptions-only gate passed this bundle
+    const t = fresh();
+    padRetro(t, SKILLS_LISTING_MAX + 1 - base);
+    expect(size(noteOf(t.root))).toBe(SKILLS_LISTING_MAX + 1);
+    expect(descriptionsAlone(t.root)).toBeLessThanOrEqual(SKILLS_LISTING_MAX);
+    expect(descriptionsAlone(t.root)).toBe(descriptionsAlone());
+    expect(listingErrors(t)).toEqual([
+      `the Skills listing Claude Code ${CLIENT_LISTING_VERSION} sends every turn is ${String(SKILLS_LISTING_MAX + 1)} chars over the 12 model-invocable Skill(s) (plan 07 §5.1 [A-4] ceiling ${String(SKILLS_LISTING_MAX)}), over by 1: shorten the model-invocable Skills' description / when_to_use frontmatter (the ceiling is never raised)`,
+    ]);
+    const r = runScript("check-skills.mjs", ["--root", t.root, "--no-scan"], deny.env);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("over by 1: shorten");
+    t.cleanup();
+    // exactly at the ceiling: no listing problem
+    const u = fresh();
+    padRetro(u, SKILLS_LISTING_MAX - base);
+    expect(size(noteOf(u.root))).toBe(SKILLS_LISTING_MAX);
+    expect(listingErrors(u)).toEqual([]);
+    expect(noteOf(u.root)).toMatch(/, headroom 0$/);
+  });
+
+  it("a longer when_to_use grows the listing by exactly its length; a disable-model-invocation Skill costs nothing", () => {
     const before = noteOf(ROOT);
     const t = fresh();
     t.edit("skills/retro/SKILL.md", /^when_to_use: .*$/m, `$&, ${"q".repeat(498)}`);
-    const after = noteOf(t.root);
-    const size = (n: string): number => Number(/is (\d+) chars/.exec(n)?.[1]);
-    const desc = (n: string): number => Number(/descriptions alone: (\d+)/.exec(n)?.[1]);
-    expect(size(after) - size(before)).toBe(500);
-    expect(desc(after)).toBe(desc(before));
+    expect(size(noteOf(t.root)) - size(before)).toBe(500);
+    expect(listingErrors(t)).toHaveLength(size(before) + 500 > SKILLS_LISTING_MAX ? 1 : 0);
     t.cleanup();
-    // a disable-model-invocation Skill costs nothing, whatever its frontmatter
+    // apply is never listed, whatever its frontmatter: no listing growth and no listing error
     const u = fresh();
     u.edit("skills/apply/SKILL.md", /^when_to_use: .*$/m, `$&, ${"q".repeat(498)}`);
+    u.edit(
+      "skills/apply/SKILL.md",
+      /^description: (.*)$/m,
+      `description: ${"a".repeat(DESCRIPTION_MAX - 26)} in the user's ESPN league`,
+    );
     expect(size(noteOf(u.root))).toBe(size(before));
+    expect(listingErrors(u)).toEqual([]);
   });
 
   it("the per-Skill cap counts the separator and UTF-16 units, exactly where the client cuts", () => {
@@ -458,16 +486,27 @@ describe("the Skills listing as Claude Code sends it (Stage C finding skills-lis
     expect(errorsOf(v)).not.toMatch(/as Claude Code lists it/);
   });
 
-  it("listingNote names the overrun and what closes it, and nothing when the listing fits", () => {
-    const fits = listingNote("x".repeat(SKILLS_LISTING_MAX), [{}, { userInvoked: true }], 100);
-    expect(fits).toContain(
-      `is ${String(SKILLS_LISTING_MAX)} chars over the 1 model-invocable Skill(s)`,
+  it("listingNote gives the size, ceiling and headroom; listingProblem is null up to the ceiling and names the overrun and its fix past it", () => {
+    expect(SKILLS_LISTING_MAX).toBe(4600);
+    const at = "x".repeat(SKILLS_LISTING_MAX);
+    const fits = listingNote(at, [{}, { userInvoked: true }]);
+    expect(fits).toBe(
+      `the Skills listing Claude Code ${CLIENT_LISTING_VERSION} sends every turn is 4600 chars over the 1 model-invocable Skill(s) (plan 07 §5.1 [A-4] ceiling 4600), headroom 0`,
     );
-    expect(fits).not.toMatch(/OVER/);
-    const over = listingNote("x".repeat(SKILLS_LISTING_MAX + 7), [{}, {}], 100);
-    expect(over).toContain("OVER by 7");
-    expect(over).toContain("skills-listing-budget-undercounted");
-    expect(over).toContain("never raised");
+    expect(listingProblem(at, [{}, { userInvoked: true }])).toBeNull();
+    expect(listingProblem("", [])).toBeNull();
+    const past = "x".repeat(SKILLS_LISTING_MAX + 7);
+    expect(listingNote(past, [{}, {}])).toMatch(
+      /over the 2 model-invocable Skill\(s\).*, over by 7$/,
+    );
+    const problem = listingProblem(past, [{}, {}]) ?? "";
+    expect(problem).toContain("over by 7: shorten");
+    expect(problem).toContain("description / when_to_use");
+    expect(problem).toContain("never raised");
+    // UTF-16 units, as the client counts: one football is two
+    const ball = `${"x".repeat(SKILLS_LISTING_MAX - 1)}\u{1F3C8}`;
+    expect(codePoints(ball)).toBe(SKILLS_LISTING_MAX);
+    expect(listingProblem(ball, [{}])).toContain("over by 1");
   });
 });
 

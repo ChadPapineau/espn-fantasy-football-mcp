@@ -1,7 +1,7 @@
 ---
 name: onboard
-description: Sets up and checks this assistant in the user's ESPN league — restates the scoring, roster, waiver and playoff format in plain English, confirms which team is the user's, checks the scoring engine against ESPN's own points per stat, records the seeding reading, and reports unverified settings, the session state and read-only mode.
-when_to_use: set up, onboard, connect my league, which team am I, scoring settings, league rules, did the settings change, is the scoring right, can I trust these numbers, half-PPR, seeding
+description: Sets up this assistant in the user's ESPN league — restates the scoring, roster, waiver and playoff format, confirms the user's team, checks the scoring engine against ESPN's points and records the seeding reading.
+when_to_use: set up, connect my league, which team am I, scoring settings, league rules, did the settings change, is the scoring right, can I trust these numbers, half-PPR, seeding
 argument-hint: "[nothing — reads the configured league]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup

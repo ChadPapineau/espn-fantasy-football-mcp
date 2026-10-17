@@ -1,6 +1,6 @@
 ---
 name: injury-cascade
-description: Analyses the fantasy impact of an NFL injury or absence in the user's ESPN league — expected weeks missed, which teammates gain targets, carries and red-zone work and how likely each role holds, whether the official report confirms it, and what to claim, start or move to IR, with ESPN's IR rules applied.
+description: Analyses an NFL injury or absence in the user's ESPN league — weeks missed, which teammates gain targets and carries, whether the official report confirms it, and what to claim, start or move to IR.
 when_to_use: injured, injury, hurt, torn, tore his, who benefits, next man up, suspended, out for weeks, broken
 argument-hint: "[the injured player]"
 disallowed-tools:

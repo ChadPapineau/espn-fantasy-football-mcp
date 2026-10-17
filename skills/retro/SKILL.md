@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Reviews last week's recommendations in the user's ESPN league once scores are final — which calls were followed, which were right for the right reasons, regret against last week's points and ESPN's projection, calibration of the win and start/sit probabilities, and how this server's projections compared with ESPN's.
+description: Reviews last week's advice in the user's ESPN league — which calls were followed and right for the right reasons, regret against ESPN's projection, and calibration of the win and start/sit odds.
 when_to_use: how did we do, review last week, were you right, calibration, recap my week, regret, was ESPN right, how did the advice do
 argument-hint: "[week]"
 disallowed-tools:

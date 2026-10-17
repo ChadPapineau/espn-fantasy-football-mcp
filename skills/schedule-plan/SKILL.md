@@ -1,6 +1,6 @@
 ---
 name: schedule-plan
-description: Plans the user's roster across bye weeks and the fantasy playoffs in the user's ESPN league — lineup holes and the cheapest fixes, playoff and first-round-bye odds, the seed race under the league's seeding rule, what one more win or a block of points is worth right now, and how little playoff-week matchups can be trusted.
+description: Plans the roster across byes and the fantasy playoffs in the user's ESPN league — lineup holes and the cheapest fixes, playoff and first-round-bye odds, the seed race, and what a win or a block of points is worth.
 when_to_use: bye week, byes, playoff odds, am I making the playoffs, playoff seed, first-round bye, wins or points, weeks 15-17, plan ahead, down the stretch, coast, playoff schedule
 argument-hint: "[weeks, or a playoff question]"
 disallowed-tools:

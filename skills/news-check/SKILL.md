@@ -1,7 +1,7 @@
 ---
 name: news-check
-description: Reconciles a fantasy-football news item, ESPN outlook paragraph, beat report or rumour with usage and official-report data — what the numbers say, how reliable the source is, whether a structured ESPN field contradicts the text, what would confirm it, and whether it changes a start/sit, claim or trade in the user's ESPN league.
-when_to_use: I heard, reports say, tweet, beat writer, is it true, rumor, rumour, ESPN says, outlook, story vs numbers
+description: Checks a news item, ESPN outlook, beat report or rumour against usage and the official report — how reliable the source is and whether it changes a start/sit, claim or trade in the user's ESPN league.
+when_to_use: I heard, reports say, tweet, beat writer, is it true, rumor, ESPN says, outlook, story vs numbers
 argument-hint: "[the claim, its source and when it appeared]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup

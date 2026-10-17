@@ -1,6 +1,6 @@
 ---
 name: weekly
-description: Produces the weekly game plan in the user's ESPN league — last week's result, this week's matchup and lineup with the win chance, the waiver claim list before the run and the free-agent scramble after it, K and D/ST streaming, injuries and byes, and a league activity digest. Use for a weekly plan, briefing or check-in.
+description: Produces the weekly game plan in the user's ESPN league — last week's result, this week's matchup and lineup with the win chance, waiver claims, K and D/ST streams, injuries, byes and league activity.
 when_to_use: weekly plan, game plan, briefing, prep me, what should I do this week, what happened in my league, waivers cleared, weekly check-in
 argument-hint: "[week]"
 disallowed-tools:

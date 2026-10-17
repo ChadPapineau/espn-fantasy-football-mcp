@@ -1,7 +1,7 @@
 ---
 name: trade
-description: Evaluates a fantasy-football trade in the user's ESPN league — an offer received, one being considered, or a partner search. Rest-of-season value change for both rosters with intervals, each side's playoff and bye odds under the league's seeding rule, the implied drop, veto risk and counter-offers, with the trade deadline stated.
-when_to_use: trade, trade offer, is it fair, 2-for-1, buy low, sell high, counter-offer, who should I trade with, trade deadline, trade partner
+description: Evaluates a trade in the user's ESPN league — an offer received or considered, or a partner search — with rest-of-season value for both rosters, playoff odds under the seeding rule, counter-offers and the deadline.
+when_to_use: trade, is it fair, 2-for-1, buy low, sell high, counter-offer, who should I trade with, trade deadline
 argument-hint: "[the offer, or the position to trade for]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup

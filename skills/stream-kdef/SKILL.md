@@ -1,7 +1,7 @@
 ---
 name: stream-kdef
-description: Picks the kicker or team defense to start or stream in the user's ESPN league from implied team totals, spreads, weather, opponent profiles and the league's own K and D/ST scoring brackets, with a two-week look-ahead, a hold-or-stream verdict, and whether the move is a waiver claim or a free-agent add after the run.
-when_to_use: stream, streaming, kicker, defense, D/ST, DST, which K, which defense, hold my kicker
+description: Picks the kicker or defense to start or stream in the user's ESPN league from implied totals, weather, opponents and the league's K and D/ST scoring, with a two-week look-ahead and a hold-or-stream verdict.
+when_to_use: stream, kicker, defense, D/ST, DST, which K, which defense, hold my kicker
 argument-hint: "[K | D/ST]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup

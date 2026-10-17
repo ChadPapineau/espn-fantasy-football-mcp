@@ -1,7 +1,7 @@
 ---
 name: roster-audit
-description: Audits the whole roster rest-of-season in the user's ESPN league — what each bench spot is for, handcuff and stash values, who is droppable, the IR slots (who is eligible, whether a healed player makes the roster invalid and blocks adds, the forced drop, when to activate), and adds remaining.
-when_to_use: rate my team, rate my roster, roster audit, droppable, IR spot, IR eligible, roster invalid, can't add players, handcuff, stash, rest of season, backup QB
+description: Audits the roster rest-of-season in the user's ESPN league — what each bench spot is for, handcuffs and stashes, who is droppable, IR eligibility, and whether a healed player makes the roster invalid.
+when_to_use: rate my team, rate my roster, droppable, IR spot, IR eligible, roster invalid, can't add players, handcuff, stash, rest of season, backup QB
 argument-hint: "[competing or eliminated]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup
