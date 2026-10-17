@@ -3,10 +3,11 @@
 // ports): the CredentialAuthority over the store.sqlite `credential_state` row (plan 03 §1.1 step 4 —
 // never a keychain read at construction; the secret is read lazily on the first cookie-bearing call),
 // probe access for espn_check_auth (plan 02 §2.1), the EspnProvider (cache, limiter, drift, the
-// scoring translator; fixture mode swaps in the recorded fixtures and never holds a credential —
-// plan 05 §3.1 step 5), the status/auth ports G1/G2 read, the package texts (Skill bodies for the
-// prompts, the tool-output cheat-sheet), and the PHASE W SEAM registration-gate verdict (never all
-// hold). EFF_TEST_STUBS turns any network call or keychain access into exit 99 (plan 05 §4.2); in
+// scoring translator, the stored pro schedule every player's bye week comes from; fixture mode swaps
+// in the recorded fixtures and never holds a credential — plan 05 §3.1 step 5), the status/auth
+// ports G1/G2 read (the drift view with its additive list), the package texts (Skill bodies and the
+// references they link, for the prompts — plan 09 §6; the tool-output cheat-sheet), and the PHASE W
+// SEAM registration-gate verdict (never all hold). EFF_TEST_STUBS turns any network call or keychain access into exit 99 (plan 05 §4.2); in
 // fixture mode it also turns the samplers' CPU deadline off (the test-only switch — plan 10 A8a's
 // injection invariance must not flake on a slow runner; changelog R5).
 // Fixture mode's guard (plan 05 §3.1 step 5, §4.4 "fixture mode unreachable with a stored
@@ -61,6 +62,7 @@ import type {
   ServerTexts,
   TunedOverrides,
 } from "../mcp/services.js";
+import { referenceTextsFor } from "../mcp/prompts/index.js";
 import { createEspnProvider, type EspnProvider, type FetchLike } from "../providers/espn/index.js";
 import type { LeagueRef } from "../providers/platform.js";
 import type { Store } from "../store/types.js";
@@ -127,6 +129,13 @@ export function loadTexts(root: string): ServerTexts {
     skills,
     tool_outputs: readPackageText(
       path.join(root, "skills", "_shared", "references", "tool-outputs.md"),
+    ),
+    // the references each prompt's body links (orient.md's Step 0 routing, onboard-log-entry.md):
+    // a prompt-only client cannot open a file, so the prompt carries them (plan 09 §6; Stage C
+    // finding prompts-skill-references-unreachable). referenceTextsFor reads only one-component
+    // names under skills/<name>/references/, each once, through the same bounded package read
+    references: referenceTextsFor(skills, (skill, file) =>
+      readPackageText(path.join(dir, skill, "references", file)),
     ),
   };
 }
@@ -445,6 +454,9 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     })(),
     ttlContext: ttlContextFrom(store, config.season, clock),
     periodProvisional: periodProvisionalFrom(store),
+    // every PlatformPlayer's bye week (plan 07 A4/B1/C2; the E4–E7/E11 weekly values zero it):
+    // nothing else supplies it (Stage C finding normalize-bye-week-never-populated)
+    proSchedule: store.datasets.proSchedule,
     log: logger,
   });
 
@@ -491,6 +503,9 @@ export function buildServices(args: BuildServicesArgs): Wiring {
       last_probe_at: row.last_probe_at,
       manifest_hash: row.manifest_hash,
       diff: parseDiffs(row.diff_json).slice(0, 30),
+      // the additive-drift list (plan 07 §4.1 espn-ff://status/drift): an `additive` status names its
+      // paths (Stage C finding status-drift-diff-unwrapped-strings)
+      additive: parseDiffs(row.additive_json).slice(0, 30),
     };
   };
 

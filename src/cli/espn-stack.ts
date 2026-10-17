@@ -170,6 +170,9 @@ export function buildEspnStack(
     observer: opts.observer,
     ...(opts.probeObserver === undefined ? {} : { probeObserver: opts.probeObserver }),
     ...(observations === undefined ? {} : { observations }),
+    // every PlatformPlayer's bye week (the jobs' snapshots and the CLI read the same players the
+    // server does; Stage C finding normalize-bye-week-never-populated)
+    proSchedule: store.datasets.proSchedule,
     log,
   });
   return {
