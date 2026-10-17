@@ -109,7 +109,6 @@ espn-fantasy-football-mcp/
 ├── skills/                      # the Skills bundle (product planner / skills researcher own content)
 │   ├── _shared/references/      # generated into each Skill by scripts/build-skills.ts (plan 09 K5)
 │   └── <skill-name>/SKILL.md (+ references/, evals/)
-├── evals/                       # `claude plugin eval` suite — Lane 2 (plan 09 §4 — T-01)
 ├── scripts/                     # zero-token tooling (plan 06): record-fixture (incl. --public), scrub-fixture, gen-manifest,
 │   │                            # gen-config-docs, gen-tool-docs, check-commits, check-licenses, check-no-scripts,
 │   │                            # check-mermaid, check-skills (incl. `claude plugin validate --strict`), check-identifiers,
@@ -122,7 +121,7 @@ espn-fantasy-football-mcp/
     └── PULL_REQUEST_TEMPLATE.md # checklist: no identifiers, tests, docs, changelog
 ```
 
-`dist/` is built, git-ignored (already), and is what the launch config points at — in the runtime install, outside any file-provider directory (plan 03 §4; ADV OBJ-10). Fixture file names avoid the `.gitignore`'s secret-shaped globs (`*cookie*`, `*credentials*.json`, `*token*.json`) by construction — a test asserts every fixture path is tracked.
+`dist/` is built, git-ignored (already), and is what the launch config points at — in the runtime install, outside any file-provider directory (plan 03 §4; ADV OBJ-10). The Skills' Lane 2 suite is built there too and never committed: `dist/plugin-evals/`, from each Skill's `evals/` (plan 09 §4, §5.2; Stage C — no `evals/` directory at the root). Fixture file names avoid the `.gitignore`'s secret-shaped globs (`*cookie*`, `*credentials*.json`, `*token*.json`) by construction — a test asserts every fixture path is tracked.
 
 ---
 

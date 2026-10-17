@@ -45,7 +45,7 @@ Standard carried over from the sibling [V-sib 05]: **everything ships with tests
 | Live probe | `eff probe` | the CLI against the public probe league, else the user's league | never in CI (launchd) | keyless when a public probe league is configured (plan 06 §1.2) | no |
 | Model-driven evals | `tests/evals/` | mcp-builder `scripts/evaluation.py` | no — manual, pre-release | no (fixture mode) | **yes** |
 | Skills Lane 1 (structural + fixture dry run + injection invariance) — T-10 | `skills/*/evals/`, `scripts/check-skills.ts` | vitest + the built binary in fixture mode (plan 09 §5.1) | yes, every push (`docs.yml`) | no | no |
-| Skills Lane 2 (model-graded) — T-10 | `evals/` | `claude plugin eval` with mocks from `fx-10h` (plan 09 §5.2) | no — manual, pre-release | no (mocks) | **yes** |
+| Skills Lane 2 (model-graded) — T-10 | `dist/plugin-evals/` (a build output, never committed: `npm run build:plugin-evals` from `skills/*/evals/`) | `claude plugin eval` over eval plugins whose one server is the built binary in fixture mode on the case's `fx-10h` variant (plan 09 §5.2) | no — manual, pre-release | no (fixture mode) | **yes** |
 
 ---
 

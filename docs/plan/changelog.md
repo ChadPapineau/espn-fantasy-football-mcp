@@ -553,6 +553,11 @@ These are not rulings. They record what Stage C built where the plan names an ar
   - On every push, `tests/e2e/model-evals.test.ts` re-derives every answer from the built server under both toolsets, started as the documented run starts it, and refuses an answer that is not unique. `tests/evals/read-only.test.ts` holds the file's format.
   - The run (≥ 8/10) has not happened: it is manual, comes before a release and spends model tokens.
   - Three things are open for the owner before the runner can be trusted, in `docs/evals/model-driven-evals.md` → *Running it*: it needs an Anthropic API key, and CLAUDE.md allows free services only; it needs a current model id; and read statically, it has a defect in how it encodes tool results.
+- **Lane 2's suite and its runner** · plan 04 §1, plan 05 §1, plan 09 §4, §5.1 items 6 and 9, §5.2, plan 10 B15 · The plan put the suite in a committed `evals/` directory at the root, answered by mocks, and ran it with `claude plugin eval .` and a `--trust-plugin` option. No such directory, mock or option exists (Stage C finding docs-trust-plugin-flag-rejected).
+  - The suite is a build output and is never committed. `npm run build:plugin-evals` (`scripts/skills/build-plugin-evals.mjs`, built in B2a) writes it to `dist/plugin-evals/` from every Skill's `evals/`.
+  - The harness of Claude Code 2.1.238 has no MCP mock layer. So the "mocks" are eval plugins: each has one server, the built binary in fixture mode on the case's `fx-10h` variant, with no network and no cookie.
+  - The runner is the command the suite's generated `README.md` gives. Its target is that directory, and it adds `--allow-tools` for the plugin's tools and `--no-publish`. The CLI answers `--trust-plugin` with "unknown option" and exit 1.
+  - `tests/lint/plugin-eval-docs.test.ts` already held the README to the build and to the pinned CLI's options. It now holds the plan's runner, its layout trees and its Lane 2 statements in the same way.
 
 ## Reviews (re-run on every version bump of the named dependency)
 
