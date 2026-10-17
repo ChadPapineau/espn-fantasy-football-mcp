@@ -61,11 +61,12 @@ export const RECORD_JSON_MAX = 1024 * 1024;
  * Records one league-week holds (every kind; a deduplicated re-record adds none). Normal use is 5–20
  * a week; the log is never pruned (T-07), and before this bound a week grew with every record E12
  * accepted (400 records in one week: E13 stalled the main loop 71 ms). At the bound — about 2 MB —
- * `forWeek`'s one statement plus a parse per row costs ≈ 11 ms (p95 ≈ 18 ms on the development Mac;
- * tests/store/reclog-week.perf.test.ts holds the p95 under 25 ms). The bound caps ONE week only: a
- * caller that read every week up to the scored one in one turn still stalled in proportion to the
- * season's log (17 full weeks: ≈ 240 ms), so an analytics caller reads the earlier weeks' existence
- * with `weekCounts` and a week's records with `forWeekPaced`, whose turns hold one page each.
+ * `forWeek` (the week's keys, its rows by primary key, a parse per row) costs ≈ 5 ms (p95 ≈ 9 ms
+ * on the development Mac; tests/store/reclog-week.perf.test.ts holds the p95 under 25 ms). The
+ * bound caps ONE week only: a caller that read every week up to the scored one in one turn still
+ * stalled in proportion to the season's log (17 full weeks: ≈ 80–240 ms), so an analytics caller
+ * reads the earlier weeks' existence with `weekCounts` and a week's records with `forWeekPaced`,
+ * whose turns hold one page each.
  */
 export const RECORDS_PER_WEEK_MAX = 100;
 /**

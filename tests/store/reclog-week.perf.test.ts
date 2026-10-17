@@ -1,11 +1,12 @@
 // reclog-week.perf.test.ts — a full league-week of the recommendation log reads within the stall
 // bound (plan 03 §1.2: main-loop stall ≤ 50 ms; src/store/repos/reclog.ts RECORDS_PER_WEEK_MAX,
-// RECORD_WEEK_BYTES_MAX). Stage C, reclog-retrospective-unbounded-read: `forWeek` is one synchronous
-// statement plus a parse per row, and before the bound a week grew with every record E12 accepted.
-// At the bound — 100 records at the tool's 20 000-char input cap, about 2 MB, the most a week can
-// hold — the read keeps its p95 under 25 ms (half the whole stall budget; ≈ 18 ms measured on the
-// development Mac) and the week cannot grow past it. Runs in the `process` project (wall-clock
-// budgets never run under coverage).
+// RECORD_WEEK_BYTES_MAX). Stage C, reclog-retrospective-unbounded-read: `forWeek` reads a whole week
+// synchronously (its keys, then its rows by primary key, a parse per row), and before the bound a
+// week grew with every record E12 accepted. At the bound — 100 records at the tool's 20 000-char
+// input cap, about 2 MB, the most a week can hold — the read keeps its p95 under 25 ms (half the whole
+// stall budget; ≈ 9 ms measured on the development Mac) and the week cannot grow past it. That a
+// week's read never grows with the rest of the log is tests/store/reclog-scale.perf.test.ts's. Runs
+// in the `process` project (wall-clock budgets never run under coverage).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RecordRecommendationInput } from "../../src/domain/reclog/types.js";
 import {
