@@ -20,7 +20,7 @@ import { slotClassOf } from "../league/slots.js";
 import type { BareText, LeagueRules, RosterSlots, UntrustedText, Week } from "../league/types.js";
 import { isIrEligible } from "../league/types.js";
 import { P_ACTIVE_BY_STATUS } from "./constants.js";
-import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
+import { loopPacer, RunBudget, runCooperative, type Pacer } from "./cooperative.js";
 import { AnalyticsError, ensure } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
@@ -99,12 +99,21 @@ export interface TradeRequest {
   readonly rng: Rng;
   readonly pacer?: Pacer;
   readonly inputs?: readonly InputFreshness[];
+  /**
+   * The CPU (ms) the call has left for this engine (plan 07 E1 [A-7]: one 8 s deadline per call;
+   * Stage C finding analytics-cpu-deadline-per-run): the Monte Carlo, the counter-offers and the
+   * partner search share it (RunBudget); past it the answer is built from what was evaluated,
+   * said in a `partial:` warning. null = off (the test-only switch); absent = COOPERATIVE.deadlineMs.
+   */
+  readonly deadline_ms?: number | null;
 }
 
 /** E6's outcome. */
 export interface TradeOutcome {
   readonly data: TradeData;
   readonly warnings: readonly string[];
+  /** The CPU deadline stopped a run: the answer is built from what was evaluated (said). */
+  readonly partial?: boolean;
 }
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
@@ -531,7 +540,8 @@ export async function analyzeTrade(req: TradeRequest): Promise<TradeOutcome> {
       ),
     );
   const pacer = req.pacer ?? loopPacer(req.clock);
-  return req.offer !== undefined && req.offer !== null
+  const budget = new RunBudget(req.deadline_ms);
+  const out = await (req.offer !== undefined && req.offer !== null
     ? evaluateOffer(
         req,
         req.offer,
@@ -542,6 +552,7 @@ export async function analyzeTrade(req: TradeRequest): Promise<TradeOutcome> {
         assumptions,
         warnings,
         pacer,
+        budget,
       )
     : searchPartners(
         req,
@@ -552,7 +563,9 @@ export async function analyzeTrade(req: TradeRequest): Promise<TradeOutcome> {
         assumptions,
         warnings,
         pacer,
-      );
+        budget,
+      ));
+  return { ...out, partial: out.warnings.some((w) => w.startsWith("partial:")) };
 }
 
 async function evaluateOffer(
@@ -565,6 +578,7 @@ async function evaluateOffer(
   assumptions: Assumption[],
   warnings: string[],
   pacer: Pacer,
+  budget: RunBudget,
 ): Promise<TradeOutcome> {
   const partner = req.teams.find((t) => t.team_id === offer.partner_team_id);
   if (partner === undefined || partner.team_id === req.me.team_id)
@@ -600,7 +614,7 @@ async function evaluateOffer(
   const rng = req.rng.fork("trade");
   const sMe: number[] = [];
   const sP: number[] = [];
-  await runCooperative(
+  const mc = await runCooperative(
     nSims,
     () => {
       const mult = new Map<number, number>();
@@ -615,8 +629,13 @@ async function evaluateOffer(
       sMe.push(dm);
       sP.push(dp);
     },
-    { pacer, deadlineMs: null },
+    { pacer, deadlineMs: budget.left() },
   );
+  budget.spend(mc);
+  if (mc.partial)
+    warnings.push(
+      `partial: ${String(mc.completed)} of ${String(nSims)} trade samples before the CPU deadline`,
+    );
   const deltaMe = distFromSamples(sMe, "position_cv", me.delta);
   const deltaPartner = distFromSamples(sP, "position_cv", pe.delta);
 
@@ -624,7 +643,19 @@ async function evaluateOffer(
   const spans = deltaMe.p10 <= 0 && deltaMe.p90 >= 0;
   const counters =
     spans || deltaMe.p90 < 0
-      ? await counterOffers(req, ctx, partner, offer, wMe, wP, deltaMe, deltaPartner, pacer)
+      ? await counterOffers(
+          req,
+          ctx,
+          partner,
+          offer,
+          wMe,
+          wP,
+          deltaMe,
+          deltaPartner,
+          pacer,
+          budget,
+          warnings,
+        )
       : [];
   const verdict: TradeEvaluationData["verdict"] = spans
     ? "fair"
@@ -883,6 +914,8 @@ async function counterOffers(
   dMe: Dist,
   dP: Dist,
   pacer: Pacer,
+  budget: RunBudget,
+  warnings: string[],
 ): Promise<TradeEvaluationData["counters"]> {
   const variants: { give: number[]; get: number[] }[] = [];
   if (offer.give.length >= 2)
@@ -900,7 +933,7 @@ async function counterOffers(
   const sdMe = sigmaOf(dMe);
   const sdP = sigmaOf(dP);
   const out: { give: number[]; get: number[]; me: number; partner: number }[] = [];
-  await runCooperative(
+  const run = await runCooperative(
     variants.length,
     (i) => {
       const v = variants[i];
@@ -911,8 +944,13 @@ async function counterOffers(
       const p = evalSide(ctx, partner.players, new Set(v.get), g, wP, wire).delta;
       if (m > 0 && p >= TRADE.partnerEpsilon) out.push({ ...v, me: m, partner: p });
     },
-    { pacer, deadlineMs: null },
+    { pacer, deadlineMs: budget.left() },
   );
+  budget.spend(run);
+  if (run.partial)
+    warnings.push(
+      `partial: ${String(run.completed)} of ${String(variants.length)} counter-offers evaluated before the CPU deadline`,
+    );
   return out
     .sort((a, b) => b.me - a.me || b.partner - a.partner)
     .slice(0, TRADE.maxCounters)
@@ -933,6 +971,7 @@ async function searchPartners(
   assumptions: Assumption[],
   warnings: string[],
   pacer: Pacer,
+  budget: RunBudget,
 ): Promise<TradeOutcome> {
   const search = req.find_partners;
   if (search === undefined || search === null)
@@ -995,7 +1034,7 @@ async function searchPartners(
     plans.push(plan);
     for (const g of gets) for (const give of combos) units.push({ plan, get: g, give });
   }
-  await runCooperative(
+  const run = await runCooperative(
     units.length,
     (i) => {
       const u = units[i];
@@ -1025,8 +1064,13 @@ async function searchPartners(
           moved: [...gp, u.get],
         };
     },
-    { pacer, deadlineMs: null },
+    { pacer, deadlineMs: budget.left() },
   );
+  budget.spend(run);
+  if (run.partial)
+    warnings.push(
+      `partial: ${String(run.completed)} of ${String(units.length)} packages evaluated before the CPU deadline`,
+    );
   const partners: TradePartnersData["partners"][number][] = [];
   for (const plan of plans) {
     const best = plan.best;

@@ -163,6 +163,46 @@ describe("a season run cut short inside a tool is said: warning + partial (plan 
   }, 120_000);
 });
 
+describe("the engines without a sampler honour the call's one budget too (Stage C: analytics-cpu-deadline-per-run)", () => {
+  // E5's drop and scoring runs, E6's partner search: each ran with no deadline at all, so a call
+  // past 8 s of CPU never stopped (find_partners measured 13.3 s at 6x emulated CPU, 66.5 s at 30x)
+  const engineWarning = (e: Env, what: string): string[] =>
+    e.warnings.filter((w) =>
+      new RegExp(`^partial: \\d+ of \\d+ ${what} before the CPU deadline`).test(w),
+    );
+
+  it("E5 (P0 path): 0 ms stops the drop solve and the scoring — partial, said; off: complete", async () => {
+    const cut = await connect(world, { options: { cpuDeadlineMs: 0 } });
+    const e = await run(cut.client, "espn_analyze_waivers", { mode: "priority", phase: "auto" });
+    expect(e.partial).toBe(true);
+    expect(engineWarning(e, "drop candidates solved").length).toBe(1);
+    await cut.close();
+    const off = await connect(world, { options: { cpuDeadlineMs: null } });
+    const f = await run(off.client, "espn_analyze_waivers", { mode: "priority", phase: "auto" });
+    expect(f.partial).toBe(false);
+    expect(engineWarning(f, "drop candidates solved")).toEqual([]);
+    await off.close();
+  });
+
+  it("E6 find_partners: 0 ms stops the package search — partial, said; off: complete", async () => {
+    const cut = await connect(world, { options: { toolset: "full", cpuDeadlineMs: 0 } });
+    const e = await run(cut.client, "espn_analyze_trade", {
+      find_partners: { need_position: "WR" },
+      seed: 2,
+    });
+    expect(e.partial).toBe(true);
+    expect(engineWarning(e, "packages evaluated").length).toBe(1);
+    await cut.close();
+    const off = await connect(world, { options: { toolset: "full", cpuDeadlineMs: null } });
+    const f = await run(off.client, "espn_analyze_trade", {
+      find_partners: { need_position: "WR" },
+      seed: 2,
+    });
+    expect(f.partial).toBe(false);
+    await off.close();
+  });
+});
+
 describe("the composition root sets the switch only under EFF_TEST_STUBS=1 in fixture mode", () => {
   const wire = (env: Record<string, string>) => {
     const home = path.join(world.root, "home");

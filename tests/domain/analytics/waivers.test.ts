@@ -30,6 +30,7 @@ import {
   referenceRules,
   referenceSettings,
   referenceSlots,
+  steppingPacer,
 } from "./helpers.js";
 
 const WEEK = 4;
@@ -956,5 +957,49 @@ describe("the remaining paths", () => {
     const x = byId(out.data, 601);
     expect(x?.kdst?.brackets_e).toBeNull();
     expect(x?.kdst?.next_week?.e).not.toBeNull();
+  });
+});
+
+describe("Stage C: one CPU budget per call (analytics-cpu-deadline-per-run)", () => {
+  // steppingPacer: the clock advances 5 ms per read and there is no CPU clock, so the deadline
+  // counts the batches' time — deterministic
+  it("no deadline (null): every drop solved and every candidate scored, never partial", async () => {
+    const out = await analyzeWaivers(request({ pacer: steppingPacer(5), deadline_ms: null }));
+    expect(out.partial).toBe(false);
+    expect(out.warnings.some((w) => w.startsWith("partial:"))).toBe(false);
+    expect(out.data.candidates.length).toBeGreaterThan(3);
+  });
+
+  it("0 ms: the drop and scoring runs stop after one batch — partial, said, a subset never above the full answer", async () => {
+    const full = await analyzeWaivers(request({ pacer: steppingPacer(5), deadline_ms: null }));
+    const out = await analyzeWaivers(request({ pacer: steppingPacer(5), deadline_ms: 0 }));
+    expect(out.partial).toBe(true);
+    expect(
+      out.warnings.some((w) =>
+        /^partial: \d+ of \d+ drop candidates solved before the CPU deadline/.test(w),
+      ),
+    ).toBe(true);
+    expect(out.data.candidates.length).toBeLessThanOrEqual(full.data.candidates.length);
+    // a drop chosen among fewer solved drops is never better than the full answer's
+    for (const cnd of out.data.candidates) {
+      const f = byId(full.data, cnd.player_id);
+      expect(f).toBeDefined();
+      expect(cnd.s).toBeLessThanOrEqual((f?.s ?? 0) + 1e-9);
+    }
+    expect(typeof out.cpu_ms).toBe("number");
+  });
+
+  it("the runs share the call's budget: what the drop run spends, the scoring run does not get", async () => {
+    const free = await analyzeWaivers(request({ pacer: steppingPacer(5), deadline_ms: null }));
+    // a budget that the drop run alone uses up: the scoring run starts with nothing left
+    const spent = free.cpu_ms ?? 0;
+    expect(spent).toBeGreaterThan(0);
+    const out = await analyzeWaivers(request({ pacer: steppingPacer(5), deadline_ms: 1 }));
+    expect(out.partial).toBe(true);
+    expect(
+      out.warnings.some((w) =>
+        /^partial: \d+ of \d+ candidates scored before the CPU deadline$/.test(w),
+      ),
+    ).toBe(true);
   });
 });

@@ -47,7 +47,7 @@ import {
   WAIVERS,
   Z90,
 } from "./constants.js";
-import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
+import { loopPacer, RunBudget, runCooperative, type Pacer } from "./cooperative.js";
 import { AnalyticsError, ensure } from "./errors.js";
 import { isKdst, kdstExpectation, type KdstExpectation } from "./kdst.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
@@ -169,6 +169,13 @@ export interface WaiverRequest {
    * for this league's size; otherwise the cold-start table (said in a warning when sizes differ).
    */
   readonly premium_fit?: PremiumFitInput | null;
+  /**
+   * The CPU (ms) the call has left for this engine (plan 07 E1 [A-7]: one 8 s deadline per call;
+   * Stage C finding analytics-cpu-deadline-per-run): its runs share it (RunBudget); past it the
+   * answer is built from what was solved, said in a `partial:` warning. null = off (the test-only
+   * switch); absent = COOPERATIVE.deadlineMs.
+   */
+  readonly deadline_ms?: number | null;
 }
 
 /** The fitted premium E5 can read (structurally waiver-fit's `LeaguePremiumFit`). */
@@ -196,6 +203,10 @@ export interface PremiumFitInput {
 export interface WaiverOutcome {
   readonly data: WaiversData;
   readonly warnings: readonly string[];
+  /** CPU (ms) the engine's cooperative runs spent (a caller chaining runs charges it). */
+  readonly cpu_ms?: number;
+  /** The CPU deadline stopped a run: the answer is built from what was solved (said). */
+  readonly partial?: boolean;
 }
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
@@ -721,9 +732,12 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
   // L(R − d) per drop and week does not depend on the candidate: solved once, cooperatively (one
   // drop per step — a whole-roster precompute in one turn stalled the main loop, plan 10 A16a)
   const pacer = req.pacer ?? loopPacer(req.clock);
+  const budget = new RunBudget(req.deadline_ms);
+  let cpu = 0;
+  let partial = false;
   const restOf = new Map<WaiverPlayer | null, { players: WaiverPlayer[]; values: number[] }>();
   restOf.set(null, { players: activeMine, values: base });
-  await runCooperative(
+  const dropRun = await runCooperative(
     drops.length,
     (i) => {
       const d = drops[i];
@@ -734,8 +748,19 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
         values: req.weeks.map((_, wi) => lineupValue(seatsPlan, players, wi)),
       });
     },
-    { pacer, deadlineMs: null },
+    { pacer, deadlineMs: budget.left() },
   );
+  budget.spend(dropRun);
+  cpu += dropRun.cpu_ms;
+  if (dropRun.partial) {
+    // the drops are solved least valuable first: a claim's drop is the best of those solved
+    partial = true;
+    warnings.push(
+      `partial: ${String(dropRun.completed)} of ${String(drops.length)} drop candidates solved before the CPU deadline: each drop is the best of the least valuable ${String(dropRun.completed)}`,
+    );
+  }
+  /** A drop the deadline left unsolved is never priced (its gains would read as 0). */
+  const solved = (d: WaiverPlayer): boolean => restOf.has(d);
   if (req.include_drop === false)
     assumptions.push(A("no drop considered: surplus is the add alone", "include_drop"));
 
@@ -771,14 +796,17 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     // locked: such a claim can only process once the period has rolled over, when any may go
     // (said). The best locked drop is still priced, to be said when it would be better — never used
     const unplacedClaim = c.status === "WAIVERS" && !(kick !== null && at !== null);
-    const allowed = byDrop
-      ? unplacedClaim
-        ? allLocked
-          ? drops
-          : unlockedDrops
-        : drops.filter((d) => skip === 1 || !startedBy(d, at))
-      : [];
-    const lockedAlt = byDrop && unplacedClaim && !allLocked ? drops.filter((d) => d.locked) : [];
+    const allowed = (
+      byDrop
+        ? unplacedClaim
+          ? allLocked
+            ? drops
+            : unlockedDrops
+          : drops.filter((d) => skip === 1 || !startedBy(d, at))
+        : []
+    ).filter(solved);
+    const lockedAlt =
+      byDrop && unplacedClaim && !allLocked ? drops.filter((d) => d.locked && solved(d)) : [];
     // the gains it needs, in order: every allowed drop (or only "no drop"), the locked alternatives,
     // then the IR move
     const options: readonly (WaiverPlayer | null)[] = byDrop
@@ -834,7 +862,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     ...cand.options.map((_, j) => ({ cand, j })),
     { cand, j: -1 },
   ]);
-  await runCooperative(
+  const scoreRun = await runCooperative(
     units.length,
     (u) => {
       const unit = units[u];
@@ -924,8 +952,17 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
         horizon: H - skip,
       });
     },
-    { pacer, deadlineMs: null },
+    { pacer, deadlineMs: budget.left() },
   );
+  budget.spend(scoreRun);
+  cpu += scoreRun.cpu_ms;
+  if (scoreRun.partial) {
+    // units run candidate by candidate: the candidates assembled are whole, the rest are left out
+    partial = true;
+    warnings.push(
+      `partial: ${String(scored.length)} of ${String(prepared.length)} candidates scored before the CPU deadline`,
+    );
+  }
 
   if (lockedBetter.length > 0) {
     const best = [...lockedBetter].sort((a, b) => b.s - a.s || a.c - b.c)[0];
@@ -1173,6 +1210,8 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       inputs,
     },
     warnings,
+    cpu_ms: cpu,
+    partial,
   };
 }
 

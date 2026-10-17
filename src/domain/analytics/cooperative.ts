@@ -118,6 +118,29 @@ export interface CooperativeResult {
   readonly max_batch_ms: number;
 }
 
+/**
+ * One engine call's CPU budget across its cooperative runs (plan 07 E1 [A-7], plan 10 A16a: the 8 s
+ * deadline is per CALL; Stage C finding analytics-cpu-deadline-per-run): `deadline` is what the
+ * call has left (null = off — the test-only switch; undefined = COOPERATIVE.deadlineMs), `left()`
+ * what remains for the next run and `spend` charges a run's CPU, so runs chained in one engine call
+ * share the one budget instead of each starting a fresh 8 s.
+ */
+export class RunBudget {
+  private remaining: number | null;
+  constructor(deadline: number | null | undefined) {
+    this.remaining = deadline === undefined ? COOPERATIVE.deadlineMs : deadline;
+  }
+  /** What the next run may spend (null: no deadline). */
+  left(): number | null {
+    return this.remaining;
+  }
+  /** Charges one run's CPU and returns the run (for chaining). */
+  spend<R extends Pick<CooperativeResult, "cpu_ms">>(run: R): R {
+    if (this.remaining !== null) this.remaining = Math.max(0, this.remaining - run.cpu_ms);
+    return run;
+  }
+}
+
 /** The fewest and most steps between two clock reads (adaptive: ~1 ms between reads). */
 const CHECK_MIN = 1;
 const CHECK_MAX = 4096;

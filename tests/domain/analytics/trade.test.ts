@@ -428,3 +428,46 @@ describe("validation and the depth helpers", () => {
     expect(gaps.map((g) => g.gap)).toEqual([...gaps.map((g) => g.gap)].sort((a, b) => b - a));
   });
 });
+
+describe("Stage C: one CPU budget per call (analytics-cpu-deadline-per-run)", () => {
+  it("find_partners: no deadline evaluates every package; 0 ms stops after one batch — partial, said", async () => {
+    const all = await analyzeTrade(
+      req({
+        offer: null,
+        find_partners: { need_position: "WR" },
+        pacer: steppingPacer(5),
+        deadline_ms: null,
+      }),
+    );
+    expect(all.partial).toBe(false);
+    const cut = await analyzeTrade(
+      req({
+        offer: null,
+        find_partners: { need_position: "WR" },
+        pacer: steppingPacer(5),
+        deadline_ms: 0,
+      }),
+    );
+    expect(cut.partial).toBe(true);
+    expect(
+      cut.warnings.some((w) =>
+        /^partial: \d+ of \d+ packages evaluated before the CPU deadline$/.test(w),
+      ),
+    ).toBe(true);
+    expect(all.warnings.some((w) => w.startsWith("partial:"))).toBe(false);
+  });
+
+  it("an offer: the Monte Carlo stops at the deadline and names its paths; the counters share what is left", async () => {
+    const cut = await analyzeTrade(req({ pacer: steppingPacer(5), deadline_ms: 0, n_sims: 200 }));
+    expect(cut.partial).toBe(true);
+    expect(
+      cut.warnings.some((w) =>
+        /^partial: \d+ of 200 trade samples before the CPU deadline$/.test(w),
+      ),
+    ).toBe(true);
+    const all = await analyzeTrade(
+      req({ pacer: steppingPacer(5), deadline_ms: null, n_sims: 200 }),
+    );
+    expect(all.partial).toBe(false);
+  });
+});

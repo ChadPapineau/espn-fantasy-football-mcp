@@ -1656,6 +1656,8 @@ export const analyzeWaiversTool = defineTool({
       premium_fit: premiumFit,
       clock: ctx.services.clock,
       pacer: ctx.pacer,
+      // one 8 s CPU budget per call (Stage C finding analytics-cpu-deadline-per-run)
+      deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
     };
     // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; D11): the claim list is advice only; a write module
@@ -1719,6 +1721,8 @@ export const analyzeWaiversTool = defineTool({
             sleeper_trend: extras.sleeper_trend,
             mechanics: extras.mechanics,
             faab: extras.faab === null ? null : { ...extras.faab, reserve: args.reserve },
+            // what the call has left after E1's ensemble runs above
+            deadline_ms: cpuDeadlineOf(ctx),
             inputs: toDataInputs(inputs, ctx.nowMs),
           });
         })();
@@ -1740,7 +1744,7 @@ export const analyzeWaiversTool = defineTool({
       inputs,
       warnings: [...warnings, ...out.warnings],
       estimate: true,
-      partial: warnings.some((x) => x.startsWith("partial:")),
+      partial: out.partial === true || warnings.some((x) => x.startsWith("partial:")),
       listKey: "candidates",
       trims: waiverTrims(data.candidates.length),
       week: w,

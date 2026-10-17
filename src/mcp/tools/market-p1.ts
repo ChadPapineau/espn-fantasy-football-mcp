@@ -79,7 +79,7 @@ import {
 import { toDataInputs, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, type ToolContext, type ToolOutput } from "../define.js";
-import { carryOutcome, seedOf, waiverPlayerOf, type Subject } from "./analytics.js";
+import { carryOutcome, cpuDeadlineOf, seedOf, waiverPlayerOf, type Subject } from "./analytics.js";
 import {
   crosswalkOf,
   isDegradable,
@@ -465,6 +465,8 @@ export const analyzeTradeTool = defineTool({
       clock: ctx.services.clock,
       pacer: ctx.pacer,
       rng: seededRng(seed),
+      // one 8 s CPU budget per call: the season runs above already spent theirs (Stage C)
+      deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
     if (out.data.kind === "evaluation" && !out.data.seeding.confirmed)
@@ -475,7 +477,8 @@ export const analyzeTradeTool = defineTool({
       inputs,
       warnings: [...warnings, ...out.warnings],
       estimate: true,
-      partial: sims.partial || warnings.some((x) => x.startsWith("partial:")),
+      partial:
+        sims.partial || out.partial === true || warnings.some((x) => x.startsWith("partial:")),
       listKey: data.kind === "evaluation" ? "counters" : "partners",
       week: b.w,
     };
@@ -593,6 +596,7 @@ async function waiverVerdicts(
   teammates: ReadonlyMap<number, PlatformPlayer>,
   list: readonly CascadeClaimInput[],
   ros: RosReading | null,
+  warnings: string[],
 ): Promise<ReadonlyMap<number, WaiverVerdict>> {
   const out = new Map<number, WaiverVerdict>();
   const gsis = (p: PlatformPlayer): string | null =>
@@ -618,8 +622,12 @@ async function waiverVerdicts(
     candidates: candidates.slice(0, BOUNDS.waiverCandidates.max),
     value_basis: "ensemble",
     rival_rosters: rivalRosters(ctx, rosters, me, weeks, ros),
+    deadline_ms: cpuDeadlineOf(ctx),
   };
   const res = await analyzeWaiversP1(req);
+  // a deadline-stopped claim evaluation reaches the cascade's envelope (its flag and its line)
+  for (const w of res.warnings)
+    if (w.startsWith("partial:") && !warnings.includes(w)) warnings.push(w);
   for (const c of res.data.candidates) out.set(c.player_id, c.verdict);
   return out;
 }
@@ -956,7 +964,18 @@ export const analyzeInjuryCascadeTool = defineTool({
         ? {}
         : {
             evaluate_claims: (list: readonly CascadeClaimInput[]) =>
-              waiverVerdicts(ctx, b, mine, rosters ?? [], standings, weeks, tmById, list, ros),
+              waiverVerdicts(
+                ctx,
+                b,
+                mine,
+                rosters ?? [],
+                standings,
+                weeks,
+                tmById,
+                list,
+                ros,
+                warnings,
+              ),
           }),
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),

@@ -20,7 +20,7 @@
 // warm fit or the history curve makes the demand part not cold; FAAB has no premium). Pure. New here.
 import { isKdst } from "./kdst.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
-import { loopPacer, runCooperative } from "./cooperative.js";
+import { loopPacer, RunBudget, runCooperative } from "./cooperative.js";
 import { CLEARS_TO_FA_MIN_COLD_WIDTH, type Assumption, type ClearsToFa } from "./types.js";
 import { WAIVERS, Z90 } from "./constants.js";
 import { fittedQ, type DemandFit, type LearnedMechanics } from "./demand.js";
@@ -192,6 +192,11 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
     (a) => !(faabMode && a.revisit_trigger === AT_LAST_TRIGGER),
   );
   const pacer = req.pacer ?? loopPacer(req.clock);
+  // the call's one CPU budget: what the P0 engine's runs left (Stage C, analytics-cpu-deadline-per-run)
+  const budget = new RunBudget(req.deadline_ms);
+  budget.spend({ cpu_ms: base.cpu_ms ?? 0 });
+  const p1Warnings: string[] = [];
+  let partial = base.partial === true;
 
   // each rival's own lineup gain per week from each candidate (research 05 §1.3 input 1)
   const inputOf = new Map(req.candidates.map((c) => [c.player_id, c]));
@@ -216,7 +221,7 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
         ),
       );
     const work = d.candidates.flatMap((c) => rosters.map((r) => ({ c, r })));
-    await runCooperative(
+    const run = await runCooperative(
       work.length,
       (i) => {
         const unit = work[i];
@@ -233,8 +238,16 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
         }
         upgrades.set(`${String(unit.r.team_id)}:${String(unit.c.player_id)}`, gain / H);
       },
-      { pacer, deadlineMs: null },
+      { pacer, deadlineMs: budget.left() },
     );
+    budget.spend(run);
+    if (run.partial) {
+      // a rival without its own upgrade reads the candidate's rate (the cold-start input)
+      partial = true;
+      p1Warnings.push(
+        `partial: ${String(run.completed)} of ${String(work.length)} rival upgrades before the CPU deadline: the rest read the candidate's own rate`,
+      );
+    }
   }
 
   const fit = req.demand_fit ?? null;
@@ -601,7 +614,7 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
     },
     rec,
   };
-  return { data, warnings: base.warnings };
+  return { data, warnings: [...base.warnings, ...p1Warnings], partial };
 }
 
 function faabActionText(
