@@ -7,6 +7,7 @@
 // rule for a 4th request (plan 01 §5.6). Ported from sibling @5daa625, adapted to the ESPN seam.
 import { freshnessClass } from "../../config/freshness.js";
 import type { DatasetResult, DatasetStamp } from "../../domain/analytics/types.js";
+import { rosShareOptsOf, type WeeklyValuesOpts } from "../../domain/analytics/waivers.js";
 import {
   crosswalkStatusOfPair,
   identityOfPlatformPlayer,
@@ -226,6 +227,62 @@ export function scheduleOf(
     inputs.push(input);
     return { schedule: got.value, input, from: "espn" as const };
   });
+}
+
+/**
+ * How a tool reads ESPN's rest-of-season total for the engines' weekly values — E1's own window
+ * (Stage C finding projection-ros-includes-week18; projection.ts `rosWindow`): which of a player's
+ * games the total still counts, from the pro schedule at the call's instant, through the NFL
+ * season's last week (never the league's final scoring period). Every weekly-value caller (E4–E9,
+ * E11, E5) passes one, so its weeks equal E1's. null: the call has no schedule — the total is then
+ * read from the first value week through week 18, the bye excluded (weeklyValues' default).
+ */
+export interface RosReading {
+  readonly schedule: Pick<ProSchedule, "games">;
+  readonly season: number;
+  readonly nowMs: number;
+}
+
+/** A RosReading over `schedule` at `nowMs`, or null when there is no schedule (no games). */
+export function rosReadingFrom(
+  schedule: Pick<ProSchedule, "games"> | null | undefined,
+  season: number,
+  nowMs: number,
+): RosReading | null {
+  return schedule === null || schedule === undefined || schedule.games.length === 0
+    ? null
+    : { schedule, season, nowMs };
+}
+
+/**
+ * This call's RosReading: the season's pro schedule (scheduleOf — one memoised read per call) at the
+ * call's instant, or null — said once — when the call cannot read it.
+ */
+export async function rosReadingOf(
+  ctx: ToolContext,
+  season: number,
+  inputs: InputStamp[],
+  warnings: string[],
+  allowStale: boolean,
+): Promise<RosReading | null> {
+  const got = await withinBudget(() => scheduleOf(ctx, season, inputs, allowStale), warnings).catch(
+    (e: unknown) => {
+      if (!isOptionalReadFailure(e)) throw e;
+      return null;
+    },
+  );
+  const ros = rosReadingFrom(got?.schedule ?? null, season, ctx.nowMs);
+  if (ros === null) {
+    const w =
+      "pro schedule unavailable: ESPN's rest-of-season total read from the first value week";
+    if (!warnings.includes(w)) warnings.push(w);
+  }
+  return ros;
+}
+
+/** The weeklyValues options of `p` under `ros` (null: weeklyValues' default reading). */
+export function rosOptsOf(p: PlatformPlayer, ros: RosReading | null): WeeklyValuesOpts {
+  return ros === null ? {} : rosShareOptsOf(p, ros.schedule, ros.season, ros.nowMs);
 }
 
 /** Games of one week. */

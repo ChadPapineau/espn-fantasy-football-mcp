@@ -50,7 +50,16 @@ import type { InputStamp } from "../envelope.js";
 import { fromBudgetSignal } from "../errors.js";
 import type { ToolContext } from "../define.js";
 import { cpuDeadlineOf, project, standingsFromMatchups, type Subject } from "./analytics.js";
-import { leagueOf, optionalDataset, rulesOf, settingsOf, slotsOf, weekOf } from "./common.js";
+import {
+  leagueOf,
+  optionalDataset,
+  rosOptsOf,
+  rulesOf,
+  settingsOf,
+  slotsOf,
+  weekOf,
+  type RosReading,
+} from "./common.js";
 import { V2_BULK_SIMS } from "./projection-v2.js";
 
 /** What every P1 analytics tool reads about the league once per call. */
@@ -77,11 +86,23 @@ export async function basicsOf(
 
 /**
  * A player's value per week: ESPN's weekly projection for the first week, its rest-of-season total
- * shared over the remaining non-bye weeks — E1 v1's own point estimate (weight_espn = 1.0), so the
- * league-wide engines (E4, E6, E8's stream, E9's wire) need no sampling.
+ * shared over the games it still counts — E1 v1's own point estimate (weight_espn = 1.0), so the
+ * league-wide engines (E4, E6, E7, E8's stream, E9's wire, E11) need no sampling. `ros` is the call's
+ * reading of that total (common.ts RosReading: E1's window from the pro schedule at the clock —
+ * Stage C finding projection-ros-includes-week18); null reads it from the first value week.
  */
-export function valueWeeks(p: PlatformPlayer, weeks: readonly Week[]): (number | null)[] {
-  return weeklyValues(weeks, p.projection_week_espn, p.projection_ros_espn, p.bye_week);
+export function valueWeeks(
+  p: PlatformPlayer,
+  weeks: readonly Week[],
+  ros: RosReading | null,
+): (number | null)[] {
+  return weeklyValues(
+    weeks,
+    p.projection_week_espn,
+    p.projection_ros_espn,
+    p.bye_week,
+    rosOptsOf(p, ros),
+  );
 }
 
 /** E1 targets per call (the engine's own cap is 64). */

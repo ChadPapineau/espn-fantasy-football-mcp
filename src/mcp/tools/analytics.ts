@@ -82,6 +82,8 @@ import {
   optionalDataset,
   present,
   readOpts,
+  rosOptsOf,
+  rosReadingOf,
   rulesOf,
   scheduleOf,
   settingsOf,
@@ -91,6 +93,7 @@ import {
   turn,
   weekOf,
   withinBudget,
+  type RosReading,
 } from "./common.js";
 import { rostersOf } from "./roster.js";
 import {
@@ -1245,13 +1248,17 @@ export const waiversSchema = z.strictObject({
   inputs: inputsSchema,
 });
 
-/** A waiver-engine player from a platform record and its value weeks. */
+/**
+ * A waiver-engine player from a platform record and its value weeks, ESPN's rest-of-season total
+ * read under the call's `ros` (common.ts RosReading — E1's window; null: from the first value week).
+ */
 export function waiverPlayerOf(
   p: PlatformPlayer,
   slotId: number,
   locked: boolean,
   weeks: readonly Week[],
   gsis: string | null,
+  ros: RosReading | null,
 ): WaiverPlayer {
   return {
     player_id: p.ref.id,
@@ -1265,7 +1272,13 @@ export function waiverPlayerOf(
     slot_id: slotId,
     locked,
     droppable: p.droppable,
-    weekly: weeklyValues(weeks, p.projection_week_espn, p.projection_ros_espn, p.bye_week),
+    weekly: weeklyValues(
+      weeks,
+      p.projection_week_espn,
+      p.projection_ros_espn,
+      p.bye_week,
+      rosOptsOf(p, ros),
+    ),
     percent_owned: p.ownership?.percent_owned ?? null,
   };
 }
@@ -1509,35 +1522,36 @@ export const analyzeWaiversTool = defineTool({
     if (weeks.length === 0)
       throw new EffError("VALIDATION", { field: "week", reason: "season_over" });
     const kdstOnly = args.positions?.every((p) => KDST.has(p)) === true;
+    // the pro schedule, for every call (Stage C findings waivers-lock-state-drop-candidates and
+    // projection-ros-includes-week18): this week's kickoffs place the claim's run against the week's
+    // games (which players a claim can still add or drop, and whether it reaches this week — the
+    // engine's scheduled path), and ESPN's ROS total is read as E1 reads it (rosReadingOf)
+    const ros = await rosReadingOf(ctx, league.ref.season, inputs, warnings, allowStale);
+    const sched =
+      ros === null ? null : await scheduleOf(ctx, league.ref.season, inputs, allowStale);
     let kdst: { schedule: ProSchedule; implied_totals: ImpliedTotal[] } | null = null;
-    if (kdstOnly) {
-      const sched = await withinBudget(
-        () => scheduleOf(ctx, league.ref.season, inputs, allowStale),
-        warnings,
-      );
-      if (sched !== null)
-        kdst = {
-          schedule: sched.schedule,
-          implied_totals: impliedTotals(
-            ctx,
-            sched.schedule,
-            league.ref.season,
-            weeks.slice(0, 3),
-            inputs,
-            allowStale,
-          ),
-        };
-    }
+    if (kdstOnly && sched !== null)
+      kdst = {
+        schedule: sched.schedule,
+        implied_totals: impliedTotals(
+          ctx,
+          sched.schedule,
+          league.ref.season,
+          weeks.slice(0, 3),
+          inputs,
+          allowStale,
+        ),
+      };
     const gsis = (p: PlatformPlayer): string | null =>
       crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id;
     const minePlayers = mine.entries.map((e) =>
-      waiverPlayerOf(e.player, e.slot_id, e.lineup_locked, weeks, gsis(e.player)),
+      waiverPlayerOf(e.player, e.slot_id, e.lineup_locked, weeks, gsis(e.player), ros),
     );
     const candidates: WaiverCandidateInput[] = pool
       .filter((p) => p.status === "FREEAGENT" || p.status === "WAIVERS")
       .slice(0, BOUNDS.waiverCandidates.max)
       .map((p) => ({
-        ...waiverPlayerOf(p, 20, false, weeks, gsis(p)),
+        ...waiverPlayerOf(p, 20, false, weeks, gsis(p), ros),
         status: p.status === "WAIVERS" ? "WAIVERS" : "FREEAGENT",
         waiver_process_date: p.waiver_process_date,
         percent_change: p.ownership?.percent_change ?? null,
@@ -1576,6 +1590,7 @@ export const analyzeWaiversTool = defineTool({
       ...(args.look_ahead === undefined ? {} : { look_ahead: args.look_ahead }),
       include_drop: args.include_drop,
       settings,
+      schedule: sched?.schedule ?? null,
       kdst,
       adds_remaining: null,
       premium_fit: premiumFit,
@@ -1594,10 +1609,6 @@ export const analyzeWaiversTool = defineTool({
           let mineV = minePlayers;
           let candV = candidates;
           if (ensemble) {
-            const sched = await withinBudget(
-              () => scheduleOf(ctx, league.ref.season, inputs, allowStale),
-              warnings,
-            ).catch(() => null);
             const proj = await projectMany(
               ctx,
               [...mine.entries.map((e) => e.player), ...pool]
@@ -1636,6 +1647,7 @@ export const analyzeWaiversTool = defineTool({
             inputs,
             warnings,
             allowStale,
+            ros,
           );
           return analyzeWaiversP1({
             ...p0Request,

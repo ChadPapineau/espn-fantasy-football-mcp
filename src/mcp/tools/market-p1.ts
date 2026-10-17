@@ -86,10 +86,12 @@ import {
   leagueRef,
   optionalDataset,
   readOpts,
+  rosReadingOf,
   take,
   teamOf,
   turn,
   withinBudget,
+  type RosReading,
 } from "./common.js";
 import {
   basicsOf,
@@ -134,12 +136,13 @@ const seedingSchema = z.strictObject({
   confirmed: z.boolean(),
 });
 
-/** One TradePlayer from a platform record at E1 v1's point estimate over `weeks`. */
+/** One TradePlayer from a platform record at E1 v1's point estimate over `weeks` (`ros`: valueWeeks). */
 export function tradePlayerOf(
   ctx: ToolContext,
   p: PlatformPlayer,
   slotId: number,
   weeks: readonly Week[],
+  ros: RosReading | null,
 ): TradePlayer {
   return {
     player_id: p.ref.id,
@@ -150,7 +153,7 @@ export function tradePlayerOf(
     injury_status: p.injury_status,
     slot_id: slotId,
     droppable: p.droppable,
-    weekly: valueWeeks(p, weeks),
+    weekly: valueWeeks(p, weeks, ros),
     bye_week: p.bye_week,
     auction_value_average: p.ownership?.auction_value_average ?? null,
   };
@@ -361,6 +364,14 @@ export const analyzeTradeTool = defineTool({
     const rosters = await required(() => rostersOf(ctx, b.w, inputs, warnings, args, me));
     const mine = rosters.find((r) => r.team.team_id === me);
     if (mine === undefined) throw new EffError("NOT_FOUND");
+    // ESPN's ROS total read as E1 reads it (Stage C finding projection-ros-includes-week18)
+    const ros = await rosReadingOf(
+      ctx,
+      b.league.ref.season,
+      inputs,
+      warnings,
+      args.allow_stale === true,
+    );
     if (args.offer !== undefined) {
       const partner = rosters.find((r) => r.team.team_id === args.offer?.partner_team_id);
       if (partner === undefined || args.offer.partner_team_id === me)
@@ -418,7 +429,7 @@ export const analyzeTradeTool = defineTool({
       return {
         team_id: r.team.team_id,
         name: r.team_name,
-        players: r.entries.map((e) => tradePlayerOf(ctx, e.player, e.slot_id, weeks)),
+        players: r.entries.map((e) => tradePlayerOf(ctx, e.player, e.slot_id, weeks, ros)),
         readings,
         alive_by_week: aliveOf(readings),
       };
@@ -450,7 +461,7 @@ export const analyzeTradeTool = defineTool({
         mode: ctx.services.seedingMode,
         confirmed_at: ctx.services.seedingConfirmedAt,
       },
-      free_agents: pool.slice(0, TRADE_WIRE_MAX).map((p) => tradePlayerOf(ctx, p, 20, weeks)),
+      free_agents: pool.slice(0, TRADE_WIRE_MAX).map((p) => tradePlayerOf(ctx, p, 20, weeks, ros)),
       clock: ctx.services.clock,
       pacer: ctx.pacer,
       rng: seededRng(seed),
@@ -581,6 +592,7 @@ async function waiverVerdicts(
   weeks: readonly Week[],
   teammates: ReadonlyMap<number, PlatformPlayer>,
   list: readonly CascadeClaimInput[],
+  ros: RosReading | null,
 ): Promise<ReadonlyMap<number, WaiverVerdict>> {
   const out = new Map<number, WaiverVerdict>();
   const gsis = (p: PlatformPlayer): string | null =>
@@ -589,7 +601,7 @@ async function waiverVerdicts(
   for (const c of list) {
     const p = teammates.get(c.player_id);
     if (p === undefined || c.status === "ONTEAM") continue;
-    const base = waiverPlayerOf(p, 20, false, weeks, gsis(p));
+    const base = waiverPlayerOf(p, 20, false, weeks, gsis(p), ros);
     const delta = new Map(c.delta_proj_by_week.map((x) => [x.week, x.delta]));
     candidates.push({
       ...base,
@@ -602,17 +614,20 @@ async function waiverVerdicts(
   if (candidates.length === 0) return out;
   const me = mine.team.team_id;
   const req: WaiverP1Request = {
-    ...waiverBase(ctx, b, mine, rosters, standings, weeks),
+    ...waiverBase(ctx, b, mine, rosters, standings, weeks, ros),
     candidates: candidates.slice(0, BOUNDS.waiverCandidates.max),
     value_basis: "ensemble",
-    rival_rosters: rivalRosters(ctx, rosters, me, weeks),
+    rival_rosters: rivalRosters(ctx, rosters, me, weeks, ros),
   };
   const res = await analyzeWaiversP1(req);
   for (const c of res.data.candidates) out.set(c.player_id, c.verdict);
   return out;
 }
 
-/** The P0 waiver request's shared part (my roster, rivals, k, rules) for a set of weeks. */
+/**
+ * The P0 waiver request's shared part (my roster, rivals, k, rules) for a set of weeks; `ros` reads
+ * ESPN's ROS total as E1 does and carries the pro schedule the claim timing reads (Stage C).
+ */
 export function waiverBase(
   ctx: ToolContext,
   b: LeagueBasics,
@@ -620,6 +635,7 @@ export function waiverBase(
   rosters: readonly Roster[],
   standings: Standings | null,
   weeks: readonly Week[],
+  ros: RosReading | null,
 ): Omit<WaiverRequest, "candidates"> {
   const me = mine.team.team_id;
   const gsis = (p: PlatformPlayer): string | null =>
@@ -631,7 +647,7 @@ export function waiverBase(
     week: b.w,
     weeks,
     mine: mine.entries.map((e) =>
-      waiverPlayerOf(e.player, e.slot_id, e.lineup_locked, weeks, gsis(e.player)),
+      waiverPlayerOf(e.player, e.slot_id, e.lineup_locked, weeks, gsis(e.player), ros),
     ),
     k: standings?.teams.find((t) => t.team_id === me)?.waiver_rank ?? null,
     rivals: (standings?.teams ?? [])
@@ -645,6 +661,7 @@ export function waiverBase(
         };
       }),
     settings: b.settings,
+    schedule: ros?.schedule ?? null,
     clock: ctx.services.clock,
     pacer: ctx.pacer,
   };
@@ -656,6 +673,7 @@ export function rivalRosters(
   rosters: readonly Roster[],
   me: number,
   weeks: readonly Week[],
+  ros: RosReading | null,
 ): RivalRoster[] {
   return rosters
     .filter((r) => r.team.team_id !== me)
@@ -668,6 +686,7 @@ export function rivalRosters(
           e.lineup_locked,
           weeks,
           crosswalkOf(ctx, e.player.ref.id, e.player.position_id).gsis_id,
+          ros,
         ),
       ),
     }));
@@ -751,6 +770,8 @@ export const analyzeInjuryCascadeTool = defineTool({
     const weeks = remainingWeeks(b.rules.playoffs, b.w).slice(0, 22);
     if (weeks.length === 0)
       throw new EffError("VALIDATION", { field: "player", reason: "season_over" });
+    // ESPN's ROS total read as E1 reads it (Stage C finding projection-ros-includes-week18)
+    const ros = await rosReadingOf(ctx, season, inputs, warnings, allowStale);
     const subjects: Subject[] = [inj, ...teammates].map((p) => ({
       p,
       gsis: crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id,
@@ -873,7 +894,7 @@ export const analyzeInjuryCascadeTool = defineTool({
               })(),
         percent_change: p.ownership?.percent_change ?? null,
         availability: { status: p.status, waiver_process_date: p.waiver_process_date },
-        weekly: valueWeeks(p, weeks),
+        weekly: valueWeeks(p, weeks, ros),
         depth_rank: depthRankOf.get(p.ref.id) ?? null,
       };
     });
@@ -914,7 +935,7 @@ export const analyzeInjuryCascadeTool = defineTool({
           carry_share: injShares.carry_share,
           rz_share: injShares.rz_share,
         },
-        weekly: valueWeeks(inj, weeks),
+        weekly: valueWeeks(inj, weeks, ros),
         mine:
           myEntry === null
             ? null
@@ -935,7 +956,7 @@ export const analyzeInjuryCascadeTool = defineTool({
         ? {}
         : {
             evaluate_claims: (list: readonly CascadeClaimInput[]) =>
-              waiverVerdicts(ctx, b, mine, rosters ?? [], standings, weeks, tmById, list),
+              waiverVerdicts(ctx, b, mine, rosters ?? [], standings, weeks, tmById, list, ros),
           }),
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
@@ -1426,6 +1447,14 @@ export const analyzeLeagueActivityTool = defineTool({
       return null;
     });
     const weeks = remainingWeeks(b.rules.playoffs, b.w).slice(0, 4);
+    // ESPN's ROS total read as E1 reads it (Stage C finding projection-ros-includes-week18)
+    const ros = await rosReadingOf(
+      ctx,
+      b.league.ref.season,
+      inputs,
+      warnings,
+      args.allow_stale === true,
+    );
     const pool = args.include_rival_needs ? await poolOf(ctx, b.w, inputs, warnings, 25) : [];
     const names = new Map<number, UntrustedText>();
     for (const r of rosters ?? []) names.set(r.team.team_id, r.team_name);
@@ -1457,7 +1486,7 @@ export const analyzeLeagueActivityTool = defineTool({
                   player_id: e.player.ref.id,
                   position: e.player.position,
                   slot_id: e.slot_id,
-                  weekly: valueWeeks(e.player, weeks),
+                  weekly: valueWeeks(e.player, weeks, ros),
                 })),
               }),
         },
@@ -1474,7 +1503,7 @@ export const analyzeLeagueActivityTool = defineTool({
         player_id: p.ref.id,
         position: p.position,
         slot_id: 20,
-        weekly: valueWeeks(p, weeks),
+        weekly: valueWeeks(p, weeks, ros),
       })),
       include_rival_needs: args.include_rival_needs,
       clock: ctx.services.clock,
@@ -1522,6 +1551,7 @@ export function waiverP1Extras(
   inputs: InputStamp[],
   warnings: string[],
   allowStale: boolean,
+  ros: RosReading | null,
 ): WaiverP1Extras {
   const season = b.league.ref.season;
   const byId = new Map<number, WaiverPlayer>();
@@ -1585,7 +1615,7 @@ export function waiverP1Extras(
   }
   return {
     usage,
-    rival_rosters: rivalRosters(ctx, rosters, me, weeks),
+    rival_rosters: rivalRosters(ctx, rosters, me, weeks, ros),
     sleeper_trend: sleeper,
     mechanics,
     faab,

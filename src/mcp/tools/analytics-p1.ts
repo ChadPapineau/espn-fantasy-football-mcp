@@ -78,12 +78,15 @@ import {
   isDegradable,
   leagueRef,
   readOpts,
+  rosReadingFrom,
+  rosReadingOf,
   scheduleOf,
   take,
   teamOf,
   turn,
   weekGames,
   withinBudget,
+  type RosReading,
 } from "./common.js";
 import {
   basicsOf,
@@ -666,13 +669,14 @@ async function poolOf(
   return got === null ? [] : take(ctx, got, inputs).items;
 }
 
-/** A ReplacementPlayer at E1 v1's point estimate (ESPN's weekly means) for `weeks`. */
+/** A ReplacementPlayer at E1 v1's point estimate (ESPN's weekly means) for `weeks` (`ros`: valueWeeks). */
 export function replacementPlayerOf(
   p: PlatformPlayer,
   weeks: readonly Week[],
   rostered: boolean,
+  ros: RosReading | null,
 ): ReplacementPlayer {
-  const v = valueWeeks(p, weeks);
+  const v = valueWeeks(p, weeks, ros);
   return {
     player_id: p.ref.id,
     name: p.name,
@@ -690,6 +694,7 @@ function leaguePlayers(
   rosters: readonly Roster[],
   pool: readonly PlatformPlayer[],
   weeks: readonly Week[],
+  ros: RosReading | null,
 ): ReplacementPlayer[] {
   const seen = new Set<number>();
   const out: ReplacementPlayer[] = [];
@@ -697,12 +702,12 @@ function leaguePlayers(
     for (const e of r.entries)
       if (!seen.has(e.player.ref.id)) {
         seen.add(e.player.ref.id);
-        out.push(replacementPlayerOf(e.player, weeks, true));
+        out.push(replacementPlayerOf(e.player, weeks, true, ros));
       }
   for (const p of pool)
     if (!seen.has(p.ref.id) && p.status !== "ONTEAM") {
       seen.add(p.ref.id);
-      out.push(replacementPlayerOf(p, weeks, false));
+      out.push(replacementPlayerOf(p, weeks, false, ros));
     }
   return out;
 }
@@ -796,6 +801,14 @@ export const analyzeReplacementTool = defineTool({
       throw new EffError("VALIDATION", { field: "week", reason: "season_over" });
     const rosters = await required(() => rostersOf(ctx, b.w, inputs, warnings, args, null));
     const pool = await poolOf(ctx, b.w, inputs, warnings);
+    // ESPN's ROS total read as E1 reads it (Stage C finding projection-ros-includes-week18)
+    const ros = await rosReadingOf(
+      ctx,
+      b.league.ref.season,
+      inputs,
+      warnings,
+      args.allow_stale === true,
+    );
     const mine = rosters.find((r) => r.team.team_id === (b.league.my_team?.team_id ?? -1));
     const out = await analyzeReplacement({
       roster: b.slots,
@@ -804,7 +817,7 @@ export const analyzeReplacementTool = defineTool({
       horizon: args.horizon,
       baseline: args.baseline,
       ...(args.positions === undefined ? {} : { positions: args.positions }),
-      players: leaguePlayers(rosters, pool, weeks),
+      players: leaguePlayers(rosters, pool, weeks, ros),
       ...(mine === undefined ? {} : { focus_player_ids: mine.entries.map((e) => e.player.ref.id) }),
       detail: args.detail,
       clock: ctx.services.clock,
@@ -947,9 +960,10 @@ export const analyzeScheduleTool = defineTool({
       warnings,
     );
     const pool = await poolOf(ctx, b.w, inputs, warnings);
+    const ros = rosReadingFrom(schedule, b.league.ref.season, ctx.nowMs);
     const streamPlayers = pool
       .filter((p) => p.status !== "ONTEAM")
-      .map((p) => replacementPlayerOf(p, weeks, false));
+      .map((p) => replacementPlayerOf(p, weeks, false, ros));
     const positions = [...new Set(mine.entries.map((e) => e.player.position))];
     // P(alive) from E3 `season` under the reading in use (cold start; weight 1 when unreadable)
     const reading = readingOf(ctx, "config");
@@ -1118,6 +1132,7 @@ export function handcuffCases(
   mine: Roster,
   rosters: readonly Roster[],
   weeks: readonly Week[],
+  ros: RosReading | null,
 ): HandcuffCase[] {
   const out: HandcuffCase[] = [];
   const rostered = rosters.flatMap((r) => r.entries.map((e) => e.player));
@@ -1131,7 +1146,7 @@ export function handcuffCases(
       .sort((a, b) => (b.projection_ros_espn ?? 0) - (a.projection_ros_espn ?? 0))[0];
     if (lead === undefined || (lead.projection_ros_espn ?? 0) <= (p.projection_ros_espn ?? 0))
       continue;
-    const v = valueWeeks(lead, weeks);
+    const v = valueWeeks(lead, weeks, ros);
     out.push({
       handcuff: p.ref.id,
       starter: lead.ref.id,
@@ -1194,12 +1209,13 @@ export const analyzeRosterTool = defineTool({
       warnings,
     );
     const pool = await poolOf(ctx, b.w, inputs, warnings);
+    const ros = rosReadingFrom(schedule, b.league.ref.season, ctx.nowMs);
     // E4's streamability over the league (cheap: no sampling) and its stream candidates
     const repl = await analyzeReplacement({
       roster: b.slots,
       league_size: b.league.size,
       weeks,
-      players: leaguePlayers(rosters, pool, weeks),
+      players: leaguePlayers(rosters, pool, weeks, ros),
       clock: ctx.services.clock,
       pacer: ctx.pacer,
       deadline_ms: cpuDeadlineOf(ctx),
@@ -1208,7 +1224,7 @@ export const analyzeRosterTool = defineTool({
     for (const p of repl.data.positions) streamability[p.position] = p.streamability;
     const streamPlayers = pool
       .filter((p) => p.status !== "ONTEAM")
-      .map((p) => replacementPlayerOf(p, weeks, false));
+      .map((p) => replacementPlayerOf(p, weeks, false, ros));
     const positions = [...new Set(mine.entries.map((e) => e.player.position))];
     const standings = await standingsOrNull(ctx, inputs, warnings);
     const mineStanding = standings?.teams.find((t) => t.team_id === team) ?? null;
@@ -1280,7 +1296,7 @@ export const analyzeRosterTool = defineTool({
       season,
       streamability,
       stream: streamCandidates(streamPlayers, weeks, positions),
-      handcuffs: handcuffCases(mine, rosters, weeks),
+      handcuffs: handcuffCases(mine, rosters, weeks, ros),
       rules: {
         acquisition_limit: b.rules.waiver.acquisition_limit,
         acquisitions_used: mineStanding?.transaction_counter.acquisitions ?? null,
