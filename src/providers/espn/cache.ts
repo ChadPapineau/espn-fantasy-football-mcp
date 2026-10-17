@@ -4,13 +4,16 @@
 // force_refresh gate (once per 60 s per key), in-process coalescing (N concurrent identical requests
 // → one upstream call), and the PII rule for what is stored (plan 02 §2.4: member names,
 // notification settings and any `clientAddress` never enter the parsed cache; the raw body only in
-// fixture-recording mode).
+// fixture-recording mode), and the league's publicity kept across processes (cachedPublicity).
 import {
   freshnessClass,
   type FreshnessClass,
   type FreshnessClassId,
 } from "../../config/freshness.js";
+import type { Clock } from "../../domain/clock.js";
+import type { EspnCacheRepository } from "../../store/types.js";
 import { FORCE_REFRESH_MIN_INTERVAL_MS } from "../platform.js";
+import type { PublicityStore } from "./auth-gate.js";
 import type { EspnTarget } from "./path.js";
 import type { EspnView } from "./types.js";
 
@@ -60,6 +63,53 @@ export function classForViews(views: readonly EspnView[]): FreshnessClass {
  * The canonical cache key of a request (plan 01 §5.3): route, season, league (or `-`), views in
  * whitelist order, scoringPeriodId, and the canonical filter string.
  */
+/**
+ * The espn_cache row a league's publicity is kept under (auth-gate.ts PublicityStore): not a
+ * request's key — its own namespace — so no read ever serves it as a body.
+ */
+export function publicityKey(leagueId: string): string {
+  return [`espn:v${String(CACHE_KEY_VERSION)}`, "publicity", leagueId].join("|");
+}
+
+/** How long a persisted publicity is trusted: a later process re-learns an older one (one read). */
+export const PUBLICITY_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+
+/**
+ * The league's publicity over the provider's cache (Stage C finding
+ * espn-missing-season-404-not-cached): every process that learns `settings.isPublic` — from any
+ * league body, or a keyless 401 — writes it here, and the next process reads it instead of sending
+ * the anonymous mSettings read again. Best effort both ways: no row, a row older than
+ * PUBLICITY_MAX_AGE_MS or an unreadable one reads as unknown (the read learns it once).
+ */
+export function cachedPublicity(
+  cache: Pick<EspnCacheRepository, "get" | "put">,
+  leagueId: string,
+  clock: Pick<Clock, "nowMs" | "nowIso">,
+): PublicityStore {
+  const key = publicityKey(leagueId);
+  return {
+    load: () => {
+      const e = cache.get(key);
+      if (e === null) return null;
+      const at = Date.parse(e.fetched_at);
+      if (!Number.isFinite(at) || clock.nowMs() - at > PUBLICITY_MAX_AGE_MS) return null;
+      const v = (JSON.parse(e.parsed_json) as { isPublic?: unknown } | null)?.isPublic;
+      return typeof v === "boolean" ? v : null;
+    },
+    save: (isPublic) => {
+      cache.put({
+        key,
+        parsed_json: JSON.stringify({ isPublic }),
+        fetched_at: clock.nowIso(),
+        server_time: null,
+        etag: null,
+        http_status: 200,
+        raw_body: null,
+      });
+    },
+  };
+}
+
 export function cacheKey(
   target: EspnTarget,
   leagueId: string | null,

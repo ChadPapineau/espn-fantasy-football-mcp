@@ -62,7 +62,7 @@ import {
 } from "./limiter.js";
 import { primaryView, type EspnTarget } from "./path.js";
 import { sendAttempt, type AttemptAnswer, type FetchLike } from "./transport.js";
-import { CookieGate, type CookieUse } from "./auth-gate.js";
+import { CookieGate, type CookieUse, type PublicityStore } from "./auth-gate.js";
 import { ESPN_BACKOFF } from "../../config/schema.js";
 import type { EspnView } from "./types.js";
 import { absentMeansEmptyPaths } from "./views/index.js";
@@ -124,6 +124,8 @@ export interface RequestDeps {
   readonly random?: () => number;
   readonly log?: ProviderLog;
   readonly attemptTimeoutMs?: number;
+  /** Where the league's publicity outlives this process (auth-gate.ts PublicityStore). */
+  readonly publicity?: PublicityStore;
 }
 
 /** One read: the request, its cookie rule and the typed parse of its body. */
@@ -239,7 +241,12 @@ export class EspnRequester {
       onEvent: (e) => deps.log?.debug(e),
     });
     this.drift = new DriftStateWriter(deps.driftState, deps.clock, deps.host);
-    this.cookies = new CookieGate(deps.credentials, deps.clock, deps.observer);
+    this.cookies = new CookieGate(
+      deps.credentials,
+      deps.clock,
+      deps.observer,
+      deps.publicity ?? null,
+    );
   }
 
   /** Today's 304 count (UTC day) — `transportStatus().etag_304_count`. */

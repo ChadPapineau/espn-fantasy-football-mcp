@@ -49,29 +49,82 @@ export function hasProbeAccess(
   return typeof (a as Partial<CredentialProbeAccess>).getCookieHeaderForProbe === "function";
 }
 
+/**
+ * Where the league's publicity outlives a process (the provider's espn_cache row — Stage C finding
+ * espn-missing-season-404-not-cached: every `eff check-auth` / `eff doctor --online` process
+ * re-learned it with an anonymous mSettings read, and a private league's 401 was never kept).
+ * `load` answers null when nothing usable is stored (absent, too old, unreadable).
+ */
+export interface PublicityStore {
+  load(): boolean | null;
+  save(isPublic: boolean): void;
+}
+
 /** The provider's cookie gate (one per provider instance). */
 export class CookieGate {
+  /** What THIS process saw ESPN answer (a league body, a keyless 401); null until it has. */
   private publicity: boolean | null = null;
+  /** The value another process kept (PublicityStore), read once and lazily; null when none. */
+  private kept: boolean | null = null;
+  /** The persisted publicity was consulted (once per process, lazily). */
+  private loaded = false;
+  /** This process has written what it learned (once, and again on every change). */
+  private saved = false;
   private lastAcceptedObservedMs = Number.NEGATIVE_INFINITY;
   private swid: string | null = null;
   private readonly auth: CredentialAuthority | null;
   private readonly clock: Clock;
   private readonly observer: CredentialObserver;
+  private readonly store: PublicityStore | null;
 
-  constructor(auth: CredentialAuthority | null, clock: Clock, observer: CredentialObserver) {
+  constructor(
+    auth: CredentialAuthority | null,
+    clock: Clock,
+    observer: CredentialObserver,
+    store: PublicityStore | null = null,
+  ) {
     this.auth = auth;
     this.clock = clock;
     this.observer = observer;
+    this.store = store;
   }
 
-  /** `settings.isPublic` as last learned: true, false, or null (unknown). */
+  /** What is known: learned in this process, else the persisted value (read once), else null. */
+  private known(): boolean | null {
+    if (this.publicity !== null) return this.publicity;
+    if (!this.loaded) {
+      this.loaded = true;
+      try {
+        const v = this.store?.load() ?? null;
+        if (typeof v === "boolean") this.kept = v;
+      } catch {
+        // an unreadable store reads as unknown: the anonymous read learns it
+      }
+    }
+    return this.kept;
+  }
+
+  /** Records a learned value, persisting it once per process and on every change. */
+  private learn(v: boolean): void {
+    const changed = this.publicity !== v;
+    this.publicity = v;
+    if (this.store === null || (!changed && this.saved)) return;
+    this.saved = true;
+    try {
+      this.store.save(v);
+    } catch {
+      // best effort: an unwritten value is learned again by the next process
+    }
+  }
+
+  /** `settings.isPublic` as last learned (or persisted): true, false, or null (unknown). */
   isPublic(): boolean | null {
-    return this.publicity;
+    return this.known();
   }
 
   /** Records what a response proved (a keyless 401 proves private). */
   learnPublic(v: boolean): void {
-    this.publicity = v;
+    this.learn(v);
   }
 
   /** Learns `settings.isPublic` from any league body that carries it. */
@@ -80,7 +133,7 @@ export class CookieGate {
     const s = (body as { settings?: unknown }).settings;
     if (typeof s !== "object" || s === null) return;
     const p = (s as { isPublic?: unknown }).isPublic;
-    if (typeof p === "boolean") this.publicity = p;
+    if (typeof p === "boolean") this.learn(p);
   }
 
   /**
@@ -89,7 +142,7 @@ export class CookieGate {
    * anonymously on a public league keep working while the cookie is rejected.
    */
   needsPublicity(): boolean {
-    return this.auth !== null && this.publicity === null && this.auth.state() === "rejected";
+    return this.auth !== null && this.known() === null && this.auth.state() === "rejected";
   }
 
   /**
@@ -117,11 +170,14 @@ export class CookieGate {
    */
   async forRequest(use: CookieUse, route: EspnRoute): Promise<string | null> {
     if (use === "never" || route === "season" || route === "players") return null;
+    // a `required` view is read keyless only on a league THIS process saw answer as public: the
+    // kept value decides the probe and the `auto` reads, never that a cookie-only view (transactions,
+    // pending claims — empty anonymously, research 03 §B) is read without one
     if (this.auth === null) {
       if (use === "required" && this.publicity !== true) this.requires();
       return null;
     }
-    if (use === "auto" && this.publicity === true) return null;
+    if (use === "auto" && this.known() === true) return null;
     const labelledNone = !this.configured();
     const r = await this.auth.getCookieHeader();
     if (r.ok) {
@@ -136,7 +192,7 @@ export class CookieGate {
       return null;
     }
     if (r.reason === "rejected") {
-      if (this.publicity === true && use === "auto") return null;
+      if (this.known() === true && use === "auto") return null;
       throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
     }
     throw new EspnCredentialError("INTERNAL", `credential_${r.reason}`);
@@ -154,7 +210,7 @@ export class CookieGate {
   ): Promise<void> {
     if (this.auth === null) return;
     if (kind === "accepted") {
-      if (this.publicity !== false) return;
+      if (this.known() !== false) return;
       const now = this.clock.nowMs();
       if (
         this.auth.state() === "validated" &&

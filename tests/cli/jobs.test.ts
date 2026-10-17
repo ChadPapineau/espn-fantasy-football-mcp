@@ -481,8 +481,16 @@ describe("credential-check and check-auth", () => {
     store.close();
     expect(calls).toHaveLength(1);
     const ca = await runtime({}, { fetch: f.fetch });
+    const before = f.urls.length;
     expect(await checkAuth(ca.io, ca.config, ca.log, { json: true })).toBe(3);
-    expect(JSON.parse(ca.io.out.text)).toMatchObject({ accepted: false, probe: "settings" });
+    // the credential check's process learned the league's publicity (league-a's body: isPublic
+    // true) and kept it: this process probes the public league on the board (plan 02 §2.1 R-5 — a
+    // cookie-bearing 200 on a public league proves nothing) without the anonymous mSettings read
+    // every probe process sent again (Stage C finding espn-missing-season-404-not-cached)
+    expect(JSON.parse(ca.io.out.text)).toMatchObject({ accepted: false, probe: "board" });
+    expect(
+      f.urls.slice(before).filter((u) => u.includes("view=mSettings") && u.includes("view=mNav")),
+    ).toEqual([]);
     const soon = await runtime({}, { fetch: f.fetch, clock: ca.io.clock });
     expect(await checkAuth(soon.io, soon.config, soon.log, { json: false })).toBe(1);
     expect(soon.io.err.text).toContain("at most one probe per minute");

@@ -59,6 +59,7 @@ import {
   type TxnQuery,
 } from "../platform.js";
 import { EspnCredentialError } from "./auth-gate.js";
+import { cachedPublicity } from "./cache.js";
 import { EspnDriftError, EspnUpstreamError } from "./errors.js";
 import {
   boardProbeFilter,
@@ -321,6 +322,8 @@ export class EspnProvider implements FantasyPlatform {
       ...(deps.random === undefined ? {} : { random: deps.random }),
       ...(deps.log === undefined ? {} : { log: deps.log }),
       ...(deps.attemptTimeoutMs === undefined ? {} : { attemptTimeoutMs: deps.attemptTimeoutMs }),
+      // the league's publicity outlives the process: a CLI probe never re-learns it anonymously
+      publicity: cachedPublicity(deps.repos.cache, deps.config.leagueId, deps.clock),
     });
   }
 
