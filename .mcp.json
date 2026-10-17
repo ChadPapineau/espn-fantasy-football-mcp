@@ -5,7 +5,8 @@
       "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/eff-launch.sh", "serve"],
       "env": {
         "ESPN_LEAGUE_ID": "${user_config.league_id}",
-        "ESPN_SEASON": "${user_config.season}"
+        "ESPN_SEASON": "${user_config.season}",
+        "EFF_TOOLSET": "${user_config.toolset}"
       }
     }
   }

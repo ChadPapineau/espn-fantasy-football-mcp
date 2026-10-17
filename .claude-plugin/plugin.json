@@ -18,9 +18,15 @@
     },
     "season": {
       "type": "string",
-      "title": "Season",
-      "description": "The season year to read.",
-      "default": "2026"
+      "title": "Season (ESPN_SEASON)",
+      "description": "Leave empty to read the current NFL season, the one the eff CLI and the scheduled jobs read. A year pins this plugin's server to that season only.",
+      "default": ""
+    },
+    "toolset": {
+      "type": "string",
+      "title": "Toolset (EFF_TOOLSET)",
+      "description": "full registers all 34 read tools, which the five P1 Skills need; core registers the 18 P0 tools. Empty: config.json's EFF_TOOLSET, else core. Restart the client after a change.",
+      "default": ""
     }
   }
 }

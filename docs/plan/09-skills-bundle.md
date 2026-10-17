@@ -225,12 +225,18 @@ As 06 §D.15: ESPN's `mDraftDetail`, native ADP and `auctionValueAverage`, the f
 ```
 /                                        # repo root == plugin root (`claude --plugin-dir .` in development)
 ├── .claude-plugin/
-│   ├── plugin.json                      # name "espn-fantasy-football" (= the client config key), version = package.json
+│   ├── plugin.json                      # name "espn-fantasy-football" (= the client config key), version = package.json;
+│   │                                    #   userConfig (non-sensitive): league_id, season, toolset — season and toolset default to ""
 │   └── marketplace.json                 # { name: "espn-fantasy-football-mcp", plugins: [{ name: "espn-fantasy-football", source: "./" }] }
 ├── .mcp.json                            # { "espn-fantasy-football": { command: "/bin/sh", args: ["${CLAUDE_PLUGIN_ROOT}/scripts/eff-launch.sh", "serve"],
-│                                        #     env: { ESPN_LEAGUE_ID: "${user_config.league_id}", ESPN_SEASON: "${user_config.season}" } } }
+│                                        #     env: { ESPN_LEAGUE_ID: "${user_config.league_id}", ESPN_SEASON: "${user_config.season}",
+│                                        #            EFF_TOOLSET: "${user_config.toolset}" } } }
 │                                        #   variables only; no secrets; no absolute user paths (plan 03 §4.2 — T-01, resolved);
-│                                        #   no EFF_CONFIG_DIR / EFF_CACHE_DIR — one shared location with the CLI and launchd (below)
+│                                        #   no EFF_CONFIG_DIR / EFF_CACHE_DIR — one shared location with the CLI and launchd (below);
+│                                        #   an option left empty reaches the server empty, which it reads as unset (config.json,
+│                                        #   then its default): the plugin never pins a season the CLI and the jobs do not read, and
+│                                        #   the toolset option is how a plugin install sets the `EFF_TOOLSET=full` the P1 Skills
+│                                        #   ask for (§2 orient.md) — Stage C
 ├── skills/
 │   ├── _shared/references/              # orient.md · tool-outputs.md (GENERATED) · output-template.md · guardrails.md · log.md ·
 │   │                                    #   espn-vocabulary.md · priority-waivers.md   (not a Skill; ignored by the skills scan)
