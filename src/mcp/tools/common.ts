@@ -7,7 +7,9 @@
 // rule for a 4th request (plan 01 §5.6). Ported from sibling @5daa625, adapted to the ESPN seam.
 import { freshnessClass } from "../../config/freshness.js";
 import type { DatasetResult, DatasetStamp } from "../../domain/analytics/types.js";
-import { rosShareOptsOf, type WeeklyValuesOpts } from "../../domain/analytics/waivers.js";
+import { yieldTurn } from "../../domain/analytics/cooperative.js";
+import { espnRosLastWeek, rosWeeksOf, type RosWeek } from "../../domain/analytics/projection.js";
+import type { WeeklyValuesOpts } from "../../domain/analytics/waivers.js";
 import {
   crosswalkStatusOfPair,
   identityOfPlatformPlayer,
@@ -280,9 +282,34 @@ export async function rosReadingOf(
   return ros;
 }
 
-/** The weeklyValues options of `p` under `ros` (null: weeklyValues' default reading). */
+/**
+ * Per reading: the season's last week and each pro team's weeks. `rosWeeksOf` scans the season's
+ * games (~5 000 game visits), so it runs once per pro team per call — never per player: per player
+ * it cost a league-wide tool (E4, E9, E11) 40–60 ms of one turn (the stall bound, plan 03 §1.2).
+ */
+const ROS_MEMO = new WeakMap<
+  RosReading,
+  { readonly last: Week; readonly byTeam: Map<number, readonly RosWeek[]> }
+>();
+
+/**
+ * The weeklyValues options of `p` under `ros` (null: weeklyValues' default reading) — exactly
+ * waivers.ts `rosShareOptsOf` for a platform player (who carries no ESPN game count), memoised per
+ * pro team.
+ */
 export function rosOptsOf(p: PlatformPlayer, ros: RosReading | null): WeeklyValuesOpts {
-  return ros === null ? {} : rosShareOptsOf(p, ros.schedule, ros.season, ros.nowMs);
+  if (ros === null) return {};
+  let memo = ROS_MEMO.get(ros);
+  if (memo === undefined) {
+    memo = { last: espnRosLastWeek(ros.schedule, ros.season), byTeam: new Map() };
+    ROS_MEMO.set(ros, memo);
+  }
+  let weeks = memo.byTeam.get(p.pro_team_id);
+  if (weeks === undefined) {
+    weeks = rosWeeksOf(ros.schedule, p.pro_team_id, memo.last, ros.nowMs);
+    memo.byTeam.set(p.pro_team_id, weeks);
+  }
+  return { ros_last_week: memo.last, ros_weeks: weeks, position_id: p.position_id };
 }
 
 /** Games of one week. */
@@ -421,10 +448,10 @@ export function isOptionalReadFailure(e: unknown): boolean {
  * Lets the event loop run (timers, stdin, the shutdown handler) before the next synchronous step of
  * a tool: a cached roster parse, the player-index mapping and the dataset reads each take ~10–25 ms,
  * and chained as one macrotask they passed the 50 ms main-loop stall bound (plan 03 §1.2; plan 10
- * A16a; ADV OBJ-07 — found by the full-toolset stall probe). Costs one setImmediate.
+ * A16a; ADV OBJ-07 — found by the full-toolset stall probe). Through the process-wide turn gate
+ * (cooperative.ts `yieldTurn`): one slice per loop turn however many calls are in flight (Stage C
+ * finding analytics-parallel-calls-stall-loop).
  */
 export function turn(): Promise<void> {
-  return new Promise((resolve) => {
-    setImmediate(resolve);
-  });
+  return yieldTurn();
 }

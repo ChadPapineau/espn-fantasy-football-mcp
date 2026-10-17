@@ -23,6 +23,7 @@ import {
   type DegradedRead,
   type PlatformStamp,
 } from "../../domain/league/types.js";
+import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import { checkResponse, failsResponse, type DriftCheck } from "../../drift/detect.js";
 import { errorPath } from "../../drift/pattern.js";
 import { DriftStateWriter, driftMetaFor } from "../../drift/state.js";
@@ -185,11 +186,14 @@ function memoStamp(e: EspnCacheEntry): string {
   return `${e.fetched_at}|${e.etag ?? ""}|${String(e.parsed_json.length)}`;
 }
 
-/** Lets the event loop run (timers, stdin, the shutdown handler) before the next synchronous step. */
+/**
+ * Lets the event loop run (timers, stdin, the shutdown handler) before the next synchronous step,
+ * through the process-wide turn gate (src/domain/analytics/cooperative.ts `yieldTurn`): a plain
+ * setImmediate per read let every in-flight call's slice run in the same check phase, N slices back
+ * to back at N parallel calls (Stage C finding analytics-parallel-calls-stall-loop; plan 03 §1.2).
+ */
 export function yieldToLoop(): Promise<void> {
-  return new Promise((resolve) => {
-    setImmediate(resolve);
-  });
+  return yieldTurn();
 }
 
 /**
@@ -431,6 +435,11 @@ export class EspnRequester {
       if (e instanceof UpstreamBudgetExhausted) throw e;
       return fallback(e);
     }
+    // an upstream answer resumes its readers outside the turn gate (an I/O completion, every joiner
+    // of a coalesced read at once): each takes a gated turn before its synchronous work — the parse
+    // below and the caller's own steps — so parallel calls never share a turn (plan 03 §1.2; Stage C
+    // finding analytics-parallel-calls-stall-loop)
+    await yieldToLoop();
     let value: T;
     try {
       value = fresh.parsedBy === spec.parse ? (fresh.parsed as T) : spec.parse(fresh.body);

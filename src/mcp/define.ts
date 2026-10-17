@@ -13,6 +13,7 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
+import { yieldTurn } from "../domain/analytics/cooperative.js";
 import { createUpstreamBudget, type UpstreamBudget } from "../providers/platform.js";
 import { CallCancelled, controlsFromRequest, productionCallPacer, type CallPacer } from "./call.js";
 import {
@@ -489,6 +490,10 @@ export async function runTool(
   options: McpServerOptions,
 ): Promise<ToolSuccessResult> {
   const log = services.logger;
+  // a call starts in a turn of its own: N requests arriving in one stdin chunk are dispatched in one
+  // turn, and each ran its first synchronous steps (cached reads, the player mapping) before its
+  // first yield — N of them back to back (Stage C finding analytics-parallel-calls-stall-loop)
+  await yieldTurn();
   services.beforeCall?.();
   const ctx = toolContext(base, services, options);
   const started = performance.now();
@@ -518,10 +523,9 @@ export async function runTool(
     throw mapped;
   }
   // the envelope is built, fitted and schema-checked synchronously (tens of ms for an analytics
-  // result): a yield first keeps it a macrotask of its own (plan 03 §1.2 stall bound; plan 10 A16a)
-  await new Promise<void>((resolve) => {
-    setImmediate(resolve);
-  });
+  // result): a yield first keeps it a turn of its own (plan 03 §1.2 stall bound; plan 10 A16a) —
+  // through the process-wide gate, so parallel calls' envelopes never share a turn (Stage C)
+  await yieldTurn();
   const env = envelopeOf(out, ctx, def);
   const budget = def.budget === "analytics" ? ANALYTICS_BUDGET_CHARS : RESULT_BUDGET_CHARS;
   const fit = fitToBudget(env, budget, out.listKey, {

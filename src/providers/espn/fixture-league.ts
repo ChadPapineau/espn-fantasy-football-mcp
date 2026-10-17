@@ -15,6 +15,7 @@
 // the manifest's root, and patch pointers can never reach a prototype.
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import { FixtureError, composeBodies } from "./fixture.js";
 import { HEADER_FILTER, HEADER_PLAYER_COUNT, HEADER_TRANSACTION_COUNT } from "./types.js";
 import type { FetchLike } from "./transport.js";
@@ -301,12 +302,11 @@ function trimSplits(e: JsonObject, sp: number | null): JsonObject {
 /**
  * Lets the event loop run between the fetch's synchronous phases (a file read and parse, a pool
  * query, a serialisation): real I/O would, and the 50 ms stall bound is measured in fixture mode
- * (plan 10 A16a; plan 05 §0).
+ * (plan 10 A16a; plan 05 §0). Through the process-wide turn gate, as every slice is (Stage C
+ * finding analytics-parallel-calls-stall-loop).
  */
 function turn(): Promise<void> {
-  return new Promise((resolve) => {
-    setImmediate(resolve);
-  });
+  return yieldTurn();
 }
 
 // --- the fetch -------------------------------------------------------------------------------------

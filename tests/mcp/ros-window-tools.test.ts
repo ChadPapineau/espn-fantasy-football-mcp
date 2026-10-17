@@ -13,7 +13,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PlatformPlayer, ProSchedule } from "../../src/domain/league/types.js";
 import { remainingWeeks } from "../../src/domain/league/rules.js";
 import { waiverPlayerOf } from "../../src/mcp/tools/analytics.js";
-import { rosReadingFrom } from "../../src/mcp/tools/common.js";
+import { rosShareOptsOf } from "../../src/domain/analytics/waivers.js";
+import { rosOptsOf, rosReadingFrom } from "../../src/mcp/tools/common.js";
 import { valueWeeks } from "../../src/mcp/tools/p1-common.js";
 import { SEASON, T0, call, connect, makeWorld, type World } from "./helpers/world.js";
 
@@ -108,6 +109,21 @@ describe("the tools' weekly values are E1's (projection-ros-includes-week18)", (
     // the comparison covers the later weeks, where the old reading was short by wk4/13
     expect(compared).toBeGreaterThan(60);
     expect(later).toBeGreaterThan(40);
+  });
+
+  it("rosOptsOf is rosShareOptsOf for every platform player, memoised per pro team", async () => {
+    const ref = world.services.league;
+    const sched = scheduleOf();
+    const ros = rosReadingFrom(sched, SEASON, Date.parse(T0));
+    const players = (await world.wiring.provider.getRosters(ref, 4)).value.flatMap((r) =>
+      r.entries.map((e) => e.player),
+    );
+    expect(players.length).toBeGreaterThan(100);
+    for (const p of players)
+      expect(rosOptsOf(p, ros), String(p.ref.id)).toEqual(
+        rosShareOptsOf(p, sched, SEASON, Date.parse(T0)),
+      );
+    expect(rosOptsOf(players[0]!, null)).toEqual({});
   });
 
   it("without a schedule the reading is null and said; the default reading is the old one", () => {
