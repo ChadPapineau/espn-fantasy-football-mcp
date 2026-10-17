@@ -46,6 +46,8 @@
     "build:plugin-evals": "node scripts/skills/build-plugin-evals.mjs",
     "fixtures:gen": "tsx scripts/gen-fixtures.ts",
     "fixtures:check": "tsx scripts/gen-fixtures.ts --check",
+    "docs:gen": "tsx scripts/gen-config-docs.ts --write && tsx scripts/gen-tool-docs.ts --write",
+    "check:docs": "tsx scripts/gen-config-docs.ts --check && tsx scripts/gen-tool-docs.ts --check",
     "pack:scan": "node scripts/ci/scan-tarball.mjs",
     "scan:secrets": "node scripts/dev/scan-secrets.mjs",
     "eff": "node dist/cli.js",

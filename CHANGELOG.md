@@ -33,9 +33,16 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   supply-chain: `npm audit --omit=dev --audit-level=high`, no install scripts, licenses, full
   runtime tree; pack scan; process), `docs.yml` (Mermaid render with pinned mermaid-cli and an
   explicit `chrome-headless-shell` install, internal links, identifiers, plugin + Skills
-  structure and `claude plugin validate --strict`), `secret-scan.yml` (workflow `secrets`; gitleaks pinned by version and
-  sha256 over the full history and the tree, plus its self-test), Dependabot (monthly, grouped) and
-  a pull-request template. Every action pinned by commit SHA; `contents: read`; no secrets.
+  structure and `claude plugin validate --strict`, and `docs-current` — `npm run check:docs`
+  regenerates the README's config keys, test keys and registered tools from the config schema and
+  the registry and fails on any difference, on a catalog Status the registry contradicts and on a
+  cheat-sheet field the tool's output schema lacks; `npm run docs:gen` rewrites them), `secret-scan.yml` (workflow `secrets`; gitleaks pinned by version and
+  sha256 over the full history and the tree, plus its self-test), `release.yml` (on a `v*` tag:
+  the full `ci.yml` gate, `scripts/ci/check-changelog.mjs` — the tag, `package.json` and a dated
+  section here agree — `npm shrinkwrap` from the lockfile, the tarball scan, `npm pack`, and a
+  GitHub Release with the tarball and its sha256; never `npm publish`), Dependabot (monthly,
+  grouped) and a pull-request template. Every action pinned by commit SHA; `contents: read` (the
+  release job alone `contents: write`); no secrets.
 - **Plugin root (plan 09 §4, K8).** `.claude-plugin/plugin.json` (`espn-fantasy-football`,
   `userConfig` for the league id, the season and the toolset — the season and the toolset empty
   by default, so the server reads the current NFL season like the `eff` CLI and the jobs, and

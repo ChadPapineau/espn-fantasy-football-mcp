@@ -32,6 +32,8 @@ describe("classify", () => {
     "LICENSE",
     "CHANGELOG.md",
     "package.json",
+    // release.yml shrinkwraps the committed lockfile before packing (plan 04 §4.4)
+    "npm-shrinkwrap.json",
   ])("allows %s", (f) => {
     expect(classify(f, FILES)).toBeNull();
   });

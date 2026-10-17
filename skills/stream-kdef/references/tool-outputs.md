@@ -1,6 +1,6 @@
 ## Tool outputs — the cheat-sheet (`EFF_TOOLSET=core`, and the P1 tools under `full`)
 
-Hand-maintained from the tool catalog until the generator (`scripts/gen-tool-docs.ts`) emits it from the registry's output schemas; the same text is served as `espn-ff://docs/tool-outputs`. Tool names here are bare; never qualify them in prose.
+Written by hand and held to the registry: CI's `docs-current` check (`scripts/gen-tool-docs.ts`) fails when a field named below is not in that tool's output schema, or a registered tool has no row; the same text is served as `espn-ff://docs/tool-outputs`. Tool names here are bare; never qualify them in prose.
 
 The two rules every result is read under, verbatim:
 

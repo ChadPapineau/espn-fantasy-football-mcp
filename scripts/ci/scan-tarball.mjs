@@ -12,8 +12,12 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT, isMain, isRecord, parseArgs, readJson, reporter, runNpm } from "./_lib.mjs";
 
-/** Files npm always adds regardless of `files`. */
-const ALWAYS = new Set(["package.json", "README.md", "LICENSE", "LICENCE"]);
+/**
+ * Files npm always adds regardless of `files`. npm-shrinkwrap.json is packed whenever it exists:
+ * release.yml writes it from the committed lockfile before packing, so a tarball install resolves
+ * the same locked tree (plan 04 §4.4; README "eff is the package's CLI").
+ */
+const ALWAYS = new Set(["package.json", "README.md", "LICENSE", "LICENCE", "npm-shrinkwrap.json"]);
 
 /** @type {readonly { re: RegExp, why: string }[]} */
 export const FORBIDDEN = Object.freeze([

@@ -1,0 +1,83 @@
+# release — on a tag vX.Y.Z (plan 04 §4.4, R8; Stage C finding ci-release-workflow-missing): the
+# full ci.yml gate first (called as a reusable workflow, never copied: the same jobs on the same
+# commit), then the changelog check (scripts/ci/check-changelog.mjs: the tag, package.json's
+# version and a dated CHANGELOG.md section agree; the section is the release body), npm shrinkwrap
+# (the committed lockfile becomes the tarball's npm-shrinkwrap.json, so `npm install -g` of the
+# tarball resolves the same locked tree with its integrity hashes — npm pack never ships
+# package-lock.json), the tarball scan (scan-tarball.mjs: the files allow-list, the plugin root,
+# secrets and identifiers), npm pack, and a GitHub Release carrying the tarball and its sha256.
+#
+# Choices, and why
+# - No npm publish from CI (R8): publishing, if ever, is the owner's manual `npm publish
+#   --provenance`.
+# - permissions: contents: read by default; the release job alone gets contents: write — the one
+#   scope `gh release create` needs, with the job's own token (no repository secret of any kind).
+# - Actions pinned to full commit SHAs with the `# vX.Y.Z` comment; persist-credentials: false;
+#   `npm ci` of the committed lockfile with ignore-scripts=true (.npmrc).
+# - A tag releases only once the ci gate is green on it (needs: ci); a re-pushed tag cancels the
+#   superseded run (a tag is never refs/heads/main).
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+
+jobs:
+  ci:
+    name: ci
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: release
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install (lockfile only, no lifecycle scripts)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: The tag, package.json and CHANGELOG.md agree (the release notes)
+        run: node scripts/ci/check-changelog.mjs --tag "$GITHUB_REF_NAME" --notes "$RUNNER_TEMP/notes.md"
+      - name: Lock the tarball's tree (npm-shrinkwrap.json from the committed lockfile)
+        run: npm shrinkwrap --ignore-scripts
+      - name: Scan what npm pack ships (files allow-list, plugin root, secrets, identifiers)
+        run: npm run pack:scan
+      - name: Pack and checksum
+        run: |
+          set -euo pipefail
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP"
+          tgz="espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
+          test -f "$tgz"
+          sha256sum "$tgz" > "$tgz.sha256"
+      - name: Create the GitHub Release (nothing goes to the npm registry — R8)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tgz="$RUNNER_TEMP/espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
+          pre=()
+          case "$GITHUB_REF_NAME" in *-*) pre=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" "$tgz" "$tgz.sha256" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" "${pre[@]}"

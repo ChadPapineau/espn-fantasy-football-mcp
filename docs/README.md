@@ -2,12 +2,13 @@
 
 The research, the plan, the record of how the plan was attacked and defended, and the orchestration
 state of the agent program that produced them. **Read [`HANDOFF.md`](HANDOFF.md) first** in any fresh
-session; then [`plan/00-index.md`](plan/00-index.md) for the plan in reading order. Everything in this
-directory describes a product that is **📋 planned, not built** — no server code exists, and the build
-starts only after the owner approves the plan.
+session; then [`plan/00-index.md`](plan/00-index.md) for the plan in reading order. The product these documents
+describe is **built and in QA** (Stage C): the read-only server, the `eff` CLI and the Skills exist;
+the write module is not built. The research and the plan are kept as written, with the build-time
+rulings in [`plan/changelog.md`](plan/changelog.md).
 
 > **Not affiliated with ESPN.** This project is not affiliated with, endorsed by, or supported by ESPN
-> or The Walt Disney Company. It plans to use ESPN's unofficial, undocumented fantasy API with the
+> or The Walt Disney Company. It uses ESPN's unofficial, undocumented fantasy API with the
 > user's own session cookies; the terms-of-use and account-risk disclosure is in
 > [`research/03-espn-api.md` §D](research/03-espn-api.md#d-terms-of-service-rate-limits-account-risk)
 > and in the [README](../README.md#terms-of-use-and-account-risk).

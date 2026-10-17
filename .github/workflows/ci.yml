@@ -43,6 +43,8 @@ name: ci
 on:
   push:
   pull_request:
+  # release.yml calls this gate on a tag before it packs (plan 04 §4.4: "full ci.yml jobs")
+  workflow_call:
   workflow_dispatch:
   schedule:
     - cron: "23 6 * * 1" # Monday 06:23 UTC: the weekly macOS process run (plan 10 A15a)
@@ -51,7 +53,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event_name }}-${{ github.ref }}
+  # github.workflow is the CALLER's name in a called run ("release"): a tag's own ci run and the one
+  # release.yml calls never share a group, so neither cancels the other
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
 
 jobs:

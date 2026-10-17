@@ -1,13 +1,14 @@
 # Security policy
 
-This repository holds the **plan** for a local, read-only-by-default MCP server for ESPN Fantasy
-Football. **No server code exists yet** — the build starts only after the owner approves the plan
-(see [README → Status](README.md#status)). This policy covers what is here today (documents and
-configuration examples) and the code, CLI, Skills and CI workflows as they land.
+This repository holds a local, read-only MCP server for ESPN Fantasy Football, its `eff` CLI, its
+Skills and CI workflows, and the plan they were built from. The read-only product is built and in
+QA; no version is tagged yet, and the write module is not built (see
+[README → Status](README.md#status)). This policy covers all of it: the code, the CLI, the Skills,
+the workflows, the documents and the configuration examples.
 
 > **Not affiliated with ESPN.** This project is not affiliated with, endorsed by, or supported by
-> ESPN or The Walt Disney Company. It is planned to use ESPN's unofficial, undocumented fantasy
-> API with the user's own session cookies. Read the
+> ESPN or The Walt Disney Company. It uses ESPN's unofficial, undocumented fantasy API with the
+> user's own session cookies. Read the
 > [terms-of-use and account-risk disclosure](README.md#terms-of-use-and-account-risk) before you
 > decide to use it.
 
@@ -20,12 +21,12 @@ Use **GitHub private vulnerability reporting** for this repository: open the **S
 choose **Report a vulnerability**. The report reaches the maintainer only and becomes a private
 security advisory in which the fix and the disclosure are coordinated.
 
-> **Maintainer step (pending).** Private vulnerability reporting is a repository setting the
-> maintainer switches on (*Settings → Code security → Private vulnerability reporting*); as of
-> 2026-09-30 it is **off**, so the **Report a vulnerability** button is not shown yet. Until it is
-> on, open an ordinary issue titled `security: please enable private vulnerability reporting`
-> **with no details of the finding**; the maintainer enables the setting and follows up there.
-> There is deliberately no e-mail channel: the repository is public and identifier-free by rule.
+> Private vulnerability reporting is **on** for this repository (*Settings → Code security →
+> Private vulnerability reporting*), so the **Report a vulnerability** button is shown on the
+> Security tab. If it is ever missing, open an ordinary issue titled `security: please enable
+> private vulnerability reporting` **with no details of the finding**; the maintainer enables the
+> setting and follows up there. There is deliberately no e-mail channel: the repository is public
+> and identifier-free by rule.
 
 What helps in a report: the file, commit or workflow involved; the class of problem (credential
 handling, prompt injection, supply chain, a security claim in the plan that does not hold); the
@@ -42,7 +43,7 @@ Intentions of a solo, part-time maintainer — not guarantees:
 |---|---|
 | Acknowledgement | within **7 days** of the report |
 | Triage and severity | within **14 days** — which class it falls into and whether it is in scope |
-| Fix or mitigation | as fast as the severity warrants; credential exposure and anything on the (planned, off-by-default) write path first |
+| Fix or mitigation | as fast as the severity warrants; credential exposure and anything on the (unbuilt, off-by-default) write path first |
 | Disclosure | coordinated through the advisory; reporters are credited unless they ask not to be |
 
 ## Scope
@@ -122,7 +123,7 @@ works for whoever saw it until you have done all of the following:
    **unverified** (ESPN documents no revocation behaviour), which is exactly why prevention
    matters more than cleanup.
 2. **Log out of ESPN in the browser** the cookie came from, log back in, and copy the new values.
-3. **Re-run `eff setup`** (planned), which overwrites the stored values and re-checks them against
+3. **Re-run `eff setup`**, which overwrites the stored values and re-checks them against
    your league; `eff setup --reset` or `eff uninstall` removes them from the keychain and the
    fallback file.
 4. **Delete the copies you control** — the chat message, the screenshot, the pasted note, the
@@ -133,7 +134,7 @@ works for whoever saw it until you have done all of the following:
 
 ## Writes and the confirmation gate
 
-The planned server is **read-only by default**. The write module (lineup changes first; add/drop,
+The server is **read-only**; the write module is not built. The write module (lineup changes first; add/drop,
 waiver claims and trades as separate later gates) is opt-in, off, and carries the plan's own
 verdict **"recommended: do not build yet"**. If it is ever built, write tools are not even
 registered unless, when the server starts, the operator has set `EFF_ENABLE_WRITES=true`, has typed

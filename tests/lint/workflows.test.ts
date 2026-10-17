@@ -55,10 +55,18 @@ describe.each(files)("%s", (file) => {
   const text = load(file);
   const jobs = jobsOf(text);
 
-  it("has read-only default permissions and nothing wider anywhere", () => {
+  it("has read-only default permissions and nothing wider anywhere (the release job's contents: write alone)", () => {
     expect(text).toMatch(/^permissions:\n {2}contents: read\n/m);
-    expect(text).not.toMatch(/:\s*write\b/);
     expect(text).not.toMatch(/permissions:\s*write-all/);
+    // plan 04 §4.4: the one write anywhere is release.yml's `release` job creating the GitHub
+    // Release with its own token — contents: write and nothing else
+    for (const [name, block] of jobs) {
+      const writes = [...block.matchAll(/^\s*([a-z-]+):\s*write\b/gm)].map((m) => m[1]);
+      if (file === "release.yml" && name === "release") expect(writes, name).toEqual(["contents"]);
+      else expect(writes, `${file} ${name}`).toEqual([]);
+    }
+    const outside = text.split(/^jobs:$/m)[0] ?? "";
+    expect(outside).not.toMatch(/:\s*write\b/);
   });
 
   it("never uses pull_request_target, and never reads a repository secret", () => {
@@ -66,10 +74,15 @@ describe.each(files)("%s", (file) => {
     expect(text).not.toMatch(/\$\{\{\s*secrets\./);
   });
 
-  it("pins every action to a full commit SHA with its version comment", () => {
+  it("pins every action to a full commit SHA with its version comment (a called workflow of this repo is the same commit)", () => {
     const uses = [...text.matchAll(/^\s*(?:- )?uses:\s*(\S+)(.*)$/gm)];
     expect(uses.length).toBeGreaterThan(0);
     for (const u of uses) {
+      const local = /^\.\/\.github\/workflows\/([\w.-]+\.ya?ml)$/.exec(u[1] ?? "");
+      if (local !== null) {
+        expect(files, u[0]).toContain(local[1]);
+        continue;
+      }
       expect(u[1], u[0]).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
       expect(u[2], u[0]).toMatch(/# v\d+\.\d+\.\d+/);
     }
@@ -85,6 +98,8 @@ describe.each(files)("%s", (file) => {
   it("bounds every job with a timeout and runs on a pinned image (ubuntu; the -macos jobs macOS)", () => {
     expect(jobs.size).toBeGreaterThan(0);
     for (const [name, block] of jobs) {
+      // a job that calls a workflow of this repo runs that workflow's jobs, bounded there
+      if (/^ {4}uses: \.\/\.github\/workflows\/[\w.-]+\.ya?ml$/m.test(block)) continue;
       expect(block, name).toMatch(/^ {4}timeout-minutes: \d+$/m);
       if (name.endsWith("-macos")) expect(block, name).toMatch(/^ {4}runs-on: macos-15$/m);
       else expect(block, name).toMatch(/^ {4}runs-on: ubuntu-24\.04$/m);
@@ -108,6 +123,13 @@ describe("ci.yml (plan 04 §4.1)", () => {
   const text = load("ci.yml");
   const jobs = jobsOf(text);
   const job = (n: string) => jobs.get(n) ?? "";
+
+  it("can be called by release.yml, in a concurrency group of its own (a tag's direct run never cancels the called one)", () => {
+    expect(text).toMatch(/^on:\n {2}push:\n {2}pull_request:\n {2}workflow_call:\n/m);
+    expect(text).toContain(
+      "group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}",
+    );
+  });
 
   it("runs on every push (no branch/path filter) and every pull request", () => {
     expect(text).toMatch(/^on:\n {2}push:\n {2}pull_request:\n/m);
@@ -501,10 +523,30 @@ describe("docs.yml (plan 04 §4.2)", () => {
     expect(text).toMatch(/^on:\n {2}push:\n {2}pull_request:\n/m);
   });
 
-  it("has the mermaid, links, identifiers and skills jobs", () => {
+  it("has the mermaid, links, identifiers, skills and docs-current jobs", () => {
     expect([...jobs.keys()]).toEqual(
-      expect.arrayContaining(["mermaid", "links", "identifiers", "skills"]),
+      expect.arrayContaining(["mermaid", "links", "identifiers", "skills", "docs-current"]),
     );
+  });
+
+  it("docs-current: the locked tree, a self-test on a doctored copy, then npm run check:docs (Stage C docs-current-check-missing)", () => {
+    const d = job("docs-current");
+    const ci = d.indexOf("run: npm ci");
+    const self = d.indexOf("Self-test");
+    const check = d.indexOf("run: npm run check:docs");
+    expect(ci).toBeGreaterThan(0);
+    expect(self).toBeGreaterThan(ci);
+    expect(check).toBeGreaterThan(self);
+    const st = step(d, "Self-test");
+    // both generators run against the doctored copy, and both must exit 1 with their message
+    expect(st).toContain('scripts/gen-config-docs.ts --check --root "$tmp"');
+    expect(st).toContain('scripts/gen-tool-docs.ts --check --root "$tmp"');
+    expect(st).toContain('[ "$rc_config" -ne 1 ]');
+    expect(st).toContain('[ "$rc_tools" -ne 1 ]');
+    expect(st).toContain("README.md: not current");
+    expect(st).toContain("registered, but the cheat-sheet has no row for it");
+    expect(st).toMatch(/exit 1\n/);
+    expect(d).not.toContain("--ignore-scripts=false");
   });
 
   it("pins the renderer, puppeteer and the Claude Code CLI exactly", () => {
@@ -624,5 +666,46 @@ describe("pins outside Dependabot", () => {
     expect(d).toContain('package-ecosystem: "npm"');
     expect(d.match(/interval: "monthly"/g)).toHaveLength(2);
     expect(d.match(/groups:/g)).toHaveLength(2);
+  });
+});
+
+describe("release.yml (plan 04 §4.4, R8; Stage C finding ci-release-workflow-missing)", () => {
+  const text = load("release.yml");
+  const jobs = jobsOf(text);
+  const release = jobs.get("release") ?? "";
+
+  it("runs on a v* tag only", () => {
+    expect(text).toMatch(/^on:\n {2}push:\n {4}tags:\n {6}- "v\*"\n\n/m);
+  });
+
+  it("releases only after the full ci.yml gate, called on the same commit", () => {
+    expect(jobs.get("ci")).toMatch(/^ {4}uses: \.\/\.github\/workflows\/ci\.yml$/m);
+    expect(release).toMatch(/^ {4}needs: ci$/m);
+  });
+
+  it("checks the changelog, shrinkwraps, scans the tarball, packs, checksums, then creates the GitHub Release — in that order", () => {
+    const order = [
+      "npm ci",
+      "npm run build",
+      'node scripts/ci/check-changelog.mjs --tag "$GITHUB_REF_NAME" --notes "$RUNNER_TEMP/notes.md"',
+      "npm shrinkwrap --ignore-scripts",
+      "npm run pack:scan",
+      "npm pack --ignore-scripts",
+      "sha256sum",
+      'gh release create "$GITHUB_REF_NAME"',
+    ];
+    let at = -1;
+    for (const needle of order) {
+      const i = release.indexOf(needle);
+      expect(i, needle).toBeGreaterThan(at);
+      at = i;
+    }
+    expect(release).toContain('--notes-file "$RUNNER_TEMP/notes.md"');
+    expect(release).toContain("--verify-tag");
+    expect(release).toContain("GH_TOKEN: ${{ github.token }}");
+  });
+
+  it("never publishes to npm (R8: the owner publishes by hand, if ever)", () => {
+    expect(text).not.toMatch(/npm publish/);
   });
 });
