@@ -213,7 +213,7 @@ export interface McpServices {
   readonly recommendationLog: RecommendationLogRepository;
   readonly projections: ProjectionRepository;
   readonly espnProjections: Pick<EspnProjectionRepository, "asOf" | "lastSnapshotAt">;
-  readonly transactionsSeen: Pick<TransactionsSeenRepository, "list" | "oldestSeen">;
+  readonly transactionsSeen: Pick<TransactionsSeenRepository, "list" | "listRange" | "oldestSeen">;
   readonly rosterSnapshots: Pick<RosterSnapshotRepository, "latestTwo">;
   readonly poolSnapshots: Pick<PoolSnapshotRepository, "latestTwo">;
   readonly scoreboardSnapshots: Pick<ScoreboardSnapshotRepository, "forWeek">;

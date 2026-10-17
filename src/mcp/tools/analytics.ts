@@ -36,17 +36,20 @@ import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
 import { remainingWeeks, regularSeasonWeeks } from "../../domain/league/rules.js";
 import { auditIr, seatsOf } from "../../domain/league/roster.js";
 import { lockPlan } from "../../domain/league/schedule.js";
-import type {
-  League,
-  LeagueRules,
-  Matchup,
-  PlatformPlayer,
-  ProSchedule,
-  Roster,
-  RosterEntry,
-  RosterSlots,
-  Standings,
-  Week,
+import {
+  TRANSACTIONS_RANGE_MAX,
+  type League,
+  type LeagueRules,
+  type Matchup,
+  type PlatformPlayer,
+  type ProSchedule,
+  type Roster,
+  type RosterEntry,
+  type RosterSlots,
+  type Standings,
+  type Transaction,
+  type TransactionsSeenRepository,
+  type Week,
 } from "../../domain/league/types.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import type { NflTeam } from "../../config/schema.js";
@@ -123,7 +126,7 @@ import { projectMany } from "./p1-common.js";
 import {
   fitPremiumFromHistory,
   seasonFeedFromTransactions,
-  transactionsBySeason,
+  seasonOfInstant,
   WAIVER_FIT,
   type LeaguePremiumFit,
 } from "../../domain/analytics/waiver-fit/index.js";
@@ -1329,6 +1332,61 @@ export function regularSeasonLastWeek(rules: LeagueRules): number | null {
   return last > 0 ? last : null;
 }
 
+/** Previous seasons scanned for stored transactions, newest first (an empty one is one index probe). */
+export const HISTORY_SCAN_SEASONS = 10;
+
+/** The first instant of NFL season `s` (seasonOfInstant's boundary: March 1, UTC). */
+function seasonStart(s: number): string {
+  return new Date(Date.UTC(s, 2, 1)).toISOString();
+}
+
+/**
+ * The stored transactions of `season` and of the newest WAIVER_FIT.history.maxSeasons previous
+ * seasons that have any, each season read whole through its own window — never the newest-first
+ * page of `list`, which stops reaching the previous seasons once the current one (lineup moves
+ * included) fills it (Stage C finding waivers-previous-season-feed-not-populated). A season at the
+ * read's bound is said. `pace` is awaited before each season's read: one full season (5 000 rows,
+ * read and parsed) costs 16–21 ms, so three in one turn would pass the 50 ms stall bound (plan 03
+ * §1.2) — each takes a turn of its own.
+ */
+export async function storedSeasons(
+  seen: Pick<TransactionsSeenRepository, "listRange" | "oldestSeen">,
+  season: number,
+  warnings: string[],
+  pace: () => Promise<void>,
+): Promise<{
+  readonly current: readonly Transaction[];
+  readonly previous: readonly {
+    readonly season: number;
+    readonly transactions: readonly Transaction[];
+  }[];
+}> {
+  const read = (s: number): Transaction[] => {
+    const rows = seen.listRange(seasonStart(s), seasonStart(s + 1), TRANSACTIONS_RANGE_MAX);
+    if (rows.length >= TRANSACTIONS_RANGE_MAX)
+      warnings.push(
+        `season ${String(s)}: only its newest ${String(TRANSACTIONS_RANGE_MAX)} stored transactions are read`,
+      );
+    // the season of a row is its processed (else proposed) instant, as the feed reads it
+    return rows.filter((t) => seasonOfInstant(t.process_date ?? t.proposed_date) === s);
+  };
+  const previous: { season: number; transactions: Transaction[] }[] = [];
+  const oldest = seasonOfInstant(seen.oldestSeen());
+  if (oldest !== null)
+    for (
+      let s = season - 1;
+      s >= Math.max(oldest, season - HISTORY_SCAN_SEASONS) &&
+      previous.length < WAIVER_FIT.history.maxSeasons;
+      s--
+    ) {
+      await pace();
+      const transactions = read(s);
+      if (transactions.length > 0) previous.push({ season: s, transactions });
+    }
+  await pace();
+  return { current: read(season), previous };
+}
+
 /**
  * The league-fitted premium (Phase 3, plan 10 C5; Stage C, changelog R6-3 — waiver-fit/history.ts
  * fitPremiumFromHistory). The league's previous seasons' transactions kept in `transactions_seen`
@@ -1340,29 +1398,31 @@ export function regularSeasonLastWeek(rules: LeagueRules): number | null {
  * the drift. Null when the store holds neither history nor runs (E5 then states the cold start
  * itself); a cold fit says why once.
  */
-export function leaguePremiumFit(
+export async function leaguePremiumFit(
   ctx: ToolContext,
   league: League,
   rules: LeagueRules,
   w: Week,
   standings: Standings | null,
   warnings: string[],
-): LeaguePremiumFit | null {
+): Promise<LeaguePremiumFit | null> {
   try {
     const season = league.ref.season;
-    const bySeason = transactionsBySeason(ctx.services.transactionsSeen.list(null, 1000));
+    const stored = await storedSeasons(ctx.services.transactionsSeen, season, warnings, turn);
     const regular = regularSeasonLastWeek(rules);
-    const feeds = [...bySeason.keys()]
-      .filter((s) => s < season)
-      .sort((a, b) => b - a)
-      .slice(0, WAIVER_FIT.history.maxSeasons)
-      .map((s) =>
+    // a season's feed costs 10–22 ms at 5 000 rows: one per turn (the stall bound)
+    const feeds: ReturnType<typeof seasonFeedFromTransactions>[] = [];
+    for (const p of stored.previous) {
+      await turn();
+      feeds.push(
         seasonFeedFromTransactions({
-          season: s,
-          transactions: bySeason.get(s) ?? [],
+          season: p.season,
+          transactions: p.transactions,
           regular_season_weeks: regular,
         }),
       );
+    }
+    await turn();
     const repo = ctx.services.waiverRuns;
     const runs = repo === undefined ? [] : repo.list(leagueRef(ctx).league_id, season);
     const evidence = feeds.filter((f) => f.outcomes.length > 0 || f.claim_runs > 0);
@@ -1374,7 +1434,7 @@ export function leaguePremiumFit(
       runs: runs.map((r) => ({ W: r.W, candidates: r.surplus.map((x) => ({ s: x })) })),
       current: {
         season,
-        transactions: bySeason.get(season) ?? [],
+        transactions: stored.current,
         standings: standings?.teams ?? [],
         periods_played: Array.from({ length: Math.max(0, period - 1) }, (_, i) => i + 1),
       },
@@ -1572,7 +1632,7 @@ export const analyzeWaiversTool = defineTool({
     // this league's own feed — its previous seasons' transactions (demand curve and drift, from the
     // first call), else a regular season of runs E5 priced (store); until then the cold-start table,
     // said once with its measured miss
-    const premiumFit = leaguePremiumFit(ctx, league, rules, w, standings, warnings);
+    const premiumFit = await leaguePremiumFit(ctx, league, rules, w, standings, warnings);
     const p0Request = {
       roster: slots,
       rules,

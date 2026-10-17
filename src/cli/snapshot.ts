@@ -204,23 +204,25 @@ export async function snapshotRoster(
         lines.push(text);
         if (opts.notify) await run.notifier.info(text);
       }
-      // the daily IR-validity check (T-08): a healthy player in IR blocks every add. It alerts on
-      // every TRANSITION to invalid — no open check yet, or the previous snapshot's IR was valid —
-      // so an IR that was fixed and then went invalid again is alerted again, even while an older
-      // check is still open (nothing in this build can close a check but `eff doctor --ack`).
+      // the daily IR-validity check (T-08): a healthy player in IR blocks every add. The check is a
+      // CONDITION this snapshot re-reads every night: a valid IR closes every open ir_invalid check
+      // (acknowledger `snapshot` — the state it described is gone), so doctor #23, `eff status` and
+      // espn_get_status's checks[] clear with the fix; an invalid IR with no open check raises one
+      // and alerts — the next healthy player in IR is a new check and a new alert (as is an invalid
+      // IR right after a snapshot that read it valid, should a failed close have left a check open).
       const slots = (await run.stack.provider.getRosterSlots(ref)).value;
       const ir = auditIr(seatsOf(mine), slots);
       const prevIrValid = prev === undefined ? null : !auditIr(seatsOf(prev.roster), slots).invalid;
       const openIr = hasOpenCheck(run, "ir_invalid");
-      // when IR was last seen valid again (doctor #23 / status read it: an older open check no
-      // longer describes the roster); an invalid IR clears it
-      if (ir.invalid) updateJobState(config.cacheDir, { "ir.valid_since": null });
-      else if (stateNumber(readJobState(config.cacheDir), "ir.valid_since") === null)
-        updateJobState(config.cacheDir, { "ir.valid_since": Date.parse(takenAt) });
-      if (!ir.invalid && openIr && prevIrValid === false)
-        lines.push(
-          "IR valid again — the open ir_invalid check stays until `eff doctor --ack ir_invalid`",
+      if (!ir.invalid && openIr) {
+        const closed = run.store.repos.leagueSettings.acknowledgeChecks(
+          "ir_invalid",
+          takenAt,
+          "snapshot",
+          takenAt,
         );
+        lines.push(`IR valid again — ${String(closed)} ir_invalid check(s) closed`);
+      }
       if (ir.invalid && (!openIr || prevIrValid === true)) {
         run.store.repos.leagueSettings.raiseCheck(
           check(

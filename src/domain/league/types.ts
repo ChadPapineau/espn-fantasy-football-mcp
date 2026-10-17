@@ -1572,12 +1572,18 @@ export const CHECK_IDS = [
 export type CheckId = (typeof CHECK_IDS)[number];
 
 /**
- * Who may acknowledge a check — a human act in a terminal, never a model-callable tool (an
- * acknowledgement the model could make would let injected text silence a health check):
- * `eff doctor --ack <check>`, or `eff setup --seeding` (the step `onboard` ends with, which
- * acknowledges `settings_changed` up to the settings it showed the operator).
+ * Who may close a check — never a model-callable tool (an acknowledgement the model could make would
+ * let injected text silence a health check): a human act in a terminal — `eff doctor --ack <check>`,
+ * or `eff setup --seeding` (the step `onboard` ends with, which acknowledges `settings_changed` up to
+ * the settings it showed the operator) — or `snapshot`: the nightly roster snapshot closing the
+ * `ir_invalid` checks raised before it read the user's IR valid again (the condition it raised is
+ * gone; a roster state read from ESPN, never text). `snapshot` closes `ir_invalid` only
+ * (SNAPSHOT_CLOSES); the event checks (`scoring_mismatch`, `settings_changed`) need the human.
  */
-export type CheckAcknowledger = "doctor" | "setup";
+export type CheckAcknowledger = "doctor" | "setup" | "snapshot";
+
+/** The checks the nightly roster snapshot may close (a condition it re-reads every night). */
+export const SNAPSHOT_CLOSES: readonly CheckId[] = ["ir_invalid"];
 
 /** A health check row (plan 07 G1 `checks[]`; plan 06 §1.4 T-08). */
 export interface CheckRow {
@@ -1729,10 +1735,23 @@ export interface ScoreboardSnapshotRepository {
 }
 
 /** transactions_seen (append-only): history from install day (plan 07 A6 `history_coverage`). */
+/**
+ * Largest `transactionsSeen.listRange` page: one season of a busy ten-team league with every
+ * transaction type, lineup moves included (≈ 30 per team-week over 17 weeks), with room to spare.
+ */
+export const TRANSACTIONS_RANGE_MAX = 5000;
+
 export interface TransactionsSeenRepository {
   /** Appends unseen transactions (dedup by id); returns how many were new. */
   appendNew(txns: readonly Transaction[], seenAt: IsoInstant): number;
+  /** The newest transactions at or after `since`, newest first (at most `limit`). */
   list(since: IsoInstant | null, limit: number): readonly Transaction[];
+  /**
+   * The transactions whose instant falls in [from, until), newest first, at most `limit`: one
+   * bounded statement that reaches an OLDER window whole — `list` cannot once a later season's
+   * rows fill its page (E5 reads each previous season this way; changelog R6-3).
+   */
+  listRange(from: IsoInstant, until: IsoInstant, limit: number): readonly Transaction[];
   oldestSeen(): IsoInstant | null;
 }
 

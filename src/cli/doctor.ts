@@ -51,7 +51,7 @@ import { onlineRows } from "./doctor-online.js";
 import { exitCodeFor, row, type DoctorRow, type RowStatus } from "./doctor-rows.js";
 import { bothCredentialStores } from "./espn-stack.js";
 import { writeLine, distEntry, type CliIo } from "./io.js";
-import { jobRunRecords, readJobState, stateNumber, stateToken } from "./job-state.js";
+import { jobRunRecords, readJobState, stateToken } from "./job-state.js";
 import { installedPlists, JOB_NAMES, LAUNCHCTL, labelOf, launchctl } from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
 import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
@@ -1310,15 +1310,11 @@ export async function checkSetupPort(io: CliIo, config: LenientConfig | null): P
 }
 
 /**
- * Rows 21–23: the open health checks (plan 03 §5, T-08). `irValidSinceMs` is when the nightly roster
- * snapshot last saw the user's IR valid again (job-state `ir.valid_since`): an ir_invalid check
- * raised before it describes a state that no longer holds, so #23 passes and says how to clear the
- * record (only `eff doctor --ack` closes a check row in this build).
+ * Rows 21–23: the open health checks (plan 03 §5, T-08). An ir_invalid check is closed by the
+ * nightly roster snapshot the night it reads the user's IR valid again, so an open one is the IR as
+ * last read (an event check — scoring, settings — waits for `eff doctor --ack`).
  */
-export function checkHealthChecks(
-  store: Store | null,
-  irValidSinceMs: number | null = null,
-): DoctorRow[] {
+export function checkHealthChecks(store: Store | null): DoctorRow[] {
   const titles = {
     scoring_mismatch: [21, "Scoring golden"],
     settings_changed: [22, "Settings changed"],
@@ -1328,21 +1324,7 @@ export function checkHealthChecks(
     return Object.entries(titles).map(([id, [n, t]]) => row(n, id, t, "skip", "store not open"));
   const open = store.repos.leagueSettings.openChecks().filter((c) => !c.acknowledged);
   return Object.entries(titles).map(([id, [n, t]]) => {
-    const all = open.filter((c) => c.id === id);
-    const hits =
-      id === "ir_invalid" && irValidSinceMs !== null
-        ? all.filter((c) => !(Date.parse(c.raised_at) <= irValidSinceMs))
-        : all;
-    if (all.length > 0 && hits.length === 0)
-      return row(
-        n,
-        id,
-        t,
-        "ok",
-        `IR valid again since ${new Date(irValidSinceMs ?? 0).toISOString()} (nightly roster snapshot)`,
-        null,
-        [`${String(all.length)} older record(s) stay open until \`eff doctor --ack ir_invalid\``],
-      );
+    const hits = open.filter((c) => c.id === id);
     if (hits.length === 0) return row(n, id, t, "ok", "no open check");
     const worst = hits.some((c) => c.status === "fail") ? "fail" : "warn";
     const details = hits.slice(0, 5).map(
@@ -1356,7 +1338,7 @@ export function checkHealthChecks(
         ? "run `onboard`'s self-check (plan 08 §6 step 3d); `eff doctor --ack scoring_mismatch` once reviewed"
         : id === "settings_changed"
           ? "the commissioner changed the league settings: `onboard` explains it; `eff setup --seeding …` or `eff doctor --ack settings_changed`"
-          : "move the healthy player out of IR (adds are blocked until then); `eff doctor --ack ir_invalid` once fixed";
+          : "move the healthy player out of IR (adds are blocked until then); the nightly roster snapshot closes the check once it reads the IR valid";
     return row(n, id, t, worst, `${String(hits.length)} open check(s)`, fix, details);
   });
 }
@@ -1714,12 +1696,7 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
       rows.push(...(await onlineRows(io, config, store, log)));
     }
     rows.push(await checkSetupPort(io, config));
-    rows.push(
-      ...checkHealthChecks(
-        store,
-        config === null ? null : stateNumber(readJobState(config.cacheDir), "ir.valid_since"),
-      ),
-    );
+    rows.push(...checkHealthChecks(store));
     rows.push(checkStaleBuild(io.packageRoot));
     rows.push(checkClientLog(opts.clientLog ?? defaultClientLog(io.home), secrets));
   } finally {

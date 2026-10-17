@@ -1,12 +1,15 @@
 // league.ts — the league-side store tables (plan 01 §9.2): league_settings (never pruned; plan 08 §9)
-// with the health checks (plan 07 G1 checks[]; plan 06 §1.4 T-08; acknowledgements only by a human
-// in a terminal), roster/pool snapshots (pruned after 30 days, plan 06 §1.3), scoreboard_snapshot
-// (never pruned, T-07) and the append-only transactions_seen history. Every write is REQUIRED; JSON
+// with the health checks (plan 07 G1 checks[]; plan 06 §1.4 T-08; closed by a human in a terminal,
+// an ir_invalid check also by the nightly roster snapshot that reads the IR valid again),
+// roster/pool snapshots (pruned after 30 days, plan 06 §1.3), scoreboard_snapshot (never pruned,
+// T-07) and the append-only transactions_seen history. Every write is REQUIRED; JSON
 // bound for a snapshot passes the GUID pseudonymiser (plan 02 §2.4). Ported from sibling @cf3b015,
 // adapted (single-league posture: no league key on snapshots; ESPN shapes).
 import { ESPN_LEAGUE_ID_RE, TEAM_ID_MAX, TEAM_ID_MIN } from "../../config/schema.js";
 import {
   CHECK_IDS,
+  SNAPSHOT_CLOSES,
+  TRANSACTIONS_RANGE_MAX,
   type CheckAcknowledger,
   type CheckRow,
   type LeagueSettingsRepository,
@@ -48,7 +51,7 @@ export const CHECK_DETAIL_VALUE_RE = /^[A-Za-z0-9_.:/+-]{0,64}$/;
 /** Most detail entries one check carries. */
 export const CHECK_DETAIL_MAX = 32;
 
-const ACKNOWLEDGERS: readonly CheckAcknowledger[] = ["doctor", "setup"];
+const ACKNOWLEDGERS: readonly CheckAcknowledger[] = ["doctor", "setup", "snapshot"];
 const CHECK_STATUSES = ["ok", "warn", "fail"] as const;
 
 interface SettingsRow {
@@ -197,6 +200,9 @@ export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettin
       oneOf(id, CHECK_IDS, "check id");
       const upToMs = isoMs(upTo, "upTo");
       oneOf(by, ACKNOWLEDGERS, "acknowledger");
+      // the nightly snapshot closes only the condition it re-reads (an event check needs the human)
+      if (by === "snapshot" && !SNAPSHOT_CLOSES.includes(id))
+        throw new RangeError("store: the roster snapshot closes only ir_invalid checks");
       isoMs(at, "at");
       return writes.required("checks", () =>
         Number(
@@ -373,6 +379,19 @@ export function transactionsSeenRepository({
            ORDER BY ts_ms DESC, transaction_id DESC LIMIT :lim`,
         )
         .all({ since: sinceMs, lim }) as unknown as { txn_json: string }[];
+      return rows.map((r) => parseJson<Transaction>(r.txn_json));
+    },
+    listRange(from, until, limit) {
+      const lim = intIn(limit, 1, TRANSACTIONS_RANGE_MAX, "limit");
+      const fromMs = isoMs(from, "from");
+      const untilMs = isoMs(until, "until");
+      if (untilMs <= fromMs) return [];
+      const rows = db
+        .prepare(
+          `SELECT txn_json FROM transactions_seen WHERE ts_ms >= :from AND ts_ms < :until
+           ORDER BY ts_ms DESC, transaction_id DESC LIMIT :lim`,
+        )
+        .all({ from: fromMs, until: untilMs, lim }) as unknown as { txn_json: string }[];
       return rows.map((r) => parseJson<Transaction>(r.txn_json));
     },
     oldestSeen() {

@@ -115,6 +115,68 @@ describe("R6-3 through the composition root (fx-10h, core)", () => {
   });
 });
 
+/**
+ * `count` executed lineup moves (ESPN type ROSTER) of this season, weeks 1–4, before the fx-10h
+ * clock: the rows `eff transactions` stores every day, which outnumber a waiver feed (ids only).
+ */
+function lineupMoves(count: number): Transaction[] {
+  return Array.from({ length: count }, (_, i) => ({
+    transaction_id: `l2026-lineup-${String(i)}`,
+    type: "ROSTER",
+    status: "EXECUTED",
+    team_id: 1 + (i % 10),
+    team_name: null,
+    scoring_period: 1 + (i % 4),
+    process_date: new Date(Date.UTC(2026, 8, 9) + i * 60_000).toISOString(),
+    proposed_date: null,
+    bid_amount: null,
+    items: [],
+    related_transaction_id: null,
+    note: null,
+  }));
+}
+
+describe("R6-3 at a realistic store size: this season's rows never hide the previous seasons", () => {
+  let w: Awaited<ReturnType<typeof open>>;
+  beforeAll(async () => {
+    w = await open("core");
+    w.world.store.repos.transactionsSeen.appendNew(history, w.world.clock.nowIso());
+  }, 120_000);
+  afterAll(async () => {
+    await w.close();
+    w.world.cleanup();
+  });
+
+  const summaryOf = (d: WaiversOut): string | undefined =>
+    d.rec.assumptions
+      .find((a) => a.text.startsWith("premium re-solved from seasons"))
+      // the surplus part counts this world's logged runs, which every call adds to
+      ?.text.split("; surplus")[0];
+
+  it("league_fitted from the same seasons and drops after 1,100 newer rows of this season", async () => {
+    const before = await waivers(w.client);
+    expect(before.data.premium_basis).toBe("league_fitted");
+    const added = w.world.store.repos.transactionsSeen.appendNew(
+      lineupMoves(1100),
+      w.world.clock.nowIso(),
+    );
+    expect(added).toBe(1100);
+    // the newest-first page (the read E5 used) is this season's rows only
+    expect(
+      w.world.store.repos.transactionsSeen
+        .list(null, 1000)
+        .every((t) => (t.process_date ?? "") >= "2026-03-01"),
+    ).toBe(true);
+    const after = await waivers(w.client);
+    expect(after.data.premium_basis).toBe("league_fitted");
+    expect(summaryOf(after.data)).toContain("seasons 2025, 2024");
+    expect(summaryOf(after.data)).toBe(summaryOf(before.data));
+    expect(
+      after.warnings.some((x) => x.includes("no previous-season transactions of this league")),
+    ).toBe(false);
+  });
+});
+
 describe("R6-3 through the composition root (fx-10h, full)", () => {
   let w: Awaited<ReturnType<typeof open>>;
   beforeAll(async () => {

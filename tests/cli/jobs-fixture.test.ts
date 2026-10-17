@@ -10,7 +10,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildEspnStack } from "../../src/cli/espn-stack.js";
 import { dayFirstKickoff, weekFirstKickoff } from "../../src/cli/espn-jobs.js";
 import { checkHealthChecks } from "../../src/cli/doctor.js";
-import { readJobState, stateNumber, updateJobState } from "../../src/cli/job-state.js";
+import { readJobState, updateJobState } from "../../src/cli/job-state.js";
+import { call, connect, makeWorld, type World } from "../mcp/helpers/world.js";
 import { loadRuntime } from "../../src/cli/runtime.js";
 import {
   preKickoff,
@@ -210,7 +211,7 @@ describe("snapshot pool over launchd's hourly wakes (plan 06 §1.4, ADV OBJ-16)"
   }, 60_000);
 });
 
-describe("the nightly IR-validity check alerts on every transition to invalid (plan 06 §1.4, T-08)", () => {
+describe("the nightly IR-validity check: a fixed IR closes the check, a new healthy player in IR is a new alert (plan 06 §1.4, T-08; plan 03 §5 #23)", () => {
   /** league-a with team 1's IR-slot (21) player in `status` this night. */
   function leagueWithIr(status: string) {
     return fakeFetch((url) => {
@@ -250,7 +251,8 @@ describe("the nightly IR-validity check alerts on every transition to invalid (p
     });
   }
 
-  async function night(at: string, status: string) {
+  /** One nightly run; `cacheDir` puts the store elsewhere (an MCP world's, to read it as Claude does). */
+  async function night(at: string, status: string, cacheDir?: string) {
     const f = leagueWithIr(status);
     const { exec, calls } = fakeExec();
     const io = makeIo(sb, {
@@ -264,39 +266,68 @@ describe("the nightly IR-validity check alerts on every transition to invalid (p
         EFF_CREDENTIAL_STORE: "file",
         ESPN_SEASON: "2026",
         ESPN_TEAM_ID: "1",
+        ...(cacheDir === undefined ? {} : { EFF_CACHE_DIR: cacheDir }),
       },
     });
     const { config, log } = await loadRuntime(io);
     expect(await snapshotRoster(io, config, log, { notify: true, preKickoff: false })).toBe(0);
     const notified = calls.some((c) => c.args.join(" ").includes("IR slot holds"));
     const line = io.out.text.split("\n").some((l) => l.startsWith("IR invalid"));
-    // doctor #23 as `eff doctor` computes it (the store's open checks + the snapshot's IR state)
+    // doctor #23 exactly as `eff doctor` computes it, and the open rows themselves
     const store = openStore(config, io.clock, log, { migrate: false });
     let row23;
+    let open;
     try {
-      row23 = checkHealthChecks(
-        store,
-        stateNumber(readJobState(config.cacheDir), "ir.valid_since"),
-      ).find((r) => r.id === "ir_invalid");
+      row23 = checkHealthChecks(store).find((r) => r.id === "ir_invalid");
+      open = store.repos.leagueSettings.openChecks().filter((c) => c.id === "ir_invalid").length;
     } finally {
       store.close();
     }
-    return { notified, line, text: io.out.text, doctor23: row23?.status };
+    return { notified, line, text: io.out.text, doctor23: row23?.status, open };
   }
 
-  it("healthy-in-IR → alert; fixed → said; healthy-in-IR again → alerted AGAIN (an old check is still open)", async () => {
+  it("healthy-in-IR → alert; fixed → the check closed; healthy-in-IR again → a new check, alerted again", async () => {
     sb = sandbox();
     const n1 = await night("2026-10-06T06:00:00.000Z", "ACTIVE");
-    expect([n1.line, n1.notified, n1.doctor23]).toEqual([true, true, "fail"]);
+    expect([n1.line, n1.notified, n1.doctor23, n1.open]).toEqual([true, true, "fail", 1]);
     const n2 = await night("2026-10-07T06:00:00.000Z", "INJURY_RESERVE");
     expect([n2.line, n2.notified]).toEqual([false, false]);
-    expect(n2.text).toContain("IR valid again");
-    // the fixed IR no longer fails doctor #23 (the old record is described, not counted)
-    expect(n2.doctor23).toBe("ok");
+    expect(n2.text).toContain("IR valid again — 1 ir_invalid check(s) closed");
+    // the fixed IR closes the row itself: nothing is left open for doctor #23 to describe
+    expect([n2.doctor23, n2.open]).toEqual(["ok", 0]);
     const n3 = await night("2026-10-08T06:00:00.000Z", "ACTIVE");
-    expect([n3.line, n3.notified, n3.doctor23]).toEqual([true, true, "fail"]);
-    // a night that stays invalid does not repeat the alert
+    expect([n3.line, n3.notified, n3.doctor23, n3.open]).toEqual([true, true, "fail", 1]);
+    // a night that stays invalid does not repeat the alert or the row
     const n4 = await night("2026-10-09T06:00:00.000Z", "ACTIVE");
-    expect([n4.line, n4.notified, n4.doctor23]).toEqual([false, false, "fail"]);
+    expect([n4.line, n4.notified, n4.doctor23, n4.open]).toEqual([false, false, "fail", 1]);
+    // a valid night with no open check closes nothing and says nothing
+    const n5 = await night("2026-10-10T06:00:00.000Z", "INJURY_RESERVE");
+    expect(n5.text).toContain("IR valid again — 1 ir_invalid check(s) closed");
+    const n6 = await night("2026-10-11T06:00:00.000Z", "INJURY_RESERVE");
+    expect(n6.text).not.toContain("IR valid again");
+    expect([n6.line, n6.notified, n6.doctor23, n6.open]).toEqual([false, false, "ok", 0]);
   });
+
+  it("espn_get_status's checks[] — what the Skills read first — follows the nightly IR state", async () => {
+    sb = sandbox();
+    const world: World = await makeWorld({ publishEspn: false });
+    const { client, close } = await connect(world);
+    try {
+      const irRows = async () => {
+        const r = await call(client, "espn_get_status", { include_checks: true });
+        expect(r.isError).toBe(false);
+        const checks = (r.body.data as { checks: { id: string; status: string }[] }).checks;
+        return checks.filter((c) => c.id === "ir_invalid").map((c) => c.status);
+      };
+      await night("2026-10-06T06:00:00.000Z", "ACTIVE", world.cache);
+      expect(await irRows()).toEqual(["fail"]);
+      await night("2026-10-07T06:00:00.000Z", "INJURY_RESERVE", world.cache);
+      expect(await irRows()).toEqual([]);
+      await night("2026-10-08T06:00:00.000Z", "ACTIVE", world.cache);
+      expect(await irRows()).toEqual(["fail"]);
+    } finally {
+      await close();
+      world.cleanup();
+    }
+  }, 60_000);
 });
