@@ -23,6 +23,7 @@ import {
   type ScoringWeek,
 } from "../../domain/reclog/retrospective.js";
 import {
+  OUTCOMES_PER_WRITE_MAX,
   RECLOG_TEXT_PATHS,
   RECLOG_UNTRUSTED_SOURCE,
   RECOMMENDATION_KINDS,
@@ -52,6 +53,7 @@ import {
   settingsOf,
   take,
   teamOf,
+  turn,
   weekOf,
   withinBudget,
 } from "./common.js";
@@ -338,20 +340,23 @@ export const analyzeRetrospective = defineTool({
             prev.set(e.player.ref.id, e.actual?.applied_total ?? null);
     }
     const scored = factsOf(boxes, team, prev, gsisOf);
+    // the log is read the paced way (Stage C finding reclog-retrospective-unbounded-read; plan 03
+    // §1.2): an earlier week is scored with no facts, so its calls contribute only that the week is
+    // in the window — which weekCounts answers from the index without reading a record — and the
+    // scored week is read in bounded pages through the turn gate. Read whole, weeks 1..w took one
+    // synchronous statement and parse each, in one turn, growing with the never-pruned log
+    const log = ctx.services.recommendationLog;
     const weeks: ScoringWeek[] = [];
-    for (let x = 1; x <= w; x++) {
-      const records = ctx.services.recommendationLog.forWeek(ref.league_id, season, x);
-      if (x === w)
-        weeks.push({
-          week: x,
-          records,
-          facts: scored.facts,
-          roster: scored.roster,
-          team_result: scored.result,
-        });
-      else if (records.length > 0)
-        weeks.push({ week: x, records, facts: [], roster: null, team_result: null });
-    }
+    for (const c of log.weekCounts(ref.league_id, season))
+      if (c.week < w && c.n > 0)
+        weeks.push({ week: c.week, records: [], facts: [], roster: null, team_result: null });
+    weeks.push({
+      week: w,
+      records: await log.forWeekPaced(ref.league_id, season, w, turn),
+      facts: scored.facts,
+      roster: scored.roster,
+      team_result: scored.result,
+    });
     const sched = await withinBudget(() => scheduleOf(ctx, season, inputs), warnings).catch(
       () => null,
     );
@@ -411,11 +416,13 @@ export const analyzeRetrospective = defineTool({
     }
     // E10's logged news claims whose game is final are scored into the calibration table (C8)
     if (!r.provisional) await scoreClaims(ctx, season, w, boxes, gsisOf);
-    for (const o of r.outcomes) {
+    // a scored week's outcomes in one transaction per OUTCOMES_PER_WRITE_MAX (a week's calls at
+    // the per-week cap fit one): all or none, never a row per statement
+    for (let i = 0; i < r.outcomes.length; i += OUTCOMES_PER_WRITE_MAX) {
       try {
-        ctx.services.recommendationLog.recordOutcome(o);
+        log.recordOutcomes(r.outcomes.slice(i, i + OUTCOMES_PER_WRITE_MAX));
       } catch {
-        warnings.push("an outcome row could not be persisted (the store was busy)");
+        warnings.push("the week's outcome rows could not be persisted (the store was busy)");
       }
     }
     // the attribution map's keys are server-composed (ATTRIBUTION_KEY_RE); anything else is dropped

@@ -40,7 +40,7 @@ import type {
 } from "../domain/league/types.js";
 import type {
   ParameterProposalRepository,
-  RecommendationLogRepository,
+  PacedRecommendationLog,
   ScoredClaimRepository,
 } from "../domain/reclog/types.js";
 import type {
@@ -210,7 +210,8 @@ export interface McpServices {
   readonly nflPlayers: NflPlayersReader;
   readonly crosswalk: Pick<CrosswalkRepository, "get" | "byGsis" | "count">;
   readonly crosswalkOverrides: readonly CrosswalkOverride[];
-  readonly recommendationLog: RecommendationLogRepository;
+  /** The log, with the paced reads E13 takes (the store's RecommendationLogStore satisfies it). */
+  readonly recommendationLog: PacedRecommendationLog;
   readonly projections: ProjectionRepository;
   readonly espnProjections: Pick<EspnProjectionRepository, "asOf" | "lastSnapshotAt">;
   readonly transactionsSeen: Pick<TransactionsSeenRepository, "list" | "listRange" | "oldestSeen">;

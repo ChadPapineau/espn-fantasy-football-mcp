@@ -448,3 +448,34 @@ export interface RecommendationLogRepository {
   recordOutcome(outcome: RecommendationOutcome): void;
   outcome(logId: string): RecommendationOutcome | null;
 }
+
+/** How many records one week of a league-season holds (`PacedRecommendationLog.weekCounts`). */
+export interface WeekRecordCount {
+  readonly week: Week;
+  readonly n: number;
+}
+
+/** The most outcomes one `recordOutcomes` call carries (a week's calls at the store's per-week cap). */
+export const OUTCOMES_PER_WRITE_MAX = 100;
+
+/**
+ * The recommendation log as an analytics caller reads it (E13; plan 03 §1.2: no turn of the event
+ * loop holds more than one bounded statement or one small batch, however long the never-pruned log
+ * grows — Stage C finding reclog-retrospective-unbounded-read: E13 read every week up to the scored
+ * one, whole, in one turn): which weeks hold records (no record text read), one week read in pages
+ * with the caller's pace awaited around them, and a scored week's outcomes in one transaction. The
+ * store implements it (src/store/types.ts RecommendationLogStore).
+ */
+export interface PacedRecommendationLog extends RecommendationLogRepository {
+  /** Records each week of a league-season holds, ascending by week; weeks with none are absent. */
+  weekCounts(leagueId: string, season: number): readonly WeekRecordCount[];
+  /** `forWeek`'s records in its order, read in bounded pages; `pace` awaited before, between, after. */
+  forWeekPaced(
+    leagueId: string,
+    season: number,
+    week: Week,
+    pace: () => Promise<void>,
+  ): Promise<readonly RecommendationRecord[]>;
+  /** Upserts at most OUTCOMES_PER_WRITE_MAX outcomes in ONE write transaction (all or none). */
+  recordOutcomes(outcomes: readonly RecommendationOutcome[]): void;
+}

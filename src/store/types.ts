@@ -39,7 +39,8 @@ import type {
 } from "../domain/league/types.js";
 import type {
   ParameterProposalRepository,
-  RecommendationLogRepository,
+  PacedRecommendationLog,
+  WeekRecordCount,
   RecommendationOutcome,
   RecommendationRecord,
   ScoredClaimRepository,
@@ -588,10 +589,7 @@ export interface PointsCacheRepository {
 }
 
 /** How many records one week of a league-season holds (`RecommendationLogStore.weekCounts`). */
-export interface WeekRecordCount {
-  readonly week: Week;
-  readonly n: number;
-}
+export type { WeekRecordCount } from "../domain/reclog/types.js";
 
 /**
  * The recommendation log as the store serves it: the domain port (src/domain/reclog/types.ts) plus
@@ -600,7 +598,7 @@ export interface WeekRecordCount {
  * 10 A16a; Stage C, reclog-retrospective-unbounded-read — E13 read every week up to the scored one,
  * whole, in one turn). Declared in domain types only, so the port can adopt them as they stand.
  */
-export interface RecommendationLogStore extends RecommendationLogRepository {
+export interface RecommendationLogStore extends PacedRecommendationLog {
   /**
    * Records each week of a league-season holds, ascending by week; weeks with none are absent. One
    * aggregate statement answered from the (league_id, season, week) index: no record text is read.
