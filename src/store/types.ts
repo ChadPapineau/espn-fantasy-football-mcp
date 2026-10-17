@@ -35,10 +35,13 @@ import type {
   RosterSnapshotRepository,
   ScoreboardSnapshotRepository,
   TransactionsSeenRepository,
+  Week,
 } from "../domain/league/types.js";
 import type {
   ParameterProposalRepository,
   RecommendationLogRepository,
+  RecommendationOutcome,
+  RecommendationRecord,
   ScoredClaimRepository,
 } from "../domain/reclog/types.js";
 
@@ -563,6 +566,48 @@ export interface PointsCacheRepository {
   put(lineHash: string, settingsHash: string, resultJson: string): BestEffortOutcome;
 }
 
+/** How many records one week of a league-season holds (`RecommendationLogStore.weekCounts`). */
+export interface WeekRecordCount {
+  readonly week: Week;
+  readonly n: number;
+}
+
+/**
+ * The recommendation log as the store serves it: the domain port (src/domain/reclog/types.ts) plus
+ * the reads and writes an analytics caller paces, so no turn of the event loop holds more than one
+ * bounded statement or one small batch however long the never-pruned log grows (plan 03 §1.2; plan
+ * 10 A16a; Stage C, reclog-retrospective-unbounded-read — E13 read every week up to the scored one,
+ * whole, in one turn). Declared in domain types only, so the port can adopt them as they stand.
+ */
+export interface RecommendationLogStore extends RecommendationLogRepository {
+  /**
+   * Records each week of a league-season holds, ascending by week; weeks with none are absent. One
+   * aggregate statement answered from the (league_id, season, week) index: no record text is read.
+   */
+  weekCounts(leagueId: string, season: number): readonly WeekRecordCount[];
+  /**
+   * `forWeek`'s records in `forWeek`'s order, read in pages of at most WEEK_PAGE_ROWS_MAX records
+   * and WEEK_PAGE_BYTES_MAX stored bytes (a larger record alone is a page), each one statement plus
+   * a parse per row. `pace` is awaited before the read, between pages and after the last page, so
+   * every turn holds one page and the caller's own work before and after keeps turns of its own; an
+   * analytics caller passes the process-wide turn gate (src/domain/analytics/cooperative.ts
+   * `yieldTurn`). The week's membership is fixed when the read starts. RangeError (a rejection) on a
+   * malformed league id, season or week.
+   */
+  forWeekPaced(
+    leagueId: string,
+    season: number,
+    week: Week,
+    pace: () => Promise<void>,
+  ): Promise<readonly RecommendationRecord[]>;
+  /**
+   * Upserts a scored week's outcomes (at most OUTCOMES_PER_BATCH_MAX — a week's calls) in ONE write
+   * transaction, with `recordOutcome`'s semantics row by row: every row is checked first (RangeError,
+   * nothing written) and a failed write writes none (StoreBusyError when the lock stays busy).
+   */
+  recordOutcomes(outcomes: readonly RecommendationOutcome[]): void;
+}
+
 /** Every repository the store serves. */
 export interface StoreRepositories {
   readonly espnCache: EspnCacheRepository;
@@ -581,7 +626,7 @@ export interface StoreRepositories {
   readonly transactionsSeen: TransactionsSeenRepository;
   readonly projections: ProjectionRepository;
   readonly espnProjections: EspnProjectionRepository;
-  readonly recommendationLog: RecommendationLogRepository;
+  readonly recommendationLog: RecommendationLogStore;
   /** PHASE W SEAM — the empty table's counts (G1 `journal` is null in this build). */
   readonly writeJournal: WriteJournalRepository;
   /** Phase 3 (plan 10 C9; migration 002): the retrospective's proposal sets `eff tune` reads. */
