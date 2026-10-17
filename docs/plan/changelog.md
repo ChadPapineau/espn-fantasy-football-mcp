@@ -550,7 +550,7 @@ These are not rulings. They record what Stage C built where the plan names an ar
   - Drafts 1 and 10 are reworded so that each has one reading.
   - Drafts 2, 6, 7 and 8 are adapted under that section's own rule ("read-only, independent, stable, single-answer"). As drafted, 6 has three correct answers; 7 comes to 0, which an empty search also gives; and 8 asks for a season-to-date split that no tool serves on the fixture.
   - The reasons, question by question, are in `docs/evals/model-driven-evals.md`.
-  - `tests/evals/read-only.test.ts` re-derives every answer from the tools under both toolsets on every push, and refuses an answer that is not unique.
+  - On every push, `tests/e2e/model-evals.test.ts` re-derives every answer from the built server under both toolsets, started as the documented run starts it, and refuses an answer that is not unique. `tests/evals/read-only.test.ts` holds the file's format.
   - The run (≥ 8/10) has not happened: it is manual, comes before a release and spends model tokens.
   - Three things are open for the owner before the runner can be trusted, in `docs/evals/model-driven-evals.md` → *Running it*: it needs an Anthropic API key, and CLAUDE.md allows free services only; it needs a current model id; and read statically, it has a defect in how it encodes tool results.
 

@@ -14,7 +14,7 @@ teams named "Team NN".
 | item | status |
 |---|---|
 | The question set, [`tests/evals/read-only.xml`](../../tests/evals/read-only.xml) | **Built.** Ten read-only questions with their answers, in the mcp-builder `evaluation.md` format (`<evaluation><qa_pair><question/><answer/></qa_pair>`). |
-| Its answer key | **Held by a test.** [`tests/evals/read-only.test.ts`](../../tests/evals/read-only.test.ts) runs in the unit project on every push. It re-derives every answer from the tools in fixture mode, under `core` and under `full`. It fails if an answer changes or stops being the only answer. |
+| Its answer key | **Held by tests.** [`tests/e2e/model-evals.test.ts`](../../tests/e2e/model-evals.test.ts) runs in the process project on every push. It starts the built server the way the documented run does, then re-derives every answer from the tools in fixture mode, under `core` and under `full`. It fails if an answer changes or stops being the only answer. [`tests/evals/read-only.test.ts`](../../tests/evals/read-only.test.ts) runs in the unit project and holds the file's format and its agreement with the answer key below. |
 | A10b, the model-driven run (pass bar ≥ 8/10) | **Not run.** The run is manual and comes before a release, because it spends model tokens. It is the owner's step before the `v0.1.0` tag. Read [Running it](#running-it-the-owner-before-a-release) for what it needs first. |
 
 ## The fixture state the questions assume
@@ -70,8 +70,9 @@ format, because the runner compares answers by exact string match.
 
 ## The answer key
 
-This is what the solvers in the test derived. The section is generated: `UPDATE_EVALS=1` rewrites it,
-and otherwise the test checks it against its own run.
+This is what the solvers derived. They are in `tests/evals/solvers.ts` and run against the built server
+by `tests/e2e/model-evals.test.ts`. The section is generated: `UPDATE_EVALS=1` rewrites it, and
+otherwise that test checks it against its own run.
 
 <!-- answer-key:start -->
 | # | answer | tools the solver read |
@@ -161,12 +162,12 @@ After the run:
 2. Triage the report's "feedback on the tools" into description fixes (plan 05 §6).
 3. Run the set again after any change to a tool description.
 
-If a fixture regeneration or a tool change moves an answer, `tests/evals/read-only.test.ts` fails and
+If a fixture regeneration or a tool change moves an answer, `tests/e2e/model-evals.test.ts` fails and
 names the question. To fix it:
 
 1. Solve the question again with the tools.
 2. Update the answer in the XML.
-3. Run the test once with `UPDATE_EVALS=1`.
+3. Build the package, then run that test once with `UPDATE_EVALS=1`.
 
 ## What this does not cover
 
