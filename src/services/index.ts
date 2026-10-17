@@ -9,6 +9,13 @@
 // hold). EFF_TEST_STUBS turns any network call or keychain access into exit 99 (plan 05 §4.2); in
 // fixture mode it also turns the samplers' CPU deadline off (the test-only switch — plan 10 A8a's
 // injection invariance must not flake on a slow runner; changelog R5).
+// Fixture mode's guard (plan 05 §3.1 step 5, §4.4 "fixture mode unreachable with a stored
+// credential"; Stage C finding config-fixture-mode-guard-bypassed): it starts only as league 0 and
+// only while no credential is stored — judged from the startup label's own evidence (the row and a
+// stat of session.json), never a credential-store read — or the root throws a ConfigError before
+// anything is wired. A missing or unreadable drift manifest is never silent (plan 01 §7; finding
+// pack-drift-manifest-not-shipped): the in-call detector then runs its required-key and skeleton
+// checks only, and the root logs that degradation, as `eff probe` prints it.
 // Nothing here runs a request or reads a secret.
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
@@ -19,12 +26,21 @@ import { buildCookieHeader } from "../auth/format.js";
 import { evaluateRegistrationGates } from "../auth/gates.js";
 import type { KeyringPort } from "../auth/keychain.js";
 import { registerCredentialRedaction } from "../auth/redact.js";
-import { createCredentialAuthority, type CredentialAuthorityHandle } from "../auth/state.js";
+import {
+  createCredentialAuthority,
+  deriveStartupState,
+  type CredentialAuthorityHandle,
+} from "../auth/state.js";
 import { openCredentialStore } from "../auth/stores.js";
-import type { CookieHeaderResult, CredentialStore, SecretRegistrar } from "../auth/types.js";
+import type {
+  CookieHeaderResult,
+  CredentialStateRepository,
+  CredentialStore,
+  SecretRegistrar,
+} from "../auth/types.js";
 import { inGameWindow, isPeriodProvisional, type TtlContext } from "../config/freshness.js";
 import { readSecureFile } from "../config/paths.js";
-import type { Config } from "../config/schema.js";
+import { ConfigError, type Config, type ConfigIssue } from "../config/schema.js";
 import type { Clock } from "../domain/clock.js";
 import { CHECKED_IN_OVERRIDES } from "../domain/crosswalk/overrides.js";
 import {
@@ -146,19 +162,92 @@ export function loadTunedOverrides(configDir: string, logger: McpLogger): TunedO
   }
 }
 
-/** The drift observations the package ships (fixtures/drift/manifest.json), or undefined. */
+/**
+ * What the in-call drift detector still checks without the manifest's observations (plan 01 §7;
+ * src/drift/detect.ts `checkResponse`): the required keys and the skeleton only — no unknown-enum,
+ * no additive-key and no meaning-changing statSourceId/statSplitTypeId check. `eff probe` prints the
+ * same degradation ("manifest absent: required keys and skeletons only").
+ */
+export const DRIFT_DEGRADED_DETECTION = "required_keys_and_skeletons_only";
+
+/**
+ * The drift observations the package ships (fixtures/drift/manifest.json), or undefined — never
+ * silently: a missing (`drift.manifest_absent` — a package installed from the tarball, which ships
+ * no fixtures/) or unreadable (`drift.manifest_unreadable`) manifest leaves the in-call detector
+ * on its required-key and skeleton checks, and the warning says so (plan 01 §7). Value-free: the
+ * relative manifest path and the degradation, never the package root.
+ */
 export function driftObservationsAt(
   root: string,
   logger: McpLogger,
 ): DriftObservations | undefined {
   const file = path.join(root, MANIFEST_PATH);
-  if (!existsSync(file)) return undefined;
+  const degraded = { manifest: MANIFEST_PATH, detection: DRIFT_DEGRADED_DETECTION };
+  if (!existsSync(file)) {
+    logger.warn("drift.manifest_absent", degraded);
+    return undefined;
+  }
   try {
     return loadObservations(file);
   } catch {
-    logger.warn("drift.manifest_unreadable");
+    logger.warn("drift.manifest_unreadable", degraded);
     return undefined;
   }
+}
+
+/** The league id fixture mode serves the recorded fixtures as (plan 05 §3.1 step 5). */
+export const FIXTURE_LEAGUE_ID = "0";
+
+/** Why fixture mode is refused (fixed, value-free texts: logged and thrown as config issues). */
+export const FIXTURE_MODE_REFUSALS = Object.freeze({
+  league_id: `must be ${FIXTURE_LEAGUE_ID} in fixture mode (EFF_FIXTURE_DIR serves the recorded fixtures as league ${FIXTURE_LEAGUE_ID})`,
+  credential_stored:
+    "fixture mode is refused while a credential is stored (fixture mode and real cookies never coexist in one process): unset EFF_FIXTURE_DIR, or point EFF_CONFIG_DIR and EFF_CACHE_DIR at empty test directories",
+  credential_unknown:
+    "fixture mode is refused: whether a credential is stored could not be checked (run `eff doctor`)",
+} as const);
+
+/**
+ * Fixture mode's guard (plan 05 §3.1 step 5: "`ESPN_LEAGUE_ID=0` in this mode. Not reachable when a
+ * credential store holds a value"; §4.4 security regression set): the issues that refuse it, none
+ * when it may start. Without it a stray EFF_FIXTURE_DIR in a real install served the fixture league
+ * as the configured league, wrote it into the real cache under that league's key, and reported the
+ * stored credential as absent (Stage C finding config-fixture-mode-guard-bypassed). The evidence is
+ * exactly the startup label's (plan 03 §1.1 step 4: the store.sqlite `credential_state` row, which
+ * `eff setup` writes whenever it stores a value — a row for any league counts — and a stat of
+ * session.json, never a read), so the keychain is never touched: its row stands for it. A
+ * session.json at the configured path counts whichever store config.json names (a credential store
+ * holding a value), and evidence that cannot be read refuses (fail closed).
+ */
+export function fixtureModeIssues(
+  config: Pick<Config, "leagueId" | "credentialStore" | "credentialFile">,
+  repo: Pick<CredentialStateRepository, "get">,
+): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  if (config.leagueId !== FIXTURE_LEAGUE_ID)
+    issues.push({ key: "ESPN_LEAGUE_ID", reason: FIXTURE_MODE_REFUSALS.league_id });
+  let stored: boolean | null;
+  try {
+    const fileStoreExists = fileStoreExistsSync(config.credentialFile);
+    const label = deriveStartupState({
+      row: repo.get(),
+      leagueId: config.leagueId,
+      storeKind: config.credentialStore,
+      fileStoreExists,
+    });
+    stored = fileStoreExists || label !== "not_configured";
+  } catch {
+    stored = null;
+  }
+  if (stored !== false)
+    issues.push({
+      key: "EFF_FIXTURE_DIR",
+      reason:
+        stored === null
+          ? FIXTURE_MODE_REFUSALS.credential_unknown
+          : FIXTURE_MODE_REFUSALS.credential_stored,
+    });
+  return issues;
 }
 
 /** A fetch that ends the process with TEST_STUB_EXIT (EFF_TEST_STUBS=1). */
@@ -295,11 +384,24 @@ export interface Wiring {
   close(): void;
 }
 
-/** Wires the services src/mcp is given. No request is made and no secret is read here. */
+/**
+ * Wires the services src/mcp is given. No request is made and no secret is read here. Fixture mode
+ * on a league other than 0 or with a stored credential throws a ConfigError (exit 2 semantics —
+ * plan 03 §1.3) before anything is wired, one value-free `services.fixture_mode_refused` line per
+ * issue (fixtureModeIssues).
+ */
 export function buildServices(args: BuildServicesArgs): Wiring {
   const { config, store, clock, logger } = args;
   const stderr = args.stderr ?? process.stderr;
   const fixture = config.fixtureDir !== null;
+  if (fixture) {
+    const refused = fixtureModeIssues(config, store.repos.credentialState);
+    if (refused.length > 0) {
+      for (const i of refused)
+        logger.error("services.fixture_mode_refused", { key: i.key, reason: i.reason });
+      throw new ConfigError(refused);
+    }
+  }
   const loadKeyring = config.testStubs ? stubbedKeyring(stderr) : args.loadKeyring;
   const fetchFn = config.testStubs && !fixture ? stubbedFetch(stderr) : args.fetch;
   const ref: LeagueRef = { platform: "espn", league_id: config.leagueId, season: config.season };

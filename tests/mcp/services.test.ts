@@ -1,8 +1,10 @@
 // services.test.ts — the serve composition root (src/services): texts read from the package, the
-// drift manifest, the test stubs (exit 99 on a network call or keychain access — plan 05 §4.2),
-// probe access over the credential store (plan 02 §2.1), the provider's TTL context and provisional
-// period from the stored pro schedule, the status/auth ports, fixture mode (no credential, the spike
-// nonce), and the PHASE W gate verdict. Nothing here touches the network or a real keychain.
+// drift manifest (absent or unreadable → the degraded-detection warning; the package-layout case is
+// tests/mcp/drift-manifest-absent.test.ts), the test stubs (exit 99 on a network call or keychain
+// access — plan 05 §4.2), probe access over the credential store (plan 02 §2.1), the provider's TTL
+// context and provisional period from the stored pro schedule, the status/auth ports, fixture mode
+// (no credential, the spike nonce; its guard is tests/mcp/fixture-mode-guard.test.ts), and the
+// PHASE W gate verdict. Nothing here touches the network or a real keychain.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +13,7 @@ import { createLogger } from "../../src/cli/log.js";
 import { loadConfig } from "../../src/config/schema.js";
 import type { CredentialStore } from "../../src/auth/types.js";
 import {
+  DRIFT_DEGRADED_DETECTION,
   PROMPT_SKILLS,
   TEST_STUB_EXIT,
   buildServices,
@@ -52,18 +55,25 @@ describe("package texts", () => {
     expect(readPackageText(path.join(ROOT, "nope.md"))).toBeNull();
   });
 
-  it("the drift manifest: loaded when shipped, undefined when absent or unreadable", () => {
+  it("the drift manifest: loaded when shipped; absent or unreadable → undefined with the degraded-detection warning", () => {
     const warn = vi.fn();
     const logger = { error: vi.fn(), warn, info: vi.fn(), debug: vi.fn() };
     expect(driftObservationsAt(ROOT, logger)).toBeDefined();
+    expect(warn).not.toHaveBeenCalled();
+    const degraded = {
+      manifest: "fixtures/drift/manifest.json",
+      detection: DRIFT_DEGRADED_DETECTION,
+    };
     expect(driftObservationsAt(path.join(tmpdir(), "eff-no-such-root"), logger)).toBeUndefined();
+    expect(warn).toHaveBeenLastCalledWith("drift.manifest_absent", degraded);
     const dir = mkdtempSync(path.join(tmpdir(), "eff-drift-"));
     try {
       const f = path.join(dir, "fixtures", "drift");
       mkdirSync(f, { recursive: true });
       writeFileSync(path.join(f, "manifest.json"), "{not json");
       expect(driftObservationsAt(dir, logger)).toBeUndefined();
-      expect(warn).toHaveBeenCalledWith("drift.manifest_unreadable");
+      expect(warn).toHaveBeenLastCalledWith("drift.manifest_unreadable", degraded);
+      expect(warn).toHaveBeenCalledTimes(2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

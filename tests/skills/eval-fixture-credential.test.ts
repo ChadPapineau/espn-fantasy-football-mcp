@@ -1,19 +1,21 @@
 // eval-fixture-credential.test.ts — holds scripts/skills/build-plugin-evals.mjs FIXTURE_CREDENTIAL_STATES
 // to the real composition root (Stage C finding eval-credential-state-variants-missing): an eval
 // server is `dist/cli.js serve` in fixture mode, and fixture mode builds no CredentialAuthority
-// (src/services/index.ts), so `credential.state` is `not_configured` on every fx-10h variant — even
-// with a `rejected` or `stored` credential row for the league in its store, and whatever the
-// variant's `harness.credential_state` says. The builder writes a case only when its variant's
-// harness state is one of FIXTURE_CREDENTIAL_STATES; the day fixture mode reproduces another state,
-// the first test here fails until that state is added (and its cases come back by themselves).
-// Nothing here touches the network, a keychain, ~/.config or ~/.cache.
+// (src/services/index.ts), so `credential.state` is `not_configured` on every fx-10h variant,
+// whatever the variant's `harness.credential_state` says — and with a `rejected` or `stored`
+// credential row in its store it does not start at all (fixture mode's guard, plan 05 §3.1 step 5;
+// Stage C finding config-fixture-mode-guard-bypassed), so it can report no other state. The builder
+// writes a case only when its variant's harness state is one of FIXTURE_CREDENTIAL_STATES; the day
+// fixture mode reproduces another state, the first test here fails until that state is added (and
+// its cases come back by themselves). Nothing here touches the network, a keychain, ~/.config or
+// ~/.cache.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLogger } from "../../src/cli/log.js";
 import { backupDir, datasetDir, storePath } from "../../src/config/paths.js";
-import { loadConfig } from "../../src/config/schema.js";
+import { ConfigError, loadConfig } from "../../src/config/schema.js";
 import { fixedClock } from "../../src/domain/clock.js";
 import { buildServices } from "../../src/services/index.js";
 import { storeFactory } from "../../src/store/index.js";
@@ -98,7 +100,7 @@ async function serverOn(variant: string | null) {
 }
 
 describe("FIXTURE_CREDENTIAL_STATES is what a fixture-mode server reports", () => {
-  it("on every fx-10h variant, even with a rejected or stored credential row for the league", async () => {
+  it("on every fx-10h variant; with a rejected or stored credential row for the league it does not start", async () => {
     const seen = new Set<string>();
     for (const row of [null, "rejected", "stored"] as const) {
       if (row === null) store.repos.credentialState.clear();
@@ -118,6 +120,11 @@ describe("FIXTURE_CREDENTIAL_STATES is what a fixture-mode server reports", () =
           updated_by: "setup",
         });
       for (const v of variants) {
+        if (row !== null) {
+          // fixture mode and a stored credential never coexist: refused before anything is wired
+          await expect(serverOn(v), String(v)).rejects.toBeInstanceOf(ConfigError);
+          continue;
+        }
         const s = await serverOn(v);
         expect(s.fixtureMode, String(v)).toBe(true);
         seen.add(s.state);
@@ -125,6 +132,7 @@ describe("FIXTURE_CREDENTIAL_STATES is what a fixture-mode server reports", () =
         expect(s.probe, String(v)).toMatchObject({ accepted: null, reason: "not_configured" });
       }
     }
+    store.repos.credentialState.clear();
     expect([...seen].sort()).toEqual([...FIXTURE_CREDENTIAL_STATES].sort());
   });
 
