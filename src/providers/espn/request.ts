@@ -589,7 +589,7 @@ export class EspnRequester {
         }
         if (answer !== null && answer.status === 304 && entry !== null && entry.etag !== null) {
           outcome = "not_modified";
-          return this.notModifiedAnswer(entry, answer, key);
+          return this.notModifiedAnswer(entry, answer, key, target.views);
         }
         if (answer !== null) {
           failure = classifyAnswer({
@@ -688,7 +688,20 @@ export class EspnRequester {
     }
   }
 
-  private notModifiedAnswer(entry: EspnCacheEntry, answer: AttemptAnswer, key: string): Fresh {
+  /**
+   * A 304: ESPN says the latest answer for `views` IS the cached body, and only an entry that parsed
+   * under the views' schemas in this process is ever revalidated (`read` passes the usable entry
+   * only) — so the 304 verifies them exactly as a complete 200 does, and their removed keys clear
+   * (src/drift applyRecovered, `schema`). ESPN answers conditional reads with 304: without this, one
+   * incomplete answer kept a view red — and every scoring call refused — for as long as the content
+   * did not change (Stage C finding drift-red-never-clears).
+   */
+  private notModifiedAnswer(
+    entry: EspnCacheEntry,
+    answer: AttemptAnswer,
+    key: string,
+    views: readonly EspnView[],
+  ): Fresh {
     const day = Math.floor(this.deps.clock.nowMs() / 86_400_000);
     this.notModified =
       this.notModified.day === day ? { day, count: this.notModified.count + 1 } : { day, count: 1 };
@@ -697,6 +710,11 @@ export class EspnRequester {
       this.deps.cache.put({ ...entry, key, fetched_at: fetchedAt });
     } catch {
       this.deps.log?.warn("espn.cache.write_failed");
+    }
+    try {
+      this.drift.recovered(views, "schema");
+    } catch {
+      this.deps.log?.warn("espn.drift_state.write_failed");
     }
     return {
       body: parseJsonSafe(entry.parsed_json),

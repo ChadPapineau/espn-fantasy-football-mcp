@@ -36,7 +36,7 @@ import type {
   Week,
 } from "../../domain/league/types.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
-import { scoringRefusal } from "../../drift/state.js";
+import { scoringRefusal, settingsDriftPath } from "../../drift/state.js";
 import type { DriftObservations } from "../../drift/types.js";
 import type {
   DriftStateRepository,
@@ -514,8 +514,11 @@ export class EspnProvider implements FantasyPlatform {
 
   async getScoringSettings(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<ScoringSettings>> {
     const r = await this.settingsRead(ref, opts);
-    if (scoringRefusal(this.req.drift.current()) === "settings_drift")
-      throw new EspnDriftError("mSettings", "settings.scoringSettings");
+    // the refusal names the mSettings key the row records missing (src/drift settingsDriftPath),
+    // never a fixed stand-in, and ends with the drift: the next complete answer — a 200, or a 304
+    // revalidating the cached body — clears it (Stage C finding drift-red-never-clears)
+    const missing = settingsDriftPath(this.req.drift.current());
+    if (missing !== null) throw new EspnDriftError("mSettings", missing);
     return this.stamped(r, this.deps.scoring(scoringInputOf(r.value.settings)));
   }
 

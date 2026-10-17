@@ -3,7 +3,10 @@
 // is ESPN_HOST_MOVED and is never followed, a non-JSON 200 is host_moved, a skeleton is red, the
 // probe_log rows and the drift_state row are written, the drift alarm fires once per state change
 // and is never rate-limited, exit 4 on drift. Every response comes from an injected fetch.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { DriftStateWriter, loadDriftManifest, scoringRefusal } from "../../src/drift/index.js";
 import { createHttpClient } from "../../src/http/client.js";
 import {
   MAX_LIMITER_WAIT_MS,
@@ -376,6 +379,89 @@ describe("eff probe", () => {
     expect(await probe(again, config, log, { hostOnly: true, notify: true, json: false })).toBe(4);
     expect(calls).toHaveLength(1);
     expect(again.out.text).toContain("shape  skipped");
+  });
+  it("a green run ends an in-call red row and records the manifest; a newer manifest re-baselines and says so (drift-red-never-clears)", async () => {
+    sb = sandbox();
+    const host = JSON.parse(
+      readFileSync(
+        path.join(ROOT, "fixtures/espn/recorded/season/proTeamSchedules_wl.json"),
+        "utf8",
+      ),
+    ) as unknown;
+    const shape = JSON.parse(
+      readFileSync(path.join(ROOT, "fixtures/espn/recorded/league-a/probe-shape.json"), "utf8"),
+    ) as unknown;
+    const f = fakeFetch((url) => (url.includes("/leagues/") ? json(shape) : json(host)));
+    const io = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock(),
+      packageRoot: ROOT,
+      env: { ESPN_LEAGUE_ID: "0", EFF_PROBE_LEAGUE_ID: "1" },
+    });
+    const { config, log } = await loadLenientRuntime(io);
+    // an in-call answer left the row red (a removed mSettings key: scoring refused)
+    let store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      new DriftStateWriter(store.repos.driftState, io.clock, config.espnReadHost).record([
+        {
+          kind: "missing_required_key",
+          view: "mSettings",
+          path: "$.settings.acquisitionSettings",
+          value: null,
+        },
+      ]);
+      expect(scoringRefusal(store.repos.driftState.get())).toBe("settings_drift");
+    } finally {
+      store.close();
+    }
+    expect(await probe(io, config, log, { hostOnly: false, notify: false, json: true })).toBe(0);
+    const doc = JSON.parse(io.out.text) as {
+      status: string;
+      drift_state: string;
+      rebaselined: boolean;
+    };
+    expect([doc.status, doc.drift_state, doc.rebaselined]).toEqual(["green", "green", false]);
+    const shipped = loadDriftManifest(path.join(ROOT, "fixtures/drift/manifest.json")).identity;
+    store = openStore(config, io.clock, log, { migrate: false });
+    try {
+      const row = store.repos.driftState.get();
+      expect(row).toMatchObject({
+        status: "green",
+        diff_json: "[]",
+        manifest_hash: shipped.hash,
+        manifest_version: shipped.version,
+      });
+      expect(scoringRefusal(row)).toBeNull();
+    } finally {
+      store.close();
+    }
+    // a checkout whose manifest was regenerated (another hash): the first probe re-baselines and
+    // says so
+    const pkg = fakePackage(sb);
+    mkdirSync(path.join(pkg, "fixtures", "drift"), { recursive: true });
+    const m = JSON.parse(
+      readFileSync(path.join(ROOT, "fixtures/drift/manifest.json"), "utf8"),
+    ) as Record<string, unknown>;
+    writeFileSync(
+      path.join(pkg, "fixtures", "drift", "manifest.json"),
+      JSON.stringify({ ...m, $comment: "regenerated after a re-recording" }),
+    );
+    const regenerated = loadDriftManifest(path.join(pkg, "fixtures", "drift", "manifest.json"));
+    expect(regenerated.identity.hash).not.toBe(shipped.hash);
+    const next = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock("2026-10-07T18:00:00.000Z"),
+      packageRoot: pkg,
+      env: { ESPN_LEAGUE_ID: "0", EFF_PROBE_LEAGUE_ID: "1" },
+    });
+    expect(await probe(next, config, log, { hostOnly: false, notify: false, json: false })).toBe(0);
+    expect(next.out.text).toContain("re-baselined on a newer drift manifest");
+    store = openStore(config, next.clock, log, { migrate: false });
+    try {
+      expect(store.repos.driftState.get()?.manifest_hash).toBe(regenerated.identity.hash);
+    } finally {
+      store.close();
+    }
   });
   it("unreachable: exit 1 with a rate-limited failure notification; fixture mode refused", async () => {
     sb = sandbox();

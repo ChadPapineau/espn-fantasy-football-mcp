@@ -28,8 +28,11 @@ import {
   type DriftStateRow,
   type ManifestIdentity,
 } from "../../src/drift/types.js";
+import { createFixtureFetch } from "../../src/providers/espn/fixture.js";
+import type { FetchLike } from "../../src/providers/espn/transport.js";
 import type { EspnView } from "../../src/providers/espn/types.js";
 import {
+  FIXTURES,
   jsonResponse,
   loadFixture,
   makeWorld,
@@ -388,5 +391,70 @@ describe("a newer manifest re-baselines the row (plan 03 §7)", () => {
     w.record([missing("mSettings", ACQ)]);
     expect(w.rebaseline(B)).toMatchObject({ rebaselined: true, row: { status: "green" } });
     expect(repo.row?.manifest_hash).toBe(B.hash);
+  });
+});
+
+describe("through the provider: a 304 revalidation ends the drift; the refusal names the missing key", () => {
+  /**
+   * league-a's recorded mSettings&mNav answer, served as ESPN serves a conditional read: answer 1
+   * complete with an ETag, answer 2 (a forced refresh) without settings.acquisitionSettings under a
+   * new ETag, then 304 to an If-None-Match of the first ETag — ESPN's content is the complete body
+   * again. Every other request is the recorded fixture.
+   */
+  function conditional(): { fetch: FetchLike; settingsCalls: () => number; sent304: () => number } {
+    const inner = createFixtureFetch({ dir: FIXTURES, league: "league-a" });
+    let n = 0;
+    let n304 = 0;
+    const fetch: FetchLike = async (url, init) => {
+      const views = new URL(url).searchParams.getAll("view");
+      if (!(views.includes("mSettings") && views.includes("mNav"))) return inner(url, init);
+      n += 1;
+      const headers = new Headers(init.headers);
+      const res = await inner(url, init);
+      const body = (await res.json()) as { settings: Record<string, unknown> };
+      if (n === 1) return jsonResponse(body, 200, { etag: 'W/"v1"' });
+      if (n === 2) {
+        delete body.settings.acquisitionSettings;
+        return jsonResponse(body, 200, { etag: 'W/"v2"' });
+      }
+      expect(headers.get("if-none-match")).toBe('W/"v1"');
+      n304 += 1;
+      return new Response(null, { status: 304, headers: { etag: 'W/"v1"' } });
+    };
+    return { fetch, settingsCalls: () => n, sent304: () => n304 };
+  }
+
+  it("one incomplete answer, a refusal naming its key, then ESPN's 304: green, scoring served again", async () => {
+    const c = conditional();
+    const w = makeWorld({ fetch: c.fetch });
+    // 1. a complete answer, cached with its ETag
+    const first = await w.provider.getScoringSettings(w.ref);
+    expect(first.stamp.drift).toBeNull();
+    // 2. a forced refresh answers without acquisitionSettings: drift, recorded, never cached
+    w.clock.advance(1_000);
+    await expect(
+      w.provider.getScoringSettings(w.ref, { force_refresh: true }),
+    ).rejects.toMatchObject({
+      effCode: "ESPN_DRIFT_DETECTED",
+      effDetails: { view: "mSettings", path: "settings.acquisitionSettings" },
+    });
+    expect(w.drift.row?.status).toBe("red");
+    // 3. the cached complete body is still fresh, yet scoring is refused while the drift stands —
+    //    and the refusal names the key that is missing (it named settings.scoringSettings)
+    w.clock.advance(1_000);
+    await expect(w.provider.getScoringSettings(w.ref)).rejects.toMatchObject({
+      effCode: "ESPN_DRIFT_DETECTED",
+      effDetails: { view: "mSettings", path: "settings.acquisitionSettings" },
+    });
+    // 4. two days on the cache is stale: the conditional read is answered 304 — the latest answer
+    //    is the complete body again, so the drift ends and scoring is served
+    w.clock.advance(2 * 86_400_000);
+    const back = await w.provider.getScoringSettings(w.ref);
+    expect(c.sent304()).toBe(1);
+    expect(c.settingsCalls()).toBe(3);
+    expect(back.stamp.drift).toBeNull();
+    expect(w.drift.row).toMatchObject({ status: "green", since: null, diff_json: "[]" });
+    expect(w.provider.scoringRefusal()).toBeNull();
+    expect(back.value.settings_hash).toBe(first.value.settings_hash);
   });
 });

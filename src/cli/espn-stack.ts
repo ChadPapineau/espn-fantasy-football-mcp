@@ -22,7 +22,12 @@ import type {
 } from "../auth/types.js";
 import type { Config } from "../config/schema.js";
 import { translateScoringInput } from "../domain/scoring/index.js";
-import { loadObservations, MANIFEST_PATH, type DriftObservations } from "../drift/index.js";
+import {
+  loadDriftManifest,
+  MANIFEST_PATH,
+  type DriftObservations,
+  type LoadedManifest,
+} from "../drift/index.js";
 import { createEspnProvider, type EspnProvider } from "../providers/espn/index.js";
 import type { LeagueRef } from "../providers/platform.js";
 import type { RequestOrigin, Store } from "../store/types.js";
@@ -93,16 +98,25 @@ export function withProbeAccess(
   };
 }
 
-/** The drift observations the checkout ships (fixtures/drift/manifest.json), or undefined. */
-export function driftObservations(io: CliIo, log: Logger): DriftObservations | undefined {
+/**
+ * The drift manifest the checkout ships (fixtures/drift/manifest.json) — its observations and its
+ * identity (plan 03 §7: drift_state records the manifest a probe judged against, and a newer one
+ * re-baselines) — or undefined when absent or unreadable (warned).
+ */
+export function driftManifest(io: CliIo, log: Logger): LoadedManifest | undefined {
   const file = path.join(io.packageRoot, MANIFEST_PATH);
   if (!existsSync(file)) return undefined;
   try {
-    return loadObservations(file);
+    return loadDriftManifest(file);
   } catch {
     log.warn("drift.manifest_unreadable");
     return undefined;
   }
+}
+
+/** The drift observations the checkout ships (fixtures/drift/manifest.json), or undefined. */
+export function driftObservations(io: CliIo, log: Logger): DriftObservations | undefined {
+  return driftManifest(io, log)?.observations;
 }
 
 /** The league the configuration names. */

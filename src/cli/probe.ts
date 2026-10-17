@@ -19,7 +19,7 @@ import {
 } from "../drift/index.js";
 import type { LenientConfig } from "../config/schema.js";
 import type { Clock } from "../domain/clock.js";
-import type { DriftObservations } from "../drift/types.js";
+import type { DriftObservations, ManifestIdentity } from "../drift/types.js";
 import { createHttpClient, type HttpClient } from "../http/client.js";
 import { leagueTarget, seasonTarget } from "../providers/espn/path.js";
 import type { EspnView } from "../providers/espn/types.js";
@@ -30,7 +30,7 @@ import type {
   Store,
   StoreFactory,
 } from "../store/types.js";
-import { driftObservations } from "./espn-stack.js";
+import { driftManifest } from "./espn-stack.js";
 import { espnRequest, jsonBody, type EspnAnswer } from "./espn-http.js";
 import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
@@ -256,13 +256,28 @@ export function probeErrorToken(c: ProbeCheck): string {
   return /^[A-Za-z]/.test(raw) ? raw : `e${raw.slice(0, 63)}`;
 }
 
-/** Records probe_log rows and the drift_state row; returns the stored status. */
+/** What one recorded probe run left in drift_state. */
+export interface RecordedProbe {
+  readonly status: DriftStatus;
+  /** A newer manifest discarded the diff computed against the old one (plan 03 §7: say so). */
+  readonly rebaselined: boolean;
+}
+
+/**
+ * Records probe_log rows and the drift_state row through src/drift's probe transform
+ * (DriftStateWriter.probed — plan 01 §7 "The daily probe"): the manifest the run judged against
+ * (a newer one re-baselines), what each answer verified clears (the required-key drift of its
+ * views), what the run found is recorded, a host move ends on a good answer of a run that saw none,
+ * and last_probe_at moves. Before, a run recorded its signals and called `recovered()` with no
+ * view, so a green probe never ended a red row (Stage C finding drift-red-never-clears).
+ */
 export function recordProbe(
   store: Store,
   clock: Clock,
   host: string,
   checks: readonly ProbeCheck[],
-): DriftStatus {
+  manifest: ManifestIdentity | null = null,
+): RecordedProbe {
   const at = clock.nowIso();
   for (const c of checks) {
     if (c.status === "skipped") continue;
@@ -276,31 +291,8 @@ export function recordProbe(
     };
     store.repos.probeLog.record(row);
   }
-  const writer = new DriftStateWriter(store.repos.driftState, clock, host);
-  const signals = checks.flatMap((c) => c.signals);
-  let row = writer.record(signals);
-  const hostOk = checks.some(
-    (c) => c.name === "host" && (c.status === "green" || c.status === "additive"),
-  );
-  if (hostOk && !checks.some((c) => c.status === "host_moved")) row = writer.recovered();
-  const current = row ?? store.repos.driftState.get();
-  const next =
-    current === null
-      ? {
-          status: "green" as const,
-          since: null,
-          last_probe_at: at,
-          manifest_hash: null,
-          manifest_version: null,
-          host,
-          host_moved_at: null,
-          diff_json: "[]",
-          additive_json: "[]",
-          updated_at: at,
-        }
-      : { ...current, last_probe_at: at, updated_at: at };
-  store.repos.driftState.put(next);
-  return next.status;
+  const out = new DriftStateWriter(store.repos.driftState, clock, host).probed(checks, manifest);
+  return { status: out.row.status, rebaselined: out.rebaselined };
 }
 
 /** Options of `eff probe`. */
@@ -343,6 +335,7 @@ export async function probe(
     return EXIT.error;
   }
   try {
+    const manifest = driftManifest(io, log);
     const deps: ProbeDeps = {
       http: createHttpClient({
         ...(io.fetch === null ? {} : { fetch: io.fetch }),
@@ -352,7 +345,7 @@ export async function probe(
       limiter: store.repos.limiter,
       clock: io.clock,
       host: config.espnReadHost,
-      observations: driftObservations(io, log),
+      observations: manifest?.observations,
       // the launchd job runs `probe --notify`; a run without it is someone at a terminal
       origin: opts.notify ? "job" : "server",
     };
@@ -370,12 +363,20 @@ export async function probe(
         server_time_ms: null,
       });
     else checks.push(await shapeProbe(deps, config.season, league, config.probeLeagueId !== null));
-    const stored = recordProbe(store, io.clock, config.espnReadHost, checks);
+    const recorded = recordProbe(
+      store,
+      io.clock,
+      config.espnReadHost,
+      checks,
+      manifest?.identity ?? null,
+    );
+    const stored = recorded.status;
     const status = worstStatus(checks);
     log.info("probe.done", {
       status,
       stored,
       manifest: deps.observations === undefined ? "absent" : "present",
+      rebaselined: recorded.rebaselined,
     });
 
     const bad = stored === "red" || stored === "host_moved";
@@ -401,6 +402,7 @@ export async function probe(
           status,
           drift_state: stored,
           manifest: deps.observations === undefined ? "absent" : "present",
+          rebaselined: recorded.rebaselined,
           checks: checks.map((c) => ({
             name: c.name,
             views: c.views,
@@ -419,7 +421,7 @@ export async function probe(
         );
       await writeLine(
         io.stdout,
-        `drift_state: ${stored}${deps.observations === undefined ? " (manifest absent: required keys and skeletons only)" : ""}`,
+        `drift_state: ${stored}${deps.observations === undefined ? " (manifest absent: required keys and skeletons only)" : ""}${recorded.rebaselined ? " (re-baselined on a newer drift manifest: the old diff was discarded)" : ""}`,
       );
       const a = alarmText(checks);
       if (a !== null) await writeLine(io.stderr, a);
