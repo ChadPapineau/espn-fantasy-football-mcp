@@ -22,7 +22,7 @@ import {
   selectJobs,
   type LaunchdJob,
 } from "./launchd.js";
-import { runtimeLocationProblems } from "./print-config.js";
+import { RUNTIME_LOCATION_FIX, runtimeLocationProblems } from "./print-config.js";
 import { availableRefreshJobs, type SourceRegistry } from "./refresh.js";
 
 /** The jobs this build can run (a refresh job whose sources are not shipped is not). */
@@ -140,10 +140,7 @@ export async function installLaunchd(
       "eff install-launchd: refused — the runtime install is under a file-provider (iCloud) or synced directory:",
     );
     for (const p of where) await writeLine(io.stderr, `  ${p}`);
-    await writeLine(
-      io.stderr,
-      "  install from a clone outside it, or `npm install -g` from the release tarball.",
-    );
+    await writeLine(io.stderr, `  ${RUNTIME_LOCATION_FIX}.`);
     return EXIT.error;
   }
   const steps = await installJobs({

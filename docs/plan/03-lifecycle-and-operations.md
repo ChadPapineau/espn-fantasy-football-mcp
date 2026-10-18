@@ -175,7 +175,7 @@ claude mcp add --scope user --transport stdio \
 
 ### 4.3 Global install variant
 
-`npm install -g` puts `eff` on `PATH`; the config still uses the absolute `dist/cli.js` path printed by `eff print-config` — GUI clients do not have the user's shell `PATH` [A-1]. The global install (from the release tarball) is the recommended runtime location when the checkout is iCloud-managed (ADV OBJ-10); the quickstart's first step is `fnm install 24 && fnm default 24` (T-15(a)).
+`npm install -g` puts `eff` on `PATH`; the config still uses the absolute `dist/cli.js` path printed by `eff print-config` — GUI clients do not have the user's shell `PATH` [A-1]. The global install (from the release tarball) is the recommended runtime location when the checkout is iCloud-managed (ADV OBJ-10); the quickstart's first step is `fnm install 24 && fnm default 24` (T-15(a)). **As built (changelog B4):** the tarball is unpacked into its own folder, `npm ci --omit=dev --ignore-scripts` installs the lockfile it carries there, and `npm link --ignore-scripts` puts `eff` on `PATH` — `npm install -g` of the `.tgz` would resolve the dependencies outside that lockfile.
 
 ---
 

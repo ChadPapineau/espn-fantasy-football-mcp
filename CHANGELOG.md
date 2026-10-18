@@ -39,9 +39,13 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   cheat-sheet field the tool's output schema lacks; `npm run docs:gen` rewrites them), `secret-scan.yml` (workflow `secrets`; gitleaks pinned by version and
   sha256 over the full history and the tree, plus its self-test), `release.yml` (on a `v*` tag:
   the full `ci.yml` gate, `scripts/ci/check-changelog.mjs` — the tag, `package.json` and a dated
-  section here agree — `npm shrinkwrap` from the lockfile, the tarball scan, `npm pack`, and a
-  GitHub Release with the tarball and its sha256; never `npm publish`), Dependabot (monthly,
-  grouped) and a pull-request template. Every action pinned by commit SHA; `contents: read` (the
+  section here agree — the committed lockfile copied to `npm-shrinkwrap.json`, which `files`
+  ships, the tarball scan with `--release` (the packed lock is that lockfile byte for byte),
+  `npm pack`, `scripts/ci/check-release-install.mjs` — the README's release install, `npm ci
+  --omit=dev --ignore-scripts` then `npm link --ignore-scripts`, run offline on that very tarball:
+  exactly the lockfile's runtime tree, and the linked `eff` runs — and a GitHub Release with the
+  tarball and its sha256; never `npm publish`; `ci.yml`'s pack job rehearses the same steps on
+  every push), Dependabot (monthly, grouped) and a pull-request template. Every action pinned by commit SHA; `contents: read` (the
   release job alone `contents: write`); no secrets.
 - **Plugin root (plan 09 §4, K8).** `.claude-plugin/plugin.json` (`espn-fantasy-football`,
   `userConfig` for the league id, the season and the toolset — the season and the toolset empty

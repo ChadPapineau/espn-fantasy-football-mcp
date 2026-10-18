@@ -75,16 +75,22 @@ export function isRecord(v) {
 /**
  * Run npm with an argument array (never a shell string) and return its output. npm ls exits 1 when
  * the tree has problems but still prints JSON; the caller inspects `problems`.
- * @param {string[]} args
+ * @param {readonly string[]} args
  * @param {string} cwd
+ * @param {Readonly<Record<string, string>>} [env] extra environment (e.g. a throwaway npm_config_prefix)
  * @returns {{ status: number | null, stdout: string, stderr: string }}
  */
-export function runNpm(args, cwd) {
+export function runNpm(args, cwd, env = {}) {
   const r = spawnSync("npm", args, {
     cwd,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, npm_config_update_notifier: "false", npm_config_fund: "false" },
+    env: {
+      ...process.env,
+      npm_config_update_notifier: "false",
+      npm_config_fund: "false",
+      ...env,
+    },
   });
   if (r.error) throw new Error(`npm ${args.join(" ")} failed to start: ${r.error.message}`);
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };

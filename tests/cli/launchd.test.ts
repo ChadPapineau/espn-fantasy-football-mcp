@@ -306,6 +306,10 @@ describe("install-launchd / uninstall-launchd", () => {
     });
     expect(await installLaunchd(icloud, config, { jobs: "probe", dryRun: false })).toBe(1);
     expect(icloud.err.text).toContain("refused");
+    // the fix is the locked release install, never `npm install -g` of the tarball (npm would not
+    // read its npm-shrinkwrap.json — Stage C finding ci-release-workflow-missing)
+    expect(icloud.err.text).toContain("`npm ci --omit=dev --ignore-scripts`");
+    expect(icloud.err.text).not.toMatch(/npm install -g|npm i -g|--global/);
     expect(existsSync(launchAgentsDir(sb.home))).toBe(false);
     const noUid = makeIo(sb, { packageRoot: built, platform: "darwin", uid: null });
     expect(await installLaunchd(noUid, config, { jobs: "probe", dryRun: false })).toBe(1);

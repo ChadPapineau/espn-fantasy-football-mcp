@@ -51,6 +51,18 @@ function step(job: string, needle: string): string {
 
 const CANCEL_EXPR = "${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}";
 
+/**
+ * release.yml's tarball steps, which ci.yml's pack job rehearses on every push (plan 04 §4.4; Stage C
+ * finding ci-release-workflow-missing): the committed lockfile as the tarball's npm-shrinkwrap.json,
+ * the --release scan, npm pack, and the README's locked install run on the packed tarball.
+ */
+const REHEARSED = [
+  "cp package-lock.json npm-shrinkwrap.json",
+  "npm run pack:scan -- --release",
+  'npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"',
+  "node scripts/ci/check-release-install.mjs --tarball",
+];
+
 describe.each(files)("%s", (file) => {
   const text = load(file);
   const jobs = jobsOf(text);
@@ -200,6 +212,24 @@ describe("ci.yml (plan 04 §4.1)", () => {
       expect(block, c).toContain(c);
       expect(block.indexOf("npm ci"), c).toBeLessThan(block.indexOf(c));
     }
+  });
+
+  it("pack rehearses release.yml's tarball on every push: the plain scan first, then the lock, the --release scan, npm pack and the README's install", () => {
+    const p = job("pack");
+    const rehearsal = step(p, "Rehearse release.yml's tarball");
+    expect(rehearsal).not.toBe("");
+    // every push still packs without the lock first (the default scan)
+    const plain = p.indexOf("run: npm run pack:scan\n");
+    expect(plain).toBeGreaterThan(p.indexOf("npm run build"));
+    expect(plain).toBeLessThan(p.indexOf(rehearsal));
+    let at = -1;
+    for (const needle of REHEARSED) {
+      const i = rehearsal.indexOf(needle);
+      expect(i, needle).toBeGreaterThan(at);
+      at = i;
+    }
+    expect(rehearsal).toContain("set -euo pipefail");
+    expect(rehearsal).toContain('--tarball "$RUNNER_TEMP/espn-fantasy-football-mcp-$version.tgz"');
   });
 
   it("the gating audit is not swallowed (only the report-only audit may be)", () => {
@@ -683,16 +713,16 @@ describe("release.yml (plan 04 §4.4, R8; Stage C finding ci-release-workflow-mi
     expect(release).toMatch(/^ {4}needs: ci$/m);
   });
 
-  it("checks the changelog, shrinkwraps, scans the tarball, packs, checksums, then creates the GitHub Release — in that order", () => {
+  it("checks the changelog, writes the lock, scans, packs, checksums, installs that tarball the README's way, then creates the GitHub Release — in that order", () => {
     const order = [
       "npm ci",
       "npm run build",
       'node scripts/ci/check-changelog.mjs --tag "$GITHUB_REF_NAME" --notes "$RUNNER_TEMP/notes.md"',
-      "npm shrinkwrap --ignore-scripts",
-      "npm run pack:scan",
-      "npm pack --ignore-scripts",
+      ...REHEARSED.slice(0, 3),
       "sha256sum",
-      'gh release create "$GITHUB_REF_NAME"',
+      // the README's locked install, run on the very tarball the release uploads
+      `${REHEARSED[3] ?? ""} "$RUNNER_TEMP/espn-fantasy-football-mcp-\${GITHUB_REF_NAME#v}.tgz"`,
+      'gh release create "$GITHUB_REF_NAME" "$tgz" "$tgz.sha256"',
     ];
     let at = -1;
     for (const needle of order) {
@@ -703,6 +733,13 @@ describe("release.yml (plan 04 §4.4, R8; Stage C finding ci-release-workflow-mi
     expect(release).toContain('--notes-file "$RUNNER_TEMP/notes.md"');
     expect(release).toContain("--verify-tag");
     expect(release).toContain("GH_TOKEN: ${{ github.token }}");
+  });
+
+  it("the lock is the committed lockfile copied (npm shrinkwrap would delete it and leave nothing to compare)", () => {
+    expect(step(release, "npm-shrinkwrap.json")).toMatch(
+      /run: cp package-lock\.json npm-shrinkwrap\.json$/m,
+    );
+    expect(release).not.toContain("npm shrinkwrap");
   });
 
   it("never publishes to npm (R8: the owner publishes by hand, if ever)", () => {

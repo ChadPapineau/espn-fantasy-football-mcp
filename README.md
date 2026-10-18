@@ -34,6 +34,7 @@ A **planned** local [Model Context Protocol](https://modelcontextprotocol.io/) s
 - [Tool reference](#tool-reference)
 - [Skills reference](#skills-reference)
 - [Quickstart and installation](#quickstart-and-installation)
+  - [Install from a release](#install-from-a-release)
 - [Safe credential setup](#safe-credential-setup)
 - [Configuration](#configuration)
 - [Launch configuration for Claude Desktop and Claude Code](#launch-configuration-for-claude-desktop-and-claude-code)
@@ -914,14 +915,30 @@ eff install-launchd
 
 Notes on the steps:
 
-- **`eff` is the package's CLI** (`dist/cli.js`). In a clone you would run it as `node dist/cli.js <subcommand>`; `npm install -g --ignore-scripts` from the release tarball puts `eff` on your `PATH` and is the recommended runtime location when your checkout lives in a cloud-synced directory. The tarball is a GitHub Release asset (`espn-fantasy-football-mcp-<version>.tgz` and its `.sha256` — check it with `shasum -a 256 -c`), built by the tag workflow `release.yml` after the full CI gate; it carries `npm-shrinkwrap.json`, generated from the committed lockfile, so the install resolves the same locked tree with its integrity hashes. Either way the client configuration uses absolute paths (step 5), because GUI clients do not have your shell's `PATH`.
-- **`npm ci`, never `npm install`**, with `ignore-scripts=true` and exact pins: the lockfile's integrity hashes are the provenance (a release tarball's `npm-shrinkwrap.json` carries the same hashes).
+- **`eff` is the package's CLI** (`dist/cli.js`). In a clone you would run it as `node dist/cli.js <subcommand>`; a [release install](#install-from-a-release) puts `eff` on your `PATH` and is the recommended runtime location when your checkout lives in a cloud-synced directory. Either way the client configuration uses absolute paths (step 5), because GUI clients do not have your shell's `PATH`.
+- **`npm ci`, never `npm install`**, with `ignore-scripts=true` and exact pins: the lockfile's integrity hashes are the provenance — `package-lock.json` in a clone, and in a release install the tarball's `npm-shrinkwrap.json`, which is that same file.
 - **Step 3 fails at setup time, not mid-week.** A mis-pasted cookie is rejected by one definitive check against your league and deleted again.
 - **The plugin comes from your built clone, not from GitHub.** Its server is the launch shim `scripts/eff-launch.sh`, which runs `dist/cli.js` — a build output that git never carries. A plugin added from GitHub (`<owner>/<repo>`) is that git tree: Claude Code installs its locked dependencies but builds nothing, so the shim exits with "dist/cli.js is missing" in every session. Added from the built clone, the install copies the clone, `dist/` included, into Claude Code's plugin cache and installs the locked dependencies there (`npm ci --ignore-scripts`, Claude Code 2.1.238); the cache never builds anything.
 - **One registration per client.** In Claude Code the plugin registers the server itself — its tools appear as `mcp__plugin_espn-fantasy-football_espn-fantasy-football__espn_<tool>`. `eff print-config --client code` prints the other route, a user-scope `claude mcp add` entry for Claude Code without the plugin (the Skills then copied into `~/.claude/skills/`: `node scripts/skills/build-skills.mjs --copy-out dist/skills-copy`, then the `espn-<name>` directories): use it **instead of the plugin, never beside it** — both at once start two servers and list every tool twice. Claude Desktop chat ignores a plugin's server, so it always takes step 5's `eff print-config --client desktop`; its Skills load from the plugin or from per-Skill zips. The `espn.<workflow>` prompts work wherever prompts do.
 - **First use:** run the `onboard` Skill (`/espn-fantasy-football:onboard` from the plugin, `/espn-onboard` from a copy install, or the `espn.onboard` prompt). It restates your league's format, checks the scoring engine against ESPN's own points per stat, and asks the one question settings cannot answer — how your league seeds its playoffs.
 - **Upgrade:** `git pull && npm ci && npm run build` in the runtime clone, then refresh the plugin's copy of it: `claude plugin marketplace update espn-fantasy-football-mcp` and `claude plugin update espn-fantasy-football@espn-fantasy-football-mcp` copy in a new version; at an unchanged version (a development build) the update keeps the old copy, so `claude plugin uninstall espn-fantasy-football@espn-fantasy-football-mcp` and install it again as in step 5. Restart the client, then `eff doctor`; re-run `eff print-config` and `eff install-launchd` whenever the Node path changed.
 - **Uninstall:** `eff uninstall` removes the launchd jobs, both possible credential stores, the cache and (after asking) the configuration directory; it prints — and does not edit — the client configuration entry to remove, and it tells you that deleting local copies does **not** invalidate the ESPN session itself. The plugin goes with `claude plugin uninstall espn-fantasy-football@espn-fantasy-football-mcp`, then `claude plugin marketplace remove espn-fantasy-football-mcp`.
+
+### Install from a release
+
+Each `v*` tag's GitHub Release carries `espn-fantasy-football-mcp-<version>.tgz` and its `.sha256`, built by the tag workflow `release.yml` after the full CI gate. The tarball carries `npm-shrinkwrap.json`, which is the committed `package-lock.json` byte for byte. Unpack it into a new folder outside any cloud-synced directory (and outside this tool's own directories under `~/.config` and `~/.cache`, which `eff uninstall` removes), install its locked runtime tree there, and link `eff` onto your `PATH`:
+
+```sh
+# <version> = the release's version (its tag without the "v"); both assets in the current directory
+shasum -a 256 -c espn-fantasy-football-mcp-<version>.tgz.sha256
+mkdir -p ~/.local/lib/espn-fantasy-football-mcp-<version>
+tar -xzf espn-fantasy-football-mcp-<version>.tgz -C ~/.local/lib/espn-fantasy-football-mcp-<version> --strip-components 1
+cd ~/.local/lib/espn-fantasy-football-mcp-<version>
+npm ci --omit=dev --ignore-scripts
+npm link --ignore-scripts
+```
+
+`npm ci` reads `npm-shrinkwrap.json` and installs exactly the lockfile's runtime tree — the six packages of the runtime allow-list — refusing any package whose bytes do not match its integrity hash. `npm link` then makes `eff` a link into this folder and installs nothing. **Do not `npm install -g` the `.tgz` itself:** npm then resolves the dependencies from the registry and never reads the tarball's lockfile. The tag workflow runs the two `npm` commands, offline, on the tarball it is about to publish and checks what they installed against the lockfile; `ci.yml` rehearses that on every push (`scripts/ci/check-release-install.mjs`). A newer version goes into its own new folder the same way; then re-run `eff print-config` and `eff install-launchd`, whose absolute paths name the folder.
 
 ---
 
@@ -1219,7 +1236,7 @@ The untrusted-text rule the server declares to the model, verbatim from the plan
 | `supply-chain` | a high or critical runtime advisory; any install script; a licence outside the allow-list; an undeclared runtime dependency |
 | `secrets` | any secret-scan finding (including ESPN cookie, GUID and league-id rules) across full history |
 | `identifiers` | an absolute user path, a real-looking league id, a GUID outside the fixture pseudonym range, or an IP literal in any tracked file |
-| `pack` | the tarball contains anything outside the declared files, or an identifier |
+| `pack` | the tarball contains anything outside the declared files, or an identifier; or the release rehearsal fails — the tarball does not carry the committed lockfile as `npm-shrinkwrap.json`, or [the release install](#install-from-a-release) of it does not install exactly the lockfile's runtime tree and a working `eff` |
 | `docs`: `mermaid`, `skills`, `docs-current`, `links`, `identifiers` | a diagram that does not render; a Skill that breaks the structural rules; generated docs out of date; a broken internal link |
 
 **Running the Skills evals** (planned commands, [plan 09 §5](docs/plan/09-skills-bundle.md#5-eval-plan-k7)):

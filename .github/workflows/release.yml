@@ -1,11 +1,17 @@
 # release — on a tag vX.Y.Z (plan 04 §4.4, R8; Stage C finding ci-release-workflow-missing): the
 # full ci.yml gate first (called as a reusable workflow, never copied: the same jobs on the same
 # commit), then the changelog check (scripts/ci/check-changelog.mjs: the tag, package.json's
-# version and a dated CHANGELOG.md section agree; the section is the release body), npm shrinkwrap
-# (the committed lockfile becomes the tarball's npm-shrinkwrap.json, so `npm install -g` of the
-# tarball resolves the same locked tree with its integrity hashes — npm pack never ships
-# package-lock.json), the tarball scan (scan-tarball.mjs: the files allow-list, the plugin root,
-# secrets and identifiers), npm pack, and a GitHub Release carrying the tarball and its sha256.
+# version and a dated CHANGELOG.md section agree; the section is the release body), the lock (the
+# committed package-lock.json copied, byte for byte, to npm-shrinkwrap.json — npm pack never ships
+# package-lock.json, and package.json `files` names the shrinkwrap), the tarball scan
+# (scan-tarball.mjs --release: the files allow-list, the plugin root, secrets and identifiers, and
+# the packed shrinkwrap is the committed lockfile), npm pack with its sha256, the README's release
+# install run on that very tarball (check-release-install.mjs: unpack, `npm ci --omit=dev
+# --ignore-scripts` offline — exactly the lockfile's runtime tree, every integrity hash checked —
+# then `npm link --ignore-scripts` under a throwaway prefix, and the linked `eff` runs; npm never
+# reads the shrinkwrap of a .tgz it installs by path, so `npm install -g <tarball>` is not the
+# documented install), and a GitHub Release carrying the tarball and its sha256. ci.yml's pack job
+# rehearses the same lock, scan, pack and install on every push.
 #
 # Choices, and why
 # - No npm publish from CI (R8): publishing, if ever, is the owner's manual `npm publish
@@ -58,10 +64,10 @@ jobs:
         run: npm run build
       - name: The tag, package.json and CHANGELOG.md agree (the release notes)
         run: node scripts/ci/check-changelog.mjs --tag "$GITHUB_REF_NAME" --notes "$RUNNER_TEMP/notes.md"
-      - name: Lock the tarball's tree (npm-shrinkwrap.json from the committed lockfile)
-        run: npm shrinkwrap --ignore-scripts
-      - name: Scan what npm pack ships (files allow-list, plugin root, secrets, identifiers)
-        run: npm run pack:scan
+      - name: The tarball's lock is the committed lockfile, byte for byte (npm-shrinkwrap.json)
+        run: cp package-lock.json npm-shrinkwrap.json
+      - name: Scan what npm pack ships (files allow-list, plugin root, secrets, identifiers; the lock packed)
+        run: npm run pack:scan -- --release
       - name: Pack and checksum
         run: |
           set -euo pipefail
@@ -70,6 +76,8 @@ jobs:
           tgz="espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
           test -f "$tgz"
           sha256sum "$tgz" > "$tgz.sha256"
+      - name: Install that tarball the README's way, offline — the lockfile's runtime tree, then the linked eff runs
+        run: node scripts/ci/check-release-install.mjs --tarball "$RUNNER_TEMP/espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
       - name: Create the GitHub Release (nothing goes to the npm registry — R8)
         env:
           GH_TOKEN: ${{ github.token }}

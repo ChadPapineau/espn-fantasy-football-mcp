@@ -200,7 +200,7 @@ Push protection stays on (HANDOFF) — no CI can undo a pushed secret; only rota
 
 ### 4.4 `release.yml` — on tag `v*`
 
-Build → full `ci.yml` jobs → `scripts/check-changelog.ts` → `npm pack` → `scan-tarball` → GitHub Release with tarball + sha256 and the changelog section as body. **No `npm publish` from CI** (R8). Semantic versioning: breaking changes to tool names/schemas, the store format or the manifest format bump major (pre-1.0: minor).
+Build → full `ci.yml` jobs → `scripts/check-changelog.ts` → `npm pack` → `scan-tarball` → GitHub Release with tarball + sha256 and the changelog section as body. **No `npm publish` from CI** (R8). Semantic versioning: breaking changes to tool names/schemas, the store format or the manifest format bump major (pre-1.0: minor). **As built (changelog B4):** the committed lockfile ships in the tarball as `npm-shrinkwrap.json` (`files` names it; `scan-tarball --release` checks it byte for byte), and `scripts/ci/check-release-install.mjs` runs the README's locked install on the tarball before the Release is created; `ci.yml`'s `pack` job rehearses both on every push.
 
 ### 4.5 `scheduled.yml` — weekly (Monday 06:00 UTC) + manual
 

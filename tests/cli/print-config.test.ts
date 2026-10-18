@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   MissingBuildError,
+  RUNTIME_LOCATION_FIX,
   SERVER_NAME,
   codeCommand,
   desktopSnippet,
@@ -114,6 +115,16 @@ describe("print-config", () => {
       runtimeLocationProblems({ home: sb.home, xattr: () => null }, path.join(dist, "cli.js"))[0],
     ).toMatch(/could not check/);
     expect(runtimeLocationWarning([])).toEqual([]);
+  });
+  it("the runtime-location fix is the locked release install, never `npm install -g` of the tarball (README, Install from a release)", () => {
+    // npm never reads the npm-shrinkwrap.json of a .tgz it installs by path (Stage C finding
+    // ci-release-workflow-missing): the fix print-config, install-launchd and doctor give names the
+    // lockfile install the release workflow checks
+    const warning = runtimeLocationWarning(["x"]).join("\n");
+    expect(warning).toContain(RUNTIME_LOCATION_FIX);
+    expect(RUNTIME_LOCATION_FIX).toContain("`npm ci --omit=dev --ignore-scripts`");
+    expect(RUNTIME_LOCATION_FIX).toContain("Install from a release");
+    expect(warning).not.toMatch(/npm install -g|npm i -g|--global/);
   });
   it("launchEnv copies only env-sourced non-secret keys; desktopSnippet and codeCommand agree", async () => {
     sb = sandbox();

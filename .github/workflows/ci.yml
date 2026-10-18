@@ -33,6 +33,11 @@
 #   server through tests/smoke/fixture-serve.mjs (fixture mode on fx-10h over a temp home — a stdio
 #   client passes only a safe subset of its environment to the server). `npm run smoke` is the same
 #   A3a check with the repo's own SDK client, both protocol eras, instructions and cache hints.
+# - pack rehearses release.yml's tarball on every push (plan 04 §4.4; Stage C finding
+#   ci-release-workflow-missing): the committed lockfile copied to npm-shrinkwrap.json, the scan's
+#   --release checks, npm pack, and scripts/ci/check-release-install.mjs — the README's release
+#   install (`npm ci --omit=dev --ignore-scripts`, then `npm link --ignore-scripts`) run offline on
+#   the packed tarball — so the first tag is never the first run of those steps.
 # - process-macos (weekly + on demand, never on push): the process and end-to-end suites on macOS,
 #   and the keychain round trip (EFF_KEYCHAIN_PROCESS_TEST=1: `eff setup --service-name
 #   eff-test-<random>` through the real launchd self-test, the eff-test items removed afterwards —
@@ -271,6 +276,14 @@ jobs:
         run: npm run build
       - name: Scan what npm pack would ship (files allow-list, plugin root, secrets, identifiers)
         run: npm run pack:scan
+      - name: Rehearse release.yml's tarball — the lockfile packed as npm-shrinkwrap.json, installed the README's way, offline
+        run: |
+          set -euo pipefail
+          cp package-lock.json npm-shrinkwrap.json
+          npm run pack:scan -- --release
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+          version="$(node -p 'require("./package.json").version')"
+          node scripts/ci/check-release-install.mjs --tarball "$RUNNER_TEMP/espn-fantasy-football-mcp-$version.tgz"
 
   process:
     name: process

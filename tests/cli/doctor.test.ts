@@ -132,6 +132,10 @@ describe("rows #1–#3, #12, #13, #24, #25 (pure)", () => {
       { command: process.execPath, args: [desktop, "serve"] },
     );
     expect(fp.hard.join(" ")).toContain("file provider");
+    // the fix is the locked release install, never `npm install -g` (Stage C finding
+    // ci-release-workflow-missing: npm would not read the tarball's npm-shrinkwrap.json)
+    expect(fp.hard.join(" ")).toContain("`npm ci --omit=dev --ignore-scripts`");
+    expect(fp.hard.join(" ")).not.toMatch(/npm install -g|npm i -g|--global/);
     const r = await checkLaunchConfig(
       makeIo(sb, {
         exec: fakeExec(() => ({ code: 1, stderr: "eff-launch: no Node.js >= 24.15 found\n" })).exec,

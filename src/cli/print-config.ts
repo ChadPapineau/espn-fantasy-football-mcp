@@ -180,13 +180,23 @@ export function runtimeLocationProblems(
   return out;
 }
 
+/**
+ * Where a runtime install goes instead of a synced folder (plan 03 §4.1, §4.3; README "Install from a
+ * release"; Stage C finding ci-release-workflow-missing): a clone outside it, or a release tarball
+ * unpacked outside it and installed from the lockfile it carries. Never `npm install -g` of the
+ * `.tgz`: npm then resolves the dependencies from the registry and never reads the tarball's
+ * npm-shrinkwrap.json. Shared by print-config, install-launchd and doctor #2.
+ */
+export const RUNTIME_LOCATION_FIX =
+  "use a clone outside it (e.g. ~/Developer/…), or unpack a release tarball outside it and install its locked tree there (`npm ci --omit=dev --ignore-scripts`; README, Install from a release)";
+
 /** The warning lines for a runtime install under a file-provider or synced directory. */
 export function runtimeLocationWarning(problems: readonly string[]): string[] {
   if (problems.length === 0) return [];
   return [
     "eff print-config: warning: the runtime install is under a file-provider (iCloud) or synced directory:",
     ...problems.map((p) => `  ${p}`),
-    "  iCloud eviction breaks launches silently — use a clone outside it (e.g. ~/Developer/…) or `npm install -g` from the release tarball (plan 03 §4.1).",
+    `  iCloud eviction breaks launches silently — ${RUNTIME_LOCATION_FIX} (plan 03 §4.1).`,
   ];
 }
 

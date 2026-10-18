@@ -58,6 +58,7 @@ import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
 import {
   codeConfigPath,
   desktopConfigPath,
+  RUNTIME_LOCATION_FIX,
   SERVER_NAME,
   SIBLING_SERVER_NAME,
 } from "./print-config.js";
@@ -305,9 +306,7 @@ export async function entryProblems(
       try {
         const marks = fileProviderMarks(dir, io.home, io.xattr, "runtime install");
         if (marks.length > 0)
-          hard.push(
-            `${dir} is managed by a file provider (iCloud): use a clone outside it or \`npm install -g\``,
-          );
+          hard.push(`${dir} is managed by a file provider (iCloud): ${RUNTIME_LOCATION_FIX}`);
       } catch {
         hard.push(`${dir}: the file-provider check could not run`);
       }

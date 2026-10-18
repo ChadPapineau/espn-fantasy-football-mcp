@@ -64,6 +64,10 @@ describe("package.json", () => {
       "README.md",
       "LICENSE",
       "CHANGELOG.md",
+      // a release tarball's lock: release.yml copies the committed lockfile to it before packing,
+      // and npm ships it only because `files` names it (plan 04 §4.4; Stage C finding
+      // ci-release-workflow-missing)
+      "npm-shrinkwrap.json",
     ]);
     // every plugin-root file a tarball install needs is covered by `files`
     for (const f of REQUIRED) expect(classify(f, pkg.files ?? []), f).toBeNull();

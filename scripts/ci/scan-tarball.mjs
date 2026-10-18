@@ -6,18 +6,28 @@
 // scripts/dev/scan-secrets.mjs (secrets, ESPN cookies, GUIDs, league ids, IPs, home paths, emails,
 // and the local deny-list when present). Ported from sibling @d72e03b, adapted. Node built-ins only.
 //
-// Usage: node scripts/ci/scan-tarball.mjs [--root <dir>]   (run `npm run build` first)
+// --release (release.yml, and ci.yml's rehearsal of it; Stage C finding ci-release-workflow-missing):
+// the tarball must also carry its lock — npm-shrinkwrap.json packed, byte for byte the committed
+// package-lock.json, its root this package at this version — because the README's release install
+// (`npm ci --omit=dev --ignore-scripts` in the unpacked package) installs from that file alone.
+//
+// Usage: node scripts/ci/scan-tarball.mjs [--root <dir>] [--release]   (run `npm run build` first)
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { REPO_ROOT, isMain, isRecord, parseArgs, readJson, reporter, runNpm } from "./_lib.mjs";
 
 /**
- * Files npm always adds regardless of `files`. npm-shrinkwrap.json is packed whenever it exists:
- * release.yml writes it from the committed lockfile before packing, so a tarball install resolves
- * the same locked tree (plan 04 §4.4; README "eff is the package's CLI").
+ * Files npm always adds regardless of `files`. npm-shrinkwrap.json is not one of them: with a
+ * `files` allow-list npm 11 packs it only when `files` names it (package.json does), exactly as it
+ * never packs package-lock.json at all — so a release tarball carries its lock only through `files`.
  */
-const ALWAYS = new Set(["package.json", "README.md", "LICENSE", "LICENCE", "npm-shrinkwrap.json"]);
+const ALWAYS = new Set(["package.json", "README.md", "LICENSE", "LICENCE"]);
+
+/** The lock a release tarball carries (npm reads it as the package's lockfile). */
+export const SHRINKWRAP = "npm-shrinkwrap.json";
+/** The committed lockfile the release tarball's lock must be, byte for byte. */
+export const LOCKFILE = "package-lock.json";
 
 /** @type {readonly { re: RegExp, why: string }[]} */
 export const FORBIDDEN = Object.freeze([
@@ -89,8 +99,49 @@ export function packedPaths(packJson) {
 }
 
 /**
+ * What is wrong with a release tarball's lock (plan 04 §4.4; plan 02 §7.1 "Lockfile": the integrity
+ * hashes are the provenance): npm-shrinkwrap.json must be packed, be the committed package-lock.json
+ * byte for byte (release.yml copies it, so the release installs exactly the tree CI installed and
+ * tested), and name this package at this version at its root.
+ * @param {string} root the package root
+ * @param {readonly string[]} packed what `npm pack` would ship
+ * @param {Record<string, unknown>} manifest the root's package.json
+ * @returns {string[]} problems (empty = the tarball carries its lock)
+ */
+export function releaseLockProblems(root, packed, manifest) {
+  /** @type {string[]} */
+  const problems = [];
+  if (!packed.includes(SHRINKWRAP))
+    problems.push(
+      `${SHRINKWRAP} is not packed — a release tarball carries the committed lockfile as ${SHRINKWRAP} (package.json \`files\` must name it, and it must exist when npm packs)`,
+    );
+  const sw = path.join(root, SHRINKWRAP);
+  const lock = path.join(root, LOCKFILE);
+  if (!existsSync(sw)) {
+    problems.push(`${SHRINKWRAP} does not exist — copy ${LOCKFILE} to it before packing`);
+    return problems;
+  }
+  if (!existsSync(lock)) {
+    problems.push(`${LOCKFILE} does not exist — ${SHRINKWRAP} cannot be checked against it`);
+    return problems;
+  }
+  if (!readFileSync(sw).equals(readFileSync(lock)))
+    problems.push(`${SHRINKWRAP} is not the committed ${LOCKFILE}, byte for byte`);
+  const parsed = readJson(sw);
+  const rootEntry = isRecord(parsed) && isRecord(parsed.packages) ? parsed.packages[""] : undefined;
+  /** @param {unknown} entry */
+  const names = (entry) =>
+    isRecord(entry) && entry.name === manifest.name && entry.version === manifest.version;
+  if (!names(parsed) || !names(rootEntry))
+    problems.push(
+      `${SHRINKWRAP} does not name ${String(manifest.name)}@${String(manifest.version)} at its top level and in packages[""] (regenerate the lockfile after the version bump)`,
+    );
+  return problems;
+}
+
+/**
  * @param {string} root
- * @param {{ required?: readonly string[] }} [opts]
+ * @param {{ required?: readonly string[], release?: boolean }} [opts]
  * @returns {number} exit code
  */
 export function main(root, opts = {}) {
@@ -113,6 +164,7 @@ export function main(root, opts = {}) {
     if (!files.includes(req))
       r.error(`${req} is not packed (a tarball install must also be a plugin root)`);
   }
+  if (opts.release === true) for (const p of releaseLockProblems(root, files, manifest)) r.error(p);
   const bin = isRecord(manifest.bin) ? Object.values(manifest.bin) : [];
   for (const b of bin) {
     if (typeof b !== "string") continue;
@@ -133,14 +185,16 @@ export function main(root, opts = {}) {
     });
     if (s.status !== 0) r.error(`scan-secrets found problems in packed files:\n${s.stderr.trim()}`);
   }
-  return r.finish(`${String(files.length)} packed file(s), all within \`files\` and clean`);
+  return r.finish(
+    `${String(files.length)} packed file(s), all within \`files\` and clean${opts.release === true ? `; ${SHRINKWRAP} is the committed ${LOCKFILE}` : ""}`,
+  );
 }
 
 if (isMain(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
   const root = typeof args.root === "string" ? path.resolve(args.root) : REPO_ROOT;
   try {
-    process.exitCode = main(root);
+    process.exitCode = main(root, { release: args.release === true });
   } catch (e) {
     process.stderr.write(`scan-tarball: ${e instanceof Error ? e.message : String(e)}\n`);
     process.exitCode = 2;

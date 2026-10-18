@@ -1,10 +1,22 @@
 // ci-scan-tarball.test.ts — scripts/ci/scan-tarball.mjs must FAIL when the package would ship a
 // fixture, a test, an env file, a database, a cookie/session/credential file, a YAML outside skills/,
 // a secret or an ESPN identifier, or would miss a plugin-root file (plan 04 §2, §4.1 `pack`, R8;
-// plan 09 §4). Ported from sibling @d72e03b, adapted.
+// plan 09 §4); with --release, also when the tarball would not carry the committed lockfile as
+// npm-shrinkwrap.json (plan 04 §4.4; Stage C finding ci-release-workflow-missing). Ported from
+// sibling @d72e03b, adapted.
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { REQUIRED, classify, main, packedPaths } from "../../scripts/ci/scan-tarball.mjs";
-import { runCheck, tempDir, writeTree } from "../lint/helpers.js";
+import { runNpm } from "../../scripts/ci/_lib.mjs";
+import {
+  LOCKFILE,
+  REQUIRED,
+  SHRINKWRAP,
+  classify,
+  main,
+  packedPaths,
+} from "../../scripts/ci/scan-tarball.mjs";
+import { ROOT, runCheck, tempDir, writeTree } from "../lint/helpers.js";
 
 const FILES = [
   "dist",
@@ -17,6 +29,7 @@ const FILES = [
   "README.md",
   "LICENSE",
   "CHANGELOG.md",
+  "npm-shrinkwrap.json",
 ];
 
 describe("classify", () => {
@@ -32,10 +45,15 @@ describe("classify", () => {
     "LICENSE",
     "CHANGELOG.md",
     "package.json",
-    // release.yml shrinkwraps the committed lockfile before packing (plan 04 §4.4)
+    // a release tarball's lock: release.yml copies the committed lockfile to it (plan 04 §4.4)
     "npm-shrinkwrap.json",
   ])("allows %s", (f) => {
     expect(classify(f, FILES)).toBeNull();
+  });
+  it("admits npm-shrinkwrap.json only through `files` (npm never adds it on its own)", () => {
+    const without = FILES.filter((f) => f !== SHRINKWRAP);
+    expect(classify(SHRINKWRAP, without)).toBe("not covered by package.json `files`");
+    expect(classify(LOCKFILE, FILES)).toBe("not covered by package.json `files`");
   });
   it.each([
     ["dist/fixtures/espn/league.json", "fixtures"],
@@ -154,5 +172,111 @@ describe("scan-tarball CLI on a fake package", () => {
     tmp = tempDir();
     writeTree(tmp.dir, { "package.json": pkg, "dist/index.js": "export {};\n" });
     expect(main(tmp.dir, { required: [] })).toBe(0);
+  });
+});
+
+// The release tarball carries its lock (plan 04 §4.4; plan 02 §7.1 "Lockfile"; Stage C finding
+// ci-release-workflow-missing, attempt 2: release.yml shrinkwrapped the lockfile, but npm packed the
+// tarball without it, because a `files` allow-list ships npm-shrinkwrap.json only when it names it).
+describe("the release tarball carries the committed lockfile as npm-shrinkwrap.json", () => {
+  let tmp: ReturnType<typeof tempDir> | undefined;
+  afterEach(() => tmp?.cleanup());
+
+  /** The repository's own package.json `files` — what release.yml's npm pack obeys. */
+  const realFiles = (
+    JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+      files: string[];
+    }
+  ).files;
+  const lock = (version = "1.0.0") => ({
+    name: "fake-pack",
+    version,
+    lockfileVersion: 3,
+    requires: true,
+    packages: { "": { name: "fake-pack", version } },
+  });
+  /**
+   * A clean plugin-root package with the lock written as release.yml writes it (a copy of the
+   * lockfile); `over` replaces files, `omit` leaves files out.
+   */
+  function releaseRoot(
+    over: Record<string, string | object> = {},
+    { files = FILES, omit = [] }: { files?: string[]; omit?: string[] } = {},
+  ): string {
+    tmp = tempDir();
+    const tree: Record<string, string | object> = {
+      "package.json": { name: "fake-pack", version: "1.0.0", files },
+      "dist/index.js": "export {};\n",
+      "scripts/eff-launch.sh": "#!/bin/sh\n",
+      ".mcp.json": "{}\n",
+      ".claude-plugin/plugin.json": "{}\n",
+      ".claude-plugin/marketplace.json": "{}\n",
+      [LOCKFILE]: lock(),
+      [SHRINKWRAP]: lock(),
+      ...over,
+    };
+    writeTree(tmp.dir, Object.fromEntries(Object.entries(tree).filter(([f]) => !omit.includes(f))));
+    return tmp.dir;
+  }
+
+  it("the repository's package.json `files` packs npm-shrinkwrap.json once it exists", () => {
+    const dir = releaseRoot({}, { files: realFiles });
+    const pack = runNpm(["pack", "--dry-run", "--json", "--ignore-scripts"], dir);
+    expect(pack.status, pack.stderr).toBe(0);
+    expect(packedPaths(JSON.parse(pack.stdout))).toContain(SHRINKWRAP);
+    expect(main(dir, { release: true })).toBe(0);
+  });
+
+  it("--release passes the lock packed, byte for byte the committed lockfile", () => {
+    const r = runCheck("scan-tarball.mjs", ["--root", releaseRoot(), "--release"]);
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("npm-shrinkwrap.json is the committed package-lock.json");
+  });
+
+  it("--release fails when `files` does not name it, though it exists (npm then leaves it out)", () => {
+    const dir = releaseRoot({}, { files: FILES.filter((f) => f !== SHRINKWRAP) });
+    const r = runCheck("scan-tarball.mjs", ["--root", dir, "--release"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("npm-shrinkwrap.json is not packed");
+  });
+
+  it("--release fails when no lock was written before packing", () => {
+    const r = runCheck("scan-tarball.mjs", [
+      "--root",
+      releaseRoot({}, { omit: [SHRINKWRAP] }),
+      "--release",
+    ]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("npm-shrinkwrap.json is not packed");
+    expect(r.stderr).toContain("npm-shrinkwrap.json does not exist");
+  });
+
+  it("--release fails when the lock is not the committed lockfile byte for byte (same JSON, other bytes)", () => {
+    const dir = releaseRoot({ [SHRINKWRAP]: JSON.stringify(lock()) });
+    const r = runCheck("scan-tarball.mjs", ["--root", dir, "--release"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("npm-shrinkwrap.json is not the committed package-lock.json");
+  });
+
+  it("--release fails when the lock describes another version (a bump without the lockfile)", () => {
+    const dir = releaseRoot({ [LOCKFILE]: lock("0.9.0"), [SHRINKWRAP]: lock("0.9.0") });
+    const r = runCheck("scan-tarball.mjs", ["--root", dir, "--release"]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("npm-shrinkwrap.json does not name fake-pack@1.0.0");
+  });
+
+  it("--release fails when there is no committed lockfile to compare it with", () => {
+    const r = runCheck("scan-tarball.mjs", [
+      "--root",
+      releaseRoot({}, { omit: [LOCKFILE] }),
+      "--release",
+    ]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("package-lock.json does not exist");
+  });
+
+  it("without --release a missing lock is fine: every push packs without one", () => {
+    expect(main(releaseRoot({}, { omit: [SHRINKWRAP] }))).toBe(0);
   });
 });
