@@ -134,6 +134,9 @@ export async function attributionRows(
               ? v1
               : v2;
       if (stored === null) continue;
+      // a projection served without an expected line (ESPN's mean with the position spread — a
+      // kicker, a D/ST): nothing to decompose (storeProjections keeps it for the P(win) scoring)
+      if (Object.keys(stored.expectation).length === 0) continue;
       const reported = stored.reported_mean ?? null;
       if (reported === null) continue;
       const trace0 = readTrace(stored.trace ?? null);
@@ -222,8 +225,9 @@ export interface RetroForecasts {
  * box-score entry with a projection STORED BEFORE ITS GAME'S KICKOFF carrying the Dist the tool served
  * (servedDistOf) is a player forecast, its P(active) a p_active forecast against whether he played;
  * a week whose two lineups as played were each projected in full gives OUR pre-week P(win)
- * (independent normal sums of the served Dists — a starter E1 stored no row for at ESPN's mean with the
- * position-CV spread, the Dist E1 serves him), beside ESPN's from the pre-week scoreboard snapshot
+ * (independent normal sums of the Dists served before each starter's kickoff — a bye is 0 for
+ * certain; a starter with no served Dist leaves the week unscored, never filled from the final box
+ * score's game-day number, which knows who sat), beside ESPN's from the pre-week scoreboard snapshot
  * of THIS season (preWeekSnapshot: the latest before the week's first kickoff — a previous season's
  * week N never answers). Before, E13 passed none of these and every metric read "n too small (0 of
  * 30)" forever; the stored snapshots were never read (Stage C finding
@@ -270,23 +274,14 @@ export async function retroForecasts(
           const served = stored === null ? null : servedDistOf(stored);
           if (stored !== null && served === null) unserved += 1;
           if (starts) {
-            // a starter whose team has no game this week (a bye) scores 0 for certain; one without a
-            // stored projection is what E1 serves a player without a trailing line — ESPN's mean
-            // with the position-CV spread (E1 stores no row for him: nothing to attribute)
+            // only what was SERVED before his kickoff: a starter whose team has no game this week (a
+            // bye) scores 0 for certain; one without a served pre-lock Dist leaves the week without
+            // our forecast — never ESPN's number from the final box score (a game-day value, 0 for an
+            // inactive starter: after the fact, and not ours)
             const bye = lock === undefined && kick.size > 0;
-            const espnMean = e.projected?.applied_total ?? null;
-            const d =
-              served ??
-              (espnMean === null
-                ? null
-                : gammaDist(
-                    espnMean,
-                    positionCv(e.player.position, e.player.position_id, settings),
-                    "position_cv",
-                  ));
-            if (d !== null) {
-              mu += d.mean;
-              v += sigmaOf(d) ** 2;
+            if (served !== null) {
+              mu += served.mean;
+              v += sigmaOf(served) ** 2;
             } else if (!bye) complete = false;
           }
           const id = e.player.ref.id;

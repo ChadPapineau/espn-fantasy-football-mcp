@@ -668,9 +668,14 @@ export const SERVED_DIST_KEY = "served_dist";
  * CONDITIONAL ON PLAYING with its P(active), reported mean and tuning trace (`v2-opportunity`); any
  * other player with a trailing window its v1 trailing expectation (games played — conditional too),
  * P(active) and reported mean (`v1-ensemble`); every row's trace also keeps the served first-week Dist
- * (SERVED_DIST_KEY). No samples (attribution needs none).
- * Best-effort: a busy store skips a row; a row with the same inputs and expectation as the newest
- * earlier one adds nothing (repo dedup), so repeated calls do not grow the table. Never throws.
+ * (SERVED_DIST_KEY). A player E1 served without a trailing line — a kicker, a D/ST, a player with no
+ * games yet: ESPN's mean with the position spread — is stored too, with an EMPTY expectation (the
+ * attribution has no line to decompose and skips it): the retrospective's P(win) of the lineups as
+ * played needs the Dist E1 served every starter, and once none was stored it read ESPN's game-day
+ * number from the final box score instead — not what was served, and after the fact (an inactive
+ * starter at 0; Stage C finding reclog-retro-forecasts-never-scored). No samples (attribution needs
+ * none). Best-effort: a busy store skips a row; a row with the same inputs and expectation as the
+ * newest earlier one adds nothing (repo dedup), so repeated calls do not grow the table. Never throws.
  */
 export async function storeProjections(
   ctx: ToolContext,
@@ -697,8 +702,8 @@ export async function storeProjections(
     const w0 = pp.weeks[0];
     if (id === null || id === 0 || w0?.week !== week || w0.bye) continue;
     const d = v2.get(id);
+    // no trailing line (K, D/ST, no games yet): stored with an empty expectation, the served Dist kept
     const v1Exp = pp.expectation ?? {};
-    if (d === undefined && Object.keys(v1Exp).length === 0) continue;
     const exp = d?.expectation ?? null;
     const dist = d?.dist ?? null;
     if (k > 0 && k % STORE_PER_TURN === 0) {
