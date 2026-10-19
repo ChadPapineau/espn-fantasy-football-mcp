@@ -926,8 +926,19 @@ export const analyzeScheduleTool = defineTool({
     const b = await basicsOf(ctx, inputs, args);
     const team = teamOf(b.league, args.team_id);
     const all = remainingWeeks(b.rules.playoffs, b.w, { playoffs: args.include_playoffs });
-    const weeks = (args.weeks === undefined ? all : [...args.weeks].sort((a, c) => a - c)).filter(
-      (w) => args.include_playoffs || !b.rules.playoffs.playoff_weeks.includes(w),
+    // an explicit week past the league's final scoring period has no fantasy game: dropped and said
+    // (importance 0 after the championship week — plan 07 E8), never analysed at P(alive) = 1 as
+    // week 18 of a 17-period league was (Stage C finding schedule-weeks-past-final-weighted)
+    const finalWeek = b.league.clock.final_scoring_period;
+    const asked = args.weeks === undefined ? all : [...args.weeks].sort((a, c) => a - c);
+    const past = finalWeek >= 1 ? asked.filter((w) => w > finalWeek) : [];
+    if (past.length > 0)
+      warnings.push(
+        `week(s) ${past.map(String).join(", ")} dropped: after the league's final scoring period (${String(finalWeek)})`,
+      );
+    const weeks = asked.filter(
+      (w) =>
+        !past.includes(w) && (args.include_playoffs || !b.rules.playoffs.playoff_weeks.includes(w)),
     );
     if (weeks.length === 0)
       throw new EffError("VALIDATION", { field: "weeks", reason: "season_over" });
