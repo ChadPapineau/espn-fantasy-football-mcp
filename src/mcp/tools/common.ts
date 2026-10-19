@@ -6,10 +6,13 @@
 // empty — plan 01 §5.5), the crosswalk state behind every gsis id (plan 07 C1), and the partial
 // rule for a 4th request (plan 01 §5.6). Ported from sibling @5daa625, adapted to the ESPN seam.
 import {
+  DEFAULT_TTL_CONTEXT,
   freshnessClass,
+  inGameWindow,
   serveDecision,
   stampState,
   type FreshnessClassId,
+  type TtlContext,
 } from "../../config/freshness.js";
 import type { DatasetResult, DatasetStamp } from "../../domain/analytics/types.js";
 import { yieldTurn } from "../../domain/analytics/cooperative.js";
@@ -74,27 +77,107 @@ export function readOpts(ctx: ToolContext, args: FreshnessArgs = {}): ReadOption
   };
 }
 
-/** A stamped platform read → its value, pushing its input onto `inputs` (the provider judged the age). */
+// --- the TTL context every input is judged under (plan 01 §5.2 game-day TTLs) ------------------------
+
+const EASTERN_DATE = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** The US-Eastern calendar date of an instant (`YYYY-MM-DD`): the NFL's game day. */
+export function easternDate(ms: number): string {
+  return EASTERN_DATE.format(new Date(ms));
+}
+
+/** Days before the first and after the last kickoff still counted as the season (as the provider counts). */
+const IN_SEASON_MARGIN_MS = 14 * 86_400_000;
+
+/**
+ * The TTL context at `nowMs` from a season's pro-schedule games (plan 01 §5.2): a game day is a day
+ * with a kickoff on the league's local calendar — US Eastern, the NFL's (a Thursday-night game kicks
+ * off after midnight UTC, so a UTC-date test read the TNF Thursday as no game day and the Friday after
+ * as one); a game window is open while any game is under way; the season runs from two weeks before
+ * the first kickoff to two weeks after the last. No games: the default context.
+ */
+export function ttlContextAt(games: readonly ProGame[], nowMs: number): TtlContext {
+  const flags = games.map((g) => ({
+    kickoff_ms: g.kickoff === null || g.start_time_tbd ? null : Date.parse(g.kickoff),
+    valid_for_locking: g.valid_for_locking,
+    stats_official: g.stats_official,
+  }));
+  const kicks = flags
+    .map((f) => f.kickoff_ms)
+    .filter((k): k is number => k !== null && Number.isFinite(k));
+  if (kicks.length === 0) return DEFAULT_TTL_CONTEXT;
+  const today = easternDate(nowMs);
+  return {
+    inGameWindow: inGameWindow(flags, nowMs),
+    gameDay: kicks.some((k) => easternDate(k) === today),
+    inSeason:
+      nowMs >= Math.min(...kicks) - IN_SEASON_MARGIN_MS &&
+      nowMs <= Math.max(...kicks) + IN_SEASON_MARGIN_MS,
+  };
+}
+
+/**
+ * This call's TTL context — the stored pro schedule of the configured season at the call's instant,
+ * read once per call (memo). Every input a tool or resource builds is judged under it: game-day TTLs
+ * (the pro schedule's 1 h, lines' and schedules' 30 min) and the in-game-window TTLs (live, 60 s)
+ * apply to the label the envelope shows. Before, every stamp was judged under the default context, so
+ * a schedule or lines refresh that stopped on a Sunday was labelled fresh for 6 h instead of stale
+ * after 1 h / 30 min (Stage C finding freshness-gameday-ttl-never-applied). An unreadable schedule
+ * is the default context (never an error).
+ */
+export function ttlContextOf(ctx: Pick<ToolContext, "memo" | "nowMs" | "services">): TtlContext {
+  const hit = ctx.memo.get("ttl_context") as TtlContext | undefined;
+  if (hit !== undefined) return hit;
+  let value: TtlContext = DEFAULT_TTL_CONTEXT;
+  try {
+    value = ttlContextAt(
+      ctx.services.datasets.proSchedule.games(ctx.services.league.season, null).rows,
+      ctx.nowMs,
+    );
+  } catch {
+    value = DEFAULT_TTL_CONTEXT;
+  }
+  ctx.memo.set("ttl_context", value);
+  return value;
+}
+
+/** Where an input is judged: a call (its instant and TTL context), or a bare instant (default context). */
+export type JudgeAt = number | Pick<ToolContext, "memo" | "nowMs" | "services">;
+
+function judged(at: JudgeAt): { readonly nowMs: number; readonly ttl: TtlContext } {
+  return typeof at === "number"
+    ? { nowMs: at, ttl: DEFAULT_TTL_CONTEXT }
+    : { nowMs: at.nowMs, ttl: ttlContextOf(at) };
+}
+
+/** A stamped platform read → its value, pushing its input onto `inputs` (the call's TTL context). */
 export function take<T>(ctx: ToolContext, s: Stamped<T>, inputs: InputStamp[]): T {
-  inputs.push(stampToInput(s.stamp, ctx.nowMs));
+  inputs.push(stampToInput(s.stamp, ctx.nowMs, ttlContextOf(ctx)));
   return s.value;
 }
 
 /** A platform stamp as an input (for a read whose value is consumed elsewhere). */
 export function platformInput(ctx: ToolContext, stamp: PlatformStamp): InputStamp {
-  return stampToInput(stamp, ctx.nowMs);
+  return stampToInput(stamp, ctx.nowMs, ttlContextOf(ctx));
 }
 
 /**
  * A dataset stamp as an envelope input — STALE_ONLY past its class's hard limit unless
- * `allow_stale`; an `omit`-class input past it is dropped (null) and named by the caller.
+ * `allow_stale`; an `omit`-class input past it is dropped (null) and named by the caller. Judged
+ * under the call's TTL context when `at` is the call (every tool passes it).
  */
 export function datasetInput(
   stamp: DatasetStamp,
-  nowMs: number,
+  at: JudgeAt,
   allowStale: boolean,
 ): InputStamp | null {
-  const input = stampToInput(stamp, nowMs);
+  const j = judged(at);
+  const input = stampToInput(stamp, j.nowMs, j.ttl);
   if (input.state === "expired" && !allowStale) {
     if (freshnessClass(stamp.freshness_class).beyondHard === "omit") return null;
     throw new EffError("STALE_ONLY");
@@ -105,22 +188,22 @@ export function datasetInput(
 /** A REQUIRED dataset read: never loaded → STALE_ONLY with the "run eff refresh" hint. */
 export function requiredDataset<T>(
   r: DatasetResult<T>,
-  nowMs: number,
+  at: JudgeAt,
   allowStale: boolean,
 ): InputStamp | null {
   if (r.stamp === null) throw new EffError("STALE_ONLY", { hint: SERVER_HINTS.datasetNeverLoaded });
-  return datasetInput(r.stamp, nowMs, allowStale);
+  return datasetInput(r.stamp, at, allowStale);
 }
 
 /** An OPTIONAL dataset read (injuries, lines, weather): null input when never loaded or omitted. */
 export function optionalDataset<T>(
   r: DatasetResult<T>,
-  nowMs: number,
+  at: JudgeAt,
   allowStale: boolean,
 ): InputStamp | null {
   if (r.stamp === null) return null;
   try {
-    return datasetInput(r.stamp, nowMs, allowStale);
+    return datasetInput(r.stamp, at, allowStale);
   } catch {
     return null;
   }
@@ -247,7 +330,7 @@ export function scheduleOf(
     const games = ctx.services.datasets.proSchedule.games(season, null);
     if (games.stamp !== null && games.rows.length > 0) {
       const teams = ctx.services.datasets.proSchedule.teams(season);
-      const input = datasetInput(games.stamp, ctx.nowMs, allowStale);
+      const input = datasetInput(games.stamp, ctx, allowStale);
       if (input !== null) inputs.push(input);
       return {
         schedule: { season, games: games.rows, teams: teams.rows },

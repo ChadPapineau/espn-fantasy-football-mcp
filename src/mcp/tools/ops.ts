@@ -31,7 +31,7 @@ import { EffError, SERVER_HINTS } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
 import type { DriftView, McpServerOptions } from "../services.js";
 import { TOOL_CONTRACT } from "../contract.js";
-import { leagueRef } from "./common.js";
+import { leagueRef, ttlContextOf } from "./common.js";
 import { count, iso, isoNull } from "./schemas.js";
 
 /** The SDK the server is built on (pinned exactly in package.json; a test keeps them equal). */
@@ -339,6 +339,8 @@ function sourceStatus(ctx: ToolContext, id: DatasetSourceId): StatusData["source
       rows: null,
       last_error: lastError,
     };
+  // judged under the call's TTL context, as every tool input (game-day TTLs — Stage C finding
+  // freshness-gameday-ttl-never-applied)
   const st = stampState(
     FRESHNESS_TABLE[info.freshness],
     {
@@ -347,6 +349,7 @@ function sourceStatus(ctx: ToolContext, id: DatasetSourceId): StatusData["source
       checked_at: current.checked_at,
     },
     ctx.nowMs,
+    ttlContextOf(ctx),
   );
   return {
     id,

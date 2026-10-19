@@ -188,7 +188,7 @@ export const getInjuries = defineTool({
     const ids = sel.players.map((p) => ({ p, xw: crosswalkOf(ctx, p.ref.id, p.position_id) }));
     const gsis = present(ids.map((x) => x.xw.gsis_id));
     const reports = ctx.services.datasets.injuries.reports(league.ref.season, w, gsis);
-    const repInput = optionalDataset(reports, ctx.nowMs, allowStale);
+    const repInput = optionalDataset(reports, ctx, allowStale);
     if (repInput !== null) inputs.push(repInput);
     else warnings.push("nflverse:injuries unavailable or past its hard limit: official is null");
     const byGsis = new Map<string, InjuryReport>();
@@ -366,7 +366,7 @@ export const getSchedule = defineTool({
       );
     const ids = games.map((g) => g.espn_game_id);
     const nfl = ids.length === 0 ? null : ctx.services.datasets.nflGames.byEspnGameId(ids);
-    const nflInput = nfl === null ? null : optionalDataset(nfl, ctx.nowMs, allowStale);
+    const nflInput = nfl === null ? null : optionalDataset(nfl, ctx, allowStale);
     const byEspn = new Map<number, NflGame>();
     if (nfl !== null && nflInput !== null) {
       inputs.push(nflInput);
@@ -376,7 +376,7 @@ export const getSchedule = defineTool({
     const weatherBy = new Map<string, WeatherObservation>();
     if (args.include_weather && byEspn.size > 0) {
       const wx = ctx.services.datasets.weather.forGames([...byEspn.values()].map((g) => g.game_id));
-      const wxInput = optionalDataset(wx, ctx.nowMs, allowStale);
+      const wxInput = optionalDataset(wx, ctx, allowStale);
       if (wxInput !== null) {
         inputs.push(wxInput);
         for (const o of wx.rows) weatherBy.set(o.game_id, o);

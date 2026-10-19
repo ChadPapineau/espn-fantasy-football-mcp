@@ -244,7 +244,7 @@ export const getPlayerStats = defineTool({
       const gsis = [...gsisOf.values()].filter((g): g is string => g !== null);
       if (gsis.length > 0) {
         const r = ctx.services.datasets.playerWeeks.lines(gsis, season, nflWeeks);
-        const input = optionalDataset(r, ctx.nowMs, args.allow_stale === true);
+        const input = optionalDataset(r, ctx, args.allow_stale === true);
         if (input !== null) {
           inputs.push(input);
           nflLines = new Map();

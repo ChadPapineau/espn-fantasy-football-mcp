@@ -409,7 +409,7 @@ export const getDepthChart = defineTool({
     if (team === null) throw new EffError("NOT_FOUND");
     const season = league.ref.season;
     const chart = ctx.services.datasets.depthCharts.chart(season, [team]);
-    const input = requiredDataset(chart, ctx.nowMs, allowStale);
+    const input = requiredDataset(chart, ctx, allowStale);
     if (input !== null) inputs.push(input);
     const wanted = args.positions === undefined ? null : new Set(args.positions);
     const rows = chart.rows.filter(
@@ -426,7 +426,7 @@ export const getDepthChart = defineTool({
     const snapBy = new Map<string, number | null>();
     if (gsis.length > 0 && recent.length > 0) {
       const r = ctx.services.datasets.playerWeeks.lines(gsis, season, recent);
-      const li = optionalDataset(r, ctx.nowMs, allowStale);
+      const li = optionalDataset(r, ctx, allowStale);
       if (li !== null) {
         inputs.push(li);
         const acc = new Map<string, (number | null)[]>();
@@ -683,7 +683,7 @@ export const getDefenseProfile = defineTool({
     const allowed: Allowed[] = [];
     if (weeks.length > 0) {
       const roster = ctx.services.rosterWeekly.latest(season);
-      const rIn = optionalDataset(roster, ctx.nowMs, allowStale);
+      const rIn = optionalDataset(roster, ctx, allowStale);
       const gsis = rIn === null ? [] : [...new Set(roster.rows.map((r) => r.gsis_id))];
       if (rIn !== null) inputs.push(rIn);
       if (gsis.length > 0) {
@@ -721,7 +721,7 @@ export const getDefenseProfile = defineTool({
         for (const [k, wk] of weeks.entries()) {
           await turn();
           const r = ctx.services.datasets.playerWeeks.lines(gsis, season, [wk], { usage: false });
-          const stamp = requiredDataset(r, ctx.nowMs, allowStale);
+          const stamp = requiredDataset(r, ctx, allowStale);
           const v = r.stamp?.file_version ?? null;
           if (k === 0) {
             li = stamp;
@@ -737,7 +737,7 @@ export const getDefenseProfile = defineTool({
           scored.length = 0;
           await turn();
           const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks, { usage: false });
-          li = requiredDataset(r, ctx.nowMs, allowStale);
+          li = requiredDataset(r, ctx, allowStale);
           scoreRows(r.rows);
         }
         if (li !== null) inputs.push(li);
@@ -751,7 +751,7 @@ export const getDefenseProfile = defineTool({
       if (positions.includes("D/ST")) {
         const teams = [...new Set(allowed.map((a) => a.offense))];
         const d = ctx.services.datasets.playerWeeks.defenseLines(teams, season, weeks);
-        const di = optionalDataset(d, ctx.nowMs, allowStale);
+        const di = optionalDataset(d, ctx, allowStale);
         if (di !== null) {
           inputs.push(di);
           // a D/ST's points are what the OPPOSING offence allows to D/STs: keyed by that offence
@@ -804,7 +804,7 @@ export const getDefenseProfile = defineTool({
     if (pbp !== undefined && weeks.length > 0 && want.length > 0) {
       await turn();
       const prof = pbp.teamProfile(want, season, weeks);
-      const pi = optionalDataset(prof, ctx.nowMs, allowStale);
+      const pi = optionalDataset(prof, ctx, allowStale);
       if (pi !== null) {
         inputs.push(pi);
         for (const t of want)
@@ -1014,7 +1014,7 @@ export const getNews = defineTool({
     }
     const since = new Date(ctx.nowMs - args.since_hours * 3600 * 1000).toISOString();
     const res = ctx.services.datasets.news.recent(since, BOUNDS.newsLimit.max, gsis);
-    const input = requiredDataset(res, ctx.nowMs, allowStale);
+    const input = requiredDataset(res, ctx, allowStale);
     if (input !== null) inputs.push(input);
     const sources = args.sources === undefined ? null : new Set(args.sources);
     const kept = res.rows

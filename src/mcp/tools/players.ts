@@ -132,7 +132,7 @@ async function nameIndex(
 ): Promise<IndexEntry[]> {
   const ds = ctx.services.playerUniverse.all(season);
   if (ds.stamp !== null && ds.rows.length > 0) {
-    const input = datasetInput(ds.stamp, ctx.nowMs, args.allow_stale === true);
+    const input = datasetInput(ds.stamp, ctx, args.allow_stale === true);
     if (input !== null) inputs.push(input);
     return ds.rows.map((r) => ({
       id: r.espn_id,

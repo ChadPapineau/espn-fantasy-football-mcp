@@ -87,7 +87,7 @@ export async function attributionRows(
     const reader = ctx.services.datasets.teamWeek;
     if (reader !== undefined && teams.length > 0) {
       const r = reader.lines(teams, season, [x]);
-      const st = optionalDataset(r, ctx.nowMs, true);
+      const st = optionalDataset(r, ctx, true);
       if (st !== null) inputs.push(st);
       for (const t of r.rows)
         volume.set(t.nfl_team, {

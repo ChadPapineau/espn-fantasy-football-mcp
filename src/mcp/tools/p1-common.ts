@@ -324,14 +324,14 @@ export function usageOf(
   let epLoaded = false;
   if (gsis.length > 0 && weeks.length > 0) {
     const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks);
-    const input = optionalDataset(r, ctx.nowMs, allowStale);
+    const input = optionalDataset(r, ctx, allowStale);
     if (input !== null) {
       statsLoaded = true;
       if (!inputs.some((x) => x.source === input.source)) inputs.push(input);
       for (const l of r.rows) byGsis.set(l.gsis_id, [...(byGsis.get(l.gsis_id) ?? []), l]);
     }
     const ep = ctx.services.datasets.epWeekly.rows(gsis, season, weeks);
-    const epInput = optionalDataset(ep, ctx.nowMs, allowStale);
+    const epInput = optionalDataset(ep, ctx, allowStale);
     if (epInput !== null) {
       epLoaded = true;
       if (!inputs.some((x) => x.source === epInput.source)) inputs.push(epInput);

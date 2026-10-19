@@ -247,7 +247,7 @@ export async function matchupTableFor(
   const key = [season, week, settings.settings_hash, statsV, rosterV].join("|");
   if (MATCHUP_MEMO.has(key)) return MATCHUP_MEMO.get(key) ?? null;
   const roster = ctx.services.rosterWeekly.latest(season);
-  const rIn = optionalDataset(roster, ctx.nowMs, allowStale);
+  const rIn = optionalDataset(roster, ctx, allowStale);
   const gsis = rIn === null ? [] : [...new Set(roster.rows.map((r) => r.gsis_id))];
   if (rIn === null || gsis.length === 0) {
     warnings.push("v2-opportunity: no player universe for the matchup table: the multiplier is 1");
@@ -259,7 +259,7 @@ export async function matchupTableFor(
   for (let w = 1; w < week; w++) {
     await turn();
     const r = ctx.services.datasets.playerWeeks.lines(gsis, season, [w], { usage: false });
-    const stamp = optionalDataset(r, ctx.nowMs, allowStale);
+    const stamp = optionalDataset(r, ctx, allowStale);
     if (stamp === null) break;
     const v = r.stamp?.file_version ?? null;
     if (version === null) {
@@ -364,7 +364,7 @@ export async function runV2(
     // season's eighteen weeks of them were one long statement (the stall bound), and v2 reads the
     // role metric and location from the recent games first (null → opportunity share / xTD)
     const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks, { usage: yr === season });
-    const st = optionalDataset(r, ctx.nowMs, o.allowStale);
+    const st = optionalDataset(r, ctx, o.allowStale);
     if (st === null) continue;
     anyLines = true;
     addInput(inputs, st);
@@ -376,7 +376,7 @@ export async function runV2(
     if (weeks.length === 0) continue;
     await turn();
     const r = ctx.services.datasets.epWeekly.rows(gsis, yr, weeks);
-    const st = optionalDataset(r, ctx.nowMs, o.allowStale);
+    const st = optionalDataset(r, ctx, o.allowStale);
     if (st === null) continue;
     addInput(inputs, st);
     for (const e of r.rows)
@@ -411,7 +411,7 @@ export async function runV2(
     const target = yr === season ? [...weeks, o.week] : [...weeks];
     await turn();
     const g = ctx.services.datasets.nflGames.games(yr, target);
-    const gi = optionalDataset(g, ctx.nowMs, o.allowStale);
+    const gi = optionalDataset(g, ctx, o.allowStale);
     if (gi !== null) addInput(inputs, gi);
     const side = new Map<string, ReturnType<typeof teamSideOf>>();
     for (const row of g.rows)
@@ -427,7 +427,7 @@ export async function runV2(
     if (weeks.length === 0) continue;
     await turn();
     const r = reader.lines([...teams], yr, weeks);
-    const st = optionalDataset(r, ctx.nowMs, o.allowStale);
+    const st = optionalDataset(r, ctx, o.allowStale);
     if (st === null) continue;
     anyTeam = true;
     addInput(inputs, st);
@@ -457,7 +457,7 @@ export async function runV2(
   if (ids.length > 0) {
     await turn();
     const wx = ctx.services.datasets.weather.forGames(ids);
-    const wi = optionalDataset(wx, ctx.nowMs, o.allowStale);
+    const wi = optionalDataset(wx, ctx, o.allowStale);
     if (wi !== null) addInput(inputs, wi);
     const obs = new Map(wx.rows.map((r) => [r.game_id, r]));
     for (const [t, g] of gameIdOf) {
@@ -484,7 +484,7 @@ export async function runV2(
   // availability: ESPN's status, the week's official report and its last practice
   await turn();
   const reports = ctx.services.datasets.injuries.reports(season, o.week, gsis);
-  const ri = optionalDataset(reports, ctx.nowMs, o.allowStale);
+  const ri = optionalDataset(reports, ctx, o.allowStale);
   if (ri !== null) addInput(inputs, ri);
   const reportOf = new Map(reports.rows.map((r) => [r.gsis_id, r]));
 

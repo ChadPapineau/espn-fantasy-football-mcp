@@ -179,7 +179,7 @@ export function trailingFor(
       if (weeks.length === 0) continue;
       // stat lines only: E1 scores them, it never reads the usage extras
       const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks, { usage: false });
-      const input = optionalDataset(r, ctx.nowMs, allowStale);
+      const input = optionalDataset(r, ctx, allowStale);
       if (input === null) continue;
       loaded = true;
       inputs.push(input);
@@ -198,7 +198,7 @@ export function trailingFor(
   }
   if (teams.size > 0 && now.length > 0) {
     const r = ctx.services.datasets.playerWeeks.defenseLines([...teams.keys()], season, now);
-    const input = optionalDataset(r, ctx.nowMs, allowStale);
+    const input = optionalDataset(r, ctx, allowStale);
     if (input !== null) {
       loaded = true;
       inputs.push(input);
@@ -224,7 +224,7 @@ export function impliedTotals(
   allowStale: boolean,
 ): ImpliedTotal[] {
   const r = ctx.services.datasets.nflGames.games(season, weeks);
-  const input = optionalDataset(r, ctx.nowMs, allowStale);
+  const input = optionalDataset(r, ctx, allowStale);
   if (input === null) return [];
   inputs.push(input);
   const byEspn = new Map(

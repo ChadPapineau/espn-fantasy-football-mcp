@@ -911,7 +911,7 @@ export const analyzeInjuryCascadeTool = defineTool({
     if (injTeam !== null) {
       await turn();
       const dc = ctx.services.datasets.depthCharts.chart(season, [injTeam]);
-      const di = optionalDataset(dc, ctx.nowMs, allowStale);
+      const di = optionalDataset(dc, ctx, allowStale);
       if (di !== null) {
         inputs.push(di);
         const byGsis = new Map(subjects.map((s) => [s.gsis, s.p]));
@@ -973,7 +973,7 @@ export const analyzeInjuryCascadeTool = defineTool({
     const myEntry = mine?.entries.find((e) => e.player.ref.id === inj.ref.id) ?? null;
     const standings = await standingsOrNull(ctx, inputs, warnings);
     const nfl = ctx.services.datasets.nflGames.games(season, [b.w]);
-    const nflIn = optionalDataset(nfl, ctx.nowMs, allowStale);
+    const nflIn = optionalDataset(nfl, ctx, allowStale);
     if (nflIn !== null) inputs.push(nflIn);
     const team = nflverseTeam(inj.pro_team);
     const game = nfl.rows.find((g) => g.home === team || g.away === team);
@@ -1242,7 +1242,7 @@ export const analyzeEvidenceTool = defineTool({
     } | null = null;
     if (gsis !== null) {
       const rep = ctx.services.datasets.injuries.reports(season, b.w, [gsis]);
-      const ri = optionalDataset(rep, ctx.nowMs, allowStale);
+      const ri = optionalDataset(rep, ctx, allowStale);
       if (ri !== null) {
         inputs.push(ri);
         const r = rep.rows.find((x) => x.gsis_id === gsis);
@@ -1284,7 +1284,7 @@ export const analyzeEvidenceTool = defineTool({
     if (gsis !== null) {
       const since = new Date(ctx.nowMs - 7 * 24 * 3600 * 1000).toISOString();
       const news = ctx.services.datasets.news.recent(since, 10, [gsis]);
-      const ni = optionalDataset(news, ctx.nowMs, allowStale);
+      const ni = optionalDataset(news, ctx, allowStale);
       if (ni !== null) {
         inputs.push(ni);
         for (const it of news.rows.slice(0, 8)) {
@@ -1659,7 +1659,7 @@ export function waiverP1Extras(
   // Sleeper trending adds (secondary; ESPN's percentChange is primary)
   const sleeper = new Map<number, number>();
   const tr = ctx.services.datasets.trending.latest();
-  const ti = optionalDataset(tr, ctx.nowMs, allowStale);
+  const ti = optionalDataset(tr, ctx, allowStale);
   if (ti !== null) {
     inputs.push(ti);
     for (const r of tr.rows) {
