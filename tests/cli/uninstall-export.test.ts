@@ -2,13 +2,22 @@
 // `--export-log` writes the recommendation log AND the snapshots as JSON before deletion; plan 03 L8:
 // uninstall removes what the product made and says what it will not touch). Stage C findings
 // uninstall-export-empty-then-deletes-log, uninstall-export-omits-snapshots,
-// uninstall-malformed-config-blocks and uninstall-leftover-logs-recordings-tmp: the export holds every
-// league's rows whatever the environment's league id (none here), a store that needs a migration or
+// uninstall-malformed-config-blocks, uninstall-leftover-logs-recordings-tmp and (round 2)
+// uninstall-export-skips-backups: the export holds every league's rows whatever the environment's
+// league id (none here) — and the rows only a backup copy holds — a store that needs a migration or
 // was written by a newer binary still exports, an export that cannot be written stops the uninstall
 // with NOTHING changed, a malformed config.json does not block the credential/launchd/cache steps,
 // and the jobs' logs, the raw recordings and interrupted-write temp files go too. Sandboxed HOME,
 // config and cache dirs; an in-memory keyring; no network.
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
@@ -203,6 +212,126 @@ describe("--export-log keeps everything it cannot rebuild", () => {
     expect(existsSync(STORE())).toBe(true);
     expect(existsSync(path.join(sb.configDir, "session.json"))).toBe(true);
     expect(keyring.items.size).toBe(3);
+  });
+});
+
+// Stage C finding uninstall-export-skips-backups: the purge deletes the backups too, and rows can live
+// only there (a store moved aside, or started anew, as doctor's old advice said)
+describe("--export-log also exports what only the backups hold", () => {
+  const BACKUP = (): string => path.join(sb.cacheDir, "backups", "store-2026-10-06.sqlite");
+  /** The installed store, plus one weekly backup of it. */
+  async function withBackup(): Promise<{ keyring: FakeKeyring }> {
+    const r = await installed();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" } });
+    const { config, log } = await loadLenientRuntime(io);
+    const store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      await store.backup(BACKUP());
+    } finally {
+      store.close();
+    }
+    return r;
+  }
+  const run = async (keyring: FakeKeyring, dest: string) => {
+    const io = makeIo(sb, { keyring });
+    const { config, log } = await loadLenientRuntime(io);
+    const code = await uninstall(io, config, log, {
+      yes: true,
+      dryRun: false,
+      keepConfig: false,
+      exportLog: dest,
+    });
+    return { code, io };
+  };
+  type Doc = Record<string, unknown> & {
+    recommendation_log: unknown[];
+    backups: (Record<string, unknown[]> & { file: string; rows: Record<string, number | null> })[];
+  };
+  it("store.sqlite moved aside: the backup's log is exported before the backup is deleted", async () => {
+    sb = sandbox();
+    const { keyring } = await withBackup();
+    renameSync(STORE(), `${STORE()}.moved-aside`);
+    const dest = path.join(sb.dir, "export.json");
+    const { code, io } = await run(keyring, dest);
+    expect(code).toBe(0);
+    const doc = JSON.parse(readFileSync(dest, "utf8")) as Doc;
+    expect(doc.recommendation_log).toEqual([]);
+    expect(doc.backups).toHaveLength(1);
+    expect(doc.backups[0]?.file).toBe("store-2026-10-06.sqlite");
+    expect(doc.backups[0]?.recommendation_log).toHaveLength(3);
+    expect(doc.backups[0]?.rows.recommendation_log).toBe(3);
+    expect(doc.backups[0]?.pool_snapshot).toHaveLength(1);
+    expect(io.out.text).toContain("no store.sqlite — exporting what only the backups hold");
+    expect(io.out.text).toContain("exported 3 recommendation(s)");
+    expect(existsSync(BACKUP())).toBe(false);
+    // what uninstall does not own stays (and keeps the cache dir)
+    expect(existsSync(`${STORE()}.moved-aside`)).toBe(true);
+  });
+  it("a store started anew: its rows at the top, the backup-only rows under backups", async () => {
+    sb = sandbox();
+    const { keyring } = await withBackup();
+    rmSync(STORE(), { force: true });
+    const io0 = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" } });
+    const { config, log } = await loadLenientRuntime(io0);
+    const fresh = openStore(config, io0.clock, log, { migrate: true });
+    try {
+      fresh.repos.recommendationLog.record(rec(6, "r-new"), "2026-10-13T12:00:00.000Z");
+    } finally {
+      fresh.close();
+    }
+    const dest = path.join(sb.dir, "export.json");
+    const { code, io } = await run(keyring, dest);
+    expect(code).toBe(0);
+    const doc = JSON.parse(readFileSync(dest, "utf8")) as Doc;
+    expect(doc.recommendation_log).toHaveLength(1);
+    expect(doc.backups[0]?.recommendation_log).toHaveLength(3);
+    expect(io.out.text).toContain("exported 1 recommendation(s)");
+    expect(io.out.text).toContain("plus, found only in 3 recommendation(s)");
+  });
+  it("--dry-run names the backup copies it would export; with neither a store nor a backup there is nothing to export", async () => {
+    sb = sandbox();
+    const { keyring } = await withBackup();
+    const io = makeIo(sb, { keyring });
+    const { config, log } = await loadLenientRuntime(io);
+    const dest = path.join(sb.dir, "dry.json");
+    const dry = { yes: false, dryRun: true, keepConfig: false, exportLog: dest };
+    expect(await uninstall(io, config, log, dry)).toBe(0);
+    expect(io.out.text).toContain(
+      `would export the recommendation log and snapshots (store.sqlite and 1 backup copy) to ${dest}`,
+    );
+    expect(existsSync(dest)).toBe(false);
+    rmSync(STORE(), { force: true });
+    rmSync(BACKUP(), { force: true });
+    const none = makeIo(sb, { keyring });
+    const r = await loadLenientRuntime(none);
+    expect(await uninstall(none, r.config, r.log, { ...dry, dryRun: false, yes: true })).toBe(0);
+    expect(none.out.text).toContain("no store.sqlite and no backup — nothing recorded to export");
+    expect(existsSync(dest)).toBe(false);
+  });
+  it("rows the live store still holds are not exported twice; an unreadable backup stops the uninstall", async () => {
+    sb = sandbox();
+    const { keyring } = await withBackup();
+    const dest = path.join(sb.dir, "export.json");
+    const { code } = await run(keyring, dest);
+    expect(code).toBe(0);
+    const doc = JSON.parse(readFileSync(dest, "utf8")) as Doc;
+    expect(doc.recommendation_log).toHaveLength(3);
+    expect(doc.backups[0]?.rows).toEqual(Object.fromEntries(EXPORT_TABLES.map((t) => [t, 0])));
+    // a backup that cannot be read: nothing is changed (its rows could not be kept)
+    sb.cleanup();
+    sb = sandbox();
+    const second = await withBackup();
+    writeFileSync(BACKUP(), "not a database".repeat(400));
+    const bad = path.join(sb.dir, "bad.json");
+    const r = await run(second.keyring, bad);
+    expect(r.code).toBe(1);
+    expect(r.io.err.text).toContain(
+      "the export failed: backup store-2026-10-06.sqlite cannot be read (ERR_SQLITE_ERROR 26) — nothing was changed",
+    );
+    expect(existsSync(bad)).toBe(false);
+    expect(existsSync(BACKUP())).toBe(true);
+    expect(existsSync(STORE())).toBe(true);
+    expect(second.keyring.items.size).toBe(3);
   });
 });
 

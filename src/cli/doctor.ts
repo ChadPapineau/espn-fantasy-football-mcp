@@ -29,6 +29,7 @@ import { validateCookies } from "../auth/format.js";
 import { evaluateRegistrationGates } from "../auth/gates.js";
 import type { StoredCredential } from "../auth/types.js";
 import {
+  backupDir,
   ensureSecureDir,
   fileProviderMarks,
   insecureAncestors,
@@ -43,6 +44,7 @@ import {
   type LenientConfig,
 } from "../config/schema.js";
 import type { CheckId } from "../domain/league/types.js";
+import { TUNED_PARAMETERS_FILE_NAME } from "../domain/reclog/tune.js";
 import { parseDiffs } from "../drift/index.js";
 import { MIGRATIONS } from "../store/index.js";
 import type { CredentialStateRow, Store, StoreFactory } from "../store/types.js";
@@ -51,7 +53,7 @@ import { onlineRows } from "./doctor-online.js";
 import { exitCodeFor, row, type DoctorRow, type RowStatus } from "./doctor-rows.js";
 import { bothCredentialStores } from "./espn-stack.js";
 import { writeLine, distEntry, type CliIo } from "./io.js";
-import { jobRunRecords, readJobState, stateToken } from "./job-state.js";
+import { jobRunRecords, jobStatePath, readJobState, stateToken } from "./job-state.js";
 import { installedPlists, JOB_NAMES, LAUNCHCTL, labelOf, launchctl } from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
 import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
@@ -66,7 +68,14 @@ import { createTerminalPrompt } from "./prompt.js";
 import { bootLevel, makeLogger, registerConfigRedaction } from "./runtime.js";
 import { candidatePorts, portOwner } from "./setup-page.js";
 import { sourceStatuses, configuredSources, sourceStatus } from "./status.js";
-import { errorText, openExistingStore, type ExistingStore } from "./store-access.js";
+import {
+  errorText,
+  openExistingStore,
+  restoreSteps,
+  type ExistingStore,
+  type StoreOpenReason,
+} from "./store-access.js";
+import { CACHE_DIRS } from "./uninstall.js";
 import { createServer } from "node:net";
 
 export { exitCodeFor, type DoctorRow, type RowStatus } from "./doctor-rows.js";
@@ -513,6 +522,83 @@ function refusal(e: unknown): string {
   return e instanceof PathSecurityError ? e.detail : errorText(e);
 }
 
+/** What fixes a refused directory or file of ours: `--fix` only tightens a mode bit. */
+function refusalFix(e: unknown): string {
+  return e instanceof PathSecurityError && e.reason === "insecure_mode"
+    ? "`eff doctor --fix` tightens our own directory's or file's mode"
+    : "`eff doctor --fix` never follows a symlink or changes what is not yours: fix it by hand";
+}
+
+/**
+ * The cache's own directories that are there but refused (group/other bits, a symlink, not ours):
+ * every store open checks `datasets/`, `eff backup` `backups/`, `eff refresh` `tmp/` — each
+ * refusal says "run `eff doctor --fix`", so doctor names it and --fix repairs it (Stage C finding
+ * doctor-fix-skips-cache-subdirs). A missing one is fine: what needs it creates it 0700.
+ */
+export function cacheSubdirRefusals(cacheDir: string): { path: string; error: unknown }[] {
+  const out: { path: string; error: unknown }[] = [];
+  for (const d of CACHE_DIRS) {
+    const sub = path.join(cacheDir, d.name);
+    try {
+      ensureSecureDir(sub, { create: false, what: `${d.name}/ directory` });
+    } catch (e) {
+      if (!(e instanceof PathSecurityError && e.reason === "missing"))
+        out.push({ path: sub, error: e });
+    }
+  }
+  return out;
+}
+
+/** Row 5's detail and fix for a store that could not be opened (never "move a healthy store aside"). */
+function openFailure(
+  config: LenientConfig,
+  reason: StoreOpenReason,
+  subdirs: readonly { path: string; error: unknown }[],
+  refusedPath: string | undefined,
+): { detail: string; fix: string; steps: string[] } {
+  const cannot = `store.sqlite could not be opened (${reason})`;
+  switch (reason) {
+    case "insecure_path": {
+      const first = subdirs[0];
+      return {
+        detail:
+          first !== undefined
+            ? `${cannot}: a directory of ours is refused (below) — a path rule, not damage to the store`
+            : `${cannot}: ${refusedPath ?? "a path of ours"} is refused — a path rule, not damage to the store`,
+        fix:
+          first !== undefined
+            ? refusalFix(first.error)
+            : "`eff doctor --fix` tightens our own directories' and files' modes",
+        steps: [],
+      };
+    }
+    case "busy":
+      return {
+        detail: `${cannot}: another process holds it`,
+        fix: "retry once the running job or server is done (`eff status` lists the jobs)",
+        steps: [],
+      };
+    case "readonly":
+      return {
+        detail: `${cannot}: it is not writable by you`,
+        fix: "`eff doctor --fix` restores 0600 on our own file; a file owned by someone else needs fixing by hand",
+        steps: [],
+      };
+    case "unsupported_node":
+      return { detail: cannot, fix: "upgrade Node (row 1)", steps: [] };
+    case "cannot_open":
+      return { detail: cannot, fix: "check the cache dir's path and mode (rows 4–5)", steps: [] };
+    case "not_a_database":
+    case "corrupt":
+    case "other":
+      return {
+        detail: cannot,
+        fix: "restore a backup — the steps below (with no backup: do steps 1–2, then `eff refresh all` starts a new, empty store)",
+        steps: restoreSteps(config.cacheDir, { kind: "newest" }),
+      };
+  }
+}
+
 function marksOf(io: CliIo, dir: string): string[] {
   try {
     return fileProviderMarks(dir, io.home, io.xattr, "directory").map(
@@ -606,6 +692,34 @@ export function quickCheckFile(file: string): "ok" | "corrupt" | "unreadable" {
   }
 }
 
+/** The backups a restore can take, newest first (names and dates only), for row 5's details. */
+export function backupsPresent(cacheDir: string, max = 6): string[] {
+  const dir = backupDir(cacheDir);
+  const re = CACHE_DIRS.find((d) => d.name === path.basename(dir))?.re;
+  if (re === undefined) return [];
+  let found: { name: string; at: number }[] = [];
+  try {
+    found = readdirSync(dir)
+      .filter((n) => re.test(n))
+      .flatMap((n) => {
+        try {
+          const st = lstatSync(path.join(dir, n));
+          return st.isFile() ? [{ name: n, at: st.mtimeMs }] : [];
+        } catch {
+          return [];
+        }
+      })
+      .sort((a, b) => b.at - a.at);
+  } catch {
+    // no backups directory (or none readable): there is no backup to take
+    found = [];
+  }
+  if (found.length === 0) return [`no backup in ${dir}`];
+  return found
+    .slice(0, max)
+    .map((f) => `backup: ${path.join(dir, f.name)} (${new Date(f.at).toISOString()})`);
+}
+
 /** Row 5: cache dir, free space, store integrity + schema + size, no file-provider xattr. */
 export function checkStore(io: CliIo, config: LenientConfig, ex: ExistingStore): DoctorRow {
   const title = "Cache dir + store";
@@ -663,17 +777,29 @@ export function checkStore(io: CliIo, config: LenientConfig, ex: ExistingStore):
     worse("warn");
     details.push(`free space ${String(Math.round(free / 1024 ** 2))} MB < 1 GB`);
   }
+  // the cache's own directories: a refused one fails every store open, `eff backup` or `eff refresh`
+  const subdirs = cacheSubdirRefusals(config.cacheDir);
+  for (const r of subdirs) details.push(`${r.path}: ${refusal(r.error)}`);
+  const subdirRow = (): DoctorRow | null => {
+    const first = subdirs[0];
+    return first === undefined
+      ? null
+      : row(
+          5,
+          "store",
+          title,
+          "fail",
+          `${String(subdirs.length)} directory(ies) of ours refused: ${first.path}${subdirs.length > 1 ? " …" : ""}`,
+          refusalFix(first.error),
+          details,
+        );
+  };
   const bin = MIGRATIONS.length;
   switch (ex.kind) {
     case "missing":
-      return row(
-        5,
-        "store",
-        title,
-        "warn",
-        "store.sqlite not created yet",
-        "`eff refresh all`",
-        details,
+      return (
+        subdirRow() ??
+        row(5, "store", title, "warn", "store.sqlite not created yet", "`eff refresh all`", details)
       );
     case "newer":
       return row(
@@ -682,29 +808,34 @@ export function checkStore(io: CliIo, config: LenientConfig, ex: ExistingStore):
         title,
         "fail",
         `store.sqlite was written by a newer version (v${String(ex.storeVersion)}); this binary supports v${String(bin)}`,
-        "upgrade the package or restore a backup from <cache>/backups",
-        details,
+        "upgrade the package — or restore the backup taken before the upgrade: the steps below",
+        [
+          ...details,
+          ...restoreSteps(config.cacheDir, { kind: "pre_migration", binaryVersion: bin }),
+          ...backupsPresent(config.cacheDir),
+        ],
       );
     case "pending":
-      return row(
-        5,
-        "store",
-        title,
-        "warn",
-        `schema v${String(ex.storeVersion)}; the next job or server start migrates it to v${String(bin)} (a VACUUM INTO backup is taken first)`,
-        null,
-        details,
+      return (
+        subdirRow() ??
+        row(
+          5,
+          "store",
+          title,
+          "warn",
+          `schema v${String(ex.storeVersion)}; the next job or server start migrates it to v${String(bin)} (a VACUUM INTO backup is taken first)`,
+          null,
+          details,
+        )
       );
-    case "error":
-      return row(
-        5,
-        "store",
-        title,
-        "fail",
-        `store.sqlite could not be opened (${ex.reason})`,
-        "move it aside and restore a backup from <cache>/backups (or run `eff refresh all` to start a new store)",
-        details,
-      );
+    case "error": {
+      const f = openFailure(config, ex.reason, subdirs, ex.path);
+      return row(5, "store", title, "fail", f.detail, f.fix, [
+        ...details,
+        ...f.steps,
+        ...(f.steps.length > 0 ? backupsPresent(config.cacheDir) : []),
+      ]);
+    }
     case "open":
       break;
   }
@@ -723,6 +854,9 @@ export function checkStore(io: CliIo, config: LenientConfig, ex: ExistingStore):
       `store ${String(Math.round(stats.size_bytes / 1024 ** 2))} MB > 500 MB — \`eff prune\``,
     );
   }
+  // the store opened, but a refused directory of ours still fails `eff backup` or `eff refresh`
+  const refused = subdirRow();
+  if (refused !== null) return refused;
   const ok = acc.status === "ok";
   return row(
     5,
@@ -1523,13 +1657,44 @@ function fileFix(file: string): Fix | null {
   return null;
 }
 
-/** The repairs `--fix` would make (never on a symlink or something we do not own). */
+/** Our files inside one of the cache's own directories (only when it is a real directory). */
+function ownFilesIn(dir: string, re: RegExp): string[] {
+  try {
+    if (!lstatSync(dir).isDirectory()) return [];
+    return readdirSync(dir)
+      .filter((n) => re.test(n))
+      .sort()
+      .map((n) => path.join(dir, n));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The repairs `--fix` would make (never on a symlink or something we do not own): the config and
+ * cache dirs (created when missing), the cache's own directories — `datasets/`, `backups/`, `tmp/`,
+ * `recordings/`, which every store open, `eff backup`, `eff refresh` and the fixture tools refuse while
+ * group/other bits are set (never created here: what needs one makes it) — and our private files:
+ * the credential file, the store with its -wal/-shm, the jobs' state, the tuned parameters and the
+ * backups (each written 0600). A tree copied or restored with default modes is repaired whole
+ * (Stage C finding doctor-fix-skips-cache-subdirs: only four paths were covered).
+ */
 export function plannedFixes(config: LenientConfig): Fix[] {
+  const store = storePath(config.cacheDir);
+  const backups = CACHE_DIRS.find((d) => d.name === path.basename(backupDir(config.cacheDir)));
   const out: (Fix | null)[] = [
     dirFix(config.configDir, "config dir", true),
     dirFix(config.cacheDir, "cache dir", true),
+    ...CACHE_DIRS.map((d) => dirFix(path.join(config.cacheDir, d.name), `${d.name}/ dir`, false)),
     fileFix(config.credentialFile),
-    fileFix(storePath(config.cacheDir)),
+    fileFix(path.join(config.configDir, TUNED_PARAMETERS_FILE_NAME)),
+    fileFix(store),
+    fileFix(`${store}-wal`),
+    fileFix(`${store}-shm`),
+    fileFix(jobStatePath(config.cacheDir)),
+    ...(backups === undefined
+      ? []
+      : ownFilesIn(backupDir(config.cacheDir), backups.re).map((f) => fileFix(f))),
   ];
   return out.filter((f): f is Fix => f !== null);
 }

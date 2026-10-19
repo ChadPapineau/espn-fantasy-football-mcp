@@ -2,13 +2,25 @@
 // a failing case; offline mode makes zero network calls and reads the secret only in #7; the exit
 // code is the worst finding: 1 fail · 2 config · 3 credentials · 4 drift). The keychain is the
 // in-memory fake; the client configs and logs are temp files; launchctl/lsof are fake.
-import { chmodSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeEspnS2, fakeGuid, fakeLeagueId } from "../../scripts/ci/secret-fixtures.mjs";
 import {
   MIN_NODE,
   checkClientLog,
+  checkStore,
   checkClientSecrecy,
   checkDrift,
   checkHealthChecks,
@@ -35,8 +47,9 @@ import { clockSkewRow, hostRow } from "../../src/cli/doctor-online.js";
 import { exitCodeFor, exitOfStatus, row } from "../../src/cli/doctor-rows.js";
 import { SecretRegistry } from "../../src/cli/log.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
-import { openStore } from "../../src/cli/store-access.js";
+import { openStore, restoreSteps, type StoreOpenReason } from "../../src/cli/store-access.js";
 import { metaFor } from "../../src/auth/upgrade.js";
+import { MIGRATIONS } from "../../src/store/index.js";
 import { sessionFileBody } from "../../src/auth/file.js";
 import { fakeCookies, stateRow } from "../auth/helpers.js";
 import {
@@ -621,5 +634,266 @@ describe("the keychain rows (#6–#8) over the in-memory keyring", () => {
     expect(file.status).toBe("ok");
     expect(file.message).not.toContain("two stores");
     expect(file.details.join("\n")).toContain("keychain item: unavailable");
+  });
+});
+
+// Stage C findings doctor-fix-skips-cache-subdirs and store-restore-advice-stale-wal
+describe("row 5: the cache's own directories, and the restore procedure", () => {
+  const sub = (d: string) => path.join(sb.cacheDir, d);
+  const modeOf = (p: string) => statSync(p).mode & 0o777;
+  it("datasets/, backups/, tmp/ copied with default modes: row 5 names them (never the healthy store), --fix repairs the tree", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } });
+    const { config, log } = await loadLenientRuntime(io);
+    const backup = path.join(sub("backups"), "store-2026-10-06.sqlite");
+    const store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      await store.backup(backup);
+    } finally {
+      store.close();
+    }
+    mkdirSync(sub("tmp"), { mode: 0o700 });
+    writeFileSync(path.join(sb.cacheDir, "job-state.json"), "{}\n");
+    // the cache restored with default modes (cp -R under umask 022, rsync without -p)
+    for (const d of ["datasets", "backups", "tmp"]) chmodSync(sub(d), 0o755);
+    chmodSync(backup, 0o644);
+    chmodSync(path.join(sb.cacheDir, "job-state.json"), 0o644);
+    // every store open now refuses — the store file itself is fine
+    expect(() => openStore(config, io.clock, log, { migrate: true })).toThrow(
+      /dataset directory: group\/other permission bits are set/,
+    );
+    const r = await runDoctor(io, { json: false, online: false, fix: false, yes: false });
+    const s = byId(r.rows, "store");
+    expect(s.status).toBe("fail");
+    expect(s.message).toContain("a path rule, not damage to the store");
+    for (const d of ["datasets", "backups", "tmp"])
+      expect(s.details).toContain(
+        `${sub(d)}: group/other permission bits are set (directories must be 0700, files 0600); run \`eff doctor --fix\``,
+      );
+    expect(s.fix).toContain("`eff doctor --fix`");
+    expect(JSON.stringify(s)).not.toMatch(/move it aside|restore a backup|start a new store/);
+    expect(plannedFixes(config).map((f) => f.description)).toEqual(
+      expect.arrayContaining([
+        `chmod 700 ${sub("datasets")}`,
+        `chmod 700 ${sub("backups")}`,
+        `chmod 700 ${sub("tmp")}`,
+        `chmod 600 ${backup}`,
+        `chmod 600 ${path.join(sb.cacheDir, "job-state.json")}`,
+      ]),
+    );
+    const fix = makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } });
+    await runDoctor(fix, { json: false, online: false, fix: true, yes: true });
+    expect(fix.err.text).toContain(`eff doctor: fixed: chmod 700 ${sub("datasets")}`);
+    expect(plannedFixes(config)).toEqual([]);
+    for (const d of ["datasets", "backups", "tmp"]) expect(modeOf(sub(d))).toBe(0o700);
+    expect(modeOf(backup)).toBe(0o600);
+    openStore(config, io.clock, log, { migrate: true }).close();
+    const after = await runDoctor(makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } }), {
+      json: false,
+      online: false,
+      fix: false,
+      yes: false,
+    });
+    expect(byId(after.rows, "store").status).toBe("ok");
+  });
+  it("an open store with a refused backups/ still fails row 5 (eff backup would), naming it", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } });
+    const { config, log } = await loadLenientRuntime(io);
+    openStore(config, io.clock, log, { migrate: true }).close();
+    mkdirSync(sub("backups"), { mode: 0o755 });
+    chmodSync(sub("backups"), 0o755);
+    const r = await runDoctor(io, { json: false, online: false, fix: false, yes: false });
+    const s = byId(r.rows, "store");
+    expect(s.status).toBe("fail");
+    expect(s.message).toBe(`1 directory(ies) of ours refused: ${sub("backups")}`);
+    expect(s.details.some((d) => d.startsWith("schema v"))).toBe(true);
+  });
+  it("row 5's advice follows why the store did not open: never 'restore' for a busy, read-only or refused one", async () => {
+    sb = sandbox({ create: true });
+    const io = makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } });
+    const { config } = await loadLenientRuntime(io);
+    const at = (reason: StoreOpenReason, path?: string) =>
+      checkStore(io, config, {
+        kind: "error",
+        message: "x",
+        reason,
+        ...(path === undefined ? {} : { path }),
+      });
+    const restore = /restore a backup/;
+    expect(at("busy").fix).toContain("retry once the running job or server is done");
+    expect(at("readonly").fix).toContain("restores 0600 on our own file");
+    expect(at("unsupported_node").fix).toBe("upgrade Node (row 1)");
+    expect(at("cannot_open").fix).toContain("rows 4–5");
+    for (const r of ["busy", "readonly", "unsupported_node", "cannot_open"] as const) {
+      expect(JSON.stringify(at(r)), r).not.toMatch(restore);
+      expect(at(r).status, r).toBe("fail");
+    }
+    const refused = at("insecure_path", path.join(sb.cacheDir, "store.sqlite"));
+    expect(refused.message).toBe(
+      `store.sqlite could not be opened (insecure_path): ${path.join(sb.cacheDir, "store.sqlite")} is refused — a path rule, not damage to the store`,
+    );
+    expect(JSON.stringify(refused)).not.toMatch(restore);
+    for (const r of ["corrupt", "not_a_database", "other"] as const) {
+      expect(at(r).fix, r).toMatch(restore);
+      expect(at(r).details, r).toEqual(
+        expect.arrayContaining([
+          ...restoreSteps(sb.cacheDir, { kind: "newest" }),
+          `no backup in ${sub("backups")}`,
+        ]),
+      );
+    }
+  });
+  it("a symlinked datasets/ is refused and named; --fix never follows it", async () => {
+    sb = sandbox({ create: true });
+    const elsewhere = path.join(sb.dir, "elsewhere");
+    mkdirSync(elsewhere, { mode: 0o700 });
+    symlinkSync(elsewhere, sub("datasets"));
+    const io = makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } });
+    const { config } = await loadLenientRuntime(io);
+    const r = await runDoctor(io, { json: false, online: false, fix: false, yes: false });
+    const s = byId(r.rows, "store");
+    expect(s.status).toBe("fail");
+    expect(s.message).toBe(`1 directory(ies) of ours refused: ${sub("datasets")}`);
+    expect(s.fix).toContain("never follows a symlink");
+    expect(
+      plannedFixes(config)
+        .map((f) => f.description)
+        .join("\n"),
+    ).not.toContain("datasets");
+  });
+  it("restoreSteps: stop everything, move the store WITH its -wal and -shm, then copy the backup", () => {
+    sb = sandbox();
+    const steps = restoreSteps(sb.cacheDir, { kind: "newest" }).join("\n");
+    expect(steps).toContain("quit the MCP clients");
+    expect(steps).toContain("`eff uninstall-launchd`");
+    expect(steps).toContain(
+      "store.sqlite, store.sqlite-wal, store.sqlite-shm and store.sqlite-journal (those present)",
+    );
+    expect(steps).toContain("never leave one behind: SQLite replays a leftover -wal");
+    expect(steps).toContain(`chmod 600 ${path.join(sb.cacheDir, "store.sqlite")}`);
+    expect(
+      restoreSteps(sb.cacheDir, { kind: "pre_migration", binaryVersion: 2 }).join("\n"),
+    ).toContain(`${path.join(sb.cacheDir, "backups")}/store.sqlite.bak-v2`);
+  });
+  it("a damaged store: row 5 gives the whole restore and lists the backups; a newer one the pre-upgrade copy", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } });
+    const { config, log } = await loadLenientRuntime(io);
+    const store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      await store.backup(path.join(sub("backups"), "store-2026-10-06.sqlite"));
+    } finally {
+      store.close();
+    }
+    writeFileSync(path.join(sb.cacheDir, "store.sqlite"), "not a database at all".repeat(300));
+    const r = await runDoctor(io, { json: false, online: false, fix: false, yes: false });
+    const s = byId(r.rows, "store");
+    expect(s.status).toBe("fail");
+    expect(s.fix).toContain("restore a backup — the steps below");
+    expect(s.details).toEqual(
+      expect.arrayContaining(restoreSteps(sb.cacheDir, { kind: "newest" })),
+    );
+    expect(s.details.join("\n")).toContain(
+      `backup: ${path.join(sub("backups"), "store-2026-10-06.sqlite")}`,
+    );
+    expect(JSON.stringify(s)).not.toContain("move it aside");
+    // a store a newer binary migrated: the restore takes the copy made before that migration
+    rmSync(path.join(sb.cacheDir, "store.sqlite"), { force: true });
+    openStore(config, io.clock, log, { migrate: true }).close();
+    const raw = new DatabaseSync(path.join(sb.cacheDir, "store.sqlite"));
+    try {
+      raw
+        .prepare("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)")
+        .run(MIGRATIONS.length + 1, "2026-10-07T00:00:00.000Z");
+    } finally {
+      raw.close();
+    }
+    const n = await runDoctor(makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } }), {
+      json: false,
+      online: false,
+      fix: false,
+      yes: false,
+    });
+    const newer = byId(n.rows, "store");
+    expect(newer.status).toBe("fail");
+    expect(newer.fix).toContain("restore the backup taken before the upgrade: the steps below");
+    expect(newer.details).toEqual(
+      expect.arrayContaining(
+        restoreSteps(sb.cacheDir, { kind: "pre_migration", binaryVersion: MIGRATIONS.length }),
+      ),
+    );
+    expect(newer.details.join("\n")).toContain(`store.sqlite.bak-v${String(MIGRATIONS.length)}`);
+  });
+  it("following the steps restores the backup's contents; the old advice (store.sqlite alone moved) replays a leftover -wal", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } });
+    const { config, log } = await loadLenientRuntime(io);
+    const file = path.join(sb.cacheDir, "store.sqlite");
+    const backup = path.join(sub("backups"), "store-2026-10-06.sqlite");
+    let store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      await store.backup(backup);
+    } finally {
+      store.close();
+    }
+    // a writer adds a table after the backup and is killed before any checkpoint: its WAL stays
+    const killedWriter = (): void => {
+      const w = new DatabaseSync(file);
+      try {
+        w.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;");
+        w.exec("CREATE TABLE after_backup (x INTEGER); INSERT INTO after_backup VALUES (1);");
+        // what a SIGKILL leaves: the -wal and -shm as they are now (closing would checkpoint them)
+        for (const side of ["-wal", "-shm"]) copyFileSync(`${file}${side}`, `${file}${side}.kept`);
+      } finally {
+        w.close();
+      }
+      for (const side of ["-wal", "-shm"]) renameSync(`${file}${side}.kept`, `${file}${side}`);
+    };
+    const tables = (): string[] => {
+      const db = new DatabaseSync(file);
+      try {
+        return (
+          db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+            name: string;
+          }[]
+        ).map((t) => t.name);
+      } finally {
+        db.close();
+      }
+    };
+    killedWriter();
+    // the old advice: move store.sqlite aside, copy the backup in — the leftover -wal is replayed
+    renameSync(file, `${file}.moved`);
+    copyFileSync(backup, file);
+    let naive: string[] | string;
+    try {
+      naive = tables();
+    } catch (e) {
+      naive = String(e);
+    }
+    expect(Array.isArray(naive) && !naive.includes("after_backup")).toBe(false);
+    // again, by the steps: steps 2–3 move all three files, then copy the backup
+    for (const f of [file, `${file}-wal`, `${file}-shm`, `${file}.moved`])
+      rmSync(f, { force: true });
+    store = openStore(config, io.clock, log, { migrate: true });
+    store.close();
+    killedWriter();
+    const aside = path.join(sb.dir, "moved-aside");
+    mkdirSync(aside, { mode: 0o700 });
+    for (const n of ["store.sqlite", "store.sqlite-wal", "store.sqlite-shm"])
+      renameSync(path.join(sb.cacheDir, n), path.join(aside, n));
+    copyFileSync(backup, file);
+    chmodSync(file, 0o600);
+    expect(tables()).not.toContain("after_backup");
+    store = openStore(config, io.clock, log, { migrate: true });
+    store.close();
+    const after = await runDoctor(makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } }), {
+      json: false,
+      online: false,
+      fix: false,
+      yes: false,
+    });
+    expect(byId(after.rows, "store").status).toBe("ok");
   });
 });

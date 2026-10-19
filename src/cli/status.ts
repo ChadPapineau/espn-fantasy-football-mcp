@@ -317,7 +317,7 @@ function storeBlock(ex: ExistingStore, config: LenientConfig): StatusReport["sto
         ...none,
         state: "newer",
         schema_version: ex.storeVersion,
-        message: `written by a newer version (v${String(ex.storeVersion)}); this binary supports v${String(ex.binaryVersion)} — upgrade the package or restore a backup`,
+        message: `written by a newer version (v${String(ex.storeVersion)}); this binary supports v${String(ex.binaryVersion)} — upgrade the package or restore a backup (\`eff doctor\` lists the steps)`,
       };
     case "pending":
       return {
@@ -327,7 +327,14 @@ function storeBlock(ex: ExistingStore, config: LenientConfig): StatusReport["sto
         message: `schema v${String(ex.storeVersion)} → v${String(ex.binaryVersion)} migration pending — it runs on the next job or server start`,
       };
     case "error":
-      return { ...none, state: "error", schema_version: null, message: ex.message };
+      // what to do depends on why (a refused directory of ours, a busy or a damaged store): doctor
+      // row 5 says it — never "move it aside" for a store that is healthy
+      return {
+        ...none,
+        state: "error",
+        schema_version: null,
+        message: `${ex.message} (${ex.reason}) — \`eff doctor\` says what to do`,
+      };
   }
 }
 

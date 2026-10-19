@@ -1,8 +1,10 @@
 // uninstall.ts — `eff uninstall [--yes] [--dry-run] [--keep-config] [--export-log <path>]` (plan 03
 // L8, §8): (0) when asked, export the recommendation log AND the snapshots as JSON before anything is
-// deleted — every league's rows, read straight from store.sqlite on a read-only connection (so a
-// store that needs a migration, or was written by a newer binary, still exports), and an export that
-// cannot be written stops the whole uninstall with nothing changed; (1) boot out and delete our
+// deleted — every league's rows, read straight from store.sqlite AND from every backup copy step 3
+// deletes (rows only a backup holds — a store moved aside or started anew — are exported too: Stage C
+// finding uninstall-export-skips-backups), each on a read-only connection (so a store that needs a
+// migration, or was written by a newer binary, still exports), and an export that cannot be done
+// stops the whole uninstall with nothing changed; (1) boot out and delete our
 // LaunchAgents and the jobs' log files; (2) delete BOTH the keychain items and session.json —
 // always, whichever store config.json records (a stale second copy must never survive — ADV OBJ-05)
 // — plus a leftover self-test item, saying that Time Machine may hold copies and that the ESPN
@@ -27,12 +29,14 @@ import {
   writeSync,
 } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { selftestItemDeleter } from "../auth/stores.js";
 import { removeAllCredentials } from "../auth/uninstall.js";
 import { KEYCHAIN_SERVICE } from "../auth/types.js";
 import {
   BACKUP_DIR_NAME,
+  backupDir,
   CONFIG_FILE_NAME,
   DATASET_DIR_NAME,
   defaultCredentialFilePath,
@@ -57,7 +61,13 @@ import { JOB_STATE_FILE, JOB_STATE_LOCK } from "./job-state.js";
 import { JOB_NAMES, logDir, removeJobs } from "./launchd.js";
 import type { Logger } from "./log.js";
 import { resolveBackupDestination } from "./maintenance.js";
-import { codeConfigPath, desktopConfigPath, SERVER_NAME } from "./print-config.js";
+import {
+  codeConfigPath,
+  desktopConfigPath,
+  MARKETPLACE_NAME,
+  PLUGIN_ID,
+  SERVER_NAME,
+} from "./print-config.js";
 import { createTerminalPrompt, type TerminalPrompt } from "./prompt.js";
 import { openExistingStore } from "./store-access.js";
 
@@ -96,8 +106,11 @@ export interface PurgeDir {
   readonly tree?: boolean;
 }
 
-/** Directories of ours inside the cache dir, emptied by pattern. */
-const CACHE_DIRS: readonly PurgeDir[] = [
+/**
+ * Directories of ours inside the cache dir, emptied by pattern (each private: 0700, its files 0600 —
+ * `eff doctor` checks and `--fix` repairs them from this same list).
+ */
+export const CACHE_DIRS: readonly PurgeDir[] = [
   {
     name: DATASET_DIR_NAME,
     re: /^[a-z][a-z0-9_]*__[a-z][a-z0-9_]*(?:\.sqlite(?:-journal|-wal|-shm)?|\..*\.tmp(?:-journal)?)$/,
@@ -222,11 +235,45 @@ export function executePurge(plan: readonly PurgeStep[]): { removed: string[]; k
   return { removed, kept };
 }
 
-/** The manual steps uninstall prints and never performs (plan 03 §8 steps 5–6). */
-export function manualSteps(home: string): string[] {
+/** Where a copy install puts the Skills (README: `~/.claude/skills/espn-<name>`). */
+export function skillsCopyDir(home: string): string {
+  return path.join(home, ".claude", "skills");
+}
+
+/**
+ * The copy-installed Skill directories present now: `~/.claude/skills/espn-<name>` for each Skill
+ * this package ships (`<package>/skills/<name>/SKILL.md`), by exact name — never another Skill.
+ */
+export function copiedSkillDirs(home: string, packageRoot: string): string[] {
+  let names: string[] = [];
+  try {
+    names = readdirSync(path.join(packageRoot, "skills"))
+      .filter((n) => /^[a-z][a-z0-9-]{0,40}$/.test(n))
+      .filter((n) => kind(path.join(packageRoot, "skills", n, "SKILL.md")) === "file")
+      .sort();
+  } catch {
+    names = [];
+  }
+  return names
+    .map((n) => path.join(skillsCopyDir(home), `espn-${n}`))
+    .filter((d) => kind(d) === "dir");
+}
+
+/**
+ * The manual steps uninstall prints and never performs (plan 03 §8 steps 5–6; L8 "prints what it
+ * will not touch"): every client registration — the Claude Code plugin first (the README's route: it
+ * registers the server itself, and every session would start it and create the cache again), the
+ * user-scope entry, Claude Desktop's entry — the copy-installed Skills, then the ESPN session, the
+ * backups and the global package (Stage C finding uninstall-steps-omit-plugin).
+ */
+export function manualSteps(home: string, copiedSkills: readonly string[] = []): string[] {
   return [
-    `Remove the "${SERVER_NAME}" entry from ${desktopConfigPath(home)} (Claude Desktop), then restart it.`,
-    `Claude Code: claude mcp remove --scope user ${SERVER_NAME} (entries live in ${codeConfigPath(home)})`,
+    `Claude Code with the plugin: claude plugin uninstall ${PLUGIN_ID}, then claude plugin marketplace remove ${MARKETPLACE_NAME} — until then every Claude Code session starts the server, which creates the cache again. The plugin's league id and season settings live in Claude Code's settings: remove them there if the uninstall leaves them.`,
+    `Claude Code without the plugin: claude mcp remove --scope user ${SERVER_NAME} (entries live in ${codeConfigPath(home)})`,
+    `Remove the "${SERVER_NAME}" entry from ${desktopConfigPath(home)} (Claude Desktop), then restart it; Skills you uploaded to Claude Desktop as zips are removed in its settings.`,
+    copiedSkills.length > 0
+      ? `Delete the Skills copied into ${skillsCopyDir(home)}: ${copiedSkills.map((d) => path.basename(d)).join(", ")}`
+      : `A copy install of the Skills lives in ${skillsCopyDir(home)} as espn-<name> directories: none of ours is there now.`,
     "The ESPN session itself is NOT invalidated: log out at espn.com (account settings) to attempt that — whether it works is unverified.",
     "Time Machine or other backups may still hold copies of the keychain, session.json and the store.",
     "If installed globally: npm uninstall -g espn-fantasy-football-mcp",
@@ -250,6 +297,26 @@ export const EXPORT_TABLES = [
 
 /** One exported table's row count, or null when the store has no such table. */
 export type ExportCounts = Readonly<Record<(typeof EXPORT_TABLES)[number], number | null>>;
+
+/** A backup copy the export could not read (its name, and the underlying failure). */
+export class ExportSourceError extends Error {
+  readonly file: string;
+  readonly reason: unknown;
+  constructor(file: string, reason: unknown) {
+    super("export: a backup copy could not be read");
+    this.name = "ExportSourceError";
+    this.file = file;
+    this.reason = reason;
+  }
+}
+
+/** What an export wrote: the live store's tables, and the rows only each backup copy held. */
+export interface ExportSummary {
+  /** Null when there was no live store.sqlite. */
+  readonly store: ExportCounts | null;
+  /** Per backup, newest first: the rows exported from it (those no newer source held). */
+  readonly backups: readonly { readonly file: string; readonly rows: ExportCounts }[];
+}
 
 /** A stored row as JSON: `<x>_json` columns parsed under `<x>`, bytes as base64. */
 function exportRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -302,67 +369,163 @@ function newPrivateWriter(dest: string): { write(s: string): void; close(): void
   };
 }
 
-/**
- * Exports the recommendation log and the snapshots of EVERY league in the store as JSON (plan 03
- * §8 step 3) to a NEW 0600 file, streaming row by row. The store file is read on its own read-only
- * connection, never through a migration: a store whose migration is pending, or one written by a
- * newer binary, exports its tables as they are. Throws when the store cannot be read or the file
- * cannot be written (the partial file is removed).
- */
-export function exportStoreData(storeFile: string, dest: string, nowIso: string): ExportCounts {
-  const db = new DatabaseSync(storeFile, { readOnly: true, timeout: 5_000 });
+/** The export tables a store file has, and its schema version (null when it has none). */
+function describeStore(db: DatabaseSync): { present: Set<string>; schemaVersion: unknown } {
+  const present = new Set(
+    (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+        name: unknown;
+      }[]
+    )
+      .map((r) => r.name)
+      .filter((n): n is string => typeof n === "string"),
+  );
+  let schemaVersion: unknown = null;
   try {
-    const present = new Set(
+    schemaVersion =
       (
-        db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
-          name: unknown;
-        }[]
-      )
-        .map((r) => r.name)
-        .filter((n): n is string => typeof n === "string"),
-    );
-    let schemaVersion: unknown = null;
-    try {
-      schemaVersion =
-        (
-          db.prepare("SELECT MAX(version) AS v FROM schema_version").get() as
-            { v?: unknown } | undefined
-        )?.v ?? null;
-    } catch {
-      schemaVersion = null;
-    }
-    const counts = {} as Record<(typeof EXPORT_TABLES)[number], number | null>;
-    for (const t of EXPORT_TABLES)
-      counts[t] = present.has(t)
-        ? Number((db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get() as { n: unknown }).n)
-        : null;
-    const w = newPrivateWriter(dest);
-    try {
-      w.write(
-        `{\n  "exported_at": ${JSON.stringify(nowIso)},\n  "schema_version": ${JSON.stringify(schemaVersion)},\n  "rows": ${JSON.stringify(counts)}`,
-      );
-      for (const t of EXPORT_TABLES) {
-        w.write(`,\n  ${JSON.stringify(t)}: [`);
-        if (present.has(t)) {
-          let first = true;
-          for (const row of db.prepare(`SELECT * FROM "${t}"`).iterate()) {
-            w.write(`${first ? "\n    " : ",\n    "}${JSON.stringify(exportRow(row))}`);
-            first = false;
-          }
-          if (!first) w.write("\n  ");
-        }
-        w.write("]");
-      }
-      w.write("\n}\n");
-      w.close();
-    } catch (e) {
-      w.abort();
-      throw e;
-    }
-    return counts;
-  } finally {
-    db.close();
+        db.prepare("SELECT MAX(version) AS v FROM schema_version").get() as
+          { v?: unknown } | undefined
+      )?.v ?? null;
+  } catch {
+    schemaVersion = null;
   }
+  return { present, schemaVersion };
+}
+
+/**
+ * Exports the recommendation log and the snapshots of EVERY league as JSON (plan 03 §8 step 3) to a
+ * NEW 0600 file, streaming row by row: the live store's tables at the top level (each table empty and
+ * counted null when the store lacks it — or when there is no store.sqlite), then, under `backups`,
+ * each backup copy's rows that no newer source held, newest copy first. The purge deletes those
+ * copies (the weekly `eff backup` files and the pre-migration ones — full VACUUM INTO copies of the
+ * log and the snapshots): rows that live only there — a store moved aside or started anew — were
+ * deleted unexported (Stage C finding uninstall-export-skips-backups). Two rows are the same row
+ * when every column is equal. Every file is read on its own read-only connection, never through a
+ * migration: a store whose migration is pending, or one written by a newer binary, exports its
+ * tables as they are. Throws when a file cannot be read or the export cannot be written (the partial
+ * file is removed) — the caller then changes nothing.
+ */
+export function exportStoreData(
+  storeFile: string | null,
+  backups: readonly string[],
+  dest: string,
+  nowIso: string,
+): ExportSummary {
+  const seen = new Map<string, Set<string>>(EXPORT_TABLES.map((t) => [t, new Set<string>()]));
+  /** Writes `table`'s rows no earlier source held; returns how many it wrote. */
+  const rows = (
+    db: DatabaseSync,
+    table: (typeof EXPORT_TABLES)[number],
+    out: { write(s: string): void },
+    indent: string,
+  ): number => {
+    const known = seen.get(table) ?? new Set<string>();
+    let n = 0;
+    for (const row of db.prepare(`SELECT * FROM "${table}"`).iterate()) {
+      const text = JSON.stringify(exportRow(row));
+      const key = createHash("sha256").update(text).digest("base64");
+      if (known.has(key)) continue;
+      known.add(key);
+      out.write(`${n === 0 ? `\n${indent}  ` : `,\n${indent}  `}${text}`);
+      n++;
+    }
+    if (n > 0) out.write(`\n${indent}`);
+    return n;
+  };
+  const open = (file: string): DatabaseSync =>
+    new DatabaseSync(file, { readOnly: true, timeout: 5_000 });
+  const none = Object.fromEntries(EXPORT_TABLES.map((t) => [t, null])) as ExportCounts;
+  const w = newPrivateWriter(dest);
+  try {
+    let store: ExportCounts | null = null;
+    w.write(`{\n  "exported_at": ${JSON.stringify(nowIso)}`);
+    if (storeFile === null) {
+      w.write(`,\n  "schema_version": null,\n  "rows": ${JSON.stringify(none)}`);
+      for (const t of EXPORT_TABLES) w.write(`,\n  ${JSON.stringify(t)}: []`);
+    } else {
+      const db = open(storeFile);
+      try {
+        const { present, schemaVersion } = describeStore(db);
+        const counts = {} as Record<(typeof EXPORT_TABLES)[number], number | null>;
+        for (const t of EXPORT_TABLES)
+          counts[t] = present.has(t)
+            ? Number((db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get() as { n: unknown }).n)
+            : null;
+        w.write(
+          `,\n  "schema_version": ${JSON.stringify(schemaVersion)},\n  "rows": ${JSON.stringify(counts)}`,
+        );
+        for (const t of EXPORT_TABLES) {
+          w.write(`,\n  ${JSON.stringify(t)}: [`);
+          if (present.has(t)) rows(db, t, w, "  ");
+          w.write("]");
+        }
+        store = counts;
+      } finally {
+        db.close();
+      }
+    }
+    const done: { file: string; rows: ExportCounts }[] = [];
+    w.write(`,\n  "backups": [`);
+    for (const file of backups) {
+      const name = path.basename(file);
+      let db: DatabaseSync | null = null;
+      try {
+        db = open(file);
+        const { present, schemaVersion } = describeStore(db);
+        w.write(
+          `${done.length === 0 ? "\n    " : ",\n    "}{\n      "file": ${JSON.stringify(name)},\n      "schema_version": ${JSON.stringify(schemaVersion)}`,
+        );
+        const counts = {} as Record<(typeof EXPORT_TABLES)[number], number | null>;
+        for (const t of EXPORT_TABLES) {
+          w.write(`,\n      ${JSON.stringify(t)}: [`);
+          counts[t] = present.has(t) ? rows(db, t, w, "      ") : null;
+          w.write("]");
+        }
+        w.write(`,\n      "rows": ${JSON.stringify(counts)}\n    }`);
+        done.push({ file: name, rows: counts });
+      } catch (e) {
+        // a SQLite failure here is the backup's (the export file is written with fs, not SQLite):
+        // name it, so the owner knows which copy blocks the uninstall
+        if ((e as { code?: unknown } | null)?.code === "ERR_SQLITE_ERROR")
+          throw new ExportSourceError(name, e);
+        throw e;
+      } finally {
+        db?.close();
+      }
+    }
+    w.write(done.length === 0 ? "]" : "\n  ]");
+    w.write("\n}\n");
+    w.close();
+    return { store, backups: done };
+  } catch (e) {
+    w.abort();
+    throw e;
+  }
+}
+
+/**
+ * The store copies the cache purge would delete — our backups (`backups/store-<date>.sqlite`,
+ * `backups/store.sqlite.bak-v<N>`), regular files only (a symlink's target is not deleted) — newest
+ * first, so a row is attributed to the newest copy that holds it.
+ */
+export function backupsToExport(plan: readonly PurgeStep[], backupsDir: string): string[] {
+  return plan
+    .filter(
+      (p) =>
+        p.action === "unlink" && path.dirname(p.path) === backupsDir && kind(p.path) === "file",
+    )
+    .map((p) => {
+      let at = 0;
+      try {
+        at = lstatSync(p.path).mtimeMs;
+      } catch {
+        at = 0;
+      }
+      return { file: p.path, at };
+    })
+    .sort((a, b) => b.at - a.at || b.file.localeCompare(a.file))
+    .map((b) => b.file);
 }
 
 /** The config uninstall needs (the dirs, the credential file and what the store opener reads). */
@@ -465,23 +628,38 @@ export async function uninstall(
     }
 
     // 0. the export comes first: when it cannot be written, NOTHING is changed (plan 03 §8 step 3 —
-    // the recommendation log cannot be rebuilt)
+    // the recommendation log cannot be rebuilt). It covers every store copy step 3 deletes: the
+    // live store and the backups (whose rows may exist nowhere else)
     if (exportDest !== null) {
       const file = storePath(config.cacheDir);
-      if (kind(file) === null) await out("no store.sqlite — nothing recorded to export");
+      const live = kind(file) === null ? null : file;
+      const backups = backupsToExport(cachePlan, backupDir(config.cacheDir));
+      const copies = `${String(backups.length)} backup cop${backups.length === 1 ? "y" : "ies"}`;
+      if (live === null && backups.length === 0)
+        await out("no store.sqlite and no backup — nothing recorded to export");
       else if (opts.dryRun)
-        await out(`would export the recommendation log and snapshots to ${exportDest}`);
+        await out(
+          `would export the recommendation log and snapshots (${live === null ? "no store.sqlite; " : "store.sqlite and "}${copies}) to ${exportDest}`,
+        );
       else {
         try {
-          const counts = exportStoreData(file, exportDest, io.clock.nowIso());
-          const n = (t: (typeof EXPORT_TABLES)[number]): string => String(counts[t] ?? 0);
-          await out(
-            `exported ${n("recommendation_log")} recommendation(s) (${n("recommendation_outcome")} scored), ${n("roster_snapshot")} roster, ${n("pool_snapshot")} pool and ${n("scoreboard_snapshot")} scoreboard snapshot(s) and ${n("espn_projection")} ESPN projection row(s) to ${exportDest}`,
-          );
+          const r = exportStoreData(live, backups, exportDest, io.clock.nowIso());
+          const tally = (c: ExportCounts | null, t: (typeof EXPORT_TABLES)[number]): number =>
+            c?.[t] ?? 0;
+          const line = (c: (t: (typeof EXPORT_TABLES)[number]) => number): string =>
+            `${String(c("recommendation_log"))} recommendation(s) (${String(c("recommendation_outcome"))} scored), ${String(c("roster_snapshot"))} roster, ${String(c("pool_snapshot"))} pool and ${String(c("scoreboard_snapshot"))} scoreboard snapshot(s) and ${String(c("espn_projection"))} ESPN projection row(s)`;
+          if (live === null) await out(`no store.sqlite — exporting what only the backups hold`);
+          else await out(`exported ${line((t) => tally(r.store, t))} to ${exportDest}`);
+          if (r.backups.length > 0)
+            await out(
+              `${live === null ? "exported" : "  plus, found only in"} ${line((t) => r.backups.reduce((a, b) => a + tally(b.rows, t), 0))}${live === null ? ` from ${copies} to ${exportDest}` : ` (${copies}, under "backups")`}`,
+            );
         } catch (e) {
           await writeLine(
             io.stderr,
-            `eff uninstall: the export failed (${exportFailure(e)}) — nothing was changed`,
+            e instanceof ExportSourceError
+              ? `eff uninstall: the export failed: backup ${e.file} cannot be read (${exportFailure(e.reason)}) — nothing was changed; move it out of ${backupDir(config.cacheDir)} if it is not needed, or uninstall without --export-log`
+              : `eff uninstall: the export failed (${exportFailure(e)}) — nothing was changed`,
           );
           return EXIT.error;
         }
@@ -570,7 +748,8 @@ export async function uninstall(
     // 5–6. what uninstall never does itself
     await out("");
     await out("Not done automatically (do these yourself):");
-    for (const s of manualSteps(io.home)) await out(`  - ${s}`);
+    for (const s of manualSteps(io.home, copiedSkillDirs(io.home, io.packageRoot)))
+      await out(`  - ${s}`);
     return failed ? EXIT.error : EXIT.ok;
   } finally {
     prompt?.close();

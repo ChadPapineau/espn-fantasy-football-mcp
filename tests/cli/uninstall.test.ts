@@ -10,10 +10,16 @@ import { sessionFileBody } from "../../src/auth/file.js";
 import { metaFor } from "../../src/auth/upgrade.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
-import { executePurge, manualSteps, purgePlan, uninstall } from "../../src/cli/uninstall.js";
+import {
+  copiedSkillDirs,
+  executePurge,
+  manualSteps,
+  purgePlan,
+  uninstall,
+} from "../../src/cli/uninstall.js";
 import { createTerminalPrompt } from "../../src/cli/prompt.js";
 import { fakeCookies } from "../auth/helpers.js";
-import { Capture, FakeKeyring, fakeExec, makeIo, sandbox, type Sandbox } from "./helpers.js";
+import { Capture, FakeKeyring, ROOT, fakeExec, makeIo, sandbox, type Sandbox } from "./helpers.js";
 
 let sb: Sandbox;
 afterEach(() => {
@@ -145,5 +151,50 @@ describe("uninstall", () => {
     expect(r.kept).toContain(sb.cacheDir);
     expect(purgePlan(path.join(sb.dir, "none"), [], [])).toEqual([]);
     expect(manualSteps("/h").join("\n")).toContain("npm uninstall -g espn-fantasy-football-mcp");
+  });
+  // Stage C finding uninstall-steps-omit-plugin: the README's own route (the plugin) and the copied
+  // Skills were missing, so the plugin kept starting the server and re-creating the cache
+  it("the printed steps name the plugin route (held to the plugin manifest) and the copied Skills found", async () => {
+    sb = sandbox();
+    const manifest = JSON.parse(
+      readFileSync(path.join(ROOT, ".claude-plugin", "marketplace.json"), "utf8"),
+    ) as { name: string; plugins: { name: string }[] };
+    const plugin = JSON.parse(
+      readFileSync(path.join(ROOT, ".claude-plugin", "plugin.json"), "utf8"),
+    ) as { name: string };
+    expect(manifest.plugins.map((p) => p.name)).toContain(plugin.name);
+    const id = `${plugin.name}@${manifest.name}`;
+    const steps = manualSteps("/h").join("\n");
+    expect(steps).toContain(`claude plugin uninstall ${id}`);
+    expect(steps).toContain(`claude plugin marketplace remove ${manifest.name}`);
+    expect(steps).toContain("claude mcp remove --scope user espn-fantasy-football");
+    // the copy install: exactly the espn-<name> directories of the Skills this package ships
+    const skills = path.join(sb.home, ".claude", "skills");
+    mkdirSync(path.join(skills, "espn-onboard"), { recursive: true });
+    mkdirSync(path.join(skills, "espn-weekly"), { recursive: true });
+    mkdirSync(path.join(skills, "espn-someone-elses"), { recursive: true });
+    mkdirSync(path.join(skills, "my-own-skill"), { recursive: true });
+    expect(copiedSkillDirs(sb.home, ROOT)).toEqual([
+      path.join(skills, "espn-onboard"),
+      path.join(skills, "espn-weekly"),
+    ]);
+    const { keyring } = await install();
+    const io = makeIo(sb, { keyring, platform: "darwin", exec: fakeExec().exec });
+    const { config, log } = await loadLenientRuntime(io);
+    expect(
+      await uninstall(io, config, log, {
+        yes: false,
+        dryRun: true,
+        keepConfig: false,
+        exportLog: undefined,
+      }),
+    ).toBe(0);
+    expect(io.out.text).toContain(`claude plugin uninstall ${id}`);
+    expect(io.out.text).toContain(
+      `Delete the Skills copied into ${skills}: espn-onboard, espn-weekly`,
+    );
+    expect(io.out.text).not.toContain("espn-someone-elses");
+    // Skills are never deleted by uninstall itself (it prints, never edits a client's files)
+    expect(existsSync(path.join(skills, "espn-onboard"))).toBe(true);
   });
 });

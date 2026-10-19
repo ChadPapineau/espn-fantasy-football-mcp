@@ -224,6 +224,19 @@ describe("startup refusals", () => {
       factory: failing(new PathSecurityError("relative", "x", "store")),
     });
     expect(await unsafe.code).toBe(EXIT.usage);
+    // the log line names WHICH directory of ours is refused (a fixed label, never the path) and
+    // says what repairs it (Stage C finding doctor-fix-skips-cache-subdirs)
+    const loose = start(tempEnv(), {
+      factory: failing(new PathSecurityError("insecure_mode", "/x/datasets", "dataset directory")),
+    });
+    expect(await loose.code).toBe(EXIT.usage);
+    const ll = loose.logs.find((x) => eventOf(x) === "store.open_failed");
+    expect(ll).toMatchObject({
+      error: "PathSecurityError",
+      message:
+        "dataset directory: group/other permission bits are set (directories must be 0700, files 0600); run `eff doctor --fix`",
+    });
+    expect(JSON.stringify(ll)).not.toContain("/x/datasets");
     const busy = start(tempEnv(), {
       factory: failing(Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" })),
     });

@@ -17,6 +17,11 @@ import { distEntry, write, writeLine, type CliIo } from "./io.js";
 export const SERVER_NAME = "espn-fantasy-football";
 /** The sibling's key: doctor #2 says both are installed when it is present (plan 03 §5 #2). */
 export const SIBLING_SERVER_NAME = "fantasy-football";
+/** The Claude Code plugin (`.claude-plugin/plugin.json` `name`) and its marketplace (this repo). */
+export const PLUGIN_NAME = "espn-fantasy-football";
+export const MARKETPLACE_NAME = "espn-fantasy-football-mcp";
+/** The id `claude plugin install|uninstall` takes. */
+export const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
 /** The clients `print-config` knows. */
 export const CLIENTS = ["desktop", "code"] as const;
 export type Client = (typeof CLIENTS)[number];

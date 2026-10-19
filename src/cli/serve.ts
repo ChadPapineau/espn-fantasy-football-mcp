@@ -69,6 +69,7 @@ import {
 import { VERSION } from "../version.js";
 import type { KeyringPort } from "../auth/keychain.js";
 import { createLogger, type Logger } from "./log.js";
+import { newerStoreMessage as storeNewerMessage } from "./store-access.js";
 
 /** What `serve` is given (the CLI entry passes the real process streams). */
 export interface ServeOptions {
@@ -103,9 +104,13 @@ export interface ServeInternals {
 /** Process exit codes (plan 03 §1.3, shared with the CLI). */
 export const EXIT = EXIT_CODES;
 
-/** Plan 03 §7's message for a store written by a newer binary (exit 1). */
+/**
+ * Plan 03 §7's message for a store written by a newer binary (exit 1) — the CLI's one message
+ * (store-access.ts), which says where the restore steps are (Stage C finding
+ * store-restore-advice-stale-wal).
+ */
 export function newerStoreMessage(storeVersion: number, binaryVersion: number): string {
-  return `store.sqlite was written by a newer version (v${String(storeVersion)}); this binary supports v${String(binaryVersion)}. Upgrade the package or restore the backup.`;
+  return storeNewerMessage(storeVersion, binaryVersion);
 }
 
 // --- malformed requests --------------------------------------------------------------------------
@@ -703,7 +708,9 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       logger.error("store.open_failed", { error: e.name, reason: "migration_pending" });
     } else if (e instanceof PathSecurityError) {
       code = EXIT.usage;
-      logger.error("store.open_failed", { error: e.name, reason: e.detail });
+      // the message names which directory or file of ours is at fault ("dataset directory: …";
+      // a fixed label, never the path) — `eff doctor` shows the path, `eff doctor --fix` repairs it
+      logger.error("store.open_failed", { error: e.name, reason: e.detail, message: e.message });
     } else {
       logger.error("store.open_failed", {
         error: e instanceof Error ? e.name : "unknown",

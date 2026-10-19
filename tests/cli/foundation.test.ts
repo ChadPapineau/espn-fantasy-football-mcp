@@ -43,7 +43,9 @@ import {
   openExistingStore,
   storeOpenReason,
 } from "../../src/cli/store-access.js";
+import { PathSecurityError } from "../../src/config/paths.js";
 import { ConfigError } from "../../src/config/schema.js";
+import { StoreVersionError } from "../../src/store/types.js";
 import { Capture, makeIo, sandbox, type Sandbox } from "./helpers.js";
 
 let sb: Sandbox;
@@ -252,6 +254,23 @@ describe("store-access", () => {
     expect(errorText(new RangeError("r"))).toBe("RangeError: r");
     expect(errorText("x")).toBe("unknown error");
     expect(newerStoreMessage(7, 5)).toContain("newer version (v7)");
+    // Stage C findings doctor-fix-skips-cache-subdirs / store-restore-advice-stale-wal: a path
+    // rule's refusal names the directory at fault and is not a damaged store; the newer-store text
+    // says where the restore steps are
+    const loose = new PathSecurityError(
+      "insecure_mode",
+      "/somewhere/datasets",
+      "dataset directory",
+    );
+    expect(storeOpenReason(loose)).toBe("insecure_path");
+    expect(errorText(loose)).toBe(
+      "PathSecurityError: dataset directory: group/other permission bits are set (directories must be 0700, files 0600); run `eff doctor --fix`",
+    );
+    expect(errorText(loose)).not.toContain("/somewhere");
+    expect(newerStoreMessage(7, 5)).toContain("(`eff doctor` lists the steps)");
+    expect(errorText(new StoreVersionError(7, 5))).toBe(
+      `StoreVersionError: ${newerStoreMessage(7, 5)}`,
+    );
   });
   it("openExistingStore: missing, and a file that is not a database", async () => {
     sb = sandbox({ create: true });
