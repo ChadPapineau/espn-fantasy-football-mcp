@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SetupNetwork } from "../../src/auth/setup.js";
 import type { KeychainSelftestResult } from "../../src/auth/selftest.js";
 import { main } from "../../src/cli/main.js";
-import { TYPED_AHEAD_NOTE } from "../../src/cli/prompt.js";
+import { DISCARDED_NOTE, TYPED_AHEAD_NOTE } from "../../src/cli/prompt.js";
 import { checkSetupFlags, configPatchOf, fixedAnswers, setup } from "../../src/cli/setup.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
@@ -439,6 +439,36 @@ describe("setup on a terminal (the real prompt): espn_s2 is never drawn", () => 
     expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
     // typed before the process took the terminal: the terminal driver may have shown it — said
     expect(io.out.text).toContain(TYPED_AHEAD_NOTE);
+    expect(stdin.rawCalls).toEqual([true, false]);
+  });
+  // the variant the first fix left open: the SWID refused (no braces) and espn_s2 in the same paste
+  // with no line break after it — espn_s2 waited, undrawn, in the line the re-asked SWID question
+  // then edited, and Backspace, Ctrl-L, Ctrl-W, Ctrl-_ (undo) or Ctrl-Y (yank) drew it
+  it("a refused SWID pasted with espn_s2 and no final line break: dropped unshown, never drawn by an edit key, pasted again", async () => {
+    sb = sandbox();
+    const stdin = new FakeTty();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, stdin });
+    const asks = (): number => io.out.text.split("SWID (visible").length - 1;
+    const run = setup(io, opts, { network: network(), selftest: selftest("ok") });
+    for (let i = 0; i < 200 && asks() < 1; i++) await new Promise((r) => setTimeout(r, 5));
+    stdin.write(`${COOKIES.swid.slice(1, -1)}\r${COOKIES.espn_s2}`);
+    for (let i = 0; i < 200 && asks() < 2; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(io.out.text).toContain("SWID must keep its braces");
+    // every edit key that redraws, restores or yanks the line
+    stdin.write("\x7f\x0c\x17\x1f\x1e\x19\x01\x0b\x1b[3~\x1b[D");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
+    // the unfinished line was dropped, and the owner told to paste espn_s2 again
+    expect(io.out.text).toContain(DISCARDED_NOTE);
+    stdin.write(`\x15${COOKIES.swid}\r`);
+    for (let i = 0; i < 200 && !io.out.text.includes("espn_s2 (hidden"); i++)
+      await new Promise((r) => setTimeout(r, 5));
+    stdin.write(`${COOKIES.espn_s2}\r`);
+    expect(await run).toBe(0);
+    // taken whole at its own question, never joined to the dropped copy
+    expect(io.out.text).toContain(`espn_s2 ok (${String(COOKIES.espn_s2.length)} chars)`);
+    expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
+    expect(io.out.text).not.toContain(TYPED_AHEAD_NOTE);
     expect(stdin.rawCalls).toEqual([true, false]);
   });
   it("--page and --reset never take the terminal (Ctrl-C keeps its meaning there)", async () => {
