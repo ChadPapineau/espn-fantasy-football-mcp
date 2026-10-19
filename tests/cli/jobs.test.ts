@@ -50,6 +50,7 @@ import {
   snapshotProjections,
   snapshotRoster,
   transactionsAppend,
+  transactionsDue,
 } from "../../src/cli/snapshot.js";
 import { openStore } from "../../src/cli/store-access.js";
 import { composeBodies } from "../../src/providers/espn/index.js";
@@ -285,6 +286,54 @@ describe("pure helpers", () => {
     });
     expect(preKickoffFindings(roster, slots, null, 5).bye_starters).toBe(0);
   });
+  // Stage C finding prekickoff-counts-locked-starters: the check is of what can still change
+  it("pre-kickoff leaves out locked starters: ESPN's flag, or a per-game lock whose kickoff passed", () => {
+    sb = sandbox();
+    const entry = (id: number, team: number, injury: string, locked: boolean) => ({
+      slot_class: "starter",
+      slot_id: 2,
+      lineup_locked: locked,
+      player: {
+        ref: { id },
+        eligible_slot_ids: [2],
+        injury_status: injury,
+        position: "RB",
+        pro_team_id: team,
+      },
+    });
+    // the Thursday RB played, got hurt and is now OUT: his slot is locked; the other is fine
+    const roster = {
+      entries: [entry(1, 2, "OUT", true), entry(2, 1, "ACTIVE", false)],
+    } as unknown as Roster;
+    const perGame = {
+      lineup_lock_type: "INDIVIDUAL_GAME",
+      slots: [{ slot_id: 2, name: "RB", class: "starter", count: 2, eligible_positions: [] }],
+    } as unknown as RosterSlots;
+    const f = preKickoffFindings(roster, perGame, null, 5);
+    expect(f.out_starters).toBe(0);
+    expect(preKickoffText(f, [])).toBeNull();
+    // a DOUBTFUL starter already locked is not actionable either
+    const doubtful = {
+      entries: [entry(1, 2, "DOUBTFUL", true), entry(2, 1, "ACTIVE", false)],
+    } as unknown as Roster;
+    expect(preKickoffFindings(doubtful, perGame, null, 5).doubtful_starters).toBe(0);
+    // a snapshot older than the lock (flag still false): the per-game kickoff decides, given now
+    const stale = {
+      entries: [entry(1, 2, "OUT", false), entry(2, 1, "ACTIVE", false)],
+    } as unknown as Roster;
+    const thursday = sched([
+      { ...game(5, "2026-10-09T00:15:00Z"), home_pro_team_id: 2, away_pro_team_id: 3 },
+      { ...game(5, "2026-10-11T17:00:00Z"), home_pro_team_id: 1, away_pro_team_id: 4 },
+    ]);
+    const sunday = Date.parse("2026-10-11T16:00:00Z");
+    expect(preKickoffFindings(stale, perGame, thursday, 5, sunday).out_starters).toBe(0);
+    // before his Thursday kickoff he still counts
+    const wednesday = Date.parse("2026-10-07T16:00:00Z");
+    expect(preKickoffFindings(stale, perGame, thursday, 5, wednesday).out_starters).toBe(1);
+    // an unverified lock rule never silences a starter on the schedule alone
+    const unknownRule = { ...perGame, lineup_lock_type: null } as unknown as RosterSlots;
+    expect(preKickoffFindings(stale, unknownRule, thursday, 5, sunday).out_starters).toBe(1);
+  });
   it("credential texts and verdict lines", () => {
     sb = sandbox();
     expect(hhmm(null)).toBe("the next scheduled check");
@@ -425,6 +474,26 @@ describe("the credential gate and the job lock", () => {
       0,
     );
     expect(t.io.out.text).toContain("not 30 min after a pool run");
+  });
+  // Stage C finding jobs-transactions-wake-no-grace
+  it("eff transactions: the :30 wake works after a :00 pool run that read its clock later than it", () => {
+    sb = sandbox();
+    // the pool's working run woke at :00 and read `now` 1.2 s later (beside the other :00 jobs)
+    const poolAt = Date.parse("2026-10-14T11:00:01.200Z");
+    const state = { "pool.worked_at": poolAt, "pool.worked": poolAt };
+    // the :30 wake read its `now` 0.4 s after its minute: 29 min 59.2 s after the pool's — it IS
+    // the run 30 min after the pool's working run
+    expect(transactionsDue(Date.parse("2026-10-14T11:30:00.400Z"), state)).toBe(true);
+    expect(transactionsDue(Date.parse("2026-10-14T12:30:00.400Z"), state)).toBe(true);
+    // a wake well before that is not; nor one after this pool run was worked; nor with no pool run
+    expect(transactionsDue(Date.parse("2026-10-14T11:20:00.000Z"), state)).toBe(false);
+    expect(
+      transactionsDue(Date.parse("2026-10-14T11:30:00.400Z"), {
+        ...state,
+        "transactions.after": poolAt,
+      }),
+    ).toBe(false);
+    expect(transactionsDue(Date.parse("2026-10-14T11:30:00.400Z"), {})).toBe(false);
   });
 });
 

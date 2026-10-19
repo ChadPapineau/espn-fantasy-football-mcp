@@ -12,6 +12,7 @@ import {
   auditIr,
   emptyStartingSlots,
   isOnBye,
+  lockPlan,
   nextWaiverRun,
   seatsOf,
 } from "../domain/league/index.js";
@@ -41,6 +42,7 @@ import {
   proScheduleOf,
   startJob,
   weekFirstKickoff,
+  WAKE_GRACE_MS,
   type JobRun,
 } from "./espn-jobs.js";
 import { effCodeOf } from "./espn-stack.js";
@@ -52,6 +54,7 @@ import {
   stateNumber,
   stateToken,
   updateJobState,
+  type JobState,
 } from "./job-state.js";
 import type { Logger } from "./log.js";
 import { parseSeasons } from "./refresh.js";
@@ -501,6 +504,22 @@ export async function snapshotProjections(
   }
 }
 
+/**
+ * Whether `eff transactions` works at `nowMs`: the wake 30 min after the pool's working run (plan 06
+ * §1.4), once per pool run, launch latency included — both instants are read after node start, the
+ * store open and the lock, and the pool's :00 run starts beside the other :00 jobs, so its `now` can
+ * trail its minute by more than the :30 wake's does (the `isWorkingRun` grace; Stage C finding
+ * jobs-transactions-wake-no-grace: that wake read 29 min 59 s and the work slipped an hour).
+ */
+export function transactionsDue(nowMs: number, state: JobState): boolean {
+  const poolAt = stateNumber(state, "pool.worked_at");
+  return (
+    poolAt !== null &&
+    nowMs >= poolAt + TRANSACTIONS_AFTER_POOL_MS - WAKE_GRACE_MS &&
+    stateNumber(state, "transactions.after") !== poolAt
+  );
+}
+
 /** `eff transactions` — append unseen transactions after the pool's working run (plan 06 §1.4). */
 export async function transactionsAppend(
   io: CliIo,
@@ -515,9 +534,7 @@ export async function transactionsAppend(
     const now = io.clock.nowMs();
     const state = readJobState(config.cacheDir);
     const poolAt = stateNumber(state, "pool.worked_at");
-    const done = stateNumber(state, "transactions.after");
-    const due = poolAt !== null && now >= poolAt + TRANSACTIONS_AFTER_POOL_MS && done !== poolAt;
-    if (!due && !opts.force) {
+    if (!transactionsDue(now, state) && !opts.force) {
       jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: not 30 min after a pool run — nothing to do`);
       return EXIT.ok;
@@ -669,15 +686,43 @@ export interface PreKickoffFindings {
   readonly bye_starters: number;
 }
 
-/** Judges a roster for the pre-kickoff check (plan 06 §1.4). */
+/**
+ * Judges a roster for the pre-kickoff check (plan 06 §1.4: the check before the day's first kickoff —
+ * of what the owner can still change). A starter whose slot is locked is left out (Stage C finding
+ * prekickoff-counts-locked-starters: a Thursday starter hurt in his game alarmed "starter OUT" on
+ * Sunday and Monday): locked by ESPN's flag in the snapshot, or — given `nowMs` and the league's
+ * verified per-game lock rule — by his game's kickoff having passed (a snapshot older than the lock).
+ * An unverified lock rule never silences a starter on the schedule alone.
+ */
 export function preKickoffFindings(
   roster: Roster,
   slots: RosterSlots,
   schedule: ProSchedule | null,
   week: number,
+  nowMs: number | null = null,
 ): PreKickoffFindings {
+  const plan =
+    schedule === null || nowMs === null
+      ? null
+      : lockPlan(
+          roster.entries.map((e) => ({
+            player_id: e.player.ref.id,
+            pro_team_id: e.player.pro_team_id,
+            lineup_locked: e.lineup_locked,
+          })),
+          schedule,
+          week,
+          slots.lineup_lock_type,
+          nowMs,
+        );
+  const lockedBySchedule = new Set(
+    plan !== null && plan.rule === "per_game" && plan.rule_verified ? plan.locked_player_ids : [],
+  );
   const starters = roster.entries.filter(
-    (e) => e.slot_class === "starter" || e.slot_class === "flex",
+    (e) =>
+      (e.slot_class === "starter" || e.slot_class === "flex") &&
+      !e.lineup_locked &&
+      !lockedBySchedule.has(e.player.ref.id),
   );
   return {
     empty_slots: emptyStartingSlots(seatsOf(roster), slots),
@@ -744,7 +789,7 @@ export async function preKickoff(
       return EXIT.ok;
     }
     const slots = (await run.stack.provider.getRosterSlots(run.stack.ref)).value;
-    const f = preKickoffFindings(latest.roster, slots, schedule, latest.week);
+    const f = preKickoffFindings(latest.roster, slots, schedule, latest.week, now);
     const stale: string[] = [];
     for (const [source, maxH] of [
       ["nflverse:injuries", 36],
