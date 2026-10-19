@@ -17,6 +17,7 @@ import {
 } from "../../src/cli/espn-http.js";
 import {
   alarmText,
+  driftAlarmKey,
   hostProbe,
   probe,
   probeRunExit,
@@ -26,6 +27,7 @@ import {
   worstStatus,
   type ProbeCheck,
 } from "../../src/cli/probe.js";
+import { readJobState, updateJobState } from "../../src/cli/job-state.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
 import type { CookieHeader } from "../../src/auth/types.js";
@@ -379,6 +381,97 @@ describe("eff probe", () => {
     expect(await probe(again, config, log, { hostOnly: true, notify: true, json: false })).toBe(4);
     expect(calls).toHaveLength(1);
     expect(again.out.text).toContain("shape  skipped");
+  });
+  // Stage C finding probe-drift-alarm-stamp-sticks: the stamp outlived its episode
+  it("a new red episode after an in-call recovery alarms again (the stamp names the episode)", async () => {
+    sb = sandbox();
+    let body: unknown = { settings: { name: "renamed" }, teams: [] };
+    const f = fakeFetch(() => json(body));
+    const { exec, calls } = fakeExec();
+    const at = (iso: string) =>
+      makeIo(sb, { fetch: f.fetch, clock: movingClock(iso), platform: "darwin", exec });
+    const day1 = at("2026-10-06T09:00:00.000Z");
+    const { config, log } = await loadLenientRuntime(day1);
+    const probeAt = (io: ReturnType<typeof at>, notify = true) =>
+      probe(io, config, log, { hostOnly: true, notify, json: false });
+    // day 1: the launchd probe finds red and alarms once
+    expect(await probeAt(day1)).toBe(4);
+    expect(calls).toHaveLength(1);
+    expect(readJobState(config.cacheDir)["alarm.drift"]).toBeDefined();
+    // later that day an in-call answer verifies the view: drift_state recovers between probes
+    const noon = at("2026-10-06T15:00:00.000Z");
+    let store = openStore(config, noon.clock, log, { migrate: true });
+    try {
+      new DriftStateWriter(store.repos.driftState, noon.clock, config.espnReadHost).recovered([
+        "proTeamSchedules_wl",
+      ]);
+      expect(store.repos.driftState.get()?.status).toBe("green");
+    } finally {
+      store.close();
+    }
+    // day 2: green, so the episode's stamp is gone
+    body = HOST_BODY;
+    expect(await probeAt(at("2026-10-07T09:00:00.000Z"))).toBe(0);
+    expect(readJobState(config.cacheDir)["alarm.drift"]).toBeUndefined();
+    // day 9: a NEW drift episode alarms again
+    body = { settings: { name: "renamed" }, teams: [] };
+    expect(await probeAt(at("2026-10-14T09:00:00.000Z"))).toBe(4);
+    expect(calls).toHaveLength(2);
+    // a recovery AND a new in-call red between two probes, no green probe in between: still a new
+    // episode (a new `since`), so it alarms
+    const later = at("2026-10-15T15:00:00.000Z");
+    store = openStore(config, later.clock, log, { migrate: true });
+    try {
+      const w = new DriftStateWriter(store.repos.driftState, later.clock, config.espnReadHost);
+      w.recovered(["proTeamSchedules_wl"]);
+      w.record([
+        { kind: "skeleton", view: "proTeamSchedules_wl", path: "$.settings.proTeams", value: null },
+      ]);
+    } finally {
+      store.close();
+    }
+    expect(await probeAt(at("2026-10-16T09:00:00.000Z"))).toBe(4);
+    expect(calls).toHaveLength(3);
+    // the same episode the next day: no repeat
+    expect(await probeAt(at("2026-10-17T09:00:00.000Z"))).toBe(4);
+    expect(calls).toHaveLength(3);
+  });
+  it("a probe without --notify never stamps the alarm: the launchd probe still notifies that episode", async () => {
+    sb = sandbox();
+    const f = fakeFetch(() => json({ settings: { name: "renamed" }, teams: [] }));
+    const { exec, calls } = fakeExec();
+    const io = makeIo(sb, { fetch: f.fetch, clock: movingClock(), platform: "darwin", exec });
+    const { config, log } = await loadLenientRuntime(io);
+    // the owner at a terminal sees red (the alarm line on stderr), no notification, no stamp
+    expect(await probe(io, config, log, { hostOnly: true, notify: false, json: false })).toBe(4);
+    expect(io.err.text).toContain("ESPN drift: proTeamSchedules_wl");
+    expect(calls).toHaveLength(0);
+    expect(readJobState(config.cacheDir)["alarm.drift"]).toBeUndefined();
+    // the scheduled run notifies the episode once
+    const job = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock("2026-10-07T18:00:00.000Z"),
+      platform: "darwin",
+      exec,
+    });
+    expect(await probe(job, config, log, { hostOnly: true, notify: true, json: false })).toBe(4);
+    expect(calls).toHaveLength(1);
+    // a notification osascript could not show is not stamped: the next run tries again
+    const failing = fakeExec(() => ({ code: 1 }));
+    const retry = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock("2026-10-08T18:00:00.000Z"),
+      platform: "darwin",
+      exec: failing.exec,
+    });
+    updateJobState(config.cacheDir, { "alarm.drift": null });
+    expect(await probe(retry, config, log, { hostOnly: true, notify: true, json: false })).toBe(4);
+    expect(failing.calls).toHaveLength(1);
+    expect(readJobState(config.cacheDir)["alarm.drift"]).toBeUndefined();
+    expect(driftAlarmKey("red", null)).toBe("red");
+    expect(driftAlarmKey("host_moved", "2026-10-06T09:00:00.000Z")).toBe(
+      "host_moved:2026-10-06T09:00:00.000Z",
+    );
   });
   it("a green run ends an in-call red row and records the manifest; a newer manifest re-baselines and says so (drift-red-never-clears)", async () => {
     sb = sandbox();

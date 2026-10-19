@@ -259,8 +259,23 @@ export function probeErrorToken(c: ProbeCheck): string {
 /** What one recorded probe run left in drift_state. */
 export interface RecordedProbe {
   readonly status: DriftStatus;
+  /** When the row's bad episode began (`DriftStateRow.since`; null on a good row). */
+  readonly since: string | null;
   /** A newer manifest discarded the diff computed against the old one (plan 03 §7: say so). */
   readonly rebaselined: boolean;
+}
+
+/**
+ * The `alarm.drift` stamp of a bad drift_state state: its status and the instant its episode began
+ * (fixed vocabulary + an ISO instant — job-state's token alphabet). The drift alarm fires once per
+ * state change (plan 06 §1.2, §2): a stamp that names the EPISODE — not just `red` — can never match a
+ * later episode, so the alarm fires again even when no probe saw the good state in between (an
+ * in-call answer recovers drift_state too: Stage C finding probe-drift-alarm-stamp-sticks).
+ */
+export function driftAlarmKey(status: DriftStatus, since: string | null): string {
+  return (since === null ? status : `${status}:${since}`)
+    .replace(/[^A-Za-z0-9_.:-]/g, "_")
+    .slice(0, 64);
 }
 
 /**
@@ -292,7 +307,7 @@ export function recordProbe(
     store.repos.probeLog.record(row);
   }
   const out = new DriftStateWriter(store.repos.driftState, clock, host).probed(checks, manifest);
-  return { status: out.row.status, rebaselined: out.rebaselined };
+  return { status: out.row.status, since: out.row.since, rebaselined: out.rebaselined };
 }
 
 /** Options of `eff probe`. */
@@ -349,7 +364,6 @@ export async function probe(
       // the launchd job runs `probe --notify`; a run without it is someone at a terminal
       origin: opts.notify ? "job" : "server",
     };
-    const before = store.repos.driftState.get()?.status ?? "green";
     const checks: ProbeCheck[] = [await hostProbe(deps, config.season)];
     const league = config.probeLeagueId ?? config.leagueId;
     if (opts.hostOnly || league === null)
@@ -379,16 +393,20 @@ export async function probe(
       rebaselined: recorded.rebaselined,
     });
 
+    // the drift alarm: once per bad episode, by the run that notifies (the launchd `probe --notify`).
+    // A run without --notify (someone at a terminal, who sees the alarm line below) never stamps it,
+    // so the scheduled probe still notifies that episode; a notification osascript could not show
+    // is not stamped either (the next probe tries again). A good stored state ends the episode.
     const bad = stored === "red" || stored === "host_moved";
-    const state = readJobState(config.cacheDir);
-    const alarmed = stateToken(state, "alarm.drift");
-    if (bad && alarmed !== stored) {
-      const text = alarmText(checks) ?? `ESPN drift: ${stored} — run \`eff status\``;
-      if (opts.notify) await notifier.alarm(text);
-      updateJobState(config.cacheDir, { "alarm.drift": stored });
-    } else if (!bad && alarmed !== null && before !== stored) {
-      updateJobState(config.cacheDir, { "alarm.drift": null });
-    }
+    const alarmed = stateToken(readJobState(config.cacheDir), "alarm.drift");
+    if (bad) {
+      const key = driftAlarmKey(stored, recorded.since);
+      if (opts.notify && alarmed !== key) {
+        const text = alarmText(checks) ?? `ESPN drift: ${stored} — run \`eff status\``;
+        if ((await notifier.alarm(text)) !== "failed")
+          updateJobState(config.cacheDir, { "alarm.drift": key });
+      }
+    } else if (alarmed !== null) updateJobState(config.cacheDir, { "alarm.drift": null });
     if (opts.notify && (status === "unreachable" || status === "config"))
       await notifier.failure("probe", status);
 
