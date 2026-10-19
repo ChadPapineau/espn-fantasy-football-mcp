@@ -85,9 +85,30 @@ describe("partsAbout (Stage C evidence-item-claims-misattributed)", () => {
     expect(about("Quist is out. Ostrander starts.")).toBe("Ostrander starts.");
   });
 
+  it("another player named by his first name only still counts (not a shared or a word-like one)", () => {
+    expect(about("Ostrander starts in place of Dorian, who is out")).toBeNull();
+    expect(about("Ostrander starts in place of Dorian")).toBeNull();
+    // the subject's own first name, shared with the other player, names nobody else
+    const josh = keys("Josh Ostrander");
+    const jacobs = [keys("Josh Jacobs")];
+    expect(
+      partsAbout(t("Josh Ostrander (ankle) ruled out"), josh, jacobs)?.untrusted_text.value,
+    ).toBe("Josh Ostrander (ankle) ruled out");
+    // a first name that is an English word too is no key ("will" is in every other clause)
+    expect(nameKeysOf("Will Quist")?.given).toBeNull();
+    expect(
+      partsAbout(t("Ostrander will start"), him, [keys("Will Quist")])?.untrusted_text.value,
+    ).toBe("Ostrander will start");
+  });
+
   it("names are read as the matcher folds them: possessive, hyphen, spacing, suffix, case", () => {
     const jsn = keys("Jaxon Smith-Njigba");
-    expect(nameKeysOf("James Cook III")).toEqual({ surname: "cook", whole: "jamescook" });
+    expect(nameKeysOf("James Cook III")).toEqual({
+      surname: "cook",
+      whole: "jamescook",
+      given: "james",
+      tokens: ["james", "cook"],
+    });
     expect(
       partsAbout(t("SMITH NJIGBA OUT, Ostrander to start"), him, [jsn])?.untrusted_text.value,
     ).toBe("Ostrander to start");

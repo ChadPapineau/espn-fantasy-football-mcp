@@ -1150,7 +1150,66 @@ export interface NameKeys {
   readonly surname: string;
   /** Every token run together (`Smith Njigba` and `Smith-Njigba` both read `smithnjigba`). */
   readonly whole: string;
+  /**
+   * His first name when it can stand for him in text ("in place of Dorian, who is out"): two or more
+   * tokens, three or more letters, not an English word as well (Will, Mark, Chase …); null otherwise.
+   * Read only to see ANOTHER player named — never to name the subject.
+   */
+  readonly given: string | null;
+  /** Every folded token of his name. */
+  readonly tokens: readonly string[];
 }
+
+/** First names that are English words too: as a key they would see a player in ordinary prose. */
+const COMMON_WORD_NAMES: ReadonlySet<string> = new Set([
+  "will",
+  "mark",
+  "chase",
+  "miles",
+  "hunter",
+  "grant",
+  "frank",
+  "rich",
+  "bill",
+  "art",
+  "jack",
+  "ray",
+  "rob",
+  "sterling",
+  "august",
+  "earl",
+  "dale",
+  "guy",
+  "major",
+  "king",
+  "young",
+  "hope",
+  "faith",
+  "pat",
+  "sky",
+  "jet",
+  "cash",
+  "case",
+  "lane",
+  "dean",
+  "van",
+  "del",
+  "von",
+  "don",
+  "bo",
+  "jay",
+  "kenny",
+  "joe",
+  "max",
+  "rush",
+  "price",
+  "gage",
+  "page",
+  "sam",
+  "drew",
+  "wade",
+  "dee",
+]);
 
 /** A player's NameKeys, or null when his name does not fold (non-Latin, empty) or its surname is one letter. */
 export function nameKeysOf(name: string): NameKeys | null {
@@ -1158,7 +1217,12 @@ export function nameKeysOf(name: string): NameKeys | null {
   const tokens = m === null ? [] : m.split(" ").filter((t) => t.length > 0);
   const surname = tokens[tokens.length - 1];
   if (surname === undefined || surname.length < 2) return null;
-  return { surname, whole: tokens.join("") };
+  const first = tokens[0];
+  const given =
+    tokens.length >= 2 && first !== undefined && first.length >= 3 && !COMMON_WORD_NAMES.has(first)
+      ? first
+      : null;
+  return { surname, whole: tokens.join(""), given, tokens };
 }
 
 /**
@@ -1216,9 +1280,14 @@ export function partsAbout(
   subject: NameKeys,
   others: readonly NameKeys[],
 ): UntrustedText | null {
+  // another player is seen by his surname or whole name, and by his first name too unless the
+  // subject shares it ("Josh Allen" names no "Josh Jacobs")
+  const namesOther = (words: ReadonlySet<string>, o: NameKeys): boolean =>
+    namesPlayer(words, o) ||
+    (o.given !== null && !subject.tokens.includes(o.given) && words.has(o.given));
   const alone = (piece: string): boolean => {
     const words = foldedWords(piece);
-    return namesPlayer(words, subject) && !others.some((o) => namesPlayer(words, o));
+    return namesPlayer(words, subject) && !others.some((o) => namesOther(words, o));
   };
   const kept: string[] = [];
   for (const raw of text.untrusted_text.value.split(CLAUSE_SPLIT)) {
