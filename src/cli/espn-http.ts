@@ -28,6 +28,11 @@ export interface EspnAnswer {
   readonly status: number;
   readonly body: Uint8Array;
   readonly headers: Readonly<Record<string, string>>;
+  /**
+   * ESPN's numeric `Retry-After` on a 429 / 5xx the client turned into an error (its body and
+   * headers are not kept then), so a caller that retries can honour it (plan 01 §6).
+   */
+  readonly retryAfterS?: number | null;
 }
 
 /** An unanswered request: a fixed-vocabulary code (never a message). */
@@ -139,7 +144,12 @@ export async function espnRequest(
       if (e.kind === "redirect_refused" || e.kind === "too_many_redirects")
         return { error: "host_moved" };
       if (e.status !== null && e.kind !== "timeout")
-        return { status: e.status, body: new Uint8Array(), headers: {} };
+        return {
+          status: e.status,
+          body: new Uint8Array(),
+          headers: {},
+          retryAfterS: e.retryAfterS,
+        };
       return { error: e.kind };
     }
     record("network_error");
@@ -153,10 +163,26 @@ export async function espnRequest(
  * non-2xx answer or a refusal becomes the HttpError the refresh runner classifies (404 → the season
  * is not published yet; 429/5xx → retried; a spent daily cap → RATE_LIMITED). A limiter that cannot
  * record the request sends nothing (INTERNAL).
+ *
+ * ESPN's `Retry-After` is honoured (plan 01 §6 "honour Retry-After if it ever appears"; Stage C
+ * finding cli-season-get-drops-retry-after: the hint was dropped, so `eff refresh espn:*` retried a
+ * 429 after ~0.6 s): the error carries it — the runner's retry waits at least that long, up to its
+ * own cap — and until the hinted instant no request of this run goes to that host at all: a call
+ * inside the window is refused here, nothing sent, `rate_limited` with the time left.
  */
 export function seasonGet(deps: EspnHttpDeps): HttpGet {
+  const notBefore = new Map<string, number>();
   return async (url, opts) => {
     const host = new URL(url).hostname;
+    const until = notBefore.get(host);
+    const now = deps.clock.nowMs();
+    if (until !== undefined && now < until)
+      throw new HttpError({
+        kind: "rate_limited",
+        host,
+        retryAfterS: Math.max(1, Math.ceil((until - now) / 1000)),
+        espn: true,
+      });
     const r = await espnRequest(deps, {
       url,
       cookie: null,
@@ -179,7 +205,9 @@ export function seasonGet(deps: EspnHttpDeps): HttpGet {
     }
     if (r.status < 200 || r.status > 299) {
       const kind = r.status === 429 ? "rate_limited" : r.status >= 500 ? "http_5xx" : "http_4xx";
-      throw new HttpError({ kind, host, status: r.status, espn: true });
+      const retryAfterS = kind === "http_4xx" ? null : (r.retryAfterS ?? null);
+      if (retryAfterS !== null) notBefore.set(host, deps.clock.nowMs() + retryAfterS * 1000);
+      throw new HttpError({ kind, host, status: r.status, retryAfterS, espn: true });
     }
     return { status: r.status, body: r.body, headers: r.headers, final_url: url };
   };

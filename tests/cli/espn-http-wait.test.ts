@@ -3,16 +3,29 @@
 // cli-limiter-boundary-retry-rate-limited): the wait holds the event loop (a child process with
 // nothing else alive still sends its request and exits 0 — an unreferenced timer ended it with exit
 // 13), a retry that wakes on the store's inclusive window boundary is waited for again instead of
-// being reported `rate_limited`, and the total wait stays within MAX_LIMITER_WAIT_MS. No network:
-// the http client is a stub; the limiter is the real store table (or a stub in the child).
+// being reported `rate_limited`, and the total wait stays within MAX_LIMITER_WAIT_MS; ESPN's
+// Retry-After on the keyless season GET reaches the refresh runner and no request goes inside the
+// hinted window (finding cli-season-get-drops-retry-after). No network: the http client is a stub
+// (or the real client over a stub fetch); the limiter is the real store table (or a stub).
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MAX_LIMITER_WAIT_MS, espnRequest, limiterSleep } from "../../src/cli/espn-http.js";
+import {
+  MAX_LIMITER_WAIT_MS,
+  espnRequest,
+  limiterSleep,
+  seasonGet,
+} from "../../src/cli/espn-http.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
-import { fixedClock } from "../../src/domain/clock.js";
-import type { HttpClient } from "../../src/http/client.js";
+import { fixedClock, seededRng } from "../../src/domain/clock.js";
+import { createHttpClient, type HttpClient } from "../../src/http/client.js";
+import { HttpError } from "../../src/http/errors.js";
+import { espnSeasonSources } from "../../src/sources/espn_season/index.js";
+import { runRefresh } from "../../src/sources/runner.js";
+import { MemoryLimiterRepo } from "../providers/espn/helpers.js";
 import { ROOT, makeIo, sandbox, type Sandbox } from "./helpers.js";
 
 let sb: Sandbox | undefined;
@@ -233,6 +246,96 @@ describe("the CLI's requests take their slot under the cross-process in-flight c
       expect(repo.countSince(new Date(t0 - 60_000).toISOString())).toBe(rows);
     } finally {
       store.close();
+    }
+  });
+});
+
+// Stage C finding cli-season-get-drops-retry-after: the CLI's keyless season GET dropped ESPN's
+// Retry-After, so `eff refresh espn:*` retried a 429 after ~0.6 s and ~0.04 s
+describe("Retry-After on the CLI's keyless season GET", () => {
+  const SEASON_URL = `${URL0}?view=proTeamSchedules_wl`;
+  /** ESPN answering 429 with `Retry-After: 60`; the clock moves only when someone sleeps. */
+  function world() {
+    let t = Date.parse("2026-10-06T12:00:00.000Z");
+    const clock = { nowMs: () => t, nowIso: () => new Date(t).toISOString() };
+    const sentAt: number[] = [];
+    const http = createHttpClient({
+      fetch: () => {
+        sentAt.push(t);
+        return Promise.resolve(
+          new Response("{}", {
+            status: 429,
+            headers: { "retry-after": "60", "content-type": "application/json" },
+          }),
+        );
+      },
+    });
+    const sleep = (ms: number): Promise<void> => {
+      t += ms;
+      return Promise.resolve();
+    };
+    const get = seasonGet({
+      http,
+      limiter: new MemoryLimiterRepo(),
+      clock,
+      origin: "server",
+      sleep,
+    });
+    return { get, sentAt, clock, sleep, advance: (ms: number) => (t += ms) };
+  }
+  const opts = () => ({ signal: new AbortController().signal, maxBytes: 1 << 20 });
+
+  it("the error carries the hint; inside the hinted window nothing is sent; after it a request goes", async () => {
+    const w = world();
+    const first = (await w.get(SEASON_URL, opts()).catch((e: unknown) => e)) as HttpError;
+    expect(first).toBeInstanceOf(HttpError);
+    expect([first.kind, first.status, first.retryAfterS]).toEqual(["rate_limited", 429, 60]);
+    w.advance(10_000);
+    const inside = (await w.get(SEASON_URL, opts()).catch((e: unknown) => e)) as HttpError;
+    expect([inside.kind, inside.retryAfterS]).toEqual(["rate_limited", 50]);
+    expect(w.sentAt).toHaveLength(1);
+    w.advance(50_000);
+    await w.get(SEASON_URL, opts()).catch(() => undefined);
+    expect(w.sentAt).toHaveLength(2);
+  });
+
+  it("through the refresh runner: it waits for the hint and no request lands inside the window", async () => {
+    const w = world();
+    const sleeps: number[] = [];
+    const tmp = mkdtempSync(path.join(tmpdir(), "eff-retry-after-"));
+    try {
+      const r = await runRefresh(
+        { source: espnSeasonSources().proSchedule, seasons: [2026], week: null },
+        {
+          http: w.get,
+          download: () => Promise.reject(new Error("no download")),
+          clock: w.clock,
+          rng: seededRng(7),
+          publisher: {} as never,
+          refreshLog: { record: () => undefined, current: () => [] },
+          proSchedule: {
+            games: () => ({ rows: [], stamp: null }),
+            teams: () => ({ rows: [], stamp: null }),
+          },
+          temp: {
+            create: () => Promise.resolve(mkdtempSync(path.join(tmp, "run-"))),
+            remove: () => Promise.resolve(),
+          },
+          sleep: (ms: number) => {
+            sleeps.push(ms);
+            return w.sleep(ms);
+          },
+        },
+      );
+      expect(r).toMatchObject({ status: "failed", source_error: "RATE_LIMITED" });
+      const t0 = w.sentAt[0] ?? Number.NaN;
+      // every request after the first waited out the 60 s ESPN asked for
+      for (const at of w.sentAt.slice(1)) expect(at - t0).toBeGreaterThanOrEqual(60_000);
+      // the runner waited the hint (capped at its 30 s maximum per retry), never ~0.6 s
+      expect(sleeps.length).toBeGreaterThan(0);
+      for (const ms of sleeps) expect(ms).toBeGreaterThanOrEqual(30_000);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
     }
   });
 });
