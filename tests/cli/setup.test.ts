@@ -1,5 +1,6 @@
 // setup.test.ts — `eff setup` wiring (plan 03 §2.1, §2.2; plan 02 §2; changelog V8): the hidden
-// prompt (piped input here — nothing is ever echoed), the file and keychain stores (an in-memory
+// prompt (piped input, and a fake terminal — espn_s2 never drawn, even pasted in one burst with the
+// SWID or typed ahead: Stage C finding setup-hidden-prompt-echo-burst), the file and keychain stores (an in-memory
 // keyring — never the real keychain), config.json records, the credential_state row, the
 // definitive check over an injected network, `--service-name eff-test-…` (no store.sqlite, no
 // config.json, no network), `--seeding`, `--reset`, `--page` end to end over loopback. Every line
@@ -8,6 +9,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { request } from "node:http";
 import { createServer } from "node:net";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SetupNetwork } from "../../src/auth/setup.js";
 import type { KeychainSelftestResult } from "../../src/auth/selftest.js";
@@ -389,6 +391,62 @@ function post(url: string, body: string, headers: Record<string, string>): Promi
     req.end(body);
   });
 }
+
+/** A stdin that says it is a terminal (readline echoes through stdout and sets raw mode on it). */
+class FakeTty extends PassThrough {
+  readonly isTTY = true;
+  readonly rawCalls: boolean[] = [];
+  setRawMode(mode: boolean): this {
+    this.rawCalls.push(mode);
+    return this;
+  }
+}
+
+// Stage C finding setup-hidden-prompt-echo-burst, end to end through the real prompt on a terminal
+describe("setup on a terminal (the real prompt): espn_s2 is never drawn", () => {
+  const opts = {
+    reset: false,
+    storage: "file",
+    seeding: undefined,
+    serviceName: undefined,
+    page: false,
+  } as const;
+  it("SWID and espn_s2 pasted in one burst at the SWID question: stored, never drawn", async () => {
+    sb = sandbox();
+    const stdin = new FakeTty();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, stdin });
+    const run = setup(io, opts, { network: network(), selftest: selftest("ok") });
+    for (let i = 0; i < 200 && !io.out.text.includes("SWID (visible"); i++)
+      await new Promise((r) => setTimeout(r, 5));
+    stdin.write(`${COOKIES.swid}\r${COOKIES.espn_s2}\r`);
+    expect(await run).toBe(0);
+    expect(io.out.text).toContain(`espn_s2 ok (${String(COOKIES.espn_s2.length)} chars)`);
+    expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
+    expect(stdin.rawCalls).toEqual([true, false]);
+  });
+  it("both values typed ahead before setup asks: the terminal is taken first, nothing drawn", async () => {
+    sb = sandbox();
+    const stdin = new FakeTty();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, stdin });
+    stdin.write(`${COOKIES.swid}\r${COOKIES.espn_s2}\r`);
+    const run = setup(io, opts, { network: network(), selftest: selftest("ok") });
+    // raw mode before the configuration is even read (the instructions come later)
+    expect(stdin.rawCalls).toEqual([true]);
+    expect(io.out.text).toBe("");
+    expect(await run).toBe(0);
+    expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
+    expect(stdin.rawCalls).toEqual([true, false]);
+  });
+  it("--page and --reset never take the terminal (Ctrl-C keeps its meaning there)", async () => {
+    sb = sandbox();
+    const stdin = new FakeTty();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, stdin });
+    expect(
+      await setup(io, { ...opts, storage: undefined, reset: true }, { network: network() }),
+    ).toBe(0);
+    expect(stdin.rawCalls).toEqual([]);
+  });
+});
 
 describe("setup --page (loopback)", () => {
   it("serves one form, accepts the first valid POST, prints the result in the terminal, frees the port", async () => {

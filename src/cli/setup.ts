@@ -161,22 +161,30 @@ export async function setup(
     return recordSeeding(io, opts.seeding as SeedingMode, log, config, over.factory);
   }
 
-  // test mode needs no league (it never asks ESPN); every other run does
-  let config: Config | LenientConfig;
-  let log: Logger;
-  try {
-    ({ config, log } = testMode ? await loadLenientRuntime(io) : await loadRuntime(io));
-  } catch (e) {
-    if (e instanceof ConfigError) return EXIT.usage;
-    throw e;
-  }
-
-  const out = (line: string): void => {
-    io.stdout.write(`${line}\n`);
-  };
+  // the terminal flow asks for both values: it takes the terminal before anything else, so keys
+  // typed while setup starts are read muted, never echoed (prompt.ts). `--page` takes its values
+  // from the page (Ctrl-C keeps stopping it) and `--reset` asks nothing: neither takes it.
+  const prompt =
+    over.prompt ??
+    createTerminalPrompt({
+      stdin: io.stdin,
+      out: io.stdout,
+      takeTerminalNow: !opts.page && !opts.reset,
+    });
   let store: Store | null = null;
-  const prompt = over.prompt ?? createTerminalPrompt({ stdin: io.stdin, out: io.stdout });
   try {
+    // test mode needs no league (it never asks ESPN); every other run does
+    let config: Config | LenientConfig;
+    let log: Logger;
+    try {
+      ({ config, log } = testMode ? await loadLenientRuntime(io) : await loadRuntime(io));
+    } catch (e) {
+      if (e instanceof ConfigError) return EXIT.usage;
+      throw e;
+    }
+    const out = (line: string): void => {
+      io.stdout.write(`${line}\n`);
+    };
     if (!testMode) {
       try {
         store = openStore(config, io.clock, log, {
