@@ -1,17 +1,33 @@
 // dispatch.test.ts — every `eff` subcommand reached through `main` (plan 03 §1.1 step 1; plan 06 J2):
 // each one parses its flags, loads the configuration it needs (strict or lenient) and returns an
 // exit code without a network call or a real keychain access; and the crosswalk rebuild's done path
-// with the unmatched-player alert (plan 06 §1.3: threshold 1, counts only in the notification).
+// with the unmatched-player alert (plan 06 §1.3: threshold 1, counts only in the notification; the
+// rebuild lists the alerted ids and why, and names how an override is really made — Stage C finding
+// crosswalk-alert-remediation-dead).
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { runCrosswalkRebuild } from "../../src/cli/crosswalk.js";
+import {
+  OVERRIDE_HOWTO,
+  alertReason,
+  diagnosticsLine,
+  runCrosswalkRebuild,
+} from "../../src/cli/crosswalk.js";
 import { main } from "../../src/cli/main.js";
 import { createNotifier } from "../../src/cli/notify.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import type { Store } from "../../src/store/types.js";
 import { openStore } from "../../src/cli/store-access.js";
 import { stateRow } from "../auth/helpers.js";
-import { fakeExec, fakePackage, makeIo, noNetwork, sandbox, type Sandbox } from "./helpers.js";
+import {
+  ROOT,
+  fakeExec,
+  fakePackage,
+  makeIo,
+  noNetwork,
+  sandbox,
+  type Sandbox,
+} from "./helpers.js";
 
 let sb: Sandbox;
 afterEach(() => {
@@ -85,6 +101,59 @@ describe("main reaches every subcommand", () => {
 });
 
 describe("crosswalk rebuild — done path and the alert", () => {
+  it("the override advice names what the runtime reads; reasons and diagnostics carry ids and codes only", () => {
+    sb = sandbox();
+    // the runtime reads the compiled CHECKED_IN_OVERRIDES (the package ships no data/): the advice
+    // names it beside the JSON file a test holds it equal to — both exist in a checkout
+    expect(OVERRIDE_HOWTO).toContain("data/crosswalk/overrides.json");
+    expect(OVERRIDE_HOWTO).toContain("CHECKED_IN_OVERRIDES in src/domain/crosswalk/overrides.ts");
+    expect(existsSync(path.join(ROOT, "data", "crosswalk", "overrides.json"))).toBe(true);
+    expect(
+      readFileSync(path.join(ROOT, "src", "domain", "crosswalk", "overrides.ts"), "utf8"),
+    ).toContain("export const CHECKED_IN_OVERRIDES");
+    const pair = {
+      espn_id: 1,
+      gsis_id: "00-0012345",
+      method: "match" as const,
+      source: "matcher" as never,
+      confidence: 0.8,
+      first_seen: "t",
+      last_seen: "t",
+    };
+    expect(alertReason({ status: "matched", pair, evidence: [], changed: false })).toBe(
+      "paired by match only (confidence 0.8) with 00-0012345",
+    );
+    const cand = (g: string) =>
+      ({
+        gsis_id: g,
+        team: "ATL",
+        position: "RB",
+        jersey_number: 1,
+        evidence: [],
+        score: 1,
+      }) as never;
+    expect(
+      alertReason({
+        status: "ambiguous",
+        candidates: [
+          cand("00-0000001"),
+          cand("00-0000002"),
+          cand("00-0000003"),
+          cand("00-0000004"),
+        ],
+      }),
+    ).toBe(
+      "ambiguous between 4 nflverse player(s) — candidates 00-0000001, 00-0000002, 00-0000003 (+1)",
+    );
+    expect(diagnosticsLine([])).toBeNull();
+    expect(
+      diagnosticsLine([
+        { code: "duplicate_gsis", espn_id: 5, gsis_ids: ["00-0000009"] },
+        { code: "duplicate_gsis", espn_id: 6, gsis_ids: ["00-0000009"] },
+        { code: "stale_override_pair", espn_id: null, gsis_ids: [] },
+      ]),
+    ).toBe("  diagnostics: duplicate_gsis ×2 (espn 5, espn 6); stale_override_pair ×1");
+  });
   it("pairs by roster_weekly espn_id, alerts once on an unmatched rostered player (counts only)", async () => {
     sb = sandbox();
     const stamp = {
@@ -182,6 +251,13 @@ describe("crosswalk rebuild — done path and the alert", () => {
     expect(r.lines.join("\n")).toMatch(/1 pair\(s\) written[\s\S]*lack a confident nflverse pair/);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args[1]).not.toContain("Nomatch");
+    // Stage C finding crosswalk-alert-remediation-dead: the alert lists WHICH ids and why (never a
+    // name), says how an override is really made, and the notification names this very command
+    expect(r.lines).toContain("    espn 9000002 (rostered): no nflverse pair (no_candidate)");
+    expect(r.lines.join("\n")).not.toContain("Nomatch");
+    expect(r.lines).toContain(`  ${OVERRIDE_HOWTO}`);
+    expect(calls[0]?.args[1]).toContain("run `eff crosswalk rebuild` for the list");
+    expect(calls[0]?.args[1]).not.toContain("eff status");
     const broken = {
       ...store,
       rosterWeekly: {

@@ -3,11 +3,19 @@
 // espn:players": crosswalk rows + the unmatched report; notification when any rostered or ≥ 1 %
 // owned ESPN player lacks a confidence-1.0 pair, threshold 1). launchd cannot chain jobs, so the
 // refresh that publishes either input runs the rebuild itself (decision recorded). The notification
-// carries counts only — never a player name (plan 06 §2).
+// carries counts only — never a player name (plan 06 §2). When the rebuild alerts, it lists each
+// alerted ESPN id with why it lacks a confidence-1.0 pair (ids, codes and numbers only — never a
+// name) and how an override is really made, and the notification points at this command (Stage C
+// finding crosswalk-alert-remediation-dead: the advice named a file the runtime never reads and an
+// `eff status` that has no crosswalk section).
 import type { Config, LenientConfig } from "../config/schema.js";
 import { CHECKED_IN_OVERRIDES } from "../domain/crosswalk/overrides.js";
 import { rebuildCrosswalk } from "../domain/crosswalk/rebuild.js";
-import { statusCounts } from "../domain/crosswalk/resolver.js";
+import {
+  statusCounts,
+  type CrosswalkDiagnostic,
+  type CrosswalkResolution,
+} from "../domain/crosswalk/resolver.js";
 import type { Store } from "../store/types.js";
 import { EXIT } from "./exit.js";
 import type { CliIo } from "./io.js";
@@ -19,6 +27,59 @@ export interface CrosswalkOutcome {
   readonly code: number;
   readonly lines: readonly string[];
   readonly alert: boolean;
+}
+
+/** Most alerted players the rebuild lists (the rest are counted). */
+export const MAX_ALERT_LINES = 25;
+
+/**
+ * How an override is made (research 04 §C step 3): the runtime reads only the overrides compiled into
+ * the build (`CHECKED_IN_OVERRIDES`; the package ships `dist`, not `data/`), so an override is a code
+ * change in a checkout — the JSON file and its compiled copy together (a test holds them equal).
+ */
+export const OVERRIDE_HOWTO =
+  "an override is a code change in a checkout: add {espn_id, gsis_id} to data/crosswalk/overrides.json AND to CHECKED_IN_OVERRIDES in src/domain/crosswalk/overrides.ts (a test holds them equal), `npm run build`, then `eff crosswalk rebuild`";
+
+const GSIS_SHOWN = 3;
+
+/** Why one alerted ESPN player lacks a confidence-1.0 pair (ids, codes and numbers only). */
+export function alertReason(resolution: CrosswalkResolution): string {
+  const ids = (c: readonly { readonly gsis_id: string }[]): string =>
+    c.length === 0
+      ? ""
+      : ` — candidates ${c
+          .slice(0, GSIS_SHOWN)
+          .map((x) => x.gsis_id)
+          .join(", ")}${c.length > GSIS_SHOWN ? ` (+${String(c.length - GSIS_SHOWN)})` : ""}`;
+  switch (resolution.status) {
+    case "matched":
+      return `paired by ${resolution.pair.method} only (confidence ${String(resolution.pair.confidence)}) with ${resolution.pair.gsis_id}`;
+    case "ambiguous":
+      return `ambiguous between ${String(resolution.candidates.length)} nflverse player(s)${ids(resolution.candidates)}`;
+    case "unmatched":
+      return `no nflverse pair (${resolution.reason})${ids(resolution.candidates)}`;
+    case "team_unit":
+      return "a team unit (paired by its team)";
+  }
+}
+
+/** The diagnostics a rebuild noticed, by code, with the ESPN ids involved (none: no line). */
+export function diagnosticsLine(diagnostics: readonly CrosswalkDiagnostic[]): string | null {
+  if (diagnostics.length === 0) return null;
+  const byCode = new Map<string, number[]>();
+  for (const d of diagnostics) {
+    const ids = byCode.get(d.code) ?? [];
+    if (d.espn_id !== null && !ids.includes(d.espn_id)) ids.push(d.espn_id);
+    byCode.set(d.code, ids);
+  }
+  const parts = [...byCode.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([code, ids]) => {
+      const n = diagnostics.filter((d) => d.code === code).length;
+      const shown = ids.slice(0, 5).map((i) => `espn ${String(i)}`);
+      return `${code} ×${String(n)}${shown.length > 0 ? ` (${shown.join(", ")}${ids.length > 5 ? ", …" : ""})` : ""}`;
+    });
+  return `  diagnostics: ${parts.join("; ")}`;
 }
 
 /** ESPN ids on the user's team in its newest roster snapshot (the alert's "rostered" set). */
@@ -40,6 +101,7 @@ export async function runCrosswalkRebuild(
   log: Logger,
   notifier: Notifier | null,
 ): Promise<CrosswalkOutcome> {
+  const rostered = rosteredIds(store, config.teamId);
   let r;
   try {
     r = rebuildCrosswalk({
@@ -50,7 +112,7 @@ export async function runCrosswalkRebuild(
       repository: store.repos.crosswalk,
       overrides: CHECKED_IN_OVERRIDES,
       now: io.clock.nowIso(),
-      rostered: rosteredIds(store, config.teamId),
+      rostered,
     });
   } catch (e) {
     log.error("crosswalk.failed", { error: e });
@@ -70,12 +132,25 @@ export async function runCrosswalkRebuild(
   log.info("crosswalk.rebuilt", { written: r.written, ...c, alert: r.run.alert.count });
   if (r.run.alert.triggered) {
     lines.push(
-      `→ ${String(r.run.alert.count)} rostered or ≥ 1 %-owned ESPN player(s) lack a confident nflverse pair (add an override in data/crosswalk/overrides.json)`,
+      `→ ${String(r.run.alert.count)} rostered or ≥ 1 %-owned ESPN player(s) lack a confident nflverse pair:`,
     );
+    const byId = new Map(r.run.resolved.map((p) => [p.espn_id, p]));
+    for (const id of r.run.alert.espn_ids.slice(0, MAX_ALERT_LINES)) {
+      const p = byId.get(id);
+      const why = rostered.has(id) ? "rostered" : "≥ 1 % owned";
+      lines.push(
+        `    espn ${String(id)} (${why}): ${p === undefined ? "not in this run" : alertReason(p.resolution)}`,
+      );
+    }
+    if (r.run.alert.espn_ids.length > MAX_ALERT_LINES)
+      lines.push(`    … ${String(r.run.alert.espn_ids.length - MAX_ALERT_LINES)} more`);
+    lines.push(`  ${OVERRIDE_HOWTO}`);
     if (notifier !== null)
       await notifier.info(
-        `Crosswalk: ${String(r.run.alert.count)} rostered or top-owned ESPN player(s) lack a confident match — run \`eff status\``,
+        `Crosswalk: ${String(r.run.alert.count)} rostered or top-owned ESPN player(s) lack a confident match — run \`eff crosswalk rebuild\` for the list`,
       );
   }
+  const diag = diagnosticsLine(r.run.diagnostics);
+  if (diag !== null) lines.push(diag);
   return { code: EXIT.ok, lines, alert: r.run.alert.triggered };
 }
