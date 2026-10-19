@@ -83,8 +83,11 @@ export const USAGE = `usage: eff <command> [options]
   check-auth [--json]         one credential probe now (at most once a minute)
   refresh <target> [--seasons 2025,2026] [--force] [--notify] [--json] [--game-day-cadence]
                               targets: all | espn:schedule | espn:players | nflverse:schedules |
-                              nflverse:daily | nflverse:stats | weather | nflverse:<source>
-                              (--game-day-cadence: off a game day only the 00/06/12/18 h wakes run)
+                              nflverse:daily | nflverse:stats | weather | any source id \`eff status\`
+                              lists (espn:pro_schedule, weather:open_meteo, nflverse:<source>, …)
+                              (--seasons adds seasons: every file keeps its own; earlier seasons
+                              go to a source's _history file; --game-day-cadence: off a game day
+                              only the 00/06/12/18 h wakes run)
   probe [--host-only] [--notify] [--json]
                               the keyless ESPN drift probe (exit 4 on drift)
   snapshot roster|pool|projections [--pre-kickoff] [--notify]

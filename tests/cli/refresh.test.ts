@@ -2,6 +2,8 @@
 // sources plan through the default registry), seasons, the coming week,
 // result lines and JSON (fixed fields, terminal-safe warnings), fixture mode refused, a failed source
 // → exit 1 + one failure notification, and the crosswalk chain after a published daily source.
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_REGISTRY,
@@ -21,15 +23,30 @@ import {
   planTarget,
   refresh,
   resultJson,
+  seasonsFor,
+  targetUsageError,
   type SourceRegistry,
 } from "../../src/cli/refresh.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
+import { configuredSources } from "../../src/cli/status.js";
+import { openStore } from "../../src/cli/store-access.js";
 import { isDatasetSourceId } from "../../src/config/freshness.js";
+import { limiterRequest } from "../../src/providers/espn/limiter.js";
 import { NFLVERSE_SOURCES } from "../../src/sources/nflverse/index.js";
 import type { Store } from "../../src/store/types.js";
-import type { RefreshResult } from "../../src/sources/runner.js";
+import { seasonState, type RefreshResult } from "../../src/sources/runner.js";
 import type { DataSource } from "../../src/sources/source.js";
-import { fakeExec, makeIo, noNetwork, sandbox, type Sandbox } from "./helpers.js";
+import {
+  fakeExec,
+  fakeFetch,
+  json,
+  makeIo,
+  movingClock,
+  noNetwork,
+  ROOT,
+  sandbox,
+  type Sandbox,
+} from "./helpers.js";
 
 let sb: Sandbox;
 afterEach(() => {
@@ -271,6 +288,118 @@ describe("planning", () => {
     ])
       expect(() => parseSeasons(bad), bad).toThrow();
   });
+  // Stage C finding refresh-seasons-drops-current: a file is replaced whole, so --seasons only adds
+  it("seasonsFor: --seasons adds to a source's own seasons; earlier seasons of a twinned source go to its history file", () => {
+    sb = sandbox();
+    const id = (s: string) => ({ id: s as DataSource["id"] });
+    expect(seasonsFor(id("espn:pro_schedule"), 2026, null)).toEqual({
+      seasons: [2026],
+      forHistory: [],
+    });
+    expect(seasonsFor(id("espn:pro_schedule"), 2026, [2025])).toEqual({
+      seasons: [2025, 2026],
+      forHistory: [],
+    });
+    expect(seasonsFor(id("espn:players"), 2026, [2024, 2025]).seasons).toEqual([2024, 2025, 2026]);
+    expect(seasonsFor(id("nflverse:schedules"), 2026, [2020]).seasons).toEqual([
+      2020, 2024, 2025, 2026,
+    ]);
+    // a twinned current-season file keeps exactly its own seasons; the earlier ones are the twin's
+    expect(seasonsFor(id("nflverse:pbp"), 2026, [2023, 2024])).toEqual({
+      seasons: [2026],
+      forHistory: [2023, 2024],
+    });
+    expect(seasonsFor(id("nflverse:stats_player_week"), 2026, [2025])).toEqual({
+      seasons: [2025, 2026],
+      forHistory: [],
+    });
+    // a twin never takes the current season; it keeps its own two
+    expect(seasonsFor(id("nflverse:pbp_history"), 2026, [2023, 2026])).toEqual({
+      seasons: [2023, 2024, 2025],
+      forHistory: [],
+    });
+    // nothing is asked for a season after the current one
+    expect(seasonsFor(id("espn:pro_schedule"), 2026, [2027]).seasons).toEqual([2026]);
+  });
+  it("refresh espn:schedule / espn:players --seasons <previous season>: the current season stays loaded", async () => {
+    sb = sandbox();
+    const root = path.join(ROOT, "fixtures/espn/recorded/season");
+    const schedule = JSON.parse(
+      readFileSync(path.join(root, "proTeamSchedules_wl.json"), "utf8"),
+    ) as Record<string, unknown>;
+    const players = JSON.parse(readFileSync(path.join(root, "players_wl.json"), "utf8")) as unknown;
+    const f = fakeFetch((url) => {
+      if (/seasons\/\d{4}\/players/.test(url)) return json(players);
+      const m = /seasons\/(\d{4})/.exec(url);
+      return json({ ...schedule, seasonId: m === null ? null : Number(m[1]) });
+    });
+    // the season views are spaced 60 s apart within a run (politeness): every clock read moves
+    // past it, so no real wait happens
+    const clock = movingClock("2026-10-11T12:00:00.000Z", 61_000);
+    const io = makeIo(sb, { fetch: f.fetch, clock });
+    const { config, log } = await loadLenientRuntime(io);
+    const run = (target: string, seasons?: string) =>
+      refresh(
+        io,
+        config,
+        log,
+        {
+          target,
+          force: false,
+          notify: false,
+          json: true,
+          ...(seasons === undefined ? {} : { seasons }),
+        },
+        new AbortController().signal,
+      );
+    const peek = () => {
+      const st = openStore(config, io.clock, log, { migrate: true });
+      try {
+        st.reopenChangedDatasets();
+        return {
+          games2026: st.datasets.proSchedule.games(2026, null).rows.length,
+          games2025: st.datasets.proSchedule.games(2025, null).rows.length,
+          state: seasonState(st.datasets.proSchedule, 2026, io.clock.nowMs()),
+          players2026: st.playerUniverse.all(2026).rows.length,
+          players2025: st.playerUniverse.all(2025).rows.length,
+        };
+      } finally {
+        st.close();
+      }
+    };
+    expect(await run("espn:schedule")).toBe(0);
+    expect(await run("espn:players")).toBe(0);
+    const before = peek();
+    expect(before.games2026).toBeGreaterThan(0);
+    expect(before.players2026).toBeGreaterThan(0);
+    expect(before.state).toBe("in_season");
+    clock.advance(10 * 60_000);
+    expect(await run("espn:schedule", "2025")).toBe(0);
+    expect(await run("espn:players", "2025")).toBe(0);
+    const after = peek();
+    expect(after).toMatchObject({
+      games2026: before.games2026,
+      players2026: before.players2026,
+      state: "in_season",
+    });
+    expect(after.games2025).toBeGreaterThan(0);
+    expect(after.players2025).toBeGreaterThan(0);
+  });
+  it("a single twinned source with earlier --seasons says where they belong (its history file)", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { fetch: noNetwork });
+    const { config, log } = await loadLenientRuntime(io);
+    await refresh(
+      io,
+      config,
+      log,
+      { target: "nflverse:pbp", seasons: "2024", force: false, notify: false, json: false },
+      new AbortController().signal,
+    );
+    expect(io.out.text).toContain(
+      "note: season(s) 2024 belong to nflverse:pbp_history (the history file;",
+    );
+  });
   it("comingWeek: the week of the next confirmed kickoff; TBD and past games ignored", () => {
     sb = sandbox();
     const g = (week: number, kickoff: string | null, tbd = false) => ({
@@ -383,7 +512,58 @@ describe("refresh", () => {
         { target: "bogus", force: false, notify: false, json: false },
         new AbortController().signal,
       ),
-    ).rejects.toThrow(/refresh needs a target/);
+    ).rejects.toThrow(/refresh: unknown target 'bogus' — the targets are: all \| /);
+  });
+  // Stage C finding cli-refresh-source-id-not-target
+  it("every source id the product reports is a target; a missing, an unknown and an unconfigured one are told apart", async () => {
+    sb = sandbox();
+    for (const weatherSource of ["open-meteo", "nws"] as const) {
+      // the ids `eff status` lists, both toolsets
+      for (const id of configuredSources({ weatherSource, toolset: "full" }))
+        expect(isRefreshTarget(id), id).toBe(true);
+      // every source a job of this build runs (the history files included) — what a tool's
+      // freshness warning or the STALE_ONLY hint can name
+      for (const step of planTarget("all", { weatherSource }))
+        if (step.kind === "source")
+          expect(isRefreshTarget(step.source.id), step.source.id).toBe(true);
+    }
+    expect(
+      planTarget("espn:pro_schedule", { weatherSource: "open-meteo" }).map((s) =>
+        s.kind === "source" ? s.source.id : s.job,
+      ),
+    ).toEqual(["espn:pro_schedule"]);
+    expect(
+      planTarget("weather:open_meteo", { weatherSource: "open-meteo" }).map((s) =>
+        s.kind === "source" ? s.source.id : s.job,
+      ),
+    ).toEqual(["weather:open_meteo"]);
+    expect(
+      planTarget("nflverse:pbp_history", { weatherSource: "open-meteo" }).map((s) =>
+        s.kind === "source" ? s.source.id : s.job,
+      ),
+    ).toEqual(["nflverse:pbp_history"]);
+    expect(targetUsageError(undefined).message).toMatch(/^refresh needs a target: all \| /);
+    // a value that is not a plain token is never echoed
+    expect(targetUsageError("x\u001b[2Jy").message).toMatch(/^refresh: unknown target — /);
+    const io = makeIo(sb, { fetch: noNetwork });
+    const { config, log } = await loadLenientRuntime(io);
+    const go = (target: string) =>
+      refresh(
+        io,
+        config,
+        log,
+        { target, force: false, notify: false, json: true },
+        new AbortController().signal,
+      );
+    await expect(go("weather:nws")).rejects.toThrow(
+      /weather:nws is not the configured weather source \(EFF_WEATHER_SOURCE=open-meteo\)/,
+    );
+    // the id a stale warning names runs its source (offline here: a failure, not a usage error)
+    expect(await go("espn:pro_schedule")).toBe(1);
+    expect(JSON.parse(io.out.text)).toMatchObject({
+      target: "espn:pro_schedule",
+      results: [{ source: "espn:pro_schedule", status: "failed" }],
+    });
   });
   it("plan 10 B1: outside the season (no schedule loaded) each Phase-2 job exits 0 in < 2 s, no request", async () => {
     sb = sandbox();
@@ -427,7 +607,62 @@ describe("refresh", () => {
     });
   });
 
-  it("an ESPN season refresh goes through the limiter as a keyless job request; offline it fails with ESPN_UPSTREAM_UNAVAILABLE", async () => {
+  // Stage C finding cli-refresh-manual-charged-job-cap
+  it("a refresh at a terminal (no --notify) is a server request: it never spends the jobs' keyless cap", async () => {
+    sb = sandbox();
+    const body = JSON.parse(
+      readFileSync(
+        path.join(ROOT, "fixtures/espn/recorded/season/proTeamSchedules_wl.json"),
+        "utf8",
+      ),
+    ) as unknown;
+    const f = fakeFetch(() => json(body));
+    // a Sunday of the season (a game day: the schedule job's hourly runs need the allowance)
+    const clock = movingClock("2026-10-11T13:00:00.000Z", 3_000);
+    const io = makeIo(sb, { fetch: f.fetch, clock });
+    const { config, log } = await loadLenientRuntime(io);
+    const day = "2026-10-11T00:00:00.000Z";
+    let store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      // the fleet already spent 28 of its 30 keyless requests today
+      const start = Date.parse("2026-10-11T01:00:00.000Z");
+      for (let i = 0; i < 28; i++)
+        expect(
+          store.repos.limiter.tryRecord(limiterRequest(start + i * 5_000, true, "job")).ok,
+        ).toBe(true);
+    } finally {
+      store.close();
+    }
+    const run = (notify: boolean, gameDayCadence = false) =>
+      refresh(
+        io,
+        config,
+        log,
+        { target: "espn:schedule", force: true, notify, json: true, gameDayCadence },
+        new AbortController().signal,
+      );
+    // the owner refreshes by hand, three times
+    for (let i = 0; i < 3; i++) expect(await run(false)).toBe(0);
+    store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      expect(store.repos.limiter.countToday(day)).toEqual({
+        server: { cookie: 0, keyless: 3 },
+        job: { cookie: 0, keyless: 28 },
+      });
+    } finally {
+      store.close();
+    }
+    // the launchd run an hour later (its plist's form) keeps its allowance and refreshes
+    clock.advance(3_600_000);
+    expect(await run(true, true)).toBe(0);
+    store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      expect(store.repos.limiter.countToday(day).job.keyless).toBe(29);
+    } finally {
+      store.close();
+    }
+  });
+  it("an ESPN season refresh goes through the limiter as a keyless request; offline it fails with ESPN_UPSTREAM_UNAVAILABLE", async () => {
     sb = sandbox();
     const io = makeIo(sb, { fetch: noNetwork });
     const { config, log } = await loadLenientRuntime(io);

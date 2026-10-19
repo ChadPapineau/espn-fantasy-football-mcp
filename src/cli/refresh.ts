@@ -94,8 +94,16 @@ export const REFRESH_JOBS_BUILT = [
   "weather",
 ] as const satisfies readonly RefreshJob[];
 
-/** The individual sources a target may name (each runs inside its own job). */
+/**
+ * The individual sources a target may name (each runs inside its own job): every dataset source id
+ * the product reports — `eff status` rows, the tools' freshness warnings, the STALE_ONLY hint "run
+ * eff refresh <source>" — is a target (Stage C finding cli-refresh-source-id-not-target: the two the
+ * owner sees most, `espn:pro_schedule` and `weather:open_meteo`, were refused). `espn:players` and
+ * `sleeper:trending` are job names too. A source this build has no fetcher for (odds — owner
+ * decision D13; the pfr / ftn files) is reported nowhere and is not a target.
+ */
 export const SOURCE_TARGETS = [
+  "espn:pro_schedule",
   "nflverse:schedules",
   "nflverse:injuries",
   "nflverse:roster_weekly",
@@ -109,6 +117,15 @@ export const SOURCE_TARGETS = [
   "news:rotowire",
   "news:espn",
   "news:cbs",
+  "weather:open_meteo",
+  "weather:nws",
+  "nflverse:stats_player_week_history",
+  "nflverse:stats_team_week_history",
+  "nflverse:pbp_history",
+  "nflverse:snap_counts_history",
+  "nflverse:injuries_history",
+  "nflverse:depth_charts_history",
+  "ffopportunity:ep_weekly_history",
 ] as const satisfies readonly DatasetSourceId[];
 /** Every `eff refresh` target. */
 export const REFRESH_TARGETS = ["all", ...REFRESH_JOBS_BUILT, ...SOURCE_TARGETS] as const;
@@ -117,6 +134,14 @@ export type RefreshTarget = (typeof REFRESH_TARGETS)[number];
 /** Whether `s` is a refresh target. */
 export function isRefreshTarget(s: string): s is RefreshTarget {
   return (REFRESH_TARGETS as readonly string[]).includes(s);
+}
+
+/** The usage error of a missing or unknown target (an unknown one is named only when it is a plain token). */
+export function targetUsageError(target: string | undefined): UsageError {
+  const list = REFRESH_TARGETS.join(" | ");
+  if (target === undefined) return new UsageError(`refresh needs a target: ${list}`);
+  const named = /^[a-z][a-z0-9_:-]{0,63}$/.test(target) ? ` '${target}'` : "";
+  return new UsageError(`refresh: unknown target${named} — the targets are: ${list}`);
 }
 
 /**
@@ -279,10 +304,45 @@ export function planTarget(
  * before it as well (the soft backtests' games); a history twin the two prior seasons only (the
  * current season is its current source's file — plan 10 §3.2 [A-3]).
  */
-export function defaultSeasons(source: DataSource, season: number): number[] {
+export function defaultSeasons(source: Pick<DataSource, "id">, season: number): number[] {
   if (isHistorySource(source)) return [season - 2, season - 1];
   if (source.id === "nflverse:schedules") return [season - 2, season - 1, season];
   return source.id === "nflverse:stats_player_week" ? [season - 1, season] : [season];
+}
+
+/** The seasons one source's run asks for, and the `--seasons` its history twin takes instead. */
+export interface SourceSeasons {
+  readonly seasons: number[];
+  /** Listed seasons before the current one that belong to the source's history file, not to it. */
+  readonly forHistory: number[];
+}
+
+/**
+ * The seasons one source's run asks for. A published file is replaced whole, so a source always
+ * keeps its own seasons (`defaultSeasons`) and `--seasons` only ADDS to them (Stage C finding
+ * refresh-seasons-drops-current: `eff refresh espn:schedule --seasons 2025` published a schedule
+ * without the current season's games, every season-gated job then went off-season, and `espn:players
+ * --seasons 2025` emptied the current season's player index). A season after the current one is never
+ * asked for (nothing is published for it). Where a current-season source has a history twin, the
+ * seasons before the current one are the twin's (plan 10 §3.2 [A-3]: two files — the current file
+ * keeps its own window, the twin holds the prior seasons), so the current file keeps exactly its own
+ * seasons; a twin never takes the current season. Every other source takes each listed season.
+ */
+export function seasonsFor(
+  source: Pick<DataSource, "id">,
+  season: number,
+  requested: readonly number[] | null,
+): SourceSeasons {
+  const own = defaultSeasons(source, season);
+  if (requested === null) return { seasons: own, forHistory: [] };
+  const history = isHistorySource(source);
+  if (!history && isDatasetSourceId(`${source.id}_history`))
+    return {
+      seasons: own,
+      forHistory: requested.filter((s) => s < season && !own.includes(s)),
+    };
+  const extra = requested.filter((s) => (history ? s < season : s <= season));
+  return { seasons: [...new Set([...own, ...extra])].sort((a, b) => a - b), forHistory: [] };
 }
 
 /**
@@ -499,8 +559,14 @@ export async function refresh(
   signal: AbortSignal,
 ): Promise<number> {
   const target = opts.target;
-  if (target === undefined || !isRefreshTarget(target))
-    throw new UsageError(`refresh needs a target: ${REFRESH_TARGETS.join(" | ")}`);
+  if (target === undefined || !isRefreshTarget(target)) throw targetUsageError(target);
+  // a weather source is a target only while it is the configured one (EFF_WEATHER_SOURCE): the
+  // weather job runs that source alone, and the server reads only its file
+  const weatherId = config.weatherSource === "nws" ? "weather:nws" : "weather:open_meteo";
+  if (target.startsWith("weather:") && target !== weatherId)
+    throw new UsageError(
+      `refresh: ${target} is not the configured weather source (EFF_WEATHER_SOURCE=${config.weatherSource}) — run \`eff refresh weather\``,
+    );
   if (config.fixtureDir !== null) {
     await writeLine(
       io.stderr,
@@ -576,17 +642,23 @@ export async function refresh(
     return EXIT.error;
   }
   const temp = fsTempArea(tmpDir);
-  // the keyless ESPN season views go through the cross-process limiter (the jobs' keyless cap,
-  // plan 06 §1.4): one row per request, its outcome recorded — like every other ESPN request
+  // the keyless ESPN season views go through the cross-process limiter: one row per request, its
+  // outcome recorded — like every other ESPN request. Whose request it is follows `--notify`, as for
+  // `eff probe`: every launchd refresh passes it (`job` — counted against the fleet's daily keyless
+  // cap, plan 06 §1.4 + changelog V7); a run without it is the owner at a terminal (`server` — the
+  // windows bind it, never the jobs' allowance: Stage C finding cli-refresh-manual-charged-job-cap)
   const espnGet = seasonGet({
     http,
     limiter: store.repos.limiter,
     clock: io.clock,
-    origin: "job",
+    origin: opts.notify ? "job" : "server",
   });
   const results: RefreshResult[] = [];
   const lines: string[] = [];
   const unavailable: RefreshJob[] = [];
+  const planned = new Set<string>(
+    steps.flatMap((s) => (s.kind === "source" ? [s.source.id as string] : [])),
+  );
   let chainCrosswalk = false;
   try {
     for (const step of steps) {
@@ -612,10 +684,11 @@ export async function refresh(
         step.source.job === "weather"
           ? comingWeek(store.datasets.proSchedule, config.season, io.clock.nowMs())
           : null;
+      const seasons = seasonsFor(step.source, config.season, seasonsOverride);
       const r = await runRefresh(
         {
           source: step.source,
-          seasons: seasonsOverride ?? defaultSeasons(step.source, config.season),
+          seasons: seasons.seasons,
           week,
           signal,
           ...(opts.force ? { force: true } : {}),
@@ -635,6 +708,11 @@ export async function refresh(
       );
       results.push(r);
       lines.push(describeResult(r), ...describeWarnings(r));
+      // said only when the history file is not part of this run (a single-source target)
+      if (seasons.forHistory.length > 0 && !planned.has(`${step.source.id}_history`))
+        lines.push(
+          `  note: season(s) ${seasons.forHistory.join(", ")} belong to ${step.source.id}_history (the history file; \`eff refresh ${step.source.id}_history --seasons …\`): this current-season file keeps ${seasons.seasons.join(", ")}`,
+        );
       if (
         r.status === "published" &&
         (step.job === "nflverse:daily" || step.job === "espn:players")
