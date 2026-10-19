@@ -17,6 +17,7 @@ import {
 import {
   simulateSeason,
   type PlayedGame,
+  type PlayoffRound,
   type ScheduledGame,
   type SeasonSimOutcome,
   type SeasonTeam,
@@ -183,7 +184,11 @@ export function seasonInputs(
   standings: Standings | null,
   rules: LeagueRules,
 ): { teams: SeasonTeam[]; played: PlayedGame[]; remaining: ScheduledGame[] } {
-  const derived = standingsFromMatchups(matchups, rules.playoffs.regular_season_matchups);
+  const derived = standingsFromMatchups(
+    matchups,
+    rules.playoffs.regular_season_matchups,
+    rules.playoffs.matchup_periods,
+  );
   const teams: SeasonTeam[] =
     standings === null
       ? derived.teams
@@ -197,6 +202,30 @@ export function seasonInputs(
           points_against: t.points_against,
         }));
   return { teams, played: derived.played, remaining: derived.remaining };
+}
+
+/**
+ * The playoff rounds of a league: one per playoff MATCHUP period (the periods after
+ * `regular_season_matchups`), each spanning the scoring periods `matchupPeriods` gives it — a
+ * two-week round (`playoffMatchupPeriodLength` 2, or a two-week final) is ONE round of two weeks
+ * (plan 07 E3; the PlayoffRound doc). One round per NFL week split such a round in two: the
+ * simulator warned "playoff rounds N differ from the bracket's M" on a valid league, simulated a
+ * two-week round as one week and left its second week out of p_alive_by_week (Stage C finding
+ * season-sim-multiweek-rounds-split). Without the period map: one round per playoff week.
+ */
+export function playoffRoundsOf(
+  p: Pick<LeagueRules["playoffs"], "regular_season_matchups" | "matchup_periods" | "playoff_weeks">,
+): PlayoffRound[] {
+  const reg = p.regular_season_matchups;
+  if (reg !== null) {
+    const rounds = Object.entries(p.matchup_periods)
+      .map(([k, ws]) => ({ period: Number(k), weeks: [...ws].sort((a, b) => a - b) }))
+      .filter((x) => Number.isInteger(x.period) && x.period > reg && x.weeks.length > 0)
+      .sort((a, b) => a.period - b.period)
+      .map((x) => ({ weeks: x.weeks }));
+    if (rounds.length > 0) return rounds;
+  }
+  return p.playoff_weeks.map((week) => ({ weeks: [week] }));
 }
 
 /** One season simulation's request knobs. */
@@ -231,10 +260,7 @@ export async function runSeason(
   const { teams, played, remaining } = seasonInputs(r.matchups, r.standings, r.rules);
   const teamCount = r.rules.playoffs.team_count;
   if (teamCount === null || teams.length < 2 || !teams.some((t) => t.team_id === r.me)) return null;
-  const rounds =
-    r.through_playoffs === false
-      ? []
-      : r.rules.playoffs.playoff_weeks.map((week) => ({ weeks: [week] }));
+  const rounds = r.through_playoffs === false ? [] : playoffRoundsOf(r.rules.playoffs);
   const base = {
     played,
     remaining,

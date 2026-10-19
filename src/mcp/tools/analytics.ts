@@ -785,10 +785,16 @@ export const lineupSchema = z.discriminatedUnion("basis", [
 
 export { opponentIn, periodOf };
 
-/** Season standings from the schedule's results (when the standings view is not cached). */
+/**
+ * Season standings from the schedule's results (when the standings view is not cached), the played
+ * regular-season games and the remaining ones — each remaining game carrying the scoring periods its
+ * matchup period spans (`matchupPeriods`, `scheduleSettings.matchupPeriods`), so a two-week period is
+ * simulated as two weeks of points, never one (Stage C finding season-sim-multiweek-rounds-split).
+ */
 export function standingsFromMatchups(
   matchups: readonly Matchup[],
   regularPeriods: number | null,
+  matchupPeriods: Readonly<Record<string, readonly number[]>> = {},
 ): { teams: SeasonTeam[]; played: PlayedGame[]; remaining: ScheduledGame[] } {
   const acc = new Map<number, { w: number; l: number; t: number; pf: number; pa: number }>();
   const row = (id: number) => {
@@ -833,11 +839,13 @@ export function standingsFromMatchups(
         a.t++;
       }
     } else {
+      const span = matchupPeriods[String(m.matchup_period)]?.length ?? 1;
       remaining.push({
         period: m.matchup_period,
         matchup_id: m.matchup_id,
         home: m.home.team_id,
         away: m.away.team_id,
+        ...(span > 1 ? { weeks: span } : {}),
       });
     }
   }
@@ -869,7 +877,7 @@ export async function seasonContext(
   warnings: string[],
 ): Promise<LineupSeasonContext | null> {
   const regular = rules.playoffs.regular_season_matchups;
-  const derived = standingsFromMatchups(matchups, regular);
+  const derived = standingsFromMatchups(matchups, regular, rules.playoffs.matchup_periods);
   const teams: SeasonTeam[] =
     standings === null
       ? derived.teams
