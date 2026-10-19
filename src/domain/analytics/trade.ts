@@ -21,7 +21,7 @@ import type { BareText, LeagueRules, RosterSlots, UntrustedText, Week } from "..
 import { isIrEligible } from "../league/types.js";
 import { P_ACTIVE_BY_STATUS } from "./constants.js";
 import { loopPacer, RunBudget, runCooperative, type Pacer } from "./cooperative.js";
-import { AnalyticsError, ensure } from "./errors.js";
+import { AnalyticsError, ensure, ensurePlayers } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
 import { TRADE } from "./marketConstants.js";
@@ -498,14 +498,15 @@ function validate(req: TradeRequest): void {
   const hasOffer = req.offer !== undefined && req.offer !== null;
   const hasSearch = req.find_partners !== undefined && req.find_partners !== null;
   ensure(hasOffer !== hasSearch, "exactly one of offer and find_partners", "offer");
-  ensure(
-    req.me.players.length >= 1 && req.me.players.length <= 60,
-    "roster size out of range",
-    "team_id",
-  );
+  // an empty roster is a league state (before the draft), not an argument error (Stage C round 2)
+  ensurePlayers(req.me.players.length, "team_id");
+  ensure(req.me.players.length <= 60, "roster size out of range", "team_id");
 }
 
-/** E6. Throws AnalyticsError `invalid_request` on a malformed offer or search. */
+/**
+ * E6. Throws AnalyticsError `invalid_request` on a malformed offer or search, `roster_empty` when my
+ * roster is empty.
+ */
 export async function analyzeTrade(req: TradeRequest): Promise<TradeOutcome> {
   validate(req);
   const ctx: Ctx = {

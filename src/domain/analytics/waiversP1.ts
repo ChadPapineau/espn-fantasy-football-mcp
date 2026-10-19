@@ -17,7 +17,10 @@
 // B3: "the Π rule still holds for every candidate"). Stage C (changelog R6-3; additive): with no
 // fitted logistic, the league's previous-season demand curve (the premium fit's) replaces the cold
 // start's at each rival's own lineup gain, and the cold-start statement is re-derived for P1 (the
-// warm fit or the history curve makes the demand part not cold; FAAB has no premium). Pure. New here.
+// warm fit or the history curve makes the demand part not cold; FAAB has no premium). Stage C round 2
+// (finding waivers-postrun-adds-unbounded-same-drop): the Rec carries the P0 engine's plan — moves
+// that can all be made together — re-planned here over P1's verdicts (FAAB claims by expected net),
+// never every claim and add with its own drop. Pure. New here.
 import { isKdst } from "./kdst.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
 import { loopPacer, RunBudget, runCooperative } from "./cooperative.js";
@@ -40,13 +43,20 @@ import { demandOf } from "./waiverDp.js";
 import { COLD_START_REVISIT, coldStartNote, curveDemand } from "./waiver-fit/history.js";
 import {
   analyzeWaivers,
+  PLAN_REVISIT,
+  planDrivers,
+  planDropsAssumption,
+  planPartialLine,
+  waiverActionText,
   type WaiverOutcome,
+  type WaiverPlan,
   type WaiverPlayer,
   type WaiverRequest,
 } from "./waivers.js";
+
+export { waiverActionText };
 import type {
   Rec,
-  RecSubject,
   ValueBasis,
   WaiverCandidate,
   WaiverSignal,
@@ -105,28 +115,6 @@ const finiteWeeks = <T extends WaiverPlayer>(p: T): T =>
 const AT_LAST_TRIGGER = "my position improves";
 
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
-
-/**
- * The P0 engine's action text from the verdict counts (kept identical so a P1 call with nothing new
- * reads exactly as P0 — waiversP1.test.ts pins the equality).
- */
-export function waiverActionText(
-  claims: number,
-  adds: number,
-  marginal: number,
-  scramble: number,
-  phase: WaiversData["phase"],
-): string {
-  const parts: string[] = [];
-  if (claims > 0) parts.push(`submit ${String(claims)} ordered claim${plural(claims, "", "s")}`);
-  if (adds > 0) parts.push(`add ${String(adds)} free agent${plural(adds, "", "s")} now`);
-  if (marginal > 0) parts.push(`${String(marginal)} marginal (your call)`);
-  if (scramble > 0 && phase === "pre_run")
-    parts.push(`${String(scramble)} on the scramble list after the run`);
-  const noMove = claims === 0 && adds === 0;
-  if (!noMove) return parts.join("; ");
-  return parts.length > 0 ? `no clear move: ${parts.join("; ")}` : "no claim clears the premium";
-}
 
 /** The P0 engine's interval widening, so a cold-start P(clears) never reads as certain. */
 function coldInterval(p: number, lo0: number, hi0: number): readonly [number, number] {
@@ -533,32 +521,44 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
     .filter((c) => c.verdict === "claim")
     .sort((a, b) => (a.claim_rank ?? 0) - (b.claim_rank ?? 0));
   const top = claims[0] ?? adds[0] ?? null;
-  const subjects: RecSubject[] = [];
-  for (const c of [...claims, ...adds]) {
-    subjects.push({
-      player_id: c.player_id,
-      gsis_id: null,
-      role: c.verdict === "claim" ? "claim" : "add",
-      slot: null,
-    });
-    if (c.conditional_drop !== null)
-      subjects.push({
-        player_id: c.conditional_drop.player_id,
-        gsis_id: null,
-        role: "drop",
-        slot: null,
-      });
+  // the plan over P1's verdicts (FAAB: a chained claim joins while it still gains); the P0 engine's
+  // planner holds the roster and the solved candidates
+  const plan: WaiverPlan = await base.planner({
+    claims,
+    adds,
+    ...(faabMode ? { claimHolds: (x: number) => x > 0 } : {}),
+    deadline_ms: budget.left(),
+  });
+  budget.spend(plan);
+  if (plan.partial) {
+    partial = true;
+    const line = planPartialLine(plan);
+    if (!base.warnings.includes(line)) p1Warnings.push(line);
   }
+  const planAt = assumptions.findIndex((a) => a.revisit_trigger === PLAN_REVISIT);
+  const planSaid = planDropsAssumption(plan);
+  if (planAt >= 0) {
+    if (planSaid === null) assumptions.splice(planAt, 1);
+    else assumptions[planAt] = planSaid;
+  } else if (planSaid !== null) assumptions.push(planSaid);
+  const planAdds = plan.moves.filter((m) => m.role === "add").length;
   const noMove = claims.length === 0 && adds.length === 0;
   const premium = faabMode ? 0 : d.premium;
   const sd = top === null ? 0 : (top.value.p90 - top.value.p10) / (2 * Z90);
   const action = faabMode
-    ? faabActionText(claims, adds.length, scramble.length, d.phase)
-    : waiverActionText(claims.length, adds.length, marginal.length, scramble.length, d.phase);
+    ? faabActionText(claims, adds.length, scramble.length, d.phase, planAdds)
+    : waiverActionText(
+        claims.length,
+        adds.length,
+        marginal.length,
+        scramble.length,
+        d.phase,
+        planAdds,
+      );
   const rec: Rec = {
     ...d.rec,
     action,
-    subjects,
+    subjects: plan.subjects,
     point_estimate: top === null ? 0 : top.s,
     distribution: top === null ? zeroDist("position_cv") : top.value,
     delta_vs_next: {
@@ -570,11 +570,9 @@ export async function analyzeWaiversP1(raw: WaiverP1Request): Promise<WaiverOutc
     drivers: faabMode
       ? [
           { name: "lambda", contribution: -round(lambda * (claims[0]?.bid?.b_star ?? 0), 3) },
-          ...ranked
-            .slice(0, 3)
-            .map((c) => ({ name: `surplus:${String(c.player_id)}`, contribution: c.s })),
+          ...planDrivers(plan, ranked),
         ]
-      : d.rec.drivers,
+      : [{ name: "premium", contribution: -d.premium }, ...planDrivers(plan, ranked)],
     assumptions,
     as_of: newestAsOf(d.inputs, req.clock.nowIso()),
     latest_execution_time: noMove ? null : claims.length > 0 ? d.next_run_at : null,
@@ -622,6 +620,7 @@ function faabActionText(
   adds: number,
   scramble: number,
   phase: WaiversData["phase"],
+  planAdds: number = adds,
 ): string {
   const parts: string[] = [];
   const top = claims[0];
@@ -629,7 +628,13 @@ function faabActionText(
     parts.push(
       `bid on ${String(claims.length)} player${plural(claims.length, "", "s")} (top bid $${String(top.bid?.b_star ?? 0)})`,
     );
-  if (adds > 0) parts.push(`add ${String(adds)} free agent${plural(adds, "", "s")} now`);
+  const made = Math.max(0, Math.min(adds, planAdds));
+  if (made > 0) parts.push(`add ${String(made)} free agent${plural(made, "", "s")} now`);
+  const later = adds - made;
+  if (later > 0)
+    parts.push(
+      `${String(later)} more free agent${plural(later, "", "s")} after ${made > 0 ? "these moves" : "the bids"}: call again then`,
+    );
   if (scramble > 0 && phase === "pre_run")
     parts.push(`${String(scramble)} on the scramble list after the run`);
   if (claims.length > 0 || adds > 0) return parts.join("; ");

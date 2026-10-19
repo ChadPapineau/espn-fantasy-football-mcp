@@ -17,7 +17,7 @@ import {
   type LineupPlayer,
   type LineupRequest,
 } from "../../../src/domain/analytics/lineup.js";
-import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
+import { AnalyticsError, ROSTER_EMPTY_TEXT } from "../../../src/domain/analytics/errors.js";
 import type { RosterEntry } from "../../../src/domain/league/types.js";
 import { bare, clockAndRng, dist, ELIGIBLE, referenceSlots } from "./helpers.js";
 
@@ -575,6 +575,23 @@ describe("option value, conditionals, stacks, cross-check", () => {
 
   it("refuses bad requests", () => {
     expect(() => analyzeLineup(request({ players: [] }))).toThrow(AnalyticsError);
+    // Stage C round 2 (analytics-empty-roster-validation): before the draft a roster is empty — a
+    // league state, NOT_FOUND roster_empty with the fixed texts, never VALIDATION
+    let refusal: unknown = null;
+    try {
+      analyzeLineup(request({ players: [] }));
+    } catch (e) {
+      refusal = e;
+    }
+    expect(refusal).toMatchObject({
+      code: "roster_empty",
+      effCode: "NOT_FOUND",
+      effDetails: {
+        reason: "roster_empty",
+        message: ROSTER_EMPTY_TEXT.message,
+        hint: ROSTER_EMPTY_TEXT.hint,
+      },
+    });
     expect(() =>
       analyzeLineup(request({ players: [...myRoster(), player(1, "QB", 1, SLOT.BE)] })),
     ).toThrow(AnalyticsError);

@@ -13,9 +13,15 @@
 // EXACTLY its three risks, the activate-after-the-run warning, `effective_bench` = bench + IR slots
 // holding a positive-value stash). When the roster is invalid the IR section is reported FIRST (the
 // data object's first key, the rec's action and first driver — plan 10 B7). Bench players run as
-// cooperative batches under the CPU deadline. Pure. New here (sib E9 is planned, not built).
+// cooperative batches under the CPU deadline. Stage C round 2 (finding roster-audit-deadline-by-week):
+// "past the trade deadline" is the deadline INSTANT against the clock — tradeDeadlineStatus, the
+// rule E6 applies — whenever the caller passes it (`trade_deadline`): ESPN rolls the scoring period
+// to the deadline's week by Tuesday, so the week number said "past" up to ~1.5 days early and E9 then
+// dropped the 2-for-1 trade idea and zeroed stash trade value while trades were still open. Pure.
+// New here (sib E9 is planned, not built).
 import type { Clock } from "../clock.js";
 import { auditIr, irStayStatus, type RosterSeat } from "../league/roster.js";
+import { tradeDeadlineStatus } from "../league/rules.js";
 import { slotClassOf } from "../league/slots.js";
 import {
   isIrEligible,
@@ -27,7 +33,7 @@ import {
 import type { Dist } from "../scoring/types.js";
 import { DEFAULT_CV, POSITION_CV } from "./constants.js";
 import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
-import { ensure } from "./errors.js";
+import { ensure, ensurePlayers } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs, newestAsOf } from "./inputs.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
 import { clamp, normalDist, round } from "./math.js";
@@ -122,8 +128,18 @@ export interface RosterAuditRequest {
   readonly weeks: readonly Week[];
   readonly current_week: Week;
   readonly playoff_weeks: readonly Week[];
-  /** The first week after the trade deadline (`tradeDeadlineWeeks.first_week_after`), or null. */
+  /**
+   * The first week after the trade deadline (`tradeDeadlineWeeks.first_week_after`), or null — the
+   * phase reads it only when `trade_deadline` is absent (a caller that passes the week alone).
+   */
   readonly trade_deadline_week: Week | null;
+  /**
+   * The league's trade deadline instant (`rules.trade.deadline`; Stage C round 2): when present, the
+   * phase is `late` from that instant on, judged against the clock exactly as tradeDeadlineStatus
+   * judges it — so E9 and E6 agree at every instant; null = the league states none (the playoff
+   * fallback below).
+   */
+  readonly trade_deadline?: IsoInstant | null;
   readonly competing?: "auto" | "yes" | "eliminated";
   /** E3 `season` under the reading in use (P(alive) weights, elimination), or null. */
   readonly season?: {
@@ -223,13 +239,11 @@ export function returnCurve(
   });
 }
 
-/** E9. Throws AnalyticsError `invalid_request` on bounds. */
+/** E9. Throws AnalyticsError `roster_empty` on an empty roster, `invalid_request` on bounds. */
 export async function analyzeRoster(req: RosterAuditRequest): Promise<RosterAuditOutcome> {
-  ensure(
-    req.players.length >= 1 && req.players.length <= ROSTER_AUDIT.maxPlayers,
-    "roster size out of range",
-    "players",
-  );
+  // an empty roster is a league state (before the draft), not an argument error (Stage C round 2)
+  ensurePlayers(req.players.length, "players");
+  ensure(req.players.length <= ROSTER_AUDIT.maxPlayers, "roster size out of range", "players");
   ensure(
     req.weeks.length >= 1 &&
       req.weeks.length <= ROSTER_AUDIT.maxWeeks &&
@@ -266,10 +280,20 @@ export async function analyzeRoster(req: RosterAuditRequest): Promise<RosterAudi
       A("competing assumed: no season simulation", "espn_analyze_matchup(mode: season) runs"),
     );
   const firstPlayoff = req.playoff_weeks.length === 0 ? null : Math.min(...req.playoff_weeks);
+  // past the deadline: the instant against the clock (tradeDeadlineStatus — E6's rule) when the
+  // caller passes it; else the first week after it; without a deadline, weeks before the playoffs
+  const byPlayoffs =
+    firstPlayoff !== null && req.current_week >= firstPlayoff - ROSTER_AUDIT.lateBeforePlayoffs;
+  const passed =
+    req.trade_deadline === undefined
+      ? undefined
+      : tradeDeadlineStatus({ deadline: req.trade_deadline }, nowMs).passed;
   const late =
-    req.trade_deadline_week !== null
-      ? req.current_week >= req.trade_deadline_week
-      : firstPlayoff !== null && req.current_week >= firstPlayoff - ROSTER_AUDIT.lateBeforePlayoffs;
+    passed !== undefined
+      ? (passed ?? byPlayoffs)
+      : req.trade_deadline_week !== null
+        ? req.current_week >= req.trade_deadline_week
+        : byPlayoffs;
   const phase: RosterAnalysisData["phase"] = late
     ? "late"
     : req.current_week <= ROSTER_AUDIT.earlyLastWeek

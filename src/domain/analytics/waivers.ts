@@ -21,6 +21,18 @@
 // the schedule and a run time cannot place against the week's games never names a player locked now
 // as its drop (he stays locked until the period rolls over, and the run may come first) — the better
 // locked drop is said; every unplaced reading is said; weeklyValues reads E1's window (rosWindow).
+// Stage C round 2: (1) the K/D-ST bracket model values a player-week only where its game has a
+// betting line — a kicker reads his team's implied total, a D/ST the opponent's — and every other
+// week keeps ESPN's projection (the current week) or ROS share, said per week (before, a missing line
+// read as the league average and every K and D/ST got one value); (2) K and D/ST stream one each
+// (research 05 §4.2 "drop-and-stream, not carry-two"): while my roster fills a streaming position's
+// seats, a candidate there drops one of mine at it; (3) the Rec carries a plan whose moves can all be
+// made together (the planner analyzeWaivers returns): claims keep their own drop — a later claim on an earlier claim's
+// drop is its fallback in the ordered list — and free-agent adds, made now, are chained greedily on
+// distinct drops or open seats, each valued on the roster the moves before it leave, at most
+// PLAN_MAX_MOVES (the Rec's 20 subjects). Before, every claim and add was listed with its own
+// conditional drop, unbounded: one drop backed many immediate adds and a post-run kicker stream
+// overflowed the Rec's subjects (INTERNAL).
 // Pure. New here (the sibling's E5 was FAAB / K-DEF only).
 import type { Clock } from "../clock.js";
 import { auditIr, type RosterSeat } from "../league/roster.js";
@@ -48,7 +60,7 @@ import {
   Z90,
 } from "./constants.js";
 import { loopPacer, RunBudget, runCooperative, type Pacer } from "./cooperative.js";
-import { AnalyticsError, ensure } from "./errors.js";
+import { AnalyticsError, ensure, ensurePlayers } from "./errors.js";
 import { isKdst, kdstExpectation, type KdstExpectation } from "./kdst.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
 import { newestAsOf } from "./inputs.js";
@@ -209,7 +221,99 @@ export interface WaiverOutcome {
   readonly partial?: boolean;
 }
 
+/** analyzeWaivers' outcome: E5's, plus the planner the P1 layer re-plans with (never serialised). */
+export interface WaiverEngineOutcome extends WaiverOutcome {
+  /** Re-plans the Rec over the same roster and solved candidates (P1's FAAB verdicts differ). */
+  readonly planner: WaiverPlanner;
+}
+
+/**
+ * The Rec's moves (Stage C round 2): at most this many, so its subjects — each move and its drop —
+ * stay within 20 (src/mcp/envelope.ts REC_LIMITS.subjects; src/domain/reclog/record.ts
+ * RECORD_BOUNDS.subjects — a test holds the three equal).
+ */
+export const PLAN_MAX_MOVES = 10;
+
+/** One move of the plan the Rec carries. */
+export interface WaiverPlanMove {
+  readonly player_id: number;
+  readonly role: "claim" | "add";
+  /** The player it drops (null: an open seat, or `include_drop: false`). */
+  readonly drop: number | null;
+  /**
+   * Its surplus in the plan: the first move's own `s`; a later one's on the roster the moves before
+   * it leave (they are taken as made).
+   */
+  readonly s: number;
+}
+
+/** The plan the Rec carries: moves that can all be made together. */
+export interface WaiverPlan {
+  readonly moves: readonly WaiverPlanMove[];
+  readonly subjects: readonly RecSubject[];
+  /** Claims left to the ordered list as fallbacks (an earlier claim's drop, or chained below the rule). */
+  readonly fallback_claims: number;
+  /** Free-agent adds left for a call after the plan's (no drop or seat left, no gain once chained, the bound). */
+  readonly later_adds: number;
+  /** Adds whose drop in the plan differs from their own `conditional_drop` (said in the Rec). */
+  readonly redropped: readonly { readonly player_id: number; readonly drop: number | null }[];
+  readonly partial: boolean;
+  readonly cpu_ms: number;
+}
+
+/** What to plan: the verdicts to act on, in the order they are made. */
+export interface WaiverPlanRequest {
+  /** The claims in submission order (claim_rank). */
+  readonly claims: readonly WaiverCandidate[];
+  /** The free-agent adds made now, best first. */
+  readonly adds: readonly WaiverCandidate[];
+  /** Whether a chained claim's surplus still makes it a claim (default: P0's s ≥ Π outside the band). */
+  readonly claimHolds?: (s: number) => boolean;
+  /** The CPU the plan may spend (the caller's budget left; null = off). */
+  readonly deadline_ms?: number | null;
+}
+
+/** Builds the Rec's plan over one analyzeWaivers call's roster and solved candidates. */
+export type WaiverPlanner = (req: WaiverPlanRequest) => Promise<WaiverPlan>;
+
+/** The revisit trigger of the plan's "drops differ" statement (the P1 layer replaces it). */
+export const PLAN_REVISIT = "a move before it in the plan is not made";
+
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
+
+const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+
+/**
+ * E5's action text from the verdict counts and the plan (one template for P0 and P1, so a P1 call
+ * with nothing new reads exactly as P0): `claims` is the whole ordered claim list (fallbacks
+ * included — the user submits it all), `adds` every free agent worth adding now, `planAdds` the adds
+ * the plan makes together (default: all of them); the rest wait for a call after those adds.
+ */
+export function waiverActionText(
+  claims: number,
+  adds: number,
+  marginal: number,
+  scramble: number,
+  phase: WaiverPhase,
+  planAdds: number = adds,
+): string {
+  const parts: string[] = [];
+  if (claims > 0) parts.push(`submit ${String(claims)} ordered claim${plural(claims, "", "s")}`);
+  const made = Math.max(0, Math.min(adds, planAdds));
+  if (made > 0) parts.push(`add ${String(made)} free agent${plural(made, "", "s")} now`);
+  const later = adds - made;
+  if (later > 0)
+    parts.push(
+      `${String(later)} more free agent${plural(later, "", "s")} after ${made > 0 ? "these moves" : "the claims"}: call again then`,
+    );
+  if (marginal > 0) parts.push(`${String(marginal)} marginal (your call)`);
+  if (scramble > 0 && phase === "pre_run")
+    parts.push(`${String(scramble)} on the scramble list after the run`);
+  const noMove = claims === 0 && adds === 0;
+  if (!noMove) return parts.join("; ");
+  return parts.length > 0 ? `no clear move: ${parts.join("; ")}` : "no claim clears the premium";
+}
+
 const BENCH = 20;
 /** After a run, the scramble window is assumed to last this long (the phase is read from the data) [U]. */
 const POST_RUN_WINDOW_MS = 24 * 3600 * 1000;
@@ -400,6 +504,8 @@ interface Scored {
   readonly c: WaiverCandidateInput;
   readonly s: number;
   readonly sIr: number | null;
+  /** A K/D-ST streamer replacing mine at his position: an IR move changes nothing for him. */
+  readonly inPlace: boolean;
   readonly drop: WaiverPlayer | null;
   readonly value: Dist;
   readonly roles: readonly { readonly week: Week; readonly p: number }[];
@@ -408,10 +514,10 @@ interface Scored {
 }
 
 /**
- * E5 priority (and the K/D-ST slice in any league). Throws AnalyticsError `invalid_request` on
- * bounds, `not_in_phase` for FAAB bidding outside the K/D-ST slice (P1).
+ * E5 priority (and the K/D-ST slice in any league). Throws AnalyticsError `roster_empty` on an empty
+ * roster, `invalid_request` on bounds, `not_in_phase` for FAAB bidding outside the K/D-ST slice (P1).
  */
-export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome> {
+export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverEngineOutcome> {
   const N = req.league_size;
   ensure(Number.isInteger(N) && N >= 2 && N <= 20, "league size out of range", "league_size");
   ensure(
@@ -421,7 +527,9 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
   );
   ensure(req.weeks[0] === req.week, "the value weeks must start at the claim week", "weeks");
   ensure(req.candidates.length <= WAIVERS.maxCandidates, "too many candidates", "candidates");
-  ensure(req.mine.length >= 1 && req.mine.length <= 60, "roster size out of range", "team_id");
+  // an empty roster is a league state (before the draft), not an argument error (Stage C round 2)
+  ensurePlayers(req.mine.length, "team_id");
+  ensure(req.mine.length <= 60, "roster size out of range", "team_id");
   for (const p of [...req.mine, ...req.candidates])
     ensure(
       p.weekly.length === req.weeks.length,
@@ -646,12 +754,26 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
   );
   const full = active.length >= req.roster.starters + req.roster.bench;
 
-  // K/D-ST weekly values from the bracket model when the implied totals are known
+  // K/D-ST weekly values from the bracket model, for a player-week whose game has a betting line: the
+  // model reads a kicker's own implied team total and a D/ST's opponent's (kdst.ts). Stage C round 2
+  // (finding waivers-kdst-no-line-flattens): a game without a line keeps ESPN's projection (the
+  // current week) or ROS share (later weeks) — WaiverRequest.kdst's "ESPN's projections as given" —
+  // where a missing line used to read as the league-average total: every K and every D/ST got one
+  // value, my starters included, and the candidates tied
   const settings = req.settings ?? null;
   const kd = req.kdst ?? null;
   const impliedOf = new Map<string, number | null>();
   for (const r of kd?.implied_totals ?? [])
     impliedOf.set(`${String(r.week)}:${String(r.pro_team_id)}`, r.implied);
+  const lineOf = (w: Week, team: number): number | null => {
+    const v = impliedOf.get(`${String(w)}:${String(team)}`) ?? null;
+    return v !== null && Number.isFinite(v) && v > 0 ? v : null;
+  };
+  /**
+   * Per value week index: the player-weeks with a game at the positions the call asks about, and
+   * those with a betting line (what the basis statement and the warning count).
+   */
+  const kdstLines = new Map<number, { games: number; lined: number }>();
   const kdstCache = new Map<string, KdstExpectation | null>();
   const kdstOf = (p: WaiverPlayer, wi: number): KdstExpectation | null => {
     if (
@@ -670,13 +792,14 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     const g = teamGame(wg, p.pro_team_id);
     let out: KdstExpectation | null = null;
     if (g !== null) {
-      const opp = opponentOf(g, p.pro_team_id);
-      out = kdstExpectation(
-        p.position,
-        settings,
-        impliedOf.get(`${String(w)}:${String(p.pro_team_id)}`) ?? null,
-        impliedOf.get(`${String(w)}:${String(opp)}`) ?? null,
-      );
+      const team = lineOf(w, p.pro_team_id);
+      const against = lineOf(w, opponentOf(g, p.pro_team_id));
+      const read = p.position === "K" ? team : against;
+      if (positions === null || positions.length === 0 || positions.includes(p.position)) {
+        const t = kdstLines.get(wi) ?? { games: 0, lined: 0 };
+        kdstLines.set(wi, { games: t.games + 1, lined: t.lined + (read === null ? 0 : 1) });
+      }
+      if (read !== null) out = kdstExpectation(p.position, settings, team, against);
     }
     kdstCache.set(key, out);
     return out;
@@ -693,17 +816,6 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     });
     return { ...p, weekly };
   };
-  if (
-    kd !== null &&
-    settings !== null &&
-    (kdstOnly || req.candidates.some((c) => isKdst(c.position)))
-  )
-    assumptions.push(
-      A(
-        "K and D/ST are valued on the implied-total bracket model under this league's S; ESPN's own K/D-ST projections are comparators",
-        "the model's backtest says otherwise",
-      ),
-    );
   const mine = req.mine.map(withModel);
   // a free agent whose game has started cannot be added now; a WAIVERS candidate's claim runs later
   // (his week-0 value is what it cannot reach — below), so a lock never removes him
@@ -711,6 +823,43 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     .filter((c) => positions === null || positions.length === 0 || positions.includes(c.position))
     .filter((c) => !(c.status === "FREEAGENT" && c.locked))
     .map((c) => withModel(c));
+  // which basis valued the K/D-ST weeks — said per week whenever a game has no line (Stage C round 2)
+  if (
+    kd !== null &&
+    settings !== null &&
+    (kdstOnly || req.candidates.some((c) => isKdst(c.position)))
+  ) {
+    const states: string[] = [];
+    let allLined = true;
+    for (let wi = 0; wi < kdstWeeks; wi++) {
+      const t = kdstLines.get(wi);
+      if (t === undefined || t.games === 0) continue;
+      const wk = `week ${String(req.weeks[wi] ?? req.week)}`;
+      if (t.lined === t.games) states.push(`${wk} lined`);
+      else {
+        allLined = false;
+        states.push(
+          t.lined === 0 ? `${wk} none` : `${wk} ${String(t.lined)} of ${String(t.games)} lined`,
+        );
+      }
+    }
+    assumptions.push(
+      allLined
+        ? A(
+            "K and D/ST are valued on the implied-total bracket model under this league's S; ESPN's own K/D-ST projections are comparators",
+            "the model's backtest says otherwise",
+          )
+        : A(
+            `K and D/ST: the bracket model under this league's S where a game has a betting line, ESPN's projection where not — ${states.join(", ")}`,
+            "the betting lines of those games are posted",
+          ),
+    );
+    const now = kdstLines.get(0);
+    if (now !== undefined && now.lined < now.games)
+      warnings.push(
+        `${String(now.games - now.lined)} of ${String(now.games)} K/D-ST players' week ${String(req.week)} games have no betting line: valued on ESPN's projection, not the bracket model`,
+      );
+  }
   const lockedOut = req.candidates.length - pool.length;
   if (lockedOut > 0 && positions === null)
     warnings.push(`${String(lockedOut)} candidates skipped (game started)`);
@@ -773,6 +922,32 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
   // now, or — every droppable player locked (the week's games under way for all of them) — anyone
   const unlockedDrops = drops.filter((d) => !d.locked);
   const allLocked = drops.length > 0 && unlockedDrops.length === 0;
+  // K and D/ST stream one each (research 05 §4.2: "drop-and-stream, not carry-two"; the stream-kdef
+  // Skill: "one K and one D/ST, never a second" — Stage C round 2): while my active roster holds as
+  // many players at a streaming position as the lineup has seats for it alone, a candidate there
+  // drops one of them, whatever the open seats (unless the call asks for no drop)
+  const seatsFor = (pos: string): number =>
+    req.roster.slots
+      .filter(
+        (sl) =>
+          sl.class === "starter" &&
+          sl.eligible_positions.length === 1 &&
+          sl.eligible_positions[0] === pos,
+      )
+      .reduce((a, sl) => a + sl.count, 0);
+  const inPlaceOf = new Map<string, boolean>();
+  const streamsInPlace = (pos: string): boolean => {
+    const hit = inPlaceOf.get(pos);
+    if (hit !== undefined) return hit;
+    const seatsAt = seatsFor(pos);
+    const v =
+      isKdst(pos) &&
+      req.include_drop !== false &&
+      seatsAt > 0 &&
+      activeMine.filter((p) => p.position === pos).length >= seatsAt;
+    inPlaceOf.set(pos, v);
+    return v;
+  };
   const prepared = pool.map((c) => {
     const H = valueWeeks(c);
     // when the add / claim executes and the first value week it reaches (Stage C)
@@ -796,21 +971,26 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     // locked: such a claim can only process once the period has rolled over, when any may go
     // (said). The best locked drop is still priced, to be said when it would be better — never used
     const unplacedClaim = c.status === "WAIVERS" && !(kick !== null && at !== null);
-    const allowed = (
-      byDrop
-        ? unplacedClaim
-          ? allLocked
-            ? drops
-            : unlockedDrops
-          : drops.filter((d) => skip === 1 || !startedBy(d, at))
-        : []
+    // a streamer in place drops a player at his own position (no IR-move version: it carries two)
+    const inPlace = streamsInPlace(c.position);
+    const usesDrop = byDrop || inPlace;
+    const pick = inPlace ? drops.filter((d) => d.position === c.position) : drops;
+    // every drop legal when it executes (the plan's chained adds read it once a seat is taken)
+    const legal = (
+      unplacedClaim
+        ? allLocked
+          ? pick
+          : pick.filter((d) => !d.locked)
+        : pick.filter((d) => skip === 1 || !startedBy(d, at))
     ).filter(solved);
+    const allowed = usesDrop ? legal : [];
     const lockedAlt =
-      byDrop && unplacedClaim && !allLocked ? drops.filter((d) => d.locked && solved(d)) : [];
+      usesDrop && unplacedClaim && !allLocked ? pick.filter((d) => d.locked && solved(d)) : [];
+    const irOption = withIr && !inPlace;
     // the gains it needs, in order: every allowed drop (or only "no drop"), the locked alternatives,
     // then the IR move
-    const options: readonly (WaiverPlayer | null)[] = byDrop
-      ? [...allowed, ...lockedAlt, ...(withIr ? [null] : [])]
+    const options: readonly (WaiverPlayer | null)[] = usesDrop
+      ? [...allowed, ...lockedAlt, ...(irOption ? [null] : [])]
       : [null];
     return {
       c,
@@ -818,14 +998,18 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       skip,
       roles,
       cAsBench,
+      legal,
       allowed,
       lockedAlt,
       unplacedClaim,
+      inPlace,
+      usesDrop,
+      irOption,
       options,
       gains: new Array<number>(options.length).fill(0),
     };
   });
-  if (allLocked && byDrop && prepared.some((x) => x.unplacedClaim))
+  if (allLocked && prepared.some((x) => x.unplacedClaim && x.usesDrop))
     assumptions.push(
       A(
         "every droppable player of mine is locked now: a claim can drop one only once the period has rolled over, when any of them may go",
@@ -875,7 +1059,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       const { c, H, skip, roles, gains, allowed, lockedAlt, cAsBench } = cand;
       let s: number;
       let drop: WaiverPlayer | null = null;
-      if (!byDrop) s = gains[0] ?? 0;
+      if (!cand.usesDrop) s = gains[0] ?? 0;
       else {
         s = -Infinity;
         for (let di = 0; di < allowed.length; di++) {
@@ -896,7 +1080,12 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
         }
         if (alt !== null) lockedBetter.push({ c: c.player_id, d: alt.d, s: alt.s });
       }
-      const sIr = withIr ? (gains[allowed.length + lockedAlt.length] ?? 0) : null;
+      // the IR-move version: a streamer in place still drops the one he replaces — the same s
+      const sIr = cand.irOption
+        ? (gains[allowed.length + lockedAlt.length] ?? 0)
+        : cand.inPlace && withIr
+          ? s
+          : null;
       let mean = 0;
       let v = 0;
       const cv = cvOf(c.position, c.position_id, settings);
@@ -945,6 +1134,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
         c,
         s: round(s, 3),
         sIr: sIr === null ? null : round(sIr, 3),
+        inPlace: cand.inPlace,
         drop,
         value: mean === 0 ? zeroDist("position_cv") : normalDist(mean, Math.sqrt(v), "position_cv"),
         roles,
@@ -1026,7 +1216,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
             ? `P(role holds) below ×${String(round(premium / x.s, 2))} of the prior flips it to pass`
             : `needs P(role holds) ×${String(round(premium / x.s, 2))} of the prior to clear the premium`;
     const irWarn =
-      x.sIr !== null
+      x.sIr !== null && !x.inPlace
         ? "an IR move frees the seat instead: move the IR-eligible player before the run and activate him only after it (a claim fails if the bench fills first)"
         : null;
     return {
@@ -1130,39 +1320,201 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     ranked.find((c) => c.verdict === "fa_add_now") ??
     null;
   const adds = ranked.filter((c) => c.verdict === "fa_add_now");
-  const subjects: RecSubject[] = [];
-  for (const c of [...ranked.filter((x) => x.verdict === "claim"), ...adds]) {
-    subjects.push({
-      player_id: c.player_id,
-      gsis_id: null,
-      role: c.verdict === "claim" ? "claim" : "add",
-      slot: null,
+
+  // the plan the Rec carries (Stage C round 2, finding waivers-postrun-adds-unbounded-same-drop):
+  // every claim and add above was valued alone against today's roster, so after one immediate add
+  // the next one's drop may be gone and its surplus is not what it was. The plan keeps only moves
+  // that can all be made together: claims in their order with their own drop (a later claim on an
+  // earlier claim's drop is its fallback in the ordered list — ESPN fails it once the earlier one
+  // wins), then the free-agent adds made now, chained greedily — each on the best drop no earlier
+  // move uses (or an open seat), valued on the roster the moves before it leave, joining only while
+  // it still gains — one K and one D/ST, at most PLAN_MAX_MOVES moves (the Rec's 20 subjects)
+  const preparedOf = new Map(prepared.map((x) => [x.c.player_id, x] as const));
+  const seatCount = req.roster.starters + req.roster.bench;
+  const startAt = (pos: string): number => activeMine.filter((p) => p.position === pos).length;
+  const inBandOf = (x: number): boolean => band.low < band.high && x >= band.low && x <= band.high;
+  const p0ClaimHolds = (x: number): boolean => x > 0 && !inBandOf(x) && x >= premium;
+  const planner: WaiverPlanner = async (pr) => {
+    const claimHolds = pr.claimHolds ?? p0ClaimHolds;
+    const items = [
+      ...pr.claims.map((cand) => ({ cand, role: "claim" as const })),
+      ...pr.adds.map((cand) => ({ cand, role: "add" as const })),
+    ];
+    const noDrop = req.include_drop === false;
+    /** Each item's options: a claim its own drop; an add an open seat, then every legal drop. */
+    const optionsOf = items.map(({ cand, role }) => {
+      const prep = preparedOf.get(cand.player_id);
+      if (prep === undefined) return [];
+      const own =
+        cand.conditional_drop === null
+          ? null
+          : (activeMine.find((m) => m.player_id === cand.conditional_drop?.player_id) ?? null);
+      if (role === "claim") return [own];
+      return noDrop ? [null] : [null, ...prep.legal];
     });
-    if (c.conditional_drop !== null)
-      subjects.push({
-        player_id: c.conditional_drop.player_id,
-        gsis_id: null,
-        role: "drop",
-        slot: null,
+    const moves: WaiverPlanMove[] = [];
+    const redropped: { player_id: number; drop: number | null }[] = [];
+    let onRoster: WaiverPlayer[] = [...activeMine];
+    let baseNow: number[] = [...base];
+    const used = new Set<number>();
+    let seats = Math.max(noDrop ? 1 : 0, seatCount - activeMine.length);
+    let fallback = 0;
+    let later = 0;
+    const gainsOf = optionsOf.map((o) =>
+      new Array<number>(o.length).fill(Number.NEGATIVE_INFINITY),
+    );
+    /** The option is a move this plan can still make (a seat, or a drop still mine and unused). */
+    const open = (i: number, d: WaiverPlayer | null): boolean => {
+      const item = items[i];
+      const prep = preparedOf.get(item?.cand.player_id ?? -1);
+      if (item === undefined || prep === undefined) return false;
+      if (d === null) {
+        if (seats <= 0) return false;
+      } else if (used.has(d.player_id) || !onRoster.includes(d)) return false;
+      // with a seat open an add takes it (more players never lower the best lineup) — unless it is a
+      // streamer in place, who drops the one he replaces; a claim keeps its own drop
+      if (d !== null && item.role === "add" && seats > 0 && !prep.inPlace) return false;
+      // one K and one D/ST: never more at a streaming position than its seats (or than I held)
+      const pos = item.cand.position;
+      if (!noDrop && isKdst(pos)) {
+        const after =
+          onRoster.filter((x) => x.position === pos).length + 1 - (d?.position === pos ? 1 : 0);
+        if (after > Math.max(seatsFor(pos), startAt(pos))) return false;
+      }
+      return true;
+    };
+    /** Its surplus on the plan's roster with drop `d` (the moves before it taken as made). */
+    const chained = (i: number, d: WaiverPlayer | null): number => {
+      const prep = preparedOf.get(items[i]?.cand.player_id ?? -1);
+      if (prep === undefined) return Number.NEGATIVE_INFINITY;
+      const rest = d === null ? onRoster : onRoster.filter((x) => x !== d);
+      let v = 0;
+      for (let wi = prep.skip; wi < prep.H; wi++) {
+        const pr = prep.roles[wi]?.p ?? 0;
+        const withP = lineupValue(seatsPlan, [...rest, prep.cAsBench], wi);
+        const without = d === null ? (baseNow[wi] ?? 0) : lineupValue(seatsPlan, rest, wi);
+        v += (weight[wi] ?? 1) * (pr * withP + (1 - pr) * without - (baseNow[wi] ?? 0));
+      }
+      return v;
+    };
+    const admit = (i: number, d: WaiverPlayer | null, sv: number): void => {
+      const item = items[i];
+      const prep = preparedOf.get(item?.cand.player_id ?? -1);
+      if (item === undefined || prep === undefined) return;
+      moves.push({
+        player_id: item.cand.player_id,
+        role: item.role,
+        drop: d?.player_id ?? null,
+        s: round(sv, 3),
       });
+      if (
+        item.role === "add" &&
+        (d?.player_id ?? null) !== (item.cand.conditional_drop?.player_id ?? null)
+      )
+        redropped.push({ player_id: item.cand.player_id, drop: d?.player_id ?? null });
+      onRoster = [...(d === null ? onRoster : onRoster.filter((x) => x !== d)), prep.cAsBench];
+      if (d === null) seats -= 1;
+      else used.add(d.player_id);
+      baseNow = req.weeks.map((_, wi) => lineupValue(seatsPlan, onRoster, wi));
+    };
+    const leave = (i: number): void => {
+      if (items[i]?.role === "claim") fallback += 1;
+      else later += 1;
+    };
+    // the first move is its own valuation against today's roster — its own drop and s, never
+    // chained — made before any budgeted work, so a plan always opens with the Rec's top move
+    let first = 0;
+    for (; first < items.length && moves.length === 0; first++) {
+      const item = items[first];
+      if (item === undefined) break;
+      const ownId = item.cand.conditional_drop?.player_id ?? null;
+      const own = ownId === null ? null : (onRoster.find((x) => x.player_id === ownId) ?? null);
+      if ((ownId !== null && own === null) || !open(first, own)) leave(first);
+      else admit(first, own, item.cand.s);
+    }
+    // then the chained ones: (item, option) units, then one decision unit per item (j = −1), so no
+    // step holds the loop for an item's options × weeks (plan 10 A16a)
+    const units = optionsOf
+      .slice(first)
+      .flatMap((o, k) => [...o.map((_, j) => ({ i: first + k, j })), { i: first + k, j: -1 }]);
+    let decided = first;
+    const run = await runCooperative(
+      units.length,
+      (u) => {
+        const unit = units[u];
+        if (unit === undefined) return;
+        const { i, j } = unit;
+        const opts = optionsOf[i] ?? [];
+        const item = items[i];
+        if (item === undefined) return;
+        if (j >= 0) {
+          const d = opts[j] ?? null;
+          if (moves.length >= PLAN_MAX_MOVES || !open(i, d)) return;
+          const g = gainsOf[i];
+          if (g !== undefined) g[j] = chained(i, d);
+          return;
+        }
+        decided = i + 1;
+        if (moves.length >= PLAN_MAX_MOVES) {
+          leave(i);
+          return;
+        }
+        let best = -1;
+        let bestV = Number.NEGATIVE_INFINITY;
+        const g = gainsOf[i] ?? [];
+        for (let k = 0; k < opts.length; k++) {
+          const v = g[k] ?? Number.NEGATIVE_INFINITY;
+          if (v > bestV + 1e-12) {
+            bestV = v;
+            best = k;
+          }
+        }
+        const sv = round(bestV, 3);
+        if (best < 0 || !Number.isFinite(sv) || !(item.role === "claim" ? claimHolds(sv) : sv > 0))
+          leave(i);
+        else admit(i, opts[best] ?? null, sv);
+      },
+      { pacer, deadlineMs: pr.deadline_ms === undefined ? budget.left() : pr.deadline_ms },
+    );
+    // items the deadline left unread wait for the next call
+    for (let i = decided; i < items.length; i++) leave(i);
+    const subjects: RecSubject[] = [];
+    for (const m of moves) {
+      subjects.push({ player_id: m.player_id, gsis_id: null, role: m.role, slot: null });
+      if (m.drop !== null)
+        subjects.push({ player_id: m.drop, gsis_id: null, role: "drop", slot: null });
+    }
+    return {
+      moves,
+      subjects,
+      fallback_claims: fallback,
+      later_adds: later,
+      redropped,
+      partial: run.partial,
+      cpu_ms: run.cpu_ms,
+    };
+  };
+  const plan = await planner({ claims, adds });
+  budget.spend(plan);
+  cpu += plan.cpu_ms;
+  if (plan.partial) {
+    partial = true;
+    warnings.push(planPartialLine(plan));
   }
-  const parts: string[] = [];
-  if (claims.length > 0)
-    parts.push(`submit ${String(claims.length)} ordered claim${claims.length === 1 ? "" : "s"}`);
-  if (adds.length > 0)
-    parts.push(`add ${String(adds.length)} free agent${adds.length === 1 ? "" : "s"} now`);
-  if (marginal.length > 0) parts.push(`${String(marginal.length)} marginal (your call)`);
-  if (scramble.length > 0 && phase === "pre_run")
-    parts.push(`${String(scramble.length)} on the scramble list after the run`);
+  const planAssumption = planDropsAssumption(plan);
+  if (planAssumption !== null) assumptions.push(planAssumption);
   const noMove = claims.length === 0 && adds.length === 0;
   const sd = top === null ? 0 : (top.value.p90 - top.value.p10) / (2 * Z90);
   const rec: Rec = {
-    action: noMove
-      ? parts.length > 0
-        ? `no clear move: ${parts.join("; ")}`
-        : "no claim clears the premium"
-      : parts.join("; "),
-    subjects,
+    action: waiverActionText(
+      claims.length,
+      adds.length,
+      marginal.length,
+      scramble.length,
+      phase,
+      plan.moves.filter((m) => m.role === "add").length,
+    ),
+    subjects: plan.subjects,
     lineup: null,
     point_estimate: top === null ? 0 : top.s,
     distribution: top === null ? zeroDist("position_cv") : top.value,
@@ -1172,12 +1524,7 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
       p90: top === null ? 0 : round(top.s - premium + Z90 * sd, 3),
     },
     decision_metric: "surplus_vs_premium",
-    drivers: [
-      { name: "premium", contribution: -premium },
-      ...ranked
-        .slice(0, 3)
-        .map((c) => ({ name: `surplus:${String(c.player_id)}`, contribution: c.s })),
-    ],
+    drivers: [{ name: "premium", contribution: -premium }, ...planDrivers(plan, ranked)],
     assumptions,
     confidence: { role_games: 0, inputs },
     as_of: newestAsOf(inputs, req.clock.nowIso()),
@@ -1212,7 +1559,48 @@ export async function analyzeWaivers(req: WaiverRequest): Promise<WaiverOutcome>
     warnings,
     cpu_ms: cpu,
     partial,
+    planner,
   };
+}
+
+/**
+ * The Rec's surplus drivers: the plan's moves with their surplus in it (a later move's on the roster
+ * the earlier ones leave), then the best other candidates alone — three in all.
+ */
+export function planDrivers(
+  plan: Pick<WaiverPlan, "moves">,
+  ranked: readonly Pick<WaiverCandidate, "player_id" | "s">[],
+): { name: string; contribution: number }[] {
+  const inPlan = new Set(plan.moves.map((m) => m.player_id));
+  return [
+    ...plan.moves.map((m) => ({ name: `surplus:${String(m.player_id)}`, contribution: m.s })),
+    ...ranked
+      .filter((c) => !inPlan.has(c.player_id))
+      .map((c) => ({ name: `surplus:${String(c.player_id)}`, contribution: c.s })),
+  ].slice(0, 3);
+}
+
+/** The line a deadline-stopped plan adds to the warnings. */
+export function planPartialLine(plan: Pick<WaiverPlan, "moves">): string {
+  return `partial: the plan stops at ${String(plan.moves.length)} move${plural(plan.moves.length, "", "s")} before the CPU deadline: call again after making them`;
+}
+
+/**
+ * Said when a chained add drops another player than it would alone (its conditional_drop): the plan's
+ * drop is the one to use when every move before it is made. Null when none does.
+ */
+export function planDropsAssumption(
+  plan: Pick<WaiverPlan, "redropped" | "moves">,
+): Assumption | null {
+  if (plan.redropped.length === 0) return null;
+  const listed = plan.redropped
+    .slice(0, 3)
+    .map((r) => `${String(r.player_id)} drops ${r.drop === null ? "nobody" : String(r.drop)}`);
+  const more = plan.redropped.length - listed.length;
+  return A(
+    `the plan's adds are chained, each valued after the moves before it: ${listed.join(", ")}${more > 0 ? ` (+${String(more)})` : ""} — not the drop each names alone`,
+    PLAN_REVISIT,
+  );
 }
 
 function dropValue(p: WaiverPlayer, weeks: number, settings: ScoringSettings | null): Dist {

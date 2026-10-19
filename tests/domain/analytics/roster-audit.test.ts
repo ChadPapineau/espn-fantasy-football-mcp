@@ -10,7 +10,7 @@
 // (`ir-invalid`, `hidden-bench`, `ir-open`, `inj-ir-cleared`, the base).
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
+import { AnalyticsError, ROSTER_EMPTY_TEXT } from "../../../src/domain/analytics/errors.js";
 import {
   COLD_STREAMABILITY,
   HIDDEN_BENCH_RISKS,
@@ -23,7 +23,7 @@ import {
 } from "../../../src/domain/analytics/rosterAudit.js";
 import type { StreamOption } from "../../../src/domain/analytics/scheduleStress.js";
 import { weeklyValues } from "../../../src/domain/analytics/waivers.js";
-import { remainingWeeks } from "../../../src/domain/league/rules.js";
+import { remainingWeeks, tradeDeadlineStatus } from "../../../src/domain/league/rules.js";
 import type { InjuryStatus, Roster } from "../../../src/domain/league/types.js";
 import { clockAndRng, ELIGIBLE, instantPacer, referenceSlots, steppingPacer } from "./helpers.js";
 import { FX_WEEK, MY_TEAM, fxLeague, type FxLeague } from "./fx10h-world.js";
@@ -535,6 +535,16 @@ describe("phase, adds, bounds", () => {
     expect(out.partial).toBe(true);
     expect(out.data.bench_plan.length).toBeLessThan(5);
     await expect(analyzeRoster(rq({ players: [] }))).rejects.toBeInstanceOf(AnalyticsError);
+    // Stage C round 2 (analytics-empty-roster-validation): a league state, never VALIDATION
+    await expect(analyzeRoster(rq({ players: [] }))).rejects.toMatchObject({
+      code: "roster_empty",
+      effCode: "NOT_FOUND",
+      effDetails: {
+        reason: "roster_empty",
+        message: ROSTER_EMPTY_TEXT.message,
+        hint: ROSTER_EMPTY_TEXT.hint,
+      },
+    });
     await expect(analyzeRoster(rq({ players: [...roster(), roster()[0]!] }))).rejects.toThrow(
       /twice/,
     );
@@ -634,5 +644,100 @@ describe("fx-10h IR variants (research 05 §4.3; plan 09 RA-2..RA-4, RA-INJ)", (
     expect(out.data.ir.invalid).toBe(false);
     expect(out.data.ir.forced_drop).toBeNull();
     expect(out.data.rec.action).not.toMatch(/INVALID/);
+  });
+});
+
+// Stage C round 2, finding roster-audit-deadline-by-week (plan 07 E9 "zero after the deadline";
+// research 05 §4.3 item 2; changelog R6 era): the owner's deadline is 2026-12-02 17:00Z and week 13's
+// first kickoff is Thursday the 3rd, so `first_week_after` = 13 — but ESPN rolls the scoring period
+// to 13 by Tuesday, and E9 judged the phase by that week number: from Tuesday until Wednesday noon
+// ET, while trades were still open, it dropped the consolidation idea and zeroed stash trade value
+// "past the trade deadline", contradicting espn_analyze_trade at the same instant. With the deadline
+// instant passed, the phase is the instant against the clock — tradeDeadlineStatus, E6's own rule.
+describe("the trade deadline is an instant, not a week (finding roster-audit-deadline-by-week)", () => {
+  const DEADLINE = "2026-12-02T17:00:00.000Z";
+  const LATE_WEEKS = [13, 14, 15, 16, 17];
+  /**
+   * A stash unlikely back by the playoffs (P(returned by week 15) 0.04) but likely by week 17 (0.9):
+   * worth holding while he can still be traded, a streamer once he cannot.
+   */
+  const stashed = (): AuditPlayer[] => [
+    ...roster(),
+    ap(20, "WR", 16, 21, {
+      status: "INJURY_RESERVE",
+      return_by_week: [
+        { week: 15, p: 0.04 },
+        { week: 17, p: 0.9 },
+      ],
+    }),
+  ];
+  const at = (iso: string, week: number, over: Partial<RosterAuditRequest> = {}) =>
+    analyzeRoster(
+      rq({
+        clock: clockAndRng(iso).clock,
+        current_week: week,
+        weeks: LATE_WEEKS.filter((w) => w >= week).length > 0 ? LATE_WEEKS : [week],
+        players: stashed(),
+        trade_deadline_week: 13,
+        trade_deadline: DEADLINE,
+        ...over,
+      }),
+    );
+  const stashOf = (d: Awaited<ReturnType<typeof analyzeRoster>>["data"]) =>
+    d.stash_values.find((x) => x.player_id === 20);
+
+  it("Tuesday and Wednesday morning of week 13, before the deadline: still mid — consolidation offered, the stash keeps its trade value", async () => {
+    // regression: the scoring period was already 13, so both instants read "late"
+    for (const iso of ["2026-12-02T03:00:00.000Z", "2026-12-02T16:00:00.000Z"]) {
+      const out = await at(iso, 13);
+      expect(out.data.phase, iso).toBe("mid");
+      expect(out.data.consolidation_candidates.length, iso).toBeGreaterThan(0);
+      expect(stashOf(out.data)?.playoff_horizon_note, iso).toBeNull();
+      expect(stashOf(out.data)?.value.mean ?? 0, iso).toBeGreaterThan(0);
+      expect(stashOf(out.data)?.verdict, iso).toBe("hold");
+    }
+  });
+
+  it("from the deadline instant on (inclusive): late — no consolidation, the stash is a streamer", async () => {
+    for (const iso of [DEADLINE, "2026-12-02T18:00:00.000Z", "2026-12-08T12:00:00.000Z"]) {
+      const out = await at(iso, 13);
+      expect(out.data.phase, iso).toBe("late");
+      expect(out.data.consolidation_candidates, iso).toEqual([]);
+      expect(stashOf(out.data)?.value.mean, iso).toBe(0);
+      expect(stashOf(out.data)?.verdict, iso).toBe("drop for a streamer");
+      expect(stashOf(out.data)?.playoff_horizon_note, iso).toMatch(/^past the trade deadline/);
+    }
+  });
+
+  it("property: E9 is late exactly when E6's tradeDeadlineStatus says the deadline passed", async () => {
+    const at0 = Date.parse(DEADLINE);
+    await fc.assert(
+      fc.asyncProperty(
+        fc.integer({ min: -4 * 86_400_000, max: 4 * 86_400_000 }),
+        fc.constantFrom(12, 13, 14),
+        async (offset, week) => {
+          const iso = new Date(at0 + offset).toISOString();
+          const out = await at(iso, week, { players: roster() });
+          const passed = tradeDeadlineStatus({ deadline: DEADLINE }, at0 + offset).passed;
+          expect(out.data.phase === "late").toBe(passed === true);
+        },
+      ),
+      { numRuns: 40 },
+    );
+  }, 120_000);
+
+  it("a league without a deadline (null): the playoff fallback; the week alone (no instant passed) is read as before", async () => {
+    expect((await at("2026-12-02T03:00:00.000Z", 13, { trade_deadline: null })).data.phase).toBe(
+      "late",
+    );
+    expect((await at("2026-11-24T03:00:00.000Z", 12, { trade_deadline: null })).data.phase).toBe(
+      "mid",
+    );
+    const { trade_deadline: _omit, ...legacy } = rq({
+      clock: clockAndRng("2026-12-02T03:00:00.000Z").clock,
+      current_week: 13,
+      weeks: LATE_WEEKS,
+    });
+    expect((await analyzeRoster(legacy)).data.phase).toBe("late");
   });
 });

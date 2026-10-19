@@ -23,7 +23,7 @@ import {
   type RosWeek,
   type TrailingLine,
 } from "../../../src/domain/analytics/projection.js";
-import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
+import { AnalyticsError, ROSTER_EMPTY_TEXT } from "../../../src/domain/analytics/errors.js";
 import { WEIGHT_ESPN_V1 } from "../../../src/domain/analytics/types.js";
 import { asPositionId, type StatLine } from "../../../src/domain/scoring/types.js";
 import type { PlatformPlayer } from "../../../src/domain/league/types.js";
@@ -873,6 +873,18 @@ describe("determinism, the CPU deadline, opponents and bounds", () => {
     expect(out.data.completed_samples).toBeLessThan(20_000);
     expect(out.data.completed_samples).toBeGreaterThanOrEqual(1000);
     expect(out.warnings.some((w) => w.startsWith("n_sims shared down"))).toBe(true);
+  });
+
+  it("Stage C round 2 (analytics-empty-roster-validation): no target — an empty roster, before the draft — is NOT_FOUND roster_empty", async () => {
+    await expect(projectPlayers(request({ targets: [] }))).rejects.toMatchObject({
+      code: "roster_empty",
+      effCode: "NOT_FOUND",
+      effDetails: {
+        reason: "roster_empty",
+        message: ROSTER_EMPTY_TEXT.message,
+        hint: ROSTER_EMPTY_TEXT.hint,
+      },
+    });
   });
 
   it("refuses without settings and out of bounds", async () => {

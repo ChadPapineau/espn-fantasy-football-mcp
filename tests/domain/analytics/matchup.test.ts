@@ -490,7 +490,14 @@ describe("the copula's pieces (ported)", () => {
 describe("hostile inputs", () => {
   it("no opponent, an empty opponent, n_sims out of range, a duplicated player, an empty lineup", async () => {
     await expect(analyzeMatchupWin(req({ opponent: null }))).rejects.toBeInstanceOf(AnalyticsError);
-    await expect(analyzeMatchupWin(req({ opponent: [] }))).rejects.toBeInstanceOf(AnalyticsError);
+    await expect(analyzeMatchupWin(req({ opponent: null }))).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    // Stage C round 2 (analytics-empty-roster-validation): an empty roster is a league state
+    await expect(analyzeMatchupWin(req({ opponent: [] }))).rejects.toMatchObject({
+      code: "roster_empty",
+      effCode: "NOT_FOUND",
+    });
     await expect(analyzeMatchupWin(req({ n_sims: 10 }))).rejects.toThrow(/n_sims/);
     await expect(analyzeMatchupWin(req({ n_sims: 1500.5 }))).rejects.toThrow(/n_sims/);
     const dup = roster(100).map((p) => mp(p));
@@ -510,7 +517,11 @@ describe("hostile inputs", () => {
         }),
       ),
     ).rejects.toThrow(/opponent's lineup has no starter/);
-    await expect(analyzeMatchupWin(req({ me: [] }))).rejects.toThrow(/roster size/);
+    await expect(analyzeMatchupWin(req({ me: [] }))).rejects.toMatchObject({
+      code: "roster_empty",
+      effCode: "NOT_FOUND",
+      effDetails: { field: "players", reason: "roster_empty" },
+    });
   });
 
   it("NaN points so far read as 0; a NaN Dist never yields a NaN P(win)", async () => {

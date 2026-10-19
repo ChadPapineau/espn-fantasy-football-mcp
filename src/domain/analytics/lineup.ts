@@ -43,7 +43,7 @@ import {
   type ObjectiveSwitchRecord,
 } from "./calibration/objectiveSwitch.js";
 import { LINEUP, Z90 } from "./constants.js";
-import { ensure } from "./errors.js";
+import { ensure, ensurePlayers } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
 import { normalDist, round, sigmaOf } from "./math.js";
 import type { ProjectedWeek } from "./projection.js";
@@ -819,16 +819,15 @@ interface Evaluated {
 }
 
 /**
- * E2. Throws AnalyticsError `invalid_request` on bounds (roster size, duplicate ids, blend weight,
- * PF weight, compare pairs). Never moves a locked player; never benches a locked starter.
+ * E2. Throws AnalyticsError `roster_empty` on an empty roster, `invalid_request` on bounds (roster
+ * size, duplicate ids, blend weight, PF weight, compare pairs). Never moves a locked player; never
+ * benches a locked starter.
  */
 export function analyzeLineup(req: LineupRequest): LineupData {
   const { roster, clock } = req;
-  ensure(
-    req.players.length >= 1 && req.players.length <= LINEUP.maxPlayers,
-    "roster size out of range",
-    "players",
-  );
+  // an empty roster is a league state (before the draft), not an argument error (Stage C round 2)
+  ensurePlayers(req.players.length, "players");
+  ensure(req.players.length <= LINEUP.maxPlayers, "roster size out of range", "players");
   ensure(
     new Set(req.players.map((p) => p.player_id)).size === req.players.length,
     "duplicate player id",

@@ -127,6 +127,22 @@ answers on the recorded league, and no production configuration reaches the swit
 - E5: surplus is the lineup gain on my roster (E2's assignment) over the best drop; equal drops are
   broken by the drop's own projected total (the bench effect). `s_with_ir_move` frees the seat with
   no drop — the activation warning carries the research's timing trap. K/D-ST are valued on the
-  implied-total bracket model under the league's own S; ESPN's K/D-ST projections are comparators.
+  implied-total bracket model under the league's own S where the game has a betting line (a kicker
+  reads his team's implied total, a D/ST the opponent's); a game without one keeps ESPN's projection
+  (this week) or ROS share (later weeks), and the Rec says which weeks were lined — a missing line
+  once read as the league average and gave every K and D/ST one value (Stage C round 2). K and D/ST
+  stream in place (research 05 §4.2, "drop-and-stream, not carry-two"): while my roster fills the
+  position's seats a candidate there drops one of mine at it, and his IR-move version is the same
+  move. The Rec carries a plan whose moves can all be made together: the claims in order with their
+  own drop (a claim on an earlier claim's drop is its fallback in the ordered list, which the action
+  still counts), then the free-agent adds chained greedily on distinct drops or open seats, each
+  valued on the roster the moves before it leave, at most 10 moves (20 subjects); a chained add whose
+  drop differs from its own `conditional_drop` is said. `claim_list` and the candidates' verdicts are
+  unchanged.
+- E9: past the trade deadline is the deadline instant against the clock (tradeDeadlineStatus, E6's
+  rule) when the caller passes `trade_deadline`; the week number said "past" from the Tuesday ESPN
+  rolls the scoring period over, up to ~1.5 days early (Stage C round 2).
+- Every engine answers an empty roster — a league before its draft — as `roster_empty` (plan 01
+  §4.3 NOT_FOUND, reason `roster_empty`, fixed server texts), never VALIDATION.
 - The PA tie-break direction (fewer points against ranks higher) is unverified [U]; it only acts
   after win %, PF and head-to-head all tie.

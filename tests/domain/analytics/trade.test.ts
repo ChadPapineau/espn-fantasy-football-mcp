@@ -16,7 +16,7 @@ import {
   type TradeRequest,
   type TradeTeam,
 } from "../../../src/domain/analytics/trade.js";
-import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
+import { AnalyticsError, ROSTER_EMPTY_TEXT } from "../../../src/domain/analytics/errors.js";
 import { TRADE } from "../../../src/domain/analytics/marketConstants.js";
 import type { SeasonReading, TradeEvaluationData } from "../../../src/domain/analytics/types.js";
 import { wrapUntrusted } from "../../../src/domain/league/types.js";
@@ -400,6 +400,18 @@ describe("partner search (sib §5.7)", () => {
 });
 
 describe("validation and the depth helpers", () => {
+  it("Stage C round 2 (analytics-empty-roster-validation): my empty roster — before the draft — is NOT_FOUND roster_empty", async () => {
+    await expect(analyzeTrade(req({ me: { ...ME, players: [] } }))).rejects.toMatchObject({
+      code: "roster_empty",
+      effCode: "NOT_FOUND",
+      effDetails: {
+        reason: "roster_empty",
+        message: ROSTER_EMPTY_TEXT.message,
+        hint: ROSTER_EMPTY_TEXT.hint,
+      },
+    });
+  });
+
   it("refuses an offer and a search together, an unknown player or partner, a duplicate", async () => {
     await expect(
       analyzeTrade(req({ find_partners: { need_position: "WR" } })),

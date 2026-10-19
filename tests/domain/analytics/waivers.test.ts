@@ -17,7 +17,7 @@ import {
   type WaiverPlayer,
   type WaiverRequest,
 } from "../../../src/domain/analytics/waivers.js";
-import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
+import { AnalyticsError, ROSTER_EMPTY_TEXT } from "../../../src/domain/analytics/errors.js";
 import { isValidClearsToFa } from "../../../src/domain/analytics/types.js";
 import { TEXT_CAPS } from "../../../src/domain/league/types.js";
 import {
@@ -179,7 +179,10 @@ describe("A9a: the priority premium on the reference format (hard)", () => {
     expect(byId(data, 103)?.verdict).toBe("pass");
     expect(byId(data, 104)?.verdict).toBe("fa_add_after_run");
     expect(byId(data, 105)?.verdict).toBe("fa_add_now");
-    expect(byId(data, 106)).toMatchObject({ verdict: "pass", s: 0 });
+    // a worse kicker than mine: K streams in place (Stage C round 2, research 05 §4.2) — he would
+    // replace my K 9, never ride the bench beside him, so his surplus is the loss, and he passes
+    expect(byId(data, 106)).toMatchObject({ verdict: "pass", conditional_drop: { player_id: 9 } });
+    expect(byId(data, 106)?.s ?? 0).toBeLessThan(0);
     expect(byId(data, 101)?.conditional_drop?.player_id).toBe(14);
   });
 
@@ -843,6 +846,18 @@ describe("helpers and bounds", () => {
     expect(strip((await analyzeWaivers(request({ candidates: hostile }))).data)).toBe(
       strip((await analyzeWaivers(request())).data),
     );
+  });
+
+  it("Stage C round 2 (analytics-empty-roster-validation): an empty roster — before the draft — is NOT_FOUND roster_empty, never VALIDATION", async () => {
+    await expect(analyzeWaivers(request({ mine: [] }))).rejects.toMatchObject({
+      code: "roster_empty",
+      effCode: "NOT_FOUND",
+      effDetails: {
+        reason: "roster_empty",
+        message: ROSTER_EMPTY_TEXT.message,
+        hint: ROSTER_EMPTY_TEXT.hint,
+      },
+    });
   });
 
   it("refuses malformed requests", async () => {

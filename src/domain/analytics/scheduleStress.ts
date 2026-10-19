@@ -28,7 +28,7 @@ import type { Dist } from "../scoring/types.js";
 import { FORBIDDEN, solveAssignment } from "./assignment.js";
 import { DEFAULT_CV, POSITION_CV } from "./constants.js";
 import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
-import { ensure } from "./errors.js";
+import { ensure, ensurePlayers } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs, newestAsOf } from "./inputs.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
 import { clamp, normalDist, round, zeroDist } from "./math.js";
@@ -261,13 +261,11 @@ function firstKickoff(
   return k === undefined ? null : new Date(k).toISOString();
 }
 
-/** E8. Throws AnalyticsError `invalid_request` on bounds. */
+/** E8. Throws AnalyticsError `roster_empty` on an empty roster, `invalid_request` on bounds. */
 export async function analyzeSchedule(req: ScheduleRequest): Promise<ScheduleOutcome> {
-  ensure(
-    req.players.length >= 1 && req.players.length <= SCHEDULE.maxPlayers,
-    "roster size out of range",
-    "players",
-  );
+  // an empty roster is a league state (before the draft), not an argument error (Stage C round 2)
+  ensurePlayers(req.players.length, "players");
+  ensure(req.players.length <= SCHEDULE.maxPlayers, "roster size out of range", "players");
   ensure(
     req.weeks.length >= 1 &&
       req.weeks.length <= SCHEDULE.maxWeeks &&

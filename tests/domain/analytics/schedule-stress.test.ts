@@ -8,7 +8,7 @@
 // option never lowers a week's lineup); the cooperative deadline; hostile inputs.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
+import { AnalyticsError, ROSTER_EMPTY_TEXT } from "../../../src/domain/analytics/errors.js";
 import {
   SCHEDULE,
   SCHEDULE_EVIDENCE_NOTE,
@@ -354,6 +354,16 @@ describe("cooperative batching and hostile inputs", () => {
 
   it("refuses empty rosters, duplicated players, bad or duplicated weeks, no week left", async () => {
     await expect(analyzeSchedule(rq({ players: [] }))).rejects.toBeInstanceOf(AnalyticsError);
+    // Stage C round 2 (analytics-empty-roster-validation): a league state, never VALIDATION
+    await expect(analyzeSchedule(rq({ players: [] }))).rejects.toMatchObject({
+      code: "roster_empty",
+      effCode: "NOT_FOUND",
+      effDetails: {
+        reason: "roster_empty",
+        message: ROSTER_EMPTY_TEXT.message,
+        hint: ROSTER_EMPTY_TEXT.hint,
+      },
+    });
     await expect(analyzeSchedule(rq({ players: [...roster(), roster()[0]!] }))).rejects.toThrow(
       /twice/,
     );

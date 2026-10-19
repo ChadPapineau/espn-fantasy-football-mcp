@@ -25,7 +25,7 @@ import type { GameState, IsoInstant, RosterSlots } from "../league/types.js";
 import type { Dist, DistBasis } from "../scoring/types.js";
 import { LINEUP, SIMS, Z90 } from "./constants.js";
 import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
-import { AnalyticsError, ensure } from "./errors.js";
+import { AnalyticsError, ensure, ensurePlayers } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs, newestAsOf } from "./inputs.js";
 import { bestLineup, type LineupPlayer } from "./lineup.js";
 import { clamp, normalCdf, normalDist, normalDraw, round, sigmaOf } from "./math.js";
@@ -332,13 +332,20 @@ function drawOf(c: Contribution, u: number): number {
   return c.so_far + f * c.dist.mean + Math.sqrt(f) * (x - c.dist.mean);
 }
 
-/** E3 `pre` / `live`. Throws AnalyticsError `invalid_request` (no opponent, bounds). */
+/**
+ * E3 `pre` / `live`. Throws AnalyticsError `roster_empty` when either roster is empty, `invalid_request`
+ * (no opponent, bounds).
+ */
 export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<MatchupWinOutcome> {
   const opponent = req.opponent;
-  if (opponent === null || opponent.length === 0)
+  if (opponent === null)
     throw new AnalyticsError("invalid_request", "no opponent roster for this week", "week");
+  // an empty roster — mine or the opponent's — is a league state (before the draft), not an
+  // argument error (Stage C round 2)
+  ensurePlayers(req.me.length, "players");
+  ensurePlayers(opponent.length, "week");
   ensure(
-    req.me.length > 0 && req.me.length <= LINEUP.maxPlayers && opponent.length <= LINEUP.maxPlayers,
+    req.me.length <= LINEUP.maxPlayers && opponent.length <= LINEUP.maxPlayers,
     "roster size out of range",
     "players",
   );

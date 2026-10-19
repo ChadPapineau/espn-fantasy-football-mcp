@@ -59,7 +59,7 @@ import {
 } from "./constants.js";
 import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
 import { opportunityFromLines, playerSimDist } from "./playerSim.js";
-import { AnalyticsError, ensure } from "./errors.js";
+import { AnalyticsError, ensure, ensurePlayers } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs } from "./inputs.js";
 import {
   clamp,
@@ -555,17 +555,18 @@ function drawSample(t: Task): number {
 }
 
 /**
- * E1 v1-ensemble. Throws AnalyticsError `no_settings` without S, `invalid_request` on bounds.
+ * E1 v1-ensemble. Throws AnalyticsError `no_settings` without S, `roster_empty` without a target,
+ * `invalid_request` on bounds.
  */
 export async function projectPlayers(req: ProjectionRequest): Promise<ProjectionOutcome> {
   if (req.settings === null)
     throw new AnalyticsError("no_settings", "the league's scoring settings are not available");
   const settings = req.settings;
-  ensure(
-    req.targets.length >= 1 && req.targets.length <= LIMITS.maxTargets,
-    "targets out of range",
-    "players",
-  );
+  // no target: the engines that project a roster pass none only when it is empty — a league state
+  // (before the draft), not an argument error (Stage C round 2); E1's own tool refuses an empty
+  // selection itself (NOT_FOUND)
+  ensurePlayers(req.targets.length, "players");
+  ensure(req.targets.length <= LIMITS.maxTargets, "targets out of range", "players");
   ensure(
     Number.isInteger(req.week) && req.week >= 1 && req.week <= LIMITS.maxWeeks,
     "week out of range",
