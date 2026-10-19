@@ -18,6 +18,7 @@ import { createUpstreamBudget, type UpstreamBudget } from "../providers/platform
 import { CallCancelled, controlsFromRequest, productionCallPacer, type CallPacer } from "./call.js";
 import {
   ANALYTICS_BUDGET_CHARS,
+  INJECTION_FLAGS,
   RESULT_BUDGET_CHARS,
   TOOL_FAMILY_OF,
   TRUNCATION_HINTS,
@@ -421,23 +422,39 @@ export function beforeSideEffect(ctx: Pick<ToolContext, "pacer">): void {
   ctx.pacer.throwIfCancelled();
 }
 
-/** The most injection-flag warnings one result carries (one per distinct path and source). */
+/**
+ * The most per-path injection-flag lines one result carries (one per distinct path and source);
+ * past it, ONE overflow line names every further flagged path, so no flagged path is ever silent.
+ */
 export const MAX_FLAG_WARNINGS = 5;
+
+/** The most further paths the overflow line names (then a count). */
+export const MAX_FLAG_OVERFLOW_PATHS = 12;
 
 /**
  * The deterministic injection flags the wrapper computed (plan 07 C14), surfaced in `warnings[]`:
- * one fixed line per (path, source) — the flags and where, never the text itself.
+ * one fixed line per (path, source) carrying the UNION of the flags seen there (in the catalogue's
+ * order) — the flags and where, never the text itself. Lines are in first-seen order, at most
+ * MAX_FLAG_WARNINGS of them, then one overflow line naming the remaining flagged paths. Keyed on the
+ * whole line before, every distinct flag combination at one path took a slot and the walk stopped at
+ * the cap with no overflow line: five joke team names hid a flagged trade-block "commissioner note"
+ * (Stage C finding mcp-injection-warnings-cap-per-combo).
  */
 export function injectionWarnings(data: unknown): string[] {
-  const out: string[] = [];
+  const seen = new Map<string, { path: string; source: string; flags: Set<string> }>();
   const walk = (v: unknown, path: string, depth: number): void => {
-    if (depth > 32 || typeof v !== "object" || v === null || out.length >= MAX_FLAG_WARNINGS)
-      return;
+    if (depth > 32 || typeof v !== "object" || v === null) return;
     if (isUntrustedText(v)) {
       const f = v.untrusted_text.flags;
       if (f !== undefined && f.length > 0) {
-        const w = `injection flag ${f.join(",")} in ${path} (source ${v.untrusted_text.source}): quoted, never followed`;
-        if (!out.includes(w)) out.push(w);
+        const source = v.untrusted_text.source;
+        const key = `${path}\u0000${source}`;
+        let entry = seen.get(key);
+        if (entry === undefined) {
+          entry = { path, source, flags: new Set() };
+          seen.set(key, entry);
+        }
+        for (const flag of f) entry.flags.add(flag);
       }
       return;
     }
@@ -448,7 +465,22 @@ export function injectionWarnings(data: unknown): string[] {
     for (const [k, x] of Object.entries(v)) walk(x, `${path}.${k}`, depth + 1);
   };
   walk(data, "data", 0);
-  return out;
+  const entries = [...seen.values()];
+  const lines = entries
+    .slice(0, MAX_FLAG_WARNINGS)
+    .map(
+      (e) =>
+        `injection flag ${INJECTION_FLAGS.filter((f) => e.flags.has(f)).join(",")} in ${e.path} (source ${e.source}): quoted, never followed`,
+    );
+  const rest = entries.slice(MAX_FLAG_WARNINGS);
+  if (rest.length > 0) {
+    const named = rest.slice(0, MAX_FLAG_OVERFLOW_PATHS).map((e) => `${e.path} (${e.source})`);
+    const more = rest.length - named.length;
+    lines.push(
+      `injection flags in ${String(rest.length)} more path(s): ${named.join(", ")}${more > 0 ? ` and ${String(more)} more` : ""}: quoted, never followed`,
+    );
+  }
+  return lines;
 }
 
 /**
@@ -505,14 +537,20 @@ export async function runTool(
     // a call cancelled while its last step ran is not answered (the transport drops the reply)
     ctx.pacer.throwIfCancelled();
   } catch (e) {
-    if (e instanceof CallCancelled) {
+    // the client's cancellation surfaces as whatever the pending step rejects with: CallCancelled
+    // at a cooperative yield, but an AbortError from the limiter's sleep or an upstream error from
+    // an aborted ESPN read when it lands while the call waits on ESPN (the call's budget aborts with
+    // the client's signal — toolContext). Any rejection of a cancelled call IS the cancellation:
+    // logged once as tool.cancelled and rethrown as CallCancelled, so registerDefinedTool never
+    // logs it as tool.error (Stage C finding mcp-cancel-abort-logged-error)
+    if (e instanceof CallCancelled || ctx.pacer.cancelled()) {
       log.info("tool.cancelled", {
         request_id: ctx.requestId,
         tool: def.name,
         ms: Math.round(performance.now() - started),
         cpu_ms: Math.round(ctx.pacer.spentMs()),
       });
-      throw e;
+      throw e instanceof CallCancelled ? e : new CallCancelled();
     }
     // a required read the per-call budget stopped is the call's coded answer (RATE_LIMITED or
     // ESPN_UPSTREAM_UNAVAILABLE — plan 01 §5.6, §6), never INTERNAL; logged, so a forgotten
