@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fakeEspnS2, fakeGuid, fakeLeagueId } from "../../scripts/ci/secret-fixtures.mjs";
 import {
   MIN_NODE,
+  backupsPresent,
   checkClientLog,
   checkStore,
   checkClientSecrecy,
@@ -743,6 +744,49 @@ describe("row 5: the cache's own directories, and the restore procedure", () => 
         ]),
       );
     }
+  });
+  it("several refused directories are counted; a pending store reports them; only our backups are listed and fixed", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { env: { EFF_CREDENTIAL_STORE: "file" } });
+    const { config, log } = await loadLenientRuntime(io);
+    openStore(config, io.clock, log, { migrate: true }).close();
+    for (const d of ["backups", "tmp"]) {
+      mkdirSync(sub(d), { mode: 0o700 });
+      chmodSync(sub(d), 0o755);
+    }
+    // a store whose migration is pending (one version behind the binary): the refused directories come first
+    const raw = new DatabaseSync(path.join(sb.cacheDir, "store.sqlite"));
+    try {
+      raw.prepare("DELETE FROM schema_version WHERE version = ?").run(MIGRATIONS.length);
+    } finally {
+      raw.close();
+    }
+    const r = await runDoctor(io, { json: false, online: false, fix: false, yes: false });
+    const s = byId(r.rows, "store");
+    expect(s.message).toBe(`2 directory(ies) of ours refused: ${sub("backups")} …`);
+    // in backups/: our copies only — a foreign file and a directory are neither listed nor fixed
+    chmodSync(sub("backups"), 0o700);
+    chmodSync(sub("tmp"), 0o700);
+    writeFileSync(path.join(sub("backups"), "store-2026-10-06.sqlite"), "x", { mode: 0o644 });
+    chmodSync(path.join(sub("backups"), "store-2026-10-06.sqlite"), 0o644);
+    writeFileSync(path.join(sub("backups"), "notes.txt"), "mine", { mode: 0o644 });
+    chmodSync(path.join(sub("backups"), "notes.txt"), 0o644);
+    mkdirSync(path.join(sub("backups"), "store-2026-10-07.sqlite"), { mode: 0o700 });
+    expect(backupsPresent(sb.cacheDir)).toEqual([
+      expect.stringMatching(/^backup: .*store-2026-10-06\.sqlite \(/),
+    ]);
+    const fixes = plannedFixes(config).map((f) => f.description);
+    expect(fixes).toContain(`chmod 600 ${path.join(sub("backups"), "store-2026-10-06.sqlite")}`);
+    expect(fixes.join("\n")).not.toContain("notes.txt");
+    // a backups "directory" that is a file: nothing listed, nothing planned inside it
+    rmSync(sub("backups"), { recursive: true, force: true });
+    writeFileSync(sub("backups"), "not a directory", { mode: 0o600 });
+    expect(backupsPresent(sb.cacheDir)).toEqual([`no backup in ${sub("backups")}`]);
+    expect(
+      plannedFixes(config)
+        .map((f) => f.description)
+        .join("\n"),
+    ).not.toContain("backups");
   });
   it("a symlinked datasets/ is refused and named; --fix never follows it", async () => {
     sb = sandbox({ create: true });

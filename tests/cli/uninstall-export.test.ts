@@ -16,6 +16,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -307,6 +308,42 @@ describe("--export-log also exports what only the backups hold", () => {
     expect(await uninstall(none, r.config, r.log, { ...dry, dryRun: false, yes: true })).toBe(0);
     expect(none.out.text).toContain("no store.sqlite and no backup — nothing recorded to export");
     expect(existsSync(dest)).toBe(false);
+  });
+  it("several copies, newest first; one without our tables is exported as absent; a dry run without a store says so", async () => {
+    sb = sandbox();
+    const { keyring } = await withBackup();
+    // an older pre-migration copy that is a SQLite file without our tables (an early schema)
+    const older = path.join(sb.cacheDir, "backups", "store.sqlite.bak-v1");
+    const db = new DatabaseSync(older);
+    db.exec("CREATE TABLE something_else (x INTEGER); INSERT INTO something_else VALUES (1);");
+    db.close();
+    utimesSync(older, new Date("2026-09-01T00:00:00Z"), new Date("2026-09-01T00:00:00Z"));
+    renameSync(STORE(), `${STORE()}.moved-aside`);
+    const io = makeIo(sb, { keyring });
+    const { config, log } = await loadLenientRuntime(io);
+    const dest = path.join(sb.dir, "both.json");
+    expect(
+      await uninstall(io, config, log, {
+        yes: false,
+        dryRun: true,
+        keepConfig: false,
+        exportLog: dest,
+      }),
+    ).toBe(0);
+    expect(io.out.text).toContain(
+      `would export the recommendation log and snapshots (no store.sqlite; 2 backup copies) to ${dest}`,
+    );
+    const { code } = await run(keyring, dest);
+    expect(code).toBe(0);
+    const doc = JSON.parse(readFileSync(dest, "utf8")) as Doc;
+    expect(doc.backups.map((b) => b.file)).toEqual([
+      "store-2026-10-06.sqlite",
+      "store.sqlite.bak-v1",
+    ]);
+    expect(doc.backups[0]?.recommendation_log).toHaveLength(3);
+    expect(doc.backups[1]?.schema_version).toBeNull();
+    expect(doc.backups[1]?.rows).toEqual(Object.fromEntries(EXPORT_TABLES.map((t) => [t, null])));
+    expect(existsSync(older)).toBe(false);
   });
   it("rows the live store still holds are not exported twice; an unreadable backup stops the uninstall", async () => {
     sb = sandbox();

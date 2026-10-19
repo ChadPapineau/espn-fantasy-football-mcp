@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  MAX_ALERT_LINES,
   OVERRIDE_HOWTO,
   alertReason,
   diagnosticsLine,
@@ -145,6 +146,28 @@ describe("crosswalk rebuild — done path and the alert", () => {
     ).toBe(
       "ambiguous between 4 nflverse player(s) — candidates 00-0000001, 00-0000002, 00-0000003 (+1)",
     );
+    expect(
+      alertReason({
+        status: "unmatched",
+        reason: "name_only",
+        candidates: [cand("00-0000001")],
+      }),
+    ).toBe("no nflverse pair (name_only) — candidates 00-0000001");
+    expect(alertReason({ status: "unmatched", reason: "no_candidate", candidates: [] })).toBe(
+      "no nflverse pair (no_candidate)",
+    );
+    expect(alertReason({ status: "team_unit", nfl_team: null })).toBe(
+      "a team unit (paired by its team)",
+    );
+    expect(
+      diagnosticsLine(
+        [1, 2, 3, 4, 5, 6].map((i) => ({
+          code: "persisted_id_conflict" as const,
+          espn_id: i,
+          gsis_ids: [],
+        })),
+      ),
+    ).toBe("  diagnostics: persisted_id_conflict ×6 (espn 1, espn 2, espn 3, espn 4, espn 5, …)");
     expect(diagnosticsLine([])).toBeNull();
     expect(
       diagnosticsLine([
@@ -267,6 +290,30 @@ describe("crosswalk rebuild — done path and the alert", () => {
       },
     } as unknown as Store;
     expect((await runCrosswalkRebuild(io, config, broken, log, notifier)).code).toBe(1);
+    // more alerted players than MAX_ALERT_LINES: the first are listed, the rest counted
+    const many = {
+      ...store,
+      playerUniverse: {
+        all: () => ({
+          rows: Array.from({ length: MAX_ALERT_LINES + 3 }, (_, i) => ({
+            espn_id: 9100001 + i,
+            full_name: `Nobody ${String(i)}`,
+            position_id: 3,
+            pro_team_id: 1,
+            pro_team: "Atl",
+            percent_owned: 40,
+            jersey: "80",
+          })),
+          stamp: { ...stamp, source: "espn:players" },
+        }),
+        byIds: () => ({ rows: [], stamp: null }),
+      },
+    } as unknown as Store;
+    const big = await runCrosswalkRebuild(io, config, many, log, null);
+    expect(big.lines.filter((l) => l.startsWith("    espn "))).toHaveLength(MAX_ALERT_LINES);
+    expect(big.lines).toContain("    … 3 more");
+    expect(big.lines.join("\n")).toContain("(≥ 1 % owned): no nflverse pair (");
+    expect(big.lines.join("\n")).not.toContain("Nobody");
     expect(path.isAbsolute(sb.cacheDir)).toBe(true);
   });
 });

@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeEspnS2 } from "../../scripts/ci/secret-fixtures.mjs";
 import { selftestDigest } from "../../src/auth/selftest.js";
-import { TYPED_AHEAD_NOTE, createTerminalPrompt } from "../../src/cli/prompt.js";
+import { MAX_QUEUED_LINES, TYPED_AHEAD_NOTE, createTerminalPrompt } from "../../src/cli/prompt.js";
 import {
   candidatePorts,
   formHtml,
@@ -210,6 +210,24 @@ describe("terminal prompt on a TTY: the hidden value is never drawn", () => {
     });
     p.close();
     expect(shows(out, S2)).toBe(false);
+  });
+  it(`at most ${String(MAX_QUEUED_LINES)} lines wait for a question; the rest are dropped, none drawn`, async () => {
+    sb = sandbox();
+    const stdin = new FakeTty();
+    const out = new Capture();
+    const p = createTerminalPrompt({ stdin, out, takeTerminalNow: true });
+    stdin.write(
+      Array.from({ length: MAX_QUEUED_LINES + 2 }, (_, i) => `line-${String(i)}\r`).join(""),
+    );
+    await settle();
+    for (let i = 0; i < MAX_QUEUED_LINES; i++)
+      expect(await p.ask("Q: ", { hidden: false, timeoutMs: 1000 })).toEqual({
+        kind: "answer",
+        value: `line-${String(i)}`,
+      });
+    expect(await p.ask("Q: ", { hidden: false, timeoutMs: 20 })).toEqual({ kind: "timeout" });
+    p.close();
+    expect(out.text).not.toContain("line-");
   });
   it("a visible answer typed after its question IS drawn; keys typed after it are not; a timeout mutes", async () => {
     sb = sandbox();

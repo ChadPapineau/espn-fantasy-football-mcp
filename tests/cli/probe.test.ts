@@ -436,6 +436,31 @@ describe("eff probe", () => {
     expect(await probeAt(at("2026-10-17T09:00:00.000Z"))).toBe(4);
     expect(calls).toHaveLength(3);
   });
+  it("a red the probe cannot clear (a schema-level key an in-call answer found) still alarms, with the fallback text", async () => {
+    sb = sandbox();
+    const f = fakeFetch(() => json(HOST_BODY));
+    const { exec, calls } = fakeExec();
+    const io = makeIo(sb, { fetch: f.fetch, clock: movingClock(), platform: "darwin", exec });
+    const { config, log } = await loadLenientRuntime(io);
+    const store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      // not a required-path key: the probe's seed check cannot verify it, so the row stays red
+      new DriftStateWriter(store.repos.driftState, io.clock, config.espnReadHost).record([
+        {
+          kind: "missing_required_key",
+          view: "proTeamSchedules_wl",
+          path: "$.settings.proTeams[].proGamesByScoringPeriod",
+          value: null,
+        },
+      ]);
+    } finally {
+      store.close();
+    }
+    expect(await probe(io, config, log, { hostOnly: true, notify: true, json: false })).toBe(4);
+    expect(io.out.text).toContain("drift_state: red");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args[1]).toContain("ESPN drift: red — run `eff status`");
+  });
   it("a probe without --notify never stamps the alarm: the launchd probe still notifies that episode", async () => {
     sb = sandbox();
     const f = fakeFetch(() => json({ settings: { name: "renamed" }, teams: [] }));

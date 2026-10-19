@@ -299,6 +299,45 @@ describe("Retry-After on the CLI's keyless season GET", () => {
     expect(w.sentAt).toHaveLength(2);
   });
 
+  it("a 503 with Retry-After opens the window too; a 429 without one, or a 404, opens none", async () => {
+    let t = Date.parse("2026-10-06T12:00:00.000Z");
+    const clock = { nowMs: () => t, nowIso: () => new Date(t).toISOString() };
+    const answers: { status: number; headers: Record<string, string> }[] = [
+      { status: 503, headers: { "retry-after": "30" } },
+      { status: 429, headers: {} },
+      { status: 429, headers: {} },
+      { status: 404, headers: {} },
+      { status: 404, headers: {} },
+    ];
+    let sent = 0;
+    const http = createHttpClient({
+      fetch: () => {
+        const a = answers[sent++] ?? { status: 404, headers: {} };
+        return Promise.resolve(new Response("{}", { status: a.status, headers: a.headers }));
+      },
+    });
+    const get = seasonGet({ http, limiter: new MemoryLimiterRepo(), clock, origin: "server" });
+    const fail = (): Promise<HttpError> =>
+      get(SEASON_URL, opts()).then(
+        () => {
+          throw new Error("expected a failure");
+        },
+        (e: unknown) => e as HttpError,
+      );
+    expect((await fail()).retryAfterS).toBe(30);
+    t += 5_000;
+    expect([(await fail()).status, sent]).toEqual([null, 1]);
+    t += 25_000;
+    // the window is over: each 429 without a hint, and each 404, is sent at once
+    expect([(await fail()).retryAfterS, sent]).toEqual([null, 2]);
+    t += 2_000;
+    expect([(await fail()).retryAfterS, sent]).toEqual([null, 3]);
+    t += 2_000;
+    expect([(await fail()).kind, sent]).toEqual(["http_4xx", 4]);
+    t += 2_000;
+    expect([(await fail()).kind, sent]).toEqual(["http_4xx", 5]);
+  });
+
   it("through the refresh runner: it waits for the hint and no request lands inside the window", async () => {
     const w = world();
     const sleeps: number[] = [];

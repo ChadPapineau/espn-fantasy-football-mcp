@@ -558,6 +558,19 @@ describe("refresh", () => {
     await expect(go("weather:nws")).rejects.toThrow(
       /weather:nws is not the configured weather source \(EFF_WEATHER_SOURCE=open-meteo\)/,
     );
+    const nws = makeIo(sb, { fetch: noNetwork, env: { EFF_WEATHER_SOURCE: "nws" } });
+    const n = await loadLenientRuntime(nws);
+    await expect(
+      refresh(
+        nws,
+        n.config,
+        n.log,
+        { target: "weather:open_meteo", force: false, notify: false, json: true },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(
+      /weather:open_meteo is not the configured weather source \(EFF_WEATHER_SOURCE=nws\)/,
+    );
     // the id a stale warning names runs its source (offline here: a failure, not a usage error)
     expect(await go("espn:pro_schedule")).toBe(1);
     expect(JSON.parse(io.out.text)).toMatchObject({
