@@ -16,6 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { ROOT, tempDir } from "../lint/helpers.js";
 
@@ -167,6 +168,43 @@ describe(".githooks/pre-commit scans every staged blob", () => {
     expect(head(repo)).toBe(before);
   });
 
+  // Stage C finding scan-paths-identifier-rules-skipped: these committed through this hook
+  it("blocks an identifier in a PATH — a league-id directory, a member-GUID file name, a mailbox — and never prints it", () => {
+    const repo = makeRepo();
+    const before = head(repo);
+    const id = ["6", "2", "8", "3", "1", "8", "5"].join("");
+    const guid = ["7C1E2A9B", "3D4F", "4A6B", "8C7D", "9E0F1A2B3C4D"].join("-");
+    const mailbox = ["jane.q.fakeperson", "gmail.com"].join("@");
+    repo.write(`fixtures/espn/leagues/${id}/{${guid}}.json`, "{}\n");
+    repo.write(`notes-for-${mailbox}.md`, "notes\n");
+    repo.git(["add", "-A"]);
+    const r = repo.git(["commit", "-qm", "test: add captures"]);
+    expect(r.status, r.out).not.toBe(0);
+    for (const rule of ["espn-league-id", "brace-guid", "email-address"])
+      expect(r.out).toMatch(
+        new RegExp(`the path of scanned entry #\\d+ \\(path not printed\\)  \\[${rule}\\]`),
+      );
+    for (const v of [id, guid, mailbox]) expect(r.out).not.toContain(v);
+    expect(head(repo)).toBe(before);
+  });
+
+  // Stage C finding scan-gzip-header-trailer-unscanned: this committed through this hook
+  it("blocks a gzip that hides plaintext after a NUL past its member", () => {
+    const repo = makeRepo();
+    const before = head(repo);
+    const plain = `token = ${TOKEN}\nreport to ${["jane", "acme-corp.io"].join("@")}\n`;
+    mkdirSync(path.join(repo.dir, "data"), { recursive: true });
+    writeFileSync(
+      path.join(repo.dir, "data", "notes.csv"),
+      Buffer.concat([gzipSync("week,points\n1,10\n"), Buffer.from([0]), Buffer.from(plain)]),
+    );
+    repo.git(["add", "data/notes.csv"]);
+    const r = repo.git(["commit", "-qm", "feat: notes"]);
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toContain("data/notes.csv  [unscannable-archive-or-database]");
+    expect(head(repo)).toBe(before);
+  });
+
   it("still lets a clean non-ASCII-named file through (no blanket refusal)", () => {
     const repo = makeRepo();
     repo.write("notes-é.txt", "nothing secret here\n");
@@ -185,6 +223,9 @@ describe(".githooks/commit-msg checks and scans the message", () => {
     ["a secret in the body", `fix: x\n\ntoken = ${TOKEN}`],
     ["a deny-list term", `fix: x\n\nfor ${DENY_TERM}`],
     ["an email address", `fix: x\n\nreport to ${["jane", "acme-corp.io"].join("@")}`],
+    // GitHub would start no workflow for the push (Stage C finding ci-skip-markers-accepted)
+    ["a skip-CI marker", "fix: tidy the waiver notes [skip ci]"],
+    ["a skip-checks trailer", "fix: x\n\n\nskip-checks: true"],
   ])("refuses %s", (_why, msg) => {
     const repo = makeRepo();
     const before = head(repo);
@@ -340,6 +381,8 @@ describe.skipIf(!HAS_ZSH)("scripts/dev/commit-paths.sh (macOS dev tool; zsh)", (
   it.each([
     ["non-conventional", "update stuff"],
     ["AI trailer", "fix: a\\n\\nCo-Authored-By: Claude Opus <noreply@anthropic.com>"],
+    ["skip-CI marker", "docs: README [ci skip]"],
+    ["skip-checks trailer", "chore: bump\\n\\n\\nskip-checks: true"],
   ])("refuses a %s message (exit 11)", (_why, msg) => {
     const repo = makeRepo();
     withOrigin(repo);
@@ -390,6 +433,21 @@ describe.skipIf(!HAS_ZSH)("scripts/dev/commit-paths.sh (macOS dev tool; zsh)", (
     expect(m.status).toBe(9);
     expect(m.out).toContain("deny-list match in COMMIT_MESSAGE:1");
     expect(m.out.toLowerCase()).not.toContain("gremlins");
+    expect(head(repo)).toBe(before);
+  });
+
+  it("refuses an identifier in a committed PATH (exit 9); the path is never printed", () => {
+    const repo = makeRepo();
+    withOrigin(repo);
+    const before = head(repo);
+    const id = ["6", "2", "8", "3", "1", "8", "5"].join("");
+    repo.write(`exports/${["leagueId", id].join("=")}.json`, "{}\n");
+    const r = commitPaths(repo, ["test: add an export", "exports"]);
+    expect(r.status, r.out).toBe(9);
+    expect(r.out).toMatch(
+      /the path of scanned entry #\d+ \(path not printed\) {2}\[espn-league-id\]/,
+    );
+    expect(r.out).not.toContain(id);
     expect(head(repo)).toBe(before);
   });
 

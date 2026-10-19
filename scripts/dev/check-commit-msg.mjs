@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // check-commit-msg.mjs — the commit-message rules (plan 04 §3 R4 Conventional Commits; CLAUDE.md
-// "Workflow": no AI attribution trailer). Called by .githooks/commit-msg, scripts/dev/commit-paths.sh
-// and CI (ci.yml `lint`, over every pushed commit); scripts/dev/scan-secrets.mjs --message scans the
+// "Workflow": no AI attribution trailer; plan 04 R5 and §4.1: CI on every push and PR, so a GitHub
+// skip-CI instruction is refused). Called by .githooks/commit-msg, scripts/dev/commit-paths.sh and
+// CI (ci.yml `lint`, over every pushed commit); scripts/dev/scan-secrets.mjs --message scans the
 // same message for secrets and identifiers. Node built-ins only.
 //
 // The message is checked AS IT WILL BE PUBLISHED: every line counts, a `#` line included. git keeps
@@ -42,6 +43,17 @@ const EXEMPT = /^(?:Merge |Revert "|fixup! |squash! |amend! )/;
  */
 const AI_ATTRIBUTION =
   /^[^A-Za-z0-9\n]*co-authored-by:.*(?:claude|anthropic|copilot|chatgpt|openai|gemini)|generated (?:with|by) \[?(?:claude|chatgpt|copilot|gemini)|noreply@anthropic\.com/im;
+/**
+ * GitHub's instructions to skip CI (docs "Skipping workflow runs"): a push whose commit message
+ * carries `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]`, or ends with a
+ * `skip-checks: true` trailer, starts NO push/pull_request workflow — and every CI gate (the commit
+ * identity, lint, this check, the secret and identifier scans, the tests) exists only as such a run,
+ * so nothing re-checks what that push published until a later unmarked one (Stage C finding
+ * ci-skip-markers-accepted). Refused anywhere in the message, in any case and with any spacing:
+ * over-refusing costs a reworded message, under-refusing a push no gate sees.
+ */
+export const SKIP_CI_MARKER =
+  /\[\s*(?:skip[\s_-]*(?:ci|actions)|(?:ci|actions)[\s_-]*skip|no[\s_-]*ci)\s*\]|skip-checks\s*:\s*true/i;
 export const MAX_SUBJECT = 120;
 
 /**
@@ -54,6 +66,8 @@ export function checkMessage(text) {
   if (!subject) return "the commit message is empty";
   if (AI_ATTRIBUTION.test(text))
     return "the message carries an AI attribution trailer — remove it (CLAUDE.md)";
+  if (SKIP_CI_MARKER.test(text))
+    return "the message carries a GitHub skip-CI instruction ([skip ci], [ci skip], [no ci], [skip actions], [actions skip] or skip-checks: true): the push would start no workflow, so no CI gate would check it — remove it";
   if (/^\s*#/.test(subject))
     return 'the first line starts with "#": git publishes it as the subject with -m, -F and commit-tree (only an edited message loses it) — remove the comment line(s) before the subject';
   if (EXEMPT.test(subject)) return null;

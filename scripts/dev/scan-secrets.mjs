@@ -22,9 +22,13 @@
 // a compressed stream or a database (by its BYTES, whatever its name), or bytes that are neither
 // text nor a recognised binary format are refused (S5, S7) · 2 usage/IO error (a file too large to
 // read is an error, never skipped). It reads UTF-8, and UTF-16/UTF-32 with a byte-order mark; gzip is
-// decompressed; only a binary whose bytes carry its extension's format magic is skipped, and the
-// deny-list still reads its bytes — as latin1, as UTF-8 and, when they hold NULs, without them and as
-// UTF-16 (rawDenyViews). Details: "what a blob IS" below.
+// decompressed member by member, its header's file name, comment and extra field are scanned as
+// text, and bytes after the last member are refused; only a binary whose bytes carry its
+// extension's format magic is skipped, and the deny-list still reads its bytes — as latin1, as UTF-8
+// and, when they hold NULs, without them and as UTF-16 (rawDenyViews). Details: "what a blob IS"
+// below. Every line is read as written and, when it carries %XX / \uXXXX / HTML-entity encodings,
+// with them undone (lineFindingIds). Every scanned PATH is published too: the same rules and the
+// deny-list run over it (pathFindings), and a finding there names the entry's number, not the path.
 //
 // Suppression: a line containing `scan-secrets: allow` skips the GENERIC rules on that line only.
 // It never suppresses the ESPN credential rules, a private key, or the deny-list (gitleaks in CI
@@ -43,7 +47,7 @@
 
 import { existsSync, lstatSync, readFileSync, readlinkSync, accessSync, constants } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { gunzipSync } from "node:zlib";
+import { crc32, inflateRawSync } from "node:zlib";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -253,11 +257,13 @@ export const RULES = [
     allow: (m) => isPlaceholderCookie(m[1] ?? ""),
   },
   {
-    // league ids are identifiers (HANDOFF): leagueId=, league_id:, league id: N, "leagueIds": [N],
-    // a markdown cell `| league id | N |`, ESPN_LEAGUE_ID=, EFF_PROBE_LEAGUE_ID=, --league N,
-    // --league-id=N, …/leagues/<id>, …/leagueHistory/<id> — 4+ digits, all-zero allowed
+    // league ids are identifiers (HANDOFF): leagueId=, league_id:, league+id= (form-encoded),
+    // league id: N, "leagueIds": [N], a markdown cell `| league id | N |`, ESPN_LEAGUE_ID=,
+    // EFF_PROBE_LEAGUE_ID=, --league N, --league-id=N, …/leagues/<id>, …/leagueHistory/<id> — 4+
+    // digits, all-zero allowed. Their %XX / \uXXXX / HTML-entity encoded forms (leagueId%3D<id>,
+    // %2Fleagues%2F<id>, …) are read through lineFindingIds' decoded view.
     id: "espn-league-id",
-    re: /(?:league[ _-]?ids?["'\x60]?\s*[:=|]?\s*\[?\s*["'\x60]?|--league(?:-id)?[ =]["'\x60]?|\bleagues\/|\bleagueHistory\/)(\d{4,})/gi,
+    re: /(?:league[ _+-]?ids?["'\x60]?\s*[:=|]?\s*\[?\s*["'\x60]?|--league(?:-id)?[ =]["'\x60]?|\bleagues\/|\bleagueHistory\/)(\d{4,})/gi,
     group: 1,
     strict: true,
     allow: (m) => /^0+$/.test(m[1] ?? ""),
@@ -391,7 +397,9 @@ export function isGithubNoreply(addr) {
 // --- what a blob IS (its bytes decide, never only its name) ---------------------------------------
 //
 // The scanner reads UTF-8 text, and UTF-16 / UTF-32 text that starts with a byte-order mark; it
-// decompresses gzip; it skips (deny-list on the raw bytes only, in every reading rawDenyViews gives)
+// decompresses gzip (every member; the header's text fields scanned; nothing may follow the last
+// member; the deny-list over the outer bytes too); it skips (deny-list on the raw bytes only, in
+// every reading rawDenyViews gives)
 // a binary whose bytes carry the magic number of the opaque format its extension names (an image,
 // audio, video, font, wasm or native object). Everything else is REFUSED (fail closed): an archive,
 // a document container (.docx/.xlsx/.pptx/.odt/.numbers/.epub/.jar are zip files, a .pdf carries
@@ -414,6 +422,84 @@ export const GZIP_EXT = /\.(?:gz|tgz|svgz)$/i;
 export const REVIEWED_BINARY_ALLOWLIST = Object.freeze(new Set([]));
 /** gzip layers it peels before refusing (a gzip inside a gzip inside a gzip is refused). */
 export const MAX_GZIP_LAYERS = 3;
+
+/**
+ * Every member of a gzip stream (RFC 1952 §2.3) with the bytes its header publishes beside the
+ * compressed data — FEXTRA's payload, FNAME (the source file's name, which gzip writes by default)
+ * and FCOMMENT — and its decompressed bytes, plus the count of bytes after the last member. zlib's
+ * gunzip reads neither: it drops the header fields, and it stops at a NUL after a member, silently
+ * discarding whatever follows, so those bytes passed every rule and the deny-list (Stage C finding
+ * scan-gzip-header-trailer-unscanned). Each member's CRC-32 and length are checked. Throws on
+ * anything that is not well-formed gzip, or past `maxOut` decompressed bytes in all.
+ * @param {Buffer} buf
+ * @param {number} maxOut
+ * @returns {{ members: { fields: { kind: string, bytes: Buffer }[], data: Buffer }[], trailing: number }}
+ */
+export function gzipMembers(buf, maxOut) {
+  /** @type {{ fields: { kind: string, bytes: Buffer }[], data: Buffer }[]} */
+  const members = [];
+  let off = 0;
+  let total = 0;
+  while (off < buf.length && bytesAt(buf, off, [0x1f, 0x8b])) {
+    if (buf[off + 2] !== 8) throw new Error("gzip: not a deflate member");
+    const flg = buf[off + 3] ?? 0;
+    if (flg & 0xe0) throw new Error("gzip: reserved flag bits set");
+    let p = off + 10;
+    /** @param {number} n */
+    const need = (n) => {
+      if (p + n > buf.length) throw new Error("gzip: truncated member");
+    };
+    need(0);
+    /** @type {{ kind: string, bytes: Buffer }[]} */
+    const fields = [];
+    if (flg & 0x04) {
+      need(2);
+      const xlen = buf.readUInt16LE(p);
+      need(2 + xlen);
+      fields.push({ kind: "extra field", bytes: buf.subarray(p + 2, p + 2 + xlen) });
+      p += 2 + xlen;
+    }
+    for (const [bit, kind] of /** @type {const} */ ([
+      [0x08, "file name"],
+      [0x10, "comment"],
+    ])) {
+      if (!(flg & bit)) continue;
+      const end = buf.indexOf(0, p);
+      if (end < 0) throw new Error("gzip: unterminated header field");
+      fields.push({ kind, bytes: buf.subarray(p, end) });
+      p = end + 1;
+    }
+    if (flg & 0x02) p += 2; // FHCRC
+    need(0);
+    // the raw deflate stream: zlib reports how many input bytes it consumed up to its final block
+    const { buffer: data, engine } = inflateRawSync(buf.subarray(p), {
+      info: true,
+      maxOutputLength: Math.max(1, maxOut - total),
+    });
+    p += engine.bytesWritten;
+    need(8);
+    if (buf.readUInt32LE(p) !== crc32(data) || buf.readUInt32LE(p + 4) !== data.length % 2 ** 32)
+      throw new Error("gzip: CRC-32 or length mismatch");
+    total += data.length;
+    members.push({ fields, data });
+    off = p + 8;
+  }
+  if (!members.length) throw new Error("gzip: no member");
+  return { members, trailing: buf.length - off };
+}
+
+/**
+ * The readings of a gzip header field: latin1 (RFC 1952's charset; one character per byte) and,
+ * when the bytes are valid UTF-8 that reads differently, UTF-8 (what gzip writes for a non-ASCII
+ * file name on a UTF-8 system).
+ * @param {Buffer} bytes
+ * @returns {string[]}
+ */
+function headerReadings(bytes) {
+  const latin1 = bytes.toString("latin1");
+  const utf8 = decodeText(bytes);
+  return utf8 !== null && utf8.text !== latin1 ? [latin1, utf8.text] : [latin1];
+}
 
 /** @param {Buffer} b @param {number} off @param {readonly number[]} bytes */
 const bytesAt = (b, off, bytes) =>
@@ -991,17 +1077,45 @@ export function scanBlob(label, buf, deny, o = {}) {
   if (container?.kind === "gzip" || (container === null && GZIP_EXT.test(name))) {
     if (layers >= MAX_GZIP_LAYERS)
       return refuse(`gzip nested ${String(layers + 1)} deep — refused, not peeled`);
-    let inner;
+    let gz;
     try {
-      inner = gunzipSync(buf, { maxOutputLength: MAX_SCAN_BYTES });
+      gz = gzipMembers(buf, MAX_SCAN_BYTES);
     } catch {
       return refuse("gzip could not be decompressed within the scan limit");
     }
+    // every byte the blob commits is read: bytes after the last member (gunzip stops at a NUL and
+    // drops the rest unread) are refused, never skipped (fail closed)
+    if (gz.trailing > 0)
+      return refuse(
+        `${String(gz.trailing)} byte(s) follow the last gzip member — gunzip never reads them, so they cannot be scanned`,
+      );
+    // the header's file name, comment and extra field are published in the blob: scanned as text
+    gz.members.forEach((m, i) => {
+      for (const f of m.fields) {
+        const where = `${label} (gzip ${f.kind}${gz.members.length > 1 ? ` of member ${String(i + 1)}` : ""})`;
+        const seen = new Set();
+        for (const text of headerReadings(f.bytes))
+          for (const finding of scanText(where, text, deny))
+            if (!seen.has(finding)) {
+              seen.add(finding);
+              out.findings.push(finding);
+            }
+      }
+    });
+    // the deny-list reads the outer bytes too, as it reads any blob no rule decodes
+    rawDeny();
     const innerName = name
       .replace(/\.tgz$/i, ".tar")
       .replace(/\.svgz$/i, ".svg")
       .replace(/\.gz$/i, "");
-    return scanBlob(label, inner, deny, { name: innerName, layers: layers + 1 });
+    const inner = scanBlob(label, Buffer.concat(gz.members.map((m) => m.data)), deny, {
+      name: innerName,
+      layers: layers + 1,
+    });
+    out.findings.push(...inner.findings);
+    out.scanned += inner.scanned;
+    out.binary += inner.binary;
+    return out;
   }
   if (!allowlisted) {
     if (container !== null)
@@ -1038,6 +1152,79 @@ export function scanBlob(label, buf, deny, o = {}) {
 }
 
 /**
+ * The rule ids that fire on one line, once per match (`scan-error:<id>` when a rule cannot evaluate
+ * it — fail closed). `strictOnly`: only the strict rules (never suppressed by the allow marker).
+ * @param {string} line
+ * @param {{ strictOnly?: boolean }} [o]
+ * @returns {string[]}
+ */
+export function lineRuleIds(line, o = {}) {
+  const ids = [];
+  const allowMarker = line.includes("scan-secrets: allow");
+  for (const rule of RULES) {
+    if (!rule.strict && (o.strictOnly || allowMarker)) continue;
+    try {
+      if (rule.find) {
+        rule.find(line).forEach(() => ids.push(rule.id));
+        continue;
+      }
+      const re = /** @type {RegExp} */ (rule.re);
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(line)) !== null) {
+        if (m[0] === "") {
+          re.lastIndex++;
+          continue;
+        }
+        const value = rule.group ? (m[rule.group] ?? "") : m[0];
+        if (rule.allow && rule.allow(m)) continue;
+        if (
+          !rule.strict &&
+          ["assigned-secret", "env-secret", "bearer-token"].includes(rule.id) &&
+          PLACEHOLDER.test(value)
+        )
+          continue;
+        // a filesystem path or URL named *_TOKEN_STORE / *_SECRET_FILE is a location, not a secret
+        if (
+          (rule.id === "assigned-secret" || rule.id === "env-secret") &&
+          /^(?:~\/|\/|\.\.?\/|\$\{?[A-Z_]|https?:\/\/)/.test(value)
+        )
+          continue;
+        ids.push(rule.id);
+      }
+    } catch {
+      ids.push(`scan-error:${rule.id}`);
+    }
+  }
+  return ids;
+}
+
+/** A line that may carry an encoded identifier: a %XX escape, a \uXXXX escape or an HTML entity. */
+const ENCODED_HINT =
+  /%[0-9A-Fa-f]{2}|\\u[0-9A-Fa-f]{4}|&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z]{2,6});/;
+
+/**
+ * The rule ids of one line in both of its readings: as written, and — when it carries %XX,
+ * \uXXXX or HTML-entity encodings — with them undone (decodeLayers, the deny-list's decoder), where
+ * the strict rules run again and add each rule that fires there only. An identifier in an encoded
+ * URL (`…%3FleagueId%3D<id>`, `…%2Fleagues%2F<id>`, double-encoded `%253D`) IS that identifier:
+ * one decoder gives every strict rule every encoding, instead of an encoded twin per rule (Stage C
+ * finding scan-league-id-url-encoded).
+ * @param {string} line
+ * @returns {string[]}
+ */
+export function lineFindingIds(line) {
+  const ids = lineRuleIds(line);
+  if (!ENCODED_HINT.test(line)) return ids;
+  const decoded = decodeLayers(line);
+  if (decoded === line) return ids;
+  const seen = new Set(ids);
+  for (const id of new Set(lineRuleIds(decoded, { strictOnly: true })))
+    if (!seen.has(id)) ids.push(id);
+  return ids;
+}
+
+/**
  * Scan one text. Returns finding labels (`<label>:<line>  [<rule>]`, or the deny-list form) —
  * never a matched value.
  * @param {string} label  file path or pseudo-name (COMMIT_MESSAGE)
@@ -1049,43 +1236,7 @@ export function scanText(label, text, deny) {
   const findings = [];
   const lines = text.split(/\r?\n/);
   lines.forEach((line, idx) => {
-    const allowMarker = line.includes("scan-secrets: allow");
-    for (const rule of RULES) {
-      if (allowMarker && !rule.strict) continue;
-      try {
-        if (rule.find) {
-          rule.find(line).forEach(() => findings.push(`${label}:${idx + 1}  [${rule.id}]`));
-          continue;
-        }
-        const re = /** @type {RegExp} */ (rule.re);
-        re.lastIndex = 0;
-        let m;
-        while ((m = re.exec(line)) !== null) {
-          if (m[0] === "") {
-            re.lastIndex++;
-            continue;
-          }
-          const value = rule.group ? (m[rule.group] ?? "") : m[0];
-          if (rule.allow && rule.allow(m)) continue;
-          if (
-            !rule.strict &&
-            ["assigned-secret", "env-secret", "bearer-token"].includes(rule.id) &&
-            PLACEHOLDER.test(value)
-          )
-            continue;
-          // a filesystem path or URL named *_TOKEN_STORE / *_SECRET_FILE is a location, not a secret
-          if (
-            (rule.id === "assigned-secret" || rule.id === "env-secret") &&
-            /^(?:~\/|\/|\.\.?\/|\$\{?[A-Z_]|https?:\/\/)/.test(value)
-          )
-            continue;
-          findings.push(`${label}:${idx + 1}  [${rule.id}]`);
-        }
-      } catch {
-        // a rule that cannot evaluate a line is a finding, never "clean" (fail closed)
-        findings.push(`${label}:${idx + 1}  [scan-error:${rule.id}]`);
-      }
-    }
+    for (const id of lineFindingIds(line)) findings.push(`${label}:${idx + 1}  [${id}]`);
   });
   // values wrapped across lines or split by concatenation (S3)
   const lineSet = new Set(findings);
@@ -1100,6 +1251,25 @@ export function scanText(label, text, deny) {
   findings.push(...fixtureLeagueIdFindings(label, text));
   for (const n of denylistLines(text, deny)) findings.push(`deny-list match in ${label}:${n}`);
   return findings;
+}
+
+/**
+ * The findings of a scanned entry's PATH: a file or directory name is published with its content,
+ * so every rule runs over the path in both readings (lineFindingIds: as written and with %XX /
+ * \uXXXX / entity encodings undone) and the deny-list checks it. A finding names the entry by its
+ * number, never the path (Stage C finding scan-paths-identifier-rules-skipped: a league id, a member
+ * GUID or a mailbox in a committed path passed the hooks, commit-paths.sh and CI, where only the
+ * deny-list — absent in CI — looked at paths).
+ * @param {string} file  the path as published (git's name in --all / --index / --staged)
+ * @param {number} n  the entry's 1-based number in this run
+ * @param {string[]} deny
+ * @returns {string[]}
+ */
+export function pathFindings(file, n, deny) {
+  const where = `the path of scanned entry #${String(n)} (path not printed)`;
+  const out = [...new Set(lineFindingIds(file))].map((id) => `${where}  [${id}]`);
+  if (denylistLines(file, deny).length) out.push(`deny-list match in ${where}`);
+  return out;
 }
 
 /**
@@ -1185,7 +1355,7 @@ function main() {
     else files.push(a);
   }
 
-  /** @type {{file: string, read: () => Buffer | null}[]} */
+  /** @type {{file: string, read: () => Buffer | null, message?: true}[]} */
   const targets = [];
   let deny;
   try {
@@ -1216,7 +1386,7 @@ function main() {
       targets.push({ file: f, read: () => (staged ? readStaged(f) : readWorktree(f)) });
     if (message !== null) {
       const msgPath = message;
-      targets.push({ file: "COMMIT_MESSAGE", read: () => readFileSync(msgPath) });
+      targets.push({ file: "COMMIT_MESSAGE", read: () => readFileSync(msgPath), message: true });
     }
   } catch (e) {
     return fail(e);
@@ -1231,13 +1401,9 @@ function main() {
   const findings = [];
   let scanned = 0;
   let binary = 0;
-  targets.forEach(({ file, read }, n) => {
-    // a path is published too: it must not carry a personal identifier (reported without the path)
-    if (file !== "COMMIT_MESSAGE" && denylistLines(file, deny).length) {
-      findings.push(
-        `deny-list match in the path of scanned entry #${String(n + 1)} (path not printed)`,
-      );
-    }
+  targets.forEach(({ file, read, message: isMessage }, n) => {
+    // a path is published too: every rule and the deny-list run over it (reported without the path)
+    if (!isMessage) findings.push(...pathFindings(file, n + 1, deny));
     let buf;
     try {
       buf = read();

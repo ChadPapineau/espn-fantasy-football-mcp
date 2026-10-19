@@ -7,7 +7,14 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { brotliCompressSync, crc32, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
+import {
+  brotliCompressSync,
+  crc32,
+  deflateRawSync,
+  deflateSync,
+  gunzipSync,
+  gzipSync,
+} from "node:zlib";
 import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -18,8 +25,12 @@ import {
   containerKind,
   decodeLayers,
   decodeText,
+  gzipMembers,
   isOpaqueBinary,
+  lineFindingIds,
+  lineRuleIds,
   numericTermRe,
+  pathFindings,
   scanBlob,
   skeleton,
   denylistLines,
@@ -258,6 +269,83 @@ describe("league ids (espn-league-id)", () => {
       ),
       { numRuns: 300 },
     );
+  });
+});
+
+// Stage C finding scan-league-id-url-encoded: an ESPN login redirect and an encoded API URL carry
+// the id as leagueId%3D<id> or …%2Fleagues%2F<id>, and both passed clean (CI has no deny-list).
+describe("league ids in encoded URLs (the decoded view of a line)", () => {
+  const id = ["7", "3", "1", "9", "0", "4", "2"].join("");
+  const enc = encodeURIComponent;
+  const login = (inner: string) => `https://www.espn.com/login?redirectUrl=${enc(inner)}`;
+  const leagueUrl = `https://fantasy.espn.com/football/league?${kv("leagueId", "=", id)}`;
+  const apiUrl = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/${kv("leagues", "/", id)}`;
+  it.each([
+    ["an ESPN login redirect (leagueId%3D)", login(leagueUrl)],
+    ["an encoded API URL (%2Fleagues%2F)", enc(apiUrl)],
+    ["an encoded history URL (leagueHistory%2F)", enc(`/${kv("leagueHistory", "/", id)}`)],
+    ["a double-encoded redirect (leagueId%253D)", login(login(leagueUrl))],
+    [
+      "a JSON body in a query (%22leagueId%22%3A)",
+      `q=${enc(JSON.stringify({ leagueId: Number(id) }))}`,
+    ],
+    ["a JSON \\u-escaped equals sign", `"url": "${kv("leagueId", "\\u003d", id)}"`],
+    ["an HTML-entity equals sign", `<a href="?${kv("leagueId", "&#61;", id)}">`],
+    ["a form-encoded space (league+id=)", kv("league+id", "=", id)],
+    ["upper-case escapes", kv("LEAGUEID", "%3D", id)],
+  ])("flags %s", (_why, line) => {
+    expect(flags(line, "espn-league-id"), line).toBe(true);
+  });
+
+  it.each([
+    login("https://fantasy.espn.com/football/league?leagueId=0"),
+    enc("/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0"),
+    kv("leagueId", "%3D", "%7BleagueId%7D"),
+    enc("/leagues/{leagueId}?view=mTeam"),
+    enc("score 100% of 1234 points"),
+    "50%25 off, 2026 season",
+  ])("stays quiet on %j", (line) => {
+    expect(clean(line)).toBe(true);
+  });
+
+  it("property: any 4–9 digit non-zero id is flagged behind leagueId%3D and %2Fleagues%2F", () => {
+    fc.assert(
+      fc.property(
+        fc.stringMatching(/^\d{4,9}$/),
+        fc.constantFrom("leagueId%3D", "%2Fleagues%2F", "%2FleagueHistory%2F", "leagueId%253D"),
+        (d, prefix) => /^0+$/.test(d) || flags(`${prefix}${d}`, "espn-league-id"),
+      ),
+      { numRuns: 300 },
+    );
+  });
+
+  it("every strict rule reads the decoded view; it adds a rule once and never duplicates one", () => {
+    const guid = fakeGuid("dec");
+    // a double-encoded member GUID and a \u-escaped mailbox: no raw rule sees either
+    expect(lineFindingIds(enc(enc(`{${guid}}`)))).toEqual(["brace-guid"]);
+    expect(lineFindingIds(`"to": "${["jane.q", "fakemail.net"].join("\\u0040")}"`)).toEqual([
+      "email-address",
+    ]);
+    // the raw rule already fires on %7B…%7D: the decoded reading adds nothing
+    expect(lineFindingIds(`${enc("{")}${guid}${enc("}")}`)).toEqual(["brace-guid"]);
+    // the generic rules never run on the decoded reading (only the strict ones)
+    const assigned = kv("password", " = ", `"${["Zq8vR2mK9", "wL4xN7pQ3"].join("")}"`);
+    expect(lineRuleIds(assigned)).toEqual(["assigned-secret"]);
+    expect(lineRuleIds(assigned, { strictOnly: true })).toEqual([]);
+    expect(lineFindingIds(enc(assigned))).toEqual([]);
+  });
+
+  it("the Stage C repro over the CLI: q.md and p.md exit 1 with [espn-league-id]; the id is never printed", () => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, "plain.md"), `${leagueUrl}\n`);
+    writeFileSync(path.join(tmp.dir, "q.md"), `${login(leagueUrl)}\n`);
+    writeFileSync(path.join(tmp.dir, "p.md"), `${enc(apiUrl)}\n`);
+    for (const f of ["plain.md", "q.md", "p.md"]) {
+      const r = scan(tmp.dir, ["--", f]);
+      expect(r.status, `${f}: ${r.out}`).toBe(1);
+      expect(r.out).toContain(`${f}:1  [espn-league-id]`);
+      expect(r.out).not.toContain(id);
+    }
   });
 });
 
@@ -1251,5 +1339,312 @@ describe("the deny-list reads a skipped or refused blob in every byte reading", 
     expect(views).toHaveLength(7);
     expect(views).toContain("Té");
     expect([...rawDenyViews(Buffer.concat([Buffer.from([1]), utf16be("Té")]))]).toContain("Té");
+  });
+});
+
+// --- gzip: every byte the blob commits is read ----------------------------------------------------
+// (Stage C finding scan-gzip-header-trailer-unscanned: the scanner scanned only the decompressed
+// member — the header's FNAME/FCOMMENT/FEXTRA and anything after a NUL past the member passed every
+// rule and the deny-list, through the hook, commit-paths.sh and --all.) Every value is assembled.
+
+/** A gzip member with the optional header fields RFC 1952 defines (Node's gzipSync writes none). */
+function gzipWith(
+  data: Buffer,
+  o: { name?: string; comment?: string; extra?: Buffer; hcrc?: boolean } = {},
+): Buffer {
+  let flg = 0;
+  const fields: Buffer[] = [];
+  if (o.extra !== undefined) {
+    flg |= 0x04;
+    const xlen = Buffer.alloc(2);
+    xlen.writeUInt16LE(o.extra.length);
+    fields.push(xlen, o.extra);
+  }
+  if (o.name !== undefined) {
+    flg |= 0x08;
+    fields.push(Buffer.from(o.name), Buffer.from([0]));
+  }
+  if (o.comment !== undefined) {
+    flg |= 0x10;
+    fields.push(Buffer.from(o.comment), Buffer.from([0]));
+  }
+  if (o.hcrc) flg |= 0x02;
+  const pre = Buffer.concat([Buffer.from([0x1f, 0x8b, 8, flg, 0, 0, 0, 0, 0, 3]), ...fields]);
+  const hcrc = Buffer.alloc(o.hcrc ? 2 : 0);
+  if (o.hcrc) hcrc.writeUInt16LE(crc32(pre) & 0xffff);
+  const trailer = Buffer.alloc(8);
+  trailer.writeUInt32LE(crc32(data), 0);
+  trailer.writeUInt32LE(data.length, 4);
+  return Buffer.concat([pre, hcrc, deflateRawSync(data), trailer]);
+}
+
+describe("gzip: the header's text fields and the bytes after the last member are read", () => {
+  const CSV = Buffer.from("week,points\n1,10\n");
+  const plainLeak = () =>
+    [
+      `contact: ${at("jane.q.fakeperson", "gmail.com")}`,
+      `https://fantasy.espn.com/football/league?${kv("leagueId", "=", LEAK_ID)}`,
+      kv("espn_s2", "=", fakeEspnS2("gz-trailer", 120)),
+    ].join("\n");
+
+  it("the test's gzip members are genuine: Node's gunzip reads them, and drops what follows a NUL", () => {
+    const named = gzipWith(CSV, {
+      name: "x.csv",
+      comment: "c",
+      extra: Buffer.from("ab"),
+      hcrc: true,
+    });
+    expect(gunzipSync(named).equals(CSV)).toBe(true);
+    const padded = Buffer.concat([gzipSync(CSV), Buffer.from([0]), Buffer.from(plainLeak())]);
+    expect(gunzipSync(padded).equals(CSV)).toBe(true); // the plaintext is silently discarded
+  });
+
+  it.each([
+    [
+      "a league id in FNAME (gzip's default: the source file's name)",
+      () => gzipWith(CSV, { name: `${kv("leagueId", "=", LEAK_ID)}-raw.csv` }),
+      "file name",
+      "espn-league-id",
+    ],
+    [
+      "a mailbox in FCOMMENT",
+      () => gzipWith(CSV, { comment: `from ${at("jane.q.fakeperson", "gmail.com")}` }),
+      "comment",
+      "email-address",
+    ],
+    [
+      "a member GUID in FEXTRA",
+      () => gzipWith(CSV, { extra: Buffer.from(`id={${fakeGuid("fextra")}}`) }),
+      "extra field",
+      "brace-guid",
+    ],
+    [
+      "a home path in a UTF-8 FNAME with a header CRC",
+      () => gzipWith(CSV, { name: `${homePath("Users", "jané")}.csv`, hcrc: true }),
+      "file name",
+      "home-path",
+    ],
+  ])("flags %s, labelled by the field; the value is never printed", (_why, make, kind, rule) => {
+    const r = scanBlob("excerpt.csv.gz", make(), []);
+    expect(r.findings).toContain(`excerpt.csv.gz (gzip ${kind}):1  [${rule}]`);
+    expect(r.scanned).toBe(1); // the member's own text is still scanned
+    noLeakS7(r.findings.join("\n"));
+  });
+
+  it("the same bytes as text are flagged too (the control)", () => {
+    const name = `${kv("leagueId", "=", LEAK_ID)}-raw.csv`;
+    expect(ruleIds(scanText("ctrl.txt", name, []))).toEqual(["espn-league-id"]);
+    expect(scanBlob("excerpt.csv.gz", gzipWith(CSV, { name: "excerpt.csv" }), []).findings).toEqual(
+      [],
+    );
+  });
+
+  it("refuses bytes after the last member — a NUL then plaintext, or plain junk — whatever the name", () => {
+    for (const tail of [
+      Buffer.concat([Buffer.from([0]), Buffer.from(plainLeak())]),
+      Buffer.from(plainLeak()),
+      Buffer.alloc(16), // even zero padding: no byte is left unread
+    ])
+      for (const name of ["notes.csv", "excerpt.csv.gz", "README"]) {
+        const r = scanBlob(name, Buffer.concat([gzipSync(CSV), tail]), []);
+        expect(
+          r.findings.some((f) =>
+            f.startsWith(
+              `${name}  [unscannable-archive-or-database] (${String(tail.length)} byte(s) follow the last gzip member`,
+            ),
+          ),
+          `${name}: ${r.findings.join(" | ")}`,
+        ).toBe(true);
+        noLeakS7(r.findings.join("\n"));
+      }
+  });
+
+  it("reads every member: a second member's header and data are scanned too", () => {
+    const two = Buffer.concat([
+      gzipWith(CSV, { name: "a.csv" }),
+      gzipWith(Buffer.from(`owner={${fakeGuid("member2")}}\n`), {
+        name: `${kv("leagueId", "=", LEAK_ID)}.csv`,
+      }),
+    ]);
+    const r = scanBlob("two.csv.gz", two, []);
+    expect(r.findings).toContain("two.csv.gz (gzip file name of member 2):1  [espn-league-id]");
+    expect(r.findings).toContain("two.csv.gz:3  [brace-guid]"); // member 2's data follows member 1's
+    const parsed = gzipMembers(two, 1 << 20);
+    expect(parsed.trailing).toBe(0);
+    expect(parsed.members.map((m) => m.fields.map((f) => f.kind))).toEqual([
+      ["file name"],
+      ["file name"],
+    ]);
+    expect(Buffer.concat(parsed.members.map((m) => m.data)).equals(gunzipSync(two))).toBe(true);
+  });
+
+  it("refuses a malformed member (a CRC mismatch, an unterminated name, a truncated stream, a non-deflate method)", () => {
+    const good = gzipWith(CSV, { name: "a.csv" });
+    const badCrc = Buffer.from(good);
+    badCrc.writeUInt32LE((badCrc.readUInt32LE(badCrc.length - 8) ^ 1) >>> 0, badCrc.length - 8);
+    const unterminated = Buffer.concat([
+      Buffer.from([0x1f, 0x8b, 8, 0x08, 0, 0, 0, 0, 0, 3]),
+      Buffer.from("name"),
+    ]);
+    const truncated = good.subarray(0, good.length - 12);
+    const method = Buffer.from(good);
+    method[2] = 7;
+    for (const [why, b] of [
+      ["crc", badCrc],
+      ["unterminated", unterminated],
+      ["truncated", truncated],
+      ["method", method],
+    ] as const) {
+      expect(() => gzipMembers(b, 1 << 20), why).toThrow();
+      expect(
+        scanBlob("x.gz", b, []).findings.some((f) =>
+          f.startsWith("x.gz  [unscannable-archive-or-database]"),
+        ),
+        why,
+      ).toBe(true);
+    }
+  });
+
+  it("the deny-list reads the header fields and the outer bytes; the term is never printed", () => {
+    const r = scanBlob("roster.csv.gz", gzipWith(CSV, { name: `${LEAK_TEAM} roster.csv` }), DENY());
+    expect(r.findings).toContain("deny-list match in roster.csv.gz (gzip file name):1");
+    expect(r.findings.some((f) => /^deny-list match in roster\.csv\.gz:\d+$/.test(f))).toBe(true);
+    noLeakS7(r.findings.join("\n"));
+  });
+
+  it("the Stage C repro over the CLI: notes.csv (gzip + NUL + plaintext) is refused like ctrl.csv is flagged; a named member too", () => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, "deny.txt"), `${LEAK_TEAM}\n`);
+    writeFileSync(
+      path.join(tmp.dir, "notes.csv"),
+      Buffer.concat([gzipSync(CSV), Buffer.from([0]), Buffer.from(plainLeak())]),
+    );
+    writeFileSync(path.join(tmp.dir, "ctrl.csv"), plainLeak());
+    writeFileSync(
+      path.join(tmp.dir, "excerpt.csv.gz"),
+      gzipWith(CSV, { name: `${kv("leagueId", "=", LEAK_ID)}-raw.csv` }),
+    );
+    writeFileSync(
+      path.join(tmp.dir, "fname.csv.gz"),
+      gzipWith(CSV, { name: `${LEAK_TEAM} roster.csv` }),
+    );
+    const r = scan(tmp.dir, ["--", "notes.csv", "ctrl.csv", "excerpt.csv.gz", "fname.csv.gz"], {
+      EFF_SCAN_DENYLIST: path.join(tmp.dir, "deny.txt"),
+    });
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toContain("notes.csv  [unscannable-archive-or-database]");
+    expect(r.out).toContain("ctrl.csv:1  [email-address]");
+    expect(r.out).toContain("ctrl.csv:2  [espn-league-id]");
+    expect(r.out).toContain("ctrl.csv:3  [espn-s2-cookie]");
+    expect(r.out).toContain("excerpt.csv.gz (gzip file name):1  [espn-league-id]");
+    expect(r.out).toContain("deny-list match in fname.csv.gz (gzip file name):1");
+    expect(r.out).not.toContain("scan-secrets: clean");
+    noLeakS7(r.out);
+  });
+
+  it("the commit gates refuse the same bytes: --index (pre-commit, commit-paths.sh) and --all (CI)", () => {
+    tmp = tempDir("eff-scan-");
+    const env = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    writeFileSync(
+      path.join(tmp.dir, "notes.csv"),
+      Buffer.concat([gzipSync(CSV), Buffer.from([0]), Buffer.from(plainLeak())]),
+    );
+    writeFileSync(
+      path.join(tmp.dir, "excerpt.csv.gz"),
+      gzipWith(CSV, { name: `${kv("leagueId", "=", LEAK_ID)}-raw.csv` }),
+    );
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: tmp?.dir, env: { ...process.env, ...env }, encoding: "utf8" });
+    expect(git(["init", "-q"]).status).toBe(0);
+    expect(git(["add", "notes.csv", "excerpt.csv.gz"]).status).toBe(0);
+    for (const args of [["--index"], ["--all"]]) {
+      const r = scan(tmp.dir, args, env);
+      expect(r.status, `${args.join(" ")}: ${r.out}`).toBe(1);
+      expect(r.out).toContain("notes.csv  [unscannable-archive-or-database]");
+      expect(r.out).toContain("excerpt.csv.gz (gzip file name):1  [espn-league-id]");
+      noLeakS7(r.out);
+    }
+  });
+});
+
+// --- paths are published too ------------------------------------------------------------------
+// (Stage C finding scan-paths-identifier-rules-skipped: a league-id directory, a member-GUID file
+// name and a mailbox in a name committed through the hook; --all was clean; only the deny-list —
+// absent in CI — ever looked at a path.) Every value is assembled at run time.
+describe("every rule runs over every scanned path; the path is never printed", () => {
+  const guid = () => fakeGuid("path-guid");
+  const mailbox = () => at("jane.q.fakeperson", "gmail.com");
+  const leakPaths = () => [
+    `fixtures/espn/${kv("leagues", "/", LEAK_ID)}/{${guid()}}.json`,
+    `notes-for-${mailbox()}.md`,
+    `exports/${kv("leagueId", "%3D", LEAK_ID)}.json`,
+    `backup/${homePath("Users", "janefake", "notes.md").slice(1)}`,
+  ];
+  const noPathLeak = (out: string) => {
+    expect(out).not.toContain(LEAK_ID);
+    expect(out).not.toContain(guid());
+    expect(out).not.toContain(mailbox());
+    expect(out).not.toContain("janefake");
+  };
+
+  it("pathFindings: one finding per rule, by entry number; a clean path has none", () => {
+    const [a, b, c, d] = leakPaths() as [string, string, string, string];
+    expect(pathFindings(a, 1, [])).toEqual([
+      "the path of scanned entry #1 (path not printed)  [brace-guid]",
+      "the path of scanned entry #1 (path not printed)  [espn-league-id]",
+    ]);
+    expect(pathFindings(b, 2, [])).toEqual([
+      "the path of scanned entry #2 (path not printed)  [email-address]",
+    ]);
+    expect(pathFindings(c, 3, [])).toEqual([
+      "the path of scanned entry #3 (path not printed)  [espn-league-id]",
+    ]);
+    expect(pathFindings(d, 4, [])).toEqual([
+      "the path of scanned entry #4 (path not printed)  [home-path]",
+    ]);
+    expect(pathFindings("fixtures/espn/recorded/league-a/mBoxscore.sp1.json", 5, [])).toEqual([]);
+    expect(pathFindings("docs/notes-é.md", 6, DENY())).toEqual([]);
+    expect(pathFindings(`docs/${LEAK_TEAM.replace(" ", "-")}.md`, 7, DENY())).toEqual([
+      "deny-list match in the path of scanned entry #7 (path not printed)",
+    ]);
+  });
+
+  it("refuses those paths in --index, --all and positional mode (the content is clean); nothing printed", () => {
+    tmp = tempDir("eff-scan-");
+    const env = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    for (const p of leakPaths()) {
+      mkdirSync(path.dirname(path.join(tmp.dir, p)), { recursive: true });
+      writeFileSync(path.join(tmp.dir, p), "{}\n");
+    }
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: tmp?.dir, env: { ...process.env, ...env }, encoding: "utf8" });
+    expect(git(["init", "-q"]).status).toBe(0);
+    expect(git(["add", "-A"]).status).toBe(0);
+    for (const args of [
+      ["--index"],
+      ["--all"],
+      ["--", ...leakPaths()],
+      ["--staged", "--", ...leakPaths()],
+    ]) {
+      const r = scan(tmp.dir, args, env);
+      expect(r.status, `${args.join(" ")}: ${r.out}`).toBe(1);
+      for (const rule of ["espn-league-id", "brace-guid", "email-address", "home-path"])
+        expect(r.out, `${args[0] ?? ""} ${rule}`).toMatch(
+          new RegExp(`the path of scanned entry #\\d+ \\(path not printed\\)  \\[${rule}\\]`),
+        );
+      noPathLeak(r.out);
+    }
+    // the same strings as file content are flagged by the same rules (the control)
+    writeFileSync(path.join(tmp.dir, "content.md"), `${leakPaths().join("\n")}\n`);
+    const c = scan(tmp.dir, ["--", "content.md"], env);
+    for (const rule of ["espn-league-id", "brace-guid", "email-address", "home-path"])
+      expect(c.out).toContain(`[${rule}]`);
+  });
+
+  it("a commit message is not a path: COMMIT_MESSAGE is never path-checked", () => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, "MSG"), "feat: x\n");
+    const r = scan(tmp.dir, ["--message", "MSG"]);
+    expect(r.status, r.out).toBe(0);
   });
 });

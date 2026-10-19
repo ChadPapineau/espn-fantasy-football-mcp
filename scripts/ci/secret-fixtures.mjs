@@ -154,6 +154,28 @@ export function mustFlag() {
       gitleaks: ["espn-league-id"],
       scan: ["espn-league-id"],
     },
+    // percent-encoded league URLs — an ESPN login redirect, an encoded API URL (Stage C finding
+    // scan-league-id-url-encoded): scan-secrets reads them through its decoded view; gitleaks has
+    // no decoder, so these are scan-secrets cases (`gitleaks: []`) until .gitleaks.toml's
+    // espn-league-id carries the encoded twin
+    {
+      line: join(
+        "https://www.espn.com/login?redirectUrl=https%3A%2F%2Ffantasy.espn.com%2Ffootball%2Fleague%3F",
+        "leagueId%3D",
+        fakeLeagueId("encoded-query", 7),
+      ),
+      gitleaks: [],
+      scan: ["espn-league-id"],
+    },
+    {
+      line: join(
+        "https%3A%2F%2Flm-api-reads.fantasy.espn.com%2Fapis%2Fv3%2Fgames%2Fffl%2Fseasons%2F2026%2Fsegments%2F0",
+        "%2Fleagues%2F",
+        fakeLeagueId("encoded-path", 8),
+      ),
+      gitleaks: [],
+      scan: ["espn-league-id"],
+    },
     {
       line: join("Cookie: espn_s2=", fakeEspnS2("header", 24), "; SWID={", fakeGuid("header"), "}"),
       gitleaks: ["cookie-header", "espn-swid", "brace-guid"],
@@ -271,6 +293,7 @@ export function mustPass() {
     "ESPN_LEAGUE_ID=0000000",
     "# EFF_PROBE_LEAGUE_ID=0000000",
     "leagueId=0 and league_id: 0",
+    "redirectUrl=https%3A%2F%2Ffantasy.espn.com%2Ffootball%2Fleague%3FleagueId%3D0",
     '"leagueId": 0',
     "/apis/v3/games/ffl/seasons/2026/segments/0/leagues/0?view=mTeam",
     "{00000000-0000-4000-8000-000000000001}",

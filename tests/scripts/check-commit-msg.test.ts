@@ -57,6 +57,35 @@ describe("checkMessage", () => {
     expect(checkMessage(m)).toMatch(/AI attribution/);
   });
 
+  // GitHub starts no push/pull_request workflow for these, so no CI gate would check the push
+  // (Stage C finding ci-skip-markers-accepted: all four repro messages were accepted)
+  it.each([
+    "fix: tidy the waiver notes [skip ci]",
+    "docs: README [ci skip]",
+    "chore: bump [skip actions]",
+    "fix: x\n\n\nskip-checks: true",
+    "fix: x\n\n\nskip-checks:true",
+    "feat: x [no ci]",
+    "feat: x [actions skip]",
+    "feat: x\n\nbody line [Skip CI] in the body",
+    "feat: x [ skip  ci ]",
+    "feat: x\n\nSKIP-CHECKS : TRUE",
+    "Merge branch 'build/phase-1' [skip ci]",
+    'Revert "feat: x" [ci skip]',
+  ])("refuses a GitHub skip-CI instruction: %j", (m) => {
+    expect(checkMessage(m)).toMatch(/skip-CI instruction/);
+  });
+
+  it.each([
+    "fix(ci): run every gate on every push",
+    "docs: why a skip marker is refused",
+    "fix: the skip list [skipped] stays",
+    "feat: x\n\nskip-checks: false",
+    "chore: [ci] tidy",
+  ])("a message that only mentions skipping is fine: %j", (m) => {
+    expect(checkMessage(m)).toBeNull();
+  });
+
   it("a human co-author trailer is fine", () => {
     expect(
       checkMessage(
@@ -82,6 +111,22 @@ describe("CLI", () => {
     expect(run([path.join(tmp.dir, "bad")]).status).toBe(1);
     expect(run([]).status).toBe(2);
     expect(run([path.join(tmp.dir, "missing")]).status).toBe(2);
+  });
+
+  it("the Stage C repro: each skip-CI instruction is refused by the CLI the hooks run (exit 1)", () => {
+    tmp = tempDir();
+    const msg = path.join(tmp.dir, "msg");
+    for (const m of [
+      "fix: tidy the waiver notes [skip ci]",
+      "docs: README [ci skip]",
+      "chore: bump [skip actions]",
+      "fix: x\n\n\nskip-checks: true",
+    ]) {
+      writeFileSync(msg, `${m}\n`);
+      const r = run([msg]);
+      expect(r.status, m).toBe(1);
+      expect(r.stderr).toMatch(/skip-CI instruction/);
+    }
   });
 
   it("the Stage C repro: a #-prefixed first line and a # Co-Authored-By trailer are refused (exit 1)", () => {
