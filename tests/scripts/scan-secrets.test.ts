@@ -838,6 +838,26 @@ describe("fails closed on content it cannot scan", () => {
     expect(r.out).toContain("link-home:1  [home-path]");
   });
 
+  it("a named file that does not exist is an error (exit 2), never clean; the name is not printed", () => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, "ok.txt"), "clean\n");
+    const masked = `dist/{${fakeGuid("masked")}}.js`;
+    for (const args of [
+      ["--", "ok.txt", "missing.txt"],
+      ["--", masked],
+    ]) {
+      const r = scan(tmp.dir, args);
+      expect(r.status, args.join(" ")).toBe(2);
+      expect(r.out).toMatch(/scanned entry #\d+ does not exist \(path not printed\)/);
+      expect(r.out).not.toContain("scan-secrets: clean");
+      expect(r.out).not.toContain("missing.txt");
+      expect(r.out).not.toContain(fakeGuid("masked"));
+    }
+    // a dangling symlink still exists as a link: it is scanned as its target string
+    symlinkSync(path.join(tmp.dir, "nowhere"), path.join(tmp.dir, "dangling"));
+    expect(scan(tmp.dir, ["--", "dangling"]).status).toBe(0);
+  });
+
   it("usage errors exit 2", () => {
     tmp = tempDir("eff-scan-");
     expect(scan(tmp.dir, []).status).toBe(2);

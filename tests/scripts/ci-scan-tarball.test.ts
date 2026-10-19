@@ -133,6 +133,39 @@ describe("scan-tarball CLI on a fake package", () => {
     expect(r.stderr).toContain("espn-league-id");
   });
 
+  // Stage C finding scan-paths-identifier-rules-skipped: the packed PATHS are published too, and
+  // the tarball scan inherits scan-secrets' path rules (its FORBIDDEN list has no identifier rule)
+  it("exits 1 when a packed PATH carries an ESPN league id; the id is never printed", () => {
+    tmp = tempDir();
+    const id = ["4", "8", "1", "5", "1", "6", "2"].join("");
+    writeTree(tmp.dir, { "package.json": pkg, [`dist/leagues/${id}/index.js`]: "export {};\n" });
+    const r = runCheck("scan-tarball.mjs", ["--root", tmp.dir]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(
+      /the path of scanned entry #\d+ \(path not printed\) {2}\[espn-league-id\]/,
+    );
+    expect(r.stderr).not.toContain(id);
+  });
+
+  // npm's pack listing masks a GUID-shaped name (`dist/{***}.js`): the scanner was handed a name
+  // that is not on disk and skipped it, so that file shipped with neither its path nor its bytes
+  // scanned. A named path that does not exist now fails the scan (fail closed).
+  it("exits 1 when a packed name is masked by npm's listing (or flags it when listed as is); the GUID is never printed", () => {
+    tmp = tempDir();
+    const guid = ["7C1E2A9B", "3D4F", "4A6B", "8C7D", "9E0F1A2B3C4D"].join("-");
+    writeTree(tmp.dir, {
+      "package.json": pkg,
+      "dist/index.js": "export {};\n",
+      [`dist/{${guid}}.js`]: `export const t = "${["ghp", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"].join("_")}";\n`,
+    });
+    const r = runCheck("scan-tarball.mjs", ["--root", tmp.dir]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(
+      /scanned entry #\d+ does not exist \(path not printed\)|\(path not printed\) {2}\[brace-guid\]/,
+    );
+    expect(r.stderr).not.toContain(guid);
+  });
+
   it("exits 1 when nothing was built", () => {
     tmp = tempDir();
     writeTree(tmp.dir, { "package.json": pkg, "README.md": "# x\n" });

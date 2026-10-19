@@ -18,6 +18,9 @@
 //     --identity        refuse an author or committer address that is not a GitHub no-reply address
 //                       (<id>+<login>@users.noreply.github.com); the address itself is never printed
 //     --message <file>  scan a commit message (it is published with the commit)
+//     <file>...         scan each named working-tree file; a name that does not exist is an error
+//                       (exit 2; the name is not printed) — never "clean": a caller's list that
+//                       names what is not on disk (npm's pack listing masks some names) skips nothing
 // Exit: 0 clean · 1 findings — content it cannot read included: an archive, a document container,
 // a compressed stream or a database (by its BYTES, whatever its name), or bytes that are neither
 // text nor a recognised binary format are refused (S5, S7) · 2 usage/IO error (a file too large to
@@ -982,6 +985,22 @@ function readWorktree(file) {
   return readFileSync(file);
 }
 
+/**
+ * A working-tree file named on the command line: as readWorktree, but a name that does not exist is
+ * an error, never a silent skip — scan-tarball.mjs passes npm's pack listing, which masks some
+ * names (a GUID-shaped one reads `{***}`), and a skipped name would ship unscanned (fail closed).
+ * The name is not printed: it may carry the very identifier the path rules look for.
+ * @param {string} file
+ * @param {number} n  the entry's 1-based number in this run
+ */
+function readNamed(file, n) {
+  if (!existsSync(file) && !isSymlink(file))
+    throw new ScanError(
+      `scanned entry #${String(n)} does not exist (path not printed) — a name that cannot be read is never "clean"`,
+    );
+  return readWorktree(file);
+}
+
 function isSymlink(file) {
   try {
     return lstatSync(file).isSymbolicLink();
@@ -1388,8 +1407,10 @@ function main() {
     if (index)
       for (const { file, sha } of indexEntries())
         targets.push({ file, read: () => (sha === null ? null : readBlob(sha, file)) });
-    for (const f of files)
-      targets.push({ file: f, read: () => (staged ? readStaged(f) : readWorktree(f)) });
+    for (const f of files) {
+      const n = targets.length + 1;
+      targets.push({ file: f, read: () => (staged ? readStaged(f) : readNamed(f, n)) });
+    }
     if (message !== null) {
       const msgPath = message;
       targets.push({ file: "COMMIT_MESSAGE", read: () => readFileSync(msgPath), message: true });
