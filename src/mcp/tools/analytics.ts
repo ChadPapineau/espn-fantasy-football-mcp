@@ -443,18 +443,73 @@ const withRows = (d: unknown, rows: readonly ProjRow[]): unknown => ({
   projections: rows,
 });
 
+/** One number to `places` decimals (a non-number, an integer or a non-finite value as it is; −0 → 0). */
+function toPlaces(x: unknown, places: number): unknown {
+  if (typeof x !== "number" || !Number.isFinite(x) || Number.isInteger(x)) return x;
+  const f = 10 ** places;
+  const r = Math.round(x * f) / f;
+  return r === 0 ? 0 : r;
+}
+
+/** A Dist with its points to 0.1 and its zero mass to 0.01 (rounding is monotone: the order holds). */
+function coarseDist(d: unknown): unknown {
+  if (typeof d !== "object" || d === null) return d;
+  const o = d as Obj;
+  return {
+    ...o,
+    mean: toPlaces(o.mean, 1),
+    p10: toPlaces(o.p10, 1),
+    p25: toPlaces(o.p25, 1),
+    p50: toPlaces(o.p50, 1),
+    p75: toPlaces(o.p75, 1),
+    p90: toPlaces(o.p90, 1),
+    p_zero: toPlaces(o.p_zero, 2),
+  };
+}
+
+/** One E1 week row at the precision a decision reads: points to 0.1, probabilities to 0.01. */
+function coarseWeek(w: unknown): unknown {
+  if (typeof w !== "object" || w === null) return w;
+  const o = w as Obj;
+  const inputs = o.inputs as Obj | null | undefined;
+  const dis = o.disagreement as Obj | null | undefined;
+  return {
+    ...o,
+    points: coarseDist(o.points),
+    p_active: toPlaces(o.p_active, 2),
+    implied_total: toPlaces(o.implied_total, 1),
+    ...(typeof inputs === "object" && inputs !== null
+      ? {
+          inputs: {
+            ...inputs,
+            espn: toPlaces(inputs.espn, 1),
+            own: toPlaces(inputs.own, 1),
+            weight_espn: toPlaces(inputs.weight_espn, 2),
+          },
+        }
+      : {}),
+    ...(typeof dis === "object" && dis !== null
+      ? { disagreement: { ...dis, pct: toPlaces(dis.pct, 2) } }
+      : {}),
+  };
+}
+
 /**
  * E1's budget steps (plan 07 C8 — 10 000 characters; plan 07 §5.2 — `compact` keeps every
  * identifier, every decision number, every Dist): a whole roster (≤ 16 players) at the default
  * detail is answered for every player, the rows thinned in this order before any player is dropped —
  * (1) an assumption several projections share is stated ONCE in warnings[] with the player ids it
  * applies to (lossless); (2) drivers beyond each player's largest go; (3) weeks beyond the first go
- * (the next game's row stays); (4) for a horizon with a rest-of-season total, the weekly rows go and
- * `ros_total` carries the horizon; only then (5) players leave from the end ONE at a time. Before,
- * the list was only halved: a 16-player roster came back as 8 (week) or 3 (ROS) of 16, and every
- * Skill that projects a roster this way silently read part of it (Stage C finding
- * projections-roster-truncated). Each step says what it removed and how to get it. Under
- * `detail: "full"` (every week asked for) only the lossless step (1) runs before (5).
+ * (the next game's row stays); (4) drivers go; (5) for a horizon with a rest-of-season total, the
+ * weekly rows go and `ros_total` carries the horizon; (6) the numbers go to the precision a decision
+ * reads — points to 0.1, probabilities to 0.01 (every Dist, comparator and flag stays); (7) the
+ * assumptions only one player carries go, their player ids said; only then (8) players leave from
+ * the end ONE at a time. Before, the list was only halved: a 16-player roster came back as 8 (week)
+ * or 3 (ROS) of 16, and every Skill that projects a roster this way silently read part of it (Stage
+ * C finding projections-roster-truncated); attempt 1 stopped at (5), and a 16-player roster under
+ * `full` at horizon week — v2's rows are the longest — still lost a player on the seeded fixture
+ * league in 68 of its 130 sets. Each step says what it removed and how to get it. Under
+ * `detail: "full"` (every week asked for) only the lossless step (1) runs before (8).
  */
 export function projectionTrims(total: number, full = false): readonly AnalyticsTrim[] {
   const assumptionKey = (a: { text: string; revisit_trigger: string }): string =>
@@ -563,6 +618,44 @@ export function projectionTrims(total: number, full = false): readonly Analytics
         warning:
           "projections[].weeks omitted to fit the 10000-character budget: ros_total carries the horizon; fewer players (or horizon: week) give the weekly rows",
         key: "projection_weeks",
+      };
+    },
+    // the precision a decision reads: a tenth of a point (a coin flip is several points wide)
+    (d) => {
+      const rows = projRows(d);
+      const coarse = rows.map((r) => ({
+        ...r,
+        weeks: r.weeks.map(coarseWeek),
+        ros_total: coarseDist(r.ros_total),
+      }));
+      if (JSON.stringify(coarse) === JSON.stringify(rows)) return null;
+      return {
+        data: withRows(d, coarse),
+        warning:
+          "projections[] numbers rounded to fit the 10000-character budget (points to 0.1, probabilities to 0.01); fewer players give three decimals",
+        key: "projection_precision",
+      };
+    },
+    // an assumption only one player carries (the shared ones are in warnings[] already)
+    (d) => {
+      const rows = projRows(d);
+      const ids = rows
+        .filter((r) => r.player_id !== null && r.assumptions.length > 0)
+        .map((r) => String(r.player_id));
+      if (ids.length === 0) return null;
+      const tail =
+        " to fit the 10000-character budget; detail: full with fewer players states them";
+      const named = `projections[].assumptions of ${ids.join(", ")} omitted${tail}`;
+      return {
+        data: withRows(
+          d,
+          rows.map((r) => (r.player_id === null ? r : { ...r, assumptions: [] })),
+        ),
+        warning:
+          named.length <= WARNING_MAX_CHARS
+            ? named
+            : `projections[].assumptions of ${String(ids.length)} players omitted${tail}`,
+        key: "projection_assumptions",
       };
     },
     dropLast,
