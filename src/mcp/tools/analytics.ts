@@ -89,6 +89,7 @@ import {
   rosReadingOf,
   rulesOf,
   scheduleOf,
+  seasonStartIso,
   settingsOf,
   slotsOf,
   take,
@@ -1335,11 +1336,6 @@ export function regularSeasonLastWeek(rules: LeagueRules): number | null {
 /** Previous seasons scanned for stored transactions, newest first (an empty one is one index probe). */
 export const HISTORY_SCAN_SEASONS = 10;
 
-/** The first instant of NFL season `s` (seasonOfInstant's boundary: March 1, UTC). */
-function seasonStart(s: number): string {
-  return new Date(Date.UTC(s, 2, 1)).toISOString();
-}
-
 /**
  * The stored transactions of `season` and of the newest WAIVER_FIT.history.maxSeasons previous
  * seasons that have any, each season read whole through its own window — never the newest-first
@@ -1362,7 +1358,7 @@ export async function storedSeasons(
   }[];
 }> {
   const read = (s: number): Transaction[] => {
-    const rows = seen.listRange(seasonStart(s), seasonStart(s + 1), TRANSACTIONS_RANGE_MAX);
+    const rows = seen.listRange(seasonStartIso(s), seasonStartIso(s + 1), TRANSACTIONS_RANGE_MAX);
     if (rows.length >= TRANSACTIONS_RANGE_MAX)
       warnings.push(
         `season ${String(s)}: only its newest ${String(TRANSACTIONS_RANGE_MAX)} stored transactions are read`,

@@ -29,7 +29,7 @@ import {
 import type { FreshnessClassRow, FreshnessResourceData } from "../envelope.js";
 import { EffError, SERVER_HINTS } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
-import type { DriftView } from "../services.js";
+import type { DriftView, McpServerOptions } from "../services.js";
 import { TOOL_CONTRACT } from "../contract.js";
 import { leagueRef } from "./common.js";
 import { count, iso, isoNull } from "./schemas.js";
@@ -280,10 +280,48 @@ function ageDays(storedAt: string | null, nowMs: number): number | null {
   return Math.max(0, Math.floor((nowMs - ms) / 86_400_000));
 }
 
-/** The Phase-1 dataset sources G1 lists (plan 10 §3.1a: six in Phase 1a). */
-export const STATUS_SOURCES: readonly DatasetSourceId[] = Object.freeze(
-  DATASET_SOURCE_IDS.filter((id) => SOURCE_REGISTRY[id].phase === "1a"),
-);
+/** The Phase-1 dataset sources every toolset reads (weather apart), in refresh order. */
+export const PHASE_1_STATUS_SOURCES: readonly DatasetSourceId[] = Object.freeze([
+  "espn:pro_schedule",
+  "espn:players",
+  "nflverse:schedules",
+  "nflverse:injuries",
+  "nflverse:roster_weekly",
+  "nflverse:players",
+  "nflverse:stats_player_week",
+]);
+
+/** The Phase-2 dataset sources the P1 tools read (plan 10 §3.2): reported under EFF_TOOLSET=full. */
+export const PHASE_2_STATUS_SOURCES: readonly DatasetSourceId[] = Object.freeze([
+  "nflverse:stats_team_week",
+  "nflverse:pbp",
+  "nflverse:snap_counts",
+  "nflverse:depth_charts",
+  "ffopportunity:ep_weekly",
+  "sleeper:trending",
+  "news:rotowire",
+  "news:espn",
+  "news:cbs",
+]);
+
+/**
+ * The configured dataset sources G1 and espn-ff://status/freshness list — the same set, in the same
+ * order, as `eff status` (src/cli/status.ts configuredSources, which this layer may not import; a
+ * parity test holds them equal): the Phase-1 sources, the Phase-2 ones under EFF_TOOLSET=full (the
+ * P1 tools read them), and the ONE weather source EFF_WEATHER_SOURCE names. Before, every toolset
+ * listed only the Phase-1 registry rows — both weather sources, never a Phase-2 source — so under
+ * `full` the snapshot every Skill reads in Step 0 never showed a stale pbp, snap-count or news feed
+ * the P1 tools depend on (Stage C finding status-phase2-sources-missing).
+ */
+export function statusSources(
+  o: Pick<McpServerOptions, "toolset" | "weatherSource">,
+): readonly DatasetSourceId[] {
+  return [
+    ...PHASE_1_STATUS_SOURCES,
+    ...(o.toolset === "full" ? PHASE_2_STATUS_SOURCES : []),
+    o.weatherSource === "nws" ? "weather:nws" : "weather:open_meteo",
+  ];
+}
 
 /** One `sources[]` row from refresh_log (fixed codes only — never an exception text). */
 function sourceStatus(ctx: ToolContext, id: DatasetSourceId): StatusData["sources"][number] {
@@ -446,7 +484,7 @@ export async function statusSnapshot(
       breaker_open: transport.breaker_open,
       etag_304_count: transport.etag_304_count,
     },
-    sources: STATUS_SOURCES.map((id) => sourceStatus(ctx, id)),
+    sources: statusSources(ctx.options).map((id) => sourceStatus(ctx, id)),
     crosswalk: {
       matched,
       unmatched_rostered: rosteredUnmatched,
@@ -547,7 +585,7 @@ export const checkAuth = defineTool({
 /** The plan 01 §5.4 class table with each class's current age and state. */
 export function freshnessReport(ctx: ToolContext): FreshnessResourceData {
   const ages = new Map<FreshnessClassId, { age_s: number; state: FreshnessClassRow["state"] }>();
-  const sources = STATUS_SOURCES.map((id) => sourceStatus(ctx, id));
+  const sources = statusSources(ctx.options).map((id) => sourceStatus(ctx, id));
   for (const s of sources) {
     if (s.age_s === null) continue;
     const cls = SOURCE_REGISTRY[s.id as DatasetSourceId].freshness;

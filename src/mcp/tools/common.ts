@@ -20,21 +20,26 @@ import {
   identityOfPlatformPlayer,
   isTeamUnitIdentity,
 } from "../../domain/crosswalk/resolver.js";
-import type {
-  CrosswalkStatus,
-  League,
-  LeagueRef,
-  LeagueRules,
-  OwnershipRow,
-  PlatformPlayer,
-  PlatformStamp,
-  PlayerSearchRow,
-  ProGame,
-  ProSchedule,
-  ProTeam,
-  RosterSlots,
-  Stamped,
-  Week,
+import { seasonOfInstant } from "../../domain/analytics/waiver-fit/history.js";
+import {
+  TRANSACTIONS_RANGE_MAX,
+  type CrosswalkStatus,
+  type IsoInstant,
+  type League,
+  type LeagueRef,
+  type LeagueRules,
+  type OwnershipRow,
+  type PlatformPlayer,
+  type PlatformStamp,
+  type PlayerSearchRow,
+  type ProGame,
+  type ProSchedule,
+  type ProTeam,
+  type RosterSlots,
+  type Stamped,
+  type Transaction,
+  type TransactionsSeenRepository,
+  type Week,
 } from "../../domain/league/types.js";
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import {
@@ -417,6 +422,43 @@ export async function withinBudget<T>(
     }
     throw e;
   }
+}
+
+// --- the season of a stored transaction (Stage C finding transactions-store-not-season-scoped) -------
+
+/**
+ * The first instant of NFL season `s` — March 1, UTC: seasonOfInstant's boundary (a stored row's
+ * season is that of its processed, else proposed, instant), the window every season-scoped read of
+ * `transactions_seen` uses (the table has no season column).
+ */
+export function seasonStartIso(s: number): IsoInstant {
+  return new Date(Date.UTC(s, 2, 1)).toISOString();
+}
+
+/**
+ * The stored transactions of `season` at or after `since` (null: the whole season), newest first:
+ * the season's window read whole (listRange), each row's own instant checked against the season
+ * (seasonOfInstant). `transactions_seen` holds every season the server has seen or backfilled, so a
+ * newest-first page of `list` returned week N of 2025 and 2024 with this season's week N and filled
+ * an early-season page with previous seasons' adds (Stage C finding
+ * transactions-store-not-season-scoped). `capped` is true when the season's window held more rows
+ * than one read returns (its oldest rows were not read).
+ */
+export function seasonTransactions(
+  seen: Pick<TransactionsSeenRepository, "listRange">,
+  season: number,
+  since: IsoInstant | null,
+): { readonly rows: readonly Transaction[]; readonly capped: boolean } {
+  const from = seasonStartIso(season);
+  const until = seasonStartIso(season + 1);
+  const lo = since !== null && Date.parse(since) > Date.parse(from) ? since : from;
+  if (Date.parse(lo) >= Date.parse(until)) return { rows: [], capped: false };
+  const all = seen.listRange(lo, until, TRANSACTIONS_RANGE_MAX);
+  const rows = all.filter((t) => {
+    const s = seasonOfInstant(t.process_date ?? t.proposed_date);
+    return s === null || s === season;
+  });
+  return { rows, capped: all.length >= TRANSACTIONS_RANGE_MAX };
 }
 
 // --- position arguments (Stage C finding players-position-filter-unvalidated) -------------------------

@@ -88,6 +88,7 @@ import {
   optionalDataset,
   readOpts,
   rosReadingOf,
+  seasonTransactions,
   take,
   teamOf,
   turn,
@@ -1481,7 +1482,11 @@ async function transactionsOf(
     warnings.push(
       `weeks before ${String(covered)} come from the server's persisted history only (one feed read per week)`,
     );
-  for (const t of ctx.services.transactionsSeen.list(since, 1000))
+  // the configured season's stored rows in the window (never a previous season's — Stage C finding
+  // transactions-store-not-season-scoped)
+  await turn();
+  for (const t of seasonTransactions(ctx.services.transactionsSeen, leagueRef(ctx).season, since)
+    .rows)
     if (!byId.has(t.transaction_id)) byId.set(t.transaction_id, t);
   return [...byId.values()];
 }

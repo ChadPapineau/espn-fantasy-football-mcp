@@ -18,7 +18,7 @@ import {
 import type { ScoringSettings } from "../../domain/scoring/types.js";
 import { positionNameOf } from "../../domain/league/slots.js";
 import { matchupPeriodOfWeek } from "../../domain/league/rules.js";
-import { weekGameState } from "../../domain/league/schedule.js";
+import { lockPlan, weekGameState } from "../../domain/league/schedule.js";
 import { seedingDigest, seedingEvidence } from "../../domain/league/seeding.js";
 import {
   REPRODUCTION_FINDINGS,
@@ -33,11 +33,14 @@ import {
   type BoxScorePlayerRow,
   type BoxScoreSide,
   type BoxScoreSideRow,
+  type GameState,
+  type LeagueClock,
   type LeagueDigestData,
   type LeagueDigestSection,
   type LiveMatchup,
   type LiveScoreboardData,
   type Matchup,
+  type ProSchedule,
   type ScoreboardData,
   type ScoringDigest,
   type SeedingEvidence,
@@ -45,6 +48,9 @@ import {
   type Transaction,
   type TransactionsData,
   type TransactionType,
+  type Week,
+  type IsoInstant,
+  TRANSACTIONS_RANGE_MAX,
 } from "../../domain/league/types.js";
 import {
   BOUNDS,
@@ -70,9 +76,11 @@ import {
   readOpts,
   rulesOf,
   scheduleOf,
+  seasonTransactions,
   settingsOf,
   take,
   teamOf,
+  turn,
   weekOf,
   withinBudget,
 } from "./common.js";
@@ -470,6 +478,21 @@ async function evidenceOf(
   );
 }
 
+/**
+ * The week A1's `current_week_final` / `corrections_window_open` describe: the current scoring
+ * period, or — once ESPN's clock has run past the league's final scoring period (after the season it
+ * serves scoringPeriodId 19 with finalScoringPeriod 17, every recorded finished season) — the
+ * league's LAST SCORED week. Week 19 has no games, so it read "not final" and "window open" from
+ * January to August (Stage C finding league-offseason-clock-not-final).
+ */
+export function clockWeek(
+  clock: Pick<LeagueClock, "current_scoring_period" | "final_scoring_period">,
+): Week {
+  const cur = clock.current_scoring_period;
+  const fin = clock.final_scoring_period;
+  return fin >= 1 && cur > fin ? fin : cur;
+}
+
 /** The A1 digest (also espn-ff://league/settings). */
 export async function leagueDigest(
   ctx: ToolContext,
@@ -519,7 +542,7 @@ export async function leagueDigest(
       () => null,
     );
     if (sched !== null) {
-      const st = weekGameState(sched.schedule, league.clock.current_scoring_period, ctx.nowMs);
+      const st = weekGameState(sched.schedule, clockWeek(league.clock), ctx.nowMs);
       final = st.final;
       window = st.corrections_window_open;
     } else {
@@ -940,6 +963,7 @@ export function boxRow(
   e: BoxScoreEntry,
   settings: ScoringSettings | null,
   full: boolean,
+  gameState: GameState = e.game_state,
 ): BoxScorePlayerRow {
   const actual = e.actual;
   let engine: number | null = null;
@@ -976,7 +1000,7 @@ export function boxRow(
     match,
     mismatch_stat_ids: mismatch,
     projected_espn: e.projected?.applied_total ?? null,
-    game_state: e.game_state,
+    game_state: gameState,
     ...(full && actual !== null ? { stats: actual.raw, applied_stats: actual.applied_stats } : {}),
   };
 }
@@ -985,13 +1009,42 @@ function boxSide(
   s: BoxScoreSide,
   settings: ScoringSettings | null,
   full: boolean,
+  states: ReadonlyMap<number, GameState> | null,
 ): BoxScoreSideRow {
   return {
     team_id: s.team_id,
     name: s.name,
     total_points: s.total_points,
-    players: s.entries.map((e) => boxRow(e, settings, full)),
+    players: s.entries.map((e) =>
+      boxRow(e, settings, full, states?.get(e.player.ref.id) ?? e.game_state),
+    ),
   };
+}
+
+/**
+ * Each box-score player's game state from the pro schedule — the one derivation espn_get_roster uses
+ * (lockPlan: `final` once the game's stats are official, `bye` when his team has no game that week,
+ * `in`/`pre`/`tbd` otherwise; a week the schedule holds no game for is `tbd`). The box score's own
+ * state only knows whether ESPN sent an actual line: ESPN sends none in a bye week, so a bye player
+ * read `pre` during the week, and `bye` never let the week turn final (Stage C finding
+ * boxscore-bye-blocks-final). null when the schedule cannot be read this call.
+ */
+export function boxGameStates(
+  chosen: readonly { home: BoxScoreSide; away: BoxScoreSide | null }[],
+  schedule: Pick<ProSchedule, "games"> | null,
+  week: Week,
+  nowMs: number,
+): ReadonlyMap<number, GameState> | null {
+  if (schedule === null) return null;
+  const subjects = chosen.flatMap((m) =>
+    [...m.home.entries, ...(m.away?.entries ?? [])].map((e) => ({
+      player_id: e.player.ref.id,
+      pro_team_id: e.player.pro_team_id,
+      lineup_locked: false,
+    })),
+  );
+  const plan = lockPlan(subjects, schedule, week, null, nowMs);
+  return new Map(plan.players.map((p) => [p.player_id, p.game_state]));
 }
 
 /** A5 `espn_get_box_score`. */
@@ -1049,10 +1102,15 @@ export const getBoxScore = defineTool({
       if (chosen.length === 0) throw new EffError("NOT_FOUND");
     }
     const full = args.detail === "full";
+    const sched = await withinBudget(
+      () => scheduleOf(ctx, league.ref.season, inputs, args.allow_stale === true),
+      warnings,
+    ).catch(() => null);
+    const states = boxGameStates(chosen, sched?.schedule ?? null, args.week, ctx.nowMs);
     const matchups = chosen.map((m) => ({
       matchup_id: m.matchup_id,
-      home: boxSide(m.home, settings, full),
-      away: m.away === null ? null : boxSide(m.away, settings, full),
+      home: boxSide(m.home, settings, full, states),
+      away: m.away === null ? null : boxSide(m.away, settings, full, states),
     }));
     let checked = 0;
     let matched = 0;
@@ -1065,11 +1123,13 @@ export const getBoxScore = defineTool({
           }
     const share = checked === 0 ? null : (checked - matched) / checked;
     const flags = await periodFlags(ctx, league.ref.season, [args.week], inputs, warnings);
-    const allEntries = chosen.flatMap((m) => [...m.home.entries, ...(m.away?.entries ?? [])]);
+    // final once the week's games are official: every player's game is final, and a player on bye
+    // has no game to wait for (he never blocks it)
+    const rows = matchups.flatMap((m) => [...m.home.players, ...(m.away?.players ?? [])]);
     const final =
       !flags.provisional &&
-      allEntries.length > 0 &&
-      allEntries.every((e) => e.game_state === "final");
+      rows.length > 0 &&
+      rows.every((r) => r.game_state === "final" || r.game_state === "bye");
     if (settings !== null && checked > 0) {
       const g = ctx.services.golden;
       g.last_checked_week = args.week;
@@ -1148,6 +1208,22 @@ export const transactionsSchema = z.strictObject({
   }),
 });
 
+/** The oldest instant (processed, else proposed) among stored rows, or null when none is dated. */
+export function oldestInstant(rows: readonly Transaction[]): IsoInstant | null {
+  let best: number | null = null;
+  let iso: IsoInstant | null = null;
+  for (const t of rows) {
+    const at = t.process_date ?? t.proposed_date;
+    if (at === null) continue;
+    const ms = Date.parse(at);
+    if (Number.isFinite(ms) && (best === null || ms < best)) {
+      best = ms;
+      iso = at;
+    }
+  }
+  return iso;
+}
+
 const DEFAULT_TXN_TYPES: readonly TransactionType[] = Object.freeze([
   "FREEAGENT",
   "WAIVER",
@@ -1200,7 +1276,22 @@ export const listTransactions = defineTool({
         "espn:mTransactions2 unavailable: served from the server's persisted history (stale)",
       );
     }
-    const seen = ctx.services.transactionsSeen.list(since, args.count);
+    // the configured league-season's stored rows only: transactions_seen keeps every season the
+    // server has seen or backfilled (Stage C finding transactions-store-not-season-scoped)
+    await turn();
+    const stored = seasonTransactions(ctx.services.transactionsSeen, league.ref.season, null);
+    if (stored.capped)
+      warnings.push(
+        `season ${String(league.ref.season)}: only its newest ${String(TRANSACTIONS_RANGE_MAX)} stored transactions are read`,
+      );
+    const sinceMs = since === null ? null : Date.parse(since);
+    const seen =
+      sinceMs === null
+        ? stored.rows
+        : stored.rows.filter((t) => {
+            const at = Date.parse(t.process_date ?? t.proposed_date ?? "");
+            return !Number.isFinite(at) || at >= sinceMs;
+          });
     const byId = new Map<string, Transaction>();
     for (const t of espnTxns) byId.set(t.transaction_id, t);
     for (const t of seen) {
@@ -1226,7 +1317,8 @@ export const listTransactions = defineTool({
       });
       pending = got === null ? null : [...take(ctx, got, inputs)];
     }
-    const oldest = ctx.services.transactionsSeen.oldestSeen();
+    // this season's stored history (its oldest row), never a previous season's backfilled rows
+    const oldest = oldestInstant(stored.rows);
     const data: TransactionsData = {
       transactions: merged,
       pending,
