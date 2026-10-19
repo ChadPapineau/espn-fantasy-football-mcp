@@ -17,11 +17,22 @@
 // Usage:  scripts/dev/with-node.sh npx tsx scripts/run-weekly.ts [--week <1-18>]
 //           [--toolset core|full] [--max-turns <n>] [--out <new file>] [--dry-run]
 //   --dry-run prints the server command and the query options as JSON and makes no model call;
-//   --out writes the answer to a NEW 0600 file (an existing file is never overwritten).
+//   --out writes the answer to a NEW 0600 file (an existing file is never overwritten). The answer
+//   names the owner's league (other members' team names, the roster, the lineup), so --out takes
+//   the location rule of `eff backup --to` (resolveOutDestination): an absolute (or ~/) path whose
+//   directory exists, outside every git working tree, every cloud-synced folder and every
+//   file-provider directory — checked before the model is called.
 // Exit: 0 done · 1 the run failed · 2 usage (or dist/ not built) · 3 the Agent SDK is not installed.
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  insecureAncestors,
+  locationRefusals,
+  resolveAbsolute,
+  type XattrReader,
+} from "../src/config/paths.js";
 import { WRITE_TOOL_NAMES } from "../src/domain/gate/types.js";
 import { toolNames } from "../src/mcp/registry.js";
 
@@ -111,6 +122,69 @@ export function parseRunWeeklyArgs(argv: readonly string[]): RunWeeklyArgs {
     }
   }
   return { week, toolset, maxTurns, out, dryRun };
+}
+
+/** Why each location rule refuses an `--out` (fixed text, never the path). */
+const OUT_REFUSAL: Readonly<Record<string, string>> = Object.freeze({
+  inside_repo:
+    "--out is inside a git working tree (this checkout or another repository): a later `git add` would publish the answer, which names your league's teams and roster — write it outside every repository (e.g. ~/weekly-plan.md)",
+  synced_folder:
+    "--out is in a cloud-synced folder (Documents, Desktop, iCloud Drive, CloudStorage, Dropbox, …): the answer names your league's teams and roster — write it to a folder that does not sync",
+  file_provider:
+    "--out is in a folder a file provider manages (iCloud or another sync client): the answer names your league's teams and roster — write it to a folder that does not sync",
+  xattr_unverifiable:
+    "--out: could not check whether the folder is managed by a file provider — refusing",
+});
+
+/**
+ * Where `--out` writes: its directory resolved to the real path, plus the file name. The location
+ * rule of `eff backup --to` (src/cli/maintenance.ts resolveBackupDestination) and of the product's
+ * own config and cache (src/config/paths.ts locationRefusals): absolute or `~/` (a relative path
+ * lands in the working directory — the clone, when run as documented), a directory that exists,
+ * never inside ANY git working tree, never a cloud-synced folder by name, never a directory a file
+ * provider manages, never under a directory others can write into without the sticky bit. The
+ * answer carries the live league's member-authored team names and the owner's roster (Stage C
+ * finding scripts-run-weekly-out-unguarded). Every refusal is a usage error (exit 2).
+ */
+export function resolveOutDestination(
+  out: string,
+  home: string,
+  repoRoot: string,
+  xattr?: XattrReader,
+): string {
+  let abs: string;
+  try {
+    abs = resolveAbsolute(out, home, "--out");
+  } catch {
+    throw new RunWeeklyUsage("--out: the path must be absolute (or start with ~/)");
+  }
+  const name = path.basename(abs);
+  if (out.endsWith("/") || out === "~" || name === "" || name === "." || name === "..")
+    throw new RunWeeklyUsage("--out must name a file (e.g. ~/weekly-plan.md)");
+  let parent: string;
+  try {
+    parent = realpathSync.native(path.dirname(abs));
+  } catch {
+    throw new RunWeeklyUsage("--out: its directory does not exist; create it first");
+  }
+  if (!statSync(parent).isDirectory())
+    throw new RunWeeklyUsage("--out: its parent is not a directory");
+  const dest = path.join(parent, name);
+  for (const p of [abs, dest]) {
+    const refused = locationRefusals(p, {
+      home,
+      repoRoot,
+      what: "--out",
+      ...(xattr === undefined ? {} : { xattr }),
+    })[0];
+    if (refused !== undefined)
+      throw new RunWeeklyUsage(OUT_REFUSAL[refused.reason] ?? `--out: ${refused.detail}`);
+  }
+  if (insecureAncestors(dest).length > 0)
+    throw new RunWeeklyUsage(
+      "--out: a directory above it is writable by others; choose a directory only you can write to",
+    );
+  return dest;
 }
 
 /** The stdio server one weekly run starts: the plugin's command, one environment key. */
@@ -204,6 +278,10 @@ export function resultText(messages: readonly unknown[]): { text: string | null;
 export interface RunWeeklyDeps {
   readonly root: string;
   readonly execPath: string;
+  /** The home `~/` expands to and whose synced folders `--out` may not use. */
+  readonly home: string;
+  /** The file-provider check's xattr reader (tests); defaults to the system reader. */
+  readonly xattr?: XattrReader;
   readonly query: () => Promise<QueryFn | null>;
   readonly stdout: (line: string) => void;
   readonly stderr: (line: string) => void;
@@ -215,9 +293,13 @@ export interface RunWeeklyDeps {
 export async function runWeekly(argv: readonly string[], deps: RunWeeklyDeps): Promise<number> {
   let args: RunWeeklyArgs;
   let spec: ServerSpec;
+  let out: string | null;
   try {
     args = parseRunWeeklyArgs(argv);
     spec = serverSpec(deps.root, deps.execPath, args.toolset);
+    // before anything runs: a refused destination costs no model call
+    out =
+      args.out === null ? null : resolveOutDestination(args.out, deps.home, deps.root, deps.xattr);
   } catch (e) {
     if (e instanceof RunWeeklyUsage) {
       deps.stderr(`run-weekly: ${e.message}`);
@@ -254,7 +336,7 @@ export async function runWeekly(argv: readonly string[], deps: RunWeeklyDeps): P
     deps.stderr("run-weekly: the run ended without a successful result");
     return RUN_EXIT.error;
   }
-  if (args.out !== null) deps.writeFile(args.out, `${text}\n`);
+  if (out !== null) deps.writeFile(out, `${text}\n`);
   else deps.stdout(text);
   return RUN_EXIT.ok;
 }
@@ -267,6 +349,7 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
   const code = await runWeekly(process.argv.slice(2), {
     root: PACKAGE_ROOT,
     execPath: process.execPath,
+    home: homedir(),
     query: () => loadQuery(),
     stdout: (l) => process.stdout.write(`${l}\n`),
     stderr: (l) => process.stderr.write(`${l}\n`),
