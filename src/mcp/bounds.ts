@@ -82,8 +82,11 @@ export const BOUNDS = Object.freeze({
   recNoteChars: 200,
   recordInputChars: 20_000,
   minN: { min: 1, max: 10_000, default: 30 },
-  /** E2 `pf_weight` (points-for weight in the blend objective; null = derived). */
-  pfWeight: { min: 0, max: 1000 },
+  /**
+   * E2 `pf_weight` (points-for per win in the blend objective; null = derived): `min` is EXCLUSIVE —
+   * the engine divides by it, so 0 is refused (Stage C finding lineup-pf-weight-zero-refused).
+   */
+  pfWeight: { min: 0, max: 1000, minExclusive: true },
   /** E3 `scenarios[].pf_delta` (points added to a team's season PF). */
   pfDelta: { min: -500, max: 500 },
   /** E7 `assume_weeks_out` (null = from the report). */
@@ -225,10 +228,15 @@ export const nSimsSchema = int(BOUNDS.nSims.min, N_SIMS_MAX).default(BOUNDS.nSim
 export const nSimsSeasonSchema = int(BOUNDS.nSimsSeason.min, N_SIMS_MAX).default(
   BOUNDS.nSimsSeason.default,
 );
-/** E2 `pf_weight`: 0..1000 or null (null/omitted = derived from the season simulator). */
+/**
+ * E2 `pf_weight`: (0, 1000] or null (null/omitted = derived from the season simulator). The minimum
+ * is exclusive (`exclusiveMinimum: 0` on the wire): the engine refuses 0 — it is the PF-per-win
+ * divisor — so a 0 the advertised schema allowed answered an opaque VALIDATION with no field; zod now
+ * refuses it naming `pf_weight` (Stage C finding lineup-pf-weight-zero-refused).
+ */
 export const pfWeightSchema = z
   .number()
-  .min(BOUNDS.pfWeight.min)
+  .gt(BOUNDS.pfWeight.min)
   .max(BOUNDS.pfWeight.max)
   .nullable();
 /** E3 `scenarios[].pf_delta`. */

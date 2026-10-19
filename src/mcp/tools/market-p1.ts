@@ -81,6 +81,7 @@ import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, type ToolContext, type ToolOutput } from "../define.js";
 import { carryOutcome, cpuDeadlineOf, seedOf, waiverPlayerOf, type Subject } from "./analytics.js";
 import {
+  canonicalPosition,
   crosswalkOf,
   isDegradable,
   leagueRef,
@@ -305,6 +306,37 @@ const tradeSideSchema = playerIdsSchema.refine((a) => a.length <= BOUNDS.tradeSi
   message: "too_big",
 });
 
+/** The positions a league starts (its starter and flex slots' eligible positions): E6's needs. */
+export function startingPositions(slots: {
+  readonly slots: readonly { class: string; eligible_positions: readonly string[] }[];
+}): Set<string> {
+  const out = new Set<string>();
+  for (const s of slots.slots)
+    if (s.class === "starter" || s.class === "flex")
+      for (const p of s.eligible_positions) out.add(p);
+  return out;
+}
+
+/** The assumption naming the wire a freed seat is filled from (said whenever one was given). */
+export const TRADE_WIRE_ASSUMPTION = Object.freeze({
+  text: "a seat the trade frees is filled with the best free agent (FREEAGENT: an instant add) by ESPN's rest-of-season projection; a WAIVERS player needs a claim and is never counted",
+  revisit_trigger: "the free-agent pool changes (a waiver run, a drop)",
+});
+
+/**
+ * The trade data with the wire's assumption on its rec when the engine was given a wire: Δ counts a
+ * free-agent fill of every seat the trade frees, and the reader must see which pool that was (the
+ * engine states the opposite case itself — "valued at 0 (no wire given)"). Stage C finding
+ * trade-wire-fill-free-waivers.
+ */
+export function withWireAssumption(data: TradeData, wire: readonly unknown[]): TradeData {
+  const rec = data.rec;
+  if (wire.length === 0 || rec === null) return data;
+  if (rec.assumptions.some((a) => a.text === TRADE_WIRE_ASSUMPTION.text)) return data;
+  const withA = { ...rec, assumptions: [...rec.assumptions, TRADE_WIRE_ASSUMPTION] };
+  return data.kind === "evaluation" ? { ...data, rec: withA } : { ...data, rec: withA };
+}
+
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): a write module would let the
 // user act on an accepted evaluation through its trade prepare/commit pair (plan 07 §3.F F5–F6, the
 // later gate). Nothing here prepares, proposes or sends a trade: the evaluation is read-only and the
@@ -358,6 +390,20 @@ export const analyzeTradeTool = defineTool({
     const warnings: string[] = [];
     const b = await basicsOf(ctx, inputs, args);
     const me = teamOf(b.league, args.team_id);
+    // the engine matches need_position to a player's position exactly: the argument in the league's
+    // spelling of a position it starts, else VALIDATION — never partners [] with a "no partner
+    // gains" verdict for `rb` or `FLEX` (Stage C finding players-position-filter-unvalidated)
+    const findPartners =
+      args.find_partners === undefined
+        ? null
+        : {
+            ...args.find_partners,
+            need_position: canonicalPosition(
+              args.find_partners.need_position,
+              startingPositions(b.slots),
+              "find_partners.need_position",
+            ),
+          };
     const weeks = remainingWeeks(b.rules.playoffs, b.w);
     if (weeks.length === 0)
       throw new EffError("VALIDATION", { field: "offer", reason: "season_over" });
@@ -445,6 +491,11 @@ export const analyzeTradeTool = defineTool({
         "risk preference is not modelled: Δ and its [p10, p90] interval are reported for you to weigh",
       );
     const pool = await poolOf(ctx, b.w, inputs, warnings);
+    // a seat the trade frees is filled as an instant, certain, free add: only a FREEAGENT is one.
+    // A WAIVERS player needs a claim (a priority cost, a rival's competing claim, a run that may
+    // not reach this week) — counted as a free add before, he made "give both my QBs for an RB" look
+    // fair when the pool held no free-agent QB at all (Stage C finding trade-wire-fill-free-waivers)
+    const wire = pool.filter((p) => p.status === "FREEAGENT").slice(0, TRADE_WIRE_MAX);
     // the teams' players were mapped synchronously above: the loop runs before the engine
     await turn();
     const out = await analyzeTrade({
@@ -454,14 +505,14 @@ export const analyzeTradeTool = defineTool({
       me: meTeam,
       teams: others,
       offer: args.offer ?? null,
-      find_partners: args.find_partners ?? null,
+      find_partners: findPartners,
       horizon: args.horizon,
       seeding_mode: args.seeding_mode,
       seeding_config: {
         mode: ctx.services.seedingMode,
         confirmed_at: ctx.services.seedingConfirmedAt,
       },
-      free_agents: pool.slice(0, TRADE_WIRE_MAX).map((p) => tradePlayerOf(ctx, p, 20, weeks, ros)),
+      free_agents: wire.map((p) => tradePlayerOf(ctx, p, 20, weeks, ros)),
       clock: ctx.services.clock,
       pacer: ctx.pacer,
       rng: seededRng(seed),
@@ -471,7 +522,10 @@ export const analyzeTradeTool = defineTool({
     });
     if (out.data.kind === "evaluation" && !out.data.seeding.confirmed)
       warnings.push("seeding reading not confirmed: run the onboard Skill (eff setup --seeding)");
-    const data: TradeData = { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) };
+    const data: TradeData = withWireAssumption(
+      { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) },
+      wire,
+    );
     return {
       data,
       inputs,

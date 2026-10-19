@@ -9,7 +9,7 @@ import { z } from "zod/v4";
 import { mergeName } from "../../domain/crosswalk/normalize.js";
 import type { EspnPlayerIdentity } from "../../domain/crosswalk/types.js";
 import { gamesOfWeek, kickoffOf, opponentOf, teamGame } from "../../domain/league/schedule.js";
-import { positionNameOf } from "../../domain/league/slots.js";
+import { POSITION_NAMES, SLOT_TABLE, positionNameOf } from "../../domain/league/slots.js";
 import {
   bareUntrusted,
   type PlatformPlayer,
@@ -20,7 +20,11 @@ import {
   type ProSchedule,
   type UntrustedText,
 } from "../../domain/league/types.js";
-import { PLAYER_LIST_WARNINGS, type PlayerStatusFilter } from "../../providers/platform.js";
+import {
+  PLAYER_LIST_WARNINGS,
+  isUpstreamBudgetExhausted,
+  type PlayerStatusFilter,
+} from "../../providers/platform.js";
 import {
   BOUNDS,
   NAME_SORT_OFFSET_REASON,
@@ -38,9 +42,11 @@ import type { InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
 import {
+  canonicalPosition,
   crosswalkOf,
   datasetInput,
   isDegradable,
+  isOptionalReadFailure,
   leagueOf,
   leagueRef,
   proTeamAbbrev,
@@ -48,6 +54,7 @@ import {
   scheduleOf,
   searchRow,
   slotsOf,
+  snapshotStandIn,
   take,
   weekOf,
   withinBudget,
@@ -107,17 +114,25 @@ interface IndexEntry {
   readonly player: PlatformPlayer | null;
 }
 
-/** The local name index: `espn:players`, else the keyless players_wl view (1 request). */
+/**
+ * The local name index: `espn:players`, else the keyless players_wl view (1 request). Past the
+ * dataset's hard limit it is STALE_ONLY unless the call passed `allow_stale` (then served, labelled
+ * stale) — the STALE_ONLY hint and orient's host_moved rule tell the model to retry that way (Stage C
+ * finding players-search-no-allow-stale).
+ */
 async function nameIndex(
   ctx: ToolContext,
   season: number,
   inputs: InputStamp[],
   warnings: string[],
-  allowStale = false,
+  args: {
+    readonly force_refresh?: boolean | undefined;
+    readonly allow_stale?: boolean | undefined;
+  },
 ): Promise<IndexEntry[]> {
   const ds = ctx.services.playerUniverse.all(season);
   if (ds.stamp !== null && ds.rows.length > 0) {
-    const input = datasetInput(ds.stamp, ctx.nowMs, allowStale);
+    const input = datasetInput(ds.stamp, ctx.nowMs, args.allow_stale === true);
     if (input !== null) inputs.push(input);
     return ds.rows.map((r) => ({
       id: r.espn_id,
@@ -129,7 +144,7 @@ async function nameIndex(
     }));
   }
   const got = await withinBudget(
-    () => ctx.services.espn.getSeasonPlayers(season, readOpts(ctx)),
+    () => ctx.services.espn.getSeasonPlayers(season, readOpts(ctx, args)),
     warnings,
   );
   if (got === null) return [];
@@ -203,6 +218,7 @@ export const searchPlayers = defineTool({
       .min(BOUNDS.searchLimit.min)
       .max(BOUNDS.searchLimit.max)
       .default(BOUNDS.searchLimit.default),
+    ...espnFreshnessShape,
   }),
   data: playerSearchSchema,
   budget: "list",
@@ -213,15 +229,16 @@ export const searchPlayers = defineTool({
     const q = foldTokens(args.query);
     if (q.length === 0)
       throw new EffError("VALIDATION", { field: "query", reason: "no_name_tokens" });
-    const index = await nameIndex(ctx, season, inputs, warnings);
+    const accepts =
+      args.position === undefined ? null : await searchPositions(ctx, args.position, inputs);
+    const index = await nameIndex(ctx, season, inputs, warnings, args);
     if (index.length === 0)
       throw new EffError("STALE_ONLY", {
         hint: "That dataset was never loaded: run eff refresh in a terminal, then retry.",
       });
-    const pos = args.position?.toUpperCase() ?? null;
     const hits = index
       .map((e) => ({ e, rank: nameMatchRank(e.tokens, q) }))
-      .filter((h) => h.rank > 0 && (pos === null || h.e.position.toUpperCase() === pos))
+      .filter((h) => h.rank > 0 && (accepts === null || accepts.has(h.e.position)))
       .sort((a, b) => b.rank - a.rank || b.e.percent_owned - a.e.percent_owned || a.e.id - b.e.id)
       .slice(0, args.limit)
       .map((h) => h.e);
@@ -229,13 +246,13 @@ export const searchPlayers = defineTool({
       return { data: { players: [] } satisfies PlayerSearchData, inputs, warnings };
     let rows: PlayerSearchRow[];
     try {
-      const league = await leagueOf(ctx, inputs);
+      const league = await leagueOf(ctx, inputs, args);
       const w = weekOf(league, undefined);
       const got = await ctx.services.platform.getPlayers(
         leagueRef(ctx),
         hits.map((h) => ({ platform: "espn" as const, id: h.id })),
         w,
-        readOpts(ctx),
+        readOpts(ctx, args),
       );
       const found = new Map(take(ctx, got, inputs).map((p) => [p.ref.id, p]));
       const names = await teamNames(ctx, inputs, warnings);
@@ -316,6 +333,42 @@ export function leaguePositions(slots: {
   return out;
 }
 
+/** ESPN's whole slot and position catalogue (when the league's own slots cannot be read). */
+const ESPN_SLOT_CATALOGUE: { slots: { name: string; eligible_positions: readonly string[] }[] } = {
+  slots: [
+    ...Object.values(SLOT_TABLE).filter((s) => s.name !== ""),
+    ...Object.values(POSITION_NAMES).map((p) => ({ name: p, eligible_positions: [p] })),
+  ],
+};
+
+/**
+ * The player positions C1's `position` filter accepts: the argument in the league's own spelling
+ * (canonicalPosition over the league's slot names and eligible positions — the catalogue when the
+ * slots cannot be read this call), widened to what that slot accepts when it names a slot (`FLEX` →
+ * RB, WR, TE). An unknown spelling is VALIDATION `unknown_position`, never an empty result (Stage C
+ * finding players-position-filter-unvalidated: `DST` and `FLEX` silently matched nothing).
+ */
+export async function searchPositions(
+  ctx: ToolContext,
+  raw: string,
+  inputs: InputStamp[],
+): Promise<ReadonlySet<string>> {
+  let slots: { readonly slots: readonly { name: string; eligible_positions: readonly string[] }[] };
+  try {
+    slots = await slotsOf(ctx, inputs);
+  } catch (e) {
+    if (!isOptionalReadFailure(e) && !isUpstreamBudgetExhausted(e)) throw e;
+    slots = ESPN_SLOT_CATALOGUE;
+  }
+  const name = canonicalPosition(raw, leaguePositions(slots), "position");
+  const out = new Set<string>();
+  for (const s of slots.slots) {
+    if (s.name === name) for (const p of s.eligible_positions) out.add(p);
+    if (s.eligible_positions.includes(name)) out.add(name);
+  }
+  return out;
+}
+
 /** C2 `espn_list_players`. */
 export const listPlayers = defineTool({
   name: "espn_list_players",
@@ -386,7 +439,14 @@ export const listPlayers = defineTool({
     } catch (e) {
       if (!isDegradable(e)) throw e;
       const snap = ctx.services.poolSnapshots.latestTwo()[0];
-      if (snap === undefined) throw e;
+      // the week asked and younger than a scoring period (never a previous season's pool), and
+      // past the in-week pool's 24 h hard limit only as the cache path serves an expired entry
+      // (Stage C finding players-pool-snapshot-fallback-unbounded)
+      const input = snapshotStandIn(snap, w, "espn_pool", "store:pool_snapshot", ctx.nowMs, {
+        allowStale: args.allow_stale === true,
+        error: e,
+      });
+      if (input === null || snap === undefined) throw e;
       fromSnapshot = true;
       const wanted = (p: PlatformPlayer): boolean =>
         (status === "ALL" ||
@@ -408,14 +468,9 @@ export const listPlayers = defineTool({
         next_offset:
           args.offset + players.length < all.length ? args.offset + players.length : null,
       };
-      inputs.push({
-        source: "store:pool_snapshot",
-        as_of: snap.taken_at,
-        fetched_at: snap.taken_at,
-        state: "stale",
-      });
+      inputs.push(input);
       warnings.push(
-        "espn:kona_player_info unavailable: served from last night's pool snapshot (stale)",
+        `espn:kona_player_info unavailable: served from the week ${String(w)} pool snapshot taken ${snap.taken_at} (stale)`,
       );
     }
     if (args.sort === "name") warnings.push(PLAYER_LIST_WARNINGS.name_sort_page_only);

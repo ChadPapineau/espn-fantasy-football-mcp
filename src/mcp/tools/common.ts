@@ -5,7 +5,12 @@
 // defaults (plan 07 §2), the pro schedule (dataset first, the keyless view only when the store is
 // empty — plan 01 §5.5), the crosswalk state behind every gsis id (plan 07 C1), and the partial
 // rule for a 4th request (plan 01 §5.6). Ported from sibling @5daa625, adapted to the ESPN seam.
-import { freshnessClass } from "../../config/freshness.js";
+import {
+  freshnessClass,
+  serveDecision,
+  stampState,
+  type FreshnessClassId,
+} from "../../config/freshness.js";
 import type { DatasetResult, DatasetStamp } from "../../domain/analytics/types.js";
 import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import { espnRosLastWeek, rosWeeksOf, type RosWeek } from "../../domain/analytics/projection.js";
@@ -412,6 +417,74 @@ export async function withinBudget<T>(
     }
     throw e;
   }
+}
+
+// --- position arguments (Stage C finding players-position-filter-unvalidated) -------------------------
+
+/** Spellings a user types for ESPN's `D/ST` (plan 07 §4.2 spells `espn.stream <K|DST>`). */
+export const POSITION_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  DST: "D/ST",
+  DEF: "D/ST",
+});
+
+/**
+ * A position argument in the league's own spelling: matched case-insensitively against `known`
+ * (`DST`/`DEF` → `D/ST`), else VALIDATION `unknown_position` naming `field` — an empty result never
+ * stands in for an input error. Before, C1 and E6 compared the raw string (C1 upper-cased only):
+ * `DST`, `rb` and slot names silently matched nothing, and E6 then stated a false "no partner gains"
+ * conclusion (Stage C finding players-position-filter-unvalidated).
+ */
+export function canonicalPosition(raw: string, known: Iterable<string>, field: string): string {
+  const up = raw.trim().toUpperCase();
+  const want = POSITION_ALIASES[up] ?? up;
+  for (const k of known) if (k.toUpperCase() === want) return k;
+  throw new EffError("VALIDATION", { field, reason: "unknown_position" });
+}
+
+// --- nightly snapshots standing in for a failed ESPN read (plan 01 §5.4, §7) -----------------------
+
+/** How long a nightly snapshot can still be the week it names: one scoring period. */
+export const SNAPSHOT_WEEK_SPAN_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a nightly snapshot (pool_snapshot, roster_snapshot) may answer for a failed ESPN read of
+ * week `w`, and its input. A snapshot carries no season, so it must name week `w` AND be younger
+ * than one scoring period: a week-`w` snapshot older than that is another season's week `w` (or a
+ * week long gone) and is never served — null, and the caller re-raises the read's own error. A
+ * usable snapshot is judged against the class it replaces (`cls`): past that class's hard limit it is
+ * served only as the provider's cache path would serve an expired entry (serveDecision: under
+ * `allow_stale`, or while the host has moved), else STALE_ONLY. It is always labelled at least stale.
+ * Before, any snapshot of any age and season was served as "last night's", past the STALE_ONLY gate
+ * the cache path enforces (Stage C finding players-pool-snapshot-fallback-unbounded).
+ */
+export function snapshotStandIn(
+  snap: { readonly taken_at: string; readonly week: number } | undefined,
+  w: Week,
+  cls: FreshnessClassId,
+  source: string,
+  nowMs: number,
+  opts: { readonly allowStale: boolean; readonly error: unknown },
+): InputStamp | null {
+  if (snap?.week !== w) return null;
+  const taken = Date.parse(snap.taken_at);
+  if (!Number.isFinite(taken) || nowMs - taken > SNAPSHOT_WEEK_SPAN_MS || taken - nowMs > 60_000)
+    return null;
+  const c = freshnessClass(cls);
+  const st = stampState(
+    c,
+    { as_of: snap.taken_at, fetched_at: snap.taken_at, checked_at: null },
+    nowMs,
+  );
+  const hostMoved = (opts.error as { effCode?: unknown } | null)?.effCode === "ESPN_HOST_MOVED";
+  const d = serveDecision(c, st.state, { allowStale: opts.allowStale, hostMoved });
+  if (d.outcome !== "serve") throw new EffError("STALE_ONLY");
+  return {
+    source,
+    as_of: snap.taken_at,
+    fetched_at: snap.taken_at,
+    basis_at: st.basis_at,
+    state: st.state === "fresh" ? "stale" : st.state,
+  };
 }
 
 /** Whether an error is one a degradation path may absorb (drift or an upstream outage — plan 01 §7). */

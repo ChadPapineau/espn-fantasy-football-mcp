@@ -226,7 +226,8 @@ describe("PlayerSelector (plan 07 legend; T-11)", () => {
 
 describe("CAT-14: the per-tool numeric inputs the plan names (E2, E3, E5, E7, E13)", () => {
   it("every one has a bound row", () => {
-    expect(BOUNDS.pfWeight).toEqual({ min: 0, max: 1000 });
+    // pf_weight's minimum is exclusive: the engine divides by it (Stage C lineup-pf-weight-zero-refused)
+    expect(BOUNDS.pfWeight).toEqual({ min: 0, max: 1000, minExclusive: true });
     expect(BOUNDS.pfDelta).toEqual({ min: -500, max: 500 });
     expect(BOUNDS.assumeWeeksOut).toEqual({ min: 0, max: 18 });
     expect(BOUNDS.positions).toEqual({ min: 1, max: 8 });
@@ -242,7 +243,7 @@ describe("CAT-14: the per-tool numeric inputs the plan names (E2, E3, E5, E7, E1
     expect(ok(nSimsSeasonSchema, 999)).toBe(false);
   });
   it.each([
-    [pfWeightSchema, [0, 0.5, 1000, null], [-0.001, 1000.5, Number.NaN, Infinity, "1"]],
+    [pfWeightSchema, [0.0001, 0.5, 1000, null], [0, -0, -0.001, 1000.5, Number.NaN, Infinity, "1"]],
     [pfDeltaSchema, [-500, 0, 499.5, 500], [-500.5, 501, Number.NaN, -Infinity, null]],
     [assumeWeeksOutSchema, [0, 18, null], [-1, 19, 2.5, Number.NaN, "3"]],
   ] as const)(

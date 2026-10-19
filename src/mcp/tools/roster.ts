@@ -39,6 +39,7 @@ import {
   readOpts,
   scheduleOf,
   slotsOf,
+  snapshotStandIn,
   take,
   teamOf,
   weekOf,
@@ -281,14 +282,18 @@ export async function rostersOf(
   } catch (e) {
     if (!isDegradable(e) || fallbackTeam === null) throw e;
     const snap = ctx.services.rosterSnapshots.latestTwo(fallbackTeam)[0];
-    if (snap?.week !== w) throw e;
-    inputs.push({
-      source: "store:roster_snapshot",
-      as_of: snap.taken_at,
-      fetched_at: snap.taken_at,
-      state: "stale",
+    // the week it names and younger than a scoring period (never another season's week w), and
+    // past mRoster's hard limit only as the cache path serves an expired entry (Stage C finding
+    // players-pool-snapshot-fallback-unbounded)
+    const input = snapshotStandIn(snap, w, "espn_roster", "store:roster_snapshot", ctx.nowMs, {
+      allowStale: args.allow_stale === true,
+      error: e,
     });
-    warnings.push("espn:mRoster unavailable: served from last night's roster snapshot (stale)");
+    if (input === null || snap === undefined) throw e;
+    inputs.push(input);
+    warnings.push(
+      `espn:mRoster unavailable: served from the week ${String(w)} roster snapshot taken ${snap.taken_at} (stale)`,
+    );
     return [snap.roster];
   }
 }
