@@ -14,7 +14,7 @@ import {
   type FreshnessClassId,
   type TtlContext,
 } from "../../config/freshness.js";
-import type { DatasetResult, DatasetStamp } from "../../domain/analytics/types.js";
+import type { DatasetResult, DatasetStamp, NewsItem } from "../../domain/analytics/types.js";
 import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import { espnRosLastWeek, rosWeeksOf, type RosWeek } from "../../domain/analytics/projection.js";
 import type { WeeklyValuesOpts } from "../../domain/analytics/waivers.js";
@@ -56,6 +56,7 @@ import { BOUNDS } from "../bounds.js";
 import { stampToInput, type InputStamp } from "../envelope.js";
 import { EffError, SERVER_HINTS } from "../errors.js";
 import type { ToolContext } from "../define.js";
+import { asGsisId } from "./schemas.js";
 
 /** The configured league for a season (default: the configured season). */
 export function leagueRef(ctx: ToolContext, season?: number): LeagueRef {
@@ -608,6 +609,45 @@ export function espnIdsPairedWith(ctx: Pick<ToolContext, "services">, gsis: stri
   } catch {
     return [];
   }
+}
+
+/** The matcher's lowest confidence: what an item matched by id alone (no per-ref confidence) reads. */
+export const NEWS_MATCH_FLOOR = 0.6;
+
+/** One player a stored news item names (the matcher's ref: ids and confidence, never text). */
+export interface NewsRef {
+  readonly espn_id: number | null;
+  readonly gsis_id: string | null;
+  readonly c: number;
+}
+
+/**
+ * Every player a news item names: the refs the store's reader carries beside a NewsItem (evidence
+ * `newsItemWithRefs` — ESPN ids too, so a ref with no gsis pair counts), read defensively; an item
+ * without them (another reader) names its `gsis_ids`. At most 10.
+ */
+export function newsRefsOf(item: NewsItem): readonly NewsRef[] {
+  const raw = (item as unknown as { refs?: unknown }).refs;
+  if (Array.isArray(raw)) {
+    const out: NewsRef[] = [];
+    for (const r of raw.slice(0, 10)) {
+      if (typeof r !== "object" || r === null) continue;
+      const o = r as Record<string, unknown>;
+      const e = typeof o.espn_id === "number" && Number.isSafeInteger(o.espn_id) ? o.espn_id : null;
+      const g = asGsisId(o.gsis_id);
+      const c =
+        typeof o.match_confidence === "number" && o.match_confidence >= 0 && o.match_confidence <= 1
+          ? o.match_confidence
+          : NEWS_MATCH_FLOOR;
+      if (e !== null || g !== null) out.push({ espn_id: e, gsis_id: g, c });
+    }
+    return out;
+  }
+  return item.gsis_ids
+    .slice(0, 10)
+    .map(asGsisId)
+    .filter((g) => g !== null)
+    .map((g) => ({ espn_id: null, gsis_id: g, c: NEWS_MATCH_FLOOR }));
 }
 
 /** Re-exported for tools that need the full identity (team-unit checks on a PlatformPlayer). */

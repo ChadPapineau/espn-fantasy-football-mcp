@@ -18,7 +18,6 @@ import type {
   DepthChartData,
   DepthChartRow,
   NewsData,
-  NewsItem,
   PbpTeamProfileRow,
   PlayerUsageData,
   PlayerWeekLine,
@@ -53,6 +52,8 @@ import {
   isOptionalReadFailure,
   leagueOf,
   leagueRef,
+  NEWS_MATCH_FLOOR,
+  newsRefsOf,
   optionalDataset,
   readOpts,
   requiredDataset,
@@ -876,8 +877,8 @@ export const getDefenseProfile = defineTool({
 /** News items whose claims are extracted in one turn of the event loop (plan 03 §1.2). */
 export const NEWS_ITEMS_PER_TURN = 5;
 
-/** The matcher's lowest confidence: what an item matched by id alone (no per-ref confidence) reads. */
-export const NEWS_MATCH_FLOOR = 0.6;
+/** The matcher's lowest confidence (re-exported: the shared reader lives in common.ts). */
+export { NEWS_MATCH_FLOOR };
 
 const claimSchema = z
   .strictObject({
@@ -915,35 +916,6 @@ export const newsSchema = z.strictObject({
     )
     .max(50),
 });
-
-/** The refs a reader may carry beside a NewsItem (evidence `newsItemWithRefs`), read defensively. */
-function refsOf(item: NewsItem): readonly {
-  readonly espn_id: number | null;
-  readonly gsis_id: string | null;
-  readonly c: number;
-}[] {
-  const raw = (item as unknown as { refs?: unknown }).refs;
-  if (Array.isArray(raw)) {
-    const out: { espn_id: number | null; gsis_id: string | null; c: number }[] = [];
-    for (const r of raw.slice(0, 10)) {
-      if (typeof r !== "object" || r === null) continue;
-      const o = r as Record<string, unknown>;
-      const e = typeof o.espn_id === "number" && Number.isSafeInteger(o.espn_id) ? o.espn_id : null;
-      const g = asGsisId(o.gsis_id);
-      const c =
-        typeof o.match_confidence === "number" && o.match_confidence >= 0 && o.match_confidence <= 1
-          ? o.match_confidence
-          : NEWS_MATCH_FLOOR;
-      if (e !== null || g !== null) out.push({ espn_id: e, gsis_id: g, c });
-    }
-    return out;
-  }
-  return item.gsis_ids
-    .slice(0, 10)
-    .map(asGsisId)
-    .filter((g) => g !== null)
-    .map((g) => ({ espn_id: null, gsis_id: g, c: NEWS_MATCH_FLOOR }));
-}
 
 /** D6 `espn_get_news`. */
 export const getNews = defineTool({
@@ -1023,7 +995,7 @@ export const getNews = defineTool({
     const ids = [
       ...new Set(
         kept.flatMap((it) =>
-          refsOf(it).map(
+          newsRefsOf(it).map(
             (r) =>
               r.espn_id ?? (r.gsis_id === null ? null : espnIdOfGsis(ctx, r.gsis_id, warnings)),
           ),
@@ -1048,7 +1020,7 @@ export const getNews = defineTool({
         id: it.id,
         source: it.source,
         published_at: it.published_at,
-        players_matched: refsOf(it).map((r) => {
+        players_matched: newsRefsOf(it).map((r) => {
           const pid = r.espn_id ?? (r.gsis_id === null ? null : espnIdOfGsis(ctx, r.gsis_id));
           return {
             gsis_id: r.gsis_id,

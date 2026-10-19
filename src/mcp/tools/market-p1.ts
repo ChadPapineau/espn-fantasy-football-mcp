@@ -32,6 +32,7 @@ import {
 import type { ActivityTeam } from "../../domain/analytics/leagueActivity.js";
 import type {
   LeagueActivityData,
+  NewsItem,
   TradeData,
   UsageGameRow,
   WaiverVerdict,
@@ -42,6 +43,7 @@ import type {
   WaiverRequest,
 } from "../../domain/analytics/waivers.js";
 import { CASCADE_PRIORS } from "../../domain/analytics/cascade-priors/index.js";
+import { MAX_NAME_CHARS, mergeName } from "../../domain/crosswalk/normalize.js";
 import {
   CALIBRATION,
   buildCalibrationTable,
@@ -87,6 +89,7 @@ import {
   espnIdsPairedWith,
   isDegradable,
   leagueRef,
+  newsRefsOf,
   optionalDataset,
   readOpts,
   rosReadingOf,
@@ -109,7 +112,6 @@ import {
   valueWeeks,
   type LeagueBasics,
 } from "./p1-common.js";
-import { foldTokens } from "./players.js";
 import { rostersOf } from "./roster.js";
 import { universeOf, type UniverseRow } from "./select.js";
 import {
@@ -1115,24 +1117,197 @@ export function logClaims(
     }
 }
 
-/** Where a news text splits into clauses: sentence ends, semicolons, dashes and line breaks. */
-const CLAUSE_SPLIT = /(?<=[.;!?])\s+|\s+[—–-]\s+|\n+/;
+/**
+ * Where a news text splits into clauses: sentence ends, semicolons, dashes and line breaks. A period
+ * after an initial or a name suffix ("D.J. Moore", "Kyle Pitts Sr. (ankle) ruled out") ends no
+ * sentence: split there, the claim would lose the name it follows.
+ */
+const CLAUSE_SPLIT =
+  /(?<=[;!?])\s+|(?<=\.)(?<!(?:^|[\s.(])(?:[a-z]|jr|sr|ii|iii|iv|st|vs|no|dr|mr|mt|ft)\.)\s+|\s+[—–-]\s+|\n+/iu;
 
 /**
- * The clauses of a third-party text that name a player — by his surname (the last token of his
- * name, folded as the name search folds it) — re-wrapped with the original source tag, or null when
- * none names him. Only sliced, never interpreted: the flags are recomputed on what is kept. A clause
- * that names nobody ("He will not play") stays out: whom it is about is not resolved.
+ * Where a clause that names a second player splits further: commas and colons, and the words that
+ * join two players' news in one sentence ("X ruled out, Y to start"; "Y starts as X sits"; "with X
+ * out, Y …"). Only ever applied to a clause naming more than one player, and each piece is kept only
+ * when it names the subject alone, so a split can lose one of his claims but never adopt another's.
  */
-export function clausesNaming(text: UntrustedText, name: string): UntrustedText | null {
-  const tokens = foldTokens(name);
+const PHRASE_SPLIT =
+  /\s*[,:]\s*|\s+(?:and|but|while|whereas|as|so|with|without|after|before|because|since|though|although|or|then|when|until|amid|plus|meaning|leaving|opening)\s+/iu;
+
+/** The folded keys a player is named by in news text: his surname and his whole name run together. */
+export interface NameKeys {
+  /** The last token of his folded name (`mergeName`: suffixes and punctuation gone). */
+  readonly surname: string;
+  /** Every token run together (`Smith Njigba` and `Smith-Njigba` both read `smithnjigba`). */
+  readonly whole: string;
+}
+
+/** A player's NameKeys, or null when his name does not fold (non-Latin, empty) or its surname is one letter. */
+export function nameKeysOf(name: string): NameKeys | null {
+  const m = mergeName(name);
+  const tokens = m === null ? [] : m.split(" ").filter((t) => t.length > 0);
   const surname = tokens[tokens.length - 1];
   if (surname === undefined || surname.length < 2) return null;
-  const kept = text.untrusted_text.value
-    .split(CLAUSE_SPLIT)
-    .map((c) => c.trim())
-    .filter((c) => c.length > 0 && foldTokens(c).includes(surname));
-  return kept.length === 0 ? null : wrapUntrusted(kept.join(" "), text.untrusted_text.source);
+  return { surname, whole: tokens.join("") };
+}
+
+/**
+ * The folded words of a piece of text, read as a name is folded: each word with its punctuation
+ * dropped (`Ostrander's` → `ostranders`, `Smith-Njigba` → `smithnjigba`), each part between its
+ * punctuation (`Quist/Ostrander`), and every run of two or three adjacent words joined (a spaced
+ * compound surname). A word that does not fold (symbols, non-Latin) contributes nothing.
+ */
+function foldedWords(text: string): ReadonlySet<string> {
+  const out = new Set<string>();
+  const words: string[] = [];
+  for (const w of text.split(/\s+/u)) {
+    if (w.length === 0 || w.length > MAX_NAME_CHARS) continue;
+    const f = mergeName(w)?.replaceAll(" ", "") ?? "";
+    words.push(f);
+    if (f.length > 0) out.add(f);
+    for (const part of w.split(/\p{P}+/u)) {
+      const g = part.length === 0 ? null : mergeName(part);
+      if (g !== null) out.add(g.replaceAll(" ", ""));
+    }
+  }
+  for (let i = 0; i < words.length; i++) {
+    let run = words[i] ?? "";
+    for (let j = i + 1; j < Math.min(words.length, i + 3); j++) {
+      run += words[j] ?? "";
+      if (run.length > 0) out.add(run);
+    }
+  }
+  return out;
+}
+
+/** Whether folded words name a player: his surname or whole name, possessive (`…s`) included. */
+function namesPlayer(words: ReadonlySet<string>, k: NameKeys): boolean {
+  return (
+    words.has(k.surname) ||
+    words.has(`${k.surname}s`) ||
+    words.has(k.whole) ||
+    words.has(`${k.whole}s`)
+  );
+}
+
+/**
+ * The parts of a third-party text of a news item that also names other players which are about the
+ * subject ALONE: a clause (CLAUSE_SPLIT) naming him and none of the others is kept whole; a clause
+ * naming him and another is split into its phrases (PHRASE_SPLIT), each kept on the same rule; a
+ * clause naming nobody ("He will not play") stays out — whom it is about is not resolved. Re-wrapped
+ * with the original source tag (the parts joined by "; ", so no claim pattern can straddle two of
+ * them), or null when nothing is his alone. Only sliced, never interpreted: the flags are recomputed
+ * on what is kept. Stage C finding evidence-item-claims-misattributed: the matcher attaches one item
+ * to every player it names, and a teammate's claim in a clause that also named the subject — "X
+ * (ankle) ruled out, Y to start", "with X out Y starts", "X will not play, so Y …" — was his.
+ */
+export function partsAbout(
+  text: UntrustedText,
+  subject: NameKeys,
+  others: readonly NameKeys[],
+): UntrustedText | null {
+  const alone = (piece: string): boolean => {
+    const words = foldedWords(piece);
+    return namesPlayer(words, subject) && !others.some((o) => namesPlayer(words, o));
+  };
+  const kept: string[] = [];
+  for (const raw of text.untrusted_text.value.split(CLAUSE_SPLIT)) {
+    const clause = raw.trim();
+    if (clause.length === 0 || !namesPlayer(foldedWords(clause), subject)) continue;
+    if (alone(clause)) {
+      kept.push(clause);
+      continue;
+    }
+    for (const p of clause.split(PHRASE_SPLIT)) {
+      const phrase = p.trim();
+      if (phrase.length > 0 && alone(phrase)) kept.push(phrase);
+    }
+  }
+  return kept.length === 0 ? null : wrapUntrusted(kept.join("; "), text.untrusted_text.source);
+}
+
+/**
+ * The NameKeys of the subject's NFL teammates in the local player index (not him, not a team unit,
+ * not sharing his surname — a shared surname cannot tell them apart in text). The matcher refs a
+ * player named by his surname only when the item also names his team, so a blurb's "with Quist
+ * (ankle) ruled out" about a teammate may carry no ref at all: a teammate's surname in the text
+ * makes the item a multi-player one for E10. Empty when the index is not loaded (refs alone decide).
+ */
+export function teammateKeysOf(
+  ctx: ToolContext,
+  season: number,
+  subject: { readonly espn_id: number; readonly pro_team_id: number; readonly keys: NameKeys },
+): readonly NameKeys[] {
+  if (subject.pro_team_id <= 0) return [];
+  let rows: readonly { espn_id: number; pro_team_id: number; full_name: string }[];
+  try {
+    rows = ctx.services.playerUniverse.all(season).rows;
+  } catch {
+    return [];
+  }
+  const out: NameKeys[] = [];
+  for (const r of rows) {
+    if (r.pro_team_id !== subject.pro_team_id || r.espn_id <= 0 || r.espn_id === subject.espn_id)
+      continue;
+    const k = nameKeysOf(r.full_name);
+    if (k !== null && k.surname !== subject.keys.surname) out.push(k);
+  }
+  return out;
+}
+
+/** The keys among `keys` whose player a text names (surname or whole name, possessive included). */
+export function namedIn(text: string, keys: readonly NameKeys[]): readonly NameKeys[] {
+  if (keys.length === 0) return [];
+  const words = foldedWords(text);
+  return keys.filter((k) => namesPlayer(words, k));
+}
+
+/** Who a news item names besides the subject, as E10 reads it. */
+export type ItemOthers =
+  /** Nobody else: the item is his alone (read whole). */
+  | { readonly kind: "own" }
+  /** These others, named by their keys: read only in the parts naming him alone. */
+  | { readonly kind: "others"; readonly keys: readonly NameKeys[] }
+  /** Others that cannot be named, or his own name does not fold: not read for him at all. */
+  | { readonly kind: "unreadable" };
+
+/**
+ * The other players a news item names — its refs that are not the subject, by ESPN id or by gsis id
+ * through the crosswalk — with their NameKeys from the local player index. `unreadable` when one of
+ * them cannot be named (no ESPN id, not in the index, a name that does not fold), shares the
+ * subject's surname, or the subject's own name does not fold: such an item cannot be read for him
+ * safely.
+ */
+export function othersOf(
+  ctx: ToolContext,
+  item: NewsItem,
+  subject: { readonly espn_id: number; readonly gsis_id: string | null; readonly name: string },
+): ItemOthers {
+  const ids: number[] = [];
+  for (const r of newsRefsOf(item)) {
+    if (r.espn_id === subject.espn_id) continue;
+    if (r.gsis_id !== null && r.gsis_id === subject.gsis_id) continue;
+    const id = r.espn_id ?? (r.gsis_id === null ? null : espnIdOfGsis(ctx, r.gsis_id));
+    if (id === null || id <= 0) return { kind: "unreadable" };
+    if (id !== subject.espn_id && !ids.includes(id)) ids.push(id);
+  }
+  if (ids.length === 0) return { kind: "own" };
+  const mine = nameKeysOf(subject.name);
+  if (mine === null) return { kind: "unreadable" };
+  let rows: readonly { readonly espn_id: number; readonly full_name: string }[];
+  try {
+    rows = ctx.services.playerUniverse.byIds(ids).rows;
+  } catch {
+    return { kind: "unreadable" };
+  }
+  const keys: NameKeys[] = [];
+  for (const id of ids) {
+    const row = rows.find((x) => x.espn_id === id);
+    const k = row === undefined ? null : nameKeysOf(row.full_name);
+    if (k === null || k.surname === mine.surname) return { kind: "unreadable" };
+    keys.push(k);
+  }
+  return { kind: "others", keys };
 }
 
 /** E10 data (plan 07 E10; EvidenceData). */
@@ -1310,19 +1485,43 @@ export const analyzeEvidenceTool = defineTool({
       const ni = optionalDataset(news, ctx, allowStale);
       if (ni !== null) {
         inputs.push(ni);
-        // an item that names other players too is read only in the clauses that name him: the
-        // matcher attaches one item to every player it names, and the headline "<starter> ruled
-        // out; <him> to start" is no 'out' claim about him (Stage C finding
-        // evidence-item-claims-misattributed)
+        // an item that names other players too (any of its refs — an ESPN id with no gsis pair
+        // counts) is read only in the parts naming him ALONE: the matcher attaches one item to every
+        // player it names, and "<starter> (ankle) ruled out, <him> to start" is no 'out' claim about
+        // him; an item whose other players cannot be named is not read for him at all (Stage C
+        // finding evidence-item-claims-misattributed)
+        const keys = nameKeysOf(p.name);
+        const mates =
+          keys === null
+            ? []
+            : teammateKeysOf(ctx, season, { espn_id: p.ref.id, pro_team_id: p.pro_team_id, keys });
         let scoped = 0;
         let skipped = 0;
         for (const it of news.rows.slice(0, 8)) {
-          const own = it.gsis_ids.every((g) => g === gsis);
+          const byRefs = othersOf(ctx, it, { espn_id: p.ref.id, gsis_id: gsis, name: p.name });
+          // a teammate the matcher did not ref (his surname alone, no team named) counts too
+          const unreffed = namedIn(
+            `${it.title.untrusted_text.value}\n${it.blurb.untrusted_text.value}`,
+            mates,
+          );
+          const who: ItemOthers =
+            byRefs.kind === "unreadable" || unreffed.length === 0
+              ? byRefs
+              : {
+                  kind: "others",
+                  keys: [...(byRefs.kind === "others" ? byRefs.keys : []), ...unreffed],
+                };
           const parts = [it.title, it.blurb]
             .filter((t) => t.untrusted_text.value.length > 0)
-            .map((t) => (own ? t : clausesNaming(t, p.name)))
+            .map((t) =>
+              who.kind === "own"
+                ? t
+                : who.kind === "others" && keys !== null
+                  ? partsAbout(t, keys, who.keys)
+                  : null,
+            )
             .filter((t): t is UntrustedText => t !== null);
-          if (!own) {
+          if (who.kind !== "own") {
             if (parts.length === 0) skipped += 1;
             else scoped += 1;
           }
@@ -1330,7 +1529,7 @@ export const analyzeEvidenceTool = defineTool({
         }
         if (scoped + skipped > 0)
           warnings.push(
-            `${String(scoped + skipped)} news item(s) also name other players: only their clauses naming this player are read${skipped > 0 ? ` (${String(skipped)} with none, skipped)` : ""}`,
+            `${String(scoped + skipped)} news item(s) also name other players: only their parts naming this player alone are read${skipped > 0 ? ` (${String(skipped)} with none, or whose other players cannot be named, skipped)` : ""}`,
           );
       }
     }
