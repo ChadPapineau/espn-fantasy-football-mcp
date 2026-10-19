@@ -11,6 +11,7 @@ import {
   type McpServer,
   type ReadResourceResult,
 } from "@modelcontextprotocol/server";
+import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import { espnStatIdRows } from "../../domain/scoring/stat_map.js";
 import { diffRosterSnapshots } from "../../domain/league/types.js";
 import { LOG_ID_RE } from "../../domain/reclog/types.js";
@@ -108,9 +109,17 @@ export async function readAsEnvelope(
 ): Promise<ReadResourceResult> {
   const requestId = newRequestId();
   try {
+    // a read starts in a turn of its own, and its synchronous envelope build (envelope, fit,
+    // serialisation) is another — through the process-wide turn gate, exactly as runTool: warm cached
+    // reads resolve as microtasks, so N parallel reads (every prompt embeds league/settings) ran
+    // their whole bodies and envelopes back to back in one macrotask — 289 ms at 30 parallel
+    // espn-ff://status reads against the tool twin's 30 ms (Stage C finding
+    // resources-prompts-bypass-turn-gate; plan 03 §1.2, plan 10 A16a)
+    await yieldTurn();
     services.beforeCall?.();
     const ctx = toolContext({ requestId }, services, options);
     const out = await body(ctx);
+    await yieldTurn();
     const env = envelopeOf(out, ctx, twin);
     const fit = fitToBudget(env, budget, out.listKey, {
       pageable: false,

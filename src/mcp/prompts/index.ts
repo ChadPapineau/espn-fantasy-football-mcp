@@ -18,6 +18,7 @@ import type {
   StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
+import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import { boundedTextSchema, UNTRUSTED_TEXT_RULE } from "../envelope.js";
 import { leagueSettingsText, toolOutputsText } from "../resources/index.js";
 import type { McpServerOptions, McpServices, ServerTexts } from "../services.js";
@@ -58,7 +59,23 @@ export interface PromptSpec {
   readonly toolVocabulary?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /** The Skill's priority: P1 prompts register under EFF_TOOLSET=full only. */
   readonly priority: "P0" | "P1";
+  /**
+   * The free-text arguments (the user's own words — a sentence, an offer, a name), which a client
+   * may cut to their first word (FREE_TEXT_ONE_WORD_NOTE).
+   */
+  readonly freeText?: readonly string[];
 }
+
+/**
+ * Said after the arguments line when a free-text argument arrived as ONE word. Claude Code runs an
+ * MCP prompt's slash command by splitting the typed text on whitespace and giving each declared
+ * argument one word (extra words dropped), so `/…espn.check Beat writer: the backup gets more work`
+ * reached the server as claim="Beat" — and the prompt asserted that word as the user's argument,
+ * which news-check then quoted verbatim (Stage C finding prompts-multiword-arg-truncated). A value
+ * with a space arrived intact and needs no note.
+ */
+export const FREE_TEXT_ONE_WORD_NOTE =
+  "arrived as a single word. Some clients (Claude Code) pass only the first word of each argument typed after a prompt command, so it may be cut short: take the user's full wording from their message, and ask for it if it is not there. Never use that one word alone as what the user asked.";
 
 /** The eight P0 prompts (plan 07 §4.2: a Skill's prompt has its Skill's priority) — `core`'s list. */
 export const PROMPTS: readonly PromptSpec[] = Object.freeze([
@@ -108,6 +125,7 @@ export const PROMPTS: readonly PromptSpec[] = Object.freeze([
     description: "The exact ESPN clicks for an agreed change (read-only: nothing is executed).",
     args: z.object({ what: textArg(200) }),
     priority: "P0",
+    freeText: ["what"],
   },
   {
     name: "espn.session",
@@ -133,6 +151,7 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
     description: "Evaluate a trade offer for both sides, or find trade partners for a position.",
     args: z.object({ offer: textArg(200) }),
     priority: "P1",
+    freeText: ["offer"],
   },
   {
     name: "espn.injury",
@@ -140,6 +159,7 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
     description: "Who gains when a player is out, the IR move, and a claim or pass for each.",
     args: z.object({ player: textArg(64) }),
     priority: "P1",
+    freeText: ["player"],
   },
   {
     name: "espn.schedule",
@@ -162,6 +182,7 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
     description: "Check a news claim or an outlook about a player against the structured facts.",
     args: z.object({ claim: textArg(400) }),
     priority: "P1",
+    freeText: ["claim"],
   },
 ]);
 
@@ -316,11 +337,16 @@ export function referenceTextsFor(
   return out;
 }
 
-/** The prompt's user text: any missing guardrail sentence, the Skill body, its references, the arguments. */
+/**
+ * The prompt's user text: any missing guardrail sentence, the Skill body, its references, the
+ * arguments — and, for each free-text argument (`freeText`) that arrived as one word, the note that it
+ * may be cut short (FREE_TEXT_ONE_WORD_NOTE).
+ */
 export function promptText(
   texts: ServerTexts,
   skill: string,
   args: Readonly<Record<string, string | undefined>>,
+  freeText: readonly string[] = [],
 ): string {
   const installed = texts.skills[skill];
   const body =
@@ -335,7 +361,15 @@ export function promptText(
     .join("");
   const refs =
     installed === null || installed === undefined ? "" : referencesSection(texts, skill, body);
-  return `${head}${body.trim()}${refs}${argLine === "" ? "" : `\n\nArguments: ${argLine}`}\n`;
+  const oneWord = freeText.filter((k) => {
+    const v = args[k];
+    return typeof v === "string" && v.trim() !== "" && !/\s/.test(v.trim());
+  });
+  const note =
+    oneWord.length === 0
+      ? ""
+      : `\n\nThe ${oneWord.map((k) => `\`${k}\``).join(", ")} argument ${FREE_TEXT_ONE_WORD_NOTE}`;
+  return `${head}${body.trim()}${refs}${argLine === "" ? "" : `\n\nArguments: ${argLine}`}${note}\n`;
 }
 
 /** All thirteen prompts, in plan 07 §4.2 order (the eight P0, then the five P1). */
@@ -387,13 +421,17 @@ export function registerPrompts(
 ): void {
   for (const p of promptsFor(options.toolset)) {
     const build = async (raw: Readonly<Record<string, unknown>>): Promise<GetPromptResult> => {
+      // the prompt text (the Skill body and every reference it carries) is built in a turn of its
+      // own, through the process-wide gate tools and resources use (Stage C finding
+      // resources-prompts-bypass-turn-gate): 30 parallel prompts/get stalled the loop 97 ms
+      await yieldTurn();
       const given: Record<string, string | undefined> = {};
       for (const [k, v] of Object.entries(raw)) if (typeof v === "string") given[k] = v;
       const args = toToolVocabulary(p, given);
       const messages: GetPromptResult["messages"] = [
         {
           role: "user",
-          content: { type: "text", text: promptText(options.texts, p.skill, args) },
+          content: { type: "text", text: promptText(options.texts, p.skill, args, p.freeText) },
         },
       ];
       const settings = await leagueSettingsText(services, options);
@@ -410,7 +448,9 @@ export function registerPrompts(
           },
         });
       // the field cheat-sheet the body (or a reference it carries) links as
-      // references/tool-outputs.md, as the resource it is
+      // references/tool-outputs.md, as the resource it is — its own turn too (the settings read
+      // resumes right after its envelope's turn)
+      await yieldTurn();
       const body = options.texts.skills[p.skill];
       if (typeof body === "string" && linksToolOutputs(options.texts, p.skill, body))
         messages.push({
