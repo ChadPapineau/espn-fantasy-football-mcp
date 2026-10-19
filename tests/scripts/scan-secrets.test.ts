@@ -1641,6 +1641,36 @@ describe("every rule runs over every scanned path; the path is never printed", (
       expect(c.out).toContain(`[${rule}]`);
   });
 
+  it("a submodule entry has no blob, but its staged PATH is checked too (--index)", () => {
+    tmp = tempDir("eff-scan-");
+    const env = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: tmp?.dir, env: { ...process.env, ...env }, encoding: "utf8" });
+    expect(git(["init", "-q"]).status).toBe(0);
+    const commit = "a".repeat(40); // a gitlink's commit id: never read, no blob exists
+    const gitlink = `vendor/${kv("leagueId", "=", LEAK_ID)}`;
+    expect(
+      git(["update-index", "--add", "--cacheinfo", `160000,${commit},${gitlink}`]).status,
+    ).toBe(0);
+    const r = scan(tmp.dir, ["--index"], env);
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toContain("the path of scanned entry #1 (path not printed)  [espn-league-id]");
+    noPathLeak(r.out);
+    // a clean gitlink path passes: nothing is read for it
+    const c = tempDir("eff-scan-");
+    try {
+      const g2 = (args: string[]) =>
+        spawnSync("git", args, { cwd: c.dir, env: { ...process.env, ...env }, encoding: "utf8" });
+      expect(g2(["init", "-q"]).status).toBe(0);
+      expect(
+        g2(["update-index", "--add", "--cacheinfo", `160000,${commit},vendor/lib`]).status,
+      ).toBe(0);
+      expect(scan(c.dir, ["--index"], env).status).toBe(0);
+    } finally {
+      c.cleanup();
+    }
+  });
+
   it("a commit message is not a path: COMMIT_MESSAGE is never path-checked", () => {
     tmp = tempDir("eff-scan-");
     writeFileSync(path.join(tmp.dir, "MSG"), "feat: x\n");

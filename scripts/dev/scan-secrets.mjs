@@ -991,10 +991,12 @@ function isSymlink(file) {
 }
 
 /**
- * Every blob the next commit adds or changes: `git diff --cached --raw -z --no-renames` (index vs
+ * Every path the next commit adds or changes: `git diff --cached --raw -z --no-renames` (index vs
  * HEAD, or vs the empty tree before the first commit). NUL-separated, so no name is quoted; every
- * status except D is kept; blobs are read by object id.
- * @returns {{file: string, sha: string}[]}
+ * status except D is kept; blobs are read by object id. A submodule entry (mode 160000) has no
+ * blob — `sha` null — but its path is published like any other, so it is returned for the path
+ * rules (Stage C finding scan-paths-identifier-rules-skipped).
+ * @returns {{file: string, sha: string | null}[]}
  */
 function indexEntries() {
   const raw = git(
@@ -1022,7 +1024,11 @@ function indexEntries() {
     const paths = /^[RC]/.test(status) ? 2 : 1;
     const file = raw[i + paths] ?? "";
     i += paths;
-    if (status.startsWith("D") || newMode === "000000" || newMode === "160000") continue;
+    if (status.startsWith("D") || newMode === "000000") continue;
+    if (newMode === "160000") {
+      entries.push({ file, sha: null });
+      continue;
+    }
     if (!newSha || /^0+$/.test(newSha))
       throw new ScanError(`${file}: no staged blob id (status ${status})`);
     entries.push({ file, sha: newSha });
@@ -1381,7 +1387,7 @@ function main() {
     }
     if (index)
       for (const { file, sha } of indexEntries())
-        targets.push({ file, read: () => readBlob(sha, file) });
+        targets.push({ file, read: () => (sha === null ? null : readBlob(sha, file)) });
     for (const f of files)
       targets.push({ file: f, read: () => (staged ? readStaged(f) : readWorktree(f)) });
     if (message !== null) {
