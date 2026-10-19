@@ -76,7 +76,7 @@ import {
   singlePlayerSelectorSchema,
   teamIdSchema,
 } from "../bounds.js";
-import { toDataInputs, type InputStamp } from "../envelope.js";
+import { toDataInputs, wrapUntrusted, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, type ToolContext, type ToolOutput } from "../define.js";
 import { carryOutcome, cpuDeadlineOf, seedOf, waiverPlayerOf, type Subject } from "./analytics.js";
@@ -109,6 +109,7 @@ import {
   valueWeeks,
   type LeagueBasics,
 } from "./p1-common.js";
+import { foldTokens } from "./players.js";
 import { rostersOf } from "./roster.js";
 import { universeOf, type UniverseRow } from "./select.js";
 import {
@@ -1114,6 +1115,26 @@ export function logClaims(
     }
 }
 
+/** Where a news text splits into clauses: sentence ends, semicolons, dashes and line breaks. */
+const CLAUSE_SPLIT = /(?<=[.;!?])\s+|\s+[—–-]\s+|\n+/;
+
+/**
+ * The clauses of a third-party text that name a player — by his surname (the last token of his
+ * name, folded as the name search folds it) — re-wrapped with the original source tag, or null when
+ * none names him. Only sliced, never interpreted: the flags are recomputed on what is kept. A clause
+ * that names nobody ("He will not play") stays out: whom it is about is not resolved.
+ */
+export function clausesNaming(text: UntrustedText, name: string): UntrustedText | null {
+  const tokens = foldTokens(name);
+  const surname = tokens[tokens.length - 1];
+  if (surname === undefined || surname.length < 2) return null;
+  const kept = text.untrusted_text.value
+    .split(CLAUSE_SPLIT)
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0 && foldTokens(c).includes(surname));
+  return kept.length === 0 ? null : wrapUntrusted(kept.join(" "), text.untrusted_text.source);
+}
+
 /** E10 data (plan 07 E10; EvidenceData). */
 export const evidenceSchema = z.strictObject({
   flag: z.enum([
@@ -1289,11 +1310,28 @@ export const analyzeEvidenceTool = defineTool({
       const ni = optionalDataset(news, ctx, allowStale);
       if (ni !== null) {
         inputs.push(ni);
+        // an item that names other players too is read only in the clauses that name him: the
+        // matcher attaches one item to every player it names, and the headline "<starter> ruled
+        // out; <him> to start" is no 'out' claim about him (Stage C finding
+        // evidence-item-claims-misattributed)
+        let scoped = 0;
+        let skipped = 0;
         for (const it of news.rows.slice(0, 8)) {
-          texts.push({ text: it.title, time: it.published_at });
-          if (it.blurb.untrusted_text.value.length > 0)
-            texts.push({ text: it.blurb, time: it.published_at });
+          const own = it.gsis_ids.every((g) => g === gsis);
+          const parts = [it.title, it.blurb]
+            .filter((t) => t.untrusted_text.value.length > 0)
+            .map((t) => (own ? t : clausesNaming(t, p.name)))
+            .filter((t): t is UntrustedText => t !== null);
+          if (!own) {
+            if (parts.length === 0) skipped += 1;
+            else scoped += 1;
+          }
+          for (const t of parts) texts.push({ text: t, time: it.published_at });
         }
+        if (scoped + skipped > 0)
+          warnings.push(
+            `${String(scoped + skipped)} news item(s) also name other players: only their clauses naming this player are read${skipped > 0 ? ` (${String(skipped)} with none, skipped)` : ""}`,
+          );
       }
     }
     const out = analyzeEvidence({
