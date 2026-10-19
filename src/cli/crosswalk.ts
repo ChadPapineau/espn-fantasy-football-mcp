@@ -7,7 +7,11 @@
 // alerted ESPN id with why it lacks a confidence-1.0 pair (ids, codes and numbers only — never a
 // name) and how an override is really made, and the notification points at this command (Stage C
 // finding crosswalk-alert-remediation-dead: the advice named a file the runtime never reads and an
-// `eff status` that has no crosswalk section).
+// `eff status` that has no crosswalk section). Rostered players are listed first (the cap once hid
+// every rostered one behind ≥ 1 %-owned ids), `--all` lists every alerted id, the advice names every
+// key an override row needs (`note` too: the compiled copy's type requires it), and the summary says
+// how many matched players were paired only by name — research 04 §C step 2's "matched by name",
+// the players the alert lists although they count as matched.
 import type { Config, LenientConfig } from "../config/schema.js";
 import { CHECKED_IN_OVERRIDES } from "../domain/crosswalk/overrides.js";
 import { rebuildCrosswalk } from "../domain/crosswalk/rebuild.js";
@@ -15,6 +19,7 @@ import {
   statusCounts,
   type CrosswalkDiagnostic,
   type CrosswalkResolution,
+  type CrosswalkRun,
 } from "../domain/crosswalk/resolver.js";
 import type { Store } from "../store/types.js";
 import { EXIT } from "./exit.js";
@@ -35,10 +40,13 @@ export const MAX_ALERT_LINES = 25;
 /**
  * How an override is made (research 04 §C step 3): the runtime reads only the overrides compiled into
  * the build (`CHECKED_IN_OVERRIDES`; the package ships `dist`, not `data/`), so an override is a code
- * change in a checkout — the JSON file and its compiled copy together (a test holds them equal).
+ * change in a checkout — the JSON file and its compiled copy together (a test holds them equal), each
+ * row with every key `CrosswalkOverride` requires — and it lives in that build only: the launchd jobs'
+ * chained rebuild runs the build they were installed from, and one without the row drops the pair
+ * again (a `stale_override_pair` diagnostic).
  */
 export const OVERRIDE_HOWTO =
-  "an override is a code change in a checkout: add {espn_id, gsis_id} to data/crosswalk/overrides.json AND to CHECKED_IN_OVERRIDES in src/domain/crosswalk/overrides.ts (a test holds them equal), `npm run build`, then `eff crosswalk rebuild`";
+  "an override is a code change in a checkout: add {espn_id, gsis_id, note} (note: a short public reason, or null) to data/crosswalk/overrides.json AND to CHECKED_IN_OVERRIDES in src/domain/crosswalk/overrides.ts (a test holds them equal), `npm run build`, then `eff crosswalk rebuild` — from the install your launchd jobs and MCP client run (`eff print-config` shows its path; else `eff install-launchd` from this one), or the next chained rebuild drops it";
 
 const GSIS_SHOWN = 3;
 
@@ -93,6 +101,27 @@ export function rosteredIds(store: Store, teamId: number | null): ReadonlySet<nu
   }
 }
 
+/** The alerted ids in listing order: the user's rostered players first, each group ascending. */
+export function alertOrder(
+  espnIds: readonly number[],
+  rostered: ReadonlySet<number>,
+): readonly number[] {
+  return [
+    ...espnIds.filter((id) => rostered.has(id)),
+    ...espnIds.filter((id) => !rostered.has(id)),
+  ];
+}
+
+/**
+ * Matched players paired with less than confidence 1.0 — by name, team and position, never by an id
+ * (research 04 §C step 2: "matched by name").
+ */
+export function matchedByName(run: Pick<CrosswalkRun<unknown>, "resolved">): number {
+  return run.resolved.filter(
+    (p) => p.resolution.status === "matched" && p.resolution.pair.confidence < 1,
+  ).length;
+}
+
 /** Runs one rebuild over the open store (never throws for a data problem). */
 export async function runCrosswalkRebuild(
   io: CliIo,
@@ -100,6 +129,7 @@ export async function runCrosswalkRebuild(
   store: Store,
   log: Logger,
   notifier: Notifier | null,
+  opts: { readonly all?: boolean } = {},
 ): Promise<CrosswalkOutcome> {
   const rostered = rosteredIds(store, config.teamId);
   let r;
@@ -126,24 +156,37 @@ export async function runCrosswalkRebuild(
       alert: false,
     };
   const c = statusCounts(r.run.report);
+  const byName = matchedByName(r.run);
   const lines = [
-    `crosswalk rebuild: ${String(r.written)} pair(s) written, ${String(c.matched)} matched, ${String(c.unmatched_rostered)} rostered and ${String(c.unmatched_top_owned)} top-owned unmatched`,
+    `crosswalk rebuild: ${String(r.written)} pair(s) written, ${String(c.matched)} matched (${String(byName)} of them only by name), ${String(c.unmatched_rostered)} rostered and ${String(c.unmatched_top_owned)} top-owned unmatched`,
   ];
-  log.info("crosswalk.rebuilt", { written: r.written, ...c, alert: r.run.alert.count });
+  log.info("crosswalk.rebuilt", {
+    written: r.written,
+    ...c,
+    matched_by_name: byName,
+    alert: r.run.alert.count,
+  });
   if (r.run.alert.triggered) {
     lines.push(
       `→ ${String(r.run.alert.count)} rostered or ≥ 1 %-owned ESPN player(s) lack a confident nflverse pair:`,
     );
     const byId = new Map(r.run.resolved.map((p) => [p.espn_id, p]));
-    for (const id of r.run.alert.espn_ids.slice(0, MAX_ALERT_LINES)) {
+    const ordered = alertOrder(r.run.alert.espn_ids, rostered);
+    const shown = opts.all === true ? ordered : ordered.slice(0, MAX_ALERT_LINES);
+    for (const id of shown) {
       const p = byId.get(id);
       const why = rostered.has(id) ? "rostered" : "≥ 1 % owned";
       lines.push(
         `    espn ${String(id)} (${why}): ${p === undefined ? "not in this run" : alertReason(p.resolution)}`,
       );
     }
-    if (r.run.alert.espn_ids.length > MAX_ALERT_LINES)
-      lines.push(`    … ${String(r.run.alert.espn_ids.length - MAX_ALERT_LINES)} more`);
+    const hidden = ordered.slice(shown.length);
+    if (hidden.length > 0) {
+      const hiddenRostered = hidden.filter((id) => rostered.has(id)).length;
+      lines.push(
+        `    … ${String(hidden.length)} more, ${hiddenRostered === 0 ? "none" : String(hiddenRostered)} rostered (\`eff crosswalk rebuild --all\` lists every one)`,
+      );
+    }
     lines.push(`  ${OVERRIDE_HOWTO}`);
     if (notifier !== null)
       await notifier.info(

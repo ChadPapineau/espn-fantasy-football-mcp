@@ -99,8 +99,8 @@ export const USAGE = `usage: eff <command> [options]
                               own history; cookies on a private league; you run it once)
   credential-check [--notify] the daily credential probe (launchd)
   pre-kickoff [--notify]      the check before the day's first kickoff (launchd)
-  crosswalk rebuild [--notify]
-                              re-pair ESPN and nflverse player ids
+  crosswalk rebuild [--notify] [--all]
+                              re-pair ESPN and nflverse player ids (--all: list every alerted id)
   print-config --client desktop|code
                               the launch config with absolute paths (no secrets)
   install-launchd [--jobs a,b] [--dry-run]
@@ -182,7 +182,7 @@ const SPECS: Readonly<Record<string, { options: Options; positionals: number }>>
   },
   "credential-check": { options: { notify: { type: "boolean" } }, positionals: 0 },
   "pre-kickoff": { options: { notify: { type: "boolean" } }, positionals: 0 },
-  crosswalk: { options: { notify: { type: "boolean" } }, positionals: 1 },
+  crosswalk: { options: { notify: { type: "boolean" }, all: { type: "boolean" } }, positionals: 1 },
   "print-config": { options: { client: { type: "string" } }, positionals: 0 },
   "install-launchd": {
     options: { jobs: { type: "string" }, "dry-run": { type: "boolean" } },
@@ -503,6 +503,7 @@ export async function main(
             store,
             log,
             flag(p, "notify") ? notifier : null,
+            { all: flag(p, "all") },
           );
           for (const l of r.lines) await writeLine(io.stdout, l);
           return r.code;

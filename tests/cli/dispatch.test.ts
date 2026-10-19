@@ -10,10 +10,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_ALERT_LINES,
   OVERRIDE_HOWTO,
+  alertOrder,
   alertReason,
   diagnosticsLine,
+  matchedByName,
   runCrosswalkRebuild,
 } from "../../src/cli/crosswalk.js";
+import { parseCrosswalkOverrides } from "../../src/domain/crosswalk/overrides.js";
+import type { CrosswalkOverride } from "../../src/domain/crosswalk/types.js";
 import { main } from "../../src/cli/main.js";
 import { createNotifier } from "../../src/cli/notify.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
@@ -112,6 +116,22 @@ describe("crosswalk rebuild — done path and the alert", () => {
     expect(
       readFileSync(path.join(ROOT, "src", "domain", "crosswalk", "overrides.ts"), "utf8"),
     ).toContain("export const CHECKED_IN_OVERRIDES");
+    // the row the advice describes is valid in both places: it names every key the compiled copy's
+    // type requires (`note` too — {espn_id, gsis_id} alone failed `npm run build`; this literal stops
+    // compiling if the type gains a key), and the parser of the JSON file accepts it
+    const row: Required<CrosswalkOverride> = {
+      espn_id: 9000001,
+      gsis_id: "00-0012345",
+      note: null,
+    };
+    for (const key of Object.keys(row)) expect(OVERRIDE_HOWTO).toContain(key);
+    expect(OVERRIDE_HOWTO).toContain("or null");
+    expect(parseCrosswalkOverrides(JSON.stringify({ version: 1, overrides: [row] }))).toEqual([
+      row,
+    ]);
+    // it lives in that build only: the advice says the jobs' build must carry it
+    expect(OVERRIDE_HOWTO).toContain("`eff print-config`");
+    expect(OVERRIDE_HOWTO).toContain("`eff install-launchd`");
     const pair = {
       espn_id: 1,
       gsis_id: "00-0012345",
@@ -272,6 +292,10 @@ describe("crosswalk rebuild — done path and the alert", () => {
     expect(r.alert).toBe(true);
     expect(written.length).toBe(1);
     expect(r.lines.join("\n")).toMatch(/1 pair\(s\) written[\s\S]*lack a confident nflverse pair/);
+    // the summary says how many matched players were paired only by name (none here: by id)
+    expect(r.lines[0]).toBe(
+      "crosswalk rebuild: 1 pair(s) written, 1 matched (0 of them only by name), 1 rostered and 0 top-owned unmatched",
+    );
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args[1]).not.toContain("Nomatch");
     // Stage C finding crosswalk-alert-remediation-dead: the alert lists WHICH ids and why (never a
@@ -311,9 +335,108 @@ describe("crosswalk rebuild — done path and the alert", () => {
     } as unknown as Store;
     const big = await runCrosswalkRebuild(io, config, many, log, null);
     expect(big.lines.filter((l) => l.startsWith("    espn "))).toHaveLength(MAX_ALERT_LINES);
-    expect(big.lines).toContain("    … 3 more");
+    expect(big.lines).toContain(
+      "    … 3 more, none rostered (`eff crosswalk rebuild --all` lists every one)",
+    );
     expect(big.lines.join("\n")).toContain("(≥ 1 % owned): no nflverse pair (");
     expect(big.lines.join("\n")).not.toContain("Nobody");
     expect(path.isAbsolute(sb.cacheDir)).toBe(true);
+    // a rostered player is listed first, never hidden behind ≥ 1 %-owned ids that sort before him
+    // (the cap hid every rostered player once: ids ascending, rostered ones far down the list)
+    const rosteredLate = {
+      ...many,
+      playerUniverse: {
+        all: () => ({
+          rows: [
+            ...many.playerUniverse.all(2026).rows,
+            {
+              espn_id: 9200001,
+              full_name: "Late Rostered",
+              position_id: 3,
+              pro_team_id: 1,
+              pro_team: "Atl",
+              percent_owned: 0.5,
+              jersey: "81",
+            },
+          ],
+          stamp: { ...stamp, source: "espn:players" },
+        }),
+        byIds: () => ({ rows: [], stamp: null }),
+      },
+      repos: {
+        ...many.repos,
+        rosterSnapshots: {
+          latestTwo: () => [
+            {
+              team_id: 1,
+              week: 5,
+              taken_at: "t",
+              roster: { entries: [{ player: { ref: { id: 9200001 } } }] },
+            },
+          ],
+        },
+      },
+    } as unknown as Store;
+    const late = await runCrosswalkRebuild(io, config, rosteredLate, log, null);
+    const listed = late.lines.filter((l) => l.startsWith("    espn "));
+    expect(listed).toHaveLength(MAX_ALERT_LINES);
+    expect(listed[0]).toBe("    espn 9200001 (rostered): no nflverse pair (no_candidate)");
+    expect(late.lines).toContain(
+      "    … 4 more, none rostered (`eff crosswalk rebuild --all` lists every one)",
+    );
+    // --all lists every alerted id, and no "more" line
+    const all = await runCrosswalkRebuild(io, config, rosteredLate, log, null, { all: true });
+    expect(all.lines.filter((l) => l.startsWith("    espn "))).toHaveLength(MAX_ALERT_LINES + 4);
+    expect(all.lines.join("\n")).not.toContain("more, ");
+    expect(all.lines.join("\n")).not.toContain("Late Rostered");
+  });
+  it("alertOrder lists rostered ids first, each group in its given order", () => {
+    sb = sandbox();
+    expect(alertOrder([1, 2, 3, 4, 5], new Set([4, 2]))).toEqual([2, 4, 1, 3, 5]);
+    expect(alertOrder([], new Set([1]))).toEqual([]);
+    expect(alertOrder([3, 1], new Set())).toEqual([3, 1]);
+  });
+  it("the summary counts the players matched only by name — the ones the alert lists though matched", () => {
+    sb = sandbox();
+    const pair = (confidence: number, method: "id" | "match" | "override") => ({
+      espn_id: 1,
+      gsis_id: "00-0012345",
+      method,
+      source: "matcher" as never,
+      confidence,
+      first_seen: "t",
+      last_seen: "t",
+    });
+    const matched = (confidence: number, method: "id" | "match" | "override") => ({
+      player: null,
+      espn_id: 1,
+      resolution: {
+        status: "matched" as const,
+        pair: pair(confidence, method),
+        evidence: [],
+        changed: false,
+      },
+    });
+    expect(
+      matchedByName({
+        resolved: [
+          matched(1, "id"),
+          matched(1, "override"),
+          matched(0.8, "match"),
+          matched(0.75, "match"),
+          {
+            player: null,
+            espn_id: 2,
+            resolution: { status: "unmatched", reason: "no_candidate", candidates: [] },
+          },
+        ],
+      } as never),
+    ).toBe(2);
+  });
+  it("`eff crosswalk rebuild --all` parses (a cold store skips)", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" } });
+    expect(await main(["crosswalk", "rebuild", "--all"], io)).toBe(0);
+    expect(io.out.text).toContain("skipped");
   });
 });
