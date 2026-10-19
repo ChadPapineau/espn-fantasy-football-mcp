@@ -57,7 +57,7 @@ import {
   weekOf,
   withinBudget,
 } from "./common.js";
-import { attributionRows, scoreClaims, tunedDocOf } from "./retro-p3.js";
+import { attributionRows, retroForecasts, scoreClaims, tunedDocOf } from "./retro-p3.js";
 import {
   count,
   inputs as inputsSchema,
@@ -379,6 +379,22 @@ export const analyzeRetrospective = defineTool({
       settings === null
         ? []
         : await attributionRows(ctx, season, w, boxesOf, sched?.schedule ?? null, inputs, warnings);
+    // the forecasts the tools served before lock, against what happened (Stage C finding
+    // reclog-retro-forecasts-never-scored): the projections (CRPS, coverage vs ESPN), P(active),
+    // and P(win) of the lineups as played beside ESPN's pre-week number
+    const forecasts =
+      settings === null
+        ? null
+        : await retroForecasts(
+            ctx,
+            season,
+            w,
+            team,
+            boxesOf,
+            sched?.schedule ?? null,
+            settings,
+            warnings,
+          );
     const games = (sched?.schedule.games ?? [])
       .filter((g) => g.week === w)
       .map((g) => ({
@@ -392,8 +408,14 @@ export const analyzeRetrospective = defineTool({
         games,
         kinds: args.kinds ?? null,
         weeks,
-        player_forecasts: [],
-        probabilities: { p_active: [], p_win: [], p_playoffs: [], p_role_holds: [], p_k_win: [] },
+        player_forecasts: forecasts?.player_forecasts ?? [],
+        probabilities: {
+          p_active: forecasts?.p_active ?? [],
+          p_win: forecasts?.p_win ?? [],
+          p_playoffs: [],
+          p_role_holds: [],
+          p_k_win: [],
+        },
         weight_espn: SHIPPED_WEIGHT_ESPN,
         min_n: args.min_n,
         inputs: toDataInputs(inputs, ctx.nowMs),
@@ -443,7 +465,13 @@ export const analyzeRetrospective = defineTool({
       estimate: true,
       provisional: r.provisional,
       correctionsWindowOpen: data.corrections_window_open,
-      extraSources: ["store:recommendation_log"],
+      extraSources: [
+        "store:recommendation_log",
+        ...(forecasts !== null && forecasts.player_forecasts.length > 0
+          ? ["store:projection"]
+          : []),
+        ...(forecasts?.snapshot_used === true ? ["store:scoreboard_snapshot"] : []),
+      ],
       listKey: "calls",
       week: w,
     };

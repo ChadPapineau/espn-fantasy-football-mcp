@@ -653,12 +653,22 @@ export function mergeV2(
 export const STORE_PER_TURN = 10;
 
 /**
+ * The key a stored projection's trace keeps the first-week Dist the tool SERVED under (the merged
+ * v1/v2 answer): the retrospective scores it (projection CRPS and coverage vs ESPN, the P(win) of the
+ * lineups as played — plan 07 E13), and nothing else could rebuild it afterwards (v1's spread is
+ * sampled). The tuning trace's own keys (shares, rates, matchup, weather_mult) are untouched;
+ * readTrace reads only those (Stage C finding reclog-retro-forecasts-never-scored).
+ */
+export const SERVED_DIST_KEY = "served_dist";
+
+/**
  * Stores each projected player's FIRST-WEEK projection for the retrospective (plan 08 §5
  * `projection`; plan 10 C9: the attribution joins it to the final box score), so every call E1 backs
  * — lineup, matchup, waivers, schedule, roster, any toolset — can be attributed: a v2-served player's expected line
  * CONDITIONAL ON PLAYING with its P(active), reported mean and tuning trace (`v2-opportunity`); any
  * other player with a trailing window its v1 trailing expectation (games played — conditional too),
- * P(active) and reported mean, no trace (`v1-ensemble`). No samples (attribution needs none).
+ * P(active) and reported mean (`v1-ensemble`); every row's trace also keeps the served first-week Dist
+ * (SERVED_DIST_KEY). No samples (attribution needs none).
  * Best-effort: a busy store skips a row; a row with the same inputs and expectation as the newest
  * earlier one adds nothing (repo dedup), so repeated calls do not grow the table. Never throws.
  */
@@ -711,7 +721,7 @@ export async function storeProjections(
               samples: [],
               p_active: w0.p_active,
               reported_mean: w0.dist.mean,
-              trace: null,
+              trace: { [SERVED_DIST_KEY]: w0.dist },
             }
           : {
               player_id: id,
@@ -725,10 +735,12 @@ export async function storeProjections(
               samples: [],
               p_active: d.p_active,
               reported_mean: dist.mean,
-              trace:
-                d.trace === undefined
-                  ? null
-                  : (d.trace as unknown as Readonly<Record<string, unknown>>),
+              trace: {
+                ...(d.trace === undefined
+                  ? {}
+                  : (d.trace as unknown as Readonly<Record<string, unknown>>)),
+                [SERVED_DIST_KEY]: w0.dist,
+              },
             },
       );
       if (r.written) stored += 1;

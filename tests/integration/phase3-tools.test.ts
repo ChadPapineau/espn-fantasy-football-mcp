@@ -16,7 +16,9 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { datasetDir, storePath } from "../../src/config/paths.js";
 import { ATTRIBUTION_KEY_RE } from "../../src/domain/reclog/attribution.js";
-import { clearMatchupMemo } from "../../src/mcp/tools/projection-v2.js";
+import { readTrace } from "../../src/domain/reclog/realised.js";
+import { SERVED_DIST_KEY, clearMatchupMemo } from "../../src/mcp/tools/projection-v2.js";
+import { servedDistOf } from "../../src/mcp/tools/retro-p3.js";
 import { envelopeViolations, identifierLeaks } from "../mcp/helpers/walk.js";
 import { ESPN_FIXTURES, call, connect, makeWorld, type World } from "../mcp/helpers/world.js";
 import { seedDatasets } from "./helpers/seed.js";
@@ -149,7 +151,11 @@ describe("C9: E1 stores v2 projections; E13 attributes the ones stored before ki
       .filter((r) => r !== null);
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) {
-      expect(r.trace).toBeNull();
+      // no tuning trace (v1 has none); the trace keeps only the Dist E1 served, which E13 scores
+      // (Stage C finding reclog-retro-forecasts-never-scored)
+      expect(readTrace(r.trace)).toBeNull();
+      expect(Object.keys(r.trace ?? {})).toEqual([SERVED_DIST_KEY]);
+      expect(servedDistOf(r)?.mean).toBe(r.reported_mean);
       expect(typeof r.reported_mean).toBe("number");
       expect(Object.keys(r.expectation).length).toBeGreaterThan(0);
     }
