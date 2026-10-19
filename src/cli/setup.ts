@@ -30,7 +30,7 @@ import type { Store, StoreFactory } from "../store/types.js";
 import { ConfigWriteError, patchConfigFile, type ConfigPatch } from "./config-file.js";
 import { createSetupNetwork } from "./espn-http.js";
 import { EXIT, UsageError } from "./exit.js";
-import { writeLine, type CliIo } from "./io.js";
+import { isTty, writeLine, type CliIo } from "./io.js";
 import type { Logger } from "./log.js";
 import { createTerminalPrompt, type TerminalPrompt } from "./prompt.js";
 import { loadLenientRuntime, loadRuntime, reportConfigError } from "./runtime.js";
@@ -83,6 +83,9 @@ export function checkSetupFlags(o: SetupOptions): void {
   }
   if (o.page && o.reset) throw new UsageError("setup: --page cannot be combined with --reset");
 }
+
+/** How long setup lets input already waiting on the terminal be read before it prints anything. */
+export const TYPE_AHEAD_SETTLE_MS = 25;
 
 /** A prompt that answers from fixed values (the page's posted pair), then reports closed input. */
 export function fixedAnswers(values: readonly string[]): SetupPrompt {
@@ -164,15 +167,17 @@ export async function setup(
   // the terminal flow asks for both values: it takes the terminal before anything else, so keys
   // typed while setup starts are read muted, never echoed (prompt.ts). `--page` takes its values
   // from the page (Ctrl-C keeps stopping it) and `--reset` asks nothing: neither takes it.
+  const takeNow = !opts.page && !opts.reset;
   const prompt =
     over.prompt ??
-    createTerminalPrompt({
-      stdin: io.stdin,
-      out: io.stdout,
-      takeTerminalNow: !opts.page && !opts.reset,
-    });
+    createTerminalPrompt({ stdin: io.stdin, out: io.stdout, takeTerminalNow: takeNow });
   let store: Store | null = null;
   try {
+    // input already waiting on the terminal — typed while the process started, so the terminal
+    // driver echoed it — is read now, before anything is printed: the prompt then knows it came
+    // before the first question and says so if espn_s2 is taken from it (prompt.ts TYPED_AHEAD_NOTE)
+    if (over.prompt === undefined && takeNow && isTty(io.stdin))
+      await new Promise((resolve) => setTimeout(resolve, TYPE_AHEAD_SETTLE_MS));
     // test mode needs no league (it never asks ESPN); every other run does
     let config: Config | LenientConfig;
     let log: Logger;

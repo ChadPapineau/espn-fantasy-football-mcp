@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeEspnS2 } from "../../scripts/ci/secret-fixtures.mjs";
 import { selftestDigest } from "../../src/auth/selftest.js";
-import { createTerminalPrompt } from "../../src/cli/prompt.js";
+import { TYPED_AHEAD_NOTE, createTerminalPrompt } from "../../src/cli/prompt.js";
 import {
   candidatePorts,
   formHtml,
@@ -142,6 +142,8 @@ describe("terminal prompt on a TTY: the hidden value is never drawn", () => {
     p.close();
     expect(out.text).toContain(SWID);
     expect(shows(out, S2)).toBe(false);
+    // pasted at the question (the terminal was ours): nothing to clear
+    expect(out.text).not.toContain(TYPED_AHEAD_NOTE);
     expect(stdin.rawCalls).toEqual([true, false]);
   });
   it("a line break inside the pasted espn_s2: neither part is drawn", async () => {
@@ -186,8 +188,9 @@ describe("terminal prompt on a TTY: the hidden value is never drawn", () => {
     });
     p.close();
     expect(shows(out, S2)).toBe(false);
-    // each question's line is ended (the queued line's own line break was never drawn)
-    expect(out.text).toBe("SWID: \nespn_s2: \n");
+    // each question's line is ended (the queued line's own line break was never drawn), and a
+    // hidden answer typed before the first question says what the terminal driver may have shown
+    expect(out.text).toBe(`SWID: \nespn_s2: \n${TYPED_AHEAD_NOTE}\n`);
     expect(stdin.isRaw).toBe(false);
   });
   it("type-ahead before the FIRST question without takeTerminalNow is not drawn either", async () => {

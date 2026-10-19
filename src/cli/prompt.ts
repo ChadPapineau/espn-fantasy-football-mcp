@@ -17,7 +17,8 @@
 // terminal (raw mode: the terminal driver stops echoing) at construction instead of at the first
 // question, so keys typed while setup starts are read here, muted. What was typed before the
 // process took the terminal has already been echoed by the terminal driver itself; no program can
-// prevent that.
+// prevent that — so a hidden answer taken from a line typed before the first question says so
+// (`TYPED_AHEAD_NOTE`): the owner can then clear the terminal's scrollback.
 import { createInterface, type Interface } from "node:readline";
 import { Writable } from "node:stream";
 import type { PromptAnswer, SetupPrompt } from "../auth/setup.js";
@@ -35,6 +36,13 @@ export const CONFIRM_TIMEOUT_MS = 5 * 60_000;
 
 /** Most lines kept while no question waits (piped input with several answers). */
 export const MAX_QUEUED_LINES = 16;
+
+/**
+ * Said on a terminal when a hidden answer is a line typed before the first question was asked: keys
+ * typed before this process took the terminal were echoed by the terminal driver, not by us.
+ */
+export const TYPED_AHEAD_NOTE =
+  "(typed before the first question: if the terminal showed it as you typed, clear this terminal's scrollback and any session log)";
 
 /**
  * A prompt over `stdin`/`out`. On a TTY readline echoes typed characters through `out` only while
@@ -56,7 +64,9 @@ export function createTerminalPrompt(io: {
   });
   const terminal = isTty(io.stdin);
   let rl: Interface | null = null;
-  const queue: string[] = [];
+  // each line read while no question waited, and whether it came before the first question
+  const queue: { readonly line: string; readonly early: boolean }[] = [];
+  let asked = false;
   let closed = false;
   let waiter: ((a: PromptAnswer) => void) | null = null;
 
@@ -77,7 +87,7 @@ export function createTerminalPrompt(io: {
       if (w !== null) {
         waiter = null;
         w({ kind: "answer", value: line });
-      } else if (queue.length < MAX_QUEUED_LINES) queue.push(line);
+      } else if (queue.length < MAX_QUEUED_LINES) queue.push({ line, early: !asked });
     });
     r.on("close", () => {
       closed = true;
@@ -96,13 +106,15 @@ export function createTerminalPrompt(io: {
     opts: { hidden: boolean; timeoutMs: number },
   ): Promise<PromptAnswer> => {
     open();
+    asked = true;
     io.out.write(question);
     const queued = queue.shift();
     if (queued !== undefined) {
       // a line read before this question was never drawn (nor its line break): end the question's
       // line here — on a pipe only after a hidden answer, as before
       if (opts.hidden || terminal) io.out.write("\n");
-      return Promise.resolve({ kind: "answer", value: queued });
+      if (opts.hidden && terminal && queued.early) io.out.write(`${TYPED_AHEAD_NOTE}\n`);
+      return Promise.resolve({ kind: "answer", value: queued.line });
     }
     if (closed) return Promise.resolve({ kind: "closed" });
     return new Promise<PromptAnswer>((resolve) => {

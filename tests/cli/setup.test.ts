@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { SetupNetwork } from "../../src/auth/setup.js";
 import type { KeychainSelftestResult } from "../../src/auth/selftest.js";
 import { main } from "../../src/cli/main.js";
+import { TYPED_AHEAD_NOTE } from "../../src/cli/prompt.js";
 import { checkSetupFlags, configPatchOf, fixedAnswers, setup } from "../../src/cli/setup.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
@@ -422,6 +423,7 @@ describe("setup on a terminal (the real prompt): espn_s2 is never drawn", () => 
     expect(await run).toBe(0);
     expect(io.out.text).toContain(`espn_s2 ok (${String(COOKIES.espn_s2.length)} chars)`);
     expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
+    expect(io.out.text).not.toContain(TYPED_AHEAD_NOTE);
     expect(stdin.rawCalls).toEqual([true, false]);
   });
   it("both values typed ahead before setup asks: the terminal is taken first, nothing drawn", async () => {
@@ -435,6 +437,8 @@ describe("setup on a terminal (the real prompt): espn_s2 is never drawn", () => 
     expect(io.out.text).toBe("");
     expect(await run).toBe(0);
     expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
+    // typed before the process took the terminal: the terminal driver may have shown it — said
+    expect(io.out.text).toContain(TYPED_AHEAD_NOTE);
     expect(stdin.rawCalls).toEqual([true, false]);
   });
   it("--page and --reset never take the terminal (Ctrl-C keeps its meaning there)", async () => {
