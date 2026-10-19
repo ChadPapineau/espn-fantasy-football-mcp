@@ -1229,25 +1229,31 @@ export function nameKeysOf(name: string): NameKeys | null {
  * The folded words of a piece of text, read as a name is folded: each word with its punctuation
  * dropped (`Ostrander's` → `ostranders`, `Smith-Njigba` → `smithnjigba`), each part between its
  * punctuation (`Quist/Ostrander`), and every run of two or three adjacent words joined (a spaced
- * compound surname). A word that does not fold (symbols, non-Latin) contributes nothing.
+ * compound surname). A word that does not fold (symbols, non-Latin) contributes nothing; with
+ * `capitalised`, neither does a word (or a part) that does not start with a capital letter — the
+ * form a name takes in prose ("before Thursday's lock" names no Drew Lock).
  */
-function foldedWords(text: string): ReadonlySet<string> {
+function foldedWords(text: string, capitalised = false): ReadonlySet<string> {
   const out = new Set<string>();
   const words: string[] = [];
+  const capital = (w: string): boolean =>
+    !capitalised || /^\p{Lu}/u.test(w.replace(/^\P{L}+/u, ""));
   for (const w of text.split(/\s+/u)) {
     if (w.length === 0 || w.length > MAX_NAME_CHARS) continue;
-    const f = mergeName(w)?.replaceAll(" ", "") ?? "";
+    const f = capital(w) ? (mergeName(w)?.replaceAll(" ", "") ?? "") : "";
     words.push(f);
     if (f.length > 0) out.add(f);
     for (const part of w.split(/\p{P}+/u)) {
-      const g = part.length === 0 ? null : mergeName(part);
+      const g = part.length === 0 || !capital(part) ? null : mergeName(part);
       if (g !== null) out.add(g.replaceAll(" ", ""));
     }
   }
   for (let i = 0; i < words.length; i++) {
     let run = words[i] ?? "";
     for (let j = i + 1; j < Math.min(words.length, i + 3); j++) {
-      run += words[j] ?? "";
+      const next = words[j] ?? "";
+      if (next.length === 0) break;
+      run += next;
       if (run.length > 0) out.add(run);
     }
   }
@@ -1347,10 +1353,13 @@ export function neighbourKeysOf(
   return out;
 }
 
-/** The keys among `keys` whose player a text names (surname or whole name, possessive included). */
+/**
+ * The keys among `keys` whose player a text names as a name is written — a capitalised surname or
+ * whole name, possessive included — for the players around the subject, whom no matcher confirmed.
+ */
 export function namedIn(text: string, keys: readonly NameKeys[]): readonly NameKeys[] {
   if (keys.length === 0) return [];
-  const words = foldedWords(text);
+  const words = foldedWords(text, true);
   return keys.filter((k) => namesPlayer(words, k));
 }
 

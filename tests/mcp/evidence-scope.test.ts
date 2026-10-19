@@ -18,7 +18,7 @@ import type { DatasetStamp, NewsItem } from "../../src/domain/analytics/types.js
 import { extractClaim } from "../../src/domain/evidence/index.js";
 import { wrapUntrusted } from "../../src/mcp/envelope.js";
 import type { McpServices } from "../../src/mcp/services.js";
-import { nameKeysOf, partsAbout, type NameKeys } from "../../src/mcp/tools/market-p1.js";
+import { nameKeysOf, namedIn, partsAbout, type NameKeys } from "../../src/mcp/tools/market-p1.js";
 import { call, connect, makeWorld, SEASON, type World } from "./helpers/world.js";
 
 describe("partsAbout (Stage C evidence-item-claims-misattributed)", () => {
@@ -99,6 +99,14 @@ describe("partsAbout (Stage C evidence-item-claims-misattributed)", () => {
     expect(
       partsAbout(t("Ostrander will start"), him, [keys("Will Quist")])?.untrusted_text.value,
     ).toBe("Ostrander will start");
+  });
+
+  it("a player around him (no matcher ref) counts only where written as a name: capitalised", () => {
+    const lock = [keys("Drew Lock")];
+    expect(namedIn("Cleared to play: move him out of IR before Thursday's lock", lock)).toEqual([]);
+    expect(namedIn("With Lock (knee) out, he starts", lock)).toEqual(lock);
+    expect(namedIn("LOCK OUT; he starts", lock)).toEqual(lock);
+    expect(namedIn("Lock's knee", lock)).toEqual(lock);
   });
 
   it("names are read as the matcher folds them: possessive, hyphen, spacing, suffix, case", () => {
