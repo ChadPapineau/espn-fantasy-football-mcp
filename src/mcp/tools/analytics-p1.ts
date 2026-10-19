@@ -74,6 +74,8 @@ import {
   type Subject,
 } from "./analytics.js";
 import {
+  bankedPoints,
+  bankedPointsWarning,
   crosswalkOf,
   isDegradable,
   leagueRef,
@@ -463,7 +465,8 @@ export const analyzeMatchupTool = defineTool({
     // first (plan 01 §5.6: a cold call's 3 requests): the box score — the points so far AND this
     // period's pairing, so the opponent needs no season-schedule read — then the pro schedule (the
     // game states; the dataset, 0 requests once refreshed); mMatchup only when the box score cannot
-    // name the opponent; ESPN's live numbers, a cross-check, last.
+    // name the opponent or the week is a later week of a multi-week period (the period's earlier
+    // points); ESPN's live numbers, a cross-check, last.
     const rosters = await rostersOf(ctx, b.w, inputs, warnings, args, team);
     const mine = rosters.find((r) => r.team.team_id === team);
     if (mine === undefined) throw new EffError("NOT_FOUND");
@@ -506,6 +509,27 @@ export const analyzeMatchupTool = defineTool({
     const opp = oppId === null ? undefined : rosters.find((r) => r.team.team_id === oppId);
     if (opp === undefined)
       throw new EffError("NOT_FOUND", { field: "week", reason: "no_opponent" });
+    // a later week of a multi-week period: its earlier weeks' points, which the engine cannot carry
+    // in yet, are said and the answer is partial — never a 0–0 P(win) presented as the period's
+    // (Stage C finding matchup-multiweek-prior-points-ignored). The season schedule is read for it
+    // only then (pre read it above; a cache hit).
+    const period = periodOf(b.rules, b.w);
+    const span = period === null ? [] : (b.rules.playoffs.matchup_periods[String(period)] ?? []);
+    if (span.some((x) => x < b.w)) {
+      const ms = await withinBudget(
+        () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
+        warnings,
+      ).catch((e: unknown) => {
+        if (!isDegradable(e)) throw e;
+        return null;
+      });
+      const banked = ms === null ? null : bankedPoints(take(ctx, ms, inputs), b.rules, b.w, team);
+      if (banked !== null) warnings.push(bankedPointsWarning(banked, b.w));
+      else
+        warnings.push(
+          `partial: matchup period ${String(period)} spans weeks ${span.map(String).join(", ")}: its earlier weeks' points were not read — the win probability scores week ${String(b.w)} alone, not the period`,
+        );
+    }
     await turn();
     const proj = await project(
       ctx,

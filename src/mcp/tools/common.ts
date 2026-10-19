@@ -296,6 +296,58 @@ export function periodOf(rules: Pick<LeagueRules, "playoffs">, w: Week): number 
   return best;
 }
 
+/**
+ * The points a multi-week matchup period already holds before week `w` (its earlier scoring
+ * periods, ESPN's `points_by_week`) for `team` and its opponent, or null when `w` is its period's
+ * first week, the period spans one week, or the matchup is unknown. A two-week round's second week
+ * starts from that margin, never 0–0 (research 05 §2.3: read matchupPeriods, never assume).
+ */
+export function bankedPoints(
+  matchups: readonly Matchup[],
+  rules: Pick<LeagueRules, "playoffs">,
+  w: Week,
+  team: number,
+): {
+  readonly period: number;
+  readonly weeks: readonly Week[];
+  readonly me: number;
+  readonly opp: number;
+} | null {
+  const period = periodOf(rules, w);
+  if (period === null) return null;
+  const span = [...(rules.playoffs.matchup_periods[String(period)] ?? [])].sort((a, b) => a - b);
+  const earlier = span.filter((x) => x < w);
+  if (earlier.length === 0) return null;
+  const m = matchups.find(
+    (x) => x.matchup_period === period && (x.home.team_id === team || x.away?.team_id === team),
+  );
+  const away = m?.away ?? null;
+  if (m === undefined || away === null) return null;
+  const mine = m.home.team_id === team ? m.home : away;
+  const theirs = m.home.team_id === team ? away : m.home;
+  const sum = (s: { readonly points_by_week: Readonly<Record<string, number>> }): number =>
+    earlier.reduce((acc, x) => acc + (s.points_by_week[String(x)] ?? 0), 0);
+  return { period, weeks: earlier, me: sum(mine), opp: sum(theirs) };
+}
+
+/**
+ * The warning a win probability carries while the engine scores the call's week alone in a later
+ * week of a multi-week period (the engines take no carried-points input yet): the period's score so
+ * far — its earlier weeks' points, 0–0 while they are unplayed — is said beside it, never dropped.
+ */
+export function bankedPointsWarning(
+  b: {
+    readonly period: number;
+    readonly weeks: readonly Week[];
+    readonly me: number;
+    readonly opp: number;
+  },
+  w: Week,
+): string {
+  const r = (x: number): string => String(Math.round(x * 10) / 10);
+  return `partial: matchup period ${String(b.period)} also scores week ${b.weeks.map(String).join(", ")} (${r(b.me)}–${r(b.opp)} so far): the win probability scores week ${String(w)} alone, not the period`;
+}
+
 /** The team a call means: the argument, else my team — or VALIDATION with the setup hint. */
 export function teamOf(league: League, teamId: number | undefined): number {
   if (teamId !== undefined) return teamId;

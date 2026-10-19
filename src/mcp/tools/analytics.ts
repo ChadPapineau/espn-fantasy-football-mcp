@@ -79,6 +79,8 @@ import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, dropLastTrim, type ToolContext } from "../define.js";
 import { remainingDeadline } from "../call.js";
 import {
+  bankedPoints,
+  bankedPointsWarning,
   crosswalkOf,
   leagueOf,
   leagueRef,
@@ -974,6 +976,11 @@ export const analyzeLineupTool = defineTool({
     const matchups = mGot === null ? [] : take(ctx, mGot, inputs);
     const oppId = opponentIn(matchups, periodOf(rules, w), team);
     const opp = oppId === null ? null : (rosters.find((r) => r.team.team_id === oppId) ?? null);
+    // a later week of a multi-week period: its earlier weeks' points, which the engine cannot carry
+    // in yet, are said and the answer is partial — never a 0–0 P(win) presented as the period's
+    // (Stage C finding matchup-multiweek-prior-points-ignored)
+    const banked = bankedPoints(matchups, rules, w, team);
+    if (banked !== null) warnings.push(bankedPointsWarning(banked, w));
     if (mGot === null)
       warnings.push("schedule unavailable: no opponent, objective mean, mode neutral");
     const sched = await withinBudget(
