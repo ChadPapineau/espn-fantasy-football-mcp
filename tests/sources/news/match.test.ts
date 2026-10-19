@@ -117,6 +117,27 @@ describe("surnames", () => {
     expect(twoOnTeam.match("Ravens RB Henry leaves early")).toEqual([]);
   });
 
+  it("never reads a surname directly after a coaching-staff word as a player", () => {
+    // Stage C remediation news-match-coach-surname: a head coach / coordinator is not in the player
+    // universe, and E10 would otherwise read the coach's statement as a claim about the universe
+    // player who shares the surname. Two CIN players, one sharing the coach's surname.
+    const cin = buildPlayerMatcher([
+      { espn_id: 9_000_501, full_name: "Jalen Corbin", team: "CIN", gsis_id: null },
+      { espn_id: 9_000_502, full_name: "Ira Pruitt", team: "CIN", gsis_id: null },
+    ]);
+    const got = (t: string) => cin.match(t).map((r) => [r.espn_id, r.match_method]);
+    // the coach "Corbin" is dropped; the player "Pruitt" the coach speaks about still matches
+    expect(got("Bengals coach Corbin says Pruitt (ankle) is out Sunday")).toEqual([
+      [9_000_502, "last_name_team"],
+    ]);
+    expect(got("Coach Corbin: Bengals will sit Pruitt")).toEqual([[9_000_502, "last_name_team"]]);
+    // a capitalised coordinator abbreviation and its lower-case form both block the surname
+    expect(got("Bengals OC Corbin calls the shots")).toEqual([]);
+    expect(got("Bengals dc Corbin calls the shots")).toEqual([]);
+    // the player IS matched when no staff word precedes the surname (the fix is not over-broad)
+    expect(got("Bengals RB Corbin breaks free")).toEqual([[9_000_501, "last_name_team"]]);
+  });
+
   it("never reads a surname that is part of another person's full name", () => {
     expect(ids("Ravens coach Patrick Henry speaks")).toEqual([]);
     expect(ids("Josh Allen and the Colts")).toEqual([[3918298, "full_name"]]); // not Keenan Allen (IND)

@@ -29,6 +29,21 @@
 //     bytes (a snappy stream expands ~21×: strings of the cap's size times 21 are bytes too) are
 //     capped.
 //
+// The schema is checked too (Stage C remediation nflverse-parquet-negative-children-hang): hyparquet's
+// metadata parse and decode walk the schema list by each element's `num_children` and resolve a
+// column chunk to its element by name, so a 35-byte footer with a child count of −1 held
+// parquetMetadata's GeoParquet pass in an endless synchronous loop (SIGTERM never ran). The footer
+// walk now refuses, before hyparquet reads it, a schema element whose child count is not a
+// non-negative integer or whose converted type is DECIMAL (nflverse writes none and the product reads
+// none; hyparquet converts such a column's statistics with a BigInt loop that grows faster than the
+// square of their length, inside the parse); openParquet parses with GeoParquet off (the product
+// reads no geo type) and then `assertSchemaTree` requires one well-formed tree — every element
+// inside the root's subtree, every group holding exactly its children, nesting within
+// maxSchemaDepth, a named element, no two children of a group sharing a name, a root that is not
+// REPEATED — so this scan, checkParquet and hyparquet's decoder always pick the same element for a
+// column; and the page scan requires a chunk's own type to be its element's (hyparquet decodes by
+// the chunk's).
+//
 // Every refusal is NflverseSourceError `corrupt` (refresh_log `schema_mismatch`): the run fails
 // loudly before any large allocation and the previous dataset stays served. The caps bound the
 // decode to a FINITE, non-fatal size — not to a small one: the heaviest real file decodes within
@@ -59,6 +74,8 @@ export interface ParquetDecodeLimits {
    * whatever its shape; a real footer holds ~20 k (pbp's 372 columns with statistics).
    */
   readonly maxThriftNodes: number;
+  /** Nesting of the schema tree below its root (every nflverse release file is flat: 1). */
+  readonly maxSchemaDepth: number;
 }
 
 /**
@@ -70,6 +87,8 @@ export interface ParquetDecodeLimits {
  * size: the heaviest real file within ~1 GB, an adversarial file at the cell cap to ~1.7 GB peak
  * (the narrowest contract, 17 columns, 1<<24 / 17 ≈ 987 k rows; measured — 2.7 GB at the former
  * 1<<25) — never the unbounded fatal out-of-memory that an unchecked footer or page claim caused.
+ * Every surveyed file's schema is flat (depth 1); maxSchemaDepth leaves room for a nested column a
+ * future file might add while bounding hyparquet's per-level tree walk.
  */
 export const PARQUET_DECODE_LIMITS: ParquetDecodeLimits = Object.freeze({
   maxRows: 1 << 21,
@@ -78,10 +97,15 @@ export const PARQUET_DECODE_LIMITS: ParquetDecodeLimits = Object.freeze({
   maxDecodedBytes: 256 * 1024 * 1024,
   maxThriftDepth: 32,
   maxThriftNodes: 1 << 20,
+  maxSchemaDepth: 32,
 });
 
 const corrupt = (what: string): NflverseSourceError =>
   new NflverseSourceError("corrupt", `nflverse: ${what}`);
+
+/** A schema the reader refuses: `not_parquet` (refresh_log `schema_mismatch`), naming the rule. */
+const badSchema = (what: string): NflverseSourceError =>
+  new NflverseSourceError("not_parquet", `nflverse: unreadable parquet schema (${what})`);
 
 // --- the bounded thrift-compact reader -----------------------------------------------------------------
 
@@ -186,16 +210,8 @@ function readElement(c: Cursor, type: number, depth: number, keep: boolean): Thr
     }
     case T.LIST: {
       if (depth >= PARQUET_DECODE_LIMITS.maxThriftDepth) throw new ThriftBounds("nested too deep");
-      const head = byteAt(c);
-      const elem = head & 0x0f;
-      let size = head >> 4;
-      if (size === 15) size = varint32(c);
-      // every element takes at least one byte: a longer list cannot be real (hyparquet would
-      // allocate `new Array(size)` before failing)
-      if (size < 0 || size > c.end - c.o)
-        throw new ThriftBounds("a list longer than the bytes left");
-      const bool = elem === T.TRUE || elem === T.FALSE;
-      for (let i = 0; i < size; i++) readElement(c, bool ? T.BYTE : elem, depth + 1, false);
+      const { elem, size } = listHeader(c);
+      for (let i = 0; i < size; i++) readElement(c, elem, depth + 1, false);
       return OTHER;
     }
     case T.STRUCT: {
@@ -209,11 +225,31 @@ function readElement(c: Cursor, type: number, depth: number, keep: boolean): Thr
 }
 
 /**
+ * A list's header, as hyparquet reads it: the element type (a boolean list's elements are bytes)
+ * and the size. Every element takes at least one byte, so a list longer than the bytes left cannot
+ * be real (hyparquet would allocate `new Array(size)` before failing).
+ */
+function listHeader(c: Cursor): { readonly elem: number; readonly size: number } {
+  const head = byteAt(c);
+  const elem = head & 0x0f;
+  let size = head >> 4;
+  if (size === 15) size = varint32(c);
+  if (size < 0 || size > c.end - c.o) throw new ThriftBounds("a list longer than the bytes left");
+  return { elem: elem === T.TRUE || elem === T.FALSE ? T.BYTE : elem, size };
+}
+
+/**
  * One struct, exactly as hyparquet's `deserializeTCompactProtocol` walks it (fields until STOP or the
  * end of the bytes; a zero delta reads the field id as a zigzag varint; a repeated id keeps the last
- * value). `keep` builds the fields (page headers); otherwise the walk only validates (the footer).
+ * value). `keep` builds the fields (page headers, schema elements); otherwise the walk only
+ * validates. `field`, when given, walks a field of THIS struct itself (the footer's schema list).
  */
-function readStruct(c: Cursor, depth: number, keep: boolean): ThriftStruct {
+function readStruct(
+  c: Cursor,
+  depth: number,
+  keep: boolean,
+  field?: (fid: number, type: number) => boolean,
+): ThriftStruct {
   const out: Record<number, ThriftValue> = {};
   let fid = 0;
   while (c.o < c.end) {
@@ -222,17 +258,43 @@ function readStruct(c: Cursor, depth: number, keep: boolean): ThriftStruct {
     if (type === T.STOP) break;
     const delta = byte >> 4;
     fid = delta !== 0 ? fid + delta : zigzag32(c);
+    if (field?.(fid, type) === true) continue;
     const v = readElement(c, type, depth, keep);
     if (keep) out[fid] = v;
   }
   return out;
 }
 
+/** FileMetaData's schema list and the SchemaElement fields checked in it (parquet.thrift). */
+const FOOTER_SCHEMA_FIELD = 2;
+const ELEMENT_NUM_CHILDREN = 5;
+const ELEMENT_CONVERTED_TYPE = 6;
+/** ConvertedType DECIMAL (parquet.thrift; hyparquet's `ConvertedTypes[5]`). */
+const CONVERTED_DECIMAL = 5;
+
+/**
+ * One SchemaElement of the footer, its fields kept, refused before hyparquet reads it when its
+ * child count is not a non-negative integer (hyparquet's schema walks step by it: a negative count
+ * never ends one) or its converted type is DECIMAL or not an integer (hyparquet maps a non-integer to
+ * a converted type by its string form, and converts a DECIMAL column's statistics inside the parse).
+ */
+function checkSchemaElement(v: ThriftValue): void {
+  if (typeof v !== "object" || !("struct" in v)) return; // not a struct: hyparquet reads no fields
+  const children = v.struct[ELEMENT_NUM_CHILDREN];
+  if (children !== undefined && !(typeof children === "number" && children >= 0))
+    throw badSchema("a child count that is not a count");
+  const converted = v.struct[ELEMENT_CONVERTED_TYPE];
+  if (converted !== undefined && (typeof converted !== "number" || converted === CONVERTED_DECIMAL))
+    throw badSchema("a DECIMAL or unreadable converted type");
+}
+
 /**
  * Walks a parquet footer before hyparquet parses it (the metadata struct starting `metadata_length`
  * bytes before the trailing length + magic, read — as hyparquet reads it — over the whole buffer).
  * Throws NflverseSourceError `not_parquet` on anything the bounded reader refuses, including a footer
- * holding more than `limits.maxThriftNodes` elements (parquetMetadata would build one object each).
+ * holding more than `limits.maxThriftNodes` elements (parquetMetadata would build one object each)
+ * and a schema element `checkSchemaElement` refuses (every occurrence of the schema list is checked,
+ * though hyparquet keeps the last).
  */
 export function assertBoundedFooter(
   file: Uint8Array,
@@ -242,13 +304,69 @@ export function assertBoundedFooter(
   const len = n >= 8 ? new DataView(file.buffer, file.byteOffset, n).getUint32(n - 8, true) : -1;
   if (len < 0 || len > n - 8)
     throw new NflverseSourceError("not_parquet", "nflverse: unreadable parquet footer");
+  const c = cursorAt(file, n - 8 - len, n, limits.maxThriftNodes);
+  // the schema list, element by element: the same node and depth accounting as readElement's LIST
+  const schemaList = (fid: number, type: number): boolean => {
+    if (fid !== FOOTER_SCHEMA_FIELD || type !== T.LIST) return false;
+    if (++c.nodes > c.maxNodes) throw new ThriftBounds("more thrift elements than a footer may hold");
+    const { elem, size } = listHeader(c);
+    for (let i = 0; i < size; i++) checkSchemaElement(readElement(c, elem, 1, elem === T.STRUCT));
+    return true;
+  };
   try {
-    readStruct(cursorAt(file, n - 8 - len, n, limits.maxThriftNodes), 0, false);
+    readStruct(c, 0, false, schemaList);
   } catch (e) {
     if (e instanceof ThriftBounds)
       throw new NflverseSourceError("not_parquet", "nflverse: unreadable parquet footer");
     throw e;
   }
+}
+
+/**
+ * Requires the parsed schema list to be ONE well-formed tree before anything walks it (checkParquet,
+ * the page scan, hyparquet's decoder): the root first and not REPEATED (hyparquet counts the root's
+ * repetition in every column's repetition level, though no level of a flat column is one), every
+ * later element inside the root's subtree, every group holding exactly the children it claims,
+ * nesting within `limits.maxSchemaDepth`, every element named, and no two children of one group
+ * sharing a name (hyparquet takes the first, a name map the last: the scan and the decode would
+ * read one chunk as two different columns). Throws NflverseSourceError `not_parquet`.
+ */
+export function assertSchemaTree(
+  schema: readonly SchemaElement[],
+  limits: ParquetDecodeLimits = PARQUET_DECODE_LIMITS,
+): void {
+  const childrenOf = (el: SchemaElement): number => {
+    const k: unknown = el.num_children ?? 0;
+    if (typeof k !== "number" || !Number.isSafeInteger(k) || k < 0)
+      throw badSchema("a child count that is not a count");
+    return k;
+  };
+  const root = schema[0];
+  if (root === undefined) throw badSchema("no root");
+  if (typeof root.name !== "string") throw badSchema("an element without a name");
+  if (root.repetition_type === "REPEATED") throw badSchema("a repeated root");
+  // the open groups, innermost last: how many children each still holds and the names taken
+  const open: { left: number; readonly names: Set<string> }[] = [];
+  const rootChildren = childrenOf(root);
+  if (rootChildren > 0) open.push({ left: rootChildren, names: new Set() });
+  for (let i = 1; i < schema.length; i++) {
+    const el = schema[i];
+    const group = open[open.length - 1];
+    if (el === undefined || group === undefined)
+      throw badSchema("an element outside the root's tree");
+    if (typeof el.name !== "string") throw badSchema("an element without a name");
+    if (group.names.has(el.name)) throw badSchema("two columns of one group share a name");
+    group.names.add(el.name);
+    group.left--;
+    const k = childrenOf(el);
+    if (k > 0) {
+      if (open.length >= limits.maxSchemaDepth) throw badSchema("nested deeper than the bound");
+      open.push({ left: k, names: new Set() });
+    } else {
+      while (open.length > 0 && open[open.length - 1]?.left === 0) open.pop();
+    }
+  }
+  if (open.length > 0) throw badSchema("a group with fewer children than it claims");
 }
 
 // --- the page scan -------------------------------------------------------------------------------------
@@ -503,6 +621,8 @@ export function scanParquetPages(
       chunks.set(name, (chunks.get(name) ?? 0) + 1);
       const el = elements.get(name);
       if (el === undefined) throw corrupt("a contract column is not in the file");
+      // hyparquet decodes a chunk by the chunk's own type; this scan reads its element's
+      if (md.type !== el.type) throw corrupt("a column chunk's type is not its column's");
       scanChunk(bytes, md, el, groupRows, limits, budget);
     }
     for (const name of columns)

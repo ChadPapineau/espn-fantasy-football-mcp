@@ -237,8 +237,15 @@ export function seasonState(
   return "off_season";
 }
 
-const SAFE_NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
-const safeName = (s: string): string => (SAFE_NAME.test(s) ? s : "?");
+/**
+ * The grammar a third-party name (an upstream column or codec) must match to be shown verbatim; a
+ * name with anything else — a space, a quote, a newline, a prompt-injection sentence — becomes `?`.
+ * Used by the schema-failure line here AND by the published-result warnings the nflverse schema
+ * check builds (base.ts), so both paths sanitise upstream names the same way (Stage C remediation
+ * refresh-extra-column-names-verbatim).
+ */
+export const SAFE_NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
+export const safeName = (s: string): string => (SAFE_NAME.test(s) ? s : "?");
 
 /** One line naming what failed the schema assertion (column names and codecs, sanitised). */
 export function describeSchemaFailure(r: SchemaReport): string {

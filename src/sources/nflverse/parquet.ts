@@ -5,12 +5,15 @@
 // hostile file can claim millions of values, so the footer is walked by a bounded reader before
 // hyparquet parses it, and every page the decode will touch is checked before a row group is decoded
 // (parquet-bounds.ts, PARQUET_DECODE_LIMITS — Stage C remediation nflverse-parquet-decode-bomb).
+// The schema is one well-formed tree before anything walks it, and the metadata parse runs with
+// GeoParquet off (Stage C remediation nflverse-parquet-negative-children-hang: a negative child
+// count held that pass in an endless loop).
 // Ported from sibling @521f9f3, adapted (errors carry a SourceErrorCode).
 import { readFile } from "node:fs/promises";
 import { parquetMetadata, parquetReadObjects } from "hyparquet";
 import type { FileMetaData, SchemaElement } from "hyparquet";
 import { ALLOWED_PARQUET_CODECS, type ColumnCodec } from "../source.js";
-import { assertBoundedFooter, scanParquetPages } from "./parquet-bounds.js";
+import { assertBoundedFooter, assertSchemaTree, scanParquetPages } from "./parquet-bounds.js";
 import { MAX_RELEASE_FILE_BYTES, NflverseSourceError } from "./release.js";
 import type { ColumnKind } from "./schemas.js";
 
@@ -44,6 +47,10 @@ const MAGIC = [0x50, 0x41, 0x52, 0x31]; // "PAR1"
 /**
  * Reads and parses a parquet file; anything that is not one fails with `not_parquet`. `maxBytes`
  * (default MAX_RELEASE_FILE_BYTES) is the source's cap — the pbp source passes PBP_MAX_FILE_BYTES.
+ * The footer is walked by the bounded reader first; the parse runs with GeoParquet off (no release
+ * file is geospatial and the product reads no geo type — hyparquet's GeoParquet pass walks the
+ * schema by its child counts and parses a `geo` key-value as JSON); the schema must then be one
+ * well-formed tree (`assertSchemaTree`).
  */
 export async function openParquet(
   path: string,
@@ -61,10 +68,11 @@ export async function openParquet(
   const buffer = b.buffer.slice(b.byteOffset, b.byteOffset + n);
   let metadata: FileMetaData;
   try {
-    metadata = parquetMetadata(buffer);
+    metadata = parquetMetadata(buffer, { geoparquet: false });
   } catch {
     throw new NflverseSourceError("not_parquet", "nflverse: unreadable parquet footer");
   }
+  assertSchemaTree(metadata.schema);
   return { buffer, metadata };
 }
 

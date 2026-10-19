@@ -103,7 +103,6 @@ const LEAD_WORDS: ReadonlySet<string> = new Set([
   "ot",
   "og",
   "ls",
-  "coach",
   "star",
   "rookie",
   "veteran",
@@ -143,6 +142,27 @@ const LEAD_WORDS: ReadonlySet<string> = new Set([
   "wr2",
   "backup",
   "starter",
+]);
+
+/**
+ * Coaching-staff words: a capitalised surname directly after one ("Bengals coach Corbin", "Coach
+ * Corbin", "OC Corbin") names a staff member, not a player, so it is not a `last_name_team` mention —
+ * head coaches and coordinators are not in the player universe (negative team-unit ids are skipped),
+ * and E10 would otherwise read the coach's statement as a claim about the universe player who shares
+ * the surname (Stage C remediation news-match-coach-surname). "coach" used to sit in LEAD_WORDS,
+ * which licensed exactly this false match; the capitalised abbreviations already failed the lead
+ * check, but the lower-case "coach" of "Bengals coach Corbin" slipped past the capitalised-prev
+ * guard. These never overlap a player-position lead word (qb, rb, s, p…).
+ */
+const STAFF_WORDS: ReadonlySet<string> = new Set([
+  "coach",
+  "coaches",
+  "hc",
+  "oc",
+  "dc",
+  "stc",
+  "coordinator",
+  "coordinators",
 ]);
 
 interface Token {
@@ -290,6 +310,10 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       if (t === null || t === undefined || consumed[i] === true || !t.capital) continue;
       if (TEAM_WORDS.has(t.norm)) continue;
       const prev = i > 0 ? tokens[i - 1] : null;
+      // a surname right after a coaching-staff word is that staff member, not a player (whatever the
+      // staff word's case — "Bengals coach Corbin" as much as "Coach Corbin")
+      if (!t.breakBefore && prev !== null && prev !== undefined && STAFF_WORDS.has(prev.norm))
+        continue;
       if (!t.breakBefore && prev?.capital === true) {
         if (!LEAD_WORDS.has(prev.norm) && !TEAM_WORDS.has(prev.norm)) continue;
       }

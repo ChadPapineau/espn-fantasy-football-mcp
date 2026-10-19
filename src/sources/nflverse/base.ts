@@ -31,6 +31,7 @@ import {
   readRowGroups,
   type ColumnTypeMismatch,
 } from "./parquet.js";
+import { safeName } from "../runner.js";
 import type { ColumnKind } from "./schemas.js";
 import {
   MAX_RELEASE_FILE_BYTES,
@@ -169,20 +170,26 @@ export async function assertSchemaOf(
   const extraList = [...extra].sort();
   const mismatchList = [...mismatches.values()].sort((a, b) => (a.column < b.column ? -1 : 1));
   const badCodecs = [...codecs.values()];
+  // Every upstream name shown is a third party's (the nflverse release file); it passes through the
+  // same safeName grammar as the schema-failure line (runner.ts), so a column named with spaces, a
+  // quote or a prompt-injection sentence shows as `?`, never verbatim — this warning reaches stdout
+  // on a PUBLISHED result and, in Claude Code, the model reads it (Stage C remediation
+  // refresh-extra-column-names-verbatim). `mm.found`/`mm.expected` and the codec allow-list are
+  // code-controlled strings.
   if (missingList.length > 0) {
-    warnings.push(`${id}: missing or renamed column(s): ${missingList.join(", ")}`);
+    warnings.push(`${id}: missing or renamed column(s): ${missingList.map(safeName).join(", ")}`);
   }
   for (const mm of mismatchList) {
-    warnings.push(`${id}: column ${mm.column} expected ${mm.expected}, found ${mm.found}`);
+    warnings.push(`${id}: column ${safeName(mm.column)} expected ${mm.expected}, found ${mm.found}`);
   }
   for (const bc of badCodecs) {
     warnings.push(
-      `${id}: column ${bc.column} uses codec ${bc.codec} (allowed: SNAPPY, UNCOMPRESSED)`,
+      `${id}: column ${safeName(bc.column)} uses codec ${safeName(bc.codec)} (allowed: SNAPPY, UNCOMPRESSED)`,
     );
   }
   if (extraList.length > 0) {
     // A projected source (pbp: 372 upstream columns, ~49 read) would otherwise name hundreds.
-    const named = extraList.slice(0, MAX_EXTRA_NAMED).join(", ");
+    const named = extraList.slice(0, MAX_EXTRA_NAMED).map(safeName).join(", ");
     const more = extraList.length - MAX_EXTRA_NAMED;
     warnings.push(
       `${id}: ${String(extraList.length)} extra column(s) tolerated: ${named}${more > 0 ? ` … and ${String(more)} more` : ""}`,

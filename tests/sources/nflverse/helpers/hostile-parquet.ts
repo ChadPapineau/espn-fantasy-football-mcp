@@ -4,6 +4,10 @@
 // file would claim — an RLE run past its page, a row group claiming ten million rows over one value,
 // an oversized page, a V2 page, a footer varint of thousands of bytes. Test-only; nothing in src/
 // imports it. The schema it writes passes checkParquet for the columns given (flat, typed).
+// Stage C remediation nflverse-parquet-negative-children-hang: a file may also carry the caller's
+// own schema list (`schema`: every element's raw thrift fields, of any thrift type — a negative or
+// DOUBLE-typed child count, a duplicated name, a DECIMAL annotation) and a column chunk its own
+// statistics (`statistics`), so the footer facts hyparquet's metadata parse acts on are the test's.
 import { snappyLiteral } from "./parquet-writer.js";
 
 export type HostileType = "BOOLEAN" | "INT32" | "INT64" | "DOUBLE" | "BYTE_ARRAY";
@@ -47,6 +51,8 @@ export interface HostileColumn {
   readonly pages: readonly HostilePage[];
   /** How the pages are stored and labelled (default SNAPPY). */
   readonly codec?: "SNAPPY" | "UNCOMPRESSED";
+  /** The chunk's Statistics struct (ColumnMetaData field 12), raw; none by default. */
+  readonly statistics?: readonly ThriftField[];
 }
 
 export interface HostileFile {
@@ -57,6 +63,13 @@ export interface HostileFile {
   readonly fileRows?: number;
   /** Raw bytes appended inside the footer struct before its STOP (a hostile footer field). */
   readonly footerTail?: Uint8Array;
+  /**
+   * The footer's schema list, raw: each element's thrift fields, the root first. Default: a root
+   * named `schema` with one child per column, then one flat element per column (`schemaOf`).
+   */
+  readonly schema?: readonly (readonly ThriftField[])[];
+  /** The footer's key-value metadata (FileMetaData field 5), in order; none by default. */
+  readonly keyValue?: Readonly<Record<string, string>>;
 }
 
 // --- byte helpers --------------------------------------------------------------------------------------
@@ -80,30 +93,64 @@ const u32 = (out: number[], n: number): void => {
 
 // --- thrift compact writer ------------------------------------------------------------------------------
 
-type Field = readonly [number, Value];
-type Value =
+/** One thrift struct field as written: its id and its value (whose `t` is the thrift type). */
+export type ThriftField = readonly [number, ThriftValue];
+/**
+ * A thrift compact value: 1/2 a boolean struct field (no value bytes), 3 BYTE, 5 I32, 6 I64, 7
+ * DOUBLE, 8 BINARY (a string is UTF-8 encoded), 12 STRUCT, 9 LIST.
+ */
+export type ThriftValue =
+  | { t: 1 | 2 }
+  | { t: 3; v: number }
   | { t: 5; v: number }
   | { t: 6; v: number | bigint }
-  | { t: 8; v: string }
-  | { t: 12; v: readonly Field[] }
-  | { t: 9; elem: 5 | 8 | 12; v: readonly Value[] };
+  | { t: 7; v: number }
+  | { t: 8; v: string | Uint8Array }
+  | { t: 12; v: readonly ThriftField[] }
+  | { t: 9; elem: 5 | 8 | 12; v: readonly ThriftValue[] };
+type Field = ThriftField;
+type Value = ThriftValue;
 
 const i32 = (v: number): Value => ({ t: 5, v });
 const i64 = (v: number | bigint): Value => ({ t: 6, v });
-const bin = (v: string): Value => ({ t: 8, v });
+const bin = (v: string | Uint8Array): Value => ({ t: 8, v });
 const struct = (v: readonly Field[]): Value => ({ t: 12, v });
 const list = (elem: 5 | 8 | 12, v: readonly Value[]): Value => ({ t: 9, elem, v });
 
+/** Constructors of every thrift value the writer emits (for a caller-built schema or statistics). */
+export const thrift = Object.freeze({
+  bool: (v: boolean): Value => ({ t: v ? 1 : 2 }),
+  byte: (v: number): Value => ({ t: 3, v }),
+  i32,
+  i64,
+  double: (v: number): Value => ({ t: 7, v }),
+  bin,
+  struct,
+  list,
+});
+
 function writeValue(out: number[], val: Value): void {
   switch (val.t) {
+    case 1:
+    case 2:
+      return; // a boolean field is its header's type
+    case 3:
+      out.push(val.v & 0xff);
+      return;
     case 5:
     case 6:
       uvarint(out, zigzag(val.v));
       return;
-    case 8: {
-      const b = new TextEncoder().encode(val.v);
-      uvarint(out, b.length);
+    case 7: {
+      const b = new Uint8Array(8);
+      new DataView(b.buffer).setFloat64(0, val.v, true);
       out.push(...b);
+      return;
+    }
+    case 8: {
+      const b = typeof val.v === "string" ? new TextEncoder().encode(val.v) : val.v;
+      uvarint(out, b.length);
+      for (const x of b) out.push(x);
       return;
     }
     case 12:
@@ -184,6 +231,28 @@ export function onePresent(v: string): HostilePage {
 
 // --- the file -------------------------------------------------------------------------------------------
 
+/**
+ * The schema list a file of `columns` carries by default: a root named `schema` with one child per
+ * column, then each column as a flat element (type, repetition, name, UTF8 when `utf8`).
+ */
+export function schemaOf(columns: readonly HostileColumn[]): ThriftField[][] {
+  return [
+    [
+      [4, bin("schema")],
+      [5, i32(columns.length)],
+    ],
+    ...columns.map((c) => {
+      const fields: Field[] = [
+        [1, i32(TYPE_ID[c.type])],
+        [3, i32(c.repetition ?? 1)],
+        [4, bin(c.name)],
+      ];
+      if (c.utf8 === true) fields.push([6, i32(0)]);
+      return fields;
+    }),
+  ];
+}
+
 /** Writes the file: `PAR1`, every column's pages, the footer, its length, `PAR1`. */
 export function hostileParquet(f: HostileFile): Uint8Array {
   const out: number[] = [0x50, 0x41, 0x52, 0x31];
@@ -248,6 +317,7 @@ export function hostileParquet(f: HostileFile): Uint8Array {
       [9, i64(dataOffset ?? start)],
     ];
     if (dictOffset !== null) md.push([11, i64(dictOffset)]);
+    if (c.statistics !== undefined) md.push([12, struct(c.statistics)]);
     chunks.push(
       struct([
         [2, i64(start)],
@@ -255,41 +325,37 @@ export function hostileParquet(f: HostileFile): Uint8Array {
       ]),
     );
   }
-  const schema: Value[] = [
-    struct([
-      [4, bin("schema")],
-      [5, i32(f.columns.length)],
-    ]),
-    ...f.columns.map((c) => {
-      const fields: Field[] = [
-        [1, i32(TYPE_ID[c.type])],
-        [3, i32(c.repetition ?? 1)],
-        [4, bin(c.name)],
-      ];
-      if (c.utf8 === true) fields.push([6, i32(0)]);
-      return struct(fields);
-    }),
-  ];
+  const schema: Value[] = (f.schema ?? schemaOf(f.columns)).map((fields) => struct(fields));
   const footer: number[] = [];
-  writeStruct(
-    footer,
+  const fields: Field[] = [
+    [1, i32(2)],
+    [2, list(12, schema)],
+    [3, i64(f.fileRows ?? f.groupRows)],
     [
-      [1, i32(2)],
-      [2, list(12, schema)],
-      [3, i64(f.fileRows ?? f.groupRows)],
-      [
-        4,
-        list(12, [
-          struct([
-            [1, list(12, chunks)],
-            [2, i64(0)],
-            [3, i64(f.groupRows)],
-          ]),
+      4,
+      list(12, [
+        struct([
+          [1, list(12, chunks)],
+          [2, i64(0)],
+          [3, i64(f.groupRows)],
         ]),
-      ],
+      ]),
     ],
-    f.footerTail,
-  );
+  ];
+  if (f.keyValue !== undefined)
+    fields.push([
+      5,
+      list(
+        12,
+        Object.entries(f.keyValue).map(([k, v]) =>
+          struct([
+            [1, bin(k)],
+            [2, bin(v)],
+          ]),
+        ),
+      ),
+    ]);
+  writeStruct(footer, fields, f.footerTail);
   for (const b of footer) out.push(b);
   u32(out, footer.length);
   out.push(0x50, 0x41, 0x52, 0x31);
