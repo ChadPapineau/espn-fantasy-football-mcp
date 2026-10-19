@@ -53,7 +53,9 @@ async function e1Team(teamId: number): Promise<E1Player[]> {
   const r = await call(client, "espn_project_players", {
     players: { team_id: teamId },
     horizon: "ros",
-    detail: "compact",
+    // every week's row (compact answers a whole roster with ros_total only once the rows do not
+    // fit — Stage C finding projections-roster-truncated)
+    detail: "full",
     n_sims: 1000,
     seed: 1,
   });

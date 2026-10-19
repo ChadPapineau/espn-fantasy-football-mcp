@@ -76,7 +76,7 @@ import {
 } from "../bounds.js";
 import { toDataInputs, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
-import { beforeSideEffect, defineTool, type ToolContext } from "../define.js";
+import { beforeSideEffect, defineTool, dropLastTrim, type ToolContext } from "../define.js";
 import { remainingDeadline } from "../call.js";
 import {
   crosswalkOf,
@@ -87,6 +87,8 @@ import {
   readOpts,
   rosOptsOf,
   rosReadingOf,
+  opponentIn,
+  periodOf,
   rulesOf,
   scheduleOf,
   seasonStartIso,
@@ -421,6 +423,150 @@ function compactProjections(
   };
 }
 
+/** The longest one warnings[] line may be (the envelope schema's cap). */
+const WARNING_MAX_CHARS = 400;
+
+/** One E1 projection row as the budget steps see it. */
+interface ProjRow {
+  readonly player_id: number | null;
+  readonly weeks: readonly unknown[];
+  readonly ros_total: unknown;
+  readonly drivers: readonly { readonly name: string; readonly contribution: number }[];
+  readonly assumptions: readonly { readonly text: string; readonly revisit_trigger: string }[];
+}
+
+const projRows = (d: unknown): ProjRow[] => ((d as Obj).projections ?? []) as ProjRow[];
+const withRows = (d: unknown, rows: readonly ProjRow[]): unknown => ({
+  ...(d as Obj),
+  projections: rows,
+});
+
+/**
+ * E1's budget steps (plan 07 C8 — 10 000 characters; plan 07 §5.2 — `compact` keeps every
+ * identifier, every decision number, every Dist): a whole roster (≤ 16 players) at the default
+ * detail is answered for every player, the rows thinned in this order before any player is dropped —
+ * (1) an assumption several projections share is stated ONCE in warnings[] with the player ids it
+ * applies to (lossless); (2) drivers beyond each player's largest go; (3) weeks beyond the first go
+ * (the next game's row stays); (4) for a horizon with a rest-of-season total, the weekly rows go and
+ * `ros_total` carries the horizon; only then (5) players leave from the end ONE at a time. Before,
+ * the list was only halved: a 16-player roster came back as 8 (week) or 3 (ROS) of 16, and every
+ * Skill that projects a roster this way silently read part of it (Stage C finding
+ * projections-roster-truncated). Each step says what it removed and how to get it. Under
+ * `detail: "full"` (every week asked for) only the lossless step (1) runs before (5).
+ */
+export function projectionTrims(total: number, full = false): readonly AnalyticsTrim[] {
+  const assumptionKey = (a: { text: string; revisit_trigger: string }): string =>
+    `${a.text}\u0000${a.revisit_trigger}`;
+  // one shared assumption per step (each its own warnings[] line, ≤ the envelope's 400 chars),
+  // the largest saving first; one whose line would not fit stays on its rows
+  const hoist: AnalyticsTrim = (d) => {
+    const rows = projRows(d);
+    const holders = new Map<string, { a: ProjRow["assumptions"][number]; ids: number[] }>();
+    for (const r of rows) {
+      if (r.player_id === null) continue;
+      for (const a of r.assumptions) {
+        const k = assumptionKey(a);
+        const h = holders.get(k) ?? { a, ids: [] };
+        h.ids.push(r.player_id);
+        holders.set(k, h);
+      }
+    }
+    let best: { k: string; line: string; saving: number } | null = null;
+    for (const [k, h] of holders) {
+      if (h.ids.length < 2) continue;
+      const line = `assumption of projections ${h.ids.map(String).join(", ")}: ${h.a.text} (revisit when ${h.a.revisit_trigger})`;
+      if (line.length > WARNING_MAX_CHARS) continue;
+      const saving = h.ids.length * JSON.stringify(h.a).length - line.length;
+      if (best === null || saving > best.saving) best = { k, line, saving };
+    }
+    if (best === null) return null;
+    const hoisted = best.k;
+    const thinned = rows.map((r) =>
+      r.player_id === null
+        ? r
+        : { ...r, assumptions: r.assumptions.filter((a) => assumptionKey(a) !== hoisted) },
+    );
+    return {
+      data: withRows(d, thinned),
+      warning: best.line,
+      key: `projection_assumption:${hoisted}`,
+    };
+  };
+  const dropLast = dropLastTrim(
+    "projections",
+    total,
+    "pass fewer players (player_ids in batches) for the rest",
+  ) as AnalyticsTrim;
+  // `full` asks for every week: lossless first, then players one at a time (never thinner rows)
+  if (full) return [hoist, dropLast];
+  return [
+    hoist,
+    // drivers explain a mean (no Skill reads them): each player's largest is kept here
+    (d) => {
+      const rows = projRows(d);
+      if (!rows.some((r) => r.drivers.length > 1)) return null;
+      const top = (r: ProjRow): ProjRow["drivers"] =>
+        r.drivers.length <= 1
+          ? r.drivers
+          : [
+              r.drivers.reduce((b, x) =>
+                Math.abs(x.contribution) > Math.abs(b.contribution) ? x : b,
+              ),
+            ];
+      return {
+        data: withRows(
+          d,
+          rows.map((r) => ({ ...r, drivers: top(r) })),
+        ),
+        warning:
+          "projections[].drivers cut to each player's largest to fit the 10000-character budget; detail: full with fewer players shows them all",
+        key: "projection_drivers",
+      };
+    },
+    (d) => {
+      const rows = projRows(d);
+      if (!rows.some((r) => r.weeks.length > 1)) return null;
+      return {
+        data: withRows(
+          d,
+          rows.map((r) => ({ ...r, weeks: r.weeks.slice(0, 1) })),
+        ),
+        warning:
+          "projections[].weeks cut to the first week to fit the 10000-character budget (ros_total kept); detail: full with fewer players shows every week",
+        key: "projection_weeks",
+      };
+    },
+    (d) => {
+      const rows = projRows(d);
+      if (!rows.some((r) => r.drivers.length > 0)) return null;
+      return {
+        data: withRows(
+          d,
+          rows.map((r) => ({ ...r, drivers: [] })),
+        ),
+        warning:
+          "projections[].drivers omitted to fit the 10000-character budget; fewer players show them",
+        key: "projection_drivers",
+      };
+    },
+    (d) => {
+      const rows = projRows(d);
+      if (rows.length === 0 || !rows.every((r) => r.ros_total !== null)) return null;
+      if (!rows.some((r) => r.weeks.length > 0)) return null;
+      return {
+        data: withRows(
+          d,
+          rows.map((r) => ({ ...r, weeks: [] })),
+        ),
+        warning:
+          "projections[].weeks omitted to fit the 10000-character budget: ros_total carries the horizon; fewer players (or horizon: week) give the weekly rows",
+        key: "projection_weeks",
+      };
+    },
+    dropLast,
+  ];
+}
+
 /** E1 `espn_project_players`. */
 export const projectPlayersTool = defineTool({
   name: "espn_project_players",
@@ -501,6 +647,7 @@ export const projectPlayersTool = defineTool({
       estimate: true,
       partial: out.partial,
       listKey: "projections",
+      trims: projectionTrims(data.projections.length, args.detail === "full"),
       week: w,
     };
   },
@@ -636,28 +783,7 @@ export const lineupSchema = z.discriminatedUnion("basis", [
   }),
 ]);
 
-/** The matchup period of a week and the opponent of `team` in it (null on a bye or unknown). */
-export function opponentIn(
-  matchups: readonly Matchup[],
-  period: number | null,
-  team: number,
-): number | null {
-  if (period === null) return null;
-  const m = matchups.find(
-    (x) => x.matchup_period === period && (x.home.team_id === team || x.away?.team_id === team),
-  );
-  const away = m?.away ?? null;
-  if (m === undefined || away === null) return null;
-  return m.home.team_id === team ? away.team_id : m.home.team_id;
-}
-
-/** The matchup period listing `w` (lowest id). */
-export function periodOf(rules: LeagueRules, w: Week): number | null {
-  let best: number | null = null;
-  for (const [k, ws] of Object.entries(rules.playoffs.matchup_periods))
-    if (ws.includes(w) && (best === null || Number(k) < best)) best = Number(k);
-  return best;
-}
+export { opponentIn, periodOf };
 
 /** Season standings from the schedule's results (when the standings view is not cached). */
 export function standingsFromMatchups(

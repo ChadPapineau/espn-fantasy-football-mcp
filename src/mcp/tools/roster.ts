@@ -33,10 +33,14 @@ import { defineTool, type ToolContext } from "../define.js";
 import {
   crosswalkOf,
   isDegradable,
+  isOptionalReadFailure,
   leagueOf,
   leagueRef,
+  opponentIn,
   ownershipRow,
+  periodOf,
   readOpts,
+  rulesOf,
   scheduleOf,
   slotsOf,
   snapshotStandIn,
@@ -299,22 +303,66 @@ export async function rostersOf(
 }
 
 /**
- * B1 `all: true`'s budget step (ten compact rosters can exceed 20 000 chars — the contract's
- * ROSTER_ALL_LIST_KEY note): teams leave from the end one at a time (mine is first), never silently.
+ * B1 `all: true`'s budget step (ten compact rosters exceed 20 000 chars — the contract's
+ * ROSTER_ALL_LIST_KEY note): teams leave from the end one at a time, never silently, and the warning
+ * names every team left out. The order (allRostersOrder) puts mine first and this week's opponent
+ * second, so the budget never drops the opponent the weekly Skill reads from this call.
  */
 export function rosterAllTrim(
-  total: number,
+  teamIds: readonly number[],
 ): (d: unknown) => { data: unknown; warning: string; key: string } | null {
+  const total = teamIds.length;
   return (d) => {
-    const list = (d as { rosters?: unknown[] }).rosters ?? [];
+    const list = (d as { rosters?: { team_id: number }[] }).rosters ?? [];
     if (list.length <= 1) return null;
     const kept = list.slice(0, list.length - 1);
+    const shown = new Set(kept.map((r) => r.team_id));
+    const omitted = teamIds.filter((id) => !shown.has(id));
     return {
       data: { ...(d as Record<string, unknown>), rosters: kept },
-      warning: `rosters truncated to ${String(kept.length)} of ${String(total)} teams to fit the 20000-character budget; pass team_id for any other team`,
+      warning: `rosters truncated to ${String(kept.length)} of ${String(total)} teams to fit the 20000-character budget (mine and this week's opponent first); not shown: team ${omitted.map(String).join(", ")} — pass team_id for any of them`,
       key: "rosters",
     };
   };
+}
+
+/**
+ * The order of B1 `all: true`: my team, then my opponent of week `w` (when the call can read the
+ * schedule — a cached or budgeted mMatchup read; never required), then every other team by id. Ten
+ * compact rosters exceed the 20 000-character budget, and teams leave from the end: by id alone the
+ * cut fell on the highest ids — on fx-10h week 5 the opponent, team 10 (Stage C finding
+ * roster-all-truncated-drops-opponent).
+ */
+export function allRostersOrder(
+  rosters: readonly Roster[],
+  opponent: number | null,
+): readonly Roster[] {
+  const rank = (r: Roster): number => (r.is_mine ? 0 : r.team.team_id === opponent ? 1 : 2);
+  return [...rosters].sort((a, b) => rank(a) - rank(b) || a.team.team_id - b.team.team_id);
+}
+
+/** My opponent in the matchup period of week `w`, or null (no team of mine, a bye, or unreadable). */
+async function opponentOfWeek(
+  ctx: ToolContext,
+  league: League,
+  w: number,
+  inputs: InputStamp[],
+  warnings: string[],
+): Promise<number | null> {
+  const mine = league.my_team?.team_id ?? null;
+  if (mine === null) return null;
+  try {
+    const rules = await rulesOf(ctx, inputs);
+    const got = await withinBudget(
+      () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx)),
+      warnings,
+    );
+    if (got === null) return null;
+    return opponentIn(take(ctx, got, inputs), periodOf(rules, w), mine);
+  } catch (e) {
+    if (isOptionalReadFailure(e)) return null;
+    throw e;
+  }
 }
 
 /** B1 `espn_get_roster`. */
@@ -354,11 +402,10 @@ export const getRoster = defineTool({
     if (sched === null) warnings.push("pro schedule unavailable: kickoffs and lock times unknown");
     const gs = sched === null ? null : weekGameState(sched.schedule, w, ctx.nowMs);
     let data: RosterToolData;
+    let order: readonly Roster[] = rosters;
     if (team === null) {
-      const sorted = [...rosters].sort(
-        (a, b) => Number(b.is_mine) - Number(a.is_mine) || a.team.team_id - b.team.team_id,
-      );
-      data = { scope: "all", week: w, rosters: sorted.map((r) => rosterSummary(r, slots)) };
+      order = allRostersOrder(rosters, await opponentOfWeek(ctx, league, w, inputs, warnings));
+      data = { scope: "all", week: w, rosters: order.map((r) => rosterSummary(r, slots)) };
     } else {
       const roster = rosters.find((r) => r.team.team_id === team);
       if (roster === undefined) throw new EffError("NOT_FOUND");
@@ -379,7 +426,10 @@ export const getRoster = defineTool({
       correctionsWindowOpen: gs?.corrections_window_open ?? false,
       week: w,
       ...(team === null
-        ? { listKey: ROSTER_ALL_LIST_KEY, trims: [rosterAllTrim(rosters.length)] }
+        ? {
+            listKey: ROSTER_ALL_LIST_KEY,
+            trims: [rosterAllTrim(order.map((r) => r.team.team_id))],
+          }
         : {}),
     };
   },

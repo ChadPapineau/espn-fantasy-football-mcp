@@ -28,6 +28,7 @@ import {
   type League,
   type LeagueRef,
   type LeagueRules,
+  type Matchup,
   type OwnershipRow,
   type PlatformPlayer,
   type PlatformStamp,
@@ -186,6 +187,29 @@ export function weekOf(league: League, week: number | undefined): Week {
   if (week !== undefined) return week;
   const cur = league.clock.current_scoring_period;
   return Math.min(BOUNDS.week.max, Math.max(BOUNDS.week.min, cur));
+}
+
+/** The matchup period of a week and the opponent of `team` in it (null on a bye or unknown). */
+export function opponentIn(
+  matchups: readonly Matchup[],
+  period: number | null,
+  team: number,
+): number | null {
+  if (period === null) return null;
+  const m = matchups.find(
+    (x) => x.matchup_period === period && (x.home.team_id === team || x.away?.team_id === team),
+  );
+  const away = m?.away ?? null;
+  if (m === undefined || away === null) return null;
+  return m.home.team_id === team ? away.team_id : m.home.team_id;
+}
+
+/** The matchup period listing `w` (lowest id). */
+export function periodOf(rules: Pick<LeagueRules, "playoffs">, w: Week): number | null {
+  let best: number | null = null;
+  for (const [k, ws] of Object.entries(rules.playoffs.matchup_periods))
+    if (ws.includes(w) && (best === null || Number(k) < best)) best = Number(k);
+  return best;
 }
 
 /** The team a call means: the argument, else my team — or VALIDATION with the setup hint. */
