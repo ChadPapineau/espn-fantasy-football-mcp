@@ -289,11 +289,11 @@ describe("bounds and the P1 layer", () => {
     expect(adds.length).toBe(6);
     expect(moves(out.data.rec.subjects).length).toBeGreaterThan(1);
     // the same plan with no CPU left: the first move only, partial
-    const plan = await out.planner?.({ claims: [], adds, deadline_ms: 0 });
-    expect(plan?.partial).toBe(true);
-    expect(plan?.moves.map((m) => m.player_id)).toEqual([adds[0]?.player_id]);
-    expect(plan?.later_adds).toBe(5);
-    expect(planPartialLine(plan ?? { moves: [] })).toBe(
+    const plan = await out.planner({ claims: [], adds, deadline_ms: 0 });
+    expect(plan.partial).toBe(true);
+    expect(plan.moves.map((m) => m.player_id)).toEqual([adds[0]?.player_id]);
+    expect(plan.later_adds).toBe(5);
+    expect(planPartialLine(plan)).toBe(
       "partial: the plan stops at 1 move before the CPU deadline: call again after making them",
     );
   });
