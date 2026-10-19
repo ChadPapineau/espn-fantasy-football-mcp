@@ -180,7 +180,9 @@ export async function assertSchemaOf(
     warnings.push(`${id}: missing or renamed column(s): ${missingList.map(safeName).join(", ")}`);
   }
   for (const mm of mismatchList) {
-    warnings.push(`${id}: column ${safeName(mm.column)} expected ${mm.expected}, found ${mm.found}`);
+    warnings.push(
+      `${id}: column ${safeName(mm.column)} expected ${mm.expected}, found ${mm.found}`,
+    );
   }
   for (const bc of badCodecs) {
     warnings.push(

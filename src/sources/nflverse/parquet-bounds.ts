@@ -308,7 +308,8 @@ export function assertBoundedFooter(
   // the schema list, element by element: the same node and depth accounting as readElement's LIST
   const schemaList = (fid: number, type: number): boolean => {
     if (fid !== FOOTER_SCHEMA_FIELD || type !== T.LIST) return false;
-    if (++c.nodes > c.maxNodes) throw new ThriftBounds("more thrift elements than a footer may hold");
+    if (++c.nodes > c.maxNodes)
+      throw new ThriftBounds("more thrift elements than a footer may hold");
     const { elem, size } = listHeader(c);
     for (let i = 0; i < size; i++) checkSchemaElement(readElement(c, elem, 1, elem === T.STRUCT));
     return true;

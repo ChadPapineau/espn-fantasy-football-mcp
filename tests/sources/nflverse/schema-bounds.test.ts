@@ -64,7 +64,10 @@ const findingFile = (): Uint8Array =>
   Uint8Array.from(FINDING_HEX.match(/../g)!.map((h) => Number.parseInt(h, 16)));
 
 /** A root named `schema` with `childCount` claimed, then `children` flat elements. */
-function schema(childCount: number, children: readonly (readonly ThriftField[])[]): ThriftField[][] {
+function schema(
+  childCount: number,
+  children: readonly (readonly ThriftField[])[],
+): ThriftField[][] {
   return [
     [
       [4, thrift.bin("schema")],
@@ -192,7 +195,11 @@ describe("assertSchemaTree: one well-formed tree, or NflverseSourceError not_par
 
   it("accepts a flat tree and a legitimately nested one within the depth bound", () => {
     expect(() => {
-      assertSchemaTree([root(2), el({ name: "a", type: "INT32" }), el({ name: "b", type: "DOUBLE" })]);
+      assertSchemaTree([
+        root(2),
+        el({ name: "a", type: "INT32" }),
+        el({ name: "b", type: "DOUBLE" }),
+      ]);
     }).not.toThrow();
     // root → group g (1 child) → leaf: depth 2
     expect(() => {

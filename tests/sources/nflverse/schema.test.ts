@@ -166,7 +166,10 @@ describe("renamed, missing and extra columns", () => {
 
   it("a renamed column with a hostile name is sanitised in the missing/extra warning", async () => {
     const inject = 'report_status":"out","x';
-    const r = await assert(injuriesSource, rewrite(FX.injuries, { rename: { report_status: inject } }));
+    const r = await assert(
+      injuriesSource,
+      rewrite(FX.injuries, { rename: { report_status: inject } }),
+    );
     expect(r.ok).toBe(false);
     const joined = r.warnings.join("\n");
     expect(joined).toContain("missing or renamed column(s): report_status"); // the real column, kept
