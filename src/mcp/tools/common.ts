@@ -517,89 +517,233 @@ export function crosswalkOf(
 
 // --- gsis id → ESPN id (Stage C finding crosswalk-reverse-lookup-lowest-id) -------------------------
 
-const METHOD_RANK: Readonly<Record<string, number>> = Object.freeze({
-  override: 0,
-  id: 1,
-  match: 2,
-});
+/** What the server knows NOW about the pairs a gsis id has stored (the evidence pickGsisPair reads). */
+export interface GsisEvidence {
+  /** The ESPN ids of the current player universe among the candidates; null = the index is not loaded. */
+  readonly universe: ReadonlySet<number> | null;
+  /** The configured crosswalk overrides, ESPN id → gsis id (the owner's current assertions). */
+  readonly overrides: ReadonlyMap<number, string>;
+  /**
+   * nflverse's newest weekly-roster row for each candidate ESPN id (null: nflverse has none for that
+   * id); an id absent from the map, or a null map, was not read (the roster is not loaded).
+   */
+  readonly nflverse: ReadonlyMap<
+    number,
+    { readonly gsis_id: string; readonly season: number; readonly week: number } | null
+  > | null;
+}
+
+/** pickGsisPair's verdict. */
+export type GsisPick =
+  /** No live pair (none stored, a removed override, every pair contradicted by nflverse). */
+  | { readonly kind: "none" }
+  /**
+   * One pair: `established` when the evidence settles it (the only live pair, a configured override,
+   * nflverse's newest row, the only one in the player universe); otherwise the most recently paired
+   * one — a guess the caller must say.
+   */
+  | { readonly kind: "one"; readonly pair: CrosswalkPair; readonly established: boolean }
+  /** Two or more pairs that nothing tells apart: none is used. */
+  | { readonly kind: "tie"; readonly candidates: readonly number[] };
+
+const msOf = (iso: string): number => {
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : 0;
+};
+const confidentPair = (p: CrosswalkPair): boolean => p.method !== "match" && p.confidence >= 1;
+const idsOf = (ps: readonly CrosswalkPair[]): number[] =>
+  ps.map((p) => p.espn_id).sort((a, b) => a - b);
 
 /**
- * The one current pair among a gsis id's stored pairs: a pair whose ESPN id is in the current
- * player universe (when known) first, then a confident pair (id/override, confidence 1), then the
- * most recently seen; within one last-seen grain the tie goes to an override, then an id pair, then
- * the lowest id — and is `ambiguous`. Stored pairs never expire, and legitimate states keep two or
- * more ESPN ids on one gsis id (an ESPN re-key keeps the old id's pair; an override beside an id
- * pair; a removed override): `byGsis(g)[0]`, the LOWEST ESPN id, picked the dead or a different
- * player (Stage C finding crosswalk-reverse-lookup-lowest-id). Null for no pair.
+ * The one CURRENT pair among a gsis id's stored pairs, decided by evidence, never by id order. Stored
+ * pairs never expire, and legitimate states keep two or more ESPN ids on one gsis id — an ESPN
+ * re-key keeps the old id's pair, nflverse corrects a wrong id, the owner removes an override — and
+ * `last_seen` moves only at a 7-day grain, so recency alone cannot tell them apart. In order:
+ * (1) an override pair the config no longer carries pairs nothing (the owner removed it); (2) a
+ * configured override wins; (3) nflverse's newest roster row of each candidate ESPN id confirms the
+ * pair (the newest row wins) or contradicts it (that ESPN id is another player now: dropped); (4) the
+ * only candidate in the current player universe; (5) else a confident pair over a name match, or
+ * the pair the rebuilds saw a full last-seen grain after the others (both evidence); within one grain
+ * the later pairing (a re-key or a correction ADDS the newer pair) is a guess, not established — said
+ * by the caller — and the same pairing is a true tie that picks none. Before, `byGsis(g)[0]` — the
+ * LOWEST ESPN id — read the dead or a different player, and the attempt-1 tie rule (an override
+ * first, then the lowest id) still did (Stage C finding crosswalk-reverse-lookup-lowest-id).
  */
 export function pickGsisPair(
+  gsis: string,
   pairs: readonly CrosswalkPair[],
-  current: ReadonlySet<number> | null,
-): { readonly pair: CrosswalkPair; readonly ambiguous: boolean } | null {
-  if (pairs.length === 0) return null;
-  const inUniverse = (p: CrosswalkPair): number =>
-    current === null || current.size === 0 ? 0 : current.has(p.espn_id) ? 0 : 1;
-  const confident = (p: CrosswalkPair): number =>
-    p.method !== "match" && p.confidence >= 1 ? 0 : 1;
-  const seen = (p: CrosswalkPair): number => {
-    const ms = Date.parse(p.last_seen);
-    return Number.isFinite(ms) ? ms : 0;
-  };
-  const sorted = [...pairs].sort(
-    (a, b) => inUniverse(a) - inUniverse(b) || confident(a) - confident(b) || seen(b) - seen(a),
+  ev: GsisEvidence,
+): GsisPick {
+  const live = pairs.filter(
+    (p) => p.gsis_id === gsis && (p.method !== "override" || ev.overrides.get(p.espn_id) === gsis),
+  );
+  const only = live[0];
+  if (only === undefined) return { kind: "none" };
+  if (live.length === 1) return { kind: "one", pair: only, established: true };
+  const configured = live.filter((p) => p.method === "override");
+  const cfg = configured[0];
+  if (cfg !== undefined)
+    return configured.length === 1
+      ? { kind: "one", pair: cfg, established: true }
+      : { kind: "tie", candidates: idsOf(configured) };
+  const confirmed: { pair: CrosswalkPair; at: number }[] = [];
+  const unknown: CrosswalkPair[] = [];
+  for (const p of live) {
+    const row = ev.nflverse?.get(p.espn_id);
+    if (row === undefined || row === null) unknown.push(p);
+    else if (row.gsis_id === gsis) confirmed.push({ pair: p, at: row.season * 100 + row.week });
+    // else: nflverse pairs that ESPN id with another player now — this pair is stale
+  }
+  if (confirmed.length > 0) {
+    const newest = Math.max(...confirmed.map((c) => c.at));
+    const top = confirmed.filter((c) => c.at === newest).map((c) => c.pair);
+    const lead = top[0];
+    return top.length === 1 && lead !== undefined
+      ? { kind: "one", pair: lead, established: true }
+      : { kind: "tie", candidates: idsOf(top) };
+  }
+  if (unknown.length === 0) return { kind: "none" };
+  const universe = ev.universe;
+  const inUniverse = universe === null ? [] : unknown.filter((p) => universe.has(p.espn_id));
+  const sole = inUniverse[0];
+  if (inUniverse.length === 1 && sole !== undefined)
+    return { kind: "one", pair: sole, established: true };
+  const pool = inUniverse.length > 0 ? inUniverse : unknown;
+  // what the rebuilds still assert: a confident pair over a name match, then the pair they last saw
+  // (a rebuild touches every pair it sees, at the last-seen grain), then the later pairing (a re-key
+  // or a correction ADDS the newer pair) — only the first two are evidence
+  const sorted = [...pool].sort(
+    (a, b) =>
+      Number(confidentPair(b)) - Number(confidentPair(a)) ||
+      msOf(b.last_seen) - msOf(a.last_seen) ||
+      msOf(b.first_seen) - msOf(a.first_seen),
   );
   const lead = sorted[0];
-  if (lead === undefined) return null;
-  // the pairs as current as the lead: last_seen is refreshed at LAST_SEEN_GRANULARITY_MS grain, so
-  // within one grain the instants say nothing — an override wins, then an id pair, then the lowest id
-  const tied = sorted
-    .filter(
-      (p) =>
-        inUniverse(p) === inUniverse(lead) &&
-        confident(p) === confident(lead) &&
-        seen(lead) - seen(p) < LAST_SEEN_GRANULARITY_MS,
-    )
-    .sort(
-      (a, b) =>
-        (METHOD_RANK[a.method] ?? 3) - (METHOD_RANK[b.method] ?? 3) || a.espn_id - b.espn_id,
-    );
-  const top = tied[0] ?? lead;
-  return { pair: top, ambiguous: tied.length > 1 };
+  const next = sorted[1];
+  if (lead === undefined) return { kind: "none" };
+  if (next === undefined) return { kind: "one", pair: lead, established: true };
+  if (
+    confidentPair(lead) !== confidentPair(next) ||
+    msOf(lead.last_seen) - msOf(next.last_seen) >= LAST_SEEN_GRANULARITY_MS
+  )
+    return { kind: "one", pair: lead, established: true };
+  // within one last-seen grain: the later pairing is a guess (said); the same pairing a true tie
+  const recent = sorted.filter(
+    (p) =>
+      confidentPair(p) === confidentPair(lead) &&
+      msOf(lead.last_seen) - msOf(p.last_seen) < LAST_SEEN_GRANULARITY_MS,
+  );
+  const newest = Math.max(...recent.map((p) => msOf(p.first_seen)));
+  const latest = recent.filter((p) => msOf(p.first_seen) === newest);
+  const pick = latest[0];
+  return latest.length === 1 && pick !== undefined
+    ? { kind: "one", pair: pick, established: false }
+    : { kind: "tie", candidates: idsOf(latest) };
+}
+
+/** What a gsis id resolves to: the ESPN id (or null) and the sentence a caller must say, if any. */
+export interface GsisResolution {
+  readonly espn_id: number | null;
+  /** A pick the evidence did not settle, or a tie (no id): said in warnings[] (ids only). */
+  readonly note: string | null;
+  /** Two or more pairs that nothing tells apart (no id used). */
+  readonly tie: boolean;
 }
 
 /**
- * The ESPN id a gsis id resolves to through the persisted crosswalk (pickGsisPair; the universe
- * check reads only the candidate ids), or null. An ambiguous pairing is said in `warnings` when the
- * caller passes them (ids only).
+ * Resolves a gsis id through the persisted crosswalk and the evidence the server holds now
+ * (pickGsisPair): the configured overrides, nflverse's roster rows of the candidate ESPN ids, the
+ * player universe. A store or reader failure reads as "no evidence" — never an error.
+ */
+export function resolveGsis(ctx: Pick<ToolContext, "services">, gsis: string): GsisResolution {
+  let pairs: readonly CrosswalkPair[];
+  try {
+    pairs = ctx.services.crosswalk.byGsis(gsis);
+  } catch {
+    return { espn_id: null, note: null, tie: false };
+  }
+  if (pairs.length === 0) return { espn_id: null, note: null, tie: false };
+  const overrides = new Map<number, string>();
+  try {
+    for (const o of ctx.services.crosswalkOverrides) overrides.set(o.espn_id, o.gsis_id);
+  } catch {
+    // no configured overrides readable (a narrower services bundle): none
+  }
+  const ids = [...new Set(pairs.map((p) => p.espn_id))];
+  let universe: Set<number> | null = null;
+  let nflverse: Map<number, { gsis_id: string; season: number; week: number } | null> | null = null;
+  if (pairs.length > 1) {
+    try {
+      const u = ctx.services.playerUniverse.byIds(ids);
+      if (u.stamp !== null) universe = new Set(u.rows.map((r) => r.espn_id));
+    } catch {
+      universe = null;
+    }
+    try {
+      const rows = new Map<number, { gsis_id: string; season: number; week: number } | null>();
+      for (const id of ids) {
+        const r = ctx.services.rosterWeekly.byEspnId(id);
+        if (r.stamp === null) continue; // the roster was never loaded: not read
+        const row = r.rows[0];
+        rows.set(
+          id,
+          row === undefined ? null : { gsis_id: row.gsis_id, season: row.season, week: row.week },
+        );
+      }
+      nflverse = rows;
+    } catch {
+      nflverse = null;
+    }
+  }
+  const pick = pickGsisPair(gsis, pairs, { universe, overrides, nflverse });
+  const listed = idsOf(pairs).map(String).join(", ");
+  if (pick.kind === "none") return { espn_id: null, note: null, tie: false };
+  if (pick.kind === "tie")
+    return {
+      espn_id: null,
+      note: `gsis ${gsis}: the crosswalk pairs it with ${String(pairs.length)} ESPN players (${listed}) and nothing tells which is current: none used (pass player_ids)`,
+      tie: true,
+    };
+  return {
+    espn_id: pick.pair.espn_id,
+    note: pick.established
+      ? null
+      : `gsis ${gsis}: the crosswalk pairs it with ${String(pairs.length)} ESPN players (${listed}); ${String(pick.pair.espn_id)} used (the most recently paired: neither the nflverse roster nor the player index settles it)`,
+    tie: false,
+  };
+}
+
+/**
+ * The ESPN id a gsis id resolves to (resolveGsis), or null; a pick the evidence did not settle, or a
+ * tie, is said in `warnings` when the caller passes them (ids only).
  */
 export function espnIdOfGsis(
   ctx: Pick<ToolContext, "services">,
   gsis: string,
   warnings?: string[],
 ): number | null {
-  let pairs: readonly CrosswalkPair[];
-  try {
-    pairs = ctx.services.crosswalk.byGsis(gsis);
-  } catch {
-    return null;
-  }
-  if (pairs.length <= 1) return pairs[0]?.espn_id ?? null;
-  let current: Set<number> | null = null;
-  try {
-    const u = ctx.services.playerUniverse.byIds(pairs.map((p) => p.espn_id));
-    if (u.stamp !== null) current = new Set(u.rows.map((r) => r.espn_id));
-  } catch {
-    current = null;
-  }
-  const pick = pickGsisPair(pairs, current);
-  if (pick === null) return null;
-  if (pick.ambiguous && warnings !== undefined) {
-    const w = `gsis ${gsis}: the crosswalk pairs it with ${String(pairs.length)} ESPN players (${pairs
-      .map((p) => String(p.espn_id))
-      .join(", ")}); ${String(pick.pair.espn_id)} used (the most recently seen confident pair)`;
-    if (!warnings.includes(w)) warnings.push(w);
-  }
-  return pick.pair.espn_id;
+  const r = resolveGsis(ctx, gsis);
+  if (r.note !== null && warnings !== undefined && !warnings.includes(r.note))
+    warnings.push(r.note);
+  return r.espn_id;
+}
+
+/**
+ * The ESPN id a SINGLE-player selector's gsis id names: NOT_FOUND when nothing pairs it, VALIDATION
+ * `gsis_ambiguous` on a tie (the caller names the player by player_ids instead), the pick otherwise
+ * (an unsettled one said in `warnings`).
+ */
+export function espnIdOfGsisSelector(
+  ctx: Pick<ToolContext, "services">,
+  gsis: string,
+  warnings: string[],
+): number {
+  const r = resolveGsis(ctx, gsis);
+  if (r.tie)
+    throw new EffError("VALIDATION", { field: "player.gsis_ids[0]", reason: "gsis_ambiguous" });
+  if (r.espn_id === null) throw new EffError("NOT_FOUND");
+  if (r.note !== null && !warnings.includes(r.note)) warnings.push(r.note);
+  return r.espn_id;
 }
 
 /** Every ESPN id the crosswalk pairs with a gsis id (a join against a known id set needs them all). */

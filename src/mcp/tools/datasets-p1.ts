@@ -48,6 +48,7 @@ import { defineTool, roundDeep, type ToolContext } from "../define.js";
 import {
   crosswalkOf,
   espnIdOfGsis,
+  espnIdOfGsisSelector,
   isDegradable,
   isOptionalReadFailure,
   leagueOf,
@@ -357,12 +358,14 @@ async function teamOfPlayer(
   sel: z.output<typeof singlePlayerSelectorSchema>,
   w: Week,
   inputs: InputStamp[],
+  warnings: string[],
 ): Promise<PlatformPlayer> {
   let id: number | undefined;
   if ("player_ids" in sel) id = sel.player_ids[0];
   else {
+    // the gsis id's ONE current pair (a tie is VALIDATION gsis_ambiguous: name him by player_ids)
     const g = sel.gsis_ids[0];
-    id = g === undefined ? undefined : (espnIdOfGsis(ctx, g) ?? undefined);
+    id = g === undefined ? undefined : espnIdOfGsisSelector(ctx, g, warnings);
   }
   if (id === undefined) throw new EffError("NOT_FOUND");
   const got = await ctx.services.platform.getPlayers(
@@ -403,7 +406,7 @@ export const getDepthChart = defineTool({
     const w = weekOf(league, undefined);
     let team: NflTeam | null;
     if (args.player !== undefined) {
-      const p = await teamOfPlayer(ctx, args.player, w, inputs);
+      const p = await teamOfPlayer(ctx, args.player, w, inputs, warnings);
       team = teamOfProTeamId(p.pro_team_id) ?? nflverseTeam(p.pro_team);
       if (team === null)
         throw new EffError("VALIDATION", { field: "player", reason: "no_nfl_team" });
@@ -445,7 +448,7 @@ export const getDepthChart = defineTool({
     >();
     for (const r of rows) {
       const g = asGsisId(r.gsis_id);
-      const pid = r.espn_id ?? (g === null ? null : espnIdOfGsis(ctx, g));
+      const pid = r.espn_id ?? (g === null ? null : espnIdOfGsis(ctx, g, warnings));
       const list = groups.get(r.pos_grp) ?? [];
       list.push({
         pos_abb: r.pos_abb,

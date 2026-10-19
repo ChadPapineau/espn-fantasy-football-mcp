@@ -86,6 +86,7 @@ import {
   canonicalPosition,
   crosswalkOf,
   espnIdOfGsis,
+  espnIdOfGsisSelector,
   espnIdsPairedWith,
   isDegradable,
   leagueRef,
@@ -766,13 +767,15 @@ async function singlePlayer(
   sel: z.output<typeof singlePlayerSelectorSchema>,
   w: Week,
   inputs: InputStamp[],
+  warnings: string[],
   extra: readonly number[] = [],
 ): Promise<{ readonly player: PlatformPlayer; readonly others: readonly PlatformPlayer[] }> {
   let id: number | undefined;
   if ("player_ids" in sel) id = sel.player_ids[0];
   else {
+    // the gsis id's ONE current pair (a tie is VALIDATION gsis_ambiguous: name him by player_ids)
     const g = sel.gsis_ids[0];
-    id = g === undefined ? undefined : (espnIdOfGsis(ctx, g) ?? undefined);
+    id = g === undefined ? undefined : espnIdOfGsisSelector(ctx, g, warnings);
   }
   if (id === undefined) throw new EffError("NOT_FOUND");
   const ids = [id, ...extra.filter((x) => x !== id)].slice(0, 50);
@@ -827,7 +830,14 @@ export const analyzeInjuryCascadeTool = defineTool({
     await turn();
     const teamId0 = index.find((r) => r.espn_id === first)?.pro_team_id ?? 0;
     const room = first === undefined || teamId0 <= 0 ? [] : teamPlayerIds(index, teamId0, first);
-    const { player: inj, others } = await singlePlayer(ctx, args.player, b.w, inputs, room);
+    const { player: inj, others } = await singlePlayer(
+      ctx,
+      args.player,
+      b.w,
+      inputs,
+      warnings,
+      room,
+    );
     if (inj.pro_team_id <= 0)
       throw new EffError("VALIDATION", { field: "player", reason: "no_nfl_team" });
     const teammates = others.filter(
@@ -1412,7 +1422,7 @@ export const analyzeEvidenceTool = defineTool({
     const allowStale = args.allow_stale === true;
     const b = await basicsOf(ctx, inputs, args);
     const season = b.league.ref.season;
-    const { player: p } = await singlePlayer(ctx, args.player, b.w, inputs);
+    const { player: p } = await singlePlayer(ctx, args.player, b.w, inputs, warnings);
     const gsis = crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id;
     const myTeam = b.league.my_team?.team_id ?? null;
     const isMine = p.status === "ONTEAM" && myTeam !== null && p.on_team_id === myTeam;
@@ -1903,10 +1913,13 @@ export function waiverP1Extras(
     inputs.push(ti);
     for (const r of tr.rows) {
       if (r.kind !== "add" || r.gsis_id === null) continue;
-      // every ESPN id paired with the row's gsis id that is a candidate (a re-keyed player keeps
-      // his old id's pair beside the new one — Stage C finding crosswalk-reverse-lookup-lowest-id)
-      for (const id of espnIdsPairedWith(ctx, r.gsis_id))
-        if (byId.has(id)) sleeper.set(id, r.count);
+      // the gsis id's ONE current pair, and only when it is a candidate: a gsis id paired with two
+      // ESPN players (a re-key, a removed override) gave its trend to both — a different player's
+      // among them (Stage C finding crosswalk-reverse-lookup-lowest-id); resolved only for a row
+      // that touches a candidate at all
+      if (!espnIdsPairedWith(ctx, r.gsis_id).some((id) => byId.has(id))) continue;
+      const id = espnIdOfGsis(ctx, r.gsis_id, warnings);
+      if (id !== null && byId.has(id)) sleeper.set(id, r.count);
     }
   }
   // the mechanics the league's own persisted feed has shown (null until a same-run pair exists)
