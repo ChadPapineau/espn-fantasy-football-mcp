@@ -321,6 +321,14 @@ export const REVISION_POINTS = 0.1;
 const DAY_MS = 24 * 3600 * 1000;
 
 /** C3 data (plan 07 C3; EspnProjectionsData). */
+/**
+ * The week key the espn_projection store files a split with no week under (ROS, preseason):
+ * `eff snapshot projections` writes them with `week: null`, kept as week_key −1
+ * (src/store/repos/projection.ts `r.week ?? -1`); `asOf` reads by that key. A round-trip test through
+ * the real store holds the two together.
+ */
+export const SNAPSHOT_NO_WEEK = -1;
+
 export const espnProjectionsSchema = z.strictObject({
   source: z.literal("espn:projection"),
   projections: z
@@ -400,11 +408,16 @@ export const getProjections = defineTool({
       warnings.push("espn:kona_player_info unavailable: the last espn_projection snapshot (stale)");
     }
     const split = args.horizon === "week" ? "weekly" : args.horizon;
+    // the snapshots of this horizon: a weekly split is filed under its week, a ROS or preseason
+    // split (week null) under SNAPSHOT_NO_WEEK — reading ROS rows at week `w` found none, so a ROS
+    // revision never read as revised and the outage fallback served nothing (Stage C finding
+    // projections-ros-snapshots-unread)
+    const snapWeek = args.horizon === "week" ? w : SNAPSHOT_NO_WEEK;
     if (native === null) {
       stale = true;
       const snaps = ctx.services.espnProjections.asOf(
         league.ref.season,
-        w,
+        snapWeek,
         ctx.services.clock.nowIso(),
       );
       const last = ctx.services.espnProjections.lastSnapshotAt();
@@ -430,7 +443,7 @@ export const getProjections = defineTool({
     const before = new Date(ctx.nowMs - DAY_MS).toISOString();
     const prior = new Map<number, number>();
     try {
-      for (const s of ctx.services.espnProjections.asOf(league.ref.season, w, before))
+      for (const s of ctx.services.espnProjections.asOf(league.ref.season, snapWeek, before))
         if (s.split === split) prior.set(s.player_id, s.applied_total);
     } catch {
       // no snapshot history: nothing reads as revised
