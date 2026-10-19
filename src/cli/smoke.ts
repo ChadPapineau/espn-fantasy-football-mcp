@@ -7,8 +7,9 @@
 // as an interactive `server` origin, the cookie only to the read host) and the keyless probes;
 // nothing is written but the cache and limiter rows any read writes. Output is counts and fixed
 // codes only — never a team, member or player name, never an id beyond week numbers. Exit: 0 every
-// check passed (or was skipped for a stated reason); 1 a failed check; 3 ESPN rejected the cookies;
-// 4 drift or a moved host (plan 03 §1.3).
+// check passed (or was skipped for a stated reason); 1 a failed check; 3 credentials not configured
+// or rejected (no cookies stored for a private league, or ESPN refusing them); 4 drift or a moved
+// host (plan 03 §1.3).
 import type { Config } from "../config/schema.js";
 import type { StoreFactory } from "../store/types.js";
 import { buildEspnStack, driftObservations, effCodeOf } from "./espn-stack.js";
@@ -39,9 +40,19 @@ export interface SmokeOptions {
   readonly factory?: StoreFactory;
 }
 
+/** The read codes that mean "credentials not configured or rejected" (plan 03 §1.3 exit 3). */
+export const SMOKE_CREDENTIAL_CODES: readonly string[] = Object.freeze([
+  // ESPN refused the stored cookies
+  "ESPN_AUTH_REJECTED",
+  // none is stored and the league needs them (Stage C finding cli-smoke-exit-not-configured: this
+  // was exit 1, "a failed check" — check-auth and doctor #6 already say 3)
+  "ESPN_REQUIRES_COOKIES",
+]);
+
 /** The exit code of a smoke run (plan 03 §1.3). */
 export function smokeExit(checks: readonly SmokeCheck[], probe: readonly ProbeCheck[]): number {
-  if (checks.some((c) => c.code === "ESPN_AUTH_REJECTED")) return EXIT.credentials;
+  if (checks.some((c) => c.code !== null && SMOKE_CREDENTIAL_CODES.includes(c.code)))
+    return EXIT.credentials;
   const p = probe.length === 0 ? "green" : worstStatus(probe);
   if (p === "red" || p === "host_moved") return EXIT.drift;
   return checks.some((c) => c.status === "fail") ? EXIT.error : EXIT.ok;

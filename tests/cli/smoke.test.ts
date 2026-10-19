@@ -3,7 +3,8 @@
 // answers from the recorded, anonymised league-a fixtures (league id 0, keyless, a public league):
 // settings, one roster, one pool page, the last final week scored per stat against ESPN's applied
 // points, and the keyless probe diff — counts only, exit 0; a scoring mismatch fails (exit 1); a
-// rejected cookie is exit 3; a skeleton answer from the probe is drift (exit 4). No request leaves
+// rejected cookie, or none stored for a private league, is exit 3; a skeleton answer from the probe
+// is drift (exit 4). No request leaves
 // the process.
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -143,7 +144,34 @@ describe("eff smoke (the live smoke, run by the owner)", () => {
     const ok = { check: "settings" as const, status: "ok" as const, detail: "", code: null };
     expect(smokeExit([ok], [])).toBe(0);
     expect(smokeExit([{ ...ok, status: "fail", code: "ESPN_AUTH_REJECTED" }], [])).toBe(3);
+    // Stage C finding cli-smoke-exit-not-configured: no credential stored for a private league is
+    // "credentials not configured" — exit 3, as check-auth and doctor #6 say
+    expect(smokeExit([{ ...ok, status: "fail", code: "ESPN_REQUIRES_COOKIES" }], [])).toBe(3);
     expect(smokeExit([{ ...ok, status: "fail" }], [])).toBe(1);
+    expect(smokeExit([{ ...ok, status: "fail", code: "ESPN_UPSTREAM_UNAVAILABLE" }], [])).toBe(1);
+  });
+
+  it("a private league with no cookies stored: exit 3 (credentials not configured), not 1", async () => {
+    sb = sandbox();
+    const f = fakeFetch((url, init) => {
+      if (url.includes("view=proTeamSchedules_wl"))
+        return jsonRes(rec("season/proTeamSchedules_wl.json"));
+      // a private league answers an anonymous read 401
+      if (url.includes("/leagues/0") && new Headers(init.headers).get("cookie") === null)
+        return jsonRes({ messages: ["private"] }, 401);
+      return new Response(null, { status: 404 });
+    });
+    const io = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock(),
+      env: { ESPN_LEAGUE_ID: "0", EFF_CREDENTIAL_STORE: "file" },
+      packageRoot: fakePackage(sb),
+    });
+    const { config, log } = await loadRuntime(io);
+    const code = await smoke(io, config, log, { json: false, week: undefined });
+    expect(io.out.text).toContain("ESPN_REQUIRES_COOKIES");
+    expect(io.out.text).toContain("smoke: FAILED (exit 3)");
+    expect(code).toBe(3);
   });
 
   it("fixture mode skips the probe (no network); --week is validated", async () => {
