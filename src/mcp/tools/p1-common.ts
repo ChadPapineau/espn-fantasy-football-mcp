@@ -25,6 +25,7 @@ import {
 import type {
   EpWeeklyRow,
   PlayerWeekLine,
+  SeasonReading,
   SeasonScenario,
   SeedingModeArg,
   UsageGameRow,
@@ -287,9 +288,188 @@ export async function runSeason(
     deadline_ms: cpuDeadlineOf(ctx),
   };
   const projections = r.projections ?? null;
-  if (projections !== null && projections.size > 0)
-    return simulateFittedSeason({ ...base, teams, projections });
-  return simulateSeason({ ...base, teams });
+  const sim =
+    projections !== null && projections.size > 0
+      ? await simulateFittedSeason({ ...base, teams, projections })
+      : await simulateSeason({ ...base, teams });
+  // the simulator re-runs the bracket from the seeds: rounds ESPN has already decided are taken
+  // from its results (Stage C finding season-sim-played-playoff-rounds-ignored)
+  return withPlayedBracket(sim, bracketState(r.matchups, r.rules, r.standings), rounds, r.me);
+}
+
+// --- the bracket as played (Stage C finding season-sim-played-playoff-rounds-ignored) --------------
+
+/** Where the winners bracket stands by ESPN's results. */
+export interface BracketState {
+  /** A game of a playoff matchup period has a result. */
+  readonly started: boolean;
+  /**
+   * The winners bracket could be traced: its field is the standings' top `team_count` playoff seeds
+   * (final once the regular season is over — and a playoff result exists only then).
+   */
+  readonly traced: boolean;
+  /** The bracket's teams (empty when not traced). */
+  readonly field: ReadonlySet<number>;
+  /** Leading rounds whose every winners-bracket game is decided. */
+  readonly rounds_done: number;
+  /** Team → the round (0-based) it lost its winners-bracket game in. */
+  readonly lost_in: ReadonlyMap<number, number>;
+}
+
+const decidedWinner = (m: Matchup): "HOME" | "AWAY" | null =>
+  m.winner === "HOME" || m.winner === "AWAY" ? m.winner : null;
+
+/**
+ * The winners bracket as ESPN's results have decided it: from the field (the standings' top
+ * `team_count` seeds), round by round over the playoff matchup periods, a decided game between two
+ * teams still alive is a bracket game and its loser leaves (a consolation game never pairs two of
+ * them). A round counts as done when every bracket game of it is decided; a decided game of the
+ * round in progress still eliminates its loser. Not traced without seeds (no standings read).
+ */
+export function bracketState(
+  matchups: readonly Matchup[],
+  rules: Pick<LeagueRules, "playoffs">,
+  standings: Standings | null,
+): BracketState {
+  const reg = rules.playoffs.regular_season_matchups;
+  const P = rules.playoffs.team_count;
+  const games = matchups.filter((m) => reg !== null && m.matchup_period > reg && m.away !== null);
+  const started = games.some((m) => decidedWinner(m) !== null);
+  const none = {
+    started,
+    traced: false,
+    field: new Set<number>(),
+    rounds_done: 0,
+    lost_in: new Map<number, number>(),
+  };
+  if (!started || P === null || standings === null) return none;
+  const seeded = standings.teams.filter(
+    (t) => t.playoff_seed !== null && t.playoff_seed >= 1 && t.playoff_seed <= P,
+  );
+  if (seeded.length !== P) return none;
+  const field = new Set(seeded.map((t) => t.team_id));
+  const alive = new Set(field);
+  const lostIn = new Map<number, number>();
+  const periods = [...new Set(games.map((m) => m.matchup_period))].sort((a, b) => a - b);
+  let done = 0;
+  for (const [i, period] of periods.entries()) {
+    const bracket = games.filter(
+      (m) =>
+        m.matchup_period === period &&
+        m.away !== null &&
+        alive.has(m.home.team_id) &&
+        alive.has(m.away.team_id),
+    );
+    if (bracket.length === 0) break;
+    for (const g of bracket) {
+      const w = decidedWinner(g);
+      if (w === null || g.away === null) continue;
+      const loser = w === "HOME" ? g.away.team_id : g.home.team_id;
+      alive.delete(loser);
+      lostIn.set(loser, i);
+    }
+    if (!bracket.every((g) => decidedWinner(g) !== null)) break;
+    done = i + 1;
+  }
+  return { started, traced: true, field, rounds_done: done, lost_in: lostIn };
+}
+
+/**
+ * One simulator reading conditioned on the bracket as played, for team `me`: once ESPN has decided a
+ * round, an eliminated team is alive only through the round it lost (P(alive) 0 after it, P(champion)
+ * 0, `clinch.eliminated`); a team still alive is alive (1) through the round in progress, and a later
+ * round is the simulator's chance given that — P(alive at r) / P(alive at the current round) over its
+ * paths, P(champion) likewise; a team that has won every round is the champion. Not traced (no seeds):
+ * P(champion) null, said — the simulator's later rounds re-run the bracket from the seeds.
+ */
+export function conditionedReading(
+  reading: SeasonReading,
+  state: BracketState,
+  rounds: readonly PlayoffRound[],
+  me: number,
+): { readonly reading: SeasonReading; readonly note: string | null } {
+  if (!state.started || rounds.length === 0) return { reading, note: null };
+  if (!state.traced)
+    return {
+      reading: { ...reading, p_champion: null },
+      note: "the playoff bracket has started and its field is unknown (no standings seeds): P(alive) for later rounds re-runs the bracket from the seeds, and P(champion) is not given",
+    };
+  if (!state.field.has(me)) return { reading, note: null };
+  const roundOf = new Map<number, number>();
+  rounds.forEach((r, i) => {
+    for (const w of r.weeks) roundOf.set(w, i);
+  });
+  const lost = state.lost_in.get(me);
+  const firstWeekP = (i: number): number | null => {
+    const w = rounds[i]?.weeks[0];
+    const x = w === undefined ? undefined : reading.p_alive_by_week.find((y) => y.week === w);
+    return x?.p ?? null;
+  };
+  const clamp = (x: number): number => Math.min(1, Math.max(0, Math.round(x * 10_000) / 10_000));
+  if (lost !== undefined)
+    return {
+      reading: {
+        ...reading,
+        p_champion: 0,
+        p_alive_by_week: reading.p_alive_by_week.map((x) => {
+          const ri = roundOf.get(x.week);
+          return ri === undefined ? x : { week: x.week, p: ri <= lost ? 1 : 0 };
+        }),
+        clinch: { ...reading.clinch, eliminated: true },
+      },
+      note: `eliminated in playoff round ${String(lost + 1)} of ${String(rounds.length)} (ESPN's results): P(alive) is 0 from then on and P(champion) 0`,
+    };
+  const cur = state.rounds_done;
+  if (cur >= rounds.length)
+    return {
+      reading: {
+        ...reading,
+        p_champion: 1,
+        p_alive_by_week: reading.p_alive_by_week.map((x) =>
+          roundOf.has(x.week) ? { week: x.week, p: 1 } : x,
+        ),
+      },
+      note: "the playoff bracket is decided (ESPN's results): this team won it",
+    };
+  const base = firstWeekP(cur);
+  if (base === null || base <= 0)
+    return {
+      reading: { ...reading, p_champion: null },
+      note: `alive in playoff round ${String(cur + 1)} of ${String(rounds.length)} (ESPN's results), a path the simulator did not reach: later rounds re-run the bracket from the seeds, and P(champion) is not given`,
+    };
+  return {
+    reading: {
+      ...reading,
+      p_champion: reading.p_champion === null ? null : clamp(reading.p_champion / base),
+      p_alive_by_week: reading.p_alive_by_week.map((x) => {
+        const ri = roundOf.get(x.week);
+        if (ri === undefined) return x;
+        return { week: x.week, p: ri <= cur ? 1 : clamp(x.p / base) };
+      }),
+    },
+    note: `the playoff bracket has started: round ${String(cur + 1)} of ${String(rounds.length)} is this team's next (ESPN's results); later rounds are the simulator's chances given that it is alive now`,
+  };
+}
+
+/** A simulator outcome with every reading conditioned on the bracket as played (said once). */
+export function withPlayedBracket<T extends SeasonSimOutcome>(
+  sim: T,
+  state: BracketState,
+  rounds: readonly PlayoffRound[],
+  me: number,
+): T {
+  if (!state.started) return sim;
+  const notes: string[] = [];
+  const readings = sim.data.readings.map((x) => {
+    const c = conditionedReading(x, state, rounds, me);
+    if (c.note !== null && !notes.includes(c.note)) notes.push(c.note);
+    return c.reading;
+  });
+  return {
+    ...sim,
+    data: { ...sim.data, readings },
+    warnings: [...sim.warnings, ...notes.filter((n) => !sim.warnings.includes(n))],
+  };
 }
 
 /**

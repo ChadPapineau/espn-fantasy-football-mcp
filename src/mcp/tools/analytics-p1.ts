@@ -92,6 +92,7 @@ import {
   basicsOf,
   projectMany,
   required,
+  bracketState,
   runSeason,
   valueWeeks,
   type LeagueBasics,
@@ -988,11 +989,18 @@ export const analyzeScheduleTool = defineTool({
       return null;
     });
     if (mGot !== null) {
+      const matchups = take(ctx, mGot, inputs);
+      // once the bracket has a result, its field is the standings' seeds: the simulator's playoff
+      // weeks are then conditioned on ESPN's results (Stage C finding
+      // season-sim-played-playoff-rounds-ignored) — read only then (the standings cost a request)
+      const standings = bracketState(matchups, b.rules, null).started
+        ? await standingsOrNull(ctx, inputs, warnings)
+        : null;
       const sim = await runSeason(ctx, {
         league: b.league,
         rules: b.rules,
-        matchups: take(ctx, mGot, inputs),
-        standings: null,
+        matchups,
+        standings,
         me: team,
         w: b.w,
         seed,
