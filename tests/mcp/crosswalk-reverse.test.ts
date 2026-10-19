@@ -17,17 +17,16 @@ const pair = (
   method: CrosswalkPair["method"],
   last_seen: string,
   confidence = 1,
-): CrosswalkPair =>
-  ({
-    espn_id,
-    gsis_id: G,
-    method,
-    source:
-      method === "override" ? "overrides" : method === "id" ? "nflverse:roster_weekly" : "matcher",
-    confidence,
-    first_seen: "2026-08-01T00:00:00.000Z",
-    last_seen,
-  });
+): CrosswalkPair => ({
+  espn_id,
+  gsis_id: G,
+  method,
+  source:
+    method === "override" ? "overrides" : method === "id" ? "nflverse:roster_weekly" : "matcher",
+  confidence,
+  first_seen: "2026-08-01T00:00:00.000Z",
+  last_seen,
+});
 
 describe("pickGsisPair (Stage C crosswalk-reverse-lookup-lowest-id)", () => {
   it("a re-key: the new id (seen this week) over the old one, the lowest", () => {

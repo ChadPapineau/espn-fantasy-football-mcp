@@ -51,8 +51,9 @@ beforeAll(async () => {
   const pick = rows.find(
     (r) => r.gsis_id !== null && r.injury_status === "ACTIVE" && r.player_id > 0,
   );
-  if (pick === undefined || pick.gsis_id === null) throw new Error("no ACTIVE crosswalked player");
-  subject = { id: pick.player_id, name: pick.name, gsis: pick.gsis_id };
+  const gsis = pick?.gsis_id ?? null;
+  if (pick === undefined || gsis === null) throw new Error("no ACTIVE crosswalked player");
+  subject = { id: pick.player_id, name: pick.name, gsis };
 }, 180_000);
 afterAll(async () => {
   await close();
@@ -95,11 +96,10 @@ async function evidence(
       player: { player_ids: [subject.id] },
     });
     expect(r.isError, JSON.stringify(r.body).slice(0, 400)).toBe(false);
-    const pending =
-      world.store.repos.scoredClaims
-        ?.pending(world.services.league.league_id, world.services.league.season, 4)
-        .filter((p) => p.player_id === subject.id)
-        .map((p) => `${p.claim.type}:${p.claim.signal}`) ?? [];
+    const pending = world.store.repos.scoredClaims
+      .pending(world.services.league.league_id, world.services.league.season, 4)
+      .filter((p) => p.player_id === subject.id)
+      .map((p) => `${p.claim.type}:${p.claim.signal}`);
     return {
       flag: (r.body.data as { flag: string }).flag,
       claims: pending,

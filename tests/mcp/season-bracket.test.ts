@@ -74,24 +74,23 @@ const game = (
 /** Week 15 as played: seed 6 (team 5) beat seed 3 (team 8); seed 4 (team 7) beat seed 5 (team 6). */
 const WEEK15 = [game(15, 8, 5, "AWAY"), game(15, 7, 6, "HOME"), game(15, 1, 2, "HOME")];
 
-const reading = (alive: Record<number, number>, champion: number | null): SeasonReading =>
-  ({
-    seeding_mode: "espn_rule",
-    p_playoffs: 1,
-    p_bye: 0,
-    p_champion: champion,
-    seed_distribution: [],
-    p_alive_by_week: [
-      { week: 14, p: 1 },
-      ...Object.entries(alive).map(([w, p]) => ({ week: Number(w), p })),
-    ],
-    tiebreak_chain: [],
-    cutoff: { seed_line: 6, wins_gap: 0, pf_gap: 0, pf_rank_needed: null },
-    marginal_values: {} as never,
-    pf_per_win: null,
-    clinch: { clinched: true, eliminated: false, magic_number: null },
-    scenarios_applied: [],
-  });
+const reading = (alive: Record<number, number>, champion: number | null): SeasonReading => ({
+  seeding_mode: "espn_rule",
+  p_playoffs: 1,
+  p_bye: 0,
+  p_champion: champion,
+  seed_distribution: [],
+  p_alive_by_week: [
+    { week: 14, p: 1 },
+    ...Object.entries(alive).map(([w, p]) => ({ week: Number(w), p })),
+  ],
+  tiebreak_chain: [],
+  cutoff: { seed_line: 6, wins_gap: 0, pf_gap: 0, pf_rank_needed: null },
+  marginal_values: {} as never,
+  pf_per_win: null,
+  clinch: { clinched: true, eliminated: false, magic_number: null },
+  scenarios_applied: [],
+});
 
 describe("bracketState (Stage C season-sim-played-playoff-rounds-ignored)", () => {
   it("round 1 decided: its losers out, the consolation game ignored, one round done", () => {

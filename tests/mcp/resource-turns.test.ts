@@ -81,12 +81,15 @@ describe("resource reads take the turn gate (Stage C resources-prompts-bypass-tu
     const turns = turnCounter();
     const built: number[] = [];
     // the prompt text starts by reading the Skill body: that read marks the build's turn
-    const skills = new Proxy({ weekly: "Weekly body." }, {
-      get(t, prop, rec) {
-        if (prop === "weekly") built.push(turns.now());
-        return Reflect.get(t, prop, rec) as unknown;
+    const skills = new Proxy(
+      { weekly: "Weekly body." },
+      {
+        get(t, prop, rec) {
+          if (prop === "weekly") built.push(turns.now());
+          return Reflect.get(t, prop, rec) as unknown;
+        },
       },
-    });
+    );
     const texts = { ...world.options.texts, skills } as ServerTexts;
     const options: McpServerOptions = { ...world.options, texts };
     const handlers = new Map<string, (raw?: unknown) => Promise<unknown>>();
