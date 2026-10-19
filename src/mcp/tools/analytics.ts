@@ -125,7 +125,7 @@ import {
 import { selectPlayers } from "./select.js";
 import { analyzeWaiversP1 } from "../../domain/analytics/phase2.js";
 import { waiverP1Extras } from "./market-p1.js";
-import { projectMany } from "./p1-common.js";
+import { playoffAliveOf, projectMany } from "./p1-common.js";
 import {
   fitPremiumFromHistory,
   seasonFeedFromTransactions,
@@ -1347,7 +1347,9 @@ export const waiversSchema = z.strictObject({
   next_run_at: isoNull,
   last_run_at: isoNull,
   k: count.nullable(),
-  W: count,
+  // the usable weeks after the claim week, playoff weeks weighted by P(alive) under full (plan 07
+  // E5's W bullet, changelog R5-1) — fractional once weighted, an integer at P0
+  W: z.number().min(0).max(BOUNDS.week.max),
   premium: z.number(),
   premium_band: z.strictObject({ low: z.number(), high: z.number() }),
   premium_basis: z.enum(["cold_start_table", "league_fitted"]),
@@ -1416,13 +1418,70 @@ export function waiverPlayerOf(
 /** The K/D-ST positions (plan 07 C5). */
 export const KDST = new Set(["K", "D/ST"]);
 
-/** The pool page E5 reads: one sorted page, filtered to the positions asked. */
+/** The most pool pages one E5 call reads (plan 07 E5 "Data: C2 (≤ 3 pages)"). */
+export const E5_POOL_PAGES = 3;
+/** One position's page: its best 25 available players by ESPN's rest-of-season projection. */
+export const E5_POSITION_PAGE = 25;
+
+/** The order positions are paged in (and interleaved) when no flex slot names the market. */
+const MARKET_ORDER = ["RB", "WR", "TE", "QB"];
+const marketRank = (p: string): number => {
+  const i = MARKET_ORDER.indexOf(p);
+  return i === -1 ? MARKET_ORDER.length : i;
+};
+
+/**
+ * E5's default market when the call names neither positions nor candidates: the league's widest
+ * flex slot (FLEX → RB, WR, TE; OP → QB too) read as ONE page — ESPN's pool filter takes the slot,
+ * so the flex market costs the single request the old all-position page cost — else, in a league
+ * with no flex slot, its starting positions other than K and D/ST (stream-kdef names those), one
+ * page each, at most E5_POOL_PAGES of them.
+ */
+export function defaultWaiverMarket(slots: Pick<RosterSlots, "slots">): {
+  readonly slot: string | null;
+  readonly positions: readonly string[];
+} {
+  let widest: RosterSlots["slots"][number] | null = null;
+  for (const s of slots.slots)
+    if (
+      s.class === "flex" &&
+      s.count > 0 &&
+      s.name !== "" &&
+      (widest === null || s.eligible_positions.length > widest.eligible_positions.length)
+    )
+      widest = s;
+  if (widest !== null) return { slot: widest.name, positions: widest.eligible_positions };
+  const starters = new Set<string>();
+  for (const s of slots.slots)
+    if (s.class === "starter" && s.count > 0)
+      for (const p of s.eligible_positions) if (!KDST.has(p)) starters.add(p);
+  return {
+    slot: null,
+    positions: [...starters]
+      .sort((a, b) => marketRank(a) - marketRank(b) || (a < b ? -1 : a > b ? 1 : 0))
+      .slice(0, E5_POOL_PAGES),
+  };
+}
+
+/**
+ * The players E5 prices. Named `candidates` are read by id. With no positions, the default market
+ * (defaultWaiverMarket: the flex slot's page, said in a warning); with ≤ E5_POOL_PAGES positions,
+ * one page per position — each its best E5_POSITION_PAGE available players by ESPN's rest-of-season
+ * projection — interleaved so every position enters the engine's 25; with more, one page of every
+ * position filtered to them (said). Before, the default call read ONE 50-row page of EVERY
+ * position, which ESPN's ROS totals fill with backup QBs, kickers and D/STs (fx-10h: 25 TQB and 7 QB
+ * in it), so the waivers and weekly Skills' main call never priced the RB/WR targets they had just
+ * surfaced (Stage C finding skills-waivers-default-pool-wrong-market). A page after the first that
+ * the call's budget stops leaves the partial line.
+ */
 export async function candidatePool(
   ctx: ToolContext,
   w: Week,
   positions: readonly string[] | undefined,
   ids: readonly number[] | undefined,
   inputs: InputStamp[],
+  slots: Pick<RosterSlots, "slots">,
+  warnings: string[],
 ): Promise<PlatformPlayer[]> {
   if (ids !== undefined) {
     const got = await ctx.services.platform.getPlayers(
@@ -1433,20 +1492,56 @@ export async function candidatePool(
     );
     return [...take(ctx, got, inputs)];
   }
-  const single = positions?.length === 1 ? (positions[0] ?? null) : null;
-  const got = await ctx.services.platform.listPlayers(
-    leagueRef(ctx),
-    { status: "AVAILABLE", position: single, sort: "projection_ros", week: w, injured: null },
-    { limit: single === null ? 50 : 25, offset: 0 },
-    readOpts(ctx),
-  );
-  const items = take(ctx, got, inputs).items;
-  return positions === undefined
-    ? [...items]
-    : items.filter(
-        (p) =>
-          positions.includes(p.position) || p.eligible_slots.some((s) => positions.includes(s)),
-      );
+  const page = async (position: string | null, limit: number) => {
+    const got = await ctx.services.platform.listPlayers(
+      leagueRef(ctx),
+      { status: "AVAILABLE", position, sort: "projection_ros", week: w, injured: null },
+      { limit, offset: 0 },
+      readOpts(ctx),
+    );
+    return take(ctx, got, inputs).items;
+  };
+  const market = positions === undefined ? defaultWaiverMarket(slots) : { slot: null, positions };
+  const wanted = market.positions;
+  const fits = (p: PlatformPlayer): boolean =>
+    wanted.includes(p.position) || p.eligible_slots.some((x) => wanted.includes(x));
+  if (market.slot !== null) {
+    warnings.push(
+      `pool: the ${market.slot} market (${wanted.join(", ")}) — one page by ESPN's rest-of-season projection; pass positions for QB, K or D/ST`,
+    );
+    return (await page(market.slot, 50)).filter(fits);
+  }
+  if (wanted.length === 0) return [...(await page(null, 50))];
+  if (wanted.length > E5_POOL_PAGES) {
+    warnings.push(
+      `${String(wanted.length)} positions asked: one page of every position by ESPN's rest-of-season projection, filtered to them (pass at most ${String(E5_POOL_PAGES)} positions for a page each)`,
+    );
+    return (await page(null, 50)).filter(fits);
+  }
+  if (positions === undefined)
+    warnings.push(
+      `pool: ${wanted.join(", ")} — one page each by ESPN's rest-of-season projection (pass positions for K or D/ST)`,
+    );
+  const pages: PlatformPlayer[][] = [];
+  for (const [i, pos] of wanted.entries()) {
+    // the first page is the call's market; a later one the budget stops leaves the partial line
+    const got =
+      i === 0
+        ? await page(pos, E5_POSITION_PAGE)
+        : await withinBudget(() => page(pos, E5_POSITION_PAGE), warnings);
+    if (got !== null) pages.push(got.filter(fits));
+  }
+  const out: PlatformPlayer[] = [];
+  const seen = new Set<number>();
+  for (let r = 0; pages.some((pg) => r < pg.length); r++)
+    for (const pg of pages) {
+      const p = pg[r];
+      if (p !== undefined && !seen.has(p.ref.id)) {
+        seen.add(p.ref.id);
+        out.push(p);
+      }
+    }
+  return out;
 }
 
 /** The regular season's last scoring period from the rules (null when unknown). */
@@ -1692,7 +1787,15 @@ export const analyzeWaiversTool = defineTool({
     const rosters = await rostersOf(ctx, w, inputs, warnings, args, team);
     const mine: Roster | undefined = rosters.find((r) => r.team.team_id === team);
     if (mine === undefined) throw new EffError("NOT_FOUND");
-    const pool = await candidatePool(ctx, w, args.positions, args.candidates, inputs);
+    const pool = await candidatePool(
+      ctx,
+      w,
+      args.positions,
+      args.candidates,
+      inputs,
+      slots,
+      warnings,
+    );
     const stGot = await withinBudget(
       () => ctx.services.platform.getStandings(leagueRef(ctx), readOpts(ctx)),
       warnings,
@@ -1786,9 +1889,34 @@ export const analyzeWaiversTool = defineTool({
     // would hand it to its transaction prepare step (plan 07 §3.F F3–F4). No claim is ever sent here.
     // P1 (EFF_TOOLSET=full): E1 values (`ensemble`), usage signals, rival rosters, Sleeper's
     // secondary trend, the learned mechanics and FAAB bidding (plan 07 E5 P1; plan 10 B3, B4)
+    // under full, playoff weeks are weighted by P(alive) from E3's season simulator under the
+    // reading in use — W and every candidate's playoff-week value (plan 07 E5's W bullet; changelog
+    // R5-1); weight 1 stays the P0 path's, said in its assumption. Before, full never passed it and
+    // served W 12 / Π 26.95 where P(alive) 0.775 / 0.58 / 0.233 gives W 10.6 / Π 23.4 (Stage C finding
+    // waivers-playoff-weeks-unweighted-full)
+    const sims = { partial: false };
     const out = !p1
       ? await analyzeWaivers(p0Request)
       : await (async () => {
+          const alive = await playoffAliveOf(
+            ctx,
+            {
+              league,
+              rules,
+              team,
+              w,
+              standings,
+              seed: seedOf(ctx, undefined, ["e5alive", league.ref.season, w, team].join("|")),
+              args,
+            },
+            inputs,
+            warnings,
+          );
+          sims.partial = alive.partial;
+          if (alive.alive === null && weeks.some((x) => rules.playoffs.playoff_weeks.includes(x)))
+            warnings.push(
+              "season simulation unavailable: playoff weeks weighted 1 (P(alive) unknown)",
+            );
           const ensemble = args.value_source !== "espn_ros";
           let mineV = minePlayers;
           let candV = candidates;
@@ -1835,6 +1963,7 @@ export const analyzeWaiversTool = defineTool({
           );
           return analyzeWaiversP1({
             ...p0Request,
+            ...(alive.alive === null ? {} : { alive_by_week: alive.alive }),
             mine: mineV,
             candidates: candV,
             value_basis: ensemble ? "ensemble" : "espn_ros",
@@ -1866,7 +1995,8 @@ export const analyzeWaiversTool = defineTool({
       inputs,
       warnings: [...warnings, ...out.warnings],
       estimate: true,
-      partial: out.partial === true || warnings.some((x) => x.startsWith("partial:")),
+      partial:
+        out.partial === true || sims.partial || warnings.some((x) => x.startsWith("partial:")),
       listKey: "candidates",
       trims: waiverTrims(data.candidates.length),
       week: w,

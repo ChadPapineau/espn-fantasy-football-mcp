@@ -49,15 +49,26 @@ import { BOUNDS } from "../bounds.js";
 import type { InputStamp } from "../envelope.js";
 import { fromBudgetSignal } from "../errors.js";
 import type { ToolContext } from "../define.js";
-import { cpuDeadlineOf, project, standingsFromMatchups, type Subject } from "./analytics.js";
 import {
+  carryOutcome,
+  cpuDeadlineOf,
+  project,
+  standingsFromMatchups,
+  type Subject,
+} from "./analytics.js";
+import {
+  isDegradable,
   leagueOf,
+  leagueRef,
   optionalDataset,
+  readOpts,
   rosOptsOf,
   rulesOf,
   settingsOf,
   slotsOf,
+  take,
   weekOf,
+  withinBudget,
   type RosReading,
 } from "./common.js";
 import { V2_BULK_SIMS } from "./projection-v2.js";
@@ -253,6 +264,56 @@ export async function runSeason(
   if (projections !== null && projections.size > 0)
     return simulateFittedSeason({ ...base, teams, projections });
   return simulateSeason({ ...base, teams });
+}
+
+/**
+ * P(`team` alive) by playoff week from the seeding simulator under the configured reading (E3
+ * `season`, through the playoffs) — the weights E5's W and playoff-week values, E6's Δ and E8's
+ * importance take (plan 07 E5's W bullet, changelog R5-1; research 05 §1.2). Null when the schedule
+ * cannot be read or the league has no bracket (the engine then weights 1 and says so). A
+ * deadline-stopped run's warning reaches `warnings` and `partial` is true.
+ */
+export async function playoffAliveOf(
+  ctx: ToolContext,
+  o: {
+    readonly league: League;
+    readonly rules: LeagueRules;
+    readonly team: number;
+    readonly w: Week;
+    readonly standings: Standings | null;
+    readonly seed: number;
+    readonly args?: { readonly allow_stale?: boolean | undefined };
+  },
+  inputs: InputStamp[],
+  warnings: string[],
+): Promise<{ readonly alive: Readonly<Record<string, number>> | null; readonly partial: boolean }> {
+  const mGot = await withinBudget(
+    () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, o.args ?? {})),
+    warnings,
+  ).catch((e: unknown) => {
+    if (!isDegradable(e)) throw e;
+    return null;
+  });
+  if (mGot === null) return { alive: null, partial: false };
+  const sim = await runSeason(ctx, {
+    league: o.league,
+    rules: o.rules,
+    matchups: take(ctx, mGot, inputs),
+    standings: o.standings,
+    me: o.team,
+    w: o.w,
+    seed: o.seed,
+    seeding_mode: ctx.services.seedingMode,
+    n_sims: BOUNDS.nSims.default,
+    marginal: false,
+    through_playoffs: true,
+  });
+  const partial = carryOutcome(sim, warnings);
+  const playoff = new Set(o.rules.playoffs.playoff_weeks);
+  const alive: Record<string, number> = {};
+  for (const x of sim?.data.readings[0]?.p_alive_by_week ?? [])
+    if (playoff.has(x.week)) alive[String(x.week)] = x.p;
+  return { alive: Object.keys(alive).length === 0 ? null : alive, partial };
 }
 
 // --- NFL team spellings ----------------------------------------------------------------------------
