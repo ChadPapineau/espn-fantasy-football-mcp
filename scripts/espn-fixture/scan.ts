@@ -3,7 +3,7 @@
 // deny-list (EFF_SCAN_DENYLIST or the default file) the commit hook uses — BEFORE it is written into
 // the repo. Fails closed: a scanner error is a refusal, never "clean".
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { REPO_ROOT } from "./http.js";
@@ -16,17 +16,37 @@ export interface ScanResult {
   error?: string;
 }
 
-/** Scans `text` as if it were the file `label` (the label is only used in the report). */
+/**
+ * `label` when it is a relative path the temp dir can hold as written — no empty, `.` or `..`
+ * segment, no control character or backslash, bounded — else null (the scan uses a fixed name).
+ */
+function relativeName(label: string): string | null {
+  const ok =
+    label.length > 0 &&
+    label.length <= 1024 &&
+    !/[\u0000-\u001f\u007f\\]/.test(label) &&
+    label.split("/").every((s) => s.length > 0 && s.length <= 255 && !/^\.{1,2}$/.test(s));
+  return ok ? label : null;
+}
+
+/**
+ * Scans `text` as if it were the file `label`. The scanner reads it under that name, relative to
+ * its working directory (a private temp dir): its path rules (scan-secrets.mjs pathFindings) run
+ * over the capture's own name as the commit gate will, never over the temp directory's absolute
+ * path — which may sit under a home directory and would be a home-path finding in every file.
+ */
 export function scanWithRepoScanner(text: string, label: string, root = REPO_ROOT): ScanResult {
   const dir = mkdtempSync(path.join(tmpdir(), "eff-scrub-scan-"));
-  const file = path.join(dir, "body.json");
+  const rel = relativeName(label) ?? "body.json";
+  const file = path.join(dir, rel);
   try {
+    mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     writeFileSync(file, text, { mode: 0o600 });
     const r = spawnSync(
       process.execPath,
-      [path.join(root, "scripts", "dev", "scan-secrets.mjs"), "--", file],
+      [path.join(root, "scripts", "dev", "scan-secrets.mjs"), "--", rel],
       {
-        cwd: root,
+        cwd: dir,
         encoding: "utf8",
         env: process.env,
         timeout: 120_000,
@@ -37,7 +57,7 @@ export function scanWithRepoScanner(text: string, label: string, root = REPO_ROO
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean)
-      .map((l) => l.split(file).join(label));
+      .map((l) => l.split(rel).join(label));
     if (r.status === 0) return { clean: true, findings: [] };
     if (r.status === 1)
       return { clean: false, findings: lines.filter((l) => !l.startsWith("scan-secrets:")) };

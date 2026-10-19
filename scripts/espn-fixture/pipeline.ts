@@ -16,7 +16,6 @@ import {
   canonicalize,
   contentSha256,
   emptyObject,
-  formatPath,
   isObject,
   parseJsonStrict,
   setOwn,
@@ -24,7 +23,7 @@ import {
   type JsonObject,
 } from "./canonical.js";
 import { formatJson } from "./format-json.js";
-import { pathsAtLines, segmentsAtLines, type Seg } from "./json-lines.js";
+import { pathsAtLines } from "./json-lines.js";
 import {
   READ_HOST,
   communicationUrl,
@@ -562,19 +561,21 @@ export interface ManifestEntry {
     id_range?: { first: number; last: number } | null;
   } | null;
   /**
-   * Units removed because a line of theirs matched the local repo deny-list (scan-secrets.mjs): JSON
-   * paths into the scrubbed body as it stood before the removal. Never a value.
+   * Units an EARLIER run removed because a line of theirs matched the local repo deny-list: JSON
+   * paths into the scrubbed body as it stood before the removal, never a value. Always empty from
+   * Stage C on: a deny-list match aborts the run instead (DENY_LIST_GATE) — it is never withheld.
    */
   withheld: string[];
   /**
-   * Player-name leaves REPLACED (`Player <id>`) instead of withholding their whole unit, because the
-   * only deny-list match in the unit was that public name (CAT-12). JSON paths; never a value.
+   * Player-name leaves an EARLIER run replaced by `Player <id>` for a deny-list match (CAT-12).
+   * Always empty from Stage C on, for the same reason as `withheld`.
    */
   replaced: string[];
   /**
-   * What the withheld units leave missing, value-free (CAT-12): the teams whose roster lost an
-   * entry or whose matchup row was removed, and how many matchup rows are gone — so fixture-mode
-   * tests never treat an artificial hole as a real empty slot or a missing game. null = complete.
+   * What an earlier run's withheld units leave missing, value-free (CAT-12): the teams whose roster
+   * lost an entry or whose matchup row was removed, and how many matchup rows are gone — so
+   * fixture-mode tests never treat an artificial hole as a real empty slot or a missing game.
+   * null = complete (always, for a run from Stage C on).
    */
   incomplete: Incomplete | null;
   stats_official: boolean | null;
@@ -624,7 +625,7 @@ export interface FixtureManifest {
   scrub_rules_version: number;
   leagues: Record<string, { format: LeagueFormat; final_boxscore_weeks: number[] }>;
   files: ManifestEntry[];
-  /** Captures withheld whole (a deny-list match that no unit removal could clear). */
+  /** Captures an earlier run withheld whole for a deny-list match; always empty from Stage C on. */
   withheld_files: string[];
   /** Hand-written error bodies (never evidence), under `synthetic/`. */
   synthetic_files?: SyntheticEntry[];
@@ -645,121 +646,35 @@ export interface ScrubRunOptions {
   maxBytes?: number;
   /** The hand-written error bodies to write under `synthetic/` (tests); defaults to SYNTHETIC_ERRORS. */
   synthetic?: readonly SyntheticError[];
-  /**
-   * When the repo scanner's ONLY findings are local deny-list matches, remove the smallest
-   * self-contained unit holding each matched line (withholdUnit) instead of refusing the run; the
-   * file is re-scanned and must then be clean. Any other finding still refuses the run.
-   */
-  withholdDenylisted?: boolean;
 }
 
 const DENY_PREFIX = "deny-list match in ";
 
 /**
- * The smallest self-contained unit holding a deny-listed line: a whole matchup row in a box score
- * (the golden's unit — never a partial row), else the roster entry, else a top-level element, else
- * (season body) the pro team's non-schedule property or the one game. null: withhold the file.
+ * Why a deny-list match aborts the run and is never withheld (plan 05 §3.1 step 2: "refuses to write
+ * unless its deny-list check passes", "abort with the path"; plan 02 §8 threat #13; CLAUDE.md: never
+ * the probe leagues' ids). The scrub has already replaced every league-private string, so a match in
+ * a scrubbed capture is public ESPN data that coincides with a private term — a D/ST's or a player's
+ * id equal to a deny-listed league id, a player named like a deny-listed member. Removing or
+ * relabelling that unit cannot hide the term: the committed files, the manifest's paths and ESPN's
+ * own public data show which public unit is missing (a players_wl row in id order, the one pro
+ * team's emptied teamPlayersByPosition, a gap no other file has), so the gap itself publishes it
+ * (Stage C finding fixtures-withheld-unit-discloses-term). The deny-list is therefore a gate, never
+ * a filter: whatever it holds, a run writes the same bytes or nothing. Local output only.
  */
-export function withholdUnit(
-  view: string,
-  segs: readonly Seg[],
-): { segs: Seg[]; action: "omit" | "empty" } | null {
-  if (view === "mBoxscore") {
-    return segs[0] === "schedule" && typeof segs[1] === "number"
-      ? { segs: segs.slice(0, 2), action: "omit" }
-      : null;
-  }
-  // a root-array body (players_wl): the one player row
-  if (typeof segs[0] === "number") return { segs: segs.slice(0, 1), action: "omit" };
-  for (let k = segs.length - 2; k >= 0; k--)
-    if (segs[k] === "entries" && typeof segs[k + 1] === "number")
-      return { segs: segs.slice(0, k + 2), action: "omit" };
-  if (["teams", "schedule", "players"].includes(String(segs[0])) && typeof segs[1] === "number")
-    return { segs: segs.slice(0, 2), action: "omit" };
-  if (
-    segs[0] === "settings" &&
-    segs[1] === "proTeams" &&
-    typeof segs[2] === "number" &&
-    typeof segs[3] === "string"
-  ) {
-    if (segs[3] === "proGamesByScoringPeriod")
-      return typeof segs[4] === "string" && typeof segs[5] === "number"
-        ? { segs: segs.slice(0, 6), action: "omit" }
-        : null;
-    if (["id", "abbrev", "byeWeek", "location", "name"].includes(segs[3])) return null;
-    return { segs: segs.slice(0, 4), action: "empty" };
-  }
-  return null;
-}
+export const DENY_LIST_GATE =
+  "a deny-list match is never withheld or replaced: the term coincides with public ESPN data (an id or a name), and the gap that hid it would show which public unit it is — nothing was written; resolve the coincidence (the deny-list term or the recorded league — the owner's decision), then re-run";
 
-/** Player-name keys whose value may be replaced instead of withholding the unit (CAT-12). */
-export const REPLACEABLE_NAME_KEYS = new Set(["fullName", "firstName", "lastName"]);
-
-/**
- * When the deny-listed line is a public player's NAME leaf (`…player.fullName|firstName|lastName`)
- * inside a body we can address, the leaf is replaced by `Player <id>` (the public ESPN id) instead
- * of removing the whole unit — the stats, slot and scoring fields stay (CAT-12). Returns null
- * when the leaf is anything else (the caller withholds the unit).
- */
-export function replaceableNameLeaf(
-  body: Json,
-  segs: readonly Seg[],
-): { segs: Seg[]; action: "replace"; value: string } | null {
-  const last = segs[segs.length - 1];
-  if (typeof last !== "string" || !REPLACEABLE_NAME_KEYS.has(last)) return null;
-  if (segs[segs.length - 2] !== "player") return null;
-  let cur: Json = body;
-  for (const s of segs.slice(0, -1)) {
-    if (typeof s === "number" ? !Array.isArray(cur) : !isObject(cur)) return null;
-    cur = (cur as Record<string, Json>)[s as never] ?? null;
-  }
-  if (!isObject(cur) || typeof cur[last] !== "string") return null;
-  const id = cur.id;
-  if (typeof id !== "number" || !Number.isSafeInteger(id)) return null;
-  return { segs: [...segs], action: "replace", value: `Player ${String(id)}` };
-}
-
-/**
- * The name leaves a deny-listed LINE may be cleared by (CAT-12): the leaf itself when the line is a
- * player-name leaf (replaceableNameLeaf); else, when the line is a whole player object printed on
- * one line — a players_wl row (`$[n]`) or a `…player` object — every name leaf of it that is not
- * already its placeholder. Empty: nothing replaceable (the caller withholds the unit).
- */
-export function replaceableNameLeaves(
-  body: Json,
-  segs: readonly Seg[],
-): { segs: Seg[]; action: "replace"; value: string }[] {
-  const one = replaceableNameLeaf(body, segs);
-  if (one) return [one];
-  const isPlayerObject =
-    (segs.length === 1 && typeof segs[0] === "number") ||
-    (segs.length > 0 && segs[segs.length - 1] === "player");
-  if (!isPlayerObject) return [];
-  const obj = leafAt(body, segs);
-  if (!isObject(obj) || typeof obj.id !== "number" || !Number.isSafeInteger(obj.id)) return [];
-  const value = `Player ${String(obj.id)}`;
-  return [...REPLACEABLE_NAME_KEYS]
-    .sort()
-    .filter((k) => typeof obj[k] === "string" && obj[k] !== value)
-    .map((k) => ({ segs: [...segs, k], action: "replace" as const, value }));
-}
-
-/** The value at `segs` in `body`, or undefined when the path does not resolve. */
-export function leafAt(body: Json, segs: readonly Seg[]): Json | undefined {
-  let cur: Json | undefined = body;
-  for (const s of segs) {
-    if (typeof s === "number") cur = Array.isArray(cur) ? cur[s] : undefined;
-    else cur = isObject(cur) && Object.prototype.hasOwnProperty.call(cur, s) ? cur[s] : undefined;
-    if (cur === undefined) return undefined;
-  }
-  return cur;
-}
+/** The refusal of the removed `--withhold-denylisted` option (exit 2): the reason, never a value. */
+export const WITHHOLD_REMOVED =
+  "--withhold-denylisted was removed: withholding a unit for a deny-list match publishes the term (the gap shows which public unit is missing), so a deny-list match now aborts the run (plan 05 §3.1 step 2)";
 
 /**
  * The value-free incompleteness a set of withheld units leaves in a COMMITTED (post-withhold)
- * body (CAT-12): `teams[i].roster.entries[j]` → teams[i].id; `schedule[k].<side>.….entries[j]` →
- * that side's teamId; a whole `schedule[k]` row (box scores) → every team of `teams[]` no
- * remaining row names, and one missing matchup per removed row. null when nothing was withheld.
+ * body (CAT-12) — the reader of what earlier runs committed; no run withholds any more:
+ * `teams[i].roster.entries[j]` → teams[i].id; `schedule[k].<side>.….entries[j]` → that side's
+ * teamId; a whole `schedule[k]` row (box scores) → every team of `teams[]` no remaining row
+ * names, and one missing matchup per removed row. null when nothing was withheld.
  */
 export function deriveIncomplete(body: Json, withheld: readonly string[]): Incomplete | null {
   if (!withheld.length) return null;
@@ -805,40 +720,6 @@ export function deriveIncomplete(body: Json, withheld: readonly string[]): Incom
     matchups_missing: matchupsMissing,
     ...(rowsMissing > 0 ? { rows_missing: rowsMissing } : {}),
   };
-}
-
-/** Removes (omit), empties or replaces (a string leaf) the given units; applied together. */
-export function applyUnits(
-  body: Json,
-  units: readonly (
-    { segs: Seg[]; action: "omit" | "empty" } | { segs: Seg[]; action: "replace"; value: string }
-  )[],
-): Json {
-  const key = (segs: readonly Seg[]) => JSON.stringify(segs);
-  const omit = new Set(units.filter((u) => u.action === "omit").map((u) => key(u.segs)));
-  const empty = new Set(units.filter((u) => u.action === "empty").map((u) => key(u.segs)));
-  const replace = new Map(
-    units.flatMap((u) => (u.action === "replace" ? [[key(u.segs), u.value] as const] : [])),
-  );
-  const walk = (v: Json, segs: Seg[]): Json => {
-    const r = replace.get(key(segs));
-    if (r !== undefined && typeof v === "string") return r;
-    if (empty.has(key(segs))) return Array.isArray(v) ? [] : isObject(v) ? emptyObject() : null;
-    if (Array.isArray(v)) {
-      const out: Json[] = [];
-      v.forEach((el, i) => {
-        if (!omit.has(key([...segs, i]))) out.push(walk(el, [...segs, i]));
-      });
-      return out;
-    }
-    if (isObject(v)) {
-      const out = emptyObject();
-      for (const k of Object.keys(v)) setOwn(out, k, walk(v[k] as Json, [...segs, k]));
-      return out;
-    }
-    return v;
-  };
-  return walk(body, []);
 }
 
 export interface ScrubRunResult {
@@ -1025,112 +906,43 @@ export interface PendingCapture {
 export interface FreezeOptions {
   scan: (text: string, label: string) => { clean: boolean; findings: string[]; error?: string };
   maxBytes: number;
-  withholdDenylisted: boolean;
   log: (s: string) => void;
   /** The verification context of a slot: its own GUID map, the run's union of names and ids. */
   verifyCtxOf: (slot: string) => LeagueScrubContext;
-  /**
-   * The unit a deny-listed line withholds (default withholdUnit: a box score's whole matchup row,
-   * the golden's unit). history.ts passes historyWithholdUnit (the roster entry first).
-   */
-  unitOf?: (view: string, segs: readonly Seg[]) => { segs: Seg[]; action: "omit" | "empty" } | null;
 }
 
 export interface FreezeResult {
   entries: ManifestEntry[];
   outputs: { rel: string; text: string }[];
   problems: string[];
-  withheldFiles: string[];
 }
 
 /**
  * The freeze half of a scrub run (plan 05 §3.1 steps 2–4): per capture, the in-process verification,
- * the repo scanner with its local deny-list (deny-list-only findings withhold their units when
- * allowed, then re-scan), the lossless split past the size cap, the scoring-projection identity and
- * the manifest entry with its provenance hashes. Writes nothing: the caller writes only when
- * `problems` is empty (an abort leaves the repo untouched).
+ * the lossless split past the size cap, the scoring-projection identity, the repo scanner with its
+ * local deny-list over exactly the text each file will hold (any finding — a deny-list match
+ * included — is a problem: DENY_LIST_GATE) and the manifest entry with its provenance hashes. Writes
+ * nothing: the caller writes only when `problems` is empty (an abort leaves the repo untouched).
  */
 export async function freezeCaptures(
   pending: readonly PendingCapture[],
   opts: FreezeOptions,
 ): Promise<FreezeResult> {
   const { scan, maxBytes, log } = opts;
-  const unitOf = opts.unitOf ?? withholdUnit;
   const outputs: { rel: string; text: string }[] = [];
   const entries: ManifestEntry[] = [];
   const problems: string[] = [];
-  const withheldFiles: string[] = [];
+  let gateNoted = false;
   for (const p of pending) {
     const { env, base, season } = p;
     const verifyCtx = opts.verifyCtxOf(env.slot);
     for (const v of verifyScrubbed(p.scrubbed, env.kind, verifyCtx))
       problems.push(`${base}.json: ${v.rule} at ${v.path}`);
 
-    // the repo scanner (with its local deny-list) over the whole body first; with
-    // withholdDenylisted, deny-list-only findings remove their units and the body is re-scanned
-    let body = p.scrubbed;
-    let rawBody = p.rawCanonical;
-    let whole = await formatJson(body, "recorded");
-    const withheld: string[] = [];
-    const replaced: string[] = [];
-    let withholdFile = false;
-    for (let round = 0; round < 3; round++) {
-      const r = scan(whole, `${base}.json`);
-      if (r.clean) break;
-      const others = r.findings.filter((f) => !f.startsWith(DENY_PREFIX));
-      if (r.error || others.length || !opts.withholdDenylisted || round === 2) {
-        problems.push(`${base}.json: the repo scanner refused it${r.error ? ` (${r.error})` : ""}`);
-        for (const f of annotateFindings(r.findings.slice(0, 40), whole)) problems.push(`  ${f}`);
-        break;
-      }
-      const lines = r.findings
-        .map((f) => /:(\d+)$/.exec(f)?.[1])
-        .filter((x): x is string => x !== undefined)
-        .map(Number);
-      const units: (
-        | { segs: Seg[]; action: "omit" | "empty" }
-        | { segs: Seg[]; action: "replace"; value: string }
-      )[] = [];
-      for (const segs of segmentsAtLines(whole, lines).values()) {
-        // a public player's name leaf (or the name leaves of a player printed on one line) is
-        // replaced, never the whole unit (CAT-12) — unless the placeholder would read the same,
-        // or a replacement already failed to clear this line
-        const reps = replaceableNameLeaves(body, segs);
-        const usable =
-          reps.length > 0 &&
-          reps.every(
-            (rep) =>
-              !replaced.includes(formatPath(rep.segs)) && rep.value !== leafAt(body, rep.segs),
-          );
-        const fallback = usable ? null : unitOf(env.views[0] ?? "", segs);
-        if (!usable && fallback === null) withholdFile = true;
-        for (const u of usable ? reps : fallback ? [fallback] : [])
-          if (!units.some((x) => JSON.stringify(x.segs) === JSON.stringify(u.segs))) units.push(u);
-      }
-      if (withholdFile || lines.length !== r.findings.length) {
-        withholdFile = true;
-        break;
-      }
-      for (const u of units)
-        (u.action === "replace" ? replaced : withheld).push(formatPath(u.segs));
-      // a replaced leaf inside a withheld unit (this round or an earlier one, whatever the order
-      // the units came in) is no longer "replaced" — it is gone
-      for (let i = replaced.length - 1; i >= 0; i--) {
-        const r = replaced[i] ?? "";
-        if (withheld.some((w) => r === w || r.startsWith(`${w}.`) || r.startsWith(`${w}[`)))
-          replaced.splice(i, 1);
-      }
-      body = applyUnits(body, units);
-      rawBody = applyUnits(rawBody, units);
-      whole = await formatJson(body, "recorded");
-    }
-    if (withholdFile) {
-      withheldFiles.push(`${base}.json`);
-      log(`${base}: withheld whole (a deny-list match outside any removable unit)`);
-      continue;
-    }
-    if (withheld.length)
-      log(`${base}: withheld ${String(withheld.length)} unit(s) matching the local deny-list`);
+    // the body is frozen as scrubbed: no deny-list match ever removes or relabels a unit of it
+    const body = p.scrubbed;
+    const rawBody = p.rawCanonical;
+    const whole = await formatJson(body, "recorded");
 
     // one file, or — when the body formats past the cap — lossless parts along one top-level array
     let parts: { rel: string; body: Json; raw: Json; part: ManifestEntry["part"] }[] = [
@@ -1191,6 +1003,10 @@ export async function freezeCaptures(
         );
         for (const f of annotateFindings(scanned.findings.slice(0, 40), text))
           problems.push(`  ${f}`);
+        if (!gateNoted && scanned.findings.some((f) => f.startsWith(DENY_PREFIX))) {
+          gateNoted = true;
+          problems.push(`  ${DENY_LIST_GATE}`);
+        }
       }
       entries.push({
         path: part.rel,
@@ -1212,10 +1028,9 @@ export async function freezeCaptures(
         scrub_rules_version: SCRUB_RULES_VERSION,
         pruned: p.pruned,
         part: part.part,
-        withheld,
-        replaced,
-        // the paths index the WHOLE response (before any split): derive on the whole body
-        incomplete: deriveIncomplete(body, withheld),
+        withheld: [],
+        replaced: [],
+        incomplete: null,
         stats_official: env.stats_official,
         top_level_keys: isObject(part.body) ? Object.keys(part.body).sort() : [],
         bytes,
@@ -1226,7 +1041,7 @@ export async function freezeCaptures(
       outputs.push({ rel: part.rel, text });
     }
   }
-  return { entries, outputs, problems, withheldFiles };
+  return { entries, outputs, problems };
 }
 
 /**
@@ -1321,12 +1136,11 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
     {
       scan,
       maxBytes,
-      withholdDenylisted: opts.withholdDenylisted === true,
       log,
       verifyCtxOf: (slot) => ({ ...ctxOf(slot), denyTerms: unionTerms, realLeagueIds: unionIds }),
     },
   );
-  const { outputs, entries, problems, withheldFiles } = frozen;
+  const { outputs, entries, problems } = frozen;
   const blanked = [...new Set([...contexts.values()].flatMap((c) => [...c.blanked]))].sort();
   const synthetic = await syntheticOutputs(opts.synthetic ?? SYNTHETIC_ERRORS, scan, problems);
   outputs.push(...synthetic.outputs);
@@ -1348,7 +1162,7 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
   }
   const manifest: FixtureManifest = {
     $comment:
-      "Recorded ESPN fixtures (evidence, plan 05 §3 fixture law): keyless captures of public leagues, scrubbed by scripts/scrub-fixture.ts (research 03 §F.3). sha256 = sha256 of the canonical JSON (sorted keys, no whitespace) of the scrubbed body; scoring.sha256 = the same over every scoring field (scrub.ts SCORING_KEYS), computed on the raw recording and re-verified on the scrubbed file. `pruned` keys were emptied (never a scoring key); `part` marks one response split along `array` to stay ≤ 1 MB; `withheld` lists units removed because a line of theirs matched the local repo deny-list (never committed); `replaced` lists public player-name leaves set to `Player <id>` instead; `synthetic_files` are hand-written error bodies (never evidence, never a scoring field). No league id, team name or member name of any recorded league is stored anywhere in this repo.",
+      "Recorded ESPN fixtures (evidence, plan 05 §3 fixture law): keyless captures of public leagues, scrubbed by scripts/scrub-fixture.ts (research 03 §F.3). sha256 = sha256 of the canonical JSON (sorted keys, no whitespace) of the scrubbed body; scoring.sha256 = the same over every scoring field (scrub.ts SCORING_KEYS), computed on the raw recording and re-verified on the scrubbed file. `pruned` keys were emptied (never a scoring key); `part` marks one response split along `array` to stay ≤ 1 MB; `withheld` / `replaced` / `incomplete` / `withheld_files` are empty: a match of the local repo deny-list aborts the run, it is never withheld (a gap would show which public unit it is); `synthetic_files` are hand-written error bodies (never evidence, never a scoring field). No league id, team name or member name of any recorded league is stored anywhere in this repo.",
     version: 1,
     host: READ_HOST,
     season,
@@ -1356,7 +1170,7 @@ export async function scrubRun(opts: ScrubRunOptions): Promise<ScrubRunResult> {
     scrub_rules_version: SCRUB_RULES_VERSION,
     leagues,
     files: entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
-    withheld_files: withheldFiles.sort(),
+    withheld_files: [],
     synthetic_files: synthetic.entries,
   };
   const manifestText = await formatJson(manifest as unknown as Json);

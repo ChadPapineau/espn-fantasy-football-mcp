@@ -1,8 +1,9 @@
 // b1-views.test.ts — the B1 extensions of the keyless recorder and the scrub run against the synthetic
 // fake ESPN: plan 05 §3.1 (mMatchupScore current + final, solo mNav, kona_player_info and
 // kona_playercard by filterIds ≤ 25 ids, players_wl, the keyless 401; synthetic ONLY for error
-// bodies — the fixture law), plan 07 A4/B2/C1 (the request shapes), research 03 §A.1–§A.4, CAT-12
-// (a public player's name replaced, never the whole unit; a root-array row withheld value-free).
+// bodies — the fixture law), plan 07 A4/B2/C1 (the request shapes), research 03 §A.1–§A.4, the
+// deny-list gate (a match in an index row aborts the run: no row is withheld, no name replaced —
+// Stage C finding fixtures-withheld-unit-discloses-term; deriveIncomplete still reads earlier runs).
 // No network: every fetch is the synthetic fake; every identifier-shaped value is built at run time.
 import path from "node:path";
 import fc from "fast-check";
@@ -23,6 +24,7 @@ import {
 import {
   CARD_IDS_MAX,
   CARD_ROSTERED_IDS,
+  DENY_LIST_GATE,
   PLAYERS_WL_FILTER,
   ROOT_ARRAY,
   cardIds,
@@ -32,17 +34,16 @@ import {
   leagueRequestPath,
   planSplit,
   readRaw,
-  replaceableNameLeaves,
   requestUrl,
   rosteredPlayerIds,
   scrubRun,
   splitArrayKey,
   syntheticOutputs,
   withArray,
-  withholdUnit,
   writeRaw,
   type RequestSpec,
 } from "../../scripts/espn-fixture/pipeline.js";
+import { ScrubAbort } from "../../scripts/espn-fixture/scrub.js";
 import { SYNTHETIC_ERRORS, espnErrorBody } from "../../scripts/espn-fixture/synthetic.js";
 import { parseArgs, plannedRequests } from "../../scripts/record-fixture.js";
 import { tempDir } from "../lint/helpers.js";
@@ -319,7 +320,7 @@ describe("routes and request paths", () => {
   });
 });
 
-describe("root-array bodies (players_wl): split, withhold, replace — value-free", () => {
+describe("root-array bodies (players_wl): split, and the deny-list gate — value-free", () => {
   const rows = (n: number) =>
     Array.from({ length: n }, (_, i) => ({
       id: 100 + i,
@@ -398,7 +399,30 @@ describe("root-array bodies (players_wl): split, withhold, replace — value-fre
     expect(stableStringify(merged as Json)).toBe(stableStringify(original));
   });
 
-  it("a deny-listed name in a one-line index row replaces that row's name leaves; the row stays", async () => {
+  /** A scrub run that must abort on a deny-list match in `rel`, write nothing, print no term. */
+  async function refusedOn(
+    rawDir: string,
+    terms: string[],
+    rel: string,
+    at: RegExp,
+  ): Promise<string> {
+    const out = path.join(dir(), "out");
+    const err = await scrubRun({
+      rawDir,
+      outRoot: out,
+      scan: inProcessScan(terms),
+      withholdDenylisted: true, // an old caller's option: ignored, nothing is withheld
+    } as Parameters<typeof scrubRun>[0]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ScrubAbort);
+    const where = (err as ScrubAbort).where.join("\n");
+    expect(where).toContain(`deny-list match in ${rel}:`);
+    expect(where).toMatch(at);
+    expect(where).toContain(DENY_LIST_GATE);
+    for (const t of terms) expect(where).not.toContain(t);
+    return where;
+  }
+
+  it("a deny-listed NAME in a one-line index row aborts the run: the row is never relabelled `Player <id>`", async () => {
     const run = await makeRawRun(path.join(dir(), "raw"), { count: 1 });
     const env = readRaw(run.rawDir, "season", "players_wl");
     if (!env) throw new Error("missing capture");
@@ -409,54 +433,21 @@ describe("root-array bodies (players_wl): split, withhold, replace — value-fre
     row.firstName = "Gridiron";
     row.lastName = "Hero";
     writeRaw(run.rawDir, { ...env, bodyText: JSON.stringify(body) });
-    const r = await scrubRun({
-      rawDir: run.rawDir,
-      outRoot: path.join(dir(), "out"),
-      scan: inProcessScan([term]),
-      withholdDenylisted: true,
-      dryRun: true,
-    });
-    const e = r.manifest.files.find((f) => f.path === "recorded/season/players_wl.json");
-    expect(e?.withheld).toEqual([]);
-    expect(e?.replaced).toEqual(["$[2].firstName", "$[2].fullName", "$[2].lastName"]);
-    expect(e?.incomplete).toBeNull();
-    const text = r.outputs.find((o) => o.rel === "recorded/season/players_wl.json")?.text ?? "";
-    expect(text).not.toContain(term);
-    expect((JSON.parse(text) as JsonObject[])[2]).toMatchObject({
-      id: 102,
-      fullName: "Player 102",
-      firstName: "Player 102",
-      lastName: "Player 102",
-      eligibleSlots: [2, 3, 23],
-    });
+    await refusedOn(run.rawDir, [term], "recorded/season/players_wl.json", / at \$\[2\]/);
   });
 
-  it("a deny-listed NON-name value in an index row withholds the row; the count is recorded, never the id", async () => {
+  it("a deny-listed NON-name value in an index row aborts the run: the row is never withheld (its id would be the gap)", async () => {
     const run = await makeRawRun(path.join(dir(), "raw"), { count: 1 });
     const env = readRaw(run.rawDir, "season", "players_wl");
     if (!env) throw new Error("missing capture");
     const body = rows(5);
     const term = ["Zephyr", "Quokka"].join("");
-    (body[3] as JsonObject).note = term; // not a name leaf: replacing the names cannot clear it
+    (body[3] as JsonObject).note = term;
     writeRaw(run.rawDir, { ...env, bodyText: JSON.stringify(body) });
-    const r = await scrubRun({
-      rawDir: run.rawDir,
-      outRoot: path.join(dir(), "out"),
-      scan: inProcessScan([term]),
-      withholdDenylisted: true,
-      dryRun: true,
-    });
-    const e = r.manifest.files.find((f) => f.path === "recorded/season/players_wl.json");
-    expect(e?.withheld).toEqual(["$[3]"]);
-    expect(e?.replaced).toEqual([]); // the failed replacement is not reported as a replacement
-    expect(e?.incomplete).toEqual({ team_ids: [], matchups_missing: 0, rows_missing: 1 });
-    const text = r.outputs.find((o) => o.rel === "recorded/season/players_wl.json")?.text ?? "";
-    expect(text).not.toContain(term);
-    expect((JSON.parse(text) as unknown[]).length).toBe(4);
-    expect(JSON.stringify(r.manifest)).not.toContain(term);
+    await refusedOn(run.rawDir, [term], "recorded/season/players_wl.json", / at \$\[3\]/);
   });
 
-  it("a name replaced in a unit that the same round withholds is not reported as replaced (any unit order)", async () => {
+  it("deny-listed terms inside a box-score row abort the run: no matchup row and no roster entry is withheld", async () => {
     const run = await makeRawRun(path.join(dir(), "raw"), { count: 1 });
     const env = readRaw(run.rawDir, "league-a", "mBoxscore.sp1");
     if (!env) throw new Error("missing capture");
@@ -465,45 +456,18 @@ describe("root-array bodies (players_wl): split, withhold, replace — value-fre
     const entries = (home.rosterForCurrentScoringPeriod as JsonObject).entries as JsonObject[];
     const name = ["Gridiron", "Hero"].join(" ");
     const other = ["Zephyr", "Quokka"].join("");
-    entries[0]!.note = other; // earlier line: not replaceable → the whole row
-    ((entries[1]?.playerPoolEntry as JsonObject).player as JsonObject).fullName = name; // later line
+    entries[0]!.note = other;
+    ((entries[1]?.playerPoolEntry as JsonObject).player as JsonObject).fullName = name;
     writeRaw(run.rawDir, { ...env, bodyText: JSON.stringify(body) });
-    const r = await scrubRun({
-      rawDir: run.rawDir,
-      outRoot: path.join(dir(), "out"),
-      scan: inProcessScan([name, other]),
-      withholdDenylisted: true,
-      dryRun: true,
-    });
-    const box = r.manifest.files.find((f) => f.path === "recorded/league-a/mBoxscore.sp1.json");
-    expect(box?.withheld).toEqual(["$.schedule[0]"]);
-    expect(box?.replaced).toEqual([]);
+    await refusedOn(
+      run.rawDir,
+      [name, other],
+      "recorded/league-a/mBoxscore.sp1.json",
+      / at \$\.schedule\[0\]\.home\.rosterForCurrentScoringPeriod\.entries\[\d\]/,
+    );
   });
 
-  it("replaceableNameLeaves / withholdUnit / deriveIncomplete on root rows and one-line players", () => {
-    const body = canonicalize({
-      players: [{ id: 7, player: { id: 70, fullName: "A B", firstName: "A", lastName: "B" } }],
-    });
-    expect(replaceableNameLeaves(body, ["players", 0, "player"]).map((u) => u.segs)).toEqual([
-      ["players", 0, "player", "firstName"],
-      ["players", 0, "player", "fullName"],
-      ["players", 0, "player", "lastName"],
-    ]);
-    expect(replaceableNameLeaves(body, ["players", 0, "player", "fullName"])).toEqual([
-      { segs: ["players", 0, "player", "fullName"], action: "replace", value: "Player 70" },
-    ]);
-    expect(replaceableNameLeaves(body, ["players", 0])).toEqual([]); // not a player object
-    expect(replaceableNameLeaves(rows(2), [1]).map((u) => u.value)).toEqual([
-      "Player 101",
-      "Player 101",
-    ]); // fullName already reads "Player 101": only first/last are replaced
-    expect(replaceableNameLeaves([{ fullName: "x" }] as Json, [0])).toEqual([]); // no id
-    expect(replaceableNameLeaves(rows(2), [5])).toEqual([]);
-    expect(withholdUnit("players_wl", [4, "fullName"])).toEqual({ segs: [4], action: "omit" });
-    expect(withholdUnit("kona_playercard", ["players", 2, "player", "x"])).toEqual({
-      segs: ["players", 2],
-      action: "omit",
-    });
+  it("deriveIncomplete still reads what an earlier run withheld: root rows and kona rows, value-free", () => {
     expect(deriveIncomplete(rows(2), ["$[1]", "$[4]"])).toEqual({
       team_ids: [],
       matchups_missing: 0,
@@ -514,6 +478,7 @@ describe("root-array bodies (players_wl): split, withhold, replace — value-fre
       matchups_missing: 0,
       rows_missing: 1,
     });
+    expect(deriveIncomplete(canonicalize({ players: [] }), [])).toBeNull();
   });
 });
 

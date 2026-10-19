@@ -25,7 +25,6 @@ import {
   errorTypeOf,
   historyLeagueSpecs,
   historySeasonDirs,
-  historyWithholdUnit,
   parseHistoryArgs,
   plannedHistoryRequests,
   previousSeasonsOf,
@@ -37,6 +36,7 @@ import {
   type HistoryOptions,
 } from "../../scripts/espn-fixture/history.js";
 import { READ_HOST, WRITE_HOST } from "../../scripts/espn-fixture/http.js";
+import { DENY_LIST_GATE, WITHHOLD_REMOVED } from "../../scripts/espn-fixture/pipeline.js";
 import { scoringProjection, FAKE_GUID_RE } from "../../scripts/espn-fixture/scrub.js";
 import { ScrubAbort } from "../../scripts/espn-fixture/scrub.js";
 import { mainHistory } from "../../scripts/record-fixture.js";
@@ -615,33 +615,10 @@ describe("scrubHistory — the committed history and its manifest", () => {
     for (const [, g] of owners(2025)) expect(String(g).replace(/[{}]/g, "")).toMatch(FAKE_GUID_RE);
   });
 
-  it("a deny-listed player id in a box score withholds that roster entry, not the matchup row", async () => {
-    const extra = 7_654_321;
-    const r = rig({
-      extraPlayerId: extra,
-      scan: inProcessScan([String(extra)]),
-      argv: ["--seasons", "2025", "--projection-seasons", "2025", "--withhold-denylisted"],
-    });
-    await r.run();
-    const m = readManifest(r.o.outRoot);
-    const boxes = m.files.filter((f) => f.views[0] === "mBoxscore");
-    expect(boxes).toHaveLength(4);
-    for (const b of boxes) {
-      expect(b.withheld).toEqual(["$.schedule[0].home.rosterForCurrentScoringPeriod.entries[3]"]);
-      expect(b.incomplete).toEqual({ team_ids: [1], matchups_missing: 0 });
-      const body = parseJsonStrict(readFileSync(path.join(r.o.outRoot, b.path), "utf8")) as {
-        schedule: { home: { rosterForCurrentScoringPeriod: { entries: unknown[] } } }[];
-      };
-      expect(body.schedule).toHaveLength(1); // the row stays
-      expect(body.schedule[0]?.home.rosterForCurrentScoringPeriod.entries).toHaveLength(3);
-      expect(JSON.stringify(body)).not.toContain(String(extra));
-    }
-    // projection entries counted after withholding (the withheld entry's projection is gone)
-    const b25 = m.leagues["league-b"]?.seasons["2025"];
-    expect(b25?.served ? b25.projection_entries : -1).toBe(24);
-  });
-
-  it("without --withhold-denylisted a deny-list match refuses the whole run and writes nothing", async () => {
+  // Stage C finding fixtures-withheld-unit-discloses-term: --withhold-denylisted withheld the
+  // deny-listed player's roster entry in every box score, so the player — a public id equal to the
+  // private term — was the one gap across every file. A deny-list match now refuses the run.
+  it("a deny-listed player id in a box score refuses the whole run and writes nothing — no roster entry is withheld, whatever a caller passes", async () => {
     const extra = 7_654_321;
     const r = rig({
       extraPlayerId: extra,
@@ -652,8 +629,31 @@ describe("scrubHistory — the committed history and its manifest", () => {
     expect(err).toBeInstanceOf(ScrubAbort);
     const where = (err as ScrubAbort).where.join("\n");
     expect(where).toMatch(/mBoxscore\.sp1\.json: the repo scanner refused it/);
+    expect(where).toMatch(
+      /deny-list match in \S*mBoxscore\.sp1\.json:\d+ at \$\.schedule\[0\]\.home\.rosterForCurrentScoringPeriod\.entries\[3\]/,
+    );
+    expect(where).toContain(DENY_LIST_GATE);
     expect(where).not.toContain(String(extra)); // paths, never the value
     expect(existsSync(path.join(r.o.outRoot, "recorded", "history"))).toBe(false);
+    // the stored raw run, re-scrubbed by a caller still passing the old option: refused the same way
+    const again = await scrubHistory({
+      rawDir: r.o.rawDir,
+      outRoot: r.o.outRoot,
+      scan: inProcessScan([String(extra)]),
+      withholdDenylisted: true,
+    } as Parameters<typeof scrubHistory>[0]).catch((e: unknown) => e);
+    expect(again).toBeInstanceOf(ScrubAbort);
+    expect((again as ScrubAbort).where.join("\n")).toContain(DENY_LIST_GATE);
+    expect(existsSync(path.join(r.o.outRoot, "recorded", "history"))).toBe(false);
+  });
+
+  it("the removed --withhold-denylisted is refused before any request (exit 2), with the reason", () => {
+    expect(() => rig({ argv: ["--seasons", "2025", "--withhold-denylisted"] })).toThrow(
+      HistoryRefusal,
+    );
+    expect(() => rig({ argv: ["--seasons", "2025", "--withhold-denylisted"] })).toThrow(
+      WITHHOLD_REMOVED,
+    );
   });
 
   it("refuses a raw dir holding anything but history captures, or no season", async () => {
@@ -925,49 +925,6 @@ describe("pure helpers", () => {
     ).toBeNull();
     expect(errorTypeOf(JSON.stringify({ details: [] }))).toBeNull();
     expect(errorTypeOf("<html>")).toBeNull();
-  });
-
-  it("historyWithholdUnit: a box-score line inside a roster entry withholds the entry; elsewhere withholdUnit", () => {
-    expect(
-      historyWithholdUnit("mBoxscore", [
-        "schedule",
-        2,
-        "away",
-        "rosterForCurrentScoringPeriod",
-        "entries",
-        7,
-        "playerPoolEntry",
-        "player",
-        "id",
-      ]),
-    ).toEqual({
-      segs: ["schedule", 2, "away", "rosterForCurrentScoringPeriod", "entries", 7],
-      action: "omit",
-    });
-    expect(
-      historyWithholdUnit("mBoxscore", [
-        "schedule",
-        2,
-        "away",
-        "rosterForMatchupPeriod",
-        "entries",
-        1,
-        "playerId",
-      ]),
-    ).toEqual({
-      segs: ["schedule", 2, "away", "rosterForMatchupPeriod", "entries", 1],
-      action: "omit",
-    });
-    // a line on the row itself: the whole row (withholdUnit's golden unit)
-    expect(historyWithholdUnit("mBoxscore", ["schedule", 2, "away", "teamId"])).toEqual({
-      segs: ["schedule", 2],
-      action: "omit",
-    });
-    expect(historyWithholdUnit("mBoxscore", ["teams", 1, "name"])).toBeNull();
-    expect(historyWithholdUnit("mTeam", ["teams", 3, "valuesByStat", "3"])).toEqual({
-      segs: ["teams", 3],
-      action: "omit",
-    });
   });
 
   it("historySeasonDirs: four-digit directories only, ascending", () => {

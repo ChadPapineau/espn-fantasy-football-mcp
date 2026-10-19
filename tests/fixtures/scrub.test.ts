@@ -3,7 +3,7 @@
 // determinism, the deny-list verification), plan 05 §3.1 steps 2–4 (the deny-list abort with the
 // path, byte-identical reruns, provenance hashes). Adversarial: hostile keys, unicode, huge sizes,
 // prototype keys, too many GUIDs. Every identifier-shaped value is assembled at run time.
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,12 +16,15 @@ import {
 } from "../../scripts/espn-fixture/canonical.js";
 import { formatJson } from "../../scripts/espn-fixture/format-json.js";
 import {
-  applyUnits,
+  DENY_LIST_GATE,
+  WITHHOLD_REMOVED,
   scrubRun,
-  withholdUnit,
   readRaw,
   writeRaw,
 } from "../../scripts/espn-fixture/pipeline.js";
+import { parseHistoryArgs } from "../../scripts/espn-fixture/history.js";
+import { parseArgs as parseRecordArgs } from "../../scripts/record-fixture.js";
+import { parseScrubArgs } from "../../scripts/scrub-fixture.js";
 import {
   FAKE_GUID_RE,
   ScrubAbort,
@@ -39,7 +42,7 @@ import {
 } from "../../scripts/espn-fixture/scrub.js";
 import { scanWithRepoScanner } from "../../scripts/espn-fixture/scan.js";
 import { tempDir } from "../lint/helpers.js";
-import { inProcessScan, makeRawRun, SEASON } from "./helpers/run.js";
+import { inProcessScan, makeRawRun, NOW, SEASON } from "./helpers/run.js";
 import {
   ip,
   leagueBody,
@@ -591,34 +594,89 @@ describe("scrubRun — capture → scrub → freeze over a synthetic raw run", (
     expect(where).not.toContain("Player 201");
   });
 
-  it("--withhold-denylisted removes the smallest unit (box score: the whole row), re-scans, and lists paths", async () => {
+  // Stage C finding fixtures-withheld-unit-discloses-term: with --withhold-denylisted a deny-list
+  // match on a PUBLIC, enumerable unit (a D/ST id equal to a deny-listed numeric term) removed that
+  // unit and listed its path; the gap — in the manifest, in plain absence across every file, against
+  // ESPN's own public data — published the very term it hid. The deny-list is now a gate only.
+  it("Stage C repro: a deny-listed public id (a D/ST-shaped index row) is never withheld — the run aborts, nothing is written, whatever a caller passes", async () => {
     const dir = tmp?.dir ?? "";
     const run = await makeRawRun(path.join(dir, "raw"), { count: 1 });
-    const scan = inProcessScan(["Player 201"]); // a player of team 2 → in box-score row 1 (away)
-    const r = await scrubRun({
-      rawDir: run.rawDir,
-      outRoot: path.join(dir, "out"),
-      scan,
-      withholdDenylisted: true,
-    });
-    const all = r.outputs.map((o) => o.text).join("\n");
-    expect(all).not.toContain("Player 201");
-    const box = r.manifest.files.find((f) => f.path === "recorded/league-a/mBoxscore.sp1.json");
-    expect(box?.withheld).toEqual(["$.schedule[0]"]);
-    const roster = r.manifest.files.find((f) => f.path === "recorded/league-a/mRoster.sp1.json");
-    expect(roster?.withheld).toEqual(["$.teams[1].roster.entries[1]"]);
-    const boxBody = JSON.parse(
-      r.outputs.find((o) => o.rel === "recorded/league-a/mBoxscore.sp1.json")?.text ?? "{}",
-    ) as JsonObject;
-    expect(boxBody.schedule).toEqual([]);
-    // the provenance identity still holds after the removal (raw had the same unit removed): only
-    // settings.scoringSettings.scoringItems is left as a scoring field
-    expect(box?.scoring.entries).toBe(1);
-    for (const f of r.manifest.files)
-      for (const w of f.withheld) expect(w).toMatch(/^\$(?:\.[A-Za-z_]\w*|\[\d+\])+$/);
+    const env = readRaw(run.rawDir, "season", "players_wl");
+    if (!env) throw new Error("missing capture");
+    // D/ST-shaped rows (negative ids, one per pro team) around ordinary players, in id order; the
+    // digits are assembled so no source line carries the term
+    const base = Number(["9", "4", "0"].join("")) * 100;
+    const dst = Array.from({ length: 6 }, (_, i) => ({
+      id: -(base + i + 1),
+      fullName: `Team ${String(i + 1)} D/ST`,
+      defaultPositionId: 16,
+    }));
+    const players = Array.from({ length: 4 }, (_, i) => ({
+      id: 300 + i,
+      fullName: `Player ${String(300 + i)}`,
+      defaultPositionId: 2,
+    }));
+    writeRaw(run.rawDir, { ...env, bodyText: JSON.stringify([...dst, ...players]) });
+    const term = String(base + 4); // the digit run of one D/ST's id
+    const out = path.join(dir, "out");
+    for (const opts of [
+      {},
+      { withholdDenylisted: true },
+      { withholdDenylisted: true, dryRun: true },
+    ]) {
+      const err = await scrubRun({
+        rawDir: run.rawDir,
+        outRoot: out,
+        scan: inProcessScan([term]),
+        ...opts,
+      }).catch((e: unknown) => e);
+      expect(err, JSON.stringify(opts)).toBeInstanceOf(ScrubAbort);
+      const where = (err as ScrubAbort).where.join("\n");
+      expect(where).toMatch(
+        /deny-list match in recorded\/season\/players_wl\.json:\d+ at \$\[\d+\]/,
+      );
+      expect(where).toContain(DENY_LIST_GATE);
+      expect(where).not.toContain(term);
+      expect((err as Error).message).not.toContain(term);
+      expect(existsSync(out)).toBe(false); // no file, no manifest, no gap anywhere
+    }
   });
 
-  it("CAT-12: a deny-listed public player NAME is replaced (`Player <id>`), the unit and its scoring kept", async () => {
+  it("property: the deny-list is a gate, never a filter — any public value of the run as a deny-list term aborts it, or the run writes exactly what it writes without one", async () => {
+    const dir = tmp?.dir ?? "";
+    const run = await makeRawRun(path.join(dir, "raw"), { count: 1 });
+    const opts = { rawDir: run.rawDir, outRoot: path.join(dir, "out"), dryRun: true };
+    const baseline = await scrubRun({ ...opts, scan: inProcessScan() });
+    const text = (r: typeof baseline) => r.outputs.map((o) => `${o.rel}\n${o.text}`).join("\n");
+    // every public leaf the committed files would hold: player names and ids, stat values, …
+    const leaves = new Set<string>();
+    const walk = (v: unknown): void => {
+      if (typeof v === "string" && /[A-Za-z]{3}/.test(v) && v.length <= 40) leaves.add(v);
+      else if (typeof v === "number" && Number.isInteger(v) && Math.abs(v) >= 100)
+        leaves.add(String(Math.abs(v)));
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v !== null && typeof v === "object") Object.values(v).forEach(walk);
+    };
+    for (const o of baseline.outputs)
+      if (o.rel !== "manifest.json") walk(JSON.parse(o.text) as unknown);
+    const terms = [...leaves].sort();
+    expect(terms.length).toBeGreaterThan(20);
+    await fc.assert(
+      fc.asyncProperty(fc.constantFrom(...terms), async (term) => {
+        const r = await scrubRun({
+          ...opts,
+          scan: inProcessScan([term]),
+          withholdDenylisted: true, // an old caller's option changes nothing
+        } as Parameters<typeof scrubRun>[0]).catch((e: unknown) => e);
+        // a gate: refused (nothing to write), or exactly the files the run writes without a term
+        if (r instanceof ScrubAbort) return true;
+        return text(r as typeof baseline) === text(baseline);
+      }),
+      { numRuns: 8, seed: 20261019 },
+    );
+  });
+
+  it("a deny-listed public player NAME is never replaced by a `Player <id>` stand-in either (the stand-in marks the player): the run aborts", async () => {
     const dir = tmp?.dir ?? "";
     const run = await makeRawRun(path.join(dir, "raw"), { count: 1 });
     const env = readRaw(run.rawDir, "league-a", "mRoster.sp1");
@@ -630,24 +688,24 @@ describe("scrubRun — capture → scrub → freeze over a synthetic raw run", (
     const term = ["Gridiron", "Hero"].join(" ");
     player.fullName = term;
     writeRaw(run.rawDir, { ...env, bodyText: JSON.stringify(body) });
-    const r = await scrubRun({
+    const err = await scrubRun({
       rawDir: run.rawDir,
       outRoot: path.join(dir, "out"),
       scan: inProcessScan([term]),
       withholdDenylisted: true,
-    });
-    const roster = r.manifest.files.find((f) => f.path === "recorded/league-a/mRoster.sp1.json");
-    expect(roster?.withheld).toEqual([]);
-    expect(roster?.replaced).toEqual([
-      "$.teams[1].roster.entries[1].playerPoolEntry.player.fullName",
-    ]);
-    expect(roster?.incomplete).toBeNull();
-    const text = r.outputs.find((o) => o.rel === "recorded/league-a/mRoster.sp1.json")?.text ?? "";
-    expect(text).not.toContain(term);
-    expect(text).toContain(`Player ${String(player.id as number)}`);
+    } as Parameters<typeof scrubRun>[0]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ScrubAbort);
+    const where = (err as ScrubAbort).where.join("\n");
+    expect(where).toMatch(
+      /deny-list match in recorded\/league-a\/mRoster\.sp1\.json:\d+ at \$\.teams\[1\]\.roster\.entries\[1\]/,
+    );
+    expect(where).toContain(DENY_LIST_GATE);
+    expect(where).not.toContain(term);
+    expect(where).not.toContain(`Player ${String(player.id as number)}`);
+    expect(readdirSync(dir)).not.toContain("out");
   });
 
-  it("--withhold-denylisted never hides a non-deny-list finding: a real secret still refuses the run", async () => {
+  it("any other finding refuses the run the same way (a real mailbox)", async () => {
     const dir = tmp?.dir ?? "";
     const run = await makeRawRun(path.join(dir, "raw"), { count: 1 });
     const env = readRaw(run.rawDir, "league-a", "mTeam");
@@ -659,10 +717,31 @@ describe("scrubRun — capture → scrub → freeze over a synthetic raw run", (
       rawDir: run.rawDir,
       outRoot: path.join(dir, "out"),
       scan: inProcessScan(),
-      withholdDenylisted: true,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ScrubAbort);
-    expect((err as ScrubAbort).where.join("\n")).toMatch(/\[email-address\] at \$\.contact/);
+    const where = (err as ScrubAbort).where.join("\n");
+    expect(where).toMatch(/\[email-address\] at \$\.contact/);
+    expect(where).not.toContain(DENY_LIST_GATE); // the gate note names deny-list matches only
+  });
+
+  it("--withhold-denylisted is refused by every fixture tool, with the reason (exit 2)", () => {
+    const dir = tmp?.dir ?? "";
+    const raw = path.join(dir, "raw");
+    const env = { EFF_PROBE_LEAGUE_IDS: String(100_000 + 7919) };
+    expect(() => parseScrubArgs(["--raw-dir", raw, "--withhold-denylisted"])).toThrow(
+      WITHHOLD_REMOVED,
+    );
+    expect(() =>
+      parseRecordArgs(["--public", "--raw-dir", raw, "--withhold-denylisted"], env, NOW),
+    ).toThrow(WITHHOLD_REMOVED);
+    expect(() =>
+      parseHistoryArgs(
+        ["--public", "--history", "--scrub-only", "--raw-dir", raw, "--withhold-denylisted"],
+        env,
+        NOW,
+      ),
+    ).toThrow(WITHHOLD_REMOVED);
+    expect(WITHHOLD_REMOVED).toMatch(/publishes the term/);
   });
 
   it("a body over the size cap is split losslessly along its largest top-level array", async () => {
@@ -740,6 +819,31 @@ describe("scrubRun — capture → scrub → freeze over a synthetic raw run", (
     ).rejects.toThrow(/more than one season/);
   });
 
+  it("scan.ts reads a capture under its own relative name: the path rules see that name, never the temp dir (which may sit under a home)", () => {
+    const dir = tmp?.dir ?? "";
+    const underHome = path.join(dir, "Users", "janefake", "tmp");
+    mkdirSync(underHome, { recursive: true });
+    vi.stubEnv("TMPDIR", underHome);
+    expect(scanWithRepoScanner('{ "a": 1 }\n', "recorded/league-a/mTeam.json")).toEqual({
+      clean: true,
+      findings: [],
+    });
+    // an identifier in the capture's own name is what the commit gate would see: reported, unprinted
+    const id = ["8", "1", "7", "2", "6", "3", "5"].join("");
+    const r = scanWithRepoScanner('{ "a": 1 }\n', `recorded/${["leagueId", id].join("=")}.json`);
+    expect(r.clean).toBe(false);
+    expect(r.findings.join("\n")).toMatch(
+      /the path of scanned entry #1 \(path not printed\) {2}\[espn-league-id\]/,
+    );
+    expect(r.findings.join("\n")).not.toContain(id);
+    // a label that is not a plain relative path is scanned under a fixed name, reported as the label
+    const odd = scanWithRepoScanner(
+      `${JSON.stringify({ [["client", "Address"].join("")]: ip(10, 1, 2, 3) })}\n`,
+      "../escape.json",
+    );
+    expect(odd.findings.join("\n")).toMatch(/^\.\.\/escape\.json:1 {2}\[client-address\]/m);
+  });
+
   it("the real scanner integration (scan.ts) reports clean text clean and fails closed on findings", () => {
     expect(scanWithRepoScanner('{ "a": 1 }\n', "x.json")).toEqual({ clean: true, findings: [] });
     // the key is assembled so this test file itself stays clean for the scanner
@@ -750,69 +854,5 @@ describe("scrubRun — capture → scrub → freeze over a synthetic raw run", (
     expect(r.clean).toBe(false);
     expect(r.findings.join("\n")).toMatch(/^y\.json:1 {2}\[client-address\]/m);
     expect(r.findings.join("\n")).not.toContain(ip(10, 1, 2, 3));
-  });
-});
-
-describe("withholdUnit / applyUnits", () => {
-  it("chooses the smallest self-contained unit per view", () => {
-    expect(
-      withholdUnit("mBoxscore", [
-        "schedule",
-        2,
-        "home",
-        "rosterForCurrentScoringPeriod",
-        "entries",
-        4,
-        "playerId",
-      ]),
-    ).toEqual({ segs: ["schedule", 2], action: "omit" });
-    expect(withholdUnit("mBoxscore", ["teams", 1, "name"])).toBeNull();
-    expect(
-      withholdUnit("mRoster", [
-        "teams",
-        3,
-        "roster",
-        "entries",
-        7,
-        "playerPoolEntry",
-        "player",
-        "stats",
-        2,
-      ]),
-    ).toEqual({ segs: ["teams", 3, "roster", "entries", 7], action: "omit" });
-    expect(withholdUnit("kona_player_info", ["players", 5, "player", "id"])).toEqual({
-      segs: ["players", 5],
-      action: "omit",
-    });
-    expect(
-      withholdUnit("proTeamSchedules_wl", ["settings", "proTeams", 16, "teamPlayersByPosition"]),
-    ).toEqual({ segs: ["settings", "proTeams", 16, "teamPlayersByPosition"], action: "empty" });
-    expect(
-      withholdUnit("proTeamSchedules_wl", [
-        "settings",
-        "proTeams",
-        4,
-        "proGamesByScoringPeriod",
-        "3",
-        0,
-        "id",
-      ]),
-    ).toEqual({
-      segs: ["settings", "proTeams", 4, "proGamesByScoringPeriod", "3", 0],
-      action: "omit",
-    });
-    expect(withholdUnit("proTeamSchedules_wl", ["settings", "proTeams", 4, "byeWeek"])).toBeNull();
-    expect(withholdUnit("mSettings", ["settings", "name"])).toBeNull();
-  });
-
-  it("applies omissions and emptyings together on one indexing", () => {
-    const v = { a: [{ x: 1 }, { x: 2 }, { x: 3 }], b: { c: { d: 1 } } } as Json;
-    expect(
-      applyUnits(v, [
-        { segs: ["a", 0], action: "omit" },
-        { segs: ["a", 2], action: "omit" },
-        { segs: ["b", "c"], action: "empty" },
-      ]),
-    ).toEqual({ a: [{ x: 2 }], b: { c: {} } });
   });
 });

@@ -17,18 +17,22 @@ import {
   type Json,
 } from "../../scripts/espn-fixture/canonical.js";
 import { formatJson } from "../../scripts/espn-fixture/format-json.js";
-import { findCookieMaterial, isInside, rawDirRefusal } from "../../scripts/espn-fixture/guards.js";
+import {
+  defaultRawDir,
+  findCookieMaterial,
+  isInside,
+  rawDirRefusal,
+  rawDirRefusalMessage,
+} from "../../scripts/espn-fixture/guards.js";
 import { pathsAtLines } from "../../scripts/espn-fixture/json-lines.js";
 import { leagueFormat, matchupPeriodOf } from "../../scripts/espn-fixture/league-format.js";
 import {
-  REPLACEABLE_NAME_KEYS,
   annotateFindings,
-  applyUnits,
   deriveIncomplete,
   konaFilter,
   officialWeeks,
-  replaceableNameLeaf,
 } from "../../scripts/espn-fixture/pipeline.js";
+import type { XattrReader } from "../../src/config/paths.js";
 import { ROOT, tempDir } from "../lint/helpers.js";
 import { proTeamSchedules } from "./helpers/synthetic.js";
 
@@ -277,12 +281,71 @@ describe("guards", () => {
     mkdirSync(path.join(other, ".git"), { recursive: true });
     expect(rawDirRefusal(path.join(other, "raw"), ROOT)).toBe("inside_git_work_tree");
     expect(rawDirRefusal(path.join(tmp.dir, "plain", "raw"), ROOT)).toBeNull();
-    expect(rawDirRefusal(path.join(tmp.dir, "x"), ROOT, () => false)).toBeNull();
+    expect(rawDirRefusal(path.join(tmp.dir, "x"), ROOT, { gitEntry: () => false })).toBeNull();
     expect(rawDirRefusal(path.join(ROOT, "fixtures", "raw"), ROOT)).toBe("inside_repo");
+  });
+
+  // Stage C finding scripts-raw-dir-synced-accepted: only the repo and git work trees were refused
+  it("a raw dir gets the product's location rule: synced folders and file-provider directories are refused", () => {
+    tmp = tempDir("eff-guard-");
+    const home = path.join(tmp.dir, "home");
+    mkdirSync(home);
+    const managed = path.join(tmp.dir, "managed");
+    mkdirSync(managed);
+    const clean: XattrReader = (ps) => new Map(ps.map((p) => [p, []]));
+    const marked: XattrReader = (ps) =>
+      new Map(ps.map((p) => [p, p === managed ? ["com.apple.file-provider-domain-id"] : []]));
+    const g = { home, xattr: clean };
+    for (const sub of [
+      "Documents",
+      "Desktop",
+      path.join("Library", "Mobile Documents", "com~apple~CloudDocs"),
+      path.join("Library", "CloudStorage", "GoogleDrive-x"),
+      "Dropbox",
+      "Google Drive",
+      "OneDrive",
+    ])
+      expect(rawDirRefusal(path.join(home, sub, "eff-raw"), ROOT, g), sub).toBe("synced_folder");
+    expect(rawDirRefusal(path.join(managed, "raw"), ROOT, { home, xattr: marked })).toBe(
+      "file_provider",
+    );
+    expect(rawDirRefusal(path.join(tmp.dir, "raw"), ROOT, { home, xattr: () => null })).toBe(
+      "xattr_unverifiable",
+    );
+    expect(rawDirRefusal(path.join(tmp.dir, "raw"), ROOT, g)).toBeNull();
+    expect(rawDirRefusal(path.join(home, ".cache", "x", "recordings", "d"), ROOT, g)).toBeNull();
+    // the repo rules still come first
+    expect(rawDirRefusal(path.join(ROOT, "fixtures", "raw"), ROOT, g)).toBe("inside_repo");
+    // every reason has a fixed message that names no path
+    for (const r of [
+      "inside_repo",
+      "inside_git_work_tree",
+      "synced_folder",
+      "file_provider",
+      "xattr_unverifiable",
+    ] as const) {
+      expect(rawDirRefusalMessage(r)).toMatch(/real names and ids/);
+      expect(rawDirRefusalMessage(r)).not.toContain(tmp.dir);
+    }
+  });
+
+  it("defaultRawDir resolves the cache dir as the product does (EFF_CACHE_DIR, else ~/.cache/…)", () => {
+    expect(defaultRawDir({}, "/h", "2026-10-05")).toBe(
+      path.join("/h", ".cache", "espn-fantasy-football-mcp", "recordings", "2026-10-05"),
+    );
+    expect(defaultRawDir({ EFF_CACHE_DIR: "/c" }, "/h", "history-2026-10-05")).toBe(
+      path.join("/c", "recordings", "history-2026-10-05"),
+    );
+    expect(defaultRawDir({ EFF_CACHE_DIR: "~/c" }, "/h", "d")).toBe(
+      path.join("/h", "c", "recordings", "d"),
+    );
+    expect(() => defaultRawDir({ EFF_CACHE_DIR: "rel" }, "/h", "d")).toThrow();
   });
 });
 
-describe("CAT-12: replace a public name leaf instead of withholding its unit; derive incompleteness", () => {
+// No run withholds or relabels a unit any more (the deny-list is a gate — Stage C finding
+// fixtures-withheld-unit-discloses-term); deriveIncomplete reads what earlier runs committed.
+describe("CAT-12: derive the incompleteness an earlier run's withheld units left, value-free", () => {
   const body = {
     teams: [
       {
@@ -299,38 +362,6 @@ describe("CAT-12: replace a public name leaf instead of withholding its unit; de
       { home: { teamId: 4, rosterForCurrentScoringPeriod: { entries: [] } }, away: { teamId: 7 } },
     ],
   };
-  it("replaces fullName/firstName/lastName under a player with `Player <id>`; anything else is not replaceable", () => {
-    const segs = ["teams", 0, "roster", "entries", 0, "playerPoolEntry", "player", "fullName"];
-    expect(replaceableNameLeaf(body as never, segs)).toEqual({
-      segs,
-      action: "replace",
-      value: "Player 9001",
-    });
-    expect(replaceableNameLeaf(body as never, [...segs.slice(0, -1), "stats"])).toBeNull();
-    expect(replaceableNameLeaf(body as never, ["teams", 0, "id"])).toBeNull();
-    expect(
-      replaceableNameLeaf(body as never, [
-        "teams",
-        9,
-        "roster",
-        "entries",
-        0,
-        "playerPoolEntry",
-        "player",
-        "fullName",
-      ]),
-    ).toBeNull();
-    expect(replaceableNameLeaf(body as never, ["teams", 0, "fullName"])).toBeNull();
-    const out = applyUnits(body, [
-      { segs, action: "replace", value: "Player 9001" },
-    ]) as typeof body;
-    expect(out.teams[0]?.roster.entries[0]?.playerPoolEntry.player).toEqual({
-      id: 9001,
-      fullName: "Player 9001",
-      stats: [],
-    });
-    expect(REPLACEABLE_NAME_KEYS).toEqual(new Set(["fullName", "firstName", "lastName"]));
-  });
   it("derives team ids and missing matchups from withheld paths, value-free", () => {
     expect(deriveIncomplete(body as never, [])).toBeNull();
     expect(deriveIncomplete(body as never, ["$.teams[0].roster.entries[3]"])).toEqual({

@@ -3,7 +3,7 @@
 // recording, raw captures OUTSIDE the repo), plan 10 §3.0 Z7 (≥ 3 final mBoxscore weeks with the
 // league's own mSettings; statsOfficial verified), research 03 §D.3 (≥ 1.2 s spacing, ≤ 60 requests,
 // a limit always with a sort, no retry on a 4xx). No network.
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -14,7 +14,14 @@ import {
   plannedRequests,
   record,
 } from "../../scripts/record-fixture.js";
+import { parseScrubArgs } from "../../scripts/scrub-fixture.js";
+import { RECORDINGS_DIR_NAME as RAW_RUNS_DIR } from "../../scripts/espn-fixture/guards.js";
+import { parseHistoryArgs } from "../../scripts/espn-fixture/history.js";
 import { READ_HOST, WRITE_HOST } from "../../scripts/espn-fixture/http.js";
+import { loadLenientRuntime } from "../../src/cli/runtime.js";
+import { RECORDINGS_DIR_NAME, uninstall } from "../../src/cli/uninstall.js";
+import type { XattrReader } from "../../src/config/paths.js";
+import { fakeXattr, makeIo, sandbox } from "../cli/helpers.js";
 import { tempDir, ROOT } from "../lint/helpers.js";
 import { inProcessScan, makeRawRun, NOW, SEASON } from "./helpers/run.js";
 import { fakeEspn, realGuid, rng, syntheticLeague } from "./helpers/synthetic.js";
@@ -140,6 +147,124 @@ describe("argument validation", () => {
     expect(
       plannedRequests(parseArgs(["--public"], { EFF_PROBE_LEAGUE_IDS: ids(1, 2, 3) }, NOW)),
     ).toBe(53);
+  });
+});
+
+// Stage C findings scripts-raw-dir-synced-accepted (a --raw-dir in Documents, Desktop or iCloud Drive
+// was accepted by all three tools) and uninstall-recordings-override-path (the tools wrote under
+// ~/.cache whatever EFF_CACHE_DIR said, while uninstall purged only EFF_CACHE_DIR's recordings).
+describe("the raw directory: the product's location rule, under the cache dir uninstall purges", () => {
+  const env = { EFF_PROBE_LEAGUE_IDS: ids(1) };
+  /** Every fixture tool that takes a raw directory, parsing `--raw-dir <d>` under `g`. */
+  const tools = (d: string, g: { home: string; xattr: XattrReader }) =>
+    [
+      ["record-fixture", () => parseArgs(["--public", "--raw-dir", d], env, NOW, g)],
+      [
+        "record-fixture --history",
+        () =>
+          parseHistoryArgs(
+            ["--public", "--history", "--projections", "none", "--raw-dir", d],
+            env,
+            NOW,
+            g,
+          ),
+      ],
+      ["scrub-fixture", () => parseScrubArgs(["--raw-dir", d], g)],
+    ] as const;
+
+  it("refuses a cloud-synced folder, a file-provider directory and one it cannot check — in every tool", () => {
+    const home = path.join(dir(), "home");
+    mkdirSync(home);
+    const managed = path.join(dir(), "provider-managed");
+    mkdirSync(managed);
+    const marks = fakeXattr({ [managed]: ["com.apple.fileprovider.fpfs#P"] });
+    const cases: [string, XattrReader, RegExp][] = [
+      [path.join(home, "Documents", "eff-raw-probe"), marks, /cloud-synced folder/],
+      [path.join(home, "Desktop", "eff-raw"), marks, /cloud-synced folder/],
+      [
+        path.join(home, "Library", "Mobile Documents", "com~apple~CloudDocs", "eff-raw-probe"),
+        marks,
+        /cloud-synced folder/,
+      ],
+      [path.join(home, "Library", "CloudStorage", "Dropbox", "raw"), marks, /cloud-synced folder/],
+      [path.join(home, "Dropbox", "raw"), marks, /cloud-synced folder/],
+      [path.join(managed, "raw"), marks, /managed by a file provider/],
+      [path.join(dir(), "plain", "raw"), () => null, /could not check whether/],
+    ];
+    for (const [d, xattr, why] of cases)
+      for (const [tool, parse] of tools(d, { home, xattr })) {
+        expect(parse, `${tool} ${path.relative(dir(), d)}`).toThrow(why);
+        try {
+          parse();
+        } catch (e) {
+          expect((e as Error).message).not.toContain(dir()); // the path is never printed
+        }
+      }
+    // a plain local directory outside every repository passes all three
+    for (const [tool, parse] of tools(path.join(dir(), "plain", "raw"), { home, xattr: marks }))
+      expect(parse, tool).not.toThrow();
+  });
+
+  it("the default is <EFF_CACHE_DIR>/recordings/<date> (and history-<date>): eff uninstall removes both", async () => {
+    const sb = sandbox();
+    try {
+      const e = { ...env, EFF_CACHE_DIR: sb.cacheDir };
+      const g = { home: sb.home, xattr: fakeXattr() };
+      const rec = parseArgs(["--public"], e, NOW, g).rawDir;
+      const hist = parseHistoryArgs(
+        ["--public", "--history", "--projections", "none"],
+        e,
+        NOW,
+        g,
+      ).rawDir;
+      expect(RAW_RUNS_DIR).toBe(RECORDINGS_DIR_NAME);
+      expect(rec).toBe(path.join(sb.cacheDir, RECORDINGS_DIR_NAME, "2026-10-05"));
+      expect(hist).toBe(path.join(sb.cacheDir, RECORDINGS_DIR_NAME, "history-2026-10-05"));
+      // what a recording run leaves (record-fixture.ts bindSlots: 0700 directories, a 0600 run.json)
+      for (const d of [rec, hist]) {
+        mkdirSync(d, { recursive: true, mode: 0o700 });
+        writeFileSync(path.join(d, "run.json"), "{}\n", { mode: 0o600 });
+      }
+      const io = makeIo(sb);
+      const { config, log } = await loadLenientRuntime(io);
+      const opts = { yes: true, dryRun: false, keepConfig: false, exportLog: undefined };
+      expect(await uninstall(io, config, log, opts), io.err.text).toBe(0);
+      expect(existsSync(rec)).toBe(false);
+      expect(existsSync(hist)).toBe(false);
+      expect(existsSync(path.join(sb.home, ".cache"))).toBe(false); // nothing under the home's default
+    } finally {
+      sb.cleanup();
+    }
+  });
+
+  it("without EFF_CACHE_DIR the default stays ~/.cache/espn-fantasy-football-mcp/recordings; an EFF_CACHE_DIR the product refuses is refused", () => {
+    const home = path.join(dir(), "home");
+    const g = { home, xattr: fakeXattr() };
+    expect(parseArgs(["--public"], env, NOW, g).rawDir).toBe(
+      path.join(home, ".cache", "espn-fantasy-football-mcp", RECORDINGS_DIR_NAME, "2026-10-05"),
+    );
+    for (const bad of ["relative/cache", "~someone/cache"]) {
+      expect(() => parseArgs(["--public"], { ...env, EFF_CACHE_DIR: bad }, NOW, g)).toThrow(
+        /^EFF_CACHE_DIR: /,
+      );
+      expect(() =>
+        parseHistoryArgs(
+          ["--public", "--history", "--projections", "none"],
+          { ...env, EFF_CACHE_DIR: bad },
+          NOW,
+          g,
+        ),
+      ).toThrow(/^EFF_CACHE_DIR: /);
+    }
+    // an explicit --raw-dir needs no cache dir at all
+    expect(
+      parseArgs(
+        ["--public", "--raw-dir", path.join(dir(), "r")],
+        { ...env, EFF_CACHE_DIR: "relative" },
+        NOW,
+        g,
+      ).rawDir,
+    ).toBe(path.join(dir(), "r"));
   });
 });
 

@@ -22,7 +22,14 @@ import {
   type JsonObject,
 } from "./canonical.js";
 import { formatJson } from "./format-json.js";
-import { findCookieMaterial, rawDirRefusal } from "./guards.js";
+import {
+  cacheDirRefusalMessage,
+  defaultRawDir,
+  findCookieMaterial,
+  rawDirRefusal,
+  rawDirRefusalMessage,
+  type RawDirGuardOptions,
+} from "./guards.js";
 import {
   READ_HOST,
   REPO_ROOT,
@@ -33,7 +40,6 @@ import {
   type FetchLike,
   type PoliteClient,
 } from "./http.js";
-import type { Seg } from "./json-lines.js";
 import { leagueFormat, matchupPeriodOf, type LeagueFormat } from "./league-format.js";
 import {
   DEFAULT_PRUNE,
@@ -46,7 +52,7 @@ import {
   rawInventory,
   readRaw,
   seasonPlan,
-  withholdUnit,
+  WITHHOLD_REMOVED,
   type ManifestEntry,
   type PendingCapture,
   type RawEnvelope,
@@ -100,7 +106,6 @@ export interface HistoryOptions {
   maxRequests: number;
   scrub: boolean;
   scrubOnly: boolean;
-  withholdDenylisted: boolean;
   prune: string[];
 }
 
@@ -121,12 +126,15 @@ const yearList = (text: string, flag: string, max: number): number[] => {
 
 /**
  * Parses `record-fixture.ts --public --history …`; throws HistoryRefusal (exit 2) — on any cookie
- * material first, before anything else is looked at.
+ * material first, before anything else is looked at — and on a raw directory the location rules
+ * refuse (guards.ts rawDirRefusal; the default is `<cache dir>/recordings/history-<date>`, the one
+ * `eff uninstall` purges). `guard` injects the home, the xattr reader and the `.git` probe (tests).
  */
 export function parseHistoryArgs(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
   now: Date,
+  guard: RawDirGuardOptions = {},
 ): HistoryOptions {
   const cookies = findCookieMaterial(env, argv);
   if (cookies.length)
@@ -144,7 +152,6 @@ export function parseHistoryArgs(
   let maxRequests = HISTORY_DEFAULT_MAX_REQUESTS;
   let scrub = true;
   let scrubOnly = false;
-  let withholdDenylisted = false;
   let prune: string[] = [];
   const leagues: string[] = [];
   for (let i = 0; i < argv.length; i++) {
@@ -202,8 +209,7 @@ export function parseHistoryArgs(
         scrubOnly = true;
         break;
       case "--withhold-denylisted":
-        withholdDenylisted = true;
-        break;
+        throw new HistoryRefusal(WITHHOLD_REMOVED);
       case "--league": {
         const id = val();
         if (!isLeagueId(id)) throw new HistoryRefusal("--league needs a positive integer id");
@@ -246,19 +252,20 @@ export function parseHistoryArgs(
     if (slotIndex >= leagues.length)
       throw new HistoryRefusal(`--projections ${projectionsSlot}: no league is bound to that slot`);
   }
-  const raw =
-    rawDir ??
-    path.join(
-      homedir(),
-      ".cache",
-      "espn-fantasy-football-mcp",
-      "recordings",
-      `history-${now.toISOString().slice(0, 10)}`,
-    );
-  if (rawDirRefusal(raw, REPO_ROOT) !== null)
-    throw new HistoryRefusal(
-      "the raw directory must be OUTSIDE the repository and outside any git working tree (raw captures hold real names and ids)",
-    );
+  let raw = rawDir;
+  if (raw === null) {
+    try {
+      raw = defaultRawDir(
+        env,
+        guard.home ?? homedir(),
+        `history-${now.toISOString().slice(0, 10)}`,
+      );
+    } catch (e) {
+      throw new HistoryRefusal(cacheDirRefusalMessage(e));
+    }
+  }
+  const refused = rawDirRefusal(raw, REPO_ROOT, guard);
+  if (refused !== null) throw new HistoryRefusal(rawDirRefusalMessage(refused));
   return {
     seasons: seasonsResolved,
     leagues,
@@ -269,7 +276,6 @@ export function parseHistoryArgs(
     maxRequests,
     scrub,
     scrubOnly,
-    withholdDenylisted,
     prune,
   };
 }
@@ -595,7 +601,6 @@ export async function recordHistory(
     rawDir: o.rawDir,
     outRoot: o.outRoot,
     prune: o.prune,
-    withholdDenylisted: o.withholdDenylisted,
     log,
     ...(deps.scan ? { scan: deps.scan } : {}),
   });
@@ -610,23 +615,6 @@ export async function recordHistory(
 }
 
 // --- scrub + freeze ---------------------------------------------------------------------------------
-
-/**
- * The unit a deny-listed line withholds in a history capture: inside a box score, the ROSTER ENTRY
- * holding the line (a projection corpus loses one player-week, not a whole matchup — the golden's
- * whole-row unit in withholdUnit protects totals the history corpus does not assert); else
- * withholdUnit's unit.
- */
-export function historyWithholdUnit(
-  view: string,
-  segs: readonly Seg[],
-): { segs: Seg[]; action: "omit" | "empty" } | null {
-  if (view === "mBoxscore")
-    for (let k = segs.length - 2; k >= 2; k--)
-      if (segs[k] === "entries" && typeof segs[k + 1] === "number" && segs[0] === "schedule")
-        return { segs: segs.slice(0, k + 2), action: "omit" };
-  return withholdUnit(view, segs);
-}
 
 export interface HistorySeasonServed {
   served: true;
@@ -679,7 +667,6 @@ export interface HistoryScrubOptions {
   scan?: (text: string, label: string) => { clean: boolean; findings: string[]; error?: string };
   dryRun?: boolean;
   maxBytes?: number;
-  withholdDenylisted?: boolean;
 }
 
 export interface HistoryScrubResult {
@@ -864,12 +851,10 @@ export async function scrubHistory(opts: HistoryScrubOptions): Promise<HistorySc
   const frozen = await freezeCaptures(pending, {
     scan,
     maxBytes,
-    withholdDenylisted: opts.withholdDenylisted === true,
     log,
     verifyCtxOf: (slot) => ({ ...ctxOf(slot), denyTerms: unionTerms, realLeagueIds: unionIds }),
-    unitOf: historyWithholdUnit,
   });
-  const { outputs, entries, problems, withheldFiles } = frozen;
+  const { outputs, entries, problems } = frozen;
   if (problems.length)
     throw new ScrubAbort(`refusing to write: ${String(problems.length)} problem(s)`, problems);
 
@@ -961,7 +946,7 @@ export async function scrubHistory(opts: HistoryScrubOptions): Promise<HistorySc
   ].sort((a, b) => a - b);
   const manifest: HistoryManifest = {
     $comment:
-      "Recorded ESPN fixtures of the probe leagues' finished PREVIOUS seasons (evidence, plan 05 §3 fixture law; plan 10 §3.3 C1/C3/C4 inputs): keyless captures, scrubbed by scripts/record-fixture.ts --history (research 03 §F.3), one GUID pseudonym map per league across seasons. `files[]` has the shape of fixtures/espn/manifest.json's entries (paths relative to fixtures/espn; sha256 = sha256 of the canonical JSON of the scrubbed body; scoring.sha256 over every scoring field, computed on the raw recording and re-verified on the scrubbed file; `withheld` lists units removed because a line of theirs matched the local deny-list — in a box score the roster entry, never a value). `leagues[slot].seasons[season]` summarises each attempted season value-free (served or the typed 4xx; finished; teams; playoff seeds; box-score weeks; weekly projections = statSourceId 1, statSplitTypeId 1); `not_attempted` lists the previous seasons ESPN lists that this run did not request. Kept apart from fixtures/espn/manifest.json, whose hash the drift entity manifest binds. No league id, team name or member name of any recorded league is stored anywhere in this repo.",
+      "Recorded ESPN fixtures of the probe leagues' finished PREVIOUS seasons (evidence, plan 05 §3 fixture law; plan 10 §3.3 C1/C3/C4 inputs): keyless captures, scrubbed by scripts/record-fixture.ts --history (research 03 §F.3), one GUID pseudonym map per league across seasons. `files[]` has the shape of fixtures/espn/manifest.json's entries (paths relative to fixtures/espn; sha256 = sha256 of the canonical JSON of the scrubbed body; scoring.sha256 over every scoring field, computed on the raw recording and re-verified on the scrubbed file; `withheld` / `replaced` / `incomplete` / `withheld_files` are empty: a match of the local deny-list aborts the run, it is never withheld — a gap would show which public unit it is). `leagues[slot].seasons[season]` summarises each attempted season value-free (served or the typed 4xx; finished; teams; playoff seeds; box-score weeks; weekly projections = statSourceId 1, statSplitTypeId 1); `not_attempted` lists the previous seasons ESPN lists that this run did not request. Kept apart from fixtures/espn/manifest.json, whose hash the drift entity manifest binds. No league id, team name or member name of any recorded league is stored anywhere in this repo.",
     version: 1,
     kind: "history",
     host: READ_HOST,
@@ -971,7 +956,7 @@ export async function scrubHistory(opts: HistoryScrubOptions): Promise<HistorySc
     projections: { slot: boxSlots[0] ?? null, seasons: boxSeasons },
     leagues,
     files: entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
-    withheld_files: withheldFiles.sort(),
+    withheld_files: [],
   };
   // the manifest lives under recorded/, where prettier resolves the recorded profile (printWidth 1000)
   const manifestText = await formatJson(manifest as unknown as Json, "recorded");

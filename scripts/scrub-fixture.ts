@@ -6,17 +6,22 @@
 //
 // Usage:  scripts/dev/with-node.sh npx tsx scripts/scrub-fixture.ts --raw-dir <dir outside the repo>
 //                                     [--out <fixtures/espn>] [--prune <key,…>] [--dry-run]
-//                                     [--withhold-denylisted]
 // It reads only the raw directory (written by record-fixture.ts) and makes no network request.
-// --withhold-denylisted: when the repo scanner's only findings are local deny-list matches, remove
-// the smallest self-contained unit holding each matched line (pipeline.ts withholdUnit), re-scan,
-// and list the removed units by path in the manifest; any other finding still refuses the run.
+// The deny-list is a gate, never a filter: any finding of the repo scanner — a local deny-list
+// match included — refuses the whole run and nothing is written (plan 05 §3.1 step 2). A match is
+// never withheld or relabelled: in a scrubbed capture it is public ESPN data that coincides with a
+// private term, and the gap would show which public unit it is (pipeline.ts DENY_LIST_GATE; the
+// removed --withhold-denylisted is refused with that reason).
 // Exit: 0 written · 1 refused (the deny-list abort or another problem, each listed by path) · 2 usage.
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { rawDirRefusal } from "./espn-fixture/guards.js";
+import {
+  rawDirRefusal,
+  rawDirRefusalMessage,
+  type RawDirGuardOptions,
+} from "./espn-fixture/guards.js";
 import { REPO_ROOT } from "./espn-fixture/http.js";
-import { scrubRun, type ScrubRunResult } from "./espn-fixture/pipeline.js";
+import { WITHHOLD_REMOVED, scrubRun, type ScrubRunResult } from "./espn-fixture/pipeline.js";
 import { ScrubAbort } from "./espn-fixture/scrub.js";
 
 export interface ScrubCliOptions {
@@ -24,15 +29,20 @@ export interface ScrubCliOptions {
   outRoot: string;
   prune: string[];
   dryRun: boolean;
-  withholdDenylisted: boolean;
 }
 
-export function parseScrubArgs(argv: readonly string[]): ScrubCliOptions {
+/**
+ * Parses the arguments; throws (exit 2) on a usage error or a raw directory the location rules
+ * refuse (guards.ts rawDirRefusal). `guard` injects the home, the xattr reader and the `.git` probe.
+ */
+export function parseScrubArgs(
+  argv: readonly string[],
+  guard: RawDirGuardOptions = {},
+): ScrubCliOptions {
   let rawDir: string | null = null;
   let outRoot = path.join(REPO_ROOT, "fixtures", "espn");
   let prune: string[] = [];
   let dryRun = false;
-  let withholdDenylisted = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = (): string => {
@@ -50,13 +60,13 @@ export function parseScrubArgs(argv: readonly string[]): ScrubCliOptions {
       if (prune.some((k) => !/^[A-Za-z_]\w{0,63}$/.test(k)))
         throw new Error("--prune takes key names");
     } else if (a === "--dry-run") dryRun = true;
-    else if (a === "--withhold-denylisted") withholdDenylisted = true;
+    else if (a === "--withhold-denylisted") throw new Error(WITHHOLD_REMOVED);
     else throw new Error(`unknown argument #${String(i + 1)}`);
   }
   if (rawDir === null) throw new Error("--raw-dir is required");
-  if (rawDirRefusal(rawDir, REPO_ROOT) !== null)
-    throw new Error("the raw directory must be outside the repository and any git working tree");
-  return { rawDir, outRoot, prune, dryRun, withholdDenylisted };
+  const refused = rawDirRefusal(rawDir, REPO_ROOT, guard);
+  if (refused !== null) throw new Error(rawDirRefusalMessage(refused));
+  return { rawDir, outRoot, prune, dryRun };
 }
 
 export async function runScrub(
@@ -68,7 +78,6 @@ export async function runScrub(
     outRoot: o.outRoot,
     prune: o.prune,
     dryRun: o.dryRun,
-    withholdDenylisted: o.withholdDenylisted,
     log,
   });
 }

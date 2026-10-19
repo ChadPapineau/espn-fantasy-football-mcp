@@ -11,16 +11,20 @@
 //   EFF_PROBE_LEAGUE_IDS=<id>,<id>,… scripts/dev/with-node.sh npx tsx scripts/record-fixture.ts --public
 //       [--season <year>] [--weeks 1,2,3] [--raw-dir <dir outside the repo>] [--out <fixtures/espn>]
 //       [--max-requests <n ≤ 80>] [--kona-limit <n ≤ 50>] [--prune <key,…>] [--no-scrub]
-//       [--withhold-denylisted]  (see scrub-fixture.ts)
+//   A local deny-list match in any scrubbed capture aborts the scrub (see scrub-fixture.ts).
 //   League ids come from EFF_PROBE_LEAGUE_IDS (or --league <id>, repeatable); they map in order to
 //   league-a, league-b, … and are NEVER written into the repo or printed. No cookie is ever sent:
 //   the run refuses to start if any cookie variable or argument is present. A re-run reuses stored
-//   raw captures (no request is repeated). Exit: 0 ok · 1 error · 2 usage/refused.
+//   raw captures (no request is repeated). The raw directory defaults to
+//   <cache dir>/recordings/<YYYY-MM-DD> (the cache dir is EFF_CACHE_DIR, else
+//   ~/.cache/espn-fantasy-football-mcp — the one `eff uninstall` purges); any --raw-dir must be
+//   outside every git working tree, every cloud-synced folder and every file-provider directory.
+//   Exit: 0 ok · 1 error · 2 usage/refused.
 //
 //   EFF_PROBE_LEAGUE_IDS=<id>,<id>,… scripts/dev/with-node.sh npx tsx scripts/record-fixture.ts --public
 //       --history [--seasons 2025,2024,2023] [--projections <slot>|none] [--projection-seasons 2025,2024]
 //       [--raw-dir <dir outside the repo>] [--out <fixtures/espn>] [--max-requests <n ≤ 90>]
-//       [--prune <key,…>] [--no-scrub | --scrub-only] [--withhold-denylisted]
+//       [--prune <key,…>] [--no-scrub | --scrub-only]
 //   The finished previous seasons (default: the three before the current one) of every league:
 //   mSettings, mTeam + mStandings, mMatchup, and every final week's mBoxscore (ESPN's weekly
 //   projections) for the projections slot (default league-b) in the projection seasons (default the
@@ -33,7 +37,14 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseJsonStrict } from "./espn-fixture/canonical.js";
-import { findCookieMaterial, rawDirRefusal } from "./espn-fixture/guards.js";
+import {
+  cacheDirRefusalMessage,
+  defaultRawDir,
+  findCookieMaterial,
+  rawDirRefusal,
+  rawDirRefusalMessage,
+  type RawDirGuardOptions,
+} from "./espn-fixture/guards.js";
 import {
   REPO_ROOT,
   defaultSeason,
@@ -46,6 +57,7 @@ import {
 import {
   KONA_FILTER_DEFAULT_LIMIT,
   LEAGUE_SLOTS,
+  WITHHOLD_REMOVED,
   captureOne,
   cardIds,
   cardPlan,
@@ -86,16 +98,20 @@ export interface RecordOptions {
   konaLimit: number;
   prune: string[];
   scrub: boolean;
-  withholdDenylisted: boolean;
 }
 
 export class Refusal extends Error {}
 
-/** Parses and validates arguments; throws Refusal (exit 2) — including on any cookie material. */
+/**
+ * Parses and validates arguments; throws Refusal (exit 2) — including on any cookie material and on
+ * a raw directory the location rules refuse (guards.ts rawDirRefusal). `guard` injects the home,
+ * the xattr reader and the `.git` probe (tests); the defaults are the real machine's.
+ */
 export function parseArgs(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
   now: Date,
+  guard: RawDirGuardOptions = {},
 ): RecordOptions {
   const cookies = findCookieMaterial(env, argv);
   if (cookies.length)
@@ -112,7 +128,6 @@ export function parseArgs(
   let konaLimit = KONA_FILTER_DEFAULT_LIMIT;
   let prune: string[] = [];
   let scrub = true;
-  let withholdDenylisted = false;
   const leagues: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -167,8 +182,7 @@ export function parseArgs(
         scrub = false;
         break;
       case "--withhold-denylisted":
-        withholdDenylisted = true;
-        break;
+        throw new Refusal(WITHHOLD_REMOVED);
       case "--league": {
         const id = val();
         if (!isLeagueId(id)) throw new Refusal("--league needs a positive integer id");
@@ -195,19 +209,16 @@ export function parseArgs(
     throw new Refusal(`at most ${String(LEAGUE_SLOTS.length)} leagues per run`);
   const resolvedSeason = season ?? (env.ESPN_SEASON ? Number(env.ESPN_SEASON) : defaultSeason(now));
   if (!isSeason(resolvedSeason)) throw new Refusal("ESPN_SEASON must be a year from 2018");
-  const raw =
-    rawDir ??
-    path.join(
-      homedir(),
-      ".cache",
-      "espn-fantasy-football-mcp",
-      "recordings",
-      now.toISOString().slice(0, 10),
-    );
-  if (rawDirRefusal(raw, REPO_ROOT) !== null)
-    throw new Refusal(
-      "the raw directory must be OUTSIDE the repository and outside any git working tree (raw captures hold real names and ids)",
-    );
+  let raw = rawDir;
+  if (raw === null) {
+    try {
+      raw = defaultRawDir(env, guard.home ?? homedir(), now.toISOString().slice(0, 10));
+    } catch (e) {
+      throw new Refusal(cacheDirRefusalMessage(e));
+    }
+  }
+  const refused = rawDirRefusal(raw, REPO_ROOT, guard);
+  if (refused !== null) throw new Refusal(rawDirRefusalMessage(refused));
   return {
     season: resolvedSeason,
     leagues,
@@ -218,7 +229,6 @@ export function parseArgs(
     konaLimit,
     prune,
     scrub,
-    withholdDenylisted,
   };
 }
 
@@ -330,7 +340,6 @@ export async function record(o: RecordOptions, deps: RecordDeps = {}): Promise<v
     rawDir: o.rawDir,
     outRoot: o.outRoot,
     prune: o.prune,
-    withholdDenylisted: o.withholdDenylisted,
     log,
     ...(deps.scan ? { scan: deps.scan } : {}),
   });
