@@ -23,6 +23,7 @@ import {
   identityOfPlatformPlayer,
   isTeamUnitIdentity,
 } from "../../domain/crosswalk/resolver.js";
+import { LAST_SEEN_GRANULARITY_MS, type CrosswalkPair } from "../../domain/crosswalk/types.js";
 import { seasonOfInstant } from "../../domain/analytics/waiver-fit/history.js";
 import {
   TRANSACTIONS_RANGE_MAX,
@@ -459,6 +460,102 @@ export function crosswalkOf(
     gsis_id: pair?.espn_id === espnId ? pair.gsis_id : null,
     crosswalk: crosswalkStatusOfPair(identity, pair),
   };
+}
+
+// --- gsis id → ESPN id (Stage C finding crosswalk-reverse-lookup-lowest-id) -------------------------
+
+const METHOD_RANK: Readonly<Record<string, number>> = Object.freeze({
+  override: 0,
+  id: 1,
+  match: 2,
+});
+
+/**
+ * The one current pair among a gsis id's stored pairs: a pair whose ESPN id is in the current
+ * player universe (when known) first, then a confident pair (id/override, confidence 1), then the
+ * most recently seen; within one last-seen grain the tie goes to an override, then an id pair, then
+ * the lowest id — and is `ambiguous`. Stored pairs never expire, and legitimate states keep two or
+ * more ESPN ids on one gsis id (an ESPN re-key keeps the old id's pair; an override beside an id
+ * pair; a removed override): `byGsis(g)[0]`, the LOWEST ESPN id, picked the dead or a different
+ * player (Stage C finding crosswalk-reverse-lookup-lowest-id). Null for no pair.
+ */
+export function pickGsisPair(
+  pairs: readonly CrosswalkPair[],
+  current: ReadonlySet<number> | null,
+): { readonly pair: CrosswalkPair; readonly ambiguous: boolean } | null {
+  if (pairs.length === 0) return null;
+  const inUniverse = (p: CrosswalkPair): number =>
+    current === null || current.size === 0 ? 0 : current.has(p.espn_id) ? 0 : 1;
+  const confident = (p: CrosswalkPair): number =>
+    p.method !== "match" && p.confidence >= 1 ? 0 : 1;
+  const seen = (p: CrosswalkPair): number => {
+    const ms = Date.parse(p.last_seen);
+    return Number.isFinite(ms) ? ms : 0;
+  };
+  const sorted = [...pairs].sort(
+    (a, b) => inUniverse(a) - inUniverse(b) || confident(a) - confident(b) || seen(b) - seen(a),
+  );
+  const lead = sorted[0];
+  if (lead === undefined) return null;
+  // the pairs as current as the lead: last_seen is refreshed at LAST_SEEN_GRANULARITY_MS grain, so
+  // within one grain the instants say nothing — an override wins, then an id pair, then the lowest id
+  const tied = sorted
+    .filter(
+      (p) =>
+        inUniverse(p) === inUniverse(lead) &&
+        confident(p) === confident(lead) &&
+        seen(lead) - seen(p) < LAST_SEEN_GRANULARITY_MS,
+    )
+    .sort(
+      (a, b) =>
+        (METHOD_RANK[a.method] ?? 3) - (METHOD_RANK[b.method] ?? 3) || a.espn_id - b.espn_id,
+    );
+  const top = tied[0] ?? lead;
+  return { pair: top, ambiguous: tied.length > 1 };
+}
+
+/**
+ * The ESPN id a gsis id resolves to through the persisted crosswalk (pickGsisPair; the universe
+ * check reads only the candidate ids), or null. An ambiguous pairing is said in `warnings` when the
+ * caller passes them (ids only).
+ */
+export function espnIdOfGsis(
+  ctx: Pick<ToolContext, "services">,
+  gsis: string,
+  warnings?: string[],
+): number | null {
+  let pairs: readonly CrosswalkPair[];
+  try {
+    pairs = ctx.services.crosswalk.byGsis(gsis);
+  } catch {
+    return null;
+  }
+  if (pairs.length <= 1) return pairs[0]?.espn_id ?? null;
+  let current: Set<number> | null = null;
+  try {
+    const u = ctx.services.playerUniverse.byIds(pairs.map((p) => p.espn_id));
+    if (u.stamp !== null) current = new Set(u.rows.map((r) => r.espn_id));
+  } catch {
+    current = null;
+  }
+  const pick = pickGsisPair(pairs, current);
+  if (pick === null) return null;
+  if (pick.ambiguous && warnings !== undefined) {
+    const w = `gsis ${gsis}: the crosswalk pairs it with ${String(pairs.length)} ESPN players (${pairs
+      .map((p) => String(p.espn_id))
+      .join(", ")}); ${String(pick.pair.espn_id)} used (the most recently seen confident pair)`;
+    if (!warnings.includes(w)) warnings.push(w);
+  }
+  return pick.pair.espn_id;
+}
+
+/** Every ESPN id the crosswalk pairs with a gsis id (a join against a known id set needs them all). */
+export function espnIdsPairedWith(ctx: Pick<ToolContext, "services">, gsis: string): number[] {
+  try {
+    return ctx.services.crosswalk.byGsis(gsis).map((p) => p.espn_id);
+  } catch {
+    return [];
+  }
 }
 
 /** Re-exported for tools that need the full identity (team-unit checks on a PlatformPlayer). */

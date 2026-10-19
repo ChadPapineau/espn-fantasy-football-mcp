@@ -48,6 +48,7 @@ import { EffError } from "../errors.js";
 import { defineTool, roundDeep, type ToolContext } from "../define.js";
 import {
   crosswalkOf,
+  espnIdOfGsis,
   isDegradable,
   isOptionalReadFailure,
   leagueOf,
@@ -360,7 +361,7 @@ async function teamOfPlayer(
   if ("player_ids" in sel) id = sel.player_ids[0];
   else {
     const g = sel.gsis_ids[0];
-    id = g === undefined ? undefined : ctx.services.crosswalk.byGsis(g)[0]?.espn_id;
+    id = g === undefined ? undefined : (espnIdOfGsis(ctx, g) ?? undefined);
   }
   if (id === undefined) throw new EffError("NOT_FOUND");
   const got = await ctx.services.platform.getPlayers(
@@ -443,8 +444,7 @@ export const getDepthChart = defineTool({
     >();
     for (const r of rows) {
       const g = asGsisId(r.gsis_id);
-      const pid =
-        r.espn_id ?? (g === null ? null : (ctx.services.crosswalk.byGsis(g)[0]?.espn_id ?? null));
+      const pid = r.espn_id ?? (g === null ? null : espnIdOfGsis(ctx, g));
       const list = groups.get(r.pos_grp) ?? [];
       list.push({
         pos_abb: r.pos_abb,
@@ -1025,10 +1025,7 @@ export const getNews = defineTool({
         kept.flatMap((it) =>
           refsOf(it).map(
             (r) =>
-              r.espn_id ??
-              (r.gsis_id === null
-                ? null
-                : (ctx.services.crosswalk.byGsis(r.gsis_id)[0]?.espn_id ?? null)),
+              r.espn_id ?? (r.gsis_id === null ? null : espnIdOfGsis(ctx, r.gsis_id, warnings)),
           ),
         ),
       ),
@@ -1052,11 +1049,7 @@ export const getNews = defineTool({
         source: it.source,
         published_at: it.published_at,
         players_matched: refsOf(it).map((r) => {
-          const pid =
-            r.espn_id ??
-            (r.gsis_id === null
-              ? null
-              : (ctx.services.crosswalk.byGsis(r.gsis_id)[0]?.espn_id ?? null));
+          const pid = r.espn_id ?? (r.gsis_id === null ? null : espnIdOfGsis(ctx, r.gsis_id));
           return {
             gsis_id: r.gsis_id,
             player_id: pid !== null && pid > 0 ? pid : null,

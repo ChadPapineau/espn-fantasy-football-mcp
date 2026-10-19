@@ -10,7 +10,7 @@ import { BOUNDS } from "../bounds.js";
 import type { InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import type { ToolContext } from "../define.js";
-import { leagueRef, readOpts, take, withinBudget } from "./common.js";
+import { espnIdOfGsis, leagueRef, readOpts, take, withinBudget } from "./common.js";
 import { rostersOf } from "./roster.js";
 
 /** What a selector resolved to. */
@@ -26,13 +26,16 @@ export interface Selection {
 function espnIdsOfGsis(
   ctx: ToolContext,
   gsis: readonly string[],
+  warnings: string[],
 ): { ids: number[]; missing: number } {
   const ids: number[] = [];
   let missing = 0;
   for (const g of gsis) {
-    const pair = ctx.services.crosswalk.byGsis(g)[0];
-    if (pair === undefined) missing++;
-    else if (!ids.includes(pair.espn_id)) ids.push(pair.espn_id);
+    // the one current pair, never the lowest ESPN id (Stage C finding
+    // crosswalk-reverse-lookup-lowest-id)
+    const id = espnIdOfGsis(ctx, g, warnings);
+    if (id === null) missing++;
+    else if (!ids.includes(id)) ids.push(id);
   }
   return { ids, missing };
 }
@@ -136,7 +139,7 @@ export async function selectPlayers(
     return { players, roster: null, missing: selector.player_ids.length - players.length };
   }
   if ("gsis_ids" in selector) {
-    const { ids, missing } = espnIdsOfGsis(ctx, selector.gsis_ids);
+    const { ids, missing } = espnIdsOfGsis(ctx, selector.gsis_ids, warnings);
     const players = await byIds(ctx, ids, w, inputs);
     return { players, roster: null, missing: missing + ids.length - players.length };
   }

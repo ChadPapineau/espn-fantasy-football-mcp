@@ -83,6 +83,8 @@ import { carryOutcome, cpuDeadlineOf, seedOf, waiverPlayerOf, type Subject } fro
 import {
   canonicalPosition,
   crosswalkOf,
+  espnIdOfGsis,
+  espnIdsPairedWith,
   isDegradable,
   leagueRef,
   optionalDataset,
@@ -767,7 +769,7 @@ async function singlePlayer(
   if ("player_ids" in sel) id = sel.player_ids[0];
   else {
     const g = sel.gsis_ids[0];
-    id = g === undefined ? undefined : ctx.services.crosswalk.byGsis(g)[0]?.espn_id;
+    id = g === undefined ? undefined : (espnIdOfGsis(ctx, g) ?? undefined);
   }
   if (id === undefined) throw new EffError("NOT_FOUND");
   const ids = [id, ...extra.filter((x) => x !== id)].slice(0, 50);
@@ -816,7 +818,7 @@ export const analyzeInjuryCascadeTool = defineTool({
     if ("player_ids" in args.player) first = args.player.player_ids[0];
     else {
       const g = args.player.gsis_ids[0];
-      first = g === undefined ? undefined : ctx.services.crosswalk.byGsis(g)[0]?.espn_id;
+      first = g === undefined ? undefined : (espnIdOfGsis(ctx, g, warnings) ?? undefined);
     }
     const index = await universeOf(ctx, season, inputs, warnings);
     await turn();
@@ -1664,8 +1666,10 @@ export function waiverP1Extras(
     inputs.push(ti);
     for (const r of tr.rows) {
       if (r.kind !== "add" || r.gsis_id === null) continue;
-      const id = ctx.services.crosswalk.byGsis(r.gsis_id)[0]?.espn_id;
-      if (id !== undefined && byId.has(id)) sleeper.set(id, r.count);
+      // every ESPN id paired with the row's gsis id that is a candidate (a re-keyed player keeps
+      // his old id's pair beside the new one — Stage C finding crosswalk-reverse-lookup-lowest-id)
+      for (const id of espnIdsPairedWith(ctx, r.gsis_id))
+        if (byId.has(id)) sleeper.set(id, r.count);
     }
   }
   // the mechanics the league's own persisted feed has shown (null until a same-run pair exists)
