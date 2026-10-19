@@ -2,7 +2,9 @@
 // gsis_id crosses; plan 05 §2 `domain/crosswalk`; plan 06 §1.3 alert; plan 07 C1 { method, confidence },
 // G1 counts; plan 10 A6a). Ported from sibling @8db206f (matcher.ts), adapted: the ESPN id is the
 // entry point. Precedence: team unit by team → override → roster_weekly espn_id → nflverse players
-// espn_id → persisted pair → name + team + position (confidence 0.8; never name alone).
+// espn_id → persisted pair → name + team + position (confidence 0.8; never name alone). A run also
+// names the stored pairs it no longer accepts (`rejected`), so the store can hold exactly what the
+// run decided (Stage C finding crosswalk-rejected-pair-persists).
 import type { NflTeam } from "../../config/schema.js";
 import { GSIS_ID_RE } from "../../config/schema.js";
 import type { IsoInstant, PlatformPlayer } from "../league/types.js";
@@ -313,6 +315,15 @@ export interface CrosswalkRun<P> {
   readonly pairs: readonly CrosswalkPair[];
   /** The pairs to hand to `CrosswalkRepository.upsertDelta` (new or changed). */
   readonly changed: readonly CrosswalkPair[];
+  /**
+   * The stored pairs this run read and no longer accepts, as read, for `CrosswalkRepository
+   * .removeRejected`: the player resolved ambiguous or unmatched — his pair refuted by nflverse's id
+   * evidence, a removed override's pair, an invalid row, a name match the one-gsis rule demoted — or
+   * is a team unit, which is never paired. A matched player's differing row is rewritten through
+   * `changed` instead, and a stored player the run does not resolve keeps his pair (pairs never
+   * expire). Never a row the lookup gave for another ESPN id. Ascending by ESPN id, each id once.
+   */
+  readonly rejected: readonly CrosswalkPair[];
   /** ESPN ids whose pair is unchanged (for `CrosswalkRepository.touch`). */
   readonly unchanged_ids: readonly number[];
   readonly team_units: readonly ResolvedTeamUnit[];
@@ -372,6 +383,8 @@ interface Internal {
 interface Work<P> {
   readonly player: P;
   readonly identity: EspnPlayerIdentity;
+  /** The stored row the run read for this ESPN id (null: none, or a row of another id). */
+  readonly stored: CrosswalkPair | null;
   result: Internal;
 }
 
@@ -605,10 +618,14 @@ function teamUnit(identity: EspnPlayerIdentity, ctx: Ctx): Internal {
   return unit(null);
 }
 
-function resolveOne(identity: EspnPlayerIdentity, ctx: Ctx): Internal {
+function resolveOne(
+  identity: EspnPlayerIdentity,
+  stored: CrosswalkPair | null,
+  ctx: Ctx,
+): Internal {
   const espnId = identity.espn_id;
   if (isTeamUnitIdentity(identity)) return teamUnit(identity, ctx);
-  const prev = validPersisted(ctx.persisted.get(espnId), espnId, ctx);
+  const prev = validPersisted(stored, espnId, ctx);
   const hit = idEvidence(espnId, ctx);
   const override = ctx.overrides.get(espnId);
   if (override !== undefined) {
@@ -711,9 +728,22 @@ function checkInput<P>(input: CrosswalkRunInput<P>): { top: number; threshold: n
 }
 
 /**
+ * The stored pairs a run read and does not keep (`CrosswalkRun.rejected`): a player that ended
+ * neither matched nor paired keeps no row, so the tool-time path (a stored row) agrees with the run.
+ */
+function rejectedOf<P>(work: readonly Work<P>[]): readonly CrosswalkPair[] {
+  return work
+    .flatMap((w) =>
+      w.stored !== null && w.result.resolution.status !== "matched" ? [w.stored] : [],
+    )
+    .sort((a, b) => a.espn_id - b.espn_id);
+}
+
+/**
  * Resolves every player of one run (pure). The caller persists `changed` through
- * `CrosswalkRepository.upsertDelta`, refreshes `unchanged_ids` through `touch`, puts the report
- * counts into `espn_get_status.crosswalk` and notifies when `alert.triggered` (plan 06 §1.3).
+ * `CrosswalkRepository.upsertDelta`, removes `rejected` through `removeRejected`, refreshes
+ * `unchanged_ids` through `touch`, puts the report counts into `espn_get_status.crosswalk` and
+ * notifies when `alert.triggered` (plan 06 §1.3).
  */
 export function resolveCrosswalk<P>(input: CrosswalkRunInput<P>): CrosswalkRun<P> {
   const { top, threshold } = checkInput(input);
@@ -744,7 +774,14 @@ export function resolveCrosswalk<P>(input: CrosswalkRunInput<P>): CrosswalkRun<P
       continue;
     }
     seen.add(id);
-    work.push({ player, identity, result: resolveOne(identity, ctx) });
+    // read once, for team units too: a stored row is either kept, rewritten or rejected
+    const stored = ctx.persisted.get(id);
+    work.push({
+      player,
+      identity,
+      stored: stored?.espn_id === id ? stored : null,
+      result: resolveOne(identity, stored, ctx),
+    });
   }
   enforceUniqueGsis(work, diag);
 
@@ -797,6 +834,7 @@ export function resolveCrosswalk<P>(input: CrosswalkRunInput<P>): CrosswalkRun<P
     resolved,
     pairs,
     changed,
+    rejected: rejectedOf(work),
     unchanged_ids: unchanged,
     team_units: teamUnits,
     unresolved_team_units: unresolvedUnits,

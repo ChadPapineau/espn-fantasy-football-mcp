@@ -13,12 +13,14 @@ import {
   type CrosswalkRunInput,
   type PersistedPairLookup,
 } from "../../../src/domain/crosswalk/resolver.js";
-import type {
-  CrosswalkOverride,
-  CrosswalkPair,
-  EspnPlayerIdentity,
-  NflPlayerRecord,
-  NflRosterPlayer,
+import {
+  LAST_SEEN_GRANULARITY_MS,
+  type CrosswalkOverride,
+  type CrosswalkPair,
+  type CrosswalkRepository,
+  type EspnPlayerIdentity,
+  type NflPlayerRecord,
+  type NflRosterPlayer,
 } from "../../../src/domain/crosswalk/types.js";
 import { ESPN_PRO_TEAMS } from "../../../src/providers/espn/types.js";
 
@@ -267,6 +269,94 @@ export function run(
     ...(opts.rostered === undefined ? {} : { rostered: opts.rostered }),
     ...opts.extra,
   });
+}
+
+/** Whether two pairs are the same stored pair (the fields `upsertDelta` compares). */
+export function samePair(a: CrosswalkPair, b: CrosswalkPair): boolean {
+  return (
+    a.espn_id === b.espn_id &&
+    a.gsis_id === b.gsis_id &&
+    a.method === b.method &&
+    a.source === b.source &&
+    a.confidence === b.confidence
+  );
+}
+
+/** A store model: the crosswalk repository with its call log. */
+export interface StoreModel extends CrosswalkRepository {
+  readonly upserts: CrosswalkPair[][];
+  readonly removals: CrosswalkPair[][];
+  readonly touches: number[][];
+  /** Every row, ascending by ESPN id. */
+  rows(): CrosswalkPair[];
+}
+
+/**
+ * The crosswalk table in memory, with src/store/repos/crosswalk.ts's semantics: `upsertDelta` inserts a
+ * new id and rewrites gsis/method/source/confidence/last_seen (first_seen kept) only when one of the
+ * four differs; `removeRejected` deletes a row only while it still equals the pair (the contract in
+ * src/domain/crosswalk/types.ts); `touch` moves last_seen at LAST_SEEN_GRANULARITY_MS grain. Initial
+ * rows are taken as given (a corrupt table can be modelled). `removal: false` models a repository
+ * without `removeRejected`.
+ */
+export function storeModel(
+  initial: readonly CrosswalkPair[] = [],
+  opts: { readonly removal?: boolean } = {},
+): StoreModel {
+  const table = new Map(initial.map((p) => [p.espn_id, p]));
+  const upserts: CrosswalkPair[][] = [];
+  const removals: CrosswalkPair[][] = [];
+  const touches: number[][] = [];
+  const model: StoreModel = {
+    upserts,
+    removals,
+    touches,
+    rows: () => [...table.values()].sort((a, b) => a.espn_id - b.espn_id),
+    get: (id) => table.get(id) ?? null,
+    byGsis: (g) =>
+      [...table.values()].filter((p) => p.gsis_id === g).sort((a, b) => a.espn_id - b.espn_id),
+    upsertDelta: (pairs) => {
+      upserts.push([...pairs]);
+      let written = 0;
+      for (const p of pairs) {
+        const cur = table.get(p.espn_id);
+        if (cur === undefined) table.set(p.espn_id, p);
+        else if (!samePair(cur, p)) table.set(p.espn_id, { ...p, first_seen: cur.first_seen });
+        else continue;
+        written += 1;
+      }
+      return written;
+    },
+    touch: (ids, at) => {
+      touches.push([...ids]);
+      for (const id of ids) {
+        const cur = table.get(id);
+        if (
+          cur !== undefined &&
+          Date.parse(cur.last_seen) < Date.parse(at) - LAST_SEEN_GRANULARITY_MS
+        )
+          table.set(id, { ...cur, last_seen: at });
+      }
+      return { written: true };
+    },
+    count: () => table.size,
+  };
+  if (opts.removal === false) return model;
+  return {
+    ...model,
+    removeRejected: (pairs) => {
+      removals.push([...pairs]);
+      let removed = 0;
+      for (const p of pairs) {
+        const cur = table.get(p.espn_id);
+        if (cur !== undefined && samePair(cur, p)) {
+          table.delete(p.espn_id);
+          removed += 1;
+        }
+      }
+      return removed;
+    },
+  };
 }
 
 // --- the recorded ESPN fixtures ----------------------------------------------------------------

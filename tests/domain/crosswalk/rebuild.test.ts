@@ -117,6 +117,7 @@ describe("rebuildCrosswalk", () => {
     // the free agent is the only person roster_weekly does not pair; team units are never asked
     expect(players.asked).toEqual([[fx("Joe Mixon").espn_id]]);
     expect(out.written).toBe(FIXTURE.players.length);
+    expect(out.removed).toBe(0);
     expect(repo.upserts).toHaveLength(1);
     expect(out.touched).toBeNull();
     expect(out.run.alert.triggered).toBe(false);
@@ -144,6 +145,7 @@ describe("rebuildCrosswalk", () => {
     const second = rebuildCrosswalk({ ...deps, now: LATER });
     if (second.status !== "done") throw new Error("expected done");
     expect(second.written).toBe(0);
+    expect(second.removed).toBe(0);
     expect(repo.upserts).toHaveLength(1);
     expect(second.touched).toEqual({ written: true });
     expect(repo.touches).toEqual([FIXTURE.players.map((p) => p.espn_id)]);

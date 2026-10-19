@@ -447,6 +447,7 @@ describe("precedence: override → roster id → players id → persisted → ma
       changed: true,
     });
     expect(codes(r)).toEqual(["stale_override_pair"]);
+    expect(r.rejected).toEqual([]);
   });
 
   it("a persisted pair contradicted by nflverse's own ESPN id for that gsis is dropped", () => {
@@ -462,6 +463,8 @@ describe("precedence: override → roster id → players id → persisted → ma
     const r = run([other], { persisted: persistedOf([prev]) });
     expect(resolutionOf(r, 9000002).status).toBe("unmatched");
     expect(codes(r)).toEqual(["persisted_id_conflict"]);
+    // dropped from the store too, not only from this run (Stage C crosswalk-rejected-pair-persists)
+    expect(r.rejected).toEqual([prev]);
   });
 
   it.each([
@@ -1012,6 +1015,7 @@ describe("inputs", () => {
       resolved: [],
       pairs: [],
       changed: [],
+      rejected: [],
       unchanged_ids: [],
       team_units: [],
       unresolved_team_units: [],

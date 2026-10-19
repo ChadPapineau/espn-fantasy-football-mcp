@@ -146,6 +146,15 @@ export interface CrosswalkRepository {
   /** Best-effort: sets `last_seen` only on pairs older than the granularity. */
   touch(espnIds: readonly number[], at: IsoInstant): BestEffortOutcome;
   count(): number;
+  /**
+   * Additive (Stage C finding crosswalk-rejected-pair-persists): removes the pairs a rebuild no
+   * longer accepts (`CrosswalkRun.rejected`, as read), each only while its row still equals that pair
+   * on espn_id, gsis_id, method, source and confidence (the fields `upsertDelta` compares) — a row
+   * another rebuild rewrote in the meantime is kept. A required write: a failure propagates. Returns
+   * rows removed. Optional on the type only until the store implements it; a repository without it
+   * keeps every rejected pair, and `rebuildCrosswalk` then reports `removed: null`.
+   */
+  removeRejected?(pairs: readonly CrosswalkPair[]): number;
 }
 
 /** The nflverse roster port the crosswalk reads (over the `nflverse:roster_weekly` dataset file). */
