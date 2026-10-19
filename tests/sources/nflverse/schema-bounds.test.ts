@@ -20,12 +20,14 @@ import type { FileMetaData, SchemaElement } from "hyparquet";
 import { EXPECTED_COLUMNS } from "../../../src/sources/nflverse/index.js";
 import { openParquet } from "../../../src/sources/nflverse/parquet.js";
 import {
+  assertBoundedFooter,
   assertSchemaTree,
   PARQUET_DECODE_LIMITS,
   scanParquetPages,
 } from "../../../src/sources/nflverse/parquet-bounds.js";
 import { NflverseSourceError } from "../../../src/sources/nflverse/release.js";
 import {
+  footerNodeBomb,
   hostileParquet,
   nullPage,
   thrift,
@@ -186,6 +188,20 @@ describe("openParquet refuses a hostile schema before hyparquet walks it", () =>
       ],
     });
     expect((await refusal(bytes)).message).toMatch(/repeated root/);
+  });
+});
+
+describe("the footer's schema list counts against the thrift-node budget", () => {
+  // the schema list the walk checks element by element is itself one node; with the version field
+  // (1 node) consuming the budget, entering the list refuses before any element is read.
+  it("refuses when the schema list alone would exceed maxThriftNodes", () => {
+    const footer = footerNodeBomb(5);
+    expect(() => {
+      assertBoundedFooter(footer, { ...PARQUET_DECODE_LIMITS, maxThriftNodes: 1 });
+    }).toThrow(/unreadable parquet footer/);
+    expect(() => {
+      assertBoundedFooter(footer, { ...PARQUET_DECODE_LIMITS, maxThriftNodes: 100 });
+    }).not.toThrow();
   });
 });
 
