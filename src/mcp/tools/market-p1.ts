@@ -1306,18 +1306,32 @@ export function partsAbout(
 }
 
 /**
- * The NameKeys of the subject's NFL teammates in the local player index (not him, not a team unit,
- * not sharing his surname — a shared surname cannot tell them apart in text). The matcher refs a
- * player named by his surname only when the item also names his team, so a blurb's "with Quist
- * (ankle) ruled out" about a teammate may carry no ref at all: a teammate's surname in the text
- * makes the item a multi-player one for E10. Empty when the index is not loaded (refs alone decide).
+ * The NameKeys of the players around the subject in the local player index: his NFL teammates and
+ * the players of the team he faces in week `w` (not him, not a team unit, not sharing his surname — a
+ * shared surname cannot tell them apart in text). The matcher refs a player named by his surname
+ * only when the item also names his team, and an ESPN outlook carries no refs at all, so "with Quist
+ * (ankle) ruled out" about a teammate — or an opponent the outlook discusses — may carry nothing to
+ * say whom it is about: one of these surnames in the text makes it a multi-player text for E10.
+ * Empty when the index is not loaded (refs alone decide); the opponent is skipped when the week's
+ * pro schedule cannot say who it is.
  */
-export function teammateKeysOf(
+export function neighbourKeysOf(
   ctx: ToolContext,
   season: number,
+  w: Week,
   subject: { readonly espn_id: number; readonly pro_team_id: number; readonly keys: NameKeys },
 ): readonly NameKeys[] {
   if (subject.pro_team_id <= 0) return [];
+  const teams = new Set<number>([subject.pro_team_id]);
+  try {
+    for (const g of ctx.services.datasets.proSchedule.games(season, [w]).rows) {
+      if (g.week !== w) continue;
+      if (g.home_pro_team_id === subject.pro_team_id) teams.add(g.away_pro_team_id);
+      else if (g.away_pro_team_id === subject.pro_team_id) teams.add(g.home_pro_team_id);
+    }
+  } catch {
+    // the opponent stays unknown: teammates only
+  }
   let rows: readonly { espn_id: number; pro_team_id: number; full_name: string }[];
   try {
     rows = ctx.services.playerUniverse.all(season).rows;
@@ -1326,8 +1340,7 @@ export function teammateKeysOf(
   }
   const out: NameKeys[] = [];
   for (const r of rows) {
-    if (r.pro_team_id !== subject.pro_team_id || r.espn_id <= 0 || r.espn_id === subject.espn_id)
-      continue;
+    if (!teams.has(r.pro_team_id) || r.espn_id <= 0 || r.espn_id === subject.espn_id) continue;
     const k = nameKeysOf(r.full_name);
     if (k !== null && k.surname !== subject.keys.surname) out.push(k);
   }
@@ -1553,11 +1566,37 @@ export const analyzeEvidenceTool = defineTool({
       warnings.push("partial: espn:kona_player_info unavailable: no ESPN outlook in the evidence");
       return null;
     });
+    // the subject's name keys and the players around him (teammates, the week's opponent): a
+    // third-party text that names one of them is read only in its parts naming him alone (Stage C
+    // finding evidence-item-claims-misattributed: "with <teammate> sidelined, <him> …" in his own
+    // ESPN outlook was an 'out' claim about him)
+    const keys = nameKeysOf(p.name);
+    const around =
+      keys === null
+        ? []
+        : neighbourKeysOf(ctx, season, b.w, {
+            espn_id: p.ref.id,
+            pro_team_id: p.pro_team_id,
+            keys,
+          });
+    let outlooksScoped = 0;
+    const outlookText = (t: UntrustedText): UntrustedText | null => {
+      const named = namedIn(t.untrusted_text.value, around);
+      if (named.length === 0) return t;
+      outlooksScoped += 1;
+      return keys === null ? null : partsAbout(t, keys, named);
+    };
     for (const o of ol === null ? [] : take(ctx, ol, inputs)) {
       const wk = o.weekly[String(b.w)];
-      if (wk !== undefined) texts.push({ text: wk, time: p.last_news_at });
-      if (o.season !== null) texts.push({ text: o.season, time: null });
+      const wkText = wk === undefined ? null : outlookText(wk);
+      if (wkText !== null) texts.push({ text: wkText, time: p.last_news_at });
+      const seasonText = o.season === null ? null : outlookText(o.season);
+      if (seasonText !== null) texts.push({ text: seasonText, time: null });
     }
+    if (outlooksScoped > 0)
+      warnings.push(
+        `${String(outlooksScoped)} ESPN outlook text(s) also name other players: only their parts naming this player alone are read`,
+      );
     if (gsis !== null) {
       const since = new Date(ctx.nowMs - 7 * 24 * 3600 * 1000).toISOString();
       const news = ctx.services.datasets.news.recent(since, 10, [gsis]);
@@ -1569,19 +1608,14 @@ export const analyzeEvidenceTool = defineTool({
         // player it names, and "<starter> (ankle) ruled out, <him> to start" is no 'out' claim about
         // him; an item whose other players cannot be named is not read for him at all (Stage C
         // finding evidence-item-claims-misattributed)
-        const keys = nameKeysOf(p.name);
-        const mates =
-          keys === null
-            ? []
-            : teammateKeysOf(ctx, season, { espn_id: p.ref.id, pro_team_id: p.pro_team_id, keys });
         let scoped = 0;
         let skipped = 0;
         for (const it of news.rows.slice(0, 8)) {
           const byRefs = othersOf(ctx, it, { espn_id: p.ref.id, gsis_id: gsis, name: p.name });
-          // a teammate the matcher did not ref (his surname alone, no team named) counts too
+          // a player around him the matcher did not ref (his surname alone, no team named) counts too
           const unreffed = namedIn(
             `${it.title.untrusted_text.value}\n${it.blurb.untrusted_text.value}`,
-            mates,
+            around,
           );
           const who: ItemOthers =
             byRefs.kind === "unreadable" || unreffed.length === 0

@@ -332,6 +332,58 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
     expect(health(got.claims)).toEqual([]);
   }, 60_000);
 
+  it("his own ESPN outlook naming a teammate: the teammate's claim is not his (the control is)", async () => {
+    const index = world.services.playerUniverse.all(SEASON).rows;
+    const team = index.find((r) => r.espn_id === subject.id)?.pro_team_id ?? 0;
+    const surname = (n: string) => n.split(" ").at(-1) ?? n;
+    const mate = index.find(
+      (r) =>
+        r.pro_team_id === team &&
+        r.espn_id > 0 &&
+        r.espn_id !== subject.id &&
+        surname(r.full_name) !== surname(subject.name) &&
+        /^[A-Z][a-z]{3,}$/.test(surname(r.full_name)),
+    );
+    if (mate === undefined) throw new Error("no teammate in the index");
+    const outlook = (text: string): McpServices => {
+      const base = withNews({ title: T("League notes"), blurb: B(""), gsis_ids: [] });
+      const inner = base.platform;
+      const platform = new Proxy(inner, {
+        get(target, key) {
+          if (key === "getPlayerOutlooks")
+            return async (...a: Parameters<typeof inner.getPlayerOutlooks>) => {
+              const got = await target.getPlayerOutlooks(...a);
+              const week = String(a[2][0]);
+              return {
+                ...got,
+                value: [
+                  {
+                    player: { platform: "espn", id: subject.id },
+                    season: null,
+                    weekly: { [week]: wrapUntrusted(text, "espn.player.outlook") },
+                  },
+                ],
+              };
+            };
+          const v: unknown = Reflect.get(target, key);
+          return typeof v === "function" ? (v as (...x: unknown[]) => unknown).bind(target) : v;
+        },
+      });
+      return { ...base, platform };
+    };
+    const m = surname(mate.full_name);
+    const s = surname(subject.name);
+    const got = await evidence(outlook(`With ${m} sidelined, ${s} should see more work.`));
+    expect(got.flag).not.toBe("availability_conflict");
+    expect(health(got.claims)).toEqual([]);
+    expect(got.warnings).toContain(
+      "1 ESPN outlook text(s) also name other players: only their parts naming this player alone are read",
+    );
+    // control: the same claim about him alone is his
+    const own = await evidence(outlook(`${s} was ruled out for Sunday.`));
+    expect(own.flag).toBe("availability_conflict");
+  }, 60_000);
+
   it("an item whose other player's name cannot be read is not read for him at all", async () => {
     const got = await evidence(
       withNews({
