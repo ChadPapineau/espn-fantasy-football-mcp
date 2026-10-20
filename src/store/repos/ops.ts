@@ -1,9 +1,16 @@
 // ops.ts — the operational tables: refresh_log (plan 01 §5.5 which dataset file version is current;
 // plan 06 J2; the release age basis is `checked_at`), job_lock (single-flight jobs across processes,
 // plan 06 §1.3) and write_journal (PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision
-// D11): read-only counts for `espn_get_status.journal`; nothing in this build writes it). Ported from
-// sibling @cf3b015, adapted (synchronous repositories; SourceErrorCode errors).
+// D11): read-only counts for `espn_get_status.journal`; nothing in this build writes it). Every
+// refresh_log read the server runs is a fixed number of seeks in the (source, ok, id) index, never
+// a walk of the history (plan 03 §1.2: one bounded statement per turn; plan 10 A16a's 50 ms stall
+// bound — G1 reads every source's row once per source, so a read that grew with the history stalled
+// the loop 60–600 ms over a season: Stage C, store-refresh-log-unpruned-status-stall); `store prune`
+// bounds the history itself (src/store/prune.ts REFRESH_LOG_RETENTION_MS). Ported from sibling
+// @cf3b015, adapted (synchronous repositories; SourceErrorCode errors).
+import type { StatementSync } from "node:sqlite";
 import {
+  DATASET_SOURCE_IDS,
   isDatasetSourceId,
   isSourceErrorCode,
   type DatasetSourceId,
@@ -148,8 +155,51 @@ export function markCheckedRow(
   else db.prepare("UPDATE refresh_log SET checked_at = ? WHERE id = ?").run(checkedAt, cur.id);
 }
 
+/** The known source ids as the JSON array `REFRESH_LOG_SQL.current` iterates (fixed at build). */
+const SOURCE_IDS_JSON = JSON.stringify(DATASET_SOURCE_IDS);
+
+/**
+ * The refresh_log statements the server reads (tests/store/refresh-log-plans.test.ts holds each to
+ * index seeks — no statement walks the history, however long it grows):
+ * - `current`: per KNOWN source (a fixed list, bound as one JSON array), one seek for its newest
+ *   success, then that row by primary key. Before, every row of the table was visited, and each
+ *   visit ran its own correlated MAX — a full scan per call (≈ 25 ms at 10 000 rows, measured).
+ * - `latest`: the newest row of a source, success or failure: the largest id of each `ok` value is
+ *   one seek each (rows hold `ok` 0 or 1 only — insertRefreshRow, markCheckedRow), then that row by
+ *   primary key. Before, `source = ? ORDER BY id DESC` sorted every row of the source.
+ * - `consecutiveFailures`: the failures after the newest success — a seek, then a range bounded by
+ *   the current failure streak.
+ */
+export const REFRESH_LOG_SQL = Object.freeze({
+  current: `SELECT r.* FROM json_each(:sources) AS s
+    JOIN refresh_log AS r ON r.id = (SELECT c.id FROM refresh_log AS c
+      WHERE c.source = s.value AND c.ok = 1 ORDER BY c.id DESC LIMIT 1)
+    ORDER BY r.source`,
+  latest: `SELECT * FROM refresh_log WHERE id = (SELECT MAX(m.id) FROM (
+      SELECT MAX(id) AS id FROM refresh_log WHERE source = :s AND ok = 0
+      UNION ALL
+      SELECT MAX(id) AS id FROM refresh_log WHERE source = :s AND ok = 1) AS m)`,
+  consecutiveFailures: `SELECT COUNT(*) AS n FROM refresh_log WHERE source = :s AND ok = 0
+    AND id > COALESCE((SELECT MAX(id) FROM refresh_log WHERE source = :s AND ok = 1), 0)`,
+});
+
 export function refreshLogRepository(deps: RepoDeps): RefreshLogRepository {
   const { db, writes } = deps;
+  // Prepared once per connection, on first use: G1 runs these three once per listed source per call
+  // (51 runs under `full`), and compiling a statement — the guard's authorizer called back for every
+  // column it reads — costs far more than running it (≈ 0.3–0.6 ms per compile against ≈ 0.08 ms
+  // per run of `current`, measured on a loaded host): compiled per run, the compiles alone ate
+  // 15–30 ms of the 50 ms stall budget. node:sqlite resets a statement after every run, so a cached
+  // one never holds a read snapshot open.
+  const statements = new Map<keyof typeof REFRESH_LOG_SQL, StatementSync>();
+  const statement = (name: keyof typeof REFRESH_LOG_SQL): StatementSync => {
+    let st = statements.get(name);
+    if (st === undefined) {
+      st = db.prepare(REFRESH_LOG_SQL[name]);
+      statements.set(name, st);
+    }
+    return st;
+  };
   return {
     record(row) {
       checkRefreshRow(row);
@@ -158,35 +208,17 @@ export function refreshLogRepository(deps: RepoDeps): RefreshLogRepository {
       });
     },
     current() {
-      return (
-        db
-          .prepare(
-            `SELECT r.* FROM refresh_log AS r
-             WHERE r.ok = 1 AND r.id = (SELECT MAX(id) FROM refresh_log WHERE source = r.source AND ok = 1)
-             ORDER BY r.source`,
-          )
-          .all() as unknown as RefreshRow[]
-      )
+      // known sources only, by construction: a row of an id this binary does not know is never served
+      return (statement("current").all({ sources: SOURCE_IDS_JSON }) as unknown as RefreshRow[])
         .filter((r) => isDatasetSourceId(r.source))
         .map(toRefresh);
     },
     latest(source) {
-      const r = db
-        .prepare("SELECT * FROM refresh_log WHERE source = ? ORDER BY id DESC LIMIT 1")
-        .get(source) as RefreshRow | undefined;
+      const r = statement("latest").get({ s: source }) as RefreshRow | undefined;
       return r === undefined ? null : toRefresh(r);
     },
     consecutiveFailures(source) {
-      return num(
-        (
-          db
-            .prepare(
-              `SELECT COUNT(*) AS n FROM refresh_log WHERE source = :s AND ok = 0
-               AND id > COALESCE((SELECT MAX(id) FROM refresh_log WHERE source = :s AND ok = 1), 0)`,
-            )
-            .get({ s: source }) as { n: number }
-        ).n,
-      );
+      return num((statement("consecutiveFailures").get({ s: source }) as { n: number }).n);
     },
   };
 }
