@@ -136,7 +136,10 @@ export function recordedCredentialFile(configDir: string, home: string): string 
  * no restart (plan 02 §2.2 "Multiple processes"; plan 03 L6). The record only ever picks one of
  * these two backends: no path, service or other setting comes from it. The file backend's path is
  * config.json's (`CredentialStoreConfig.configDir`): setup records it there, never in the row, and
- * a path that changes is a new file store whose location rule runs before its first read.
+ * a path that changes is a new file store whose location rule runs before its first read. Opened
+ * without `configDir` it says so (`followsRecordedPath: false`): its file backend stays at the start
+ * path, which a setup run from another shell may never have written, so the authority does not
+ * take an empty file there as the end of the value a row records.
  */
 export interface InstallCredentialStore extends CredentialStore, FollowingCredentialStoreReader {
   readonly kind: CredentialStoreKind;
@@ -193,6 +196,14 @@ export function openCredentialStore(
   return {
     get kind(): CredentialStoreKind {
       return current;
+    },
+    // read as `fileBackend` reads it, when asked (opening touches nothing); unreadable → false
+    get followsRecordedPath(): boolean {
+      try {
+        return cfg.configDir !== undefined;
+      } catch {
+        return false;
+      }
     },
     followRecord: (r) => {
       record = r;

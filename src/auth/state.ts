@@ -9,8 +9,11 @@
 // config.json records (plan 03 §3; src/auth/stores.ts); `rejected` short-circuits with no request
 // until setup stores a new value or another process records an acceptance later than this
 // process's rejection (no restart in any of these). The row is shared with setup, status and the
-// daily job: this process clears or recreates it only when it describes the value this process
-// read (Stage C) — read, for an install store opened with `configDir`, where config.json says.
+// daily job: this process recreates it only for the value it read, and clears it only when its
+// read proves the value the row describes gone — the row in effect when the read started, naming
+// the backend read, where that value lives: the keychain, the file at the path config.json records
+// (an install store opened with `configDir`), or the file this process read that very value from
+// (Stage C findings auth-store-switch-deletes-credential-row, auth-file-path-switch-deletes-row).
 import type { CredentialStoreKind } from "../config/schema.js";
 import { cookieUnavailableFor } from "./errors.js";
 import { buildCookieHeader } from "./format.js";
@@ -193,13 +196,22 @@ export function createCredentialAuthority(
     header = null;
   };
 
-  /** One store operation and the backend that served it (an install store picks it at the call). */
+  /**
+   * One store operation, the backend that served it (an install store picks it at the call) and
+   * the value this league's row described when it started (`valueKey`; null: none, or unreadable).
+   */
   const served = async <T>(
     op: () => Promise<T>,
-  ): Promise<{ readonly value: T; readonly kind: CredentialStoreKind }> => {
+  ): Promise<{
+    readonly value: T;
+    readonly kind: CredentialStoreKind;
+    readonly before: string | null;
+  }> => {
+    const startRow = ownRow(quietRow());
+    const before = startRow === null ? null : valueKey(startRow);
     const pending = op();
     const kind = opts.store.kind;
-    return { value: await pending, kind };
+    return { value: await pending, kind, before };
   };
 
   const markRejected = (storedAt: string | null, atMs: number | null): void => {
@@ -228,21 +240,49 @@ export function createCredentialAuthority(
   };
 
   /**
-   * `kind`'s backend holds nothing: drop the value, and clear the row only when it describes a value
-   * that backend held (plan 03 §1.1 step 4: a row without items → not_configured). A row naming the
-   * other backend describes the value `eff setup --storage …` moved there: it is never cleared from
-   * here — clearing it would blank `eff status` and stop the daily credential check (plan 06 §1.4).
+   * Whether `kind`'s backend is where a row naming it keeps the value: the keychain (the install's
+   * one service), or the file an install store reads at the path config.json records. Any other
+   * file — the start path of an install store opened without `configDir`, a fixed backend — may
+   * not be the one `eff setup` wrote (plan 03 §3: setup records the path it used, and a shell's
+   * EFF_CREDENTIAL_FILE need not be this process's).
    */
-  const nothingStored = (kind: CredentialStoreKind): CookieHeaderResult => {
+  const placesValue = (kind: CredentialStoreKind): boolean => {
+    if (kind === "keychain") return true;
+    try {
+      return followsRecord(opts.store) && opts.store.followsRecordedPath;
+    } catch {
+      return false; // a store that cannot say proves nothing
+    }
+  };
+
+  /**
+   * `kind`'s backend holds nothing: drop the value, and clear the row only when this read proves
+   * the value it describes gone (plan 03 §1.1 step 4: a row without items → not_configured): the
+   * row names `kind` — a row naming the other backend describes the value `eff setup --storage …`
+   * moved there; it is the row in effect when the read started (`before`) — a row written during
+   * the read (setup records config.json, writes the value, then the row) describes a value the read
+   * may have missed; and the read looked where that value lives (`placesValue`), or the value is
+   * the one this process read from this very backend. Any other row stays: clearing it would blank
+   * `eff status`, stop the daily credential check (plan 06 §1.4) and undo the setup that wrote it.
+   * The label is `not_configured` either way; a row written during the read can still re-arm it.
+   */
+  const nothingStored = (kind: CredentialStoreKind, before: string | null): CookieHeaderResult => {
+    const held = loadedKind === kind ? (loaded?.meta.storedAt ?? null) : null;
     drop();
     const row = ownRow(readRow());
-    if (row !== null && row.state !== "not_configured" && row.store === kind) {
+    if (
+      row !== null &&
+      row.state !== "not_configured" &&
+      row.store === kind &&
+      valueKey(row) === before &&
+      (placesValue(kind) || (held !== null && row.stored_at === held))
+    ) {
       const seen = valueKey(row);
       persist((cur) =>
         cur !== null && cur.league_id === leagueId && valueKey(cur) === seen ? null : cur,
       );
     }
-    vanished = row === null ? null : valueKey(row);
+    vanished = before;
     adopt(null, "not_configured");
     return { ok: false, reason: "not_configured" };
   };
@@ -280,23 +320,27 @@ export function createCredentialAuthority(
     let meta: StoredSecretMeta | null;
     let fresh: StoredCredential | null = null;
     let kind: CredentialStoreKind;
+    /** The row's value when the last store operation started. */
+    let before: string | null;
     try {
       if (loaded === null && state !== "rejected") {
         const r = await served(() => opts.store.read());
         fresh = r.value;
         kind = r.kind;
+        before = r.before;
         meta = fresh?.meta ?? null;
       } else {
         const r = await served(() => opts.store.readMeta());
         meta = r.value;
         kind = r.kind;
+        before = r.before;
       }
     } catch (e) {
       return { ok: false, reason: cookieUnavailableFor(e) };
     }
     // the install moved to the other backend: the value held came from the one setup emptied
     if (loadedKind !== null && loadedKind !== kind) drop();
-    if (meta === null) return nothingStored(kind);
+    if (meta === null) return nothingStored(kind, before);
 
     // a rejection whose value is unknown (a row without stored_at) is taken to be the stored one:
     // never send a cookie that may be the rejected one; a later `eff setup` still lifts it
@@ -317,10 +361,11 @@ export function createCredentialAuthority(
         const r = await served(() => opts.store.read());
         fresh = r.value;
         kind = r.kind;
+        before = r.before;
       } catch (e) {
         return { ok: false, reason: cookieUnavailableFor(e) };
       }
-      if (fresh === null) return nothingStored(kind);
+      if (fresh === null) return nothingStored(kind, before);
     }
     if (fresh !== null) {
       registerCredentialRedaction(opts.registrar, fresh.cookies);
@@ -330,7 +375,7 @@ export function createCredentialAuthority(
     }
     const value = loaded;
     const from = loadedKind;
-    if (value === null || header === null || from === null) return nothingStored(kind);
+    if (value === null || header === null || from === null) return nothingStored(kind, before);
 
     const row = settle(value.meta.storedAt, from);
     const next: CredentialState =

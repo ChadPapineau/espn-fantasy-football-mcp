@@ -3,7 +3,9 @@
 // read at construction), the plan 02 §2.1 transitions recorded through the repository, `rejected`
 // short-circuits without reading the secret, a new `storedAt` reloads without a restart, another
 // process's later acceptance reloads to `validated`, an earlier one does not; the daily probe edge;
-// the value is registered with the redactor on load and dropped on rejection.
+// the value is registered with the redactor on load and dropped on rejection; an empty read clears
+// the row only when it proves the row's value gone (where that value lives, the row unchanged
+// since the read started).
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { CredentialStoreError } from "../../src/auth/errors.js";
@@ -11,6 +13,7 @@ import { buildCookieHeader } from "../../src/auth/format.js";
 import { createCredentialAuthority, deriveStartupState } from "../../src/auth/state.js";
 import type { CredentialObservation, CredentialState } from "../../src/auth/types.js";
 import {
+  FollowingMemoryStore,
   MemoryStateRepo,
   MemoryStore,
   RecordingRegistrar,
@@ -237,6 +240,142 @@ describe("the row: items without a row are recreated as stored; a row without it
       },
     });
     expect((await auth.getCookieHeader()).ok).toBe(true);
+  });
+});
+
+describe("a row is cleared only when the read proves its value gone (Stage C finding auth-file-path-switch-deletes-row)", () => {
+  const T5 = "2026-10-06T00:00:00.000Z";
+  /** The authority over `store`, with this league's row set to `row`. */
+  function over(store: FollowingMemoryStore | MemoryStore, row: ReturnType<typeof stateRow>) {
+    const repo = new MemoryStateRepo();
+    repo.row = row;
+    const auth = createCredentialAuthority({
+      store,
+      repo,
+      leagueId: "0",
+      registrar: new RecordingRegistrar(),
+      now: () => T3,
+    });
+    return { repo, auth };
+  }
+  const fileRow = (storedAt: string) =>
+    stateRow({
+      state: "validated",
+      store: "file",
+      stored_at: storedAt,
+      last_accepted_at: storedAt,
+    });
+
+  it("a store reading its start path, not config.json's: a `file` row for a value it never read stays", async () => {
+    // a keychain server; `EFF_CREDENTIAL_FILE=<alt> eff setup --storage file` emptied the keychain,
+    // wrote <alt> and the row — this store follows the row to the file at ITS path, which is empty
+    const store = new FollowingMemoryStore("keychain", false);
+    const c = fakeCookies("guard-a");
+    store.keychain.set(c, T0);
+    const { repo, auth } = over(
+      store,
+      stateRow({ state: "validated", stored_at: T0, last_accepted_at: T0 }),
+    );
+    expect((await auth.getCookieHeader()).ok).toBe(true);
+    store.keychain.stored = null;
+    const setupRow = fileRow(T5);
+    repo.row = setupRow;
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(store.kind).toBe("file");
+    expect(repo.row).toBe(setupRow); // eff status and the daily credential check still see it
+    expect(auth.state()).toBe("not_configured");
+    expect(auth.state()).toBe("not_configured"); // the same row never re-arms the label
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(repo.row).toBe(setupRow);
+    expect(auth.holdsSecret()).toBe(false);
+  });
+
+  it("…and the same for a fixed file backend: it cannot say where config.json puts the file", async () => {
+    const setupRow = fileRow(T5);
+    const { repo, auth } = over(new MemoryStore("file"), setupRow);
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(repo.row).toBe(setupRow);
+  });
+
+  it("…and for a store that cannot say whether it reads the recorded path (never a throw)", async () => {
+    class Unsure extends FollowingMemoryStore {
+      override get followsRecordedPath(): boolean {
+        throw new Error("cannot tell");
+      }
+    }
+    const setupRow = fileRow(T5);
+    const { repo, auth } = over(new Unsure("file", true), setupRow);
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(repo.row).toBe(setupRow);
+  });
+
+  it("a value this process read from that very file is cleared when it vanishes (a row without items)", async () => {
+    for (const store of [new FollowingMemoryStore("file", false), new MemoryStore("file")]) {
+      const file = store instanceof FollowingMemoryStore ? store.fileAt : store;
+      file.set(fakeCookies("guard-held"), T0);
+      const { repo, auth } = over(store, fileRow(T0));
+      expect((await auth.getCookieHeader()).ok).toBe(true);
+      file.stored = null;
+      expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+      expect(repo.row).toBeNull();
+      expect(auth.state()).toBe("not_configured");
+    }
+  });
+
+  it("the file at the path config.json records, and the keychain, prove a row without items", async () => {
+    const wired = new FollowingMemoryStore("file", true);
+    const f = over(wired, fileRow(T0));
+    expect(await f.auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(f.repo.row).toBeNull();
+    for (const recordsPath of [false, true]) {
+      const k = over(
+        new FollowingMemoryStore("keychain", recordsPath),
+        stateRow({ state: "validated", stored_at: T0 }),
+      );
+      expect(await k.auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+      expect(k.repo.row).toBeNull();
+    }
+  });
+
+  it("a row written while the read was under way is never cleared by it; the label follows it", async () => {
+    // the install's recorded file was emptied; while this process reads it, another terminal's
+    // `eff setup --storage file` (another path) records config.json, writes the value, then the row
+    const store = new FollowingMemoryStore("file", true);
+    const { repo, auth } = over(store, fileRow(T0));
+    const b = fakeCookies("guard-mid");
+    const setupRow = fileRow(T5);
+    store.midRead = () => {
+      const moved = new MemoryStore("file");
+      moved.set(b, T5);
+      store.fileAt = moved;
+      repo.row = setupRow;
+    };
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(repo.row).toBe(setupRow);
+    expect(auth.state()).toBe("validated");
+    const r = await auth.getCookieHeader();
+    expect(r.ok && r.header === buildCookieHeader(b)).toBe(true);
+    expect(repo.row).toMatchObject({ state: "validated", store: "file", stored_at: T5 });
+  });
+
+  it("a keychain row written during the read is not cleared either; one removed then stays removed", async () => {
+    // an emptied keychain; another process records a new keychain value's row while this one reads
+    const store = new FollowingMemoryStore("keychain", false);
+    const { repo, auth } = over(store, stateRow({ state: "validated", stored_at: T0 }));
+    const setupRow = stateRow({ state: "stored", stored_at: T5 });
+    store.midRead = () => {
+      repo.row = setupRow;
+    };
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(repo.row).toBe(setupRow);
+    expect(auth.state()).toBe("stored");
+
+    // `eff setup --reset` while the read was under way: nothing to clear, nothing recreated
+    store.midRead = () => {
+      repo.row = null;
+    };
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(repo.row).toBeNull();
   });
 });
 

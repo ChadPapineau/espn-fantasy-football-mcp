@@ -147,6 +147,15 @@ export interface FollowingCredentialStoreReader extends CredentialStoreReader {
   readonly kind: CredentialStoreKind;
   /** Before every operation the store moves to the backend `record` names (null: stays put). */
   followRecord(record: CredentialStoreRecord): void;
+  /**
+   * Additive (Stage C): whether the file backend reads the session.json path config.json records
+   * when each operation starts (opened with `configDir`) — the install's file, so a file it finds
+   * empty says the value a `file` row records is gone. False: the path this process resolved at
+   * start, which an `eff setup --storage file` run from a shell naming another
+   * `EFF_CREDENTIAL_FILE` never wrote (plan 03 §3) — an empty file there says nothing about the
+   * value the row records, so the authority leaves that row alone (src/auth/state.ts).
+   */
+  readonly followsRecordedPath: boolean;
 }
 
 // --- the cookie-header port (plan 01 §10) ------------------------------------------------------

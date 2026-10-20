@@ -246,6 +246,14 @@ describe("the file path config.json records (Stage C finding auth-file-path-swit
     ).toBeNull();
   });
 
+  it("the store says whether its file is the one config.json records (the authority's clearing rule)", () => {
+    // src/auth/state.ts clears a `file` row on an empty read only where that read is the install's
+    expect(openCredentialStore("file", cfg).followsRecordedPath).toBe(false);
+    expect(openCredentialStore("keychain", cfg).followsRecordedPath).toBe(false);
+    expect(wired("file").followsRecordedPath).toBe(true);
+    expect(wired("keychain").followsRecordedPath).toBe(true);
+  });
+
   it("nothing is read at construction or for a keychain operation; the choice stays synchronous", async () => {
     rawConfig("{ not json");
     let recorded: CredentialStoreKind | null = "keychain";
@@ -339,6 +347,7 @@ describe("the file path config.json records (Stage C finding auth-file-path-swit
         throw leaky;
       },
     });
+    expect(s.followsRecordedPath).toBe(false); // it cannot say, so it never claims the recorded path
     for (const op of [() => s.read(), () => s.readMeta(), () => s.exists()]) {
       let pending: Promise<unknown> | null = null;
       expect(() => {

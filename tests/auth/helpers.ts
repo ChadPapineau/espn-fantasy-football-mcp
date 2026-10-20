@@ -1,14 +1,19 @@
 // helpers.ts — fakes for the auth tests: an in-memory keyring (with failure injection and a call
 // log that records service/account only, never values), an in-memory credential_state repository
-// with the real read-modify-write contract, an in-memory CredentialStore, a recording redactor and
-// fake cookies derived at run time (scripts/ci/secret-fixtures.mjs — no flaggable literal).
+// with the real read-modify-write contract, an in-memory CredentialStore, an in-memory install
+// store that follows the bound record (and can let another process act mid-read), a recording
+// redactor and fake cookies derived at run time (scripts/ci/secret-fixtures.mjs — no flaggable
+// literal).
 import { fakeEspnS2, fakeGuid } from "../../scripts/ci/secret-fixtures.mjs";
 import type { KeyringPort } from "../../src/auth/keychain.js";
 import type {
   CredentialStateRepository,
   CredentialStateRow,
   CredentialStore,
+  CredentialStoreKind,
+  CredentialStoreRecord,
   EspnCookies,
+  FollowingCredentialStoreReader,
   SecretRegistrar,
   StoredCredential,
   StoredSecretMeta,
@@ -183,6 +188,61 @@ export class MemoryStore implements CredentialStore {
     if (this.failDelete) return Promise.reject(this.failDelete);
     this.stored = null;
     return Promise.resolve();
+  }
+}
+
+/**
+ * The install store's shape (src/auth/stores.ts `openCredentialStore`) over in-memory backends: it
+ * starts on `start`, follows the bound record's kind, and picks the backend synchronously when an
+ * operation starts — `fileAt` is the file at the path config.json records at that moment (a test
+ * swaps it to move the install). `followsRecordedPath` says whether that is the recorded path.
+ * `midRead` runs once inside the next operation, after its backend was picked and before that
+ * backend answers (another process acting while this one reads).
+ */
+export class FollowingMemoryStore implements FollowingCredentialStoreReader {
+  readonly keychain = new MemoryStore("keychain");
+  fileAt = new MemoryStore("file");
+  midRead: (() => void) | null = null;
+  private readonly recordsPath: boolean;
+  private current: CredentialStoreKind;
+  private record: CredentialStoreRecord | null = null;
+
+  constructor(start: CredentialStoreKind, followsRecordedPath: boolean) {
+    this.current = start;
+    this.recordsPath = followsRecordedPath;
+  }
+  get kind(): CredentialStoreKind {
+    return this.current;
+  }
+  get followsRecordedPath(): boolean {
+    return this.recordsPath;
+  }
+  followRecord(record: CredentialStoreRecord): void {
+    this.record = record;
+  }
+  private async run<T>(op: (b: MemoryStore) => Promise<T>): Promise<T> {
+    let next: CredentialStoreKind | null = null;
+    try {
+      next = this.record?.() ?? null;
+    } catch {
+      next = null;
+    }
+    if (next !== null) this.current = next;
+    const b = this.current === "keychain" ? this.keychain : this.fileAt;
+    await Promise.resolve();
+    const hook = this.midRead;
+    this.midRead = null;
+    hook?.();
+    return op(b);
+  }
+  read(): Promise<StoredCredential | null> {
+    return this.run((b) => b.read());
+  }
+  readMeta(): Promise<StoredSecretMeta | null> {
+    return this.run((b) => b.readMeta());
+  }
+  exists(): Promise<boolean> {
+    return this.run((b) => b.exists());
   }
 }
 

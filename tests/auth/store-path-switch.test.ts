@@ -11,13 +11,14 @@
 // its config dir, the authority and the composition root's probe access. The server reads the value
 // at the path config.json records with no restart, never deletes the row setup wrote (so `eff
 // status` and the daily credential check keep seeing it), clears a row only for a value gone from
-// that path, and fails closed on a config.json it cannot read. A property drives random
-// interleavings of setups from shells naming any path, resets, calls, probe reads and observations.
+// that path — never one another terminal's setup writes while it reads — and fails closed on a
+// config.json it cannot read. A property drives random interleavings of setups from shells naming
+// any path, resets, calls, probe reads and observations.
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { fileStoreExistsSync } from "../../src/auth/file.js";
+import { fileStoreExistsSync, sessionFileBody } from "../../src/auth/file.js";
 import { buildCookieHeader } from "../../src/auth/format.js";
 import type { KeychainSelftestResult } from "../../src/auth/selftest.js";
 import { runSetup, type PromptAnswer } from "../../src/auth/setup.js";
@@ -30,13 +31,20 @@ import {
   type CredentialStoreKind,
   type EspnCookies,
 } from "../../src/auth/types.js";
+import { metaFor } from "../../src/auth/upgrade.js";
 import { mergeConfigPatch, patchConfigFile, type ConfigPatch } from "../../src/cli/config-file.js";
 import { configPatchOf } from "../../src/cli/setup.js";
-import { configFilePath } from "../../src/config/paths.js";
+import { configFilePath, type XattrReader } from "../../src/config/paths.js";
 import { loadConfig, readConfigFile, type Config } from "../../src/config/schema.js";
 import { withProbeAccess } from "../../src/services/index.js";
 import { ROOT, noXattrs, tempDir } from "../config/helpers.js";
-import { FakeKeyring, MemoryStateRepo, RecordingRegistrar, fakeCookies } from "./helpers.js";
+import {
+  FakeKeyring,
+  MemoryStateRepo,
+  RecordingRegistrar,
+  fakeCookies,
+  stateRow,
+} from "./helpers.js";
 
 const LEAGUE = "0";
 const T0 = "2026-10-01T00:00:00.000Z";
@@ -188,12 +196,20 @@ async function setup(
   return r.exitCode;
 }
 
-/** A long-lived process as the composition roots wire it: started from `envFile`'s env. */
-function server(envFile: string | null, observer: CredentialObserver = "server") {
+/**
+ * A long-lived process as the composition roots are to wire it (src/auth/stores.ts: the install store
+ * opened with its config dir): started from `envFile`'s env.
+ */
+function server(
+  envFile: string | null,
+  observer: CredentialObserver = "server",
+  xattr: XattrReader = noXattrs,
+) {
   const c = resolveConfig(envFile);
   const reg = new RecordingRegistrar();
   const store = openCredentialStore(c.credentialStore, {
     ...storeConfig(c),
+    xattr,
     configDir: c.configDir,
   });
   const auth = createCredentialAuthority({
@@ -382,6 +398,51 @@ describe("the row is judged at the path config.json records", () => {
     writeFileSync(configFilePath(configDir), good, { mode: 0o600 });
     expect(carries(await srv.auth.getCookieHeader(), b)).toBe(true);
     expect(observers()).toMatchObject({ status: "validated", storedAt: T5, store: "file" });
+  });
+});
+
+describe("another terminal's setup landing while the server reads (no row it cannot verify is cleared)", () => {
+  it("a row written during a read of the recorded path is never cleared by that read", async () => {
+    const [a, b] = [fakeCookies("ps-race-a"), fakeCookies("ps-race-b")];
+    expect(await setup(a, T0, "file", alt())).toBe(0);
+    rmSync(alt()); // the value at the recorded path is gone (removed by hand); its row is stale
+    const stale = repo.row;
+    expect(stale).toMatchObject({ store: "file", stored_at: T0 });
+    // while this process runs the location rule before its first read of <alt>, another terminal's
+    // `EFF_CREDENTIAL_FILE=<alt2> eff setup --storage file` completes: config.json, the file, the row
+    const setupRow = stateRow({
+      state: "validated",
+      store: "file",
+      stored_at: T5,
+      last_accepted_at: T5,
+      updated_at: T5,
+    });
+    let landed = 0;
+    const midRead: XattrReader = (paths) => {
+      if (landed++ === 0) {
+        recordQuickly({ EFF_CREDENTIAL_STORE: "file", EFF_CREDENTIAL_FILE: alt("alt2") });
+        writeFileSync(alt("alt2"), sessionFileBody(b, metaFor(b, T5)), { mode: 0o600 });
+        repo.put(setupRow);
+      }
+      return noXattrs(paths);
+    };
+    const srv = server(null, "server", midRead);
+    expect(srv.startPath).toBe(alt());
+    expect(srv.auth.state()).toBe("validated"); // the stale row's label, until the first read
+    expect(await srv.auth.getCookieHeader()).toEqual({ ok: false, reason: "not_configured" });
+    expect(landed).toBeGreaterThan(0);
+    // <alt> really was empty, but the row is setup's, for a value at <alt2>: it stays
+    expect(repo.row).toEqual(setupRow);
+    expect(observers()).toEqual({
+      status: "validated",
+      storedAt: T5,
+      store: "file",
+      dailyCheckProbes: true,
+    });
+    // the label follows setup's row, and the next call reads where config.json now says
+    expect(srv.auth.state()).toBe("validated");
+    expect(carries(await srv.auth.getCookieHeader(), b)).toBe(true);
+    expect(repo.row).toMatchObject({ state: "validated", store: "file", stored_at: T5 });
   });
 });
 
