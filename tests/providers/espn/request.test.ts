@@ -8,6 +8,10 @@ import { EspnBreakerOpenError } from "../../../src/providers/espn/limiter.js";
 import { communicationTarget } from "../../../src/providers/espn/path.js";
 import { parseJsonSafe } from "../../../src/providers/espn/request.js";
 import {
+  createUpstreamBudget,
+  isUpstreamBudgetExhausted,
+} from "../../../src/providers/platform.js";
+import {
   FakeAuthority,
   jsonResponse,
   loadFixture,
@@ -187,6 +191,44 @@ describe("the provisional resolver and the probe request", () => {
       effCode: "ESPN_UPSTREAM_UNAVAILABLE",
     });
     expect(net.limiter.rows[0]?.outcome).toBe("network_error");
+  });
+  it("probeSend inside a call budget: nothing is sent past its deadline or beyond its cap (no row)", async () => {
+    const w = makeWorld({ fetch: () => Promise.resolve(jsonResponse({ topics: [] })) });
+    const req = (
+      w.provider as unknown as {
+        req: { probeSend: (t: unknown, f: unknown, c: unknown, b?: unknown) => Promise<number> };
+      }
+    ).req;
+    const board = communicationTarget({
+      host: "lm-api-reads.fantasy.espn.com",
+      season: SEASON,
+      leagueId: "0",
+    });
+    const passed = createUpstreamBudget("r-0123456789ab", w.clock.nowMs() - 30_000);
+    await expect(req.probeSend(board, null, null, passed)).rejects.toMatchObject({
+      effCode: "ESPN_UPSTREAM_UNAVAILABLE",
+      effDetails: { reason: "call_deadline" },
+    });
+    const spent = createUpstreamBudget("r-0123456789ab", w.clock.nowMs(), 0);
+    await expect(req.probeSend(board, null, null, spent)).rejects.toMatchObject({
+      effCode: "ESPN_UPSTREAM_UNAVAILABLE",
+      effDetails: { reason: "call_budget" },
+    });
+    expect(w.sent).toHaveLength(0);
+    expect(w.limiter.rows).toHaveLength(0);
+    // a budget with room: one request, paid from it
+    const ok = createUpstreamBudget("r-0123456789ab", w.clock.nowMs());
+    await expect(req.probeSend(board, null, null, ok)).resolves.toBe(200);
+    expect(ok.used()).toBe(1);
+  });
+  it("an attempt left with no time when its slot is granted sends nothing; its row is no counted failure", async () => {
+    const w = makeWorld({ fetch: () => Promise.resolve(pro()), over: { attemptTimeoutMs: 0 } });
+    const e = await w.provider.getProSchedule(SEASON).catch((x: unknown) => x);
+    expect(isUpstreamBudgetExhausted(e)).toBe(true);
+    expect(w.sent).toHaveLength(0);
+    // the row the limiter wrote reads client_error (nothing went out), never network_error
+    expect(w.limiter.rows.map((r) => r.outcome)).toEqual(["client_error"]);
+    expect(w.provider.transportStatus().consecutive_failures).toBe(0);
   });
   it("parseJsonSafe drops every __proto__ key at any depth", () => {
     const v = parseJsonSafe('{"a":[{"__proto__":{"x":1},"b":2}]}') as {

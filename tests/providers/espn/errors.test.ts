@@ -7,6 +7,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { BREAKER_FAILURE_OUTCOMES } from "../../../src/config/schema.js";
+import { ESPN_BREAKER_FAILURE_OUTCOMES } from "../../../src/providers/platform.js";
 import { classifyFetchError } from "../../../src/http/errors.js";
 import { toToolError } from "../../../src/mcp/errors.js";
 import {
@@ -281,6 +282,66 @@ describe("thrown network failures", () => {
       classifyThrown(Object.assign(new Error("x"), { code: "ECONNREFUSED" }), false, "mRoster")
         .kind,
     ).toBe("network");
+  });
+  // Stage C finding espn-tls-failure-retried-transient: a certificate failure fell through to
+  // network_transient — three attempts per read, never counted — where src/http says `tls`, not
+  // retryable
+  it("a certificate or TLS-protocol failure anywhere in the chain → tls: never retried, counted", () => {
+    // the shape Node 24's fetch gives a self-signed endpoint (checked against a local server)
+    const selfSigned = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("self-signed certificate"), {
+        code: "DEPTH_ZERO_SELF_SIGNED_CERT",
+      }),
+    });
+    for (const code of [
+      "DEPTH_ZERO_SELF_SIGNED_CERT",
+      "SELF_SIGNED_CERT_IN_CHAIN",
+      "CERT_HAS_EXPIRED",
+      "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+      "ERR_TLS_CERT_ALTNAME_INVALID",
+      "ERR_SSL_WRONG_VERSION_NUMBER",
+      "EPROTO",
+    ]) {
+      const thrown = new TypeError("fetch failed", {
+        cause: Object.assign(new Error("tls"), { code }),
+      });
+      const e = classifyThrown(thrown, false, "mSettings");
+      expect(e, code).toMatchObject({
+        kind: "tls",
+        retryable: false,
+        outcome: "network_error",
+        effCode: "ESPN_UPSTREAM_UNAVAILABLE",
+        effDetails: { view: "mSettings", reason: "tls" },
+      });
+      expect(e.cause).toBe(thrown);
+      // the two classifiers agree: src/http calls it `tls`, and it is not retryable there either
+      const http = classifyFetchError(thrown, null, null, true);
+      expect(http.kind, code).toBe("tls");
+      expect(http.retryable).toBe(false);
+      // a breaker failure, like every network failure (plan 05 §4.1)
+      expect(ESPN_BREAKER_FAILURE_OUTCOMES).toContain(e.outcome);
+    }
+    expect(classifyThrown(selfSigned, false, "mRoster").kind).toBe("tls");
+    // deeper in the chain, still found; our own timer still names a timeout
+    const deep = new TypeError("fetch failed", {
+      cause: new Error("wrap", {
+        cause: Object.assign(new Error("x"), { code: "CERT_HAS_EXPIRED" }),
+      }),
+    });
+    expect(classifyThrown(deep, false, "mRoster").kind).toBe("tls");
+    expect(classifyThrown(selfSigned, true, "mRoster").kind).toBe("timeout");
+  });
+  it("the caller's cancellation is its own kind: no verdict, never retried, never counted", () => {
+    const e = new EspnUpstreamError("aborted", { view: "mRoster", reason: "aborted" });
+    expect(e).toMatchObject({
+      effCode: "ESPN_UPSTREAM_UNAVAILABLE",
+      outcome: "client_error",
+      retryable: false,
+    });
+    expect(ESPN_BREAKER_FAILURE_OUTCOMES).not.toContain(e.outcome);
+    // every network failure the classifier names is a breaker failure (plan 05 §4.1)
+    for (const k of ["network", "network_transient", "tls", "timeout"] as const)
+      expect(ESPN_BREAKER_FAILURE_OUTCOMES, k).toContain(FAILURE_TABLE[k].outcome);
   });
   it("resets, odd throws → network_transient (retryable)", () => {
     expect(

@@ -267,10 +267,26 @@ export interface TransportStatus {
 }
 
 /**
+ * The outcomes the ESPN breaker counts as failures, in process (limiter.ts `Breaker`) and derived
+ * from the persisted rows (`breakerFromOutcomes`): config's BREAKER_FAILURE_OUTCOMES (5xx, 429,
+ * timeouts — plan 01 §6) plus `network_error`. Plan 05 §4.1's fault matrix counts ECONNRESET like a
+ * 5xx ("3 attempts; breaker opens after 3 consecutive") and ENOTFOUND/ECONNREFUSED on the "breaker
+ * counter", and plan 01 §5.7 promises that a dead host costs 3 requests, not a request per tool
+ * call — so a resetting edge, a refused connection or a certificate failure counts (Stage C finding
+ * espn-breaker-ignores-resets; src/http/breaker.ts HTTP_BREAKER_FAILURE_OUTCOMES records the same
+ * reading). The caller's own cancellation is never `network_error` (errors.ts `aborted`).
+ */
+export const ESPN_BREAKER_FAILURE_OUTCOMES: readonly RequestOutcome[] = Object.freeze([
+  ...BREAKER_FAILURE_OUTCOMES,
+  "network_error",
+]);
+
+/**
  * The breaker state DERIVED from persisted outcomes (newest first) — the reading `eff status`,
  * `eff doctor` and a second server use, since the in-process breaker lives in another process:
- * open while the newest ESPN_BREAKER.failures outcomes are all failures and the newest of them is
- * less than ESPN_BREAKER.openMs old. `pending` rows (in flight) are skipped. Pure.
+ * open while the newest ESPN_BREAKER.failures outcomes are all failures (ESPN_BREAKER_FAILURE_
+ * OUTCOMES) and the newest of them is less than ESPN_BREAKER.openMs old. `pending` rows (in
+ * flight) are skipped. Pure.
  */
 export function breakerFromOutcomes(
   newestFirst: readonly { readonly at_ms: number; readonly outcome: RequestOutcome }[],
@@ -280,7 +296,7 @@ export function breakerFromOutcomes(
   let newestFailureMs: number | null = null;
   for (const r of newestFirst) {
     if (r.outcome === "pending") continue;
-    if (!BREAKER_FAILURE_OUTCOMES.includes(r.outcome)) break;
+    if (!ESPN_BREAKER_FAILURE_OUTCOMES.includes(r.outcome)) break;
     consecutive++;
     newestFailureMs ??= r.at_ms;
   }
@@ -360,11 +376,18 @@ export type StatsQuery =
 export interface CredentialProbeResult {
   /** null when nothing is stored, or the board probe does not discriminate here (ADV OBJ-26). */
   readonly accepted: boolean | null;
+  /**
+   * The probe family: `settings` (a private league's `mSettings`) or `board` (a public league's —
+   * the board probe, or after a rejection where the board does not discriminate the view whose 401
+   * caused it, R3 nit (c); `view` names which).
+   */
   readonly probe: "settings" | "board";
   readonly upstream_status: number | null;
   /** Fixed-vocabulary reason when `accepted` is null. */
   readonly reason: "not_configured" | "board_not_discriminating" | null;
   readonly checked_at: string;
+  /** Additive (Stage C): the view the cookie-bearing probe requested; absent when none was sent. */
+  readonly view?: EspnView;
 }
 
 // --- the seam ---------------------------------------------------------------------------------------
@@ -460,8 +483,14 @@ export interface FantasyPlatform {
   getProSchedule(season: number, opts?: ReadOptions): Promise<Stamped<ProSchedule>>;
   /** The team whose owners include the stored SWID (plan 03 §2.1 step 6). */
   resolveOwnTeam(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<OwnTeamResolution>>;
-  /** The one explicit credential probe (plan 07 G2), ≤ 1 per minute by the caller. */
-  probeCredential(ref: LeagueRef): Promise<CredentialProbeResult>;
+  /**
+   * The one explicit credential probe (plan 07 G2), ≤ 1 per minute by the caller, inside one ≤ 20 s
+   * budget (the caller's — a tool's, so the client's cancellation reaches it — or its own).
+   */
+  probeCredential(
+    ref: LeagueRef,
+    opts?: { readonly budget?: UpstreamBudget },
+  ): Promise<CredentialProbeResult>;
   /**
    * This process's transport state (breaker, consecutive failures, today's 304s). Another process
    * (`eff status`, `eff doctor`) derives the same from `espn_requests.outcome` rows with

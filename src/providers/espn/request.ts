@@ -1,11 +1,13 @@
 // request.ts — the read pipeline every provider method goes through (plan 01 §5.3 cache-first, §5.6
 // the per-call budget, §6 limiter/backoff/breaker/deadline, §7 in-call drift; plan 02 §2.1 the
-// credential rules): cache → (fresh: done) → breaker → budget → coalesce → cookie decision →
-// (limiter → attempt)+ (each attempt its own limiter row; 429/5xx/timeouts retried with jitter inside
-// the ≤ 20 s deadline, never sooner than the backoff, never once the breaker is open; 400/401/403/404
-// and fail-fast network codes never) → classify → JSON → drift + schema → cache write. A failure
-// falls back to the cached entry within its hard limit (`degraded`), or past it under `allow_stale`
-// or while the host is moved; never an upstream body in any error.
+// credential rules; plan 02 T2 "TLS to ESPN, then zod"): cache → (fresh: done) → breaker → budget →
+// coalesce (each reader keeps its own deadline and cancellation) → TLS policy → cookie decision →
+// (limiter → attempt)+ (each attempt its own limiter row; 429/5xx/timeouts/resets retried with
+// jitter inside the ≤ 20 s deadline, never sooner than the backoff, never once the breaker is open;
+// 400/401/403/404, fail-fast network codes and TLS failures never) → classify → JSON → drift +
+// schema → cache write. A failure falls back to the cached entry within its hard limit
+// (`degraded`), or past it under `allow_stale` or while the host is moved; never an upstream body
+// in any error. Nothing is sent while certificate verification is off process-wide.
 import {
   serveDecision,
   stampState,
@@ -40,6 +42,7 @@ import {
   PER_CALL_DEADLINE_MS,
   UpstreamBudgetExhausted,
   type ReadOptions,
+  type UpstreamBudget,
 } from "../platform.js";
 import {
   cacheKey,
@@ -49,6 +52,9 @@ import {
   serverTimeIso,
   stripForCache,
   UNCACHED_VIEWS,
+  type CoalesceParty,
+  type LeaveReason,
+  type SharedLimits,
 } from "./cache.js";
 import { classifyAnswer, EspnDriftError, EspnUpstreamError } from "./errors.js";
 import {
@@ -61,7 +67,13 @@ import {
   type Sleep,
 } from "./limiter.js";
 import { primaryView, type EspnTarget } from "./path.js";
-import { sendAttempt, type AttemptAnswer, type FetchLike } from "./transport.js";
+import {
+  EspnTlsPolicyError,
+  sendAttempt,
+  tlsVerificationDisabled,
+  type AttemptAnswer,
+  type FetchLike,
+} from "./transport.js";
 import { CookieGate, type CookieUse, type PublicityStore } from "./auth-gate.js";
 import { ESPN_BACKOFF } from "../../config/schema.js";
 import type { EspnView } from "./types.js";
@@ -126,6 +138,12 @@ export interface RequestDeps {
   readonly attemptTimeoutMs?: number;
   /** Where the league's publicity outlives this process (auth-gate.ts PublicityStore). */
   readonly publicity?: PublicityStore;
+  /**
+   * Whether certificate verification is off process-wide, asked before every request (default:
+   * transport.ts `tlsVerificationDisabled`, Node's own rule, read at each request). Only fixture
+   * mode, which opens no connection at all, answers false regardless (index.ts).
+   */
+  readonly tlsVerificationDisabled?: () => boolean;
 }
 
 /** One read: the request, its cookie rule and the typed parse of its body. */
@@ -210,13 +228,32 @@ export function parseJsonSafe(text: string): unknown {
   return JSON.parse(text, (k: string, v: unknown) => (k === "__proto__" ? undefined : v));
 }
 
+/** A reader's own limits: its call's budget, or the default ≤ 20 s window from now (no budget). */
+function partyOf(budget: UpstreamBudget | undefined, nowMs: number): CoalesceParty {
+  return {
+    deadlineAtMs: budget?.deadline_at_ms ?? nowMs + PER_CALL_DEADLINE_MS,
+    signal: budget?.signal ?? null,
+  };
+}
+
+/**
+ * What a reader that stopped waiting on a shared read gets: its own cancellation (`aborted`: no
+ * upstream verdict), or its own deadline passing while the read goes on for a later reader — the
+ * answer that call would have had alone (`attempt_timeout`). Neither is a request: nothing records it.
+ */
+function leaveError(why: LeaveReason, view: EspnView): EspnUpstreamError {
+  return why === "aborted"
+    ? new EspnUpstreamError("aborted", { view, reason: "aborted" })
+    : new EspnUpstreamError("timeout", { view, reason: "attempt_timeout" });
+}
+
 /** The pipeline. One per provider instance (its coalescer, gate and limiter are per process). */
 export class EspnRequester {
   readonly limiter: EspnLimiter;
   readonly drift: DriftStateWriter;
   readonly cookies: CookieGate;
   private readonly deps: RequestDeps;
-  private readonly coalescer = new Coalescer<Fresh>();
+  private readonly coalescer: Coalescer<Fresh>;
   private readonly gate = new ForceRefreshGate();
   private readonly reportedSignals = new Set<string>();
   /**
@@ -233,6 +270,7 @@ export class EspnRequester {
 
   constructor(deps: RequestDeps) {
     this.deps = deps;
+    this.coalescer = new Coalescer<Fresh>(() => deps.clock.nowMs());
     this.limiter = new EspnLimiter({
       repo: deps.limiter,
       clock: deps.clock,
@@ -247,6 +285,24 @@ export class EspnRequester {
       deps.observer,
       deps.publicity ?? null,
     );
+  }
+
+  /**
+   * Refuses to send while certificate verification is off process-wide (Stage C finding
+   * espn-tls-verify-disabled-unguarded): checked before the cookie is asked for and before any
+   * limiter row — nothing is sent, no row is written, the cookie never leaves the authority. A
+   * policy that cannot be read refuses too (fail closed).
+   */
+  private assertTlsVerified(view: EspnView): void {
+    let off: boolean;
+    try {
+      off = (this.deps.tlsVerificationDisabled ?? tlsVerificationDisabled)();
+    } catch {
+      off = true;
+    }
+    if (!off) return;
+    this.deps.log?.warn("espn.tls_verification_disabled", { view });
+    throw new EspnTlsPolicyError(view);
   }
 
   /** Today's 304 count (UTC day) — `transportStatus().etag_304_count`. */
@@ -418,30 +474,30 @@ export class EspnRequester {
           : new EspnBreakerOpenError(),
       );
 
-    let joined = false;
-    let promise: Promise<Fresh>;
-    try {
-      const run = this.coalescer.run(key, async () => {
-        const budget = opts.budget;
-        if (budget !== undefined) {
-          if (!budget.canStart(this.deps.clock.nowMs()))
-            throw new UpstreamBudgetExhausted(view, "deadline");
-          if (!budget.tryConsume()) throw new UpstreamBudgetExhausted(view, "budget");
-        }
-        return this.fetchFresh(spec, usable?.entry ?? null, opts, key, cacheable);
-      });
-      joined = run.joined;
-      promise = run.promise;
-    } catch (e) {
-      return fallback(e);
-    }
+    // this reader's own limits: its call's deadline and cancellation (plan 01 §6, ADV OBJ-20). A
+    // reader that can no longer start a request takes part in none; only the reader that STARTS
+    // the request pays for it (a joiner shares it — plan 01 §5.3), and a shared read never runs
+    // under one reader's limits (cache.ts Coalescer; Stage C finding espn-coalesced-read-leader-
+    // budget: a cancelled or nearly-spent first caller failed a parallel call)
+    const budget = opts.budget;
+    if (budget !== undefined && !budget.canStart(now))
+      throw new UpstreamBudgetExhausted(view, "deadline");
+    if (budget !== undefined && !this.coalescer.has(key) && !budget.tryConsume())
+      throw new UpstreamBudgetExhausted(view, "budget");
+    const run = this.coalescer.run(
+      key,
+      partyOf(budget, now),
+      (limits) => this.fetchFresh(spec, usable?.entry ?? null, limits, key, cacheable),
+      (why) => leaveError(why, view),
+    );
     let fresh: Fresh;
     try {
-      fresh = await promise;
+      fresh = await run.promise;
     } catch (e) {
       if (e instanceof UpstreamBudgetExhausted) throw e;
       return fallback(e);
     }
+    const joined = run.joined;
     // an upstream answer resumes its readers outside the turn gate (an I/O completion, every joiner
     // of a coalesced read at once): each takes a gated turn before its synchronous work — the parse
     // below and the caller's own steps — so parallel calls never share a turn (plan 03 §1.2; Stage C
@@ -546,25 +602,27 @@ export class EspnRequester {
   }
 
   /**
-   * One fresh upstream read (inside the coalescer): cookie → (limiter → attempt)+ → JSON → drift →
-   * cache. Every attempt — the first and each retry — is one upstream request and passes the limiter
-   * on its own (its own `espn_requests` row: the 30/min and 1/s windows, the job fleet's daily caps,
-   * the cross-process concurrency cap; plan 01 §6 "each request inserts a row … before sending").
-   * A retry is not a new request for the call's budget (platform.ts UpstreamBudget) but must fit the
-   * deadline; one the limiter cannot fit before the deadline ends the read with the last upstream
-   * failure, and none is sent once the breaker is open.
+   * One fresh upstream read (inside the coalescer): TLS policy → cookie → (limiter → attempt)+ →
+   * JSON → drift → cache. Every attempt — the first and each retry — is one upstream request and
+   * passes the limiter on its own (its own `espn_requests` row: the 30/min and 1/s windows, the job
+   * fleet's daily caps, the cross-process concurrency cap; plan 01 §6 "each request inserts a row …
+   * before sending"). A retry is not a new request for the call's budget (platform.ts
+   * UpstreamBudget) but must fit the deadline; one the limiter cannot fit before the deadline ends
+   * the read with the last upstream failure, and none is sent once the breaker is open. The deadline
+   * and the signal are the SHARED read's (`limits`, read at every step): the latest deadline of the
+   * readers still waiting, and an abort once none is.
    */
   private async fetchFresh<T>(
     spec: ReadSpec<T>,
     entry: EspnCacheEntry | null,
-    opts: ReadOptions,
+    limits: SharedLimits,
     key: string,
     cacheable: boolean,
   ): Promise<Fresh> {
     const target = spec.target;
     const view = primaryView(target);
-    const deadline = opts.budget?.deadline_at_ms ?? this.deps.clock.nowMs() + PER_CALL_DEADLINE_MS;
-    const signal = opts.budget?.signal ?? null;
+    const signal = limits.signal;
+    this.assertTlsVerified(view);
     const cookie = await this.cookies.forRequest(spec.cookies, target.route);
     let last: EspnUpstreamError | null = null;
     for (let attempt = 1; ; attempt++) {
@@ -572,14 +630,16 @@ export class EspnRequester {
       try {
         ticket = await this.limiter.acquire({
           keyless: cookie === null,
-          deadlineAtMs: deadline,
+          deadlineAtMs: () => limits.deadline(),
           signal,
         });
       } catch (e) {
         if (last !== null && e instanceof EspnRateLimitedError) throw last;
         throw e;
       }
-      let outcome: RequestOutcome = "network_error";
+      // what the row records when the attempt ends before an upstream verdict was classified:
+      // nothing went out (our own refusal) — never a network failure the breaker would count
+      let outcome: RequestOutcome = "client_error";
       let wait: number;
       try {
         // the limiter recorded the send only before the deadline (it refuses one that cannot
@@ -587,7 +647,7 @@ export class EspnRequester {
         // from that instant
         const timeoutMs = Math.min(
           this.deps.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS,
-          deadline - ticket.atMs,
+          limits.deadline() - ticket.atMs,
         );
         if (timeoutMs <= 0) throw new UpstreamBudgetExhausted(view, "deadline");
         let answer: AttemptAnswer | null = null;
@@ -624,6 +684,7 @@ export class EspnRequester {
             return await this.success(spec, answer, cookie !== null, key, cacheable);
           }
         }
+        // an error with its own code from the fetch itself (fixture mode's refusal) sent nothing
         if (!(failure instanceof EspnUpstreamError)) throw failure;
         const err = failure;
         outcome = err.outcome;
@@ -631,8 +692,7 @@ export class EspnRequester {
         await this.afterFailure(err, cookie !== null, view);
         if (!err.retryable || attempt >= ESPN_BACKOFF.maxAttempts) throw err;
         wait = this.retryWaitMs(err, attempt);
-        const at = this.deps.clock.nowMs() + wait;
-        if (opts.budget?.canStart(at) === false || at >= deadline) throw err;
+        if (!limits.canStart(this.deps.clock.nowMs() + wait)) throw err;
       } finally {
         ticket.finish(outcome);
       }
@@ -646,30 +706,47 @@ export class EspnRequester {
   /**
    * One probe request (plan 02 §2.1): through the limiter and the breaker, never cached, never
    * retried; the body is discarded — only the status is returned. A 3xx or a non-JSON 2xx is still
-   * ESPN_HOST_MOVED; a network failure is still classified.
+   * ESPN_HOST_MOVED; a network failure is still classified. It runs inside the probe CALL's budget
+   * (plan 01 §6 / ADV OBJ-20: the whole probe ends within its ≤ 20 s deadline — Stage C finding
+   * auth-probe-definitive-plan-unwired): no request starts past it, and the attempt has what the
+   * deadline leaves. Without a budget it gets its own ≤ 20 s window.
    */
   async probeSend(
     target: EspnTarget,
     filter: string | null,
     cookie: string | null,
+    budget?: UpstreamBudget,
   ): Promise<number> {
     if (this.limiter.breaker.isOpen()) throw new EspnBreakerOpenError();
     const view = primaryView(target);
+    this.assertTlsVerified(view);
     const now = this.deps.clock.nowMs();
+    const deadline = budget?.deadline_at_ms ?? now + PER_CALL_DEADLINE_MS;
+    // nothing is sent past the call's deadline or beyond its request cap (no row is written either)
+    if (budget !== undefined && !budget.canStart(now))
+      throw new EspnUpstreamError("timeout", { view, reason: "call_deadline" });
+    if (budget !== undefined && !budget.tryConsume())
+      throw new EspnUpstreamError("client_error", { view, reason: "call_budget" });
+    const signal = budget?.signal ?? null;
     const ticket = await this.limiter.acquire({
       keyless: cookie === null,
-      deadlineAtMs: now + PER_CALL_DEADLINE_MS,
-      signal: null,
+      deadlineAtMs: deadline,
+      signal,
     });
-    let outcome: RequestOutcome = "network_error";
+    // nothing classified yet: nothing went out (see fetchFresh) — never a counted network failure
+    let outcome: RequestOutcome = "client_error";
     try {
+      const timeoutMs = Math.min(
+        this.deps.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS,
+        deadline - ticket.atMs,
+      );
       const answer = await sendAttempt(this.deps.fetch, {
         target,
         filter,
         cookie,
         ifNoneMatch: null,
-        timeoutMs: this.deps.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS,
-        signal: null,
+        timeoutMs,
+        signal,
         view,
       });
       const s = answer.status;

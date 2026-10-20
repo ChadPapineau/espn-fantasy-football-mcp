@@ -205,7 +205,14 @@ describe("keyless 401 and cookie-required views (plan 01 §4.3 ESPN_REQUIRES_COO
       ],
       mPendingTransactions: [() => jsonResponse({ pendingTransactions: txn.slice(0, 1) })],
     });
-    const w0 = makeWorld({ fetch: scripted({}) });
+    // an unknown league (publicity never learned: its settings answer 404) with no credential: the
+    // cookie-only view is refused with zero requests of its own. (The identity read used to fail
+    // as three unscripted network errors; those now open the breaker — plan 05 §4.1 — which then
+    // answers every read without a request, plan 01 §6.)
+    const fetch0 = scripted({
+      "mSettings&mNav": [() => jsonResponse(errBody("GENERAL_NOT_FOUND"), 404)],
+    });
+    const w0 = makeWorld({ fetch: fetch0 });
     await expect(
       w0.provider.listTransactions(w0.ref, {
         types: ["WAIVER"],
@@ -217,6 +224,7 @@ describe("keyless 401 and cookie-required views (plan 01 §4.3 ESPN_REQUIRES_COO
     ).rejects.toMatchObject({
       effCode: "ESPN_REQUIRES_COOKIES",
     });
+    expect(fetch0.calls).toEqual(["mSettings&mNav"]);
     const w = makeWorld({ fetch });
     await w.provider.getLeague(w.ref);
     const page = await w.provider.listTransactions(w.ref, {

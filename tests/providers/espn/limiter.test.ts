@@ -672,3 +672,144 @@ describe("Stage C: the in-flight cap is decided inside the store's transaction; 
     expect(await sem.acquire(0)).toBe(true);
   });
 });
+
+// Stage C findings espn-breaker-ignores-resets and espn-coalesced-read-leader-budget
+describe("Stage C: network failures count; a shared read's deadline is read at every step", () => {
+  it("the in-process breaker counts network failures like a 5xx; a client error (a cancellation) never does", () => {
+    const clock = fixedClock(NOW_ISO);
+    const b = new Breaker(clock, null);
+    b.record("network_error");
+    b.record("network_error");
+    expect(b.isOpen()).toBe(false);
+    b.record("network_error");
+    expect(b.status()).toMatchObject({ breaker_open: true, consecutive_failures: 3 });
+    const c = new Breaker(clock, null);
+    for (let i = 0; i < 5; i++) c.record("client_error");
+    expect(c.status()).toMatchObject({ breaker_open: false, consecutive_failures: 0 });
+    // the cross-process view agrees: three network_error rows open it for a second process
+    const repo = new MemoryLimiterRepo();
+    for (let i = 0; i < 3; i++) {
+      const v = repo.tryRecord(limiterRequest(T0 - 10_000 + i * 2000, true, "server"));
+      if (v.ok) repo.recordOutcome(v.id, "network_error");
+    }
+    expect(new Breaker(clock, repo).isOpen()).toBe(true);
+  });
+
+  it("an in-process slot wait re-arms when the deadline grows (a later reader joined)", async () => {
+    const clock = fixedClock(NOW_ISO);
+    const l = new EspnLimiter({ repo: new MemoryLimiterRepo(), clock, origin: "server" });
+    // two sends hold both in-process slots (a second apart: the 1/s window)
+    const a = await l.acquire({
+      keyless: true,
+      deadlineAtMs: clock.nowMs() + 20_000,
+      signal: null,
+    });
+    clock.advance(1000);
+    const b = await l.acquire({
+      keyless: true,
+      deadlineAtMs: clock.nowMs() + 20_000,
+      signal: null,
+    });
+    clock.advance(1000);
+    let until = clock.nowMs() + 60;
+    const third = l.acquire({ keyless: true, deadlineAtMs: () => until, signal: null });
+    // the deadline grows before its first 60 ms wait gives up; a slot frees only after that bound
+    await new Promise((r) => setTimeout(r, 20));
+    until = clock.nowMs() + 5_000;
+    await new Promise((r) => setTimeout(r, 100));
+    a.finish("ok");
+    const t = await third;
+    expect(t.atMs).toBe(clock.nowMs());
+    t.finish("ok");
+    b.finish("ok");
+    expect(l.inFlight).toBe(0);
+    // a deadline that does not grow still gives up at its bound, holding nothing
+    clock.advance(1000);
+    const c = await l.acquire({
+      keyless: true,
+      deadlineAtMs: clock.nowMs() + 20_000,
+      signal: null,
+    });
+    clock.advance(1000);
+    const d = await l.acquire({
+      keyless: true,
+      deadlineAtMs: clock.nowMs() + 20_000,
+      signal: null,
+    });
+    const fixed = clock.nowMs() + 30;
+    await expect(
+      l.acquire({ keyless: true, deadlineAtMs: () => fixed, signal: null }),
+    ).rejects.toBeInstanceOf(EspnRateLimitedError);
+    c.finish("ok");
+    d.finish("ok");
+    expect(l.inFlight).toBe(0);
+  });
+
+  it("the cross-process concurrency polls extend with a deadline that grows", async () => {
+    const clock = fixedClock(NOW_ISO);
+    const repo = new MemoryLimiterRepo();
+    // two requests in flight in another process, sent 2 s ago (outside the 1/s window, inside the
+    // 30 s in-flight horizon): every poll is refused for concurrency
+    const other = (id: number) => ({
+      id,
+      at: T0 - 2000,
+      keyless: true,
+      origin: "server",
+      outcome: "pending" as const,
+    });
+    repo.rows.push(other(900), other(901));
+    let until = T0 + 2 * IN_FLIGHT_POLL_MS + 1;
+    let sleeps = 0;
+    const l = new EspnLimiter({
+      repo,
+      clock,
+      origin: "server",
+      sleep: () => {
+        sleeps++;
+        // the first poll: a later reader joins; the fourth: the other process finishes
+        if (sleeps === 1) until = T0 + 8 * IN_FLIGHT_POLL_MS + 1;
+        if (sleeps === 4) for (const r of repo.rows) r.outcome = "ok";
+        if (sleeps > 10) throw new Error("runaway poll loop");
+        return Promise.resolve();
+      },
+    });
+    const t = await l.acquire({ keyless: true, deadlineAtMs: () => until, signal: null });
+    // more polls than the first deadline allowed (2): the grown deadline's were added
+    expect(sleeps).toBe(4);
+    t.finish("ok");
+    // with a deadline that never grows, the polls run out at its bound
+    repo.rows.push(other(902), other(903));
+    let polls = 0;
+    const fixedL = new EspnLimiter({
+      repo,
+      clock,
+      origin: "server",
+      sleep: () => {
+        polls++;
+        if (polls > 10) throw new Error("runaway poll loop");
+        return Promise.resolve();
+      },
+    });
+    await expect(
+      fixedL.acquire({
+        keyless: true,
+        deadlineAtMs: () => T0 + 2 * IN_FLIGHT_POLL_MS + 1,
+        signal: null,
+      }),
+    ).rejects.toBeInstanceOf(EspnRateLimitedError);
+    expect(polls).toBe(2);
+  });
+
+  it("every reader gone (the shared signal aborted): refused before any row is written", async () => {
+    const clock = fixedClock(NOW_ISO);
+    const repo = new MemoryLimiterRepo();
+    const l = new EspnLimiter({ repo, clock, origin: "server" });
+    const ctl = new AbortController();
+    ctl.abort();
+    await expect(
+      l.acquire({ keyless: true, deadlineAtMs: T0 + 20_000, signal: ctl.signal }),
+    ).rejects.toBeInstanceOf(EspnRateLimitedError);
+    expect(repo.rows).toHaveLength(0);
+    expect(l.inFlight).toBe(0);
+  });
+});

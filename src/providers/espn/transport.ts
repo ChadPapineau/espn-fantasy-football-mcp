@@ -3,12 +3,45 @@
 // never sent to a redirect target; plan 02 §5 the 8 MB body cap, streamed; §2.1 the Cookie header
 // is built ONLY for the read host; plan 01 §6 the fixed honest User-Agent and a per-attempt timeout
 // under the per-call deadline). Never the write host: the host is checked against the config rule
-// on every attempt. Tests inject `fetch`; no test touches the network.
+// on every attempt. Never a cookie over a channel whose certificate is not verified (plan 02 T2:
+// ESPN's trust is "TLS to ESPN, then zod"). Tests inject `fetch`; no test touches the network.
 import { ESPN_WRITE_HOST, isAllowedReadHost } from "../../config/schema.js";
 import { VERSION } from "../../version.js";
 import { classifyThrown, EspnUpstreamError } from "./errors.js";
 import type { EspnTarget } from "./path.js";
 import { HEADER_FILTER, type EspnView } from "./types.js";
+
+/**
+ * Whether certificate verification is off for every TLS connection this process makes: Node skips
+ * it when `NODE_TLS_REJECT_UNAUTHORIZED` is exactly `"0"` — read at each connection, any other
+ * value (`"false"`, `""`, `" 0"`) leaves it on (checked against Node 24's fetch). The variable is
+ * the corporate-proxy workaround some shells export; every `eff` command and an MCP client that
+ * passes its environment inherit it, and with it an on-path impostor answering for the read host
+ * would receive the cookie and have its body served as league data (Stage C finding
+ * espn-tls-verify-disabled-unguarded). Read at every request, as Node reads it.
+ */
+export function tlsVerificationDisabled(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  return env.NODE_TLS_REJECT_UNAUTHORIZED === "0";
+}
+
+/**
+ * The provider refuses to send while certificate verification is off process-wide (fail closed;
+ * nothing is sent and no limiter row is written). INTERNAL with a fixed reason: our own policy
+ * refusing, not an outage, so no stale answer stands in for it and the reason names the cause —
+ * unset `NODE_TLS_REJECT_UNAUTHORIZED` (or install the proxy's CA with `NODE_EXTRA_CA_CERTS`, which
+ * keeps verification on).
+ */
+export class EspnTlsPolicyError extends Error {
+  readonly effCode = "INTERNAL" as const;
+  readonly effDetails: { readonly reason: "tls_verification_disabled"; readonly view: EspnView };
+  constructor(view: EspnView) {
+    super("espn: certificate verification is disabled in this process; nothing was sent");
+    this.name = "EspnTlsPolicyError";
+    this.effDetails = Object.freeze({ reason: "tls_verification_disabled", view });
+  }
+}
 
 /** The subset of `fetch` the transport uses (tests inject a fake; fixture mode serves files). */
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -122,11 +155,17 @@ async function readText(res: Response, view: EspnView): Promise<{ text: string; 
 
 /**
  * Sends ONE attempt. Resolves with the answer for any HTTP status (the classifier decides); rejects
- * with an EspnUpstreamError for a timeout, a network failure or an oversized body. An error that
- * already carries an own `effCode` (fixture mode's missing-fixture error) passes through unchanged.
+ * with an EspnUpstreamError for a timeout, a network failure or an oversized body, and with
+ * `aborted` when the caller's signal ended it (no upstream verdict: the breaker never counts it). An
+ * error that already carries an own `effCode` (fixture mode's missing-fixture error) passes through
+ * unchanged. A cookie-bearing attempt is refused, nothing sent, while certificate verification is
+ * off (`tlsVerificationDisabled` — the last line behind the pipeline's own check).
  */
 export async function sendAttempt(fetchFn: FetchLike, req: AttemptRequest): Promise<AttemptAnswer> {
   const url = assertReadTarget(req.target);
+  if (req.cookie !== null && tlsVerificationDisabled()) throw new EspnTlsPolicyError(req.view);
+  if (req.signal?.aborted === true)
+    throw new EspnUpstreamError("aborted", { view: req.view, reason: "aborted" });
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -136,10 +175,11 @@ export async function sendAttempt(fetchFn: FetchLike, req: AttemptRequest): Prom
   const onCaller = (): void => {
     controller.abort();
   };
-  if (req.signal?.aborted === true) {
-    clearTimeout(timer);
-    throw new EspnUpstreamError("network_transient", { view: req.view, reason: "aborted" });
-  }
+  // the caller's cancellation is named as such — never a network failure the breaker would count
+  const failure = (e: unknown): EspnUpstreamError =>
+    !timedOut && req.signal?.aborted === true
+      ? new EspnUpstreamError("aborted", { view: req.view, reason: "aborted" }, { cause: e })
+      : classifyThrown(e, timedOut, req.view);
   req.signal?.addEventListener("abort", onCaller, { once: true });
   const headers: Record<string, string> = {
     "user-agent": ESPN_USER_AGENT,
@@ -161,7 +201,7 @@ export async function sendAttempt(fetchFn: FetchLike, req: AttemptRequest): Prom
       });
     } catch (e) {
       if (e instanceof Error && Object.prototype.hasOwnProperty.call(e, "effCode")) throw e;
-      throw classifyThrown(e, timedOut, req.view);
+      throw failure(e);
     }
     if (res.status >= 300 && res.status <= 399) {
       discard(res);
@@ -172,7 +212,7 @@ export async function sendAttempt(fetchFn: FetchLike, req: AttemptRequest): Prom
       return { status: res.status, headers: collectHeaders(res.headers), bodyText: text, bytes };
     } catch (e) {
       if (e instanceof EspnUpstreamError) throw e;
-      throw classifyThrown(e, timedOut, req.view);
+      throw failure(e);
     }
   } finally {
     clearTimeout(timer);

@@ -7,6 +7,13 @@
 // (src/providers/platform.ts) is not implemented here and nothing in this file sends to the write host.
 import type { TtlContext } from "../../config/freshness.js";
 import type { Config } from "../../config/schema.js";
+import {
+  BOARD_PROBE_VIEW,
+  boardControlDiscriminates,
+  planDefinitiveProbe,
+  probeVerdict,
+  type ProbePlan,
+} from "../../auth/probe.js";
 import type { CredentialAuthority, CredentialObserver } from "../../auth/types.js";
 import type { Clock } from "../../domain/clock.js";
 import type {
@@ -39,13 +46,17 @@ import type { ScoringSettings } from "../../domain/scoring/types.js";
 import { scoringRefusal, settingsDriftPath } from "../../drift/state.js";
 import type { DriftObservations } from "../../drift/types.js";
 import type {
+  CredentialStateRepository,
+  CredentialStateRow,
   DriftStateRepository,
   EspnCacheRepository,
   LimiterRepository,
   RequestOrigin,
 } from "../../store/types.js";
 import {
+  createUpstreamBudget,
   espnCapabilities,
+  isUpstreamBudgetExhausted,
   WRITES_SEAM_MARKER,
   type CredentialProbeResult,
   type FantasyPlatform,
@@ -57,10 +68,11 @@ import {
   type StatsQuery,
   type TransportStatus,
   type TxnQuery,
+  type UpstreamBudget,
 } from "../platform.js";
 import { EspnCredentialError } from "./auth-gate.js";
-import { cachedPublicity } from "./cache.js";
-import { EspnDriftError, EspnUpstreamError } from "./errors.js";
+import { cachedBoardControl, cachedPublicity, type KeptFlag } from "./cache.js";
+import { EspnDriftError, EspnUpstreamError, isEspnUpstreamError } from "./errors.js";
 import {
   boardProbeFilter,
   playerFilter,
@@ -101,6 +113,7 @@ import {
 import {
   communicationTarget,
   leagueTarget,
+  primaryView,
   readHost,
   seasonPlayersTarget,
   seasonTarget,
@@ -118,6 +131,7 @@ import {
   FILTER_IDS_MAX,
   HEADER_PLAYER_COUNT,
   HEADER_TRANSACTION_COUNT,
+  LEAGUE_VIEWS,
   type EspnView,
   type LeagueView,
   type ScoringSettingsTranslator,
@@ -193,6 +207,12 @@ export interface EspnProviderDeps {
     readonly limiter: LimiterRepository;
     readonly cache: EspnCacheRepository;
     readonly driftState: DriftStateRepository;
+    /**
+     * store.sqlite's `credential_state` row, READ only (never the secret): the definitive probe's
+     * plan reads setup's board control and the rejected view from it (plan 02 §2.1; R3 nit (c)).
+     * Absent: the probe plans from what it can learn itself.
+     */
+    readonly credentialState?: Pick<CredentialStateRepository, "get">;
   };
   readonly clock: Clock;
   /** The scoring module's settings translator (plan 08 §1). */
@@ -225,6 +245,11 @@ export interface EspnProviderDeps {
   readonly random?: () => number;
   readonly log?: ProviderLog;
   readonly attemptTimeoutMs?: number;
+  /**
+   * Whether certificate verification is off process-wide (request.ts RequestDeps; default Node's
+   * NODE_TLS_REJECT_UNAUTHORIZED rule, read at each request). Only fixture mode overrides it.
+   */
+  readonly tlsVerificationDisabled?: () => boolean;
 }
 
 interface SettingsRead {
@@ -282,6 +307,39 @@ const parsePending = (b: unknown): readonly unknown[] =>
   must("mPendingTransactions", mPendingTransactionsSchema, absentAsEmpty("mPendingTransactions", b))
     .pendingTransactions;
 
+/** The budget id of a probe run without a caller's budget (`eff check-auth`, doctor, the daily job). */
+const PROBE_BUDGET_ID = "credential-probe";
+
+/**
+ * A public league's probe plan: src/auth/probe.ts `planDefinitiveProbe` over the credential_state
+ * row, its board control taken from setup's row or — when setup recorded none — from what this
+ * provider learned and kept (`known`; null = never learned, so the plan cannot discriminate yet).
+ */
+function publicProbePlan(row: CredentialStateRow | null, known: boolean | null): ProbePlan {
+  if (row === null) return { kind: "board", view: BOARD_PROBE_VIEW, discriminates: known === true };
+  return planDefinitiveProbe({
+    leaguePublic: true,
+    row: { ...row, board_probe_discriminates: known },
+  });
+}
+
+/**
+ * A probe step's failure as the probe's answer: the call budget's own signal (it carries no code)
+ * becomes ESPN_UPSTREAM_UNAVAILABLE — the probe's ≤ 20 s deadline passed, or its three requests were
+ * spent — so every caller (the tool, `eff check-auth`, doctor, the daily job) reads a coded failure.
+ */
+function probeFailure(e: unknown, view: EspnView): unknown {
+  if (!isUpstreamBudgetExhausted(e)) return e;
+  return e.missing.reason === "deadline"
+    ? new EspnUpstreamError("timeout", { view, reason: "call_deadline" })
+    : new EspnUpstreamError("client_error", { view, reason: "call_budget" });
+}
+
+/** Whether a keyless read was refused (401/403 — ESPN's typed answer, or an edge's block page). */
+function refusedAnonymously(e: unknown): boolean {
+  return isEspnUpstreamError(e) && (e.kind === "requires_cookies" || e.kind === "edge_blocked");
+}
+
 /** A non-negative integer header (`x-fantasy-filter-*-count`), or null. */
 function countHeader(h: Readonly<Record<string, string>>, name: string): number | null {
   const v = h[name];
@@ -322,6 +380,9 @@ export class EspnProvider implements FantasyPlatform {
       ...(deps.random === undefined ? {} : { random: deps.random }),
       ...(deps.log === undefined ? {} : { log: deps.log }),
       ...(deps.attemptTimeoutMs === undefined ? {} : { attemptTimeoutMs: deps.attemptTimeoutMs }),
+      ...(deps.tlsVerificationDisabled === undefined
+        ? {}
+        : { tlsVerificationDisabled: deps.tlsVerificationDisabled }),
       // the league's publicity outlives the process: a CLI probe never re-learns it anonymously
       publicity: cachedPublicity(deps.repos.cache, deps.config.leagueId, deps.clock),
     });
@@ -1033,28 +1094,46 @@ export class EspnProvider implements FantasyPlatform {
   }
 
   /**
-   * The one explicit credential probe (plan 02 §2.1; plan 07 G2): on a private league one
-   * cookie-bearing `mSettings` (200 accepted / 401·403 rejected / 404 → ESPN_LEAGUE_NOT_FOUND); on a
-   * public league the board probe (`kona_league_communication`, limit 1, body discarded) with an
-   * anonymous control first — a control that is not 401 means the probe does not discriminate here.
-   * Never cached; exempt from the short-circuit only when the authority offers probe access.
-   * Nothing stored (whatever the startup label said) → not_configured with zero requests.
+   * The one explicit credential probe — plan 02 §2.1 "The definitive check", plan 06 §1.4, plan 07
+   * G2 (ADV OBJ-14, OBJ-26; R3 nit (c); changelog R-5, K1) — inside ONE ≤ 20 s call budget (plan 01
+   * §6 / ADV OBJ-20: every step's requests and retries, never more than the call's three):
+   * - a PRIVATE league: one cookie-bearing `mSettings` (200 accepted / 401·403 rejected / 404 →
+   *   ESPN_LEAGUE_NOT_FOUND);
+   * - a PUBLIC league: src/auth/probe.ts `planDefinitiveProbe` over the credential_state row — the
+   *   board probe (`kona_league_communication`, one topic, body discarded) when its anonymous
+   *   control answered 401; after a rejection on a league whose board does not discriminate, the
+   *   view whose 401 caused it (discriminating by construction), so Rejected → Validated stays
+   *   reachable without a human; otherwise `accepted: null` (`board_not_discriminating`) and no
+   *   cookie-bearing request. The control is setup's (`board_probe_discriminates`, cached with the
+   *   league settings); a league without one learns it ONCE here and keeps it (cache.ts
+   *   `cachedBoardControl`) — never re-sent before every probe (Stage C finding
+   *   auth-probe-definitive-plan-unwired). `probe` names the family: `board` on a public league.
+   * Publicity is learned ANONYMOUSLY when unknown (cache-first; a cookie-bearing 200 on a public
+   * league would prove nothing — R-5): when it cannot be learned, no probe is judged and the read's
+   * error is the answer. Never cached; exempt from the short-circuit only when the authority offers
+   * probe access. Nothing stored (whatever the startup label said) → not_configured, zero requests.
    */
-  async probeCredential(ref: LeagueRef): Promise<CredentialProbeResult> {
+  async probeCredential(
+    ref: LeagueRef,
+    opts: { readonly budget?: UpstreamBudget } = {},
+  ): Promise<CredentialProbeResult> {
     this.checkRef(ref);
     const by = this.deps.probeObserver ?? "check_auth";
+    const budget = opts.budget ?? createUpstreamBudget(PROBE_BUDGET_ID, this.deps.clock.nowMs());
     const checkedAt = (): string => this.deps.clock.nowIso();
     const result = (
       accepted: boolean | null,
       probe: "settings" | "board",
       status: number | null,
       reason: CredentialProbeResult["reason"],
+      view: EspnView | null = null,
     ): CredentialProbeResult => ({
       accepted,
       probe,
       upstream_status: status,
       reason,
       checked_at: checkedAt(),
+      ...(view === null ? {} : { view }),
     });
     // a label of "nothing stored" is not the store: a value `eff setup` stored while this process
     // ran (or items a wiped cache lost the row of) is loaded first, so it is probed and its
@@ -1067,11 +1146,15 @@ export class EspnProvider implements FantasyPlatform {
       return header.reason === "rejected"
         ? result(false, "settings", null, null)
         : result(null, "settings", null, "not_configured");
-    if (this.req.cookies.isPublic() === null) {
+    let isPublic = this.req.cookies.isPublic();
+    if (isPublic === null) {
       // learn publicity ANONYMOUSLY (cache-first; one keyless request when cold): a cookie-bearing
-      // 200 on a public league would prove nothing (plan 02 §2.1, R-5)
-      await this.req
-        .read(
+      // 200 on a public league would prove nothing (plan 02 §2.1, R-5). A fresh answer is learned
+      // (and kept) by the read itself; a cached or stale body's flag is used for this probe only.
+      let failure: unknown = null;
+      let flag: boolean | null = null;
+      try {
+        const s = await this.req.read(
           {
             target: this.league(ref, ["mSettings", "mNav"]),
             filter: null,
@@ -1079,25 +1162,40 @@ export class EspnProvider implements FantasyPlatform {
             cookies: "never",
             parse: parseSettings,
           },
-          {},
-        )
-        .catch(() => undefined);
+          { budget },
+        );
+        const p = s.value.settings.isPublic;
+        flag = typeof p === "boolean" ? p : null;
+      } catch (e) {
+        failure = e;
+      }
+      isPublic = this.req.cookies.isPublic() ?? flag;
+      // still unknown: an anonymous REFUSAL (a keyless 401/403 — ESPN's own, or an edge's) means a
+      // cookie-bearing 200 discriminates, as on a private league (the anonymous control's rule, ADV
+      // OBJ-26); any other failure (an outage, a malformed answer, the deadline) leaves nothing to
+      // judge a probe against — no probe is sent and the read's failure is the answer
+      if (isPublic === null && failure !== null && !refusedAnonymously(failure))
+        throw probeFailure(failure, "mSettings");
     }
-    const isPublic = this.req.cookies.isPublic() === true;
     const probeOnce = (
       target: EspnTarget,
       filter: string | null,
       withCookie: boolean,
-    ): Promise<number> => this.req.probeSend(target, filter, withCookie ? header.header : null);
-    if (!isPublic) {
+    ): Promise<number> =>
+      this.req
+        .probeSend(target, filter, withCookie ? header.header : null, budget)
+        .catch((e: unknown) => {
+          throw probeFailure(e, primaryView(target));
+        });
+    if (isPublic !== true) {
       const status = await probeOnce(this.league(ref, ["mSettings"]), null, true);
       if (status >= 200 && status <= 299) {
         await this.req.cookies.observeProbe("accepted", by, status, "mSettings");
-        return result(true, "settings", status, null);
+        return result(true, "settings", status, null, "mSettings");
       }
       if (status === 401 || status === 403) {
         await this.req.cookies.observeProbe("rejected", by, status, "mSettings");
-        return result(false, "settings", status, null);
+        return result(false, "settings", status, null, "mSettings");
       }
       if (status === 404)
         throw new EspnUpstreamError("league_not_found", {
@@ -1111,21 +1209,84 @@ export class EspnProvider implements FantasyPlatform {
       season: ref.season,
       leagueId: ref.league_id,
     });
-    const control = await probeOnce(board, boardProbeFilter(), false);
-    if (control !== 401) return result(null, "board", control, "board_not_discriminating");
-    const status = await probeOnce(board, boardProbeFilter(), true);
-    if ((status >= 200 && status <= 299) || status === 404) {
-      await this.req.cookies.observeProbe("accepted", by, status, "kona_league_communication");
-      return result(true, "board", status, null);
+    const row = this.credentialRow();
+    const kept = this.boardControl(ref.season);
+    let known = row?.board_probe_discriminates ?? kept.load();
+    let plan = publicProbePlan(row, known);
+    let controlStatus: number | null = null;
+    if (plan.kind === "board" && known === null) {
+      // no control was ever run for this league: once, ANONYMOUSLY (ADV OBJ-26), then kept
+      controlStatus = await probeOnce(board, boardProbeFilter(), false);
+      known = boardControlDiscriminates(controlStatus) === true;
+      kept.save(known);
+      plan = publicProbePlan(row, known);
     }
-    if (status === 401 || status === 403) {
-      await this.req.cookies.observeProbe("rejected", by, status, "kona_league_communication");
-      return result(false, "board", status, null);
+    if (!plan.discriminates)
+      return result(null, "board", controlStatus, "board_not_discriminating");
+    const probe = this.probeTarget(ref, plan, board);
+    if (probe === null) return result(null, "board", controlStatus, "board_not_discriminating");
+    const status = await probeOnce(probe.target, probe.filter, true);
+    // a discriminating board answers valid cookies 200 or 404 (plan 02 §2.1): the board verdict reads
+    // its 404 as an acceptance, also when the board is the rejected view itself
+    const verdict = probeVerdict(
+      probe.view === BOARD_PROBE_VIEW ? { ...plan, kind: "board" } : plan,
+      status,
+    );
+    if (verdict.observation === "accepted" || verdict.observation === "rejected") {
+      await this.req.cookies.observeProbe(verdict.observation, by, status, probe.view);
+      return result(verdict.observation === "accepted", "board", status, null, probe.view);
     }
-    throw new EspnUpstreamError("server_error", {
-      upstream_status: status,
-      view: "kona_league_communication",
-    });
+    if (verdict.observation === "league_not_found")
+      throw new EspnUpstreamError("league_not_found", { upstream_status: 404, view: probe.view });
+    throw new EspnUpstreamError("server_error", { upstream_status: status, view: probe.view });
+  }
+
+  /** This league's credential_state row, read only (null: none, another league's, unreadable). */
+  private credentialRow(): CredentialStateRow | null {
+    try {
+      const row = this.deps.repos.credentialState?.get() ?? null;
+      return row !== null && row.league_id === this.deps.config.leagueId ? row : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The kept board control of a season (cache.ts cachedBoardControl). */
+  private boardControl(season: number): KeptFlag {
+    return cachedBoardControl(
+      this.deps.repos.cache,
+      this.deps.config.leagueId,
+      season,
+      this.deps.clock,
+    );
+  }
+
+  /**
+   * The request a public-league probe plan sends: the board probe, or the view whose cookie-bearing
+   * 401 caused the rejection (R3 nit (c)) with the smallest request that view answers — the pool
+   * views one row (`limit` needs a sort); null when the recorded view is not one this provider
+   * requests on the league (then nothing can discriminate here).
+   */
+  private probeTarget(
+    ref: LeagueRef,
+    plan: ProbePlan,
+    board: EspnTarget,
+  ): {
+    readonly target: EspnTarget;
+    readonly filter: string | null;
+    readonly view: EspnView;
+  } | null {
+    if (plan.kind === "board" || plan.view === BOARD_PROBE_VIEW)
+      return { target: board, filter: boardProbeFilter(), view: "kona_league_communication" };
+    const view = (LEAGUE_VIEWS as readonly string[]).includes(plan.view)
+      ? (plan.view as LeagueView)
+      : null;
+    if (view === null) return null;
+    const filter =
+      view === "kona_player_info" || view === "kona_playercard"
+        ? playerFilter({ limit: 1, sorts: sortTerms("percOwned", ref.season, 1) }, "league")
+        : null;
+    return { target: this.league(ref, [view]), filter, view };
   }
 
   transportStatus(): TransportStatus {

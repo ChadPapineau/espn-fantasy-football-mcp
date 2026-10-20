@@ -5,11 +5,13 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES, classifyError } from "../../src/mcp/errors.js";
 import * as espn from "../../src/providers/espn/types.js";
+import { HTTP_BREAKER_FAILURE_OUTCOMES } from "../../src/http/breaker.js";
 import { SOURCE_RATE_LIMITS } from "../../src/sources/source.js";
 import {
   ATTEMPT_TIMEOUT_MS,
   BREAKER_FAILURE_OUTCOMES,
   DEGRADED_CODES,
+  ESPN_BREAKER_FAILURE_OUTCOMES,
   ESPN_BACKOFF,
   ESPN_BREAKER,
   ESPN_JOB_DAILY_CAPS,
@@ -216,6 +218,16 @@ describe("B4/B5: transport policy constants and the breaker derived from outcome
       expect(Object.isFrozen(o)).toBe(true);
     expect(BREAKER_FAILURE_OUTCOMES).toEqual(["server_error", "rate_limited", "timeout"]);
     for (const o of BREAKER_FAILURE_OUTCOMES) expect(REQUEST_OUTCOMES).toContain(o);
+    // the ESPN breaker's set: plan 01 §6's list plus network failures (plan 05 §4.1), the same set
+    // src/http/breaker.ts counts — never a client error (the caller's own cancellation included)
+    expect([...ESPN_BREAKER_FAILURE_OUTCOMES].sort()).toEqual(
+      [...BREAKER_FAILURE_OUTCOMES, "network_error"].sort(),
+    );
+    expect([...ESPN_BREAKER_FAILURE_OUTCOMES].sort()).toEqual(
+      [...HTTP_BREAKER_FAILURE_OUTCOMES].sort(),
+    );
+    expect(ESPN_BREAKER_FAILURE_OUTCOMES).not.toContain("client_error");
+    expect(Object.isFrozen(ESPN_BREAKER_FAILURE_OUTCOMES)).toBe(true);
   });
   const T = Date.parse("2026-10-05T18:00:00Z");
   const row = (agoMs: number, outcome: RequestOutcome) => ({ at_ms: T - agoMs, outcome });
@@ -259,10 +271,17 @@ describe("B4/B5: transport policy constants and the breaker derived from outcome
         T,
       ).breaker_open,
     ).toBe(true);
+    // Stage C finding espn-breaker-ignores-resets: a reset, a refused connection or a TLS failure
+    // (network_error) is a failure like a 5xx (plan 05 §4.1) — it no longer resets the run
     expect(
-      breakerFromOutcomes([row(1, "network_error"), row(2, "timeout"), row(3, "timeout")], T)
-        .consecutive_failures,
-    ).toBe(0);
+      breakerFromOutcomes([row(1, "network_error"), row(2, "timeout"), row(3, "timeout")], T),
+    ).toMatchObject({ breaker_open: true, consecutive_failures: 3 });
+    expect(
+      breakerFromOutcomes(
+        [row(1, "network_error"), row(2, "network_error"), row(3, "network_error")],
+        T,
+      ).breaker_open,
+    ).toBe(true);
     expect(breakerFromOutcomes([], T)).toEqual({
       breaker_open: false,
       breaker_open_until: null,

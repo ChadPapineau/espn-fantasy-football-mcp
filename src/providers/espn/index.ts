@@ -71,7 +71,14 @@ export interface CreateEspnProviderOptions {
     Config,
     "leagueId" | "season" | "teamId" | "espnReadHost" | "fixtureRecord" | "fixtureDir"
   >;
-  readonly repos: Pick<StoreRepositories, "limiter" | "espnCache" | "driftState">;
+  /**
+   * The store's repositories; `credentialState` (read only — the definitive probe's plan reads
+   * setup's board control and the rejected view, plan 02 §2.1) when the root passes it, as
+   * `store.repos` does.
+   */
+  readonly repos: Pick<StoreRepositories, "limiter" | "espnCache" | "driftState"> & {
+    readonly credentialState?: Pick<StoreRepositories["credentialState"], "get">;
+  };
   readonly credentials: CredentialAuthority | null;
   readonly clock: Clock;
   readonly scoring: ScoringSettingsTranslator;
@@ -95,6 +102,7 @@ export interface CreateEspnProviderOptions {
 export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
   let fetchFn: FetchLike = o.fetch ?? ((url, init) => fetch(url, init));
   let credentials = o.credentials;
+  let tlsVerificationDisabled: (() => boolean) | undefined;
   if (o.config.fixtureDir !== null) {
     if (credentials !== null && credentials.state() !== "not_configured")
       throw new EspnProviderError("INTERNAL", "fixture_mode_with_credentials");
@@ -103,12 +111,21 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     fetchFn =
       loc.kind === "derived" ? createDerivedLeagueFetch({ dir: loc.dir }) : createFixtureFetch(loc);
     credentials = null;
+    // fixture mode reads recorded files and opens no connection: no TLS policy applies to it
+    tlsVerificationDisabled = () => false;
   }
   return new EspnProvider({
     config: o.config,
     fetch: fetchFn,
     credentials,
-    repos: { limiter: o.repos.limiter, cache: o.repos.espnCache, driftState: o.repos.driftState },
+    repos: {
+      limiter: o.repos.limiter,
+      cache: o.repos.espnCache,
+      driftState: o.repos.driftState,
+      ...(o.repos.credentialState === undefined
+        ? {}
+        : { credentialState: o.repos.credentialState }),
+    },
     clock: o.clock,
     scoring: o.scoring,
     ...(o.origin === undefined ? {} : { origin: o.origin }),
@@ -119,5 +136,6 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     ...(o.periodProvisional === undefined ? {} : { periodProvisional: o.periodProvisional }),
     ...(o.proSchedule === undefined ? {} : { proSchedule: o.proSchedule }),
     ...(o.log === undefined ? {} : { log: o.log }),
+    ...(tlsVerificationDisabled === undefined ? {} : { tlsVerificationDisabled }),
   });
 }

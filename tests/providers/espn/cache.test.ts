@@ -4,12 +4,15 @@
 // owner GUIDs kept for own-team resolution; `__proto__` never copied), the force_refresh gate (once
 // per 60 s per key) and the coalescer (N concurrent → one call).
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FRESHNESS_TABLE } from "../../../src/config/freshness.js";
 import {
   cacheKey,
   classForViews,
   Coalescer,
+  type CoalesceParty,
+  type LeaveReason,
+  type SharedLimits,
   ForceRefreshGate,
   serverTimeIso,
   stripForCache,
@@ -141,20 +144,38 @@ describe("ForceRefreshGate", () => {
 });
 
 describe("Coalescer", () => {
+  // a reader with no budget: the default 20 s window, never cancelled
+  const lone = (deadlineAtMs = Date.now() + 20_000): CoalesceParty => ({
+    deadlineAtMs,
+    signal: null,
+  });
+  const gone = (why: LeaveReason): Error => new Error(`left: ${why}`);
   it("N concurrent identical calls → one run; the key is free again afterwards", async () => {
     const c = new Coalescer<number>();
     let runs = 0;
     let release!: (n: number) => void;
     const gate = new Promise<number>((r) => (release = r));
-    const calls = Array.from({ length: 5 }, () => c.run("k", () => (runs++, gate)));
+    const calls = Array.from({ length: 5 }, () => c.run("k", lone(), () => (runs++, gate), gone));
     expect(calls.filter((x) => x.joined)).toHaveLength(4);
     expect(c.size).toBe(1);
+    expect(c.has("k")).toBe(true);
     release(7);
     expect(await Promise.all(calls.map((x) => x.promise))).toEqual([7, 7, 7, 7, 7]);
     expect(runs).toBe(1);
     expect(c.size).toBe(0);
-    const failing = c.run("k", () => Promise.reject(new Error("boom")));
+    expect(c.has("k")).toBe(false);
+    const failing = c.run("k", lone(), () => Promise.reject(new Error("boom")), gone);
     await expect(failing.promise).rejects.toThrow("boom");
+    expect(c.size).toBe(0);
+    const thrown = c.run(
+      "k",
+      lone(),
+      () => {
+        throw new Error("sync");
+      },
+      gone,
+    );
+    await expect(thrown.promise).rejects.toThrow("sync");
     expect(c.size).toBe(0);
   });
   it("property: concurrent calls over k keys run exactly k times", async () => {
@@ -166,17 +187,162 @@ describe("Coalescer", () => {
           let runs = 0;
           const ps = keys.map(
             (k) =>
-              c.run(String(k), async () => {
-                runs++;
-                await Promise.resolve();
-                return String(k);
-              }).promise,
+              c.run(
+                String(k),
+                lone(),
+                async () => {
+                  runs++;
+                  await Promise.resolve();
+                  return String(k);
+                },
+                gone,
+              ).promise,
           );
           expect(await Promise.all(ps)).toEqual(keys.map(String));
           expect(runs).toBe(new Set(keys).size);
         },
       ),
     );
+  });
+
+  // Stage C finding espn-coalesced-read-leader-budget: the run used to take the FIRST caller's
+  // signal and deadline, so cancelling that caller failed every joiner
+  it("a reader's cancellation ends its own wait only: the run goes on for the others", async () => {
+    const c = new Coalescer<string>();
+    let release!: (v: string) => void;
+    let limits!: SharedLimits;
+    const a = new AbortController();
+    const first = c.run(
+      "k",
+      { deadlineAtMs: Date.now() + 20_000, signal: a.signal },
+      (l) => {
+        limits = l;
+        return new Promise<string>((r) => (release = r));
+      },
+      gone,
+    );
+    const second = c.run("k", lone(), () => Promise.reject(new Error("never run")), gone);
+    expect(second.joined).toBe(true);
+    a.abort();
+    await expect(first.promise).rejects.toThrow("left: aborted");
+    expect(limits.signal.aborted).toBe(false);
+    expect(c.has("k")).toBe(true);
+    release("data");
+    await expect(second.promise).resolves.toBe("data");
+  });
+  it("the run is aborted, and the key freed, only once every reader has gone", async () => {
+    const c = new Coalescer<string>();
+    let limits!: SharedLimits;
+    const a = new AbortController();
+    const b = new AbortController();
+    const first = c.run(
+      "k",
+      { deadlineAtMs: Date.now() + 20_000, signal: a.signal },
+      (l) => {
+        limits = l;
+        return new Promise<string>((_r, rej) => {
+          l.signal.addEventListener("abort", () => {
+            rej(new Error("aborted run"));
+          });
+        });
+      },
+      gone,
+    );
+    const second = c.run(
+      "k",
+      { deadlineAtMs: Date.now() + 20_000, signal: b.signal },
+      () => Promise.reject(new Error("never run")),
+      gone,
+    );
+    a.abort();
+    await expect(first.promise).rejects.toThrow("left: aborted");
+    expect(limits.signal.aborted).toBe(false);
+    b.abort();
+    await expect(second.promise).rejects.toThrow("left: aborted");
+    expect(limits.signal.aborted).toBe(true);
+    expect(limits.canStart(Date.now())).toBe(false);
+    // a later reader starts a run of its own, never joining the aborted one
+    let runs = 0;
+    const third = c.run("k", lone(), () => (runs++, Promise.resolve("fresh")), gone);
+    expect(third.joined).toBe(false);
+    await expect(third.promise).resolves.toBe("fresh");
+    expect(runs).toBe(1);
+  });
+  it("a reader already cancelled starts and joins nothing", async () => {
+    const c = new Coalescer<string>();
+    const a = new AbortController();
+    a.abort();
+    let runs = 0;
+    const r = c.run(
+      "k",
+      { deadlineAtMs: Date.now() + 20_000, signal: a.signal },
+      () => (runs++, Promise.resolve("x")),
+      gone,
+    );
+    await expect(r.promise).rejects.toThrow("left: aborted");
+    expect(runs).toBe(0);
+    expect(c.size).toBe(0);
+  });
+  it("the run's deadline is the latest of the readers still waiting; each reader stops at its own", async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    try {
+      const c = new Coalescer<string>(() => Date.now());
+      let release!: (v: string) => void;
+      let limits!: SharedLimits;
+      const t0 = Date.now();
+      const early = c.run(
+        "k",
+        { deadlineAtMs: t0 + 100, signal: null },
+        (l) => {
+          limits = l;
+          return new Promise<string>((r) => (release = r));
+        },
+        gone,
+      );
+      expect(limits.deadline()).toBe(t0 + 100);
+      expect(limits.canStart(t0 + 99)).toBe(true);
+      expect(limits.canStart(t0 + 100)).toBe(false);
+      expect(limits.canStart(Number.NaN)).toBe(false);
+      const late = c.run(
+        "k",
+        { deadlineAtMs: t0 + 20_000, signal: null },
+        () => Promise.reject(new Error("never run")),
+        gone,
+      );
+      // a later reader extends the run: it may now start requests up to that reader's deadline
+      expect(limits.deadline()).toBe(t0 + 20_000);
+      expect(limits.canStart(t0 + 5_000)).toBe(true);
+      let earlyOutcome: unknown = null;
+      early.promise.catch((e: unknown) => (earlyOutcome = e));
+      await vi.advanceTimersByTimeAsync(100);
+      // the early reader stopped at ITS deadline; the run goes on, bounded by the late reader's
+      expect(String(earlyOutcome)).toContain("left: deadline");
+      expect(limits.signal.aborted).toBe(false);
+      expect(limits.deadline()).toBe(t0 + 20_000);
+      release("late data");
+      await expect(late.promise).resolves.toBe("late data");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("a lone reader arms no timer of its own (the run's own timing bounds it)", async () => {
+    vi.useFakeTimers({ now: 2_000_000 });
+    try {
+      const c = new Coalescer<string>(() => Date.now());
+      let release!: (v: string) => void;
+      const r = c.run(
+        "k",
+        { deadlineAtMs: Date.now() + 50, signal: null },
+        () => new Promise<string>((res) => (release = res)),
+        gone,
+      );
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      release("late but alone");
+      await expect(r.promise).resolves.toBe("late but alone");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

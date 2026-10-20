@@ -6,10 +6,9 @@
 // by every tool and every process"), fail-closed (a row that cannot be written means the request is
 // not sent), one row per upstream request — every retry attempt is a request of its own (plan 01 §6
 // "each request inserts a row"), the circuit breaker (open 5 min after 3 consecutive 5xx / 429 /
-// timeouts — in process AND derived from the persisted outcomes, so a second process sees it), and
-// the backoff schedule (1, 2, 4, 8 s, ±25 % full jitter).
+// timeouts / network failures — plan 05 §4.1 — in process AND derived from the persisted
+// outcomes, so a second process sees it), and the backoff schedule (1, 2, 4, 8 s, ±25 % jitter).
 import {
-  BREAKER_FAILURE_OUTCOMES,
   ESPN_BACKOFF,
   ESPN_BREAKER,
   ESPN_JOB_DAILY_CAPS,
@@ -17,7 +16,11 @@ import {
   type RequestOutcome,
 } from "../../config/schema.js";
 import type { Clock } from "../../domain/clock.js";
-import { breakerFromOutcomes, type TransportStatus } from "../platform.js";
+import {
+  breakerFromOutcomes,
+  ESPN_BREAKER_FAILURE_OUTCOMES,
+  type TransportStatus,
+} from "../platform.js";
 import type {
   LimiterRepository,
   LimiterRequest,
@@ -262,10 +265,14 @@ export class Breaker {
     this.repo = repo;
   }
 
-  /** Records a finished request's outcome (success resets the count). */
+  /**
+   * Records a finished request's outcome (ESPN_BREAKER_FAILURE_OUTCOMES count — a reset, a refused
+   * connection and a certificate failure among them; a success resets the count; a client error,
+   * the caller's cancellation included, neither counts nor resets).
+   */
   record(outcome: RequestOutcome): void {
     if (outcome === "pending") return;
-    if (!BREAKER_FAILURE_OUTCOMES.includes(outcome)) {
+    if (!ESPN_BREAKER_FAILURE_OUTCOMES.includes(outcome)) {
       if (outcome === "ok" || outcome === "not_modified") this.consecutive = 0;
       return;
     }
@@ -356,20 +363,30 @@ export class EspnLimiter {
 
   /**
    * Waits for a concurrency slot (in this process, then across processes — `trySlot`) and a bucket
-   * slot, then records the send (one row per upstream request). A wait that would pass
-   * `deadlineAtMs` is refused as RATE_LIMITED (with the wait); a daily cap is refused at once; rows
-   * that cannot be read or written refuse fail-closed.
+   * slot, then records the send (one row per upstream request). A wait that would pass the deadline
+   * is refused as RATE_LIMITED (with the wait); a daily cap is refused at once; rows that cannot be
+   * read or written refuse fail-closed. The deadline is a number, or a function read at every step:
+   * a coalesced read's is the latest deadline of the readers still waiting for it (cache.ts
+   * `SharedLimits`), which grows when a later reader joins and shrinks when one leaves.
    */
   async acquire(opts: {
     readonly keyless: boolean;
-    readonly deadlineAtMs: number;
+    readonly deadlineAtMs: number | (() => number);
     readonly signal: AbortSignal | null;
   }): Promise<LimiterTicket> {
+    const d = opts.deadlineAtMs;
+    const deadline = typeof d === "function" ? d : (): number => d;
     // the in-process slot is waited for only until the deadline: a read queued behind hung requests
-    // is refused (RATE_LIMITED, concurrency) instead of sending after its call gave up
-    const waitMs = opts.deadlineAtMs - this.deps.clock.nowMs();
-    if (!(await this.sem.acquire(waitMs, opts.signal)))
-      throw new EspnRateLimitedError(Math.max(IN_FLIGHT_POLL_MS, waitMs), "concurrency");
+    // is refused (RATE_LIMITED, concurrency) instead of sending after its call gave up; a deadline
+    // that grew meanwhile (a later reader joined) is waited for again
+    for (let horizon = deadline(); ;) {
+      const waitMs = horizon - this.deps.clock.nowMs();
+      if (await this.sem.acquire(waitMs, opts.signal)) break;
+      const later = deadline();
+      if (opts.signal?.aborted === true || !(later > horizon))
+        throw new EspnRateLimitedError(Math.max(IN_FLIGHT_POLL_MS, waitMs), "concurrency");
+      horizon = later;
+    }
     let held = true;
     const releaseSlot = (): void => {
       if (held) {
@@ -379,13 +396,17 @@ export class EspnLimiter {
     };
     try {
       // the concurrency waits are counted as well as timed: a clock that does not move (a test's
-      // fixed clock) cannot keep the loop alive past the deadline's number of polls
+      // fixed clock) cannot keep the loop alive past the deadline's number of polls (a deadline
+      // that grew adds the polls of its extra time)
       let polls: number | null = null;
+      let pollHorizon = Number.NEGATIVE_INFINITY;
       for (;;) {
         const now = this.deps.clock.nowMs();
+        const until = deadline();
         // a request that can no longer start inside its deadline is never recorded: an unsent
-        // request must not spend the 30/min window (espn-deadline-budget-exhausted-internal)
-        if (now >= opts.deadlineAtMs)
+        // request must not spend the 30/min window (espn-deadline-budget-exhausted-internal) — nor
+        // one whose every reader has gone (a cancelled call)
+        if (now >= until || opts.signal?.aborted === true)
           throw new EspnRateLimitedError(IN_FLIGHT_POLL_MS, "concurrency");
         let verdict: SlotVerdict;
         try {
@@ -394,8 +415,14 @@ export class EspnLimiter {
           throw new EspnLimiterUnavailableError(e);
         }
         if (!verdict.ok && verdict.reason === "concurrency") {
-          polls ??= Math.max(0, Math.floor((opts.deadlineAtMs - now) / IN_FLIGHT_POLL_MS));
-          if (now + verdict.retry_after_ms >= opts.deadlineAtMs || polls <= 0)
+          if (polls === null) {
+            polls = Math.max(0, Math.floor((until - now) / IN_FLIGHT_POLL_MS));
+            pollHorizon = until;
+          } else if (until > pollHorizon) {
+            polls += Math.floor((until - pollHorizon) / IN_FLIGHT_POLL_MS);
+            pollHorizon = until;
+          }
+          if (now + verdict.retry_after_ms >= until || polls <= 0)
             throw new EspnRateLimitedError(verdict.retry_after_ms, "concurrency");
           polls--;
           this.deps.onEvent?.("limiter.wait_concurrency");
@@ -419,7 +446,7 @@ export class EspnLimiter {
             },
           };
         }
-        if (verdict.reason === "daily_cap" || now + verdict.retry_after_ms >= opts.deadlineAtMs)
+        if (verdict.reason === "daily_cap" || now + verdict.retry_after_ms >= until)
           throw new EspnRateLimitedError(verdict.retry_after_ms, verdict.reason);
         this.deps.onEvent?.("limiter.wait");
         await this.sleep(verdict.retry_after_ms, opts.signal);

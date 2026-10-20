@@ -4,7 +4,9 @@
 // 401/403 on a cookie-bearing request → ESPN_AUTH_REJECTED, NEVER retried (the state machine
 // short-circuits further calls), keyless → ESPN_REQUIRES_COOKIES; 404 GENERAL_NOT_FOUND →
 // ESPN_LEAGUE_NOT_FOUND; 400 FILTER_LIMIT_MISSING_SORT → INTERNAL (our builder makes it impossible);
-// 429/5xx/timeouts retryable; ENOTFOUND/ECONNREFUSED never; a 3xx or a non-JSON 2xx → ESPN_HOST_MOVED.
+// 429/5xx/timeouts and resets retryable; ENOTFOUND/ECONNREFUSED and TLS failures never (src/http's
+// taxonomy: `tls` is not retryable); every network failure is a breaker failure (plan 05 §4.1); the
+// caller's own cancellation is no upstream verdict at all; a 3xx or a non-JSON 2xx → ESPN_HOST_MOVED.
 // Errors carry an own `effCode`/`effDetails` (a provider may not import src/mcp).
 import type { RequestOutcome } from "../../config/schema.js";
 import { kindForCode } from "../../http/errors.js";
@@ -28,6 +30,8 @@ export const ESPN_FAILURE_KINDS = [
   "timeout",
   "network",
   "network_transient",
+  "tls",
+  "aborted",
   "unexpected_status",
 ] as const;
 export type EspnFailureKind = (typeof ESPN_FAILURE_KINDS)[number];
@@ -50,7 +54,11 @@ export interface FailureSpec {
   readonly retryable: boolean;
 }
 
-/** The classifier table (plan 01 §6: 400/401/403/404 and ENOTFOUND/ECONNREFUSED never retried). */
+/**
+ * The classifier table (plan 01 §6: 400/401/403/404 and ENOTFOUND/ECONNREFUSED never retried; plan
+ * 05 §4.1: resets retried like a 5xx). `network_error` is a breaker failure (platform.ts
+ * ESPN_BREAKER_FAILURE_OUTCOMES); `client_error` never is.
+ */
 export const FAILURE_TABLE: Readonly<Record<EspnFailureKind, FailureSpec>> = Object.freeze({
   auth_rejected: { effCode: "ESPN_AUTH_REJECTED", outcome: "client_error", retryable: false },
   requires_cookies: { effCode: "ESPN_REQUIRES_COOKIES", outcome: "client_error", retryable: false },
@@ -71,6 +79,12 @@ export const FAILURE_TABLE: Readonly<Record<EspnFailureKind, FailureSpec>> = Obj
     outcome: "network_error",
     retryable: true,
   },
+  // a certificate or TLS-protocol failure (src/http `tls`): a retry cannot cure an impostor or a
+  // TLS-intercepting middlebox, so it fails fast — and counts toward the breaker like any outage
+  tls: { effCode: "ESPN_UPSTREAM_UNAVAILABLE", outcome: "network_error", retryable: false },
+  // the caller's own cancellation (a coalesced read: every reader's): no upstream verdict — the row
+  // reads client_error, which the breaker never counts — and nothing retries it
+  aborted: { effCode: "ESPN_UPSTREAM_UNAVAILABLE", outcome: "client_error", retryable: false },
   unexpected_status: {
     effCode: "ESPN_UPSTREAM_UNAVAILABLE",
     outcome: "server_error",
@@ -269,13 +283,18 @@ const CONNECT_TIMEOUT_CODE = "UND_ERR_CONNECT_TIMEOUT";
 /**
  * Classifies a thrown fetch failure: our own attempt timeout → `timeout` (`attempt_timeout`;
  * retryable, counted by the breaker); a fail-fast DNS/refused code anywhere in the cause chain →
- * `network` (never retried); a timeout the runtime itself raised before our timer fired → `timeout`
- * too — Node's fetch gives up on a black-holed address after ≈ 10 s with `fetch failed` ←
- * `UND_ERR_CONNECT_TIMEOUT` (`connect_timeout`), inside the 15 s attempt timer, and plan 01 §6 / ADV
- * OBJ-20 and plan 05 §4.1's black-hole row need the breaker to count it; any other runtime timeout
- * (`ETIMEDOUT`, undici's headers/body timers, a `TimeoutError`) is `runtime_timeout`. The timeout
- * codes are src/http's (`kindForCode`), so the two classifiers agree on what a timeout is. Anything
- * else (resets, sockets, a bare `fetch failed`) → `network_transient` (retryable, not counted).
+ * `network` (never retried); a certificate or TLS-protocol code (src/http's `kindForCode` → `tls`:
+ * `DEPTH_ZERO_SELF_SIGNED_CERT`, `CERT_HAS_EXPIRED`, `ERR_TLS_CERT_ALTNAME_INVALID`, …) → `tls`
+ * (never retried — Stage C finding espn-tls-failure-retried-transient: it was three attempts per
+ * read, which src/http's taxonomy refuses); a timeout the runtime itself raised before our timer
+ * fired → `timeout` too — Node's fetch gives up on a black-holed address after ≈ 10 s with `fetch
+ * failed` ← `UND_ERR_CONNECT_TIMEOUT` (`connect_timeout`), inside the 15 s attempt timer, and plan
+ * 01 §6 / ADV OBJ-20 and plan 05 §4.1's black-hole row need the breaker to count it; any other
+ * runtime timeout (`ETIMEDOUT`, undici's headers/body timers, a `TimeoutError`) is
+ * `runtime_timeout`. The timeout and TLS codes are src/http's (`kindForCode`), so the two
+ * classifiers agree on what they are. Anything else (resets, sockets, a bare `fetch failed`) →
+ * `network_transient` (retried like a 5xx). Every one of them is a breaker failure (`network_error`
+ * or `timeout`; plan 05 §4.1). The caller's own cancellation is the transport's to name (`aborted`).
  */
 export function classifyThrown(e: unknown, timedOut: boolean, view: EspnView): EspnUpstreamError {
   if (timedOut) return new EspnUpstreamError("timeout", { view, reason: "attempt_timeout" });
@@ -285,6 +304,8 @@ export function classifyThrown(e: unknown, timedOut: boolean, view: EspnView): E
     const code = ownCode(cur);
     if (code !== null && FAIL_FAST_NETWORK_CODES.has(code))
       return new EspnUpstreamError("network", { view, reason: "unreachable" }, { cause: e });
+    if (code !== null && kindForCode(code) === "tls")
+      return new EspnUpstreamError("tls", { view, reason: "tls" }, { cause: e });
     if (code === CONNECT_TIMEOUT_CODE) runtimeTimeout = "connect_timeout";
     else if ((code !== null && kindForCode(code) === "timeout") || ownName(cur) === "TimeoutError")
       runtimeTimeout ??= "runtime_timeout";

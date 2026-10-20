@@ -9,12 +9,15 @@ import { EspnUpstreamError } from "../../../src/providers/espn/errors.js";
 import { leagueTarget, type EspnTarget } from "../../../src/providers/espn/path.js";
 import {
   assertReadTarget,
+  EspnTlsPolicyError,
   ESPN_USER_AGENT,
   MAX_BODY_BYTES,
   sendAttempt,
+  tlsVerificationDisabled,
   type AttemptRequest,
   type FetchLike,
 } from "../../../src/providers/espn/transport.js";
+import { ESPN_BREAKER_FAILURE_OUTCOMES } from "../../../src/providers/platform.js";
 import { jsonResponse, testCookieHeader } from "./helpers.js";
 
 const H = "lm-api-reads.fantasy.espn.com";
@@ -157,13 +160,16 @@ describe("limits and failures", () => {
       kind: "timeout",
     });
   });
-  it("the caller's abort: before the start (no request) and during it", async () => {
+  it("the caller's abort: before the start (no request) and during it — `aborted`, never counted", async () => {
     const pre = new AbortController();
     pre.abort();
     let sent = 0;
     await expect(
       sendAttempt(() => (sent++, Promise.resolve(jsonResponse({}))), req({ signal: pre.signal })),
     ).rejects.toMatchObject({
+      kind: "aborted",
+      outcome: "client_error",
+      retryable: false,
       effDetails: { reason: "aborted" },
     });
     expect(sent).toBe(0);
@@ -176,7 +182,35 @@ describe("limits and failures", () => {
       );
     const p = sendAttempt(hung, req({ signal: mid.signal, timeoutMs: 10_000 }));
     mid.abort();
-    await expect(p).rejects.toMatchObject({ kind: "network_transient" });
+    // the caller's cancellation is no upstream verdict: the breaker never counts it (it used to
+    // read network_transient, a network failure — Stage C finding espn-breaker-ignores-resets)
+    const e = await p.catch((x: unknown) => x);
+    expect(e).toMatchObject({ kind: "aborted", outcome: "client_error", retryable: false });
+    expect(ESPN_BREAKER_FAILURE_OUTCOMES).not.toContain((e as { outcome: string }).outcome);
+    // aborted while the body streams: still the caller's cancellation
+    const bodyCut = new AbortController();
+    const streaming: FetchLike = (_u, i) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(new TextEncoder().encode("{"));
+              i.signal?.addEventListener("abort", () => {
+                c.error(new DOMException("a", "AbortError"));
+              });
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const q = sendAttempt(streaming, req({ signal: bodyCut.signal, timeoutMs: 10_000 }));
+    await new Promise((r) => setTimeout(r, 5));
+    bodyCut.abort();
+    await expect(q).rejects.toMatchObject({ kind: "aborted" });
+    // our own timer firing is still a (counted) timeout, whatever the caller did
+    const late = new AbortController();
+    const timed = sendAttempt(hung, req({ signal: late.signal, timeoutMs: 5 }));
+    await expect(timed).rejects.toMatchObject({ kind: "timeout", outcome: "timeout" });
   });
   it("an error carrying its own effCode (fixture mode) passes through unchanged", async () => {
     const own = Object.assign(new Error("fixture"), { effCode: "INTERNAL" });
@@ -192,5 +226,51 @@ describe("limits and failures", () => {
     await expect(sendAttempt(() => Promise.resolve(res), req())).resolves.toMatchObject({
       status: 301,
     });
+  });
+});
+
+// Stage C finding espn-tls-verify-disabled-unguarded: an inherited NODE_TLS_REJECT_UNAUTHORIZED=0
+// let an impostor's self-signed endpoint receive the cookie and have its body served as league data
+describe("certificate verification turned off process-wide", () => {
+  const SWID = "{00000000-0000-4000-8000-000000000008}";
+  const withEnv = async (value: string | undefined, fn: () => Promise<void>): Promise<void> => {
+    const saved = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    if (value === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = value;
+    try {
+      await fn();
+    } finally {
+      if (saved === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = saved;
+    }
+  };
+  it("Node's rule exactly: only the value \"0\" turns verification off (checked on Node 24's fetch)", () => {
+    expect(tlsVerificationDisabled({})).toBe(false);
+    expect(tlsVerificationDisabled({ NODE_TLS_REJECT_UNAUTHORIZED: "0" })).toBe(true);
+    for (const v of ["1", "false", "", " 0", "00", "no", "0 "])
+      expect(tlsVerificationDisabled({ NODE_TLS_REJECT_UNAUTHORIZED: v }), v).toBe(false);
+  });
+  it("a cookie-bearing attempt is refused with nothing sent; the cookie never reaches fetch", async () => {
+    await withEnv("0", async () => {
+      expect(tlsVerificationDisabled()).toBe(true);
+      const c = capture(() => jsonResponse({}));
+      const e = await sendAttempt(c.fetch, req({ cookie: testCookieHeader(SWID) })).catch(
+        (x: unknown) => x,
+      );
+      expect(e).toBeInstanceOf(EspnTlsPolicyError);
+      expect(e).toMatchObject({
+        effCode: "INTERNAL",
+        effDetails: { reason: "tls_verification_disabled", view: "mSettings" },
+      });
+      expect(JSON.stringify(e)).not.toContain("SWID");
+      expect(c.urls).toHaveLength(0);
+    });
+    // with verification on (unset, or any other value) the same attempt goes out
+    for (const v of [undefined, "1", "false"])
+      await withEnv(v, async () => {
+        const c = capture(() => jsonResponse({}));
+        await sendAttempt(c.fetch, req({ cookie: testCookieHeader(SWID) }));
+        expect(c.urls).toHaveLength(1);
+      });
   });
 });
