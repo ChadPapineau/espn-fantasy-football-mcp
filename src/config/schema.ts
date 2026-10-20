@@ -110,26 +110,53 @@ export function defaultSeason(nowMs: number): number {
 }
 
 /**
- * Whether ESPN may simply not serve the configured season of the league YET (Stage C finding
- * league-rollover-not-found-misdiagnosed). Leagues are per-season objects (research 03 §A.4): ESPN
- * creates a league's new season only when its manager renews the league — any day between ESPN
- * opening the season and the draft, which can be late August — and until then every read of it 404s
- * GENERAL_NOT_FOUND while the previous season (`season - 1`) is still served. So a 404 there does
- * not mean the league id is wrong. True only when ESPN_SEASON is unset (the season is the calendar
- * default — an operator-set season is meant as set), the season is the default at `nowMs` (a server
- * started before July 1 still holds last season), and `nowMs` is before October 1 of that season
- * (UTC): by then a league that plays it has been renewed, and a 404 says what it says.
+ * Whether a league 404 on `season` (default: the configured one) may mean ESPN simply does not serve
+ * that season of the league YET (Stage C finding league-rollover-not-found-misdiagnosed). Leagues
+ * are per-season objects (research 03 §A.4): ESPN creates a league's new season only when its
+ * manager renews the league — any day between ESPN opening the season and the draft, which can be
+ * late August — and until then every read of it 404s GENERAL_NOT_FOUND while the previous season
+ * (`season - 1`) is still served. So a 404 there does not mean the league id is wrong. True only
+ * when `season` is the configured season (a past season's 404 means the league did not exist then),
+ * ESPN_SEASON is unset (the season is the calendar default — an operator-set season is meant as
+ * set), the season is the default at `nowMs` (a server started before July 1 still holds last
+ * season), and `nowMs` is before October 1 of that season (UTC): by then a league that plays it has
+ * been renewed, and a 404 says what it says. The words for the state are SEASON_RENEWAL_TEXT.
  */
 export function seasonMayAwaitRenewal(
   config: Pick<LenientConfig, "season" | "origins">,
   nowMs: number,
+  season: number = config.season,
 ): boolean {
-  if (config.origins.ESPN_SEASON !== "default" || !Number.isFinite(nowMs)) return false;
+  if (season !== config.season || config.origins.ESPN_SEASON !== "default") return false;
+  if (!Number.isFinite(nowMs)) return false;
   return (
     config.season === defaultSeason(nowMs) &&
     nowMs < Date.UTC(config.season, SEASON_RENEWAL_DEADLINE_MONTH, 1)
   );
 }
+
+/**
+ * The renewal state's one vocabulary (Stage C finding league-rollover-not-found-misdiagnosed): what
+ * every reader says about a league 404 while `seasonMayAwaitRenewal` holds, instead of "the league
+ * id is wrong". Config is the one layer the provider, auth, the CLI and src/mcp may all import (plan
+ * 01 §1.1), so the words live here once:
+ * - `reason` — the value-free code the provider tags its ESPN_LEAGUE_NOT_FOUND with (the MCP
+ *   mapper's reason grammar, `^[a-z_]{1,40}$`), and the probe's check reason;
+ * - `message`, `hint` — the fixed texts that error carries; src/mcp/errors.ts shows them only when
+ *   its own SERVER_MESSAGES / SERVER_HINTS list the same strings (plan 01 §4.3: fixed strings from
+ *   a table, never data). Value-free: no season, no id;
+ * - `line(season)` — the terminal's sentence (eff doctor --online, eff setup, the daily jobs), with
+ *   the years, which are configuration, never an identifier.
+ * None says the id is wrong: a 404 in the window cannot tell an unrenewed league from a wrong id,
+ * so each says what is known, the remedy for each case, and where to tell them apart.
+ */
+export const SEASON_RENEWAL_TEXT = Object.freeze({
+  reason: "season_not_renewed",
+  message: "ESPN has no league with the configured id for the new season yet.",
+  hint: "From July 1 an unset ESPN_SEASON is the new season, which ESPN serves only once the league's manager renews the league. Until then set ESPN_SEASON to last season's year to read last season (unset it after the renewal). If it was renewed, check ESPN_LEAGUE_ID with eff doctor --online in a terminal.",
+  line: (season: number): string =>
+    `ESPN has no ${String(season)} season of this league yet: ESPN serves it once the league's manager renews the league (until then ESPN_SEASON=${String(season - 1)} reads last season; unset it after the renewal). If it was renewed, check ESPN_LEAGUE_ID.`,
+});
 
 /** The read host used unless the operator overrides it (research 03 §A.1). */
 export const ESPN_READ_HOST_DEFAULT = "lm-api-reads.fantasy.espn.com";

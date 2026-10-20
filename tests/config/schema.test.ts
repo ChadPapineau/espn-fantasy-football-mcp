@@ -18,6 +18,8 @@ import {
   ESPN_READ_HOST_DEFAULT,
   ESPN_WRITE_HOST,
   EXIT_CODES,
+  SEASON_MIN,
+  SEASON_RENEWAL_TEXT,
   SETUP_RECORD_KEYS,
   UNKNOWN_FILE_KEYS_WARNING,
   configKeysByScope,
@@ -261,6 +263,61 @@ describe("season, team, enums, port", () => {
       }),
       { numRuns: 500 },
     );
+  });
+  // the 404 a reader holds names the season it asked for: a past season's 404 (seeding evidence,
+  // history) means the league did not exist then — never the renewal state
+  it("awaiting renewal holds only for a 404 on the configured season itself", () => {
+    const july = Date.parse("2027-07-15T15:00:00Z");
+    const c = loadConfig(input({ nowMs: july }));
+    expect(seasonMayAwaitRenewal(c, july, 2027)).toBe(true);
+    expect(seasonMayAwaitRenewal(c, july)).toBe(true);
+    for (const other of [2026, 2025, 2018, 2028])
+      expect(seasonMayAwaitRenewal(c, july, other)).toBe(false);
+    const pinned = loadConfig(
+      input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_SEASON: "2027" }, nowMs: july }),
+    );
+    expect(seasonMayAwaitRenewal(pinned, july, 2027)).toBe(false);
+  });
+  describe("SEASON_RENEWAL_TEXT: the renewal state's one vocabulary", () => {
+    const T = SEASON_RENEWAL_TEXT;
+    it("is frozen; its reason fits the MCP mapper's reason grammar", () => {
+      expect(Object.isFrozen(T)).toBe(true);
+      expect(T.reason).toMatch(/^[a-z_]{1,40}$/);
+    });
+    // the MCP mapper's server-text contract (tests/mcp/errors.test.ts holds every SERVER_HINTS hint
+    // to it): printable ASCII, one line, at most 300 characters — held here, where the words live
+    it("the message and hint are fixed, value-free one-liners (no season, no id) the mapper accepts", () => {
+      for (const s of [T.message, T.hint]) {
+        expect(s).toMatch(/^[\x20-\x7e]{1,300}$/);
+        expect(s).not.toMatch(/\d{2,}/);
+        expect(s.trim()).toBe(s);
+      }
+      expect(T.message.length).toBeLessThanOrEqual(120);
+    });
+    it("names the state and its remedies; never says the id is wrong", () => {
+      for (const s of [T.message, T.hint, T.line(2027)]) expect(s).not.toMatch(/\bwrong\b/i);
+      expect(T.message).toMatch(/new season/);
+      expect(T.hint).toContain("ESPN_SEASON");
+      expect(T.hint).toMatch(/renews the league/);
+      expect(T.hint).toMatch(/unset it after the renewal/);
+      expect(T.hint).toContain("ESPN_LEAGUE_ID");
+      expect(T.hint).toContain("eff doctor --online");
+    });
+    it("property: the terminal line names the season and last season, and no other number", () => {
+      fc.assert(
+        fc.property(fc.integer({ min: SEASON_MIN, max: 2100 }), (season) => {
+          const line = T.line(season);
+          expect(line).toContain(`ESPN has no ${String(season)} season`);
+          expect(line).toContain(`ESPN_SEASON=${String(season - 1)}`);
+          expect(line).toMatch(/renews the league/);
+          expect(line).toContain("ESPN_LEAGUE_ID");
+          const numbers = line.match(/\d+/g) ?? [];
+          expect(new Set(numbers)).toEqual(new Set([String(season), String(season - 1)]));
+          expect(line).toMatch(/^[\x20-\x7e]+$/);
+        }),
+        { numRuns: 200 },
+      );
+    });
   });
   it.each([
     ["2018", 2018],
