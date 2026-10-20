@@ -17,6 +17,14 @@
 // anything is wired. A missing or unreadable drift manifest is never silent (plan 01 §7; finding
 // pack-drift-manifest-not-shipped): the in-call detector then runs its required-key and skeleton
 // checks only, and the root logs that degradation, as `eff probe` prints it.
+// What `eff setup` records while the server runs is followed with no restart (plan 03 L6; plan 07
+// C12): the operator's seeding reading is re-read from config.json at the start of every tool call
+// and resource read, as a server started now would resolve it (src/services/seeding.ts; Stage C
+// finding services-seeding-read-once), and espn_get_status names the credential backend the
+// authority reads now — the one the `credential_state` row records after `eff setup --storage …` —
+// never the kind config.json named at start (Stage C finding status-credential-store-label-stale).
+// The services object is handed out whole (the serve CLI's in-flight accounting rides in its
+// arguments): a copy spread from it would freeze the per-call reading.
 // Nothing here runs a request or reads a secret.
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
@@ -32,7 +40,7 @@ import {
   deriveStartupState,
   type CredentialAuthorityHandle,
 } from "../auth/state.js";
-import { openCredentialStore } from "../auth/stores.js";
+import { openCredentialStore, type InstallCredentialStore } from "../auth/stores.js";
 import type {
   CookieHeaderResult,
   CredentialStateRepository,
@@ -67,6 +75,7 @@ import { createEspnProvider, type EspnProvider, type FetchLike } from "../provid
 import type { LeagueRef } from "../providers/platform.js";
 import type { Store } from "../store/types.js";
 import { VERSION } from "../version.js";
+import { createSeedingReader } from "./seeding.js";
 
 /** What the composition root needs of the logger (src/cli/log.ts Logger satisfies it). */
 export type ServicesLogger = McpLogger & SecretRegistrar;
@@ -382,6 +391,12 @@ export interface BuildServicesArgs {
   readonly texts?: ServerTexts;
   /** Where EFF_TEST_STUBS writes its one line (default process.stderr). */
   readonly stderr?: NodeJS.WritableStream;
+  /**
+   * The serve CLI's in-flight call accounting (the shutdown drain — plan 03 §1.3), carried on the
+   * services this root builds, so the CLI hands them to the server as they are: a copy spread from
+   * them would freeze the seeding reading every call re-reads.
+   */
+  readonly inflight?: { enter(): void; exit(): void };
 }
 
 /** The composition root's product. */
@@ -416,6 +431,8 @@ export function buildServices(args: BuildServicesArgs): Wiring {
   const ref: LeagueRef = { platform: "espn", league_id: config.leagueId, season: config.season };
 
   let authority: ProbingAuthority | null = null;
+  /** The install's one credential store (null in fixture mode, which holds no credential). */
+  let installStore: InstallCredentialStore | null = null;
   if (!fixture) {
     const credStore = openCredentialStore(config.credentialStore, {
       filePath: config.credentialFile,
@@ -436,6 +453,7 @@ export function buildServices(args: BuildServicesArgs): Wiring {
       },
     });
     authority = withProbeAccess(base, credStore, logger);
+    installStore = credStore;
   }
 
   const provider = createEspnProvider({
@@ -478,7 +496,15 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     const state = authority?.state() ?? "not_configured";
     return {
       state,
-      store: fixture ? null : state === "not_configured" ? null : config.credentialStore,
+      // where the value is read from now (plan 07 G1 `credential.store`; the session-check Skill's
+      // "where stored"): the backend the install store's next operation goes to — the one this
+      // league's row records (`eff setup --storage …` writes it, and src/auth/state.ts binds the
+      // store to it), else the one in use — never the kind config.json named at start (Stage C
+      // finding status-credential-store-label-stale)
+      store:
+        installStore === null || state === "not_configured"
+          ? null
+          : (mine?.store ?? installStore.kind),
       present: state !== "not_configured",
       stored_at: mine?.stored_at ?? null,
       last_accepted_at: mine?.last_accepted_at ?? null,
@@ -509,12 +535,21 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     };
   };
 
+  // the operator's seeding reading as `eff setup --seeding` records it now: re-read at the start of
+  // every tool call and resource read (beforeCall), so the onboard Skill's answer reaches the very
+  // next call (plan 07 C12; Stage C finding services-seeding-read-once)
+  const seeding = createSeedingReader(config, logger);
+
   const services: McpServices = {
     clock,
     league: ref,
     configuredTeamId: config.teamId,
-    seedingMode: config.seedingMode,
-    seedingConfirmedAt: config.seedingConfirmedAt,
+    get seedingMode() {
+      return seeding.current().mode;
+    },
+    get seedingConfirmedAt() {
+      return seeding.current().confirmedAt;
+    },
     platform: provider,
     espn: provider,
     datasets: store.datasets,
@@ -574,12 +609,14 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     },
     transport: () => provider.transportStatus(),
     beforeCall: () => {
+      seeding.refresh();
       try {
         store.reopenChangedDatasets();
       } catch (e) {
         logger.warn("store.reopen_failed", { error: e instanceof Error ? e.name : "unknown" });
       }
     },
+    ...(args.inflight === undefined ? {} : { inflight: args.inflight }),
     golden,
     logger,
   };
