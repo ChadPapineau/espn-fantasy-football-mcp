@@ -22,7 +22,8 @@
 // and resource read, as a server started now would resolve it (src/services/seeding.ts; Stage C
 // finding services-seeding-read-once), and espn_get_status names the credential backend the
 // authority reads now — the one the `credential_state` row records after `eff setup --storage …` —
-// never the kind config.json named at start (Stage C finding status-credential-store-label-stale).
+// never the kind config.json named at start (Stage C finding status-credential-store-label-stale) —
+// and, for the file store, reads the session.json path config.json records at each operation.
 // The services object is handed out whole (the serve CLI's in-flight accounting rides in its
 // arguments): a copy spread from it would freeze the per-call reading.
 // Nothing here runs a request or reads a secret.
@@ -436,6 +437,11 @@ export function buildServices(args: BuildServicesArgs): Wiring {
   if (!fixture) {
     const credStore = openCredentialStore(config.credentialStore, {
       filePath: config.credentialFile,
+      // each file operation reads the session.json path config.json records at that moment (plan
+      // 03 §3: authoritative for every process), so `EFF_CREDENTIAL_FILE=<alt> eff setup --storage
+      // file` in another terminal is read at the next call, no restart (plan 03 L6; Stage C finding
+      // auth-file-path-switch-deletes-row, the composition root's half)
+      ...(config.configDir === "" ? {} : { configDir: config.configDir }),
       home: args.home,
       repoRoot: args.packageRoot,
       ...(loadKeyring === undefined ? {} : { loadKeyring }),
