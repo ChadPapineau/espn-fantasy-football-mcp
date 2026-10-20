@@ -22,7 +22,7 @@ metadata:
 
 # apply — the exact clicks for a change already agreed
 
-The user invokes this Skill; the model never does. It turns a recommendation **already agreed in this conversation** into numbered manual steps on ESPN — the page, the control, the slot, the player, the deadline — after checking against the current roster that ESPN will accept them. This version is read-only: it never changes the team, never says "done", and never claims a change was made.
+Only the user starts this Skill — with its command, or, where the Skills were installed one by one, by asking for the clicks (guardrail 10) — and the model never starts it on its own. It turns a recommendation **already agreed in this conversation** into numbered manual steps on ESPN — the page, the control, the slot, the player, the deadline — after checking against the current roster that ESPN will accept them. This version is read-only: it never changes the team, never says "done", and never claims a change was made.
 
 Conventions: Step 0 and the never-re-fetch rules in [orient](references/orient.md); fields per tool in [tool outputs](references/tool-outputs.md); slot names, statuses and page names in [ESPN vocabulary](references/espn-vocabulary.md); the claim mechanics in [priority waivers](references/priority-waivers.md). The guardrails are repeated below.
 

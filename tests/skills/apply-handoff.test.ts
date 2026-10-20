@@ -88,6 +88,16 @@ describe("the hand-off to apply names what starts it (Stage C finding skills-app
     expect(copy.data.name).toBe("espn-apply");
   });
 
+  it("apply's own body agrees: the user starts it, the model never does so on its own", () => {
+    // a copy install's apply is started by the model when the user says apply (the line above), so
+    // the body must not tell that model it never invokes the Skill — only that it never starts it
+    // unasked
+    const body = read("skills/apply/SKILL.md");
+    expect(body).toMatch(/Only the user starts this Skill/);
+    expect(body).toMatch(/the model never starts it on its own/);
+    expect(body).not.toMatch(/the model never does\./);
+  });
+
   it("with no Skill installed, the line names the server's espn.apply prompt, which exists", () => {
     const { context, line } = lineFor("not at all");
     expect(context).toContain("`espn.*` prompts");
