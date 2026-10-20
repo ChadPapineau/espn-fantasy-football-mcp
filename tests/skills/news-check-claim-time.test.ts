@@ -39,7 +39,8 @@ const accepted = (time: string): boolean =>
     .success;
 
 /** The sentence of step 4 that says when `time` is left out. */
-const LEAVE_OUT = CHECK_STEP.split(/(?<=\.)\s+/).find((s) => /^Leave `time` out/.test(s)) ?? "";
+const LEAVE_OUT =
+  CHECK_STEP.split(/(?<=\.)\s+/).find((s) => s.startsWith("Leave `time` out")) ?? "";
 /** The examples step 4 gives to pass: every backticked date-time. */
 const EXAMPLES = [...CHECK_STEP.matchAll(/`(\d{4}-\d{2}-\d{2}T[^`]+)`/g)].map((m) => m[1] ?? "");
 /** The form step 4 states, `YYYY-MM-DDThh:mm:ss±hh:mm`. */
