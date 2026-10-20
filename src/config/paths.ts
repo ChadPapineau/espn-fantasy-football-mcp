@@ -1,9 +1,10 @@
 // paths.ts — the one config dir and one cache dir (plan 01 D16, §5.1; plan 02 §2.2; plan 03 §1.1
-// step 1), absolute-path assertions, 0700/0600 helpers that refuse symlinks and group/other bits,
-// and the file-provider (iCloud) xattr refusal (plan 02 §2.2 "iCloud check", §8 #7; plan 03 §5 #4).
+// step 1), absolute-path assertions, 0700/0600 helpers that refuse symlinks, group/other bits and
+// (macOS) an ACL entry giving anyone else access, and the file-provider (iCloud) xattr refusal
+// (plan 02 §2.2 "iCloud check", §8 #7; plan 03 §5 #4).
 // Ported from sibling @d72e03b, adapted: no $XDG_* (plan 01 D16, changelog G2), ESPN file names,
-// the xattr check, control characters refused. Symlinks are never followed for the dirs or for any
-// file opened here; files open O_NONBLOCK (a planted FIFO cannot stall startup).
+// the xattr check, the ACL rule, control characters refused. Symlinks are never followed for the
+// dirs or for any file opened here; files open O_NONBLOCK (a planted FIFO cannot stall startup).
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
@@ -21,8 +22,10 @@ import {
   rmSync,
   statSync,
   writeSync,
+  type BigIntStats,
   type Stats,
 } from "node:fs";
+import { userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -62,6 +65,8 @@ export type PathRefusal =
   | "not_directory"
   | "not_regular_file"
   | "insecure_mode"
+  | "insecure_acl"
+  | "acl_unverifiable"
   | "wrong_owner"
   | "too_large"
   | "insecure_ancestor"
@@ -85,6 +90,10 @@ const REFUSAL_TEXT: Readonly<Record<PathRefusal, string>> = Object.freeze({
   not_regular_file: "exists but is not a regular file",
   insecure_mode:
     "group/other permission bits are set (directories must be 0700, files 0600); run `eff doctor --fix`",
+  insecure_acl:
+    "an access control list (ACL) entry gives another user or group access that the 0700/0600 mode does not show; `ls -led` lists it, `chmod -N` removes it (`chmod -R -N` for a directory and everything in it)",
+  acl_unverifiable:
+    "could not read its access control list (ACL), so it cannot be shown private; refusing (run `eff doctor`)",
   wrong_owner: "is not owned by the current user",
   too_large: "file is larger than the allowed maximum",
   insecure_ancestor:
@@ -550,6 +559,225 @@ function checkOwnerAndMode(st: Stats, p: string, what: string): void {
   if ((st.mode & GROUP_OTHER) !== 0) throw new PathSecurityError("insecure_mode", p, what);
 }
 
+// --- access control lists (plan 02 §2.2 "refused if group/other can access"; §8 #1) --------------
+//
+// The 0700/0600 rule above reads mode bits, and on macOS an extended ACL grants access the mode bits
+// do not show: an entry a parent passes down (File Sharing of a home folder, an admin's `chmod +a …
+// file_inherit,directory_inherit`, an MDM profile) lands on every directory and file created under
+// it, which still list as drwx------ / -rw------- (Stage C finding paths-acl-bypasses-private-check).
+// So "private" also means: no ACL entry that allows anyone but the owner anything. Linux needs no
+// read: a POSIX ACL's named entries are capped by its mask, which IS the mode's group-class bits,
+// so the mode rule already refuses any that could take effect (and a 0600/0700 create masks an
+// inherited default ACL to nothing).
+
+/** One extended ACL entry, as `ls -le` prints it (macOS). */
+export interface AclEntry {
+  /** `user:<name>`, `group:<name>`, or the qualifier's UUID when it resolves to no name. */
+  readonly principal: string;
+  /** Copied from the parent directory when the entry's file or directory was created. */
+  readonly inherited: boolean;
+  readonly kind: "allow" | "deny" | "unknown";
+  /** Permission and inheritance-flag names (`read`, `list`, `delete_child`, `file_inherit`, …). */
+  readonly perms: readonly string[];
+}
+
+/** The ACL operations the privacy rule needs: the system's (`systemAcl`) or a test's. */
+export interface AclAccess {
+  /** The extended ACL entries of `p`, never through a symlink; null when they could not be read. */
+  read(p: string): readonly AclEntry[] | null;
+  /** Removes every extended ACL entry of `p`, never through a symlink; false when that failed. */
+  strip(p: string): boolean;
+  /** This process's account name — the owner of everything the rule accepts; null = unknown. */
+  owner(): string | null;
+}
+
+/** The macOS `ls` (`-le` prints a path's ACL) and `chmod` (`-N` removes it); argument arrays only. */
+export const LS_BIN = "/bin/ls";
+export const CHMOD_BIN = "/bin/chmod";
+
+/** One entry line of `ls -le`: ` <index>: <principal>[ inherited] <allow|deny|unknown> <names>`. */
+const ACL_LINE_RE = /^ (\d+): (.+) (allow|deny|unknown)(?: ([a-z_,]*))?$/;
+const INHERITED_SUFFIX = " inherited";
+
+/**
+ * Parses `ls -ledq <one path>`: the first line is the long listing (skipped — it holds the name);
+ * every further line is one entry, numbered from 0. Null when there is no listing line or any further
+ * line is not the next entry: output that is not understood cannot show a path private (fail closed).
+ */
+export function parseLsAcl(stdout: string): AclEntry[] | null {
+  const lines = stdout.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  if (lines.length === 0 || (lines[0] ?? "") === "") return null;
+  const out: AclEntry[] = [];
+  for (const line of lines.slice(1)) {
+    const m = ACL_LINE_RE.exec(line);
+    if (m === null || Number(m[1]) !== out.length) return null;
+    const named = m[2] ?? "";
+    const inherited = named.endsWith(INHERITED_SUFFIX);
+    const principal = inherited ? named.slice(0, -INHERITED_SUFFIX.length) : named;
+    if (principal === "") return null;
+    out.push(
+      Object.freeze({
+        principal,
+        inherited,
+        kind: m[3] as AclEntry["kind"],
+        perms: Object.freeze((m[4] ?? "").split(",").filter((s) => s !== "")),
+      }),
+    );
+  }
+  return out;
+}
+
+/**
+ * Whether an entry gives anyone but the owner any access: every allow entry except the owner's own
+ * `user:<name>` one, and every entry of an unknown kind. A deny entry grants nothing; with the
+ * owner unknown, no allow entry can be shown to be the owner's.
+ */
+export function isForeignGrant(e: AclEntry, owner: string | null): boolean {
+  if (e.kind === "deny") return false;
+  return !(e.kind === "allow" && owner !== null && e.principal === `user:${owner}`);
+}
+
+let ownerName: string | null | undefined;
+/** This process's account name (`userInfo().username`), once; null when it cannot be read. */
+function currentUserName(): string | null {
+  if (ownerName === undefined) {
+    try {
+      const n = userInfo().username;
+      ownerName = n === "" ? null : n;
+    } catch {
+      ownerName = null;
+    }
+  }
+  return ownerName;
+}
+
+/** Runs a system tool (argument array, never a shell, bounded, a C locale); stdout, or null. */
+function runTool(bin: string, args: readonly string[]): string | null {
+  const r = spawnSync(bin, [...args], {
+    encoding: "utf8",
+    shell: false,
+    timeout: 2000,
+    maxBuffer: 256 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { LC_ALL: "C" },
+  });
+  if (r.error !== undefined || r.status !== 0 || typeof r.stdout !== "string") return null;
+  return r.stdout;
+}
+
+/** The most verdicts one system access keeps (one per inode state; the oldest goes first). */
+export const ACL_CACHE_MAX = 256;
+
+/**
+ * A system ACL access with its own verdict cache. On macOS a read is one `ls -ledq -- <path>`
+ * (bounded: 2 s, 256 KiB), kept per inode state — device, inode and change time, which every ACL
+ * edit moves (`chmod +a`, `-N`) — so an unchanged directory is read once, not on every check; a
+ * strip is `chmod -h -N` on the absolute path (`-h`: never through a symlink; chmod takes no `--`,
+ * and an absolute path cannot read as an option). Elsewhere there is nothing to read (see the
+ * section comment). The platform is read per call.
+ */
+export function createSystemAcl(): AclAccess {
+  const cache = new Map<string, readonly AclEntry[]>();
+  return Object.freeze({
+    read(p: string): readonly AclEntry[] | null {
+      if (process.platform !== "darwin") return [];
+      let before: BigIntStats;
+      try {
+        before = lstatSync(p, { bigint: true });
+      } catch {
+        return null;
+      }
+      const key = `${String(before.dev)}:${String(before.ino)}:${String(before.ctimeNs)}`;
+      const known = cache.get(key);
+      if (known !== undefined) return known;
+      const stdout = runTool(LS_BIN, ["-ledq", "--", p]);
+      const parsed = stdout === null ? null : parseLsAcl(stdout);
+      if (parsed === null) return null;
+      let after: BigIntStats;
+      try {
+        after = lstatSync(p, { bigint: true });
+      } catch {
+        return null;
+      }
+      // the listing must be of the inode the key names (a rename over the path mid-read is refused)
+      if (after.dev !== before.dev || after.ino !== before.ino) return null;
+      const entries = Object.freeze(parsed);
+      if (cache.size >= ACL_CACHE_MAX) {
+        const oldest = cache.keys().next().value;
+        if (oldest !== undefined) cache.delete(oldest);
+      }
+      cache.set(key, entries);
+      return entries;
+    },
+    strip(p: string): boolean {
+      if (process.platform !== "darwin") return true;
+      return runTool(CHMOD_BIN, ["-h", "-N", path.resolve(p)]) !== null;
+    },
+    owner: currentUserName,
+  });
+}
+
+/** The process's system ACL access (every helper's default). */
+export const systemAcl: AclAccess = createSystemAcl();
+
+/**
+ * The entries of `p` that give anyone but its owner any access (see `isForeignGrant`). Throws
+ * `acl_unverifiable` when the entries could not be read — fail closed, as the xattr check does.
+ */
+export function foreignAclEntries(
+  p: string,
+  what = "path",
+  acl: AclAccess = systemAcl,
+): AclEntry[] {
+  const entries = acl.read(p);
+  if (entries === null) throw new PathSecurityError("acl_unverifiable", p, what);
+  const owner = acl.owner();
+  return entries.filter((e) => isForeignGrant(e, owner));
+}
+
+/**
+ * Removes `p`'s ACL when an entry gives anyone but its owner access; returns whether it did. For a
+ * directory or file this program has just created (nothing is in it yet) and for `eff doctor --fix`
+ * on our own paths; throws `insecure_acl` when the removal failed, `acl_unverifiable` as above.
+ */
+export function stripForeignAcl(p: string, what = "path", acl: AclAccess = systemAcl): boolean {
+  if (foreignAclEntries(p, what, acl).length === 0) return false;
+  if (!acl.strip(p)) throw new PathSecurityError("insecure_acl", p, what);
+  return true;
+}
+
+/**
+ * Throws `insecure_acl` when an ACL entry on `p` gives anyone but its owner access. `pin` is the
+ * inode the verdict must be about (the one already checked, or the open descriptor's): a path that
+ * names another inode once the entries are read is `acl_unverifiable`.
+ */
+function assertPrivateAcl(p: string, what: string, acl: AclAccess, pin: Stats): void {
+  const foreign = foreignAclEntries(p, what, acl);
+  const now = lstatOrNull(p);
+  if (now?.dev !== pin.dev || now.ino !== pin.ino)
+    throw new PathSecurityError("acl_unverifiable", p, what);
+  if (foreign.length > 0) throw new PathSecurityError("insecure_acl", p, what);
+}
+
+/**
+ * The directories one recursive mkdir made, from `dir` up to `top` (its return value), both
+ * included. When `top` is not above `dir`, only `dir` is known to be new.
+ */
+function createdChain(dir: string, top: string): string[] {
+  const end = path.resolve(top);
+  const chain: string[] = [];
+  let cur = path.resolve(dir);
+  for (let i = 0; i < GIT_WALK_MAX_LEVELS; i++) {
+    chain.push(cur);
+    if (cur === end) return chain;
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return [path.resolve(dir)];
+}
+
 /**
  * Every existing ancestor of `dir` (nearest first, `dir` excluded) writable by group/other WITHOUT
  * the sticky bit — a directory in which someone else could rename ours away (ssh StrictModes).
@@ -586,44 +814,58 @@ export function insecureAncestors(dir: string): string[] {
 }
 
 /**
- * Asserts `dir` is a real (non-symlink) directory owned by this user with no group/other bits and
- * no insecure ancestor. With `create`, a missing directory is created 0700 (parents too). An
- * existing directory with bad bits is refused, never silently chmod-ed (`eff doctor --fix`).
+ * Asserts `dir` is a real (non-symlink) directory owned by this user with no group/other bits, no
+ * ACL entry giving anyone else access, and no insecure ancestor. With `create`, a missing directory
+ * is created 0700 (parents too), and every directory this call made has an ACL entry its parent
+ * passed down removed before anything is put in it — 0700 is what was asked for. An existing
+ * directory with bad bits or such an entry is refused, never silently changed (`eff doctor --fix`).
  */
-export function ensureSecureDir(dir: string, opts: { create: boolean; what?: string }): void {
+export function ensureSecureDir(
+  dir: string,
+  opts: { create: boolean; what?: string; acl?: AclAccess },
+): void {
   const what = opts.what ?? "directory";
+  const acl = opts.acl ?? systemAcl;
   let st = lstatOrNull(dir);
   if (st === null) {
     if (!opts.create) throw new PathSecurityError("missing", dir, what);
     if (insecureAncestors(dir).length > 0)
       throw new PathSecurityError("insecure_ancestor", dir, what);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const first = mkdirSync(dir, { recursive: true, mode: 0o700 });
     st = lstatSync(dir);
+    if (first !== undefined && st.isDirectory())
+      for (const made of createdChain(dir, first)) stripForeignAcl(made, what, acl);
   }
   if (st.isSymbolicLink()) throw new PathSecurityError("symlink", dir, what);
   if (!st.isDirectory()) throw new PathSecurityError("not_directory", dir, what);
   checkOwnerAndMode(st, dir, what);
+  assertPrivateAcl(dir, what, acl, st);
   if (insecureAncestors(dir).length > 0)
     throw new PathSecurityError("insecure_ancestor", dir, what);
 }
 
-/** Asserts `file` is a real (non-symlink) regular file owned by this user with no group/other bits. */
-export function assertSecureFile(file: string, what = "file"): void {
+/**
+ * Asserts `file` is a real (non-symlink) regular file owned by this user with no group/other bits
+ * and no ACL entry giving anyone else access.
+ */
+export function assertSecureFile(file: string, what = "file", acl: AclAccess = systemAcl): void {
   const st = lstatOrNull(file);
   if (st === null) throw new PathSecurityError("missing", file, what);
   if (st.isSymbolicLink()) throw new PathSecurityError("symlink", file, what);
   if (!st.isFile()) throw new PathSecurityError("not_regular_file", file, what);
   checkOwnerAndMode(st, file, what);
+  assertPrivateAcl(file, what, acl, st);
 }
 
 /**
  * Reads a file opened `O_NOFOLLOW | O_NONBLOCK` and checked on the open descriptor (no TOCTOU; a
- * FIFO is refused as `not_regular_file`). `requirePrivate` enforces 0600-or-stricter and ownership
- * (session.json); config.json passes false (plan 03 §3: no secrets allowed in it). Null when absent.
+ * FIFO is refused as `not_regular_file`). `requirePrivate` enforces 0600-or-stricter, ownership and
+ * no ACL entry giving anyone else access — read for the descriptor's inode (session.json);
+ * config.json passes false (plan 03 §3: no secrets allowed in it). Null when absent.
  */
 export function readSecureFile(
   file: string,
-  opts: { requirePrivate: boolean; maxBytes?: number; what?: string },
+  opts: { requirePrivate: boolean; maxBytes?: number; what?: string; acl?: AclAccess },
 ): string | null {
   const what = opts.what ?? "file";
   const max = opts.maxBytes ?? MAX_SECURE_FILE_BYTES;
@@ -639,7 +881,10 @@ export function readSecureFile(
   try {
     const st = fstatSync(fd);
     if (!st.isFile()) throw new PathSecurityError("not_regular_file", file, what);
-    if (opts.requirePrivate) checkOwnerAndMode(st, file, what);
+    if (opts.requirePrivate) {
+      checkOwnerAndMode(st, file, what);
+      assertPrivateAcl(file, what, opts.acl ?? systemAcl, st);
+    }
     if (st.size > max) throw new PathSecurityError("too_large", file, what);
     const buf = Buffer.alloc(st.size);
     let off = 0;
@@ -656,23 +901,27 @@ export function readSecureFile(
 
 /**
  * Atomically writes a 0600 file (plan 02 §2.2 "Write"): `<file>.<pid>.<rand>.tmp` opened `wx`
- * (exclusive, never follows a pre-placed symlink), written, fsynced, renamed over the target, then
- * the directory is fsynced. The parent must already pass `ensureSecureDir`. On failure the temp
- * file is removed and the previous target is untouched.
+ * (exclusive, never follows a pre-placed symlink), checked for an ACL entry giving anyone else
+ * access while still empty, written, fsynced, renamed over the target, then the directory is
+ * fsynced. The parent must already pass `ensureSecureDir`. On failure the temp file is removed and
+ * the previous target is untouched.
  */
 export function writeSecureFileAtomic(
   file: string,
   data: string | Uint8Array,
   what = "file",
+  acl: AclAccess = systemAcl,
 ): void {
   const dir = path.dirname(file);
-  ensureSecureDir(dir, { create: false, what: `${what} directory` });
+  ensureSecureDir(dir, { create: false, what: `${what} directory`, acl });
   const target = lstatOrNull(file);
   if (target?.isSymbolicLink() === true) throw new PathSecurityError("symlink", file, what);
   const tmp = `${file}.${String(process.pid)}.${randomBytes(6).toString("hex")}.tmp`;
   let fd: number | null = null;
   try {
     fd = openSync(tmp, "wx", 0o600);
+    // before a byte is written: an entry the new file took from its directory would show it
+    assertPrivateAcl(tmp, what, acl, fstatSync(fd));
     const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : data;
     let off = 0;
     while (off < bytes.length) off += writeSync(fd, bytes, off, bytes.length - off);
