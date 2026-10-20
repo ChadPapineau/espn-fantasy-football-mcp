@@ -533,6 +533,55 @@ describe("failures after the prompts leave nothing partial (plan 03 §2.1 step 8
     expect(r.exitCode).toBe(2);
     expect(h.lines.some((l) => l.includes("file_provider"))).toBe(true);
   });
+  it("a file store its write checks refuse is refused before config.json or the other store is touched", async () => {
+    // a working keychain install: `EFF_CREDENTIAL_FILE=<a synced path> eff setup --storage file`
+    const old = fakeCookies("setup-kept");
+    const h = harness();
+    h.keychain.set(old, "2026-10-01T00:00:00.000Z");
+    const row = stateRow({ league_id: LEAGUE, state: "validated", store: "keychain" });
+    h.repo!.row = row;
+    h.file.failPreflight = new CredentialStoreError("file", "insecure_location", "synced_folder");
+    const r = await runSetup(h.req({ storage: "file" }), h.deps);
+    expect(r).toMatchObject({ exitCode: 2, state: "not_configured", store: null });
+    expect(h.file.preflights).toBe(1);
+    expect(h.patches).toEqual([]); // config.json still names the keychain: every process starts
+    expect(h.keychain.deletes + h.file.deletes + h.keychain.writes + h.file.writes).toBe(0);
+    expect(h.keychain.stored?.cookies).toEqual(old); // the working credential is kept
+    expect(h.repo!.row).toBe(row);
+    expect(h.calls).toEqual([]);
+    expect(h.lines.at(-1)).toContain("synced_folder");
+    expect(h.lines.at(-1)).toContain("Nothing was stored.");
+    h.assertClean();
+  });
+  it.each(["timeout", "error"] as const)(
+    "a fresh install the self-test sends to the file store (%s): the same checks come first",
+    async (outcome) => {
+      const h = harness({ selftest: { outcome, reason: "read_timeout" } });
+      h.file.failPreflight = new CredentialStoreError("file", "insecure_location", "inside_repo");
+      const r = await runSetup(h.req(), h.deps);
+      expect(r).toMatchObject({ exitCode: 2, selftest: outcome });
+      expect(h.patches).toEqual([]);
+      expect(h.keychain.deletes + h.file.writes).toBe(0);
+    },
+  );
+  it("a write check that fails for another reason (I/O) exits 1, nothing recorded or deleted", async () => {
+    const h = harness();
+    h.file.failPreflight = new CredentialStoreError("file", "write_failed");
+    const r = await runSetup(h.req({ recordedStore: "file" }), h.deps);
+    expect(r.exitCode).toBe(1);
+    expect(h.patches).toEqual([]);
+    expect(h.keychain.deletes + h.file.writes).toBe(0);
+    expect(h.lines.at(-1)).toBe(
+      "The file store refused the credential: file store: the credential could not be written. Nothing was stored.",
+    );
+  });
+  it("the keychain store never runs the file store's checks", async () => {
+    const h = harness();
+    h.file.failPreflight = new CredentialStoreError("file", "insecure_location", "synced_folder");
+    expect((await runSetup(h.req(), h.deps)).exitCode).toBe(0);
+    expect(h.file.preflights).toBe(0);
+    expect(h.patches[0]).toMatchObject({ EFF_CREDENTIAL_STORE: "keychain" });
+  });
   it("an untyped store failure still reads as a fixed sentence", async () => {
     const h = harness();
     h.keychain.failWrite = new Error("raw native text");

@@ -140,10 +140,17 @@ export class MemoryStore implements CredentialStore {
   failRead: Error | null = null;
   failWrite: Error | null = null;
   failDelete: Error | null = null;
+  /** The file store's write checks (src/auth/file.ts `preflight`): how often run, and a refusal. */
+  preflights = 0;
+  failPreflight: Error | null = null;
 
   constructor(kind: "keychain" | "file" = "keychain", service = "espn-fantasy-football-mcp") {
     this.kind = kind;
     this.service = service;
+  }
+  preflight(): void {
+    this.preflights++;
+    if (this.failPreflight) throw this.failPreflight;
   }
   /** Stores a value as `eff setup` would (another process, for the authority tests). */
   set(cookies: EspnCookies, storedAt: string): StoredSecretMeta {

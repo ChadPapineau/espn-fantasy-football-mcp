@@ -385,6 +385,44 @@ describe("the row is judged at the path config.json records", () => {
   });
 });
 
+describe("a path the file store refuses is refused before anything changes (plan 03 §2.1 steps 4, 8)", () => {
+  it("`EFF_CREDENTIAL_FILE=<a synced path> eff setup --storage file`: the keychain install keeps working", async () => {
+    const [a, b] = [fakeCookies("ps-r-a"), fakeCookies("ps-r-b")];
+    expect(await setup(a, T0, "keychain", null)).toBe(0);
+    const srv = server(null);
+    expect(carries(await srv.auth.getCookieHeader(), a)).toBe(true);
+    const before = readFileSync(configFilePath(configDir), "utf8");
+    const row = repo.row;
+
+    const synced = path.join(home, "Documents", "session.json");
+    mkdirSync(path.dirname(synced), { mode: 0o700 });
+    expect(await setup(b, T5, "file", synced)).toBe(2);
+    // config.json is untouched, so every later process — the server, the jobs, `eff setup` — starts
+    expect(readFileSync(configFilePath(configDir), "utf8")).toBe(before);
+    expect(() => resolveConfig(null)).not.toThrow();
+    expect(() => resolveConfig(synced)).not.toThrow(); // the same shell can simply run setup again
+    // the keychain value was not deleted for a value that could not be stored; the row stands
+    expect(repo.row).toBe(row);
+    expect(fileStoreExistsSync(synced)).toBe(false);
+    expect(carries(await srv.auth.getCookieHeader(), a)).toBe(true);
+    expect(observers()).toMatchObject({ status: "validated", store: "keychain", storedAt: T0 });
+    // and the next setup, at a path the rules accept, moves the install as usual
+    expect(await setup(b, T6, "file", alt())).toBe(0);
+    expect(carries(await srv.auth.getCookieHeader(), b)).toBe(true);
+  });
+
+  it("a fresh install whose path is refused records nothing: a re-run with a good path works", async () => {
+    const srv = server(null);
+    const inRepo = path.join(ROOT, "eff-never-created", "session.json");
+    expect(await setup(fakeCookies("ps-r-f"), T5, "file", inRepo)).toBe(2);
+    expect(readConfigFile(configDir)).toBeUndefined();
+    expect(repo.row).toBeNull();
+    const a = fakeCookies("ps-r-g");
+    expect(await setup(a, T6, "file", alt())).toBe(0);
+    expect(carries(await srv.auth.getCookieHeader(), a)).toBe(true);
+  });
+});
+
 describe("property: setups from shells naming any path never leave the server reading elsewhere", () => {
   it("setups (either store, any EFF_CREDENTIAL_FILE), resets, calls, probe reads and observations", async () => {
     type Where = "default" | "alt" | "alt2";

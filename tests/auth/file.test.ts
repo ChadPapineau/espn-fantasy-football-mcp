@@ -393,6 +393,158 @@ describe("delete (setup --reset, a failed setup, uninstall)", () => {
   });
 });
 
+describe("preflight: write's checks, run first by `eff setup` (plan 03 §2.1 step 4)", () => {
+  /** The typed error a synchronous call throws (never a raw one, never a path in it). */
+  const thrown = (fn: () => void, reason: string, refusal?: string): CredentialStoreError => {
+    let e: unknown = null;
+    try {
+      fn();
+    } catch (x) {
+      e = x;
+    }
+    expect(e).toBeInstanceOf(CredentialStoreError);
+    const err = e as CredentialStoreError;
+    expect(err.reason).toBe(reason);
+    if (refusal !== undefined) expect(err.refusal).toBe(refusal);
+    expect(renderings(err)).not.toContain(tmp.dir);
+    return err;
+  };
+
+  it("a safe location passes: the 0700 directory is made as write makes it, nothing is written", async () => {
+    const store = createFileCredentialStore(opts());
+    store.preflight();
+    expect(statSync(cfgDir).mode & 0o777).toBe(0o700);
+    expect(readdirSync(cfgDir)).toEqual([]);
+    store.preflight(); // an existing 0700 directory
+    await store.write(cookies(), metaFor(cookies(), AT));
+    store.preflight(); // a re-run over an existing session.json
+    expect((await store.readMeta())?.storedAt).toBe(AT);
+  });
+
+  it("the location rule refuses first, and nothing is created", () => {
+    const synced = path.join(home, "Documents", "eff", "session.json");
+    thrown(
+      () => {
+        createFileCredentialStore(opts({ path: synced })).preflight();
+      },
+      "insecure_location",
+      "synced_folder",
+    );
+    thrown(
+      () => {
+        createFileCredentialStore(opts({ gitEntry: () => true })).preflight();
+      },
+      "insecure_location",
+      "inside_repo",
+    );
+    thrown(
+      () => {
+        createFileCredentialStore(
+          opts({ xattr: xattrsOn(home, ["com.apple.file-provider-domain-id"]) }),
+        ).preflight();
+      },
+      "insecure_location",
+      "file_provider",
+    );
+    expect(existsSync(path.join(home, "Documents"))).toBe(false);
+    expect(existsSync(cfgDir)).toBe(false);
+  });
+
+  it.skipIf(isRoot)(
+    "an existing directory with group/other bits is refused, never chmod-ed",
+    () => {
+      mkdirSync(cfgDir, { recursive: true, mode: 0o700 });
+      chmodSync(cfgDir, 0o755);
+      thrown(
+        () => {
+          createFileCredentialStore(opts()).preflight();
+        },
+        "insecure_location",
+        "insecure_mode",
+      );
+      expect(statSync(cfgDir).mode & 0o777).toBe(0o755);
+    },
+  );
+
+  it.skipIf(isRoot)(
+    "a missing directory under a group/other-writable ancestor is refused, not made",
+    () => {
+      const open = path.join(home, "open");
+      mkdirSync(open, { mode: 0o700 });
+      chmodSync(open, 0o777);
+      const under = path.join(open, "eff", "session.json");
+      thrown(
+        () => {
+          createFileCredentialStore(opts({ path: under })).preflight();
+        },
+        "insecure_location",
+        "insecure_ancestor",
+      );
+      expect(existsSync(path.dirname(under))).toBe(false);
+      chmodSync(open, 0o700);
+    },
+  );
+
+  it("a symlinked directory, or a symlink where session.json goes, is refused; the target untouched", () => {
+    const real = path.join(tmp.dir, "real-dir");
+    mkdirSync(real, { mode: 0o700 });
+    mkdirSync(path.dirname(cfgDir), { recursive: true, mode: 0o700 });
+    symlinkSync(real, cfgDir);
+    thrown(
+      () => {
+        createFileCredentialStore(opts()).preflight();
+      },
+      "insecure_location",
+      "symlink",
+    );
+    expect(readdirSync(real)).toEqual([]);
+
+    const dir2 = path.join(home, "other");
+    mkdirSync(dir2, { mode: 0o700 });
+    const target = path.join(tmp.dir, "elsewhere.json");
+    writeFileSync(target, "decoy", { mode: 0o600 });
+    symlinkSync(target, path.join(dir2, "session.json"));
+    thrown(
+      () => {
+        createFileCredentialStore(opts({ path: path.join(dir2, "session.json") })).preflight();
+      },
+      "insecure_location",
+      "symlink",
+    );
+    expect(readFileSync(target, "utf8")).toBe("decoy");
+  });
+
+  it("a directory or a FIFO where session.json goes is refused (not_regular_file)", () => {
+    mkdirSync(file, { recursive: true, mode: 0o700 });
+    thrown(
+      () => {
+        createFileCredentialStore(opts()).preflight();
+      },
+      "insecure_location",
+      "not_regular_file",
+    );
+    const fifo = path.join(home, "fifo-dir", "session.json");
+    mkdirSync(path.dirname(fifo), { mode: 0o700 });
+    execFileSync("mkfifo", ["-m", "600", fifo]);
+    thrown(
+      () => {
+        createFileCredentialStore(opts({ path: fifo })).preflight();
+      },
+      "insecure_location",
+      "not_regular_file",
+    );
+  });
+
+  it("a directory that cannot be made (a file in its place) is a write failure with no path in it", () => {
+    writeFileSync(path.join(home, "plain"), "x", { mode: 0o600 });
+    thrown(() => {
+      createFileCredentialStore(
+        opts({ path: path.join(home, "plain", "sub", "session.json") }),
+      ).preflight();
+    }, "write_failed");
+  });
+});
+
 describe("fileStoreExistsSync (the startup stat — plan 03 §1.1 step 4)", () => {
   it("true for any entry, false when absent or under a file", () => {
     expect(fileStoreExistsSync(file)).toBe(false);

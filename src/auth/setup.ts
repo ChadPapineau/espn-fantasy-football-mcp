@@ -106,7 +106,8 @@ export interface SetupConfigWriter {
 /** Both backends (constructed lazily by the CLI; the keychain one names its service). */
 export interface SetupStores {
   readonly keychain: CredentialStore & { readonly service: string };
-  readonly file: CredentialStore;
+  /** The file store, with the checks its write runs (src/auth/file.ts `preflight`). */
+  readonly file: CredentialStore & { preflight(): void };
 }
 
 /** What the operator asked for, and what config.json already records. */
@@ -277,6 +278,19 @@ export async function runSetup(req: SetupRequest, deps: SetupDeps): Promise<Setu
     kind = storeForSelftest(selftest.outcome);
   }
   const st = selftest?.outcome ?? null;
+  // the file store's checks run first (plan 03 §2.1 step 4): a path its location or directory rules
+  // refuse is refused before config.json records it — every later process, `eff setup` included,
+  // would refuse to start on a recorded path the startup guard refuses — and before the other
+  // store is emptied for a value that cannot be written ("Nothing was stored" stays true, step 8)
+  if (kind === "file") {
+    try {
+      deps.stores.file.preflight();
+    } catch (e) {
+      out(storeFailureText(e, kind));
+      const usage = e instanceof CredentialStoreError && e.reason === "insecure_location";
+      return result({ exitCode: usage ? EXIT_CODES.usage : EXIT_CODES.error, selftest: st });
+    }
+  }
   if (!testMode) {
     const patch: SetupConfigPatch = {
       ...(selftest === null

@@ -3,7 +3,9 @@
 // written `<file>.<pid>.<rand>.tmp` wx + fsync + rename (src/config/paths.ts writeSecureFileAtomic);
 // every read refuses a symlink, a non-regular file, foreign ownership and group/other bits; the
 // location rule (outside every repository, not a synced folder, no iCloud/file-provider xattr) runs
-// before every write and before the first read. Read-only after setup (changelog V5).
+// before every write and before the first read, and `preflight` runs write's checks without writing
+// (setup runs them before it records anything — plan 03 §2.1 step 4). Read-only after setup
+// (changelog V5).
 import { lstatSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import {
@@ -41,6 +43,13 @@ export interface FileCredentialStore extends CredentialStore {
   readonly kind: "file";
   /** Throws `insecure_location` when the path breaks the location rule (plan 02 §2.2 iCloud check). */
   verifyLocation(): void;
+  /**
+   * The checks `write` runs before it writes (plan 03 §2.1 step 4: "the file store runs the mode
+   * and iCloud-xattr checks first"): the location rule, the 0700 directory of this user with no
+   * insecure ancestor (created when missing, as `write` creates it) and nothing but a regular file
+   * where session.json goes. Throws what `write` would throw; never writes a value.
+   */
+  preflight(): void;
 }
 
 function wrap(e: unknown, fallback: CredentialStoreErrorReason): CredentialStoreError {
@@ -134,9 +143,24 @@ export function createFileCredentialStore(opts: FileStoreOptions): FileCredentia
     return text === null ? null : parseSessionFile(text);
   };
 
+  const preflight = (): void => {
+    verifyLocation();
+    try {
+      ensureSecureDir(dir, { create: true, what: "credential directory" });
+      const st = lstatSync(file, { throwIfNoEntry: false });
+      if (st?.isSymbolicLink() === true)
+        throw new PathSecurityError("symlink", file, "credential file");
+      if (st !== undefined && !st.isFile())
+        throw new PathSecurityError("not_regular_file", file, "credential file");
+    } catch (e) {
+      throw wrap(e, "write_failed");
+    }
+  };
+
   return {
     kind: "file",
     verifyLocation,
+    preflight,
     read: () => Promise.resolve().then(load),
     readMeta: () => Promise.resolve().then(() => load()?.meta ?? null),
     exists: () => Promise.resolve().then(() => fileStoreExistsSync(file)),
