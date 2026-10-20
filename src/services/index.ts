@@ -24,8 +24,13 @@
 // authority reads now — the one the `credential_state` row records after `eff setup --storage …` —
 // never the kind config.json named at start (Stage C finding status-credential-store-label-stale) —
 // and, for the file store, reads the session.json path config.json records at each operation.
-// The services object is handed out whole (the serve CLI's in-flight accounting rides in its
-// arguments): a copy spread from it would freeze the per-call reading.
+// The reading reaches the services object each call reads, whichever it is: the one built here
+// (accessors over the reader) or a copy spread from it — `eff serve` hands the server such a copy
+// (src/cli/serve.ts adds its in-flight accounting so), as do the test worlds — whose fields
+// `beforeCall` sets, being called as a method of the services the call reads (src/mcp/define.ts
+// runTool, src/mcp/resources/index.ts readAsEnvelope). A copy froze the reading at its spread, so
+// the stdio server kept the start reading until a restart (finding services-seeding-read-once,
+// attempt 2); no consumer has to avoid copying the services now.
 // Nothing here runs a request or reads a secret.
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
@@ -76,7 +81,7 @@ import { createEspnProvider, type EspnProvider, type FetchLike } from "../provid
 import type { LeagueRef } from "../providers/platform.js";
 import type { Store } from "../store/types.js";
 import { VERSION } from "../version.js";
-import { createSeedingReader } from "./seeding.js";
+import { adoptSeedingReading, createSeedingReader } from "./seeding.js";
 
 /** What the composition root needs of the logger (src/cli/log.ts Logger satisfies it). */
 export type ServicesLogger = McpLogger & SecretRegistrar;
@@ -394,8 +399,9 @@ export interface BuildServicesArgs {
   readonly stderr?: NodeJS.WritableStream;
   /**
    * The serve CLI's in-flight call accounting (the shutdown drain — plan 03 §1.3), carried on the
-   * services this root builds, so the CLI hands them to the server as they are: a copy spread from
-   * them would freeze the seeding reading every call re-reads.
+   * services this root builds, so the CLI can hand them to the server as they are. A copy spread
+   * from them with its own `inflight` works as well: `beforeCall` sets the per-call seeding reading
+   * on the copy a call reads.
    */
   readonly inflight?: { enter(): void; exit(): void };
 }
@@ -545,6 +551,34 @@ export function buildServices(args: BuildServicesArgs): Wiring {
   // every tool call and resource read (beforeCall), so the onboard Skill's answer reaches the very
   // next call (plan 07 C12; Stage C finding services-seeding-read-once)
   const seeding = createSeedingReader(config, logger);
+  /** The copies already reported as unable to take the reading (one warning each). */
+  const staleCopies = new WeakSet<object>();
+  /**
+   * Sets the reading in use on `target`, the services a call is about to read: this object reads the
+   * reader through its accessors; a copy spread from it holds the values its spread read, set here
+   * (adoptSeedingReading). A copy that cannot take them (a frozen one) keeps its values for the call,
+   * with one value-free warning per copy: the server then follows `eff setup --seeding` only after
+   * a restart, and the log says so.
+   */
+  const followSeeding = (target: object): void => {
+    let held: boolean;
+    try {
+      held = adoptSeedingReading(target, seeding.current());
+    } catch {
+      held = false;
+    }
+    if (held || staleCopies.has(target)) return;
+    staleCopies.add(target);
+    try {
+      logger.warn("services.seeding_copy_stale", {
+        mode: seeding.current().mode,
+        confirmed: seeding.current().confirmedAt !== null,
+        hint: "restart the client to use the recorded seeding reading",
+      });
+    } catch {
+      // a throwing log sink must not break the call (as the reader's own lines)
+    }
+  };
 
   const services: McpServices = {
     clock,
@@ -614,8 +648,11 @@ export function buildServices(args: BuildServicesArgs): Wiring {
       probe: (r) => provider.probeCredential(r),
     },
     transport: () => provider.transportStatus(),
-    beforeCall: () => {
+    beforeCall(this: unknown) {
       seeding.refresh();
+      // `this`: the services the call reads — src/mcp calls `services.beforeCall()` on them, this
+      // object or a copy spread from it (the serve CLI's, a test world's); no receiver → this object
+      followSeeding(typeof this === "object" && this !== null ? this : services);
       try {
         store.reopenChangedDatasets();
       } catch (e) {

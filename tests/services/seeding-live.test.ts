@@ -2,8 +2,9 @@
 // services-seeding-read-once; plan 07 C12: `seeding.confirmed: false` on every result until onboard
 // records the answer; plan 03 §2.1 `--seeding`, §3 precedence). The server is the real composition
 // root (src/services/index.ts buildServices) in fixture mode on fx-10h under the full toolset, as the
-// finding ran it, connected in process with the services object it built (never a copy); setup is
-// the real CLI (`eff setup --seeding …` through src/cli/main.ts) over the same config and cache dirs.
+// finding ran it, connected in process with the services object it built (a copy spread from it —
+// what `eff serve` hands the server — is tests/services/seeding-serve.test.ts); setup is the real
+// CLI (`eff setup --seeding …` through src/cli/main.ts) over the same config and cache dirs.
 // The next call — espn_get_league, espn_get_status, espn_analyze_lineup, espn-ff://league — reports
 // and uses the recorded reading with no restart. The reading is resolved exactly as a server started
 // now would resolve it (src/config/schema.ts loadConfig — a property over config.json documents);
@@ -28,10 +29,14 @@ import {
 import { createServer } from "../../src/mcp/server.js";
 import { buildServices, type Wiring } from "../../src/services/index.js";
 import {
+  SEEDING_FIELDS,
   SEEDING_MODE_DEFAULT,
+  adoptSeedingReading,
   createSeedingReader,
+  seedingFieldsOf,
   seedingRecordOf,
   type SeedingReaderConfig,
+  type SeedingReading,
 } from "../../src/services/seeding.js";
 import { makeIo } from "../cli/helpers.js";
 import { ROOT, noXattrs, tempDir } from "../config/helpers.js";
@@ -281,7 +286,7 @@ describe("`eff setup --seeding` while the server runs (the finding's repro, thro
     ROOT_TEST_MS,
   );
 
-  it("the services carry the serve CLI's in-flight accounting, so serve never copies them", () => {
+  it("the services can carry the serve CLI's in-flight accounting (the server may take them as built)", () => {
     const inflight = { enter: vi.fn(), exit: vi.fn() };
     const w = buildServices({
       config: world.config,
@@ -636,5 +641,85 @@ describe("createSeedingReader", () => {
       r.refresh();
     }).not.toThrow();
     expect(r.current()).toEqual({ mode: "points_only", confirmedAt: AT });
+  });
+});
+
+describe("adoptSeedingReading: the services a call reads take the reading in use", () => {
+  const R: SeedingReading = { mode: "points_only", confirmedAt: AT };
+  const stale = (): { seedingMode: string; seedingConfirmedAt: string | null; other: number } => ({
+    seedingMode: "espn_rule",
+    seedingConfirmedAt: null,
+    other: 1,
+  });
+
+  it("a copy's plain fields are set, nothing else is touched", () => {
+    const t = stale();
+    expect(adoptSeedingReading(t, R)).toBe(true);
+    expect(t).toEqual({ seedingMode: "points_only", seedingConfirmedAt: AT, other: 1 });
+    expect(seedingFieldsOf(R)).toEqual({ seedingMode: "points_only", seedingConfirmedAt: AT });
+    expect(SEEDING_FIELDS).toEqual(["seedingMode", "seedingConfirmedAt"]);
+    expect(Object.isFrozen(SEEDING_FIELDS)).toBe(true);
+  });
+
+  it("fields that already read it are never written: the built object's accessors, read-through objects", () => {
+    const writes: string[] = [];
+    const live = new Proxy(
+      { seedingMode: "points_only", seedingConfirmedAt: AT },
+      {
+        set: (o, k, v) => {
+          writes.push(String(k));
+          return Reflect.set(o, k, v);
+        },
+      },
+    );
+    expect(adoptSeedingReading(live, R)).toBe(true);
+    expect(writes).toEqual([]);
+    // the composition root's shape: getters over the reader, no setter
+    let reading: SeedingReading = R;
+    const built = {
+      get seedingMode(): string {
+        return reading.mode;
+      },
+      get seedingConfirmedAt(): string | null {
+        return reading.confirmedAt;
+      },
+    };
+    expect(adoptSeedingReading(built, R)).toBe(true);
+    const over = Object.create(built) as object;
+    reading = { mode: "espn_rule", confirmedAt: null };
+    expect(adoptSeedingReading(over, reading)).toBe(true);
+    expect(Object.hasOwn(over, "seedingMode")).toBe(false);
+    expect(Object.hasOwn(over, "seedingConfirmedAt")).toBe(false);
+  });
+
+  it("a target that cannot take them is left as it is: false, never a throw", () => {
+    const frozen = Object.freeze(stale());
+    expect(adoptSeedingReading(frozen, R)).toBe(false);
+    expect(frozen).toEqual(stale());
+    // a getter of its own that reads something else: the field it can take, it takes
+    const own = {
+      get seedingMode(): string {
+        return "espn_rule";
+      },
+      seedingConfirmedAt: null as string | null,
+    };
+    expect(adoptSeedingReading(own, R)).toBe(false);
+    expect(own.seedingMode).toBe("espn_rule");
+    expect(own.seedingConfirmedAt).toBe(AT);
+    const part = stale();
+    Object.defineProperty(part, "seedingConfirmedAt", { value: null, writable: false });
+    expect(adoptSeedingReading(part, R)).toBe(false);
+    expect(part.seedingMode).toBe("points_only");
+    expect(part.seedingConfirmedAt).toBeNull();
+    expect(adoptSeedingReading(Object.preventExtensions({}), R)).toBe(false);
+  });
+
+  it("only a throwing getter, setter or trap of the target's own throws (the composition root catches it)", () => {
+    const t = {
+      get seedingMode(): string {
+        throw new Error("getter");
+      },
+    };
+    expect(() => adoptSeedingReading(t, R)).toThrow("getter");
   });
 });

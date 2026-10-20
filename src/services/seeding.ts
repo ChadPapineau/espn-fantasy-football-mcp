@@ -12,6 +12,11 @@
 // is not an ISO-8601 instant — is never followed: the reading in use stays, and one value-free
 // warning says why (the same rule as src/auth/stores.ts `recordedCredentialFile`). config.json is
 // read only, never echoed; no network, no credential store.
+// The reading reaches the services object the call reads (`adoptSeedingReading`): the object the
+// composition root builds reads the reader through accessors, but a copy spread from it holds the
+// values the spread read once — and `eff serve` hands the server such a copy (src/cli/serve.ts adds
+// its in-flight accounting so), so without this the stdio server kept its start reading until the
+// client restarted (Stage C finding services-seeding-read-once, attempt 2).
 import {
   SEEDING_MODES,
   isIsoInstant,
@@ -94,6 +99,39 @@ export function seedingRecordOf(file: unknown, envMode: SeedingMode | null): See
   }
   if (at !== undefined && !isIsoInstant(at)) return refused("confirmed_at_invalid");
   return ok(mode, at ?? null);
+}
+
+/** The services fields that carry the reading (src/mcp/services.ts `McpServices`). */
+export const SEEDING_FIELDS = Object.freeze(["seedingMode", "seedingConfirmedAt"] as const);
+
+/** The services fields' values for `reading`. */
+export function seedingFieldsOf(reading: SeedingReading): {
+  readonly seedingMode: SeedingMode;
+  readonly seedingConfirmedAt: string | null;
+} {
+  return { seedingMode: reading.mode, seedingConfirmedAt: reading.confirmedAt };
+}
+
+/**
+ * Brings `target` — the services object a tool call or resource read is about to read — to
+ * `reading`, and says whether it now reads it. The object the composition root builds reads its
+ * reader through accessors, so it is there already; a copy spread from that object (the serve CLI
+ * adds its in-flight accounting so; the test worlds add a seed) holds plain values the spread read
+ * once, and they are set here. The operator's record always wins: a value a copy set itself is
+ * replaced at its next call (a test sets its reading through the environment or config.json). A
+ * target that cannot take them (frozen; a getter of its own that reads something else) is left as
+ * it is, and the answer is false. Reflect.set never throws for a read-only property; only a
+ * throwing getter, setter or proxy trap of the target's own can throw.
+ */
+export function adoptSeedingReading(target: object, reading: SeedingReading): boolean {
+  const want = seedingFieldsOf(reading);
+  let held = true;
+  for (const key of SEEDING_FIELDS) {
+    if (Reflect.get(target, key) === want[key]) continue;
+    Reflect.set(target, key, want[key]);
+    if (Reflect.get(target, key) !== want[key]) held = false;
+  }
+  return held;
 }
 
 /** The reading a running server uses, re-read per call. */
