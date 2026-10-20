@@ -29,7 +29,10 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   index, refuses `main`, scans blobs and message, GitHub no-reply identity only, pushes);
   `.githooks/pre-commit` and `.githooks/commit-msg`; `.gitleaks.toml` with the ESPN rules;
   generated (never committed) self-test fixtures in `scripts/ci/secret-fixtures.mjs`.
-- **CI (plan 04 §4).** `ci.yml` (lint incl. commit messages, typecheck, test + coverage gate,
+- **CI (plan 04 §4).** `ci.yml` (lint incl. the commit identities and messages — every message the
+  head reaches, merges and annotated tags included, scanned for secrets and identifiers; after the
+  baseline, Conventional with no AI attribution trailer; a pull request's title as a squash merge
+  publishes it, re-checked when it is edited —, typecheck, test + coverage gate,
   supply-chain: `npm audit --omit=dev --audit-level=high`, no install scripts, licenses, full
   runtime tree; pack scan; process), `docs.yml` (Mermaid render with pinned mermaid-cli and an
   explicit `chrome-headless-shell` install, internal links, identifiers, plugin + Skills
@@ -38,7 +41,8 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   the registry and fails on any difference, on a catalog Status the registry contradicts and on a
   cheat-sheet field the tool's output schema lacks; `npm run docs:gen` rewrites them), `secret-scan.yml` (workflow `secrets`; gitleaks pinned by version and
   sha256 over the full history and the tree, plus its self-test), `release.yml` (on a `v*` tag:
-  the full `ci.yml` gate, `scripts/ci/check-changelog.mjs` — the tag, `package.json` and a dated
+  the full gate — `ci.yml`, `secret-scan.yml` and `docs.yml`, each called on the tagged commit —,
+  `scripts/ci/check-changelog.mjs` — the tag, `package.json` and a dated
   section here agree — the committed lockfile copied to `npm-shrinkwrap.json`, which `files`
   ships, the tarball scan with `--release` (the packed lock is that lockfile byte for byte),
   `npm pack`, `scripts/ci/check-release-install.mjs` — the README's release install, `npm ci

@@ -3,9 +3,13 @@
 // job sets of plan 04 §4.1–§4.3 as built in this stage. Ported from sibling @d72e03b, adapted: no
 // YAML parser is a dependency of this repo (plan 04 §2), so the workflows are read structurally —
 // a job is a two-space-indented key under `jobs:`. The commit-identity step (CLAUDE.md "Security";
-// Stage C finding ci-commit-identity-unchecked) is also RUN: its `run:` block, cut out of ci.yml
-// exactly as YAML reads it, is executed against throwaway repositories and this clone's history.
+// Stage C finding ci-commit-identity-unchecked) and the commit-message step (plan 04 §3 R4; Stage C
+// findings ci-commit-message-not-scanned, ci-message-check-skips-merges-first-push) are also RUN:
+// each `run:` block, cut out of ci.yml exactly as YAML reads it, is executed against throwaway
+// repositories and this clone's history. release.yml is held to wait for every workflow a push
+// runs (Stage C finding ci-release-skips-gitleaks-gate).
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -47,6 +51,21 @@ function jobsOf(text: string): Map<string, string> {
 function step(job: string, needle: string): string {
   const parts = job.split(/\n(?= {6}- )/);
   return parts.find((p) => p.includes(needle)) ?? "";
+}
+
+/** The events a workflow runs on: the two-space keys of its `on:` block. */
+function onKeys(text: string): string[] {
+  const block = /^on:\n((?: {2,}.*\n|\n)*)/m.exec(text)?.[1] ?? "";
+  return [...block.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1] ?? "");
+}
+
+/** A job's `needs:` — one job name or a flow sequence of them. */
+function needsOf(job: string): string[] {
+  const m = /^ {4}needs: (?:\[([^\]\n]*)\]|(\S+))$/m.exec(job);
+  return (m?.[1] ?? m?.[2] ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 const CANCEL_EXPR = "${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}";
@@ -137,7 +156,7 @@ describe("ci.yml (plan 04 §4.1)", () => {
   const job = (n: string) => jobs.get(n) ?? "";
 
   it("can be called by release.yml, in a concurrency group of its own (a tag's direct run never cancels the called one)", () => {
-    expect(text).toMatch(/^on:\n {2}push:\n {2}pull_request:\n {2}workflow_call:\n/m);
+    expect(text).toMatch(/^on:\n {2}push:\n {2}pull_request:\n(?: {4}.*\n)* {2}workflow_call:\n/m);
     expect(text).toContain(
       "group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}",
     );
@@ -190,8 +209,10 @@ describe("ci.yml (plan 04 §4.1)", () => {
     expect(sm).toContain('assert-inspector.mjs" --toolset "$toolset"');
   });
 
+  // the commit-message step needs no npm ci and runs whatever an earlier step decided (its own
+  // describe below holds that): a lint or format failure never skips it
   it.each([
-    ["lint", ["npm run lint", "npm run format:check", "scripts/dev/check-commit-msg.mjs"]],
+    ["lint", ["npm run lint", "npm run format:check"]],
     ["typecheck", ["npm run typecheck"]],
     ["test", ["npm run test:coverage", "npm run check:coverage"]],
     [
@@ -290,6 +311,28 @@ const MACHINE = ["dev", "build-host.lan"].join("@");
 const RESERVED = ["probe", "example.invalid"].join("@");
 const LOOKALIKE = ["1234567+probe", "users.noreply.github.com.example.invalid"].join("@");
 
+/** git's environment: no inherited GIT_* state, no global/system config, no hooks. */
+const gitEnv = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) if (!k.startsWith("GIT_")) env[k] = v;
+  return {
+    ...env,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ""}`,
+    ...extra,
+  };
+};
+
+/** True when this clone holds the whole history back to `baseline` (CI's unit job checks out one commit). */
+const fullHistoryFrom = (baseline: string): boolean =>
+  /^[0-9a-f]{40}$/.test(baseline) &&
+  spawnSync("git", ["rev-parse", "--is-shallow-repository"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  }).stdout.trim() === "false" &&
+  spawnSync("git", ["cat-file", "-e", `${baseline}^{commit}`], { cwd: ROOT }).status === 0;
+
 describe("ci.yml commit identity — authors and committers after the baseline, and taggers, are GitHub no-reply addresses", () => {
   const identity = rawStep("ci.yml", "Commit identity");
   const script = runBlock(identity);
@@ -300,19 +343,6 @@ describe("ci.yml commit identity — authors and committers after the baseline, 
     tmp?.cleanup();
     tmp = undefined;
   });
-
-  /** git's environment: no inherited GIT_* state, no global/system config, no hooks. */
-  const gitEnv = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => {
-    const env: NodeJS.ProcessEnv = {};
-    for (const [k, v] of Object.entries(process.env)) if (!k.startsWith("GIT_")) env[k] = v;
-    return {
-      ...env,
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_NOSYSTEM: "1",
-      PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ""}`,
-      ...extra,
-    };
-  };
 
   /** Run the step's script as the runner would: bash, cwd = the checkout, the step's env. */
   const runStep = (cwd: string, env: { IDENTITY_BASELINE: string; HEAD_SHA: string }) => {
@@ -519,13 +549,7 @@ describe("ci.yml commit identity — authors and committers after the baseline, 
 
   // This clone's own history (a full clone — CI's unit job checks out one commit, so it skips here;
   // the lint job runs the step itself on every push with the full history).
-  const full =
-    /^[0-9a-f]{40}$/.test(baseline) &&
-    spawnSync("git", ["rev-parse", "--is-shallow-repository"], {
-      cwd: ROOT,
-      encoding: "utf8",
-    }).stdout.trim() === "false" &&
-    spawnSync("git", ["cat-file", "-e", `${baseline}^{commit}`], { cwd: ROOT }).status === 0;
+  const full = fullHistoryFrom(baseline);
 
   it.skipIf(!full)(
     "this clone's history passes from the baseline, and the baseline is the newest commit that would not",
@@ -540,6 +564,449 @@ describe("ci.yml commit identity — authors and committers after the baseline, 
         baseline,
       ]);
       expect(back.out).not.toContain("@");
+    },
+  );
+});
+
+// --- every published message, checked and scanned in CI (the local hooks are bypassable) ---------
+
+// Values are assembled at run time so no literal identifier sits in this file (the identifiers scan).
+/** A league id as ESPN's URLs carry it. */
+const LEAGUE_ID = String(2 ** 22 + 1_618_033);
+const LEAGUE_ID_TEXT = ["leagueId", LEAGUE_ID].join("=");
+/** An espn_s2 cookie with its name: "AE", then base64 — digits, both cases, high entropy. */
+const COOKIE_VALUE = `AE${createHash("sha512").update("eff-probe-cookie").digest("base64")}`;
+const COOKIE_TEXT = [["espn", "s2"].join("_"), COOKIE_VALUE].join("=");
+/** The attribution trailer an assistant appends (CLAUDE.md: never in a commit message). */
+const AI_TRAILER = `Co-Authored-By: Claude <${["noreply", "anthropic.com"].join("@")}>`;
+/** GitHub's support mailbox, which Dependabot signs off every commit with. */
+const SUPPORT = ["support", "github.com"].join("@");
+const DEPENDABOT_SIGNOFF = `Signed-off-by: dependabot[bot] <${SUPPORT}>`;
+/** Dependabot's author address: its GitHub App's no-reply form. */
+const DEPENDABOT = ["49699333+dependabot[bot]", "users.noreply.github.com"].join("@");
+const AS_DEPENDABOT = {
+  GIT_AUTHOR_NAME: "dependabot[bot]",
+  GIT_AUTHOR_EMAIL: DEPENDABOT,
+  GIT_COMMITTER_NAME: "GitHub",
+  GIT_COMMITTER_EMAIL: WEB_FLOW,
+};
+
+describe("ci.yml commit messages — every published message (merges, the root and tags included) is scanned for secrets and identifiers; after the baseline it is Conventional with no AI attribution trailer; a pull request's title too", () => {
+  const messages = rawStep("ci.yml", "Commit messages");
+  const script = runBlock(messages);
+  const baseline = stepEnv(messages, "MESSAGE_BASELINE") ?? "";
+
+  let tmp: ReturnType<typeof tempDir> | undefined;
+  afterEach(() => {
+    tmp?.cleanup();
+    tmp = undefined;
+  });
+
+  interface StepEnv {
+    MESSAGE_BASELINE: string;
+    HEAD_SHA: string;
+    EVENT?: string;
+    PR_TITLE?: string;
+    PR_NUMBER?: string;
+  }
+
+  /** Run the step's script as the runner would: bash, cwd = the checkout, the step's env. */
+  const runStep = (cwd: string, env: StepEnv) => {
+    const r = spawnSync("bash", ["-c", script], {
+      cwd,
+      encoding: "utf8",
+      env: gitEnv({ EVENT: "push", PR_TITLE: "", PR_NUMBER: "", ...env, GITHUB_WORKSPACE: ROOT }),
+      timeout: 60_000,
+    });
+    return { status: r.status, out: `${r.stdout}${r.stderr}` };
+  };
+
+  /**
+   * A throwaway repository: two commits before the baseline whose messages carry an AI attribution
+   * trailer (the residual every pre-rule commit of this repository carries), `residual` added to
+   * the first one's body. Every message is committed byte for byte (`--cleanup=verbatim`).
+   */
+  const makeRepo = (residual = "") => {
+    const t = tempDir("eff-messages-");
+    tmp = t;
+    const repoDir = path.join(t.dir, "repo");
+    mkdirSync(repoDir);
+    const git = (args: string[], extra: Record<string, string> = {}): string => {
+      const r = spawnSync("git", args, {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: gitEnv({
+          GIT_AUTHOR_NAME: "probe",
+          GIT_AUTHOR_EMAIL: NOREPLY,
+          GIT_COMMITTER_NAME: "probe",
+          GIT_COMMITTER_EMAIL: NOREPLY,
+          ...extra,
+        }),
+        timeout: 30_000,
+      });
+      if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+      return r.stdout.trim();
+    };
+    git(["init", "-q", "-b", "main", "."]);
+    const msgFile = path.join(t.dir, "message.txt");
+    const commit = (msg: string, extra: Record<string, string> = {}): string => {
+      writeFileSync(msgFile, msg);
+      git(
+        ["commit", "-q", "--allow-empty", "--no-verify", "--cleanup=verbatim", "-F", msgFile],
+        extra,
+      );
+      return git(["rev-parse", "HEAD"]);
+    };
+    const merge = (branch: string, msg: string): string => {
+      writeFileSync(msgFile, msg);
+      git(["merge", "-q", "--no-ff", "--no-verify", "--cleanup=verbatim", "-F", msgFile, branch]);
+      return git(["rev-parse", "HEAD"]);
+    };
+    const first = commit(`chore: before the rules\n\n${residual}${AI_TRAILER}\n`);
+    const base = commit(`docs: the last commit before the rules\n\n${AI_TRAILER}\n`);
+    const head = () => git(["rev-parse", "HEAD"]);
+    return { dir: repoDir, git, commit, merge, first, base, head };
+  };
+
+  /** Every value a test puts in a message — none of which the step may print. */
+  const leaks = (out: string) =>
+    [LEAGUE_ID, COOKIE_VALUE, MACHINE, SUPPORT, "a body that names no one"].filter((v) =>
+      out.includes(v),
+    );
+  /** The commits (or objects) the step refused, once each. */
+  const refused = (out: string) => [
+    ...new Set(
+      [...out.matchAll(/^::error::(commit [0-9a-f]{40}|tag \S+|the pull request title):/gm)].map(
+        (m) => m[1],
+      ),
+    ),
+  ];
+
+  it("is lint's last step on the full history, run whatever an earlier step decided (no identity, lint or format failure skips it; its refusal skips no other check), on every event from a fixed baseline, the local rules imported, no context value spliced into the script", () => {
+    expect(messages.length, "ci.yml has no `Commit messages` step").toBeGreaterThan(0);
+    const lint = load("ci.yml").split(/\n {2}typecheck:\n/)[0] ?? "";
+    const at = lint.indexOf("- name: Commit messages");
+    expect(lint).toContain("fetch-depth: 0");
+    // the last of lint's steps, after the identity check, ESLint and Prettier
+    for (const earlier of [
+      "- name: Commit identity",
+      "run: npm run lint",
+      "run: npm run format:check",
+    ])
+      expect(at, earlier).toBeGreaterThan(lint.indexOf(earlier));
+    expect(lint.slice(at + 1)).not.toMatch(/^ {6}- /m);
+    // a failed step before it never skips it (only a cancelled run does), and it needs no npm ci
+    expect(messages[1]).toBe("        if: ${{ !cancelled() }}");
+    expect(script).not.toMatch(/\bnpm\b|node_modules/);
+    expect(baseline).toMatch(/^[0-9a-f]{40}$/);
+    expect(stepEnv(messages, "EVENT")).toBe("${{ github.event_name }}");
+    expect(stepEnv(messages, "HEAD_SHA")).toBe(
+      "${{ github.event.pull_request.head.sha || github.sha }}",
+    );
+    expect(stepEnv(messages, "PR_TITLE")).toBe("${{ github.event.pull_request.title }}");
+    expect(stepEnv(messages, "PR_NUMBER")).toBe("${{ github.event.pull_request.number }}");
+    const text = messages.join("\n");
+    // no pushed-range shortcut (a first push, a tag or a manual run has no usable `before`) and no
+    // merge skipped
+    expect(text).not.toContain("github.event.before");
+    expect(text).not.toContain("--no-merges");
+    // a title reaches the script through the environment only, never as script text
+    expect(script).not.toContain("${{");
+    expect(script).toContain('"scripts/dev/check-commit-msg.mjs"');
+    expect(script).toContain('"scripts/dev/scan-secrets.mjs"');
+    expect(script).toContain("checkMessage(");
+    expect(script).toContain("scanBlob(");
+    // the raw messages as published: no .mailmap rewrite of the author the allowance reads, no
+    // signature output mixed into the records
+    expect(script).toContain('"--no-use-mailmap"');
+    expect(script).toContain('"--no-show-signature"');
+    expect(text).not.toMatch(/continue-on-error|\|\| true|set \+e/);
+  });
+
+  it("re-runs on a pull request's title edit (the subject a squash merge publishes) as well as on GitHub's default activity types", () => {
+    expect(load("ci.yml")).toMatch(
+      /^ {2}pull_request:\n {4}types: \[opened, synchronize, reopened, edited\]\n/m,
+    );
+  });
+
+  it("passes a clean history — Conventional commits, a merge, a revert, Dependabot's signed-off commit, annotated and lightweight tags — and leaves the residual before the baseline to the scan alone", () => {
+    const r = makeRepo();
+    r.commit("feat: a\n\nA body that names no one.\n");
+    r.git(["checkout", "-q", "-b", "side"]);
+    r.commit("fix: on the side\n");
+    r.git(["checkout", "-q", "main"]);
+    r.commit("docs: on main\n");
+    r.merge("side", "Merge branch 'side'\n");
+    const reverted = r.commit("feat: to be reverted\n");
+    r.commit(`Revert "feat: to be reverted"\n\nThis reverts commit ${reverted}.\n`);
+    r.commit(
+      `build(deps): bump the npm-minor-and-patch group with 2 updates\n\nBumps the group with 2 updates.\n\n---\nupdated-dependencies:\n- dependency-name: vitest\n  dependency-version: 4.1.2\n  dependency-type: direct:development\n...\n\n${DEPENDABOT_SIGNOFF}\n`,
+      AS_DEPENDABOT,
+    );
+    r.git(["tag", "-a", "v0.0.1", "-m", "v0.0.1\n\nThe first release."]);
+    r.git(["tag", "light"]);
+    const res = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: r.head() });
+    expect(res.status, res.out).toBe(0);
+    // the 2 residual commits + feat, fix, docs, the merge, feat, the revert, Dependabot's
+    expect(res.out).toContain("checked the message of 9 commit(s)");
+    expect(res.out).toContain("the format of the 7 after the baseline");
+    expect(res.out).toContain("1 annotated tag(s)");
+    expect(res.out).not.toContain("::error::");
+    expect(leaks(res.out)).toEqual([]);
+  });
+
+  it.each<[string, string, string]>([
+    [
+      "a league id",
+      `see https://fantasy.espn.com/football/league?${LEAGUE_ID_TEXT}`,
+      "espn-league-id",
+    ],
+    ["a mailbox", `reported by ${MACHINE}`, "email-address"],
+    ["an espn_s2 cookie", COOKIE_TEXT, "espn-s2-cookie"],
+  ])(
+    "refuses %s in a commit message — naming the commit, the line and the rule, never the value",
+    (_label, line, rule) => {
+      const r = makeRepo();
+      r.commit("feat: fine\n");
+      const bad = r.commit(`fix: read the league\n\nThe probe failed:\n${line}\n`);
+      r.commit("fix: fine again\n");
+      const res = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: r.head() });
+      expect(res.status, res.out).toBe(1);
+      expect(res.out).toContain(`::error::commit ${bad}: COMMIT_MESSAGE:4  [${rule}]`);
+      expect(refused(res.out)).toEqual([`commit ${bad}`]);
+      expect(leaks(res.out)).toEqual([]);
+    },
+  );
+
+  it("refuses a message whose bytes are not UTF-8: what the scanner cannot read is never passed", () => {
+    const r = makeRepo();
+    // `git commit` re-encodes such a message (it reads the bytes as latin1), but a commit object
+    // written directly — any client can push one — keeps them: "café" in latin1, a lone 0xE9
+    const ident = `probe <${NOREPLY}> 1700000000 +0000`;
+    const object = Buffer.concat([
+      Buffer.from(
+        `tree ${r.git(["rev-parse", "HEAD^{tree}"])}\nparent ${r.head()}\nauthor ${ident}\ncommitter ${ident}\n\nfix: a latin-1 body\n\ncaf`,
+      ),
+      Buffer.from([0xe9]),
+      Buffer.from("\n"),
+    ]);
+    const written = spawnSync("git", ["hash-object", "-t", "commit", "-w", "--stdin"], {
+      cwd: r.dir,
+      input: object,
+      env: gitEnv(),
+      timeout: 30_000,
+    });
+    const bad = written.stdout.toString("utf8").trim();
+    expect(bad, written.stderr.toString("utf8")).toMatch(/^[0-9a-f]{40}$/);
+    r.git(["update-ref", "refs/heads/main", bad]);
+    const shown = spawnSync("git", ["log", "-1", "--format=%B", bad], {
+      cwd: r.dir,
+      env: gitEnv(),
+    });
+    expect(shown.stdout.includes(0xe9), "git log no longer shows the raw byte").toBe(true);
+    const res = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: r.head() });
+    expect(res.status, res.out).toBe(1);
+    expect(res.out).toContain(
+      `::error::commit ${bad}: COMMIT_MESSAGE  [unscannable-archive-or-database]`,
+    );
+    expect(refused(res.out)).toEqual([`commit ${bad}`]);
+  });
+
+  it("scans a merge commit's message (a merge is published like any other commit)", () => {
+    const r = makeRepo();
+    r.git(["checkout", "-q", "-b", "side"]);
+    r.commit("feat: on the side\n");
+    r.git(["checkout", "-q", "main"]);
+    r.commit("feat: on main\n");
+    const merge = r.merge("side", `Merge branch 'side'\n\nTried on ${LEAGUE_ID_TEXT}\n`);
+    const res = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: merge });
+    expect(res.status, res.out).toBe(1);
+    expect(res.out).toContain(`::error::commit ${merge}: COMMIT_MESSAGE:3  [espn-league-id]`);
+    expect(refused(res.out)).toEqual([`commit ${merge}`]);
+    expect(leaks(res.out)).toEqual([]);
+  });
+
+  it("scans the whole history, the root included: the baseline exempts the residual from the format check only", () => {
+    const r = makeRepo(`${LEAGUE_ID_TEXT}\n\n`);
+    r.commit("feat: fine\n");
+    const res = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: r.head() });
+    expect(res.status, res.out).toBe(1);
+    expect(res.out).toContain(`::error::commit ${r.first}: COMMIT_MESSAGE:3  [espn-league-id]`);
+    // the residual's AI attribution trailers are not refused: only the identifier is
+    expect(refused(res.out)).toEqual([`commit ${r.first}`]);
+    expect(res.out).not.toContain("message refused");
+    expect(leaks(res.out)).toEqual([]);
+  });
+
+  it("scans every annotated tag's message (a release tag publishes it); a lightweight tag has none", () => {
+    const r = makeRepo();
+    r.commit("feat: a\n");
+    r.git(["tag", "-a", "v0.0.2", "-m", `v0.0.2\n\nTried on ${LEAGUE_ID_TEXT}`]);
+    r.git(["tag", "light"]);
+    const res = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: r.head() });
+    expect(res.status, res.out).toBe(1);
+    expect(res.out).toContain("::error::tag refs/tags/v0.0.2: TAG_MESSAGE:3  [espn-league-id]");
+    expect(refused(res.out)).toEqual(["tag refs/tags/v0.0.2"]);
+    expect(leaks(res.out)).toEqual([]);
+  });
+
+  it("allows Dependabot's own sign-off trailer and nothing more: the mailbox anywhere else, the trailer changed or in another author's commit is refused", () => {
+    const r = makeRepo();
+    r.commit(`build(deps): bump a\n\n${DEPENDABOT_SIGNOFF}\n`, AS_DEPENDABOT);
+    r.commit(`build(deps): bump b\n\n${DEPENDABOT_SIGNOFF}\r\n`, AS_DEPENDABOT);
+    const elsewhere = r.commit(`build(deps): bump c\n\nAsk ${SUPPORT} for help.\n`, AS_DEPENDABOT);
+    const changed = r.commit(
+      `build(deps): bump d\n\n${DEPENDABOT_SIGNOFF.replace("dependabot[bot]", "someone")}\n`,
+      AS_DEPENDABOT,
+    );
+    const longer = r.commit(
+      `build(deps): bump e\n\n${DEPENDABOT_SIGNOFF} ${MACHINE}\n`,
+      AS_DEPENDABOT,
+    );
+    const human = r.commit(`build(deps): bump f\n\n${DEPENDABOT_SIGNOFF}\n`);
+    const res = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: r.head() });
+    expect(res.status, res.out).toBe(1);
+    expect(refused(res.out).sort()).toEqual(
+      [elsewhere, changed, longer, human].map((c) => `commit ${c}`).sort(),
+    );
+    for (const c of [elsewhere, changed, human])
+      expect(res.out).toContain(`::error::commit ${c}: COMMIT_MESSAGE:3  [email-address]`);
+    expect(leaks(res.out)).toEqual([]);
+  });
+
+  it("refuses a merge commit that carries an AI attribution trailer (merges are no longer skipped)", () => {
+    const r = makeRepo();
+    r.git(["checkout", "-q", "-b", "side"]);
+    r.commit("feat: on the side\n");
+    r.git(["checkout", "-q", "main"]);
+    const merge = r.merge("side", `Merge branch 'side'\n\n${AI_TRAILER}\n`);
+    const res = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: merge });
+    expect(res.status, res.out).toBe(1);
+    expect(res.out).toContain(
+      `::error::commit ${merge}: message refused — the message carries an AI attribution trailer`,
+    );
+    expect(refused(res.out)).toEqual([`commit ${merge}`]);
+  });
+
+  it.each(["push", "workflow_dispatch", "schedule", "pull_request"])(
+    "checks the whole history after the baseline on a %s run, not a pushed range: a bad commit deep in a new branch is refused",
+    (event) => {
+      const r = makeRepo();
+      const deep = r.commit("not a conventional subject\n");
+      for (let i = 0; i < 3; i++) r.commit(`feat: later ${String(i)}\n`);
+      const res = runStep(r.dir, {
+        MESSAGE_BASELINE: r.base,
+        HEAD_SHA: r.head(),
+        EVENT: event,
+        ...(event === "pull_request" ? { PR_TITLE: "feat: a title", PR_NUMBER: "7" } : {}),
+      });
+      expect(res.status, res.out).toBe(1);
+      expect(res.out).toContain(
+        `::error::commit ${deep}: message refused — the subject is not a Conventional Commit`,
+      );
+      expect(refused(res.out)).toEqual([`commit ${deep}`]);
+      expect(res.out).not.toContain("not checked");
+    },
+  );
+
+  it.each<[string, string, string]>([
+    ["not a Conventional Commit", "Update the README", "the subject is not a Conventional Commit"],
+    [
+      "a skip-CI instruction",
+      "fix: a typo [skip ci]",
+      "the message carries a GitHub skip-CI instruction",
+    ],
+    [
+      "over the subject limit once a squash merge appends its number",
+      `feat: ${"x".repeat(114)}`,
+      "the subject is longer than 120 characters",
+    ],
+  ])(
+    "on a pull request, refuses a title that is %s (a squash merge publishes it as the subject on main)",
+    (_label, title, why) => {
+      const r = makeRepo();
+      r.commit("feat: fine\n");
+      const res = runStep(r.dir, {
+        MESSAGE_BASELINE: r.base,
+        HEAD_SHA: r.head(),
+        EVENT: "pull_request",
+        PR_TITLE: title,
+        PR_NUMBER: "12",
+      });
+      expect(res.status, res.out).toBe(1);
+      expect(res.out).toContain(`::error::the pull request title: refused — ${why}`);
+      expect(refused(res.out)).toEqual(["the pull request title"]);
+      expect(res.out).not.toContain(title);
+    },
+  );
+
+  it("on a pull request, scans the title for secrets and identifiers, never printing it", () => {
+    const r = makeRepo();
+    r.commit("feat: fine\n");
+    const res = runStep(r.dir, {
+      MESSAGE_BASELINE: r.base,
+      HEAD_SHA: r.head(),
+      EVENT: "pull_request",
+      PR_TITLE: `fix: read ${LEAGUE_ID_TEXT}`,
+      PR_NUMBER: "12",
+    });
+    expect(res.status, res.out).toBe(1);
+    expect(res.out).toContain("::error::the pull request title: PR_TITLE:1  [espn-league-id]");
+    expect(refused(res.out)).toEqual(["the pull request title"]);
+    expect(leaks(res.out)).toEqual([]);
+  });
+
+  it("on a pull request, passes a Conventional title and says it checked it; fails closed when the title or the number cannot be read", () => {
+    const r = makeRepo();
+    r.commit("feat: fine\n");
+    const pr = (PR_TITLE: string, PR_NUMBER: string) =>
+      runStep(r.dir, {
+        MESSAGE_BASELINE: r.base,
+        HEAD_SHA: r.head(),
+        EVENT: "pull_request",
+        PR_TITLE,
+        PR_NUMBER,
+      });
+    const ok = pr("feat(ci): scan every published message", "12");
+    expect(ok.status, ok.out).toBe(0);
+    expect(ok.out).toContain("and the pull request title");
+    for (const [title, n] of [
+      ["", "12"],
+      ["  ", "12"],
+      ["feat: a title", ""],
+    ] as const) {
+      const res = pr(title, n);
+      expect(res.status, res.out).toBe(1);
+      expect(res.out).toContain("::error::the pull request title: it could not be read");
+    }
+    // outside a pull request no title exists, and none is required
+    const push = runStep(r.dir, { MESSAGE_BASELINE: r.base, HEAD_SHA: r.head() });
+    expect(push.status, push.out).toBe(0);
+    expect(push.out).not.toContain("the pull request title");
+  });
+
+  it("fails closed when the baseline commit is not in the checkout", () => {
+    const r = makeRepo();
+    r.commit("feat: a\n");
+    const res = runStep(r.dir, { MESSAGE_BASELINE: "f".repeat(40), HEAD_SHA: r.head() });
+    expect(res.status, res.out).toBe(1);
+    expect(res.out).toContain("::error::");
+    expect(res.out).not.toContain("checked the message");
+  });
+
+  // This clone's own history (a full clone — CI's unit job checks out one commit, so it skips here;
+  // the lint job runs the step itself on every push with the full history).
+  it.skipIf(!fullHistoryFrom(baseline))(
+    "this clone's history passes, and the baseline is the newest commit whose message the format check would refuse",
+    () => {
+      const ok = runStep(ROOT, { MESSAGE_BASELINE: baseline, HEAD_SHA: "HEAD" });
+      expect(ok.status, ok.out).toBe(0);
+      expect(ok.out).not.toContain("::error::");
+      // moved one commit back, the baseline itself is refused (its AI attribution trailer): it is tight
+      const back = runStep(ROOT, { MESSAGE_BASELINE: `${baseline}^`, HEAD_SHA: "HEAD" });
+      expect(back.status, back.out).toBe(1);
+      expect(refused(back.out)).toEqual([`commit ${baseline}`]);
+      expect(back.out).toContain(`::error::commit ${baseline}: message refused — `);
     },
   );
 });
@@ -710,7 +1177,52 @@ describe("release.yml (plan 04 §4.4, R8; Stage C finding ci-release-workflow-mi
 
   it("releases only after the full ci.yml gate, called on the same commit", () => {
     expect(jobs.get("ci")).toMatch(/^ {4}uses: \.\/\.github\/workflows\/ci\.yml$/m);
-    expect(release).toMatch(/^ {4}needs: ci$/m);
+    expect(needsOf(release)).toContain("ci");
+  });
+
+  it("waits for every gate a push runs — ci, secrets (gitleaks over the history and the tree) and docs (plugin validation): each push-triggered workflow is called on the same commit and needed by the release job (plan 04 §4.1, §4.4)", () => {
+    const gates = files.filter((f) => f !== "release.yml" && onKeys(load(f)).includes("push"));
+    expect(gates.sort()).toEqual(["ci.yml", "docs.yml", "secret-scan.yml"]);
+    const needs = needsOf(release);
+    for (const gate of gates) {
+      const caller = [...jobs].find(([, block]) =>
+        new RegExp(`^ {4}uses: \\./\\.github/workflows/${gate.replace(".", "\\.")}$`, "m").test(
+          block,
+        ),
+      );
+      expect(caller, `release.yml does not call ${gate}`).toBeDefined();
+      expect(needs, `the release job does not wait for ${gate}`).toContain(caller?.[0]);
+    }
+  });
+
+  it("every workflow it calls is callable and runs in a concurrency group of its own: a tag's direct run and the called one never share — so never cancel — a group", () => {
+    const called = [...jobs.values()]
+      .map((block) => /^ {4}uses: \.\/\.github\/workflows\/([\w.-]+)$/m.exec(block)?.[1])
+      .filter((f): f is string => f !== undefined);
+    expect(called.sort()).toEqual(["ci.yml", "docs.yml", "secret-scan.yml"]);
+    const groupOf = (f: string) => /^concurrency:\n {2}group: (.+)$/m.exec(load(f))?.[1] ?? "";
+    /** A concurrency group with these context values; an unknown expression fails the test. */
+    const evaluate = (group: string, ctx: Record<string, string>) =>
+      group.replace(/\$\{\{\s*([\w.]+)\s*\}\}/g, (_m, key: string) => {
+        const v = ctx[key];
+        if (v === undefined) throw new Error(`unknown context ${key} in ${group}`);
+        return v;
+      });
+    const tag = { "github.event_name": "push", "github.ref": "refs/tags/v1.2.3" };
+    const groups = new Map([
+      ["release.yml", evaluate(groupOf("release.yml"), { ...tag, "github.workflow": "release" })],
+    ]);
+    for (const f of called) {
+      expect(onKeys(load(f)), f).toContain("workflow_call");
+      const name = /^name: (.+)$/m.exec(load(f))?.[1] ?? f;
+      // github.workflow is the CALLER's name in a called run
+      groups.set(`${f}, called`, evaluate(groupOf(f), { ...tag, "github.workflow": "release" }));
+      groups.set(
+        `${f}, its own run on the tag`,
+        evaluate(groupOf(f), { ...tag, "github.workflow": name }),
+      );
+    }
+    expect(new Set(groups.values()).size, JSON.stringify([...groups], null, 1)).toBe(groups.size);
   });
 
   it("checks the changelog, writes the lock, scans, packs, checksums, installs that tarball the README's way, then creates the GitHub Release — in that order", () => {

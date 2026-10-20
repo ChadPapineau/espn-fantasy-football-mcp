@@ -27,6 +27,23 @@
 #   imported, plus a GitHub App's `<id>+<slug>[bot]` form (Dependabot's PR commits); GitHub's own
 #   `noreply@github.com` is accepted as committer or tagger only (web merges, signed bot commits).
 #   It prints the commit or tag and the role, never an address.
+# - lint's commit-message step (plan 04 §3 R4: "every PR commit and title"; CLAUDE.md: no id,
+#   address or credential is ever pushed; Stage C findings ci-commit-message-not-scanned,
+#   ci-message-check-skips-merges-first-push): the same hook-bypassing paths publish a message no
+#   local guard read (.githooks/commit-msg and commit-paths.sh scan it with scan-secrets --message),
+#   so CI reads every one. It is lint's last step and runs whatever an earlier step decided
+#   (`!cancelled()`; it needs no npm ci): an identity, lint or format failure never skips it, and a
+#   refusal — a published message stays published — never skips another check.
+#   Every commit the head reaches, merges and the root included, and every annotated tag's message:
+#   scanned with scan-secrets.mjs's rules (scanBlob, imported — the --message scan; CI has no
+#   deny-list), Dependabot's own sign-off trailer alone exempt (GitHub's support mailbox, no person).
+#   Every commit after MESSAGE_BASELINE (the newest whose message carries an AI attribution trailer:
+#   it and its ancestors predate the commit rules — the residual): check-commit-msg.mjs's rules
+#   (Conventional, no AI attribution trailer, no skip-CI instruction). The whole history on every
+#   event, never only the pushed range: a first push, a tag, a manual or a scheduled run has no
+#   usable `before`. On a pull request, its title as a squash merge publishes it, `<title> (#<n>)`:
+#   checked and scanned — and `edited` re-runs the gate when the title changes. It prints the
+#   commit, tag or title, the line and the rule, never a message.
 # - smoke: the MCP Inspector CLI is pinned EXACTLY (npx pins are not Dependabot-managed — bump
 #   deliberately) and runs from $RUNNER_TEMP with npm_config_ignore_scripts=true, so neither the
 #   project .npmrc nor an install script of the Inspector's own tree is involved. It drives the built
@@ -47,7 +64,10 @@ name: ci
 
 on:
   push:
+  # GitHub's default activity types, plus `edited`: a title changed after the last push is the
+  # subject a squash merge publishes, and lint's commit-message step reads it
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   # release.yml calls this gate on a tag before it packs (plan 04 §4.4: "full ci.yml jobs")
   workflow_call:
   workflow_dispatch:
@@ -153,33 +173,115 @@ jobs:
         run: npm run lint
       - name: Prettier
         run: npm run format:check
-      - name: Commit messages — Conventional, no AI attribution trailer (plan 04 R4)
+      - name: Commit messages — every published message carries no secret or identifier; after the baseline, Conventional, no AI attribution trailer; the PR title too (plan 04 §3 R4, CLAUDE.md)
+        if: ${{ !cancelled() }}
         env:
           EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # a pull request's title is the subject a squash merge publishes on main (plan 04 §3: "every
+          # PR commit and title"): it reaches the script through the environment, never as its text
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # The newest commit whose message carries an AI attribution trailer: it and its ancestors
+          # were made before the commit rules (CLAUDE.md; docs/HANDOFF.md "Decisions made",
+          # 2026-10-05) — the accepted residual of the FORMAT check, every commit after it checked on
+          # every event. The secret and identifier scan has no baseline: every message the head
+          # reaches is scanned, the root included.
+          MESSAGE_BASELINE: f9eebbf0b9d1f2cfe3bbc4aa673bc82adff86c62
         run: |
           set -euo pipefail
-          range=""
-          if [ "$EVENT" = "pull_request" ]; then
-            range="${PR_BASE}..${HEAD_SHA}"
-          elif [ "$EVENT" = "push" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
-               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            range="${BEFORE}..${HEAD_SHA}"
+          if ! git cat-file -e "${MESSAGE_BASELINE}^{commit}" 2>/dev/null; then
+            echo "::error::the message baseline ${MESSAGE_BASELINE} is not in this checkout — the commit messages cannot be verified"
+            exit 1
           fi
-          if [ -z "$range" ]; then
-            echo "no usable range (new branch, manual run or force-push) — commit messages not checked"
-            exit 0
-          fi
-          msg="$RUNNER_TEMP/commit-msg.txt"
-          n=0
-          for sha in $(git rev-list --no-merges "$range"); do
-            git log -1 --format=%B "$sha" > "$msg"
-            node scripts/dev/check-commit-msg.mjs "$msg" || { echo "::error::commit $sha: message refused"; exit 1; }
-            n=$((n + 1))
-          done
-          echo "checked $n commit message(s) in $range"
+          node --input-type=module <<'JS'
+          import { execFileSync } from "node:child_process";
+          import path from "node:path";
+          import { pathToFileURL } from "node:url";
+          // the rules the local guards apply (.githooks/commit-msg, commit-paths.sh), imported: the
+          // format check, and scan-secrets.mjs --message (its scanBlob over the message) — CI has no
+          // deny-list (it lives on the owner's machine, outside the repo), so its rules alone
+          const load = (f) => import(pathToFileURL(path.join(process.env.GITHUB_WORKSPACE, f)).href);
+          const { checkMessage } = await load("scripts/dev/check-commit-msg.mjs");
+          const { scanBlob } = await load("scripts/dev/scan-secrets.mjs");
+          const { EVENT = "", HEAD_SHA = "", MESSAGE_BASELINE = "", PR_TITLE = "", PR_NUMBER = "" } = process.env;
+          const git = (args) => execFileSync("git", args, { maxBuffer: 1024 * 1024 * 1024 });
+          let refused = 0;
+          // the object, the line and the rule only: a message or a title is never printed
+          const refuse = (what, why) => {
+            refused++;
+            console.log(`::error::${what}: ${why}`);
+          };
+          // Dependabot signs off every commit it makes with GitHub's support mailbox, which names no
+          // person: that exact trailer line, in a commit Dependabot authored, is not scanned (blanked,
+          // so line numbers hold). The mailbox anywhere else, or in anyone else's commit, is.
+          const DEPENDABOT = ["49699333+dependabot[bot]", "users.noreply.github.com"].join("@");
+          const SIGNOFF = `Signed-off-by: dependabot[bot] <${["support", "github.com"].join("@")}>`;
+          // latin1 round-trips every byte: what is scanned is the message as published
+          const scan = (what, label, bytes, author = "") => {
+            let text = bytes.toString("latin1");
+            if (author === DEPENDABOT)
+              text = text.split("\n").map((l) => (l.replace(/\r$/, "") === SIGNOFF ? "" : l)).join("\n");
+            for (const finding of scanBlob(label, Buffer.from(text, "latin1"), []).findings)
+              refuse(what, `${finding} — a secret or an identifier is published with it (value not printed)`);
+          };
+          // the NUL-separated fields of a git -z output, as bytes
+          const fields = (buf) => {
+            const out = [];
+            let at = 0;
+            for (let i = buf.indexOf(0); i !== -1; i = buf.indexOf(0, at)) {
+              out.push(buf.subarray(at, i));
+              at = i + 1;
+            }
+            if (at < buf.length) out.push(buf.subarray(at));
+            return out;
+          };
+          // every commit the head reaches — merges and the root included — with its raw author address
+          // (no .mailmap rewrite: the allowance above reads it) and its message as published (%B); no
+          // signature output (a log.showSignature setting) mixed into the records
+          const f = fields(git(["log", "--no-use-mailmap", "--no-show-signature", "-z", "--format=%H%x00%ae%x00%B", "--end-of-options", HEAD_SHA]));
+          const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+          if (f.length % 3 !== 0 || f.some((x, i) => i % 3 === 0 && !SHA.test(x.toString("latin1")))) {
+            console.log("::error::unexpected git log output — the commit messages cannot be verified");
+            process.exit(1);
+          }
+          // the format rules bind after the baseline; it and its ancestors are the residual
+          const after = new Set(git(["rev-list", "--end-of-options", `${MESSAGE_BASELINE}..${HEAD_SHA}`]).toString("latin1").split("\n").filter(Boolean));
+          for (let i = 0; i < f.length; i += 3) {
+            const sha = f[i].toString("latin1");
+            if (after.has(sha)) {
+              const why = checkMessage(f[i + 2].toString("utf8"));
+              if (why) refuse(`commit ${sha}`, `message refused — ${why}`);
+            }
+            scan(`commit ${sha}`, "COMMIT_MESSAGE", f[i + 2], f[i + 1].toString("latin1"));
+          }
+          // an annotated tag publishes its message too (a release tag, plan 04 §4.4); a lightweight
+          // tag has none
+          let tags = 0;
+          for (const line of git(["for-each-ref", "--format=%(objecttype)%00%(objectname)%00%(refname)", "refs/tags"]).toString("utf8").split("\n")) {
+            const [type, id = "", ref = ""] = line.split("\0");
+            if (type !== "tag") continue;
+            tags++;
+            const object = git(["cat-file", "tag", id]);
+            const body = object.indexOf("\n\n");
+            scan(`tag ${ref}`, "TAG_MESSAGE", body === -1 ? Buffer.alloc(0) : object.subarray(body + 2));
+          }
+          // a pull request's title is the subject a squash merge publishes on main, " (#<n>)" appended:
+          // checked as that subject, and scanned
+          let title = false;
+          if (EVENT === "pull_request") {
+            if (PR_TITLE.trim() === "" || !/^[1-9]\d*$/.test(PR_NUMBER)) {
+              refuse("the pull request title", "it could not be read — the title cannot be verified");
+            } else {
+              title = true;
+              const why = checkMessage(`${PR_TITLE} (#${PR_NUMBER})`);
+              if (why) refuse("the pull request title", `refused — ${why}`);
+              scan("the pull request title", "PR_TITLE", Buffer.from(PR_TITLE, "utf8"));
+            }
+          }
+          console.log(`checked the message of ${f.length / 3} commit(s) the head reaches (the format of the ${after.size} after the baseline) and of ${tags} annotated tag(s)${title ? ", and the pull request title" : ""}`);
+          if (refused) process.exit(1);
+          JS
 
   typecheck:
     name: typecheck

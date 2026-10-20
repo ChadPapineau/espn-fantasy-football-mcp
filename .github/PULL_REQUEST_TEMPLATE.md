@@ -10,7 +10,7 @@
 - [ ] **Fixtures are anonymised** (`docs/research/03-espn-api.md` §F.3): league id `0`, "Example League", "Team A"…; recorded from public leagues, keyless.
 - [ ] **Committed with `scripts/dev/commit-paths.sh`** (or a plain `git commit` through `.githooks`); explicit paths only — no `git add -A` / `-u` / directory adds; never `--no-verify`.
 - [ ] **Commit identity.** Every commit's author and committer, and any annotated tag's tagger, is a GitHub no-reply address (`<id>+<login>@users.noreply.github.com`) — never one git derived from the machine's user and host names. `ci / lint` refuses any other, merges and cherry-picks included.
-- [ ] **Conventional Commit** title and commits (`feat|fix|docs|test|chore|refactor|perf|ci|build(scope): subject`); **no AI attribution trailer**.
+- [ ] **Conventional Commit** title and commits (`feat|fix|docs|test|chore|refactor|perf|ci|build(scope): subject`); **no AI attribution trailer**; no secret or identifier in any commit message or in the title. `ci / lint` checks the title as a squash merge publishes it, `<title> (#<n>)`, re-checks it when it is edited, and checks every commit message, merges included.
 - [ ] **Read-only.** No write path is built; the Phase W seam stays declared and unimplemented (owner decision D11); no request can reach the ESPN write host.
 - [ ] **Dependencies.** No new runtime dependency without a plan 04 §2 row and a reviewed `scripts/ci/runtime-allowlist.json`; every version exact; no install script.
 - [ ] **Tests** for every new or changed unit (plan 05), adversarial by default; the coverage gate (plan 05 §7) untouched.

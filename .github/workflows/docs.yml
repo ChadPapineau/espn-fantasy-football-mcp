@@ -36,20 +36,25 @@
 #   generators to exit 1 on it, via --root, before the tree's pass counts.
 # - Safe on a public repo: permissions contents: read; no secrets; `pull_request` (never
 #   pull_request_target); persist-credentials: false.
-# - Triggers: every push and PR (no path filter: `identifiers` must see every change).
+# - Triggers: every push and PR (no path filter: `identifiers` must see every change), and
+#   release.yml's call on a v* tag (workflow_call): the release waits for `claude plugin validate
+#   --strict` and every other docs check on the tagged commit (plan 04 §4.4; Stage C finding
+#   ci-release-skips-gitleaks-gate). The concurrency group carries github.workflow — the CALLER's
+#   name in a called run ("release") — so the tag's own run and the called one never share a group.
 
 name: docs
 
 on:
   push:
   pull_request:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: docs-${{ github.event_name }}-${{ github.ref }}
+  group: docs-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
 
 env:
