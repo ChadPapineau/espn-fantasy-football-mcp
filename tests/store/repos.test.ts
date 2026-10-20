@@ -246,12 +246,16 @@ describe("league_settings and checks", () => {
     fetched_at: fetched,
   });
 
-  it("put is content-addressed (a repeat only advances fetched_at); byHash; latest", () => {
+  it("put is keyed by hash (a repeat advances fetched_at and keeps the newer fetch's slots and rules, never an older one's); byHash; latest", () => {
     s.repos.leagueSettings.put(settings(HASH_A, "2026-10-01T00:00:00.000Z"));
     s.repos.leagueSettings.put(settings(HASH_B, "2026-10-03T00:00:00.000Z"));
-    s.repos.leagueSettings.put(settings(HASH_A, "2026-10-05T00:00:00.000Z"));
+    s.repos.leagueSettings.put({
+      ...settings(HASH_A, "2026-10-05T00:00:00.000Z"),
+      rules: { waiver: { budget: 100 } } as never,
+    });
     s.repos.leagueSettings.put(settings(HASH_A, "2026-09-01T00:00:00.000Z")); // never goes back
     expect(s.repos.leagueSettings.byHash(HASH_A)?.fetched_at).toBe("2026-10-05T00:00:00.000Z");
+    expect(s.repos.leagueSettings.byHash(HASH_A)?.rules).toEqual({ waiver: { budget: 100 } });
     expect(s.repos.leagueSettings.latest("0", 2026)?.settings_hash).toBe(HASH_A);
     expect(s.repos.leagueSettings.latest("0", 2025)).toBeNull();
     expect(s.repos.leagueSettings.byHash("not-a-hash")).toBeNull();

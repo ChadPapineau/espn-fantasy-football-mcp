@@ -114,6 +114,24 @@ export function toJson(v: unknown, what: string, max: number = JSON_MAX_CHARS): 
   return s;
 }
 
+/**
+ * JSON with object keys sorted at every depth, so two encodings of one value compare equal whatever
+ * order their keys were written in (a comparison key, never stored).
+ */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJson(v)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`)
+      .join(",")}}`;
+  }
+  // undefined has no JSON text (it only reaches here from a hand-built value): it compares as null
+  if (value === undefined) return "null";
+  return JSON.stringify(value);
+}
+
 /** Parses JSON the store itself wrote (its shape is the one the same repository serialised). */
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the shape it wrote
 export function parseJson<T>(text: unknown): T {

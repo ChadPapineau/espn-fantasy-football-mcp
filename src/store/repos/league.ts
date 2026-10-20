@@ -3,8 +3,12 @@
 // an ir_invalid check also by the nightly roster snapshot that reads the IR valid again),
 // roster/pool snapshots (pruned after 30 days, plan 06 §1.3), scoreboard_snapshot (never pruned,
 // T-07) and the append-only transactions_seen history. Every write is REQUIRED; JSON
-// bound for a snapshot passes the GUID pseudonymiser (plan 02 §2.4). Ported from sibling @cf3b015,
+// bound for a snapshot passes the GUID pseudonymiser (plan 02 §2.4). A settings snapshot that
+// changes the league-season's newest settings raises `settings_changed` in the same transaction
+// (plan 08 §9; plan 03 §5 #22; T-08 — Stage C, league-settings-changed-never-raised: nothing compared
+// a new snapshot with the last one, so the check could never open). Ported from sibling @cf3b015,
 // adapted (single-league posture: no league key on snapshots; ESPN shapes).
+import type { DatabaseSync } from "node:sqlite";
 import { ESPN_LEAGUE_ID_RE, TEAM_ID_MAX, TEAM_ID_MIN } from "../../config/schema.js";
 import {
   CHECK_IDS,
@@ -12,6 +16,7 @@ import {
   TRANSACTIONS_RANGE_MAX,
   type CheckAcknowledger,
   type CheckRow,
+  type LeagueRules,
   type LeagueSettingsRepository,
   type LeagueSettingsRow,
   type PoolSnapshotRepository,
@@ -19,15 +24,18 @@ import {
   type ScoreboardSnapshotRepository,
   type Transaction,
   type TransactionsSeenRepository,
+  type WaiverRules,
 } from "../../domain/league/types.js";
-import { SETTINGS_HASH_RE } from "../../domain/scoring/types.js";
+import { SETTINGS_HASH_RE, type ScoringSettings } from "../../domain/scoring/types.js";
 import {
   boundedArray,
+  canonicalJson,
   intIn,
   isoMs,
   isoMsOrNull,
   keyString,
   matching,
+  msToIso,
   num,
   oneOf,
   parseJson,
@@ -62,6 +70,80 @@ interface SettingsRow {
   slots_json: string;
   rules_json: string;
   fetched_at: string;
+  fetched_ms: number;
+}
+
+/** The newest settings snapshot of a league-season (the `latest` order: newest fetch, then newest row). */
+const NEWEST_SETTINGS_SQL =
+  "SELECT * FROM league_settings WHERE league_id = ? AND season = ? ORDER BY fetched_ms DESC, rowid DESC LIMIT 1";
+
+/**
+ * The fields of a snapshot that are league STATUS or this build's own vocabulary, not settings: they
+ * move with no edit at all, so they never count as a settings change. The waiver clock is ESPN's
+ * `status.waiverNextExecutionDate`/`waiverLastExecutionDate` (it moves every week); `unverified` and
+ * `unverified_fields` list what this build has not verified; `rounding.verified` is the engine's own
+ * golden flag. Typed against the domain shapes, so a renamed field fails the build here.
+ */
+const WAIVER_STATUS_FIELDS = [
+  "next_execution",
+  "last_execution",
+  "unverified",
+] as const satisfies readonly (keyof WaiverRules)[];
+const RULES_STATUS_FIELDS = ["unverified_fields"] as const satisfies readonly (keyof LeagueRules)[];
+const ROUNDING_STATUS_FIELD = "verified" satisfies keyof ScoringSettings["rounding"];
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** `obj` without `keys` (own data properties only — a parsed `__proto__` key stays plain data). */
+function omit(obj: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
+}
+
+/** A stored JSON column as a comparison key: canonical, with its status fields dropped. */
+function settingsKey(column: "scoring" | "slots" | "rules", text: string): string {
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    return `text:${text}`; // never written by this repository; compared as written
+  }
+  if (column === "scoring" && isRecord(v) && isRecord(v.rounding))
+    v = { ...v, rounding: omit(v.rounding, [ROUNDING_STATUS_FIELD]) };
+  if (column === "rules" && isRecord(v))
+    v = {
+      ...omit(v, RULES_STATUS_FIELDS),
+      ...(isRecord(v.waiver) ? { waiver: omit(v.waiver, WAIVER_STATUS_FIELDS) } : {}),
+    };
+  return canonicalJson(v);
+}
+
+/**
+ * The `settings_changed` detail when the newest snapshot of a league-season moved from `before` to
+ * `after` with a different scoring (its settings_hash among it), roster slots or league rules;
+ * null when the settings are the same. Fixed vocabulary only: flags, the season, a hash, an instant.
+ */
+function settingsChange(
+  before: SettingsRow,
+  after: SettingsRow,
+): Record<string, string | number | boolean | null> | null {
+  const scoring =
+    before.settings_hash !== after.settings_hash ||
+    settingsKey("scoring", before.scoring_json) !== settingsKey("scoring", after.scoring_json);
+  const slots = settingsKey("slots", before.slots_json) !== settingsKey("slots", after.slots_json);
+  const rules = settingsKey("rules", before.rules_json) !== settingsKey("rules", after.rules_json);
+  if (!scoring && !slots && !rules) return null;
+  return {
+    season: num(after.season),
+    scoring_changed: scoring,
+    slots_changed: slots,
+    rules_changed: rules,
+    previous_settings_hash: SETTINGS_HASH_RE.test(before.settings_hash)
+      ? before.settings_hash
+      : null,
+    previous_fetched_at: msToIso(num(before.fetched_ms)),
+  };
 }
 
 const toSettings = (r: SettingsRow): LeagueSettingsRow => ({
@@ -100,6 +182,42 @@ interface CheckDbRow {
   acknowledged_by: string | null;
 }
 
+/**
+ * One checks row. A repeat raise of the same (id, raised_at) refreshes status/detail; its ack state
+ * stays. Callers validate first and run it inside their write.
+ */
+function insertCheck(
+  db: DatabaseSync,
+  c: {
+    readonly id: CheckRow["id"];
+    readonly raised_at: string;
+    readonly raised_ms: number;
+    readonly status: CheckRow["status"];
+    readonly detail_json: string;
+    readonly settings_hash: string | null;
+    readonly acknowledged: boolean;
+    readonly acknowledged_at: string | null;
+    readonly acknowledged_by: CheckAcknowledger | null;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO checks (id, raised_at, raised_ms, status, detail_json, settings_hash, acknowledged, acknowledged_at, acknowledged_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (id, raised_ms) DO UPDATE SET status = excluded.status,
+       detail_json = excluded.detail_json, settings_hash = excluded.settings_hash`,
+  ).run(
+    c.id,
+    c.raised_at,
+    c.raised_ms,
+    c.status,
+    c.detail_json,
+    c.settings_hash,
+    c.acknowledged ? 1 : 0,
+    c.acknowledged_at,
+    c.acknowledged_by,
+  );
+}
+
 const toCheck = (r: CheckDbRow): CheckRow => ({
   id: r.id as CheckRow["id"],
   status: r.status as CheckRow["status"],
@@ -112,7 +230,21 @@ const toCheck = (r: CheckDbRow): CheckRow => ({
 });
 
 export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettingsRepository {
+  const newest = (leagueId: string, season: number): SettingsRow | undefined =>
+    db.prepare(NEWEST_SETTINGS_SQL).get(leagueId, season) as SettingsRow | undefined;
   return {
+    /**
+     * Records a settings snapshot and, in the SAME transaction, raises `settings_changed` when it
+     * changed the league-season's newest settings (plan 08 §9: "if the hash changed — … checks[] row
+     * settings_changed", so `onboard` can explain the commissioner's edit; plan 03 §5 #22; T-08).
+     * A change is a different scoring (its settings_hash among it), roster slots or league rules —
+     * a switch to FAAB or a new playoff seeding rule leaves the scoring hash alone and changes the
+     * advice all the same — never a status field (settingsKey). The league-season's first snapshot is
+     * the baseline (no check); a repeat of the newest settings, or a snapshot older than the newest
+     * (a late answer), raises nothing; two processes recording one change raise it once (the second
+     * reads the first's row as the newest). The check (warn) carries the new hash and the change's
+     * flags; a human closes it (`eff setup --seeding`, `eff doctor --ack settings_changed`).
+     */
     put(row) {
       matching(row.league_id, ESPN_LEAGUE_ID_RE, "league_id");
       intIn(row.season, SEASON_MIN, SEASON_MAX, "season");
@@ -121,13 +253,17 @@ export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettin
       const scoring = toJson(row.scoring, "scoring");
       const slots = toJson(row.slots, "slots");
       const rules = toJson(row.rules, "rules");
-      writes.required("league_settings", () => {
-        // The hash identifies the content: a repeat put only advances fetched_at (never back).
+      writes.requiredTx("league_settings", () => {
+        const before = newest(row.league_id, row.season);
+        // One row per settings_hash (the log's referent): a repeat put of a hash records the newer
+        // fetch's slots and rules (the hash covers the scoring rules only) — never an older fetch's.
         db.prepare(
           `INSERT INTO league_settings (league_id, season, settings_hash, scoring_json, slots_json, rules_json, fetched_at, fetched_ms)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (league_id, season, settings_hash) DO UPDATE SET fetched_at = excluded.fetched_at,
-             fetched_ms = excluded.fetched_ms WHERE excluded.fetched_ms > league_settings.fetched_ms`,
+           ON CONFLICT (league_id, season, settings_hash) DO UPDATE SET scoring_json = excluded.scoring_json,
+             slots_json = excluded.slots_json, rules_json = excluded.rules_json,
+             fetched_at = excluded.fetched_at, fetched_ms = excluded.fetched_ms
+           WHERE excluded.fetched_ms > league_settings.fetched_ms`,
         ).run(
           row.league_id,
           row.season,
@@ -138,6 +274,22 @@ export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettin
           row.fetched_at,
           ms,
         );
+        const after = newest(row.league_id, row.season);
+        // the only write here is this snapshot: when the newest settings differ, this one made them so
+        const change =
+          before === undefined || after === undefined ? null : settingsChange(before, after);
+        if (change === null || after === undefined) return;
+        insertCheck(db, {
+          id: "settings_changed",
+          raised_at: after.fetched_at,
+          raised_ms: num(after.fetched_ms),
+          status: "warn",
+          detail_json: checkDetail(change),
+          settings_hash: after.settings_hash,
+          acknowledged: false,
+          acknowledged_at: null,
+          acknowledged_by: null,
+        });
       });
     },
     byHash(settingsHash) {
@@ -170,23 +322,17 @@ export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettin
       if (check.acknowledged_by !== null)
         oneOf(check.acknowledged_by, ACKNOWLEDGERS, "acknowledger");
       writes.required("checks", () => {
-        // A repeat raise of the same (id, raised_at) refreshes status/detail; its ack state stays.
-        db.prepare(
-          `INSERT INTO checks (id, raised_at, raised_ms, status, detail_json, settings_hash, acknowledged, acknowledged_at, acknowledged_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT (id, raised_ms) DO UPDATE SET status = excluded.status,
-             detail_json = excluded.detail_json, settings_hash = excluded.settings_hash`,
-        ).run(
-          check.id,
-          check.raised_at,
-          raisedMs,
-          check.status,
-          detail,
-          check.settings_hash,
-          check.acknowledged ? 1 : 0,
-          check.acknowledged_at,
-          check.acknowledged_by,
-        );
+        insertCheck(db, {
+          id: check.id,
+          raised_at: check.raised_at,
+          raised_ms: raisedMs,
+          status: check.status,
+          detail_json: detail,
+          settings_hash: check.settings_hash,
+          acknowledged: check.acknowledged,
+          acknowledged_at: check.acknowledged_at,
+          acknowledged_by: check.acknowledged_by,
+        });
       });
     },
     openChecks() {
