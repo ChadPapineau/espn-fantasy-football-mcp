@@ -208,6 +208,21 @@ const MARK_FLOOD_RE = /(\p{M}{4})\p{M}+/gu;
 const ANY_ENTITY_RE = /&#?[A-Za-z0-9]{1,32};/g;
 const MAX_PASSES = 6;
 
+/**
+ * Markdown's link joins (plan 02 §6.2: "URLs left as text, never marked clickable, never fetched").
+ * The model renders this text as Markdown, where quotation marks change nothing: CommonMark and GFM
+ * form an inline link or image only where `]` is followed IMMEDIATELY by `(` (`[text](url)`,
+ * `![alt](url)`), a full or collapsed reference only by `[` (`[text][label]`, `[label][]`), and a
+ * link reference or footnote definition only by `:` (`[label]: url`, `[^1]: …`). A space after such
+ * a `]` breaks all of them while the words and the URL stay, as text: a member's
+ * `[session expired, sign in](https://…)` reads `[session expired, sign in] (https://…)` — no link
+ * whose text hides where it goes, no image a client fetches, no definition another member's `[label]`
+ * resolves against (Stage C finding untrusted-markdown-links-live). Applied last in every pass, after
+ * the entity decoding (`&#91;x&#93;&#40;url&#41;` decodes to a link) and after every removal that
+ * could close the gap (a zero-width space, a soft hyphen or a tag between `]` and `(`).
+ */
+const MARKDOWN_LINK_JOIN_RE = /\](?=[([:])/g;
+
 function sanitizePass(input: string): string {
   let s = input
     .normalize("NFC")
@@ -222,7 +237,7 @@ function sanitizePass(input: string): string {
   s = stripTags(s.replace(ANY_ENTITY_RE, " "));
   s = s.replace(LONE_SURROGATE_RE, "").replace(SPACE_LIKE_RE, " ").replace(REMOVE_RE, "");
   s = s.normalize("NFC").replace(MARK_FLOOD_RE, "$1");
-  return s.replace(/\s+/gu, " ").trim();
+  return s.replace(/\s+/gu, " ").trim().replace(MARKDOWN_LINK_JOIN_RE, "] ");
 }
 
 /** The sanitiser's output. */
@@ -235,7 +250,9 @@ export interface SanitizedText {
  * Sanitises third-party text (plan 02 §6.2): bounded pre-cut (a 1 MB input stays linear), lone
  * surrogates dropped, entities decoded and HTML removed to a fixed point (an encoded tag cannot
  * survive), controls/zero-width/bidi/tag characters removed, combining floods capped, NFC,
- * whitespace collapsed, then capped at `cap` code points. Idempotent on its own output.
+ * whitespace collapsed, Markdown's link joins broken (`](`, `][`, `]:` — no live link, image or
+ * reference definition; the words and URLs stay as text), then capped at `cap` code points.
+ * Idempotent on its own output.
  */
 export function sanitizeText(raw: string, cap: number): SanitizedText {
   return capCodePoints(sanitizeUncapped(raw, cap), cap);
