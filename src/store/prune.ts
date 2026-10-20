@@ -1,8 +1,12 @@
 // prune.ts — `eff store prune` (plan 06 §1.3; plan 01 §5.5, §5.8): the ESPN cache past its longest
 // finite hard limit, roster/pool snapshots older than 30 days, the bounded points_cache LRU,
-// espn_requests past ESPN_REQUEST_ROW_TTL_MS (changelog V7), staging debris and dataset files
-// refresh_log could never name, backups beyond two versions / four weeks, and the temp files of a
-// killed run (`<cache>/tmp/<prefix>-XXXXXX` untouched for a day — Stage C, store-prune-skips-tmp-runs).
+// espn_requests past ESPN_REQUEST_ROW_TTL_MS (changelog V7), refresh_log history superseded more
+// than 30 days ago (each source's newest success and every row after it stay — Stage C,
+// store-refresh-log-unpruned-status-stall: one row per publish, ≈ 390 a day in season, and nothing
+// deleted them), staging debris and dataset files refresh_log could never name, backups beyond two
+// versions / four weeks (one pre-migration copy per version, under the process lock — Stage C,
+// store-failed-migration-backups-accumulate), and the temp files of a killed run
+// (`<cache>/tmp/<prefix>-XXXXXX` untouched for a day — Stage C, store-prune-skips-tmp-runs).
 // NEVER touches the never-pruned tables (T-07): the only DELETE targets are the PRUNE_POLICY tables,
 // asserted below.
 import { lstatSync, readdirSync, rmSync, type Stats } from "node:fs";
@@ -20,7 +24,13 @@ import {
 import { ESPN_REQUEST_ROW_TTL_MS } from "../config/schema.js";
 import type { IsoInstant } from "../domain/league/types.js";
 import { prunePreMigrationBackups, pruneWeeklyBackups } from "./backup.js";
-import { pidAlive } from "./lock.js";
+import {
+  acquireLockSync,
+  LOCK_WAIT_MS,
+  lockPathOf,
+  pidAlive,
+  StoreLockTimeoutError,
+} from "./lock.js";
 import { publishJob, PUBLISH_LOCK_STALE_MS } from "./publisher.js";
 import { intIn, isoMs, num } from "./repos/common.js";
 import { storeInternalsOf } from "./store.js";
@@ -30,6 +40,15 @@ import { NEVER_PRUNED_TABLES, PRUNE_POLICY, type Store, type StoreTable } from "
 export const ESPN_CACHE_PRUNE_MS = 7 * 24 * 60 * 60 * 1000;
 /** Roster and pool snapshots are kept 30 days (plan 06 §1.3). */
 export const SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * refresh_log rows superseded by a newer success are kept this long after they finished (the same
+ * 30 days as the snapshots and `ds_news`). Never deleted, at any age: a source's newest success — the
+ * dataset file G1, `eff status` and the server's connections read — and every row after it (the
+ * current failure streak `consecutiveFailures` counts and `latest` returns). Nothing reads an older
+ * row: before this rule the table grew by every publish forever (Stage C,
+ * store-refresh-log-unpruned-status-stall).
+ */
+export const REFRESH_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** The points_cache LRU bound (rows kept, newest by last write). */
 export const POINTS_CACHE_MAX_ROWS = 50_000;
 /**
@@ -55,6 +74,7 @@ export const PRUNE_TARGETS = Object.freeze([
   "roster_snapshot",
   "pool_snapshot",
   "espn_requests",
+  "refresh_log",
 ] as const satisfies readonly StoreTable[]);
 
 for (const t of PRUNE_TARGETS) {
@@ -69,6 +89,8 @@ export interface PruneOptions {
   readonly espnCacheMaxAgeMs?: number;
   readonly snapshotMaxAgeMs?: number;
   readonly requestRowTtlMs?: number;
+  /** How long superseded refresh_log rows are kept (default REFRESH_LOG_RETENTION_MS). */
+  readonly refreshLogMaxAgeMs?: number;
   readonly pointsCacheMaxRows?: number;
   /** Also sweep dataset debris, old backups and stale run directories (default true). */
   readonly files?: boolean;
@@ -80,6 +102,11 @@ export interface PruneOptions {
   readonly runTempDir?: string | null;
   /** How long a run directory must be untouched before it is swept (default RUN_TEMP_STALE_MS). */
   readonly runTempMaxAgeMs?: number;
+  /**
+   * How long the pre-migration rotation waits for the process-wide store lock before it skips this
+   * run (default LOCK_WAIT_MS).
+   */
+  readonly lockWaitMs?: number;
 }
 
 /** What was removed. */
@@ -193,6 +220,27 @@ function sweepRunTemp(tmp: string, nowMs: number, maxAgeMs: number): string[] {
   return removed.sort();
 }
 
+/**
+ * The pre-migration rotation under the process-wide store lock: a migration in another process
+ * writes its copy under that lock, so the rotation can never judge — and delete — a copy still being
+ * written. When the lock stays held past its wait (a migration or a backup running), the rotation is
+ * skipped this time: nothing is removed.
+ */
+function prunePreMigrationLocked(storePath: string, backupDir: string, waitMs: number): string[] {
+  let lock;
+  try {
+    lock = acquireLockSync(lockPathOf(storePath), waitMs);
+  } catch (e) {
+    if (e instanceof StoreLockTimeoutError) return [];
+    throw e;
+  }
+  try {
+    return prunePreMigrationBackups(backupDir);
+  } finally {
+    lock.release();
+  }
+}
+
 /** Runs one prune pass over an open store. */
 export function pruneStore(store: Store, opts: PruneOptions = {}): PruneReport {
   const internals = storeInternalsOf(store);
@@ -217,6 +265,12 @@ export function pruneStore(store: Store, opts: PruneOptions = {}): PruneReport {
     3650 * DAY,
     "requestRowTtlMs",
   );
+  const refreshAge = intIn(
+    opts.refreshLogMaxAgeMs ?? REFRESH_LOG_RETENTION_MS,
+    0,
+    3650 * DAY,
+    "refreshLogMaxAgeMs",
+  );
   const keep = intIn(
     opts.pointsCacheMaxRows ?? POINTS_CACHE_MAX_ROWS,
     0,
@@ -229,6 +283,7 @@ export function pruneStore(store: Store, opts: PruneOptions = {}): PruneReport {
     3650 * DAY,
     "runTempMaxAgeMs",
   );
+  const lockWait = intIn(opts.lockWaitMs ?? LOCK_WAIT_MS, 0, 10 * 60_000, "lockWaitMs");
   const tmp =
     opts.runTempDir === undefined
       ? layoutRunTempDir(store.path, internals.datasetDir, internals.backupDir)
@@ -256,6 +311,17 @@ export function pruneStore(store: Store, opts: PruneOptions = {}): PruneReport {
       nowMs - snapAge,
     ),
     espn_requests: del("espn_requests", "DELETE FROM espn_requests WHERE ts < ?", nowMs - reqTtl),
+    // superseded history only: a row below its source's newest success (so never that success, nor
+    // a failure after it — a source with no success keeps every row), finished before the cutoff.
+    // The age is the row's own ISO `finished_at` read back to exact epoch ms (julianday is SQLite's
+    // integer-ms clock over 86 400 000); a value SQLite cannot read is NULL, and NULL is never older.
+    refresh_log: del(
+      "refresh_log",
+      `DELETE FROM refresh_log
+       WHERE id < (SELECT MAX(c.id) FROM refresh_log AS c WHERE c.source = refresh_log.source AND c.ok = 1)
+         AND ROUND((julianday(finished_at) - 2440587.5) * 86400000.0) < ?`,
+      nowMs - refreshAge,
+    ),
   };
   const filesRemoved: string[] = [];
   const backupsRemoved: string[] = [];
@@ -295,7 +361,7 @@ export function pruneStore(store: Store, opts: PruneOptions = {}): PruneReport {
         filesRemoved.push(n);
       }
     }
-    backupsRemoved.push(...prunePreMigrationBackups(internals.backupDir));
+    backupsRemoved.push(...prunePreMigrationLocked(store.path, internals.backupDir, lockWait));
     backupsRemoved.push(...pruneWeeklyBackups(internals.backupDir));
     if (tmp !== null) tempRunsRemoved.push(...sweepRunTemp(tmp, nowMs, tempAge));
   }

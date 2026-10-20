@@ -2,9 +2,18 @@
 // exactly MIGRATION_001_TABLES and 002 (Phase 3, plan 10 §3.3) exactly MIGRATION_002_TABLES plus the
 // projection's three attribution columns, on a v1 store with its rows kept; a synthetic 003 runs
 // after a VACUUM INTO pre-migration backup (0600, holding the v2 data) under the process lock; a
-// failing migration rolls back whole; a store from a newer binary is refused (no down-migration);
-// backups beyond the last two versions are pruned; a second runner is a no-op.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+// failing migration rolls back whole and leaves no copy behind; one copy per version, of the last
+// two versions, is kept; a store from a newer binary is refused (no down-migration); a second runner
+// is a no-op.
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -33,7 +42,7 @@ import {
   STORE_TABLES,
   StoreVersionError,
 } from "../../src/store/types.js";
-import { openStore, ROOT, tempCache, type TempCache } from "./helpers/env.js";
+import { openPublisher, openStore, ROOT, tempCache, type TempCache } from "./helpers/env.js";
 
 let t: TempCache;
 beforeEach(() => {
@@ -238,7 +247,7 @@ describe("upgrading (plan 03 §7)", () => {
 });
 
 describe("pre-migration backup retention", () => {
-  it("keeps the newest two versions; a same-version second backup gets a suffix", () => {
+  it("keeps the newest copy of each of the newest two versions; a new copy's name always ranks newest", () => {
     const dir = t.backupDir;
     openStore(t).close(); // creates nothing in backups/, but the dir may not exist yet
     const mk = (name: string): void => {
@@ -250,16 +259,137 @@ describe("pre-migration backup retention", () => {
     mk("store.sqlite.bak-v3");
     mk("store.sqlite.bak-v3-1759752000000");
     mk("unrelated.txt");
-    expect(preMigrationBackupPath(dir, 3, 42)).toBe(path.join(dir, "store.sqlite.bak-v3-42"));
+    // a copy of a version that has one takes a suffix above every suffix it holds — even when the
+    // clock reads earlier (42) — so a rotation keeping a version's newest copy keeps the new one
+    expect(preMigrationBackupPath(dir, 3, 42)).toBe(
+      path.join(dir, "store.sqlite.bak-v3-1759752000001"),
+    );
+    expect(preMigrationBackupPath(dir, 3, 1_800_000_000_000)).toBe(
+      path.join(dir, "store.sqlite.bak-v3-1800000000000"),
+    );
+    expect(preMigrationBackupPath(dir, 2, 42)).toBe(path.join(dir, "store.sqlite.bak-v2-42"));
     expect(preMigrationBackupPath(dir, 4, 42)).toBe(path.join(dir, "store.sqlite.bak-v4"));
+    expect(() => preMigrationBackupPath(dir, 4, Number.NaN)).toThrow(RangeError);
     expect(KEEP_BACKUP_VERSIONS).toBe(2);
-    expect(prunePreMigrationBackups(dir)).toEqual(["store.sqlite.bak-v1"]);
+    // v1 is past the newest two versions; v3's bare copy is older than its suffixed one
+    expect(prunePreMigrationBackups(dir)).toEqual(["store.sqlite.bak-v1", "store.sqlite.bak-v3"]);
     expect(readdirSync(dir).sort()).toEqual([
       "store.sqlite.bak-v2",
-      "store.sqlite.bak-v3",
       "store.sqlite.bak-v3-1759752000000",
       "unrelated.txt",
     ]);
+    expect(prunePreMigrationBackups(dir)).toEqual([]);
     expect(prunePreMigrationBackups(path.join(dir, "missing"))).toEqual([]);
+  });
+
+  it("never removes a symlink's target or a directory, and a copy it cannot remove is left for the next rotation", () => {
+    const dir = t.backupDir;
+    mkdirSync(dir, { mode: 0o700, recursive: true });
+    const outside = path.join(t.root, "outside.sqlite");
+    writeFileSync(outside, "keep", { mode: 0o600 });
+    symlinkSync(outside, path.join(dir, "store.sqlite.bak-v1"));
+    mkdirSync(path.join(dir, "store.sqlite.bak-v2"));
+    writeFileSync(path.join(dir, "store.sqlite.bak-v2-5"), "x", { mode: 0o600 });
+    writeFileSync(path.join(dir, "store.sqlite.bak-v3"), "x", { mode: 0o600 });
+    writeFileSync(path.join(dir, "store.sqlite.bak-v4"), "x", { mode: 0o600 });
+    expect(prunePreMigrationBackups(dir)).toEqual(["store.sqlite.bak-v2-5"]);
+    expect(readFileSync(outside, "utf8")).toBe("keep");
+    expect(readdirSync(dir).sort()).toEqual([
+      "store.sqlite.bak-v1",
+      "store.sqlite.bak-v2",
+      "store.sqlite.bak-v3",
+      "store.sqlite.bak-v4",
+    ]);
+  });
+});
+
+// Stage C, store-failed-migration-backups-accumulate: openMigrated took a full VACUUM INTO copy before
+// every attempt and pruned only after a success, keeping every file of the newest two versions — so a
+// migration that kept failing (a lock still busy at BEGIN IMMEDIATE, SQLITE_FULL, a migration bug)
+// left one full copy per open: the server's start and each launchd job, every hour, until the disk
+// filled. Now a run that committed nothing removes its own copy, an attempt removes the earlier copies
+// of the version it migrates from before it takes its own, and the rotation keeps one per version.
+describe("a migration that keeps failing leaves no copies behind (one copy per version at most)", () => {
+  const preCopies = (): string[] =>
+    (existsSync(t.backupDir) ? readdirSync(t.backupDir) : [])
+      .filter((n) => n.includes(".bak-v"))
+      .sort();
+
+  it("24 hourly wakes of a failing migration: no copy remains, the store keeps its version and rows", () => {
+    seedCurrent();
+    for (let hour = 0; hour < 24; hour++) {
+      t.clock.advance(3_600_000);
+      expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003_FAILS] })).toThrow(
+        /boom mid-migration/,
+      );
+      expect(preCopies()).toEqual([]);
+    }
+    const db = new DatabaseSync(t.storePath, { readOnly: true });
+    expect(readSchemaVersion(db)).toBe(BIN);
+    db.close();
+    // the refresh process opens the store the same way (openPublisher → openMigrated)
+    expect(() => openPublisher(t, { migrations: [...MIGRATIONS, M003_FAILS] })).toThrow(
+      /boom mid-migration/,
+    );
+    expect(preCopies()).toEqual([]);
+    // the fixed migration then takes exactly one copy, holding the current data
+    const s = openStore(t, {}, { migrations: [...MIGRATIONS, M003] });
+    expect(s.schemaVersion).toBe(BIN + 1);
+    expect(s.repos.probeLog.recent(5)).toHaveLength(1);
+    s.close();
+    expect(preCopies()).toEqual([`store.sqlite.bak-v${String(BIN)}`]);
+    const b = new DatabaseSync(path.join(t.backupDir, `store.sqlite.bak-v${String(BIN)}`), {
+      readOnly: true,
+    });
+    expect(readSchemaVersion(b)).toBe(BIN);
+    expect((b.prepare("SELECT COUNT(*) AS n FROM probe_log").get() as { n: number }).n).toBe(1);
+    b.close();
+  });
+
+  it("a run that committed a step keeps its copy (that step cannot be undone without it)", () => {
+    seedCurrent();
+    const M004_FAILS: Migration = { ...M003_FAILS, version: BIN + 2 };
+    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003, M004_FAILS] })).toThrow(
+      /boom mid-migration/,
+    );
+    const db = new DatabaseSync(t.storePath, { readOnly: true });
+    expect(readSchemaVersion(db)).toBe(BIN + 1);
+    db.close();
+    expect(preCopies()).toEqual([`store.sqlite.bak-v${String(BIN)}`]);
+    // the next attempt starts from v3: its own copy of v3 goes when it fails; the v2 copy stays
+    t.clock.advance(3_600_000);
+    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003, M004_FAILS] })).toThrow(
+      /boom mid-migration/,
+    );
+    expect(preCopies()).toEqual([`store.sqlite.bak-v${String(BIN)}`]);
+  });
+
+  it("copies left by killed attempts (or by builds before this rule) are replaced by the next attempt's", () => {
+    seedCurrent();
+    mkdirSync(t.backupDir, { mode: 0o700, recursive: true });
+    // what a SIGKILLed attempt — or the old code's failed ones — left: copies of the version (v2)
+    for (const n of ["", "-1760000000000", "-1760003600000"])
+      writeFileSync(path.join(t.backupDir, `store.sqlite.bak-v${String(BIN)}${n}`), "stale", {
+        mode: 0o600,
+      });
+    writeFileSync(path.join(t.backupDir, "store.sqlite.bak-v1"), "older version", { mode: 0o600 });
+    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003_FAILS] })).toThrow(
+      /boom mid-migration/,
+    );
+    // the failed attempt removed them before its own copy, then its own copy: v1's stays
+    expect(preCopies()).toEqual(["store.sqlite.bak-v1"]);
+    for (const n of ["", "-1760000000000"])
+      writeFileSync(path.join(t.backupDir, `store.sqlite.bak-v${String(BIN)}${n}`), "stale", {
+        mode: 0o600,
+      });
+    const s = openStore(t, {}, { migrations: [...MIGRATIONS, M003] });
+    s.close();
+    // one copy of v2, the fresh one (a database holding the data, not a leftover)
+    expect(preCopies()).toEqual(["store.sqlite.bak-v1", `store.sqlite.bak-v${String(BIN)}`]);
+    const b = new DatabaseSync(path.join(t.backupDir, `store.sqlite.bak-v${String(BIN)}`), {
+      readOnly: true,
+    });
+    expect((b.prepare("SELECT COUNT(*) AS n FROM probe_log").get() as { n: number }).n).toBe(1);
+    b.close();
   });
 });

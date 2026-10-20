@@ -1,14 +1,16 @@
 // prune.test.ts — `eff store prune` (plan 06 §1.3; plan 01 §5.5, §5.8; T-07): each rule (ESPN cache past
 // its longest finite hard limit, snapshots older than 30 days, the bounded points_cache LRU,
-// espn_requests past 48 h, dataset debris and unnamable files, backups beyond two versions / four
-// weeks, the run directories a killed refresh left under <cache>/tmp) — and the never-pruned tables
-// are untouched: same rows after, and the statement trace shows no DELETE/UPDATE on any of them
-// (property over random contents).
+// espn_requests past 48 h, refresh_log history superseded more than 30 days ago — every source's
+// newest success and the rows after it kept —, dataset debris and unnamable files, backups beyond two
+// versions (one copy each, rotated under the process lock) / four weeks, the run directories a killed
+// refresh left under <cache>/tmp) — and the never-pruned tables are untouched: same rows after, and
+// the statement trace shows no DELETE/UPDATE on any of them (property over random contents).
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
+  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -18,11 +20,13 @@ import { constants as C, DatabaseSync } from "node:sqlite";
 import fc from "fast-check";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTempDir } from "../../src/config/paths.js";
+import { lockPathOf } from "../../src/store/lock.js";
 import {
   ESPN_CACHE_PRUNE_MS,
   POINTS_CACHE_MAX_ROWS,
   PRUNE_TARGETS,
   pruneStore,
+  REFRESH_LOG_RETENTION_MS,
   RUN_TEMP_STALE_MS,
   RUN_TEMP_WALK_MAX,
   SNAPSHOT_RETENTION_MS,
@@ -189,6 +193,7 @@ describe("pruneStore", () => {
       roster_snapshot: 1,
       pool_snapshot: 1,
       espn_requests: 1,
+      refresh_log: 0,
     });
     expect(s.repos.espnCache.get("edge")).not.toBeNull();
     expect(s.repos.pointsCache.get("l4", "s")).toBe("{}");
@@ -449,7 +454,175 @@ describe("pruneStore", () => {
     expect(() => pruneStore(s, { now: "later" })).toThrow(RangeError);
     expect(() => pruneStore(s, { espnCacheMaxAgeMs: -1 })).toThrow(RangeError);
     expect(() => pruneStore(s, { pointsCacheMaxRows: 1.5 })).toThrow(RangeError);
+    expect(() => pruneStore(s, { refreshLogMaxAgeMs: -1 })).toThrow(RangeError);
+    expect(() => pruneStore(s, { lockWaitMs: 1.5 })).toThrow(RangeError);
     expect(() => pruneStore({} as Store)).toThrow(/not an open store/);
     expect(pruneStore(s, { now: iso(NOW), files: false }).rows.espn_cache).toBe(0);
+  });
+});
+
+// Stage C, store-refresh-log-unpruned-status-stall: one refresh_log row per publish (≈ 390 a day in
+// season) and nothing deleted them — the table every G1 call reads grew for ever. Now superseded
+// history past REFRESH_LOG_RETENTION_MS goes; what anything reads stays: each source's newest success
+// (the file G1, `eff status` and the dataset connections serve) and every row after it (the failure
+// streak `consecutiveFailures` counts; `latest` returns its newest).
+describe("refresh_log history (superseded rows past the retention)", () => {
+  /** Inserts one row as the publisher writes it; returns its id. */
+  function row(
+    source: string,
+    ok: boolean,
+    finishedMs: number,
+    finishedAt = iso(finishedMs),
+  ): number {
+    const db = new DatabaseSync(t.storePath);
+    try {
+      return Number(
+        db
+          .prepare(
+            `INSERT INTO refresh_log (source, file, file_version, release_updated_at, seasons_json, rows,
+               columns_hash, started_at, finished_at, ok, error, checked_at)
+             VALUES (?, ?, ?, NULL, '[2026]', 1, 'h', ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            source,
+            ok ? `/c/${source}.sqlite` : null,
+            ok ? `v${String(finishedMs)}` : null,
+            finishedAt,
+            finishedAt,
+            ok ? 1 : 0,
+            ok ? null : "UPSTREAM_UNAVAILABLE",
+            finishedAt,
+          ).lastInsertRowid,
+      );
+    } finally {
+      db.close();
+    }
+  }
+  const ids = (): number[] => {
+    const db = new DatabaseSync(t.storePath, { readOnly: true });
+    try {
+      return (db.prepare("SELECT id FROM refresh_log ORDER BY id").all() as { id: number }[]).map(
+        (r) => r.id,
+      );
+    } finally {
+      db.close();
+    }
+  };
+  /** Everything a reader of refresh_log sees, per source. */
+  const reads = (sources: readonly string[]) =>
+    sources.map((src) => ({
+      current: s.repos.refreshLog.current().find((r) => r.source === src) ?? null,
+      latest: s.repos.refreshLog.latest(src as never),
+      failures: s.repos.refreshLog.consecutiveFailures(src as never),
+    }));
+
+  it("drops superseded rows past 30 days; keeps the newest success at any age and every row after it", () => {
+    const old = NOW - 90 * DAY;
+    // injuries: old history, then its newest success (old too), then a failure streak (old)
+    const injOld1 = row("nflverse:injuries", true, old);
+    const injOld2 = row("nflverse:injuries", false, old + DAY);
+    const injCurrent = row("nflverse:injuries", true, old + 2 * DAY);
+    const injStreak1 = row("nflverse:injuries", false, old + 3 * DAY);
+    const injStreak2 = row("nflverse:injuries", false, NOW - DAY);
+    // news: hourly history; superseded rows inside the window stay, older ones go
+    const newsOld = row("news:espn", true, NOW - 31 * DAY);
+    const newsEdge = row("news:espn", true, NOW - REFRESH_LOG_RETENTION_MS); // exactly 30 days: kept
+    const newsRecent = row("news:espn", false, NOW - 2 * DAY);
+    const newsCurrent = row("news:espn", true, NOW - 60_000);
+    // a source that never succeeded keeps every row (they are its streak)
+    const oddsOld = row("odds:the_odds_api", false, old);
+    // an id this build does not know follows the same rule
+    const retiredOld = row("retired:source", true, old);
+    const retiredCurrent = row("retired:source", true, old + DAY);
+    // a superseded row whose finished_at SQLite cannot read is never judged older
+    const unreadable = row(
+      "sleeper:trending",
+      true,
+      NOW - 400 * DAY,
+      "Thu, 01 Oct 2025 00:00:00 GMT",
+    );
+    const trendingCurrent = row("sleeper:trending", true, NOW - 60_000);
+    const sources = ["nflverse:injuries", "news:espn", "odds:the_odds_api", "sleeper:trending"];
+    // the reads every consumer makes before the prune …
+    const before = reads(sources);
+    expect(before[0]?.failures).toBe(2);
+    expect(before[2]?.failures).toBe(1);
+    const report = pruneStore(s, { files: false });
+    expect(report.rows.refresh_log).toBe(4);
+    expect(ids()).toEqual(
+      [
+        injCurrent,
+        injStreak1,
+        injStreak2,
+        newsEdge,
+        newsRecent,
+        newsCurrent,
+        oddsOld,
+        retiredCurrent,
+        unreadable,
+        trendingCurrent,
+      ].sort((a, b) => a - b),
+    );
+    expect([injOld1, injOld2, newsOld, retiredOld].every((i) => !ids().includes(i))).toBe(true);
+    // … are the reads after it
+    expect(reads(sources)).toEqual(before);
+    // a second pass finds nothing more; a shorter retention is an option
+    expect(pruneStore(s, { files: false }).rows.refresh_log).toBe(0);
+    expect(pruneStore(s, { files: false, refreshLogMaxAgeMs: DAY }).rows.refresh_log).toBe(2);
+    expect(ids()).not.toContain(newsEdge);
+    expect(ids()).not.toContain(newsRecent);
+    expect(REFRESH_LOG_RETENTION_MS).toBe(30 * DAY);
+  });
+
+  it("the served dataset keeps its stamp: a published file's row is its source's newest success", async () => {
+    const pub = openPublisher(t);
+    await publishTables(pub, "nflverse:injuries", "v1", emptyTables("nflverse:injuries"));
+    pub.close();
+    const stamp = s.datasets.injuries.reports(2026, 3, null).stamp;
+    t.clock.set(NOW + 400 * DAY); // far past the retention: the row is old, never superseded
+    expect(pruneStore(s, { files: false }).rows.refresh_log).toBe(0);
+    expect(s.datasets.injuries.reports(2026, 3, null).stamp).toEqual(stamp);
+  });
+});
+
+// Stage C, store-failed-migration-backups-accumulate: the rotation kept every copy of the newest two
+// versions, so the full copies a failing migration wrote on every open (the builds before the fix)
+// stayed until two more migrations — eff prune removed none. Now it keeps the newest copy of each,
+// under the process-wide store lock a migration writes its copy under.
+describe("pre-migration copies (one per version, under the process lock)", () => {
+  const mk = (n: string): void => {
+    mkdirSync(t.backupDir, { recursive: true, mode: 0o700 });
+    writeFileSync(path.join(t.backupDir, n), "x", { mode: 0o600 });
+  };
+
+  it("24 failed attempts' copies of a version: the rotation keeps the newest", () => {
+    mk("store.sqlite.bak-v1");
+    const suffixes = Array.from({ length: 23 }, (_, h) => 1_760_000_000_000 + h * 3_600_000);
+    for (const ms of suffixes) mk(`store.sqlite.bak-v1-${String(ms)}`);
+    mk("store.sqlite.bak-v2");
+    const report = pruneStore(s, { files: true, runTempDir: null });
+    expect(report.backups_removed).toHaveLength(23);
+    expect(readdirSync(t.backupDir).sort()).toEqual([
+      `store.sqlite.bak-v1-${String(suffixes[22])}`,
+      "store.sqlite.bak-v2",
+    ]);
+    expect(pruneStore(s, { runTempDir: null }).backups_removed).toEqual([]);
+  });
+
+  it("while another live process holds the store lock (a migration taking its copy), it removes no copy", () => {
+    mk("store.sqlite.bak-v1");
+    mk("store.sqlite.bak-v1-1760000000000");
+    writeFileSync(lockPathOf(t.storePath), `${String(process.pid)} ${iso(NOW)}\n`, { mode: 0o600 });
+    try {
+      const report = pruneStore(s, { runTempDir: null, lockWaitMs: 50 });
+      expect(report.backups_removed).toEqual([]);
+      expect(report.rows.espn_cache).toBe(0); // the rest of the prune ran
+      expect(readdirSync(t.backupDir).length).toBe(2);
+    } finally {
+      rmSync(lockPathOf(t.storePath), { force: true });
+    }
+    expect(pruneStore(s, { runTempDir: null }).backups_removed).toEqual(["store.sqlite.bak-v1"]);
+    // the rotation released the lock it took
+    expect(existsSync(lockPathOf(t.storePath))).toBe(false);
   });
 });

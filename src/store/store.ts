@@ -9,7 +9,13 @@ import type { DatabaseSync } from "node:sqlite";
 import { assertSecureFile, ensureSecureDir, PathSecurityError } from "../config/paths.js";
 import type { Clock } from "../domain/clock.js";
 import type { NflPlayersReader } from "../domain/crosswalk/types.js";
-import { preMigrationBackupPath, prunePreMigrationBackups, vacuumInto } from "./backup.js";
+import {
+  discardPreMigrationCopy,
+  preMigrationBackupPath,
+  prunePreMigrationBackups,
+  removePreMigrationCopies,
+  vacuumInto,
+} from "./backup.js";
 import { DatasetConnections } from "./datasets/connections.js";
 import { createReaders } from "./datasets/readers.js";
 import { acquireLock, acquireLockSync, lockPathOf } from "./lock.js";
@@ -124,10 +130,25 @@ export function prepareStoreFile(storePath: string): void {
   }
 }
 
+/** The store's schema version, or null when it cannot be read (the caller then keeps what it has). */
+function schemaVersionOrNull(db: DatabaseSync): number | null {
+  try {
+    return readSchemaVersion(db);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Opens (and when asked, migrates) a store-role connection: refuses a newer schema, refuses a
  * pending migration without `migrate`, else — under the process lock — backs up (version > 0) by
- * VACUUM INTO and migrates forward, pruning backups beyond the last two versions.
+ * VACUUM INTO and migrates forward, pruning backups beyond the last two versions. One copy per
+ * version (Stage C, store-failed-migration-backups-accumulate: a migration that kept failing wrote a
+ * full copy on every open — the server and each launchd job — and nothing removed them): the earlier
+ * copies of the version are removed before the new one is taken (removePreMigrationCopies says why
+ * that is safe), and a run that committed nothing removes its own copy — the store still reads that
+ * version, intact, so the copy duplicates it. A run that committed a step keeps its copy: that step
+ * cannot be undone without it.
  */
 export function openMigrated(opts: {
   readonly path: string;
@@ -151,15 +172,21 @@ export function openMigrated(opts: {
         v = readSchemaVersion(db);
         if (v > target) throw new StoreVersionError(v, target);
         if (v < target) {
+          let copy: string | null = null;
           if (v > 0) {
             ensureSecureDir(opts.backupDir, { create: true, what: "backup directory" });
-            vacuumInto(
-              db,
-              preMigrationBackupPath(opts.backupDir, v, opts.clock.nowMs()),
-              opts.guard,
-            );
+            removePreMigrationCopies(opts.backupDir, v);
+            copy = preMigrationBackupPath(opts.backupDir, v, opts.clock.nowMs());
+            vacuumInto(db, copy, opts.guard);
           }
-          applyMigrations(db, opts.migrations, () => opts.clock.nowIso());
+          const from = v;
+          try {
+            applyMigrations(db, opts.migrations, () => opts.clock.nowIso());
+          } catch (e) {
+            // nothing committed (the store still reads `from`): the copy duplicates the intact store
+            if (copy !== null && schemaVersionOrNull(db) === from) discardPreMigrationCopy(copy);
+            throw e;
+          }
           if (v > 0) prunePreMigrationBackups(opts.backupDir);
           v = readSchemaVersion(db);
         }

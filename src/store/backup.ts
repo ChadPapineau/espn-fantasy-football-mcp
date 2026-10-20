@@ -1,9 +1,11 @@
 // backup.ts — consistent store backups (plan 03 L7 / §7; T-15(b): a file copy of a WAL database
 // with another process live is not a backup): `VACUUM INTO` a fresh 0600 file — one read
 // transaction, so another process's committed-but-uncheckpointed WAL rows are included — run under
-// the process-wide store lock by the caller. Pre-migration backups keep the last two versions
-// (plan 03 §7); the weekly `store backup` keeps four (plan 06 §1.3). Ported from sibling @cf3b015,
-// adapted (VACUUM INTO only, as plan 03 §7 names it).
+// the process-wide store lock by the caller. Pre-migration backups keep ONE copy per version — the
+// newest — of the last two versions (plan 03 §7 names one `store.sqlite.bak-v<old>` per version: a
+// migration that kept failing wrote a full copy on every attempt and nothing removed them — Stage C,
+// store-failed-migration-backups-accumulate); the weekly `store backup` keeps four (plan 06 §1.3).
+// Ported from sibling @cf3b015, adapted (VACUUM INTO only, as plan 03 §7 names it).
 import { lstatSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -45,41 +47,118 @@ export function vacuumInto(db: DatabaseSync, dest: string, guard: StatementGuard
 }
 
 const PRE_RE = new RegExp(
-  `^${STORE_FILE_NAME.replace(".", "\\.")}\\.bak-v(\\d{1,9})(?:-\\d{1,16})?$`,
+  `^${STORE_FILE_NAME.replace(".", "\\.")}\\.bak-v(\\d{1,9})(?:-(\\d{1,16}))?$`,
 );
 
-/** `<backups>/store.sqlite.bak-v<old>` (a `-<ms>` suffix when one exists already). */
-export function preMigrationBackupPath(backupDir: string, version: number, nowMs: number): string {
-  const base = path.join(backupDir, `${STORE_FILE_NAME}.bak-v${String(version)}`);
-  return exists(base) ? `${base}-${String(nowMs)}` : base;
+/** The largest `-<ms>` suffix PRE_RE accepts and Number holds exactly. */
+const PRE_SUFFIX_MAX = Math.min(Number.MAX_SAFE_INTEGER, 10 ** 16 - 1);
+
+/** One pre-migration copy in the backup directory: its version and its name's rank. */
+interface PreMigrationCopy {
+  readonly name: string;
+  readonly version: number;
+  /** -1 for the bare name (a version's first copy); else the `-<ms>` suffix. */
+  readonly rank: number;
 }
 
-/** Deletes pre-migration backups older than the newest KEEP_BACKUP_VERSIONS versions; returns names. */
-export function prunePreMigrationBackups(backupDir: string): string[] {
+/** The pre-migration copies in `backupDir` (none when it cannot be read). */
+function preMigrationCopies(backupDir: string): PreMigrationCopy[] {
   let names: string[];
   try {
     names = readdirSync(backupDir);
   } catch {
     return [];
   }
-  const byVersion = new Map<number, string[]>();
-  for (const n of names) {
-    const m = PRE_RE.exec(n);
+  const out: PreMigrationCopy[] = [];
+  for (const name of names) {
+    const m = PRE_RE.exec(name);
     if (m?.[1] === undefined) continue;
-    const v = Number.parseInt(m[1], 10);
-    byVersion.set(v, [...(byVersion.get(v) ?? []), n]);
+    out.push({
+      name,
+      version: Number.parseInt(m[1], 10),
+      rank: m[2] === undefined ? -1 : Number(m[2]),
+    });
   }
-  const keep = new Set([...byVersion.keys()].sort((a, b) => b - a).slice(0, KEEP_BACKUP_VERSIONS));
+  return out;
+}
+
+/** Removes a regular file of ours (never a symlink's target, never a directory); true when gone. */
+function removeCopy(backupDir: string, name: string): boolean {
+  const p = path.join(backupDir, name);
+  try {
+    if (!lstatSync(p).isFile()) return false;
+    rmSync(p, { force: true });
+    return true;
+  } catch {
+    return false; // a copy that cannot be removed now is left for the next rotation
+  }
+}
+
+/**
+ * `<backups>/store.sqlite.bak-v<old>` while the directory holds no copy of that version; otherwise
+ * `-<ms>` with `<ms>` strictly above every suffix the version already holds (`nowMs`, or one more
+ * than the largest when the clock reads earlier) — so the name of the copy written now always ranks
+ * newest, and a rotation keeping the newest copy of a version can never delete it in favour of an
+ * older one (the weekly backups' rule, weeklyBackupPath). Throws when no such name exists.
+ */
+export function preMigrationBackupPath(backupDir: string, version: number, nowMs: number): string {
+  if (!Number.isFinite(nowMs)) throw new RangeError("store: the backup clock is not a time");
+  const base = path.join(backupDir, `${STORE_FILE_NAME}.bak-v${String(version)}`);
+  const same = preMigrationCopies(backupDir).filter((c) => c.version === version);
+  if (same.length === 0 && !exists(base)) return base;
+  const suffix = Math.max(Math.trunc(nowMs), ...same.map((c) => c.rank + 1));
+  if (!Number.isSafeInteger(suffix) || suffix > PRE_SUFFIX_MAX)
+    throw new RangeError("store: no pre-migration backup name ranks after the existing copies");
+  return `${base}-${String(suffix)}`;
+}
+
+/**
+ * Removes every pre-migration copy of `version` (regular files only); returns the names removed.
+ * Run under the process lock by a migration from `version`, BEFORE it takes its own copy: the store
+ * it is about to copy still reads `version`, so each of those copies is this store at that same
+ * version, earlier — left by an attempt that failed or was killed, or the copy a restore started
+ * from (a restore copies the newest backup over the store: src/cli/store-access.ts restoreSteps) —
+ * and the copy taken now holds what it held and every row written since (less what `store prune`
+ * removed by its own rules — a pre-migration copy undoes a migration; the weekly backups are the
+ * archive). Removing them first also frees their space for that copy (a full disk is one way a
+ * migration fails).
+ */
+export function removePreMigrationCopies(backupDir: string, version: number): string[] {
   const removed: string[] = [];
-  for (const [v, files] of byVersion) {
-    if (keep.has(v)) continue;
-    for (const f of files) {
-      const p = path.join(backupDir, f);
-      if (lstatSync(p).isFile()) {
-        rmSync(p, { force: true });
-        removed.push(f);
-      }
-    }
+  for (const c of preMigrationCopies(backupDir))
+    if (c.version === version && removeCopy(backupDir, c.name)) removed.push(c.name);
+  return removed.sort();
+}
+
+/**
+ * Removes the copy a migration attempt took when the attempt changed nothing (its store still reads
+ * the version the copy holds): a duplicate of the intact live store, never left behind. Best effort —
+ * a copy that cannot be removed now is an older copy of its version for the next rotation.
+ */
+export function discardPreMigrationCopy(file: string): void {
+  removeCopy(path.dirname(file), path.basename(file));
+}
+
+/**
+ * Keeps the NEWEST copy (by name rank) of each of the newest KEEP_BACKUP_VERSIONS versions and
+ * deletes every other pre-migration copy; returns the names removed. A version's older copies were
+ * written by attempts that never migrated from it (or by the builds before this rule, one per failed
+ * attempt) — the newest is the one taken before the migration that committed. Never takes the
+ * process lock itself: a migration runs it under the lock it holds, `store prune` takes it first.
+ */
+export function prunePreMigrationBackups(backupDir: string): string[] {
+  const copies = preMigrationCopies(backupDir);
+  const versions = [...new Set(copies.map((c) => c.version))].sort((a, b) => b - a);
+  const keptVersions = new Set(versions.slice(0, KEEP_BACKUP_VERSIONS));
+  const newest = new Map<number, PreMigrationCopy>();
+  for (const c of copies) {
+    const best = newest.get(c.version);
+    if (best === undefined || c.rank > best.rank) newest.set(c.version, c);
+  }
+  const removed: string[] = [];
+  for (const c of copies) {
+    if (keptVersions.has(c.version) && newest.get(c.version) === c) continue;
+    if (removeCopy(backupDir, c.name)) removed.push(c.name);
   }
   return removed.sort();
 }

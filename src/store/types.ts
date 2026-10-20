@@ -174,6 +174,8 @@ export const PRUNE_POLICY: Readonly<Partial<Record<StoreTable, string>>> = Objec
   pool_snapshot: "older than 30 days",
   espn_requests:
     "older than 48 hours (ESPN_REQUEST_ROW_TTL_MS: the daily caps and the breaker/304 counters read them)",
+  refresh_log:
+    "superseded rows finished more than 30 days ago (each source's newest success and every row after it are kept: the current file and the failure streak)",
 });
 
 /** The write class of each table (schema_version is migration-only). */
@@ -324,12 +326,18 @@ export interface RefreshLogRow {
   readonly checked_at: IsoInstant;
 }
 
-/** refresh_log (required). */
+/**
+ * refresh_log (required). Every read is a fixed number of index seeks, whatever the history holds
+ * (G1 reads them once per listed source per call — plan 03 §1.2; src/store/repos/ops.ts
+ * REFRESH_LOG_SQL); `store prune` drops superseded rows past REFRESH_LOG_RETENTION_MS.
+ */
 export interface RefreshLogRepository {
   record(row: RefreshLogRow): void;
-  /** The newest successful row per source (what the server should have open). */
+  /** The newest successful row of each known dataset source (what the server should have open). */
   current(): readonly RefreshLogRow[];
+  /** The newest row of `source`, success or failure. */
   latest(source: DatasetSourceId): RefreshLogRow | null;
+  /** The failures recorded after `source`'s newest success. */
   consecutiveFailures(source: DatasetSourceId): number;
 }
 
