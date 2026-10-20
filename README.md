@@ -1019,7 +1019,7 @@ Nobody could establish how long `espn_s2` lives — community reports say "weeks
 | Key | Scope | Default | In `config.json` | Secret | Meaning |
 |---|---|---|---|---|---|
 | `ESPN_LEAGUE_ID` | server | — | yes | no | Numeric ESPN league id from the league URL. Required; personal — never commit a real value. |
-| `ESPN_SEASON` | server | the current NFL season | yes | no | Season year to read (2018 or later). |
+| `ESPN_SEASON` | server | the current NFL season | yes | no | Season year to read (2018 or later). Unset, it is the calendar year from July 1, which ESPN serves only once the league's manager renews the league; until then last season's year still reads. |
 | `ESPN_TEAM_ID` | server | — | yes | no | Your team id in the league; recorded by `eff setup` from the stored SWID. |
 | `EFF_CONFIG_DIR` | server | `~/.config/espn-fantasy-football-mcp` | no | no | Config directory (0700; config.json, session.json). Env only; client-config installs only. |
 | `EFF_CACHE_DIR` | server | `~/.cache/espn-fantasy-football-mcp` | no | no | Cache directory (0700; store.sqlite, datasets/, backups/). Env only; client-config installs only. |

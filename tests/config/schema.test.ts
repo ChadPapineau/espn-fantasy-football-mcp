@@ -22,6 +22,7 @@ import {
   UNKNOWN_FILE_KEYS_WARNING,
   configKeysByScope,
   defaultSeason,
+  seasonMayAwaitRenewal,
   envExampleKeys,
   envExampleNames,
   identifierValues,
@@ -212,6 +213,54 @@ describe("season, team, enums, port", () => {
     expect(defaultSeason(Date.parse("2026-07-01T00:00:00Z"))).toBe(2026);
     expect(defaultSeason(Date.parse("2027-01-10T00:00:00Z"))).toBe(2026);
     expect(() => defaultSeason(Number.NaN)).toThrow(RangeError);
+  });
+  // Stage C finding league-rollover-not-found-misdiagnosed: from July 1 the default is a season ESPN
+  // serves for a league only once its manager renews it (research 03 §A.4: until then a 404)
+  it("a defaulted new season may await the league's renewal from July 1 until October 1 (UTC)", () => {
+    const at = (iso: string, env: Record<string, string> = {}) => {
+      const nowMs = Date.parse(iso);
+      const c = loadConfig(input({ env: { ESPN_LEAGUE_ID: LEAGUE, ...env }, nowMs }));
+      return { season: c.season, pending: seasonMayAwaitRenewal(c, nowMs) };
+    };
+    expect(at("2027-07-15T15:00:00Z")).toEqual({ season: 2027, pending: true });
+    expect(at("2027-07-01T00:00:00Z")).toEqual({ season: 2027, pending: true });
+    expect(at("2027-09-30T23:59:59.999Z")).toEqual({ season: 2027, pending: true });
+    expect(at("2027-10-01T00:00:00Z")).toEqual({ season: 2027, pending: false });
+    expect(at("2027-06-30T23:59:59.999Z")).toEqual({ season: 2026, pending: false });
+    expect(at("2028-01-10T00:00:00Z")).toEqual({ season: 2027, pending: false });
+    // an operator-set season is meant as set: its 404 says what it says
+    expect(at("2027-07-15T15:00:00Z", { ESPN_SEASON: "2027" })).toEqual({
+      season: 2027,
+      pending: false,
+    });
+  });
+  it("a season set in config.json, a stale defaulted season, or a non-finite clock never awaits renewal", () => {
+    const july = Date.parse("2027-07-15T15:00:00Z");
+    const fromFile = loadConfig(input({ file: { ESPN_SEASON: "2027" }, nowMs: july }));
+    expect(fromFile.origins.ESPN_SEASON).toBe("file");
+    expect(seasonMayAwaitRenewal(fromFile, july)).toBe(false);
+    // a server started on June 30 still holds last season, which ESPN serves: nothing is pending
+    const june = loadConfig(input({ nowMs: Date.parse("2027-06-30T12:00:00Z") }));
+    expect(june.season).toBe(2026);
+    expect(seasonMayAwaitRenewal(june, july)).toBe(false);
+    const defaulted = loadConfig(input({ nowMs: july }));
+    expect(seasonMayAwaitRenewal(defaulted, Number.NaN)).toBe(false);
+    expect(seasonMayAwaitRenewal(defaulted, Number.POSITIVE_INFINITY)).toBe(false);
+  });
+  it("property: awaiting renewal only ever names the calendar default, from its July 1 to its October 1", () => {
+    const START = Date.parse("2019-01-01T00:00:00Z");
+    const END = Date.parse("2035-01-01T00:00:00Z");
+    const origins = { ...loadConfig(input()).origins, ESPN_SEASON: "default" as const };
+    fc.assert(
+      fc.property(fc.integer({ min: START, max: END }), (nowMs) => {
+        const season = defaultSeason(nowMs);
+        const inWindow = nowMs >= Date.UTC(season, 6, 1) && nowMs < Date.UTC(season, 9, 1);
+        expect(seasonMayAwaitRenewal({ season, origins }, nowMs)).toBe(inWindow);
+        for (const other of [season - 1, season + 1])
+          expect(seasonMayAwaitRenewal({ season: other, origins }, nowMs)).toBe(false);
+      }),
+      { numRuns: 500 },
+    );
   });
   it.each([
     ["2018", 2018],

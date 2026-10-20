@@ -90,14 +90,45 @@ export const TEAM_ID_MAX = 999;
 export const SETUP_PORT_DEFAULT = 8790;
 export const SETUP_PORT_RANGE = Object.freeze({ min: 8790, max: 8799 });
 
+/** The UTC month (0-based) from which `defaultSeason` names the new season: July. */
+export const SEASON_ROLLOVER_MONTH = 6;
+/**
+ * The UTC month (0-based) by which a league that plays the new season has been renewed on ESPN:
+ * October — the regular season is under way (see `seasonMayAwaitRenewal`).
+ */
+export const SEASON_RENEWAL_DEADLINE_MONTH = 9;
+
 /**
  * The season a call means when none is given: the calendar year from July on, else the previous
  * year (ESPN `seasonId` is the year the NFL season starts; plan 03 §7 re-records each August).
+ * From July 1 that is a season ESPN may not serve for the league yet — `seasonMayAwaitRenewal`.
  */
 export function defaultSeason(nowMs: number): number {
   if (!Number.isFinite(nowMs)) throw new RangeError("config: now must be finite");
   const d = new Date(nowMs);
-  return d.getUTCMonth() >= 6 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
+  return d.getUTCMonth() >= SEASON_ROLLOVER_MONTH ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
+}
+
+/**
+ * Whether ESPN may simply not serve the configured season of the league YET (Stage C finding
+ * league-rollover-not-found-misdiagnosed). Leagues are per-season objects (research 03 §A.4): ESPN
+ * creates a league's new season only when its manager renews the league — any day between ESPN
+ * opening the season and the draft, which can be late August — and until then every read of it 404s
+ * GENERAL_NOT_FOUND while the previous season (`season - 1`) is still served. So a 404 there does
+ * not mean the league id is wrong. True only when ESPN_SEASON is unset (the season is the calendar
+ * default — an operator-set season is meant as set), the season is the default at `nowMs` (a server
+ * started before July 1 still holds last season), and `nowMs` is before October 1 of that season
+ * (UTC): by then a league that plays it has been renewed, and a 404 says what it says.
+ */
+export function seasonMayAwaitRenewal(
+  config: Pick<LenientConfig, "season" | "origins">,
+  nowMs: number,
+): boolean {
+  if (config.origins.ESPN_SEASON !== "default" || !Number.isFinite(nowMs)) return false;
+  return (
+    config.season === defaultSeason(nowMs) &&
+    nowMs < Date.UTC(config.season, SEASON_RENEWAL_DEADLINE_MONTH, 1)
+  );
 }
 
 /** The read host used unless the operator overrides it (research 03 §A.1). */
@@ -258,7 +289,7 @@ const spec = (
 // prettier-ignore
 export const CONFIG_KEY_SPECS: readonly ConfigKeySpec[] = Object.freeze([
   spec("ESPN_LEAGUE_ID", "server", "Numeric ESPN league id from the league URL. Required; personal — never commit a real value.", null, { file: true }),
-  spec("ESPN_SEASON", "server", "Season year to read (2018 or later).", "the current NFL season", { file: true }),
+  spec("ESPN_SEASON", "server", "Season year to read (2018 or later). Unset, it is the calendar year from July 1, which ESPN serves only once the league's manager renews the league; until then last season's year still reads.", "the current NFL season", { file: true }),
   spec("ESPN_TEAM_ID", "server", "Your team id in the league; recorded by `eff setup` from the stored SWID.", null, { file: true }),
   spec("EFF_CONFIG_DIR", "server", "Config directory (0700; config.json, session.json). Env only; client-config installs only.", "~/.config/espn-fantasy-football-mcp"),
   spec("EFF_CACHE_DIR", "server", "Cache directory (0700; store.sqlite, datasets/, backups/). Env only; client-config installs only.", "~/.cache/espn-fantasy-football-mcp"),
