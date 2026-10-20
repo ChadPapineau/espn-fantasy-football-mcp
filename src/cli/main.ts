@@ -13,6 +13,7 @@ import { runCrosswalkRebuild } from "./crosswalk.js";
 import { doctor } from "./doctor.js";
 import { EXIT, UsageError } from "./exit.js";
 import { installLaunchd, uninstallLaunchd } from "./install-launchd.js";
+import { NO_INTERRUPTS, type Interrupts } from "./interrupt.js";
 import { tolerateClosedPipe, writeLine, type CliIo } from "./io.js";
 import { backup, prune } from "./maintenance.js";
 import { createNotifier } from "./notify.js";
@@ -289,11 +290,17 @@ export async function loadServe(): Promise<ServeFn | null> {
   return typeof fn === "function" ? (fn as ServeFn) : null;
 }
 
-/** Extra wiring for tests (never reachable from argv). */
+/** Extra wiring (never reachable from argv). */
 export interface MainDeps {
   readonly loadServe?: () => Promise<ServeFn | null>;
-  /** Aborts a running refresh or setup page (the entry wires SIGINT/SIGTERM to it). */
-  readonly signal?: AbortSignal;
+  /**
+   * The process's interrupt policy (src/cli/interrupt.ts; src/cli.ts passes it). A command claims
+   * SIGINT/SIGTERM for exactly the scope that honours cancellation: `refresh` for its run, `setup
+   * --page` while the page waits. Nothing else claims, so the first signal ends any other command
+   * by the default action (Stage C finding cli-first-signal-swallowed). Default: claims that never
+   * abort (in-process callers).
+   */
+  readonly interrupts?: Interrupts;
 }
 
 /**
@@ -332,7 +339,7 @@ export async function main(
   tolerateClosedPipe(io.stdout);
   tolerateClosedPipe(io.stderr);
   const bootLog = makeLogger(io, bootLevel(io.env));
-  const signal = deps.signal ?? new AbortController().signal;
+  const interrupts = deps.interrupts ?? NO_INTERRUPTS;
   try {
     const p = parseCommand(command, rest);
     switch (command) {
@@ -371,7 +378,7 @@ export async function main(
             serviceName: str(p, "service-name"),
             page: flag(p, "page"),
           },
-          { signal },
+          { interrupts },
         );
       case "selftest-read":
         return await selftestRead(io, { service: str(p, "service"), report: str(p, "report") });
@@ -457,21 +464,29 @@ export async function main(
     switch (command) {
       case "status":
         return await status(io, config, log, { json: flag(p, "json") });
-      case "refresh":
-        return await refresh(
-          io,
-          config,
-          log,
-          {
-            target: p.positionals[0],
-            seasons: str(p, "seasons"),
-            force: flag(p, "force"),
-            notify: flag(p, "notify"),
-            json: flag(p, "json"),
-            gameDayCadence: flag(p, "game-day-cadence"),
-          },
-          signal,
-        );
+      case "refresh": {
+        // the run honours cancellation (src/cli/refresh.ts): the step in flight ends at once and
+        // publishes nothing, no later step starts, exit 1. So it claims the signals for the run
+        const claim = interrupts.claim();
+        try {
+          return await refresh(
+            io,
+            config,
+            log,
+            {
+              target: p.positionals[0],
+              seasons: str(p, "seasons"),
+              force: flag(p, "force"),
+              notify: flag(p, "notify"),
+              json: flag(p, "json"),
+              gameDayCadence: flag(p, "game-day-cadence"),
+            },
+            claim.signal,
+          );
+        } finally {
+          claim.release();
+        }
+      }
       case "probe":
         return await probe(io, config, log, {
           hostOnly: flag(p, "host-only"),

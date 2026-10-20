@@ -5,8 +5,10 @@
 // or keychain item. No test reaches the network: a preload replaces fetch (no-network.cjs exits 98),
 // and EFF_TEST_STUBS=1 makes any network call or keychain load exit 99. launchctl is never run
 // (install-launchd --dry-run only). The preload is .cjs so tsconfig's allowJs never reads its
-// `globalThis.fetch =` as a declaration of the global (that retyped fetch tree-wide).
-import { spawn, spawnSync } from "node:child_process";
+// `globalThis.fetch =` as a declaration of the global (that retyped fetch tree-wide). SIGINT and
+// SIGTERM (Stage C finding cli-first-signal-swallowed): the first one ends a command that does not
+// claim it, by the signal; a scope that claims it (the setup page) stops cleanly on the first.
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
@@ -18,6 +20,7 @@ import {
   rmSync,
   symlinkSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -329,4 +332,128 @@ describe("eff (process)", () => {
     }
     expect(readFileSync(NO_NETWORK, "utf8")).toContain("exit(98)");
   });
+});
+
+// Stage C finding cli-first-signal-swallowed: the entry listened for SIGINT/SIGTERM for every
+// command — which takes Node's default exit away — while only a refresh and the setup page acted on
+// them, so the first Ctrl-C (or a launchd bootout's SIGTERM) to any other command did nothing and
+// only a second one ended it. Now only a scope that honours cancellation claims the signals
+// (src/cli/interrupt.ts): any other command ends on the first one, by the signal.
+describe("eff (process): SIGINT and SIGTERM", () => {
+  const delay = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
+  interface Started {
+    readonly child: ChildProcessWithoutNullStreams;
+    readonly out: () => string;
+    readonly exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+  }
+
+  /** Spawns `eff <args>` with stdin a pipe held open (nothing is ever written to it). */
+  function start(args: readonly string[], env: Record<string, string>, cwd: string): Started {
+    const child = spawn(process.execPath, argvFor(args, [NO_NETWORK]), { env, cwd });
+    let out = "";
+    child.stdout.on("data", (d: Buffer) => {
+      out += d.toString("utf8");
+    });
+    child.stderr.resume();
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve) => {
+        child.on("exit", (code, signal) => {
+          resolve({ code, signal });
+        });
+      },
+    );
+    return { child, out: () => out, exited };
+  }
+
+  /** Waits (bounded) until stdout shows `text`. */
+  async function waitFor(s: Started, text: string): Promise<void> {
+    for (let i = 0; i < 1800 && !s.out().includes(text); i++) await delay(50);
+    expect(s.out()).toContain(text);
+  }
+
+  /** The exit, or "alive" when the process still runs `ms` after the call. */
+  function exitWithin(
+    s: Started,
+    ms: number,
+  ): Promise<{ code: number | null; signal: NodeJS.Signals | null } | "alive"> {
+    return Promise.race([s.exited, delay(ms).then(() => "alive" as const)]);
+  }
+
+  function freePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const s = createServer();
+      s.on("error", reject);
+      s.listen({ host: "127.0.0.1", port: 0 }, () => {
+        const a = s.address();
+        const port = typeof a === "object" && a !== null ? a.port : 0;
+        s.close(() => {
+          resolve(port);
+        });
+      });
+    });
+  }
+
+  /** Whether 127.0.0.1:`port` can be bound now (the page let it go). */
+  function portFree(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const s = createServer();
+      s.on("error", () => {
+        resolve(false);
+      });
+      s.listen({ host: "127.0.0.1", port, exclusive: true }, () => {
+        s.close(() => {
+          resolve(true);
+        });
+      });
+    });
+  }
+
+  for (const sig of ["SIGINT", "SIGTERM"] as const)
+    it(`the first ${sig} ends a command that does not claim it (setup waiting at its prompt on a pipe), by the signal, nothing stored`, async () => {
+      const t = tempRoot();
+      const s = start(
+        ["setup", "--storage", "file"],
+        { ...t.env, ESPN_LEAGUE_ID: "0", EFF_TEST_STUBS: "1" },
+        t.dir,
+      );
+      try {
+        await waitFor(s, "SWID (visible as you type): ");
+        s.child.kill(sig);
+        // before the fix the process was still waiting here; only a second signal ended it
+        expect(await exitWithin(s, 10_000)).toEqual({ code: null, signal: sig });
+      } finally {
+        s.child.kill("SIGKILL");
+      }
+      expect(existsSync(path.join(t.config, "session.json"))).toBe(false);
+    }, 150_000);
+
+  it("a scope that claims the signals stops cleanly on the first one (setup --page): exit 1, nothing stored, the port free", async () => {
+    const t = tempRoot();
+    const port = await freePort();
+    const s = start(
+      ["setup", "--page"],
+      {
+        ...t.env,
+        ESPN_LEAGUE_ID: "0",
+        EFF_TEST_STUBS: "1",
+        EFF_CREDENTIAL_STORE: "file",
+        EFF_SETUP_PORT: String(port),
+      },
+      t.dir,
+    );
+    try {
+      await waitFor(s, `http://127.0.0.1:${String(port)}/setup/`);
+      s.child.kill("SIGINT");
+      expect(await exitWithin(s, 10_000)).toEqual({ code: 1, signal: null });
+    } finally {
+      s.child.kill("SIGKILL");
+    }
+    expect(s.out()).toContain("Stopped: nothing was stored.");
+    expect(await portFree(port)).toBe(true);
+    expect(existsSync(path.join(t.config, "session.json"))).toBe(false);
+  }, 150_000);
 });

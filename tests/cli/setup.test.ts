@@ -3,7 +3,8 @@
 // SWID or typed ahead: Stage C finding setup-hidden-prompt-echo-burst), the file and keychain stores (an in-memory
 // keyring — never the real keychain), config.json records, the credential_state row, the
 // definitive check over an injected network, `--service-name eff-test-…` (no store.sqlite, no
-// config.json, no network), `--seeding`, `--reset`, `--page` end to end over loopback. Every line
+// config.json, no network), `--seeding`, `--reset`, `--page` end to end over loopback (it claims
+// SIGINT/SIGTERM only while it waits: Stage C finding cli-first-signal-swallowed). Every line
 // printed is checked never to contain the SWID or espn_s2 value.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { request } from "node:http";
@@ -13,6 +14,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SetupNetwork } from "../../src/auth/setup.js";
 import type { KeychainSelftestResult } from "../../src/auth/selftest.js";
+import { createInterrupts } from "../../src/cli/interrupt.js";
 import { main } from "../../src/cli/main.js";
 import { DISCARDED_NOTE, TYPED_AHEAD_NOTE } from "../../src/cli/prompt.js";
 import { checkSetupFlags, configPatchOf, fixedAnswers, setup } from "../../src/cli/setup.js";
@@ -20,6 +22,7 @@ import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
 import { containsFragment, fakeCookies } from "../auth/helpers.js";
 import { FakeKeyring, makeIo, sandbox, type Sandbox, type TestIo } from "./helpers.js";
+import { FakeSignalHost } from "./signal-host.js";
 
 let sb: Sandbox;
 afterEach(() => {
@@ -558,8 +561,10 @@ describe("setup failure paths", () => {
     } finally {
       busy.close();
     }
-    const ctl = new AbortController();
-    ctl.abort();
+    // a SIGINT while the page waits closes it: the page claims the signals, and nothing is raised
+    // (src/cli/interrupt.ts; Stage C finding cli-first-signal-swallowed)
+    const host = new FakeSignalHost();
+    host.deliverWhenListening("SIGINT");
     const io2 = makeIo(sb, {
       env: { ESPN_LEAGUE_ID: "0", EFF_SETUP_PORT: String(await freePort()) },
     });
@@ -567,11 +572,70 @@ describe("setup failure paths", () => {
       await setup(
         io2,
         { reset: false, storage: "file", seeding: undefined, serviceName: undefined, page: true },
-        { network: network(), selftest: selftest("ok"), signal: ctl.signal },
+        { network: network(), selftest: selftest("ok"), interrupts: createInterrupts(host) },
       ),
     ).toBe(1);
     expect(io2.out.text).toContain("Stopped: nothing was stored.");
     expect(existsSync(path.join(sb.configDir, "session.json"))).toBe(false);
+    expect(host.events).toEqual(["on SIGINT", "on SIGTERM", "off SIGINT", "off SIGTERM"]);
+    expect(host.ended).toEqual([]);
+  });
+  it("--page claims the signals only while it waits: a SIGTERM during the league check after the POST ends the process", async () => {
+    sb = sandbox();
+    const port = await freePort();
+    const host = new FakeSignalHost();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0", EFF_SETUP_PORT: String(port) } });
+    let delivered = false;
+    const net = network();
+    // the first request setup sends after the page returned carries the signal
+    const signalled = Object.fromEntries(
+      Object.entries(net).map(([k, v]) => [
+        k,
+        typeof v === "function"
+          ? (...args: unknown[]) => {
+              if (!delivered) {
+                delivered = true;
+                host.deliver("SIGTERM");
+              }
+              return (v as (...a: unknown[]) => unknown)(...args);
+            }
+          : v,
+      ]),
+    ) as unknown as SetupNetwork;
+    const run = setup(
+      io,
+      { reset: false, storage: "file", seeding: undefined, serviceName: undefined, page: true },
+      { network: signalled, selftest: selftest("ok"), interrupts: createInterrupts(host) },
+    );
+    let url = "";
+    for (let i = 0; i < 200 && url === ""; i++) {
+      const m = /http:\/\/127\.0\.0\.1:\d+\/setup\/[0-9a-f]{64}/.exec(io.out.text);
+      if (m !== null) url = m[0];
+      else await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(url).not.toBe("");
+    // while the page waits, its claim holds the listeners
+    expect(host.listening).toBe(true);
+    const form = new URLSearchParams({
+      token: url.slice(-64),
+      swid: COOKIES.swid,
+      espn_s2: COOKIES.espn_s2,
+    }).toString();
+    expect(await post(url, form, { origin: `http://127.0.0.1:${String(port)}` })).toBe(200);
+    await run;
+    expect(delivered).toBe(true);
+    // the page had released its claim: the signal ended the process by the default action (the
+    // fake process lives on, so setup ran to its end here — the real one would be gone)
+    expect(host.events).toEqual([
+      "on SIGINT",
+      "on SIGTERM",
+      "off SIGINT",
+      "off SIGTERM",
+      "raise SIGTERM",
+      "ended SIGTERM",
+      "exit 143",
+    ]);
+    noValues(io);
   });
   it("a store that cannot open is exit 1; a config.json that cannot be written fails closed", async () => {
     sb = sandbox();

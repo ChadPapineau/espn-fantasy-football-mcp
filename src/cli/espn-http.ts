@@ -77,6 +77,20 @@ function outcomeOfStatus(status: number): RequestOutcome {
   return "client_error";
 }
 
+/** Resolves when `p` settles or `signal` aborts, whichever comes first (never rejects). */
+function untilAborted(p: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (signal === undefined) return p;
+  return new Promise((resolve) => {
+    const done = (): void => {
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    signal.addEventListener("abort", done, { once: true });
+    if (signal.aborted) done();
+    p.then(done, done);
+  });
+}
+
 /**
  * One ESPN GET under the limiter (one send: the CLI never retries a probe). It takes its slot as
  * every ESPN request does (trySlot: the cross-process in-flight cap of plan 01 §6 D7, decided inside
@@ -84,7 +98,9 @@ function outcomeOfStatus(status: number): RequestOutcome {
  * limiter-concurrency-per-process: this path recorded its row with tryRecord alone, outside the
  * cap). A full window or no free in-flight slot is waited for — again and again while it stays so —
  * until the waits would exceed MAX_LIMITER_WAIT_MS in total; then `rate_limited`, with nothing
- * sent. A spent daily cap is refused at once.
+ * sent. A spent daily cap is refused at once. The caller's `signal` (a refresh's claim on
+ * SIGINT/SIGTERM) ends it at once: before a slot is taken or during a wait, `aborted` with nothing
+ * recorded or sent; during the request, `aborted` (no upstream verdict: the breaker never counts it).
  */
 export async function espnRequest(
   deps: EspnHttpDeps,
@@ -93,6 +109,7 @@ export async function espnRequest(
     readonly cookie: CookieHeader | null;
     readonly fantasyFilter?: string;
     readonly maxBytes?: number;
+    readonly signal?: AbortSignal;
   },
 ): Promise<EspnAnswer | EspnFailure> {
   const limiter = deps.limiter;
@@ -102,6 +119,7 @@ export async function espnRequest(
   let waited = 0;
   let id: number;
   for (;;) {
+    if (req.signal?.aborted === true) return { error: "aborted" };
     let verdict;
     try {
       verdict = trySlot(limiter, limiterRequest(deps.clock.nowMs(), keyless, deps.origin));
@@ -119,7 +137,7 @@ export async function espnRequest(
     if (!Number.isFinite(wait) || waited + wait > MAX_LIMITER_WAIT_MS)
       return { error: "rate_limited" };
     waited += wait;
-    await sleep(wait);
+    await untilAborted(sleep(wait), req.signal);
   }
   const record = (o: RequestOutcome): void => {
     try {
@@ -129,8 +147,9 @@ export async function espnRequest(
     }
   };
   try {
+    const timeout = AbortSignal.timeout(20_000);
     const r = await deps.http.espnGet(req.url, {
-      signal: AbortSignal.timeout(20_000),
+      signal: req.signal === undefined ? timeout : AbortSignal.any([req.signal, timeout]),
       cookie: req.cookie,
       ...(req.fantasyFilter === undefined ? {} : { fantasyFilter: req.fantasyFilter }),
       ...(req.maxBytes === undefined ? {} : { maxBytes: req.maxBytes }),
@@ -169,6 +188,10 @@ export async function espnRequest(
  * 429 after ~0.6 s): the error carries it — the runner's retry waits at least that long, up to its
  * own cap — and until the hinted instant no request of this run goes to that host at all: a call
  * inside the window is refused here, nothing sent, `rate_limited` with the time left.
+ *
+ * The caller's `signal` reaches the request (Stage C finding cli-first-signal-swallowed: it was
+ * dropped, so the first Ctrl-C to `eff refresh espn:*` waited out the request in flight): its abort
+ * ends the request or the limiter wait at once, as the `aborted` HttpError the runner reports.
  */
 export function seasonGet(deps: EspnHttpDeps): HttpGet {
   const notBefore = new Map<string, number>();
@@ -188,6 +211,7 @@ export function seasonGet(deps: EspnHttpDeps): HttpGet {
       cookie: null,
       ...(opts.fantasyFilter === undefined ? {} : { fantasyFilter: opts.fantasyFilter }),
       maxBytes: opts.maxBytes,
+      signal: opts.signal,
     });
     if ("error" in r) {
       if (r.error === "daily_cap")

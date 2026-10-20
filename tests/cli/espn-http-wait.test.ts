@@ -5,8 +5,10 @@
 // 13), a retry that wakes on the store's inclusive window boundary is waited for again instead of
 // being reported `rate_limited`, and the total wait stays within MAX_LIMITER_WAIT_MS; ESPN's
 // Retry-After on the keyless season GET reaches the refresh runner and no request goes inside the
-// hinted window (finding cli-season-get-drops-retry-after). No network: the http client is a stub
-// (or the real client over a stub fetch); the limiter is the real store table (or a stub).
+// hinted window (finding cli-season-get-drops-retry-after); the caller's signal ends a request in
+// flight or a limiter wait at once (finding cli-first-signal-swallowed). No network: the http
+// client is a stub (or the real client over a stub fetch); the limiter is the real store table (or
+// a stub).
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -376,5 +378,103 @@ describe("Retry-After on the CLI's keyless season GET", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+// Stage C finding cli-first-signal-swallowed: seasonGet dropped the caller's signal, so the first
+// SIGINT/SIGTERM to `eff refresh espn:*` (which claims the signals for its run) waited out the
+// request in flight, or the limiter wait, before the run could stop. The signal now ends either at
+// once, as `aborted`: no upstream verdict (the breaker never counts it) and, before a slot is
+// taken or while waiting for one, nothing recorded and nothing sent.
+describe("the caller's signal ends the CLI's ESPN request at once", () => {
+  const SEASON_URL = `${URL0}?view=proTeamSchedules_wl`;
+  const clock = fixedClock("2026-10-06T18:00:00.000Z");
+
+  it("a season GET in flight: the fetch's own signal aborts synchronously, the GET rejects aborted, the row keeps no verdict", async () => {
+    const limiter = new MemoryLimiterRepo();
+    const fetchSignals: AbortSignal[] = [];
+    const http = createHttpClient({
+      // a hung socket: it never settles and ignores its signal
+      fetch: (_url, init) => {
+        if (init.signal) fetchSignals.push(init.signal);
+        return new Promise<Response>(() => undefined);
+      },
+    });
+    const get = seasonGet({ http, limiter, clock, origin: "server" });
+    const caller = new AbortController();
+    const pending = get(SEASON_URL, { signal: caller.signal, maxBytes: 1 << 20 }).catch(
+      (e: unknown) => e,
+    );
+    for (let i = 0; i < 200 && fetchSignals.length === 0; i++)
+      await new Promise((r) => setTimeout(r, 5));
+    expect(fetchSignals).toHaveLength(1);
+    const sent = fetchSignals[0];
+    expect(sent?.aborted).toBe(false);
+    caller.abort();
+    // before the fix the request ran on to its own 15 s attempt timeout
+    expect(sent?.aborted).toBe(true);
+    const e = (await pending) as HttpError;
+    expect(e).toBeInstanceOf(HttpError);
+    expect(e.kind).toBe("aborted");
+    expect(limiter.rows.map((r) => r.outcome)).toEqual(["pending"]);
+  });
+
+  it("a wait for the limiter: the abort ends it at once, nothing sent, nothing recorded", async () => {
+    const sent: string[] = [];
+    let checks = 0;
+    const caller = new AbortController();
+    const r = espnRequest(
+      {
+        http: okHttp(sent),
+        limiter: {
+          tryRecord: () => {
+            checks++;
+            return { ok: false as const, reason: "window" as const, retry_after_ms: 700 };
+          },
+          recordOutcome: () => undefined,
+          recentOutcomes: () => [],
+        } as never,
+        clock,
+        origin: "job",
+        // a wait that never ends by itself: only the abort can end it
+        sleep: () => new Promise<void>(() => undefined),
+      },
+      { url: SEASON_URL, cookie: null, signal: caller.signal },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    caller.abort();
+    expect(await r).toEqual({ error: "aborted" });
+    expect(sent).toHaveLength(0);
+    expect(checks).toBe(1);
+  });
+
+  it("an already aborted signal: no slot taken, nothing sent; seasonGet reports aborted", async () => {
+    const limiter = new MemoryLimiterRepo();
+    const sent: string[] = [];
+    const caller = new AbortController();
+    caller.abort();
+    expect(
+      await espnRequest(
+        { http: okHttp(sent), limiter, clock, origin: "job" },
+        { url: SEASON_URL, cookie: null, signal: caller.signal },
+      ),
+    ).toEqual({ error: "aborted" });
+    const get = seasonGet({ http: okHttp(sent), limiter, clock, origin: "job" });
+    const e = (await get(SEASON_URL, { signal: caller.signal, maxBytes: 1 << 20 }).catch(
+      (x: unknown) => x,
+    )) as HttpError;
+    expect([e instanceof HttpError, e.kind]).toEqual([true, "aborted"]);
+    expect(sent).toHaveLength(0);
+    expect(limiter.rows).toHaveLength(0);
+  });
+
+  it("without a signal nothing changes: the request is sent and answered", async () => {
+    const sent: string[] = [];
+    const r = await espnRequest(
+      { http: okHttp(sent), limiter: new MemoryLimiterRepo(), clock, origin: "server" },
+      { url: SEASON_URL, cookie: null },
+    );
+    expect("status" in r && r.status).toBe(200);
+    expect(sent).toEqual([SEASON_URL]);
   });
 });

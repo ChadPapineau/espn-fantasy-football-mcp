@@ -30,12 +30,13 @@ import type { Store, StoreFactory } from "../store/types.js";
 import { ConfigWriteError, patchConfigFile, type ConfigPatch } from "./config-file.js";
 import { createSetupNetwork } from "./espn-http.js";
 import { EXIT, UsageError } from "./exit.js";
+import { NO_INTERRUPTS, type Interrupts } from "./interrupt.js";
 import { isTty, writeLine, type CliIo } from "./io.js";
 import type { Logger } from "./log.js";
 import { createTerminalPrompt, type TerminalPrompt } from "./prompt.js";
 import { loadLenientRuntime, loadRuntime, reportConfigError } from "./runtime.js";
 import { createSelftestRunner } from "./selftest-agent.js";
-import { portBusyMessage, runSetupPage } from "./setup-page.js";
+import { portBusyMessage, runSetupPage, type PageOutcome } from "./setup-page.js";
 import { errorText, openStore } from "./store-access.js";
 
 /** The flags of `eff setup`. */
@@ -47,13 +48,18 @@ export interface SetupOptions {
   readonly page: boolean;
 }
 
-/** Test hooks (never reachable from argv). */
+/** Wiring and test hooks (never reachable from argv). */
 export interface SetupDepsOverride {
   readonly network?: SetupNetwork;
   readonly selftest?: (service: string) => Promise<KeychainSelftestResult>;
   readonly prompt?: TerminalPrompt;
   readonly factory?: StoreFactory;
-  readonly signal?: AbortSignal;
+  /**
+   * The process's interrupt policy (src/cli/interrupt.ts; main passes it). Only the page claims
+   * it, while it waits: Ctrl-C closes the page (plan 03 §1.4). Everywhere else in setup the first
+   * signal ends the process by the default action.
+   */
+  readonly interrupts?: Interrupts;
 }
 
 /** The config.json patch a SetupConfigPatch becomes (string values; null removes). */
@@ -230,12 +236,21 @@ export async function setup(
 
     let answers: SetupPrompt = prompt;
     if (opts.page) {
-      const page = await runSetupPage({
-        explicitPort: config.setupPort,
-        exec: io.exec,
-        out,
-        signal: over.signal ?? new AbortController().signal,
-      });
+      // the page honours cancellation, so it claims SIGINT/SIGTERM while it waits, and only then:
+      // once it returns, a signal during the checks below ends the process (Stage C finding
+      // cli-first-signal-swallowed)
+      const claim = (over.interrupts ?? NO_INTERRUPTS).claim();
+      let page: PageOutcome;
+      try {
+        page = await runSetupPage({
+          explicitPort: config.setupPort,
+          exec: io.exec,
+          out,
+          signal: claim.signal,
+        });
+      } finally {
+        claim.release();
+      }
       if (page.kind === "port_busy") {
         await writeLine(io.stderr, `eff setup: ${portBusyMessage(page.port, page.owner)}`);
         return EXIT.usage;
