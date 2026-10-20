@@ -6,9 +6,14 @@
 // bound for a snapshot passes the GUID pseudonymiser (plan 02 §2.4). A settings snapshot that
 // changes the league-season's newest settings raises `settings_changed` in the same transaction
 // (plan 08 §9; plan 03 §5 #22; T-08 — Stage C, league-settings-changed-never-raised: nothing compared
-// a new snapshot with the last one, so the check could never open). Ported from sibling @cf3b015,
-// adapted (single-league posture: no league key on snapshots; ESPN shapes).
-import type { DatabaseSync } from "node:sqlite";
+// a new snapshot with the last one, so the check could never open). The change is judged on the
+// league's own settings — never on what this build derives from them (its stat registry, bound table
+// and pinned rounding, all inside settings_hash), so an upgrade never reads as the commissioner's
+// edit — and a fetch already recorded takes no write lock (put belongs on the settings read path,
+// plan 08 §9, where every cache hit re-records the fetch it was served from: a busy store must not
+// stall a read that changes nothing). Ported from sibling @cf3b015, adapted (single-league posture:
+// no league key on snapshots; ESPN shapes).
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { ESPN_LEAGUE_ID_RE, TEAM_ID_MAX, TEAM_ID_MIN } from "../../config/schema.js";
 import {
   CHECK_IDS,
@@ -26,7 +31,11 @@ import {
   type TransactionsSeenRepository,
   type WaiverRules,
 } from "../../domain/league/types.js";
-import { SETTINGS_HASH_RE, type ScoringSettings } from "../../domain/scoring/types.js";
+import {
+  SETTINGS_HASH_RE,
+  type ScoringRule,
+  type ScoringSettings,
+} from "../../domain/scoring/types.js";
 import {
   boundedArray,
   canonicalJson,
@@ -76,13 +85,16 @@ interface SettingsRow {
 /** The newest settings snapshot of a league-season (the `latest` order: newest fetch, then newest row). */
 const NEWEST_SETTINGS_SQL =
   "SELECT * FROM league_settings WHERE league_id = ? AND season = ? ORDER BY fetched_ms DESC, rowid DESC LIMIT 1";
+/** The fetch instant one settings hash of a league-season is recorded at (a primary-key seek). */
+export const RECORDED_FETCH_SQL =
+  "SELECT fetched_ms FROM league_settings WHERE league_id = ? AND season = ? AND settings_hash = ?";
 
 /**
  * The fields of a snapshot that are league STATUS or this build's own vocabulary, not settings: they
  * move with no edit at all, so they never count as a settings change. The waiver clock is ESPN's
  * `status.waiverNextExecutionDate`/`waiverLastExecutionDate` (it moves every week); `unverified` and
- * `unverified_fields` list what this build has not verified; `rounding.verified` is the engine's own
- * golden flag. Typed against the domain shapes, so a renamed field fails the build here.
+ * `unverified_fields` list what this build has not verified. Typed against the domain shapes, so a
+ * renamed field fails the build here.
  */
 const WAIVER_STATUS_FIELDS = [
   "next_execution",
@@ -90,7 +102,29 @@ const WAIVER_STATUS_FIELDS = [
   "unverified",
 ] as const satisfies readonly (keyof WaiverRules)[];
 const RULES_STATUS_FIELDS = ["unverified_fields"] as const satisfies readonly (keyof LeagueRules)[];
-const ROUNDING_STATUS_FIELD = "verified" satisfies keyof ScoringSettings["rounding"];
+/**
+ * What the scoring normaliser derives from THIS build, never from the league (src/domain/scoring/
+ * settings.ts): a rule's canonical name, abbreviation, position classes and E9 disputed flag are its
+ * statId looked up in the build's stat registry; `families` are built from the rules and the build's
+ * bound table; `rounding` is the engine's pinned rule (ESPN_ROUNDING) and its golden flag; and
+ * `settings_hash` is computed over all of them. Within one build each is a function of the league's
+ * own items, so dropping them misses no edit; across builds they move with the code — an upgrade that
+ * re-normalises the same league settings to another hash is not the commissioner's edit. What the
+ * league states is the rest: each item's statId, points, pointsOverrides and isReverseItem, and the
+ * matchup items (tie rules, home bonuses — outside the hash). A field the domain adds later counts
+ * until it is listed here.
+ */
+const RULE_DERIVED_FIELDS = [
+  "canonical",
+  "abbr",
+  "applies_to",
+  "disputed",
+] as const satisfies readonly (keyof ScoringRule)[];
+const SCORING_DERIVED_FIELDS = [
+  "families",
+  "rounding",
+  "settings_hash",
+] as const satisfies readonly (keyof ScoringSettings)[];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -101,7 +135,10 @@ function omit(obj: Record<string, unknown>, keys: readonly string[]): Record<str
   return Object.fromEntries(Object.entries(obj).filter(([k]) => !keys.includes(k)));
 }
 
-/** A stored JSON column as a comparison key: canonical, with its status fields dropped. */
+/**
+ * A stored JSON column as a comparison key: canonical, with its status fields and (scoring) what this
+ * build derives dropped; the scoring items compare as a set (the normaliser sorts them by statId).
+ */
 function settingsKey(column: "scoring" | "slots" | "rules", text: string): string {
   let v: unknown;
   try {
@@ -109,8 +146,17 @@ function settingsKey(column: "scoring" | "slots" | "rules", text: string): strin
   } catch {
     return `text:${text}`; // never written by this repository; compared as written
   }
-  if (column === "scoring" && isRecord(v) && isRecord(v.rounding))
-    v = { ...v, rounding: omit(v.rounding, [ROUNDING_STATUS_FIELD]) };
+  if (column === "scoring" && isRecord(v))
+    v = {
+      ...omit(v, SCORING_DERIVED_FIELDS),
+      ...(Array.isArray(v.rules)
+        ? {
+            rules: v.rules
+              .map((r: unknown) => canonicalJson(isRecord(r) ? omit(r, RULE_DERIVED_FIELDS) : r))
+              .sort(),
+          }
+        : {}),
+    };
   if (column === "rules" && isRecord(v))
     v = {
       ...omit(v, RULES_STATUS_FIELDS),
@@ -121,15 +167,16 @@ function settingsKey(column: "scoring" | "slots" | "rules", text: string): strin
 
 /**
  * The `settings_changed` detail when the newest snapshot of a league-season moved from `before` to
- * `after` with a different scoring (its settings_hash among it), roster slots or league rules;
- * null when the settings are the same. Fixed vocabulary only: flags, the season, a hash, an instant.
+ * `after` with a different scoring (the league's items and matchup items), roster slots or league
+ * rules; null when the league's settings are the same — whatever their settings_hash, which also
+ * encodes this build's registry (SCORING_DERIVED_FIELDS). Fixed vocabulary only: flags, the season,
+ * a hash, an instant.
  */
 function settingsChange(
   before: SettingsRow,
   after: SettingsRow,
 ): Record<string, string | number | boolean | null> | null {
   const scoring =
-    before.settings_hash !== after.settings_hash ||
     settingsKey("scoring", before.scoring_json) !== settingsKey("scoring", after.scoring_json);
   const slots = settingsKey("slots", before.slots_json) !== settingsKey("slots", after.slots_json);
   const rules = settingsKey("rules", before.rules_json) !== settingsKey("rules", after.rules_json);
@@ -232,18 +279,34 @@ const toCheck = (r: CheckDbRow): CheckRow => ({
 export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettingsRepository {
   const newest = (leagueId: string, season: number): SettingsRow | undefined =>
     db.prepare(NEWEST_SETTINGS_SQL).get(leagueId, season) as SettingsRow | undefined;
+  // Prepared once per connection, on first use: put belongs on the settings read path (plan 08 §9 —
+  // the provider persists each answer it normalises), and compiling a statement — the guard's
+  // authorizer called back per column — costs more than the seek it runs. node:sqlite resets a
+  // statement after each run, so it never holds a read snapshot open.
+  let recordedFetch: StatementSync | undefined;
+  const recordedMs = (leagueId: string, season: number, hash: string): number | null => {
+    recordedFetch ??= db.prepare(RECORDED_FETCH_SQL);
+    const r = recordedFetch.get(leagueId, season, hash) as { fetched_ms: number } | undefined;
+    return r === undefined ? null : num(r.fetched_ms);
+  };
   return {
     /**
      * Records a settings snapshot and, in the SAME transaction, raises `settings_changed` when it
      * changed the league-season's newest settings (plan 08 §9: "if the hash changed — … checks[] row
      * settings_changed", so `onboard` can explain the commissioner's edit; plan 03 §5 #22; T-08).
-     * A change is a different scoring (its settings_hash among it), roster slots or league rules —
-     * a switch to FAAB or a new playoff seeding rule leaves the scoring hash alone and changes the
-     * advice all the same — never a status field (settingsKey). The league-season's first snapshot is
-     * the baseline (no check); a repeat of the newest settings, or a snapshot older than the newest
-     * (a late answer), raises nothing; two processes recording one change raise it once (the second
-     * reads the first's row as the newest). The check (warn) carries the new hash and the change's
-     * flags; a human closes it (`eff setup --seeding`, `eff doctor --ack settings_changed`).
+     * A change is a different scoring (the league's items and matchup items), roster slots or league
+     * rules — a switch to FAAB or a new playoff seeding rule leaves the scoring hash alone and changes
+     * the advice all the same — never a status field, nor what this build derives (its registry,
+     * bound table and pinned rounding, all inside settings_hash: an upgrade that re-normalises the
+     * same settings to a new hash stores the new hash's row and raises nothing — settingsKey). The
+     * league-season's first snapshot is the baseline (no check); a repeat of the newest settings, or
+     * a snapshot older than the newest (a late answer), raises nothing; two processes recording one
+     * change raise it once (the second reads the first's row as the newest). The check (warn) carries
+     * the new hash and the change's flags; a human closes it (`eff setup --seeding`, `eff doctor
+     * --ack settings_changed`). A fetch already recorded — this hash's row holds this fetch or a newer
+     * one — would change nothing, so it returns after one read and takes NO write lock: on the read
+     * path every cache hit re-records the fetch it was served from, and a required write blocks the
+     * thread up to BUSY_TIMEOUT_MS behind another process's writer.
      */
     put(row) {
       matching(row.league_id, ESPN_LEAGUE_ID_RE, "league_id");
@@ -253,6 +316,13 @@ export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettin
       const scoring = toJson(row.scoring, "scoring");
       const slots = toJson(row.slots, "slots");
       const rules = toJson(row.rules, "rules");
+      // The upsert below never moves a row back (WHERE excluded.fetched_ms > fetched_ms), so with a
+      // row of this hash at or after this fetch it writes nothing, the newest row stays the newest and
+      // no check opens: the same answer the transaction gives, without waiting for its lock. A row's
+      // fetched_ms only grows (and league_settings is never pruned), so a writer that commits after
+      // this read cannot make the skip wrong; under WAL the read does not wait for that writer.
+      const known = recordedMs(row.league_id, row.season, row.settings_hash);
+      if (known !== null && known >= ms) return;
       writes.requiredTx("league_settings", () => {
         const before = newest(row.league_id, row.season);
         // One row per settings_hash (the log's referent): a repeat put of a hash records the newer
