@@ -137,8 +137,10 @@ export type CredentialStoreRecord = () => CredentialStoreKind | null;
  * `openCredentialStore`). `eff setup --storage …` moves the one store of the install (plan 02 §2.2)
  * and records the new kind in the `credential_state` row it writes; the authority binds that row
  * here, so a process that started on the other backend — the server — reads where setup wrote, the
- * probe read included, with no restart (plan 02 §2.2 "Multiple processes"; plan 03 L6, §6).
- * Construction and binding touch neither backend.
+ * probe read included, with no restart (plan 02 §2.2 "Multiple processes"; plan 03 L6, §6). The
+ * file backend's path is the one config.json records (plan 03 §3), read when a file operation
+ * starts (`CredentialStoreConfig.configDir`), never the row's. Construction and binding touch
+ * neither backend.
  */
 export interface FollowingCredentialStoreReader extends CredentialStoreReader {
   /** The backend in use now (it can change between operations). */

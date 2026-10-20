@@ -5,10 +5,12 @@
 // `not_configured`, from a row another process writes later; the secret is read lazily on the first
 // cookie-bearing call, registered with the redactor, and held only here; every call compares the
 // stored `storedAt` field and reloads after a new `eff setup`; an install store follows the backend
-// the row records (`eff setup --storage …`); `rejected` short-circuits with no request until setup
-// stores a new value or another process records an acceptance later than this process's rejection
-// (no restart in any of these). The row is shared with setup, status and the daily job: this
-// process clears or recreates it only when it describes the value this process read (Stage C).
+// the row records (`eff setup --storage …`) and, for the file store, the session.json path
+// config.json records (plan 03 §3; src/auth/stores.ts); `rejected` short-circuits with no request
+// until setup stores a new value or another process records an acceptance later than this
+// process's rejection (no restart in any of these). The row is shared with setup, status and the
+// daily job: this process clears or recreates it only when it describes the value this process
+// read (Stage C) — read, for an install store opened with `configDir`, where config.json says.
 import type { CredentialStoreKind } from "../config/schema.js";
 import { cookieUnavailableFor } from "./errors.js";
 import { buildCookieHeader } from "./format.js";
