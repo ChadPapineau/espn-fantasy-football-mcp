@@ -1,5 +1,5 @@
 {
-  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.13): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, on fx-10h (Team 02; week 5). The player is the user's first starting RB — the one inj-outlook-system's season outlook targets. `pasted` checks a user's paste (claim.text is the user's own words, a literal); `outlook` checks ESPN's paragraph with no claim; `readback` reads last week's log entries back first (NC-INJ-2). Format: skills/README.md#tool-sequences.",
+  "$comment": "Lane 1 (plan 09 §5.1 items 3 and 7; §3.13): the calls this P1 Skill promises, in order, under EFF_TOOLSET=full, on fx-10h (Team 02; week 5). The player is the user's first starting RB — the one inj-outlook-system's season outlook targets. `pasted` checks a user's paste (claim.text is the user's own words, a literal; claim.time is the one form step 4 states — seconds and a UTC offset, the date, clock time and zone the user gave — which the dry run passes to the tool's own schema); `outlook` checks ESPN's paragraph with no claim; `readback` reads last week's log entries back first (NC-INJ-2). Format: skills/README.md#tool-sequences.",
   "schema_version": 1,
   "skill": "news-check",
   "tool_contract": 1,
@@ -69,7 +69,8 @@
             "player": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
             "claim": {
               "text": "Beat writer: the backup will get more of the work from now on",
-              "source": "beat writer"
+              "source": "beat writer",
+              "time": "2026-10-06T14:30:00-04:00"
             }
           }
         },

@@ -23,11 +23,12 @@
       "name": "WK-2",
       "toolset": "core",
       "prompt": "Prep me for week 5",
-      "expected_output": "With the write module off, every recommended move is listed as not actionable here and the reply ends with the 'say apply for the exact clicks' line; no write tool is called.",
+      "expected_output": "With the write module off, every recommended move is listed as not actionable here and the reply ends with the apply line of guardrail 10 for the plugin the eval runs: the command the user types, /espn-fantasy-football:apply and the change — apply is user-invoked, so saying apply cannot start it; no write tool is called.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
-        "The reply ends with the apply pointer (regex: `say \\*?apply\\*? for the exact clicks`)"
+        "The reply ends with the apply line naming the command the user types (regex: `/espn-fantasy-football:apply\\b`)",
+        "The reply never tells the user to say apply, which cannot start the user-invoked Skill in the plugin (regex_absent: `\\bsay \\*?apply\\b`)"
       ]
     },
     {

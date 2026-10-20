@@ -4,7 +4,7 @@ Agent Skills that teach Claude to use the ESPN fantasy-football MCP server (plan
 
 **Skills N.x need server N.x.** Every `SKILL.md` carries `metadata.version` (the package version) and `metadata.tool_contract`; at the start of a session each Skill compares its `tool_contract` with the server's (`espn_get_status` → `server.tool_contract`) and stops when they differ.
 
-**Read-only.** This version has no write module (PHASE W SEAM — NOT IMPLEMENTED): no Skill changes the team; every recommendation ends with "say *apply* for the exact clicks", and the `apply` Skill turns an agreed change into numbered manual steps on ESPN.
+**Read-only.** This version has no write module (PHASE W SEAM — NOT IMPLEMENTED): no Skill changes the team; every recommendation ends with how to start the `apply` Skill, which turns an agreed change into numbered manual steps on ESPN. Only the user starts it — the plugin makes it user-invoked (`disable-model-invocation: true`), and Claude Code refuses the model's call for it — so the line names what the user does (guardrail 10): with the plugin, type `/espn-fantasy-football:apply` and the change; with the Skills installed one by one, say *apply* (the copy carries no `disable-model-invocation`, so the model starts `espn-apply`); with only the server's prompts, choose `espn.apply`.
 
 ## The eight P0 Skills
 

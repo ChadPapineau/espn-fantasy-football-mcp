@@ -30,4 +30,4 @@ The `log_id` returned by `espn_record_recommendation` — recorded **before** th
 ### Attribution
 "League data and ESPN projections from ESPN Fantasy (unofficial API); nflverse CC-BY-4.0" — printing only the sources whose `meta.attribution[]` actually appears in the results used. Our projections and probabilities are this server's estimates (`meta.estimate: true`), never a consensus or ESPN's.
 
-End with "say *apply* for the exact clicks" while `capabilities.write` is false.
+End with the apply line of guardrail 10 while `capabilities.write` is false — with the plugin, "type `/espn-fantasy-football:apply` and the change for the exact clicks".
