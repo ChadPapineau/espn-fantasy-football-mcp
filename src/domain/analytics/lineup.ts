@@ -170,6 +170,15 @@ export interface LineupRequest {
    * committed record (additive, Phase 3).
    */
   readonly objective_switch?: ObjectiveSwitchRecord;
+  /**
+   * A later week of a multi-week matchup period: the points each side already holds from the
+   * period's earlier weeks (ESPN `points_by_week`). Carried into the margin wherever this week's
+   * matchup decides — P(win) before and after and its interval, the `pwin`/`blend` objective, the
+   * protect/chase mode and the coin-flip band's ΔP(win) — so each is the period's, never a 0–0 start
+   * (research 05 §2.3; Stage C finding matchup-multiweek-prior-points-ignored). Expected points stay
+   * this week's. Null / absent: the week is the whole period; ignored without an opponent.
+   */
+  readonly banked?: { readonly me: number; readonly opponent: number } | null;
 }
 
 // --- the solve ---------------------------------------------------------------------------------------
@@ -918,6 +927,25 @@ export function analyzeLineup(req: LineupRequest): LineupData {
       ),
     );
   const oppMembers = oppStarters.map(member);
+  // the period's earlier weeks' margin (mine minus the opponent's): only an opponent's matchup has one
+  const banked = listed === null ? null : (req.banked ?? null);
+  if (banked !== null) {
+    ensure(
+      Number.isFinite(banked.me) && Number.isFinite(banked.opponent),
+      "the banked points must be finite",
+      "week",
+    );
+    assumptions.push(
+      A(
+        `a multi-week matchup period: the earlier weeks' ${String(round(banked.me, 1))}–${String(round(banked.opponent, 1))} is carried into P(win) and the mode, which are the period's`,
+        "the period's earlier scores are corrected",
+      ),
+    );
+  }
+  const carry = banked === null ? 0 : banked.me - banked.opponent;
+  /** This week's moments with the carried margin: what P(win) and the mode read. */
+  const carried = (mo: PairMoments): PairMoments =>
+    carry === 0 ? mo : { ...mo, mu_m: mo.mu_m + carry };
 
   const meanA = solve({
     roster,
@@ -937,7 +965,7 @@ export function analyzeLineup(req: LineupRequest): LineupData {
   const evaluate = (a: Assignment): Evaluated => {
     const starters = startersOf(a, req.players, roster);
     const mo = moments(starters);
-    return { a, starters, moments: mo, pwin: pWinNormal(mo) };
+    return { a, starters, moments: mo, pwin: pWinNormal(carried(mo)) };
   };
 
   // the exchange rate (reading (a)): one win in PF points
@@ -981,7 +1009,7 @@ export function analyzeLineup(req: LineupRequest): LineupData {
   // the mode (research 05 §2.2)
   const mm = meanEval.moments;
   const sd = diffSd(mm);
-  const d = mm.mu_m - mm.mu_o;
+  const d = mm.mu_m - mm.mu_o + carry;
   let mode: MatchupMode;
   const ctx = req.season?.pf_context ?? null;
   if (reading === "points_only" || objective === "points_only") {
@@ -1033,7 +1061,7 @@ export function analyzeLineup(req: LineupRequest): LineupData {
     reading !== "points_only" &&
     objective !== "points_only";
   const dpOf = (after: readonly LineupPlayer[]): number =>
-    listed === null ? 0 : pWinNormal(moments(after)) - curEval.pwin;
+    listed === null ? 0 : pWinNormal(carried(moments(after))) - curEval.pwin;
   /** The `swaps[]` row of a pair (its Δ unrounded in `de` for the search below). */
   const rawSwap = (pr: FlowPair) => {
     const out = pr.out;
@@ -1388,8 +1416,8 @@ export function analyzeLineup(req: LineupRequest): LineupData {
     p_win_before: hasOpp ? round(curEval.pwin) : null,
     p_win_after: hasOpp ? round(chosen.pwin) : null,
     p_win_interval: hasOpp
-      ? ([...pWinInterval(chosen.moments, recStarters.length + oppStarters.length)].map((x) =>
-          round(x),
+      ? ([...pWinInterval(carried(chosen.moments), recStarters.length + oppStarters.length)].map(
+          (x) => round(x),
         ) as [number, number])
       : null,
     conditionals,

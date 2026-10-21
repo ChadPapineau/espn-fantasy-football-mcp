@@ -294,24 +294,6 @@ export function bankedPoints(
   return { period, weeks: earlier, me: sum(mine), opp: sum(theirs) };
 }
 
-/**
- * The warning a win probability carries while the engine scores the call's week alone in a later
- * week of a multi-week period (the engines take no carried-points input yet): the period's score so
- * far — its earlier weeks' points, 0–0 while they are unplayed — is said beside it, never dropped.
- */
-export function bankedPointsWarning(
-  b: {
-    readonly period: number;
-    readonly weeks: readonly Week[];
-    readonly me: number;
-    readonly opp: number;
-  },
-  w: Week,
-): string {
-  const r = (x: number): string => String(Math.round(x * 10) / 10);
-  return `partial: matchup period ${String(b.period)} also scores week ${b.weeks.map(String).join(", ")} (${r(b.me)}–${r(b.opp)} so far): the win probability scores week ${String(w)} alone, not the period`;
-}
-
 /** The team a call means: the argument, else my team — or VALIDATION with the setup hint. */
 export function teamOf(league: League, teamId: number | undefined): number {
   if (teamId !== undefined) return teamId;

@@ -161,6 +161,56 @@ describe("pre-week P(win)", () => {
     expect(a.data.interval[1]).toBeGreaterThanOrEqual(a.data.p_win);
   });
 
+  it("a multi-week period carries its earlier points into the margin of both methods (Stage C matchup-multiweek-prior-points-ignored)", async () => {
+    const starters = (ps: readonly LineupPlayer[]) =>
+      ps
+        .filter((p) => p.slot_id !== 20)
+        .map((p) => ({
+          player_id: p.player_id,
+          position: p.position,
+          pro_team_id: p.pro_team_id,
+          points: p.points,
+        }));
+    const pm = pairMoments(starters(roster(100)), starters(roster(200, 0.95)));
+    for (const [me, opponent] of [
+      [150, 80],
+      [80, 150],
+      [40, 40],
+    ] as const) {
+      const carry = me - opponent;
+      const n = await analyzeMatchupWin(req({ banked: { me, opponent } }));
+      // the normal approximation: the week's moments with the carried margin
+      expect(n.data.p_win, `${String(me)}–${String(opponent)}`).toBeCloseTo(
+        pWinNormal({ ...pm, mu_m: pm.mu_m + carry }),
+        3,
+      );
+      expect(n.data.rec.delta_vs_next.value).toBeCloseTo(pm.mu_m - pm.mu_o + carry, 2);
+      expect(n.data.rec.assumptions.map((a) => a.text)).toContain(
+        `a multi-week matchup period: the earlier weeks' ${String(me)}–${String(opponent)} is carried into P(win), which is the period's`,
+      );
+      // Monte Carlo agrees with it (every path starts from the banked points)
+      const mc = await analyzeMatchupWin(
+        req({ method: "mc", n_sims: 8000, banked: { me, opponent } }),
+      );
+      expect(Math.abs(mc.data.p_win - n.data.p_win)).toBeLessThan(0.03);
+    }
+    // an equal score so far changes nothing; null is the week alone
+    const none = await analyzeMatchupWin(req({ method: "mc", n_sims: 4000, banked: null }));
+    const even = await analyzeMatchupWin(
+      req({ method: "mc", n_sims: 4000, banked: { me: 40, opponent: 40 } }),
+    );
+    expect(even.data.p_win).toBeCloseTo(none.data.p_win, 2);
+    expect(none.data.rec.assumptions.some((a) => a.text.startsWith("a multi-week"))).toBe(false);
+    // a lead no week can overturn decides it
+    const won = await analyzeMatchupWin(
+      req({ method: "mc", n_sims: 2000, banked: { me: 2000, opponent: 0 } }),
+    );
+    expect(won.data.p_win).toBe(1);
+    await expect(
+      analyzeMatchupWin(req({ banked: { me: Number.NaN, opponent: 0 } })),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   it("method defaults to Monte Carlo; an all-player_sim lineup reports basis player_sim", async () => {
     const { method: _m, ...noMethod } = req();
     const out = await analyzeMatchupWin({ ...noMethod, n_sims: 1000 });

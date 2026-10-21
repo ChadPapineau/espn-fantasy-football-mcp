@@ -75,7 +75,6 @@ import {
 } from "./analytics.js";
 import {
   bankedPoints,
-  bankedPointsWarning,
   crosswalkOf,
   isDegradable,
   leagueRef,
@@ -509,12 +508,13 @@ export const analyzeMatchupTool = defineTool({
     const opp = oppId === null ? undefined : rosters.find((r) => r.team.team_id === oppId);
     if (opp === undefined)
       throw new EffError("NOT_FOUND", { field: "week", reason: "no_opponent" });
-    // a later week of a multi-week period: its earlier weeks' points, which the engine cannot carry
-    // in yet, are said and the answer is partial — never a 0–0 P(win) presented as the period's
-    // (Stage C finding matchup-multiweek-prior-points-ignored). The season schedule is read for it
-    // only then (pre read it above; a cache hit).
+    // a later week of a multi-week period: its earlier weeks' points are carried into P(win) — the
+    // period's, never a 0–0 start (Stage C finding matchup-multiweek-prior-points-ignored; the
+    // engine says the carried score). The season schedule is read for it only then (pre read it
+    // above; a cache hit); when it cannot be read the answer scores the week alone and is partial.
     const period = periodOf(b.rules, b.w);
     const span = period === null ? [] : (b.rules.playoffs.matchup_periods[String(period)] ?? []);
+    let banked: { readonly me: number; readonly opponent: number } | null = null;
     if (span.some((x) => x < b.w)) {
       const ms = await withinBudget(
         () => ctx.services.platform.getMatchups(leagueRef(ctx), readOpts(ctx, args)),
@@ -523,8 +523,8 @@ export const analyzeMatchupTool = defineTool({
         if (!isDegradable(e)) throw e;
         return null;
       });
-      const banked = ms === null ? null : bankedPoints(take(ctx, ms, inputs), b.rules, b.w, team);
-      if (banked !== null) warnings.push(bankedPointsWarning(banked, b.w));
+      const held = ms === null ? null : bankedPoints(take(ctx, ms, inputs), b.rules, b.w, team);
+      if (held !== null) banked = { me: held.me, opponent: held.opp };
       else
         warnings.push(
           `partial: matchup period ${String(period)} spans weeks ${span.map(String).join(", ")}: its earlier weeks' points were not read — the win probability scores week ${String(b.w)} alone, not the period`,
@@ -601,6 +601,7 @@ export const analyzeMatchupTool = defineTool({
       deadline_ms: cpuDeadlineOf(ctx),
       inputs: toDataInputs(inputs, ctx.nowMs),
       live_unread: liveUnread,
+      banked,
     });
     const data: MatchupToolData = { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) };
     return {

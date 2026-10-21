@@ -111,6 +111,45 @@ const seatCounts = (out: ReturnType<typeof analyzeLineup>): Map<string, number> 
   return m;
 };
 
+describe("a multi-week matchup period's earlier points (Stage C matchup-multiweek-prior-points-ignored)", () => {
+  it("P(win), its interval and the mode carry the period's score; expected points stay the week's", () => {
+    const week = analyzeLineup(request());
+    const ahead = analyzeLineup(request({ banked: { me: 80, opponent: 0 } }));
+    const behind = analyzeLineup(request({ banked: { me: 0, opponent: 80 } }));
+    const even = analyzeLineup(request({ banked: { me: 40, opponent: 40 } }));
+    // the week alone is close; 80 ahead or behind decides the mode and P(win)
+    expect(ahead.mode).toBe("protect");
+    expect(behind.mode).toBe("chase");
+    expect(ahead.p_win_before ?? 0).toBeGreaterThan(0.9);
+    expect(behind.p_win_before ?? 1).toBeLessThan(0.1);
+    expect(ahead.p_win_after ?? 0).toBeGreaterThan(week.p_win_after ?? 1);
+    expect(behind.p_win_after ?? 1).toBeLessThan(week.p_win_after ?? 0);
+    expect(ahead.p_win_interval?.[0] ?? 0).toBeGreaterThan(week.p_win_interval?.[0] ?? 1);
+    // an even score so far is the week alone
+    expect(even.p_win_before).toBeCloseTo(week.p_win_before ?? Number.NaN, 6);
+    expect(even.mode).toBe(week.mode);
+    // the week's expected points and lineup are unchanged by what the period already holds
+    for (const out of [ahead, behind, even]) {
+      expect(out.e_points_before).toBeCloseTo(week.e_points_before, 6);
+      expect(out.mode_basis.mu_m).toBeCloseTo(week.mode_basis.mu_m, 6);
+    }
+    expect(ahead.rec.assumptions.map((a) => a.text)).toContain(
+      "a multi-week matchup period: the earlier weeks' 80–0 is carried into P(win) and the mode, which are the period's",
+    );
+    expect(week.rec.assumptions.some((a) => a.text.startsWith("a multi-week"))).toBe(false);
+  });
+
+  it("without an opponent nothing is carried; a non-finite score is refused", () => {
+    const out = analyzeLineup(request({ opponent: null, banked: { me: 80, opponent: 0 } }));
+    expect(out.p_win_before).toBeNull();
+    expect(out.mode).toBe("neutral");
+    expect(out.rec.assumptions.some((a) => a.text.startsWith("a multi-week"))).toBe(false);
+    expect(() =>
+      analyzeLineup(request({ banked: { me: Number.POSITIVE_INFINITY, opponent: 0 } })),
+    ).toThrow(/banked points must be finite/);
+  });
+});
+
 describe("the exact assignment", () => {
   it("starts the bench upgrades in the right seats; the flex is filled by projection, not position", () => {
     const out = analyzeLineup(request());

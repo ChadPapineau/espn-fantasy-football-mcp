@@ -92,6 +92,14 @@ export interface MatchupWinRequest {
    * warning, and the outcome is `partial`.
    */
   readonly live_unread?: readonly string[];
+  /**
+   * A later week of a multi-week matchup period: the points each side already holds from the
+   * period's earlier weeks (ESPN `points_by_week`), carried into the margin of every method — the
+   * normal approximation and every Monte-Carlo path — so P(win), its interval and the margin are
+   * the period's, never a 0–0 start (research 05 §2.3; Stage C finding
+   * matchup-multiweek-prior-points-ignored). Null / absent: the week is the whole period.
+   */
+  readonly banked?: { readonly me: number; readonly opponent: number } | null;
 }
 
 /** E3 `pre` / `live`'s outcome. */
@@ -275,6 +283,8 @@ export function liveMoments(
 }
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
+/** Points as the assumptions say them: one decimal, no trailing zero. */
+const fmtPoints = (x: number): string => String(Math.round(x * 10) / 10);
 
 const isStart = (roster: RosterSlots, slotId: number): boolean => {
   const c = slotClassOf(slotId);
@@ -357,10 +367,26 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
     ensure(!ids.has(p.player.player_id), "a player is listed twice", "players");
     ids.add(p.player.player_id);
   }
+  const banked = req.banked ?? null;
+  if (banked !== null)
+    ensure(
+      Number.isFinite(banked.me) && Number.isFinite(banked.opponent),
+      "the banked points must be finite",
+      "week",
+    );
+  /** The period's earlier weeks' margin (mine minus the opponent's), carried into every method. */
+  const carry = banked === null ? 0 : banked.me - banked.opponent;
   const nowMs = req.clock.nowMs();
   const mode = req.mode;
   const assumptions: Assumption[] = [];
   const warnings: string[] = [];
+  if (banked !== null)
+    assumptions.push(
+      A(
+        `a multi-week matchup period: the earlier weeks' ${fmtPoints(banked.me)}–${fmtPoints(banked.opponent)} is carried into P(win), which is the period's`,
+        "the period's earlier scores are corrected",
+      ),
+    );
   // live facts this call did not read: nothing is conditioned on them (an unread box score is not
   // 0 points, an unknown game is not a bye) — every started player keeps his pre-game distribution
   const unread = mode === "live" ? [...new Set(req.live_unread ?? [])] : [];
@@ -426,7 +452,7 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
   const mine = myStarters.map((p) => contributionOf(p, "me", scoring, nowMs));
   const theirs = oppStarters.map((p) => contributionOf(p, "opp", scoring, nowMs));
   const mo = liveMoments(mine, theirs);
-  const dMu = mo.mu_m - mo.mu_o;
+  const dMu = mo.mu_m - mo.mu_o + carry;
   const sd = Math.sqrt(Math.max(0, mo.v_m + mo.v_o - 2 * mo.cov));
   const cdf = (x: number): number => (sd === 0 ? (x > 0 ? 1 : x < 0 ? 0 : 0.5) : normalCdf(x / sd));
   const pNormal = cdf(dMu);
@@ -437,8 +463,12 @@ export async function analyzeMatchupWin(req: MatchupWinRequest): Promise<Matchup
   let partial = false;
   const open = [...mine, ...theirs].filter((c) => c.status !== "final");
   if (method === "mc" && open.length > 0 && sd > 0) {
-    const constM = mine.filter((c) => c.status === "final").reduce((s, c) => s + c.so_far, 0);
-    const constO = theirs.filter((c) => c.status === "final").reduce((s, c) => s + c.so_far, 0);
+    const constM =
+      (banked?.me ?? 0) +
+      mine.filter((c) => c.status === "final").reduce((s, c) => s + c.so_far, 0);
+    const constO =
+      (banked?.opponent ?? 0) +
+      theirs.filter((c) => c.status === "final").reduce((s, c) => s + c.so_far, 0);
     const k = open.length;
     const corr = open.map((a) => open.map((b) => (a === b ? 1 : rho(memberOf(a), memberOf(b)))));
     const l = cholesky(corr);

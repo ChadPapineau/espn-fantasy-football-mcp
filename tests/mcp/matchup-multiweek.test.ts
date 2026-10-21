@@ -1,17 +1,16 @@
-// matchup-multiweek.test.ts — a later week of a multi-week matchup period says the score the period
-// already holds, and its win chance is partial (plan 07 E2/E3: P(win) is the matchup's; research 05
-// §2.3: read scheduleSettings.matchupPeriods, never assume a one-week matchup). Stage C finding
+// matchup-multiweek.test.ts — a later week of a multi-week matchup period carries the score the
+// period already holds (plan 07 E2/E3: P(win) is the matchup's; research 05 §2.3: read
+// scheduleSettings.matchupPeriods, never assume a one-week matchup). Stage C finding
 // matchup-multiweek-prior-points-ignored: in the second week of a two-week round E3 pre/live and E2
 // projected week w alone and never read the period's earlier points (points_by_week), so leading or
-// trailing by 70 gave the identical P(win), mode and coin flips, presented whole. The engines take no
-// carried-points input yet (a need from the domain owner); until they do, each such answer names the
-// period's score so far and is partial. Units over bankedPoints, then E3 pre/live and E2 on fx-10h in
-// week 16 of a two-week semifinal, leading and trailing (fixture mode, no network).
+// trailing by 70 gave the identical P(win), mode and coin flips. The engines now take the carried
+// points (`banked`); here bankedPoints, then E3 pre/live and E2 on fx-10h in week 16 of a two-week
+// semifinal, leading and trailing (fixture mode, no network).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { League, LeagueRules, Matchup, Stamped } from "../../src/providers/platform.js";
-import { bankedPoints, bankedPointsWarning } from "../../src/mcp/tools/common.js";
+import { bankedPoints } from "../../src/mcp/tools/common.js";
 import { faulty } from "./helpers/faults.js";
 import { ESPN_FIXTURES, call, connect, makeWorld } from "./helpers/world.js";
 
@@ -74,19 +73,10 @@ describe("bankedPoints (Stage C matchup-multiweek-prior-points-ignored)", () => 
     expect(bankedPoints(ms, RULES, 16, 9)).toBeNull();
     expect(bankedPoints(ms, RULES, 12, 2)).toBeNull();
   });
-
-  it("the warning names the period, its earlier weeks and the score so far", () => {
-    expect(bankedPointsWarning({ period: 15, weeks: [15], me: 150.04, opp: 80 }, 16)).toBe(
-      "partial: matchup period 15 also scores week 15 (150–80 so far): the win probability scores week 16 alone, not the period",
-    );
-    expect(bankedPointsWarning({ period: 17, weeks: [18, 19], me: 90, opp: 150.25 }, 20)).toBe(
-      "partial: matchup period 17 also scores week 18, 19 (90–150.3 so far): the win probability scores week 20 alone, not the period",
-    );
-  });
 });
 
 describe("E3 and E2 in week 16 of a two-week semifinal (fx-10h)", () => {
-  it("each answer names the period's score so far, leading or trailing, and is partial", async () => {
+  it("P(win), E2's mode and the carried score follow the period, leading or trailing", async () => {
     const m = JSON.parse(readFileSync(path.join(FX, "manifest.json"), "utf8")) as {
       my_team_id: number;
     };
@@ -162,12 +152,15 @@ describe("E3 and E2 in week 16 of a two-week semifinal (fx-10h)", () => {
       });
       const c = await connect(world, { options: { toolset: "full" }, services: s });
       try {
+        /** Per tool: [P(win), the margin E3 reports (delta_vs_next.value)] leading, then trailing. */
+        const seen: Record<string, { p: number; margin: number }[]> = {};
         for (const [lead, said] of [
           [[150, 80], "150–80"],
           [[80, 150], "80–150"],
         ] as const) {
           week15 = lead;
-          const line = `partial: matchup period 15 also scores week 15 (${said} so far): the win probability scores week 16 alone, not the period`;
+          const carriedLine = (tail: string) =>
+            `a multi-week matchup period: the earlier weeks' ${said} is carried into ${tail}`;
           for (const [name, args] of [
             ["espn_analyze_matchup", { mode: "pre", n_sims: 2000, seed: 1 }],
             ["espn_analyze_matchup", { mode: "live", n_sims: 2000, seed: 1 }],
@@ -176,9 +169,39 @@ describe("E3 and E2 in week 16 of a two-week semifinal (fx-10h)", () => {
             const r = await call(c.client, name, args);
             const label = `${name} ${JSON.stringify(args)} ${said}`;
             expect(r.isError, `${label}: ${JSON.stringify(r.body).slice(0, 400)}`).toBe(false);
-            expect(r.body.warnings as string[], label).toContain(line);
-            expect(r.body.partial, label).toBe(true);
+            // never the week alone: no such warning, and the engine says what it carried
+            expect(
+              (r.body.warnings as string[]).filter((w) => w.includes("alone, not the period")),
+              label,
+            ).toEqual([]);
+            const d = r.body.data as {
+              p_win?: number;
+              p_win_before?: number | null;
+              mode?: string;
+              rec: { assumptions: { text: string }[]; delta_vs_next: { value: number } };
+            };
+            const texts = d.rec.assumptions.map((a) => a.text);
+            const key = name === "espn_analyze_lineup" ? name : `${name}:${args.mode}`;
+            if (name === "espn_analyze_lineup") {
+              expect(texts, label).toContain(
+                carriedLine("P(win) and the mode, which are the period's"),
+              );
+              // the week alone favours the opponent by about 26: +70 is a lead, −70 a deficit
+              expect(d.mode, label).toBe(lead[0] > lead[1] ? "protect" : "chase");
+            } else expect(texts, label).toContain(carriedLine("P(win), which is the period's"));
+            (seen[key] ??= []).push({
+              p: d.p_win ?? d.p_win_before ?? Number.NaN,
+              margin: d.rec.delta_vs_next.value,
+            });
           }
+        }
+        for (const [k, [ahead, behind]] of Object.entries(seen)) {
+          if (ahead === undefined || behind === undefined) throw new Error(`${k}: two calls`);
+          // identical before the fix (the week scored alone); now 70 ahead beats 70 behind by far
+          expect(ahead.p - behind.p, k).toBeGreaterThan(0.3);
+          // E3's margin is the period's: the same week, 140 points apart (+70 against −70)
+          if (k !== "espn_analyze_lineup")
+            expect(ahead.margin - behind.margin, k).toBeCloseTo(140, 2);
         }
         // control: the period's first week is the whole score so far — nothing to carry, not said
         const first = await call(c.client, "espn_analyze_matchup", {
