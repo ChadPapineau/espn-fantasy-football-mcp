@@ -398,31 +398,64 @@ describe("format validation at the prompt (plan 02 §2.1; ADV OBJ-15)", () => {
     const c = fakeCookies("setup-short", 60);
     const h = harness({
       cookies: c,
+      // each round asks the SWID, then espn_s2, before either is judged (Stage C finding
+      // setup-hidden-prompt-echo-burst): round 1 refuses both, round 2 takes both
       answers: [
         { kind: "answer", value: c.swid.slice(1, -1) },
-        { kind: "answer", value: `  ${c.swid}\n` },
         { kind: "answer", value: c.espn_s2.slice(0, 39) },
+        { kind: "answer", value: `  ${c.swid}\n` },
         { kind: "answer", value: c.espn_s2 },
       ],
     });
     const r = await runSetup(h.req(), h.deps);
     expect(r.exitCode).toBe(0);
+    expect(h.asked.map((a) => a.hidden)).toEqual([false, true, false, true]);
     expect(h.lines).toContain("SWID must keep its braces: {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}.");
     expect(h.lines.some((l) => l.startsWith("espn_s2 is shorter than 40 characters"))).toBe(true);
     expect(h.lines.some((l) => l.startsWith("espn_s2 is shorter than expected"))).toBe(true);
     expect(h.keychain.stored?.cookies).toEqual(c);
     h.assertClean();
   });
-  it(`${String(SETUP_MAX_ATTEMPTS)} invalid answers → exit 2; nothing stored, no self-test, no config, no request`, async () => {
+  it("a refused SWID is asked again only after the hidden espn_s2 question (a paste's rest never meets a visible one)", async () => {
+    const c = fakeCookies("setup-order");
     const h = harness({
+      cookies: c,
+      answers: [
+        { kind: "answer", value: c.swid.slice(1, -1) },
+        { kind: "answer", value: c.espn_s2 },
+        { kind: "answer", value: c.swid },
+      ],
+    });
+    const r = await runSetup(h.req(), h.deps);
+    expect(r.exitCode).toBe(0);
+    // SWID (visible), espn_s2 (hidden) — and only then the refused SWID, visible again
+    expect(h.asked.map((a) => [a.q, a.hidden])).toEqual([
+      [SETUP_TEXT.askSwid, false],
+      [SETUP_TEXT.askEspnS2, true],
+      [SETUP_TEXT.askSwid, false],
+    ]);
+    // the refusal is said after both answers are in, value-free
+    const refusal = h.lines.indexOf(
+      "SWID must keep its braces: {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}.",
+    );
+    expect(refusal).toBeGreaterThanOrEqual(0);
+    expect(h.keychain.stored?.cookies).toEqual(c);
+    h.assertClean();
+  });
+  it(`${String(SETUP_MAX_ATTEMPTS)} invalid answers → exit 2; nothing stored, no self-test, no config, no request`, async () => {
+    const c = fakeCookies("setup-invalid");
+    const h = harness({
+      // the SWID refused three times; espn_s2, valid in round 1, is never asked again
       answers: [
         { kind: "answer", value: "x" },
+        { kind: "answer", value: c.espn_s2 },
         { kind: "answer", value: "y" },
         { kind: "answer", value: "z" },
       ],
     });
     const r = await runSetup(h.req(), h.deps);
     expect(r.exitCode).toBe(2);
+    expect(h.asked.map((a) => a.hidden)).toEqual([false, true, false, false]);
     expect(h.lines).toContain(SETUP_TEXT.tooManyAttempts);
     expect(
       h.keychain.writes + h.file.writes + h.selftests.length + h.patches.length + h.calls.length,

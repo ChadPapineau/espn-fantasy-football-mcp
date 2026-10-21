@@ -262,15 +262,14 @@ export async function runSetup(req: SetupRequest, deps: SetupDeps): Promise<Setu
 
   // --- steps 1–3: instructions, SWID (echoed), espn_s2 (hidden) ---------------------------------
   for (const line of SETUP_TEXT.instructions) out(line);
-  const swid = await askValid(deps, "swid");
-  if (!swid.ok) return result({ exitCode: swid.exitCode });
-  const s2 = await askValid(deps, "espn_s2");
-  if (!s2.ok) return result({ exitCode: s2.exitCode });
-  const cookies: EspnCookies = { espn_s2: s2.value.value, swid: swid.value.value };
+  const asked = await askCookies(deps);
+  if (!asked.ok) return result({ exitCode: asked.exitCode });
+  const { swid, s2 } = asked.value;
+  const cookies: EspnCookies = { espn_s2: s2.value, swid: swid.value };
   registerCredentialRedaction(deps.registrar, cookies);
   out(`SWID ok (${String(cookies.swid.length)} chars)`);
   out(`espn_s2 ok (${String(cookies.espn_s2.length)} chars)`);
-  if (s2.value.warning) out(ESPN_S2_SHORT_WARNING);
+  if (s2.warning) out(ESPN_S2_SHORT_WARNING);
 
   // --- step 4: one store per install (the launchd-context self-test decides) -------------------
   const doSelftest = async (): Promise<KeychainSelftestResult> => {
@@ -530,27 +529,59 @@ async function deleteQuietly(store: CredentialStore): Promise<void> {
   }
 }
 
-async function askValid(
+/** One answer to one field's question: the value as pasted, or the end of setup (timeout, closed). */
+async function askOne(deps: SetupDeps, field: "swid" | "espn_s2"): Promise<Step<string>> {
+  const a = await deps.prompt.ask(field === "swid" ? SETUP_TEXT.askSwid : SETUP_TEXT.askEspnS2, {
+    hidden: field === "espn_s2",
+    timeoutMs: SETUP_PROMPT_TIMEOUT_MS,
+  });
+  if (a.kind === "timeout") {
+    deps.out(SETUP_TEXT.timeout);
+    return { ok: false, exitCode: EXIT_CODES.error };
+  }
+  if (a.kind === "closed") {
+    deps.out(SETUP_TEXT.closed);
+    return { ok: false, exitCode: EXIT_CODES.error };
+  }
+  return { ok: true, value: normalizePastedValue(a.value) };
+}
+
+/** A field's accepted value, and whether it carries the short-value warning. */
+interface Accepted {
+  readonly value: string;
+  readonly warning: boolean;
+}
+
+/**
+ * Steps 2–3: the SWID (visible) and espn_s2 (hidden), each asked in that order BEFORE either is
+ * judged, then re-asked — up to SETUP_MAX_ATTEMPTS rounds — only where refused. So a refused SWID
+ * is asked again only after the hidden question has taken whatever was pasted with it: a SWID and
+ * espn_s2 pasted together, the SWID refused (no braces), with espn_s2 arriving a read later, never
+ * reaches the re-asked VISIBLE question, which would draw it (Stage C finding
+ * setup-hidden-prompt-echo-burst; the prompt keeps a burst from any visible question too). Each
+ * refusal is said, value-free, once both answers are in.
+ */
+async function askCookies(
   deps: SetupDeps,
-  field: "swid" | "espn_s2",
-): Promise<Step<{ value: string; warning: boolean }>> {
+): Promise<Step<{ readonly swid: Accepted; readonly s2: Accepted }>> {
+  let swid: Accepted | null = null;
+  let s2: Accepted | null = null;
   for (let attempt = 0; attempt < SETUP_MAX_ATTEMPTS; attempt++) {
-    const a = await deps.prompt.ask(field === "swid" ? SETUP_TEXT.askSwid : SETUP_TEXT.askEspnS2, {
-      hidden: field === "espn_s2",
-      timeoutMs: SETUP_PROMPT_TIMEOUT_MS,
-    });
-    if (a.kind === "timeout") {
-      deps.out(SETUP_TEXT.timeout);
-      return { ok: false, exitCode: EXIT_CODES.error };
+    const swidAnswer: Step<string> | null = swid === null ? await askOne(deps, "swid") : null;
+    if (swidAnswer !== null && !swidAnswer.ok) return swidAnswer;
+    const s2Answer: Step<string> | null = s2 === null ? await askOne(deps, "espn_s2") : null;
+    if (s2Answer !== null && !s2Answer.ok) return s2Answer;
+    if (swidAnswer !== null) {
+      const verdict = validateSwid(swidAnswer.value);
+      if (verdict.ok) swid = { value: swidAnswer.value, warning: verdict.warning !== null };
+      else deps.out(formatRefusalText(verdict));
     }
-    if (a.kind === "closed") {
-      deps.out(SETUP_TEXT.closed);
-      return { ok: false, exitCode: EXIT_CODES.error };
+    if (s2Answer !== null) {
+      const verdict = validateEspnS2(s2Answer.value);
+      if (verdict.ok) s2 = { value: s2Answer.value, warning: verdict.warning !== null };
+      else deps.out(formatRefusalText(verdict));
     }
-    const value = normalizePastedValue(a.value);
-    const verdict = field === "swid" ? validateSwid(value) : validateEspnS2(value);
-    if (verdict.ok) return { ok: true, value: { value, warning: verdict.warning !== null } };
-    deps.out(formatRefusalText(verdict));
+    if (swid !== null && s2 !== null) return { ok: true, value: { swid, s2 } };
   }
   deps.out(SETUP_TEXT.tooManyAttempts);
   return { ok: false, exitCode: EXIT_CODES.usage };

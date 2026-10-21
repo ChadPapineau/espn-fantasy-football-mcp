@@ -57,11 +57,22 @@ export const TYPED_AHEAD_NOTE =
   "(typed before the first question: if the terminal showed it as you typed, clear this terminal's scrollback and any session log)";
 
 /**
- * Said on a terminal when a visible question drops an unfinished line typed while no visible
- * question waited (never drawn, so it cannot be edited where it would be seen).
+ * Said on a terminal when a visible question drops keys it did not draw: an unfinished line typed
+ * while no visible question waited, or the rest of a burst still arriving when it was asked (never
+ * drawn, so it cannot be edited where it would be seen).
  */
 export const DISCARDED_NOTE =
-  "(keys typed before this question, with no line break after them, were dropped unshown: answer here, and paste anything else again when it is asked for)";
+  "(keys that reached this question before it was asked were dropped unshown: answer here, and paste anything else again when it is asked for)";
+
+/**
+ * How long the input must have been quiet before a visible question draws: a question asked while
+ * keys are still arriving (the rest of a paste, a read the kernel split, a second write of one
+ * selection) keeps them muted until this long passes with no key, then drops them unshown — no
+ * person reads a new question and types at it this fast (Stage C finding
+ * setup-hidden-prompt-echo-burst: a refused SWID pasted with espn_s2, espn_s2 a read later, was
+ * drawn in full by the re-asked SWID question).
+ */
+export const BURST_QUIET_MS = 150;
 
 /**
  * Said on a terminal when a hidden question finds an unfinished line typed while no visible question
@@ -147,6 +158,13 @@ export function createTerminalPrompt(io: {
   // the waiting visible question's own editor
   let visible: Interface | null = null;
   let lastReturnAt = 0;
+  // when the last key was read (any editor), and whether a visible question is waiting for the
+  // input to go quiet (its keys stay muted) — and dropped a whole muted line meanwhile
+  let lastKeyAt = Number.NEGATIVE_INFINITY;
+  let settling = false;
+  let burstDropped = false;
+  // a SIGCONT listener is waiting (at most one, however many Ctrl-Z)
+  let contPending = false;
 
   const setRaw = (on: boolean): void => {
     const s = io.stdin as { setRawMode?: (mode: boolean) => unknown };
@@ -170,18 +188,32 @@ export function createTerminalPrompt(io: {
     pipe?.close();
   };
 
-  // readline's own suspend, on the terminal this prompt reads: raw mode off first, on again after
+  // readline's own suspend, on the terminal this prompt reads: raw mode off first, on again after.
+  // A stop that happens returns from kill only once continued; a stop the system discards (an
+  // orphaned process group, SIGTSTP ignored) returns at once — either way raw mode is taken again
+  // right after it, so the terminal never echoes while a question waits (Stage C finding
+  // setup-hidden-prompt-echo-burst: a discarded stop left ECHO on at the hidden question). SIGCONT
+  // takes it again too, after a shell restored its own modes on `fg`.
   const suspend = (): void => {
     setRaw(false);
-    process.once("SIGCONT", () => {
+    if (!contPending) {
+      contPending = true;
+      process.once("SIGCONT", () => {
+        contPending = false;
+        if (!closed) setRaw(true);
+      });
+    }
+    try {
+      process.kill(process.pid, "SIGTSTP");
+    } finally {
       if (!closed) setRaw(true);
-    });
-    process.kill(process.pid, "SIGTSTP");
+    }
   };
 
   // every key read on the terminal, in order, to exactly one editor
   function onKey(s: string | undefined, key: Key | undefined): void {
     if (closed) return;
+    lastKeyAt = Date.now();
     const k: Key = key ?? {};
     const plain = k.ctrl !== true && k.meta !== true && k.shift !== true;
     // the LF of a CR LF pair ends no second line, whichever editor took the CR (readline's rule)
@@ -210,6 +242,11 @@ export function createTerminalPrompt(io: {
     mutedEarly = false;
     if (dropMuted) {
       dropMuted = false;
+      return;
+    }
+    // the rest of a burst that reached a visible question before it was asked: dropped unshown
+    if (settling) {
+      burstDropped = true;
       return;
     }
     deliver(line, early, false);
@@ -250,7 +287,13 @@ export function createTerminalPrompt(io: {
   // a visible question never edits a line it did not draw: an unfinished muted line is dropped
   const dropUnshown = (): void => {
     const m = muted;
-    if (m === null || closed || m.line === "") return;
+    const dropped = burstDropped;
+    burstDropped = false;
+    if (m === null || closed) return;
+    if (m.line === "") {
+      if (dropped) io.out.write(`${DISCARDED_NOTE}\n`);
+      return;
+    }
     const early = mutedEarly;
     // ends the muted line as Enter would (readline resets the line and its undo history); dropped
     dropMuted = true;
@@ -260,12 +303,44 @@ export function createTerminalPrompt(io: {
     if (early) io.out.write(`${TYPED_AHEAD_NOTE}\n`);
   };
 
+  // a visible question asked while keys are still arriving: they stay muted until the input has
+  // been quiet for BURST_QUIET_MS (whole lines are dropped as they end), then the question draws
+  const afterQuiet = (): Promise<void> =>
+    new Promise((resolve) => {
+      settling = true;
+      const check = (): void => {
+        const quiet = Date.now() - lastKeyAt;
+        if (!closed && quiet < BURST_QUIET_MS) {
+          setTimeout(check, BURST_QUIET_MS - quiet);
+          return;
+        }
+        settling = false;
+        resolve();
+      };
+      check();
+    });
+
   const ask = (
     question: string,
     opts: { hidden: boolean; timeoutMs: number },
   ): Promise<PromptAnswer> => {
     open();
     asked = true;
+    if (
+      terminal &&
+      !opts.hidden &&
+      !closed &&
+      queue.length === 0 &&
+      Date.now() - lastKeyAt < BURST_QUIET_MS
+    )
+      return afterQuiet().then(() => askNow(question, opts));
+    return askNow(question, opts);
+  };
+
+  const askNow = (
+    question: string,
+    opts: { hidden: boolean; timeoutMs: number },
+  ): Promise<PromptAnswer> => {
     const queued = queue.shift();
     if (queued === undefined && terminal) {
       if (!opts.hidden) dropUnshown();
