@@ -901,6 +901,47 @@ describe("fitToBudget (20 000 chars; explicit truncation, never silent)", () => 
   });
 });
 
+describe("fitToBudget: a step's warning stands for earlier ones", () => {
+  it("dropKeys removes the named earlier warnings; a same-key warning replaces in place", () => {
+    const env = buildEnvelope({
+      data: { players: [], blob: "b".repeat(5000) },
+      requestId: RID,
+      nowMs: NOW,
+      inputs: [],
+    });
+    const line = (n: number): string => `cut ${String(n)} ${"w".repeat(290)}`;
+    let n = 0;
+    const cut = (d: unknown) => {
+      const data = d as { players: unknown[]; blob: string };
+      if (data.blob.length === 0) return null;
+      n += 1;
+      return {
+        data: { ...data, blob: data.blob.slice(1000) },
+        warning: line(n),
+        key: `k${String(n)}`,
+      };
+    };
+    const merge = (d: unknown) =>
+      n === 0
+        ? null
+        : { data: d, warning: "every cut said once", key: "k1", dropKeys: ["k2", "k3", "k4"] };
+    const budget = serializeEnvelope(env).length - 4000;
+    // five cuts empty the blob, but their five lines keep it over budget
+    const r0 = fitToBudget(env, budget, "players", { pageable: false, hint: "h", trims: [cut] });
+    expect(r0.ok).toBe(false);
+    n = 0;
+    const r = fitToBudget(env, budget, "players", {
+      pageable: false,
+      hint: "h",
+      trims: [cut, merge],
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.warnings).toEqual(["every cut said once", line(5)]);
+    expect(serializeEnvelope(r.envelope).length).toBeLessThanOrEqual(budget);
+  });
+});
+
 describe("toToolResult (plan 01 §4.2)", () => {
   it("one text block with the same JSON; structuredContent only when asked", () => {
     const env = listEnv(1);

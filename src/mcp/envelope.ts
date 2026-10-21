@@ -465,12 +465,15 @@ export const TRUNCATION_HINTS = Object.freeze({
 /**
  * One tool-specific budget step: given the current `data`, a smaller one plus the warning naming
  * what was cut, or null when nothing is left to cut. `dropPaths` are untrusted-field paths removed.
+ * A later step's warning replaces an earlier one with the same `key`; `dropKeys` names earlier
+ * steps' warnings this step's own warning stands for (they leave warnings[]).
  */
 export type BudgetTrim = (data: unknown) => {
   readonly data: unknown;
   readonly warning: string;
   readonly key?: string;
   readonly dropPaths?: readonly string[];
+  readonly dropKeys?: readonly string[];
 } | null;
 
 /** How `fitToBudget` treats paging. */
@@ -510,6 +513,7 @@ function applyTrims<D>(
       if (r === null) break;
       applied = true;
       data = r.data;
+      for (const k of r.dropKeys ?? []) notes.delete(k);
       notes.set(r.key ?? `#${String(index)}`, r.warning);
       for (const p of r.dropPaths ?? []) dropped.add(p);
     }

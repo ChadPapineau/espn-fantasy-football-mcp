@@ -76,7 +76,7 @@ import {
 } from "../bounds.js";
 import { toDataInputs, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
-import { beforeSideEffect, defineTool, dropLastTrim, type ToolContext } from "../define.js";
+import { beforeSideEffect, defineTool, type ToolContext } from "../define.js";
 import { remainingDeadline } from "../call.js";
 import {
   bankedPoints,
@@ -493,30 +493,52 @@ function coarseWeek(w: unknown): unknown {
   };
 }
 
+/** E1's warning once every assumption line went to fit the budget (projectionTrims step 8). */
+export const EVERY_ASSUMPTION_OMITTED =
+  "projections[].assumptions omitted to fit the budget, shared and own (detail full, fewer players: stated)";
+
 /**
  * E1's budget steps (plan 07 C8 — 10 000 characters; plan 07 §5.2 — `compact` keeps every
  * identifier, every decision number, every Dist): a whole roster (≤ 16 players) at the default
  * detail is answered for every player, the rows thinned in this order before any player is dropped —
  * (1) an assumption several projections share is stated ONCE in warnings[] with the player ids it
- * applies to (lossless); (2) drivers beyond each player's largest go; (3) weeks beyond the first go
+ * applies to, or those it does not (lossless); (2) drivers beyond each player's largest go; (3) weeks beyond the first go
  * (the next game's row stays); (4) drivers go; (5) for a horizon with a rest-of-season total, the
  * weekly rows go and `ros_total` carries the horizon; (6) the numbers go to the precision a decision
  * reads — points to 0.1, probabilities to 0.01 (every Dist, comparator and flag stays); (7) the
- * assumptions only one player carries go, their player ids said; only then (8) players leave from
- * the end ONE at a time. Before, the list was only halved: a 16-player roster came back as 8 (week)
- * or 3 (ROS) of 16, and every Skill that projects a roster this way silently read part of it (Stage
- * C finding projections-roster-truncated); attempt 1 stopped at (5), and a 16-player roster under
- * `full` at horizon week — v2's rows are the longest — still lost a player on the seeded fixture
- * league in 68 of its 130 sets. Each step says what it removed and how to get it. Under
- * `detail: "full"` (every week asked for) only the lossless step (1) runs before (8).
+ * assumptions only one player carries go, their player ids said; (8) the shared ones' lines go
+ * from warnings[] too, one line saying every assumption was omitted; only then (9) players leave
+ * from the end ONE at a time. Before, the list was only halved: a 16-player roster came back as 8
+ * (week) or 3 (ROS) of 16, and every Skill that projects a roster this way silently read part of it
+ * (Stage C finding projections-roster-truncated); attempt 1 stopped at (5), and a 16-player roster
+ * under `full` at horizon week — v2's rows are the longest — still lost a player on the seeded
+ * fixture league in 68 of its 130 sets; attempt 2 stopped at (7), and in a week with no market line
+ * yet (most rows carry "no market line", the state the weekly Skill meets on a Tuesday) 2–12 of 130
+ * sets still lost one. Every warning counts against the budget, so each is short, a shared
+ * assumption names the players it does NOT apply to when that list is shorter ("every projection
+ * but …"), and (8) trades every assumption line for one. Each step says what it removed and how to
+ * get it. Under `detail: "full"` (every week asked for) only the lossless step (1) runs before (9).
  */
 export function projectionTrims(total: number, full = false): readonly AnalyticsTrim[] {
   const assumptionKey = (a: { text: string; revisit_trigger: string }): string =>
     `${a.text}\u0000${a.revisit_trigger}`;
+  // each warnings[] line the assumption steps wrote, by key (step 8 trades them all for one)
+  const assumptionLines = new Map<string, number>();
   // one shared assumption per step (each its own warnings[] line, ≤ the envelope's 400 chars),
-  // the largest saving first; one whose line would not fit stays on its rows
+  // the largest saving first; one whose line would not fit stays on its rows. Its players are named,
+  // or — when shorter — the players it does not apply to ("every projection but …")
   const hoist: AnalyticsTrim = (d) => {
     const rows = projRows(d);
+    const whom = (ids: readonly number[]): string => {
+      const named = `projections ${ids.map(String).join(", ")}`;
+      const others = rows.filter((r) => r.player_id === null || !ids.includes(r.player_id));
+      if (others.some((r) => r.player_id === null)) return named;
+      const but =
+        others.length === 0
+          ? "every projection"
+          : `every projection but ${others.map((r) => String(r.player_id)).join(", ")}`;
+      return but.length < named.length ? but : named;
+    };
     const holders = new Map<string, { a: ProjRow["assumptions"][number]; ids: number[] }>();
     for (const r of rows) {
       if (r.player_id === null) continue;
@@ -530,7 +552,7 @@ export function projectionTrims(total: number, full = false): readonly Analytics
     let best: { k: string; line: string; saving: number } | null = null;
     for (const [k, h] of holders) {
       if (h.ids.length < 2) continue;
-      const line = `assumption of projections ${h.ids.map(String).join(", ")}: ${h.a.text} (revisit when ${h.a.revisit_trigger})`;
+      const line = `assumption of ${whom(h.ids)}: ${h.a.text} (revisit when ${h.a.revisit_trigger})`;
       if (line.length > WARNING_MAX_CHARS) continue;
       const saving = h.ids.length * JSON.stringify(h.a).length - line.length;
       if (best === null || saving > best.saving) best = { k, line, saving };
@@ -542,17 +564,31 @@ export function projectionTrims(total: number, full = false): readonly Analytics
         ? r
         : { ...r, assumptions: r.assumptions.filter((a) => assumptionKey(a) !== hoisted) },
     );
+    const key = `projection_assumption:${hoisted}`;
+    assumptionLines.set(key, best.line.length);
+    return { data: withRows(d, thinned), warning: best.line, key };
+  };
+  // the last player goes, one at a time — and the warning names every player left out, so the
+  // caller asks for exactly them (Stage C finding projections-roster-truncated: "pass fewer players"
+  // named nobody, and no Skill could tell whom the answer lacked)
+  const omitted: number[] = [];
+  const dropLast: AnalyticsTrim = (d) => {
+    const rows = projRows(d);
+    if (rows.length <= 1) return null;
+    const last = rows[rows.length - 1];
+    if (last?.player_id !== null && last?.player_id !== undefined) omitted.unshift(last.player_id);
+    const kept = rows.slice(0, -1);
+    const ids = omitted.map(String).join(", ");
+    const named = `projections truncated to ${String(kept.length)} of ${String(total)} to fit the budget; call again with player_ids [${ids}] for the rest`;
     return {
-      data: withRows(d, thinned),
-      warning: best.line,
-      key: `projection_assumption:${hoisted}`,
+      data: withRows(d, kept),
+      warning:
+        named.length <= WARNING_MAX_CHARS
+          ? named
+          : `projections truncated to ${String(kept.length)} of ${String(total)} to fit the budget; pass the players not returned (player_ids in batches) for the rest`,
+      key: "projections",
     };
   };
-  const dropLast = dropLastTrim(
-    "projections",
-    total,
-    "pass fewer players (player_ids in batches) for the rest",
-  ) as AnalyticsTrim;
   // `full` asks for every week: lossless first, then players one at a time (never thinner rows)
   if (full) return [hoist, dropLast];
   return [
@@ -575,7 +611,7 @@ export function projectionTrims(total: number, full = false): readonly Analytics
           rows.map((r) => ({ ...r, drivers: top(r) })),
         ),
         warning:
-          "projections[].drivers cut to each player's largest to fit the 10000-character budget; detail: full with fewer players shows them all",
+          "projections[].drivers cut to each player's largest to fit the budget (detail full, fewer players: all)",
         key: "projection_drivers",
       };
     },
@@ -588,7 +624,7 @@ export function projectionTrims(total: number, full = false): readonly Analytics
           rows.map((r) => ({ ...r, weeks: r.weeks.slice(0, 1) })),
         ),
         warning:
-          "projections[].weeks cut to the first week to fit the 10000-character budget (ros_total kept); detail: full with fewer players shows every week",
+          "projections[].weeks cut to the first to fit the budget (ros_total kept; detail full, fewer players: every week)",
         key: "projection_weeks",
       };
     },
@@ -600,8 +636,7 @@ export function projectionTrims(total: number, full = false): readonly Analytics
           d,
           rows.map((r) => ({ ...r, drivers: [] })),
         ),
-        warning:
-          "projections[].drivers omitted to fit the 10000-character budget; fewer players show them",
+        warning: "projections[].drivers omitted to fit the budget (fewer players show them)",
         key: "projection_drivers",
       };
     },
@@ -615,7 +650,7 @@ export function projectionTrims(total: number, full = false): readonly Analytics
           rows.map((r) => ({ ...r, weeks: [] })),
         ),
         warning:
-          "projections[].weeks omitted to fit the 10000-character budget: ros_total carries the horizon; fewer players (or horizon: week) give the weekly rows",
+          "projections[].weeks omitted to fit the budget: ros_total carries the horizon (fewer players, or horizon week: weekly rows)",
         key: "projection_weeks",
       };
     },
@@ -630,8 +665,7 @@ export function projectionTrims(total: number, full = false): readonly Analytics
       if (JSON.stringify(coarse) === JSON.stringify(rows)) return null;
       return {
         data: withRows(d, coarse),
-        warning:
-          "projections[] numbers rounded to fit the 10000-character budget (points to 0.1, probabilities to 0.01); fewer players give three decimals",
+        warning: "projections[] numbers rounded to fit the budget (points 0.1, probabilities 0.01)",
         key: "projection_precision",
       };
     },
@@ -642,20 +676,33 @@ export function projectionTrims(total: number, full = false): readonly Analytics
         .filter((r) => r.player_id !== null && r.assumptions.length > 0)
         .map((r) => String(r.player_id));
       if (ids.length === 0) return null;
-      const tail =
-        " to fit the 10000-character budget; detail: full with fewer players states them";
+      const tail = " to fit the budget (detail full, fewer players: stated)";
       const named = `projections[].assumptions of ${ids.join(", ")} omitted${tail}`;
+      const warning =
+        named.length <= WARNING_MAX_CHARS
+          ? named
+          : `projections[].assumptions of ${String(ids.length)} players omitted${tail}`;
+      assumptionLines.set("projection_assumptions", warning.length);
       return {
         data: withRows(
           d,
           rows.map((r) => (r.player_id === null ? r : { ...r, assumptions: [] })),
         ),
-        warning:
-          named.length <= WARNING_MAX_CHARS
-            ? named
-            : `projections[].assumptions of ${String(ids.length)} players omitted${tail}`,
+        warning,
         key: "projection_assumptions",
       };
+    },
+    // the shared assumptions' lines (step 1) go too: one line for every assumption line written —
+    // taken only when it is shorter than the lines it stands for
+    (d) => {
+      const shared = [...assumptionLines.keys()].filter((k) => k !== "projection_assumptions");
+      if (shared.length === 0) return null;
+      const warning = EVERY_ASSUMPTION_OMITTED;
+      let saved = 0;
+      for (const n of assumptionLines.values()) saved += n + 3;
+      if (saved <= warning.length + 3) return null;
+      assumptionLines.clear();
+      return { data: d, warning, key: "projection_assumptions", dropKeys: shared };
     },
     dropLast,
   ];
@@ -1219,7 +1266,12 @@ const arr = (d: unknown, k: string): unknown[] => {
 };
 
 /** One E2/E5 budget step (envelope.ts BudgetTrim with a required key). */
-export type AnalyticsTrim = (d: unknown) => { data: unknown; warning: string; key: string } | null;
+export type AnalyticsTrim = (d: unknown) => {
+  data: unknown;
+  warning: string;
+  key: string;
+  dropKeys?: readonly string[];
+} | null;
 
 /** The rec's confidence inputs go first in every analytics answer: `data.inputs` carries them. */
 export const REC_INPUTS_TRIM: AnalyticsTrim = (d) => {
