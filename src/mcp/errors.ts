@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import type { StandardSchemaWithJSON } from "@modelcontextprotocol/server";
 import type { z } from "zod/v4";
 import { SEASON_RENEWAL_TEXT } from "../config/schema.js";
+import { ROSTER_EMPTY_TEXT } from "../domain/analytics/errors.js";
 import {
   isEspnView,
   isUpstreamBudgetExhausted,
@@ -161,6 +162,8 @@ export const SERVER_HINTS = Object.freeze({
     "In a terminal run: eff snapshot roster (eff install-launchd takes one every night), then read it again.",
   /** A league 404 on a defaulted new season before its renewal (config SEASON_RENEWAL_TEXT). */
   seasonAwaitingRenewal: SEASON_RENEWAL_TEXT.hint,
+  /** An analytics engine's `roster_empty` (a league before its draft): the domain's fixed text. */
+  rosterEmpty: ROSTER_EMPTY_TEXT.hint,
 });
 const SERVER_HINT_SET: ReadonlySet<string> = new Set(Object.values(SERVER_HINTS));
 
@@ -177,6 +180,11 @@ export const SERVER_MESSAGES = Object.freeze({
    * id" (Stage C finding league-rollover-not-found-misdiagnosed; config SEASON_RENEWAL_TEXT).
    */
   seasonAwaitingRenewal: SEASON_RENEWAL_TEXT.message,
+  /**
+   * An analytics engine's `roster_empty`: a roster before the draft is not "a team, player or week
+   * not in this league" (Stage C finding analytics-empty-roster-validation).
+   */
+  rosterEmpty: ROSTER_EMPTY_TEXT.message,
 });
 const SERVER_MESSAGE_SET: ReadonlySet<string> = new Set(Object.values(SERVER_MESSAGES));
 

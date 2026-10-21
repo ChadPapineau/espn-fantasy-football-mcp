@@ -3,10 +3,16 @@
 // every roster with no entries. The analytics tools refused it as VALIDATION ("The arguments are
 // invalid … fix the arguments") with no field — though their arguments were valid — so a weekly or
 // start-sit question in August sent the model to fix arguments it could not fix. Each now answers
-// NOT_FOUND with reason `roster_empty`. The recorded league-b, its rosters emptied on the way in (the
-// fixture fetch is wrapped, nothing on disk changes), under the full toolset. No network.
+// NOT_FOUND with reason `roster_empty` and the fixed texts that say the draft has not filled the roster
+// yet — on the wire, not only on the engine's error: the mapper shows a message or hint only from its
+// own server table, so a text the table does not list never arrived and the answer read "not in this
+// league … check the id or week" (the verifier's round-2 finding). The recorded league-b, its rosters
+// emptied on the way in (the fixture fetch is wrapped, nothing on disk changes), under the full
+// toolset. No network.
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ROSTER_EMPTY_TEXT } from "../../src/domain/analytics/errors.js";
+import { ERROR_TABLE } from "../../src/mcp/errors.js";
 import type { FetchLike } from "../../src/providers/espn/index.js";
 import { call, connect, makeWorld, type World } from "./helpers/world.js";
 
@@ -60,12 +66,20 @@ describe("before the draft: the analytics tools answer roster_empty, never VALID
     "espn_analyze_matchup",
     "espn_analyze_schedule",
   ])
-    it(`${tool} {}: NOT_FOUND, reason roster_empty`, async () => {
+    it(`${tool} {}: NOT_FOUND, reason roster_empty, the draft's texts on the wire`, async () => {
       const r = await call(conn!.client, tool, {});
       expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(true);
       const err = (r.body as { error: Record<string, unknown> }).error;
       expect(err.code).toBe("NOT_FOUND");
       expect(err.reason).toBe("roster_empty");
-      expect(err.hint).not.toMatch(/fix the arguments/);
+      expect(err.retryable).toBe(false);
+      // the roster has no players yet — never "fix the arguments", never "check the id or week"
+      expect(err.message).toBe(ROSTER_EMPTY_TEXT.message);
+      expect(err.hint).toBe(ROSTER_EMPTY_TEXT.hint);
+      expect(err.message).not.toBe(ERROR_TABLE.NOT_FOUND.message);
+      expect(err.hint).not.toBe(ERROR_TABLE.NOT_FOUND.hint);
+      expect(err.hint).not.toBe(ERROR_TABLE.VALIDATION.hint);
+      // a league state, not an argument: no field points the model at an argument to change
+      expect(err.field).toBeUndefined();
     }, 120_000);
 });
