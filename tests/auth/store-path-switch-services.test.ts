@@ -300,7 +300,7 @@ describe("`EFF_CREDENTIAL_FILE=<alt> eff setup --storage file` while the server 
 });
 
 describe("the same switch while a job runs (buildEspnStack)", () => {
-  it("a job's calls never delete the row; the next job sends the new value", async () => {
+  it("a job's calls never delete the row and send the new value with no restart; so does the next job", async () => {
     const [a, b] = [fakeCookies("psj-a"), fakeCookies("psj-b")];
     expect(await setup(a, w.clock.nowIso(), "keychain", null)).toBe(0);
     const running = job(null);
@@ -322,13 +322,15 @@ describe("the same switch while a job runs (buildEspnStack)", () => {
     expect(row()).toEqual(switched);
 
     w.clock.advance(60_000);
-    // whatever this job can read, it is never another value than the one setup stored
+    // the running job reads the session.json path config.json now records (its store follows the
+    // recorded path, as the server's does): it sends the value setup stored, with no restart — the
+    // jobs' half of the finding (src/cli/espn-stack.ts recordedCredentialStore)
     for (const r of [
       await auth.getCookieHeader(),
       await auth.getCookieHeaderForProbe(),
       (auth.state(), await auth.getCookieHeader()),
     ])
-      expect(!r.ok || r.header === buildCookieHeader(b)).toBe(true);
+      expect(r.ok && r.header === buildCookieHeader(b)).toBe(true);
     expect(row()).toEqual(switched);
     expect(dailyCheckProbes()).toBe(true);
     running.stack.close();

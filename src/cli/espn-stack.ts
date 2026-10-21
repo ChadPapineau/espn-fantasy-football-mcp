@@ -35,10 +35,19 @@ import type { CliIo } from "./io.js";
 import { nextCredentialCheckAt } from "./launchd.js";
 import type { Logger } from "./log.js";
 
-/** The credential store config.json records (plan 03 §3), opened lazily (nothing touched here). */
+/**
+ * The credential store config.json records (plan 03 §3), opened lazily (nothing touched here). Each
+ * file operation reads the session.json path config.json records at that moment, as the server's
+ * does (src/services/index.ts): a job or command started from an env that names another
+ * EFF_CREDENTIAL_FILE (launchd's plist, an old shell) — or running while `EFF_CREDENTIAL_FILE=<alt>
+ * eff setup --storage file` lands in another terminal — sends the value setup stored, never reads
+ * an empty file at its start path (plan 03 §3, L6; Stage C finding auth-file-path-switch-deletes-row,
+ * the jobs' half).
+ */
 export function recordedCredentialStore(io: CliIo, config: Config): CredentialStore {
   return openCredentialStore(config.credentialStore, {
     filePath: config.credentialFile,
+    ...(config.configDir === "" ? {} : { configDir: config.configDir }),
     home: io.home,
     repoRoot: io.packageRoot,
     xattr: io.xattr,
