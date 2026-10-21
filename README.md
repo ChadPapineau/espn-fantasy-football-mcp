@@ -13,7 +13,7 @@
 
 <p align="center"><em>Unofficial. Not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company.</em></p>
 
-> **Built, in QA — not yet a release.** Phases 1a, 1b, 2 and 3 are built: 34 read-only tools (18 under the default `EFF_TOOLSET=core`), 13 Skills, 13 prompts and 10 resources, read-only by design; the write module is **not built** (its seam is declared in code). Stage C — QA and penetration testing — is in progress, and no version is tagged yet. The [Status](#status) section and the generated tables below (configuration keys, test keys, the registered tools) are current and checked in CI; some prose further down still describes the design in the plan's words ([`docs/plan/`](docs/plan/00-index.md); the state of the build is in [`docs/HANDOFF.md`](docs/HANDOFF.md)).
+> **Built, in QA — not yet a release.** Phases 1a, 1b, 2 and 3 are built: 34 read-only tools (18 under the default `EFF_TOOLSET=core`), 13 Skills, 13 prompts and 10 resources, read-only by design; the write module is **not built** (its seam is declared in code). Stage C — QA and penetration testing — is in progress, and no version is tagged yet. The [Status](#status) section and the generated tables below (configuration keys, test keys, the registered tools) are current and checked in CI. The design sections summarise the plan in its words and cite the section they summarise ([`docs/plan/`](docs/plan/00-index.md), kept as the record of the design); the state of the build is in [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 > **Not affiliated with ESPN — and read this before you use it.** This project is not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company. It uses ESPN's **unofficial, undocumented** fantasy API, authenticated with **your own session cookies**. The Disney Terms of Use, as the research read them, prohibit automated access of this kind and let Disney suspend an account for it. The full, honest disclosure is in [Terms of use and account risk](#terms-of-use-and-account-risk); read it and decide for yourself. "ESPN" is used here only as a plain description of the service this tool reads.
 
@@ -23,7 +23,7 @@
 
 ## What this is
 
-A **planned** local [Model Context Protocol](https://modelcontextprotocol.io/) server, to be written in Node/TypeScript on the official MCP SDK, that gives Claude (Desktop or Code) a **complete, cached, read-only view of your ESPN Fantasy Football league** — settings, rosters, the free-agent pool, transactions, standings, the scoreboard, live scoring, and ESPN's own projections and ownership numbers — together with a set of **decision engines** that turn that view into recommendations you can act on. Every number is meant to be **format-aware**: the server reads *your* league's scoring, roster slots, waiver system and playoff rules from ESPN and re-scores everything through a settings-driven engine that is checked, stat by stat, against ESPN's own applied points — so a 10-team, half-PPR, 5-point-passing-touchdown league with move-to-last waiver priority and points-for seeding gets different answers than a standard one (waiver priority is priced as a scarce option, the lineup objective follows the league's seeding rule, quarterbacks are valued under the league's own touchdown and turnover points). Every recommendation is meant to be **deeply reasoned and honest about uncertainty**: a point estimate never ships without a distribution, the drivers behind it, the assumptions that would change it, the deadline by which it matters, and a log entry so that next week's retrospective can say whether the advice was right for the right reasons. ESPN's own projections are **labelled as ESPN's** and shown beside the server's numbers, never silently merged. The product is **read-only by default**: the write module (lineup changes first) is opt-in, off, and carries the plan's own verdict *"recommended: do not build yet"*; if it is ever built, **every roster change requires an explicit human confirmation that the model cannot forge** — a guarantee the plan states together with the session condition under which it holds. Third-party text — team and owner names written by other league members, ESPN's player outlooks, news headlines, player names, even the model's own earlier recommendations read back from the log — is **data, never instructions**: capped, source-tagged, marked in every result (wrapped as `untrusted_text`, or path-listed in `meta.untrusted_fields[]` where it arrives as a plain string) and declared non-instructional. Thirteen **Skills** are planned alongside the server so the model follows a tested procedure for each decision instead of improvising.
+A local [Model Context Protocol](https://modelcontextprotocol.io/) server, written in Node/TypeScript on the official MCP SDK, that gives Claude (Desktop or Code) a **complete, cached, read-only view of your ESPN Fantasy Football league** — settings, rosters, the free-agent pool, transactions, standings, the scoreboard, live scoring, and ESPN's own projections and ownership numbers — together with a set of **decision engines** that turn that view into recommendations you can act on. Every number is **format-aware**: the server reads *your* league's scoring, roster slots, waiver system and playoff rules from ESPN and re-scores everything through a settings-driven engine that is checked, stat by stat, against ESPN's own applied points — so a 10-team, half-PPR, 5-point-passing-touchdown league with move-to-last waiver priority and points-for seeding gets different answers than a standard one (waiver priority is priced as a scarce option, the lineup objective follows the league's seeding rule, quarterbacks are valued under the league's own touchdown and turnover points). Every recommendation is built to be **deeply reasoned and honest about uncertainty**: a point estimate never ships without a distribution, the drivers behind it, the assumptions that would change it, the deadline by which it matters, and a log entry so that next week's retrospective can say whether the advice was right for the right reasons. ESPN's own projections are **labelled as ESPN's** and shown beside the server's numbers, never silently merged. The product is **read-only**: the write module (lineup changes first) is **not built** — it carries the plan's own verdict *"recommended: do not build yet"*, and its seam is declared in code; if it is ever built, it is opt-in and off by default, and **every roster change requires an explicit human confirmation that the model cannot forge** — a guarantee the plan states together with the session condition under which it holds. Third-party text — team and owner names written by other league members, ESPN's player outlooks, news headlines, player names, even the model's own earlier recommendations read back from the log — is **data, never instructions**: capped, source-tagged, marked in every result (wrapped as `untrusted_text`, or path-listed in `meta.untrusted_fields[]` where it arrives as a plain string) and declared non-instructional. Thirteen **Skills** ship alongside the server so the model follows a tested procedure for each decision instead of improvising.
 
 ## Table of contents
 
@@ -67,23 +67,23 @@ A **planned** local [Model Context Protocol](https://modelcontextprotocol.io/) s
 
 **What the research established** — six facts shape everything on this page, and the plan carries them openly:
 
-1. **ESPN's fantasy API is unofficial, cookie-authenticated, and drifts silently.** There is no OAuth, no API key, no developer programme and no documentation. One host serves JSON for current seasons, and hosts have moved without notice before. An unknown view name returns HTTP 200 with a skeleton body, so drift **cannot be detected from status codes**: the plan validates every response against per-view schemas that hard-fail on a missing required key, and runs a daily probe against a fixture manifest ([`docs/research/03-espn-api.md` §A, §F](docs/research/03-espn-api.md)).
+1. **ESPN's fantasy API is unofficial, cookie-authenticated, and drifts silently.** There is no OAuth, no API key, no developer programme and no documentation. One host serves JSON for current seasons, and hosts have moved without notice before. An unknown view name returns HTTP 200 with a skeleton body, so drift **cannot be detected from status codes**: the server validates every response against per-view schemas that hard-fail on a missing required key, and a daily probe checks the live shape against a fixture manifest ([`docs/research/03-espn-api.md` §A, §F](docs/research/03-espn-api.md)).
 2. **The Disney Terms of Use, as written, cover what this project does.** See [the next section](#terms-of-use-and-account-risk). The plan's posture is personal, single-league, read-only, cached, hard-capped and honestly identified — and the risk is disclosed rather than argued away.
 3. **The session cookie is a password-equivalent for the whole account.** `espn_s2` has an unknown lifetime and no verifiable revocation path, so it lives in the OS keychain (or a `0600` file outside the repository), to be typed only into a terminal with hidden input, and to appear in no tool argument, no client configuration, no `.env` file and no log line ([Safe credential setup](#safe-credential-setup)).
 4. **ESPN returns projections, ownership, draft ranks, injury status and outlook text natively.** That makes a useful read-only product possible from the first phase — and it puts member-written names and ESPN editorial text inside the same JSON objects as the facts, which is why free text is wrapped field by field. In v1 the projection point estimate is **ESPN's own mean** (`weight_espn = 1.0`); the server's nflverse-based line contributes the distribution shape and a disagreement flag, and the weight moves only if a backtest under the league's scoring shows a mixture beats ESPN alone.
-5. **Read-only is the product.** Every planned Skill ends with the exact clicks to make on ESPN. The write module is specified in full so that it would be mechanical and safe if built, but the plan recommends not building it yet ([Roadmap](#roadmap)).
+5. **Read-only is the product.** Every Skill's recommendation ends with the way to the exact clicks on ESPN (the `apply` Skill). The write module is specified in full so that it would be mechanical and safe if built; the plan recommends not building it yet, and it is not built ([Roadmap](#roadmap)).
 6. **The confirmation guarantee is a property of the session, not of the client.** "The model cannot forge a confirmation" holds only in a session where the model has no shell or filesystem reach as you. Claude Code with `Bash`, or any chat with a filesystem or shell MCP server configured beside this one, is not such a session, and writes are **unsupported** there ([Security model](#security-model)).
 
-**What the review's closing verdict still worries about** — ranked, and carried here so that nobody mistakes a reviewed plan for a finished product ([`adversarial-log.md`](docs/plan/adversarial-log.md), "Closing verdict"; [`changelog.md`](docs/plan/changelog.md), "Summary"):
+**What the review's closing verdict worried about** (2026-09-30, before any code) — ranked as the plan's record carries them, with where the build has answered one ([`adversarial-log.md`](docs/plan/adversarial-log.md), "Closing verdict"; [`changelog.md`](docs/plan/changelog.md), "Summary"):
 
-1. Two decisions sit in front of everything and belong to the owner: accepting the terms-of-use account risk for live use, and naming a public probe league.
+1. Two decisions sat in front of everything and belonged to the owner: accepting the terms-of-use account risk for live use (D0) and naming a public probe league (D2). Both were made on 2026-10-05 ([Decisions that belong to the owner](#decisions-that-belong-to-the-owner)).
 2. The API is unofficial and the recovery is human: a cookie of unknown lifetime with no refresh, and a renamed view or a host move outside ESPN's fantasy domain is a release measured in days, in season.
-3. Whether v1 is *useful*, not merely correct: with ESPN's mean as the point estimate, the added value is the lineup assignment, the waiver-priority rule with its band, the scoring check and the discipline of labelled numbers — which may be thin until Phase 2's usage data and a season of the league's own history.
-4. The calendar: the largest phase's effort estimate has no measurement behind it.
+3. Whether v1 is *useful*, not merely correct: with ESPN's mean as the point estimate, the added value is the lineup assignment, the waiver-priority rule with its band, the scoring check and the discipline of labelled numbers — which may be thin until Phase 2's usage data and a season of the league's own history. Phase 2 is built; the league's history accrues this season, and the retrospective scores it.
+4. The calendar: the largest phase's effort estimate had no measurement behind it. Measured since: plan 10 recalibrated its effort scale on 2026-10-05, and Phases 0–3 were built between 2026-10-05 and 2026-10-11.
 5. The fixture rules rest on one path guard and one manifest flag — the rule a builder under time pressure is most likely to bend.
 6. Build-time unknowns, each named with a fallback (Keychain behaviour under launchd, what clients deliver to the model, never-observed transaction fields, ESPN's rounding, the private-league 401 body).
 7. Detecting a session in which the model has file or shell reach is a heuristic — so the documentation must keep saying "unsupported", never "safe".
-8. The plan is unbuilt. Its acceptance criteria are tests, and the tests are the next adversary.
+8. At review time the plan was only a plan: its acceptance criteria are tests, and the tests are the next adversary. Phases 0–3 now pass their gates ([`docs/evals/`](docs/evals/)), and Stage C — QA and penetration testing — is that adversary.
 
 ### Terms of use and account risk
 
@@ -105,7 +105,7 @@ And from the plan's threat model ([`docs/plan/02-security-architecture.md` §8, 
 
 What that means for you, plainly:
 
-- **Absence of evidence is not evidence of absence.** No enforcement case was found; the terms still give Disney the right. If you use this tool, you accept that risk on your own account. The plan treats the owner's explicit acceptance of it as a decision (**D0**) that gates every phase touching a real league.
+- **Absence of evidence is not evidence of absence.** No enforcement case was found; the terms still give Disney the right. If you use this tool, you accept that risk on your own account. The plan treats the owner's explicit acceptance of it as a decision (**D0**) that gates every phase touching a real league; the owner accepted it, for the owner's own account and league, on 2026-10-05.
 - **The mitigations are the design, not a promise of safety:** personal use by the account owner on their own single league; read-only by default; aggressive caching and hard caps (≤ 30 requests a minute, tens of requests a day in normal use); a fixed, honest `User-Agent`; no web-page scraping; no redistribution; no model training on the data; no browser impersonation — if the API host ever starts blocking the honest `User-Agent`, the server is designed to stop and say so rather than disguise itself.
 - **Never commercial with ESPN data.** The plan treats this as a hard stop ([`docs/research/04-data-sources.md` §E](docs/research/04-data-sources.md#e-licensing--tos-table-and-the-personal-vs-commercial-constraints)). The MIT licence on this repository covers this project's own code and text; it grants nothing over ESPN's data or services.
 - **A hosted or shared install is a clean negative.** A remote server would have to hold other people's ESPN cookies; the plan rejects it ([FAQ](#can-i-run-it-remotely)).
@@ -114,7 +114,7 @@ What that means for you, plainly:
 
 ## Features
 
-Every row below is traceable to the tool catalog ([`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-catalog.md)) and the phasing plan ([`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-acceptance.md)); analytics rows cite the section of [`docs/research/05-strategy-and-analytics.md`](docs/research/05-strategy-and-analytics.md) whose method they implement. **Priority:** **P0** = the read-only MVP (Phase 1) · **P1** = Phase 2 · **P2** = the model wave (Phase 3) · **later** = Phase 4 · **conditional** = the write module (Phase W, not recommended to build yet). The **18 P0 tools** are what the server would register by default (`EFF_TOOLSET=core`); `EFF_TOOLSET=full` adds the **16 P1 tools** (34 read tools in total). No tool takes a league id: the league is operator configuration, never a model-supplied argument.
+Every row below is traceable to the tool catalog ([`docs/plan/07-tool-catalog.md`](docs/plan/07-tool-catalog.md)) and the phasing plan ([`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-acceptance.md)); analytics rows cite the section of [`docs/research/05-strategy-and-analytics.md`](docs/research/05-strategy-and-analytics.md) whose method they implement. **Priority:** **P0** = the read-only MVP (Phase 1) · **P1** = Phase 2 · **P2** = the model wave (Phase 3) · **later** = Phase 4 · **conditional** = the write module (Phase W, not recommended to build yet). The **18 P0 tools** are what the server registers by default (`EFF_TOOLSET=core`); `EFF_TOOLSET=full` adds the **16 P1 tools** (34 read tools in total). No tool takes a league id: the league is operator configuration, never a model-supplied argument.
 
 ### League and discovery
 
@@ -180,7 +180,7 @@ Each engine implements a named method from the analytics research. Every result 
 
 ### Writes — opt-in, off, behind the prepare/commit gate
 
-**None of these tools is registered unless all four gates hold when the server starts** — checked from what setup recorded, with no network and no keychain read: `EFF_ENABLE_WRITES` is exactly `true`; the operator has typed an acknowledgement sentence in a terminal (`eff setup --enable-writes`); the local store records the credential as validated; and `eff setup` has recorded the operator's own team, resolved from the stored `SWID`. The tool set changes only at a restart: if ESPN rejects the credential mid-session, the listed write tools stay listed until then and refuse while the credential is rejected. A model cannot call what it cannot see. Every write is then two tools plus a human step: `espn_prepare_*` computes a human-readable and structured diff from the *current* state and journals it; **a human confirms** through one of three channels the model does not author; `espn_commit_*` verifies the HMAC-bound ticket, re-reads the roster and compare-and-sets the precondition, performs exactly one request, and reads the roster back. Writes are pinned to the operator's own team (a commissioner's cookie *can* edit other teams at ESPN; this server will not), capped per day, frozen near kickoff, and never automatically retried. The plan's verdict on the whole module is **"recommended: do not build yet"** ([Roadmap](#roadmap)). Details: [Security model](#security-model), [`docs/plan/02-security-architecture.md` §3–§4](docs/plan/02-security-architecture.md).
+**The write module is not built** (Phase W; the owner's decision D11): its seam is declared in code and registers nothing, so none of the tools below exists in this build. As specified, **none of these tools is registered unless all four gates hold when the server starts** — checked from what setup recorded, with no network and no keychain read: `EFF_ENABLE_WRITES` is exactly `true`; the operator has typed an acknowledgement sentence in a terminal (`eff setup --enable-writes`); the local store records the credential as validated; and `eff setup` has recorded the operator's own team, resolved from the stored `SWID`. The tool set changes only at a restart: if ESPN rejects the credential mid-session, the listed write tools stay listed until then and refuse while the credential is rejected. A model cannot call what it cannot see. Every write is then two tools plus a human step: `espn_prepare_*` computes a human-readable and structured diff from the *current* state and journals it; **a human confirms** through one of three channels the model does not author; `espn_commit_*` verifies the HMAC-bound ticket, re-reads the roster and compare-and-sets the precondition, performs exactly one request, and reads the roster back. Writes are pinned to the operator's own team (a commissioner's cookie *can* edit other teams at ESPN; this server will not), capped per day, frozen near kickoff, and never automatically retried. The plan's verdict on the whole module is **"recommended: do not build yet"** ([Roadmap](#roadmap)). Details: [Security model](#security-model), [`docs/plan/02-security-architecture.md` §3–§4](docs/plan/02-security-architecture.md).
 
 | Tool | What it does | ESPN write | Priority | Status |
 |---|---|---|---|---|
@@ -198,7 +198,7 @@ Each engine implements a named method from the analytics research. Every result 
 | `eff setup` | One-time cookie entry in a terminal with hidden input, format validation, one definitive check against your league, own-team resolution; `--reset`, `--storage`, `--seeding`; an optional one-shot local page (`--page`) | Phase 1b | ✅ |
 | `eff doctor` | **Twenty-five checks**, offline by default: Node version, absolute launch paths, the runtime install outside any iCloud/file-provider directory, no cookie-shaped value in any client config, directory and file modes, exactly one credential store, store health, drift-probe age, dataset ages, launchd jobs, the write flag's session warning, a stale `dist/`, the client's own MCP log tail. `--online` adds clock skew, the host and shape probe, credential validity, league reachability, own-team resolution and source reachability. `--fix` repairs modes and directories after a prompt. Doctor never modifies the stored secret or its setup metadata; `--online` records its probe result in the local store exactly as `espn_check_auth` does | Phase 1a / 1b | ✅ |
 | `eff status` | The one-page dashboard the resource and the tool also serve | Phase 1a | ✅ |
-| `eff probe` | **The drift probe** — a keyless host probe and a shape probe against a fixture manifest, daily under launchd; a removed key turns the state red, fires a notification and puts `meta.drift` on every affected result. The first automation the plan builds, as a standalone script before any server code exists | Phase 0 | ✅ |
+| `eff probe` | **The drift probe** — a keyless host probe and a shape probe against a fixture manifest, daily under launchd; a removed key turns the state red, fires a notification and puts `meta.drift` on every affected result. The first automation built, as a standalone script before any server code existed | Phase 0 | ✅ |
 | `eff refresh <source\|all>` | The **only** writer of dataset files: polls a version, downloads, asserts the schema and codec, publishes a fresh per-source SQLite file by atomic rename | Phase 1a | ✅ |
 | `eff snapshot <roster\|pool\|projections>` | Nightly roster and free-agent pool snapshots with diffs, ESPN projection snapshots (the backtest corpus), the daily IR-validity and scoring checks | Phase 1b | ✅ |
 | `eff print-config --client desktop\|code` | Emits the launch-config snippet with **resolved absolute paths** and no secret values; warns if the runtime sits in a file-provider directory | Phase 1a | ✅ |
@@ -214,7 +214,7 @@ Each engine implements a named method from the analytics research. Every result 
 
 ## Architecture
 
-Eight diagrams. Each was checked by hand against Mermaid's grammar when written and is rendered by the orchestrator in a browser with Mermaid 11; once the planned docs workflow exists, CI renders every block on each push. The full design is in [`docs/plan/01-system-architecture.md`](docs/plan/01-system-architecture.md); each caption names the plan sections the diagram summarises. **Everything drawn here is planned, not built.**
+Eight diagrams of the design the build follows. CI renders every block on each push (the `mermaid` job of `docs.yml`, Mermaid 11). The full design is in [`docs/plan/01-system-architecture.md`](docs/plan/01-system-architecture.md); each caption names the plan sections the diagram summarises. **What is not built is labelled where it is drawn:** the write module's confirmation gate, its human channels and the write host (diagram 6), the write tools (diagram 7), and Phases W and 4 (diagram 8).
 
 ### 1. System context
 
@@ -463,16 +463,16 @@ flowchart LR
       PROV["ESPN provider<br/>one path builder, one filter builder, a view whitelist, per-view schemas,<br/>the normaliser wraps free text and drops the client IP"]
       SRC["Data-source loaders<br/>schema assertion, text wrapped"]
       OUT["Output envelope<br/>third-party text as untrusted_text, or as a plain string path-listed in meta.untrusted_fields - capped, stripped, source-tagged"]
-      GATE["Confirmation gate - planned, off, not recommended to build yet<br/>prepare, then a human channel, then commit<br/>HMAC ticket, compare-and-set precondition, own-team pinning, journal"]
+      GATE["Confirmation gate - not built, recommended not to build yet<br/>prepare, then a human channel, then commit<br/>HMAC ticket, compare-and-set precondition, own-team pinning, journal"]
     end
     CRED["Credential store<br/>OS keychain or 0600 file, outside the repository and outside iCloud"]
     STORE["store.sqlite and dataset files<br/>member GUIDs pseudonymised outside the parsed cache"]
-    NOTIF["macOS notification<br/>diff summary and a one-time code shown to the human only"]
-    TERM["Terminal<br/>eff setup with hidden input, eff confirm"]
+    NOTIF["macOS notification - channel 2 of the confirmation gate, not built<br/>diff summary and a one-time code shown to the human only"]
+    TERM["Terminal<br/>eff setup with hidden input<br/>eff confirm - channel 3 of the confirmation gate, not built"]
     REFRESH["eff refresh - separate process, launchd"]
   end
   ESPNR["ESPN read host<br/>facts trusted after validation, free text NOT trusted"]
-  ESPNW["ESPN write host<br/>not in the allow-list unless the write module is enabled"]
+  ESPNW["ESPN write host<br/>not in the allow-list - the write module is not built"]
   DATA["nflverse, ffopportunity, Sleeper, weather<br/>numbers trusted after schema assertion, text NOT trusted"]
   NEWS["News RSS<br/>trusted for nothing"]
   HUMAN -- "T0 chat" --> CLIENT
@@ -500,7 +500,7 @@ flowchart LR
   CLIENT -. "reach sessions only - the model could read files or drive a terminal, so writes are unsupported there" .-> TERM
 ```
 
-*Every entry point for untrusted input is named (T0–T4), and every third-party string leaves the server marked as data: text written by league members, the commissioner or an editor — team and league names, outlooks, news — inside an `untrusted_text` wrapper, even where it arrives inside an otherwise-trusted ESPN object; player names, the official injury report's statuses, depth-chart names and anything read back from the recommendation log as plain strings, each path listed in `meta.untrusted_fields[]`, under the same rule. The cookie never crosses into the model channel. The gate's human channels are unforgeable by the model **only in a no-reach session**, which is why writes are off by default, unsupported wherever the model has file or shell reach, and not recommended to build yet — plan 02 §1, §2.3–§2.4, §3, §4, §6; plan 01 §4.4.*
+*Every entry point for untrusted input is named (T0–T4), and every third-party string leaves the server marked as data: text written by league members, the commissioner or an editor — team and league names, outlooks, news — inside an `untrusted_text` wrapper, even where it arrives inside an otherwise-trusted ESPN object; player names, the official injury report's statuses, depth-chart names and anything read back from the recommendation log as plain strings, each path listed in `meta.untrusted_fields[]`, under the same rule. The cookie never crosses into the model channel. The gate's human channels are unforgeable by the model **only in a no-reach session**, which is one reason the write module is not built and, if it ever is, would be off by default and unsupported wherever the model has file or shell reach; the dotted paths are that module — plan 02 §1, §2.3–§2.4, §3, §4, §6; plan 01 §4.4.*
 
 ### 7. Tool-and-Skill map
 
@@ -560,7 +560,7 @@ flowchart LR
   subgraph LOGW["Local write"]
     REC["espn_record_recommendation<br/>every Skill but session-check, before rendering"]
   end
-  subgraph WRITES["Conditional writes, Phase W"]
+  subgraph WRITES["Conditional writes, Phase W - not built"]
     PREP["espn_prepare_lineup, _transaction, _trade"]
     COMMIT["espn_commit_lineup, _transaction, _trade"]
   end
@@ -593,12 +593,12 @@ flowchart LR
 ### 8. Roadmap timeline
 
 ```mermaid
-%% 8. Roadmap - phases, not dates. Effort scale from the plan - S is days, M is 1 to 3 weeks, L is 4 to 8 weeks
+%% 8. Roadmap - phases, not dates. Effort scale from plan 10, recalibrated 2026-10-05 - S is hours, M is a build session, L is one to two build sessions
 timeline
-    title Delivery phases - nothing starts before the owner approves the plan
+    title Delivery phases - Phases 0 to 3 built, Phase W not built, Phase 4 later
     section Before any code
         Plan approval : research 00 to 06 : plan 01 to 10 : adversarial review closed after three rounds with 26 objections resolved and none pressed
-        Owner decisions : D0 accept the terms-of-use account risk for live use : D2 name the public probe league
+        Owner decisions, made 2026-10-05 : D0 - the terms-of-use account risk accepted for live use : D2 - the public probe leagues named
     section Phase 0 - Foundation, S
         Repository protections : docs, secrets and identifiers CI : branch ruleset
         First automation : the standalone daily drift probe : keyless recording of the probe league
@@ -621,7 +621,7 @@ timeline
         Draft tools and Skill : what-if scoring : activity feed : seasons before 2018 : shared core extraction
 ```
 
-*Phase 1 is split so that everything that needs no cookie is built and accepted first on fixtures and public data, and the half that touches a real account waits for the owner's explicit acceptance of the terms-of-use risk. Writes are a conditional phase with a "do not build yet" verdict, not a numbered one — plan 10 §0 (Ph1–Ph9), §1, §3, §5 (D0, D2, D11).*
+*Phase 1 is split so that everything that needs no cookie is built and accepted first on fixtures and public data, and the half that touches a real account waits for the owner's explicit acceptance of the terms-of-use risk. Writes are a conditional phase with a "do not build yet" verdict, not a numbered one. The tags are the plan's: the build cut none, and the first tagged release comes with Stage D — plan 10 §0 (Ph1–Ph9), §1, §3, §5 (D0, D2, D11).*
 
 ---
 
@@ -878,7 +878,7 @@ Thirteen Skills ship ([`docs/plan/09-skills-bundle.md`](docs/plan/09-skills-bund
 
 > These commands exist ([`docs/plan/03-lifecycle-and-operations.md` §2–§4](docs/plan/03-lifecycle-and-operations.md), [`docs/plan/09-skills-bundle.md` §6](docs/plan/09-skills-bundle.md)); no version is tagged yet, so the install is from a clone you build.
 
-**What you will need:** macOS (the planned first platform — scheduled jobs use launchd and the default credential store is the macOS Keychain); **Node ≥ 24.15**; an ESPN Fantasy Football league you are a member of; Claude Desktop or Claude Code.
+**What you will need:** macOS (the platform it is built for — scheduled jobs use launchd and the default credential store is the macOS Keychain); **Node ≥ 24.15**; an ESPN Fantasy Football league you are a member of; Claude Desktop or Claude Code.
 
 ```sh
 # 0. Node 24 — the floor is 24.15
@@ -983,7 +983,7 @@ Do **not** install a third-party "cookie finder" extension for this (an unaudite
 |---|---|---|
 | **OS keychain** (macOS Keychain; service `espn-fantasy-football-mcp`) | yes — the default | Encrypted at rest, access-controlled to your user, not in iCloud Drive. Reached through one exact-pinned native package with no install script that passed a written review |
 | **A `0600` file in a `0700` directory** under `~/.config/espn-fantasy-football-mcp/` | yes — the fallback | Outside the repository and outside cloud-synced folders; written atomically; **refused** if the directory is managed by iCloud or another file provider, if the file's mode bits are too open, or if an access control list (ACL) entry on the file or its directory gives another user or group access — an entry a parent passes down is removed from the directories `eff` creates, and any other is refused and named by `eff doctor` |
-| `.env` in the repository | **never** | The repository directory may be cloud-synced — `.gitignore` protects git, not iCloud — and a relative `.env` is prior art's second most common failure. The planned server reads no `.env` at all |
+| `.env` in the repository | **never** | The repository directory may be cloud-synced — `.gitignore` protects git, not iCloud — and a relative `.env` is prior art's second most common failure. The server reads no `.env` at all |
 | The MCP client configuration (`env` block) | **never** | A plaintext JSON file people edit, paste into chats and screenshot for support; its values are inherited by every child process. `eff doctor` fails if it finds a cookie-shaped value there |
 | A tool argument or a chat message | **never** | It would enter the model's context and the client's transcript logs. There is no `authenticate` tool, and no Skill will ask for, accept or repeat a cookie |
 | Logs, error messages, tool output, `eff status` | **never** | The logger redacts the known value in both its pasted and its URL-decoded form; status shows timestamps and booleans — never a value, a length or a fingerprint |
@@ -1061,7 +1061,7 @@ Nobody could establish how long `espn_s2` lives — community reports say "weeks
 | `# EFF_ESPN_READ_HOST=lm-api-reads.fantasy.espn.com` | a host name (unset) | **Emergency override if ESPN moves its API host again.** Accepted only when it matches `^[a-z0-9-]+\.fantasy\.espn\.com$`, so cookies can never be sent outside `*.fantasy.espn.com`. It covers only a move inside that domain; the permanent fix is a release |
 | `EFF_ENABLE_WRITES=false` | `true` · `false` (`false`) | The write module is **not built in v1** and is off by default. If it is ever built, its tools register — when the server starts, from what setup recorded — only when this is exactly `true` **and** `eff setup --enable-writes` has recorded a typed acknowledgement **and** `eff setup` has recorded your own team, resolved from the stored `SWID`, **and** the local store records the credential as validated — and every write still needs an explicit human confirmation through a channel the model does not author |
 | `# ODDS_API_KEY=` | a key (unset) | Reserved: accepted but unused — no keyed odds API is built (plan 10 D13; the betting lines come from nflverse `schedules`), so setting it changes nothing. Never logged |
-| `# WEATHER_API_KEY=` | a key (unset) | Optional and reserved: the two planned weather sources need no key. Never logged |
+| `# WEATHER_API_KEY=` | a key (unset) | Optional and reserved: the two weather sources, Open-Meteo and NWS, need no key. Never logged |
 | `# EFF_NODE=` | an absolute path (unset) | **Launcher only.** The Node binary the plugin launch script (`scripts/eff-launch.sh`) should use. Unset means it is resolved automatically |
 
 Three further keys exist for tests only and are deliberately absent from `.env.example`: `EFF_FIXTURE_DIR`, `EFF_FIXTURE_RECORD` and `EFF_TEST_STUBS`, listed under [Testing](#testing).
@@ -1142,13 +1142,13 @@ What to get right:
 
 **Two rules, stated plainly in the plan:**
 
-1. **No roster change happens without an explicit human confirmation that the model cannot forge — in a session where the model has no shell or filesystem reach as the user.** In v1 the rule is satisfied trivially: there is no write module. Everything about the gate exists so that, if the module is ever built, the rule is mechanical rather than aspirational.
+1. **No roster change happens without an explicit human confirmation that the model cannot forge — in a session where the model has no shell or filesystem reach as the user.** In v1 the rule is satisfied trivially: there is no write module. Everything about the gate is specified so that, if the module is ever built, the rule is mechanical rather than aspirational.
 2. **The session cookie never enters the model channel, the client configuration, the repository directory or a log line** — in that order of consequence.
 
 | Area | What the plan specifies |
 |---|---|
 | **Credential store** | OS keychain by default, through one exact-pinned, reviewed native package behind a `CredentialStore` seam; a `0600` file in a `0700` directory as the fallback; **one store per install**, chosen at setup by a real test under launchd. Setup is a terminal prompt with hidden input and one definitive check; a rejected value is deleted. Any 401/403 → `rejected`, never retried, short-circuited until a rate-limited probe or a human fixes it. The credential is read lazily, held only in the ESPN transport, and given to the logger solely so it can be redacted ([Safe credential setup](#safe-credential-setup)) |
-| **Least privilege** | **Read-only by default**: the v1 tool list contains no write tool, and the write host is not in the HTTP allow-list. The opt-in write module registers tools only when four gates hold when the server starts, checked from persisted evidence with no network — the exact env flag, a typed acknowledgement recorded by `eff setup --enable-writes`, the operator's own team recorded by `eff setup` from the stored `SWID`, and a credential the local store records as validated — plus a scope limit (lineup moves first) and caps (at most 5 writes a day, none within 15 minutes of a kickoff involved in the change). When any gate is false the tools do not exist; the tool set changes only at a restart |
+| **Least privilege** | **Read-only**: the v1 tool list contains no write tool, and the write host is not in the HTTP allow-list. The opt-in write module (not built) registers tools only when four gates hold when the server starts, checked from persisted evidence with no network — the exact env flag, a typed acknowledgement recorded by `eff setup --enable-writes`, the operator's own team recorded by `eff setup` from the stored `SWID`, and a credential the local store records as validated — plus a scope limit (lineup moves first) and caps (at most 5 writes a day, none within 15 minutes of a kickoff involved in the change). When any gate is false the tools do not exist; the tool set changes only at a restart |
 | **Own-team pinning** | At ESPN, authority comes from the session: a commissioner's cookie can change another manager's lineup. So the target team is *derived* from the stored `SWID`, never an argument; any other target is refused before a request is made; commissioner flags are never sent as true |
 | **Confirmation gate** | `espn_prepare_*` → a human channel → `espn_commit_*`. The ticket is an HMAC over the prepared change, its diff hash, a precondition hash and an expiry (10 minutes); commit re-reads the roster and **compare-and-sets** — if anything changed, the write is voided and you re-prepare and see the new diff; exactly one atomic request is sent, the roster is read back, and the outcome is journalled. Writes are never automatically retried; an uncertain outcome is reconciled later and surfaced, never hidden |
 | **The three human channels** | (1) the client's own form-mode elicitation (Approve/Reject rendered by the client); (2) an out-of-band one-time code shown with the diff in a macOS notification — the model never sees it; (3) `eff confirm <id>` in a terminal. An opaque token returned to the model would prove only that the model called `prepare`; a confirmation must come from a channel the model does not author |
@@ -1240,7 +1240,7 @@ The untrusted-text rule the server declares to the model, verbatim from the plan
 | `pack` | the tarball contains anything outside the declared files, or an identifier; or the release rehearsal fails — the tarball does not carry the committed lockfile as `npm-shrinkwrap.json`, or [the release install](#install-from-a-release) of it does not install exactly the lockfile's runtime tree and a working `eff` |
 | `docs`: `mermaid`, `skills`, `docs-current`, `links`, `identifiers` | a diagram that does not render; a Skill that breaks the structural rules; generated docs out of date; a broken internal link |
 
-**Running the Skills evals** (planned commands, [plan 09 §5](docs/plan/09-skills-bundle.md#5-eval-plan-k7)):
+**Running the Skills evals** (the commands of [plan 09 §5](docs/plan/09-skills-bundle.md#5-eval-plan-k7)):
 
 ```sh
 # Lane 1 - zero tokens; the same checks the docs workflow runs on every push
@@ -1263,13 +1263,13 @@ The pass bar for Lane 2: every free grader passes, the model-graded rubric reach
 
 ## Roadmap
 
-> **The owner approved the plan on 2026-10-05; Phases 0–3 are built, Phase W is not, and Stage C (QA) is in progress.** Phases, not dates. Effort scale from the plan: **S** ≈ days · **M** ≈ 1–3 weeks · **L** ≈ 4–8 weeks of one senior engineer working with agents. Every acceptance criterion is a test, a CI job, a fixture assertion, or a one-line manual check with named evidence ([`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-acceptance.md)).
+> **The owner approved the plan on 2026-10-05; Phases 0–3 are built, Phase W is not, and Stage C (QA) is in progress.** Phases, not dates. Effort scale from the plan, recalibrated on 2026-10-05: **S** ≈ hours · **M** ≈ a build session · **L** ≈ one to two build sessions — relative sizes, bound by the owner's usage limits rather than engineering time. Every acceptance criterion is a test, a CI job, a fixture assertion, or a one-line manual check with named evidence ([`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-acceptance.md)). The tags in the acceptance column (`v0.1.0`–`v0.3.0`) are the plan's: the phases were built on one branch without them, and the first tagged release comes with Stage D.
 
 | Phase | Scope | Effort | Acceptance, summarised | Status |
 |---|---|---|---|---|
 | **0 — Foundation** | Repository protections (docs, secrets and identifiers CI; branch ruleset), **the standalone daily drift probe**, the package and CI skeleton with four pinned runtime dependencies, the plugin manifest, the keyless recording of a public probe league | S | [Z1–Z7](docs/plan/10-phasing-and-acceptance.md#30-phase-0--foundation-s): the CI jobs are green and a deliberately planted GUID, league id and cookie-shaped value fail them; every plan diagram renders; the probe runs daily and a renamed key makes it exit non-zero with the JSON path; ≥ 3 recorded final weeks of the probe league are committed with provenance hashes (gated on naming that league) | ✅ |
 | **1a — Read-only MVP, fixture and keyless half** | **No cookies anywhere.** Store and migrations, `eff refresh` for the keyless ESPN season views and nflverse, the crosswalk, the scoring engine, projections v1, the lineup engine, the waiver-priority premium, the seeding simulator, the recommendation log and retrospective, the 18 P0 tools in fixture mode, 10 resources, the 8 P0 Skills at Lane 1, `eff doctor` offline | L | [A1a–A16a](docs/plan/10-phasing-and-acceptance.md#31-phase-1--read-only-mvp-in-two-halves): the engine matches ESPN's applied points **per stat within 0.005 and per total within 0.01** on recorded weeks; the Inspector lists exactly the 18 tools and no write tool; in-call drift fails loudly while unaffected tools keep working; injection invariance holds byte for byte; the tool list fits its size ceiling; the main loop never stalls more than 50 ms during analytics | ✅ |
-| **1b — Read-only MVP, live-league half** | **Gated on the owner accepting the terms-of-use account risk (D0).** `eff setup` and the credential lifecycle, the live ESPN provider under the limiter, the P0 tools over a real league, the credentialed jobs, `eff smoke`, Skills Lane 2 | M | [A1b–A18b](docs/plan/10-phasing-and-acceptance.md#31-phase-1--read-only-mvp-in-two-halves): the scoring self-check matches the real league; a 401 yields exactly one attempt and then zero requests; a full day of normal use stays under 100 ESPN requests; snapshots hold pseudonymised GUIDs only; a weekly briefing on the live league contains intervals, the premium with its band, deadlines, attribution and log ids. Tag `v0.1.0` when both halves are green | ✅ |
+| **1b — Read-only MVP, live-league half** | **Gated on the owner accepting the terms-of-use account risk (D0; accepted 2026-10-05).** `eff setup` and the credential lifecycle, the live ESPN provider under the limiter, the P0 tools over a real league, the credentialed jobs, `eff smoke`, Skills Lane 2 (moved to Stage C by ruling R5-5; not runnable on this account, R7-2) | M | [A1b–A18b](docs/plan/10-phasing-and-acceptance.md#31-phase-1--read-only-mvp-in-two-halves): the scoring self-check matches the real league; a 401 yields exactly one attempt and then zero requests; a full day of normal use stays under 100 ESPN requests; snapshots hold pseudonymised GUIDs only; a weekly briefing on the live league contains intervals, the premium with its band, deadlines, attribution and log ids. Tag `v0.1.0` when both halves are green | ✅ |
 | **2 — Usage, market and the P1 engines** | Snap, play-by-play, expected-points, depth-chart, news and trending sources; the 16 P1 tools (34 under `full`); the 5 P1 Skills; usage-first waiver detection; live win probability | L | [B1–B15](docs/plan/10-phasing-and-acceptance.md#32-phase-2--usage-market-and-the-p1-engines-and-skills-l): every source loads behind a schema assertion; trades, cascades, roster and schedule engines pass their hard invariants; the prospective backtest of the projection ensemble against ESPN alone is reported. Tag `v0.2.0` | ✅ |
 | **3 — Model wave** | The opportunity-model projections, the waiver premium re-solved from the league's own history, the seeding simulator reproducing past seasons' seeds exactly, held-out-season backtests | L | [C1–C10](docs/plan/10-phasing-and-acceptance.md#33-phase-3--model-wave-l): the soft gates of earlier phases become hard ones on held-out seasons. Tag `v0.3.0` | ✅ |
 | **W — Conditional writes** | The write tools (lineup only, if ever), the gate's three channels, journal reconcile, `apply` in write mode | M | [W1–W11](docs/plan/10-phasing-and-acceptance.md#3w-phase-w--conditional-writes-m--verdict-recommended-do-not-build-yet) — **verdict: recommended, do not build yet** | 📋 not scheduled |
@@ -1277,7 +1277,7 @@ The pass bar for Lane 2: every free grader passes, the model-graded rubric reach
 
 ### The honest expectation for the 2026 season
 
-From [plan 10 §0](docs/plan/10-phasing-and-acceptance.md#0-decisions-at-a-glance): the plan was written in NFL week 4 of 18, and development starts only after the owner's review. Phase 0 is S and Phase 1a is L, so **under the best case** — a review within the week and no surprises — the P0 tools and Skills exist in **mid-to-late November**, and live use covers the **last regular-season weeks and the fantasy playoffs**: start/sit under the seeding reading, the waiver claim briefs while claims still matter, K and D/ST streaming, the playoff-odds simulator, and the retrospective accumulating its first weeks of calibration data. The `trade` Skill (P1, Phase 2) **will miss the 2026 trade deadline**; usage-first waiver detection and the opportunity model are 2027 features. In the plan's own words: *"Under no branch does a week-4 start yield a week-4 product."* What the 2026 season buys regardless of timing is the projection-snapshot corpus, the transaction history for the demand model, and the recorded fixtures — each of which turns a soft gate into a hard one for 2027. The adversarial review's closing verdict adds its own caution: the L estimate for Phase 1a has no measurement behind it, and v1's added value over ESPN's own numbers may be thin until Phase 2's usage data arrives — the retrospective is built to show it either way.
+From [plan 10 §0](docs/plan/10-phasing-and-acceptance.md#0-decisions-at-a-glance), whose expectation paragraph was rewritten on 2026-10-05: the plan's first estimate, made in NFL week 4 of 18 on a human-engineer effort scale, put the P0 tools in mid-to-late November and had the `trade` Skill miss the 2026-12-02 trade deadline — wrong by roughly thirtyfold against the sibling project's measured build. The owner approved the build on 2026-10-05 (NFL week 5), and the full read-only scope — Phases 0, 1a, 1b, 2 and 3: the P0 tools and Skills, the `trade` Skill, usage-first waiver detection and the opportunity model — was built by 2026-10-11 and has been in QA and penetration testing (Stage C) since. The owner's client gets it at Stage D, aiming at most of the remaining regular season, the trade deadline and the fantasy playoffs; what can still delay it is usage limits and the owner's review stops, not the plan's size. What the season buys either way is the projection-snapshot corpus, the transaction history for the demand model and the league's own logged calls — the evidence the time-bound gates wait on (plan 10 B14 needs eight weeks of snapshots, C3 a pre-week scoreboard snapshot). The adversarial review's caution still stands: with ESPN's mean as the point estimate (`weight_espn = 1.0`), v1's added value over ESPN's own numbers may be thin, and the retrospective is built to show it either way.
 
 ### The write module: "recommended: do not build yet"
 
@@ -1294,7 +1294,7 @@ It would start only on the owner's explicit decision, after at least one season 
 
 ### Decisions that belong to the owner
 
-The plan lists sixteen ([plan 10 §5](docs/plan/10-phasing-and-acceptance.md), D0–D15). Two sit in front of everything: **D0** — accept the terms-of-use account risk for live use (it gates Phase 1b and every credentialed job; if it is not accepted, Phase 1a ships as a fixture-and-public-data product that never touches a real league) — and **D2** — name the public league the drift probe and the keyless fixtures use. **D1** (which seeding reading the league actually uses) and **D11** (the write module: do not build yet) follow.
+The plan lists sixteen ([plan 10 §5](docs/plan/10-phasing-and-acceptance.md), D0–D15). The four that shaped the build were made on 2026-10-05 ([`docs/HANDOFF.md`](docs/HANDOFF.md), "Decisions made"): **D0** — the owner accepted the terms-of-use account risk for live, read-only use (it gated Phase 1b and every credentialed job); **D2** — the owner named the public leagues the drift probe and the keyless fixtures use (kept in local configuration, never committed); **D1** — the owner recorded the reference league's seeding reading (ESPN's rule: record first, points for as the tiebreak); **D11** — the write module is not built. The others carry the plan's recommended defaults, which the plan's approval accepted.
 
 ---
 
@@ -1306,7 +1306,7 @@ Yes. The read-only product is built — the server, the `eff` CLI, 34 read tools
 
 ### Why read-only first?
 
-Because read-only is where the value is and where the risk is lowest. The decisions — who to start, whether a waiver claim is worth your priority, what a trade does to your playoff odds — are the hard part; the click that follows takes seconds, and every planned Skill ends with the exact clicks. A write changes league state under your identity through an unofficial API with no dry-run, and the confirmation guarantee holds only in some sessions. The plan therefore specifies the write module in full and recommends not building it yet.
+Because read-only is where the value is and where the risk is lowest. The decisions — who to start, whether a waiver claim is worth your priority, what a trade does to your playoff odds — are the hard part; the click that follows takes seconds, and every Skill's recommendation ends with the way to the exact clicks. A write changes league state under your identity through an unofficial API with no dry-run, and the confirmation guarantee holds only in some sessions. The plan therefore specifies the write module in full and recommends not building it yet.
 
 ### Will it ever change my roster without asking?
 
@@ -1326,7 +1326,7 @@ No. This project is not affiliated with, endorsed by, or supported by ESPN or Th
 
 ### Why not scrape?
 
-Because scraping web pages is the behaviour ESPN's infrastructure actively blocks and the terms name most directly, and because it is brittle. The plan reads only the JSON API the ESPN site itself uses, identifies itself honestly, and will not impersonate a browser to get past a block — if the API ever starts refusing the honest `User-Agent`, the server stops and says so. For the same reason it never reads your browser's cookie database and never automates a username/password login: both are indistinguishable from credential theft and would cross from "you pasted your own session" to "software harvested credentials".
+Because scraping web pages is the behaviour ESPN's infrastructure actively blocks and the terms name most directly, and because it is brittle. The server reads only the JSON API the ESPN site itself uses, identifies itself honestly, and will not impersonate a browser to get past a block — if the API ever starts refusing the honest `User-Agent`, the server stops and says so. For the same reason it never reads your browser's cookie database and never automates a username/password login: both are indistinguishable from credential theft and would cross from "you pasted your own session" to "software harvested credentials".
 
 ### Does it work for other leagues and formats?
 
@@ -1334,7 +1334,7 @@ Because scraping web pages is the behaviour ESPN's infrastructure actively block
 
 ### What about Yahoo?
 
-There is a sibling project, `yahoo-fantasy-football-mcp`, by the same owner, planned the same way. The shared-core question was decided explicitly ([plan 01 §0](docs/plan/01-system-architecture.md#0-decisions-at-a-glance), D3): **two servers, two repositories, no shared package today** — with a written contract (the same module boundaries, canonical stat hub, result envelope and data-source interface, and a mechanical name crosswalk `ff_*` ↔ `espn_*`) and a named trigger for extracting a shared core later: both scoring engines pass their golden tests *and* a shared module needs the same fix in both repositories. The two can be installed side by side under different configuration keys; the `espn_` prefix tells the model which league a tool touches, and the Skills ask which league you mean when both are present and you did not say.
+There is a sibling project, `yahoo-fantasy-football-mcp`, by the same owner, researched, reviewed and built the same way. The shared-core question was decided explicitly ([plan 01 §0](docs/plan/01-system-architecture.md#0-decisions-at-a-glance), D3): **two servers, two repositories, no shared package today** — with a written contract (the same module boundaries, canonical stat hub, result envelope and data-source interface, and a mechanical name crosswalk `ff_*` ↔ `espn_*`) and a named trigger for extracting a shared core later: both scoring engines pass their golden tests *and* a shared module needs the same fix in both repositories. The two can be installed side by side under different configuration keys; the `espn_` prefix tells the model which league a tool touches, and the Skills ask which league you mean when both are present and you did not say.
 
 ### Where are my cookies stored?
 
@@ -1342,7 +1342,7 @@ In your operating system's keychain by default, or — if a setup-time test show
 
 ### Is my league data sent anywhere?
 
-Only where you would expect. The planned server makes **no telemetry, error-reporting or third-party LLM calls**, and its HTTP client refuses every host that is not on this list:
+Only where you would expect. The server makes **no telemetry, error-reporting or third-party LLM calls**, and its HTTP client refuses every host that is not on this list:
 
 | Host | What is sent | Why |
 |---|---|---|
@@ -1377,7 +1377,7 @@ This design was informed by research, not built from anyone else's code. Nothing
 
 **Data providers and their licences** ([`docs/research/04-data-sources.md` §E](docs/research/04-data-sources.md#e-licensing--tos-table-and-the-personal-vs-commercial-constraints)):
 
-| Provider | Planned use | Licence / terms |
+| Provider | Use | Licence / terms |
 |---|---|---|
 | [nflverse](https://github.com/nflverse/nflverse-data) | The backbone: player and team stats, snaps, play-by-play, injuries, depth charts, weekly rosters (the ESPN-id crosswalk), schedules and lines | CC-BY 4.0 — attribution carried in every result that uses it |
 | FTN charting via nflverse; [ffopportunity](https://github.com/ffverse/ffopportunity) | Expected fantasy points and charting-derived inputs | CC-BY-SA 4.0 — attribution; share-alike attaches to redistributed derived data |
@@ -1387,7 +1387,7 @@ This design was informed by research, not built from anyone else's code. Nothing
 | RotoWire, ESPN and CBS Sports RSS | News headlines | Headlines only, treated as untrusted text |
 | ESPN Fantasy (unofficial API) | League data and ESPN's own projections | **No licence and no affiliation.** Subject to the Disney Terms of Use; never commercial; see the [disclosure](#terms-of-use-and-account-risk) |
 
-**Protocol and tooling.** The [Model Context Protocol](https://modelcontextprotocol.io/) specification and its official TypeScript SDK; the MCP Inspector; `zod`, `hyparquet` and `@napi-rs/keyring` (the four planned runtime packages, each exact-pinned); Anthropic's published guidance on building MCP servers and authoring Skills; and the sibling project `yahoo-fantasy-football-mcp`, whose platform-agnostic research and adversarial rulings are reused here by citation.
+**Protocol and tooling.** The [Model Context Protocol](https://modelcontextprotocol.io/) specification and its official TypeScript SDK; the MCP Inspector; `zod`, `hyparquet` and `@napi-rs/keyring` (with the SDK, the four direct runtime dependencies, each exact-pinned); Anthropic's published guidance on building MCP servers and authoring Skills; and the sibling project `yahoo-fantasy-football-mcp`, whose platform-agnostic research and adversarial rulings are reused here by citation.
 
 **Process.** The plan was attacked by a devil's-advocate agent over three rounds before any code was written; [`docs/plan/adversarial-log.md`](docs/plan/adversarial-log.md) and [`docs/plan/changelog.md`](docs/plan/changelog.md) are the record.
 
@@ -1401,4 +1401,4 @@ Why MIT: it gives maximal reuse for a small open-source tool (a fork, a provider
 
 ---
 
-<p align="center"><em>Unofficial. Not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company. Nothing on this page is implemented yet.</em></p>
+<p align="center"><em>Unofficial. Not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company.</em></p>
