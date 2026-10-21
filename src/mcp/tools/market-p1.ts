@@ -1136,13 +1136,21 @@ const CLAUSE_SPLIT =
   /(?<=[;!?])\s+|(?<=\.)(?<!(?:^|[\s.(])(?:[a-z]|jr|sr|ii|iii|iv|st|vs|no|dr|mr|mt|ft)\.)\s+|\s+[—–-]\s+|\n+/iu;
 
 /**
- * Where a clause that names a second player splits further: commas and colons, and the words that
- * join two players' news in one sentence ("X ruled out, Y to start"; "Y starts as X sits"; "with X
- * out, Y …"). Only ever applied to a clause naming more than one player, and each piece is kept only
- * when it names the subject alone, so a split can lose one of his claims but never adopt another's.
+ * Where a clause of a multi-player text splits further: commas and colons, and the words that join
+ * two players' news in one sentence ("X ruled out, Y to start"; "Y starts as X sits"; "with X out,
+ * Y …"; "if he is ruled out, Y would start"; "Y steps in now that he is sidelined"). Only ever applied
+ * to a text that names more than one player, and each piece is kept only when it names the subject
+ * alone, so a split can lose one of his claims but never adopt another's.
  */
 const PHRASE_SPLIT =
-  /\s*[,:]\s*|\s+(?:and|but|while|whereas|as|so|with|without|after|before|because|since|though|although|or|then|when|until|amid|plus|meaning|leaving|opening)\s+/iu;
+  /\s*[,:]\s*|(?:^|\s+)(?:and|but|while|whereas|as|so|with|without|after|before|because|since|though|although|or|then|when|until|amid|plus|meaning|leaving|opening|if|once|unless|now that|in place of|instead of|following)\s+/iu;
+
+/**
+ * A third-person pronoun: in a text that names another player, whom it means is not resolved ("With
+ * him sidelined, Y figures to start" — him is the teammate), so a piece holding one is never read as
+ * the subject's (Stage C finding evidence-item-claims-misattributed).
+ */
+const UNRESOLVED_PRONOUN = /(?<!\p{L})(?:he|him|his|himself|he's|he'll|he'd)(?!\p{L})/iu;
 
 /** The folded keys a player is named by in news text: his surname and his whole name run together. */
 export interface NameKeys {
@@ -1272,14 +1280,16 @@ function namesPlayer(words: ReadonlySet<string>, k: NameKeys): boolean {
 
 /**
  * The parts of a third-party text of a news item that also names other players which are about the
- * subject ALONE: a clause (CLAUSE_SPLIT) naming him and none of the others is kept whole; a clause
- * naming him and another is split into its phrases (PHRASE_SPLIT), each kept on the same rule; a
- * clause naming nobody ("He will not play") stays out — whom it is about is not resolved. Re-wrapped
- * with the original source tag (the parts joined by "; ", so no claim pattern can straddle two of
- * them), or null when nothing is his alone. Only sliced, never interpreted: the flags are recomputed
- * on what is kept. Stage C finding evidence-item-claims-misattributed: the matcher attaches one item
- * to every player it names, and a teammate's claim in a clause that also named the subject — "X
- * (ankle) ruled out, Y to start", "with X out Y starts", "X will not play, so Y …" — was his.
+ * subject ALONE: each clause (CLAUSE_SPLIT) that names him is split into its phrases (PHRASE_SPLIT),
+ * and a phrase is kept only when it names him and none of the others and holds no third-person
+ * pronoun (UNRESOLVED_PRONOUN); a phrase naming nobody ("He will not play", "with the starter out")
+ * stays out — whom it is about is not resolved. Re-wrapped with the original source tag (the parts
+ * joined by "; ", so no claim pattern can straddle two of them), or null when nothing is his alone.
+ * Only sliced, never interpreted: the flags are recomputed on what is kept. Stage C finding
+ * evidence-item-claims-misattributed: the matcher attaches one item to every player it names, and a
+ * teammate's claim in a clause that also named the subject — "X (ankle) ruled out, Y to start",
+ * "with X out Y starts", "X will not play, so Y …" — was his; so was one a pronoun carried into the
+ * subject's own clause ("With him sidelined, Y figures to start"; "Y steps in now that he is out").
  */
 export function partsAbout(
   text: UntrustedText,
@@ -1293,16 +1303,16 @@ export function partsAbout(
     (o.given !== null && !subject.tokens.includes(o.given) && words.has(o.given));
   const alone = (piece: string): boolean => {
     const words = foldedWords(piece);
-    return namesPlayer(words, subject) && !others.some((o) => namesOther(words, o));
+    return (
+      namesPlayer(words, subject) &&
+      !others.some((o) => namesOther(words, o)) &&
+      !UNRESOLVED_PRONOUN.test(piece)
+    );
   };
   const kept: string[] = [];
   for (const raw of text.untrusted_text.value.split(CLAUSE_SPLIT)) {
     const clause = raw.trim();
     if (clause.length === 0 || !namesPlayer(foldedWords(clause), subject)) continue;
-    if (alone(clause)) {
-      kept.push(clause);
-      continue;
-    }
     for (const p of clause.split(PHRASE_SPLIT)) {
       const phrase = p.trim();
       if (phrase.length > 0 && alone(phrase)) kept.push(phrase);

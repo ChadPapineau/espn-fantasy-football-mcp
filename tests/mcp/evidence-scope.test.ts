@@ -73,6 +73,45 @@ describe("partsAbout (Stage C evidence-item-claims-misattributed)", () => {
     expect(extractClaim("Ostrander is out Ostrander-style")?.designation).toBe("out");
   });
 
+  it("a pronoun in his own clause is not his: whom it means is not resolved (round 3)", () => {
+    // the verifier's wordings: the teammate is "him"/"he" in the subject's own clause
+    for (const [text, kept] of [
+      [
+        "Quist (ankle) was ruled out for Sunday's game against the opponent. With him sidelined, Malik Ostrander figures to start.",
+        "Malik Ostrander figures to start.",
+      ],
+      [
+        "Quist limited at practice; if he is ruled out, Ostrander would start",
+        "Ostrander would start",
+      ],
+      ["If he is ruled out, Ostrander would start", "Ostrander would start"],
+      ["Quist (ankle) ruled out. With him sidelined, Ostrander starts", "Ostrander starts"],
+      [
+        "Quist (ankle) is out for the week. With him sidelined, Ostrander should see more work.",
+        "Ostrander should see more work.",
+      ],
+      ["Quist was ruled out. Ostrander steps in now that he is sidelined.", "Ostrander steps in"],
+      ["Ostrander starts once Quist is ruled out", "Ostrander starts"],
+      ["Ostrander starts unless he is cleared", "Ostrander starts"],
+    ] as const) {
+      const got = about(text);
+      expect(got, text).toBe(kept);
+      // nothing kept carries the teammate's availability
+      expect(extractClaim(got)?.designation ?? null, text).not.toBe("out");
+    }
+    // a phrase naming nobody but "the starter" is not his either
+    expect(about("Quist is out. With the starter sidelined, Ostrander figures to start")).toBe(
+      "Ostrander figures to start",
+    );
+    // a pronoun beside his own name is unresolved too in a multi-player text: dropped, never adopted
+    expect(about("Quist is out. Ostrander says he is fine")).toBeNull();
+    expect(about("Quist is out. Ostrander's knee: he'll sit")).toBe("Ostrander's knee");
+    // control: his own claim with no pronoun stays his
+    expect(about("Quist is fine. Ostrander (knee) was ruled out")).toBe(
+      "Ostrander (knee) was ruled out",
+    );
+  });
+
   it("a period after an initial or a name suffix ends no clause (the claim keeps its name)", () => {
     const pitts = [keys("Kyle Pitts Sr.")];
     expect(
@@ -86,8 +125,11 @@ describe("partsAbout (Stage C evidence-item-claims-misattributed)", () => {
   });
 
   it("another player named by his first name only still counts (not a shared or a word-like one)", () => {
-    expect(about("Ostrander starts in place of Dorian, who is out")).toBeNull();
-    expect(about("Ostrander starts in place of Dorian")).toBeNull();
+    // a phrase naming him and the other by his first name is not his alone
+    expect(about("Ostrander replaces Dorian, who is out")).toBeNull();
+    // "in place of" joins two players' news: his own part is kept, the other's "who is out" never
+    expect(about("Ostrander starts in place of Dorian, who is out")).toBe("Ostrander starts");
+    expect(about("Ostrander starts in place of Dorian")).toBe("Ostrander starts");
     // the subject's own first name, shared with the other player, names nobody else
     const josh = keys("Josh Ostrander");
     const jacobs = [keys("Josh Jacobs")];
@@ -282,6 +324,22 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
       (s, o) => [`Injury update`, `${o} will not play Sunday, so ${s} draws the start.`],
     ],
     ["a possessive", (s, o) => [`${s} starts with ${o}'s ankle injury ruling him out`, ""]],
+    // round 3 (the verifier): the teammate is a pronoun in the subject's own clause
+    [
+      "'with him sidelined'",
+      (s, o) => [
+        `${s.split(" ").at(-1) ?? s} in line for start`,
+        `${o} (ankle) was ruled out for Sunday's game against the opponent. With him sidelined, ${s} figures to start.`,
+      ],
+    ],
+    [
+      "'if he is ruled out'",
+      (s, o) => [`${o} limited at practice; if he is ruled out, ${s} would start`, ""],
+    ],
+    [
+      "'now that he is sidelined'",
+      (s, o) => [`${o} was ruled out. ${s} steps in now that he is sidelined.`, ""],
+    ],
   ];
   /** The claims that would move his availability or health (a role claim of his own may stand). */
   const health = (claims: readonly string[]) =>
@@ -384,6 +442,15 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
     const got = await evidence(outlook(`With ${m} sidelined, ${s} should see more work.`));
     expect(got.flag).not.toBe("availability_conflict");
     expect(health(got.claims)).toEqual([]);
+    // round 3: the teammate as a pronoun in the outlook's sentence about him
+    for (const text of [
+      `${m} (ankle) is out for the week. With him sidelined, ${s} should see more work.`,
+      `${m} was ruled out. ${s} steps in now that he is sidelined.`,
+    ]) {
+      const p = await evidence(outlook(text));
+      expect(p.flag, text).not.toBe("availability_conflict");
+      expect(health(p.claims), text).toEqual([]);
+    }
     expect(got.warnings).toContain(
       "1 ESPN outlook text(s) also name other players: only their parts naming this player alone are read",
     );
