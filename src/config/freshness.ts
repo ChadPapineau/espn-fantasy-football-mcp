@@ -322,6 +322,64 @@ export function inGameWindow(games: readonly GameFlags[], nowMs: number): boolea
   );
 }
 
+// --- the TTL context every reader judges under (plan 01 §5.2 game-day TTLs) ------------------------
+
+/**
+ * A pro-schedule game as the TTL context reads it (structurally the domain's ProGame; config
+ * imports no domain type).
+ */
+export interface TtlScheduleGame {
+  readonly kickoff: string | null;
+  readonly start_time_tbd: boolean;
+  readonly valid_for_locking: boolean;
+  readonly stats_official: boolean;
+}
+
+const EASTERN_DATE = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** The US-Eastern calendar date of an instant (`YYYY-MM-DD`): the NFL's game day. */
+export function easternDate(ms: number): string {
+  return EASTERN_DATE.format(new Date(ms));
+}
+
+/** Days before the first and after the last kickoff still counted as the season. */
+export const IN_SEASON_MARGIN_MS = 14 * 86_400_000;
+
+/**
+ * The TTL context at `nowMs` from a season's pro-schedule games (plan 01 §5.2): a game day is a day
+ * with a kickoff on the league's local calendar — US Eastern, the NFL's (a Thursday-night game kicks
+ * off after midnight UTC, so a UTC-date test read the TNF Thursday as no game day and the Friday after
+ * as one); a game window is open while any game is under way; the season runs from two weeks before
+ * the first kickoff to two weeks after the last. No usable kickoff: the default context. ONE
+ * definition for every reader — the tools (src/mcp), the provider's own TTLs (src/services) and
+ * `eff status` / `eff doctor` (src/cli) — so the three cannot disagree on a label (Stage C finding
+ * freshness-gameday-ttl-never-applied).
+ */
+export function ttlContextAt(games: readonly TtlScheduleGame[], nowMs: number): TtlContext {
+  const flags = games.map((g) => ({
+    kickoff_ms: g.kickoff === null || g.start_time_tbd ? null : Date.parse(g.kickoff),
+    valid_for_locking: g.valid_for_locking,
+    stats_official: g.stats_official,
+  }));
+  const kicks = flags
+    .map((f) => f.kickoff_ms)
+    .filter((k): k is number => k !== null && Number.isFinite(k));
+  if (kicks.length === 0 || !Number.isFinite(nowMs)) return DEFAULT_TTL_CONTEXT;
+  const today = easternDate(nowMs);
+  return {
+    inGameWindow: inGameWindow(flags, nowMs),
+    gameDay: kicks.some((k) => easternDate(k) === today),
+    inSeason:
+      nowMs >= Math.min(...kicks) - IN_SEASON_MARGIN_MS &&
+      nowMs <= Math.max(...kicks) + IN_SEASON_MARGIN_MS,
+  };
+}
+
 /** A resource's `ttlMs`: the class TTL capped at one day; one day for immutable classes. */
 export function resourceTtlMs(cls: FreshnessClass): number {
   return (cls.ttlSeconds === null ? DAY : Math.min(cls.ttlSeconds, DAY)) * 1000;

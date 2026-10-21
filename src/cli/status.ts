@@ -9,11 +9,14 @@
 import { lstatSync } from "node:fs";
 import { deriveStartupState } from "../auth/state.js";
 import {
+  DEFAULT_TTL_CONTEXT,
   SOURCE_REGISTRY,
   freshnessClass,
   stampState,
+  ttlContextAt,
   type DatasetSourceId,
   type FreshnessState,
+  type TtlContext,
 } from "../config/freshness.js";
 import { datasetFilePath, storePath } from "../config/paths.js";
 import { ESPN_JOB_DAILY_CAPS, type LenientConfig } from "../config/schema.js";
@@ -81,7 +84,10 @@ export interface SourceStatus {
   readonly consecutive_failures: number;
 }
 
-/** Judges one source from its refresh_log rows. */
+/**
+ * Judges one source from its refresh_log rows, under `ttl` — the TTL context at `nowMs` (game-day
+ * TTLs: the pro schedule's 1 h, schedules' and lines' 30 min), the one espn_get_status judges under.
+ */
 export function sourceStatus(
   source: DatasetSourceId,
   current: RefreshLogRow | null,
@@ -89,6 +95,7 @@ export function sourceStatus(
   failures: number,
   cacheDir: string,
   nowMs: number,
+  ttl: TtlContext = DEFAULT_TTL_CONTEXT,
 ): SourceStatus {
   const cls = freshnessClass(SOURCE_REGISTRY[source].freshness);
   const base = {
@@ -124,6 +131,7 @@ export function sourceStatus(
       checked_at: current.checked_at,
     },
     nowMs,
+    ttl,
   );
   return {
     ...base,
@@ -136,10 +144,25 @@ export function sourceStatus(
   };
 }
 
-/** Every configured source's status from an open store. */
+/**
+ * The TTL context at `nowMs` from the store's pro schedule of the configured season (config's
+ * `ttlContextAt`, as the tools judge): a 2.5 h-old schedule on a Sunday is stale here as it is in
+ * espn_get_status (Stage C finding freshness-gameday-ttl-never-applied). An unreadable schedule is
+ * the default context.
+ */
+export function storeTtlContext(store: Store, season: number, nowMs: number): TtlContext {
+  try {
+    return ttlContextAt(store.datasets.proSchedule.games(season, null).rows, nowMs);
+  } catch {
+    return DEFAULT_TTL_CONTEXT;
+  }
+}
+
+/** Every configured source's status from an open store, judged under the store's TTL context. */
 export function sourceStatuses(store: Store, config: LenientConfig, nowMs: number): SourceStatus[] {
   const rl = store.repos.refreshLog;
   const current = rl.current();
+  const ttl = storeTtlContext(store, config.season, nowMs);
   return configuredSources(config).map((s) =>
     sourceStatus(
       s,
@@ -148,6 +171,7 @@ export function sourceStatuses(store: Store, config: LenientConfig, nowMs: numbe
       rl.consecutiveFailures(s),
       config.cacheDir,
       nowMs,
+      ttl,
     ),
   );
 }

@@ -53,7 +53,12 @@ import type {
   CredentialStore,
   SecretRegistrar,
 } from "../auth/types.js";
-import { inGameWindow, isPeriodProvisional, type TtlContext } from "../config/freshness.js";
+import {
+  DEFAULT_TTL_CONTEXT,
+  isPeriodProvisional,
+  ttlContextAt,
+  type TtlContext,
+} from "../config/freshness.js";
 import { readSecureFile } from "../config/paths.js";
 import { ConfigError, type Config, type ConfigIssue } from "../config/schema.js";
 import type { Clock } from "../domain/clock.js";
@@ -334,7 +339,14 @@ export function withProbeAccess(
  */
 export const TTL_CONTEXT_MEMO_MS = 1000;
 
-/** The freshness context the provider's TTLs read, from the stored pro schedule (plan 01 §5.2). */
+/**
+ * The freshness context the provider's TTLs read, from the stored pro schedule (plan 01 §5.2),
+ * memoised for TTL_CONTEXT_MEMO_MS. The context itself is config's `ttlContextAt`, the one the tools
+ * and `eff status` judge under: the game day on the league's Eastern calendar day (a UTC-date test
+ * read the TNF Thursday as no game day and the Friday after as one) and no non-finite kickoff in the
+ * season span (Stage C finding freshness-gameday-ttl-never-applied). An unreadable schedule is the
+ * default context.
+ */
 export function ttlContextFrom(store: Store, season: number, clock: Clock): () => TtlContext {
   let memo: { readonly at: number; readonly value: TtlContext } | null = null;
   return () => {
@@ -342,27 +354,11 @@ export function ttlContextFrom(store: Store, season: number, clock: Clock): () =
     if (memo !== null && at >= memo.at && at - memo.at < TTL_CONTEXT_MEMO_MS) return memo.value;
     memo = null;
     try {
-      const games = store.datasets.proSchedule.games(season, null).rows;
-      const now = clock.nowMs();
-      const flags = games.map((g) => ({
-        kickoff_ms: g.kickoff === null || g.start_time_tbd ? null : Date.parse(g.kickoff),
-        valid_for_locking: g.valid_for_locking,
-        stats_official: g.stats_official,
-      }));
-      const day = new Date(now).toISOString().slice(0, 10);
-      const gameDay = flags.some(
-        (f) => f.kickoff_ms !== null && new Date(f.kickoff_ms).toISOString().slice(0, 10) === day,
-      );
-      const kicks = flags.map((f) => f.kickoff_ms).filter((k): k is number => k !== null);
-      const inSeason =
-        kicks.length === 0 ||
-        (now >= Math.min(...kicks) - 14 * 86_400_000 &&
-          now <= Math.max(...kicks) + 14 * 86_400_000);
-      const value = { inGameWindow: inGameWindow(flags, now), gameDay, inSeason };
+      const value = ttlContextAt(store.datasets.proSchedule.games(season, null).rows, at);
       memo = { at, value };
       return value;
     } catch {
-      return { inGameWindow: false, gameDay: false, inSeason: true };
+      return DEFAULT_TTL_CONTEXT;
     }
   };
 }
