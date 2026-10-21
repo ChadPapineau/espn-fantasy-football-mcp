@@ -21,6 +21,7 @@ import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
 import { gradersFor, serverEnv } from "../../scripts/skills/build-plugin-evals.mjs";
 import { graderOf } from "../../scripts/skills/check-skills.mjs";
+import { PASSING_PATTERN, RECEPTION_PATTERN } from "../../scripts/skills/on1-patterns.mjs";
 import { readManifest } from "../../scripts/skills/_lib.mjs";
 import { createLogger } from "../../src/cli/log.js";
 import { backupDir, datasetDir, storePath } from "../../src/config/paths.js";
@@ -403,6 +404,33 @@ function receptionCorpus(): { right: string[]; wrong: string[] } {
     "| Scoring | Half-PPR (0.5 per reception) |",
     "| Reception | 0.5 per catch |",
     "| Receptions | ½ pt |",
+    // Stage C round 2 (the verifiers of attempts 1–3): correct rows and replies the earlier graders
+    // rejected — slash and dash separators, category-first rows, the stat id in every form ESPN's
+    // own fields use, a horizontal table, spelled-out halves
+    "Points per reception (stat 53): 0.5",
+    "| Points per reception (stat 53) | 0.5 |",
+    "| Stat | ID | Points |\n|---|---|---|\n| Reception | 53 | 0.5 |",
+    "| PPR | 0.5 |",
+    "0.5 points for each reception",
+    "Rec 0.50, Pass TD 5.0",
+    "Scoring: Rec 0.5 / Pass TD 5 / Rush-Rec TD 6 / INT −2 / Fumble lost −2",
+    "PPR 0.5 / pass TD 5 / rush TD 6",
+    "Reception: 0.5 - Passing TD: 5 - Rushing TD: 6",
+    "Receptions: 0.5 / Passing TD: 5",
+    "Receiving: reception 0.5 / yards 0.1 / TD 6",
+    "Receiving: 0.5 (rec), 0.1 (yd), 6 (TD)",
+    "REC (53): 0.5",
+    "Reception (53): 0.5",
+    "REC (stat_id 53): 0.5",
+    "| REC (stat_id 53) | 0.5 |",
+    "| Scoring | Half-PPR · TDs: passing 5, rushing/receiving 6 · INT −2 · fumble lost −2 |",
+    "| Scoring | Rec 0.5 / Pass TD 5 / Rush-Rec TD 6 / INT −2 / FL −2 |",
+    "Rec 0.5 / Pass TD 5 / Rush/Rec TD 6 / INT −2",
+    "Half PPR / Pass TD 5 / Rush TD 6",
+    "| REC | PTD | INT |\n|---|---|---|\n| 0.5 | 5 | -2 |",
+    "| REC | PTD |\n|---|---|\n| 0.5 pts | 5 pts |",
+    "half-point-per-reception, five points per passing TD",
+    "0.5/reception",
   ];
   const wrong = [
     ...labelFirst(labels, wrongValues, "53"),
@@ -452,6 +480,13 @@ function receptionCorpus(): { right: string[]; wrong: string[] } {
     "PPR: full; 0.5 points per completion",
     "full PPR and bench: 0.5",
     "PPR and the FLEX: 0.5",
+    // structural probes: a value beside another stat, another item, another column
+    "TE premium: 0.5 extra per reception",
+    "PPR: 1 (half for TEs: 0.5)",
+    "Receptions: 1; Rushing yards: 0.5",
+    "0.5 bonus per reception for TEs, 1 per reception otherwise",
+    "| REC | INT |\n|---|---|\n| 1 | 0.5 |",
+    "1-point receptions and bench: 0.5 and 2",
   ];
   return { right, wrong };
 }
@@ -573,6 +608,53 @@ function passingCorpus(): { right: string[]; wrong: string[] } {
     "five points for every passing touchdown",
     "Five-point passing touchdowns",
     "passing touchdowns score five",
+    // Stage C round 2 (the verifiers of attempts 1–3): category-first rows and their mirror images,
+    // slash and dash separators, the stat id in ESPN's own field forms, prose with a long gap or a
+    // comma, quarterbacks and throws, a horizontal table, a respectively-list
+    "Points per passing TD (stat 4): 5",
+    "| Passing TD (stat 4) | 5 |",
+    "| 4 | PTD | pass_td | 5 |",
+    "pass_td: 5",
+    "five points per passing touchdown",
+    "Rec 0.50, Pass TD 5.0",
+    "Scoring: Rec 0.5 / Pass TD 5 / Rush-Rec TD 6 / INT −2 / Fumble lost −2",
+    "PPR 0.5 / pass TD 5 / rush TD 6",
+    "Reception: 0.5 - Passing TD: 5 - Rushing TD: 6",
+    "Receptions: 0.5 / Passing TD: 5",
+    "Passing TD 5 / Rushing TD 6",
+    "Passing TD: 5 / Receiving TD: 6",
+    "Pass TD 5 - Rush TD 6",
+    "Pass/Rush/Rec TD: 5/6/6",
+    "Passing: TD 5",
+    "Passing: TD = 5, INT = −2",
+    "Passing | 1 pt / 25 yds · TD 5 · INT −2",
+    "| Passing | 1 pt / 25 yds · TD 5 · INT −2 |",
+    "TDs: passing 5, rushing 6, receiving 6",
+    "| Touchdowns | Passing 5, rushing 6, receiving 6 |",
+    "Touchdowns: 5 (pass), 6 (rush/rec)",
+    "TDs: 6 (rush/rec), 5 (pass)",
+    "| Scoring | Half-PPR · TDs: passing 5, rushing/receiving 6 · INT −2 · fumble lost −2 |",
+    "touchdowns are worth 6 points, except passing touchdowns, which are worth 5.",
+    "| Scoring | Rec 0.5 / Pass TD 5 / Rush-Rec TD 6 / INT −2 / FL −2 |",
+    "Quarterbacks get 5 points for every touchdown they throw.",
+    "QBs earn 5 points for each TD they throw",
+    "Touchdowns: passing 5, rushing/receiving 6",
+    "TDs — pass 5, rush 6, rec 6",
+    "Passing: TD = 5 · INT = −2",
+    "Passing: TDs 5 pts, INTs −2",
+    "Passing — TD: 5, INT: −2",
+    "PTD (4): 5",
+    "Passing TD (4): 5",
+    "Passing TDs (4) → 5",
+    "PTD (stat_id 4): 5",
+    "| PTD (stat_id 4) | 5 |",
+    "Rec 0.5 / Pass TD 5 / Rush/Rec TD 6 / INT −2",
+    "Half PPR / Pass TD 5 / Rush TD 6",
+    "passing touchdowns are worth one point more than standard (5 instead of 4)",
+    "touchdown throws are worth five points",
+    "TDs through the air are worth five.",
+    "| REC | PTD | INT |\n|---|---|---|\n| 0.5 | 5 | -2 |",
+    "half-point-per-reception, five points per passing TD",
   ];
   const wrong = [
     ...labelFirst(labels, wrongValues, "4"),
@@ -616,6 +698,24 @@ function passingCorpus(): { right: string[]; wrong: string[] } {
     "5 points per receiving TD",
     "Passing yards (stat 3): 5",
     "6-point passing TDs and 5-point rushing TDs",
+    // structural probes: a value beside another stat, another item, another category, another column
+    "QBs: 4 per TD; WRs: 5 per TD",
+    "TDs: rushing 5, passing 4",
+    "TDs: 5 rushing, 4 passing",
+    "Passing: 1 pt per 25 yds; Rushing: TD 5",
+    "Passing TD 4, rushing TD 5",
+    "Rushing TD 5, passing TD 4",
+    "5 rushing TDs and passing TDs worth 4",
+    "Touchdowns: TD 5",
+    "TDs: 5",
+    "Passing TDs: 4\nBench: 5",
+    "| PTD | Bench |\n|---|---|\n| 4 | 5 |",
+    "Passing TD: 6 (5 in some leagues)",
+    "4-point passing TDs and bench: 5, then 5 more",
+    // a respectively-list starts from a label without a value of its own, lists stats, and joins its
+    // values by "and" (a digest's next row is no second value)
+    "5 bench spots, 4-point passing TDs and bench: 5, 6 teams make the playoffs",
+    "4-point passing TDs and bench: 5 and 6 teams",
   ];
   return { right, wrong };
 }
@@ -657,6 +757,11 @@ function waiverCorpus(): { right: string[]; wrong: string[] } {
     "the waiver order does not reset",
     "your priority never resets",
     "| Waivers | Traditional, move to the last spot after a claim |",
+    // Stage C round 2 (the verifier of attempt 2): a claim's subject moving to last
+    "the claiming team goes last",
+    "claimant to last",
+    "claim → back of the line",
+    "the claimant goes last",
   ];
   const wrong = [
     "FAAB, $100 budget",
@@ -676,6 +781,9 @@ function waiverCorpus(): { right: string[]; wrong: string[] } {
     "Players dropped go back to waivers",
     "Dropped players go to waivers until the end of the period",
     "The order resets weekly; the worst team picks first",
+    // a claim's timing is no move to last
+    "Waiver claims go to the end of the day",
+    "claims are processed and go to the end of each week",
   ];
   return { right, wrong };
 }
@@ -722,6 +830,12 @@ describe("ON-1's free graders accept every correct restatement and reject every 
         Object.values(SENTENCES).some((re) => re.test(e)),
         e,
       ).toBe(true);
+  });
+
+  it("the reception and passing graders are scripts/skills/on1-patterns.mjs's, verbatim (built from named parts)", () => {
+    expect(G.reception.source).toBe(new RegExp(RECEPTION_PATTERN, "i").source);
+    expect(G.passing.source).toBe(new RegExp(PASSING_PATTERN, "i").source);
+    expect(G.reception.flags).toBe("i");
   });
 
   it("is built from the Skill's own words and the tool's own output (the owner's format on fx-10h)", () => {
