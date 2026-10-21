@@ -17,7 +17,11 @@ import {
   type DriftSignal,
   type DriftStatus,
 } from "../drift/index.js";
-import type { LenientConfig } from "../config/schema.js";
+import {
+  SEASON_RENEWAL_TEXT,
+  seasonMayAwaitRenewal,
+  type LenientConfig,
+} from "../config/schema.js";
 import type { Clock } from "../domain/clock.js";
 import type { DriftObservations, ManifestIdentity } from "../drift/types.js";
 import { createHttpClient, type HttpClient } from "../http/client.js";
@@ -208,6 +212,23 @@ export async function shapeProbe(
   return judge("shape", views, r, deps.observations);
 }
 
+/**
+ * A league 404 on a season that may await the league's renewal (config `seasonMayAwaitRenewal`:
+ * the configured season, not a past one, before its October 1) is no configuration failure: the league — the probe
+ * league or the user's — has no season on ESPN until its manager renews it, so the shape probe is
+ * skipped with that reason, never `config`, never notified (Stage C finding
+ * league-rollover-not-found-misdiagnosed). Any other check is returned unchanged.
+ */
+export function renewalSkipped(
+  c: ProbeCheck,
+  config: Pick<LenientConfig, "season">,
+  nowMs: number,
+): ProbeCheck {
+  if (c.name !== "shape" || c.status !== "config" || c.upstream_status !== 404) return c;
+  if (!seasonMayAwaitRenewal(config, nowMs)) return c;
+  return { ...c, status: "skipped", reason: SEASON_RENEWAL_TEXT.reason };
+}
+
 const RANK: Record<ProbeCheckStatus, number> = {
   host_moved: 7,
   red: 6,
@@ -376,7 +397,14 @@ export async function probe(
         signals: [],
         server_time_ms: null,
       });
-    else checks.push(await shapeProbe(deps, config.season, league, config.probeLeagueId !== null));
+    else
+      checks.push(
+        renewalSkipped(
+          await shapeProbe(deps, config.season, league, config.probeLeagueId !== null),
+          config,
+          io.clock.nowMs(),
+        ),
+      );
     const recorded = recordProbe(
       store,
       io.clock,

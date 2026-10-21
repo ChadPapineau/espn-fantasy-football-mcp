@@ -3,8 +3,15 @@
 // league id); #16 is the definitive credential probe (plan 02 §2.1), recorded in the store.sqlite
 // `credential_state` row exactly as `espn_check_auth` does — never in the credential store — and
 // never interpreted as "expired"; #17 the anonymous `mSettings` read; #18 the own-team resolution;
-// #19 nflverse `timestamp.txt` reachability. Nothing here prints a value, a league id or a name.
-import type { Config, LenientConfig } from "../config/schema.js";
+// #19 nflverse `timestamp.txt` reachability. Nothing here prints a value, a league id or a name. A
+// league 404 while the new season may await the league's renewal (config seasonMayAwaitRenewal)
+// names that state in #16 and #17 (Stage C finding league-rollover-not-found-misdiagnosed).
+import {
+  SEASON_RENEWAL_TEXT,
+  seasonMayAwaitRenewal,
+  type Config,
+  type LenientConfig,
+} from "../config/schema.js";
 import { createHttpClient } from "../http/client.js";
 import { leagueTarget } from "../providers/espn/path.js";
 import { NFLVERSE_RELEASE_BASE, NFLVERSE_TAGS } from "../sources/nflverse/release.js";
@@ -189,6 +196,12 @@ async function leagueRows(
   }
   const full = config as Config;
   const out: DoctorRow[] = [];
+  // a league 404 on a new season that may await the league's renewal names that state, never only
+  // "the id is wrong" (Stage C finding league-rollover-not-found-misdiagnosed; config's one text)
+  const renewal = seasonMayAwaitRenewal(full, io.clock.nowMs());
+  const notFoundFix = renewal
+    ? SEASON_RENEWAL_TEXT.line(full.season)
+    : "check ESPN_LEAGUE_ID and ESPN_SEASON";
   const stack = buildEspnStack(io, full, store, log, {
     origin: "server",
     observer: "doctor",
@@ -232,16 +245,17 @@ async function leagueRows(
         );
     } catch (e) {
       const code = effCodeOf(e);
+      const notFound = code === "ESPN_LEAGUE_NOT_FOUND";
       out.push(
         row(
           16,
           "credential_validity",
           "Credential validity (online)",
-          code === "ESPN_LEAGUE_NOT_FOUND" ? "config" : "fail",
-          `the probe could not complete (${code})`,
-          code === "ESPN_LEAGUE_NOT_FOUND"
-            ? "check ESPN_LEAGUE_ID and ESPN_SEASON"
-            : "re-run later",
+          notFound ? "config" : "fail",
+          notFound && renewal
+            ? `the probe could not complete (${code}: ${SEASON_RENEWAL_TEXT.reason})`
+            : `the probe could not complete (${code})`,
+          notFound ? notFoundFix : "re-run later",
         ),
       );
     }
@@ -303,8 +317,10 @@ async function leagueRows(
           "league_reachability",
           "League reachability (online)",
           "config",
-          `404 — no such league for season ${String(full.season)}`,
-          "check ESPN_LEAGUE_ID and ESPN_SEASON",
+          renewal
+            ? `404 — ESPN has no ${String(full.season)} season of this league yet`
+            : `404 — no such league for season ${String(full.season)}`,
+          notFoundFix,
         ),
       );
     else

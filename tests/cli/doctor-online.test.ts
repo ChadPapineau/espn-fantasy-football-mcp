@@ -12,6 +12,7 @@ import { runDoctor } from "../../src/cli/doctor.js";
 import { probe } from "../../src/cli/probe.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
+import { SEASON_RENEWAL_TEXT } from "../../src/config/schema.js";
 import { composeBodies } from "../../src/providers/espn/index.js";
 import { fakeCookies, stateRow } from "../auth/helpers.js";
 import {
@@ -154,6 +155,50 @@ describe("doctor --online", () => {
       const rows = await onlineRows(io2, config, store, log);
       expect(rows.find((x) => x.n === 17)?.status).toBe("config");
       expect(rows.find((x) => x.n === 16)?.status).toBe("config");
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe("doctor --online in July, the new season not renewed yet (Stage C league-rollover-not-found-misdiagnosed)", () => {
+  it("#16 and #17 name the renewal state, never only 'check ESPN_LEAGUE_ID'", async () => {
+    sb = sandbox();
+    mkdirSync(sb.configDir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(sb.configDir, "session.json"),
+      sessionFileBody(COOKIES, metaFor(COOKIES, "2027-07-01T00:00:00.000Z")),
+      { mode: 0o600 },
+    );
+    // ESPN_SEASON unset: from July 1 the default is the new season, which 404s until the renewal
+    const env = { ESPN_LEAGUE_ID: "0", EFF_CREDENTIAL_STORE: "file" };
+    // ESPN's own answer for a season the league does not have (research 03 §A.4, recorded)
+    const notFound = recorded("errors/404-league-not-found.json");
+    const base = espn({ anon: 200, cookie: 200, nflverse: 200 });
+    const f = fakeFetch((url, init) =>
+      url.includes("/leagues/0") ? jsonRes(notFound, 404) : base.fetch(url, init),
+    );
+    const io = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock("2027-07-15T15:00:00.000Z"),
+      packageRoot: fakePackage(sb),
+      env,
+    });
+    const { config, log } = await loadLenientRuntime(io);
+    expect(config.season).toBe(2027);
+    const store = openStore(config, io.clock, log, { migrate: true });
+    try {
+      const rows = await onlineRows(io, config, store, log);
+      const r16 = rows.find((x) => x.n === 16);
+      const r17 = rows.find((x) => x.n === 17);
+      expect(r16?.status).toBe("config");
+      expect(r17?.status).toBe("config");
+      for (const r of [r16, r17]) {
+        expect(r?.fix).toBe(SEASON_RENEWAL_TEXT.line(2027));
+        expect(r?.fix).not.toBe("check ESPN_LEAGUE_ID and ESPN_SEASON");
+      }
+      expect(r16?.message).toContain(SEASON_RENEWAL_TEXT.reason);
+      expect(r17?.message).toBe("404 — ESPN has no 2027 season of this league yet");
     } finally {
       store.close();
     }

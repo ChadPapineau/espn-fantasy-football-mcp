@@ -7,6 +7,8 @@
 // earlier steps stored (step 8).
 import {
   EXIT_CODES,
+  SEASON_RENEWAL_TEXT,
+  seasonMayAwaitRenewal,
   type CredentialStoreKind,
   type ExitCode,
   type KeychainSelftestOutcome,
@@ -182,6 +184,7 @@ export const SETUP_TEXT = Object.freeze({
   notDiscriminating: "Stored; this league's board answers the same to anyone, so validity cannot be tested here (state: stored).",
   rejected: "ESPN did not accept these cookies for that league: copy them again from a logged-in browser tab and re-run `eff setup`. Nothing was kept.",
   leagueNotFound: (season: number) => `League id not found for season ${String(season)}: check ESPN_LEAGUE_ID. Nothing was kept.`,
+  seasonNotRenewed: (season: number) => `${SEASON_RENEWAL_TEXT.line(season)} Nothing was kept.`,
   checkIncomplete: (code: string) => `The ESPN check could not complete (${code}); the cookies stay stored (state: stored). Run \`eff doctor --online\` later.`,
   teamOne: (id: number) => `Your team: id ${String(id)} (recorded as ESPN_TEAM_ID).`,
   teamNone: "No team in this league lists your SWID as an owner: ESPN_TEAM_ID left unset (writes stay off).",
@@ -391,13 +394,17 @@ export async function runSetup(req: SetupRequest, deps: SetupDeps): Promise<Setu
 
   // --- step 5: the definitive check (plan 02 §2.1; ADV OBJ-14, OBJ-26) ------------------------
   const header = buildCookieHeader(cookies);
+  // a league 404 on a new season that may await the league's renewal is that state, said — never
+  // only "check ESPN_LEAGUE_ID" (Stage C finding league-rollover-not-found-misdiagnosed)
+  const notFoundLine = seasonMayAwaitRenewal({ season: req.season }, Date.parse(deps.now()))
+    ? SETUP_TEXT.seasonNotRenewed(req.season)
+    : SETUP_TEXT.leagueNotFound(req.season);
   const vis = await deps.network.anonymousSettings();
   if ("error" in vis) {
     out(SETUP_TEXT.checkIncomplete(safeCode(vis.error)));
     return kept({ exitCode: EXIT_CODES.error });
   }
-  if (vis.status === 404)
-    return discard(EXIT_CODES.usage, SETUP_TEXT.leagueNotFound(req.season), "settings");
+  if (vis.status === 404) return discard(EXIT_CODES.usage, notFoundLine, "settings");
   let plan: ProbePlan;
   if (vis.status === 200) {
     const control = await deps.network.anonymousBoard();
@@ -438,7 +445,7 @@ export async function runSetup(req: SetupRequest, deps: SetupDeps): Promise<Setu
     if (verdict.observation === "rejected")
       return discard(EXIT_CODES.credentials, SETUP_TEXT.rejected, probeKind);
     if (verdict.observation === "league_not_found")
-      return discard(EXIT_CODES.usage, SETUP_TEXT.leagueNotFound(req.season), probeKind);
+      return discard(EXIT_CODES.usage, notFoundLine, probeKind);
     if (verdict.accepted !== true) {
       out(SETUP_TEXT.checkIncomplete(`http_${String(res.status)}`));
       return kept({ exitCode: EXIT_CODES.error, probe: probeKind });

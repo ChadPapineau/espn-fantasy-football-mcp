@@ -831,7 +831,7 @@ Prompts are user-invoked, hold no logic, and are generated from the Skill bodies
 | `ESPN_DRIFT_DETECTED` | A required key was missing from a view, or a skeleton came back for a known view; names the view and the JSON path | no — a human reads the diff |
 | `ESPN_HOST_MOVED` | The read host answered a redirect or a non-JSON body | no — operator override, then a release |
 | `ESPN_UPSTREAM_UNAVAILABLE` | 5xx, timeout, non-JSON body or an open circuit breaker; stale cache inside the hard limit is returned as data with this code in `warnings` | yes |
-| `ESPN_LEAGUE_NOT_FOUND` | The league id does not exist for that season | no |
+| `ESPN_LEAGUE_NOT_FOUND` | The league id does not exist for that season. From July 1 until the league's manager renews the league that is usually the new season, not yet on ESPN: the error then carries `reason: season_not_renewed` and a hint that says so — last season still reads with `ESPN_SEASON` set to its year | no |
 | `RATE_LIMITED` | The server's own limiter would exceed its cap (or ESPN ever returns 429); carries `retry_after_s` | yes |
 | `STALE_ONLY` | Only data older than the hard limit exists and `allow_stale` was not set | yes |
 | `VALIDATION` | Input failed validation (field and reason) | no |

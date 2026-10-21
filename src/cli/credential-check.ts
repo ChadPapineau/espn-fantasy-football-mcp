@@ -8,7 +8,7 @@
 // the store.sqlite `credential_state` row, never in the credential store (plan 03 L5).
 import { checkAuthAllowed, dailyProbeAllowed } from "../auth/probe.js";
 import type { CredentialObserver } from "../auth/types.js";
-import type { Config } from "../config/schema.js";
+import { SEASON_RENEWAL_TEXT, seasonMayAwaitRenewal, type Config } from "../config/schema.js";
 import type { CredentialProbeResult } from "../providers/platform.js";
 import { seasonState } from "../sources/runner.js";
 import type { Store, StoreFactory } from "../store/types.js";
@@ -113,6 +113,22 @@ function notConfigured(r: CredentialProbeResult | { readonly error: string }): b
 }
 
 /**
+ * Whether a probe's failure is the renewal state: ESPN has no league for the configured season while
+ * that season may simply not be renewed yet (config `seasonMayAwaitRenewal`: the configured season,
+ * not a past one, before its October 1). Not a credential observation and not a failure to raise every day (Stage C finding
+ * league-rollover-not-found-misdiagnosed): said, never notified, exit 0.
+ */
+export function awaitingRenewal(
+  r: CredentialProbeResult | { readonly error: string },
+  config: Pick<Config, "season">,
+  nowMs: number,
+): boolean {
+  return (
+    "error" in r && r.error === "ESPN_LEAGUE_NOT_FOUND" && seasonMayAwaitRenewal(config, nowMs)
+  );
+}
+
+/**
  * The exit code of a probe (plan 03 §1.3: 3 = credentials not configured OR rejected — as doctor
  * #16 maps it; a script running `eff check-auth && …` must not read a missing credential as success).
  */
@@ -183,6 +199,14 @@ export async function credentialCheck(
     updateJobState(config.cacheDir, { "credcheck.day": day, "credcheck.count": count + 1 });
     const wasRejected = row.state === "rejected";
     const r = await probeOnce(io, config, store, log, "daily_job");
+    if (awaitingRenewal(r, config, now)) {
+      recordJobIdle(config.cacheDir, JOB, now);
+      await writeLine(
+        io.stdout,
+        `credential-check: ${SEASON_RENEWAL_TEXT.line(config.season)} The state is unchanged.`,
+      );
+      return EXIT.ok;
+    }
     if ("error" in r) {
       recordJobRun(config.cacheDir, JOB, now, { ok: false, error: r.error });
       await writeLine(
@@ -253,6 +277,8 @@ export async function checkAuth(
     // nothing stored → no request was sent: the once-a-minute allowance is not spent
     if (notConfigured(r)) updateJobState(config.cacheDir, { "checkauth.last": last });
     if (opts.json) await writeLine(io.stdout, JSON.stringify(r));
+    else if (awaitingRenewal(r, config, now))
+      await writeLine(io.stdout, `check-auth: ${SEASON_RENEWAL_TEXT.line(config.season)}`);
     else if ("error" in r)
       await writeLine(io.stdout, `check-auth: the probe could not complete (${r.error})`);
     else {

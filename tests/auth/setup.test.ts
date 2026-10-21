@@ -265,6 +265,28 @@ describe("the private-league path (plan 03 §2.1; plan 02 §2.1: mSettings with 
     expect(h.keychain.stored).toBeNull();
     expect(h.lines).toContain(SETUP_TEXT.leagueNotFound(2026));
   });
+  it.each([
+    ["the anonymous read", { anon: { status: 404 } }],
+    ["mSettings with cookies", { settings: { status: 404 } }],
+  ] as const)(
+    "July, the new season not renewed yet: a 404 from %s names that state, never only the id (Stage C league-rollover-not-found-misdiagnosed)",
+    async (_n, net) => {
+      const h = harness({ net });
+      const july = { ...h.deps, now: () => "2027-07-15T15:00:00.000Z" };
+      const r = await runSetup(h.req({ season: 2027 }), july);
+      expect(r).toMatchObject({ exitCode: 2, state: "not_configured", accepted: null });
+      expect(h.keychain.stored).toBeNull();
+      expect(h.lines).toContain(SETUP_TEXT.seasonNotRenewed(2027));
+      expect(h.lines).not.toContain(SETUP_TEXT.leagueNotFound(2027));
+      expect(SETUP_TEXT.seasonNotRenewed(2027)).toContain("ESPN_SEASON=2026");
+      // after October 1 the same 404 is the wrong-id answer again
+      const h2 = harness({ net });
+      const october = { ...h2.deps, now: () => "2027-10-02T15:00:00.000Z" };
+      await runSetup(h2.req({ season: 2027 }), october);
+      expect(h2.lines).toContain(SETUP_TEXT.leagueNotFound(2027));
+      h.assertClean();
+    },
+  );
   it("404 from the anonymous read → league id wrong before any cookie is sent", async () => {
     const h = harness({ net: { anon: { status: 404 } } });
     const r = await runSetup(h.req(), h.deps);

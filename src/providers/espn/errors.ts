@@ -100,6 +100,13 @@ export interface EspnErrorDetails {
   readonly path?: string;
   readonly retry_after_s?: number;
   readonly reason?: string;
+  /**
+   * A fixed server text from config (SEASON_RENEWAL_TEXT — the provider may not import src/mcp),
+   * never upstream text; src/mcp/errors.ts shows it only when its own SERVER_MESSAGES / SERVER_HINTS
+   * list the same string.
+   */
+  readonly message?: string;
+  readonly hint?: string;
 }
 
 /**

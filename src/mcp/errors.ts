@@ -10,6 +10,7 @@
 import { randomBytes } from "node:crypto";
 import type { StandardSchemaWithJSON } from "@modelcontextprotocol/server";
 import type { z } from "zod/v4";
+import { SEASON_RENEWAL_TEXT } from "../config/schema.js";
 import {
   isEspnView,
   isUpstreamBudgetExhausted,
@@ -158,6 +159,8 @@ export const SERVER_HINTS = Object.freeze({
   checkAuthTooSoon: "espn_check_auth runs at most once per minute; wait retry_after_s seconds.",
   rosterSnapshotNone:
     "In a terminal run: eff snapshot roster (eff install-launchd takes one every night), then read it again.",
+  /** A league 404 on a defaulted new season before its renewal (config SEASON_RENEWAL_TEXT). */
+  seasonAwaitingRenewal: SEASON_RENEWAL_TEXT.hint,
 });
 const SERVER_HINT_SET: ReadonlySet<string> = new Set(Object.values(SERVER_HINTS));
 
@@ -169,6 +172,11 @@ const SERVER_HINT_SET: ReadonlySet<string> = new Set(Object.values(SERVER_HINTS)
  */
 export const SERVER_MESSAGES = Object.freeze({
   rosterSnapshotNone: "No roster snapshot has been taken yet.",
+  /**
+   * A league 404 on a defaulted new season before its renewal is not "no league with the configured
+   * id" (Stage C finding league-rollover-not-found-misdiagnosed; config SEASON_RENEWAL_TEXT).
+   */
+  seasonAwaitingRenewal: SEASON_RENEWAL_TEXT.message,
 });
 const SERVER_MESSAGE_SET: ReadonlySet<string> = new Set(Object.values(SERVER_MESSAGES));
 

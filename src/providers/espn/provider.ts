@@ -6,7 +6,7 @@
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): FantasyPlatformWrites
 // (src/providers/platform.ts) is not implemented here and nothing in this file sends to the write host.
 import type { TtlContext } from "../../config/freshness.js";
-import type { Config } from "../../config/schema.js";
+import { SEASON_RENEWAL_TEXT, seasonMayAwaitRenewal, type Config } from "../../config/schema.js";
 import {
   BOARD_PROBE_VIEW,
   boardControlDiscriminates,
@@ -125,6 +125,7 @@ import {
   SchemaSignals,
   type ProviderLog,
   type ReadResult,
+  type ReadSpec,
 } from "./request.js";
 import type { FetchLike } from "./transport.js";
 import {
@@ -400,6 +401,38 @@ export class EspnProvider implements FantasyPlatform {
       throw new EspnProviderError("INTERNAL", "league_ref_not_configured");
   }
 
+  /**
+   * A league 404 on a season that may await the league's renewal (config `seasonMayAwaitRenewal`:
+   * the configured season, not a past one, before its October 1) is that state, named — the same
+   * code and outcome, tagged `season_not_renewed` with config's fixed SEASON_RENEWAL_TEXT message
+   * and hint, which src/mcp/errors.ts shows (Stage C finding league-rollover-not-found-misdiagnosed).
+   * Any other failure, or a past season's 404, is returned unchanged. Idempotent.
+   */
+  private renewalAware(season: number, e: unknown): unknown {
+    if (!isEspnUpstreamError(e) || e.kind !== "league_not_found") return e;
+    if (e.effDetails.reason === SEASON_RENEWAL_TEXT.reason) return e;
+    if (!seasonMayAwaitRenewal(this.deps.config, this.deps.clock.nowMs(), season)) return e;
+    return new EspnUpstreamError(
+      "league_not_found",
+      {
+        ...e.effDetails,
+        reason: SEASON_RENEWAL_TEXT.reason,
+        message: SEASON_RENEWAL_TEXT.message,
+        hint: SEASON_RENEWAL_TEXT.hint,
+      },
+      { cause: e },
+    );
+  }
+
+  /** Every read: the one pipeline (request.ts), its league 404 read for the renewal state. */
+  private async read<T>(spec: ReadSpec<T>, opts?: ReadOptions): Promise<ReadResult<T>> {
+    try {
+      return await this.req.read(spec, opts);
+    } catch (e) {
+      throw this.renewalAware(spec.target.season, e);
+    }
+  }
+
   private league(
     ref: LeagueRef,
     views: readonly LeagueView[],
@@ -469,7 +502,7 @@ export class EspnProvider implements FantasyPlatform {
       views: readonly LeagueView[],
       parse: (b: unknown) => SettingsRead,
     ): Promise<ReadResult<SettingsRead>> =>
-      this.req.read(
+      this.read(
         {
           target: this.league(ref, views),
           filter: null,
@@ -603,7 +636,7 @@ export class EspnProvider implements FantasyPlatform {
   ): Promise<Stamped<readonly Roster[]>> {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["mRoster"], week),
         filter: null,
@@ -668,7 +701,7 @@ export class EspnProvider implements FantasyPlatform {
   ): Promise<Stamped<PageOf<PlatformPlayer>>> {
     await this.prepare(ref, opts);
     const filter = playerFilter(this.poolFilter(q, page, ref.season), "league");
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["kona_player_info"], q.week),
         filter,
@@ -709,7 +742,7 @@ export class EspnProvider implements FantasyPlatform {
   }
 
   private konaById(ref: LeagueRef, ids: readonly number[], week: Week, opts?: ReadOptions) {
-    return this.req.read(
+    return this.read(
       {
         target: this.league(ref, ["kona_player_info"], week),
         filter: playerFilter({ filterIds: ids }, "league"),
@@ -786,7 +819,7 @@ export class EspnProvider implements FantasyPlatform {
       },
       "league",
     );
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["kona_playercard"]),
         filter,
@@ -822,7 +855,7 @@ export class EspnProvider implements FantasyPlatform {
   async getMatchups(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<readonly Matchup[]>> {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["mMatchup"]),
         filter: null,
@@ -843,7 +876,7 @@ export class EspnProvider implements FantasyPlatform {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const latest = id.settings?.status.latestScoringPeriod ?? null;
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["mMatchupScore"], week),
         filter: null,
@@ -865,7 +898,7 @@ export class EspnProvider implements FantasyPlatform {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const periods = id.settings === null ? [week] : matchupPeriodsForWeek(id.settings, week);
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["mBoxscore"], week),
         filter: scheduleFilter(periods.length === 0 ? [week] : periods),
@@ -901,7 +934,7 @@ export class EspnProvider implements FantasyPlatform {
   ): Promise<Stamped<readonly NativeProjection[]>> {
     await this.prepare(ref, opts);
     const ids = this.checkIds(players, FILTER_IDS_MAX);
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["kona_player_info"], week),
         filter: playerFilter({ filterIds: ids }, "league"),
@@ -921,7 +954,7 @@ export class EspnProvider implements FantasyPlatform {
   async getStandings(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<Standings>> {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["mTeam", "mStandings"]),
         filter: null,
@@ -952,7 +985,7 @@ export class EspnProvider implements FantasyPlatform {
   ): Promise<Stamped<PageOf<Transaction>>> {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["mTransactions2"], q.week),
         filter: transactionsFilter(q.types),
@@ -1000,7 +1033,7 @@ export class EspnProvider implements FantasyPlatform {
   ): Promise<Stamped<readonly Transaction[]>> {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["mPendingTransactions"]),
         filter: null,
@@ -1024,7 +1057,7 @@ export class EspnProvider implements FantasyPlatform {
     opts?: ReadOptions,
   ): Promise<Stamped<readonly PositionalRating[]>> {
     await this.prepare(ref, opts);
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: this.league(ref, ["mPositionalRatings"], week),
         filter: null,
@@ -1038,7 +1071,7 @@ export class EspnProvider implements FantasyPlatform {
   }
 
   async getProSchedule(season: number, opts?: ReadOptions): Promise<Stamped<ProSchedule>> {
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: seasonTarget({ host: this.host, season }),
         filter: null,
@@ -1059,7 +1092,7 @@ export class EspnProvider implements FantasyPlatform {
     season: number,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly PlatformPlayer[]>> {
-    const r = await this.req.read(
+    const r = await this.read(
       {
         target: seasonPlayersTarget({ host: this.host, season }),
         filter: playerFilter({ filterActive: true }, "root"),
@@ -1117,6 +1150,19 @@ export class EspnProvider implements FantasyPlatform {
     ref: LeagueRef,
     opts: { readonly budget?: UpstreamBudget } = {},
   ): Promise<CredentialProbeResult> {
+    try {
+      return await this.probeDefinitive(ref, opts);
+    } catch (e) {
+      // the probe's own 404 (mSettings or the board) on a season awaiting renewal is that state
+      throw this.renewalAware(ref.season, e);
+    }
+  }
+
+  /** `probeCredential`'s body (its doc above). */
+  private async probeDefinitive(
+    ref: LeagueRef,
+    opts: { readonly budget?: UpstreamBudget },
+  ): Promise<CredentialProbeResult> {
     this.checkRef(ref);
     const by = this.deps.probeObserver ?? "check_auth";
     const budget = opts.budget ?? createUpstreamBudget(PROBE_BUDGET_ID, this.deps.clock.nowMs());
@@ -1154,7 +1200,7 @@ export class EspnProvider implements FantasyPlatform {
       let failure: unknown = null;
       let flag: boolean | null = null;
       try {
-        const s = await this.req.read(
+        const s = await this.read(
           {
             target: this.league(ref, ["mSettings", "mNav"]),
             filter: null,
