@@ -1,6 +1,7 @@
 // index.ts — the ESPN provider's public surface and its one wiring helper (plan 01 §9, §10; plan 05
 // §3.1 step 5 fixture mode): `createEspnProvider` builds an EspnProvider from the resolved Config,
-// the store's three repositories, the CredentialAuthority and the scoring translator. Fixture mode
+// the store's repositories (league_settings among them: every settings answer is recorded, plan 08
+// §9), the CredentialAuthority and the scoring translator. Fixture mode
 // (`EFF_FIXTURE_DIR`) swaps the network fetch for the recorded fixtures and REFUSES to start when a
 // credential is configured — fixture mode and real cookies never coexist in one process.
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): no write provider is built here.
@@ -73,11 +74,13 @@ export interface CreateEspnProviderOptions {
   >;
   /**
    * The store's repositories; `credentialState` (read only — the definitive probe's plan reads
-   * setup's board control and the rejected view, plan 02 §2.1) when the root passes it, as
-   * `store.repos` does.
+   * setup's board control and the rejected view, plan 02 §2.1) and `leagueSettings` (each settings
+   * answer recorded; the store raises `settings_changed` — plan 08 §9, plan 03 §5 #22) when the root
+   * passes them, as `store.repos` does.
    */
   readonly repos: Pick<StoreRepositories, "limiter" | "espnCache" | "driftState"> & {
     readonly credentialState?: Pick<StoreRepositories["credentialState"], "get">;
+    readonly leagueSettings?: Pick<StoreRepositories["leagueSettings"], "put">;
   };
   readonly credentials: CredentialAuthority | null;
   readonly clock: Clock;
@@ -125,6 +128,7 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
       ...(o.repos.credentialState === undefined
         ? {}
         : { credentialState: o.repos.credentialState }),
+      ...(o.repos.leagueSettings === undefined ? {} : { leagueSettings: o.repos.leagueSettings }),
     },
     clock: o.clock,
     scoring: o.scoring,

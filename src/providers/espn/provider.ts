@@ -2,7 +2,10 @@
 // 07 §3 what each P0 tool asks of it; plan 01 §5.6 the views per call). Every read goes through the
 // one pipeline (request.ts): one path builder, one filter builder, cache-first, the cross-process
 // limiter, in-call drift, the credential rules. The league id comes from config only (plan 02 §5);
-// a LeagueRef naming another league is a programming error. Read-only: no write method exists.
+// a LeagueRef naming another league is a programming error. Every settings answer is recorded in
+// store.sqlite's league_settings (plan 08 §9), which raises `settings_changed` when it changed the
+// league-season's newest settings (Stage C, league-settings-changed-never-raised). Read-only: no write
+// method exists (league_settings is the store's own bookkeeping, never a write to ESPN).
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): FantasyPlatformWrites
 // (src/providers/platform.ts) is not implemented here and nothing in this file sends to the write host.
 import type { TtlContext } from "../../config/freshness.js";
@@ -21,6 +24,7 @@ import type {
   League,
   LeagueRef,
   LeagueRules,
+  LeagueSettingsRepository,
   LiveMatchup,
   Matchup,
   NativeProjection,
@@ -214,6 +218,14 @@ export interface EspnProviderDeps {
      * Absent: the probe plans from what it can learn itself.
      */
     readonly credentialState?: Pick<CredentialStateRepository, "get">;
+    /**
+     * store.sqlite's `league_settings` (plan 08 §9: the normalised settings persisted by
+     * settings_hash, never pruned — the recommendation log's referents): each settings answer is
+     * recorded once per parsed body, and the store raises `settings_changed` in the same write when
+     * it changed the league-season's newest settings (plan 03 §5 #22; T-08). Both composition roots
+     * pass `store.repos`, so both wire it; absent, nothing is recorded (a unit test's own ports).
+     */
+    readonly leagueSettings?: Pick<LeagueSettingsRepository, "put">;
   };
   readonly clock: Clock;
   /** The scoring module's settings translator (plan 08 §1). */
@@ -355,6 +367,8 @@ export class EspnProvider implements FantasyPlatform {
   private readonly host: string;
   /** Previous seasons fixture mode holds no settings recording for (settingsRead): the error, kept. */
   private readonly settingsMissing = new Map<number, Error>();
+  /** The parsed settings answers already recorded (a cache hit re-reads the same frozen parse). */
+  private readonly settingsRecorded = new WeakSet<SettingsRead>();
   /** Each season's bye map (null: no schedule loaded) and when it was read (`byeWeeks`). */
   private readonly byeMemo = new Map<
     number,
@@ -524,7 +538,7 @@ export class EspnProvider implements FantasyPlatform {
         const missing = this.settingsMissing.get(ref.season);
         if (missing !== undefined) throw missing;
         try {
-          return await read(["mSettings"], parseSettingsAlone);
+          return this.recordSettings(ref, await read(["mSettings"], parseSettingsAlone));
         } catch (e) {
           if (
             e instanceof Error &&
@@ -534,13 +548,49 @@ export class EspnProvider implements FantasyPlatform {
           throw e;
         }
       }
-      return await read(["mSettings", "mNav"], parseSettings);
+      return this.recordSettings(ref, await read(["mSettings", "mNav"], parseSettings));
     } catch (e) {
       // a private league answered the anonymous read with 401: the credential is still the problem
       if (learning && (e as { effCode?: unknown } | null)?.effCode === "ESPN_REQUIRES_COOKIES")
         throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
       throw e;
     }
+  }
+
+  /**
+   * Records a settings answer in league_settings and returns it (plan 08 §9: re-normalised and
+   * persisted by settings_hash; the store raises `settings_changed` in the same write when the
+   * answer changed the league-season's newest settings — Stage C, league-settings-changed-never-
+   * raised: nothing recorded them, so the check could never open). Once per parsed body: a cache hit
+   * re-reads the same frozen parse, and a parse the memo dropped re-records a fetch the store already
+   * holds without a write lock. Only an answer that passed mSettings' required keys and schema reaches
+   * here (a drifted one throws in the pipeline), so what is recorded is the league's settings. Never at
+   * the read's cost: a failure is logged and the next answer records again — the store compares with
+   * its newest row, so a change is raised late, never lost.
+   */
+  private recordSettings(ref: LeagueRef, r: ReadResult<SettingsRead>): ReadResult<SettingsRead> {
+    const repo = this.deps.repos.leagueSettings;
+    if (repo === undefined || this.settingsRecorded.has(r.value)) return r;
+    try {
+      const body = r.value.settings;
+      const scoring = this.deps.scoring(scoringInputOf(body));
+      repo.put({
+        league_id: ref.league_id,
+        season: ref.season,
+        settings_hash: scoring.settings_hash,
+        scoring,
+        slots: normalizeRosterSlots(body),
+        rules: normalizeLeagueRules(body),
+        fetched_at: r.stamp.fetched_at,
+      });
+      this.settingsRecorded.add(r.value);
+    } catch (e) {
+      // the error's class name only (StoreBusyError, RangeError, …), never its message
+      this.deps.log?.warn("espn.settings.record_failed", {
+        error: e instanceof Error ? e.name : "unknown",
+      });
+    }
+    return r;
   }
 
   /** The ref check, then (rejected, publicity unknown) the one anonymous settings read. */
