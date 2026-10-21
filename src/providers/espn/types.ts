@@ -489,11 +489,14 @@ export const PLAYOFF_SEEDING_RULES = [
   "H2H_RECORD",
   "INTRA_DIVISION_RECORD",
 ] as const;
-/** `scoringType`, tie rules, lock type, winners, playoff tiers, streaks (others [U]). */
+/**
+ * `scoringType`, tie rules, lock type, winners, playoff tiers, streaks (others [U]). `TIE` is a
+ * finished tie (in the recorded 2023 and 2024 history of league-c; research 03's probes saw none).
+ */
 export const SCORING_TYPES = ["H2H_POINTS"] as const;
 export const MATCHUP_TIE_RULES = ["SLOT_POINTS", "NONE"] as const;
 export const LINEUP_LOCKTIME_TYPES = ["INDIVIDUAL_GAME"] as const;
-export const MATCHUP_WINNERS = ["HOME", "AWAY", "UNDECIDED"] as const;
+export const MATCHUP_WINNERS = ["HOME", "AWAY", "TIE", "UNDECIDED"] as const;
 export const PLAYOFF_TIER_TYPES = ["NONE"] as const;
 export const STREAK_TYPES = ["WIN", "LOSS"] as const;
 /** `draftRanksByRankType` keys. */

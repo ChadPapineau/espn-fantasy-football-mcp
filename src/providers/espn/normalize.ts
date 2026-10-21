@@ -54,6 +54,7 @@ import type { StatSourceId, StatSplitTypeId } from "../../domain/scoring/types.j
 import { decodePosition, decodeSlot, isIdInteger, proTeamAbbrev } from "./ids.js";
 import {
   ESPN_SLOTS,
+  isKnownValue,
   MATCHUP_WINNERS,
   POSITIONAL_RATING_POSITION_IDS,
   statSplitName,
@@ -647,10 +648,15 @@ export function normalizeRosters(
 
 // --- matchups, live, box scores ------------------------------------------------------------------
 
+/**
+ * `schedule[].winner` → the domain's MatchupWinner (plan 07 A3): HOME, AWAY, TIE (a finished tie: a
+ * decided result — a tie in the records, a played game for the simulators) or UNDECIDED; a value
+ * ESPN adds reads as null, never coerced. No cast: every wire value must be a domain value or this
+ * does not compile, and a test holds the two sets equal — a TIE once read as null was re-simulated
+ * as a remaining game (Stage C finding matchup-tie-winner-null).
+ */
 function winnerOf(v: unknown): MatchupWinner | null {
-  return typeof v === "string" && (MATCHUP_WINNERS as readonly string[]).includes(v)
-    ? (v as MatchupWinner)
-    : null;
+  return typeof v === "string" && isKnownValue(MATCHUP_WINNERS, v) ? v : null;
 }
 
 /** The season schedule and results (mMatchup; plan 07 A3). A bye is `home` without `away`. */

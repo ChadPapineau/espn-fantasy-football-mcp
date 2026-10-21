@@ -694,7 +694,7 @@ export const scoreboardSchema = z.strictObject({
         matchup_id: z.number().int().min(0),
         matchup_period: z.number().int().min(0).max(25),
         playoff_tier: tokenNull,
-        winner: z.enum(["HOME", "AWAY", "UNDECIDED"]).nullable(),
+        winner: z.enum(["HOME", "AWAY", "TIE", "UNDECIDED"]).nullable(),
         is_bye: z.boolean(),
         home: matchupSideSchema,
         away: matchupSideSchema.nullable(),

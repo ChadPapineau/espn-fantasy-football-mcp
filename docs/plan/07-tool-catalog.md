@@ -86,7 +86,7 @@ Every tool carries **decision · why · alternative · what would change it** on
 
 **A3 `espn_get_scoreboard`** — P0 — the season schedule and results by matchup period.
 - Inputs: `{ week?, matchup_period?, team_id? (only that matchup), detail? }`.
-- Output `data`: `{ matchup_period, weeks[], matchups[]: { matchup_id, playoff_tier, winner: "HOME"|"AWAY"|"UNDECIDED"|null, is_bye, home: { team_id, name: UT, points, points_by_week: { [week]: pts }, is_mine }, away: {…} | null } }` + `meta.provisional`, `meta.corrections_window_open` (plan 01 §5.4).
+- Output `data`: `{ matchup_period, weeks[], matchups[]: { matchup_id, playoff_tier, winner: "HOME"|"AWAY"|"TIE"|"UNDECIDED"|null, is_bye, home: { team_id, name: UT, points, points_by_week: { [week]: pts }, is_mine }, away: {…} | null } }` + `meta.provisional`, `meta.corrections_window_open` (plan 01 §5.4).
 - Method: 05 §2.4 (completed and remaining schedule), sib §12 (realised results). Data: 03 §B.4 `mMatchup`; byes are `home` without `away`.
 - Views · budget: `mMatchup` (1; the whole season). Degradation: serve stale; rows are immutable 7 days after the week's last game.
 - Token: 2 500 / 5 000.

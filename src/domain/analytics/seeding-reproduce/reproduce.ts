@@ -107,7 +107,9 @@ function regularSeason(input: SeasonReproductionInput): {
     const hp = h.points;
     const ap = a.points;
     let winner: FinalGame["winner"] | null = null;
-    if (m.winner === "HOME" || m.winner === "AWAY") winner = m.winner;
+    // a finished tie is TIE (Stage C finding matchup-tie-winner-null); a row whose winner ESPN did
+    // not name (null) with equal final points still reads as one, as before
+    if (m.winner === "HOME" || m.winner === "AWAY" || m.winner === "TIE") winner = m.winner;
     else if (
       m.winner === null &&
       hp !== null &&

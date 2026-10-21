@@ -233,7 +233,7 @@ describe("reproduceSeason — divisions, readings and the field", () => {
 });
 
 describe("reproduceSeason — the schedule: ties, byes, playoff rows", () => {
-  it("a tie (winner null, equal points) counts half a win; playoff rows and byes are not read", () => {
+  it("a tie (winner TIE, as the provider serves it) counts half a win; playoff rows and byes are not read", () => {
     const games: G[] = [
       [1, 2, 100, 100],
       [3, 4, 120, 100],
@@ -266,6 +266,33 @@ describe("reproduceSeason — the schedule: ties, byes, playoff rows", () => {
     expect(s.regular_games).toBe(4);
     expect(s.records_agree).toBe(true);
     expect(s.espn_rule.exact).toBe(true);
+  });
+
+  it("a finished tie read as TIE equals the legacy null-winner row with equal points (Stage C finding matchup-tie-winner-null)", () => {
+    const games: G[] = [
+      [1, 2, 100, 100],
+      [3, 4, 120, 100],
+      [1, 3, 110, 100],
+      [2, 4, 105, 100],
+    ];
+    const t = standingsOf([1, 2, 3, 4], games);
+    const input = seasonOf({
+      teams: seeded(t, referenceOrder(t, games, "espn_rule")),
+      games,
+      periods: [1, 1, 2, 2],
+      regular: 2,
+    });
+    expect(input.matchups[0]?.winner).toBe("TIE");
+    const legacy = {
+      ...input,
+      matchups: input.matchups.map((m) => (m.winner === "TIE" ? { ...m, winner: null } : m)),
+    };
+    for (const s of [reproduceSeason(input), reproduceSeason(legacy)]) {
+      expect(codes(s)).not.toContain("season_unfinished");
+      expect(s.regular_games).toBe(4);
+      expect(s.records_agree).toBe(true);
+      expect(s.espn_rule.exact).toBe(true);
+    }
   });
 
   it("an undecided row: season_unfinished; a null-winner row with unequal points is undecided too", () => {

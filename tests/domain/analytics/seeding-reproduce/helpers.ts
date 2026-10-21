@@ -12,12 +12,12 @@ import type {
 /** One constructed regular-season game: home, away, home points, away points. */
 export type G = readonly [home: number, away: number, hp: number, ap: number];
 
-/** A matchup row from a game (a tie arrives as `winner: null`, as the provider normalises it). */
+/** A matchup row from a game (a tie arrives as `winner: "TIE"`, as the provider normalises it). */
 export function row(g: G, period: number): ReproduceMatchup {
   const [home, away, hp, ap] = g;
   return {
     matchup_period: period,
-    winner: hp > ap ? "HOME" : hp < ap ? "AWAY" : null,
+    winner: hp > ap ? "HOME" : hp < ap ? "AWAY" : "TIE",
     is_bye: false,
     home: { team_id: home, points: hp },
     away: { team_id: away, points: ap },

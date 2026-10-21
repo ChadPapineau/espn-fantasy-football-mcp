@@ -27,10 +27,10 @@ export interface ReproduceSide {
   readonly points: number | null;
 }
 
-/** One schedule row (a pick of the provider's `Matchup`; a tie arrives as `winner: null`). */
+/** One schedule row (a pick of the provider's `Matchup`; a finished tie arrives as `TIE`). */
 export interface ReproduceMatchup {
   readonly matchup_period: number;
-  readonly winner: "HOME" | "AWAY" | "UNDECIDED" | null;
+  readonly winner: "HOME" | "AWAY" | "TIE" | "UNDECIDED" | null;
   readonly is_bye: boolean;
   readonly home: ReproduceSide;
   readonly away: ReproduceSide | null;

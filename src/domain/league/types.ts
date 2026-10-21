@@ -878,8 +878,8 @@ export interface LockScheduleEntry {
 
 // --- matchups, live, box scores (plan 07 A3–A5) --------------------------------------------------
 
-/** `schedule[].winner`. */
-export type MatchupWinner = "HOME" | "AWAY" | "UNDECIDED";
+/** `schedule[].winner` (`TIE`: a finished tie — a decided result, counted as played). */
+export type MatchupWinner = "HOME" | "AWAY" | "TIE" | "UNDECIDED";
 
 /** One side of a season-schedule matchup (mMatchup). */
 export interface MatchupSide {
