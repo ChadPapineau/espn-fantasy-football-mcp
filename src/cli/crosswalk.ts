@@ -11,7 +11,8 @@
 // every rostered one behind ≥ 1 %-owned ids), `--all` lists every alerted id, the advice names every
 // key an override row needs (`note` too: the compiled copy's type requires it), and the summary says
 // how many matched players were paired only by name — research 04 §C step 2's "matched by name",
-// the players the alert lists although they count as matched.
+// the players the alert lists although they count as matched — and how many stored pairs the run
+// rejected and removed (Stage C finding crosswalk-rejected-pair-persists).
 import type { Config, LenientConfig } from "../config/schema.js";
 import { CHECKED_IN_OVERRIDES } from "../domain/crosswalk/overrides.js";
 import { rebuildCrosswalk } from "../domain/crosswalk/rebuild.js";
@@ -157,11 +158,14 @@ export async function runCrosswalkRebuild(
     };
   const c = statusCounts(r.run.report);
   const byName = matchedByName(r.run);
+  // `removed`: the stored pairs this run no longer accepts, deleted so no tool serves them (Stage C
+  // finding crosswalk-rejected-pair-persists)
   const lines = [
-    `crosswalk rebuild: ${String(r.written)} pair(s) written, ${String(c.matched)} matched (${String(byName)} of them only by name), ${String(c.unmatched_rostered)} rostered and ${String(c.unmatched_top_owned)} top-owned unmatched`,
+    `crosswalk rebuild: ${String(r.written)} pair(s) written, ${String(r.removed)} rejected pair(s) removed, ${String(c.matched)} matched (${String(byName)} of them only by name), ${String(c.unmatched_rostered)} rostered and ${String(c.unmatched_top_owned)} top-owned unmatched`,
   ];
   log.info("crosswalk.rebuilt", {
     written: r.written,
+    removed: r.removed,
     ...c,
     matched_by_name: byName,
     alert: r.run.alert.count,

@@ -294,7 +294,38 @@ describe("crosswalk rebuild — done path and the alert", () => {
     expect(r.lines.join("\n")).toMatch(/1 pair\(s\) written[\s\S]*lack a confident nflverse pair/);
     // the summary says how many matched players were paired only by name (none here: by id)
     expect(r.lines[0]).toBe(
-      "crosswalk rebuild: 1 pair(s) written, 1 matched (0 of them only by name), 1 rostered and 0 top-owned unmatched",
+      "crosswalk rebuild: 1 pair(s) written, 0 rejected pair(s) removed, 1 matched (0 of them only by name), 1 rostered and 0 top-owned unmatched",
+    );
+    // a stored pair the run rejects (here an override no longer checked in: stale_override_pair)
+    // is removed through the repository and counted (Stage C finding crosswalk-rejected-pair-persists)
+    const stalePair = {
+      espn_id: 9000002,
+      gsis_id: "00-0099002",
+      method: "override",
+      source: "overrides",
+      confidence: 1,
+      first_seen: "2026-09-01T00:00:00.000Z",
+      last_seen: "2026-09-01T00:00:00.000Z",
+    };
+    const removedPairs: unknown[] = [];
+    const withStale = {
+      ...store,
+      repos: {
+        ...store.repos,
+        crosswalk: {
+          ...store.repos.crosswalk,
+          get: (id: number) => (id === 9000002 ? stalePair : null),
+          removeRejected: (p: readonly unknown[]) => {
+            removedPairs.push(...p);
+            return p.length;
+          },
+        },
+      },
+    } as unknown as Store;
+    const rs = await runCrosswalkRebuild(io, config, withStale, log, null);
+    expect(removedPairs).toEqual([stalePair]);
+    expect(rs.lines[0]).toMatch(
+      /^crosswalk rebuild: \d+ pair\(s\) written, 1 rejected pair\(s\) removed, /,
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]?.args[1]).not.toContain("Nomatch");

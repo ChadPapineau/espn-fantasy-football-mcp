@@ -16,7 +16,6 @@ import {
 import { isPersonId } from "./ids.js";
 import type {
   CrosswalkOverride,
-  CrosswalkPair,
   CrosswalkRepository,
   EspnPlayerIdentity,
   NflPlayersReader,
@@ -54,11 +53,8 @@ export type CrosswalkRebuildResult =
       readonly run: CrosswalkRun<EspnPlayerIdentity>;
       /** Rows `upsertDelta` wrote. */
       readonly written: number;
-      /**
-       * Rows `removeRejected` removed (the run's `rejected` pairs still stored as read); null when the
-       * run rejected pairs and the repository cannot remove them — they stay stored.
-       */
-      readonly removed: number | null;
+      /** Rows `removeRejected` removed (the run's `rejected` pairs still stored as read). */
+      readonly removed: number;
       /** The best-effort `last_seen` refresh of unchanged pairs (null when there were none). */
       readonly touched: BestEffortOutcome | null;
       readonly stamps: CrosswalkRebuildStamps;
@@ -70,15 +66,6 @@ export interface CrosswalkRebuildStamps {
   readonly players_universe: DatasetStamp | null;
   /** Null when the fallback was not asked (no missing id, or no reader). */
   readonly nfl_players: DatasetStamp | null;
-}
-
-/** Removes the run's rejected pairs (none: no call); null when the repository cannot remove. */
-function removeRejected(
-  repository: CrosswalkRepository,
-  rejected: readonly CrosswalkPair[],
-): number | null {
-  if (rejected.length === 0) return 0;
-  return repository.removeRejected === undefined ? null : repository.removeRejected(rejected);
 }
 
 /**
@@ -121,7 +108,7 @@ export function rebuildCrosswalk(deps: CrosswalkRebuildDeps): CrosswalkRebuildRe
     ...(deps.rostered === undefined ? {} : { rostered: deps.rostered }),
   });
   const written = run.changed.length > 0 ? deps.repository.upsertDelta(run.changed) : 0;
-  const removed = removeRejected(deps.repository, run.rejected);
+  const removed = run.rejected.length > 0 ? deps.repository.removeRejected(run.rejected) : 0;
   const touched =
     run.unchanged_ids.length > 0 ? deps.repository.touch(run.unchanged_ids, deps.now) : null;
   return {

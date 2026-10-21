@@ -681,6 +681,66 @@ describe("crosswalk", () => {
     ).toThrow(RangeError);
     expect(s.repos.crosswalk.count()).toBe(0);
   });
+
+  it("removeRejected deletes a row only while it still equals the pair (Stage C crosswalk-rejected-pair-persists)", () => {
+    const stale = pair(1, "00-9000001", { method: "match", source: "matcher", confidence: 0.8 });
+    const kept = pair(2, "00-9000002");
+    s.repos.crosswalk.upsertDelta([stale, kept]);
+    expect(s.repos.crosswalk.removeRejected([])).toBe(0);
+    // a row rewritten since the run read it is kept, field by field
+    for (const other of [
+      { ...kept, gsis_id: "00-9000009" },
+      { ...kept, method: "match" as const },
+      { ...kept, source: "nflverse:players" as const },
+      { ...kept, confidence: 0.8 },
+    ])
+      expect(s.repos.crosswalk.removeRejected([other])).toBe(0);
+    // last_seen and first_seen are not compared (touch moves last_seen)
+    expect(
+      s.repos.crosswalk.removeRejected([
+        { ...stale, first_seen: "2026-09-01T00:00:00.000Z", last_seen: "2026-10-09T00:00:00.000Z" },
+        pair(7, "00-9000007"),
+      ]),
+    ).toBe(1);
+    expect(s.repos.crosswalk.get(1)).toBeNull();
+    expect(s.repos.crosswalk.byGsis("00-9000001")).toEqual([]);
+    expect(s.repos.crosswalk.get(2)).toEqual(kept);
+    expect(s.repos.crosswalk.count()).toBe(1);
+    expect(s.repos.crosswalk.removeRejected([kept, kept])).toBe(1);
+    expect(s.repos.crosswalk.count()).toBe(0);
+  });
+
+  it("removeRejected removes any row get reads, corrupt ones included, and refuses a malformed key", () => {
+    // rows upsertDelta refuses but get still reads (a corrupt table): a bad gsis, method and source
+    // with an out-of-range confidence; a team unit's negative id; a non-finite confidence
+    const raw = new DatabaseSync(t.storePath);
+    raw.exec(
+      `INSERT INTO crosswalk (espn_id, gsis_id, method, source, confidence, first_seen, last_seen, last_seen_ms) VALUES
+         (5, 'bad', 'guess', 'nowhere', 1.5, 'x', 'y', 0),
+         (-16002, '00-9000002', 'match', 'matcher', 0.8, 'x', 'y', 0),
+         (6, '00-9000006', 'id', 'nflverse:roster_weekly', 9e999, 'x', 'y', 0)`,
+    );
+    raw.close();
+    const corrupt = [5, -16002, 6].map((id) => s.repos.crosswalk.get(id));
+    expect(corrupt.map((p) => p?.confidence)).toEqual([1.5, 0.8, Number.POSITIVE_INFINITY]);
+    expect(s.repos.crosswalk.removeRejected(corrupt.filter((p) => p !== null))).toBe(3);
+    expect(s.repos.crosswalk.count()).toBe(0);
+    for (const bad of [
+      pair(1.5, "00-9000001"),
+      pair(Number.NaN, "00-9000001"),
+      pair(2 ** 53, "00-9000001"),
+      { ...pair(1, "00-9000001"), espn_id: "1" } as never,
+      { ...pair(1, "00-9000001"), gsis_id: 7 } as never,
+      { ...pair(1, "00-9000001"), method: null } as never,
+      { ...pair(1, "00-9000001"), source: undefined } as never,
+      pair(1, "00-9000001", { confidence: Number.NaN }),
+      { ...pair(1, "00-9000001"), confidence: "1" } as never,
+    ])
+      expect(() => s.repos.crosswalk.removeRejected([bad])).toThrow(RangeError);
+    expect(() =>
+      s.repos.crosswalk.removeRejected(Array.from({ length: 50_001 }, () => pair(1, "00-9000001"))),
+    ).toThrow(RangeError);
+  });
 });
 
 describe("projection (best-effort, append-only) and espn_projection (required)", () => {

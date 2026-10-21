@@ -53,7 +53,7 @@ function codesOf(r: CrosswalkRun<EspnPlayerIdentity>, espnId: number): string[] 
 /** What `rebuildCrosswalk` does with a run, over the store model. */
 function apply(store: StoreModel, r: CrosswalkRun<EspnPlayerIdentity>): void {
   if (r.changed.length > 0) store.upsertDelta(r.changed);
-  if (r.rejected.length > 0) store.removeRejected?.(r.rejected);
+  if (r.rejected.length > 0) store.removeRejected(r.rejected);
 }
 
 // The finding's repro (a): a WR matched by name + team + position (0.8, stored); nflverse then gives
@@ -352,7 +352,7 @@ describe("rebuildCrosswalk removes what the run rejects", () => {
         // another rebuild rewrites the row between this run's read and its removal
         removeRejected: (pairs) => {
           store.upsertDelta([rewritten]);
-          return store.removeRejected?.(pairs) ?? Number.NaN;
+          return store.removeRejected(pairs);
         },
       },
       overrides: [],
@@ -395,14 +395,6 @@ describe("rebuildCrosswalk removes what the run rejects", () => {
       }),
     ).toThrow("disk I/O error");
     expect(store.get(BY_ID)).toMatchObject({ gsis_id: G, method: "id" });
-  });
-
-  it("a repository without removeRejected keeps the rejected pairs, and the rebuild says so (removed: null)", () => {
-    const store = storeModel([overridePair], { removal: false });
-    const out = rebuild(store, overriddenRows(), [overridden]);
-    expect(out.run.rejected).toEqual([overridePair]);
-    expect(out.removed).toBeNull();
-    expect(store.get(OVERRIDDEN)).toEqual(overridePair);
   });
 });
 

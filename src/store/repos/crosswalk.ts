@@ -2,7 +2,9 @@
 // confidence, first/last seen; research 04 §C: survive team changes, never expire): delta-only
 // required upserts ("changed" never compares last_seen), and a best-effort `touch` that refreshes
 // last_seen only at LAST_SEEN_GRANULARITY_MS grain. Ported from sibling @cf3b015, adapted (ESPN ids
-// are the key; D/ST units are never paired, so ids are positive).
+// are the key; D/ST units are never paired, so ids are positive). A rebuild removes the pairs it
+// rejects through `removeRejected`, a compare-and-delete (Stage C finding
+// crosswalk-rejected-pair-persists: the tool-time path reads the stored row, plan 07 C1).
 import { GSIS_ID_RE } from "../../config/schema.js";
 import {
   LAST_SEEN_GRANULARITY_MS,
@@ -28,7 +30,7 @@ const SOURCES: readonly CrosswalkSource[] = [
   "matcher",
   "overrides",
 ];
-/** Most ids one `touch` call may name, and most pairs one `upsertDelta` takes (bounded work). */
+/** Most ids one `touch` call may name, and most pairs one `upsertDelta` / `removeRejected` takes. */
 export const TOUCH_MAX_IDS = 50_000;
 export const UPSERT_MAX_PAIRS = 50_000;
 
@@ -41,6 +43,23 @@ function checkPair(p: CrosswalkPair): number {
   if (c < 0 || c > 1) throw new RangeError("store: confidence must be in 0..1");
   isoMs(p.first_seen, "first_seen");
   return isoMs(p.last_seen, "last_seen");
+}
+
+/**
+ * A rejected pair's key, as `get` read it: a safe-integer id and the four compared fields by type
+ * only. Anything `get` returns must be removable — a corrupt row the rebuild refuses (a bad gsis, an
+ * unknown method, a non-finite confidence, a team unit's negative id) would otherwise fail every
+ * later rebuild. The DELETE matches the exact row, so a wider key removes nothing it should not.
+ */
+function checkRejected(p: CrosswalkPair): CrosswalkPair {
+  if (!Number.isSafeInteger(p.espn_id))
+    throw new RangeError("store: a rejected pair's espn_id must be a safe integer");
+  const fields: readonly unknown[] = [p.gsis_id, p.method, p.source];
+  if (!fields.every((v) => typeof v === "string"))
+    throw new RangeError("store: a rejected pair's gsis_id, method and source must be strings");
+  if (typeof p.confidence !== "number" || Number.isNaN(p.confidence))
+    throw new RangeError("store: a rejected pair's confidence must be a number");
+  return p;
 }
 
 interface Row {
@@ -125,6 +144,23 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
           }
         }
         return written;
+      });
+    },
+    removeRejected(pairs) {
+      const checked = boundedArray(pairs, UPSERT_MAX_PAIRS, "pairs").map(checkRejected);
+      if (checked.length === 0) return 0;
+      return writes.requiredTx("crosswalk", () => {
+        // only while the row still equals the pair the run read: a rewrite since is kept
+        const del = db.prepare(
+          `DELETE FROM crosswalk
+           WHERE espn_id = ? AND gsis_id = ? AND method = ? AND source = ? AND confidence = ?`,
+        );
+        let removed = 0;
+        for (const p of checked)
+          removed += Number(
+            del.run(p.espn_id, p.gsis_id, p.method, p.source, p.confidence).changes,
+          );
+        return removed;
       });
     },
     touch(espnIds, at) {

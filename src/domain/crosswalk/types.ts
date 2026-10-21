@@ -148,13 +148,14 @@ export interface CrosswalkRepository {
   count(): number;
   /**
    * Additive (Stage C finding crosswalk-rejected-pair-persists): removes the pairs a rebuild no
-   * longer accepts (`CrosswalkRun.rejected`, as read), each only while its row still equals that pair
-   * on espn_id, gsis_id, method, source and confidence (the fields `upsertDelta` compares) — a row
-   * another rebuild rewrote in the meantime is kept. A required write: a failure propagates. Returns
-   * rows removed. Optional on the type only until the store implements it; a repository without it
-   * keeps every rejected pair, and `rebuildCrosswalk` then reports `removed: null`.
+   * longer accepts (`CrosswalkRun.rejected`, as `get` read them), each only while its row still
+   * equals that pair on espn_id, gsis_id, method, source and confidence (the fields `upsertDelta`
+   * compares) — a row another rebuild rewrote in the meantime is kept. Any row `get` returns is
+   * removable, a corrupt one included (a team unit's negative id, a bad gsis, a non-finite
+   * confidence): a run rejects such rows, and refusing them would fail every later rebuild. A
+   * required write: a failure propagates. Returns rows removed.
    */
-  removeRejected?(pairs: readonly CrosswalkPair[]): number;
+  removeRejected(pairs: readonly CrosswalkPair[]): number;
 }
 
 /** The nflverse roster port the crosswalk reads (over the `nflverse:roster_weekly` dataset file). */

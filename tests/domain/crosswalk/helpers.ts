@@ -296,18 +296,14 @@ export interface StoreModel extends CrosswalkRepository {
  * new id and rewrites gsis/method/source/confidence/last_seen (first_seen kept) only when one of the
  * four differs; `removeRejected` deletes a row only while it still equals the pair (the contract in
  * src/domain/crosswalk/types.ts); `touch` moves last_seen at LAST_SEEN_GRANULARITY_MS grain. Initial
- * rows are taken as given (a corrupt table can be modelled). `removal: false` models a repository
- * without `removeRejected`.
+ * rows are taken as given (a corrupt table can be modelled).
  */
-export function storeModel(
-  initial: readonly CrosswalkPair[] = [],
-  opts: { readonly removal?: boolean } = {},
-): StoreModel {
+export function storeModel(initial: readonly CrosswalkPair[] = []): StoreModel {
   const table = new Map(initial.map((p) => [p.espn_id, p]));
   const upserts: CrosswalkPair[][] = [];
   const removals: CrosswalkPair[][] = [];
   const touches: number[][] = [];
-  const model: StoreModel = {
+  return {
     upserts,
     removals,
     touches,
@@ -340,10 +336,6 @@ export function storeModel(
       return { written: true };
     },
     count: () => table.size,
-  };
-  if (opts.removal === false) return model;
-  return {
-    ...model,
     removeRejected: (pairs) => {
       removals.push([...pairs]);
       let removed = 0;
