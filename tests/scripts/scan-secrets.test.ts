@@ -293,8 +293,34 @@ describe("league ids in encoded URLs (the decoded view of a line)", () => {
     ["an HTML-entity equals sign", `<a href="?${kv("leagueId", "&#61;", id)}">`],
     ["a form-encoded space (league+id=)", kv("league+id", "=", id)],
     ["upper-case escapes", kv("LEAGUEID", "%3D", id)],
+    // backslash escapes: a JSON-escaped URL, JSON inside JSON (once and twice), a double-escaped
+    // \u escape; and an upper-case hex entity and an HTML-escaped JSON attribute
+    ["a JSON-escaped API URL (\\/leagues\\/)", `"url": "${apiUrl.replaceAll("/", "\\/")}"`],
+    [
+      'escaped JSON inside JSON (\\"leagueId\\":)',
+      `"text": ${JSON.stringify(JSON.stringify({ leagueId: Number(id) }))}`,
+    ],
+    [
+      "JSON inside JSON inside JSON",
+      `"t": ${JSON.stringify(JSON.stringify(JSON.stringify({ leagueId: Number(id) })))}`,
+    ],
+    ["a double-escaped \\u escape", kv("leagueId", "\\\\u003d", id)],
+    ["an upper-case hex entity (&#X3D;)", kv("leagueId", "&#X3D;", id)],
+    ["an HTML-escaped JSON attribute (&quot;)", `data-x="{&quot;leagueId&quot;:${id}}"`],
   ])("flags %s", (_why, line) => {
     expect(flags(line, "espn-league-id"), line).toBe(true);
+  });
+
+  it("every strict rule reads the backslash-decoded line: an escaped envelope, an escaped espn_s2", () => {
+    const body = JSON.stringify({ draftDetail: {}, gameId: 1, id: Number(id), members: [] });
+    const escaped = `"text": ${JSON.stringify(body)}`;
+    expect(lineRuleIds(escaped)).not.toContain("espn-league-envelope"); // the raw reading misses it
+    expect(lineFindingIds(escaped)).toContain("espn-league-envelope");
+    // a 60-character paste with no escapes: no bare-value heuristic sees it, only the named rule
+    const v = fakeEspnS2("escaped-json", 200).replace(/%../g, "").slice(0, 60);
+    const cookie = `"h": ${JSON.stringify(JSON.stringify({ espn_s2: v }))}`;
+    expect(lineRuleIds(cookie)).toEqual([]);
+    expect(lineFindingIds(cookie)).toEqual(["espn-s2-cookie"]);
   });
 
   it.each([
@@ -304,6 +330,9 @@ describe("league ids in encoded URLs (the decoded view of a line)", () => {
     enc("/leagues/{leagueId}?view=mTeam"),
     enc("score 100% of 1234 points"),
     "50%25 off, 2026 season",
+    `"text": ${JSON.stringify(JSON.stringify({ leagueId: 0, seasonId: 2026 }))}`,
+    `"url": "${"/leagues/{leagueId}?view=mTeam".replaceAll("/", "\\/")}"`,
+    `const re = /leagueId\\s*=\\s*(\\d+)/; // a pattern, not an id`,
   ])("stays quiet on %j", (line) => {
     expect(clean(line)).toBe(true);
   });
@@ -743,6 +772,21 @@ describe("S4: deny-list terms in every encoding a capture can carry", () => {
     expect(decodeLayers("%ZZ &bogus; &#0; &#xD800;")).toBe("%ZZ &bogus; &#0; &#xD800;");
     expect(skeleton("Grid-iron 🏈 Gang!")).toBe("GridironGang");
     expect(SKELETON_MIN).toBe(6);
+  });
+  it("decodeLayers reads backslash escapes as JSON does, one layer per pass, and leaves the rest", () => {
+    const bs = "\\";
+    expect(decodeLayers(`a${bs}"b${bs}/c${bs}'d${bs}\`e`)).toBe("a\"b/c'd`e");
+    expect(decodeLayers(`${bs}${bs}u0040`)).toBe("@"); // an escaped backslash, then \u0040
+    expect(decodeLayers(`${bs}${bs}${bs}"x`)).toBe('"x'); // JSON inside JSON: \\\" → \" → "
+    expect(decodeLayers(`${bs}n ${bs}d ${bs}t C:${bs}Users`)).toBe(
+      `${bs}n ${bs}d ${bs}t C:${bs}Users`,
+    );
+    expect(decodeLayers("&#X3D;&#x3d;&#61;")).toBe("===");
+  });
+  it("a short term (no skeleton match) behind a JS escape is matched: the deny-list reads the same decoder", () => {
+    const d = parseDenylist("O'Day\n");
+    expect(denylistLines(`x\n${["O", "Day"].join("\\'")}\ny`, d)).toEqual([2]);
+    expect(denylistLines(`x\n${["O", "Day"].join("\\\\\\'")}\ny`, d)).toEqual([2]);
   });
 });
 

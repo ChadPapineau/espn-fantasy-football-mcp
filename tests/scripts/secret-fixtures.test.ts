@@ -2,7 +2,10 @@
 // BOTH scanners: every .gitleaks.toml custom rule has a must-flag case and fires on it, the
 // placeholders stay quiet, and scripts/dev/scan-secrets.mjs is never narrower than gitleaks on the
 // ESPN rules (plan 04 §4.3; plan 10 §3.0 Z1). gitleaks itself only runs in CI, so its custom rules
-// are EMULATED here from the TOML (RE2 → JS: the patterns use only the common subset).
+// are EMULATED here from the TOML (RE2 → JS: the patterns use only the common subset, plus the
+// `(?-i:…)` flag group both engines read). The emulation is the rule alone: gitleaks' own decoder
+// (--max-decode-depth, a CLI default) is not modelled, so an encoded case passes here only when
+// the rule itself reads it.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -12,6 +15,7 @@ import {
   GITLEAKS_RULE_IDS,
   assertGitleaks,
   assertScan,
+  encodedLeagueIdCases,
   fakeEspnS2,
   fakeGuid,
   fakeIpv4,
@@ -19,7 +23,7 @@ import {
   mustFlag,
   mustPass,
 } from "../../scripts/ci/secret-fixtures.mjs";
-import { entropy, scanText } from "../../scripts/dev/scan-secrets.mjs";
+import { entropy, lineRuleIds, scanText } from "../../scripts/dev/scan-secrets.mjs";
 import { ROOT, tempDir } from "../lint/helpers.js";
 
 interface GlRule {
@@ -143,6 +147,206 @@ describe(".gitleaks.toml ↔ the generated self-test", () => {
   });
 });
 
+// Stage C finding scan-league-id-url-encoded: .gitleaks.toml's espn-league-id read none of a league
+// id's encoded spellings (leagueId%3D<id>, …%2Fleagues%2F<id>). In CI only gitleaks' own decoder —
+// a CLI default, not this config — read the percent forms; nothing read HTML entities or backslash
+// escapes. The rule now carries a twin for each encoding, bounded to what scan-secrets decodes.
+describe("espn-league-id in encoded and escaped spellings (both scanners)", () => {
+  const BS = "\\";
+  const NAMED: Record<string, string[]> = { '"': ["&quot;"], "'": ["&apos;"], " ": ["&nbsp;"] };
+  /**
+   * The spellings of one separator character: literal, %XX under 0–3 extra %25 layers, \u00XX
+   * behind one or two backslashes, decimal and hex HTML entities (zero-padded to the decoder's
+   * limit), the named entity, and 1–3 backslashes before a quote or slash. `deep` goes past the
+   * decoder's bounds (for the "never narrower" direction only).
+   */
+  const spellings = (ch: string, deep = false): string[] => {
+    const code = ch.charCodeAt(0);
+    const hh = code.toString(16).padStart(2, "0");
+    const dec = String(code);
+    const out = [ch];
+    for (const k of deep ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 3])
+      out.push(`%${"25".repeat(k)}${hh}`, `%${"25".repeat(k)}${hh.toUpperCase()}`);
+    for (const n of deep ? [1, 2, 3, 4] : [1, 2]) out.push(`${BS.repeat(n)}u00${hh}`);
+    for (const z of deep ? [0, 3, 5, 6, 8] : [0, 7 - dec.length])
+      out.push(`&#${"0".repeat(z)}${dec};`);
+    for (const z of deep ? [0, 4, 5, 8] : [0, 6 - hh.length])
+      out.push(`&#x${"0".repeat(z)}${hh};`, `&#X${"0".repeat(z)}${hh.toUpperCase()};`);
+    out.push(...(NAMED[ch] ?? []));
+    if (`"'\`/`.includes(ch))
+      for (const n of deep ? [1, 2, 3, 4, 5, 6] : [1, 2, 3]) out.push(`${BS.repeat(n)}${ch}`);
+    return out;
+  };
+  type Enc = (ch: string) => string;
+  /** Every literal form the rule names, its separators spelled by `e`. */
+  const FORMS: readonly (readonly [string, (e: Enc, id: string) => string])[] = [
+    ["a query value", (e, id) => `https://fantasy.espn.com/football/league?leagueId${e("=")}${id}`],
+    ["a JSON field", (e, id) => `{${e('"')}leagueId${e('"')}${e(":")}${e(" ")}${id}}`],
+    ["a JSON array", (e, id) => `${e('"')}leagueIds${e('"')}${e(":")}${e(" ")}${e("[")}${id}]`],
+    ["prose", (e, id) => `league${e(" ")}id${e(":")}${e(" ")}${id}`],
+    ["a quoted value", (e, id) => `league_id${e("=")}${e("'")}${id}${e("'")}`],
+    ["a markdown cell", (e, id) => `| league id ${e("|")} ${id} |`],
+    [
+      "an API path",
+      (e, id) =>
+        `/apis/v3/games/ffl/seasons/2026/segments/0${e("/")}leagues${e("/")}${id}?view=mTeam`,
+    ],
+    ["a history path", (e, id) => `x${e("/")}leagueHistory${e("/")}${id}`],
+    ["a flag", (e, id) => `run --league${e(" ")}${e("`")}${id}`],
+    ["a flag with =", (e, id) => `--league-id${e("=")}${e('"')}${id}`],
+    ["a form-encoded space", (e, id) => `league+id${e("=")}${id}`],
+  ];
+  /** The literal separator of each of a form's slots, in order. */
+  const slotChars = (form: (e: Enc, id: string) => string) => {
+    const chars: string[] = [];
+    form((c) => (chars.push(c), c), "1");
+    return chars;
+  };
+  /** The form with separator `slot` spelled `spelling`, every other one literal. */
+  const oneSpelled = (
+    form: (e: Enc, id: string) => string,
+    slot: number,
+    spelling: string,
+    id: string,
+  ) => {
+    let k = 0;
+    return form((c) => (k++ === slot ? spelling : c), id);
+  };
+  const leagueIdFires = (line: string) => gitleaksFires(line).has("espn-league-id");
+  const localLeagueId = (line: string) => localRules(line).includes("espn-league-id");
+  const ID = fc.stringMatching(/^\d{4,9}$/).filter((d) => !/^0+$/.test(d));
+  const id7 = ["7", "3", "1", "9", "0", "4", "2"].join("");
+
+  it("the generated self-test carries the encoded cases, each a gitleaks AND a scan-secrets line", () => {
+    const flagged = new Map(mustFlag().map((c) => [c.line, c]));
+    const encoded = encodedLeagueIdCases((...p) => p.join(""));
+    expect(encoded.length).toBeGreaterThanOrEqual(12);
+    for (const c of encoded) {
+      expect(flagged.get(c.line)?.gitleaks, c.line.slice(0, 40)).toEqual(["espn-league-id"]);
+      expect(flagged.get(c.line)?.scan).toEqual(["espn-league-id"]);
+    }
+  });
+
+  it("every spelling of every separator, one at a time, is flagged by both scanners", () => {
+    const misses: string[] = [];
+    let checked = 0;
+    for (const [name, form] of FORMS)
+      slotChars(form).forEach((ch, slot) => {
+        for (const s of spellings(ch)) {
+          const line = oneSpelled(form, slot, s, id7);
+          checked++;
+          if (!leagueIdFires(line)) misses.push(`gitleaks: ${name} ${JSON.stringify(s)}`);
+          if (!localLeagueId(line)) misses.push(`scan-secrets: ${name} ${JSON.stringify(s)}`);
+        }
+      });
+    expect(misses).toEqual([]);
+    expect(checked).toBeGreaterThan(300);
+  });
+
+  it("property: mixed spellings within the decoder's bounds are flagged by both", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...FORMS),
+        fc.array(fc.nat(), { minLength: 6, maxLength: 6 }),
+        ID,
+        ([, form], picks, id) => {
+          let k = 0;
+          const line = form((c) => {
+            const s = spellings(c);
+            return s[(picks[k++ % picks.length] ?? 0) % s.length] ?? c;
+          }, id);
+          return leagueIdFires(line) && localLeagueId(line);
+        },
+      ),
+      { numRuns: 1000 },
+    );
+  });
+
+  it("property: past the decoder's bounds too, scan-secrets is never narrower (gitleaks ⇒ scan-secrets)", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...FORMS),
+        fc.array(fc.nat(), { minLength: 6, maxLength: 6 }),
+        ID,
+        ([, form], picks, id) => {
+          let k = 0;
+          const line = form((c) => {
+            const s = spellings(c, true);
+            return s[(picks[k++ % picks.length] ?? 0) % s.length] ?? c;
+          }, id);
+          return !leagueIdFires(line) || localLeagueId(line);
+        },
+      ),
+      { numRuns: 1000 },
+    );
+  });
+
+  it("the placeholder id 0 / 0000 stays quiet in every spelling, in both", () => {
+    const hits: string[] = [];
+    for (const [name, form] of FORMS)
+      slotChars(form).forEach((ch, slot) => {
+        for (const s of spellings(ch))
+          for (const zero of ["0", "0000"]) {
+            const line = oneSpelled(form, slot, s, zero);
+            if (leagueIdFires(line) || localLeagueId(line))
+              hits.push(`${name} ${JSON.stringify(s)}`);
+          }
+      });
+    expect(hits).toEqual([]);
+  });
+
+  it("property: on text with no %, backslash or & the rule IS scan-secrets' literal espn-league-id", () => {
+    // the twin never widens the literal reading (the history scan stays as it was) and never
+    // narrows it: both directions, over a key / separator / glue / digits grammar and a free mix
+    const KEY = ["league", "leagues", "leagueHistory", "LEAGUE", "--league", "--league-id", "x"];
+    const MID = ["", " ", "  ", "_", "-", "+", "\t"];
+    const IDS = ["", "id", "ids", "Id", "IDS", "-id"];
+    const SEPS = [
+      "",
+      " ",
+      "=",
+      ":",
+      ": ",
+      " = ",
+      '"',
+      '":',
+      '": "',
+      "'",
+      " | ",
+      "=[",
+      '": [',
+      "`",
+      "/",
+    ];
+    const DIGITS = ["1234", "98765", "0", "0000", "7", "123"];
+    const agree = (line: string) =>
+      leagueIdFires(line) === lineRuleIds(line).includes("espn-league-id");
+    // every combination of the grammar, deterministically
+    const disagree: string[] = [];
+    for (const k of KEY)
+      for (const m of MID)
+        for (const i of IDS)
+          for (const s of SEPS)
+            for (const d of DIGITS) {
+              const line = `/${k}${m}${i}${s}${d}`;
+              if (!agree(line)) disagree.push(JSON.stringify(line));
+            }
+    expect(disagree).toEqual([]);
+    // and a free mix of the same pieces plus stray glue
+    const GLUE = [" ", "\t", ":", "=", "|", "[", "]", "{", '"', "'", "`", "/", ",", "."];
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom(...KEY, ...MID, ...IDS, ...SEPS, ...GLUE, ...DIGITS), {
+          minLength: 1,
+          maxLength: 12,
+        }),
+        (parts) => agree(parts.join("")),
+      ),
+      { numRuns: 3000 },
+    );
+  });
+});
+
 describe("the generators", () => {
   it("are deterministic and shaped as documented", () => {
     expect(fakeEspnS2("x", 120)).toBe(fakeEspnS2("x", 120));
@@ -176,10 +380,46 @@ describe("the generators", () => {
 describe("assertGitleaks (the CI report check)", () => {
   const report = (ids: string[]) =>
     ids.map((RuleID, i) => ({ RuleID, File: "f", StartLine: i + 1, Secret: "S3CRET", Match: "M" }));
-  it("expect-all passes only when every rule fired", () => {
-    expect(
-      assertGitleaks(report([...GITLEAKS_RULE_IDS, "generic-api-key"]), "--expect-all").ok,
-    ).toBe(true);
+  /** What a gitleaks run that meets every must-flag expectation reports (StartLine is 1-based). */
+  const perLine = () =>
+    mustFlag().flatMap((c, i) =>
+      c.gitleaks.map((RuleID) => ({ RuleID, File: "must-flag.txt", StartLine: i + 1 })),
+    );
+  /** The 1-based must-flag line of the first encoded league-id case. */
+  const encodedLine = () =>
+    mustFlag().findIndex((c) => c.line === encodedLeagueIdCases((...p) => p.join(""))[0]?.line) + 1;
+
+  it("expect-all passes when every must-flag line is reported by each rule it names, on that line", () => {
+    const r = assertGitleaks(
+      [...perLine(), { RuleID: "generic-api-key", File: "f", StartLine: 1 }],
+      "--expect-all",
+    );
+    expect(r.ok, r.lines.join("\n")).toBe(true);
+    expect(r.lines.join("\n")).toMatch(/per line: (\d+) of \1 expected findings/);
+  });
+
+  it("a rule that fires elsewhere never stands in for a line it misses (Stage C finding scan-league-id-url-encoded)", () => {
+    const line = encodedLine();
+    expect(line).toBeGreaterThan(1);
+    // every rule still fires (espn-league-id on its literal lines): the old all-rules-fired check
+    // passed exactly this report, with the encoded league-id line unreported
+    const r = assertGitleaks(
+      perLine().filter((f) => f.StartLine !== line),
+      "--expect-all",
+    );
+    expect(r.lines.join("\n")).toContain(
+      `expected ${String(GITLEAKS_RULE_IDS.length)} rule ids, fired ${String(GITLEAKS_RULE_IDS.length)}`,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.lines.join("\n")).toContain(`line ${String(line)} [espn-league-id]`);
+    // a finding on the neighbouring line is not this line's finding
+    const shifted = perLine().map((f) =>
+      f.StartLine === line ? { ...f, StartLine: line + 50 } : f,
+    );
+    expect(assertGitleaks(shifted, "--expect-all").ok).toBe(false);
+  });
+
+  it("expect-all still names a rule that fired nowhere", () => {
     const missing = assertGitleaks(report(GITLEAKS_RULE_IDS.slice(1)), "--expect-all");
     expect(missing.ok).toBe(false);
     expect(missing.lines.join()).toContain(GITLEAKS_RULE_IDS[0]);

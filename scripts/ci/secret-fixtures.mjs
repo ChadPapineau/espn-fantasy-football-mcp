@@ -10,7 +10,9 @@
 //   node scripts/ci/secret-fixtures.mjs write <dir>
 //       writes <dir>/must-flag.txt and <dir>/must-pass.txt (outside the repo, e.g. $RUNNER_TEMP)
 //   node scripts/ci/secret-fixtures.mjs assert-gitleaks <report.json> --expect-all|--expect-none
-//       --expect-all: every id in GITLEAKS_RULE_IDS fired at least once; --expect-none: no finding.
+//       --expect-all: every must-flag line is reported, on its own line (StartLine), by each
+//       .gitleaks.toml rule it names — so every id in GITLEAKS_RULE_IDS fires, and a rule that fires
+//       on one line can never stand in for a line it misses; --expect-none: no finding.
 //       A missing report counts as zero findings. Prints RuleID/File/StartLine/Commit only — never a
 //       value. secret-scan.yml also uses it to report the history and tree scans' findings.
 //   node scripts/ci/secret-fixtures.mjs assert-scan
@@ -154,28 +156,12 @@ export function mustFlag() {
       gitleaks: ["espn-league-id"],
       scan: ["espn-league-id"],
     },
-    // percent-encoded league URLs — an ESPN login redirect, an encoded API URL (Stage C finding
-    // scan-league-id-url-encoded): scan-secrets reads them through its decoded view; gitleaks has
-    // no decoder, so these are scan-secrets cases (`gitleaks: []`) until .gitleaks.toml's
-    // espn-league-id carries the encoded twin
-    {
-      line: join(
-        "https://www.espn.com/login?redirectUrl=https%3A%2F%2Ffantasy.espn.com%2Ffootball%2Fleague%3F",
-        "leagueId%3D",
-        fakeLeagueId("encoded-query", 7),
-      ),
-      gitleaks: [],
-      scan: ["espn-league-id"],
-    },
-    {
-      line: join(
-        "https%3A%2F%2Flm-api-reads.fantasy.espn.com%2Fapis%2Fv3%2Fgames%2Fffl%2Fseasons%2F2026%2Fsegments%2F0",
-        "%2Fleagues%2F",
-        fakeLeagueId("encoded-path", 8),
-      ),
-      gitleaks: [],
-      scan: ["espn-league-id"],
-    },
+    // league ids in encoded URLs and escaped bodies (Stage C finding scan-league-id-url-encoded):
+    // scan-secrets reads them through its decoded view, gitleaks through espn-league-id's encoded
+    // twin. The twin does not lean on gitleaks' own decoder (--max-decode-depth, a CLI default): the
+    // redirect that also carries a non-ASCII escape (the decoder drops that whole segment), the HTML
+    // entities and the backslash escapes are lines it never decodes — each is checked on its own line
+    ...encodedLeagueIdCases(join),
     {
       line: join("Cookie: espn_s2=", fakeEspnS2("header", 24), "; SWID={", fakeGuid("header"), "}"),
       gitleaks: ["cookie-header", "espn-swid", "brace-guid"],
@@ -279,6 +265,95 @@ export function mustFlag() {
 }
 
 /**
+ * The encoded and escaped spellings of a league id the two scanners must both flag, each a line of
+ * its own (Stage C finding scan-league-id-url-encoded): percent-encoding once, twice and inside a
+ * JSON query value, a redirect whose query also carries a non-ASCII escape, Gson's \uXXXX-escaped
+ * `=`, HTML entities, a JSON-escaped API URL, escaped JSON inside JSON, and the form-encoded
+ * `league+id=`.
+ * @param {(...p: string[]) => string} join
+ * @returns {FlagCase[]}
+ */
+export function encodedLeagueIdCases(join) {
+  /** @param {string} line @returns {FlagCase} */
+  const both = (line) => ({ line, gitleaks: ["espn-league-id"], scan: ["espn-league-id"] });
+  const login = "https://www.espn.com/login?redirectUrl=";
+  return [
+    both(
+      join(
+        login,
+        "https%3A%2F%2Ffantasy.espn.com%2Ffootball%2Fleague%3F",
+        "leagueId%3D",
+        fakeLeagueId("encoded-query", 7),
+      ),
+    ),
+    both(
+      join(
+        "https%3A%2F%2Flm-api-reads.fantasy.espn.com%2Fapis%2Fv3%2Fgames%2Fffl%2Fseasons%2F2026%2Fsegments%2F0",
+        "%2Fleagues%2F",
+        fakeLeagueId("encoded-path", 8),
+      ),
+    ),
+    both(
+      join(
+        "%2Fapis%2Fv3%2Fgames%2Fffl",
+        "%2FleagueHistory%2F",
+        fakeLeagueId("encoded-history", 7),
+        "%3FseasonId%3D2019",
+      ),
+    ),
+    both(
+      join(
+        login,
+        "https%253A%252F%252Ffantasy.espn.com%252Ffootball%252Fleague%253F",
+        "leagueId%253D",
+        fakeLeagueId("double-encoded", 7),
+      ),
+    ),
+    // %E2%80%A6 (an ellipsis) is not printable ASCII: gitleaks' percent decoder drops the line's
+    // whole %XX segment, so only the rule itself can see the id
+    both(
+      join(
+        login,
+        "https%3A%2F%2Ffantasy.espn.com%2Ffootball%2Fleague%3F",
+        "leagueId%3D",
+        fakeLeagueId("non-ascii-escape", 7),
+        "%26note%3D%E2%80%A6",
+      ),
+    ),
+    both(join("filter=%7B%22", "leagueIds%22%3A%5B", fakeLeagueId("json-in-query", 9), "%5D%7D")),
+    both(
+      join(
+        '"url": "https://fantasy.espn.com/football/league?',
+        "leagueId\\u003d",
+        fakeLeagueId("gson", 7),
+        '"',
+      ),
+    ),
+    both(join('<a href="/football/league?', "leagueId&#61;", fakeLeagueId("entity", 7), '">')),
+    both(
+      join('<div data-props="{', "&quot;leagueId&quot;:", fakeLeagueId("entity-json", 8), '}">'),
+    ),
+    both(
+      join(
+        '"url": "https:\\/\\/lm-api-reads.fantasy.espn.com\\/apis\\/v3\\/games\\/ffl\\/seasons\\/2026\\/segments\\/0',
+        "\\/leagues\\/",
+        fakeLeagueId("json-slash", 8),
+        '"',
+      ),
+    ),
+    both(
+      join(
+        '"text": "{',
+        '\\"leagueId\\":',
+        fakeLeagueId("escaped-json", 7),
+        ',\\"seasonId\\":2026}"',
+      ),
+    ),
+    both(join("league+id=", fakeLeagueId("form", 7))),
+  ];
+}
+
+/**
  * A fake global-unicast IPv6 address (never the documentation or link-local ranges).
  * @param {string} label
  */
@@ -322,6 +397,17 @@ export function mustPass() {
     "at 12:34:56 the C++ std::vector was ok",
     "write to name%40example.com or a&#64;example.org",
     "https://user:pw@internal.example/path",
+    // the encoded and escaped league-id spellings with the placeholder id, a template or too few
+    // digits (Stage C finding scan-league-id-url-encoded)
+    "redirectUrl=https%253A%252F%252Ffantasy.espn.com%252Ffootball%252Fleague%253FleagueId%253D0",
+    "%2Fapis%2Fv3%2Fgames%2Fffl%2FleagueHistory%2F0%3FseasonId%3D2019",
+    "leagueId%3D%7BleagueId%7D and %2Fleagues%2F%7Bid%7D?view=mTeam",
+    '"url": "https://fantasy.espn.com/football/league?leagueId\\u003d0"',
+    '<a href="/football/league?leagueId&#61;0">',
+    '<div data-props="{&quot;leagueId&quot;:0}">',
+    '"url": "https:\\/\\/lm-api-reads.fantasy.espn.com\\/apis\\/v3\\/games\\/ffl\\/seasons\\/2026\\/segments\\/0\\/leagues\\/0"',
+    '"text": "{\\"leagueId\\":0,\\"seasonId\\":2026}"',
+    "league+id=0 and league+id=123",
   ];
 }
 
@@ -350,9 +436,12 @@ export function assertGitleaks(findings, mode) {
   /** @type {string[]} */
   const lines = [];
   const fired = new Set();
+  /** `<rule>@<StartLine>` of every finding */
+  const at = new Set();
   for (const f of findings) {
     const rule = typeof f?.RuleID === "string" ? f.RuleID : "?";
     fired.add(rule);
+    at.add(`${rule}@${String(f?.StartLine)}`);
     const commit =
       typeof f?.Commit === "string" && f.Commit ? ` commit=${f.Commit.slice(0, 12)}` : "";
     lines.push(
@@ -372,7 +461,23 @@ export function assertGitleaks(findings, mode) {
     `expected ${String(GITLEAKS_RULE_IDS.length)} rule ids, fired ${String(GITLEAKS_RULE_IDS.length - missing.length)}`,
   );
   if (missing.length) lines.push(`these rules did NOT fire: ${missing.join(", ")}`);
-  return { ok: missing.length === 0, lines };
+  // per line (StartLine is 1-based, the must-flag case's own line): a rule that fires on one line
+  // never stands in for a line it misses (Stage C finding scan-league-id-url-encoded — the encoded
+  // league-id lines were unchecked while espn-league-id fired elsewhere)
+  /** @type {string[]} */
+  const unmet = [];
+  let expected = 0;
+  mustFlag().forEach((c, i) => {
+    for (const id of c.gitleaks) {
+      expected++;
+      if (!at.has(`${id}@${String(i + 1)}`)) unmet.push(`line ${String(i + 1)} [${id}]`);
+    }
+  });
+  lines.push(
+    `per line: ${String(expected - unmet.length)} of ${String(expected)} expected findings on their own must-flag line`,
+  );
+  if (unmet.length) lines.push(`these must-flag lines were NOT reported: ${unmet.join(", ")}`);
+  return { ok: missing.length === 0 && unmet.length === 0, lines };
 }
 
 /**

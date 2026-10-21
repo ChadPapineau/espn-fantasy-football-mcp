@@ -29,9 +29,10 @@
 // text, and bytes after the last member are refused; only a binary whose bytes carry its
 // extension's format magic is skipped, and the deny-list still reads its bytes — as latin1, as UTF-8
 // and, when they hold NULs, without them and as UTF-16 (rawDenyViews). Details: "what a blob IS"
-// below. Every line is read as written and, when it carries %XX / \uXXXX / HTML-entity encodings,
-// with them undone (lineFindingIds). Every scanned PATH is published too: the same rules and the
-// deny-list run over it (pathFindings), and a finding there names the entry's number, not the path.
+// below. Every line is read as written and, when it carries %XX / \uXXXX / backslash / HTML-entity
+// encodings, with them undone (lineFindingIds). Every scanned PATH is published too: the same
+// rules and the deny-list run over it (pathFindings), and a finding there names the entry's
+// number, not the path.
 //
 // Suppression: a line containing `scan-secrets: allow` skips the GENERIC rules on that line only.
 // It never suppresses the ESPN credential rules, a private key, or the deny-list (gitleaks in CI
@@ -40,9 +41,9 @@
 // Local deny-list (personal identifiers): if $EFF_SCAN_DENYLIST names a readable file, else if
 // ~/.local/share/espn-fantasy-football-mcp-dev/scan-denylist.txt exists, every non-comment line is
 // a case-insensitive literal that must not appear in any scanned content, file path or commit
-// message — also when a line break or zero-width character splits it, when it is %XX-, \uXXXX- or
-// HTML-entity-encoded, and (for terms of ≥ 6 letters/digits) when punctuation, emoji or symbols
-// separate its words (`gridiron.gang`). List distinctive location/nickname parts and team
+// message — also when a line break or zero-width character splits it, when it is %XX-, \uXXXX-,
+// backslash- or HTML-entity-encoded, and (for terms of ≥ 6 letters/digits) when punctuation, emoji
+// or symbols separate its words (`gridiron.gang`). List distinctive location/nickname parts and team
 // abbreviations as separate lines: a name stored as separate fields never forms the joined term. A match prints ONLY
 // "deny-list match in <file>:<line>"; the term and the file's contents are never printed. Absent
 // file = no deny-list (CI has none). The file lives outside the repo: it holds the very strings
@@ -263,8 +264,10 @@ export const RULES = [
     // league ids are identifiers (HANDOFF): leagueId=, league_id:, league+id= (form-encoded),
     // league id: N, "leagueIds": [N], a markdown cell `| league id | N |`, ESPN_LEAGUE_ID=,
     // EFF_PROBE_LEAGUE_ID=, --league N, --league-id=N, …/leagues/<id>, …/leagueHistory/<id> — 4+
-    // digits, all-zero allowed. Their %XX / \uXXXX / HTML-entity encoded forms (leagueId%3D<id>,
-    // %2Fleagues%2F<id>, …) are read through lineFindingIds' decoded view.
+    // digits, all-zero allowed. Their %XX / \uXXXX / backslash / HTML-entity encoded forms
+    // (leagueId%3D<id>, %2Fleagues%2F<id>, {\"leagueId\":<id>}, \/leagues\/<id>, …) are read
+    // through lineFindingIds' decoded view; .gitleaks.toml carries the same literal forms plus an
+    // explicit twin for each encoding (gitleaks decodes no entity and no escaped quote or slash).
     id: "espn-league-id",
     re: /(?:league[ _+-]?ids?["'\x60]?\s*[:=|]?\s*\[?\s*["'\x60]?|--league(?:-id)?[ =]["'\x60]?|\bleagues\/|\bleagueHistory\/)(\d{4,})/gi,
     group: 1,
@@ -778,9 +781,12 @@ const NAMED_ENTITIES = {
 };
 
 /**
- * Undoes the encodings a name takes in captured text (S4), a bounded number of layers: %XX
- * (UTF-8 runs), \uXXXX (JSON's default for non-ASCII), and HTML entities (`&#39;`, `&#x27;`,
- * `&amp;`). Anything that does not decode is left as it is.
+ * Undoes the encodings a name or an identifier takes in captured text (S4), a bounded number of
+ * layers: %XX (UTF-8 runs); backslash escapes, read left to right as a JSON or JS parser reads them
+ * — \uXXXX (JSON's default for non-ASCII; Gson writes `=` that way too) and an escaped `\`, `/`,
+ * quote or backtick (JSON inside JSON: `{\"leagueId\":…}`; PHP's `https:\/\/…`), so a
+ * double-escaped \\uXXXX is two layers; and HTML entities (`&#39;`, `&#x27;` / `&#X27;`, `&amp;`).
+ * Anything that does not decode is left as it is (`\n`, `\d` and the like stay).
  * @param {string} s
  */
 export function decodeLayers(s) {
@@ -794,8 +800,10 @@ export function decodeLayers(s) {
           return run;
         }
       })
-      .replace(/\\u([0-9A-Fa-f]{4})/g, (_m, h) => String.fromCharCode(Number.parseInt(h, 16)))
-      .replace(/&#(?:x([0-9A-Fa-f]{1,6})|([0-9]{1,7}));/g, (m, hex, dec) => {
+      .replace(/\\(?:u([0-9A-Fa-f]{4})|([\\/"'\x60]))/g, (_m, h, c) =>
+        h !== undefined ? String.fromCharCode(Number.parseInt(h, 16)) : c,
+      )
+      .replace(/&#(?:[xX]([0-9A-Fa-f]{1,6})|([0-9]{1,7}));/g, (m, hex, dec) => {
         const cp = hex !== undefined ? Number.parseInt(hex, 16) : Number.parseInt(dec, 10);
         return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)
           ? String.fromCodePoint(cp)
@@ -1224,17 +1232,23 @@ export function lineRuleIds(line, o = {}) {
   return ids;
 }
 
-/** A line that may carry an encoded identifier: a %XX escape, a \uXXXX escape or an HTML entity. */
+/**
+ * A line that may carry an encoded identifier: a %XX escape, a \uXXXX escape, a backslash-escaped
+ * `\`, `/`, quote or backtick, or an HTML entity.
+ */
 const ENCODED_HINT =
-  /%[0-9A-Fa-f]{2}|\\u[0-9A-Fa-f]{4}|&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z]{2,6});/;
+  /%[0-9A-Fa-f]{2}|\\u[0-9A-Fa-f]{4}|\\[\\/"'\x60]|&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z]{2,6});/;
 
 /**
  * The rule ids of one line in both of its readings: as written, and — when it carries %XX,
- * \uXXXX or HTML-entity encodings — with them undone (decodeLayers, the deny-list's decoder), where
- * the strict rules run again and add each rule that fires there only. An identifier in an encoded
- * URL (`…%3FleagueId%3D<id>`, `…%2Fleagues%2F<id>`, double-encoded `%253D`) IS that identifier:
- * one decoder gives every strict rule every encoding, instead of an encoded twin per rule (Stage C
- * finding scan-league-id-url-encoded).
+ * \uXXXX, backslash or HTML-entity encodings — with them undone (decodeLayers, the deny-list's
+ * decoder), where the strict rules run again and add each rule that fires there only. An
+ * identifier in an encoded URL or an escaped body (`…%3FleagueId%3D<id>`, `…%2Fleagues%2F<id>`,
+ * double-encoded `%253D`, `{\"leagueId\":<id>}`, `https:\/\/…\/leagues\/<id>`) IS that identifier:
+ * one decoder gives every strict rule every encoding (Stage C finding scan-league-id-url-encoded).
+ * gitleaks' own decoder is a CLI setting and reads no HTML entity and no escaped quote or slash,
+ * so .gitleaks.toml's espn-league-id carries each encoding as an explicit twin, kept within what
+ * this decoder undoes.
  * @param {string} line
  * @returns {string[]}
  */

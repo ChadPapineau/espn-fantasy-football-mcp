@@ -2,9 +2,10 @@
 # (public repo: no secrets, no personal identifiers — league ids and member GUIDs included).
 # Ported from sibling @d72e03b, adapted: Yahoo rules replaced by the ESPN rules below.
 # Runs: .github/workflows/secret-scan.yml (full history + the tree on every push/PR, and a self-test).
-# Self-test: scripts/ci/secret-fixtures.mjs GENERATES a must-flag file (every rule below must fire)
-# and a must-pass file (the documentation placeholders must not) at run time — no fake secret is
-# ever committed, so this config needs no path allowlist. Add a rule → add its case there.
+# Self-test: scripts/ci/secret-fixtures.mjs GENERATES a must-flag file (every rule below must fire,
+# each on every line that names it) and a must-pass file (the documentation placeholders must not)
+# at run time — no fake secret is ever committed, so this config needs no path allowlist. Add a
+# rule → add its case there.
 # scripts/dev/scan-secrets.mjs carries the same rules locally (never narrower — its espn_s2 floor
 # is 40, this one 80) plus IPv4 / home-path / email (plan 04 R11, the `identifiers` job).
 #
@@ -81,9 +82,24 @@ tags = ["espn", "credential"]
 # --- ESPN identifiers ---------------------------------------------------------------------------
 
 [[rules]]
+# The literal forms — exactly scan-secrets' espn-league-id — and each again with its separators
+# encoded the ways a captured URL or body carries them (Stage C finding scan-league-id-url-encoded):
+#   %XX with up to three %25 layers   leagueId%3D<id>, %2Fleagues%2F<id>, leagueId%253D<id>
+#   \u00XX / \\u00XX (lower-case u)     leagueId\u003d<id> (Gson), \u002Fleagues\u002F<id>
+#   HTML entities                     leagueId&#61;<id>, &#x3D;, &quot;leagueId&quot;:<id>, &nbsp;
+#   backslash escapes                 {\"leagueId\":<id>} (JSON in JSON), https:\/\/…\/leagues\/<id>
+# Pieces, each literal OR encoded: SP a space · Q a quote ("'`) · SEP : = | · LSQB [ · SLASH /
+#   league(SP|[ _+-])?ids? Q? (\s|SP)* SEP? (\s|SP)* LSQB? (\s|SP)* Q? <id>
+#   --league(-id)? (SP|[ =]) Q? <id>        (\b|an encoded slash)league(s|History) SLASH <id>
+# Why a twin and not only gitleaks' decoder: --max-decode-depth is a CLI default (5 in the pinned
+# 8.30.1), not this config; its percent decoder drops a whole segment when one escape in it is not
+# printable ASCII (a redirect that also carries %C3%A9); it reads no HTML entity and no escaped
+# quote or slash. Every encoding here is one scan-secrets' decodeLayers undoes (zero padding, %25
+# layers and backslashes bounded to match), so scan-secrets stays never narrower; on text without
+# encodings the two rules agree exactly (tests/scripts/secret-fixtures.test.ts holds both).
 id = "espn-league-id"
-description = "An ESPN league id (leagueId=, league_id:, league id: N, \"leagueIds\": [N], a markdown cell, ESPN_LEAGUE_ID=, EFF_PROBE_LEAGUE_ID=, --league N, --league-id=N, leagues/<id>, leagueHistory/<id>) other than all zeros"
-regex = '''(?i)(?:league[ _-]?ids?["'`]?\s*[:=|]?\s*\[?\s*["'`]?|--league(?:-id)?[ =]["'`]?|\bleagues/|\bleagueHistory/)(\d{4,})'''
+description = "An ESPN league id (leagueId=, league_id:, league id: N, \"leagueIds\": [N], a markdown cell, ESPN_LEAGUE_ID=, EFF_PROBE_LEAGUE_ID=, --league N, --league-id=N, leagues/<id>, leagueHistory/<id>), also with its separators %XX-, \\u-, HTML-entity- or backslash-encoded, other than all zeros"
+regex = '''(?i)(?:league(?:[ _+-]|%(?:25){0,3}20|\\{1,2}(?-i:u)0020|&#0{0,5}32;|&#x0{0,4}20;|&nbsp;)?ids?(?:\\{0,3}["'`]|%(?:25){0,3}(?:22|27|60)|\\{1,2}(?-i:u)00(?:22|27|60)|&#0{0,5}(?:34|39|96);|&#x0{0,4}(?:22|27|60);|&(?:quot|apos);)?(?:\s|%(?:25){0,3}20|\\{1,2}(?-i:u)0020|&#0{0,5}32;|&#x0{0,4}20;|&nbsp;)*(?:[:=|]|%(?:25){0,3}(?:3a|3d|7c)|\\{1,2}(?-i:u)00(?:3a|3d|7c)|&#0{0,5}(?:58|61);|&#0{0,4}124;|&#x0{0,4}(?:3a|3d|7c);)?(?:\s|%(?:25){0,3}20|\\{1,2}(?-i:u)0020|&#0{0,5}32;|&#x0{0,4}20;|&nbsp;)*(?:\[|%(?:25){0,3}5b|\\{1,2}(?-i:u)005b|&#0{0,5}91;|&#x0{0,4}5b;)?(?:\s|%(?:25){0,3}20|\\{1,2}(?-i:u)0020|&#0{0,5}32;|&#x0{0,4}20;|&nbsp;)*(?:\\{0,3}["'`]|%(?:25){0,3}(?:22|27|60)|\\{1,2}(?-i:u)00(?:22|27|60)|&#0{0,5}(?:34|39|96);|&#x0{0,4}(?:22|27|60);|&(?:quot|apos);)?|--league(?:-id)?(?:[ =]|%(?:25){0,3}(?:20|3d)|\\{1,2}(?-i:u)00(?:20|3d)|&#0{0,5}(?:32|61);|&#x0{0,4}(?:20|3d);|&nbsp;)(?:\\{0,3}["'`]|%(?:25){0,3}(?:22|27|60)|\\{1,2}(?-i:u)00(?:22|27|60)|&#0{0,5}(?:34|39|96);|&#x0{0,4}(?:22|27|60);|&(?:quot|apos);)?|(?:\b|%(?:25){0,3}2f|\\{1,2}(?-i:u)002f)league(?:s|History)(?:\\{0,3}/|%(?:25){0,3}2f|\\{1,2}(?-i:u)002f|&#0{0,5}47;|&#x0{0,4}2f;))(\d{4,})'''
 secretGroup = 1
 keywords = ["league"]
 tags = ["espn", "identifier"]
