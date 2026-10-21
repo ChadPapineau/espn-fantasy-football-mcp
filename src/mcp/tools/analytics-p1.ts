@@ -1335,6 +1335,9 @@ export const analyzeRosterTool = defineTool({
       current_week: b.w,
       playoff_weeks: b.rules.playoffs.playoff_weeks,
       trade_deadline_week: deadline,
+      // the instant decides "past the deadline" (tradeDeadlineStatus, E6's rule); the week alone
+      // said "past" from ESPN's Tuesday roll-over (Stage C roster-audit-deadline-by-week)
+      trade_deadline: b.rules.trade.deadline,
       competing: args.competing,
       season,
       streamability,
