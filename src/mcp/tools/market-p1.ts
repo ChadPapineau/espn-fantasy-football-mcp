@@ -333,7 +333,7 @@ export const TRADE_WIRE_ASSUMPTION = Object.freeze({
 /**
  * The trade data with the wire's assumption on its rec when the engine was given a wire: Δ counts a
  * free-agent fill of every seat the trade frees, and the reader must see which pool that was (the
- * engine states the opposite case itself — "valued at 0 (no wire given)"). Stage C finding
+ * engine states the opposite case itself — "valued at 0 (no free agent to fill it)"). Stage C finding
  * trade-wire-fill-free-waivers.
  */
 export function withWireAssumption(data: TradeData, wire: readonly unknown[]): TradeData {

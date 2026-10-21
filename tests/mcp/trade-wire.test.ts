@@ -84,7 +84,7 @@ describe("E6's wire is free agency only (Stage C trade-wire-fill-free-waivers)",
     expect(e.data.delta_me.mean).toBeLessThan(-50);
     // no free agent at all: the engine says the freed seat is worth 0, and no wire assumption
     expect(e.data.rec.assumptions.map((a) => a.text)).toContain(
-      "a seat the trade frees is valued at 0 (no wire given)",
+      "a seat the trade frees is valued at 0 (no free agent to fill it)",
     );
     expect(e.data.rec.assumptions.map((a) => a.text)).not.toContain(TRADE_WIRE_ASSUMPTION.text);
   }, 60_000);
@@ -127,6 +127,57 @@ describe("E6's wire is free agency only (Stage C trade-wire-fill-free-waivers)",
       await c.close();
     }
   }, 60_000);
+});
+
+describe("one free agent fills one side only (Stage C trade-wire-fill-free-waivers, the engine half)", () => {
+  // the verifier's case: both sides free a seat; with only 3046779 a free agent, both Δs rose
+  // (Δ_me 0 → +7.955, Δ_partner −37.249 → −16.999), both from that one player
+  const ONE_FA = 3046779;
+  const OFFER = { partner_team_id: 10, give: [4366031], get: [4262921] };
+  interface Impact {
+    weekly_impact: { me: number; partner: number }[];
+    rec: { assumptions: { text: string }[] };
+  }
+  const sums = (d: Impact) => ({
+    me: d.weekly_impact.reduce((s, w) => s + w.me, 0),
+    partner: d.weekly_impact.reduce((s, w) => s + w.partner, 0),
+  });
+
+  it("with one FREEAGENT in the pool, Δ_me and Δ_partner never both rise; the fill is named once", async () => {
+    const s = faulty(world.services, {
+      listPlayers: async (real, ...args) => {
+        const got = (await real(...args)) as Stamped<PageOf<PlatformPlayer>>;
+        const items = got.value.items.map((x) =>
+          x.ref.id === ONE_FA ? { ...x, status: "FREEAGENT" as const } : x,
+        );
+        return { ...got, value: { ...got.value, items } };
+      },
+    });
+    const c = await connect(world, { options: { toolset: "full" }, services: s });
+    try {
+      const one = (await ok(c.client, "espn_analyze_trade", { offer: OFFER, seed: 7 })) as {
+        data: Impact;
+      };
+      const bare = (await ok(client, "espn_analyze_trade", { offer: OFFER, seed: 7 })) as {
+        data: Impact;
+      };
+      const [a, b] = [sums(one.data), sums(bare.data)];
+      const rose = { me: a.me > b.me + 1e-6, partner: a.partner > b.partner + 1e-6 };
+      // he fills a seat (a wire was given) — on exactly one side
+      expect(rose.me || rose.partner).toBe(true);
+      expect(rose.me && rose.partner).toBe(false);
+      const side = rose.me ? "me" : "partner";
+      expect(side === "me" ? a.partner : a.me).toBeCloseTo(side === "me" ? b.partner : b.me, 6);
+      const fill = one.data.rec.assumptions.find((x) =>
+        x.text.startsWith("the seats the trade frees are filled"),
+      )?.text;
+      expect(fill).toBe(
+        `the seats the trade frees are filled from the wire, each free agent on one side only: you add ${side === "me" ? String(ONE_FA) : "none"}; the partner adds ${side === "partner" ? String(ONE_FA) : "none"}`,
+      );
+    } finally {
+      await c.close();
+    }
+  }, 120_000);
 });
 
 describe("E6 find_partners.need_position (Stage C players-position-filter-unvalidated)", () => {

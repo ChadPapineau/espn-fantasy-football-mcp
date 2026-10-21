@@ -248,15 +248,23 @@ function cheapestCut(
   return best === null ? null : { player: best.player, value: round(best.value, 3) };
 }
 
+/** One side's roster change before any wire fill, and the seats the trade frees. */
+interface SideCore {
+  readonly after: TradePlayer[];
+  readonly drops: readonly { readonly player: TradePlayer; readonly value: number }[];
+  readonly next_cut: { readonly player: TradePlayer; readonly value: number } | null;
+  /** Active seats the trade frees (fewer active players than before, below capacity). */
+  readonly freed: number;
+}
+
 /** The roster after giving `out` and receiving `inc`: received IR-eligible players use open IR seats. */
-function sideAfter(
+function sideCore(
   ctx: Ctx,
   before: readonly TradePlayer[],
   out: ReadonlySet<number>,
   inc: readonly TradePlayer[],
   weight: readonly number[],
-  wire: readonly TradePlayer[],
-): SideAfter {
+): SideCore {
   const kept = before.filter((p) => !out.has(p.player_id));
   let irUsed = kept.filter((p) => slotClassOf(p.slot_id) === "ir").length;
   const received = inc.map((p) => {
@@ -277,32 +285,87 @@ function sideAfter(
   }
   const uneven = inc.length > out.size;
   const nextCut = uneven && drops.length === 0 ? cheapestCut(ctx, after, keep, weight) : null;
-  // a seat freed by the trade (fewer active players than before, below capacity) is filled from the wire
-  const fills: TradePlayer[] = [];
-  const freed = Math.min(
-    ctx.capacity - activeOf(after).length,
-    activeOf(before).length - activeOf(after).length,
+  const freed = Math.max(
+    0,
+    Math.min(
+      ctx.capacity - activeOf(after).length,
+      activeOf(before).length - activeOf(after).length,
+    ),
   );
+  return { after, drops, next_cut: nextCut, freed };
+}
+
+/** A side for the joint wire fill: its roster change and its value weights. */
+interface FillSide {
+  readonly core: SideCore;
+  readonly weight: readonly number[];
+}
+
+/**
+ * Fills the seats a trade frees on BOTH sides from ONE wire: a free agent one side takes is gone for
+ * the other (Stage C finding trade-wire-fill-free-waivers — each side filled from the same list on
+ * its own, so one free agent counted for both teams). Greedy over the two sides' remaining seats:
+ * each step adds the wire player with the larger weighted lineup gain to his side (only a positive
+ * gain fills a seat); a tie goes to the later side — the partner, conservative for me. One side
+ * alone fills exactly as before (the best gain, ties by wire order). Each side's ranking is computed
+ * once per roster it holds and only re-ranked after it takes a player (the cost of the per-side fill).
+ */
+function fillJointly(
+  ctx: Ctx,
+  sides: readonly FillSide[],
+  wire: readonly TradePlayer[],
+): TradePlayer[][] {
+  const pass: Pass = { health: true, mult: null };
+  const fills: TradePlayer[][] = sides.map(() => []);
+  const afters = sides.map((x) => [...x.core.after]);
+  const left = sides.map((x) => x.core.freed);
   const used = new Set<number>();
-  for (let f = 0; f < freed; f++) {
-    const cur = weighted(lineupWeeks(ctx, after, { health: true, mult: null }), weight);
-    let best: { p: TradePlayer; gain: number } | null = null;
-    for (const w of wire) {
-      if (used.has(w.player_id) || after.some((x) => x.player_id === w.player_id)) continue;
+  /** Side i's candidates under its current roster: positive gains, best first (stable by wire order). */
+  const rankOf = (i: number): { p: TradePlayer; gain: number }[] => {
+    const after = afters[i] ?? [];
+    const weight = sides[i]?.weight ?? [];
+    const cur = weighted(lineupWeeks(ctx, after, pass), weight);
+    const ranked: { p: TradePlayer; gain: number; at: number }[] = [];
+    wire.forEach((w, at) => {
+      if (used.has(w.player_id) || after.some((x) => x.player_id === w.player_id)) return;
       const gain =
-        weighted(
-          lineupWeeks(ctx, [...after, { ...w, slot_id: BENCH }], { health: true, mult: null }),
-          weight,
-        ) - cur;
-      if (gain > 1e-9 && (best === null || gain > best.gain + 1e-12)) best = { p: w, gain };
+        weighted(lineupWeeks(ctx, [...after, { ...w, slot_id: BENCH }], pass), weight) - cur;
+      if (gain > 1e-9) ranked.push({ p: w, gain, at });
+    });
+    // best gain first; within 1e-12 the wire's own order decides (as the per-side fill did)
+    ranked.sort((a, b) => (Math.abs(a.gain - b.gain) <= 1e-12 ? a.at - b.at : b.gain - a.gain));
+    return ranked;
+  };
+  const ranks = sides.map((_, i) => ((left[i] ?? 0) > 0 && wire.length > 0 ? rankOf(i) : []));
+  for (;;) {
+    let best: { side: number; p: TradePlayer; gain: number } | null = null;
+    for (let i = 0; i < sides.length; i++) {
+      if ((left[i] ?? 0) <= 0) continue;
+      const top = (ranks[i] ?? []).find((c) => !used.has(c.p.player_id));
+      if (top === undefined) continue;
+      if (best === null || top.gain > best.gain + 1e-12 || Math.abs(top.gain - best.gain) <= 1e-12)
+        best = { side: i, p: top.p, gain: top.gain };
     }
     if (best === null) break;
     used.add(best.p.player_id);
     const filled = { ...best.p, slot_id: BENCH };
-    fills.push(filled);
-    after = [...after, filled];
+    fills[best.side]?.push(filled);
+    afters[best.side]?.push(filled);
+    left[best.side] = (left[best.side] ?? 0) - 1;
+    // the side that took him holds a new roster: its gains change; the other's only lose him
+    ranks[best.side] = (left[best.side] ?? 0) > 0 ? rankOf(best.side) : [];
   }
-  return { after, drops, next_cut: nextCut, fills };
+  return fills;
+}
+
+/** A side's SideAfter: its roster change with the fills the joint allocation gave it. */
+function withFills(core: SideCore, fills: readonly TradePlayer[]): SideAfter {
+  return {
+    after: [...core.after, ...fills],
+    drops: core.drops,
+    next_cut: core.next_cut,
+    fills,
+  };
 }
 
 /** The value weights of a team: playoff weeks by P(alive) (1 when not given); `playoffs` horizon → only those. */
@@ -329,15 +392,13 @@ interface SideEval {
   readonly afterVals: number[];
 }
 
-function evalSide(
+/** One side's Δ over a roster change already decided (its fills included). */
+function evalAfter(
   ctx: Ctx,
   before: readonly TradePlayer[],
-  out: ReadonlySet<number>,
-  inc: readonly TradePlayer[],
+  after: SideAfter,
   weight: readonly number[],
-  wire: readonly TradePlayer[],
 ): SideEval {
-  const after = sideAfter(ctx, before, out, inc, weight, wire);
   const healthy: Pass = { health: true, mult: null };
   const rawPass: Pass = { health: false, mult: null };
   const b = lineupWeeks(ctx, before, healthy);
@@ -348,6 +409,40 @@ function evalSide(
     weighted(lineupWeeks(ctx, after.after, rawPass), weight) -
     weighted(lineupWeeks(ctx, before, rawPass), weight);
   return { delta, raw, weekly, after, beforeVals: b, afterVals: a };
+}
+
+/** One side of a trade: its roster before, what it gives (ids), what it gets, its weights. */
+interface PairSide {
+  readonly before: readonly TradePlayer[];
+  readonly out: ReadonlySet<number>;
+  readonly inc: readonly TradePlayer[];
+  readonly weight: readonly number[];
+}
+
+/**
+ * Both sides of one trade: each roster change, the seats it frees filled JOINTLY from the one wire
+ * (fillJointly — never the same free agent on both sides), then each side's Δ. [me, partner].
+ */
+function evalPair(
+  ctx: Ctx,
+  me: PairSide,
+  partner: PairSide,
+  wire: readonly TradePlayer[],
+): readonly [SideEval, SideEval] {
+  const cm = sideCore(ctx, me.before, me.out, me.inc, me.weight);
+  const cp = sideCore(ctx, partner.before, partner.out, partner.inc, partner.weight);
+  const [fm, fp] = fillJointly(
+    ctx,
+    [
+      { core: cm, weight: me.weight },
+      { core: cp, weight: partner.weight },
+    ],
+    wire,
+  );
+  return [
+    evalAfter(ctx, me.before, withFills(cm, fm ?? []), me.weight),
+    evalAfter(ctx, partner.before, withFills(cp, fp ?? []), partner.weight),
+  ];
 }
 
 /** ΔU of one side under one reading: the +3 points-per-week marginal scaled linearly (research 05 §2.4). */
@@ -536,7 +631,7 @@ export async function analyzeTrade(req: TradeRequest): Promise<TradeOutcome> {
   if ((req.free_agents ?? []).length === 0)
     assumptions.push(
       A(
-        "a seat the trade frees is valued at 0 (no wire given)",
+        "a seat the trade frees is valued at 0 (no free agent to fill it)",
         "the wire is passed as free_agents",
       ),
     );
@@ -599,8 +694,12 @@ async function evaluateOffer(
   const wP = weightsOf(req.weeks, req.rules, partner, horizon);
   const giveIds = new Set(offer.give);
   const getIds = new Set(offer.get);
-  const me = evalSide(ctx, req.me.players, giveIds, get, wMe, wire);
-  const pe = evalSide(ctx, partner.players, getIds, give, wP, wire);
+  const [me, pe] = evalPair(
+    ctx,
+    { before: req.me.players, out: giveIds, inc: get, weight: wMe },
+    { before: partner.players, out: getIds, inc: give, weight: wP },
+    wire,
+  );
 
   // Monte Carlo on common random numbers (the drops and fills held at their deterministic choice)
   const nSims = Math.max(20, Math.min(2000, req.n_sims ?? TRADE.nSims));
@@ -690,6 +789,18 @@ async function evaluateOffer(
         "an even trade is proposed",
       ),
     );
+
+  // every fill counted in Δ is named (ids only), and no free agent is on both sides (fillJointly)
+  if (me.after.fills.length + pe.after.fills.length > 0) {
+    const ids = (f: readonly TradePlayer[]): string =>
+      f.length === 0 ? "none" : f.map((x) => String(x.player_id)).join(", ");
+    assumptions.push(
+      A(
+        `the seats the trade frees are filled from the wire, each free agent on one side only: you add ${ids(me.after.fills)}; the partner adds ${ids(pe.after.fills)}`,
+        "the free-agent pool changes (a waiver run, a drop)",
+      ),
+    );
+  }
 
   const du = deltaU(req, partner, me, pe);
   if (du.basis === "cold_start")
@@ -941,8 +1052,14 @@ async function counterOffers(
       if (v === undefined) return;
       const g = findPlayers(req.me.players, v.give);
       const t = findPlayers(partner.players, v.get);
-      const m = evalSide(ctx, req.me.players, new Set(v.give), t, wMe, wire).delta;
-      const p = evalSide(ctx, partner.players, new Set(v.get), g, wP, wire).delta;
+      const [em, ep] = evalPair(
+        ctx,
+        { before: req.me.players, out: new Set(v.give), inc: t, weight: wMe },
+        { before: partner.players, out: new Set(v.get), inc: g, weight: wP },
+        wire,
+      );
+      const m = em.delta;
+      const p = ep.delta;
       if (m > 0 && p >= TRADE.partnerEpsilon) out.push({ ...v, me: m, partner: p });
     },
     { pacer, deadlineMs: budget.left() },
@@ -1041,15 +1158,19 @@ async function searchPartners(
       const u = units[i];
       if (u === undefined) return;
       const gp = findPlayers(req.me.players, u.give);
-      const m = evalSide(ctx, req.me.players, new Set(u.give), [u.get], wMe, wire).delta;
-      const p = evalSide(
+      const [em, ep] = evalPair(
         ctx,
-        u.plan.team.players,
-        new Set([u.get.player_id]),
-        gp,
-        u.plan.wP,
+        { before: req.me.players, out: new Set(u.give), inc: [u.get], weight: wMe },
+        {
+          before: u.plan.team.players,
+          out: new Set([u.get.player_id]),
+          inc: gp,
+          weight: u.plan.wP,
+        },
         wire,
-      ).delta;
+      );
+      const m = em.delta;
+      const p = ep.delta;
       if (p < TRADE.partnerEpsilon || m <= 0) return;
       const best = u.plan.best;
       if (

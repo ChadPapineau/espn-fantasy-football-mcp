@@ -13,6 +13,7 @@ import {
   availability,
   positionGaps,
   weakestPosition,
+  type TradePlayer,
   type TradeRequest,
   type TradeTeam,
 } from "../../../src/domain/analytics/trade.js";
@@ -194,6 +195,67 @@ describe("plan 10 B5 hard: a 2-for-1 always carries implied_drop", () => {
     expect(without.rec.assumptions.some((a) => a.text.startsWith("a seat the trade frees"))).toBe(
       true,
     );
+  });
+});
+
+describe("one wire for both sides (Stage C finding trade-wire-fill-free-waivers)", () => {
+  // an "IR swap": each side gives an OUT receiver on its bench and gets the other's, who takes the
+  // open IR seat — so each side frees one active seat. A free-agent WR at 12 a week helps both
+  // lineups: mine (RB-rich) over a 7-point WR, the WR-rich partner's only over an 11-point flex.
+  const injured = (id: number) => tp(id, "WR", 0, SLOT.BE, { injury_status: "OUT" });
+  const swapMe = {
+    ...ME,
+    players: ME.players.map((p) => (p.player_id === 114 ? injured(114) : p)),
+  };
+  const swapPartner = {
+    ...PARTNER,
+    players: PARTNER.players.map((p) => (p.player_id === 214 ? injured(214) : p)),
+  };
+  const swap = (free_agents: readonly TradePlayer[]) =>
+    evaluation({
+      me: swapMe,
+      teams: [swapPartner, ...OTHERS],
+      offer: { partner_team_id: 2, give: [114], get: [214] },
+      free_agents,
+    });
+  const sums = (d: TradeEvaluationData) => ({
+    me: d.weekly_impact.reduce((s, w) => s + w.me, 0),
+    partner: d.weekly_impact.reduce((s, w) => s + w.partner, 0),
+  });
+  const fillsOf = (d: TradeEvaluationData) =>
+    d.rec.assumptions.find((a) => a.text.startsWith("the seats the trade frees are filled"))
+      ?.text ?? null;
+  const named = (me: string, partner: string) =>
+    `the seats the trade frees are filled from the wire, each free agent on one side only: you add ${me}; the partner adds ${partner}`;
+
+  it("one free agent fills ONE side — the side he helps more; the other's Δ is its no-wire Δ", async () => {
+    const none = sums(await swap([]));
+    expect(none.me).toBeCloseTo(0, 6);
+    expect(none.partner).toBeCloseTo(0, 6);
+    const d = await swap([tp(990, "WR", 12, SLOT.BE)]);
+    const one = sums(d);
+    // never both: one free agent is one roster's player
+    expect(one.me).toBeGreaterThan(none.me + 1);
+    expect(one.partner).toBeCloseTo(none.partner, 6);
+    expect(fillsOf(d)).toBe(named("990", "none"));
+  });
+
+  it("two free agents fill both seats, one each, the larger gain first", async () => {
+    const none = sums(await swap([]));
+    const alone = sums(await swap([tp(990, "WR", 12, SLOT.BE)]));
+    const d = await swap([tp(990, "WR", 12, SLOT.BE), tp(991, "WR", 12, SLOT.BE)]);
+    const two = sums(d);
+    expect(two.me).toBeCloseTo(alone.me, 6);
+    expect(two.partner).toBeGreaterThan(none.partner + 1);
+    expect(two.partner).toBeLessThan(two.me);
+    expect(fillsOf(d)).toBe(named("990", "991"));
+  });
+
+  it("a free agent who helps no lineup fills nothing, and nothing is named", async () => {
+    const d = await swap([tp(990, "K", 1, SLOT.BE)]);
+    expect(sums(d).me).toBeCloseTo(0, 6);
+    expect(sums(d).partner).toBeCloseTo(0, 6);
+    expect(fillsOf(d)).toBeNull();
   });
 });
 
