@@ -41,6 +41,7 @@ import {
   ConfigError,
   loadConfigFromProcess,
   looksLikeCredentialValue,
+  tlsVerificationDisabled,
   type LenientConfig,
 } from "../config/schema.js";
 import type { CheckId } from "../domain/league/types.js";
@@ -1722,16 +1723,25 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
     registerConfigRedaction(log, config);
     if (config.leagueId !== null) secrets.addIdentifier("league", config.leagueId);
     if (config.probeLeagueId !== null) secrets.addIdentifier("league", config.probeLeagueId);
+    // certificate verification off: every ESPN request is refused (plan 02 T2; Stage C finding
+    // espn-tls-verify-disabled-unguarded) — a configuration finding, worse than a missing id
+    const tlsOff = tlsVerificationDisabled(io.env);
     rows.push(
       row(
         0,
         "config",
         "Configuration",
-        config.leagueId === null ? "warn" : "ok",
-        config.leagueId === null
-          ? "resolves, but ESPN_LEAGUE_ID is not set"
-          : "configuration resolves",
-        config.leagueId === null ? "set ESPN_LEAGUE_ID (env or config.json)" : null,
+        tlsOff ? "config" : config.leagueId === null ? "warn" : "ok",
+        tlsOff
+          ? "certificate verification is off (NODE_TLS_REJECT_UNAUTHORIZED=0): no ESPN request is sent"
+          : config.leagueId === null
+            ? "resolves, but ESPN_LEAGUE_ID is not set"
+            : "configuration resolves",
+        tlsOff
+          ? "unset NODE_TLS_REJECT_UNAUTHORIZED in this shell and in the MCP client's env block (a proxy's CA belongs in NODE_EXTRA_CA_CERTS)"
+          : config.leagueId === null
+            ? "set ESPN_LEAGUE_ID (env or config.json)"
+            : null,
         [...config.warnings],
       ),
     );

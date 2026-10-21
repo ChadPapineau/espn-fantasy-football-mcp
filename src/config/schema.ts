@@ -186,6 +186,24 @@ export function isAllowedReadHost(host: string): boolean {
 // Defined in config (the lowest layer) so the provider, the store's limiter, the job fleet, the
 // status tool and the per-source limits share ONE copy; src/providers/platform.ts re-exports them.
 
+/**
+ * Whether certificate verification is off for every TLS connection this process makes: Node skips
+ * it when `NODE_TLS_REJECT_UNAUTHORIZED` is exactly `"0"` — read at each connection; any other
+ * value (`"false"`, `""`, `" 0"`) leaves it on (checked against Node 24's fetch). Some shells export
+ * it as a corporate-proxy workaround, and every `eff` command and an MCP client that passes its
+ * environment inherit it; with it, an on-path impostor answering for the read host would receive
+ * the cookie and have its body read as ESPN's facts (plan 02 T2: "TLS to ESPN, then zod"; Stage C
+ * finding espn-tls-verify-disabled-unguarded). While it holds, no ESPN request is sent — the
+ * provider's (src/providers/espn) and the CLI's (src/http espnGet) alike. Read at every request, as
+ * Node reads it.
+ */
+export function tlsVerificationDisabled(env: Env = process.env): boolean {
+  return env.NODE_TLS_REJECT_UNAUTHORIZED === "0";
+}
+/** What `eff doctor`, `eff status` and the server's start-up log say while it holds. */
+export const TLS_VERIFICATION_OFF_WARNING =
+  "NODE_TLS_REJECT_UNAUTHORIZED=0 turns certificate verification off for this process: no ESPN request is sent while it is set — unset it (a proxy's CA belongs in NODE_EXTRA_CA_CERTS, which keeps verification on)";
+
 /** The global, cross-process ESPN limiter: ≤ 30/min, ≤ 1/s sustained, ≤ 2 concurrent. */
 export const ESPN_LIMITER = Object.freeze({ perMinute: 30, perSecond: 1, concurrency: 2 });
 /** The circuit breaker: open for 5 min after 3 consecutive 5xx / 429 / timeouts. */
@@ -641,6 +659,7 @@ export function loadConfig(
     }
   }
 
+  if (tlsVerificationDisabled(env)) warnings.push(TLS_VERIFICATION_OFF_WARNING);
   for (const k of Object.keys(env)) {
     if (
       (k.startsWith("EFF_") || k.startsWith("ESPN_")) &&

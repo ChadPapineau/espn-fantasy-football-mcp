@@ -9,7 +9,8 @@
 // redirect hop is re-checked BEFORE it is requested (`redirect: "manual"`, ≤ MAX_REDIRECT_HOPS), so
 // the old ESPN host's 302 to www.espn.com is refused, never followed (plan 05 §4.1 → ESPN_HOST_MOVED).
 // A Cookie header exists only on `espnGet`, only for a URL on the read host, and only on hops to it;
-// it is never logged and never part of an error (errors are fixed strings with no raw cause). Body
+// it is never logged and never part of an error (errors are fixed strings with no raw cause), and no
+// ESPN request leaves while certificate verification is off process-wide (plan 02 T2). Body
 // caps are enforced while streaming, on the wire AND after gzip decoding (a gzip bomb stops at the
 // cap). `Set-Cookie` is dropped from every response. PHASE W SEAM — NOT IMPLEMENTED: there is no
 // write method and the write host is on no allow-list (allowlist.ts).
@@ -18,6 +19,7 @@
 import { open, unlink } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { tlsVerificationDisabled } from "../config/schema.js";
 import { ATTEMPT_TIMEOUT_MS } from "../providers/platform.js";
 import {
   MAX_REDIRECT_HOPS,
@@ -621,6 +623,14 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
     // the cookie rule is checked before anything else: it never meets a URL off the read host
     if (cookie !== null && host !== readHost)
       throw new HttpError({ kind: "cookie_refused", host, espn: true });
+    // never an ESPN request over a channel whose certificate is not verified (plan 02 T2): the
+    // cookie would reach an impostor and its body would be read as ESPN's facts — the provider's
+    // pipeline refuses the same way (Stage C finding espn-tls-verify-disabled-unguarded). Read at
+    // every call, as Node reads it; nothing is sent.
+    if (tlsVerificationDisabled()) {
+      cfg.log?.warn("http.tls_verification_disabled", { host, cookie: cookie !== null });
+      throw new HttpError({ kind: "tls_verification_disabled", host, espn: true });
+    }
     const url = checkUrl(raw, cfg.espnAllow, true);
     const espnHeaders: Record<string, string> = {};
     if (cookie !== null) espnHeaders.cookie = headerValue(cookie, MAX_COOKIE_CHARS, "cookie");

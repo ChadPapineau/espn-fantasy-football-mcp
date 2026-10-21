@@ -789,3 +789,56 @@ describe("--reset (plan 03 §2.1)", () => {
     expect(repo.row).not.toBeNull();
   });
 });
+
+describe("certificate verification off (plan 02 T2; Stage C finding espn-tls-verify-disabled-unguarded)", () => {
+  it("refuses before the prompt: nothing asked, stored, recorded or sent; exit 2 with the fix", async () => {
+    const repo = new MemoryStateRepo();
+    const h = harness({ repo });
+    const r = await runSetup(h.req(), { ...h.deps, tlsVerificationOff: () => true });
+    expect(r).toEqual({
+      exitCode: 2,
+      state: "not_configured",
+      store: null,
+      accepted: null,
+      probe: null,
+      teamId: null,
+      selftest: null,
+    });
+    expect(h.asked).toEqual([]);
+    expect(h.calls).toEqual([]);
+    expect(h.selftests).toEqual([]);
+    expect(h.patches).toEqual([]);
+    expect(h.keychain.writes + h.file.writes).toBe(0);
+    expect(repo.writes).toBe(0);
+    expect(h.lines).toEqual([SETUP_TEXT.tlsOff]);
+    expect(SETUP_TEXT.tlsOff).toContain("NODE_TLS_REJECT_UNAUTHORIZED=0");
+    expect(SETUP_TEXT.tlsOff).toContain("NODE_EXTRA_CA_CERTS");
+  });
+  it("verification on (or no check wired): the flow runs as before", async () => {
+    for (const off of [() => false, undefined]) {
+      const h = harness();
+      const deps = off === undefined ? h.deps : { ...h.deps, tlsVerificationOff: off };
+      const r = await runSetup(h.req(), deps);
+      expect(r.exitCode).toBe(0);
+      expect(h.calls).toEqual(["anon", "settings", "team"]);
+    }
+  });
+  it("test mode never sends anything, so it goes on; --reset sends nothing either", async () => {
+    const t = harness({ service: "eff-test-unit", repo: new MemoryStateRepo() });
+    const r = await runSetup(t.req({ serviceName: "eff-test-unit", storage: "keychain" }), {
+      ...t.deps,
+      tlsVerificationOff: () => true,
+    });
+    expect(r).toMatchObject({ exitCode: 0, probe: "skipped" });
+    expect(t.calls).toEqual([]);
+    const repo = new MemoryStateRepo();
+    repo.row = stateRow();
+    const z = harness({ repo });
+    const rr = await runSetup(z.req({ reset: true }), {
+      ...z.deps,
+      tlsVerificationOff: () => true,
+    });
+    expect(rr).toMatchObject({ exitCode: 0, state: "not_configured" });
+    expect(z.calls).toEqual([]);
+  });
+});

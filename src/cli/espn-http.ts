@@ -20,7 +20,7 @@ import { communicationTarget, leagueTarget } from "../providers/espn/path.js";
 import type { SetupNetwork, TeamResolution } from "../auth/setup.js";
 import type { CookieHeader } from "../auth/types.js";
 import type { LimiterRepository, RequestOrigin } from "../store/types.js";
-import type { RequestOutcome } from "../config/schema.js";
+import { tlsVerificationDisabled, type RequestOutcome } from "../config/schema.js";
 import type { HttpGet } from "../sources/source.js";
 
 /** One answered request: the status, the (capped) body and the headers. */
@@ -112,6 +112,10 @@ export async function espnRequest(
     readonly signal?: AbortSignal;
   },
 ): Promise<EspnAnswer | EspnFailure> {
+  // certificate verification off process-wide: nothing is sent and no limiter row is written (the
+  // client refuses too, as the last line) — the cookie would reach an impostor (plan 02 T2; Stage C
+  // finding espn-tls-verify-disabled-unguarded)
+  if (tlsVerificationDisabled()) return { error: "tls_verification_disabled" };
   const limiter = deps.limiter;
   if (limiter === null) return { error: "no_limiter" };
   const keyless = req.cookie === null;

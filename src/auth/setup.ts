@@ -142,6 +142,13 @@ export interface SetupDeps {
   /** store.sqlite's row (null only in test mode, which records nothing). */
   readonly credentialState: CredentialStateRepository | null;
   readonly registrar: SecretRegistrar;
+  /**
+   * Whether certificate verification is off process-wide (config/schema.ts
+   * `tlsVerificationDisabled`, wired by the CLI). While it is, no ESPN request may be sent, so the
+   * cookies could never be checked: setup refuses before asking for them (Stage C finding
+   * espn-tls-verify-disabled-unguarded). Absent → never off.
+   */
+  readonly tlsVerificationOff?: () => boolean;
 }
 
 /** What happened. */
@@ -181,6 +188,7 @@ export const SETUP_TEXT = Object.freeze({
   otherStoreFailed: (kind: CredentialStoreKind) => `The ${kind} store still holds a credential that could not be removed (only one store may hold it): nothing was stored. Run \`eff doctor\`.`,
   rowFailed: "store.sqlite could not record the credential state: nothing was kept. Run `eff doctor`.",
   testModeSkipped: "Test service name: the ESPN check and team resolution were skipped (a test item is never sent to ESPN).",
+  tlsOff: "Certificate verification is off in this process (NODE_TLS_REJECT_UNAUTHORIZED=0): your cookies go to ESPN only over a verified connection, so nothing was asked and nothing was stored. Unset it (a proxy's CA belongs in NODE_EXTRA_CA_CERTS) and run `eff setup` again.",
   notDiscriminating: "Stored; this league's board answers the same to anyone, so validity cannot be tested here (state: stored).",
   rejected: "ESPN did not accept these cookies for that league: copy them again from a logged-in browser tab and re-run `eff setup`. Nothing was kept.",
   leagueNotFound: (season: number) => `League id not found for season ${String(season)}: check ESPN_LEAGUE_ID. Nothing was kept.`,
@@ -245,6 +253,12 @@ export async function runSetup(req: SetupRequest, deps: SetupDeps): Promise<Setu
     return result({ exitCode: EXIT_CODES.error });
   }
   if (req.reset) return reset(deps, testMode, repo, result);
+  // no ESPN request leaves while certificate verification is off (plan 02 T2): the cookies could
+  // not be checked, so they are not asked for (a test item is never sent: test mode goes on)
+  if (!testMode && deps.tlsVerificationOff?.() === true) {
+    out(SETUP_TEXT.tlsOff);
+    return result({ exitCode: EXIT_CODES.usage });
+  }
 
   // --- steps 1–3: instructions, SWID (echoed), espn_s2 (hidden) ---------------------------------
   for (const line of SETUP_TEXT.instructions) out(line);

@@ -5,26 +5,23 @@
 // under the per-call deadline). Never the write host: the host is checked against the config rule
 // on every attempt. Never a cookie over a channel whose certificate is not verified (plan 02 T2:
 // ESPN's trust is "TLS to ESPN, then zod"). Tests inject `fetch`; no test touches the network.
-import { ESPN_WRITE_HOST, isAllowedReadHost } from "../../config/schema.js";
+import {
+  ESPN_WRITE_HOST,
+  isAllowedReadHost,
+  tlsVerificationDisabled,
+} from "../../config/schema.js";
 import { VERSION } from "../../version.js";
 import { classifyThrown, EspnUpstreamError } from "./errors.js";
 import type { EspnTarget } from "./path.js";
 import { HEADER_FILTER, type EspnView } from "./types.js";
 
 /**
- * Whether certificate verification is off for every TLS connection this process makes: Node skips
- * it when `NODE_TLS_REJECT_UNAUTHORIZED` is exactly `"0"` — read at each connection, any other
- * value (`"false"`, `""`, `" 0"`) leaves it on (checked against Node 24's fetch). The variable is
- * the corporate-proxy workaround some shells export; every `eff` command and an MCP client that
- * passes its environment inherit it, and with it an on-path impostor answering for the read host
- * would receive the cookie and have its body served as league data (Stage C finding
- * espn-tls-verify-disabled-unguarded). Read at every request, as Node reads it.
+ * Whether certificate verification is off process-wide (`NODE_TLS_REJECT_UNAUTHORIZED` exactly
+ * `"0"`, read at every request as Node reads it). ONE definition, in the config layer, shared with
+ * src/http's `espnGet` — the CLI's ESPN requests (`eff setup`'s cookie-bearing probes) — so the two
+ * transports cannot disagree (Stage C finding espn-tls-verify-disabled-unguarded).
  */
-export function tlsVerificationDisabled(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): boolean {
-  return env.NODE_TLS_REJECT_UNAUTHORIZED === "0";
-}
+export { tlsVerificationDisabled };
 
 /**
  * The provider refuses to send while certificate verification is off process-wide (fail closed;

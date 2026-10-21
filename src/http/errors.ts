@@ -18,6 +18,11 @@ export const HTTP_ERROR_KINDS = [
   "host_not_allowed",
   /** A Cookie header was offered for a URL that is not on the ESPN read host (never sent). */
   "cookie_refused",
+  /**
+   * Certificate verification is off process-wide (`NODE_TLS_REJECT_UNAUTHORIZED=0`): no ESPN
+   * request is sent (config/schema.ts `tlsVerificationDisabled`; plan 02 T2).
+   */
+  "tls_verification_disabled",
   /** A redirect without a usable Location, or to a URL the allow-list refuses (never fetched). */
   "redirect_refused",
   /** More than MAX_REDIRECT_HOPS redirects. */
@@ -74,6 +79,7 @@ export const POLICY_KINDS: ReadonlySet<HttpErrorKind> = new Set<HttpErrorKind>([
   "credentials_refused",
   "host_not_allowed",
   "cookie_refused",
+  "tls_verification_disabled",
 ]);
 
 /** Kinds where no request reached upstream, so no upstream verdict exists (the breaker ignores them). */
@@ -91,6 +97,8 @@ const MESSAGES: Readonly<Record<HttpErrorKind, string>> = Object.freeze({
   credentials_refused: "http: URLs carrying credentials are refused",
   host_not_allowed: "http: host is not on the allow-list",
   cookie_refused: "http: a cookie is only ever sent to the ESPN read host",
+  tls_verification_disabled:
+    "http: certificate verification is disabled in this process; no ESPN request was sent",
   redirect_refused: "http: redirect refused",
   too_many_redirects: "http: too many redirects",
   dns: "http: DNS lookup failed",

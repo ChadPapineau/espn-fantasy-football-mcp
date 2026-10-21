@@ -24,6 +24,7 @@ import {
   status,
 } from "../../src/cli/status.js";
 import { openStore } from "../../src/cli/store-access.js";
+import { TLS_VERIFICATION_OFF_WARNING } from "../../src/config/schema.js";
 import { stateRow } from "../auth/helpers.js";
 import { ROOT, fakeExec, fakeXattr, makeIo, sandbox, type Sandbox } from "./helpers.js";
 
@@ -158,6 +159,18 @@ describe("status", () => {
     expect(text).toContain("NOT CONFIGURED (ESPN_LEAGUE_ID)");
     expect(text).toContain("launchd: not available");
     expect(text).toContain("run `eff refresh all`");
+  });
+  it("certificate verification off is flagged (Stage C finding espn-tls-verify-disabled-unguarded)", async () => {
+    sb = sandbox();
+    const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0", NODE_TLS_REJECT_UNAUTHORIZED: "0" } });
+    const { config, log } = await loadLenientRuntime(io);
+    const text = renderStatus(collectStatus(io, config, log)).join("\n");
+    expect(text).toContain(`warning: ${TLS_VERIFICATION_OFF_WARNING}`);
+    const on = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" } });
+    const quiet = await loadLenientRuntime(on);
+    expect(renderStatus(collectStatus(on, quiet.config, quiet.log)).join("\n")).not.toContain(
+      "NODE_TLS_REJECT_UNAUTHORIZED",
+    );
   });
   it("plan 10 B1: every source line shows its license and age; full lists the Phase-2 sources", async () => {
     sb = sandbox();

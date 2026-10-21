@@ -21,6 +21,7 @@ import {
   SEASON_MIN,
   SEASON_RENEWAL_TEXT,
   SETUP_RECORD_KEYS,
+  TLS_VERIFICATION_OFF_WARNING,
   UNKNOWN_FILE_KEYS_WARNING,
   configKeysByScope,
   defaultSeason,
@@ -40,6 +41,7 @@ import {
   readConfigFile,
   scanConfigFileForCredentials,
   secretValues,
+  tlsVerificationDisabled,
   type Config,
   type ConfigInput,
 } from "../../src/config/schema.js";
@@ -449,6 +451,30 @@ describe("the read-host override (plan 02 S12; ADV OBJ-06)", () => {
         loadConfig(input({ env: { ESPN_LEAGUE_ID: LEAGUE, EFF_ESPN_READ_HOST: host } })),
       )[0]?.key,
     ).toBe("EFF_ESPN_READ_HOST");
+  });
+});
+
+describe("certificate verification off (plan 02 T2; Stage C finding espn-tls-verify-disabled-unguarded)", () => {
+  it('Node\'s exact rule: only "0" turns it off; the process env is the default', () => {
+    expect(tlsVerificationDisabled({ NODE_TLS_REJECT_UNAUTHORIZED: "0" })).toBe(true);
+    for (const v of [undefined, "", "false", " 0", "0 ", "00", "no", "1"])
+      expect(tlsVerificationDisabled({ NODE_TLS_REJECT_UNAUTHORIZED: v }), JSON.stringify(v)).toBe(
+        false,
+      );
+    expect(tlsVerificationDisabled()).toBe(process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0");
+  });
+  it("is warned (doctor, status and the server's start-up log read config warnings), never an issue", () => {
+    const off = loadConfig(
+      input({ env: { ESPN_LEAGUE_ID: LEAGUE, NODE_TLS_REJECT_UNAUTHORIZED: "0" } }),
+    );
+    expect(off.warnings).toContain(TLS_VERIFICATION_OFF_WARNING);
+    for (const v of ["false", "1", ""]) {
+      const on = loadConfig(
+        input({ env: { ESPN_LEAGUE_ID: LEAGUE, NODE_TLS_REJECT_UNAUTHORIZED: v } }),
+      );
+      expect(on.warnings, v).not.toContain(TLS_VERIFICATION_OFF_WARNING);
+    }
+    expect(TLS_VERIFICATION_OFF_WARNING).toContain("NODE_EXTRA_CA_CERTS");
   });
 });
 

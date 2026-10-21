@@ -52,6 +52,7 @@ import { openStore, restoreSteps, type StoreOpenReason } from "../../src/cli/sto
 import { metaFor } from "../../src/auth/upgrade.js";
 import { MIGRATIONS } from "../../src/store/index.js";
 import { sessionFileBody } from "../../src/auth/file.js";
+import { TLS_VERIFICATION_OFF_WARNING } from "../../src/config/schema.js";
 import { fakeCookies, stateRow } from "../auth/helpers.js";
 import {
   FakeKeyring,
@@ -504,6 +505,28 @@ describe("runDoctor over a sandbox", () => {
     });
     expect(checkDrift(store, io.clock.nowMs()).status).toBe("ok");
     store.close();
+  });
+  it("row 0 flags certificate verification off (exit 2, the fix named, nothing sent); other spellings stay ok (Stage C finding espn-tls-verify-disabled-unguarded)", async () => {
+    sb = sandbox();
+    const off = makeIo(sb, {
+      fetch: noNetwork,
+      env: { EFF_CREDENTIAL_STORE: "file", ESPN_LEAGUE_ID: "0", NODE_TLS_REJECT_UNAUTHORIZED: "0" },
+    });
+    const r = await runDoctor(off, { json: false, online: false, fix: false, yes: false });
+    const c = byId(r.rows, "config");
+    expect(c.status).toBe("config");
+    expect(c.message).toContain("NODE_TLS_REJECT_UNAUTHORIZED=0");
+    expect(c.fix).toContain("NODE_EXTRA_CA_CERTS");
+    expect(c.details).toContain(TLS_VERIFICATION_OFF_WARNING);
+    expect(r.exit_code).toBeGreaterThanOrEqual(2);
+    for (const v of ["false", "1"]) {
+      const on = makeIo(sb, {
+        fetch: noNetwork,
+        env: { EFF_CREDENTIAL_STORE: "file", ESPN_LEAGUE_ID: "0", NODE_TLS_REJECT_UNAUTHORIZED: v },
+      });
+      const ok = await runDoctor(on, { json: false, online: false, fix: false, yes: false });
+      expect(byId(ok.rows, "config").status, v).toBe("ok");
+    }
   });
   it("#4/#5 an iCloud-marked config or cache dir fails; a config error is row 0 'config' (exit 2)", async () => {
     sb = sandbox({ create: true });

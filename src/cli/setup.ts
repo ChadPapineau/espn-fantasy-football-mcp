@@ -20,6 +20,7 @@ import {
   CREDENTIAL_STORE_KINDS,
   SEEDING_MODES,
   isOneOf,
+  tlsVerificationDisabled,
   type Config,
   type CredentialStoreKind,
   type LenientConfig,
@@ -307,6 +308,7 @@ export async function setup(
         },
         credentialState: store?.repos.credentialState ?? null,
         registrar: log,
+        tlsVerificationOff: () => tlsVerificationDisabled(),
       },
     );
     log.info("setup.done", {
