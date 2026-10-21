@@ -230,17 +230,35 @@ describe("season, team, enums, port", () => {
     expect(at("2027-10-01T00:00:00Z")).toEqual({ season: 2027, pending: false });
     expect(at("2027-06-30T23:59:59.999Z")).toEqual({ season: 2026, pending: false });
     expect(at("2028-01-10T00:00:00Z")).toEqual({ season: 2027, pending: false });
-    // an operator-set season is meant as set: its 404 says what it says
-    expect(at("2027-07-15T15:00:00Z", { ESPN_SEASON: "2027" })).toEqual({
-      season: 2027,
-      pending: false,
-    });
   });
-  it("a season set in config.json, a stale defaulted season, or a non-finite clock never awaits renewal", () => {
+  // attempt 2: the origin was a proxy. ESPN's 404 on the new season means the same however the season
+  // was chosen — the finder's own repro pins ESPN_SEASON=2027 in July — so a season pinned in env or
+  // config.json awaits the renewal exactly as the defaulted one does; a pinned PAST season never does
+  it("unset or set, the new season awaits renewal the same way; a past season never does", () => {
     const july = Date.parse("2027-07-15T15:00:00Z");
+    const fromEnv = loadConfig(
+      input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_SEASON: "2027" }, nowMs: july }),
+    );
     const fromFile = loadConfig(input({ file: { ESPN_SEASON: "2027" }, nowMs: july }));
-    expect(fromFile.origins.ESPN_SEASON).toBe("file");
-    expect(seasonMayAwaitRenewal(fromFile, july)).toBe(false);
+    expect([fromEnv.origins.ESPN_SEASON, fromFile.origins.ESPN_SEASON]).toEqual(["env", "file"]);
+    for (const c of [fromEnv, fromFile]) {
+      expect(seasonMayAwaitRenewal(c, july)).toBe(true);
+      expect(seasonMayAwaitRenewal(c, Date.parse("2027-10-01T00:00:00Z"))).toBe(false);
+    }
+    // a season set ahead (2027 in March, while the default is still 2026) is not under way either
+    const march = Date.parse("2027-03-01T12:00:00Z");
+    const ahead = loadConfig(
+      input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_SEASON: "2027" }, nowMs: march }),
+    );
+    expect(seasonMayAwaitRenewal(ahead, march)).toBe(true);
+    // a pinned past season: its 404 means the league did not exist then
+    const past = loadConfig(
+      input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_SEASON: "2026" }, nowMs: july }),
+    );
+    expect(seasonMayAwaitRenewal(past, july)).toBe(false);
+  });
+  it("a stale defaulted season or a non-finite clock never awaits renewal", () => {
+    const july = Date.parse("2027-07-15T15:00:00Z");
     // a server started on June 30 still holds last season, which ESPN serves: nothing is pending
     const june = loadConfig(input({ nowMs: Date.parse("2027-06-30T12:00:00Z") }));
     expect(june.season).toBe(2026);
@@ -249,18 +267,25 @@ describe("season, team, enums, port", () => {
     expect(seasonMayAwaitRenewal(defaulted, Number.NaN)).toBe(false);
     expect(seasonMayAwaitRenewal(defaulted, Number.POSITIVE_INFINITY)).toBe(false);
   });
-  it("property: awaiting renewal only ever names the calendar default, from its July 1 to its October 1", () => {
+  it("property: a configured season awaits renewal exactly while it is current or ahead and before its October 1", () => {
     const START = Date.parse("2019-01-01T00:00:00Z");
     const END = Date.parse("2035-01-01T00:00:00Z");
-    const origins = { ...loadConfig(input()).origins, ESPN_SEASON: "default" as const };
     fc.assert(
-      fc.property(fc.integer({ min: START, max: END }), (nowMs) => {
-        const season = defaultSeason(nowMs);
-        const inWindow = nowMs >= Date.UTC(season, 6, 1) && nowMs < Date.UTC(season, 9, 1);
-        expect(seasonMayAwaitRenewal({ season, origins }, nowMs)).toBe(inWindow);
-        for (const other of [season - 1, season + 1])
-          expect(seasonMayAwaitRenewal({ season: other, origins }, nowMs)).toBe(false);
-      }),
+      fc.property(
+        fc.integer({ min: START, max: END }),
+        fc.integer({ min: -3, max: 1 }),
+        (nowMs, d) => {
+          const current = defaultSeason(nowMs);
+          const season = current + d;
+          const expected = d >= 0 && nowMs < Date.UTC(season, 9, 1);
+          expect(seasonMayAwaitRenewal({ season }, nowMs)).toBe(expected);
+          // the calendar default itself: exactly from its July 1 to its October 1
+          if (d === 0)
+            expect(expected).toBe(
+              nowMs >= Date.UTC(season, 6, 1) && nowMs < Date.UTC(season, 9, 1),
+            );
+        },
+      ),
       { numRuns: 500 },
     );
   });
@@ -268,15 +293,15 @@ describe("season, team, enums, port", () => {
   // history) means the league did not exist then — never the renewal state
   it("awaiting renewal holds only for a 404 on the configured season itself", () => {
     const july = Date.parse("2027-07-15T15:00:00Z");
-    const c = loadConfig(input({ nowMs: july }));
-    expect(seasonMayAwaitRenewal(c, july, 2027)).toBe(true);
-    expect(seasonMayAwaitRenewal(c, july)).toBe(true);
-    for (const other of [2026, 2025, 2018, 2028])
-      expect(seasonMayAwaitRenewal(c, july, other)).toBe(false);
-    const pinned = loadConfig(
-      input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_SEASON: "2027" }, nowMs: july }),
-    );
-    expect(seasonMayAwaitRenewal(pinned, july, 2027)).toBe(false);
+    for (const c of [
+      loadConfig(input({ nowMs: july })),
+      loadConfig(input({ env: { ESPN_LEAGUE_ID: LEAGUE, ESPN_SEASON: "2027" }, nowMs: july })),
+    ]) {
+      expect(seasonMayAwaitRenewal(c, july, 2027)).toBe(true);
+      expect(seasonMayAwaitRenewal(c, july)).toBe(true);
+      for (const other of [2026, 2025, 2018, 2028])
+        expect(seasonMayAwaitRenewal(c, july, other)).toBe(false);
+    }
   });
   describe("SEASON_RENEWAL_TEXT: the renewal state's one vocabulary", () => {
     const T = SEASON_RENEWAL_TEXT;

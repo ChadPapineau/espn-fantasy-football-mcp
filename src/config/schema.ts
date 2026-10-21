@@ -116,22 +116,22 @@ export function defaultSeason(nowMs: number): number {
  * manager renews the league — any day between ESPN opening the season and the draft, which can be
  * late August — and until then every read of it 404s GENERAL_NOT_FOUND while the previous season
  * (`season - 1`) is still served. So a 404 there does not mean the league id is wrong. True only
- * when `season` is the configured season (a past season's 404 means the league did not exist then),
- * ESPN_SEASON is unset (the season is the calendar default — an operator-set season is meant as
- * set), the season is the default at `nowMs` (a server started before July 1 still holds last
- * season), and `nowMs` is before October 1 of that season (UTC): by then a league that plays it has
- * been renewed, and a 404 says what it says. The words for the state are SEASON_RENEWAL_TEXT.
+ * when `season` is the configured season (the season every tool and job reads), it is not a past
+ * season — at least the calendar default at `nowMs`: a past season's 404 means the league did not
+ * exist then, and a server started before July 1 still holds last season, which ESPN serves — and
+ * `nowMs` is before October 1 of that season (UTC): by then a league that plays it has been renewed,
+ * and a 404 says what it says. Unset or set, the season's origin does not change what ESPN's 404
+ * means: the new season pinned in July is as unrenewed as the defaulted one. The words for the state
+ * are SEASON_RENEWAL_TEXT.
  */
 export function seasonMayAwaitRenewal(
-  config: Pick<LenientConfig, "season" | "origins">,
+  config: Pick<LenientConfig, "season">,
   nowMs: number,
   season: number = config.season,
 ): boolean {
-  if (season !== config.season || config.origins.ESPN_SEASON !== "default") return false;
-  if (!Number.isFinite(nowMs)) return false;
+  if (season !== config.season || !Number.isFinite(nowMs)) return false;
   return (
-    config.season === defaultSeason(nowMs) &&
-    nowMs < Date.UTC(config.season, SEASON_RENEWAL_DEADLINE_MONTH, 1)
+    season >= defaultSeason(nowMs) && nowMs < Date.UTC(season, SEASON_RENEWAL_DEADLINE_MONTH, 1)
   );
 }
 
@@ -153,7 +153,7 @@ export function seasonMayAwaitRenewal(
 export const SEASON_RENEWAL_TEXT = Object.freeze({
   reason: "season_not_renewed",
   message: "ESPN has no league with the configured id for the new season yet.",
-  hint: "From July 1 an unset ESPN_SEASON is the new season, which ESPN serves only once the league's manager renews the league. Until then set ESPN_SEASON to last season's year to read last season (unset it after the renewal). If it was renewed, check ESPN_LEAGUE_ID with eff doctor --online in a terminal.",
+  hint: "ESPN serves a league's new season (from July 1 an unset ESPN_SEASON names it) only once its manager renews the league. Until then set ESPN_SEASON to last season's year, and unset it after the renewal. If it was renewed, check ESPN_LEAGUE_ID with eff doctor --online in a terminal.",
   line: (season: number): string =>
     `ESPN has no ${String(season)} season of this league yet: ESPN serves it once the league's manager renews the league (until then ESPN_SEASON=${String(season - 1)} reads last season; unset it after the renewal). If it was renewed, check ESPN_LEAGUE_ID.`,
 });
