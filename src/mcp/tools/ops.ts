@@ -232,8 +232,12 @@ export const statusDataSchema = z.strictObject({
     etag_304_count: count,
   }),
   sources: z.array(sourceRow).max(30),
+  // matched: every stored pair; matched_by_name: those below confidence 1.0 (research 04 §C step 2);
+  // unmatched_*: rostered / ≥ 1 %-owned players without a confidence-1.0 pair, the alert's rule (§C
+  // step 5) — a name-only player counts in matched, matched_by_name and unmatched_*
   crosswalk: z.strictObject({
     matched: count,
+    matched_by_name: count,
     unmatched_rostered: count,
     unmatched_top_owned: count,
   }),
@@ -401,6 +405,15 @@ export async function statusSnapshot(
       rosterLast = null;
     }
   }
+  // A player counts as unmatched exactly when the rebuild's alert would list him (research 04 §C
+  // step 5; plan 06 §1.3): no stored pair, or one below confidence 1.0 — a name-only pair (§C step 2)
+  // is surfaced as matched_by_name, never hidden among the confident ones (Stage C finding
+  // crosswalk-alert-remediation-dead). A pair the rebuild rejected is removed from the store, so it
+  // reads as no pair here (crosswalk-rejected-pair-persists).
+  const lacksConfidentPair = (espnId: number): boolean => {
+    const pair = s.crosswalk.get(espnId);
+    return pair === null || pair.confidence < 1;
+  };
   let poolLast: string | null = null;
   let topOwnedUnmatched = 0;
   try {
@@ -408,7 +421,7 @@ export async function statusSnapshot(
     poolLast = pool?.taken_at ?? null;
     for (const p of pool?.players ?? []) {
       if ((p.ownership?.percent_owned ?? 0) < 1 || p.ref.id < 0) continue;
-      if (s.crosswalk.get(p.ref.id) === null) topOwnedUnmatched++;
+      if (lacksConfidentPair(p.ref.id)) topOwnedUnmatched++;
     }
   } catch {
     poolLast = null;
@@ -419,7 +432,7 @@ export async function statusSnapshot(
     const rosters = await cachedOnly(ctx, (budget) => s.platform.getRosters(ref, week, { budget }));
     for (const r of rosters?.value ?? [])
       for (const e of r.entries)
-        if (e.player.ref.id > 0 && s.crosswalk.get(e.player.ref.id) === null) rosteredUnmatched++;
+        if (e.player.ref.id > 0 && lacksConfidentPair(e.player.ref.id)) rosteredUnmatched++;
   }
   let projectionLast: string | null = null;
   try {
@@ -432,6 +445,12 @@ export async function statusSnapshot(
     matched = s.crosswalk.count();
   } catch {
     matched = 0;
+  }
+  let matchedByName = 0;
+  try {
+    matchedByName = s.crosswalk.countMatchedByName();
+  } catch {
+    matchedByName = 0;
   }
   const checks: CheckRow[] = includeChecks ? [...s.status.checks()] : [];
   return {
@@ -490,6 +509,7 @@ export async function statusSnapshot(
     sources: statusSources(ctx.options).map((id) => sourceStatus(ctx, id)),
     crosswalk: {
       matched,
+      matched_by_name: matchedByName,
       unmatched_rostered: rosteredUnmatched,
       unmatched_top_owned: topOwnedUnmatched,
     },

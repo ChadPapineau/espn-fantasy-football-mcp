@@ -57,6 +57,7 @@ function crosswalk(at: string): McpServices["crosswalk"] {
     get: (id) => (id > 0 ? pair(id) : null),
     byGsis: (g) => [pair(idOfGsis(g))],
     count: () => 1,
+    countMatchedByName: () => 0,
   };
 }
 

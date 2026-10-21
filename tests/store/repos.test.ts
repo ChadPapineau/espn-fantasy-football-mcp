@@ -710,6 +710,21 @@ describe("crosswalk", () => {
     expect(s.repos.crosswalk.count()).toBe(0);
   });
 
+  it("countMatchedByName counts the stored pairs below confidence 1.0 (Stage C crosswalk-alert-remediation-dead)", () => {
+    expect(s.repos.crosswalk.countMatchedByName()).toBe(0);
+    s.repos.crosswalk.upsertDelta([
+      pair(1, "00-9000001", { method: "match", source: "matcher", confidence: 0.8 }),
+      pair(2, "00-9000002", { method: "match", source: "matcher", confidence: 0.75 }),
+      pair(3, "00-9000003"),
+      pair(4, "00-9000004", { method: "override", source: "overrides", confidence: 1 }),
+    ]);
+    expect(s.repos.crosswalk.count()).toBe(4);
+    expect(s.repos.crosswalk.countMatchedByName()).toBe(2);
+    // a name-only pair an id pair replaces leaves the count
+    s.repos.crosswalk.upsertDelta([pair(1, "00-9000001")]);
+    expect(s.repos.crosswalk.countMatchedByName()).toBe(1);
+  });
+
   it("removeRejected removes any row get reads, corrupt ones included, and refuses a malformed key", () => {
     // rows upsertDelta refuses but get still reads (a corrupt table): a bad gsis, method and source
     // with an out-of-range confidence; a team unit's negative id; a non-finite confidence

@@ -187,6 +187,7 @@ describe("over the real store, a rebuild leaves exactly the pairs it accepts", (
         upsertDelta: (ps) => repo.upsertDelta(ps),
         touch: (ids, at) => repo.touch(ids, at),
         count: () => repo.count(),
+        countMatchedByName: () => repo.countMatchedByName(),
         removeRejected: (ps) => {
           repo.upsertDelta([rewritten]);
           return repo.removeRejected(ps);

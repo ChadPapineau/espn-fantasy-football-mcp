@@ -147,6 +147,13 @@ export interface CrosswalkRepository {
   touch(espnIds: readonly number[], at: IsoInstant): BestEffortOutcome;
   count(): number;
   /**
+   * The stored pairs below confidence 1.0 — matched by name, team and position, never by an id
+   * (research 04 §C step 2: "surfaced in health as matched by name"; Stage C finding
+   * crosswalk-alert-remediation-dead) — the pairs the rebuild alert's test (`confidence < 1`)
+   * lists although they count as matched.
+   */
+  countMatchedByName(): number;
+  /**
    * Additive (Stage C finding crosswalk-rejected-pair-persists): removes the pairs a rebuild no
    * longer accepts (`CrosswalkRun.rejected`, as `get` read them), each only while its row still
    * equals that pair on espn_id, gsis_id, method, source and confidence (the fields `upsertDelta`

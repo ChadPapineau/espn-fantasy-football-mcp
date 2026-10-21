@@ -589,7 +589,11 @@ export interface StatusData {
     readonly last_error: SourceErrorCode | null;
   }[];
   readonly crosswalk: {
+    /** Every stored pair. */
     readonly matched: number;
+    /** Stored pairs below confidence 1.0 (research 04 §C step 2: "matched by name"). */
+    readonly matched_by_name: number;
+    /** Rostered / ≥ 1 %-owned players without a confidence-1.0 pair (the alert's rule, §C step 5). */
     readonly unmatched_rostered: number;
     readonly unmatched_top_owned: number;
   };

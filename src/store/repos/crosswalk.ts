@@ -184,5 +184,15 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
     count() {
       return num((db.prepare("SELECT COUNT(*) AS n FROM crosswalk").get() as { n: number }).n);
     },
+    countMatchedByName() {
+      // the rebuild alert's own test (resolver: `pair.confidence < 1`); the column is REAL NOT NULL
+      return num(
+        (
+          db.prepare("SELECT COUNT(*) AS n FROM crosswalk WHERE confidence < 1").get() as {
+            n: number;
+          }
+        ).n,
+      );
+    },
   };
 }

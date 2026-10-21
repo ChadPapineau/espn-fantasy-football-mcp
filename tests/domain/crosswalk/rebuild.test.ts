@@ -91,6 +91,7 @@ function memoryRepo(initial: readonly CrosswalkPair[] = []): CrosswalkRepository
       return { written: true };
     },
     count: () => pairs.size,
+    countMatchedByName: () => [...pairs.values()].filter((p) => p.confidence < 1).length,
     removeRejected: (ps) => ps.filter((p) => pairs.delete(p.espn_id)).length,
   };
 }

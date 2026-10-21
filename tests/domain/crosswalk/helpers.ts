@@ -336,6 +336,7 @@ export function storeModel(initial: readonly CrosswalkPair[] = []): StoreModel {
       return { written: true };
     },
     count: () => table.size,
+    countMatchedByName: () => [...table.values()].filter((p) => p.confidence < 1).length,
     removeRejected: (pairs) => {
       removals.push([...pairs]);
       let removed = 0;

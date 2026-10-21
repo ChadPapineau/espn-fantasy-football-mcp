@@ -1226,6 +1226,7 @@ describe("E5 espn_analyze_waivers under full (plan 10 B3 hard parts)", () => {
         return xw.byGsis(g);
       },
       count: () => xw.count(),
+      countMatchedByName: () => xw.countMatchedByName(),
     };
     const real = world.services.datasets.playerWeeks;
     const tplGsis = myRoster.map((p) => p.gsis_id).filter((g): g is string => g !== null);

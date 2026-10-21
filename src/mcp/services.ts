@@ -208,7 +208,7 @@ export interface McpServices {
   readonly rosterWeekly: RosterWeeklyReader;
   readonly playerUniverse: PlayerUniverseReader;
   readonly nflPlayers: NflPlayersReader;
-  readonly crosswalk: Pick<CrosswalkRepository, "get" | "byGsis" | "count">;
+  readonly crosswalk: Pick<CrosswalkRepository, "get" | "byGsis" | "count" | "countMatchedByName">;
   readonly crosswalkOverrides: readonly CrosswalkOverride[];
   /** The log, with the paced reads E13 takes (the store's RecommendationLogStore satisfies it). */
   readonly recommendationLog: PacedRecommendationLog;
