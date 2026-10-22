@@ -6,6 +6,7 @@
 // deterministic by seed; `opportunityFromLines` reads volume and efficiency from the stat lines.
 import { describe, expect, it } from "vitest";
 import {
+  DEADLINE_UNREAD_ASSUMPTION,
   PLAYER_SIM_E1_SAMPLES,
   projectPlayers,
   type ProjectionRequest,
@@ -25,6 +26,7 @@ import {
   POSITION_ID,
   proSchedule,
   referenceSettings,
+  steppingPacer,
 } from "./helpers.js";
 
 const SEASON = 2026;
@@ -151,6 +153,67 @@ describe("E1 player_sim cost bound", () => {
     expect(weeks[0]?.dist.basis).toBe("player_sim");
     for (const w of weeks.slice(1)) expect(w.dist.basis).toBe("position_cv");
     expect(PLAYER_SIM_E1_SAMPLES).toBe(1000);
+  });
+});
+
+// Stage C finding analytics-cpu-deadline-per-run (round 2, the verifier at 30× emulated CPU): the
+// set-up (every trailing line scored) and the summaries (a sort per player-week, the player_sim
+// simulation) ran with no deadline, so E1 passed 8 s on a slow CPU however early the sampler
+// stopped. One budget now runs through the three phases; past it the work is thin, never skipped.
+describe("one CPU budget through E1's set-up, sampling and summaries", () => {
+  const roster = Array.from({ length: 30 }, (_, i) =>
+    rb({ player_id: 300 + i, gsis_id: `00-0000${String(300 + i)}` }),
+  );
+
+  it("past it: the rest are planned without their trailing line and summarised without player_sim — every player answered, said", async () => {
+    const out = await projectPlayers(
+      request({ targets: roster, player_sim: true, pacer: steppingPacer(1), deadline_ms: 6 }),
+    );
+    expect(out.data.projections).toHaveLength(30);
+    expect(out.partial).toBe(true);
+    expect(
+      out.warnings.filter((w) =>
+        /^partial: \d+ of 30 players' trailing lines read before the CPU deadline \(the rest: ESPN's mean with the position's spread\)$/.test(
+          w,
+        ),
+      ),
+    ).toHaveLength(1);
+    const thin = out.data.projections.filter((p) =>
+      p.assumptions.some((a) => a.text === DEADLINE_UNREAD_ASSUMPTION.text),
+    );
+    expect(thin.length).toBeGreaterThan(0);
+    expect(thin.length).toBeLessThan(30);
+    for (const p of thin) {
+      // no trailing line was scored: ESPN's mean, no own number, no role sample
+      expect(p.role_confidence_games).toBe(0);
+      expect(p.weeks[0]?.points.mean).toBe(14.5);
+      expect(p.weeks[0]?.inputs.own).toBeNull();
+      expect(p.assumptions.some((a) => a.text.startsWith("no trailing nflverse line"))).toBe(false);
+    }
+    expect(
+      out.warnings.filter((w) =>
+        /^partial: \d+ of 30 players summarised from every sample before the CPU deadline/.test(w),
+      ),
+    ).toHaveLength(1);
+    // summarised thin: the position's spread, no player_sim simulation
+    expect(out.data.projections.some((p) => p.weeks[0]?.points.basis === "position_cv")).toBe(true);
+  });
+
+  it("no CPU left at all: every plan is thin; off: every line read, every simulation run, nothing said", async () => {
+    const none = await projectPlayers(
+      request({ targets: roster.slice(0, 5), player_sim: true, deadline_ms: 0 }),
+    );
+    expect(none.partial).toBe(true);
+    expect(
+      none.data.projections.every((p) =>
+        p.assumptions.some((a) => a.text === DEADLINE_UNREAD_ASSUMPTION.text),
+      ),
+    ).toBe(true);
+    const off = await projectPlayers(request({ targets: roster, player_sim: true }));
+    expect(off.partial).toBe(false);
+    expect(off.warnings.filter((w) => w.startsWith("partial:"))).toEqual([]);
+    expect(off.data.projections.every((p) => p.weeks[0]?.points.basis === "player_sim")).toBe(true);
+    expect(off.data.projections.every((p) => p.role_confidence_games === 4)).toBe(true);
   });
 });
 

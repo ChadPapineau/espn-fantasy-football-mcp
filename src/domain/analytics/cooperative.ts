@@ -22,6 +22,14 @@ export interface Pacer {
    * CPU). Absent, the deadline counts the batches' `nowMs` time instead.
    */
   cpuMs?(): number;
+  /**
+   * The same CPU meter read without ending a batch's account (a call pacer pairs `cpuMs` reads into
+   * batches): the runner's in-batch deadline check reads it, so a batch stops at the deadline by CPU
+   * and not only after its wall-time length — where CPU and wall time part (a throttled or
+   * emulated-slow CPU) a 12 ms batch could otherwise spend far more of the deadline than 12 ms
+   * (Stage C finding analytics-cpu-deadline-per-run). Absent: the batch's `nowMs` time.
+   */
+  cpuPeekMs?(): number;
 }
 
 // --- the process-wide turn gate ----------------------------------------------------------------------
@@ -84,6 +92,7 @@ export function loopPacer(clock: Clock, cpu: CpuClock = threadCpuClock): Pacer {
   return Object.freeze({
     nowMs: () => clock.nowMs(),
     cpuMs: () => cpu.cpuMs(),
+    cpuPeekMs: () => cpu.cpuMs(),
     yieldToLoop: yieldTurn,
   });
 }
@@ -133,6 +142,13 @@ export class RunBudget {
   /** What the next run may spend (null: no deadline). */
   left(): number | null {
     return this.remaining;
+  }
+  /**
+   * What a sampler may spend: COOPERATIVE.samplingShare of what is left, so the work that
+   * summarises its samples (under the same budget) is not left with nothing (null: no deadline).
+   */
+  sampling(): number | null {
+    return this.remaining === null ? null : this.remaining * COOPERATIVE.samplingShare;
   }
   /** Charges one run's CPU and returns the run (for chaining). */
   spend<R extends Pick<CooperativeResult, "cpu_ms">>(run: R): R {
@@ -199,7 +215,13 @@ export async function runCooperative(
       else if (gap > 2 && checkEvery > CHECK_MIN) checkEvery = Math.max(CHECK_MIN, checkEvery >> 1);
       elapsed = now - start;
       if (i >= units || elapsed >= batchMs) break;
-      if (deadline !== null && cpu + elapsed >= deadline) break;
+      // the deadline inside a batch: the CPU spent so far in it when the pacer can peek its meter,
+      // else the batch's time
+      const used =
+        pacer.cpuMs !== undefined && pacer.cpuPeekMs !== undefined
+          ? Math.max(0, pacer.cpuPeekMs() - cpuStart)
+          : elapsed;
+      if (deadline !== null && cpu + used >= deadline) break;
       // the next chunk would run the batch past batchMs: yield first. A coarse step (a trade package,
       // a bench audit: several ms each) otherwise made a batch of batchMs plus one more step —
       // ~30 ms turns from 16 ms batches, measured by the end-to-end stall probe (plan 10 A16a). The

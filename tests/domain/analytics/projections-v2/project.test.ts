@@ -16,6 +16,7 @@ import {
   WEIGHT_ESPN_V2,
 } from "../../../../src/domain/analytics/projections-v2/constants.js";
 import {
+  V2_DEADLINE_SKIP,
   ensembleMean,
   pinDist,
   projectV2,
@@ -181,6 +182,32 @@ describe("projectV2", () => {
     expect(out.partial).toBe(true);
     expect(out.data.completed_samples).toBeLessThan(1000);
     expect(out.warnings.some((w) => w.startsWith("partial:"))).toBe(true);
+  });
+
+  it("one budget through set-up, sampling and scoring: a target the deadline reached first is skipped (E1 keeps v1), said", async () => {
+    // Stage C finding analytics-cpu-deadline-per-run (round 2): the set-up and the scoring ran with
+    // no deadline, so v2 passed 8 s on a slow CPU however early its sampler stopped
+    const many: V2Target[] = Array.from({ length: 12 }, (_, i) => ({ ...wr, player_id: i + 1 }));
+    const out = await projectV2(req({ targets: many, pacer: steppingPacer(1), deadline_ms: 6 }));
+    expect(out.partial).toBe(true);
+    const late = out.details.filter((d) => d.skipped === V2_DEADLINE_SKIP);
+    expect(late.length).toBeGreaterThan(0);
+    expect(out.data.projections.length + late.length).toBe(12);
+    expect(out.details).toHaveLength(12);
+    expect(
+      out.warnings.filter((w) =>
+        /^partial: \d+ of 12 players modelled by v2 before the CPU deadline \(v1-ensemble serves the rest\)$/.test(
+          w,
+        ),
+      ),
+    ).toHaveLength(1);
+    // a deadline skip is not "not modelled"
+    expect(out.warnings.some((w) => w.endsWith("players not modelled by v2"))).toBe(false);
+    // off: every one modelled, nothing said
+    const off = await projectV2(req({ targets: many }));
+    expect(off.partial).toBe(false);
+    expect(off.data.projections).toHaveLength(12);
+    expect(off.warnings.filter((w) => w.startsWith("partial:"))).toEqual([]);
   });
 
   it("yields to the event loop between batches", async () => {

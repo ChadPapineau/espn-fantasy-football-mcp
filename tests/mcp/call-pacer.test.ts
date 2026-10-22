@@ -112,16 +112,52 @@ describe("the CPU deadline is one budget per call (plan 07 E1 [A-7], E3)", () =>
     expect(cpuDeadlineOf(ctx(null, 9000))).toBeNull();
   });
 
-  it("an unpaired CPU read never counts across a yield", async () => {
+  it("an unpaired CPU read never counts across a yield as a batch", async () => {
     const { base, tick } = fakeBase();
     const pacer = callPacer(base);
     pacer.cpuMs(); // a start read …
-    tick(100); // … then time outside any batch
+    tick(100); // … then CPU outside any batch
     await pacer.yieldToLoop(); // the yield drops the unpaired start
     pacer.cpuMs();
     tick(2);
     pacer.cpuMs();
-    expect(pacer.spentMs()).toBe(2);
+    expect(pacer.batchMs()).toBe(2);
+    // the call's spend is all of its CPU: the 100 ms outside a batch is still the call's own
+    expect(pacer.spentMs()).toBe(102);
+  });
+
+  it("a call's spend counts its CPU outside any batch, never another call's batches", async () => {
+    // Stage C round 2 (the verifier, 30× emulated CPU): E1's dataset reads, scoring and assembly ran
+    // outside every batch, so a call that summed only its batches passed 8 s with partial false
+    const { base, tick } = fakeBase();
+    const a = callPacer(base);
+    tick(300); // a's own work outside any batch (a dataset read, a parse)
+    const b = callPacer(base);
+    // b's batch runs while a waits for a turn: its CPU is b's, not a's
+    await runCooperative(
+      20,
+      () => {
+        tick(1);
+      },
+      { pacer: b, batchMs: 50, deadlineMs: null },
+    );
+    expect(b.batchMs()).toBe(20);
+    expect(b.spentMs()).toBe(20);
+    // a's batch
+    await runCooperative(
+      10,
+      () => {
+        tick(1);
+      },
+      { pacer: a, batchMs: 50, deadlineMs: null },
+    );
+    expect(a.batchMs()).toBe(10);
+    expect(a.spentMs()).toBe(310);
+    // the deadline a's next run is handed counts it: 8 000 less 310, not less 10
+    expect(remainingDeadline(8000, a.spentMs())).toBe(7690);
+    // without a CPU clock (a fake base pacer) the spend stays the batches' own
+    const plain = callPacer({ nowMs: () => 0, yieldToLoop: () => Promise.resolve() });
+    expect(plain.spentMs()).toBe(0);
   });
 });
 

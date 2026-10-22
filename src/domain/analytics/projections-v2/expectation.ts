@@ -121,6 +121,21 @@ function tdRate(
 }
 
 /**
+ * The skips expectV2 decides before any work — a position v2 does not model, no NFL team, no game
+ * at all — so a target the CPU deadline reached first keeps its own reason when it has one.
+ */
+export function quickSkipV2(player: {
+  readonly position: string;
+  readonly team: string | null;
+  readonly games: readonly V2Game[];
+}): ExpectationSkip | null {
+  if (!isV2Position(player.position)) return "position_not_modelled";
+  if (player.team === null || player.team.length === 0) return "no_team";
+  if (player.games.length === 0) return "no_history";
+  return null;
+}
+
+/**
  * The expectation of one player-week, or why none: a position v2 does not model, no NFL team in the
  * target week, or no game before it.
  */

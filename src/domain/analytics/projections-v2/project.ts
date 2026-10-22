@@ -16,7 +16,7 @@ import type { Rng } from "../../clock.js";
 import type { Dist, ScoringSettings, StatLine } from "../../scoring/types.js";
 import { score } from "../../scoring/engine.js";
 import { LIMITS, SIMS } from "../constants.js";
-import { loopPacer, runCooperative } from "../cooperative.js";
+import { RunBudget, loopPacer, runCooperative } from "../cooperative.js";
 import { AnalyticsError, ensure } from "../errors.js";
 import { collectInputs, mergeInputs } from "../inputs.js";
 import { gammaDist, round, zeroDist } from "../math.js";
@@ -32,7 +32,7 @@ import {
   WEIGHT_ESPN_V2,
 } from "./constants.js";
 import { activePoints, anchorExpectation } from "./ensemble.js";
-import { expectV2, type ExpectationResult } from "./expectation.js";
+import { expectV2, quickSkipV2, type ExpectationResult } from "./expectation.js";
 import { espnRatingOf } from "./matchup.js";
 import {
   expectedCounts,
@@ -58,6 +58,12 @@ import { indexTeamGames } from "./window.js";
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 const fin = (x: number | null | undefined): x is number =>
   typeof x === "number" && Number.isFinite(x);
+
+/**
+ * Why a target v2 would have modelled was not: the CPU deadline came first (E1 keeps v1 for him —
+ * plan 07 E1 [A-7]; Stage C finding analytics-cpu-deadline-per-run).
+ */
+export const V2_DEADLINE_SKIP = "cpu_deadline";
 
 /** Samples per player-week for a request: n_sims shared down by the call's line budget. */
 export function v2SampleCount(requested: number | undefined, simulations: number): number {
@@ -159,16 +165,48 @@ export async function projectV2(req: V2Request): Promise<V2Outcome> {
   const teamIndex = indexTeamGames(req.team_games);
   const memo = new Map<string, TeamVolume>();
 
+  // ONE budget runs through the three phases (plan 07 E1 [A-7]: the deadline is per CALL; Stage C
+  // finding analytics-cpu-deadline-per-run — set-up and scoring once ran with none): the set-up
+  // spends what is left, the sampler a share of the rest, the scoring what remains; a target either
+  // phase did not reach is skipped (V2_DEADLINE_SKIP) and E1 serves v1 for him
+  const budget = new RunBudget(req.deadline_ms);
   // phase 1 — set-up, one target per step
   const plans: Plan[] = [];
-  await runCooperative(
-    req.targets.length,
-    (i) => {
-      const t = req.targets[i];
-      if (t !== undefined) plans.push(planOf(t, i));
-    },
-    { pacer, deadlineMs: null },
+  // a call with no CPU left at all plans nobody (each target keeps a reason of its own, if any)
+  const setup = budget.spend(
+    await runCooperative(
+      budget.left() === 0 ? 0 : req.targets.length,
+      (i) => {
+        const t = req.targets[i];
+        if (t !== undefined) plans.push(planOf(t, i));
+      },
+      { pacer, deadlineMs: budget.left() },
+    ),
   );
+  for (let i = setup.completed; i < req.targets.length; i++) {
+    const t = req.targets[i];
+    if (t !== undefined) plans.push(unreached(t, i));
+  }
+
+  /** A target the deadline reached first: nothing simulated (skipped, E1 keeps v1). */
+  function unreached(t: V2Target, i: number): Plan {
+    const key = `${String(t.player_id ?? t.gsis_id ?? i)}:${String(req.week)}`;
+    return {
+      target: t,
+      result: null,
+      trace: null,
+      skipped: quickSkipV2(t) ?? V2_DEADLINE_SKIP,
+      active: pActiveV2(t.availability),
+      rng: req.rng.fork(`v2:${key}`),
+      buf: new Float64Array(0),
+      anchored: null,
+      abuf: new Float64Array(0),
+      arng: req.rng.fork(`v2_anchor:${key}`),
+      weight: 0,
+      anchor_failed: false,
+      assumptions: [],
+    };
+  }
 
   function planOf(t: V2Target, i: number): Plan {
     const assumptions: Assumption[] = [];
@@ -254,17 +292,19 @@ export async function projectV2(req: V2Request): Promise<V2Outcome> {
 
   // phase 2 — sampling, sample-major across the modelled targets
   const live = plans.filter((p) => p.result !== null);
-  const run = await runCooperative(
-    live.length === 0 ? 0 : n,
-    (s) => {
-      for (const p of live) {
-        if (p.result === null) continue;
-        simulateInto(p.result.expectation, p.active.p, params, p.rng, p.buf, s * SAMPLE_WIDTH);
-        if (p.anchored !== null)
-          simulateInto(p.anchored, p.active.p, params, p.arng, p.abuf, s * SAMPLE_WIDTH);
-      }
-    },
-    { pacer, deadlineMs: req.deadline_ms },
+  const run = budget.spend(
+    await runCooperative(
+      live.length === 0 ? 0 : n,
+      (s) => {
+        for (const p of live) {
+          if (p.result === null) continue;
+          simulateInto(p.result.expectation, p.active.p, params, p.rng, p.buf, s * SAMPLE_WIDTH);
+          if (p.anchored !== null)
+            simulateInto(p.anchored, p.active.p, params, p.arng, p.abuf, s * SAMPLE_WIDTH);
+        }
+      },
+      { pacer, deadlineMs: budget.sampling() },
+    ),
   );
   const k = live.length === 0 ? n : run.completed;
   if (run.partial)
@@ -276,29 +316,45 @@ export async function projectV2(req: V2Request): Promise<V2Outcome> {
   const projections: Projection[] = [];
   const details: V2PlayerDetail[] = [];
   const owns: (Dist | null)[] = plans.map(() => null);
-  await runCooperative(
-    plans.length * 2,
-    (j) => {
-      const i = Math.floor(j / 2);
-      const p = plans[i];
-      if (p === undefined) return;
-      if (j % 2 === 0) {
-        owns[i] = ownDist(p, settings, k);
-        return;
-      }
-      const built = assemble(p, settings, k, req, owns[i] ?? null);
-      if (built.projection !== null) projections.push(built.projection);
-      details.push(built.detail);
-    },
-    { pacer, deadlineMs: null },
+  const scoring = budget.spend(
+    await runCooperative(
+      budget.left() === 0 ? 0 : plans.length * 2,
+      (j) => {
+        const i = Math.floor(j / 2);
+        const p = plans[i];
+        if (p === undefined) return;
+        if (j % 2 === 0) {
+          owns[i] = ownDist(p, settings, k);
+          return;
+        }
+        const built = assemble(p, settings, k, req, owns[i] ?? null);
+        if (built.projection !== null) projections.push(built.projection);
+        details.push(built.detail);
+      },
+      { pacer, deadlineMs: budget.left() },
+    ),
   );
-  const skipped = details.filter((d) => d.skipped !== null).length;
+  // the targets the scoring did not reach: skipped (E1 keeps v1); a skip of their own stays theirs
+  for (let i = Math.floor(scoring.completed / 2); i < plans.length; i++) {
+    const p = plans[i];
+    if (p === undefined) continue;
+    const q = p.result === null ? p : { ...p, result: null, skipped: V2_DEADLINE_SKIP };
+    details.push(assemble(q, settings, k, req, null).detail);
+  }
+  const late = details.filter((d) => d.skipped === V2_DEADLINE_SKIP).length;
+  const skipped = details.filter((d) => d.skipped !== null).length - late;
   if (skipped > 0) warnings.push(`${String(skipped)} players not modelled by v2`);
+  if (late > 0)
+    warnings.push(
+      `partial: ${String(projections.length)} of ${String(projections.length + late)} players modelled by v2 before the CPU deadline (v1-ensemble serves the rest)`,
+    );
   const inputs = mergeInputs(collectInputs(req.stamps ?? [], req.clock), req.inputs ?? []);
   return {
     data: { model_version: MODEL_VERSION_V2, projections, completed_samples: k, inputs },
     details,
-    partial: run.partial,
+    // a target the deadline reached first lost v2's answer (set-up or scoring); a run stopped with
+    // nothing left that needed it lost nothing
+    partial: run.partial || late > 0,
     warnings: [...new Set(warnings)],
   };
 }

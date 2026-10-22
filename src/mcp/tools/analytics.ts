@@ -246,9 +246,10 @@ export function impliedTotals(
  * What remains of the call's CPU deadline for the next cooperative run (plan 07 E1 [A-7], E3: "the
  * 8 s per-CALL CPU deadline"): ANALYTICS_CPU_DEADLINE_MS — or the test-only switch in the server
  * options (null = off — plan 10 A8a's injection invariance; never set by a production
- * configuration, changelog R5) — less the CPU this call's batches have already spent (call.ts). Read
- * it when the run starts: every run of one call draws on the same budget, so E1's v1 + v2 and E3's
- * season chain stop at 8 s in total (Stage C finding `analytics-cpu-deadline-per-run`).
+ * configuration, changelog R5) — less the CPU this call has already spent, inside its batches and
+ * outside them (call.ts). Read it when the run starts: every run of one call draws on the same
+ * budget, so E1's v1 + v2 and E3's season chain stop at 8 s in total (Stage C finding
+ * `analytics-cpu-deadline-per-run`).
  */
 export function cpuDeadlineOf(ctx: ToolContext): number | null {
   const v = ctx.options.cpuDeadlineMs;
@@ -270,6 +271,17 @@ export function carryOutcome(
   for (const w of out.warnings) if (!warnings.includes(w)) warnings.push(w);
   return out.partial;
 }
+
+/** Said when the call's CPU deadline passed before v2-opportunity could run (v1-ensemble serves). */
+export const V2_SKIPPED_DEADLINE_WARNING =
+  "partial: v2-opportunity not run, the CPU deadline came first (v1-ensemble serves)";
+
+/**
+ * The least CPU a call must have left for v2-opportunity to start: its dataset reads alone are a
+ * share of the deadline on a slow CPU (a roster call's, at 30× emulated, ~1.9 s), and with less left
+ * it reads for players it then skips (Stage C finding analytics-cpu-deadline-per-run).
+ */
+export const V2_MIN_LEFT_MS = ANALYTICS_CPU_DEADLINE_MS / 4;
 
 /** Runs E1 over `subjects` (the projection every other engine starts from). */
 export async function project(
@@ -295,7 +307,13 @@ export async function project(
   warnings: string[],
 ): Promise<ProjectionOutcome> {
   const season = o.league.ref.season;
-  const trailing = trailingFor(ctx, subjects, season, o.week, inputs, warnings, o.allowStale);
+  // a call with no CPU left reads no trailing line (E1 plans every target thin and runs no v2):
+  // the reads outside every batch count against the deadline too (Stage C finding
+  // analytics-cpu-deadline-per-run — a 30× slower CPU took a chunked season call far past 8 s)
+  const trailing =
+    cpuDeadlineOf(ctx) === 0
+      ? new Map<number, TrailingLine[]>()
+      : trailingFor(ctx, subjects, season, o.week, inputs, warnings, o.allowStale);
   const lastWeek = Math.max(o.week, o.league.clock.final_scoring_period);
   const weeks: Week[] =
     o.horizon === "week"
@@ -329,7 +347,11 @@ export async function project(
   // the point estimate at weight_espn 1.0); everyone else keeps v1 (projection-v2.ts)
   let out = v1;
   let run: V2Run | null = null;
-  if (ctx.options.toolset === "full")
+  const left = cpuDeadlineOf(ctx);
+  if (ctx.options.toolset === "full" && left !== null && (left === 0 || left < V2_MIN_LEFT_MS)) {
+    warnings.push(V2_SKIPPED_DEADLINE_WARNING);
+    out = { ...v1, partial: true };
+  } else if (ctx.options.toolset === "full")
     try {
       run = await runV2(
         ctx,
@@ -343,7 +365,7 @@ export async function project(
           allowStale: o.allowStale,
           ...(o.v2_n_sims === undefined ? {} : { n_sims: o.v2_n_sims }),
           include_stat_line: o.include_stat_line === true,
-          deadline_ms: cpuDeadlineOf(ctx),
+          deadline: () => cpuDeadlineOf(ctx),
         },
         inputs,
         warnings,

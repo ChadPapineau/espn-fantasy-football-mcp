@@ -41,6 +41,7 @@ import {
   type StatLine,
 } from "../scoring/types.js";
 import {
+  COOPERATIVE,
   DEFAULT_CV,
   ESPN_ROS,
   LIMITS,
@@ -57,7 +58,7 @@ import {
   TURNOVER_SHRINK_K,
   TURNOVER_STATS,
 } from "./constants.js";
-import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
+import { RunBudget, loopPacer, runCooperative, type Pacer } from "./cooperative.js";
 import { opportunityFromLines, playerSimDist } from "./playerSim.js";
 import { AnalyticsError, ensure, ensurePlayers } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs } from "./inputs.js";
@@ -302,6 +303,27 @@ interface Trailing {
   readonly expectation: Readonly<Record<Canonical, number>>;
   readonly skipped: number;
 }
+
+/** No trailing window read (a plan the CPU deadline left thin): ESPN's mean, the position's spread. */
+const UNREAD_TRAILING: Trailing = Object.freeze({
+  own: null,
+  games: 0,
+  lambdaInt: 0,
+  lambdaFum: 0,
+  expectation: Object.freeze({}),
+  skipped: 0,
+});
+
+/** A thin plan's assumption: the deadline came before his trailing line was read. */
+export const DEADLINE_UNREAD_ASSUMPTION = Object.freeze({
+  text: "the CPU deadline came before his trailing line was read: ESPN's mean with the position's spread",
+  revisit_trigger: "a call with fewer players or weeks",
+});
+/** The same, for a player ESPN has no projection for (his trailing line was the only estimate). */
+export const DEADLINE_UNREAD_NO_ESPN_ASSUMPTION = Object.freeze({
+  text: "the CPU deadline came before his trailing line was read and ESPN has no projection: projected at 0",
+  revisit_trigger: "a call with fewer players or weeks",
+});
 
 /** The trailing window scored through the engine (sibling research 05 §1 step 2 weights). */
 function trailingOf(
@@ -606,10 +628,13 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
   for (let w = 1; w <= shareEnd; w++) seasonWeeks.push(w);
   const gamesByWeek = new Map(seasonWeeks.map((w) => [w, gamesOfWeek(req.schedule, w)]));
   const tasks: Task[] = [];
-  const planOf = (t: ProjectionTarget, pi: number) => {
+  // `thin`: the CPU deadline passed before this target's turn — its trailing line (the set-up's
+  // cost: every game scored under S) is not read, ESPN's mean is the estimate with the position's
+  // spread, and the assumption says so
+  const planOf = (t: ProjectionTarget, pi: number, thin: boolean) => {
     const assumptions: Assumption[] = [];
     const cv = positionCv(t.position, t.position_id, settings);
-    const tr = trailingOf(t, req.season, req.week, settings);
+    const tr = thin ? UNREAD_TRAILING : trailingOf(t, req.season, req.week, settings);
     if (tr.skipped > 0) warnings.push(`${String(tr.skipped)} trailing lines could not be scored`);
     const cls = positionClassOf(t.position_id);
     const penInt =
@@ -642,7 +667,11 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
     });
     const perWeekRos = rosShare(t.espn_ros, window.covered, explicit);
     const espnMissing = explicit.size === 0 && t.espn_ros === null;
-    if (espnMissing)
+    if (thin)
+      assumptions.push(
+        espnMissing ? DEADLINE_UNREAD_NO_ESPN_ASSUMPTION : DEADLINE_UNREAD_ASSUMPTION,
+      );
+    if (espnMissing && !thin)
       assumptions.push(
         A(
           tr.own === null
@@ -651,7 +680,7 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
           "ESPN publishes a projection for the player",
         ),
       );
-    if (tr.games === 0)
+    if (tr.games === 0 && !thin)
       assumptions.push(
         A(
           "no trailing nflverse line: the spread is the positional CV alone",
@@ -771,34 +800,67 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
   // (every horizon week lies inside the season read above: shareEnd ≥ the horizon's last week)
   // the per-player plans (trailing lines scored, weekly means, tasks) are built cooperatively too —
   // one target per step, in order, so the tasks and their streams are exactly as before — keeping a
-  // 60-target call's set-up from running as one long macrotask (plan 10 A16a's 50 ms stall bound)
+  // 60-target call's set-up from running as one long macrotask (plan 10 A16a's 50 ms stall bound).
+  // ONE budget runs through the three phases (plan 07 E1 [A-7]: the deadline is per CALL; Stage C
+  // finding analytics-cpu-deadline-per-run — set-up and post-processing once ran with none, and on
+  // a 30× slower CPU took E1 past 8 s alone): the set-up spends what is left, the targets it did not
+  // reach are planned thin (no trailing line scored — DEADLINE_UNREAD_ASSUMPTION), the sampler
+  // spends a share of the rest, and the summaries what remains (past it: thin summaries).
   const pacer = req.pacer ?? loopPacer(req.clock);
+  const budget = new RunBudget(req.deadline_ms);
   const plans: ReturnType<typeof planOf>[] = [];
-  await runCooperative(
-    req.targets.length,
-    (pi) => {
-      const t = req.targets[pi];
-      if (t !== undefined) plans.push(planOf(t, pi));
-    },
-    { pacer, deadlineMs: null },
+  // a call with no CPU left at all reads no trailing line: every plan is thin
+  const setup = budget.spend(
+    await runCooperative(
+      budget.left() === 0 ? 0 : req.targets.length,
+      (pi) => {
+        const t = req.targets[pi];
+        if (t !== undefined) plans.push(planOf(t, pi, false));
+      },
+      { pacer, deadlineMs: budget.left() },
+    ),
   );
+  if (setup.completed < req.targets.length) {
+    const from = setup.completed;
+    budget.spend(
+      await runCooperative(
+        req.targets.length - from,
+        (j) => {
+          const t = req.targets[from + j];
+          if (t !== undefined) plans.push(planOf(t, from + j, true));
+        },
+        { pacer, deadlineMs: null },
+      ),
+    );
+    warnings.push(
+      `partial: ${String(from)} of ${String(req.targets.length)} players' trailing lines read before the CPU deadline (the rest: ESPN's mean with the position's spread)`,
+    );
+  }
 
   // the sampler: sample-index-major, so a deadline-stopped run leaves every player-week with the
   // same number of samples; each task draws from its own forked stream (batching never shifts it)
-  const run = await runCooperative(
-    n,
-    (s) => {
-      for (const task of tasks) task.samples[s] = drawSample(task);
-    },
-    { pacer, deadlineMs: req.deadline_ms },
+  const run = budget.spend(
+    await runCooperative(
+      n,
+      (s) => {
+        for (const task of tasks) task.samples[s] = drawSample(task);
+      },
+      { pacer, deadlineMs: budget.sampling() },
+    ),
   );
   const k = run.completed;
   if (run.partial)
     warnings.push(`partial: ${String(k)} of ${String(n)} samples before the CPU deadline`);
 
-  // post-processing (quantile sorts, ROS sums) is cooperative too: one player per step
+  // post-processing (quantile sorts, ROS sums) is cooperative too: one player per step. `thin`: the
+  // deadline passed before this player's turn — his summary reads the first
+  // COOPERATIVE.thinSamples samples and no player_sim simulation runs (the answer stays whole)
   type Plan = (typeof plans)[number];
-  const build = ({ t, tr, assumptions, weeksOut, espnMissing }: Plan): ProjectedPlayer => {
+  const build = (
+    { t, tr, assumptions, weeksOut, espnMissing }: Plan,
+    thin: boolean,
+  ): ProjectedPlayer => {
+    const kk = thin ? Math.min(k, COOPERATIVE.thinSamples) : k;
     // the P1 player_sim basis (see ProjectionRequest.player_sim): E1's own trailing lines
     const opportunity =
       req.player_sim === true
@@ -813,7 +875,8 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
     // the first target week only (the decision week the trailing rates describe); one simulation
     // per player keeps E1 inside its CPU and stall budgets (~7 ms at 1 000 samples)
     const simOf = (x: (typeof weeksOut)[number]): Dist | null => {
-      if (opportunity === null || x.task === null || k === 0 || x !== weeksOut[0]) return null;
+      if (thin || opportunity === null || x.task === null || k === 0 || x !== weeksOut[0])
+        return null;
       return (
         playerSimDist({
           opportunity,
@@ -828,11 +891,11 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
     const weeksP: ProjectedWeek[] = weeksOut.map((x) => ({
       ...x.info,
       dist:
-        x.task === null || k === 0
+        x.task === null || kk === 0
           ? x.mean === 0
             ? zeroDist("position_cv")
             : { ...zeroDist("position_cv"), mean: round(x.mean), p_zero: 0 }
-          : (simOf(x) ?? distFromSamples(x.task.samples.subarray(0, k), "position_cv", x.mean)),
+          : (simOf(x) ?? distFromSamples(x.task.samples.subarray(0, kk), "position_cv", x.mean)),
     }));
     const pw: ProjectionWeek[] = weeksP.map((w) => {
       const pct =
@@ -857,15 +920,15 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
     });
     let ros: Dist | null = null;
     if (weeksP.length > 1) {
-      const sums = new Float64Array(k);
+      const sums = new Float64Array(kk);
       let meanSum = 0;
       for (const x of weeksOut) {
         meanSum += x.mean;
         if (x.task !== null)
-          for (let s = 0; s < k; s++) sums[s] = (sums[s] ?? 0) + (x.task.samples[s] ?? 0);
+          for (let s = 0; s < kk; s++) sums[s] = (sums[s] ?? 0) + (x.task.samples[s] ?? 0);
       }
       ros =
-        k === 0
+        kk === 0
           ? { ...zeroDist("position_cv"), mean: round(meanSum), p_zero: meanSum === 0 ? 1 : 0 }
           : distFromSamples(sums, "position_cv", meanSum);
     }
@@ -900,14 +963,31 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
     return { target: t, projection, weeks: weeksP, expectation: tr.expectation };
   };
   const players: ProjectedPlayer[] = [];
-  await runCooperative(
-    plans.length,
-    (i) => {
-      const plan = plans[i];
-      if (plan !== undefined) players.push(build(plan));
-    },
-    { pacer, deadlineMs: null },
+  // no CPU left at all: every summary is thin (a full one runs the player_sim simulation)
+  const summarised = budget.spend(
+    await runCooperative(
+      budget.left() === 0 ? 0 : plans.length,
+      (i) => {
+        const plan = plans[i];
+        if (plan !== undefined) players.push(build(plan, false));
+      },
+      { pacer, deadlineMs: budget.left() },
+    ),
   );
+  if (summarised.completed < plans.length) {
+    const from = summarised.completed;
+    await runCooperative(
+      plans.length - from,
+      (j) => {
+        const plan = plans[from + j];
+        if (plan !== undefined) players.push(build(plan, true));
+      },
+      { pacer, deadlineMs: null },
+    );
+    warnings.push(
+      `partial: ${String(from)} of ${String(plans.length)} players summarised from every sample before the CPU deadline (the rest from the first ${String(Math.min(k, COOPERATIVE.thinSamples))}, the position's spread)`,
+    );
+  }
 
   const inputs = mergeInputs(collectInputs(req.stamps ?? [], req.clock), req.inputs ?? []);
   return {
@@ -918,7 +998,8 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
       inputs,
     },
     players,
-    partial: run.partial,
+    partial:
+      setup.completed < req.targets.length || run.partial || summarised.completed < plans.length,
     warnings: [...new Set(warnings)],
   };
 }

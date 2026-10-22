@@ -76,10 +76,17 @@ export interface V2CallOptions {
   /** Samples per player (shared down by projectV2's line budget); default V2_SIMS.default. */
   readonly n_sims?: number;
   readonly include_stat_line?: boolean;
-  readonly deadline_ms: number | null;
+  /**
+   * What the call's CPU deadline has left, read when v2's engine starts — after v2's own dataset
+   * reads, so they count against it (cpuDeadlineOf; Stage C finding analytics-cpu-deadline-per-run).
+   */
+  readonly deadline: () => number | null;
 }
 
-/** Why a QB/RB/WR/TE subject was not served by v2 (fixed vocabulary — no third-party text). */
+/**
+ * Why a QB/RB/WR/TE subject was not served by v2 (fixed vocabulary — no third-party text);
+ * `cpu_deadline`: the call's CPU deadline came before v2 reached him (projections-v2 V2_DEADLINE_SKIP).
+ */
 export type V2Skip =
   | "no_gsis_id"
   | "no_nfl_team"
@@ -87,7 +94,8 @@ export type V2Skip =
   | "inputs_not_loaded"
   | "position_not_modelled"
   | "no_team"
-  | "no_history";
+  | "no_history"
+  | "cpu_deadline";
 
 /** The most regular-season weeks a prior season's window reads (nflverse REG weeks 1–18). */
 export const V2_PRIOR_WEEKS = 18;
@@ -539,7 +547,7 @@ export async function runV2(
     clock: ctx.services.clock,
     pacer: ctx.pacer,
     rng: o.rng,
-    deadline_ms: o.deadline_ms,
+    deadline_ms: o.deadline(),
     include_stat_line: o.include_stat_line === true,
     inputs: toDataInputs(inputs, ctx.nowMs),
   });

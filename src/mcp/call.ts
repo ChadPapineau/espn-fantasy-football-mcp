@@ -9,7 +9,12 @@
 // runner reads the pacer's CPU clock at the start and end of each synchronous batch and yields
 // between batches), so `cpuDeadlineOf` hands each run only what the call has left; each yield checks
 // the client's signal (a cancelled call stops at its next batch boundary, before any store write)
-// and, at most every PROGRESS_INTERVAL_MS, notifies progress. New here.
+// and, at most every PROGRESS_INTERVAL_MS, notifies progress. A call's spend is also the CPU its
+// code ran OUTSIDE any batch (a parse, a read, assembling the answer): the thread's CPU since the call
+// began, less what other calls' batches spent meanwhile — exact when calls run one at a time,
+// conservative when they overlap (another call's unbatched CPU counts here too, so a run stops
+// earlier, never later). Batches alone undercounted it by 1–5 s per call on a 30× slower CPU, and E8
+// and E9 ran past 8 s with partial false (Stage C finding analytics-cpu-deadline-per-run). New here.
 import { loopPacer, type Pacer } from "../domain/analytics/index.js";
 import type { Clock } from "../domain/clock.js";
 
@@ -36,19 +41,32 @@ export class CallCancelled extends Error {
 export interface CallPacer extends Pacer {
   /** The thread's CPU (ms); always present, so the runner counts the deadline in CPU. */
   cpuMs(): number;
-  /** CPU (ms) this call's cooperative batches have spent so far. */
+  /** The same meter read without pairing (the runner's in-batch deadline check). */
+  cpuPeekMs(): number;
+  /**
+   * CPU (ms) this call has spent so far: the thread's CPU since it began less other calls' batches
+   * meanwhile (never less than its own batches); its batches alone when the base pacer has no CPU
+   * clock.
+   */
   spentMs(): number;
+  /** CPU (ms) this call's cooperative batches have spent so far (a part of `spentMs`). */
+  batchMs(): number;
   /** Whether the client cancelled this call. */
   cancelled(): boolean;
   /** Throws CallCancelled when the client cancelled (before a side effect, a request, a reply). */
   throwIfCancelled(): void;
 }
 
+/** Every call's batch CPU, summed process-wide (a call subtracts the others' share from its own). */
+const BATCH_LEDGER = { ms: 0 };
+
 /**
  * The pacer one tool call hands every engine it runs. `base` is the production loop pacer (the
  * injected clock, the thread's CPU, the process-wide turn gate). The runner reads `cpuMs()` once at
  * a batch's start and once at its end, and yields between batches, so the CPU between the two reads
- * of a batch is this call's own: batches are synchronous, so no other call runs inside one.
+ * of a batch is this call's own: batches are synchronous, so no other call runs inside one. The
+ * call's spend (`spentMs`) is the thread's CPU since the pacer was made, less the other calls'
+ * batches since then — never less than its own batches.
  */
 export function callPacer(
   base: Pacer,
@@ -65,13 +83,18 @@ export function callPacer(
     if (cancelled()) throw new CallCancelled();
   };
   const cpuNow = (): number => (base.cpuMs === undefined ? base.nowMs() : base.cpuMs());
+  const hasCpu = base.cpuMs !== undefined;
+  const startCpu = cpuNow();
+  const ledgerAtStart = BATCH_LEDGER.ms;
   return Object.freeze({
     nowMs: () => base.nowMs(),
     cpuMs: () => {
       const now = cpuNow();
       if (batchStart === null) batchStart = now;
       else {
-        spent += Math.max(0, now - batchStart);
+        const d = Math.max(0, now - batchStart);
+        spent += d;
+        BATCH_LEDGER.ms += d;
         batchStart = null;
       }
       return now;
@@ -96,7 +119,13 @@ export function callPacer(
       await base.yieldToLoop();
       throwIfCancelled();
     },
-    spentMs: () => spent,
+    cpuPeekMs: cpuNow,
+    spentMs: () => {
+      if (!hasCpu) return spent;
+      const others = Math.max(0, BATCH_LEDGER.ms - ledgerAtStart - spent);
+      return Math.max(spent, cpuNow() - startCpu - others);
+    },
+    batchMs: () => spent,
     cancelled,
     throwIfCancelled,
   });

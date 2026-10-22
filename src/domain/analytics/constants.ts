@@ -161,6 +161,18 @@ export const COOPERATIVE = Object.freeze({
   deadlineMs: 8000,
   /** Steps between clock reads inside a batch (a clock read per step would dominate). */
   checkEvery: 64,
+  /**
+   * The share of a call's remaining CPU an engine's sampler may spend: summarising the samples (a
+   * sort per player-week, E1's player_sim simulation, v2's scoring of every simulated line) costs
+   * about as much again, and it runs under the same deadline (Stage C finding
+   * analytics-cpu-deadline-per-run: set-up and post-processing ran with none).
+   */
+  samplingShare: 0.5,
+  /**
+   * The samples a player's summary reads once the deadline has passed (a sort of this many per
+   * player-week, no player_sim simulation): the answer stays whole, its spread from fewer samples.
+   */
+  thinSamples: 200,
 });
 
 /** z of the 90th percentile (p10/p90 = μ ∓ z·σ under the normal approximation). */
