@@ -961,6 +961,18 @@ export interface EvidenceData extends AnalyticsResult {
     readonly official: boolean;
     readonly decayed: boolean;
   }[];
+  /**
+   * The claims of a text that also names other players which cannot be tied to this player with
+   * certainty (Stage C ruling R7-4; src/domain/evidence/attribution.ts): shown, wrapped, under this
+   * label — never in `evidence`, never logged, scored or weighed in the flag or the posterior.
+   */
+  readonly ambiguous_multi_player: readonly {
+    readonly source: string;
+    readonly claim: UntrustedText;
+    readonly type: ClaimExtract["type"];
+    readonly direction: ClaimExtract["direction"];
+    readonly time: IsoInstant | null;
+  }[];
   /** null until the calibration table has EVIDENCE_POSTERIOR_MIN_N scored claims. */
   readonly posterior: {
     readonly p_active: number | null;

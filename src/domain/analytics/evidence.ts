@@ -12,7 +12,11 @@
 // (rule 4); `posterior: null` until the calibrated table holds 200 scored news claims (Phase 3, plan 10
 // C8 — `calibration_table`); and the recommendation is computed
 // from the structured fields and the usage only, so it is INVARIANT to the text except for the flag
-// (rule 5). Text is data with a reliability score; it is never an instruction (plan 02 §6.4). Pure.
+// (rule 5). Text is data with a reliability score; it is never an instruction (plan 02 §6.4). A claim
+// of a text that also names other players which cannot be tied to this player with certainty (Stage
+// C ruling R7-4; the caller decides it with src/domain/evidence/attribution.ts) is shown under
+// `ambiguous_multi_player` and is never his: no evidence item, flag, posterior weight or logged
+// claim. Pure.
 import type { Clock } from "../clock.js";
 import {
   calibrationSourceOf,
@@ -77,6 +81,13 @@ const CHECK = {
 export interface EvidenceText {
   readonly text: UntrustedText;
   readonly time: IsoInstant | null;
+  /**
+   * `ambiguous_multi_player`: a claim of a text that also names other players, which cannot be tied
+   * to this player with certainty (Stage C ruling R7-4; src/domain/evidence/attribution.ts). It is
+   * shown under `ambiguous_multi_player` and never read as his: no evidence item, no flag, no
+   * posterior weight, no logged claim. Absent: the text is his.
+   */
+  readonly attribution?: "ambiguous_multi_player";
 }
 
 /** The player's structured fields (the facts every claim is compared with). */
@@ -256,8 +267,31 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
     });
     return true;
   };
+  // a claim that cannot be tied to him (R7-4) is shown under its label and is never an item: no
+  // flag, no disagreement, no posterior weight, no logged claim reads it
+  const ambiguous: EvidenceData["ambiguous_multi_player"][number][] = [];
+  let ambiguousOver = 0;
   let ignored = 0;
-  for (const t of req.texts) if (!addText(t.text, t.time)) ignored += 1;
+  for (const t of req.texts) {
+    if (t.attribution === "ambiguous_multi_player") {
+      if (reliabilitySourceOf(t.text.untrusted_text.source) === null) ignored += 1;
+      else if (ambiguous.length >= EVIDENCE.maxAmbiguous) ambiguousOver += 1;
+      else {
+        const ex = extractClaim(t.text.untrusted_text.value);
+        ambiguous.push({
+          source: t.text.untrusted_text.source,
+          claim: t.text,
+          type: ex?.type ?? "other",
+          direction: ex?.direction ?? "neutral",
+          time: t.time,
+        });
+      }
+      continue;
+    }
+    if (!addText(t.text, t.time)) ignored += 1;
+  }
+  if (ambiguousOver > 0)
+    warnings.push(`${String(ambiguousOver)} ambiguous_multi_player claims not listed (cap)`);
   if (ignored > 0)
     warnings.push(
       `${String(ignored)} text item(s) from a non-claim source ignored (league-member text is display-only)`,
@@ -417,9 +451,10 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
   if (items.length > EVIDENCE.maxEvidence)
     warnings.push(`${String(items.length - EVIDENCE.maxEvidence)} evidence items not listed (cap)`);
 
-  // injection flags across every wrapped text (shown, never obeyed)
+  // injection flags across every wrapped text shown, the ambiguous ones included (never obeyed)
   const seen = new Set<InjectionFlag>();
   for (const it of items) for (const f of it.claim.untrusted_text.flags ?? []) seen.add(f);
+  for (const a of ambiguous) for (const f of a.claim.untrusted_text.flags ?? []) seen.add(f);
   const injection_flags = INJECTION_FLAGS.filter((f) => seen.has(f));
 
   const pActive =
@@ -545,6 +580,7 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
       injection_flags,
       prior: prior.p_active === null && prior.role_shares === null ? null : prior,
       evidence,
+      ambiguous_multi_player: ambiguous,
       // the merge is P2 (sib ADV OBJ-21): never shown before the calibrated table holds 200 news claims
       posterior,
       what_would_confirm: confirm,

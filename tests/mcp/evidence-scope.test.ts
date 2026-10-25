@@ -1,175 +1,27 @@
-// evidence-scope.test.ts — espn_analyze_evidence reads a news item's claims only about the player the
-// claim names (plan 07 E10; plan 10 C8: the logged claims calibrate each source's reliability).
-// Stage C finding evidence-item-claims-misattributed: E10 loaded every item whose refs held the
-// subject and passed its WHOLE title and blurb as texts about him; the matcher attaches one item to
-// every player it names, so the commonest injury headline — "<starter> (ankle) ruled out; <the
-// subject> to start" — gave a healthy subject availability_conflict and logged an 'out' claim against
-// him that the retrospective would score "not borne out", lowering the source's measured reliability.
-// Attempt 1 read only the clauses naming the subject, which held for that exact headline alone: a
-// comma, "and", "with … out" or "so" kept the teammate's claim in a clause that also named him, and
-// an item whose other player had no gsis pair was read as his. Now an item naming other players (any
-// ref) is read only in the parts naming him ALONE — a clause naming another splits into phrases, each
-// kept only when it names him and nobody else — and an item whose other players cannot be named is
-// not read for him at all. Units, then the tool on league-a under EFF_TOOLSET=full with the news
-// reader injected and the claim log observed (no network).
+// evidence-scope.test.ts — espn_analyze_evidence reads a claim of a news item or an outlook as the
+// subject's only when it is about him (plan 07 E10; plan 10 C8: the logged claims calibrate each
+// source's reliability). Stage C finding evidence-item-claims-misattributed: E10 loaded every item
+// whose refs held the subject and passed its WHOLE title and blurb as texts about him; the matcher
+// attaches one item to every player it names, so the commonest injury headline — "<starter> (ankle)
+// ruled out; <the subject> to start" — gave a healthy subject availability_conflict and logged an
+// 'out' claim against him that the retrospective would score "not borne out". Three rounds of smarter
+// parsing each left a wording that still carried the teammate's claim onto him (a comma, a pronoun, a
+// noun phrase). Ruling R7-4 (fail safe): in a text that names more than one player a claim is his
+// only where its clause opens with his name, states the claim of him directly and names no other
+// player (src/domain/evidence/attribution.ts, held word by word in
+// tests/domain/evidence/attribution.test.ts); every other claim is listed under
+// `ambiguous_multi_player`, wrapped, and is never logged, scored or weighed as his. The tool on
+// league-a under EFF_TOOLSET=full with the news reader (and the outlook, the weekly roster) injected
+// and the claim log observed; no network.
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatasetStamp, NewsItem } from "../../src/domain/analytics/types.js";
-import { extractClaim } from "../../src/domain/evidence/index.js";
+import type { NflRosterPlayer } from "../../src/domain/crosswalk/types.js";
 import { wrapUntrusted } from "../../src/mcp/envelope.js";
 import type { McpServices } from "../../src/mcp/services.js";
-import { nameKeysOf, namedIn, partsAbout, type NameKeys } from "../../src/mcp/tools/market-p1.js";
+import { MULTI_PLAYER_RULE } from "../../src/mcp/tools/market-p1.js";
+import { envelopeViolations } from "./helpers/walk.js";
 import { call, connect, makeWorld, SEASON, type World } from "./helpers/world.js";
-
-describe("partsAbout (Stage C evidence-item-claims-misattributed)", () => {
-  const t = (v: string) => wrapUntrusted(v, "rss.rotowire.title");
-  const keys = (n: string): NameKeys => {
-    const k = nameKeysOf(n);
-    if (k === null) throw new Error(n);
-    return k;
-  };
-  const him = keys("Malik Ostrander");
-  const quist = [keys("Dorian Quist")];
-  const about = (v: string, others: readonly NameKeys[] = quist) =>
-    partsAbout(t(v), him, others)?.untrusted_text.value ?? null;
-
-  it("keeps the clauses naming him alone, under the original source; none → null", () => {
-    const got = partsAbout(
-      t("Bengals' Dorian Quist (ankle) ruled out; Malik Ostrander to start"),
-      him,
-      quist,
-    );
-    expect(got?.untrusted_text.value).toBe("Malik Ostrander to start");
-    expect(got?.untrusted_text.source).toBe("rss.rotowire.title");
-    expect(about("Quist will not play.")).toBeNull();
-    expect(about("He will not play.")).toBeNull();
-    expect(about("Quist is out. Ostrander gets the start — Quist sits")).toBe(
-      "Ostrander gets the start",
-    );
-  });
-
-  it("a clause naming both splits into phrases; only a phrase naming him alone is kept", () => {
-    expect(about("Quist (ankle) ruled out for Sunday, Ostrander to start")).toBe(
-      "Ostrander to start",
-    );
-    expect(about("Quist (ankle) ruled out and Ostrander to start")).toBe("Ostrander to start");
-    expect(about("Quist will not play Sunday, so Ostrander draws the start.")).toBe(
-      "so Ostrander draws the start.",
-    );
-    expect(about("Ostrander starts with Quist's ankle injury ruling him out")).toBe(
-      "Ostrander starts",
-    );
-    // no phrase is his alone: nothing is read
-    expect(about("With Quist ruled out Sunday Ostrander gets the start")).toBeNull();
-    expect(about("Ostrander replaces the injured Quist")).toBeNull();
-    // his own phrase still reads as his (the claim is kept)
-    expect(about("Quist to start, Ostrander (ankle) ruled out for Sunday")).toBe(
-      "Ostrander (ankle) ruled out for Sunday",
-    );
-    // pieces are joined so no claim pattern straddles two of them
-    const joined = about("Ostrander is, Quist says, out Ostrander-style");
-    expect(joined).toBe("Ostrander is; out Ostrander-style");
-    expect(extractClaim(joined)).toBeNull();
-    expect(extractClaim("Ostrander is out Ostrander-style")?.designation).toBe("out");
-  });
-
-  it("a pronoun in his own clause is not his: whom it means is not resolved (round 3)", () => {
-    // the verifier's wordings: the teammate is "him"/"he" in the subject's own clause
-    for (const [text, kept] of [
-      [
-        "Quist (ankle) was ruled out for Sunday's game against the opponent. With him sidelined, Malik Ostrander figures to start.",
-        "Malik Ostrander figures to start.",
-      ],
-      [
-        "Quist limited at practice; if he is ruled out, Ostrander would start",
-        "Ostrander would start",
-      ],
-      ["If he is ruled out, Ostrander would start", "Ostrander would start"],
-      ["Quist (ankle) ruled out. With him sidelined, Ostrander starts", "Ostrander starts"],
-      [
-        "Quist (ankle) is out for the week. With him sidelined, Ostrander should see more work.",
-        "Ostrander should see more work.",
-      ],
-      ["Quist was ruled out. Ostrander steps in now that he is sidelined.", "Ostrander steps in"],
-      ["Ostrander starts once Quist is ruled out", "Ostrander starts"],
-      ["Ostrander starts unless he is cleared", "Ostrander starts"],
-    ] as const) {
-      const got = about(text);
-      expect(got, text).toBe(kept);
-      // nothing kept carries the teammate's availability
-      expect(extractClaim(got)?.designation ?? null, text).not.toBe("out");
-    }
-    // a phrase naming nobody but "the starter" is not his either
-    expect(about("Quist is out. With the starter sidelined, Ostrander figures to start")).toBe(
-      "Ostrander figures to start",
-    );
-    // a pronoun beside his own name is unresolved too in a multi-player text: dropped, never adopted
-    expect(about("Quist is out. Ostrander says he is fine")).toBeNull();
-    expect(about("Quist is out. Ostrander's knee: he'll sit")).toBe("Ostrander's knee");
-    // control: his own claim with no pronoun stays his
-    expect(about("Quist is fine. Ostrander (knee) was ruled out")).toBe(
-      "Ostrander (knee) was ruled out",
-    );
-  });
-
-  it("a period after an initial or a name suffix ends no clause (the claim keeps its name)", () => {
-    const pitts = [keys("Kyle Pitts Sr.")];
-    expect(
-      partsAbout(t("Kyle Pitts Sr. (ankle) ruled out, Ostrander to start"), him, pitts)
-        ?.untrusted_text.value,
-    ).toBe("Ostrander to start");
-    expect(
-      partsAbout(t("D.J. Quist ruled out. Ostrander to start."), him, quist)?.untrusted_text.value,
-    ).toBe("Ostrander to start.");
-    expect(about("Quist is out. Ostrander starts.")).toBe("Ostrander starts.");
-  });
-
-  it("another player named by his first name only still counts (not a shared or a word-like one)", () => {
-    // a phrase naming him and the other by his first name is not his alone
-    expect(about("Ostrander replaces Dorian, who is out")).toBeNull();
-    // "in place of" joins two players' news: his own part is kept, the other's "who is out" never
-    expect(about("Ostrander starts in place of Dorian, who is out")).toBe("Ostrander starts");
-    expect(about("Ostrander starts in place of Dorian")).toBe("Ostrander starts");
-    // the subject's own first name, shared with the other player, names nobody else
-    const josh = keys("Josh Ostrander");
-    const jacobs = [keys("Josh Jacobs")];
-    expect(
-      partsAbout(t("Josh Ostrander (ankle) ruled out"), josh, jacobs)?.untrusted_text.value,
-    ).toBe("Josh Ostrander (ankle) ruled out");
-    // a first name that is an English word too is no key ("will" is in every other clause)
-    expect(nameKeysOf("Will Quist")?.given).toBeNull();
-    expect(
-      partsAbout(t("Ostrander will start"), him, [keys("Will Quist")])?.untrusted_text.value,
-    ).toBe("Ostrander will start");
-  });
-
-  it("a player around him (no matcher ref) counts only where written as a name: capitalised", () => {
-    const lock = [keys("Drew Lock")];
-    expect(namedIn("Cleared to play: move him out of IR before Thursday's lock", lock)).toEqual([]);
-    expect(namedIn("With Lock (knee) out, he starts", lock)).toEqual(lock);
-    expect(namedIn("LOCK OUT; he starts", lock)).toEqual(lock);
-    expect(namedIn("Lock's knee", lock)).toEqual(lock);
-  });
-
-  it("names are read as the matcher folds them: possessive, hyphen, spacing, suffix, case", () => {
-    const jsn = keys("Jaxon Smith-Njigba");
-    expect(nameKeysOf("James Cook III")).toEqual({
-      surname: "cook",
-      whole: "jamescook",
-      given: "james",
-      tokens: ["james", "cook"],
-    });
-    expect(
-      partsAbout(t("SMITH NJIGBA OUT, Ostrander to start"), him, [jsn])?.untrusted_text.value,
-    ).toBe("Ostrander to start");
-    expect(
-      partsAbout(t("Smith-Njigba's ankle; Ostrander's day"), him, [jsn])?.untrusted_text.value,
-    ).toBe("Ostrander's day");
-    expect(partsAbout(t("Quist/Ostrander ruled out"), him, quist)).toBeNull();
-    expect(nameKeysOf("X")).toBeNull();
-    expect(nameKeysOf("Игорь Петров")).toBeNull();
-  });
-});
 
 let world: World;
 let client: Client;
@@ -252,9 +104,20 @@ function withNews(item: Omit<NewsItem, "id" | "source" | "published_at" | "url">
   };
 }
 
-async function evidence(
-  services: McpServices,
-): Promise<{ flag: string; claims: string[]; warnings: string[] }> {
+interface Ambiguous {
+  source: string;
+  claim: { untrusted_text: { value: string; source: string } };
+  type: string;
+  direction: string;
+}
+
+async function evidence(services: McpServices): Promise<{
+  flag: string;
+  claims: string[];
+  warnings: string[];
+  evidence: { source: string; type: string; claim: { untrusted_text: { value: string } } }[];
+  ambiguous: Ambiguous[];
+}> {
   const c = await connect(world, { options: { toolset: "full" }, services });
   logged = [];
   try {
@@ -262,60 +125,85 @@ async function evidence(
       player: { player_ids: [subject.id] },
     });
     expect(r.isError, JSON.stringify(r.body).slice(0, 400)).toBe(false);
+    // every third-party string of the answer is wrapped or listed (the A6 walk), the label's too
+    expect(envelopeViolations(r.body as never)).toEqual([]);
+    const data = r.body.data as {
+      flag: string;
+      evidence: { source: string; type: string; claim: { untrusted_text: { value: string } } }[];
+      ambiguous_multi_player: Ambiguous[];
+    };
     return {
-      flag: (r.body.data as { flag: string }).flag,
+      flag: data.flag,
       // this call's logged claims (every one is about the subject: E10 logs only for him)
       claims: logged.map((x) => {
         expect(x.player_id).toBe(subject.id);
         return `${x.type}:${x.signal}`;
       }),
       warnings: r.body.warnings as string[],
+      evidence: data.evidence,
+      ambiguous: data.ambiguous_multi_player,
     };
   } finally {
     await c.close();
   }
 }
 
+const T = (s: string) => wrapUntrusted(s, "rss.rotowire.title");
+const B = (s: string) => wrapUntrusted(s, "rss.rotowire.blurb");
+const surname = (n: string) => n.split(" ").at(-1) ?? n;
+/** The claims that would move his availability or health (a role claim of his own may stand). */
+const health = (claims: readonly string[]) =>
+  claims.filter((c) => c.startsWith("availability:") || c.startsWith("health:"));
+/** His news evidence items (the fixture's own ESPN outlook is an item of his too). */
+const newsItems = (e: Awaited<ReturnType<typeof evidence>>["evidence"]) =>
+  e.filter((x) => x.source.startsWith("rss."));
+/** The evidence items (his) that carry an availability or health claim. */
+const healthItems = (e: Awaited<ReturnType<typeof evidence>>["evidence"]) =>
+  e.filter((x) => x.type === "availability" || x.type === "health");
+
 describe("E10 on a multi-player item (the tool)", () => {
-  it("a teammate's 'ruled out' is no claim about him: no availability_conflict, no 'out' logged", async () => {
-    const surname = subject.name.split(" ").at(-1) ?? subject.name;
+  it("a teammate's 'ruled out' is no claim about him: no conflict, nothing logged — listed ambiguous", async () => {
     const got = await evidence(
       withNews({
-        title: wrapUntrusted(
-          `Teammate Quist (ankle) ruled out for Sunday; ${surname} to start`,
-          "rss.rotowire.title",
-        ),
-        blurb: wrapUntrusted("Quist will not play.", "rss.rotowire.blurb"),
+        title: T(`Teammate Quist (ankle) ruled out for Sunday; ${surname(subject.name)} to start`),
+        blurb: B("Quist will not play."),
         gsis_ids: [subject.gsis, "00-0099998"],
       }),
     );
     expect(got.flag).not.toBe("availability_conflict");
-    expect(got.claims.filter((c) => c.endsWith(":out"))).toEqual([]);
-    // its other player's name cannot be read (no crosswalk pair): not read for him at all
-    expect(got.warnings).toContain(
-      "1 news item(s) also name other players: only their parts naming this player alone are read (1 with none, or whose other players cannot be named, skipped)",
-    );
+    expect(got.claims).toEqual([]);
+    expect(newsItems(got.evidence)).toEqual([]);
+    // its other player's name cannot be read (no crosswalk pair): nothing in it is tied to him —
+    // every claim of it is shown, wrapped under its own source, under the label
+    expect(got.ambiguous.map((a) => [a.source, a.claim.untrusted_text.value, a.type])).toEqual([
+      ["rss.rotowire.title", "Teammate Quist (ankle) ruled out for Sunday;", "availability"],
+      ["rss.rotowire.title", `${surname(subject.name)} to start`, "role"],
+      ["rss.rotowire.blurb", "Quist will not play.", "availability"],
+    ]);
+    for (const a of got.ambiguous) expect(a.claim.untrusted_text.source).toBe(a.source);
+    expect(got.warnings).toContain(`1 news item(s) also name other players: ${MULTI_PLAYER_RULE}`);
   }, 60_000);
 
-  it("control: the same words about him alone are his claim (availability_conflict)", async () => {
+  it("control: the same words about him alone are his claim (availability_conflict, logged)", async () => {
     const got = await evidence(
       withNews({
-        title: wrapUntrusted(`${subject.name} (ankle) ruled out for Sunday`, "rss.rotowire.title"),
-        blurb: wrapUntrusted("He will not play.", "rss.rotowire.blurb"),
+        title: T(`${subject.name} (ankle) ruled out for Sunday`),
+        blurb: B("He will not play."),
         gsis_ids: [subject.gsis],
       }),
     );
     expect(got.flag).toBe("availability_conflict");
+    expect(got.claims).toContain("availability:out");
+    expect(got.ambiguous).toEqual([]);
   }, 60_000);
 });
 
-// Attempt 2 (the verifier: the clause fix held only for the exact repro). A teammate's claim and the
-// subject's name in ONE clause — a comma, "and", "after", "so" — was still read as his; and an item
-// whose other player has no gsis pair (named by ESPN id only in its refs) was read as his alone.
-describe("E10 on a multi-player item: the wording does not move a teammate's claim onto him", () => {
-  const T = (s: string) => wrapUntrusted(s, "rss.rotowire.title");
-  const B = (s: string) => wrapUntrusted(s, "rss.rotowire.blurb");
-  const variants: readonly [string, (s: string, o: string) => [string, string]][] = [
+// Every wording the three verification rounds produced, through the tool: two crosswalked refs, the
+// teammate's claim in the subject's clause (a comma, "and", one clause, "so", a possessive), the
+// teammate as a pronoun (round 2), the teammate as a noun phrase in the subject's own phrase (round 3).
+describe("E10 on a multi-player item: no wording moves a teammate's claim onto him", () => {
+  // [label, the item, whether the teammate's part carries a status claim of its own to list]
+  const variants: readonly [string, (s: string, o: string) => [string, string], boolean?][] = [
     ["a comma", (s, o) => [`${o} (ankle) ruled out for Sunday, ${s} to start`, ""]],
     ["'and'", (s, o) => [`${o} (ankle) ruled out and ${s} to start`, ""]],
     ["one clause", (s, o) => [`With ${o} ruled out Sunday ${s} gets the start`, ""]],
@@ -324,11 +212,11 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
       (s, o) => [`Injury update`, `${o} will not play Sunday, so ${s} draws the start.`],
     ],
     ["a possessive", (s, o) => [`${s} starts with ${o}'s ankle injury ruling him out`, ""]],
-    // round 3 (the verifier): the teammate is a pronoun in the subject's own clause
+    // round 2: the teammate is a pronoun in the subject's own clause
     [
       "'with him sidelined'",
       (s, o) => [
-        `${s.split(" ").at(-1) ?? s} in line for start`,
+        `${surname(s)} in line for start`,
         `${o} (ankle) was ruled out for Sunday's game against the opponent. With him sidelined, ${s} figures to start.`,
       ],
     ],
@@ -340,19 +228,79 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
       "'now that he is sidelined'",
       (s, o) => [`${o} was ruled out. ${s} steps in now that he is sidelined.`, ""],
     ],
+    [
+      "A3 'will start with him sidelined'",
+      (s, o) => [`${o} (ankle) won't play Sunday`, `${surname(s)} will start with him sidelined.`],
+    ],
+    [
+      "A5 'because he was placed on IR'",
+      (s, o) => [
+        `${o} (knee) hurt Sunday`,
+        `${surname(s)} will start because he was placed on injured reserve.`,
+      ],
+      // "hurt" is no rule: the teammate's part has no claim to list
+      false,
+    ],
+    // round 3: the teammate is a noun phrase in the subject's own phrase
+    [
+      "T1 'steps in for the sidelined starter'",
+      (s, o) => [
+        `${o} (ankle) ruled out for Sunday`,
+        `${surname(s)} steps in for the sidelined starter.`,
+      ],
+    ],
+    [
+      "T2 'takes over for the ruled out lead back'",
+      (s, o) => [
+        `${o} (ankle) won't play Sunday`,
+        `${surname(s)} takes over for the ruled out lead back.`,
+      ],
+    ],
+    [
+      "T3 'replaces the back who was ruled out'",
+      (s, o) => [
+        `${o} (ankle) limited Thursday`,
+        `${surname(s)} replaces the back who was ruled out.`,
+      ],
+    ],
+    [
+      "T4 'starts for the starter placed on injured reserve'",
+      (s, o) => [
+        `${o} (knee) hurt Sunday`,
+        `${surname(s)} starts for the starter placed on injured reserve.`,
+      ],
+    ],
+    [
+      "T5 title only",
+      (s, o) => [`${surname(o)} (ankle) out; ${surname(s)} replaces sidelined veteran`, ""],
+    ],
+    [
+      "the pipeline's noun blurb",
+      (s, o) => [
+        `${o}: Ruled out for Week 5`,
+        `${surname(o)} (ankle) was ruled out for Sunday's game against the opponent. ${s} steps in for the sidelined starter.`,
+      ],
+    ],
+    [
+      "the pipeline's noun title",
+      (s, o) => [`${o} won't play Sunday; ${s} takes over for the ruled out veteran`, ""],
+    ],
   ];
-  /** The claims that would move his availability or health (a role claim of his own may stand). */
-  const health = (claims: readonly string[]) =>
-    claims.filter((c) => c.startsWith("availability:") || c.startsWith("health:"));
   it.each(variants)(
     "%s",
-    async (_label, make) => {
+    async (_label, make, listed = true) => {
       const [title, blurb] = make(subject.name, other.name);
       const got = await evidence(
         withNews({ title: T(title), blurb: B(blurb), gsis_ids: [subject.gsis, other.gsis] }),
       );
       expect(got.flag, title).not.toBe("availability_conflict");
       expect(health(got.claims), title).toEqual([]);
+      expect(healthItems(got.evidence), title).toEqual([]);
+      // the teammate's status claim is shown, under the label
+      expect(
+        got.ambiguous.some((a) => a.type === "availability" || a.type === "health"),
+        title,
+      ).toBe(listed);
     },
     60_000,
   );
@@ -370,13 +318,14 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
     const got = await evidence(withNews(item));
     expect(got.flag).not.toBe("availability_conflict");
     expect(health(got.claims)).toEqual([]);
+    expect(got.ambiguous.length).toBeGreaterThan(0);
   }, 60_000);
 
-  it("a teammate the matcher did not ref (his surname alone, no team named) counts too", async () => {
-    // a real NFL teammate of the subject from the local player index; the item refs the subject only
+  /** A real NFL teammate of the subject from the local player index, by surname. */
+  function teammate(): string {
     const index = world.services.playerUniverse.all(SEASON).rows;
     const team = index.find((r) => r.espn_id === subject.id)?.pro_team_id ?? 0;
-    const surname = (n: string) => n.split(" ").at(-1) ?? n;
+    expect(team).toBeGreaterThan(0);
     const mate = index.find(
       (r) =>
         r.pro_team_id === team &&
@@ -385,32 +334,75 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
         surname(r.full_name) !== surname(subject.name) &&
         /^[A-Z][a-z]{3,}$/.test(surname(r.full_name)),
     );
-    expect(team).toBeGreaterThan(0);
     if (mate === undefined) throw new Error("no teammate in the index");
+    return surname(mate.full_name);
+  }
+
+  it("a teammate the matcher did not ref (his surname alone, no team named) counts too", async () => {
+    const m = teammate();
     const got = await evidence(
       withNews({
-        title: T(`${surname(mate.full_name)} (ankle) ruled out; ${subject.name} to start`),
-        blurb: B(`${surname(mate.full_name)} will not play.`),
+        title: T(`${m} (ankle) ruled out; ${subject.name} to start`),
+        blurb: B(`${m} will not play.`),
         gsis_ids: [subject.gsis],
       }),
     );
     expect(got.flag).not.toBe("availability_conflict");
     expect(health(got.claims)).toEqual([]);
+    // his own clause stays his (the role claim), the teammate's are listed
+    expect(got.claims).toEqual(["role:up"]);
+    expect(got.ambiguous.map((a) => a.claim.untrusted_text.value)).toEqual([
+      `${m} (ankle) ruled out;`,
+      `${m} will not play.`,
+    ]);
+  }, 60_000);
+
+  it("B1: a teammate outside ESPN's index (a lineman on the weekly roster) counts too", async () => {
+    // the subject's NFL team as nflverse spells it, and a lineman of that team on its weekly roster
+    const own = world.services.rosterWeekly.byEspnId(subject.id).rows[0];
+    if (own === undefined) throw new Error("the subject has no weekly-roster row");
+    const real = world.services.rosterWeekly;
+    const lineman: NflRosterPlayer = {
+      gsis_id: "00-0099997",
+      season: SEASON,
+      week: own.week,
+      full_name: "Orlando Fenwick",
+      team: own.team,
+      position: "T",
+      jersey_number: 71,
+      espn_id: null,
+      sleeper_id: null,
+      status: "ACT",
+    };
+    const base = withNews({
+      title: T(`${surname(subject.name)} faces tougher sledding`),
+      blurb: B(
+        `Left tackle Orlando Fenwick (knee) was ruled out, so ${surname(subject.name)} may see stacked boxes.`,
+      ),
+      gsis_ids: [subject.gsis],
+    });
+    const services: McpServices = {
+      ...base,
+      rosterWeekly: {
+        latest: (season) => {
+          const r = real.latest(season);
+          return { ...r, rows: [...r.rows, lineman] };
+        },
+        byEspnId: (id) => real.byEspnId(id),
+      },
+    };
+    const got = await evidence(services);
+    expect(got.flag).not.toBe("availability_conflict");
+    expect(health(got.claims)).toEqual([]);
+    expect(got.ambiguous.map((a) => a.claim.untrusted_text.value)).toEqual([
+      `Left tackle Orlando Fenwick (knee) was ruled out, so ${surname(subject.name)} may see stacked boxes.`,
+    ]);
+    // control: without the roster row the item names no other player, so it is read whole as his
+    const bare = await evidence(base);
+    expect(bare.flag).toBe("availability_conflict");
   }, 60_000);
 
   it("his own ESPN outlook naming a teammate: the teammate's claim is not his (the control is)", async () => {
-    const index = world.services.playerUniverse.all(SEASON).rows;
-    const team = index.find((r) => r.espn_id === subject.id)?.pro_team_id ?? 0;
-    const surname = (n: string) => n.split(" ").at(-1) ?? n;
-    const mate = index.find(
-      (r) =>
-        r.pro_team_id === team &&
-        r.espn_id > 0 &&
-        r.espn_id !== subject.id &&
-        surname(r.full_name) !== surname(subject.name) &&
-        /^[A-Z][a-z]{3,}$/.test(surname(r.full_name)),
-    );
-    if (mate === undefined) throw new Error("no teammate in the index");
     const outlook = (text: string): McpServices => {
       const base = withNews({ title: T("League notes"), blurb: B(""), gsis_ids: [] });
       const inner = base.platform;
@@ -437,29 +429,33 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
       });
       return { ...base, platform };
     };
-    const m = surname(mate.full_name);
+    const m = teammate();
     const s = surname(subject.name);
-    const got = await evidence(outlook(`With ${m} sidelined, ${s} should see more work.`));
-    expect(got.flag).not.toBe("availability_conflict");
-    expect(health(got.claims)).toEqual([]);
-    // round 3: the teammate as a pronoun in the outlook's sentence about him
     for (const text of [
+      `With ${m} sidelined, ${s} should see more work.`,
+      // round 2: the teammate as a pronoun in the outlook's sentence about him
       `${m} (ankle) is out for the week. With him sidelined, ${s} should see more work.`,
       `${m} was ruled out. ${s} steps in now that he is sidelined.`,
+      // round 3: the teammate as a noun phrase in the subject's own sentence
+      `${m} (ankle) is out for the week. ${s} replaces the sidelined veteran.`,
+      `${m} was ruled out. ${s} fills in for the ruled out starter.`,
     ]) {
-      const p = await evidence(outlook(text));
-      expect(p.flag, text).not.toBe("availability_conflict");
-      expect(health(p.claims), text).toEqual([]);
+      const got = await evidence(outlook(text));
+      expect(got.flag, text).not.toBe("availability_conflict");
+      expect(health(got.claims), text).toEqual([]);
+      expect(got.ambiguous.length, text).toBeGreaterThan(0);
+      for (const a of got.ambiguous) expect(a.source, text).toBe("espn.player.outlook");
+      expect(got.warnings, text).toContain(
+        `1 ESPN outlook text(s) also name other players: ${MULTI_PLAYER_RULE}`,
+      );
     }
-    expect(got.warnings).toContain(
-      "1 ESPN outlook text(s) also name other players: only their parts naming this player alone are read",
-    );
     // control: the same claim about him alone is his
     const own = await evidence(outlook(`${s} was ruled out for Sunday.`));
     expect(own.flag).toBe("availability_conflict");
-  }, 60_000);
+    expect(own.ambiguous).toEqual([]);
+  }, 120_000);
 
-  it("an item whose other player's name cannot be read is not read for him at all", async () => {
+  it("an item whose other player's name cannot be read ties nothing to him", async () => {
     const got = await evidence(
       withNews({
         title: T(`Quist (ankle) ruled out, ${subject.name} to start`),
@@ -469,30 +465,43 @@ describe("E10 on a multi-player item: the wording does not move a teammate's cla
     );
     expect(got.flag).not.toBe("availability_conflict");
     expect(got.claims).toEqual([]);
+    expect(got.ambiguous.map((a) => a.claim.untrusted_text.value)).toEqual([
+      `Quist (ankle) ruled out, ${subject.name} to start`,
+    ]);
   }, 60_000);
 
-  it.each([
-    [
-      "his own clause",
-      (s: string, o: string) => `${o} to start; ${s} (ankle) ruled out for Sunday`,
-    ],
-    [
-      "his own phrase",
-      (s: string, o: string) => `${o} to start, ${s} (ankle) ruled out for Sunday`,
-    ],
-  ])(
-    "control — %s in a multi-player item is still his claim",
-    async (_label, make) => {
-      const got = await evidence(
-        withNews({
-          title: T(make(subject.name, other.name)),
-          blurb: B(""),
-          gsis_ids: [subject.gsis, other.gsis],
-        }),
-      );
-      expect(got.flag).toBe("availability_conflict");
-      expect(got.claims).toContain("availability:out");
-    },
-    60_000,
-  );
+  it("control — his own clause in a multi-player item is still his claim", async () => {
+    const got = await evidence(
+      withNews({
+        title: T(`${other.name} to start; ${subject.name} (ankle) ruled out for Sunday`),
+        blurb: B(""),
+        gsis_ids: [subject.gsis, other.gsis],
+      }),
+    );
+    expect(got.flag).toBe("availability_conflict");
+    expect(got.claims).toContain("availability:out");
+    expect(newsItems(got.evidence).map((e) => e.claim.untrusted_text.value)).toEqual([
+      `${subject.name} (ankle) ruled out for Sunday`,
+    ]);
+    expect(got.ambiguous.map((a) => a.claim.untrusted_text.value)).toEqual([
+      `${other.name} to start;`,
+    ]);
+  }, 60_000);
+
+  it("fail safe — his own claim in a clause that also names the other is not tied to him", async () => {
+    // attempt 3 kept this as his ("his own phrase"); under R7-4 a clause naming another player is
+    // never certain, so it is listed, never weighed
+    const got = await evidence(
+      withNews({
+        title: T(`${other.name} to start, ${subject.name} (ankle) ruled out for Sunday`),
+        blurb: B(""),
+        gsis_ids: [subject.gsis, other.gsis],
+      }),
+    );
+    expect(got.flag).not.toBe("availability_conflict");
+    expect(got.claims).toEqual([]);
+    expect(got.ambiguous.map((a) => a.claim.untrusted_text.value)).toEqual([
+      `${other.name} to start, ${subject.name} (ankle) ruled out for Sunday`,
+    ]);
+  }, 60_000);
 });

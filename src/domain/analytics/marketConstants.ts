@@ -248,6 +248,11 @@ export const EVIDENCE = Object.freeze({
   roleConfirmShare: 0.05,
   /** Evidence items one result carries. */
   maxEvidence: 12,
+  /**
+   * `ambiguous_multi_player` claims one result shows (Stage C ruling R7-4: a claim in a text naming
+   * other players that cannot be tied to the subject — shown, never weighed).
+   */
+  maxAmbiguous: 8,
 });
 
 // --- E11 league activity (plan 07 E11) ------------------------------------------------------------------

@@ -1,13 +1,24 @@
 // index.ts — the evidence domain (plan 07 D6 claim extract, E10 deterministic parts; research 05 §6;
 // plan 02 §6.4; plan 10 B8): the `rules_v1` claim extractor, the hand-set source reliability model,
 // the structured-field comparator, the stored-row → `NewsItem` wrapper, and (Phase 3, plan 10 §3.3
-// C8) the per-source calibration table with E10's posterior over it. Pure; no I/O.
+// C8) the per-source calibration table with E10's posterior over it, and (Stage C, ruling R7-4)
+// which claims of a text that names more than one player are the subject's. Pure; no I/O.
+export {
+  CLAUSE_SPLIT,
+  clauseClaims,
+  nameKeysOf,
+  namedIn,
+  statesOfSubject,
+  type ClauseClaim,
+  type NameKeys,
+} from "./attribution.js";
 export {
   availabilityClass,
   CLAIM_DIRECTIONS,
   CLAIM_TEXT_CAP,
   CLAIM_TYPES,
   claimFold,
+  claimHit,
   DESIGNATIONS,
   extractClaim,
   extractItemClaim,

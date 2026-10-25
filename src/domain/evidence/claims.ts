@@ -565,11 +565,26 @@ export function extractClaim(
   text: string | null | undefined,
   field: RulesV1Claim["field"] = "text",
 ): RulesV1Claim | null {
+  return claimHit(text, field)?.claim ?? null;
+}
+
+/**
+ * The claim of one text (exactly `extractClaim`'s) and where its words start in `claimFold(text)`:
+ * the earliest hit's position (a rule that wins on table order from inside that phrase reads the same
+ * words). What E10's attribution reads to see whether a clause states the claim of the player it
+ * opens with (src/domain/evidence/attribution.ts). Null when no rule fires.
+ */
+export function claimHit(
+  text: string | null | undefined,
+  field: RulesV1Claim["field"] = "text",
+): { readonly claim: RulesV1Claim; readonly at: number } | null {
   if (typeof text !== "string" || text.length === 0) return null;
-  const first = winner(hitsOf(claimFold(text)));
-  if (first === undefined) return null;
-  const r = first.rule;
-  return Object.freeze({
+  const hits = hitsOf(claimFold(text));
+  const best = winner(hits);
+  const start = hits[0];
+  if (best === undefined || start === undefined) return null;
+  const r = best.rule;
+  const claim = Object.freeze({
     type: r.type,
     direction: r.direction,
     extractor: RULES_V1,
@@ -577,6 +592,7 @@ export function extractClaim(
     designation: r.designation,
     field,
   });
+  return { claim, at: start.index };
 }
 
 /**
