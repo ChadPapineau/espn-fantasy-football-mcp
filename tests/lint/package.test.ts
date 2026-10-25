@@ -81,7 +81,9 @@ describe("package.json", () => {
 
   it("has exactly the four planned runtime dependencies at the plan 04 §2 versions", () => {
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(RUNTIME);
-    expect(pkg.dependencies?.["@modelcontextprotocol/server"]).toBe("2.2.0");
+    // 2.2.0 → 2.3.1 on 2026-10-25 (GHSA-jm63-cq47-j5jp, GHSA-46jr-4wx8-v453, GHSA-rvq5-wwqv-78pq),
+    // reviewed in docs/plan/changelog.md "Reviews"
+    expect(pkg.dependencies?.["@modelcontextprotocol/server"]).toBe("2.3.1");
     expect(pkg.dependencies?.hyparquet).toBe("1.31.2");
     expect(pkg.dependencies?.["@napi-rs/keyring"]).toBe("2.1.0");
   });
@@ -208,7 +210,16 @@ describe("the runtime allow-list (plan 04 §2, §4.1)", () => {
     for (const name of RUNTIME) {
       expect(allow.packages, name).toContain(`${name}@${pkg.dependencies?.[name] ?? "?"}`);
     }
-    expect(allow.packages).toContain("@modelcontextprotocol/core@2.2.0");
+    // the SDK ships in lockstep: core at the server's exact version, in the allow-list, in the
+    // lockfile and in the server's own dependency on it (plan 04 §2)
+    const sdk = pkg.dependencies?.["@modelcontextprotocol/server"] ?? "?";
+    expect(allow.packages).toContain(`@modelcontextprotocol/core@${sdk}`);
+    expect(lock.packages["node_modules/@modelcontextprotocol/core"]?.version).toBe(sdk);
+    expect(
+      lock.packages["node_modules/@modelcontextprotocol/server"]?.dependencies?.[
+        "@modelcontextprotocol/core"
+      ],
+    ).toBe(sdk);
   });
 
   it("oneOf is exactly the keyring's twelve optional platform packages, at its version", () => {

@@ -2,11 +2,11 @@
   "$comment": "The FULL runtime tree (plan 04 §2, §4.1, R11): exactly `packages` plus exactly ONE of `oneOf` (the @napi-rs/keyring prebuilt platform package npm selects for the OS/CPU/libc). count = packages + 1. Changing this file is a reviewed decision: a new row in plan 04 §2 first.",
   "count": 6,
   "packages": [
-    "@modelcontextprotocol/core@2.2.0",
-    "@modelcontextprotocol/server@2.2.0",
+    "@modelcontextprotocol/core@2.3.1",
+    "@modelcontextprotocol/server@2.3.1",
     "@napi-rs/keyring@2.1.0",
     "hyparquet@1.31.2",
-    "zod@4.6.5"
+    "zod@4.6.7"
   ],
   "oneOf": [
     "@napi-rs/keyring-darwin-arm64@2.1.0",

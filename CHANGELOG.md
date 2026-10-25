@@ -12,7 +12,7 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 - **Scaffold and supply chain (plan 04 §1–§2).** `.npmrc` (`ignore-scripts`, `save-exact`,
   `engine-strict`, `audit`), `.nvmrc` (Node 24.21.0; engines `>=24.15`), `package.json` with exactly
-  four runtime dependencies pinned exactly — `@modelcontextprotocol/server` 2.2.0, `zod` 4.6.5 (the
+  four runtime dependencies pinned exactly — `@modelcontextprotocol/server` 2.3.1, `zod` 4.6.7 (the
   one zod the SDK resolves), `hyparquet` 1.31.2, `@napi-rs/keyring` 2.1.0 — and a committed
   lockfile; runtime tree of 6 packages held exactly by `scripts/ci/runtime-allowlist.json`.
 - **TypeScript, lint, format, tests (plan 04 §3, plan 05 §1, §7).** Strict `tsconfig` (NodeNext,
@@ -185,3 +185,14 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   instead of re-reading the season's schedule on every read, a large fresh body yields between its
   parse, drift check, schema check and cache strip, and the heavier P1 tools yield between their
   synchronous steps (measured 37 ms worst case against the 50 ms bound).
+
+### Security
+
+- **The MCP SDK 2.2.0 → 2.3.1** (`@modelcontextprotocol/server` with `core`, and the dev
+  `@modelcontextprotocol/client`): GHSA-jm63-cq47-j5jp, GHSA-46jr-4wx8-v453, GHSA-rvq5-wwqv-78pq
+  and GHSA-6prh-2h8m-c8cw, all in HTTP-transport, bearer-auth or redirect code that this stdio
+  server never runs. **`zod` 4.6.5 → 4.6.7**: GHSA-mrhx-c7xc-m3w5 (an over-long array, map or set
+  was parsed element by element before its size check failed). Both bumps were reviewed statically
+  (diff, install scripts, dependencies, provenance, licence) and are recorded in
+  `docs/plan/changelog.md` "Reviews"; the runtime tree keeps its six names, and a test holds the
+  lockfile out of the advisories' ranges offline.

@@ -191,13 +191,16 @@ describe("check-runtime-tree CLI", () => {
       packages: string[];
       oneOf: string[];
     };
-    const packages = committed.packages.filter((p) => !p.startsWith("@modelcontextprotocol/core@"));
+    // the installed core, at whatever exact version the committed allow-list pins it
+    const core = committed.packages.find((p) => p.startsWith("@modelcontextprotocol/core@"));
+    expect(core).toMatch(/^@modelcontextprotocol\/core@\d+\.\d+\.\d+$/);
+    const packages = committed.packages.filter((p) => p !== core);
     writeTree(tmp.dir, {
       "allow.json": { count: packages.length + 1, packages, oneOf: committed.oneOf },
     });
     const r = runCheck("check-runtime-tree.mjs", ["--allowlist", path.join(tmp.dir, "allow.json")]);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("not on the allow-list: @modelcontextprotocol/core@2.2.0");
+    expect(r.stderr).toContain(`not on the allow-list: ${String(core)}`);
   });
 
   it("exits 2 on a malformed allow-list", () => {
