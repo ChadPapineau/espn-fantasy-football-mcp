@@ -11,6 +11,7 @@ import {
   fingerprintOf,
   formatRefusalText,
   normalizePastedValue,
+  swidEchoShape,
   validateCookies,
   validateEspnS2,
   validateSwid,
@@ -114,6 +115,49 @@ describe("validateEspnS2 (plan 02 §2.1; ADV OBJ-15 thresholds)", () => {
         const ok = validateSwid(v).ok;
         return ok === /^\{[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\}$/.test(v);
       }),
+    );
+  });
+});
+
+// Stage C finding setup-hidden-prompt-echo-burst, ruling R7-3: the SWID question draws a character
+// only while the line can still become a SWID, so an espn_s2 pasted there is never drawn
+describe("swidEchoShape (what the SWID question draws as it is typed)", () => {
+  it("every prefix of a SWID, either case, after blanks and with blanks after it whole", () => {
+    for (let i = 0; i <= swid.length; i++) {
+      expect(swidEchoShape(swid.slice(0, i)), swid.slice(0, i)).toBe(true);
+      expect(swidEchoShape(swid.toLowerCase().slice(0, i))).toBe(true);
+    }
+    expect(swidEchoShape(`  \t${swid}`)).toBe(true);
+    expect(swidEchoShape(`${swid} \t`)).toBe(true);
+    expect(swidEchoShape("")).toBe(true);
+    expect(swidEchoShape("   ")).toBe(true);
+  });
+  it.each([
+    ["espn_s2 (the cookie alphabet has no brace)", s2(80)],
+    ["the GUID without its braces", guid],
+    ["a cookie name before it", `SWID=${swid}`],
+    ["a non-hex character", `${swid.slice(0, 5)}g`],
+    ["a dash out of place", `${swid.slice(0, 3)}-`],
+    ["more after the closing brace", `${swid}x`],
+    ["a second brace", `${swid.slice(0, 9)}{`],
+  ])("%s: not a SWID's shape", (_label, line) => {
+    expect(swidEchoShape(line)).toBe(false);
+  });
+  it("property: a line the shape accepts is a prefix of a valid SWID (blanks aside), and every valid SWID is accepted", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 60, unit: "binary" }), (v) => {
+        if (!swidEchoShape(v)) return true;
+        const core = v.trim();
+        // completed with the rest of a valid SWID, it is one
+        const done = `${core}${swid.slice(core.length)}`;
+        return core.length <= swid.length && validateSwid(done).ok;
+      }),
+    );
+    fc.assert(
+      fc.property(
+        fc.stringMatching(/^\{[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\}$/),
+        (v) => swidEchoShape(v),
+      ),
     );
   });
 });

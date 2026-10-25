@@ -41,6 +41,26 @@ export function normalizePastedValue(raw: string): string {
   return raw.trim();
 }
 
+/** The braced GUID a SWID is, as a template (`x`: a hex digit). */
+const SWID_TEMPLATE = "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}";
+
+/**
+ * Whether a line typed at the SWID question can still become a SWID: blanks, then a prefix of the
+ * braced GUID (either case), then — once it is whole — blanks. `eff setup` draws the SWID as it is
+ * typed only while this holds, so an espn_s2 pasted at the SWID question (the cookie alphabet has no
+ * brace) is never drawn (Stage C finding setup-hidden-prompt-echo-burst, ruling R7-3).
+ */
+export function swidEchoShape(line: string): boolean {
+  const s = line.replace(/^[ \t]+/, "");
+  const core = s.slice(0, SWID_TEMPLATE.length);
+  for (let i = 0; i < core.length; i++) {
+    const t = SWID_TEMPLATE.charAt(i);
+    const ch = core.charAt(i);
+    if (t === "x" ? !/^[0-9A-Fa-f]$/.test(ch) : ch !== t) return false;
+  }
+  return /^[ \t]*$/.test(s.slice(SWID_TEMPLATE.length));
+}
+
 /** SWID: a braced GUID; lowercase hex accepted; braces kept (plan 02 §2.1). */
 export function validateSwid(v: string): FormatVerdict {
   if (v.length <= SWID_MAX_INPUT && SWID_RE.test(v)) return OK;

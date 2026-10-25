@@ -1,6 +1,7 @@
 // setup.test.ts — `eff setup` wiring (plan 03 §2.1, §2.2; plan 02 §2; changelog V8): the hidden
 // prompt (piped input, and a fake terminal — espn_s2 never drawn, even pasted in one burst with the
-// SWID or typed ahead: Stage C finding setup-hidden-prompt-echo-burst), the file and keychain stores (an in-memory
+// SWID or typed ahead: Stage C finding setup-hidden-prompt-echo-burst, ruling R7-3; every variant is
+// in setup-echo.test.ts), the file and keychain stores (an in-memory
 // keyring — never the real keychain), config.json records, the credential_state row, the
 // definitive check over an injected network, `--service-name eff-test-…` (no store.sqlite, no
 // config.json, no network), `--seeding`, `--reset`, `--page` end to end over loopback (it claims
@@ -16,7 +17,7 @@ import type { SetupNetwork } from "../../src/auth/setup.js";
 import type { KeychainSelftestResult } from "../../src/auth/selftest.js";
 import { createInterrupts } from "../../src/cli/interrupt.js";
 import { main } from "../../src/cli/main.js";
-import { PENDING_NOTE, TYPED_AHEAD_NOTE } from "../../src/cli/prompt.js";
+import { DISCARDED_NOTE, TYPED_AHEAD_NOTE } from "../../src/cli/prompt.js";
 import { checkSetupFlags, configPatchOf, fixedAnswers, setup } from "../../src/cli/setup.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openStore } from "../../src/cli/store-access.js";
@@ -398,7 +399,7 @@ function post(url: string, body: string, headers: Record<string, string>): Promi
   });
 }
 
-/** A stdin that says it is a terminal (readline echoes through stdout and sets raw mode on it). */
+/** A stdin that says it is a terminal (the prompt reads its bytes in raw mode). */
 class FakeTty extends PassThrough {
   readonly isTTY = true;
   readonly rawCalls: boolean[] = [];
@@ -409,6 +410,9 @@ class FakeTty extends PassThrough {
 }
 
 // Stage C finding setup-hidden-prompt-echo-burst, end to end through the real prompt on a terminal
+// (ruling R7-3; tests/cli/setup-echo.test.ts holds every variant on fake time): the terminal is taken
+// before anything else and kept with echo off until setup ends; every question is asked on a quiet
+// input, so a burst's espn_s2 is dropped before the hidden question (said) and pasted again at it.
 describe("setup on a terminal (the real prompt): espn_s2 is never drawn", () => {
   const opts = {
     reset: false,
@@ -417,21 +421,29 @@ describe("setup on a terminal (the real prompt): espn_s2 is never drawn", () => 
     serviceName: undefined,
     page: false,
   } as const;
-  it("SWID and espn_s2 pasted in one burst at the SWID question: stored, never drawn", async () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  /** Waits (real time) until `io.out` has printed `text` `n` times. */
+  async function printed(io: TestIo, text: string, n = 1): Promise<void> {
+    for (let i = 0; i < 400 && io.out.text.split(text).length - 1 < n; i++) await sleep(5);
+    expect(io.out.text.split(text).length - 1, text).toBeGreaterThanOrEqual(n);
+  }
+  it("SWID and espn_s2 pasted in one burst at the SWID question: the burst's espn_s2 is dropped, the paste at its own question stored, never drawn", async () => {
     sb = sandbox();
     const stdin = new FakeTty();
     const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, stdin });
     const run = setup(io, opts, { network: network(), selftest: selftest("ok") });
-    for (let i = 0; i < 200 && !io.out.text.includes("SWID (visible"); i++)
-      await new Promise((r) => setTimeout(r, 5));
+    await printed(io, "SWID (visible");
     stdin.write(`${COOKIES.swid}\r${COOKIES.espn_s2}\r`);
+    await printed(io, "espn_s2 (hidden");
+    expect(io.out.text).toContain(`${DISCARDED_NOTE}\nespn_s2 (hidden`);
+    stdin.write(`${COOKIES.espn_s2}\r`);
     expect(await run).toBe(0);
     expect(io.out.text).toContain(`espn_s2 ok (${String(COOKIES.espn_s2.length)} chars)`);
     expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
     expect(io.out.text).not.toContain(TYPED_AHEAD_NOTE);
     expect(stdin.rawCalls).toEqual([true, false]);
   });
-  it("both values typed ahead before setup asks: the terminal is taken first, nothing drawn", async () => {
+  it("both values typed ahead before setup asks: the terminal is taken first, they are dropped unshown and said", async () => {
     sb = sandbox();
     const stdin = new FakeTty();
     const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, stdin });
@@ -440,36 +452,34 @@ describe("setup on a terminal (the real prompt): espn_s2 is never drawn", () => 
     // raw mode before the configuration is even read (the instructions come later)
     expect(stdin.rawCalls).toEqual([true]);
     expect(io.out.text).toBe("");
+    await printed(io, "SWID (visible");
+    // read before the first question: the terminal driver may have shown it — said
+    expect(io.out.text).toContain(`${DISCARDED_NOTE}\n${TYPED_AHEAD_NOTE}\nSWID (visible`);
+    stdin.write(`${COOKIES.swid}\r`);
+    await printed(io, "espn_s2 (hidden");
+    stdin.write(`${COOKIES.espn_s2}\r`);
     expect(await run).toBe(0);
     expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
-    // typed before the process took the terminal: the terminal driver may have shown it — said
-    expect(io.out.text).toContain(TYPED_AHEAD_NOTE);
     expect(stdin.rawCalls).toEqual([true, false]);
   });
   // the variant the first fix left open: the SWID refused (no braces) and espn_s2 in the same paste
-  // with no line break after it — espn_s2 waited, undrawn, in the line the re-asked SWID question
-  // then edited, and Backspace, Ctrl-L, Ctrl-W, Ctrl-_ (undo) or Ctrl-Y (yank) drew it. Now the
-  // hidden question comes first: it takes the waiting espn_s2 (Enter), and the SWID is asked again
-  // only after — its edit keys have nothing of espn_s2 to draw
-  it("a refused SWID pasted with espn_s2 and no final line break: the hidden question takes espn_s2 first; the re-asked SWID draws none of it", async () => {
+  // with no line break after it — readline's line buffer, undo history and kill ring held it, and an
+  // edit key at the re-asked SWID question drew it. There is no line editor now: it is dropped before
+  // the hidden question, and the edit keys at the re-asked SWID have nothing of it to draw
+  it("a refused SWID pasted with espn_s2 and no final line break: dropped before the hidden question; edit keys at the re-asked SWID draw none of it", async () => {
     sb = sandbox();
     const stdin = new FakeTty();
     const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, stdin });
-    const asks = (): number => io.out.text.split("SWID (visible").length - 1;
     const run = setup(io, opts, { network: network(), selftest: selftest("ok") });
-    for (let i = 0; i < 200 && asks() < 1; i++) await new Promise((r) => setTimeout(r, 5));
+    await printed(io, "SWID (visible");
     stdin.write(`${COOKIES.swid.slice(1, -1)}\r${COOKIES.espn_s2}`);
-    for (let i = 0; i < 200 && !io.out.text.includes("espn_s2 (hidden"); i++)
-      await new Promise((r) => setTimeout(r, 5));
-    // the unfinished espn_s2 waits for Enter at its own (hidden) question, and the prompt says so
-    expect(io.out.text).toContain(PENDING_NOTE);
-    expect(asks()).toBe(1);
-    stdin.write("\r");
-    for (let i = 0; i < 400 && asks() < 2; i++) await new Promise((r) => setTimeout(r, 5));
+    await printed(io, "espn_s2 (hidden");
+    stdin.write(`${COOKIES.espn_s2}\r`);
+    await printed(io, "SWID (visible", 2);
     expect(io.out.text).toContain("SWID must keep its braces");
-    // every edit key that redraws, restores or yanks the line
+    // every edit key readline redrew, restored or yanked a line with
     stdin.write("\x7f\x0c\x17\x1f\x1e\x19\x01\x0b\x1b[3~\x1b[D");
-    await new Promise((r) => setTimeout(r, 20));
+    await sleep(20);
     expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
     stdin.write(`\x15${COOKIES.swid}\r`);
     expect(await run).toBe(0);
@@ -477,38 +487,50 @@ describe("setup on a terminal (the real prompt): espn_s2 is never drawn", () => 
     expect(io.out.text).toContain(`espn_s2 ok (${String(COOKIES.espn_s2.length)} chars)`);
     expect(io.out.text.split("espn_s2 (hidden").length - 1).toBe(1);
     expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
-    expect(io.out.text).not.toContain(TYPED_AHEAD_NOTE);
     expect(stdin.rawCalls).toEqual([true, false]);
   });
-  // Round 2 (the verifier): the same paste with its line break, espn_s2 arriving in a LATER read —
-  // a second write 2–100 ms after the first, or the kernel splitting one write past 1 KB. The
-  // re-asked visible SWID question opened within microtasks of the refusal and drew all of it.
+  // Round 2 (the verifier): the same paste with its line break, espn_s2 arriving in a LATER read — a
+  // second write 2–100 ms after the first, or the kernel splitting one write past 1 KB. Round 3: a
+  // pause inside the paste longer than the old quiet window (the re-asked visible question drew it)
   it.each([
     ["a second write 2 ms later", 2, 0],
-    ["a second write 20 ms later", 20, 0],
     ["a second write 100 ms later", 100, 0],
+    ["a second write 400 ms later", 400, 0],
     ["one write split by the kernel past 1 KB", 0, 1024],
   ] as const)(
-    "a refused SWID with espn_s2 in a later read (%s): stored, never drawn",
+    "a refused SWID with espn_s2 in a later read (%s): never drawn, stored once pasted at its question",
     async (_label, gap, split) => {
       sb = sandbox();
       const stdin = new FakeTty();
       const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, stdin });
-      const asks = (): number => io.out.text.split("SWID (visible").length - 1;
       const run = setup(io, opts, { network: network(), selftest: selftest("ok") });
-      for (let i = 0; i < 200 && asks() < 1; i++) await new Promise((r) => setTimeout(r, 5));
+      await printed(io, "SWID (visible");
       const burst = `${COOKIES.swid.slice(1, -1)}\r${COOKIES.espn_s2}\r`;
       const cut = split > 0 ? split : COOKIES.swid.length - 1;
       stdin.write(burst.slice(0, cut));
-      await new Promise((r) => setTimeout(r, gap));
+      await sleep(gap);
       stdin.write(burst.slice(cut));
-      for (let i = 0; i < 400 && asks() < 2; i++) await new Promise((r) => setTimeout(r, 5));
-      expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
-      stdin.write(`${COOKIES.swid}\r`);
+      // answer what the screen asks (as a person would), until setup ends
+      const state = { done: false };
+      const done = (): boolean => state.done;
+      void run.then(() => {
+        state.done = true;
+      });
+      for (let round = 0; round < 6 && !done(); round++) {
+        await sleep(400);
+        if (done()) break;
+        const t = io.out.text;
+        stdin.write(
+          t.lastIndexOf("SWID (visible") > t.lastIndexOf("espn_s2 (hidden")
+            ? `${COOKIES.swid}\r`
+            : `${COOKIES.espn_s2}\r`,
+        );
+      }
       expect(await run).toBe(0);
       expect(io.out.text).toContain(`espn_s2 ok (${String(COOKIES.espn_s2.length)} chars)`);
       expect(containsFragment(io.out.text + io.err.text, COOKIES.espn_s2, 8)).toBe(false);
     },
+    30_000,
   );
   it("--page and --reset never take the terminal (Ctrl-C keeps its meaning there)", async () => {
     sb = sandbox();

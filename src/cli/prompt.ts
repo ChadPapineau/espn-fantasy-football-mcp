@@ -1,38 +1,38 @@
 // prompt.ts — the terminal prompt `eff setup` asks through (plan 03 §2.1 steps 2–3, 8: SWID echoed,
 // espn_s2 with echo OFF — no dependency; each prompt waits 10 minutes; plan 02 §2.3: the value is
-// never printed). Lines are queued as they arrive, so piped input that delivers several answers at
-// once is never lost. History is disabled, so no value is kept in readline's history buffer. Also
-// the y/N confirmation doctor --fix and uninstall ask.
+// never printed). Also the y/N confirmation `eff doctor --fix` and `eff uninstall` ask, and the word
+// `eff tune` asks for. On a pipe, lines are queued as they arrive, so piped input that delivers
+// several answers at once is never lost, and nothing is echoed.
 //
-// The echo rule (Stage C finding setup-hidden-prompt-echo-burst): on a terminal, nothing typed is
-// ever drawn except a key that a VISIBLE question receives while it waits for its own line. Every
-// key is read here (raw mode: the terminal driver does not echo) and routed, as it is read, to
-// exactly one line editor (node:readline, fed key by key as readline feeds itself):
-//  - a visible question gets a fresh editor of its own, drawing on the terminal; it receives only
-//    the keys typed while it waits, up to its line break, and is closed with its line;
-//  - every other key — typed ahead, the rest of a burst after a visible answer, a hidden answer —
-//    goes to one muted editor whose output is discarded, always.
-// So no editor that draws ever holds a key it did not draw: a redraw (Backspace, Ctrl-L, Ctrl-W), an
-// undo (Ctrl-_) or a yank (Ctrl-Y) at a visible question can only show what was typed at it. (The
-// first fix muted one shared editor at the right moments, but that editor kept an unfinished line
-// read while muted — and its undo history and kill ring — and the next visible question drew it on
-// its first edit key: a refused SWID pasted with espn_s2 and no final line break showed espn_s2 on
-// Backspace. Before that, the mute was tied to the time a hidden answer was awaited, so a burst, a
-// line break inside espn_s2, and type-ahead were drawn too.)
-//
-// A visible question that finds an unfinished muted line drops it, unshown, and says so
-// (`DISCARDED_NOTE`); a hidden question takes it as the start of its answer and says it is waiting
-// (`PENDING_NOTE`: a SWID and espn_s2 pasted as two lines with no final line break, then Enter).
+// On a terminal (Stage C finding setup-hidden-prompt-echo-burst, ruling R7-3 — three fixes each
+// closed one paste pattern and the next round found another, so the approach changed):
+//  - ECHO is OFF at the terminal driver for the prompt's whole life: raw mode, taken when `eff setup`
+//    builds the prompt (`takeTerminalNow`) or at the first question, and given back on close. There
+//    is no line editor — no node:readline, so no redraw, no undo, no kill ring, no history: this
+//    module reads the bytes itself and draws nothing it was not asked to.
+//  - Only a VISIBLE question draws, and only the characters typed at it, one by one as they are read
+//    (Backspace and Ctrl-U erase what it drew; every other control key and escape sequence is
+//    ignored). A question that names the shape of its answer (`echo`: the SWID) draws a character
+//    only while the line can still be one, so a value pasted at the wrong question is not drawn
+//    either.
+//  - Every question is asked on a quiet input: whatever was read before it — keys typed ahead, the
+//    rest of an earlier answer's paste — is discarded unshown, and so is every byte that arrives
+//    until the input has been quiet for FLUSH_QUIET_MS (Node has no tcflush; this is how the
+//    terminal's own buffer is drained). Before espn_s2 this is the ruling's "all pending input is
+//    discarded"; before a visible question it keeps the rest of a paste from being typed at it.
+//  - A HIDDEN answer is never drawn. It is refused and asked again when it holds a line break — more
+//    than blanks after its line break, in the same read or within HIDDEN_SETTLE_MS — and when it is
+//    empty, so the rest of a paste meets the hidden question again (after its flush), never a
+//    visible one.
 // Keys typed before this process took the terminal were echoed by the terminal driver itself, which
-// no program can prevent: an answer or a dropped line holding keys read before the first question
-// says so (`TYPED_AHEAD_NOTE`), so the owner can clear the terminal's scrollback. `takeTerminalNow`
-// takes the terminal at construction instead of at the first question. Ctrl-C, and Ctrl-D on an
-// empty line, end the input; Ctrl-Z gives the terminal back and suspends, and SIGCONT takes it again
-// (readline's own suspend would leave raw mode on the terminal it never read, and its resume left
-// the input paused).
-import { createInterface, emitKeypressEvents, type Interface, type Key } from "node:readline";
-import { PassThrough, Writable } from "node:stream";
-import type { PromptAnswer, SetupPrompt } from "../auth/setup.js";
+// no program can prevent: a question that discards keys read before the first question says so
+// (TYPED_AHEAD_NOTE), so the owner can clear the scrollback. Ctrl-C, and Ctrl-D on an empty line at a
+// question, end the input; Ctrl-Z gives the terminal back and suspends, and takes it again right
+// after (and on SIGCONT: readline's own suspend left raw mode on a terminal it no longer read).
+import { createInterface, type Interface } from "node:readline";
+import { Writable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
+import type { AskOptions, PromptAnswer, SetupPrompt } from "../auth/setup.js";
 import { isTty } from "./io.js";
 
 /** A prompt that can be closed (releases stdin so the process can exit). */
@@ -45,45 +45,57 @@ export interface TerminalPrompt extends SetupPrompt {
 /** The default y/N wait. */
 export const CONFIRM_TIMEOUT_MS = 5 * 60_000;
 
-/** Most lines kept while no question waits (piped input with several answers). */
+/** Most lines kept while no question waits (a pipe with several answers). */
 export const MAX_QUEUED_LINES = 16;
 
 /**
- * Said on a terminal when a hidden answer, or a dropped unfinished line, holds keys typed before the
- * first question was asked: keys typed before this process took the terminal were echoed by the
- * terminal driver, not by us.
+ * Said on a terminal when a question discards keys read before the first question was asked: keys
+ * typed before this process took the terminal were echoed by the terminal driver, not by us.
  */
 export const TYPED_AHEAD_NOTE =
   "(typed before the first question: if the terminal showed it as you typed, clear this terminal's scrollback and any session log)";
 
 /**
- * Said on a terminal when a visible question drops keys it did not draw: an unfinished line typed
- * while no visible question waited, or the rest of a burst still arriving when it was asked (never
- * drawn, so it cannot be edited where it would be seen).
+ * Said on a terminal when a question discards keys that reached it before it was asked (typed
+ * ahead, or the rest of an earlier paste still arriving): never drawn, never an answer.
  */
 export const DISCARDED_NOTE =
   "(keys that reached this question before it was asked were dropped unshown: answer here, and paste anything else again when it is asked for)";
 
-/**
- * How long the input must have been quiet before a visible question draws: a question asked while
- * keys are still arriving (the rest of a paste, a read the kernel split, a second write of one
- * selection) keeps them muted until this long passes with no key, then drops them unshown — no
- * person reads a new question and types at it this fast (Stage C finding
- * setup-hidden-prompt-echo-burst: a refused SWID pasted with espn_s2, espn_s2 a read later, was
- * drawn in full by the re-asked SWID question).
- */
-export const BURST_QUIET_MS = 150;
+/** Said when a hidden answer is refused for a line break: nothing of it was kept. */
+export const HIDDEN_REFUSED_NOTE =
+  "(that paste held a line break or more than one value: nothing of it was kept — paste the value alone, then press Enter)";
+
+/** Said when a hidden answer is refused because nothing was entered. */
+export const HIDDEN_EMPTY_NOTE = "(nothing was entered: paste the value, then press Enter)";
+
+/** Said when a visible answer held characters its question did not draw (not its shape). */
+export const NOT_SHOWN_NOTE =
+  "(the rest of that line was not shown: it is not the shape this question asks for)";
 
 /**
- * Said on a terminal when a hidden question finds an unfinished line typed while no visible question
- * waited: it becomes the start of this answer (a SWID and espn_s2 pasted as two lines with no final
- * line break), so pasting the value again would double it.
+ * How long the input must have been quiet before a question is asked: until then every byte read is
+ * discarded. No person reads a new question and answers it this fast; the rest of one paste (a read
+ * the kernel split, a slow link) arrives within it.
  */
-export const PENDING_NOTE =
-  "(keys typed before this question are waiting, unshown: press Enter to use them, or Ctrl-U and paste again)";
+export const FLUSH_QUIET_MS = 250;
 
-/** readline's window for the LF of a CR LF pair (its `crlfDelay` default and minimum). */
+/** The longest a question waits for the input to go quiet (keys still arriving are then its own). */
+export const FLUSH_MAX_MS = 5_000;
+
+/** How long after a hidden answer's line break more input refuses it (the rest of a paste). */
+export const HIDDEN_SETTLE_MS = 250;
+
+/** The longest line kept; characters past it are ignored (espn_s2 is at most 4096). */
+export const MAX_LINE_CHARS = 16_384;
+
+/** The window for the LF of a CR LF pair arriving in a later read (readline's `crlfDelay`). */
 const CRLF_DELAY_MS = 100;
+
+/** A y/N answer's shape: a prefix of yes or no (confirm draws nothing else). */
+export function yesNoShape(line: string): boolean {
+  return /^[ \t]*(?:y(?:e(?:s)?)?|n(?:o)?)?[ \t]*$/i.test(line);
+}
 
 /** An output that draws nothing. */
 function nowhere(): Writable {
@@ -94,75 +106,167 @@ function nowhere(): Writable {
   });
 }
 
-/** A line editor fed key by key (`write(s, key)`, as readline feeds itself); it reads no stream. */
-function lineEditor(output: Writable, prompt: string): Interface {
-  return createInterface({
-    input: new PassThrough(),
-    output,
-    terminal: true,
-    historySize: 0,
-    prompt,
-  });
-}
-
-/** A line read while no question waited for it, and whether it holds keys read before the first. */
-interface Queued {
-  readonly line: string;
-  readonly early: boolean;
-}
-
-/** The question waiting for its line. */
-interface Waiter {
-  readonly hidden: boolean;
-  settle(a: PromptAnswer, early: boolean): void;
-}
-
 /**
- * A prompt over `stdin`/`out`. On a TTY only a visible question draws, and only the keys typed at
- * it (see the echo rule above); on a pipe nothing is echoed at all. `takeTerminalNow` opens the
- * reader at once (on a TTY: raw mode now, not at the first ask).
+ * A prompt over `stdin`/`out`: on a terminal only a visible question draws, and only the keys typed
+ * at it (see the header); on a pipe nothing is echoed at all. `takeTerminalNow` opens the reader at
+ * once (on a terminal: raw mode now, not at the first question).
  */
 export function createTerminalPrompt(io: {
   readonly stdin: NodeJS.ReadableStream;
   readonly out: NodeJS.WritableStream;
   readonly takeTerminalNow?: boolean;
 }): TerminalPrompt {
-  const terminal = isTty(io.stdin);
-  const queue: Queued[] = [];
-  let asked = false;
+  return isTty(io.stdin) ? terminalPrompt(io) : pipePrompt(io);
+}
+
+/** The y/N question over any `ask`. */
+function confirmOver(
+  ask: SetupPrompt["ask"],
+): (question: string, timeoutMs?: number) => Promise<boolean> {
+  return async (question, timeoutMs = CONFIRM_TIMEOUT_MS) => {
+    const a = await ask(`${question} [y/N] `, { hidden: false, timeoutMs, echo: yesNoShape });
+    return a.kind === "answer" && /^y(es)?$/i.test(a.value.trim());
+  };
+}
+
+// ---- a pipe -------------------------------------------------------------------------------------
+
+/** On a pipe: one line reader, lines queued as they arrive, nothing echoed. */
+function pipePrompt(io: {
+  readonly stdin: NodeJS.ReadableStream;
+  readonly out: NodeJS.WritableStream;
+  readonly takeTerminalNow?: boolean;
+}): TerminalPrompt {
+  const queue: string[] = [];
   let opened = false;
   let closed = false;
-  let waiter: Waiter | null = null;
+  let reader: Interface | null = null;
+  let waiter: ((a: PromptAnswer) => void) | null = null;
 
-  // a line no question waited for is queued (the first MAX_QUEUED_LINES); `anyQuestion` false: only
-  // a hidden question may take it as it arrives (a terminal's muted lines never answer a visible one
-  // while it waits — that one reads its own keys)
-  const deliver = (line: string, early: boolean, anyQuestion: boolean): void => {
+  const shutdown = (): void => {
+    if (closed) return;
+    closed = true;
     const w = waiter;
-    if (w !== null && (anyQuestion || w.hidden)) {
-      waiter = null;
-      w.settle({ kind: "answer", value: line }, early);
-    } else if (queue.length < MAX_QUEUED_LINES) queue.push({ line, early });
+    waiter = null;
+    w?.({ kind: "closed" });
+    reader?.close();
   };
+  const open = (): void => {
+    if (opened || closed) return;
+    opened = true;
+    const r = createInterface({
+      input: io.stdin,
+      output: nowhere(),
+      terminal: false,
+      historySize: 0,
+      prompt: "",
+    });
+    r.on("line", (line: string) => {
+      const w = waiter;
+      if (w !== null) {
+        waiter = null;
+        w({ kind: "answer", value: line });
+      } else if (queue.length < MAX_QUEUED_LINES) queue.push(line);
+    });
+    r.on("close", shutdown);
+    reader = r;
+  };
+  if (io.takeTerminalNow === true) open();
 
-  // ---- a pipe: one reader; readline draws input only on a terminal ------------------------------
-  let pipe: Interface | null = null;
+  const ask = (question: string, opts: AskOptions): Promise<PromptAnswer> => {
+    open();
+    io.out.write(question);
+    const queued = queue.shift();
+    if (queued !== undefined) {
+      // a line read before this question: end its line after a hidden answer, as a terminal would
+      if (opts.hidden) io.out.write("\n");
+      return Promise.resolve({ kind: "answer", value: queued });
+    }
+    if (closed) return Promise.resolve({ kind: "closed" });
+    return new Promise<PromptAnswer>((resolve) => {
+      const timer = setTimeout(() => {
+        waiter = null;
+        if (opts.hidden) io.out.write("\n");
+        resolve({ kind: "timeout" });
+      }, opts.timeoutMs);
+      waiter = (a) => {
+        clearTimeout(timer);
+        if (opts.hidden && a.kind === "answer") io.out.write("\n");
+        resolve(a);
+      };
+    });
+  };
+  return {
+    ask,
+    confirm: confirmOver(ask),
+    close() {
+      shutdown();
+    },
+  };
+}
 
-  // ---- a terminal -------------------------------------------------------------------------------
-  // reads every key no visible question receives; its output goes nowhere, always
-  let muted: Interface | null = null;
-  // the muted editor's unfinished line holds a key read before the first question
-  let mutedEarly = false;
-  // the muted editor's next line is the unfinished line a visible question drops
-  let dropMuted = false;
-  // the waiting visible question's own editor
-  let visible: Interface | null = null;
-  let lastReturnAt = 0;
-  // when the last key was read (any editor), and whether a visible question is waiting for the
-  // input to go quiet (its keys stay muted) — and dropped a whole muted line meanwhile
-  let lastKeyAt = Number.NEGATIVE_INFINITY;
-  let settling = false;
-  let burstDropped = false;
+// ---- a terminal ---------------------------------------------------------------------------------
+
+/** What the bytes read now go to. */
+type Mode =
+  /** No question is waiting, or its input is not quiet yet: everything read is discarded. */
+  | { readonly kind: "discard" }
+  /** A visible question: its line, how many of its characters it drew, and its shape (null: none). */
+  | {
+      readonly kind: "visible";
+      readonly line: string[];
+      drawn: number;
+      readonly echo: ((line: string) => boolean) | null;
+    }
+  /** A hidden question: its line (never drawn). */
+  | { readonly kind: "hidden"; readonly line: string[] }
+  /** A hidden answer whose line break was read: anything but blanks now refuses it. */
+  | { readonly kind: "settle"; readonly line: string[] };
+
+/** The question being asked (one at a time). */
+interface Asking {
+  readonly question: string;
+  readonly opts: AskOptions;
+  /** The question has been written (its input went quiet). */
+  shown: boolean;
+  finish(a: PromptAnswer): void;
+}
+
+/** A blank: what may follow a hidden answer's line break without refusing it. */
+const isBlank = (c: string): boolean => c === " " || c === "\t" || c === "\r" || c === "\n";
+
+/** A control character: never inserted, never drawn (Backspace, Ctrl-U, Ctrl-D are handled first). */
+const isControl = (c: string): boolean => {
+  const n = c.codePointAt(0) ?? 0;
+  return n < 0x20 || n === 0x7f || (n >= 0x80 && n < 0xa0);
+};
+
+/** On a terminal (see the header). */
+function terminalPrompt(io: {
+  readonly stdin: NodeJS.ReadableStream;
+  readonly out: NodeJS.WritableStream;
+  readonly takeTerminalNow?: boolean;
+}): TerminalPrompt {
+  const out = io.out;
+  const decoder = new StringDecoder("utf8");
+  let opened = false;
+  // the input ended (Ctrl-C, Ctrl-D at an empty line, end of file): every question answers closed
+  let ended = false;
+  // the terminal was given back (close): its own modes, no longer read
+  let released = false;
+  // a question has been asked (keys read before then may have been echoed by the terminal driver)
+  let asked = false;
+  let mode: Mode = { kind: "discard" };
+  let asking: Asking | null = null;
+  let lastByteAt = Number.NEGATIVE_INFINITY;
+  let lastCrAt = Number.NEGATIVE_INFINITY;
+  // characters discarded since the last question's notes, and whether one was read before the first
+  let discarded = 0;
+  let discardedEarly = false;
+  // an escape sequence being skipped: after ESC, inside CSI (ESC [ … final), or SS3 (ESC O x)
+  let esc: "esc" | "csi" | "ss3" | null = null;
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
   // a SIGCONT listener is waiting (at most one, however many Ctrl-Z)
   let contPending = false;
 
@@ -170,265 +274,303 @@ export function createTerminalPrompt(io: {
     const s = io.stdin as { setRawMode?: (mode: boolean) => unknown };
     if (typeof s.setRawMode === "function") s.setRawMode(on);
   };
+  const clearTimers = (): void => {
+    if (flushTimer !== null) clearTimeout(flushTimer);
+    if (settleTimer !== null) clearTimeout(settleTimer);
+    flushTimer = null;
+    settleTimer = null;
+  };
 
-  const shutdown = (): void => {
-    if (closed) return;
-    closed = true;
-    if (opened && terminal) {
-      io.stdin.removeListener("keypress", onKey);
-      io.stdin.removeListener("end", shutdown);
+  /**
+   * The input ended: the waiting question and every later one answer closed. The terminal stays raw
+   * and is still read — what arrives is dropped — until close(), so echo stays off for the caller's
+   * whole run and nothing typed is left unread for the shell after it (a paste would run as a
+   * command there).
+   */
+  const endInput = (): void => {
+    if (ended) return;
+    ended = true;
+    clearTimers();
+    const a = asking;
+    asking = null;
+    mode = { kind: "discard" };
+    a?.finish({ kind: "closed" });
+  };
+
+  /** Gives the terminal back: its own modes, no longer read. */
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    endInput();
+    if (opened) {
+      io.stdin.removeListener("data", onData);
+      io.stdin.removeListener("end", endInput);
       setRaw(false);
       io.stdin.pause();
     }
-    const w = waiter;
-    waiter = null;
-    // a visible question closes its own editor
-    w?.settle({ kind: "closed" }, false);
-    muted?.close();
-    pipe?.close();
   };
 
-  // readline's own suspend, on the terminal this prompt reads: raw mode off first, on again after.
-  // A stop that happens returns from kill only once continued; a stop the system discards (an
-  // orphaned process group, SIGTSTP ignored) returns at once — either way raw mode is taken again
-  // right after it, so the terminal never echoes while a question waits (Stage C finding
-  // setup-hidden-prompt-echo-burst: a discarded stop left ECHO on at the hidden question). SIGCONT
-  // takes it again too, after a shell restored its own modes on `fg`.
+  // Ctrl-Z: raw mode off, stop, raw mode on again. A stop that happens returns from kill only once
+  // continued; a stop the system discards (an orphaned process group, SIGTSTP ignored) returns at once
+  // — either way raw mode is taken again right after, so the driver never echoes while a question
+  // waits; SIGCONT takes it again too, after a shell restored its own modes on `fg`
   const suspend = (): void => {
     setRaw(false);
     if (!contPending) {
       contPending = true;
       process.once("SIGCONT", () => {
         contPending = false;
-        if (!closed) setRaw(true);
+        if (!released) setRaw(true);
       });
     }
     try {
       process.kill(process.pid, "SIGTSTP");
     } finally {
-      if (!closed) setRaw(true);
+      if (!released) setRaw(true);
     }
   };
 
-  // every key read on the terminal, in order, to exactly one editor
-  function onKey(s: string | undefined, key: Key | undefined): void {
-    if (closed) return;
-    lastKeyAt = Date.now();
-    const k: Key = key ?? {};
-    const plain = k.ctrl !== true && k.meta !== true && k.shift !== true;
-    // the LF of a CR LF pair ends no second line, whichever editor took the CR (readline's rule)
-    if (plain && k.name === "enter" && Date.now() - lastReturnAt <= CRLF_DELAY_MS) {
-      lastReturnAt = 0;
+  /** Discards what was read, then — once the input has been quiet FLUSH_QUIET_MS — runs `then`. */
+  const flushThen = (then: () => void): void => {
+    mode = { kind: "discard" };
+    const started = Date.now();
+    const check = (): void => {
+      flushTimer = null;
+      if (ended) return;
+      const now = Date.now();
+      const quiet = now - lastByteAt;
+      if (quiet < FLUSH_QUIET_MS && now - started < FLUSH_MAX_MS) {
+        flushTimer = setTimeout(check, Math.max(1, FLUSH_QUIET_MS - quiet));
+        return;
+      }
+      then();
+    };
+    check();
+  };
+
+  /** Says what the flush dropped (once per question), then asks `a`'s question on a quiet input. */
+  const present = (a: Asking, note: string | null): void => {
+    flushThen(() => {
+      if (asking !== a) return;
+      // a refusal's note covers the rest of the refused paste; anything else dropped is said
+      if (note !== null) out.write(`${note}\n`);
+      else if (discarded > 0) out.write(`${DISCARDED_NOTE}\n`);
+      if (discarded > 0 && discardedEarly) out.write(`${TYPED_AHEAD_NOTE}\n`);
+      discarded = 0;
+      discardedEarly = false;
+      out.write(a.question);
+      a.shown = true;
+      mode = a.opts.hidden
+        ? { kind: "hidden", line: [] }
+        : { kind: "visible", line: [], drawn: 0, echo: a.opts.echo ?? null };
+    });
+  };
+
+  /** A hidden answer refused: its line ended, said, and the hidden question asked again. */
+  const refuseHidden = (note: string): void => {
+    if (settleTimer !== null) clearTimeout(settleTimer);
+    settleTimer = null;
+    const a = asking;
+    mode = { kind: "discard" };
+    out.write("\n");
+    if (a !== null) present(a, note);
+  };
+
+  /** The settle window passed: the hidden answer stands (or is refused when empty). */
+  const acceptHidden = (): void => {
+    settleTimer = null;
+    if (mode.kind !== "settle") return;
+    const value = mode.line.join("");
+    if (value.trim().length === 0) {
+      refuseHidden(HIDDEN_EMPTY_NOTE);
       return;
     }
-    lastReturnAt = plain && k.name === "return" ? Date.now() : 0;
-    if (k.ctrl === true && k.name === "z" && process.platform !== "win32") {
+    const a = asking;
+    mode = { kind: "discard" };
+    out.write("\n");
+    a?.finish({ kind: "answer", value });
+  };
+
+  /** One key at the visible question (`term`: a line break). */
+  const visibleKey = (m: Extract<Mode, { kind: "visible" }>, c: string, term: boolean): void => {
+    if (term) {
+      const value = m.line.join("");
+      const notShown = m.drawn < m.line.length;
+      const a = asking;
+      mode = { kind: "discard" };
+      out.write("\n");
+      if (notShown) out.write(`${NOT_SHOWN_NOTE}\n`);
+      a?.finish({ kind: "answer", value });
+      return;
+    }
+    if (c === "\x7f" || c === "\b") {
+      if (m.line.length === 0) return;
+      m.line.pop();
+      if (m.drawn > m.line.length) {
+        out.write("\b \b");
+        m.drawn = m.line.length;
+      }
+      return;
+    }
+    if (c === "\x15") {
+      out.write("\b \b".repeat(m.drawn));
+      m.line.length = 0;
+      m.drawn = 0;
+      return;
+    }
+    if (c === "\x04") {
+      if (m.line.length === 0) endInput();
+      return;
+    }
+    if (isControl(c) || m.line.length >= MAX_LINE_CHARS) return;
+    // drawn only while every earlier character was drawn and the line keeps its question's shape
+    const draw = m.drawn === m.line.length && (m.echo === null || m.echo([...m.line, c].join("")));
+    m.line.push(c);
+    if (draw) {
+      out.write(c);
+      m.drawn += 1;
+    }
+  };
+
+  /** One key at the hidden question: never drawn. */
+  const hiddenKey = (m: Extract<Mode, { kind: "hidden" }>, c: string, term: boolean): void => {
+    if (term) {
+      mode = { kind: "settle", line: m.line };
+      settleTimer = setTimeout(acceptHidden, HIDDEN_SETTLE_MS);
+      return;
+    }
+    if (c === "\x7f" || c === "\b") {
+      m.line.pop();
+      return;
+    }
+    if (c === "\x15") {
+      m.line.length = 0;
+      return;
+    }
+    if (c === "\x04") {
+      if (m.line.length === 0) endInput();
+      return;
+    }
+    if (isControl(c) || m.line.length >= MAX_LINE_CHARS) return;
+    m.line.push(c);
+  };
+
+  /** One character read. */
+  const key = (c: string, now: number): void => {
+    // an escape sequence (an arrow, Delete, Meta-x) is skipped whole: never inserted, never drawn; a
+    // control key ends a broken one and counts as itself (no sequence swallows a line break)
+    if (esc !== null) {
+      const n = c.codePointAt(0) ?? 0;
+      if (n >= 0x20 || c === "\x1b") {
+        if (esc === "esc")
+          esc = c === "[" ? "csi" : c === "O" ? "ss3" : c === "\x1b" ? "esc" : null;
+        else if (esc === "csi") {
+          if (n >= 0x40 && n <= 0x7e) esc = null;
+        } else esc = null;
+        return;
+      }
+      esc = null;
+    }
+    if (c === "\x1b") {
+      esc = "esc";
+      return;
+    }
+    if (c === "\x03") {
+      endInput();
+      return;
+    }
+    if (c === "\x1a" && process.platform !== "win32") {
       suspend();
       return;
     }
-    if (visible !== null) {
-      visible.write(s, k);
-      return;
+    // CR, LF and CR LF each end one line (the LF of a pair may arrive in a later read)
+    let term = false;
+    if (c === "\r") {
+      lastCrAt = now;
+      term = true;
+    } else if (c === "\n") {
+      if (now - lastCrAt <= CRLF_DELAY_MS) {
+        lastCrAt = Number.NEGATIVE_INFINITY;
+        return;
+      }
+      term = true;
+    } else lastCrAt = Number.NEGATIVE_INFINITY;
+    const m = mode;
+    switch (m.kind) {
+      case "discard":
+        discarded += 1;
+        if (!asked) discardedEarly = true;
+        return;
+      case "visible":
+        visibleKey(m, c, term);
+        return;
+      case "hidden":
+        hiddenKey(m, c, term);
+        return;
+      case "settle":
+        if (!isBlank(c)) refuseHidden(HIDDEN_REFUSED_NOTE);
+        return;
     }
-    const m = muted;
-    if (m === null) return;
-    m.write(s, k);
-    // a key read before the first question that stays in the unfinished line
-    if (!asked && m.line !== "") mutedEarly = true;
-  }
-
-  const onMutedLine = (line: string): void => {
-    const early = mutedEarly || !asked;
-    mutedEarly = false;
-    if (dropMuted) {
-      dropMuted = false;
-      return;
-    }
-    // the rest of a burst that reached a visible question before it was asked: dropped unshown
-    if (settling) {
-      burstDropped = true;
-      return;
-    }
-    deliver(line, early, false);
   };
 
+  // every byte read, in order
+  function onData(chunk: Buffer | string): void {
+    if (released) return;
+    const now = Date.now();
+    lastByteAt = now;
+    const s = typeof chunk === "string" ? chunk : decoder.write(chunk);
+    for (const c of s) key(c, now);
+  }
+
   const open = (): void => {
-    if (opened || closed) return;
+    if (opened || released) return;
     opened = true;
-    if (!terminal) {
-      const r = createInterface({
-        input: io.stdin,
-        output: nowhere(),
-        terminal: false,
-        historySize: 0,
-        prompt: "",
-      });
-      r.on("line", (line: string) => {
-        deliver(line, !asked, true);
-      });
-      r.on("close", shutdown);
-      pipe = r;
-      return;
-    }
     // raw mode first: from here the terminal driver echoes nothing
     setRaw(true);
-    const m = lineEditor(nowhere(), "");
-    m.on("line", onMutedLine);
-    // Ctrl-C, or Ctrl-D on an empty line, read while no visible question waits
-    m.on("close", shutdown);
-    muted = m;
-    emitKeypressEvents(io.stdin);
-    io.stdin.on("keypress", onKey);
-    io.stdin.on("end", shutdown);
+    io.stdin.on("data", onData);
+    io.stdin.on("end", endInput);
     io.stdin.resume();
   };
   if (io.takeTerminalNow === true) open();
 
-  // a visible question never edits a line it did not draw: an unfinished muted line is dropped
-  const dropUnshown = (): void => {
-    const m = muted;
-    const dropped = burstDropped;
-    burstDropped = false;
-    if (m === null || closed) return;
-    if (m.line === "") {
-      if (dropped) io.out.write(`${DISCARDED_NOTE}\n`);
-      return;
-    }
-    const early = mutedEarly;
-    // ends the muted line as Enter would (readline resets the line and its undo history); dropped
-    dropMuted = true;
-    m.write("\r");
-    dropMuted = false;
-    io.out.write(`${DISCARDED_NOTE}\n`);
-    if (early) io.out.write(`${TYPED_AHEAD_NOTE}\n`);
-  };
-
-  // a visible question asked while keys are still arriving: they stay muted until the input has
-  // been quiet for BURST_QUIET_MS (whole lines are dropped as they end), then the question draws
-  const afterQuiet = (): Promise<void> =>
-    new Promise((resolve) => {
-      settling = true;
-      const check = (): void => {
-        const quiet = Date.now() - lastKeyAt;
-        if (!closed && quiet < BURST_QUIET_MS) {
-          setTimeout(check, BURST_QUIET_MS - quiet);
-          return;
-        }
-        settling = false;
-        resolve();
-      };
-      check();
-    });
-
-  const ask = (
-    question: string,
-    opts: { hidden: boolean; timeoutMs: number },
-  ): Promise<PromptAnswer> => {
+  const ask = (question: string, opts: AskOptions): Promise<PromptAnswer> => {
     open();
     asked = true;
-    if (
-      terminal &&
-      !opts.hidden &&
-      !closed &&
-      queue.length === 0 &&
-      Date.now() - lastKeyAt < BURST_QUIET_MS
-    )
-      return afterQuiet().then(() => askNow(question, opts));
-    return askNow(question, opts);
-  };
-
-  const askNow = (
-    question: string,
-    opts: { hidden: boolean; timeoutMs: number },
-  ): Promise<PromptAnswer> => {
-    const queued = queue.shift();
-    if (queued === undefined && terminal) {
-      if (!opts.hidden) dropUnshown();
-      else if (muted !== null && !closed && muted.line !== "") io.out.write(`${PENDING_NOTE}\n`);
-    }
-    io.out.write(question);
-    if (queued !== undefined) {
-      // a line read before this question was never drawn (nor its line break): end the question's
-      // line here — on a pipe only after a hidden answer, as before
-      if (opts.hidden || terminal) io.out.write("\n");
-      if (opts.hidden && terminal && queued.early) io.out.write(`${TYPED_AHEAD_NOTE}\n`);
-      return Promise.resolve({ kind: "answer", value: queued.line });
-    }
-    if (closed) return Promise.resolve({ kind: "closed" });
-    if (opts.hidden || !terminal) {
-      return new Promise<PromptAnswer>((resolve) => {
-        const timer = setTimeout(() => {
-          waiter = null;
-          if (opts.hidden) io.out.write("\n");
-          resolve({ kind: "timeout" });
-        }, opts.timeoutMs);
-        waiter = {
-          hidden: opts.hidden,
-          settle: (a, early) => {
-            clearTimeout(timer);
-            if (opts.hidden && a.kind === "answer") {
-              // the line break the muted editor did not draw
-              io.out.write("\n");
-              if (terminal && early) io.out.write(`${TYPED_AHEAD_NOTE}\n`);
-            }
-            resolve(a);
-          },
-        };
-      });
-    }
-    // a visible question on a terminal: an editor of its own draws the keys typed while it waits
+    if (ended) return Promise.resolve({ kind: "closed" });
     return new Promise<PromptAnswer>((resolve) => {
-      let live = true;
-      const screen = new Writable({
-        write(chunk: Buffer | string, _enc, cb) {
-          if (live) io.out.write(chunk);
-          cb();
-        },
-      });
-      // the question is its prompt, so a redraw keeps it in front of the line
-      const v = lineEditor(screen, question);
-      let settled = false;
-      const finish = (a: PromptAnswer): void => {
-        if (settled) return;
-        settled = true;
-        live = false;
-        clearTimeout(timer);
-        if (visible === v) visible = null;
-        if (waiter === w) waiter = null;
-        v.close();
-        resolve(a);
-      };
-      const w: Waiter = {
-        hidden: false,
-        settle: (a) => {
-          finish(a);
+      let done = false;
+      const a: Asking = {
+        question,
+        opts,
+        shown: false,
+        finish: (ans) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          if (asking === a) {
+            asking = null;
+            clearTimers();
+          }
+          resolve(ans);
         },
       };
-      v.on("line", (line: string) => {
-        finish({ kind: "answer", value: line });
-      });
-      v.on("close", () => {
-        if (settled) return;
-        // Ctrl-C, or Ctrl-D on an empty line, at this question: the input ends
-        finish({ kind: "closed" });
-        shutdown();
-      });
       const timer = setTimeout(() => {
-        finish({ kind: "timeout" });
+        if (asking !== a) return;
+        mode = { kind: "discard" };
+        // the line of a question it wrote ends here
+        if (a.shown) out.write("\n");
+        a.finish({ kind: "timeout" });
       }, opts.timeoutMs);
-      visible = v;
-      waiter = w;
+      asking = a;
+      present(a, null);
     });
   };
 
   return {
     ask,
-    async confirm(question, timeoutMs = CONFIRM_TIMEOUT_MS) {
-      const a = await ask(`${question} [y/N] `, { hidden: false, timeoutMs });
-      return a.kind === "answer" && /^y(es)?$/i.test(a.value.trim());
-    },
+    confirm: confirmOver(ask),
     close() {
-      shutdown();
+      release();
     },
   };
 }

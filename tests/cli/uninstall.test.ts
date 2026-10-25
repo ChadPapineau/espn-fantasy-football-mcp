@@ -123,18 +123,23 @@ describe("uninstall", () => {
     Object.assign(stdin, { isTTY: true });
     const out = new Capture();
     const prompt = createTerminalPrompt({ stdin, out });
-    stdin.write("n\nn\n");
     const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" }, keyring, stdin });
     const { config, log } = await loadLenientRuntime(io);
-    expect(
-      await uninstall(io, config, log, {
-        yes: false,
-        dryRun: false,
-        keepConfig: true,
-        exportLog: undefined,
-        prompt,
-      }),
-    ).toBe(0);
+    const run = uninstall(io, config, log, {
+      yes: false,
+      dryRun: false,
+      keepConfig: true,
+      exportLog: undefined,
+      prompt,
+    });
+    // on a terminal a question takes only what is typed after it is asked (src/cli/prompt.ts, Stage
+    // C ruling R7-3: keys typed ahead are dropped unshown), so each one is answered as it appears
+    for (const n of [1, 2]) {
+      for (let i = 0; i < 400 && out.text.split("[y/N] ").length - 1 < n; i++)
+        await new Promise((r) => setTimeout(r, 5));
+      stdin.write("n\n");
+    }
+    expect(await run).toBe(0);
     expect(keyring.items.size).toBe(4);
     expect(existsSync(path.join(sb.cacheDir, "store.sqlite"))).toBe(true);
     expect(io.out.text).toContain("kept the stored cookies");

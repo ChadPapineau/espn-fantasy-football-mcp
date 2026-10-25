@@ -1,20 +1,27 @@
-// setup-parts.test.ts — the pieces under `eff setup`: the terminal prompt (queued lines, hidden
-// input never echoed, timeout, closed input, y/N), the one-shot setup page (plan 03 §2.2: 127.0.0.1
-// only, exact Host, Origin/Referer, token, 120 s timeout, SIGINT, the busy-port message with the
-// lsof owner, no external resources in the form), and the keychain self-test's launchd plumbing
-// (plan 03 §2.1 step 4: a digest report, never the value; the agent booted out afterwards).
+// setup-parts.test.ts — the pieces under `eff setup`: the terminal prompt (on a pipe: queued lines,
+// hidden input never echoed, timeout, closed input, y/N; on a terminal: ruling R7-3's echo rule —
+// tests/cli/setup-echo.test.ts holds every paste variant through setup itself), the one-shot setup
+// page (plan 03 §2.2: 127.0.0.1 only, exact Host, Origin/Referer, token, 120 s timeout, SIGINT, the
+// busy-port message with the lsof owner, no external resources in the form), and the keychain
+// self-test's launchd plumbing (plan 03 §2.1 step 4: a digest report, never the value; the agent
+// booted out afterwards).
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeEspnS2 } from "../../scripts/ci/secret-fixtures.mjs";
+import { swidEchoShape } from "../../src/auth/format.js";
 import { selftestDigest } from "../../src/auth/selftest.js";
 import {
-  BURST_QUIET_MS,
   DISCARDED_NOTE,
-  MAX_QUEUED_LINES,
-  PENDING_NOTE,
+  FLUSH_MAX_MS,
+  FLUSH_QUIET_MS,
+  HIDDEN_EMPTY_NOTE,
+  HIDDEN_REFUSED_NOTE,
+  HIDDEN_SETTLE_MS,
+  MAX_LINE_CHARS,
+  NOT_SHOWN_NOTE,
   TYPED_AHEAD_NOTE,
   createTerminalPrompt,
 } from "../../src/cli/prompt.js";
@@ -33,6 +40,7 @@ import {
   selftestPlist,
   selftestRead,
 } from "../../src/cli/selftest-agent.js";
+import { FakeTty, Screen, shows } from "./fake-tty.js";
 import {
   Capture,
   FakeKeyring,
@@ -89,651 +97,372 @@ describe("terminal prompt", () => {
   });
 });
 
-/** A stdin that says it is a terminal (readline then echoes through its output and sets raw mode). */
-class FakeTty extends PassThrough {
-  readonly isTTY = true;
-  isRaw = false;
-  readonly rawCalls: boolean[] = [];
-  setRawMode(mode: boolean): this {
-    this.isRaw = mode;
-    this.rawCalls.push(mode);
-    return this;
-  }
-}
-
-/** Resolves once `out` has printed `text` (the question is on screen). */
-function printed(out: Capture, text: string): Promise<void> {
-  return new Promise((resolve) => {
-    const check = (): void => {
-      if (out.text.includes(text)) {
-        out.off("data", check);
-        resolve();
-      }
-    };
-    out.on("data", check);
-    check();
-  });
-}
-
-/** Lets the readline pass over every buffered chunk run (data events are async). */
-const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
-
-/** How many times `out` has printed `text`. */
-const times = (out: Capture, text: string): number => out.text.split(text).length - 1;
-
-/**
- * Resolves once `out` has printed `text` `n` times: a visible question asked while keys were still
- * arriving is printed only after the input has been quiet for BURST_QUIET_MS.
- */
-function printedTimes(out: Capture, text: string, n: number): Promise<void> {
-  return new Promise((resolve) => {
-    const check = (): void => {
-      if (times(out, text) >= n) {
-        out.off("data", check);
-        resolve();
-      }
-    };
-    out.on("data", check);
-    check();
-  });
-}
-
-const SWID = "{00000000-0000-4000-8000-000000000001}";
-// a fake value in the cookie alphabet, generated (never a real cookie; never a literal the scanner sees)
-const S2 = fakeEspnS2("cli-prompt-tty", 98);
-
-/** True when any 8-character run of the hidden value reached the screen. */
-function shows(out: Capture, value: string): boolean {
-  for (let i = 0; i + 8 <= value.length; i++)
-    if (out.text.includes(value.slice(i, i + 8))) return true;
-  return false;
-}
-
-// Stage C finding setup-hidden-prompt-echo-burst: on a terminal the hidden value was drawn when it
-// arrived in the same input chunk as an earlier line, after a line break inside it, or typed ahead.
-describe("terminal prompt on a TTY: the hidden value is never drawn", () => {
-  it("SWID and espn_s2 pasted in ONE burst at the SWID question: the SWID is drawn, espn_s2 is not", async () => {
+// Stage C finding setup-hidden-prompt-echo-burst, ruling R7-3: on a terminal the prompt keeps ECHO off
+// for its whole life, draws only the characters a visible question receives (and, given a shape, only
+// while the line keeps it), asks every question on a quiet input (whatever was read before is
+// dropped unshown), and refuses a hidden answer with a line break in it. Fake timers: the quiet
+// windows run on the test's clock; each `type` is one read, dispatched at once.
+describe("terminal prompt on a TTY (ruling R7-3)", () => {
+  beforeEach(() => {
     sb = sandbox();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const tick = async (ms: number): Promise<void> => {
+    await vi.advanceTimersByTimeAsync(ms);
+  };
+  const SWID = "{00000000-0000-4000-8000-000000000001}";
+  const S2 = fakeEspnS2("cli-prompt-tty", 98);
+  const open = (takeTerminalNow = false) => {
     const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const swid = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "SWID: ");
-    stdin.write(`${SWID}\r${S2}\r`);
-    expect(await swid).toEqual({ kind: "answer", value: SWID });
-    await settle();
-    expect(await p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: S2,
-    });
+    const screen = new Screen();
+    const p = createTerminalPrompt({ stdin, out: screen, takeTerminalNow });
+    return { stdin, screen, p };
+  };
+  /** A hidden answer settles HIDDEN_SETTLE_MS after its line break. */
+  const settled = async <T>(x: Promise<T>): Promise<T> => {
+    await tick(HIDDEN_SETTLE_MS);
+    return x;
+  };
+
+  it("echo is off at the terminal for the prompt's whole life: raw mode at once, given back on close", async () => {
+    const { stdin, p } = open(true);
+    expect(stdin.rawCalls).toEqual([true]);
+    const a = p.ask("SWID: ", { hidden: false, timeoutMs: 60_000 });
+    stdin.type(`${SWID}\r`);
+    expect(await a).toEqual({ kind: "answer", value: SWID });
+    // raw between questions too: no question waits, and the driver still echoes nothing
+    expect(stdin.isRaw).toBe(true);
     p.close();
-    expect(out.text).toContain(SWID);
-    expect(shows(out, S2)).toBe(false);
-    // pasted at the question (the terminal was ours): nothing to clear
-    expect(out.text).not.toContain(TYPED_AHEAD_NOTE);
     expect(stdin.rawCalls).toEqual([true, false]);
   });
-  it("a line break inside the pasted espn_s2: neither part is drawn", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const swid = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "SWID: ");
-    stdin.write(`${SWID}\r`);
-    await swid;
-    const hidden = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-    await printed(out, "espn_s2: ");
-    stdin.write(`${S2.slice(0, 50)}\r${S2.slice(50)}\r`);
-    expect(await hidden).toEqual({ kind: "answer", value: S2.slice(0, 50) });
-    await settle();
-    // the tail waits in the queue, undrawn; a re-ask would take it, still undrawn
-    expect(await p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: S2.slice(50),
-    });
-    p.close();
-    expect(shows(out, S2)).toBe(false);
-  });
-  it("keys typed ahead while setup starts (takeTerminalNow): raw mode at once, nothing drawn, answers kept", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out, takeTerminalNow: true });
-    // the terminal is taken before any question: the terminal driver no longer echoes
-    expect(stdin.rawCalls).toEqual([true]);
-    stdin.write(`${SWID}\r${S2}\r`);
-    await settle();
-    expect(out.text).toBe("");
-    expect(await p.ask("SWID: ", { hidden: false, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: SWID,
-    });
-    expect(await p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: S2,
-    });
-    p.close();
-    expect(shows(out, S2)).toBe(false);
-    // each question's line is ended (the queued line's own line break was never drawn), and a
-    // hidden answer typed before the first question says what the terminal driver may have shown
-    expect(out.text).toBe(`SWID: \nespn_s2: \n${TYPED_AHEAD_NOTE}\n`);
-    expect(stdin.isRaw).toBe(false);
-  });
-  it("type-ahead before the FIRST question without takeTerminalNow is not drawn either", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    stdin.write(`${SWID}\r${S2}\r`);
-    expect(await p.ask("SWID: ", { hidden: false, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: SWID,
-    });
-    await settle();
-    expect(await p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: S2,
-    });
-    p.close();
-    expect(shows(out, S2)).toBe(false);
-  });
-  it(`at most ${String(MAX_QUEUED_LINES)} lines wait for a question; the rest are dropped, none drawn`, async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out, takeTerminalNow: true });
-    stdin.write(
-      Array.from({ length: MAX_QUEUED_LINES + 2 }, (_, i) => `line-${String(i)}\r`).join(""),
-    );
-    await settle();
-    for (let i = 0; i < MAX_QUEUED_LINES; i++)
-      expect(await p.ask("Q: ", { hidden: false, timeoutMs: 1000 })).toEqual({
-        kind: "answer",
-        value: `line-${String(i)}`,
-      });
-    expect(await p.ask("Q: ", { hidden: false, timeoutMs: 20 })).toEqual({ kind: "timeout" });
-    p.close();
-    expect(out.text).not.toContain("line-");
-  });
-  it("a visible answer typed after its question IS drawn; keys typed after it are not; a timeout mutes", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const a = p.ask("Q: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "Q: ");
-    stdin.write("visible-answer\r");
-    expect(await a).toEqual({ kind: "answer", value: "visible-answer" });
-    expect(out.text).toContain("visible-answer");
-    // nothing waits now: typed keys stay undrawn until the next question
-    stdin.write("typed-between");
-    await settle();
-    expect(out.text).not.toContain("typed-between");
-    expect(await p.ask("T: ", { hidden: false, timeoutMs: 20 })).toEqual({ kind: "timeout" });
-    stdin.write("after-timeout");
-    await settle();
-    expect(out.text).not.toContain("after-timeout");
-    p.close();
-  });
-});
 
-// The same finding, the variant the first fix left open: an editor that draws must never hold a key
-// it did not draw. One shared readline kept espn_s2, read muted with no line break after it, in its
-// line buffer (and its undo history and kill ring), and the next VISIBLE question drew it on its
-// first edit key — Backspace drew all of it but the last character, Ctrl-L all of it, Ctrl-W its last
-// segment, Ctrl-_ (undo) and Ctrl-Y (yank) brought it back.
-describe("terminal prompt on a TTY: a visible question draws only the keys typed at it", () => {
-  /** The SWID without its braces: refused (missing_braces), so setup asks for it again. */
-  const BARE_SWID = SWID.slice(1, -1);
+  it("a visible question draws the characters typed at it, one by one; Backspace and Ctrl-U erase what it drew", async () => {
+    const { stdin, screen, p } = open();
+    const a = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
+    expect(screen.text).toBe("Q: ");
+    stdin.type("ab");
+    stdin.type("c\x7f");
+    expect(screen.text).toBe("Q: abc\b \b");
+    stdin.type("\x15xy\x08z\r");
+    expect(await a).toEqual({ kind: "answer", value: "xz" });
+    expect(screen.text).toBe("Q: abc\b \b\b \b\b \bxy\b \bz\n");
+    p.close();
+  });
 
-  // every key readline redraws, deletes, inserts or restores the line with
+  it("a hidden answer is never drawn: the question, then its line end", async () => {
+    const { stdin, screen, p } = open();
+    const a = p.ask("espn_s2: ", { hidden: true, timeoutMs: 60_000 });
+    stdin.type(S2.slice(0, 40));
+    stdin.type(`${S2.slice(40)}\x7fz\r`);
+    expect(await settled(a)).toEqual({ kind: "answer", value: `${S2.slice(0, -1)}z` });
+    expect(screen.text).toBe("espn_s2: \n");
+    p.close();
+  });
+
+  it("a shaped question draws only while the line keeps its shape: espn_s2 pasted at the SWID question is never drawn", async () => {
+    const { stdin, screen, p } = open();
+    const a = p.ask("SWID: ", { hidden: false, timeoutMs: 60_000, echo: swidEchoShape });
+    stdin.type(`${S2}\r`);
+    // the answer is the whole line (setup refuses it as no GUID); nothing of it was drawn, said
+    expect(await a).toEqual({ kind: "answer", value: S2 });
+    expect(shows(screen.text, S2, 4)).toBe(false);
+    expect(screen.text).toBe(`SWID: \n${NOT_SHOWN_NOTE}\n`);
+    // a SWID is drawn whole; a typo stops the drawing there, Backspace resumes it
+    const b = p.ask("SWID: ", { hidden: false, timeoutMs: 60_000, echo: swidEchoShape });
+    await tick(FLUSH_QUIET_MS);
+    stdin.type(`  ${SWID.slice(0, 10)}Q`);
+    expect(screen.text.endsWith(`SWID:   ${SWID.slice(0, 10)}`)).toBe(true);
+    stdin.type(`\x7f${SWID.slice(10)}\r`);
+    expect(await b).toEqual({ kind: "answer", value: `  ${SWID}` });
+    expect(screen.text.endsWith(`SWID:   ${SWID}\n`)).toBe(true);
+    // y/N draws a prefix of yes or no only
+    const c = p.confirm("Go?");
+    await tick(FLUSH_QUIET_MS);
+    stdin.type("yes\r");
+    expect(await c).toBe(true);
+    expect(screen.text.endsWith("Go? [y/N] yes\n")).toBe(true);
+    const d = p.confirm("Go?");
+    await tick(FLUSH_QUIET_MS);
+    stdin.type(`${S2}\r`);
+    expect(await d).toBe(false);
+    expect(shows(screen.text, S2, 4)).toBe(false);
+    p.close();
+  });
+
+  // every key readline redraws, deletes, inserts, undoes or restores a line with: none inserts or
+  // draws anything here (there is no line editor: no undo, no kill ring)
   const EDIT_KEYS: readonly (readonly [string, string])[] = [
-    ["Backspace", "\x7f"],
-    ["Ctrl-H", "\x08"],
     ["Delete", "\x1b[3~"],
     ["Ctrl-W", "\x17"],
     ["Meta-Backspace", "\x1b\x7f"],
     ["Ctrl-L", "\x0c"],
     ["Ctrl-K", "\x0b"],
-    ["Ctrl-A then a character", "\x01x"],
-    ["Left arrow then a character", "\x1b[Dx"],
+    ["Ctrl-A", "\x01"],
+    ["Left arrow", "\x1b[D"],
+    ["an SS3 arrow", "\x1bOD"],
     ["Ctrl-_ (undo)", "\x1f"],
     ["Ctrl-^ (redo)", "\x1e"],
-    ["Ctrl-U then Ctrl-Y (kill, yank)", "\x15\x19"],
     ["Ctrl-Y (yank)", "\x19"],
+    ["Meta-y (yank-pop)", "\x1by"],
+    ["ESC ESC [ A", "\x1b\x1b[A"],
+    ["a function key", "\x1b[15~"],
   ];
-
-  /**
-   * Asks the visible question again and types `keys` (nothing of espn_s2 may be drawn by them), then
-   * clears the line and types the real SWID; returns the answer.
-   */
-  async function reask(
-    p: ReturnType<typeof createTerminalPrompt>,
-    stdin: FakeTty,
-    out: Capture,
-    keys: string,
-  ): Promise<unknown> {
-    const n = times(out, "SWID: ");
-    const again = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    // the question is drawn once the input is quiet; the owner types at it after that
-    await printedTimes(out, "SWID: ", n + 1);
-    stdin.write(keys);
-    await settle();
-    expect(shows(out, S2)).toBe(false);
-    stdin.write(`\x15${SWID}\r`);
-    return again;
-  }
-
   it.each(EDIT_KEYS)(
-    "a refused SWID pasted with espn_s2 and no final line break: %s at the re-asked SWID draws none of espn_s2",
-    async (_name, keys) => {
-      sb = sandbox();
-      const stdin = new FakeTty();
-      const out = new Capture();
-      const p = createTerminalPrompt({ stdin, out });
-      const first = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-      await printed(out, "SWID: ");
-      // a two-line selection usually ends without a line break
-      stdin.write(`${BARE_SWID}\r${S2}`);
-      expect(await first).toEqual({ kind: "answer", value: BARE_SWID });
-      await settle();
-      expect(await reask(p, stdin, out, keys)).toEqual({ kind: "answer", value: SWID });
-      // the unfinished line was dropped, unshown, and the prompt said so
-      expect(out.text).toContain(DISCARDED_NOTE);
-      expect(out.text).not.toContain(TYPED_AHEAD_NOTE);
-      // espn_s2 is pasted again at its own (hidden) question and taken whole, never joined to the
-      // dropped copy
-      const hidden = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-      await printed(out, "espn_s2: ");
-      stdin.write(`${S2}\r`);
-      expect(await hidden).toEqual({ kind: "answer", value: S2 });
+    "%s at a visible question inserts nothing and draws nothing",
+    async (_n, keys) => {
+      const { stdin, screen, p } = open();
+      const a = p.ask("SWID: ", { hidden: false, timeoutMs: 60_000, echo: swidEchoShape });
+      stdin.type(keys);
+      expect(screen.text).toBe("SWID: ");
+      stdin.type(`${SWID}\r`);
+      expect(await a).toEqual({ kind: "answer", value: SWID });
       p.close();
-      expect(shows(out, S2)).toBe(false);
-      expect(stdin.rawCalls).toEqual([true, false]);
     },
   );
 
-  it.each(EDIT_KEYS)(
-    "the same burst typed ahead before the first question: %s at the re-asked SWID draws none of espn_s2",
-    async (_name, keys) => {
-      sb = sandbox();
-      const stdin = new FakeTty();
-      const out = new Capture();
-      const p = createTerminalPrompt({ stdin, out, takeTerminalNow: true });
-      stdin.write(`${BARE_SWID}\r${S2}`);
-      await settle();
-      expect(await p.ask("SWID: ", { hidden: false, timeoutMs: 1000 })).toEqual({
-        kind: "answer",
-        value: BARE_SWID,
-      });
-      expect(await reask(p, stdin, out, keys)).toEqual({ kind: "answer", value: SWID });
-      // dropped unshown; typed before the first question, so the terminal driver may have shown it
-      expect(out.text).toContain(`${DISCARDED_NOTE}\n${TYPED_AHEAD_NOTE}\nSWID: `);
-      p.close();
-      expect(shows(out, S2)).toBe(false);
-    },
-  );
-
-  // Round 2 (the verifier): a refused SWID and espn_s2 from one paste, espn_s2 in a LATER read (a
-  // second write, or the kernel splitting one write past 1 KB) — the re-asked visible question,
-  // opened within microtasks of the refusal, drew all of it
-  it.each([0, 2, 5, 20, 100])(
-    "espn_s2 arriving %i ms after a re-asked visible question opens is never drawn, then dropped and said",
-    async (gap) => {
-      sb = sandbox();
-      const stdin = new FakeTty();
-      const out = new Capture();
-      const p = createTerminalPrompt({ stdin, out });
-      const first = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-      await printed(out, "SWID: ");
-      stdin.write(`${BARE_SWID}\r`);
-      expect(await first).toEqual({ kind: "answer", value: BARE_SWID });
-      // refused: asked again at once, as setup does
-      const again = p.ask("SWID: ", { hidden: false, timeoutMs: 2000 });
-      await new Promise((r) => setTimeout(r, gap));
-      stdin.write(`${S2}\r`);
-      await printedTimes(out, "SWID: ", 2);
-      // drawn only now, after BURST_QUIET_MS of quiet: espn_s2 never reached it
-      expect(shows(out, S2)).toBe(false);
-      expect(out.text).toContain(`${DISCARDED_NOTE}\nSWID: `);
-      stdin.write(`${SWID}\r`);
-      expect(await again).toEqual({ kind: "answer", value: SWID });
-      expect(out.text).toContain(SWID);
-      // the dropped line answers nothing later
-      expect(await p.ask("espn_s2: ", { hidden: true, timeoutMs: 50 })).toEqual({
-        kind: "timeout",
-      });
-      p.close();
-      expect(shows(out, S2)).toBe(false);
-    },
-  );
-
-  it("one paste past 1 KB split by the kernel into two reads: the tail never reaches a visible question", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const long = fakeEspnS2("cli-prompt-split", 2000);
-    const first = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "SWID: ");
-    const burst = `${BARE_SWID}\r${long}\r`;
-    stdin.write(burst.slice(0, 1024));
-    expect(await first).toEqual({ kind: "answer", value: BARE_SWID });
-    const again = p.ask("SWID: ", { hidden: false, timeoutMs: 2000 });
-    stdin.write(burst.slice(1024));
-    await printedTimes(out, "SWID: ", 2);
-    expect(shows(out, long)).toBe(false);
-    stdin.write(`${SWID}\r`);
-    expect(await again).toEqual({ kind: "answer", value: SWID });
-    p.close();
-    expect(shows(out, long)).toBe(false);
-  });
-
-  it(`a visible question with no keys arriving draws at once; one asked mid-burst waits ${String(BURST_QUIET_MS)} ms of quiet`, async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const a = p.ask("Q1: ", { hidden: false, timeoutMs: 1000 });
-    // no key read yet: drawn now
-    expect(out.text).toBe("Q1: ");
-    stdin.write("one\r");
-    expect(await a).toEqual({ kind: "answer", value: "one" });
-    const t0 = Date.now();
-    const b = p.ask("Q2: ", { hidden: false, timeoutMs: 1000 });
-    expect(out.text).not.toContain("Q2: ");
-    await printedTimes(out, "Q2: ", 1);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(BURST_QUIET_MS - 5);
-    stdin.write("two\r");
-    expect(await b).toEqual({ kind: "answer", value: "two" });
+  it("a broken escape sequence ends at a control key, which counts: no sequence swallows Enter", async () => {
+    const { stdin, screen, p } = open();
+    const a = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
+    stdin.type("ab\x1b[12\rnext");
+    expect(await a).toEqual({ kind: "answer", value: "ab" });
+    expect(screen.text).toBe("Q: ab\n");
     p.close();
   });
 
-  it("espn_s2 killed (Ctrl-U) while no question waits is never yanked back at a visible question", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out, takeTerminalNow: true });
-    // pasted too early, then cleared: the line is empty, the kill ring of a shared editor is not
-    stdin.write(`${S2}\x15`);
-    await settle();
-    const a = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "SWID: ");
-    stdin.write("\x19\x1f\x0c");
-    await settle();
-    stdin.write(`\x15${SWID}\r`);
-    expect(await a).toEqual({ kind: "answer", value: SWID });
-    p.close();
-    expect(shows(out, S2)).toBe(false);
-  });
-
-  it("a hidden answer edited with kill keys is never yanked or undone back at a later visible question", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const hidden = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-    await printed(out, "espn_s2: ");
-    // pasted, cleared with Ctrl-U (the kill ring now holds it), pasted again, killed again from the
-    // start of the line (Ctrl-A, Ctrl-K), pasted a third time
-    stdin.write(`${S2}\x15${S2}\x01\x0b${S2}\r`);
-    expect(await hidden).toEqual({ kind: "answer", value: S2 });
-    const visible = p.ask("Continue? ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "Continue? ");
-    // yank, yank-pop (Meta-y), undo, redo, redraw
-    stdin.write("\x19\x1by\x1by\x1f\x1e\x0c");
-    await settle();
-    stdin.write("\x15y\r");
+  it("a hidden answer killed with Ctrl-U, then edit keys at a later visible question: nothing of it is drawn", async () => {
+    const { stdin, screen, p } = open();
+    const hidden = p.ask("espn_s2: ", { hidden: true, timeoutMs: 60_000 });
+    stdin.type(`${S2}\x15${S2}\x01\x0b`);
+    stdin.type(`\x15${S2}\r`);
+    expect(await settled(hidden)).toEqual({ kind: "answer", value: S2 });
+    const visible = p.ask("Continue? ", { hidden: false, timeoutMs: 60_000 });
+    await tick(FLUSH_QUIET_MS);
+    stdin.type("\x19\x1by\x1f\x1e\x0c\x1b[Dy\r");
     expect(await visible).toEqual({ kind: "answer", value: "y" });
+    expect(shows(screen.text, S2, 4)).toBe(false);
     p.close();
-    expect(shows(out, S2)).toBe(false);
   });
 
-  it("a hidden answer begun before the first question and finished after it says so (TYPED_AHEAD_NOTE)", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out, takeTerminalNow: true });
-    // the SWID line and the first part of espn_s2 reach the terminal before the first question
-    stdin.write(`${SWID}\r${S2.slice(0, 40)}`);
-    await settle();
-    expect(await p.ask("SWID: ", { hidden: false, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: SWID,
-    });
-    // a hidden question takes the unfinished line, and says it is waiting (nothing was dropped)
-    expect(out.text).not.toContain(DISCARDED_NOTE);
-    const hidden = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-    await printed(out, "espn_s2: ");
-    stdin.write(`${S2.slice(40)}\r`);
-    expect(await hidden).toEqual({ kind: "answer", value: S2 });
-    p.close();
-    expect(out.text).toBe(`SWID: \n${PENDING_NOTE}\nespn_s2: \n${TYPED_AHEAD_NOTE}\n`);
-    expect(shows(out, S2)).toBe(false);
-  });
-
-  it("two lines pasted at the SWID question with no final line break: espn_s2 waits for Enter, and says so", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const swid = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "SWID: ");
-    stdin.write(`${SWID}\r${S2}`);
-    expect(await swid).toEqual({ kind: "answer", value: SWID });
-    await settle();
-    const hidden = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-    // pasting it again would double the value: the prompt says Enter uses what waits
-    expect(out.text).toContain(`${PENDING_NOTE}\nespn_s2: `);
-    stdin.write("\r");
-    expect(await hidden).toEqual({ kind: "answer", value: S2 });
-    // or Ctrl-U clears it, unshown, and the value is pasted again
-    const n = times(out, "SWID: ");
-    const again = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    await printedTimes(out, "SWID: ", n + 1);
-    stdin.write(`${SWID}\r${S2}`);
-    expect(await again).toEqual({ kind: "answer", value: SWID });
-    await settle();
-    const cleared = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-    stdin.write(`\x15${S2}\r`);
-    expect(await cleared).toEqual({ kind: "answer", value: S2 });
-    p.close();
-    expect(out.text).not.toContain(TYPED_AHEAD_NOTE);
-    expect(shows(out, S2)).toBe(false);
-  });
-
-  it("a line typed in full after the first question carries no note", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out, takeTerminalNow: true });
-    const hidden = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-    await printed(out, "espn_s2: ");
-    stdin.write(S2.slice(0, 40));
-    await settle();
-    stdin.write(`${S2.slice(40)}\r`);
-    expect(await hidden).toEqual({ kind: "answer", value: S2 });
-    p.close();
-    expect(out.text).toBe("espn_s2: \n");
-  });
-
-  it("CR LF and LF line breaks end one line each, also when the LF of a CR LF pair arrives apart", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const a = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "SWID: ");
-    stdin.write(`${SWID}\r`);
-    stdin.write(`\n`);
+  it("keys typed ahead are discarded unshown at the first question and said (typed before it: the scrollback note)", async () => {
+    const { stdin, screen, p } = open(true);
+    stdin.type(`${SWID}\r${S2}\r`);
+    const a = p.ask("SWID: ", { hidden: false, timeoutMs: 60_000, echo: swidEchoShape });
+    // asked on a quiet input only
+    expect(screen.text).toBe("");
+    await tick(FLUSH_QUIET_MS);
+    expect(screen.text).toBe(`${DISCARDED_NOTE}\n${TYPED_AHEAD_NOTE}\nSWID: `);
+    stdin.type(`${SWID}\r`);
     expect(await a).toEqual({ kind: "answer", value: SWID });
-    await settle();
-    // the LF was the second half of the line break, not an empty answer
-    expect(await p.ask("espn_s2: ", { hidden: true, timeoutMs: 30 })).toEqual({ kind: "timeout" });
-    const n = times(out, "SWID: ");
-    const b = p.ask("SWID: ", { hidden: false, timeoutMs: 1000 });
-    await printedTimes(out, "SWID: ", n + 1);
-    stdin.write(`${SWID}\r\n${S2}\r\nnext\n`);
-    expect(await b).toEqual({ kind: "answer", value: SWID });
-    await settle();
-    expect(await p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: S2,
-    });
-    expect(await p.ask("Q: ", { hidden: false, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: "next",
-    });
     p.close();
-    expect(shows(out, S2)).toBe(false);
+    expect(shows(screen.text, S2, 4)).toBe(false);
   });
 
-  it("a visible question edits its own line and keeps its label on a redraw", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const a = p.ask("Q: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "Q: ");
-    stdin.write("abc\x7f");
-    await settle();
-    // the redraw (cursor to column 1, erase down) writes the question again, then the line
-    expect(out.text.slice(out.text.lastIndexOf("\x1b[0J") + 4)).toMatch(/^Q: ab/);
-    stdin.write("d\r");
-    expect(await a).toEqual({ kind: "answer", value: "abd" });
+  it(`a question asked while keys still arrive waits ${String(FLUSH_QUIET_MS)} ms of quiet and drops them; ${String(FLUSH_MAX_MS)} ms at most`, async () => {
+    const { stdin, screen, p } = open();
+    const a = p.ask("Q1: ", { hidden: false, timeoutMs: 60_000 });
+    stdin.type("one\rtwo");
+    expect(await a).toEqual({ kind: "answer", value: "one" });
+    const b = p.ask("Q2: ", { hidden: false, timeoutMs: 60_000 });
+    for (let i = 0; i < 4; i++) {
+      await tick(FLUSH_QUIET_MS - 50);
+      stdin.type("more");
+      expect(screen.text).not.toContain("Q2: ");
+    }
+    await tick(FLUSH_QUIET_MS);
+    expect(screen.text).toBe(`Q1: one\n${DISCARDED_NOTE}\nQ2: `);
+    stdin.type("two\r");
+    expect(await b).toEqual({ kind: "answer", value: "two" });
+    // keys that never stop: the question is asked after FLUSH_MAX_MS regardless
+    const c = p.ask("Q3: ", { hidden: false, timeoutMs: 60_000 });
+    for (let t = 0; t < FLUSH_MAX_MS + 200; t += 100) {
+      stdin.type("k");
+      await tick(100);
+    }
+    expect(screen.text).toContain("Q3: ");
+    stdin.type("\x15three\r");
+    expect(await c).toEqual({ kind: "answer", value: "three" });
     p.close();
   });
 
-  it("Ctrl-C at a visible or a hidden question, and Ctrl-D on an empty line, end the input", async () => {
+  it("immediately before the hidden question every pending byte is dropped: SWID and espn_s2 pasted at the SWID question", async () => {
+    const { stdin, screen, p } = open(true);
+    const swid = p.ask("SWID: ", { hidden: false, timeoutMs: 60_000, echo: swidEchoShape });
+    stdin.type(`${SWID}\r${S2}\r`);
+    expect(await swid).toEqual({ kind: "answer", value: SWID });
+    const hidden = p.ask("espn_s2: ", { hidden: true, timeoutMs: 60_000 });
+    await tick(FLUSH_QUIET_MS);
+    // espn_s2 from the burst was dropped (said); the hidden question takes a fresh paste only
+    expect(screen.text).toBe(`SWID: ${SWID}\n${DISCARDED_NOTE}\nespn_s2: `);
+    stdin.type(`${S2}\r`);
+    expect(await settled(hidden)).toEqual({ kind: "answer", value: S2 });
+    p.close();
+    expect(shows(screen.text, S2, 4)).toBe(false);
+  });
+
+  it("a hidden answer with a line break in it is refused and asked again, nothing kept: the same read, a later read", async () => {
+    const { stdin, screen, p } = open();
+    const a = p.ask("espn_s2: ", { hidden: true, timeoutMs: 60_000 });
+    // the line break inside the value, one read
+    stdin.type(`${S2.slice(0, 50)}\r${S2.slice(50)}\r`);
+    await tick(FLUSH_QUIET_MS);
+    expect(screen.text).toBe(`espn_s2: \n${HIDDEN_REFUSED_NOTE}\nespn_s2: `);
+    // the tail in a later read, within the settle window
+    stdin.type(`${S2.slice(0, 50)}\r`);
+    await tick(HIDDEN_SETTLE_MS - 50);
+    stdin.type(`${S2.slice(50)}\r`);
+    await tick(FLUSH_QUIET_MS);
+    expect(screen.count(HIDDEN_REFUSED_NOTE)).toBe(2);
+    // two answers in one read
+    stdin.type(`${S2}\r${S2}\r`);
+    await tick(FLUSH_QUIET_MS);
+    expect(screen.count(HIDDEN_REFUSED_NOTE)).toBe(3);
+    // blanks after the line break (CR LF, a second Enter) refuse nothing
+    stdin.type(`${S2}\r\n`);
+    stdin.type("\r");
+    expect(await settled(a)).toEqual({ kind: "answer", value: S2 });
+    p.close();
+    expect(shows(screen.text, S2, 4)).toBe(false);
+  });
+
+  it("an empty hidden answer is refused and asked again (a late paste then meets the hidden question)", async () => {
+    const { stdin, screen, p } = open();
+    const a = p.ask("espn_s2: ", { hidden: true, timeoutMs: 60_000 });
+    stdin.type("\r");
+    await tick(HIDDEN_SETTLE_MS + FLUSH_QUIET_MS);
+    expect(screen.text).toBe(`espn_s2: \n${HIDDEN_EMPTY_NOTE}\nespn_s2: `);
+    stdin.type(`${S2}\r`);
+    expect(await settled(a)).toEqual({ kind: "answer", value: S2 });
+    p.close();
+  });
+
+  it("CR LF and LF end one line each, also when the LF of a CR LF pair arrives in a later read", async () => {
+    const { stdin, p } = open();
+    const a = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
+    stdin.type("one\r");
+    stdin.type("\n");
+    expect(await a).toEqual({ kind: "answer", value: "one" });
+    await tick(FLUSH_QUIET_MS);
+    const b = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
+    stdin.type("two\n");
+    expect(await b).toEqual({ kind: "answer", value: "two" });
+    await tick(FLUSH_QUIET_MS);
+    const c = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
+    stdin.type("three\r\nlater");
+    expect(await c).toEqual({ kind: "answer", value: "three" });
+    p.close();
+  });
+
+  it("Ctrl-C at a visible or a hidden question, Ctrl-D on an empty line, and Ctrl-C between questions end the input", async () => {
     for (const [hidden, key] of [
       [false, "\x03"],
       [true, "\x03"],
       [false, "\x04"],
       [true, "\x04"],
     ] as const) {
-      sb = sandbox();
-      const stdin = new FakeTty();
-      const out = new Capture();
-      const p = createTerminalPrompt({ stdin, out });
-      const a = p.ask("Q: ", { hidden, timeoutMs: 1000 });
-      await printed(out, "Q: ");
-      stdin.write(key);
+      const { stdin, screen, p } = open();
+      const a = p.ask("Q: ", { hidden, timeoutMs: 60_000 });
+      stdin.type(key);
       expect(await a).toEqual({ kind: "closed" });
-      expect(await p.ask("Q: ", { hidden: false, timeoutMs: 1000 })).toEqual({ kind: "closed" });
-      expect(stdin.rawCalls).toEqual([true, false]);
+      expect(await p.ask("Q: ", { hidden: false, timeoutMs: 60_000 })).toEqual({ kind: "closed" });
+      // the terminal stays raw, and what still arrives is read and dropped, until close
+      expect(stdin.rawCalls).toEqual([true]);
+      stdin.type(`${S2}\r`);
+      expect(shows(screen.text, S2, 4)).toBe(false);
       p.close();
       expect(stdin.rawCalls).toEqual([true, false]);
-      sb.cleanup();
     }
-    sb = sandbox();
+    // Ctrl-D on a line that holds keys is no end; Ctrl-C while no question waits is
+    const { stdin, p } = open(true);
+    const a = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
+    stdin.type("x\x04y\r");
+    expect(await a).toEqual({ kind: "answer", value: "xy" });
+    stdin.type("\x03");
+    expect(stdin.rawCalls).toEqual([true]);
+    expect(await p.ask("Q: ", { hidden: true, timeoutMs: 60_000 })).toEqual({ kind: "closed" });
+    p.close();
+    expect(stdin.rawCalls).toEqual([true, false]);
   });
 
-  it("Ctrl-C typed while no question waits ends the input too; lines read before it still answer", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out, takeTerminalNow: true });
-    stdin.write(`${SWID}\r\x03`);
-    await settle();
-    expect(stdin.rawCalls).toEqual([true, false]);
-    expect(await p.ask("SWID: ", { hidden: false, timeoutMs: 1000 })).toEqual({
-      kind: "answer",
-      value: SWID,
-    });
-    expect(await p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 })).toEqual({
-      kind: "closed",
-    });
+  it("a timeout answers timeout and ends the line; keys typed after it are never drawn", async () => {
+    const { stdin, screen, p } = open();
+    const a = p.ask("Q: ", { hidden: false, timeoutMs: 1_000 });
+    await tick(1_000);
+    expect(await a).toEqual({ kind: "timeout" });
+    stdin.type("after-timeout");
+    expect(screen.text).toBe("Q: \n");
+    const b = p.ask("H: ", { hidden: true, timeoutMs: 1_000 });
+    await tick(FLUSH_QUIET_MS + 1_000);
+    expect(await b).toEqual({ kind: "timeout" });
+    expect(screen.text).not.toContain("after-timeout");
     p.close();
   });
 
-  it("Ctrl-Z gives the terminal back before it suspends and takes it again on SIGCONT", async () => {
-    sb = sandbox();
-    // the stop, simulated: the terminal is cooked while the process is stopped
-    const stdin = new FakeTty();
+  it("Ctrl-Z gives the terminal back before it stops and takes it again on SIGCONT; a discarded stop takes it at once", async () => {
     const rawWhileStopped: boolean[] = [];
+    const { stdin, screen, p } = open();
     const kill = vi.spyOn(process, "kill").mockImplementation(() => {
       rawWhileStopped.push(stdin.isRaw);
       return true;
     });
     try {
-      const out = new Capture();
-      const p = createTerminalPrompt({ stdin, out });
-      const a = p.ask("Q: ", { hidden: true, timeoutMs: 1000 });
-      await printed(out, "Q: ");
-      stdin.write("\x1a");
-      await settle();
+      const a = p.ask("espn_s2: ", { hidden: true, timeoutMs: 60_000 });
+      stdin.type(`\x1a${S2.slice(0, 30)}`);
       expect(kill).toHaveBeenCalledWith(process.pid, "SIGTSTP");
       expect(rawWhileStopped).toEqual([false]);
-      // continued (kill returns): raw again at once; SIGCONT takes it again too
+      // continued (kill returned): raw again at once, whether or not SIGCONT comes
       expect(stdin.rawCalls).toEqual([true, false, true]);
+      // a second Ctrl-Z before any SIGCONT adds no second listener
+      const pending = process.listenerCount("SIGCONT");
+      stdin.type("\x1a");
+      expect(process.listenerCount("SIGCONT")).toBe(pending);
+      expect(stdin.rawCalls).toEqual([true, false, true, false, true]);
       process.emit("SIGCONT");
-      expect(stdin.rawCalls).toEqual([true, false, true, true]);
-      stdin.write("after\r");
-      expect(await a).toEqual({ kind: "answer", value: "after" });
+      expect(stdin.rawCalls).toEqual([true, false, true, false, true, true]);
+      stdin.type(`${S2.slice(30)}\r`);
+      expect(await settled(a)).toEqual({ kind: "answer", value: S2 });
+      expect(shows(screen.text, S2, 4)).toBe(false);
       p.close();
-      expect(stdin.rawCalls).toEqual([true, false, true, true, false]);
+      expect(stdin.isRaw).toBe(false);
     } finally {
       kill.mockRestore();
     }
   });
 
-  // Round 2 (the verifier): Ctrl-Z when the stop is discarded — an orphaned process group (eff as
-  // the session leader, `exec eff setup`) or SIGTSTP ignored: kill returns at once, no SIGCONT ever
-  // comes, and the terminal stayed cooked with ECHO on while the hidden question waited, so the
-  // rest of a paste was echoed by the terminal driver
-  it("Ctrl-Z whose stop is discarded: raw mode is back before the next key, nothing is echoed", async () => {
-    sb = sandbox();
-    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
-    try {
-      const stdin = new FakeTty();
-      const out = new Capture();
-      const p = createTerminalPrompt({ stdin, out });
-      const a = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-      await printed(out, "espn_s2: ");
-      stdin.write(`\x1a${S2.slice(0, 30)}`);
-      await settle();
-      // no SIGCONT: the terminal is raw again regardless (the driver does not echo)
-      expect(stdin.isRaw).toBe(true);
-      expect(stdin.rawCalls).toEqual([true, false, true]);
-      stdin.write(`${S2.slice(30)}\r`);
-      expect(await a).toEqual({ kind: "answer", value: S2 });
-      // a second Ctrl-Z adds no second SIGCONT listener
-      const before = process.listenerCount("SIGCONT");
-      const b = p.ask("espn_s2: ", { hidden: true, timeoutMs: 1000 });
-      stdin.write("\x1a");
-      await settle();
-      expect(process.listenerCount("SIGCONT")).toBe(before);
-      stdin.write("x\r");
-      await b;
-      p.close();
-      expect(shows(out, S2)).toBe(false);
-    } finally {
-      kill.mockRestore();
-    }
-  });
-
-  it("an input that ends (EOF) while a question waits answers closed and gives the terminal back", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
-    const a = p.ask("Q: ", { hidden: false, timeoutMs: 1000 });
-    await printed(out, "Q: ");
-    stdin.end();
+  it("an input that ends (EOF) while a question waits answers closed; close gives the terminal back", async () => {
+    const { stdin, p } = open();
+    const a = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
+    stdin.eof();
     expect(await a).toEqual({ kind: "closed" });
-    expect(stdin.rawCalls).toEqual([true, false]);
     p.close();
+    expect(stdin.rawCalls).toEqual([true, false]);
+    // closing twice gives nothing back twice
+    p.close();
+    expect(stdin.rawCalls).toEqual([true, false]);
   });
 
   it("a prompt closed before it was ever opened never takes the terminal", async () => {
-    sb = sandbox();
-    const stdin = new FakeTty();
-    const out = new Capture();
-    const p = createTerminalPrompt({ stdin, out });
+    const { stdin, p } = open();
     p.close();
-    expect(await p.ask("Q: ", { hidden: false, timeoutMs: 1000 })).toEqual({ kind: "closed" });
+    expect(await p.ask("Q: ", { hidden: false, timeoutMs: 60_000 })).toEqual({ kind: "closed" });
     expect(stdin.rawCalls).toEqual([]);
+  });
+
+  it("a multi-byte character split across reads is read whole; a line past MAX_LINE_CHARS is cut there", async () => {
+    const { stdin, p } = open();
+    const a = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
+    const e = Buffer.from("é", "utf8");
+    stdin.emit("data", e.subarray(0, 1));
+    stdin.emit("data", e.subarray(1));
+    stdin.type("\r");
+    expect(await a).toEqual({ kind: "answer", value: "é" });
+    await tick(FLUSH_QUIET_MS);
+    const b = p.ask("H: ", { hidden: true, timeoutMs: 60_000 });
+    stdin.type(`${"x".repeat(MAX_LINE_CHARS + 10)}\r`);
+    expect(await settled(b)).toEqual({ kind: "answer", value: "x".repeat(MAX_LINE_CHARS) });
+    p.close();
   });
 });
 

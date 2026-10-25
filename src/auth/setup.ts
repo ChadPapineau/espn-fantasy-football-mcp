@@ -19,6 +19,7 @@ import {
   buildCookieHeader,
   formatRefusalText,
   normalizePastedValue,
+  swidEchoShape,
   validateEspnS2,
   validateSwid,
 } from "./format.js";
@@ -53,18 +54,28 @@ export const SETUP_MAX_ATTEMPTS = 3;
 /** Largest team id accepted from team resolution (plan 02 A-2 says ≤ 20; generous). */
 const TEAM_ID_MAX = 9999;
 
-/** One answer from the terminal (the CLI's readline; `hidden` mutes the echo). */
+/** One answer from the terminal (src/cli/prompt.ts; `hidden`: nothing typed is drawn). */
 export type PromptAnswer =
   | { readonly kind: "answer"; readonly value: string }
   | { readonly kind: "timeout" }
   | { readonly kind: "closed" };
 
+/** How one question is asked. */
+export interface AskOptions {
+  /** espn_s2: nothing typed is ever drawn. */
+  readonly hidden: boolean;
+  readonly timeoutMs: number;
+  /**
+   * The answer's shape, for a visible question on a terminal: a character is drawn only while the
+   * line typed so far has it (the SWID; a y/N answer) — so a value pasted at the wrong question is
+   * not drawn (Stage C ruling R7-3). Absent: every character typed is drawn.
+   */
+  readonly echo?: (line: string) => boolean;
+}
+
 /** The terminal prompt (hidden input for espn_s2 — plan 03 §2.1 step 3). */
 export interface SetupPrompt {
-  ask(
-    question: string,
-    opts: { readonly hidden: boolean; readonly timeoutMs: number },
-  ): Promise<PromptAnswer>;
+  ask(question: string, opts: AskOptions): Promise<PromptAnswer>;
 }
 
 /** One ESPN request's outcome: an HTTP status, or a fixed error code (timeout, network, host_moved). */
@@ -531,10 +542,14 @@ async function deleteQuietly(store: CredentialStore): Promise<void> {
 
 /** One answer to one field's question: the value as pasted, or the end of setup (timeout, closed). */
 async function askOne(deps: SetupDeps, field: "swid" | "espn_s2"): Promise<Step<string>> {
-  const a = await deps.prompt.ask(field === "swid" ? SETUP_TEXT.askSwid : SETUP_TEXT.askEspnS2, {
-    hidden: field === "espn_s2",
-    timeoutMs: SETUP_PROMPT_TIMEOUT_MS,
-  });
+  // the SWID is drawn as it is typed only while it looks like one: an espn_s2 pasted at its question
+  // (it never starts with a brace) is never drawn (Stage C ruling R7-3)
+  const a = await deps.prompt.ask(
+    field === "swid" ? SETUP_TEXT.askSwid : SETUP_TEXT.askEspnS2,
+    field === "swid"
+      ? { hidden: false, timeoutMs: SETUP_PROMPT_TIMEOUT_MS, echo: swidEchoShape }
+      : { hidden: true, timeoutMs: SETUP_PROMPT_TIMEOUT_MS },
+  );
   if (a.kind === "timeout") {
     deps.out(SETUP_TEXT.timeout);
     return { ok: false, exitCode: EXIT_CODES.error };

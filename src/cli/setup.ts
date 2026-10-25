@@ -171,9 +171,10 @@ export async function setup(
     return recordSeeding(io, opts.seeding as SeedingMode, log, config, over.factory);
   }
 
-  // the terminal flow asks for both values: it takes the terminal before anything else, so keys
-  // typed while setup starts are read muted, never echoed (prompt.ts). `--page` takes its values
-  // from the page (Ctrl-C keeps stopping it) and `--reset` asks nothing: neither takes it.
+  // the terminal flow asks for both values: it takes the terminal before anything else (raw mode:
+  // from then on the driver echoes nothing) and keeps it until setup ends (prompt.ts; Stage C ruling
+  // R7-3). `--page` takes its values from the page (Ctrl-C keeps stopping it) and `--reset` asks
+  // nothing: neither takes it.
   const takeNow = !opts.page && !opts.reset;
   const prompt =
     over.prompt ??
@@ -182,7 +183,7 @@ export async function setup(
   try {
     // input already waiting on the terminal — typed while the process started, so the terminal
     // driver echoed it — is read now, before anything is printed: the prompt then knows it came
-    // before the first question and says so if espn_s2 is taken from it (prompt.ts TYPED_AHEAD_NOTE)
+    // before the first question, discards it unshown and says so (prompt.ts TYPED_AHEAD_NOTE)
     if (over.prompt === undefined && takeNow && isTty(io.stdin))
       await new Promise((resolve) => setTimeout(resolve, TYPE_AHEAD_SETTLE_MS));
     // test mode needs no league (it never asks ESPN); every other run does
