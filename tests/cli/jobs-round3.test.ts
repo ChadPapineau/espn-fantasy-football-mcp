@@ -27,7 +27,7 @@ import {
   updateJobState,
   NOTIFICATION_LOG_MAX,
 } from "../../src/cli/job-state.js";
-import { JOBS } from "../../src/cli/launchd.js";
+import { JOBS, installedArgv, plistPath, renderPlist } from "../../src/cli/launchd.js";
 import { main } from "../../src/cli/main.js";
 import { createNotifier } from "../../src/cli/notify.js";
 import { gameDayCadenceWorks } from "../../src/cli/refresh.js";
@@ -156,6 +156,40 @@ describe("a job typed at a terminal is the owner's, never the fleet's cap (cli-s
 
   it("every launchd job that reads ESPN with cookies carries --notify, the launchd mark", () => {
     for (const j of JOBS.filter((x) => x.cookies)) expect(j.argv, j.name).toContain("--notify");
+  });
+
+  it("doctor #11 names a plist an older build installed (its arguments differ): `eff install-launchd`", async () => {
+    sb = sandbox();
+    const job = JOBS.find((j) => j.name === "snapshot-projections")!;
+    const agents = path.join(sb.home, "Library", "LaunchAgents");
+    mkdirSync(agents, { recursive: true });
+    const plist = (argv: readonly string[]) =>
+      renderPlist({
+        job: { ...job, argv },
+        node: process.execPath,
+        entry: path.join(sb.dir, "dist", "cli.js"),
+        env: {},
+        home: sb.home,
+      });
+    writeFileSync(plistPath(sb.home, job), plist(["snapshot", "projections"]));
+    const io = makeIo(sb, {
+      platform: "darwin",
+      exec: fakeExec().exec,
+      env: { ESPN_LEAGUE_ID: "0" },
+    });
+    const { config } = await loadRuntime(io);
+    const old = await checkLaunchd(io, config, null);
+    expect(old.status).toBe("warn");
+    expect(old.details.join("\n")).toContain(
+      "snapshot-projections: installed by an older build — it runs `eff snapshot projections`, this build `eff snapshot projections --notify`",
+    );
+    expect(installedArgv(plistPath(sb.home, job))).toEqual(["snapshot", "projections"]);
+    writeFileSync(plistPath(sb.home, job), plist(job.argv));
+    expect((await checkLaunchd(io, config, null)).details.join("\n")).not.toContain("older build");
+    // a file that is not one of ours reads as nothing to compare
+    writeFileSync(plistPath(sb.home, job), "<plist/>");
+    expect(installedArgv(plistPath(sb.home, job))).toBeNull();
+    expect(installedArgv(path.join(sb.dir, "none.plist"))).toBeNull();
   });
 });
 
@@ -445,6 +479,50 @@ describe("the pool's waiver anchor after a working run (jobs-pool-anchor-cached-
     );
     expect(row.details.join("\n")).toContain("waiverNextExecutionDate is absent");
   });
+});
+
+describe("the anchor's fresh read when ESPN is briefly unreachable", () => {
+  it("keeps the passed anchor (never the ET guess) and reads again at the next wake", async () => {
+    sb = sandbox();
+    const runs = ["2026-10-08T16:00:00.000Z", "2026-10-11T16:00:00.000Z"].map(Date.parse);
+    let wake = 0;
+    let down = false;
+    const base = leagueA((s) => {
+      const next = runs.find((t) => t > wake) ?? runs[runs.length - 1]!;
+      const status = { ...(s.status as Record<string, unknown>), waiverNextExecutionDate: next };
+      const settings = s.settings as Record<string, unknown>;
+      const acq = {
+        ...(settings.acquisitionSettings as Record<string, unknown>),
+        waiverProcessHour: 3,
+      };
+      return { ...s, status, settings: { ...settings, acquisitionSettings: acq } };
+    });
+    const f = fakeFetch((url, init) => {
+      if (down && new URL(url).searchParams.getAll("view").includes("mSettings"))
+        return new Response(null, { status: 503 });
+      return base.fetch(url, init);
+    });
+    const at = async (iso: string) => {
+      wake = Date.parse(iso);
+      const r = await runtime(iso, f);
+      return { r, code: await snapshotPool(r.io, r.config, r.log, { notify: false }) };
+    };
+    // Thu 10:00Z caches the settings (next execution Thu 16:00Z); 17:00Z is the working run
+    expect((await at("2026-10-08T10:00:00.000Z")).code).toBe(0);
+    const work = await at("2026-10-08T17:00:00.000Z");
+    expect(work.r.io.out.text).toContain("(waivers)");
+    // 18:00Z: the cached body states the passed Thu run; the fresh read finds ESPN down
+    down = true;
+    expect((await at("2026-10-08T18:00:00.000Z")).code).toBe(0);
+    expect(readJobState(sb.cacheDir)["pool.anchor"]).toBe(runs[0]);
+    // 19:00Z: ESPN is back; the fresh read states Sunday's run
+    down = false;
+    expect((await at("2026-10-08T19:00:00.000Z")).code).toBe(0);
+    expect(readJobState(sb.cacheDir)).toMatchObject({
+      "pool.anchor": runs[1],
+      "pool.anchor_basis": "status",
+    });
+  }, 60_000);
 });
 
 describe("what the notifications said is kept, and shown by eff status (notify-text-not-recorded)", () => {

@@ -71,7 +71,14 @@ import {
   readJobState,
   stateToken,
 } from "./job-state.js";
-import { installedPlists, JOB_NAMES, LAUNCHCTL, labelOf, launchctl } from "./launchd.js";
+import {
+  installedArgv,
+  installedPlists,
+  JOB_NAMES,
+  LAUNCHCTL,
+  labelOf,
+  launchctl,
+} from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
 import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
 import {
@@ -1471,14 +1478,25 @@ export async function checkLaunchd(
     return row(11, "launchd", title, "warn", "no jobs installed", "`eff install-launchd`", details);
   let status: RowStatus = "ok";
   let failing = 0;
+  let outdated = 0;
   const records = new Map(
     jobRunRecords(readJobState(config.cacheDir), JOB_NAMES).map((r) => [r.job, r] as const),
   );
-  for (const { job } of installed) {
+  for (const { job, file } of installed) {
     const r = await io.exec(LAUNCHCTL, launchctl.print(io.uid, labelOf(job)));
     const loaded = r.code === 0;
     if (!loaded) status = "warn";
     const spec = availableJobs().find((j) => j.name === job);
+    // a plist an older build wrote runs that build's arguments (e.g. the projections snapshot
+    // before it carried --notify, the launchd mark its requests are charged by)
+    const argv = installedArgv(file);
+    if (spec !== undefined && argv !== null && argv.join("\u0000") !== spec.argv.join("\u0000")) {
+      outdated++;
+      status = "warn";
+      details.push(
+        `${job}: installed by an older build — it runs \`eff ${argv.join(" ")}\`, this build \`eff ${spec.argv.join(" ")}\``,
+      );
+    }
     const runs = (spec?.sources ?? [])
       .map((s) => (store === null ? null : store.repos.refreshLog.latest(s)))
       .filter((x) => x !== null)
@@ -1515,7 +1533,9 @@ export async function checkLaunchd(
       ? `${String(installed.length)} job(s) installed and loaded`
       : failing > 0
         ? `${String(failing)} job(s) failed on their last run${missing.length > 0 ? "; some jobs are missing or not loaded" : ""}`
-        : "some jobs are missing or not loaded",
+        : outdated > 0
+          ? `${String(outdated)} job(s) installed by an older build`
+          : "some jobs are missing or not loaded",
     status === "ok"
       ? null
       : failing > 0

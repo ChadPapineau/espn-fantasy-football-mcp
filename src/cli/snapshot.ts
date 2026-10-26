@@ -325,6 +325,13 @@ export function poolWorkingRun(
   return null;
 }
 
+/** The failures of a fresh settings read after which the pool's anchor is simply read again later. */
+const TRANSIENT_CODES: ReadonlySet<string> = new Set([
+  "ESPN_UPSTREAM_UNAVAILABLE",
+  "UPSTREAM_UNAVAILABLE",
+  "RATE_LIMITED",
+]);
+
 /** How waiverNextExecutionDate and waiverProcessHour (read as ET) relate (doctor #11 reads it). */
 export type AnchorAgreement = "agrees" | "disagrees" | "unknown";
 
@@ -363,8 +370,20 @@ async function refreshPoolAnchor(
     return t !== null && Number.isFinite(t) ? t : null;
   };
   const cached = statedOf(rules.waiver);
-  if (cached !== null && cached <= now)
-    rules = (await run.stack.provider.getLeagueRules(ref, { force_refresh: true })).value;
+  if (cached !== null && cached <= now) {
+    // ESPN unreachable for that one read — it failed, or the provider answered from its stale
+    // cache instead: the anchor stays (passed and worked), so the next hourly wake reads again —
+    // never the ET guess in its place. Any other failure (a rejected cookie, drift) is the job's
+    let fresh;
+    try {
+      fresh = await run.stack.provider.getLeagueRules(ref, { force_refresh: true });
+    } catch (e) {
+      if (!TRANSIENT_CODES.has(effCodeOf(e))) throw e;
+      return;
+    }
+    if (fresh.stamp.degraded !== null) return;
+    rules = fresh.value;
+  }
   const stated = statedOf(rules.waiver);
   const next = nextWaiverRun(rules.waiver, now);
   const at = next.at === null ? null : Date.parse(next.at);

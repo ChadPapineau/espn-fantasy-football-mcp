@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatasetSourceId, RefreshJob } from "../config/freshness.js";
+import { readSecureFile } from "../config/paths.js";
 import type { LenientConfig } from "../config/schema.js";
 import type { Exec } from "./io.js";
 import { envSourcedServerKeys } from "./print-config.js";
@@ -532,6 +533,38 @@ export function installedPlists(home: string): { job: string; file: string }[] {
     job: j,
     file: plistPath(home, j),
   }));
+}
+
+/** The inverse of `xmlEscape` (the five entities it writes). */
+function xmlUnescape(s: string): string {
+  return s
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+}
+
+/**
+ * The `eff` arguments an installed plist runs — its ProgramArguments after the node binary and
+ * dist/cli.js — or null when the file cannot be read as one of ours (doctor #11 compares them with
+ * this build's job table: a plist written by an older build keeps its old arguments until `eff
+ * install-launchd` runs again).
+ */
+export function installedArgv(file: string): string[] | null {
+  let text: string | null;
+  try {
+    text = readSecureFile(file, { requirePrivate: false, maxBytes: 64 * 1024, what: "plist" });
+  } catch {
+    return null;
+  }
+  if (text === null) return null;
+  const m = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(text);
+  if (m?.[1] === undefined) return null;
+  const args = [...m[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map((x) =>
+    xmlUnescape(x[1] ?? ""),
+  );
+  return args.length < 2 ? null : args.slice(2);
 }
 
 /** Boots out and removes every installed plist of ours (plan 03 §8 step 1). */
