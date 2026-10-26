@@ -46,6 +46,7 @@ import {
   type RecommendationRecordView,
 } from "../domain/reclog/types.js";
 import type { BracketFamilyName, Canonical } from "../domain/scoring/types.js";
+import type { G1SourceRow, G1StatusData } from "./tools/ops.js";
 import {
   ESPN_PERSON_PLAYER_ID_MAX,
   degradedWarning,
@@ -712,7 +713,7 @@ export interface FreshnessClassRow {
 }
 /** `espn-ff://status/freshness`: G1's `sources[]` plus the class table. */
 export interface FreshnessResourceData {
-  readonly sources: StatusData["sources"];
+  readonly sources: readonly G1SourceRow[];
   readonly classes: readonly FreshnessClassRow[];
 }
 
@@ -745,7 +746,7 @@ export interface ResourcePayloads {
   readonly "espn-ff://league": LeagueResourceData;
   readonly "espn-ff://league/settings": LeagueDigestData;
   readonly "espn-ff://game/stat-ids": StatIdResourceData;
-  readonly "espn-ff://status": StatusData;
+  readonly "espn-ff://status": G1StatusData;
   readonly "espn-ff://status/freshness": FreshnessResourceData;
   readonly "espn-ff://status/drift": DriftResourceData;
   readonly "espn-ff://roster/snapshot": RosterSnapshotResourceData;

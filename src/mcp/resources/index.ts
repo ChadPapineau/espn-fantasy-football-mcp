@@ -246,12 +246,13 @@ export function registerResources(
     "status_freshness",
     "espn-ff://status/freshness",
     "Each data source's age and state, and the freshness class table.",
-    (ctx) =>
-      Promise.resolve({
-        data: freshnessReport(ctx),
-        inputs: [],
-        extraSources: ["store:refresh_log"],
-      }),
+    (ctx) => {
+      const warnings: string[] = [];
+      const data = freshnessReport(ctx, (w) => {
+        if (!warnings.includes(w)) warnings.push(w);
+      });
+      return Promise.resolve({ data, inputs: [], warnings, extraSources: ["store:refresh_log"] });
+    },
   );
   reg(
     "status_drift",

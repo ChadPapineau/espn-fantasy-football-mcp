@@ -149,7 +149,29 @@ export interface StatusPort {
     readonly last_run_at: string | null;
     readonly exit: number | null;
   }[];
+  /**
+   * Why the dataset connection layer refuses `source`'s CURRENT file (src/store/datasets/
+   * connections.ts DatasetRefusal: `dataset_unreadable`, `dataset_tables_missing`, …), or null when
+   * it serves it or refresh_log names none. G1 reports a refused file as unusable, as every reader
+   * reads it ("never loaded"), instead of fresh from refresh_log (Stage C finding
+   * status-damaged-dataset-reported-fresh). Optional and additive: a bundle without it (an older
+   * composition root, the narrower test fakes) reads every listed file as served.
+   */
+  datasetRefusal?(source: DatasetSourceId): DatasetRefusalCode | null;
 }
+
+/** The connection layer's refusal codes (fixed vocabulary; src/store/datasets/connections.ts). */
+export const DATASET_REFUSAL_CODES = [
+  "dataset_symlink_refused",
+  "dataset_not_regular_file",
+  "dataset_missing",
+  "dataset_unreadable",
+  "dataset_unstamped",
+  "dataset_source_mismatch",
+  "dataset_schema_mismatch",
+  "dataset_tables_missing",
+] as const;
+export type DatasetRefusalCode = (typeof DATASET_REFUSAL_CODES)[number];
 
 /** The one explicit credential probe (plan 07 G2) behind the authority's state. */
 export interface AuthPort {

@@ -18,6 +18,7 @@ import {
   type FreshnessClassId,
 } from "../../config/freshness.js";
 import { CREDENTIAL_STATES, DRIFT_STATUSES, SEEDING_MODES, TOOLSETS } from "../../config/schema.js";
+import { TOP_OWNED_PERCENT } from "../../domain/crosswalk/types.js";
 import { CHECK_IDS, type CheckRow } from "../../domain/league/types.js";
 import {
   NO_WRITES,
@@ -29,9 +30,9 @@ import {
 import type { FreshnessClassRow, FreshnessResourceData } from "../envelope.js";
 import { EffError, SERVER_HINTS } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
-import type { DriftView, McpServerOptions } from "../services.js";
+import type { DatasetRefusalCode, DriftView, McpServerOptions } from "../services.js";
 import { TOOL_CONTRACT } from "../contract.js";
-import { clockWeek, leagueRef, ttlContextOf } from "./common.js";
+import { clockWeek, isTeamUnitIdentity, leagueRef, ttlContextOf } from "./common.js";
 import { count, iso, isoNull } from "./schemas.js";
 
 /**
@@ -239,12 +240,13 @@ export const statusDataSchema = z.strictObject({
   sources: z.array(sourceRow).max(30),
   // matched: every stored pair; matched_by_name: those below confidence 1.0 (research 04 §C step 2);
   // unmatched_*: rostered / ≥ 1 %-owned players without a confidence-1.0 pair, the alert's rule (§C
-  // step 5) — a name-only player counts in matched, matched_by_name and unmatched_*
+  // step 5) — a name-only player counts in matched, matched_by_name and unmatched_*; null (with a
+  // warning) when this call cannot read the players the alert reads (crosswalkUnmatched)
   crosswalk: z.strictObject({
     matched: count,
     matched_by_name: count,
-    unmatched_rostered: count,
-    unmatched_top_owned: count,
+    unmatched_rostered: count.nullable(),
+    unmatched_top_owned: count.nullable(),
   }),
   store: z.strictObject({
     path: z.literal(STORE_PATH_PLACEHOLDER),
@@ -280,6 +282,123 @@ export const statusDataSchema = z.strictObject({
     .max(50)
     .nullable(),
 });
+
+/**
+ * G1's data: StatusData with the crosswalk's unmatched counts nullable — null when the call cannot
+ * read the players the rebuild's alert reads (Stage C finding status-crosswalk-counts-disagree-alert).
+ */
+export type G1StatusData = Omit<StatusData, "crosswalk" | "sources"> & {
+  readonly crosswalk: Omit<
+    StatusData["crosswalk"],
+    "unmatched_rostered" | "unmatched_top_owned"
+  > & {
+    readonly unmatched_rostered: number | null;
+    readonly unmatched_top_owned: number | null;
+  };
+  readonly sources: readonly G1SourceRow[];
+};
+
+/**
+ * One G1 `sources[]` row: StatusData's, whose `last_error` may also carry the connection layer's
+ * refusal of the current file (StatusPort.datasetRefusal — Stage C finding
+ * status-damaged-dataset-reported-fresh).
+ */
+export type G1SourceRow = Omit<StatusData["sources"][number], "last_error"> & {
+  readonly last_error: StatusData["sources"][number]["last_error"] | DatasetRefusalCode;
+};
+
+/** The highest team id G1 probes the store's roster snapshots for (ESPN leagues hold ≤ 20 teams). */
+export const SNAPSHOT_TEAM_PROBE_MAX = 40;
+
+/**
+ * The rostered players of EVERY league roster (research 04 §C step 5: "ESPN ids on any fantasy
+ * roster of the league"), from zero requests: this call's cached rosters of the clock's week, else the
+ * store's newest roster-snapshot run (`eff snapshot rosters` stores every team's), else null.
+ */
+async function leagueRostered(
+  ctx: ToolContext,
+  week: number | null,
+): Promise<ReadonlySet<number> | null> {
+  const s = ctx.services;
+  const ref = leagueRef(ctx);
+  if (week !== null && week >= 1) {
+    const rosters = await cachedOnly(ctx, (budget) => s.platform.getRosters(ref, week, { budget }));
+    if (rosters !== null && rosters.value.length > 0)
+      return new Set(rosters.value.flatMap((r) => r.entries.map((e) => e.player.ref.id)));
+  }
+  try {
+    const runs: { taken: number; ids: number[] }[] = [];
+    for (let t = 1; t <= SNAPSHOT_TEAM_PROBE_MAX; t++) {
+      const snap = s.rosterSnapshots.latestTwo(t)[0];
+      if (snap === undefined) continue;
+      runs.push({
+        taken: Date.parse(snap.taken_at),
+        ids: snap.roster.entries.map((e) => e.player.ref.id),
+      });
+    }
+    if (runs.length === 0) return null;
+    // the newest run only: a team's older snapshot is no longer its roster
+    const newest = Math.max(...runs.map((r) => r.taken));
+    return new Set(runs.filter((r) => r.taken === newest).flatMap((r) => r.ids));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The crosswalk's unmatched counts by the rebuild's alert rule (research 04 §C step 5; plan 06
+ * §1.3; src/domain/crosswalk/resolver.ts resolveCrosswalk): over the players the rebuild resolves —
+ * ESPN's player index (espn:players) — a player without a confidence-1.0 pair, team units never,
+ * counts as rostered when he is on any league roster, else as top-owned when he is ≥ 1 % owned.
+ * Before, the top-owned count read the newest POOL snapshot (free agents only, the top of each
+ * position) and the rostered one a cached read a new session never has, so both read a hard 0 — a
+ * false all-clear — beside the rebuild's alert (Stage C finding status-crosswalk-counts-disagree-
+ * alert). A set this call cannot read is null, said in a warning: without the index both (the
+ * rebuild itself skips), without a league roster the rostered count, and the top-owned one then
+ * counts every ≥ 1 %-owned player.
+ */
+export async function crosswalkUnmatched(
+  ctx: ToolContext,
+  week: number | null,
+  warn: (w: string) => void,
+): Promise<{ readonly rostered: number | null; readonly top_owned: number | null }> {
+  const s = ctx.services;
+  const lacksConfidentPair = (espnId: number): boolean => {
+    const pair = s.crosswalk.get(espnId);
+    return pair === null || pair.confidence < 1;
+  };
+  let universe: ReturnType<typeof s.playerUniverse.all>;
+  try {
+    universe = s.playerUniverse.all(s.league.season);
+  } catch {
+    warn("crosswalk: espn:players unreadable: unmatched_rostered and unmatched_top_owned are null");
+    return { rostered: null, top_owned: null };
+  }
+  if (universe.stamp === null) {
+    warn(
+      "crosswalk: espn:players never loaded: unmatched_rostered and unmatched_top_owned are null (eff refresh espn:players)",
+    );
+    return { rostered: null, top_owned: null };
+  }
+  const rostered = await leagueRostered(ctx, week);
+  if (rostered === null)
+    warn(
+      "crosswalk: no league roster is readable without a request (no cached rosters, no roster snapshot): unmatched_rostered is null, unmatched_top_owned counts every ≥ 1 %-owned player",
+    );
+  let rosteredUnmatched = 0;
+  let topOwnedUnmatched = 0;
+  for (const p of universe.rows) {
+    if (p.espn_id <= 0 || isTeamUnitIdentity(p)) continue;
+    const isRostered = rostered?.has(p.espn_id) === true;
+    const owned = p.percent_owned;
+    const isTop = typeof owned === "number" && Number.isFinite(owned) && owned >= TOP_OWNED_PERCENT;
+    if (!isRostered && !isTop) continue;
+    if (!lacksConfidentPair(p.espn_id)) continue;
+    if (isRostered) rosteredUnmatched++;
+    else topOwnedUnmatched++;
+  }
+  return { rostered: rostered === null ? null : rosteredUnmatched, top_owned: topOwnedUnmatched };
+}
 
 /** Whole days since `iso`, or null. */
 function ageDays(storedAt: string | null, nowMs: number): number | null {
@@ -332,12 +451,46 @@ export function statusSources(
   ];
 }
 
-/** One `sources[]` row from refresh_log (fixed codes only — never an exception text). */
-function sourceStatus(ctx: ToolContext, id: DatasetSourceId): StatusData["sources"][number] {
+/** The fix G1 names for a dataset file the connection layer refuses. */
+export function refusedDatasetWarning(id: DatasetSourceId, code: string): string {
+  return `${id}: its dataset file cannot be served (${code}): every tool reads it as never loaded — run \`eff refresh ${id}\``;
+}
+
+/**
+ * One `sources[]` row from refresh_log (fixed codes only — never an exception text), judged against
+ * the dataset connection layer: a current file it refuses (StatusPort.datasetRefusal — truncated,
+ * damaged, re-laid-out) is unusable — freshness `never`, no rows, the refusal as `last_error` and the
+ * refresh named — as every reader reads it, never fresh from refresh_log alone (Stage C finding
+ * status-damaged-dataset-reported-fresh).
+ */
+function sourceStatus(
+  ctx: ToolContext,
+  id: DatasetSourceId,
+  warn?: (w: string) => void,
+): G1SourceRow {
   const info = SOURCE_REGISTRY[id];
   const current = ctx.services.refreshLog.current().find((r) => r.source === id) ?? null;
   const latest = ctx.services.refreshLog.latest(id);
   const lastError = latest !== null && !latest.ok ? latest.error : null;
+  let refusal: DatasetRefusalCode | null = null;
+  if (current !== null)
+    try {
+      refusal = ctx.services.status.datasetRefusal?.(id) ?? null;
+    } catch {
+      refusal = null;
+    }
+  if (current !== null && refusal !== null) {
+    warn?.(refusedDatasetWarning(id, refusal));
+    return {
+      id,
+      license: info.license,
+      last_success_at: current.finished_at,
+      age_s: null,
+      freshness: "never",
+      rows: null,
+      last_error: refusal,
+    };
+  }
   if (current === null)
     return {
       id,
@@ -388,7 +541,8 @@ export async function statusSnapshot(
   ctx: ToolContext,
   includeChecks: boolean,
   droppedDrift?: (n: number) => void,
-): Promise<StatusData> {
+  warn?: (w: string) => void,
+): Promise<G1StatusData> {
   const s = ctx.services;
   const ref = leagueRef(ctx);
   const cred = s.status.credential();
@@ -410,35 +564,20 @@ export async function statusSnapshot(
       rosterLast = null;
     }
   }
+  let poolLast: string | null = null;
+  try {
+    poolLast = s.poolSnapshots.latestTwo()[0]?.taken_at ?? null;
+  } catch {
+    poolLast = null;
+  }
   // A player counts as unmatched exactly when the rebuild's alert would list him (research 04 §C
   // step 5; plan 06 §1.3): no stored pair, or one below confidence 1.0 — a name-only pair (§C step 2)
   // is surfaced as matched_by_name, never hidden among the confident ones (Stage C finding
   // crosswalk-alert-remediation-dead). A pair the rebuild rejected is removed from the store, so it
-  // reads as no pair here (crosswalk-rejected-pair-persists).
-  const lacksConfidentPair = (espnId: number): boolean => {
-    const pair = s.crosswalk.get(espnId);
-    return pair === null || pair.confidence < 1;
-  };
-  let poolLast: string | null = null;
-  let topOwnedUnmatched = 0;
-  try {
-    const pool = s.poolSnapshots.latestTwo()[0];
-    poolLast = pool?.taken_at ?? null;
-    for (const p of pool?.players ?? []) {
-      if ((p.ownership?.percent_owned ?? 0) < 1 || p.ref.id < 0) continue;
-      if (lacksConfidentPair(p.ref.id)) topOwnedUnmatched++;
-    }
-  } catch {
-    poolLast = null;
-  }
-  let rosteredUnmatched = 0;
-  const week = league === null ? null : league.value.clock.current_scoring_period;
-  if (week !== null && week >= 1) {
-    const rosters = await cachedOnly(ctx, (budget) => s.platform.getRosters(ref, week, { budget }));
-    for (const r of rosters?.value ?? [])
-      for (const e of r.entries)
-        if (e.player.ref.id > 0 && lacksConfidentPair(e.player.ref.id)) rosteredUnmatched++;
-  }
+  // reads as no pair here (crosswalk-rejected-pair-persists). Every league roster and the player
+  // index, as the alert reads them (crosswalkUnmatched).
+  const week = league === null ? null : clockWeek(league.value.clock);
+  const unmatched = await crosswalkUnmatched(ctx, week, (w) => warn?.(w));
   let projectionLast: string | null = null;
   try {
     projectionLast = s.espnProjections.lastSnapshotAt();
@@ -513,12 +652,12 @@ export async function statusSnapshot(
       breaker_open: transport.breaker_open,
       etag_304_count: transport.etag_304_count,
     },
-    sources: statusSources(ctx.options).map((id) => sourceStatus(ctx, id)),
+    sources: statusSources(ctx.options).map((id) => sourceStatus(ctx, id, warn)),
     crosswalk: {
       matched,
       matched_by_name: matchedByName,
-      unmatched_rostered: rosteredUnmatched,
-      unmatched_top_owned: topOwnedUnmatched,
+      unmatched_rostered: unmatched.rostered,
+      unmatched_top_owned: unmatched.top_owned,
     },
     store: {
       path: STORE_PATH_PLACEHOLDER,
@@ -549,9 +688,16 @@ export const getStatus = defineTool({
   budget: "list",
   run: async (args, ctx) => {
     const warnings: string[] = [];
-    const data = await statusSnapshot(ctx, args.include_checks, (n) => {
-      if (n > 0) warnings.push(droppedDriftWarning(n));
-    });
+    const data = await statusSnapshot(
+      ctx,
+      args.include_checks,
+      (n) => {
+        if (n > 0) warnings.push(droppedDriftWarning(n));
+      },
+      (w) => {
+        if (!warnings.includes(w)) warnings.push(w);
+      },
+    );
     if (data.credential.stale_warning === true)
       warnings.push(`credential stored ${String(data.credential.age_days)} days ago`);
     if (data.drift.status !== "green") warnings.push(`drift status is ${data.drift.status}`);
@@ -613,9 +759,12 @@ export const checkAuth = defineTool({
 // --- status resources (plan 07 §4.1) -------------------------------------------------------------
 
 /** The plan 01 §5.4 class table with each class's current age and state. */
-export function freshnessReport(ctx: ToolContext): FreshnessResourceData {
+export function freshnessReport(
+  ctx: ToolContext,
+  warn?: (w: string) => void,
+): FreshnessResourceData {
   const ages = new Map<FreshnessClassId, { age_s: number; state: FreshnessClassRow["state"] }>();
-  const sources = statusSources(ctx.options).map((id) => sourceStatus(ctx, id));
+  const sources = statusSources(ctx.options).map((id) => sourceStatus(ctx, id, warn));
   for (const s of sources) {
     if (s.age_s === null) continue;
     const cls = SOURCE_REGISTRY[s.id as DatasetSourceId].freshness;
