@@ -17,7 +17,14 @@ import {
 } from "../../config/freshness.js";
 import type { DatasetResult, DatasetStamp, NewsItem } from "../../domain/analytics/types.js";
 import { yieldTurn } from "../../domain/analytics/cooperative.js";
-import { espnRosLastWeek, rosWeeksOf, type RosWeek } from "../../domain/analytics/projection.js";
+import { ESPN_ROS, LIMITS, NFL_REGULAR_SEASON } from "../../domain/analytics/constants.js";
+import {
+  espnRosLastWeek,
+  rosGamesOf,
+  rosWeeksOf,
+  rosWindow,
+  type RosWeek,
+} from "../../domain/analytics/projection.js";
 import type { WeeklyValuesOpts } from "../../domain/analytics/waivers.js";
 import {
   crosswalkStatusOfPair,
@@ -434,7 +441,10 @@ const ROS_MEMO = new WeakMap<
  * waivers.ts `rosShareOptsOf` for a platform player (who carries no ESPN game count), memoised per
  * pro team.
  */
-export function rosOptsOf(p: PlatformPlayer, ros: RosReading | null): WeeklyValuesOpts {
+export function rosOptsOf(
+  p: Pick<PlatformPlayer, "pro_team_id" | "position_id">,
+  ros: RosReading | null,
+): WeeklyValuesOpts {
   if (ros === null) return {};
   let memo = ROS_MEMO.get(ros);
   if (memo === undefined) {
@@ -447,6 +457,37 @@ export function rosOptsOf(p: PlatformPlayer, ros: RosReading | null): WeeklyValu
     memo.byTeam.set(p.pro_team_id, weeks);
   }
   return { ros_last_week: memo.last, ros_weeks: weeks, position_id: p.position_id };
+}
+
+/**
+ * How many games ESPN's rest-of-season total for `p` covers, as E1 reads the total (projection.ts
+ * rosWindow): ESPN's own game count (stat 210 of the split, `espnGames`) when believable; else a
+ * D/ST's whole season; else his games not yet started at the clock from the week ESPN's numbers are
+ * as of (`asOf`, the clock's week) through the NFL season's last week (week 18 included, byes out).
+ * Without a pro schedule (`ros` null) every week from `asOf` on but his bye counts. Independent of
+ * any week a caller asks about: the total does not change with it (Stage C finding
+ * projections-ros-weeks-remaining-mismatch — C3 paired the total with the league's weeks from the
+ * requested week, so a per-week reading was about twice the true per-game value).
+ */
+export function rosGamesCovered(
+  p: Pick<PlatformPlayer, "pro_team_id" | "position_id" | "bye_week" | "projection_ros_espn">,
+  ros: RosReading | null,
+  asOf: Week,
+  espnGames: number | null = null,
+): number {
+  const opts = rosOptsOf(p, ros);
+  const last = opts.ros_last_week ?? NFL_REGULAR_SEASON.lastWeek;
+  const given = new Map((opts.ros_weeks ?? []).map((x) => [x.week, x]));
+  const season: RosWeek[] = [];
+  for (let w = 1; w <= Math.min(LIMITS.maxWeeks, Math.max(last, asOf)); w++)
+    season.push(
+      given.get(w) ?? { week: w, playing: w !== p.bye_week, started: false, ahead: false },
+    );
+  return rosWindow(season, {
+    from: asOf,
+    games: rosGamesOf(espnGames, p.projection_ros_espn),
+    full_season: ESPN_ROS.fullSeasonPositionIds.includes(p.position_id),
+  }).covered.size;
 }
 
 /** Games of one week. */
@@ -760,8 +801,101 @@ export function newsRefsOf(item: NewsItem): readonly NewsRef[] {
     .map((g) => ({ espn_id: null, gsis_id: g, c: NEWS_MATCH_FLOOR }));
 }
 
+/**
+ * The most items the news reader returns from one read (its own ceiling, src/store/datasets/
+ * readers-p2.ts NEWS_RECENT_MAX — the reader never returns more, whatever is asked).
+ */
+export const NEWS_READ_MAX = 500;
+
+/** The players a news read selects: ESPN ids, their crosswalk gsis ids, and whether one has none. */
+export interface NewsSelection {
+  readonly espn_ids: readonly number[];
+  readonly gsis_ids: readonly string[];
+  /** A selected player (not a team unit) has no crosswalk pair: no gsis filter can find him. */
+  readonly unpaired: boolean;
+}
+
+/** The selection of `players`: each one's ESPN id and crosswalk gsis id (a team unit needs none). */
+export function newsSelectionOf(
+  ctx: ToolContext,
+  players: readonly { readonly ref: { readonly id: number }; readonly position_id: number }[],
+): NewsSelection {
+  const espn: number[] = [];
+  const gsis: string[] = [];
+  let unpaired = false;
+  for (const p of players) {
+    espn.push(p.ref.id);
+    const g = crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id;
+    if (g !== null) gsis.push(g);
+    else if (!isTeamUnitIdentity({ espn_id: p.ref.id, position_id: p.position_id }))
+      unpaired = true;
+  }
+  return { espn_ids: [...new Set(espn)], gsis_ids: [...new Set(gsis)], unpaired };
+}
+
+/**
+ * The newest news items since `sinceIso` that name a selected player — by a gsis id OR an ESPN id in
+ * the item's refs (the matcher refs an ESPN id even where no crosswalk pair exists) — from the
+ * selected feeds, at most `limit`. The reader merges the three feeds and keeps the newest `cap` of
+ * them before any feed filter, and filters by gsis id only; so a feed filter applied after its cut
+ * lost a feed's older in-window items silently, and an unpaired player's items could not be found
+ * at all (Stage C findings news-sources-filter-after-cut, crosswalk-unpaired-joins-silent). Here the
+ * read widens (doubling, up to NEWS_READ_MAX) until it holds more than `limit` matching items or
+ * every item of the window; with an unpaired player the gsis filter is dropped and the refs decide.
+ * `more`: matching items exist past `limit`; `capped`: the read stopped at the reader's ceiling
+ * with the window not exhausted (older matching items may be missing).
+ */
+export async function newsMatching(
+  ctx: ToolContext,
+  o: {
+    readonly sinceIso: IsoInstant;
+    readonly limit: number;
+    readonly players: NewsSelection | null;
+    readonly sources: ReadonlySet<NewsItem["source"]> | null;
+  },
+): Promise<{
+  readonly result: DatasetResult<NewsItem>;
+  readonly items: NewsItem[];
+  readonly more: boolean;
+  readonly capped: boolean;
+}> {
+  const sel = o.players;
+  const espn = new Set(sel?.espn_ids ?? []);
+  const gsis = new Set(sel?.gsis_ids ?? []);
+  const readerFilter = sel === null || sel.unpaired ? null : [...gsis];
+  const sourcesCut = o.sources !== null && o.sources.size < 3;
+  const refsCut = sel !== null && readerFilter === null;
+  const matches = (it: NewsItem): boolean => {
+    if (o.sources !== null && !o.sources.has(it.source)) return false;
+    if (sel === null) return true;
+    if (it.gsis_ids.some((g) => gsis.has(g))) return true;
+    return newsRefsOf(it).some(
+      (r) =>
+        (r.espn_id !== null && espn.has(r.espn_id)) || (r.gsis_id !== null && gsis.has(r.gsis_id)),
+    );
+  };
+  const limit = Math.max(1, Math.trunc(o.limit));
+  // one more than the limit tells whether more exist; a filter applied here reads wider
+  let cap = Math.min(NEWS_READ_MAX, (limit + 1) * (sourcesCut || refsCut ? 3 : 1));
+  let result = ctx.services.datasets.news.recent(o.sinceIso, cap, readerFilter);
+  let matched = result.rows.filter(matches);
+  while (matched.length <= limit && result.rows.length >= cap && cap < NEWS_READ_MAX) {
+    cap = Math.min(NEWS_READ_MAX, cap * 2);
+    await turn();
+    result = ctx.services.datasets.news.recent(o.sinceIso, cap, readerFilter);
+    matched = result.rows.filter(matches);
+  }
+  const more = matched.length > limit;
+  return {
+    result,
+    items: matched.slice(0, limit),
+    more,
+    capped: !more && result.rows.length >= cap && cap >= NEWS_READ_MAX,
+  };
+}
+
 /** Re-exported for tools that need the full identity (team-unit checks on a PlatformPlayer). */
-export { identityOfPlatformPlayer };
+export { identityOfPlatformPlayer, isTeamUnitIdentity };
 
 /** A row's ownership block (the competition signal flag is always true — plan 07 E5). */
 export function ownershipRow(p: Pick<PlatformPlayer, "ownership">): OwnershipRow | null {

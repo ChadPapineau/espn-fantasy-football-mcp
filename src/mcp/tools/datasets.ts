@@ -37,6 +37,7 @@ import { EffError } from "../errors.js";
 import { defineTool } from "../define.js";
 import {
   crosswalkOf,
+  isTeamUnitIdentity,
   leagueOf,
   optionalDataset,
   present,
@@ -151,6 +152,17 @@ export function sourcesAgree(espn: InjuryStatus | null, report: string | null): 
   return e === official;
 }
 
+/** The most player ids D2's no-pair warning names (then a count). */
+export const UNPAIRED_IDS_SHOWN = 10;
+
+/** D2's warning for players whose official report cannot be joined (no crosswalk pair). */
+export function unpairedReportWarning(ids: readonly number[]): string {
+  const named = ids.slice(0, UNPAIRED_IDS_SHOWN).map(String).join(", ");
+  const more =
+    ids.length > UNPAIRED_IDS_SHOWN ? ` and ${String(ids.length - UNPAIRED_IDS_SHOWN)} more` : "";
+  return `no crosswalk pair for ${String(ids.length)} player(s) (${named}${more}): their official report cannot be joined — official null means not read, not "not on the report"`;
+}
+
 /** D2 `espn_get_injuries`. */
 export const getInjuries = defineTool({
   name: "espn_get_injuries",
@@ -243,6 +255,20 @@ export const getInjuries = defineTool({
         game_day: gameDay,
       });
     }
+    // a player without a crosswalk pair has no row of the official report to join: his `official`
+    // null means "not read", not "not on the report" — said, with his id (Stage C finding
+    // crosswalk-unpaired-joins-silent)
+    const shown = new Set(rows.map((r) => r.player_id));
+    const unpaired = ids
+      .filter(
+        ({ p, xw }) =>
+          shown.has(p.ref.id) &&
+          xw.gsis_id === null &&
+          !isTeamUnitIdentity({ espn_id: p.ref.id, position_id: p.position_id }),
+      )
+      .map(({ p }) => p.ref.id)
+      .sort((a, b) => a - b);
+    if (unpaired.length > 0) warnings.push(unpairedReportWarning(unpaired));
     const data: InjuriesData = { players: rows, base_rates_note: BASE_RATES_NOTE };
     return { data, inputs, warnings, listKey: "players", week: w };
   },

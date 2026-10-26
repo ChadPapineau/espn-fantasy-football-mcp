@@ -45,6 +45,8 @@ import {
   leagueRef,
   optionalDataset,
   readOpts,
+  rosGamesCovered,
+  rosReadingOf,
   settingsOf,
   take,
   weekOf,
@@ -354,6 +356,9 @@ export const espnProjectionsSchema = z.strictObject({
   note: z.string().max(200),
 });
 
+/** ESPN's stat id for games (`gp`): in a projection split, the games its total counts. */
+export const ESPN_GAMES_STAT = "210";
+
 /** The fixed C3 note (plan 07 C3; C13). */
 export const PROJECTIONS_NOTE =
   "ESPN's projection under this league's scoring (appliedTotal); one input to ours (C13)";
@@ -448,7 +453,16 @@ export const getProjections = defineTool({
     } catch {
       // no snapshot history: nothing reads as revised
     }
-    const remaining = Math.max(0, league.clock.final_scoring_period - w + 1);
+    // ESPN's ROS total is as of the clock and runs through NFL week 18 whatever `week` asks: its
+    // weeks_remaining is the games that total covers (E1's reading — rosGamesCovered: ESPN's own
+    // count when the split carries it, else his games still to come at the clock, byes out), never
+    // the league's weeks from the requested week (Stage C finding
+    // projections-ros-weeks-remaining-mismatch)
+    const rosRead =
+      args.horizon === "ros"
+        ? await rosReadingOf(ctx, league.ref.season, inputs, warnings, args.allow_stale === true)
+        : null;
+    const asOf = weekOf(league, undefined);
     const data: EspnProjectionsData = {
       source: "espn:projection",
       projections: players.map((p) => {
@@ -465,7 +479,15 @@ export const getProjections = defineTool({
           ros:
             np === null || args.horizon !== "ros"
               ? null
-              : { points: np.points, weeks_remaining: remaining },
+              : {
+                  points: np.points,
+                  weeks_remaining: rosGamesCovered(
+                    p,
+                    rosRead,
+                    asOf,
+                    np.raw[ESPN_GAMES_STAT] ?? null,
+                  ),
+                },
           preseason_full_season: np !== null && args.horizon === "preseason" ? np.points : null,
           as_of: np?.as_of ?? null,
           revised_recently:

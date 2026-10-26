@@ -33,6 +33,7 @@ import {
   type Week,
 } from "../../domain/league/types.js";
 import { score } from "../../domain/scoring/index.js";
+import type { ScoringSettings } from "../../domain/scoring/types.js";
 import {
   BOUNDS,
   analyticsFreshnessShape,
@@ -54,7 +55,11 @@ import {
   leagueOf,
   leagueRef,
   NEWS_MATCH_FLOOR,
+  NEWS_READ_MAX,
+  newsMatching,
   newsRefsOf,
+  newsSelectionOf,
+  type NewsSelection,
   optionalDataset,
   readOpts,
   requiredDataset,
@@ -494,7 +499,7 @@ export type { DepthChartRow };
 
 /** D5's positions and their ESPN position ids (mPositionalRatings keys: 1–5, 16). */
 export const DEFENSE_POSITIONS = Object.freeze({ QB: 1, RB: 2, WR: 3, TE: 4, K: 5, "D/ST": 16 });
-type DefensePosition = keyof typeof DEFENSE_POSITIONS;
+export type DefensePosition = keyof typeof DEFENSE_POSITIONS;
 
 /**
  * The cold-start regression (research 05 §1 step 6): β_pos = the year-over-year correlation of
@@ -543,7 +548,7 @@ export const defenseProfileSchema = z.strictObject({
 });
 
 /** One game's points to one position against a defence. */
-interface Allowed {
+export interface Allowed {
   readonly defense: NflTeam;
   readonly offense: NflTeam;
   readonly week: Week;
@@ -649,6 +654,128 @@ export function teamProfileOf(rows: readonly PbpTeamProfileRow[]): {
   };
 }
 
+/**
+ * The points each position scored against each NFL defence over `weeks` (D5's input; E8's playoff
+ * matchup term reads the same — plan 07 E8 "from D5's shrunk multipliers"): every rostered NFL
+ * player's week scored under the league's S, one week per turn, and the D/ST lines keyed by the
+ * opposing offence when D/ST is asked for. `universe` is false when nflverse's weekly roster is not
+ * loaded (nothing to aggregate). nflverse:stats_player_week is REQUIRED here (STALE_ONLY when never
+ * loaded — the caller decides whether that fails it).
+ */
+export async function defenseAllowedOf(
+  ctx: ToolContext,
+  o: {
+    readonly season: number;
+    readonly weeks: readonly Week[];
+    readonly positions: readonly DefensePosition[];
+    readonly settings: ScoringSettings;
+    readonly allowStale: boolean;
+  },
+  inputs: InputStamp[],
+): Promise<{ readonly allowed: Allowed[]; readonly universe: boolean }> {
+  const { season, weeks, positions, settings, allowStale } = o;
+  const allowed: Allowed[] = [];
+  let universe = true;
+  if (weeks.length === 0) return { allowed, universe };
+  const roster = ctx.services.rosterWeekly.latest(season);
+  const rIn = optionalDataset(roster, ctx, allowStale);
+  const gsis = rIn === null ? [] : [...new Set(roster.rows.map((r) => r.gsis_id))];
+  if (rIn !== null) inputs.push(rIn);
+  if (gsis.length > 0) {
+    // points allowed need the stat lines only (no usage extras). One statement per week, each
+    // week's lines scored in a turn of its own: the window over the whole NFL roster as one
+    // read + score was a single macrotask (~10 000 player-weeks at the default 10 weeks) that
+    // blocked the loop past the 50 ms stall bound (plan 03 §1.2 — the loop never blocks longer
+    // than one SQLite statement or one ≤ 20 ms CPU batch; plan 10 A16a; ADV OBJ-07)
+    let li: InputStamp | null = null;
+    const scored: { readonly gsis: string; readonly a: Allowed }[] = [];
+    const scoreRows = (rows: readonly PlayerWeekLine[]): void => {
+      for (const l of rows) {
+        const pos = l.position === "FB" ? "RB" : l.position;
+        if (!(pos in DEFENSE_POSITIONS) || pos === "D/ST" || l.opponent === null) continue;
+        let pts: number;
+        try {
+          pts = score(l.line, settings).points;
+        } catch {
+          continue;
+        }
+        scored.push({
+          gsis: l.gsis_id,
+          a: {
+            defense: l.opponent,
+            offense: l.nfl_team,
+            week: l.week,
+            position: pos as DefensePosition,
+            points: pts,
+          },
+        });
+      }
+    };
+    let version: string | null = null;
+    let mixed = false;
+    for (const [k, wk] of weeks.entries()) {
+      await turn();
+      const r = ctx.services.datasets.playerWeeks.lines(gsis, season, [wk], { usage: false });
+      const stamp = requiredDataset(r, ctx, allowStale);
+      const v = r.stamp?.file_version ?? null;
+      if (k === 0) {
+        li = stamp;
+        version = v;
+      } else if (v !== version) {
+        mixed = true; // a refresh published a new file between two weeks' statements
+        break;
+      }
+      scoreRows(r.rows);
+    }
+    if (mixed) {
+      // one answer reads one file version: the window again as one statement (the rare case)
+      scored.length = 0;
+      await turn();
+      const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks, { usage: false });
+      li = requiredDataset(r, ctx, allowStale);
+      scoreRows(r.rows);
+    }
+    if (li !== null) inputs.push(li);
+    await turn();
+    // the single statement's order (ORDER BY player_id, week; ASCII ids, so code-unit order is
+    // SQLite's BINARY order): afpaOf's sums are order-sensitive in the last bit
+    scored.sort((x, y) => (x.gsis < y.gsis ? -1 : x.gsis > y.gsis ? 1 : x.a.week - y.a.week));
+    for (const s2 of scored) allowed.push(s2.a);
+  } else universe = false;
+  await turn();
+  if (positions.includes("D/ST")) {
+    const teams = [...new Set(allowed.map((a) => a.offense))];
+    const d = ctx.services.datasets.playerWeeks.defenseLines(teams, season, weeks);
+    const di = optionalDataset(d, ctx, allowStale);
+    if (di !== null) {
+      inputs.push(di);
+      // a D/ST's points are what the OPPOSING offence allows to D/STs: keyed by that offence
+      for (const l of d.rows) {
+        if (l.opponent === null) continue;
+        try {
+          allowed.push({
+            defense: l.opponent,
+            offense: l.nfl_team,
+            week: l.week,
+            position: "D/ST",
+            points: score(l.line, settings).points,
+          });
+        } catch {
+          // an underivable D/ST line is left out
+        }
+      }
+    }
+  }
+  return { allowed, universe };
+}
+
+/** D5's rolling window: up to `size` completed weeks before week `w`, ascending. */
+export function defenseWindow(w: Week, size: number): Week[] {
+  const weeks: Week[] = [];
+  for (let x = w - 1; x >= 1 && weeks.length < size; x--) weeks.unshift(x);
+  return weeks;
+}
+
 /** D5 `espn_get_defense_profile`. */
 export const getDefenseProfile = defineTool({
   name: "espn_get_defense_profile",
@@ -676,106 +803,23 @@ export const getDefenseProfile = defineTool({
     const w = weekOf(league, undefined);
     const settings = await settingsOf(ctx, inputs);
     const season = league.ref.season;
-    const weeks: Week[] = [];
-    for (let x = w - 1; x >= 1 && weeks.length < args.window_weeks; x--) weeks.unshift(x);
+    const weeks = defenseWindow(w, args.window_weeks);
     const positions: DefensePosition[] =
       args.position !== undefined
         ? [args.position]
         : args.detail === "full"
           ? ["QB", "RB", "WR", "TE", "K", "D/ST"]
           : ["QB", "RB", "WR", "TE"];
-    const allowed: Allowed[] = [];
-    if (weeks.length > 0) {
-      const roster = ctx.services.rosterWeekly.latest(season);
-      const rIn = optionalDataset(roster, ctx, allowStale);
-      const gsis = rIn === null ? [] : [...new Set(roster.rows.map((r) => r.gsis_id))];
-      if (rIn !== null) inputs.push(rIn);
-      if (gsis.length > 0) {
-        // points allowed need the stat lines only (no usage extras). One statement per week, each
-        // week's lines scored in a turn of its own: the window over the whole NFL roster as one
-        // read + score was a single macrotask (~10 000 player-weeks at the default 10 weeks) that
-        // blocked the loop past the 50 ms stall bound (plan 03 §1.2 — the loop never blocks longer
-        // than one SQLite statement or one ≤ 20 ms CPU batch; plan 10 A16a; ADV OBJ-07)
-        let li: InputStamp | null = null;
-        const scored: { readonly gsis: string; readonly a: Allowed }[] = [];
-        const scoreRows = (rows: readonly PlayerWeekLine[]): void => {
-          for (const l of rows) {
-            const pos = l.position === "FB" ? "RB" : l.position;
-            if (!(pos in DEFENSE_POSITIONS) || pos === "D/ST" || l.opponent === null) continue;
-            let pts: number;
-            try {
-              pts = score(l.line, settings).points;
-            } catch {
-              continue;
-            }
-            scored.push({
-              gsis: l.gsis_id,
-              a: {
-                defense: l.opponent,
-                offense: l.nfl_team,
-                week: l.week,
-                position: pos as DefensePosition,
-                points: pts,
-              },
-            });
-          }
-        };
-        let version: string | null = null;
-        let mixed = false;
-        for (const [k, wk] of weeks.entries()) {
-          await turn();
-          const r = ctx.services.datasets.playerWeeks.lines(gsis, season, [wk], { usage: false });
-          const stamp = requiredDataset(r, ctx, allowStale);
-          const v = r.stamp?.file_version ?? null;
-          if (k === 0) {
-            li = stamp;
-            version = v;
-          } else if (v !== version) {
-            mixed = true; // a refresh published a new file between two weeks' statements
-            break;
-          }
-          scoreRows(r.rows);
-        }
-        if (mixed) {
-          // one answer reads one file version: the window again as one statement (the rare case)
-          scored.length = 0;
-          await turn();
-          const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks, { usage: false });
-          li = requiredDataset(r, ctx, allowStale);
-          scoreRows(r.rows);
-        }
-        if (li !== null) inputs.push(li);
-        await turn();
-        // the single statement's order (ORDER BY player_id, week; ASCII ids, so code-unit order is
-        // SQLite's BINARY order): afpaOf's sums are order-sensitive in the last bit
-        scored.sort((x, y) => (x.gsis < y.gsis ? -1 : x.gsis > y.gsis ? 1 : x.a.week - y.a.week));
-        for (const s of scored) allowed.push(s.a);
-      } else warnings.push("nflverse:roster_weekly not loaded: no player universe to aggregate");
-      await turn();
-      if (positions.includes("D/ST")) {
-        const teams = [...new Set(allowed.map((a) => a.offense))];
-        const d = ctx.services.datasets.playerWeeks.defenseLines(teams, season, weeks);
-        const di = optionalDataset(d, ctx, allowStale);
-        if (di !== null) {
-          inputs.push(di);
-          // a D/ST's points are what the OPPOSING offence allows to D/STs: keyed by that offence
-          for (const l of d.rows) {
-            if (l.opponent === null) continue;
-            try {
-              allowed.push({
-                defense: l.opponent,
-                offense: l.nfl_team,
-                week: l.week,
-                position: "D/ST",
-                points: score(l.line, settings).points,
-              });
-            } catch {
-              // an underivable D/ST line is left out
-            }
-          }
-        }
-      }
-    } else warnings.push("no completed week in the window yet: every multiplier is 1");
+    const got = await defenseAllowedOf(
+      ctx,
+      { season, weeks, positions, settings, allowStale },
+      inputs,
+    );
+    const allowed = got.allowed;
+    if (weeks.length === 0)
+      warnings.push("no completed week in the window yet: every multiplier is 1");
+    else if (!got.universe)
+      warnings.push("nflverse:roster_weekly not loaded: no player universe to aggregate");
     const ratings = await withinBudget(
       () => ctx.services.platform.getPositionalRatings(leagueRef(ctx), w, readOpts(ctx)),
       warnings,
@@ -962,7 +1006,10 @@ export const getNews = defineTool({
     const allowStale = args.allow_stale === true;
     const league = await leagueOf(ctx, inputs);
     const w = weekOf(league, undefined);
-    let gsis: string[] | null = null;
+    // the players asked about, by ESPN id and crosswalk gsis id: an item is theirs when its refs
+    // name either (an unpaired player's items are found by his ESPN id — Stage C finding
+    // crosswalk-unpaired-joins-silent: the gsis-only filter dropped him silently)
+    let selection: NewsSelection | null = null;
     if (args.players !== undefined) {
       const sel = await selectPlayers(
         ctx,
@@ -972,29 +1019,42 @@ export const getNews = defineTool({
         inputs,
         warnings,
       );
-      gsis = sel.players
-        .map((p) => crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id)
-        .filter((g): g is string => g !== null);
-      if (gsis.length === 0) {
-        warnings.push("no crosswalk pair for the selected players: no news can be matched");
-        return { data: { items: [] }, inputs, warnings, listKey: "items", week: w };
-      }
+      selection = newsSelectionOf(ctx, sel.players);
     } else if (args.nfl_team !== undefined) {
       const team = args.nfl_team;
       const uni = await universeOf(ctx, league.ref.season, inputs, warnings);
-      gsis = uni
-        .filter((r) => r.pro_team === team && r.espn_id > 0)
-        .map((r) => crosswalkOf(ctx, r.espn_id, r.position_id).gsis_id)
-        .filter((g): g is string => g !== null);
+      selection = newsSelectionOf(
+        ctx,
+        uni
+          .filter((r) => r.pro_team === team && r.espn_id > 0)
+          .map((r) => ({ ref: { id: r.espn_id }, position_id: r.position_id })),
+      );
     }
+    if (selection?.unpaired === true)
+      warnings.push(
+        "a selected player has no crosswalk pair: his items are matched by the ESPN id in their refs",
+      );
     const since = new Date(ctx.nowMs - args.since_hours * 3600 * 1000).toISOString();
-    const res = ctx.services.datasets.news.recent(since, BOUNDS.newsLimit.max, gsis);
+    // the asked feeds' newest items: read wide enough for the filters, never cut before them
+    // (Stage C finding news-sources-filter-after-cut)
+    const read = await newsMatching(ctx, {
+      sinceIso: since,
+      limit: args.limit,
+      players: selection,
+      sources: args.sources === undefined ? null : new Set(args.sources),
+    });
+    const res = read.result;
     const input = requiredDataset(res, ctx, allowStale);
     if (input !== null) inputs.push(input);
-    const sources = args.sources === undefined ? null : new Set(args.sources);
-    const kept = res.rows
-      .filter((it) => sources === null || sources.has(it.source))
-      .slice(0, args.limit);
+    const kept = read.items;
+    if (read.more)
+      warnings.push(
+        `more matching items than the limit: the newest ${String(kept.length)} shown (raise limit, narrow since_hours or sources)`,
+      );
+    else if (read.capped)
+      warnings.push(
+        `the newest ${String(NEWS_READ_MAX)} items of the window were read: older matching items may be missing (narrow since_hours)`,
+      );
     const ids = [
       ...new Set(
         kept.flatMap((it) =>

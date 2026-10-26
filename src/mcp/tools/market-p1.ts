@@ -60,9 +60,11 @@ import {
 import { seededRng } from "../../domain/clock.js";
 import { auditIr, seatsOf } from "../../domain/league/roster.js";
 import { remainingWeeks } from "../../domain/league/rules.js";
+import { lockPlan } from "../../domain/league/schedule.js";
 import type {
   InjuryStatus,
   PlatformPlayer,
+  ProSchedule,
   Roster,
   Standings,
   Transaction,
@@ -93,7 +95,10 @@ import {
   espnIdsPairedWith,
   isDegradable,
   leagueRef,
+  isTeamUnitIdentity,
+  newsMatching,
   newsRefsOf,
+  newsSelectionOf,
   optionalDataset,
   readOpts,
   rosReadingOf,
@@ -347,6 +352,115 @@ export function withWireAssumption(data: TradeData, wire: readonly unknown[]): T
   return data.kind === "evaluation" ? { ...data, rec: withA } : { ...data, rec: withA };
 }
 
+/** How far a trade accepted now reaches into the current week (tradeReachesWeek). */
+export interface TradeWeekReach {
+  /** Every player the trade moves can still play the week for his new team. */
+  readonly reaches: boolean;
+  /** The earliest instant the trade can process: now plus the league's review period. */
+  readonly process_at_ms: number;
+  /** The review period read (tradeSettings.revisionHours; unknown read as 0). */
+  readonly review_hours: number;
+  /** The moved players who are locked now or lock before it can process (ids, ascending). */
+  readonly blocked: readonly number[];
+}
+
+/**
+ * Whether a trade accepted now can still change week `week`'s lineups — TradeRequest.weeks starts at
+ * "the first week the traded players can play". The trade processes no sooner than the league's
+ * review period after now (rules.trade.revision_hours, tradeSettings.revisionHours; unknown read as
+ * 0, the earliest it could); a player it moves who is locked (ESPN's lineupLocked, or his lock has
+ * passed — lockPlan under the league's lineup lock rule) or locks before it can process plays the
+ * week for his old team. An offer (`moved`: the ids it moves) reaches the week only when none of its
+ * players is blocked; a partner search (`moved` null: any player may move) only when the trade can
+ * process before the week's first lock. Lock instants come from the pro schedule; without it only
+ * ESPN's lineupLocked decides. Mid-week, E6 counted the current week's lineup change of players
+ * who were locked, and so in the delta, the weekly impact and ΔU's regular-season scaling (Stage C
+ * finding trade-locked-week-counted).
+ */
+export function tradeReachesWeek(o: {
+  readonly rosters: readonly Pick<Roster, "entries">[];
+  readonly moved: readonly number[] | null;
+  readonly schedule: Pick<ProSchedule, "games">;
+  readonly week: Week;
+  readonly lineupLockType: string | null;
+  readonly nowMs: number;
+  readonly revisionHours: number | null;
+}): TradeWeekReach {
+  const hours =
+    o.revisionHours !== null && Number.isFinite(o.revisionHours) && o.revisionHours > 0
+      ? o.revisionHours
+      : 0;
+  const processAt = o.nowMs + hours * 3_600_000;
+  const moved = o.moved === null ? null : new Set(o.moved);
+  const entries = o.rosters
+    .flatMap((r) => r.entries)
+    .filter((e) => moved === null || moved.has(e.player.ref.id));
+  const plan = lockPlan(
+    entries.map((e) => ({
+      player_id: e.player.ref.id,
+      pro_team_id: e.player.pro_team_id,
+      lineup_locked: e.lineup_locked,
+    })),
+    o.schedule,
+    o.week,
+    o.lineupLockType,
+    o.nowMs,
+  );
+  const lockMs = (x: { readonly lock_at: string | null }): number | null =>
+    x.lock_at === null ? null : Date.parse(x.lock_at);
+  let blocked: number[];
+  if (moved !== null)
+    blocked = plan.players
+      .filter((x) => {
+        const at = lockMs(x);
+        return x.locked || (at !== null && at <= processAt);
+      })
+      .map((x) => x.player_id);
+  else {
+    // a search: the whole week must still be ahead of the trade's processing
+    const first = plan.schedule[0];
+    const firstMs = first === undefined ? null : Date.parse(first.lock_at);
+    const started = plan.players.filter((x) => x.locked).map((x) => x.player_id);
+    blocked =
+      started.length > 0
+        ? started
+        : firstMs !== null && firstMs <= processAt
+          ? [...(first?.player_ids ?? [])]
+          : [];
+  }
+  return {
+    reaches: blocked.length === 0,
+    process_at_ms: processAt,
+    review_hours: hours,
+    blocked: [...new Set(blocked)].sort((a, b) => a - b),
+  };
+}
+
+/** The assumption naming a current week the trade cannot reach (said whenever one is left out). */
+export function tradeWeekAssumption(
+  week: Week,
+  reach: TradeWeekReach,
+  offer: boolean,
+): { readonly text: string; readonly revisit_trigger: string } {
+  return {
+    text: offer
+      ? `week ${String(week)} not counted: ${String(reach.blocked.length)} of the traded players are locked or lock before the trade can process (review period ${String(reach.review_hours)} h) and play it for their current team; the value weeks start at week ${String(week + 1)}`
+      : `week ${String(week)} not counted: its games lock before a trade accepted now can process (review period ${String(reach.review_hours)} h); the value weeks start at week ${String(week + 1)}`,
+    revisit_trigger: "a new scoring period starts",
+  };
+}
+
+/** The trade data with one more assumption on its rec (never twice). */
+export function withTradeAssumption(
+  data: TradeData,
+  a: { readonly text: string; readonly revisit_trigger: string },
+): TradeData {
+  const rec = data.rec;
+  if (rec === null || rec.assumptions.some((x) => x.text === a.text)) return data;
+  const withA = { ...rec, assumptions: [...rec.assumptions, a] };
+  return data.kind === "evaluation" ? { ...data, rec: withA } : { ...data, rec: withA };
+}
+
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): a write module would let the
 // user act on an accepted evaluation through its trade prepare/commit pair (plan 07 §3.F F5–F6, the
 // later gate). Nothing here prepares, proposes or sends a trade: the evaluation is read-only and the
@@ -414,8 +528,8 @@ export const analyzeTradeTool = defineTool({
               "find_partners.need_position",
             ),
           };
-    const weeks = remainingWeeks(b.rules.playoffs, b.w);
-    if (weeks.length === 0)
+    const allWeeks = remainingWeeks(b.rules.playoffs, b.w);
+    if (allWeeks.length === 0)
       throw new EffError("VALIDATION", { field: "offer", reason: "season_over" });
     const rosters = await required(() => rostersOf(ctx, b.w, inputs, warnings, args, me));
     const mine = rosters.find((r) => r.team.team_id === me);
@@ -439,6 +553,27 @@ export const analyzeTradeTool = defineTool({
       if (!args.offer.get.every((id) => theirIds.has(id)))
         throw new EffError("VALIDATION", { field: "offer.get", reason: "not_on_partner_roster" });
     }
+    // the value weeks start at the first week the trade can still change: this week only when a
+    // trade accepted now processes before the moved players lock (tradeReachesWeek)
+    const reach = tradeReachesWeek({
+      rosters,
+      moved: args.offer === undefined ? null : [...args.offer.give, ...args.offer.get],
+      schedule: ros?.schedule ?? { games: [] },
+      week: b.w,
+      lineupLockType: b.slots.lineup_lock_type,
+      nowMs: ctx.nowMs,
+      revisionHours: b.rules.trade.revision_hours,
+    });
+    const weeks = reach.reaches ? allWeeks : allWeeks.filter((w) => w > b.w);
+    if (weeks.length === 0)
+      throw new EffError("VALIDATION", { field: "offer", reason: "season_over" });
+    const weekNote = reach.reaches
+      ? null
+      : tradeWeekAssumption(b.w, reach, args.offer !== undefined);
+    if (weekNote !== null)
+      warnings.push(
+        `week ${String(b.w)} not counted: a trade accepted now cannot reach its lineups (locks, review period)`,
+      );
     const seed = seedOf(
       ctx,
       args.seed,
@@ -532,10 +667,11 @@ export const analyzeTradeTool = defineTool({
     });
     if (out.data.kind === "evaluation" && !out.data.seeding.confirmed)
       warnings.push("seeding reading not confirmed: run the onboard Skill (eff setup --seeding)");
-    const data: TradeData = withWireAssumption(
+    const wired: TradeData = withWireAssumption(
       { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) },
       wire,
     );
+    const data = weekNote === null ? wired : withTradeAssumption(wired, weekNote);
     return {
       data,
       inputs,
@@ -1254,6 +1390,10 @@ export function othersOf(
   return { kind: "others", keys };
 }
 
+/** Said when E10's subject has no crosswalk pair (the nflverse joins cannot be made for him). */
+export const NO_PAIR_EVIDENCE_WARNING =
+  "no crosswalk pair for this player: the official injury report and nflverse usage were not read for him (no nflverse row to join); news is matched by his ESPN id";
+
 /** E10 data (plan 07 E10; EvidenceData). */
 export const evidenceSchema = z.strictObject({
   flag: z.enum([
@@ -1371,6 +1511,12 @@ export const analyzeEvidenceTool = defineTool({
     const season = b.league.ref.season;
     const { player: p } = await singlePlayer(ctx, args.player, b.w, inputs, warnings);
     const gsis = crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id;
+    // a player without a crosswalk pair (a rookie or call-up nflverse does not list yet, a name it
+    // spells otherwise) has no nflverse row to join: say what was not read for him, as D1 does —
+    // the answer otherwise read as if the official report and his usage had been checked (Stage C
+    // finding crosswalk-unpaired-joins-silent)
+    if (gsis === null && !isTeamUnitIdentity({ espn_id: p.ref.id, position_id: p.position_id }))
+      warnings.push(NO_PAIR_EVIDENCE_WARNING);
     const myTeam = b.league.my_team?.team_id ?? null;
     const isMine = p.status === "ONTEAM" && myTeam !== null && p.on_team_id === myTeam;
     let slot: number | null = null;
@@ -1479,9 +1625,17 @@ export const analyzeEvidenceTool = defineTool({
       warnings.push(
         `${String(outlooksScoped)} ESPN outlook text(s) also name other players: ${MULTI_PLAYER_RULE}`,
       );
-    if (gsis !== null) {
+    {
+      // his items: by his gsis id or, unpaired, by the ESPN id in the items' refs (Stage C finding
+      // crosswalk-unpaired-joins-silent — the news was skipped for a player without a pair)
       const since = new Date(ctx.nowMs - 7 * 24 * 3600 * 1000).toISOString();
-      const news = ctx.services.datasets.news.recent(since, 10, [gsis]);
+      const read = await newsMatching(ctx, {
+        sinceIso: since,
+        limit: 8,
+        players: newsSelectionOf(ctx, [p]),
+        sources: null,
+      });
+      const news = read.result;
       const ni = optionalDataset(news, ctx, allowStale);
       if (ni !== null) {
         inputs.push(ni);
@@ -1491,7 +1645,7 @@ export const analyzeEvidenceTool = defineTool({
         // "<starter> (ankle) ruled out, <him> to start" is no 'out' claim about him; an item whose
         // other players cannot be named ties no claim to him at all
         let multi = 0;
-        for (const it of news.rows.slice(0, 8)) {
+        for (const it of read.items) {
           const byRefs = othersOf(ctx, it, { espn_id: p.ref.id, gsis_id: gsis, name: p.name });
           // a player around him the matcher did not ref (his surname alone, no team named) counts too
           const unreffed = namedIn(

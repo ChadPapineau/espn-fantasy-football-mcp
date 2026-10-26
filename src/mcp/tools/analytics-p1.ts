@@ -35,9 +35,11 @@ import {
   type SeasonSimData,
 } from "../../domain/analytics/types.js";
 import { seededRng } from "../../domain/clock.js";
+import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
 import { remainingWeeks, tradeDeadlineWeeks } from "../../domain/league/rules.js";
-import { lockPlan } from "../../domain/league/schedule.js";
+import { gamesOfWeek, lockPlan, opponentOf, teamGame } from "../../domain/league/schedule.js";
 import type {
+  LeagueRules,
   LiveMatchup,
   Matchup,
   PlatformPlayer,
@@ -98,6 +100,14 @@ import {
   valueWeeks,
   type LeagueBasics,
 } from "./p1-common.js";
+import {
+  DEFENSE_POSITIONS,
+  afpaOf,
+  defenseAllowedOf,
+  defenseWindow,
+  matchupMultiplier,
+  type DefensePosition,
+} from "./datasets-p1.js";
 import { rostersOf } from "./roster.js";
 import {
   code,
@@ -199,6 +209,25 @@ function lineupOf(
     );
   });
   return { players, plan };
+}
+
+/**
+ * The weeks E3 `season` fits each team's weekly model over: the regular-season weeks from `w` on —
+ * the games the simulation plays — and the playoff weeks too when it runs through the playoffs; this
+ * week alone when none is left (a playoff week under the regular horizon).
+ */
+export function seasonFitWeeks(rules: LeagueRules, w: Week, throughPlayoffs: boolean): Week[] {
+  const weeks = remainingWeeks(rules.playoffs, w, { playoffs: throughPlayoffs });
+  return weeks.length > 0 ? weeks : [w];
+}
+
+/**
+ * A roster as it stands in week `fw`: ESPN's `lineupLocked` is this scoring period's (`w`) — a later
+ * week's lineup is still open, so no seat is held where it sits now.
+ */
+function rosterAt(r: Roster, fw: Week, w: Week): Roster {
+  if (fw === w) return r;
+  return { ...r, entries: r.entries.map((e) => ({ ...e, lineup_locked: false })) };
 }
 
 /** The reading a `seeding_mode` argument resolves to for one simulator call. */
@@ -396,6 +425,12 @@ export const analyzeMatchupTool = defineTool({
       );
       if (rosters !== null && rosters.length >= 2) {
         await turn();
+        // each team's prior is its E1 lineup projection over EVERY week the simulation plays —
+        // byes and short absences in the weeks they happen (seasonFit.ts projectionModel: "its E1
+        // lineup projection for the remaining weeks"; plan 07 E3) — never this week's alone: one
+        // bye-heavy week set a team's strength for the whole season (Stage C finding
+        // season-fit-prior-one-week)
+        const fitWeeks = seasonFitWeeks(b.rules, b.w, args.horizon === "through_playoffs");
         const proj = await projectMany(
           ctx,
           subjectsOf(
@@ -406,7 +441,7 @@ export const analyzeMatchupTool = defineTool({
             league: b.league,
             settings: b.settings,
             schedule,
-            horizon: "week",
+            horizon: fitWeeks.some((x) => x > b.w) ? "ros" : "week",
             week: b.w,
             seed,
             allowStale,
@@ -417,8 +452,13 @@ export const analyzeMatchupTool = defineTool({
         projections = new Map();
         await turn();
         for (const r of rosters) {
-          const lp = lineupOf(ctx, r, proj.byId, schedule, b, b.w).players;
-          projections.set(r.team.team_id, [teamWeekOf(b.slots, lp, b.w)]);
+          const weeks: TeamWeekProjection[] = [];
+          for (const fw of fitWeeks) {
+            const lp = lineupOf(ctx, rosterAt(r, fw, b.w), proj.byId, schedule, b, fw).players;
+            weeks.push(teamWeekOf(b.slots, lp, fw));
+          }
+          projections.set(r.team.team_id, weeks);
+          await turn();
         }
       } else warnings.push("rosters unavailable: the season uses the cold-start weekly model");
       await turn();
@@ -925,6 +965,101 @@ export const scheduleAnalysisSchema = z.strictObject({
   inputs: inputsSchema,
 });
 
+/** The most players E8's playoff matchup term lists (its output schema's cap). */
+const PLAYOFF_MULTIPLIERS_MAX = 40;
+
+/** One player's playoff matchup term (plan 07 E8 `playoff_weeks.matchup_multipliers[]`). */
+export interface PlayoffMultiplier {
+  readonly player_id: number;
+  readonly multiplier: number;
+  readonly shrink_w: number;
+}
+
+/**
+ * E8's playoff matchup term from D5's shrunk multipliers (plan 07 E8; research 05 §1 step 6, §7.2:
+ * a tie-breaker between similar players, never a driver): D5's window of completed weeks before
+ * this one, aFPA per position over it, and for each of my players the mean of his playoff-week
+ * opponents' multipliers at his position and of their shrink weights (a week without his game, or
+ * a defence without a game in the window, adds nothing). Null — said in a warning — when D5's inputs
+ * cannot be read: E8 passed nothing before, so the field was always [] beside an evidence note that
+ * read as if the term had been computed (Stage C finding schedule-matchup-multipliers-unwired).
+ */
+export async function playoffMultipliersOf(
+  ctx: ToolContext,
+  b: LeagueBasics,
+  mine: Roster,
+  schedule: ProSchedule,
+  playoffWeeks: readonly Week[],
+  allowStale: boolean,
+  inputs: InputStamp[],
+  warnings: string[],
+): Promise<PlayoffMultiplier[] | null> {
+  const isDefensePosition = (x: string): x is DefensePosition =>
+    Object.hasOwn(DEFENSE_POSITIONS, x);
+  const players = mine.entries
+    .map((e) => e.player)
+    .filter((p) => isDefensePosition(p.position) && p.pro_team_id > 0);
+  if (playoffWeeks.length === 0 || players.length === 0) return [];
+  const window = defenseWindow(b.w, BOUNDS.defenseWindowWeeks.default);
+  if (window.length === 0) {
+    warnings.push("no completed week yet: the playoff matchup multipliers are not computed");
+    return null;
+  }
+  const positions = [...new Set(players.map((p) => p.position as DefensePosition))].sort();
+  let got: Awaited<ReturnType<typeof defenseAllowedOf>>;
+  try {
+    got = await defenseAllowedOf(
+      ctx,
+      {
+        season: b.league.ref.season,
+        weeks: window,
+        positions,
+        settings: b.settings,
+        allowStale,
+      },
+      inputs,
+    );
+  } catch (e) {
+    if (!(e instanceof EffError) || e.code !== "STALE_ONLY") throw e;
+    warnings.push(
+      "nflverse:stats_player_week not loaded: the playoff matchup multipliers are not computed",
+    );
+    return null;
+  }
+  if (!got.universe) {
+    warnings.push(
+      "nflverse:roster_weekly not loaded: the playoff matchup multipliers are not computed",
+    );
+    return null;
+  }
+  const byPos = new Map<DefensePosition, ReturnType<typeof afpaOf>>();
+  for (const pos of positions) {
+    await turn();
+    byPos.set(pos, afpaOf(got.allowed, pos));
+  }
+  const out: PlayoffMultiplier[] = [];
+  for (const p of players) {
+    const team = p.pro_team_id;
+    const pos = p.position as DefensePosition;
+    const ms: { multiplier: number; shrink_w: number }[] = [];
+    for (const pw of playoffWeeks) {
+      const g = teamGame(gamesOfWeek(schedule, pw), team);
+      if (g === null) continue;
+      const opp = teamOfProTeamId(opponentOf(g, team));
+      const v = opp === null ? undefined : byPos.get(pos)?.get(opp);
+      if (v === undefined) continue;
+      ms.push(matchupMultiplier(v.adjusted, v.mean, pos, v.n));
+    }
+    if (ms.length === 0) continue;
+    out.push({
+      player_id: p.ref.id,
+      multiplier: ms.reduce((a, m) => a + m.multiplier, 0) / ms.length,
+      shrink_w: ms.reduce((a, m) => a + m.shrink_w, 0) / ms.length,
+    });
+  }
+  return out.sort((x, y) => x.player_id - y.player_id).slice(0, PLAYOFF_MULTIPLIERS_MAX);
+}
+
 /** E8 `espn_analyze_schedule`. */
 export const analyzeScheduleTool = defineTool({
   name: "espn_analyze_schedule",
@@ -1040,6 +1175,20 @@ export const analyzeScheduleTool = defineTool({
     }
     if (alive === null)
       warnings.push("season simulation unavailable: every week weighted 1 (P(alive) unknown)");
+    // the (weak) playoff matchup term: D5's shrunk multipliers for my players' playoff-week games
+    const playoffWeeks = b.rules.playoffs.playoff_weeks.filter((x) => weeks.includes(x));
+    const multipliers = args.include_playoffs
+      ? await playoffMultipliersOf(
+          ctx,
+          b,
+          mine,
+          schedule,
+          playoffWeeks,
+          allowStale,
+          inputs,
+          warnings,
+        )
+      : [];
     const out = await analyzeSchedule({
       roster: b.slots,
       players: mine.entries.map((e) => ({
@@ -1059,6 +1208,7 @@ export const analyzeScheduleTool = defineTool({
       p_alive_by_week: alive,
       seeding: seedingStatus(reading, ctx.services.seedingConfirmedAt),
       stream: streamCandidates(streamPlayers, weeks, positions),
+      ...(multipliers === null ? {} : { matchup_multipliers: multipliers }),
       schedule,
       clock: ctx.services.clock,
       pacer: ctx.pacer,

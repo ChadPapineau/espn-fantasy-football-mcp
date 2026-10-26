@@ -6,6 +6,8 @@
 // a never-loaded dataset is STALE_ONLY with the "run eff refresh" hint). The Phase-2 dataset ports the
 // store does not serve yet (depth charts, ep_weekly, news, trending) are injected as fake readers with
 // fixed rows — the tools are tested against the PORT contract, never a file layout.
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MANDATORY_SENTENCES } from "../../src/mcp/envelope.js";
@@ -24,7 +26,7 @@ import { bareUntrusted, wrapUntrusted } from "../../src/domain/league/types.js";
 import { DEFENSE } from "../../src/mcp/tools/datasets-p1.js";
 import { coded, faulty } from "./helpers/faults.js";
 import { envelopeViolations, identifierLeaks } from "./helpers/walk.js";
-import { call, connect, makeWorld, T0, type World } from "./helpers/world.js";
+import { ESPN_FIXTURES, call, connect, makeWorld, T0, type World } from "./helpers/world.js";
 
 let world: World;
 let client: Client;
@@ -44,6 +46,28 @@ interface Env {
   partial: boolean;
   truncated: boolean;
   page?: { limit: number; offset: number; count: number; total: number | null; has_more: boolean };
+}
+
+/** ESPN's stat-210 game count of every recorded player's ROS split (statSource 1, split 0). */
+function rosGamesFromFixture(league: string): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const f of ["kona_player_info.json", "kona_player_info.ids.json"]) {
+    let body: { players?: { id: number; player?: { stats?: Record<string, unknown>[] } }[] };
+    try {
+      body = JSON.parse(
+        readFileSync(path.join(ESPN_FIXTURES, "recorded", league, f), "utf8"),
+      ) as typeof body;
+    } catch {
+      continue;
+    }
+    for (const p of body.players ?? [])
+      for (const st of p.player?.stats ?? [])
+        if (st.statSourceId === 1 && st.statSplitTypeId === 0 && st.scoringPeriodId === 0) {
+          const gp = (st.stats as Record<string, number> | undefined)?.["210"];
+          if (typeof gp === "number") out.set(p.id, gp);
+        }
+  }
+  return out;
 }
 
 /** A successful call, checked against the A6 walk, the identifier scan and the mandatory sentences. */
@@ -249,8 +273,18 @@ describe("C3 espn_get_projections", () => {
       horizon: "ros",
       week: 4,
     });
-    const rr = ros.data.projections as { ros: { weeks_remaining: number } | null }[];
-    expect(rr.find((r) => r.ros !== null)?.ros?.weeks_remaining).toBe(14);
+    // weeks_remaining is the games ESPN's total covers — its own count, stat 210 of the split —
+    // never the league's weeks from the requested week (final 17 − week 4 + 1 = 14, before Stage C
+    // finding projections-ros-weeks-remaining-mismatch; held in projections-ros-weeks.test.ts)
+    const rr = ros.data.projections as {
+      player_id: number;
+      ros: { weeks_remaining: number } | null;
+    }[];
+    const games = rosGamesFromFixture("league-a");
+    const withRos = rr.filter((r) => r.ros !== null);
+    expect(withRos.length).toBeGreaterThan(0);
+    for (const r of withRos)
+      expect(r.ros?.weeks_remaining, String(r.player_id)).toBe(games.get(r.player_id));
   });
 
   it("validation: horizon is week|ros|preseason", async () => {
