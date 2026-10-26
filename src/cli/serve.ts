@@ -5,19 +5,21 @@
 // the primary signal — / SIGTERM / SIGINT / SIGHUP / stdout EPIPE / reparenting → one single-flight
 // drain (reads ≤ 3 s) and close (WAL checkpoint, store closed, the secret dropped) under a 10 s hard
 // ceiling → exit 5; a second SIGINT forces the close; a crash exits 1). stdout carries ONLY MCP
-// frames: every log line is JSON on stderr. A stdin line the SDK transport would drop is answered
-// (-32700 for a line that is not JSON, -32600 for an invalid request with a usable id), and a
-// tools/call argument key `__proto__` reaches the tool's strict schema (plan 02 §5) instead of being
-// dropped by the SDK's re-parse. A JSON-RPC batch (an array line; MCP 2025-03-26 §Batching: a
-// server MUST support receiving them) is answered with ONE array of the responses, `[]` with a single
-// -32600; the SDK's invalid-params replies (-32603 carrying a raw zod issue dump, or the URI-length
+// frames: every log line is JSON on stderr. stdin is read by ONE line reader that feeds the SDK
+// transport in arrival order (a batch's elements in its place, so a later line never overtakes them).
+// A stdin line the SDK transport would drop is answered (-32700 for a line that is not JSON, -32600
+// for any other line that is not a valid JSON-RPC message: under its id when it is a request with a
+// usable one, else with no id), and a tools/call argument key `__proto__` reaches the tool's strict
+// schema (plan 02 §5) instead of being dropped by the SDK's re-parse. A JSON-RPC batch (an array
+// line; MCP 2025-03-26 §Batching: a server MUST support receiving them) is answered with ONE array of
+// the responses, `[]` with a single -32600; no line, however nested, can throw out of the reader;
+// the SDK's invalid-params replies (-32603 carrying a raw zod issue dump, or the URI-length
 // refusal) become -32602 "Invalid params"; an open `subscriptions/listen` (a stream, answered only at
 // teardown) never holds the drain; and the process resolves its exit code only once stdout has
 // flushed every reply (a reply queued in the stream when `process.exit` runs is lost).
 // Ported from sibling @5daa625 (src/cli/serve.ts), adapted.
 import { homedir } from "node:os";
 import { PassThrough, type Readable, type Writable } from "node:stream";
-import { StringDecoder } from "node:string_decoder";
 import { parseArgs } from "node:util";
 import {
   INTERNAL_ERROR,
@@ -129,9 +131,11 @@ export function parseErrorReply(): JSONRPCErrorResponse {
  * The reply a stdin line deserves when the SDK transport would drop it silently (the transport hands
  * every line it cannot read to `onerror` and answers nothing): a line that is not JSON gets -32700
  * Parse error with no id (`parseErrorReply`); a line that parses as JSON but is not a valid JSON-RPC
- * message and is a REQUEST with a usable id (a string ≤ 256 chars, or a finite number) gets -32600
- * Invalid Request under that id. Everything else is null: a valid message (the SDK answers it), a
- * notification or a response, an array, a null/object id.
+ * message gets -32600 Invalid Request — under its id when it is a REQUEST with a usable id (a string
+ * ≤ 256 chars, or a finite number), else with no id: `42`, `"hello"`, `null`, `{}` and JSON-RPC 2.0
+ * §5.1's own `{"jsonrpc":"2.0","method":1,"params":"bar"}` are answered exactly as the same thing
+ * inside a batch is (Stage C finding mcp-nonobject-line-unanswered: they got no reply at all). Null:
+ * a valid message (the SDK answers it), and an array (a batch: `batchElements` answers each element).
  */
 export function stdinLineReply(line: string): JSONRPCErrorResponse | null {
   let raw: unknown;
@@ -140,6 +144,7 @@ export function stdinLineReply(line: string): JSONRPCErrorResponse | null {
   } catch {
     return parseErrorReply();
   }
+  if (Array.isArray(raw)) return null;
   return invalidRequestOf(raw, line);
 }
 
@@ -149,21 +154,37 @@ export function invalidRequestReply(line: string): JSONRPCErrorResponse | null {
   return r !== null && r.error.code === INVALID_REQUEST ? r : null;
 }
 
-function invalidRequestOf(raw: unknown, line: string): JSONRPCErrorResponse | null {
+/** Whether `line` deserializes as a JSON-RPC message the SDK accepts (never throws). */
+function isValidMessage(line: string): boolean {
   try {
     deserializeMessage(line);
-    return null;
+    return true;
   } catch {
-    // not a valid message: answer it below when it is a request with a usable id
+    return false;
   }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-  const o = raw as Record<string, unknown>;
-  if (!Object.prototype.hasOwnProperty.call(o, "method")) return null;
-  const id = o.id;
+}
+
+function invalidRequestOf(raw: unknown, line: string): JSONRPCErrorResponse | null {
+  return isValidMessage(line) ? null : invalidReplyFor(raw);
+}
+
+/**
+ * The -32600 Invalid Request an invalid JSON value gets (JSON-RPC 2.0 §5.1, §6): under its id when it
+ * is a request object with a usable id (a string ≤ 256 chars, or a finite number), else with no id
+ * (MCP's error response makes `id` optional and its RequestId has no null). A fresh object per call;
+ * never an echo of the value.
+ */
+export function invalidReplyFor(raw: unknown): JSONRPCErrorResponse {
+  const o = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : null;
+  const id =
+    o !== null && Object.prototype.hasOwnProperty.call(o, "method")
+      ? (o as Record<string, unknown>).id
+      : undefined;
   const usable =
     (typeof id === "string" && id.length <= 256) || (typeof id === "number" && Number.isFinite(id));
-  if (!usable) return null;
-  return { jsonrpc: "2.0", id, error: { code: INVALID_REQUEST, message: "Invalid Request" } };
+  return usable
+    ? { jsonrpc: "2.0", id, error: { code: INVALID_REQUEST, message: "Invalid Request" } }
+    : { jsonrpc: "2.0", error: { code: INVALID_REQUEST, message: "Invalid Request" } };
 }
 
 /**
@@ -298,29 +319,34 @@ export function emptyBatchReply(): JSONRPCErrorResponse {
   return { jsonrpc: "2.0", error: { code: INVALID_REQUEST, message: "Invalid Request" } };
 }
 
-/** One element of a batch: a message to deliver, or the -32600 reply an invalid element gets. */
+/**
+ * One element of a batch: a message to deliver (with its JSON line, which the SDK reads as a line of
+ * its own), or the -32600 reply an invalid element gets.
+ */
 export type BatchElement =
-  | { readonly kind: "message"; readonly message: JSONRPCMessage }
+  | { readonly kind: "message"; readonly message: JSONRPCMessage; readonly line: string }
   | { readonly kind: "invalid"; readonly reply: JSONRPCErrorResponse };
 
 /**
  * Splits a batch (JSON-RPC 2.0 §6): each element that is a valid JSON-RPC message is delivered as if
  * it had arrived alone; an invalid element is answered -32600 Invalid Request — under its id when it
- * is a request with a usable one, else with no id (never an echo of the element).
+ * is a request with a usable one, else with no id (never an echo of the element). Never throws: an
+ * element too deeply nested to be serialised again (V8's JSON.stringify overflows its stack from
+ * about 7 000 levels, which JSON.parse accepts) is an invalid element too — before, the RangeError
+ * escaped the stdin listener and crashed the server (Stage C finding mcp-batch-deep-nesting-crash).
  */
 export function batchElements(batch: readonly unknown[]): BatchElement[] {
   return batch.map((el): BatchElement => {
-    const line = JSON.stringify(el);
+    let line: string;
     try {
-      return { kind: "message", message: deserializeMessage(line) };
+      line = JSON.stringify(el);
     } catch {
-      return {
-        kind: "invalid",
-        reply: invalidRequestOf(el, line) ?? {
-          jsonrpc: "2.0",
-          error: { code: INVALID_REQUEST, message: "Invalid Request" },
-        },
-      };
+      return { kind: "invalid", reply: invalidReplyFor(el) };
+    }
+    try {
+      return { kind: "message", message: deserializeMessage(line), line };
+    } catch {
+      return { kind: "invalid", reply: invalidReplyFor(el) };
     }
   });
 }
@@ -416,9 +442,19 @@ export function whenFlushed(stream: NodeJS.WritableStream): Promise<void> {
 }
 
 /**
- * Watches stdin's lines beside the SDK transport and answers each one `stdinLineReply` answers (a
- * line over the read cap — the transport refuses it and closes — is never judged); a line that is a
- * JSON array (a batch, which the SDK transport drops) goes to `batch`, `[]` gets one -32600.
+ * Reads stdin's lines and answers each one `stdinLineReply` answers (a line over the read cap — the
+ * transport refuses it and closes — is never judged); a line that is a JSON array (a batch, which the
+ * SDK transport drops) goes to `batch`, `[]` gets one -32600.
+ *
+ * With `forward` it is the SDK transport's ONLY reader: every line the SDK should read is handed to
+ * `forward` in the order it arrived — a valid message, a blank line, a line over the read cap (raw,
+ * so the transport refuses it and closes as before) — and a batch line is not: `batch` delivers its
+ * elements in its place (serve forwards each as a line of its own). Reading beside the SDK instead,
+ * the SDK saw a chunk first, so a batch's elements reached it after every later line of that chunk:
+ * a notifications/cancelled written right behind a batched call overtook it and was lost, and the
+ * call ran, wrote its side effect and replied (Stage C finding mcp-batch-reorders-cancel-lost). A line
+ * this reader answers itself is not forwarded (the SDK would only drop it). No line can throw out of
+ * the listener: a failure judging one is logged and the line forwarded as it came.
  * Returns the unsubscribe.
  */
 export function watchInvalidRequests(
@@ -426,51 +462,94 @@ export function watchInvalidRequests(
   reply: (msg: JSONRPCErrorResponse) => void,
   logger: Logger,
   batch?: (elements: readonly unknown[]) => void,
+  forward?: (bytes: Buffer) => void,
 ): () => void {
-  let buf = "";
-  // inside a line longer than the read cap: its rest up to the next newline is not a line of its own
+  // the current line's bytes (lines split on the newline byte: a multi-byte character never contains
+  // it, so each line decodes whole however the chunks cut it)
+  let parts: Buffer[] = [];
+  let held = 0;
+  // inside a line longer than the read cap: its rest up to the next newline is passed through raw
   let overflowed = false;
-  // a multi-byte character split across two chunks is decoded whole
-  const decoder = new StringDecoder("utf8");
+
+  const onLine = (raw: Buffer): void => {
+    // the transport's own rule: a line it cannot buffer is refused and the transport closes
+    if (raw.length > STDIO_DEFAULT_MAX_BUFFER_SIZE) {
+      forward?.(raw);
+      return;
+    }
+    const line = raw.toString("utf8", 0, raw.length - 1).replace(/\r$/, "");
+    if (line.trim() === "") {
+      forward?.(raw);
+      return;
+    }
+    if (batch !== undefined && line.trimStart().startsWith("[")) {
+      let arr: unknown = null;
+      try {
+        arr = JSON.parse(line);
+      } catch {
+        arr = null;
+      }
+      if (Array.isArray(arr)) {
+        if (arr.length === 0) {
+          logger.warn("transport.invalid_request", { code: INVALID_REQUEST, batch: 0 });
+          reply(emptyBatchReply());
+        } else batch(arr);
+        return;
+      }
+    }
+    const r = stdinLineReply(line);
+    if (r === null) {
+      forward?.(raw);
+      return;
+    }
+    if (r.error.code === PARSE_ERROR) logger.warn("transport.parse_error", { bytes: line.length });
+    else logger.warn("transport.invalid_request", { code: INVALID_REQUEST });
+    reply(r);
+  };
+
   const onData = (chunk: Buffer | string): void => {
-    buf += typeof chunk === "string" ? chunk : decoder.write(chunk);
-    let i = buf.indexOf("\n");
-    while (i >= 0) {
-      const line = buf.slice(0, i).replace(/\r$/, "");
-      buf = buf.slice(i + 1);
-      i = buf.indexOf("\n");
+    let b = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+    while (b.length > 0) {
+      const i = b.indexOf(0x0a);
+      if (i < 0) {
+        if (overflowed) {
+          forward?.(b);
+          return;
+        }
+        parts.push(b);
+        held += b.length;
+        if (held > STDIO_DEFAULT_MAX_BUFFER_SIZE) {
+          // past the read cap without a newline: the transport refuses it (it closes itself), so
+          // what was held goes to it raw and the rest of the line follows as it arrives
+          overflowed = true;
+          const all = Buffer.concat(parts);
+          parts = [];
+          held = 0;
+          forward?.(all);
+        }
+        return;
+      }
+      const head = b.subarray(0, i + 1);
+      b = b.subarray(i + 1);
       if (overflowed) {
         overflowed = false;
+        forward?.(head);
         continue;
       }
-      // a line over the read cap is the transport's to refuse (it closes itself): never judged here
-      if (line.length > STDIO_DEFAULT_MAX_BUFFER_SIZE) continue;
-      if (line.trim() === "") continue;
-      if (batch !== undefined && line.trimStart().startsWith("[")) {
-        let arr: unknown = null;
+      const raw = parts.length === 0 ? head : Buffer.concat([...parts, head]);
+      parts = [];
+      held = 0;
+      try {
+        onLine(raw);
+      } catch (e) {
+        // judging a line never takes the server down; the SDK still reads it
+        logger.warn("transport.line_failed", { error: e instanceof Error ? e.name : "unknown" });
         try {
-          arr = JSON.parse(line);
+          forward?.(raw);
         } catch {
-          arr = null;
-        }
-        if (Array.isArray(arr)) {
-          if (arr.length === 0) {
-            logger.warn("transport.invalid_request", { code: INVALID_REQUEST, batch: 0 });
-            reply(emptyBatchReply());
-          } else batch(arr);
-          continue;
+          // the transport is gone: the shutdown path handles it
         }
       }
-      const r = stdinLineReply(line);
-      if (r === null) continue;
-      if (r.error.code === PARSE_ERROR)
-        logger.warn("transport.parse_error", { bytes: line.length });
-      else logger.warn("transport.invalid_request", { code: INVALID_REQUEST });
-      reply(r);
-    }
-    if (buf.length > STDIO_DEFAULT_MAX_BUFFER_SIZE) {
-      buf = "";
-      overflowed = true;
     }
   };
   stdin.on("data", onData);
@@ -761,15 +840,19 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     // The SDK transport reads a proxy of stdin that never ends by itself: on stdin EOF the transport
     // would close at once and drop the reply of a call still in flight. EOF runs the shutdown
     // (onEnd), whose drain lets that call answer before handle.close() ends the transport, as for
-    // SIGTERM. The transport's own stdin error listener moves to the real stream.
+    // SIGTERM. The transport's own stdin error listener moves to the real stream. The proxy is fed by
+    // the one line reader below (watchInvalidRequests), in arrival order, a batch's elements in its
+    // place; once the transport has closed nothing more is fed.
     const input = new PassThrough();
-    opts.stdin.pipe(input, { end: false });
+    let transportClosed = false;
+    const feed = (bytes: Buffer | string): void => {
+      if (!transportClosed) input.write(bytes);
+    };
     const onStdinError = (e: unknown): void => {
       logger.warn("transport.error", { error: e instanceof Error ? e.name : "unknown" });
     };
     opts.stdin.on("error", onStdinError);
     cleanups.push(() => {
-      opts.stdin.unpipe(input);
       opts.stdin.off("error", onStdinError);
     });
     const transport = new StdioServerTransport(input, opts.stdout as unknown as Writable);
@@ -824,6 +907,7 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     // sequence instead of idling deaf (serveStdio installs its own onclose; wrap it after the call)
     const sdkOnClose = transport.onclose;
     transport.onclose = () => {
+      transportClosed = true;
       sdkOnClose?.();
       void shutdown("transport_closed", EXIT.ok);
     };
@@ -840,8 +924,10 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
         },
         logger,
         (elements) => {
-          // a batch: each valid element goes through the same path as a line of its own (pending,
-          // the __proto__ carry, the SDK); the responses come back as ONE array (BatchReplies)
+          // a batch: each valid element goes to the SDK as a line of its own, in the batch's place
+          // in the stream (so a later line — a cancellation of one of them — never overtakes it),
+          // through the same path as any line (pending, the __proto__ carry); the responses come
+          // back as ONE array (BatchReplies)
           const split = batchElements(elements);
           const ids = split.flatMap((e) =>
             e.kind === "message" &&
@@ -854,8 +940,9 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
           const invalid = split.flatMap((e) => (e.kind === "invalid" ? [e.reply] : []));
           logger.info("transport.batch", { size: elements.length, requests: ids.length });
           batchReplies.begin(ids, invalid);
-          for (const e of split) if (e.kind === "message") transport.onmessage?.(e.message);
+          for (const e of split) if (e.kind === "message") feed(`${e.line}\n`);
         },
+        feed,
       ),
     );
     logger.info("serve.ready", {

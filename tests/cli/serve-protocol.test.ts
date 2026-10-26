@@ -10,14 +10,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
+import { STDIO_DEFAULT_MAX_BUFFER_SIZE } from "@modelcontextprotocol/server";
 import {
   BatchReplies,
   EXIT,
   batchElements,
   isInvalidParamsDump,
   serve,
+  watchInvalidRequests,
   withInvalidParamsCoded,
 } from "../../src/cli/serve.js";
+import { createLogger } from "../../src/cli/log.js";
 import { ESPN_FIXTURES, ROOT, T0, runningClock } from "../mcp/helpers/world.js";
 
 type Msg = Record<string, unknown>;
@@ -182,6 +185,225 @@ describe("JSON-RPC batches (MCP 2025-03-26 §Batching; JSON-RPC 2.0 §6)", () =>
       { kind: "message" },
       { kind: "invalid", reply: { error: { code: -32600 } } },
     ]);
+  });
+});
+
+// Stage C finding mcp-batch-deep-nesting-crash: batchElements re-serialised each element with
+// JSON.stringify, which overflows V8's stack from about 7 000 levels that JSON.parse accepts; the
+// RangeError escaped the stdin listener and the server exited 1 with every later request unanswered
+describe("a batch element too deeply nested to re-serialise", () => {
+  const deep = (depth: number): string => `${"[".repeat(depth)}${"]".repeat(depth)}`;
+
+  it("is answered -32600 under its id; the server keeps serving (no crash, the next ping answered)", async () => {
+    const r = start(tempEnv());
+    r.send(init("2025-03-26"));
+    await r.reply(1);
+    r.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    r.send(`[{"jsonrpc":"2.0","id":2,"method":"ping","params":{"x":${deep(20_000)}}}]`);
+    r.send({ jsonrpc: "2.0", id: 3, method: "ping" });
+    expect((await r.reply(3)).result).toEqual({});
+    const arr = await r.array();
+    expect(arr).toEqual([
+      { jsonrpc: "2.0", id: 2, error: { code: -32600, message: "Invalid Request" } },
+    ]);
+    // a nesting it can re-serialise is an ordinary element: the ping is answered in its array
+    r.send(`[{"jsonrpc":"2.0","id":4,"method":"ping","params":{"x":${deep(500)}}}]`);
+    await until(
+      () => (r.lines.some((l) => Array.isArray(l) && (l as Msg[])[0]?.id === 4) ? true : undefined),
+      10_000,
+      "the shallow batch's array",
+    );
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+    expect(r.logs.map((l) => l.event)).not.toContain("serve.crash");
+  });
+
+  it("batchElements never throws: an element it cannot serialise is invalid, under its id when usable", () => {
+    let v: unknown = 1;
+    for (let i = 0; i < 20_000; i++) v = [v];
+    const cyclic: Record<string, unknown> = { jsonrpc: "2.0", id: 7, method: "ping" };
+    cyclic.self = cyclic;
+    expect(
+      batchElements([{ jsonrpc: "2.0", id: 5, method: "ping", params: { v } }, cyclic, v]),
+    ).toEqual([
+      {
+        kind: "invalid",
+        reply: { jsonrpc: "2.0", id: 5, error: { code: -32600, message: "Invalid Request" } },
+      },
+      {
+        kind: "invalid",
+        reply: { jsonrpc: "2.0", id: 7, error: { code: -32600, message: "Invalid Request" } },
+      },
+      {
+        kind: "invalid",
+        reply: { jsonrpc: "2.0", error: { code: -32600, message: "Invalid Request" } },
+      },
+    ]);
+  });
+});
+
+// Stage C finding mcp-batch-reorders-cancel-lost: the SDK read each stdin chunk before the batch
+// watcher did, so for one write "[call]\n<cancel>\n" it queued the cancel first and the batch's
+// call afterwards: the cancellation was a no-op, the call ran to completion and replied. One reader
+// now feeds the SDK in arrival order, a batch's elements in its place.
+describe("a cancellation written right behind a batched call", () => {
+  const call = (id: number, name: string, args: Record<string, unknown> = {}): Msg => ({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name, arguments: args },
+  });
+  const cancel = (id: number): Msg => ({
+    jsonrpc: "2.0",
+    method: "notifications/cancelled",
+    params: { requestId: id },
+  });
+  const repliesTo = (lines: readonly unknown[], id: number): unknown[] =>
+    lines
+      .flatMap((l): unknown[] => (Array.isArray(l) ? (l as unknown[]) : [l]))
+      .filter((m) => (m as Msg).id === id);
+
+  it("cancels it exactly as it cancels the same call sent alone: no reply, no tool.end", async () => {
+    const r = start(tempEnv());
+    r.send(init("2025-03-26"));
+    await r.reply(1);
+    r.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    // the control: a call and its cancellation in ONE write, each a line of its own
+    r.stdin.write(
+      `${JSON.stringify(call(60, "espn_project_players"))}\n${JSON.stringify(cancel(60))}\n`,
+    );
+    // the batched call and its cancellation in one write
+    r.stdin.write(
+      `${JSON.stringify([call(70, "espn_project_players")])}\n${JSON.stringify(cancel(70))}\n`,
+    );
+    // and the reverse order: a call, then a batch holding its cancellation
+    r.stdin.write(
+      `${JSON.stringify(call(80, "espn_project_players"))}\n${JSON.stringify([cancel(80)])}\n`,
+    );
+    r.send({ jsonrpc: "2.0", id: 90, method: "ping" });
+    await r.reply(90);
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+    expect(repliesTo(r.lines, 60)).toEqual([]);
+    expect(repliesTo(r.lines, 70)).toEqual([]);
+    expect(repliesTo(r.lines, 80)).toEqual([]);
+    // none of the three ran to an answer: a cancellation that lands before its call starts stops it
+    // before the tool runs at all, one that lands after logs tool.cancelled — never tool.end
+    expect(r.logs.filter((l) => l.event === "tool.end")).toEqual([]);
+    expect(r.logs.map((l) => l.event)).not.toContain("serve.drain_timeout");
+  });
+});
+
+describe("watchInvalidRequests as the SDK transport's one reader (forward)", () => {
+  function reader() {
+    const stdin = new PassThrough();
+    const fed: string[] = [];
+    const replies: unknown[] = [];
+    const batches: unknown[][] = [];
+    const events: string[] = [];
+    const logger = createLogger({
+      level: "debug",
+      sink: (l) => events.push(String((JSON.parse(l) as { event?: unknown }).event)),
+    });
+    const stop = watchInvalidRequests(
+      stdin,
+      (m) => replies.push(m),
+      logger,
+      (els) => {
+        batches.push([...els]);
+        // what serve does: each element fed in the batch's place
+        for (const e of batchElements(els)) if (e.kind === "message") fed.push(`${e.line}\n`);
+      },
+      (b) => fed.push(b.toString("utf8")),
+    );
+    return { stdin, fed, replies, batches, events, stop };
+  }
+  const ping = (id: number): string => JSON.stringify({ jsonrpc: "2.0", id, method: "ping" });
+
+  it("feeds lines in arrival order, a batch's elements in its place, within one chunk and across chunks", () => {
+    const r = reader();
+    r.stdin.write(`${ping(1)}\n[${ping(2)},${ping(3)}]\n${ping(4)}\n`);
+    expect(r.fed).toEqual([`${ping(1)}\n`, `${ping(2)}\n`, `${ping(3)}\n`, `${ping(4)}\n`]);
+    // a line split across reads is fed once it is whole, CR LF kept for the SDK to strip
+    r.stdin.write(ping(5).slice(0, 10));
+    r.stdin.write(`${ping(5).slice(10)}\r\n`);
+    expect(r.fed.at(-1)).toBe(`${ping(5)}\r\n`);
+    r.stop();
+  });
+
+  it("answers what the SDK would drop and does not feed it; blank lines and over-cap lines are fed raw", () => {
+    const r = reader();
+    r.stdin.write('not json\n42\n\n[]\n{"jsonrpc":"2.0","id":7,"method":5}\n');
+    expect(r.replies).toHaveLength(4);
+    expect(r.fed).toEqual(["\n"]);
+    const big = `${"x".repeat(STDIO_DEFAULT_MAX_BUFFER_SIZE + 3)}\n`;
+    r.stdin.write(big);
+    expect(r.fed.at(-1)?.length).toBe(big.length);
+    // past the cap without a newline: what was held, then the rest of the line, raw
+    r.stdin.write("y".repeat(STDIO_DEFAULT_MAX_BUFFER_SIZE - 5));
+    r.stdin.write("y".repeat(10));
+    r.stdin.write("tail\n");
+    expect(r.fed.slice(-2).map((x) => x.length)).toEqual([STDIO_DEFAULT_MAX_BUFFER_SIZE + 5, 5]);
+    expect(r.replies).toHaveLength(4);
+    r.stop();
+  });
+
+  it("a line it fails to judge is logged and fed as it came: nothing escapes the listener", () => {
+    const stdin = new PassThrough();
+    const fed: string[] = [];
+    const events: string[] = [];
+    const logger = createLogger({
+      level: "debug",
+      sink: (l) => events.push(String((JSON.parse(l) as { event?: unknown }).event)),
+    });
+    watchInvalidRequests(
+      stdin,
+      () => undefined,
+      logger,
+      () => {
+        throw new RangeError("boom");
+      },
+      (b) => fed.push(b.toString("utf8")),
+    );
+    expect(() => stdin.write(`[${ping(1)}]\n${ping(2)}\n`)).not.toThrow();
+    expect(events).toContain("transport.line_failed");
+    expect(fed).toEqual([`[${ping(1)}]\n`, `${ping(2)}\n`]);
+  });
+});
+
+// Stage C finding mcp-nonobject-line-unanswered: a parseable line that is not a JSON-RPC message
+// got no reply unless it was a request with a usable id, while the same value inside a batch got the
+// id-less -32600
+describe("an invalid single line is answered like the same value inside a batch", () => {
+  it('42, "hello", null, {} and JSON-RPC §5.1\'s example each get one id-less -32600; the next ping is answered', async () => {
+    const r = start(tempEnv());
+    r.send(init("2025-03-26"));
+    await r.reply(1);
+    r.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    const before = r.lines.length;
+    for (const line of [
+      "42",
+      '"hello"',
+      "null",
+      "{}",
+      '{"jsonrpc":"2.0","method":1,"params":"bar"}',
+    ])
+      r.send(line);
+    r.send({ jsonrpc: "2.0", id: 9, method: "ping" });
+    await r.reply(9);
+    const INVALID = { jsonrpc: "2.0", error: { code: -32600, message: "Invalid Request" } };
+    expect(r.lines.slice(before).filter((l) => (l as Msg).id === undefined)).toEqual([
+      INVALID,
+      INVALID,
+      INVALID,
+      INVALID,
+      INVALID,
+    ]);
+    // inside a batch: the same answer per element
+    r.send("[42, {}]");
+    expect(await r.array()).toEqual([INVALID, INVALID]);
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
   });
 });
 

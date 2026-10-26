@@ -816,7 +816,11 @@ describe("signals, crashes and reparenting (process handlers, the runner's own s
 });
 
 describe("invalidRequestReply", () => {
-  it("answers only a request with a usable id that is not a valid message", () => {
+  // Stage C finding mcp-nonobject-line-unanswered: a parseable line that is not a valid message is
+  // answered -32600 — under its id when it is a request with a usable one, else with no id, exactly
+  // as the same value inside a batch is; a valid message, a non-JSON line and an array get null
+  const NO_ID = { jsonrpc: "2.0", error: { code: -32600, message: "Invalid Request" } };
+  it("answers every parseable line that is not a valid message: under a usable request id, else with none", () => {
     expect(invalidRequestReply('{"jsonrpc":"2.0","id":1,"method":5}')).toEqual({
       jsonrpc: "2.0",
       id: 1,
@@ -826,14 +830,21 @@ describe("invalidRequestReply", () => {
     expect(invalidRequestReply('{"jsonrpc":"2.0","id":1,"method":"tools/list"}')).toBeNull();
     expect(invalidRequestReply("not json")).toBeNull();
     expect(invalidRequestReply("[1,2]")).toBeNull();
-    expect(invalidRequestReply("null")).toBeNull();
-    expect(invalidRequestReply('{"jsonrpc":"2.0","result":5}')).toBeNull();
-    expect(invalidRequestReply('{"jsonrpc":"1.0","method":"x"}')).toBeNull();
-    expect(invalidRequestReply('{"jsonrpc":"1.0","id":null,"method":"x"}')).toBeNull();
-    expect(
-      invalidRequestReply(`{"jsonrpc":"1.0","id":"${"a".repeat(257)}","method":"x"}`),
-    ).toBeNull();
-    expect(invalidRequestReply('{"jsonrpc":"1.0","id":{"a":1},"method":"x"}')).toBeNull();
+    for (const line of [
+      "null",
+      "42",
+      '"hello"',
+      "{}",
+      '{"jsonrpc":"2.0","method":1,"params":"bar"}',
+      '{"jsonrpc":"2.0","result":5}',
+      '{"jsonrpc":"1.0","method":"x"}',
+      '{"jsonrpc":"1.0","id":null,"method":"x"}',
+      `{"jsonrpc":"1.0","id":"${"a".repeat(257)}","method":"x"}`,
+      '{"jsonrpc":"1.0","id":{"a":1},"method":"x"}',
+      // an id without a method is not a request's: never read as one
+      '{"jsonrpc":"2.0","id":3,"result":5}',
+    ])
+      expect(invalidRequestReply(line), line.slice(0, 40)).toEqual(NO_ID);
   });
 });
 
@@ -855,14 +866,13 @@ describe("stdinLineReply", () => {
     expect(stdinLineReply('{"jsonrpc":"2.0","id":1,"method":5}')).toEqual(
       invalidRequestReply('{"jsonrpc":"2.0","id":1,"method":5}'),
     );
-    for (const line of [
-      '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
-      "[1,2]",
-      "null",
-      "5",
-      '"x"',
-    ])
+    for (const line of ['{"jsonrpc":"2.0","id":1,"method":"tools/list"}', "[1,2]", "[]"])
       expect(stdinLineReply(line)).toBeNull();
+    for (const line of ["null", "5", '"x"'])
+      expect(stdinLineReply(line)).toEqual({
+        jsonrpc: "2.0",
+        error: { code: -32600, message: "Invalid Request" },
+      });
     // a fresh object per reply: one caller mutating it cannot change the next
     expect(parseErrorReply()).not.toBe(parseErrorReply());
     expect(parseErrorReply()).toEqual(PARSE);
