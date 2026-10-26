@@ -440,6 +440,153 @@ describe("clinch, elimination, cutoff and scenarios", () => {
   });
 });
 
+// Stage C finding seeding-clinch-ignores-ties (round 3): the paths rank by win % with a tie as half a
+// win, but the deterministic clinch counted wins only — a team with two H2H ties read `eliminated`
+// while every path put it in, and a team a tied rival passes on PF read `clinched`. The clinch now
+// reads the ranking's own win %; once no game remains the final standings decide through the chain.
+describe("clinch and the cutoff read win % with ties as half wins (Stage C seeding-clinch-ignores-ties)", () => {
+  const rec = (id: number, w: number, l: number, t: number, pf: number): SeasonTeam => ({
+    ...team(id, w, l, pf),
+    ties: t,
+  });
+  // ten teams, six in, the regular season over (the finding's repro (a))
+  const final = (me: SeasonTeam, rival: SeasonTeam) =>
+    base({
+      teams: [
+        rec(1, 10, 4, 0, 1700),
+        rec(2, 10, 4, 0, 1690),
+        rec(3, 10, 4, 0, 1680),
+        rec(4, 10, 4, 0, 1670),
+        rec(5, 10, 4, 0, 1660),
+        rival,
+        me,
+        rec(8, 4, 10, 0, 1300),
+        rec(9, 4, 10, 0, 1290),
+        rec(10, 4, 10, 0, 1280),
+      ],
+      me: me.team_id,
+      playoff: { team_count: 6, seeding_rule: "TOTAL_POINTS_SCORED", reseed: false, rounds: [] },
+      seeding_mode: "espn_rule",
+      marginal: false,
+    });
+
+  it("6-6-2 level with a 7-7-0 rival on win %, ahead on PF: in on every path, clinched, never eliminated", async () => {
+    const r = (await simulateSeason(final(rec(7, 6, 6, 2, 1600), rec(6, 7, 7, 0, 1500)))).data
+      .readings[0];
+    expect(r?.p_playoffs).toBe(1);
+    expect(r?.seed_distribution).toEqual([{ seed: 6, p: 1 }]);
+    expect(r?.clinch).toEqual({ clinched: true, eliminated: false, magic_number: 0 });
+    // level with the line on win %: no win between them (a tie counts half), PF ahead
+    expect(r?.cutoff).toMatchObject({ seed_line: 6, wins_gap: 0, pf_gap: 100 });
+  });
+
+  it("the mirror — 7-7-0 behind a 6-6-2 rival on PF: out on every path, eliminated, never clinched", async () => {
+    const r = (await simulateSeason(final(rec(7, 7, 7, 0, 1500), rec(6, 6, 6, 2, 1600)))).data
+      .readings[0];
+    expect(r?.p_playoffs).toBe(0);
+    expect(r?.clinch).toEqual({ clinched: false, eliminated: true, magic_number: null });
+    expect(r?.cutoff).toMatchObject({ wins_gap: 0, pf_gap: -100 });
+  });
+
+  // four teams, two in, one game left each: me v D, B v C
+  const oneLeft = (me: SeasonTeam, b: SeasonTeam, c: SeasonTeam) =>
+    base({
+      teams: [me, b, c, rec(4, 0, 5, 0, 400)],
+      me: 1,
+      remaining: [
+        { period: 6, matchup_id: 61, home: 1, away: 4 },
+        { period: 6, matchup_id: 62, home: 2, away: 3 },
+      ],
+      playoff: { team_count: 2, seeding_rule: "TOTAL_POINTS_SCORED", reseed: false, rounds: [] },
+      seeding_mode: "espn_rule",
+      marginal: false,
+    });
+
+  it("games left: four ties keep a team alive that two rivals lead on wins alone", async () => {
+    // me 1-0-4 (3 of 5 in half wins); B and C 3-2-0 play each other, so one finishes 3-3 (.500)
+    // while a win takes me to 2-0-4 (.667): alive, and the paths agree
+    const r = (
+      await simulateSeason(
+        oneLeft(rec(1, 1, 0, 4, 560), rec(2, 3, 2, 0, 520), rec(3, 3, 2, 0, 510)),
+      )
+    ).data.readings[0];
+    expect(r?.clinch.eliminated).toBe(false);
+    expect(r?.p_playoffs).toBeGreaterThan(0.2);
+  });
+
+  it("games left: a rival's ties can still catch a 3-2-0 team, so it has not clinched", async () => {
+    // B and C 1-0-4 play each other: the winner reaches 2-0-4 (.667), the loser 1-1-4 (.500) —
+    // level with me at 3-3 if I lose, the PF tiebreak to come
+    const r = (
+      await simulateSeason(
+        oneLeft(rec(1, 3, 2, 0, 500), rec(2, 1, 0, 4, 520), rec(3, 1, 0, 4, 510)),
+      )
+    ).data.readings[0];
+    expect(r?.clinch.clinched).toBe(false);
+    // losing out does not clinch (the bounds read each rival's best case, not who plays whom)
+    expect(r?.clinch.magic_number).not.toBe(0);
+    expect(r?.p_playoffs).toBeLessThan(1);
+  });
+
+  it("property: clinched ⇒ in on every path, eliminated ⇒ out on every path; with no game left both are exact", async () => {
+    const W = fc.record({ w: fc.nat(6), t: fc.nat(2), pf: fc.integer({ min: 400, max: 700 }) });
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(W, { minLength: 4, maxLength: 6 }),
+        fc.integer({ min: 0, max: 2 }),
+        fc.nat(5),
+        fc.nat(5),
+        fc.constantFrom("TOTAL_POINTS_SCORED", "H2H_RECORD", "INTRA_DIVISION_RECORD"),
+        fc.boolean(),
+        async (rows, left, meIdx, pIdx, rule, divisions) => {
+          const n = rows.length - (rows.length % 2);
+          const G = 8;
+          const teams = rows.slice(0, n).map((x, i) => ({
+            ...rec(i + 1, Math.min(x.w, G - x.t), 0, x.t, x.pf),
+            losses: G - Math.min(x.w, G - x.t) - x.t,
+            division_id: divisions ? (i % 2) + 1 : null,
+          }));
+          const remaining = Array.from({ length: left }, (_, k) =>
+            Array.from({ length: n / 2 }, (_, j) => ({
+              period: 9 + k,
+              matchup_id: 100 * k + j,
+              home: ((j + k) % n) + 1,
+              away: ((n - 1 - j + k) % n) + 1,
+            })),
+          )
+            .flat()
+            .filter((g) => g.home !== g.away);
+          const me = (meIdx % n) + 1;
+          const P = (pIdx % (n - 1)) + 1;
+          const out = await simulateSeason(
+            base({
+              teams,
+              me,
+              remaining,
+              playoff: { team_count: P, seeding_rule: rule, reseed: false, rounds: [] },
+              seeding_mode: "espn_rule",
+              marginal: false,
+              n_sims: 1000,
+            }),
+          );
+          const r = out.data.readings[0];
+          if (r === undefined) return false;
+          if (r.clinch.clinched && r.p_playoffs !== 1) return false;
+          if (r.clinch.eliminated && r.p_playoffs !== 0) return false;
+          if (r.clinch.clinched && r.clinch.eliminated) return false;
+          if (remaining.length === 0)
+            return (
+              r.clinch.clinched === (r.p_playoffs === 1) &&
+              r.clinch.eliminated === (r.p_playoffs === 0)
+            );
+          return true;
+        },
+      ),
+      { numRuns: 120 },
+    );
+  });
+});
+
 describe("determinism, monotone marginal values, partial runs, hostile input", () => {
   const small = (seed: number) => {
     const { clock, rng } = clockAndRng("2026-10-06T12:00:00.000Z", seed);

@@ -22,6 +22,7 @@ import {
   type RosterAuditRequest,
 } from "../../../src/domain/analytics/rosterAudit.js";
 import type { StreamOption } from "../../../src/domain/analytics/scheduleStress.js";
+import { simulateSeason } from "../../../src/domain/analytics/seeding.js";
 import { weeklyValues } from "../../../src/domain/analytics/waivers.js";
 import { remainingWeeks, tradeDeadlineStatus } from "../../../src/domain/league/rules.js";
 import type { InjuryStatus, Roster } from "../../../src/domain/league/types.js";
@@ -225,6 +226,64 @@ describe("bench roles and marginal values (sib research 05 §9.1)", () => {
       rq({ season: { p_playoffs: 0.005, eliminated: false, p_alive_by_week: [] } }),
     );
     expect(auto.data.competing).toBe("eliminated");
+  });
+
+  // Stage C finding seeding-clinch-ignores-ties: E3's wins-only clinch called a 6-6-2 sixth seed
+  // (level on win % with a 7-7-0 team, ahead on PF) eliminated, and E9 then weighted every week 0.
+  // E9 reads E3's reading as the tool passes it (p_playoffs, clinch.eliminated, P(alive) by week).
+  it("E3 → E9: the sixth seed with two H2H ties is competing, never eliminated", async () => {
+    const { clock, rng } = clockAndRng("2026-12-16T12:00:00.000Z");
+    const t = (id: number, w: number, l: number, ties: number, pf: number) => ({
+      team_id: id,
+      division_id: null,
+      wins: w,
+      losses: l,
+      ties,
+      points_for: pf,
+      points_against: 0,
+    });
+    const sim = await simulateSeason({
+      teams: [
+        ...[1, 2, 3, 4, 5].map((id) => t(id, 10, 4, 0, 1700 - id)),
+        t(6, 7, 7, 0, 1500),
+        t(7, 6, 6, 2, 1600),
+        ...[8, 9, 10].map((id) => t(id, 4, 10, 0, 1300 - id)),
+      ],
+      played: [],
+      remaining: [],
+      me: 7,
+      playoff: {
+        team_count: 6,
+        seeding_rule: "TOTAL_POINTS_SCORED",
+        reseed: false,
+        rounds: [{ weeks: [15] }, { weeks: [16] }, { weeks: [17] }],
+      },
+      seeding_mode: "espn_rule",
+      seeding_config: { mode: "espn_rule", confirmed_at: null },
+      regular_weeks: [],
+      marginal: false,
+      n_sims: 1000,
+      clock,
+      rng,
+      pacer: instantPacer,
+      deadline_ms: null,
+    });
+    const r0 = sim.data.readings[0];
+    expect(r0?.p_playoffs).toBe(1);
+    expect(r0?.clinch.eliminated).toBe(false);
+    const out = await analyzeRoster(
+      rq({
+        current_week: 15,
+        weeks: [15, 16, 17],
+        season: {
+          p_playoffs: r0?.p_playoffs ?? 0,
+          eliminated: r0?.clinch.eliminated ?? true,
+          p_alive_by_week: (r0?.p_alive_by_week ?? []).map((x) => ({ week: x.week, p: x.p })),
+        },
+      }),
+    );
+    expect(out.data.competing).toBe("yes");
+    expect(out.data.rec.action).not.toMatch(/^eliminated/);
   });
 
   it("consolidation: two bench players who never start, while competing and before the deadline", async () => {

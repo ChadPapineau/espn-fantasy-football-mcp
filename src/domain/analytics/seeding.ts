@@ -10,7 +10,9 @@
 // more than one division (reading (a)), PF only under reading (b); the bracket with the bye rule of
 // research 05 §2.3; marginal values by re-running from perturbed states on common random numbers.
 // Cooperative batches under the CPU deadline (plan 01 §1.1). Phase 3 (plan 10 C4; additive):
-// `rankFinalStandings` applies the same chain once to a finished season. Pure. New here.
+// `rankFinalStandings` applies the same chain once to a finished season. Stage C round 3: the
+// deterministic clinch and the cutoff's wins gap read the standings as the chain does — win % with a
+// tie as half a win, and the chain itself once no game remains. Pure. New here.
 import type { Clock, Rng } from "../clock.js";
 import type { SeedingMode } from "../../config/schema.js";
 import type { Week } from "../league/types.js";
@@ -839,6 +841,8 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
     results: playedResults,
   };
   const remainingOf = (i: number): number => remaining.filter((g) => g.h === i || g.a === i).length;
+  // the standings the ranking reads: wins with a tie as half a win (its win % = this / games)
+  const halfWins = (i: number): number => rd(w0, i) + rd(t0, i) / 2;
   const readings: SeasonReading[] = modes.map((mode, mi) => {
     const chain = chains[mi]?.chain ?? [];
     const t = tallies[mi] ?? [];
@@ -872,7 +876,8 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
     const nowOrder = rankAll(chain, mode === "espn_rule" && divisionAware, nowAgg);
     const myRank = nowOrder.indexOf(me) + 1;
     const ref = myRank <= P ? nowOrder[P] : nowOrder[P - 1];
-    const winsGap = ref === undefined ? 0 : (w0[me] ?? 0) - (w0[ref] ?? 0);
+    // a tie counts half a win, as the ranking's win % does (6-6-2 is level with 7-7-0)
+    const winsGap = ref === undefined ? 0 : halfWins(me) - halfWins(ref);
     const pfGap = ref === undefined ? 0 : (pf0[me] ?? 0) - (pf0[ref] ?? 0);
     let pfRankNeeded: number | null = null;
     if (mode === "points_only") pfRankNeeded = P;
@@ -887,24 +892,62 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
       const spots = P - ahead;
       if (spots > 0 && spots < group) pfRankNeeded = spots;
     }
-    // clinch / elimination: deterministic, wins only (reading (a)); PF is unbounded under (b)
+    // clinch / elimination, deterministic, read as the ranking reads the standings (Stage C finding
+    // seeding-clinch-ignores-ties: wins alone flipped both flags for a team with H2H ties).
+    // No game left: the standings are final and the chain decides — exactly, over every coin flip.
+    // Games left, reading (a) with win % first: bounds on win % with a tie as half a win, a level
+    // win % left to the tiebreaks (PF is not final until the last game) — never above, always a
+    // reacher. PF is unbounded under (b) while games remain.
     let clinched = false;
     let eliminated = false;
     let magic: number | null = null;
-    if (mode === "espn_rule") {
-      const myW = w0[me] ?? 0;
-      const myMax = myW + remainingOf(me);
+    let decided = false;
+    const divisionsFirst = mode === "espn_rule" && divisionAware;
+    if (remaining.length === 0) {
+      const seatWith = (coin: Float64Array): readonly number[] =>
+        rankAll(chain, divisionsFirst, { ...nowAgg, coin });
+      if (!divisionsFirst) {
+        // a coin flip elsewhere only orders a block wholly above or below me: my own coin decides
+        // my seat, so winning and losing every flip bound it exactly
+        const mine = (c: number) => Float64Array.from({ length: n }, (_, i) => (i === me ? c : 0));
+        clinched = seatWith(mine(-1)).indexOf(me) + 1 <= P;
+        eliminated = seatWith(mine(1)).indexOf(me) + 1 > P;
+        decided = true;
+      } else {
+        // division winners first: another division's coin flip can move its runner-up into the
+        // wild-card pool, so only an order no coin flip touches is exact (one that flips under the
+        // coins reversed has a coin-level tie somewhere)
+        const fwd = seatWith(Float64Array.from({ length: n }, (_, i) => n - i));
+        const rev = seatWith(Float64Array.from({ length: n }, (_, i) => i + 1));
+        if (fwd.every((x, k) => x === rev[k])) {
+          clinched = fwd.indexOf(me) + 1 <= P;
+          eliminated = !clinched;
+          decided = true;
+        }
+      }
+      if (decided) magic = clinched ? 0 : null;
+    }
+    if (!decided && mode === "espn_rule" && chain[0] === "win_pct") {
+      const games = (i: number): number => rd(w0, i) + rd(l0, i) + rd(t0, i) + remainingOf(i);
+      const pctAt = (i: number, half: number): number => {
+        const g = games(i);
+        return g > 0 ? half / g : 0;
+      };
+      const minPct = (i: number): number => pctAt(i, halfWins(i));
+      const maxPct = (i: number): number => pctAt(i, halfWins(i) + remainingOf(i));
+      const myMax = maxPct(me);
       const adj = divisionAware ? divIds.length - 1 : 0;
       const rivals = Array.from({ length: n }, (_, i) => i).filter((i) => i !== me);
-      const above = rivals.filter((i) => (w0[i] ?? 0) > myMax).length;
-      const divRivalAbove = rivals.some((i) => div[i] === div[me] && (w0[i] ?? 0) > myMax);
+      const surelyAbove = (i: number): boolean => minPct(i) > myMax + 1e-9;
+      const above = rivals.filter(surelyAbove).length;
+      const divRivalAbove = rivals.some((i) => div[i] === div[me] && surelyAbove(i));
       eliminated = above >= P && (!divisionAware || divRivalAbove);
-      const reachers = (target: number): number =>
-        rivals.filter((i) => (w0[i] ?? 0) + remainingOf(i) >= target).length + adj;
-      clinched = reachers(myW) < P;
+      const reachers = (pctMine: number): number =>
+        rivals.filter((i) => maxPct(i) >= pctMine - 1e-9).length + adj;
+      clinched = reachers(minPct(me)) < P;
       if (!eliminated)
         for (let m = 0; m <= remainingOf(me); m++)
-          if (reachers(myW + m) < P) {
+          if (reachers(pctAt(me, halfWins(me) + m)) < P) {
             magic = m;
             break;
           }
