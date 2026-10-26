@@ -32,7 +32,7 @@ import { EffError, SERVER_HINTS } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
 import type { DatasetRefusalCode, DriftView, McpServerOptions } from "../services.js";
 import { TOOL_CONTRACT } from "../contract.js";
-import { clockWeek, isTeamUnitIdentity, leagueRef, ttlContextOf } from "./common.js";
+import { clockWeek, isTeamUnitIdentity, leagueRef, ttlContextOf, turn } from "./common.js";
 import { count, iso, isoNull } from "./schemas.js";
 
 /**
@@ -307,6 +307,9 @@ export type G1SourceRow = Omit<StatusData["sources"][number], "last_error"> & {
   readonly last_error: StatusData["sources"][number]["last_error"] | DatasetRefusalCode;
 };
 
+/** Crosswalk lookups G1's unmatched counts take per turn of the event loop (~6 ms). */
+export const LOOKUPS_PER_TURN = 100;
+
 /** The highest team id G1 probes the store's roster snapshots for (ESPN leagues hold ≤ 20 teams). */
 export const SNAPSHOT_TEAM_PROBE_MAX = 40;
 
@@ -380,19 +383,25 @@ export async function crosswalkUnmatched(
     );
     return { rostered: null, top_owned: null };
   }
+  // the index read is one statement step; the lookups run LOOKUPS_PER_TURN to a turn (one
+  // indexed read each: ~700 of them cost 35–50 ms, past the stall bound — plan 03 §1.2)
+  await turn();
   const rostered = await leagueRostered(ctx, week);
+  await turn();
   if (rostered === null)
     warn(
       "crosswalk: no league roster is readable without a request (no cached rosters, no roster snapshot): unmatched_rostered is null, unmatched_top_owned counts every ≥ 1 %-owned player",
     );
   let rosteredUnmatched = 0;
   let topOwnedUnmatched = 0;
+  let lookups = 0;
   for (const p of universe.rows) {
     if (p.espn_id <= 0 || isTeamUnitIdentity(p)) continue;
     const isRostered = rostered?.has(p.espn_id) === true;
     const owned = p.percent_owned;
     const isTop = typeof owned === "number" && Number.isFinite(owned) && owned >= TOP_OWNED_PERCENT;
     if (!isRostered && !isTop) continue;
+    if (++lookups % LOOKUPS_PER_TURN === 0) await turn();
     if (!lacksConfidentPair(p.espn_id)) continue;
     if (isRostered) rosteredUnmatched++;
     else topOwnedUnmatched++;
