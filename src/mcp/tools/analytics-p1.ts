@@ -1175,8 +1175,9 @@ export const analyzeScheduleTool = defineTool({
     }
     if (alive === null)
       warnings.push("season simulation unavailable: every week weighted 1 (P(alive) unknown)");
-    // the (weak) playoff matchup term: D5's shrunk multipliers for my players' playoff-week games
-    const playoffWeeks = b.rules.playoffs.playoff_weeks.filter((x) => weeks.includes(x));
+    // the (weak) playoff matchup term: D5's shrunk multipliers for my players' games in the
+    // league's playoff weeks still ahead (the block lists them whatever `weeks` analyses)
+    const playoffWeeks = b.rules.playoffs.playoff_weeks.filter((x) => x >= b.w);
     const multipliers = args.include_playoffs
       ? await playoffMultipliersOf(
           ctx,

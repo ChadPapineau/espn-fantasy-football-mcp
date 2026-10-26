@@ -135,6 +135,12 @@ describe("E8's playoff matchup term from D5 (Stage C schedule-matchup-multiplier
     expect(mine1?.shrink_w).toBeCloseTo(mean(fromD5.map((x) => x.shrink_w)), 2);
   }, 180_000);
 
+  it("the block is the league's playoff weeks: an analysis of weeks 6–7 still carries their term", async () => {
+    const all = await schedule(fx.client);
+    const some = await schedule(fx.client, { weeks: [6, 7] });
+    expect(some.multipliers).toEqual(all.multipliers);
+  }, 180_000);
+
   it("include_playoffs: false asks for no playoff term and says nothing about it", async () => {
     const got = await schedule(fx.client, { include_playoffs: false });
     expect(got.multipliers).toEqual([]);
