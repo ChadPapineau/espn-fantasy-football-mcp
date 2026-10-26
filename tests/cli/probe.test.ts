@@ -49,6 +49,17 @@ afterEach(() => {
 });
 
 const HOST_BODY = { settings: { proTeams: [{ id: 1, abbrev: "ATL", byeWeek: 5 }] } };
+/**
+ * The recorded host answer: healthy under the checkout's manifest probe spec too (typed keys, 32+
+ * teams, known team ids — Stage C finding probe-manifest-specs-unevaluated), where the minimal
+ * HOST_BODY above is red. The tests that run with the checkout's manifest answer with this.
+ */
+const RECORDED_HOST = (): Record<string, unknown> =>
+  JSON.parse(
+    readFileSync(path.join(ROOT, "fixtures/espn/recorded/season/proTeamSchedules_wl.json"), "utf8"),
+  ) as Record<string, unknown>;
+/** A drifted host answer: the view's key is gone (a skeleton for the seed, removed for the spec). */
+const DRIFTED_HOST = { settings: {} };
 const SHAPE_BODY = {
   settings: {
     scoringSettings: {},
@@ -350,10 +361,10 @@ describe("eff probe", () => {
   });
   it("with the checkout's drift manifest, observed keys are compared (an unseen key is additive, exit 0)", async () => {
     sb = sandbox();
-    const body = {
-      settings: { proTeams: [{ id: 1, abbrev: "ATL", byeWeek: 5, brandNewKey: 1 }] },
-      brandNewTop: true,
-    };
+    const body = RECORDED_HOST();
+    const teams = (body.settings as { proTeams: Record<string, unknown>[] }).proTeams;
+    teams[1]!.brandNewKey = 1;
+    body.brandNewTop = true;
     const f = fakeFetch(() => json(body));
     const io = makeIo(sb, { fetch: f.fetch, clock: movingClock(), packageRoot: ROOT });
     const { config, log } = await loadLenientRuntime(io);
@@ -385,7 +396,7 @@ describe("eff probe", () => {
   // Stage C finding probe-drift-alarm-stamp-sticks: the stamp outlived its episode
   it("a new red episode after an in-call recovery alarms again (the stamp names the episode)", async () => {
     sb = sandbox();
-    let body: unknown = { settings: { name: "renamed" }, teams: [] };
+    let body: unknown = DRIFTED_HOST;
     const f = fakeFetch(() => json(body));
     const { exec, calls } = fakeExec();
     const at = (iso: string) =>
@@ -410,11 +421,11 @@ describe("eff probe", () => {
       store.close();
     }
     // day 2: green, so the episode's stamp is gone
-    body = HOST_BODY;
+    body = RECORDED_HOST();
     expect(await probeAt(at("2026-10-07T09:00:00.000Z"))).toBe(0);
     expect(readJobState(config.cacheDir)["alarm.drift"]).toBeUndefined();
     // day 9: a NEW drift episode alarms again
-    body = { settings: { name: "renamed" }, teams: [] };
+    body = DRIFTED_HOST;
     expect(await probeAt(at("2026-10-14T09:00:00.000Z"))).toBe(4);
     expect(calls).toHaveLength(2);
     // a recovery AND a new in-call red between two probes, no green probe in between: still a new
@@ -438,18 +449,19 @@ describe("eff probe", () => {
   });
   it("a red the probe cannot clear (a schema-level key an in-call answer found) still alarms, with the fallback text", async () => {
     sb = sandbox();
-    const f = fakeFetch(() => json(HOST_BODY));
+    const f = fakeFetch(() => json(RECORDED_HOST()));
     const { exec, calls } = fakeExec();
     const io = makeIo(sb, { fetch: f.fetch, clock: movingClock(), platform: "darwin", exec });
     const { config, log } = await loadLenientRuntime(io);
     const store = openStore(config, io.clock, log, { migrate: true });
     try {
-      // not a required-path key: the probe's seed check cannot verify it, so the row stays red
+      // neither a required-path key nor one the manifest's probe spec requires: no probe answer
+      // can verify it, so the row stays red
       new DriftStateWriter(store.repos.driftState, io.clock, config.espnReadHost).record([
         {
           kind: "missing_required_key",
           view: "proTeamSchedules_wl",
-          path: "$.settings.proTeams[].proGamesByScoringPeriod",
+          path: "$.settings.proTeams[].teamPlayersByPosition",
           value: null,
         },
       ]);

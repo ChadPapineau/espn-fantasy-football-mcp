@@ -6,7 +6,7 @@
 // from the short-circuit"), and the EspnProvider wired with the scoring translator, the drift
 // observations (when the checkout ships the manifest) and the job/server request origin.
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): no write provider is composed.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { cookieUnavailableFor } from "../auth/errors.js";
 import { fileStoreExistsSync } from "../auth/file.js";
@@ -25,6 +25,7 @@ import { translateScoringInput } from "../domain/scoring/index.js";
 import {
   loadDriftManifest,
   MANIFEST_PATH,
+  MAX_MANIFEST_BYTES,
   type DriftObservations,
   type LoadedManifest,
 } from "../drift/index.js";
@@ -34,6 +35,7 @@ import type { RequestOrigin, Store } from "../store/types.js";
 import type { CliIo } from "./io.js";
 import { nextCredentialCheckAt } from "./launchd.js";
 import type { Logger } from "./log.js";
+import { parseProbeSpecs, type ProbeSpecs } from "./probe-spec.js";
 
 /**
  * The credential store config.json records (plan 03 §3), opened lazily (nothing touched here). Each
@@ -126,6 +128,24 @@ export function driftManifest(io: CliIo, log: Logger): LoadedManifest | undefine
 /** The drift observations the checkout ships (fixtures/drift/manifest.json), or undefined. */
 export function driftObservations(io: CliIo, log: Logger): DriftObservations | undefined {
   return driftManifest(io, log)?.observations;
+}
+
+/**
+ * The manifest's probe specs (`probes.host` / `probes.shape`: typed required keys, `minItems`,
+ * `enums` — what the daily probe, doctor #15 and `eff smoke` judge an answer against, plan 01 §7),
+ * or undefined when the checkout ships no manifest or its probes section is malformed (warned: a
+ * malformed spec is never read as "no drift" — the probe then says it judged without it).
+ */
+export function driftProbeSpecs(io: CliIo, log: Logger): ProbeSpecs | undefined {
+  const file = path.join(io.packageRoot, MANIFEST_PATH);
+  if (!existsSync(file)) return undefined;
+  try {
+    if (statSync(file).size > MAX_MANIFEST_BYTES) throw new Error("drift manifest: file too large");
+    return parseProbeSpecs(JSON.parse(readFileSync(file, "utf8")) as unknown);
+  } catch {
+    log.warn("drift.probe_specs_unreadable");
+    return undefined;
+  }
 }
 
 /** The league the configuration names. */

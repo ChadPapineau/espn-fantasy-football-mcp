@@ -16,11 +16,12 @@ import { createHttpClient } from "../http/client.js";
 import { leagueTarget } from "../providers/espn/path.js";
 import { NFLVERSE_RELEASE_BASE, NFLVERSE_TAGS } from "../sources/nflverse/release.js";
 import type { Store } from "../store/types.js";
-import { buildEspnStack, driftObservations, effCodeOf } from "./espn-stack.js";
+import { buildEspnStack, driftObservations, driftProbeSpecs, effCodeOf } from "./espn-stack.js";
 import { espnRequest } from "./espn-http.js";
 import type { CliIo } from "./io.js";
 import type { Logger } from "./log.js";
 import { hostProbe, type ProbeCheck } from "./probe.js";
+import { findingPhrase } from "./probe-spec.js";
 import { errorText } from "./store-access.js";
 import { row, type DoctorRow } from "./doctor-rows.js";
 
@@ -65,7 +66,15 @@ export function clockSkewRow(check: ProbeCheck, nowMs: number): DoctorRow {
 /** Row 15 from the host probe (plan 01 §7; ADV OBJ-06 — the override is probed, never rewritten). */
 export function hostRow(check: ProbeCheck, overridden: boolean): DoctorRow {
   const title = "API host / shape probe (online)";
-  const details = check.signals.slice(0, 10).map((s) => `${s.view}: ${s.kind} ${s.path}`);
+  // a probe-spec finding is said as what it saw (`removed …`, `unknown value … at …`); a detector
+  // signal by its kind
+  const spec = (check.findings ?? []).map((f) => `${f.view}: ${findingPhrase(f)}`);
+  const details = [
+    ...spec,
+    ...check.signals
+      .filter((s) => !(check.findings ?? []).some((f) => f.view === s.view && f.path === s.path))
+      .map((s) => `${s.view}: ${s.kind} ${s.path}`),
+  ].slice(0, 10);
   switch (check.status) {
     case "green":
       return row(
@@ -149,6 +158,7 @@ export async function onlineRows(
         ),
       );
   } else {
+    const specs = driftProbeSpecs(io, log);
     const host = await hostProbe(
       {
         http,
@@ -156,6 +166,9 @@ export async function onlineRows(
         clock: io.clock,
         host: config.espnReadHost,
         observations: driftObservations(io, log),
+        // the manifest's probe specs, as the daily probe judges (plan 01 §7; Stage C finding
+        // probe-manifest-specs-unevaluated)
+        ...(specs === undefined ? {} : { specs }),
         // an interactive diagnosis: never charged to the launchd jobs' daily keyless cap
         origin: "server",
       },

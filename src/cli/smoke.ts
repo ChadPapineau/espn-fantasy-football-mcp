@@ -12,7 +12,7 @@
 // host (plan 03 §1.3).
 import type { Config } from "../config/schema.js";
 import type { StoreFactory } from "../store/types.js";
-import { buildEspnStack, driftObservations, effCodeOf } from "./espn-stack.js";
+import { buildEspnStack, driftObservations, driftProbeSpecs, effCodeOf } from "./espn-stack.js";
 import { EXIT } from "./exit.js";
 import { createHttpClient } from "../http/client.js";
 import { writeLine, type CliIo } from "./io.js";
@@ -192,6 +192,7 @@ export async function smoke(
         code: null,
       });
     else {
+      const specs = driftProbeSpecs(io, log);
       const deps = {
         http: createHttpClient({
           ...(io.fetch === null ? {} : { fetch: io.fetch }),
@@ -202,6 +203,9 @@ export async function smoke(
         clock: io.clock,
         host: config.espnReadHost,
         observations: driftObservations(io, log),
+        // the manifest's probe specs too, as the daily probe judges (plan 01 §7; Stage C finding
+        // probe-manifest-specs-unevaluated)
+        ...(specs === undefined ? {} : { specs }),
         origin: "server" as const,
       };
       probe = [await hostProbe(deps, config.season)];

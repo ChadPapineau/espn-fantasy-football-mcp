@@ -5,16 +5,22 @@
 // user's league when it answers anonymously — a private league's shape is covered by the cookie
 // requests every job makes, so no cookie is sent here). Each response runs through src/drift's
 // detector (required keys, skeleton, and — when the checkout ships the manifest — enums and additive
-// keys); a 3xx or a non-JSON body is `host_moved`. It writes probe_log rows and the drift_state
-// row, never a dataset file (`eff refresh` stays their only writer). The drift alarm is never
-// rate-limited and fires once per state change. Exit 4 on red or host moved (plan 03 §1.3).
+// keys) AND, when the checkout ships it, through the manifest's probe spec (probe-spec.ts: typed
+// required keys, `minItems`, `enums` — plan 01 §7 "Diff against the manifest"; Stage C finding
+// probe-manifest-specs-unevaluated); a 3xx or a non-JSON body is `host_moved`. It writes probe_log
+// rows and the drift_state row, never a dataset file (`eff refresh` stays their only writer). The
+// drift alarm is never rate-limited and fires once per state change. Exit 4 on red or host moved
+// (plan 03 §1.3).
 import {
   checkResponse,
   DriftStateWriter,
   failsResponse,
   hostMovedSignal,
+  parseDiffs,
   probeExitCode,
+  statusOf,
   type DriftSignal,
+  type DriftStateRow,
   type DriftStatus,
 } from "../drift/index.js";
 import {
@@ -34,13 +40,20 @@ import type {
   Store,
   StoreFactory,
 } from "../store/types.js";
-import { driftManifest } from "./espn-stack.js";
+import { driftManifest, driftProbeSpecs } from "./espn-stack.js";
 import { espnRequest, jsonBody, type EspnAnswer } from "./espn-http.js";
 import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
 import { readJobState, stateToken, updateJobState } from "./job-state.js";
 import type { Logger } from "./log.js";
 import { createNotifier } from "./notify.js";
+import {
+  findingPhrase,
+  judgeSpec,
+  specSignals,
+  type ProbeSpecs,
+  type SpecFinding,
+} from "./probe-spec.js";
 import { errorText, openStore } from "./store-access.js";
 
 /** One probe's verdict. */
@@ -56,6 +69,10 @@ export interface ProbeCheck {
   readonly signals: readonly DriftSignal[];
   /** `x-fantasy-server-time` / `date` of the answer (doctor #14 clock skew). */
   readonly server_time_ms: number | null;
+  /** The manifest probe spec's findings on a judged answer (none without the spec). */
+  readonly findings?: readonly SpecFinding[];
+  /** Per view, the spec paths this answer verified (a later good probe clears what they name). */
+  readonly verified?: ReadonlyMap<EspnView, ReadonlySet<string>>;
 }
 
 /** What the probes need. */
@@ -65,6 +82,12 @@ export interface ProbeDeps {
   readonly clock: Clock;
   readonly host: string;
   readonly observations: DriftObservations | undefined;
+  /**
+   * The checkout's manifest probe specs (`probes.host` for the host probe, `probes.shape` for the
+   * shape probe): typed required keys, `minItems` and `enums`, each red drift (plan 01 §7). Absent
+   * → the seed paths and the observations only.
+   */
+  readonly specs?: ProbeSpecs;
   /**
    * Whose request the limiter row records: `job` (the launchd drift probe — counted against the
    * jobs' daily keyless cap, plan 06 §1.4 + changelog V7) or `server` (an interactive run: `eff
@@ -83,11 +106,33 @@ export function serverTimeMs(headers: Readonly<Record<string, string>>): number 
   return Number.isFinite(ms) ? ms : null;
 }
 
+/**
+ * The signals of one judged answer: src/drift's detector first (the seed paths, skeletons, and the
+ * observations' enum and additive keys), then the probe spec's findings it did not already name.
+ */
+function mergeSignals(
+  detected: readonly DriftSignal[],
+  spec: readonly DriftSignal[],
+): DriftSignal[] {
+  const seen = new Set(
+    detected.map((s) => `${s.view}|${s.path}|${failsResponse(s) ? "red" : "add"}`),
+  );
+  const out = [...detected];
+  for (const s of spec) {
+    const key = `${s.view}|${s.path}|${failsResponse(s) ? "red" : "add"}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
 function judge(
   name: "host" | "shape",
   views: readonly EspnView[],
   a: EspnAnswer,
   observations: DriftObservations | undefined,
+  spec: ProbeSpecs["host"] | undefined,
 ): ProbeCheck {
   const base = { name, views, upstream_status: a.status, server_time_ms: serverTimeMs(a.headers) };
   const body = jsonBody(a);
@@ -100,15 +145,25 @@ function judge(
     };
   if (a.status === 200) {
     const c = checkResponse(views, body, observations);
-    // the same rule the drift_state writer applies: a removed key or a skeleton is red; a new
-    // enum value or key is additive (counted, reviewed by a human — plan 01 §7)
-    const red = c.signals.some(failsResponse);
-    const status: DriftStatus = red ? "red" : c.signals.length > 0 ? "additive" : "green";
+    const verdict = spec === undefined ? null : judgeSpec(spec, views, body);
+    const signals = mergeSignals(c.signals, verdict === null ? [] : specSignals(verdict.findings));
+    // the same rule the drift_state writer applies: a removed key, a skeleton, or a red finding of
+    // the manifest's probe spec is red; a new enum value or key is additive (counted, reviewed by a
+    // human — plan 01 §7)
+    const red = signals.some(failsResponse);
+    const status: DriftStatus = red ? "red" : signals.length > 0 ? "additive" : "green";
+    const firstRed = verdict?.findings.find((f) => f.severity === "red") ?? null;
     return {
       ...base,
       status,
-      reason: c.first === null ? null : `${c.first.kind} ${c.first.path}`,
-      signals: c.signals,
+      reason:
+        c.first !== null
+          ? `${c.first.kind} ${c.first.path}`
+          : firstRed !== null
+            ? `spec_${firstRed.kind} ${firstRed.path}`
+            : null,
+      signals,
+      ...(verdict === null ? {} : { findings: verdict.findings, verified: verdict.verified }),
     };
   }
   if (a.status === 404) return { ...base, status: "config", reason: "http_404", signals: [] };
@@ -157,7 +212,7 @@ export async function hostProbe(deps: ProbeDeps, season: number): Promise<ProbeC
       signals: [hostMovedSignal("proTeamSchedules_wl")],
       server_time_ms: serverTimeMs(r.headers),
     };
-  return judge("host", views, r, deps.observations);
+  return judge("host", views, r, deps.observations, deps.specs?.host);
 }
 
 /** The keyless shape probe on a league (`private` when it needs cookies — skipped, not drift). */
@@ -209,7 +264,7 @@ export async function shapeProbe(
       signals: [],
       server_time_ms: serverTimeMs(r.headers),
     };
-  return judge("shape", views, r, deps.observations);
+  return judge("shape", views, r, deps.observations, deps.specs?.shape);
 }
 
 /**
@@ -256,14 +311,26 @@ export function probeRunExit(status: ProbeCheckStatus): number {
   return probeExitCode(status);
 }
 
-/** The one alarm line (plan 06 §1.2: "ESPN drift: <view>: removed <key>"). */
+/** The spec finding behind a signal (the same view and path), if the probe spec raised it. */
+function findingOf(c: ProbeCheck, s: DriftSignal): SpecFinding | undefined {
+  return c.findings?.find((f) => f.severity === "red" && f.view === s.view && f.path === s.path);
+}
+
+/**
+ * The one alarm line (plan 06 §1.2: "ESPN drift: <view>: removed <key>"): the first response-failing
+ * signal of the first red answer — a removed key or a skeleton says `removed`; a probe-spec finding
+ * says what it saw (`removed`, `changed the type of`, `shortened`, `unknown value … at`).
+ */
 export function alarmText(checks: readonly ProbeCheck[]): string | null {
   for (const c of checks) {
     if (c.status === "host_moved")
       return `ESPN host moved: ${c.views.join("+")} — run \`eff doctor --online\``;
     if (c.status === "red") {
-      const s = c.signals.find((x) => x.kind !== "additive_key");
-      return `ESPN drift: ${s?.view ?? c.views.join("+")}: ${s === undefined ? "changed" : `${s.kind === "skeleton" || s.kind === "missing_required_key" ? "removed" : "changed"} ${s.path}`}`;
+      const s = c.signals.find(failsResponse) ?? c.signals.find((x) => x.kind !== "additive_key");
+      if (s === undefined) return `ESPN drift: ${c.views.join("+")}: changed`;
+      const f = findingOf(c, s);
+      if (f !== undefined) return `ESPN drift: ${s.view}: ${findingPhrase(f)}`;
+      return `ESPN drift: ${s.view}: ${s.kind === "skeleton" || s.kind === "missing_required_key" ? "removed" : "changed"} ${s.path}`;
     }
   }
   return null;
@@ -272,7 +339,10 @@ export function alarmText(checks: readonly ProbeCheck[]): string | null {
 /** The probe_log `error` token of a failed check (fixed vocabulary: a signal kind or a reason code). */
 export function probeErrorToken(c: ProbeCheck): string {
   const failing = c.signals.find(failsResponse);
-  if (failing !== undefined) return failing.kind;
+  if (failing !== undefined) {
+    const f = findingOf(c, failing);
+    return f === undefined ? failing.kind : `spec_${f.kind}`;
+  }
   const raw = (c.reason ?? c.status).replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 64);
   return /^[A-Za-z]/.test(raw) ? raw : `e${raw.slice(0, 63)}`;
 }
@@ -300,12 +370,62 @@ export function driftAlarmKey(status: DriftStatus, since: string | null): string
 }
 
 /**
+ * The row with every removed path a probe answer just VERIFIED cleared (pure; nothing to clear → the
+ * same object): src/drift's probe transform clears only the seed paths (`required_paths`), so a key
+ * the manifest's probe spec found missing — `playoffSeedingRule`, a game's `date` — would stay red
+ * after ESPN served it again, until some in-call answer of its view (Stage C finding
+ * probe-manifest-specs-unevaluated). A path any answer of this run found failing is never cleared;
+ * a host move is left to the transform.
+ */
+export function clearSpecVerified(
+  row: DriftStateRow,
+  checks: readonly ProbeCheck[],
+  nowIso: string,
+): DriftStateRow {
+  if (row.status !== "red" && row.status !== "host_moved") return row;
+  const failing = new Set(
+    checks.flatMap((c) => c.signals.filter(failsResponse).map((s) => `${s.view}|${s.path}`)),
+  );
+  const verified = new Map<EspnView, Set<string>>();
+  for (const c of checks) {
+    const judged = c.status === "green" || c.status === "additive" || c.status === "red";
+    if (!judged || c.verified === undefined) continue;
+    for (const [view, paths] of c.verified) {
+      const set = verified.get(view) ?? new Set<string>();
+      for (const p of paths) if (!failing.has(`${view}|${p}`)) set.add(p);
+      verified.set(view, set);
+    }
+  }
+  if (verified.size === 0) return row;
+  const diffs = parseDiffs(row.diff_json);
+  let cleared = false;
+  const next = [];
+  for (const d of diffs) {
+    const v = verified.get(d.view);
+    const removed = v === undefined ? d.removed : d.removed.filter((p) => !v.has(p));
+    if (removed.length !== d.removed.length) cleared = true;
+    if (removed.length + d.added.length + d.enums.length > 0) next.push({ ...d, removed });
+  }
+  if (!cleared) return row;
+  const moved = row.status === "host_moved";
+  const status = statusOf(moved, next, parseDiffs(row.additive_json));
+  return {
+    ...row,
+    status,
+    since: status === "red" || moved ? (row.since ?? nowIso) : null,
+    diff_json: JSON.stringify(next),
+    updated_at: nowIso,
+  };
+}
+
+/**
  * Records probe_log rows and the drift_state row through src/drift's probe transform
  * (DriftStateWriter.probed — plan 01 §7 "The daily probe"): the manifest the run judged against
  * (a newer one re-baselines), what each answer verified clears (the required-key drift of its
- * views), what the run found is recorded, a host move ends on a good answer of a run that saw none,
- * and last_probe_at moves. Before, a run recorded its signals and called `recovered()` with no
- * view, so a green probe never ended a red row (Stage C finding drift-red-never-clears).
+ * views — and, first, every path the manifest's probe spec verified: `clearSpecVerified`), what the
+ * run found is recorded, a host move ends on a good answer of a run that saw none, and
+ * last_probe_at moves. Before, a run recorded its signals and called `recovered()` with no view, so
+ * a green probe never ended a red row (Stage C finding drift-red-never-clears).
  */
 export function recordProbe(
   store: Store,
@@ -326,6 +446,11 @@ export function recordProbe(
       error: c.status === "green" || c.status === "additive" ? null : probeErrorToken(c),
     };
     store.repos.probeLog.record(row);
+  }
+  const current = store.repos.driftState.get();
+  if (current !== null) {
+    const cleared = clearSpecVerified(current, checks, at);
+    if (cleared !== current) store.repos.driftState.put(cleared);
   }
   const out = new DriftStateWriter(store.repos.driftState, clock, host).probed(checks, manifest);
   return { status: out.row.status, since: out.row.since, rebaselined: out.rebaselined };
@@ -372,6 +497,7 @@ export async function probe(
   }
   try {
     const manifest = driftManifest(io, log);
+    const specs = manifest === undefined ? undefined : driftProbeSpecs(io, log);
     const deps: ProbeDeps = {
       http: createHttpClient({
         ...(io.fetch === null ? {} : { fetch: io.fetch }),
@@ -382,6 +508,7 @@ export async function probe(
       clock: io.clock,
       host: config.espnReadHost,
       observations: manifest?.observations,
+      ...(specs === undefined ? {} : { specs }),
       // the launchd job runs `probe --notify`; a run without it is someone at a terminal
       origin: opts.notify ? "job" : "server",
     };
@@ -418,6 +545,7 @@ export async function probe(
       status,
       stored,
       manifest: deps.observations === undefined ? "absent" : "present",
+      probe_specs: specs === undefined ? "absent" : "present",
       rebaselined: recorded.rebaselined,
     });
 
@@ -448,6 +576,7 @@ export async function probe(
           status,
           drift_state: stored,
           manifest: deps.observations === undefined ? "absent" : "present",
+          probe_specs: specs === undefined ? "absent" : "present",
           rebaselined: recorded.rebaselined,
           checks: checks.map((c) => ({
             name: c.name,
@@ -456,18 +585,35 @@ export async function probe(
             upstream_status: c.upstream_status,
             reason: c.reason,
             signals: c.signals.slice(0, 50),
+            findings: (c.findings ?? []).slice(0, 50).map((f) => ({
+              severity: f.severity,
+              kind: f.kind,
+              view: f.view,
+              path: f.path,
+              count: f.count,
+              value: f.value,
+            })),
           })),
         }),
       );
     } else {
-      for (const c of checks)
+      for (const c of checks) {
         await writeLine(
           io.stdout,
           `${c.name.padEnd(6)} ${c.status.padEnd(11)} ${c.views.join("+")}${c.reason === null ? "" : `  (${c.reason})`}`,
         );
+        const red = (c.findings ?? []).filter((f) => f.severity === "red");
+        for (const f of red.slice(0, 10))
+          await writeLine(io.stdout, `       red: ${f.view}: ${findingPhrase(f)}`);
+        if (red.length > 10)
+          await writeLine(
+            io.stdout,
+            `       … and ${String(red.length - 10)} more (--json lists them)`,
+          );
+      }
       await writeLine(
         io.stdout,
-        `drift_state: ${stored}${deps.observations === undefined ? " (manifest absent: required keys and skeletons only)" : ""}${recorded.rebaselined ? " (re-baselined on a newer drift manifest: the old diff was discarded)" : ""}`,
+        `drift_state: ${stored}${deps.observations === undefined ? " (manifest absent: required keys and skeletons only)" : specs === undefined ? " (the manifest's probe specs are unreadable: required keys and skeletons only)" : ""}${recorded.rebaselined ? " (re-baselined on a newer drift manifest: the old diff was discarded)" : ""}`,
       );
       const a = alarmText(checks);
       if (a !== null) await writeLine(io.stderr, a);
