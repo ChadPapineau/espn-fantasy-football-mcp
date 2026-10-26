@@ -14,7 +14,6 @@ import {
   constants as fsc,
   fstatSync,
   lstatSync,
-  mkdirSync,
   openSync,
   readdirSync,
   readSync,
@@ -32,10 +31,14 @@ import {
   backupDir,
   ensureSecureDir,
   fileProviderMarks,
+  foreignAclEntries,
   insecureAncestors,
   PathSecurityError,
   readSecureFile,
   storePath,
+  stripForeignAcl,
+  systemAcl,
+  type AclAccess,
 } from "../config/paths.js";
 import {
   ConfigError,
@@ -515,11 +518,34 @@ function refusal(e: unknown): string {
   return e instanceof PathSecurityError ? e.detail : errorText(e);
 }
 
-/** What fixes a refused directory or file of ours: `--fix` only tightens a mode bit. */
-function refusalFix(e: unknown): string {
-  return e instanceof PathSecurityError && e.reason === "insecure_mode"
-    ? "`eff doctor --fix` tightens our own directory's or file's mode"
-    : "`eff doctor --fix` never follows a symlink or changes what is not yours: fix it by hand";
+/**
+ * What fixes a refused directory or file of ours, by why it was refused: `--fix` tightens a mode bit
+ * and removes an ACL entry giving others access on our OWN paths (it creates what is missing); it
+ * never follows a symlink and never changes what is not ours. Rows 4 and 5 used to say "--fix
+ * tightens our own directory's mode" for every refusal, an ACL's included, which --fix then did not
+ * repair (Stage C finding doctor-fix-dirs-inherit-acl).
+ */
+export function refusalFix(e: unknown): string {
+  if (!(e instanceof PathSecurityError))
+    return "`eff doctor --fix` never follows a symlink or changes what is not yours: fix it by hand";
+  switch (e.reason) {
+    case "insecure_mode":
+      return "`eff doctor --fix` tightens our own directory's or file's mode";
+    case "insecure_acl":
+      return "`eff doctor --fix` removes the ACL entries that give others access to our own directory or file";
+    case "missing":
+      return "`eff setup` (or `eff doctor --fix`) creates it 0700";
+    case "symlink":
+      return "`eff doctor --fix` never follows a symlink: replace the link with a real directory by hand";
+    case "wrong_owner":
+      return "it belongs to another user, and `eff doctor --fix` never changes what is not yours: fix its owner by hand";
+    case "insecure_ancestor":
+      return "a directory above it is writable by others: fix that directory's permissions by hand (`eff doctor --fix` changes only our own paths)";
+    case "acl_unverifiable":
+      return "its access control list could not be read: check it with `ls -led` and fix it by hand";
+    default:
+      return "`eff doctor --fix` never follows a symlink or changes what is not yours: fix it by hand";
+  }
 }
 
 /**
@@ -540,6 +566,59 @@ export function cacheSubdirRefusals(cacheDir: string): { path: string; error: un
     }
   }
   return out;
+}
+
+/** At most this many entries of one run directory's tree are looked at (a bound on a user's tree). */
+export const MAX_RUN_TREE_ENTRIES = 2_000;
+
+/**
+ * The run directories inside the cache's own tree directories (`tmp/<run>`, `recordings/<run>` —
+ * raw captures with real names and ids, a full store copy of an interrupted `backup --to`) that are
+ * there but not private (group/other bits, an ACL entry for others): `eff uninstall` and `eff prune`
+ * keep such a directory as "not a run directory this program made", so it would outlive both (Stage
+ * C finding doctor-fix-run-dirs-unrepaired). A run directory that is a symlink or someone else's is
+ * not ours and not listed.
+ */
+export function cacheRunDirRefusals(
+  cacheDir: string,
+  acl: AclAccess = systemAcl,
+): { path: string; error: unknown }[] {
+  const out: { path: string; error: unknown }[] = [];
+  for (const d of CACHE_DIRS) {
+    if (d.tree !== true) continue;
+    const top = path.join(cacheDir, d.name);
+    for (const p of ownDirsIn(top, d.re)) {
+      try {
+        ensureSecureDir(p, { create: false, what: `${d.name}/ run directory`, acl });
+      } catch (e) {
+        if (!(e instanceof PathSecurityError && e.reason === "insecure_ancestor"))
+          out.push({ path: p, error: e });
+      }
+    }
+  }
+  return out;
+}
+
+/** The directories of ours (real, owned) inside `dir` whose names match `re`. */
+function ownDirsIn(dir: string, re: RegExp): string[] {
+  try {
+    if (!lstatSync(dir).isDirectory()) return [];
+    const uid = ownUid();
+    return readdirSync(dir)
+      .filter((n) => re.test(n))
+      .sort()
+      .map((n) => path.join(dir, n))
+      .filter((p) => {
+        try {
+          const st = lstatSync(p);
+          return st.isDirectory() && (uid === null || st.uid === uid);
+        } catch {
+          return false;
+        }
+      });
+  } catch {
+    return [];
+  }
 }
 
 /** Row 5's detail and fix for a store that could not be opened (never "move a healthy store aside"). */
@@ -620,9 +699,7 @@ export function checkConfigDir(io: CliIo, config: LenientConfig): DoctorRow {
       title,
       missing ? "warn" : "fail",
       `${config.configDir}: ${refusal(e)}`,
-      missing
-        ? "`eff setup` (or `eff doctor --fix`) creates it 0700"
-        : "`eff doctor --fix` tightens our own directory's mode; fix ownership or the parent by hand",
+      refusalFix(e),
       details,
     );
   }
@@ -685,6 +762,60 @@ export function quickCheckFile(file: string): "ok" | "corrupt" | "unreadable" {
   }
 }
 
+/** Why a store file of ours is not writable, with the fix for that cause, or null when it is. */
+export function storeUnwritable(
+  file: string,
+): { readonly file: string; readonly code: string; readonly fix: string } | null {
+  for (const f of [file, `${file}-wal`, `${file}-shm`]) {
+    let st;
+    try {
+      st = lstatSync(f);
+    } catch {
+      continue; // no -wal / -shm right after a checkpoint
+    }
+    try {
+      accessSync(f, fsc.W_OK);
+      continue;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code ?? "EACCES";
+      const fix =
+        code === "EROFS"
+          ? "the volume holding the cache is mounted read-only: move the cache to a writable volume (EFF_CACHE_DIR)"
+          : code === "EPERM"
+            ? `the file is locked (an immutable flag): \`chflags nouchg ${f}\`, then \`eff doctor\``
+            : (st.mode & 0o200) === 0
+              ? `\`eff doctor --fix\` restores 0600 on our own file (or \`chmod 600 ${f}\`)`
+              : `an access control list entry denies you write access: \`chmod -N ${f}\` removes it`;
+      return { file: f, code, fix };
+    }
+  }
+  return null;
+}
+
+/** The store's page counts on its own read-only connection (live bytes vs free pages), or null. */
+export function storePages(
+  file: string,
+): { readonly liveBytes: number; readonly freeBytes: number } | null {
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(file, { readOnly: true });
+    const n = (pragma: string): number => {
+      const r = db?.prepare(`PRAGMA ${pragma}`).get() as Record<string, unknown> | undefined;
+      const v = r === undefined ? undefined : Object.values(r)[0];
+      return typeof v === "number" ? v : Number(v ?? NaN);
+    };
+    const size = n("page_size");
+    const count = n("page_count");
+    const free = n("freelist_count");
+    if (![size, count, free].every((x) => Number.isFinite(x) && x >= 0)) return null;
+    return { liveBytes: (count - free) * size, freeBytes: free * size };
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
 /** The backups a restore can take, newest first (names and dates only), for row 5's details. */
 export function backupsPresent(cacheDir: string, max = 6): string[] {
   const dir = backupDir(cacheDir);
@@ -733,14 +864,7 @@ export function checkStore(io: CliIo, config: LenientConfig, ex: ExistingStore):
         `${config.cacheDir} does not exist yet`,
         "`eff refresh all` (or `eff doctor --fix`) creates it 0700",
       );
-    return row(
-      5,
-      "store",
-      title,
-      "fail",
-      `${config.cacheDir}: ${refusal(e)}`,
-      "`eff doctor --fix` tightens our own directory's mode",
-    );
+    return row(5, "store", title, "fail", `${config.cacheDir}: ${refusal(e)}`, refusalFix(e));
   }
   try {
     accessSync(config.cacheDir, fsc.W_OK | fsc.X_OK);
@@ -770,8 +894,12 @@ export function checkStore(io: CliIo, config: LenientConfig, ex: ExistingStore):
     worse("warn");
     details.push(`free space ${String(Math.round(free / 1024 ** 2))} MB < 1 GB`);
   }
-  // the cache's own directories: a refused one fails every store open, `eff backup` or `eff refresh`
-  const subdirs = cacheSubdirRefusals(config.cacheDir);
+  // the cache's own directories: a refused one fails every store open, `eff backup` or `eff refresh`;
+  // a run directory inside tmp/ or recordings/ that is not private outlives uninstall and prune
+  const subdirs = [
+    ...cacheSubdirRefusals(config.cacheDir),
+    ...cacheRunDirRefusals(config.cacheDir),
+  ];
   for (const r of subdirs) details.push(`${r.path}: ${refusal(r.error)}`);
   const subdirRow = (): DoctorRow | null => {
     const first = subdirs[0];
@@ -832,19 +960,59 @@ export function checkStore(io: CliIo, config: LenientConfig, ex: ExistingStore):
     case "open":
       break;
   }
-  const qc = quickCheckFile(storePath(config.cacheDir));
-  if (qc !== "ok") {
-    worse("fail");
-    details.push(`store quick_check: ${qc}`);
-  }
+  const file = storePath(config.cacheDir);
   const stats = ex.store.stats();
   details.push(
     `schema v${String(stats.schema_version)} (binary v${String(bin)}), ${String(Math.round(stats.size_bytes / 1024))} KB`,
   );
-  if (stats.size_bytes > MAX_STORE_BYTES) {
+  // a store that opens but fails quick_check is the usual way damage shows: the same restore
+  // procedure as a store that does not open at all, with the backups to take (Stage C finding
+  // doctor-quick-check-corrupt-no-restore-steps: it said only "store problems → see details")
+  const qc = quickCheckFile(file);
+  if (qc !== "ok")
+    return row(
+      5,
+      "store",
+      title,
+      "fail",
+      `store.sqlite fails quick_check (${qc}): the file is damaged`,
+      "restore a backup — the steps below (with no backup: do steps 1–2, then `eff refresh all` starts a new, empty store)",
+      [
+        ...details,
+        `store quick_check: ${qc}`,
+        ...restoreSteps(config.cacheDir, { kind: "newest" }),
+        ...backupsPresent(config.cacheDir),
+      ],
+    );
+  // writable: every request writes its limiter row first, so a store SQLite opens read-only (mode
+  // 0400, an immutable flag, an ACL denying write, a read-only volume) fails every ESPN-backed tool
+  // and every job (Stage C finding doctor-store-readonly-reported-ok)
+  const unwritable = storeUnwritable(file);
+  if (unwritable !== null)
+    return row(
+      5,
+      "store",
+      title,
+      "fail",
+      `${unwritable.file} is not writable by you (${unwritable.code}): every ESPN request and every job fails`,
+      unwritable.fix,
+      details,
+    );
+  const pages = storePages(file);
+  const live = pages === null ? stats.size_bytes : pages.liveBytes;
+  if (pages !== null && pages.freeBytes >= 1024 ** 2)
+    details.push(
+      `${String(Math.round(pages.freeBytes / 1024 ** 2))} MB of the file are free pages (\`eff prune\` reclaims them)`,
+    );
+  if (live > MAX_STORE_BYTES) {
     worse("warn");
     details.push(
-      `store ${String(Math.round(stats.size_bytes / 1024 ** 2))} MB > 500 MB — \`eff prune\``,
+      `store holds ${String(Math.round(live / 1024 ** 2))} MB of data > 500 MB — \`eff prune\` removes what is past its limits`,
+    );
+  } else if (stats.size_bytes > MAX_STORE_BYTES) {
+    worse("warn");
+    details.push(
+      `store file ${String(Math.round(stats.size_bytes / 1024 ** 2))} MB > 500 MB, most of it free pages — \`eff prune\` reclaims them`,
     );
   }
   // the store opened, but a refused directory of ours still fails `eff backup` or `eff refresh`
@@ -1649,49 +1817,137 @@ function ownUid(): number | null {
   return typeof process.getuid === "function" ? process.getuid() : null;
 }
 
-function dirFix(dir: string, what: string, create: boolean): Fix | null {
-  let st;
+/** Whether `p` carries an ACL entry giving others access (false when it cannot be read: not ours to touch). */
+function hasForeignAcl(p: string, acl: AclAccess): boolean {
   try {
-    st = lstatSync(dir);
+    return foreignAclEntries(p, "path", acl).length > 0;
   } catch {
-    if (!create || insecureAncestors(dir).length > 0) return null;
-    return {
-      description: `create ${what} ${dir} (0700)`,
-      apply: () => {
-        mkdirSync(dir, { recursive: true, mode: 0o700 });
-      },
-    };
+    return false;
   }
-  const uid = ownUid();
-  if (st.isSymbolicLink() || !st.isDirectory() || (uid !== null && st.uid !== uid)) return null;
-  if ((st.mode & 0o077) === 0 && (st.mode & 0o700) === 0o700) return null;
+}
+
+/** The ACL repair of one of our own paths: removes every entry that gives others access. */
+function aclFix(p: string, what: string, acl: AclAccess): Fix | null {
+  if (!hasForeignAcl(p, acl)) return null;
   return {
-    description: `chmod 700 ${dir}`,
+    description: `remove the ACL entries that give others access to ${p} (chmod -N)`,
     apply: () => {
-      chmodSync(dir, 0o700);
+      stripForeignAcl(p, what, acl);
     },
   };
 }
 
-function fileFix(file: string): Fix | null {
+/**
+ * The repairs of one directory of ours: created when missing (`create`) through ensureSecureDir —
+ * which removes an ACL entry the parent passed down to every directory it made, so the new directory
+ * is the 0700 one every later check accepts (Stage C finding doctor-fix-dirs-inherit-acl: a plain
+ * mkdir kept the inherited entry and every command then refused the directory --fix had made); an
+ * existing one gets its mode back to 0700 and its foreign ACL entries removed. Never a symlink,
+ * something that is not a directory, or a directory of another user.
+ */
+function dirFixes(dir: string, what: string, create: boolean, acl: AclAccess): Fix[] {
+  let st;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    if (!create || insecureAncestors(dir).length > 0) return [];
+    return [
+      {
+        description: `create ${what} ${dir} (0700)`,
+        apply: () => {
+          ensureSecureDir(dir, { create: true, what, acl });
+        },
+      },
+    ];
+  }
+  const uid = ownUid();
+  if (st.isSymbolicLink() || !st.isDirectory() || (uid !== null && st.uid !== uid)) return [];
+  const out: Fix[] = [];
+  if ((st.mode & 0o077) !== 0 || (st.mode & 0o700) !== 0o700)
+    out.push({
+      description: `chmod 700 ${dir}`,
+      apply: () => {
+        chmodSync(dir, 0o700);
+      },
+    });
+  const a = aclFix(dir, what, acl);
+  if (a !== null) out.push(a);
+  return out;
+}
+
+/** The repairs of one private file of ours: mode 0600, foreign ACL entries removed. */
+function fileFixes(file: string, acl: AclAccess): Fix[] {
   try {
     const st = lstatSync(file);
     const uid = ownUid();
-    if (
-      st.isFile() &&
-      (uid === null || st.uid === uid) &&
-      ((st.mode & 0o077) !== 0 || (st.mode & 0o600) !== 0o600)
-    )
-      return {
+    if (!st.isFile() || (uid !== null && st.uid !== uid)) return [];
+    const out: Fix[] = [];
+    if ((st.mode & 0o077) !== 0 || (st.mode & 0o600) !== 0o600)
+      out.push({
         description: `chmod 600 ${file}`,
         apply: () => {
           chmodSync(file, 0o600);
         },
-      };
+      });
+    const a = aclFix(file, "file", acl);
+    if (a !== null) out.push(a);
+    return out;
   } catch {
-    // not there
+    return []; // not there
   }
-  return null;
+}
+
+/**
+ * The repair of one run directory of ours inside tmp/ or recordings/ that is not private: its whole
+ * tree (bounded by MAX_RUN_TREE_ENTRIES) back to directories 0700 and files 0600, every foreign ACL
+ * entry removed — never through a symlink, never a path of another user — so `eff uninstall` and
+ * `eff prune` recognise it as a run directory this program made (Stage C finding
+ * doctor-fix-run-dirs-unrepaired: only the top-level directories were repaired).
+ */
+function runTreeFix(root: string, acl: AclAccess): Fix | null {
+  const uid = ownUid();
+  const paths: { p: string; dir: boolean }[] = [];
+  const walk = (p: string): void => {
+    if (paths.length >= MAX_RUN_TREE_ENTRIES) return;
+    let st;
+    try {
+      st = lstatSync(p);
+    } catch {
+      return;
+    }
+    if (st.isSymbolicLink() || (uid !== null && st.uid !== uid)) return;
+    if (st.isDirectory()) {
+      paths.push({ p, dir: true });
+      let names: string[] = [];
+      try {
+        names = readdirSync(p).sort();
+      } catch {
+        names = [];
+      }
+      for (const n of names) walk(path.join(p, n));
+    } else if (st.isFile()) paths.push({ p, dir: false });
+  };
+  walk(root);
+  const modeBad = (x: { p: string; dir: boolean }): boolean => {
+    try {
+      const m = lstatSync(x.p).mode;
+      return (m & 0o077) !== 0 || (m & (x.dir ? 0o700 : 0o600)) !== (x.dir ? 0o700 : 0o600);
+    } catch {
+      return false;
+    }
+  };
+  const stripAll = hasForeignAcl(root, acl);
+  const todo = paths.filter((x) => modeBad(x) || (stripAll && hasForeignAcl(x.p, acl)));
+  if (todo.length === 0) return null;
+  return {
+    description: `repair the run directory ${root} (${String(todo.length)} path(s) to 0700/0600${stripAll ? ", ACL entries for others removed" : ""})`,
+    apply: () => {
+      for (const x of todo) {
+        if (modeBad(x)) chmodSync(x.p, x.dir ? 0o700 : 0o600);
+        if (stripAll && hasForeignAcl(x.p, acl)) stripForeignAcl(x.p, "run directory", acl);
+      }
+    },
+  };
 }
 
 /** Our files inside one of the cache's own directories (only when it is a real directory). */
@@ -1709,29 +1965,37 @@ function ownFilesIn(dir: string, re: RegExp): string[] {
 
 /**
  * The repairs `--fix` would make (never on a symlink or something we do not own): the config and
- * cache dirs (created when missing), the cache's own directories — `datasets/`, `backups/`, `tmp/`,
- * `recordings/`, which every store open, `eff backup`, `eff refresh` and the fixture tools refuse while
- * group/other bits are set (never created here: what needs one makes it) — and our private files:
- * the credential file, the store with its -wal/-shm, the jobs' state, the tuned parameters and the
- * backups (each written 0600). A tree copied or restored with default modes is repaired whole
- * (Stage C finding doctor-fix-skips-cache-subdirs: only four paths were covered).
+ * cache dirs (created when missing, through ensureSecureDir), the cache's own directories —
+ * `datasets/`, `backups/`, `tmp/`, `recordings/`, which every store open, `eff backup`, `eff refresh`
+ * and the fixture tools refuse while group/other bits are set (never created here: what needs one
+ * makes it) — and the run directories inside `tmp/` and `recordings/`, whole; our private files: the
+ * credential file, the store with its -wal/-shm, the jobs' state and notification log, the tuned
+ * parameters and the backups (each written 0600). Each also loses an ACL entry giving others access
+ * (rows 4 and 5 refuse one as `insecure_acl`). A tree copied or restored with default modes is
+ * repaired whole (Stage C findings doctor-fix-skips-cache-subdirs, doctor-fix-dirs-inherit-acl,
+ * doctor-fix-run-dirs-unrepaired).
  */
-export function plannedFixes(config: LenientConfig): Fix[] {
+export function plannedFixes(config: LenientConfig, acl: AclAccess = systemAcl): Fix[] {
   const store = storePath(config.cacheDir);
   const backups = CACHE_DIRS.find((d) => d.name === path.basename(backupDir(config.cacheDir)));
   const out: (Fix | null)[] = [
-    dirFix(config.configDir, "config dir", true),
-    dirFix(config.cacheDir, "cache dir", true),
-    ...CACHE_DIRS.map((d) => dirFix(path.join(config.cacheDir, d.name), `${d.name}/ dir`, false)),
-    fileFix(config.credentialFile),
-    fileFix(path.join(config.configDir, TUNED_PARAMETERS_FILE_NAME)),
-    fileFix(store),
-    fileFix(`${store}-wal`),
-    fileFix(`${store}-shm`),
-    fileFix(jobStatePath(config.cacheDir)),
+    ...dirFixes(config.configDir, "config dir", true, acl),
+    ...dirFixes(config.cacheDir, "cache dir", true, acl),
+    ...CACHE_DIRS.flatMap((d) =>
+      dirFixes(path.join(config.cacheDir, d.name), `${d.name}/ dir`, false, acl),
+    ),
+    ...CACHE_DIRS.filter((d) => d.tree === true).flatMap((d) =>
+      ownDirsIn(path.join(config.cacheDir, d.name), d.re).map((p) => runTreeFix(p, acl)),
+    ),
+    ...fileFixes(config.credentialFile, acl),
+    ...fileFixes(path.join(config.configDir, TUNED_PARAMETERS_FILE_NAME), acl),
+    ...fileFixes(store, acl),
+    ...fileFixes(`${store}-wal`, acl),
+    ...fileFixes(`${store}-shm`, acl),
+    ...fileFixes(jobStatePath(config.cacheDir), acl),
     ...(backups === undefined
       ? []
-      : ownFilesIn(backupDir(config.cacheDir), backups.re).map((f) => fileFix(f))),
+      : ownFilesIn(backupDir(config.cacheDir), backups.re).flatMap((f) => fileFixes(f, acl))),
   ];
   return out.filter((f): f is Fix => f !== null);
 }

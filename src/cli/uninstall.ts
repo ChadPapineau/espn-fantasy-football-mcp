@@ -60,7 +60,7 @@ import { isTty, writeLine, type CliIo } from "./io.js";
 import { JOB_STATE_FILE, JOB_STATE_LOCK } from "./job-state.js";
 import { JOB_NAMES, logDir, removeJobs } from "./launchd.js";
 import type { Logger } from "./log.js";
-import { resolveBackupDestination } from "./maintenance.js";
+import { privatizeNewFile, resolveBackupDestination } from "./maintenance.js";
 import {
   cookieFindings,
   removeCommand,
@@ -418,9 +418,20 @@ function exportRow(row: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Buffered writes to a NEW 0600 file (O_EXCL, never follows a symlink); removed on failure. */
+/**
+ * Buffered writes to a NEW 0600 file (O_EXCL, never follows a symlink), private before a byte is
+ * written (an ACL entry of its directory removed and checked — Stage C finding
+ * paths-export-destination-acl-inherited); removed on failure.
+ */
 function newPrivateWriter(dest: string): { write(s: string): void; close(): void; abort(): void } {
   const fd = openSync(dest, fsc.O_WRONLY | fsc.O_CREAT | fsc.O_EXCL | fsc.O_NOFOLLOW, 0o600);
+  try {
+    privatizeNewFile(fd, dest);
+  } catch (e) {
+    closeSync(fd);
+    rmSync(dest, { force: true });
+    throw e;
+  }
   let buf: string[] = [];
   let size = 0;
   const flush = (): void => {
