@@ -528,6 +528,32 @@ describe("clinch and the cutoff read win % with ties as half wins (Stage C seedi
     expect(r?.p_playoffs).toBeLessThan(1);
   });
 
+  it("division winners first, no game left, another division settled by a coin flip: the bounds stand in, still sound", async () => {
+    // division A: teams 1 (6-2) and 2 (5-3); division B: teams 3 and 4 level on everything, so a coin
+    // flip names B's winner; three in. Team 2 is in whichever wins it; team 3 or 4 is in only if it
+    // wins the flip
+    const divs = (me: number) =>
+      base({
+        teams: [
+          { ...team(1, 6, 2, 900), division_id: 1 },
+          { ...team(2, 5, 3, 850), division_id: 1 },
+          { ...team(3, 4, 4, 800), division_id: 2 },
+          { ...team(4, 4, 4, 800), division_id: 2 },
+        ],
+        me,
+        playoff: { team_count: 3, seeding_rule: "TOTAL_POINTS_SCORED", reseed: false, rounds: [] },
+        seeding_mode: "espn_rule",
+        marginal: false,
+      });
+    const second = (await simulateSeason(divs(2))).data.readings[0];
+    expect(second?.p_playoffs).toBe(1);
+    expect(second?.clinch).toEqual({ clinched: true, eliminated: false, magic_number: 0 });
+    const flip = (await simulateSeason(divs(3))).data.readings[0];
+    expect(flip?.p_playoffs).toBeGreaterThan(0.3);
+    expect(flip?.p_playoffs).toBeLessThan(0.7);
+    expect(flip?.clinch).toEqual({ clinched: false, eliminated: false, magic_number: null });
+  });
+
   it("property: clinched ⇒ in on every path, eliminated ⇒ out on every path; with no game left both are exact", async () => {
     const W = fc.record({ w: fc.nat(6), t: fc.nat(2), pf: fc.integer({ min: 400, max: 700 }) });
     await fc.assert(

@@ -32,8 +32,11 @@ output exactly (bar the stream signal's evidence).
 RB36 / WR38 / TE14 (research 05 §1.6); a hit = top-24 RB/WR or top-12 TE over the next four weeks;
 the points-only detector takes the same number of picks each week from last week's top available
 scorers (equal recall budget). Half-PPR points from nflverse's standard and PPR columns; xFP is
-ffopportunity's (PPR on both sides of the gap). `rz_shift`, `depth_chart` and `implied_total` need
-pbp, chart and line inputs the harness does not join — not backtested.
+ffopportunity's (PPR on both sides of the gap: one basis). The tools compare on the league's basis
+instead — ffopportunity's expected line scored under S, and E5's gap is D1's row gap
+([`xfp.ts`](../../src/domain/analytics/xfp.ts), Stage C round 3; before, E5 set ffopportunity's
+full-PPR xFP against the league's half-PPR points). `rz_shift`, `depth_chart` and `implied_total`
+need pbp, chart and line inputs the harness does not join — not backtested.
 
 | season | signal | picks | usage precision | points-only precision |
 |---|---|---:|---:|---:|
