@@ -31,11 +31,16 @@ import { EffError, SERVER_HINTS } from "../errors.js";
 import { defineTool, type ToolContext } from "../define.js";
 import type { DriftView, McpServerOptions } from "../services.js";
 import { TOOL_CONTRACT } from "../contract.js";
-import { leagueRef, ttlContextOf } from "./common.js";
+import { clockWeek, leagueRef, ttlContextOf } from "./common.js";
 import { count, iso, isoNull } from "./schemas.js";
 
-/** The SDK the server is built on (pinned exactly in package.json; a test keeps them equal). */
-export const SDK_VERSION = "2.2.0";
+/**
+ * The SDK the server is built on: package.json's exact pin of @modelcontextprotocol/server, which
+ * tests/mcp/sdk-version.test.ts holds equal to this constant, the lockfile and the installed package
+ * (src/mcp reads no file — plan 01 §1.1). A version bump that misses it fails that test (Stage C
+ * finding status-sdk-version-stale: the reviewed 2.3.1 bump left 2.2.0 here, untested).
+ */
+export const SDK_VERSION = "2.3.1";
 /** The stateless era the server serves beside the legacy initialize eras (plan 01 §3.1). */
 export const MODERN_PROTOCOL_ERA = "2026-07-28";
 /** The protocol eras the server answers (the modern one, then the SDK's legacy list). */
@@ -487,7 +492,9 @@ export async function statusSnapshot(
     },
     league: {
       season: ref.season,
-      current_week: league?.value.clock.current_scoring_period ?? null,
+      // the week the league's clock means — its final scoring period once the season is over,
+      // as every tool's default week (Stage C finding league-postseason-default-week-18)
+      current_week: league === null ? null : clockWeek(league.value.clock),
       is_public: league?.value.is_public ?? null,
       seeding_mode_configured: s.seedingMode,
       seeding_confirmed:

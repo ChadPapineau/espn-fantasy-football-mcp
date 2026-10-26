@@ -69,6 +69,7 @@ import { TRUNCATION_HINTS, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
 import { defineTool, dropLastTrim, type ToolContext } from "../define.js";
 import {
+  clockWeek,
   isDegradable,
   leagueOf,
   leagueRef,
@@ -264,6 +265,7 @@ export const leagueDigestSchema = z.strictObject({
       transaction_scoring_period: z.number().int().min(0).max(25).nullable(),
       is_active: z.boolean(),
       is_expired: z.boolean().nullable(),
+      current_week: z.number().int().min(0).max(25),
       current_week_final: z.boolean(),
       corrections_window_open: z.boolean(),
     })
@@ -479,19 +481,26 @@ async function evidenceOf(
 }
 
 /**
- * The week A1's `current_week_final` / `corrections_window_open` describe: the current scoring
- * period, or — once ESPN's clock has run past the league's final scoring period (after the season it
- * serves scoringPeriodId 19 with finalScoringPeriod 17, every recorded finished season) — the
- * league's LAST SCORED week. Week 19 has no games, so it read "not final" and "window open" from
- * January to August (Stage C finding league-offseason-clock-not-final).
+ * The week A1's `current_week_final` / `corrections_window_open` describe (common.ts clockWeek, the
+ * one rule every default week follows): re-exported where it was first defined.
  */
-export function clockWeek(
-  clock: Pick<LeagueClock, "current_scoring_period" | "final_scoring_period">,
-): Week {
-  const cur = clock.current_scoring_period;
-  const fin = clock.final_scoring_period;
-  return fin >= 1 && cur > fin ? fin : cur;
-}
+export { clockWeek };
+
+/**
+ * A1's clock block: ESPN's clock, `current_week` — the week it means (clockWeek: the current
+ * scoring period, the league's final one after the season), which every tool's default week is —
+ * and that week's two flags. Without it a model read "current_scoring_period 19" beside
+ * "current_week_final true" and could not tell which week the flag described (Stage C finding
+ * league-postseason-default-week-18).
+ */
+export type DigestClock = LeagueClock & {
+  readonly current_week: Week;
+  readonly current_week_final: boolean;
+  readonly corrections_window_open: boolean;
+};
+
+/** A1's data: LeagueDigestData with the clock block naming its week (DigestClock). */
+export type LeagueDigestOut = Omit<LeagueDigestData, "clock"> & { readonly clock?: DigestClock };
 
 /** The A1 digest (also espn-ff://league/settings). */
 export async function leagueDigest(
@@ -501,7 +510,7 @@ export async function leagueDigest(
     readonly include?: readonly LeagueDigestSection[] | undefined;
     readonly force_refresh?: boolean | undefined;
   },
-): Promise<{ data: LeagueDigestData; inputs: InputStamp[]; warnings: string[] }> {
+): Promise<{ data: LeagueDigestOut; inputs: InputStamp[]; warnings: string[] }> {
   const inputs: InputStamp[] = [];
   const warnings: string[] = [];
   const configured = ctx.services.league.season;
@@ -522,7 +531,7 @@ export async function leagueDigest(
   inputs.push(platformInput(ctx, lg.stamp));
   const league = lg.value;
   const rules = (await ctx.services.platform.getLeagueRules(ref, readOpts(ctx))).value;
-  const data: { -readonly [K in keyof LeagueDigestData]: LeagueDigestData[K] } = {
+  const data: { -readonly [K in keyof LeagueDigestOut]: LeagueDigestOut[K] } = {
     unverified_fields: [...rules.unverified_fields],
   };
   if (include.has("league"))
@@ -550,7 +559,12 @@ export async function leagueDigest(
         "pro schedule unavailable: current_week_final and corrections_window_open are conservative",
       );
     }
-    data.clock = { ...league.clock, current_week_final: final, corrections_window_open: window };
+    data.clock = {
+      ...league.clock,
+      current_week: clockWeek(league.clock),
+      current_week_final: final,
+      corrections_window_open: window,
+    };
   }
   if (include.has("scoring")) {
     const settings = (await ctx.services.platform.getScoringSettings(ref, readOpts(ctx))).value;

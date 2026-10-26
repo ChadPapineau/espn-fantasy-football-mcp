@@ -228,12 +228,33 @@ export function rulesOf(ctx: ToolContext, inputs: InputStamp[]): Promise<LeagueR
 }
 
 /**
- * The week a call means (plan 07 §2): the argument, else the league's current scoring period,
- * clamped into a tool's 1..18 (a preseason period 0 reads as week 1; a kicker-only 19–22 as 18).
+ * The week the league's clock means: the current scoring period, or — once ESPN's clock has run past
+ * the league's final scoring period (during NFL week 18 it serves scoringPeriodId 18, and 19 from
+ * then to August, with finalScoringPeriod 17: every recorded finished season) — the league's LAST
+ * SCORED week. A1's `current_week_final` / `corrections_window_open` describe this week (Stage C
+ * finding league-offseason-clock-not-final), A1 states it as `clock.current_week`, G1 as
+ * `league.current_week`, and every tool's default week is it (weekOf). An unknown final period (0)
+ * never redirects.
+ */
+export function clockWeek(
+  clock: Pick<League["clock"], "current_scoring_period" | "final_scoring_period">,
+): Week {
+  const cur = clock.current_scoring_period;
+  const fin = clock.final_scoring_period;
+  return fin >= 1 && cur > fin ? fin : cur;
+}
+
+/**
+ * The week a call means (plan 07 §2): the argument, else the week the league's clock means
+ * (clockWeek — the league's final scoring period once the season is over), clamped into a tool's
+ * 1..18 (a preseason period 0 reads as week 1). Clamping the raw period to 18 sent every
+ * default-week tool to NFL week 18 — a week the league does not play — from the day after the
+ * championship to August: the retrospective reviewed week 18, E2 set a week-18 lineup, E3 `pre`
+ * found no opponent (Stage C finding league-postseason-default-week-18).
  */
 export function weekOf(league: League, week: number | undefined): Week {
   if (week !== undefined) return week;
-  const cur = league.clock.current_scoring_period;
+  const cur = clockWeek(league.clock);
   return Math.min(BOUNDS.week.max, Math.max(BOUNDS.week.min, cur));
 }
 
