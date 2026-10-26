@@ -1083,6 +1083,14 @@ export const pageSchema = z.strictObject({
   next_offset: z.number().int().min(0).nullable(),
 });
 
+/**
+ * The longest `warnings[]` line the envelope schema accepts: a line the server builds from a list
+ * (the injection-flag overflow line — define.ts injectionWarnings) is fitted under it, never cut by
+ * the schema into tool.output_invalid → INTERNAL (Stage C finding
+ * mcp-injection-overflow-warning-over-cap).
+ */
+export const WARNING_MAX_CHARS = 400;
+
 /** The full envelope around a tool's `data` schema (an outputSchema). */
 export function envelopeSchema<T extends z.ZodType>(data: T) {
   return z.strictObject({
@@ -1091,7 +1099,7 @@ export function envelopeSchema<T extends z.ZodType>(data: T) {
     page: pageSchema.optional(),
     truncated: z.boolean(),
     partial: z.boolean(),
-    warnings: z.array(z.string().max(400)).max(50),
+    warnings: z.array(z.string().max(WARNING_MAX_CHARS)).max(50),
   });
 }
 

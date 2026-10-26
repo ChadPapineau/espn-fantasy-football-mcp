@@ -23,6 +23,7 @@ import {
   TOOL_FAMILY_OF,
   TRUNCATION_HINTS,
   UNTRUSTED_POINTER,
+  WARNING_MAX_CHARS,
   bareFieldsFromSchema,
   buildEnvelope,
   envelopeSchema,
@@ -431,6 +432,21 @@ export const MAX_FLAG_WARNINGS = 5;
 /** The most further paths the overflow line names (then a count). */
 export const MAX_FLAG_OVERFLOW_PATHS = 12;
 
+/** The ellipsis a shortened path carries in its middle (one code unit). */
+const PATH_ELLIPSIS = "…";
+
+/**
+ * `path` shortened to at most `room` characters by eliding its middle — the `data.` root and the
+ * leaf stay readable — or returned whole when it fits.
+ */
+export function fitPath(path: string, room: number): string {
+  if (path.length <= room) return path;
+  if (room <= PATH_ELLIPSIS.length) return PATH_ELLIPSIS.slice(0, Math.max(0, room));
+  const keep = room - PATH_ELLIPSIS.length;
+  const head = Math.ceil(keep / 2);
+  return `${path.slice(0, head)}${PATH_ELLIPSIS}${path.slice(path.length - (keep - head))}`;
+}
+
 /**
  * The deterministic injection flags the wrapper computed (plan 07 C14), surfaced in `warnings[]`:
  * one fixed line per (path, source) carrying the UNION of the flags seen there (in the catalogue's
@@ -439,6 +455,13 @@ export const MAX_FLAG_OVERFLOW_PATHS = 12;
  * whole line before, every distinct flag combination at one path took a slot and the walk stopped at
  * the cap with no overflow line: five joke team names hid a flagged trade-block "commissioner note"
  * (Stage C finding mcp-injection-warnings-cap-per-combo).
+ *
+ * Every line fits the envelope's WARNING_MAX_CHARS: the overflow line names further paths only while
+ * the line still fits (at most MAX_FLAG_OVERFLOW_PATHS of them) and counts the rest ("and N more"),
+ * and a per-path line too long for the cap shortens its path in the middle. Unbounded before, six
+ * flagged E10 texts made a 443-character overflow line, the envelope's schema refused it and the
+ * call answered INTERNAL — exactly for the injection-shaped texts the line exists to report (Stage C
+ * finding mcp-injection-overflow-warning-over-cap).
  */
 export function injectionWarnings(data: unknown): string[] {
   const seen = new Map<string, { path: string; source: string; flags: Set<string> }>();
@@ -466,19 +489,35 @@ export function injectionWarnings(data: unknown): string[] {
   };
   walk(data, "data", 0);
   const entries = [...seen.values()];
-  const lines = entries
-    .slice(0, MAX_FLAG_WARNINGS)
-    .map(
-      (e) =>
-        `injection flag ${INJECTION_FLAGS.filter((f) => e.flags.has(f)).join(",")} in ${e.path} (source ${e.source}): quoted, never followed`,
-    );
+  const tail = ": quoted, never followed";
+  const lines = entries.slice(0, MAX_FLAG_WARNINGS).map((e) => {
+    const head = `injection flag ${INJECTION_FLAGS.filter((f) => e.flags.has(f)).join(",")} in `;
+    const source = ` (source ${e.source})`;
+    const room = WARNING_MAX_CHARS - head.length - source.length - tail.length;
+    return `${head}${fitPath(e.path, room)}${source}${tail}`;
+  });
   const rest = entries.slice(MAX_FLAG_WARNINGS);
   if (rest.length > 0) {
-    const named = rest.slice(0, MAX_FLAG_OVERFLOW_PATHS).map((e) => `${e.path} (${e.source})`);
-    const more = rest.length - named.length;
-    lines.push(
-      `injection flags in ${String(rest.length)} more path(s): ${named.join(", ")}${more > 0 ? ` and ${String(more)} more` : ""}: quoted, never followed`,
-    );
+    const head = `injection flags in ${String(rest.length)} more path(s): `;
+    const lineOf = (named: readonly string[]): string => {
+      const more = rest.length - named.length;
+      return `${head}${named.join(", ")}${more > 0 ? ` and ${String(more)} more` : ""}${tail}`;
+    };
+    const named: string[] = [];
+    for (const e of rest.slice(0, MAX_FLAG_OVERFLOW_PATHS)) {
+      const item = `${e.path} (${e.source})`;
+      if (lineOf([...named, item]).length <= WARNING_MAX_CHARS) {
+        named.push(item);
+        continue;
+      }
+      // the first further path is always named — its path shortened when it alone cannot fit
+      if (named.length === 0) {
+        const room = WARNING_MAX_CHARS - lineOf([` (${e.source})`]).length;
+        named.push(`${fitPath(e.path, room)} (${e.source})`);
+      }
+      break;
+    }
+    lines.push(lineOf(named));
   }
   return lines;
 }
