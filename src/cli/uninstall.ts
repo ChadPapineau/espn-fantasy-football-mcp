@@ -51,7 +51,7 @@ import {
   storePath,
   type Env,
 } from "../config/paths.js";
-import type { ConfigIssue, LenientConfig } from "../config/schema.js";
+import { readConfigFile, type ConfigIssue, type LenientConfig } from "../config/schema.js";
 import { TUNED_PARAMETERS_FILE_NAME } from "../domain/reclog/tune.js";
 import type { StoreFactory } from "../store/types.js";
 import { bothCredentialStores } from "./espn-stack.js";
@@ -533,16 +533,75 @@ export type UninstallConfig = Pick<
   LenientConfig,
   "cacheDir" | "configDir" | "credentialFile" | "weatherSource" | "fixtureRecord"
 > & {
-  /** Set when config.json could not be read: its issues (key + fixed reason, never a value). */
+  /**
+   * Where `credentialFile` came from (`file`: the path config.json records — plan 03 §3, which wins
+   * over the environment; `env`; `default`). A recorded file that is still there after the
+   * credential step keeps config.json, its only record (plan 03 §8 step 2; plan 02 §8 #21).
+   */
+  readonly origins?: Readonly<Partial<Record<"EFF_CREDENTIAL_FILE", string>>>;
+  /** Set when the configuration could not be loaded: its issues (key + fixed reason, never a value). */
   readonly unreadableConfig?: readonly ConfigIssue[];
+  /**
+   * config.json itself could not be read (not JSON, not an object, its EFF_CREDENTIAL_FILE unusable):
+   * a credential file it may record is unknown, so config.json is kept for the owner to read.
+   */
+  readonly configFileUnreadable?: boolean;
 };
 
+/** What config.json says about the credential file (never a value besides the path it records). */
+interface ConfigFileRecord {
+  /** `parsed` (a JSON object), `missing`, or `unreadable` (not JSON, not an object, refused). */
+  readonly state: "parsed" | "missing" | "unreadable";
+  /** The EFF_CREDENTIAL_FILE it records, resolved; null when it records none. */
+  readonly file: string | null;
+  /** It records one that cannot be used (not a string, not an absolute path): unknown. */
+  readonly unusable: boolean;
+}
+
 /**
- * The config of an uninstall whose config.json cannot be read (invalid JSON, a value of the wrong
- * type): the directories come from the environment alone — EFF_CONFIG_DIR / EFF_CACHE_DIR are
- * env-only keys — and the credential file is EFF_CREDENTIAL_FILE when set, else the default. A
- * custom credential file recorded only in the unreadable file is unknown, and uninstall says so.
- * Throws (a usage error upstream) only when the environment's own directory values are invalid.
+ * Reads config.json's EFF_CREDENTIAL_FILE record directly (plan 03 §3: the recorded path is
+ * authoritative), whatever else the file or the environment gets wrong: a value of the wrong type
+ * elsewhere, a credential-shaped value (the file then holds a secret and is deleted anyway), an
+ * environment typo or a location refusal never hide where the cookie file lives (Stage C finding
+ * uninstall-fallback-ignores-recorded-credential-file).
+ */
+export function configFileRecord(configDir: string, home: string): ConfigFileRecord {
+  let raw: unknown;
+  try {
+    raw = readConfigFile(configDir);
+  } catch {
+    // not JSON, a symlink, too large: what it records is unknown
+    return { state: "unreadable", file: null, unusable: true };
+  }
+  if (raw === undefined) return { state: "missing", file: null, unusable: false };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+    return { state: "unreadable", file: null, unusable: true };
+  const rec = raw as Readonly<Record<string, unknown>>;
+  if (!Object.prototype.hasOwnProperty.call(rec, "EFF_CREDENTIAL_FILE"))
+    return { state: "parsed", file: null, unusable: false };
+  const v = rec.EFF_CREDENTIAL_FILE;
+  if (typeof v !== "string") return { state: "parsed", file: null, unusable: true };
+  if (v.trim() === "") return { state: "parsed", file: null, unusable: false };
+  try {
+    return {
+      state: "parsed",
+      file: resolveAbsolute(v.trim(), home, "EFF_CREDENTIAL_FILE"),
+      unusable: false,
+    };
+  } catch {
+    return { state: "parsed", file: null, unusable: true };
+  }
+}
+
+/**
+ * The config of an uninstall whose configuration cannot be loaded (an environment typo, a location
+ * refusal, a config.json value of the wrong type, a config.json that is not JSON): the directories
+ * come from the environment alone — EFF_CONFIG_DIR / EFF_CACHE_DIR are env-only keys — and the
+ * credential file is the one config.json RECORDS when it can be read (plan 03 §3), else
+ * EFF_CREDENTIAL_FILE when set, else the default. Before, the record was never read, so a
+ * custom-path cookie file survived the uninstall while config.json, its only record, was deleted
+ * (Stage C finding uninstall-fallback-ignores-recorded-credential-file). Throws (a usage error
+ * upstream) only when the environment's own directory values are invalid.
  */
 export function fallbackUninstallConfig(
   env: Env,
@@ -550,17 +609,27 @@ export function fallbackUninstallConfig(
   issues: readonly ConfigIssue[],
 ): UninstallConfig {
   const configDir = resolveConfigDir(env, home);
+  const record = configFileRecord(configDir, home);
   const fromEnv = env.EFF_CREDENTIAL_FILE?.trim();
+  let envFile: string | null = null;
+  if (fromEnv !== undefined && fromEnv !== "") {
+    try {
+      envFile = resolveAbsolute(fromEnv, home, "EFF_CREDENTIAL_FILE");
+    } catch {
+      envFile = null;
+    }
+  }
+  const credentialFile = record.file ?? envFile ?? defaultCredentialFilePath(configDir);
+  const origin = record.file !== null ? "file" : envFile !== null ? "env" : "default";
   return {
     configDir,
     cacheDir: resolveCacheDir(env, home),
-    credentialFile:
-      fromEnv === undefined || fromEnv === ""
-        ? defaultCredentialFilePath(configDir)
-        : resolveAbsolute(fromEnv, home, "EFF_CREDENTIAL_FILE"),
+    credentialFile,
     weatherSource: "open-meteo",
     fixtureRecord: false,
+    origins: { EFF_CREDENTIAL_FILE: origin },
     unreadableConfig: issues,
+    configFileUnreadable: record.state === "unreadable" || record.unusable,
   };
 }
 
@@ -618,13 +687,24 @@ export async function uninstall(
   const prefix = opts.dryRun ? "would " : "";
   let failed = false;
   try {
+    const recordedFile = config.origins?.EFF_CREDENTIAL_FILE === "file";
     if (config.unreadableConfig !== undefined) {
-      await out(
-        `config.json could not be read (${config.unreadableConfig.map((i) => `${i.key}: ${i.reason}`).join("; ")}): uninstall continues with the directories from the environment.`,
-      );
-      await out(
-        `  The credential file it removes is ${config.credentialFile}; a different EFF_CREDENTIAL_FILE recorded only in that config.json cannot be known here — delete it yourself if you set one.`,
-      );
+      const issues = config.unreadableConfig.map((i) => `${i.key}: ${i.reason}`).join("; ");
+      if (config.configFileUnreadable === true) {
+        await out(
+          `config.json could not be read (${issues}): uninstall continues with the directories from the environment.`,
+        );
+        await out(
+          `  The credential file it removes is ${config.credentialFile} (${config.origins?.EFF_CREDENTIAL_FILE === "env" ? "EFF_CREDENTIAL_FILE" : "the default"}); another one recorded in that config.json cannot be known here, so config.json is kept: read it, delete the credential file it names (if any), then delete config.json yourself.`,
+        );
+      } else {
+        await out(
+          `the configuration could not be loaded (${issues}): uninstall continues with the directories from the environment.`,
+        );
+        await out(
+          `  The credential file it removes is ${config.credentialFile} (${recordedFile ? "recorded in config.json" : config.origins?.EFF_CREDENTIAL_FILE === "env" ? "EFF_CREDENTIAL_FILE" : "the default"}).`,
+        );
+      }
     }
 
     // 0. the export comes first: when it cannot be written, NOTHING is changed (plan 03 §8 step 3 —
@@ -697,16 +777,21 @@ export async function uninstall(
       const stores = bothCredentialStores(io, config);
       const ex = openExistingStore(config, io.clock, log, opts.factory);
       try {
+        const existed = kind(config.credentialFile) !== null;
         const r = await removeAllCredentials({
           keychain: stores.keychain,
           file: stores.file,
           deleteSelftestItem: selftestItemDeleter(KEYCHAIN_SERVICE, io.loadKeyring),
           credentialState: ex.kind === "open" ? ex.store.repos.credentialState : null,
         });
+        // what was actually deleted: `removed` only when a file was there and is gone now
+        const left = kind(config.credentialFile) !== null;
+        const fileText = left ? `${r.file} (still there)` : existed ? "removed" : "absent";
         await out(
-          `credentials: keychain ${r.keychain}, session.json ${r.file}, self-test item ${r.selftestItem}, state ${r.credentialState}`,
+          `credentials: keychain ${r.keychain}, session.json ${fileText}, self-test item ${r.selftestItem}, state ${r.credentialState}`,
         );
-        if (!r.ok) failed = true;
+        await out(`  credential file: ${config.credentialFile}`);
+        if (!r.ok || left) failed = true;
       } finally {
         if (ex.kind === "open") ex.store.close();
       }
@@ -730,8 +815,21 @@ export async function uninstall(
     for (const p of cachePlan)
       if (p.action === "keep") await out(`kept (not ours: ${p.reason}) ${p.path}`);
 
-    // 4. the config dir
-    const cfgDeleting = configPlan.filter((p) => p.action !== "keep");
+    // 4. the config dir. config.json is the only record of a credential file at a custom path
+    // (plan 03 §3): never deleted while that file is still there, nor when it could not be read (a
+    // file it may name is unknown) — Stage C finding uninstall-fallback-ignores-recorded-credential-file
+    const configJson = path.join(config.configDir, CONFIG_FILE_NAME);
+    const keepConfigJson =
+      config.configFileUnreadable === true
+        ? "it could not be read, so a credential file it may record is unknown — read it, then delete it yourself"
+        : recordedFile && kind(config.credentialFile) !== null
+          ? `it records where the credential file ${config.credentialFile} lives, and that file is still there`
+          : null;
+    const cfgDeleting = configPlan.filter(
+      (p) => p.action !== "keep" && !(keepConfigJson !== null && p.path === configJson),
+    );
+    if (!opts.keepConfig && keepConfigJson !== null && kind(configJson) !== null)
+      await out(`${opts.dryRun ? "would keep" : "kept"} ${configJson}: ${keepConfigJson}`);
     if (opts.keepConfig) await out(`kept your config: ${config.configDir}`);
     else if (opts.dryRun)
       for (const p of cfgDeleting)

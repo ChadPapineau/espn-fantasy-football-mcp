@@ -381,7 +381,11 @@ describe("a malformed config.json does not block uninstall", () => {
     });
     const io = makeIo(sb, { keyring });
     expect(await main(["uninstall", "--yes"], io)).toBe(0);
-    expect(io.out.text).toContain("config.json could not be read");
+    // the file parses (one value has the wrong type): the configuration could not be loaded, but
+    // config.json was read — "could not be read" is said only for a file that is not JSON (Stage C
+    // finding uninstall-fallback-ignores-recorded-credential-file)
+    expect(io.out.text).toContain("the configuration could not be loaded");
+    expect(io.out.text).not.toContain("config.json could not be read");
     expect(io.out.text).toContain("ESPN_SEASON");
     expect(keyring.items.size).toBe(0);
     expect(existsSync(path.join(sb.configDir, "session.json"))).toBe(false);
@@ -395,6 +399,9 @@ describe("a malformed config.json does not block uninstall", () => {
     const io2 = makeIo(sb, { keyring: second.keyring });
     expect(await main(["uninstall", "--yes"], io2)).toBe(0);
     expect(second.keyring.items.size).toBe(0);
+    expect(io2.out.text).toContain("config.json could not be read");
+    // what it may record is unknown: it is kept for the owner to read
+    expect(existsSync(path.join(sb.configDir, "config.json"))).toBe(true);
   });
 });
 
