@@ -75,6 +75,58 @@ describe("free-text prompt arguments (Stage C prompts-multiword-arg-truncated)",
     expect(stream).not.toContain(FREE_TEXT_ONE_WORD_NOTE);
   });
 
+  // Stage C finding prompts-one-word-note-blocks-complete-args: the note fired on word count alone
+  // and ended "Never use that one word alone as what the user asked", so a prompt-only client
+  // (Claude Desktop / claude.ai, plan 09 §6), which sends the whole form field, was told never to use
+  // espn.trade's documented partner search "RB", an espn.injury surname or player id, or
+  // espn.apply's "claim" — and to ask again
+  it("the note never forbids the value: the user's own message decides, else the word as given", () => {
+    expect(FREE_TEXT_ONE_WORD_NOTE).not.toMatch(/never use|do not use|don't use/i);
+    expect(FREE_TEXT_ONE_WORD_NOTE).toContain("otherwise use the word as given");
+  });
+
+  it.each([
+    ["espn.trade", "offer", "RB", "RB"],
+    ["espn.trade", "offer", "rb", "RB"],
+    ["espn.trade", "offer", "WR", "WR"],
+    ["espn.trade", "offer", "DST", "D/ST"],
+    ["espn.trade", "offer", "D/ST", "D/ST"],
+    ["espn.injury", "player", "4361050", "4361050"],
+    ["espn.injury", "player", "00-0036389", "00-0036389"],
+    ["espn.apply", "what", "claim", "claim"],
+    ["espn.apply", "what", "lineup", "lineup"],
+    ["espn.apply", "what", "trade", "trade"],
+  ])("%s %s=%s is a complete argument: used as given, no note", async (name, arg, sent, shown) => {
+    const text = textOf(await client.getPrompt({ name, arguments: { [arg]: sent } }));
+    expect(text).toContain(`Arguments: ${arg}=${JSON.stringify(shown)}`);
+    expect(text).not.toContain(FREE_TEXT_ONE_WORD_NOTE);
+    expect(text).not.toMatch(/never use that one word/i);
+  });
+
+  it("a one-word name (espn.injury 'Kamara') may be whole or cut short: the note lets it be used as given", async () => {
+    const text = textOf(
+      await client.getPrompt({ name: "espn.injury", arguments: { player: "Kamara" } }),
+    );
+    expect(text).toContain('Arguments: player="Kamara"');
+    expect(text).toContain(`The \`player\` argument ${FREE_TEXT_ONE_WORD_NOTE}`);
+    expect(text).not.toMatch(/never use that one word/i);
+  });
+
+  it("promptText: a complete one-word form takes no note; any other one word still does", () => {
+    const texts = { skills: { x: "Body." }, references: {} } as never;
+    const forms = { offer: /^RB$/ };
+    expect(promptText(texts, "x", { offer: "RB" }, ["offer"], forms)).not.toContain(
+      FREE_TEXT_ONE_WORD_NOTE,
+    );
+    expect(promptText(texts, "x", { offer: "my" }, ["offer"], forms)).toContain(
+      FREE_TEXT_ONE_WORD_NOTE,
+    );
+    // a form of another argument never exempts this one
+    expect(promptText(texts, "x", { claim: "RB" }, ["claim"], forms)).toContain(
+      FREE_TEXT_ONE_WORD_NOTE,
+    );
+  });
+
   it("promptText: the note follows the arguments line, only for one-word free text", () => {
     const texts = { skills: { x: "Body." }, references: {} } as never;
     const base = promptText(texts, "x", {}).trimEnd(); // the guardrails and the body

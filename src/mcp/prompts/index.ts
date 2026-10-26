@@ -64,18 +64,49 @@ export interface PromptSpec {
    * may cut to their first word (FREE_TEXT_ONE_WORD_NOTE).
    */
   readonly freeText?: readonly string[];
+  /**
+   * Per free-text argument, the one-word values that are a COMPLETE argument of this prompt — the
+   * Skill's own documented one-word forms (espn.trade's position for a partner search, espn.injury's
+   * player id, espn.apply's agreed action): used as given, with no note (Stage C finding
+   * prompts-one-word-note-blocks-complete-args).
+   */
+  readonly completeOneWord?: Readonly<Record<string, RegExp>>;
 }
 
 /**
- * Said after the arguments line when a free-text argument arrived as ONE word. Claude Code runs an
- * MCP prompt's slash command by splitting the typed text on whitespace and giving each declared
- * argument one word (extra words dropped), so `/…espn.check Beat writer: the backup gets more work`
- * reached the server as claim="Beat" — and the prompt asserted that word as the user's argument,
- * which news-check then quoted verbatim (Stage C finding prompts-multiword-arg-truncated). A value
- * with a space arrived intact and needs no note.
+ * Said after the arguments line when a free-text argument arrived as ONE word that is not one of
+ * the prompt's complete one-word forms (`completeOneWord`). Claude Code runs an MCP prompt's slash
+ * command by splitting the typed text on whitespace and giving each declared argument one word
+ * (extra words dropped), so `/…espn.check Beat writer: the backup gets more work` reached the server
+ * as claim="Beat" — and the prompt asserted that word as the user's argument, which news-check then
+ * quoted verbatim (Stage C finding prompts-multiword-arg-truncated). The note never forbids the
+ * value: a prompt-only client sends the whole field, where one word ("Kamara") IS what the user
+ * asked, and the earlier "never use that one word alone" blocked those requests (Stage C finding
+ * prompts-one-word-note-blocks-complete-args) — the user's own message decides. A value with a
+ * space arrived intact and needs no note.
  */
 export const FREE_TEXT_ONE_WORD_NOTE =
-  "arrived as a single word. Some clients (Claude Code) pass only the first word of each argument typed after a prompt command, so it may be cut short: take the user's full wording from their message, and ask for it if it is not there. Never use that one word alone as what the user asked.";
+  "arrived as a single word. Some clients (Claude Code) pass only the first word of each argument typed after a prompt command, so it may be cut short: if the user's own message shows more words for it, use their full wording; otherwise use the word as given.";
+
+/** The positions a trade partner search takes as espn.trade's whole argument (the Skill's hint). */
+const TRADE_POSITION_RE = /^(?:QB|RB|WR|TE|K|D\/ST|DST)$/i;
+/** The tools' spelling of each position espn.trade accepts in any case (ESPN's `D/ST`). */
+const TRADE_POSITION_VOCABULARY: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(
+    ["QB", "RB", "WR", "TE", "K", "D/ST", "DST"].flatMap((p) => {
+      const tool = p === "DST" ? "D/ST" : p;
+      return [p, p.toLowerCase(), p.charAt(0) + p.slice(1).toLowerCase()].map((v) => [v, tool]);
+    }),
+  ),
+);
+/** A player id as espn.injury's whole argument: ESPN's numeric id or an nflverse gsis id. */
+const PLAYER_ID_ARG_RE = /^(?:[0-9]{1,10}|00-[0-9]{7})$/;
+/**
+ * The agreed change espn.apply names in one word: the apply Skill's kinds of change as nouns — a
+ * verb that takes a player ("start", "drop") is more often a cut-short sentence and keeps the note.
+ */
+const APPLY_ACTION_RE =
+  /^(?:lineup|lineups|claim|claims|waiver|waivers|ir|trade|offer|counter|counteroffer)$/i;
 
 /** The eight P0 prompts (plan 07 §4.2: a Skill's prompt has its Skill's priority) — `core`'s list. */
 export const PROMPTS: readonly PromptSpec[] = Object.freeze([
@@ -126,6 +157,7 @@ export const PROMPTS: readonly PromptSpec[] = Object.freeze([
     args: z.object({ what: textArg(200) }),
     priority: "P0",
     freeText: ["what"],
+    completeOneWord: { what: APPLY_ACTION_RE },
   },
   {
     name: "espn.session",
@@ -150,8 +182,11 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
     skill: "trade",
     description: "Evaluate a trade offer for both sides, or find trade partners for a position.",
     args: z.object({ offer: textArg(200) }),
+    // the partner search's documented one-word form — a position — in the tools' spelling
+    toolVocabulary: { offer: TRADE_POSITION_VOCABULARY },
     priority: "P1",
     freeText: ["offer"],
+    completeOneWord: { offer: TRADE_POSITION_RE },
   },
   {
     name: "espn.injury",
@@ -160,6 +195,7 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
     args: z.object({ player: textArg(64) }),
     priority: "P1",
     freeText: ["player"],
+    completeOneWord: { player: PLAYER_ID_ARG_RE },
   },
   {
     name: "espn.schedule",
@@ -339,14 +375,16 @@ export function referenceTextsFor(
 
 /**
  * The prompt's user text: any missing guardrail sentence, the Skill body, its references, the
- * arguments — and, for each free-text argument (`freeText`) that arrived as one word, the note that it
- * may be cut short (FREE_TEXT_ONE_WORD_NOTE).
+ * arguments — and, for each free-text argument (`freeText`) that arrived as one word other than one
+ * of the prompt's complete one-word forms (`complete`), the note that it may be cut short
+ * (FREE_TEXT_ONE_WORD_NOTE).
  */
 export function promptText(
   texts: ServerTexts,
   skill: string,
   args: Readonly<Record<string, string | undefined>>,
   freeText: readonly string[] = [],
+  complete: Readonly<Record<string, RegExp>> = {},
 ): string {
   const installed = texts.skills[skill];
   const body =
@@ -363,7 +401,9 @@ export function promptText(
     installed === null || installed === undefined ? "" : referencesSection(texts, skill, body);
   const oneWord = freeText.filter((k) => {
     const v = args[k];
-    return typeof v === "string" && v.trim() !== "" && !/\s/.test(v.trim());
+    if (typeof v !== "string" || v.trim() === "" || /\s/.test(v.trim())) return false;
+    const form = Object.hasOwn(complete, k) ? complete[k] : undefined;
+    return form?.test(v.trim()) !== true;
   });
   const note =
     oneWord.length === 0
@@ -431,7 +471,10 @@ export function registerPrompts(
       const messages: GetPromptResult["messages"] = [
         {
           role: "user",
-          content: { type: "text", text: promptText(options.texts, p.skill, args, p.freeText) },
+          content: {
+            type: "text",
+            text: promptText(options.texts, p.skill, args, p.freeText, p.completeOneWord),
+          },
         },
       ];
       const settings = await leagueSettingsText(services, options);
