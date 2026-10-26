@@ -13,6 +13,8 @@
 // change by change — a change inside the coin-flip band is held, a call whose every change is held
 // is `no_move` and logged as "keep" — while the mean-optimal assignment (`recommended_lineup`,
 // `rec.lineup`) is unchanged; a seat that scores a known 0 is priced exactly (sib QA-2-038's rule).
+// Stage C round 3: in a playoff week (no regular-season week left) the seeding is settled, so the
+// objective, mode and coin flips follow the week's matchup under either reading.
 // Ported from sibling @f6ba81e (src/domain/analytics/lineup.ts), adapted: ESPN slot ids and
 // eligibleSlots, the reading-driven objective and modes, the PF exchange rate, numeric player ids.
 import type { Clock } from "../clock.js";
@@ -141,9 +143,24 @@ export interface LineupSeasonContext {
     readonly pf_gap_to_cutoff: number;
     readonly tiebreak_in_play: boolean;
   } | null;
-  /** Regular-season weeks left (scales the PF cutoff band under reading (b)). */
+  /**
+   * Regular-season weeks left, this one included (scales the PF cutoff band under reading (b)). 0: a
+   * week past the regular season — a playoff week, where the seeding is settled, so E2's objective,
+   * mode and coin flips follow the week's matchup under either reading (PLAYOFF_WEEK_ASSUMPTION).
+   */
   readonly remaining_weeks: number;
 }
+
+/**
+ * A week past the regular season (`season.remaining_weeks` 0): the seeds are fixed and only the
+ * head-to-head result advances, so neither reading's points-for objective, cutoff or tiebreak
+ * applies (research 05 §2.2's objective is the regular season's; Stage C finding
+ * lineup-playoff-week-seeding-objective).
+ */
+export const PLAYOFF_WEEK_ASSUMPTION = Object.freeze({
+  text: "a playoff week: the regular season is over and the seeding settled, so only this matchup's result counts — no points-for objective, cutoff or tiebreak",
+  revisit_trigger: "the league's schedule settings change",
+});
 
 /** An E2 request. */
 export interface LineupRequest {
@@ -872,12 +889,18 @@ export function analyzeLineup(req: LineupRequest): LineupData {
         "the operator confirms one reading",
       ),
     );
+  // no regular-season week left (a playoff week): the seeding is settled under either reading, so the
+  // week's objective, mode and coin flips follow its matchup alone — the reading decides nothing
+  const settled = req.season?.remaining_weeks === 0;
+  /** Reading (b)'s points-for objective: only while the regular season, which it seeds, runs. */
+  const pfSeeding = reading === "points_only" && !settled;
+  if (settled) assumptions.push(PLAYOFF_WEEK_ASSUMPTION);
   const listed = req.opponent !== null && req.opponent.length > 0 ? req.opponent : null;
   const objArg = req.objective ?? "auto";
   let objective: Objective;
   let reason: string;
   if (objArg === "auto") {
-    if (reading === "points_only") {
+    if (pfSeeding) {
       objective = "points_only";
       reason = "auto: the points_only reading seeds by points for, so every point counts the same";
     } else if (
@@ -886,12 +909,14 @@ export function analyzeLineup(req: LineupRequest): LineupData {
     ) {
       // plan 10 C2 / plan 07 E2: the committed switch record shows pwin beats mean on regret
       objective = "pwin";
-      reason =
-        "auto: espn_rule with player_sim — pwin beat mean on regret in the held-out replay (plan 10 C2)";
+      reason = settled
+        ? "auto: a playoff week — the seeding is settled and only this matchup advances: pwin, which beat mean on regret in the held-out replay (plan 10 C2)"
+        : "auto: espn_rule with player_sim — pwin beat mean on regret in the held-out replay (plan 10 C2)";
     } else {
       objective = "mean";
-      reason =
-        basis === "position_cv"
+      reason = settled
+        ? `auto: a playoff week — the seeding is settled and only this matchup advances: the mean${listed === null ? "" : " against the opponent"}`
+        : basis === "position_cv"
           ? "auto: espn_rule with position_cv spreads — the mean, with PF awareness through the exchange rate"
           : "auto: espn_rule — the mean until player_sim P(win) is shown to beat it on regret";
     }
@@ -968,9 +993,9 @@ export function analyzeLineup(req: LineupRequest): LineupData {
     return { a, starters, moments: mo, pwin: pWinNormal(carried(mo)) };
   };
 
-  // the exchange rate (reading (a)): one win in PF points
+  // the exchange rate (reading (a)): one win in PF points — none once the seeding is settled
   const pfRate: ModeBasis["pf_exchange_rate"] =
-    reading === "points_only"
+    reading === "points_only" || settled
       ? { pf_per_win: null, source: null }
       : req.season?.pf_per_win !== undefined && req.season.pf_per_win !== null
         ? { pf_per_win: round(req.season.pf_per_win, 1), source: "season_sim" }
@@ -1006,13 +1031,14 @@ export function analyzeLineup(req: LineupRequest): LineupData {
     for (const c of [...seen.values()]) if (utility(c) > utility(chosen) + 1e-12) chosen = c;
   }
 
-  // the mode (research 05 §2.2)
+  // the mode (research 05 §2.2) — in a playoff week the matchup's alone: the regular season's PF
+  // context (its cutoff, its tiebreak) is final and no longer bears on the week
   const mm = meanEval.moments;
   const sd = diffSd(mm);
   const d = mm.mu_m - mm.mu_o + carry;
   let mode: MatchupMode;
-  const ctx = req.season?.pf_context ?? null;
-  if (reading === "points_only" || objective === "points_only") {
+  const ctx = settled ? null : (req.season?.pf_context ?? null);
+  if (!settled && (reading === "points_only" || objective === "points_only")) {
     const band = LINEUP.pfGapPerWeek * Math.max(1, req.season?.remaining_weeks ?? 1);
     mode =
       ctx === null
@@ -1052,14 +1078,12 @@ export function analyzeLineup(req: LineupRequest): LineupData {
   const recIds = new Set(recStarters.map((p) => p.player_id));
   const byId = new Map(req.players.map((p) => [p.player_id, p]));
   // ΔP(win) can make a change a coin flip only when this week's opponent decides it: one is listed,
-  // the objective counts the matchup, and P(win) is not saturated — under reading (b) or
-  // `points_only` every point counts the same, and in `maximise_pf` the points-for tiebreak is the
-  // currency (there |ΔP(win)| is near 0 for every change); then the interval alone decides (R7-1)
+  // the objective counts the matchup, and P(win) is not saturated — under reading (b) in the
+  // regular season or `points_only` every point counts the same, and in `maximise_pf` the
+  // points-for tiebreak is the currency (there |ΔP(win)| is near 0 for every change); then the
+  // interval alone decides (R7-1). A playoff week's opponent decides it under either reading.
   const pwinDecides =
-    listed !== null &&
-    mode !== "maximise_pf" &&
-    reading !== "points_only" &&
-    objective !== "points_only";
+    listed !== null && mode !== "maximise_pf" && !pfSeeding && objective !== "points_only";
   const dpOf = (after: readonly LineupPlayer[]): number =>
     listed === null ? 0 : pWinNormal(carried(moments(after))) - curEval.pwin;
   /** The `swaps[]` row of a pair (its Δ unrounded in `de` for the search below). */
@@ -1264,8 +1288,11 @@ export function analyzeLineup(req: LineupRequest): LineupData {
     stackFlags.push({
       players: group.map((p) => p.player_id).sort((a, b) => a - b),
       effect: floor ? "floor-" : "ceiling+",
-      advice_under_reading:
-        reading === "points_only"
+      advice_under_reading: settled
+        ? floor
+          ? "playoffs: as the favourite the stack's variance costs floor"
+          : "playoffs: as the underdog the stack's variance is a useful ceiling"
+        : reading === "points_only"
           ? floor
             ? "points_only: comfortably above the PF cutoff — the stack's variance costs more than it adds"
             : "points_only: the stack's variance is judged against the season PF cutoff, not this opponent"

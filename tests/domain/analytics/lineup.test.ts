@@ -9,6 +9,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  PLAYOFF_WEEK_ASSUMPTION,
   analyzeLineup,
   bestLineupMean,
   compareWarnings,
@@ -442,6 +443,113 @@ describe("objective and mode by the seeding reading (hard: A11a)", () => {
     expect(out.seeding.mode_used).toBe("both");
     expect(out.objective_used).toBe("mean");
     expect(out.rec.assumptions.some((a) => a.text.includes("both readings"))).toBe(true);
+  });
+});
+
+// Stage C finding lineup-playoff-week-seeding-objective (round 3): in a playoff week the seeding is
+// settled and only the head-to-head result advances, yet E2 kept the regular season's objective —
+// points_only "every point counts the same", a mode from the frozen PF cutoff, maximise_pf from a
+// tiebreak the final standings show. With no regular-season week left (`remaining_weeks: 0`) the
+// objective and the mode follow this week's matchup under either reading.
+describe("a playoff week (Stage C lineup-playoff-week-seeding-objective)", () => {
+  const frozen = { season_pf_rank: 5, pf_gap_to_cutoff: 89.66, tiebreak_in_play: false };
+  const playoffs = (pf_context = frozen, pf_per_win: number | null = null) => ({
+    pf_per_win,
+    pf_context,
+    remaining_weeks: 0,
+  });
+
+  it("points_only reading: the matchup's objective and mode, no PF cutoff, said once", () => {
+    // μ_m 103 against μ_o 110: the underdog chases — the frozen PF cushion (+89.66) said protect
+    const out = analyzeLineup(
+      request({ seeding_mode: "points_only", opponent: oppRoster(110), season: playoffs() }),
+    );
+    expect(out.objective_used).toBe("mean");
+    expect(out.objective_reason).toBe(
+      "auto: a playoff week — the seeding is settled and only this matchup advances: the mean against the opponent",
+    );
+    expect(out.mode_basis.mu_m).toBeLessThan(out.mode_basis.mu_o);
+    expect(out.mode).toBe("chase");
+    expect(out.mode_basis.pf_context).toBeNull();
+    expect(out.mode_basis.pf_exchange_rate).toEqual({ pf_per_win: null, source: null });
+    expect(out.rec.decision_metric).toBe("expected_points");
+    expect(out.rec.assumptions.filter((a) => a.text === PLAYOFF_WEEK_ASSUMPTION.text)).toHaveLength(
+      1,
+    );
+    // the regular season's last week on the same inputs: the points_only objective and cutoff stand
+    const last = analyzeLineup(
+      request({
+        seeding_mode: "points_only",
+        opponent: oppRoster(110),
+        season: { ...playoffs(), remaining_weeks: 1 },
+      }),
+    );
+    expect(last.objective_used).toBe("points_only");
+    expect(last.mode).toBe("protect");
+    expect(last.mode_basis.pf_context).toEqual(frozen);
+    expect(last.rec.assumptions.some((a) => a.text === PLAYOFF_WEEK_ASSUMPTION.text)).toBe(false);
+  });
+
+  it("espn_rule: no maximise_pf from the final standings' tiebreak; the favourite protects", () => {
+    const tie = { season_pf_rank: 6, pf_gap_to_cutoff: -3, tiebreak_in_play: true };
+    const out = analyzeLineup(request({ opponent: oppRoster(40), season: playoffs(tie, 150) }));
+    expect(out.mode).toBe("protect");
+    expect(out.mode_basis.pf_context).toBeNull();
+    expect(out.mode_basis.pf_exchange_rate).toEqual({ pf_per_win: null, source: null });
+    expect(out.rec.assumptions.some((a) => a.text.includes("cold start"))).toBe(false);
+    // the same tiebreak in the regular season still reads maximise_pf
+    expect(
+      analyzeLineup(
+        request({ opponent: oppRoster(40), season: { ...playoffs(tie), remaining_weeks: 5 } }),
+      ).mode,
+    ).toBe("maximise_pf");
+  });
+
+  it("a stack's advice is the matchup's, not the season PF cutoff's", () => {
+    const players = myRoster().map((p) => (p.player_id === 4 ? { ...p, pro_team_id: 1 } : p));
+    const out = analyzeLineup(
+      request({
+        players,
+        seeding_mode: "points_only",
+        opponent: oppRoster(160),
+        season: playoffs(),
+      }),
+    );
+    expect(out.stack_flags[0]?.effect).toBe("ceiling+");
+    expect(out.stack_flags[0]?.advice_under_reading).toBe(
+      "playoffs: as the underdog the stack's variance is a useful ceiling",
+    );
+  });
+
+  it("property: in a playoff week the seeding reading changes nothing but its own label", () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: 40, max: 200, noNaN: true }),
+        fc.boolean(),
+        fc.double({ min: -150, max: 150, noNaN: true }),
+        (oppMean, tie, gap) => {
+          const season = playoffs({
+            season_pf_rank: 6,
+            pf_gap_to_cutoff: gap,
+            tiebreak_in_play: tie,
+          });
+          const a = analyzeLineup(request({ opponent: oppRoster(oppMean), season }));
+          const b = analyzeLineup(
+            request({ seeding_mode: "points_only", opponent: oppRoster(oppMean), season }),
+          );
+          const strip = (x: typeof a) => ({ ...x, seeding_mode_used: null, seeding: null });
+          const d = a.mode_basis.mu_m - a.mode_basis.mu_o;
+          return (
+            JSON.stringify(strip(a)) === JSON.stringify(strip(b)) &&
+            a.mode !== "maximise_pf" &&
+            a.objective_used !== "points_only" &&
+            (a.mode !== "protect" || d > 0) &&
+            (a.mode !== "chase" || d < 0)
+          );
+        },
+      ),
+      { numRuns: 100 },
+    );
   });
 });
 
