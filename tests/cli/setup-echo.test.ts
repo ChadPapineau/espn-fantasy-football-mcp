@@ -65,7 +65,13 @@ async function scenario(
 ): Promise<{ screen: string; result: SetupResult; stored: string | null }> {
   const stdin = new FakeTty();
   const screen = new Screen();
-  const prompt = createTerminalPrompt({ stdin, out: screen, takeTerminalNow: true });
+  // a Ctrl-C while no question waits would raise SIGINT on this process: recorded instead
+  const prompt = createTerminalPrompt({
+    stdin,
+    out: screen,
+    takeTerminalNow: true,
+    interrupt: () => undefined,
+  });
   // keys typed while setup starts: read after the terminal was taken, before the first question
   if (ahead !== null) stdin.type(ahead);
   const keychain = new MemoryStore("keychain", SERVICE);

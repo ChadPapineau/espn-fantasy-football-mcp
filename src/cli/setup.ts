@@ -173,8 +173,11 @@ export async function setup(
 
   // the terminal flow asks for both values: it takes the terminal before anything else (raw mode:
   // from then on the driver echoes nothing) and keeps it until setup ends (prompt.ts; Stage C ruling
-  // R7-3). `--page` takes its values from the page (Ctrl-C keeps stopping it) and `--reset` asks
-  // nothing: neither takes it.
+  // R7-3). Raw mode keeps the driver from turning Ctrl-C into SIGINT, so the prompt raises it itself
+  // whenever no question waits: Ctrl-C during the self-test, the writes or the checks with ESPN ends
+  // setup by the signal before anything more is stored or sent (Stage C finding
+  // setup-raw-mode-ctrl-c-ignored). `--page` takes its values from the page (Ctrl-C keeps stopping
+  // it) and `--reset` asks nothing: neither takes it.
   const takeNow = !opts.page && !opts.reset;
   const prompt =
     over.prompt ??

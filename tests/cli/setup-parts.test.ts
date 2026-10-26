@@ -118,8 +118,15 @@ describe("terminal prompt on a TTY (ruling R7-3)", () => {
   const open = (takeTerminalNow = false) => {
     const stdin = new FakeTty();
     const screen = new Screen();
-    const p = createTerminalPrompt({ stdin, out: screen, takeTerminalNow });
-    return { stdin, screen, p };
+    // Ctrl-C while no question waits raises SIGINT by default: recorded here instead
+    const interrupts: number[] = [];
+    const p = createTerminalPrompt({
+      stdin,
+      out: screen,
+      takeTerminalNow,
+      interrupt: () => interrupts.push(1),
+    });
+    return { stdin, screen, p, interrupts };
   };
   /** A hidden answer settles HIDDEN_SETTLE_MS after its line break. */
   const settled = async <T>(x: Promise<T>): Promise<T> => {
@@ -374,13 +381,16 @@ describe("terminal prompt on a TTY (ruling R7-3)", () => {
       p.close();
       expect(stdin.rawCalls).toEqual([true, false]);
     }
-    // Ctrl-D on a line that holds keys is no end; Ctrl-C while no question waits is
-    const { stdin, p } = open(true);
+    // Ctrl-D on a line that holds keys is no end; Ctrl-C while no question waits is the SIGINT raw
+    // mode kept the terminal driver from sending (tests/cli/setup-interrupt.test.ts): the terminal
+    // is given back, then the interrupt is raised (Stage C finding setup-raw-mode-ctrl-c-ignored)
+    const { stdin, p, interrupts } = open(true);
     const a = p.ask("Q: ", { hidden: false, timeoutMs: 60_000 });
     stdin.type("x\x04y\r");
     expect(await a).toEqual({ kind: "answer", value: "xy" });
     stdin.type("\x03");
-    expect(stdin.rawCalls).toEqual([true]);
+    expect(interrupts).toEqual([1]);
+    expect(stdin.rawCalls).toEqual([true, false]);
     expect(await p.ask("Q: ", { hidden: true, timeoutMs: 60_000 })).toEqual({ kind: "closed" });
     p.close();
     expect(stdin.rawCalls).toEqual([true, false]);

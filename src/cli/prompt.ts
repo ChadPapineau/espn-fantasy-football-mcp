@@ -29,6 +29,12 @@
 // (TYPED_AHEAD_NOTE), so the owner can clear the scrollback. Ctrl-C, and Ctrl-D on an empty line at a
 // question, end the input; Ctrl-Z gives the terminal back and suspends, and takes it again right
 // after (and on SIGCONT: readline's own suspend left raw mode on a terminal it no longer read).
+// Raw mode also turns off the driver's ISIG, so Ctrl-C reaches us as a byte, never as SIGINT: while
+// NO question waits — setup's checks and writes after the last answer, uninstall's deletions between
+// its questions — Ctrl-C gives the terminal back and sends this process SIGINT itself, exactly what
+// the driver would have sent (the command stops by the signal, or a scope that claims it stops
+// cleanly — src/cli/interrupt.ts). Before, it was read and dropped, so setup stored the cookies and
+// sent them to ESPN after the owner pressed Ctrl-C (Stage C finding setup-raw-mode-ctrl-c-ignored).
 import { createInterface, type Interface } from "node:readline";
 import { Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
@@ -106,16 +112,29 @@ function nowhere(): Writable {
   });
 }
 
+/** What a terminal prompt's Ctrl-C does while no question waits: SIGINT to this process. */
+export function raiseInterrupt(): void {
+  process.kill(process.pid, "SIGINT");
+}
+
+/** Where a prompt reads and writes. */
+export interface PromptIo {
+  readonly stdin: NodeJS.ReadableStream;
+  readonly out: NodeJS.WritableStream;
+  readonly takeTerminalNow?: boolean;
+  /**
+   * What Ctrl-C does on a terminal while no question waits, once the terminal has been given back
+   * (default `raiseInterrupt`: the SIGINT raw mode kept the terminal driver from sending).
+   */
+  readonly interrupt?: () => void;
+}
+
 /**
  * A prompt over `stdin`/`out`: on a terminal only a visible question draws, and only the keys typed
  * at it (see the header); on a pipe nothing is echoed at all. `takeTerminalNow` opens the reader at
  * once (on a terminal: raw mode now, not at the first question).
  */
-export function createTerminalPrompt(io: {
-  readonly stdin: NodeJS.ReadableStream;
-  readonly out: NodeJS.WritableStream;
-  readonly takeTerminalNow?: boolean;
-}): TerminalPrompt {
+export function createTerminalPrompt(io: PromptIo): TerminalPrompt {
   return isTty(io.stdin) ? terminalPrompt(io) : pipePrompt(io);
 }
 
@@ -132,11 +151,7 @@ function confirmOver(
 // ---- a pipe -------------------------------------------------------------------------------------
 
 /** On a pipe: one line reader, lines queued as they arrive, nothing echoed. */
-function pipePrompt(io: {
-  readonly stdin: NodeJS.ReadableStream;
-  readonly out: NodeJS.WritableStream;
-  readonly takeTerminalNow?: boolean;
-}): TerminalPrompt {
+function pipePrompt(io: PromptIo): TerminalPrompt {
   const queue: string[] = [];
   let opened = false;
   let closed = false;
@@ -242,11 +257,7 @@ const isControl = (c: string): boolean => {
 };
 
 /** On a terminal (see the header). */
-function terminalPrompt(io: {
-  readonly stdin: NodeJS.ReadableStream;
-  readonly out: NodeJS.WritableStream;
-  readonly takeTerminalNow?: boolean;
-}): TerminalPrompt {
+function terminalPrompt(io: PromptIo): TerminalPrompt {
   const out = io.out;
   const decoder = new StringDecoder("utf8");
   let opened = false;
@@ -476,6 +487,13 @@ function terminalPrompt(io: {
       return;
     }
     if (c === "\x03") {
+      // at a question it ends the input (the question answers closed); with none waiting it is the
+      // SIGINT the terminal driver would have sent: the terminal is given back, then the signal
+      if (asking === null) {
+        release();
+        (io.interrupt ?? raiseInterrupt)();
+        return;
+      }
       endInput();
       return;
     }
