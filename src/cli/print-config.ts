@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { assertNotSynced, fileProviderMarks, PathSecurityError } from "../config/paths.js";
 import type { ConfigKey, LenientConfig } from "../config/schema.js";
+import { scanPlugin } from "./client-config.js";
 import { EXIT, UsageError } from "./exit.js";
 import { distEntry, write, writeLine, type CliIo } from "./io.js";
 
@@ -238,5 +239,12 @@ export async function printConfig(
       ? `eff print-config: merge the mcpServers entry into ${desktopConfigPath(io.home)}, then restart Claude Desktop.`
       : "eff print-config: run the command above in a terminal (user scope, so nothing lands in a repository's .mcp.json).",
   );
+  // the plugin registers the server in Claude Code itself: this entry beside it is the duplicate
+  // the README forbids (Stage C finding doctor-plugin-install-invisible)
+  if (client === "code" && scanPlugin(io.home)?.enabled === true)
+    await writeLine(
+      io.stderr,
+      `eff print-config: warning: the ${PLUGIN_ID} plugin is installed and enabled — it registers this server in Claude Code already. Adding the entry above beside it starts two servers and lists every tool twice: use it only instead of the plugin (\`claude plugin uninstall ${PLUGIN_ID}\` first).`,
+    );
   return EXIT.ok;
 }

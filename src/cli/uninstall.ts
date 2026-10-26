@@ -62,6 +62,14 @@ import { JOB_NAMES, logDir, removeJobs } from "./launchd.js";
 import type { Logger } from "./log.js";
 import { resolveBackupDestination } from "./maintenance.js";
 import {
+  cookieFindings,
+  removeCommand,
+  scanClientConfig,
+  scanPlugin,
+  type ClientConfigScan,
+  type PluginInstall,
+} from "./client-config.js";
+import {
   codeConfigPath,
   desktopConfigPath,
   MARKETPLACE_NAME,
@@ -259,25 +267,100 @@ export function copiedSkillDirs(home: string, packageRoot: string): string[] {
     .filter((d) => kind(d) === "dir");
 }
 
+/** The client registrations uninstall found (`eff doctor` rows #2/#3 read the same ones). */
+export interface FoundRegistrations {
+  readonly scans: readonly ClientConfigScan[];
+  readonly plugin: PluginInstall | null;
+}
+
+/** Scans every client registration of this server under `home` (nothing is changed). */
+export function findRegistrations(home: string): FoundRegistrations {
+  return {
+    scans: [
+      scanClientConfig("desktop", desktopConfigPath(home)),
+      scanClientConfig("code", codeConfigPath(home)),
+    ],
+    plugin: scanPlugin(home),
+  };
+}
+
+const COOKIE_NOTE =
+  "its env block holds an ESPN cookie (a key named ESPN_S2/SWID or a cookie-shaped value): removing the entry takes it out of that file — the file's backups and history may keep it, and logging out at espn.com is the only way to try to end the session";
+
 /**
  * The manual steps uninstall prints and never performs (plan 03 §8 steps 5–6; L8 "prints what it
  * will not touch"): every client registration — the Claude Code plugin first (the README's route: it
- * registers the server itself, and every session would start it and create the cache again), the
- * user-scope entry, Claude Desktop's entry — the copy-installed Skills, then the ESPN session, the
- * backups and the global package (Stage C finding uninstall-steps-omit-plugin).
+ * registers the server itself, and every session would start it and create the cache again), then
+ * each `claude mcp add` entry FOUND, with the command for its scope (user; local — `claude mcp add`'s
+ * default, removed from its project directory; project — `.mcp.json`, a file meant to be committed),
+ * entries under another key included, and Claude Desktop's entry; an env block holding a cookie is
+ * said. With nothing found, the generic user-scope and Desktop steps stand (Stage C findings
+ * uninstall-steps-omit-plugin, uninstall-local-scope-registration-unnamed). Then the copy-installed
+ * Skills, the ESPN session, the backups and the global package.
  */
-export function manualSteps(home: string, copiedSkills: readonly string[] = []): string[] {
-  return [
-    `Claude Code with the plugin: claude plugin uninstall ${PLUGIN_ID}, then claude plugin marketplace remove ${MARKETPLACE_NAME} — until then every Claude Code session starts the server, which creates the cache again. The plugin's league id and season settings live in Claude Code's settings: remove them there if the uninstall leaves them.`,
-    `Claude Code without the plugin: claude mcp remove --scope user ${SERVER_NAME} (entries live in ${codeConfigPath(home)})`,
-    `Remove the "${SERVER_NAME}" entry from ${desktopConfigPath(home)} (Claude Desktop), then restart it; Skills you uploaded to Claude Desktop as zips are removed in its settings.`,
+export function manualSteps(
+  home: string,
+  copiedSkills: readonly string[] = [],
+  found: FoundRegistrations = { scans: [], plugin: null },
+): string[] {
+  const out: string[] = [
+    `Claude Code with the plugin: claude plugin uninstall ${PLUGIN_ID}, then claude plugin marketplace remove ${MARKETPLACE_NAME} — until then every Claude Code session starts the server, which creates the cache again.${found.plugin === null ? "" : ` It is installed here (${found.plugin.copies.map((c) => c.installPath).join(", ")}${found.plugin.enabled ? "" : "; disabled"}).`} The plugin's league id and season settings live in Claude Code's settings: remove them there if the uninstall leaves them.`,
+  ];
+  const code = found.scans.filter((x) => x.client === "code").flatMap((x) => x.entries);
+  const desktop = found.scans.filter((x) => x.client === "desktop").flatMap((x) => x.entries);
+  const cookieIn = (e: { file: string; dir: string | null; name: string }): boolean =>
+    found.scans.some((x) =>
+      x.envBlocks.some(
+        (b) =>
+          b.ours &&
+          b.file === e.file &&
+          b.dir === e.dir &&
+          b.name === e.name &&
+          cookieFindings(b.env).length > 0,
+      ),
+    );
+  if (code.length === 0)
+    out.push(
+      `Claude Code without the plugin: claude mcp remove --scope user ${SERVER_NAME} (entries live in ${codeConfigPath(home)}; a local-scope entry is removed from its project directory with --scope local)`,
+    );
+  for (const e of code) {
+    const where =
+      e.scope === "project"
+        ? `project scope, ${path.join(e.dir ?? ".", ".mcp.json")} — a file meant to be committed`
+        : e.scope === "local"
+          ? `local scope, project ${e.dir ?? "?"}`
+          : `user scope, ${e.file}`;
+    out.push(
+      `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}: ${removeCommand(e)}`,
+    );
+    if (cookieIn(e)) out.push(`  ${COOKIE_NOTE}`);
+  }
+  if (desktop.length === 0)
+    out.push(
+      `Remove the "${SERVER_NAME}" entry from ${desktopConfigPath(home)} (Claude Desktop), then restart it; Skills you uploaded to Claude Desktop as zips are removed in its settings.`,
+    );
+  for (const e of desktop) {
+    out.push(
+      `Remove the "${e.name}" entry from ${e.file} (Claude Desktop), then restart it; Skills you uploaded to Claude Desktop as zips are removed in its settings.`,
+    );
+    if (cookieIn(e)) out.push(`  ${COOKIE_NOTE}`);
+  }
+  // another server's env block holding an ESPN cookie: said (value-free), never edited
+  for (const x of found.scans)
+    for (const b of x.envBlocks)
+      if (!b.ours && cookieFindings(b.env).length > 0)
+        out.push(
+          `Another MCP server's entry in ${b.file}${b.dir === null ? "" : ` (project ${b.dir})`} holds an ESPN cookie-shaped value in its env block: remove it there.`,
+        );
+  out.push(
     copiedSkills.length > 0
       ? `Delete the Skills copied into ${skillsCopyDir(home)}: ${copiedSkills.map((d) => path.basename(d)).join(", ")}`
       : `A copy install of the Skills lives in ${skillsCopyDir(home)} as espn-<name> directories: none of ours is there now.`,
     "The ESPN session itself is NOT invalidated: log out at espn.com (account settings) to attempt that — whether it works is unverified.",
     "Time Machine or other backups may still hold copies of the keychain, session.json and the store.",
     "If installed globally: npm uninstall -g espn-fantasy-football-mcp",
-  ];
+  );
+  return out;
 }
 
 /**
@@ -846,8 +929,12 @@ export async function uninstall(
     // 5–6. what uninstall never does itself
     await out("");
     await out("Not done automatically (do these yourself):");
-    for (const s of manualSteps(io.home, copiedSkillDirs(io.home, io.packageRoot)))
-      await out(`  - ${s}`);
+    for (const s of manualSteps(
+      io.home,
+      copiedSkillDirs(io.home, io.packageRoot),
+      findRegistrations(io.home),
+    ))
+      await out(s.startsWith("  ") ? `    ${s.trimStart()}` : `  - ${s}`);
     return failed ? EXIT.error : EXIT.ok;
   } finally {
     prompt?.close();

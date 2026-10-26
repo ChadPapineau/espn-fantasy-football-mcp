@@ -40,7 +40,6 @@ import {
 import {
   ConfigError,
   loadConfigFromProcess,
-  looksLikeCredentialValue,
   tlsVerificationDisabled,
   type LenientConfig,
 } from "../config/schema.js";
@@ -50,6 +49,14 @@ import { parseDiffs } from "../drift/index.js";
 import { MIGRATIONS } from "../store/index.js";
 import type { CredentialStateRow, Store, StoreFactory } from "../store/types.js";
 import { VERSION } from "../version.js";
+import {
+  cookieFindings,
+  scanClientConfig,
+  scanPlugin,
+  whereOf,
+  type ClientConfigScan,
+  type PluginInstall,
+} from "./client-config.js";
 import { onlineRows } from "./doctor-online.js";
 import { exitCodeFor, row, type DoctorRow, type RowStatus } from "./doctor-rows.js";
 import { bothCredentialStores } from "./espn-stack.js";
@@ -80,6 +87,14 @@ import { CACHE_DIRS } from "./uninstall.js";
 import { createServer } from "node:net";
 
 export { exitCodeFor, type DoctorRow, type RowStatus } from "./doctor-rows.js";
+export {
+  MAX_CLIENT_CONFIG_BYTES,
+  MAX_CLIENT_PROJECTS,
+  isOurs,
+  scanClientConfig,
+  serverMaps,
+  type ClientConfigScan,
+} from "./client-config.js";
 
 /** The minimum Node (plan 03 §5 #1). */
 export const MIN_NODE = [24, 15, 0] as const;
@@ -87,8 +102,6 @@ export const MIN_NODE = [24, 15, 0] as const;
 export const MIN_FREE_BYTES = 1024 ** 3;
 /** Store size above this warns (plan 03 §5 #5). */
 export const MAX_STORE_BYTES = 500 * 1024 ** 2;
-/** Largest client config read (a Claude Code user config can be several MB). */
-export const MAX_CLIENT_CONFIG_BYTES = 16 * 1024 * 1024;
 /** How much of a client log's tail is read; lines shown (plan 03 §5 #25: the last 40). */
 export const LOG_TAIL_BYTES = 64 * 1024;
 export const LOG_TAIL_LINES = 40;
@@ -158,99 +171,6 @@ export function checkNode(nodeVersion: string, execPath: string): DoctorRow {
 }
 
 // --- #2, #3, #13: client configs ---------------------------------------------------------------------
-
-/** A parsed client config and our entries in it. */
-export interface ClientConfigScan {
-  readonly client: "desktop" | "code";
-  readonly file: string;
-  readonly state: "ok" | "missing" | "invalid";
-  readonly entries: readonly { readonly name: string; readonly spec: Record<string, unknown> }[];
-  /** Every entry's env (secrecy is checked over ALL entries — plan 03 §5 #3). */
-  readonly envs: readonly Readonly<Record<string, unknown>>[];
-  /** How many OTHER mcpServers entries it lists (names are never printed). */
-  readonly others: number;
-  readonly siblingInstalled: boolean;
-}
-
-function isObj(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-/** Whether an entry launches this server (the config key, the dist/cli.js path or the plugin shim). */
-export function isOurs(name: string, spec: Record<string, unknown>): boolean {
-  if (name === SERVER_NAME) return true;
-  const args = Array.isArray(spec.args) ? spec.args : [];
-  const strs = args.filter((a): a is string => typeof a === "string");
-  return (
-    strs.includes("serve") &&
-    strs.some(
-      (a) => /[/\\]dist[/\\]cli\.js$/.test(a) || /[/\\]scripts[/\\]eff-launch\.sh$/.test(a),
-    ) &&
-    name !== SIBLING_SERVER_NAME
-  );
-}
-
-/** Reads a client config's `mcpServers`. */
-export function scanClientConfig(client: "desktop" | "code", file: string): ClientConfigScan {
-  const empty = {
-    client,
-    file,
-    entries: [],
-    envs: [],
-    others: 0,
-    siblingInstalled: false,
-  } as const;
-  let text: string | null;
-  try {
-    text = readSecureFile(file, {
-      requirePrivate: false,
-      maxBytes: MAX_CLIENT_CONFIG_BYTES,
-      what: "client config",
-    });
-  } catch {
-    return { ...empty, state: "invalid" };
-  }
-  if (text === null) return { ...empty, state: "missing" };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { ...empty, state: "invalid" };
-  }
-  const entries: { name: string; spec: Record<string, unknown> }[] = [];
-  const envs: Record<string, unknown>[] = [];
-  let others = 0;
-  let siblingInstalled = false;
-  for (const servers of serverMaps(parsed)) {
-    for (const [name, spec] of Object.entries(servers)) {
-      if (!isObj(spec)) continue;
-      if (isObj(spec.env)) envs.push(spec.env);
-      if (name === SIBLING_SERVER_NAME) siblingInstalled = true;
-      if (isOurs(name, spec)) entries.push({ name, spec });
-      else others++;
-    }
-  }
-  return { client, file, state: "ok", entries, envs, others, siblingInstalled };
-}
-
-/** Most `projects[*]` entries of ~/.claude.json scanned (a bound on a file the user owns). */
-export const MAX_CLIENT_PROJECTS = 1000;
-
-/**
- * Every `mcpServers` map of a client config: the top-level one (Claude Desktop; Claude Code's user
- * scope) and each `projects["<dir>"].mcpServers` (Claude Code's LOCAL scope — `claude mcp add`'s
- * default — which a cookie pasted into an `--env` lands in; a scan of the top level alone reported
- * "no client env block to check" for it, plan 03 §5 #2/#3).
- */
-export function serverMaps(parsed: unknown): Record<string, unknown>[] {
-  if (!isObj(parsed)) return [];
-  const out: Record<string, unknown>[] = [];
-  if (isObj(parsed.mcpServers)) out.push(parsed.mcpServers);
-  if (isObj(parsed.projects))
-    for (const p of Object.values(parsed.projects).slice(0, MAX_CLIENT_PROJECTS))
-      if (isObj(p) && isObj(p.mcpServers)) out.push(p.mcpServers);
-  return out;
-}
 
 async function nodeVersionOf(io: CliIo, command: string): Promise<string | null> {
   if (command === io.execPath) return io.nodeVersion;
@@ -331,20 +251,24 @@ export async function entryProblems(
   return { hard, soft };
 }
 
-/** The node the plugin shim would pick (plan 03 §5 #2; ADV OBJ-12), via `version --json`. */
-export async function shimResolution(io: CliIo): Promise<string> {
-  const shim = path.join(io.packageRoot, "scripts", "eff-launch.sh");
+/**
+ * The node the plugin shim would pick (plan 03 §5 #2; ADV OBJ-12), via `version --json` — the shim
+ * of `root` (this install by default; an installed plugin's copy, which is what Claude Code runs).
+ */
+export async function shimResolution(io: CliIo, root: string = io.packageRoot): Promise<string> {
+  const shim = path.join(root, "scripts", "eff-launch.sh");
+  const label = root === io.packageRoot ? "plugin shim" : `plugin copy's shim (${root})`;
   try {
     lstatSync(shim);
   } catch {
-    return "plugin shim: not present in this install";
+    return `${label}: not present in this install`;
   }
   const r = await io.exec("/bin/sh", [shim, "version", "--json"], { timeoutMs: 10_000 });
   if (r.code !== 0) {
     // the shim's own fixed text (eff-launch: …), first line only, control characters dropped
     const first = r.stderr.split("\n").find((l) => l.startsWith("eff-launch: ")) ?? "";
     const why = truncate(first.replace(/[\u0000-\u001f\u007f]/g, " ").trim(), 200);
-    return `plugin shim failed${why === "" ? "" : `: ${why}`}`;
+    return `${label} failed${why === "" ? "" : `: ${why}`}`;
   }
   try {
     const v = JSON.parse(r.stdout.trim().split("\n").pop() ?? "") as {
@@ -356,23 +280,54 @@ export async function shimResolution(io: CliIo): Promise<string> {
       typeof v.exec_path === "string" &&
       /^\d+\.\d+\.\d+/.test(v.node)
     )
-      return `plugin shim would run node ${v.node} at ${v.exec_path.replace(/[\u0000-\u001f]/g, "")}`;
+      return `${label} would run node ${v.node} at ${v.exec_path.replace(/[\u0000-\u001f]/g, "")}`;
   } catch {
     // fall through
   }
-  return "plugin shim: ran, but its output was not understood";
+  return `${label}: ran, but its output was not understood`;
 }
 
-/** Row 2: launch configuration paths in every client config found. */
+/**
+ * Problems of an installed plugin copy (what Claude Code runs: `<installPath>/scripts/eff-launch.sh
+ * serve` → `<installPath>/dist/cli.js`): its build and its shim must be there. A copy added from
+ * GitHub carries no `dist/` (README step 5: the plugin comes from the built clone).
+ */
+export function pluginCopyProblems(installPath: string): string[] {
+  const out: string[] = [];
+  const has = (rel: string): boolean => {
+    try {
+      return lstatSync(path.join(installPath, rel)).isFile();
+    } catch {
+      return false;
+    }
+  };
+  if (!has(path.join("dist", "cli.js")))
+    out.push(
+      `the plugin copy at ${installPath} has no dist/cli.js — install the plugin from the built clone (README step 5), not from GitHub`,
+    );
+  if (!has(path.join("scripts", "eff-launch.sh")))
+    out.push(`the plugin copy at ${installPath} has no scripts/eff-launch.sh`);
+  return out;
+}
+
+/**
+ * Row 2: launch configuration paths in every client config found — and the Claude Code plugin, the
+ * README's recommended registration (Stage C finding doctor-plugin-install-invisible: a plugin user
+ * was told no client launches the server and pointed at `--client code`, the duplicate registration
+ * the README forbids). An enabled plugin beside a `claude mcp add` entry of ours is a warning: two
+ * servers, every tool listed twice.
+ */
 export async function checkLaunchConfig(
   io: CliIo,
   scans: readonly ClientConfigScan[],
+  plugin: PluginInstall | null = null,
 ): Promise<DoctorRow> {
   const title = "Launch config paths";
   const details: string[] = [];
   let hard = false;
   let soft = false;
   let found = 0;
+  let codeEntries = 0;
   for (const s of scans) {
     if (s.state === "missing") {
       details.push(`${s.client}: no config at ${s.file}`);
@@ -382,6 +337,8 @@ export async function checkLaunchConfig(
       details.push(`${s.client}: ${s.file} could not be read as JSON`);
       continue;
     }
+    for (const pf of s.projectFiles)
+      if (pf.state === "invalid") details.push(`${s.client}: ${pf.file} could not be read as JSON`);
     if (s.siblingInstalled)
       details.push(
         `${s.client}: the sibling's \`${SIBLING_SERVER_NAME}\` server is also installed (fine)`,
@@ -392,19 +349,39 @@ export async function checkLaunchConfig(
     }
     for (const e of s.entries) {
       found++;
+      if (s.client === "code") codeEntries++;
+      const where = whereOf(e.scope, e.dir);
       if (e.name !== SERVER_NAME)
         details.push(
-          `${s.client}: an entry launches this server under another key (expected \`${SERVER_NAME}\`)`,
+          `${where}: an entry launches this server under another key (expected \`${SERVER_NAME}\`)`,
         );
       const p = await entryProblems(io, e.spec);
-      if (p.hard.length === 0 && p.soft.length === 0) details.push(`${s.client}: entry ok`);
-      for (const x of p.hard) details.push(`${s.client}: ${x}`);
-      for (const x of p.soft) details.push(`${s.client}: warning: ${x}`);
+      if (p.hard.length === 0 && p.soft.length === 0) details.push(`${where}: entry ok`);
+      for (const x of p.hard) details.push(`${where}: ${x}`);
+      for (const x of p.soft) details.push(`${where}: warning: ${x}`);
       if (p.hard.length > 0) hard = true;
       if (p.soft.length > 0) soft = true;
     }
   }
-  details.push(await shimResolution(io));
+  const pluginOn = plugin?.enabled === true;
+  if (plugin !== null) {
+    for (const c of plugin.copies) {
+      if (!plugin.enabled) {
+        details.push(`code: the plugin is installed (${c.installPath}) but disabled`);
+        continue;
+      }
+      found++;
+      const problems = pluginCopyProblems(c.installPath);
+      if (problems.length === 0)
+        details.push(
+          `code: the plugin registers the server (${c.scope} scope${c.version === null ? "" : `, version ${c.version}`}, ${c.installPath})`,
+        );
+      for (const x of problems) details.push(`code: ${x}`);
+      if (problems.length > 0) hard = true;
+      details.push(await shimResolution(io, c.installPath));
+    }
+  }
+  if (!pluginOn) details.push(await shimResolution(io));
   if (hard)
     return row(
       2,
@@ -412,7 +389,9 @@ export async function checkLaunchConfig(
       title,
       "fail",
       "a client launches the server with a bad path, Node or location",
-      "replace the entry with the output of `eff print-config --client desktop` (or --client code)",
+      pluginOn
+        ? "install the plugin again from the built clone (README step 5); replace any other entry with `eff print-config`'s output"
+        : "replace the entry with the output of `eff print-config --client desktop` (or --client code)",
       details,
     );
   if (found === 0)
@@ -422,7 +401,17 @@ export async function checkLaunchConfig(
       title,
       "warn",
       "no client is configured to launch this server",
-      "`eff print-config --client desktop` or `--client code`",
+      "Claude Code: the plugin (README step 5); Claude Desktop: `eff print-config --client desktop`",
+      details,
+    );
+  if (pluginOn && codeEntries > 0)
+    return row(
+      2,
+      "launch_config",
+      title,
+      "warn",
+      "Claude Code registers this server twice: the plugin AND a `claude mcp add` entry — two servers, every tool listed twice",
+      "keep one: remove the entry (`eff uninstall --dry-run` prints its `claude mcp remove` command) or uninstall the plugin",
       details,
     );
   if (soft)
@@ -440,28 +429,31 @@ export async function checkLaunchConfig(
     "launch_config",
     title,
     "ok",
-    `${String(found)} client entr${found === 1 ? "y" : "ies"} with absolute, existing paths`,
+    `${String(found)} client registration${found === 1 ? "" : "s"} with absolute, existing paths`,
     null,
     details,
   );
 }
 
-const COOKIE_KEY_RE = /^(?:espn[_-]?s2|swid)$/i;
-
-/** Row 3: no cookie-shaped env value and no ESPN_S2/SWID-named key in any client config. */
+/**
+ * Row 3: no cookie-shaped env value and no ESPN_S2/SWID-named key in any client config — every
+ * scope Claude Code keeps (user, local, and the project `.mcp.json` files: Stage C finding
+ * doctor-project-scope-mcp-json-unscanned) and Claude Desktop's. Never a value: where it is and what.
+ */
 export function checkClientSecrecy(scans: readonly ClientConfigScan[]): DoctorRow {
   const title = "Client config secrecy";
   const details: string[] = [];
   let any = false;
   for (const s of scans) {
-    for (const env of s.envs) {
+    for (const b of s.envBlocks) {
       any = true;
-      for (const [k, v] of Object.entries(env)) {
-        if (COOKIE_KEY_RE.test(k))
-          details.push(`${s.client}: an env key named like an ESPN cookie`);
-        else if (typeof v === "string" && looksLikeCredentialValue(v))
-          details.push(`${s.client}: an env value shaped like an ESPN cookie or a member GUID`);
-      }
+      const where = b.scope === "desktop" ? s.client : whereOf(b.scope, b.dir);
+      for (const f of cookieFindings(b.env))
+        details.push(
+          f === "key"
+            ? `${where}: an env key named like an ESPN cookie`
+            : `${where}: an env value shaped like an ESPN cookie or a member GUID`,
+        );
     }
   }
   if (!any) return row(3, "client_secrecy", title, "skip", "no client env block to check");
@@ -473,7 +465,7 @@ export function checkClientSecrecy(scans: readonly ClientConfigScan[]): DoctorRo
     title,
     "config",
     "a client config holds a cookie-shaped value — the client config is not a secret store",
-    "remove it from the env block (cookies live only in the credential store; `eff setup` puts them there), then restart the client",
+    "remove it from the env block (cookies live only in the credential store; `eff setup` puts them there), then restart the client; a project .mcp.json is a file meant to be committed: check its history",
     [...new Set(details)],
   );
 }
@@ -1501,15 +1493,47 @@ export function newestMtime(dir: string, budget = { left: 20_000 }): number {
   return newest;
 }
 
-/** Row 24: in a checkout, dist/cli.js newer than every file under src/ and package.json. */
-export function checkStaleBuild(root: string): DoctorRow {
-  const title = "Stale dist/";
-  if (!isCheckout(root))
-    return row(24, "stale_build", title, "na", "not a checkout (installed package)");
-  let dist: number;
+function mtimeOf(file: string): number | null {
   try {
-    dist = statSync(distEntry(root)).mtimeMs;
+    return statSync(file).mtimeMs;
   } catch {
+    return null;
+  }
+}
+
+/**
+ * Row 24: in a checkout, dist/cli.js newer than every file under src/ and package.json — and every
+ * enabled plugin copy (what Claude Code actually runs) built no earlier than this clone: README says
+ * `claude plugin update` at an unchanged version keeps the old copy, which the clone's own check never
+ * saw (Stage C finding doctor-plugin-install-invisible).
+ */
+export function checkStaleBuild(root: string, plugin: PluginInstall | null = null): DoctorRow {
+  const title = "Stale dist/";
+  const copies = plugin?.enabled === true ? plugin.copies : [];
+  const checkout = isCheckout(root);
+  const clone = checkout ? mtimeOf(distEntry(root)) : null;
+  const newestSource = checkout
+    ? Math.max(newestMtime(path.join(root, "src")), mtimeOf(path.join(root, "package.json")) ?? 0)
+    : 0;
+  const details: string[] = [];
+  let stale = 0;
+  for (const c of copies) {
+    const copy = mtimeOf(distEntry(c.installPath));
+    if (copy === null) {
+      stale++;
+      details.push(`plugin copy ${c.installPath}: no dist/cli.js`);
+    } else if (checkout && copy < Math.max(clone ?? 0, newestSource)) {
+      stale++;
+      details.push(
+        `plugin copy ${c.installPath}: built before this clone's current build or sources — Claude Code runs the old server`,
+      );
+    } else details.push(`plugin copy ${c.installPath}: current`);
+  }
+  const pluginFix =
+    "refresh the plugin's copy: `claude plugin uninstall espn-fantasy-football@espn-fantasy-football-mcp`, then install it again from the built clone (README Upgrade), and restart the client";
+  if (!checkout && copies.length === 0)
+    return row(24, "stale_build", title, "na", "not a checkout (installed package)");
+  if (checkout && clone === null)
     return row(
       24,
       "stale_build",
@@ -1517,25 +1541,37 @@ export function checkStaleBuild(root: string): DoctorRow {
       "warn",
       "dist/cli.js does not exist — the package is not built",
       "`npm run build`",
+      details,
     );
-  }
-  let pkg = 0;
-  try {
-    pkg = statSync(path.join(root, "package.json")).mtimeMs;
-  } catch {
-    pkg = 0;
-  }
-  const newest = Math.max(newestMtime(path.join(root, "src")), pkg);
-  return dist >= newest
-    ? row(24, "stale_build", title, "ok", "dist/ is newer than every source file")
-    : row(
-        24,
-        "stale_build",
-        title,
-        "fail",
-        "dist/ is older than the sources — the client is launching an old server",
-        "`npm run build`",
-      );
+  if (checkout && (clone ?? 0) < newestSource)
+    return row(
+      24,
+      "stale_build",
+      title,
+      "fail",
+      "dist/ is older than the sources — the client is launching an old server",
+      `\`npm run build\`${copies.length > 0 ? `, then ${pluginFix}` : ""}`,
+      details,
+    );
+  if (stale > 0)
+    return row(
+      24,
+      "stale_build",
+      title,
+      "fail",
+      `${String(stale)} plugin cop${stale === 1 ? "y is" : "ies are"} older than this clone — Claude Code launches an old server`,
+      pluginFix,
+      details,
+    );
+  return row(
+    24,
+    "stale_build",
+    title,
+    "ok",
+    checkout ? "dist/ is newer than every source file" : "the plugin copy is built",
+    null,
+    details,
+  );
 }
 
 /** The last `maxLines` lines of a file (no symlink), from its last LOG_TAIL_BYTES. */
@@ -1797,7 +1833,8 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
     scanClientConfig("desktop", opts.clientConfig ?? desktopConfigPath(io.home)),
     scanClientConfig("code", codeConfigPath(io.home)),
   ];
-  rows.push(await checkLaunchConfig(io, scans));
+  const plugin = scanPlugin(io.home);
+  rows.push(await checkLaunchConfig(io, scans, plugin));
   rows.push(checkClientSecrecy(scans));
 
   let ex: ExistingStore = { kind: "missing" };
@@ -1871,7 +1908,7 @@ export async function runDoctor(io: CliIo, opts: DoctorOptions): Promise<DoctorR
     }
     rows.push(await checkSetupPort(io, config));
     rows.push(...checkHealthChecks(store));
-    rows.push(checkStaleBuild(io.packageRoot));
+    rows.push(checkStaleBuild(io.packageRoot, plugin));
     rows.push(checkClientLog(opts.clientLog ?? defaultClientLog(io.home), secrets));
   } finally {
     if (ex.kind === "open") ex.store.close();
