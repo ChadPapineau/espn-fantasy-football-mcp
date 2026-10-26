@@ -4,9 +4,11 @@
 // distribution around the SAME mean (ESPN's — weight_espn 1.0, ADV OBJ-02); a QB, a player with too
 // few games, a ruled-out week and the default request all stay `position_cv`; the result is
 // deterministic by seed; `opportunityFromLines` reads volume and efficiency from the stat lines.
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   DEADLINE_UNREAD_ASSUMPTION,
+  PLAYER_SIM_ANCHOR_FAILED_ASSUMPTION,
   PLAYER_SIM_E1_SAMPLES,
   projectPlayers,
   type ProjectionRequest,
@@ -142,6 +144,122 @@ describe("E1 player_sim (P1)", () => {
       }),
     );
     expect(prior?.basis).toBe("player_sim");
+  });
+});
+
+// Stage C finding projection-player-sim-clamp-mean (round 3): v1 clamped the rescale ESPN / simulated
+// mean to [1/3, 3] and then served the simulated mean × 3 (or ÷ 3), not ESPN's, while `inputs.weight_espn`
+// read 1 — exactly on a role change, where ESPN departs most from the trailing opportunity. A rescale
+// the simulation cannot carry now serves no player_sim: the week keeps the positional CV around
+// ESPN's mean (v2's anchor_failed rule), and E1 says so.
+describe("an anchor the simulation cannot carry (Stage C projection-player-sim-clamp-mean)", () => {
+  // a backup's trailing role: 3 carries and 1 target a game (the finding's repro)
+  function thinLine(week: number): TrailingLine {
+    const values = {
+      targets: 1,
+      rec: 1,
+      rec_yd: 7,
+      rec_td: 0,
+      rush_att: 3,
+      rush_yd: 11,
+      rush_td: 0,
+      fum_lost: 0,
+    };
+    const line: StatLine = {
+      values,
+      present: Object.keys(values).sort(),
+      position: asPositionId(2),
+      position_class: "O",
+      provisional: false,
+      source: "nflverse",
+    };
+    return { season: SEASON, week, line };
+  }
+  const backup = (espn: number, over: Partial<ProjectionTarget> = {}) =>
+    rb({ espn_week: espn, trailing: [1, 2, 3, 4].map(thinLine), ...over });
+  const first = async (target: ProjectionTarget, playerSim: boolean) => {
+    const out = await projectPlayers(request({ player_sim: playerSim, targets: [target] }));
+    const p = out.data.projections[0];
+    return { week: p?.weeks[0], assumptions: (p?.assumptions ?? []).map((a) => a.text) };
+  };
+
+  it("a promoted backup: ESPN's 14 and 18 are served exactly at weight_espn 1, on the positional CV, said", async () => {
+    for (const espn of [14, 18]) {
+      const sim = await first(backup(espn), true);
+      const cv = await first(backup(espn), false);
+      expect(sim.week?.points.mean).toBe(espn);
+      expect(sim.week?.points.basis).toBe("position_cv");
+      expect(sim.week?.inputs.espn).toBe(espn);
+      expect(sim.week?.inputs.weight_espn).toBe(1);
+      // the very distribution the default request serves (the same mean, the same spread)
+      expect(sim.week?.points).toEqual(cv.week?.points);
+      expect(sim.assumptions).toContain(PLAYER_SIM_ANCHOR_FAILED_ASSUMPTION.text);
+      expect(cv.assumptions).not.toContain(PLAYER_SIM_ANCHOR_FAILED_ASSUMPTION.text);
+    }
+  });
+
+  it("a projection far below the trailing role (a starter losing it) is served exactly too", async () => {
+    // a lead back's trailing line (≈ 17 points a game) against ESPN's 2: a rescale below 1/3
+    const sim = await first(rb({ espn_week: 2 }), true);
+    expect(sim.week?.points.mean).toBe(2);
+    expect(sim.week?.points.basis).toBe("position_cv");
+    expect(sim.assumptions).toContain(PLAYER_SIM_ANCHOR_FAILED_ASSUMPTION.text);
+  });
+
+  it("inside the band the simulation stands, at ESPN's mean, and nothing is said", async () => {
+    const sim = await first(backup(4), true);
+    expect(sim.week?.points.basis).toBe("player_sim");
+    expect(sim.week?.points.mean).toBe(4);
+    expect(sim.assumptions).not.toContain(PLAYER_SIM_ANCHOR_FAILED_ASSUMPTION.text);
+  });
+
+  it("property: whatever the trailing role and ESPN's projection, the first week's mean is ESPN's at weight_espn 1", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.integer({ min: 0, max: 12 }),
+        fc.integer({ min: 0, max: 24 }),
+        fc.double({ min: 0.1, max: 45, noNaN: true }),
+        async (targets, carries, espn) => {
+          fc.pre(targets + carries > 0);
+          const line = (week: number): TrailingLine => {
+            const values = {
+              targets,
+              rec: Math.round(targets * 0.7),
+              rec_yd: Math.round(targets * 6),
+              rec_td: 0,
+              rush_att: carries,
+              rush_yd: Math.round(carries * 4.2),
+              rush_td: carries > 10 ? 1 : 0,
+              fum_lost: 0,
+            };
+            return {
+              season: SEASON,
+              week,
+              line: {
+                values,
+                present: Object.keys(values).sort(),
+                position: asPositionId(2),
+                position_class: "O",
+                provisional: false,
+                source: "nflverse",
+              },
+            };
+          };
+          const out = await projectPlayers(
+            request({
+              player_sim: true,
+              n_sims: 1000,
+              targets: [rb({ espn_week: espn, trailing: [1, 2, 3, 4].map(line) })],
+            }),
+          );
+          const w = out.data.projections[0]?.weeks[0];
+          return (
+            w?.points.mean === Math.round(espn * 10_000) / 10_000 && w.inputs.weight_espn === 1
+          );
+        },
+      ),
+      { numRuns: 40 },
+    );
   });
 });
 

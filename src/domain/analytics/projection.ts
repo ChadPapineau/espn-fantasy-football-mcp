@@ -7,7 +7,8 @@
 // with the completed count). Pure: settings, engine, clock, rng and pacer are injected. New here
 // (the sibling's v1-trailing had no native projection); its sampler shape is ported. P1 (plan 10
 // §3.2): with `player_sim` an RB/WR/TE's first target week, when his trailing lines hold ≥ 3 games,
-// takes the volume × efficiency simulation's distribution (playerSim.ts) around the same ESPN mean.
+// takes the volume × efficiency simulation's distribution (playerSim.ts) around the same ESPN mean —
+// or keeps position_cv, said, when the simulation cannot carry that mean (Stage C round 3).
 // Stage C: ESPN's rest-of-season total runs through the NFL season's last week (18), past the
 // league's final scoring period, so it is shared over the player's games through that week and only
 // the league's weeks are kept (espnRosLastWeek; research 04 §B.1.1). Round 2: its START moves with
@@ -59,6 +60,7 @@ import {
   TURNOVER_STATS,
 } from "./constants.js";
 import { RunBudget, loopPacer, runCooperative, type Pacer } from "./cooperative.js";
+import { PLAYER_SIM } from "./marketConstants.js";
 import { opportunityFromLines, playerSimDist } from "./playerSim.js";
 import { AnalyticsError, ensure, ensurePlayers } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs } from "./inputs.js";
@@ -194,8 +196,10 @@ export interface ProjectionRequest {
    * The P1 `player_sim` basis (plan 10 §3.2 "E1's player_sim basis where the opportunity inputs
    * exist"; playerSim.ts): an RB/WR/TE's FIRST target week, with ≥ PLAYER_SIM.minGames trailing
    * games, gets the volume × efficiency simulation's distribution around the SAME mean (ESPN's —
-   * weight_espn 1.0); later weeks and everyone else stay `position_cv`. Default false (the P0
-   * `core` toolset is unchanged).
+   * weight_espn 1.0); a simulation that cannot carry that mean (its rescale outside
+   * [1/PLAYER_SIM.maxRescale, PLAYER_SIM.maxRescale]) leaves the week `position_cv`, said
+   * (PLAYER_SIM_ANCHOR_FAILED_ASSUMPTION); later weeks and everyone else stay `position_cv`.
+   * Default false (the P0 `core` toolset is unchanged).
    */
   readonly player_sim?: boolean;
 }
@@ -323,6 +327,16 @@ export const DEADLINE_UNREAD_ASSUMPTION = Object.freeze({
 export const DEADLINE_UNREAD_NO_ESPN_ASSUMPTION = Object.freeze({
   text: "the CPU deadline came before his trailing line was read and ESPN has no projection: projected at 0",
   revisit_trigger: "a call with fewer players or weeks",
+});
+/**
+ * A `player_sim` week whose simulation cannot carry the served mean (playerSim.ts `anchor_failed`:
+ * a rescale outside [1/3, 3] — a role change ESPN has seen and the trailing window has not): the
+ * week keeps the positional CV around that mean, as v2 does (Stage C finding
+ * projection-player-sim-clamp-mean).
+ */
+export const PLAYER_SIM_ANCHOR_FAILED_ASSUMPTION = Object.freeze({
+  text: `his trailing opportunity cannot carry this week's projection (more than ${String(PLAYER_SIM.maxRescale)}× apart): the position's spread around it, not the opportunity simulation`,
+  revisit_trigger: "his trailing usage moves toward the projection",
 });
 
 /** The trailing window scored through the engine (sibling research 05 §1 step 2 weights). */
@@ -873,20 +887,21 @@ export async function projectPlayers(req: ProjectionRequest): Promise<Projection
           )
         : null;
     // the first target week only (the decision week the trailing rates describe); one simulation
-    // per player keeps E1 inside its CPU and stall budgets (~7 ms at 1 000 samples)
+    // per player keeps E1 inside its CPU and stall budgets (~7 ms at 1 000 samples). A simulation
+    // that cannot carry the served mean leaves the week on the positional CV around it, said
     const simOf = (x: (typeof weeksOut)[number]): Dist | null => {
       if (thin || opportunity === null || x.task === null || k === 0 || x !== weeksOut[0])
         return null;
-      return (
-        playerSimDist({
-          opportunity,
-          settings,
-          espn_mean: x.mean,
-          p_active: x.task.pShape,
-          n_sims: Math.min(k, PLAYER_SIM_E1_SAMPLES),
-          rng: req.rng.fork(`e1_sim:${String(t.player_id ?? t.gsis_id ?? "")}:${String(x.w)}`),
-        })?.dist ?? null
-      );
+      const sim = playerSimDist({
+        opportunity,
+        settings,
+        espn_mean: x.mean,
+        p_active: x.task.pShape,
+        n_sims: Math.min(k, PLAYER_SIM_E1_SAMPLES),
+        rng: req.rng.fork(`e1_sim:${String(t.player_id ?? t.gsis_id ?? "")}:${String(x.w)}`),
+      });
+      if (sim?.anchor_failed === true) assumptions.push(PLAYER_SIM_ANCHOR_FAILED_ASSUMPTION);
+      return sim?.dist ?? null;
     };
     const weeksP: ProjectedWeek[] = weeksOut.map((x) => ({
       ...x.info,

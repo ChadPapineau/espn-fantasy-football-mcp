@@ -6,9 +6,13 @@
 // batch, touchdowns Poisson on the per-opportunity rates, fumbles per touch; every line is scored
 // through the plan 08 engine under the league's S (format-aware: half-PPR, per-N, bonuses), and the
 // samples are rescaled so the mean is ESPN's (weight_espn = 1.0 in v1 — ADV OBJ-02; the simulation
-// shapes the distribution, it never moves the point estimate). The zero mass follows P(active)
-// with E1's shape floor. Receivers and rushers only (RB/WR/TE): a QB's passing volume is not an
-// opportunity input yet → no player_sim (the caller keeps position_cv). Pure. New here.
+// shapes the distribution, it never moves the point estimate). A rescale outside [1/maxRescale,
+// maxRescale] — or an anchor or simulated mean that is not positive — cannot carry ESPN's mean, so no
+// Dist is served (`anchor_failed`) and the caller keeps the positional CV around ESPN's mean, as v2
+// does; the rescale is never clamped (Stage C finding projection-player-sim-clamp-mean: the clamped
+// samples' mean, the simulation × 3, was served while weight_espn read 1). The zero mass follows
+// P(active) with E1's shape floor. Receivers and rushers only (RB/WR/TE): a QB's passing volume is not
+// an opportunity input yet → no player_sim (the caller keeps position_cv). Pure. New here.
 import type { Rng } from "../clock.js";
 import { scoreSamples } from "../scoring/engine.js";
 import { positionClassOf } from "../scoring/stat_map.js";
@@ -75,10 +79,16 @@ export function hasOpportunityInputs(
 
 /** The simulation's result: the Dist (`basis: "player_sim"`), the raw simulated mean and the rescale. */
 export interface PlayerSimResult {
-  readonly dist: Dist;
+  /** The Dist around the anchor; null exactly when `anchor_failed` (the caller keeps position_cv). */
+  readonly dist: Dist | null;
   readonly sim_mean: number;
-  /** ESPN's mean / the simulated mean (clamped); 1 when ESPN's mean is unknown. */
+  /** The rescale applied to the samples: ESPN's mean / the simulated mean; 1 when none was applied. */
   readonly factor: number;
+  /**
+   * ESPN's mean was given but the simulation cannot carry it: the rescale would leave
+   * [1/maxRescale, maxRescale], or the anchor or the simulated mean is not positive.
+   */
+  readonly anchor_failed: boolean;
 }
 
 function lineOf(values: Readonly<Record<Canonical, number>>, positionId: number): StatLine {
@@ -137,7 +147,9 @@ export function opportunityFromLines(
 
 /**
  * The `player_sim` distribution of one player-week, or null when the opportunity inputs do not
- * exist. `espn_mean` anchors the mean (v1); `p_active` sets the zero mass (floored as in E1).
+ * exist. `espn_mean` anchors the mean (v1): the Dist's mean is ESPN's exactly, or there is no Dist
+ * (`anchor_failed`); null `espn_mean` leaves the simulated mean standing. `p_active` sets the zero
+ * mass (floored as in E1).
  */
 export function playerSimDist(input: {
   readonly opportunity: OpportunityInputs | null | undefined;
@@ -202,14 +214,18 @@ export function playerSimDist(input: {
   const sim = scoreSamples(lines, input.settings, "player_sim").dist;
   const simMean = sim.mean;
   const espn = input.espn_mean;
-  let factor = 1;
-  if (finite(espn) && espn >= 0 && simMean > 0)
-    factor = clamp(espn / simMean, 1 / PLAYER_SIM.maxRescale, PLAYER_SIM.maxRescale);
-  const exact = finite(espn) && espn >= 0 && simMean > 0 && factor === espn / simMean;
+  // the anchor (v1: weight_espn 1.0): the samples rescaled by ESPN / simulated — only inside the band;
+  // outside it (or with no positive mean to scale) the simulation cannot carry ESPN's mean, and a
+  // clamped rescale would serve a mean that is neither ESPN's nor the simulation's
+  const anchored = finite(espn);
+  const ratio = anchored && espn > 0 && simMean > 0 ? espn / simMean : Number.NaN;
+  if (anchored && !(ratio >= 1 / PLAYER_SIM.maxRescale && ratio <= PLAYER_SIM.maxRescale))
+    return { dist: null, sim_mean: round(simMean), factor: 1, anchor_failed: true };
+  const factor = anchored ? ratio : 1;
   const s = (x: number): number => round(x * factor);
   return {
     dist: {
-      mean: exact ? round(espn) : s(sim.mean),
+      mean: anchored ? round(espn) : round(simMean),
       p10: s(sim.p10),
       p25: s(sim.p25),
       p50: s(sim.p50),
@@ -220,5 +236,6 @@ export function playerSimDist(input: {
     },
     sim_mean: round(simMean),
     factor: round(factor, 6),
+    anchor_failed: false,
   };
 }

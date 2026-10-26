@@ -3,6 +3,7 @@
 // is ESPN's (weight_espn = 1.0, ADV OBJ-02) and the simulation only shapes the distribution, scored
 // under the league's S — so a full-PPR league widens a receiver's spread in points; the zero mass
 // follows P(active) with E1's floor; seeded and deterministic.
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   hasOpportunityInputs,
@@ -66,9 +67,9 @@ describe("playerSimDist", () => {
     const d = r?.dist;
     expect(d?.basis).toBe("player_sim");
     expect(d?.mean).toBe(11.2);
-    expect(
-      d !== undefined && d.p10 <= d.p25 && d.p25 <= d.p50 && d.p50 <= d.p75 && d.p75 <= d.p90,
-    ).toBe(true);
+    expect(d != null && d.p10 <= d.p25 && d.p25 <= d.p50 && d.p50 <= d.p75 && d.p75 <= d.p90).toBe(
+      true,
+    );
     expect(r?.sim_mean).toBeGreaterThan(0);
     expect(r?.factor).toBeCloseTo(11.2 / (r?.sim_mean ?? 1), 3);
   });
@@ -79,25 +80,65 @@ describe("playerSimDist", () => {
   it("format-aware: full PPR widens a receiver's spread at the same mean", () => {
     const half = run();
     const full = run({ settings: ppr() });
-    const spread = (x: typeof half) => (x === null ? 0 : x.dist.p90 - x.dist.p10);
+    const spread = (x: typeof half) => (x?.dist == null ? 0 : x.dist.p90 - x.dist.p10);
     expect(full?.sim_mean).toBeGreaterThan(half?.sim_mean ?? 0);
-    expect(full?.dist.mean).toBe(11.2);
+    expect(full?.dist?.mean).toBe(11.2);
     expect(spread(full)).toBeGreaterThan(0);
   });
   it("the zero mass follows P(active), floored as E1's", () => {
     const q = run({ p_active: 0.71, n_sims: 5000 });
-    expect(q?.dist.p_zero).toBeGreaterThan(0.2);
-    expect(q?.dist.p_zero).toBeLessThan(0.4);
+    expect(q?.dist?.p_zero).toBeGreaterThan(0.2);
+    expect(q?.dist?.p_zero).toBeLessThan(0.4);
     const out = run({ p_active: 0, n_sims: 5000 });
-    expect(out?.dist.p_zero).toBeCloseTo(1 - P_ACTIVE_SHAPE_FLOOR, 1);
+    expect(out?.dist?.p_zero).toBeCloseTo(1 - P_ACTIVE_SHAPE_FLOOR, 1);
   });
-  it("no ESPN mean: the simulated mean stands (factor 1); an implausible anchor is clamped", () => {
+  it("no ESPN mean: the simulated mean stands (factor 1)", () => {
     const r = run({ espn_mean: null });
     expect(r?.factor).toBe(1);
-    expect(r?.dist.mean).toBe(r?.sim_mean);
-    const wild = run({ espn_mean: 500 });
-    expect(wild?.factor).toBe(3);
-    expect(wild?.dist.mean).toBeCloseTo((wild?.sim_mean ?? 0) * 3, 2);
+    expect(r?.anchor_failed).toBe(false);
+    expect(r?.dist?.mean).toBe(r?.sim_mean);
+  });
+  // Stage C finding projection-player-sim-clamp-mean: the rescale used to be clamped to [1/3, 3] and
+  // the clamped mean (the simulation × 3) served as if it were ESPN's. An anchor the simulation cannot
+  // carry now serves no Dist at all: the caller keeps the positional CV around ESPN's mean (v2's rule).
+  it("an anchor outside [1/3, 3] of the simulated mean, or not positive, serves no Dist (anchor_failed)", () => {
+    const sim = run({ espn_mean: null })?.sim_mean ?? 0;
+    expect(sim).toBeGreaterThan(0);
+    for (const espn of [500, sim * 3.01, sim / 3.01, 0, -1.5]) {
+      const r = run({ espn_mean: espn });
+      expect(r?.anchor_failed, String(espn)).toBe(true);
+      expect(r?.dist, String(espn)).toBeNull();
+      expect(r?.factor).toBe(1);
+      expect(r?.sim_mean).toBe(sim);
+    }
+    // at the band's edges the rescale still holds, and the mean is ESPN's exactly
+    for (const espn of [sim * 2.99, sim / 2.99]) {
+      const r = run({ espn_mean: espn });
+      expect(r?.anchor_failed).toBe(false);
+      expect(r?.dist?.mean).toBe(Math.round(espn * 10_000) / 10_000);
+      expect(r?.dist?.basis).toBe("player_sim");
+    }
+  });
+  it("property: a Dist is served only at ESPN's mean exactly", () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: -5, max: 80, noNaN: true }),
+        fc.double({ min: 0.5, max: 14, noNaN: true }),
+        fc.double({ min: 0, max: 18, noNaN: true }),
+        (espn, targets, carries) => {
+          const r = run({
+            espn_mean: espn,
+            n_sims: 300,
+            opportunity: { ...WR, targets_pg: targets, carries_pg: carries },
+          });
+          if (r === null) return false;
+          return r.dist === null
+            ? r.anchor_failed
+            : !r.anchor_failed && r.dist.mean === Math.round(espn * 10_000) / 10_000;
+        },
+      ),
+      { numRuns: 80 },
+    );
   });
   it("defaults fill missing efficiency inputs; a QB or a thin history gets null", () => {
     const sparse = run({
@@ -113,7 +154,7 @@ describe("playerSimDist", () => {
         carries_pg: 14,
       },
     });
-    expect(sparse?.dist.basis).toBe("player_sim");
+    expect(sparse?.dist?.basis).toBe("player_sim");
     expect(run({ opportunity: { ...WR, position: "QB", position_id: 1 } })).toBeNull();
     expect(run({ opportunity: { ...WR, games: 1 } })).toBeNull();
   });

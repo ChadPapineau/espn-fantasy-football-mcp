@@ -155,9 +155,16 @@ property: the recommendation is identical with any texts, any sources and any pa
 around a gamma game-script multiplier), receptions, yards and touchdowns, scores every line through
 the plan 08 engine under the league's S, and rescales to ESPN's mean (weight_espn = 1.0): the mean is
 ESPN's exactly, the shape is the opportunity model's. Only RB/WR/TE with ≥ 3 games of volume qualify;
-a QB keeps `position_cv`. [`player-sim.test.ts`](../../tests/domain/analytics/player-sim.test.ts):
+a QB keeps `position_cv`. The rescale is applied only inside [1/3, 3]: outside it the simulation
+cannot carry ESPN's mean, so the week keeps `position_cv` around that mean, as v2 does, and E1 says so
+(Stage C round 3; before, the rescale was clamped and the simulation × 3 was served while
+`weight_espn` read 1). [`player-sim.test.ts`](../../tests/domain/analytics/player-sim.test.ts):
 basis, the anchored mean, determinism per seed, the P(active) zero mass with E1's floor, the rescale
-clamp, and that a full-PPR league raises a receiver's simulated mean at the same anchor.
+band (a property: a Dist is served only at ESPN's mean), and that a full-PPR league raises a
+receiver's simulated mean at the same anchor;
+[`projection-player-sim.test.ts`](../../tests/domain/analytics/projection-player-sim.test.ts): the
+promoted backup and the starter losing his role, and the property that E1's first-week mean is ESPN's
+whatever the trailing role.
 
 ## Decisions taken where the plan is silent (simplest safe option)
 
