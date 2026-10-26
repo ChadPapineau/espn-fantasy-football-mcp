@@ -236,3 +236,85 @@ describe("usageWeekOf — a D1 row", () => {
     expect(SIGNALS.holdGames).toBe(2);
   });
 });
+
+// Stage C finding analytics-xfp-gap-scoring-basis (round 3): E5 set ffopportunity's full-PPR xFP
+// against the league's half-PPR points, so a pass catcher who played exactly to expectation read as
+// buy-low by half a point per catch — every week, on most pass-catching candidates. E5 now reads the
+// row's own gap, D1's one comparison on one basis (xfp.ts), and never differences xfp_ep itself.
+describe("E5's xFP gap is the D1 row's own (Stage C analytics-xfp-gap-scoring-basis)", () => {
+  const game = (week: number, over: Partial<UsageGameRow>): UsageGameRow => ({
+    week,
+    opponent: null,
+    snaps: null,
+    snap_pct: 0.8,
+    routes_proxy: null,
+    targets: 6,
+    target_share: 0.2,
+    air_yards: null,
+    air_yards_share: null,
+    adot: null,
+    wopr: null,
+    racr: null,
+    carries: 0,
+    carry_share: null,
+    rz_targets: null,
+    rz_carries: null,
+    gl_carries: null,
+    xfp_ep: null,
+    points_league: null,
+    xfp_gap: null,
+    ...over,
+  });
+
+  it("the finding's WR: 4 catches, 40 yards and a TD a game, exactly his expectation — no signal", () => {
+    // ffopportunity's full-PPR 14 against the half-PPR league's 12; the row's own gap is 0
+    const games = [1, 2, 3, 4, 5].map((w) =>
+      usageWeekOf(game(w, { xfp_ep: 14, points_league: 12, xfp_gap: 0 }), null),
+    );
+    expect(detectSignals({ position: "WR", games }).map((s) => s.kind)).not.toContain("xfp_gap");
+    expect(games.every((g) => g.xfp === g.points)).toBe(true);
+  });
+
+  it("a real under-producer fires on the row's gap; the evidence is the window's expectation on that basis", () => {
+    const games = [1, 2, 3, 4, 5].map((w) =>
+      usageWeekOf(game(w, { xfp_ep: 99, points_league: 7, xfp_gap: 3.5 }), null),
+    );
+    const s = detectSignals({ position: "WR", games }).find((x) => x.kind === "xfp_gap");
+    expect(s).toEqual({ kind: "xfp_gap", value: 3.5, evidence: 31.5 });
+  });
+
+  it("no row gap (no expected components, no S): no xFP for the detector", () => {
+    const w = usageWeekOf(game(1, { xfp_ep: 14, points_league: 12, xfp_gap: null }), null);
+    expect(w.xfp).toBeNull();
+    expect(w.points).toBe(12);
+    expect(usageWeekOf(game(1, { xfp_gap: 2 }), null).xfp).toBeNull();
+  });
+
+  it("property: the signal's value is the window's mean row gap, whatever xfp_ep reads", () => {
+    const cell = fc.double({ min: -40, max: 60, noNaN: true });
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({ xfp: cell, pts: cell, gap: fc.double({ min: -15, max: 15, noNaN: true }) }),
+          {
+            minLength: 3,
+            maxLength: 8,
+          },
+        ),
+        (rows) => {
+          const games = rows.map((r, i) =>
+            usageWeekOf(game(i + 1, { xfp_ep: r.xfp, points_league: r.pts, xfp_gap: r.gap }), null),
+          );
+          const win = rows.slice(-SIGNALS.xfpWindow);
+          const mean = win.reduce((a, r) => a + r.gap, 0) / win.length;
+          const sig = detectSignals({ position: "WR", games }).find((x) => x.kind === "xfp_gap");
+          if (mean >= SIGNALS.xfpGapPerGame + 1e-3)
+            return sig !== undefined && Math.abs(sig.value - mean) < 1e-3;
+          if (mean < SIGNALS.xfpGapPerGame - 1e-3) return sig === undefined;
+          return true;
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+});

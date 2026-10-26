@@ -15,6 +15,11 @@ describe("phase2.ts", () => {
       "playerSimDist",
       "hasOpportunityInputs",
       "detectSignals",
+      "usageWeekOf",
+      "epExpectedOf",
+      "expectedLineOf",
+      "leagueXfp",
+      "xfpOf",
       "fitDemand",
       "fittedQ",
       "claimRuns",
@@ -28,6 +33,7 @@ describe("phase2.ts", () => {
     ] as const)
       expect(typeof P2[name]).toBe("function");
     expect(P2.SIGNALS.snapJump).toBe(0.15);
+    expect(Object.isFrozen(P2.EP_EXPECTED_COLUMNS)).toBe(true);
     expect(Object.isFrozen(P2.TRADE)).toBe(true);
     expect(Object.isFrozen(P2.CASCADE)).toBe(true);
   });

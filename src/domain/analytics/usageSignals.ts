@@ -18,7 +18,10 @@ export interface UsageWeek {
   readonly target_share: number | null;
   /** The player's share of the team's red-zone opportunities (targets + carries inside the 20). */
   readonly rz_share: number | null;
-  /** Expected fantasy points from usage under the league's S (ffopportunity re-scored). */
+  /**
+   * Expected fantasy points from usage on the SAME basis as `points` (xfp.ts: ffopportunity's
+   * expected line scored under the league's S) — the detector's gap is `xfp − points`.
+   */
   readonly xfp: number | null;
   /** Actual fantasy points under the league's S. */
   readonly points: number | null;
@@ -42,24 +45,33 @@ export interface SignalInput {
   readonly teammate_absent_weeks?: readonly Week[];
 }
 
-/** A UsageWeek from a D1 per-game row; `team_rz` = the team's red-zone opportunities that game. */
+const finite = (x: number | null | undefined): x is number =>
+  typeof x === "number" && Number.isFinite(x);
+
+/**
+ * A UsageWeek from a D1 per-game row; `team_rz` = the team's red-zone opportunities that game. The
+ * expectation is the row's own gap on its points — `points_league + xfp_gap`, the one comparison D1
+ * makes (xfp.ts `xfpOf`) — never `xfp_ep` set against the league's points, which compared two
+ * scoring bases (Stage C finding analytics-xfp-gap-scoring-basis: a half-PPR pass catcher who played
+ * to expectation read as buy-low by half a point per catch). D1's `trailing.xfp_gap_sum` and E5's
+ * `xfp_gap` signal read the same number.
+ */
 export function usageWeekOf(row: UsageGameRow, teamRz: number | null): UsageWeek {
   const rz =
     row.rz_targets === null && row.rz_carries === null
       ? null
       : (row.rz_targets ?? 0) + (row.rz_carries ?? 0);
+  const points = finite(row.points_league) ? row.points_league : null;
+  const gap = finite(row.xfp_gap) ? row.xfp_gap : null;
   return {
     week: row.week,
     snap_pct: row.snap_pct,
     target_share: row.target_share,
     rz_share: rz === null || teamRz === null || !(teamRz > 0) ? null : Math.min(1, rz / teamRz),
-    xfp: row.xfp_ep,
-    points: row.points_league,
+    xfp: points === null || gap === null ? null : round(points + gap),
+    points,
   };
 }
-
-const finite = (x: number | null | undefined): x is number =>
-  typeof x === "number" && Number.isFinite(x);
 
 /** Whether a signal is well-formed for plan 10 B3: a finite value and a finite NUMBER as evidence. */
 export function hasNumericEvidence(s: WaiverSignal): boolean {

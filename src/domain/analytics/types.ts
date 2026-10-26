@@ -1112,8 +1112,21 @@ export interface UsageGameRow {
    * in Phase 2 — plan 10 §3.2).
    */
   readonly rz_team?: number | null;
+  /**
+   * Expected fantasy points from usage under the LEAGUE's scoring: ffopportunity's expected stat
+   * line scored by the engine under S (xfp.ts `leagueXfp`; plan 08 §5; sib research 05 §4.1 item 4)
+   * — never its own `total_fantasy_points_exp` (full PPR, 4-pt pass TD); null without the row's
+   * expected components or without S.
+   */
   readonly xfp_ep: number | null;
+  /** The game's points under S (the engine on the nflverse line). */
   readonly points_league: number | null;
+  /**
+   * `xfp_ep − points_league`, one scoring basis (xfp.ts `xfpOf`): a player who plays exactly to
+   * expectation shows no gap. D1's `trailing.xfp_gap_sum` and E5's `xfp_gap` signal both read it
+   * (usageSignals.ts `usageWeekOf`), never a difference of their own (Stage C finding
+   * analytics-xfp-gap-scoring-basis).
+   */
   readonly xfp_gap: number | null;
 }
 
@@ -1380,6 +1393,41 @@ export interface EpWeeklyRow {
   readonly x_rec_td?: number | null;
   readonly x_rush_td?: number | null;
   readonly x_pass_td?: number | null;
+  /**
+   * ffopportunity's expected stat line that week, by canonical stat (xfp.ts `epExpectedOf` reads it
+   * from the row's `*_exp` columns and its attempt counts): what a league-scored xFP is scored from
+   * (plan 08 §5 — `total_fantasy_points_exp` is ffopportunity's own full-PPR, 4-pt-pass-TD scoring).
+   * Optional and null when any component is missing: no league-scored xFP, never a partial one.
+   */
+  readonly expected?: EpExpected | null;
+}
+
+/**
+ * ffopportunity's expected components of one player-week, keyed by the canonical stat each is
+ * (plan 08 §3.1 names). The attempt counts (`pass_att`, `rush_att`, `targets`) are the opportunity
+ * itself — ffopportunity's expectation is conditional on them, so they are the game's actual counts;
+ * the rest are the model's expectations (`*_exp`). Fumbles, sacks taken, returns and TD lengths
+ * have no expectation (xfp.ts).
+ */
+export interface EpExpected {
+  readonly pass_att: number;
+  readonly pass_cmp: number;
+  readonly pass_yd: number;
+  readonly pass_td: number;
+  readonly pass_int: number;
+  readonly pass_2pt: number;
+  readonly pass_1d: number;
+  readonly rush_att: number;
+  readonly rush_yd: number;
+  readonly rush_td: number;
+  readonly rush_2pt: number;
+  readonly rush_1d: number;
+  readonly targets: number;
+  readonly rec: number;
+  readonly rec_yd: number;
+  readonly rec_td: number;
+  readonly rec_2pt: number;
+  readonly rec_1d: number;
 }
 
 /** Game-venue weather (Open-Meteo / NWS). */
