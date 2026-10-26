@@ -261,6 +261,46 @@ const linesSchema = z.strictObject({
   as_of: iso,
 });
 
+/** What a well-formed roof or surface value outside the known vocabulary is shown as. */
+export const VENUE_OTHER = "other";
+/**
+ * nflverse `schedules.roof`'s known values (projection-v2.ts reads the same four), plus VENUE_OTHER.
+ * Like the depth-chart labels (src/sources/nflverse/depth-charts.ts DEPTH_LABELS), roof and surface
+ * reach the model BARE — neither wrapped nor path-listed — so they are held to a closed vocabulary
+ * here, at the last boundary: an open snake_case grammar let any short third-party text through
+ * ("ignore_all_rules"), unflagged (Stage C finding datasets-schedule-roof-surface-bare).
+ */
+export const ROOF_VOCABULARY = ["outdoors", "dome", "closed", "open", VENUE_OTHER] as const;
+/** nflverse `schedules.surface`'s known values (every recorded season), plus VENUE_OTHER. */
+export const SURFACE_VOCABULARY = [
+  "grass",
+  "fieldturf",
+  "astroturf",
+  "sportturf",
+  "matrixturf",
+  "a_turf",
+  "astroplay",
+  "dessograss",
+  VENUE_OTHER,
+] as const;
+export type RoofValue = (typeof ROOF_VOCABULARY)[number];
+export type SurfaceValue = (typeof SURFACE_VOCABULARY)[number];
+
+/**
+ * A roof or surface value as D3 shows it: trimmed and lower-cased, a known value as itself, any
+ * other non-empty value as VENUE_OTHER (the game keeps its row; the text never leaves), empty or
+ * absent as null.
+ */
+export function venueValue<T extends string>(
+  vocabulary: readonly T[],
+  v: string | null | undefined,
+): T | null {
+  if (v === null || v === undefined) return null;
+  const t = v.trim().toLowerCase();
+  if (t === "") return null;
+  return (vocabulary as readonly string[]).includes(t) ? (t as T) : (VENUE_OTHER as T);
+}
+
 /** D3 data (plan 07 D3; ScheduleData). */
 export const scheduleSchema = z.strictObject({
   games: z
@@ -275,14 +315,8 @@ export const scheduleSchema = z.strictObject({
         state: z.enum(["pre", "in", "final", "tbd"]),
         away: proTeam,
         home: proTeam,
-        roof: z
-          .string()
-          .regex(/^[a-z_]{1,16}$/)
-          .nullable(),
-        surface: z
-          .string()
-          .regex(/^[a-z_]{1,24}$/)
-          .nullable(),
+        roof: z.enum(ROOF_VOCABULARY).nullable(),
+        surface: z.enum(SURFACE_VOCABULARY).nullable(),
         divisional: z.boolean().nullable(),
         rest_days: z.strictObject({
           away: z.number().int().nullable(),
@@ -316,9 +350,6 @@ export const scheduleSchema = z.strictObject({
     )
     .max(60),
 });
-
-const ROOF_RE = /^[a-z_]{1,16}$/;
-const SURFACE_RE = /^[a-z_]{1,24}$/;
 
 /** D3 `espn_get_schedule`. */
 export const getSchedule = defineTool({
@@ -397,11 +428,8 @@ export const getSchedule = defineTool({
         state: state === "bye" ? "pre" : state,
         away: abbrev(g.away_pro_team_id),
         home: abbrev(g.home_pro_team_id),
-        roof: n?.roof !== undefined && n.roof !== null && ROOF_RE.test(n.roof) ? n.roof : null,
-        surface:
-          n?.surface !== undefined && n.surface !== null && SURFACE_RE.test(n.surface)
-            ? n.surface
-            : null,
+        roof: venueValue(ROOF_VOCABULARY, n?.roof),
+        surface: venueValue(SURFACE_VOCABULARY, n?.surface),
         divisional: n?.divisional ?? null,
         rest_days: n?.rest_days ?? { away: null, home: null },
         lines:
@@ -443,6 +471,11 @@ export const getSchedule = defineTool({
     const data: ScheduleData = { games: rows, byes, lock_windows };
     const tbd = games.filter((g) => g.start_time_tbd).length;
     if (tbd > 0) warnings.push(`${String(tbd)} game(s) have a TBD kickoff: no time is shown`);
+    const unknownVenue = rows.filter((r) => r.roof === VENUE_OTHER || r.surface === VENUE_OTHER);
+    if (unknownVenue.length > 0)
+      warnings.push(
+        `${String(unknownVenue.length)} game(s) carry a roof or surface value outside the known vocabulary: shown as '${VENUE_OTHER}'`,
+      );
     return { data, inputs, warnings, listKey: "games" };
   },
 });
