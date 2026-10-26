@@ -137,6 +137,8 @@ export async function projectMany(
     readonly seed: number;
     readonly allowStale: boolean;
     readonly n_sims?: number;
+    /** A `ros` horizon's last week (project's `last_week`; default the final scoring period). */
+    readonly last_week?: Week;
   },
   inputs: InputStamp[],
   warnings: string[],
@@ -166,6 +168,7 @@ export async function projectMany(
         // v2-opportunity in bulk (full only): its smallest sample count keeps a many-roster search
         // inside the CPU and stall budgets (plan 10 A16a); E1 called directly uses 2 000
         v2_n_sims: V2_BULK_SIMS,
+        ...(o.last_week === undefined ? {} : { last_week: o.last_week }),
       },
       // each chunk re-reads the same dataset stamps: keep one copy of each in `inputs`
       i === 0 ? inputs : [],

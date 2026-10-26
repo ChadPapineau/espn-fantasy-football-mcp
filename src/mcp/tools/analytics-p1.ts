@@ -443,6 +443,8 @@ export const analyzeMatchupTool = defineTool({
             schedule,
             horizon: fitWeeks.some((x) => x > b.w) ? "ros" : "week",
             week: b.w,
+            // the fitted weeks only: a regular-horizon run samples no playoff week
+            last_week: Math.max(...fitWeeks),
             seed,
             allowStale,
           },

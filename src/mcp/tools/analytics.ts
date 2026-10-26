@@ -303,6 +303,12 @@ export async function project(
      * bulk callers (projectMany) pass V2_BULK_SIMS so a many-roster season run stays in budget.
      */
     readonly v2_n_sims?: number;
+    /**
+     * A `ros` horizon's last week (default the league's final scoring period): a caller that needs
+     * fewer weeks — E3 `season` under the regular horizon fits the regular season only — samples
+     * no week it would discard (each week is ~1 000 samples per player).
+     */
+    readonly last_week?: Week;
   },
   inputs: InputStamp[],
   warnings: string[],
@@ -315,7 +321,7 @@ export async function project(
     cpuDeadlineOf(ctx) === 0
       ? new Map<number, TrailingLine[]>()
       : trailingFor(ctx, subjects, season, o.week, inputs, warnings, o.allowStale);
-  const lastWeek = Math.max(o.week, o.league.clock.final_scoring_period);
+  const lastWeek = Math.max(o.week, o.last_week ?? o.league.clock.final_scoring_period);
   const weeks: Week[] =
     o.horizon === "week"
       ? [o.week]
