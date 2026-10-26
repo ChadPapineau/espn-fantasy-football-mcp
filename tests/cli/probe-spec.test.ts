@@ -154,8 +154,7 @@ const SHAPE_CASES: readonly {
     mutate: (b) => {
       at(b, "settings", "rosterSettings", "lineupSlotCounts")["77"] = 1;
     },
-    alarm:
-      "ESPN drift: mSettings: unknown value 77 at $.settings.rosterSettings.lineupSlotCounts{#}",
+    alarm: "ESPN drift: mSettings: unknown key 77 in $.settings.rosterSettings.lineupSlotCounts",
   },
   {
     name: "a team loses waiverRank",
@@ -428,6 +427,47 @@ describe("hostProbe and shapeProbe judge the probe specs (the finding's repro, c
         "mSettings: removed $.settings.scoringSettings.scoringItems",
       );
       expect(hostRow(rename, false).status).toBe("drift");
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe("every red finding reaches drift_state (its path is one drift_state records)", () => {
+  it("each mutation of the finding, recorded, leaves the row red naming the finding's path", async () => {
+    let body: () => unknown = SHAPE;
+    const { deps, store, io } = await depsOf(() => body());
+    try {
+      for (const [cases, probeOf] of [
+        [HOST_CASES, () => hostProbe(deps, 2026)],
+        [SHAPE_CASES, () => shapeProbe(deps, 2026, "1", true)],
+      ] as const) {
+        for (const c of cases) {
+          store.repos.driftState.put({
+            status: "green",
+            since: null,
+            last_probe_at: null,
+            manifest_hash: null,
+            manifest_version: null,
+            host: deps.host,
+            host_moved_at: null,
+            diff_json: "[]",
+            additive_json: "[]",
+            updated_at: io.clock.nowIso(),
+          });
+          body = () => {
+            const b = cases === HOST_CASES ? HOST() : SHAPE();
+            c.mutate(b);
+            return b;
+          };
+          const check = await probeOf();
+          const red = check.findings?.find((f) => f.severity === "red");
+          expect(red, c.name).toBeDefined();
+          const recorded = recordProbe(store, io.clock, deps.host, [check]);
+          expect(recorded.status, c.name).toBe("red");
+          expect(store.repos.driftState.get()?.diff_json, c.name).toContain(red?.path ?? "?");
+        }
+      }
     } finally {
       store.close();
     }

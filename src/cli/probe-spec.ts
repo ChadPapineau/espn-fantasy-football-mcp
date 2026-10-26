@@ -157,6 +157,8 @@ export interface SpecFinding {
   readonly count: number;
   /** `enum`: the value as an ESPN token (or null when it is not one); `short`: the item count. */
   readonly value: string | null;
+  /** `enum` over an object's KEYS (a `{#}` pattern, recorded as `{}`: drift_state has no `#`). */
+  readonly key?: boolean;
 }
 
 /** What one answer showed: its findings and, per view, the spec paths it verified. */
@@ -323,6 +325,10 @@ export function judgeSpec(spec: ProbeSpec, views: readonly EspnView[], body: unk
     const set = new Set(allowed.map((a) => JSON.stringify(a)));
     const nodes = sel(pattern);
     if (nodes === null || nodes.length === 0) continue;
+    // a keys pattern (`…{#}`) is recorded as its map (`…{}`): src/drift's path grammar and the
+    // drift_state lists have no `#`, and a path they refuse would never turn the row red
+    const keys = pattern.endsWith("{#}");
+    const path = keys ? `${pattern.slice(0, -3)}{}` : pattern;
     let outside = false;
     for (const node of nodes) {
       // only a JSON scalar is compared (a deep value could not even be stringified): anything else
@@ -334,12 +340,13 @@ export function judgeSpec(spec: ProbeSpec, views: readonly EspnView[], body: unk
       add(`enum|${pattern}|${text ?? `<${jsonTypeOf(node.value)}>`}`, {
         severity: "red",
         kind: "enum",
-        path: pattern,
+        path,
         first: formatPath(node.segs),
         value: scalar ? enumToken(node.value) : null,
+        ...(keys ? { key: true } : {}),
       });
     }
-    if (!outside) verify(pattern);
+    if (!outside) verify(path);
   }
 
   const findings = [...agg.values()].sort((a, b) =>
@@ -373,7 +380,7 @@ export function specSignals(findings: readonly SpecFinding[]): DriftSignal[] {
 }
 
 /** What an alarm or a probe line says a red finding did to its path (fixed vocabulary). */
-export function findingPhrase(f: Pick<SpecFinding, "kind" | "path" | "value">): string {
+export function findingPhrase(f: Pick<SpecFinding, "kind" | "path" | "value" | "key">): string {
   switch (f.kind) {
     case "removed":
       return `removed ${f.path}`;
@@ -383,7 +390,9 @@ export function findingPhrase(f: Pick<SpecFinding, "kind" | "path" | "value">): 
     case "short":
       return `shortened ${f.path}${f.value === null ? "" : ` to ${f.value} item(s)`}`;
     case "enum":
-      return `unknown value${f.value === null ? "" : ` ${f.value}`} at ${f.path}`;
+      return f.key === true
+        ? `unknown key${f.value === null ? "" : ` ${f.value}`} in ${f.path.slice(0, -2)}`
+        : `unknown value${f.value === null ? "" : ` ${f.value}`} at ${f.path}`;
     case "oversize":
       return `oversized ${f.path}`;
     case "added":
