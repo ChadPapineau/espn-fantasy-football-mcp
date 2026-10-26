@@ -1,8 +1,9 @@
 # docs/
 
-The research, the plan, the record of how the plan was attacked and defended, and the orchestration
-state of the agent program that produced them. **Read [`HANDOFF.md`](HANDOFF.md) first** in any fresh
-session; then [`plan/00-index.md`](plan/00-index.md) for the plan in reading order. The product these documents
+The research, the plan, the record of how the plan was attacked and defended, the build's evidence,
+and the orchestration state of the agent programs that produced them.
+**Read [`HANDOFF.md`](HANDOFF.md) first** in any fresh session; then
+[`plan/00-index.md`](plan/00-index.md) for the plan in reading order. The product these documents
 describe is **built and in QA** (Stage C): the read-only server, the `eff` CLI and the Skills exist;
 the write module is not built. The research and the plan are kept as written, with the build-time
 rulings in [`plan/changelog.md`](plan/changelog.md).
@@ -15,10 +16,11 @@ rulings in [`plan/changelog.md`](plan/changelog.md).
 
 | Path | What it is |
 |---|---|
-| [`HANDOFF.md`](HANDOFF.md) | **The single handoff document.** The ▶ NEXT STEP, the findings that shape the product (the unofficial cookie-authenticated API and its silent drift, the Disney Terms of Use reading, keychain-first credentials, the prior-art audit, the write surface, data sources, the format strategy, the Skills design, the product plan), program status, decisions made with dates, and the accumulating list of things the owner must know or decide |
+| [`HANDOFF.md`](HANDOFF.md) | **The single handoff document.** The ▶ NEXT STEP, the build facts of each stage, the findings that shape the product (the unofficial cookie-authenticated API and its silent drift, the Disney Terms of Use reading, keychain-first credentials, the prior-art audit, the write surface, data sources, the format strategy, the Skills design, the product plan), program status, decisions made with dates, and the accumulating list of things the owner must know or decide |
 | [`research/`](#research-00-to-06) | Seven research documents (waves 1–3), each verified by the orchestrator against load-bearing claims at source |
-| [`plan/`](#plan-01-to-10-plus-the-review-record) | The ten-part refined plan, the adversarial log and the changelog of what the review changed |
-| [`scratch/`](#scratch) | Orchestration state — the agent roster, verbatim briefs, per-agent resume notes. Not product documentation |
+| [`plan/`](#plan-01-to-10-plus-the-review-record) | The ten-part refined plan, the adversarial log and the changelog of what the review and the build's rulings changed |
+| [`evals/`](evals/) | The build's evidence, written as each stage closed: the measurements and acceptance records of Phase 1a (`1a-*`), Phase 2 (`phase2-*`) and Phase 3 (`phase3-*`, with the acceptance summary), the model-driven question set (`model-driven-evals.md`) and Stage C's live and plugin-eval reports (`stage-c-*`) |
+| [`scratch/`](#scratch) | Orchestration state — the build program and its saved workflow scripts, and the research-and-plan program's roster, verbatim briefs and per-agent resume notes. Not product documentation |
 
 ## Research 00 to 06
 
@@ -45,20 +47,26 @@ are the **structural plan** (architecture, security, lifecycle, repository and C
   nothing pressed at close. The closing verdict also ranks the residual concerns.
 - [`plan/changelog.md`](plan/changelog.md) records, one row per objection, tension and nit, what changed
   in which plan file and what survived unchanged (§R1, §R2, §R3, plus §R4 — the consistency fixes after
-  the docs pass, their verification pass and the orchestrator's rulings on the parked items), ends with
-  a **Summary** for a reader who reads nothing else, and lists the dependency reviews that must be
-  re-run on every version bump.
+  the docs pass, their verification pass and the orchestrator's rulings on the parked items), then a
+  **Summary** for a reader who reads nothing else. The sections after it come from the build: the
+  records it wrote back (§B1 on) and the orchestrator's build-time rulings (§R5 on), each ruling
+  superseding the plan text it names. It ends with the dependency reviews that must be re-run on every
+  version bump.
 
-The plan is final and **awaiting the owner's approval**; approval, not the review, is what starts the build.
+The owner approved the plan on 2026-10-05 ([`HANDOFF.md`](HANDOFF.md), "Decisions made"), and the build
+follows it; the plan stays the record of the design.
 
 ## Scratch
 
-[`scratch/`](scratch/) is the agent program's working memory, committed so that work survives a
-usage-limit cutoff: [`roster.md`](scratch/roster.md) (every agent, its brief, owned paths, status and
-last pushed SHA), [`program.md`](scratch/program.md) (waves and file ownership),
-[`briefs/`](scratch/briefs/) (the verbatim brief each agent was given) and one `<agent>.md` note per
-agent with a `## RESUME HERE` section. It is orchestration state, not product documentation: nothing in
-it is a decision unless `HANDOFF.md` or a plan file records it.
+[`scratch/`](scratch/) is the agent programs' working memory, committed so that work survives a
+usage-limit cutoff. The build's is [`build-program.md`](scratch/build-program.md): the stages A to D,
+each run as a workflow, and a `## RESUME HERE` section; [`workflows/`](scratch/workflows/) holds the
+saved workflow scripts. The research-and-plan program that preceded the build left
+[`roster.md`](scratch/roster.md) (every agent, its brief, owned paths, status and last pushed SHA),
+[`program.md`](scratch/program.md) (waves and file ownership), [`briefs/`](scratch/briefs/) (the
+verbatim brief each agent was given) and one `<agent>.md` note per agent with a `## RESUME HERE`
+section. It is orchestration state, not product documentation: nothing in it is a decision unless
+`HANDOFF.md` or a plan file records it.
 
 ## Conventions used across these documents
 
@@ -82,5 +90,5 @@ The documents in this directory are covered by the repository's [MIT licence](..
 chosen because it gives maximal reuse for a small open-source tool, it is the norm for MCP servers, and
 it carries no NOTICE-file overhead; Apache-2.0's explicit patent grant was judged not material for a
 project of this kind, and MIT matches the sibling project. The licence covers this repository's own
-text and (future) code only — it grants nothing over ESPN's data or services, which remain subject to
-their owner's terms.
+text and code only — it grants nothing over ESPN's data or services, which remain subject to their
+owner's terms.

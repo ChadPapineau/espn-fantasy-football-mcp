@@ -50,9 +50,9 @@ Intentions of a solo, part-time maintainer — not guarantees:
 
 **In scope**
 
-- The server, the `eff` CLI, the Skills bundle and the scripts in this repository, once they exist.
-- The CI workflows, the secret-scanning rules and the dependency pins, once they exist — anything
-  that gates what reaches `main` or a release.
+- The server, the `eff` CLI, the Skills bundle and the scripts in this repository.
+- The CI workflows, the secret-scanning rules and the dependency pins — anything that gates what
+  reaches `main` or a release.
 - The security architecture **as documented** in
   [`docs/plan/02-security-architecture.md`](docs/plan/02-security-architecture.md): a claim that
   is false under the session condition it names is a valid report.

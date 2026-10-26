@@ -17,7 +17,22 @@
 // 3. the README states plan 10's effort scale, never the one plan 10 withdrew;
 // 4. the README's owner-decisions section dates every decision docs/HANDOFF.md records as made;
 // 5. the plan index calls the plan the record of the design and links the build state.
-import { readdirSync } from "node:fs";
+// Stage C round 3, finding docs-prebuild-markers-remain (area repo-root): the check's words missed
+// the pre-build phrasings, and it did not read docs/HANDOFF.md. SECURITY.md scoped the server, the
+// CLI, the Skills, the scripts, the CI workflows and the pins "once they exist"; docs/README.md said
+// the plan was "awaiting the owner's approval" ("approval … is what starts the build"), called the
+// code "(future)" and did not index docs/evals/; HANDOFF headed Program status "pre-build" with the
+// build "blocked on Chad's plan approval", called the working directory iCloud-managed, sent a fresh
+// context to the pre-build program's roster instead of the files CLAUDE.md names, and stated plan 10
+// §0's withdrawn November expectation as the 2026 expectation. What holds now, in addition:
+// 6. the denial words include those phrasings, and HANDOFF's sections that describe the state — the
+//    intro, the findings, Program status, Open items — are read like the documents above;
+// 7. HANDOFF places the working copy outside iCloud, as its "Decisions made" and CLAUDE.md do, and
+//    sends a fresh context to the files CLAUDE.md names;
+// 8. HANDOFF's Program status has a row for every stage of docs/scratch/build-program.md;
+// 9. no document states plan 10 §0's withdrawn expectation as the expectation;
+// 10. docs/README.md indexes every entry of docs/.
+import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { WRITE_TOOL_NAMES } from "../../src/domain/gate/types.js";
@@ -119,6 +134,13 @@ const DENIAL: readonly RegExp[] = [
   /\b(?:built|implemented) yet\b/i,
   /\bto be (?:written|built|implemented)\b/i,
   /\bnothing\b[^.;]*\b(?:is|are|has been|have been) (?:yet )?(?:built|implemented)\b/i,
+  // the pre-build phrasings (docs-prebuild-markers-remain): a part that exists only "once it
+  // exists", a build that awaits or is blocked on an approval, a "pre-build" state, "(future)" code
+  /\bonce (?:they|it|these) (?:exists?|(?:is|are) built)\b/i,
+  /\b(?:await(?:s|ing)?|pending|blocked (?:on|by))\b[^.;]*\bapproval\b/i,
+  /\bstarts the build\b/i,
+  /\bpre-?build\b/i,
+  /\(future\)/i,
 ];
 
 /**
@@ -159,7 +181,32 @@ const STATUS_DOCS = [
 const unitsOf = (doc: string): Unit[] =>
   statusUnits(doc === ".env.example" ? readDoc(doc).replace(/^#[ \t]?/gm, "") : readDoc(doc));
 
+/**
+ * HANDOFF's sections that describe the state and are not rewritten at every pause: the intro (its
+ * rules and its reading order) and these. ▶ NEXT STEP is rewritten at every pause and is about the
+ * work ahead by design; the Build facts, the decision lists, the accumulated notes and the Log are
+ * dated records.
+ */
+const HANDOFF_STATE_SECTIONS = [
+  "## The findings that shape the product",
+  "## Program status",
+  "## Open items",
+] as const;
+
+/** The status units of HANDOFF's intro and state sections, each with its line in the file. */
+function handoffStateUnits(md: string): Unit[] {
+  const firstSection = md.split("\n").findIndex((l) => l.startsWith("## "));
+  const ranges: (readonly [number, number])[] = [[1, firstSection + 1]];
+  for (const heading of HANDOFF_STATE_SECTIONS) {
+    const text = section(md, heading);
+    const start = md.slice(0, md.indexOf(text)).split("\n").length;
+    ranges.push([start, start + text.split("\n").length]);
+  }
+  return statusUnits(md).filter((u) => ranges.some(([from, to]) => u.line >= from && u.line < to));
+}
+
 const README = readDoc("README.md");
+const HANDOFF = readDoc("docs/HANDOFF.md");
 
 describe("the status check can fail (positive controls)", () => {
   it.each([
@@ -171,6 +218,14 @@ describe("the status check can fail (positive controls)", () => {
     "The plan is unbuilt.",
     "| Provider | Planned use | Licence / terms |",
     "SDK. **Nothing in this plan is built.** Every feature is planned.",
+    // the pre-build phrasings, each as SECURITY.md, docs/README.md or HANDOFF carried it
+    "- The server, the `eff` CLI, the Skills bundle and the scripts in this repository, once they exist.",
+    "- The CI workflows, the secret-scanning rules and the dependency pins, once they exist — anything\n  that gates what reaches `main` or a release.",
+    "The plan is final and **awaiting the owner's approval**; approval, not the review, is what starts the build.",
+    "Approval, not the review, is what starts the build.",
+    "| build | ⛔ blocked on Chad's plan approval | — |",
+    "## Program status (pre-build: research → plan → adversarial review → docs)",
+    "The licence covers this repository's own text and (future) code only.",
   ])("flags %j", (text) => {
     expect(unsupportedDenials(statusUnits(text)).length).toBeGreaterThan(0);
   });
@@ -183,6 +238,10 @@ describe("the status check can fail (positive controls)", () => {
     "This design was informed by research, not built from anyone else's code.",
     "| ESPN's fantasy **write** host | Nothing, unless the write module is built and enabled | — |",
     "No write tool exists: Phase W is not built; seams carry a `PHASE W SEAM — NOT IMPLEMENTED` marker.",
+    "The write module, once it exists, registers its tools only at a restart.",
+    "The owner approved the plan on 2026-10-05, and the build follows it.",
+    "| build — Stage D (the final gate, the merge to `main`, the owner's install) | next | — |",
+    "Players split into final, live and pending players.",
   ])("passes %j", (text) => {
     expect(unsupportedDenials(statusUnits(text))).toEqual([]);
   });
@@ -205,6 +264,81 @@ describe("the status check can fail (positive controls)", () => {
 describe("a status word names something that is not built", () => {
   it.each(STATUS_DOCS)("%s", (doc) => {
     expect(unsupportedDenials(unitsOf(doc))).toEqual([]);
+  });
+
+  it("docs/HANDOFF.md: the intro and the state sections", () => {
+    expect(unsupportedDenials(handoffStateUnits(HANDOFF))).toEqual([]);
+  });
+});
+
+/** The `docs/…` files a sentence sends the reader to after the one it names first (`lead` ends at "then"). */
+function readsNext(md: string, lead: RegExp): string[] {
+  const flat = md.replace(/\s+/g, " ");
+  const m = lead.exec(flat);
+  if (m === null) return [];
+  const rest = flat.slice(m.index + m[0].length);
+  const end = rest.search(/\.(?=\s|$)/);
+  return [...(end < 0 ? rest : rest.slice(0, end)).matchAll(/`(docs\/[^`\s]+\.md)`/g)].map(
+    (x) => x[1] ?? "",
+  );
+}
+
+/** The units that put the working copy in iCloud: they name iCloud, and not as where it is not. */
+const inICloud = (units: readonly Unit[]): string[] =>
+  units
+    .filter((u) => /\biCloud\b/.test(u.text) && !/\boutside iCloud\b/.test(u.text))
+    .map((u) => `${String(u.line)}: ${u.text}`);
+
+describe("HANDOFF's intro and state sections describe the build (docs-prebuild-markers-remain)", () => {
+  const units = handoffStateUnits(HANDOFF);
+
+  it("reads the title, the intro and every state section (the reader works)", () => {
+    expect(units[0]?.text).toMatch(/^# HANDOFF\b/);
+    expect(units.some((u) => /\breads this first\b/.test(u.text))).toBe(true);
+    for (const heading of HANDOFF_STATE_SECTIONS)
+      expect(units.some((u) => u.text.startsWith(heading))).toBe(true);
+  });
+
+  it("places the working copy outside iCloud, where Decisions made and CLAUDE.md put it", () => {
+    const moved = tableRows(section(HANDOFF, "## Decisions made"))
+      .slice(1)
+      .filter((cells) => /\boutside iCloud\b/.test(cells.join(" ")));
+    expect(moved.length).toBeGreaterThan(0);
+    expect(readDoc("CLAUDE.md")).toMatch(/\boutside iCloud\b/);
+    const old = "The working directory is iCloud-managed, so nothing secret ever lives in it.";
+    expect(inICloud(statusUnits(old))).toHaveLength(1);
+    expect(inICloud(units)).toEqual([]);
+  });
+
+  it("sends a fresh context to the files CLAUDE.md names, after itself", () => {
+    const claude = readsNext(
+      readDoc("CLAUDE.md"),
+      /\bRead `docs\/HANDOFF\.md` first\b[^.]*?\bthen\b/,
+    );
+    expect(claude.length).toBeGreaterThan(0);
+    for (const f of claude) expect(statSync(path.join(ROOT, f)).isFile(), f).toBe(true);
+    const lead = /\breads this first\b[^.]*?\bthen\b/;
+    const old = [
+      "A fresh context window reads this first, then",
+      "`docs/scratch/roster.md` (agent state) and `docs/scratch/program.md`",
+      "(waves and file ownership). Update it after every meaningful step.",
+    ].join("\n");
+    expect(readsNext(old, lead)).toEqual(["docs/scratch/roster.md", "docs/scratch/program.md"]);
+    expect(readsNext(HANDOFF, lead)).toEqual(claude);
+  });
+
+  it("Program status has a row for every stage of docs/scratch/build-program.md", () => {
+    const stages = tableRows(readDoc("docs/scratch/build-program.md"))
+      .map((cells) => cells[0] ?? "")
+      .filter((c) => /^[A-Z][0-9]*$/.test(c));
+    expect(stages).toEqual(expect.arrayContaining(["A", "C", "D"]));
+    const rows = tableRows(section(HANDOFF, "## Program status"))
+      .slice(1)
+      .map((cells) => cells[0] ?? "");
+    const missing = stages.filter(
+      (id) => !rows.some((c) => new RegExp(`\\bStage ${id}(?![0-9])`).test(c)),
+    );
+    expect(missing).toEqual([]);
   });
 });
 
@@ -349,5 +483,47 @@ describe("the plan index — where the README and CLAUDE.md send a reader first 
     expect(lead).toContain("](../../README.md#status)");
     expect(lead).toContain("](../HANDOFF.md)");
     expect(lead).toContain("](changelog.md)");
+  });
+});
+
+describe("no document states plan 10 §0's withdrawn expectation as the expectation", () => {
+  /** What plan 10 §0's rewritten paragraph says the original paragraph estimated. */
+  const withdrawn =
+    /\bThe original paragraph here estimated the first usable version in ([^;.]+?)[;.]/
+      .exec(PLAN10)?.[1]
+      ?.trim() ?? "";
+  /** The units that state that estimate without saying it was withdrawn. */
+  const stated = (units: readonly Unit[]): string[] =>
+    units
+      .filter(
+        (u) =>
+          u.text.includes(withdrawn) && !/\b(?:withdrawn|wrong|first estimate)\b/i.test(u.text),
+      )
+      .map((u) => `${String(u.line)}: ${u.text}`);
+
+  it("plan 10 §0 names the estimate it withdrew (the reader works)", () => {
+    expect(withdrawn).toBe("mid-to-late November");
+  });
+
+  it("the check can fail: HANDOFF's finding 10 stated it as the 2026 expectation", () => {
+    const old =
+      "Honest 2026 expectation: P0 tools mid-to-late November; `trade` misses the 2026-12-02 deadline.";
+    expect(stated(statusUnits(old))).toHaveLength(1);
+  });
+
+  it("the README and HANDOFF's state sections state it only as withdrawn", () => {
+    expect(stated(statusUnits(README))).toEqual([]);
+    expect(stated(handoffStateUnits(HANDOFF))).toEqual([]);
+  });
+});
+
+describe("docs/README.md indexes every entry of docs/", () => {
+  it("names each file and directory of docs/ in a table row (a directory with its slash)", () => {
+    const listed = tableRows(readDoc("docs/README.md")).map((cells) => cells[0] ?? "");
+    const entries = readdirSync(path.join(ROOT, "docs"))
+      .filter((e) => !e.startsWith(".") && e !== "README.md")
+      .map((e) => (statSync(path.join(ROOT, "docs", e)).isDirectory() ? `${e}/` : e));
+    expect(entries).toEqual(expect.arrayContaining(["HANDOFF.md", "plan/", "research/"]));
+    expect(entries.filter((e) => !listed.some((c) => c.includes(`\`${e}\``)))).toEqual([]);
   });
 });
