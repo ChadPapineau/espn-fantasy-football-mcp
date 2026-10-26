@@ -8,7 +8,13 @@
 import type { Clock } from "../domain/clock.js";
 import type { Exec } from "./io.js";
 import { SecretRegistry, redactString, truncate } from "./log.js";
-import { readJobState, stateNumber, updateJobState } from "./job-state.js";
+import {
+  readJobState,
+  recordNotification,
+  stateNumber,
+  updateJobState,
+  type NotificationRecord,
+} from "./job-state.js";
 
 /** One failure notification per job per this many ms (plan 06 §2). */
 export const NOTIFY_RATE_LIMIT_MS = 6 * 60 * 60 * 1000;
@@ -56,7 +62,13 @@ export interface Notifier {
   info(text: string): Promise<NotifyResult>;
 }
 
-/** Builds a notifier over osascript (darwin only) with the rate-limit stamps in job-state.json. */
+/**
+ * Builds a notifier over osascript (darwin only) with the rate-limit stamps in job-state.json. Every
+ * notification it sends — and every alarm or informational one this platform cannot show — is also
+ * written to the notification log with its text (plan 06 §2: "so `eff status` shows what was said";
+ * Stage C finding notify-text-not-recorded); a failure the rate limit holds back was not said and is
+ * not logged.
+ */
 export function createNotifier(opts: {
   readonly platform: NodeJS.Platform;
   readonly exec: Exec;
@@ -73,6 +85,16 @@ export function createNotifier(opts: {
       return "failed";
     }
   };
+  const say = async (kind: NotificationRecord["kind"], text: string): Promise<NotifyResult> => {
+    const r = await show(text);
+    recordNotification(opts.cacheDir, {
+      at: new Date(opts.clock.nowMs()).toISOString(),
+      kind,
+      text: safeNotificationText(text),
+      shown: r === "shown" ? "shown" : "not_shown",
+    });
+    return r;
+  };
   return {
     async failure(job, error) {
       if (opts.platform !== "darwin") return "unsupported";
@@ -80,11 +102,11 @@ export function createNotifier(opts: {
       const now = opts.clock.nowMs();
       const last = stateNumber(readJobState(opts.cacheDir), key);
       if (last !== null && now >= last && now - last < NOTIFY_RATE_LIMIT_MS) return "rate_limited";
-      const r = await show(failureText(job, error));
+      const r = await say("failure", failureText(job, error));
       if (r === "shown") updateJobState(opts.cacheDir, { [key]: now });
       return r;
     },
-    alarm: show,
-    info: show,
+    alarm: (text) => say("alarm", text),
+    info: (text) => say("info", text),
   };
 }

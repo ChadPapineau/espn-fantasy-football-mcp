@@ -25,6 +25,7 @@ import {
   type ProSchedule,
   type Roster,
   type RosterSlots,
+  type WaiverRules,
 } from "../domain/league/types.js";
 import type { EspnProjectionSnapshot } from "../domain/analytics/types.js";
 import { isLeagueWideMismatch, statLineFromEspn, verify } from "../domain/scoring/index.js";
@@ -324,6 +325,60 @@ export function poolWorkingRun(
   return null;
 }
 
+/** How waiverNextExecutionDate and waiverProcessHour (read as ET) relate (doctor #11 reads it). */
+export type AnchorAgreement = "agrees" | "disagrees" | "unknown";
+
+/**
+ * Whether the stated next execution falls in the ET process hour on a process day — the
+ * fallback's own instant (`nextWaiverRun` without the stated date, from the hour holding it). Unknown
+ * when the league states no process hour or days.
+ */
+export function anchorAgreement(waiver: WaiverRules, statedMs: number): AnchorAgreement {
+  const hourStart = Math.floor(statedMs / 3_600_000) * 3_600_000;
+  const et = nextWaiverRun({ ...waiver, next_execution: null }, hourStart - 1);
+  if (et.at === null) return "unknown";
+  return Date.parse(et.at) === hourStart ? "agrees" : "disagrees";
+}
+
+/**
+ * Re-reads the pool's waiver anchor: `waiverNextExecutionDate` (zone-free) when it is ahead, the ET
+ * process hour only when it is not (plan 06 §1.4, §2; ADV OBJ-16). The settings come from the
+ * provider's cache — and that body was usually fetched BEFORE the waiver run that just happened, so
+ * it states that run's own, now-passed instant: such a body is read fresh once, where ESPN states
+ * the next one. Before, every refresh after a working run switched to the ET guess while ESPN served
+ * the field (Stage C finding jobs-pool-anchor-cached-past-execution). Records the basis, whether the
+ * field was served, and whether it agrees with the ET hour (doctor #11 warns when they disagree, and
+ * says "absent" only when it is).
+ */
+async function refreshPoolAnchor(
+  run: JobRun,
+  config: Config,
+  now: number,
+  anchor: number | null,
+): Promise<void> {
+  const ref = run.stack.ref;
+  let rules = (await run.stack.provider.getLeagueRules(ref)).value;
+  const statedOf = (w: WaiverRules): number | null => {
+    const t = w.next_execution === null ? null : Date.parse(w.next_execution);
+    return t !== null && Number.isFinite(t) ? t : null;
+  };
+  const cached = statedOf(rules.waiver);
+  if (cached !== null && cached <= now)
+    rules = (await run.stack.provider.getLeagueRules(ref, { force_refresh: true })).value;
+  const stated = statedOf(rules.waiver);
+  const next = nextWaiverRun(rules.waiver, now);
+  const at = next.at === null ? null : Date.parse(next.at);
+  const agreement: AnchorAgreement =
+    next.basis === "status" && at !== null ? anchorAgreement(rules.waiver, at) : "unknown";
+  if (at !== null && Number.isFinite(at) && at !== anchor)
+    updateJobState(config.cacheDir, {
+      "pool.anchor": at,
+      "pool.anchor_basis": next.basis,
+      "pool.anchor_field": stated === null ? "absent" : "served",
+      "pool.anchor_et": agreement,
+    });
+}
+
 /** `eff snapshot pool`. */
 export async function snapshotPool(
   io: CliIo,
@@ -346,13 +401,8 @@ export async function snapshotPool(
       // anchor + 1 h) — is kept: replacing it there with the NEXT waiver run (nextWaiverRun returns
       // instants strictly after now) meant the wake at anchor + 1 h found a future anchor and the
       // waiver-relative working run never fired (plan 06 §1.4, ADV OBJ-16).
-      if (anchor === null || (now >= anchor && stateNumber(state, "pool.worked") === anchor)) {
-        const rules = (await run.stack.provider.getLeagueRules(ref)).value;
-        const next = nextWaiverRun(rules.waiver, now);
-        const at = next.at === null ? null : Date.parse(next.at);
-        if (at !== null && Number.isFinite(at) && at !== anchor)
-          updateJobState(config.cacheDir, { "pool.anchor": at, "pool.anchor_basis": next.basis });
-      }
+      if (anchor === null || (now >= anchor && stateNumber(state, "pool.worked") === anchor))
+        await refreshPoolAnchor(run, config, now, anchor);
       jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: not a working run — nothing to do`);
       return EXIT.ok;
@@ -520,6 +570,41 @@ export function transactionsDue(nowMs: number, state: JobState): boolean {
   );
 }
 
+/** At most this many scoring periods are read by one `eff transactions` run (one request each). */
+export const TRANSACTIONS_MAX_PERIODS = 4;
+
+/** The scoring periods one append reads, and the periods it found never read (a gap). */
+export interface TransactionPeriods {
+  readonly read: readonly number[];
+  readonly gap: { readonly from: number; readonly to: number } | null;
+}
+
+/**
+ * Which scoring periods an append reads (plan 06 §1.4 `transactions append`, "warn on gap
+ * detection"): from the period the previous append last read — read AGAIN, so the moves made in it
+ * after that read (Monday's adds for the Monday game, the drops before ESPN rolls the period) are
+ * stored — through the current one, at most TRANSACTIONS_MAX_PERIODS (the newest); older periods
+ * never read are the gap, said. A first run, another season, or a period behind the recorded one
+ * reads the current period alone. Before, only the current period was read, so each week's last
+ * moves were never stored and nothing noticed (Stage C finding jobs-transactions-period-rollover-gap).
+ */
+export function transactionPeriods(
+  state: JobState,
+  season: number,
+  firstPeriod: number,
+  current: number,
+): TransactionPeriods {
+  const lastSeason = stateNumber(state, "transactions.season");
+  const last = stateNumber(state, "transactions.period");
+  if (lastSeason !== season || last === null || last > current || !Number.isInteger(last))
+    return { read: [current], gap: null };
+  const from = Math.max(firstPeriod, last);
+  const start = Math.max(from, current - TRANSACTIONS_MAX_PERIODS + 1);
+  const read: number[] = [];
+  for (let p = start; p <= current; p++) read.push(p);
+  return { read, gap: start > from ? { from, to: start - 1 } : null };
+}
+
 /** `eff transactions` — append unseen transactions after the pool's working run (plan 06 §1.4). */
 export async function transactionsAppend(
   io: CliIo,
@@ -542,19 +627,39 @@ export async function transactionsAppend(
     const ref = run.stack.ref;
     const league = (await run.stack.provider.getLeague(ref)).value;
     const week = league.clock.current_scoring_period;
-    const page = await run.stack.provider.listTransactions(ref, {
-      types: TRANSACTION_TYPES,
+    const plan = transactionPeriods(
+      readJobState(config.cacheDir),
+      config.season,
+      Math.max(1, league.clock.first_scoring_period),
       week,
-      since: null,
-      count: 100,
-      team_id: null,
+    );
+    let added = 0;
+    for (const period of plan.read) {
+      const page = await run.stack.provider.listTransactions(ref, {
+        types: TRANSACTION_TYPES,
+        week: period,
+        since: null,
+        count: 100,
+        team_id: null,
+      });
+      added += run.store.repos.transactionsSeen.appendNew(page.value.items, io.clock.nowIso());
+    }
+    updateJobState(config.cacheDir, {
+      ...(poolAt === null ? {} : { "transactions.after": poolAt }),
+      "transactions.season": config.season,
+      "transactions.period": week,
     });
-    const added = run.store.repos.transactionsSeen.appendNew(page.value.items, io.clock.nowIso());
-    if (poolAt !== null) updateJobState(config.cacheDir, { "transactions.after": poolAt });
     await writeLine(
       io.stdout,
-      `${job}: ${String(added)} new transaction(s) appended (week ${String(week)})`,
+      `${job}: ${String(added)} new transaction(s) appended (week${plan.read.length > 1 ? "s" : ""} ${plan.read.join(", ")})`,
     );
+    if (plan.gap !== null) {
+      log.warn("transactions.gap", { from: plan.gap.from, to: plan.gap.to });
+      await writeLine(
+        io.stdout,
+        `${job}: warning: scoring period(s) ${String(plan.gap.from)}–${String(plan.gap.to)} were not read (the job did not run then): the moves made in them since the last run are missing from transactions_seen`,
+      );
+    }
     jobWorked(io, config, job);
     return EXIT.ok;
   } catch (e) {
@@ -634,10 +739,11 @@ export async function transactionsBackfill(
         first = Math.max(1, clock.first_scoring_period);
         last = Math.max(first, clock.final_scoring_period);
       } catch (e) {
-        const code = effCodeOf(e);
-        // a season this league (or these cookies) cannot read is skipped, never fatal
-        if (code === "ESPN_LEAGUE_NOT_FOUND" || code === "ESPN_REQUIRES_COOKIES") {
-          done.push({ season, weeks: 0, read: 0, added: 0, skipped: code });
+        // a season ESPN does not serve this league is skipped, never fatal; no cookie stored for
+        // a private league is no such season — it is the run's credential failure (exit 3, `eff
+        // setup`: Stage C finding cli-backfill-no-cookie-exit-zero)
+        if (effCodeOf(e) === "ESPN_LEAGUE_NOT_FOUND") {
+          done.push({ season, weeks: 0, read: 0, added: 0, skipped: "ESPN_LEAGUE_NOT_FOUND" });
           continue;
         }
         throw e;
@@ -665,10 +771,17 @@ export async function transactionsBackfill(
           : `${job}: season ${String(d.season)}: not served (${d.skipped}) — skipped`,
       );
     const total = done.reduce((a, d) => a + d.added, 0);
+    const readAny = done.some((d) => d.skipped === null);
     await writeLine(
       io.stdout,
-      `${job}: ${String(total)} new transaction(s) stored — espn_analyze_waivers fits its premium from them`,
+      readAny
+        ? `${job}: ${String(total)} new transaction(s) stored — espn_analyze_waivers fits its premium from them`
+        : `${job}: no season could be read — nothing stored; espn_analyze_waivers keeps the basis it has`,
     );
+    if (!readAny) {
+      jobIdle(io, config, job);
+      return EXIT.ok;
+    }
     jobWorked(io, config, job);
     return EXIT.ok;
   } catch (e) {

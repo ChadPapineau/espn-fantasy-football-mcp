@@ -158,6 +158,98 @@ export function stateToken(s: JobState, key: string): string | null {
   return typeof v === "string" ? v : null;
 }
 
+// --- the notification log (plan 06 §2: "Every notification's text is also a refresh_log.note so
+// `eff status` shows what was said") -----------------------------------------------------------------
+//
+// refresh_log is keyed by dataset source and has no note column, so what the jobs said lives here:
+// the newest NOTIFICATION_LOG_MAX notifications, each its server-authored, redacted text (fixed
+// vocabulary and numbers — notify.ts safeNotificationText), its kind and whether it was shown. A
+// notification the owner missed (Focus, notifications off for osascript, a sleeping Mac) is still in
+// `eff status` (Stage C finding notify-text-not-recorded). Written under the job-state lock, 0600.
+
+/** The notification log inside the cache dir. */
+export const NOTIFICATION_LOG_FILE = "notifications.json";
+/** How many notifications the log keeps (the newest). */
+export const NOTIFICATION_LOG_MAX = 20;
+/** The longest text kept (notify.ts NOTIFY_MAX_CHARS, plus the marker a cut text carries). */
+const NOTE_MAX_CHARS = 256;
+const NOTE_CONTROL_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}]/u;
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
+/** One notification as the log keeps it. */
+export interface NotificationRecord {
+  readonly at: string;
+  readonly kind: "info" | "alarm" | "failure";
+  /** The text as it was sent (already redacted, control-free, capped). */
+  readonly text: string;
+  /** `shown`: osascript showed it; `not_shown`: it failed, or this platform has no channel. */
+  readonly shown: "shown" | "not_shown";
+}
+
+/** `<cache>/notifications.json`. */
+export function notificationLogPath(cacheDir: string): string {
+  return path.join(cacheDir, NOTIFICATION_LOG_FILE);
+}
+
+function validRecord(x: unknown): NotificationRecord | null {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) return null;
+  const r = x as Record<string, unknown>;
+  if (typeof r.at !== "string" || !ISO_RE.test(r.at)) return null;
+  if (r.kind !== "info" && r.kind !== "alarm" && r.kind !== "failure") return null;
+  if (typeof r.text !== "string" || r.text.length === 0 || r.text.length > NOTE_MAX_CHARS)
+    return null;
+  if (NOTE_CONTROL_RE.test(r.text)) return null;
+  if (r.shown !== "shown" && r.shown !== "not_shown") return null;
+  return { at: r.at, kind: r.kind, text: r.text, shown: r.shown };
+}
+
+/** The logged notifications, newest first (missing or malformed → []; a bad entry is dropped). */
+export function readNotifications(cacheDir: string): NotificationRecord[] {
+  try {
+    const text = readSecureFile(notificationLogPath(cacheDir), {
+      requirePrivate: true,
+      maxBytes: JOB_STATE_MAX_BYTES,
+      what: "notification log",
+    });
+    if (text === null) return [];
+    const v = JSON.parse(text) as unknown;
+    const items =
+      typeof v === "object" && v !== null && !Array.isArray(v)
+        ? (v as { items?: unknown }).items
+        : null;
+    if (!Array.isArray(items)) return [];
+    return items
+      .map(validRecord)
+      .filter((r): r is NotificationRecord => r !== null)
+      .slice(0, NOTIFICATION_LOG_MAX);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Prepends one notification to the log (the newest NOTIFICATION_LOG_MAX kept), under the job-state
+ * lock. `text` must already be the sent text (redacted, control-free); anything else is dropped.
+ * Never throws: a lost record never stops a job.
+ */
+export function recordNotification(cacheDir: string, r: NotificationRecord): boolean {
+  if (validRecord(r) === null) return false;
+  try {
+    ensureSecureDir(cacheDir, { create: true, what: "cache dir" });
+    return withStateLock(cacheDir, () => {
+      const items = [r, ...readNotifications(cacheDir)].slice(0, NOTIFICATION_LOG_MAX);
+      writeSecureFileAtomic(
+        notificationLogPath(cacheDir),
+        `${JSON.stringify({ items })}\n`,
+        "notification log",
+      );
+      return true;
+    });
+  } catch {
+    return false;
+  }
+}
+
 // --- job run records (plan 06 J2 "one … row per run … plus `eff status`": failure must be visible
 // without reading logs; §1.4 a 401 is a recorded failure; §3 `eff status` / doctor #11) -------------
 //

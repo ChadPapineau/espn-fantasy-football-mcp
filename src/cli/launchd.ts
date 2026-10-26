@@ -245,8 +245,10 @@ export const JOBS: readonly LaunchdJob[] = Object.freeze([
     sources: [],
   },
   {
+    // `--notify` marks the launchd run (its requests count against the fleet's caps; a hand-typed
+    // `eff snapshot projections` does not — src/cli/espn-jobs.ts startJob)
     name: "snapshot-projections",
-    argv: ["snapshot", "projections"],
+    argv: ["snapshot", "projections", "--notify"],
     description: "ESPN projection snapshot — Tue 06:00, Thu 18:00, Sun 11:00",
     calendar: [at(6, 0, TUE), at(18, 0, THU), at(11, 0, SUN)],
     cookies: true,

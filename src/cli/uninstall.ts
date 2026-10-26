@@ -57,7 +57,7 @@ import type { StoreFactory } from "../store/types.js";
 import { bothCredentialStores } from "./espn-stack.js";
 import { EXIT } from "./exit.js";
 import { isTty, writeLine, type CliIo } from "./io.js";
-import { JOB_STATE_FILE, JOB_STATE_LOCK } from "./job-state.js";
+import { JOB_STATE_FILE, JOB_STATE_LOCK, NOTIFICATION_LOG_FILE } from "./job-state.js";
 import { JOB_NAMES, logDir, removeJobs } from "./launchd.js";
 import type { Logger } from "./log.js";
 import { privatizeNewFile, resolveBackupDestination } from "./maintenance.js";
@@ -88,6 +88,7 @@ const CACHE_FILES = [
   `${STORE_FILE_NAME}.lock`,
   JOB_STATE_FILE,
   JOB_STATE_LOCK,
+  NOTIFICATION_LOG_FILE,
 ];
 /** An interrupted atomic write's temp file (config/paths writeSecureFileAtomic: `<file>.<pid>.<12 hex>.tmp`). */
 const atomicTemp = (names: readonly string[]): RegExp =>
@@ -95,7 +96,9 @@ const atomicTemp = (names: readonly string[]): RegExp =>
     `^(?:${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\.\\d{1,10}\\.[0-9a-f]{12}\\.tmp$`,
   );
 /** Interrupted-write temp files of ours directly inside the cache dir. */
-const CACHE_FILE_PATTERNS: readonly RegExp[] = [atomicTemp([JOB_STATE_FILE])];
+const CACHE_FILE_PATTERNS: readonly RegExp[] = [
+  atomicTemp([JOB_STATE_FILE, NOTIFICATION_LOG_FILE]),
+];
 /** A run directory under tmp/ (mkdtemp: `<prefix>-XXXXXX`). */
 const RUN_TMP_RE = /^[A-Za-z0-9_]{1,80}-[A-Za-z0-9]{6}$/;
 /**

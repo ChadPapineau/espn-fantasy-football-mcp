@@ -28,7 +28,13 @@ import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
 import { JOBS, installedPlists } from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
-import { jobRunRecords, readJobState, type JobRunRecord } from "./job-state.js";
+import {
+  jobRunRecords,
+  readJobState,
+  readNotifications,
+  type JobRunRecord,
+  type NotificationRecord,
+} from "./job-state.js";
 import { seasonState } from "../sources/runner.js";
 import type { Logger } from "./log.js";
 import { openExistingStore, type ExistingStore } from "./store-access.js";
@@ -239,6 +245,11 @@ export interface StatusReport {
   };
   /** The credentialed jobs' last runs (plan 06 J2: failure visible without reading logs). */
   readonly jobs: readonly JobRunRecord[];
+  /**
+   * What the jobs' notifications said, newest first (plan 06 §2: every notification's text is kept
+   * "so `eff status` shows what was said"; fixed vocabulary and numbers, redacted).
+   */
+  readonly notifications: readonly NotificationRecord[];
   /** The newest snapshot of each kind (null = none stored, or not knowable: no team id). */
   readonly snapshots: {
     readonly roster_last_at: string | null;
@@ -489,6 +500,7 @@ export function collectStatus(
           .filter((j) => !installed.includes(j)),
       },
       jobs,
+      notifications: readNotifications(config.cacheDir),
       snapshots,
       alerts: statusAlerts({
         nowMs: now,
@@ -612,6 +624,14 @@ export function renderStatus(r: StatusReport): string[] {
     out.push(
       `snapshots: roster ${r.snapshots.roster_last_at ?? "none"}, pool ${r.snapshots.pool_last_at ?? "none"}, projections ${r.snapshots.projections_last_at ?? "none"}`,
     );
+  if (r.notifications.length > 0) {
+    out.push("");
+    out.push(`notifications (newest first, last ${String(Math.min(r.notifications.length, 10))}):`);
+    for (const n of r.notifications.slice(0, 10))
+      out.push(
+        `  ${n.at} ${n.kind.padEnd(7)} ${n.text}${n.shown === "shown" ? "" : "  (not shown)"}`,
+      );
+  }
   for (const a of r.alerts) {
     if (a === "probe_stale")
       out.push("ALERT: no successful drift probe in 36 h — `eff probe` (and check the probe job)");

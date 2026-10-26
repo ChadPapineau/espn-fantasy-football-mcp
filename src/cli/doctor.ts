@@ -64,7 +64,13 @@ import { onlineRows } from "./doctor-online.js";
 import { exitCodeFor, row, type DoctorRow, type RowStatus } from "./doctor-rows.js";
 import { bothCredentialStores } from "./espn-stack.js";
 import { writeLine, distEntry, type CliIo } from "./io.js";
-import { jobRunRecords, jobStatePath, readJobState, stateToken } from "./job-state.js";
+import {
+  jobRunRecords,
+  jobStatePath,
+  notificationLogPath,
+  readJobState,
+  stateToken,
+} from "./job-state.js";
 import { installedPlists, JOB_NAMES, LAUNCHCTL, labelOf, launchctl } from "./launchd.js";
 import { availableJobs } from "./install-launchd.js";
 import { redactString, SecretRegistry, truncate, type Logger } from "./log.js";
@@ -1446,9 +1452,20 @@ export async function checkLaunchd(
   if (io.uid === null) return row(11, "launchd", title, "skip", "no user id");
   const installed = installedPlists(io.home);
   const details: string[] = [];
-  if (stateToken(readJobState(config.cacheDir), "pool.anchor_basis") === "process_days_et")
+  // plan 06 §1.4 / ADV OBJ-16: waiverProcessHour (read as ET) is the fallback only when
+  // waiverNextExecutionDate is absent, with a warning when the two disagree — "absent" is said only
+  // when it is (Stage C finding jobs-pool-anchor-cached-past-execution)
+  const state = readJobState(config.cacheDir);
+  const basis = stateToken(state, "pool.anchor_basis");
+  if (basis === "process_days_et")
     details.push(
-      "waiverNextExecutionDate is absent: `snapshot pool` uses waiverProcessHour read as ET (unverified — ADV OBJ-16)",
+      stateToken(state, "pool.anchor_field") === "served"
+        ? "waiverNextExecutionDate was not ahead even on a fresh read: `snapshot pool` uses waiverProcessHour read as ET for now (unverified — ADV OBJ-16)"
+        : "waiverNextExecutionDate is absent: `snapshot pool` uses waiverProcessHour read as ET (unverified — ADV OBJ-16)",
+    );
+  else if (basis === "status" && stateToken(state, "pool.anchor_et") === "disagrees")
+    details.push(
+      "waiverNextExecutionDate disagrees with waiverProcessHour read as ET: `snapshot pool` follows waiverNextExecutionDate (the process hour's zone is unverified — ADV OBJ-16)",
     );
   if (installed.length === 0)
     return row(11, "launchd", title, "warn", "no jobs installed", "`eff install-launchd`", details);
@@ -1993,6 +2010,7 @@ export function plannedFixes(config: LenientConfig, acl: AclAccess = systemAcl):
     ...fileFixes(`${store}-wal`, acl),
     ...fileFixes(`${store}-shm`, acl),
     ...fileFixes(jobStatePath(config.cacheDir), acl),
+    ...fileFixes(notificationLogPath(config.cacheDir), acl),
     ...(backups === undefined
       ? []
       : ownFilesIn(backupDir(config.cacheDir), backups.re).flatMap((f) => fileFixes(f, acl))),

@@ -12,6 +12,7 @@
 import { randomInt } from "node:crypto";
 import {
   SOURCE_REGISTRY,
+  easternDate,
   isDatasetSourceId,
   type DatasetSourceId,
   type RefreshJob,
@@ -431,10 +432,14 @@ export const OFF_DAY_HOURS: readonly number[] = Object.freeze([0, 6, 12, 18]);
 /**
  * Whether a `--game-day-cadence` wake works (plan 06 §1.3: the game-day cadence comes from the
  * schedule itself, never from weekday names baked into a plist; §2 fixed wakes that self-select):
- * every wake on a local day the pro schedule has a kickoff on — Wednesday, Friday and Saturday game
- * days included — and, on any other day, only the wakes in the first half hour of 00, 06, 12 and
- * 18 h. A schedule that was never loaded (or cannot be read) works every wake: the refresh is what
- * loads it.
+ * every wake on a GAME DAY — a day the pro schedule has a kickoff on, Wednesday, Friday and Saturday
+ * game days included — and, on any other day, only the wakes in the first half hour of 00, 06, 12
+ * and 18 h local. A game day is the US-Eastern calendar day, the one definition the TTLs judge by
+ * (config/freshness.ts `ttlContextAt`): on a Mac set to another zone the local day of a Thursday-
+ * night kickoff is Friday, so all of ET Thursday was refreshed 6-hourly while the schedule was judged
+ * under its 1 h game-day TTL — stale for most of the day (Stage C finding
+ * refresh-gameday-cadence-local-calendar). A schedule that was never loaded (or cannot be read)
+ * works every wake: the refresh is what loads it.
  */
 export function gameDayCadenceWorks(
   schedule: ProScheduleReader,
@@ -443,15 +448,14 @@ export function gameDayCadenceWorks(
 ): boolean {
   const d = new Date(nowMs);
   if (OFF_DAY_HOURS.includes(d.getHours()) && d.getMinutes() < 30) return true;
-  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+  const today = easternDate(nowMs);
   try {
     const games = schedule.games(season, null);
     if (games.stamp === null) return true;
     return games.rows.some((g) => {
       if (g.kickoff === null) return false;
       const k = Date.parse(g.kickoff);
-      return Number.isFinite(k) && k >= start && k < end;
+      return Number.isFinite(k) && easternDate(k) === today;
     });
   } catch {
     return true;

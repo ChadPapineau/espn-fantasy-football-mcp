@@ -165,10 +165,18 @@ describe("working runs over the recorded league", () => {
     expect(prc).toBe(0);
     expect(proj.io.out.text).toMatch(/ESPN projection row\(s\) stored/);
     const tx = await runtime("2026-10-07T19:00:00.000Z");
-    const txc = await transactionsAppend(tx.io, tx.config, tx.log, { notify: false, force: false });
+    const txc = await transactionsAppend(tx.io, tx.config, tx.log, { notify: true, force: false });
+    // mTransactions2 always needs cookies; with none stored the launchd job says so, sends nothing
+    // more and stays quiet (exit 0)
     expect(txc).toBe(0);
-    // mTransactions2 always needs cookies; with none stored the job says so and sends nothing more
     expect(tx.io.out.text).toContain("needs cookies and none are stored");
+    // typed at a terminal it is the credentials failure it is: exit 3 and `eff setup` (Stage C
+    // finding cli-backfill-no-cookie-exit-zero)
+    const hand = await runtime("2026-10-07T19:05:00.000Z");
+    expect(
+      await transactionsAppend(hand.io, hand.config, hand.log, { notify: false, force: false }),
+    ).toBe(3);
+    expect(hand.io.out.text).toContain("run `eff setup`");
     // the pre-kickoff check, 61 min before a game day's first kickoff, over the newest snapshot
     const s = await schedule();
     const sunday = s.games

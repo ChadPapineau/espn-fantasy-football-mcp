@@ -29,6 +29,8 @@ export interface JobRun {
   readonly stack: EspnStack;
   readonly notifier: Notifier;
   readonly lockName: string;
+  /** Whose requests these are: `job` (a launchd run) or `server` (one the owner typed). */
+  readonly origin: RequestOrigin;
 }
 
 /** Common options of the ESPN jobs. */
@@ -36,9 +38,12 @@ export interface JobOptions {
   readonly notify: boolean;
   readonly factory?: StoreFactory;
   /**
-   * Whose requests these are (default `job`: the launchd fleet, counted against its daily caps —
-   * plan 06 §1.4 + changelog V7). A run the owner starts by hand (`eff transactions --backfill`) is
-   * `server`: it never spends the jobs' daily allowance.
+   * Whose requests these are. Default: they follow `--notify`, the mark every launchd job carries
+   * (src/cli/launchd.ts JOBS) — `job` for a launchd run (counted against the fleet's daily caps, plan
+   * 06 §1.4 + changelog V7), `server` for a run the owner typed at a terminal (`eff snapshot roster`,
+   * the server's own hint; `eff transactions --force`), which never spends the jobs' daily allowance
+   * and so never starves that day's scheduled jobs — as refresh and probe already do (Stage C
+   * finding cli-snapshot-manual-charged-job-cap). `eff transactions --backfill` passes `server`.
    */
   readonly origin?: RequestOrigin;
 }
@@ -102,11 +107,12 @@ export async function startJob(
     await writeLine(io.stdout, `${job}: another run holds the job lock — nothing done`);
     return EXIT.ok;
   }
+  const origin: RequestOrigin = opts.origin ?? (opts.notify ? "job" : "server");
   const stack = buildEspnStack(io, config, store, log, {
-    origin: opts.origin ?? "job",
-    observer: (opts.origin ?? "job") === "job" ? "daily_job" : "server",
+    origin,
+    observer: origin === "job" ? "daily_job" : "server",
   });
-  return { store, stack, notifier, lockName };
+  return { store, stack, notifier, lockName, origin };
 }
 
 /** Closes a job run (releases the lock, drops the secret, closes the store). */
@@ -135,7 +141,11 @@ export function jobIdle(io: CliIo, config: Pick<Config, "cacheDir">, job: string
 
 /**
  * Maps a provider failure to the job's exit code, notifying as plan 06 §1.4 says, and records the
- * failed run with its code (a 401 included — plan 06 §1.4 `ok = 0` on a rejection).
+ * failed run with its code (a 401 included — plan 06 §1.4 `ok = 0` on a rejection). No cookie stored
+ * for a private league is quiet for a launchd run (exit 0: `eff status` shows the credential state),
+ * and for a run the owner typed it is what it is — credentials not configured, exit 3 (plan 03 §1.3),
+ * with the line to run `eff setup` (Stage C finding cli-backfill-no-cookie-exit-zero: the launchd
+ * rule answered a hand-run command 0).
  */
 export async function jobFailure(
   io: CliIo,
@@ -160,7 +170,7 @@ export async function jobFailure(
       io.stdout,
       `${job}: this league needs cookies and none are stored — run \`eff setup\` (nothing done)`,
     );
-    return EXIT.ok;
+    return run.origin === "job" ? EXIT.ok : EXIT.credentials;
   }
   await writeLine(io.stderr, `eff ${job}: ${code}`);
   if (notify) await run.notifier.failure(job, code);
