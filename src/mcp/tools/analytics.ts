@@ -31,11 +31,12 @@ import {
   type WaiverCandidateInput,
   type WaiverPlayer,
 } from "../../domain/analytics/index.js";
+import type { WaiverRunRecord } from "../../domain/analytics/types.js";
 import { seededRng, seedFrom } from "../../domain/clock.js";
 import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
 import { remainingWeeks, regularSeasonWeeks } from "../../domain/league/rules.js";
 import { auditIr, seatsOf } from "../../domain/league/roster.js";
-import { lockPlan } from "../../domain/league/schedule.js";
+import { kickoffMsOf, lockPlan } from "../../domain/league/schedule.js";
 import {
   TRANSACTIONS_RANGE_MAX,
   type League,
@@ -1822,7 +1823,14 @@ export async function leaguePremiumFit(
     }
     await turn();
     const repo = ctx.services.waiverRuns;
-    const runs = repo === undefined ? [] : repo.list(leagueRef(ctx).league_id, season);
+    // one observation per fantasy week (weeklyRunFeed), the pro schedule placing each run in its
+    // week (the call's memoised read — no request once the dataset is refreshed)
+    const logged = repo === undefined ? [] : repo.list(leagueRef(ctx).league_id, season);
+    const sched =
+      logged.length === 0
+        ? null
+        : await withinBudget(() => scheduleOf(ctx, season, [], true), []).catch(() => null);
+    const runs = weeklyRunFeed(logged, sched?.schedule ?? null);
     const evidence = feeds.filter((f) => f.outcomes.length > 0 || f.claim_runs > 0);
     if (evidence.length === 0 && runs.length === 0) return null;
     const period = periodOf(rules, w) ?? w;
@@ -1844,7 +1852,7 @@ export async function leaguePremiumFit(
           ? "no previous-season transactions of this league are stored"
           : `its previous seasons (${evidence.map((f) => String(f.season)).join(", ")}) show ${String(n)} waiver candidate(s) with a visible fate, ${String(WAIVER_FIT.history.minOutcomes)} needed`;
       warnings.push(
-        `premium and demand stay on the cold-start tables: ${history}; ${String(runs.length)} of ${String(WAIVER_FIT.minRuns)} priced waiver runs logged`,
+        `premium and demand stay on the cold-start tables: ${history}; ${String(runs.length)} of ${String(WAIVER_FIT.minRuns)} weeks of priced waiver runs logged`,
       );
     }
     return fit;
@@ -1894,34 +1902,102 @@ export function pricesWholeWireRun(
   );
 }
 
-/** Logs the waiver run an E5 answer priced (priority mode, a known next run; plan 10 C5). */
+/**
+ * Logs the waiver run an E5 answer priced (priority mode, a known next run; plan 10 C5): the
+ * surplus of its CLAIMABLE players only — the WAIVERS candidates a claim spends priority on (research
+ * 05 §1.2: "the best claimable player's surplus") — and nothing for a post-run call, whose
+ * candidates are free agents (an add costs no priority) and whose `next_run_at` is the NEXT run:
+ * before, every candidate's `s` was logged, a post-run free-agent scramble included, as an
+ * observation of the run after it (Stage C finding waivers-surplus-feed-per-run). Runs are stored as
+ * the store keys them (one row per run, the newest call before it wins); the feed reads one
+ * observation per fantasy week (weeklyRunFeed).
+ */
 export function logWaiverRun(
   ctx: ToolContext,
   season: number,
   data: {
     readonly mode_used: string;
+    readonly phase?: string;
     readonly next_run_at: string | null;
     readonly W: number;
-    readonly candidates: readonly { readonly s: number }[];
+    readonly candidates: readonly { readonly s: number; readonly status?: string }[];
   },
 ): void {
   const repo = ctx.services.waiverRuns;
   if (repo === undefined || data.mode_used !== "priority" || data.next_run_at === null) return;
+  if (data.phase === "post_run") return;
+  const surplus = data.candidates
+    .filter((c) => c.status === undefined || c.status === "WAIVERS")
+    .map((c) => c.s)
+    .filter((x) => Number.isFinite(x));
+  if (surplus.length === 0) return;
   beforeSideEffect(ctx);
   try {
     repo.put(
       leagueRef(ctx).league_id,
-      {
-        season,
-        run_at: data.next_run_at,
-        W: data.W,
-        surplus: data.candidates.map((c) => c.s).filter((x) => Number.isFinite(x)),
-      },
+      { season, run_at: data.next_run_at, W: data.W, surplus },
       ctx.services.clock.nowIso(),
     );
   } catch {
     // a run the store refuses is skipped, never fatal to the answer
   }
+}
+
+/** A Tuesday 09:00 UTC (04:00/05:00 ET, after Monday night's game): the fallback week boundary. */
+const FEED_WEEK_ANCHOR_MS = Date.parse("2020-01-07T09:00:00.000Z");
+const FEED_WEEK_MS = 7 * 24 * 3600 * 1000;
+
+/**
+ * The fantasy week a waiver run belongs to: within the season — from a week before its first known
+ * kickoff (the run before week 1) to its last — the first scoring period whose last known kickoff is
+ * at or after the run (a run after Monday night's game serves the coming week); before or after the
+ * season, or without the pro schedule, the Tuesday-to-Tuesday week it falls in (a preseason run
+ * after the draft is its own week). Exported for tests.
+ */
+export function feedWeekOf(
+  runMs: number,
+  lastKickoffs: readonly (readonly [Week, number])[],
+  firstKickoffMs: number | null,
+): string {
+  if (firstKickoffMs !== null && runMs > firstKickoffMs - FEED_WEEK_MS)
+    for (const [week, last] of lastKickoffs) if (last >= runMs) return `w${String(week)}`;
+  return `t${String(Math.floor((runMs - FEED_WEEK_ANCHOR_MS) / FEED_WEEK_MS))}`;
+}
+
+/**
+ * The league's priced waiver runs as the fitted premium reads them (research 05 §1.2 — the weekly
+ * DP's surplus rate of the best weekly claim; plan 10 C5 "13 logged runs (one regular season)"): ONE
+ * observation per fantasy week, the week's run whose best claimable surplus is the largest — the
+ * week's main claim run; a later daily run holds the leftovers. One row per processing run made a
+ * daily-processing league reach the 13-run threshold in about two weeks and biased the rate low
+ * (Stage C finding waivers-surplus-feed-per-run). Chronological.
+ */
+export function weeklyRunFeed(
+  runs: readonly WaiverRunRecord[],
+  schedule: Pick<ProSchedule, "games"> | null,
+): WaiverRunRecord[] {
+  const last = new Map<Week, number>();
+  for (const g of schedule?.games ?? []) {
+    const k = kickoffMsOf(g);
+    if (k !== null) last.set(g.week, Math.max(last.get(g.week) ?? Number.NEGATIVE_INFINITY, k));
+  }
+  const lastKickoffs = [...last.entries()].sort((a, b) => a[0] - b[0]);
+  let first: number | null = null;
+  for (const g of schedule?.games ?? []) {
+    const k = kickoffMsOf(g);
+    if (k !== null && (first === null || k < first)) first = k;
+  }
+  const best = (r: WaiverRunRecord): number =>
+    r.surplus.reduce((m, x) => (Number.isFinite(x) && x > m ? x : m), Number.NEGATIVE_INFINITY);
+  const byWeek = new Map<string, WaiverRunRecord>();
+  for (const r of runs) {
+    const ms = Date.parse(r.run_at);
+    if (!Number.isFinite(ms)) continue;
+    const key = feedWeekOf(ms, lastKickoffs, first);
+    const cur = byWeek.get(key);
+    if (cur === undefined || best(r) > best(cur)) byWeek.set(key, r);
+  }
+  return [...byWeek.values()].sort((a, b) => Date.parse(a.run_at) - Date.parse(b.run_at));
 }
 
 /** E5 `espn_analyze_waivers`. */
