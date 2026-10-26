@@ -75,15 +75,30 @@ const esc = (s: string): string =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
-/** The form page (instructions + two fields + the hidden token; no external resources). */
+/**
+ * The attributes of every field: no autocomplete, autocorrect or spellcheck, and the opt-outs the
+ * common password managers honour (1Password, LastPass, Bitwarden, Dashlane).
+ */
+export const FIELD_ATTRS =
+  'type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"';
+
+/**
+ * The form page (instructions + two fields + the hidden token; no external resources). It is never
+ * shaped like a login: no `type="password"` field, so no browser pairs the SWID with espn_s2 as a
+ * username and password and offers to save the account-equivalent cookie to its synced password
+ * manager (Google Password Manager, iCloud Keychain — a store outside the keychain-or-0600-file rule,
+ * plan 02 S1, §2.2, threat #7; `autocomplete="off"` on a password field does not stop that offer).
+ * espn_s2 is masked on screen by CSS instead (`-webkit-text-security`; a browser without it shows
+ * the pasted value in this local tab). Stage C finding setup-page-login-form-password-manager.
+ */
 export function formHtml(token: string, notice: string | null): string {
   const items = SETUP_TEXT.instructions.map((l) => `<li>${esc(l.trim())}</li>`).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>eff setup</title>
-<meta name="referrer" content="${REFERRER_POLICY}"><style>body{font:15px system-ui;max-width:40em;margin:2em auto;padding:0 1em}input{width:100%;font:14px monospace;margin:.3em 0 1em}</style></head>
+<meta name="referrer" content="${REFERRER_POLICY}"><style>body{font:15px system-ui;max-width:40em;margin:2em auto;padding:0 1em}input{width:100%;font:14px monospace;margin:.3em 0 1em}.masked{-webkit-text-security:disc;text-security:disc}</style></head>
 <body><h1>Connect your ESPN league</h1><ul>${items}</ul>${notice === null ? "" : `<p><strong>${esc(notice)}</strong></p>`}
-<form method="post" action="/setup/${esc(token)}" autocomplete="off"><input type="hidden" name="token" value="${esc(token)}">
-<label>SWID<input name="swid" spellcheck="false" autocomplete="off"></label>
-<label>espn_s2<input name="espn_s2" type="password" spellcheck="false" autocomplete="off"></label>
+<form method="post" action="/setup/${esc(token)}" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"><input type="hidden" name="token" value="${esc(token)}">
+<label>SWID<input name="swid" ${FIELD_ATTRS}></label>
+<label>espn_s2<input name="espn_s2" class="masked" ${FIELD_ATTRS}></label>
 <button type="submit">Store and check</button></form></body></html>`;
 }
 

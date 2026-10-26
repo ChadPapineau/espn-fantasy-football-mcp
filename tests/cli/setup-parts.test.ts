@@ -520,6 +520,22 @@ describe("setup page", () => {
     expect(html).toContain('name="token" value="abc"');
     expect(html).toContain("x&quot;&lt;y&gt;");
     expect(html).not.toMatch(/\b(?:src|href)=/);
+    // never a login form (Stage C finding setup-page-login-form-password-manager): no password
+    // field for a browser to pair with the SWID and offer to save in its synced password manager;
+    // espn_s2 masked by CSS; every field opted out of autocomplete and the password managers
+    expect(html).not.toMatch(/type\s*=\s*["']?password/i);
+    expect(html).not.toMatch(/autocomplete="(?:username|current-password|new-password|email)"/);
+    const inputs = [...html.matchAll(/<input\b[^>]*>/g)].map((m) => m[0]);
+    const visible = inputs.filter((i) => !i.includes('type="hidden"'));
+    expect(visible).toHaveLength(2);
+    for (const i of visible) {
+      expect(i).toContain('type="text"');
+      expect(i).toContain('autocomplete="off"');
+      expect(i).toContain("data-1p-ignore");
+      expect(i).toContain('data-lpignore="true"');
+    }
+    expect(visible.find((i) => i.includes('name="espn_s2"'))).toContain('class="masked"');
+    expect(html).toContain(".masked{-webkit-text-security:disc");
     const { exec } = fakeExec(() => ({ stdout: "COMMAND PID USER\nnc\u001b 77 me IPv4\n" }));
     expect(await portOwner(exec, 9)).toBe("nc? (pid 77)");
     expect(await portOwner(fakeExec(() => ({ code: 1 })).exec, 9)).toBeNull();
