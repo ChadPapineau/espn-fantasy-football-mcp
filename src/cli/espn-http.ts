@@ -69,6 +69,18 @@ export const limiterSleep = (ms: number): Promise<void> =>
     setTimeout(resolve, Math.max(0, ms));
   });
 
+/**
+ * The HttpError kinds that are an ANSWER: ESPN sent this status, and only its body was not kept
+ * (a 4xx, a 5xx, a 429, another unexpected status). Every other kind with a status — `too_large`,
+ * `decode` — is a refused body: the request is unanswered.
+ */
+const ANSWERED_STATUS_KINDS: ReadonlySet<HttpErrorKind> = new Set<HttpErrorKind>([
+  "http_4xx",
+  "http_5xx",
+  "http_status",
+  "rate_limited",
+]);
+
 function outcomeOfStatus(status: number): RequestOutcome {
   if (status === 304) return "not_modified";
   if (status >= 200 && status < 300) return "ok";
@@ -166,7 +178,11 @@ export async function espnRequest(
       if (o !== null) record(o);
       if (e.kind === "redirect_refused" || e.kind === "too_many_redirects")
         return { error: "host_moved" };
-      if (e.status !== null && e.kind !== "timeout")
+      // an error status ESPN answered (its body is not kept) is an answered request; a body the
+      // client REFUSED — over the size cap, or a gzip that does not decode — is not, whatever its
+      // status line said: passed on as an empty 200 it read as host_moved to the probe and as
+      // accepted cookies to setup (Stage C finding cli-espn-refused-body-reads-as-200)
+      if (e.status !== null && ANSWERED_STATUS_KINDS.has(e.kind))
         return {
           status: e.status,
           body: new Uint8Array(),
