@@ -4,8 +4,21 @@
 // 8790 then 8790–8799; the URL printed exactly as bound with a 32-byte hex token; POST-only form
 // with the token in the path AND a hidden field, accepted only when Host is exactly
 // `127.0.0.1:<port>`, Origin (or, without one, Referer) matches, and the values pass the format
-// rules; `Cache-Control: no-store`; nothing is logged; the first valid POST ends it (the server
-// closes), every other path is 404; 120 s timeout; SIGINT closes it; `keepAliveTimeout` 1 s.
+// rules; `Cache-Control: no-store`; nothing is logged; every POST is answered `303 See Other` (a
+// refusal back to the form, the first valid one to the done page, which is served once — or
+// DONE_GRACE_MS passes — and then the server closes); every other path is 404; 120 s timeout;
+// SIGINT closes it; `keepAliveTimeout` 1 s.
+//
+// The browser keeps nothing it was given (Stage C finding setup-page-login-form-password-manager):
+// the values are typed into `<textarea>`s, never an `<input>`, and nothing on the page carries
+// `-webkit-text-security` — Safari's AutoFill counts an `<input>` of type password OR with a
+// computed text-security other than none as a password field, every password manager keys on
+// `<input>` elements, and Safari hands only `<input>` text values to its form AutoFill on submit —
+// so no browser sees a username and password to offer to save in its synced password manager. No
+// POST ends on a page of its own: a session-history entry made by a POST keeps the body for a
+// reload, and Chrome writes a body that held no password field to its session-restore file; after
+// a 303 the entry is the GET that follows. espn_s2 is kept off the screen by a transparent text
+// colour (a mode that forces colours, or a screen reader, still shows or reads it).
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
@@ -20,6 +33,8 @@ import type { Exec } from "./io.js";
 
 /** The page waits this long for the one valid submission (plan 03 §2.2, [V-03 §C.4]). */
 export const PAGE_TIMEOUT_MS = 120_000;
+/** After the accepted POST, the server waits this long for the browser's GET of the done page. */
+export const DONE_GRACE_MS = 1_000;
 /** Largest form body accepted. */
 export const MAX_FORM_BYTES = 16 * 1024;
 /** The lsof binary (macOS; skipped when absent). */
@@ -76,29 +91,38 @@ const esc = (s: string): string =>
     .replaceAll('"', "&quot;");
 
 /**
- * The attributes of every field: no autocomplete, autocorrect or spellcheck, and the opt-outs the
- * common password managers honour (1Password, LastPass, Bitwarden, Dashlane).
+ * The attributes of both fields (each a `<textarea>`): no autocomplete, autocorrect or spellcheck,
+ * and the opt-outs the common password managers honour (1Password, LastPass, Bitwarden, Dashlane).
+ * `autocomplete="off"` also keeps the values out of the browser's saved form state (session
+ * history and session restore).
  */
 export const FIELD_ATTRS =
-  'type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"';
+  'spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"';
 
 /**
- * The form page (instructions + two fields + the hidden token; no external resources). It is never
- * shaped like a login: no `type="password"` field, so no browser pairs the SWID with espn_s2 as a
- * username and password and offers to save the account-equivalent cookie to its synced password
- * manager (Google Password Manager, iCloud Keychain — a store outside the keychain-or-0600-file rule,
- * plan 02 S1, §2.2, threat #7; `autocomplete="off"` on a password field does not stop that offer).
- * espn_s2 is masked on screen by CSS instead (`-webkit-text-security`; a browser without it shows
- * the pasted value in this local tab). Stage C finding setup-page-login-form-password-manager.
+ * The page's style. `.conceal` keeps espn_s2 off the screen without any property a browser reads as
+ * a password field: a transparent text colour (and selection), a visible caret and placeholder, and
+ * a line that says whether something was pasted.
+ */
+const STYLE =
+  'body{font:15px system-ui;max-width:40em;margin:2em auto;padding:0 1em}textarea{display:block;box-sizing:border-box;width:100%;font:14px monospace;margin:.3em 0 1em;resize:vertical}.conceal{color:transparent;caret-color:#000}.conceal::selection{color:transparent}.conceal::placeholder{color:#767676;opacity:1}.got{display:block;margin:-.7em 0 1em;font-size:13px}.conceal:placeholder-shown+.got::after{content:"nothing pasted yet"}.conceal:not(:placeholder-shown)+.got::after{content:"pasted (kept off the screen)"}';
+
+/**
+ * The form page (instructions + two fields + the hidden token; no external resources, no script).
+ * It is never a login form for any browser: the only `<input>` is the hidden token, the values go
+ * in `<textarea>`s, and no element is styled with text-security, so neither Safari's AutoFill nor
+ * any password manager finds a password field to pair with the SWID and offer to save in its synced
+ * store (Google Password Manager, iCloud Keychain — outside the keychain-or-0600-file rule, plan 02
+ * S1, §2.2, threat #7). Stage C finding setup-page-login-form-password-manager.
  */
 export function formHtml(token: string, notice: string | null): string {
   const items = SETUP_TEXT.instructions.map((l) => `<li>${esc(l.trim())}</li>`).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>eff setup</title>
-<meta name="referrer" content="${REFERRER_POLICY}"><style>body{font:15px system-ui;max-width:40em;margin:2em auto;padding:0 1em}input{width:100%;font:14px monospace;margin:.3em 0 1em}.masked{-webkit-text-security:disc;text-security:disc}</style></head>
+<meta name="referrer" content="${REFERRER_POLICY}"><style>${STYLE}</style></head>
 <body><h1>Connect your ESPN league</h1><ul>${items}</ul>${notice === null ? "" : `<p><strong>${esc(notice)}</strong></p>`}
 <form method="post" action="/setup/${esc(token)}" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"><input type="hidden" name="token" value="${esc(token)}">
-<label>SWID<input name="swid" ${FIELD_ATTRS}></label>
-<label>espn_s2<input name="espn_s2" class="masked" ${FIELD_ATTRS}></label>
+<label>SWID<textarea name="swid" rows="1" ${FIELD_ATTRS}></textarea></label>
+<label>espn_s2<textarea name="espn_s2" rows="4" class="conceal" placeholder="paste espn_s2 here" ${FIELD_ATTRS}></textarea><span class="got"></span></label>
 <button type="submit">Store and check</button></form></body></html>`;
 }
 
@@ -119,18 +143,26 @@ export function sameOrigin(req: Pick<IncomingMessage, "headers">, origin: string
   return typeof r === "string" && (r === origin || r.startsWith(`${origin}/`));
 }
 
+const HEADERS = {
+  "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": REFERRER_POLICY,
+  "x-frame-options": "DENY",
+  "content-security-policy":
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+  connection: "close",
+} as const;
+
 function send(res: ServerResponse, status: number, html: string | null): void {
-  res.writeHead(status, {
-    "content-type": "text/html; charset=utf-8",
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": REFERRER_POLICY,
-    "x-frame-options": "DENY",
-    "content-security-policy":
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
-    connection: "close",
-  });
+  res.writeHead(status, HEADERS);
   res.end(html ?? "");
+}
+
+/** `303 See Other` to a GET page of ours: the history entry the POST makes is that GET's. */
+function redirect(res: ServerResponse, location: string): void {
+  res.writeHead(303, { ...HEADERS, location });
+  res.end();
 }
 
 function readBody(req: IncomingMessage): Promise<string | null> {
@@ -187,6 +219,8 @@ export interface PageOptions {
 /** Runs the one-shot page until the first valid submission, the timeout, or SIGINT. */
 export async function runSetupPage(opts: PageOptions): Promise<PageOutcome> {
   const token = randomBytes(32).toString("hex");
+  const formPath = `/setup/${token}`;
+  const donePath = `${formPath}/done`;
   let done: ((o: PageOutcome) => void) | null = null;
   const finished = new Promise<PageOutcome>((resolve) => {
     done = resolve;
@@ -196,16 +230,36 @@ export async function runSetupPage(opts: PageOptions): Promise<PageOutcome> {
     done = null;
     d?.(o);
   };
+  // the accepted values, held until the done page is served (or DONE_GRACE_MS passes)
+  let accepted: Extract<PageOutcome, { kind: "values" }> | null = null;
+  // a refusal's text, shown once by the GET the refusal's 303 leads to
+  let notice: string | null = null;
+  // the page's timeout, then (once a value is accepted) the done page's grace
+  const timers: { page?: NodeJS.Timeout; grace?: NodeJS.Timeout } = {};
   let port = 0;
   const server = createServer((req, res) => {
     const origin = `http://127.0.0.1:${String(port)}`;
-    const pathOk = req.url === `/setup/${token}`;
-    if (req.headers.host !== `127.0.0.1:${String(port)}` || !pathOk || done === null) {
+    if (req.headers.host !== `127.0.0.1:${String(port)}` || done === null) {
+      send(res, 404, null);
+      return;
+    }
+    if (accepted !== null) {
+      // the one request left: the done page the accepted POST was sent to (it carries no value)
+      if (req.method === "GET" && req.url === donePath) {
+        const values = accepted;
+        send(res, 200, DONE_HTML);
+        finish(values);
+      } else send(res, 404, null);
+      return;
+    }
+    if (req.url !== formPath) {
       send(res, 404, null);
       return;
     }
     if (req.method === "GET") {
-      send(res, 200, formHtml(token, null));
+      const shown = notice;
+      notice = null;
+      send(res, 200, formHtml(token, shown));
       return;
     }
     if (req.method !== "POST" || !sameOrigin(req, origin)) {
@@ -213,7 +267,7 @@ export async function runSetupPage(opts: PageOptions): Promise<PageOutcome> {
       return;
     }
     void readBody(req).then((body) => {
-      if (body === null || done === null) {
+      if (body === null || done === null || accepted !== null) {
         send(res, 404, null);
         return;
       }
@@ -229,11 +283,17 @@ export async function runSetupPage(opts: PageOptions): Promise<PageOutcome> {
       const ve = validateEspnS2(s2);
       if (!vs.ok || !ve.ok) {
         const bad = !vs.ok ? vs : ve.ok ? null : ve;
-        send(res, 400, formHtml(token, bad === null ? "Value refused." : formatRefusalText(bad)));
+        notice = bad === null ? "Value refused." : formatRefusalText(bad);
+        redirect(res, formPath);
         return;
       }
-      send(res, 200, DONE_HTML);
-      finish({ kind: "values", swid, espn_s2: s2 });
+      const values = { kind: "values", swid, espn_s2: s2 } as const;
+      accepted = values;
+      clearTimeout(timers.page);
+      timers.grace = setTimeout(() => {
+        finish(values);
+      }, DONE_GRACE_MS);
+      redirect(res, donePath);
     });
   });
   server.keepAliveTimeout = 1_000;
@@ -257,12 +317,12 @@ export async function runSetupPage(opts: PageOptions): Promise<PageOutcome> {
     server.close();
     return { kind: "port_busy", port: null, owner: null };
   }
-  const url = `http://127.0.0.1:${String(port)}/setup/${token}`;
+  const url = `http://127.0.0.1:${String(port)}${formPath}`;
   opts.out(
     `Open ${url} in your browser (this terminal waits ${String(Math.round((opts.timeoutMs ?? PAGE_TIMEOUT_MS) / 1000))} s; Ctrl-C stops it).`,
   );
   opts.onListening?.(url, port);
-  const timer = setTimeout(() => {
+  timers.page = setTimeout(() => {
     finish({ kind: "timeout" });
   }, opts.timeoutMs ?? PAGE_TIMEOUT_MS);
   const onAbort = (): void => {
@@ -273,7 +333,8 @@ export async function runSetupPage(opts: PageOptions): Promise<PageOutcome> {
   try {
     return await finished;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timers.page);
+    clearTimeout(timers.grace);
     opts.signal.removeEventListener("abort", onAbort);
     // let the last response flush (it carries `connection: close`), then force any idle or stray
     // connection shut so the port is free within a second (plan 03 §1.4)

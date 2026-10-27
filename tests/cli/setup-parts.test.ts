@@ -27,6 +27,7 @@ import {
 } from "../../src/cli/prompt.js";
 import {
   candidatePorts,
+  DONE_GRACE_MS,
   formHtml,
   portBusyMessage,
   portOwner,
@@ -497,6 +498,30 @@ async function freePort(): Promise<number> {
   return typeof a === "object" && a !== null ? a.port : 0;
 }
 
+/**
+ * The fields of a page that some browser counts as a password field (the name of each): an
+ * `<input>` of type password (every browser and password manager), or — Safari's AutoFill
+ * (`_isSecureTextField`) — an `<input>` whose computed `-webkit-text-security` is not `none`, which
+ * any text-security declaration on the page may give it (the property is inherited; counted for
+ * every input, conservatively). Safari's rule takes `<input>` elements only, never a `<textarea>`.
+ */
+function passwordFields(html: string): string[] {
+  const textSecurity = /text-security\s*:\s*(?!none\b)[a-z]/i.test(html);
+  return [...html.matchAll(/<input\b[^>]*>/gi)]
+    .map((m) => m[0])
+    .filter((i) => !/\btype\s*=\s*["']?hidden\b/i.test(i))
+    .filter((i) => textSecurity || /\btype\s*=\s*["']?password\b/i.test(i))
+    .map((i) => /\bname="([^"]+)"/.exec(i)?.[1] ?? "?");
+}
+
+/** The two earlier forms the finding was raised on (the password field, then the CSS mask). */
+const PRE_FIX_PAGES = {
+  password:
+    '<form method="post"><input type="hidden" name="token" value="t"><input name="swid" type="text" autocomplete="off"><input name="espn_s2" type="password" autocomplete="off"></form>',
+  textSecurity:
+    '<style>.masked{-webkit-text-security:disc;text-security:disc}</style><form method="post"><input type="hidden" name="token" value="t"><input name="swid" type="text" autocomplete="off"><input name="espn_s2" class="masked" type="text" autocomplete="off"></form>',
+};
+
 describe("setup page", () => {
   it("ports, messages, origin rule, form (no external resource, token in path and field)", async () => {
     sb = sandbox();
@@ -520,22 +545,34 @@ describe("setup page", () => {
     expect(html).toContain('name="token" value="abc"');
     expect(html).toContain("x&quot;&lt;y&gt;");
     expect(html).not.toMatch(/\b(?:src|href)=/);
-    // never a login form (Stage C finding setup-page-login-form-password-manager): no password
-    // field for a browser to pair with the SWID and offer to save in its synced password manager;
-    // espn_s2 masked by CSS; every field opted out of autocomplete and the password managers
-    expect(html).not.toMatch(/type\s*=\s*["']?password/i);
-    expect(html).not.toMatch(/autocomplete="(?:username|current-password|new-password|email)"/);
-    const inputs = [...html.matchAll(/<input\b[^>]*>/g)].map((m) => m[0]);
-    const visible = inputs.filter((i) => !i.includes('type="hidden"'));
-    expect(visible).toHaveLength(2);
-    for (const i of visible) {
-      expect(i).toContain('type="text"');
-      expect(i).toContain('autocomplete="off"');
-      expect(i).toContain("data-1p-ignore");
-      expect(i).toContain('data-lpignore="true"');
-    }
-    expect(visible.find((i) => i.includes('name="espn_s2"'))).toContain('class="masked"');
-    expect(html).toContain(".masked{-webkit-text-security:disc");
+    // never a login form (Stage C finding setup-page-login-form-password-manager): by every
+    // browser's rule there is no password field to pair with the SWID and offer to save in a synced
+    // password manager — and the rules flag both earlier pages (positive controls)
+    expect(passwordFields(html)).toEqual([]);
+    expect(passwordFields(PRE_FIX_PAGES.password)).toEqual(["espn_s2"]);
+    expect(passwordFields(PRE_FIX_PAGES.textSecurity)).toContain("espn_s2");
+    expect(html).not.toMatch(
+      /autocomplete="(?:username|current-password|new-password|email|one-time-code)"/,
+    );
+    // the only <input> is the hidden token; the values go in <textarea>s, each opted out of
+    // autocomplete (and the saved form state) and of the password managers
+    expect([...html.matchAll(/<input\b[^>]*>/g)].map((m) => m[0])).toEqual([
+      '<input type="hidden" name="token" value="abc">',
+    ]);
+    const areas = [...html.matchAll(/<textarea\b[^>]*>/g)].map((m) => m[0]);
+    expect(areas.map((a) => /\bname="([^"]+)"/.exec(a)?.[1])).toEqual(["swid", "espn_s2"]);
+    for (const a of areas)
+      for (const attr of [
+        'autocomplete="off"',
+        "data-1p-ignore",
+        'data-lpignore="true"',
+        "data-bwignore",
+        'data-form-type="other"',
+      ])
+        expect(a).toContain(attr);
+    // espn_s2 is kept off the screen by colour alone, never by text-security
+    expect(areas[1]).toContain('class="conceal"');
+    expect(html).toContain(".conceal{color:transparent;");
     const { exec } = fakeExec(() => ({ stdout: "COMMAND PID USER\nnc\u001b 77 me IPv4\n" }));
     expect(await portOwner(exec, 9)).toBe("nc? (pid 77)");
     expect(await portOwner(fakeExec(() => ({ code: 1 })).exec, 9)).toBeNull();
@@ -661,7 +698,90 @@ describe("setup page", () => {
     ctl.abort();
     expect(await run).toEqual({ kind: "interrupted" });
   });
+  // a session-history entry made by a POST keeps its body for a reload, and Chrome writes a body
+  // that held no password field to its session-restore file: no POST may end on a page of its own
+  // (Stage C finding setup-page-login-form-password-manager)
+  it("every POST is a 303 to a GET page: a refusal back to the form (its text shown once), the accepted one to the done page", async () => {
+    sb = sandbox();
+    const { url, run, post } = await openPage(new AbortController());
+    const token = url.slice(-64);
+    const get = globalThis.fetch as (u: string, i?: RequestInit) => Promise<Response>;
+    const refused = await post({ token, swid: "bad", espn_s2: PAGE_COOKIES.espn_s2 });
+    expect(refused.status).toBe(303);
+    expect(refused.headers.get("location")).toBe(`/setup/${token}`);
+    expect(await refused.text()).toBe("");
+    const shown = await (await get(url)).text();
+    expect(shown).toMatch(/<p><strong>SWID [^<]+<\/strong><\/p>/);
+    expect(shown).not.toContain(PAGE_COOKIES.espn_s2);
+    expect(await (await get(url)).text()).not.toContain("<strong>");
+    // nothing is at the done path before a value is accepted
+    expect((await get(`${url}/done`)).status).toBe(404);
+    const ok = await post({ token, ...PAGE_COOKIES });
+    expect(ok.status).toBe(303);
+    expect(ok.headers.get("location")).toBe(`/setup/${token}/done`);
+    expect(await ok.text()).toBe("");
+    // once a value is accepted the form is gone and a second POST is refused
+    expect((await get(url)).status).toBe(404);
+    expect((await post({ token, ...PAGE_COOKIES })).status).toBe(404);
+    const done = await get(`${url}/done`);
+    expect(done.status).toBe(200);
+    expect(done.headers.get("cache-control")).toBe("no-store");
+    const doneHtml = await done.text();
+    expect(doneHtml).toContain("you can close this tab");
+    expect(doneHtml).not.toContain(PAGE_COOKIES.espn_s2);
+    expect(doneHtml).not.toContain(PAGE_COOKIES.swid);
+    expect(await run).toEqual({ kind: "values", ...PAGE_COOKIES });
+  });
+  it("the accepted values come back after DONE_GRACE_MS when the done page is never fetched; Ctrl-C in that window stores nothing", async () => {
+    sb = sandbox();
+    const first = await openPage(new AbortController());
+    const t0 = Date.now();
+    expect((await first.post({ token: first.url.slice(-64), ...PAGE_COOKIES })).status).toBe(303);
+    expect(await first.run).toEqual({ kind: "values", ...PAGE_COOKIES });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(DONE_GRACE_MS - 50);
+    expect(Date.now() - t0).toBeLessThan(DONE_GRACE_MS + 2_000);
+    const ctl = new AbortController();
+    const second = await openPage(ctl);
+    expect((await second.post({ token: second.url.slice(-64), ...PAGE_COOKIES })).status).toBe(303);
+    ctl.abort();
+    expect(await second.run).toEqual({ kind: "interrupted" });
+  });
 });
+
+/** A fake SWID (the placeholder GUID range) and a generated espn_s2 of a valid shape. */
+const PAGE_COOKIES = {
+  swid: "{00000000-0000-4000-8000-000000000001}",
+  espn_s2: fakeEspnS2("cli-page-prg", 220),
+};
+
+/** Opens the page on a free port; `post` sends a same-origin form POST and never follows a 303. */
+async function openPage(ctl: AbortController) {
+  const port = await freePort();
+  let url = "";
+  const run = runSetupPage({
+    explicitPort: port,
+    exec: fakeExec().exec,
+    out: () => undefined,
+    signal: ctl.signal,
+    onListening: (u) => {
+      url = u;
+    },
+  });
+  while (url === "") await new Promise((r) => setTimeout(r, 5));
+  // loopback only: the page under test, on 127.0.0.1
+  const loopback = globalThis.fetch as (u: string, i?: RequestInit) => Promise<Response>;
+  const post = (fields: Record<string, string>) =>
+    loopback(url, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        origin: `http://127.0.0.1:${String(port)}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(fields).toString(),
+    });
+  return { url, run, post };
+}
 
 describe("keychain self-test plumbing", () => {
   it("parseReport accepts only well-formed reports; selftestPlist is absolute and RunAtLoad", () => {

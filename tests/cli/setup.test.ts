@@ -399,6 +399,23 @@ function post(url: string, body: string, headers: Record<string, string>): Promi
   });
 }
 
+function getStatus(url: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = request(
+      { host: "127.0.0.1", port: u.port, path: u.pathname, method: "GET" },
+      (res) => {
+        res.resume();
+        res.on("end", () => {
+          resolve(res.statusCode ?? 0);
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 /** A stdin that says it is a terminal (the prompt reads its bytes in raw mode). */
 class FakeTty extends PassThrough {
   readonly isTTY = true;
@@ -586,8 +603,10 @@ describe("setup --page (loopback)", () => {
         new URLSearchParams({ token, swid: "bad", espn_s2: COOKIES.espn_s2 }).toString(),
         { origin },
       ),
-    ).toBe(400);
-    expect(await post(url, form, { origin })).toBe(200);
+    ).toBe(303);
+    // the accepted POST is a 303 to the done page, which the browser then fetches
+    expect(await post(url, form, { origin })).toBe(303);
+    expect(await getStatus(`${url}/done`)).toBe(200);
     expect(await run).toBe(0);
     expect(await freePort()).toBeGreaterThan(0);
     expect(io.out.text).toContain("league check ok");
@@ -679,7 +698,8 @@ describe("setup failure paths", () => {
       swid: COOKIES.swid,
       espn_s2: COOKIES.espn_s2,
     }).toString();
-    expect(await post(url, form, { origin: `http://127.0.0.1:${String(port)}` })).toBe(200);
+    expect(await post(url, form, { origin: `http://127.0.0.1:${String(port)}` })).toBe(303);
+    expect(await getStatus(`${url}/done`)).toBe(200);
     await run;
     expect(delivered).toBe(true);
     // the page had released its claim: the signal ended the process by the default action (the

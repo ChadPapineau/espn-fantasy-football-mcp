@@ -5,7 +5,8 @@
 // serialises the origin as `null`; `same-origin` does so only for a cross-origin target; the
 // downgrade-aware policies only for https → http). The test reads the policy the page actually serves
 // (header and `<meta>`), derives the headers a browser would send, and posts the form with them: an
-// empty submission must reach the value checks (400 "Value refused"), not the Origin refusal (404).
+// empty submission must reach the value checks (a 303 back to the form, which then shows the
+// refusal), not the Origin refusal (404).
 // Under the old `no-referrer` page every real submission was refused. Loopback only; no store, no
 // keychain, no ESPN.
 import { createServer } from "node:net";
@@ -109,7 +110,7 @@ describe("the setup page accepts a real browser's form POST", () => {
     expect(browserPostReferer(policy, url, "http://other.example/")).toBeNull();
   });
 
-  it("the browser's empty submission reaches the value checks (400), not the Origin refusal (404)", async () => {
+  it("the browser's empty submission reaches the value checks (a 303 back to the form with the refusal), not the Origin refusal (404)", async () => {
     const { url } = await openPage();
     const page = await loopback(url);
     const html = await page.text();
@@ -124,11 +125,16 @@ describe("the setup page accepts a real browser's form POST", () => {
     if (referer !== null) headers.referer = referer;
     const r = await loopback(action, {
       method: "POST",
+      redirect: "manual",
       headers,
       body: new URLSearchParams({ token, swid: "", espn_s2: "" }).toString(),
     });
-    expect(r.status).toBe(400);
-    expect(await r.text()).toContain("<form");
+    expect(r.status).toBe(303);
+    const back = new URL(r.headers.get("location") ?? "", action).href;
+    expect(back).toBe(url);
+    const again = await (await loopback(back)).text();
+    expect(again).toContain("<form");
+    expect(again).toMatch(/<p><strong>SWID [^<]+<\/strong><\/p>/);
   });
 
   it("a POST from another origin is still refused (404)", async () => {

@@ -975,7 +975,7 @@ Do **not** install a third-party "cookie finder" extension for this (an unaudite
 6. Resolve which team is yours (the team whose owners include your `SWID`) and record it.
 7. Remind you that the cookie's lifetime is unknown, and suggest re-running setup whenever `eff status` shows `rejected` and considering it every 30 days.
 
-`eff setup --page` is an optional one-shot local page for people who prefer paste fields: it binds `127.0.0.1` only, on a printed URL with a random token, accepts exactly one POST, closes after it or after 120 seconds, and logs nothing. It costs a socket, a browser tab and the clipboard holding the secret, so the terminal prompt is the recommended path.
+`eff setup --page` is an optional one-shot local page for people who prefer paste fields: it binds `127.0.0.1` only, on a printed URL with a random token, accepts exactly one POST, closes after it or after 120 seconds, and logs nothing. It costs a socket, a browser tab and the clipboard holding the secret, so the terminal prompt is the recommended path. The page is never a login form: the values go in plain text areas, so neither Safari, Chrome, Firefox nor a password-manager extension finds a password field and offers to save `espn_s2` to a synced password store, and every submission is answered with a redirect, so the browser's history never keeps the posted values. `espn_s2` is kept off the screen by a transparent text colour; a mode that forces colours, or a screen reader, still shows or reads it.
 
 ### 3. Where the cookies are stored — and why not anywhere else
 
