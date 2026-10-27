@@ -10,7 +10,11 @@
 // runs (Stage C finding ci-release-skips-gitleaks-gate), and its write token to a job that runs no
 // dependency code (Stage C finding ci-release-write-job-runs-deps): every workflow's write-scoped
 // jobs are read for what they run, and release.yml's handoff — build's notes and pack steps, then
-// the release job's check and its `gh release create` — is run offline on throwaway files.
+// the release job's check and its `gh release create` — is run offline on throwaway files. The
+// weekly macOS run holds on whatever branch is built, not only where GitHub runs a schedule (Stage
+// C finding ci-default-branch-controls-inert): macos-due's script is run offline against a stubbed
+// Actions API, process-macos is held to its marker, and release.yml to granting what ci.yml's jobs
+// ask for.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -24,6 +28,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { ROOT, tempDir } from "./helpers.js";
 
@@ -120,6 +125,16 @@ const DEPENDENCY_CODE =
   /\b(?:npm|npx|node|nodejs|corepack|pnpm|yarn|tsx|bun|deno|python3?|pip3?|ruby|perl|php|java|make|cargo|curl|wget|tar|unzip|bash|zsh|sh|source|eval|exec|chmod)\b|(?:^|[\s;&|(])\.{1,2}\/|\bscripts\//m;
 
 const CANCEL_EXPR = "${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}";
+
+/**
+ * When process-macos runs (Stage C finding ci-default-branch-controls-inert): the schedule — which
+ * GitHub fires from the default branch only — a manual run, or a push to a branch that macos-due
+ * finds without a pass in the last 7 days, or whose answer macos-due could not give. Never on a
+ * pull request or a tag: macos-due is skipped there, so its output is empty and its result
+ * `skipped` (plan 04 R5: macOS weekly, never every push).
+ */
+const MACOS_IF =
+  "${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.macos-due.outputs.due == 'true' || needs.macos-due.result == 'failure') }}";
 
 /**
  * release.yml's tarball steps, which ci.yml's pack job rehearses on every push (plan 04 §4.4; Stage C
@@ -260,9 +275,9 @@ describe("ci.yml (plan 04 §4.1)", () => {
     expect(p.indexOf("npm run build")).toBeLessThan(p.indexOf("npm run test:process"));
     expect(step(p, "suites against dist")).toContain('EFF_PROCESS_TEST_DIST: "1"');
     const mac = job("process-macos");
-    expect(mac).toContain(
-      "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
-    );
+    // weekly: the schedule, or a push to a branch whose last macOS pass is over 7 days old
+    // (macos-due; its own describe below); on demand: a manual run
+    expect(mac).toContain(`    if: ${MACOS_IF}\n`);
     expect(mac.indexOf("npm run build")).toBeLessThan(mac.indexOf("npm run test:process"));
     expect(mac).toContain('EFF_KEYCHAIN_PROCESS_TEST: "1"');
     expect(text).toMatch(/^ {2}schedule:\n {4}- cron: "[0-9* ]+"/m);
@@ -332,6 +347,409 @@ describe("ci.yml (plan 04 §4.1)", () => {
     const gate = step(job("supply-chain"), "high/critical fails");
     expect(gate).toContain("npm audit --omit=dev --audit-level=high");
     expect(gate).not.toMatch(/\|\||continue-on-error/);
+  });
+});
+
+// --- the weekly macOS run on whatever branch is built (Stage C finding ci-default-branch-controls-inert)
+//
+// GitHub fires a `schedule` only from the default branch's copy of a workflow (and reads
+// dependabot.yml and the dependency graph only there), so a cron alone never runs the macOS suite
+// on the branch being built. macos-due asks the Actions API for that branch's pass marker.
+
+/** The scope -> level map of the `permissions:` mapping at `indent` in `text`, if there is one. */
+function permissionsAt(text: string, indent: number): Record<string, string> | undefined {
+  const pad = " ".repeat(indent);
+  const lines = text.split("\n");
+  // read-all, write-all, {} or any other scalar form would grant what a scope map cannot show
+  expect(
+    lines.filter((l) => new RegExp(`^${pad}permissions:\\s*\\S`).test(l)),
+    "a permissions value that is not a scope map",
+  ).toEqual([]);
+  const at = lines.indexOf(`${pad}permissions:`);
+  if (at === -1) return undefined;
+  const scopes: Record<string, string> = {};
+  for (const l of lines.slice(at + 1)) {
+    const m = new RegExp(`^${pad} {2}([a-z-]+): (read|write|none)$`).exec(l);
+    if (m === null) break;
+    scopes[m[1] ?? ""] = m[2] ?? "";
+  }
+  return scopes;
+}
+
+/** The text of a workflow before its `jobs:` key (the workflow-level keys). */
+const headOf = (text: string): string => text.split(/^jobs:$/m)[0] ?? "";
+
+describe("ci.yml's weekly macOS run on whatever branch is built: macos-due and the pass marker (Stage C finding ci-default-branch-controls-inert)", () => {
+  const text = load("ci.yml");
+  const jobs = jobsOf(text);
+  const due = jobs.get("macos-due") ?? "";
+  const mac = jobs.get("process-macos") ?? "";
+  const dueStep = rawStep("ci.yml", "Weekly macOS run");
+  const script = runBlock(dueStep);
+  const marker = /^const MARKER = "([\w-]+)";$/m.exec(script)?.[1] ?? "";
+
+  it("macos-due runs on a push to a branch only — never a pull request, a tag or release.yml's call — with a read-only token (actions: read, for the artifact list), Node from .nvmrc, and the run's context through env", () => {
+    expect(due, "ci.yml has no macos-due job").not.toBe("");
+    expect(due).toContain("    if: github.event_name == 'push' && github.ref_type == 'branch'\n");
+    expect(permissionsAt(due, 4)).toEqual({ actions: "read", contents: "read" });
+    expect(due).toMatch(/^ {4}outputs:\n {6}due: \$\{\{ steps\.due\.outputs\.due \}\}$/m);
+    expect(step(due, "Weekly macOS run")).toMatch(/^ {8}id: due$/m);
+    const env = Object.fromEntries(
+      ["GH_TOKEN", "API_URL", "REPOSITORY", "REPOSITORY_ID", "BRANCH"].map((k) => [
+        k,
+        stepEnv(dueStep, k),
+      ]),
+    );
+    expect(env).toEqual({
+      GH_TOKEN: "${{ github.token }}",
+      API_URL: "${{ github.api_url }}",
+      REPOSITORY: "${{ github.repository }}",
+      REPOSITORY_ID: "${{ github.repository_id }}",
+      BRANCH: "${{ github.ref_name }}",
+    });
+    // no context value is spliced into the script, and the job installs and runs no package
+    expect(script).toContain("node --input-type=module <<'JS'");
+    expect(script).not.toContain("${{");
+    expect(due).not.toMatch(/\bnpm\b|\bnpx\b/);
+    expect(marker).toBe("process-macos-pass");
+  });
+
+  it("process-macos needs macos-due and runs on the schedule, on demand, or on a push macos-due finds due or cannot answer for — the cron and the manual run stay", () => {
+    expect(needsOf(mac)).toEqual(["macos-due"]);
+    expect(mac).toContain(`    if: ${MACOS_IF}\n`);
+    expect(onKeys(text)).toEqual([
+      "push",
+      "pull_request",
+      "workflow_call",
+      "workflow_dispatch",
+      "schedule",
+    ]);
+  });
+
+  it("process-macos's last two steps record the pass only once the suites passed (no if:, so a red or cancelled run leaves no marker), under the name macos-due reads, kept past the 7-day window, never a silent no-op", () => {
+    const steps = mac.split(/\n(?= {6}- )/).slice(1);
+    const suites = steps.findIndex((s) => s.includes("run: npm run test:process"));
+    const record = steps.findIndex((s) => s.includes("- name: Record the macOS pass"));
+    const upload = steps.findIndex((s) => s.includes("uses: actions/upload-artifact@"));
+    expect(suites).toBeGreaterThan(-1);
+    expect([record, upload]).toEqual([suites + 1, suites + 2]);
+    expect(upload).toBe(steps.length - 1);
+    for (const s of [steps[record] ?? "", steps[upload] ?? ""])
+      expect(s).not.toMatch(/^ {8}(?:if|continue-on-error):/m);
+    const up = steps[upload] ?? "";
+    expect(up).toContain(
+      "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+    );
+    expect(up).toContain(`          name: ${marker}\n`);
+    expect(up).toContain("          path: ${{ runner.temp }}/process-macos-pass/\n");
+    expect(up).toContain("          if-no-files-found: error\n");
+    // a re-run of a passed job uploads again rather than failing on the name
+    expect(up).toContain("          overwrite: true\n");
+    const days = Number(/^ {10}retention-days: (\d+)$/m.exec(up)?.[1]);
+    expect(days).toBeGreaterThan(7);
+    expect(days).toBeLessThanOrEqual(14);
+    // the marker holds the commit and nothing else
+    expect(runBlock(rawStep("ci.yml", "Record the macOS pass"))).toBe(
+      [
+        "set -euo pipefail",
+        'mkdir -p "$RUNNER_TEMP/process-macos-pass"',
+        `printf '%s\\n' "$GITHUB_SHA" > "$RUNNER_TEMP/process-macos-pass/commit"`,
+        "",
+      ].join("\n"),
+    );
+  });
+});
+
+describe("a called workflow asks for no scope its caller does not grant (GitHub refuses the whole run at startup otherwise)", () => {
+  const rank = (level: string | undefined) => ["none", "read", "write"].indexOf(level ?? "none");
+
+  it("release.yml grants each workflow it calls every scope that workflow's jobs ask for — ci.yml's macos-due its actions: read — and nothing wider", () => {
+    const caller = load("release.yml");
+    const callerDefault = permissionsAt(headOf(caller), 0) ?? {};
+    const asked: string[] = [];
+    for (const [name, block] of jobsOf(caller)) {
+      const called = /^ {4}uses: \.\/\.github\/workflows\/([\w.-]+)$/m.exec(block)?.[1];
+      if (called === undefined) continue;
+      const granted = permissionsAt(block, 4) ?? callerDefault;
+      const callee = load(called);
+      const calleeDefault = permissionsAt(headOf(callee), 0) ?? {};
+      for (const [job, jb] of jobsOf(callee)) {
+        for (const [scope, level] of Object.entries(permissionsAt(jb, 4) ?? calleeDefault)) {
+          expect(rank(level), `${called} ${job} ${scope}: ${level}`).toBeGreaterThan(-1);
+          expect(
+            rank(granted[scope]),
+            `${called} ${job} asks for ${scope}: ${level}; release.yml's ${name} grants ${granted[scope] ?? "none"}`,
+          ).toBeGreaterThanOrEqual(rank(level));
+          asked.push(`${called} ${job} ${scope}: ${level}`);
+        }
+      }
+    }
+    expect(asked).toContain("ci.yml macos-due actions: read");
+    expect(permissionsAt(jobsOf(caller).get("ci") ?? "", 4)).toEqual({
+      actions: "read",
+      contents: "read",
+    });
+  });
+});
+
+/**
+ * A fetch for macos-due's script, loaded with --import: it answers from $STUB_ANSWERS in order and
+ * logs every request to $STUB_LOG. Nothing reaches a network.
+ */
+const FETCH_STUB = `import { appendFileSync, readFileSync } from "node:fs";
+const log = (o) => appendFileSync(process.env.STUB_LOG, JSON.stringify(o) + "\\n");
+const answers = JSON.parse(readFileSync(process.env.STUB_ANSWERS, "utf8"));
+let next = 0;
+log({ loaded: true });
+globalThis.fetch = async (input, init = {}) => {
+  const h = new Headers(init.headers);
+  log({
+    url: String(input),
+    method: init.method ?? "GET",
+    authorization: h.get("authorization"),
+    accept: h.get("accept"),
+    version: h.get("x-github-api-version"),
+    signal: init.signal instanceof AbortSignal,
+  });
+  const a = answers[next++];
+  if (a === undefined) throw new Error("the stub has no answer left");
+  if ("throw" in a) throw new TypeError(a.throw);
+  return new Response(typeof a.body === "string" ? a.body : JSON.stringify(a.body), { status: a.status });
+};
+`;
+
+describe("macos-due, run offline on a stubbed Actions API: due unless this repository's own run on this branch uploaded an unexpired pass marker in the last 7 days; an answer it cannot read runs the suite", () => {
+  const script = runBlock(rawStep("ci.yml", "Weekly macOS run"));
+  const DAY = 86_400_000;
+  /** A stand-in for the job token: it must reach the request and never the log. No real token exists here. */
+  const TOKEN = "fake-job-token";
+  const REPO_ID = 1_000_001;
+  const BRANCH = "build/example";
+  const SHA = "a".repeat(40);
+  /** The discard port on loopback: were the stub not loaded, nothing would leave the machine. */
+  const API = "https://127.0.0.1:9";
+  const url = (page: number) =>
+    `${API}/repos/example-owner/example-repo/actions/artifacts?name=process-macos-pass&per_page=100&page=${String(page)}`;
+  const iso = (ago: number) => new Date(Date.now() - ago).toISOString();
+  type RunOver = Record<string, unknown> | null;
+  /** A pass marker as the Actions API lists it: this repository's run on this branch, a day old. */
+  const passMarker = (over: Record<string, unknown> = {}, run: RunOver = {}) => ({
+    id: 9,
+    name: "process-macos-pass",
+    size_in_bytes: 41,
+    expired: false,
+    created_at: iso(DAY),
+    expires_at: iso(-7 * DAY),
+    workflow_run:
+      run === null
+        ? null
+        : {
+            id: 5_000_001,
+            repository_id: REPO_ID,
+            head_repository_id: REPO_ID,
+            head_branch: BRANCH,
+            head_sha: SHA,
+            ...run,
+          },
+    ...over,
+  });
+  type Answer = { status: number; body: unknown } | { throw: string };
+  const page = (artifacts: unknown[]): Answer => ({
+    status: 200,
+    body: { total_count: artifacts.length, artifacts },
+  });
+  const others = (n: number) =>
+    Array.from({ length: n }, () => passMarker({}, { head_branch: "main" }));
+
+  let tmp: ReturnType<typeof tempDir> | undefined;
+  afterEach(() => {
+    tmp?.cleanup();
+    tmp = undefined;
+  });
+
+  /** Run the step's script as the runner does — bash, the step's env — with fetch answering `answers`. */
+  const run = (answers: Answer[], over: Record<string, string> = {}) => {
+    const t = tempDir("eff-macos-due-");
+    tmp = t;
+    const file = (name: string, body = "") => {
+      const f = path.join(t.dir, name);
+      writeFileSync(f, body);
+      return f;
+    };
+    const stub = file("fetch-stub.mjs", FETCH_STUB);
+    const log = file("requests.jsonl");
+    const output = file("github-output");
+    const summary = file("step-summary");
+    // nothing from a real runner (CI runs this suite inside one)
+    const env: NodeJS.ProcessEnv = {};
+    for (const [k, v] of Object.entries(process.env))
+      if (!/^(?:GITHUB_|RUNNER_|ACTIONS_|GH_|NODE_OPTIONS$)/.test(k)) env[k] = v;
+    const r = spawnSync("bash", ["-c", script], {
+      cwd: t.dir,
+      encoding: "utf8",
+      timeout: 60_000,
+      env: {
+        ...env,
+        PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ""}`,
+        NODE_OPTIONS: `--import=${pathToFileURL(stub).href}`,
+        STUB_ANSWERS: file("answers.json", JSON.stringify(answers)),
+        STUB_LOG: log,
+        GITHUB_OUTPUT: output,
+        GITHUB_STEP_SUMMARY: summary,
+        GH_TOKEN: TOKEN,
+        API_URL: API,
+        REPOSITORY: "example-owner/example-repo",
+        REPOSITORY_ID: String(REPO_ID),
+        BRANCH,
+        ...over,
+      },
+    });
+    const logged = readFileSync(log, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(logged[0], "the fetch stub was not loaded").toEqual({ loaded: true });
+    return {
+      status: r.status,
+      out: `${r.stdout}${r.stderr}`,
+      output: readFileSync(output, "utf8"),
+      summary: readFileSync(summary, "utf8"),
+      requests: logged.slice(1),
+    };
+  };
+  type Ran = ReturnType<typeof run>;
+
+  /** The step passed and set exactly `due=<v>`; the token reached neither the log nor the summary. */
+  const expectDue = (r: Ran, v: boolean) => {
+    expect(r.status, r.out).toBe(0);
+    expect(r.output).toBe(`due=${String(v)}\n`);
+    expect(r.out).not.toContain(TOKEN);
+    expect(r.summary).not.toContain(TOKEN);
+  };
+  const UNREAD =
+    "process (macOS) runs on this push: whether this branch passed it in the last 7 days could not be read\n";
+
+  it("no marker on the list: due — one GET of the artifact list with the job token, said in the log and the job summary", () => {
+    expect(script).not.toBe("");
+    const r = run([page([])]);
+    expectDue(r, true);
+    expect(r.requests).toEqual([
+      {
+        url: url(1),
+        method: "GET",
+        authorization: `Bearer ${TOKEN}`,
+        accept: "application/vnd.github+json",
+        version: "2022-11-28",
+        signal: true,
+      },
+    ]);
+    expect(r.summary).toBe(
+      "process (macOS) runs on this push: no pass on this branch in the last 7 days\n",
+    );
+    expect(r.out).not.toContain("::warning::");
+  });
+
+  it.each<[string, number]>([
+    ["a day", DAY],
+    ["6 days and 23 hours", 7 * DAY - 3_600_000],
+  ])(
+    "this repository's own run on this branch passed it %s ago: not due, naming the run, the commit and when",
+    (_label, ago) => {
+      const r = run([page([passMarker({ created_at: iso(ago) })])]);
+      expectDue(r, false);
+      expect(r.summary).toMatch(
+        new RegExp(
+          `^process \\(macOS\\) is not due: run 5000001 passed it on ${SHA} at \\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z\\n$`,
+        ),
+      );
+      expect(r.out).not.toContain("::warning::");
+    },
+  );
+
+  it.each<[string, Record<string, unknown>, RunOver]>([
+    ["another branch's", {}, { head_branch: "main" }],
+    [
+      "a fork's pull-request run under this branch's name (it runs in this repository)",
+      {},
+      { head_repository_id: 2_000_002 },
+    ],
+    ["another repository's", {}, { repository_id: 2_000_002, head_repository_id: 2_000_002 }],
+    ["an expired", { expired: true }, {}],
+    ["an unstated-expiry", { expired: undefined }, {}],
+    ["an 8-day-old", { created_at: iso(8 * DAY) }, {}],
+    ["a 7-days-and-an-hour-old", { created_at: iso(7 * DAY + 3_600_000) }, {}],
+    ["a dated-a-day-ahead", { created_at: iso(-DAY) }, {}],
+    ["an unreadable-date", { created_at: "yesterday" }, {}],
+    ["another artifact's (were the name filter ignored)", { name: "coverage" }, {}],
+    ["a forged-run-id", {}, { id: "5000001\n::error::forged" }],
+    ["a not-a-commit", {}, { head_sha: "HEAD" }],
+    ["a runless", {}, null],
+  ])("%s marker does not count: due", (_label, over, runOver) => {
+    const r = run([page([passMarker(over, runOver)])]);
+    expectDue(r, true);
+    expect(r.out).not.toMatch(/::(?:warning|error)::/);
+  });
+
+  it("reads past a full page: a pass on the second counts, and nothing after it is read", () => {
+    const r = run([page(others(100)), page([passMarker()]), page([])]);
+    expectDue(r, false);
+    expect(r.requests.map((q) => q.url)).toEqual([url(1), url(2)]);
+  });
+
+  it("a pass on a full first page ends the read there", () => {
+    const r = run([page([...others(99), passMarker()]), page([])]);
+    expectDue(r, false);
+    expect(r.requests.map((q) => q.url)).toEqual([url(1)]);
+  });
+
+  it("stops at a short page: no pass on either is due, after two reads", () => {
+    const r = run([page(others(100)), page(others(3)), page([passMarker()])]);
+    expectDue(r, true);
+    expect(r.requests.map((q) => q.url)).toEqual([url(1), url(2)]);
+  });
+
+  it("more than ten full pages are not read to the end: due, with a warning", () => {
+    const r = run(Array.from({ length: 11 }, () => page(others(100))));
+    expectDue(r, true);
+    expect(r.requests).toHaveLength(10);
+    expect(r.out.match(/::warning::/g)).toHaveLength(1);
+    expect(r.summary).toBe(UNREAD);
+  });
+
+  it.each<[string, Answer]>([
+    [
+      "a 403 (a token without actions: read)",
+      { status: 403, body: { message: "Resource not accessible by integration" } },
+    ],
+    ["a 502", { status: 502, body: "<html>bad gateway</html>" }],
+    ["a body that is not JSON", { status: 200, body: "<html>not json</html>" }],
+    ["JSON without an artifact list", { status: 200, body: { total_count: 0 } }],
+    ["a request that fails", { throw: "fetch failed" }],
+  ])(
+    "%s: due, with one warning, the answer never echoed, and the step still passes",
+    (_label, a) => {
+      const r = run([a]);
+      expectDue(r, true);
+      expect(r.requests).toHaveLength(1);
+      expect(r.out.match(/::warning::/g)).toHaveLength(1);
+      expect(r.out).not.toMatch(/html|Resource not accessible/);
+      expect(r.summary).toBe(UNREAD);
+    },
+  );
+
+  it.each<[string, Record<string, string>]>([
+    ["no repository id", { REPOSITORY_ID: "" }],
+    ["a repository id that is not a number", { REPOSITORY_ID: "1000001 OR 1" }],
+    ["no branch", { BRANCH: "" }],
+    ["no token", { GH_TOKEN: "" }],
+    ["a repository that is not owner/name", { REPOSITORY: "example-owner/example-repo/../x" }],
+    ["an API that is not https", { API_URL: "http://127.0.0.1:9" }],
+  ])("%s: due, with one warning, and no request is made", (_label, over) => {
+    const r = run([page([passMarker()])], over);
+    expectDue(r, true);
+    expect(r.requests).toEqual([]);
+    expect(r.out.match(/::warning::/g)).toHaveLength(1);
+    expect(r.summary).toBe(UNREAD);
   });
 });
 

@@ -24,6 +24,8 @@
 #   --provenance`.
 # - permissions: contents: read by default; the release job alone gets contents: write — the one
 #   scope `gh release create` needs, with the job's own token (no repository secret of any kind).
+#   The ci call adds actions: read, which ci.yml's macos-due asks for (a called job holds no scope
+#   its caller does not grant).
 # - The write token never meets third-party code (plan 04 §4; Stage C finding
 #   ci-release-write-job-runs-deps). Every step of a job can read that job's token: on a
 #   GitHub-hosted runner a step can sudo, and the runner worker's memory holds the token (the
@@ -62,6 +64,12 @@ concurrency:
 jobs:
   ci:
     name: ci
+    # A called workflow's job can never hold a scope its caller does not grant — GitHub refuses the
+    # whole run at startup — and ci.yml's macos-due reads the Actions API's artifact list (actions:
+    # read; skipped on a tag). Read scopes only: no write reaches a called workflow.
+    permissions:
+      actions: read
+      contents: read
     uses: ./.github/workflows/ci.yml
 
   secrets:

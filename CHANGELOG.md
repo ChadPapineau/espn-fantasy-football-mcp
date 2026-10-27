@@ -93,7 +93,9 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   injected-text invariance, the A9a/A11a/A13a analytics checks and the latency
   bounds (startup, warm-cache reads, E1/E2/E5 budgets, event-loop stall). CI runs them in the
   `process` job, a `smoke` job drives the built server with the pinned Inspector CLI, and a weekly
-  `process-macos` job runs the keychain process tests.
+  `process-macos` job runs the keychain process tests — weekly on whatever branch is built: on the
+  schedule (GitHub fires it from the default branch only), on demand, and on a push to a branch
+  whose last macOS pass is more than 7 days old.
 - **Phase 2 data sources (plan 10 §3.2).** nflverse `stats_team_week`, the play-by-play projected
   subset, `snap_counts` and the ESPN-keyed `depth_charts`; ffopportunity `ep_weekly`; Sleeper's
   trending adds and drops (a secondary signal); the RotoWire, ESPN and CBS RSS headlines (all text

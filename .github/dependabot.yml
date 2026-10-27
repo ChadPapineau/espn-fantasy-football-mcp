@@ -7,6 +7,14 @@
 #   row and a reviewed scripts/ci/runtime-allowlist.json update — CI fails until both exist.
 # Not managed here (bump by hand, value and checksum together): the mermaid-cli / puppeteer / Claude
 #   Code npx pins in .github/workflows/docs.yml and the gitleaks pin in scripts/ci/install-gitleaks.sh.
+# Where it takes effect (Stage C finding ci-default-branch-controls-inert): GitHub reads this file
+#   only from the DEFAULT branch, and builds the dependency graph — which Dependabot's alerts and
+#   security updates read — only from the default branch's manifests. While the default branch
+#   carries neither this file nor package-lock.json, no update PR is opened and no alert covers the
+#   runtime tree, whatever the build branch holds; no workflow can stand in for that (only the push
+#   gate's npm audit runs). It starts when the default branch carries both: the merge to main, or
+#   the owner setting the default branch to the build branch. The weekly macOS run does not wait for
+#   it (ci.yml's macos-due).
 version: 2
 updates:
   - package-ecosystem: "github-actions"

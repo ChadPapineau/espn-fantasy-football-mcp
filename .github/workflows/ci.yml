@@ -55,10 +55,21 @@
 #   --release checks, npm pack, and scripts/ci/check-release-install.mjs — the README's release
 #   install (`npm ci --omit=dev --ignore-scripts`, then `npm link --ignore-scripts`) run offline on
 #   the packed tarball — so the first tag is never the first run of those steps.
-# - process-macos (weekly + on demand, never on push): the process and end-to-end suites on macOS,
-#   and the keychain round trip (EFF_KEYCHAIN_PROCESS_TEST=1: `eff setup --service-name
-#   eff-test-<random>` through the real launchd self-test, the eff-test items removed afterwards —
-#   never the real service name; plan 04 §4.4, plan 05 §4.2).
+# - process-macos (weekly + on demand): the process and end-to-end suites on macOS, and the
+#   keychain round trip (EFF_KEYCHAIN_PROCESS_TEST=1: `eff setup --service-name eff-test-<random>`
+#   through the real launchd self-test, the eff-test items removed afterwards — never the real
+#   service name; plan 04 §4.4, plan 05 §4.2).
+# - Weekly holds on whatever branch is built, not only where a cron fires (Stage C finding
+#   ci-default-branch-controls-inert). GitHub runs a `schedule` only from the DEFAULT branch's copy
+#   of a workflow — as it reads dependabot.yml and the dependency graph only there — so on any other
+#   branch the cron never fires, and the macOS suite ran only when someone dispatched it. macos-due
+#   (a push to a branch; never a pull request or a tag, so never release.yml's call) asks the
+#   Actions API, with an actions: read token, whether this repository's own run on this branch
+#   uploaded the `process-macos-pass` marker in the last 7 days. process-macos uploads it as its last
+#   step, so it exists only when the whole suite passed; a red or cancelled run leaves none, and a
+#   fork's pull-request run — which runs in this repository under the fork's branch name — never
+#   counts. No pass, or an answer macos-due cannot read, and process-macos runs on that push: weekly
+#   in a quiet week, again on each push while it is red (plan 04 R5: never every push).
 
 name: ci
 
@@ -71,8 +82,10 @@ on:
   # release.yml calls this gate on a tag before it packs (plan 04 §4.4: "full ci.yml jobs")
   workflow_call:
   workflow_dispatch:
+  # Monday 06:23 UTC: the weekly macOS process run (plan 10 A15a) — fired from the default branch
+  # only; macos-due keeps the cadence on every other branch
   schedule:
-    - cron: "23 6 * * 1" # Monday 06:23 UTC: the weekly macOS process run (plan 10 A15a)
+    - cron: "23 6 * * 1"
 
 permissions:
   contents: read
@@ -414,9 +427,135 @@ jobs:
           EFF_PROCESS_TEST_DIST: "1"
         run: npm run test:process
 
+  # Is the weekly macOS run due on this branch? (Stage C finding ci-default-branch-controls-inert;
+  # the header's "Weekly holds" bullet.) Reads one Actions endpoint and runs no repository or
+  # package code: the checkout is for .nvmrc.
+  macos-due:
+    name: macos-due
+    if: github.event_name == 'push' && github.ref_type == 'branch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      due: ${{ steps.due.outputs.due }}
+    steps:
+      - name: Check out (.nvmrc)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Weekly macOS run — due unless this branch passed process (macOS) in the last 7 days (plan 04 R5, plan 10 A15a)
+        id: due
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API_URL: ${{ github.api_url }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import { appendFileSync } from "node:fs";
+          const { GH_TOKEN = "", API_URL = "", REPOSITORY = "", REPOSITORY_ID = "", BRANCH = "" } = process.env;
+          // process-macos uploads it as its last step: it exists only when the whole suite passed
+          const MARKER = "process-macos-pass";
+          const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+          const PER_PAGE = 100;
+          const MAX_PAGES = 10;
+          const now = Date.now();
+          const decide = (due, why) => {
+            appendFileSync(process.env.GITHUB_OUTPUT, `due=${due}\n`);
+            const line = `process (macOS) ${due ? "runs on this push" : "is not due"}: ${why}`;
+            console.log(line);
+            if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);
+          };
+          // A pass counts only from this repository's own run on this branch — a fork's pull request
+          // runs in this repository too, under the fork's branch name — unexpired and at most 7 days
+          // old; its run id and commit are printed, so they must be what they claim to be
+          const counts = (a) => {
+            const run = a?.workflow_run;
+            const at = Date.parse(a?.created_at);
+            return (
+              a?.name === MARKER &&
+              a.expired === false &&
+              typeof run === "object" &&
+              run !== null &&
+              String(run.repository_id) === REPOSITORY_ID &&
+              String(run.head_repository_id) === REPOSITORY_ID &&
+              run.head_branch === BRANCH &&
+              /^[1-9]\d*$/.test(String(run.id)) &&
+              /^[0-9a-f]{40}$/.test(String(run.head_sha)) &&
+              Number.isFinite(at) &&
+              at - now < 5 * 60 * 1000 &&
+              now - at < WINDOW_MS
+            );
+          };
+          // A pass that counts (the newest on the first page that holds one), or null when the list
+          // has none; every failure is thrown with a fixed message (the answer's body is never echoed)
+          const read = async () => {
+            if (!/^[1-9]\d*$/.test(REPOSITORY_ID) || !/^[\w.-]+\/[\w.-]+$/.test(REPOSITORY) || BRANCH === "" || GH_TOKEN === "" || !/^https:\/\/\S+$/.test(API_URL))
+              throw new Error("the run's context is incomplete");
+            for (let page = 1; page <= MAX_PAGES; page++) {
+              const url = new URL(`${API_URL}/repos/${REPOSITORY}/actions/artifacts`);
+              url.searchParams.set("name", MARKER);
+              url.searchParams.set("per_page", String(PER_PAGE));
+              url.searchParams.set("page", String(page));
+              let res;
+              try {
+                res = await fetch(url, {
+                  method: "GET",
+                  headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${GH_TOKEN}`, "X-GitHub-Api-Version": "2022-11-28" },
+                  signal: AbortSignal.timeout(30_000),
+                });
+              } catch {
+                throw new Error("the artifact list could not be fetched");
+              }
+              if (!res.ok) throw new Error(`the artifact list answered HTTP ${res.status}`);
+              let body;
+              try {
+                body = await res.json();
+              } catch {
+                throw new Error("the artifact list is not JSON");
+              }
+              const list = body?.artifacts;
+              if (!Array.isArray(list)) throw new Error("the answer carries no artifact list");
+              const pass = list.filter(counts).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))[0];
+              if (pass !== undefined) return pass;
+              if (list.length < PER_PAGE) return null;
+            }
+            throw new Error(`more than ${MAX_PAGES * PER_PAGE} markers to read`);
+          };
+          let pass;
+          let failure;
+          try {
+            pass = await read();
+          } catch (e) {
+            failure = e instanceof Error ? e.message : "an unknown error";
+          }
+          if (failure !== undefined) {
+            console.log(`::warning::process (macOS) runs on this push: whether this branch passed it in the last 7 days could not be read (${failure})`);
+            decide(true, "whether this branch passed it in the last 7 days could not be read");
+          } else if (pass === null) {
+            decide(true, "no pass on this branch in the last 7 days");
+          } else {
+            const at = new Date(Date.parse(pass.created_at)).toISOString();
+            decide(false, `run ${pass.workflow_run.id} passed it on ${pass.workflow_run.head_sha} at ${at}`);
+          }
+          JS
+
   process-macos:
     name: process (macOS)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: macos-due
+    # weekly (the schedule, from the default branch only, or a push macos-due finds due) or on demand;
+    # a macos-due that failed is no answer, so the suite runs; never a pull request or a tag, where
+    # macos-due is skipped
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.macos-due.outputs.due == 'true' || needs.macos-due.result == 'failure') }}
     runs-on: macos-15
     timeout-minutes: 25
     steps:
@@ -438,6 +577,21 @@ jobs:
           EFF_PROCESS_TEST_DIST: "1"
           EFF_KEYCHAIN_PROCESS_TEST: "1"
         run: npm run test:process
+      # the pass marker macos-due reads on this branch's next push: these two steps run only when
+      # every step before them passed — the commit, and nothing else, is what it holds
+      - name: Record the macOS pass (the commit) for macos-due
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/process-macos-pass"
+          printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/process-macos-pass/commit"
+      - name: Upload the pass marker (kept 8 days, past macos-due's 7-day window)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: process-macos-pass
+          path: ${{ runner.temp }}/process-macos-pass/
+          retention-days: 8
+          if-no-files-found: error
+          overwrite: true
 
   smoke:
     name: smoke
