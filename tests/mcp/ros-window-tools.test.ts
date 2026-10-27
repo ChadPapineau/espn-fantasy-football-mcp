@@ -90,7 +90,15 @@ describe("the tools' weekly values are E1's (projection-ros-includes-week18)", (
         const proj = e1.find((x) => x.player_id === p.ref.id);
         if (proj === undefined || p.injury_status !== "ACTIVE") continue;
         const v = valueWeeks(p, weeks, ros, w);
-        const wp = waiverPlayerOf(p, entry.slot_id, entry.lineup_locked, weeks, null, ros).weekly;
+        const wp = waiverPlayerOf(
+          p,
+          entry.slot_id,
+          entry.lineup_locked,
+          weeks,
+          null,
+          ros,
+          w,
+        ).weekly;
         const old = valueWeeks(p, weeks, null, w);
         for (const [i, week] of weeks.entries()) {
           const espn = proj.weeks.find((x) => x.week === week)?.inputs.espn ?? null;

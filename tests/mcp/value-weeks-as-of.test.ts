@@ -13,6 +13,8 @@ import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { describe, expect, it, vi } from "vitest";
 import type { WeeklyValuesOpts } from "../../src/domain/analytics/waivers.js";
+import { waiverPlayerOf } from "../../src/mcp/tools/analytics.js";
+import { valueWeeks } from "../../src/mcp/tools/p1-common.js";
 import { envelopeViolations } from "./helpers/walk.js";
 import { ESPN_FIXTURES, call, connect, makeWorld, type World } from "./helpers/world.js";
 
@@ -46,10 +48,9 @@ vi.mock("../../src/domain/analytics/waivers.js", async (importOriginal) => {
   };
 });
 
-const { weeklyValues } =
-  await vi.importActual<typeof import("../../src/domain/analytics/waivers.js")>(
-    "../../src/domain/analytics/waivers.js",
-  );
+const { weeklyValues } = await vi.importActual<
+  typeof import("../../src/domain/analytics/waivers.js")
+>("../../src/domain/analytics/waivers.js");
 
 const FX = path.join(ESPN_FIXTURES, "fx-10h");
 /** The finder's offer: my RB for team 10's RB, both locked in the 13:00 ET Sunday games. */
@@ -148,6 +149,38 @@ describe("valueWeeks prices every week from the as-of week (Stage C trade-locked
       fx.world.cleanup();
     }
   }, 180_000);
+
+  it("valueWeeks and waiverPlayerOf: leaving out leading value weeks never re-prices the others", () => {
+    const p = {
+      ref: { platform: "espn", id: 1 },
+      name: "Player A",
+      position: "RB",
+      position_id: 2,
+      eligible_slot_ids: [2, 23],
+      injury_status: "ACTIVE",
+      pro_team_id: 1,
+      droppable: true,
+      projection_week_espn: 18.4,
+      projection_ros_espn: 150,
+      bye_week: 9,
+      ownership: null,
+    } as never;
+    const all = Array.from({ length: 13 }, (_, i) => AS_OF + i);
+    const full = valueWeeks(p, all, null, AS_OF);
+    const fullWaiver = waiverPlayerOf(p, 20, false, all, null, null, AS_OF).weekly;
+    expect(full[0]).toBe(18.4);
+    for (let k = 1; k <= 5; k++) {
+      const later = all.slice(k);
+      expect(valueWeeks(p, later, null, AS_OF), `first ${String(k)} left out`).toEqual(
+        full.slice(k),
+      );
+      expect(waiverPlayerOf(p, 20, false, later, null, null, AS_OF).weekly).toEqual(
+        fullWaiver.slice(k),
+      );
+      // never ESPN's week-5 projection on a later week
+      expect(valueWeeks(p, later, null, AS_OF)[0]).not.toBe(18.4);
+    }
+  });
 
   it("control: Tuesday night E6 values week 5 first, and the readings agree", async () => {
     const fx = await fxWorld("");

@@ -1570,7 +1570,9 @@ export const waiversSchema = z.strictObject({
 
 /**
  * A waiver-engine player from a platform record and its value weeks, ESPN's rest-of-season total
- * read under the call's `ros` (common.ts RosReading — E1's window; null: from the first value week).
+ * read under the call's `ros` (common.ts RosReading — E1's window; null: from the as-of week).
+ * `asOf` is the week ESPN's numbers describe (the week the players were read for), never inferred
+ * from the value weeks (p1-common.ts valueWeeks; Stage C finding trade-locked-week-counted).
  */
 export function waiverPlayerOf(
   p: PlatformPlayer,
@@ -1579,6 +1581,7 @@ export function waiverPlayerOf(
   weeks: readonly Week[],
   gsis: string | null,
   ros: RosReading | null,
+  asOf: Week,
 ): WaiverPlayer {
   return {
     player_id: p.ref.id,
@@ -1592,13 +1595,10 @@ export function waiverPlayerOf(
     slot_id: slotId,
     locked,
     droppable: p.droppable,
-    weekly: weeklyValues(
-      weeks,
-      p.projection_week_espn,
-      p.projection_ros_espn,
-      p.bye_week,
-      rosOptsOf(p, ros),
-    ),
+    weekly: weeklyValues(weeks, p.projection_week_espn, p.projection_ros_espn, p.bye_week, {
+      ...rosOptsOf(p, ros),
+      from_week: asOf,
+    }),
     percent_owned: p.ownership?.percent_owned ?? null,
   };
 }
@@ -2093,13 +2093,13 @@ export const analyzeWaiversTool = defineTool({
     const gsis = (p: PlatformPlayer): string | null =>
       crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id;
     const minePlayers = mine.entries.map((e) =>
-      waiverPlayerOf(e.player, e.slot_id, e.lineup_locked, weeks, gsis(e.player), ros),
+      waiverPlayerOf(e.player, e.slot_id, e.lineup_locked, weeks, gsis(e.player), ros, w),
     );
     const candidates: WaiverCandidateInput[] = pool
       .filter((p) => p.status === "FREEAGENT" || p.status === "WAIVERS")
       .slice(0, BOUNDS.waiverCandidates.max)
       .map((p) => ({
-        ...waiverPlayerOf(p, 20, false, weeks, gsis(p), ros),
+        ...waiverPlayerOf(p, 20, false, weeks, gsis(p), ros, w),
         status: p.status === "WAIVERS" ? "WAIVERS" : "FREEAGENT",
         waiver_process_date: p.waiver_process_date,
         percent_change: p.ownership?.percent_change ?? null,

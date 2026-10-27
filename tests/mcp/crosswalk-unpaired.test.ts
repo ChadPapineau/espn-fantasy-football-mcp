@@ -132,7 +132,8 @@ describe("the nflverse joins of an unpaired player are said, never silent (Stage
       NO_PAIR_CONFIRM_PAIR,
     ]);
     expect(confirmWithoutPair([NO_PAIR_CONFIRM_PAIR])).toEqual([NO_PAIR_CONFIRM_PAIR]);
-    for (const c of [NO_PAIR_CONFIRM_ESPN, NO_PAIR_CONFIRM_PAIR]) expect(c.length).toBeLessThan(400);
+    for (const c of [NO_PAIR_CONFIRM_ESPN, NO_PAIR_CONFIRM_PAIR])
+      expect(c.length).toBeLessThan(400);
   });
 
   it("control: a paired player carries no such warning", async () => {

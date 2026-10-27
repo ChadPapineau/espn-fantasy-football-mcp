@@ -807,7 +807,7 @@ async function waiverVerdicts(
   for (const c of list) {
     const p = teammates.get(c.player_id);
     if (p === undefined || c.status === "ONTEAM") continue;
-    const base = waiverPlayerOf(p, 20, false, weeks, gsis(p), ros);
+    const base = waiverPlayerOf(p, 20, false, weeks, gsis(p), ros, b.w);
     const delta = new Map(c.delta_proj_by_week.map((x) => [x.week, x.delta]));
     candidates.push({
       ...base,
@@ -823,7 +823,7 @@ async function waiverVerdicts(
     ...waiverBase(ctx, b, mine, rosters, standings, weeks, ros),
     candidates: candidates.slice(0, BOUNDS.waiverCandidates.max),
     value_basis: "ensemble",
-    rival_rosters: rivalRosters(ctx, rosters, me, weeks, ros),
+    rival_rosters: rivalRosters(ctx, rosters, me, weeks, ros, b.w),
     deadline_ms: cpuDeadlineOf(ctx),
   };
   const res = await analyzeWaiversP1(req);
@@ -857,7 +857,7 @@ export function waiverBase(
     week: b.w,
     weeks,
     mine: mine.entries.map((e) =>
-      waiverPlayerOf(e.player, e.slot_id, e.lineup_locked, weeks, gsis(e.player), ros),
+      waiverPlayerOf(e.player, e.slot_id, e.lineup_locked, weeks, gsis(e.player), ros, b.w),
     ),
     k: standings?.teams.find((t) => t.team_id === me)?.waiver_rank ?? null,
     rivals: (standings?.teams ?? [])
@@ -884,6 +884,8 @@ export function rivalRosters(
   me: number,
   weeks: readonly Week[],
   ros: RosReading | null,
+  /** The week ESPN's numbers describe (waiverPlayerOf's `asOf`). */
+  asOf: Week,
 ): RivalRoster[] {
   return rosters
     .filter((r) => r.team.team_id !== me)
@@ -897,6 +899,7 @@ export function rivalRosters(
           weeks,
           crosswalkOf(ctx, e.player.ref.id, e.player.position_id).gsis_id,
           ros,
+          asOf,
         ),
       ),
     }));
@@ -2109,7 +2112,7 @@ export function waiverP1Extras(
   }
   return {
     usage,
-    rival_rosters: rivalRosters(ctx, rosters, me, weeks, ros),
+    rival_rosters: rivalRosters(ctx, rosters, me, weeks, ros, b.w),
     sleeper_trend: sleeper,
     mechanics,
     faab,
