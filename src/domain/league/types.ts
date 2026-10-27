@@ -146,38 +146,45 @@ export interface UntrustedText {
  */
 export type BareText = string & { readonly __bareText: true };
 
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-  ndash: "–",
-  mdash: "—",
-  hellip: "…",
-  lsquo: "‘",
-  rsquo: "’",
-  ldquo: "“",
-  rdquo: "”",
-  eacute: "é",
-  egrave: "è",
-  aacute: "á",
-  iacute: "í",
-  oacute: "ó",
-  uacute: "ú",
-  ntilde: "ñ",
-  uuml: "ü",
-  ouml: "ö",
-  auml: "ä",
-  ccedil: "ç",
-};
+/**
+ * The named entities decoded; any other name decodes to nothing. A Map, not an object literal: a
+ * lookup must see only these names, never Object.prototype's (`&constructor;` read
+ * `function Object() { [native code] }` into the text).
+ */
+const NAMED_ENTITIES: ReadonlyMap<string, string> = new Map(
+  Object.entries({
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+    ndash: "–",
+    mdash: "—",
+    hellip: "…",
+    lsquo: "‘",
+    rsquo: "’",
+    ldquo: "“",
+    rdquo: "”",
+    eacute: "é",
+    egrave: "è",
+    aacute: "á",
+    iacute: "í",
+    oacute: "ó",
+    uacute: "ú",
+    ntilde: "ñ",
+    uuml: "ü",
+    ouml: "ö",
+    auml: "ä",
+    ccedil: "ç",
+  }),
+);
 
 function decodeEntities(s: string): string {
   return s.replace(
     /&(?:#([0-9]{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/g,
     (_m, dec?: string, hex?: string, name?: string) => {
-      if (name !== undefined) return NAMED_ENTITIES[name] ?? "";
+      if (name !== undefined) return NAMED_ENTITIES.get(name) ?? "";
       const cp = dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex ?? "", 16);
       return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)
         ? String.fromCodePoint(cp)
