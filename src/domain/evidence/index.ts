@@ -14,6 +14,7 @@ export {
 } from "./attribution.js";
 export {
   availabilityClass,
+  claimAvailability,
   CLAIM_DIRECTIONS,
   CLAIM_TEXT_CAP,
   CLAIM_TYPES,

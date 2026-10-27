@@ -16,6 +16,20 @@
 // vocabulary (type, direction, rule id, designation): no part of the input text ever reaches it, so
 // an instruction in a headline cannot travel through the extractor (research 05 §6 rule 5).
 // Never a model; bounded work (the text is capped before any regex runs; every pattern is linear).
+//
+// Availability is read in its everyday wordings too (Stage C finding
+// evidence-availability-claims-missed: "is active", "is playing Sunday", "in the lineup", "is a go"
+// read as no claim, so an OUT player's "is active for Sunday" never met ESPN's OUT), each with its
+// negated mirror ("won't be active", "isn't playing Sunday"). "Is playing" and "active" are read only
+// next to the coming game — its day, night or week, an opponent, an injury he plays through, or the
+// clause's end — never "is playing well", "active in the passing game" or "the active roster". A
+// claim that he STARTS the coming game ("will start Sunday", "gets the start") stays a role claim
+// (the B8 labelling convention) and carries what it implies, that he plays: `claimAvailability` is
+// what the structured comparator reads (structured.ts), so "will start Sunday" about a player ESPN
+// lists OUT names `injury_status`. A start that is not this game's start implies nothing: practice
+// ("will start practicing"), a wish or a decision ("hoping to start", "the decision to start"), a
+// condition in its clause ("will start if healthy", "once cleared, he will start"); and "will start
+// the season on IR" is read as what it is, an IR placement.
 import type { ClaimExtract } from "../league/types.js";
 import { flagFold, sanitizeText } from "../league/types.js";
 
@@ -101,6 +115,14 @@ interface Rule {
   readonly negatable: boolean;
   /** Dropped when the text is about game officials (a referee's suspension is not a player's). */
   readonly notOfficials: boolean;
+  /** Dropped when a condition stands in its clause ("if healthy, he will start"; CONDITIONED_RE). */
+  readonly unconditional: boolean;
+  /**
+   * The availability a claim of this (non-availability) rule implies: a role claim that he starts
+   * the coming game says he plays (`will_play`). Null for every other rule — an availability rule
+   * states its own `designation`.
+   */
+  readonly implies: Designation | null;
 }
 
 const rule = (
@@ -109,7 +131,12 @@ const rule = (
   direction: ClaimDirection,
   designation: Designation | null,
   source: string,
-  opts: { negatable?: boolean; notOfficials?: boolean } = {},
+  opts: {
+    negatable?: boolean;
+    notOfficials?: boolean;
+    unconditional?: boolean;
+    implies?: Designation;
+  } = {},
 ): Rule =>
   Object.freeze({
     id,
@@ -119,12 +146,41 @@ const rule = (
     re: new RegExp(source, "g"),
     negatable: opts.negatable ?? false,
     notOfficials: opts.notOfficials ?? false,
+    unconditional: opts.unconditional ?? false,
+    implies: opts.implies ?? null,
   });
 
 const BODY =
   "(?:ankle|high[- ]ankle|knee|hamstring|groin|quad|quadriceps|calf|foot|toe|turf toe|hip|shoulder|elbow|wrist|hand|finger|thumb|back|neck|rib|ribs|chest|pectoral|oblique|achilles|acl|mcl|pcl|meniscus|abdominal|core|heel|shin|forearm|biceps|triceps|lisfranc|head|jaw|eye|illness)";
 const INJURY_NOUN =
   "(?:sprain|strain|injury|tear|fracture|bruise|contusion|issue|soreness|tightness|problem|ailment|surgery|dislocation)";
+
+/**
+ * The coming game, named by its day, night or week ("Sunday", "tonight", "this week", "Week 7",
+ * "on Monday"): what ties "is playing" or "will start" to this game, not to a season ("will start
+ * for the Bucs this year") or to practice ("will start practicing").
+ */
+const GAME_TIME = String.raw`(?:sunday|monday|thursday|saturday|friday|tuesday|wednesday|tonight|today|tomorrow|this week(?:end)?|(?:in )?week \d{1,2}|on (?:sunday|monday|thursday|saturday|friday|tuesday|wednesday))`;
+/** The end of a clause: its punctuation, a spaced dash, or the end of the text. */
+const CLAUSE_END = String.raw`(?:\s*(?:[.!?;,:)]|$)|\s+-)`;
+/** What may follow "is playing" for it to say he plays the coming game (not "is playing well"). */
+const PLAYING_GAME = String.raw`(?=${CLAUSE_END}|\s+(?:${GAME_TIME}|against|vs|versus|through|for ${GAME_TIME})\b)`;
+/**
+ * What may follow "is active" for it to be a game-day active ("active for Sunday", "active despite
+ * the ankle", "is active."), never a roster or usage word ("active roster", "active in the passing
+ * game", "active-duty").
+ */
+const ACTIVE_GAME = String.raw`(?=${CLAUSE_END}|\s+(?:${GAME_TIME}|for|against|vs|versus|again|and|but|despite|after|following|as)\b)`;
+/** What may follow "will start" / "is starting" for it to be the coming game's start. */
+const START_GAME = String.raw`(?=${CLAUSE_END}|\s+(?:${GAME_TIME}|against|vs|versus|again|for ${GAME_TIME}|in place of|in (?:his|the) (?:place|stead|absence)|for (?:the\s+)?(?:injured|sidelined|ailing|banged-up|absent|suspended|inactive)|at (?:quarterback|qb|running back|tailback|rb|wide receiver|receiver|wr|tight end|te|kicker|fullback)\s+(?:${GAME_TIME}|against|vs|versus))\b)`;
+/** "Play" as the game, never a role ("expected to play a bigger role", "to play more snaps"). */
+const PLAY_NOT_ROLE = String.raw`(?!\s+(?:(?:a|an|the|his)\s+(?:[a-z-]+\s+){0,2}(?:role|part)|more|fewer|less|a lot)\b)`;
+/**
+ * The words before "to start" that make it a wish, an attempt or a decision rather than his start
+ * ("hoping to start", "fighting to start", "the decision to start", "too banged up to start") —
+ * read as a lookbehind AFTER the words matched, so it costs nothing where "to start" is absent.
+ */
+const NOT_HIS_START = String.raw`(?<!\b(?:hopes?|hoping|wants?|wanting|aims?|aiming|try|tries|trying|attempts?|attempting|looking|fighting|battling|competing|pushing|waiting|eager|needs?|time|decision|choice|reason|chance|opportunity|bid)\s+to\s+start|\btoo\s+(?:[a-z'-]+\s+){1,3}to\s+start)`;
 
 /**
  * The rule table, in tie-break order (a hit's position decides first). Patterns read the folded,
@@ -138,7 +194,14 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "down",
     "out",
-    String.raw`\b(?:won't|wont|will not|not expected to|unlikely to|isn't expected to|is not expected to|not going to|doesn't expect to|does not expect to)\s+(?:play|suit up|dress|be available|go)\b|\b(?:unlikely|not expected|not likely)\s+(?:for|against|vs)\s+(?:week|sunday|monday|thursday|saturday|tonight|the game)\b`,
+    [
+      String.raw`\b(?:won't|wont|will not|not expected to|unlikely to|isn't expected to|is not expected to|not going to|doesn't expect to|does not expect to)\s+(?:play|suit up|dress|be available|go|be active${ACTIVE_GAME}|be playing${PLAYING_GAME}|be (?:back\s+)?in (?:the\s+)?lineup)\b`,
+      String.raw`\b(?:unlikely|not expected|not likely)\s+(?:for|against|vs)\s+(?:week|sunday|monday|thursday|saturday|tonight|the game)\b`,
+      // the mirrors of "is active" / "is playing Sunday" / "in the lineup" (claims.ts header)
+      String.raw`\b(?:isn't|is not|not)\s+(?:active${ACTIVE_GAME}|playing${PLAYING_GAME}|in (?:the\s+)?lineup\b)`,
+      // "unable to start" is no start (it precedes role.will_start's "to start" in reading order)
+      String.raw`\b(?:unable|not able|isn't able|is not able|won't be able|will not be able)\s+to\s+(?:play|suit up|dress|go|start|be active)\b`,
+    ].join("|"),
   ),
   rule(
     "availability.will_miss",
@@ -159,7 +222,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "down",
     "out",
-    String.raw`\b(?:is|was|will be|remains|remain|listed|declared|considered|officially|be|been|being)\s+out\b(?!-|\s+of\b)|\bout\s+(?:indefinitely|again|this week|sunday|monday|thursday|saturday|week \d{1,2})\b|\bout for (?:the\s+)?(?:week|weeks|game|games|sunday|monday|thursday|saturday|the rest|the remainder|several|multiple|an extended|extended|\d{1,2})\b`,
+    String.raw`\b(?:is|was|will be|remains|remain|listed|declared|considered|officially|be|been|being)\s+out\b(?!-|\s+of\b)|\bout\s+(?:indefinitely|again|this week|sunday|monday|thursday|saturday|week \d{1,2})\b|\bout for (?:the\s+)?(?:week|weeks|game|games|sunday|monday|thursday|saturday|the rest|the remainder|several|multiple|an extended|extended|\d{1,2})\b|\bout of (?:the\s+)?lineup\b`,
     { negatable: true },
   ),
   rule(
@@ -206,7 +269,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "down",
     "injured_reserve",
-    String.raw`\b(?:placed|place|places|placing|moved|moves|move|sent|put|puts)\s+(?:[a-z.'-]+\s+){0,3}?(?:on|to)\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b|\b(?:landed|lands|land|headed|heads|head|going|goes|reverts|revert|reverted|to)\s+(?:on|to)\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b|\bseason[- ]ending\b|\bout for the (?:season|year)\b`,
+    String.raw`\b(?:placed|place|places|placing|moved|moves|move|sent|put|puts)\s+(?:[a-z.'-]+\s+){0,3}?(?:on|to)\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b|\b(?:landed|lands|land|headed|heads|head|going|goes|reverts|revert|reverted|to)\s+(?:on|to)\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b|\bseason[- ]ending\b|\bout for the (?:season|year)\b|\b(?:starts|start|starting|begins|begin|beginning|opens|open|opening)\s+(?:the\s+(?:season|year)\s+)?on\s+(?:the\s+)?(?:injured reserve|ir|reserve/injured)\b`,
   ),
   rule(
     "availability.pup_nfi",
@@ -301,7 +364,24 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "availability",
     "up",
     "will_play",
-    String.raw`\b(?:will|expected to|set to|plans to|on track to|is going to|going to|in line to|should|poised to)\s+(?:play|suit up|be available|dress)\b`,
+    [
+      String.raw`\b(?:will|expected to|expects to|expect to|set to|plans to|planning to|intends to|on track to|is going to|going to|in line to|slated to|should|poised to)\s+(?:play|suit up|be available|dress)\b${PLAY_NOT_ROLE}`,
+      // a game-day active: "is active", "will be active for Sunday", a headline's "Active for Week 7"
+      String.raw`\b(?:is|be|remains|remain|stays|stay|listed as|declared|officially)\s+active\b${ACTIVE_GAME}`,
+      String.raw`(?:^|:\s*)active\b${ACTIVE_GAME}`,
+      String.raw`\bactive\s+(?:(?:for\s+)?${GAME_TIME}|against|vs|versus)\b`,
+      // "is playing Sunday", "will be playing through the ankle", a headline's "Playing Sunday"
+      String.raw`\b(?:is|be)\s+playing\b${PLAYING_GAME}`,
+      String.raw`:\s*playing\b${PLAYING_GAME}`,
+      String.raw`\bplan(?:s|ning)? on playing\b`,
+      // "is in the lineup", "will be back in the starting lineup", a headline's "In lineup Sunday"
+      String.raw`\b(?:is|be|remains|remain|stays|stay)\s+(?:back\s+)?in\s+(?:the\s+)?(?:starting\s+)?lineup\b`,
+      String.raw`(?:^|:\s*)(?:back\s+)?in\s+(?:the\s+)?(?:starting\s+)?lineup\b`,
+      // "is a go for Sunday", "a full go" (never "a go-to target")
+      String.raw`\b(?:is|be|remains)\s+a\s+(?:full\s+)?go\b(?!-)`,
+      // "is available for Sunday" (never "available in 60 % of leagues" or "for pickup")
+      String.raw`\b(?:is|remains)\s+available\s+(?:to play|to suit up|for ${GAME_TIME}|${GAME_TIME}|against|vs|versus)\b`,
+    ].join("|"),
     { negatable: true },
   ),
   rule(
@@ -428,7 +508,7 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "role",
     "down",
     null,
-    String.raw`\b(?:lose|loses|lost|losing)\s+(?:his\s+|the\s+)?(?:starting\s+|lead\s+|featured\s+)?(?:job|role|spot|gig)\b|\b(?:lose|loses|lost|losing)\s+(?:snaps|carries|targets|touches|work|reps)\b|\b(?:benched|demoted|relegated)\b|\bout-?snapped\b|\b(?:won't|will not|not expected to|isn't expected to)\s+start\b`,
+    String.raw`\b(?:lose|loses|lost|losing)\s+(?:his\s+|the\s+)?(?:starting\s+|lead\s+|featured\s+)?(?:job|role|spot|gig)\b|\b(?:lose|loses|lost|losing)\s+(?:snaps|carries|targets|touches|work|reps)\b|\b(?:benched|demoted|relegated)\b|\bout-?snapped\b|\b(?:won't|will not|not expected to|isn't expected to|is not expected to|unlikely to|not likely to|not going to|isn't going to)\s+start\b`,
   ),
   rule(
     "role.reduced",
@@ -443,6 +523,24 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     "up",
     null,
     String.raw`\b(?:lead|starting|featured|bigger|expanded|increased|larger|feature|primary|every-down|three-down|workhorse|bell-?cow)\s+(?:role|back|job|workload|duties|usage)\b`,
+  ),
+  // the coming game's start: a role claim that also says he plays (`implies`; claims.ts header) —
+  // before role.starter, which reads the same words where they are not this game's
+  rule(
+    "role.will_start",
+    "role",
+    "up",
+    null,
+    [
+      // "will start", "is expected to start", a headline's "Ostrander to start Sunday" — never
+      // "hoping to start" (NOT_HIS_START); "expected"/"set"/"in line" before "to" are read by
+      // role.starter at the phrase's own start, so negation and attribution see the whole phrase
+      String.raw`\b(?:will|to)\s+start\b${NOT_HIS_START}${START_GAME}`,
+      String.raw`(?:\b(?:is|be)\s+|:\s*)starting\b${START_GAME}`,
+      String.raw`\b(?:gets|get|getting|draws|draw|earns|earn|makes|make|making|set for|in line for)\s+(?:(?:his|the|a|an)\s+)?(?:(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|next|another|career|nfl|consecutive|straight|\d{1,2}(?:st|nd|rd|th))\s+){0,2}start\b(?!-|\s+(?:time|of|to)\b)`,
+      String.raw`\b(?:gets|get|getting|draws|draw|earns|earn|set for|in line for)\s+(?:the\s+)?starting nod\b`,
+    ].join("|"),
+    { negatable: true, unconditional: true, implies: "will_play" },
   ),
   rule(
     "role.starter",
@@ -484,6 +582,11 @@ export type RuleId = string;
 /** Every rule id, in table order. */
 export const RULE_IDS: readonly RuleId[] = Object.freeze(RULES_V1_TABLE.map((r) => r.id));
 
+/** The availability each implying rule's claims carry (`Rule.implies`), by rule id. */
+const IMPLIED: ReadonlyMap<RuleId, Designation> = new Map(
+  RULES_V1_TABLE.flatMap((r) => (r.implies === null ? [] : [[r.id, r.implies] as const])),
+);
+
 /** The extractor's full output: the plan 07 D6 `claim` plus the rule and the structured value. */
 export interface RulesV1Claim extends ClaimExtract {
   readonly extractor: typeof RULES_V1;
@@ -504,6 +607,29 @@ const NEGATED_RE =
 /** The text is about game officials: a suspension rule does not read it as a player's. */
 const OFFICIALS_RE =
   /\b(?:referees?|refs|officials?|officiating|umpires?|line judge|side judge|back judge|field judge)\b/;
+/**
+ * A condition ("if healthy", "once cleared", "pending a test", "as long as"; "once again" is none):
+ * an `unconditional` rule's hit is dropped when one stands in its clause within CONDITION_REACH
+ * characters before or after it — "will start Sunday if he clears the protocol" says nothing about
+ * an OUT player's game.
+ */
+const CONDITIONED_RE =
+  /\b(?:if|pending|provided|assuming|(?:as|so) long as)\b|\bonce\b(?!\s+again\b)/;
+/** How far a condition is looked for around an `unconditional` hit (its clause, within this). */
+const CONDITION_REACH = 60;
+
+/** Whether a condition stands in the clause of `folded[index, end)` (CONDITIONED_RE). */
+function conditioned(folded: string, index: number, end: number): boolean {
+  // the clause around the hit: back to the last sentence end or semicolon, on to the next one
+  let from = Math.max(0, index - CONDITION_REACH);
+  for (const stop of ".;!?") from = Math.max(from, folded.lastIndexOf(stop, index - 1) + 1);
+  const after = folded.slice(end, end + CONDITION_REACH);
+  const cut = after.search(/[.;!?]/);
+  return (
+    CONDITIONED_RE.test(folded.slice(from, index)) ||
+    CONDITIONED_RE.test(cut < 0 ? after : after.slice(0, cut))
+  );
+}
 
 /**
  * The copy the rules read: the plan 02 §6.2 sanitiser (HTML, entities, controls, bidi and
@@ -540,7 +666,9 @@ function hitsOf(folded: string): Hit[] {
       const index = m.index;
       if (r.notOfficials && officials) continue;
       if (r.negatable && NEGATED_RE.test(folded.slice(Math.max(0, index - 48), index))) continue;
-      out.push({ index, end: index + m[0].length, order, rule: r });
+      const end = index + m[0].length;
+      if (r.unconditional && conditioned(folded, index, end)) continue;
+      out.push({ index, end, order, rule: r });
       break; // the earliest hit of a rule is the only one that can win
     }
   });
@@ -611,6 +739,18 @@ export function ruleHits(
   text: string,
 ): readonly { readonly index: number; readonly rule: RuleId }[] {
   return hitsOf(claimFold(text)).map((h) => ({ index: h.index, rule: h.rule.id }));
+}
+
+/**
+ * The availability a claim states or implies, as a designation: an availability claim's own; for a
+ * claim whose rule implies one, that one — "will start Sunday" is a role claim that says he plays
+ * (`will_play`); null otherwise (no claim, another type, an availability claim with no designation).
+ * What the structured comparator lines up against ESPN's injury status (structured.ts).
+ */
+export function claimAvailability(c: RulesV1Claim | null): Designation | null {
+  if (c === null) return null;
+  if (c.type === "availability") return c.designation;
+  return IMPLIED.get(c.rule) ?? null;
 }
 
 /** The plan 07 D6 `claim` shape of an extract (the three public fields only). */

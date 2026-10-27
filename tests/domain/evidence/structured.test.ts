@@ -75,6 +75,74 @@ describe("structuredDisagreement", () => {
     expect(structuredDisagreement(avail(null), { injury_status: "OUT" })).toBeNull();
   });
 
+  // Stage C finding evidence-availability-claims-missed: "is active", "is playing Sunday" and "in the
+  // lineup" read as no claim, and "will start Sunday" was a role claim the comparator never read, so
+  // none of them named ESPN's OUT — the one contradiction a start/sit decision hinges on
+  it.each([
+    "White is active.",
+    "White is active for Sunday.",
+    "White is playing Sunday.",
+    "White is in the lineup Sunday.",
+    "White will start Sunday.",
+    "White gets the start Sunday",
+    "White will be available Sunday.",
+  ])("an OUT or IR player's %s → injury_status, the claim saying he plays", (text) => {
+    for (const status of ["OUT", "INJURY_RESERVE", "SUSPENSION", "DOUBTFUL"] as const)
+      expect(structuredDisagreement(extractClaim(text), { injury_status: status }), status).toEqual(
+        { field: "injury_status", structured_value: status, claim_value: "will_play" },
+      );
+    // consistent with ACTIVE, and an uncertain tag disagrees with nothing
+    for (const status of ["ACTIVE", "QUESTIONABLE", "DAY_TO_DAY"] as const)
+      expect(
+        structuredDisagreement(extractClaim(text), { injury_status: status }),
+        status,
+      ).toBeNull();
+  });
+
+  it("the mirrors name an ACTIVE player's status (plan 09 SS-INJ-2's shape)", () => {
+    for (const text of [
+      "White isn't playing Sunday",
+      "White won't be active Sunday",
+      "White is not in the lineup",
+      "White is unable to start Sunday",
+    ])
+      expect(structuredDisagreement(extractClaim(text), { injury_status: "ACTIVE" }), text).toEqual(
+        {
+          field: "injury_status",
+          structured_value: "ACTIVE",
+          claim_value: "out",
+        },
+      );
+  });
+
+  it("a start that is not this game's names nothing, and neither does a plain role claim", () => {
+    for (const text of [
+      "White will start practicing Wednesday",
+      "White will start if healthy",
+      "White is hoping to start Sunday",
+      "White named starter",
+      "White gets first-team reps",
+      "White loses starting job",
+    ])
+      expect(structuredDisagreement(extractClaim(text), { injury_status: "OUT" }), text).toBeNull();
+    // a hand-built role claim of the implying rule reads its implication; any other rule none
+    const role = (rule: string): RulesV1Claim => ({
+      type: "role",
+      direction: "up",
+      extractor: "rules_v1",
+      rule,
+      designation: null,
+      field: "text",
+    });
+    expect(structuredDisagreement(role("role.will_start"), { injury_status: "OUT" })).toEqual({
+      field: "injury_status",
+      structured_value: "OUT",
+      claim_value: "will_play",
+    });
+    expect(structuredDisagreement(role("role.starter"), { injury_status: "OUT" })).toBeNull();
+    expect(structuredDisagreement(role("__proto__"), { injury_status: "OUT" })).toBeNull();
+  });
+
   it("classes every ESPN status and every designation", () => {
     expect(ESPN_INJURY_STATUSES.map((s) => statusClass(s))).toEqual([
       "plays",

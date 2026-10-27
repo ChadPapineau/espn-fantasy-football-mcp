@@ -10,8 +10,19 @@
 // questionable tag is consistent with any report, an OUT tag is not consistent with "cleared to
 // play". The claim never changes the structured value; the comparator only names the conflict, and
 // the caller keeps the structured value (no move is ever derived from the text).
+//
+// The claim's side is what it states OR IMPLIES about his availability (claims.ts
+// `claimAvailability`; Stage C finding evidence-availability-claims-missed): "will start Sunday" is
+// a role claim, and a start says he plays, so against an OUT player it names `injury_status` with
+// `claim_value: "will_play"` like "will play Sunday" does — a start/sit decision hinges on exactly
+// that contradiction.
 import type { InjuryStatus } from "../league/types.js";
-import { availabilityClass, type AvailabilityClass, type RulesV1Claim } from "./claims.js";
+import {
+  availabilityClass,
+  claimAvailability,
+  type AvailabilityClass,
+  type RulesV1Claim,
+} from "./claims.js";
 
 /** The structured facts a claim is compared with (ESPN's view of the player). */
 export interface StructuredFacts {
@@ -43,23 +54,26 @@ export function statusClass(status: InjuryStatus | null): AvailabilityClass | nu
 }
 
 /**
- * The disagreement between an availability claim and ESPN's injury status, or null (no claim, not
- * an availability claim, no designation, an unknown status, or the classes are not opposite ends).
+ * The disagreement between the availability a claim states or implies (`claimAvailability`: an
+ * availability claim's designation, or a start's `will_play`) and ESPN's injury status, or null (no
+ * claim, nothing it says about his availability, an unknown status, or the classes are not opposite
+ * ends).
  */
 export function structuredDisagreement(
   claim: RulesV1Claim | null,
   facts: StructuredFacts,
 ): StructuredDisagreement | null {
-  if (claim?.type !== "availability" || claim.designation === null) return null;
+  const said = claimAvailability(claim);
+  if (said === null) return null;
   const s = statusClass(facts.injury_status);
   if (s === null || facts.injury_status === null) return null;
-  const c = availabilityClass(claim.designation);
+  const c = availabilityClass(said);
   const opposite = (s === "plays" && c === "out") || (s === "out" && c === "plays");
   return opposite
     ? {
         field: "injury_status",
         structured_value: facts.injury_status,
-        claim_value: claim.designation,
+        claim_value: said,
       }
     : null;
 }

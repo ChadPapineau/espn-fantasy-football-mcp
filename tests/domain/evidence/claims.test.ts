@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { INJECTIONS } from "../../../scripts/fx10h/variants.js";
 import {
   availabilityClass,
+  claimAvailability,
   CLAIM_DIRECTIONS,
   CLAIM_TEXT_CAP,
   CLAIM_TYPES,
@@ -298,6 +299,238 @@ describe("rules_v1 — conventions", () => {
       field: "text",
     });
     expect(Object.isFrozen(x)).toBe(true);
+  });
+});
+
+// Stage C finding evidence-availability-claims-missed: the everyday wordings of "he plays" read as no
+// claim ("is active", "is playing Sunday", "in the lineup") and "will start Sunday" only as a role
+// claim, so an OUT player's pasted "is active for Sunday" or "will start Sunday" never met ESPN's
+// OUT. Each wording below read null (or, for the starts, a role claim implying nothing) before.
+describe("rules_v1 — everyday availability wordings (finding evidence-availability-claims-missed)", () => {
+  it.each([
+    "Player A is active.",
+    "Player A is active for Sunday.",
+    "Player A is active",
+    "Player A will be active Sunday",
+    "Player A is expected to be active",
+    "Player A is officially active",
+    "Player A remains active for Week 7",
+    "Player A: Active for Week 7",
+    "Player A (ankle) is active, per the team",
+    "Player A active vs. Lions",
+    "Player A active for Sunday's game",
+    "Player A is active despite the ankle",
+    "Player A is playing Sunday.",
+    "Player A is playing tonight",
+    "Player A will be playing through the ankle injury",
+    "Player A is playing against the Bears",
+    "Player A: Playing Sunday",
+    "Player A plans on playing Sunday",
+    "Player A is planning to play Sunday",
+    "Player A expects to play Sunday",
+    "Player A is slated to play in Week 7",
+    "Player A is in the lineup Sunday.",
+    "Player A will be in the lineup",
+    "Player A is back in the starting lineup",
+    "Player A: In lineup Sunday",
+    "Player A is a go for Sunday",
+    "Player A is a full go",
+    "Player A is available for Sunday",
+    "Player A is available to play",
+  ])("%s → availability/up (will_play)", (text) => {
+    expect(c(text)).toBe("availability/up");
+    expect(extractClaim(text)?.designation).toBe("will_play");
+  });
+
+  it.each([
+    ["Player A won't be active Sunday", "out"],
+    ["Player A is not active", "out"],
+    ["Player A isn't active for Week 7", "out"],
+    ["Player A: Not active Sunday", "out"],
+    ["Player A isn't playing Sunday", "out"],
+    ["Player A is not playing tonight", "out"],
+    ["Player A won't be playing Sunday", "out"],
+    ["Player A is not expected to be active", "out"],
+    ["Player A won't be in the lineup Sunday", "out"],
+    ["Player A is not in the lineup", "out"],
+    ["Player A will be out of the lineup Sunday", "out"],
+    ["Player A is unable to start Sunday", "out"],
+    ["Player A won't be able to play", "out"],
+    ["Player A will start the season on IR", "injured_reserve"],
+    ["Player A to start on injured reserve", "injured_reserve"],
+  ])("%s → availability/down (%s): the negated mirrors", (text, designation) => {
+    expect(c(text)).toBe("availability/down");
+    expect(extractClaim(text)?.designation).toBe(designation);
+  });
+
+  it.each([
+    "Player A is playing well",
+    "Player A is playing his best football",
+    "Player A is playing for a new contract",
+    "Player A is active in the passing game",
+    "Player A is on the active roster",
+    "Player A has been on the active roster all year",
+    "Player A, an active-duty veteran",
+    "Player A was active last week",
+    "Player A is a go-to target",
+    "Player A is available in 60% of leagues",
+    "Player A is available for pickup",
+    "Player A remains available on waivers",
+    "Player A after playing 12 snaps in Week 4",
+  ])("%s → no claim (a look-alike)", (text) => {
+    expect(extractClaim(text)).toBeNull();
+  });
+
+  it("'play' as a role is a role claim, not 'he plays' (the widened will_play openers)", () => {
+    expect(c("Player A is expected to play a bigger role")).toBe("role/up");
+    expect(c("Player A expects to play more snaps")).toBe("role/up");
+    expect(c("Player A: Expected to play Week 5")).toBe("availability/up");
+  });
+
+  it.each([
+    "Player A will start Sunday.",
+    "Player A will start.",
+    "Player A to start Sunday",
+    "Player A to start",
+    "Player A is expected to start Sunday",
+    "Player A is set to start",
+    "Player A is starting Sunday",
+    "Player A will be starting against the Bears",
+    "Player A: Starting Sunday",
+    "Player A gets the start Sunday",
+    "Player A will get the start",
+    "Player A draws the start",
+    "Player A makes his first career start Sunday",
+    "Player A set for second start",
+    "Player A gets the starting nod",
+    "Player A will start in place of Player B",
+    "Player A will start for the injured Player B",
+    "Player A will start at running back Sunday",
+    "Player A will start in Week 7",
+    "Player A will start Sunday once again",
+    "Player A is healthy enough to start Sunday",
+    "Player A will start Sunday. If not, Player B.",
+  ])("%s → a role claim that says he plays (claimAvailability: will_play)", (text) => {
+    const x = extractClaim(text);
+    expect(c(text)).toBe("role/up");
+    expect(x?.rule).toBe("role.will_start");
+    expect(claimAvailability(x)).toBe("will_play");
+  });
+
+  it.each([
+    "Player A will start practicing Wednesday",
+    "Player A will start if healthy",
+    "If healthy, Player A will start Sunday",
+    "Player A will start Sunday if he clears the protocol",
+    "Once cleared, Player A will start",
+    "Player A is expected to start Sunday, pending a final test",
+    "Player A is hoping to start Sunday",
+    "Player A is fighting to start Sunday",
+    "Player A is too banged up to start Sunday",
+    "the decision to start Player A",
+    "Player A earned the start last week",
+    "Player A makes a strong start to the season",
+    "Player A named starter",
+    "Player A gets first-team reps",
+    "Player A will start because he was placed on injured reserve.",
+  ])("%s → still a role claim, implying nothing (not this game's start)", (text) => {
+    const x = extractClaim(text);
+    expect(c(text)).toBe("role/up");
+    expect(claimAvailability(x)).toBeNull();
+  });
+
+  it("a start that will not happen is a role claim down, never a start", () => {
+    for (const t of [
+      "Player A is unlikely to start Sunday",
+      "Player A is not expected to start Sunday",
+      "Player A is not going to start",
+      "Player A won't start Sunday",
+    ]) {
+      expect(c(t), t).toBe("role/down");
+      expect(claimAvailability(extractClaim(t)), t).toBeNull();
+    }
+  });
+
+  it("only a non-availability rule implies an availability, and only that he plays", () => {
+    const implying = RULES_V1_TABLE.filter((r) => r.implies !== null);
+    expect(implying.map((r) => r.id)).toEqual(["role.will_start"]);
+    for (const r of implying) {
+      expect(r.type).not.toBe("availability");
+      expect(r.direction).toBe("up");
+      expect(r.implies !== null && DESIGNATIONS.includes(r.implies)).toBe(true);
+      expect(r.implies === null ? null : availabilityClass(r.implies)).toBe("plays");
+    }
+    // the table's own order: the coming game's start is read before the role.starter it refines
+    expect(RULE_IDS.indexOf("role.will_start")).toBe(RULE_IDS.indexOf("role.starter") - 1);
+    // an availability claim's own designation; a start's will_play; nothing for any other claim
+    expect(claimAvailability(extractClaim("Player A: Ruled out"))).toBe("out");
+    expect(claimAvailability(extractClaim("Player A: Questionable for Week 5"))).toBe(
+      "questionable",
+    );
+    expect(claimAvailability(extractClaim("Player A signs with Bills"))).toBeNull();
+    expect(claimAvailability(extractClaim("Player A has ankle sprain"))).toBeNull();
+    expect(claimAvailability(null)).toBeNull();
+  });
+
+  it("property: every 'he plays' wording, about any subject, at any game time, reads as will_play", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom("Player A", "PLAYER A", "Player A (ankle)", "He", "Player A Jr."),
+        fc.constantFrom(
+          "is active",
+          "will be active",
+          "is expected to be active",
+          "is playing",
+          "will be playing",
+          "is in the lineup",
+          "will be back in the lineup",
+          "is a go",
+          "will play",
+          "is expected to play",
+        ),
+        fc.constantFrom(
+          "",
+          " Sunday",
+          " tonight",
+          " in Week 7",
+          " against the Bears",
+          " this week",
+        ),
+        fc.constantFrom("", ".", ", per the team.", "; the team confirmed it"),
+        (who, says, when, end) => {
+          const text = `${who} ${says}${when}${end}`;
+          expect(c(text), text).toBe("availability/up");
+          expect(claimAvailability(extractClaim(text)), text).toBe("will_play");
+        },
+      ),
+      { numRuns: 400 },
+    );
+  });
+
+  it("property: every start of the coming game, about any subject, implies he plays", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom("Player A", "PLAYER A", "Player A (ankle)", "He"),
+        fc.constantFrom(
+          "will start",
+          "is expected to start",
+          "is set to start",
+          "is starting",
+          "will be starting",
+          "to start",
+          "gets the start",
+          "will get the start",
+        ),
+        fc.constantFrom(" Sunday", " tonight", " in Week 7", " against the Bears", " this week"),
+        fc.constantFrom("", ".", ", per the team."),
+        (who, says, when, end) => {
+          const text = `${who} ${says}${when}${end}`;
+          expect(c(text), text).toBe("role/up");
+          expect(claimAvailability(extractClaim(text)), text).toBe("will_play");
+        },
+      ),
+      { numRuns: 300 },
+    );
   });
 });
 
