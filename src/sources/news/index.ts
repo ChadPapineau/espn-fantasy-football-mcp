@@ -16,6 +16,9 @@ export {
   MAX_REFS_PER_ITEM,
   type NewsPlayerRef,
   type NewsUniversePlayer,
+  percentOwnedOf,
+  PROMINENCE_RATIO,
+  PROMINENT_OWNED,
   UNIVERSE_SQL,
   universeFromEspnPlayers,
   type PlayerMatcher,
@@ -43,7 +46,14 @@ export {
   type NewsFile,
   type NewsSourceOptions,
 } from "./source.js";
-export { TEAM_HOMES, TEAM_NICKNAMES, TEAM_WORDS, teamsMentioned } from "./teams.js";
+export {
+  TEAM_HOMES,
+  TEAM_NICKNAMES,
+  TEAM_WORDS,
+  teamMentions,
+  teamsMentioned,
+  type TeamMention,
+} from "./teams.js";
 export {
   decodeBody,
   decodeXmlText,

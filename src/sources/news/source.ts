@@ -47,7 +47,7 @@ import {
   type TempFile,
 } from "../source.js";
 import { cleanLink, collapse, isPromo, NEWS_FEEDS, pubDateMs, type NewsFeedSpec } from "./feeds.js";
-import { buildPlayerMatcher, type NewsUniversePlayer } from "./match.js";
+import { buildPlayerMatcher, percentOwnedOf, type NewsUniversePlayer } from "./match.js";
 import {
   decodeBody,
   parseRss,
@@ -116,6 +116,7 @@ export function universePlayerOf(v: unknown): NewsUniversePlayer | null {
   const name = own(v, "full_name");
   const team = own(v, "team");
   const gsis = own(v, "gsis_id");
+  const share = percentOwnedOf(own(v, "percent_owned"));
   if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) return null;
   if (typeof name !== "string" || name.length === 0 || name.length > 128) return null;
   return {
@@ -123,6 +124,7 @@ export function universePlayerOf(v: unknown): NewsUniversePlayer | null {
     full_name: name,
     team: typeof team === "string" && isNflTeam(team) ? team : null,
     gsis_id: typeof gsis === "string" && GSIS_ID_RE.test(gsis) ? gsis : null,
+    ...(share === null ? {} : { percent_owned: share }),
   };
 }
 

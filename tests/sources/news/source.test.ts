@@ -670,12 +670,19 @@ describe("the wiring statements (the universe and the previous file, read from r
       team_units: { espn_id: number; espn_name?: string; espn_pro_team_id?: number }[];
     };
     const ins = db.prepare(
-      "INSERT INTO ds_players (season, espn_id, full_name, position_id, pro_team_id) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO ds_players (season, espn_id, full_name, position_id, pro_team_id, percent_owned) VALUES (?, ?, ?, ?, ?, ?)",
     );
     for (const p of roster.players)
-      ins.run(2026, p.espn_id, p.espn_name, p.espn_position_id, p.espn_pro_team_id);
-    ins.run(2026, -16001, "Falcons D/ST", 16, 1);
-    ins.run(2025, 1, "Last Season", 1, 1);
+      ins.run(
+        2026,
+        p.espn_id,
+        p.espn_name,
+        p.espn_position_id,
+        p.espn_pro_team_id,
+        p.espn_name === "Bijan Robinson" ? 99.9 : null,
+      );
+    ins.run(2026, -16001, "Falcons D/ST", 16, 1, null);
+    ins.run(2025, 1, "Last Season", 1, 1, null);
     const gsis = new Map(roster.players.map((p) => [p.espn_id, p.gsis_id]));
     const universe = universeFromEspnPlayers(
       db.prepare(UNIVERSE_SQL).all({ season: 2026 }),
@@ -686,7 +693,12 @@ describe("the wiring statements (the universe and the previous file, read from r
       team: null,
       gsis_id: "00-0033897",
     });
-    expect(universe.find((p) => p.full_name === "Bijan Robinson")).toMatchObject({ team: "ATL" });
+    // the share owned rides along (the matcher's prominence rule reads it); unknown is left out
+    expect(universe.find((p) => p.full_name === "Bijan Robinson")).toMatchObject({
+      team: "ATL",
+      percent_owned: 99.9,
+    });
+    expect(universe.find((p) => p.full_name === "Joe Mixon")).not.toHaveProperty("percent_owned");
     // a lookup that throws or returns garbage leaves the gsis id null
     const bad = universeFromEspnPlayers(db.prepare(UNIVERSE_SQL).all({ season: 2026 }), (id) => {
       if (id % 2 === 0) throw new Error("x");
@@ -854,6 +866,16 @@ describe("row rules", () => {
       team: "ATL",
       gsis_id: "00-0038542",
     });
+    // a share owned is a finite 0–100 and rides along; anything else is unknown (left out)
+    const row = { espn_id: 1, full_name: "A B" };
+    expect(universePlayerOf({ ...row, percent_owned: 42.5 })?.percent_owned).toBe(42.5);
+    for (const v of [-1, 101, Number.NaN, "50", null, Infinity])
+      expect(universePlayerOf({ ...row, percent_owned: v })).toEqual({
+        espn_id: 1,
+        full_name: "A B",
+        team: null,
+        gsis_id: null,
+      });
     for (const bad of [
       null,
       {},
