@@ -53,6 +53,7 @@ import {
   VERSION_MAX,
 } from "./repos/ops.js";
 import {
+  closingCheckpoint,
   createPrivateFile,
   immediate,
   openDatasetConnection,
@@ -612,11 +613,8 @@ export function openPublisher(
     close() {
       if (closed) return;
       closed = true;
-      try {
-        db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-      } catch {
-        // busy: the next opener checkpoints
-      }
+      // never waits for another process's reader or writer (store-close-checkpoint-blocks-exit)
+      closingCheckpoint(db);
       guard.forget(db);
       db.close();
     },

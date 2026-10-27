@@ -1,8 +1,10 @@
 // store.ts — StoreFactory.open → Store (plan 01 §5.1 one store file, WAL; §5.3 write classes; §5.5
 // dataset files as their own read-only connections, opened lazily; plan 03 §1.1 step 3 open →
-// migrate, nothing attached at startup; §1.3 close with a WAL checkpoint; §7 forward-only migrations
-// after a VACUUM INTO backup under the process lock; a newer store is refused). The cache directory
-// is 0700 and store.sqlite 0600. Ported from sibling @cf3b015, adapted (no attach loop; ESPN tables).
+// migrate, nothing attached at startup; §1.3 close with a WAL checkpoint that never waits for another
+// process — sqlite.ts closingCheckpoint, Stage C store-close-checkpoint-blocks-exit; §7 forward-only
+// migrations after a VACUUM INTO backup under the process lock; a newer store is refused). The cache
+// directory is 0700 and store.sqlite 0600. Ported from sibling @cf3b015, adapted (no attach loop;
+// ESPN tables).
 import { lstatSync, statSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -48,7 +50,13 @@ import {
   waiverRunRepository,
 } from "./repos/phase3.js";
 import { recommendationLogRepository } from "./repos/reclog.js";
-import { createPrivateFile, openStoreConnection, StatementGuard, WriteExecutor } from "./sqlite.js";
+import {
+  closingCheckpoint,
+  createPrivateFile,
+  openStoreConnection,
+  StatementGuard,
+  WriteExecutor,
+} from "./sqlite.js";
 import {
   BEST_EFFORT_BUSY_MS,
   BUSY_TIMEOUT_MS,
@@ -324,11 +332,8 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
       if (closed) return;
       closed = true;
       connections.closeAll();
-      try {
-        db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-      } catch {
-        // another process holds the lock: the next opener checkpoints
-      }
+      // never waits for another process's reader or writer (store-close-checkpoint-blocks-exit)
+      closingCheckpoint(db);
       guard.forget(db);
       db.close();
     },

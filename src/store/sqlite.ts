@@ -225,6 +225,27 @@ export function openDatasetConnection(
   return db;
 }
 
+/**
+ * The closing checkpoint of a store-role connection (plan 03 §1.3 "close with a WAL checkpoint"):
+ * folds the log into the store and truncates it when that can be done NOW, and never waits. The
+ * connection's busy_timeout drops to 0 first — it is about to close — so a TRUNCATE checkpoint that
+ * would have to wait for another process's reader or writer checkpoints what it can without blocking
+ * (SQLite then proceeds as PASSIVE and answers busy) and returns. With the connection's 5-s
+ * busy_timeout it called the busy handler for the whole BUSY_TIMEOUT_MS behind any open read
+ * transaction — the weekly VACUUM INTO backup, doctor's quick_check, `eff status`, a job's read — so
+ * `eff serve` exited 5.4 s after stdin EOF (plan 05 §4.2, plan 10 A15a: within 3 s) and every CLI
+ * job's close waited the same (Stage C finding store-close-checkpoint-blocks-exit). The frames left
+ * behind are the next opener's (or the last connection's close's) to checkpoint. Never throws.
+ */
+export function closingCheckpoint(db: DatabaseSync): void {
+  try {
+    db.exec("PRAGMA busy_timeout = 0");
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  } catch {
+    // busy or unable: the next opener checkpoints
+  }
+}
+
 /** Runs `fn` inside `BEGIN IMMEDIATE … COMMIT` (the writer lock is taken up front). */
 export function immediate<T>(db: DatabaseSync, fn: () => T): T {
   db.exec("BEGIN IMMEDIATE");
