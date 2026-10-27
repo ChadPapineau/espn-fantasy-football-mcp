@@ -604,25 +604,45 @@ export function toListItem(
   };
 }
 
+/** A subject with its model-authored slot label read back (RECLOG_TEXT_PATHS). */
+function readBackSubject(s: RecSubject): RecSubject {
+  return { ...s, slot: s.slot === null ? null : readBack(s.slot) };
+}
+
 /**
  * The read-back form of a record (`espn-ff://rec/{log_id}`): no `league_id` (toRecordView) and every
  * RECLOG_TEXT_PATHS field sanitised and capped (control, bidi, zero-width and markup removed) — the
- * reader still path-lists them with source `store.recommendation_log` (plan 07 C15).
+ * free text and the labels whose grammars spell words (slots, the decision metric, provenance tags,
+ * tool names, `client_ref`); the reader still path-lists them with source `store.recommendation_log`
+ * (plan 07 C15). Every other position (RECLOG_STRING_PATHS `code`/`minted`) is returned as stored.
  */
 export function readBackView(record: RecommendationRecord): RecommendationRecordView {
   const view = toRecordView(record);
+  const r = view.rec;
   return {
     ...view,
     rec: {
-      ...view.rec,
-      action: readBack(view.rec.action),
-      drivers: view.rec.drivers.map((d) => ({ ...d, name: readBack(d.name) })),
-      assumptions: view.rec.assumptions.map((a) => ({
+      ...r,
+      action: readBack(r.action),
+      subjects: r.subjects.map(readBackSubject),
+      lineup: r.lineup === null ? null : r.lineup.map((s) => ({ ...s, slot: readBack(s.slot) })),
+      decision_metric: readBack(r.decision_metric),
+      drivers: r.drivers.map((d) => ({ ...d, name: readBack(d.name) })),
+      assumptions: r.assumptions.map((a) => ({
         text: readBack(a.text),
         revisit_trigger: readBack(a.revisit_trigger),
       })),
+      confidence: {
+        ...r.confidence,
+        inputs: r.confidence.inputs.map((i) => ({ ...i, source: readBack(i.source) })),
+      },
     },
-    alternatives: view.alternatives.map((a) => ({ ...a, action: readBack(a.action) })),
+    alternatives: view.alternatives.map((a) => ({
+      ...a,
+      action: readBack(a.action),
+      subjects: a.subjects.map(readBackSubject),
+    })),
+    source_calls: view.source_calls.map((s) => ({ ...s, tool: readBack(s.tool) })),
     note: view.note === null ? null : readBack(view.note),
     client_ref: view.client_ref === null ? null : readBack(view.client_ref),
   };

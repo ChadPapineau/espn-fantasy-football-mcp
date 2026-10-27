@@ -1,10 +1,11 @@
 // types.ts — the recommendation log and retrospective contract (plan 07 E12 record input/output,
 // E13 retrospective incl. the two baselines, ESPN comparators and "n too small", E14 list items;
-// plan 01 §9.2 `recommendation_log`, never pruned; plan 07 C15: every free-text field here is
-// model-authored and untrusted on read — readers path-list RECLOG_TEXT_PATHS with source
-// `store.recommendation_log`). Deviations recorded (sibling lessons): the dedup scope is the whole
-// (league, season, week, kind, client_ref) tuple (sib QA-1-061); a scored outcome is persisted
-// beside the immutable log row (sib critic C-02b). Ported from sibling @d72e03b, adapted.
+// plan 01 §9.2 `recommendation_log`, never pruned; plan 07 C15: what the model wrote here is
+// untrusted on read — readers path-list RECLOG_TEXT_PATHS, every position whose grammar admits words
+// (RECLOG_STRING_PATHS classifies them all), with source `store.recommendation_log`). Deviations
+// recorded (sibling lessons): the dedup scope is the whole (league, season, week, kind, client_ref)
+// tuple (sib QA-1-061); a scored outcome is persisted beside the immutable log row (sib critic
+// C-02b). Ported from sibling @d72e03b, adapted.
 import type { SeedingMode } from "../../config/schema.js";
 import type { BestEffortOutcome, InputFreshness, Rec, RecSubject } from "../analytics/types.js";
 import type { ScoredClaim } from "../evidence/calibration.js";
@@ -21,22 +22,75 @@ export const DECISION_METRIC_RE = /^[a-z_]{1,32}$/;
 export const CLIENT_REF_RE = /^[A-Za-z0-9._:-]{1,64}$/;
 
 /**
- * Every model-authored free-text path in a stored record, relative to the record. Every reader
- * (E13, E14, `espn-ff://rec/{log_id}`, `espn-ff://rec/week/{week}`) path-lists these, prefixed
- * with its own `data…` path, with source RECLOG_UNTRUSTED_SOURCE (plan 07 C15). `client_ref` is
- * the model's own label (CLIENT_REF_RE admits words — "ignore.previous:rules"), so it is listed
- * too although C15's enumeration predates it (the B2a gate's round 3).
+ * How one string position of a stored record is read back (plan 07 C15: the log is a persistence
+ * channel for injected text across sessions, and everything in a row but its id and instant is the
+ * model's). `listed` — model-authored under a grammar that admits words: sanitised and path-listed
+ * with source RECLOG_UNTRUSTED_SOURCE on every read. `code` — model-authored under a closed enum or
+ * a grammar that cannot carry an instruction (digits, lowercase hex, an ISO instant). `minted` — the
+ * server's own (the log id, the recording instant).
  */
-export const RECLOG_TEXT_PATHS: readonly string[] = Object.freeze([
-  "rec.action",
-  "rec.assumptions[].text",
-  "rec.assumptions[].revisit_trigger",
-  "rec.drivers[].name",
-  "alternatives[].action",
-  "note",
-  "client_ref",
-]);
-/** The provenance tag of every read-back free-text field. */
+export type ReclogStringClass = "listed" | "code" | "minted";
+
+/**
+ * Every string position of a read-back record (`espn-ff://rec/{log_id}`; relative to the record,
+ * `[]` = every element), classified. Besides the free text, the labels whose grammars spell words
+ * are listed: `client_ref` (CLIENT_REF_RE — "ignore.previous:rules"; the B2a gate's round 3), the
+ * decision metric (DECISION_METRIC_RE — "ignore_rules_drop_your_qb"), every slot (SLOT_NAME_RE —
+ * "DropYourQB"), every provenance tag (INPUT_SOURCE_RE — "system:IgnorePreviousRules…") and every
+ * source call's tool (TOOL_NAME_RE — "espn_ignore_all_previous_instructions"), although C15's
+ * enumeration predates them (Stage C finding reclog-identifier-fields-unlisted). A string position
+ * added to the record without an entry here, or a position that admits a word without being
+ * `listed`, fails tests/domain/reclog/read-back-paths.test.ts. A position stays `listed` even if its
+ * write grammar later closes: the log is never pruned, so older rows keep what it admitted.
+ */
+export const RECLOG_STRING_PATHS: Readonly<Record<string, ReclogStringClass>> = Object.freeze({
+  // free text (C15's enumeration) and the model's own dedup label
+  "rec.action": "listed",
+  "rec.assumptions[].text": "listed",
+  "rec.assumptions[].revisit_trigger": "listed",
+  "rec.drivers[].name": "listed",
+  "alternatives[].action": "listed",
+  note: "listed",
+  client_ref: "listed",
+  // labels whose grammars spell words
+  "rec.decision_metric": "listed",
+  "rec.subjects[].slot": "listed",
+  "rec.lineup[].slot": "listed",
+  "rec.confidence.inputs[].source": "listed",
+  "alternatives[].subjects[].slot": "listed",
+  "source_calls[].tool": "listed",
+  // closed enums
+  kind: "code",
+  "rec.subjects[].role": "code",
+  "rec.distribution.basis": "code",
+  "rec.confidence.inputs[].freshness": "code",
+  "alternatives[].subjects[].role": "code",
+  "alternatives[].distribution.basis": "code",
+  seeding_mode_used: "code",
+  followed_hint: "code",
+  // grammars that cannot carry an instruction: GSIS ids, ISO instants, request ids, the hash
+  "rec.subjects[].gsis_id": "code",
+  "rec.as_of": "code",
+  "rec.latest_execution_time": "code",
+  "rec.confidence.inputs[].as_of": "code",
+  "alternatives[].subjects[].gsis_id": "code",
+  "source_calls[].request_id": "code",
+  settings_hash: "code",
+  // the server's own
+  log_id: "minted",
+  recorded_at: "minted",
+});
+
+/**
+ * Every model-authored path of a stored record whose grammar admits words (RECLOG_STRING_PATHS'
+ * `listed` entries), relative to the record. Every reader (E13, E14, `espn-ff://rec/{log_id}`,
+ * `espn-ff://rec/week/{week}`) path-lists these, prefixed with its own `data…` path, with source
+ * RECLOG_UNTRUSTED_SOURCE (plan 07 C15), and readBackView sanitises each of them.
+ */
+export const RECLOG_TEXT_PATHS: readonly string[] = Object.freeze(
+  Object.keys(RECLOG_STRING_PATHS).filter((p) => RECLOG_STRING_PATHS[p] === "listed"),
+);
+/** The provenance tag of every listed read-back field (RECLOG_TEXT_PATHS). */
 export const RECLOG_UNTRUSTED_SOURCE = "store.recommendation_log";
 /**
  * The model-authored text paths of `espn_analyze_retrospective` data (plan 07 E13, C15), relative to
