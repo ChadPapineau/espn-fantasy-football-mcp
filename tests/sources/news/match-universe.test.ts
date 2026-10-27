@@ -22,6 +22,7 @@ import {
   universeFromEspnPlayers,
   type NewsUniversePlayer,
 } from "../../../src/sources/news/index.js";
+import { labelledItems } from "./helpers.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 const universe = universeFromEspnPlayers(
@@ -102,6 +103,31 @@ describe("a shared full name (news-match-universe-homonyms)", () => {
     expect(refs("Vikings WR Justin Jefferson: Questionable vs. Browns")).toEqual([
       [WR_JEFFERSON, "full_name_team"],
     ]);
+  });
+
+  it("every labelled real title opening with a >= 1 %-owned player's full name refs him", () => {
+    // the finding's measure: of the 71 labelled titles, those opening with such a name (as ESPN
+    // spells it) and getting no ref were exactly the Lamar Jackson items (a 0.11 %-owned free-agent
+    // namesake blocked them)
+    const owned = universe.filter((p) => (p.percent_owned ?? 0) >= PROMINENT_OWNED);
+    const opens = (title: string, name: string): boolean =>
+      title.toLowerCase().startsWith(name.toLowerCase()) &&
+      !/^[\p{L}\p{N}]/u.test(title.slice(name.length));
+    let opening = 0;
+    for (const it of [
+      ...labelledItems(),
+      ...labelledItems("fixtures/news/labelled/holdout.json"),
+    ]) {
+      const subjects = owned.filter((p) => opens(it.title, p.full_name));
+      if (subjects.length === 0) continue;
+      opening++;
+      const got = m.match(it.title).map((r) => r.espn_id);
+      expect(
+        subjects.some((p) => got.includes(p.espn_id)),
+        it.title,
+      ).toBe(true);
+    }
+    expect(opening).toBe(13);
   });
 
   it("namesakes neither prominent nor told apart by a team get no ref", () => {
