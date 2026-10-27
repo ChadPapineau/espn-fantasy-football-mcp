@@ -16,6 +16,7 @@ import {
 import type { RecordRecommendationInput } from "../../src/domain/reclog/types.js";
 import { LOG_ID_RE } from "../../src/domain/reclog/types.js";
 import type { StatLine } from "../../src/domain/scoring/types.js";
+import { pickGsisPair } from "../../src/mcp/tools/common.js";
 import { decodeSamples, encodeSamples, SAMPLES_MAX } from "../../src/store/repos/projection.js";
 import { newLogId } from "../../src/store/repos/reclog.js";
 import type { DriftStateRow, RefreshLogRow, Store } from "../../src/store/types.js";
@@ -659,6 +660,57 @@ describe("crosswalk", () => {
     s.repos.crosswalk.touch([1], "2026-10-09T00:00:01.000Z");
     expect(s.repos.crosswalk.get(1)?.last_seen).toBe("2026-10-09T00:00:01.000Z");
     expect(s.repos.crosswalk.touch([], "2026-10-09T00:00:01.000Z")).toEqual({ written: true });
+  });
+
+  it("a pair moved to another gsis starts its own pairing (first_seen is the new pair's); a new method on the same gsis keeps it (Stage C crosswalk-rewrite-keeps-first-seen)", () => {
+    const SEP1 = "2026-09-01T00:00:00.000Z";
+    const OCT1 = "2026-10-01T00:00:00.000Z";
+    const OCT18 = "2026-10-18T00:00:00.000Z";
+    const OCT20 = "2026-10-20T00:00:00.000Z";
+    s.repos.crosswalk.upsertDelta([pair(111, "00-0000009", { first_seen: SEP1, last_seen: SEP1 })]);
+    s.repos.crosswalk.upsertDelta([
+      pair(222, "00-0000001", { first_seen: OCT1, last_seen: OCT18 }),
+    ]);
+    // the resolver's correction of 111 (resolver.ts `matched`: a changed gsis is paired now)
+    expect(
+      s.repos.crosswalk.upsertDelta([
+        pair(111, "00-0000001", { first_seen: OCT20, last_seen: OCT20 }),
+      ]),
+    ).toBe(1);
+    expect(s.repos.crosswalk.get(111)).toEqual(
+      pair(111, "00-0000001", { first_seen: OCT20, last_seen: OCT20 }),
+    );
+    // the reverse lookup's last-resort rule (the later pairing) now reads the correction
+    const pick = pickGsisPair("00-0000001", s.repos.crosswalk.byGsis("00-0000001"), {
+      universe: null,
+      overrides: new Map(),
+      nflverse: null,
+    });
+    expect(pick).toMatchObject({ kind: "one", pair: { espn_id: 111 }, established: false });
+    // the same gsis under a new method, source and confidence is the same pairing: its start stays,
+    // whatever first_seen the caller hands in
+    expect(
+      s.repos.crosswalk.upsertDelta([
+        pair(111, "00-0000001", {
+          method: "match",
+          source: "matcher",
+          confidence: 0.9,
+          first_seen: "2026-10-25T00:00:00.000Z",
+          last_seen: OCT20,
+        }),
+      ]),
+    ).toBe(1);
+    expect(s.repos.crosswalk.get(111)).toMatchObject({
+      method: "match",
+      confidence: 0.9,
+      first_seen: OCT20,
+    });
+    // and a pair moved back to an earlier gsis is a new pairing again
+    const OCT26 = "2026-10-26T00:00:00.000Z";
+    s.repos.crosswalk.upsertDelta([
+      pair(111, "00-0000009", { first_seen: OCT26, last_seen: OCT26 }),
+    ]);
+    expect(s.repos.crosswalk.get(111)).toMatchObject({ first_seen: OCT26, last_seen: OCT26 });
   });
 
   it("refuses malformed pairs (team units, bad gsis, unknown method/source, confidence outside 0..1)", () => {

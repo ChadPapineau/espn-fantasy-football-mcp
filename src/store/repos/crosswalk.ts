@@ -4,7 +4,10 @@
 // last_seen only at LAST_SEEN_GRANULARITY_MS grain. Ported from sibling @cf3b015, adapted (ESPN ids
 // are the key; D/ST units are never paired, so ids are positive). A rebuild removes the pairs it
 // rejects through `removeRejected`, a compare-and-delete (Stage C finding
-// crosswalk-rejected-pair-persists: the tool-time path reads the stored row, plan 07 C1).
+// crosswalk-rejected-pair-persists: the tool-time path reads the stored row, plan 07 C1). A row's
+// first_seen is when its CURRENT pairing began: an upsert that moves an ESPN id to another gsis
+// writes the pair's first_seen (Stage C finding crosswalk-rewrite-keeps-first-seen: the row kept its
+// previous pairing's, so the reverse lookup's "later pairing" tie-break picked the other ESPN id).
 import { GSIS_ID_RE } from "../../config/schema.js";
 import {
   LAST_SEEN_GRANULARITY_MS,
@@ -108,19 +111,27 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
       if (checked.length === 0) return 0;
       return writes.requiredTx("crosswalk", () => {
         const sel = db.prepare(
-          "SELECT gsis_id, method, source, confidence FROM crosswalk WHERE espn_id = ?",
+          "SELECT gsis_id, method, source, confidence, first_seen FROM crosswalk WHERE espn_id = ?",
         );
         const ins = db.prepare(
           `INSERT INTO crosswalk (${COLS}, last_seen_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         );
         const upd = db.prepare(
-          `UPDATE crosswalk SET gsis_id = ?, method = ?, source = ?, confidence = ?, last_seen = ?, last_seen_ms = ?
+          `UPDATE crosswalk SET gsis_id = ?, method = ?, source = ?, confidence = ?, first_seen = ?,
+             last_seen = ?, last_seen_ms = ?
            WHERE espn_id = ?`,
         );
         let written = 0;
         for (const { p, ms } of checked) {
           const cur = sel.get(p.espn_id) as
-            { gsis_id: string; method: string; source: string; confidence: number } | undefined;
+            | {
+                gsis_id: string;
+                method: string;
+                source: string;
+                confidence: number;
+                first_seen: string;
+              }
+            | undefined;
           if (cur === undefined) {
             ins.run(
               p.espn_id,
@@ -139,7 +150,20 @@ export function crosswalkRepository({ db, writes }: RepoDeps): CrosswalkReposito
             cur.source !== p.source ||
             cur.confidence !== p.confidence
           ) {
-            upd.run(p.gsis_id, p.method, p.source, p.confidence, p.last_seen, ms, p.espn_id);
+            // first_seen is when THIS pairing began: a row moved to another gsis starts a new one
+            // and takes the pair's; the same gsis under a new method, source or confidence is the
+            // same pairing and keeps its own
+            const firstSeen = cur.gsis_id === p.gsis_id ? cur.first_seen : p.first_seen;
+            upd.run(
+              p.gsis_id,
+              p.method,
+              p.source,
+              p.confidence,
+              firstSeen,
+              p.last_seen,
+              ms,
+              p.espn_id,
+            );
             written += 1;
           }
         }
