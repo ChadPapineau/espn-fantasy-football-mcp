@@ -5,6 +5,7 @@
 // Adapted from the sibling's tests/lint/scan-secrets.test.ts (@d72e03b). Every well-formed value
 // below is ASSEMBLED AT RUN TIME so this file itself stays clean for both scanners.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
@@ -18,19 +19,33 @@ import {
 import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CROSS_LINE_RULE_IDS,
+  EMBED_MIN_BYTES,
   FAKE_GUID,
+  MAX_EMBED_DEPTH,
   MAX_GZIP_LAYERS,
   NUMERIC_ALNUM_BOUNDARY,
+  OPAQUE_FORMATS,
+  REVIEWED_BINARIES,
+  RULES,
   SKELETON_MIN,
+  canCrossLines,
   containerKind,
+  dataUriPayloads,
   decodeLayers,
   decodeText,
   gzipMembers,
   isOpaqueBinary,
+  isReviewedBinary,
+  leagueBodyFindings,
   lineFindingIds,
   lineRuleIds,
   numericTermRe,
+  opaqueKind,
   pathFindings,
+  rawRuleFindings,
+  refFindings,
+  refSpellings,
   scanBlob,
   skeleton,
   denylistLines,
@@ -42,8 +57,15 @@ import {
   parseDenylist,
   rawDenyViews,
   scanText,
+  textRuleHits,
 } from "../../scripts/dev/scan-secrets.mjs";
-import { fakeEspnS2, fakeGuid } from "../../scripts/ci/secret-fixtures.mjs";
+import {
+  fakeEspnS2,
+  fakeGuid,
+  fakeIpv4,
+  fakeLeagueId,
+  mustFlag,
+} from "../../scripts/ci/secret-fixtures.mjs";
 import { ROOT, tempDir } from "../lint/helpers.js";
 
 const SCANNER = path.join(ROOT, "scripts", "dev", "scan-secrets.mjs");
@@ -54,6 +76,11 @@ const ip = (...o: number[]) => o.join(".");
 const homePath = (kind: string, name: string, rest = "x") => ["", kind, name, rest].join("/");
 const kv = (key: string, sep: string, value: string) => [key, sep, value].join("");
 const FAKE = (nn: string) => ["00000000", "0000", "4000", "8000", `0000000000${nn}`].join("-");
+/** A reviewed-binary entry for exactly these bytes at this path (REVIEWED_BINARIES' shape). */
+const reviewOf = (p: string, bytes: Buffer) => ({
+  path: p,
+  sha256: createHash("sha256").update(bytes).digest("hex"),
+});
 
 let tmp: ReturnType<typeof tempDir> | undefined;
 afterEach(() => {
@@ -681,7 +708,8 @@ describe("S3: league ids in every spelling, envelope and parsed fixtures", () =>
     expect(
       scanText("fixtures/y.json", JSON.stringify({ gameId: 1, id: 2026, name: "2026" }), []),
     ).toEqual([]);
-    expect(scanText("docs/y.json", pretty, [])).toEqual([]);
+    // outside fixtures/ too (Stage C finding scan-league-envelope-per-line: this was clean)
+    expect(scanText("docs/y.json", pretty, [])).toContain("docs/y.json  [espn-league-root-id]");
     expect(scanText("fixtures/y.json", "{not json", [])).toEqual([]);
   });
 });
@@ -827,12 +855,13 @@ describe("fails closed on content it cannot scan", () => {
     expect(r.status).toBe(1);
   });
 
-  it("still skips a genuine binary image format, and says so; a .png without NUL is scanned", () => {
+  it("refuses a genuine binary image no person has reviewed, and says so; a .png without NUL is scanned as text", () => {
     tmp = tempDir("eff-scan-");
     writeFileSync(path.join(tmp.dir, "a.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 1, 2]));
     const r = scan(tmp.dir, ["--", "a.png"]);
-    expect(r.status).toBe(0);
-    expect(r.out).toMatch(/1 binary file\(s\) skipped/);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("a.png  [unreviewed-binary] (its bytes are a PNG image");
+    expect(r.out).not.toContain("scan-secrets: clean");
     writeFileSync(path.join(tmp.dir, "shot.png"), `token = ${TOKEN}\n`);
     expect(scan(tmp.dir, ["--", "shot.png"]).status).toBe(1);
   });
@@ -1096,7 +1125,7 @@ describe("S7: document containers and compressed streams are refused by their by
       for (const name of ["x.dat", "notes.md", "pic.png", "lib.so"]) {
         const r = scanBlob(name, make(), DENY());
         expect(r.scanned, name).toBe(0);
-        expect(r.binary, name).toBe(0);
+        expect(r.reviewed, name).toBe(0);
         expect(
           r.findings.some((f) => f.startsWith(`${name}  [unscannable-archive-or-database]`)),
         ).toBe(true);
@@ -1129,15 +1158,17 @@ describe("S7: document containers and compressed streams are refused by their by
     expect(scanBlob("a.tgz", gzipSync(tar), []).findings.join()).toMatch(/tar archive/);
   });
 
-  it("still skips a genuine opaque binary (magic + extension) with the deny-list on its bytes; a lookalike name alone skips nothing", () => {
+  it("refuses a genuine opaque binary (magic + extension) no person reviewed, with the deny-list on its bytes; a lookalike name alone is no binary", () => {
     const png = Buffer.concat([
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]),
       Buffer.from(LEAK_TEAM),
     ]);
     const r = scanBlob("a.png", png, DENY());
-    expect(r.binary).toBe(1);
+    expect(r.reviewed).toBe(0);
     // the PNG signature carries "\r\n" and "\n": the term sits on the third latin1 "line"
-    expect(r.findings).toEqual(["deny-list match in a.png:3"]);
+    expect(r.findings).toHaveLength(2);
+    expect(r.findings[0]).toMatch(/^a\.png {2}\[unreviewed-binary\] \(its bytes are a PNG image/);
+    expect(r.findings[1]).toBe("deny-list match in a.png:3");
     expect(isOpaqueBinary("a.png", png)).toBe(true);
     expect(isOpaqueBinary("a.jpg", png)).toBe(false); // the magic of another format
     expect(isOpaqueBinary("a.txt", png)).toBe(false); // not an opaque extension
@@ -1365,13 +1396,22 @@ describe("the deny-list reads a skipped or refused blob in every byte reading", 
       () => Buffer.concat([Buffer.from([7]), utf16be(`artist=${ACCENTED};`)]),
     ],
   ])(
-    "a genuine PNG carrying %s is still skipped, and the deny-list matches it",
+    "a genuine PNG carrying %s is refused, and the deny-list matches it — reviewed or not",
     (_label, field) => {
-      const r = scanBlob("shot.png", png(field()), deny());
-      expect(r.binary).toBe(1);
-      expect(r.findings.length).toBeGreaterThanOrEqual(1);
-      expect(r.findings.every((f) => /^deny-list match in shot\.png:\d+$/.test(f))).toBe(true);
+      const bytes = png(field());
+      const r = scanBlob("shot.png", bytes, deny());
+      expect(r.reviewed).toBe(0);
+      expect(r.findings[0]).toMatch(/^shot\.png {2}\[unreviewed-binary\]/);
+      expect(r.findings.length).toBeGreaterThanOrEqual(2);
+      expect(r.findings.slice(1).every((f) => /^deny-list match in shot\.png:\d+$/.test(f))).toBe(
+        true,
+      );
       noLeakS7(r.findings.join("\n"));
+      // reviewed (its path and these bytes' sha256): no refusal, and the deny-list still reads it
+      const rr = scanBlob("shot.png", bytes, deny(), { reviewed: [reviewOf("shot.png", bytes)] });
+      expect(rr.reviewed).toBe(1);
+      expect(rr.findings.length).toBeGreaterThanOrEqual(1);
+      expect(rr.findings.every((f) => /^deny-list match in shot\.png:\d+$/.test(f))).toBe(true);
     },
   );
 
@@ -1386,13 +1426,18 @@ describe("the deny-list reads a skipped or refused blob in every byte reading", 
   });
 
   it("one finding per line, whichever readings see it; nothing without a term; nothing printed", () => {
-    // ASCII: the latin1, UTF-8 and NUL-free readings all see it — reported once
-    const once = scanBlob("shot.png", png(Buffer.from(LEAK_TEAM)), deny());
-    expect(once.findings).toEqual(["deny-list match in shot.png:3"]);
-    expect(
-      scanBlob("shot.png", png(Buffer.from("nothing here", "utf16le")), deny()).findings,
-    ).toEqual([]);
-    expect(scanBlob("shot.png", png(Buffer.from(LEAK_TEAM)), []).findings).toEqual([]);
+    // ASCII: the latin1, UTF-8 and NUL-free readings all see it — reported once (a reviewed PNG,
+    // so the deny-list's findings are all there is)
+    const scanReviewed = (b: Buffer, d: string[]) =>
+      scanBlob("shot.png", b, d, { reviewed: [reviewOf("shot.png", b)] }).findings;
+    const team = png(Buffer.from(LEAK_TEAM));
+    expect(scanReviewed(team, deny())).toEqual(["deny-list match in shot.png:3"]);
+    expect(scanReviewed(png(Buffer.from("nothing here", "utf16le")), deny())).toEqual([]);
+    expect(scanReviewed(team, [])).toEqual([]);
+    // unreviewed: the same deny-list findings after the one refusal
+    const once = scanBlob("shot.png", team, deny()).findings;
+    expect(once.slice(1)).toEqual(["deny-list match in shot.png:3"]);
+    expect(once[0]).toMatch(/\[unreviewed-binary\]/);
   });
 
   it("rawDenyViews: latin1 and UTF-8 always; without NULs and as UTF-16 (both orders, both alignments) when NULs are there", () => {
@@ -1740,5 +1785,974 @@ describe("every rule runs over every scanned path; the path is never printed", (
     writeFileSync(path.join(tmp.dir, "MSG"), "feat: x\n");
     const r = scan(tmp.dir, ["--message", "MSG"]);
     expect(r.status, r.out).toBe(0);
+  });
+});
+
+// --- matches across line breaks ------------------------------------------------------------------
+// (Stage C finding scan-league-envelope-per-line: every rule ran one line at a time and the league
+// body walk read only fixtures/**/*.json, so a body written one key per line — JSON.stringify(v,
+// null, 2), prettier — passed outside fixtures/, where gitleaks, reading the whole file, flagged it
+// after the push.) Every value is assembled at run time.
+describe("matches that span line breaks are found as gitleaks finds them", () => {
+  const id8 = () => fakeLeagueId("cross-line", 8);
+  const guid = () => fakeGuid("cross-line");
+  const hex32 = () => createHash("sha256").update("cross-line odds").digest("hex").slice(0, 32);
+  /** The finding's repro body, in ESPN's (sorted) key order. */
+  const body = () => ({
+    draftDetail: {},
+    gameId: 1,
+    id: Number(id8()),
+    members: [],
+    scoringPeriodId: 7,
+    seasonId: 2026,
+    segmentId: 0,
+  });
+  /** The 1-based lines each rule reports in `text` (scanText). */
+  const hitsOf = (text: string, label = "x.txt") => {
+    const out = new Map<string, number[]>();
+    for (const f of scanText(label, text, [])) {
+      const m = /:(\d+) {2}\[([a-z0-9:-]+)\]$/.exec(f);
+      if (m) out.set(m[2] ?? "", [...(out.get(m[2] ?? "") ?? []), Number(m[1])]);
+    }
+    return out;
+  };
+
+  it("the Stage C repro over the CLI: a pretty-printed league body outside fixtures/ is refused (CI conditions: no deny-list)", () => {
+    tmp = tempDir("eff-scan-");
+    mkdirSync(path.join(tmp.dir, "tests", "contract", "data"), { recursive: true });
+    writeFileSync(
+      path.join(tmp.dir, "tests", "contract", "data", "mSettings.json"),
+      `${JSON.stringify(body(), null, 2)}\n`,
+    );
+    writeFileSync(path.join(tmp.dir, "min.json"), `${JSON.stringify(body())}\n`);
+    const r = scan(tmp.dir, ["--", "tests/contract/data/mSettings.json", "min.json"]);
+    expect(r.status, r.out).toBe(1);
+    // the envelope where "gameId" is (line 3 of the pretty body), and the parsed root id
+    expect(r.out).toContain("tests/contract/data/mSettings.json:3  [espn-league-envelope]");
+    expect(r.out).toContain("tests/contract/data/mSettings.json  [espn-league-root-id]");
+    expect(r.out).toContain("min.json:1  [espn-league-envelope]");
+    expect(r.out).not.toContain(id8());
+    expect(r.out).not.toContain("scan-secrets: clean");
+  });
+
+  it.each<[string, () => string[], string, number]>([
+    [
+      "a league body one key per line",
+      () => ["{", '  "gameId": 1,', `  "id": ${id8()},`, '  "members": []', "}"],
+      "espn-league-envelope",
+      2,
+    ],
+    [
+      "a pretty-printed leagueIds array",
+      () => ["{", '  "leagueIds": [', `    ${id8()}`, "  ]", "}"],
+      "espn-league-id",
+      2,
+    ],
+    ["a wrapped prose league id", () => ["the league id:", `  ${id8()}`], "espn-league-id", 1],
+    [
+      "an espn_s2 assignment with the value on the next line",
+      () => ["espn_s2 =", `  "${fakeEspnS2("cross-line", 100)}"`],
+      "espn-s2-cookie",
+      1,
+    ],
+    [
+      "a SWID field with the value on the next line",
+      () => ['  "swid":', `    "${guid()}"`],
+      "espn-swid",
+      1,
+    ],
+    [
+      "a Cookie header wrapped after SWID=",
+      () => ["Cookie: SWID=", `  {${guid()}}`],
+      "cookie-header",
+      1,
+    ],
+    [
+      "a clientAddress field with the value on the next line",
+      () => [['  "client', 'Address":'].join(""), `    "${fakeIpv4("cross-line")}"`],
+      "client-address",
+      1,
+    ],
+    [
+      "an odds key with the value on the next line",
+      () => ["ODDS_API_KEY =", `  ${hex32()}`],
+      "odds-api-key",
+      1,
+    ],
+    [
+      "an encoded league id whose value is on the next line (the decoded reading)",
+      () => [`https://fantasy.espn.com/football/league?${kv("leagueId", "%3D", "")}`, id8()],
+      "espn-league-id",
+      1,
+    ],
+  ])("flags %s, at the line the match starts on", (_label, lines, rule, line) => {
+    const text = lines().join("\n");
+    expect(hitsOf(text).get(rule)).toContain(line);
+    // CRLF line endings read the same
+    expect(hitsOf(lines().join("\r\n")).get(rule)).toContain(line);
+    // no line alone carries it (the per-line reading the scanner had)
+    for (const l of lines()) expect(lineFindingIds(l), l).not.toContain(rule);
+  });
+
+  it("stays quiet on the scrubbed shapes and placeholders across lines", () => {
+    for (const text of [
+      ['  "gameId": 1,', '  "id": 0,', '  "members": []'].join("\n"),
+      ['  "leagueIds": [', "    0", "  ]"].join("\n"),
+      ["espn_s2 =", "  <your espn_s2>"].join("\n"),
+      ['  "swid":', `    "{${FAKE("01")}}"`].join("\n"),
+      ['  "client' + 'Address":', '    "0.0.0.0"'].join("\n"),
+      JSON.stringify({ abbrev: "FFL", gameId: 1, id: 2026, name: "2026" }, null, 2),
+    ])
+      expect(scanText("x.txt", text, []), text).toEqual([]);
+  });
+
+  it("the allow marker suppresses a generic rule's match on the line it starts on, never a strict one's", () => {
+    const generic = ["# scan-secrets: allow ODDS_API_KEY =", `  ${hex32()}`].join("\n");
+    expect(hitsOf(generic).get("odds-api-key")).toBeUndefined();
+    expect(hitsOf(["ODDS_API_KEY =", `  ${hex32()}`].join("\n")).get("odds-api-key")).toEqual([1]);
+    const strict = ["# scan-secrets: allow the league id:", `  ${id8()}`].join("\n");
+    expect(hitsOf(strict).get("espn-league-id")).toEqual([1]);
+  });
+
+  it("textRuleHits: one hit per match, in line order and, on a line, in rule order; crossOnly keeps only the spanning ones", () => {
+    const lines = [
+      `${kv("leagueId", "=", id8())} {${guid()}}`,
+      "nothing here",
+      "the league id:",
+      `  ${id8()} and ${kv("leagueId", "=", id8())}`,
+    ];
+    expect(textRuleHits(lines)).toEqual([
+      { line: 1, id: "brace-guid" },
+      { line: 1, id: "espn-league-id" },
+      { line: 3, id: "espn-league-id" },
+      { line: 4, id: "espn-league-id" },
+    ]);
+    expect(textRuleHits(lines, { crossOnly: true })).toEqual([{ line: 3, id: "espn-league-id" }]);
+    expect(textRuleHits(lines, { strictOnly: true })).toHaveLength(4);
+    expect(textRuleHits([""])).toEqual([]);
+  });
+
+  it("canCrossLines reads a pattern's source conservatively", () => {
+    for (const re of [
+      /a\sb/,
+      /a[^"]b/,
+      /[^]/,
+      /a.b/s,
+      /\x0a/,
+      /[\n]/,
+      /a\Wb/,
+      /a\Db/,
+      /[\s]/,
+      /[^\S]/,
+      /\u000a/,
+    ])
+      expect(canCrossLines(re), String(re)).toBe(true);
+    for (const re of [
+      /abc/,
+      /a.b/,
+      /[^\s"]+/,
+      /[^\n]*/,
+      /[\d.]/,
+      /\bgh[pousr]_[A-Za-z0-9]{36,}\b/,
+      /\[a\]/,
+    ])
+      expect(canCrossLines(re), String(re)).toBe(false);
+  });
+
+  it("the rules it runs across lines are the ones whose patterns can span a break", () => {
+    expect([...CROSS_LINE_RULE_IDS].sort()).toEqual(
+      [
+        "assigned-secret",
+        "bearer-token",
+        "client-address",
+        "cookie-header",
+        "env-secret",
+        "espn-league-envelope",
+        "espn-league-id",
+        "espn-s2-cookie",
+        "espn-swid",
+        "home-path",
+        "odds-api-key",
+      ].sort(),
+    );
+    // the others really cannot: a line break put anywhere into a line they match never ends up
+    // inside one of their matches (checked on every must-flag line, at every position)
+    const single = RULES.filter((r) => r.re !== undefined && !CROSS_LINE_RULE_IDS.includes(r.id));
+    expect(single.length).toBeGreaterThan(10);
+    const spanning: string[] = [];
+    for (const c of mustFlag())
+      for (let i = 1; i < c.line.length; i++) {
+        const text = `${c.line.slice(0, i)}\n${c.line.slice(i)}`;
+        for (const r of single) {
+          const re = new RegExp(r.re?.source ?? "", r.re?.flags ?? "g");
+          for (const m of text.matchAll(re)) if (m[0].includes("\n")) spanning.push(r.id);
+        }
+      }
+    expect(spanning).toEqual([]);
+  });
+
+  it("stays linear on many lines (a 2 MB text of wrapped league-id arrays and envelopes)", () => {
+    const chunk = [
+      '  "leagueIds": [',
+      "    0",
+      "  ],",
+      '  "gameId": 1,',
+      '  "id": 0,',
+      '  "members": [],',
+    ];
+    // 71 characters a chunk: 30,000 chunks are the 2 MB the title names (12,000 were 852 KB)
+    const text = Array.from({ length: 30_000 }, () => chunk.join("\n")).join("\n");
+    expect(text.length).toBeGreaterThan(2_000_000);
+    const t0 = performance.now();
+    expect(scanText("big.json", text, [])).toEqual([]);
+    expect(performance.now() - t0).toBeLessThan(20_000);
+  });
+
+  // a rule whose whitespace run could split among several adjacent `\s*` backtracked through every
+  // split: espn-league-id was cubic in the run after its key (2,000 blanks took 19 s), and the
+  // whole-text pass makes a run of blank lines such a run; env-secret's `^\s*` re-read a run of
+  // blank lines from each of its line starts (quadratic: 20,000 lines took 2.3 s). The bound is the
+  // single-line guard's above: a hang detector, not a latency budget (linear takes milliseconds).
+  it.each<[string, () => string]>([
+    ["blanks after a league-id key, in a line", () => `league id${" ".repeat(2_000)}x`],
+    ["blank lines after a league-id key", () => `the league ids${"\n".repeat(2_000)}x`],
+    ["indented lines after a quoted key", () => `the "leagueIds"${"\n   ".repeat(500)}]`],
+    ["a run of blank lines (env-secret's line starts)", () => `${"\n".repeat(60_000)}x`],
+    ["indented blank lines", () => `${"   \n".repeat(20_000)}x`],
+  ])("stays linear on %s", (_label, make) => {
+    const text = make();
+    const t0 = performance.now();
+    expect(scanText("runs.txt", text, [])).toEqual([]);
+    expect(performance.now() - t0).toBeLessThan(5000);
+  });
+
+  it("the rewritten patterns read exactly the strings they read before (same matches, same groups)", () => {
+    const id = fakeLeagueId("same-language", 7);
+    const league = RULES.find((r) => r.id === "espn-league-id")?.re;
+    const env = RULES.find((r) => r.id === "env-secret")?.re;
+    if (league === undefined || env === undefined) throw new Error("rule missing");
+    // the patterns as they were, for the comparison only
+    const oldLeague =
+      /(?:league[ _+-]?ids?["'\x60]?\s*[:=|]?\s*\[?\s*["'\x60]?|--league(?:-id)?[ =]["'\x60]?|\bleagues\/|\bleagueHistory\/)(\d{4,})/gi;
+    const oldEnv =
+      /^\s*(?:export\s+)?[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY)[A-Z0-9_]*\s*=\s*([^\s#'"]{12,})/gm;
+    const value = ["Zq9", "x7Lm2", "Pw4Rt8"].join("");
+    const sep = fc.constantFrom(
+      "",
+      " ",
+      "  ",
+      "\t",
+      ":",
+      "=",
+      "|",
+      ": ",
+      " : ",
+      "[",
+      " [ ",
+      ": [",
+      "=[ ",
+      '"',
+      ': "',
+      ' ["',
+    );
+    const ends = (re: RegExp, s: string) =>
+      [...s.matchAll(new RegExp(re.source, re.flags))].map((m) => [m.index, m[0], m[1]]);
+    fc.assert(
+      fc.property(
+        fc.constantFrom("league", "League", "league_", "league-", "league ", "league+"),
+        fc.constantFrom("id", "ids", "Id", "IDS"),
+        fc.array(sep, { maxLength: 4 }),
+        fc.constantFrom(id, "0000", "123", `${id}5`),
+        (a, b, seps, digits) => {
+          const line = `${a}${b}${seps.join("")}${digits}`;
+          return JSON.stringify(ends(league, line)) === JSON.stringify(ends(oldLeague, line));
+        },
+      ),
+      { numRuns: 2_000 },
+    );
+    // env-secret on one line — what every line was when the rules read one line at a time
+    fc.assert(
+      fc.property(
+        fc.constantFrom("", " ", "\t", "  \t ", " ", "\u000b"),
+        fc.constantFrom("", "export ", "export\t"),
+        fc.constantFrom("FOO_TOKEN", "API_KEY", "MY_SECRET_X", "PASSWORD"),
+        fc.constantFrom("=", " = ", "\t=\t"),
+        (indent, exp, name, eq) => {
+          const line = `${indent}${exp}${name}${eq}${value}`;
+          return JSON.stringify(ends(env, line)) === JSON.stringify(ends(oldEnv, line));
+        },
+      ),
+      { numRuns: 1_000 },
+    );
+  });
+});
+
+describe("a league body is parsed wherever a JSON value is written, whatever its key order", () => {
+  const id8 = () => fakeLeagueId("league-body", 8);
+  /** A league body in an order no line rule reads (the walk's own job). */
+  const unsorted = () => ({ teams: [], seasonId: 2026, id: Number(id8()), gameId: 1 });
+
+  it("a whole JSON text under any name, a JSON Lines record, a fenced block in Markdown", () => {
+    const pretty = JSON.stringify(unsorted(), null, 2);
+    expect(leagueBodyFindings("tests/data/body.json", pretty)).toEqual([
+      "tests/data/body.json  [espn-league-root-id]",
+    ]);
+    expect(leagueBodyFindings("capture.txt", pretty)).toEqual([
+      "capture.txt  [espn-league-root-id]",
+    ]);
+    const jsonl = ['{"ok":true}', JSON.stringify(unsorted()), "not json"].join("\n");
+    expect(leagueBodyFindings("log.jsonl", jsonl)).toEqual(["log.jsonl:2  [espn-league-root-id]"]);
+    const md = [
+      "# Notes",
+      "",
+      "```json",
+      pretty,
+      "```",
+      "",
+      "~~~",
+      JSON.stringify({ leagueId: Number(id8()) }),
+      "~~~",
+    ].join("\n");
+    expect(leagueBodyFindings("docs/notes.md", md).sort()).toEqual(
+      [
+        "docs/notes.md:4  [espn-league-root-id]",
+        `docs/notes.md:${String(7 + pretty.split("\n").length)}  [espn-league-id-field]`,
+      ].sort(),
+    );
+    // an unclosed fence runs to the end
+    expect(leagueBodyFindings("a.md", ["```", pretty].join("\n"))).toEqual([
+      "a.md:2  [espn-league-root-id]",
+    ]);
+    // and scanText reports it (the CLI's path)
+    expect(scanText("docs/notes.md", md, [])).toContain("docs/notes.md:4  [espn-league-root-id]");
+  });
+
+  it("finds a league body at any depth: leagueHistory's array of bodies, a capture's wrapper", () => {
+    const history = JSON.stringify([unsorted(), { ...unsorted(), seasonId: 2025 }]);
+    expect(leagueBodyFindings("h.json", history)).toEqual(["h.json  [espn-league-root-id]"]);
+    const wrapped = JSON.stringify({ response: { status: 200, body: unsorted() } }, null, 2);
+    expect(leagueBodyFindings("w.json", wrapped)).toEqual(["w.json  [espn-league-root-id]"]);
+    const field = JSON.stringify({ a: [{ b: { leagueIds: ["0", id8()] } }] });
+    expect(leagueBodyFindings("f.json", field)).toEqual(["f.json  [espn-league-id-field]"]);
+  });
+
+  it("stays quiet on scrubbed bodies, season bodies, small or zero league-id fields and text that is not JSON", () => {
+    const quiet: [label: string, text: string][] = [
+      ["a.json", JSON.stringify({ ...unsorted(), id: 0 })],
+      ["b.json", JSON.stringify({ gameId: 1, id: 2026, name: "2026", abbrev: "FFL" })],
+      ["c.json", JSON.stringify([{ nested: { gameId: 1, id: 2026, name: "2026" } }])],
+      ["d.json", JSON.stringify({ leagueId: 0, leagueIds: ["0", "123"] })],
+      ["e.md", "a { brace } line\n```ts\nconst x = { gameId: 1 };\n```\n"],
+      ["f.json", "{not json"],
+    ];
+    for (const [label, text] of quiet) expect(leagueBodyFindings(label, text), label).toEqual([]);
+  });
+});
+
+// --- opaque binaries are refused unless reviewed -------------------------------------------------
+// (Stage C finding scan-opaque-binaries-unscanned: a PNG or JPEG whose metadata carried a cookie, a
+// SWID, a league id or an email passed the hooks, commit-paths.sh and CI — only the deny-list, absent
+// in CI, read its bytes — and a PNG's compressed text chunk hid even a deny-listed name.)
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/** A well-formed 1×1 grey PNG: IHDR, the given chunks, IDAT, IEND, each with its CRC-32. */
+function pngOf(...chunks: [string, Buffer][]): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  return Buffer.concat([
+    PNG_SIG,
+    chunk("IHDR", Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0])),
+    ...chunks.map(([t, d]) => chunk(t, d)),
+    chunk("IDAT", deflateSync(Buffer.from([0, 0x80]))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+const tEXt = (key: string, text: string): [string, Buffer] => [
+  "tEXt",
+  Buffer.concat([Buffer.from(key, "latin1"), Buffer.from([0]), Buffer.from(text, "latin1")]),
+];
+const zTXt = (key: string, text: string): [string, Buffer] => [
+  "zTXt",
+  Buffer.concat([
+    Buffer.from(key, "latin1"),
+    Buffer.from([0, 0]),
+    deflateSync(Buffer.from(text, "latin1")),
+  ]),
+];
+/** A JPEG: SOI, a comment segment (COM) holding `text`, EOI. */
+function jpegWithComment(text: string): Buffer {
+  const body = Buffer.from(text, "latin1");
+  const len = Buffer.alloc(2);
+  len.writeUInt16BE(body.length + 2);
+  return Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xfe]),
+    len,
+    body,
+    Buffer.from([0xff, 0xd9]),
+  ]);
+}
+
+describe("an opaque binary is refused unless a person reviewed exactly these bytes", () => {
+  /** The finding's payload: the fake espn_s2, SWID and league id of the self-test, and a mailbox. */
+  const payload = () =>
+    [
+      kv("espn_s2", "=", fakeEspnS2("png-meta", 120)),
+      kv("SWID", "=", `{${fakeGuid("png-meta")}}`),
+      `https://fantasy.espn.com/football/league?${kv("leagueId", "=", LEAK_ID)}`,
+      `owner ${at("jane.q.fakeperson", "gmail.com")}`,
+    ].join(" ");
+  const shot = () => pngOf(tEXt("Comment", payload()));
+  const values = () => [
+    fakeEspnS2("png-meta", 120),
+    fakeGuid("png-meta"),
+    LEAK_ID,
+    "jane.q.fakeperson",
+  ];
+
+  it("the Stage C repro over the CLI, in CI conditions (no deny-list): a PNG tEXt chunk and a JPEG comment are refused, never clean", () => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, "payload.txt"), `${payload()}\n`);
+    writeFileSync(path.join(tmp.dir, "shot-text.png"), shot());
+    writeFileSync(path.join(tmp.dir, "photo.jpg"), jpegWithComment(payload()));
+    // the control: as text, six findings
+    const text = scan(tmp.dir, ["--", "payload.txt"]);
+    expect(text.status).toBe(1);
+    for (const rule of [
+      "espn-s2-cookie",
+      "espn-swid",
+      "brace-guid",
+      "espn-league-id",
+      "email-address",
+    ])
+      expect(text.out).toContain(`payload.txt:1  [${rule}]`);
+    const r = scan(tmp.dir, ["--", "shot-text.png", "photo.jpg"]);
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toContain("shot-text.png  [unreviewed-binary] (its bytes are a PNG image");
+    expect(r.out).toContain("photo.jpg  [unreviewed-binary] (its bytes are a JPEG image");
+    expect(r.out).not.toContain("scan-secrets: clean");
+    for (const v of values()) expect(r.out).not.toContain(v);
+  });
+
+  it("a compressed text chunk (zTXt) that hides a deny-listed name is refused too, with or without the deny-list", () => {
+    const z = pngOf(zTXt("Comment", `team ${LEAK_TEAM}`));
+    for (const deny of [[], DENY()]) {
+      const r = scanBlob("league-screenshot.png", z, deny);
+      expect(r.findings[0]).toMatch(/^league-screenshot\.png {2}\[unreviewed-binary\]/);
+      noLeakS7(r.findings.join("\n"));
+    }
+  });
+
+  it.each<[string, Buffer]>([
+    ["a.png", Buffer.concat([PNG_SIG, Buffer.from([0xff])])],
+    ["a.jpg", Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0xff])],
+    ["a.jpeg", Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0xff])],
+    ["a.gif", Buffer.concat([Buffer.from("GIF89a"), Buffer.from([0xff])])],
+    [
+      "a.webp",
+      Buffer.concat([
+        Buffer.from("RIFF"),
+        Buffer.from([1, 0, 0, 0]),
+        Buffer.from("WEBP"),
+        Buffer.from([0xff]),
+      ]),
+    ],
+    ["a.ico", Buffer.from([0, 0, 1, 0, 0xff])],
+    ["a.cur", Buffer.from([0, 0, 2, 0, 0xff])],
+    ["a.icns", Buffer.concat([Buffer.from("icns"), Buffer.from([0xff])])],
+    ["a.bmp", Buffer.concat([Buffer.from("BM"), Buffer.from([0xff])])],
+    ["a.tiff", Buffer.from([0x49, 0x49, 0x2a, 0, 0xff])],
+    [
+      "a.heic",
+      Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypheic"), Buffer.from([0xff])]),
+    ],
+    [
+      "a.mov",
+      Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypqt  "), Buffer.from([0xff])]),
+    ],
+    ["a.mp3", Buffer.concat([Buffer.from("ID3"), Buffer.from([0xff])])],
+    [
+      "a.wav",
+      Buffer.concat([
+        Buffer.from("RIFF"),
+        Buffer.from([1, 0, 0, 0]),
+        Buffer.from("WAVE"),
+        Buffer.from([0xff]),
+      ]),
+    ],
+    ["a.ogg", Buffer.concat([Buffer.from("OggS"), Buffer.from([0xff])])],
+    ["a.webm", Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0xff])],
+    ["a.ttf", Buffer.from([0, 1, 0, 0, 0xff])],
+    ["a.otf", Buffer.concat([Buffer.from("OTTO"), Buffer.from([0xff])])],
+    ["a.wasm", Buffer.from([0, 0x61, 0x73, 0x6d, 0xff])],
+    ["addon.node", Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0xff])],
+    ["lib.dylib", Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0xff])],
+    ["lib.so", Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0xff])],
+    ["a.bin", Buffer.concat([Buffer.from("MZ"), Buffer.from([0xff])])],
+    ["A.class", Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0xff])],
+  ])("refuses %s, naming its format", (name, bytes) => {
+    const kind = opaqueKind(name, bytes);
+    expect(kind, name).not.toBeNull();
+    expect(isOpaqueBinary(name, bytes)).toBe(true);
+    const r = scanBlob(name, bytes, []);
+    expect(r.reviewed).toBe(0);
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]).toContain(
+      `${name}  [unreviewed-binary] (its bytes are a ${String(kind)}: no rule reads its pixels`,
+    );
+  });
+
+  it("every opaque format has a label; REVIEWED_BINARIES is empty and frozen (the repository tracks no binary)", () => {
+    for (const f of OPAQUE_FORMATS) expect(f.label.length, String(f.ext)).toBeGreaterThan(2);
+    expect(REVIEWED_BINARIES).toEqual([]);
+    expect(Object.isFrozen(REVIEWED_BINARIES)).toBe(true);
+  });
+
+  it("a reviewed binary passes only as its exact bytes at its path, and every rule still reads its bytes", () => {
+    const clean = pngOf(tEXt("Software", "a drawing tool"));
+    const review = [reviewOf("docs/diagram.png", clean)];
+    const ok = scanBlob("docs/diagram.png", clean, [], { reviewed: review });
+    expect(ok).toEqual({ findings: [], scanned: 0, reviewed: 1 });
+    expect(isReviewedBinary("docs/diagram.png", clean, review)).toBe(true);
+    // one changed byte, or the same bytes under another path: unreviewed again
+    const changed = Buffer.from(clean);
+    changed[changed.length - 13] = (changed[changed.length - 13] ?? 0) ^ 1;
+    expect(scanBlob("docs/diagram.png", changed, [], { reviewed: review }).findings[0]).toMatch(
+      /\[unreviewed-binary\]/,
+    );
+    expect(scanBlob("docs/moved.png", clean, [], { reviewed: review }).findings[0]).toMatch(
+      /\[unreviewed-binary\]/,
+    );
+    // a reviewed screenshot whose metadata carries the payload: the rules see it in its bytes
+    const bad = shot();
+    const r = scanBlob("docs/shot.png", bad, [], { reviewed: [reviewOf("docs/shot.png", bad)] });
+    expect(r.reviewed).toBe(1);
+    expect(ruleIds(r.findings)).toEqual(
+      expect.arrayContaining([
+        "brace-guid",
+        "email-address",
+        "espn-league-id",
+        "espn-s2-cookie",
+        "espn-swid",
+      ]),
+    );
+    expect(r.findings.every((f) => f.startsWith("docs/shot.png (its bytes):"))).toBe(true);
+    expect(rawRuleFindings("docs/shot.png", bad)).toEqual(r.findings);
+    for (const v of values()) expect(r.findings.join("\n")).not.toContain(v);
+  });
+
+  it("the commit gates refuse it: --index (pre-commit, commit-paths.sh) and --all (CI)", () => {
+    tmp = tempDir("eff-scan-");
+    const env = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    mkdirSync(path.join(tmp.dir, "docs"));
+    writeFileSync(path.join(tmp.dir, "docs", "league-screenshot.png"), shot());
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: tmp?.dir, env: { ...process.env, ...env }, encoding: "utf8" });
+    expect(git(["init", "-q"]).status).toBe(0);
+    expect(git(["add", "docs/league-screenshot.png"]).status).toBe(0);
+    for (const args of [["--index"], ["--all"]]) {
+      const r = scan(tmp.dir, args, env);
+      expect(r.status, `${args.join(" ")}: ${r.out}`).toBe(1);
+      expect(r.out).toContain("docs/league-screenshot.png  [unreviewed-binary]");
+      for (const v of values()) expect(r.out).not.toContain(v);
+    }
+  });
+});
+
+// --- files inside a text: base64 data: URIs ------------------------------------------------------
+// (Stage C finding scan-opaque-binaries-unscanned, its embedded half: the same screenshot written
+// into a Markdown page, an SVG or a CSS file as a base64 data: URI is text to the file reader, and
+// no rule reads base64 — it passed every gate as "clean".)
+describe("a file inside a text (a base64 data: URI) is read as a committed file is", () => {
+  const payload = () =>
+    [
+      kv("espn_s2", "=", fakeEspnS2("data-uri", 120)),
+      kv("SWID", "=", `{${fakeGuid("data-uri")}}`),
+      `https://fantasy.espn.com/football/league?${kv("leagueId", "=", LEAK_ID)}`,
+      `owner ${at("jane.q.fakeperson", "gmail.com")}`,
+    ].join(" ");
+  const values = () => [
+    fakeEspnS2("data-uri", 120),
+    fakeGuid("data-uri"),
+    LEAK_ID,
+    "jane.q.fakeperson",
+  ];
+  const shot = () => pngOf(tEXt("Comment", payload()));
+  const b64 = (b: Buffer) => b.toString("base64");
+  const uri = (type: string, b: Buffer) => `data:${type};base64,${b64(b)}`;
+  /** An SVG holding `b` as an <image>, its base64 wrapped at 76 columns as an editor writes it. */
+  const svgWith = (b: Buffer) => {
+    const wrapped = b64(b).match(/.{1,76}/g) ?? [];
+    return [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">',
+      `  <image width="1" height="1" href="data:image/png;base64,${wrapped[0] ?? ""}`,
+      ...wrapped.slice(1, -1).map((w) => `    ${w}`),
+      `    ${wrapped.at(-1) ?? ""}"/>`,
+      "</svg>",
+    ];
+  };
+  const refusal =
+    /^docs\/page\.md:3 \(data: URI\) {2}\[embedded-binary\] \(its bytes are a PNG image/;
+
+  it("the screenshot as a Markdown image is refused at the URI's line, in CI conditions over the CLI (never clean)", () => {
+    tmp = tempDir("eff-scan-");
+    mkdirSync(path.join(tmp.dir, "docs"));
+    writeFileSync(
+      path.join(tmp.dir, "docs", "page.md"),
+      ["# The league", "", `![standings](${uri("image/png", shot())})`, ""].join("\n"),
+    );
+    const r = scan(tmp.dir, ["--", "docs/page.md"]);
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toMatch(
+      /docs\/page\.md:3 \(data: URI\) {2}\[embedded-binary\] \(its bytes are a PNG image/,
+    );
+    expect(r.out).not.toContain("scan-secrets: clean");
+    for (const v of values()) expect(r.out).not.toContain(v);
+    expect(r.out).not.toContain(b64(shot()).slice(0, 24));
+  });
+
+  it("refuses it in every way a text embeds one: an HTML img, a CSS url(), a JSON string, a URL-encoded or URL-safe payload, any case", () => {
+    const png = shot();
+    const lines = (l: string) => ["# x", "", l];
+    const urlSafe = b64(png).replace(/\+/g, "-").replace(/\//g, "_");
+    for (const l of [
+      `<img src="${uri("image/png", png)}">`,
+      `.logo { background: url(${uri("image/png", png)}); }`,
+      JSON.stringify({ icon: uri("image/png", png) }),
+      `data:image/png;base64,${encodeURIComponent(b64(png))}`,
+      `data:image/png;base64,${urlSafe}`,
+      `DATA:IMAGE/PNG;BASE64,${b64(png)}`,
+      `data:image/png;name=shot.png;base64,${b64(png)}`,
+      `data:;base64,${b64(png)}`,
+      `data:application/octet-stream;base64,${b64(png)}`,
+    ]) {
+      const f = scanText("docs/page.md", lines(l).join("\n"), []);
+      expect(
+        f.some((x) => refusal.test(x)),
+        l.slice(0, 40),
+      ).toBe(true);
+      for (const v of values()) expect(f.join("\n")).not.toContain(v);
+    }
+    // a JPEG, a zip and an unrecognised blob are refused too, each naming what its bytes are
+    const jpeg = jpegWithComment(payload());
+    expect(scanText("a.md", uri("image/jpeg", jpeg), [])).toEqual([
+      expect.stringMatching(
+        /^a\.md:1 \(data: URI\) {2}\[embedded-binary\] \(its bytes are a JPEG image/,
+      ),
+    ]);
+    // (0x80 starts no UTF-8 character and no byte-order mark: no text reader takes these bytes)
+    const blob = Buffer.concat([Buffer.from([0x80, 0x81, 0x82]), deflateRawSync(payload())]);
+    expect(scanText("a.md", uri("application/octet-stream", blob), [])).toEqual([
+      expect.stringMatching(
+        /^a\.md:1 \(data: URI\) {2}\[embedded-binary\] \(its bytes are a binary blob no reader recognises/,
+      ),
+    ]);
+  });
+
+  it("joins a payload an SVG wraps across lines inside its attribute, byte for byte, and refuses it", () => {
+    const png = shot();
+    const svg = svgWith(png);
+    expect(svg.length).toBeGreaterThan(5);
+    const p = dataUriPayloads(svg);
+    expect(p).toHaveLength(1);
+    expect(p[0]?.line).toBe(2);
+    expect(p[0]?.type).toBe("image/png");
+    expect(p[0]?.bytes.equals(png)).toBe(true);
+    const f = scanText("docs/logo.svg", svg.join("\n"), []);
+    expect(f).toEqual([
+      expect.stringMatching(
+        /^docs\/logo\.svg:2 \(data: URI\) {2}\[embedded-binary\] \(its bytes are a PNG image/,
+      ),
+    ]);
+    // CRLF endings join the same
+    expect(dataUriPayloads(svg.join("\r\n").split(/\r?\n/))[0]?.bytes.equals(png)).toBe(true);
+  });
+
+  it("a text, gzip or SVG payload is scanned with every rule, the deny-list and the data: URIs inside it", () => {
+    const text = Buffer.from(`notes: ${payload()}\n`);
+    const f = scanText("docs/a.md", `see ${uri("text/plain", text)} here`, DENY());
+    for (const rule of ["espn-s2-cookie", "espn-swid", "espn-league-id", "email-address"])
+      expect(f, rule).toContain(`docs/a.md:1 (data: URI):1  [${rule}]`);
+    expect(f).toContain("deny-list match in docs/a.md:1 (data: URI):1");
+    // gzip: peeled, then scanned
+    const gz = scanText("docs/a.md", uri("application/gzip", gzipSync(text)), []);
+    expect(gz).toContain("docs/a.md:1 (data: URI):1  [espn-league-id]");
+    // an SVG in a data: URI holding the screenshot: two levels down, refused
+    const nested = Buffer.from(svgWith(shot()).join("\n"));
+    expect(scanText("docs/a.md", `![logo](${uri("image/svg+xml", nested)})`, [])).toEqual([
+      expect.stringMatching(
+        /^docs\/a\.md:1 \(data: URI\):2 \(data: URI\) {2}\[embedded-binary\] \(its bytes are a PNG image/,
+      ),
+    ]);
+    for (const v of values()) expect(f.join("\n")).not.toContain(v);
+  });
+
+  it(`refuses URIs nested more than ${String(MAX_EMBED_DEPTH)} deep rather than decode them without end`, () => {
+    let inner = "plain text";
+    for (let i = 0; i <= MAX_EMBED_DEPTH; i++) inner = uri("text/plain", Buffer.from(inner));
+    const f = scanText("a.md", inner, []);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatch(/\[embedded-binary\] \(data: URIs nested more than \d+ deep/);
+    // one level less is read through
+    let ok = "plain text";
+    for (let i = 0; i < MAX_EMBED_DEPTH; i++) ok = uri("text/plain", Buffer.from(ok));
+    expect(scanText("a.md", ok, [])).toEqual([]);
+  });
+
+  it("a payload too short to hold a value is not refused, but every rule and the deny-list still read its bytes", () => {
+    expect(EMBED_MIN_BYTES).toBe(16);
+    // a value stored as plain ASCII among a few bytes no text reader accepts
+    const small = Buffer.concat([Buffer.from([0xff]), Buffer.from(kv("leagues", "/", "4821"))]);
+    expect(small.length).toBeLessThan(EMBED_MIN_BYTES);
+    const f = scanText("a.md", uri("application/octet-stream", small), []);
+    expect(f.some((x) => x.startsWith("a.md:1 (data: URI) (its bytes):"))).toBe(true);
+    expect(ruleIds(f)).toContain("espn-league-id");
+    const term = Buffer.concat([Buffer.from([0xff]), Buffer.from("Zorblax")]);
+    expect(scanText("a.md", uri("image/png", term), parseDenylist("Zorblax\n"))).toEqual([
+      "deny-list match in a.md:1 (data: URI):1",
+    ]);
+  });
+
+  it("stays quiet on what the repository's hostile-input tests write, on URIs without base64, and on prose", () => {
+    for (const text of [
+      '"![x](data:image/png;base64,AAAA)",',
+      '"![x](data:image/png;base64,iVBORw0KGgo=)",',
+      '"<a href=\\"data:text/html,<script>\\">x</a>",',
+      "data:,Hello%2C%20World",
+      "a data:image/png;base64, URI is refused",
+      "the data: URI scheme (RFC 2397)",
+      `const head = "data:image/png;base64,";`,
+    ])
+      expect(scanText("t.ts", text, []), text).toEqual([]);
+    // prose after a bare URI is never read as its payload
+    const p = dataUriPayloads([
+      `see ${uri("text/plain", Buffer.from("a note that is long enough to wrap"))}`,
+      "---",
+      "Word",
+    ]);
+    expect(p.map((x) => x.bytes.toString())).toEqual(["a note that is long enough to wrap"]);
+  });
+});
+
+// --- ref names are published ---------------------------------------------------------------------
+// (Stage C finding scan-ref-names-unscanned: commit-paths.sh pushed a branch named with a league-id
+// shape and a deny-list term, and no guard or CI step read a ref name.)
+describe("every rule runs over every published ref name; the name is never printed", () => {
+  const term = () => LEAK_TEAM.toLowerCase().replace(" ", "-");
+  const leakRef = () => `refs/heads/build/${kv("leagues", "/", LEAK_ID)}-${term()}`;
+
+  it("refSpellings: the full name, the name a branch list shows, and a remote's own branch name", () => {
+    expect(refSpellings("refs/heads/build/x")).toEqual([
+      "refs/heads/build/x",
+      "heads/build/x",
+      "build/x",
+    ]);
+    expect(refSpellings("refs/tags/v1.0.0")).toEqual(["refs/tags/v1.0.0", "tags/v1.0.0", "v1.0.0"]);
+    expect(refSpellings("refs/remotes/origin/build/x")).toEqual([
+      "refs/remotes/origin/build/x",
+      "remotes/origin/build/x",
+      "build/x",
+    ]);
+    expect(refSpellings("build/x")).toEqual(["build/x", "refs/heads/build/x"]);
+  });
+
+  it("refFindings: each rule once, by the ref's number; a deny-list term; a clean name has none", () => {
+    expect(refFindings(leakRef(), 1, DENY())).toEqual([
+      "the name of ref #1 (name not printed)  [espn-league-id]",
+      "deny-list match in the name of ref #1 (name not printed)",
+    ]);
+    // a branch named after a mailbox, a member GUID, a home path
+    expect(refFindings(`build/${at("jane.q.fakeperson", "gmail.com")}`, 2, [])).toEqual([
+      "the name of ref #2 (name not printed)  [email-address]",
+    ]);
+    expect(refFindings(`refs/tags/{${fakeGuid("ref")}}`, 3, [])).toEqual([
+      "the name of ref #3 (name not printed)  [brace-guid]",
+    ]);
+    expect(refFindings("Users/janefake/wip", 4, [])).toEqual([
+      "the name of ref #4 (name not printed)  [home-path]",
+    ]);
+    for (const clean of [
+      "refs/heads/build/phase-1",
+      "refs/heads/main",
+      "refs/tags/v0.1.0",
+      "refs/stash",
+    ])
+      expect(refFindings(clean, 5, DENY()), clean).toEqual([]);
+  });
+
+  it("--ref over the CLI: exit 1 with the finding, the name never printed; exit 0 when clean; a missing name is a usage error", () => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(path.join(tmp.dir, "deny.txt"), `${LEAK_TEAM}\n`);
+    const env = { EFF_SCAN_DENYLIST: path.join(tmp.dir, "deny.txt") };
+    const r = scan(tmp.dir, ["--ref", leakRef()], env);
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toContain("the name of ref #1 (name not printed)  [espn-league-id]");
+    expect(r.out).toContain("deny-list match in the name of ref #1 (name not printed)");
+    noLeakS7(r.out);
+    const ok = scan(tmp.dir, ["--ref", "refs/heads/build/phase-1"], env);
+    expect(ok.status, ok.out).toBe(0);
+    expect(ok.out).toContain("1 ref name(s)");
+    expect(scan(tmp.dir, ["--ref"]).status).toBe(2);
+  });
+
+  it("--index scans the branch the commit lands on (the pre-commit hook); a detached HEAD has none", () => {
+    tmp = tempDir("eff-scan-");
+    const env = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: tmp?.dir, env: { ...process.env, ...env }, encoding: "utf8" });
+    expect(git(["init", "-q", "-b", leakRef().slice("refs/heads/".length)]).status).toBe(0);
+    writeFileSync(path.join(tmp.dir, "a.txt"), "hello\n");
+    expect(git(["add", "a.txt"]).status).toBe(0);
+    const r = scan(tmp.dir, ["--index"], env);
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toContain("the name of ref #1 (name not printed)  [espn-league-id]");
+    noLeakS7(r.out);
+    const ident = [
+      "-c",
+      "user.name=p",
+      "-c",
+      `user.email=${["1+p", "users.noreply.github.com"].join("@")}`,
+    ];
+    expect(git([...ident, "commit", "-qm", "x"]).status).toBe(0);
+    expect(git(["checkout", "-q", "--detach"]).status).toBe(0);
+    writeFileSync(path.join(tmp.dir, "b.txt"), "hello\n");
+    expect(git(["add", "b.txt"]).status).toBe(0);
+    const d = scan(tmp.dir, ["--index"], env);
+    expect(d.status, d.out).toBe(0);
+    expect(d.out).not.toContain("ref name(s)");
+  });
+
+  it("--all scans every ref in the repository: branches, tags, remote-tracking refs (CI's full checkout)", () => {
+    tmp = tempDir("eff-scan-");
+    const env = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: tmp?.dir, env: { ...process.env, ...env }, encoding: "utf8" });
+    expect(git(["init", "-q", "-b", "main"]).status).toBe(0);
+    writeFileSync(path.join(tmp.dir, "a.txt"), "hello\n");
+    expect(git(["add", "a.txt"]).status).toBe(0);
+    const ident = [
+      "-c",
+      "user.name=p",
+      "-c",
+      `user.email=${["1+p", "users.noreply.github.com"].join("@")}`,
+    ];
+    expect(git([...ident, "commit", "-qm", "x"]).status).toBe(0);
+    expect(scan(tmp.dir, ["--all"], env).status).toBe(0);
+    for (const ref of [
+      `refs/tags/${kv("leagues", "/", LEAK_ID)}`,
+      `refs/remotes/origin/${kv("leagueHistory", "/", LEAK_ID)}`,
+      `refs/heads/${kv("league-id", "=", LEAK_ID)}`,
+    ]) {
+      expect(git(["update-ref", ref, "HEAD"]).status).toBe(0);
+      const r = scan(tmp.dir, ["--all"], env);
+      expect(r.status, `${ref}: ${r.out}`).toBe(1);
+      expect(r.out).toMatch(/the name of ref #\d+ \(name not printed\) {2}\[espn-league-id\]/);
+      expect(r.out).not.toContain(LEAK_ID);
+      expect(git(["update-ref", "-d", ref]).status).toBe(0);
+    }
+  });
+});
+
+// --- home paths as Claude Code spells them -------------------------------------------------------
+// (Stage C finding scan-home-path-dash-encoded: the scratchpad and transcript paths every agent here
+// works in — /private/tmp/claude-<uid>/-Users-<name>-…, ~/.claude/projects/-Users-<name>-… — passed;
+// HANDOFF item 13's committed leak was that form.)
+describe("home paths in Claude Code's dash spelling (home-path)", () => {
+  const dash = (...p: string[]) => p.join("-");
+  it.each([
+    [
+      "/private/tmp/claude-501/",
+      dash(
+        "",
+        "Users",
+        "probeuser",
+        "Developer",
+        "espn-fantasy-football-mcp/0f0e/scratchpad/live.json",
+      ),
+    ].join(""),
+    [
+      "~/.claude/projects/",
+      dash("", "Users", "probeuser", "Developer", "espn-fantasy-football-mcp/abc.jsonl"),
+    ].join(""),
+    `cwd ${dash("", "home", "runner", "work", "x")}`,
+    dash("C", "", "Users", "probeuser", "AppData"),
+    dash("", "private", "tmp", "claude", "501", "", "Users", "probeuser", "x"),
+    `"${dash("", "Users", "probeuser")}"`,
+    `projects\\/${dash("", "Users", "probeuser", "x")}`,
+    `%2Fprojects%2F${dash("", "Users", "probeuser", "x")}`,
+    dash("", "users", "probeuser", "x"),
+  ])("flags %s", (line) => {
+    expect(flags(line, "home-path")).toBe(true);
+  });
+
+  it.each([
+    "git --home-dir and a --users-file flag",
+    "the Power-Users-guide, a re-users-list",
+    "eff-home-abc and nav-home-link",
+    `~/.claude/projects/${dash("", "Users", "<you>", "Developer", "x")}`,
+    dash("", "home", "${USER}", "x"),
+    dash("", "Users", "$USER", "x"),
+    dash("", "Users", "…", "x"),
+    "/Users/ and -Users- alone",
+  ])("stays quiet on %s", (line) => {
+    expect(clean(line)).toBe(true);
+  });
+
+  // the finding's expected spelling `(^|[/\-])Users-<name>-`: the encoded path with its leading dash
+  // dropped, after a slash or at a line's start
+  it.each([
+    `~/.claude/projects/${dash("Users", "probeuser", "Developer", "espn-fantasy-football-mcp")}`,
+    `/private/tmp/claude-501/${dash("Users", "probeuser", "Developer", "x")}/scratchpad`,
+    dash("Users", "probeuser", "Developer", "x"),
+    `projects\\/${dash("Users", "probeuser", "x")}`,
+    `%2Fprojects%2F${dash("Users", "probeuser", "x")}`,
+  ])("flags the dash-free spelling %s", (line) => {
+    expect(flags(line, "home-path")).toBe(true);
+    // and in a text, on its own line
+    expect(rulesOn(["intro", line]).get(2)).toContain("home-path");
+  });
+
+  it.each([
+    dash("users", "guide", "v2"),
+    "docs/users-facing-notes-v2.md",
+    "https://github.com/home-assistant/core and /home-page-design",
+    "the Users-guide, a Users-",
+    `projects/${dash("Users", "<you>", "Developer", "x")}`,
+    `projects/${dash("Users", "$USER", "x")}`,
+  ])("stays quiet on the dash-free look-alike %s", (line) => {
+    expect(clean(line)).toBe(true);
+  });
+
+  it("the Stage C repro over the CLI: notes.md flags all three lines (it flagged only the slash form)", () => {
+    tmp = tempDir("eff-scan-");
+    writeFileSync(
+      path.join(tmp.dir, "notes.md"),
+      [
+        [
+          "/private/tmp/claude-501/",
+          dash(
+            "",
+            "Users",
+            "probeuser",
+            "Developer",
+            "espn-fantasy-football-mcp/0f0e/scratchpad/live.json",
+          ),
+        ].join(""),
+        [
+          "~/.claude/projects/",
+          dash("", "Users", "probeuser", "Developer", "espn-fantasy-football-mcp/abc.jsonl"),
+        ].join(""),
+        homePath("Users", "probeuser", "Developer/x"),
+        "",
+      ].join("\n"),
+    );
+    const r = scan(tmp.dir, ["--", "notes.md"]);
+    expect(r.status).toBe(1);
+    for (const n of [1, 2, 3]) expect(r.out).toContain(`notes.md:${String(n)}  [home-path]`);
+    expect(r.out).not.toContain("probeuser");
   });
 });

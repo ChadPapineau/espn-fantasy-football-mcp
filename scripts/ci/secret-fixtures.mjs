@@ -261,7 +261,113 @@ export function mustFlag() {
     },
     { line: join("path=%2FUsers%2F", "probe-user", "%2Fsrc"), gitleaks: [], scan: ["home-path"] },
     { line: join("peer ", fakeIpv6("peer")), gitleaks: [], scan: ["ipv6-literal"] },
+    // a home path as Claude Code spells it in a scratchpad or a transcript directory (Stage C
+    // finding scan-home-path-dash-encoded): every character but a letter or a digit is a "-"
+    ...dashedHomePathCases(join),
+    // the cases a line pass cannot see — LAST, so every case above keeps its line: a match that
+    // spans line breaks, which gitleaks reads whole-file (Stage C finding
+    // scan-league-envelope-per-line). Each starts on its first line, where both scanners report it
+    ...crossLineCases(join),
   ];
+}
+
+/**
+ * Home paths in Claude Code's dash spelling (scan-secrets only: gitleaks has no home-path rule): a
+ * scratchpad, a transcript directory, a Linux home, a Windows drive, an encoded path inside an
+ * encoded path, and a transcript directory with its leading dash dropped.
+ * @param {(...p: string[]) => string} join
+ * @returns {FlagCase[]}
+ */
+export function dashedHomePathCases(join) {
+  /** @param {string} line @returns {FlagCase} */
+  const home = (line) => ({ line, gitleaks: [], scan: ["home-path"] });
+  return [
+    home(
+      join(
+        "/private/tmp/claude-501/",
+        "-Users",
+        "-probeuser-Developer-espn-fantasy-football-mcp/0f0e/scratchpad/live.json",
+      ),
+    ),
+    home(
+      join(
+        "~/.claude/projects/",
+        "-Users",
+        "-probeuser-Developer-espn-fantasy-football-mcp/a.jsonl",
+      ),
+    ),
+    home(join("cwd ", "-home", "-runner-work-espn-fantasy-football-mcp")),
+    home(join("C-", "-Users", "-probeuser-AppData-Roaming")),
+    home(join("-private-tmp-claude-501-", "-Users", "-probeuser-Developer-x")),
+    // the same with its leading dash dropped, after a slash
+    home(join("~/.claude/projects/", "Users", "-probeuser-Developer-espn-fantasy-football-mcp")),
+  ];
+}
+
+/**
+ * The shapes both scanners must flag when a line break sits where the rule allows whitespace: a
+ * league body written one key per line, a league-id array, and the espn_s2, SWID, Cookie-header,
+ * clientAddress and odds-key assignments with the value on the next line. Each case starts on its
+ * own first line — where gitleaks reports a match (the full match's first line) and scan-secrets
+ * too (its first non-blank character).
+ * @param {(...p: string[]) => string} join
+ * @returns {FlagCase[]}
+ */
+export function crossLineCases(join) {
+  return [
+    {
+      line: join(
+        '  "gameId": 1,\n  "id": ',
+        fakeLeagueId("pretty-envelope", 8),
+        ',\n  "members": [],',
+      ),
+      gitleaks: ["espn-league-envelope"],
+      scan: ["espn-league-envelope"],
+    },
+    {
+      line: join('  "leagueIds": [\n    ', fakeLeagueId("pretty-array", 7), "\n  ],"),
+      gitleaks: ["espn-league-id"],
+      scan: ["espn-league-id"],
+    },
+    {
+      line: join("espn_s2 =\n  ", fakeEspnS2("wrapped-assignment", 120)),
+      gitleaks: ["espn-s2-cookie"],
+      scan: ["espn-s2-cookie"],
+    },
+    {
+      line: join('  "swid":\n    "', fakeGuid("wrapped-swid"), '",'),
+      gitleaks: ["espn-swid"],
+      scan: ["espn-swid"],
+    },
+    {
+      line: join("Cookie: SWID=\n  {", fakeGuid("wrapped-header"), "}"),
+      gitleaks: ["cookie-header", "espn-swid"],
+      scan: ["cookie-header", "espn-swid"],
+    },
+    {
+      line: join('  "client', 'Address":\n    "', fakeIpv4("wrapped-client"), '",'),
+      gitleaks: ["client-address"],
+      scan: ["client-address"],
+    },
+    {
+      line: join("ODDS_API_KEY =\n  ", digest("wrapped-odds").toString("hex").slice(0, 32)),
+      gitleaks: ["odds-api-key"],
+      scan: ["odds-api-key"],
+    },
+  ];
+}
+
+/**
+ * The 1-based line of must-flag.txt each case starts on (a case may hold line breaks).
+ * @returns {number[]}
+ */
+export function mustFlagStartLines() {
+  let next = 1;
+  return mustFlag().map((c) => {
+    const at = next;
+    next += c.line.split("\n").length;
+    return at;
+  });
 }
 
 /**
@@ -408,6 +514,14 @@ export function mustPass() {
     '"url": "https:\\/\\/lm-api-reads.fantasy.espn.com\\/apis\\/v3\\/games\\/ffl\\/seasons\\/2026\\/segments\\/0\\/leagues\\/0"',
     '"text": "{\\"leagueId\\":0,\\"seasonId\\":2026}"',
     "league+id=0 and league+id=123",
+    // the dash-spelled home path with a placeholder, and dashes that are not a home path (Stage C
+    // finding scan-home-path-dash-encoded)
+    "~/.claude/projects/-Users-<you>-Developer-espn-fantasy-football-mcp/ and -home-${USER}-x",
+    "git --home-dir, a --users-file flag, the Power-Users-guide, eff-home-abc",
+    "docs/users-facing-notes-v2.md, https://github.com/home-assistant/core, the Users-guide",
+    // the scrubbed shapes across line breaks (Stage C finding scan-league-envelope-per-line)
+    '  "gameId": 1,\n  "id": 0,\n  "members": [],',
+    '  "leagueIds": [\n    0\n  ],',
   ];
 }
 
@@ -467,10 +581,12 @@ export function assertGitleaks(findings, mode) {
   /** @type {string[]} */
   const unmet = [];
   let expected = 0;
+  const starts = mustFlagStartLines();
   mustFlag().forEach((c, i) => {
+    const line = starts[i] ?? 0;
     for (const id of c.gitleaks) {
       expected++;
-      if (!at.has(`${id}@${String(i + 1)}`)) unmet.push(`line ${String(i + 1)} [${id}]`);
+      if (!at.has(`${id}@${String(line)}`)) unmet.push(`line ${String(line)} [${id}]`);
     }
   });
   lines.push(
@@ -503,11 +619,13 @@ export function assertScan(scanner = path.join(REPO_ROOT, "scripts", "dev", "sca
       ok = false;
       lines.push(`must-flag: scan-secrets exit ${String(flag.status)} (1 required)`);
     }
+    const starts = mustFlagStartLines();
     mustFlag().forEach((c, i) => {
+      const line = starts[i] ?? 0;
       for (const rule of c.scan) {
-        if (!out.includes(`must-flag.txt:${String(i + 1)}  [${rule}]`)) {
+        if (!out.includes(`must-flag.txt:${String(line)}  [${rule}]`)) {
           ok = false;
-          lines.push(`must-flag line ${String(i + 1)}: rule ${rule} did not fire`);
+          lines.push(`must-flag line ${String(line)}: rule ${rule} did not fire`);
         }
       }
     });

@@ -15,12 +15,15 @@ import {
   GITLEAKS_RULE_IDS,
   assertGitleaks,
   assertScan,
+  crossLineCases,
+  dashedHomePathCases,
   encodedLeagueIdCases,
   fakeEspnS2,
   fakeGuid,
   fakeIpv4,
   fakeLeagueId,
   mustFlag,
+  mustFlagStartLines,
   mustPass,
 } from "../../scripts/ci/secret-fixtures.mjs";
 import { entropy, lineRuleIds, scanText } from "../../scripts/dev/scan-secrets.mjs";
@@ -143,6 +146,104 @@ describe(".gitleaks.toml ↔ the generated self-test", () => {
         );
       }),
       { numRuns: 300 },
+    );
+  });
+});
+
+// Stage C finding scan-league-envelope-per-line: scan-secrets matched each rule one line at a time,
+// while gitleaks matches a whole file, where `\s` crosses line breaks — so a league body written one
+// key per line passed the prevention layer and was flagged only after the push.
+describe("across line breaks, scan-secrets is never narrower than gitleaks", () => {
+  /** The scan-secrets rule that stands for a gitleaks rule. */
+  const LOCAL: Record<string, string> = {
+    "espn-s2-value-bare": "espn-s2-bare",
+    "espn-s2-percent-encoded": "espn-s2-bare",
+  };
+  /** The offsets at which the emulated gitleaks rule `id` starts a (reported) match in `text`. */
+  const gitleaksStarts = (text: string, id: string) => {
+    const r = GL.find((x) => x.id === id);
+    if (!r) return [];
+    r.re.lastIndex = 0;
+    return [...text.matchAll(r.re)]
+      .filter((m) => {
+        const secret = r.group ? (m[r.group] ?? "") : m[0];
+        return !r.allow.some((a) => a.test(secret)) && !(r.entropy && entropy(secret) < r.entropy);
+      })
+      .map((m) => m.index);
+  };
+
+  it("the self-test's cross-line cases: each rule both scanners must report starts on the case's first line", () => {
+    const cases = crossLineCases((...p) => p.join(""));
+    expect(cases.length).toBeGreaterThanOrEqual(7);
+    const flagged = new Map(mustFlag().map((c) => [c.line, c]));
+    for (const c of cases) {
+      expect(flagged.get(c.line), c.line.slice(0, 30)).toBeDefined();
+      expect(c.line).toContain("\n");
+      const firstBreak = c.line.indexOf("\n");
+      for (const id of c.gitleaks) {
+        const starts = gitleaksStarts(c.line, id);
+        expect(
+          starts.some((s) => s < firstBreak),
+          `${id} on ${c.line.slice(0, 30)}`,
+        ).toBe(true);
+      }
+      const local = scanText("x", c.line, []);
+      for (const id of c.scan) expect(local, id).toContain(`x:1  [${id}]`);
+      // no line of the case alone carries it (what the line-by-line scanner saw)
+      for (const id of c.scan)
+        for (const l of c.line.split("\n")) expect(lineRuleIds(l), `${id}: ${l}`).not.toContain(id);
+    }
+  });
+
+  it("mustFlagStartLines: the line each case starts on in the written must-flag.txt", () => {
+    const written = `${mustFlag()
+      .map((c) => c.line)
+      .join("\n")}\n`.split("\n");
+    const starts = mustFlagStartLines();
+    mustFlag().forEach((c, i) => {
+      expect(written[(starts[i] ?? 0) - 1]).toBe(c.line.split("\n")[0]);
+    });
+    // the single-line cases before the first multi-line one keep their old numbering
+    const firstMulti = mustFlag().findIndex((c) => c.line.includes("\n"));
+    expect(firstMulti).toBeGreaterThan(40);
+    for (let i = 0; i < firstMulti; i++) expect(starts[i]).toBe(i + 1);
+  });
+
+  it("the self-test carries the dash-spelled home paths (scan-secrets only)", () => {
+    const flagged = new Map(mustFlag().map((c) => [c.line, c]));
+    const cases = dashedHomePathCases((...p) => p.join(""));
+    expect(cases.length).toBeGreaterThanOrEqual(5);
+    for (const c of cases) {
+      expect(flagged.get(c.line)?.scan).toEqual(["home-path"]);
+      expect(localRules(c.line)).toContain("home-path");
+      expect([...gitleaksFires(c.line)]).toEqual([]);
+    }
+  });
+
+  it("property: a line break (and indentation) put where the rules let whitespace stand — gitleaks ⇒ scan-secrets, rule for rule", () => {
+    const SEP = new Set([":", "=", ",", "[", "{", "|", '"', "'", " "]);
+    const cases = mustFlag().filter((c) => c.gitleaks.length > 0 && !c.line.includes("\n"));
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...cases),
+        fc.array(fc.nat(), { minLength: 1, maxLength: 3 }),
+        fc.constantFrom("", "  ", "\t", "    "),
+        (c, picks, indent) => {
+          // code-unit offsets, as slice reads them
+          const points: number[] = [];
+          for (let i = 0; i < c.line.length; i++)
+            if (SEP.has(c.line[i] ?? "")) points.push(i, i + 1);
+          if (!points.length) return true;
+          const at = [...new Set(picks.map((p) => points[p % points.length] ?? 0))].sort(
+            (a, b) => b - a,
+          );
+          let text = c.line;
+          for (const i of at) text = `${text.slice(0, i)}\n${indent}${text.slice(i)}`;
+          const local = new Set(localRules(text));
+          return [...gitleaksFires(text)].every((id) => local.has(LOCAL[id] ?? id));
+        },
+      ),
+      { numRuns: 1500 },
     );
   });
 });
@@ -380,14 +481,21 @@ describe("the generators", () => {
 describe("assertGitleaks (the CI report check)", () => {
   const report = (ids: string[]) =>
     ids.map((RuleID, i) => ({ RuleID, File: "f", StartLine: i + 1, Secret: "S3CRET", Match: "M" }));
-  /** What a gitleaks run that meets every must-flag expectation reports (StartLine is 1-based). */
-  const perLine = () =>
-    mustFlag().flatMap((c, i) =>
-      c.gitleaks.map((RuleID) => ({ RuleID, File: "must-flag.txt", StartLine: i + 1 })),
+  /**
+   * What a gitleaks run that meets every must-flag expectation reports (StartLine is 1-based: the
+   * line its case starts on — a case may hold line breaks).
+   */
+  const perLine = () => {
+    const starts = mustFlagStartLines();
+    return mustFlag().flatMap((c, i) =>
+      c.gitleaks.map((RuleID) => ({ RuleID, File: "must-flag.txt", StartLine: starts[i] ?? 0 })),
     );
+  };
   /** The 1-based must-flag line of the first encoded league-id case. */
   const encodedLine = () =>
-    mustFlag().findIndex((c) => c.line === encodedLeagueIdCases((...p) => p.join(""))[0]?.line) + 1;
+    mustFlagStartLines()[
+      mustFlag().findIndex((c) => c.line === encodedLeagueIdCases((...p) => p.join(""))[0]?.line)
+    ] ?? 0;
 
   it("expect-all passes when every must-flag line is reported by each rule it names, on that line", () => {
     const r = assertGitleaks(
@@ -454,8 +562,11 @@ describe("CLI", () => {
     tmp = tempDir();
     expect(run(["write", tmp.dir]).status).toBe(0);
     expect(existsSync(path.join(tmp.dir, "must-flag.txt"))).toBe(true);
-    expect(readFileSync(path.join(tmp.dir, "must-pass.txt"), "utf8").split("\n").length).toBe(
-      mustPass().length + 1,
+    expect(readFileSync(path.join(tmp.dir, "must-pass.txt"), "utf8")).toBe(
+      `${mustPass().join("\n")}\n`,
+    );
+    expect(readFileSync(path.join(tmp.dir, "must-flag.txt"), "utf8").split("\n").length).toBe(
+      (mustFlagStartLines().at(-1) ?? 0) + (mustFlag().at(-1)?.line.split("\n").length ?? 0),
     );
     expect(run([]).status).toBe(2);
     expect(

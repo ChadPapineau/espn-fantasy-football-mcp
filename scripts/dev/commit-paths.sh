@@ -16,7 +16,8 @@
 #   * the change is empty (exit 3), or touches a path not under the given paths (exit 4)
 #   * a changed name looks like an iCloud/Finder conflict copy, "x 2.ts" (exit 8)
 #   * scripts/dev/scan-secrets.mjs finds a secret, a personal identifier or a deny-list term in any
-#     blob being committed or in the message (exit 9)
+#     blob being committed, in its path, in the message, or in the name of the branch the push
+#     publishes (exit 9) — a branch name is published like a path (branch list, PR head, run names)
 #   * the author/committer address is not a GitHub no-reply address (exit 10)
 #   * the message is not a Conventional Commit or carries an AI attribution trailer (exit 11)
 #   * an explicitly named file is git-ignored, so it would be left out silently (exit 12)
@@ -118,8 +119,9 @@ done
 "$ROOT/scripts/dev/with-node.sh" node "$ROOT/scripts/dev/scan-secrets.mjs" --identity \
   || { print -u2 "commit-paths: commit identity refused — nothing committed"; exit 10; }
 # then EXACTLY the blobs being committed (the private index against HEAD, read by object id, any
-# status but a deletion) and the message
-GIT_INDEX_FILE=$IDX "$ROOT/scripts/dev/with-node.sh" node "$ROOT/scripts/dev/scan-secrets.mjs" --index --message "$MSG" \
+# status but a deletion), the message, and the ref the push below publishes — the very name it
+# pushes, whatever HEAD names by then (Stage C finding scan-ref-names-unscanned)
+GIT_INDEX_FILE=$IDX "$ROOT/scripts/dev/with-node.sh" node "$ROOT/scripts/dev/scan-secrets.mjs" --index --message "$MSG" --ref "refs/heads/$branch" \
   || { print -u2 "commit-paths: secret/identifier scan FAILED — nothing committed"; exit 9; }
 
 C=$(git commit-tree "$T" -p "$PARENT" -F "$MSG")

@@ -29,6 +29,18 @@ const RESERVED = ["probe", "example.invalid"].join("@");
 const MACHINE = ["dev", "build-host.lan"].join("@");
 const DENY_TERM = ["Gridiron", "Gremlins"].join(" ");
 const HAS_ZSH = existsSync("/bin/zsh") || spawnSync("zsh", ["-c", "true"]).status === 0;
+/** A fake league id, split so no literal in this file matches. */
+const LEAGUE_ID = ["6", "2", "8", "3", "1", "8", "5"].join("");
+/** A branch name carrying the league id in its path form and the deny-list term (dashed). */
+const BAD_BRANCH = () => `build/leagues/${LEAGUE_ID}-${DENY_TERM.toLowerCase().replace(" ", "-")}`;
+/** A PNG (its signature, then bytes no UTF-8 reader accepts) carrying `text` in its metadata. */
+const PNG = (text: string) =>
+  Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x10]),
+    Buffer.from("tEXtComment\0", "latin1"),
+    Buffer.from(text, "latin1"),
+    Buffer.from([0xff, 0xfe]),
+  ]);
 
 let tmp: ReturnType<typeof tempDir> | undefined;
 afterEach(() => {
@@ -211,6 +223,52 @@ describe(".githooks/pre-commit scans every staged blob", () => {
     repo.git(["add", "notes-é.txt"]);
     expect(repo.git(["commit", "-qm", "docs: clean"]).status).toBe(0);
   });
+
+  // Stage C finding scan-opaque-binaries-unscanned: an image committed through this hook unread
+  it("blocks an image no person has reviewed (its metadata is never read by a rule)", () => {
+    const repo = makeRepo();
+    const before = head(repo);
+    mkdirSync(path.join(repo.dir, "docs"), { recursive: true });
+    writeFileSync(path.join(repo.dir, "docs", "league-screenshot.png"), PNG(`owner ${TOKEN}`));
+    repo.git(["add", "docs/league-screenshot.png"]);
+    const r = repo.git(["commit", "-qm", "docs: a screenshot"]);
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toContain("docs/league-screenshot.png  [unreviewed-binary]");
+    expect(head(repo)).toBe(before);
+  });
+
+  // the same image written into a page as a base64 data: URI: text to the file reader, so it passed
+  it("blocks the image embedded in a Markdown page as a data: URI", () => {
+    const repo = makeRepo();
+    const before = head(repo);
+    mkdirSync(path.join(repo.dir, "docs"), { recursive: true });
+    const img = `data:image/png;base64,${PNG(`owner ${TOKEN}`).toString("base64")}`;
+    writeFileSync(path.join(repo.dir, "docs", "page.md"), `# Standings\n\n![table](${img})\n`);
+    repo.git(["add", "docs/page.md"]);
+    const r = repo.git(["commit", "-qm", "docs: the standings"]);
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toContain(
+      "docs/page.md:3 (data: URI)  [embedded-binary] (its bytes are a PNG image",
+    );
+    expect(r.out).not.toContain(TOKEN);
+    expect(head(repo)).toBe(before);
+  });
+
+  // Stage C finding scan-ref-names-unscanned: the branch a commit lands on is published by the push
+  it("blocks a commit on a branch named with a league id and a deny-list term; the name is never printed", () => {
+    const repo = makeRepo();
+    expect(repo.git(["checkout", "-q", "-b", BAD_BRANCH()]).status).toBe(0);
+    const before = head(repo);
+    repo.write("a.txt", "hello\n");
+    repo.git(["add", "a.txt"]);
+    const r = repo.git(["commit", "-qm", "fix: probe the ref-name path"]);
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toContain("the name of ref #1 (name not printed)  [espn-league-id]");
+    expect(r.out).toContain("deny-list match in the name of ref #1 (name not printed)");
+    expect(r.out).not.toContain(LEAGUE_ID);
+    expect(r.out.toLowerCase()).not.toContain("gremlins");
+    expect(head(repo)).toBe(before);
+  });
 });
 
 describe(".githooks/commit-msg checks and scans the message", () => {
@@ -242,6 +300,23 @@ describe(".githooks/commit-msg checks and scans the message", () => {
     repo.write("a.txt", "hello\n");
     repo.git(["add", "a.txt"]);
     expect(repo.git(["commit", "-qm", "feat(scope): add a\n\nbody line"]).status).toBe(0);
+  });
+
+  // Stage C finding ci-ai-trailer-variants-accepted: each committed through this hook
+  it.each([
+    "fix: x\n\nAssisted-by: Claude:claude-opus-5-5",
+    "fix: x\n\nGenerated-by: Claude Code",
+    "fix: x\n\nAI-assisted-by: Claude Code",
+    `fix: x\n\nCo-Authored-By: Cursor Agent <${["cursoragent", "cursor.com"].join("@")}>`,
+  ])("refuses the AI attribution trailer variant %j", (msg) => {
+    const repo = makeRepo();
+    const before = head(repo);
+    repo.write("a.txt", "hello\n");
+    repo.git(["add", "a.txt"]);
+    const r = repo.git(["commit", "-qm", msg]);
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toMatch(/AI attribution/);
+    expect(head(repo)).toBe(before);
   });
 
   // Stage C finding: `git commit -m`/`-F` publish `#` lines verbatim, so the hook must not ignore them
@@ -448,6 +523,69 @@ describe.skipIf(!HAS_ZSH)("scripts/dev/commit-paths.sh (macOS dev tool; zsh)", (
       /the path of scanned entry #\d+ \(path not printed\) {2}\[espn-league-id\]/,
     );
     expect(r.out).not.toContain(id);
+    expect(head(repo)).toBe(before);
+  });
+
+  // Stage C finding scan-ref-names-unscanned: the repro committed and pushed this branch, exit 0
+  it("refuses to publish a branch named with a league id and a deny-list term (exit 9): nothing committed, nothing pushed, the name never printed", () => {
+    const repo = makeRepo();
+    const bare = withOrigin(repo);
+    expect(repo.git(["checkout", "-q", "-b", BAD_BRANCH()]).status).toBe(0);
+    const before = head(repo);
+    repo.write("a.txt", "hello\n");
+    const r = commitPaths(repo, ["fix: probe the ref-name path", "a.txt"]);
+    expect(r.status, r.out).toBe(9);
+    expect(r.out).toContain("the name of ref #1 (name not printed)  [espn-league-id]");
+    expect(r.out).toContain("deny-list match in the name of ref #1 (name not printed)");
+    expect(r.out).not.toContain(LEAGUE_ID);
+    expect(r.out.toLowerCase()).not.toContain("gremlins");
+    expect(head(repo)).toBe(before);
+    const remote = spawnSync("git", ["ls-remote", bare], { encoding: "utf8" }).stdout;
+    expect(remote).toContain("refs/heads/build/probe");
+    expect(remote).not.toContain(LEAGUE_ID);
+    // the control: the same change on a clean branch commits and pushes
+    expect(repo.git(["checkout", "-q", "-b", "build/clean"]).status).toBe(0);
+    const ok = commitPaths(repo, ["fix: probe the ref-name path", "a.txt"]);
+    expect(ok.status, ok.out).toBe(0);
+    expect(spawnSync("git", ["ls-remote", bare], { encoding: "utf8" }).stdout).toContain(
+      "refs/heads/build/clean",
+    );
+  });
+
+  // Stage C finding scan-opaque-binaries-unscanned: the repro committed and pushed this, exit 0
+  it("refuses an image no person has reviewed (exit 9)", () => {
+    const repo = makeRepo();
+    withOrigin(repo);
+    const before = head(repo);
+    mkdirSync(path.join(repo.dir, "docs"), { recursive: true });
+    writeFileSync(path.join(repo.dir, "docs", "league-screenshot.png"), PNG(`owner ${TOKEN}`));
+    const r = commitPaths(repo, ["docs: a screenshot", "docs"]);
+    expect(r.status, r.out).toBe(9);
+    expect(r.out).toContain("docs/league-screenshot.png  [unreviewed-binary]");
+    expect(head(repo)).toBe(before);
+  });
+
+  // Stage C finding ci-ai-trailer-variants-accepted: each was accepted
+  it.each([
+    ["the kernel's Assisted-by", "fix: x\\n\\nAssisted-by: Claude:claude-opus-5-5"],
+    [
+      "Co-developed-by",
+      `fix: x\\n\\nCo-developed-by: Claude <${["claude", "users.noreply.github.com"].join("@")}>`,
+    ],
+    ["Generated-by", "fix: x\\n\\nGenerated-by: Claude Code"],
+    ["an AI-keyed trailer", "fix: x\\n\\nAI-assisted-by: Claude Code"],
+    [
+      "Cursor's co-author trailer",
+      `fix: x\\n\\nCo-Authored-By: Cursor Agent <${["cursoragent", "cursor.com"].join("@")}>`,
+    ],
+  ])("refuses %s (exit 11): nothing committed", (_why, msg) => {
+    const repo = makeRepo();
+    withOrigin(repo);
+    const before = head(repo);
+    repo.write("a.txt", "hello\n");
+    const r = commitPaths(repo, [msg, "a.txt"]);
+    expect(r.status, r.out).toBe(11);
+    expect(r.out).toMatch(/AI attribution/);
     expect(head(repo)).toBe(before);
   });
 

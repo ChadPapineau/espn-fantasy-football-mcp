@@ -9,30 +9,42 @@
 // print the rule id and file:line only — NEVER the matched value.
 //
 // Usage:
-//   node scripts/dev/scan-secrets.mjs [--staged] [--all] [--index] [--identity] [--message <file>] [--] <file>...
+//   node scripts/dev/scan-secrets.mjs [--staged] [--all] [--index] [--identity] [--message <file>]
+//                                     [--ref <name>]... [--] <file>...
 //     --staged          scan the STAGED (index) blob of each given file; a path that is not in the
 //                       index, or that cannot be read, is an error (exit 2) — never "clean"
-//     --all             scan every tracked file (git ls-files), as it is in the working tree
+//     --all             scan every tracked file (git ls-files), as it is in the working tree, and the
+//                       name of every ref (git for-each-ref: branches, tags, remote-tracking refs —
+//                       in CI's full-depth checkout every branch and tag the remote publishes)
 //     --index           scan every blob the next commit adds or changes (index vs HEAD, any status
-//                       but D — type changes included — read by object id, so no name is re-quoted)
+//                       but D — type changes included — read by object id, so no name is re-quoted),
+//                       and the name of the branch it lands on (HEAD's symbolic ref; none when detached)
 //     --identity        refuse an author or committer address that is not a GitHub no-reply address
 //                       (<id>+<login>@users.noreply.github.com); the address itself is never printed
 //     --message <file>  scan a commit message (it is published with the commit)
+//     --ref <name>      scan a ref name that is about to be published (`refs/heads/x`, `refs/tags/v1`,
+//                       or a bare branch name); repeatable; the name itself is never printed
 //     <file>...         scan each named working-tree file; a name that does not exist is an error
 //                       (exit 2; the name is not printed) — never "clean": a caller's list that
 //                       names what is not on disk (npm's pack listing masks some names) skips nothing
 // Exit: 0 clean · 1 findings — content it cannot read included: an archive, a document container,
-// a compressed stream or a database (by its BYTES, whatever its name), or bytes that are neither
-// text nor a recognised binary format are refused (S5, S7) · 2 usage/IO error (a file too large to
-// read is an error, never skipped). It reads UTF-8, and UTF-16/UTF-32 with a byte-order mark; gzip is
-// decompressed member by member, its header's file name, comment and extra field are scanned as
-// text, and bytes after the last member are refused; only a binary whose bytes carry its
-// extension's format magic is skipped, and the deny-list still reads its bytes — as latin1, as UTF-8
-// and, when they hold NULs, without them and as UTF-16 (rawDenyViews). Details: "what a blob IS"
-// below. Every line is read as written and, when it carries %XX / \uXXXX / backslash / HTML-entity
-// encodings, with them undone (lineFindingIds). Every scanned PATH is published too: the same
-// rules and the deny-list run over it (pathFindings), and a finding there names the entry's
-// number, not the path.
+// a compressed stream or a database (by its BYTES, whatever its name), an image, audio, video, font,
+// wasm or native binary no human has reviewed, or bytes that are neither text nor a recognised
+// binary format are refused (S5, S7) · 2 usage/IO error (a file too large to read is an error, never
+// skipped). It reads UTF-8, and UTF-16/UTF-32 with a byte-order mark; gzip is decompressed member by
+// member, its header's file name, comment and extra field are scanned as text, and bytes after the
+// last member are refused; a binary passes only as the exact bytes a person reviewed at that path
+// (REVIEWED_BINARIES — empty), and every rule and the deny-list still read its bytes — as
+// latin1, as UTF-8 and, when they hold NULs, without them and as UTF-16 (rawDenyViews). Details:
+// "what a blob IS" below. Every line is read as written and, when it carries %XX / \uXXXX /
+// backslash / HTML-entity encodings, with them undone (lineFindingIds); a match that spans line
+// breaks is found as gitleaks finds it, over the whole text (textRuleHits); a JSON body — a whole
+// file, a JSON Lines record or a fenced block — is parsed for a league's root id and league-id
+// fields whatever its key order (leagueBodyFindings); and a file a text carries as a base64 data:
+// URI is read as a committed file is — text scanned, a binary refused (embeddedFindings). Every
+// scanned PATH and every scanned REF NAME is published too: the same rules and the deny-list run
+// over it (pathFindings, refFindings), and a finding there names the entry's number, not the path
+// or the name.
 //
 // Suppression: a line containing `scan-secrets: allow` skips the GENERIC rules on that line only.
 // It never suppresses the ESPN credential rules, a private key, or the deny-list (gitleaks in CI
@@ -51,10 +63,14 @@
 
 import { existsSync, lstatSync, readFileSync, readlinkSync, accessSync, constants } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { crc32, inflateRawSync } from "node:zlib";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+
+/** The marker that skips the generic rules on its line (never a strict rule, never the deny-list). */
+const ALLOW_MARKER = "scan-secrets: allow";
 
 /** Placeholder words that mark a GENERIC-rule value as documentation, not a secret. */
 const PLACEHOLDER =
@@ -200,6 +216,16 @@ export function wrappedRuns(lines) {
   return out;
 }
 
+/**
+ * The text of a match's own line before it, at most 1 KiB: a rule runs over a whole text, so
+ * `m.input` is the file — reading all of it before every match would be quadratic.
+ * @param {RegExpExecArray} m
+ */
+function lineBefore(m) {
+  const w = m.input.slice(Math.max(0, m.index - 1024), m.index);
+  return w.slice(w.lastIndexOf("\n") + 1);
+}
+
 /** True when every octet is 0–255 and the address is not one of the two allowed literals. */
 function isReportableIpv4(addr) {
   const parts = addr.split(".");
@@ -268,8 +294,12 @@ export const RULES = [
     // (leagueId%3D<id>, %2Fleagues%2F<id>, {\"leagueId\":<id>}, \/leagues\/<id>, …) are read
     // through lineFindingIds' decoded view; .gitleaks.toml carries the same literal forms plus an
     // explicit twin for each encoding (gitleaks decodes no entity and no escaped quote or slash).
+    // Each run of whitespace follows the token before it — `\s*(?:[:=|]\s*)?(?:\[\s*)?`, the very
+    // strings `\s*[:=|]?\s*\[?\s*` reads — so a long run with no id after it backtracks once, not
+    // in every split of the run among three `\s*`: that was cubic (2,000 blanks after "league id"
+    // took 19 s), and the whole-text pass makes a run of blank lines such a run.
     id: "espn-league-id",
-    re: /(?:league[ _+-]?ids?["'\x60]?\s*[:=|]?\s*\[?\s*["'\x60]?|--league(?:-id)?[ =]["'\x60]?|\bleagues\/|\bleagueHistory\/)(\d{4,})/gi,
+    re: /(?:league[ _+-]?ids?["'\x60]?\s*(?:[:=|]\s*)?(?:\[\s*)?["'\x60]?|--league(?:-id)?[ =]["'\x60]?|\bleagues\/|\bleagueHistory\/)(\d{4,})/gi,
     group: 1,
     strict: true,
     allow: (m) => /^0+$/.test(m[1] ?? ""),
@@ -301,12 +331,25 @@ export const RULES = [
     allow: (m) => !isReportableIpv4(m[1] ?? ""),
   },
   {
-    // /Users/<name>, /home/<name>, C:\Users\<name> (JSON-escaped too); placeholders are exempt
+    // /Users/<name>, /home/<name>, C:\Users\<name> (JSON-escaped too); and the same paths as Claude
+    // Code spells them in a scratchpad or a transcript directory — every character but a letter or
+    // a digit turned into "-": /private/tmp/claude-<uid>/-Users-<name>-…, ~/.claude/projects/
+    // -Users-<name>-…, -home-<name>-…, C--Users-<name>-…, and an encoded path inside another one
+    // (…-claude-501--Users-<name>-…). The dash form starts a path segment (after a slash, a
+    // backslash, a quote, a space, a bracket or the line's start) or follows "<letter or digit>-"
+    // (that "-" is an encoded slash or colon), so `--home-dir` and `Power-Users-guide` are not
+    // home paths (Stage C finding scan-home-path-dash-encoded: HANDOFF item 13's leak was this
+    // form). The same spelling with its leading dash dropped — `…/Users-<name>-…`, or a line that
+    // starts `Users-<name>-` — is one too, as macOS names the folder ("Users", capital U, and a
+    // further "-" segment): `users-guide-…` and `/home-assistant-…` are prose and URLs, not paths.
+    // Placeholders are exempt in every form.
     id: "home-path",
-    re: /(?:(?:\/|\\\/|%2F)(?:Users|home)(?:\/|\\\/|%2F)|\b[A-Za-z]:(?:\\{1,2}|\/|%5C|%2F)Users(?:\\{1,2}|\/|%5C|%2F))(<[^<>\s]{0,64}>|\$\{[A-Za-z_]\w{0,64}\}|[^/\\\s"'\x60<>()[\]{},;:|*?%]{1,256})/gi,
+    re: /(?:(?:\/|\\\/|%2F)(?:Users|home)(?:\/|\\\/|%2F)|\b[A-Za-z]:(?:\\{1,2}|\/|%5C|%2F)Users(?:\\{1,2}|\/|%5C|%2F))(<[^<>\s]{0,64}>|\$\{[A-Za-z_]\w{0,64}\}|[^/\\\s"'\x60<>()[\]{},;:|*?%]{1,256})|(?:(?<=^|[\s/\\"'\x60(\[{=:,;|<>])|(?<=[A-Za-z0-9]-))-(?:Users|home)-(<[^<>\s]{0,64}>|\$\{[A-Za-z_]\w{0,64}\}|\$[A-Za-z_]\w{0,64}|…|\.\.\.|[A-Za-z0-9_.]{1,256})|(?<=^|[\n/])Users-(<[^<>\s]{0,64}>|\$\{[A-Za-z_]\w{0,64}\}|\$[A-Za-z_]\w{0,64}|…|\.\.\.|[A-Za-z0-9_.]{1,256})-/gi,
     group: 1,
     strict: true,
-    allow: (m) => isPlaceholderName(m[1] ?? ""),
+    allow: (m) =>
+      isPlaceholderName(m[1] ?? m[2] ?? m[3] ?? "") ||
+      (m[3] !== undefined && !m[0].startsWith("Users-")),
   },
   {
     // ANY mailbox (CLAUDE.md); only no-reply and reserved placeholder addresses pass. The
@@ -320,7 +363,7 @@ export const RULES = [
     allow: (m) =>
       isPlaceholderEmail(m[0]) ||
       /^git@/i.test(m[0]) ||
-      /[a-z][a-z0-9+.-]*:\/\/[^/\s@:]*:$/i.test(m.input.slice(0, m.index)),
+      /[a-z][a-z0-9+.-]*:\/\/[^/\s@:]*:$/i.test(lineBefore(m)),
   },
   {
     // the same mailbox URL- or HTML-encoded (`name%40<domain>`, `name&#64;<domain>`)
@@ -367,8 +410,12 @@ export const RULES = [
     group: 1,
   },
   {
+    // a line-start assignment: the indentation before it is the line's own (`[^\S\n]`, whitespace
+    // but a line break — what `\s` was when every rule read one line), so over a whole text `^`
+    // never starts a match in a run of blank lines above it, where each start re-read the run
+    // (quadratic: 20,000 blank lines took 2.3 s); every line start is still a start of its own
     id: "env-secret",
-    re: /^\s*(?:export\s+)?[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY)[A-Z0-9_]*\s*=\s*([^\s#'"]{12,})/gm,
+    re: /^[^\S\n]*(?:export[^\S\n]+)?[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY)[A-Z0-9_]*\s*=\s*([^\s#'"]{12,})/gm,
     group: 1,
   },
 ];
@@ -404,28 +451,54 @@ export function isGithubNoreply(addr) {
 //
 // The scanner reads UTF-8 text, and UTF-16 / UTF-32 text that starts with a byte-order mark; it
 // decompresses gzip (every member; the header's text fields scanned; nothing may follow the last
-// member; the deny-list over the outer bytes too); it skips (deny-list on the raw bytes only, in
-// every reading rawDenyViews gives)
-// a binary whose bytes carry the magic number of the opaque format its extension names (an image,
-// audio, video, font, wasm or native object). Everything else is REFUSED (fail closed): an archive,
-// a document container (.docx/.xlsx/.pptx/.odt/.numbers/.epub/.jar are zip files, a .pdf carries
-// Flate streams), a compressed stream or a database — detected by content (magic number, or a zip
-// record anywhere: a zip appended to another file still opens) and by extension — and any other
-// content that is neither text nor a recognised binary (a raw deflate or brotli stream,
-// legacy-encoded text, UTF-16 without a byte-order mark that is not plain ASCII). A rule cannot see
-// into compressed bytes, so "clean" would be a lie.
+// member; the deny-list over the outer bytes too). Everything else is REFUSED (fail closed): an
+// archive, a document container (.docx/.xlsx/.pptx/.odt/.numbers/.epub/.jar are zip files, a .pdf
+// carries Flate streams), a compressed stream or a database — detected by content (magic number, or
+// a zip record anywhere: a zip appended to another file still opens) and by extension —; an opaque
+// binary (an image, audio, video, font, wasm or native object: OPAQUE_FORMATS) no person has
+// reviewed; and any other content that is neither text nor a recognised binary (a raw deflate or
+// brotli stream, legacy-encoded text, UTF-16 without a byte-order mark that is not plain ASCII). A
+// rule cannot see into compressed bytes, and an image's pixels and most of its metadata ARE
+// compressed bytes (PNG's IDAT, zTXt and compressed iTXt are deflate streams; a screenshot carries
+// its text as pixels), so "clean" would be a lie. A refused or reviewed blob is still read by the
+// deny-list in every reading rawDenyViews gives, and a reviewed one by every rule too. The same
+// holds for a file a text embeds as a base64 data: URI (embeddedFindings, below): its bytes are
+// judged as these are, and a binary among them is refused.
 
 /**
  * Archives, document containers, compressed streams and databases refused by NAME (S5: a compressed
- * raw capture or a store dump would skip every identifier rule) — fail closed — unless the path is on
- * the reviewed allow-list below (empty today). gzip (`.gz`, `.tgz`, `.svgz`) is decompressed and
- * scanned instead. Content sniffing (containerKind) refuses the same formats under any other name.
+ * raw capture or a store dump would skip every identifier rule) — fail closed — unless the blob is
+ * a reviewed binary (REVIEWED_BINARIES, empty today). gzip (`.gz`, `.tgz`, `.svgz`) is decompressed
+ * and scanned instead. Content sniffing (containerKind) refuses the same formats under any other
+ * name.
  */
 export const REFUSED_EXT =
   /\.(?:zip|jar|war|ear|aar|apk|aab|ipa|xpi|crx|whl|egg|nupkg|vsix|docx|docm|dotx|dotm|xlsx|xlsm|xlsb|xltx|xltm|pptx|pptm|potx|potm|ppsx|odt|ods|odp|odg|odf|ott|ots|otp|numbers|pages|key|epub|kmz|3mf|xps|oxps|usdz|sketch|pdf|doc|xls|ppt|msg|msi|cab|woff2?|7z|xz|zst|zstd|bz2|lz4|lzma|lz|lzo|br|z|rar|tar|iso|dmg|pkg|deb|rpm|sqlite|sqlite3|db|db3|parquet|arrow|feather|ipc|duckdb)$/i;
 export const GZIP_EXT = /\.(?:gz|tgz|svgz)$/i;
-/** Reviewed binary paths that may be committed despite REFUSED_EXT (none). */
-export const REVIEWED_BINARY_ALLOWLIST = Object.freeze(new Set([]));
+/**
+ * The binaries a person has reviewed — looked at what each one shows and carries (its pixels, its
+ * metadata) — each as its committed path and the sha256 of its exact bytes. Nothing else that is
+ * not text is ever committed (Stage C finding scan-opaque-binaries-unscanned: a cookie, a SWID, a
+ * league id or a mailbox in a PNG's or a JPEG's metadata passed the hooks, commit-paths.sh and CI,
+ * where no rule read an image, and a PNG's compressed text chunks hid even a deny-listed name). The
+ * pair IS the review: a changed byte or a moved file is unreviewed again. Every rule and the
+ * deny-list still read a reviewed blob's bytes. Empty: the repository tracks no binary.
+ * @type {readonly { readonly path: string, readonly sha256: string }[]}
+ */
+export const REVIEWED_BINARIES = Object.freeze([]);
+
+/**
+ * True when `label` (the published path) and the sha256 of `buf` are a reviewed pair in `reviewed`.
+ * @param {string} label
+ * @param {Buffer} buf
+ * @param {readonly { path: string, sha256: string }[]} [reviewed]
+ */
+export function isReviewedBinary(label, buf, reviewed = REVIEWED_BINARIES) {
+  const entries = reviewed.filter((r) => r.path === label);
+  if (!entries.length) return false;
+  const digest = createHash("sha256").update(buf).digest("hex");
+  return entries.some((r) => r.sha256.toLowerCase() === digest);
+}
 /** gzip layers it peels before refusing (a gzip inside a gzip inside a gzip is refused). */
 export const MAX_GZIP_LAYERS = 3;
 
@@ -634,49 +707,89 @@ const MACHO = [
   [0xca, 0xfe, 0xba, 0xbe],
 ];
 /**
- * Opaque binary formats a commit may carry, each by extension AND magic number: such a file is not
- * regex-scanned (its bytes are not text), but the deny-list still reads them. A file with one of
- * these extensions whose bytes do not carry the magic is not that format: it is read as text, or
- * refused.
- * @type {readonly { ext: RegExp, test: (b: Buffer) => boolean }[]}
+ * Opaque binary formats, each by extension AND magic number: no rule can read one (its bytes are
+ * not text — an image's pixels and compressed chunks, a font's or an object's tables), so one is
+ * refused unless it is a reviewed binary (REVIEWED_BINARIES); the label names the format in the
+ * refusal. A file with one of these extensions whose bytes do not carry the magic is not that
+ * format: it is read as text, or refused as unrecognised.
+ * @type {readonly { ext: RegExp, label: string, test: (b: Buffer) => boolean }[]}
  */
 export const OPAQUE_FORMATS = Object.freeze([
-  { ext: /\.png$/i, test: (b) => bytesAt(b, 0, [0x89, 0x50, 0x4e, 0x47]) },
-  { ext: /\.jpe?g$/i, test: (b) => bytesAt(b, 0, [0xff, 0xd8, 0xff]) },
-  { ext: /\.gif$/i, test: (b) => asciiAt(b, 0, "GIF87a") || asciiAt(b, 0, "GIF89a") },
-  { ext: /\.webp$/i, test: (b) => asciiAt(b, 0, "RIFF") && asciiAt(b, 8, "WEBP") },
+  { ext: /\.png$/i, label: "PNG image", test: (b) => bytesAt(b, 0, [0x89, 0x50, 0x4e, 0x47]) },
+  { ext: /\.jpe?g$/i, label: "JPEG image", test: (b) => bytesAt(b, 0, [0xff, 0xd8, 0xff]) },
+  {
+    ext: /\.gif$/i,
+    label: "GIF image",
+    test: (b) => asciiAt(b, 0, "GIF87a") || asciiAt(b, 0, "GIF89a"),
+  },
+  {
+    ext: /\.webp$/i,
+    label: "WebP image",
+    test: (b) => asciiAt(b, 0, "RIFF") && asciiAt(b, 8, "WEBP"),
+  },
   {
     ext: /\.(?:ico|cur)$/i,
+    label: "icon",
     test: (b) => bytesAt(b, 0, [0, 0, 1, 0]) || bytesAt(b, 0, [0, 0, 2, 0]),
   },
-  { ext: /\.icns$/i, test: (b) => asciiAt(b, 0, "icns") },
-  { ext: /\.bmp$/i, test: (b) => asciiAt(b, 0, "BM") },
+  { ext: /\.icns$/i, label: "Apple icon", test: (b) => asciiAt(b, 0, "icns") },
+  { ext: /\.bmp$/i, label: "BMP image", test: (b) => asciiAt(b, 0, "BM") },
   {
     ext: /\.tiff?$/i,
+    label: "TIFF image",
     test: (b) => bytesAt(b, 0, [0x49, 0x49, 0x2a, 0]) || bytesAt(b, 0, [0x4d, 0x4d, 0, 0x2a]),
   },
-  { ext: /\.(?:avif|heic|heif|mp4|m4a|mov)$/i, test: (b) => asciiAt(b, 4, "ftyp") },
+  {
+    ext: /\.(?:avif|heic|heif|mp4|m4a|mov)$/i,
+    label: "HEIF/AVIF image or MP4/MOV media",
+    test: (b) => asciiAt(b, 4, "ftyp"),
+  },
   {
     ext: /\.mp3$/i,
+    label: "MP3 audio",
     test: (b) => asciiAt(b, 0, "ID3") || (b[0] === 0xff && ((b[1] ?? 0) & 0xe0) === 0xe0),
   },
-  { ext: /\.wav$/i, test: (b) => asciiAt(b, 0, "RIFF") && asciiAt(b, 8, "WAVE") },
-  { ext: /\.ogg$/i, test: (b) => asciiAt(b, 0, "OggS") },
-  { ext: /\.webm$/i, test: (b) => bytesAt(b, 0, [0x1a, 0x45, 0xdf, 0xa3]) },
+  {
+    ext: /\.wav$/i,
+    label: "WAV audio",
+    test: (b) => asciiAt(b, 0, "RIFF") && asciiAt(b, 8, "WAVE"),
+  },
+  { ext: /\.ogg$/i, label: "Ogg media", test: (b) => asciiAt(b, 0, "OggS") },
+  { ext: /\.webm$/i, label: "WebM media", test: (b) => bytesAt(b, 0, [0x1a, 0x45, 0xdf, 0xa3]) },
   {
     ext: /\.(?:ttf|otf)$/i,
+    label: "TrueType/OpenType font",
     test: (b) => bytesAt(b, 0, [0, 1, 0, 0]) || asciiAt(b, 0, "OTTO") || asciiAt(b, 0, "true"),
   },
-  { ext: /\.wasm$/i, test: (b) => bytesAt(b, 0, [0, 0x61, 0x73, 0x6d]) },
+  {
+    ext: /\.wasm$/i,
+    label: "WebAssembly module",
+    test: (b) => bytesAt(b, 0, [0, 0x61, 0x73, 0x6d]),
+  },
   {
     ext: /\.(?:node|so|dylib|o|bin)$/i,
+    label: "native object (ELF, Mach-O or PE)",
     test: (b) =>
       bytesAt(b, 0, [0x7f, 0x45, 0x4c, 0x46]) ||
       MACHO.some((m) => bytesAt(b, 0, m)) ||
       asciiAt(b, 0, "MZ"),
   },
-  { ext: /\.class$/i, test: (b) => bytesAt(b, 0, [0xca, 0xfe, 0xba, 0xbe]) },
+  {
+    ext: /\.class$/i,
+    label: "Java class file",
+    test: (b) => bytesAt(b, 0, [0xca, 0xfe, 0xba, 0xbe]),
+  },
 ]);
+
+/**
+ * The opaque binary format `name` names and `buf` carries the magic number of, or null.
+ * @param {string} name
+ * @param {Buffer} buf
+ * @returns {string | null}
+ */
+export function opaqueKind(name, buf) {
+  return OPAQUE_FORMATS.find((f) => f.ext.test(name) && f.test(buf))?.label ?? null;
+}
 
 /**
  * True when `name` is an opaque binary format and `buf` carries that format's magic number.
@@ -684,11 +797,12 @@ export const OPAQUE_FORMATS = Object.freeze([
  * @param {Buffer} buf
  */
 export function isOpaqueBinary(name, buf) {
-  return OPAQUE_FORMATS.some((f) => f.ext.test(name) && f.test(buf));
+  return opaqueKind(name, buf) !== null;
 }
 
 /**
- * The texts the deny-list reads in bytes no rule decodes — a binary it skips, content it refuses:
+ * The texts the deny-list (and, for a reviewed binary or a short embedded payload, every rule)
+ * reads in bytes no rule decodes — a reviewed binary, content it refuses:
  * the bytes one per character (latin1); as UTF-8, where a non-ASCII term is stored as UTF-8 (an image's
  * XMP or iTXt metadata); and, when the bytes hold NULs, without them and as UTF-16 in both byte orders
  * and alignments, where a term is stored as UTF-16 (EXIF XP* tags, ID3 frames, Windows resources).
@@ -1063,6 +1177,46 @@ function indexEntries() {
   return entries;
 }
 
+/**
+ * A ref name as git wrote it: UTF-8 when it is valid UTF-8, else one character per byte (git allows
+ * any byte from 0x80 up in a ref name; a replacement character would hide a term).
+ * @param {Buffer} b
+ */
+function refNameText(b) {
+  return decodeText(b)?.text ?? b.toString("latin1");
+}
+
+/** The branch HEAD names (`refs/heads/…`, unborn too), or null when HEAD is detached. */
+function headRef() {
+  try {
+    const name = refNameText(git(["symbolic-ref", "-q", "HEAD"])).trim();
+    return name || null;
+  } catch (e) {
+    // exit 1: HEAD is not a symbolic ref (detached) — no branch is published by this commit
+    if (e !== null && typeof e === "object" && "status" in e && e.status === 1) return null;
+    throw e;
+  }
+}
+
+/**
+ * Every ref name in the repository (`git for-each-ref`: branches, tags, remote-tracking refs, notes,
+ * the stash) and the branch HEAD names, unborn or not. Ref names hold no line break.
+ * @returns {string[]}
+ */
+function allRefNames() {
+  const out = git(["for-each-ref", "--format=%(refname)"], 64 * 1024 * 1024);
+  const names = [];
+  let at = 0;
+  for (let i = out.indexOf(0x0a); i !== -1; i = out.indexOf(0x0a, at)) {
+    if (i > at) names.push(refNameText(out.subarray(at, i)));
+    at = i + 1;
+  }
+  if (at < out.length) names.push(refNameText(out.subarray(at)));
+  const head = headRef();
+  if (head !== null) names.push(head);
+  return names;
+}
+
 /** The address in a `git var GIT_*_IDENT` line ("Name <addr> 1700000000 +0000"). */
 function identEmail(which) {
   const ident = git(["var", which]).toString("utf8");
@@ -1073,24 +1227,45 @@ function identEmail(which) {
 // --- the scan -------------------------------------------------------------------------------------
 
 /**
+ * Every rule over every reading of a blob's raw bytes (rawDenyViews: latin1, UTF-8 and, when they
+ * hold NULs, without them and as UTF-16) — what a reviewed binary still may not carry: a cookie, a
+ * SWID, a league id or a mailbox in its metadata, which a person looking at the picture can miss.
+ * Reported as `<label> (its bytes):<line>  [<rule>]`, once whichever readings see it.
+ * @param {string} label
+ * @param {Buffer} buf
+ * @returns {string[]}
+ */
+export function rawRuleFindings(label, buf) {
+  const seen = new Set();
+  for (const view of rawDenyViews(buf))
+    for (const f of scanText(`${label} (its bytes)`, view, [])) seen.add(f);
+  return [...seen];
+}
+
+/**
  * Scan one blob by what its bytes are (see "what a blob IS" above): text is scanned (a text holding
  * NUL characters — interleaved UTF-16 without a byte-order mark, a stray NUL — is scanned a second
  * time with them removed, so a value spread across NULs is still one value); gzip is peeled and its
- * content scanned the same way; a recognised opaque binary is skipped with the deny-list over its
- * raw bytes; anything else is refused (fail closed — the deny-list still reads its raw bytes).
+ * content scanned the same way; a reviewed binary (its path and the sha256 of these bytes in
+ * `reviewed`) passes with every rule and the deny-list over its raw bytes; anything else is refused
+ * — an unreviewed opaque binary as `[unreviewed-binary]`, the rest as
+ * `[unscannable-archive-or-database]` (fail closed — the deny-list still reads its raw bytes).
  * Findings carry `label`, never a matched value.
  * @param {string} label  the path reported (the published name)
  * @param {Buffer} buf
  * @param {string[]} deny
- * @param {{ name?: string, layers?: number }} [o]  name: the name whose extension applies (a peeled
- *   gzip's inner name); layers: gzip layers already peeled
- * @returns {{ findings: string[], scanned: number, binary: number }}
+ * @param {{ name?: string, layers?: number,
+ *           reviewed?: readonly { path: string, sha256: string }[] }} [o]  name: the name whose
+ *   extension applies (a peeled gzip's inner name); layers: gzip layers already peeled; reviewed:
+ *   the reviewed binaries (REVIEWED_BINARIES)
+ * @returns {{ findings: string[], scanned: number, reviewed: number }}
  */
 export function scanBlob(label, buf, deny, o = {}) {
   const name = o.name ?? label;
   const layers = o.layers ?? 0;
-  /** @type {{ findings: string[], scanned: number, binary: number }} */
-  const out = { findings: [], scanned: 0, binary: 0 };
+  const reviewedList = o.reviewed ?? REVIEWED_BINARIES;
+  /** @type {{ findings: string[], scanned: number, reviewed: number }} */
+  const out = { findings: [], scanned: 0, reviewed: 0 };
   const rawDeny = () => {
     if (!deny.length) return;
     // every reading of the raw bytes (rawDenyViews); one finding per line, whichever view saw it
@@ -1099,13 +1274,13 @@ export function scanBlob(label, buf, deny, o = {}) {
     for (const l of [...lines].sort((x, y) => x - y))
       out.findings.push(`deny-list match in ${label}:${String(l)}`);
   };
-  /** @param {string} why */
-  const refuse = (why) => {
-    out.findings.push(`${label}  [unscannable-archive-or-database] (${why})`);
+  /** @param {string} why @param {string} [rule] */
+  const refuse = (why, rule = "unscannable-archive-or-database") => {
+    out.findings.push(`${label}  [${rule}] (${why})`);
     rawDeny();
     return out;
   };
-  const allowlisted = REVIEWED_BINARY_ALLOWLIST.has(label);
+  const reviewed = isReviewedBinary(label, buf, reviewedList);
   const container = containerKind(buf);
   if (container?.kind === "gzip" || (container === null && GZIP_EXT.test(name))) {
     if (layers >= MAX_GZIP_LAYERS)
@@ -1144,13 +1319,14 @@ export function scanBlob(label, buf, deny, o = {}) {
     const inner = scanBlob(label, Buffer.concat(gz.members.map((m) => m.data)), deny, {
       name: innerName,
       layers: layers + 1,
+      reviewed: reviewedList,
     });
     out.findings.push(...inner.findings);
     out.scanned += inner.scanned;
-    out.binary += inner.binary;
+    out.reviewed += inner.reviewed;
     return out;
   }
-  if (!allowlisted) {
+  if (!reviewed) {
     if (container !== null)
       return refuse(
         `its bytes are a ${container.label}, which no rule can read, so it cannot be committed`,
@@ -1173,15 +1349,47 @@ export function scanBlob(label, buf, deny, o = {}) {
     }
     return out;
   }
-  if (allowlisted || isOpaqueBinary(name, buf)) {
-    out.binary++;
-    // a binary file is not regex-scanned, but the deny-list still applies to its bytes as latin1
+  if (reviewed) {
+    out.reviewed++;
+    // a person reviewed exactly these bytes at this path: every rule and the deny-list still read
+    // them in every byte reading (metadata a look at the picture can miss)
+    out.findings.push(...rawRuleFindings(label, buf));
     rawDeny();
     return out;
   }
+  const kind = opaqueKind(name, buf);
+  if (kind !== null)
+    return refuse(
+      `its bytes are a ${kind}: no rule reads its pixels, its compressed chunks or its tables, so a cookie, a league id or a name in it would pass unseen — it is committed only as bytes a person has reviewed (REVIEWED_BINARIES: its path and sha256)`,
+      "unreviewed-binary",
+    );
   return refuse(
     "its bytes are neither UTF-8 text (nor UTF-16/UTF-32 with a byte-order mark) nor a recognised binary format with its extension — re-save it as UTF-8",
   );
+}
+
+/**
+ * Whether one match of `rule` is a finding: its own allow-list, and for the generic assignments the
+ * placeholder words and the location exemption, may say it is not.
+ * @param {Rule} rule
+ * @param {RegExpExecArray} m
+ */
+function matchIsFinding(rule, m) {
+  const value = rule.group ? (m[rule.group] ?? "") : m[0];
+  if (rule.allow && rule.allow(m)) return false;
+  if (
+    !rule.strict &&
+    ["assigned-secret", "env-secret", "bearer-token"].includes(rule.id) &&
+    PLACEHOLDER.test(value)
+  )
+    return false;
+  // a filesystem path or URL named *_TOKEN_STORE / *_SECRET_FILE is a location, not a secret
+  if (
+    (rule.id === "assigned-secret" || rule.id === "env-secret") &&
+    /^(?:~\/|\/|\.\.?\/|\$\{?[A-Z_]|https?:\/\/)/.test(value)
+  )
+    return false;
+  return true;
 }
 
 /**
@@ -1193,7 +1401,7 @@ export function scanBlob(label, buf, deny, o = {}) {
  */
 export function lineRuleIds(line, o = {}) {
   const ids = [];
-  const allowMarker = line.includes("scan-secrets: allow");
+  const allowMarker = line.includes(ALLOW_MARKER);
   for (const rule of RULES) {
     if (!rule.strict && (o.strictOnly || allowMarker)) continue;
     try {
@@ -1209,27 +1417,140 @@ export function lineRuleIds(line, o = {}) {
           re.lastIndex++;
           continue;
         }
-        const value = rule.group ? (m[rule.group] ?? "") : m[0];
-        if (rule.allow && rule.allow(m)) continue;
-        if (
-          !rule.strict &&
-          ["assigned-secret", "env-secret", "bearer-token"].includes(rule.id) &&
-          PLACEHOLDER.test(value)
-        )
-          continue;
-        // a filesystem path or URL named *_TOKEN_STORE / *_SECRET_FILE is a location, not a secret
-        if (
-          (rule.id === "assigned-secret" || rule.id === "env-secret") &&
-          /^(?:~\/|\/|\.\.?\/|\$\{?[A-Z_]|https?:\/\/)/.test(value)
-        )
-          continue;
-        ids.push(rule.id);
+        if (matchIsFinding(rule, m)) ids.push(rule.id);
       }
     } catch {
       ids.push(`scan-error:${rule.id}`);
     }
   }
   return ids;
+}
+
+/** Escapes that can match a line break, or that this reader does not resolve (conservative). */
+const NEWLINE_ESCAPES = new Set([..."sWDpPnxuc0123456789"]);
+
+/**
+ * Whether a pattern can consume a line break, read from its source: an escape that can match one
+ * (`\s`, `\W`, `\D`, `\n`, `\p{…}`, a `\x`/`\u`/`\c`/numeric escape — not resolved, so counted), a
+ * literal line break, a `.` under the `s` flag, a positive class holding one of those, or a negated
+ * class that excludes neither `\s` nor `\n` (`[^"]`, `[^]`). Conservative by construction: what it
+ * counts wrongly costs one more pass over the text, never a missed match.
+ * @param {RegExp} re
+ */
+export function canCrossLines(re) {
+  const src = re.source;
+  const dotAll = re.flags.includes("s");
+  let inClass = false;
+  let negated = false;
+  let excludesNewline = false;
+  let mayMatchNewline = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i] ?? "";
+    if (c === "\\") {
+      const e = src[++i] ?? "";
+      if (!inClass) {
+        if (NEWLINE_ESCAPES.has(e)) return true;
+      } else {
+        if (e === "s" || e === "n") excludesNewline = true;
+        if (NEWLINE_ESCAPES.has(e)) mayMatchNewline = true;
+      }
+      continue;
+    }
+    if (inClass) {
+      if (c === "]") {
+        if (negated ? !excludesNewline : mayMatchNewline) return true;
+        inClass = false;
+      } else if (c === "\n") {
+        excludesNewline = true;
+        mayMatchNewline = true;
+      }
+      continue;
+    }
+    if (c === "[") {
+      inClass = true;
+      negated = src[i + 1] === "^";
+      if (negated) i++;
+      excludesNewline = false;
+      mayMatchNewline = false;
+    } else if (c === "\n" || (c === "." && dotAll)) return true;
+  }
+  return inClass;
+}
+
+/** The regex rules whose matches can span a line break (canCrossLines), fixed at load. */
+const CROSS_LINE_RULES = new Set(
+  RULES.filter((r) => !r.find && r.re !== undefined && canCrossLines(r.re)),
+);
+
+/** The ids of the rules whose matches can span a line break (for tests and the docs). */
+export const CROSS_LINE_RULE_IDS = Object.freeze([...CROSS_LINE_RULES].map((r) => r.id));
+
+/**
+ * Every rule over a text, as gitleaks runs its rules over a whole file: each regex rule once over
+ * the lines joined with "\n" — so a match that spans line breaks (`\s` and a class like `[^"]`
+ * cross them) is found like one inside a line — and each linear finder (`find`) line by line
+ * (wrappedRuns joins a value wrapped across lines). A hit is the line of the match's first
+ * non-blank character (1-based); one per match, in line order and, on a line, in rule order. A
+ * generic rule's hit is dropped when that line carries `scan-secrets: allow`. `strictOnly`: the
+ * strict rules only; `crossOnly`: only the matches that span a line break (from the rules that can,
+ * canCrossLines). Stage C finding scan-league-envelope-per-line: the rules ran one line at a time,
+ * so a league body written one key per line (`JSON.stringify(v, null, 2)`, prettier) —
+ * `"gameId": 1,⏎ "id": <id>,⏎ "members"` — or a `"leagueIds": [⏎ <id>` array passed, where
+ * gitleaks flagged it after the push.
+ * @param {string[]} lines
+ * @param {{ strictOnly?: boolean, crossOnly?: boolean }} [o]
+ * @returns {{ line: number, id: string }[]}
+ */
+export function textRuleHits(lines, o = {}) {
+  const text = lines.join("\n");
+  /** the offset of each line's first character */
+  const starts = [0];
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) starts.push(i + 1);
+  /** @param {number} off */
+  const lineOf = (off) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if ((starts[mid] ?? 0) <= off) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+  /** @type {{ line: number, id: string, rank: number }[]} */
+  const hits = [];
+  RULES.forEach((rule, rank) => {
+    if (!rule.strict && o.strictOnly) return;
+    if (o.crossOnly && !CROSS_LINE_RULES.has(rule)) return;
+    try {
+      if (rule.find) {
+        const find = rule.find;
+        lines.forEach((l, i) => {
+          if (!rule.strict && l.includes(ALLOW_MARKER)) return;
+          for (let k = find(l).length; k > 0; k--) hits.push({ line: i + 1, id: rule.id, rank });
+        });
+        return;
+      }
+      const re = /** @type {RegExp} */ (rule.re);
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        if (m[0] === "") {
+          re.lastIndex++;
+          continue;
+        }
+        const body = m[0].trimStart();
+        if (o.crossOnly && !body.includes("\n")) continue;
+        const line = lineOf(m.index + (m[0].length - body.length));
+        if (!rule.strict && (lines[line - 1] ?? "").includes(ALLOW_MARKER)) continue;
+        if (matchIsFinding(rule, m)) hits.push({ line, id: rule.id, rank });
+      }
+    } catch {
+      hits.push({ line: 1, id: `scan-error:${rule.id}`, rank });
+    }
+  });
+  hits.sort((a, b) => a.line - b.line || a.rank - b.rank);
+  return hits.map(({ line, id }) => ({ line, id }));
 }
 
 /**
@@ -1253,9 +1574,25 @@ const ENCODED_HINT =
  * @returns {string[]}
  */
 export function lineFindingIds(line) {
+  return idsOfReadings(line, decodedLine(line));
+}
+
+/**
+ * A line's decoded reading (decodeLayers) when it carries an encoding hint, else the line itself.
+ * @param {string} line
+ */
+function decodedLine(line) {
+  return ENCODED_HINT.test(line) ? decodeLayers(line) : line;
+}
+
+/**
+ * The rule ids of a line given its decoded reading: every rule on the line, then each strict rule
+ * that fires only on the decoded reading (lineFindingIds).
+ * @param {string} line
+ * @param {string} decoded
+ */
+function idsOfReadings(line, decoded) {
   const ids = lineRuleIds(line);
-  if (!ENCODED_HINT.test(line)) return ids;
-  const decoded = decodeLayers(line);
   if (decoded === line) return ids;
   const seen = new Set(ids);
   for (const id of new Set(lineRuleIds(decoded, { strictOnly: true })))
@@ -1272,11 +1609,38 @@ export function lineFindingIds(line) {
  * @returns {string[]}
  */
 export function scanText(label, text, deny) {
-  const findings = [];
   const lines = text.split(/\r?\n/);
-  lines.forEach((line, idx) => {
-    for (const id of lineFindingIds(line)) findings.push(`${label}:${idx + 1}  [${id}]`);
+  /** each line's rule ids, in order: as written, then what only its decoded reading adds */
+  /** @type {Map<number, string[]>} */
+  const byLine = new Map();
+  /** @param {number} line @param {string} id */
+  const add = (line, id) => {
+    const ids = byLine.get(line);
+    if (ids) ids.push(id);
+    else byLine.set(line, [id]);
+  };
+  // every rule over the whole text — matches inside a line and across line breaks alike, as
+  // gitleaks finds them (never narrower than it)
+  for (const { line, id } of textRuleHits(lines)) add(line, id);
+  // each line's decoded reading (lineFindingIds): every strict rule that fires there only
+  let decodedAny = false;
+  const view = lines.map((l, i) => {
+    const d = decodedLine(l);
+    if (d === l) return l;
+    decodedAny = true;
+    const seen = new Set(byLine.get(i + 1));
+    for (const id of new Set(lineRuleIds(d, { strictOnly: true })))
+      if (!seen.has(id)) add(i + 1, id);
+    // an encoded line break is read as a space, so every line keeps its number
+    return d.replaceAll("\n", " ");
   });
+  // and across line breaks in the decoded reading (`leagueId%3D⏎<id>`: gitleaks' encoded twin)
+  if (decodedAny)
+    for (const { line, id } of textRuleHits(view, { strictOnly: true, crossOnly: true }))
+      if (!byLine.get(line)?.includes(id)) add(line, id);
+  const findings = [];
+  for (const line of [...byLine.keys()].sort((a, b) => a - b))
+    for (const id of byLine.get(line) ?? []) findings.push(`${label}:${String(line)}  [${id}]`);
   // values wrapped across lines or split by concatenation (S3)
   const lineSet = new Set(findings);
   for (const { line, run } of wrappedRuns(lines))
@@ -1287,7 +1651,9 @@ export function scanText(label, text, deny) {
         findings.push(f);
       }
     }
-  findings.push(...fixtureLeagueIdFindings(label, text));
+  findings.push(...leagueBodyFindings(label, text));
+  // a file inside the text: a base64 data: URI's bytes, read as a committed file's would be
+  findings.push(...embeddedFindings(label, lines, deny));
   for (const n of denylistLines(text, deny)) findings.push(`deny-list match in ${label}:${n}`);
   return findings;
 }
@@ -1312,41 +1678,85 @@ export function pathFindings(file, n, deny) {
 }
 
 /**
- * A recorded ESPN body under fixtures/ parsed as JSON (S3): a non-zero root `id` of a league body
- * (`gameId` 1 with a `seasonId` — a season body has none) or a non-zero numeric `leagueId` anywhere
- * is the real league id — whatever the key
- * order or whitespace. Unparseable JSON is not this rule's concern (the line rules still ran).
- * @param {string} label
- * @param {string} text
+ * The spellings a ref name is published in: the full name (`refs/heads/x`), the name a branch list,
+ * a pull request's head, a run's name and `github.ref_name` show (`x`), and for a remote-tracking
+ * ref the remote's own branch name. A name without `refs/` is a branch name, as `git push origin
+ * <name>` reads it.
+ * @param {string} name
  * @returns {string[]}
  */
-export function fixtureLeagueIdFindings(label, text) {
-  if (!/(?:^|\/)fixtures\/.+\.json$/.test(label)) return [];
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    return [];
+export function refSpellings(name) {
+  const out = new Set([name]);
+  if (!name.startsWith("refs/")) out.add(`refs/heads/${name}`);
+  else {
+    const rest = name.slice("refs/".length);
+    out.add(rest);
+    const short = /^(?:heads|tags)\/(.+)$/.exec(rest) ?? /^remotes\/[^/]+\/(.+)$/.exec(rest);
+    if (short?.[1]) out.add(short[1]);
   }
-  const out = [];
-  if (
-    body !== null &&
-    typeof body === "object" &&
-    !Array.isArray(body) &&
-    body.gameId === 1 &&
-    "seasonId" in body &&
-    typeof body.id === "number" &&
-    body.id !== 0
-  )
-    out.push(`${label}  [espn-league-root-id]`);
-  let flagged = false;
+  return [...out];
+}
+
+/**
+ * The findings of a ref NAME: a push publishes it — the branch list, a pull request's head, every
+ * Actions run and `github.ref_name` — so every rule runs over each of its spellings (refSpellings)
+ * in both readings (lineFindingIds) and the deny-list checks them. A finding names the ref by its
+ * number, never the name (Stage C finding scan-ref-names-unscanned: commit-paths.sh pushed a branch
+ * named with a league-id shape and a deny-list term, and no guard or CI step read a ref name).
+ * @param {string} name  the ref name (`refs/heads/x`, `refs/tags/v1`, or a bare branch name)
+ * @param {number} n  the ref's 1-based number in this run
+ * @param {string[]} deny
+ * @returns {string[]}
+ */
+export function refFindings(name, n, deny) {
+  const where = `the name of ref #${String(n)} (name not printed)`;
+  const ids = new Set();
+  let denied = false;
+  for (const s of refSpellings(name)) {
+    for (const id of lineFindingIds(s)) ids.add(id);
+    if (denylistLines(s, deny).length) denied = true;
+  }
+  const out = [...ids].map((id) => `${where}  [${id}]`);
+  if (denied) out.push(`deny-list match in ${where}`);
+  return out;
+}
+
+/**
+ * `text` parsed as one JSON object or array (its first non-blank character `{` or `[`), or
+ * undefined.
+ * @param {string} text
+ * @returns {unknown}
+ */
+function parseJsonValue(text) {
+  const t = text.trimStart();
+  if (!t.startsWith("{") && !t.startsWith("[")) return undefined;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The league-body rules over one parsed JSON value: an object at any depth with `gameId` 1, a
+ * `seasonId` and a non-zero numeric `id` is a league body (`/seasons/{s}` has no `seasonId`;
+ * `leagueHistory` is an array of league bodies), its `id` the league id; a non-zero numeric (or
+ * 4+-digit string) `leagueId` / `leagueIds` / `league_id` anywhere is one too.
+ * @param {unknown} body
+ * @returns {string[]}  rule ids, each once
+ */
+function leagueBodyIds(body) {
+  const ids = new Set();
   const walk = (/** @type {unknown} */ v, depth = 0) => {
-    if (flagged || depth > 64 || v === null || typeof v !== "object") return;
+    if (ids.size === 2 || depth > 64 || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
       for (const x of v) walk(x, depth + 1);
       return;
     }
-    for (const [k, x] of Object.entries(v)) {
+    const o = /** @type {Record<string, unknown>} */ (v);
+    if (o.gameId === 1 && "seasonId" in o && typeof o.id === "number" && o.id !== 0)
+      ids.add("espn-league-root-id");
+    for (const [k, x] of Object.entries(o)) {
       if (/^league[_-]?ids?$/i.test(k)) {
         const vals = Array.isArray(x) ? x : [x];
         if (
@@ -1355,16 +1765,226 @@ export function fixtureLeagueIdFindings(label, text) {
               (typeof n === "number" && n !== 0) ||
               (typeof n === "string" && /^[1-9]\d{3,}$/.test(n)),
           )
-        ) {
-          out.push(`${label}  [espn-league-id-field]`);
-          flagged = true;
-          return;
-        }
+        )
+          ids.add("espn-league-id-field");
       }
       walk(x, depth + 1);
     }
   };
   walk(body);
+  return [...ids];
+}
+
+/**
+ * The fenced code blocks of a Markdown text (``` or ~~~, three or more, indented at most three
+ * spaces; an unclosed fence runs to the end), each with its first content line (1-based).
+ * @param {string[]} lines
+ * @returns {{ line: number, body: string }[]}
+ */
+function fencedBlocks(lines) {
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i] ?? "");
+    if (!open) continue;
+    const fence = open[1] ?? "";
+    const close = new RegExp(
+      `^ {0,3}${fence[0] === "`" ? "`" : "~"}{${String(fence.length)},}\\s*$`,
+    );
+    let j = i + 1;
+    while (j < lines.length && !close.test(lines[j] ?? "")) j++;
+    out.push({ line: i + 2, body: lines.slice(i + 1, j).join("\n") });
+    i = j;
+  }
+  return out;
+}
+
+/**
+ * A league body wherever a JSON value is written, whatever the writer's key order, indentation and
+ * line breaks (S3; Stage C finding scan-league-envelope-per-line — the walk read only
+ * fixtures/**\/*.json, so a pretty-printed body under tests/ or docs/ passed): the whole text when
+ * it is one JSON value (a .json file or a capture under any name, reported without a line), else
+ * every JSON Lines record and every fenced code block that holds one (reported at its line).
+ * Unparseable text is not this rule's concern: the line and cross-line rules still ran.
+ * @param {string} label
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function leagueBodyFindings(label, text) {
+  const whole = parseJsonValue(text);
+  if (whole !== undefined) return leagueBodyIds(whole).map((id) => `${label}  [${id}]`);
+  const out = new Set();
+  const lines = text.split(/\r?\n/);
+  lines.forEach((l, i) => {
+    const t = l.trim();
+    if (!/^(?:\{.*\}|\[.*\])$/.test(t)) return;
+    const v = parseJsonValue(t);
+    if (v !== undefined)
+      for (const id of leagueBodyIds(v)) out.add(`${label}:${String(i + 1)}  [${id}]`);
+  });
+  if (text.includes("```") || text.includes("~~~"))
+    for (const { line, body } of fencedBlocks(lines)) {
+      const v = parseJsonValue(body);
+      if (v !== undefined)
+        for (const id of leagueBodyIds(v)) out.add(`${label}:${String(line)}  [${id}]`);
+    }
+  return [...out];
+}
+
+// --- files inside a text: base64 data: URIs ------------------------------------------------------
+//
+// A text can carry a file the rules cannot read: a base64 `data:` URI (RFC 2397) — a Markdown or
+// HTML image, an SVG's `<image href="data:image/png;base64,…">`, a CSS `url(data:font/woff2;…)`.
+// Its bytes are judged as a committed file's are (Stage C finding scan-opaque-binaries-unscanned:
+// an image's metadata no rule reads must never pass as "clean", committed as a file or embedded):
+// text (and gzip) is scanned — every rule, the deny-list, and the data: URIs inside it, a bounded
+// number of levels deep; anything else is refused as `[embedded-binary]`, and the deny-list still
+// reads its bytes. A payload too short to hold a value any rule names is not refused, but the
+// rules and the deny-list read its bytes all the same.
+
+/** A base64 data: URI's head: `data:[<type>/<subtype>][;<parameter>]*;base64,` (any case). */
+const DATA_URI_HEAD =
+  /\bdata:((?:[a-z0-9!#$&^_.+-]{1,127}\/[a-z0-9!#$&^_.+-]{1,127})?)((?:;[^;,\s"'\x60<>()\\]{0,256}){0,16}?);base64,/gi;
+/**
+ * A payload run: the base64 alphabet and its URL-safe twin, `%2B` `%2F` `%3D` (a URI inside a URL)
+ * and `\/` (a URI inside a JSON string).
+ */
+const PAYLOAD_RUN = /(?:[A-Za-z0-9+/=_-]|%2[BbFf]|%3[Dd]|\\\/)+/y;
+/** What closes the quote or bracket a data: URI is written in (an attribute, a link, `url(…)`). */
+const DATA_URI_CLOSER = new Map([
+  ['"', '"'],
+  ["'", "'"],
+  ["\x60", "\x60"],
+  ["(", ")"],
+]);
+/**
+ * The fewest bytes of a non-text payload that are refused: fewer hold no value a rule names, even
+ * deflated (a GUID is 36 characters, an espn_s2 value 40, a league id needs `leagueId=` before its
+ * digits) — so a hostile-input test's `data:image/png;base64,iVBORw0KGgo=` (a bare PNG signature)
+ * can be committed, while the smallest real image (67 bytes) cannot.
+ */
+export const EMBED_MIN_BYTES = 16;
+/** data: URIs decoded inside decoded data: URIs (an SVG in a data: URI holding a PNG is 2). */
+export const MAX_EMBED_DEPTH = 3;
+/** How deep the scan of a data: URI's bytes is now (scanText → scanBlob → scanText …). */
+let embedDepth = 0;
+
+/** A payload run's bytes. @param {string} run */
+function payloadBytes(run) {
+  // Node's base64 decoder reads the URL-safe alphabet too, and skips nothing else in a run
+  return Buffer.from(
+    run.replace(/%2B/gi, "+").replace(/%2F/gi, "/").replace(/%3D/gi, "=").replaceAll("\\/", "/"),
+    "base64",
+  );
+}
+
+/**
+ * Every base64 data: URI in `lines`: the line it starts on (1-based), its media type (lower case,
+ * "" when none) and its payload's bytes. A payload runs to the first character outside the base64
+ * alphabet. One written inside a quote or a bracket that its line leaves open — an SVG or HTML
+ * attribute an editor wraps at 64–76 columns, a CSS `url(` — goes on through the lines below that
+ * hold only payload, and the line that closes the quote or bracket; padding (`=`) ends it. A bare
+ * URI is one line: the prose after it is never read as its payload.
+ * @param {string[]} lines
+ * @returns {{ line: number, type: string, bytes: Buffer }[]}
+ */
+export function dataUriPayloads(lines) {
+  /** @type {{ line: number, type: string, bytes: Buffer }[]} */
+  const out = [];
+  const head = new RegExp(DATA_URI_HEAD.source, DATA_URI_HEAD.flags);
+  const run = new RegExp(PAYLOAD_RUN.source, PAYLOAD_RUN.flags);
+  /** @param {string} s @param {number} at */
+  const runAt = (s, at) => {
+    run.lastIndex = at;
+    return run.exec(s)?.[0] ?? "";
+  };
+  lines.forEach((line, i) => {
+    if (!/data:/i.test(line)) return;
+    head.lastIndex = 0;
+    for (let m = head.exec(line); m !== null; m = head.exec(line)) {
+      const at = m.index + m[0].length;
+      const first = runAt(line, at);
+      const parts = [first];
+      const closer = DATA_URI_CLOSER.get(line[m.index - 1] ?? "");
+      let chunk = first;
+      let rest = line.slice(at + first.length);
+      if (closer !== undefined)
+        for (let j = i + 1; j < lines.length; j++) {
+          if (chunk.endsWith("=") || !/^\s*$/.test(rest)) break;
+          const next = lines[j] ?? "";
+          const lead = next.length - next.trimStart().length;
+          chunk = runAt(next, lead);
+          rest = next.slice(lead + chunk.length);
+          if (!chunk || !(/^\s*$/.test(rest) || rest.startsWith(closer))) break;
+          parts.push(chunk);
+        }
+      out.push({
+        line: i + 1,
+        type: (m[1] ?? "").toLowerCase(),
+        bytes: payloadBytes(parts.join("")),
+      });
+      head.lastIndex = Math.max(head.lastIndex, at + first.length);
+    }
+  });
+  return out;
+}
+
+/**
+ * The findings of the files a text carries in base64 data: URIs (see above). A finding names the
+ * text and the line the URI starts on — `<label>:<line> (data: URI)` — never a byte of it.
+ * @param {string} label
+ * @param {string[]} lines
+ * @param {string[]} deny
+ * @returns {string[]}
+ */
+export function embeddedFindings(label, lines, deny) {
+  const payloads = dataUriPayloads(lines).filter((p) => p.bytes.length > 0);
+  if (!payloads.length) return [];
+  if (embedDepth >= MAX_EMBED_DEPTH)
+    return [
+      `${label}  [embedded-binary] (data: URIs nested more than ${String(MAX_EMBED_DEPTH)} deep inside one another — refused, not decoded)`,
+    ];
+  /** @type {string[]} */
+  const out = [];
+  for (const p of payloads) {
+    const where = `${label}:${String(p.line)} (data: URI)`;
+    const gzip = containerKind(p.bytes)?.kind === "gzip";
+    if (gzip || decodeText(p.bytes) !== null) {
+      // text, or gzip to peel: scanned as a committed file of that kind is
+      embedDepth++;
+      try {
+        const name = gzip ? "embedded.gz" : "embedded.txt";
+        out.push(...scanBlob(where, p.bytes, deny, { name, reviewed: [] }).findings);
+      } finally {
+        embedDepth--;
+      }
+      continue;
+    }
+    if (p.bytes.length >= EMBED_MIN_BYTES) {
+      const kind =
+        containerKind(p.bytes)?.label ??
+        OPAQUE_FORMATS.find((f) => f.test(p.bytes))?.label ??
+        "binary blob no reader recognises";
+      out.push(
+        `${where}  [embedded-binary] (its bytes are a ${kind}: no rule reads them, so a cookie, a league id or a name in them would pass unseen — a text carries no binary; one committed as a file of its own passes only as bytes a person has reviewed, REVIEWED_BINARIES)`,
+      );
+    } else {
+      // too short to refuse: every rule still reads its bytes, in every reading
+      embedDepth++;
+      try {
+        out.push(...rawRuleFindings(where, p.bytes));
+      } finally {
+        embedDepth--;
+      }
+    }
+    // the deny-list reads the bytes in every reading, as it reads any blob no rule decodes
+    if (deny.length) {
+      const seen = new Set();
+      for (const view of rawDenyViews(p.bytes))
+        for (const l of denylistLines(view, deny)) seen.add(l);
+      for (const l of [...seen].sort((a, b) => a - b))
+        out.push(`deny-list match in ${where}:${String(l)}`);
+    }
+  }
   return out;
 }
 
@@ -1377,6 +1997,8 @@ function main() {
   /** @type {string | null} */
   let message = null;
   const files = [];
+  /** @type {string[]} */
+  const refArgs = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? "";
     if (a === "--staged") staged = true;
@@ -1387,6 +2009,10 @@ function main() {
       const v = args[++i];
       if (v === undefined) return fail(new Error("--message needs a file"));
       message = v;
+    } else if (a === "--ref") {
+      const v = args[++i];
+      if (v === undefined || v === "") return fail(new Error("--ref needs a ref name"));
+      refArgs.push(v);
     } else if (a === "--") {
       files.push(...args.slice(i + 1));
       break;
@@ -1396,6 +2022,13 @@ function main() {
 
   /** @type {{file: string, read: () => Buffer | null, message?: true}[]} */
   const targets = [];
+  /** the ref names a push publishes: scanned like paths, never printed */
+  /** @type {string[]} */
+  const refs = [];
+  /** @param {string} r */
+  const addRef = (r) => {
+    if (!refs.includes(r)) refs.push(r);
+  };
   let deny;
   try {
     deny = loadDenylist();
@@ -1417,14 +2050,22 @@ function main() {
         .filter(Boolean)) {
         targets.push({ file: f, read: () => readWorktree(f) });
       }
+      // every ref a push publishes or has published: in CI's full-depth checkout, every branch and
+      // tag of the remote (Stage C finding scan-ref-names-unscanned)
+      for (const r of allRefNames()) addRef(r);
     }
-    if (index)
+    if (index) {
       for (const { file, sha } of indexEntries())
         targets.push({ file, read: () => (sha === null ? null : readBlob(sha, file)) });
+      // the commit is published under the branch it lands on
+      const head = headRef();
+      if (head !== null) addRef(head);
+    }
     for (const f of files) {
       const n = targets.length + 1;
       targets.push({ file: f, read: () => (staged ? readStaged(f) : readNamed(f, n)) });
     }
+    for (const r of refArgs) addRef(r);
     if (message !== null) {
       const msgPath = message;
       targets.push({ file: "COMMIT_MESSAGE", read: () => readFileSync(msgPath), message: true });
@@ -1432,16 +2073,17 @@ function main() {
   } catch (e) {
     return fail(e);
   }
-  if (!targets.length && !index && !identity) {
+  if (!targets.length && !refs.length && !index && !identity) {
     process.stderr.write(
-      "scan-secrets: no files given (use --all, --index, --message or pass paths)\n",
+      "scan-secrets: no files given (use --all, --index, --message, --ref or pass paths)\n",
     );
     process.exit(2);
   }
 
   const findings = [];
+  refs.forEach((r, i) => findings.push(...refFindings(r, i + 1, deny)));
   let scanned = 0;
-  let binary = 0;
+  let reviewed = 0;
   targets.forEach(({ file, read, message: isMessage }, n) => {
     // a path is published too: every rule and the deny-list run over it (reported without the path)
     if (!isMessage) findings.push(...pathFindings(file, n + 1, deny));
@@ -1459,7 +2101,7 @@ function main() {
     const r = scanBlob(file, buf, deny);
     findings.push(...r.findings);
     scanned += r.scanned;
-    binary += r.binary;
+    reviewed += r.reviewed;
   });
 
   if (findings.length) {
@@ -1470,7 +2112,7 @@ function main() {
     process.exit(1);
   }
   process.stdout.write(
-    `scan-secrets: clean (${String(scanned)} text file(s) scanned${binary ? `, ${String(binary)} binary file(s) skipped` : ""}${identity ? ", commit identity ok" : ""}${deny.length ? ", local deny-list active" : ""})\n`,
+    `scan-secrets: clean (${String(scanned)} text file(s) scanned${reviewed ? `, ${String(reviewed)} reviewed binary file(s)` : ""}${refs.length ? `, ${String(refs.length)} ref name(s)` : ""}${identity ? ", commit identity ok" : ""}${deny.length ? ", local deny-list active" : ""})\n`,
   );
 }
 
