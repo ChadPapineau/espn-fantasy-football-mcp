@@ -2,7 +2,8 @@
 // rows past their hard limits, snapshots > 30 d, espn_requests past their TTL, points_cache LRU,
 // dataset debris, backups beyond two versions; never the recommendation log, league_settings,
 // espn_projection, scoreboard_snapshot or write_journal (T-07) — and the space the deleted rows took
-// is given back: a VACUUM when the free pages are a real share of the file; `store backup` weekly
+// is given back: a VACUUM when store-space's `reclaimDue` says so, the same rule doctor row 5's
+// advice follows; `store backup` weekly
 // Sun 03:10: a `VACUUM INTO` copy under the process lock, keep 4 — plan 03 §7, T-15(b)). `backup --to
 // <path>` writes a NEW 0600 file the user names (never a synced folder, the checkout, or a directory
 // others can write into — by mode bits or by an ACL entry — and with no ACL entry of its directory
@@ -47,6 +48,7 @@ import { writeLine, type CliIo } from "./io.js";
 import type { Logger } from "./log.js";
 import { createNotifier } from "./notify.js";
 import { errorText, openStore } from "./store-access.js";
+import { MAX_STORE_BYTES, readStoreSpace, reclaimDue, storeFileBytes } from "./store-space.js";
 
 /** `eff prune`. */
 export async function prune(
@@ -92,16 +94,26 @@ export async function prune(
     files_removed: report.files_removed.length,
     backups_removed: report.backups_removed.length,
     reclaim: reclaimed.status,
-    ...(reclaimed.status === "reclaimed" ? { reclaimed_bytes: reclaimed.freedBytes } : {}),
+    ...(reclaimed.status === "reclaimed"
+      ? { reclaimed_bytes: reclaimed.freedBytes, log_held: reclaimed.logHeld }
+      : {}),
   });
   await writeLine(
     io.stdout,
     `pruned rows: ${rows}; ${String(report.files_removed.length)} dataset file(s), ${String(report.backups_removed.length)} old backup(s). Never pruned: recommendation log, league settings, ESPN projections, scoreboard snapshots, write journal.`,
   );
-  if (reclaimed.status === "reclaimed")
+  const mb = (n: number): string => String(Math.round(n / 1024 ** 2));
+  if (reclaimed.status === "reclaimed" && reclaimed.logHeld)
+    // the VACUUM is in the write-ahead log, which a process still reading the store keeps: the space
+    // comes back when that process closes the store, never "reclaimed 0 MB" (the file grew)
     await writeLine(
       io.stdout,
-      `reclaimed ${String(Math.round(reclaimed.freedBytes / 1024 ** 2))} MB of free pages (store.sqlite ${String(Math.round(reclaimed.beforeBytes / 1024 ** 2))} → ${String(Math.round(reclaimed.afterBytes / 1024 ** 2))} MB)`,
+      `free pages VACUUMed, but another process is reading the store, so its write-ahead log keeps the space until that process closes the store (store.sqlite and its log: ${mb(reclaimed.beforeBytes)} → ${mb(reclaimed.afterBytes)} MB)`,
+    );
+  else if (reclaimed.status === "reclaimed")
+    await writeLine(
+      io.stdout,
+      `reclaimed ${mb(reclaimed.freedBytes)} MB of free pages (store.sqlite ${mb(reclaimed.beforeBytes)} → ${mb(reclaimed.afterBytes)} MB)`,
     );
   else if (reclaimed.status === "busy")
     await writeLine(
@@ -111,11 +123,6 @@ export async function prune(
   return EXIT.ok;
 }
 
-/** A prune VACUUMs only when the free pages are at least this many bytes … */
-export const RECLAIM_MIN_FREE_BYTES = 8 * 1024 ** 2;
-/** … and at least this share of the file (a VACUUM rewrites every live page). */
-export const RECLAIM_MIN_FREE_SHARE = 0.2;
-
 /** What reclaiming the store's free pages did. */
 export type ReclaimResult =
   | {
@@ -123,30 +130,22 @@ export type ReclaimResult =
       readonly beforeBytes: number;
       readonly afterBytes: number;
       readonly freedBytes: number;
+      /** The TRUNCATE checkpoint could not finish: a reader's snapshot holds the log. */
+      readonly logHeld: boolean;
     }
   | { readonly status: "not_needed" | "busy" | "missing" | "error" };
 
-function fileBytes(file: string): number {
-  let n = 0;
-  for (const f of [file, `${file}-wal`]) {
-    try {
-      n += statSync(f).size;
-    } catch {
-      // no -wal right after a checkpoint
-    }
-  }
-  return n;
-}
-
 /**
  * Gives the store's free pages back to the file system (plan 06 §1.3 "freed space"): the store runs
- * with auto_vacuum off, so a prune's DELETEs only move pages to the freelist. When they are at least
- * RECLAIM_MIN_FREE_BYTES and RECLAIM_MIN_FREE_SHARE of the file, one `VACUUM` on a connection of its
- * own (busy timeout 5 s: a server or job writing meanwhile is waited for, never interrupted —
- * SQLite's own locking; a VACUUM changes no row and no INTEGER PRIMARY KEY), then a TRUNCATE
- * checkpoint. Never throws: a busy or failing store is reported, the prune itself has succeeded.
+ * with auto_vacuum off, so a prune's DELETEs only move pages to the freelist. When store-space's
+ * `reclaimDue` holds (the rule doctor row 5's advice follows: enough free pages, or a file over the
+ * size limit whose data is not), one `VACUUM` on a connection of its own (busy timeout 5 s: a server
+ * or job writing meanwhile is waited for, never interrupted — SQLite's own locking; a VACUUM changes
+ * no row and no INTEGER PRIMARY KEY), then a TRUNCATE checkpoint, whose `busy` answer says whether a
+ * reader kept the log. Never throws: a busy or failing store is reported, the prune itself has
+ * succeeded. `maxStoreBytes` is the size limit (tests pass a small one).
  */
-export function reclaimFreePages(file: string): ReclaimResult {
+export function reclaimFreePages(file: string, maxStoreBytes = MAX_STORE_BYTES): ReclaimResult {
   try {
     statSync(file);
   } catch {
@@ -155,26 +154,19 @@ export function reclaimFreePages(file: string): ReclaimResult {
   let db: DatabaseSync | null = null;
   try {
     db = new DatabaseSync(file, { timeout: 5_000 });
-    const n = (pragma: string): number => {
-      const r = db?.prepare(`PRAGMA ${pragma}`).get() as Record<string, unknown> | undefined;
-      return Number(r === undefined ? NaN : Object.values(r)[0]);
-    };
-    const size = n("page_size");
-    const count = n("page_count");
-    const free = n("freelist_count");
-    if (![size, count, free].every((x) => Number.isFinite(x) && x >= 0) || count === 0)
-      return { status: "error" };
-    if (free * size < RECLAIM_MIN_FREE_BYTES || free / count < RECLAIM_MIN_FREE_SHARE)
-      return { status: "not_needed" };
-    const beforeBytes = fileBytes(file);
+    const space = readStoreSpace(db, file);
+    if (space === null || space.pageCount === 0) return { status: "error" };
+    if (!reclaimDue(space, maxStoreBytes)) return { status: "not_needed" };
     db.exec("VACUUM");
-    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    const afterBytes = fileBytes(file);
+    const ck = db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as
+      Record<string, unknown> | undefined;
+    const afterBytes = storeFileBytes(file);
     return {
       status: "reclaimed",
-      beforeBytes,
+      beforeBytes: space.fileBytes,
       afterBytes,
-      freedBytes: Math.max(0, beforeBytes - afterBytes),
+      freedBytes: Math.max(0, space.fileBytes - afterBytes),
+      logHeld: Number(ck?.busy ?? 0) !== 0,
     };
   } catch (e) {
     const errcode = (e as { errcode?: unknown } | null)?.errcode;

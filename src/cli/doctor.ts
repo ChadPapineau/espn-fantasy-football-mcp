@@ -91,6 +91,13 @@ import {
 import { createTerminalPrompt } from "./prompt.js";
 import { bootLevel, makeLogger, registerConfigRedaction } from "./runtime.js";
 import { candidatePorts, portOwner } from "./setup-page.js";
+import {
+  freeBytes as freePageBytes,
+  liveBytes,
+  MAX_STORE_BYTES,
+  measureStoreSpace,
+  storeSpaceNotes,
+} from "./store-space.js";
 import { sourceStatuses, configuredSources, sourceStatus } from "./status.js";
 import {
   errorText,
@@ -116,8 +123,8 @@ export {
 export const MIN_NODE = [24, 15, 0] as const;
 /** Free space below this warns (plan 03 §5 #5). */
 export const MIN_FREE_BYTES = 1024 ** 3;
-/** Store size above this warns (plan 03 §5 #5). */
-export const MAX_STORE_BYTES = 500 * 1024 ** 2;
+/** Store size above this warns (plan 03 §5 #5); store-space holds it with prune's reclaim rule. */
+export { MAX_STORE_BYTES };
 /** How much of a client log's tail is read; lines shown (plan 03 §5 #25: the last 40). */
 export const LOG_TAIL_BYTES = 64 * 1024;
 export const LOG_TAIL_LINES = 40;
@@ -809,24 +816,8 @@ export function storeUnwritable(
 export function storePages(
   file: string,
 ): { readonly liveBytes: number; readonly freeBytes: number } | null {
-  let db: DatabaseSync | null = null;
-  try {
-    db = new DatabaseSync(file, { readOnly: true });
-    const n = (pragma: string): number => {
-      const r = db?.prepare(`PRAGMA ${pragma}`).get() as Record<string, unknown> | undefined;
-      const v = r === undefined ? undefined : Object.values(r)[0];
-      return typeof v === "number" ? v : Number(v ?? NaN);
-    };
-    const size = n("page_size");
-    const count = n("page_count");
-    const free = n("freelist_count");
-    if (![size, count, free].every((x) => Number.isFinite(x) && x >= 0)) return null;
-    return { liveBytes: (count - free) * size, freeBytes: free * size };
-  } catch {
-    return null;
-  } finally {
-    db?.close();
-  }
+  const space = measureStoreSpace(file);
+  return space === null ? null : { liveBytes: liveBytes(space), freeBytes: freePageBytes(space) };
 }
 
 /** The backups a restore can take, newest first (names and dates only), for row 5's details. */
@@ -1011,23 +1002,22 @@ export function checkStore(io: CliIo, config: LenientConfig, ex: ExistingStore):
       unwritable.fix,
       details,
     );
-  const pages = storePages(file);
-  const live = pages === null ? stats.size_bytes : pages.liveBytes;
-  if (pages !== null && pages.freeBytes >= 1024 ** 2)
-    details.push(
-      `${String(Math.round(pages.freeBytes / 1024 ** 2))} MB of the file are free pages (\`eff prune\` reclaims them)`,
-    );
-  if (live > MAX_STORE_BYTES) {
-    worse("warn");
-    details.push(
-      `store holds ${String(Math.round(live / 1024 ** 2))} MB of data > 500 MB — \`eff prune\` removes what is past its limits`,
-    );
-  } else if (stats.size_bytes > MAX_STORE_BYTES) {
-    worse("warn");
-    details.push(
-      `store file ${String(Math.round(stats.size_bytes / 1024 ** 2))} MB > 500 MB, most of it free pages — \`eff prune\` reclaims them`,
-    );
-  }
+  // the size lines follow the rule prune's reclaim follows (store-space `reclaimDue`): what they say
+  // `eff prune` reclaims, it does (Stage C finding store-never-vacuumed)
+  const space = measureStoreSpace(file);
+  const notes =
+    space !== null
+      ? storeSpaceNotes(space)
+      : stats.size_bytes > MAX_STORE_BYTES
+        ? {
+            warn: true,
+            details: [
+              `store holds ${String(Math.round(stats.size_bytes / 1024 ** 2))} MB > 500 MB — \`eff prune\` removes what is past its limits`,
+            ],
+          }
+        : { warn: false, details: [] };
+  details.push(...notes.details);
+  if (notes.warn) worse("warn");
   // the store opened, but a refused directory of ours still fails `eff backup` or `eff refresh`
   const refused = subdirRow();
   if (refused !== null) return refused;

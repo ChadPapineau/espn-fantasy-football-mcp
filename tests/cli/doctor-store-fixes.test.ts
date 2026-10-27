@@ -12,7 +12,9 @@
 //  - doctor-store-readonly-reported-ok: row 5 was ok for a read-only store.sqlite while every ESPN
 //    request failed its limiter write;
 //  - store-never-vacuumed: prune only moved pages to the freelist, so doctor's size warning outlived
-//    its own advice.
+//    its own advice; then (round 3) prune reclaimed only at ≥ 8 MiB and ≥ 20 % free pages while the
+//    doctor warned "file > 500 MB — `eff prune` reclaims them" at any free share, so a 511 MB file
+//    with 5.8 % free pages kept the warning through every prune — one rule now decides both.
 // Sandboxes only: a temp HOME, config and cache; no network; no keychain (the file store).
 import { execFileSync } from "node:child_process";
 import {
@@ -28,6 +30,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   backupsPresent,
@@ -43,6 +46,15 @@ import { main } from "../../src/cli/main.js";
 import { reclaimFreePages } from "../../src/cli/maintenance.js";
 import { loadLenientRuntime } from "../../src/cli/runtime.js";
 import { openExistingStore, openStore, restoreSteps } from "../../src/cli/store-access.js";
+import {
+  liveBytes,
+  MAX_STORE_BYTES,
+  measureStoreSpace,
+  reclaimDue,
+  storeFileBytes,
+  storeSpaceNotes,
+  type StoreSpace,
+} from "../../src/cli/store-space.js";
 import {
   ensureSecureDir,
   foreignAclEntries,
@@ -391,6 +403,135 @@ describe("free pages are reclaimed and measured (store-never-vacuumed)", () => {
       raw.exec("ROLLBACK");
       raw.close();
     }
+  }, 30_000);
+});
+
+describe("one rule for prune's reclaim and doctor's advice (store-never-vacuumed, round 3)", () => {
+  it("the verifier's store (511 MB file, 481 MB of data, 5.8 % free pages): prune reclaims it, so the warning's advice works", () => {
+    const s: StoreSpace = {
+      pageSize: 4096,
+      pageCount: 130_764,
+      freePages: 7_539,
+      fileBytes: 535_609_344,
+    };
+    expect(reclaimDue(s)).toBe(true);
+    expect(storeSpaceNotes(s)).toEqual({
+      warn: true,
+      details: [
+        "29 MB of the file are free pages (`eff prune` reclaims them)",
+        "store file 511 MB > 500 MB with 481 MB of data — `eff prune` reclaims the other 29 MB",
+      ],
+    });
+    // the same share of free pages in a file under the limit: a routine prune leaves it, and the
+    // doctor promises nothing
+    const under: StoreSpace = {
+      pageSize: 4096,
+      pageCount: 100_000,
+      freePages: 5_800,
+      fileBytes: 409_600_000,
+    };
+    expect(reclaimDue(under)).toBe(false);
+    expect(storeSpaceNotes(under)).toEqual({
+      warn: false,
+      details: [
+        "23 MB of the file are free pages (later writes reuse them; `eff prune` reclaims them once they are 8 MB and 20 % of the file)",
+      ],
+    });
+  });
+
+  it("property: what the doctor says `eff prune` reclaims, prune's rule reclaims; after it no size warning is left unless the data itself is over the limit", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(1024, 4096, 65_536),
+        fc.integer({ min: 1, max: 20_000_000 }),
+        fc.double({ min: 0, max: 1, noNaN: true }),
+        fc.integer({ min: 0, max: 300 * 1024 ** 2 }),
+        (pageSize, pageCount, share, walBytes) => {
+          const freePages = Math.floor(pageCount * share);
+          const s: StoreSpace = {
+            pageSize,
+            pageCount,
+            freePages,
+            fileBytes: pageCount * pageSize + walBytes,
+          };
+          const notes = storeSpaceNotes(s);
+          if (notes.details.some((d) => /`eff prune` reclaims (?:them\)|the other )/.test(d)))
+            expect(reclaimDue(s)).toBe(true);
+          if (notes.warn && liveBytes(s) <= MAX_STORE_BYTES) expect(reclaimDue(s)).toBe(true);
+          if (reclaimDue(s)) {
+            // what a reclaim leaves: the live pages, no free page, an empty log
+            const after: StoreSpace = {
+              pageSize,
+              pageCount: pageCount - freePages,
+              freePages: 0,
+              fileBytes: liveBytes(s),
+            };
+            expect(storeSpaceNotes(after).warn).toBe(liveBytes(s) > MAX_STORE_BYTES);
+            expect(reclaimDue(after)).toBe(false);
+          }
+        },
+      ),
+      { numRuns: 2_000 },
+    );
+  });
+
+  it("a real store over its size limit with free pages under 8 MiB and 20 %: prune reclaims, and the warning is gone after it", async () => {
+    sb = sandbox();
+    const { io, config, log } = await bigStore(200, 100);
+    const file = path.join(sb.cacheDir, "store.sqlite");
+    const raw = new DatabaseSync(file);
+    try {
+      raw.exec("DELETE FROM espn_cache WHERE CAST(substr(key, 2) AS INTEGER) < 12");
+    } finally {
+      raw.close();
+    }
+    const space = measureStoreSpace(file);
+    if (space === null) throw new Error("unmeasured");
+    expect(space.freePages / space.pageCount).toBeLessThan(0.2);
+    // under the real limit: nothing is due, and doctor row 5 promises no reclaim
+    expect(reclaimDue(space)).toBe(false);
+    const ex = openExistingStore(config, io.clock, log);
+    try {
+      const details = checkStore(io, config, ex).details.join("\n");
+      expect(details).toMatch(/\d+ MB of the file are free pages \(later writes reuse them;/);
+      expect(details).not.toContain("free pages (`eff prune` reclaims them)");
+    } finally {
+      if (ex.kind === "open") ex.store.close();
+    }
+    expect(reclaimFreePages(file)).toEqual({ status: "not_needed" });
+    // against a limit the file is over and its data is not: the doctor warns, a prune clears it
+    const limit = liveBytes(space) + 512 * 1024;
+    const warned = storeSpaceNotes(space, limit);
+    expect(warned.warn).toBe(true);
+    expect(warned.details.join("\n")).toMatch(/`eff prune` reclaims the other \d+ MB/);
+    expect(reclaimFreePages(file, limit)).toMatchObject({ status: "reclaimed", logHeld: false });
+    const after = measureStoreSpace(file);
+    if (after === null) throw new Error("unmeasured");
+    expect(after.fileBytes).toBeLessThanOrEqual(limit);
+    expect(after.freePages).toBe(0);
+    expect(storeSpaceNotes(after, limit).warn).toBe(false);
+  });
+
+  it("a reader holding the log through the reclaim: prune says the space comes back when it closes the store, never 'reclaimed 0 MB'", async () => {
+    sb = sandbox();
+    await bigStore(200, 100);
+    const file = path.join(sb.cacheDir, "store.sqlite");
+    const reader = new DatabaseSync(file);
+    reader.exec("BEGIN");
+    reader.prepare("SELECT count(*) AS n FROM espn_cache").get();
+    const p = makeIo(sb, { env: ENV });
+    try {
+      expect(await main(["prune"], p)).toBe(0);
+    } finally {
+      reader.exec("COMMIT");
+      reader.close();
+    }
+    expect(p.out.text).toContain(
+      "free pages VACUUMed, but another process is reading the store, so its write-ahead log keeps the space until that process closes the store",
+    );
+    expect(p.out.text).not.toMatch(/reclaimed \d+ MB/);
+    // the reader gone, the log is given back
+    expect(storeFileBytes(file)).toBeLessThan(5 * 1024 ** 2);
   }, 30_000);
 });
 
