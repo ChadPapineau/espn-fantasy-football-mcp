@@ -2,8 +2,9 @@
 // consumes (plan 01 §9 "what the interface abstracts": refs, League + clock, roster slots, rules
 // with predicates, rosters, PlatformPlayer with ESPN-native extras, matchups, live and box scores,
 // standings, transactions, the pro schedule; plan 07 §3.A–C `data` shapes), the `untrusted_text`
-// mechanics the normaliser applies field by field (plan 01 §4.4; plan 02 §6.2; plan 07 C14), the
-// provenance stamp of every seam read, and the league-side repository ports tools read.
+// mechanics the normaliser applies field by field (plan 01 §4.4; plan 02 §6.2; plan 07 C14 — the
+// sanitiser's markup and entity scans in ./markup.ts), the provenance stamp of every seam read, and
+// the league-side repository ports tools read.
 // Wire-free: no ESPN JSON key appears here. Member GUIDs never enter the domain (`is_mine` is
 // computed by the provider; plan 02 §2.4, plan 07 legend). Ported from sibling @d72e03b, adapted.
 import type { FreshnessClassId } from "../../config/freshness.js";
@@ -16,6 +17,7 @@ import type {
   ScoringSettings,
   StatSplit,
 } from "../scoring/types.js";
+import { decodeLevel, decodeNested, ENTITY_SOURCE, stripTags } from "./markup.js";
 
 export type { PositionId } from "../scoring/types.js";
 
@@ -180,26 +182,26 @@ const NAMED_ENTITIES: ReadonlyMap<string, string> = new Map(
   }),
 );
 
-function decodeEntities(s: string): string {
-  return s.replace(
-    /&(?:#([0-9]{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/g,
-    (_m, dec?: string, hex?: string, name?: string) => {
-      if (name !== undefined) return NAMED_ENTITIES.get(name) ?? "";
-      const cp = dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex ?? "", 16);
-      return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)
-        ? String.fromCodePoint(cp)
-        : "";
-    },
-  );
-}
+const ENTITY_RE = new RegExp(ENTITY_SOURCE);
 
-/** Removes script/style blocks, comments, and every tag; prose such as "3 < 4" survives. */
-function stripTags(s: string): string {
-  return s
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[A-Za-z/!?][^<>]*>/g, " ")
-    .replace(/<[A-Za-z/!?][^<>]*$/, " ");
+/**
+ * What an entity decodes to: a name outside the table, or a number that is no Unicode scalar
+ * value, decodes to nothing. A decoded character is cleaned as raw text is (`cleanRaw`) the moment
+ * it appears, so it can neither hide a character the pass removes nor carry one that NFC turns into
+ * syntax: `&l&#x200b;t;` is `&lt;` once the zero-width space is gone, and so is `&lt&#894;` once
+ * the Greek question mark is the `;` NFC makes it. Left for the end of the pass, either would change
+ * the text after its tags were judged (Stage C finding untrusted-sanitizer-quadratic).
+ */
+function decodedText(
+  dec: string | undefined,
+  hex: string | undefined,
+  name: string | undefined,
+): string {
+  if (name !== undefined) return NAMED_ENTITIES.get(name) ?? "";
+  const cp = dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex ?? "", 16);
+  if (!(cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff))) return "";
+  // printable ASCII (`<`, `>`, `&`, letters — most decoded characters) is clean as it stands
+  return cp >= 0x20 && cp < 0x7f ? String.fromCharCode(cp) : cleanRaw(String.fromCodePoint(cp));
 }
 
 /**
@@ -213,7 +215,22 @@ const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF
 /** More than four stacked combining marks ("zalgo") are cut to four. */
 const MARK_FLOOD_RE = /(\p{M}{4})\p{M}+/gu;
 const ANY_ENTITY_RE = /&#?[A-Za-z0-9]{1,32};/g;
+/** Levels of entity encoding whose markup is judged one level at a time; deeper ones, at once. */
+const ENCODING_LEVELS = 8;
+/** A backstop only: a pass is its own fixed point, so the second pass confirms the first. */
 const MAX_PASSES = 6;
+
+/**
+ * The character clean every pass starts with, and every decoded character gets: NFC, lone
+ * surrogates dropped, line breaks and tabs to spaces, the invisible code points removed.
+ */
+function cleanRaw(s: string): string {
+  return s
+    .normalize("NFC")
+    .replace(LONE_SURROGATE_RE, "")
+    .replace(SPACE_LIKE_RE, " ")
+    .replace(REMOVE_RE, "");
+}
 
 /**
  * Markdown's link joins (plan 02 §6.2: "URLs left as text, never marked clickable, never fetched").
@@ -230,20 +247,32 @@ const MAX_PASSES = 6;
  */
 const MARKDOWN_LINK_JOIN_RE = /\](?=[([:])/g;
 
+/**
+ * One pass of the clean. The markup is removed as written, then as each level of encoding held it
+ * (`&lt;b&gt;`, `&amp;lt;b&amp;gt;`): HTML's own order, so a tag is judged before what it encodes
+ * is decoded — `<a title="&lt;3">` is one tag, not `<a title="<3">`, which no tag rule can match.
+ * After `ENCODING_LEVELS` levels the rest is decoded in one scan and judged once. Every step ends at
+ * its fixed point, so the pass is its own (Stage C finding untrusted-sanitizer-quadratic): removal
+ * cannot form an entity (a removed span becomes a space, which no entity holds), each decoded
+ * character is cleaned as it appears, and whenever what follows changes the text — an entity-like
+ * leftover blanked, or NFC completing a tag (`<` then U+0338 composes to `≮`, so `<a<`, U+0338,
+ * `>` becomes the tag `<a≮>`) — the tags are judged once more. A second pass over its output
+ * changes nothing. The markup and entity scans are in ./markup.ts.
+ */
 function sanitizePass(input: string): string {
-  let s = input
-    .normalize("NFC")
+  let stripped = stripTags(cleanRaw(input));
+  for (let level = 0; level <= ENCODING_LEVELS && ENTITY_RE.test(stripped); level++)
+    stripped = stripTags(
+      (level < ENCODING_LEVELS ? decodeLevel : decodeNested)(stripped, decodedText),
+    );
+  let s = stripped
+    .replace(ANY_ENTITY_RE, " ")
     .replace(LONE_SURROGATE_RE, "")
     .replace(SPACE_LIKE_RE, " ")
-    .replace(REMOVE_RE, "");
-  for (let i = 0; i < 8; i++) {
-    const next = stripTags(decodeEntities(s));
-    if (next === s) break;
-    s = next;
-  }
-  s = stripTags(s.replace(ANY_ENTITY_RE, " "));
-  s = s.replace(LONE_SURROGATE_RE, "").replace(SPACE_LIKE_RE, " ").replace(REMOVE_RE, "");
-  s = s.normalize("NFC").replace(MARK_FLOOD_RE, "$1");
+    .replace(REMOVE_RE, "")
+    .normalize("NFC");
+  if (s !== stripped) s = stripTags(s);
+  s = s.replace(MARK_FLOOD_RE, "$1");
   return s.replace(/\s+/gu, " ").trim().replace(MARKDOWN_LINK_JOIN_RE, "] ");
 }
 
@@ -254,12 +283,13 @@ export interface SanitizedText {
 }
 
 /**
- * Sanitises third-party text (plan 02 §6.2): bounded pre-cut (a 1 MB input stays linear), lone
- * surrogates dropped, entities decoded and HTML removed to a fixed point (an encoded tag cannot
- * survive), controls/zero-width/bidi/tag characters removed, combining floods capped, NFC,
- * whitespace collapsed, Markdown's link joins broken (`](`, `][`, `]:` — no live link, image or
- * reference definition; the words and URLs stay as text), then capped at `cap` code points.
- * Idempotent on its own output.
+ * Sanitises third-party text (plan 02 §6.2): bounded pre-cut, lone surrogates dropped, entities
+ * decoded and HTML removed to a fixed point (an encoded tag cannot survive), controls/zero-width/
+ * bidi/tag characters removed, combining floods capped, NFC, whitespace collapsed, Markdown's link
+ * joins broken (`](`, `][`, `]:` — no live link, image or reference definition; the words and URLs
+ * stay as text), then capped at `cap` code points. Idempotent on its own output. Linear in the
+ * pre-cut whatever the text (Stage C finding untrusted-sanitizer-quadratic): every rule is one scan,
+ * and one pass is its own fixed point, so the second pass only confirms it.
  */
 export function sanitizeText(raw: string, cap: number): SanitizedText {
   return capCodePoints(sanitizeUncapped(raw, cap), cap);
@@ -282,10 +312,16 @@ function sanitizeUncapped(raw: string, cap: number): SanitizedText {
   return { value: s, truncated };
 }
 
-/** Cuts a sanitised text to `cap` code points (a cut sets `truncated`). */
+/**
+ * Cuts a sanitised text to `cap` code points (a cut sets `truncated`), reading at most `cap` of
+ * them: the pre-cut leaves up to eight times `cap` to look past.
+ */
 function capCodePoints(t: SanitizedText, cap: number): SanitizedText {
-  const cps = Array.from(t.value);
-  return cps.length > cap ? { value: cps.slice(0, cap).join("").trimEnd(), truncated: true } : t;
+  const v = t.value;
+  if (v.length <= cap) return t;
+  let end = 0;
+  for (let n = 0; n < cap && end < v.length; n++) end += (v.codePointAt(end) ?? 0) > 0xffff ? 2 : 1;
+  return end < v.length ? { value: v.slice(0, end).trimEnd(), truncated: true } : t;
 }
 
 /** Each flag fires when any of its patterns matches (a flag may have several). */
