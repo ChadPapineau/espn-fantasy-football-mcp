@@ -196,7 +196,11 @@ export const SETUP_TEXT = Object.freeze({
   selftestIntro: "Checking that background jobs can read the macOS Keychain. A Keychain prompt may appear during this test; ignoring it selects the file store.",
   selftestCleanupFailed: "The throwaway self-test Keychain item could not be deleted; `eff uninstall` removes it.",
   configFailed: "config.json could not be written: nothing was stored. Run `eff doctor`.",
-  otherStoreFailed: (kind: CredentialStoreKind) => `The ${kind} store still holds a credential that could not be removed (only one store may hold it): nothing was stored. Run \`eff doctor\`.`,
+  otherStoreFailed: (kind: CredentialStoreKind) => kind === "keychain"
+    ? "The keychain may still hold this install's credential and could not be emptied (it did not answer, or refused): only one store may hold it, so nothing was stored and config.json is unchanged. Unlock the Keychain or answer its prompt, then run `eff setup` again."
+    : "The file store still holds a file that could not be removed (only one store may hold the credential): nothing was stored and config.json is unchanged. Run `eff doctor`.",
+  keychainUnchecked: "The keychain could not be checked for a leftover copy (it did not answer, or refused); this install never recorded a credential there, so setup goes on. `eff doctor` reports a second copy if one turns up there.",
+  otherStoreEmptied: (kind: CredentialStoreKind) => `The ${kind} store was emptied first (a switch removes the credential there before recording anything), so no store holds one now: run \`eff setup\` again once config.json can be written.`,
   rowFailed: "store.sqlite could not record the credential state: nothing was kept. Run `eff doctor`.",
   testModeSkipped: "Test service name: the ESPN check and team resolution were skipped (a test item is never sent to ESPN).",
   tlsOff: "Certificate verification is off in this process (NODE_TLS_REJECT_UNAUTHORIZED=0): your cookies go to ESPN only over a verified connection, so nothing was asked and nothing was stored. Unset it (a proxy's CA belongs in NODE_EXTRA_CA_CERTS) and run `eff setup` again.",
@@ -226,6 +230,28 @@ function storeFailureText(e: unknown, kind: CredentialStoreKind): string {
   if (e instanceof CredentialStoreError)
     return `The ${kind} store refused the credential: ${e.message}. Nothing was stored.`;
   return `The ${kind} store could not be written. Nothing was stored.`;
+}
+
+/**
+ * Whether this install's own records say `kind`'s store may hold its credential (plan 02 §2.2 "One
+ * store per install"): config.json named it as the install's store before this run, or the
+ * store.sqlite `credential_state` row names it — whatever its league or state — or that row cannot
+ * be read (it then proves nothing). config.json keeps naming a store until a run has emptied it:
+ * `--reset` and a rejected or wrong-league check clear the row even when the store could not be
+ * emptied, but neither changes config.json, and a switch records the new store only once the old
+ * one is empty (`runSetup`). Reads nothing from either store.
+ */
+function recordsNameStore(
+  kind: CredentialStoreKind,
+  recordedStore: CredentialStoreKind | null,
+  repo: CredentialStateRepository | null,
+): boolean {
+  if (recordedStore === kind || repo === null) return true;
+  try {
+    return repo.get()?.store === kind;
+  } catch {
+    return true;
+  }
 }
 
 type Step<T> =
@@ -318,35 +344,61 @@ export async function runSetup(req: SetupRequest, deps: SetupDeps): Promise<Setu
       return result({ exitCode: usage ? EXIT_CODES.usage : EXIT_CODES.error, selftest: st });
     }
   }
-  if (!testMode) {
-    const patch: SetupConfigPatch = {
-      ...(selftest === null
-        ? {}
-        : { keychain_selftest_outcome: selftest.outcome, keychain_selftest_at: selftest.at }),
-      ...(refused ? {} : { EFF_CREDENTIAL_STORE: kind }),
-      ...(refused || kind !== "file" ? {} : { EFF_CREDENTIAL_FILE: req.filePath }),
-    };
-    try {
-      await deps.config.record(patch);
-    } catch {
-      out(SETUP_TEXT.configFailed);
-      return result({ exitCode: EXIT_CODES.error, selftest: st });
+  const selftestPatch: SetupConfigPatch =
+    selftest === null
+      ? {}
+      : { keychain_selftest_outcome: selftest.outcome, keychain_selftest_at: selftest.at };
+  if (refused) {
+    // `--storage keychain` refused: the outcome is recorded (`doctor` #7), the store is not
+    if (!testMode) {
+      try {
+        await deps.config.record(selftestPatch);
+      } catch {
+        out(SETUP_TEXT.configFailed);
+      }
     }
+    return result({ exitCode: EXIT_CODES.error, selftest: st });
   }
-  if (refused) return result({ exitCode: EXIT_CODES.error, selftest: st });
 
   const store = kind === "keychain" ? deps.stores.keychain : deps.stores.file;
   if (!testMode) {
-    // switching store deletes the other store's items first: exactly one store holds a value
+    // switching store empties the other store first, and only then does config.json record the
+    // store this run writes: exactly one store ever holds a value (plan 03 §2.1 step 4 and
+    // `--storage`; ADV OBJ-05), and a refusal here leaves config.json naming the store that may
+    // still hold it, so the next run (and `recordsNameStore`) still knows where it is
     const otherKind: CredentialStoreKind = kind === "keychain" ? "file" : "keychain";
     const other = kind === "keychain" ? deps.stores.file : deps.stores.keychain;
+    const named = recordsNameStore(otherKind, req.recordedStore, repo);
+    let emptied = false;
     try {
       await other.delete();
+      emptied = true;
     } catch (e) {
+      // an addon that cannot load reaches no keychain: it holds nothing we wrote. The file store's
+      // delete fails only on an entry it cannot remove (a missing file is no error): something is
+      // left there. The keychain's can fail without saying anything about what it holds — locked,
+      // a prompt nobody answers, a session without UI — so it blocks only where this install's
+      // records name it; anywhere else, blocking would leave the file store, the fallback for
+      // exactly that keychain (plan 02 §2.2), out of reach (Stage C finding
+      // setup-keychain-unreachable-blocks-file-store)
       if (!(e instanceof CredentialStoreError && e.reason === "unavailable")) {
-        out(SETUP_TEXT.otherStoreFailed(otherKind));
-        return result({ exitCode: EXIT_CODES.error, selftest: st });
+        if (otherKind === "file" || named) {
+          out(SETUP_TEXT.otherStoreFailed(otherKind));
+          return result({ exitCode: EXIT_CODES.error, selftest: st });
+        }
+        out(SETUP_TEXT.keychainUnchecked);
       }
+    }
+    try {
+      await deps.config.record({
+        ...selftestPatch,
+        EFF_CREDENTIAL_STORE: kind,
+        ...(kind === "file" ? { EFF_CREDENTIAL_FILE: req.filePath } : {}),
+      });
+    } catch {
+      out(SETUP_TEXT.configFailed);
+      if (emptied && named) out(SETUP_TEXT.otherStoreEmptied(otherKind));
+      return result({ exitCode: EXIT_CODES.error, selftest: st });
     }
   }
 

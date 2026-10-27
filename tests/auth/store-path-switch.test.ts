@@ -149,9 +149,15 @@ async function setup(
   at: string,
   storage: CredentialStoreKind | null,
   envFile: string | null,
-  opts: { readonly reset?: boolean; readonly quick?: boolean } = {},
+  opts: {
+    readonly reset?: boolean;
+    readonly quick?: boolean;
+    /** Runs once, right after setup's first config.json write (another process acting then). */
+    readonly afterRecord?: () => Promise<void>;
+  } = {},
 ): Promise<number> {
   const reset = opts.reset ?? false;
+  let afterRecord = opts.afterRecord;
   const c = resolveConfig(envFile);
   const answers: PromptAnswer[] = [
     { kind: "answer", value: cookies.swid },
@@ -182,11 +188,13 @@ async function setup(
         resolveTeam: () => Promise.resolve({ kind: "one", teamId: 3 }),
       },
       config: {
-        record: (p) => {
+        record: async (p) => {
           if (opts.quick === true) recordQuickly(configPatchOf(p));
           else
             patchConfigFile({ configDir, home, repoRoot: ROOT, xattr: noXattrs }, configPatchOf(p));
-          return Promise.resolve();
+          const hook = afterRecord;
+          afterRecord = undefined;
+          await hook?.();
         },
       },
       credentialState: repo,
@@ -331,20 +339,34 @@ describe("`EFF_CREDENTIAL_FILE=<alt> eff setup --storage file` while a keychain 
     expect(server(alt("alt2")).startPath).toBe(defaultPath());
   });
 
-  it("a call that lands mid-switch (config.json moved, keychain emptied, no file yet) recovers", async () => {
+  it("calls that land mid-switch (keychain emptied; then config.json moved, no file yet) recover", async () => {
     const [a, b] = [fakeCookies("ps-m-a"), fakeCookies("ps-m-b")];
     await setup(a, T0, "keychain", null);
     const srv = server(null);
     expect(carries(await srv.auth.getCookieHeader(), a)).toBe(true);
-    let mid: CookieHeaderResult | null = null;
+    let emptied: CookieHeaderResult | null = null;
+    let moved: CookieHeaderResult | null = null;
     kr.afterDelete = {
-      account: KEYCHAIN_ACCOUNTS.swid, // setup has recorded <alt> and just emptied the keychain
+      // setup has just emptied the keychain; config.json still names it (a switch records the new
+      // store only once the old one is empty)
+      account: KEYCHAIN_ACCOUNTS.swid,
       run: async () => {
-        mid = await srv.auth.getCookieHeader();
+        expect(readConfigFile(configDir)).toMatchObject({ EFF_CREDENTIAL_STORE: "keychain" });
+        emptied = await srv.auth.getCookieHeader();
       },
     };
-    expect(await setup(b, T5, "file", alt())).toBe(0);
-    expect(mid).toEqual({ ok: false, reason: "not_configured" }); // the old value really was gone
+    const afterRecord = async (): Promise<void> => {
+      // config.json now records <alt>; the file is not written yet
+      expect(readConfigFile(configDir)).toMatchObject({
+        EFF_CREDENTIAL_STORE: "file",
+        EFF_CREDENTIAL_FILE: alt(),
+      });
+      expect(fileStoreExistsSync(alt())).toBe(false);
+      moved = await srv.auth.getCookieHeader();
+    };
+    expect(await setup(b, T5, "file", alt(), { afterRecord })).toBe(0);
+    expect(emptied).toEqual({ ok: false, reason: "not_configured" }); // the old value really was gone
+    expect(moved).toEqual({ ok: false, reason: "not_configured" }); // and the new one not there yet
     expect(srv.auth.state()).toBe("validated"); // setup then recorded the new one
     expect(carries(await srv.auth.getCookieHeader(), b)).toBe(true);
     expect(observers()).toMatchObject({ status: "validated", storedAt: T5, store: "file" });

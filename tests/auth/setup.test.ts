@@ -2,8 +2,11 @@
 // flags; plan 02 §2.1 definitive check, §2.2 one store per install; ADV OBJ-05, OBJ-14, OBJ-15,
 // OBJ-25, OBJ-26; changelog V8; plan 10 A2b): the private and public probe paths, the 401 / 404
 // deletions, the kept-value error paths, format retries, prompt timeouts, the self-test's store
-// choice, `--storage`, `--service-name` (no network, no config, no row, file store untouched),
-// `--reset`, team resolution — and no value, SWID or league id in any printed line.
+// choice, `--storage` (the other store emptied before config.json records the switch; a keychain
+// that cannot be asked blocks only where this install's records name it — Stage C finding
+// setup-keychain-unreachable-blocks-file-store), `--service-name` (no network, no config, no row,
+// file store untouched), `--reset`, team resolution — and no value, SWID or league id in any
+// printed line.
 import { describe, expect, it } from "vitest";
 import { fakeLeagueId } from "../../scripts/ci/secret-fixtures.mjs";
 import { CredentialStoreError } from "../../src/auth/errors.js";
@@ -21,7 +24,12 @@ import {
   type SetupRequest,
   type TeamResolution,
 } from "../../src/auth/setup.js";
-import { KEYCHAIN_SERVICE, type CookieHeader, type EspnCookies } from "../../src/auth/types.js";
+import {
+  KEYCHAIN_SERVICE,
+  type CookieHeader,
+  type CredentialStateRow,
+  type EspnCookies,
+} from "../../src/auth/types.js";
 import {
   MemoryStateRepo,
   MemoryStore,
@@ -538,14 +546,136 @@ describe("one store per install (plan 02 §2.2; plan 03 §2.1 step 4; ADV OBJ-05
     const h = harness();
     h.keychain.failDelete = new CredentialStoreError("keychain", "unavailable");
     expect((await runSetup(h.req({ storage: "file" }), h.deps)).exitCode).toBe(0);
+    expect(h.lines).not.toContain(SETUP_TEXT.keychainUnchecked);
   });
-  it("a copy in the other store that cannot be removed → refuse to store (never two stores)", async () => {
+  it("a copy in the other store that cannot be removed → refuse to store (never two stores); config.json, the copy and the row are kept", async () => {
+    // a keychain install switching to the file store while its keychain does not answer
+    const old = fakeCookies("setup-held");
     const h = harness();
+    h.keychain.set(old, "2026-10-01T00:00:00.000Z");
+    const row = stateRow({ league_id: LEAGUE, state: "validated", store: "keychain" });
+    h.repo!.row = row;
     h.keychain.failDelete = new CredentialStoreError("keychain", "timeout");
-    const r = await runSetup(h.req({ storage: "file" }), h.deps);
-    expect(r.exitCode).toBe(1);
+    const r = await runSetup(h.req({ storage: "file", recordedStore: "keychain" }), h.deps);
+    expect(r).toMatchObject({ exitCode: 1, state: "not_configured", store: null });
     expect(h.file.writes).toBe(0);
-    expect(h.lines).toContain(SETUP_TEXT.otherStoreFailed("keychain"));
+    expect(h.keychain.deletes).toBe(1);
+    // nothing recorded: config.json still names the store that holds the value (a re-run, or any
+    // process, still finds it there), the value and the row are untouched, nothing is sent
+    expect(h.patches).toEqual([]);
+    expect(h.keychain.stored?.cookies).toEqual(old);
+    expect(h.repo!.row).toBe(row);
+    expect(h.calls).toEqual([]);
+    expect(h.lines.at(-1)).toBe(SETUP_TEXT.otherStoreFailed("keychain"));
+    expect(SETUP_TEXT.otherStoreFailed("keychain")).toContain("config.json is unchanged");
+    h.assertClean();
+  });
+
+  // Stage C finding setup-keychain-unreachable-blocks-file-store: the file-store fallback exists for
+  // a keychain that prompts, hangs or is locked (plan 02 §2.2, plan 03 §2.1 step 4), so a keychain
+  // that cannot even be asked must not block it when this install never stored anything there
+  const unanswered: readonly (readonly [string, Error])[] = [
+    ["did not answer (a prompt nobody answers)", new CredentialStoreError("keychain", "timeout")],
+    [
+      "refused (locked, a session without UI)",
+      new CredentialStoreError("keychain", "delete_failed"),
+    ],
+    ["failed untyped", new Error("native keychain failure")],
+  ];
+  const neverRecorded: readonly (readonly [string, Partial<SetupRequest>, boolean])[] = [
+    ["a fresh install the self-test sends to the file store", {}, true],
+    ["a fresh `eff setup --storage file`", { storage: "file" }, false],
+    ["a re-run of a file-store install", { recordedStore: "file" }, false],
+  ];
+  describe.each(neverRecorded)("%s, its keychain unanswered", (_name, over, selftestRuns) => {
+    it.each(unanswered)(
+      "keychain %s: the file store is written, said, never refused",
+      async (_how, err) => {
+        const h = harness({ selftest: { outcome: "error", reason: "write_failed" } });
+        if (over.recordedStore === "file")
+          h.repo!.row = stateRow({ league_id: LEAGUE, state: "validated", store: "file" });
+        h.keychain.failDelete = err;
+        const r = await runSetup(h.req(over), h.deps);
+        expect(r).toMatchObject({
+          exitCode: 0,
+          state: "validated",
+          store: "file",
+          accepted: true,
+          teamId: 3,
+        });
+        expect(h.selftests.length).toBe(selftestRuns ? 1 : 0);
+        expect(h.file.stored?.cookies).toEqual(h.c); // session.json holds the value
+        expect(h.keychain.deletes).toBe(1); // a leftover is still removed when the keychain answers
+        expect(h.keychain.writes).toBe(0);
+        expect(h.patches[0]).toMatchObject({
+          EFF_CREDENTIAL_STORE: "file",
+          EFF_CREDENTIAL_FILE: "/nonexistent/eff-config/session.json",
+        });
+        expect(h.repo!.row).toMatchObject({ state: "validated", store: "file" });
+        expect(h.calls).toEqual(["anon", "settings", "team"]); // the definitive check and the team
+        expect(h.lines.filter((l) => l === SETUP_TEXT.keychainUnchecked)).toHaveLength(1);
+        expect(h.lines).not.toContain(SETUP_TEXT.otherStoreFailed("keychain"));
+        expect(h.lines.join("\n")).not.toContain("still hold");
+        h.assertClean();
+      },
+    );
+  });
+
+  // where this install's own records name the keychain, it may hold the value: the switch empties it
+  // first or stores nothing — and records nothing, so the next run still knows where the value is
+  const recordsNameKeychain: readonly (readonly [
+    string,
+    Partial<SetupRequest>,
+    CredentialStateRow | null | "unreadable",
+  ])[] = [
+    [
+      "config.json names the keychain (a reset cleared the row)",
+      { recordedStore: "keychain" },
+      null,
+    ],
+    [
+      "the row names the keychain (config.json already names the file store)",
+      { recordedStore: "file" },
+      stateRow({ league_id: LEAGUE, state: "validated", store: "keychain" }),
+    ],
+    [
+      "the row, for another league, names the keychain",
+      {},
+      stateRow({ league_id: "7", state: "stored", store: "keychain" }),
+    ],
+    [
+      "the row has no state left but still names the keychain",
+      {},
+      stateRow({ league_id: LEAGUE, state: "not_configured", store: "keychain" }),
+    ],
+    ["the row cannot be read", {}, "unreadable"],
+  ];
+  it.each(recordsNameKeychain)(
+    "%s, its keychain unanswered: `--storage file` stores and records nothing",
+    async (_name, over, row) => {
+      const h = harness();
+      if (row === "unreadable") h.repo!.failGet = true;
+      else h.repo!.row = row;
+      h.keychain.failDelete = new CredentialStoreError("keychain", "timeout");
+      const r = await runSetup(h.req({ storage: "file", ...over }), h.deps);
+      expect(r).toMatchObject({ exitCode: 1, store: null });
+      expect(h.file.writes).toBe(0);
+      expect(h.patches).toEqual([]);
+      expect(h.calls).toEqual([]);
+      expect(h.lines.at(-1)).toBe(SETUP_TEXT.otherStoreFailed("keychain"));
+      expect(h.lines).not.toContain(SETUP_TEXT.keychainUnchecked);
+    },
+  );
+  it("a session.json that cannot be removed always refuses the keychain (an entry is there), records or not", async () => {
+    for (const recordedStore of [null, "keychain"] as const) {
+      const h = harness();
+      h.file.failDelete = new CredentialStoreError("file", "delete_failed");
+      const r = await runSetup(h.req({ recordedStore }), h.deps);
+      expect(r).toMatchObject({ exitCode: 1, store: null });
+      expect(h.keychain.writes).toBe(0);
+      expect(h.patches).toEqual([]);
+      expect(h.lines.at(-1)).toBe(SETUP_TEXT.otherStoreFailed("file"));
+    }
   });
   it("a self-test that could not delete its throwaway item says so", async () => {
     const h = harness({ selftest: { cleanup: "failed" } });
@@ -571,7 +701,25 @@ describe("failures after the prompts leave nothing partial (plan 03 §2.1 step 8
     const r = await runSetup(h.req(), h.deps);
     expect(r.exitCode).toBe(1);
     expect(h.keychain.writes + h.file.writes).toBe(0);
-    expect(h.lines).toContain(SETUP_TEXT.configFailed);
+    expect(h.lines.at(-1)).toBe(SETUP_TEXT.configFailed); // a fresh install: no store was emptied
+  });
+  it("config.json cannot be written mid-switch: the old store was emptied first, and setup says so", async () => {
+    // the switch empties the store this install recorded before recording the new one (so that a
+    // store that cannot be emptied refuses with config.json untouched); nothing is left half-moved
+    const old = fakeCookies("setup-switch-cfg");
+    const h = harness({ configFails: () => true });
+    h.keychain.set(old, "2026-10-01T00:00:00.000Z");
+    h.repo!.row = stateRow({ league_id: LEAGUE, state: "validated", store: "keychain" });
+    const r = await runSetup(h.req({ storage: "file", recordedStore: "keychain" }), h.deps);
+    expect(r).toMatchObject({ exitCode: 1, store: null });
+    expect(h.keychain.stored).toBeNull();
+    expect(h.file.writes).toBe(0);
+    expect(h.calls).toEqual([]);
+    expect(h.lines.slice(-2)).toEqual([
+      SETUP_TEXT.configFailed,
+      SETUP_TEXT.otherStoreEmptied("keychain"),
+    ]);
+    h.assertClean();
   });
   it("the store write fails → the store is emptied, exit 1", async () => {
     const h = harness();
