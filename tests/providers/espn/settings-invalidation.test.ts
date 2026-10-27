@@ -27,10 +27,22 @@ import {
   createEspnProvider,
   type FetchLike,
 } from "../../../src/providers/espn/index.js";
+import { seasonTarget } from "../../../src/providers/espn/path.js";
+import { EspnRequester } from "../../../src/providers/espn/request.js";
 import { createStoreFactory } from "../../../src/store/index.js";
 import type { Store } from "../../../src/store/types.js";
 import { tempDir } from "../../lint/helpers.js";
-import { FIXTURES, LEAGUE_ID, makeWorld, MemoryCache, NOW_ISO, SEASON } from "./helpers.js";
+import {
+  FIXTURES,
+  LEAGUE_ID,
+  makeWorld,
+  MemoryCache,
+  MemoryDrift,
+  MemoryLimiterRepo,
+  NOW_ISO,
+  recording,
+  SEASON,
+} from "./helpers.js";
 
 const HOUR = 3_600_000;
 const PASS_TD = "4";
@@ -331,6 +343,15 @@ describe("the marks (cache.ts): pure rule and kept row", () => {
     });
   });
 
+  it("an instant that is not a finite number writes nothing", () => {
+    const cache = new MemoryCache();
+    const marks = cachedSettingsMarks(cache, LEAGUE_ID, SEASON, fixedClock(NOW_ISO));
+    marks.observe({ standings_ms: 100, waivers_ms: 50 }, Number.NaN);
+    marks.invalidate(Number.POSITIVE_INFINITY);
+    expect(cache.puts).toBe(0);
+    expect(marks.load()).toBeNull();
+  });
+
   it("a store that cannot be read writes no observation (it would replace marks it never saw)", () => {
     const cache = new MemoryCache();
     const clock = fixedClock(NOW_ISO);
@@ -352,6 +373,56 @@ describe("the marks (cache.ts): pure rule and kept row", () => {
     // an explicit invalidation is still written: what matters is that it is kept
     cachedSettingsMarks(unreadable, LEAGUE_ID, SEASON, clock).invalidate(3_000);
     expect(marks.load()?.dirty_at_ms).toBe(3_000);
+  });
+});
+
+describe("the read's outdated hook (request.ts ReadSpec.outdated)", () => {
+  const HOST = "lm-api-reads.fantasy.espn.com";
+  const raw = (b: unknown): unknown => b;
+  const spec = (outdated?: () => boolean) => ({
+    target: seasonTarget({ host: HOST, season: SEASON }),
+    filter: null,
+    leagueId: null,
+    cookies: "never" as const,
+    parse: raw,
+    ...(outdated === undefined ? {} : { outdated }),
+  });
+
+  it("true refetches a TTL-fresh entry; false, and a check that throws, read it as current", async () => {
+    const clock = fixedClock(NOW_ISO);
+    const rec = recording(createFixtureFetch({ dir: FIXTURES, league: "league-a" }));
+    const r = new EspnRequester({
+      fetch: rec.fetch,
+      clock,
+      limiter: new MemoryLimiterRepo(),
+      cache: new MemoryCache(),
+      driftState: new MemoryDrift(),
+      credentials: null,
+      host: HOST,
+      origin: "server",
+      observer: "server",
+      recordRawBodies: false,
+      sleep: (ms) => {
+        clock.advance(ms);
+        return Promise.resolve();
+      },
+      random: () => 0.5,
+    });
+    await r.read(spec());
+    expect((await r.read(spec(() => false))).stamp.cache).toBe("hit");
+    expect(
+      (
+        await r.read(
+          spec(() => {
+            throw new Error("check");
+          }),
+        )
+      ).stamp.cache,
+    ).toBe("hit");
+    expect(rec.sent).toHaveLength(1);
+    clock.advance(1_000);
+    expect((await r.read(spec(() => true))).stamp.cache).toBe("miss");
+    expect(rec.sent).toHaveLength(2);
   });
 });
 

@@ -207,6 +207,44 @@ describe("ESPN's Retry-After holds the read host off for its whole window", () =
   });
 });
 
+describe("the kept hold (cache.ts cachedRetryAfter)", () => {
+  it("keeps only a later, finite instant; an absent, unreadable or broken row reads as none", () => {
+    const cache = new MemoryCache();
+    const clock = fixedClock(NOW_ISO);
+    const kept = cachedRetryAfter(cache, HOST, clock);
+    expect(kept.load()).toBeNull();
+    kept.save(5_000);
+    kept.save(4_000); // earlier: the kept hold stands
+    kept.save(Number.NaN);
+    kept.save(Number.POSITIVE_INFINITY);
+    expect(cache.puts).toBe(1);
+    expect(kept.load()).toBe(5_000);
+    kept.save(6_000);
+    expect(kept.load()).toBe(6_000);
+    cache.map.set(retryAfterKey(HOST), {
+      ...cache.map.get(retryAfterKey(HOST))!,
+      parsed_json: '{"until_ms":"6000"}',
+    });
+    expect(kept.load()).toBeNull();
+    const broken = cachedRetryAfter(
+      {
+        get: () => {
+          throw new Error("db");
+        },
+        put: () => {
+          throw new Error("db");
+        },
+      },
+      HOST,
+      clock,
+    );
+    expect(broken.load()).toBeNull();
+    expect(() => {
+      broken.save(1_000);
+    }).not.toThrow();
+  });
+});
+
 describe("the credential probe honours the hold, and a probe's own Retry-After sets it", () => {
   const settingsBody = () => {
     const s = structuredClone(loadFixture("recorded/league-a/mSettings.json")) as {
