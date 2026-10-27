@@ -47,6 +47,8 @@ export {
   type NewsSourceOptions,
 } from "./source.js";
 export {
+  ATTACH_WORDS,
+  attachedTeams,
   TEAM_HOMES,
   TEAM_NICKNAMES,
   TEAM_WORDS,

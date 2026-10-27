@@ -15,22 +15,39 @@
 // that name's surname standing alone ("Dallas Goedert", "Malik Washington … Washington was ruled
 // out" name no Cowboys or Commanders — Stage C remediation news-match-player-name-team-word), and
 // never a team named only as the opponent ("against the Eagles", "Browns matchup"; teams.ts).
-// A full name several universe players share (the universe is every players_wl person: 0 %-owned
-// free agents and defensive players hold the names of stars — Stage C remediation
-// news-match-universe-homonyms) goes to one holder only on evidence: a holder on a team the item
-// names only as the opponent is not its subject; of the others, the prominent one — owned in at
-// least PROMINENT_OWNED % of ESPN leagues and PROMINENCE_RATIO times as many as each other holder —
-// takes it unless the item names only another holder's team (his own news, or the team the
-// prominent one faces: no ref, never the wrong one); without a prominent holder, the one holder on
-// a team the item names takes it, and otherwise no one does.
+//
+// Namesakes (Stage C remediation news-match-universe-homonyms). The universe is every players_wl
+// person, so 0 %-owned free agents and defensive players hold the names of stars. A team named
+// anywhere in an item may be its subject's team OR his opponent — "win over the Browns", "loss to
+// the Eagles", "at Cleveland", "the Vikings host the Browns": no cue list can tell them apart — so a
+// team named loosely is never evidence FOR a namesake; it only shows the item may be his. The
+// evidence that picks one holder of a shared full name, per occurrence of the name:
+//   1. its spelling — a generational suffix written after it ("Michael Carter II", "Byron Murphy
+//      Jr.") keeps only the holders ESPN spells with that suffix (when one does);
+//   2. ruled out — in the item's subject (its first full name), a holder on a team named only as
+//      the opponent is not him ("Questionable for Browns matchup"); a cue is about the subject, so
+//      it rules no one out for the other names an item holds;
+//   3. attached — a team written next to the name (teams.ts `attachedTeams`: "Vikings WR Justin
+//      Jefferson", "Sam Twin, Dolphins:") is his own;
+//   4. prominence — a holder owned in at least PROMINENT_OWNED % of ESPN leagues and
+//      PROMINENCE_RATIO times as many as each other holder.
+// One holder left after 1–2 takes the name. Else an attached holder takes it — past a prominent one
+// only when it is the prominent one himself (a namesake's team attached beside a star's name blocks
+// it: no ref, never the wrong one). Else the prominent holder takes it unless another holder's team
+// is named anywhere in the item (his own news, or the star facing his team: no ref). Else no one.
+// A surname standing alone that a full name in the item ends with is that person ("Justin Jefferson:
+// … | Jefferson caught …"): never a last_name_team ref to someone else. And a bare surname is not the
+// one player of it on a team named loosely when another player of that surname, ESPN-owned
+// PROMINENCE_RATIO times as widely (and at least PROMINENT_OWNED %), may be the subject facing that
+// team ("Jefferson torches Browns"); an attached team still decides ("Browns LB Jefferson").
 // The matcher reads the SANITISED text (plan 02 §6.2), only to decide which ids an item is about; the
 // text is never interpreted beyond that, and nothing of it is copied into a ref.
 import { GSIS_ID_RE, type NflTeam } from "../../config/schema.js";
-import { mergeName } from "../../domain/crosswalk/normalize.js";
+import { mergeName, NAME_SUFFIXES } from "../../domain/crosswalk/normalize.js";
 import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
 import { sanitizeText } from "../../domain/league/types.js";
 import type { NewsMatchMethod } from "../../store/datasets/derive.js";
-import { TEAM_WORDS, teamMentions } from "./teams.js";
+import { attachedTeams, TEAM_WORDS, teamMentions } from "./teams.js";
 
 /** One player of the ESPN universe the matcher reads (ds_players + the crosswalk's gsis id). */
 export interface NewsUniversePlayer {
@@ -251,42 +268,91 @@ function tokenize(text: string, cache: Map<string, string | null>): (Token | nul
   return out;
 }
 
+/** A universe player as the matcher holds him: the generational suffix ESPN spells him with. */
+interface Held extends NewsUniversePlayer {
+  /** "jr", "ii" … when his ESPN name ends with one (mergeName folds it away), else null. */
+  readonly suffix: string | null;
+}
+
 interface Entry {
   readonly key: readonly string[];
-  readonly players: readonly NewsUniversePlayer[];
+  readonly players: readonly Held[];
+}
+
+/** One occurrence of a full name in an item, and the evidence about who it is (see the header). */
+interface Occurrence {
+  readonly at: number;
+  readonly entry: Entry;
+  /** Offsets of the name in the text, its written suffix included: [start, end). */
+  readonly start: number;
+  readonly end: number;
+  /** The generational suffix written right after the name, or null. */
+  readonly suffix: string | null;
+}
+
+/** The evidence one occurrence of a shared name carries. */
+interface Evidence {
+  readonly suffix: string | null;
+  /** Teams written next to the name (its own). */
+  readonly attached: ReadonlySet<NflTeam>;
+  /** Whether the name is the item's subject (its first full name): an opponent cue is about him. */
+  readonly subject: boolean;
 }
 
 const owned = (p: NewsUniversePlayer): number => p.percent_owned ?? 0;
+
+/** Whether `a` is rostered so much more widely than `b` that an item may be about `a` instead. */
+const outshines = (a: NewsUniversePlayer, b: NewsUniversePlayer): boolean =>
+  owned(a) >= PROMINENT_OWNED && owned(a) >= PROMINENCE_RATIO * owned(b);
+
+/** The generational suffix a name is spelled with ("Michael Carter II" → "ii"), or null. */
+function suffixOf(fullName: string): string | null {
+  const words = fullName.trim().split(/\s+/u);
+  if (words.length <= 2) return null;
+  const last = mergeName(words[words.length - 1]);
+  return last !== null && NAME_SUFFIXES.includes(last) ? last : null;
+}
 
 /**
  * The holder of a shared name ESPN leagues roster far more than every other one (at least
  * PROMINENT_OWNED %, and PROMINENCE_RATIO times each other holder's share; an unknown share is 0),
  * or null when none does.
  */
-function prominentOf(holders: readonly NewsUniversePlayer[]): NewsUniversePlayer | null {
+function prominentOf<P extends NewsUniversePlayer>(holders: readonly P[]): P | null {
   const ranked = [...holders].sort((a, b) => owned(b) - owned(a));
   const top = ranked[0];
-  if (top === undefined) return null;
-  const next = ranked[1] === undefined ? 0 : owned(ranked[1]);
-  return owned(top) >= PROMINENT_OWNED && owned(top) >= PROMINENCE_RATIO * next ? top : null;
+  if (top === undefined || owned(top) < PROMINENT_OWNED) return null;
+  return ranked.slice(1).every((p) => outshines(top, p)) ? top : null;
 }
 
 /**
- * Which holder of a full name several universe players share an item is about, or null (see the
- * header): a holder on a team named only as the opponent is not its subject; then the prominent
- * holder unless only another holder's team is named; else the one holder on a named team.
+ * Which holder of a full name several universe players share this occurrence is, or null (the
+ * header's rules): spelling, then ruled out, then attached, then prominence. A team named loosely
+ * (`named`: anywhere in the item, cue or not) never picks a namesake; it only blocks a prominent one.
  */
 function sharedHolder(
-  holders: readonly NewsUniversePlayer[],
-  subject: ReadonlySet<NflTeam>,
+  holders: readonly Held[],
+  ev: Evidence,
   opponentOnly: ReadonlySet<NflTeam>,
-): NewsUniversePlayer | null {
-  const cands = holders.filter((p) => p.team === null || !opponentOnly.has(p.team));
+  named: ReadonlySet<NflTeam>,
+): Held | null {
+  let cands = holders;
+  if (ev.suffix !== null) {
+    const spelled = cands.filter((p) => p.suffix === ev.suffix);
+    if (spelled.length > 0) cands = spelled;
+  }
+  const attached = (p: Held): boolean => p.team !== null && ev.attached.has(p.team);
+  if (ev.subject)
+    cands = cands.filter((p) => p.team === null || attached(p) || !opponentOnly.has(p.team));
   if (cands.length <= 1) return cands[0] ?? null;
-  const named = cands.filter((p) => p.team !== null && subject.has(p.team));
   const top = prominentOf(cands);
-  if (top !== null) return named.length === 0 || named.includes(top) ? top : null;
-  return named.length === 1 ? (named[0] ?? null) : null;
+  const att = cands.filter(attached);
+  if (att.length > 0) {
+    const only = att.length === 1 ? att[0] : undefined;
+    return only !== undefined && (top === null || only === top) ? only : null;
+  }
+  if (top === null) return null;
+  return cands.some((p) => p !== top && p.team !== null && named.has(p.team)) ? null : top;
 }
 
 /** A matcher over one universe (built once per refresh). */
@@ -299,8 +365,8 @@ export interface PlayerMatcher {
 
 /** Builds the matcher (invalid universe rows — no positive id, no two-token name — are skipped). */
 export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): PlayerMatcher {
-  const byKey = new Map<string, NewsUniversePlayer[]>();
-  const bySurname = new Map<string, NewsUniversePlayer[]>();
+  const byKey = new Map<string, Held[]>();
+  const bySurname = new Map<string, Held[]>();
   let size = 0;
   for (const p of universe) {
     if (!Number.isSafeInteger(p.espn_id) || p.espn_id <= 0) continue;
@@ -308,12 +374,13 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
     if (merged === null) continue;
     const tokens = merged.split(" ");
     if (tokens.length < 2) continue;
-    const player: NewsUniversePlayer = {
+    const player: Held = {
       espn_id: p.espn_id,
       full_name: p.full_name,
       team: p.team,
       gsis_id: p.gsis_id !== null && GSIS_ID_RE.test(p.gsis_id) ? p.gsis_id : null,
       percent_owned: percentOwnedOf(p.percent_owned),
+      suffix: suffixOf(p.full_name),
     };
     size++;
     const list = byKey.get(merged) ?? [];
@@ -352,8 +419,9 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         at: prev?.at ?? at,
       });
     };
-    // 1. the full names the text holds (each a person's name, whoever it turns out to be)
-    const names: { readonly at: number; readonly entry: Entry }[] = [];
+    // 1. the full names the text holds (each a person's name, whoever it turns out to be), with
+    // the generational suffix written right after one ("Michael Carter II")
+    const names: Occurrence[] = [];
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i];
       // a name in running text is capitalised: "jordan love" in lower case is not a mention
@@ -368,45 +436,64 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
             tk !== null && tk !== undefined && tk.norm === e.key[k] && (k === 0 || !tk.breakBefore);
         }
         if (!ok) continue;
+        const last = i + e.key.length - 1;
+        const after = tokens[last + 1];
+        const suffix =
+          after !== null && after !== undefined && !after.breakBefore
+            ? (NAME_SUFFIXES.find((s) => s === after.norm) ?? null)
+            : null;
+        const endTok = suffix === null ? tokens[last] : after;
         for (let k = 0; k < e.key.length; k++) consumed[i + k] = true;
-        names.push({ at: i, entry: e });
-        i += e.key.length - 1;
+        if (suffix !== null) consumed[last + 1] = true;
+        names.push({ at: i, entry: e, start: t.start, end: endTok?.end ?? t.end, suffix });
+        i = suffix === null ? last : last + 1;
         break;
       }
     }
 
     // 2. the teams the item names as its subject's: a word of a name it holds, or that name's
     // surname alone, is the person; a team named only as the opponent is not the subject's
-    const spans = names.map(({ at, entry }) => ({
-      start: tokens[at]?.start ?? 0,
-      end: tokens[at + entry.key.length - 1]?.end ?? 0,
-    }));
     const surnames = new Set(names.map(({ entry }) => entry.key[entry.key.length - 1] ?? ""));
     const mentions = teamMentions(text).filter(
       (m) =>
-        !spans.some((s) => m.start < s.end && s.start < m.end) &&
+        !names.some((s) => m.start < s.end && s.start < m.end) &&
         !surnames.has(mergeName(m.words) ?? ""),
     );
     const subject = new Set(mentions.filter((m) => !m.opponent).map((m) => m.team));
     const opponentOnly = new Set(
       mentions.filter((m) => m.opponent && !subject.has(m.team)).map((m) => m.team),
     );
+    // every team the item names, the subject's or an opponent (a loose mention may be either)
+    const named = new Set(mentions.map((m) => m.team));
     const onTeam = (p: NewsUniversePlayer): boolean => p.team !== null && subject.has(p.team);
 
-    // 3. who each name is
-    for (const { at, entry } of names) {
+    // 3. who each name is (the item's subject is its first full name)
+    const subjectKey = names[0]?.entry.key.join(" ");
+    for (const occ of names) {
+      const { at, entry } = occ;
+      const attached = attachedTeams(text, mentions, occ.start, occ.end);
       const p =
         entry.players.length === 1
           ? entry.players[0]
-          : sharedHolder(entry.players, subject, opponentOnly);
-      if (p !== undefined && p !== null) add(p, onTeam(p) ? "full_name_team" : "full_name", at);
+          : sharedHolder(
+              entry.players,
+              { suffix: occ.suffix, attached, subject: entry.key.join(" ") === subjectKey },
+              opponentOnly,
+              named,
+            );
+      if (p === undefined || p === null) continue;
+      const own = onTeam(p) || (p.team !== null && attached.has(p.team));
+      add(p, own ? "full_name_team" : "full_name", at);
     }
 
     // 4. bare surnames on a team the item names
-    for (let i = 0; i < tokens.length && subject.size > 0; i++) {
+    for (let i = 0; i < tokens.length && named.size > 0; i++) {
       const t = tokens[i];
       if (t === null || t === undefined || consumed[i] === true || !t.capital) continue;
       if (TEAM_WORDS.has(t.norm)) continue;
+      // the surname of a full name the item holds is that person, whoever he turned out to be —
+      // never another player of the surname ("Justin Jefferson: … | Jefferson caught …")
+      if (surnames.has(t.norm)) continue;
       const prev = i > 0 ? tokens[i - 1] : null;
       // a surname right after a coaching-staff word is that staff member, not a player (whatever the
       // staff word's case — "Bengals coach Corbin" as much as "Coach Corbin")
@@ -419,9 +506,24 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       if (next !== null && next !== undefined && !next.breakBefore && next.capital) {
         if (!TEAM_WORDS.has(next.norm) && !LEAD_WORDS.has(next.norm)) continue;
       }
-      const here = (bySurname.get(t.norm) ?? []).filter(onTeam);
+      const sharers = bySurname.get(t.norm);
+      if (sharers === undefined) continue;
+      // a team attached to the surname decides ("Browns LB Jefferson", "Vikings WR Jefferson
+      // torches Browns"): the one player of it on that team
+      const att = attachedTeams(text, mentions, t.start, t.end);
+      const onAttached = sharers.filter((p) => p.team !== null && att.has(p.team));
+      if (onAttached.length > 0) {
+        if (onAttached.length === 1 && onAttached[0] !== undefined)
+          add(onAttached[0], "last_name_team", i);
+        continue;
+      }
+      const here = sharers.filter(onTeam);
       const only = here.length === 1 ? here[0] : undefined;
-      if (only !== undefined) add(only, "last_name_team", i);
+      if (only === undefined) continue;
+      // a far more widely rostered player of the surname, on a team the item does not name, may be
+      // its subject facing this one ("Jefferson torches Browns")
+      if (sharers.some((x) => x !== only && outshines(x, only))) continue;
+      add(only, "last_name_team", i);
     }
 
     return [...found.values()]
