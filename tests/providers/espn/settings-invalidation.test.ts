@@ -10,12 +10,23 @@
 // outdates them in every process; ESPN down, the outdated settings are served degraded. Over league-a
 // (stub translator) and the derived fx-10h league (real translator, real store: the edit raises
 // settings_changed inside the TTL). No network, no cookie.
+//
+// Attempt 2 (the verifier: "only the provider half landed" — a golden mismatch still never re-read
+// the settings). The E6 > 10 % rule (plan 08 §6 step 3(d): "the league's settings cache is marked
+// dirty") is now the provider's own: an open `scoring_mismatch` check of status `fail` — the verdict
+// the nightly roster snapshot keeps in store.sqlite when more than 10 % of a final week's checked
+// player-weeks differ — outdates every settings answer fetched before it, in every process, once,
+// for the configured season (cache.ts leagueWideMismatchAfter). `invalidateSettings` is on the
+// FantasyPlatform seam, so a golden computed in the server (`espn_get_box_score`, which sees only the
+// seam) can mark the settings dirty as well.
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { fixedClock } from "../../../src/domain/clock.js";
-import { translateScoringInput } from "../../../src/domain/scoring/index.js";
+import { fixedClock, type FixedClock } from "../../../src/domain/clock.js";
+import type { CheckRow } from "../../../src/domain/league/types.js";
+import { isLeagueWideMismatch, translateScoringInput } from "../../../src/domain/scoring/index.js";
 import {
   cachedSettingsMarks,
+  leagueWideMismatchAfter,
   settingsDirtyKey,
   settingsMarksKey,
   settingsOutdated,
@@ -29,8 +40,10 @@ import {
 } from "../../../src/providers/espn/index.js";
 import { seasonTarget } from "../../../src/providers/espn/path.js";
 import { EspnRequester } from "../../../src/providers/espn/request.js";
+import type { FantasyPlatform } from "../../../src/providers/platform.js";
 import { createStoreFactory } from "../../../src/store/index.js";
-import type { Store } from "../../../src/store/types.js";
+import { StoreBusyError, type Store } from "../../../src/store/types.js";
+import { historyFixtureFetch } from "../../fixtures/helpers/history-fixtures.js";
 import { tempDir } from "../../lint/helpers.js";
 import {
   FIXTURES,
@@ -94,6 +107,61 @@ function espn(state: {
 
 const passTdOf = (s: { rules: readonly { platform_id: string; points: number }[] }) =>
   s.rules.find((r) => r.platform_id === PASS_TD)?.points;
+
+/**
+ * The golden's verdict on a final week as the nightly roster snapshot raises it (src/cli/snapshot.ts):
+ * `fail` when more than 10 % of the checked player-weeks differ (isLeagueWideMismatch, the E6 rule),
+ * else `warn`; the counts and the rounded share in its detail.
+ */
+function verdict(
+  at: string,
+  mismatched: number,
+  checked = 150,
+  settingsHash = "0".repeat(64),
+): CheckRow {
+  return {
+    id: "scoring_mismatch",
+    status: isLeagueWideMismatch(mismatched, checked) ? "fail" : "warn",
+    detail: {
+      week: 4,
+      checked,
+      mismatched,
+      share: Math.round((mismatched / checked) * 1000) / 1000,
+    },
+    raised_at: at,
+    settings_hash: settingsHash,
+    acknowledged: false,
+    acknowledged_at: null,
+    acknowledged_by: null,
+  };
+}
+
+/** The provider's league_settings port: records nothing; its open checks are `checks` (or throw). */
+function checksPort(checks: readonly CheckRow[] | (() => readonly CheckRow[])) {
+  return {
+    put: () => undefined,
+    openChecks: () => (typeof checks === "function" ? checks() : checks),
+  };
+}
+
+/** A league-a world whose provider reads its open checks from `leagueSettings`. */
+function worldWith(
+  fetch: FetchLike,
+  leagueSettings: ReturnType<typeof checksPort>,
+  shared: { readonly cache?: MemoryCache; readonly clock?: FixedClock } = {},
+) {
+  const limiter = new MemoryLimiterRepo();
+  const cache = shared.cache ?? new MemoryCache();
+  const drift = new MemoryDrift();
+  return makeWorld({
+    fetch,
+    limiter,
+    cache,
+    drift,
+    ...(shared.clock === undefined ? {} : { clock: shared.clock }),
+    over: { repos: { limiter, cache, driftState: drift, leagueSettings } },
+  });
+}
 
 describe("a moved status instant outdates the cached settings before their 24 h TTL", () => {
   it("a standings update seen in another answer: the settings are refetched and the edit is seen", async () => {
@@ -218,6 +286,186 @@ describe("invalidateSettings: an explicit invalidation (the golden mismatch, eff
     expect(w.cache.map.has(settingsMarksKey(LEAGUE_ID, SEASON))).toBe(false);
     expect(w.cache.map.has(settingsDirtyKey(LEAGUE_ID, SEASON))).toBe(false);
     expect(w.cache.puts).toBe(0);
+  });
+
+  it("is on the FantasyPlatform seam: a caller holding only the seam (src/mcp's services.platform, where espn_get_box_score computes its golden) marks the settings dirty", async () => {
+    const state = { standingsMoved: 0, waiversMoved: 0, passTd: null as number | null };
+    const e = espn(state);
+    const w = makeWorld({ fetch: e.fetch });
+    const seam: FantasyPlatform = w.provider;
+    await seam.getScoringSettings(w.ref);
+    w.clock.advance(HOUR);
+    state.passTd = 6;
+    seam.invalidateSettings(w.ref);
+    expect(e.views).toHaveLength(1); // nothing sent by the invalidation itself
+    const s = await seam.getScoringSettings(w.ref);
+    expect(s.stamp.cache).toBe("miss");
+    expect(passTdOf(s.value)).toBe(6);
+    expect(e.views).toEqual(["mSettings+mNav", "mSettings+mNav"]);
+    expect(() => {
+      seam.invalidateSettings({ ...w.ref, league_id: "999" });
+    }).toThrow(/league_ref_not_configured/);
+  });
+});
+
+describe("the golden's league-wide verdict (the E6 > 10 % rule) outdates the cached settings before their TTL", () => {
+  it("leagueWideMismatchAfter: an open fail scoring_mismatch raised after the fetch; nothing else", () => {
+    const fetched = Date.parse(NOW_ISO);
+    const later = "2026-10-06T14:00:00.000Z";
+    expect(leagueWideMismatchAfter([], fetched)).toBe(false);
+    expect(leagueWideMismatchAfter([verdict(later, 40)], fetched)).toBe(true);
+    // raised at or before the fetch: the cached answer is as new as the verdict, or newer
+    expect(leagueWideMismatchAfter([verdict(NOW_ISO, 40)], fetched)).toBe(false);
+    expect(leagueWideMismatchAfter([verdict("2026-10-06T11:00:00.000Z", 40)], fetched)).toBe(false);
+    // at or below 10 % (15 of 150): warn, the settings stand; just above it: fail
+    expect(verdict(later, 15).status).toBe("warn");
+    expect(leagueWideMismatchAfter([verdict(later, 15)], fetched)).toBe(false);
+    expect(leagueWideMismatchAfter([verdict(later, 16)], fetched)).toBe(true);
+    // a human explained it (`eff doctor --ack scoring_mismatch`)
+    const acked: CheckRow = {
+      ...verdict(later, 40),
+      acknowledged: true,
+      acknowledged_at: later,
+      acknowledged_by: "doctor",
+    };
+    expect(leagueWideMismatchAfter([acked], fetched)).toBe(false);
+    // any other check, however severe
+    for (const id of ["settings_changed", "ir_invalid", "stale_credential", "drift"] as const)
+      expect(leagueWideMismatchAfter([{ ...verdict(later, 40), id }], fetched)).toBe(false);
+    // an instant that does not parse; a fetch instant that is not finite
+    expect(leagueWideMismatchAfter([verdict("not an instant", 40)], fetched)).toBe(false);
+    expect(leagueWideMismatchAfter([verdict(later, 40)], Number.NaN)).toBe(false);
+    // one verdict among other checks is enough
+    expect(
+      leagueWideMismatchAfter(
+        [verdict(later, 15), { ...verdict(later, 40), id: "ir_invalid" }, verdict(later, 40)],
+        fetched,
+      ),
+    ).toBe(true);
+  });
+
+  it("a verdict raised after the cached settings were fetched refetches them once: the commissioner's edit is seen", async () => {
+    const state = { standingsMoved: 0, waiversMoved: 0, passTd: null as number | null };
+    const e = espn(state);
+    const checks: CheckRow[] = [];
+    const w = worldWith(e.fetch, checksPort(checks));
+    const before = await w.provider.getScoringSettings(w.ref);
+    w.clock.advance(2 * HOUR);
+    // the commissioner switches pass TDs to 6 points; ESPN's status instants do not move
+    state.passTd = 6;
+    // with no verdict the cached settings stand for their 24 h TTL: the edit is unseen
+    const unseen = await w.provider.getScoringSettings(w.ref);
+    expect(unseen.stamp.cache).toBe("hit");
+    expect(passTdOf(unseen.value)).toBe(passTdOf(before.value));
+    // the nightly golden re-scores the final week under the cached settings: 40 of 150 differ
+    checks.push(verdict(w.clock.nowIso(), 40));
+    w.clock.advance(1_000);
+    const after = await w.provider.getScoringSettings(w.ref);
+    expect(after.stamp.cache).toBe("miss");
+    expect(passTdOf(before.value)).not.toBe(6);
+    expect(passTdOf(after.value)).toBe(6);
+    // one refetch per verdict: the answer fetched after it is current for every settings read
+    expect((await w.provider.getLeagueRules(w.ref)).stamp.cache).toBe("hit");
+    expect((await w.provider.getRosterSlots(w.ref)).stamp.cache).toBe("hit");
+    expect((await w.provider.getScoringSettings(w.ref)).stamp.cache).toBe("hit");
+    expect(e.views).toEqual(["mSettings+mNav", "mSettings+mNav"]);
+  });
+
+  it("refetches nothing for a verdict at or below 10 %, one raised at the fetch, one a human acknowledged, or another check", async () => {
+    const e = espn({ standingsMoved: 0, waiversMoved: 0, passTd: null });
+    const checks: CheckRow[] = [];
+    const w = worldWith(e.fetch, checksPort(checks));
+    await w.provider.getScoringSettings(w.ref);
+    // raised in the same instant as the fetch: the cached answer is not older than the verdict
+    checks.push(verdict(w.clock.nowIso(), 40));
+    w.clock.advance(HOUR);
+    const at = w.clock.nowIso();
+    checks.push(
+      verdict(at, 15), // exactly 10 %: warn
+      { ...verdict(at, 40), acknowledged: true, acknowledged_at: at, acknowledged_by: "doctor" },
+      { ...verdict(at, 40), id: "ir_invalid" },
+    );
+    w.clock.advance(1_000);
+    expect((await w.provider.getScoringSettings(w.ref)).stamp.cache).toBe("hit");
+    expect((await w.provider.getLeague(w.ref)).stamp.cache).toBe("hit");
+    expect(e.views).toEqual(["mSettings+mNav"]);
+  });
+
+  it("a store whose checks cannot be read: the settings read as current, never an error; a moved instant still outdates them", async () => {
+    const state = { standingsMoved: 0, waiversMoved: 0, passTd: null as number | null };
+    const e = espn(state);
+    const w = worldWith(
+      e.fetch,
+      checksPort(() => {
+        throw new StoreBusyError("checks");
+      }),
+    );
+    await w.provider.getScoringSettings(w.ref);
+    w.clock.advance(HOUR);
+    expect((await w.provider.getScoringSettings(w.ref)).stamp.cache).toBe("hit");
+    state.standingsMoved = HOUR;
+    state.passTd = 6;
+    await w.provider.getStandings(w.ref);
+    const s = await w.provider.getScoringSettings(w.ref);
+    expect(s.stamp.cache).toBe("miss");
+    expect(passTdOf(s.value)).toBe(6);
+    expect(e.views).toEqual(["mSettings+mNav", "mTeam+mStandings", "mSettings+mNav"]);
+  });
+
+  it("ESPN down after the verdict: the cached settings are served degraded, never an error, and refetched once ESPN answers", async () => {
+    const state = {
+      standingsMoved: 0,
+      waiversMoved: 0,
+      passTd: null as number | null,
+      down: false,
+    };
+    const e = espn(state);
+    const checks: CheckRow[] = [];
+    const w = worldWith(e.fetch, checksPort(checks));
+    await w.provider.getScoringSettings(w.ref);
+    w.clock.advance(HOUR);
+    state.passTd = 6;
+    checks.push(verdict(w.clock.nowIso(), 40));
+    w.clock.advance(1_000);
+    state.down = true;
+    const down = await w.provider.getScoringSettings(w.ref);
+    expect(down.stamp.degraded?.code).toBe("ESPN_UPSTREAM_UNAVAILABLE");
+    expect(["stale", "breaker"]).toContain(down.stamp.cache);
+    expect(passTdOf(down.value)).not.toBe(6);
+    // ESPN answers again once the breaker's 5 minutes are over: the outdated answer is asked again
+    state.down = false;
+    w.clock.advance(5 * 60_000 + 1_000);
+    const back = await w.provider.getScoringSettings(w.ref);
+    expect(back.stamp.cache).toBe("miss");
+    expect(back.stamp.degraded ?? null).toBeNull();
+    expect(passTdOf(back.value)).toBe(6);
+  });
+
+  it("the verdict is the configured season's (the golden checks its weeks): a previous season's cached settings stand", async () => {
+    const current = createFixtureFetch({ dir: FIXTURES, league: "league-a" });
+    const history = historyFixtureFetch("league-a");
+    const asked: string[] = [];
+    const fetch: FetchLike = (url, init) => {
+      const u = new URL(url);
+      const season = /\/seasons\/(\d+)\//.exec(u.pathname)?.[1] ?? "?";
+      asked.push(`${season}:${u.searchParams.getAll("view").join("+")}`);
+      return (season === String(SEASON) ? current : history)(url, init);
+    };
+    const checks: CheckRow[] = [];
+    const w = worldWith(fetch, checksPort(checks));
+    const prior = { ...w.ref, season: SEASON - 1 };
+    await w.provider.getLeagueRules(prior);
+    await w.provider.getLeagueRules(w.ref);
+    w.clock.advance(HOUR);
+    checks.push(verdict(w.clock.nowIso(), 40));
+    w.clock.advance(1_000);
+    expect((await w.provider.getLeagueRules(prior)).stamp.cache).toBe("hit");
+    expect((await w.provider.getLeagueRules(w.ref)).stamp.cache).toBe("miss");
+    expect(asked).toEqual([
+      `${String(SEASON - 1)}:mSettings`,
+      `${String(SEASON)}:mSettings+mNav`,
+      `${String(SEASON)}:mSettings+mNav`,
+    ]);
   });
 });
 
@@ -490,5 +738,73 @@ describe("end to end over the real store: the edit raises settings_changed insid
     expect(changed.map((c) => [c.settings_hash, c.detail.scoring_changed])).toEqual([
       [after.value.settings_hash, true],
     ]);
+  });
+
+  it("fx-10h: an edit no status instant shows is refetched on the nightly golden's league-wide verdict; settings_changed opens and a new process reads the new settings", async () => {
+    tmp = tempDir("eff-settings-golden-");
+    const clock = fixedClock("2026-10-07T01:00:00.000Z");
+    store = createStoreFactory({ busyTimeoutMs: 50 }).open({
+      path: path.join(tmp.dir, "store.sqlite"),
+      datasetDir: path.join(tmp.dir, "datasets"),
+      backupDir: path.join(tmp.dir, "backups"),
+      clock,
+      migrate: true,
+    });
+    const s = store;
+    const inner = createDerivedLeagueFetch({ dir: path.join(FIXTURES, "fx-10h") });
+    const views: string[] = [];
+    let edited = false;
+    const fetch: FetchLike = async (url, init) => {
+      views.push(new URL(url).searchParams.getAll("view").join("+"));
+      const r = await inner(url, init);
+      if (!edited) return r;
+      const b = (await r.json()) as {
+        settings?: { scoringSettings: { scoringItems: { statId: number; points: number }[] } };
+      };
+      // half-PPR → full PPR; ESPN's status instants stay as they were
+      for (const i of b.settings?.scoringSettings.scoringItems ?? [])
+        if (i.statId === 53) i.points = 1;
+      return new Response(JSON.stringify(b), { status: r.status, headers: r.headers });
+    };
+    const ref = { platform: "espn", league_id: "0", season: 2026 } as const;
+    const make = () =>
+      createEspnProvider({
+        config: {
+          leagueId: "0",
+          season: 2026,
+          teamId: 2,
+          espnReadHost: "lm-api-reads.fantasy.espn.com",
+          fixtureRecord: false,
+          fixtureDir: null,
+        },
+        repos: s.repos,
+        credentials: null,
+        clock,
+        scoring: translateScoringInput,
+        fetch,
+      });
+    const p = make();
+    const before = await p.getScoringSettings(ref);
+    clock.advance(2 * HOUR);
+    edited = true;
+    // no instant moved: inside the 24 h TTL the edit is unseen
+    expect((await p.getScoringSettings(ref)).value.settings_hash).toBe(before.value.settings_hash);
+    // the nightly roster snapshot's golden on the just-finalised week, under those settings: the
+    // receptions ESPN now pays a full point for differ on 61 of 160 player-weeks — raised as it is
+    s.repos.leagueSettings.raiseCheck(verdict(clock.nowIso(), 61, 160, before.value.settings_hash));
+    clock.advance(1_001); // the limiter's one request per second (the clock is fixed)
+    const after = await p.getScoringSettings(ref);
+    expect(after.stamp.cache).toBe("miss");
+    expect(after.value.settings_hash).not.toBe(before.value.settings_hash);
+    const changed = s.repos.leagueSettings.openChecks().filter((c) => c.id === "settings_changed");
+    expect(changed.map((c) => [c.settings_hash, c.detail.scoring_changed])).toEqual([
+      [after.value.settings_hash, true],
+    ]);
+    // a server started after the job (a new provider over the same store) reads the refetched
+    // answer: one refetch for the verdict across processes
+    const other = await make().getScoringSettings(ref);
+    expect(other.stamp.cache).toBe("hit");
+    expect(other.value.settings_hash).toBe(after.value.settings_hash);
+    expect(views.filter((v) => v.includes("mSettings"))).toHaveLength(2);
   });
 });

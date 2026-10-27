@@ -75,12 +75,13 @@ export interface CreateEspnProviderOptions {
   /**
    * The store's repositories; `credentialState` (read only — the definitive probe's plan reads
    * setup's board control and the rejected view, plan 02 §2.1) and `leagueSettings` (each settings
-   * answer recorded; the store raises `settings_changed` — plan 08 §9, plan 03 §5 #22) when the root
-   * passes them, as `store.repos` does.
+   * answer recorded; the store raises `settings_changed` — plan 08 §9, plan 03 §5 #22; its open
+   * checks read for the scoring golden's league-wide verdict, which outdates the cached settings —
+   * plan 08 §6 step 3(d)) when the root passes them, as `store.repos` does.
    */
   readonly repos: Pick<StoreRepositories, "limiter" | "espnCache" | "driftState"> & {
     readonly credentialState?: Pick<StoreRepositories["credentialState"], "get">;
-    readonly leagueSettings?: Pick<StoreRepositories["leagueSettings"], "put">;
+    readonly leagueSettings?: Pick<StoreRepositories["leagueSettings"], "put" | "openChecks">;
   };
   readonly credentials: CredentialAuthority | null;
   readonly clock: Clock;

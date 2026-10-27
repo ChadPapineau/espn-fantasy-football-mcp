@@ -8,13 +8,16 @@
 // notification settings and any `clientAddress` never enter the parsed cache; the raw body only in
 // fixture-recording mode), and what outlives a process in the cache's own namespaces: the league's
 // publicity (cachedPublicity), the settings invalidation marks (cachedSettingsMarks — plan 01 §5.2,
-// plan 08 §9) and ESPN's Retry-After hold on the read host (cachedRetryAfter — plan 01 §6).
+// plan 08 §9) and ESPN's Retry-After hold on the read host (cachedRetryAfter — plan 01 §6). The
+// scoring golden's league-wide verdict, kept as a store check, outdates the settings too
+// (leagueWideMismatchAfter — plan 08 §6 step 3(d)).
 import {
   freshnessClass,
   type FreshnessClass,
   type FreshnessClassId,
 } from "../../config/freshness.js";
 import type { Clock } from "../../domain/clock.js";
+import type { CheckRow } from "../../domain/league/types.js";
 import type { EspnCacheEntry, EspnCacheRepository } from "../../store/types.js";
 import { FORCE_REFRESH_MIN_INTERVAL_MS } from "../platform.js";
 import type { PublicityStore } from "./auth-gate.js";
@@ -228,7 +231,8 @@ export function statusInstantsOf(body: unknown): StatusInstants {
  * settings" row: `status.standingsUpdateDate` / `waiverLastExecutionDate` change, a scoring golden
  * mismatch; plan 08 §9: the E6 > 10 % rule, `eff refresh espn:settings`): the newest status instants
  * any league answer carried (ESPN's clock), when they were last seen to move (our clock), and the
- * last explicit invalidation (our clock).
+ * last explicit invalidation (our clock). The golden's league-wide verdict is read from the store's
+ * checks instead (`leagueWideMismatchAfter`), where the nightly roster snapshot keeps it.
  */
 export interface SettingsMarks extends StatusInstants {
   readonly moved_at_ms: number | null;
@@ -373,6 +377,33 @@ export function settingsOutdated(
   return (
     newer(marks.standings_ms, carried.standings_ms) || newer(marks.waivers_ms, carried.waivers_ms)
   );
+}
+
+/**
+ * Whether the scoring golden found a league-wide mismatch after a settings answer was fetched at
+ * `fetchedAtMs`. This is plan 08 §6 step 3(d), the E6 > 10 % rule: "only when share > 10 % of the
+ * checked week's rostered player-weeks … the league's settings cache is marked dirty" (plan 01 §5.2
+ * "a scoring golden mismatch"; plan 08 §9; Stage C finding
+ * cache-settings-invalidation-triggers-missing).
+ *
+ * The verdict is an open `scoring_mismatch` check of status `fail`. The nightly roster snapshot
+ * raises that status exactly when more than 10 % of the just-finalised week's checked player-weeks
+ * differ from ESPN's applied values (`isLeagueWideMismatch`), and `warn` at or below it. The check is
+ * kept in store.sqlite, so one verdict marks the settings dirty for every process, with no second
+ * write that could fail apart from it. A settings answer fetched after the verdict is current, so a
+ * verdict costs one refetch, whatever that refetch shows. An acknowledged check (a human explained
+ * it), any other check, a `warn`, or a `raised_at` that does not parse marks nothing.
+ */
+export function leagueWideMismatchAfter(
+  checks: readonly Pick<CheckRow, "id" | "status" | "raised_at" | "acknowledged">[],
+  fetchedAtMs: number,
+): boolean {
+  if (!Number.isFinite(fetchedAtMs)) return false;
+  return checks.some((c) => {
+    if (c.id !== "scoring_mismatch" || c.status !== "fail" || c.acknowledged) return false;
+    const raised = Date.parse(c.raised_at);
+    return Number.isFinite(raised) && raised > fetchedAtMs;
+  });
 }
 
 /** The espn_cache row the read host's Retry-After hold is kept under (its own namespace). */

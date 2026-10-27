@@ -5,8 +5,10 @@
 // a LeagueRef naming another league is a programming error. Every settings answer is recorded in
 // store.sqlite's league_settings (plan 08 §9), which raises `settings_changed` when it changed the
 // league-season's newest settings (Stage C, league-settings-changed-never-raised); cached settings are
-// refetched before their TTL when a later league answer shows the standings or a waiver run moved, or
-// when `invalidateSettings` was asked (plan 01 §5.2, plan 08 §9). A week past its correction window is
+// refetched before their TTL when a later league answer shows the standings or a waiver run moved,
+// when the scoring golden found a league-wide mismatch after they were fetched (the store's open
+// `scoring_mismatch` check of status `fail`, plan 08 §6 step 3(d)), or when `invalidateSettings` was
+// asked (plan 01 §5.2, plan 08 §9). A week past its correction window is
 // cached immutable (plan 01 §5.4). Read-only: no write method exists (league_settings and the cache's
 // marks are the store's own bookkeeping, never a write to ESPN).
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): FantasyPlatformWrites
@@ -24,6 +26,7 @@ import type { CredentialAuthority, CredentialObserver } from "../../auth/types.j
 import type { Clock } from "../../domain/clock.js";
 import type {
   BoxScoreMatchup,
+  CheckRow,
   League,
   LeagueRef,
   LeagueRules,
@@ -83,6 +86,7 @@ import {
   cachedBoardControl,
   cachedPublicity,
   cachedSettingsMarks,
+  leagueWideMismatchAfter,
   settingsOutdated,
   statusInstantsOf,
   type KeptFlag,
@@ -290,10 +294,12 @@ export interface EspnProviderDeps {
      * store.sqlite's `league_settings` (plan 08 §9: the normalised settings persisted by
      * settings_hash, never pruned — the recommendation log's referents): each settings answer is
      * recorded once per parsed body, and the store raises `settings_changed` in the same write when
-     * it changed the league-season's newest settings (plan 03 §5 #22; T-08). Both composition roots
-     * pass `store.repos`, so both wire it; absent, nothing is recorded (a unit test's own ports).
+     * it changed the league-season's newest settings (plan 03 §5 #22; T-08). Its open checks are
+     * READ for the scoring golden's league-wide verdict, which outdates the cached settings (plan 08
+     * §6 step 3(d); cache.ts leagueWideMismatchAfter). Both composition roots pass `store.repos`, so
+     * both wire it; absent, nothing is recorded and no verdict is read (a unit test's own ports).
      */
-    readonly leagueSettings?: Pick<LeagueSettingsRepository, "put">;
+    readonly leagueSettings?: Pick<LeagueSettingsRepository, "put" | "openChecks">;
   };
   readonly clock: Clock;
   /** The scoring module's settings translator (plan 08 §1). */
@@ -659,19 +665,45 @@ export class EspnProvider implements FantasyPlatform {
   /**
    * Whether a cached settings answer, fresh by its 24 h TTL, is outdated (plan 01 §5.2 "League
    * settings" row; plan 08 §9 — Stage C finding cache-settings-invalidation-triggers-missing: only the
-   * TTL existed, so a commissioner's edit stayed unseen for up to a day): a later league answer showed
-   * `status.standingsUpdateDate` or `waiverLastExecutionDate` newer than the cached settings carry
-   * (request.ts records every answer's instants), or the settings were invalidated after it was
-   * fetched (`invalidateSettings`). Then they are refetched — re-normalised and recorded, so a
-   * changed hash raises `settings_changed` and every engine re-scores; ESPN down, the cached answer
-   * is served degraded.
+   * TTL existed, so a commissioner's edit stayed unseen for up to a day). It is outdated when any of
+   * these happened after it was fetched:
+   * - a later league answer showed `status.standingsUpdateDate` or `waiverLastExecutionDate` newer
+   *   than the cached settings carry (request.ts records every answer's instants);
+   * - the scoring golden found a league-wide mismatch (the E6 > 10 % rule, plan 08 §6 step 3(d)): an
+   *   open `scoring_mismatch` check of status `fail` (`leagueWideMismatchAfter`), for the configured
+   *   season only, the one the nightly golden checks (a check names no season);
+   * - the settings were invalidated (`invalidateSettings`).
+   * Then they are refetched, re-normalised and recorded, so a changed hash raises `settings_changed`
+   * and every engine re-scores. While ESPN is down, the cached answer is served degraded.
    */
   private settingsOutdated(season: number, value: SettingsRead, entry: EspnCacheEntry): boolean {
-    return settingsOutdated(
-      this.settingsMarks(season).load(),
-      statusInstantsOf(value.settings),
-      Date.parse(entry.fetched_at),
+    const fetchedAtMs = Date.parse(entry.fetched_at);
+    if (
+      settingsOutdated(
+        this.settingsMarks(season).load(),
+        statusInstantsOf(value.settings),
+        fetchedAtMs,
+      )
+    )
+      return true;
+    return (
+      season === this.deps.config.season && leagueWideMismatchAfter(this.openChecks(), fetchedAtMs)
     );
+  }
+
+  /**
+   * The store's open health checks, read for the scoring golden's verdict (`settingsOutdated`).
+   * Best effort: with no store wired, or a store that cannot be read, there are none — the verdict is
+   * read again on the next settings read, and a read never fails over it.
+   */
+  private openChecks(): readonly CheckRow[] {
+    const repo = this.deps.repos.leagueSettings;
+    if (repo === undefined) return [];
+    try {
+      return repo.openChecks();
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -702,11 +734,13 @@ export class EspnProvider implements FantasyPlatform {
   }
 
   /**
-   * Marks the league-season's cached settings outdated from now, in every process (plan 08 §6 step
-   * 3(d): a golden mismatch above 10 % marks the settings cache dirty; plan 08 §9 `eff refresh
-   * espn:settings`): the next settings read of any process asks ESPN again — and, while ESPN cannot
-   * answer, every read keeps asking (the breaker and the call budget permitting) and serves the
-   * cached answer degraded. No request is made here. Read-only toward ESPN: the marks are the
+   * Marks the league-season's cached settings outdated from now, in every process
+   * (FantasyPlatform.invalidateSettings). It serves plan 08 §6 step 3(d), where a golden mismatch
+   * above 10 % marks the settings cache dirty (a golden computed in process, as `espn_get_box_score`
+   * computes it; the nightly roster snapshot's kept verdict outdates them by itself), and plan 08 §9
+   * `eff refresh espn:settings`. The next settings read of any process asks ESPN again. While ESPN
+   * cannot answer, every read keeps asking (the breaker and the call budget permitting) and serves
+   * the cached answer degraded. No request is made here. Read-only toward ESPN: the marks are the
    * provider's own cache bookkeeping.
    */
   invalidateSettings(ref: LeagueRef): void {

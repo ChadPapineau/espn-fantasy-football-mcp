@@ -77,8 +77,16 @@ function leagueFetch(dir: string, edit?: (settings: Record<string, unknown>) => 
 
 function provider(
   fetch: FetchLike,
-  leagueSettings: Pick<Store["repos"]["leagueSettings"], "put"> = store.repos.leagueSettings,
+  recorder: Pick<Store["repos"]["leagueSettings"], "put"> = store.repos.leagueSettings,
 ) {
+  // a test's own `put` stands in for the store's; the open checks the provider reads (the golden's
+  // league-wide verdict — settings-invalidation.test.ts) are the real store's
+  const leagueSettings: Pick<Store["repos"]["leagueSettings"], "put" | "openChecks"> = {
+    put: (row) => {
+      recorder.put(row);
+    },
+    openChecks: () => store.repos.leagueSettings.openChecks(),
+  };
   return createEspnProvider({
     config,
     repos: { ...store.repos, leagueSettings },

@@ -4,7 +4,9 @@
 // optional). Every read resolves to `Stamped<T>` and takes `ReadOptions` (force_refresh,
 // allow_stale, the per-call upstream budget — plan 01 §5.3, §5.6, §6). Writes are NOT part of the
 // read interface: `FantasyPlatformWrites` is the declared, unbuilt seam and `writes` is literal
-// `false`. Also the ops tool data (plan 07 G1, G2). Ported from sibling @d72e03b, adapted.
+// `false`. `invalidateSettings` is the provider's own cache bookkeeping (plan 08 §9; Stage C finding
+// cache-settings-invalidation-triggers-missing), never a write to the platform. Also the ops tool
+// data (plan 07 G1, G2). Ported from sibling @d72e03b, adapted.
 import type {
   CredentialState,
   CredentialStoreKind,
@@ -406,6 +408,16 @@ export interface FantasyPlatform {
   getScoringSettings(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<ScoringSettings>>;
   getRosterSlots(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<RosterSlots>>;
   getLeagueRules(ref: LeagueRef, opts?: ReadOptions): Promise<Stamped<LeagueRules>>;
+  /**
+   * Marks the league-season's cached settings outdated in every process. The next settings read
+   * (getLeague, getScoringSettings, getRosterSlots, getLeagueRules) then asks the platform again
+   * (plan 08 §9 "Invalidation triggers"; plan 01 §5.2). Two callers need it: a golden computed in
+   * process that finds a league-wide mismatch (the E6 > 10 % rule — plan 08 §6 step 3(d): "the
+   * league's settings cache is marked dirty"), and `eff refresh espn:settings`. This is the
+   * provider's own cache bookkeeping, not a read: it makes no request, sends nothing to the platform
+   * and resolves no `Stamped`. A ref that is not the configured league throws, as every read does.
+   */
+  invalidateSettings(ref: LeagueRef): void;
   /** One team's roster (mRoster requested alone; every team arrives and is cached per team). */
   getRoster(team: TeamRef, week: Week, opts?: ReadOptions): Promise<Stamped<Roster>>;
   /** Every team's roster for a week — the same single request. */
