@@ -1,17 +1,19 @@
 // espn-get.test.ts — the ESPN mode of src/http/client.ts (plan 02 S12: the read host only, the
-// write host never, redirects off-list refused BEFORE they are followed, the EFF_ESPN_READ_HOST
-// override; plan 02 §2.3: the cookie never in an error or a log line; plan 05 §4.1: `302` to
-// www.espn.com → ESPN_HOST_MOVED, not followed, the cookie not sent to it; plan 02 §5: 8 MB cap).
-// Injected fake fetch only — no request ever leaves the process, and every cookie is synthetic.
+// write host never, the EFF_ESPN_READ_HOST override; plan 01 §4.3, §7 and plan 03 §5 #15: a 3xx
+// the read host answers is ESPN_HOST_MOVED — never followed, wherever it points, the verdict the
+// provider's classifier gives the same answer; plan 02 §2.3: the cookie never in an error or a log
+// line; plan 05 §4.1: `302` to www.espn.com → ESPN_HOST_MOVED, not followed, the cookie not sent to
+// it; plan 02 §5: 8 MB cap). Injected fake fetch only — no request ever leaves the process, and
+// every cookie is synthetic.
 import { inspect } from "node:util";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ESPN_READ_HOST_DEFAULT, ESPN_WRITE_HOST } from "../../src/config/schema.js";
 import { createHttpClient, ESPN_MAX_BODY_BYTES, MAX_COOKIE_CHARS } from "../../src/http/client.js";
-import { HttpError } from "../../src/http/errors.js";
+import { HttpError, SAME_HOST_REDIRECT } from "../../src/http/errors.js";
 import { classifyError, describeForLog, toToolError } from "../../src/mcp/errors.js";
+import { classifyAnswer } from "../../src/providers/espn/errors.js";
 import { ATTEMPT_TIMEOUT_MS } from "../../src/providers/platform.js";
-import { MAX_REDIRECT_HOPS } from "../../src/sources/source.js";
 import {
   captureLog,
   everyRendering,
@@ -87,7 +89,7 @@ describe("espnGet: what is sent", () => {
     expect(Object.keys(f.calls[0]?.headers ?? {})).not.toContain("cookie");
   });
 
-  it("304 and 4xx answers are returned (the provider classifies them); 429 and 5xx throw", async () => {
+  it("a conditional call's 304 and 4xx answers are returned (the caller classifies them); 429 and 5xx throw", async () => {
     const bodies: Record<number, unknown> = {
       304: null,
       400: { details: [{ type: "FILTER_LIMIT_MISSING_SORT" }] },
@@ -99,15 +101,19 @@ describe("espnGet: what is sent", () => {
       const f = fakeFetch(
         () => new Response(body === null ? null : JSON.stringify(body), { status: Number(status) }),
       );
-      const r = await createHttpClient({ fetch: f.fetch }).espnGet(leagueUrl(), { signal: sig() });
+      // a 304 answers a conditional request only (RFC 9110 §15.4.5): the call sends its ETag
+      const r = await createHttpClient({ fetch: f.fetch }).espnGet(leagueUrl(), {
+        signal: sig(),
+        ifNoneMatch: 'W/"0"',
+      });
       expect(r.status).toBe(Number(status));
       if (body !== null) expect(JSON.parse(new TextDecoder().decode(r.body))).toEqual(body);
     }
+    // (every 3xx but that 304 is ESPN_HOST_MOVED: the describe block on 3xx below)
     for (const [status, kind, code] of [
       [429, "rate_limited", "RATE_LIMITED"],
       [500, "http_5xx", "ESPN_UPSTREAM_UNAVAILABLE"],
       [503, "http_5xx", "ESPN_UPSTREAM_UNAVAILABLE"],
-      [300, "http_status", "ESPN_UPSTREAM_UNAVAILABLE"],
     ] as const) {
       const f = fakeFetch(() => new Response("x", { status }));
       const e = await failure(
@@ -198,7 +204,7 @@ describe("espnGet: the host allow-list (plan 02 S12)", () => {
   });
 });
 
-describe("espnGet: redirects are re-checked BEFORE they are followed", () => {
+describe("espnGet: a 3xx the read host answers is never followed — ESPN_HOST_MOVED (plan 01 §4.3, §7)", () => {
   it("302 to www.espn.com (the old host's move, research 03 P02) → ESPN_HOST_MOVED, not followed", async () => {
     const cookie = testCookie();
     const f = fakeFetch(() => redirect("https://www.espn.com/fantasy/", 302));
@@ -229,45 +235,227 @@ describe("espnGet: redirects are re-checked BEFORE they are followed", () => {
   });
 
   it.each([
-    ["a data host", "https://github.com/x"],
-    ["another fantasy host", "https://fantasy-reads2.fantasy.espn.com/x"],
-    ["a scheme downgrade", `http://${ESPN_READ_HOST_DEFAULT}/x`],
-    ["a credentialed URL", `https://u:p@${ESPN_READ_HOST_DEFAULT}/x`],
-    ["a protocol-relative URL", "//evil.example/x"],
-    ["no Location", null],
-  ])("a redirect to %s is refused (ESPN mode allows the read host only)", async (_what, loc) => {
-    const f = fakeFetch(() => redirect(loc, 301));
+    ["a data host", "https://github.com/x", "github.com", "HOST_NOT_ALLOWED"],
+    [
+      "another fantasy host",
+      "https://fantasy-reads2.fantasy.espn.com/x",
+      "fantasy-reads2.fantasy.espn.com",
+      "HOST_NOT_ALLOWED",
+    ],
+    [
+      "a scheme downgrade",
+      `http://${ESPN_READ_HOST_DEFAULT}/x`,
+      ESPN_READ_HOST_DEFAULT,
+      "SCHEME_REFUSED",
+    ],
+    [
+      "a credentialed URL",
+      `https://u:p@${ESPN_READ_HOST_DEFAULT}/x`,
+      ESPN_READ_HOST_DEFAULT,
+      "CREDENTIALS_REFUSED",
+    ],
+    ["a protocol-relative URL", "//evil.example/x", "evil.example", "HOST_NOT_ALLOWED"],
+    ["an unparseable URL", "http://[::1", ESPN_READ_HOST_DEFAULT, null],
+    ["no Location", null, ESPN_READ_HOST_DEFAULT, null],
+  ])(
+    "a redirect to %s is refused, the target's verdict named (ESPN mode allows the read host only)",
+    async (_what, loc, host, causeCode) => {
+      const f = fakeFetch(() => redirect(loc, 301));
+      const e = await failure(
+        createHttpClient({ fetch: f.fetch }).espnGet(leagueUrl(), {
+          signal: sig(),
+          cookie: testCookie(),
+        }),
+      );
+      expect(e).toMatchObject({ kind: "redirect_refused", status: 301, host, causeCode });
+      expect(classifyError(e).code).toBe("ESPN_HOST_MOVED");
+      expect(f.calls).toHaveLength(1);
+    },
+  );
+
+  // Stage C finding probe-same-host-redirect-green: a redirect to another path on the read host was
+  // followed — the cookie and the filter re-sent — and its 200 read as the answer, so `eff probe`,
+  // doctor #15 and `eff smoke` judged green the answer every tool reports as ESPN_HOST_MOVED (the
+  // provider's classifier follows no 3xx), and the probe's green run ended the server's host move.
+  // These tests replace two that held the old behaviour: "a same-host redirect is followed with
+  // the cookie" and "more than MAX_REDIRECT_HOPS same-host hops → too_many_redirects".
+  it.each([301, 302, 303, 307, 308])(
+    "a %i to another path on the read host is refused, never followed: one request, the cookie and filter sent once",
+    async (status) => {
+      const cookie = testCookie();
+      const filter = '{"players":{"limit":1}}';
+      const moved = `${READ.replace("/v3/", "/v4/")}/seasons/2026/segments/0/leagues/${LEAGUE}?view=mSettings`;
+      const cap = captureLog();
+      const f = fakeFetch((_u, _i, n) => (n === 1 ? redirect(moved, status) : json({ ok: 1 })));
+      const e = await failure(
+        createHttpClient({ fetch: f.fetch, log: cap.log }).espnGet(leagueUrl(), {
+          signal: sig(),
+          cookie,
+          fantasyFilter: filter,
+        }),
+      );
+      expect(e).toMatchObject({
+        kind: "redirect_refused",
+        status,
+        host: ESPN_READ_HOST_DEFAULT,
+        causeCode: SAME_HOST_REDIRECT,
+        espn: true,
+      });
+      expect(classifyError(e).code).toBe("ESPN_HOST_MOVED");
+      expect(f.calls.map((c) => c.url)).toEqual([leagueUrl()]);
+      expect(f.calls[0]?.headers.cookie).toBe(cookie);
+      expect(f.calls[0]?.headers["x-fantasy-filter"]).toBe(filter);
+      // one warn line: the request's own URL with the league masked — never the Location
+      expect(cap.lines.map((l) => `${l.level} ${l.event}`)).toEqual(["warn http.error"]);
+      expect(cap.lines[0]?.fields).toMatchObject({
+        url: `${READ}/seasons/2026/segments/0/leagues/[league]`,
+        kind: "redirect_refused",
+        status,
+        cause_code: SAME_HOST_REDIRECT,
+        hops: 0,
+        cookie: true,
+      });
+      const text = `${JSON.stringify(cap.lines)}\n${everyRendering(e)}`;
+      for (const s of ["/v4/", LEAGUE, cookie]) expect(text).not.toContain(s);
+    },
+  );
+
+  it.each([
+    ["the same path with another query", `${leagueUrl()}&moved=1`],
+    ["a relative path", "/apis/v4/games/ffl/seasons/2026"],
+    ["a relative reference", "../../x"],
+    ["the request's own URL (a loop)", leagueUrl()],
+    ["the read host upper-cased, on :443", `https://LM-API-READS.FANTASY.ESPN.COM:443/apis/v4/x`],
+  ])("a Location to %s is refused the same way (SAME_HOST): one request", async (_what, loc) => {
+    const f = fakeFetch(() => redirect(loc, 302));
     const e = await failure(
-      createHttpClient({ fetch: f.fetch }).espnGet(leagueUrl(), {
-        signal: sig(),
-        cookie: testCookie(),
-      }),
+      createHttpClient({ fetch: f.fetch }).espnGet(leagueUrl(), { signal: sig() }),
     );
-    expect(e.kind).toBe("redirect_refused");
+    expect(e).toMatchObject({
+      kind: "redirect_refused",
+      host: ESPN_READ_HOST_DEFAULT,
+      causeCode: SAME_HOST_REDIRECT,
+    });
+    expect(classifyError(e).code).toBe("ESPN_HOST_MOVED");
     expect(f.calls).toHaveLength(1);
   });
 
-  it("a same-host redirect is followed with the cookie (same origin) and reports final_url", async () => {
-    const cookie = testCookie();
-    const f = fakeFetch((_u, _i, n) =>
-      n === 1 ? redirect(`${leagueUrl()}&x=1`, 301) : json({ ok: 1 }),
-    );
-    const r = await createHttpClient({ fetch: f.fetch }).espnGet(leagueUrl(), {
-      signal: sig(),
-      cookie,
-    });
-    expect(r.final_url).toBe(`${leagueUrl()}&x=1`);
-    expect(f.calls.map((c) => c.headers.cookie)).toEqual([cookie, cookie]);
-  });
-
-  it("more than MAX_REDIRECT_HOPS same-host hops → too_many_redirects → ESPN_HOST_MOVED", async () => {
+  it("a chain of same-host hops stops at the first: one request, never too_many_redirects", async () => {
     const f = fakeFetch((_u, _i, n) => redirect(`${READ}/hop${String(n)}`, 302));
     const e = await failure(
       createHttpClient({ fetch: f.fetch }).espnGet(leagueUrl(), { signal: sig() }),
     );
-    expect(e.kind).toBe("too_many_redirects");
+    expect(e).toMatchObject({ kind: "redirect_refused", causeCode: SAME_HOST_REDIRECT });
     expect(classifyError(e).code).toBe("ESPN_HOST_MOVED");
-    expect(f.calls).toHaveLength(MAX_REDIRECT_HOPS + 1);
+    expect(f.calls).toHaveLength(1);
+  });
+
+  it("the EFF_ESPN_READ_HOST override: a 3xx to another path on the override host is refused too", async () => {
+    const host = "fantasy-reads2.fantasy.espn.com";
+    const f = fakeFetch((_u, _i, n) =>
+      n === 1 ? redirect(`https://${host}/apis/v4/x`, 308) : json({}),
+    );
+    const e = await failure(
+      createHttpClient({ fetch: f.fetch, espnReadHost: host }).espnGet(
+        `https://${host}/apis/v3/games/ffl/seasons/2026`,
+        { signal: sig(), cookie: testCookie() },
+      ),
+    );
+    expect(e).toMatchObject({ kind: "redirect_refused", host, causeCode: SAME_HOST_REDIRECT });
+    expect(classifyError(e).code).toBe("ESPN_HOST_MOVED");
+    expect(f.calls).toHaveLength(1);
+  });
+
+  it("the data contract (`get`) on the read host follows no redirect either; a data host's still is", async () => {
+    const f = fakeFetch((_u, _i, n) =>
+      n === 1 ? redirect(`${READ}/seasons/2027?view=proTeamSchedules_wl`, 301) : json([]),
+    );
+    const e = await failure(
+      createHttpClient({ fetch: f.fetch }).get(`${READ}/seasons/2026?view=proTeamSchedules_wl`, {
+        signal: sig(),
+        maxBytes: 1024,
+      }),
+    );
+    expect(e).toMatchObject({
+      kind: "redirect_refused",
+      status: 301,
+      causeCode: SAME_HOST_REDIRECT,
+      espn: true,
+    });
+    expect(classifyError(e).code).toBe("ESPN_HOST_MOVED");
+    expect(f.calls).toHaveLength(1);
+    // data mode is unchanged: the NWS coordinate normalisation (tests/sources/weather/nws.test.ts)
+    const g = fakeFetch((_u, _i, n) =>
+      n === 1 ? redirect("https://api.weather.gov/points/1,2", 301) : json({}),
+    );
+    const r = await createHttpClient({ fetch: g.fetch }).get(
+      "https://api.weather.gov/points/1.0,2.0",
+      { signal: sig(), maxBytes: 1024 },
+    );
+    expect(r.final_url).toBe("https://api.weather.gov/points/1,2");
+    expect(g.calls).toHaveLength(2);
+  });
+
+  it("every 3xx, wherever it points, keyless or with a cookie: one request, ESPN_HOST_MOVED — the provider classifier's verdict on the same answer", async () => {
+    const locations = [
+      null,
+      "",
+      `${leagueUrl()}&moved=1`,
+      "/apis/v4/games/ffl/seasons/2026",
+      "https://www.espn.com/fantasy/",
+      `https://${ESPN_WRITE_HOST}/apis/v3/games/ffl/x`,
+      `http://${ESPN_READ_HOST_DEFAULT}/x`,
+      "http://[::1",
+    ];
+    let checked = 0;
+    for (let status = 300; status <= 399; status++) {
+      for (const cookie of [null, testCookie()]) {
+        // the server's verdict: the provider's transport follows no 3xx, and its classifier
+        // (src/providers/espn/errors.ts) names every one ESPN_HOST_MOVED — a 304 included, unless
+        // it answers the ETag the provider sent (the next test)
+        const server = classifyAnswer({
+          status,
+          contentType: null,
+          bodyText: "",
+          retryAfter: null,
+          cookieBearing: cookie !== null,
+          route: "league",
+          view: "mSettings",
+        });
+        expect(server?.effCode).toBe("ESPN_HOST_MOVED");
+        for (const loc of locations) {
+          const f = fakeFetch(() => redirect(loc, status));
+          const e = await failure(
+            createHttpClient({ fetch: f.fetch }).espnGet(leagueUrl(), { signal: sig(), cookie }),
+          );
+          expect(e).toMatchObject({ kind: "redirect_refused", status, espn: true });
+          expect(classifyError(e).code).toBe(server?.effCode);
+          expect(f.calls).toHaveLength(1);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBe(100 * 2 * locations.length);
+  });
+
+  it("a 304 is an answer only to the conditional call that sent If-None-Match; unconditional, it is a 3xx like any other", async () => {
+    const f = fakeFetch((_u, _i, n) =>
+      n === 3
+        ? redirect(`${READ}/v4`, 302)
+        : new Response(null, { status: 304, headers: { etag: 'W/"1"' } }),
+    );
+    const c = createHttpClient({ fetch: f.fetch });
+    const r = await c.espnGet(leagueUrl(), { signal: sig(), ifNoneMatch: 'W/"1"' });
+    expect(r).toMatchObject({ status: 304, final_url: leagueUrl() });
+    expect(r.body.byteLength).toBe(0);
+    expect(r.headers.etag).toBe('W/"1"');
+    const e = await failure(c.espnGet(leagueUrl(), { signal: sig() }));
+    expect(e).toMatchObject({ kind: "redirect_refused", status: 304 });
+    expect(classifyError(e).code).toBe("ESPN_HOST_MOVED");
+    // a conditional call is still refused any other 3xx
+    const e3 = await failure(c.espnGet(leagueUrl(), { signal: sig(), ifNoneMatch: 'W/"1"' }));
+    expect(e3).toMatchObject({ kind: "redirect_refused", status: 302 });
+    expect(f.calls.map((x) => x.headers["if-none-match"])).toEqual(['W/"1"', undefined, 'W/"1"']);
   });
 });
 

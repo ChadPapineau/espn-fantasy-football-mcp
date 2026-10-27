@@ -23,9 +23,14 @@ export const HTTP_ERROR_KINDS = [
    * request is sent (config/schema.ts `tlsVerificationDisabled`; plan 02 T2).
    */
   "tls_verification_disabled",
-  /** A redirect without a usable Location, or to a URL the allow-list refuses (never fetched). */
+  /**
+   * A redirect without a usable Location, or to a URL the allow-list refuses (never fetched); in
+   * ESPN mode, ANY 3xx the read host answers, wherever it points — never followed (plan 01 §4.3
+   * "the read host answered 3xx" → ESPN_HOST_MOVED), but the 304 answering the call's own
+   * If-None-Match.
+   */
   "redirect_refused",
-  /** More than MAX_REDIRECT_HOPS redirects. */
+  /** More than MAX_REDIRECT_HOPS redirects (data mode: ESPN mode follows none). */
   "too_many_redirects",
   "dns",
   /** Connection refused / host or network unreachable. */
@@ -38,7 +43,10 @@ export const HTTP_ERROR_KINDS = [
   /** A 4xx other than 429 (408 is transient). */
   "http_4xx",
   "http_5xx",
-  /** Any other unexpected status (1xx, a 3xx that is not a followable redirect, a stray 304). */
+  /**
+   * Any other unexpected status (1xx; in data mode a 3xx that is not a followable redirect, a stray
+   * 304 — ESPN mode refuses every 3xx as `redirect_refused`).
+   */
   "http_status",
   /** Upstream 429. */
   "rate_limited",
@@ -145,7 +153,12 @@ export interface HttpErrorInit {
   readonly status?: number | null;
   /** Seconds from `Retry-After` on a 429 / 5xx, when numeric. */
   readonly retryAfterS?: number | null;
-  /** The underlying system/undici code (`ENOTFOUND`, `ERR_TLS_…`), when one was seen. */
+  /**
+   * The underlying system/undici code (`ENOTFOUND`, `ERR_TLS_…`) when one was seen, our own timer
+   * (`CONNECT_TIMEOUT`, `TOTAL_TIMEOUT`), or — on a refused redirect whose Location parses — why
+   * its target is refused: the allow-list's verdict (`HOST_NOT_ALLOWED`, `SCHEME_REFUSED`, …) or
+   * SAME_HOST_REDIRECT (ESPN mode follows no redirect, not even one back to the read host).
+   */
   readonly causeCode?: string | null;
   /** True when the call targeted the ESPN read host (its errors map to the ESPN_* codes). */
   readonly espn?: boolean;
@@ -153,6 +166,13 @@ export interface HttpErrorInit {
 
 const SAFE_CODE = /^[A-Z0-9_]{1,48}$/;
 const SAFE_HOST = /^[a-z0-9.-]{1,253}$/;
+
+/**
+ * The `causeCode` of an ESPN-mode 3xx whose Location points back at the read host itself — a path
+ * move, which no EFF_ESPN_READ_HOST override can mend (only a release can). Refused like any other
+ * 3xx (Stage C finding probe-same-host-redirect-green: it used to be followed).
+ */
+export const SAME_HOST_REDIRECT = "SAME_HOST";
 
 function effCodeFor(kind: HttpErrorKind, espn: boolean): HttpEffCode {
   if (POLICY_KINDS.has(kind)) return "INTERNAL";
@@ -164,8 +184,9 @@ function effCodeFor(kind: HttpErrorKind, espn: boolean): HttpEffCode {
 
 /**
  * An HTTP failure. `effCode`/`effDetails` let src/mcp/errors.ts map it (policy refusals → INTERNAL,
- * 429 and a spent quota → RATE_LIMITED, an off-host redirect from the ESPN read host →
- * ESPN_HOST_MOVED, everything else → (ESPN_)UPSTREAM_UNAVAILABLE — never INTERNAL for an outage).
+ * 429 and a spent quota → RATE_LIMITED, a 3xx from the ESPN read host — never followed, wherever it
+ * points — → ESPN_HOST_MOVED, everything else → (ESPN_)UPSTREAM_UNAVAILABLE — never INTERNAL for an
+ * outage).
  * `retryable` is what the per-call deadline runner and the refresh runner retry on.
  */
 export class HttpError extends Error {

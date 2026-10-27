@@ -5,12 +5,19 @@
 // and HttpDownload (streamed to a 0600 file) contracts, plus `espnGet`, the provider's transport.
 //
 // Rules: HTTPS on the default port only; the start URL's host picks the mode — the ESPN read host →
-// ESPN mode (every hop must stay on that one host), else data mode (the data-source hosts); every
-// redirect hop is re-checked BEFORE it is requested (`redirect: "manual"`, ≤ MAX_REDIRECT_HOPS), so
-// the old ESPN host's 302 to www.espn.com is refused, never followed (plan 05 §4.1 → ESPN_HOST_MOVED).
-// A Cookie header exists only on `espnGet`, only for a URL on the read host, and only on hops to it;
-// it is never logged and never part of an error (errors are fixed strings with no raw cause), and no
-// ESPN request leaves while certificate verification is off process-wide (plan 02 T2). Body
+// ESPN mode, else data mode (the data-source hosts). ESPN mode follows NO redirect: every 3xx the
+// read host answers — wherever its Location points, back at the read host too — is refused as
+// `redirect_refused` → ESPN_HOST_MOVED, but the 304 answering the call's own If-None-Match (plan 01
+// §4.3, §7 "Host answered 3xx / non-JSON → transport classifier → ESPN_HOST_MOVED"; plan 03 §5 #15;
+// plan 05 §4.1: the old host's 302 to www.espn.com is not followed). That is the provider's
+// classifier's verdict on the same answer, so `eff probe`, doctor #15 and `eff smoke` judge what the
+// server judges (Stage C finding probe-same-host-redirect-green: a redirect to another path on the
+// read host was followed and its body judged green). Data mode re-checks every redirect hop BEFORE
+// it is requested (`redirect: "manual"`, ≤ MAX_REDIRECT_HOPS). `redirect: "manual"` everywhere.
+// A Cookie header exists only on `espnGet`, only for a URL on the read host, so only on its one
+// request; it is never logged and never part of an error (errors are fixed strings with no raw
+// cause), and no ESPN request leaves while certificate verification is off process-wide (plan 02
+// T2). Body
 // caps are enforced while streaming, on the wire AND after gzip decoding (a gzip bomb stops at the
 // cap). `Set-Cookie` is dropped from every response. PHASE W SEAM — NOT IMPLEMENTED: there is no
 // write method and the write host is on no allow-list (allowlist.ts).
@@ -35,7 +42,7 @@ import {
   narrowAllowList,
   redactUrl,
 } from "./allowlist.js";
-import { classifyFetchError, HttpError, type AbortReason } from "./errors.js";
+import { classifyFetchError, HttpError, SAME_HOST_REDIRECT, type AbortReason } from "./errors.js";
 
 /** Until response headers arrive, per hop (plan 01 §6: 15 s). */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
@@ -88,26 +95,35 @@ export interface EspnGetOptions {
   readonly cookie?: string | null;
   /** The X-Fantasy-Filter JSON the filter builder produced (canonical; printable ASCII). */
   readonly fantasyFilter?: string;
-  /** The stored weak ETag (plan 01 §5.3 conditional requests). */
+  /**
+   * The stored weak ETag (plan 01 §5.3 conditional requests). Only a call that sends one takes a
+   * 304 as its answer; without it a 304 is a 3xx like any other (RFC 9110 §15.4.5: a 304 answers
+   * a conditional request only), as the provider classifies it.
+   */
   readonly ifNoneMatch?: string;
   /** This attempt's total timeout, ≤ ATTEMPT_TIMEOUT_MS (default it). */
   readonly timeoutMs?: number;
 }
 
-/** What an `espnGet` attempt returns: 2xx, 304 and 4xx answers, for the provider to classify. */
+/**
+ * What an `espnGet` attempt returns: 2xx answers, the 304 answering its own If-None-Match, and 4xx
+ * answers, for the caller to classify.
+ */
 export interface EspnResponse {
   readonly status: number;
   readonly body: Uint8Array;
   readonly headers: Readonly<Record<string, string>>;
+  /** The URL asked for (ESPN mode follows no redirect). */
   readonly final_url: string;
   /** Whether a Cookie header was sent (a boolean only — never the value). */
   readonly cookie_sent: boolean;
 }
 
 /**
- * One ESPN read attempt. Throws HttpError for 5xx (`http_5xx`), 429 (`rate_limited`), any other
- * unexpected status, an off-host redirect (`redirect_refused` → ESPN_HOST_MOVED), network failures,
- * timeouts and oversize bodies; returns 2xx, 304 and 4xx with their (capped) bodies.
+ * One ESPN read attempt. Throws HttpError for 5xx (`http_5xx`), 429 (`rate_limited`), any 3xx —
+ * never followed, wherever it points (`redirect_refused` → ESPN_HOST_MOVED) — but the 304 answering
+ * `ifNoneMatch`, network failures, timeouts and oversize bodies; returns 2xx, that 304 and 4xx with
+ * their (capped) bodies.
  */
 export type EspnGet = (url: string, opts: EspnGetOptions) => Promise<EspnResponse>;
 
@@ -160,10 +176,13 @@ interface CallPolicy {
   readonly espn: boolean;
   /** Hosts any hop may target. */
   readonly allow: readonly string[];
-  /** Headers sent only on hops whose host is the read host (cookie, filter, etag). */
+  /** Headers sent only to the read host (cookie, filter, etag). */
   readonly espnHeaders: Readonly<Record<string, string>>;
   readonly cookie: boolean;
-  /** Non-2xx statuses returned as values instead of thrown (espnGet: 304 and 4xx but 429). */
+  /**
+   * Non-2xx statuses returned as values instead of thrown (espnGet: the 304 answering its own
+   * If-None-Match, and 4xx but 429). In ESPN mode every other 3xx is refused (`espnRedirectRefused`).
+   */
   readonly returnStatus: (status: number) => boolean;
   readonly connectTimeoutMs: number;
   readonly totalTimeoutMs: number;
@@ -284,6 +303,53 @@ function statusError(res: Response, host: string, espn: boolean): HttpError {
   return new HttpError({ kind: "http_status", host, status, espn });
 }
 
+/** Whether a status is a 3xx: in ESPN mode the read host answered "moved" (plan 01 §4.3). */
+function isRedirectClass(status: number): boolean {
+  return status >= 300 && status <= 399;
+}
+
+/**
+ * ESPN mode's verdict on a 3xx (plan 01 §4.3 ESPN_HOST_MOVED "the read host answered 3xx", §7 the
+ * transport classifier; plan 03 §5 #15): refused, never followed, whatever the status and wherever
+ * the Location points — the verdict the provider's classifier gives the same answer, since its
+ * transport follows no redirect either. Before, a redirect to another path on the read host passed
+ * the allow-list and was followed (cookie and filter re-sent), so `eff probe`, doctor #15 and `eff
+ * smoke` judged the redirected body green while every tool answered ESPN_HOST_MOVED, and the
+ * probe's green run ended the server's host move (Stage C finding probe-same-host-redirect-green).
+ * For the log line only, the error names the Location's host when it parses, and why the target is
+ * refused: the allow-list's verdict, or SAME_HOST_REDIRECT for a target on the read host itself (a
+ * path move, which no EFF_ESPN_READ_HOST override can mend). Never the Location itself.
+ */
+function espnRedirectRefused(
+  res: Response,
+  from: URL,
+  host: string,
+  allow: readonly string[],
+): HttpError {
+  const status = res.status;
+  const loc = res.headers.get("location");
+  let target: URL | null = null;
+  try {
+    if (loc !== null && loc !== "") target = new URL(loc, from);
+  } catch {
+    target = null;
+  }
+  if (target === null) return new HttpError({ kind: "redirect_refused", host, status, espn: true });
+  let causeCode: string | null = SAME_HOST_REDIRECT;
+  try {
+    checkUrl(target.href, allow, true);
+  } catch (e) {
+    causeCode = e instanceof HttpError ? e.kind.toUpperCase() : null;
+  }
+  return new HttpError({
+    kind: "redirect_refused",
+    host: target.hostname.toLowerCase(),
+    status,
+    causeCode,
+    espn: true,
+  });
+}
+
 function collectHeaders(h: Headers): Readonly<Record<string, string>> {
   const entries: [string, string][] = [];
   h.forEach((value, key) => {
@@ -370,7 +436,10 @@ async function readBody(
   return out.length;
 }
 
-/** The shared request loop: one call, every hop re-checked, timers cleared on every path. */
+/**
+ * The shared request loop: one call, timers cleared on every path. ESPN mode sends one request and
+ * refuses any 3xx (`espnRedirectRefused`); data mode re-checks every redirect hop before it is sent.
+ */
 async function request(cfg: Config, start: URL, p: CallPolicy, sink: Sink): Promise<Meta> {
   let url = start;
   let hops = 0;
@@ -419,7 +488,12 @@ async function request(cfg: Config, start: URL, p: CallPolicy, sink: Sink): Prom
       } finally {
         clearTimeout(connectTimer);
       }
-      if (REDIRECT_STATUSES.has(res.status)) {
+      // ESPN mode follows no redirect: a 3xx is the read host's "moved" (but a conditional call's 304)
+      if (p.espn && isRedirectClass(res.status) && !p.returnStatus(res.status)) {
+        discard(res);
+        throw espnRedirectRefused(res, url, host, p.allow);
+      }
+      if (!p.espn && REDIRECT_STATUSES.has(res.status)) {
         discard(res);
         if (hops >= MAX_REDIRECT_HOPS)
           throw new HttpError({
@@ -642,6 +716,8 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
       );
     if (opts.ifNoneMatch !== undefined)
       espnHeaders["if-none-match"] = headerValue(opts.ifNoneMatch, MAX_ETAG_CHARS, "ifNoneMatch");
+    // a 304 answers a conditional request only: without our ETag it is a 3xx like any other
+    const conditional = opts.ifNoneMatch !== undefined;
     const chunks: Uint8Array[] = [];
     let total = 0;
     const meta = await request(
@@ -655,7 +731,7 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
         allow: cfg.espnAllow,
         espnHeaders: Object.freeze(espnHeaders),
         cookie: cookie !== null,
-        returnStatus: (s) => s === 304 || (s >= 400 && s <= 499 && s !== 429),
+        returnStatus: (s) => (s === 304 && conditional) || (s >= 400 && s <= 499 && s !== 429),
         connectTimeoutMs: Math.min(cfg.connectTimeoutMs, timeoutMs),
         totalTimeoutMs: timeoutMs,
       },
