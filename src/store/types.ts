@@ -368,6 +368,11 @@ export interface EspnCacheEntry {
 
 /** espn_cache (best-effort). */
 export interface EspnCacheRepository {
+  /**
+   * The entry as stored. One fetched after the caller's now (a clock since set back) has an unknown
+   * age; the store returns it as stored (the caller judges freshness by its own clock) and `store
+   * prune` deletes it.
+   */
   get(key: string): EspnCacheEntry | null;
   put(entry: EspnCacheEntry): BestEffortOutcome;
   /** Deletes entries fetched before `before`; returns rows removed. */
@@ -431,14 +436,30 @@ export interface RequestCounts {
  * espn_requests: the cross-process token bucket (plan 01 §6) plus each request's outcome, from
  * which any process derives the breaker (platform.ts `breakerFromOutcomes`) and the 304 count.
  * Fail closed: a request whose row cannot be written is not sent (WRITE_CLASS `required`).
+ *
+ * A row stamped under a clock that has since been set back carries an instant after now
+ * (src/store/repos/skew.ts; Stage C finding store-future-stamped-rows-block). The repository
+ * re-stamps such rows in its writes; its reads return every row as stamped.
  */
 export interface LimiterRepository {
+  /**
+   * Checks every window, the daily cap and the in-flight cap and records the request, in one
+   * BEGIN IMMEDIATE. First, inside the same transaction, every row stamped more than a second after
+   * the store's clock AND more than REQUEST_SKEW_TOLERANCE_MS (the writer-lock wait plus a second)
+   * after `req.at` is re-stamped to `req.at`, once: it counts as a request made just now — the
+   * latest it can have been made — and then ages normally (a row at or before the store's clock is
+   * never moved).
+   */
   tryRecord(req: LimiterRequest): LimiterVerdict;
   /** Sets the outcome of a recorded row once the request finished (retries keep the same row). */
   recordOutcome(id: number, outcome: RequestOutcome): void;
   countSince(since: IsoInstant): number;
   countToday(dayStart: IsoInstant): RequestCounts;
-  /** The newest outcomes, newest first (`breakerFromOutcomes` input), at most `limit`. */
+  /**
+   * The newest outcomes, newest first (`breakerFromOutcomes` input), at most `limit`. A row stamped
+   * after the caller's now is returned as stamped — its instant is unknown (a clock since set back)
+   * and the caller judges it by its own clock; the next tryRecord, or `store prune`, re-stamps it.
+   */
   recentOutcomes(
     limit: number,
   ): readonly { readonly at: IsoInstant; readonly outcome: RequestOutcome }[];
