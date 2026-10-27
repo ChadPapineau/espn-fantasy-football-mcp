@@ -12,14 +12,23 @@ import {
   STANDARD_FRONTMATTER,
   buildSkills,
   copyInstallSkill,
+  copyInstallText,
   main,
   readSharedRefs,
   stampBody,
   stampMetadata,
   writeAtomic,
 } from "../../scripts/skills/build-skills.mjs";
-import { beginMarker, endMarker, parseFrontmatter } from "../../scripts/skills/_lib.mjs";
+import {
+  beginMarker,
+  endMarker,
+  parseFrontmatter,
+  readManifest,
+} from "../../scripts/skills/_lib.mjs";
 import { ROOT, SKILLS, runScript, tempRepo, type TempRepo } from "./helpers.js";
+
+/** The plugin's name and the bundle's Skills: what a copy install renames. */
+const REFS = { plugin: readManifest(ROOT).plugin, skills: SKILLS };
 
 let repo: TempRepo | undefined;
 afterEach(() => {
@@ -304,7 +313,7 @@ describe("stampMetadata", () => {
 });
 
 describe("the copy-install tree (plan 09 §4; research 06 §C.3 item 3)", () => {
-  it("renames each Skill espn-<name>, keeps only standard frontmatter and the body, and drops evals/", () => {
+  it("renames each Skill espn-<name>, keeps only standard frontmatter and the body (its Skill references renamed with it), and drops evals/", () => {
     const t = fresh();
     const out = t.p("dist/skills-copy");
     const r = buildSkills({ root: t.root, copyOut: out });
@@ -319,9 +328,16 @@ describe("the copy-install tree (plan 09 §4; research 06 §C.3 item 3)", () => 
       expect(data.description).toBe(
         parseFrontmatter(t.read(`skills/${s}/SKILL.md`)).data.description,
       );
-      expect(text.split("\n---\n")[1]).toBe(t.read(`skills/${s}/SKILL.md`).split("\n---\n")[1]);
+      // the body is the source's, every cross-Skill reference renamed as the copy names its Skills
+      // (Stage C finding skills-cross-references-bare-names) and nothing else changed
+      const sourceBody = t.read(`skills/${s}/SKILL.md`).split("\n---\n")[1] ?? "";
+      expect(text.split("\n---\n")[1]).toBe(copyInstallText(sourceBody, REFS));
       expect(existsSync(path.join(out, `espn-${s}`, "evals"))).toBe(false);
       expect(existsSync(path.join(out, `espn-${s}`, "references", "guardrails.md"))).toBe(true);
+      for (const f of readdirSync(path.join(out, `espn-${s}`, "references")))
+        expect(readFileSync(path.join(out, `espn-${s}`, "references", f), "utf8"), f).toBe(
+          copyInstallText(t.read(`skills/${s}/references/${f}`), REFS),
+        );
     }
   });
 
@@ -344,7 +360,7 @@ describe("the copy-install tree (plan 09 §4; research 06 §C.3 item 3)", () => 
 
   it("copyInstallSkill drops comments and Claude Code extension keys from apply", () => {
     const apply = readFileSync(path.join(ROOT, "skills/apply/SKILL.md"), "utf8");
-    const out = copyInstallSkill(apply, "apply");
+    const out = copyInstallSkill(apply, "apply", REFS);
     const data = parseFrontmatter(out).data;
     expect(Object.keys(data).sort()).toEqual(["description", "metadata", "name"]);
     expect(out).not.toMatch(/^# PHASE W SEAM/m);

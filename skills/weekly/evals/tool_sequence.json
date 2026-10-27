@@ -181,7 +181,7 @@
               "$ref": "lineup.data.seeding_mode_used"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-lineup"
+            "client_ref": { "$ref": "lineup.meta.request_id" }
           }
         },
         {
@@ -201,7 +201,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-waivers"
+            "client_ref": { "$ref": "waivers.meta.request_id" }
           }
         },
         {
@@ -221,7 +221,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-k"
+            "client_ref": { "$ref": "kicker.meta.request_id" }
           }
         },
         {
@@ -241,7 +241,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-dst"
+            "client_ref": { "$ref": "dst.meta.request_id" }
           }
         }
       ]
@@ -306,7 +306,87 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-scramble"
+            "client_ref": { "$ref": "waivers.meta.request_id" }
+          }
+        }
+      ]
+    },
+    {
+      "id": "ir_invalid",
+      "when": "the user's row of the all-teams roster read shows ir_invalid: the user's own roster read for its ir block, and the briefing opens with the invalid roster — every claim, add and stream blocked until the IR slot is fixed",
+      "fixture_variant": "ir-invalid",
+      "steps": [
+        {
+          "id": "status",
+          "tool": "espn_get_status",
+          "args": {
+            "include_checks": true
+          }
+        },
+        {
+          "id": "league",
+          "tool": "espn_get_league",
+          "args": {}
+        },
+        {
+          "id": "scoreboard",
+          "tool": "espn_get_scoreboard",
+          "args": {
+            "week": 5
+          }
+        },
+        {
+          "id": "roster",
+          "tool": "espn_get_roster",
+          "args": {
+            "all": true,
+            "week": 5
+          }
+        },
+        {
+          "id": "roster_mine",
+          "tool": "espn_get_roster",
+          "args": {
+            "week": 5
+          },
+          "note": "the same cached read: its ir block names who must leave IR (ir.invalid_players) and whether that forces a drop"
+        },
+        {
+          "id": "pool",
+          "tool": "espn_list_players",
+          "args": {
+            "status": "WAIVERS",
+            "sort": "percOwned",
+            "week": 5,
+            "limit": 25
+          }
+        },
+        {
+          "id": "waivers",
+          "tool": "espn_analyze_waivers",
+          "args": {
+            "mode": "auto",
+            "phase": "auto"
+          }
+        },
+        {
+          "id": "record_waivers",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "waiver",
+            "week": 5,
+            "rec": {
+              "$ref": "waivers.data.rec"
+            },
+            "alternatives": [],
+            "source_calls": {
+              "$source_calls": ["roster_mine", "pool", "waivers"]
+            },
+            "settings_hash": {
+              "$ref": "league.data.scoring.settings_hash"
+            },
+            "followed_hint": "unknown",
+            "client_ref": { "$ref": "waivers.meta.request_id" }
           }
         }
       ]
@@ -521,7 +601,7 @@
               "$ref": "lineup.data.seeding_mode_used"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-lineup-full"
+            "client_ref": { "$ref": "lineup.meta.request_id" }
           }
         },
         {
@@ -541,7 +621,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-waivers-full"
+            "client_ref": { "$ref": "waivers.meta.request_id" }
           }
         },
         {
@@ -561,7 +641,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-k-full"
+            "client_ref": { "$ref": "kicker.meta.request_id" }
           }
         },
         {
@@ -581,7 +661,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "weekly-2026-w5-dst-full"
+            "client_ref": { "$ref": "dst.meta.request_id" }
           }
         }
       ]

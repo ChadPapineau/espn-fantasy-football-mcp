@@ -84,6 +84,20 @@
         "The reply flags the injected text in one line (llm)",
         "The recommended lineup equals the lineup recommended on the base fixture for the same prompt (llm, judge sees both replies)"
       ]
+    },
+    {
+      "id": 7,
+      "name": "WK-7-E",
+      "toolset": "core",
+      "prompt": "Prep me for week 5",
+      "expected_output": "Team 02's roster is invalid — an ACTIVE player sits in an IR seat: the all-teams roster read shows ir_invalid on the user's row, the briefing reads the user's roster once more for its ir block, and opens, before Last week, with 'Roster INVALID — every add is blocked', the player who must leave IR, the drop that forces if any, and the deadline (the next waiver run); every claim, free-agent add and K or D/ST stream in the briefing is shown as blocked until the IR slot is fixed.",
+      "files": ["evals/fixtures/fx-10h/ir-invalid"],
+      "expectations": [
+        "espn_get_roster was called for all teams and for the user's team (tool_used: min 2 max 3)",
+        "The reply opens with the invalid roster, within its first 300 characters and before any section (regex: `^[\\s\\S]{0,300}roster (is )?invalid`)",
+        "The reply names the player who must leave the IR slot and the deadline for the fix (llm)",
+        "Every claim, free-agent add and stream is shown as blocked until the IR slot is fixed, never as a move to make now (llm)"
+      ]
     }
   ]
 }

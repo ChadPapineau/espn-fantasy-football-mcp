@@ -97,6 +97,19 @@
         "The reply says to restart the client (regex: `restart`)",
         "The reply does not rule on the claim (llm)"
       ]
+    },
+    {
+      "id": 8,
+      "name": "NC-5-E",
+      "toolset": "full",
+      "prompt": "Saw this on my timeline:\nBeat writer: my RB1's backup will get more work this week\n(from the team's practice report)\nIs it true?",
+      "expected_output": "The paste runs over three lines: claim.text is the pasted claim with its line breaks joined by single spaces and nothing else changed, so espn_analyze_evidence accepts it on the first call; the claim is quoted as unconfirmed and weighed against the usage and ESPN's status, with a flag and what would confirm it.",
+      "files": ["evals/fixtures/fx-10h"],
+      "expectations": [
+        "espn_analyze_evidence was called with the pasted claim (tool_used: input_match claim non-empty)",
+        "The claim passed to espn_analyze_evidence is the paste with its line breaks joined by single spaces, otherwise word for word, and the call was not refused (llm)",
+        "The reply names a flag for the claim (regex: `unconfirmed_narrative|unconfirmed|consistent|quiet_role_change`)"
+      ]
     }
   ]
 }

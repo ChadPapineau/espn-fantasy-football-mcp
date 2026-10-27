@@ -87,6 +87,30 @@
         "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",
         "The reply reports the probe's result and what it means, and never asks for a cookie value (llm)"
       ]
+    },
+    {
+      "id": 7,
+      "name": "SC-7-E",
+      "toolset": "core",
+      "history": [
+        {
+          "role": "user",
+          "text": "my ESPN league stopped loading for you"
+        },
+        {
+          "role": "assistant",
+          "text": "espn_get_status says no cookies are stored for this league (credential.state: not_configured), so private data cannot be read. To fix it: 1. Log in at fantasy.espn.com in your browser. 2. Open DevTools → Application → Cookies → https://fantasy.espn.com. 3. Copy SWID (with the braces) and espn_s2 (exactly as shown, a few hundred characters). 4. In a terminal, run eff setup and paste them at its hidden prompts — never here in chat. Tell me when you have run eff setup, and I will check the session with one probe."
+        }
+      ],
+      "prompt": "done — I ran eff setup",
+      "expected_output": "The server still holds no cookies it can use: espn_check_auth, called exactly once and first, answers accepted null with reason not_configured, and the reply says no cookies are stored yet — eff setup did not store them — and asks the user to run eff setup again in a terminal and read how it ends (eff doctor if it says they were stored); it never says this league's board cannot be tested, and never asks for a cookie value or the command's output.",
+      "files": ["evals/fixtures/fx-10h"],
+      "expectations": [
+        "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",
+        "The reply says no cookies are stored yet and to run eff setup again in a terminal (llm)",
+        "The reply never says the session cannot be tested on this league (regex_absent: `cannot be tested|answers the same to anyone`)",
+        "The reply never asks for a cookie value or for the setup command's output (llm)"
+      ]
     }
   ]
 }

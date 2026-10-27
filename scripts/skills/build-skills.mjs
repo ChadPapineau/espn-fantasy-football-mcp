@@ -5,7 +5,10 @@
 // every generated block in each SKILL.md body with its source file, and writes `metadata.version`
 // (package.json) + `metadata.tool_contract` (scripts/skills/manifest.json) into each frontmatter.
 // `--copy-out <dir>` also emits the copy-install tree (plan 09 §4, research 06 §C.3 item 3):
-// <dir>/espn-<name>/ with `name: espn-<name>`, standard-only frontmatter and no evals/.
+// <dir>/espn-<name>/ with `name: espn-<name>`, standard-only frontmatter, no evals/, and every
+// cross-Skill reference renamed with it (Stage C finding skills-cross-references-bare-names: the
+// source names another Skill as the plugin installs it, `espn-fantasy-football:<name>`, and a copy
+// that kept that name — or a bare `<name>` — would point at no Skill, or at another bundle's).
 // Zero dependencies. Idempotent. `--check` writes nothing and exits 1 when any output is stale.
 // Ported from sibling @c696e47, adapted (manifest path, ESPN copy tree).
 //
@@ -57,6 +60,42 @@ export const STANDARD_FRONTMATTER = Object.freeze([
 
 /** The prefix of a copy-install Skill's name and directory (plan 09 §6 [A-3]). */
 export const COPY_PREFIX = "espn-";
+
+/**
+ * The Skill references to rename in a copy install: the plugin's name (scripts/skills/manifest.json
+ * `plugin`) and the bundle's Skills.
+ * @typedef {{ plugin: string, skills: readonly string[] }} SkillRefs
+ */
+
+/** @param {string} s */
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
+/**
+ * A cross-Skill reference as the source text writes it: a Skill of the bundle under the plugin's
+ * name, in backticks — `` `espn-fantasy-football:onboard` ``, also before `'s`. Never the plugin's
+ * slash command (`` `/espn-fantasy-football:apply` ``, the command guardrail 10 tells the plugin's
+ * user to type), never the `<name>` placeholder, never a name that is not a Skill of the bundle.
+ * @param {SkillRefs} refs
+ * @returns {RegExp} global; group 1 is the Skill's name
+ */
+export function skillRefRe(refs) {
+  const names = [...refs.skills].sort((a, b) => b.length - a.length).map(reEscape);
+  return new RegExp(`\`${reEscape(refs.plugin)}:(${names.join("|")})\``, "g");
+}
+
+/**
+ * A Skill file as the copy install ships it (SKILL.md body or reference): every cross-Skill
+ * reference renamed `espn-<name>` — the copy tree's Skills are named so — and nothing else changed.
+ * @param {string} text
+ * @param {SkillRefs} refs
+ * @returns {string}
+ */
+export function copyInstallText(text, refs) {
+  if (refs === undefined || typeof refs.plugin !== "string" || !Array.isArray(refs.skills))
+    throw new TypeError("copyInstallText: the plugin's name and the bundle's Skills are required");
+  if (refs.skills.length === 0) return text;
+  return text.replace(skillRefRe(refs), (_, name) => `\`${COPY_PREFIX}${String(name)}\``);
+}
 
 /**
  * Read the shared references (only `*.md` files directly in skills/_shared/references/).
@@ -197,12 +236,14 @@ export function stampMetadata(text, meta) {
  * The copy-install form of a built SKILL.md (plan 09 §4; research 06 §C.3 item 3): `name` becomes
  * `espn-<name>` and only the standard frontmatter keys are kept (the Claude Code extensions —
  * `when_to_use`, `argument-hint`, `disallowed-tools`, `disable-model-invocation` — are dropped,
- * because zip and copy installs outside a plugin accept only the standard set). Body unchanged.
+ * because zip and copy installs outside a plugin accept only the standard set). The body is the
+ * same text with its cross-Skill references renamed `espn-<name>` (copyInstallText).
  * @param {string} text a built SKILL.md
  * @param {string} skill the Skill's directory name
+ * @param {SkillRefs} refs the plugin's name and the bundle's Skills
  * @returns {string}
  */
-export function copyInstallSkill(text, skill) {
+export function copyInstallSkill(text, skill, refs) {
   const fm = parseFrontmatter(text);
   const lines = text.split("\n");
   /** @type {string[]} */
@@ -215,7 +256,7 @@ export function copyInstallSkill(text, skill) {
     if (!keep) continue;
     kept.push(top?.[1] === "name" ? `name: ${COPY_PREFIX}${skill}` : l);
   }
-  return ["---", ...kept, ...lines.slice(fm.end)].join("\n");
+  return ["---", ...kept, copyInstallText(lines.slice(fm.end).join("\n"), refs)].join("\n");
 }
 
 /**
@@ -254,13 +295,16 @@ export function buildSkills(opts = {}) {
 
   let version = "";
   let contract = 0;
+  let plugin = "";
   try {
     version = readPackageVersion(root);
   } catch (e) {
     errors.push(errMsg(e));
   }
   try {
-    contract = readManifest(root).tool_contract;
+    const manifest = readManifest(root);
+    contract = manifest.tool_contract;
+    plugin = manifest.plugin;
   } catch (e) {
     errors.push(errMsg(e));
   }
@@ -348,20 +392,27 @@ export function buildSkills(opts = {}) {
   if (!opts.check && errors.length === 0) {
     for (const w of writes) writeAtomic(w.file, w.text);
     if (opts.copyOut !== undefined)
-      copied.push(...emitCopyTree(skillsRoot, path.resolve(opts.copyOut), built));
+      copied.push(
+        ...emitCopyTree(skillsRoot, path.resolve(opts.copyOut), built, {
+          plugin,
+          skills: listed.skills,
+        }),
+      );
   }
   return { changed, errors, skills: listed.skills, copied };
 }
 
 /**
  * Rebuild the copy-install tree under `out` (every `espn-*` directory there is replaced): per Skill,
- * the copy-install SKILL.md and the references/ files; never evals/.
+ * the copy-install SKILL.md and the references/ files, each with its cross-Skill references renamed
+ * `espn-<name>`; never evals/.
  * @param {string} skillsRoot
  * @param {string} out
  * @param {Map<string, string>} built
+ * @param {SkillRefs} refs
  * @returns {string[]} the directories written, as `espn-<name>`
  */
-function emitCopyTree(skillsRoot, out, built) {
+function emitCopyTree(skillsRoot, out, built, refs) {
   mkdirSync(out, { recursive: true });
   for (const name of readdirSync(out)) {
     if (name.startsWith(COPY_PREFIX))
@@ -371,12 +422,15 @@ function emitCopyTree(skillsRoot, out, built) {
   const dirs = [];
   for (const [skill, text] of built) {
     const target = path.join(out, `${COPY_PREFIX}${skill}`);
-    writeAtomic(path.join(target, "SKILL.md"), copyInstallSkill(text, skill));
+    writeAtomic(path.join(target, "SKILL.md"), copyInstallSkill(text, skill, refs));
     const refDir = path.join(skillsRoot, skill, "references");
     if (existsSync(refDir)) {
       for (const f of readdirSync(refDir).sort()) {
         if (!f.endsWith(".md") || TEMP_FILE_RE.test(f)) continue;
-        writeAtomic(path.join(target, "references", f), readFileSync(path.join(refDir, f), "utf8"));
+        writeAtomic(
+          path.join(target, "references", f),
+          copyInstallText(readFileSync(path.join(refDir, f), "utf8"), refs),
+        );
       }
     }
     dirs.push(`${COPY_PREFIX}${skill}`);

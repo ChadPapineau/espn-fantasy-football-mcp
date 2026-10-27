@@ -104,7 +104,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "injury-cascade-2026-w5-ir"
+            "client_ref": { "$ref": "cascade.meta.request_id" }
           }
         }
       ]
@@ -211,7 +211,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "injury-cascade-2026-w5-irmove"
+            "client_ref": { "$ref": "cascade.meta.request_id" }
           }
         }
       ]

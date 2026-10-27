@@ -107,7 +107,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "waivers-2026-w5-claims"
+            "client_ref": { "$ref": "waivers.meta.request_id" }
           }
         }
       ]
@@ -177,7 +177,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "waivers-2026-w5-scramble"
+            "client_ref": { "$ref": "waivers.meta.request_id" }
           }
         }
       ]
@@ -349,7 +349,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "waivers-2026-w5-usage"
+            "client_ref": { "$ref": "waivers.meta.request_id" }
           }
         }
       ]
@@ -445,7 +445,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "waivers-2026-w5-faab"
+            "client_ref": { "$ref": "waivers.meta.request_id" }
           }
         }
       ]

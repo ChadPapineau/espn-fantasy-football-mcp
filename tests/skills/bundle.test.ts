@@ -247,6 +247,8 @@ function standIns(args: Json, steps: SeqStep[]): Json {
         seeding_mode_used: "espn_rule",
         week: 5,
         as_of: "2026-10-06T21:00:00-04:00",
+        // the producing call's meta.request_id (references/log.md)
+        client_ref: "r-0123456789ab",
       };
       if (!(key in stand)) throw new Error(`no stand-in for a $ref at ${key}`);
       return stand[key];

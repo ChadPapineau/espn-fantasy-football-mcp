@@ -10,10 +10,24 @@
 
 | When | Brief | Source of the timing |
 |---|---|---|
-| before the run (`phase: pre_run`) | **the claim brief**: per candidate `s`, `s_with_ir_move`, the premium and its band, a claim, pass or marginal verdict, the ordered claim list, the drop per claim, `p_clears_to_fa` ("will probably clear") | `rules.waiver.next_execution` |
-| after the run (`phase: post_run`) | **the scramble brief**: every unclaimed target is now a free agent — the list filtered to `FREEAGENT`, re-ranked by `s`, to add at once; a team deep in the order spends its claims on contested players and its attention on this list | `rules.waiver.last_execution` just passed; the following run's `next_execution` |
+| before the run (`phase: pre_run`) | **the claim brief**: per candidate `s`, `s_with_ir_move`, the premium and its band, the verdict (the five below), the ordered claim list, the drop per claim, `p_clears_to_fa` ("will probably clear") | `rules.waiver.next_execution` |
+| after the run (`phase: post_run`) | **the scramble brief**: every unclaimed target is now a free agent (`fa_add_now`) — the list filtered to `FREEAGENT`, re-ranked by `s`, to add at once; a team deep in the order spends its claims on contested players and its attention on this list | `rules.waiver.last_execution` just passed; the following run's `next_execution` |
 
 A target whose game kicks off before the run clears must be rostered before kickoff — a claim that clears after his game is no help this week.
+
+### The five verdicts
+
+`espn_analyze_waivers` gives every candidate one `verdict`. Which one depends first on his `status`: a player on waivers (`WAIVERS`) can only be claimed in a run, a free agent (`FREEAGENT`) can be added at any moment.
+
+| `verdict` | The candidate | How to act, and when |
+|---|---|---|
+| `claim` | on waivers, `s ≥ Π` outside the premium band | on the ordered claim list for the run at `next_run_at` |
+| `marginal` | on waivers, `s` inside `premium_band` | the user's call — listed apart from the claim list, never a crisp claim or pass |
+| `fa_add_after_run` | on waivers, `s > 0` but below `Π` outside the band, and likely to clear (`p_clears_to_fa`) | no claim: add him as a free agent once the run clears, after `next_run_at` |
+| `fa_add_now` | already a free agent, `s > 0` | add him now — first come, first served: no claim, no priority spent, and a rival can take him first; the deadline is his game's lock, never the run |
+| `pass` | `s ≤ 0`, or on waivers below `Π` outside the band and unlikely to clear | no move |
+
+`next_run_at` times a claim and an add after the run — never a `fa_add_now`: after the run (`phase: post_run`) it is the *following* run, a day or more away, and telling the user to wait for it hands a rival a free agent who could be added now.
 
 ### What the server does not know yet
 

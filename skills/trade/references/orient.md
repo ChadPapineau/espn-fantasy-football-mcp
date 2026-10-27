@@ -8,14 +8,34 @@
 | Seen in Step 0 | Do |
 |---|---|
 | `server.tool_contract` ≠ this Skill's `metadata.tool_contract` | Stop: "These Skills expect tool contract N but the server reports M — install the Skills and the server from the same release." |
-| `credential.state: rejected` | Hand over to the `session-check` Skill and stop. |
-| `credential.state: not_configured` | Hand over to the `session-check` Skill (its setup steps). A public league still answers keyless reads — say so. |
+| `credential.state: rejected` | Hand over to the `espn-fantasy-football:session-check` Skill and stop. |
+| `credential.state: not_configured` | Hand over to the `espn-fantasy-football:session-check` Skill (its setup steps). A public league still answers keyless reads — say so. |
 | `drift.status: red` | Say which views are unavailable and what still works (the table below), and continue with what works. |
 | `drift.status: host_moved` | Say: "ESPN moved its API; stale data until the override is set or a new version ships" (the operator sets `EFF_ESPN_READ_HOST`, or waits for the release), and pass `allow_stale: true` on every ESPN-fact read for the rest of the session. |
-| `scoring.golden.status: mismatch` (or a `scoring_mismatch` check) | Say this week's numbers are unverified and route to `onboard` for the diagnosis. |
-| a `checks[]` row `ir_invalid` | Say it first, whatever the question: the roster is invalid and adds are blocked until the IR slot is fixed. |
-| `seeding.confirmed: false` | Print one line — "seeding reading unconfirmed — assuming ESPN's rule; run `onboard` to record it" — and continue. |
+| `scoring.golden.status: mismatch` (or a `scoring_mismatch` check) | Say this week's numbers are unverified and route to the `espn-fantasy-football:onboard` Skill for the diagnosis. |
+| a `checks[]` row `ir_invalid` | Say it first, whatever the question — **An invalid roster**, below. |
+| `seeding.confirmed: false` | Print one line — "seeding reading unconfirmed — assuming ESPN's rule; run `espn-fantasy-football:onboard` to record it" — and continue. |
 | `credential.stale_warning: true` | One line: "your ESPN session is N days old; re-running `eff setup` in a terminal now avoids a game-day failure." |
+
+**An invalid roster.** Whenever a result shows the user's roster invalid — a `checks[]` row `ir_invalid`, `ir.invalid: true` from `espn_get_roster` for the user's team, or `ir_invalid: true` on the user's row (`is_mine: true`) of an `all: true` read — open the answer with **"Roster INVALID — every add is blocked"**, whatever the question. Each player in `ir.invalid_players[]` — in IR with no injury tag, `ACTIVE` or `SUSPENSION` — must leave the IR slot first; when that list is empty, IR holds more players than its seats (`ir.slots`) and one of them must leave. A `QUESTIONABLE` or `DOUBTFUL` player may stay in IR: never tell the user to move him out, because he cannot go back in while he carries that tag. With a full bench the move forces a drop (`ir.forced_drop_needed`), and ESPN refuses every claim and free-agent add until it is done, so the fix is the first action, due before the next waiver run (`rules.waiver.next_execution`). Every claim, free-agent add or stream in the answer is shown as blocked until then, never as a move to make now.
+
+**Skill names.** This text names another Skill of this bundle by its installed name — `espn-fantasy-football:<name>` with the plugin, `espn-<name>` when the Skills were copied one by one (a copy's text is written so). Start only the Skill with exactly the name written here, never another bundle's Skill that shares the bare name (the owner's Yahoo Skills use several of the same names). With only the server's prompts (this text came in an `espn.*` prompt) there is no Skill to start: name the prompt the user chooses instead.
+
+| Skill | Prompt |
+|---|---|
+| `espn-fantasy-football:onboard` | `espn.onboard` |
+| `espn-fantasy-football:weekly` | `espn.weekly` |
+| `espn-fantasy-football:start-sit` | `espn.start_sit` |
+| `espn-fantasy-football:stream-kdef` | `espn.stream` |
+| `espn-fantasy-football:retro` | `espn.retro` |
+| `espn-fantasy-football:apply` | `espn.apply` |
+| `espn-fantasy-football:session-check` | `espn.session` |
+| `espn-fantasy-football:waivers` | `espn.waivers` |
+| `espn-fantasy-football:trade` | `espn.trade` (under `EFF_TOOLSET=full`) |
+| `espn-fantasy-football:injury-cascade` | `espn.injury` (under `EFF_TOOLSET=full`) |
+| `espn-fantasy-football:schedule-plan` | `espn.schedule` (under `EFF_TOOLSET=full`) |
+| `espn-fantasy-football:roster-audit` | `espn.roster_audit` (under `EFF_TOOLSET=full`) |
+| `espn-fantasy-football:news-check` | `espn.check` (under `EFF_TOOLSET=full`) |
 
 **Which league.** If any tool named `ff_<something>` (the owner's separate Yahoo server, under whatever name it was installed) is also visible in this session and the user's message names no platform, **ask which league before any recommendation** — unless the conversation already established one, in which case name the league the answer is for in the first line.
 
@@ -41,7 +61,7 @@
 |---|---|
 | `espn_get_status` | once per session; again only after an error names auth or drift |
 | `espn_get_league` / `espn-ff://league/settings` | once per session (an unchanged `settings_hash` means nothing changed) |
-| `espn_get_roster` | once per hour per team; again after `PRECONDITION_CHANGED`, or once with `force_refresh: true` in `start-sit`'s game-day branch |
+| `espn_get_roster` | once per hour per team (one team's read after an `all: true` read of the same week is the same cached read); again after `PRECONDITION_CHANGED`, or once with `force_refresh: true` in `espn-fantasy-football:start-sit`'s game-day branch |
 | `espn_get_scoreboard` | once per session before the week's games |
 | `espn_get_live_scoreboard` | on every call inside a game window (the server's 60 s cache absorbs repeats); once per session otherwise |
 | `espn_list_players` | once per (status, position, sort, page) per session — **except across the waiver run**: when `last_execution` moves (`phase` flips from `pre_run` to `post_run`), every pool page is stale |

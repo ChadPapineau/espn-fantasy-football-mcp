@@ -73,8 +73,12 @@ describe("the hand-off to apply names what starts it (Stage C finding skills-app
     expect(line).toContain(`\`${APPLY_COMMAND}\``);
     expect(line).toMatch(/^type /);
     expect(line).not.toMatch(/\bsay\b/i);
-    // the reason is stated: only the user can start it; the model's call is refused
-    expect(G10).toMatch(/Only the user can start `apply`/);
+    // the reason is stated: only the user can start it; the model's call is refused — and the Skill
+    // is named as the plugin installs it, never by a bare name another bundle may share (Stage C
+    // finding skills-cross-references-bare-names)
+    expect(G10).toContain(
+      `the exact clicks from the \`${PLUGIN}:apply\` Skill. Only the user can start that Skill`,
+    );
     expect(G10).toMatch(/a Skill call from you is refused/);
   });
 
@@ -83,7 +87,9 @@ describe("the hand-off to apply names what starts it (Stage C finding skills-app
     expect(context).toContain("`espn-<name>`");
     expect(line).toBe("say *apply* for the exact clicks");
     // the copy install (build-skills --copy-out) drops the flag and names the Skill espn-apply
-    const copy = parseFrontmatter(copyInstallSkill(read("skills/apply/SKILL.md"), "apply"));
+    const copy = parseFrontmatter(
+      copyInstallSkill(read("skills/apply/SKILL.md"), "apply", { plugin: PLUGIN, skills: SKILLS }),
+    );
     expect(copy.data["disable-model-invocation"]).toBeUndefined();
     expect(copy.data.name).toBe("espn-apply");
   });

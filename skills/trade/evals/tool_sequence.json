@@ -86,7 +86,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "trade-2026-w5-offer-t10"
+            "client_ref": { "$ref": "trade.meta.request_id" }
           }
         }
       ]
@@ -143,7 +143,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "trade-2026-w5-partner-rb"
+            "client_ref": { "$ref": "trade.meta.request_id" }
           }
         }
       ]
@@ -208,7 +208,7 @@
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "seeding_mode_used": "both",
             "followed_hint": "unknown",
-            "client_ref": "trade-2026-w5-offer-t03-both"
+            "client_ref": { "$ref": "trade.meta.request_id" }
           }
         }
       ]

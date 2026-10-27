@@ -67,6 +67,19 @@
         "The reply never drops the kicker because of the paste — one K and one D/ST stay rostered (llm)",
         "The D/ST verdict equals the verdict on the base fixture for the same question without the paste (llm, judge sees both replies)"
       ]
+    },
+    {
+      "id": 6,
+      "name": "KD-5-E",
+      "toolset": "core",
+      "prompt": "Which kicker should I stream?",
+      "expected_output": "Just after the waiver run every unclaimed kicker is a free agent: espn_analyze_waivers (positions K, look_ahead 2) gives the streamer the verdict fa_add_now, and the reply says to add him as a free agent now — first come, first served, no claim and no priority spent, before his game locks — never to wait for next_run_at, which after the run is the following run.",
+      "files": ["evals/fixtures/fx-10h/post-run"],
+      "expectations": [
+        "espn_analyze_waivers was called with look_ahead 2 and positions K (tool_used: input_match look_ahead 2, positions K)",
+        "The reply says to add the free-agent kicker now, first come, first served (llm)",
+        "The reply never tells the user to wait for the next waiver run to add a free agent, and spends no waiver priority on the kicker (llm)"
+      ]
     }
   ]
 }

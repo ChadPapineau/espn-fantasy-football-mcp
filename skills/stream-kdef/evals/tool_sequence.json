@@ -102,7 +102,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "stream-kdef-2026-w5-k"
+            "client_ref": { "$ref": "kicker.meta.request_id" }
           }
         },
         {
@@ -122,7 +122,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "stream-kdef-2026-w5-dst"
+            "client_ref": { "$ref": "dst.meta.request_id" }
           }
         }
       ]
@@ -194,7 +194,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "stream-kdef-2026-w5-dst"
+            "client_ref": { "$ref": "dst.meta.request_id" }
           }
         }
       ]
@@ -292,7 +292,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "stream-kdef-2026-w5-k-full"
+            "client_ref": { "$ref": "kicker.meta.request_id" }
           }
         },
         {
@@ -312,7 +312,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "stream-kdef-2026-w5-dst-full"
+            "client_ref": { "$ref": "dst.meta.request_id" }
           }
         }
       ]

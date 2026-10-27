@@ -75,7 +75,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "roster-audit-2026-w5"
+            "client_ref": { "$ref": "audit.meta.request_id" }
           }
         }
       ]
@@ -129,7 +129,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "roster-audit-2026-w5-invalid"
+            "client_ref": { "$ref": "audit.meta.request_id" }
           }
         }
       ]

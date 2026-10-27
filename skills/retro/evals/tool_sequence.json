@@ -41,7 +41,7 @@
             "source_calls": { "$source_calls": ["scoreboard", "retro", "txns"] },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "retro-2026-w4"
+            "client_ref": { "$ref": "retro.meta.request_id" }
           }
         }
       ]

@@ -95,7 +95,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "news-check-2026-w5-rb-paste"
+            "client_ref": { "$ref": "evidence.meta.request_id" }
           }
         }
       ]
@@ -159,7 +159,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "news-check-2026-w5-rb-outlook"
+            "client_ref": { "$ref": "evidence.meta.request_id" }
           }
         }
       ]
@@ -218,7 +218,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "news-check-2026-w5-rb-readback"
+            "client_ref": { "$ref": "evidence.meta.request_id" }
           }
         }
       ]

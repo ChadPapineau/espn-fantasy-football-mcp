@@ -1989,6 +1989,7 @@ describe("input_match is typed by the tool's input contract (arrays match the sc
       find_partners: { need_position: "RB", max_partners: 3 },
       compare: [{ out: 4000001, in: 4000002 }],
       player: { player_ids: [4000001] },
+      claim: { text: "Beat writer: the backup will get more work this week" },
     };
     let checked = 0;
     for (const s2 of SKILLS) {

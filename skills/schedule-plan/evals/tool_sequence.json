@@ -70,7 +70,7 @@
             },
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "followed_hint": "unknown",
-            "client_ref": "schedule-plan-2026-w5"
+            "client_ref": { "$ref": "plan.meta.request_id" }
           }
         }
       ]
@@ -119,7 +119,7 @@
             "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
             "seeding_mode_used": "both",
             "followed_hint": "unknown",
-            "client_ref": "schedule-plan-2026-w5-both"
+            "client_ref": { "$ref": "plan.meta.request_id" }
           }
         }
       ]

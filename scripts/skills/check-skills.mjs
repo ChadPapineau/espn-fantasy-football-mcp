@@ -376,7 +376,7 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "WK",
       kinds: ["lineup", "waiver", "stream"],
       records: true,
-      requiredCases: ["WK-1", "WK-2", "WK-3", "WK-4-E", "WK-5-E", "WK-INJ"],
+      requiredCases: ["WK-1", "WK-2", "WK-3", "WK-4-E", "WK-5-E", "WK-7-E", "WK-INJ"],
       body: [
         ...WEEKLY_HEADINGS.map(heading),
         /never re-fetch/i,
@@ -495,7 +495,7 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "KD",
       kinds: ["stream"],
       records: true,
-      requiredCases: ["KD-1", "KD-2", "KD-3", "KD-4-E", "KD-INJ"],
+      requiredCases: ["KD-1", "KD-2", "KD-3", "KD-4-E", "KD-5-E", "KD-INJ"],
       body: [/look_ahead: 2/, /implied total/i, /two weeks/i, /fa_add_after_run/, /hold_vs_stream/],
       sequences: (seqs) => {
         /** @type {string[]} */
@@ -565,7 +565,7 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "SC",
       kinds: [],
       records: false,
-      requiredCases: ["SC-1", "SC-2", "SC-3", "SC-4", "SC-INJ", "SC-6"],
+      requiredCases: ["SC-1", "SC-2", "SC-3", "SC-4", "SC-INJ", "SC-6", "SC-7-E"],
       body: [/DevTools/, /eff setup/, /espn_check_auth/, /once/i, /fantasy\.espn\.com/],
       sequences: (seqs) => {
         /** @type {string[]} */
@@ -812,7 +812,7 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "NC",
       kinds: ["evidence"],
       records: true,
-      requiredCases: ["NC-1", "NC-2", "NC-3", "NC-4-E", "NC-INJ", "NC-INJ-2", "NC-CORE"],
+      requiredCases: ["NC-1", "NC-2", "NC-3", "NC-4-E", "NC-5-E", "NC-INJ", "NC-INJ-2", "NC-CORE"],
       body: [
         /priors are hand-set/,
         /structured_disagrees/,
@@ -1325,6 +1325,16 @@ export function checkArgType(v, type) {
 }
 
 /**
+ * Whether a record step's `client_ref` is the request id of the step whose rec it logs:
+ * `{ "$ref": "<producer>.meta.request_id" }` (references/log.md).
+ * @param {unknown} v
+ * @param {string} producer the producing step's id
+ */
+export function isClientRefOf(v, producer) {
+  return isRecord(v) && Object.keys(v).length === 1 && v["$ref"] === `${producer}.meta.request_id`;
+}
+
+/**
  * Validate one tool_sequence.json.
  * @param {unknown} raw
  * @param {{ skill: string, where: string, manifest: import("./_lib.mjs").Manifest,
@@ -1528,6 +1538,16 @@ export function validateToolSequence(raw, ctx) {
       if (want !== undefined && kind !== want) {
         errors.push(
           `${sw}: logs ${String(producer?.tool)}'s rec as kind "${String(kind)}" — it is a "${want}" rec`,
+        );
+      }
+      // the client_ref recipe (references/log.md; Stage C finding
+      // skills-log-client-ref-dedups-changed-rec): the request id of the call whose rec is logged,
+      // so a re-run's changed advice is an entry of its own and only the same result logged again
+      // deduplicates — a key built from the season, week and decision folds changed advice onto the
+      // first entry (E12 deduplicates on league, season, week, kind and client_ref alone)
+      if (producer !== undefined && !isClientRefOf(p.args["client_ref"], producer.id)) {
+        errors.push(
+          `${sw}: ${p.id}'s client_ref must be { "$ref": "${producer.id}.meta.request_id" } — the producing call's request id (references/log.md), never a key built from the decision`,
         );
       }
     });
@@ -1945,6 +1965,60 @@ export function checkToolRefs(text, file, ctx, errors) {
 }
 
 /**
+ * The cross-Skill references of one Skill text that point at the wrong Skill or at none (Stage C
+ * finding skills-cross-references-bare-names; plan 09 [A-3]). A bare name in backticks
+ * (`` `onboard` ``) is the name another bundle's Skill may carry — the owner's sibling installs
+ * `onboard`, `retro`, `start-sit` and `stream-kdef` bare into ~/.claude/skills/ — so the text names
+ * a Skill as the plugin installs it, `` `espn-fantasy-football:<name>` ``, in backticks so
+ * build-skills --copy-out renames it `espn-<name>` in the copy tree; a qualified name must name a
+ * Skill of the bundle (`<name>` is the placeholder). Fenced code is skipped. One problem per
+ * occurrence, with its line.
+ * @param {string} text
+ * @param {{ plugin: string, skills: readonly string[] }} ctx
+ * @returns {string[]}
+ */
+export function skillRefProblems(text, ctx) {
+  /** @type {string[]} */
+  const out = [];
+  // fenced blocks blanked line for line, so the line numbers stay the text's own
+  const prose = text.replace(/^```[\s\S]*?^```/gm, (b) => b.replace(/[^\n]/g, " "));
+  /** @type {number[]} */
+  const starts = [0];
+  for (let i = 0; i < prose.length; i++) if (prose[i] === "\n") starts.push(i + 1);
+  /** The 1-based line of an offset (binary search over the line starts). */
+  const lineOf = (/** @type {number} */ i) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if ((starts[mid] ?? 0) <= i) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+  for (const m of prose.matchAll(/`([a-z][a-z0-9-]*)`/g)) {
+    const name = m[1] ?? "";
+    if (ctx.skills.includes(name))
+      out.push(
+        `line ${String(lineOf(m.index))}: \`${name}\` is a bare Skill name another bundle's Skill may share — write \`${ctx.plugin}:${name}\``,
+      );
+  }
+  const q = ctx.plugin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const m of prose.matchAll(new RegExp(`(\`?)(/?)${q}:([A-Za-z0-9<>_-]*)(\`?)`, "g"))) {
+    const [, open = "", slash = "", name = "", close = ""] = m;
+    const at = `line ${String(lineOf(m.index))}`;
+    if (name === "<name>") continue;
+    if (!ctx.skills.includes(name))
+      out.push(`${at}: \`${ctx.plugin}:${name}\` names no Skill of this bundle`);
+    else if (slash === "" && (open !== "`" || close !== "`"))
+      out.push(
+        `${at}: ${ctx.plugin}:${name} must be in backticks, so the copy install renames it espn-${name}`,
+      );
+  }
+  return out;
+}
+
+/**
  * The P1 tools a body names on its P1-labelled lines (`(P1; …)`, `**P1:**`), sorted.
  * @param {string} body
  * @param {import("./_lib.mjs").Manifest} manifest
@@ -2267,6 +2341,11 @@ export function checkSkills(opts = {}) {
       }
       if (manifest) {
         checkToolRefs(scanned, f, { manifest, p1Skill }, errors);
+        for (const p of skillRefProblems(scanned, {
+          plugin: manifest.plugin,
+          skills: listed.skills,
+        }))
+          errors.push(`${f}: ${p}`);
         for (const c of unknownConstants(scanned, {
           errorCodes,
           constants: manifest.constants,

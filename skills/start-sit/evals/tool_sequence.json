@@ -146,7 +146,7 @@
               "$ref": "lineup.data.seeding_mode_used"
             },
             "followed_hint": "unknown",
-            "client_ref": "start-sit-2026-w5-flex"
+            "client_ref": { "$ref": "lineup.meta.request_id" }
           }
         }
       ]
@@ -241,7 +241,7 @@
               "$ref": "lineup.data.seeding_mode_used"
             },
             "followed_hint": "unknown",
-            "client_ref": "start-sit-2026-w5-gameday"
+            "client_ref": { "$ref": "lineup.meta.request_id" }
           }
         }
       ]
@@ -342,7 +342,7 @@
               "$ref": "league.data.scoring.settings_hash"
             },
             "followed_hint": "unknown",
-            "client_ref": "start-sit-2026-w5-live-pwin"
+            "client_ref": { "$ref": "matchup.meta.request_id" }
           }
         },
         {
@@ -365,7 +365,7 @@
               "$ref": "lineup.data.seeding_mode_used"
             },
             "followed_hint": "unknown",
-            "client_ref": "start-sit-2026-w5-gameday-live"
+            "client_ref": { "$ref": "lineup.meta.request_id" }
           }
         }
       ]
