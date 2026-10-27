@@ -47,10 +47,13 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   ships, the tarball scan with `--release` (the packed lock is that lockfile byte for byte),
   `npm pack`, `scripts/ci/check-release-install.mjs` — the README's release install, `npm ci
   --omit=dev --ignore-scripts` then `npm link --ignore-scripts`, run offline on that very tarball:
-  exactly the lockfile's runtime tree, and the linked `eff` runs — and a GitHub Release with the
-  tarball and its sha256; never `npm publish`; `ci.yml`'s pack job rehearses the same steps on
-  every push), Dependabot (monthly, grouped) and a pull-request template. Every action pinned by commit SHA; `contents: read` (the
-  release job alone `contents: write`); no secrets.
+  exactly the lockfile's runtime tree, and the linked `eff` runs — all in a `contents: read` job,
+  then a GitHub Release with the tarball and its sha256, created by the one job that holds
+  `contents: write` and runs no dependency code: no checkout, Node or npm — it checks the files
+  against the sha256 the build job reported and runs `gh release create`; never `npm publish`;
+  `ci.yml`'s pack job rehearses the same steps on every push), Dependabot (monthly, grouped) and a
+  pull-request template. Every action pinned by commit SHA; `contents: read` (the release job alone
+  `contents: write`); no secrets.
 - **Plugin root (plan 09 §4, K8).** `.claude-plugin/plugin.json` (`espn-fantasy-football`,
   `userConfig` for the league id, the season and the toolset — the season and the toolset empty
   by default, so the server reads the current NFL season like the `eff` CLI and the jobs, and

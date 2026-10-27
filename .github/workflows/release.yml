@@ -4,24 +4,41 @@
 # its self-test — plan 04 §4.1 lists `secrets` among the gate's jobs); docs.yml (Mermaid, links,
 # identifiers, `claude plugin validate --strict`, docs-current) — Stage C finding
 # ci-release-skips-gitleaks-gate: a tag whose secrets or docs run is red gets no Release. Then
-# the changelog check (scripts/ci/check-changelog.mjs: the tag, package.json's
-# version and a dated CHANGELOG.md section agree; the section is the release body), the lock (the
-# committed package-lock.json copied, byte for byte, to npm-shrinkwrap.json — npm pack never ships
-# package-lock.json, and package.json `files` names the shrinkwrap), the tarball scan
+# `build`, under contents: read: the changelog check (scripts/ci/check-changelog.mjs: the tag,
+# package.json's version and a dated CHANGELOG.md section agree; the section is the release body),
+# the lock (the committed package-lock.json copied, byte for byte, to npm-shrinkwrap.json — npm pack
+# never ships package-lock.json, and package.json `files` names the shrinkwrap), the tarball scan
 # (scan-tarball.mjs --release: the files allow-list, the plugin root, secrets and identifiers, and
-# the packed shrinkwrap is the committed lockfile), npm pack with its sha256, the README's release
-# install run on that very tarball (check-release-install.mjs: unpack, `npm ci --omit=dev
+# the packed shrinkwrap is the committed lockfile), npm pack with its sha256, and the README's
+# release install run on that very tarball (check-release-install.mjs: unpack, `npm ci --omit=dev
 # --ignore-scripts` offline — exactly the lockfile's runtime tree, every integrity hash checked —
 # then `npm link --ignore-scripts` under a throwaway prefix, and the linked `eff` runs; npm never
 # reads the shrinkwrap of a .tgz it installs by path, so `npm install -g <tarball>` is not the
-# documented install), and a GitHub Release carrying the tarball and its sha256. ci.yml's pack job
-# rehearses the same lock, scan, pack and install on every push.
+# documented install). `build` hands the tarball, its sha256 and the release notes to `release` as
+# one artifact; `release` checks them against the sha256 `build` reported and creates a GitHub
+# Release carrying the tarball and its sha256. ci.yml's pack job rehearses build's lock, scan, pack
+# and install on every push.
 #
 # Choices, and why
 # - No npm publish from CI (R8): publishing, if ever, is the owner's manual `npm publish
 #   --provenance`.
 # - permissions: contents: read by default; the release job alone gets contents: write — the one
 #   scope `gh release create` needs, with the job's own token (no repository secret of any kind).
+# - The write token never meets third-party code (plan 04 §4; Stage C finding
+#   ci-release-write-job-runs-deps). Every step of a job can read that job's token: on a
+#   GitHub-hosted runner a step can sudo, and the runner worker's memory holds the token (the
+#   tj-actions/changed-files technique, CVE-2025-30066). A contents: write token can push a
+#   fast-forward commit to main, move or create a tag and replace a release asset, and what it
+#   pushes starts no workflow that would check it. So every step that runs dependency code — npm ci
+#   of the dev tree, the TypeScript build, npm pack, the locked install and the linked eff, which
+#   imports the runtime tree — runs in `build`, and `release` has no checkout, no Node and no npm:
+#   GitHub's artifact download, coreutils and the runner's own gh.
+# - The handoff is checked, not trusted. Any job of a run can replace one of the run's artifacts (the
+#   runtime token); only `build` can set build's job outputs. `build` reports the notes' and the
+#   tarball's sha256 as job outputs from the steps that write them — before the install check runs
+#   the runtime tree — and starts only once every gate has finished, so no gate job is still running
+#   when the artifact is uploaded. `release` refuses a missing, extra or changed file, and a
+#   checksum file that is not the tarball's own line.
 # - Actions pinned to full commit SHAs with the `# vX.Y.Z` comment; persist-credentials: false;
 #   `npm ci` of the committed lockfile with ignore-scripts=true (.npmrc).
 # - A tag releases only once the whole gate is green on it (needs: ci, secrets and docs); a
@@ -55,13 +72,17 @@ jobs:
     name: docs
     uses: ./.github/workflows/docs.yml
 
-  release:
-    name: release
+  build:
+    name: build
     needs: [ci, secrets, docs]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # every step that runs third-party code is here, under a read-only token
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      notes_sha256: ${{ steps.notes.outputs.sha256 }}
+      tgz_sha256: ${{ steps.pack.outputs.tgz_sha256 }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,29 +98,87 @@ jobs:
       - name: Build
         run: npm run build
       - name: The tag, package.json and CHANGELOG.md agree (the release notes)
-        run: node scripts/ci/check-changelog.mjs --tag "$GITHUB_REF_NAME" --notes "$RUNNER_TEMP/notes.md"
+        id: notes
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          node scripts/ci/check-changelog.mjs --tag "$GITHUB_REF_NAME" --notes "$RUNNER_TEMP/release/notes.md"
+          s="$(sha256sum < "$RUNNER_TEMP/release/notes.md")"
+          echo "sha256=${s%% *}" >> "$GITHUB_OUTPUT"
       - name: The tarball's lock is the committed lockfile, byte for byte (npm-shrinkwrap.json)
         run: cp package-lock.json npm-shrinkwrap.json
       - name: Scan what npm pack ships (files allow-list, plugin root, secrets, identifiers; the lock packed)
         run: npm run pack:scan -- --release
       - name: Pack and checksum
+        id: pack
         run: |
           set -euo pipefail
-          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
-          cd "$RUNNER_TEMP"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
           tgz="espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
           test -f "$tgz"
           sha256sum "$tgz" > "$tgz.sha256"
+          echo "tgz_sha256=$(cut -d ' ' -f 1 "$tgz.sha256")" >> "$GITHUB_OUTPUT"
       - name: Install that tarball the README's way, offline — the lockfile's runtime tree, then the linked eff runs
-        run: node scripts/ci/check-release-install.mjs --tarball "$RUNNER_TEMP/espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
+        run: node scripts/ci/check-release-install.mjs --tarball "$RUNNER_TEMP/release/espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
+      - name: Hand the tarball, its sha256 and the release notes to the release job (one artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: release
+    needs: [ci, secrets, docs, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # the one write anywhere; no checkout, no Node, no npm in this job
+    permissions:
+      contents: write
+    steps:
+      - name: Download the build job's release files (the tarball, its sha256, the release notes)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release
+          digest-mismatch: error
+      - name: The files are exactly the ones the build job made (its sha256 job outputs)
+        env:
+          NOTES_SHA256: ${{ needs.build.outputs.notes_sha256 }}
+          TGZ_SHA256: ${{ needs.build.outputs.tgz_sha256 }}
+        run: |
+          set -euo pipefail
+          refuse() { echo "::error::$1 — no release"; exit 1; }
+          cd "$RUNNER_TEMP/release" || refuse "the build job's release files were not downloaded"
+          tgz="espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
+          for d in "$NOTES_SHA256" "$TGZ_SHA256"; do
+            [[ "$d" =~ ^[0-9a-f]{64}$ ]] || refuse "the build job reported no sha256 for a release file"
+          done
+          # exactly the three files, each a regular file: nothing added, linked or left out (names
+          # are compared, never printed)
+          [ "$(ls -A | LC_ALL=C sort)" = "$(printf '%s\n' "$tgz" "$tgz.sha256" notes.md | LC_ALL=C sort)" ] ||
+            refuse "the downloaded files are not exactly the tarball, its sha256 and the release notes"
+          for f in "$tgz" "$tgz.sha256" notes.md; do
+            { [ -f "$f" ] && [ ! -L "$f" ]; } || refuse "$f is not a regular file"
+          done
+          sum() { local s; s="$(sha256sum < "$1")"; printf '%s' "${s%% *}"; }
+          [ "$(sum "$tgz")" = "$TGZ_SHA256" ] || refuse "the tarball is not the one the build job packed"
+          [ "$(sum notes.md)" = "$NOTES_SHA256" ] || refuse "the release notes are not the ones the build job wrote"
+          # the published checksum file is the tarball's own line, the one the README checks
+          printf '%s  %s\n' "$TGZ_SHA256" "$tgz" | cmp -s - "$tgz.sha256" ||
+            refuse "$tgz.sha256 is not the tarball's checksum line"
+          echo "the release files are the build job's: $tgz (sha256 $TGZ_SHA256), $tgz.sha256, notes.md"
       - name: Create the GitHub Release (nothing goes to the npm registry — R8)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tgz="$RUNNER_TEMP/espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
-          pre=()
-          case "$GITHUB_REF_NAME" in *-*) pre=(--prerelease) ;; esac
+          tgz="$RUNNER_TEMP/release/espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"
+          # a tag with a pre-release part (vX.Y.Z-rc.1) makes a pre-release; "$@" is empty otherwise
+          set --
+          case "$GITHUB_REF_NAME" in *-*) set -- --prerelease ;; esac
           gh release create "$GITHUB_REF_NAME" "$tgz" "$tgz.sha256" \
             --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes-file "$RUNNER_TEMP/notes.md" "${pre[@]}"
+            --notes-file "$RUNNER_TEMP/release/notes.md" "$@"

@@ -7,10 +7,22 @@
 // findings ci-commit-message-not-scanned, ci-message-check-skips-merges-first-push) are also RUN:
 // each `run:` block, cut out of ci.yml exactly as YAML reads it, is executed against throwaway
 // repositories and this clone's history. release.yml is held to wait for every workflow a push
-// runs (Stage C finding ci-release-skips-gitleaks-gate).
+// runs (Stage C finding ci-release-skips-gitleaks-gate), and its write token to a job that runs no
+// dependency code (Stage C finding ci-release-write-job-runs-deps): every workflow's write-scoped
+// jobs are read for what they run, and release.yml's handoff — build's notes and pack steps, then
+// the release job's check and its `gh release create` — is run offline on throwaway files.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ROOT, tempDir } from "./helpers.js";
@@ -68,17 +80,58 @@ function needsOf(job: string): string[] {
     .filter(Boolean);
 }
 
+/** The scopes a job's `permissions:` grant write to. */
+const writeScopes = (job: string): string[] =>
+  [...job.matchAll(/^\s*([a-z-]+):\s*write\b/gm)].map((m) => m[1] ?? "");
+
+/** What a job's steps — or the job itself, calling a workflow — `uses:`. */
+const usesOf = (job: string): string[] =>
+  [...job.matchAll(/^\s*(?:- )?uses:\s*(\S+)/gm)].map((m) => m[1] ?? "");
+
+/** Every script a job runs: a `run: |` block's lines, or a one-line `run: <command>`. */
+function runScripts(job: string): string[] {
+  const lines = job.split("\n");
+  const out: string[] = [];
+  lines.forEach((line, i) => {
+    const m = /^(\s*)(?:- )?run:\s*(.*)$/.exec(line);
+    if (m === null) return;
+    const rest = (m[2] ?? "").trim();
+    if (!/^[|>][-+]?$/.test(rest)) {
+      out.push(rest);
+      return;
+    }
+    const indent = (m[1] ?? "").length;
+    const body: string[] = [];
+    for (const l of lines.slice(i + 1)) {
+      if (l.trim() !== "" && l.length - l.trimStart().length <= indent) break;
+      body.push(l.trim());
+    }
+    out.push(body.join("\n"));
+  });
+  return out;
+}
+
+/**
+ * A command that runs code from a package, the repository or the network — which a job holding a
+ * write scope must never run (Stage C finding ci-release-write-job-runs-deps): any step of a job can
+ * read that job's token.
+ */
+const DEPENDENCY_CODE =
+  /\b(?:npm|npx|node|nodejs|corepack|pnpm|yarn|tsx|bun|deno|python3?|pip3?|ruby|perl|php|java|make|cargo|curl|wget|tar|unzip|bash|zsh|sh|source|eval|exec|chmod)\b|(?:^|[\s;&|(])\.{1,2}\/|\bscripts\//m;
+
 const CANCEL_EXPR = "${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}";
 
 /**
  * release.yml's tarball steps, which ci.yml's pack job rehearses on every push (plan 04 §4.4; Stage C
  * finding ci-release-workflow-missing): the committed lockfile as the tarball's npm-shrinkwrap.json,
- * the --release scan, npm pack, and the README's locked install run on the packed tarball.
+ * the --release scan, npm pack, and the README's locked install run on the packed tarball. The
+ * destinations differ: ci.yml packs into $RUNNER_TEMP, release.yml's build job into
+ * $RUNNER_TEMP/release, the directory it hands to the release job (each held below).
  */
 const REHEARSED = [
   "cp package-lock.json npm-shrinkwrap.json",
   "npm run pack:scan -- --release",
-  'npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"',
+  "npm pack --ignore-scripts --pack-destination",
   "node scripts/ci/check-release-install.mjs --tarball",
 ];
 
@@ -92,12 +145,33 @@ describe.each(files)("%s", (file) => {
     // plan 04 §4.4: the one write anywhere is release.yml's `release` job creating the GitHub
     // Release with its own token — contents: write and nothing else
     for (const [name, block] of jobs) {
-      const writes = [...block.matchAll(/^\s*([a-z-]+):\s*write\b/gm)].map((m) => m[1]);
+      const writes = writeScopes(block);
       if (file === "release.yml" && name === "release") expect(writes, name).toEqual(["contents"]);
       else expect(writes, `${file} ${name}`).toEqual([]);
     }
     const outside = text.split(/^jobs:$/m)[0] ?? "";
     expect(outside).not.toMatch(/:\s*write\b/);
+  });
+
+  it("a job that holds a write scope runs no dependency code — no checkout, Node, npm, repository script or called workflow; GitHub's artifact download, coreutils and `gh release create` only — and its token reaches that one step (Stage C finding ci-release-write-job-runs-deps)", () => {
+    for (const [name, block] of jobs) {
+      if (writeScopes(block).length === 0) continue;
+      const where = `${file} ${name}`;
+      // no checkout means no repository file exists in the job to run
+      for (const u of usesOf(block)) expect(u, where).toMatch(/^actions\/download-artifact@/);
+      const scripts = runScripts(block);
+      expect(scripts.length, where).toBeGreaterThan(0);
+      for (const s of scripts) {
+        expect(s, where).not.toMatch(DEPENDENCY_CODE);
+        // the runner's gh, and only its release command: a gh extension is third-party code
+        for (const m of s.matchAll(/\bgh\b.*/g)) expect(m[0], where).toMatch(/^gh release create /);
+      }
+      const steps = block.split(/\n(?= {6}- )/).slice(1);
+      const withToken = steps.filter((st) => /github\.token|secrets\.GITHUB_TOKEN/.test(st));
+      expect(withToken.length, where).toBe(1);
+      expect(withToken[0], where).toMatch(/^ {8}env:\n {10}GH_TOKEN: \$\{\{ github\.token \}\}$/m);
+      expect(withToken[0], where).toMatch(/\bgh release create\b/);
+    }
   });
 
   it("never uses pull_request_target, and never reads a repository secret", () => {
@@ -250,6 +324,7 @@ describe("ci.yml (plan 04 §4.1)", () => {
       at = i;
     }
     expect(rehearsal).toContain("set -euo pipefail");
+    expect(rehearsal).toContain(`${REHEARSED[2] ?? ""} "$RUNNER_TEMP"\n`);
     expect(rehearsal).toContain('--tarball "$RUNNER_TEMP/espn-fantasy-football-mcp-$version.tgz"');
   });
 
@@ -1225,36 +1300,464 @@ describe("release.yml (plan 04 §4.4, R8; Stage C finding ci-release-workflow-mi
     expect(new Set(groups.values()).size, JSON.stringify([...groups], null, 1)).toBe(groups.size);
   });
 
-  it("checks the changelog, writes the lock, scans, packs, checksums, installs that tarball the README's way, then creates the GitHub Release — in that order", () => {
-    const order = [
-      "npm ci",
-      "npm run build",
-      'node scripts/ci/check-changelog.mjs --tag "$GITHUB_REF_NAME" --notes "$RUNNER_TEMP/notes.md"',
-      ...REHEARSED.slice(0, 3),
-      "sha256sum",
-      // the README's locked install, run on the very tarball the release uploads
-      `${REHEARSED[3] ?? ""} "$RUNNER_TEMP/espn-fantasy-football-mcp-\${GITHUB_REF_NAME#v}.tgz"`,
-      'gh release create "$GITHUB_REF_NAME" "$tgz" "$tgz.sha256"',
-    ];
+  /** `needles` appear in `text` in this order. */
+  const inOrder = (text: string, needles: string[]) => {
     let at = -1;
-    for (const needle of order) {
-      const i = release.indexOf(needle);
+    for (const needle of needles) {
+      const i = text.indexOf(needle, at + 1);
       expect(i, needle).toBeGreaterThan(at);
       at = i;
     }
-    expect(release).toContain('--notes-file "$RUNNER_TEMP/notes.md"');
-    expect(release).toContain("--verify-tag");
-    expect(release).toContain("GH_TOKEN: ${{ github.token }}");
+  };
+  const build = jobs.get("build") ?? "";
+  /** A job's `outputs:` map. */
+  const outputsOf = (job: string): Record<string, string> =>
+    Object.fromEntries(
+      [
+        ...(/^ {4}outputs:\n((?: {6}.*\n)+)/m.exec(`${job}\n`)?.[1] ?? "").matchAll(
+          /^ {6}([\w-]+): (.+)$/gm,
+        ),
+      ].map((m) => [m[1] ?? "", m[2] ?? ""]),
+    );
+
+  it("splits the release in two (Stage C finding ci-release-write-job-runs-deps): `build` holds the read-only default and does every step that runs dependency code; `release`, the one job with contents: write, has no checkout, Node or npm", () => {
+    expect([...jobs.keys()]).toEqual(["ci", "secrets", "docs", "build", "release"]);
+    expect(writeScopes(build)).toEqual([]);
+    expect(build).toMatch(/^ {4}permissions:\n {6}contents: read\n {4}\S/m);
+    for (const code of [
+      "actions/checkout@",
+      "actions/setup-node@",
+      "run: npm ci",
+      "npm run build",
+    ]) {
+      expect(build, code).toContain(code);
+      expect(release, code).not.toContain(code);
+    }
+    expect(writeScopes(release)).toEqual(["contents"]);
+    expect(usesOf(release)).toEqual([
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    ]);
+  });
+
+  it("build starts once every gate has finished (no gate job is running while its artifact exists), and release needs build and every gate", () => {
+    expect(needsOf(build).sort()).toEqual(["ci", "docs", "secrets"]);
+    expect(needsOf(release).sort()).toEqual(["build", "ci", "docs", "secrets"]);
+  });
+
+  it("build checks the changelog, writes the lock, scans, packs and checksums, then installs that tarball the README's way — all into the one directory it uploads, as one artifact", () => {
+    inOrder(build, [
+      "run: npm ci",
+      "run: npm run build",
+      'mkdir -p "$RUNNER_TEMP/release"',
+      'node scripts/ci/check-changelog.mjs --tag "$GITHUB_REF_NAME" --notes "$RUNNER_TEMP/release/notes.md"',
+      REHEARSED[0] ?? "",
+      REHEARSED[1] ?? "",
+      `${REHEARSED[2] ?? ""} "$RUNNER_TEMP/release"\n`,
+      'tgz="espn-fantasy-football-mcp-${GITHUB_REF_NAME#v}.tgz"',
+      'sha256sum "$tgz" > "$tgz.sha256"',
+      // the README's locked install, run on the very tarball the release uploads
+      `${REHEARSED[3] ?? ""} "$RUNNER_TEMP/release/espn-fantasy-football-mcp-\${GITHUB_REF_NAME#v}.tgz"`,
+      "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+    ]);
+    const upload = step(build, "uses: actions/upload-artifact@");
+    expect(upload).toContain("          name: release-files\n");
+    expect(upload).toContain("          path: ${{ runner.temp }}/release/\n");
+    expect(upload).toContain("          if-no-files-found: error\n");
+    // the upload is build's last step
+    expect(build.slice(build.indexOf(upload) + upload.length)).not.toMatch(/^ {6}- /m);
+  });
+
+  it("build reports each file's sha256 as a job output from the step that writes the file — the tarball's before the install check runs the runtime tree", () => {
+    expect(outputsOf(build)).toEqual({
+      notes_sha256: "${{ steps.notes.outputs.sha256 }}",
+      tgz_sha256: "${{ steps.pack.outputs.tgz_sha256 }}",
+    });
+    const notes = step(build, "CHANGELOG.md agree");
+    expect(notes).toMatch(/^ {8}id: notes$/m);
+    expect(notes).toContain('>> "$GITHUB_OUTPUT"');
+    const pack = step(build, "Pack and checksum");
+    expect(pack).toMatch(/^ {8}id: pack$/m);
+    expect(pack).toContain('>> "$GITHUB_OUTPUT"');
+    expect(build.indexOf(pack)).toBeLessThan(build.indexOf(REHEARSED[3] ?? ""));
+  });
+
+  it("release downloads that artifact, checks it against build's outputs (read from the environment, never spliced into the script), then creates the GitHub Release", () => {
+    inOrder(release, [
+      "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+      "          name: release-files\n",
+      "          path: ${{ runner.temp }}/release\n",
+      "          digest-mismatch: error\n",
+      "- name: The files are exactly the ones the build job made",
+      'gh release create "$GITHUB_REF_NAME" "$tgz" "$tgz.sha256"',
+    ]);
+    const check = rawStep("release.yml", "exactly the ones the build job made");
+    expect(stepEnv(check, "NOTES_SHA256")).toBe("${{ needs.build.outputs.notes_sha256 }}");
+    expect(stepEnv(check, "TGZ_SHA256")).toBe("${{ needs.build.outputs.tgz_sha256 }}");
+    expect(runBlock(check)).not.toContain("${{");
+    const create = step(release, "Create the GitHub Release");
+    expect(create).toContain('--notes-file "$RUNNER_TEMP/release/notes.md"');
+    expect(create).toContain("--verify-tag");
+    expect(create).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(runBlock(rawStep("release.yml", "Create the GitHub Release"))).not.toContain("${{");
   });
 
   it("the lock is the committed lockfile copied (npm shrinkwrap would delete it and leave nothing to compare)", () => {
-    expect(step(release, "npm-shrinkwrap.json")).toMatch(
+    expect(step(build, "npm-shrinkwrap.json")).toMatch(
       /run: cp package-lock\.json npm-shrinkwrap\.json$/m,
     );
-    expect(release).not.toContain("npm shrinkwrap");
+    expect(text).not.toContain("npm shrinkwrap");
   });
 
   it("never publishes to npm (R8: the owner publishes by hand, if ever)", () => {
     expect(text).not.toMatch(/npm publish/);
+  });
+});
+
+// --- release.yml's handoff, run offline (Stage C finding ci-release-write-job-runs-deps) ----------
+
+describe("release.yml's handoff, run offline: build's notes and pack steps write the files and their sha256 outputs; the release job's check refuses anything else; its gh release create gets exactly the build job's files", () => {
+  const notesStep = rawStep("release.yml", "CHANGELOG.md agree (the release notes)");
+  const packStep = rawStep("release.yml", "Pack and checksum");
+  const checkStep = rawStep("release.yml", "exactly the ones the build job made");
+  const createStep = rawStep("release.yml", "Create the GitHub Release");
+  const VERSION = "1.2.3";
+  const TAG = `v${VERSION}`;
+  const TGZ = `espn-fantasy-football-mcp-${VERSION}.tgz`;
+  /** The dated CHANGELOG section's body: the release notes. */
+  const NOTES = "### Fixed\n\n- The release job runs no dependency code.";
+  /** A stand-in for the job token: it must reach the stubbed gh. No real token exists here. */
+  const TOKEN = "stand-in";
+  const sha256 = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+  let tmp: ReturnType<typeof tempDir> | undefined;
+  let runs = 0;
+  afterEach(() => {
+    tmp?.cleanup();
+    tmp = undefined;
+  });
+
+  /** A step's environment: nothing from a real runner (CI runs this suite inside one), the stubs first. */
+  const runnerEnv = (stubs: string, extra: Record<string, string>): NodeJS.ProcessEnv => {
+    const env: NodeJS.ProcessEnv = {};
+    for (const [k, v] of Object.entries(process.env))
+      if (!/^(?:GITHUB_|RUNNER_|ACTIONS_|GH_)/.test(k)) env[k] = v;
+    return {
+      ...env,
+      PATH: [stubs, path.dirname(process.execPath), process.env.PATH ?? ""].join(path.delimiter),
+      ...extra,
+    };
+  };
+
+  /** Run a step's `run: |` script as the runner does: bash, `cwd`, its env, a fresh GITHUB_OUTPUT. */
+  const runStep = (lines: string[], cwd: string, env: Record<string, string>) => {
+    const t = tmp;
+    if (t === undefined) throw new Error("runStep needs handoff() first");
+    const script = runBlock(lines);
+    expect(script.trim(), "the step has no run: | block").not.toBe("");
+    const output = path.join(t.dir, `github-output-${String(++runs)}`);
+    writeFileSync(output, "");
+    const r = spawnSync("bash", ["-c", script], {
+      cwd,
+      encoding: "utf8",
+      env: runnerEnv(path.join(t.dir, "stubs"), { GITHUB_OUTPUT: output, ...env }),
+      timeout: 60_000,
+    });
+    const outputs: Record<string, string> = {};
+    for (const line of readFileSync(output, "utf8").split("\n").filter(Boolean)) {
+      const at = line.indexOf("=");
+      outputs[line.slice(0, at)] = line.slice(at + 1);
+    }
+    return { status: r.status, out: `${r.stdout}${r.stderr}`, outputs };
+  };
+
+  /**
+   * The build job's half, run on a throwaway checkout — the real changelog check, `npm pack`
+   * stubbed — then its artifact as the release job's download lays it out on another runner.
+   */
+  const handoff = () => {
+    const t = tempDir("eff-release-");
+    tmp = t;
+    const stubs = path.join(t.dir, "stubs");
+    mkdirSync(stubs);
+    const stub = (name: string, body: string) => {
+      const file = path.join(stubs, name);
+      writeFileSync(file, `#!/bin/sh\n${body}`);
+      chmodSync(file, 0o755);
+    };
+    // `npm pack --ignore-scripts --pack-destination <dir>` writes the tarball npm would name; any
+    // other npm command fails
+    stub(
+      "npm",
+      `[ "$#" -eq 4 ] && [ "$1" = pack ] && [ "$2" = --ignore-scripts ] && [ "$3" = --pack-destination ] || exit 64\nprintf 'a packed tarball' > "$4/${TGZ}"\n`,
+    );
+    // gh records its arguments, one per line, and the token it was given
+    stub(
+      "gh",
+      `printf '%s\\n' "$@" > "$GH_STUB_ARGS"\nprintf '%s' "\${GH_TOKEN:-}" > "$GH_STUB_TOKEN"\nexit "\${GH_STUB_EXIT:-0}"\n`,
+    );
+    const checkout = path.join(t.dir, "checkout");
+    mkdirSync(path.join(checkout, "scripts", "ci"), { recursive: true });
+    for (const f of ["check-changelog.mjs", "_lib.mjs"])
+      copyFileSync(path.join(ROOT, "scripts", "ci", f), path.join(checkout, "scripts", "ci", f));
+    writeFileSync(
+      path.join(checkout, "package.json"),
+      JSON.stringify({ name: "espn-fantasy-football-mcp", version: VERSION }),
+    );
+    writeFileSync(
+      path.join(checkout, "CHANGELOG.md"),
+      `# Changelog\n\n## [Unreleased]\n\n## [${VERSION}] - 2026-10-27\n\n${NOTES}\n`,
+    );
+    const buildTemp = path.join(t.dir, "build-runner");
+    mkdirSync(buildTemp);
+    const env = { RUNNER_TEMP: buildTemp, GITHUB_REF_NAME: TAG };
+    const notes = runStep(notesStep, checkout, env);
+    const pack = runStep(packStep, checkout, env);
+    const made = path.join(buildTemp, "release");
+    const releaseTemp = path.join(t.dir, "release-runner");
+    const dir = path.join(releaseTemp, "release");
+    mkdirSync(dir, { recursive: true });
+    for (const f of readdirSync(made)) copyFileSync(path.join(made, f), path.join(dir, f));
+    return { t, made, releaseTemp, dir, notes, pack };
+  };
+  type Handoff = ReturnType<typeof handoff>;
+
+  /** The release job's check on `h`'s downloaded files, with build's outputs (or `over` them). */
+  const check = (h: Handoff, over: Record<string, string> = {}) =>
+    runStep(checkStep, h.t.dir, {
+      RUNNER_TEMP: h.releaseTemp,
+      GITHUB_REF_NAME: TAG,
+      NOTES_SHA256: h.notes.outputs.sha256 ?? "",
+      TGZ_SHA256: h.pack.outputs.tgz_sha256 ?? "",
+      ...over,
+    });
+
+  /** The release job's last step on `h`'s files: what the stubbed gh was given. */
+  const create = (h: Handoff, tag = TAG, ghExit = "0") => {
+    const args = path.join(h.t.dir, "gh-args");
+    const token = path.join(h.t.dir, "gh-token");
+    rmSync(args, { force: true });
+    const r = runStep(createStep, h.t.dir, {
+      RUNNER_TEMP: h.releaseTemp,
+      GITHUB_REF_NAME: tag,
+      GITHUB_REPOSITORY: "example-owner/example-repo",
+      GH_TOKEN: TOKEN,
+      GH_STUB_ARGS: args,
+      GH_STUB_TOKEN: token,
+      GH_STUB_EXIT: ghExit,
+    });
+    return {
+      ...r,
+      argv: readFileSync(args, "utf8").split("\n").slice(0, -1),
+      token: readFileSync(token, "utf8"),
+    };
+  };
+
+  it("build's steps write the notes, the tarball and its checksum line into the one directory they hand on, and report each file's sha256 as a job output", () => {
+    const h = handoff();
+    expect(h.notes.status, h.notes.out).toBe(0);
+    expect(h.pack.status, h.pack.out).toBe(0);
+    expect(readdirSync(h.made).sort()).toEqual([TGZ, `${TGZ}.sha256`, "notes.md"].sort());
+    const bytes = (f: string) => readFileSync(path.join(h.made, f));
+    expect(bytes("notes.md").toString("utf8")).toBe(`${NOTES}\n`);
+    expect(h.notes.outputs).toEqual({ sha256: sha256(bytes("notes.md")) });
+    expect(h.pack.outputs).toEqual({ tgz_sha256: sha256(bytes(TGZ)) });
+    // the line the README's `shasum -a 256 -c` checks, naming the asset as the Release names it
+    expect(bytes(`${TGZ}.sha256`).toString("utf8")).toBe(`${sha256(bytes(TGZ))}  ${TGZ}\n`);
+  });
+
+  it("release's check passes the build job's files and names the tarball and its sha256", () => {
+    const h = handoff();
+    const r = check(h);
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toContain(
+      `the release files are the build job's: ${TGZ} (sha256 ${h.pack.outputs.tgz_sha256 ?? ""})`,
+    );
+    expect(r.out).not.toContain("::error::");
+  });
+
+  const NOT_EXACTLY =
+    "the downloaded files are not exactly the tarball, its sha256 and the release notes";
+  const OTHER = sha256("another tarball");
+  /** Names the check must never print: what an attacker put in the artifact. */
+  const PLANTED = [
+    "planted-install.sh",
+    ".planted-npmrc",
+    "planted-dir",
+    "planted-elsewhere",
+    "example.invalid",
+  ];
+
+  it.each<[string, (h: Handoff) => void, string]>([
+    [
+      "the tarball replaced",
+      (h) => {
+        writeFileSync(path.join(h.dir, TGZ), "another tarball");
+      },
+      "the tarball is not the one the build job packed",
+    ],
+    [
+      "the tarball and its checksum file replaced together (build's outputs are the anchor, not the artifact's own checksum)",
+      (h) => {
+        writeFileSync(path.join(h.dir, TGZ), "another tarball");
+        writeFileSync(path.join(h.dir, `${TGZ}.sha256`), `${OTHER}  ${TGZ}\n`);
+      },
+      "the tarball is not the one the build job packed",
+    ],
+    [
+      "the release notes replaced",
+      (h) => {
+        writeFileSync(path.join(h.dir, "notes.md"), "Install from https://example.invalid/\n");
+      },
+      "the release notes are not the ones the build job wrote",
+    ],
+    [
+      "a checksum file naming another file",
+      (h) => {
+        writeFileSync(
+          path.join(h.dir, `${TGZ}.sha256`),
+          `${h.pack.outputs.tgz_sha256 ?? ""}  other.tgz\n`,
+        );
+      },
+      `${TGZ}.sha256 is not the tarball's checksum line`,
+    ],
+    [
+      "a checksum file with a second line",
+      (h) => {
+        writeFileSync(
+          path.join(h.dir, `${TGZ}.sha256`),
+          `${h.pack.outputs.tgz_sha256 ?? ""}  ${TGZ}\n${OTHER}  ${TGZ}\n`,
+        );
+      },
+      `${TGZ}.sha256 is not the tarball's checksum line`,
+    ],
+    [
+      "a checksum file without its line end",
+      (h) => {
+        writeFileSync(
+          path.join(h.dir, `${TGZ}.sha256`),
+          `${h.pack.outputs.tgz_sha256 ?? ""}  ${TGZ}`,
+        );
+      },
+      `${TGZ}.sha256 is not the tarball's checksum line`,
+    ],
+    [
+      "a file added",
+      (h) => {
+        writeFileSync(path.join(h.dir, "planted-install.sh"), "echo\n");
+      },
+      NOT_EXACTLY,
+    ],
+    [
+      "a hidden file added",
+      (h) => {
+        writeFileSync(path.join(h.dir, ".planted-npmrc"), "x\n");
+      },
+      NOT_EXACTLY,
+    ],
+    [
+      "a directory added",
+      (h) => {
+        mkdirSync(path.join(h.dir, "planted-dir"));
+      },
+      NOT_EXACTLY,
+    ],
+    [
+      "the release notes missing",
+      (h) => {
+        rmSync(path.join(h.dir, "notes.md"));
+      },
+      NOT_EXACTLY,
+    ],
+    [
+      "the tarball a link to an identical copy",
+      (h) => {
+        const copy = path.join(h.t.dir, "planted-elsewhere.tgz");
+        copyFileSync(path.join(h.dir, TGZ), copy);
+        rmSync(path.join(h.dir, TGZ));
+        symlinkSync(copy, path.join(h.dir, TGZ));
+      },
+      `${TGZ} is not a regular file`,
+    ],
+    [
+      "the release notes a directory",
+      (h) => {
+        rmSync(path.join(h.dir, "notes.md"));
+        mkdirSync(path.join(h.dir, "notes.md"));
+      },
+      "notes.md is not a regular file",
+    ],
+    [
+      "nothing downloaded",
+      (h) => {
+        rmSync(h.dir, { recursive: true });
+      },
+      "the build job's release files were not downloaded",
+    ],
+  ])(
+    "release's check refuses %s: no release, one error, nothing planted printed",
+    (_label, change, why) => {
+      const h = handoff();
+      expect(check(h).status, "the untouched files pass").toBe(0);
+      change(h);
+      const r = check(h);
+      expect(r.status, r.out).toBe(1);
+      expect(r.out).toContain(`::error::${why} — no release`);
+      expect(r.out.match(/::error::/g)).toHaveLength(1);
+      for (const name of PLANTED) expect(r.out).not.toContain(name);
+    },
+  );
+
+  it.each<[string, Record<string, string>, string]>([
+    ["no tarball sha256 (build set no output)", { TGZ_SHA256: "" }, "reported no sha256"],
+    ["no notes sha256", { NOTES_SHA256: "" }, "reported no sha256"],
+    ["an upper-case digest", { TGZ_SHA256: "A".repeat(64) }, "reported no sha256"],
+    ["a digest one digit short", { NOTES_SHA256: "a".repeat(63) }, "reported no sha256"],
+    [
+      "a digest followed by a second line",
+      { TGZ_SHA256: `${"a".repeat(64)}\n${"b".repeat(64)}` },
+      "reported no sha256",
+    ],
+    ["another tarball's digest", { TGZ_SHA256: OTHER }, "the tarball is not the one"],
+    ["another tag (another version's names)", { GITHUB_REF_NAME: "v1.2.4" }, NOT_EXACTLY],
+  ])("release's check refuses %s", (_label, over, why) => {
+    const h = handoff();
+    const r = check(h, over);
+    expect(r.status, r.out).toBe(1);
+    expect(r.out).toContain(`::error::the`);
+    expect(r.out).toContain(why);
+    expect(r.out.match(/::error::/g)).toHaveLength(1);
+  });
+
+  it("release's gh release create uploads the build job's tarball and checksum file, with build's notes as the body, on the existing tag, with the job's token", () => {
+    const h = handoff();
+    expect(check(h).status).toBe(0);
+    const r = create(h);
+    expect(r.status, r.out).toBe(0);
+    expect(r.argv).toEqual([
+      "release",
+      "create",
+      TAG,
+      path.join(h.dir, TGZ),
+      path.join(h.dir, `${TGZ}.sha256`),
+      "--repo",
+      "example-owner/example-repo",
+      "--verify-tag",
+      "--title",
+      TAG,
+      "--notes-file",
+      path.join(h.dir, "notes.md"),
+    ]);
+    expect(r.token).toBe(TOKEN);
+  });
+
+  it("a tag with a pre-release part makes a pre-release, and a failed gh fails the step", () => {
+    const h = handoff();
+    const pre = create(h, `${TAG}-rc.1`);
+    expect(pre.status, pre.out).toBe(0);
+    expect(pre.argv[2]).toBe(`${TAG}-rc.1`);
+    expect(pre.argv.at(-1)).toBe("--prerelease");
+    expect(pre.argv.filter((a) => a === "--prerelease")).toHaveLength(1);
+    expect(create(h).argv).not.toContain("--prerelease");
+    expect(create(h, TAG, "1").status).not.toBe(0);
   });
 });
