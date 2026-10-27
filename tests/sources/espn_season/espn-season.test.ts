@@ -21,6 +21,9 @@ import {
   espnSeasonSources,
   EspnSeasonSourceError,
   MAX_SKIPPED_PLAYER_SHARE,
+  MIN_GAMES_PER_TEAM,
+  MIN_PLAYERS,
+  MIN_PRO_TEAMS,
   playersRows,
   PLAYERS_WL_FILTER,
   proScheduleRows,
@@ -438,6 +441,38 @@ function oneTeamEmpty(body: unknown): unknown {
   }
   return out;
 }
+/** Only the pro teams `ids` listed (a partial listing: their games name teams it no longer lists). */
+function onlyTeams(body: unknown, ids: readonly number[]): unknown {
+  const out = clone(body) as { settings: { proTeams: Json[] } };
+  out.settings.proTeams = out.settings.proTeams.filter((t) => ids.includes(t.id as number));
+  return out;
+}
+/** Every team's per-period map cut to its first `n` periods (a listing cut short in time). */
+function firstPeriods(body: unknown, n: number): unknown {
+  const out = clone(body);
+  for (const t of teamsOf(out)) {
+    const map = t.proGamesByScoringPeriod as Record<string, Json[]>;
+    t.proGamesByScoringPeriod = Object.fromEntries(Object.entries(map).slice(0, n));
+  }
+  return out;
+}
+/** The first `n` games of team `id` removed from every listing (both teams of each lose it). */
+function dropGames(body: unknown, id: number, n: number): unknown {
+  const out = clone(body);
+  const team = teamsOf(out).find((t) => t.id === id)!;
+  const gone = new Set(
+    Object.values(team.proGamesByScoringPeriod as Record<string, Json[]>)
+      .flat()
+      .slice(0, n)
+      .map((g) => g.id as number),
+  );
+  for (const t of teamsOf(out)) {
+    const map = t.proGamesByScoringPeriod as Record<string, Json[]>;
+    for (const k of Object.keys(map))
+      map[k] = (map[k] ?? []).filter((g) => !gone.has(g.id as number));
+  }
+  return out;
+}
 /** Every player's `fullName` renamed (all entries skipped). */
 function renamedPlayers(body: unknown): unknown {
   return (clone(body) as Json[]).map(({ fullName, ...rest }) => ({ ...rest, name: fullName }));
@@ -468,7 +503,11 @@ describe("the drift gate over one body", () => {
   it("a team that plays no game fails; the free-agent pseudo-team's empty map is expected", () => {
     const c = checkProSchedule(oneTeamEmpty(SCHEDULE), 2026);
     expect(c.fields).toEqual(["proGamesByScoringPeriod"]);
-    expect(c.problems).toEqual(["1 pro team(s) play in no game"]);
+    // its three division rivals, who played it twice, are left with 15 games: short too
+    expect(c.problems).toEqual([
+      "1 pro team(s) play in no game",
+      "3 pro team(s) play fewer than 16 games",
+    ]);
   });
 
   it("any mistyped required field of a team or game fails, naming each field", () => {
@@ -507,6 +546,91 @@ describe("the drift gate over one body", () => {
     const dup = clone(PLAYERS) as Json[];
     for (let i = 1; i <= tolerated + 1; i++) dup[i]!.id = dup[0]!.id;
     expect(checkPlayers(dup, 2026).fields).toEqual(["id"]);
+  });
+});
+
+// Stage C remediation sources-espn-season-truncated-publishes: a partial listing passed every check
+// (fields present, typed, every listed team playing) and replaced the good dataset — 3 of 33 teams
+// published 34 games instead of 272; the first 50 players_wl entries replaced a 2,669-player index.
+describe("the drift gate refuses a truncated body (a count floor, not just a shape)", () => {
+  const MANIFEST = JSON.parse(
+    readFileSync(path.join(ROOT, "fixtures/drift/manifest.json"), "utf8"),
+  ) as {
+    probes: { host: { minItems: Record<string, number> } };
+    views: Record<string, { array_lengths: Record<string, { min: number }> }>;
+  };
+
+  it("the floors are the drift manifest's and the recorded bodies clear them", () => {
+    expect(MIN_PRO_TEAMS).toBe(MANIFEST.probes.host.minItems["$.settings.proTeams"]);
+    const listed = MANIFEST.views.proTeamSchedules_wl!.array_lengths["$.settings.proTeams"]!.min;
+    expect(listed - 1).toBeGreaterThanOrEqual(MIN_PRO_TEAMS); // the free-agent pseudo-team aside
+    expect(MANIFEST.views.players_wl!.array_lengths.$!.min).toBeGreaterThanOrEqual(MIN_PLAYERS);
+    const r = proScheduleRows(SCHEDULE, 2026);
+    expect([r.pro_teams, r.teams_without_games, r.teams_short_of_games]).toEqual([32, 0, 0]);
+    expect(playersRows(PLAYERS, 2026).rows.length).toBeGreaterThanOrEqual(MIN_PLAYERS);
+  });
+
+  it("3 of 33 teams listed: refused naming settings.proTeams (it published 34 games)", () => {
+    const c = checkProSchedule(onlyTeams(SCHEDULE, [0, 1, 2]), 2026);
+    expect(c.rows).toBe(34);
+    expect(c.fields).toEqual(["settings.proTeams"]);
+    expect(c.problems).toEqual(["2 pro teams listed, fewer than the league's 32"]);
+  });
+
+  it("one club missing from the list is refused; the free-agent pseudo-team never counts", () => {
+    const ids = teamsOf(SCHEDULE).map((t) => t.id as number);
+    const c = checkProSchedule(
+      onlyTeams(
+        SCHEDULE,
+        ids.filter((id) => id !== 1),
+      ),
+      2026,
+    );
+    expect(c.fields).toContain("settings.proTeams");
+    expect(c.problems).toContain("31 pro teams listed, fewer than the league's 32");
+    const noFa = checkProSchedule(
+      onlyTeams(
+        SCHEDULE,
+        ids.filter((id) => id !== 0),
+      ),
+      2026,
+    );
+    expect(noFa).toEqual({ rows: 272, fields: [], problems: [] });
+  });
+
+  it("every team listed but its games cut short: refused naming proGamesByScoringPeriod", () => {
+    const c = checkProSchedule(firstPeriods(SCHEDULE, 4), 2026);
+    expect(c.fields).toEqual(["proGamesByScoringPeriod"]);
+    expect(c.problems).toEqual(["32 pro team(s) play fewer than 16 games"]);
+  });
+
+  it("the games floor's boundary: a team at 16 games passes, at 15 is refused", () => {
+    expect(MIN_GAMES_PER_TEAM).toBe(16);
+    expect(checkProSchedule(dropGames(SCHEDULE, 1, 1), 2026)).toMatchObject({
+      rows: 271,
+      fields: [],
+      problems: [],
+    });
+    const c = checkProSchedule(dropGames(SCHEDULE, 1, 2), 2026);
+    expect(c.rows).toBe(270);
+    expect(c.fields).toEqual(["proGamesByScoringPeriod"]);
+    expect(c.problems).toEqual(["1 pro team(s) play fewer than 16 games"]);
+  });
+
+  it("players: the first 50 entries are refused naming players_wl; the floor's boundary holds", () => {
+    const list = PLAYERS as Json[];
+    const c = checkPlayers(list.slice(0, 50), 2026);
+    expect(c.rows).toBe(50);
+    expect(c.fields).toEqual(["players_wl"]);
+    expect(c.problems).toEqual([
+      "50 players (50 entries), fewer than the 1696 of the league's active rosters",
+    ]);
+    expect(checkPlayers(list.slice(0, MIN_PLAYERS), 2026)).toMatchObject({
+      rows: MIN_PLAYERS,
+      fields: [],
+      problems: [],
+    });
+    expect(checkPlayers(list.slice(0, MIN_PLAYERS - 1), 2026).fields).toEqual(["players_wl"]);
   });
 });
 
@@ -569,6 +693,8 @@ describe("the drift gate through the runner, the publisher and the store", () =>
   it.each([
     ["ISO dates", isoDates(SCHEDULE), "date"],
     ["a renamed per-period map", renamedMap(SCHEDULE), "proGamesByScoringPeriod"],
+    ["3 of 33 teams listed", onlyTeams(SCHEDULE, [0, 1, 2]), "settings.proTeams"],
+    ["every team's games cut short", firstPeriods(SCHEDULE, 4), "proGamesByScoringPeriod"],
   ])(
     "schedule with %s: failed schema_mismatch naming the field; the good schedule stays served and the season stays in_season",
     async (_label, drifted, field) => {
@@ -612,6 +738,7 @@ describe("the drift gate through the runner, the publisher and the store", () =>
   it.each([
     ["a renamed field", renamedPlayers(PLAYERS)],
     ["an empty index", []],
+    ["the first 50 entries", (PLAYERS as Json[]).slice(0, 50)],
   ])(
     "players with %s: failed schema_mismatch; the published universe stays",
     async (_label, drifted) => {

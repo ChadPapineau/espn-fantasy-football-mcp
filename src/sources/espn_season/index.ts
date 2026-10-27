@@ -14,6 +14,12 @@
 // (fixtures/drift/manifest.json `probes.host.required` — the per-period map and every game's epoch
 // `date` included), fails with `schema_mismatch` naming the field, so a drifted body never replaces
 // the good dataset (a schedule without kickoffs would read off-season and stop every in-season job).
+// A body far below a whole season fails the same way (Stage C remediation
+// sources-espn-season-truncated-publishes): a schedule listing fewer than the league's 32 pro teams
+// (the manifest's `probes.host.minItems` on `settings.proTeams`) or a pro team with fewer than 16
+// games, and a player index with fewer players than the league's 32 active rosters hold — a partial
+// listing would otherwise replace the good dataset and drop every other team's byes, kickoffs and
+// lock flags, or most of the player universe the crosswalk, news matcher and name index read.
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { SOURCE_REGISTRY } from "../../config/freshness.js";
@@ -53,6 +59,24 @@ export const MAX_SEASON_ROWS = 20_000;
 export const MAX_SKIPPED_PLAYER_SHARE = 0.01;
 /** ESPN's free-agent pseudo-team (id 0): listed with an empty per-period map, plays no game. */
 export const FREE_AGENT_PRO_TEAM_ID = 0;
+/**
+ * The fewest pro teams (the free-agent pseudo-team not counted) a whole schedule lists: the NFL's 32
+ * clubs, the drift manifest's `probes.host.minItems` on `settings.proTeams` (the recorded 2026 body
+ * lists 33 with the pseudo-team).
+ */
+export const MIN_PRO_TEAMS = 32;
+/**
+ * The fewest games one pro team plays in a whole schedule: 16, the shortest regular season since
+ * 1978 (17 games since 2021 — every team of the recorded 2026 body plays 17 — and the cancelled 2022
+ * Bills–Bengals game left both at 16). A team listed with fewer is a truncated schedule.
+ */
+export const MIN_GAMES_PER_TEAM = 16;
+/**
+ * The fewest players a whole players_wl index holds: the league's 32 active rosters of 53 (1,696).
+ * The recorded 2026 index holds 2,669 (1,796 on a team, 873 free agents; research 03 §A.2 counted
+ * 2,663); a page of it — a filter that gains a limit, a cut-short body — is not the index.
+ */
+export const MIN_PLAYERS = 32 * 53;
 
 /** A season source failure with a fixed refresh_log code (never upstream text). */
 export class EspnSeasonSourceError extends Error {
@@ -80,6 +104,10 @@ export interface ProScheduleParse {
   readonly failed_fields: readonly string[];
   /** Pro teams (the free-agent pseudo-team excluded) that play in no published game. */
   readonly teams_without_games: number;
+  /** Distinct pro teams listed (the free-agent pseudo-team excluded). */
+  readonly pro_teams: number;
+  /** Pro teams (the free-agent pseudo-team excluded) in 1 to MIN_GAMES_PER_TEAM − 1 games. */
+  readonly teams_short_of_games: number;
 }
 
 /** The required fields of one `settings.proTeams[]` entry that fail (drift manifest `probes.host`). */
@@ -116,7 +144,6 @@ export function proScheduleRows(body: unknown, season: number): ProScheduleParse
   const games = new Map<number, DatasetRow>();
   const teams: DatasetRow[] = [];
   const failed = new Set<string>();
-  const playing = new Set<number>();
   let skipped = 0;
   let invalid = 0;
   const note = (failures: readonly string[]): void => {
@@ -160,16 +187,20 @@ export function proScheduleRows(body: unknown, season: number): ProScheduleParse
             "proTeamSchedules_wl: one game id listed with different fields",
           );
         games.set(id, row);
-        playing.add(row.home_pro_team_id as number);
-        playing.add(row.away_pro_team_id as number);
         if (games.size > MAX_SEASON_ROWS)
           throw new EspnSeasonSourceError("schema_mismatch", "proTeamSchedules_wl: too many games");
       }
     }
   }
-  const idle = teams.filter(
-    (t) => t.pro_team_id !== FREE_AGENT_PRO_TEAM_ID && !playing.has(t.pro_team_id as number),
-  ).length;
+  // each game counted once (it is listed under both of its teams)
+  const played = new Map<number, number>();
+  for (const g of games.values())
+    for (const team of new Set([g.home_pro_team_id as number, g.away_pro_team_id as number]))
+      played.set(team, (played.get(team) ?? 0) + 1);
+  const listed = new Set(
+    teams.map((t) => t.pro_team_id as number).filter((id) => id !== FREE_AGENT_PRO_TEAM_ID),
+  );
+  const counts = [...listed].map((id) => played.get(id) ?? 0);
   return {
     games: [...games.values()].sort(
       (a, b) => (a.espn_game_id as number) - (b.espn_game_id as number),
@@ -178,7 +209,9 @@ export function proScheduleRows(body: unknown, season: number): ProScheduleParse
     skipped,
     invalid,
     failed_fields: [...failed].sort(),
-    teams_without_games: idle,
+    teams_without_games: counts.filter((n) => n === 0).length,
+    pro_teams: listed.size,
+    teams_short_of_games: counts.filter((n) => n > 0 && n < MIN_GAMES_PER_TEAM).length,
   };
 }
 
@@ -285,9 +318,10 @@ export interface SeasonViewCheck {
 /**
  * The drift gate over a proTeamSchedules_wl body: it passes only when it yields games, every team
  * and game entry carries the drift manifest's required fields with their types (an epoch-ms `date`
- * per game — a kickoff the season gate and the in-game TTLs read), and every pro team but the
- * free-agent pseudo-team plays in at least one game. Throws EspnSeasonSourceError on a body with no
- * `settings.proTeams[]` (the caller reports it).
+ * per game — a kickoff the season gate and the in-game TTLs read), it lists at least MIN_PRO_TEAMS
+ * pro teams besides the free-agent pseudo-team, and each of them plays at least MIN_GAMES_PER_TEAM
+ * games (a truncated listing is drift, never a smaller schedule). Throws EspnSeasonSourceError on a
+ * body with no `settings.proTeams[]` (the caller reports it).
  */
 export function checkProSchedule(body: unknown, season: number): SeasonViewCheck {
   const r = proScheduleRows(body, season);
@@ -305,13 +339,26 @@ export function checkProSchedule(body: unknown, season: number): SeasonViewCheck
     fields.add("proGamesByScoringPeriod");
     problems.push(`${String(r.teams_without_games)} pro team(s) play in no game`);
   }
+  if (r.teams_short_of_games > 0) {
+    fields.add("proGamesByScoringPeriod");
+    problems.push(
+      `${String(r.teams_short_of_games)} pro team(s) play fewer than ${String(MIN_GAMES_PER_TEAM)} games`,
+    );
+  }
+  if (r.pro_teams < MIN_PRO_TEAMS) {
+    fields.add("settings.proTeams");
+    problems.push(
+      `${String(r.pro_teams)} pro teams listed, fewer than the league's ${String(MIN_PRO_TEAMS)}`,
+    );
+  }
   return { rows: r.games.length, fields: [...fields].sort(), problems };
 }
 
 /**
- * The drift gate over a players_wl body: it passes only when it yields players and at most
- * MAX_SKIPPED_PLAYER_SHARE of its entries are skipped. Throws EspnSeasonSourceError on a body that
- * is not a root array (the caller reports it).
+ * The drift gate over a players_wl body: it passes only when it yields at least MIN_PLAYERS players
+ * (a truncated index is drift, never a smaller universe) and at most MAX_SKIPPED_PLAYER_SHARE of its
+ * entries are skipped. Throws EspnSeasonSourceError on a body that is not a root array (the caller
+ * reports it).
  */
 export function checkPlayers(body: unknown, season: number): SeasonViewCheck {
   const r = playersRows(body, season);
@@ -326,6 +373,12 @@ export function checkPlayers(body: unknown, season: number): SeasonViewCheck {
     );
   } else {
     fields.clear(); // a tolerated skip: publish reports the count
+  }
+  if (r.rows.length > 0 && r.rows.length < MIN_PLAYERS) {
+    fields.add("players_wl");
+    problems.push(
+      `${String(r.rows.length)} players (${String(r.entries)} entries), fewer than the ${String(MIN_PLAYERS)} of the league's active rosters`,
+    );
   }
   return { rows: r.rows.length, fields: [...fields].sort(), problems };
 }
