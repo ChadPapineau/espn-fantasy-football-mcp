@@ -159,6 +159,8 @@ export function tradePlayerOf(
   slotId: number,
   weeks: readonly Week[],
   ros: RosReading | null,
+  /** The week ESPN's numbers describe (valueWeeks' `asOf`), whatever weeks are valued. */
+  asOf: Week,
 ): TradePlayer {
   return {
     player_id: p.ref.id,
@@ -169,7 +171,7 @@ export function tradePlayerOf(
     injury_status: p.injury_status,
     slot_id: slotId,
     droppable: p.droppable,
-    weekly: valueWeeks(p, weeks, ros),
+    weekly: valueWeeks(p, weeks, ros, asOf),
     bye_week: p.bye_week,
     auction_value_average: p.ownership?.auction_value_average ?? null,
   };
@@ -620,7 +622,7 @@ export const analyzeTradeTool = defineTool({
       return {
         team_id: r.team.team_id,
         name: r.team_name,
-        players: r.entries.map((e) => tradePlayerOf(ctx, e.player, e.slot_id, weeks, ros)),
+        players: r.entries.map((e) => tradePlayerOf(ctx, e.player, e.slot_id, weeks, ros, b.w)),
         readings,
         alive_by_week: aliveOf(readings),
       };
@@ -657,7 +659,7 @@ export const analyzeTradeTool = defineTool({
         mode: ctx.services.seedingMode,
         confirmed_at: ctx.services.seedingConfirmedAt,
       },
-      free_agents: wire.map((p) => tradePlayerOf(ctx, p, 20, weeks, ros)),
+      free_agents: wire.map((p) => tradePlayerOf(ctx, p, 20, weeks, ros, b.w)),
       clock: ctx.services.clock,
       pacer: ctx.pacer,
       rng: seededRng(seed),
@@ -1111,7 +1113,7 @@ export const analyzeInjuryCascadeTool = defineTool({
               })(),
         percent_change: p.ownership?.percent_change ?? null,
         availability: { status: p.status, waiver_process_date: p.waiver_process_date },
-        weekly: valueWeeks(p, weeks, ros),
+        weekly: valueWeeks(p, weeks, ros, b.w),
         depth_rank: depthRankOf.get(p.ref.id) ?? null,
       };
     });
@@ -1152,7 +1154,7 @@ export const analyzeInjuryCascadeTool = defineTool({
           carry_share: injShares.carry_share,
           rz_share: injShares.rz_share,
         },
-        weekly: valueWeeks(inj, weeks, ros),
+        weekly: valueWeeks(inj, weeks, ros, b.w),
         mine:
           myEntry === null
             ? null
@@ -1394,6 +1396,27 @@ export function othersOf(
 export const NO_PAIR_EVIDENCE_WARNING =
   "no crosswalk pair for this player: the official injury report and nflverse usage were not read for him (no nflverse row to join); news is matched by his ESPN id";
 
+/** The one confirmation E10 can name for a player with no crosswalk pair in place of the official report's. */
+export const NO_PAIR_CONFIRM_ESPN =
+  "ESPN's injury status for him changes (the official injury report cannot be joined for him: no crosswalk pair)";
+/** How an unpaired player's official report and usage become readable. */
+export const NO_PAIR_CONFIRM_PAIR =
+  "a crosswalk pair for him (nflverse lists him at a refresh, or an override; `eff crosswalk rebuild` lists the unmatched): only then can his official report and usage be read";
+
+/**
+ * E10's what_would_confirm for a subject with no crosswalk pair: an entry naming the official report or
+ * game status is a source E10 can never join for him (it reads the report by gsis id), so it is
+ * replaced by ESPN's own status and the pair that would make the report readable. The engine named
+ * "the next official injury report" for him — a confirmation that could never arrive (Stage C finding
+ * crosswalk-unpaired-joins-silent, attempt 2).
+ */
+export function confirmWithoutPair(confirm: readonly string[]): string[] {
+  const ours = new Set([NO_PAIR_CONFIRM_ESPN, NO_PAIR_CONFIRM_PAIR]);
+  const kept = confirm.filter((c) => ours.has(c) || !/\bofficial\b/i.test(c));
+  const out = kept.length === confirm.length ? kept : [NO_PAIR_CONFIRM_ESPN, ...kept];
+  return [...new Set([...out, NO_PAIR_CONFIRM_PAIR])].slice(0, 10);
+}
+
 /** E10 data (plan 07 E10; EvidenceData). */
 export const evidenceSchema = z.strictObject({
   flag: z.enum([
@@ -1515,8 +1538,9 @@ export const analyzeEvidenceTool = defineTool({
     // spells otherwise) has no nflverse row to join: say what was not read for him, as D1 does —
     // the answer otherwise read as if the official report and his usage had been checked (Stage C
     // finding crosswalk-unpaired-joins-silent)
-    if (gsis === null && !isTeamUnitIdentity({ espn_id: p.ref.id, position_id: p.position_id }))
-      warnings.push(NO_PAIR_EVIDENCE_WARNING);
+    const unpaired =
+      gsis === null && !isTeamUnitIdentity({ espn_id: p.ref.id, position_id: p.position_id });
+    if (unpaired) warnings.push(NO_PAIR_EVIDENCE_WARNING);
     const myTeam = b.league.my_team?.team_id ?? null;
     const isMine = p.status === "ONTEAM" && myTeam !== null && p.on_team_id === myTeam;
     let slot: number | null = null;
@@ -1720,7 +1744,13 @@ export const analyzeEvidenceTool = defineTool({
       out.claims,
     );
     return {
-      data: { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) },
+      data: {
+        ...out.data,
+        ...(unpaired
+          ? { what_would_confirm: confirmWithoutPair(out.data.what_would_confirm) }
+          : {}),
+        inputs: toDataInputs(inputs, ctx.nowMs),
+      },
       inputs,
       warnings: [...warnings, ...out.warnings],
       estimate: true,
@@ -1945,7 +1975,7 @@ export const analyzeLeagueActivityTool = defineTool({
                   player_id: e.player.ref.id,
                   position: e.player.position,
                   slot_id: e.slot_id,
-                  weekly: valueWeeks(e.player, weeks, ros),
+                  weekly: valueWeeks(e.player, weeks, ros, b.w),
                 })),
               }),
         },
@@ -1962,7 +1992,7 @@ export const analyzeLeagueActivityTool = defineTool({
         player_id: p.ref.id,
         position: p.position,
         slot_id: 20,
-        weekly: valueWeeks(p, weeks, ros),
+        weekly: valueWeeks(p, weeks, ros, b.w),
       })),
       include_rival_needs: args.include_rival_needs,
       clock: ctx.services.clock,

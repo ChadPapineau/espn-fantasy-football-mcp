@@ -89,9 +89,9 @@ describe("the tools' weekly values are E1's (projection-ros-includes-week18)", (
         const p: PlatformPlayer = entry.player;
         const proj = e1.find((x) => x.player_id === p.ref.id);
         if (proj === undefined || p.injury_status !== "ACTIVE") continue;
-        const v = valueWeeks(p, weeks, ros);
+        const v = valueWeeks(p, weeks, ros, w);
         const wp = waiverPlayerOf(p, entry.slot_id, entry.lineup_locked, weeks, null, ros).weekly;
-        const old = valueWeeks(p, weeks, null);
+        const old = valueWeeks(p, weeks, null, w);
         for (const [i, week] of weeks.entries()) {
           const espn = proj.weeks.find((x) => x.week === week)?.inputs.espn ?? null;
           if (espn === null) continue;
@@ -166,8 +166,8 @@ describe("the tools' weekly values are E1's (projection-ros-includes-week18)", (
       for (const b of same.slice(1)) {
         const pb = byId.get(b.player_id);
         if (pa === undefined || pb === undefined) continue;
-        const want = sum(valueWeeks(pa, weeks, ros)) - sum(valueWeeks(pb, weeks, ros));
-        const before = sum(valueWeeks(pa, weeks, null)) - sum(valueWeeks(pb, weeks, null));
+        const want = sum(valueWeeks(pa, weeks, ros, w)) - sum(valueWeeks(pb, weeks, ros, w));
+        const before = sum(valueWeeks(pa, weeks, null, w)) - sum(valueWeeks(pb, weeks, null, w));
         expect(
           a.vor_ros.mean - b.vor_ros.mean,
           `${pos} ${String(a.player_id)}/${String(b.player_id)}`,

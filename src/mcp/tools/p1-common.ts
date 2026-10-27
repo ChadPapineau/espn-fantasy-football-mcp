@@ -102,20 +102,24 @@ export async function basicsOf(
  * shared over the games it still counts — E1 v1's own point estimate (weight_espn = 1.0), so the
  * league-wide engines (E4, E6, E7, E8's stream, E9's wire, E11) need no sampling. `ros` is the call's
  * reading of that total (common.ts RosReading: E1's window from the pro schedule at the clock —
- * Stage C finding projection-ros-includes-week18); null reads it from the first value week.
+ * Stage C finding projection-ros-includes-week18); null reads it from the as-of week.
+ *
+ * `asOf` is the week ESPN's numbers describe — the week the players were read for (the call's week):
+ * the weekly projection is that week's, and the total is shared from it. It is never inferred from
+ * the value weeks: E6 leaves out a current week a trade cannot reach, and reading the as-of week as
+ * `weeks[0]` then valued week 6 with ESPN's week-5 projection and shared the total from week 6
+ * (Stage C finding trade-locked-week-counted, attempt 2); E8's asked weeks did the same.
  */
 export function valueWeeks(
   p: PlatformPlayer,
   weeks: readonly Week[],
   ros: RosReading | null,
+  asOf: Week,
 ): (number | null)[] {
-  return weeklyValues(
-    weeks,
-    p.projection_week_espn,
-    p.projection_ros_espn,
-    p.bye_week,
-    rosOptsOf(p, ros),
-  );
+  return weeklyValues(weeks, p.projection_week_espn, p.projection_ros_espn, p.bye_week, {
+    ...rosOptsOf(p, ros),
+    from_week: asOf,
+  });
 }
 
 /** E1 targets per call (the engine's own cap is 64). */
