@@ -42,7 +42,9 @@
 // maxSchemaDepth, a named element, no two children of a group sharing a name, a root that is not
 // REPEATED — so this scan, checkParquet and hyparquet's decoder always pick the same element for a
 // column; and the page scan requires a chunk's own type to be its element's (hyparquet decodes by
-// the chunk's).
+// the chunk's). The scan walks exactly the bytes hyparquet slices for a chunk (Stage C remediation
+// nflverse-parquet-dict-offset-scan-bypass: a negative or past-2^53 dictionary page offset sent
+// hyparquet to bytes the scan never walked; `chunkBytes`).
 //
 // Every refusal is NflverseSourceError `corrupt` (refresh_log `schema_mismatch`): the run fails
 // loudly before any large allocation and the previous dataset stays served. The caps bound the
@@ -631,10 +633,39 @@ export function scanParquetPages(
   }
 }
 
+type ChunkMeta = NonNullable<FileMetaData["row_groups"][number]["columns"][number]["meta_data"]>;
+
+/**
+ * The bytes of one column chunk, exactly the bytes hyparquet decodes (Stage C remediation
+ * nflverse-parquet-dict-offset-scan-bypass). hyparquet's parquetPlanGroup takes
+ * `dictionary_page_offset || data_page_offset` — any value but an absent or zero one wins — and slices
+ * the file from `Number()` of it to `Number()` of its sum with `total_compressed_size`: a negative
+ * start counts from the file's end, a start past 2^53 is a chunk the scan never sees, and a bigint
+ * does not add to a number (the read throws). Falling back to `data_page_offset` whenever the
+ * dictionary offset is not a count walked one region while hyparquet decoded another, so every check
+ * here was bypassed. So a dictionary offset that is present must be a whole number of bytes (zero
+ * means none, to hyparquet too: `0n` is falsy), the start and the size are numbers of one kind, and
+ * the chunk lies inside the file; anything else is refused as corrupt.
+ */
+function chunkBytes(bytes: Uint8Array, md: ChunkMeta): Uint8Array {
+  const dictRaw: unknown = md.dictionary_page_offset;
+  const dict = dictRaw === undefined ? 0 : safeCount(dictRaw);
+  if (dict === null) throw corrupt("a column chunk's dictionary page offset is not an offset");
+  const startRaw: unknown = dict > 0 ? dictRaw : md.data_page_offset;
+  const sizeRaw: unknown = md.total_compressed_size;
+  const start = safeCount(startRaw);
+  const size = safeCount(sizeRaw);
+  if (start === null || size === null || start + size > bytes.length)
+    throw corrupt("a column chunk lies outside the file");
+  if (typeof startRaw !== typeof sizeRaw)
+    throw corrupt("a column chunk's offset and size are not numbers of one kind");
+  return bytes.subarray(start, start + size);
+}
+
 /** One column chunk, walked page by page the way hyparquet's flat-column reader walks it. */
 function scanChunk(
   bytes: Uint8Array,
-  md: NonNullable<FileMetaData["row_groups"][number]["columns"][number]["meta_data"]>,
+  md: ChunkMeta,
   el: SchemaElement,
   groupRows: number,
   limits: ParquetDecodeLimits,
@@ -642,12 +673,7 @@ function scanChunk(
 ): void {
   if (md.codec !== "SNAPPY" && md.codec !== "UNCOMPRESSED")
     throw corrupt("a column chunk's codec is not allowed");
-  const dict = safeCount(md.dictionary_page_offset);
-  const first = dict !== null && dict > 0 ? dict : safeCount(md.data_page_offset);
-  const size = safeCount(md.total_compressed_size);
-  if (first === null || size === null || first + size > bytes.length)
-    throw corrupt("a column chunk lies outside the file");
-  const chunk = bytes.subarray(first, first + size);
+  const chunk = chunkBytes(bytes, md);
   // hyparquet: an absent repetition type counts as optional (getMaxDefinitionLevel)
   const optional = el.repetition_type !== "REQUIRED";
   const perEntry = minEntryBytes(el);

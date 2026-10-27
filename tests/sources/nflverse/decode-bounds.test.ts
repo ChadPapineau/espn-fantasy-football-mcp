@@ -40,6 +40,7 @@ import {
   PAGE,
   plainStrings,
   uvarint,
+  type HiddenLayout,
   type HostileColumn,
   type HostilePage,
 } from "./helpers/hostile-parquet.js";
@@ -610,5 +611,146 @@ describe("the footer is walked by a bounded reader before hyparquet parses it", 
       message: "nflverse: unreadable parquet footer",
     });
     expect(performance.now() - t0).toBeLessThan(5_000); // a hang detector, not a budget
+  });
+});
+
+// Stage C remediation nflverse-parquet-dict-offset-scan-bypass. hyparquet slices a chunk from
+// `dictionary_page_offset || data_page_offset`: any present, non-zero offset wins, a negative one
+// counts from the file's end and one past 2^53 is past it. The scan fell back to data_page_offset
+// for any offset that was not a count, so it walked one region while hyparquet decoded another: the
+// pages it checked were never decoded and the pages decoded were never checked. No network.
+describe("the scan walks exactly the bytes hyparquet decodes (the chunk's dictionary offset)", () => {
+  /** nflverse:players, one row: `gsis_id` a present SCANNED_ (changed by `gsis`), every other column null. */
+  const playersWith = (
+    gsis: Partial<HostileColumn>,
+    hidden: readonly HostilePage[] = [],
+  ): Uint8Array =>
+    hostileParquet({
+      groupRows: 1,
+      hidden,
+      columns: Object.entries(PLAYERS).map(([name, kind]) => ({
+        name,
+        type: kind === "int" ? ("INT32" as const) : ("BYTE_ARRAY" as const),
+        utf8: kind !== "int",
+        pages: [name === "gsis_id" ? onePresent("SCANNED_") : nullPage(1)],
+        ...(name === "gsis_id" ? gsis : {}),
+      })),
+    });
+  /** A dictionary offset counted from the file's end that lands on the first hidden page. */
+  const fromEnd = ({ hidden, fileLength }: HiddenLayout): bigint => BigInt(hidden - fileLength);
+  const gsisOf = async (bytes: Uint8Array): Promise<unknown[]> => {
+    const out: unknown[] = [];
+    await eachRow("nflverse:players", [file(bytes)], (raw) => out.push(raw.gsis_id));
+    return out;
+  };
+  const refused = async (bytes: Uint8Array, re: RegExp): Promise<void> => {
+    const r = await assertNflverseSchema("nflverse:players", [file(bytes)]);
+    expect(r).toMatchObject({ ok: false, error: "schema_mismatch" });
+    expect(r.warnings.join("\n")).toMatch(re);
+    await expect(gsisOf(bytes)).rejects.toMatchObject({ reason: "corrupt" });
+  };
+
+  it("control: a hidden page is never read through a valid layout; offset 0 means no dictionary to both", async () => {
+    expect(Object.keys(PLAYERS)).toContain("gsis_id");
+    const hidden = [onePresent("DECODED_")];
+    for (const bytes of [
+      playersWith({}),
+      playersWith({}, hidden),
+      playersWith({ dictionaryPageOffset: 0n }, hidden),
+    ]) {
+      expect(await assertNflverseSchema("nflverse:players", [file(bytes)])).toMatchObject({
+        ok: true,
+        rows: 1,
+      });
+      expect(await gsisOf(bytes)).toEqual(["SCANNED_"]);
+    }
+  });
+
+  it("a negative dictionary offset on another page: refused (it decoded the page the scan never walked)", async () => {
+    await refused(
+      playersWith({ dictionaryPageOffset: fromEnd }, [onePresent("DECODED_")]),
+      /dictionary page offset is not an offset/,
+    );
+  });
+
+  it("a negative dictionary offset on a decode bomb: refused before decoding (it passed with no warning)", async () => {
+    // a def-level RLE run of 2^18 nulls behind num_values 1 (at 2^25 the decode is a fatal OOM)
+    const bomb = { numValues: 1, encoding: ENC.PLAIN, body: defRun(1 << 18, 0) };
+    await refused(
+      playersWith({ dictionaryPageOffset: fromEnd }, [bomb]),
+      /dictionary page offset is not an offset/,
+    );
+    // the same page inside the chunk is refused by the page scan
+    await refused(playersWith({ pages: [bomb] }), /overrun/);
+  });
+
+  it("a dictionary offset past 2^53: refused (hyparquet read an empty chunk, a silently null column)", async () => {
+    await refused(
+      playersWith({ dictionaryPageOffset: 2n ** 60n }),
+      /dictionary page offset is not an offset/,
+    );
+    await refused(
+      playersWith({ dictionaryPageOffset: 2n ** 53n }),
+      /dictionary page offset is not an offset/,
+    );
+  });
+
+  describe("scan level: the metadata hyparquet plans the chunk from", () => {
+    const base = hostileParquet({ groupRows: 2, columns: [one({ pages: [nullPage(2)] })] });
+    type Chunk = Record<string, unknown>;
+    const withChunk = (fn: (m: Chunk) => void) => (md: FileMetaData) => {
+      const copy = structuredClone(md);
+      const m = copy.row_groups[0]?.columns[0]?.meta_data as Chunk | undefined;
+      if (m === undefined) throw new Error("no chunk");
+      fn(m);
+      return copy;
+    };
+
+    it.each<[string, unknown]>([
+      ["negative", -1n],
+      ["negative (an I32 field)", -5],
+      ["2^53", 2n ** 53n],
+      ["fractional (a DOUBLE field)", 4.5],
+      ["NaN (a DOUBLE field)", Number.NaN],
+      ["a boolean field", true],
+      ["a binary field", new Uint8Array([4])],
+      ["a list field", [4]],
+    ])("refuses a dictionary page offset that is %s", async (_label, v) => {
+      await expect(
+        scan(
+          base,
+          ["gsis_id"],
+          PARQUET_DECODE_LIMITS,
+          withChunk((m) => (m.dictionary_page_offset = v)),
+        ),
+      ).rejects.toThrow(/dictionary page offset is not an offset/);
+    });
+
+    it("an offset and a size of two kinds are refused (hyparquet cannot add a bigint to a number)", async () => {
+      await scan(base, ["gsis_id"]);
+      await scan(
+        base,
+        ["gsis_id"],
+        PARQUET_DECODE_LIMITS,
+        withChunk((m) => (m.dictionary_page_offset = 0n)),
+      );
+      await expect(
+        scan(
+          base,
+          ["gsis_id"],
+          PARQUET_DECODE_LIMITS,
+          withChunk((m) => (m.data_page_offset = 4)),
+        ),
+      ).rejects.toThrow(/not numbers of one kind/);
+      await scan(
+        base,
+        ["gsis_id"],
+        PARQUET_DECODE_LIMITS,
+        withChunk((m) => {
+          m.data_page_offset = 4;
+          m.total_compressed_size = Number(m.total_compressed_size);
+        }),
+      );
+    });
   });
 });

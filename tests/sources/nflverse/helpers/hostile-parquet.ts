@@ -8,6 +8,9 @@
 // own schema list (`schema`: every element's raw thrift fields, of any thrift type — a negative or
 // DOUBLE-typed child count, a duplicated name, a DECIMAL annotation) and a column chunk its own
 // statistics (`statistics`), so the footer facts hyparquet's metadata parse acts on are the test's.
+// Stage C remediation nflverse-parquet-dict-offset-scan-bypass: a column may carry its own raw
+// dictionary page offset (`dictionaryPageOffset`, negative or past 2^53, or counted from the file's
+// end), and a file pages outside every chunk (`hidden`), the bytes such an offset can point at.
 import { snappyLiteral } from "./parquet-writer.js";
 
 export type HostileType = "BOOLEAN" | "INT32" | "INT64" | "DOUBLE" | "BYTE_ARRAY";
@@ -53,6 +56,19 @@ export interface HostileColumn {
   readonly codec?: "SNAPPY" | "UNCOMPRESSED";
   /** The chunk's Statistics struct (ColumnMetaData field 12), raw; none by default. */
   readonly statistics?: readonly ThriftField[];
+  /**
+   * ColumnMetaData.dictionary_page_offset (field 11) as written, raw (negative or past 2^53 if the
+   * test says so), in place of the first dictionary page's offset; or a function of where the file's
+   * `hidden` pages start and of the file's length (the offset's own varint is in the footer, so the
+   * file is rewritten until its length is stable).
+   */
+  readonly dictionaryPageOffset?: bigint | ((at: HiddenLayout) => bigint);
+}
+
+/** Where a file's `hidden` pages start, and the file's whole length. */
+export interface HiddenLayout {
+  readonly hidden: number;
+  readonly fileLength: number;
 }
 
 export interface HostileFile {
@@ -70,6 +86,11 @@ export interface HostileFile {
   readonly schema?: readonly (readonly ThriftField[])[];
   /** The footer's key-value metadata (FileMetaData field 5), in order; none by default. */
   readonly keyValue?: Readonly<Record<string, string>>;
+  /**
+   * Pages written after every column chunk and before the footer, stored with the first column's
+   * codec: inside no chunk's declared range, so only a hostile offset reaches them.
+   */
+  readonly hidden?: readonly HostilePage[];
 }
 
 // --- byte helpers --------------------------------------------------------------------------------------
@@ -253,78 +274,92 @@ export function schemaOf(columns: readonly HostileColumn[]): ThriftField[][] {
   ];
 }
 
-/** Writes the file: `PAR1`, every column's pages, the footer, its length, `PAR1`. */
-export function hostileParquet(f: HostileFile): Uint8Array {
+/** Writes one page: its header, then its body stored with `codec`. Returns the page's offset. */
+function writePage(out: number[], p: HostilePage, codec: "SNAPPY" | "UNCOMPRESSED"): number {
+  const at = out.length;
+  const type = p.type ?? PAGE.DATA;
+  const stored = codec === "SNAPPY" ? snappyLiteral(p.body) : p.body;
+  const header: Field[] = [
+    [1, i32(type)],
+    [2, i32(p.uncompressedSize ?? p.body.length)],
+    [3, i32(stored.length)],
+  ];
+  if (type === PAGE.DATA || type === PAGE.INDEX)
+    header.push([
+      5,
+      struct([
+        [1, i32(p.numValues)],
+        [2, i32(p.encoding ?? ENC.PLAIN)],
+        [3, i32(ENC.RLE)],
+        [4, i32(ENC.RLE)],
+      ]),
+    ]);
+  else if (type === PAGE.DICTIONARY)
+    header.push([
+      7,
+      struct([
+        [1, i32(p.numValues)],
+        [2, i32(ENC.PLAIN)],
+      ]),
+    ]);
+  else
+    header.push([
+      8,
+      struct([
+        [1, i32(p.numValues)],
+        [2, i32(0)],
+        [3, i32(p.numValues)],
+        [4, i32(p.encoding ?? ENC.PLAIN)],
+        [5, i32(0)],
+        [6, i32(0)],
+      ]),
+    ]);
+  writeStruct(out, header);
+  for (const b of stored) out.push(b);
+  return at;
+}
+
+/** Writes the file once, `fileLength` being the length a `dictionaryPageOffset` function is given. */
+function build(f: HostileFile, fileLength: number): Uint8Array {
   const out: number[] = [0x50, 0x41, 0x52, 0x31];
-  const chunks: Value[] = [];
+  const laid: { start: number; size: number; dict: number | null; data: number | null }[] = [];
   for (const c of f.columns) {
     const codec = c.codec ?? "SNAPPY";
     const start = out.length;
-    let dictOffset: number | null = null;
-    let dataOffset: number | null = null;
+    let dict: number | null = null;
+    let data: number | null = null;
     for (const p of c.pages) {
-      const type = p.type ?? PAGE.DATA;
-      const stored = codec === "SNAPPY" ? snappyLiteral(p.body) : p.body;
-      const header: Field[] = [
-        [1, i32(type)],
-        [2, i32(p.uncompressedSize ?? p.body.length)],
-        [3, i32(stored.length)],
-      ];
-      if (type === PAGE.DATA || type === PAGE.INDEX)
-        header.push([
-          5,
-          struct([
-            [1, i32(p.numValues)],
-            [2, i32(p.encoding ?? ENC.PLAIN)],
-            [3, i32(ENC.RLE)],
-            [4, i32(ENC.RLE)],
-          ]),
-        ]);
-      else if (type === PAGE.DICTIONARY)
-        header.push([
-          7,
-          struct([
-            [1, i32(p.numValues)],
-            [2, i32(ENC.PLAIN)],
-          ]),
-        ]);
-      else
-        header.push([
-          8,
-          struct([
-            [1, i32(p.numValues)],
-            [2, i32(0)],
-            [3, i32(p.numValues)],
-            [4, i32(p.encoding ?? ENC.PLAIN)],
-            [5, i32(0)],
-            [6, i32(0)],
-          ]),
-        ]);
-      if (type === PAGE.DICTIONARY) dictOffset ??= out.length;
-      else dataOffset ??= out.length;
-      writeStruct(out, header);
-      for (const b of stored) out.push(b);
+      const at = writePage(out, p, codec);
+      if ((p.type ?? PAGE.DATA) === PAGE.DICTIONARY) dict ??= at;
+      else data ??= at;
     }
-    const size = out.length - start;
+    laid.push({ start, size: out.length - start, dict, data });
+  }
+  const hidden = out.length;
+  for (const p of f.hidden ?? []) writePage(out, p, f.columns[0]?.codec ?? "SNAPPY");
+  const chunks: Value[] = f.columns.map((c, i) => {
+    const at = laid[i];
+    if (at === undefined) throw new Error("hostileParquet: a column was not laid out");
+    const codec = c.codec ?? "SNAPPY";
     const md: Field[] = [
       [1, i32(TYPE_ID[c.type])],
       [2, list(5, [i32(ENC.PLAIN), i32(ENC.RLE)])],
       [3, list(8, [bin(c.name)])],
       [4, i32(codec === "SNAPPY" ? 1 : 0)],
       [5, i64(f.groupRows)],
-      [6, i64(size)],
-      [7, i64(size)],
-      [9, i64(dataOffset ?? start)],
+      [6, i64(at.size)],
+      [7, i64(at.size)],
+      [9, i64(at.data ?? at.start)],
     ];
-    if (dictOffset !== null) md.push([11, i64(dictOffset)]);
+    const dpo = c.dictionaryPageOffset;
+    const dict = typeof dpo === "function" ? dpo({ hidden, fileLength }) : (dpo ?? at.dict);
+    if (dict !== null) md.push([11, i64(dict)]);
     if (c.statistics !== undefined) md.push([12, struct(c.statistics)]);
-    chunks.push(
-      struct([
-        [2, i64(start)],
-        [3, struct(md)],
-      ]),
-    );
-  }
+    return struct([
+      [2, i64(at.start)],
+      [3, struct(md)],
+    ]);
+  });
   const schema: Value[] = (f.schema ?? schemaOf(f.columns)).map((fields) => struct(fields));
   const footer: number[] = [];
   const fields: Field[] = [
@@ -360,6 +395,22 @@ export function hostileParquet(f: HostileFile): Uint8Array {
   u32(out, footer.length);
   out.push(0x50, 0x41, 0x52, 0x31);
   return Uint8Array.from(out);
+}
+
+/**
+ * Writes the file: `PAR1`, every column's pages, the `hidden` pages, the footer, its length, `PAR1`.
+ * A `dictionaryPageOffset` function sees the file's final length: the file is rewritten with the
+ * last length until that length is stable.
+ */
+export function hostileParquet(f: HostileFile): Uint8Array {
+  let out = build(f, 0);
+  if (!f.columns.some((c) => typeof c.dictionaryPageOffset === "function")) return out;
+  for (let i = 0; i < 8; i++) {
+    const next = build(f, out.length);
+    if (next.length === out.length) return next;
+    out = next;
+  }
+  throw new Error("hostileParquet: the file's length does not settle");
 }
 
 /** A hostile file whose columns pass checkParquet for `expected` (kind → physical type). */
