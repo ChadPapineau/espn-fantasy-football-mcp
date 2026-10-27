@@ -10,7 +10,7 @@ import {
   isAllowedReadHost,
   tlsVerificationDisabled,
 } from "../../config/schema.js";
-import { VERSION } from "../../version.js";
+import { DEFAULT_USER_AGENT } from "../../http/client.js";
 import { classifyThrown, EspnUpstreamError } from "./errors.js";
 import type { EspnTarget } from "./path.js";
 import { HEADER_FILTER, type EspnView } from "./types.js";
@@ -46,10 +46,15 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 /** The JSON body cap (plan 02 §5: the largest legitimate league response seen is 5.7 MB). */
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
 /**
- * The fixed, honest User-Agent (plan 01 §6; research 03 §D.3) — never a browser's. No repository URL
- * or contact address: it would carry an identifier (decision recorded).
+ * The fixed, honest User-Agent (plan 01 §6 "Identification": `espn-fantasy-football-mcp/<version>
+ * (+<repo URL>)`; research 03 §D.3) — never a browser's. ONE policy for every request to ESPN: this
+ * is src/http's DEFAULT_USER_AGENT, the string the CLI's requests (`eff setup`'s probes, doctor,
+ * `eff probe`, the `espn:*` refreshes) already send and the fixture scripts follow. The provider had
+ * its own string without the repository URL, by a decision recorded nowhere, so one install showed
+ * ESPN two identities (Stage C finding espn-user-agent-two-policies). The URL names the software —
+ * the public repository every install runs — never the user.
  */
-export const ESPN_USER_AGENT = `espn-fantasy-football-mcp/${VERSION} (personal read-only local MCP server)`;
+export const ESPN_USER_AGENT: string = DEFAULT_USER_AGENT;
 /** At most this many response headers are kept (each value cut to 512 chars). */
 const MAX_HEADERS = 64;
 const DROPPED_HEADERS: ReadonlySet<string> = new Set(["set-cookie", "set-cookie2"]);

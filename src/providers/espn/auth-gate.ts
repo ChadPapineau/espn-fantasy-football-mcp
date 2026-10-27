@@ -3,10 +3,12 @@
 // reports discriminating observations; the startup state label never stands in for that ask (a
 // value stored by `eff setup` while the server runs is found on the next cookie-bearing call — plan
 // 02 §2.2, plan 03 §1.1 step 4). Season routes are always keyless; a league known public is
-// read keyless (cookies cannot be tested there, and a 200 is not an acceptance); `rejected`
-// short-circuits with ESPN_AUTH_REJECTED and ZERO requests (unless the league is public); a view
-// that needs cookies with none stored is ESPN_REQUIRES_COOKIES, also with zero requests. The SWID
-// is read from the header only to compute `my_team` — it is never emitted.
+// read keyless by the server (cookies cannot be tested there, and a 200 is not an acceptance) — but
+// the credentialed launchd jobs read it with the stored cookie, as plan 06 §1.4 designs and budgets
+// them (`keylessOnPublic`); `rejected` short-circuits with ESPN_AUTH_REJECTED and ZERO requests
+// (unless the league is public); a view that needs cookies with none stored is
+// ESPN_REQUIRES_COOKIES, also with zero requests. The SWID is read from the header only to compute
+// `my_team` — it is never emitted.
 import type {
   CookieHeaderResult,
   CredentialAuthority,
@@ -60,6 +62,22 @@ export interface PublicityStore {
   save(isPublic: boolean): void;
 }
 
+/** How the gate treats a league known public (one per provider instance). */
+export interface CookieGateOptions {
+  /**
+   * Whether an `auto` read of a league known public goes keyless although a cookie is stored. True
+   * for the server and every interactive command: the cookie cannot be tested there and a 200 is no
+   * acceptance, so it is not sent. False for the credentialed launchd jobs (origin `job`): plan 06
+   * §1.4 designs them cookie-bearing on the user's league whatever its publicity (§5: "designed as
+   * cookie-bearing on the user's league regardless") and budgets them under the fleet's cookie cap
+   * (≤ 40/day); the keyless cap (≤ 30/day) is the drift probe's and the season views' alone
+   * (changelog V7). Sent keyless, their league reads spent the keyless cap on a public league and a
+   * game day's late jobs were refused (Stage C finding jobs-public-league-keyless-cap). A rejected
+   * cookie still reads a public league anonymously either way (plan 02 §2.1 "Short-circuit").
+   */
+  readonly keylessOnPublic?: boolean;
+}
+
 /** The provider's cookie gate (one per provider instance). */
 export class CookieGate {
   /** What THIS process saw ESPN answer (a league body, a keyless 401); null until it has. */
@@ -76,17 +94,20 @@ export class CookieGate {
   private readonly clock: Clock;
   private readonly observer: CredentialObserver;
   private readonly store: PublicityStore | null;
+  private readonly keylessOnPublic: boolean;
 
   constructor(
     auth: CredentialAuthority | null,
     clock: Clock,
     observer: CredentialObserver,
     store: PublicityStore | null = null,
+    opts: CookieGateOptions = {},
   ) {
     this.auth = auth;
     this.clock = clock;
     this.observer = observer;
     this.store = store;
+    this.keylessOnPublic = opts.keylessOnPublic ?? true;
   }
 
   /** What is known: learned in this process, else the persisted value (read once), else null. */
@@ -177,7 +198,9 @@ export class CookieGate {
       if (use === "required" && this.publicity !== true) this.requires();
       return null;
     }
-    if (use === "auto" && this.known() === true) return null;
+    // a public league's `auto` read: keyless for the server, the stored cookie for the jobs
+    // (CookieGateOptions.keylessOnPublic)
+    if (use === "auto" && this.keylessOnPublic && this.known() === true) return null;
     const labelledNone = !this.configured();
     const r = await this.auth.getCookieHeader();
     if (r.ok) {

@@ -52,11 +52,18 @@ export const realSleep: Sleep = (ms, signal) =>
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 
-/** Our own limiter refused (plan 01 §4.3 RATE_LIMITED, with `retry_after_s`). */
+/**
+ * Our own limiter refused (plan 01 §4.3 RATE_LIMITED, with `retry_after_s`): a full window, a spent
+ * daily cap, no free in-flight slot — or `retry_after`, ESPN's own Retry-After on the read host still
+ * running (request.ts holds every request off until it ends; plan 01 §6).
+ */
 export class EspnRateLimitedError extends Error {
   readonly effCode = "RATE_LIMITED" as const;
   readonly effDetails: { readonly retry_after_s: number; readonly reason: string };
-  constructor(retryAfterMs: number, reason: "window" | "daily_cap" | "concurrency") {
+  constructor(
+    retryAfterMs: number,
+    reason: "window" | "daily_cap" | "concurrency" | "retry_after",
+  ) {
     super("espn: rate limited by the local limiter");
     this.name = "EspnRateLimitedError";
     this.effDetails = Object.freeze({

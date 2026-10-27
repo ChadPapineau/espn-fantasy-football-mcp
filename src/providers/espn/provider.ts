@@ -4,11 +4,14 @@
 // limiter, in-call drift, the credential rules. The league id comes from config only (plan 02 §5);
 // a LeagueRef naming another league is a programming error. Every settings answer is recorded in
 // store.sqlite's league_settings (plan 08 §9), which raises `settings_changed` when it changed the
-// league-season's newest settings (Stage C, league-settings-changed-never-raised). Read-only: no write
-// method exists (league_settings is the store's own bookkeeping, never a write to ESPN).
+// league-season's newest settings (Stage C, league-settings-changed-never-raised); cached settings are
+// refetched before their TTL when a later league answer shows the standings or a waiver run moved, or
+// when `invalidateSettings` was asked (plan 01 §5.2, plan 08 §9). A week past its correction window is
+// cached immutable (plan 01 §5.4). Read-only: no write method exists (league_settings and the cache's
+// marks are the store's own bookkeeping, never a write to ESPN).
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): FantasyPlatformWrites
 // (src/providers/platform.ts) is not implemented here and nothing in this file sends to the write host.
-import type { TtlContext } from "../../config/freshness.js";
+import { CORRECTIONS_WINDOW_MS, type TtlContext } from "../../config/freshness.js";
 import { SEASON_RENEWAL_TEXT, seasonMayAwaitRenewal, type Config } from "../../config/schema.js";
 import {
   BOARD_PROBE_VIEW,
@@ -53,6 +56,7 @@ import type {
   CredentialStateRepository,
   CredentialStateRow,
   DriftStateRepository,
+  EspnCacheEntry,
   EspnCacheRepository,
   LimiterRepository,
   RequestOrigin,
@@ -75,7 +79,15 @@ import {
   type UpstreamBudget,
 } from "../platform.js";
 import { EspnCredentialError } from "./auth-gate.js";
-import { cachedBoardControl, cachedPublicity, type KeptFlag } from "./cache.js";
+import {
+  cachedBoardControl,
+  cachedPublicity,
+  cachedSettingsMarks,
+  settingsOutdated,
+  statusInstantsOf,
+  type KeptFlag,
+  type SettingsMarksStore,
+} from "./cache.js";
 import { EspnDriftError, EspnUpstreamError, isEspnUpstreamError } from "./errors.js";
 import {
   boardProbeFilter,
@@ -182,11 +194,67 @@ export const PLAYERCARD_TOP_PERIODS = 17;
 /** ≤ 25 ids per `kona_playercard` request (plan 07 B2; plan 02 §5). */
 export const PLAYERCARD_IDS_MAX = 25;
 /**
- * How long one season's bye map is reused (ms): reading the pro-schedule dataset costs ≈ 10 ms of
- * main loop (the TTL context memoises it for the same reason — plan 10 A16a); byes do not move
- * within a minute, and a dataset loaded meanwhile is seen within one.
+ * How long one season's pro schedule (its bye map, its weeks' final instants) is reused (ms):
+ * reading the pro-schedule dataset costs ≈ 10 ms of main loop (the TTL context memoises it for the
+ * same reason — plan 10 A16a); byes and finals do not move within a minute, and a dataset loaded
+ * meanwhile is seen within one.
  */
 export const BYE_WEEKS_MEMO_MS = 60_000;
+
+/**
+ * Whether no game of a season before the configured one can still change, by the calendar: from
+ * March 1 of the next year — after its last fantasy week (early January) and the Super Bowl, each
+ * with its 7-day correction window (research 04 §B.1.7). The bound a previous season's answers are
+ * final from when its pro schedule is not loaded (`EspnProvider.finalFrom`).
+ */
+export function previousSeasonFinalFrom(season: number): number {
+  return Date.UTC(season + 1, 2, 1);
+}
+
+/**
+ * The instant from which every game of `weeks` (all the season's when null) is final and past its
+ * 7-day correction window (plan 01 §5.4; research 04 §B.1.7: the week's last kickoff + 7 days — the
+ * rule `meta.corrections_window_open` uses, config's CORRECTIONS_WINDOW_MS), by a season's pro-schedule
+ * games: the latest close among them; null while any week is unknown, open or not final (no games,
+ * a TBD kickoff, a game without official stats). Pure.
+ */
+export function weeksFinalFrom(
+  games: readonly ProGame[],
+  weeks: readonly number[] | null,
+): number | null {
+  const ws = weeks ?? [...new Set(games.map((g) => g.week))];
+  if (ws.length === 0) return null;
+  let latest = Number.NEGATIVE_INFINITY;
+  for (const w of ws) {
+    let last = Number.NEGATIVE_INFINITY;
+    let any = false;
+    for (const g of games) {
+      if (g.week !== w) continue;
+      any = true;
+      const k = g.start_time_tbd || g.kickoff === null ? Number.NaN : Date.parse(g.kickoff);
+      if (!Number.isFinite(k) || !g.stats_official) return null;
+      if (k > last) last = k;
+    }
+    if (!any) return null;
+    latest = Math.max(latest, last + CORRECTIONS_WINDOW_MS);
+  }
+  return latest;
+}
+
+/**
+ * The scoring periods an answer about `week` covers: every week of the matchup period(s) holding it
+ * (a playoff matchup can span two — its totals move until the last of them is final), `[week]` when
+ * no matchup period names it; null when the settings are unknown (nothing is ever final then).
+ */
+export function coveredWeeks(settings: WireSettingsBody | null, week: number): number[] | null {
+  if (settings === null) return null;
+  const periods = matchupPeriodsForWeek(settings, week);
+  if (periods.length === 0) return [week];
+  const all = settings.settings.scheduleSettings.matchupPeriods ?? {};
+  const out = new Set<number>([week]);
+  for (const p of periods) for (const w of all[String(p)] ?? []) out.add(w);
+  return [...out].sort((a, b) => a - b);
+}
 
 /**
  * The store's pro-schedule dataset as the provider reads it — structurally src/store's
@@ -369,11 +437,23 @@ export class EspnProvider implements FantasyPlatform {
   private readonly settingsMissing = new Map<number, Error>();
   /** The parsed settings answers already recorded (a cache hit re-reads the same frozen parse). */
   private readonly settingsRecorded = new WeakSet<SettingsRead>();
-  /** Each season's bye map (null: no schedule loaded) and when it was read (`byeWeeks`). */
-  private readonly byeMemo = new Map<
+  /**
+   * Each season's pro schedule as the wired dataset held it (null: none loaded), its bye map, and
+   * when it was read (`scheduleOf`).
+   */
+  private readonly scheduleMemo = new Map<
     number,
-    { readonly at: number; readonly map: ReadonlyMap<number, number> | null }
+    {
+      readonly at: number;
+      readonly games: readonly ProGame[];
+      readonly byes: ReadonlyMap<number, number> | null;
+    }
   >();
+  /**
+   * The games of a cached `proTeamSchedules_wl` answer, by its parsed body (the requester memoises
+   * and freezes the parse while the entry is unchanged, so one body normalises once).
+   */
+  private readonly cachedViewGames = new WeakMap<WireProScheduleBody, readonly ProGame[]>();
 
   constructor(deps: EspnProviderDeps) {
     this.deps = deps;
@@ -462,29 +542,90 @@ export class EspnProvider implements FantasyPlatform {
   }
 
   /**
-   * Pro-team id → bye week for `season` from the wired pro-schedule dataset (memoised
-   * BYE_WEEKS_MEMO_MS per season), or undefined when none is wired or the dataset holds no teams for
-   * the season. A throwing read counts as not loaded (and is memoised like any answer).
+   * `season` from the wired pro-schedule dataset (memoised BYE_WEEKS_MEMO_MS per season): its games
+   * and its pro-team id → bye week map, or null when none is wired. A season the dataset holds no
+   * teams for, or a throwing read, is no games and no byes (memoised like any answer).
    */
-  private byeWeeks(season: number): ReadonlyMap<number, number> | undefined {
+  private scheduleOf(season: number): {
+    readonly games: readonly ProGame[];
+    readonly byes: ReadonlyMap<number, number> | null;
+  } | null {
     const source = this.deps.proSchedule;
-    if (source === undefined) return undefined;
+    if (source === undefined) return null;
     const now = this.deps.clock.nowMs();
-    const hit = this.byeMemo.get(season);
-    if (hit !== undefined && now >= hit.at && now - hit.at < BYE_WEEKS_MEMO_MS)
-      return hit.map ?? undefined;
-    let map: ReadonlyMap<number, number> | null = null;
+    const hit = this.scheduleMemo.get(season);
+    if (hit !== undefined && now >= hit.at && now - hit.at < BYE_WEEKS_MEMO_MS) return hit;
+    let games: readonly ProGame[] = [];
+    let byes: ReadonlyMap<number, number> | null = null;
     try {
       const teams = source.teams(season).rows;
       if (teams.length > 0) {
         const schedule: ProSchedule = { season, teams, games: source.games(season, null).rows };
-        map = byeWeeksOf(schedule);
+        games = schedule.games;
+        byes = byeWeeksOf(schedule);
       }
     } catch {
-      map = null;
+      games = [];
+      byes = null;
     }
-    this.byeMemo.set(season, { at: now, map });
-    return map ?? undefined;
+    const memo = { at: now, games, byes };
+    this.scheduleMemo.set(season, memo);
+    return memo;
+  }
+
+  /**
+   * Pro-team id → bye week for `season` from the wired pro-schedule dataset, or undefined when none
+   * is wired or the dataset holds no teams for the season (`scheduleOf`).
+   */
+  private byeWeeks(season: number): ReadonlyMap<number, number> | undefined {
+    return this.scheduleOf(season)?.byes ?? undefined;
+  }
+
+  /**
+   * The games `finalFrom` judges a season by: the wired dataset's (`scheduleOf`), else the
+   * provider's own cached `proTeamSchedules_wl` answer whatever its age (request.ts `cachedValue` —
+   * never a request). The tools read the schedule the same way (src/mcp `scheduleOf`: the dataset,
+   * else the keyless view), so a server whose dataset was never loaded still knows a week is closed.
+   * An older copy can only make a week final later, never sooner: a game's official stats never
+   * revert, and a game not yet official in it is not final.
+   */
+  private async finalityGames(season: number): Promise<readonly ProGame[]> {
+    const fromDataset = this.scheduleOf(season)?.games ?? [];
+    if (fromDataset.length > 0) return fromDataset;
+    try {
+      const body = await this.req.cachedValue({
+        target: seasonTarget({ host: this.host, season }),
+        filter: null,
+        leagueId: null,
+        cookies: "never",
+        parse: parsePro,
+      });
+      if (body === null) return [];
+      let games = this.cachedViewGames.get(body);
+      if (games === undefined) {
+        games = normalizeProSchedule(body, season).games;
+        this.cachedViewGames.set(body, games);
+      }
+      return games;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * The instant from which an answer about `weeks` of `season` (all its weeks when null) is final —
+   * past every covered week's correction window, so cached immutable (request.ts `finalFromMs`;
+   * plan 01 §5.4; Stage C finding cache-final-weeks-not-immutable) — by the season's pro schedule
+   * (`finalityGames`, `weeksFinalFrom`); a season before the configured one is final from
+   * `previousSeasonFinalFrom` at the latest. Null (never final) for the configured season while a
+   * week is open, its schedule not known or unknown, and for any later season. Never an ESPN request.
+   */
+  private async finalFrom(season: number, weeks: readonly number[] | null): Promise<number | null> {
+    const bound = season < this.deps.config.season ? previousSeasonFinalFrom(season) : null;
+    const games = await this.finalityGames(season);
+    const fromSchedule = games.length === 0 ? null : weeksFinalFrom(games, weeks);
+    if (fromSchedule === null) return bound;
+    return bound === null ? fromSchedule : Math.min(fromSchedule, bound);
   }
 
   /** The player context of `season`/`week`, with that season's byes when known. */
@@ -505,6 +646,74 @@ export class EspnProvider implements FantasyPlatform {
     return latest === null ? true : week >= latest;
   }
 
+  /** A league-season's settings invalidation marks (cache.ts cachedSettingsMarks). */
+  private settingsMarks(season: number): SettingsMarksStore {
+    return cachedSettingsMarks(
+      this.deps.repos.cache,
+      this.deps.config.leagueId,
+      season,
+      this.deps.clock,
+    );
+  }
+
+  /**
+   * Whether a cached settings answer, fresh by its 24 h TTL, is outdated (plan 01 §5.2 "League
+   * settings" row; plan 08 §9 — Stage C finding cache-settings-invalidation-triggers-missing: only the
+   * TTL existed, so a commissioner's edit stayed unseen for up to a day): a later league answer showed
+   * `status.standingsUpdateDate` or `waiverLastExecutionDate` newer than the cached settings carry
+   * (request.ts records every answer's instants), or the settings were invalidated after it was
+   * fetched (`invalidateSettings`). Then they are refetched — re-normalised and recorded, so a
+   * changed hash raises `settings_changed` and every engine re-scores; ESPN down, the cached answer
+   * is served degraded.
+   */
+  private settingsOutdated(season: number, value: SettingsRead, entry: EspnCacheEntry): boolean {
+    return settingsOutdated(
+      this.settingsMarks(season).load(),
+      statusInstantsOf(value.settings),
+      Date.parse(entry.fetched_at),
+    );
+  }
+
+  /**
+   * The settings a week's matchup periods and coverage are read from (`coveredWeeks`): the call's
+   * own, else the cached answer whatever its age (request.ts `cachedValue` — a league's matchup
+   * periods do not move with the answer's freshness), so a final week stays immutable, and is asked
+   * under the same key, through an outage that outlasts the settings' 7-day hard limit. Null when
+   * no settings answer was ever cached. Never a request.
+   */
+  private async coverageSettings(
+    ref: LeagueRef,
+    known: WireSettingsBody | null,
+  ): Promise<WireSettingsBody | null> {
+    if (known !== null) return known;
+    const previous = ref.season < this.deps.config.season;
+    try {
+      const cached = await this.req.cachedValue({
+        target: this.league(ref, previous ? ["mSettings"] : ["mSettings", "mNav"]),
+        filter: null,
+        leagueId: ref.league_id,
+        cookies: "never",
+        parse: previous ? parseSettingsAlone : parseSettings,
+      });
+      return cached?.settings ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Marks the league-season's cached settings outdated from now, in every process (plan 08 §6 step
+   * 3(d): a golden mismatch above 10 % marks the settings cache dirty; plan 08 §9 `eff refresh
+   * espn:settings`): the next settings read of any process asks ESPN again — and, while ESPN cannot
+   * answer, every read keeps asking (the breaker and the call budget permitting) and serves the
+   * cached answer degraded. No request is made here. Read-only toward ESPN: the marks are the
+   * provider's own cache bookkeeping.
+   */
+  invalidateSettings(ref: LeagueRef): void {
+    this.checkRef(ref);
+    this.settingsMarks(ref.season).invalidate(this.deps.clock.nowMs());
+  }
+
   private async settingsRead(
     ref: LeagueRef,
     opts?: ReadOptions,
@@ -523,6 +732,7 @@ export class EspnProvider implements FantasyPlatform {
           leagueId: ref.league_id,
           cookies: learning ? "never" : "auto",
           parse,
+          outdated: (value, entry) => this.settingsOutdated(ref.season, value, entry),
         },
         opts,
       );
@@ -877,6 +1087,9 @@ export class EspnProvider implements FantasyPlatform {
         cookies: "auto",
         parse: parseCard,
         provisional: () => q.type === "week" && this.provisional(season, q.week, null),
+        // one card holds the season's every week and its projections: final only once the whole
+        // season is (a previous season's card — plan 01 §5.2 "never for final weeks")
+        finalFromMs: await this.finalFrom(season, null),
       },
       opts,
     );
@@ -912,6 +1125,8 @@ export class EspnProvider implements FantasyPlatform {
         leagueId: ref.league_id,
         cookies: "auto",
         parse: parseMatchup,
+        // the season's whole schedule: final once every week of it is (a finished season)
+        finalFromMs: await this.finalFrom(ref.season, null),
       },
       opts,
     );
@@ -926,6 +1141,7 @@ export class EspnProvider implements FantasyPlatform {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const latest = id.settings?.status.latestScoringPeriod ?? null;
+    const covered = coveredWeeks(await this.coverageSettings(ref, id.settings), week);
     const r = await this.read(
       {
         target: this.league(ref, ["mMatchupScore"], week),
@@ -934,6 +1150,8 @@ export class EspnProvider implements FantasyPlatform {
         cookies: "auto",
         parse: parseScore,
         provisional: () => this.provisional(ref.season, week, latest),
+        // what this read uses is the week's matchup period: final once all its weeks are
+        finalFromMs: covered === null ? null : await this.finalFrom(ref.season, covered),
       },
       opts,
     );
@@ -947,7 +1165,9 @@ export class EspnProvider implements FantasyPlatform {
   ): Promise<Stamped<readonly BoxScoreMatchup[]>> {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
-    const periods = id.settings === null ? [week] : matchupPeriodsForWeek(id.settings, week);
+    const settings = await this.coverageSettings(ref, id.settings);
+    const periods = settings === null ? [week] : matchupPeriodsForWeek(settings, week);
+    const covered = coveredWeeks(settings, week);
     const r = await this.read(
       {
         target: this.league(ref, ["mBoxscore"], week),
@@ -957,6 +1177,9 @@ export class EspnProvider implements FantasyPlatform {
         parse: parseBox,
         provisional: (b) =>
           this.provisional(ref.season, week, b.status?.latestScoringPeriod ?? null),
+        // a week past its correction window (with every week of its matchup period) never changes
+        // again: its box scores are cached immutable (plan 01 §5.4)
+        finalFromMs: covered === null ? null : await this.finalFrom(ref.season, covered),
       },
       opts,
     );

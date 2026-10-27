@@ -1,13 +1,16 @@
 // request.ts — the read pipeline every provider method goes through (plan 01 §5.3 cache-first, §5.6
-// the per-call budget, §6 limiter/backoff/breaker/deadline, §7 in-call drift; plan 02 §2.1 the
-// credential rules; plan 02 T2 "TLS to ESPN, then zod"): cache → (fresh: done) → breaker → budget →
-// coalesce (each reader keeps its own deadline and cancellation) → TLS policy → cookie decision →
-// (limiter → attempt)+ (each attempt its own limiter row; 429/5xx/timeouts/resets retried with
-// jitter inside the ≤ 20 s deadline, never sooner than the backoff, never once the breaker is open;
-// 400/401/403/404, fail-fast network codes and TLS failures never) → classify → JSON → drift +
-// schema → cache write. A failure falls back to the cached entry within its hard limit
-// (`degraded`), or past it under `allow_stale` or while the host is moved; never an upstream body
-// in any error. Nothing is sent while certificate verification is off process-wide.
+// the per-call budget, §6 limiter/backoff/breaker/deadline/Retry-After, §7 in-call drift; plan 02
+// §2.1 the credential rules; plan 02 T2 "TLS to ESPN, then zod"): cache → (fresh and not outdated:
+// done) → breaker → ESPN's Retry-After hold → budget → coalesce (each reader keeps its own deadline
+// and cancellation) → TLS policy → cookie decision → (limiter → attempt)+ (each attempt its own
+// limiter row; 429/5xx/timeouts/resets retried with jitter inside the ≤ 20 s deadline, never sooner
+// than the backoff or a Retry-After, never once the breaker is open; 400/401/403/404, fail-fast
+// network codes and TLS failures never) → classify → JSON → drift + schema → cache write (and the
+// league's status marks — plan 01 §5.2 settings invalidation). An answer whose weeks are past their
+// correction window is cached immutable (plan 01 §5.4). A failure — or a call whose budget cannot
+// pay for the request — falls back to the cached entry within its hard limit (`degraded`), or past
+// it under `allow_stale` or while the host is moved; never an upstream body in any error. Nothing is
+// sent while certificate verification is off process-wide.
 import {
   serveDecision,
   stampState,
@@ -45,18 +48,23 @@ import {
   type UpstreamBudget,
 } from "../platform.js";
 import {
+  cachedRetryAfter,
+  cachedSettingsMarks,
   cacheKey,
   classForViews,
   Coalescer,
+  finalClassForViews,
   ForceRefreshGate,
   serverTimeIso,
+  statusInstantsOf,
   stripForCache,
   UNCACHED_VIEWS,
   type CoalesceParty,
+  type KeptInstant,
   type LeaveReason,
   type SharedLimits,
 } from "./cache.js";
-import { classifyAnswer, EspnDriftError, EspnUpstreamError } from "./errors.js";
+import { classifyAnswer, EspnDriftError, EspnUpstreamError, retryAfterMs } from "./errors.js";
 import {
   backoffMs,
   EspnBreakerOpenError,
@@ -159,6 +167,19 @@ export interface ReadSpec<T> {
   readonly provisional?: (value: T) => boolean;
   /** The stamp source (`espn:<view>` by default). */
   readonly source?: string;
+  /**
+   * Whether a cached answer, fresh by its TTL, is outdated by a trigger the caller knows (plan 01
+   * §5.2 "Invalidation trigger"; the settings' status marks — plan 08 §9): it is refetched as if
+   * stale, and served degraded when ESPN cannot answer. A check that throws reads as current.
+   */
+  readonly outdated?: (value: T, entry: EspnCacheEntry) => boolean;
+  /**
+   * The instant (epoch ms) from which an answer to this request no longer changes — every scoring
+   * period it covers is past its 7-day correction window (plan 01 §5.4); null or absent: never. An
+   * answer fetched at or after it takes its views' immutable class (cache.ts FINAL_VIEW_FRESHNESS):
+   * fresh whatever its age, no hard limit; one fetched before keeps the views' own class.
+   */
+  readonly finalFromMs?: number | null;
 }
 
 /** A read's value, its stamp, and the response headers it came with (count headers). */
@@ -267,6 +288,10 @@ export class EspnRequester {
     Map<string, { readonly stamp: string; readonly value: unknown }>
   >();
   private notModified = { day: 0, count: 0 };
+  /** ESPN's Retry-After on the read host as this process received it (epoch ms; see `holdLeftMs`). */
+  private holdUntilMs = Number.NEGATIVE_INFINITY;
+  /** The same hold kept for the other processes (cache.ts cachedRetryAfter). */
+  private readonly retryAfter: KeptInstant;
 
   constructor(deps: RequestDeps) {
     this.deps = deps;
@@ -279,12 +304,45 @@ export class EspnRequester {
       onEvent: (e) => deps.log?.debug(e),
     });
     this.drift = new DriftStateWriter(deps.driftState, deps.clock, deps.host);
+    // the credentialed launchd jobs read a public league with the stored cookie (auth-gate.ts
+    // CookieGateOptions; plan 06 §1.4), the server keyless
     this.cookies = new CookieGate(
       deps.credentials,
       deps.clock,
       deps.observer,
       deps.publicity ?? null,
+      { keylessOnPublic: deps.origin !== "job" },
     );
+    this.retryAfter = cachedRetryAfter(deps.cache, deps.host, deps.clock);
+  }
+
+  /**
+   * What is left (ms, ≥ 1; 0 = none) at `nowMs` of ESPN's Retry-After hold on the read host: the
+   * instant this process received, or the later one another process kept (cache.ts
+   * cachedRetryAfter). No request goes to the host before it ends (plan 01 §6 "honour Retry-After if
+   * it ever appears"; Stage C finding espn-retry-after-not-persisted: the hint lived only as one
+   * read's retry wait, so every later call sent again inside it).
+   */
+  private holdLeftMs(nowMs: number): number {
+    let until = this.holdUntilMs;
+    const kept = this.retryAfter.load();
+    if (kept !== null && kept > until) until = kept;
+    return until > nowMs ? Math.max(1, Math.ceil(until - nowMs)) : 0;
+  }
+
+  /** Holds every request to the read host off until `untilMs`, here and for the other processes. */
+  private holdOff(untilMs: number): void {
+    if (!Number.isFinite(untilMs) || untilMs <= this.holdUntilMs) return;
+    this.holdUntilMs = untilMs;
+    this.retryAfter.save(untilMs);
+    this.deps.log?.debug("espn.retry_after.hold", {
+      retry_after_s: Math.max(1, Math.ceil((untilMs - this.deps.clock.nowMs()) / 1000)),
+    });
+  }
+
+  /** Holds the host off for an answer's `Retry-After` (a 429 or 5xx carrying one; 0 holds nothing). */
+  private holdOffFor(afterMs: number | null): void {
+    if (afterMs !== null && afterMs > 0) this.holdOff(this.deps.clock.nowMs() + afterMs);
   }
 
   /**
@@ -413,11 +471,50 @@ export class EspnRequester {
     return value;
   }
 
+  /**
+   * The freshness class of an answer to `spec` fetched at `fetchedAt` (ISO): its views' class, or —
+   * fetched at or after the instant the spec says its weeks turned final (`finalFromMs`) — the views'
+   * immutable class (plan 01 §5.4; Stage C finding cache-final-weeks-not-immutable: a past week's box
+   * score was refetched every 10 min, and turned STALE_ONLY after 24 h of outage). An answer fetched
+   * before that instant was taken while its week could still change: its own class refetches it once.
+   */
+  private classesOf<T>(spec: ReadSpec<T>): (fetchedAt: string) => FreshnessClass {
+    const cls = classForViews(spec.target.views);
+    const from = spec.finalFromMs ?? null;
+    const final = from === null ? null : finalClassForViews(spec.target.views);
+    if (from === null || final === null) return () => cls;
+    return (fetchedAt) => {
+      const at = Date.parse(fetchedAt);
+      return Number.isFinite(at) && at >= from ? final : cls;
+    };
+  }
+
+  /**
+   * The parsed cached answer to `spec` whatever its age — never a request, never a stamp; null when
+   * none is cached or it no longer parses. For what does not move with the answer's freshness: the
+   * matchup periods a final week's coverage is read from (provider.ts `coverageSettings`), which
+   * must not be lost when an outage outlasts the settings' hard limit.
+   */
+  async cachedValue<T>(spec: ReadSpec<T>): Promise<T | null> {
+    const entry = this.cacheGet(cacheKey(spec.target, spec.leagueId, spec.filter));
+    return entry === null ? null : await this.parseCached(spec, entry);
+  }
+
+  /** Whether the spec's own trigger outdates a TTL-fresh cached value (a throwing check: current). */
+  private outdated<T>(spec: ReadSpec<T>, value: T, entry: EspnCacheEntry): boolean {
+    if (spec.outdated === undefined) return false;
+    try {
+      return spec.outdated(value, entry);
+    } catch {
+      return false;
+    }
+  }
+
   /** The read (see the file header). */
   async read<T>(spec: ReadSpec<T>, opts: ReadOptions = {}): Promise<ReadResult<T>> {
     const views = spec.target.views;
     const view = primaryView(spec.target);
-    const cls = classForViews(views);
+    const classOf = this.classesOf(spec);
     const cacheable = !views.some((v) => UNCACHED_VIEWS.includes(v));
     const key = cacheKey(spec.target, spec.leagueId, spec.filter);
     const entry = cacheable ? this.cacheGet(key) : null;
@@ -427,35 +524,47 @@ export class EspnRequester {
     // end-to-end stall probe): parseCached gives each large parse's phases turns of their own. Small
     // bodies (settings, standings) parse in well under a millisecond; a memoised parse is free.
     const cached = entry === null ? null : await this.parseCached(spec, entry);
-    const usable = entry !== null && cached !== null ? { entry, value: cached } : null;
+    const usable =
+      entry !== null && cached !== null
+        ? { entry, value: cached, cls: classOf(entry.fetched_at) }
+        : null;
     const now = this.deps.clock.nowMs();
     const force = opts.force_refresh === true && this.gate.allow(key, now);
-    if (usable !== null && !force && this.stateOf(cls, usable.entry).state === "fresh")
+    if (
+      usable !== null &&
+      !force &&
+      this.stateOf(usable.cls, usable.entry).state === "fresh" &&
+      !this.outdated(spec, usable.value, usable.entry)
+    )
       return {
         value: usable.value,
-        stamp: this.stamp(spec, usable.value, cls, this.at(usable.entry), "hit", null),
+        stamp: this.stamp(spec, usable.value, usable.cls, this.at(usable.entry), "hit", null),
         headers: {},
       };
 
-    const fallback = (err: unknown): ReadResult<T> => {
-      const code = (err as { effCode?: unknown } | null)?.effCode;
-      if (usable === null || !(DEGRADED_CODES as readonly unknown[]).includes(code)) throw err;
-      const st = this.stateOf(cls, usable.entry).state;
+    // the usable entry served as degraded (`code`) where its class's serve rule allows — stale
+    // inside its hard limit; past it under allow_stale or while the host is moved — else `refuse`
+    const serveStale = (code: DegradedCode, refuse: () => never): ReadResult<T> => {
+      if (usable === null) return refuse();
+      const st = this.stateOf(usable.cls, usable.entry).state;
       const hostMoved = code === "ESPN_HOST_MOVED" || this.hostMoved();
-      const decision = serveDecision(cls, st, { allowStale: opts.allow_stale === true, hostMoved });
-      if (decision.outcome !== "serve") throw new EspnStaleOnlyError(view);
+      const decision = serveDecision(usable.cls, st, {
+        allowStale: opts.allow_stale === true,
+        hostMoved,
+      });
+      if (decision.outcome !== "serve") return refuse();
       const degraded: DegradedRead = {
-        code: code as DegradedCode,
+        code,
         served: "stale_cache",
         hard_limit_suspended: decision.hardLimitSuspended,
       };
-      this.deps.log?.debug("espn.read.degraded", { view, code: degraded.code });
+      this.deps.log?.debug("espn.read.degraded", { view, code });
       return {
         value: usable.value,
         stamp: this.stamp(
           spec,
           usable.value,
-          cls,
+          usable.cls,
           this.at(usable.entry),
           code === "ESPN_UPSTREAM_UNAVAILABLE" && this.limiter.breaker.isOpen()
             ? "breaker"
@@ -465,6 +574,30 @@ export class EspnRequester {
         headers: {},
       };
     };
+    // ESPN (or our limiter) could not answer: the entry when usable, else the failure — or
+    // STALE_ONLY when only data past its hard limit is cached
+    const fallback = (err: unknown): ReadResult<T> => {
+      const code = (err as { effCode?: unknown } | null)?.effCode;
+      if (!(DEGRADED_CODES as readonly unknown[]).includes(code)) throw err;
+      return serveStale(code as DegradedCode, () => {
+        if (usable === null) throw err;
+        throw new EspnStaleOnlyError(view);
+      });
+    };
+    // the call's budget cannot pay for a request — its ≤ 20 s deadline passed or its three requests
+    // are spent: a usable entry is served as degraded exactly as when ESPN fails, under the code the
+    // shortfall maps to (src/mcp fromBudgetSignal: the deadline → ESPN_UPSTREAM_UNAVAILABLE, the cap
+    // → RATE_LIMITED); with nothing usable the budget signal stands — the tool's `partial: true`
+    // (plan 01 §6 "past the deadline the call returns stale data or partial: true — or
+    // ESPN_UPSTREAM_UNAVAILABLE when nothing is cached"; §5.6 a 4th request "returns what it has";
+    // Stage C finding espn-budget-spent-skips-stale-fallback: the signal skipped the cache)
+    const spent = (signal: UpstreamBudgetExhausted): ReadResult<T> =>
+      serveStale(
+        signal.missing.reason === "deadline" ? "ESPN_UPSTREAM_UNAVAILABLE" : "RATE_LIMITED",
+        () => {
+          throw signal;
+        },
+      );
 
     // while the host is moved (drift_state), an open breaker reports the move, not an outage
     if (this.limiter.breaker.isOpen())
@@ -473,6 +606,10 @@ export class EspnRequester {
           ? new EspnUpstreamError("host_moved", { view, reason: "breaker_open" })
           : new EspnBreakerOpenError(),
       );
+    // ESPN asked us to wait (Retry-After): nothing is sent until it ends — the entry when usable,
+    // else RATE_LIMITED with the time left; no budget is spent on a request that cannot go out
+    const held = this.holdLeftMs(now);
+    if (held > 0) return fallback(new EspnRateLimitedError(held, "retry_after"));
 
     // this reader's own limits: its call's deadline and cancellation (plan 01 §6, ADV OBJ-20). A
     // reader that can no longer start a request takes part in none; only the reader that STARTS
@@ -481,9 +618,9 @@ export class EspnRequester {
     // budget: a cancelled or nearly-spent first caller failed a parallel call)
     const budget = opts.budget;
     if (budget !== undefined && !budget.canStart(now))
-      throw new UpstreamBudgetExhausted(view, "deadline");
+      return spent(new UpstreamBudgetExhausted(view, "deadline"));
     if (budget !== undefined && !this.coalescer.has(key) && !budget.tryConsume())
-      throw new UpstreamBudgetExhausted(view, "budget");
+      return spent(new UpstreamBudgetExhausted(view, "budget"));
     const run = this.coalescer.run(
       key,
       partyOf(budget, now),
@@ -494,7 +631,7 @@ export class EspnRequester {
     try {
       fresh = await run.promise;
     } catch (e) {
-      if (e instanceof UpstreamBudgetExhausted) throw e;
+      if (e instanceof UpstreamBudgetExhausted) return spent(e);
       return fallback(e);
     }
     const joined = run.joined;
@@ -512,7 +649,14 @@ export class EspnRequester {
     }
     return {
       value,
-      stamp: this.stamp(spec, value, cls, fresh, joined ? "coalesced" : fresh.cache, null),
+      stamp: this.stamp(
+        spec,
+        value,
+        classOf(fresh.fetchedAt),
+        fresh,
+        joined ? "coalesced" : fresh.cache,
+        null,
+      ),
       headers: fresh.headers,
     };
   }
@@ -610,7 +754,10 @@ export class EspnRequester {
    * UpstreamBudget) but must fit the deadline; one the limiter cannot fit before the deadline ends
    * the read with the last upstream failure, and none is sent once the breaker is open. The deadline
    * and the signal are the SHARED read's (`limits`, read at every step): the latest deadline of the
-   * readers still waiting, and an abort once none is.
+   * readers still waiting, and an abort once none is. ESPN's Retry-After — on this read's answer,
+   * another read's or another process's — holds every attempt off until it ends: a first attempt is
+   * refused at once (RATE_LIMITED, the time left), a retry waits it out when the deadline leaves room
+   * for it and otherwise ends the read with its last failure.
    */
   private async fetchFresh<T>(
     spec: ReadSpec<T>,
@@ -626,6 +773,19 @@ export class EspnRequester {
     const cookie = await this.cookies.forRequest(spec.cookies, target.route);
     let last: EspnUpstreamError | null = null;
     for (let attempt = 1; ; attempt++) {
+      // the hold before every attempt: a first attempt inside it is refused at once; a retry's own
+      // wait already covers this read's hint (retryWaitMs), and what is left after it — a timer that
+      // woke a moment early, another read's later hint — is waited out ONCE when the deadline
+      // allows (bounded: never a spin on a clock that does not move), else the read ends
+      let held = this.holdLeftMs(this.deps.clock.nowMs());
+      if (held > 0 && last !== null && limits.canStart(this.deps.clock.nowMs() + held)) {
+        await (this.deps.sleep ?? realSleep)(held, signal);
+        held = this.holdLeftMs(this.deps.clock.nowMs());
+      }
+      if (held > 0) {
+        if (last === null) throw new EspnRateLimitedError(held, "retry_after");
+        throw last;
+      }
       let ticket: LimiterTicket;
       try {
         ticket = await this.limiter.acquire({
@@ -689,6 +849,8 @@ export class EspnRequester {
         const err = failure;
         outcome = err.outcome;
         last = err;
+        // ESPN's Retry-After outlives this read: no request of any read goes out before it ends
+        this.holdOffFor(err.retryAfterMs);
         await this.afterFailure(err, cookie !== null, view);
         if (!err.retryable || attempt >= ESPN_BACKOFF.maxAttempts) throw err;
         wait = this.retryWaitMs(err, attempt);
@@ -709,7 +871,8 @@ export class EspnRequester {
    * ESPN_HOST_MOVED; a network failure is still classified. It runs inside the probe CALL's budget
    * (plan 01 §6 / ADV OBJ-20: the whole probe ends within its ≤ 20 s deadline — Stage C finding
    * auth-probe-definitive-plan-unwired): no request starts past it, and the attempt has what the
-   * deadline leaves. Without a budget it gets its own ≤ 20 s window.
+   * deadline leaves. Without a budget it gets its own ≤ 20 s window. ESPN's Retry-After holds it off
+   * like any request (RATE_LIMITED with the time left), and a 429 or 5xx carrying one sets the hold.
    */
   async probeSend(
     target: EspnTarget,
@@ -721,6 +884,8 @@ export class EspnRequester {
     const view = primaryView(target);
     this.assertTlsVerified(view);
     const now = this.deps.clock.nowMs();
+    const held = this.holdLeftMs(now);
+    if (held > 0) throw new EspnRateLimitedError(held, "retry_after");
     const deadline = budget?.deadline_at_ms ?? now + PER_CALL_DEADLINE_MS;
     // nothing is sent past the call's deadline or beyond its request cap (no row is written either)
     if (budget !== undefined && !budget.canStart(now))
@@ -758,6 +923,7 @@ export class EspnRequester {
             : s >= 500
               ? "server_error"
               : "client_error";
+      if (s === 429 || s >= 500) this.holdOffFor(retryAfterMs(answer.headers["retry-after"]));
       if (s <= 399) {
         const err = classifyAnswer({
           status: s,
@@ -908,6 +1074,16 @@ export class EspnRequester {
         this.deps.log?.warn("espn.cache.write_failed");
       }
     }
+    // every league answer carries the league's status instants: a standings update or a waiver run
+    // they show newer than the cached settings carry outdates those settings (plan 01 §5.2; plan 08
+    // §9; provider.ts settingsRead) — kept for every process, written only when an instant moves
+    if (spec.target.route === "league" && spec.leagueId !== null)
+      cachedSettingsMarks(
+        this.deps.cache,
+        spec.leagueId,
+        spec.target.season,
+        this.deps.clock,
+      ).observe(statusInstantsOf(body), Date.parse(fetchedAt));
     this.deps.log?.debug("espn.request.ok", {
       view,
       upstream_status: answer.status,

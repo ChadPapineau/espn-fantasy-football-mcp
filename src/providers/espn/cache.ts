@@ -1,18 +1,21 @@
 // cache.ts — the ESPN cache policy (plan 01 §5.3, §5.4, §5.2 classes): the canonical key (season,
 // league, views in whitelist order, scoringPeriodId, canonical filter — two spellings of one request
-// hit one entry), the freshness class per view (a composite takes its strictest member), the
+// hit one entry), the freshness class per view (a composite takes its strictest member) and the
+// immutable class an answer takes once the weeks it covers are past their correction window, the
 // force_refresh gate (once per 60 s per key), in-process coalescing (N concurrent identical requests
 // → one upstream call, each reader still bound by its own call's deadline and cancellation — plan 01
 // §6), and the PII rule for what is stored (plan 02 §2.4: member names,
 // notification settings and any `clientAddress` never enter the parsed cache; the raw body only in
-// fixture-recording mode), and the league's publicity kept across processes (cachedPublicity).
+// fixture-recording mode), and what outlives a process in the cache's own namespaces: the league's
+// publicity (cachedPublicity), the settings invalidation marks (cachedSettingsMarks — plan 01 §5.2,
+// plan 08 §9) and ESPN's Retry-After hold on the read host (cachedRetryAfter — plan 01 §6).
 import {
   freshnessClass,
   type FreshnessClass,
   type FreshnessClassId,
 } from "../../config/freshness.js";
 import type { Clock } from "../../domain/clock.js";
-import type { EspnCacheRepository } from "../../store/types.js";
+import type { EspnCacheEntry, EspnCacheRepository } from "../../store/types.js";
 import { FORCE_REFRESH_MIN_INTERVAL_MS } from "../platform.js";
 import type { PublicityStore } from "./auth-gate.js";
 import type { EspnTarget } from "./path.js";
@@ -58,6 +61,33 @@ export function classForViews(views: readonly EspnView[]): FreshnessClass {
   }
   if (best === null) throw new RangeError("cache: no views");
   return best;
+}
+
+/**
+ * The immutable class a view's answer takes once every scoring period it covers is past its 7-day
+ * stat-correction window (plan 01 §5.4 "ESPN immutable (draft; final weeks past the correction
+ * window)": fresh always, no hard limit; §5.2: mMatchup rows immutable 7 days after the week's last
+ * game, the player card's weekly actuals immutable for weeks past the window). A view absent here
+ * never turns immutable: rosters, the pool, standings and settings change whatever the week.
+ */
+export const FINAL_VIEW_FRESHNESS: Readonly<Partial<Record<EspnView, FreshnessClassId>>> =
+  Object.freeze({
+    mMatchup: "espn_matchups_final",
+    mScoreboard: "espn_matchups_final",
+    mMatchupScore: "espn_matchups_final",
+    mBoxscore: "espn_matchups_final",
+    kona_playercard: "espn_player_stats_final",
+  });
+
+/** The immutable class every view of a request shares once final, or null (some view never is). */
+export function finalClassForViews(views: readonly EspnView[]): FreshnessClass | null {
+  let id: FreshnessClassId | null = null;
+  for (const v of views) {
+    const c = FINAL_VIEW_FRESHNESS[v];
+    if (c === undefined || (id !== null && c !== id)) return null;
+    id = c;
+  }
+  return id === null ? null : freshnessClass(id);
 }
 
 /**
@@ -163,6 +193,239 @@ export function cachedBoardControl(
         });
       } catch {
         // unwritten: the next probe learns it again (one anonymous request)
+      }
+    },
+  };
+}
+
+/** A non-negative finite number, else null (what a kept row or a body's status field may hold). */
+function instant(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
+}
+
+/** A league answer's status instants (epoch ms, ESPN's clock — research 03 §A.4), or nulls. */
+export interface StatusInstants {
+  /** `status.standingsUpdateDate`. */
+  readonly standings_ms: number | null;
+  /** `status.waiverLastExecutionDate`. */
+  readonly waivers_ms: number | null;
+}
+
+/** The status instants a body carries (`status.standingsUpdateDate` / `waiverLastExecutionDate`). */
+export function statusInstantsOf(body: unknown): StatusInstants {
+  const s =
+    typeof body === "object" && body !== null ? (body as { status?: unknown }).status : undefined;
+  if (typeof s !== "object" || s === null) return { standings_ms: null, waivers_ms: null };
+  const st = s as { standingsUpdateDate?: unknown; waiverLastExecutionDate?: unknown };
+  return {
+    standings_ms: instant(st.standingsUpdateDate),
+    waivers_ms: instant(st.waiverLastExecutionDate),
+  };
+}
+
+/**
+ * What invalidates a league-season's cached settings before their 24 h TTL (plan 01 §5.2 "League
+ * settings" row: `status.standingsUpdateDate` / `waiverLastExecutionDate` change, a scoring golden
+ * mismatch; plan 08 §9: the E6 > 10 % rule, `eff refresh espn:settings`): the newest status instants
+ * any league answer carried (ESPN's clock), when they were last seen to move (our clock), and the
+ * last explicit invalidation (our clock).
+ */
+export interface SettingsMarks extends StatusInstants {
+  readonly moved_at_ms: number | null;
+  readonly dirty_at_ms: number | null;
+}
+
+/** The kept marks of one league-season (best effort both ways: never throws). */
+export interface SettingsMarksStore {
+  load(): SettingsMarks | null;
+  /** Records the status instants of a league answer fetched at `atMs`; a later one moves the marks. */
+  observe(status: StatusInstants, atMs: number): void;
+  /** Marks every settings answer fetched before `atMs` outdated (an explicit invalidation). */
+  invalidate(atMs: number): void;
+}
+
+/** The espn_cache row a league-season's observed status instants are kept under (own namespace). */
+export function settingsMarksKey(leagueId: string, season: number): string {
+  return [`espn:v${String(CACHE_KEY_VERSION)}`, "settings_marks", leagueId, String(season)].join(
+    "|",
+  );
+}
+
+/** The espn_cache row a league-season's explicit settings invalidation is kept under. */
+export function settingsDirtyKey(leagueId: string, season: number): string {
+  return [`espn:v${String(CACHE_KEY_VERSION)}`, "settings_dirty", leagueId, String(season)].join(
+    "|",
+  );
+}
+
+/** A kept row's JSON object: absent or unreadable JSON → `v: null`; a store that throws → `ok: false`. */
+type KeptRow =
+  { readonly ok: true; readonly v: Record<string, unknown> | null } | { readonly ok: false };
+
+function keptRow(cache: Pick<EspnCacheRepository, "get">, key: string): KeptRow {
+  let e: EspnCacheEntry | null;
+  try {
+    e = cache.get(key);
+  } catch {
+    return { ok: false };
+  }
+  if (e === null) return { ok: true, v: null };
+  try {
+    const v = JSON.parse(e.parsed_json) as unknown;
+    return {
+      ok: true,
+      v: typeof v === "object" && v !== null ? (v as Record<string, unknown>) : null,
+    };
+  } catch {
+    return { ok: true, v: null };
+  }
+}
+
+/**
+ * The settings marks of a league-season over the provider's cache, shared by every process that
+ * reads the league (the server, the jobs, the CLI): two small rows, written only when an instant
+ * moves or an invalidation is asked — never per read. The observed instants and the explicit
+ * invalidation are kept apart, so neither write can undo the other, in this process or another one
+ * (a read-then-write of one shared row let a status observation erase an invalidation another
+ * process had just kept). A store that cannot be read writes nothing for an observation (the next
+ * answer that carries the move writes it) and reads as none; an unreadable row reads as none and the
+ * next write replaces it.
+ */
+export function cachedSettingsMarks(
+  cache: Pick<EspnCacheRepository, "get" | "put">,
+  leagueId: string,
+  season: number,
+  clock: Pick<Clock, "nowIso">,
+): SettingsMarksStore {
+  const marksKey = settingsMarksKey(leagueId, season);
+  const dirtyKey = settingsDirtyKey(leagueId, season);
+  const save = (key: string, v: Record<string, number | null>): void => {
+    try {
+      cache.put({
+        key,
+        parsed_json: JSON.stringify(v),
+        fetched_at: clock.nowIso(),
+        server_time: null,
+        etag: null,
+        http_status: 200,
+        raw_body: null,
+      });
+    } catch {
+      // unwritten: the next answer that carries the move (or the next invalidation) writes it
+    }
+  };
+  const later = (seen: number | null, kept: number | null): boolean =>
+    seen !== null && (kept === null || seen > kept);
+  const max = (a: number | null, b: number | null): number | null =>
+    a === null ? b : b === null ? a : Math.max(a, b);
+  return {
+    load: () => {
+      const m = keptRow(cache, marksKey);
+      const d = keptRow(cache, dirtyKey);
+      const marks = m.ok ? m.v : null;
+      const dirty = d.ok ? d.v : null;
+      if (marks === null && dirty === null) return null;
+      return {
+        standings_ms: instant(marks?.standings_ms),
+        waivers_ms: instant(marks?.waivers_ms),
+        moved_at_ms: instant(marks?.moved_at_ms),
+        dirty_at_ms: instant(dirty?.dirty_at_ms),
+      };
+    },
+    observe: (status, atMs) => {
+      if (!Number.isFinite(atMs)) return;
+      const row = keptRow(cache, marksKey);
+      if (!row.ok) return;
+      const keptStandings = instant(row.v?.standings_ms);
+      const keptWaivers = instant(row.v?.waivers_ms);
+      if (!later(status.standings_ms, keptStandings) && !later(status.waivers_ms, keptWaivers))
+        return;
+      save(marksKey, {
+        standings_ms: max(status.standings_ms, keptStandings),
+        waivers_ms: max(status.waivers_ms, keptWaivers),
+        moved_at_ms: max(atMs, instant(row.v?.moved_at_ms)),
+      });
+    },
+    invalidate: (atMs) => {
+      if (!Number.isFinite(atMs)) return;
+      const row = keptRow(cache, dirtyKey);
+      save(dirtyKey, { dirty_at_ms: max(atMs, row.ok ? instant(row.v?.dirty_at_ms) : null) });
+    },
+  };
+}
+
+/**
+ * Whether a cached settings answer, fresh by its TTL, is outdated by the marks: an explicit
+ * invalidation came after it was fetched, or a status instant newer than the one it carries was seen
+ * to move after it was fetched. A move outdates each earlier answer ONCE: an answer fetched after the
+ * move is kept whatever instant it carries, so a lagging body can never make every read refetch.
+ */
+export function settingsOutdated(
+  marks: SettingsMarks | null,
+  carried: StatusInstants,
+  fetchedAtMs: number,
+): boolean {
+  if (marks === null || !Number.isFinite(fetchedAtMs)) return false;
+  if (marks.dirty_at_ms !== null && fetchedAtMs < marks.dirty_at_ms) return true;
+  if (marks.moved_at_ms === null || fetchedAtMs >= marks.moved_at_ms) return false;
+  const newer = (seen: number | null, own: number | null): boolean =>
+    seen !== null && (own === null || seen > own);
+  return (
+    newer(marks.standings_ms, carried.standings_ms) || newer(marks.waivers_ms, carried.waivers_ms)
+  );
+}
+
+/** The espn_cache row the read host's Retry-After hold is kept under (its own namespace). */
+export function retryAfterKey(host: string): string {
+  return [`espn:v${String(CACHE_KEY_VERSION)}`, "retry_after", host].join("|");
+}
+
+/** An instant kept across processes (absent, unreadable or invalid reads as null; never throws). */
+export interface KeptInstant {
+  load(): number | null;
+  /** Keeps `ms` when it is later than the kept one. */
+  save(ms: number): void;
+}
+
+/**
+ * ESPN's Retry-After on the read host, kept over the provider's cache (Stage C finding
+ * espn-retry-after-not-persisted): the instant before which no request goes to the host, honoured by
+ * every process that reads it — not only the read that received the hint (plan 01 §6 "honour
+ * Retry-After if it ever appears"; the limiter is "shared by every tool and every process").
+ */
+export function cachedRetryAfter(
+  cache: Pick<EspnCacheRepository, "get" | "put">,
+  host: string,
+  clock: Pick<Clock, "nowIso">,
+): KeptInstant {
+  const key = retryAfterKey(host);
+  const load = (): number | null => {
+    try {
+      const e = cache.get(key);
+      if (e === null) return null;
+      return instant((JSON.parse(e.parsed_json) as { until_ms?: unknown } | null)?.until_ms);
+    } catch {
+      return null;
+    }
+  };
+  return {
+    load,
+    save: (ms) => {
+      if (!Number.isFinite(ms)) return;
+      const kept = load();
+      if (kept !== null && kept >= ms) return;
+      try {
+        cache.put({
+          key,
+          parsed_json: JSON.stringify({ until_ms: ms }),
+          fetched_at: clock.nowIso(),
+          server_time: null,
+          etag: null,
+          http_status: 200,
+          raw_body: null,
+        });
+      } catch {
+        // unwritten: this process still holds off (its own instant); another one may send once
       }
     },
   };
