@@ -5,7 +5,15 @@
 // connection fails by its open mode; a statement trace shows zero ds_* DML from the server; files
 // the binary would not serve (symlink, foreign, other layout, unstamped, not SQLite) read as
 // never loaded with a fixed-vocabulary warning.
-import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -16,7 +24,11 @@ import {
   sourcesOfJob,
   type DatasetSourceId,
 } from "../../src/config/freshness.js";
-import { DATASET_META_TABLE, parseDsSchema } from "../../src/store/datasets/connections.js";
+import {
+  DATASET_META_TABLE,
+  parseDsSchema,
+  type DatasetRefusal,
+} from "../../src/store/datasets/connections.js";
 import { isDatasetObject, isWriteAction } from "../../src/store/sqlite.js";
 import { nflPlayersReaderOf, statementGuardOf, storeInternalsOf } from "../../src/store/store.js";
 import { SQLITE_ATTACH_LIMIT, type DatasetPublisher, type Store } from "../../src/store/types.js";
@@ -136,6 +148,69 @@ describe("lazy, per-source, read-only connections", () => {
     expect(s.reopenChangedDatasets()).toEqual(["nflverse:injuries"]);
     expect(s.datasets.injuries.reports(2026, 3, null)).toEqual({ rows: [], stamp: null });
     expect(warnings).toContain("dataset_missing");
+  });
+
+  it("after the documented restore (refresh_log names an older publish than the file on disk) the file is opened ONCE and served until refresh_log moves (Stage C datasets-restore-version-mismatch-reopen)", async () => {
+    await publishTables(pub, "nflverse:injuries", "v1", injuriesTables());
+    const before = open();
+    const v1 = before.datasets.injuries.reports(2026, 3, null);
+    expect(v1.stamp?.file_version).toBe("v1");
+    expect(v1.rows.length).toBeGreaterThan(0);
+    // the weekly backup, then a nightly publish the backup never saw
+    const backup = path.join(t.backupDir, "store-2026-10-06.sqlite");
+    await before.backup(backup);
+    t.clock.advance(3_600_000);
+    await publishTables(pub, "nflverse:injuries", "v2", emptyTables("nflverse:injuries"));
+    before.close();
+    store = null;
+    pub.close();
+    // restoreSteps: stop everything, move the store WITH its -wal and -shm away, copy the backup in
+    for (const side of ["", "-wal", "-shm"]) rmSync(`${t.storePath}${side}`, { force: true });
+    copyFileSync(backup, t.storePath);
+    chmodSync(t.storePath, 0o600);
+    const s = open();
+    const conns = storeInternalsOf(s)?.connections;
+    const first = conns?.use("nflverse:injuries");
+    expect(first).toMatchObject({ file_version: "v2" });
+    const openedAt = s.stats().open_datasets[0]?.opened_at;
+    for (let i = 0; i < 200; i++) {
+      t.clock.advance(1000);
+      const res = s.datasets.injuries.reports(2026, 3, null);
+      // the file on disk, under its own stamp (the restored refresh_log has no row for v2)
+      expect(res).toMatchObject({ rows: [], stamp: { file_version: "v2" } });
+      expect(conns?.use("nflverse:injuries")).toBe(first);
+    }
+    expect(s.stats().open_datasets).toEqual([
+      expect.objectContaining({ file_version: "v2", opened_at: openedAt }),
+    ]);
+    // opened under the version the restored refresh_log names, not the file's
+    expect(first?.opened_for).toBe("v1");
+    // nothing changed in refresh_log: nothing to re-open
+    expect(s.reopenChangedDatasets()).toEqual([]);
+    expect(conns?.use("nflverse:injuries")).toBe(first);
+    // the next publish moves refresh_log (recording the live v2 file first, then v3): re-opened once
+    pub = openPublisher(t);
+    await publishTables(pub, "nflverse:injuries", "v3", injuriesTables());
+    const next = conns?.use("nflverse:injuries");
+    expect(next).not.toBe(first);
+    expect(next).toMatchObject({ file_version: "v3", opened_for: "v3" });
+    expect(s.datasets.injuries.reports(2026, 3, null)).toMatchObject({
+      rows: v1.rows,
+      stamp: { file_version: "v3" },
+    });
+    expect(conns?.use("nflverse:injuries")).toBe(next);
+    // no file was ever refused on the way
+    const refusals: readonly DatasetRefusal[] = [
+      "dataset_symlink_refused",
+      "dataset_not_regular_file",
+      "dataset_missing",
+      "dataset_unreadable",
+      "dataset_unstamped",
+      "dataset_source_mismatch",
+      "dataset_schema_mismatch",
+      "dataset_tables_missing",
+    ];
+    for (const code of refusals) expect(warnings).not.toContain(code);
   });
 
   it("a source refresh_log never named reads as never loaded, even when a file exists", async () => {

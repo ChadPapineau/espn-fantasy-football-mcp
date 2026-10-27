@@ -1,6 +1,8 @@
 // connections.ts — the server's view of the per-source dataset files (plan 01 §5.5 after ADV OBJ-22;
 // plan 03 §1.1 step 3): each file named in refresh_log is opened LAZILY as its OWN read-only
-// connection on first use and re-opened when refresh_log names a new version; there is no attach
+// connection on first use and re-opened when refresh_log names a new version — another than the one
+// it was opened under, never compared with the file's own stamp, which a restored store's refresh_log
+// may not name (Stage C, datasets-restore-version-mismatch-reopen); there is no attach
 // loop, so the eleven sources of `full` never meet SQLite's limit of 10 attachments. A reader
 // opened before a publish keeps its inode (the old rows) until it re-opens; the OS frees the old
 // inode at its last close. A missing, foreign, unstamped or other-layout file is never served — its
@@ -115,6 +117,16 @@ export function checkDatasetFile(
 export interface DatasetConnection extends OpenDataset {
   readonly db: DatabaseSync;
   readonly meta: Readonly<Record<string, string>>;
+  /**
+   * The version refresh_log named as current when this connection was opened: the connection is
+   * re-opened only when refresh_log names ANOTHER version. The file's own `file_version` may differ —
+   * a store restored from a backup names an older publish than the file the nightly publishes left on
+   * disk (or a publish renamed its file and could not record it, PUBLISH_UNRECORDED) — and comparing
+   * that with refresh_log re-opened and re-checked the file on EVERY read until the next publish of
+   * the source: months for an off-season or history source (Stage C finding
+   * datasets-restore-version-mismatch-reopen).
+   */
+  readonly opened_for: string | null;
 }
 
 /** What the connection manager is built from. */
@@ -165,7 +177,7 @@ export class DatasetConnections {
     }
   }
 
-  private openFile(source: DatasetSourceId): DatasetConnection | null {
+  private openFile(source: DatasetSourceId, openedFor: string | null): DatasetConnection | null {
     const file = this.fileOf(source);
     let ino: number;
     try {
@@ -205,6 +217,7 @@ export class DatasetConnections {
       opened_at: this.o.clock.nowIso(),
       db,
       meta: checked.meta,
+      opened_for: openedFor,
     };
     this.open.set(source, conn);
     return conn;
@@ -212,8 +225,9 @@ export class DatasetConnections {
 
   /**
    * The connection to read `source` from: opened on first use, re-opened when refresh_log's current
-   * version differs from the open file's, or null when refresh_log names no version (never loaded)
-   * or the file cannot be served.
+   * version differs from the one it was opened under (`opened_for` — never the file's own version,
+   * which a restored store's refresh_log may not name), or null when refresh_log names no version
+   * (never loaded) or the file cannot be served.
    */
   use(source: DatasetSourceId): DatasetConnection | null {
     if (this.closed) throw new Error("store: closed");
@@ -223,7 +237,7 @@ export class DatasetConnections {
       return null;
     }
     const existing = this.open.get(source);
-    if (existing?.file_version === cur.file_version) return existing;
+    if (existing?.opened_for === cur.file_version) return existing;
     if (
       existing === undefined &&
       this.refusedAt.has(source) &&
@@ -231,7 +245,7 @@ export class DatasetConnections {
     )
       return null;
     this.close(source);
-    const conn = this.openFile(source);
+    const conn = this.openFile(source, cur.file_version);
     if (conn === null) this.refusedAt.set(source, cur.file_version);
     else this.refusedAt.delete(source);
     return conn;
@@ -252,15 +266,18 @@ export class DatasetConnections {
     };
   }
 
-  /** Re-opens every OPEN dataset whose refresh_log version changed; returns those sources. */
+  /**
+   * Re-opens every OPEN dataset whose refresh_log version changed since it was opened (`opened_for`);
+   * returns those sources.
+   */
   reopenChanged(): readonly DatasetSourceId[] {
     const changed: DatasetSourceId[] = [];
     this.refusedAt.clear();
     for (const [source, c] of [...this.open]) {
       const cur = currentRefreshRow({ db: this.o.storeDb }, source);
-      if (cur?.file_version === c.file_version) continue;
+      if (cur !== null && cur.file_version === c.opened_for) continue;
       this.close(source);
-      if (cur !== null) this.openFile(source);
+      if (cur !== null) this.openFile(source, cur.file_version);
       changed.push(source);
     }
     return changed.sort();
