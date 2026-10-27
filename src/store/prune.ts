@@ -6,7 +6,9 @@
 // deleted them), staging debris and dataset files refresh_log could never name, backups beyond two
 // versions / four weeks (one pre-migration copy per version, under the process lock — Stage C,
 // store-failed-migration-backups-accumulate), and the temp files of a killed run
-// (`<cache>/tmp/<prefix>-XXXXXX` untouched for a day — Stage C, store-prune-skips-tmp-runs).
+// (`<cache>/tmp/<prefix>-XXXXXX` untouched for a day — Stage C, store-prune-skips-tmp-runs). A row
+// stamped after the prune's instant (a clock since set back) is judged too: a cache copy deleted, a
+// request row re-stamped to age out by its TTL (Stage C, store-future-stamped-rows-block).
 // NEVER touches the never-pruned tables (T-07): the only DELETE targets are the PRUNE_POLICY tables,
 // asserted below.
 import { lstatSync, readdirSync, rmSync, type Stats } from "node:fs";
@@ -33,6 +35,7 @@ import {
 } from "./lock.js";
 import { publishJob, PUBLISH_LOCK_STALE_MS } from "./publisher.js";
 import { intIn, isoMs, num } from "./repos/common.js";
+import { latestTrustedMs } from "./repos/skew.js";
 import { storeInternalsOf } from "./store.js";
 import { NEVER_PRUNED_TABLES, PRUNE_POLICY, type Store, type StoreTable } from "./types.js";
 
@@ -112,6 +115,14 @@ export interface PruneOptions {
 /** What was removed. */
 export interface PruneReport {
   readonly rows: Readonly<Record<(typeof PRUNE_TARGETS)[number], number>>;
+  /**
+   * Request rows stamped after the prune's instant (a clock since set back — repos/skew.ts),
+   * re-stamped to it so they age out by their TTL: read as written, `ts < now − TTL` never held for
+   * them (Stage C finding store-future-stamped-rows-block). Re-stamped, never deleted — each may be a
+   * request of the last minute or of today, which the limiter's windows and the jobs' daily caps
+   * must still count.
+   */
+  readonly restamped: { readonly espn_requests: number };
   /** Basenames removed from the dataset directory. */
   readonly files_removed: readonly string[];
   /** Basenames removed from the backup directory. */
@@ -292,8 +303,22 @@ export function pruneStore(store: Store, opts: PruneOptions = {}): PruneReport {
     throw new RangeError("store: runTempDir must be an absolute path or null");
   const del = (table: (typeof PRUNE_TARGETS)[number], sql: string, ...args: number[]): number =>
     writes.required(table, () => Number(db.prepare(sql).run(...args).changes));
+  // A stamp after this instant was written under a clock since set back (repos/skew.ts): its age is
+  // unknown, and `< now − age` never held for it. A cached copy of unknown age is deleted, like one
+  // past its limit (the next read fetches it again); a request row is re-stamped to now, so it ages
+  // out by its TTL like any other — deleted, one of the last minute's or today's would no longer
+  // count against a window or a job's daily cap.
+  const trusted = latestTrustedMs(nowMs);
+  const restamped = writes.required("espn_requests", () =>
+    Number(db.prepare("UPDATE espn_requests SET ts = ? WHERE ts > ?").run(nowMs, trusted).changes),
+  );
   const rows = {
-    espn_cache: del("espn_cache", "DELETE FROM espn_cache WHERE fetched_ms < ?", nowMs - cacheAge),
+    espn_cache: del(
+      "espn_cache",
+      "DELETE FROM espn_cache WHERE fetched_ms < ? OR fetched_ms > ?",
+      nowMs - cacheAge,
+      trusted,
+    ),
     points_cache: del(
       "points_cache",
       `DELETE FROM points_cache WHERE rowid NOT IN (
@@ -367,6 +392,7 @@ export function pruneStore(store: Store, opts: PruneOptions = {}): PruneReport {
   }
   return {
     rows,
+    restamped: { espn_requests: restamped },
     files_removed: filesRemoved.sort(),
     backups_removed: backupsRemoved.sort(),
     temp_runs_removed: tempRunsRemoved,

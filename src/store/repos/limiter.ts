@@ -2,7 +2,10 @@
 // row inside a short BEGIN IMMEDIATE after checking every window; plan 06 §1.4 + changelog V7: two
 // daily caps for the job fleet, counted over JOB-origin rows of the same kind) plus each request's
 // outcome, from which any process derives the breaker and the 304 count. Fail closed: a row that
-// cannot be written → StoreBusyError, and the caller does not send the request (WRITE_CLASS).
+// cannot be written → StoreBusyError, and the caller does not send the request (WRITE_CLASS). A row
+// stamped ahead of a request by more than any concurrent writer can stamp one is re-stamped to it
+// inside that request's transaction (a clock since set back — skew.ts; Stage C finding
+// store-future-stamped-rows-block).
 import { REQUEST_OUTCOMES } from "../../config/schema.js";
 import type { IsoInstant } from "../../domain/league/types.js";
 import {
@@ -14,6 +17,7 @@ import {
   type RequestOrigin,
 } from "../types.js";
 import { bool, boundedArray, intIn, isoMs, msToIso, num, oneOf, type RepoDeps } from "./common.js";
+import { latestTrustedMs, REQUEST_SKEW_TOLERANCE_MS } from "./skew.js";
 
 /** A day, for the daily caps' next-day start (dayStart + 24 h; the caller picks the zone). */
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -60,11 +64,26 @@ function checkRequest(req: LimiterRequest): {
   return { atMs, windows, cap, inFlight };
 }
 
-export function limiterRepository({ db, writes }: RepoDeps): LimiterRepository {
+export function limiterRepository({ db, writes, clock }: RepoDeps): LimiterRepository {
   return {
     tryRecord(req): LimiterVerdict {
       const { atMs, windows, cap, inFlight } = checkRequest(req);
       return writes.requiredTx("espn_requests", () => {
+        // A row stamped after the store's clock, and further after this request than any other
+        // process can have stamped one while this request waited for the writer lock
+        // (REQUEST_SKEW_TOLERANCE_MS), was written under a clock since set back (skew.ts): made at
+        // an unknown instant no later than now. It is re-stamped to this request's instant, once —
+        // counted from here on as made just now, the latest it can have been, so every window, cap
+        // and slot below counts it and it then ages normally. Read as written, a window with no
+        // upper bound kept it inside until real time passed its stamp: every ESPN read, the
+        // server's, the CLI's and the jobs', refused RATE_LIMITED for the size of the skew (Stage C
+        // finding store-future-stamped-rows-block). The store's clock bounds it from below: a row
+        // stamped no later than that clock is legitimate whatever instant a caller passes, and is
+        // never moved.
+        db.prepare("UPDATE espn_requests SET ts = ? WHERE ts > ?").run(
+          atMs,
+          Math.max(atMs + REQUEST_SKEW_TOLERANCE_MS, latestTrustedMs(clock.nowMs())),
+        );
         // the in-flight cap, counted inside this BEGIN IMMEDIATE: no other process can insert a
         // pending row between this count and this insert (limiter-concurrency-per-process)
         const pending =

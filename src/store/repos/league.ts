@@ -11,7 +11,10 @@
 // and pinned rounding, all inside settings_hash), so an upgrade never reads as the commissioner's
 // edit — and a fetch already recorded takes no write lock (put belongs on the settings read path,
 // plan 08 §9, where every cache hit re-records the fetch it was served from: a busy store must not
-// stall a read that changes nothing). Ported from sibling @cf3b015, adapted (single-league posture:
+// stall a read that changes nothing). A settings or snapshot row stamped past the store's clock (a
+// clock since set back) is re-stamped just below the next one written under it, and a check raised
+// then is covered by an acknowledgement made now (skew.ts; Stage C finding
+// store-future-stamped-rows-block). Ported from sibling @cf3b015, adapted (single-league posture:
 // no league key on snapshots; ESPN shapes).
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { ESPN_LEAGUE_ID_RE, TEAM_ID_MAX, TEAM_ID_MIN } from "../../config/schema.js";
@@ -55,6 +58,7 @@ import {
   WEEK_MIN,
   type RepoDeps,
 } from "./common.js";
+import { latestTrustedMs } from "./skew.js";
 
 /** Largest `transactionsSeen.list` page. */
 export const TRANSACTIONS_LIST_MAX = 1000;
@@ -276,7 +280,33 @@ const toCheck = (r: CheckDbRow): CheckRow => ({
   acknowledged_by: r.acknowledged_by as CheckAcknowledger | null,
 });
 
-export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettingsRepository {
+/**
+ * skew.ts, for the orderings ("the newest settings", "the newest two snapshots"): a row written under
+ * the store's clock — `ms` no later than its now — was written after every row stamped past that
+ * clock (those were written under a clock since set back, at instants no later than now), so those
+ * are re-stamped just below `ms`, inside the same transaction (`sql` sets the ms and ISO columns
+ * from its first two parameters, then takes `scope`, then the bound past which a stamp is skewed),
+ * and the new row is the newest. Read as written, the row stamped ahead stayed the newest until real
+ * time passed it: a commissioner's edit read as a late answer (no settings_changed, the old settings
+ * served as the latest) and a nightly snapshot was filed behind the one before it (Stage C finding
+ * store-future-stamped-rows-block). A row whose own `ms` lies past the clock re-stamps nothing.
+ */
+function restampAhead(
+  db: DatabaseSync,
+  clock: RepoDeps["clock"],
+  ms: number,
+  sql: string,
+  ...scope: (string | number)[]
+): void {
+  const trusted = latestTrustedMs(clock.nowMs());
+  if (ms <= trusted) db.prepare(sql).run(ms - 1, msToIso(ms - 1), ...scope, trusted);
+}
+
+export function leagueSettingsRepository({
+  db,
+  writes,
+  clock,
+}: RepoDeps): LeagueSettingsRepository {
   const newest = (leagueId: string, season: number): SettingsRow | undefined =>
     db.prepare(NEWEST_SETTINGS_SQL).get(leagueId, season) as SettingsRow | undefined;
   // Prepared once per connection, on first use: put belongs on the settings read path (plan 08 §9 —
@@ -321,9 +351,26 @@ export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettin
       // no check opens: the same answer the transaction gives, without waiting for its lock. A row's
       // fetched_ms only grows (and league_settings is never pruned), so a writer that commits after
       // this read cannot make the skip wrong; under WAL the read does not wait for that writer.
+      // A NEWER row of this hash stamped past the store's clock is no evidence this fetch is old:
+      // under the store's clock this fetch is the newer one (restampAhead), so it is recorded. The
+      // clock is read only then — never for the read path's common re-record of the very fetch the
+      // row already holds.
       const known = recordedMs(row.league_id, row.season, row.settings_hash);
-      if (known !== null && known >= ms) return;
+      if (known !== null && known >= ms) {
+        if (known === ms) return;
+        const trusted = latestTrustedMs(clock.nowMs());
+        if (!(ms <= trusted && known > trusted)) return;
+      }
       writes.requiredTx("league_settings", () => {
+        restampAhead(
+          db,
+          clock,
+          ms,
+          `UPDATE league_settings SET fetched_ms = ?, fetched_at = ?
+           WHERE league_id = ? AND season = ? AND fetched_ms > ?`,
+          row.league_id,
+          row.season,
+        );
         const before = newest(row.league_id, row.season);
         // One row per settings_hash (the log's referent): a repeat put of a hash records the newer
         // fetch's slots and rules (the hash covers the scoring rules only) — never an older fetch's.
@@ -420,14 +467,21 @@ export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettin
       if (by === "snapshot" && !SNAPSHOT_CLOSES.includes(id))
         throw new RangeError("store: the roster snapshot closes only ir_invalid checks");
       isoMs(at, "at");
+      // An acknowledgement made under the store's clock (upTo no later than its now) also covers a
+      // check raised past that clock: it was raised under a clock since set back, before now — so
+      // before the human (or the snapshot) looked. Read as written, `raised_ms <= upTo` kept it open
+      // whatever was acknowledged, until real time passed it (skew.ts;
+      // store-future-stamped-rows-block).
+      const trusted = latestTrustedMs(clock.nowMs());
+      const ahead = upToMs <= trusted ? trusted : Number.MAX_SAFE_INTEGER;
       return writes.required("checks", () =>
         Number(
           db
             .prepare(
               `UPDATE checks SET acknowledged = 1, acknowledged_at = ?, acknowledged_by = ?
-               WHERE id = ? AND acknowledged = 0 AND raised_ms <= ?`,
+               WHERE id = ? AND acknowledged = 0 AND (raised_ms <= ? OR raised_ms > ?)`,
             )
-            .run(at, by, id, upToMs).changes,
+            .run(at, by, id, upToMs, ahead).changes,
         ),
       );
     },
@@ -437,6 +491,7 @@ export function leagueSettingsRepository({ db, writes }: RepoDeps): LeagueSettin
 export function rosterSnapshotRepository({
   db,
   writes,
+  clock,
   pseudonyms,
 }: RepoDeps): RosterSnapshotRepository {
   return {
@@ -446,6 +501,13 @@ export function rosterSnapshotRepository({
       const ms = isoMs(s.taken_at, "taken_at");
       const json = toJson(s.roster, "roster");
       writes.requiredTx("roster_snapshot", () => {
+        // every snapshot stamped past the store's clock was taken before this one (restampAhead)
+        restampAhead(
+          db,
+          clock,
+          ms,
+          "UPDATE roster_snapshot SET taken_ms = ?, taken_at = ? WHERE taken_ms > ?",
+        );
         db.prepare(
           "INSERT INTO roster_snapshot (team_id, week, taken_at, taken_ms, roster_json) VALUES (?, ?, ?, ?, ?)",
         ).run(s.team_id, s.week, s.taken_at, ms, pseudonyms.apply(json));
@@ -475,6 +537,7 @@ export function rosterSnapshotRepository({
 export function poolSnapshotRepository({
   db,
   writes,
+  clock,
   pseudonyms,
 }: RepoDeps): PoolSnapshotRepository {
   return {
@@ -484,6 +547,13 @@ export function poolSnapshotRepository({
       if (!Array.isArray(s.players)) throw new RangeError("store: players must be an array");
       const json = toJson(s.players, "players");
       writes.requiredTx("pool_snapshot", () => {
+        // every snapshot stamped past the store's clock was taken before this one (restampAhead)
+        restampAhead(
+          db,
+          clock,
+          ms,
+          "UPDATE pool_snapshot SET taken_ms = ?, taken_at = ? WHERE taken_ms > ?",
+        );
         db.prepare(
           "INSERT INTO pool_snapshot (week, taken_at, taken_ms, players_json) VALUES (?, ?, ?, ?)",
         ).run(s.week, s.taken_at, ms, pseudonyms.apply(json));
