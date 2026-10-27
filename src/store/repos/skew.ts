@@ -22,8 +22,18 @@
 //    was corrected — so that write is the newest;
 //  - an acknowledgement made under the store's clock covers a check raised then (it was raised
 //    before the human, or the snapshot, looked).
-// Reads that take no instant (the breaker's outcome scan, a cache entry's age) leave the judgement
-// to the caller's clock: the store never reads the clock on a read path.
+// Reads that take no instant (the breaker's outcome scan, a cache entry's age) hand rows out as
+// stamped and read no clock: the judgement of an instant past now belongs to the code doing the
+// time arithmetic, which already holds the instant it compares against — the in-flight pre-check's
+// request instant (providers/espn/limiter.ts inFlightOf), the derived breaker's now (platform.ts
+// breakerFromOutcomes), a cached copy's freshness (config/freshness.ts stampState, from the
+// provider). Such a row is left out of the arithmetic: it is no evidence of a request in flight
+// now, nor of a breaker to hold, and the send that follows reaches tryRecord, which re-stamps it —
+// from then it holds a slot 30 s, or counts as a failure 5 min, never the skew. A copy fetched
+// past now has an unknown age: never `fresh` for an age-based class (an immutable copy, and a fact
+// the provider keeps, may be read whatever its age). Judged here instead, every read would need a
+// fresh clock read (a reading kept from earlier is itself ahead once the clock is set back), and
+// the cache could not tell an immutable copy or a kept fact from an age-based copy.
 import { BUSY_TIMEOUT_MS } from "../types.js";
 
 /**

@@ -369,9 +369,11 @@ export interface EspnCacheEntry {
 /** espn_cache (best-effort). */
 export interface EspnCacheRepository {
   /**
-   * The entry as stored. One fetched after the caller's now (a clock since set back) has an unknown
-   * age; the store returns it as stored (the caller judges freshness by its own clock) and `store
-   * prune` deletes it.
+   * The entry as stored. One fetched more than FUTURE_STAMP_TOLERANCE_MS after the caller's now (a
+   * clock since set back — src/store/repos/skew.ts) has an unknown age: an age-based freshness
+   * class must not read it as `fresh` (its `fetched_at` would read as age 0), while an immutable
+   * copy or a fact the provider keeps may be used whatever its age — so the store returns it as
+   * stored and the caller, which knows the class, judges it; `store prune` deletes it.
    */
   get(key: string): EspnCacheEntry | null;
   put(entry: EspnCacheEntry): BestEffortOutcome;
@@ -456,9 +458,13 @@ export interface LimiterRepository {
   countSince(since: IsoInstant): number;
   countToday(dayStart: IsoInstant): RequestCounts;
   /**
-   * The newest outcomes, newest first (`breakerFromOutcomes` input), at most `limit`. A row stamped
-   * after the caller's now is returned as stamped — its instant is unknown (a clock since set back)
-   * and the caller judges it by its own clock; the next tryRecord, or `store prune`, re-stamps it.
+   * The newest outcomes, newest first (`breakerFromOutcomes` and the in-flight pre-check's input),
+   * at most `limit`. A row stamped more than FUTURE_STAMP_TOLERANCE_MS after the caller's now (a
+   * clock since set back — src/store/repos/skew.ts) is returned as stamped, and its instant is
+   * unknown: it belongs in no time arithmetic — a `pending` one is no evidence of a request in
+   * flight now, a failure none of a breaker to hold (read as stamped, both refuse every send for
+   * the size of the skew). The send the caller then lets through reaches tryRecord, which re-stamps
+   * it to that request's instant; `store prune` re-stamps it to its own.
    */
   recentOutcomes(
     limit: number,
