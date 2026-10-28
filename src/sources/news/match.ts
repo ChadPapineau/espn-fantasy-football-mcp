@@ -12,9 +12,9 @@
 //   full_name      (0.80) — the full name, unique in the universe, or the one holder of a shared
 //                            name the rules below pick;
 //   last_name_team (0.60) — a capitalised surname, the only player of that surname on a team the
-//                            item names (a unique surname), or on a team written next to it or
-//                            tied to it by a roster move (a shared surname), not part of someone
-//                            else's full name.
+//                            item names (a unique surname), or the one sharer of a shared surname
+//                            that a team or a position written next to it, or a roster move, leaves
+//                            (below), not part of someone else's full name.
 // "A team the item names" is its subject's team: never a word of a full name the item holds, nor
 // that name's surname standing alone ("Dallas Goedert", "Malik Washington … Washington was ruled
 // out" name no Cowboys or Commanders — Stage C remediation news-match-player-name-team-word), and
@@ -23,38 +23,56 @@
 // A name only one universe player holds is matched exactly as before ruling R8-3: its team evidence
 // is teams.ts' reading (`cue`, `pair`, `attachedTeams`, `movedTeams`), and no position word is read.
 //
-// Shared names (Stage C remediation news-match-universe-homonyms; ruling R8-3, changelog §R8). The
-// universe is every players_wl person, so 0 %-owned free agents and defensive players hold the
-// names of stars: 16 full-name keys and 302 surnames have more than one holder in the recorded
+// Shared names (Stage C remediation news-match-universe-homonyms; ruling R8-3, changelog §R8 and
+// §B9). The universe is every players_wl person, so 0 %-owned free agents and defensive players hold
+// the names of stars: 16 full-name keys and 302 surnames have more than one holder in the recorded
 // universe. Precision comes before recall — a namesake's item put on a star gives E10 a false
 // injury or transaction claim, a star's lost item still has ESPN's own status behind it — so the
 // holders of a shared name are told apart by evidence only, read with cues.ts (the teams and cue
-// words) and positions.ts (the position words). A name written several times in one item is one
-// person: its evidence is pooled over every mention — each occurrence of the full name, and its
-// surname standing alone when no other full name in the item ends with it — and it is decided once.
-// The evidence, and what each kind can do:
+// words, closed lists) and positions.ts (the position words). A name written several times in one
+// item is one person: its evidence is pooled over every mention — each occurrence of the full name,
+// and its surname standing alone when no other full name in the item ends with it — and it is
+// decided once. The evidence, and what each kind can do:
 //   spelling — a generational suffix written after the name ("Michael Carter II", "Byron Murphy
 //     Jr.") keeps only the holders ESPN spells with that suffix (when one does);
 //   written next to the name — his own label (R8-3 clauses 2 and 4): a team ("Vikings WR Justin
-//     Jefferson", "Justin Jefferson, CLE:", "(WR, Vikings)", cues.ts `sharedAttachedTeams`) is his
-//     team; a position ("LB Justin Jefferson", "Jefferson, a second-year linebacker,", "Lamar Jackson
-//     injury update: Ravens QB dealing …", positions.ts `positionPhrasesNextTo`) rules out every
-//     holder ESPN lists at another position (ds_players `position_id`; an unknown one is never
-//     ruled out; several must all fit). Either is the holder's own evidence;
-//   a roster move — the team that signs, waives, claims or promotes him, or that his clause says he
-//     signs with or lands on (cues.ts `sharedMovedTeams`), is his own too (choice 3), never a trade;
-//   the cues about him (R8-3 clause 3) — the cue words of a sentence written about him: the last
-//     person named before the cue in its sentence is he, no team is named between them, and a play
-//     word follows his name directly ("Jefferson brought down the Vikings' quarterback", "Justin
-//     Jefferson: Sacks Vikings QB twice"); a cue or a game the title opens with, before anyone is
-//     named, is about the first person it names after it ("Bills vs. Ravens: Lamar Jackson
-//     limited"). A GAME is his ("Vikings host Browns"): a holder whose team does not play in it is
-//     not he, nor is a free agent; a team named as the other side of his game or play ("in Sunday's
-//     win over the Vikings", "Sacks Vikings QB") is not his team, nor is he a free agent (no games,
-//     no opponent) — whatever else names that team in the item; "<team> matchup" names his own
-//     team's game as often as his opponent's, so it rules out the holder on that team only while it
-//     leaves another holder with a team, and a free agent always (choice 4). A team written next to
-//     the name or moved to is never ruled out by a cue;
+//     Jefferson", "Vikings' No. 1 receiver …", "Justin Jefferson of the Vikings", "Justin Jefferson,
+//     CLE:", "(WR, Vikings)", cues.ts `sharedAttachedTeams`; and every name of a list a plural label
+//     heads, "Vikings WRs Jordan Addison and Justin Jefferson", `sharedListTeams`) is his team; a
+//     position ("LB Justin Jefferson", "Jefferson, a second-year linebacker,", positions.ts
+//     `positionPhrasesNextTo`, and the clause a headline topic's colon opens when it names no other
+//     player: "Lamar Jackson injury update: Ravens QB dealing …" is his, "…: Steelers cornerback fined
+//     for hit on Ravens QB" is not) rules out every holder ESPN lists at another position
+//     (ds_players `position_id`; an unknown one is never ruled out; several must all fit). Either is
+//     the holder's own evidence;
+//   a roster move — the team that signs, waives, claims, promotes, activates or reinstates him or
+//     places him on a reserve list, or that his clause says he signs with, is activated, placed on IR
+//     or reinstated by, or lands on (cues.ts `sharedMovedTeams`), is his own too (choice 3), never a
+//     trade;
+//   the cues about him (R8-3 clause 3) — the cue words of a sentence written about him. A result or
+//     an against word, a game or "<team> matchup" is about the sentence's subject: the first person
+//     it names before the cue (a possessive one with another person after him is that person's), and
+//     the names of a list he heads ("Jackson and Derrick Henry", "Jackson, Henry and Flowers"; a bare
+//     comma is no list), never a person named later ("Bijan Robinson ran past Justin Jefferson in the
+//     win over the Browns"). Another person named between him and a result or an against word
+//     anchors the game: it is that person's team's against the cued team, which he plays in on
+//     either side ("Jackson found Zay Flowers twice in the win over the Bengals" rules out the free
+//     agent; "Unlike Justin Jefferson, Bijan Robinson starred in the win over the Browns" rules out
+//     the Vikings WR), unless that person is the cued team's own ("Jackson outdueled Joe Burrow in
+//     the win over the Bengals"); a person of no known team leaves the cue no evidence. A play word is
+//     his only right after his name ("Jefferson brought down the Vikings' quarterback", "Justin
+//     Jefferson: Sacks Vikings QB twice"). A cue or a game before anyone in its sentence is about
+//     the first person named after it there ("Bills vs. Ravens: Lamar Jackson limited"), and in a
+//     sentence that names no one, about the item's subject, the first person it names (choice 2:
+//     "Jackson (ankle) was limited; the Ravens visit the Bengals Sunday."). A team named between him
+//     (or the sentence's start) and the cue is the cue's subject, not his ("as Minnesota's offense
+//     torched …"). A GAME is his ("Vikings host Browns", "Vikings at Bears"): a holder whose team
+//     does not play in it is not he, nor is a free agent; a team named as the other side of his game
+//     or play ("in Sunday's win over the Vikings", "Sacks Vikings QB") is not his team, nor is he a
+//     free agent (no games, no opponent) — whatever else names that team in the item; "<team>
+//     matchup" names his own team's game as often as his opponent's, so it rules out the holder on
+//     that team only while it leaves another holder with a team, and a free agent always (choice 4).
+//     A team written next to the name or moved to is never ruled out by a cue;
 //   describing sentences — "| The linebacker did not practice Wednesday." (positions.ts
 //     `describingPhrases`) may describe him or the player he faced ("| The cornerback jumped the
 //     route."), and no rule short of parsing tells them apart: one written about him (he is the last
@@ -62,7 +80,9 @@
 //     player) is read only when nothing is written next to his name, and never picks a holder — it
 //     keeps a pick it contradicts from being made, and it supports a holder the other evidence left;
 //   prominence — a holder owned in at least PROMINENT_OWNED % of ESPN leagues and PROMINENCE_RATIO
-//     times as many as each other holder (`prominentOf`).
+//     times as many as each other holder (`prominentOf`), judged before any evidence over every holder
+//     the spelling leaves: evidence only removes a prominent holder (it rules him out), never makes
+//     one, so writing a holder's own position never costs him a ref (R8-3 clause 4).
 // A team named loosely — any other way, a game's teams and teams named in sentences about others
 // included — is never evidence FOR a holder (R8-3 clause 2): it only ever rules one out, by the
 // cues above. Ruling out only REMOVES: a holder left without evidence of his own takes the name
@@ -70,27 +90,32 @@
 // ("Justin Jefferson: Sacks Vikings QB twice" is not the Browns LB's by elimination: no ref).
 // Evidence that contradicts every holder gives the name to no one (fail safe: the item is about a
 // holder the universe places elsewhere, or about no holder). Then: one holder left takes the name.
-// Else the one holder on a team written next to it or moved to takes it — past a prominent one only
-// when he is the prominent one himself (choice 6: after a trade of the star to his namesake's team,
-// "Cleveland's Justin Jefferson" would be the star). Else a position written next to it that fits
-// several holders picks none. Else the prominent holder takes the name at full_name, but only in R8-3
-// clause 6's accepted residual: an item that names no team, no position and no cue ("Justin
-// Jefferson: Placed on IR | Jefferson (knee) will miss at least four games."). An item that names
-// one, and leaves several holders, gives the name to no one (clause 5). Whenever no single holder is
-// left, the name takes no ref and the item is counted (`matchItem().unresolved`, the news build's
-// warning; plan 07 D6).
+// Else the one holder on a team written next to it or moved to takes it — unless the prominent
+// holder is another who is not ruled out (choice 6: after a trade of the star to his namesake's
+// team, "Cleveland's Justin Jefferson" would be the star). Else a position written next to it that
+// fits several holders picks none. Else the prominent holder takes the name at full_name, but only in
+// R8-3 clause 6's accepted residual: an item that names no team, no position and no cue ("Justin
+// Jefferson: Placed on IR | Jefferson (knee) will miss at least four games."; a letter in an initial
+// or a time, "1 P.M.", "P.J. Walker", is no position). An item that names one, and leaves several
+// holders, gives the name to no one (clause 5). Whenever no single holder is left, the name takes no
+// ref and the item is counted (`matchItem().unresolved`, the news build's warning; plan 07 D6).
 //
 // A bare surname. One standing alone that a full name in the item ends with is that person
 // ("Justin Jefferson: … | Jefferson caught …"): never a last_name_team ref to someone else. A surname
 // one universe player holds is matched as before: on a team written next to it, or named in the item
 // as its subject's. A surname several players share follows the same rules on its sharers (R8-3
 // clauses 2 and 4: "the full-name and bare-surname paths follow the same rule"), pooled over its
-// mentions: it needs a team written next to it or moved to ("Jefferson torches Browns", "Jefferson:
-// Questionable for Vikings" get none, and are counted), the one sharer on that team takes it, and a
-// prominent sharer who is not he and is not ruled out — by a position, or by the cues about the
-// surname — blocks him (choice 6: "Browns LB Jefferson" and "Cleveland's Jefferson: Sacks Vikings QB
-// twice" are the Browns LB's; "Cleveland's Jefferson: Placed on IR" and the post-trade "Browns WR
-// Jefferson" get no ref). A free agent never takes a surname.
+// mentions, with the same function: it needs a team or a position written next to it, or a team
+// moved to ("Jefferson torches Browns", "Jefferson: Questionable for Vikings" get none, and are
+// counted). The one sharer on that team takes it, or, with a position alone, the one sharer the
+// position leaves ("LB Jefferson", "Linebacker Jefferson", "QB Jackson"; never a free agent; "DT
+// Harris", which six sharers fit, gets none and is counted). A prominent sharer who is not he and is
+// not ruled out — by a position, or by the cues about the surname — blocks him, and so does his own
+// full name's prominent holder, so the surname never gives what the full name refuses (choice 6:
+// "Browns LB Jefferson" and "Cleveland's Jefferson: Sacks Vikings QB twice" are the Browns LB's;
+// "Cleveland's Jefferson: Placed on IR", "Eagles' Young" and the post-trade "Browns WR Jefferson" get
+// no ref). A position word may stand before a shared surname ("Linebacker Jefferson"), where a
+// capitalised word before a unique one is still read as a first name.
 // The matcher reads the SANITISED text (plan 02 §6.2), only to decide which ids an item is about; the
 // text is never interpreted beyond that, and nothing of it is copied into a ref.
 import { GSIS_ID_RE, type NflTeam } from "../../config/schema.js";
@@ -100,6 +125,7 @@ import { sanitizeText } from "../../domain/league/types.js";
 import type { NewsMatchMethod } from "../../store/datasets/derive.js";
 import {
   sharedAttachedTeams,
+  sharedListTeams,
   sharedMentions,
   sharedMovedTeams,
   type SharedMention,
@@ -107,6 +133,7 @@ import {
 import {
   describingPhrases,
   KNOWN_POSITION_IDS,
+  POSITION_WORDS,
   positionPhrasesNextTo,
   positionWordSpans,
   sentenceBounds,
@@ -274,6 +301,11 @@ const LEAD_WORDS: ReadonlySet<string> = new Set([
   "starter",
 ]);
 
+/** The words of the position vocabulary (positions.ts), each word of a two-word one too. */
+const POSITION_LEAD_WORDS: ReadonlySet<string> = new Set(
+  Object.keys(POSITION_WORDS).flatMap((w) => w.split(" ")),
+);
+
 /**
  * Coaching-staff words: a capitalised surname directly after one ("Bengals coach Corbin", "Coach
  * Corbin", "OC Corbin") names a staff member, not a player, so it is not a `last_name_team` mention —
@@ -344,6 +376,8 @@ function tokenize(text: string, cache: Map<string, string | null>): (Token | nul
 
 /** A universe player as the matcher holds him: the generational suffix ESPN spells him with. */
 interface Held extends NewsUniversePlayer {
+  /** His full name's key (`mergeName`): the holders of one key share his full name. */
+  readonly key: string;
   /** "jr", "ii" … when his ESPN name ends with one (mergeName folds it away), else null. */
   readonly suffix: string | null;
   /** His ESPN position id when a position word can name it (positions.ts), else null (unknown). */
@@ -444,7 +478,7 @@ interface SharedEvidence {
  * Which holder of a name several universe players share the item means, or null (the header's
  * rules): spelling, a position written next to it, the cues about it, a team written next to it or
  * moved to, then prominence — in the residual only. `surname`: a shared surname's sharers, who take
- * it only on a team written next to it or moved to.
+ * it only on a team written next to it or moved to, or by a position written next to it alone.
  */
 function sharedHolder(holders: readonly Held[], ev: SharedEvidence, surname: boolean): Held | null {
   let cands: Held[] = [...holders];
@@ -452,6 +486,16 @@ function sharedHolder(holders: readonly Held[], ev: SharedEvidence, surname: boo
     const spelled = cands.filter((p) => p.suffix !== null && ev.suffixes.has(p.suffix));
     if (spelled.length > 0) cands = spelled;
   }
+  // who is prominent is judged before any evidence, over every holder the spelling leaves, so the
+  // evidence only removes a blocker (it rules him out), never makes one: writing a holder's own
+  // position never costs him a ref the item gives without it (R8-3 clause 4)
+  const spelled = [...cands];
+  const top = prominentOf(spelled);
+  /** Whether a holder not ruled out outshines `p` as the prominent one of `among` (choice 6). */
+  const outshone = (among: readonly Held[], p: Held): boolean => {
+    const x = among === spelled ? top : prominentOf(among);
+    return x !== null && x !== p && cands.includes(x);
+  };
   const ruledOut: Held[] = [];
   const keep = (pred: (p: Held) => boolean): void => {
     for (const p of cands) if (!pred(p)) ruledOut.push(p);
@@ -483,13 +527,32 @@ function sharedHolder(holders: readonly Held[], ev: SharedEvidence, surname: boo
     if (kept.length > 0) keep((p) => kept.includes(p));
   }
   if (surname) {
-    // the one sharer on a team written next to it or moved to, unless a prominent sharer is another
-    const on = cands.filter(tied);
-    const only = on.length === 1 ? on[0] : undefined;
+    // the one sharer on a team written next to it or moved to; with neither, the one sharer a
+    // position written next to it leaves and places (never a free agent) — unless a prominent sharer
+    // who is not ruled out is another, or his own full name's prominent holder is (the full-name
+    // path's rule, so the surname never gives what the full name refuses: "Eagles' Young")
+    let only: Held | undefined;
+    if (ev.written.size > 0 || ev.moved.size > 0) {
+      const on = cands.filter(tied);
+      only = on.length === 1 ? on[0] : undefined;
+    } else {
+      const [one, ...more] = cands;
+      only =
+        one !== undefined && more.length === 0 && one.team !== null && placedBy(ev.positions, one)
+          ? one
+          : undefined;
+    }
     if (only === undefined) return null;
-    const top = prominentOf(cands);
-    if (top !== null && top !== only) return null;
-    return !labelled(only) && blocked(only) ? null : only;
+    const him = only;
+    if (
+      outshone(spelled, him) ||
+      outshone(
+        spelled.filter((p) => p.key === him.key),
+        him,
+      )
+    )
+      return null;
+    return !labelled(him) && blocked(him) ? null : him;
   }
   if ((ev.written.size > 0 || ev.moved.size > 0) && !cands.some(tied)) {
     // a team written next to the name or moved to that is no candidate's: he is none of the
@@ -506,17 +569,16 @@ function sharedHolder(holders: readonly Held[], ev: SharedEvidence, surname: boo
     // sentence about him supports him
     return !ruledOut.some((x) => outshines(x, only)) || supported(only) ? only : null;
   }
-  const top = prominentOf(cands);
   const att = cands.filter(tied);
   if (att.length > 0) {
     const one = att.length === 1 ? att[0] : undefined;
-    if (one === undefined || (top !== null && one !== top)) return null;
+    if (one === undefined || outshone(spelled, one)) return null;
     return !labelled(one) && blocked(one) ? null : one;
   }
   // a written position several holders fit tells none of them apart (R8-3 clause 5)
   if (ev.positions !== null) return null;
   // prominence decides only in R8-3 clause 6's residual
-  return ev.residual ? top : null;
+  return ev.residual && top !== null && cands.includes(top) ? top : null;
 }
 
 /** What one item's match found (ruling R8-3 clause 5: a shared name left to no one is counted). */
@@ -554,9 +616,22 @@ interface PersonSpan {
 
 /** A name written in the possessive ("Jefferson's", "Jones'"). */
 const POSSESSIVE_END_RE = /['’ʼ]s?$/u;
+/** The words that may stand between a name and the play word written about him (closed). */
+// prettier-ignore
+export const PLAY_GAP_WORDS: readonly string[] = Object.freeze([
+  "has", "had", "have", "was", "were", "is", "also", "again", "then", "later", "nearly", "almost",
+  "just", "once", "twice", "both",
+]);
 /** Between a name and the play word written about him: nothing, the headline's colon, a little. */
-const PLAY_GAP_RE =
-  /^(?:\s*\([^()]{0,40}\))?(?:\s*:\s*|\s+)(?:(?:has|had|have|was|were|is|also|again|then|later|nearly|almost|just|once|twice|both)\s+){0,2}$/iu;
+const PLAY_GAP_RE = new RegExp(
+  `^(?:\\s*\\([^()]{0,40}\\))?(?:\\s*:\\s*|\\s+)(?:(?:${PLAY_GAP_WORDS.join("|")})\\s+){0,2}$`,
+  "iu",
+);
+/**
+ * Between two names of a list or a compound subject: "," or "and" alone ("Jackson and Derrick
+ * Henry", "Jordan Addison, Jalen Nailor and Justin Jefferson").
+ */
+const JOIN_RE = /^(?:\s*,\s*(?:(?:and|&)\s+)?|\s+(?:and|&)\s+)$/iu;
 
 /** What the shared-name reading of one item needs, built once, when a shared name asks for it. */
 interface SharedItem {
@@ -564,10 +639,26 @@ interface SharedItem {
   /** Whether a pair's other mention is kept (a mention read as a name's word is no team). */
   readonly kept: ReadonlySet<number>;
   readonly persons: readonly PersonSpan[];
+  /** The persons' starts, in order (a binary search finds a sentence's persons). */
+  readonly personStarts: readonly number[];
+  /** The starts of the mentions that may be what follows them's subject: no cue, no game. */
+  readonly actorStarts: readonly number[];
   /** The sentence breaks, the describing sentences and the position words (each read once). */
   bounds(): readonly number[];
   phrases(): readonly DescribingPhrase[];
   words(): readonly PositionPhrase[];
+}
+
+/** The index of the first value of the sorted `xs` at or above `v`. */
+function lowerBound(xs: readonly number[], v: number): number {
+  let lo = 0;
+  let hi = xs.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((xs[mid] ?? 0) < v) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 /** A value computed once, on first use. */
@@ -594,6 +685,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       team: p.team,
       gsis_id: p.gsis_id !== null && GSIS_ID_RE.test(p.gsis_id) ? p.gsis_id : null,
       percent_owned: percentOwnedOf(p.percent_owned),
+      key: merged,
       suffix: suffixOf(p.full_name),
       position_id: position !== null && KNOWN_POSITION_IDS.has(position) ? position : null,
     };
@@ -670,9 +762,19 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
     // 2. the teams the item names as its subject's: a word of a name it holds, or that name's
     // surname alone, is the person; a team named only as the opponent is not the subject's
     const surnames = new Set(names.map(({ entry }) => entry.key[entry.key.length - 1] ?? ""));
+    /** `mergeName` of a team's words, remembered (an item repeats its teams; bounded work). */
+    const normOf = (w: string): string | null => {
+      let v = normCache.get(w);
+      if (v === undefined) {
+        v = w === "" ? null : mergeName(w);
+        if (normCache.size >= NORM_CACHE_MAX) normCache.clear();
+        normCache.set(w, v);
+      }
+      return v;
+    };
     const notAName = (m: { readonly start: number; readonly end: number }): boolean =>
       !names.some((s) => m.start < s.end && s.start < m.end) &&
-      !surnames.has(mergeName(text.slice(m.start, m.end)) ?? "");
+      !surnames.has(normOf(text.slice(m.start, m.end)) ?? "");
     // the unique-name reading (as before R8-3)
     const mentions = teamMentions(text).filter(notAName);
     const subject = new Set(mentions.filter((m) => !m.opponent).map((m) => m.team));
@@ -708,13 +810,62 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         mentions: kept,
         kept: new Set(kept.map((m) => m.start)),
         persons,
+        personStarts: persons.map((p) => p.start),
+        actorStarts: kept
+          .filter((m) => m.cue === null && !m.weak && m.pair === null)
+          .map((m) => m.start),
         bounds: once(() => sentenceBounds(text)),
         phrases: once(() => describingPhrases(text)),
         words: once(() => positionWordSpans(text)),
       };
       return item;
     };
-    /** Whether a cue or a game at `anchor` (its word at `cueStart`) is written about `isHim`. */
+    /**
+     * Whether a team is named in [a, b) that is the subject of what follows it ("as Minnesota's
+     * offense …"): not his own label ("Justin Jefferson, Browns: Records sack vs. Vikings"), not named
+     * by a cue or a game itself ("Out vs. Bills, vs. Dolphins").
+     */
+    const actorBetween = (
+      s: SharedItem,
+      a: number,
+      b: number,
+      labels: ReadonlySet<number>,
+    ): boolean => {
+      for (let i = lowerBound(s.actorStarts, a); i < s.actorStarts.length; i++) {
+        const at = s.actorStarts[i] ?? b;
+        if (at >= b) return false;
+        if (!labels.has(at)) return true;
+      }
+      return false;
+    };
+    /**
+     * The list the person at index `i` of the item's persons is a name of, [lo, hi): names joined by
+     * "," or "and" alone — a list only when one join is an "and" ("A, B and C"; "Unlike A, B starred"
+     * is no list) — up to the last name an "and" joins; [i, i + 1) when he is in none.
+     */
+    const listAround = (s: SharedItem, i: number): readonly [number, number] => {
+      const ps = s.persons;
+      /** The join between the persons k - 1 and k: "and", "," alone, or none. */
+      const join = (k: number): "and" | "comma" | null => {
+        const a = ps[k - 1];
+        const b = ps[k];
+        if (a === undefined || b === undefined) return null;
+        const gap = text.slice(a.end, b.start);
+        if (!JOIN_RE.test(gap)) return null;
+        return /(?:and|&)/iu.test(gap) ? "and" : "comma";
+      };
+      let lo = i;
+      while (lo > 0 && join(lo) !== null) lo--;
+      let hi = i + 1;
+      while (hi < ps.length && join(hi) !== null) hi++;
+      let last = -1;
+      for (let k = lo + 1; k < hi; k++) if (join(k) === "and") last = k;
+      return last < 0 || i > last ? [i, i + 1] : [lo, last + 1];
+    };
+    /**
+     * Whether a cue or a game at `anchor` (its word at `cueStart`) is written about `isHim`: null when
+     * it is not, else the other persons its sentence names between his subject group and the cue.
+     */
     const about = (
       s: SharedItem,
       anchor: number,
@@ -722,32 +873,58 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       play: boolean,
       isHim: (p: PersonSpan) => boolean,
       labels: ReadonlySet<number>,
-    ): boolean => {
+    ): readonly PersonSpan[] | null => {
       const [from, to] = sentenceOf(s.bounds(), anchor, text.length);
-      let last: PersonSpan | undefined;
-      for (const p of s.persons) if (p.start >= from && p.end <= anchor) last = p;
-      if (last === undefined) {
-        // the title's lead ("Bills vs. Ravens: Lamar Jackson limited"): the first person after it
-        if (play || from !== 0) return false;
-        const next = s.persons.find((p) => p.start >= anchor && p.start < to);
-        return next !== undefined && isHim(next);
+      const ps = s.persons;
+      // ps[first .. upto) are the persons named before it in its sentence
+      const first = lowerBound(s.personStarts, from);
+      let upto = first;
+      while (upto < ps.length && (ps[upto]?.end ?? Infinity) <= anchor) upto++;
+      if (play) {
+        // a play word is his only right after his name ("Jefferson brought down …")
+        const last = upto > first ? ps[upto - 1] : undefined;
+        if (last === undefined || !isHim(last) || actorBetween(s, last.end, anchor, labels))
+          return null;
+        return !last.possessive && PLAY_GAP_RE.test(text.slice(last.end, cueStart)) ? [] : null;
       }
-      const him = last;
-      if (!isHim(him)) return false;
-      // a team named between him and the cue is the cue's subject ("as Minnesota's offense …"),
-      // unless it is his own label ("Justin Jefferson, Browns: Records sack vs. Vikings") or named
-      // by a cue or a game itself ("Out vs. Bills, vs. Dolphins")
-      const actor = (m: SharedMention): boolean =>
-        m.start >= him.end &&
-        m.start < anchor &&
-        !labels.has(m.start) &&
-        m.cue === null &&
-        !m.weak &&
-        m.pair === null;
-      if (s.mentions.some(actor)) return false;
-      if (!play) return true;
-      // a play word is his only right after his name ("Jefferson brought down …")
-      return !him.possessive && PLAY_GAP_RE.test(text.slice(him.end, cueStart));
+      let him: PersonSpan | undefined;
+      let gapFrom = from;
+      let others: readonly PersonSpan[] = [];
+      if (upto > first) {
+        // the sentence's subject: its first person, and those joined to him by "," or "and" alone
+        // ("Jackson and Derrick Henry ran wild in the win over the Bengals"); never a person named
+        // later in it ("Robinson ran past Justin Jefferson in the win over the Browns"). A possessive
+        // one with another person after him is that person's ("Jefferson's former teammate Kirk
+        // Cousins threw two TDs in the win …")
+        let lead = first;
+        while (lead + 1 < upto && ps[lead]?.possessive === true) lead++;
+        const [, hi] = listAround(s, lead);
+        const end = Math.min(hi, upto);
+        for (let k = lead; k < end; k++) {
+          const p = ps[k];
+          if (p !== undefined && isHim(p)) {
+            him = p;
+            gapFrom = p.end;
+            break;
+          }
+        }
+        others = ps.slice(end, upto);
+      } else {
+        // before anyone in its sentence: the first person named after it there ("Bills vs. Ravens:
+        // Lamar Jackson limited"); in a sentence that names no one, the item's subject, the first
+        // person it names (choice 2: "Jackson (ankle) was limited; the Ravens visit the Bengals")
+        const next = ps[upto];
+        const subject = next !== undefined && next.start < to ? next : ps[0];
+        if (subject !== undefined && isHim(subject)) him = subject;
+      }
+      // a team named between him (or the sentence's start) and the cue is the cue's subject
+      return him === undefined || actorBetween(s, gapFrom, anchor, labels) ? null : others;
+    };
+    /** The team of a person a name only one universe player holds (on a team); else undefined. */
+    const teamOfPerson = (p: PersonSpan): NflTeam | undefined => {
+      const holders = p.key === null ? bySurname.get(p.norm) : byKey.get(p.key);
+      const only = holders?.length === 1 ? holders[0] : undefined;
+      return only?.team ?? undefined;
     };
     const cuesAbout = (
       s: SharedItem,
@@ -760,11 +937,28 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       for (const m of s.mentions) {
         if (m.pair !== null && s.kept.has(m.pair.start)) {
           const anchor = Math.min(m.start, m.pair.start);
-          if (about(s, anchor, anchor, false, isHim, labels)) games.add(m.team);
+          if (about(s, anchor, anchor, false, isHim, labels) !== null) games.add(m.team);
         } else if (m.cue !== null) {
           const play = m.cue.kind === "play" || m.cue.kind === "passive";
-          if (about(s, m.cue.start, m.cue.start, play, isHim, labels)) strong.add(m.team);
-        } else if (m.weak && about(s, m.start, m.start, false, isHim, labels)) weak.add(m.team);
+          const others = about(s, m.cue.start, m.cue.start, play, isHim, labels);
+          if (others === null) continue;
+          // another person named between him and the cue anchors the game: it is that person's
+          // team's against the cued team, and he plays in it on either side ("Jackson found Zay
+          // Flowers twice in the win over the Bengals"; "Unlike Justin Jefferson, Bijan Robinson
+          // starred in the win over the Browns" may be the Browns LB's) — unless every such person is
+          // the cued team's own; a person of no known team leaves the cue no evidence about him
+          const sides = new Set<NflTeam>();
+          let unknown = false;
+          for (const o of others) {
+            const t = teamOfPerson(o);
+            if (t === undefined) unknown = true;
+            else if (t !== m.team) sides.add(t);
+          }
+          if (unknown || sides.size > 1) continue;
+          if (sides.size === 0) strong.add(m.team);
+          else for (const t of [m.team, ...sides]) games.add(t);
+        } else if (m.weak && about(s, m.start, m.start, false, isHim, labels) !== null)
+          weak.add(m.team);
       }
       return { games, strong, weak };
     };
@@ -786,17 +980,30 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         .map((d) => ({ ids: d.ids, team: d.team }));
     /**
      * R8-3 clause 6: the item names no team, and no position word that may be about him — a
-     * position labelling another person, or a describing sentence plainly another player's, is not.
+     * position labelling another person, a describing sentence plainly another player's, or a letter
+     * inside a name ("P.J. Walker"), is not.
      */
     const residualFor = (s: SharedItem, isHim: (p: PersonSpan) => boolean): boolean => {
       if (s.mentions.length > 0 || named.size > 0) return false;
       const spared: (readonly [number, number])[] = [];
-      for (const p of s.persons)
+      for (const p of s.persons) {
+        spared.push([p.start, p.end]);
         if (!isHim(p))
           for (const ph of positionPhrasesNextTo(text, p.start, p.end))
             spared.push([ph.start, ph.end]);
+      }
       for (const d of s.phrases()) if (others(s, d)) spared.push([d.start, d.end]);
       return !s.words().some((w) => !spared.some(([a, b]) => w.start >= a && w.end <= b));
+    };
+    /**
+     * The start of the list a name at `a` ends, when it is a list's later name ("Jordan Addison and
+     * Justin Jefferson": the names joined by "," or "and" alone), else null.
+     */
+    const listHead = (s: SharedItem, a: number): number | null => {
+      const i = lowerBound(s.personStarts, a);
+      if (s.persons[i]?.start !== a) return null;
+      const [lo] = listAround(s, i);
+      return lo < i ? (s.persons[lo]?.start ?? null) : null;
     };
     const pool = (
       s: SharedItem,
@@ -812,13 +1019,25 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       const labels = new Set<number>();
       const sets: ReadonlySet<number>[] = [];
       for (const [a, b] of spans) {
+        // his team written next to him, or before the list he is a later name of ("Vikings WRs
+        // Jordan Addison and Justin Jefferson")
+        const head = listHead(s, a);
         for (const m of s.mentions)
-          if (sharedAttachedTeams(text, [m], a, b).size > 0) {
+          if (
+            sharedAttachedTeams(text, [m], a, b).size > 0 ||
+            (head !== null && sharedListTeams(text, [m], head).size > 0)
+          ) {
             written.add(m.team);
             labels.add(m.start);
           }
         for (const t of sharedMovedTeams(text, s.mentions, a, b)) moved.add(t);
-        for (const ph of positionPhrasesNextTo(text, a, b)) sets.push(ph.ids);
+        // a topic's clause labels him only when it names no other person
+        for (const ph of positionPhrasesNextTo(text, a, b))
+          if (
+            ph.clauseEnd === undefined ||
+            !s.persons.some((p) => p.start >= ph.end && p.start < (ph.clauseEnd ?? 0))
+          )
+            sets.push(ph.ids);
       }
       return { written, moved, positions: allowedPositions(sets), labels };
     };
@@ -896,7 +1115,11 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       if (!t.breakBefore && prev !== null && prev !== undefined && STAFF_WORDS.has(prev.norm))
         continue;
       if (!t.breakBefore && prev?.capital === true) {
-        if (!LEAD_WORDS.has(prev.norm) && !TEAM_WORDS.has(prev.norm)) continue;
+        // a capitalised word before a surname is a first name unless it is a lead word — or, before
+        // a surname several players share, a position word ("Linebacker Jefferson": R8-3 clause 4)
+        const lead = LEAD_WORDS.has(prev.norm) || TEAM_WORDS.has(prev.norm);
+        const shared = (bySurname.get(t.norm)?.length ?? 0) > 1;
+        if (!lead && !(shared && POSITION_LEAD_WORDS.has(prev.norm))) continue;
       }
       const next = tokens[i + 1];
       if (next !== null && next !== undefined && !next.breakBefore && next.capital) {
@@ -925,9 +1148,10 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         return t === null || t === undefined ? [] : [[t.start, t.end]];
       });
       const { written, moved, positions, labels } = pool(s, spans);
-      // a shared surname needs a team written next to it or moved to (R8-3 clause 2); one the item
-      // names a team beside, left to no one, is counted (clause 5)
-      if (written.size === 0 && moved.size === 0) {
+      // a shared surname needs a team written next to it or moved to (R8-3 clause 2), or a position
+      // written next to it (clause 4: "LB Jefferson"); one such evidence leaves to no one is counted,
+      // and so is one in an item that names a team (clause 5)
+      if (written.size === 0 && moved.size === 0 && positions === null) {
         if (s.mentions.length > 0 || named.size > 0) unresolved++;
         continue;
       }

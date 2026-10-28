@@ -276,9 +276,12 @@ describe("sharedMentions' reading (cues.ts; R8-3 clause 3): the closed, tested c
       "get to", "gets to", "got to", "getting to", "pressure", "pressures", "pressured", "pressuring",
       "stuff", "stuffs", "stuffed", "stuffing",
     ]);
+    // fix round 3 (clause 3, "and the like"): the passive forms of the play words the list holds
+    // ("Burned by Chiefs receiver for touchdown"), and "at" between two teams ("Vikings at Bears")
     // prettier-ignore
     expect(PASSIVE_PLAY_CUES).toEqual([
-      "sacked", "intercepted", "picked off", "tackled", "brought down", "stripped", "pressured",
+      "sacked", "strip-sacked", "intercepted", "picked off", "tackled", "brought down", "stripped",
+      "pressured", "stuffed", "burned", "torched", "gashed", "shredded",
       "beaten", "beat", "defeated", "upset", "routed", "edged", "blanked", "shut out",
     ]);
     expect(GAME_CUES).toEqual([
@@ -298,6 +301,7 @@ describe("sharedMentions' reading (cues.ts; R8-3 clause 3): the closed, tested c
       "face",
       "faces",
       "faced",
+      "at",
     ]);
   });
 

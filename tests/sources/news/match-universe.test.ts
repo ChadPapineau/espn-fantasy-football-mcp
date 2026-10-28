@@ -517,11 +517,11 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
         [[WR_JEFFERSON, "full_name"]],
       ],
       // R8-3 clause 2: the Ravens are named loosely — never full_name_team on a shared name (was
-      // full_name_team); fix round 2: the game is in a sentence about no one, so it is no evidence
-      // about him, and the item, naming teams, is no residual: no ref (full_name before)
+      // full_name_team). Fix round 3 restores round 1's expectation (fix round 2 had it no ref): a
+      // game in a sentence that names no one is the item's subject's (clause 1, choice 2 as built)
       [
         "Lamar Jackson: Limited | Jackson (ankle) was limited; the Ravens visit the Bengals Sunday.",
-        [],
+        [[QB_LAMAR, "full_name"]],
       ],
       [
         "Lamar Jackson: Throws three TDs in win over Bengals | Jackson completed 25 of 31 passes.",

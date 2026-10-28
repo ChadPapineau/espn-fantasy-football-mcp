@@ -22,9 +22,12 @@
 //     LB: Records sack"); a closing appositive ("Justin Jefferson, LB, Cleveland:", "Jefferson, a
 //     second-year linebacker, will miss", "Lamar Jackson, the Ravens' newest cornerback,"); a tag in
 //     parentheses ("(Browns LB)", "(CLE - LB)", "(WR, Vikings)"); and the clause a headline's topic
-//     colon opens right after the name ("Lamar Jackson injury update: Ravens QB dealing with …").
-//     This is evidence like an attached team: it rules out every holder of another position and is
-//     the holder's own evidence (`positionPhrasesNextTo`);
+//     colon opens right after the name ("Lamar Jackson injury update: Ravens QB dealing with …"),
+//     only when that clause names one player: after its position, the rest of its sentence names no
+//     team, no position word and no word of SECOND_PLAYER_WORDS ("Steelers cornerback fined for hit
+//     on Ravens QB", "Ravens' top cornerback also ruled out" describe someone else), and no person
+//     (the matcher's check, through `clauseEnd`). This is evidence like an attached team: it rules
+//     out every holder of another position and is the holder's own evidence (`positionPhrasesNextTo`);
 //   describing someone — a sentence that opens "The [<modifier>…] [<team>['s]] [<modifier>…]
 //     <position>" and goes on in lower case, or a clause that opens so after any other colon
 //     (`describingPhrases`). Such a sentence may describe the subject ("| The linebacker did not
@@ -40,7 +43,9 @@
 //     ("safety concerns", "the edge goes to", "the kicker:", "turned the corner");
 //   anywhere — `positionWordSpans`: every position word an item writes, the matcher's test of
 //     R8-3 clause 6 (an item naming a position for its subject is no residual).
-// Several position words joined by "/" are one player's ("LB/DE"): any of their ids.
+// Several position words joined by "/" are one player's ("LB/DE"): any of their ids. A letter
+// before a period and another letter is an initial or a time, never a position ("1 P.M.", "P.J.
+// Walker", "K.J. Osborn"), nor is a one-letter abbreviation before a period ("S. Smith").
 import type { NflTeam } from "../../config/schema.js";
 import { TEAM_ABBREVIATIONS, TEAM_HOMES, TEAM_NICKNAMES } from "./teams.js";
 
@@ -134,7 +139,8 @@ const POSITION_ALT = alt(Object.keys(POSITION_WORDS));
 const POSITION_LIST = `(?:${POSITION_ALT})(?:\\s*\\/\\s*(?:${POSITION_ALT}))*`;
 /** A word boundary that a hyphen, an apostrophe or a period also closes ("non-QB" is no QB). */
 const OPEN = "(?<![\\p{L}\\p{N}'’ʼ.-])";
-const CLOSE = "(?![\\p{L}\\p{N}'’ʼ-])";
+/** …and that a period before a letter does not ("P.M.", "P.J.": an initial or a time, no position). */
+const CLOSE = "(?![\\p{L}\\p{N}'’ʼ-]|\\.\\p{L})";
 
 /**
  * Modifiers that may stand around a team (or after an article) before the position: closed — and an
@@ -229,6 +235,31 @@ export const HEADLINE_TOPICS: readonly string[] = Object.freeze([
   "practice update", "practice report",
 ]);
 const TOPIC_COLON_RE = new RegExp(`\\s+(?:${alt(HEADLINE_TOPICS)})\\s*:\\s+(?:The\\s+)?`, "iuy");
+/**
+ * Words that mark the player a headline topic's clause labels as a second one, not the subject it
+ * is written about ("Lamar Jackson injury update: Ravens' top cornerback also ruled out",
+ * "…: Linebacker suspended for hit on the star"): closed, any case.
+ */
+// prettier-ignore
+export const SECOND_PLAYER_WORDS: readonly string[] = Object.freeze([
+  "also", "too", "another", "other", "fellow", "teammate", "teammates", "opponent", "opponents",
+  "rival", "rivals", "counterpart", "replacement", "star", "stars", "superstar", "starter",
+  "starters", "backup", "backups", "rookie", "veteran", "him",
+]);
+const SECOND_PLAYER_RE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${alt(SECOND_PLAYER_WORDS)})(?![\\p{L}\\p{N}])`,
+  "iu",
+);
+/** A team as written in running text: its nickname or home (also in capitals), its abbreviation. */
+const TEAM_IN_TEXT_RE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${alt([
+    ...TEAM_ENTRIES.map(([k]) => k),
+    ...[...Object.keys(TEAM_NICKNAMES), ...Object.keys(TEAM_HOMES)].map((k) => k.toUpperCase()),
+  ])})(?![\\p{L}\\p{N}])`,
+  "u",
+);
+/** The longest rest of a topic's clause read; a longer one is never a label (bounded work). */
+const TOPIC_CLAUSE_MAX = 160;
 /** How far from a name a position word may sit (bounded work). */
 const WINDOW = 64;
 
@@ -274,6 +305,11 @@ export interface PositionPhrase {
   readonly end: number;
   /** The team the same label names ("The Browns linebacker" → CLE), or null. */
   readonly team: NflTeam | null;
+  /**
+   * Only on the clause a headline topic's colon opens: where its sentence ends. The matcher reads it
+   * as the name's label only when no person is named in [end, clauseEnd).
+   */
+  readonly clauseEnd?: number;
 }
 
 /**
@@ -348,8 +384,10 @@ function tagPositions(text: string, at: number): PositionPhrase[] | null {
 /**
  * The position phrases written next to the name at [start, end) of the (sanitised) text — right
  * before it, right after it before its clause ends, as a closing appositive, in a tag in
- * parentheses, or as the clause a headline's topic colon opens right after it — in text order;
- * empty when none is written.
+ * parentheses, or as the clause a headline's topic colon opens right after it when the rest of its
+ * sentence names no team, no position word and no word of SECOND_PLAYER_WORDS (that phrase carries
+ * `clauseEnd`, for the matcher's check that it names no other person) — in text order; empty when
+ * none is written.
  */
 export function positionPhrasesNextTo(
   text: string,
@@ -381,9 +419,43 @@ export function positionPhrasesNextTo(
   const topic = stickyEnd(TOPIC_COLON_RE, text, end);
   if (topic >= 0) {
     const p = describingAt(text, topic);
-    if (p !== null && !p.other) out.push(p);
+    const clauseEnd = p === null ? -1 : sentenceEndFrom(text, p.end);
+    if (p !== null && !p.other && clauseEnd >= 0 && !namesAnother(text.slice(p.end, clauseEnd)))
+      out.push({ ids: p.ids, start: p.start, end: p.end, team: p.team, clauseEnd });
   }
   return out;
+}
+
+/**
+ * Whether the rest of a topic's clause names a second player: a team, a position word (any, a
+ * plural or a possessive one too) or a word of SECOND_PLAYER_WORDS.
+ */
+function namesAnother(rest: string): boolean {
+  if (TEAM_IN_TEXT_RE.test(rest) || SECOND_PLAYER_RE.test(rest)) return true;
+  for (const m of rest.matchAll(POSITION_WORD_RE)) if (idsOf(m[1] ?? "") !== null) return true;
+  return false;
+}
+
+/**
+ * Where the sentence holding offset `at` ends (`sentenceBounds`' rule), read at most
+ * TOPIC_CLAUSE_MAX characters ahead; -1 beyond that.
+ */
+function sentenceEndFrom(text: string, at: number): number {
+  const limit = Math.min(text.length, at + TOPIC_CLAUSE_MAX);
+  const re = new RegExp(BREAK_RE.source, "gu");
+  re.lastIndex = at;
+  for (let m = re.exec(text); m !== null && m.index < limit; m = re.exec(text))
+    if (m[0] !== "." || breaksAt(text, m.index)) return m.index;
+  return limit === text.length ? text.length : -1;
+}
+
+/** A sentence break: every "|" and ";", a "!" or "?" before a space or the end, a "." likewise. */
+const BREAK_RE = /[|;]|[!?](?=\s|$)|\.(?=\s|$)/gu;
+
+/** Whether the period at `i` ends a sentence (not an initial's or an abbreviation's). */
+function breaksAt(text: string, i: number): boolean {
+  const word = /([\p{L}]+)$/u.exec(text.slice(Math.max(0, i - 12), i))?.[1] ?? "";
+  return !(word.length === 1 || NO_BREAK_BEFORE_DOT.has(word.toLowerCase()));
 }
 
 /**
@@ -458,6 +530,8 @@ export function positionWordSpans(text: string): readonly PositionPhrase[] {
   for (const m of text.matchAll(POSITION_WORD_RE)) {
     const written = m[1] ?? "";
     if (NOT_DESCRIBING.has(written.toLowerCase().replace(/\s+/gu, " "))) continue;
+    // a one-letter abbreviation before a period is an initial ("S. Smith")
+    if (written.length === 1 && text[m.index + 1] === ".") continue;
     const ids = idsOf(written);
     if (ids !== null) out.push({ ids, start: m.index, end: m.index + written.length, team: null });
   }
@@ -479,13 +553,8 @@ const NO_BREAK_BEFORE_DOT: ReadonlySet<string> = new Set([
  */
 export function sentenceBounds(text: string): readonly number[] {
   const out: number[] = [];
-  for (const m of text.matchAll(/[|;]|[!?](?=\s|$)|\.(?=\s|$)/gu)) {
-    if (m[0] === ".") {
-      const word = /([\p{L}]+)$/u.exec(text.slice(Math.max(0, m.index - 12), m.index))?.[1] ?? "";
-      if (word.length === 1 || NO_BREAK_BEFORE_DOT.has(word.toLowerCase())) continue;
-    }
-    out.push(m.index);
-  }
+  for (const m of text.matchAll(BREAK_RE))
+    if (m[0] !== "." || breaksAt(text, m.index)) out.push(m.index);
   return out;
 }
 
@@ -495,14 +564,14 @@ export function sentenceOf(
   at: number,
   length: number,
 ): readonly [number, number] {
-  let start = 0;
-  let end = length;
-  for (const b of bounds) {
-    if (b < at) start = b + 1;
-    else {
-      end = b;
-      break;
-    }
+  // the first break at or after `at` (a binary search: an item's sentences are many at most)
+  let lo = 0;
+  let hi = bounds.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((bounds[mid] ?? 0) < at) lo = mid + 1;
+    else hi = mid;
   }
-  return [start, end];
+  const before = lo > 0 ? bounds[lo - 1] : undefined;
+  return [before === undefined ? 0 : before + 1, bounds[lo] ?? length];
 }

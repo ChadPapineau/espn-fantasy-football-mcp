@@ -6,11 +6,13 @@
 // holds keeps teams.ts' reading, exactly as before R8-3.
 //
 // The teams (`sharedMentions`): each nickname and home as written, and in capitals ("VIKINGS", an
-// all-caps headline), and the short names feeds write (teams.ts TEAM_SHORT_NAMES: "the Vikes"). A team's full name is one mention ("the Minnesota Vikings", "the Los Angeles
-// Rams"): a cue is read before its first word, and its home is no second, loose mention. An
-// abbreviation (teams.ts TEAM_ABBREVIATIONS, in capitals) is a team only where a context makes it
-// one: right after a cue word ("vs. MIN", "@ MIN", "Sacks MIN QB"), in a tag ("Justin Jefferson,
-// CLE:", "(PHI)", "(CLE - LB)"), or on a game's first side ("MIN vs. CLE").
+// all-caps headline), and the short names feeds write (teams.ts TEAM_SHORT_NAMES: "the Vikes"). A
+// team's full name is one mention ("the Minnesota Vikings", "the Los Angeles Rams"): a cue is read
+// before its first word, and its home is no second, loose mention. An abbreviation (teams.ts
+// TEAM_ABBREVIATIONS, in capitals) is a team only where a context makes it one: right after a cue
+// word ("vs. MIN", "@ MIN", "Sacks MIN QB"), in a tag ("Justin Jefferson, CLE:", "(PHI)", "(CLE -
+// LB)"), or on a game's first side, before the next team ("MIN vs. CLE"). The reading is linear in
+// an item's teams and abbreviations (fix round 3: one pass over each, never every pair of them).
 //
 // The cue words, each list closed and held by the tests word for word and entry by entry:
 //   AGAINST_CUES      against, vs, vs., versus, facing, @ — the other side of the subject's game;
@@ -21,24 +23,41 @@
 //   PLAY_OBJECT_CUES  "strips", "forces", "blocks", "drops", "gets to" … — the same, only before the
 //                     team's player or ball ("Strips Vikings QB", "forced a Vikings fumble", "Blocks
 //                     Ravens punt"): alone they are any verb;
-//   PASSIVE_PLAY_CUES the same, done to him, before "by" ("Sacked five times by Steelers");
-//   GAME_CUES         between two teams only: every word above, and "host", "visit", "face" ("Vikings
-//                     host Browns" names a game the subject plays in, never his side: `pair`);
+//   PASSIVE_PLAY_CUES the same, done to him, before "by" ("Sacked five times by Steelers", "Burned by
+//                     Chiefs receiver for touchdown");
+//   GAME_CUES         between two teams only: every word above, and "host", "visit", "face", "at"
+//                     ("Vikings host Browns", "Vikings at Bears" name a game the subject plays in,
+//                     never his side: `pair`);
 //   "<team> matchup"  after a team: his own team's game as often as his opponent's (`weak`).
 // A cue holds only where the words after the team read as the game or the play (closed lists, no
 // verb parsing, R7-4's precedent): after a play word, the team's player or unit (PLAY_OBJECTS: "QB",
-// "pass", "secondary" …), a possessive allowed; otherwise also punctuation, a number, the end, or a
-// word of CUE_CONTINUATIONS ("in", "on", "for", "twice", the days …). It does not hold where the
-// team's own thing follows: a possessive after a result word ("beats the Browns' sack record"), a
-// possessive with no player or unit after the others ("shreds the Browns' linebacker depth"), a
-// hyphen ("Facing Browns-imposed suspension"), any other word ("Beats Browns teammate", "Facing
-// Eagles discipline"); nor in the idioms that use a result word for a team's loss of its own player:
-// "for" after a result ("lost to the Browns for the season"), a passive "lost to" ("is lost to the
-// Chiefs"), a copula's "loss to" ("is a big loss to the Eagles"), the draft ("fell to the Browns in
-// the fifth round"). Words outside the lists are no cue either way. Whose game or play a cue names —
-// the person the sentence is written about — is match.ts's to decide.
+// "pass", "secondary", "cornerback", "safety" …, never one that only modifies a noun after it:
+// "the Browns' linebacker depth"), a possessive allowed, or "for" and a number (NUMBER_WORDS: "for
+// three touchdowns"); otherwise also punctuation, a number, the end, or a word of CUE_CONTINUATIONS
+// ("in", "on", "for", "twice", the days …). It does not hold where the team's own thing follows: a
+// possessive after a result word ("beats the Browns' sack record"), a hyphen ("Facing Browns-imposed
+// suspension"), any other word ("Beats Browns teammate", "Facing Eagles discipline"); nor before a
+// dispute's "against" (DISPUTE_WORDS: "Files grievance against Browns", "Holds out against Browns",
+// "Arbitrator rules against Browns"); nor in the idioms that use a result word for a team's loss of
+// its own player, in any case: a duration after a result (DURATION_WORDS: "lost to the Browns for the
+// season", "…until December"); "lost to" after a copula (COPULAS) or at a clause's opening ("is lost
+// to the Chiefs", "Is Lost To Browns", "…: Lost to Browns until December"); "loss to" after a copula,
+// a contraction, a clause's opening with an article or with words of LOSS_DEGREE_WORDS, or a word that
+// is no preposition and an article ("is a big loss to the Eagles", "…: A big loss to Browns", "…: Big
+// loss to Browns as LB lands on IR", "Injury a big loss to Eagles"; a preposition of
+// GAME_PREPOSITIONS or a score keeps it a game: "in a big loss to the Browns", "…, a 24-20 loss");
+// the draft (DRAFT_WORDS: "fell to the Browns in the fifth round"); and a passive play's demand
+// (PASSIVE_PURPOSE_WORDS: "Pressured by Browns to take pay cut"). Words outside the lists are no cue
+// either way. Whose game or play a cue names — the person the sentence is written about — is
+// match.ts's to decide.
+//
+// The labels (`sharedAttachedTeams`, `sharedListTeams`) and the roster moves (`sharedMovedTeams`)
+// read closed lists too: the label words (teams.ts ATTACH_WORDS, positions.ts POSITION_WORDS and
+// POSITION_MODIFIERS, LABEL_ROLE_NOUNS, LABEL_PLURALS; VERB_LIKE_LABELS only where they cannot be a
+// verb), and the moves (teams.ts' verbs, SHARED_TEAM_MOVE_WORDS, PLACE_WORDS with RESERVE_LISTS,
+// SHARED_PLAYER_MOVE_WORDS).
 import type { NflTeam } from "../../config/schema.js";
-import { POSITION_MODIFIERS, POSITION_WORDS } from "./positions.js";
+import { POSITION_COMPOUND_HEADS, POSITION_MODIFIERS, POSITION_WORDS } from "./positions.js";
 import {
   ATTACH_WORDS,
   LEGACY_CUES,
@@ -112,16 +131,24 @@ export const PLAY_OBJECT_CUES: readonly string[] = Object.freeze([
   "get to", "gets to", "got to", "getting to", "pressure", "pressures", "pressured", "pressuring",
   "stuff", "stuffs", "stuffed", "stuffing",
 ]);
-/** Play wording done to the subject, before "by" ("Sacked five times by Steelers"). */
+/**
+ * Play wording done to the subject, before "by" ("Sacked five times by Steelers", "Burned by Chiefs
+ * receiver for touchdown"). Never before "to" or "into": "Pressured by Browns to take pay cut" is
+ * his own team's demand (PASSIVE_PURPOSE_WORDS).
+ */
 // prettier-ignore
 export const PASSIVE_PLAY_CUES: readonly string[] = Object.freeze([
-  "sacked", "intercepted", "picked off", "tackled", "brought down", "stripped", "pressured",
+  "sacked", "strip-sacked", "intercepted", "picked off", "tackled", "brought down", "stripped",
+  "pressured", "stuffed", "burned", "torched", "gashed", "shredded",
   "beaten", "beat", "defeated", "upset", "routed", "edged", "blanked", "shut out",
 ]);
+/** The words after a passive play's team that make it his own team's demand, not a play. */
+export const PASSIVE_PURPOSE_WORDS: readonly string[] = Object.freeze(["to", "into"]);
 /**
  * Game wording BETWEEN two teams: every cue above, and the words that name a game only when a team
  * stands on each side ("Vikings host Browns", "the Ravens visit the Bengals", "the Vikings face the
- * Browns"). After a single team they name no opponent ("visits Bears" may be a workout).
+ * Browns", "Vikings at Bears"). After a single team they name no opponent ("visits Bears" may be a
+ * workout, "at Bears" his own team's facility).
  */
 export const GAME_CUES: readonly string[] = Object.freeze([
   ...AGAINST_CUES,
@@ -140,8 +167,13 @@ export const GAME_CUES: readonly string[] = Object.freeze([
   "face",
   "faces",
   "faced",
+  "at",
 ]);
-/** A team's player or unit a play is made on (lower case; any case written). */
+/**
+ * A team's player or unit a play is made on (lower case; any case written): the offense's for a
+ * defender's play ("Sacks Vikings QB"), the defense's for an offensive one ("Burns Browns cornerback
+ * for 60-yard TD", "Beats Browns safety for long touchdown"), each in the singular and the plural.
+ */
 // prettier-ignore
 export const PLAY_OBJECTS: readonly string[] = Object.freeze([
   "qb", "qbs", "quarterback", "quarterbacks", "passer", "passers", "signal-caller", "pass",
@@ -153,6 +185,16 @@ export const PLAY_OBJECTS: readonly string[] = Object.freeze([
   "pass rush", "pass defense", "run defense", "coverage", "punt", "punts", "punter", "kick",
   "kicks", "kicker", "field goal", "field-goal", "extra point", "fumble", "snap", "snaps",
   "returner", "starter", "starters", "star",
+  "cornerback", "corner", "cb", "cbs", "safety", "linebacker", "lb", "lbs", "db", "dbs",
+  "defensive back", "defender", "defenders", "nickelback", "nickel back", "pass rusher",
+  "pass rushers", "edge rusher", "edge rushers", "defensive end", "defensive ends",
+  "defensive tackle", "defensive tackles", "defensive lineman", "defensive linemen",
+  "left tackle", "right tackle", "rbs", "wrs", "tes", "returners", "punters", "kickers", "stars",
+]);
+/** Number words a play's "for" may count with ("Torches Bengals for three touchdowns"). */
+// prettier-ignore
+export const NUMBER_WORDS: readonly string[] = Object.freeze([
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
 ]);
 /** The words that may follow a cued team in a game's or a play's wording (any case). */
 // prettier-ignore
@@ -222,7 +264,53 @@ const ABBREVIATION_RE = new RegExp(
   `(?<![\\p{L}\\p{N}'’ʼ.-])(${Object.keys(TEAM_ABBREVIATIONS).join("|")})(?![\\p{L}\\p{N}'’ʼ-])`,
   "gu",
 );
+/**
+ * The words after a result's team that make it a duration, the team's loss of its own player:
+ * "lost to the Browns for the season", "…until December" (any case).
+ */
+export const DURATION_WORDS: readonly string[] = Object.freeze(["for", "until", "till"]);
+/** The draft, later in a result's clause ("fell to the Browns in the fifth round"; and "No. 150"). */
+// prettier-ignore
+export const DRAFT_WORDS: readonly string[] = Object.freeze([
+  "round", "draft", "pick", "overall", "selection",
+]);
+/**
+ * A dispute before "against": the team after it is his own side's ("Files grievance against
+ * Browns", "Holds out against Browns", "Arbitrator rules against Browns"), never his opponent.
+ */
+// prettier-ignore
+export const DISPUTE_WORDS: readonly string[] = Object.freeze([
+  "grievance", "grievances", "lawsuit", "lawsuits", "suit", "complaint", "complaints", "appeal",
+  "claim", "claims", "case", "charge", "charges", "ruling", "decision", "fine", "discipline",
+  "action", "motion", "protest", "arbitration", "hearing", "testimony", "holds out", "held out",
+  "holding out", "hold out", "rules", "ruled", "decides", "decided", "sides", "sided",
+  "testifies", "testified",
+]);
+/** The copulas before "loss to" or "lost to" that make it the team's loss of a player (any case). */
+// prettier-ignore
+export const COPULAS: readonly string[] = Object.freeze([
+  "is", "was", "are", "were", "be", "been", "being", "remains", "remained", "represents",
+  "represented", "becomes", "became",
+]);
+/**
+ * The prepositions that make "a … loss to <team>" a game ("in a big loss to the Browns", "after a
+ * loss to"): before one, the noun phrase is a result; any other word before "a <words> loss to" makes
+ * it the team's loss of a player ("Injury a big loss to Eagles"). Also never a word of the phrase.
+ */
+// prettier-ignore
+export const GAME_PREPOSITIONS: readonly string[] = Object.freeze([
+  "in", "after", "during", "despite", "following", "since", "before", "from", "off", "with",
+  "without", "amid", "through", "into", "on", "of", "by", "over", "under", "at", "to", "for",
+  "upon", "behind", "until", "around", "against", "via", "within", "throughout", "toward",
+  "towards",
+]);
+/** The game words that may stand between a team's possessive and a cue ("the Bengals' game versus"). */
+// prettier-ignore
+export const PAIR_GAME_WORDS: readonly string[] = Object.freeze([
+  "game", "matchup", "contest", "meeting", "clash", "showdown", "tilt",
+]);
 const ARTICLE = "(?:(?:the|a|an)\\s+)?";
+const NUMBER_ALT = alternation(NUMBER_WORDS);
 /** The cue words before a mention, each kind's (the words captured). */
 const CUE_RES: readonly (readonly [SharedCueKind, RegExp, boolean])[] = [
   [
@@ -236,7 +324,7 @@ const CUE_RES: readonly (readonly [SharedCueKind, RegExp, boolean])[] = [
   [
     "passive",
     new RegExp(
-      `(?<![\\p{L}\\p{N}])(${alternation(PASSIVE_PLAY_CUES)})(?:\\s+(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten)\\s+times|\\s+(?:twice|once|again|repeatedly))?\\s+by\\s+${ARTICLE}$`,
+      `(?<![\\p{L}\\p{N}])(${alternation(PASSIVE_PLAY_CUES)})(?:\\s+(?:\\d+|${NUMBER_ALT})\\s+times|\\s+(?:twice|once|again|repeatedly))?\\s+by\\s+${ARTICLE}$`,
       "iu",
     ),
     false,
@@ -259,8 +347,12 @@ const CUE_RES: readonly (readonly [SharedCueKind, RegExp, boolean])[] = [
 const CUE_WINDOW = 40;
 /** What may follow a cued team, read from right after it. */
 const POSSESSIVE_RE = /^['’ʼ](?:s(?![\p{L}\p{N}]))?/u;
+/**
+ * The team's player or unit, never a modifier of a noun after it ("the Browns' front office", "the
+ * Browns' linebacker depth", "…cornerback room": positions.ts POSITION_COMPOUND_HEADS).
+ */
 const OBJECT_RE = new RegExp(
-  `^\\s+(?:${alternation(PLAY_OBJECTS)})(?![\\p{L}\\p{N}])(?!\\s+office)`,
+  `^\\s+(?:${alternation(PLAY_OBJECTS)})(?![\\p{L}\\p{N}])(?!\\s+(?:office|${alternation(POSITION_COMPOUND_HEADS)})(?![\\p{L}\\p{N}]))`,
   "iu",
 );
 const NAME_AFTER_RE = /^\s+\p{Lu}/u;
@@ -268,28 +360,62 @@ const CONTINUES_RE = new RegExp(
   `^(?:\\s*$|\\s*[^\\p{L}\\p{N}\\s'’ʼ-]|\\s+[-–—](?=\\s|$)|\\s+\\d|\\s+(?:${alternation(CUE_CONTINUATIONS)})(?![\\p{L}\\p{N}]))`,
   "iu",
 );
-const FOR_RE = /^\s+for(?![\p{L}\p{N}])/iu;
-/** The draft, later in a result's clause ("fell to the Browns in the fifth round"). */
-const DRAFT_RE =
-  /(?<![\p{L}\p{N}])(?:round|draft|pick|overall|selection|No\.?\s*\d+)(?![\p{L}\p{N}])/iu;
+const DURATION_RE = new RegExp(`^\\s+(?:${alternation(DURATION_WORDS)})(?![\\p{L}\\p{N}])`, "iu");
+const DRAFT_RE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${alternation(DRAFT_WORDS)}|No\\.?\\s*\\d+)(?![\\p{L}\\p{N}])`,
+  "iu",
+);
 /**
- * A copula or an appositive before "loss to" ("is a big loss to the Eagles", "…, a big loss to the
- * Browns": the team's loss of a player). A score keeps it a game ("…, a 24-20 loss to the Browns").
+ * The words that may stand between a clause's opening and "loss to" with no article before them
+ * ("…: Big loss to Browns as LB lands on IR"; any case): the size of a team's loss of a player.
  */
-const COPULA_LOSS_RE =
-  /(?:(?<![\p{L}\p{N}])(?:is|was|are|were|be|been|being|remains|represents|['’]s)\s+(?:(?:a|an|another|the)\s+)?|[,—–]\s*(?:a|an|another)\s+)(?:[\p{Ll}-]+\s+){0,3}$/u;
-/** A passive or a participle before "lost to" ("is lost to the Chiefs", "…, lost to the Browns"). */
-const PASSIVE_LOST_RE =
-  /(?:(?<![\p{L}\p{N}])(?:is|was|are|were|be|been|being|['’]s)\s+(?:\p{Ll}+\s+)?|,\s*)$/u;
-/** A dispute before "against" ("grievance against the Browns"): the team is his own side's. */
-const DISPUTE_RE =
-  /(?<![\p{L}\p{N}])(?:grievance|grievances|lawsuit|lawsuits|suit|complaint|complaints|appeal|claim|claims|case|charge|charges|ruling|decision|fine|discipline|action|motion|protest|arbitration|hearing|testimony)\s+$/iu;
-/** "for" and a number after a play's team ("Torches Browns for 150 yards"). */
-const FOR_NUMBER_RE = /^\s+for\s+\d/iu;
+// prettier-ignore
+export const LOSS_DEGREE_WORDS: readonly string[] = Object.freeze([
+  "big", "bigger", "biggest", "huge", "major", "massive", "significant", "serious", "tough",
+  "crushing", "devastating", "brutal", "costly", "key", "notable", "sizable", "considerable",
+  "substantial", "enormous", "real", "potential", "possible", "early", "season-long", "long-term",
+  "short-term", "temporary",
+]);
+/** A word that may modify "loss" in its idiom: letters only (a score keeps it a game), no preposition. */
+const LOSS_WORD = `(?!(?:${alternation(GAME_PREPOSITIONS)}|the)(?![\\p{L}\\p{N}]))[\\p{L}-]+`;
+/**
+ * Where a clause opens: the text's start (the lead read is marked when it is not the text's start),
+ * a colon, a semicolon, a bar, a comma, a parenthesis, a dash, a sentence's end.
+ */
+const CLAUSE_OPENING = "(?:^|[:;|,(—–]|\\s[-–—]|[.!?])\\s*";
+/**
+ * "loss to" as the team's loss of a player, in any case: after a copula ("is a big loss to the
+ * Eagles", "Injury Is A Big Loss To Browns"), a contraction ("Jefferson's a big loss to"), a clause's
+ * opening ("…: A big loss to Browns", "…, a big loss to the Browns", "… - a big loss to Cleveland",
+ * "…: Big loss to Browns as LB lands on IR"), or a word that is no preposition and an article
+ * ("Season-ending injury a big loss to Browns"); up to three words before "loss". A preposition keeps
+ * it a game ("in a big loss to the Browns"), and so does a score ("…, a 24-20 loss to the Browns").
+ */
+const LOSS_IDIOM_RE = new RegExp(
+  `(?:(?:(?<![\\p{L}\\p{N}])(?:${alternation(COPULAS)})\\s+(?:(?:a|an|another|the)\\s+)?|['’]s\\s+(?:a|an|another)\\s+|${CLAUSE_OPENING}(?:a|an|another)\\s+|(?<![\\p{L}\\p{N}])${LOSS_WORD}\\s+(?:a|an|another)\\s+)(?:${LOSS_WORD}\\s+){0,3}|${CLAUSE_OPENING}(?:(?:${alternation(LOSS_DEGREE_WORDS)})\\s+){0,3})$`,
+  "iu",
+);
+/**
+ * "lost to" as a passive or a participle, in any case: after a copula and at most one word ("is lost
+ * to the Chiefs", "Is Lost To Browns"), or at a clause's opening ("…, lost to the Browns in free
+ * agency", "…: Lost to Browns until December").
+ */
+const PASSIVE_LOST_RE = new RegExp(
+  `(?:(?<![\\p{L}\\p{N}])(?:${alternation(COPULAS)})\\s+(?:${LOSS_WORD}\\s+)?|${CLAUSE_OPENING})$`,
+  "iu",
+);
+const DISPUTE_RE = new RegExp(`(?<![\\p{L}\\p{N}])(?:${alternation(DISPUTE_WORDS)})\\s+$`, "iu");
+/** "for" and a number after a play's team ("Torches Browns for 150 yards", "for three touchdowns"). */
+const FOR_NUMBER_RE = new RegExp(`^\\s+for\\s+(?:\\d|(?:${NUMBER_ALT})(?![\\p{L}\\p{N}]))`, "iu");
+/** "to" or "into" after a passive play's team: his own team's demand ("Pressured by Browns to take"). */
+const PASSIVE_PURPOSE_RE = new RegExp(
+  `^\\s+(?:${alternation(PASSIVE_PURPOSE_WORDS)})(?![\\p{L}\\p{N}])`,
+  "iu",
+);
 const WEAK_AFTER_RE = /^\s+matchups?(?![\p{L}\p{N}])/iu;
 /** Between the two teams of a game: a possessive, a score, a game word, the cue, an article. */
 const PAIR_GAP_RE = new RegExp(
-  `^(?:['’ʼ]s?)?(?:\\s+\\d{1,2}-\\d{1,2})?(?:\\s+(?:game|matchup|contest|meeting|clash|showdown|tilt))?(?:\\s+(?:${alternation(GAME_CUES.filter((w) => w !== "@"))})\\s+|\\s*@\\s*)${ARTICLE}$`,
+  `^(?:['’ʼ]s?)?(?:\\s+\\d{1,2}-\\d{1,2})?(?:\\s+(?:${alternation(PAIR_GAME_WORDS)}))?(?:\\s+(?:${alternation(GAME_CUES.filter((w) => w !== "@"))})\\s+|\\s*@\\s*)${ARTICLE}$`,
   "iu",
 );
 const POSITION_ALT = alternation(Object.keys(POSITION_WORDS));
@@ -322,7 +448,9 @@ function cueHolds(
   end: number,
 ): boolean {
   const after = text.slice(end, end + 48);
-  const lead = text.slice(Math.max(0, cue.start - 48), cue.start);
+  // the lead before the cue; "\0" marks a cut, so a clause opening at its start is only the text's
+  const from = Math.max(0, cue.start - 48);
+  const lead = (from === 0 ? "" : "\u0000") + text.slice(from, cue.start);
   if (cue.kind === "against" && DISPUTE_RE.test(lead)) return false;
   const possessive = POSSESSIVE_RE.exec(after);
   if (possessive !== null) {
@@ -331,13 +459,14 @@ function cueHolds(
     return OBJECT_RE.test(rest) || NAME_AFTER_RE.test(rest);
   }
   if (cue.objectOnly) return OBJECT_RE.test(after) || FOR_NUMBER_RE.test(after);
+  if (cue.kind === "passive" && PASSIVE_PURPOSE_RE.test(after)) return false;
   if (!OBJECT_RE.test(after) && !CONTINUES_RE.test(after)) return false;
   if (cue.kind !== "result") return true;
-  if (FOR_RE.test(after)) return false;
+  if (DURATION_RE.test(after)) return false;
   const clause = /^[^.;|!?]*/u.exec(text.slice(end, end + 160))?.[0] ?? "";
   if (DRAFT_RE.test(clause)) return false;
   const words = cue.words.replace(/\s+/gu, " ");
-  if ((words === "loss to" || words === "losses to") && COPULA_LOSS_RE.test(lead)) return false;
+  if ((words === "loss to" || words === "losses to") && LOSS_IDIOM_RE.test(lead)) return false;
   return !(words === "lost to" && PASSIVE_LOST_RE.test(lead));
 }
 
@@ -374,10 +503,17 @@ export function sharedMentions(text: string): readonly SharedMention[] {
     if (a.team !== null)
       bases.push({ team: a.team, start: a.start, end: a.end, form: a.caps ? "caps" : "name" });
   }
-  const free = (s: number, e: number): boolean => !bases.some((x) => s < x.end && x.start < e);
-  const abbreviations = [...text.matchAll(ABBREVIATION_RE)].filter((m) =>
-    free(m.index, m.index + m[0].length),
-  );
+  // an abbreviation inside a team's name is no mention (bases are in text order, never overlapping;
+  // one pass over both, so the work stays linear in an item's teams and abbreviations)
+  const abbreviations: RegExpExecArray[] = [];
+  let j = 0;
+  for (const m of text.matchAll(ABBREVIATION_RE)) {
+    const s = m.index;
+    const e = s + m[0].length;
+    while (j < bases.length && (bases[j]?.end ?? 0) <= s) j++;
+    const b = bases[j];
+    if (b === undefined || !(s < b.end && b.start < e)) abbreviations.push(m);
+  }
   const accepted = new Set<number>();
   for (const m of abbreviations) {
     const s = m.index;
@@ -387,13 +523,19 @@ export function sharedMentions(text: string): readonly SharedMention[] {
       TAG_AFTER_RE.test(text.slice(e, e + 24));
     if (tag || cueBefore(text, s) !== null) accepted.add(s);
   }
-  // a game's first side ("MIN vs. CLE"): right before a game's gap and a team already read
-  const starts = (): number[] => [...bases.map((x) => x.start), ...accepted];
+  // a game's first side ("MIN vs. CLE"): right before a game's gap and the next team already read
+  // (a team farther on never pairs: the gap would hold the nearer one, which no game word is)
+  const starts = [...bases.map((x) => x.start), ...accepted].sort((x, y) => x - y);
+  const first: number[] = [];
+  let k = 0;
   for (const m of abbreviations) {
     const e = m.index + m[0].length;
     if (accepted.has(m.index)) continue;
-    if (starts().some((s) => s > e && PAIR_GAP_RE.test(text.slice(e, s)))) accepted.add(m.index);
+    while (k < starts.length && (starts[k] ?? 0) <= e) k++;
+    const next = starts[k];
+    if (next !== undefined && PAIR_GAP_RE.test(text.slice(e, next))) first.push(m.index);
   }
+  for (const s of first) accepted.add(s);
   for (const m of abbreviations) {
     const team = TEAM_ABBREVIATIONS[m[0]];
     if (accepted.has(m.index) && team !== undefined)
@@ -420,17 +562,61 @@ export function sharedMentions(text: string): readonly SharedMention[] {
   return out;
 }
 
+/** Role nouns a writer puts between a team and a player's name, beside the position words. */
+// prettier-ignore
+export const LABEL_ROLE_NOUNS: readonly string[] = Object.freeze([
+  "superstar", "playmaker", "pass-catcher", "pass catcher", "mvp", "captain",
+]);
+/**
+ * Plural labels: before one name, or before a list of names ("Vikings WRs Jordan Addison and
+ * Justin Jefferson", `sharedListTeams`), whose every name the team is attached to.
+ */
+// prettier-ignore
+export const LABEL_PLURALS: readonly string[] = Object.freeze([
+  "qbs", "rbs", "wrs", "tes", "lbs", "olbs", "ilbs", "cbs", "dbs", "des", "dts", "dls",
+  "quarterbacks", "running backs", "receivers", "wide receivers", "wideouts", "tight ends",
+  "linebackers", "cornerbacks", "corners", "safeties", "defensive ends", "defensive tackles",
+  "defensive backs", "defensive linemen", "pass rushers", "edge rushers", "kickers", "punters",
+  "stars", "starters", "rookies", "veterans", "backups", "teammates", "playmakers",
+  "pass-catchers", "captains",
+]);
+/**
+ * Label words that read as verbs right before a name ("Vikings top Browns", "a hit by the Vikings
+ * injured Justin Jefferson"): read there only after a possessive ("the Vikings' top receiver"), and
+ * "injured" before another label word ("Vikings injured WR Justin Jefferson"); in a tag always.
+ */
+export const VERB_LIKE_LABELS: readonly string[] = Object.freeze(["lead", "top", "injured"]);
 /**
  * The words of a label between a team and the player it is attached to (any case): role words,
- * positions and modifiers — before a name not "lead" or "top", which read there as verbs ("Vikings
- * top Browns"), but in a tag after it ("the Vikings' top receiver") too.
+ * positions, modifiers, an age ("24-year-old") and a rank ("No. 1").
  */
-const LABEL_WORDS = [...ATTACH_WORDS, ...Object.keys(POSITION_WORDS), ...POSITION_MODIFIERS];
-const ROLE_ALT = `(?:${alternation(LABEL_WORDS.filter((w) => w !== "lead" && w !== "top"))}|\\d{1,2}-year-old)`;
-const TAG_ROLE_ALT = `(?:${alternation(LABEL_WORDS)}|\\d{1,2}-year-old)`;
+const LABEL_WORDS = [
+  ...ATTACH_WORDS,
+  ...Object.keys(POSITION_WORDS),
+  ...POSITION_MODIFIERS,
+  ...LABEL_ROLE_NOUNS,
+  ...LABEL_PLURALS,
+];
+const LABEL_EXTRA = "\\d{1,2}-year-old|No\\.?\\s*\\d{1,2}";
+const CORE_ALT = `(?:${alternation(LABEL_WORDS.filter((w) => !VERB_LIKE_LABELS.includes(w)))}|${LABEL_EXTRA})`;
+const ROLE_ALT = `(?:${CORE_ALT}|injured(?=\\s+${CORE_ALT}(?![\\p{L}\\p{N}])))`;
+const TAG_ROLE_ALT = `(?:${alternation(LABEL_WORDS)}|${LABEL_EXTRA})`;
 const SEPARATOR = "(?:\\s*[-–,/]\\s*|\\s+)";
-/** Between a team and a name after it: a possessive, then label words only. */
-const BEFORE_NAME_RE = new RegExp(`^(?:['’ʼ]s?)?(?:\\s+${ROLE_ALT}(?![\\p{L}\\p{N}]))*\\s+$`, "iu");
+/**
+ * Between a team and a name after it: a possessive and then any label words, or label words
+ * without one (a verb-like one only as VERB_LIKE_LABELS says).
+ */
+const BEFORE_NAME_RE = new RegExp(
+  `^(?:['’ʼ]s?(?:\\s+${TAG_ROLE_ALT}(?![\\p{L}\\p{N}]))*|(?:\\s+${ROLE_ALT}(?![\\p{L}\\p{N}]))*)\\s+$`,
+  "iu",
+);
+/** Between a name and a team after it: "of" ("Justin Jefferson of the Vikings"). */
+const OF_GAP_RE = /^\s+of\s+(?:the\s+)?$/iu;
+/** Between a team and the first name of a list: a possessive, label words, a plural label. */
+const BEFORE_LIST_RE = new RegExp(
+  `^(?:['’ʼ]s?)?(?:\\s+${TAG_ROLE_ALT}(?![\\p{L}\\p{N}]))*\\s+(?:${alternation(LABEL_PLURALS)})(?![\\p{L}\\p{N}])\\s+$`,
+  "iu",
+);
 /** Between a name and a team after it in a tag: "," or "(", an article, label words. */
 const TAG_GAP_RE = new RegExp(
   `^\\s*([(,])\\s*(?:(?:the|a|an)\\s+)?(?:${TAG_ROLE_ALT}(?![\\p{L}\\p{N}])${SEPARATOR})*$`,
@@ -447,11 +633,12 @@ const ATTACH_WINDOW = 64;
 /**
  * The teams written next to the name at [start, end) in the shared-name reading — its own team as
  * the writer labels him: "<team>['s] [label words] <name>" ("Minnesota Vikings star Justin
- * Jefferson", "Rams edge rusher Byron Young"), or a tag after it: "<name>, [label words,] <team>"
- * closing its clause ("Justin Jefferson, WR, Minnesota:", "Justin Jefferson, CLE:"), an appositive
- * holding a label word ("Justin Jefferson, the Vikings' star receiver, is"), or "<name> (<team>
- * [label words])" in either order ("(Browns LB)", "(CLE - LB)", "(WR, Vikings)"). `mentions` are
- * `sharedMentions`' (minus any read as part of a name).
+ * Jefferson", "Rams edge rusher Byron Young", "Vikings' No. 1 receiver Justin Jefferson"), "<name>
+ * of [the] <team>" ("Justin Jefferson of the Vikings"), or a tag after it: "<name>, [label words,]
+ * <team>" closing its clause ("Justin Jefferson, WR, Minnesota:", "Justin Jefferson, CLE:"), an
+ * appositive holding a label word ("Justin Jefferson, the Vikings' star receiver, is"), or "<name>
+ * (<team> [label words])" in either order ("(Browns LB)", "(CLE - LB)", "(WR, Vikings)").
+ * `mentions` are `sharedMentions`' (minus any read as part of a name).
  */
 export function sharedAttachedTeams(
   text: string,
@@ -465,6 +652,10 @@ export function sharedAttachedTeams(
       if (start - m.end <= ATTACH_WINDOW && BEFORE_NAME_RE.test(text.slice(m.end, start)))
         out.add(m.team);
     } else if (m.start >= end && m.start - end <= ATTACH_WINDOW) {
+      if (OF_GAP_RE.test(text.slice(end, m.start))) {
+        out.add(m.team);
+        continue;
+      }
       const gap = TAG_GAP_RE.exec(text.slice(end, m.start));
       const rest = TAG_REST_RE.exec(text.slice(m.end, m.end + ATTACH_WINDOW));
       if (gap === null || rest === null) continue;
@@ -480,16 +671,89 @@ export function sharedAttachedTeams(
   return out;
 }
 
+/**
+ * The teams a plural label attaches to the list of names whose first name starts at `start`
+ * ("Vikings WRs Jordan Addison and Justin Jefferson": the Vikings, for every name of the list; the
+ * matcher finds the list — names joined by "," and "and" only).
+ */
+export function sharedListTeams(
+  text: string,
+  mentions: readonly Pick<SharedMention, "team" | "start" | "end">[],
+  start: number,
+): ReadonlySet<NflTeam> {
+  const out = new Set<NflTeam>();
+  for (const m of mentions)
+    if (
+      m.end <= start &&
+      start - m.end <= ATTACH_WINDOW &&
+      BEFORE_LIST_RE.test(text.slice(m.end, start))
+    )
+      out.add(m.team);
+  return out;
+}
+
+/**
+ * The reserve lists a team places a player on or takes him off (any case): "Placed on IR by
+ * Vikings", "Activated off injured reserve by Vikings", "Vikings place Justin Jefferson on IR".
+ */
+// prettier-ignore
+export const RESERVE_LISTS: readonly string[] = Object.freeze([
+  "IR", "injured reserve", "reserve/injured", "reserve/PUP", "reserve/NFI", "reserve/suspended",
+  "PUP", "PUP list", "NFI", "NFI list", "non-football injury list",
+  "physically unable to perform list", "exempt list", "commissioner's exempt list",
+  "practice squad injured list", "waivers",
+]);
+/**
+ * The roster moves of a player's own team, beyond teams.ts' (which a unique name keeps): a team
+ * reinstates him ("Vikings reinstate Justin Jefferson"), places him on a reserve list ("Vikings place
+ * Justin Jefferson on injured reserve": the list after the name), or his clause says he was
+ * activated, reinstated or placed on a list by it ("Justin Jefferson: Activated by Vikings",
+ * "…: Activated off IR by Vikings", "…: Placed on IR by Vikings", "…: Reinstated by Vikings").
+ */
+export const SHARED_TEAM_MOVE_WORDS: readonly string[] = Object.freeze([
+  "reinstate",
+  "reinstates",
+  "reinstated",
+]);
+export const PLACE_WORDS: readonly string[] = Object.freeze([
+  "place",
+  "places",
+  "placed",
+  "put",
+  "puts",
+]);
+export const SHARED_PLAYER_MOVE_WORDS: readonly string[] = Object.freeze([
+  "activated",
+  "reinstated",
+]);
+const ATTACH_ALT = alternation(ATTACH_WORDS);
+const LIST_ALT = `(?:the\\s+)?(?:${alternation(RESERVE_LISTS)})(?![\\p{L}\\p{N}])`;
+const SHARED_TEAM_MOVES_RE = new RegExp(
+  `^\\s+(?:${alternation(SHARED_TEAM_MOVE_WORDS)})(?:\\s+(?:${ATTACH_ALT}))*\\s+$`,
+  "iu",
+);
+const PLACE_RE = new RegExp(
+  `^\\s+(?:${alternation(PLACE_WORDS)})(?:\\s+(?:${ATTACH_ALT}))*\\s+$`,
+  "iu",
+);
+const PLACE_TAIL_RE = new RegExp(`^\\s+on\\s+${LIST_ALT}`, "iu");
+const SHARED_PLAYER_MOVE_RE = new RegExp(
+  `^\\s*[:,]?\\s*(?:(?:is|was|has\\s+been|gets|got)\\s+)?(?:(?:${alternation(SHARED_PLAYER_MOVE_WORDS)})(?:\\s+(?:off|from)\\s+${LIST_ALT})?|placed\\s+on\\s+${LIST_ALT})\\s+by\\s+(?:the\\s+)?$`,
+  "iu",
+);
+
 /** What follows a team a player's clause says he moved to: a roster's name, then a clause end. */
 const MOVE_TAIL_RE =
   /^(?:['’ʼ]s?)?(?:\s+(?:practice\s+squad|active\s+roster|53-man\s+roster|roster|taxi\s+squad))?(?:\s*(?:[.,;:!?|()—–]|$)|\s+(?:on|as|after|before|from|in|off|to|through|with|and|following|via|ahead|this|last|sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?![\p{L}\p{N}]))/iu;
 
 /**
  * The teams a roster move ties to the name at [start, end) in the shared-name reading: a team that
- * signs, waives, claims or promotes him ("Bengals sign CB Lamar Jackson"), or one his own clause says
- * he signs with, is waived by or lands on — the move ending its clause there ("…: Signs with
- * Bengals", "…: Lands on Bengals practice squad"), never a workout or a mention ("Joins Ravens for
- * workout", "Lands on Vikings' radar"). Never a trade (teams.ts PLAYER_MOVE_RE).
+ * signs, waives, claims, promotes, activates or reinstates him ("Bengals sign CB Lamar Jackson"),
+ * or places him on a reserve list; or one his own clause says he signs with, is waived, activated,
+ * reinstated or placed on a list by, or lands on — the move ending its clause there ("…: Signs with
+ * Bengals", "…: Activated off IR by Vikings", "…: Lands on Bengals practice squad"), never a workout
+ * or a mention ("Joins Ravens for workout", "Lands on Vikings' radar"). Never a trade (teams.ts
+ * PLAYER_MOVE_RE).
  */
 export function sharedMovedTeams(
   text: string,
@@ -500,11 +764,18 @@ export function sharedMovedTeams(
   const out = new Set<NflTeam>();
   for (const m of mentions) {
     if (m.end <= start) {
-      if (start - m.end <= ATTACH_WINDOW && TEAM_MOVES_RE.test(text.slice(m.end, start)))
+      if (start - m.end > ATTACH_WINDOW) continue;
+      const gap = text.slice(m.end, start);
+      if (
+        TEAM_MOVES_RE.test(gap) ||
+        SHARED_TEAM_MOVES_RE.test(gap) ||
+        (PLACE_RE.test(gap) && PLACE_TAIL_RE.test(text.slice(end, end + ATTACH_WINDOW)))
+      )
         out.add(m.team);
     } else if (m.start >= end && m.start - end <= ATTACH_WINDOW) {
+      const gap = text.slice(end, m.start);
       if (
-        PLAYER_MOVE_RE.test(text.slice(end, m.start)) &&
+        (PLAYER_MOVE_RE.test(gap) || SHARED_PLAYER_MOVE_RE.test(gap)) &&
         MOVE_TAIL_RE.test(text.slice(m.end, m.end + ATTACH_WINDOW))
       )
         out.add(m.team);
