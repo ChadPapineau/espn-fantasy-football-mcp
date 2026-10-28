@@ -2,8 +2,8 @@
 
 The tracked list of Stage C items that need the owner, a repository setting, the Stage D merge or an
 orchestrator ruling. The ledger of fixed findings lives with the orchestrator; this file records only
-what stays open after the final gate's fix rounds 1, 2 and 3 (2026-10-28, `build/phase-1`). Each item
-says why code cannot close it and what would.
+what stays open after the final gate's fix rounds 1, 2 and 3 and ruling R8-3's fix (2026-10-28,
+`build/phase-1`). Each item says why code cannot close it and what would.
 
 ## For the orchestrator's ledger
 
@@ -13,9 +13,10 @@ fixed; `ci-default-branch-controls-inert` closes with the Stage D merge.
 The final gate's second run (at `2ca70dc`) and its third (at `125c184`) verified three findings fixed
 with the last verifiers' own repros, yet the ledger still lists them as confirmed:
 `trade-locked-week-counted`, `store-future-stamped-rows-block` and `crosswalk-unpaired-joins-silent`.
-They can be closed. `news-match-universe-homonyms` has no misattribution left (the third run); it
-stays open only for the ruling below. R7-2 and R7-6 stay open by ruling (below); B11 Lane 2 and B15
-are recorded at Stage D as not runnable.
+They can be closed. `news-match-universe-homonyms`: the fourth run found namesakes' items still
+reaching the star; ruling R8-3 is built (`cb2bcc7`; below, and changelog §B9), and one roster-move
+title stays open for a ruling. R7-2 and R7-6 stay open by ruling (below); B11 Lane 2 and B15 are
+recorded at Stage D as not runnable.
 
 ## Ruled — moved here by the orchestrator
 
@@ -72,6 +73,62 @@ Seen on the owner's install at the final gate. Each is an action at a terminal; 
 never evidence for a holder; the opponent cues cover result and play wording; choice 6 takes (c),
 position words from ESPN's `position_id`, on both paths. The gate's fourth run found namesake items
 still reaching the star at `f41e810` (repros kept with the orchestrator, outside the repo).
+
+**Built (2026-10-28, commit `cb2bcc7`; changelog §B9).** Every clause holds, each with tests that fail
+on the code at `f41e810` (`tests/sources/news/match-r83.test.ts`, `positions.test.ts`). The
+gate's four batteries are committed as tests, every title with its label (battery 1 the gate's own,
+2–4 their stated intent). Battery 1 had 10 misattributions; it has none now, and 34 right refs where
+it had 20. The namesakes' injury and play items of batteries 2–4 get no ref or their own holder, never
+the star. What R8-3 built:
+
+- **Cues (clause 3).** The holders of a shared name are told apart with a second reading of the cue
+  words (`teams.ts` `shared`). It reads the old words; 26 result words such as "win over", "loss to",
+  "beat", "fell to" and "past", never before the team's possessive; 36 play words such as "sacks",
+  "intercepts", "picks off", "brought down" and "torches"; and, between two teams, "host", "visit" and
+  "face". A unique name keeps the old reading.
+- **Loose teams (clause 2).** A team not written next to the name and not tied to it by a roster move,
+  a game's teams included, only rules holders out. `full_name_team` on a shared name needs the
+  attached team or the move.
+- **Positions (clause 4, choice 6(c)).** `ds_players.position_id` joins the universe (`UNIVERSE_SQL`,
+  `universeFromEspnPlayers`, the run's temp file). A closed vocabulary (`positions.ts`) is read next to
+  the name and in a sentence describing the subject, and rules out every holder of another position.
+  Writers' words cover ESPN's split labels: DL is DT or DE, edge and LB are DE or LB, a DB is a CB or S.
+  The LB takes "Browns LB Justin Jefferson" and "LB Justin Jefferson"; the free-agent CB takes "Free-agent
+  cornerback Lamar Jackson visits Bengals"; the post-trade "Browns WR Jefferson" gets no ref on either
+  path.
+- **The bare surname (clause 4: the same rule).** A surname several universe players share (302 of
+  1,604) needs a team written next to it or tied to it by a move; a position filters it, and a sharer
+  who outshines the one left and is not ruled out blocks him. "Cleveland's Jefferson" and "Jefferson:
+  Questionable for Vikings" get no ref (the second was the Vikings WR's at 0.60).
+- **Counted (clause 5).** An item whose evidence leaves no single holder keeps no ref for that name. The
+  publish step counts it, with the items no player matched, in `eff refresh news`'s warnings; every item
+  stays stored and listed.
+- **The residual (clause 6).** No team of a holder's, no position, no cue: the prominent holder at 0.80.
+
+**Readings the fixer made (for the re-gate to check).** (a) A team named loosely that rules no holder
+out, the star's own or nobody's, leaves the item to prominence, as before ("Lamar Jackson: Limited
+ahead of Bengals game" stays the Ravens QB's). Choice 5 blocks only on a namesake's team. Choice 3
+excludes trades so that a traded star's own news is not blocked, which the stricter reading (every
+named team leaves two holders, so no ref) would undo. Battery 2's "Lamar Jackson: Works out for
+Bengals" and "…: Visits Bears" are therefore residuals: the Ravens QB at 0.80, like the clause-6
+items "…: Inks reserve/future contract" and the three "Placed on IR" titles. (b) A surname several players
+share is a shared name, so clause 2 binds the bare-surname path. (c) A describing sentence counts only
+for the subject: the last person named before it, and no one named after it in its sentence. A
+sentence about an unnamed other player ("The linebacker covering him slipped.") still reads as the
+subject's; no pronoun parsing (R7-4's precedent). (d) One item naming two namesakes ("Lamar Jackson:
+Throws pick to CB Lamar Jackson") is decided as one person: a name written twice in an item is one
+person, the common case.
+
+**Open — needs a ruling: a roster move to the star's own team.** "Lamar Jackson: Signs with Ravens practice
+squad" (battery 1, the namesake's) goes to the Ravens QB at 0.95: the move ties the Ravens to the name,
+and choice 3, standing as built, reads a move like an attached team, so the holder on that team takes
+it. A free agent is consistent with any signing, though: it is how he stops being one. Options: (a) as
+built; (b) an incoming move (sign, claim, join, lands on) is a free-agent holder's too, so with one it
+leaves two holders and gets no ref ("Lamar Jackson: Signs with Ravens" would get none either); (c) "claimed
+by" alone rules out the holder already on that team (a team never claims its own player).
+
+**Before R8-3** (the record the ruling was made on; the as-built choices below are the ones it kept or
+changed):
 
 `news-match-universe-homonyms` was fixed on the evidence of the gate's five items
 (`src/sources/news/match.ts`, `teams.ts`). At `2ca70dc` no misattribution remains: the finding's

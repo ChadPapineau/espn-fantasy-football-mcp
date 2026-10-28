@@ -724,6 +724,88 @@ rulings supersede the older text they name.
 | R8-4 (F8, division winners first) | The owner confirmed that the league's division winners take the top seeds. The shipped chain, division winners first whenever a league has more than one division under ESPN's rule reading, is right for every observed league. The owner's league (`playoffSeedingRuleBy` 0, two divisions, division winners first) refutes the hypothesis that 0 means "by record". E3's `division_rule` stays as built: the record-only answer is shown as the stated alternative | none (§B8 stands) |
 | R8-5 (ledger) | `trade-locked-week-counted`, `store-future-stamped-rows-block` and `crosswalk-unpaired-joins-silent` are closed as fixed, verified at the gate's third and fourth runs. `ci-default-branch-controls-inert` is closed by the Stage D merge of `build/phase-1` into `main` and does not block the gate before it. R7-2 and R7-6 stand | the orchestrator's ledger |
 
+## B9 — what ruling R8-3 built (Stage C, 2026-10-28)
+
+These are not rulings. They record how ruling R8-3 was carried out (commit `cb2bcc7`), each clause with
+tests that fail on the code at `f41e810`. What stays open is in `docs/evals/stage-c-backlog.md`
+("Ruled R8-3").
+
+- **The universe carries ESPN's position** · R8-3 clause 4 · `src/sources/news/match.ts`
+  `universeFromEspnPlayers` and `UNIVERSE_SQL` read `ds_players.position_id` into
+  `NewsUniversePlayer.position_id` (left out when unknown, as an unknown share is); `source.ts`
+  `universePlayerOf` carries it through the run's temp file; `ds_news_players.espn_id` names it, and
+  `percent_owned`, among its sources. No column changed.
+- **Two readings of the cues** · clauses 2 and 3; plan 07 D6 · `teams.ts`: each mention also carries
+  `shared`, the reading a shared name's holders are told apart with, over closed lists the tests hold
+  word for word: the old words (against, vs, vs., versus, facing; "`<team>` matchup"), `RESULT_CUES`
+  (26: "win over", "loss to", "lost to", "beat", "fell to", "past", "matchup with" …; no cue before
+  the team's possessive, as in "beats the Browns' sack record"), `PLAY_CUES` (36: "sacks", "intercepts",
+  "picks off", "brought down", "torches" …) and, between two teams only, `GAME_CUES` (those, and
+  "host", "visit", "face"). "at", "tops", "visits" and "faces" alone stay no cue: each can stand before
+  the subject's own team. A name one universe player holds keeps the old reading (`cue`, `pair`).
+- **A team named loosely is never evidence FOR a holder** · clause 2 · `match.ts` `sharedHolder`:
+  `full_name_team` on a shared name needs a team written next to it or tied to it by a roster move.
+  A game's teams and a loosely named team rule holders out; they never raise one, nor support a
+  holder left by elimination ("Browns vs. Bengals: Justin Jefferson records two sacks" gets no ref;
+  it gave the Browns LB 0.95). A loosely named team that rules no holder out leaves the item to
+  prominence as before: choice 5 blocks only on a namesake's team, and choice 3's exclusion keeps a
+  traded star's own news from being blocked by the team he joined.
+- **Positions** · clause 4, choice 6(c) · `src/sources/news/positions.ts` (new). A closed vocabulary of 79
+  forms (abbreviations in capitals, words in any case) maps each to the ESPN ids a player it describes
+  may carry: DL words DT or DE, edge and linebacker words DE or LB, defensive-back words CB or S,
+  "defender" any defender, offensive-line words none. It is read next to the name (right before it,
+  a closing appositive, parentheses) or in a sentence describing the subject ("| The Browns
+  linebacker led the team.", "…: Ravens QB dealing with …"). The subject must be the last person named
+  before that sentence, and the sentence must name no one after it; "safety", "edge" and "kicker" are
+  never read there. A written position rules out every holder of another position and is the
+  holder's own evidence. Several must all fit; one that several holders fit picks none. A name
+  written several times in one item is decided once, over all its evidence.
+- **The bare surname follows the same rules** · clauses 2 and 4 · a surname several universe players
+  share (302 of 1,604) takes a ref only from a team written next to it or tied to it by a move. A
+  position filters its sharers, and a sharer who outshines the one left and is not ruled out blocks
+  him. "Browns LB Jefferson" is the Browns LB's. "Cleveland's Jefferson", "Browns WR Jefferson" and
+  "Jefferson: Questionable for Vikings" get no ref. "Ravens QB Jackson" is the Ravens QB's (it had none).
+- **No single holder: no ref, counted** · clause 5; plan 07 D6 · `PlayerMatcher.matchItem` returns
+  `unresolved`. The news build counts `unmatched` (kept items with no ref) and `unresolved` (kept items
+  a shared name was left out of), and the publish step returns both as warnings (`eff refresh news`).
+  Every item is stored and listed by `espn_get_news` as before.
+- **The residual** · clause 6 · no team of a holder's, no position, no cue: the prominent holder at
+  `full_name` (0.80), never 0.95.
+- **Unique names are matched as before.** A one-holder name takes the code path it took, with the
+  old cue reading; a property holds that R8-3's words leave a unique name's ref as a neutral word does.
+  Over the 219 recorded and gate titles the matcher's output changed on 48, none of them for a unique
+  name. Of the 71 labelled real titles two changed, both Lamar Jackson items: "Sources: Ravens QB
+  Jackson has ankle sprain …" gains his surname ref, and "Lamar Jackson injury update: Ravens QB …" drops
+  from `full_name_team` to `full_name`.
+- **Expectations R8-3 changed** (`tests/sources/news/match-universe.test.ts`; none weakened, each
+  commented where it stands): a cue now names what was a loose mention, so the star takes his own
+  item — "…in a win over the Browns." and "…27-20 win over the Browns." (the Vikings WR), "Byron Young:
+  Records two sacks in win over Eagles" (the Rams DE), "Marcus Harris: … in loss to Chiefs" (the Titans
+  CB), "Quiet in loss | … loss to the Browns.", "Torches Browns' secondary", "… matchup with Cleveland."
+  (the WR), "Michael Carter: Gets more work in loss to Eagles" (the Titans RB), and the synthetic "Sam
+  Twin: Out in loss to Dolphins" (the Bills holder), each no ref before; a written position decides —
+  "Browns LB Justin Jefferson: Records sack" (the LB at 0.95), "Chiefs DT Marcus Harris: Records sack"
+  (the Chiefs DT), "Bengals CB Lamar Jackson: Signed to practice squad" and "Bengals sign CB Lamar
+  Jackson" (the free-agent CB at 0.80), each no ref before; a loose team no longer raises —
+  "Lamar Jackson: Ravens vs. Steelers moved to Monday", "… the Ravens visit the Bengals Sunday." and
+  "Michael Carter II: … in the Eagles' win." drop from `full_name_team` to `full_name`; and "Browns vs.
+  Bengals: Justin Jefferson records two sacks" goes from the Browns LB at 0.95 to no ref. The choice-6
+  test keeps its blocking rule with the attached team alone ("Cleveland's Justin Jefferson", and two
+  more). In `tests/cli/refresh.test.ts` the refresh wiring's universe carries the row's
+  `position_id`: clause 4 joins it.
+- **Tests** · `tests/sources/news/match-r83.test.ts` (each clause; every title of the gate's four
+  batteries with its label; fast-check properties: an item whose evidence points to one holder never
+  goes to another, also run over all 21,600 such items while building, and an item with no evidence
+  follows clause 6), `positions.test.ts`, `source.test.ts`, `match-universe.test.ts`. Against the code
+  at `f41e810`, 51 of the 111 tests of those four files fail: 29 of the 34 in `match-r83.test.ts` (the
+  five that pass hold choices 3–5, the measured scope and two controls as built), all 10 of
+  `positions.test.ts`, the 3 new source tests and the 9 changed above; so does the refresh wiring's
+  universe test. The full unit suite passes (11,724 tests) and the coverage gate holds. The gate's first
+  battery had 10 misattributions and 20 right refs; it now has none and 34, plus the open item below.
+- **Open** · one battery title still reaches the star by the ruled evidence: "Lamar Jackson: Signs
+  with Ravens practice squad" (the Ravens QB at 0.95; choice 3: a roster move to his own team ties it to
+  him). The backlog lists it with the options.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
