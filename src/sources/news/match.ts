@@ -24,21 +24,28 @@
 // evidence that picks one holder of a shared full name, per occurrence of the name:
 //   1. its spelling — a generational suffix written after it ("Michael Carter II", "Byron Murphy
 //      Jr.") keeps only the holders ESPN spells with that suffix (when one does);
-//   2. ruled out — in the item's subject (its first full name), a holder on a team named only as
-//      the opponent is not him ("Questionable for Browns matchup"), nor is a free agent (no games, no
-//      opponent); a cue is about the subject, so it rules no one out for the other names an item
-//      holds. Ruling out only removes: a holder left without evidence of his own never takes the
-//      name from a ruled-out holder who outshines him (no cue tells "Bills vs. Ravens: Lamar Jackson
-//      limited" from a namesake's own news against the Ravens), and a cue that contradicts every
-//      holder is no evidence at all;
+//   2. ruled out — in the item's subject (its first full name): a GAME the item names ("Bills vs.
+//      Ravens", "the Bengals' game versus the Vikings" — teams.ts `pair`) is his, so a holder whose
+//      team does not play in it is not him, nor is a free agent; a team a cue word names as the
+//      opponent ("against the Ravens", "vs. Browns") is not his team, nor is he a free agent (no
+//      games, no opponent); "<team> matchup" names his own team's game as often as his opponent's,
+//      so it rules out only while it leaves a holder. A cue is about the subject, so it rules no
+//      one out for the other names an item holds. Ruling out only removes: a holder left without
+//      evidence of his own never takes the name from a ruled-out holder who outshines him;
 //   3. attached — a team written next to the name (teams.ts `attachedTeams`: "Vikings WR Justin
-//      Jefferson", "Sam Twin, Dolphins:") is his own;
+//      Jefferson", "Sam Twin, Dolphins:"), or the team of a roster move the item states (`movedTeams`:
+//      "Bengals sign CB Lamar Jackson", "…: Signs with Bengals"), is his own, so a holder on another
+//      team is not him;
 //   4. prominence — a holder owned in at least PROMINENT_OWNED % of ESPN leagues and
 //      PROMINENCE_RATIO times as many as each other holder.
-// One holder left after 1–2 takes the name (2's guard permitting). Else an attached holder takes it — past a prominent one
-// only when it is the prominent one himself (a namesake's team attached beside a star's name blocks
-// it: no ref, never the wrong one). Else the prominent holder takes it unless another holder's team
-// is named anywhere in the item (his own news, or the star facing his team: no ref). Else no one.
+// Evidence that contradicts every holder gives the name to no one (fail safe: the item is about a
+// holder the universe places elsewhere, or about no holder — "Lamar Jackson: Intercepts a pass
+// against the Ravens", "Lamar Jackson, Bengals: Signed to practice squad" went to the Ravens QB).
+// One holder left after 1–3 takes the name (2's guard permitting). Else an attached holder takes it —
+// past a prominent one only when it is the prominent one himself (a namesake's team attached beside a
+// star's name blocks it: no ref, never the wrong one). Else the prominent holder takes it unless
+// another holder's team is named anywhere in the item (his own news, or the star facing his team:
+// no ref). Else no one.
 // A surname standing alone that a full name in the item ends with is that person ("Justin Jefferson:
 // … | Jefferson caught …"): never a last_name_team ref to someone else. And a bare surname is not the
 // one player of it on a team named loosely when another player of that surname, ESPN-owned
@@ -51,7 +58,7 @@ import { mergeName, NAME_SUFFIXES } from "../../domain/crosswalk/normalize.js";
 import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
 import { sanitizeText } from "../../domain/league/types.js";
 import type { NewsMatchMethod } from "../../store/datasets/derive.js";
-import { attachedTeams, TEAM_WORDS, teamMentions } from "./teams.js";
+import { attachedTeams, movedTeams, TEAM_WORDS, teamMentions } from "./teams.js";
 
 /** One player of the ESPN universe the matcher reads (ds_players + the crosswalk's gsis id). */
 export interface NewsUniversePlayer {
@@ -330,25 +337,50 @@ function prominentOf<P extends NewsUniversePlayer>(holders: readonly P[]): P | n
 }
 
 /**
+ * What the item says of its subject's team (the subject's occurrence only — a cue is about him):
+ * `games`, the teams of the games it names ("Bills vs. Ravens": he plays in one of them); `strong`,
+ * the teams a cue word before them names as his opponent ("against the Ravens"); `weak`, those
+ * "<team> matchup" names, as often his own team's game as his opponent's.
+ */
+interface SubjectCues {
+  readonly games: ReadonlySet<NflTeam>;
+  readonly strong: ReadonlySet<NflTeam>;
+  readonly weak: ReadonlySet<NflTeam>;
+}
+
+/**
  * Which holder of a full name several universe players share this occurrence is, or null (the
  * header's rules): spelling, then ruled out, then attached, then prominence. A team named loosely
  * (`named`: anywhere in the item, cue or not) never picks a namesake; it only blocks a prominent one.
  *
- * Ruling out (the item's subject, an opponent named): a holder on that team is not him, nor is a
- * free agent — he plays no games, so an item naming its subject's opponent is not about him. Ruling
- * out only REMOVES: a holder left without evidence of his own (an attached team) never takes a name
- * from a ruled-out holder who outshines him — "Bills vs. Ravens: Lamar Jackson limited" and "…
- * Ravens matchup" ruled the Ravens QB out by a cue on his own team, and the 0.11 %-owned free-agent
- * namesake took his news by elimination; "Bengals vs. Vikings: Justin Jefferson questionable" gave
- * the Vikings WR's to the Browns LB (no cue can tell such a headline from the namesake's own news
- * against the star's team: no ref, never the wrong one). A cue that contradicts every holder is no
- * evidence about who he is, and prominence decides as without one (Stage C finding
- * news-match-universe-homonyms, attempt 3).
+ * Ruling out (the item's subject only): a game the item names leaves out every holder whose team
+ * does not play in it, a free agent included (he plays no games); an opponent a cue word names
+ * leaves out the holder on that team, and a free agent. Ruling out only REMOVES: a holder left
+ * without evidence of his own (a team attached to the name, or a game the item names that his team
+ * plays in) never takes a name from a ruled-out holder who outshines him — "Bills vs. Ravens: Lamar
+ * Jackson limited" once handed the Ravens QB's news to the 0.11 %-owned free-agent CB by
+ * elimination (attempt 3). A game names both teams of it, so "Bengals vs. Vikings: Justin Jefferson
+ * questionable" is the Vikings WR's — the Browns LB plays in no such game (attempt 4: read as an
+ * opponent cue, it ruled the WR out of his own game and gave no ref).
+ *
+ * When the evidence contradicts EVERY holder, no one takes the name (fail safe: the item is about a
+ * holder the universe places elsewhere — a namesake since signed, a stale team — or no holder at all;
+ * never the wrong one): "Lamar Jackson: Intercepts a pass against the Ravens" contradicts the Ravens
+ * QB (his own team as the opponent) and the free-agent CB alike, and went to the QB by prominence
+ * (attempt 4). The one exception is "<team> matchup" alone: it names the subject's own team's game
+ * as often as his opponent's ("Expected to start in Ravens matchup"), so a weak cue that would leave
+ * no holder is no evidence, and prominence decides as without it.
+ *
+ * A team attached to the name is his own: a holder on another team is not him, so a star whose team
+ * it is not never takes the name ("Lamar Jackson, Bengals: Signed to practice squad", "Bengals CB
+ * Lamar Jackson" went to the Ravens QB at 0.80 — attempt 4), and a namesake on it takes the name past
+ * a prominent holder only when that holder is ruled out too (a namesake's team attached beside a
+ * star's name blocks the star: no ref, never the wrong one).
  */
 function sharedHolder(
   holders: readonly Held[],
   ev: Evidence,
-  opponentOnly: ReadonlySet<NflTeam>,
+  cues: SubjectCues,
   named: ReadonlySet<NflTeam>,
 ): Held | null {
   let cands = holders;
@@ -357,17 +389,36 @@ function sharedHolder(
     if (spelled.length > 0) cands = spelled;
   }
   const attached = (p: Held): boolean => p.team !== null && ev.attached.has(p.team);
-  let ruledOut: readonly Held[] = [];
-  if (ev.subject && opponentOnly.size > 0) {
-    const kept = cands.filter((p) => attached(p) || (p.team !== null && !opponentOnly.has(p.team)));
+  const inGame = (p: Held): boolean => ev.subject && p.team !== null && cues.games.has(p.team);
+  /** Evidence of his own: his team written next to the name, or playing in a game the item names. */
+  const own = (p: Held): boolean => attached(p) || inGame(p);
+  let ruledOut: Held[] = [];
+  if (ev.subject) {
+    const hit = (teams: ReadonlySet<NflTeam>) => (p: Held) =>
+      teams.size > 0 && !own(p) && (p.team === null || teams.has(p.team));
+    const outOfGame = (p: Held): boolean => cues.games.size > 0 && !own(p);
+    const strongOut = hit(cues.strong);
+    const out = (p: Held): boolean => outOfGame(p) || strongOut(p);
+    ruledOut = cands.filter(out);
+    cands = cands.filter((p) => !out(p));
+    // a weak cue rules out only while it leaves someone
+    const weakOut = hit(cues.weak);
+    const kept = cands.filter((p) => !weakOut(p));
     if (kept.length > 0) {
-      ruledOut = cands.filter((p) => !kept.includes(p));
+      ruledOut = [...ruledOut, ...cands.filter(weakOut)];
       cands = kept;
     }
   }
-  /** A pick with no evidence of its own, outshone by a holder the cue ruled out: no one. */
-  const unsupported = (p: Held): boolean => !attached(p) && ruledOut.some((x) => outshines(x, p));
-  if (cands.length <= 1) {
+  if (ev.attached.size > 0 && !cands.some(attached)) {
+    // a team written next to the name that is no candidate's: he is none of the candidates on
+    // another team — at most a free agent since signed (who takes it only past no one he is outshone by)
+    ruledOut = [...ruledOut, ...cands.filter((p) => p.team !== null)];
+    cands = cands.filter((p) => p.team === null);
+  }
+  if (cands.length === 0) return null;
+  /** A pick with no evidence of its own, outshone by a holder the evidence ruled out: no one. */
+  const unsupported = (p: Held): boolean => !own(p) && ruledOut.some((x) => outshines(x, p));
+  if (cands.length === 1) {
     const only = cands[0];
     return only === undefined || unsupported(only) ? null : only;
   }
@@ -486,9 +537,21 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         !surnames.has(mergeName(m.words) ?? ""),
     );
     const subject = new Set(mentions.filter((m) => !m.opponent).map((m) => m.team));
-    const opponentOnly = new Set(
-      mentions.filter((m) => m.opponent && !subject.has(m.team)).map((m) => m.team),
-    );
+    // a game the item names: both its teams kept (a mention read as a name's word is no team)
+    const kept = new Set(mentions.map((m) => m.start));
+    const inPair = (m: (typeof mentions)[number]): boolean =>
+      m.pair !== null && kept.has(m.pair.start);
+    const opponentOnly = (cue: "before" | "after") =>
+      new Set(
+        mentions
+          .filter((m) => m.cue === cue && !inPair(m) && !subject.has(m.team))
+          .map((m) => m.team),
+      );
+    const cues: SubjectCues = {
+      games: new Set(mentions.filter(inPair).map((m) => m.team)),
+      strong: opponentOnly("before"),
+      weak: opponentOnly("after"),
+    };
     // every team the item names, the subject's or an opponent (a loose mention may be either)
     const named = new Set(mentions.map((m) => m.team));
     const onTeam = (p: NewsUniversePlayer): boolean => p.team !== null && subject.has(p.team);
@@ -497,14 +560,19 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
     const subjectKey = names[0]?.entry.key.join(" ");
     for (const occ of names) {
       const { at, entry } = occ;
-      const attached = attachedTeams(text, mentions, occ.start, occ.end);
+      // his own team as the item ties it to the name: written next to it, or the team of a roster
+      // move it states ("Bengals sign CB Lamar Jackson", "…: Signs with Bengals")
+      const attached = new Set([
+        ...attachedTeams(text, mentions, occ.start, occ.end),
+        ...movedTeams(text, mentions, occ.start, occ.end),
+      ]);
       const p =
         entry.players.length === 1
           ? entry.players[0]
           : sharedHolder(
               entry.players,
               { suffix: occ.suffix, attached, subject: entry.key.join(" ") === subjectKey },
-              opponentOnly,
+              cues,
               named,
             );
       if (p === undefined || p === null) continue;

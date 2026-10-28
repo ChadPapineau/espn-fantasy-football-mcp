@@ -16,6 +16,7 @@ import { playersRows } from "../../../src/sources/espn_season/index.js";
 import {
   attachedTeams,
   buildPlayerMatcher,
+  movedTeams,
   MATCH_CONFIDENCE,
   PROMINENCE_RATIO,
   PROMINENT_OWNED,
@@ -98,11 +99,10 @@ describe("a shared full name (news-match-universe-homonyms)", () => {
     // headline ("Bengals vs. Vikings: Justin Jefferson questionable", below): ruling the star out
     // never hands his name to the namesake by elimination (attempt 3: it did)
     expect(refs("Justin Jefferson: Records 10 tackles against Vikings")).toEqual([]);
-    // a free agent plays no games: an item naming its subject's opponent is not about him, so the
-    // cue contradicts both holders and is no evidence — the star takes his name
-    expect(refs("Lamar Jackson: Intercepts a pass against the Ravens")).toEqual([
-      [QB_LAMAR, "full_name"],
-    ]);
+    // the cue contradicts both holders — the Ravens QB (his own team as the opponent) and the
+    // free-agent CB (no games): fail safe, no one takes the name. Before (attempt 4's gate) the star
+    // took it by prominence, though the item is a defender's play against the star's team
+    expect(refs("Lamar Jackson: Intercepts a pass against the Ravens")).toEqual([]);
     // the namesake's team attached to the name is his own evidence: it still decides for him
     expect(refs("Browns LB Justin Jefferson: Records 10 tackles against Vikings")).toEqual([
       [LB_JEFFERSON, "full_name_team"],
@@ -122,13 +122,14 @@ describe("a shared full name (news-match-universe-homonyms)", () => {
       "Steelers facing the Ravens: Lamar Jackson questionable",
     ])
       expect(refs(title), title).toEqual([[QB_LAMAR, "full_name"]]);
-    // each went to the Browns LB (the second at 0.95): a team holder left by elimination never takes
-    // the name of the star the cue ruled out — no ref, never the wrong one
-    for (const title of [
-      "Bengals vs. Vikings: Justin Jefferson questionable",
-      "Justin Jefferson: Vikings matchup on tap for Browns",
-    ])
-      expect(refs(title), title).toEqual([]);
+    // went to the Browns LB at 0.95: a team holder left by elimination never takes the name of the
+    // star a cue ruled out — no ref, never the wrong one
+    expect(refs("Justin Jefferson: Vikings matchup on tap for Browns")).toEqual([]);
+    // went to the Browns LB at 0.80, then (attempt 3) to no one: "Bengals vs. Vikings" names a game,
+    // not the subject's opponent — he plays in it, and of the two holders only the Vikings WR does
+    expect(refs("Bengals vs. Vikings: Justin Jefferson questionable")).toEqual([
+      [WR_JEFFERSON, "full_name"],
+    ]);
     // controls: a cue on another team still rules the namesake out for the star
     expect(refs("Lamar Jackson: Questionable against Bengals")).toEqual([[QB_LAMAR, "full_name"]]);
     expect(refs("Michael Carter to see more work against Eagles")).toEqual([
@@ -199,6 +200,173 @@ describe("a shared full name (news-match-universe-homonyms)", () => {
     expect(refs("Michael Carter: Limited in practice")).toEqual([]);
     // a team that is neither one's: no evidence either way
     expect(refs("Michael Carter: Limited ahead of Bears game")).toEqual([]);
+  });
+});
+
+describe("the final gate's items (news-match-universe-homonyms, attempt 4)", () => {
+  it("a team attached to the name that is not the star's never gives him the name", () => {
+    // each went to the 99.87 %-owned Ravens QB at 0.80; the namesake is the free-agent CB, whom
+    // the Bengals signed (the universe still lists him as a free agent): no ref, never the wrong one
+    for (const title of [
+      "Lamar Jackson, Bengals: Signed to practice squad",
+      "Bengals CB Lamar Jackson: Signed to practice squad",
+      "Lamar Jackson, Bengals: Questionable against Steelers",
+    ])
+      expect(refs(title), title).toEqual([]);
+    // controls: the star's own team attached decides for him, whatever else the item names
+    expect(refs("Ravens' Lamar Jackson: Expected to play against Bengals")).toEqual([
+      [QB_LAMAR, "full_name_team"],
+    ]);
+    expect(refs("Lamar Jackson (Ravens): Limited")).toEqual([[QB_LAMAR, "full_name_team"]]);
+  });
+
+  it("an opponent cue on the star's own team with no other holder left: no ref, never the star", () => {
+    expect(refs("Lamar Jackson: Intercepts a pass against the Ravens")).toEqual([]);
+    expect(refs("Lamar Jackson: Questionable vs. Ravens, Bengals")).toEqual([]);
+    // "<team> matchup" names his own team's game as often as the opponent's: no evidence then
+    expect(refs("Lamar Jackson: Expected to start in Ravens matchup")).toEqual([
+      [QB_LAMAR, "full_name"],
+    ]);
+  });
+
+  it("a game the item names: its subject plays in it, so only a holder on one of its teams takes the name", () => {
+    // each matched no one: the cue word between two teams was read as the subject's opponent
+    for (const title of [
+      "Bengals vs. Vikings: Justin Jefferson questionable",
+      "Justin Jefferson: Questionable | Jefferson (hamstring) is questionable ahead of the Bengals' game versus the Vikings.",
+    ])
+      expect(refs(title), title).toEqual([[WR_JEFFERSON, "full_name"]]);
+    for (const title of [
+      "Bills vs. Ravens: Lamar Jackson limited Wednesday",
+      "Steelers facing the Ravens: Lamar Jackson questionable",
+      "Bengals vs. Ravens: Lamar Jackson questionable | Jackson (ankle) was limited.",
+    ])
+      expect(refs(title), title).toEqual([[QB_LAMAR, "full_name"]]);
+    expect(refs("Lamar Jackson: Ravens vs. Steelers moved to Monday")).toEqual([
+      [QB_LAMAR, "full_name_team"],
+    ]);
+    // the namesake's game: his, never the star's
+    expect(refs("Browns vs. Bengals: Justin Jefferson records two sacks")).toEqual([
+      [LB_JEFFERSON, "full_name_team"],
+    ]);
+    // both holders' teams in the game: it may be either — no ref, never the wrong one
+    for (const title of [
+      "Vikings vs. Browns: Justin Jefferson questionable",
+      "Browns vs. Vikings: Justin Jefferson questionable",
+      "Eagles vs. Titans: Michael Carter to see more work",
+      "Michael Carter: Limited | Carter (ankle) was limited ahead of the Eagles' game against the Titans.",
+    ])
+      expect(refs(title), title).toEqual([]);
+    // a game neither holder plays in: neither is the subject
+    expect(refs("Bills vs. Dolphins: Lamar Jackson questionable")).toEqual([]);
+  });
+
+  it("property: a game between the star's team and another names the star, never a namesake elsewhere", () => {
+    const others = ["Bills", "Bengals", "Steelers", "Chiefs", "Lions", "Eagles", "Packers"];
+    const joins = ["vs.", "vs", "versus", "against", "facing", "facing the", "' game versus the"];
+    fc.assert(
+      fc.property(
+        fc.constantFrom(
+          { name: "Lamar Jackson", team: "Ravens", star: QB_LAMAR },
+          { name: "Justin Jefferson", team: "Vikings", star: WR_JEFFERSON },
+        ),
+        fc.constantFrom(...others),
+        fc.constantFrom(...joins),
+        fc.boolean(),
+        fc.constantFrom("questionable", "limited Wednesday", "a full go", "out"),
+        (s, other, join, starFirst, what) => {
+          const [a, b] = starFirst ? [s.team, other] : [other, s.team];
+          const game = join.startsWith("'") ? `${a}${join} ${b}` : `${a} ${join} ${b}`;
+          const got = m.match(`${game}: ${s.name} ${what}`).map((r) => r.espn_id);
+          expect(got, game).toEqual([s.star]);
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
+});
+
+describe("a roster move ties its team to the name, like a team written next to it (attempt 4)", () => {
+  it("a namesake's signing, waiver or practice-squad move never goes to the star", () => {
+    // each went to the Ravens QB at 0.80 (the verifier's transaction titles)
+    for (const title of [
+      "Lamar Jackson: Signs with Bengals",
+      "Bengals sign CB Lamar Jackson",
+      "Lamar Jackson: Waived by Bengals | The Bengals waived Jackson on Tuesday.",
+      "Lamar Jackson: Lands on Bengals practice squad",
+      "Lamar Jackson, signed to the Bengals' practice squad",
+    ])
+      expect(refs(title), title).toEqual([]);
+    // the star's own team making the move is his
+    expect(refs("Ravens activate QB Lamar Jackson")).toEqual([[QB_LAMAR, "full_name_team"]]);
+    expect(refs("Lamar Jackson: Signs with Ravens")).toEqual([[QB_LAMAR, "full_name_team"]]);
+    // a namesake on the moving team, beside a star: blocks the star (no ref, never the wrong one)
+    expect(refs("Justin Jefferson: Released by Browns")).toEqual([]);
+  });
+
+  it("a trade or any other verb ties no team: the star's news stays his", () => {
+    for (const title of [
+      "Lamar Jackson: Traded to Bengals in blockbuster",
+      "Lamar Jackson: Throws three TDs in win over Bengals",
+      "Lamar Jackson: Cut through Bengals defense",
+    ])
+      expect(refs(title), title).toEqual([[QB_LAMAR, "full_name"]]);
+  });
+
+  it("movedTeams: the move's team, before the name (a team's move) or after it (his clause's)", () => {
+    const moved = (text: string, name: string) => {
+      const start = text.indexOf(name);
+      return [...movedTeams(text, teamMentions(text), start, start + name.length)].sort();
+    };
+    expect(moved("Bengals sign CB Lamar Jackson", "Lamar Jackson")).toEqual(["CIN"]);
+    expect(moved("Browns waive linebacker Justin Jefferson", "Justin Jefferson")).toEqual(["CLE"]);
+    expect(moved("Lamar Jackson: Signs with Bengals", "Lamar Jackson")).toEqual(["CIN"]);
+    expect(moved("Lamar Jackson was claimed off waivers by the Bengals", "Lamar Jackson")).toEqual([
+      "CIN",
+    ]);
+    for (const text of [
+      "Lamar Jackson: Traded to Bengals",
+      "Lamar Jackson torches Bengals",
+      "Bengals sack Lamar Jackson",
+      "Lamar Jackson: Signs autographs before Bengals game",
+    ])
+      expect(moved(text, "Lamar Jackson"), text).toEqual([]);
+  });
+});
+
+describe("teamMentions: games and cue kinds", () => {
+  const pairs = (text: string) =>
+    teamMentions(text).map((t) => [t.team, t.cue, t.pair?.team ?? null]);
+  it("a cue word between two teams names a game: both mentions carry the other team", () => {
+    expect(pairs("Bengals vs. Vikings: Justin Jefferson questionable")).toEqual([
+      ["CIN", null, "MIN"],
+      ["MIN", "before", "CIN"],
+    ]);
+    expect(pairs("ahead of the Bengals' game versus the Vikings")).toEqual([
+      ["CIN", null, "MIN"],
+      ["MIN", "before", "CIN"],
+    ]);
+    expect(pairs("Bills vs Dolphins; Bears versus Packers; facing Detroit")).toEqual([
+      ["BUF", null, "MIA"],
+      ["MIA", "before", "BUF"],
+      ["CHI", null, "GB"],
+      ["GB", "before", "CHI"],
+      ["DET", "before", null],
+    ]);
+  });
+  it("anything else between them is no game: a verb, a clause, a name, the same team twice", () => {
+    for (const text of [
+      "Vikings host the Browns",
+      "Browns' matchup with Steelers",
+      "Win over Browns; against the Vikings",
+      "Ravens QB Lamar Jackson vs. Bengals",
+      "Ravens vs. Ravens",
+    ])
+      expect(
+        teamMentions(text).every((t) => t.pair === null),
+        text,
+      ).toBe(true);
+    expect(pairs("Questionable for Browns matchup")).toEqual([["CLE", "after", null]]);
   });
 });
 

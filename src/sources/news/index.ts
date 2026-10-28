@@ -49,6 +49,7 @@ export {
 export {
   ATTACH_WORDS,
   attachedTeams,
+  movedTeams,
   TEAM_HOMES,
   TEAM_NICKNAMES,
   TEAM_WORDS,

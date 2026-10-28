@@ -13,7 +13,11 @@
 // so the matcher never reads one as evidence FOR a namesake (match.ts). Only a team written next to
 // the name is (`attachedTeams`: "Vikings WR Justin Jefferson", "Vikings' Justin Jefferson", "Justin
 // Jefferson, Vikings:", "Justin Jefferson (Vikings)") — the form a writer uses for the player's own
-// team, and the one form no cue word can turn into his opponent.
+// team, and the one form no cue word can turn into his opponent — and the team of a roster move
+// the item states (`movedTeams`: "Bengals sign CB Lamar Jackson", "Lamar Jackson: Waived by
+// Bengals"). A cue word BETWEEN two teams names a game ("Bills vs. Ravens"): it says the subject
+// plays in it, never which side he is on (`pair`; Stage C remediation news-match-universe-homonyms,
+// attempt 4).
 import type { NflTeam } from "../../config/schema.js";
 
 /** Nicknames and their common short forms. */
@@ -69,6 +73,21 @@ export interface TeamMention {
    * "Browns' matchup" — is the team's own).
    */
   readonly opponent: boolean;
+  /**
+   * Which cue made it the opponent: a cue word `before` it ("against the Ravens") — said of the
+   * item's subject — or "matchup" `after` it ("Ravens matchup"), which as often names his own
+   * team's game as his opponent ("Expected to start in Ravens matchup"); null without a cue.
+   */
+  readonly cue: "before" | "after" | null;
+  /**
+   * The other team of a GAME the item names — "Bills vs. Ravens", "Steelers facing the Ravens",
+   * "the Bengals' game versus the Vikings": a cue word between two teams (a possessive and a word
+   * like "game" may stand before the cue) relates the teams to each other, not the subject to one of
+   * them, so it says only that the item's subject plays in that game. Set on both mentions; null
+   * otherwise. (Stage C finding news-match-universe-homonyms, attempt 4: read as an opponent cue,
+   * "Bengals vs. Vikings: Justin Jefferson questionable" ruled the Vikings WR out of his own game.)
+   */
+  readonly pair: { readonly team: NflTeam; readonly start: number } | null;
 }
 
 /** A cue word ending the text before a mention (with an optional "the"). */
@@ -77,6 +96,13 @@ const OPPONENT_BEFORE_RE = /(?<![\p{L}\p{N}])(?:against|vs\.?|versus|facing)\s+(
 const OPPONENT_AFTER_RE = /^\s+matchups?(?![\p{L}\p{N}])/iu;
 /** The longest cue before a mention ("against the " plus slack): the look-behind window. */
 const CUE_WINDOW = 24;
+/**
+ * The whole text between two teams that names a game between them: an optional possessive, an
+ * optional game word, then the cue word and an optional "the" ("Bills vs. ", "Steelers facing the ",
+ * "Bengals' game versus the "). Anything else between them — a name, a verb, a clause — is no pair.
+ */
+const PAIR_GAP_RE =
+  /^(?:['’ʼ]s?)?(?:\s+(?:game|matchup|contest|meeting|clash|showdown|tilt))?\s+(?:against|vs\.?|versus|facing)\s+(?:the\s+)?$/iu;
 
 /** Every team mention of a (sanitised, case-preserved) text, in text order. */
 export function teamMentions(text: string): readonly TeamMention[] {
@@ -89,12 +115,26 @@ export function teamMentions(text: string): readonly TeamMention[] {
     const end = start + words.length;
     const before = text.slice(Math.max(0, start - CUE_WINDOW), start);
     const after = text.slice(end, end + CUE_WINDOW);
+    const cue = OPPONENT_BEFORE_RE.test(before)
+      ? "before"
+      : OPPONENT_AFTER_RE.test(after)
+        ? "after"
+        : null;
+    const prev = out[out.length - 1];
+    const pairs =
+      cue === "before" &&
+      prev !== undefined &&
+      prev.team !== team &&
+      PAIR_GAP_RE.test(text.slice(prev.end, start));
+    if (pairs) out[out.length - 1] = { ...prev, pair: { team, start } };
     out.push({
       team,
       words,
       start,
       end,
-      opponent: OPPONENT_BEFORE_RE.test(before) || OPPONENT_AFTER_RE.test(after),
+      opponent: cue !== null,
+      cue,
+      pair: pairs ? { team: prev.team, start: prev.start } : null,
     });
   }
   return out;
@@ -163,6 +203,48 @@ export function attachedTeams(
         (PAREN_GAP_RE.test(gap) && AFTER_PAREN_RE.test(after))
       )
         out.add(m.team);
+    }
+  }
+  return out;
+}
+
+/**
+ * A roster move a team makes, before the player it names: "Bengals sign CB Lamar Jackson", "Browns
+ * waive LB Justin Jefferson" (role words may stand between the verb and the name).
+ */
+const TEAM_MOVES_RE = new RegExp(
+  `^\\s+(?:re-?)?(?:sign|signs|signed|waive|waives|waived|release|releases|released|claim|claims|claimed|cut|cuts|promote|promotes|promoted|elevate|elevates|elevated|activate|activates|activated)(?:\\s+(?:${ATTACH_ALT}))*\\s+$`,
+  "iu",
+);
+/**
+ * The roster move a player's clause states, before the team it names: "Lamar Jackson: Signs with
+ * Bengals", "…: Waived by Bengals", "…: Lands on Bengals practice squad", "…, signed to the Browns'
+ * practice squad". Never a trade ("traded to", "dealt to"): a traded player's team in the universe
+ * is the one he left, and his news must not be blocked by it.
+ */
+const PLAYER_MOVE_RE =
+  /^\s*[:,]?\s*(?:(?:is|was|has\s+been|gets|got)\s+)?(?:re-?)?(?:signs?|signed|inks?|inked|joins?|joined|waived|released|cut|claimed(?:\s+off\s+waivers)?|promoted|elevated|lands?|landed)\s+(?:(?:with|by|to|on|onto)\s+)?(?:the\s+)?$/iu;
+
+/**
+ * The teams a roster move ties to the name at [start, end): a team that signs, waives, claims or
+ * promotes him ("Bengals sign CB Lamar Jackson") or that his own clause says he signs with, is
+ * waived by or lands on ("Lamar Jackson: Signs with Bengals"). Like an attached team it is his own
+ * (new or last) team — the matcher reads both alike — and a team named any other way is not one.
+ * Stage C finding news-match-universe-homonyms, attempt 4: such a namesake's move went to the star.
+ */
+export function movedTeams(
+  text: string,
+  mentions: readonly TeamMention[],
+  start: number,
+  end: number,
+): ReadonlySet<NflTeam> {
+  const out = new Set<NflTeam>();
+  for (const m of mentions) {
+    if (m.end <= start) {
+      if (start - m.end <= ATTACH_WINDOW && TEAM_MOVES_RE.test(text.slice(m.end, start)))
+        out.add(m.team);
+    } else if (m.start >= end && m.start - end <= ATTACH_WINDOW) {
+      if (PLAYER_MOVE_RE.test(text.slice(end, m.start))) out.add(m.team);
     }
   }
   return out;
