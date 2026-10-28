@@ -25,13 +25,17 @@
 //   1. its spelling — a generational suffix written after it ("Michael Carter II", "Byron Murphy
 //      Jr.") keeps only the holders ESPN spells with that suffix (when one does);
 //   2. ruled out — in the item's subject (its first full name), a holder on a team named only as
-//      the opponent is not him ("Questionable for Browns matchup"); a cue is about the subject, so
-//      it rules no one out for the other names an item holds;
+//      the opponent is not him ("Questionable for Browns matchup"), nor is a free agent (no games, no
+//      opponent); a cue is about the subject, so it rules no one out for the other names an item
+//      holds. Ruling out only removes: a holder left without evidence of his own never takes the
+//      name from a ruled-out holder who outshines him (no cue tells "Bills vs. Ravens: Lamar Jackson
+//      limited" from a namesake's own news against the Ravens), and a cue that contradicts every
+//      holder is no evidence at all;
 //   3. attached — a team written next to the name (teams.ts `attachedTeams`: "Vikings WR Justin
 //      Jefferson", "Sam Twin, Dolphins:") is his own;
 //   4. prominence — a holder owned in at least PROMINENT_OWNED % of ESPN leagues and
 //      PROMINENCE_RATIO times as many as each other holder.
-// One holder left after 1–2 takes the name. Else an attached holder takes it — past a prominent one
+// One holder left after 1–2 takes the name (2's guard permitting). Else an attached holder takes it — past a prominent one
 // only when it is the prominent one himself (a namesake's team attached beside a star's name blocks
 // it: no ref, never the wrong one). Else the prominent holder takes it unless another holder's team
 // is named anywhere in the item (his own news, or the star facing his team: no ref). Else no one.
@@ -329,6 +333,17 @@ function prominentOf<P extends NewsUniversePlayer>(holders: readonly P[]): P | n
  * Which holder of a full name several universe players share this occurrence is, or null (the
  * header's rules): spelling, then ruled out, then attached, then prominence. A team named loosely
  * (`named`: anywhere in the item, cue or not) never picks a namesake; it only blocks a prominent one.
+ *
+ * Ruling out (the item's subject, an opponent named): a holder on that team is not him, nor is a
+ * free agent — he plays no games, so an item naming its subject's opponent is not about him. Ruling
+ * out only REMOVES: a holder left without evidence of his own (an attached team) never takes a name
+ * from a ruled-out holder who outshines him — "Bills vs. Ravens: Lamar Jackson limited" and "…
+ * Ravens matchup" ruled the Ravens QB out by a cue on his own team, and the 0.11 %-owned free-agent
+ * namesake took his news by elimination; "Bengals vs. Vikings: Justin Jefferson questionable" gave
+ * the Vikings WR's to the Browns LB (no cue can tell such a headline from the namesake's own news
+ * against the star's team: no ref, never the wrong one). A cue that contradicts every holder is no
+ * evidence about who he is, and prominence decides as without one (Stage C finding
+ * news-match-universe-homonyms, attempt 3).
  */
 function sharedHolder(
   holders: readonly Held[],
@@ -342,16 +357,27 @@ function sharedHolder(
     if (spelled.length > 0) cands = spelled;
   }
   const attached = (p: Held): boolean => p.team !== null && ev.attached.has(p.team);
-  if (ev.subject)
-    cands = cands.filter((p) => p.team === null || attached(p) || !opponentOnly.has(p.team));
-  if (cands.length <= 1) return cands[0] ?? null;
+  let ruledOut: readonly Held[] = [];
+  if (ev.subject && opponentOnly.size > 0) {
+    const kept = cands.filter((p) => attached(p) || (p.team !== null && !opponentOnly.has(p.team)));
+    if (kept.length > 0) {
+      ruledOut = cands.filter((p) => !kept.includes(p));
+      cands = kept;
+    }
+  }
+  /** A pick with no evidence of its own, outshone by a holder the cue ruled out: no one. */
+  const unsupported = (p: Held): boolean => !attached(p) && ruledOut.some((x) => outshines(x, p));
+  if (cands.length <= 1) {
+    const only = cands[0];
+    return only === undefined || unsupported(only) ? null : only;
+  }
   const top = prominentOf(cands);
   const att = cands.filter(attached);
   if (att.length > 0) {
     const only = att.length === 1 ? att[0] : undefined;
     return only !== undefined && (top === null || only === top) ? only : null;
   }
-  if (top === null) return null;
+  if (top === null || unsupported(top)) return null;
   return cands.some((p) => p !== top && p.team !== null && named.has(p.team)) ? null : top;
 }
 

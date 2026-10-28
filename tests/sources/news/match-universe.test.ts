@@ -91,20 +91,83 @@ describe("a shared full name (news-match-universe-homonyms)", () => {
     );
   });
 
-  it("evidence still decides: a namesake's own team named blocks the star; one facing the star's team is the namesake", () => {
+  it("evidence still decides: a namesake's own team named blocks the star; one facing the star's team gets no ref", () => {
     // only the LB's team is named: his own news or the WR's opponent — no ref, never the wrong one
     expect(refs("Justin Jefferson: Records 10 tackles in Browns win")).toEqual([]);
-    // the item's subject faces the Vikings: not the Vikings WR
-    expect(refs("Justin Jefferson: Records 10 tackles against Vikings")).toEqual([
-      [LB_JEFFERSON, "full_name"],
-    ]);
+    // the subject faces the Vikings: not the Vikings WR — but no cue tells this from the WR's own
+    // headline ("Bengals vs. Vikings: Justin Jefferson questionable", below): ruling the star out
+    // never hands his name to the namesake by elimination (attempt 3: it did)
+    expect(refs("Justin Jefferson: Records 10 tackles against Vikings")).toEqual([]);
+    // a free agent plays no games: an item naming its subject's opponent is not about him, so the
+    // cue contradicts both holders and is no evidence — the star takes his name
     expect(refs("Lamar Jackson: Intercepts a pass against the Ravens")).toEqual([
-      [CB_LAMAR, "full_name"],
+      [QB_LAMAR, "full_name"],
+    ]);
+    // the namesake's team attached to the name is his own evidence: it still decides for him
+    expect(refs("Browns LB Justin Jefferson: Records 10 tackles against Vikings")).toEqual([
+      [LB_JEFFERSON, "full_name_team"],
     ]);
     // the star's own team named with the namesake's: the star
     expect(refs("Vikings WR Justin Jefferson: Questionable vs. Browns")).toEqual([
       [WR_JEFFERSON, "full_name_team"],
     ]);
+  });
+
+  it("a cue on the star's own team never hands his news to a namesake by elimination (attempt 3: the verifier's path)", () => {
+    // each went to the 0.11 %-owned free-agent CB at 0.80: the cue ruled the QB out, and a free
+    // agent could never be ruled out
+    for (const title of [
+      "Bills vs. Ravens: Lamar Jackson limited Wednesday",
+      "Lamar Jackson: Expected to start in Ravens matchup",
+      "Steelers facing the Ravens: Lamar Jackson questionable",
+    ])
+      expect(refs(title), title).toEqual([[QB_LAMAR, "full_name"]]);
+    // each went to the Browns LB (the second at 0.95): a team holder left by elimination never takes
+    // the name of the star the cue ruled out — no ref, never the wrong one
+    for (const title of [
+      "Bengals vs. Vikings: Justin Jefferson questionable",
+      "Justin Jefferson: Vikings matchup on tap for Browns",
+    ])
+      expect(refs(title), title).toEqual([]);
+    // controls: a cue on another team still rules the namesake out for the star
+    expect(refs("Lamar Jackson: Questionable against Bengals")).toEqual([[QB_LAMAR, "full_name"]]);
+    expect(refs("Michael Carter to see more work against Eagles")).toEqual([
+      [RB_CARTER, "full_name"],
+    ]);
+  });
+
+  it("property: whatever cue names the star's own team, his namesake never takes the star's name", () => {
+    const cues = [
+      (t: string) => `against ${t}`,
+      (t: string) => `against the ${t}`,
+      (t: string) => `vs. ${t}`,
+      (t: string) => `vs ${t}`,
+      (t: string) => `versus the ${t}`,
+      (t: string) => `facing the ${t}`,
+      (t: string) => `${t} matchup`,
+    ];
+    const stars = [
+      { name: "Lamar Jackson", team: "Ravens", star: QB_LAMAR, namesake: CB_LAMAR },
+      { name: "Justin Jefferson", team: "Vikings", star: WR_JEFFERSON, namesake: LB_JEFFERSON },
+    ];
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...stars),
+        fc.constantFrom(...cues),
+        fc.constantFrom("before", "after"),
+        fc.constantFrom("limited Wednesday", "questionable", "out for the week", "a full go"),
+        (s, cue, where, what) => {
+          const title =
+            where === "before"
+              ? `Bills ${cue(s.team)}: ${s.name} ${what}`
+              : `${s.name}: ${what} ${cue(s.team)}`;
+          const got = m.match(title).map((r) => r.espn_id);
+          expect(got, title).not.toContain(s.namesake);
+          expect(got.length, title).toBeLessThanOrEqual(1);
+        },
+      ),
+      { numRuns: 200 },
+    );
   });
 
   it("every labelled real title opening with a >= 1 %-owned player's full name refs him", () => {
