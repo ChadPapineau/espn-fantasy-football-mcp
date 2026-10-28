@@ -727,9 +727,10 @@ rulings supersede the older text they name.
 ## B9 — what ruling R8-3 built (Stage C, 2026-10-28)
 
 These are not rulings. They record how ruling R8-3 was carried out (commit `cb2bcc7`), each clause with
-tests that fail on the code at `f41e810`, and how fix round 2 (commit `91a8c1b`, below) answered the
-independent attack on that build. What stays open is in `docs/evals/stage-c-backlog.md` ("Ruled R8-3").
-The bullets fix round 2 changed say so.
+tests that fail on the code at `f41e810`, how fix round 2 (commit `91a8c1b`, below) answered the
+independent attack on that build, and how fix round 3 (commit `c16b9d8`, below) answered the attack on
+fix round 2. What stays open is in `docs/evals/stage-c-backlog.md` ("Ruled R8-3"). The bullets fix
+round 2 changed say so.
 
 - **The universe carries ESPN's position** · R8-3 clause 4 · `src/sources/news/match.ts`
   `universeFromEspnPlayers` and `UNIVERSE_SQL` read `ds_players.position_id` into
@@ -930,6 +931,136 @@ at root, and `tests/sources/news/match-r83-round2.test.ts` holds each one with t
   the Vikings host the Bengals from the stands") rules his namesake out (choice 2). An item naming no
   team and no position is clause 6's residual even when its verbs are the namesake's ("Justin
   Jefferson: Burned for touchdown | The receiver beat him deep." gives the WR 0.80, as accepted).
+
+### Fix round 3 — the independent attack on `7b9572c` (commit `c16b9d8`)
+
+The attack found 16 ways fix round 2 still broke R8-3, or lost what `f41e810` had for no clause's
+sake. Another player's position in a headline topic's clause was read as the subject's. Idioms for a
+team's loss of its own player were read as games once written in capitals, with a dash or before
+"until". "injured" before a name read as a label for the opponent's hit. The lists missed roster
+moves and label forms in some voices, "at" between two teams, and plain variants of play wording. A
+teammate named after the subject took his cue, and a game in a sentence naming no one went to no
+one. Two cue lists had no test. Initials read as positions. On the surname path a written position
+could block its own holder, the surname gave what the full name refused, and a position next to it
+was ignored and left uncounted. One pass was quadratic. Each is fixed at root, and
+`tests/sources/news/match-r83-round3.test.ts` holds each one with the attack's texts.
+
+- **A topic's clause is his label only when it names one player** · clause 4 · `positions.ts`
+  `positionPhrasesNextTo`: the clause after "<name> injury update:" labels him only when the rest of
+  its sentence names no team, no position word, no word of `SECOND_PLAYER_WORDS` (23: "also",
+  "teammate", "star", "him" …) and no person. "…: Steelers cornerback fined for hit on Ravens QB",
+  "…: Ravens' top cornerback also ruled out for Week 9" and the six others the attack named get no ref
+  (the other holder at `7b9572c`). The captured "…: Ravens QB dealing with ankle sprain; Week 5 status
+  still unknown, per report" stays the QB's.
+- **Idioms of a team's loss of its own player, in any case** · clause 3 · `cues.ts` `cueHolds`.
+  Each case-insensitive, so Title Case and all-caps headlines read alike:
+  - "loss to" after a copula (`COPULAS`, 13), a contraction, a clause's opening with an article or with
+    `LOSS_DEGREE_WORDS` (27: "big", "huge" …), or a word that is no preposition and an article
+    ("Injury a big loss to Eagles"); a preposition (`GAME_PREPOSITIONS`, 32) or a score keeps it a
+    game ("in a big loss to the Browns", "…, a 24-20 loss");
+  - "lost to" after a copula or at a clause's opening ("…: Lost to Browns until December", "Is Lost To
+    Browns");
+  - "until" and "till" join "for" (`DURATION_WORDS`);
+  - "to" or "into" after a passive play's team is a demand ("Pressured by Browns to take pay cut",
+    `PASSIVE_PURPOSE_WORDS`);
+  - `DISPUTE_WORDS` (37) gains "holds out", "rules", "decides" … ("Arbitrator rules against Browns").
+- **"injured" before a name** · clause 2 · `VERB_LIKE_LABELS` (lead, top, injured) read as a label
+  only after a possessive, and "injured" before another label word. "A hit by the Vikings injured
+  Justin Jefferson" attaches no team (the WR at 0.95 at `7b9572c` and at `f41e810`).
+- **Roster moves in every voice** · clause 2 · `sharedMovedTeams`: a team that reinstates him
+  (`SHARED_TEAM_MOVE_WORDS`) or places him on a reserve list (`PLACE_WORDS` with `RESERVE_LISTS`, 16,
+  the list after the name), and his clause's "activated", "reinstated" (`SHARED_PLAYER_MOVE_WORDS`),
+  "activated off IR", "placed on IR by". "Justin Jefferson: Activated by Vikings" and the ten other
+  forms the attack named are the star's at 0.95 again. The namesake's team's move is still blocked by
+  the star (choice 6). `teams.ts`, the unique names' reading, is unchanged.
+- **Label forms** · clause 2 · `sharedAttachedTeams`: "<name> of [the] <team>", role nouns
+  (`LABEL_ROLE_NOUNS`: "superstar", "playmaker", "pass-catcher", "MVP" …), a rank ("No. 1"), "top" and
+  "lead" after a possessive, plural labels (`LABEL_PLURALS`, 39), and `sharedListTeams`: a plural
+  label attaches its team to every name of the list it heads ("Vikings WRs Jordan Addison and Justin
+  Jefferson"). A list is names joined by "," or "and", with an "and" ("A, B and C"); a bare comma is
+  none.
+- **"at" between two teams** · clause 3 · `GAME_CUES` gains "at": "Vikings at Bears: Justin Jefferson
+  questionable" is the WR's at 0.80 (no ref at `7b9572c`). After one team "at" names no opponent, as
+  before.
+- **A cue is about the sentence's subject** · clause 3 · `match.ts` `about`: a result, an against word,
+  a game or "<team> matchup" is about the first person its sentence names before it (a possessive one
+  with another person after him is that person's), with the names of a list he heads; a play word
+  still needs his name right before it. Another person named between him and a result or an against
+  word anchors the game: it is that person's team's against the cued team, which he plays in on
+  either side. That person may be the cued team's own player, and then the cue stands. A person of no
+  known team leaves the cue no evidence. So "Jackson found Zay Flowers twice in the win over the
+  Bengals" is the QB's again, and "Jackson and Derrick Henry ran wild…" too. "Bijan Robinson ran past
+  Justin Jefferson in the win over the Browns" no longer gives the WR the Browns LB's item (it did at
+  `7b9572c`), and the anchor keeps "Unlike Justin Jefferson, Bijan Robinson starred in the win over
+  the Browns" and "…was no match for Bijan Robinson…" from doing so.
+- **A game in a sentence that names no one is the item's subject's** · clause 1, choice 2 as built ·
+  "Lamar Jackson: Limited | Jackson (ankle) was limited; the Ravens visit the Bengals Sunday." gives
+  the QB 0.80 whatever the punctuation (no ref at `7b9572c`, which turned on ";" against ", and").
+- **Play wording, its plain variants** · clause 3 · `PLAY_OBJECTS` (100) gains the singular and plural
+  forms it lacked ("cornerback", "CB", "safety", "linebacker", "defender" …), never one that only
+  modifies a noun after it ("the Browns' linebacker depth": positions.ts `POSITION_COMPOUND_HEADS`).
+  "for" takes a number word (`NUMBER_WORDS`). `PASSIVE_PLAY_CUES` gains "burned", "torched",
+  "gashed", "shredded", "strip-sacked" and "stuffed".
+- **Every deciding list is held** · clause 3 · 23 lists are held by one literal in the test, compared
+  word for word with the source: the two the attack named (`PLAY_OBJECTS`, `CUE_CONTINUATIONS`), the
+  new ones, `PLAY_GAP_WORDS`, and positions.ts' `POSITION_COMPOUND_HEADS`, `HEADLINE_TOPICS` and
+  `POSITION_MODIFIERS`. Each entry of 19 of them also runs through a behaviour, from the same literal,
+  so a deleted entry fails both. A mutation run deleted each of those 439 entries one at a time:
+  434 fail a behaviour test, and the 5 that do not are entries a shorter one covers
+  ("front seven", "pass rush", "pass defense", "pass rusher", "pass rushers"), which only the word-for-word test holds.
+- **Initials and times are no positions** · clause 6 · `positions.ts`: a letter before a period and
+  a letter ("1 P.M.", "P.J. Walker", "K.J. Osborn"), or a one-letter abbreviation before a period
+  ("S. Smith"), is no position word, and a word inside a person's name never counts against the
+  residual. The QB keeps clause 6's 0.80 in the five items the attack named.
+- **Prominence is judged before the evidence** · clause 4 · `sharedHolder`: the prominent holder is
+  found over every holder the spelling leaves, and blocks only while he is not ruled out. "Vikings S
+  Smith" is Harrison Smith's, as "Vikings' Smith" is (no ref at `7b9572c`: among the safeties left,
+  Tykee Smith was prominent). The attack's sweep found 78 such pairs; all 559 holders the property
+  checks keep their ref when their own position is written.
+- **The surname never gives what the full name refuses** · clause 4 · the surname path also blocks a
+  sharer whose own full name's prominent holder is another, not ruled out. "Eagles' Young",
+  "Philadelphia's Young", "Chiefs' Harris" and three more get no ref, as their full names do (the
+  namesakes at 0.60 at `7b9572c`).
+- **A position next to a shared surname is evidence** · clauses 4 and 5 · with no team written or
+  moved to, a position written next to a shared surname takes the one sharer it leaves, never a free
+  agent: "LB Jefferson", "Linebacker Jefferson" and "QB Jackson" at 0.60 (no ref at `7b9572c` and at
+  `f41e810`). One several sharers fit ("DT Harris", "WR Jefferson") gets no ref and is counted, beside
+  another ref too. A position word may stand before a shared surname ("Linebacker Jefferson").
+- **Linear** · robustness · `sharedMentions` reads each abbreviation against the next team only (a
+  farther one cannot pair: the gap would hold the nearer), in one pass; `about` and the actor check
+  use binary searches; `notAName` remembers `mergeName`. The attack's capped item takes 2.7 ms
+  (`f41e810` 2.6, `7b9572c` 33.9); a full file of it builds in 9.3 s (`f41e810` 10.9 s; `7b9572c` about
+  170 s by the attack's measure).
+- **Expectations fix round 3 changed** (each commented where it stands; none weakened):
+  - `match-r83.test.ts`, the word-for-word lists: `PASSIVE_PLAY_CUES` gains its six plain variants and
+    `GAME_CUES` gains "at" (clause 3, "and the like"; the attack's own items);
+  - `match-universe.test.ts`, "…was limited; the Ravens visit the Bengals Sunday.": back to round 1's
+    `[[QB_LAMAR, "full_name"]]`. Fix round 2 had written no ref; choice 2 as built reads the game as
+    the item subject's (clause 1).
+- **Tests** · `match-r83-round3.test.ts` (new, 35 tests) holds every violation with the attack's
+  texts, the controls that keep each fix from overreaching, the 23 lists word for word and entry by
+  entry, three fast-check properties (an item whose round-3 evidence points to one holder never goes
+  to another; an own-team idiom is evidence for no holder off that team; clause 6 past initials and
+  times) and two exhaustive checks (a written own position never costs a ref, 559 holders; a surname
+  never gives what the full name refuses, 15 refusals). `match.perf.test.ts` (new, process project)
+  bounds the worst case: the attack's item at most 12 times a benign near-cap one (3.4 now, 4.8 at
+  `f41e810`, 56 at `7b9572c`), and 1,000 of them in under 15 s. Against `7b9572c`, 27 of the
+  35 new unit tests fail, and both perf tests; against `f41e810`, 32 fail, at least one
+  per clause on its outcome. The full unit suite passes (11,797 tests) and the coverage gate holds.
+- **Measured** · the gate's four batteries give exactly `7b9572c`'s output: battery 1 has no
+  misattribution beyond the open roster move, with 28 right refs. The 71 labelled real titles match as
+  at `7b9572c`. Unique names match as at `f41e810` over 37,701 items (every recorded, test and probe
+  title, and generated items with every list word around unique names); three roundups differ only
+  through the 10-ref cap. 1,160 generated items with a known owner in this round's forms give the other
+  holder no ref (132 at `7b9572c`), and the owner 844 refs (220); round 2's 27,552 still give none.
+- **Open** · the roster move to the star's own team, as before. Two limits are new, both fail safe. A
+  topic's clause about him that names the player he hit is no label either ("Chris Jones injury
+  update: Chiefs DT fined for hit on Broncos QB" gets no ref). A free agent named as the subject's
+  teammate leaves his cue no evidence ("Jackson found Van Jefferson twice in the win over the
+  Bengals"). One limit stays as built: a cue about a free-agent namesake still rules him out (he plays
+  no games), so a namesake signed since the universe was read gives the star his game item by
+  elimination. "Lamar Jackson: Carted off with ankle injury | Jackson was hurt covering a punt in
+  Sunday's loss to the Steelers." gives the QB 0.80, as at `f41e810`.
 
 ## Reviews (re-run on every version bump of the named dependency)
 

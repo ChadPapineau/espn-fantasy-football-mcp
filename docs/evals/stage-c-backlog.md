@@ -2,8 +2,8 @@
 
 The tracked list of Stage C items that need the owner, a repository setting, the Stage D merge or an
 orchestrator ruling. The ledger of fixed findings lives with the orchestrator; this file records only
-what stays open after the final gate's fix rounds 1, 2 and 3 and ruling R8-3's fix (2026-10-28,
-`build/phase-1`). Each item says why code cannot close it and what would.
+what stays open after the final gate's fix rounds 1, 2 and 3 and ruling R8-3's fix and its fix rounds
+2 and 3 (2026-10-28, `build/phase-1`). Each item says why code cannot close it and what would.
 
 ## For the orchestrator's ledger
 
@@ -14,8 +14,9 @@ The final gate's second run (at `2ca70dc`) and its third (at `125c184`) verified
 with the last verifiers' own repros, yet the ledger still lists them as confirmed:
 `trade-locked-week-counted`, `store-future-stamped-rows-block` and `crosswalk-unpaired-joins-silent`.
 They can be closed. `news-match-universe-homonyms`: the fourth run found namesakes' items still
-reaching the star; ruling R8-3 is built (`cb2bcc7`; below, and changelog §B9), and one roster-move
-title stays open for a ruling. R7-2 and R7-6 stay open by ruling (below); B11 Lane 2 and B15 are
+reaching the star; ruling R8-3 is built (`cb2bcc7`; below, and changelog §B9), fix rounds 2 and 3
+answered the independent attacks on it (`91a8c1b`, `c16b9d8`), and one roster-move title stays open
+for a ruling. R7-2 and R7-6 stay open by ruling (below); B11 Lane 2 and B15 are
 recorded at Stage D as not runnable.
 
 ## Ruled — moved here by the orchestrator
@@ -137,6 +138,43 @@ clause 6's accepted residuals, which name no team, no position and no cue: the t
 titles, "Lamar Jackson: Inks reserve/future contract" and "Lamar Jackson: Waived with injury
 designation | Jackson (hamstring) reverts to injured reserve."
 
+**Fix round 3 (2026-10-28, commit `c16b9d8`; changelog §B9, "Fix round 3").** The independent attack on
+`7b9572c` found 16 ways that build still broke R8-3, or lost what `f41e810` had for no clause's sake.
+Each is fixed at root, and `tests/sources/news/match-r83-round3.test.ts` holds each one with the
+attack's texts:
+
+- **Topic clauses (clause 4).** "<name> injury update: <position> …" labels him only when the rest of
+  its sentence names no other team, position, person or second-player word ("also", "teammate",
+  "him" …). "Lamar Jackson injury update: Steelers cornerback fined for hit on Ravens QB" gets no ref
+  (it was the free-agent CB's); "…: Ravens QB dealing with ankle sprain" stays the QB's.
+- **Idioms (clause 3).** A team's loss of its own player is no game in any case or form: "Injury a big
+  loss to Eagles", "…: A big loss to Browns", "Is Lost To Browns", "Lost to Browns until December",
+  "Pressured by Browns to take pay cut", "Holds out against Browns". A preposition or a score keeps a
+  game ("in a big loss to the Browns").
+- **Labels and moves (clause 2).** "injured" before a name is no label for an opponent's hit. The
+  lists now read "<name> of the <team>", "superstar", "MVP", "No. 1", "the Vikings' top receiver", a
+  plural label's list ("Vikings WRs Jordan Addison and Justin Jefferson"), "Activated by", "Placed on
+  IR by", "Reinstated by" and "<team> place <name> on IR".
+- **Cues (clauses 1 and 3).** A result or an against word is about its sentence's subject (the first
+  person named, with a list he heads). Another person named before the cue anchors a game between
+  that person's team and the cued team ("Jackson found Zay Flowers twice in the win over the Bengals"
+  is the QB's; "Unlike Justin Jefferson, Bijan Robinson starred in the win over the Browns" is never
+  the WR's). A game in a sentence that names no one is the item's subject's again (choice 2). "at"
+  between two teams is a game. The play wording reads its plain variants ("for three touchdowns",
+  "Burns Browns cornerback", "Burned by Chiefs receiver").
+- **Lists (clause 3).** 23 lists that decide a cue, a label or a move are held by one literal in the
+  test: word for word, and entry by entry through a behaviour. A deleted entry fails both, except
+  entries a shorter one covers.
+- **The residual (clause 6).** An initial or a time ("1 P.M.", "P.J. Walker") is no position.
+- **The surname (clauses 4 and 5).** Writing a holder's own position never costs his ref ("Vikings S
+  Smith" is Harrison Smith's). The surname never gives what the full name refuses ("Eagles' Young"
+  gets no ref, as "Eagles' Byron Young" does). A position next to a shared surname is evidence: "LB
+  Jefferson" is the Browns LB's, and "WR Jefferson" (two fit) gets no ref and is counted.
+- **Linear.** The attack's worst-case item takes 2.7 ms, as at `f41e810`; it took 33.9 ms at
+  `7b9572c`.
+
+The four batteries give exactly fix round 2's outcomes; unique names still match as at `f41e810`.
+
 **Readings the fixer made (for the re-gate to check).** (a) Withdrawn in fix round 2. A team named
 loosely that rules no holder out no longer leaves the item to prominence; such an item is no residual
 and gets no ref (clause 5). Battery 2's "Lamar Jackson: Works out for Bengals" and "…: Visits Bears"
@@ -161,7 +199,8 @@ reading gives the star "Justin Jefferson: Signs with Vikings | Jefferson, lost t
 agency, joins Minnesota." at 0.95.
 
 **Known limits, as built (for the re-gate to check).** Each follows a choice or a vocabulary that
-stands; the first two came from the fixer's own attack after fix round 2.
+stands; the first two came from the fixer's own attack after fix round 2, the last three from fix
+round 3.
 
 - **A game not his own.** A game written in a sentence about the subject is his (choice 2), so
   "Justin Jefferson: Questionable | Jefferson watched the Vikings host the Bengals from the stands."
@@ -174,6 +213,17 @@ stands; the first two came from the fixer's own attack after fix round 2.
   are accepted by the ruling.
 - **"edge rusher"** stays DE or LB: "Chiefs edge rusher Chris Jones" (ESPN's DT) gets no ref, where
   "pass rusher" now fits him.
+- **A topic's clause naming the player he hit** is no label either: "Chris Jones injury update: Chiefs
+  DT fined for hit on Broncos QB" gets no ref (fix round 3). Telling the subject from the player he
+  hit would need verb parsing.
+- **A teammate of no known team** leaves the subject's cue no evidence: "Lamar Jackson: Big day |
+  Jackson found Van Jefferson twice in the win over the Bengals." gives the QB no ref (Van Jefferson
+  is a free agent; fix round 3).
+- **A free-agent namesake signed since.** A cue about a free agent rules him out (he plays no games).
+  The universe may list a namesake as a free agent after a team signed him, and then the star takes
+  his game item by elimination: "Lamar Jackson: Carted off with ankle injury | Jackson was hurt
+  covering a punt in Sunday's loss to the Steelers." gives the Ravens QB 0.80, as at `f41e810`. The
+  attack's round-3 probe listed this group without naming it a violation.
 
 **Before R8-3** (the record the ruling was made on; the as-built choices below are the ones it kept or
 changed):
