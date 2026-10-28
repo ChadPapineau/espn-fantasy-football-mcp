@@ -20,6 +20,7 @@ import {
   nativeProjectionOf,
   newCounts,
   normalizeBoxScores,
+  normalizeKeepers,
   normalizeLeague,
   normalizeLeagueRules,
   normalizeLiveMatchups,
@@ -572,6 +573,8 @@ describe("sparse bodies: every optional field absent reads as null, never a gues
     });
     expect(league.clock).toMatchObject({ transaction_scoring_period: null, is_expired: null });
     expect(league.divisions[0]?.name.untrusted_text.value).toBe("Division 3");
+    // no draftSettings: the keeper setting is unknown, never "redraft"
+    expect(league.keepers).toEqual({ count: null, count_next_season: null, deadline: null });
     const slots = normalizeRosterSlots(minimalSettings);
     expect(slots.slots.map((s) => [s.name, s.count, s.eligible_positions.length])).toEqual([
       ["QB", 1, 1],
@@ -802,5 +805,75 @@ describe("sparse bodies: every optional field absent reads as null, never a gues
         },
       }),
     ).toEqual([{ position_id: 1, opponent_pro_team_id: 2, average: 3, rank: 4 }]);
+  });
+});
+
+describe("the keeper setting (draftSettings; Stage C live finding F6)", () => {
+  const NONE = { count: null, count_next_season: null, deadline: null };
+
+  it("each recorded league's keepers as ESPN states them, carried by normalizeLeague", () => {
+    // the restatement lacked them: two of the three recorded public leagues are keeper leagues
+    expect(LEAGUES.map((slot) => [slot, normalizeKeepers(wire(slot).settings.settings)])).toEqual([
+      ["league-a", { count: 0, count_next_season: 0, deadline: null }],
+      ["league-b", { count: 2, count_next_season: 0, deadline: null }],
+      [
+        "league-c",
+        { count: 3, count_next_season: 3, deadline: new Date(1_788_382_800_000).toISOString() },
+      ],
+    ]);
+    const { settings, identity } = wire("league-b");
+    expect(normalizeLeague(settings, ref, identity, null, false).keepers).toEqual({
+      count: 2,
+      count_next_season: 0,
+      deadline: null,
+    });
+  });
+
+  it("a draft field of another shape reads as null, never a failed settings read", () => {
+    for (const draft of [
+      undefined,
+      null,
+      "keepers",
+      [],
+      [2],
+      { keeperCount: "2" },
+      { keeperCount: -1 },
+      { keeperCount: 2.5 },
+      { keeperCount: 51 },
+      { keeperCount: Number.NaN },
+      { keeperCount: Number.POSITIVE_INFINITY },
+      { keeperDeadlineDate: -5 },
+      { keeperDeadlineDate: "1788382800000" },
+      { keeperDeadlineDate: 9e15 },
+    ])
+      expect(normalizeKeepers({ draftSettings: draft }), JSON.stringify(draft)).toEqual(NONE);
+    for (const settings of [null, undefined, 7, "x", []])
+      expect(normalizeKeepers(settings), String(settings)).toEqual(NONE);
+    expect(normalizeKeepers({ draftSettings: { keeperCount: 50, keeperCountFuture: 0 } })).toEqual({
+      count: 50,
+      count_next_season: 0,
+      deadline: null,
+    });
+    // the view schema passes the field through untyped: a settings body with an odd one still parses
+    const odd = loadFixture("recorded/league-a/mSettings.json") as {
+      settings: Record<string, unknown>;
+    };
+    const parsed = mSettingsSchema.parse({
+      ...odd,
+      settings: { ...odd.settings, draftSettings: { keeperCount: "two" } },
+    });
+    expect(normalizeLeague(parsed, ref, null, null, false).keepers).toEqual(NONE);
+  });
+
+  it("property: any draftSettings value gives whole counts 0–50 or null and an ISO deadline or null", () => {
+    fc.assert(
+      fc.property(fc.anything(), (draft) => {
+        const k = normalizeKeepers({ draftSettings: draft });
+        for (const c of [k.count, k.count_next_season])
+          expect(c === null || (Number.isSafeInteger(c) && c >= 0 && c <= 50)).toBe(true);
+        expect(k.deadline === null || !Number.isNaN(Date.parse(k.deadline))).toBe(true);
+      }),
+      { numRuns: 300 },
+    );
   });
 });

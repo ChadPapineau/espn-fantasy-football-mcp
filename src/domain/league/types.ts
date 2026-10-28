@@ -606,6 +606,27 @@ export interface League {
   readonly standings_updated_at: IsoInstant | null;
   readonly playoff_matchup_edited: boolean | null;
   readonly waiver_order_edited: boolean | null;
+  /** The keeper setting (A1 `league.keepers`). */
+  readonly keepers: KeeperRules;
+}
+
+/**
+ * The keeper setting (plan 07 A1 `league.keepers`; research 03 §B.1 `draftSettings` [V-observed];
+ * Stage C live finding F6: the digest restated every other item of the format, so a keeper league
+ * went unnoticed): `count` players each team kept into this season's draft (`keeperCount`; 0 = a
+ * redraft league), `count_next_season` the number set for next season's (`keeperCountFuture`),
+ * `deadline` this season's keeper deadline (`keeperDeadlineDate`). null = not stated. Every value
+ * the product computes is this season's: keeper value is not modelled (research 05 §5).
+ */
+export interface KeeperRules {
+  readonly count: number | null;
+  readonly count_next_season: number | null;
+  readonly deadline: IsoInstant | null;
+}
+
+/** Whether a keeper setting makes the league a keeper league (this season's or next season's). */
+export function isKeeperLeague(k: KeeperRules): boolean {
+  return (k.count ?? 0) > 0 || (k.count_next_season ?? 0) > 0;
 }
 
 /** A roster slot's class (plan 01 §9). */
@@ -1269,6 +1290,7 @@ export interface LeagueDigestData {
     readonly name: UntrustedText;
     readonly my_team: { readonly team_id: number; readonly name: UntrustedText } | null;
     readonly commissioner: boolean;
+    readonly keepers: KeeperRules;
   };
   readonly clock?: LeagueClock & {
     readonly current_week_final: boolean;

@@ -21,6 +21,7 @@ import {
   type BoxScoreSide,
   type Division,
   type GameState,
+  type KeeperRules,
   type League,
   type LeagueRef,
   type LeagueRules,
@@ -438,6 +439,34 @@ export function normalizeLeague(
       typeof st.isPlayoffMatchupEdited === "boolean" ? st.isPlayoffMatchupEdited : null,
     waiver_order_edited:
       typeof st.isWaiverOrderEdited === "boolean" ? st.isWaiverOrderEdited : null,
+    keepers: normalizeKeepers(s),
+  };
+}
+
+/** The most keepers a team can carry (a whole ESPN roster is under this); more is no count. */
+const MAX_KEEPERS = 50;
+
+/**
+ * The keeper setting from `settings.draftSettings` (research 03 §B.1 [V-observed]: `keeperCount`,
+ * `keeperCountFuture`, `keeperDeadlineDate`; Stage C live finding F6). Read from the passthrough
+ * settings, never through the view schema: a draft field of an unexpected shape is a null here, never
+ * a failed settings read. A count is a whole number 0–MAX_KEEPERS.
+ */
+export function normalizeKeepers(settings: unknown): KeeperRules {
+  const draft =
+    typeof settings === "object" && settings !== null && !Array.isArray(settings)
+      ? (settings as Record<string, unknown>).draftSettings
+      : undefined;
+  const d =
+    typeof draft === "object" && draft !== null && !Array.isArray(draft)
+      ? (draft as Record<string, unknown>)
+      : {};
+  const keeperCount = (v: unknown): number | null =>
+    typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= MAX_KEEPERS ? v : null;
+  return {
+    count: keeperCount(d.keeperCount),
+    count_next_season: keeperCount(d.keeperCountFuture),
+    deadline: isoFromMs(finite(d.keeperDeadlineDate)),
   };
 }
 

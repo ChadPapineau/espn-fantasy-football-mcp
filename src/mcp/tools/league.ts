@@ -34,6 +34,8 @@ import {
   type BoxScoreSide,
   type BoxScoreSideRow,
   type GameState,
+  isKeeperLeague,
+  type KeeperRules,
   type LeagueClock,
   type LeagueDigestData,
   type LeagueDigestSection,
@@ -253,6 +255,11 @@ export const leagueDigestSchema = z.strictObject({
       name: ut,
       my_team: z.strictObject({ team_id: teamId, name: ut }).nullable(),
       commissioner: z.boolean(),
+      keepers: z.strictObject({
+        count: z.number().int().min(0).max(50).nullable(),
+        count_next_season: z.number().int().min(0).max(50).nullable(),
+        deadline: isoNull,
+      }),
     })
     .optional(),
   clock: z
@@ -371,6 +378,18 @@ export function refuseAbsentSeason(ctx: ToolContext, season: number): void {
 /** The fixed warning for evidence that cannot exist: the league has no previous season on ESPN. */
 export const NO_PREVIOUS_SEASON_WARNING =
   "seeding evidence unavailable: ESPN has no previous season of this league (its first season)";
+
+/**
+ * A1's warning in a keeper league (Stage C live finding F6): the product values every player for
+ * this season alone — keeper value is not modelled (research 05 §5) — so trade, waiver and roster
+ * advice in a keeper league leaves out what a player is worth next season. Null in a redraft league
+ * (or when ESPN states no keeper setting).
+ */
+export function keeperLeagueWarning(k: KeeperRules): string | null {
+  if (!isKeeperLeague(k)) return null;
+  const n = (v: number | null): string => (v === null ? "unknown" : String(v));
+  return `keeper league (${n(k.count)} kept per team this season, ${n(k.count_next_season)} next season): every value this server gives is for this season only — keeper value is not modelled (trades, drops and waiver claims leave out what a player is worth next season)`;
+}
 
 /**
  * Last season's seed table (onboard's one-time evidence — ADV OBJ-13): the previous season's exact
@@ -543,7 +562,11 @@ export async function leagueDigest(
       name: league.name,
       my_team: league.my_team,
       commissioner: league.commissioner,
+      keepers: league.keepers,
     };
+  // a keeper league is said whichever sections were asked: every value here is this season's
+  const keeperNote = keeperLeagueWarning(league.keepers);
+  if (keeperNote !== null) warnings.push(keeperNote);
   if (include.has("clock")) {
     let final = false;
     let window = true;
