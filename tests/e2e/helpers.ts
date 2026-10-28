@@ -306,3 +306,173 @@ export function runCli(env: Record<string, string>, args: readonly string[]): Pr
     );
   });
 }
+
+// --- the stall bound's host control (plan 10 A16a) -----------------------------------------------
+
+/** What a heartbeat window can be read from: the server's transport, or the idle control. */
+export interface HeartbeatSource {
+  signal(sig: NodeJS.Signals): void;
+  readonly stderr: string[];
+}
+
+/** One heartbeat window (tests/e2e/fixtures/heartbeat.cjs). */
+export interface Heartbeat {
+  /** The event loop's longest delay (ms). */
+  readonly max_ms: number;
+  /** The longest gap between two ticks of its 5 ms timer (ms past the tick)… */
+  readonly gap_ms: number;
+  /** …the main thread's own CPU time inside it… */
+  readonly gap_cpu_ms: number;
+  /** …and the process's involuntary context switches inside it (the OS took a thread off the CPU). */
+  readonly gap_invol: number;
+}
+
+/** The window of a process running the heartbeat preload, and a fresh window. */
+export async function heartbeatRecordOf(p: HeartbeatSource): Promise<Heartbeat> {
+  const before = p.stderr.length;
+  p.signal("SIGUSR2");
+  const end = Date.now() + 5000;
+  for (;;) {
+    const rec = logRecords(p.stderr.slice(before)).find((l) => l.event === "e2e.heartbeat");
+    if (rec !== undefined) {
+      const num = (k: string): number => {
+        const v = rec[k];
+        return typeof v === "number" ? v : 0;
+      };
+      return {
+        max_ms: num("max_ms"),
+        gap_ms: num("gap_ms"),
+        gap_cpu_ms: num("gap_cpu_ms"),
+        gap_invol: num("gap_invol"),
+      };
+    }
+    if (Date.now() > end) throw new Error("no heartbeat line");
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+/** The window maximum (ms) of a process running the heartbeat preload, and a fresh window. */
+export async function heartbeatOf(p: HeartbeatSource): Promise<number> {
+  return (await heartbeatRecordOf(p)).max_ms;
+}
+
+/**
+ * An idle process's longest loop delay past which a window measured the HOST, not the server: an
+ * idle Node process on a quiet machine stays within a few timer ticks of its 5 ms resolution.
+ */
+export const CONTROL_STARVED_MS = 25;
+/** How many windows one stall measurement may take before it says the host cannot measure it. */
+export const STALL_WINDOW_ATTEMPTS = 3;
+
+/**
+ * The control of the stall bounds: an IDLE child process beside the server — the same heartbeat
+ * preload and a timer, nothing else — measured over the same windows. The heartbeat is wall-clock
+ * event-loop delay, so on a loaded host (the final gate's Mac at load 34–85: Spotlight and an
+ * orphaned test worker; a shared 4-vCPU CI runner) the OS's preemption reads as the server's stall:
+ * 107 ms for six parallel lineup calls whose own stall was 21 ms when re-run, 80.6 and 128.5 ms on
+ * CI. A window in which the idle control stalled too is evidence of the host, not of the server.
+ */
+export class StallControl implements HeartbeatSource {
+  readonly stderr: string[] = [];
+  private readonly child: ChildProcessWithoutNullStreams;
+  private constructor(child: ChildProcessWithoutNullStreams) {
+    this.child = child;
+    let err = "";
+    child.stderr.on("data", (b: Buffer) => {
+      err += b.toString("utf8");
+      const lines = err.split("\n");
+      err = lines.pop() ?? "";
+      this.stderr.push(...lines.filter(Boolean));
+    });
+  }
+
+  /**
+   * Spawns the idle control (no network: the same no-socket preload as the server) and waits until
+   * its preloads are installed — a SIGUSR2 before the heartbeat's handler would end the process.
+   */
+  static async start(): Promise<StallControl> {
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        NO_SOCKET,
+        "--import",
+        HEARTBEAT,
+        "-e",
+        'process.stderr.write("e2e.control.ready\\n"); setInterval(() => {}, 1_000_000);',
+      ],
+      { cwd: ROOT, stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH ?? "" } },
+    );
+    const c = new StallControl(child);
+    const end = Date.now() + 10_000;
+    while (!c.stderr.includes("e2e.control.ready")) {
+      if (child.exitCode !== null || Date.now() > end) {
+        child.kill("SIGKILL");
+        throw new Error("the stall control did not start");
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return c;
+  }
+
+  signal(sig: NodeJS.Signals): void {
+    this.child.kill(sig);
+  }
+
+  stop(): void {
+    this.child.kill("SIGKILL");
+  }
+}
+
+/** One measured stall window: the server's longest stall, the control's, and the windows taken. */
+export interface StallWindow {
+  readonly stall_ms: number;
+  readonly control_ms: number;
+  readonly attempts: number;
+  /** The server window's preemption evidence (its longest timer gap). */
+  readonly server: Heartbeat;
+}
+
+/**
+ * Whether a server window over `boundMs` may have been set by the HOST: its longest gap holds no
+ * more of the main thread's own CPU than the bound, AND something shows the host interfering — the
+ * OS took a thread of the process off the CPU inside that gap (involuntary switches), or an idle
+ * process beside it (the control) stalled past CONTROL_STARVED_MS in the same window. A JavaScript
+ * block over the bound spends that time on the CPU, so it is the server's own and is never excused,
+ * whatever the host did. (The switch count is process-wide: a synchronous wait of the main thread
+ * that coincides with another thread's preemption is repeated, and a stall that recurs in every
+ * window ends in measureStall's "cannot be measured" failure — never a pass.)
+ */
+export function hostSetStall(server: Heartbeat, controlMs: number, boundMs: number): boolean {
+  if (server.gap_cpu_ms > boundMs) return false;
+  return server.gap_invol > 0 || controlMs > CONTROL_STARVED_MS;
+}
+
+/**
+ * The server's longest main-loop stall over one run of `work`, against `boundMs` (the heartbeat is
+ * wall-clock event-loop delay, so the OS's preemption on a loaded host reads as the server's stall).
+ * A window is measured when the server stayed within the bound, or when nothing shows the host set
+ * it (hostSetStall) — then the caller asserts it, and a stall of the server's own fails. A window
+ * over the bound that the host set is repeated — `work` is idempotent reads and analytics — up to
+ * STALL_WINDOW_ATTEMPTS windows; a host that sets every window throws, saying so: never a pass.
+ */
+export async function measureStall(
+  server: HeartbeatSource,
+  control: StallControl,
+  work: () => Promise<void>,
+  boundMs: number,
+): Promise<StallWindow> {
+  for (let attempt = 1; ; attempt++) {
+    await heartbeatOf(server); // fresh windows: only `work` is measured
+    await heartbeatOf(control);
+    await work();
+    const s = await heartbeatRecordOf(server);
+    const ctl = await heartbeatOf(control);
+    if (s.max_ms <= boundMs || !hostSetStall(s, ctl, boundMs))
+      return { stall_ms: s.max_ms, control_ms: ctl, attempts: attempt, server: s };
+    if (attempt >= STALL_WINDOW_ATTEMPTS)
+      throw new Error(
+        `the host set the server's stall in all ${String(attempt)} windows (the last: ${s.max_ms.toFixed(1)} ms, ${s.gap_cpu_ms.toFixed(1)} ms of its own CPU in its longest gap with ${String(s.gap_invol)} involuntary switches; an idle control process ${ctl.toFixed(1)} ms): the ${String(boundMs)} ms bound cannot be measured on this machine now — rerun when it is quieter`,
+      );
+  }
+}

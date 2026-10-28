@@ -14,11 +14,12 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
   HEARTBEAT,
-  logRecords,
   makeHome,
+  measureStall,
   requireDist,
   seedHome,
   serve,
+  StallControl,
   type Served,
 } from "./helpers.js";
 
@@ -49,7 +50,17 @@ const ANALYTICS = new Set([
 
 const home = makeHome();
 let s: Served | null = null;
+/**
+ * The host control of the stall windows (helpers.ts StallControl): a window over the bound while an
+ * idle process beside the server stalled too measured the host's preemption, and is repeated.
+ */
+let control: StallControl | null = null;
+async function controlOf(): Promise<StallControl> {
+  control ??= await StallControl.start();
+  return control;
+}
 afterAll(async () => {
+  control?.stop();
   if (s !== null) await s.stop();
   home.cleanup();
 });
@@ -61,22 +72,6 @@ async function timed(name: string, args: Record<string, unknown>): Promise<numbe
   const ms = performance.now() - t0;
   expect(r.isError, `${name}: ${JSON.stringify(bodyOf(r)).slice(0, 300)}`).not.toBe(true);
   return ms;
-}
-
-/** The stall probe's window maximum (ms) since the previous call. */
-async function heartbeat(): Promise<number> {
-  if (s === null) throw new Error("not served");
-  const before = s.transport.stderr.length;
-  s.transport.signal("SIGUSR2");
-  const end = Date.now() + 5000;
-  for (;;) {
-    const rec = logRecords(s.transport.stderr.slice(before)).find(
-      (l) => l.event === "e2e.heartbeat",
-    );
-    if (rec !== undefined) return rec.max_ms as number;
-    if (Date.now() > end) throw new Error("no heartbeat line");
-    await new Promise((r) => setTimeout(r, 20));
-  }
 }
 
 describe("latency on fx-10h over real stdio (A15a, A16a)", { timeout: 300_000 }, () => {
@@ -141,17 +136,28 @@ describe("latency on fx-10h over real stdio (A15a, A16a)", { timeout: 300_000 },
   });
 
   it("E1 for 32 players at n_sims 4000 < 3 s; E2 and E5 (the seeding simulator inside) < 5 s; loop stall ≤ 50 ms", async () => {
-    await heartbeat(); // start a fresh window: only the analytics calls below are measured
-    const e1 = await timed("espn_project_players", {
-      players: { pool: { status: "WAIVERS", position: "FLEX", top: 32 } },
-      horizon: "week",
-      week: 5,
-      n_sims: 4000,
-      seed: 2,
-    });
-    const e2 = await timed("espn_analyze_lineup", { week: 5, objective: "auto" });
-    const e5 = await timed("espn_analyze_waivers", { mode: "auto", phase: "auto" });
-    const stall = await heartbeat();
+    if (s === null) throw new Error("not served");
+    // one window over the analytics calls below (a starved-host window repeats them)
+    let e1 = 0;
+    let e2 = 0;
+    let e5 = 0;
+    const w = await measureStall(
+      s.transport,
+      await controlOf(),
+      async () => {
+        e1 = await timed("espn_project_players", {
+          players: { pool: { status: "WAIVERS", position: "FLEX", top: 32 } },
+          horizon: "week",
+          week: 5,
+          n_sims: 4000,
+          seed: 2,
+        });
+        e2 = await timed("espn_analyze_lineup", { week: 5, objective: "auto" });
+        e5 = await timed("espn_analyze_waivers", { mode: "auto", phase: "auto" });
+      },
+      50,
+    );
+    const stall = w.stall_ms;
     Object.assign(report, {
       e1_32_players_4000_ms: Math.round(e1),
       e2_ms: Math.round(e2),
@@ -218,20 +224,6 @@ describe(
       lastWarnings = (b.warnings as string[] | undefined) ?? [];
       return ms;
     }
-    async function heartbeatFull(): Promise<number> {
-      if (f === null) throw new Error("not served");
-      const before = f.transport.stderr.length;
-      f.transport.signal("SIGUSR2");
-      const end = Date.now() + 5000;
-      for (;;) {
-        const rec = logRecords(f.transport.stderr.slice(before)).find(
-          (l) => l.event === "e2e.heartbeat",
-        );
-        if (rec !== undefined) return rec.max_ms as number;
-        if (Date.now() > end) throw new Error("no heartbeat line");
-        await new Promise((r) => setTimeout(r, 20));
-      }
-    }
 
     it("startup < 1 s; every P1 read tool warm < 500 ms", async () => {
       requireDist();
@@ -242,28 +234,37 @@ describe(
       await timedFull("espn_get_league", {});
       await timedFull("espn_get_roster", { week: 5 });
       for (const [name, args] of P1_READS) await timedFull(name, args); // cold
-      const slow: string[] = [];
-      await heartbeatFull(); // a fresh stall window: the warm reads below
-      for (const [name, args] of P1_READS) {
-        const ms = await timedFull(name, args);
-        // fx-10h records no mPositionalRatings / kona_playercard: a tool's OPTIONAL comparator read of
-        // those views goes upstream on every call (the fixture refuses it, the tool degrades and says
-        // so) and waits on the per-second ESPN limiter — not a warm call. Production caches the views
-        // for a day. Such a call is held to the limiter window instead, and must name the view.
-        const upstream = lastWarnings.find((w) =>
-          /^espn:(mPositionalRatings|kona_playercard) unavailable/.test(w),
-        );
-        if (upstream !== undefined) {
-          report[`upstream_${name}`] = Math.round(ms);
-          if (ms >= 2000) slow.push(`${name} ${String(Math.round(ms))} ms (${upstream})`);
-          continue;
-        }
-        report[`warm_${name}`] = Math.round(ms);
-        if (ms >= 500) slow.push(`${name} ${String(Math.round(ms))} ms`);
-      }
+      let slow: string[] = [];
+      // a stall window over the warm reads below (a starved-host window repeats them)
+      const w = await measureStall(
+        f.transport,
+        await controlOf(),
+        async () => {
+          slow = [];
+          for (const [name, args] of P1_READS) {
+            const ms = await timedFull(name, args);
+            // fx-10h records no mPositionalRatings / kona_playercard: a tool's OPTIONAL comparator
+            // read of those views goes upstream on every call (the fixture refuses it, the tool
+            // degrades and says so) and waits on the per-second ESPN limiter — not a warm call.
+            // Production caches the views for a day. Such a call is held to the limiter window
+            // instead, and must name the view.
+            const upstream = lastWarnings.find((x) =>
+              /^espn:(mPositionalRatings|kona_playercard) unavailable/.test(x),
+            );
+            if (upstream !== undefined) {
+              report[`upstream_${name}`] = Math.round(ms);
+              if (ms >= 2000) slow.push(`${name} ${String(Math.round(ms))} ms (${upstream})`);
+              continue;
+            }
+            report[`warm_${name}`] = Math.round(ms);
+            if (ms >= 500) slow.push(`${name} ${String(Math.round(ms))} ms`);
+          }
+        },
+        50,
+      );
       // plan 03 §1.2: the loop never blocks longer than one statement or one ≤ 20 ms batch — D5's
       // window of player-weeks as one read + score once stalled it 40–55 ms here (B2a gate round 2)
-      const readStall = await heartbeatFull();
+      const readStall = w.stall_ms;
       report.max_loop_stall_reads_ms = Math.round(readStall * 10) / 10;
       expect(slow).toEqual([]);
       expect(readStall).toBeLessThanOrEqual(50);
@@ -273,15 +274,24 @@ describe(
     });
 
     it("every P1 analytics call < 8 s (the per-call deadline); the main loop never stalls > 50 ms", async () => {
-      await heartbeatFull();
-      const slow: string[] = [];
-      for (const [name, args] of P1_ANALYTICS) {
-        const ms = await timedFull(name, args);
-        const key = `${name}${typeof args.mode === "string" ? `_${args.mode}` : ""}`;
-        report[key] = Math.round(ms);
-        if (ms >= 8000) slow.push(`${key} ${String(Math.round(ms))} ms`);
-      }
-      const stall = await heartbeatFull();
+      if (f === null) throw new Error("not served");
+      let slow: string[] = [];
+      // one stall window over the analytics calls (a starved-host window repeats them)
+      const w = await measureStall(
+        f.transport,
+        await controlOf(),
+        async () => {
+          slow = [];
+          for (const [name, args] of P1_ANALYTICS) {
+            const ms = await timedFull(name, args);
+            const key = `${name}${typeof args.mode === "string" ? `_${args.mode}` : ""}`;
+            report[key] = Math.round(ms);
+            if (ms >= 8000) slow.push(`${key} ${String(Math.round(ms))} ms`);
+          }
+        },
+        50,
+      );
+      const stall = w.stall_ms;
       report.max_loop_stall_ms = Math.round(stall * 10) / 10;
       process.stdout.write(`latency report (full): ${JSON.stringify(report)}\n`);
       expect(slow).toEqual([]);

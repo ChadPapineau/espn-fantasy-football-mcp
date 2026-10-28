@@ -12,11 +12,13 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
   HEARTBEAT,
-  logRecords,
+  heartbeatOf,
   makeHome,
+  measureStall,
   requireDist,
   seedHome,
   serve,
+  StallControl,
   type E2eHome,
   type Served,
 } from "./helpers.js";
@@ -28,20 +30,6 @@ const MIX: readonly [string, Record<string, unknown>][] = [
   ["espn_project_players", { players: { team_id: 2 }, horizon: "ros", seed: 3 }],
   ["espn_analyze_lineup", { week: 5, objective: "pwin", seed: 4 }],
 ];
-
-async function heartbeat(s: Served): Promise<number> {
-  const before = s.transport.stderr.length;
-  s.transport.signal("SIGUSR2");
-  const end = Date.now() + 5000;
-  for (;;) {
-    const rec = logRecords(s.transport.stderr.slice(before)).find(
-      (l) => l.event === "e2e.heartbeat",
-    );
-    if (rec !== undefined) return rec.max_ms as number;
-    if (Date.now() > end) throw new Error("no heartbeat line");
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
 
 async function callOk(
   s: Served,
@@ -61,7 +49,9 @@ for (const toolset of ["core", "full"] as const) {
     () => {
       let home: E2eHome | null = null;
       let s: Served | null = null;
+      let control: StallControl | null = null;
       afterAll(async () => {
+        control?.stop();
         if (s !== null) await s.stop();
         home?.cleanup();
       });
@@ -77,19 +67,41 @@ for (const toolset of ["core", "full"] as const) {
         await callOk(served, "espn_get_roster", { week: 5 });
         const alone = JSON.stringify((await callOk(served, "espn_analyze_lineup", LINEUP)).lineup);
         for (const [name, args] of MIX) await callOk(served, name, args);
+        // the host control (helpers.ts StallControl): a window over the bound while an idle
+        // process beside the server stalled too measured the host's preemption, and is repeated
+        control = await StallControl.start();
+        const ctl = control;
+        await heartbeatOf(served.transport);
         const report: Record<string, number> = {};
+        const controls: Record<string, number> = {};
         for (const n of [3, 6, 10]) {
-          await heartbeat(served); // a fresh window: only these calls are measured
-          const answers = await Promise.all(
-            Array.from({ length: n }, () => callOk(served, "espn_analyze_lineup", LINEUP)),
+          const w = await measureStall(
+            served.transport,
+            ctl,
+            async () => {
+              const answers = await Promise.all(
+                Array.from({ length: n }, () => callOk(served, "espn_analyze_lineup", LINEUP)),
+              );
+              for (const a of answers) expect(JSON.stringify(a.lineup)).toBe(alone);
+            },
+            50,
           );
-          report[`n${String(n)}`] = Math.round((await heartbeat(served)) * 10) / 10;
-          for (const a of answers) expect(JSON.stringify(a.lineup)).toBe(alone);
+          report[`n${String(n)}`] = Math.round(w.stall_ms * 10) / 10;
+          controls[`n${String(n)}`] = Math.round(w.control_ms * 10) / 10;
         }
-        await heartbeat(served);
-        await Promise.all(MIX.map(([name, args]) => callOk(served, name, args)));
-        report.mix = Math.round((await heartbeat(served)) * 10) / 10;
-        process.stdout.write(`parallel stall (${toolset}): ${JSON.stringify(report)}\n`);
+        const mix = await measureStall(
+          served.transport,
+          ctl,
+          async () => {
+            await Promise.all(MIX.map(([name, args]) => callOk(served, name, args)));
+          },
+          50,
+        );
+        report.mix = Math.round(mix.stall_ms * 10) / 10;
+        controls.mix = Math.round(mix.control_ms * 10) / 10;
+        process.stdout.write(
+          `parallel stall (${toolset}): ${JSON.stringify(report)} control ${JSON.stringify(controls)}\n`,
+        );
         for (const [k, v] of Object.entries(report)) expect(v, k).toBeLessThanOrEqual(50);
       });
     },

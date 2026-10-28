@@ -11,34 +11,24 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
   HEARTBEAT,
-  logRecords,
   makeHome,
+  measureStall,
   requireDist,
   serve,
+  StallControl,
+  STALL_WINDOW_ATTEMPTS,
   type Served,
 } from "./helpers.js";
 
 const PER_WEEK = 100;
 const home = makeHome();
 let s: Served | null = null;
+let control: StallControl | null = null;
 afterAll(async () => {
+  control?.stop();
   if (s !== null) await s.stop();
   home.cleanup();
 });
-
-async function heartbeat(x: Served): Promise<number> {
-  const before = x.transport.stderr.length;
-  x.transport.signal("SIGUSR2");
-  const end = Date.now() + 5000;
-  for (;;) {
-    const rec = logRecords(x.transport.stderr.slice(before)).find(
-      (l) => l.event === "e2e.heartbeat",
-    );
-    if (rec !== undefined) return rec.max_ms as number;
-    if (Date.now() > end) throw new Error("no heartbeat line");
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
 
 async function ok(x: Served, name: string, args: Record<string, unknown>) {
   const r = await x.client.callTool({ name, arguments: args }, { timeout: 120_000 });
@@ -91,19 +81,31 @@ describe("E13 over a full log (fx-10h over real stdio)", { timeout: 600_000 }, (
           note,
         });
     };
-    const stallOf = async (): Promise<number> => {
-      await heartbeat(x); // a fresh window: the retrospective alone
-      const r = await ok(x, "espn_analyze_retrospective", { week: 4, min_n: 1 });
-      expect((r.data.calls as unknown[]).length).toBeGreaterThan(0);
-      return heartbeat(x);
-    };
-    // a near-empty log: five calls of the scored week
+    // the host control (helpers.ts StallControl): a window over its bound while an idle process
+    // beside the server stalled too measured the host's preemption, and is repeated
+    control = await StallControl.start();
+    const ctl = control;
+    const stallOf = async (boundMs: number): Promise<number> =>
+      (
+        await measureStall(
+          x.transport,
+          ctl,
+          async () => {
+            const r = await ok(x, "espn_analyze_retrospective", { week: 4, min_n: 1 });
+            expect((r.data.calls as unknown[]).length).toBeGreaterThan(0);
+          },
+          boundMs,
+        )
+      ).stall_ms;
+    // a near-empty log: five calls of the scored week — the least of several windows, so that a
+    // window the host inflated cannot shrink the growth below (CI read 16.9 ms > 15 at 92e933d)
     await log(4, 0, 5);
-    const small = await stallOf();
+    let small = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < STALL_WINDOW_ATTEMPTS; i++) small = Math.min(small, await stallOf(50));
     // the full log: every window week at the per-week cap
     for (const week of [1, 2, 3]) await log(week, 0, PER_WEEK);
     await log(4, 5, PER_WEEK);
-    const full = await stallOf();
+    const full = await stallOf(Math.min(50, small + GROWTH_MAX_MS));
     process.stdout.write(
       `retrospective stall: ${small.toFixed(1)} ms at 5 records, ${full.toFixed(1)} ms at ${String(4 * PER_WEEK)}\n`,
     );
