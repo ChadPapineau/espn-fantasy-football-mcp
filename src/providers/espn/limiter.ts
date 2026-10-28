@@ -8,6 +8,7 @@
 // "each request inserts a row"), the circuit breaker (open 5 min after 3 consecutive 5xx / 429 /
 // timeouts / network failures — plan 05 §4.1 — in process AND derived from the persisted
 // outcomes, so a second process sees it), and the backoff schedule (1, 2, 4, 8 s, ±25 % jitter).
+import { stampedAhead } from "../../config/freshness.js";
 import {
   ESPN_BACKOFF,
   ESPN_BREAKER,
@@ -150,7 +151,13 @@ const IN_FLIGHT_SCAN_ROWS = ESPN_LIMITER.perMinute;
 
 /**
  * Requests in flight in EVERY process at `nowMs`: the `pending` rows (recorded, outcome not yet
- * written) of the last IN_FLIGHT_MAX_AGE_MS, newest first as `recentOutcomes` returns them. Pure.
+ * written) of the last IN_FLIGHT_MAX_AGE_MS, newest first as `recentOutcomes` returns them. A row
+ * stamped past `nowMs` (stampedAhead: a clock since set back — src/store/repos/skew.ts) is no
+ * evidence of a request in flight now and is left out: counted, two such rows from a process that
+ * crashed while the clock ran fast refused every send `concurrency` until real time passed their
+ * stamps (Stage C finding store-future-stamped-rows-block). The send this lets through reaches
+ * tryRecord, which re-stamps them to its own instant: from then they hold a slot 30 s, never the
+ * skew. Pure.
  */
 export function inFlightOf(
   newestFirst: readonly { readonly at: string; readonly outcome: RequestOutcome }[],
@@ -159,7 +166,8 @@ export function inFlightOf(
   let n = 0;
   for (const r of newestFirst) {
     const at = Date.parse(r.at);
-    if (!Number.isFinite(at) || nowMs - at > IN_FLIGHT_MAX_AGE_MS) continue;
+    if (!Number.isFinite(at) || nowMs - at > IN_FLIGHT_MAX_AGE_MS || stampedAhead(at, nowMs))
+      continue;
     if (r.outcome === "pending") n++;
   }
   return n;

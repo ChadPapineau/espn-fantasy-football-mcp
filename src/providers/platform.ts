@@ -14,7 +14,12 @@ import type {
   SeedingMode,
   Toolset,
 } from "../config/schema.js";
-import type { Freshness, License, SourceErrorCode } from "../config/freshness.js";
+import {
+  stampedAhead,
+  type Freshness,
+  type License,
+  type SourceErrorCode,
+} from "../config/freshness.js";
 import { BREAKER_FAILURE_OUTCOMES, ESPN_BREAKER, type RequestOutcome } from "../config/schema.js";
 import type {
   CommitTicket,
@@ -288,7 +293,10 @@ export const ESPN_BREAKER_FAILURE_OUTCOMES: readonly RequestOutcome[] = Object.f
  * `eff doctor` and a second server use, since the in-process breaker lives in another process:
  * open while the newest ESPN_BREAKER.failures outcomes are all failures (ESPN_BREAKER_FAILURE_
  * OUTCOMES) and the newest of them is less than ESPN_BREAKER.openMs old. `pending` rows (in
- * flight) are skipped. Pure.
+ * flight) are skipped, and so is a row stamped past `nowMs` (stampedAhead: a clock since set back —
+ * src/store/repos/skew.ts): its instant is unknown, so it is neither "newest" nor evidence of a
+ * breaker to hold — read as stamped, three failures recorded 3 h fast held the breaker open 3 h 5
+ * min and every read refused (Stage C finding store-future-stamped-rows-block). Pure.
  */
 export function breakerFromOutcomes(
   newestFirst: readonly { readonly at_ms: number; readonly outcome: RequestOutcome }[],
@@ -297,7 +305,7 @@ export function breakerFromOutcomes(
   let consecutive = 0;
   let newestFailureMs: number | null = null;
   for (const r of newestFirst) {
-    if (r.outcome === "pending") continue;
+    if (r.outcome === "pending" || stampedAhead(r.at_ms, nowMs)) continue;
     if (!ESPN_BREAKER_FAILURE_OUTCOMES.includes(r.outcome)) break;
     consecutive++;
     newestFailureMs ??= r.at_ms;

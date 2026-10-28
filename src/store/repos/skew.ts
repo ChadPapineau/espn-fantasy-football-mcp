@@ -26,7 +26,7 @@
 // stamped and read no clock: the judgement of an instant past now belongs to the code doing the
 // time arithmetic, which already holds the instant it compares against — the in-flight pre-check's
 // request instant (providers/espn/limiter.ts inFlightOf), the derived breaker's now (platform.ts
-// breakerFromOutcomes), a cached copy's freshness (config/freshness.ts stampState, from the
+// breakerFromOutcomes), a cached copy's freshness (config/freshness.ts storedCopyState, from the
 // provider). Such a row is left out of the arithmetic: it is no evidence of a request in flight
 // now, nor of a breaker to hold, and the send that follows reaches tryRecord, which re-stamps it —
 // from then it holds a slot 30 s, or counts as a failure 5 min, never the skew. A copy fetched
@@ -34,6 +34,7 @@
 // the provider keeps, may be read whatever its age). Judged here instead, every read would need a
 // fresh clock read (a reading kept from earlier is itself ahead once the clock is set back), and
 // the cache could not tell an immutable copy or a kept fact from an age-based copy.
+import { FUTURE_STAMP_TOLERANCE_MS } from "../../config/freshness.js";
 import { BUSY_TIMEOUT_MS } from "../types.js";
 
 /**
@@ -41,8 +42,9 @@ import { BUSY_TIMEOUT_MS } from "../types.js";
  * legitimate row is stamped no later than now — a row is stamped before it is inserted, and an
  * insert another process made is visible only once committed — so this only absorbs a sub-second
  * clock adjustment. A stamp further ahead was written under a clock that has since been set back.
+ * Defined beside the freshness rules (config/freshness.ts), which the readers judge by too.
  */
-export const FUTURE_STAMP_TOLERANCE_MS = 1_000;
+export { FUTURE_STAMP_TOLERANCE_MS };
 
 /** The largest stamp read as written at `nowMs` (the store's clock); a later one is skewed. */
 export function latestTrustedMs(nowMs: number): number {

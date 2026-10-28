@@ -13,7 +13,7 @@
 // sent while certificate verification is off process-wide.
 import {
   serveDecision,
-  stampState,
+  storedCopyState,
   DEFAULT_TTL_CONTEXT,
   type FreshnessClass,
   type TtlContext,
@@ -386,8 +386,13 @@ export class EspnRequester {
     }
   }
 
+  /**
+   * A cached entry's state at the live clock: a copy fetched past now (a clock since set back) has
+   * an unknown age and is never served as fresh (storedCopyState; Stage C finding
+   * store-future-stamped-rows-block).
+   */
   private stateOf(cls: FreshnessClass, e: EspnCacheEntry) {
-    return stampState(
+    return storedCopyState(
       cls,
       { as_of: e.server_time ?? e.fetched_at, fetched_at: e.fetched_at, checked_at: null },
       this.deps.clock.nowMs(),

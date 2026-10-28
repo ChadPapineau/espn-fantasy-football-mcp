@@ -7,7 +7,7 @@
 // case here failed before the fix; the tool-level case is the finding's own repro (a fixture world:
 // one request stamped 3 h ahead → espn_get_league RATE_LIMITED for 10 801 s, 0 upstream requests).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { limiterRequest } from "../../src/providers/espn/limiter.js";
+import { IN_FLIGHT_MAX_AGE_MS, limiterRequest, trySlot } from "../../src/providers/espn/limiter.js";
 import { pruneStore } from "../../src/store/prune.js";
 import { REQUEST_SKEW_TOLERANCE_MS } from "../../src/store/repos/skew.js";
 import type { LimiterRequest, Store } from "../../src/store/types.js";
@@ -308,6 +308,80 @@ describe("the tools after a backward clock correction (the finding's repro)", ()
       expect(pruneStore(world.store, { files: false }).restamped).toEqual({ espn_requests: 1 });
       const roster = await call(client, "espn_get_roster", {});
       expect(roster.isError, JSON.stringify(roster.body).slice(0, 300)).toBe(false);
+    } finally {
+      await close();
+      world.cleanup();
+    }
+  }, 120_000);
+
+  // the readers' half (src/store/repos/skew.ts names them): the in-flight pre-check, the derived
+  // breaker and a cached copy's freshness judge an instant past now themselves (config/freshness.ts
+  // stampedAhead) — the store hands such rows out as stamped
+  it("two pending rows a crashed process stamped 3 h fast hold a slot 30 s, never the 3 h: espn_get_league then answers (the in-flight pre-check)", async () => {
+    const world = await makeWorld({ league: "league-b" });
+    const { client, close } = await connect(world);
+    try {
+      for (const ms of [3 * HOUR, 3 * HOUR + 1100])
+        expect(world.store.repos.limiter.tryRecord(send(world.clock.nowMs() + ms)).ok).toBe(true);
+      // the next send's pre-check reads them as no evidence (before: refused `concurrency` here,
+      // so tryRecord — which re-stamps them — was never reached and they held both slots 3 h); the
+      // store then counts them as in flight just now
+      expect(trySlot(world.store.repos.limiter, send(world.clock.nowMs()))).toMatchObject({
+        ok: false,
+        reason: "concurrency",
+      });
+      world.clock.advance(IN_FLIGHT_MAX_AGE_MS + 1000);
+      const before = world.requests.length;
+      const league = await call(client, "espn_get_league", {});
+      expect(league.isError, JSON.stringify(league.body).slice(0, 300)).toBe(false);
+      expect(world.requests.length).toBeGreaterThan(before);
+    } finally {
+      await close();
+      world.cleanup();
+    }
+  }, 120_000);
+
+  it("three failures recorded 3 h fast hold no breaker: espn_get_league is sent and answers, status reads it closed", async () => {
+    const world = await makeWorld({ league: "league-b" });
+    const { client, close } = await connect(world);
+    try {
+      for (const ms of [3 * HOUR, 3 * HOUR + 1100, 3 * HOUR + 2200]) {
+        const v = world.store.repos.limiter.tryRecord(send(world.clock.nowMs() + ms));
+        if (!v.ok) throw new Error("refused");
+        world.store.repos.limiter.recordOutcome(v.id, "server_error");
+      }
+      const before = world.requests.length;
+      const league = await call(client, "espn_get_league", {});
+      expect(league.isError, JSON.stringify(league.body).slice(0, 300)).toBe(false);
+      expect(world.requests.length).toBeGreaterThan(before);
+      const st = await call(client, "espn_get_status", {});
+      expect(st.isError).toBe(false);
+      expect((st.body.data as { limiter: { breaker_open: boolean } }).limiter.breaker_open).toBe(
+        false,
+      );
+    } finally {
+      await close();
+      world.cleanup();
+    }
+  }, 120_000);
+
+  it("a copy cached while the clock ran 3 h fast is never served fresh: espn_get_league refetches it", async () => {
+    const world = await makeWorld({ league: "league-b" });
+    const { client, close } = await connect(world);
+    try {
+      world.clock.advance(3 * HOUR);
+      const fast = await call(client, "espn_get_league", {});
+      expect(fast.isError).toBe(false);
+      // the correction: the clock is set back 3 h; the cached copy now reads as fetched in the future
+      world.clock.advance(-3 * HOUR);
+      const before = world.requests.length;
+      const again = await call(client, "espn_get_league", {});
+      expect(again.isError, JSON.stringify(again.body).slice(0, 300)).toBe(false);
+      // refetched — before, a cache hit labelled fresh with age_s 0 and a fetched_at 3 h ahead
+      expect(world.requests.length).toBeGreaterThan(before);
+      const meta = again.body.meta as { fetched_at: string; freshness: string };
+      expect(Date.parse(meta.fetched_at)).toBeLessThanOrEqual(world.clock.nowMs() + 1000);
+      expect(meta.freshness).toBe("fresh");
     } finally {
       await close();
       world.cleanup();

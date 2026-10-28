@@ -437,6 +437,31 @@ describe("EspnLimiter", () => {
     ).toBe(2);
     expect(inFlightOf([], T0)).toBe(0);
   });
+  it("inFlightOf leaves out a row stamped past now: no evidence of a request in flight (Stage C store-future-stamped-rows-block)", () => {
+    const ahead = (ms: number): string => new Date(T0 + ms).toISOString();
+    // a process that crashed while the clock ran 3 h fast left two pending rows: before, they held
+    // both slots — every send refused `concurrency` — until real time passed their stamps
+    expect(
+      inFlightOf(
+        [
+          { at: ahead(3 * 3_600_000), outcome: "pending" },
+          { at: ahead(3 * 3_600_000 - 1000), outcome: "pending" },
+        ],
+        T0,
+      ),
+    ).toBe(0);
+    // within a clock adjustment of now a row reads as written, and a live one beside it counts
+    expect(
+      inFlightOf(
+        [
+          { at: ahead(600_000), outcome: "pending" },
+          { at: ahead(800), outcome: "pending" },
+          { at: new Date(T0 - 500).toISOString(), outcome: "pending" },
+        ],
+        T0,
+      ),
+    ).toBe(2);
+  });
   it("trySlot: the one rule every recorder takes its slot by (in-flight cap first, then the bucket)", () => {
     const repo = new MemoryLimiterRepo();
     // two live requests anywhere: refused `concurrency`, nothing written, the poll interval as wait
@@ -604,6 +629,28 @@ describe("Stage C: the in-flight cap is decided inside the store's transaction; 
       // first is that old, one slot is free again
       expect(
         trySlot(stale, limiterRequest(T0 - 4000 + IN_FLIGHT_MAX_AGE_MS + 1, false, "server")),
+      ).toMatchObject({ ok: true });
+    } finally {
+      s.close();
+    }
+  });
+
+  it("store-future-stamped-rows-block: two pending rows a crashed process stamped 3 h fast hold no slot — the send is admitted and they then hold one 30 s", () => {
+    const s = realStore();
+    try {
+      // a process recorded two sends while the clock ran 3 h fast and died before their outcomes
+      for (const ms of [3 * 3_600_000, 3 * 3_600_000 + 1100])
+        expect(s.repo.tryRecord(limiterRequest(T0 + ms, true, "job")).ok).toBe(true);
+      // after the correction: the pre-check reads them as no evidence, the store re-stamps them to
+      // this request's instant inside its transaction — they then count as in flight just now
+      expect(trySlot(s.repo, limiterRequest(T0, false, "server"))).toEqual({
+        ok: false,
+        reason: "concurrency",
+        retry_after_ms: IN_FLIGHT_POLL_MS,
+      });
+      // …for IN_FLIGHT_MAX_AGE_MS (30 s), never the 3 h of the skew
+      expect(
+        trySlot(s.repo, limiterRequest(T0 + IN_FLIGHT_MAX_AGE_MS + 1, false, "server")),
       ).toMatchObject({ ok: true });
     } finally {
       s.close();

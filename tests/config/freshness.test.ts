@@ -11,6 +11,7 @@ import {
   DEFAULT_TTL_CONTEXT,
   FRESHNESS_CLASS_IDS,
   FRESHNESS_TABLE,
+  FUTURE_STAMP_TOLERANCE_MS,
   LICENSES,
   REFRESH_JOBS,
   SOURCE_REGISTRY,
@@ -25,6 +26,8 @@ import {
   serveDecision,
   sourcesOfJob,
   stampState,
+  stampedAhead,
+  storedCopyState,
   ttlFor,
   worseFreshness,
   type FreshnessClassId,
@@ -182,6 +185,78 @@ describe("stampState: the basis picks the instant", () => {
       RangeError,
     );
     expect(() => stampState(FRESHNESS_TABLE.espn_roster, t, Number.NaN)).toThrow(RangeError);
+  });
+});
+
+describe("storedCopyState: a copy stamped past now has an unknown age (Stage C store-future-stamped-rows-block)", () => {
+  const now = Date.parse("2026-10-05T12:00:00Z");
+  const inGameCtx: TtlContext = { ...DEFAULT_TTL_CONTEXT, inGameWindow: true };
+  const copy = (fetched: string) => ({
+    as_of: "2026-10-05T11:59:00Z",
+    fetched_at: fetched,
+    checked_at: null,
+  });
+  it("within the clock tolerance a copy reads as written: age 0, fresh — as stampState", () => {
+    const t = copy("2026-10-05T12:00:00.800Z");
+    expect(storedCopyState(FRESHNESS_TABLE.espn_roster, t, now)).toEqual(
+      stampState(FRESHNESS_TABLE.espn_roster, t, now),
+    );
+    expect(storedCopyState(FRESHNESS_TABLE.espn_roster, t, now).state).toBe("fresh");
+  });
+  it("30 s or 3 h ahead: never fresh — stale (refetched, or served degraded), whatever the class's TTL", () => {
+    for (const fetched of ["2026-10-05T12:00:30Z", "2026-10-05T15:00:00Z"]) {
+      const t = copy(fetched);
+      expect(storedCopyState(FRESHNESS_TABLE.espn_roster, t, now)).toEqual({
+        state: "stale",
+        basis_at: new Date(Date.parse(fetched)).toISOString(),
+        age_s: 0,
+      });
+      // a live score in a game window: refetched, never frozen as fresh
+      expect(storedCopyState(FRESHNESS_TABLE.espn_live, t, now, inGameCtx).state).toBe("stale");
+      expect(storedCopyState(FRESHNESS_TABLE.espn_settings, t, now).state).toBe("stale");
+    }
+    // the release basis: a check stamped ahead is no evidence the release is current
+    expect(
+      storedCopyState(
+        FRESHNESS_TABLE.nflverse_injuries,
+        {
+          as_of: "2026-10-05T11:00:00Z",
+          fetched_at: "2026-10-05T11:00:00Z",
+          checked_at: "2026-10-05T15:00:00Z",
+        },
+        now,
+      ).state,
+    ).toBe("stale");
+  });
+  it("an age past the hard limit stays expired, and every copy behind now is judged as stampState judges it", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...FRESHNESS_CLASS_IDS),
+        fc.integer({ min: 0, max: 30 * 86_400 }),
+        (id, agoS) => {
+          const t = copy(new Date(now - agoS * 1000).toISOString());
+          expect(storedCopyState(FRESHNESS_TABLE[id], t, now)).toEqual(
+            stampState(FRESHNESS_TABLE[id], t, now),
+          );
+        },
+      ),
+    );
+  });
+  it("an immutable copy stamped ahead is still fresh: its age never mattered", () => {
+    const immutable = FRESHNESS_CLASS_IDS.map((id) => FRESHNESS_TABLE[id]).filter(
+      (c) => c.basis === "immutable",
+    );
+    expect(immutable.length).toBeGreaterThan(0);
+    for (const c of immutable)
+      expect(storedCopyState(c, copy("2026-10-05T15:00:00Z"), now).state).toBe("fresh");
+  });
+  it("stampedAhead: past the tolerance only, and never for a non-finite instant", () => {
+    expect(FUTURE_STAMP_TOLERANCE_MS).toBe(1_000);
+    expect(stampedAhead(now + FUTURE_STAMP_TOLERANCE_MS, now)).toBe(false);
+    expect(stampedAhead(now + FUTURE_STAMP_TOLERANCE_MS + 1, now)).toBe(true);
+    expect(stampedAhead(now - 3_600_000, now)).toBe(false);
+    expect(stampedAhead(Number.NaN, now)).toBe(false);
+    expect(stampedAhead(now + 5_000, Number.NaN)).toBe(false);
   });
 });
 

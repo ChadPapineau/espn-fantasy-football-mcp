@@ -292,6 +292,33 @@ describe("B4/B5: transport policy constants and the breaker derived from outcome
         .breaker_open,
     ).toBe(false);
   });
+  it("a row stamped past now (a clock since set back) is neither newest nor a failure to hold (Stage C store-future-stamped-rows-block)", () => {
+    const ahead = (ms: number, outcome: RequestOutcome) => ({ at_ms: T + ms, outcome });
+    const H3 = 3 * 3_600_000;
+    // three failures recorded 3 h fast: before, open until 3 h 5 min from now
+    expect(
+      breakerFromOutcomes(
+        [ahead(H3, "timeout"), ahead(H3 - 1000, "server_error"), ahead(H3 - 2000, "timeout")],
+        T,
+      ),
+    ).toEqual({ breaker_open: false, breaker_open_until: null, consecutive_failures: 0 });
+    // the real rows below them still decide: three real failures open it from the newest real one
+    expect(
+      breakerFromOutcomes(
+        [ahead(H3, "ok"), row(1000, "timeout"), row(2000, "timeout"), row(3000, "rate_limited")],
+        T,
+      ),
+    ).toEqual({
+      breaker_open: true,
+      breaker_open_until: new Date(T - 1000 + 300_000).toISOString(),
+      consecutive_failures: 3,
+    });
+    // within a clock adjustment of now a row reads as written
+    expect(
+      breakerFromOutcomes([ahead(800, "timeout"), row(1000, "timeout"), row(2000, "timeout")], T)
+        .breaker_open,
+    ).toBe(true);
+  });
 });
 
 describe("CAT-15: ops vocabularies", () => {

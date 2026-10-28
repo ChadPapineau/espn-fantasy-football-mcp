@@ -207,6 +207,25 @@ export function classifyAge(
 }
 
 /**
+ * How far past now a stored instant may lie and still be read as written (src/store/repos/skew.ts
+ * holds the rule; Stage C finding store-future-stamped-rows-block): every legitimate instant is
+ * stamped no later than now, so this absorbs only a sub-second clock adjustment. One further ahead
+ * was stamped under a clock since set back — when it really happened, and so its age, is unknown.
+ */
+export const FUTURE_STAMP_TOLERANCE_MS = 1_000;
+
+/**
+ * Whether an instant (epoch ms) lies further past `nowMs` than a clock adjustment explains: it was
+ * stamped under a clock since set back, and belongs in no time arithmetic — no age, no window, no
+ * "newest". False for a non-finite instant (its own caller refuses it).
+ */
+export function stampedAhead(atMs: number, nowMs: number): boolean {
+  return (
+    Number.isFinite(atMs) && Number.isFinite(nowMs) && atMs > nowMs + FUTURE_STAMP_TOLERANCE_MS
+  );
+}
+
+/**
  * The instants an input stamp carries: `as_of` content time, `fetched_at` fetch time,
  * `checked_at` last successful release/refresh check (release basis; null → `fetched_at`).
  */
@@ -250,6 +269,30 @@ export function stampState(
       : fetched;
   const age = Math.max(0, Math.floor((nowMs - basis) / 1000));
   return { state: classifyAge(cls, age, ctx), basis_at: new Date(basis).toISOString(), age_s: age };
+}
+
+/**
+ * A STORED copy judged at the live clock — whether a cache may serve it without a request: as
+ * stampState, except that a basis stamped past now (stampedAhead: a clock since set back —
+ * src/store/repos/skew.ts) has an unknown age, so a class whose state moves with age never reads it
+ * as `fresh`: it is `stale` — refetched when it can be, served only as a degraded (stale-labelled)
+ * copy when it cannot. An immutable copy, or a class without a TTL, is fresh whatever its age. Read
+ * as age 0 it was served fresh until real time passed its stamp — in a game window, a frozen live
+ * score labelled fresh (Stage C finding store-future-stamped-rows-block). Not for an input judged
+ * at a call's START instant (the envelope's labels): a read completed during the call is after it.
+ */
+export function storedCopyState(
+  cls: FreshnessClass,
+  t: StampInstants,
+  nowMs: number,
+  ctx: TtlContext = DEFAULT_TTL_CONTEXT,
+): StampState {
+  const st = stampState(cls, t, nowMs, ctx);
+  const unknownAge =
+    stampedAhead(Date.parse(st.basis_at), nowMs) &&
+    cls.basis !== "immutable" &&
+    ttlFor(cls, ctx) !== null;
+  return unknownAge && st.state === "fresh" ? { ...st, state: "stale" } : st;
 }
 
 /** What a tool does with an input in a given state (plan 01 §5.4, §5.7, §7). */
