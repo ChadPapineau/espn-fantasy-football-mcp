@@ -16,6 +16,7 @@
 import type { Config, LenientConfig } from "../config/schema.js";
 import { CHECKED_IN_OVERRIDES } from "../domain/crosswalk/overrides.js";
 import { rebuildCrosswalk } from "../domain/crosswalk/rebuild.js";
+import { snapshotLeagueRostered } from "../domain/crosswalk/rostered.js";
 import {
   statusCounts,
   type CrosswalkDiagnostic,
@@ -91,8 +92,24 @@ export function diagnosticsLine(diagnostics: readonly CrosswalkDiagnostic[]): st
   return `  diagnostics: ${parts.join("; ")}`;
 }
 
-/** ESPN ids on the user's team in its newest roster snapshot (the alert's "rostered" set). */
-export function rosteredIds(store: Store, teamId: number | null): ReadonlySet<number> {
+/**
+ * The alert's "rostered" set: the ESPN ids on EVERY league roster in the store's newest roster-
+ * snapshot run (research 04 §C step 5: "ESPN ids on any fantasy roster of the league") — the set
+ * espn_get_status counts by when no roster is cached (domain/crosswalk/rostered.ts, one rule for
+ * both). Before, it held the user's own team only: a rival's rostered, under-1 %-owned player without
+ * a pair was never alerted, and status and the alert disagreed on one store (Stage C finding
+ * status-crosswalk-counts-disagree-alert). Empty when no snapshot exists or the store cannot answer.
+ */
+export function rosteredIds(store: Store): ReadonlySet<number> {
+  try {
+    return snapshotLeagueRostered(store.repos.rosterSnapshots) ?? new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+/** The ESPN ids on the user's own team in its newest roster snapshot (listed first in the alert). */
+export function ownRosteredIds(store: Store, teamId: number | null): ReadonlySet<number> {
   if (teamId === null) return new Set();
   try {
     const [latest] = store.repos.rosterSnapshots.latestTwo(teamId);
@@ -102,14 +119,19 @@ export function rosteredIds(store: Store, teamId: number | null): ReadonlySet<nu
   }
 }
 
-/** The alerted ids in listing order: the user's rostered players first, each group ascending. */
+/**
+ * The alerted ids in listing order: the user's own players first, then the rest of the league's
+ * rostered players, then the ≥ 1 %-owned ones — each group in its given order.
+ */
 export function alertOrder(
   espnIds: readonly number[],
   rostered: ReadonlySet<number>,
+  own: ReadonlySet<number> = new Set(),
 ): readonly number[] {
   return [
-    ...espnIds.filter((id) => rostered.has(id)),
-    ...espnIds.filter((id) => !rostered.has(id)),
+    ...espnIds.filter((id) => own.has(id)),
+    ...espnIds.filter((id) => !own.has(id) && rostered.has(id)),
+    ...espnIds.filter((id) => !own.has(id) && !rostered.has(id)),
   ];
 }
 
@@ -132,7 +154,8 @@ export async function runCrosswalkRebuild(
   notifier: Notifier | null,
   opts: { readonly all?: boolean } = {},
 ): Promise<CrosswalkOutcome> {
-  const rostered = rosteredIds(store, config.teamId);
+  const rostered = rosteredIds(store);
+  const own = ownRosteredIds(store, config.teamId);
   let r;
   try {
     r = rebuildCrosswalk({
@@ -175,7 +198,7 @@ export async function runCrosswalkRebuild(
       `→ ${String(r.run.alert.count)} rostered or ≥ 1 %-owned ESPN player(s) lack a confident nflverse pair:`,
     );
     const byId = new Map(r.run.resolved.map((p) => [p.espn_id, p]));
-    const ordered = alertOrder(r.run.alert.espn_ids, rostered);
+    const ordered = alertOrder(r.run.alert.espn_ids, rostered, own);
     const shown = opts.all === true ? ordered : ordered.slice(0, MAX_ALERT_LINES);
     for (const id of shown) {
       const p = byId.get(id);

@@ -18,6 +18,10 @@ import {
   type FreshnessClassId,
 } from "../../config/freshness.js";
 import { CREDENTIAL_STATES, DRIFT_STATUSES, SEEDING_MODES, TOOLSETS } from "../../config/schema.js";
+import {
+  SNAPSHOT_TEAM_PROBE_MAX,
+  snapshotLeagueRostered,
+} from "../../domain/crosswalk/rostered.js";
 import { TOP_OWNED_PERCENT } from "../../domain/crosswalk/types.js";
 import { CHECK_IDS, type CheckRow } from "../../domain/league/types.js";
 import {
@@ -311,7 +315,7 @@ export type G1SourceRow = Omit<StatusData["sources"][number], "last_error"> & {
 export const LOOKUPS_PER_TURN = 100;
 
 /** The highest team id G1 probes the store's roster snapshots for (ESPN leagues hold ≤ 20 teams). */
-export const SNAPSHOT_TEAM_PROBE_MAX = 40;
+export { SNAPSHOT_TEAM_PROBE_MAX };
 
 /**
  * The rostered players of EVERY league roster (research 04 §C step 5: "ESPN ids on any fantasy
@@ -330,19 +334,8 @@ async function leagueRostered(
       return new Set(rosters.value.flatMap((r) => r.entries.map((e) => e.player.ref.id)));
   }
   try {
-    const runs: { taken: number; ids: number[] }[] = [];
-    for (let t = 1; t <= SNAPSHOT_TEAM_PROBE_MAX; t++) {
-      const snap = s.rosterSnapshots.latestTwo(t)[0];
-      if (snap === undefined) continue;
-      runs.push({
-        taken: Date.parse(snap.taken_at),
-        ids: snap.roster.entries.map((e) => e.player.ref.id),
-      });
-    }
-    if (runs.length === 0) return null;
-    // the newest run only: a team's older snapshot is no longer its roster
-    const newest = Math.max(...runs.map((r) => r.taken));
-    return new Set(runs.filter((r) => r.taken === newest).flatMap((r) => r.ids));
+    // the rebuild alert's own set (domain/crosswalk/rostered.ts): the newest run of every team
+    return snapshotLeagueRostered(s.rosterSnapshots);
   } catch {
     return null;
   }

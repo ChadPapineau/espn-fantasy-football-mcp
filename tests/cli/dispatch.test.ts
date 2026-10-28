@@ -426,6 +426,10 @@ describe("crosswalk rebuild — done path and the alert", () => {
     expect(alertOrder([1, 2, 3, 4, 5], new Set([4, 2]))).toEqual([2, 4, 1, 3, 5]);
     expect(alertOrder([], new Set([1]))).toEqual([]);
     expect(alertOrder([3, 1], new Set())).toEqual([3, 1]);
+    // the owner's own players first, then the rest of the league's rostered, then the top-owned
+    expect(alertOrder([1, 2, 3, 4, 5, 6], new Set([2, 4, 5]), new Set([5, 6]))).toEqual([
+      5, 6, 2, 4, 1, 3,
+    ]);
   });
   it("the summary counts the players matched only by name — the ones the alert lists though matched", () => {
     sb = sandbox();

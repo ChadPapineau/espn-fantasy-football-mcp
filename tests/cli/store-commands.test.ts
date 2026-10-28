@@ -13,7 +13,7 @@ import {
   prune,
   resolveBackupDestination,
 } from "../../src/cli/maintenance.js";
-import { runCrosswalkRebuild, rosteredIds } from "../../src/cli/crosswalk.js";
+import { ownRosteredIds, runCrosswalkRebuild, rosteredIds } from "../../src/cli/crosswalk.js";
 import { loadLenientRuntime, loadRuntime } from "../../src/cli/runtime.js";
 import {
   collectStatus,
@@ -303,8 +303,9 @@ describe("crosswalk rebuild", () => {
     const r = await runCrosswalkRebuild(io, config, store, log, null);
     expect(r).toMatchObject({ code: 0, alert: false });
     expect(r.lines[0]).toContain("skipped: roster_weekly_never_loaded");
-    expect(rosteredIds(store, null).size).toBe(0);
-    expect(rosteredIds(store, 3).size).toBe(0);
+    expect(rosteredIds(store).size).toBe(0);
+    expect(ownRosteredIds(store, null).size).toBe(0);
+    expect(ownRosteredIds(store, 3).size).toBe(0);
     store.close();
     const cli = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0" } });
     expect(await main(["crosswalk", "rebuild"], cli)).toBe(0);

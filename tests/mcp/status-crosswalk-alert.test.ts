@@ -6,10 +6,14 @@
 // status-crosswalk-counts-disagree-alert: cold, status read 0 and 0 (no cached rosters; the top-owned
 // count read the free-agent pool snapshot, absent here); warm, it counted every roster while the
 // rebuild alerted on the owner's team only. The alert here is the domain rebuild itself run over the
-// same store with every league roster as its rostered set. League-a (team 1), `full`, the nflverse
-// excerpts published through the real runner (most of the index stays unpaired); no network.
+// same store with every league roster as its rostered set, and — last — `eff crosswalk rebuild`'s
+// own run (src/cli/crosswalk.ts), whose rostered set must be every league roster too. League-a
+// (team 1), `full`, the nflverse excerpts published through the real runner (most of the index stays
+// unpaired); no network.
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ownRosteredIds, rosteredIds, runCrosswalkRebuild } from "../../src/cli/crosswalk.js";
+import type { CliIo } from "../../src/cli/io.js";
 import { CHECKED_IN_OVERRIDES } from "../../src/domain/crosswalk/overrides.js";
 import { rebuildCrosswalk } from "../../src/domain/crosswalk/rebuild.js";
 import type { Roster } from "../../src/domain/league/types.js";
@@ -124,5 +128,61 @@ describe("G1's crosswalk counts agree with the rebuild's alert (Stage C status-c
     } finally {
       await c.close();
     }
+  });
+
+  it("`eff crosswalk rebuild` itself alerts on every league roster and reports G1's counts on the same store", async () => {
+    const rosters = await allRosters();
+    world.clock.advance(60_000);
+    const takenAt = world.clock.nowIso();
+    for (const x of rosters)
+      world.store.repos.rosterSnapshots.put({
+        team_id: x.team.team_id,
+        week: x.week,
+        taken_at: takenAt,
+        roster: x,
+      });
+    const league = new Set(rosters.flatMap((x) => x.entries.map((e) => e.player.ref.id)));
+    const mine = new Set(
+      rosters
+        .filter((x) => x.team.team_id === 1)
+        .flatMap((x) => x.entries.map((e) => e.player.ref.id)),
+    );
+    // the rebuild's rostered set is the league's, not the owner's team
+    expect(rosteredIds(world.store)).toEqual(league);
+    expect(ownRosteredIds(world.store, 1)).toEqual(mine);
+    expect(league.size).toBeGreaterThan(mine.size);
+    // G1 with only the snapshots readable (a new session), then the CLI's own run
+    const s = faulty(world.services, {
+      getRosters: () => Promise.reject(new Error("no cache")),
+    });
+    const c = await connect(world, { options: { toolset: "full" }, services: s });
+    let got: Counts;
+    try {
+      got = (await status(c.client)).counts;
+    } finally {
+      await c.close();
+    }
+    const run = await runCrosswalkRebuild(
+      { clock: world.clock } as unknown as CliIo,
+      { season: SEASON, teamId: 1 },
+      world.store,
+      world.logger,
+      null,
+      { all: true },
+    );
+    expect(run.code).toBe(0);
+    const m = /, (\d+) rostered and (\d+) top-owned unmatched$/.exec(run.lines[0] ?? "");
+    expect(m, run.lines[0]).not.toBeNull();
+    expect(Number(m?.[1])).toBe(got.unmatched_rostered);
+    expect(Number(m?.[2])).toBe(got.unmatched_top_owned);
+    // a rival's rostered player without a pair is alerted as rostered, the owner's own listed first
+    const listed = run.lines.filter((l) => l.startsWith("    espn "));
+    const idOf = (l: string): number => Number(/^ {4}espn (\d+) /.exec(l)?.[1]);
+    const rival = listed.filter((l) => l.includes("(rostered)") && !mine.has(idOf(l)));
+    expect(rival.length).toBeGreaterThan(0);
+    for (const l of rival) expect(league.has(idOf(l))).toBe(true);
+    const firstOther = listed.findIndex((l) => !mine.has(idOf(l)));
+    const lastMine = listed.reduce((at, l, i) => (mine.has(idOf(l)) ? i : at), -1);
+    expect(lastMine).toBeLessThan(firstOther === -1 ? Infinity : firstOther);
   });
 });
