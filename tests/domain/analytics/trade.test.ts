@@ -29,7 +29,7 @@ import {
   referenceSlots,
   steppingPacer,
 } from "./helpers.js";
-import { SLOT, WEEKS, tp, tradeRoster } from "./p1-helpers.js";
+import { SLOT, WEEK, WEEKS, tp, tradeRoster } from "./p1-helpers.js";
 
 const name = (s: string) => wrapUntrusted(s, "espn.team.name");
 
@@ -82,6 +82,7 @@ function req(over: Partial<TradeRequest> = {}): TradeRequest {
     roster: referenceSlots(),
     rules: referenceRules(),
     weeks: WEEKS,
+    as_of_week: WEEK,
     me: ME,
     teams: [PARTNER, ...OTHERS],
     offer: { partner_team_id: 2, give: [102], get: [204] },
@@ -543,5 +544,55 @@ describe("Stage C: one CPU budget per call (analytics-cpu-deadline-per-run)", ()
       req({ pacer: steppingPacer(5), deadline_ms: null, n_sims: 200 }),
     );
     expect(all.partial).toBe(false);
+  });
+});
+
+describe("the health multiplier counts from the week ESPN's status describes (Stage C trade-locked-week-counted)", () => {
+  // E6 leaves out a current week a trade cannot reach (locked players, the review period): the value
+  // weeks then start NEXT week, while every ESPN injury status still describes this week. Judged by
+  // its index, the first value week was valued under this week's rule — a doubtful player at his
+  // status's 6 % and no weekly miss — so leaving out a week re-priced every other week's health.
+  const doubtful = (t: TradeTeam, id: number): TradeTeam => ({
+    ...t,
+    players: t.players.map((p) => (p.player_id === id ? { ...p, injury_status: "DOUBTFUL" } : p)),
+  });
+  const fromSecondWeek = (t: TradeTeam): TradeTeam => ({
+    ...t,
+    players: t.players.map((p) => ({ ...p, weekly: p.weekly.slice(1) })),
+  });
+  const me = doubtful(ME, 102);
+  const partner = doubtful(PARTNER, 204);
+
+  it("leaving out the as-of week never re-prices the others: week 5 is a week after the status, not its week", async () => {
+    const all = await evaluation({ me, teams: [partner, ...OTHERS], as_of_week: WEEK });
+    const later = await evaluation({
+      weeks: WEEKS.slice(1),
+      as_of_week: WEEK,
+      me: fromSecondWeek(me),
+      teams: [partner, ...OTHERS].map(fromSecondWeek),
+    });
+    expect(later.weekly_impact.map((x) => x.week)).toEqual(WEEKS.slice(1));
+    expect(later.weekly_impact).toEqual(all.weekly_impact.slice(1));
+    // the as-of week itself is judged by the status alone: week 5 read as the status's week differs
+    const asIfStatusWeek = await evaluation({
+      weeks: WEEKS.slice(1),
+      as_of_week: WEEKS[1] ?? WEEK,
+      me: fromSecondWeek(me),
+      teams: [partner, ...OTHERS].map(fromSecondWeek),
+    });
+    expect(asIfStatusWeek.weekly_impact[0]).not.toEqual(later.weekly_impact[0]);
+  });
+
+  it("availability: the status's week by the status alone, a later week by its recovery and the weekly miss", () => {
+    const p = { position: "RB", injury_status: "DOUBTFUL" };
+    expect(availability(p, 0)).toBeCloseTo(0.059, 9);
+    expect(availability(p, 1)).toBeGreaterThan(availability(p, 0));
+  });
+
+  it("refuses an as-of week after the first value week, or not a week", async () => {
+    for (const as_of_week of [WEEK + 1, 0, 1.5, Number.NaN])
+      await expect(analyzeTrade(req({ as_of_week }))).rejects.toMatchObject({
+        code: "invalid_request",
+      });
   });
 });

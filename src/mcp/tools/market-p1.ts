@@ -649,6 +649,8 @@ export const analyzeTradeTool = defineTool({
       roster: b.slots,
       rules: b.rules,
       weeks,
+      // the week every player was read for: his ESPN status describes it, not the first value week
+      as_of_week: b.w,
       me: meTeam,
       teams: others,
       offer: args.offer ?? null,

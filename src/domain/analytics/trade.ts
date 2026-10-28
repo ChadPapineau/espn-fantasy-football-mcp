@@ -77,6 +77,15 @@ export interface TradeRequest {
   readonly rules: LeagueRules;
   /** The value weeks, ascending — the first week the traded players can play first. */
   readonly weeks: readonly Week[];
+  /**
+   * The week the players were read for — the week their ESPN injury statuses describe (the call's
+   * week, ≤ the first value week). Value week `w` is judged `w − as_of_week` weeks out by the health
+   * multiplier (`availability`): when E6 leaves out a current week the trade cannot reach, the first
+   * value week is NEXT week, and judging it as the week the status describes valued it under this
+   * week's rule — a doubtful player's whole status probability and no weekly miss (Stage C finding
+   * trade-locked-week-counted).
+   */
+  readonly as_of_week: Week;
   readonly me: TradeTeam;
   /** Every other team (the partner is found by id). */
   readonly teams: readonly TradeTeam[];
@@ -125,7 +134,11 @@ const nonNeg = (x: number | null | undefined): number =>
 const own = (p: TradePlayer): number => p.weekly.reduce<number>((s, v) => s + nonNeg(v), 0);
 const asc = (xs: readonly number[]): number[] => [...xs].sort((a, b) => a - b);
 
-/** Health-adjusted availability of a player in value week `wi` (sib §5.4; the roleHolds rule). */
+/**
+ * Health-adjusted availability of a player `wi` weeks after the week his ESPN status describes (sib
+ * §5.4; the roleHolds rule): that week (0) by his status alone, a later one by the status's recovery
+ * and the position's weekly miss rate.
+ */
 export function availability(
   p: Pick<TradePlayer, "position" | "injury_status">,
   wi: number,
@@ -156,6 +169,8 @@ interface Pass {
 interface Ctx {
   readonly seats: readonly number[];
   readonly weeks: readonly Week[];
+  /** The week the players' statuses describe (TradeRequest.as_of_week). */
+  readonly asOf: Week;
   readonly capacity: number;
   readonly irSeats: number;
   readonly eligible: Map<TradePlayer, ReadonlySet<number>>;
@@ -177,7 +192,8 @@ function fastOf(ctx: Ctx, p: TradePlayer, wi: number, pass: Pass): FastPlayer {
     ctx.eligible.set(p, eligible);
   }
   const base = nonNeg(p.weekly[wi]);
-  const h = pass.health ? availability(p, wi) : 1;
+  // value week wi is (week − as-of week) weeks after the week his status describes, never wi
+  const h = pass.health ? availability(p, (ctx.weeks[wi] ?? ctx.asOf) - ctx.asOf) : 1;
   const m = pass.mult?.get(p.player_id) ?? 1;
   return { eligible, value: base * h * m };
 }
@@ -577,6 +593,13 @@ function validate(req: TradeRequest): void {
     "value weeks must ascend",
     "weeks",
   );
+  ensure(
+    Number.isInteger(req.as_of_week) &&
+      req.as_of_week >= 1 &&
+      req.as_of_week <= (req.weeks[0] ?? 0),
+    "the as-of week must be a week no later than the first value week",
+    "weeks",
+  );
   for (const t of [req.me, ...req.teams])
     for (const p of t.players)
       ensure(
@@ -607,6 +630,7 @@ export async function analyzeTrade(req: TradeRequest): Promise<TradeOutcome> {
   const ctx: Ctx = {
     seats: seatPlan(req.roster),
     weeks: req.weeks,
+    asOf: req.as_of_week,
     capacity: req.roster.starters + req.roster.bench,
     irSeats: req.roster.ir,
     eligible: new Map(),

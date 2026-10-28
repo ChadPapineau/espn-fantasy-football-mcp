@@ -11,7 +11,7 @@ import { analyzeLeagueActivity } from "../../../src/domain/analytics/leagueActiv
 import { faabBid } from "../../../src/domain/analytics/faab.js";
 import { wrapUntrusted, type Transaction } from "../../../src/domain/league/types.js";
 import { bare, clockAndRng, instantPacer, referenceRules, referenceSlots } from "./helpers.js";
-import { RIVALS, WEEKS, rivalRoster, tradeRoster, waiverRequest, wc } from "./p1-helpers.js";
+import { RIVALS, WEEK, WEEKS, rivalRoster, tradeRoster, waiverRequest, wc } from "./p1-helpers.js";
 
 /** Every number reachable in a value is finite. */
 function finiteDeep(v: unknown, path = "$"): string[] {
@@ -38,6 +38,7 @@ describe("non-finite projected values", () => {
       roster: referenceSlots(),
       rules: referenceRules(),
       weeks: WEEKS,
+      as_of_week: WEEK,
       me: { team_id: 1, name: wrapUntrusted("Team 01", "espn.team.name"), players: me },
       teams: [{ team_id: 2, name: wrapUntrusted("Team 02", "espn.team.name"), players: partner }],
       offer: { partner_team_id: 2, give: [102, 110], get: [204] },
