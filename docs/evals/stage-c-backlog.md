@@ -374,7 +374,11 @@ the old single window, which fails on a loaded machine. The final gate's second 
 its worst stalls were 17.1 and 25.4 ms. Its third run read 41.6 ms for the parallel `full` calls
 (`tests/e2e/stall-parallel.test.ts`), within the bound and on the same code path the second run read
 25.4 ms on; fix round 3 adds no work there (`fx-10h` has one division, so the division-rule ranking
-of §B8 never runs).
+of §B8 never runs). At `8bd0931`, R8-6's fix, CI's process job read 83.4 ms over the `full` P1
+analytics window (`tests/e2e/latency.test.ts`). The helper did not excuse that window, so the job
+failed. The same build read 26.1 and 25.2 ms locally, and `a579917` read 24.5 ms on CI. R8-6 changed
+only the news matcher, which runs at refresh (and at the e2e seed, before the server starts), never
+inside a tool call. Re-running CI needs a push from this account.
 
 ## Closed by R8-4 — F8, division winners first
 
