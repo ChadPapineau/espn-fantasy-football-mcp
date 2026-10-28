@@ -580,7 +580,7 @@ These are not rulings: they record how the three rulings at the attempt cap were
 ## B6 — what the final gate's fix round 1 built (Stage C, 2026-10-28)
 
 These are not rulings. They record what the fixes to the independent final gate's problems added,
-each with tests that fail on the code before (commits `e40fd88` … `a7874b5`). What no agent change
+each with tests that fail on the code before (commits `e40fd88` … `7f39044`). What no agent change
 closes is in `docs/evals/stage-c-backlog.md`.
 
 - **G1's ages** · plan 07 G1 · A dataset source's and a freshness class's `age_s` are `ageSeconds`
@@ -607,7 +607,8 @@ closes is in `docs/evals/stage-c-backlog.md`.
 - **`eff refresh espn:drift`** · plan 01 §7, plan 06 §1.2 · It re-reads, once each, every view the
   stored drift row marks red, through the jobs' provider and limiter (read host; the stored
   credential when the league needs it). It clears what ESPN serves again and exits 4 while a view
-  stays red. `eff probe` prints the stored red diff (`--json`: `stored_red`, `recheck`). Doctor #9
+  stays red; a read that failed, or that the cache served because ESPN failed, is named not re-read
+  for every view it serves. `eff probe` prints the stored red diff (`--json`: `stored_red`, `recheck`). Doctor #9
   names the command for a red view the probe never reads. README CLI table, `eff help`.
 - **Doctor #14** · plan 03 §5 #14 · The server time adds the `Age` a cache in front of ESPN reports
   (RFC 9111 §5.1). A CDN copy's minutes-old Date read as clock skew on a correct clock.

@@ -24,7 +24,7 @@ and nothing secret ever lives in it.
 
 ## ▶ NEXT STEP — Stage C final gate: fix round 1 landed (2026-10-28); the orchestrator re-gates
 
-**State:** branch `build/phase-1`, from `04adb5f` (the gated HEAD) through `e40fd88` … `a7874b5`;
+**State:** branch `build/phase-1`, from `04adb5f` (the gated HEAD) through `e40fd88` … `7f39044`;
 tree clean, HEAD == origin. The independent final gate was RED. Fix round 1 fixed at root, each with
 a regression test that fails on the code before:
 
@@ -517,4 +517,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-10-25 — Stage C round 2, cross-cutting: rulings R7-3 (setup prompt), R7-4 (E10 attribution) and R7-5 (ROS wiring tests) carried out (changelog B5); re-verification next.
 - 2026-10-25 — Stage C round 3, repo-root: `docs-prebuild-markers-remain` fixed — SECURITY.md's scope, `docs/README.md` (the approval, the changelog's build sections, `evals/`, the build program) and this file's intro, finding 10, Program status and Open items describe the build; `.env.example` comments out `ESPN_SEASON` (README row with it). Held by `tests/lint/status-docs.test.ts` (pre-build words; HANDOFF's state sections, its iCloud and reading-order lines, the build stages; plan 10 §0's withdrawn estimate; the `docs/` index) and `tests/lint/env-example.test.ts` (the file's set lines resolve to the defaults in every season).
 - 2026-10-26 — Stage C paused at 90 % weekly usage in round 3: SDK 2.3.1 reviewed and pinned (CI green); R7-3–R7-5 fixed; 194 fixed + re-verified overall; round 3 found 80 (37 open, 15 awaiting re-verification).
-- 2026-10-28 — Stage C final gate RED (5 ledger items open; G1 INTERNAL past 11.6 days of dataset age; a red drift row the CLI could not clear; timing flakes under load) → fix round 1 (`e40fd88` … `a7874b5`): every gate problem fixed at root with tests, except `ci-default-branch-controls-inert` (the Stage D merge or a setting); `docs/evals/stage-c-backlog.md` tracks what stays open; changelog §B6.
+- 2026-10-28 — Stage C final gate RED (5 ledger items open; G1 INTERNAL past 11.6 days of dataset age; a red drift row the CLI could not clear; timing flakes under load) → fix round 1 (`e40fd88` … `7f39044`): every gate problem fixed at root with tests, except `ci-default-branch-controls-inert` (the Stage D merge or a setting); `docs/evals/stage-c-backlog.md` tracks what stays open; changelog §B6.
