@@ -128,8 +128,13 @@ export const SOURCE_TARGETS = [
   "nflverse:depth_charts_history",
   "ffopportunity:ep_weekly_history",
 ] as const satisfies readonly DatasetSourceId[];
-/** Every `eff refresh` target. */
+/** Every `eff refresh` target that refreshes datasets (the runner's). */
 export const REFRESH_TARGETS = ["all", ...REFRESH_JOBS_BUILT, ...SOURCE_TARGETS] as const;
+/**
+ * The one ESPN target: re-read the league's settings now (plan 08 §9; src/cli/refresh-settings.ts) —
+ * an ESPN read through the provider, not a dataset, so main.ts routes it before the runner.
+ */
+export const SETTINGS_REFRESH_TARGET = "espn:settings";
 export type RefreshTarget = (typeof REFRESH_TARGETS)[number];
 
 /** Whether `s` is a refresh target. */
@@ -139,7 +144,7 @@ export function isRefreshTarget(s: string): s is RefreshTarget {
 
 /** The usage error of a missing or unknown target (an unknown one is named only when it is a plain token). */
 export function targetUsageError(target: string | undefined): UsageError {
-  const list = REFRESH_TARGETS.join(" | ");
+  const list = [...REFRESH_TARGETS, SETTINGS_REFRESH_TARGET].join(" | ");
   if (target === undefined) return new UsageError(`refresh needs a target: ${list}`);
   const named = /^[a-z][a-z0-9_:-]{0,63}$/.test(target) ? ` '${target}'` : "";
   return new UsageError(`refresh: unknown target${named} — the targets are: ${list}`);

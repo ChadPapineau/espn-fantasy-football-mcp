@@ -1061,6 +1061,23 @@ export function boxGameStates(
   return new Map(plan.players.map((p) => [p.player_id, p.game_state]));
 }
 
+/** Said when a league-wide golden mismatch marked the cached settings outdated (plan 08 §6 step 3(d)). */
+export const SETTINGS_REREAD_WARNING =
+  "the league settings scored here were a cached copy: they are re-read on the next call (a commissioner's scoring edit raises settings_changed)";
+
+/**
+ * Whether the league settings this call scored with were a copy fetched before the call began (an
+ * `espn:mSettings` input fetched earlier than its start) — a copy a commissioner's edit can have
+ * outdated, unlike one ESPN answered during the call.
+ */
+export function settingsCachedBefore(inputs: readonly InputStamp[], callStartMs: number): boolean {
+  return inputs.some((i) => {
+    if (i.source !== "espn:mSettings") return false;
+    const at = Date.parse(i.fetched_at);
+    return Number.isFinite(at) && at < callStartMs;
+  });
+}
+
 /** A5 `espn_get_box_score`. */
 export const getBoxScore = defineTool({
   name: "espn_get_box_score",
@@ -1150,10 +1167,25 @@ export const getBoxScore = defineTool({
       g.status = matched === checked ? "match" : "mismatch";
       g.mismatch_share = share;
       g.settings_hash = settings.settings_hash;
-      if (share !== null && isLeagueWideMismatch(checked - matched, checked))
+      if (share !== null && isLeagueWideMismatch(checked - matched, checked)) {
         warnings.push(
           `scoring mismatch on more than 10% of checked player-weeks (${String(checked - matched)} of ${String(checked)})`,
         );
+        // plan 08 §6 step 3(d), §9: a league-wide mismatch marks the settings cache dirty — the
+        // settings scored here were a copy fetched before this call, and a commissioner's edit is
+        // the likeliest cause: the next settings read asks ESPN again (a new hash raises
+        // settings_changed). Settings fetched in this call are ESPN's current ones, and a re-read
+        // would change nothing, so a mismatch that persists re-reads them once, never every call
+        // (Stage C finding cache-settings-invalidation-triggers-missing)
+        if (settingsCachedBefore(inputs, ctx.nowMs)) {
+          try {
+            ctx.services.platform.invalidateSettings(leagueRef(ctx));
+            warnings.push(SETTINGS_REREAD_WARNING);
+          } catch {
+            // the bookkeeping is best effort: the settings' own TTL still re-reads them
+          }
+        }
+      }
     }
     const data: BoxScoreData = {
       week: args.week,

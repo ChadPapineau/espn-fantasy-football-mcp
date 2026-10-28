@@ -199,7 +199,7 @@ Each engine implements a named method from the analytics research. Every result 
 | `eff doctor` | **Twenty-five checks**, offline by default: Node version, absolute launch paths, the runtime install outside any iCloud/file-provider directory, no cookie-shaped value in any client config, directory and file modes, exactly one credential store, store health, drift-probe age, dataset ages, launchd jobs, the write flag's session warning, a stale `dist/`, the client's own MCP log tail. `--online` adds clock skew, the host and shape probe, credential validity, league reachability, own-team resolution and source reachability. `--fix` repairs modes and directories after a prompt. Doctor never modifies the stored secret or its setup metadata; `--online` records its probe result in the local store exactly as `espn_check_auth` does | Phase 1a / 1b | ✅ |
 | `eff status` | The one-page dashboard the resource and the tool also serve | Phase 1a | ✅ |
 | `eff probe` | **The drift probe** — a keyless host probe and a shape probe against a fixture manifest, daily under launchd; a removed key turns the state red, fires a notification and puts `meta.drift` on every affected result. The first automation built, as a standalone script before any server code existed | Phase 0 | ✅ |
-| `eff refresh <source\|all>` | The **only** writer of dataset files: polls a version, downloads, asserts the schema and codec, publishes a fresh per-source SQLite file by atomic rename | Phase 1a | ✅ |
+| `eff refresh <source\|all>` | The **only** writer of dataset files: polls a version, downloads, asserts the schema and codec, publishes a fresh per-source SQLite file by atomic rename. `eff refresh espn:settings` instead re-reads your league's settings now — after a commissioner's scoring edit, rather than waiting out the settings' 24 h cache; a changed hash raises `settings_changed` and the next analytics call re-scores | Phase 1a | ✅ |
 | `eff snapshot <roster\|pool\|projections>` | Nightly roster and free-agent pool snapshots with diffs, ESPN projection snapshots (the backtest corpus), the daily IR-validity and scoring checks | Phase 1b | ✅ |
 | `eff print-config --client desktop\|code` | Emits the launch-config snippet with **resolved absolute paths** and no secret values; warns if the runtime sits in a file-provider directory | Phase 1a | ✅ |
 | `eff install-launchd` / `eff uninstall` | Generates per-job launchd plists with absolute paths; removes what it created — including both possible credential stores — and prints what it will not touch | Phase 1a | ✅ |
@@ -341,7 +341,7 @@ flowchart TB
     FRESH["Freshness label on every result<br/>fresh, or stale and served with a warning, or STALE_ONLY past the hard limit unless allow_stale"]
   end
   ESPN["ESPN fantasy read host"]
-  INV["Invalidation triggers<br/>week rollover - standings, rosters, scoreboard<br/>waiver run executed - standings, pool, transactions<br/>kickoff of a rostered player - roster lock state<br/>scoring self-check mismatch - league settings<br/>new release version - that dataset<br/>a game going final - live scoring"]
+  INV["Invalidation triggers<br/>week rollover - standings, rosters, scoreboard<br/>waiver run executed - standings, pool, transactions<br/>kickoff of a rostered player - roster lock state<br/>scoring self-check mismatch, the ESPN standings or waiver-run instant moving, eff refresh espn:settings - league settings<br/>new release version - that dataset<br/>a game going final - live scoring"]
   NV --> POLL
   FFO --> POLL
   ESV --> POLL
