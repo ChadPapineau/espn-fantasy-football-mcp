@@ -286,6 +286,63 @@ describe("the final gate's items (news-match-universe-homonyms, attempt 4)", () 
   });
 });
 
+describe("the final gate's recall items (round 2): fail-safe by design, put to a ruling", () => {
+  // docs/evals/stage-c-backlog.md, "the news matcher's fail-safe choices" 5 and 6. Each expectation
+  // below is the rule as built; a ruling for recall changes it, and the counter-examples show what
+  // that ruling would misattribute. Of the recorded universe's 16 shared full names, the owned ones
+  // a namesake WITH a team can block are these three (the Lamar Jackson and Chris Jones namesakes
+  // are free agents).
+  const DE_YOUNG = idOf("Byron Young", "LA"); // 20.13 % owned; the Eagles DT namesake 0.08 %
+  const DT_YOUNG = idOf("Byron Young", "PHI");
+  const CB_HARRIS = idOf("Marcus Harris", "TEN"); // 2.08 %; the Chiefs DT namesake 0.02 %
+  const DT_HARRIS = idOf("Marcus Harris", "KC");
+
+  it("choice 5: a namesake's team named anywhere, with no cue, blocks the prominent holder", () => {
+    for (const title of [
+      "Justin Jefferson: Leads Vikings past Browns",
+      "Justin Jefferson: Catches TD | Jefferson caught seven passes in a win over the Browns.",
+      "Justin Jefferson: Vikings host Browns on Sunday",
+      "Justin Jefferson: Practice limited | Jefferson (hamstring) was limited Wednesday. The Vikings face the Browns.",
+      "Byron Young: Records two sacks in win over Eagles",
+      "Marcus Harris: Breaks up two passes in loss to Chiefs",
+    ])
+      expect(refs(title), title).toEqual([]);
+    // what prominence would misattribute: the namesake's own news, naming his team (or both) — the
+    // last one would hand the 99.86 %-owned WR an IR claim (E10 reads status claims from news)
+    for (const title of [
+      "Justin Jefferson: Records 10 tackles in Browns win",
+      "Justin Jefferson: Records sack | Jefferson had a sack in the Browns' loss to the Vikings.",
+      "Justin Jefferson: Lands on injured reserve | The Browns placed Jefferson on IR with a knee injury.",
+    ])
+      expect(refs(title), title).toEqual([]);
+    // controls: with no namesake's team named, prominence decides; the star's own team attached decides
+    expect(refs("Byron Young: Records two sacks")).toEqual([[DE_YOUNG, "full_name"]]);
+    expect(refs("Marcus Harris: Breaks up two passes")).toEqual([[CB_HARRIS, "full_name"]]);
+    expect(refs("Rams DE Byron Young: Records two sacks in win over Eagles")).toEqual([
+      [DE_YOUNG, "full_name_team"],
+    ]);
+  });
+
+  it("choice 6: a namesake's team attached to the name never gives him the name past a prominent holder", () => {
+    for (const title of [
+      "Browns LB Justin Jefferson: Records sack",
+      "Eagles DT Byron Young: Records two sacks",
+      "Chiefs DT Marcus Harris: Records sack",
+    ])
+      expect(refs(title), title).toEqual([]);
+    // the same evidence by the bare surname gives the namesake (the inconsistency put to the ruling;
+    // held as built by "a bare surname is not the namesake on a loosely named team while a star holds it")
+    expect(refs("Browns LB Jefferson: Records sack")).toEqual([[LB_JEFFERSON, "last_name_team"]]);
+    // a cue that rules the star out lets the attached namesake take it (the rule's one opening)
+    expect(refs("Eagles DT Byron Young: Records sack against the Rams")).toEqual([
+      [DT_YOUNG, "full_name_team"],
+    ]);
+    expect(refs("Chiefs DT Marcus Harris: Records sack vs. Titans")).toEqual([
+      [DT_HARRIS, "full_name_team"],
+    ]);
+  });
+});
+
 describe("a roster move ties its team to the name, like a team written next to it (attempt 4)", () => {
   it("a namesake's signing, waiver or practice-squad move never goes to the star", () => {
     // each went to the Ravens QB at 0.80 (the verifier's transaction titles)

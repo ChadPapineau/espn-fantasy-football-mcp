@@ -22,40 +22,38 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — Stage C final gate: fix round 1 landed (2026-10-28); the orchestrator re-gates
+## ▶ NEXT STEP — Stage C final gate: fix round 2 landed (2026-10-28); the orchestrator re-gates
 
-**State:** branch `build/phase-1`, from `04adb5f` (the gated HEAD) through `e40fd88` … `7f39044`;
-tree clean, HEAD == origin. The independent final gate was RED. Fix round 1 fixed at root, each with
+**State:** branch `build/phase-1`; fix round 1 is `e40fd88` … `7f39044` (changelog §B6), fix round 2
+`01cb8e5` and `2396b07` plus this docs commit (changelog §B7); tree clean, HEAD == origin. The final
+gate's second run found no defect in its commands or product checks. It was red only on items for the
+owner, the Stage D merge or a ruling, plus three low items. Fix round 2 took those at root, each with
 a regression test that fails on the code before:
 
-- **G1 `espn_get_status` answered INTERNAL** once any dataset was 11.6 days old (its `age_s` was typed
-  `count`, ≤ 1 000 000). It was live on the owner's install, where every Skill's Step 0 calls G1
-  first. Ages are now `ageSeconds`.
-- **`store-future-stamped-rows-block`, the in-process half.** The breaker's open window, ESPN's
-  Retry-After hold (and the copy kept for other processes) and `espn_check_auth`'s gap held for the
-  size of a backward clock step. `config/freshness.ts` `heldWindow` re-stamps them.
-- **`trade-locked-week-counted`.** ΔU now divides by the simulator's `marginal_weeks`, not the value
-  weeks (it was 11/10 too high).
-- **`crosswalk-unpaired-joins-silent`.** D6 matches every asked id and counts one nobody knows.
-- **`news-match-universe-homonyms`.** Game pairs, attached teams and roster moves now rule holders
-  out, and evidence that contradicts every holder gives no ref. Two by-design test expectations
-  changed on the gate's evidence.
-- **A red drift row on a view the probe never reads.** The new `eff refresh espn:drift` re-reads the
-  red views; `eff probe` and doctor #9 name it, and the probe prints the stored diff.
-- **Doctor #14** adds a cached answer's `Age`. **STALE_ONLY** names the source to refresh.
-- **Gate reproducibility.** The trade-block invariance compares complete runs (the CPU deadline off,
-  as in R5-m3). Two heavy tests carry a 120 s hang detector. A stall window over A16a's 50 ms bound is
-  repeated only on evidence that the host set it; the bound is unchanged.
+- **The plugin's own `.mcp.json` in a clone.** A Claude Code session opened in the clone read it as a
+  project server, which cannot start there. Doctor row 2 had called it "entry ok", and
+  `eff uninstall` printed a removal that deletes the plugin's server from the clone. Now row 2 lists
+  it as the plugin's own file, never a registration; uninstall leaves it. A client entry using a
+  plugin variable, or a `/bin/sh` entry without the shim's absolute path, fails row 2.
+- **F6, keepers.** `espn_get_league` restates `league.keepers` (count, next season's count,
+  deadline) and warns in a keeper league that every value is this season's. The onboard Skill
+  restates it.
+- **The news matcher's ruling list** gains the two rules it left out (choices 5 and 6), with the
+  gate's titles, the counter-examples, the scope and options. No rule changed; tests hold both.
 
 **Open, not an agent's to close** (each with its evidence in `docs/evals/stage-c-backlog.md`):
 `ci-default-branch-controls-inert` (the Stage D merge, or the owner's default-branch setting); R7-2
 and R7-6 (the plugin-eval tooling is gated). Two orchestrator rulings are requested: the news
-matcher's fail-safe choices and the stall bound's host evidence. The owner has terminal actions:
-`kill 63651` (an orphaned test worker at 100 % CPU, which loads every local timing), `eff refresh
-all`, `eff install-launchd` and `eff transactions --backfill`.
+matcher's fail-safe choices 1–6 and the stall bound's host evidence. The ledger can close
+`trade-locked-week-counted`, `store-future-stamped-rows-block` and `crosswalk-unpaired-joins-silent`,
+which the gate verified fixed at `2ca70dc`. The owner has terminal actions: `eff refresh all` and
+`eff install-launchd` (the live `eff doctor --online` exits 1 only on #10, the expired datasets),
+`eff transactions --backfill`, and at Stage D the plugin or `eff print-config`'s entry. In sessions
+opened in the clone, the project server stays unapproved.
 
 **Next:** the orchestrator re-runs the final gate. Then Stage **D**
-(`docs/scratch/build-program.md`).
+(`docs/scratch/build-program.md`), whose CHANGELOG pass also carries the Stage C additions
+(`league.keepers` among them).
 
 ## Build facts (Stage A, verified by the orchestrator 2026-10-06)
 
@@ -272,7 +270,7 @@ all`, `eff install-launchd` and `eff transactions --backfill`.
 | build — Stage B1 (Phases 1a and 1b: the 18 P0 tools) | ✅ gate closed 2026-10-06 (rulings R5-1, R5-2) | `docs/evals/1a-*.md`; changelog §B1, §R5 |
 | build — Stage B2a (Phase 2: the 16 P1 tools, 34 read tools in all) | ✅ 2026-10-07 (rulings R5-3 to R5-5) | "Build facts (Stage B2a)"; `docs/evals/phase2-acceptance.md` |
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
-| build — Stage C (QA and penetration testing) | 🚧 in progress — the final gate's fix round 1 landed (2026-10-28) | ▶ NEXT STEP; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §B4, §B5, §B6 |
+| build — Stage C (QA and penetration testing) | 🚧 in progress — the final gate's fix round 2 landed (2026-10-28) | ▶ NEXT STEP; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §B4, §B5, §B6, §B7 |
 | build — Stage D (the final gate, the merge to `main`, the owner's install) | next | `docs/scratch/build-program.md` |
 
 ## Decisions made
@@ -518,3 +516,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-10-25 — Stage C round 3, repo-root: `docs-prebuild-markers-remain` fixed — SECURITY.md's scope, `docs/README.md` (the approval, the changelog's build sections, `evals/`, the build program) and this file's intro, finding 10, Program status and Open items describe the build; `.env.example` comments out `ESPN_SEASON` (README row with it). Held by `tests/lint/status-docs.test.ts` (pre-build words; HANDOFF's state sections, its iCloud and reading-order lines, the build stages; plan 10 §0's withdrawn estimate; the `docs/` index) and `tests/lint/env-example.test.ts` (the file's set lines resolve to the defaults in every season).
 - 2026-10-26 — Stage C paused at 90 % weekly usage in round 3: SDK 2.3.1 reviewed and pinned (CI green); R7-3–R7-5 fixed; 194 fixed + re-verified overall; round 3 found 80 (37 open, 15 awaiting re-verification).
 - 2026-10-28 — Stage C final gate RED (5 ledger items open; G1 INTERNAL past 11.6 days of dataset age; a red drift row the CLI could not clear; timing flakes under load) → fix round 1 (`e40fd88` … `7f39044`): every gate problem fixed at root with tests, except `ci-default-branch-controls-inert` (the Stage D merge or a setting); `docs/evals/stage-c-backlog.md` tracks what stays open; changelog §B6.
+- 2026-10-28 — Stage C final gate, second run RED on no agent-fixable defect (the owner's stale datasets, the default branch, rulings, the ledger) and three low items → fix round 2 (`01cb8e5`, `2396b07`): the clone's own `.mcp.json` is no registration in doctor row 2 or uninstall; `espn_get_league` restates keepers (F6); the news matcher's ruling list is complete (choices 5, 6); changelog §B7.

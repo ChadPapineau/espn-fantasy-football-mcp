@@ -621,6 +621,46 @@ closes is in `docs/evals/stage-c-backlog.md`.
   `measureStall`, `hostSetStall`, `StallControl`). The trade-block invariance compares complete runs
   (the CPU deadline off, as in R5-m3).
 
+## B7 — what the final gate's fix round 2 built (Stage C, 2026-10-28)
+
+These are not rulings. They record what fix round 2 added for the problems of the final gate's
+second run, each with tests that fail on the code before (commits `01cb8e5` and `2396b07`). That run
+found no defect in the gate's commands or product checks. It was red on what
+`docs/evals/stage-c-backlog.md` records (the owner, the Stage D merge, rulings), and on three low items.
+
+- **The plugin's own `.mcp.json` in a clone** · plan 03 §5 #2, §8 step 5; plan 09 §4 · A Claude
+  Code session opened in the clone reads that file as a project server, and it cannot start there:
+  `${CLAUDE_PLUGIN_ROOT}` and `${user_config.*}` expand only in a plugin install.
+  - `src/cli/client-config.ts` marks a project-scope entry that uses `${CLAUDE_PLUGIN_ROOT}` in a
+    copy of this plugin (`.claude-plugin/plugin.json` names it) as the plugin's own
+    (`pluginSource`). Row 3 still scans its env.
+  - Doctor row 2 lists it and counts it as no registration. Before, alone it read "1 client
+    registration with absolute, existing paths", and beside the enabled plugin it was a second
+    registration.
+  - `eff uninstall` leaves it. Before, it printed a `claude mcp remove --scope project` that deletes
+    the plugin's server from the clone.
+  - Any client entry that uses a plugin variable is a hard row-2 problem. A `/bin/sh` entry needs
+    the absolute path of an existing `scripts/eff-launch.sh`, as row 2 asks of every registration's
+    `args[0]`.
+  - README "What to get right". Tests: `tests/cli/client-registrations.test.ts`,
+    `tests/cli/doctor.test.ts`.
+- **A1's keepers** · plan 07 A1 (`league.keepers` added; a keeper league said in `warnings[]`);
+  research 03 §B.1; research 05 §5 · Stage C live finding F6: every item of the owner's format but
+  keepers was restated, so a keeper league went unnoticed. Two of the three recorded public leagues
+  keep players.
+  - `normalizeKeepers` reads `draftSettings` from the passthrough settings. A field of another
+    shape is null, never a failed settings read.
+  - The field is on `League`, not `LeagueRules`. The store compares stored rules across snapshots,
+    so a field new to this build would have read as the commissioner's edit after the upgrade.
+  - The onboard Skill restates it. Tests: `tests/providers/espn/normalize.test.ts`,
+    `tests/mcp/league-keepers.test.ts`.
+- **The news matcher's ruling list** · `docs/evals/stage-c-backlog.md` · No rule changed. Two
+  choices were missing from the list: 5 (a namesake's team named loosely blocks the prominent
+  holder) and 6 (an attached namesake's team never gives the namesake the name past him). They are
+  added with the gate's titles, the counter-examples, the bare-surname inconsistency, the options and
+  the measured scope (16 shared full names; Justin Jefferson, Byron Young and Marcus Harris).
+  `tests/sources/news/match-universe.test.ts` holds both as built.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
