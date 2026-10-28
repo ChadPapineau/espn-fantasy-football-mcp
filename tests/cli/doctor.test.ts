@@ -131,11 +131,16 @@ describe("rows #1–#3, #12, #13, #24, #25 (pure)", () => {
       args: [path.join(sb.dir, "nope.js"), "serve"],
     });
     expect(missing.hard.join(" ")).toMatch(/does not exist/);
+    // `/bin/sh` is never version-checked as Node (the shim picks the node), but its `args[0]` must be
+    // the shim's absolute path like any registration's (the final gate, round 2)
     const oldNode = await entryProblems(
       makeIo(sb, { exec: fakeExec(() => ({ stdout: "v22.1.0\n" })).exec }),
       { command: "/bin/sh", args: ["x"] },
     );
-    expect(oldNode.hard).toEqual(["`args` does not contain `serve`"]);
+    expect(oldNode.hard).toEqual([
+      "`args[0]` is not an absolute path to scripts/eff-launch.sh",
+      "`args` does not contain `serve`",
+    ]);
     const other = await entryProblems(
       makeIo(sb, { exec: fakeExec(() => ({ stdout: "v22.1.0\n" })).exec }),
       { command: "/bin/ls", args: [desktop, "serve"] },

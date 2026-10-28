@@ -54,6 +54,7 @@ import type { CredentialStateRow, Store, StoreFactory } from "../store/types.js"
 import { VERSION } from "../version.js";
 import {
   cookieFindings,
+  pluginVariables,
   scanClientConfig,
   scanPlugin,
   whereOf,
@@ -212,7 +213,17 @@ export function isDataless(file: string): boolean {
   }
 }
 
-/** Problems of one entry (value-free): hard problems and warnings separately. */
+/** The launch shim a `/bin/sh` registration names (plan 09 §4: `<root>/scripts/eff-launch.sh`). */
+const SHIM_PATH_RE = /[/\\]scripts[/\\]eff-launch\.sh$/u;
+
+/**
+ * Problems of one client-config entry (value-free): hard problems and warnings separately. Every
+ * entry here is a registration in a client config — the plugin install is read apart
+ * (`scanPlugin`, `pluginCopyProblems`) — so plan 03 §5 #2's rule holds for each: `command` and
+ * `args[0]` absolute and existing. A plugin variable is expanded only by a plugin install, so an
+ * entry using one cannot start (the final gate, round 2: a `/bin/sh` entry was "entry ok" on
+ * `serve` alone, the plugin's own `.mcp.json` copied into a client config included).
+ */
 export async function entryProblems(
   io: CliIo,
   spec: Record<string, unknown>,
@@ -221,8 +232,24 @@ export async function entryProblems(
   const soft: string[] = [];
   const command = spec.command;
   const args = Array.isArray(spec.args) ? (spec.args as unknown[]) : [];
+  const variables = pluginVariables(spec);
+  if (variables.length > 0) {
+    hard.push(
+      `uses ${variables.join(", ")}, which only a Claude Code plugin install expands: no client starts this entry (in Claude Code the plugin registers the server itself — README step 5; elsewhere use \`eff print-config\`'s entry)`,
+    );
+    return { hard, soft };
+  }
   if (command === "/bin/sh") {
-    // the plugin path: `/bin/sh <root>/scripts/eff-launch.sh serve` (variables, no user paths)
+    // the plugin's shim launched by its absolute path: `/bin/sh <root>/scripts/eff-launch.sh serve`
+    const shim = args[0];
+    if (typeof shim !== "string" || !path.isAbsolute(shim) || !SHIM_PATH_RE.test(shim))
+      hard.push("`args[0]` is not an absolute path to scripts/eff-launch.sh");
+    else
+      try {
+        lstatSync(shim);
+      } catch {
+        hard.push("`args[0]` does not exist");
+      }
     if (!args.includes("serve")) hard.push("`args` does not contain `serve`");
     return { hard, soft };
   }
@@ -367,11 +394,18 @@ export async function checkLaunchConfig(
       details.push(
         `${s.client}: the sibling's \`${SIBLING_SERVER_NAME}\` server is also installed (fine)`,
       );
-    if (s.entries.length === 0) {
+    // the plugin's own .mcp.json in a copy of the plugin: said, never counted as a registration
+    for (const e of s.entries)
+      if (e.pluginSource)
+        details.push(
+          `${whereOf(e.scope, e.dir)}: the plugin's own .mcp.json in a copy of this plugin, not a registration — Claude Code opened in that directory reads it as a project server, which cannot start there (\${CLAUDE_PLUGIN_ROOT} and \${user_config.…} expand only in a plugin install): leave the file, and leave that project server unapproved there (\`disabledMcpjsonServers: ["${SERVER_NAME}"]\` in its .claude/settings.local.json declines it)`,
+        );
+    const registrations = s.entries.filter((e) => !e.pluginSource);
+    if (registrations.length === 0) {
       details.push(`${s.client}: ${s.file} has no \`${SERVER_NAME}\` entry`);
       continue;
     }
-    for (const e of s.entries) {
+    for (const e of registrations) {
       found++;
       if (s.client === "code") codeEntries++;
       const where = whereOf(e.scope, e.dir);
@@ -518,7 +552,7 @@ export function checkWriteFlag(
   const signals: string[] = [];
   if ((env.CLAUDECODE ?? "") !== "") signals.push("running under Claude Code (CLAUDECODE is set)");
   for (const s of scans)
-    if (s.entries.length > 0 && s.others > 0)
+    if (s.entries.some((e) => !e.pluginSource) && s.others > 0)
       signals.push(
         `${s.client} config lists ${String(s.others)} other MCP server(s) — another server may give the model shell or file reach`,
       );

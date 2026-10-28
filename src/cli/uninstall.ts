@@ -289,6 +289,9 @@ export function findRegistrations(home: string): FoundRegistrations {
 
 const COOKIE_NOTE =
   "its env block holds an ESPN cookie (a key named ESPN_S2/SWID or a cookie-shaped value): removing the entry takes it out of that file — the file's backups and history may keep it, and logging out at espn.com is the only way to try to end the session";
+/** The same, for the plugin's own file (its entry stays: only the env key holding the cookie goes). */
+const PLUGIN_FILE_COOKIE_NOTE =
+  "its env block holds an ESPN cookie (a key named ESPN_S2/SWID or a cookie-shaped value): delete that env key from the file, never the entry — a file meant to be committed, so check its history; logging out at espn.com is the only way to try to end the session";
 
 /**
  * The manual steps uninstall prints and never performs (plan 03 §8 steps 5–6; L8 "prints what it
@@ -309,7 +312,11 @@ export function manualSteps(
   const out: string[] = [
     `Claude Code with the plugin: claude plugin uninstall ${PLUGIN_ID}, then claude plugin marketplace remove ${MARKETPLACE_NAME} — until then every Claude Code session starts the server, which creates the cache again.${found.plugin === null ? "" : ` It is installed here (${found.plugin.copies.map((c) => c.installPath).join(", ")}${found.plugin.enabled ? "" : "; disabled"}).`} The plugin's league id and season settings live in Claude Code's settings: remove them there if the uninstall leaves them.`,
   ];
-  const code = found.scans.filter((x) => x.client === "code").flatMap((x) => x.entries);
+  const codeAll = found.scans.filter((x) => x.client === "code").flatMap((x) => x.entries);
+  // the plugin's own .mcp.json in a copy of the plugin is no registration: removing its entry
+  // deletes the plugin's server from that copy (client-config.ts `pluginSource`)
+  const code = codeAll.filter((e) => !e.pluginSource);
+  const pluginFiles = codeAll.filter((e) => e.pluginSource);
   const desktop = found.scans.filter((x) => x.client === "desktop").flatMap((x) => x.entries);
   const cookieIn = (e: { file: string; dir: string | null; name: string }): boolean =>
     found.scans.some((x) =>
@@ -337,6 +344,12 @@ export function manualSteps(
       `Claude Code (${where})${e.name === SERVER_NAME ? "" : ` registers this server under the key "${e.name}"`}: ${removeCommand(e)}`,
     );
     if (cookieIn(e)) out.push(`  ${COOKIE_NOTE}`);
+  }
+  for (const e of pluginFiles) {
+    out.push(
+      `${path.join(e.dir ?? ".", ".mcp.json")} is the plugin's own .mcp.json in a copy of this plugin, not a registration: leave it — removing its entry deletes the plugin's server from that copy; the plugin itself is removed by the first step.`,
+    );
+    if (cookieIn(e)) out.push(`  ${PLUGIN_FILE_COOKIE_NOTE}`);
   }
   if (desktop.length === 0)
     out.push(

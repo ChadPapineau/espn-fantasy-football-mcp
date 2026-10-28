@@ -9,10 +9,18 @@
 // plugin user was told no client launches the server and steered to the duplicate registration the
 // README forbids). Files are read bounded, never through a symlink, never written; nothing read here
 // is printed but names this program owns, paths, scopes and counts — never an env value.
+//
+// A copy of this plugin (a clone of the repository, an unpacked release: plan 04 §1, §2 `files`)
+// holds the plugin's own `.mcp.json` (plan 09 §4), which Claude Code also reads as a PROJECT-scope
+// server in a session opened there. That file is no registration: its `${CLAUDE_PLUGIN_ROOT}` and
+// `${user_config.*}` expand only in a plugin install, so it cannot start there, and removing its
+// entry deletes the plugin's server from the copy (`ClientEntry.pluginSource`; the final gate,
+// round 2: such a session ended CONNECTION_CLOSED, row 2 had called the file "entry ok", and
+// uninstall printed its `claude mcp remove --scope project`).
 import path from "node:path";
 import { readSecureFile } from "../config/paths.js";
 import { looksLikeCredentialValue } from "../config/schema.js";
-import { PLUGIN_ID, SERVER_NAME, SIBLING_SERVER_NAME } from "./print-config.js";
+import { PLUGIN_ID, PLUGIN_NAME, SERVER_NAME, SIBLING_SERVER_NAME } from "./print-config.js";
 
 /** Largest client config read (a Claude Code user config can be several MB). */
 export const MAX_CLIENT_CONFIG_BYTES = 16 * 1024 * 1024;
@@ -33,6 +41,12 @@ export interface ClientEntry {
   readonly file: string;
   /** The project directory of a local- or project-scope entry, else null. */
   readonly dir: string | null;
+  /**
+   * The plugin's own declaration, not a registration: a project-scope entry using
+   * `${CLAUDE_PLUGIN_ROOT}` in the `.mcp.json` of a copy of this plugin (`isPluginRoot`). Row 3 still
+   * checks its env; row 2 and uninstall never treat it as a launch someone registered.
+   */
+  readonly pluginSource: boolean;
 }
 
 /** One entry's env block, where it lives (secrecy is checked over ALL entries — plan 03 §5 #3). */
@@ -65,6 +79,47 @@ export interface ClientConfigScan {
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * The substitutions only Claude Code's plugin loader performs (`${CLAUDE_PLUGIN_ROOT}`,
+ * `${CLAUDE_PLUGIN_DATA}`, `${user_config.<key>}`): Claude Desktop's config and Claude Code's user,
+ * local and project scopes expand none of them, so an entry using one cannot start there.
+ */
+const PLUGIN_VARIABLE_RE =
+  /\$\{(CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|user_config\.)[^}]{0,128}\}/gu;
+
+/**
+ * The plugin variables an entry uses in its `command`, `args` or `env` values, sorted and named
+ * value-free (`${user_config.…}` for any user_config key).
+ */
+export function pluginVariables(spec: Record<string, unknown>): string[] {
+  const args: readonly unknown[] = Array.isArray(spec.args) ? spec.args : [];
+  const words: unknown[] = [spec.command, ...args];
+  if (isObj(spec.env)) words.push(...Object.values(spec.env));
+  const out = new Set<string>();
+  for (const w of words)
+    if (typeof w === "string")
+      for (const m of w.matchAll(PLUGIN_VARIABLE_RE))
+        out.add(m[1] === "user_config." ? "${user_config.…}" : `\${${m[1] ?? ""}}`);
+  return [...out].sort();
+}
+
+/**
+ * Whether `dir` is a copy of this plugin: `<dir>/.claude-plugin/plugin.json` names it (a clone of the
+ * repository, an unpacked release). Read bounded, never through a symlink; unreadable → false.
+ */
+export function isPluginRoot(dir: string): boolean {
+  const manifest = readJson(
+    path.join(dir, ".claude-plugin", "plugin.json"),
+    MAX_PROJECT_FILE_BYTES,
+  );
+  return (
+    manifest !== null &&
+    manifest !== "invalid" &&
+    isObj(manifest.value) &&
+    manifest.value.name === PLUGIN_NAME
+  );
 }
 
 /** Whether an entry launches this server (the config key, the dist/cli.js path or the plugin shim). */
@@ -160,15 +215,18 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
   const envBlocks: EnvBlock[] = [];
   let others = 0;
   let siblingInstalled = false;
-  const take = (m: ServerMap, holder: string): void => {
+  /** `pluginCopy`: the map is the `.mcp.json` of a copy of this plugin (`isPluginRoot`). */
+  const take = (m: ServerMap, holder: string, pluginCopy = false): void => {
     for (const [name, spec] of Object.entries(m.servers)) {
       if (!isObj(spec)) continue;
       const ours = isOurs(name, spec);
       if (isObj(spec.env))
         envBlocks.push({ scope: m.scope, file: holder, dir: m.dir, name, ours, env: spec.env });
       if (name === SIBLING_SERVER_NAME) siblingInstalled = true;
-      if (ours) entries.push({ name, spec, scope: m.scope, file: holder, dir: m.dir });
-      else others++;
+      if (ours) {
+        const pluginSource = pluginCopy && pluginVariables(spec).includes("${CLAUDE_PLUGIN_ROOT}");
+        entries.push({ name, spec, scope: m.scope, file: holder, dir: m.dir, pluginSource });
+      } else others++;
     }
   };
   for (const m of scopedServerMaps(client, read.value)) take(m, file);
@@ -184,7 +242,7 @@ export function scanClientConfig(client: "desktop" | "code", file: string): Clie
       }
       projectFiles.push({ file: f, state: "ok" });
       if (isObj(p.value) && isObj(p.value.mcpServers))
-        take({ scope: "project", dir, servers: p.value.mcpServers }, f);
+        take({ scope: "project", dir, servers: p.value.mcpServers }, f, isPluginRoot(dir));
     }
   return {
     client,
