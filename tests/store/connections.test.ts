@@ -9,6 +9,7 @@ import {
   chmodSync,
   copyFileSync,
   mkdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -406,7 +407,52 @@ describe("files the binary will not serve read as never loaded (fixed-vocabulary
       expect(s.datasets.injuries.reports(2026, 3, null)).toEqual({ rows: [], stamp: null });
       expect(warnings.filter((w) => w === code)).toHaveLength(1);
       expect(s.stats().open_datasets).toEqual([]);
+      // the store says why, as the reader read it (Stage C status-damaged-dataset-reported-fresh)
+      expect(s.datasetRefusal("nflverse:injuries")).toBe(code);
     });
+
+  for (const [name, tamper, code] of cases)
+    it(`datasetRefusal judges ${name} as a first read would, before any reader ran: ${code}`, async () => {
+      const s = await publishThenTamper(tamper);
+      expect(s.datasetRefusal("nflverse:injuries")).toBe(code);
+      expect(s.datasetRefusal("nflverse:injuries")).toBe(code);
+      // the reader agrees and the warning is still raised once for the version
+      expect(s.datasets.injuries.reports(2026, 3, null).stamp).toBeNull();
+      expect(warnings.filter((w) => w === code)).toHaveLength(1);
+    });
+
+  it("a half-truncated file (Stage C status-damaged-dataset-reported-fresh) is refused, and datasetRefusal says so", async () => {
+    await publishTables(pub, "nflverse:injuries", "v1", injuriesTables());
+    const f = fileOf("nflverse:injuries");
+    const bytes = readFileSync(f);
+    writeFileSync(f, bytes.subarray(0, Math.floor(bytes.length / 2)));
+    const s = open();
+    const code = s.datasetRefusal("nflverse:injuries");
+    expect(code).not.toBeNull();
+    expect(s.datasets.injuries.reports(2026, 3, null)).toEqual({ rows: [], stamp: null });
+    expect(warnings).toContain(code);
+  });
+
+  it("datasetRefusal is null for a served file, a never-loaded source, and a refused file once republished", async () => {
+    await publishTables(pub, "nflverse:injuries", "v1", injuriesTables());
+    const s = open();
+    expect(s.datasetRefusal("nflverse:injuries")).toBeNull();
+    expect(s.datasets.injuries.reports(2026, 3, null).stamp?.file_version).toBe("v1");
+    expect(s.datasetRefusal("nflverse:injuries")).toBeNull();
+    // never refreshed: nothing to refuse, even with a file on disk
+    copyFileSync(fileOf("nflverse:injuries"), fileOf("nflverse:players"));
+    expect(s.datasetRefusal("nflverse:players")).toBeNull();
+  });
+
+  it("a refused version stops being reported the moment refresh_log names a good republish", async () => {
+    const s = await publishThenTamper((f) => {
+      setMeta(f, "ds_schema", "999");
+    });
+    expect(s.datasetRefusal("nflverse:injuries")).toBe("dataset_schema_mismatch");
+    await publishTables(pub, "nflverse:injuries", "v2", injuriesTables());
+    expect(s.datasetRefusal("nflverse:injuries")).toBeNull();
+    expect(s.datasets.injuries.reports(2026, 3, null).stamp?.file_version).toBe("v2");
+  });
 
   it("a refused file is retried once refresh_log names a new version", async () => {
     const s = await publishThenTamper((f) => {

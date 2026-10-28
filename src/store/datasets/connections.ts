@@ -141,8 +141,14 @@ export interface DatasetConnectionsOptions {
 
 export class DatasetConnections {
   private readonly open = new Map<DatasetSourceId, DatasetConnection>();
-  /** The refresh_log version a refused file was refused at: no re-try (or warning) until it moves. */
-  private readonly refusedAt = new Map<DatasetSourceId, string | null>();
+  /**
+   * The refresh_log version a refused file was refused at, and why: no re-try (or warning) until the
+   * version moves, and the code `refusal` reports for it.
+   */
+  private readonly refusedAt = new Map<
+    DatasetSourceId,
+    { readonly version: string | null; readonly code: DatasetRefusal }
+  >();
   private closed = false;
 
   constructor(private readonly o: DatasetConnectionsOptions) {}
@@ -177,38 +183,37 @@ export class DatasetConnections {
     }
   }
 
+  /** Refuses `source`'s file opened for `openedFor`: warned once, remembered with its code. */
+  private refuse(source: DatasetSourceId, openedFor: string | null, code: DatasetRefusal): null {
+    this.o.warn(code);
+    this.refusedAt.set(source, { version: openedFor, code });
+    return null;
+  }
+
   private openFile(source: DatasetSourceId, openedFor: string | null): DatasetConnection | null {
     const file = this.fileOf(source);
     let ino: number;
     try {
       const st = lstatSync(file);
-      if (st.isSymbolicLink()) {
-        this.o.warn("dataset_symlink_refused");
-        return null;
-      }
-      if (!st.isFile()) {
-        this.o.warn("dataset_not_regular_file");
-        return null;
-      }
+      if (st.isSymbolicLink()) return this.refuse(source, openedFor, "dataset_symlink_refused");
+      if (!st.isFile()) return this.refuse(source, openedFor, "dataset_not_regular_file");
       ino = st.ino;
     } catch {
-      this.o.warn("dataset_missing");
-      return null;
+      return this.refuse(source, openedFor, "dataset_missing");
     }
     let db: DatabaseSync;
     try {
       db = openDatasetConnection(file, this.o.guard, source);
     } catch {
-      this.o.warn("dataset_unreadable");
-      return null;
+      return this.refuse(source, openedFor, "dataset_unreadable");
     }
     const checked = checkDatasetFile(db, source);
     if (!checked.ok) {
       this.o.guard.forget(db);
       db.close();
-      this.o.warn(checked.code);
-      return null;
+      return this.refuse(source, openedFor, checked.code);
     }
+    this.refusedAt.delete(source);
     const conn: DatasetConnection = {
       source,
       file,
@@ -238,17 +243,25 @@ export class DatasetConnections {
     }
     const existing = this.open.get(source);
     if (existing?.opened_for === cur.file_version) return existing;
-    if (
-      existing === undefined &&
-      this.refusedAt.has(source) &&
-      this.refusedAt.get(source) === cur.file_version
-    )
+    if (existing === undefined && this.refusedAt.get(source)?.version === cur.file_version)
       return null;
     this.close(source);
-    const conn = this.openFile(source, cur.file_version);
-    if (conn === null) this.refusedAt.set(source, cur.file_version);
-    else this.refusedAt.delete(source);
-    return conn;
+    return this.openFile(source, cur.file_version);
+  }
+
+  /**
+   * Why `source`'s CURRENT file (the version refresh_log names) is not served — the code `use`
+   * refused it with, judged exactly as a reader's first read judges it (opened lazily, or the open
+   * connection kept) — or null when it is served or refresh_log names no version (never loaded:
+   * nothing to refuse). What espn_get_status reports instead of refresh_log's "fresh" for a file every
+   * reader reads as never loaded (Stage C finding status-damaged-dataset-reported-fresh).
+   */
+  refusal(source: DatasetSourceId): DatasetRefusal | null {
+    if (this.use(source) !== null) return null;
+    const cur = currentRefreshRow({ db: this.o.storeDb }, source);
+    if (cur === null) return null;
+    const r = this.refusedAt.get(source);
+    return r?.version === cur.file_version ? r.code : null;
   }
 
   /** The provenance stamp of an open file: its refresh_log row, else its own dataset_meta. */

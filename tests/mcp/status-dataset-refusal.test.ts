@@ -5,12 +5,17 @@
 // `last_error` — with `eff refresh <source>` named, never "fresh" from refresh_log alone. Stage C
 // finding status-damaged-dataset-reported-fresh: a half-truncated nflverse:stats_player_week read
 // "fresh, 1168 rows" in the Step-0 snapshot while E2 and E1 warned it was not loaded. The port's
-// answer is injected here; a bundle without the port reads every listed file as served. League-a
+// answer is injected in the first block; a bundle without the port reads every listed file as
+// served. The last block truncates the published file on disk and reads it through the composition
+// root's own port (src/services/index.ts → Store.datasetRefusal → the connection layer). League-a
 // with the nflverse excerpts published through the real runner; fixture mode, no network.
+import { readFileSync, writeFileSync } from "node:fs";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { McpServices } from "../../src/mcp/services.js";
+import { datasetDir } from "../../src/config/paths.js";
+import { DATASET_REFUSAL_CODES, type McpServices } from "../../src/mcp/services.js";
 import { refusedDatasetWarning } from "../../src/mcp/tools/ops.js";
+import { datasetFileOf } from "../../src/store/index.js";
 import { call, connect, makeWorld, type World } from "./helpers/world.js";
 
 const SOURCE = "nflverse:stats_player_week";
@@ -130,5 +135,44 @@ describe("G1 reports a file the connection layer refuses as unusable (Stage C st
     } finally {
       await c.close();
     }
+  });
+});
+
+describe("the composition root wires the port to the connection layer (Stage C status-damaged-dataset-reported-fresh)", () => {
+  // the finding's own case, end to end: the published file truncated to half on disk, then the
+  // tools and G1 over the REAL buildServices — status must read the file as every reader reads it
+  let damaged: World;
+  let c: { client: Client; close: () => Promise<void> };
+  beforeAll(async () => {
+    damaged = await makeWorld({ publishNflverse: true, env: { EFF_TOOLSET: "full" } });
+    const file = datasetFileOf(datasetDir(damaged.cache), SOURCE);
+    const bytes = readFileSync(file);
+    writeFileSync(file, bytes.subarray(0, Math.floor(bytes.length / 2)));
+    c = await connect(damaged, { options: { toolset: "full" } });
+    await call(c.client, "espn_get_league", {});
+  }, 180_000);
+  afterAll(async () => {
+    await c.close();
+    damaged.cleanup();
+  });
+
+  it("the tools read the truncated file as not loaded, and G1 reports it unusable with the refusal code", async () => {
+    const lineup = await call(c.client, "espn_analyze_lineup", {});
+    expect(lineup.isError, JSON.stringify(lineup.body).slice(0, 300)).toBe(false);
+    expect(
+      (lineup.body.warnings as string[]).some((w) => w.startsWith(`${SOURCE} not loaded`)),
+    ).toBe(true);
+    const got = await sources(c.client);
+    const row = got.rows.find((x) => x.id === SOURCE);
+    expect(row?.freshness).toBe("never");
+    expect(row?.rows).toBeNull();
+    expect(DATASET_REFUSAL_CODES as readonly string[]).toContain(row?.last_error);
+    expect(row?.last_success_at).not.toBeNull();
+    expect(got.warnings).toContain(refusedDatasetWarning(SOURCE, row?.last_error ?? ""));
+    // the store's own answer, and the other sources still served
+    expect(damaged.store.datasetRefusal(SOURCE)).toBe(row?.last_error);
+    const other = got.rows.find((x) => x.id === "nflverse:roster_weekly");
+    expect(other?.freshness).not.toBe("never");
+    expect(other?.last_error).toBeNull();
   });
 });

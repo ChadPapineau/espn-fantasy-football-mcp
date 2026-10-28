@@ -299,6 +299,7 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
     playerUniverse: readers.playerUniverse,
     nflPlayers: readers.nflPlayers,
     reopenChangedDatasets: () => connections.reopenChanged(),
+    datasetRefusal: (source) => connections.refusal(source),
     async backup(destPath): Promise<BackupResult> {
       if (closed) throw new Error("store: closed");
       assertAbsolute(destPath, "backup file");

@@ -638,6 +638,16 @@ export function buildServices(args: BuildServicesArgs): Wiring {
         }
       },
       jobs: () => [],
+      // the connection layer's own judgement of each current file, as every reader's read makes it
+      // (Stage C finding status-damaged-dataset-reported-fresh); a store that cannot answer leaves
+      // G1 on refresh_log alone
+      datasetRefusal: (source) => {
+        try {
+          return store.datasetRefusal(source);
+        } catch {
+          return null;
+        }
+      },
     },
     auth: {
       state: () => authority?.state() ?? "not_configured",

@@ -45,6 +45,7 @@ import type {
   RecommendationRecord,
   ScoredClaimRepository,
 } from "../domain/reclog/types.js";
+import type { DatasetRefusal } from "./datasets/connections.js";
 
 export type { BestEffortOutcome } from "../domain/analytics/types.js";
 
@@ -753,6 +754,11 @@ export interface Store {
   readonly nflPlayers: NflPlayersReader;
   /** Re-opens any dataset whose refresh_log version changed (never an attach loop). */
   reopenChangedDatasets(): readonly DatasetSourceId[];
+  /**
+   * Why the dataset connection layer refuses `source`'s current file (datasets/connections.ts
+   * `DatasetRefusal`), judged as a reader's read judges it; null when it is served or never loaded.
+   */
+  datasetRefusal(source: DatasetSourceId): DatasetRefusal | null;
   backup(destPath: string): Promise<BackupResult>;
   stats(): StoreStats;
   /** Checkpoints WAL (TRUNCATE) and closes every connection; idempotent. */
