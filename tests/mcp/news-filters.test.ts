@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { datasetDir, storePath } from "../../src/config/paths.js";
 import type { NewsItem } from "../../src/domain/analytics/types.js";
 import { NEWS_READ_MAX } from "../../src/mcp/tools/common.js";
+import { EVIDENCE_UNREAD, NO_PAIR_NEWS_NOTE } from "../../src/mcp/tools/market-p1.js";
 import { seedDatasets } from "../integration/helpers/seed.js";
 import { envelopeViolations } from "./helpers/walk.js";
 import { ESPN_FIXTURES, call, connect, makeWorld, type World } from "./helpers/world.js";
@@ -175,6 +176,14 @@ describe("D6 finds an unpaired player's items by his ESPN id (Stage C crosswalk-
       "a selected player has no crosswalk pair: his items are matched by the ESPN id in their refs",
     );
     expect(alone.warnings.some((w) => w.includes("no news can be matched"))).toBe(false);
+    // E10 reads the same items for him, and says so only now that the news was read (attempt 3)
+    const ev = await call(client, "espn_analyze_evidence", { player: { player_ids: [subject] } });
+    expect(ev.isError, JSON.stringify(ev.body).slice(0, 300)).toBe(false);
+    expect(ev.body.warnings).toContain(NO_PAIR_NEWS_NOTE);
+    expect(ev.body.warnings).not.toContain(EVIDENCE_UNREAD.news);
+    expect((ev.body.meta as { source: string[] }).source.some((x) => x.startsWith("news:"))).toBe(
+      true,
+    );
     // beside a paired player: both players' items, newest first
     let paired: { espn: number; gsis: string } | null = null;
     for (const it of inWindow)

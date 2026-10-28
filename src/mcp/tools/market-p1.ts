@@ -118,6 +118,7 @@ import {
   runSeason,
   rzShareOf,
   usageOf,
+  USAGE_SOURCES,
   valueWeeks,
   type LeagueBasics,
 } from "./p1-common.js";
@@ -1399,7 +1400,26 @@ export function othersOf(
 
 /** Said when E10's subject has no crosswalk pair (the nflverse joins cannot be made for him). */
 export const NO_PAIR_EVIDENCE_WARNING =
-  "no crosswalk pair for this player: the official injury report and nflverse usage were not read for him (no nflverse row to join); news is matched by his ESPN id";
+  "no crosswalk pair for this player: the official injury report and nflverse usage were not read for him (no nflverse row to join)";
+
+/** Said when the RSS news was read for an unpaired subject: by the ESPN id its items' refs carry. */
+export const NO_PAIR_NEWS_NOTE =
+  "his RSS news items are matched by the ESPN id in their refs (no crosswalk pair)";
+
+/**
+ * Said when one of E10's joins could not be made because its dataset is not loaded or not usable (a
+ * file past its hard limit, refused): the answer otherwise read as if the source had been checked
+ * and said nothing (Stage C finding crosswalk-unpaired-joins-silent, attempt 3: with no news feed
+ * loaded, an unpaired player's evidence carried only ESPN's texts, meta.source named ESPN alone, and
+ * the no-pair line claimed his news was matched).
+ */
+export const EVIDENCE_UNREAD = Object.freeze({
+  news: "news (news:rotowire, news:espn, news:cbs) not loaded or not usable: no RSS item was read for him (eff refresh news)",
+  report:
+    "nflverse:injuries not loaded or not usable: the official injury report was not read for him (eff refresh nflverse:daily)",
+  usage:
+    "nflverse:stats_player_week not loaded or not usable: his usage was not read (eff refresh nflverse:stats)",
+});
 
 /** The one confirmation E10 can name for a player with no crosswalk pair in place of the official report's. */
 export const NO_PAIR_CONFIRM_ESPN =
@@ -1582,7 +1602,7 @@ export const analyzeEvidenceTool = defineTool({
             practice: r.practice.map((x) => ({ day: x.day, status: x.status })),
             as_of: r.as_of,
           };
-      }
+      } else warnings.push(EVIDENCE_UNREAD.report);
     }
     // usage (D1's rows) as the detector reads them
     await turn();
@@ -1596,6 +1616,9 @@ export const analyzeEvidenceTool = defineTool({
       inputs,
     );
     const usage = (u.byId.get(p.ref.id)?.games ?? []).map((g) => usageWeekOf(g, g.rz_team ?? null));
+    // his usage could be joined (a pair) but its dataset could not be read: said, never silent
+    if (gsis !== null && u.gaps.some((g) => g.startsWith(`${USAGE_SOURCES.stats} not loaded`)))
+      warnings.push(EVIDENCE_UNREAD.usage);
     // texts: ESPN's outlooks and the RSS items about him — wrapped at the source, never followed
     const texts: EvidenceText[] = [];
     const ol = await withinBudget(
@@ -1666,6 +1689,8 @@ export const analyzeEvidenceTool = defineTool({
       });
       const news = read.result;
       const ni = optionalDataset(news, ctx, allowStale);
+      if (ni === null) warnings.push(EVIDENCE_UNREAD.news);
+      else if (unpaired) warnings.push(NO_PAIR_NEWS_NOTE);
       if (ni !== null) {
         inputs.push(ni);
         // an item that names other players too (any of its refs — an ESPN id with no gsis pair
