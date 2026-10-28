@@ -28,6 +28,7 @@ import type {
   TrendingReader,
   TrendingRow,
 } from "../../domain/analytics/types.js";
+import { epExpectedOf } from "../../domain/analytics/xfp.js";
 import { newsItemWithRefs, readStoredNewsRow } from "../../domain/evidence/index.js";
 import { bareUntrusted, type IsoInstant, type Week } from "../../domain/league/types.js";
 import type { DatasetConnection } from "./connections.js";
@@ -225,6 +226,10 @@ export function createPhase2Readers(d: Phase2ReaderDeps): {
           x_rec_td: num(r.rec_touchdown_exp),
           x_rush_td: num(r.rush_touchdown_exp),
           x_pass_td: num(r.pass_touchdown_exp),
+          // ffopportunity's expected stat line (its attempt counts and *_exp columns): what D1 scores
+          // under the league's S (xfp.ts; plan 08 §5) — null when any component is missing, never a
+          // partial line (Stage C finding analytics-xfp-gap-scoring-basis)
+          expected: epExpectedOf((c) => num(r[c])),
         });
       }
       return { rows, stamp: d.stampOf(res.conn) };

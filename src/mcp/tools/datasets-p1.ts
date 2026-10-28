@@ -165,7 +165,7 @@ export const playerUsageSchema = z.strictObject({
 /** D1's fixed notes (clean negatives as text the Skills quote verbatim — plan 07 C9). */
 export const USAGE_NOTES = Object.freeze([
   "routes are a snap-share proxy (04 #3)",
-  "xfp_ep is ffopportunity's full-PPR expectation; xfp_gap compares it with your league's points re-expressed at full PPR for receptions",
+  "xfp_ep is ffopportunity's expected stat line scored under your league's scoring; xfp_gap = xfp_ep - points_league on that one basis",
 ]);
 
 /** The positions D1 has a usage model for. */
@@ -250,7 +250,7 @@ export const getPlayerUsage = defineTool({
     const w = weekOf(league, undefined);
     const settings = await settingsOf(ctx, inputs).catch((e: unknown) => {
       if (!isDegradable(e)) throw e;
-      warnings.push("scoring settings unavailable: points_league and xfp_gap are null");
+      warnings.push("scoring settings unavailable: points_league, xfp_ep and xfp_gap are null");
       return null;
     });
     const sel = await selectPlayers(

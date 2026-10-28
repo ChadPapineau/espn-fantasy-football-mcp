@@ -2279,7 +2279,7 @@ ORDER BY player_id, week`,
       ),
     ],
     mapping:
-      "gsis_id ← player_id; season, week as-is; xfp_total ← total_fantasy_points_exp (ffopportunity's own PPR scoring — a league-scored xFP is Σ the *_exp components × the league's weights, plan 08 §5); the component columns ride along for E1 player_sim; attribution 'ffopportunity (ffverse)', CC-BY-SA 4.0",
+      "gsis_id ← player_id; season, week as-is; xfp_total ← total_fantasy_points_exp (ffopportunity's own scoring: full PPR, 4-pt passing TD — never set against a league's points); expected ← epExpectedOf over the 18 component columns (xfp.ts EP_EXPECTED_COLUMNS: the attempt counts and the *_exp expectations; null when any is missing), the line D1 scores under the league's S (plan 08 §5); x_rec_td / x_rush_td / x_pass_td ← the *_touchdown_exp columns for E1 player_sim; attribution 'ffopportunity (ffverse)', CC-BY-SA 4.0",
   }),
   /** NewsReader.recent(sinceIso, limit, gsisIds | null) — one statement pair per feed file. */
   "NewsReader.recent": p2reader({

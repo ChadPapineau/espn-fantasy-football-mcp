@@ -31,6 +31,7 @@ import type {
   UsageGameRow,
 } from "../../domain/analytics/types.js";
 import { weeklyValues } from "../../domain/analytics/waivers.js";
+import { xfpOf } from "../../domain/analytics/xfp.js";
 import { seededRng } from "../../domain/clock.js";
 import { ESPN_TO_NFLVERSE_TEAM } from "../../domain/crosswalk/types.js";
 import { normalizeTeam } from "../../domain/crosswalk/teams.js";
@@ -553,19 +554,11 @@ export const USAGE_SOURCES = Object.freeze({
   pbp: "nflverse:pbp",
 });
 
-/** Points per reception under S for a position (the PPR adjustment of the xFP comparison). */
+/** Points per reception under S for a position (E7's cascade reads the league's reception value). */
 export function receptionPoints(settings: ScoringSettings, positionId: number): number {
   const rule = settings.rules.find((x) => x.canonical === "rec");
   if (rule === undefined) return 0;
   return rule.overrides[String(positionId)] ?? rule.points;
-}
-
-/**
- * ffopportunity's expected points are full-PPR (its own scoring); the league's points re-expressed at
- * full PPR for the reception difference make the two comparable (`xfp_gap` = xFP − that).
- */
-export function pprAdjusted(points: number, receptions: number | null, recPts: number): number {
-  return points + (1 - recPts) * (receptions ?? 0);
 }
 
 /** One player's usage read: per-game rows (oldest first) and the datasets that were missing. */
@@ -619,7 +612,6 @@ export function usageOf(
     if (s.gsis === null) own.push("no crosswalk pair: no nflverse usage");
     const lines = s.gsis === null ? [] : [...(byGsis.get(s.gsis) ?? [])];
     lines.sort((a, b) => a.week - b.week);
-    const recPts = settings === null ? 0 : receptionPoints(settings, s.p.position_id);
     const games: UsageGameRow[] = lines.map((l) => {
       let pts: number | null = null;
       if (settings !== null)
@@ -629,8 +621,10 @@ export function usageOf(
           pts = null;
         }
       const ep = s.gsis === null ? undefined : epBy.get(`${s.gsis}:${String(l.week)}`);
-      const xfp = ep?.xfp_total ?? null;
-      const rec = l.line.values.rec ?? l.line.values.rec_stat ?? null;
+      // xFP on the league's scoring basis: ffopportunity's expected line scored under S, and the gap
+      // on that one basis — never its own full-PPR / 4-pt-pass-TD total set against league points
+      // (Stage C finding analytics-xfp-gap-scoring-basis)
+      const xfp = xfpOf(ep, settings, s.p.position_id, pts);
       const u = l.usage;
       return {
         week: l.week,
@@ -651,9 +645,9 @@ export function usageOf(
         rz_carries: u?.rz_carries ?? null,
         rz_team: u?.rz_team ?? null,
         gl_carries: u?.gl_carries ?? null,
-        xfp_ep: xfp,
+        xfp_ep: xfp.xfp_ep,
         points_league: pts,
-        xfp_gap: xfp === null || pts === null ? null : xfp - pprAdjusted(pts, rec, recPts),
+        xfp_gap: xfp.xfp_gap,
       };
     });
     if (games.length > 0 && games.every((g) => g.snap_pct === null))

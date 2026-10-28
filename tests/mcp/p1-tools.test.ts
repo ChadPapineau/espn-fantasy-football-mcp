@@ -15,11 +15,13 @@ import type {
   DatasetReaders,
   DatasetStamp,
   DepthChartRow,
+  EpExpected,
   EpWeeklyRow,
   NewsItem,
 } from "../../src/domain/analytics/types.js";
 import type { FreshnessClassId } from "../../src/config/freshness.js";
 import type { DatasetSourceId } from "../../src/config/freshness.js";
+import { EP_EXPECTED_COLUMNS } from "../../src/domain/analytics/xfp.js";
 import { INJECTION_RELIABILITY_CAP } from "../../src/domain/evidence/index.js";
 import { familyVerification } from "../../src/domain/scoring/index.js";
 import { bareUntrusted, wrapUntrusted } from "../../src/domain/league/types.js";
@@ -100,6 +102,12 @@ function stamp(source: DatasetSourceId, cls: FreshnessClassId): DatasetStamp {
     freshness_class: cls,
     file_version: "fixture",
   };
+}
+
+/** ffopportunity's expected components of a stubbed row: the given ones, every other component 0. */
+function expectedOf(c: Partial<EpExpected>): EpExpected {
+  const zero = Object.fromEntries(Object.keys(EP_EXPECTED_COLUMNS).map((k) => [k, 0]));
+  return { ...(zero as unknown as EpExpected), ...c };
 }
 
 /** A client over the same world with some dataset ports replaced (the fake Phase-2 readers). */
@@ -394,7 +402,7 @@ describe("D1 espn_get_player_usage", () => {
     for (const g of games) expect(g).toHaveProperty("routes_proxy");
   });
 
-  it("xfp_gap is non-null wherever ffopportunity has the player (plan 10 B2), PPR-adjusted", async () => {
+  it("xfp_gap is non-null wherever ffopportunity has the player (plan 10 B2), on the league's scoring basis", async () => {
     const u = await ok("espn_get_player_usage", { players: { team_id: 1 }, detail: "full" });
     const lined = (
       u.data.players as {
@@ -404,11 +412,14 @@ describe("D1 espn_get_player_usage", () => {
     ).filter((p) => p.gsis_id !== null && p.games.length > 0);
     const target = lined[0];
     if (target === undefined) throw new Error("no lined player in the fixture");
+    // an expected 65 receiving yards and a TD: 12.5 under league-a's S (0.1 a yard, 6 a TD, no
+    // PPR); ffopportunity's own total (full PPR) is a different number and is never the xFP
     const rows: EpWeeklyRow[] = target.games.map((g) => ({
       gsis_id: target.gsis_id ?? "",
       season: 2026,
       week: g.week,
-      xfp_total: 12.5,
+      xfp_total: 16.5,
+      expected: expectedOf({ targets: 6, rec: 4, rec_yd: 65, rec_td: 1 }),
     }));
     const c = await withReaders({
       epWeekly: {
@@ -431,6 +442,8 @@ describe("D1 espn_get_player_usage", () => {
     for (const g of p?.games ?? []) {
       expect(g.xfp_ep).toBe(12.5);
       expect(g.xfp_gap).not.toBeNull();
+      // one basis: the gap is the league-scored xFP less the league's points, nothing else
+      if (g.points_league !== null) expect(g.xfp_gap).toBeCloseTo(12.5 - g.points_league, 9);
     }
     expect(p?.trailing.xfp_gap_sum).not.toBeNull();
     expect(e.meta.attribution.length).toBeGreaterThan(0);
@@ -1301,7 +1314,16 @@ describe("E5 espn_analyze_waivers under full (plan 10 B3 hard parts)", () => {
             rows: (ids, season, weeks) => ({
               rows: ids
                 .filter((g) => cand.has(g))
-                .flatMap((g) => weeks.map((week) => ({ gsis_id: g, season, week, xfp_total: 60 }))),
+                .flatMap((g) =>
+                  weeks.map((week) => ({
+                    gsis_id: g,
+                    season,
+                    week,
+                    xfp_total: 60,
+                    // 300 receiving yards and 5 TDs expected: 60 under league-a's S
+                    expected: expectedOf({ targets: 12, rec: 8, rec_yd: 300, rec_td: 5 }),
+                  })),
+                ),
               stamp: stamp("ffopportunity:ep_weekly", "ffopportunity_ep_weekly"),
             }),
           },

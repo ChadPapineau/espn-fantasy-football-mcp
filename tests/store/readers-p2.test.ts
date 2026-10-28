@@ -7,6 +7,7 @@
 // prior season is read from the history file. Every id and name is invented (00-90xxxxx, "Test").
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { NflTeam } from "../../src/config/schema.js";
+import { EP_EXPECTED_COLUMNS } from "../../src/domain/analytics/xfp.js";
 import { isUntrustedText } from "../../src/domain/league/types.js";
 import {
   DS_DEPTH_CHARTS,
@@ -159,6 +160,8 @@ describe("EpWeeklyReader.rows", () => {
         x_rec_td: 0.4,
         x_rush_td: 0.2,
         x_pass_td: null,
+        // a component missing (here all but two): no expected line, never a partial one
+        expected: null,
       },
       {
         gsis_id: B,
@@ -168,6 +171,7 @@ describe("EpWeeklyReader.rows", () => {
         x_rec_td: null,
         x_rush_td: null,
         x_pass_td: null,
+        expected: null,
       },
     ]);
     const prior = s.datasets.epWeekly.rows([A], 2025, [1]);
@@ -177,6 +181,35 @@ describe("EpWeeklyReader.rows", () => {
     const none = s.datasets.epWeekly.rows([A], 2023, [1]);
     expect(none.rows).toEqual([]);
     expect(none.stamp?.source).toBe("ffopportunity:ep_weekly");
+  });
+
+  it("carries ffopportunity's expected stat line by canonical stat — what D1 scores under the league's S (Stage C finding analytics-xfp-gap-scoring-basis)", async () => {
+    // every component column (xfp.ts EP_EXPECTED_COLUMNS) a distinct value, so a crossed wire shows
+    const cols = Object.entries(EP_EXPECTED_COLUMNS);
+    const cells = Object.fromEntries(cols.map(([, col], i) => [col, i + 0.5]));
+    await publishTables(pub, "ffopportunity:ep_weekly", "e1", [
+      {
+        spec: DS_EP_WEEKLY,
+        rows: [
+          full(DS_EP_WEEKLY, { season: 2026, week: 2, player_id: A, ...cells }),
+          // one component missing: no line at all (never a partial one)
+          full(DS_EP_WEEKLY, {
+            season: 2026,
+            week: 2,
+            player_id: B,
+            ...cells,
+            receptions_exp: null,
+          }),
+        ],
+      },
+    ]);
+    const got = s.datasets.epWeekly.rows([A, B], 2026, [2]).rows;
+    expect(got.map((r) => r.gsis_id)).toEqual([A, B]);
+    expect(got[0]?.expected).toEqual(Object.fromEntries(cols.map(([k], i) => [k, i + 0.5])));
+    expect(Object.keys(got[0]?.expected ?? {})).toHaveLength(18);
+    expect(got[1]?.expected).toBeNull();
+    // ffopportunity's own total is still read as-is, never used as the league-scored xFP
+    expect(got[0]?.xfp_total).toBeNull();
   });
 });
 
