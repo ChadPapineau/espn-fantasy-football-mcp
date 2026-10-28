@@ -70,6 +70,8 @@ Seen on the owner's install at the final gate. Each is an action at a terminal; 
 
 ## Ruled R8-3 — the news matcher's fail-safe choices
 
+**Superseded in part by R8-6 (2026-10-28):** R8-3's fix rounds did not converge (15, 16 and 16 violations against `52796bf`, `7b9572c` and `dbe9686`). For a shared name the matcher now fails closed: only a label next to the name picks a holder. The prominent holder takes the item only when it names no team and no position anywhere. Everything else gets no ref and is counted. The open items below that R8-6 does not settle are rebuilt or closed by its fix run (changelog §R8, §B9).
+
 **Ruled R8-3 (2026-10-28, changelog §R8):** choices 1–5 stand; a loose team mention on a shared name is
 never evidence for a holder; the opponent cues cover result and play wording; choice 6 takes (c),
 position words from ESPN's `position_id`, on both paths. The gate's fourth run found namesake items

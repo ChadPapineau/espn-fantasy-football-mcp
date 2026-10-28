@@ -30,6 +30,8 @@ accepts the stall measurement. R8-4 closes F8: the owner confirmed division winn
 closes the three fixed ledger items and leaves `ci-default-branch-controls-inert` to the Stage D
 merge. R8-3 rules the news matcher's shared names: its fix runs next, then the re-gate.
 
+**Orchestrator, 2026-10-28 (later):** R8-3's fix run (`cb2bcc7` … `dbe9686`, three rounds, CI green) did not converge: each independent attack found 15–16 new violations. R8-6 (changelog §R8) makes the matcher fail closed for shared names: only a label written next to the name picks a holder, and the prominent holder takes an item only when it names no team and no position. Its fix run is next, then the re-gate.
+
 **State:** branch `build/phase-1`; fix round 1 is `e40fd88` … `7f39044` (changelog §B6), fix round 2
 `01cb8e5` and `2396b07` (§B7), fix round 3 `42de906` and `ebc9187` plus this docs commit (§B8); tree clean,
 HEAD == origin. The final gate's third run found no defect in its commands or product checks. It was red only
