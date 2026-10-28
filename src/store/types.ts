@@ -142,6 +142,19 @@ export const MIGRATION_001_TABLES = [
 ] as const;
 /** The tables migration 002 adds (plan 10 §3.3 — src/store/migrations/002_phase3.ts). */
 export const MIGRATION_002_TABLES = ["parameter_proposal", "waiver_run", "scored_claim"] as const;
+/**
+ * The league-specific tables migration 003 gave a `league_id` (src/store/migrations/
+ * 003_league_scope.ts): a store opened for a league reads only that league's rows of them.
+ */
+export const LEAGUE_SCOPED_TABLES = [
+  "roster_snapshot",
+  "pool_snapshot",
+  "scoreboard_snapshot",
+  "transactions_seen",
+  "espn_projection",
+  "projection",
+  "checks",
+] as const;
 
 /** Every store table this binary's migrations create, in migration order. */
 export const STORE_TABLES = Object.freeze([...MIGRATION_001_TABLES, ...MIGRATION_002_TABLES]);
@@ -722,6 +735,23 @@ export interface StoreOpenOptions {
    * false: a raw body handed to `put` is dropped, so the cache never becomes a PII store.
    */
   readonly recordRawBodies?: boolean;
+  /**
+   * The league this process serves (the configured ESPN_LEAGUE_ID): the league-scoped repositories
+   * (LEAGUE_SCOPED_TABLES — the snapshots, transactions_seen, the projections, checks) write it on
+   * every row and read only its rows. Absent or null: none — their reads return nothing and their
+   * writes throw StoreLeagueUnboundError (a store opened for prune, a backup, doctor without a league).
+   * One store serves every process on the Mac, and ESPN_LEAGUE_ID can change on it: rows written
+   * under another league are never read as this one's (Stage C finding store-not-league-scoped).
+   */
+  readonly league?: string | null;
+}
+
+/** A league-scoped record written through a store opened for no league (StoreOpenOptions.league). */
+export class StoreLeagueUnboundError extends Error {
+  constructor(what: string) {
+    super(`store: ${what} is a league's record, and this store was opened for no league`);
+    this.name = "StoreLeagueUnboundError";
+  }
 }
 
 /** A consistent backup (plan 03 §7: `VACUUM INTO` under the process lock, never a file copy). */

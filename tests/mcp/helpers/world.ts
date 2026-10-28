@@ -393,6 +393,8 @@ export async function makeWorld(o: WorldOptions = {}): Promise<World> {
     backupDir: backupDir(cache),
     clock,
     migrate: true,
+    // the configured league's records, as the server's composition opens it (src/cli/serve.ts)
+    league: config.leagueId,
   });
   const t = { storePath: sp, datasetDir: dd, cache, clock };
   if (o.publishEspn !== false) await publishEspnDatasets(t);

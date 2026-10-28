@@ -30,6 +30,7 @@ import {
   toJson,
   WEEK_MAX,
   WEEK_MIN,
+  writeLeague,
   type RepoDeps,
 } from "./common.js";
 
@@ -121,19 +122,21 @@ const toStored = (r: Row): StoredProjection => {
 /** The newest earlier row of the key recorded the same inputs_as_of and expectation. */
 const REPEATS_PREVIOUS_SQL = `SELECT 1 FROM (
     SELECT inputs_as_of, expectation_json FROM projection
-    WHERE player_id = :player AND season = :season AND week = :week AND model_version = :model
-      AND made_ms <= :made
+    WHERE league_id = :league AND player_id = :player AND season = :season AND week = :week
+      AND model_version = :model AND made_ms <= :made
     ORDER BY made_ms DESC LIMIT 1
   ) AS prev WHERE prev.inputs_as_of = :inputs AND prev.expectation_json = :expectation`;
 
-export function projectionRepository({ db, writes }: RepoDeps): ProjectionRepository {
+export function projectionRepository(deps: RepoDeps): ProjectionRepository {
+  const { db, writes, league } = deps;
   const newest = (extra: string) =>
     db.prepare(
-      `SELECT * FROM projection WHERE player_id = :player AND season = :season AND week = :week
-       AND model_version = :model ${extra} ORDER BY made_ms DESC LIMIT 1`,
+      `SELECT * FROM projection WHERE league_id = :league AND player_id = :player AND season = :season
+       AND week = :week AND model_version = :model ${extra} ORDER BY made_ms DESC LIMIT 1`,
     );
   return {
     put(p) {
+      const leagueId = writeLeague(deps, "a projection");
       intIn(p.player_id, -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, "player_id");
       if (p.player_id === 0) throw new RangeError("store: player_id 0 is not a player");
       if (p.gsis_id !== null) matching(p.gsis_id, GSIS_ID_RE, "gsis_id");
@@ -153,6 +156,7 @@ export function projectionRepository({ db, writes }: RepoDeps): ProjectionReposi
       const trace =
         p.trace === undefined || p.trace === null ? null : toJson(p.trace, "trace", TRACE_JSON_MAX);
       const key = {
+        league: leagueId,
         player: p.player_id,
         season: p.season,
         week: p.week,
@@ -167,10 +171,10 @@ export function projectionRepository({ db, writes }: RepoDeps): ProjectionReposi
       return writes.bestEffort(() => {
         db.prepare(
           `INSERT OR IGNORE INTO projection
-           (player_id, gsis_id, season, week, model_version, made_at, made_ms, inputs_as_of, expectation_json, samples,
-            p_active, reported_mean, trace_json)
-           SELECT :player, :gsis, :season, :week, :model, :made_at, :made, :inputs, :expectation, :samples,
-            :p_active, :reported, :trace
+           (league_id, player_id, gsis_id, season, week, model_version, made_at, made_ms, inputs_as_of, expectation_json,
+            samples, p_active, reported_mean, trace_json)
+           SELECT :league, :player, :gsis, :season, :week, :model, :made_at, :made, :inputs, :expectation,
+            :samples, :p_active, :reported, :trace
            WHERE NOT EXISTS (${REPEATS_PREVIOUS_SQL})`,
         ).run({
           ...key,
@@ -184,11 +188,15 @@ export function projectionRepository({ db, writes }: RepoDeps): ProjectionReposi
       });
     },
     latest(playerId, season, week, model) {
-      const r = newest("").get({ player: playerId, season, week, model }) as Row | undefined;
+      if (league === null) return null;
+      const r = newest("").get({ league, player: playerId, season, week, model }) as
+        Row | undefined;
       return r === undefined ? null : toStored(r);
     },
     getAsOf(playerId, season, week, model, before) {
+      if (league === null) return null;
       const r = newest("AND made_ms < :before").get({
+        league,
         player: playerId,
         season,
         week,
@@ -231,9 +239,11 @@ const toSnapshot = (r: SnapshotRow): EspnProjectionSnapshot => ({
   snapshot_at: r.snapshot_at,
 });
 
-export function espnProjectionRepository({ db, writes }: RepoDeps): EspnProjectionRepository {
+export function espnProjectionRepository(deps: RepoDeps): EspnProjectionRepository {
+  const { db, writes, league } = deps;
   return {
     putMany(rows) {
+      const leagueId = writeLeague(deps, "an ESPN projection snapshot");
       const checked = boundedArray(rows, PUT_MANY_MAX, "rows").map((r) => ({
         r,
         ms: checkSnapshot(r),
@@ -242,13 +252,14 @@ export function espnProjectionRepository({ db, writes }: RepoDeps): EspnProjecti
       return writes.requiredTx("espn_projection", () => {
         const ins = db.prepare(
           `INSERT OR IGNORE INTO espn_projection
-           (player_id, season, week, week_key, split, applied_total, stats_raw_json, snapshot_at, snapshot_ms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (league_id, player_id, season, week, week_key, split, applied_total, stats_raw_json, snapshot_at, snapshot_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         );
         let n = 0;
         for (const { r, ms } of checked)
           n += Number(
             ins.run(
+              leagueId,
               r.player_id,
               r.season,
               r.week,
@@ -265,22 +276,26 @@ export function espnProjectionRepository({ db, writes }: RepoDeps): EspnProjecti
     },
     asOf(season, week, before) {
       const beforeMs = isoMs(before, "before");
-      // The newest snapshot before `before` per (player, split) recorded for that week.
+      if (league === null) return [];
+      // The newest snapshot before `before` per (player, split) recorded for that week, this league's
       const rows = db
         .prepare(
           `SELECT p.* FROM espn_projection AS p
            JOIN (SELECT player_id, split, MAX(snapshot_ms) AS m FROM espn_projection
-                 WHERE season = :season AND week_key = :week AND snapshot_ms < :before
+                 WHERE league_id = :league AND season = :season AND week_key = :week AND snapshot_ms < :before
                  GROUP BY player_id, split) AS n
              ON n.player_id = p.player_id AND n.split = p.split AND n.m = p.snapshot_ms
-           WHERE p.season = :season AND p.week_key = :week
+           WHERE p.league_id = :league AND p.season = :season AND p.week_key = :week
            ORDER BY p.player_id, p.split`,
         )
-        .all({ season, week, before: beforeMs }) as unknown as SnapshotRow[];
+        .all({ league, season, week, before: beforeMs }) as unknown as SnapshotRow[];
       return rows.map(toSnapshot);
     },
     lastSnapshotAt() {
-      const r = db.prepare("SELECT MAX(snapshot_ms) AS m FROM espn_projection").get() as {
+      if (league === null) return null;
+      const r = db
+        .prepare("SELECT MAX(snapshot_ms) AS m FROM espn_projection WHERE league_id = ?")
+        .get(league) as {
         m: number | null;
       };
       return r.m === null ? null : msToIso(num(r.m));

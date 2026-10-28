@@ -5,6 +5,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { up as up001 } from "./001_initial.js";
 import { up as up002 } from "./002_phase3.js";
+import { up as up003 } from "./003_league_scope.js";
 
 /** One forward-only migration. */
 export interface Migration {
@@ -19,6 +20,8 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   Object.freeze({ version: 1, name: "initial", up: up001 }),
   // Phase 3 (plan 10 §3.3): proposal sets, the projection's attribution fields, waiver runs, claims
   Object.freeze({ version: 2, name: "phase3_records", up: up002 }),
+  // Stage C (store-not-league-scoped): every league-specific record names its league
+  Object.freeze({ version: 3, name: "league_scope", up: up003 }),
 ]);
 
 /** Asserts a migration list is numbered 1..n contiguously; returns n (the binary's schema version). */

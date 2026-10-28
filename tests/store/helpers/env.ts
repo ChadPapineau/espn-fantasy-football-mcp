@@ -59,6 +59,8 @@ export function openStore(
     backupDir: t.backupDir,
     clock: t.clock,
     migrate: true,
+    // the fixture league (id 0): the league-scoped records are its own (pass `league` to change it)
+    league: "0",
     ...extra,
   });
 }

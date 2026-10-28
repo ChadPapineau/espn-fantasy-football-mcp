@@ -1,7 +1,8 @@
 // migrations.test.ts — forward-only migrations (plan 03 §7, L7): from empty; migration 001 creates
 // exactly MIGRATION_001_TABLES and 002 (Phase 3, plan 10 §3.3) exactly MIGRATION_002_TABLES plus the
-// projection's three attribution columns, on a v1 store with its rows kept; a synthetic 003 runs
-// after a VACUUM INTO pre-migration backup (0600, holding the v2 data) under the process lock; a
+// projection's three attribution columns, on a v1 store with its rows kept (003, the league scope,
+// is held in league-scope.test.ts); a synthetic next migration runs after a VACUUM INTO
+// pre-migration backup (0600, holding the current data) under the process lock; a
 // failing migration rolls back whole and leaves no copy behind; one copy per version, of the last
 // two versions, is kept; a store from a newer binary is refused (no down-migration); a second runner
 // is a no-op.
@@ -52,16 +53,16 @@ afterEach(() => {
   t.cleanup();
 });
 
-/** This binary's schema version (migrations 001 and 002). */
-const BIN = 2;
-const M003: Migration = Object.freeze({
+/** This binary's schema version (migrations 001, 002 and 003). */
+const BIN = 3;
+const NEXT: Migration = Object.freeze({
   version: BIN + 1,
   name: "synthetic_add_column",
   up: (db: DatabaseSync) => {
     db.exec("ALTER TABLE probe_log ADD COLUMN note TEXT");
   },
 });
-const M003_FAILS: Migration = Object.freeze({
+const NEXT_FAILS: Migration = Object.freeze({
   version: BIN + 1,
   name: "synthetic_fails",
   up: (db: DatabaseSync) => {
@@ -84,11 +85,11 @@ function seedCurrent(): void {
 }
 
 describe("the migration list", () => {
-  it("is numbered 1..n contiguously; this binary is v2", () => {
+  it("is numbered 1..n contiguously; this binary is v3", () => {
     expect(targetVersion(MIGRATIONS)).toBe(BIN);
-    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2]);
-    expect(() => targetVersion([M003])).toThrow(/contiguously/);
-    expect(() => targetVersion([...MIGRATIONS, M003, M003])).toThrow(/contiguously/);
+    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3]);
+    expect(() => targetVersion([NEXT])).toThrow(/contiguously/);
+    expect(() => targetVersion([...MIGRATIONS, NEXT, NEXT])).toThrow(/contiguously/);
   });
 
   const tablesIn = (db: DatabaseSync): string[] =>
@@ -130,11 +131,12 @@ describe("the migration list", () => {
     const projCols = (): string[] =>
       (db.prepare("PRAGMA table_info(projection)").all() as { name: string }[]).map((c) => c.name);
     const before = projCols();
-    expect(applyMigrations(db, MIGRATIONS, () => "2026-10-06T12:00:00.000Z")).toEqual([2]);
-    expect(readSchemaVersion(db)).toBe(BIN);
+    const upTo002 = MIGRATIONS.slice(0, 2);
+    expect(applyMigrations(db, upTo002, () => "2026-10-06T12:00:00.000Z")).toEqual([2]);
+    expect(readSchemaVersion(db)).toBe(2);
     expect(tablesIn(db)).toEqual([...STORE_TABLES].sort());
     expect(projCols()).toEqual([...before, ...MIGRATION_002_PROJECTION_COLUMNS]);
-    expect(applyMigrations(db, MIGRATIONS, () => "2026-10-06T12:00:00.000Z")).toEqual([]);
+    expect(applyMigrations(db, upTo002, () => "2026-10-06T12:00:00.000Z")).toEqual([]);
     db.close();
     const ddl = MIGRATION_002_SQL.join("\n");
     for (const tname of MIGRATION_002_TABLES) {
@@ -158,7 +160,7 @@ describe("the migration list", () => {
 describe("upgrading (plan 03 §7)", () => {
   it("backs up by VACUUM INTO (0600, the current data) before the first pending migration, then migrates", () => {
     seedCurrent();
-    const s = openStore(t, {}, { migrations: [...MIGRATIONS, M003] });
+    const s = openStore(t, {}, { migrations: [...MIGRATIONS, NEXT] });
     expect(s.schemaVersion).toBe(BIN + 1);
     expect(s.repos.probeLog.recent(5)).toHaveLength(1);
     s.close();
@@ -178,7 +180,7 @@ describe("upgrading (plan 03 §7)", () => {
   });
 
   it("a fresh store (v0) takes no backup", () => {
-    const s = openStore(t, {}, { migrations: [...MIGRATIONS, M003] });
+    const s = openStore(t, {}, { migrations: [...MIGRATIONS, NEXT] });
     expect(s.schemaVersion).toBe(BIN + 1);
     s.close();
     expect(existsSync(t.backupDir) ? readdirSync(t.backupDir) : []).toEqual([]);
@@ -186,7 +188,7 @@ describe("upgrading (plan 03 §7)", () => {
 
   it("a failing migration rolls back whole: the store keeps its version and its rows", () => {
     seedCurrent();
-    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003_FAILS] })).toThrow(
+    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, NEXT_FAILS] })).toThrow(
       /boom mid-migration/,
     );
     const db = new DatabaseSync(t.storePath, { readOnly: true });
@@ -202,8 +204,8 @@ describe("upgrading (plan 03 §7)", () => {
     s.close();
   });
 
-  it("refuses to run down: a v3 store opened by a v2 binary is StoreVersionError(3, 2)", () => {
-    openStore(t, {}, { migrations: [...MIGRATIONS, M003] }).close();
+  it("refuses to run down: a v4 store opened by a v3 binary is StoreVersionError(4, 3)", () => {
+    openStore(t, {}, { migrations: [...MIGRATIONS, NEXT] }).close();
     let err: unknown;
     try {
       openStore(t);
@@ -220,12 +222,12 @@ describe("upgrading (plan 03 §7)", () => {
     seedCurrent();
     // A lock left by a process that no longer exists.
     writeFileSync(lockPathOf(t.storePath), "999999999 2026-10-06T00:00:00.000Z\n", { mode: 0o600 });
-    const s = openStore(t, {}, { migrations: [...MIGRATIONS, M003] });
+    const s = openStore(t, {}, { migrations: [...MIGRATIONS, NEXT] });
     expect(s.schemaVersion).toBe(BIN + 1);
     s.close();
   });
 
-  it("a v1 store (written before Phase 3) migrates to v2 and keeps its rows", () => {
+  it("a v1 store (written before Phase 3) migrates to this binary's version and keeps its rows", () => {
     // a store at v1 only: migration 001 applied by an older binary
     openStore(t, {}, { migrations: MIGRATIONS.slice(0, 1) }).close();
     const s1 = openStore(t, {}, { migrations: MIGRATIONS.slice(0, 1) });
@@ -319,7 +321,7 @@ describe("a migration that keeps failing leaves no copies behind (one copy per v
     seedCurrent();
     for (let hour = 0; hour < 24; hour++) {
       t.clock.advance(3_600_000);
-      expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003_FAILS] })).toThrow(
+      expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, NEXT_FAILS] })).toThrow(
         /boom mid-migration/,
       );
       expect(preCopies()).toEqual([]);
@@ -328,12 +330,12 @@ describe("a migration that keeps failing leaves no copies behind (one copy per v
     expect(readSchemaVersion(db)).toBe(BIN);
     db.close();
     // the refresh process opens the store the same way (openPublisher → openMigrated)
-    expect(() => openPublisher(t, { migrations: [...MIGRATIONS, M003_FAILS] })).toThrow(
+    expect(() => openPublisher(t, { migrations: [...MIGRATIONS, NEXT_FAILS] })).toThrow(
       /boom mid-migration/,
     );
     expect(preCopies()).toEqual([]);
     // the fixed migration then takes exactly one copy, holding the current data
-    const s = openStore(t, {}, { migrations: [...MIGRATIONS, M003] });
+    const s = openStore(t, {}, { migrations: [...MIGRATIONS, NEXT] });
     expect(s.schemaVersion).toBe(BIN + 1);
     expect(s.repos.probeLog.recent(5)).toHaveLength(1);
     s.close();
@@ -348,8 +350,8 @@ describe("a migration that keeps failing leaves no copies behind (one copy per v
 
   it("a run that committed a step keeps its copy (that step cannot be undone without it)", () => {
     seedCurrent();
-    const M004_FAILS: Migration = { ...M003_FAILS, version: BIN + 2 };
-    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003, M004_FAILS] })).toThrow(
+    const AFTER_NEXT_FAILS: Migration = { ...NEXT_FAILS, version: BIN + 2 };
+    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, NEXT, AFTER_NEXT_FAILS] })).toThrow(
       /boom mid-migration/,
     );
     const db = new DatabaseSync(t.storePath, { readOnly: true });
@@ -358,7 +360,7 @@ describe("a migration that keeps failing leaves no copies behind (one copy per v
     expect(preCopies()).toEqual([`store.sqlite.bak-v${String(BIN)}`]);
     // the next attempt starts from v3: its own copy of v3 goes when it fails; the v2 copy stays
     t.clock.advance(3_600_000);
-    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003, M004_FAILS] })).toThrow(
+    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, NEXT, AFTER_NEXT_FAILS] })).toThrow(
       /boom mid-migration/,
     );
     expect(preCopies()).toEqual([`store.sqlite.bak-v${String(BIN)}`]);
@@ -373,7 +375,7 @@ describe("a migration that keeps failing leaves no copies behind (one copy per v
         mode: 0o600,
       });
     writeFileSync(path.join(t.backupDir, "store.sqlite.bak-v1"), "older version", { mode: 0o600 });
-    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, M003_FAILS] })).toThrow(
+    expect(() => openStore(t, {}, { migrations: [...MIGRATIONS, NEXT_FAILS] })).toThrow(
       /boom mid-migration/,
     );
     // the failed attempt removed them before its own copy, then its own copy: v1's stays
@@ -382,7 +384,7 @@ describe("a migration that keeps failing leaves no copies behind (one copy per v
       writeFileSync(path.join(t.backupDir, `store.sqlite.bak-v${String(BIN)}${n}`), "stale", {
         mode: 0o600,
       });
-    const s = openStore(t, {}, { migrations: [...MIGRATIONS, M003] });
+    const s = openStore(t, {}, { migrations: [...MIGRATIONS, NEXT] });
     s.close();
     // one copy of v2, the fresh one (a database holding the data, not a leftover)
     expect(preCopies()).toEqual(["store.sqlite.bak-v1", `store.sqlite.bak-v${String(BIN)}`]);

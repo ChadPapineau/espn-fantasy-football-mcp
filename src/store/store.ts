@@ -9,6 +9,7 @@ import { lstatSync, statSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { assertSecureFile, ensureSecureDir, PathSecurityError } from "../config/paths.js";
+import { ESPN_LEAGUE_ID_RE } from "../config/schema.js";
 import type { Clock } from "../domain/clock.js";
 import type { NflPlayersReader } from "../domain/crosswalk/types.js";
 import {
@@ -242,6 +243,9 @@ function buildRepos(deps: RepoDeps): StoreRepositories {
 export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}): Store {
   assertAbsolute(opts.datasetDir, "dataset directory");
   assertAbsolute(opts.backupDir, "backup directory");
+  const league = opts.league ?? null;
+  if (league !== null && (typeof league !== "string" || !ESPN_LEAGUE_ID_RE.test(league)))
+    throw new RangeError("store: the league must be an ESPN league id");
   const busyMs = internals.busyTimeoutMs ?? BUSY_TIMEOUT_MS;
   const guard = new StatementGuard();
   const { db, version } = openMigrated({
@@ -274,6 +278,7 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
     clock: opts.clock,
     pseudonyms: createPseudonymizer(db),
     recordRawBodies: opts.recordRawBodies === true,
+    league,
   };
   const repos = buildRepos(deps);
   const connections = new DatasetConnections({

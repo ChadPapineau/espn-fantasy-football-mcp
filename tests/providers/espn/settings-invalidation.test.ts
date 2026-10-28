@@ -688,6 +688,7 @@ describe("end to end over the real store: the edit raises settings_changed insid
     tmp = tempDir("eff-settings-inval-");
     const clock = fixedClock("2026-10-07T01:00:00.000Z");
     store = createStoreFactory({ busyTimeoutMs: 50 }).open({
+      league: "0",
       path: path.join(tmp.dir, "store.sqlite"),
       datasetDir: path.join(tmp.dir, "datasets"),
       backupDir: path.join(tmp.dir, "backups"),
@@ -744,6 +745,7 @@ describe("end to end over the real store: the edit raises settings_changed insid
     tmp = tempDir("eff-settings-golden-");
     const clock = fixedClock("2026-10-07T01:00:00.000Z");
     store = createStoreFactory({ busyTimeoutMs: 50 }).open({
+      league: "0",
       path: path.join(tmp.dir, "store.sqlite"),
       datasetDir: path.join(tmp.dir, "datasets"),
       backupDir: path.join(tmp.dir, "backups"),

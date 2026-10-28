@@ -91,17 +91,17 @@ function seedNeverPruned(age: number): void {
     at,
   );
   runSql(
-    "INSERT INTO espn_projection (player_id, season, week, week_key, split, applied_total, stats_raw_json, snapshot_at, snapshot_ms) VALUES (1, 2026, 1, 1, 'weekly', 1, '{}', ?, ?)",
+    "INSERT INTO espn_projection (league_id, player_id, season, week, week_key, split, applied_total, stats_raw_json, snapshot_at, snapshot_ms) VALUES ('0', 1, 2026, 1, 1, 'weekly', 1, '{}', ?, ?)",
     at,
     NOW - age,
   );
   runSql(
-    "INSERT INTO scoreboard_snapshot (week, taken_at, taken_ms, matchups_json, playoff_pct_json) VALUES (1, ?, ?, '[]', '{}')",
+    "INSERT INTO scoreboard_snapshot (league_id, week, taken_at, taken_ms, matchups_json, playoff_pct_json) VALUES ('0', 1, ?, ?, '[]', '{}')",
     at,
     NOW - age,
   );
   runSql(
-    "INSERT INTO projection (player_id, gsis_id, season, week, model_version, made_at, made_ms, inputs_as_of, expectation_json, samples) VALUES (1, NULL, 2026, 1, 'v1-ensemble', ?, ?, ?, '{}', x'00')",
+    "INSERT INTO projection (league_id, player_id, gsis_id, season, week, model_version, made_at, made_ms, inputs_as_of, expectation_json, samples) VALUES ('0', 1, NULL, 2026, 1, 'v1-ensemble', ?, ?, ?, '{}', x'00')",
     at,
     NOW - age,
     at,

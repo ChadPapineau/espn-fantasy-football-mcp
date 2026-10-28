@@ -769,6 +769,8 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       migrate: true,
       weatherSource: config.weatherSource,
       recordRawBodies: config.fixtureRecord,
+      // the configured league's records only (Stage C finding store-not-league-scoped)
+      league: config.leagueId,
       onWarning: (code) => {
         logger.warn("store.warning", { code });
       },

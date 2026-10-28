@@ -56,7 +56,7 @@ function tablesOf(file: string): string[] {
 }
 
 describe("a fresh store", () => {
-  it("creates the cache dir 0700 and store.sqlite 0600, WAL, schema v2, exactly the store tables", () => {
+  it("creates the cache dir 0700 and store.sqlite 0600, WAL, schema v3, exactly the store tables", () => {
     rmSync(t.cache, { recursive: true });
     const s = openStore(t);
     expect(mode(t.cache)).toBe(0o700);
@@ -66,7 +66,7 @@ describe("a fresh store", () => {
     expect(mode(`${t.storePath}-wal`)).toBe(0o600);
     expect(mode(`${t.storePath}-shm`)).toBe(0o600);
     expect(s.schemaVersion).toBe(BIN);
-    expect(BIN).toBe(2);
+    expect(BIN).toBe(3);
     expect(s.path).toBe(t.storePath);
     const db = storeInternalsOf(s)?.db;
     expect(db).toBeDefined();

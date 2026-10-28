@@ -14,8 +14,10 @@
 // stall a read that changes nothing). A settings or snapshot row stamped past the store's clock (a
 // clock since set back) is re-stamped just below the next one written under it, and a check raised
 // then is covered by an acknowledgement made now (skew.ts; Stage C finding
-// store-future-stamped-rows-block). Ported from sibling @cf3b015, adapted (single-league posture:
-// no league key on snapshots; ESPN shapes).
+// store-future-stamped-rows-block). The snapshots, transactions_seen and checks are each league's
+// own (migration 003; the store's bound league — StoreOpenOptions.league): a store opened for a
+// league writes it on every row and reads only its rows (Stage C finding store-not-league-scoped).
+// Ported from sibling @cf3b015, adapted (ESPN shapes; league-scoped records).
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { ESPN_LEAGUE_ID_RE, TEAM_ID_MAX, TEAM_ID_MIN } from "../../config/schema.js";
 import {
@@ -56,6 +58,7 @@ import {
   toJson,
   WEEK_MAX,
   WEEK_MIN,
+  writeLeague,
   type RepoDeps,
 } from "./common.js";
 import { latestTrustedMs } from "./skew.js";
@@ -240,6 +243,8 @@ interface CheckDbRow {
 function insertCheck(
   db: DatabaseSync,
   c: {
+    /** The league the check is about (migration 003: it leads the key). */
+    readonly league_id: string;
     readonly id: CheckRow["id"];
     readonly raised_at: string;
     readonly raised_ms: number;
@@ -252,11 +257,12 @@ function insertCheck(
   },
 ): void {
   db.prepare(
-    `INSERT INTO checks (id, raised_at, raised_ms, status, detail_json, settings_hash, acknowledged, acknowledged_at, acknowledged_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id, raised_ms) DO UPDATE SET status = excluded.status,
+    `INSERT INTO checks (league_id, id, raised_at, raised_ms, status, detail_json, settings_hash, acknowledged, acknowledged_at, acknowledged_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (league_id, id, raised_ms) DO UPDATE SET status = excluded.status,
        detail_json = excluded.detail_json, settings_hash = excluded.settings_hash`,
   ).run(
+    c.league_id,
     c.id,
     c.raised_at,
     c.raised_ms,
@@ -302,11 +308,8 @@ function restampAhead(
   if (ms <= trusted) db.prepare(sql).run(ms - 1, msToIso(ms - 1), ...scope, trusted);
 }
 
-export function leagueSettingsRepository({
-  db,
-  writes,
-  clock,
-}: RepoDeps): LeagueSettingsRepository {
+export function leagueSettingsRepository(deps: RepoDeps): LeagueSettingsRepository {
+  const { db, writes, clock, league } = deps;
   const newest = (leagueId: string, season: number): SettingsRow | undefined =>
     db.prepare(NEWEST_SETTINGS_SQL).get(leagueId, season) as SettingsRow | undefined;
   // Prepared once per connection, on first use: put belongs on the settings read path (plan 08 §9 —
@@ -397,6 +400,7 @@ export function leagueSettingsRepository({
           before === undefined || after === undefined ? null : settingsChange(before, after);
         if (change === null || after === undefined) return;
         insertCheck(db, {
+          league_id: row.league_id,
           id: "settings_changed",
           raised_at: after.fetched_at,
           raised_ms: num(after.fetched_ms),
@@ -438,8 +442,10 @@ export function leagueSettingsRepository({
       isoMsOrNull(check.acknowledged_at, "acknowledged_at");
       if (check.acknowledged_by !== null)
         oneOf(check.acknowledged_by, ACKNOWLEDGERS, "acknowledger");
+      const leagueId = writeLeague(deps, "a check");
       writes.required("checks", () => {
         insertCheck(db, {
+          league_id: leagueId,
           id: check.id,
           raised_at: check.raised_at,
           raised_ms: raisedMs,
@@ -453,10 +459,14 @@ export function leagueSettingsRepository({
       });
     },
     openChecks() {
+      // this league's checks only (migration 003): another league's stay its own
+      if (league === null) return [];
       return (
         db
-          .prepare("SELECT * FROM checks WHERE acknowledged = 0 ORDER BY raised_ms, id")
-          .all() as unknown as CheckDbRow[]
+          .prepare(
+            "SELECT * FROM checks WHERE league_id = ? AND acknowledged = 0 ORDER BY raised_ms, id",
+          )
+          .all(league) as unknown as CheckDbRow[]
       ).map(toCheck);
     },
     acknowledgeChecks(id, upTo, by, at) {
@@ -467,6 +477,7 @@ export function leagueSettingsRepository({
       if (by === "snapshot" && !SNAPSHOT_CLOSES.includes(id))
         throw new RangeError("store: the roster snapshot closes only ir_invalid checks");
       isoMs(at, "at");
+      if (league === null) return 0;
       // An acknowledgement made under the store's clock (upTo no later than its now) also covers a
       // check raised past that clock: it was raised under a clock since set back, before now — so
       // before the human (or the snapshot) looked. Read as written, `raised_ms <= upTo` kept it open
@@ -479,23 +490,20 @@ export function leagueSettingsRepository({
           db
             .prepare(
               `UPDATE checks SET acknowledged = 1, acknowledged_at = ?, acknowledged_by = ?
-               WHERE id = ? AND acknowledged = 0 AND (raised_ms <= ? OR raised_ms > ?)`,
+               WHERE league_id = ? AND id = ? AND acknowledged = 0 AND (raised_ms <= ? OR raised_ms > ?)`,
             )
-            .run(at, by, id, upToMs, ahead).changes,
+            .run(at, by, league, id, upToMs, ahead).changes,
         ),
       );
     },
   };
 }
 
-export function rosterSnapshotRepository({
-  db,
-  writes,
-  clock,
-  pseudonyms,
-}: RepoDeps): RosterSnapshotRepository {
+export function rosterSnapshotRepository(deps: RepoDeps): RosterSnapshotRepository {
+  const { db, writes, clock, pseudonyms, league } = deps;
   return {
     put(s) {
+      const leagueId = writeLeague(deps, "a roster snapshot");
       intIn(s.team_id, TEAM_ID_MIN, TEAM_ID_MAX, "team_id");
       intIn(s.week, WEEK_MIN, WEEK_MAX, "week");
       const ms = isoMs(s.taken_at, "taken_at");
@@ -509,16 +517,17 @@ export function rosterSnapshotRepository({
           "UPDATE roster_snapshot SET taken_ms = ?, taken_at = ? WHERE taken_ms > ?",
         );
         db.prepare(
-          "INSERT INTO roster_snapshot (team_id, week, taken_at, taken_ms, roster_json) VALUES (?, ?, ?, ?, ?)",
-        ).run(s.team_id, s.week, s.taken_at, ms, pseudonyms.apply(json));
+          "INSERT INTO roster_snapshot (league_id, team_id, week, taken_at, taken_ms, roster_json) VALUES (?, ?, ?, ?, ?, ?)",
+        ).run(leagueId, s.team_id, s.week, s.taken_at, ms, pseudonyms.apply(json));
       });
     },
     latestTwo(teamId) {
+      if (league === null) return [];
       const rows = db
         .prepare(
-          "SELECT team_id, week, taken_at, roster_json FROM roster_snapshot WHERE team_id = ? ORDER BY taken_ms DESC, id DESC LIMIT 2",
+          "SELECT team_id, week, taken_at, roster_json FROM roster_snapshot WHERE league_id = ? AND team_id = ? ORDER BY taken_ms DESC, id DESC LIMIT 2",
         )
-        .all(teamId) as unknown as {
+        .all(league, teamId) as unknown as {
         team_id: number;
         week: number;
         taken_at: string;
@@ -534,14 +543,11 @@ export function rosterSnapshotRepository({
   };
 }
 
-export function poolSnapshotRepository({
-  db,
-  writes,
-  clock,
-  pseudonyms,
-}: RepoDeps): PoolSnapshotRepository {
+export function poolSnapshotRepository(deps: RepoDeps): PoolSnapshotRepository {
+  const { db, writes, clock, pseudonyms, league } = deps;
   return {
     put(s) {
+      const leagueId = writeLeague(deps, "a pool snapshot");
       intIn(s.week, WEEK_MIN, WEEK_MAX, "week");
       const ms = isoMs(s.taken_at, "taken_at");
       if (!Array.isArray(s.players)) throw new RangeError("store: players must be an array");
@@ -555,16 +561,17 @@ export function poolSnapshotRepository({
           "UPDATE pool_snapshot SET taken_ms = ?, taken_at = ? WHERE taken_ms > ?",
         );
         db.prepare(
-          "INSERT INTO pool_snapshot (week, taken_at, taken_ms, players_json) VALUES (?, ?, ?, ?)",
-        ).run(s.week, s.taken_at, ms, pseudonyms.apply(json));
+          "INSERT INTO pool_snapshot (league_id, week, taken_at, taken_ms, players_json) VALUES (?, ?, ?, ?, ?)",
+        ).run(leagueId, s.week, s.taken_at, ms, pseudonyms.apply(json));
       });
     },
     latestTwo() {
+      if (league === null) return [];
       const rows = db
         .prepare(
-          "SELECT week, taken_at, players_json FROM pool_snapshot ORDER BY taken_ms DESC, id DESC LIMIT 2",
+          "SELECT week, taken_at, players_json FROM pool_snapshot WHERE league_id = ? ORDER BY taken_ms DESC, id DESC LIMIT 2",
         )
-        .all() as unknown as { week: number; taken_at: string; players_json: string }[];
+        .all(league) as unknown as { week: number; taken_at: string; players_json: string }[];
       return rows.map((r) => ({
         week: num(r.week),
         taken_at: r.taken_at,
@@ -574,13 +581,11 @@ export function poolSnapshotRepository({
   };
 }
 
-export function scoreboardSnapshotRepository({
-  db,
-  writes,
-  pseudonyms,
-}: RepoDeps): ScoreboardSnapshotRepository {
+export function scoreboardSnapshotRepository(deps: RepoDeps): ScoreboardSnapshotRepository {
+  const { db, writes, pseudonyms, league } = deps;
   return {
     put(s) {
+      const leagueId = writeLeague(deps, "a scoreboard snapshot");
       intIn(s.week, WEEK_MIN, WEEK_MAX, "week");
       const ms = isoMs(s.taken_at, "taken_at");
       if (!Array.isArray(s.matchups)) throw new RangeError("store: matchups must be an array");
@@ -594,16 +599,24 @@ export function scoreboardSnapshotRepository({
       const playoff = toJson(pct, "playoff_pct_espn");
       writes.requiredTx("scoreboard_snapshot", () => {
         db.prepare(
-          "INSERT INTO scoreboard_snapshot (week, taken_at, taken_ms, matchups_json, playoff_pct_json) VALUES (?, ?, ?, ?, ?)",
-        ).run(s.week, s.taken_at, ms, pseudonyms.apply(matchups), pseudonyms.apply(playoff));
+          "INSERT INTO scoreboard_snapshot (league_id, week, taken_at, taken_ms, matchups_json, playoff_pct_json) VALUES (?, ?, ?, ?, ?, ?)",
+        ).run(
+          leagueId,
+          s.week,
+          s.taken_at,
+          ms,
+          pseudonyms.apply(matchups),
+          pseudonyms.apply(playoff),
+        );
       });
     },
     forWeek(week) {
+      if (league === null) return [];
       const rows = db
         .prepare(
-          "SELECT week, taken_at, matchups_json, playoff_pct_json FROM scoreboard_snapshot WHERE week = ? ORDER BY taken_ms, id",
+          "SELECT week, taken_at, matchups_json, playoff_pct_json FROM scoreboard_snapshot WHERE league_id = ? AND week = ? ORDER BY taken_ms, id",
         )
-        .all(week) as unknown as {
+        .all(league, week) as unknown as {
         week: number;
         taken_at: string;
         matchups_json: string;
@@ -624,13 +637,11 @@ function txnInstant(t: Transaction, seenAt: string): string {
   return t.process_date ?? t.proposed_date ?? seenAt;
 }
 
-export function transactionsSeenRepository({
-  db,
-  writes,
-  pseudonyms,
-}: RepoDeps): TransactionsSeenRepository {
+export function transactionsSeenRepository(deps: RepoDeps): TransactionsSeenRepository {
+  const { db, writes, pseudonyms, league } = deps;
   return {
     appendNew(txns, seenAt) {
+      const leagueId = writeLeague(deps, "a transaction");
       const seenMs = isoMs(seenAt, "seen_at");
       const rows = boundedArray(txns, TRANSACTIONS_APPEND_MAX, "transactions").map((t) => {
         keyString(t.transaction_id, "transaction_id", TRANSACTION_ID_MAX);
@@ -647,43 +658,49 @@ export function transactionsSeenRepository({
       if (rows.length === 0) return 0;
       return writes.requiredTx("transactions_seen", () => {
         const ins = db.prepare(
-          `INSERT OR IGNORE INTO transactions_seen (transaction_id, ts, ts_ms, seen_at, seen_ms, txn_json)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO transactions_seen (league_id, transaction_id, ts, ts_ms, seen_at, seen_ms, txn_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
         );
         let n = 0;
         for (const r of rows)
-          n += Number(ins.run(r.id, r.ts, r.ms, seenAt, seenMs, pseudonyms.apply(r.json)).changes);
+          n += Number(
+            ins.run(leagueId, r.id, r.ts, r.ms, seenAt, seenMs, pseudonyms.apply(r.json)).changes,
+          );
         return n;
       });
     },
     list(since, limit) {
       const lim = intIn(limit, 1, TRANSACTIONS_LIST_MAX, "limit");
       const sinceMs = since === null ? null : isoMs(since, "since");
+      if (league === null) return [];
       const rows = db
         .prepare(
-          `SELECT txn_json FROM transactions_seen WHERE (:since IS NULL OR ts_ms >= :since)
+          `SELECT txn_json FROM transactions_seen WHERE league_id = :league AND (:since IS NULL OR ts_ms >= :since)
            ORDER BY ts_ms DESC, transaction_id DESC LIMIT :lim`,
         )
-        .all({ since: sinceMs, lim }) as unknown as { txn_json: string }[];
+        .all({ league, since: sinceMs, lim }) as unknown as { txn_json: string }[];
       return rows.map((r) => parseJson<Transaction>(r.txn_json));
     },
     listRange(from, until, limit) {
       const lim = intIn(limit, 1, TRANSACTIONS_RANGE_MAX, "limit");
       const fromMs = isoMs(from, "from");
       const untilMs = isoMs(until, "until");
-      if (untilMs <= fromMs) return [];
+      if (untilMs <= fromMs || league === null) return [];
       const rows = db
         .prepare(
-          `SELECT txn_json FROM transactions_seen WHERE ts_ms >= :from AND ts_ms < :until
+          `SELECT txn_json FROM transactions_seen WHERE league_id = :league AND ts_ms >= :from AND ts_ms < :until
            ORDER BY ts_ms DESC, transaction_id DESC LIMIT :lim`,
         )
-        .all({ from: fromMs, until: untilMs, lim }) as unknown as { txn_json: string }[];
+        .all({ league, from: fromMs, until: untilMs, lim }) as unknown as { txn_json: string }[];
       return rows.map((r) => parseJson<Transaction>(r.txn_json));
     },
     oldestSeen() {
+      if (league === null) return null;
       const r = db
-        .prepare("SELECT ts FROM transactions_seen ORDER BY ts_ms, transaction_id LIMIT 1")
-        .get() as { ts: string } | undefined;
+        .prepare(
+          "SELECT ts FROM transactions_seen WHERE league_id = ? ORDER BY ts_ms, transaction_id LIMIT 1",
+        )
+        .get(league) as { ts: string } | undefined;
       return r?.ts ?? null;
     },
   };

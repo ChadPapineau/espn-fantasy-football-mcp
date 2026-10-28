@@ -872,7 +872,8 @@ export async function uninstall(
       );
     else if (await ask("Delete the stored ESPN cookies (keychain items AND session.json)?")) {
       const stores = bothCredentialStores(io, config);
-      const ex = openExistingStore(config, io.clock, log, opts.factory);
+      // the credential_state row only: no league's records are read here
+      const ex = openExistingStore({ ...config, leagueId: null }, io.clock, log, opts.factory);
       try {
         const existed = kind(config.credentialFile) !== null;
         const r = await removeAllCredentials({

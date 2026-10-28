@@ -337,6 +337,8 @@ export function openPublisher(
     clock: opts.clock,
     pseudonyms: createPseudonymizer(db),
     recordRawBodies: false,
+    // the publisher writes datasets and refresh_log only: no league's records
+    league: null,
   };
   const jobLock = jobLockRepository(deps);
   const clock = opts.clock;

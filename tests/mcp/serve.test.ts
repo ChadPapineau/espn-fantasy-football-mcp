@@ -205,6 +205,21 @@ describe("startup refusals", () => {
       },
     }) as unknown as StoreFactory;
 
+  it("the store is opened for the configured league (Stage C store-not-league-scoped)", async () => {
+    // one store serves every process on the Mac: the server must read its own league's records only
+    let opened: { league?: string | null } | null = null;
+    const capturing = {
+      open: (o: { league?: string | null }) => {
+        opened = o;
+        throw new StoreVersionError(9, 1);
+      },
+    } as unknown as StoreFactory;
+    // tempEnv configures the placeholder league 0: the open names it (never undefined or null)
+    const r = start(tempEnv(), { factory: capturing });
+    expect(await r.code).toBe(EXIT.error);
+    expect(opened).toMatchObject({ league: "0" });
+  });
+
   it("a store written by a newer binary exits 1 with plan 03 §7's message", async () => {
     const r = start(tempEnv(), { factory: failing(new StoreVersionError(9, 1)) });
     expect(await r.code).toBe(EXIT.error);

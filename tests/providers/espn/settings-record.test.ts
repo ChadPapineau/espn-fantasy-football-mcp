@@ -50,6 +50,7 @@ beforeEach(() => {
   clock = fixedClock(AT);
   // a short busy budget: a write a read should not make fails fast instead of waiting 5 s
   store = createStoreFactory({ busyTimeoutMs: 50 }).open({
+    league: "0",
     path: path.join(tmp.dir, "store.sqlite"),
     datasetDir: path.join(tmp.dir, "datasets"),
     backupDir: path.join(tmp.dir, "backups"),

@@ -5,6 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Clock } from "../../domain/clock.js";
 import type { Pseudonymizer } from "../pseudonym.js";
 import type { WriteExecutor } from "../sqlite.js";
+import { StoreLeagueUnboundError } from "../types.js";
 
 /** What every repository is built from. */
 export interface RepoDeps {
@@ -15,6 +16,17 @@ export interface RepoDeps {
   readonly pseudonyms: Pseudonymizer;
   /** Keep `espn_cache.raw_body` (fixture-recording mode only). */
   readonly recordRawBodies: boolean;
+  /**
+   * The league the store was opened for (StoreOpenOptions.league), or null: the league-scoped
+   * repositories write it and read only its rows (Stage C finding store-not-league-scoped).
+   */
+  readonly league: string | null;
+}
+
+/** The league a league-scoped write files its row under; throws when the store serves none. */
+export function writeLeague(deps: Pick<RepoDeps, "league">, what: string): string {
+  if (deps.league === null) throw new StoreLeagueUnboundError(what);
+  return deps.league;
 }
 
 /** Longest ISO-8601 instant accepted. */

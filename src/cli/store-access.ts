@@ -20,7 +20,10 @@ import {
 import type { Logger } from "./log.js";
 
 /** The config fields the store needs. */
-export type StoreConfig = Pick<LenientConfig, "cacheDir" | "weatherSource" | "fixtureRecord">;
+export type StoreConfig = Pick<
+  LenientConfig,
+  "cacheDir" | "weatherSource" | "fixtureRecord" | "leagueId"
+>;
 
 /** Opens (creating/migrating when `migrate`) the store for `config`. */
 export function openStore(
@@ -37,6 +40,8 @@ export function openStore(
     migrate: opts.migrate,
     weatherSource: config.weatherSource,
     recordRawBodies: config.fixtureRecord,
+    // the configured league's records only (Stage C finding store-not-league-scoped)
+    league: config.leagueId,
     onWarning: (code) => {
       log.warn("store.warning", { code });
     },
