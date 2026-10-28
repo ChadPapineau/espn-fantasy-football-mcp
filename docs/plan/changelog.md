@@ -731,7 +731,8 @@ These are not rulings. They record how ruling R8-3 was carried out (commit `cb2b
 tests that fail on the code at `f41e810`, how fix round 2 (commit `91a8c1b`, below) answered the
 independent attack on that build, and how fix round 3 (commit `c16b9d8`, below) answered the attack on
 fix round 2. What stays open is in `docs/evals/stage-c-backlog.md` ("Ruled R8-3"). The bullets fix
-round 2 changed say so.
+round 2 changed say so. Ruling R8-6 then replaced the shared-name reading these rounds built ("R8-6 —
+the matcher fails closed", the last part below).
 
 - **The universe carries ESPN's position** · R8-3 clause 4 · `src/sources/news/match.ts`
   `universeFromEspnPlayers` and `UNIVERSE_SQL` read `ds_players.position_id` into
@@ -1062,6 +1063,115 @@ was ignored and left uncounted. One pass was quadratic. Each is fixed at root, a
   no games), so a namesake signed since the universe was read gives the star his game item by
   elimination. "Lamar Jackson: Carted off with ankle injury | Jackson was hurt covering a punt in
   Sunday's loss to the Steelers." gives the QB 0.80, as at `f41e810`.
+
+### R8-6 — the matcher fails closed (commit `154838b`)
+
+R8-3's three fix rounds grew the cue and description wording and did not converge (15, 16 and 16
+violations). Ruling R8-6 (§R8) makes the matcher fail closed for a name more than one universe
+player holds. The shared-name path is rebuilt at the root and is linear in the item's length. Names
+one universe player holds take `f41e810`'s code path, unchanged.
+
+- **What reads a shared name now** · `src/sources/news/labels.ts` (new) and `match.ts`. The item is
+  read for two things only. (a) The label written next to the name: a team or a position directly
+  before it (whitespace only between; a team's possessive allowed), in parentheses directly after it,
+  or in the headline's name tag before the colon. A word that is no team and no position ends the
+  label ("Vikings star Justin Jefferson" labels no team), and so does any punctuation but the
+  possessive. A word of another person's name is no label word. The label must fit exactly one
+  holder: a team fits a holder the universe lists on it (a free agent fits none), a position a holder
+  whose ESPN `position_id` it allows. Labels that fit different holders pick none. The label must be
+  on the name's first mention. A later mention may be the other holder ("Lamar Jackson: Throws pick to
+  CB Lamar Jackson"; "Justin Jefferson: Mistaken for Vikings' Justin Jefferson | The Browns
+  linebacker …"), so a label written only there picks no one. Choice 6 stands: a team-only label for a
+  namesake is blocked by a prominent holder whom no position of the label rules out. (b) The broad
+  scan, for the residual: any team in every form and any case, and any position in every written form,
+  anywhere in the title or blurb outside the persons' names. The text is read NFKC, with accents
+  stripped, zero-width marks removed, curly apostrophes and dashes folded, and Cyrillic, Greek and
+  odd Latin lookalikes folded. An abbreviation whose lower-case form is an ordinary word or a name
+  counts only in capitals, so an all-caps headline's "NO" counts and "No timetable" does not. Only
+  when the scan finds nothing does the prominent holder take the item at `full_name` (0.80). A
+  generational suffix stays spelling, as at `f41e810`: one that leaves one holder writes his name
+  alone. Everything else gives the name no ref and counts it (`unresolved`). The bare shared surname
+  follows (a) and (d): its first mention's label must fit one sharer, choice 6 blocks him on the
+  surname's and on his full name's prominent holder, and it never takes the residual. "Jefferson MLB:"
+  and "Jackson QB2:" are labels now, and an unlabelled shared surname in an item naming a team or a
+  position is counted.
+- **The closed lists** · `labels.ts` `SHARED_HOMES`, `TEAM_SHORT_NAMES` (12), `TEAM_ABBREVIATIONS`
+  (40, with PFF's ARZ, BLT, CLV and HST and NY), `CAPS_ONLY_ABBREVIATIONS` (17), `TEAM_SINGULARS` (23,
+  scan only), `TEAM_CITIES` (10, scan only: "Nashville", "Foxborough" …), `CONFUSABLES` (57),
+  `POSSESSIVE_MARKS`, `LABEL_SEPARATORS`; with `teams.ts`' nicknames and homes. `positions.ts`
+  `POSITION_ABBREVIATIONS` (32, IDL, RCB, LCB, NCB, NB, WLB and SLB new), `RANKED_ABBREVIATIONS`,
+  `POSITION_WORDS` (36, "d-lineman", "d-tackle", "d-end", "3-technique", "edge-rusher" and
+  "place-kicker" new), `SCAN_ONLY_ABBREVIATIONS` (8) and `SCAN_ONLY_WORDS` (22: "edge", "tackle",
+  "guard", "center", "rusher", "backer", "nickel", "o-line" …). The scan-only forms are verbs or
+  common nouns before a name ("Browns edge Justin Jefferson, Vikings"), or roles. An ambiguous token
+  counts as found and never labels. Plurals are read by rule. A two-word position stays listed only
+  where its last word alone reads otherwise ("offensive lineman" is not "lineman"'s DL). The ones that
+  added nothing went ("wide receiver", "free safety", "left tackle" …), and so did "EDGE", "Jax",
+  "long snapper" and "pass-catcher": each was covered by another entry, so no behaviour test could
+  hold it.
+- **What was removed** · `cues.ts`, whole: the cue, play, game, idiom, dispute, label and move lists
+  and their readers (`sharedMentions`, `sharedAttachedTeams`, `sharedListTeams`, `sharedMovedTeams`).
+  Also `positions.ts`' describing sentences, topic clauses, `positionWordSpans` and sentence bounds,
+  `match.ts`' `sharedHolder`, `cuesAbout`, `about`, `listAround`, `describedAbout`, `residualFor` and
+  `PLAY_GAP_WORDS`, and `teams.ts`' `LEGACY_CUES` and its exported move patterns. `teams.ts` is
+  `f41e810`'s code again, plus a header note. Its shared-reading data (`TEAM_ABBREVIATIONS`,
+  `TEAM_SHORT_NAMES`, `SHARED_HOMES`) moved to `labels.ts`. `match.ts` went from 1,190 lines to 689,
+  `positions.ts` from 577 to 169, and `labels.ts` is 483.
+- **Tests** · `tests/sources/news/match-r86.test.ts` (34) holds each clause, every closed list word for
+  word and entry by entry, and two fast-check properties over the universe's 16 shared names. First:
+  with no label next to the name, a holder takes it only when no team and no position is written
+  anywhere, and then only the prominent one at 0.80. Second: writing any form of the closed lists
+  anywhere in a residual item takes the residual away. Both were also run at 100,000 runs. The file
+  also checks that unique names equal the frozen `f41e810` matcher (`tests/sources/news/f41e810/`,
+  its code with the import paths re-pointed), over all 142 fixture news items and a 3,000-item
+  generated corpus. `match-r86-cases.test.ts` (17) holds each case at its R8-6 outcome: the gate's four
+  batteries with their labels, the 16 violations left open at `dbe9686` with every variant they named,
+  the 443 misattributions the attacks on R8-3's three rounds found (each with whose item it is, and
+  checked never to reach the other holder), and the 366 texts of the R8-3 test files.
+  `positions.test.ts` is rewritten for the reduced module. `match.perf.test.ts` adds the last attack's
+  4,000-character item over the recorded universe. It costs 1.3 times a benign near-cap item (bound 6;
+  `dbe9686` about 210 times), 1.8 ms against 203 ms at `dbe9686`, and 1,000 of them build in 0.9 s
+  (bound 15 s). Against `dbe9686`, 38 of the 51 tests in the two new files fail, and the 13 that pass
+  hold behaviour R8-6 keeps. Against `f41e810`, 47 fail. Each clause has tests whose refs differ from
+  both: (a) 6 of its 7, (b) 3 of 5, (c) 3 of 3, (d) 2 of 3, plus the counts. A mutation run deleted
+  each of the 337 closed-list entries one at a time, with the word-for-word test skipped, and a
+  behaviour test caught every one. An earlier run found two dead entries ("pass-catcher" and
+  `HANDLE_MIN_FORM`), and both are gone.
+- **Expectations R8-6 changed** (each commented where it stands; none moves to the other holder).
+  `match-r83.test.ts`, `-round2` and `-round3` are replaced. Their position-id, counting and battery
+  tests moved, and their texts are held at their R8-6 outcomes. In `match-universe.test.ts`, the
+  star's own items that name a team with no label lose their ref: a cue, a game, "<team> matchup", a
+  roster move. "Bengals CB Lamar Jackson" gets none, because the Bengals list no Lamar Jackson; "Eagles
+  DT Byron Young: Records sack against the Rams" gets none; "Ravens activate QB Lamar Jackson" falls to
+  `full_name`; and the one labelled real title that loses its ref is the CBS "Lamar Jackson injury
+  update: Ravens QB …". In `match.test.ts`, "Bijan Robinson, Dolphins" with no colon is no label.
+- **Measured** · Gate battery 1 has no misattribution and 19 right refs. The gate counted 20 right and
+  10 wrong; `dbe9686` had 28 right and the open one wrong. The earlier batteries' 1,167 labelled texts
+  misattribute 3 times now, all accepted residuals naming no team and no position ("Justin Jefferson:
+  Sacks Carson Wentz twice in win", "Joe Burrow: Picked off by Lamar Jackson", "Chris Jones: Punts six
+  times for 280 yards"). They misattributed 237 times at `dbe9686` and 383 at `f41e810`. None of the 443
+  misattribution texts reaches the other holder.
+- **The recall cost** (refs to a shared name's holders, against each build; the batteries by their
+  labels). Over the 1,167 labelled battery texts:
+  - against `dbe9686`, 158 right star refs and 52 right namesake refs are lost and 8 namesake refs
+    gained, while 234 wrong refs go;
+  - against `f41e810`, 191 star and 24 namesake refs are lost and 4 star and 114 namesake refs gained,
+    while 380 wrong refs go;
+  - texts with their right holder's ref: 327, from 529 at `dbe9686` and 424 at `f41e810`.
+
+  Over the 142 recorded fixture news items, one real item loses its star ref against both builds: the
+  CBS "Lamar Jackson injury update: Ravens QB dealing with ankle sprain …", in the capture and in the
+  labelled set. Against `f41e810`, "Sources: Ravens QB Jackson has ankle sprain …" gains the QB's
+  surname ref, in both. Unique names differ from `f41e810` on none of the 142.
+- **Kept as accepted, or a reading for the re-gate** · the residual: a namesake's item that names no
+  team and no position goes to the star (the 3 above). The recall loss: a shared name's item that
+  names a team or a position but carries no label gets no ref, counted (the 158 star refs above;
+  matching an item's opponent against the week's schedule would recover much, not built). Choice 6's
+  block of a team-only namesake label ("Cleveland's Justin Jefferson", "Philadelphia's Byron Young").
+  The first-mention reading of (a). A free agent fits no team label ("Bengals CB Lamar Jackson", a
+  namesake signed since the universe was read). Two holders on one team at one position ("Jaylon
+  Jones", both Titans CBs) are never told apart. Over-detection costs some star recall ("leads the
+  pack", "OT", "medical bills"), as the ruling accepts.
 
 ## Reviews (re-run on every version bump of the named dependency)
 

@@ -2,8 +2,9 @@
 
 The tracked list of Stage C items that need the owner, a repository setting, the Stage D merge or an
 orchestrator ruling. The ledger of fixed findings lives with the orchestrator; this file records only
-what stays open after the final gate's fix rounds 1, 2 and 3 and ruling R8-3's fix and its fix rounds
-2 and 3 (2026-10-28, `build/phase-1`). Each item says why code cannot close it and what would.
+what stays open after the final gate's fix rounds 1, 2 and 3, ruling R8-3's fix and its fix rounds
+2 and 3, and ruling R8-6's fix (2026-10-28, `build/phase-1`). Each item says why code cannot close it
+and what would.
 
 ## For the orchestrator's ledger
 
@@ -15,9 +16,9 @@ with the last verifiers' own repros, yet the ledger still lists them as confirme
 `trade-locked-week-counted`, `store-future-stamped-rows-block` and `crosswalk-unpaired-joins-silent`.
 They can be closed. `news-match-universe-homonyms`: the fourth run found namesakes' items still
 reaching the star; ruling R8-3 is built (`cb2bcc7`; below, and changelog §B9), fix rounds 2 and 3
-answered the independent attacks on it (`91a8c1b`, `c16b9d8`), and one roster-move title stays open
-for a ruling. R7-2 and R7-6 stay open by ruling (below); B11 Lane 2 and B15 are
-recorded at Stage D as not runnable.
+answered the independent attacks on it (`91a8c1b`, `c16b9d8`), and ruling R8-6 then made the matcher
+fail closed for shared names (`154838b`), which closes the open roster-move title (below). R7-2 and R7-6
+stay open by ruling (below); B11 Lane 2 and B15 are recorded at Stage D as not runnable.
 
 ## Ruled — moved here by the orchestrator
 
@@ -71,6 +72,55 @@ Seen on the owner's install at the final gate. Each is an action at a terminal; 
 ## Ruled R8-3 — the news matcher's fail-safe choices
 
 **Superseded in part by R8-6 (2026-10-28):** R8-3's fix rounds did not converge (15, 16 and 16 violations against `52796bf`, `7b9572c` and `dbe9686`). For a shared name the matcher now fails closed: only a label next to the name picks a holder. The prominent holder takes the item only when it names no team and no position anywhere. Everything else gets no ref and is counted. The open items below that R8-6 does not settle are rebuilt or closed by its fix run (changelog §R8, §B9).
+
+**Built under R8-6 (2026-10-28, commit `154838b`; changelog §B9, "R8-6 — the matcher fails closed").**
+The shared-name path is rebuilt: `labels.ts` (the label next to the name, and the broad scan),
+`positions.ts` (the position forms), `cues.ts` removed. A name one universe player holds matches
+exactly as at `f41e810`. What it closes:
+
+- **The open roster move.** "Lamar Jackson: Signs with Ravens practice squad" gets no ref and is
+  counted: a roster move is no label (R8-6 (c)). So do "Justin Jefferson: Signs with Vikings | …" and
+  "Ravens sign Lamar Jackson to practice squad".
+- **The 16 violations open at `dbe9686`.** None reaches the other holder.
+  `tests/sources/news/match-r86-cases.test.ts` holds each, with every variant it named, at its R8-6
+  outcome. So does every one of the 443 misattributions the attacks on R8-3's three rounds found.
+- **The known limits below.** "A game not his own" is closed: games are not read. "A topic's clause
+  naming the player he hit" and "a teammate of no known team" are no longer readings: such items get
+  no ref and are counted. "A free-agent namesake signed since" is closed, because no cue rules a holder
+  out: "Lamar Jackson: Carted off with ankle injury | … loss to the Steelers." names a team and gets no
+  ref. "edge rusher" for the Chiefs' Chris Jones stays no ref. "The residual's verbs" stays the
+  accepted residual where an item names no team and no position ("Lamar Jackson: Waived with injury
+  designation | Jackson (hamstring) reverts to injured reserve." gives the QB 0.80). Its other example
+  names a position ("| The receiver beat him deep.") and gets no ref now.
+- **The fixer's open concerns.** The five `PLAY_OBJECTS` entries went with the cue lists. The perf
+  bounds stay ratios: the last attack's 4,000-character item costs 1.3 times a benign one (`dbe9686`
+  about 210 times), and 1,000 of them build in 0.9 s.
+
+What stays, as R8-6 accepts it:
+
+- **The residual.** A namesake's item that names no team and no position goes to the prominent
+  holder at 0.80. Three of the earlier batteries' 1,167 labelled texts do: "Justin Jefferson: Sacks
+  Carson Wentz twice in win", "Joe Burrow: Picked off by Lamar Jackson" and "Chris Jones: Punts six
+  times for 280 yards".
+- **The recall loss.** A shared name's item that names a team or a position, with no label next to
+  the name, gets no ref and is counted, with ESPN's own status still behind the star. Over the labelled
+  batteries this is 158 right star refs and 52 namesake refs lost against `dbe9686` (191 and 24 against
+  `f41e810`, which loses 380 wrong refs). One real fixture item loses its ref: the CBS "Lamar Jackson
+  injury update: Ravens QB …". Matching an item's opponent against the week's schedule would recover
+  much of it; it is not built.
+
+Readings for the re-gate to check:
+
+- **(a) The label is the first mention's.** A label written only on a later mention picks no one,
+  because a later mention may be the other holder: "Lamar Jackson: Throws pick to CB Lamar Jackson"
+  went to the free-agent CB at `dbe9686`.
+- **Choice 6 stands.** A prominent holder whom no position of the label rules out blocks a team-only
+  namesake label ("Cleveland's Justin Jefferson", "Philadelphia's Byron Young": no ref).
+- **A free agent fits no team label.** "Bengals CB Lamar Jackson" gets no ref; the universe lists no
+  Lamar Jackson on the Bengals.
+- **Spelling stays as at `f41e810`.** A written suffix that leaves one holder is his name.
+- **The scan errs toward finding.** "leads the pack", "OT" and "medical bills" each take the residual
+  away.
 
 **Ruled R8-3 (2026-10-28, changelog §R8):** choices 1–5 stand; a loose team mention on a shared name is
 never evidence for a holder; the opponent cues cover result and play wording; choice 6 takes (c),
@@ -190,7 +240,8 @@ right after it) gives it to another player. Even then it never picks a holder. (
 namesakes ("Lamar Jackson: Throws pick to CB Lamar Jackson") is decided as one person: a name written
 twice in an item is one person, the common case.
 
-**Open — needs a ruling: a roster move to the star's own team.** "Lamar Jackson: Signs with Ravens practice
+**Closed by R8-6 (was open — needs a ruling): a roster move to the star's own team.** A roster move is
+no label now: the title below gets no ref and is counted. "Lamar Jackson: Signs with Ravens practice
 squad" (battery 1, the namesake's) goes to the Ravens QB at 0.95: the move ties the Ravens to the name,
 and choice 3, standing as built, reads a move like an attached team, so the holder on that team takes
 it. A free agent is consistent with any signing, though: it is how he stops being one. Options: (a) as
