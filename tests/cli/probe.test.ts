@@ -3,6 +3,7 @@
 // is ESPN_HOST_MOVED and is never followed, a non-JSON 200 is host_moved, a skeleton is red, the
 // probe_log rows and the drift_state row are written, the drift alarm fires once per state change
 // and is never rate-limited, exit 4 on drift. Every response comes from an injected fetch.
+import { clockSkewRow } from "../../src/cli/doctor-online.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,6 +24,7 @@ import {
   probeRunExit,
   recordProbe,
   serverTimeMs,
+  answerAgeMs,
   shapeProbe,
   worstStatus,
   type ProbeCheck,
@@ -245,6 +247,36 @@ describe("probe pieces", () => {
     );
     expect(serverTimeMs({ date: "nope" })).toBeNull();
     expect(serverTimeMs({})).toBeNull();
+    // a cached answer: the origin's instant plus the Age the cache reports (Stage C final gate:
+    // doctor #14 read a CDN copy's minutes-old Date as 262–278 s of skew on a correct clock)
+    expect(serverTimeMs({ date: "Tue, 06 Oct 2026 18:00:00 GMT", age: "270" })).toBe(
+      Date.parse("2026-10-06T18:04:30Z"),
+    );
+    expect(serverTimeMs({ "x-fantasy-server-time": "1791561600000", age: "12" })).toBe(
+      1791561612000,
+    );
+    // an Age that is not delta-seconds is no age; a huge one is capped as RFC 9111 says
+    for (const age of ["-5", "1.5", "soon", ""])
+      expect(serverTimeMs({ "x-fantasy-server-time": "1791561600000", age }), age).toBe(
+        1791561600000,
+      );
+    expect(answerAgeMs({ age: "9999999999" })).toBe(2_147_483_648_000);
+    expect(answerAgeMs({})).toBe(0);
+    // doctor #14 on such a copy: a correct clock is within the bound; the same headers read without
+    // the Age warned (the gate's 278 s) and would fail past 300 s
+    const now = Date.parse("2026-10-06T18:05:00Z");
+    const cached = { date: new Date(now - 278_000).toUTCString(), age: "278" };
+    const skewCheck = (server_time_ms: number | null): ProbeCheck => ({
+      name: "host",
+      views: ["proTeamSchedules_wl"],
+      status: "green",
+      upstream_status: 200,
+      reason: null,
+      signals: [],
+      server_time_ms,
+    });
+    expect(clockSkewRow(skewCheck(serverTimeMs(cached)), now).status).toBe("ok");
+    expect(clockSkewRow(skewCheck(serverTimeMs({ date: cached.date })), now).status).toBe("warn");
     const c = (status: ProbeCheck["status"], extra: Partial<ProbeCheck> = {}): ProbeCheck => ({
       name: "host",
       views: ["proTeamSchedules_wl"],

@@ -97,14 +97,33 @@ export interface ProbeDeps {
   readonly origin?: RequestOrigin;
 }
 
-/** The server time an answer reports (x-fantasy-server-time epoch ms, else Date), or null. */
+/** The longest `Age` read (RFC 9111 §1.2.2: a larger delta-seconds is sent as 2^31). */
+const AGE_MAX_S = 2_147_483_648;
+
+/**
+ * The `Age` of an answer in ms (RFC 9111 §5.1: how long a cache held it since the origin made it),
+ * 0 when absent or not delta-seconds.
+ */
+export function answerAgeMs(headers: Readonly<Record<string, string>>): number {
+  const a = headers.age;
+  if (a === undefined || !/^\s*\d{1,10}\s*$/.test(a)) return 0;
+  return Math.min(Number(a.trim()), AGE_MAX_S) * 1000;
+}
+
+/**
+ * The server time an answer reports (epoch ms), or null: `x-fantasy-server-time` (epoch ms), else
+ * `Date` — each the instant the ORIGIN made the answer — plus the `Age` a cache in front of it
+ * reports. A keyless answer the CDN served from its cache carries the origin's Date of minutes ago:
+ * read as now, doctor #14 warned of 262, then 278 s of skew on a clock that matched another host's
+ * Date to 0 s, and past 300 s it fails with "fix the system clock" (Stage C final gate).
+ */
 export function serverTimeMs(headers: Readonly<Record<string, string>>): number | null {
   const x = headers["x-fantasy-server-time"];
-  if (x !== undefined && /^\d{10,16}$/.test(x)) return Number(x);
+  if (x !== undefined && /^\d{10,16}$/.test(x)) return Number(x) + answerAgeMs(headers);
   const d = headers.date;
   if (d === undefined) return null;
   const ms = Date.parse(d);
-  return Number.isFinite(ms) ? ms : null;
+  return Number.isFinite(ms) ? ms + answerAgeMs(headers) : null;
 }
 
 /**
