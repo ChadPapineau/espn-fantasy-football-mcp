@@ -15,7 +15,9 @@ import {
   serveDecision,
   storedCopyState,
   DEFAULT_TTL_CONTEXT,
+  heldWindow,
   type FreshnessClass,
+  type HeldWindow,
   type TtlContext,
 } from "../../config/freshness.js";
 import type { RequestOutcome } from "../../config/schema.js";
@@ -288,8 +290,14 @@ export class EspnRequester {
     Map<string, { readonly stamp: string; readonly value: unknown }>
   >();
   private notModified = { day: 0, count: 0 };
-  /** ESPN's Retry-After on the read host as this process received it (epoch ms; see `holdLeftMs`). */
-  private holdUntilMs = Number.NEGATIVE_INFINITY;
+  /**
+   * ESPN's Retry-After on the read host as this process received it: when it was received and the
+   * instant it ends (epoch ms; see `holdLeftMs`).
+   */
+  private hold: HeldWindow = {
+    at: Number.NEGATIVE_INFINITY,
+    until: Number.NEGATIVE_INFINITY,
+  };
   /** The same hold kept for the other processes (cache.ts cachedRetryAfter). */
   private readonly retryAfter: KeptInstant;
 
@@ -321,19 +329,24 @@ export class EspnRequester {
    * instant this process received, or the later one another process kept (cache.ts
    * cachedRetryAfter). No request goes to the host before it ends (plan 01 §6 "honour Retry-After if
    * it ever appears"; Stage C finding espn-retry-after-not-persisted: the hint lived only as one
-   * read's retry wait, so every later call sent again inside it).
+   * read's retry wait, so every later call sent again inside it). A hold received or kept under a
+   * clock since set back is held for its own length from now at the most (heldWindow; Stage C
+   * finding store-future-stamped-rows-block: a 120 s hold read back as 10 921 s).
    */
   private holdLeftMs(nowMs: number): number {
-    let until = this.holdUntilMs;
-    const kept = this.retryAfter.load();
+    this.hold = heldWindow(this.hold, nowMs);
+    let until = this.hold.until;
+    const kept = this.retryAfter.load(nowMs);
     if (kept !== null && kept > until) until = kept;
     return until > nowMs ? Math.max(1, Math.ceil(until - nowMs)) : 0;
   }
 
   /** Holds every request to the read host off until `untilMs`, here and for the other processes. */
   private holdOff(untilMs: number): void {
-    if (!Number.isFinite(untilMs) || untilMs <= this.holdUntilMs) return;
-    this.holdUntilMs = untilMs;
+    const now = this.deps.clock.nowMs();
+    this.hold = heldWindow(this.hold, now);
+    if (!Number.isFinite(untilMs) || untilMs <= this.hold.until) return;
+    this.hold = { at: now, until: untilMs };
     this.retryAfter.save(untilMs);
     this.deps.log?.debug("espn.retry_after.hold", {
       retry_after_s: Math.max(1, Math.ceil((untilMs - this.deps.clock.nowMs()) / 1000)),

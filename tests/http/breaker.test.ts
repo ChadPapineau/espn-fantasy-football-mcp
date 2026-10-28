@@ -35,6 +35,25 @@ describe("createCircuitBreaker", () => {
     expect(b.check(T0 + 10 + OPEN - 1).allowed).toBe(false);
   });
 
+  it("opened while the clock ran 3 h fast, then set back: open its own 5 min from the correction at the most", () => {
+    const H = 3 * 3_600_000;
+    for (const open of [
+      (b: ReturnType<typeof createCircuitBreaker>) => {
+        for (let i = 0; i < 3; i++) b.record("server_error", T0 + H);
+      },
+      (b: ReturnType<typeof createCircuitBreaker>) => {
+        b.trip(T0 + H);
+      },
+    ]) {
+      const b = createCircuitBreaker();
+      open(b);
+      expect(b.status(T0 + H).state).toBe("open");
+      expect(b.status(T0)).toMatchObject({ state: "open", open_until_ms: T0 + OPEN });
+      expect(b.check(T0 + OPEN - 1).allowed).toBe(false);
+      expect(b.check(T0 + OPEN)).toEqual({ allowed: true, probe: true });
+    }
+  });
+
   it("the failure set: 5xx, 429, timeouts and network errors; everything else resets the streak", () => {
     expect([...HTTP_BREAKER_FAILURE_OUTCOMES].sort()).toEqual(
       [...BREAKER_FAILURE_OUTCOMES, "network_error"].sort(),

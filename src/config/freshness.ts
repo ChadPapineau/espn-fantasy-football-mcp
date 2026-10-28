@@ -225,6 +225,29 @@ export function stampedAhead(atMs: number, nowMs: number): boolean {
   );
 }
 
+/** A hold set from a clock reading: set at `at`, held until `until` (epoch ms). */
+export interface HeldWindow {
+  readonly at: number;
+  readonly until: number;
+}
+
+/**
+ * A hold a process set from its clock — the breaker's open window, ESPN's Retry-After, the
+ * credential check's one-a-minute gap — judged at `nowMs`. As written while `at` is not ahead of
+ * now; set under a clock since set back (`stampedAhead(at, nowMs)`), it began at some moment no
+ * later than now, so it is re-stamped as set just now: `{ at: nowMs, until: nowMs + (until − at) }`
+ * — held for its own length from now at the most, never for the size of the skew. The caller keeps
+ * the result, so the re-stamped hold then runs out normally. Read as written, a breaker opened while
+ * the clock ran 3 h fast stayed open 60 min after the correction (its own window is 5 min), and a
+ * 120 s Retry-After read back as 10 921 s (Stage C finding store-future-stamped-rows-block, the
+ * in-process half; the store's rows follow the same rule in src/store/repos/skew.ts). A non-finite
+ * instant is returned unchanged (its holder refuses it).
+ */
+export function heldWindow(w: HeldWindow, nowMs: number): HeldWindow {
+  if (!Number.isFinite(w.at) || !Number.isFinite(w.until) || !stampedAhead(w.at, nowMs)) return w;
+  return { at: nowMs, until: nowMs + Math.max(0, w.until - w.at) };
+}
+
 /**
  * The instants an input stamp carries: `as_of` content time, `fetched_at` fetch time,
  * `checked_at` last successful release/refresh check (release basis; null → `fetched_at`).

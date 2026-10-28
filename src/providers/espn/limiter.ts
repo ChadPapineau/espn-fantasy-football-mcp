@@ -8,7 +8,7 @@
 // "each request inserts a row"), the circuit breaker (open 5 min after 3 consecutive 5xx / 429 /
 // timeouts / network failures — plan 05 §4.1 — in process AND derived from the persisted
 // outcomes, so a second process sees it), and the backoff schedule (1, 2, 4, 8 s, ±25 % jitter).
-import { stampedAhead } from "../../config/freshness.js";
+import { heldWindow, stampedAhead } from "../../config/freshness.js";
 import {
   ESPN_BACKOFF,
   ESPN_BREAKER,
@@ -272,7 +272,8 @@ export class Semaphore {
 /** The circuit breaker: in process, plus the outcome rows any process wrote. */
 export class Breaker {
   private consecutive = 0;
-  private openUntil = 0;
+  /** The in-process open window (`until` 0: never opened); judged through `own` (heldWindow). */
+  private open: { at: number; until: number } = { at: 0, until: 0 };
   private readonly clock: Clock;
   private readonly repo: LimiterRepository | null;
   constructor(clock: Clock, repo: LimiterRepository | null) {
@@ -292,13 +293,27 @@ export class Breaker {
       return;
     }
     this.consecutive++;
-    if (this.consecutive >= ESPN_BREAKER.failures)
-      this.openUntil = this.clock.nowMs() + ESPN_BREAKER.openMs;
+    if (this.consecutive >= ESPN_BREAKER.failures) this.openNow();
   }
 
   /** Opens the breaker now regardless of the count (a host move — plan 01 §7). */
   forceOpen(): void {
-    this.openUntil = this.clock.nowMs() + ESPN_BREAKER.openMs;
+    this.openNow();
+  }
+
+  private openNow(): void {
+    const at = this.clock.nowMs();
+    this.open = { at, until: at + ESPN_BREAKER.openMs };
+  }
+
+  /**
+   * The in-process window's end at `now`: opened under a clock since set back, it is re-stamped as
+   * opened now — open for ESPN_BREAKER.openMs at the most, never for the size of the skew (Stage C
+   * finding store-future-stamped-rows-block: it stayed open 60 min after a 3 h correction).
+   */
+  private ownUntil(now: number): number {
+    this.open = heldWindow(this.open, now);
+    return this.open.until;
   }
 
   private derived(now: number): ReturnType<typeof breakerFromOutcomes> | null {
@@ -317,14 +332,15 @@ export class Breaker {
   /** Whether a request may not be sent now (in-process window or another process's failures). */
   isOpen(): boolean {
     const now = this.clock.nowMs();
-    if (now < this.openUntil) return true;
+    if (now < this.ownUntil(now)) return true;
     return this.derived(now)?.breaker_open === true;
   }
 
   /** The breaker part of `transportStatus()`. */
   status(): Pick<TransportStatus, "breaker_open" | "breaker_open_until" | "consecutive_failures"> {
     const now = this.clock.nowMs();
-    const own = now < this.openUntil ? this.openUntil : null;
+    const ownEnd = this.ownUntil(now);
+    const own = now < ownEnd ? ownEnd : null;
     const d = this.derived(now);
     const otherUntil =
       d?.breaker_open_until === null || d === null ? null : Date.parse(d.breaker_open_until);

@@ -53,6 +53,20 @@ export const pointsNull = points.nullable();
 export const prob = z.number().min(0).max(1);
 export const probNull = prob.nullable();
 export const count = z.number().int().min(0).max(1_000_000);
+/**
+ * The latest instant (s since the epoch) an age is measured to: 2100-01-01T00:00:00Z, the end of the
+ * seasons the schemas take (`season` ≤ 2100). An age measured from any instant since the epoch fits.
+ */
+export const AGE_S_MAX = 4_102_444_800;
+/**
+ * An age in whole seconds: the time since a stored instant, which grows with the wall clock and has
+ * no ceiling of its own. It is not a `count`: a dataset not refreshed for 12 days is past 1 000 000 s,
+ * and G1's source rows typed with `count` made espn_get_status refuse its whole answer as INTERNAL
+ * on every install idle that long — every off-season, when the jobs do not refresh (Stage C final
+ * gate; espn-ff://status, which validates no schema, still answered). Bounded by AGE_S_MAX, so a
+ * corrupt value still fails.
+ */
+export const ageSeconds = z.number().int().min(0).max(AGE_S_MAX);
 export const dist = distSchema;
 export const distNull = distSchema.nullable();
 export const inputs = z.array(inputFreshnessSchema).max(25);

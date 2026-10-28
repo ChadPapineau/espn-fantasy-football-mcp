@@ -207,6 +207,76 @@ describe("ESPN's Retry-After holds the read host off for its whole window", () =
   });
 });
 
+describe("a hold set under a clock since set back (Stage C store-future-stamped-rows-block)", () => {
+  // The gate's repro: a 120 s Retry-After received while the clock ran 3 h fast read back as
+  // 10 921 s after the correction — and so did one another process kept. Each began no later than
+  // now, so it is held for its own length from now at the most, never for the size of the skew.
+  const HOUR = 3_600_000;
+
+  it("received in this process: 120 s from the correction, then a request goes", async () => {
+    const clock = fixedClock(NOW_ISO);
+    const t0 = clock.nowMs();
+    let n = 0;
+    const w = makeWorld({
+      clock,
+      fetch: () => Promise.resolve(n++ === 0 ? tooMany("120") : pro()),
+    });
+    clock.set(t0 + 3 * HOUR);
+    await expect(w.provider.getProSchedule(SEASON)).rejects.toMatchObject({
+      effCode: "RATE_LIMITED",
+    });
+    clock.set(t0); // NTP steps the clock back
+    await expect(w.provider.getProSchedule(SEASON)).rejects.toMatchObject({
+      effCode: "RATE_LIMITED",
+      effDetails: { retry_after_s: 120, reason: "retry_after" },
+    });
+    clock.advance(60_000);
+    await expect(w.provider.getProSchedule(SEASON)).rejects.toMatchObject({
+      effDetails: { retry_after_s: 60, reason: "retry_after" },
+    });
+    clock.advance(60_000);
+    const r = await w.provider.getProSchedule(SEASON);
+    expect(r.value.games.length).toBeGreaterThan(200);
+    expect(w.sent).toHaveLength(2);
+  });
+
+  it("kept by another process while 3 h fast: held 120 s from now at the most, and written back so", async () => {
+    const cache = new MemoryCache();
+    const clock = fixedClock(NOW_ISO);
+    const t0 = clock.nowMs();
+    clock.set(t0 + 3 * HOUR);
+    cachedRetryAfter(cache, HOST, clock).save(clock.nowMs() + 120_000);
+    clock.set(t0);
+    const w = makeWorld({ fetch: scripted(pro), cache, clock });
+    await expect(w.provider.getProSchedule(SEASON)).rejects.toMatchObject({
+      effCode: "RATE_LIMITED",
+      effDetails: { retry_after_s: 120, reason: "retry_after" },
+    });
+    // the row now says when it was re-stamped: every other process reads the same end
+    const row = cache.map.get(retryAfterKey(HOST));
+    expect(row?.fetched_at).toBe(new Date(t0).toISOString());
+    expect(JSON.parse(row?.parsed_json ?? "{}")).toEqual({ until_ms: t0 + 120_000 });
+    expect(cachedRetryAfter(cache, HOST, clock).load()).toBe(t0 + 120_000);
+    clock.advance(120_000);
+    const r = await w.provider.getProSchedule(SEASON);
+    expect(r.value.games.length).toBeGreaterThan(200);
+    expect(w.sent).toHaveLength(1);
+  });
+
+  it("controls: a hold kept at now is read as written; a sub-second step back changes nothing", () => {
+    const cache = new MemoryCache();
+    const clock = fixedClock(NOW_ISO);
+    const t0 = clock.nowMs();
+    const kept = cachedRetryAfter(cache, HOST, clock);
+    kept.save(t0 + 600_000);
+    clock.advance(30_000);
+    expect(kept.load()).toBe(t0 + 600_000);
+    clock.set(t0 - 900);
+    expect(kept.load()).toBe(t0 + 600_000);
+    expect(cache.puts).toBe(1);
+  });
+});
+
 describe("the kept hold (cache.ts cachedRetryAfter)", () => {
   it("keeps only a later, finite instant; an absent, unreadable or broken row reads as none", () => {
     const cache = new MemoryCache();

@@ -147,6 +147,42 @@ describe("Breaker", () => {
     b.forceOpen();
     expect(b.isOpen()).toBe(true);
   });
+  it("opened while the clock ran 3 h fast, then set back: open 5 min from the correction at the most, never the skew (Stage C store-future-stamped-rows-block)", () => {
+    // the gate's repro: the breaker was still open 60 min after a 3 h correction (control: 5 min)
+    for (const open of [
+      (b: Breaker) => {
+        b.record("server_error");
+        b.record("server_error");
+        b.record("server_error");
+      },
+      (b: Breaker) => {
+        b.forceOpen();
+      },
+    ]) {
+      const clock = fixedClock(NOW_ISO);
+      const b = new Breaker(clock, null);
+      clock.set(T0 + 3 * 3_600_000);
+      open(b);
+      expect(b.isOpen()).toBe(true);
+      clock.set(T0); // NTP steps the clock back 3 h
+      expect(b.isOpen()).toBe(true);
+      expect(b.status().breaker_open_until).toBe(new Date(T0 + ESPN_BREAKER.openMs).toISOString());
+      clock.advance(ESPN_BREAKER.openMs - 1);
+      expect(b.isOpen()).toBe(true);
+      clock.advance(1);
+      expect(b.isOpen()).toBe(false);
+      expect(b.status()).toMatchObject({ breaker_open: false, breaker_open_until: null });
+    }
+  });
+  it("a clock adjustment under a second changes nothing; a window set before the clock moved runs as set", () => {
+    const clock = fixedClock(NOW_ISO);
+    const b = new Breaker(clock, null);
+    b.forceOpen();
+    clock.set(T0 - 800); // a sub-second step back: read as written
+    expect(b.status().breaker_open_until).toBe(new Date(T0 + ESPN_BREAKER.openMs).toISOString());
+    clock.set(T0 + 60_000); // forward: the window keeps its end
+    expect(b.status().breaker_open_until).toBe(new Date(T0 + ESPN_BREAKER.openMs).toISOString());
+  });
   it("another process's three failures open this process's breaker (derived from the rows)", () => {
     const clock = fixedClock(NOW_ISO);
     const repo = new MemoryLimiterRepo();

@@ -6,6 +6,7 @@
 // window — so a dead host costs 3 requests, then one per 5 minutes. Pure: time is passed in.
 // The cross-process view (`eff status`, a second server) is platform.ts `breakerFromOutcomes` over
 // the persisted outcomes; `trip()` lets the provider adopt it or force-open on ESPN_HOST_MOVED.
+import { heldWindow } from "../config/freshness.js";
 import { BREAKER_FAILURE_OUTCOMES, ESPN_BREAKER, type RequestOutcome } from "../config/schema.js";
 import type { TransportStatus } from "../providers/platform.js";
 
@@ -68,12 +69,22 @@ export function createCircuitBreaker(opts: BreakerOptions = {}): CircuitBreaker 
   let consecutive = 0;
   /** While > now the breaker is open; once passed, the next check is the half-open probe. */
   let openUntil: number | null = null;
+  /** When the open window was set (a window set under a clock since set back is re-stamped). */
+  let openedAt = 0;
   let probeInFlight = false;
 
   const valid = (n: number): boolean => Number.isFinite(n);
+  const openAt = (now: number, until: number): void => {
+    openedAt = now;
+    openUntil = until;
+  };
   const stateAt = (now: number): BreakerState => {
     if (openUntil === null) return "closed";
-    return now < openUntil ? "open" : "half_open";
+    // opened under a clock since set back: open for its own window from now at the most, never for
+    // the size of the skew (config/freshness.ts heldWindow; Stage C store-future-stamped-rows-block)
+    const held = heldWindow({ at: openedAt, until: openUntil }, now);
+    openAt(held.at, held.until);
+    return now < held.until ? "open" : "half_open";
   };
 
   const status = (nowMs: number): BreakerStatus => {
@@ -108,13 +119,14 @@ export function createCircuitBreaker(opts: BreakerOptions = {}): CircuitBreaker 
       }
       consecutive++;
       const now = valid(nowMs) ? nowMs : 0;
-      if (consecutive >= threshold || openUntil !== null) openUntil = now + openMs;
+      if (consecutive >= threshold || openUntil !== null) openAt(now, now + openMs);
     },
     trip(nowMs, untilMs) {
       const now = valid(nowMs) ? nowMs : 0;
       const until = untilMs !== undefined && valid(untilMs) ? untilMs : now + openMs;
       if (until <= now) return;
-      openUntil = Math.max(openUntil ?? 0, until);
+      if (openUntil !== null) stateAt(now);
+      if (openUntil === null || until > openUntil) openAt(now, until);
       consecutive = Math.max(consecutive, threshold);
       probeInFlight = false;
     },

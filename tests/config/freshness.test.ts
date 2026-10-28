@@ -26,6 +26,7 @@ import {
   serveDecision,
   sourcesOfJob,
   stampState,
+  heldWindow,
   stampedAhead,
   storedCopyState,
   ttlFor,
@@ -257,6 +258,41 @@ describe("storedCopyState: a copy stamped past now has an unknown age (Stage C s
     expect(stampedAhead(now - 3_600_000, now)).toBe(false);
     expect(stampedAhead(Number.NaN, now)).toBe(false);
     expect(stampedAhead(now + 5_000, Number.NaN)).toBe(false);
+  });
+  it("heldWindow: a hold set under a clock since set back is held for its own length from now at the most", () => {
+    const H = 3 * 3_600_000;
+    // set 3 h fast for 120 s: re-stamped as set now (the gate's repro read 10 921 s here)
+    expect(heldWindow({ at: now + H, until: now + H + 120_000 }, now)).toEqual({
+      at: now,
+      until: now + 120_000,
+    });
+    // as written: set at or before now, or within a clock adjustment of it (the same object back)
+    for (const w of [
+      { at: now, until: now + 300_000 },
+      { at: now - 60_000, until: now + 240_000 },
+      { at: now + FUTURE_STAMP_TOLERANCE_MS, until: now + 300_000 },
+      { at: Number.NEGATIVE_INFINITY, until: Number.NEGATIVE_INFINITY },
+      { at: Number.NaN, until: now + 1 },
+    ])
+      expect(heldWindow(w, now)).toBe(w);
+    // an already-ended window set ahead stays ended
+    expect(heldWindow({ at: now + H, until: now + H - 5 }, now)).toEqual({ at: now, until: now });
+  });
+  it("heldWindow property: never longer than its own length from now; re-stamping is idempotent", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -10 * 3_600_000, max: 10 * 3_600_000 }),
+        fc.integer({ min: 0, max: 100_000_000 }),
+        (skew, len) => {
+          const w = { at: now + skew, until: now + skew + len };
+          const held = heldWindow(w, now);
+          expect(held.until - now).toBeLessThanOrEqual(Math.max(len, skew + len));
+          if (skew > FUTURE_STAMP_TOLERANCE_MS) expect(held.until - now).toBe(len);
+          expect(heldWindow(held, now)).toEqual(held);
+        },
+      ),
+      { numRuns: 300 },
+    );
   });
 });
 

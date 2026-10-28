@@ -13,6 +13,7 @@
 // (leagueWideMismatchAfter — plan 08 §6 step 3(d)).
 import {
   freshnessClass,
+  heldWindow,
   type FreshnessClass,
   type FreshnessClassId,
 } from "../../config/freshness.js";
@@ -413,7 +414,11 @@ export function retryAfterKey(host: string): string {
 
 /** An instant kept across processes (absent, unreadable or invalid reads as null; never throws). */
 export interface KeptInstant {
-  load(): number | null;
+  /**
+   * The kept instant, judged at `nowMs` (default: the clock now): one kept under a clock since set
+   * back is re-stamped as kept just now (config/freshness.ts heldWindow) and written back.
+   */
+  load(nowMs?: number): number | null;
   /** Keeps `ms` when it is later than the kept one. */
   save(ms: number): void;
 }
@@ -422,19 +427,43 @@ export interface KeptInstant {
  * ESPN's Retry-After on the read host, kept over the provider's cache (Stage C finding
  * espn-retry-after-not-persisted): the instant before which no request goes to the host, honoured by
  * every process that reads it — not only the read that received the hint (plan 01 §6 "honour
- * Retry-After if it ever appears"; the limiter is "shared by every tool and every process").
+ * Retry-After if it ever appears"; the limiter is "shared by every tool and every process"). The
+ * row's `fetched_at` is when the hold was kept: a hold kept while the clock ran fast (its
+ * `fetched_at` ahead of now) began no later than now, so it is held for its own length from now at
+ * the most and written back so — read as written, a 120 s hold another process kept 3 h fast held
+ * every process off for 3 h (Stage C finding store-future-stamped-rows-block, the in-process half).
  */
 export function cachedRetryAfter(
   cache: Pick<EspnCacheRepository, "get" | "put">,
   host: string,
-  clock: Pick<Clock, "nowIso">,
+  clock: Pick<Clock, "nowIso" | "nowMs">,
 ): KeptInstant {
   const key = retryAfterKey(host);
-  const load = (): number | null => {
+  const write = (untilMs: number, atIso: string): void => {
+    try {
+      cache.put({
+        key,
+        parsed_json: JSON.stringify({ until_ms: untilMs }),
+        fetched_at: atIso,
+        server_time: null,
+        etag: null,
+        http_status: 200,
+        raw_body: null,
+      });
+    } catch {
+      // unwritten: this process still holds off (its own instant); another one may send once
+    }
+  };
+  const load = (nowMs: number = clock.nowMs()): number | null => {
     try {
       const e = cache.get(key);
       if (e === null) return null;
-      return instant((JSON.parse(e.parsed_json) as { until_ms?: unknown } | null)?.until_ms);
+      const until = instant((JSON.parse(e.parsed_json) as { until_ms?: unknown } | null)?.until_ms);
+      if (until === null) return null;
+      const kept = { at: Date.parse(e.fetched_at), until };
+      const held = heldWindow(kept, nowMs);
+      if (held !== kept) write(held.until, new Date(held.at).toISOString());
+      return held.until;
     } catch {
       return null;
     }
@@ -445,19 +474,7 @@ export function cachedRetryAfter(
       if (!Number.isFinite(ms)) return;
       const kept = load();
       if (kept !== null && kept >= ms) return;
-      try {
-        cache.put({
-          key,
-          parsed_json: JSON.stringify({ until_ms: ms }),
-          fetched_at: clock.nowIso(),
-          server_time: null,
-          etag: null,
-          http_status: 200,
-          raw_body: null,
-        });
-      } catch {
-        // unwritten: this process still holds off (its own instant); another one may send once
-      }
+      write(ms, clock.nowIso());
     },
   };
 }

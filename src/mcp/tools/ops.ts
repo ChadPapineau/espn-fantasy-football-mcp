@@ -13,6 +13,7 @@ import {
   FRESHNESS_CLASS_IDS,
   FRESHNESS_TABLE,
   SOURCE_REGISTRY,
+  stampedAhead,
   stampState,
   type DatasetSourceId,
   type FreshnessClassId,
@@ -37,7 +38,7 @@ import { defineTool, type ToolContext } from "../define.js";
 import type { DatasetRefusalCode, DriftView, McpServerOptions } from "../services.js";
 import { TOOL_CONTRACT } from "../contract.js";
 import { clockWeek, isTeamUnitIdentity, leagueRef, ttlContextOf, turn } from "./common.js";
-import { count, iso, isoNull } from "./schemas.js";
+import { ageSeconds, count, iso, isoNull } from "./schemas.js";
 
 /**
  * The SDK the server is built on: package.json's exact pin of @modelcontextprotocol/server, which
@@ -93,7 +94,8 @@ const sourceRow = z.strictObject({
   id: z.enum(DATASET_SOURCE_IDS as unknown as [DatasetSourceId, ...DatasetSourceId[]]),
   license: z.string().max(32),
   last_success_at: isoNull,
-  age_s: count.nullable(),
+  // an age, never a count: it grows with the wall clock (schemas.ts ageSeconds)
+  age_s: ageSeconds.nullable(),
   freshness: z.enum(["fresh", "stale", "provisional", "expired", "never"]),
   rows: count.nullable(),
   last_error: z.string().max(40).nullable(),
@@ -732,7 +734,12 @@ export const checkAuth = defineTool({
   budget: "list",
   wire: "outline",
   run: async (_args, ctx) => {
-    const last = LAST_CHECK.get(ctx.services);
+    // a check made under a clock since set back was made no later than now: the next one is at
+    // most a minute away, never the size of the skew (Stage C finding
+    // store-future-stamped-rows-block — the in-process instants)
+    const kept = LAST_CHECK.get(ctx.services);
+    const last = kept === undefined || !stampedAhead(kept, ctx.nowMs) ? kept : ctx.nowMs;
+    if (last !== undefined) LAST_CHECK.set(ctx.services, last);
     if (last !== undefined && ctx.nowMs - last < CHECK_AUTH_MIN_INTERVAL_MS) {
       throw new EffError("RATE_LIMITED", {
         retry_after_s: Math.ceil((last + CHECK_AUTH_MIN_INTERVAL_MS - ctx.nowMs) / 1000),
@@ -799,7 +806,7 @@ export const freshnessResourceSchema = z.strictObject({
         fresh_s: count.nullable(),
         hard_limit_s: count.nullable(),
         beyond_hard: z.enum(["STALE_ONLY", "omit"]).nullable(),
-        age_s: count.nullable(),
+        age_s: ageSeconds.nullable(),
         state: z.enum(["fresh", "stale", "expired", "never"]),
       }),
     )
