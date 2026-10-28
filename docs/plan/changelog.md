@@ -727,8 +727,9 @@ rulings supersede the older text they name.
 ## B9 — what ruling R8-3 built (Stage C, 2026-10-28)
 
 These are not rulings. They record how ruling R8-3 was carried out (commit `cb2bcc7`), each clause with
-tests that fail on the code at `f41e810`. What stays open is in `docs/evals/stage-c-backlog.md`
-("Ruled R8-3").
+tests that fail on the code at `f41e810`, and how fix round 2 (commit `91a8c1b`, below) answered the
+independent attack on that build. What stays open is in `docs/evals/stage-c-backlog.md` ("Ruled R8-3").
+The bullets fix round 2 changed say so.
 
 - **The universe carries ESPN's position** · R8-3 clause 4 · `src/sources/news/match.ts`
   `universeFromEspnPlayers` and `UNIVERSE_SQL` read `ds_players.position_id` into
@@ -743,13 +744,15 @@ tests that fail on the code at `f41e810`. What stays open is in `docs/evals/stag
   "picks off", "brought down", "torches" …) and, between two teams only, `GAME_CUES` (those, and
   "host", "visit", "face"). "at", "tops", "visits" and "faces" alone stay no cue: each can stand before
   the subject's own team. A name one universe player holds keeps the old reading (`cue`, `pair`).
+  Fix round 2 moved this reading to `cues.ts` and widened it (below).
 - **A team named loosely is never evidence FOR a holder** · clause 2 · `match.ts` `sharedHolder`:
   `full_name_team` on a shared name needs a team written next to it or tied to it by a roster move.
   A game's teams and a loosely named team rule holders out; they never raise one, nor support a
   holder left by elimination ("Browns vs. Bengals: Justin Jefferson records two sacks" gets no ref;
   it gave the Browns LB 0.95). A loosely named team that rules no holder out leaves the item to
   prominence as before: choice 5 blocks only on a namesake's team, and choice 3's exclusion keeps a
-  traded star's own news from being blocked by the team he joined.
+  traded star's own news from being blocked by the team he joined. Fix round 2 withdrew that last
+  reading: such an item is no residual, so it gets no ref (below).
 - **Positions** · clause 4, choice 6(c) · `src/sources/news/positions.ts` (new). A closed vocabulary of 79
   forms (abbreviations in capitals, words in any case) maps each to the ESPN ids a player it describes
   may carry: DL words DT or DE, edge and linebacker words DE or LB, defensive-back words CB or S,
@@ -759,7 +762,9 @@ tests that fail on the code at `f41e810`. What stays open is in `docs/evals/stag
   before that sentence, and the sentence must name no one after it; "safety", "edge" and "kicker" are
   never read there. A written position rules out every holder of another position and is the
   holder's own evidence. Several must all fit; one that several holders fit picks none. A name
-  written several times in one item is decided once, over all its evidence.
+  written several times in one item is decided once, over all its evidence. Fix round 2: a describing
+  sentence never rules a holder out or places one; only a position written next to the name does
+  (below).
 - **The bare surname follows the same rules** · clauses 2 and 4 · a surname several universe players
   share (302 of 1,604) takes a ref only from a team written next to it or tied to it by a move. A
   position filters its sharers, and a sharer who outshines the one left and is not ruled out blocks
@@ -770,7 +775,7 @@ tests that fail on the code at `f41e810`. What stays open is in `docs/evals/stag
   a shared name was left out of), and the publish step returns both as warnings (`eff refresh news`).
   Every item is stored and listed by `espn_get_news` as before.
 - **The residual** · clause 6 · no team of a holder's, no position, no cue: the prominent holder at
-  `full_name` (0.80), never 0.95.
+  `full_name` (0.80), never 0.95. Fix round 2: no team at all, as clause 6 says (below).
 - **Unique names are matched as before.** A one-holder name takes the code path it took, with the
   old cue reading; a property holds that R8-3's words leave a unique name's ref as a neutral word does.
   Over the 219 recorded and gate titles the matcher's output changed on 48, none of them for a unique
@@ -805,6 +810,126 @@ tests that fail on the code at `f41e810`. What stays open is in `docs/evals/stag
 - **Open** · one battery title still reaches the star by the ruled evidence: "Lamar Jackson: Signs
   with Ravens practice squad" (the Ravens QB at 0.95; choice 3: a roster move to his own team ties it to
   him). The backlog lists it with the options.
+
+### Fix round 2 — the independent attack on `cb2bcc7` (commit `91a8c1b`)
+
+The attack found 14 ways the first build still broke R8-3: a namesake's injury, play or transaction
+item reached the star, a star's item reached a namesake, or clear evidence lost its ref. Each is fixed
+at root, and `tests/sources/news/match-r83-round2.test.ts` holds each one with the attack's texts.
+
+- **The shared-name reading has its own file** · clauses 2 and 3 · `src/sources/news/cues.ts` (new)
+  `sharedMentions`. A team's full name is one mention ("the Minnesota Vikings", "the Los Angeles
+  Rams"): a cue before its first word holds, and its home is no second, loose mention. A team written
+  in capitals (an all-caps headline) is read, and so are the short names feeds write
+  (`TEAM_SHORT_NAMES`: "Vikes", "Pack" …). An abbreviation (`TEAM_ABBREVIATIONS`) counts where a
+  context makes it a team: after a cue ("vs. MIN", "@ MIN"), in a tag after a name ("Justin Jefferson,
+  CLE:", "(CLE - LB)"), or on a game's first side. `teamMentions` keeps exactly `f41e810`'s reading for
+  unique names.
+- **A cue is never cancelled, and is about its own person** · clauses 2 and 3 · `match.ts`. A loose
+  mention of a team no longer cancels a cue on it. Before, "…in Sunday's win over the Minnesota
+  Vikings" and "…loss to the Vikings. Minnesota converted 8 of 13 third downs." gave the star the
+  namesake's injury. A cue or a game is about the person named last before it in its sentence. An
+  uncued team between them is the cue's subject ("as Minnesota's offense torched …"). A play word
+  must follow the name directly. A title's lead is about the first person it names ("Bills vs. Ravens:
+  Lamar Jackson …"). So a shared name later in an item reads its own sentence's cue ("Denzel Ward: … |
+  Justin Jefferson added a sack in the win over the Vikings."), and the surname path reads its own
+  cues.
+- **The cue list: closed, guarded, held entry by entry** · clause 3 · `RESULT_CUES` (29) gains "win
+  at", "wins at", "victory at", "loss at", "losses at", "shutout of" and "blowout of". Two lists are
+  new: `PLAY_OBJECT_CUES` (28: "strips", "forces", "blocks", "drops", "gets to" …) and
+  `PASSIVE_PLAY_CUES` (15, before "by": "Sacked five times by Steelers"). "@" joins the against words.
+  `TEAM_RESULT_CUES` ("fell to" …) names a game between two teams only; after a player it is the
+  draft. A cue holds only where the words after the team read as the game or the play. A play word
+  needs the team's player, ball or unit (`PLAY_OBJECTS`) or "for" and a number. The other words need
+  punctuation, a number, the end, a unit or a word of `CUE_CONTINUATIONS`. The idioms that use a
+  result word for a team's loss of its own player are no cue:
+  - "for" after a result ("lost to the Browns for the season");
+  - a passive or a participle "lost to" ("is lost to the Chiefs");
+  - a copula's or an appositive's "loss to" ("is a big loss to the Eagles", "…, a big loss to the
+    Browns");
+  - the draft ("in the fifth round", "No. 150");
+  - a dispute before "against" ("grievance against the Browns");
+  - the team's own thing after it ("Beats Browns teammate", "Facing Eagles discipline",
+    "Browns-imposed").
+- **The residual, as clause 6 words it** · clauses 5 and 6 · prominence decides only for an item that
+  names no team and no position word (a plural or a possessive one included). Positions that label
+  another person do not count, nor does a sentence a pronoun gives to another player. An item that
+  names either and leaves several holders gets no ref and is counted. This withdraws round 1's reading
+  (a): "Lamar Jackson: Works out for Bengals" is no residual.
+- **A describing sentence never picks** · clause 4 · `positions.ts`. "| The cornerback jumped the
+  route." may describe the player the subject faced, and no rule short of parsing tells it from "| The
+  linebacker did not practice Wednesday.". So such a sentence no longer rules holders out or places
+  one. It counts as written about the subject when he is named last before it, no one is named after
+  it in its sentence, and no pronoun makes it plainly another's ("him" within three words of the
+  position, or "he" right after it). Then it keeps a pick it contradicts from being made, and it
+  supports a holder a cue left. It is never read past a team or a position written next to the name.
+  This withdraws round 1's reading (c).
+- **Next to the name, at every mention and in every label form** · clause 4 · a position or a team
+  written next to the name decides at each mention of him, his surname alone included ("Jefferson, a
+  second-year linebacker,"). The forms: right after the name ("Justin Jefferson LB:"); a tag with an
+  abbreviation, in either order ("(CLE - LB)", "Justin Jefferson, WR, Minnesota:"); an appositive with
+  modifiers or an age ("the Ravens' newest cornerback"); the clause a headline's topic colon opens
+  ("Lamar Jackson injury update: Ravens QB …"); and label words between a team and the name ("Rams
+  edge rusher Byron Young", which attaches the Rams). "corner" joins the vocabulary, and "pass rusher"
+  now fits ESPN's DT (the Chiefs' Chris Jones).
+- **Both paths, one rule** · clause 4 · a shared surname is decided by the full name's function
+  (`sharedHolder`), pooled over its mentions and reading its own cues. "Cleveland's Jefferson: Sacks
+  Vikings QB twice" and "Eagles' Young: Sacks Rams QB" are the namesakes' at 0.60, as their full-name
+  twins are theirs at 0.95.
+- **Counted** · clause 5 · a shared surname that an item naming a team leaves to no one is counted,
+  even when the item has another ref.
+- **A roster move is a move** · clause 2 · "joins" or "lands on" a team ties it only when the move ends
+  its clause there or names a roster. "Joins Ravens for workout" and "Lands on Vikings' radar" tie
+  nothing.
+- **Expectations fix round 2 changed** (each commented where it stands; none moves to the other
+  holder). These items name a team loosely and leave two holders, so each gets no ref and is counted
+  (clauses 5 and 6). Each was the star at `full_name` before.
+  - "Justin Jefferson: Leads Vikings to win | …", "…: Notches 100 yards as Vikings roll" and "…:
+    Catches TD as Vikings rally late";
+  - "Lamar Jackson: Signs extension with Ravens", "Ravens' John Harbaugh: Lamar Jackson day-to-day"
+    and "Lamar Jackson: Limited ahead of Bengals game | …";
+  - "Lamar Jackson: Traded to Bengals in blockbuster" and "…: Cut through Bengals defense";
+  - battery 2's "…: Works out for Bengals" and "…: Visits Bears", relabelled namesake (the gate's own
+    label);
+  - Lamar Jackson in "Ja'Marr Chase: … against Ravens | Chase outdueled Lamar Jackson.", and "…; the
+    Ravens visit the Bengals Sunday." (a game in a sentence about no one).
+
+  A describing sentence no longer picks (clause 4). Each of these had its holder before and now gets
+  no ref: "…: Dealing with knee injury | The linebacker did not practice Wednesday.", "… The defender
+  has started every game.", "…: Notches 11 tackles in Vikings loss | The linebacker led all
+  defenders.", "…: Practices fully | The Vikings wideout faces Cleveland on Sunday." (and its battery-1
+  twin), "Lamar Jackson (ankle) limited | The Ravens quarterback was limited.", "Lamar Jackson: Claimed
+  off waivers by Ravens | The cornerback joins Baltimore's secondary." and "Cleveland's Jefferson: Placed
+  on IR | The linebacker will miss four games.". Three more changed:
+  - "Justin Jefferson: Catches TD | Denzel Ward covered him. The linebacker was beaten twice." loses the
+    WR: it names a position, so it is no residual;
+  - "WR Justin Jefferson: Questionable | The linebacker did not practice Wednesday." is the WR: his
+    label decides (no ref before);
+  - the tags "Justin Jefferson, WR, Minnesota:" and "…, LB, Cleveland:" attach their team and rise to
+    `full_name_team`.
+
+  The cue-list tests moved from `teamMentions`' `shared` field to `sharedMentions`, and each reads
+  its words in their own form.
+- **Tests** · `match-r83-round2.test.ts` (new) holds every violation with the attack's texts, the
+  game words entry by entry, the fixer's further attacks, and four fast-check properties: a loose
+  mention never cancels a cue, a describing sentence alone never picks, a loosely named team alone
+  gives no ref, and the two paths agree. `match-r83.test.ts`, `positions.test.ts` and
+  `match-universe.test.ts` hold the changed expectations. Against `52796bf`, 52 of the 118 tests of
+  those four files fail, 23 of them among the 28 new ones; against `f41e810`, 86 fail. A mutation run
+  removed or weakened 36 of the new rules one at a time, and a test caught each. The hyphen guard,
+  which none caught, was dead code the continuation rule covers, so it is gone. The full unit suite
+  passes (11,762 tests), the coverage gate holds, and the news perf tests pass (worst case 3.3 s of
+  15 s).
+- **Measured** · the gate's battery 1 has no misattribution: 28 right refs and the open item; round 1
+  had 34, and the 6 lost are the clause-5 and describing-sentence recall above. The 71 labelled real
+  titles match as at `52796bf`, and unique names as at `f41e810`; two 11-name roundups gain their
+  eleventh ref where the star's slot freed under the 10-ref cap. 27,552 generated items with a known
+  owner (cue, team and label forms, loose mentions, pronoun sentences) give no ref to the other holder.
+- **Open** · the roster move to the star's own team above, and two limits the fixer's own attack found,
+  both of which stay as built. A game written about the subject but not his own ("Jefferson watched
+  the Vikings host the Bengals from the stands") rules his namesake out (choice 2). An item naming no
+  team and no position is clause 6's residual even when its verbs are the namesake's ("Justin
+  Jefferson: Burned for touchdown | The receiver beat him deep." gives the WR 0.80, as accepted).
 
 ## Reviews (re-run on every version bump of the named dependency)
 

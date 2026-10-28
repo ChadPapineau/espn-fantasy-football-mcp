@@ -105,19 +105,50 @@ the star. What R8-3 built:
   stays stored and listed.
 - **The residual (clause 6).** No team of a holder's, no position, no cue: the prominent holder at 0.80.
 
-**Readings the fixer made (for the re-gate to check).** (a) A team named loosely that rules no holder
-out, the star's own or nobody's, leaves the item to prominence, as before ("Lamar Jackson: Limited
-ahead of Bengals game" stays the Ravens QB's). Choice 5 blocks only on a namesake's team. Choice 3
-excludes trades so that a traded star's own news is not blocked, which the stricter reading (every
-named team leaves two holders, so no ref) would undo. Battery 2's "Lamar Jackson: Works out for
-Bengals" and "…: Visits Bears" are therefore residuals: the Ravens QB at 0.80, like the clause-6
-items "…: Inks reserve/future contract" and the three "Placed on IR" titles. (b) A surname several players
-share is a shared name, so clause 2 binds the bare-surname path. (c) A describing sentence counts only
-for the subject: the last person named before it, and no one named after it in its sentence. A
-sentence about an unnamed other player ("The linebacker covering him slipped.") still reads as the
-subject's; no pronoun parsing (R7-4's precedent). (d) One item naming two namesakes ("Lamar Jackson:
-Throws pick to CB Lamar Jackson") is decided as one person: a name written twice in an item is one
-person, the common case.
+**Fix round 2 (2026-10-28, commit `91a8c1b`; changelog §B9, "Fix round 2").** The independent attack on
+`cb2bcc7` found 14 ways that build still broke R8-3. A loose mention cancelled a ruled cue, so "…win
+over the Minnesota Vikings" gave the star the namesake's injury. A sentence about the player the
+subject faced was read as his position. The residual was read more widely than clause 6 words it. The
+cue list missed "win at", the strip and the blocked kick, and read idioms as games. The surname path
+read no cues, and a shared surname could vanish from the counts. Each is fixed at root, and
+`tests/sources/news/match-r83-round2.test.ts` holds each one with the attack's texts:
+
+- **Cues (clause 3).** The shared-name reading is `src/sources/news/cues.ts`. A team's full name is
+  one mention; capitals, short names and abbreviations in a context are teams. A cue is about the
+  person named last before it in its sentence, a play word only right after his name, and no loose
+  mention cancels it. The lists gain the result and play wording the attack named, and a cue holds
+  only where the words after the team read as the game or the play. The idioms that name a team's own
+  loss are no cue ("lost to the Browns for the season", "a big loss to the Eagles", the draft, "Beats
+  Browns teammate").
+- **The residual (clause 6), as worded.** Prominence decides only for an item that names no team and
+  no position. One naming either that leaves several holders gets no ref and is counted (clause 5).
+- **Describing sentences (clause 4).** A sentence elsewhere in the item never picks a holder. It
+  blocks a pick it contradicts and supports a holder a cue left, and it yields to a team or position
+  written next to the name. A pronoun ("The linebacker covering him") makes it no evidence at all. The
+  written forms are wider: every mention, the surname alone included, tags with abbreviations,
+  appositives with ages, the headline topic's clause.
+- **Both paths, one rule (clause 4).** A shared surname is decided by the full name's function with
+  its own cues ("Cleveland's Jefferson: Sacks Vikings QB twice" is the Browns LB's at 0.60). One left
+  to no one in an item that names a team is counted.
+
+Battery 1 has no misattribution: 28 right refs and the open item below (round 1 had 34; the recall lost
+is clause 5's and the describing sentences'). Batteries 2–4 give no namesake item to a star except
+clause 6's accepted residuals, which name no team, no position and no cue: the three "Placed on IR"
+titles, "Lamar Jackson: Inks reserve/future contract" and "Lamar Jackson: Waived with injury
+designation | Jackson (hamstring) reverts to injured reserve."
+
+**Readings the fixer made (for the re-gate to check).** (a) Withdrawn in fix round 2. A team named
+loosely that rules no holder out no longer leaves the item to prominence; such an item is no residual
+and gets no ref (clause 5). Battery 2's "Lamar Jackson: Works out for Bengals" and "…: Visits Bears"
+are the namesake's again, with no ref. The cost is the star's own items that name a team in wording
+no cue reads ("Justin Jefferson: Leads Vikings to win | …", "Lamar Jackson: Signs extension with
+Ravens"), which now get no ref either. (b) A surname several players share is a shared name, so
+clause 2 binds the bare-surname path; it now uses the full name's function and its own cues. (c)
+Narrowed in fix round 2. A describing sentence is about the subject only when he is the last person
+named before it, it names no one after it, and no "him" within three words of its position (or "he"
+right after it) gives it to another player. Even then it never picks a holder. (d) One item naming two
+namesakes ("Lamar Jackson: Throws pick to CB Lamar Jackson") is decided as one person: a name written
+twice in an item is one person, the common case.
 
 **Open — needs a ruling: a roster move to the star's own team.** "Lamar Jackson: Signs with Ravens practice
 squad" (battery 1, the namesake's) goes to the Ravens QB at 0.95: the move ties the Ravens to the name,
@@ -125,7 +156,24 @@ and choice 3, standing as built, reads a move like an attached team, so the hold
 it. A free agent is consistent with any signing, though: it is how he stops being one. Options: (a) as
 built; (b) an incoming move (sign, claim, join, lands on) is a free-agent holder's too, so with one it
 leaves two holders and gets no ref ("Lamar Jackson: Signs with Ravens" would get none either); (c) "claimed
-by" alone rules out the holder already on that team (a team never claims its own player).
+by" alone rules out the holder already on that team (a team never claims its own player). The same
+reading gives the star "Justin Jefferson: Signs with Vikings | Jefferson, lost to the Browns in free
+agency, joins Minnesota." at 0.95.
+
+**Known limits, as built (for the re-gate to check).** Each follows a choice or a vocabulary that
+stands; the first two came from the fixer's own attack after fix round 2.
+
+- **A game not his own.** A game written in a sentence about the subject is his (choice 2), so
+  "Justin Jefferson: Questionable | Jefferson watched the Vikings host the Bengals from the stands."
+  rules the Browns LB out and gives the WR 0.80. Telling a spectator from a player would need verb
+  parsing.
+- **The residual's verbs.** An item that names no team and no position is clause 6's residual even
+  when its verbs are the namesake's. "Justin Jefferson: Burned for touchdown | The receiver beat him
+  deep." gives the WR 0.80, since the receiver is plainly another player. "Lamar Jackson: Waived with
+  injury designation | Jackson (hamstring) reverts to injured reserve." gives the Ravens QB 0.80. Both
+  are accepted by the ruling.
+- **"edge rusher"** stays DE or LB: "Chiefs edge rusher Chris Jones" (ESPN's DT) gets no ref, where
+  "pass rusher" now fits him.
 
 **Before R8-3** (the record the ruling was made on; the as-built choices below are the ones it kept or
 changed):
