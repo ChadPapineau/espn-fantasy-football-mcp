@@ -397,7 +397,9 @@ describe("C5: E5 logs its priority runs and re-solves the premium from 13 of the
     const fitted = await tool("espn_analyze_waivers", { mode: "priority" });
     expect(fitted.data.premium_basis).toBe("league_fitted");
     expect(fitted.warnings.join(" ")).not.toMatch(/cold-start table: the league's feed/);
-  });
+    // two full E5 priority runs: the unit project's 30 s hang detector tripped on this healthy test
+    // under coverage on a loaded Mac (the final gate's test:coverage run 1); a hang still fails
+  }, 120_000);
 });
 
 describe("C6: E7 serves cascade v2 (the redistribution prior table)", () => {

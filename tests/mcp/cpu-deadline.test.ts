@@ -200,7 +200,9 @@ describe("the engines without a sampler honour the call's one budget too (Stage 
     });
     expect(f.partial).toBe(false);
     await off.close();
-  });
+    // a COMPLETE partner search with no deadline: the unit project's 30 s hang detector tripped on
+    // this healthy test under coverage on a loaded Mac (the final gate's test:coverage run 1)
+  }, 120_000);
 });
 
 describe("the composition root sets the switch only under EFF_TEST_STUBS=1 in fixture mode", () => {
