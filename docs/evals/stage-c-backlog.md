@@ -7,6 +7,9 @@ says why code cannot close it and what would.
 
 ## For the orchestrator's ledger
 
+**Ruled R8-5 (2026-10-28, `docs/plan/changelog.md` §R8):** the three findings below are closed as
+fixed; `ci-default-branch-controls-inert` closes with the Stage D merge.
+
 The final gate's second run (at `2ca70dc`) and its third (at `125c184`) verified three findings fixed
 with the last verifiers' own repros, yet the ledger still lists them as confirmed:
 `trade-locked-week-counted`, `store-future-stamped-rows-block` and `crosswalk-unpaired-joins-silent`.
@@ -32,7 +35,7 @@ are recorded at Stage D as not runnable.
 
 Seen on the owner's install at the final gate. Each is an action at a terminal; none needs code.
 
-- **Stale datasets.** The 8 dataset sources have not been refreshed since 2026-10-11, and the launchd
+- **Stale datasets (R8-1: accepted at the Stage C gate; closed by the Stage D install).** The 8 dataset sources have not been refreshed since 2026-10-11, and the launchd
   jobs are not installed. At the gate's second and third runs `eff doctor --online` completed and
   printed all 26 rows; 23 are ok, every ESPN and credential row among them (#9 drift, #14 clock, #15
   host, #16 credential, #17 league, #18 own team, #19 sources). It exits 1 only on #10 (all 8 sources
@@ -63,7 +66,12 @@ Seen on the owner's install at the final gate. Each is an action at a terminal; 
   running at 02:27 on 2026-10-28 and gone by 03:24. The gate's clean install had replaced the
   `node_modules` it ran from at 02:28. Nobody signalled it.
 
-## For an orchestrator ruling — the news matcher's fail-safe choices
+## Ruled R8-3 — the news matcher's fail-safe choices
+
+**Ruled R8-3 (2026-10-28, changelog §R8):** choices 1–5 stand; a loose team mention on a shared name is
+never evidence for a holder; the opponent cues cover result and play wording; choice 6 takes (c),
+position words from ESPN's `position_id`, on both paths. The gate's fourth run found namesake items
+still reaching the star at `f41e810` (repros kept with the orchestrator, outside the repo).
 
 `news-match-universe-homonyms` was fixed on the evidence of the gate's five items
 (`src/sources/news/match.ts`, `teams.ts`). At `2ca70dc` no misattribution remains: the finding's
@@ -141,7 +149,9 @@ items count: those that name the Browns.
 injury and transaction news on the star, which E10 then reads as his claim. For 6, take (c) as a
 follow-up, or (b) now if the two paths must agree before Stage D.
 
-## For an orchestrator ruling — the stall bound's measurement
+## Ruled R8-2 — the stall bound's measurement
+
+**Ruled R8-2 (2026-10-28, changelog §R8):** accepted as built.
 
 Plan 10 A16a's 50 ms stall bound is measured by wall-clock event-loop delay
 (`tests/e2e/fixtures/heartbeat.cjs`). On a loaded host the operating system's preemption reads as the
@@ -158,7 +168,10 @@ its worst stalls were 17.1 and 25.4 ms. Its third run read 41.6 ms for the paral
 25.4 ms on; fix round 3 adds no work there (`fx-10h` has one division, so the division-rule ranking
 of §B8 never runs).
 
-## For the owner or an orchestrator ruling — F8, division winners first
+## Closed by R8-4 — F8, division winners first
+
+**Closed by R8-4 (2026-10-28, changelog §R8):** the owner confirmed that the league's division
+winners take the top seeds. The shipped chain is right; nothing changes.
 
 Stage C live finding F8 (`docs/evals/stage-c-live.md`), raised again at the final gate's third run.
 The owner's league has two divisions and ESPN's `playoffSeedingRuleBy` 0. The season simulator seeds

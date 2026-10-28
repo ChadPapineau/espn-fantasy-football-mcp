@@ -24,6 +24,12 @@ and nothing secret ever lives in it.
 
 ## ▶ NEXT STEP — Stage C final gate: fix round 3 landed (2026-10-28); the orchestrator re-gates
 
+**Orchestrator, 2026-10-28:** the gate's fourth run (at `f41e810`) was red only on the items ruled in
+changelog §R8. R8-1 accepts doctor's exit on the stale datasets until the Stage D install. R8-2
+accepts the stall measurement. R8-4 closes F8: the owner confirmed division winners first. R8-5
+closes the three fixed ledger items and leaves `ci-default-branch-controls-inert` to the Stage D
+merge. R8-3 rules the news matcher's shared names: its fix runs next, then the re-gate.
+
 **State:** branch `build/phase-1`; fix round 1 is `e40fd88` … `7f39044` (changelog §B6), fix round 2
 `01cb8e5` and `2396b07` (§B7), fix round 3 `42de906` and `ebc9187` plus this docs commit (§B8); tree clean,
 HEAD == origin. The final gate's third run found no defect in its commands or product checks. It was red only

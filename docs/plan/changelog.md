@@ -708,6 +708,22 @@ product checks; it was red on the owner's stale datasets (doctor #10, by design 
   advisories (unreachable: no listener; Dependabot after the Stage D merge); the two tight margins and
   fixture mode's INTERNAL for an unrecorded period, recorded with the reasons they stay.
 
+## R8 — Stage C final-gate rulings (2026-10-28)
+
+**Trigger:** the final gate stayed red after its three fix rounds (its fourth run, at `f41e810`).
+Every gate command, product check and CI job passed. It was red on the owner's stale datasets, on
+the news matcher's shared names, on two items only the Stage D merge or the owner can close, and on
+the ruling requests in `docs/evals/stage-c-backlog.md`. The owner answered F8 on 2026-10-28. These
+rulings supersede the older text they name.
+
+| id | ruling | what changed (file §) |
+|---|---|---|
+| R8-1 (doctor exit, stale datasets) | `eff doctor --online` exiting 1 because #10 fails (every dataset source expired) and #11 warns (no launchd jobs) is the product reporting the install truthfully (plan 03 §5: the exit is the worst row's). It is not a defect. At the Stage C gate the live doctor check is met when doctor completes and prints every row, every ESPN and credential row is ok, and #10 and #11 are the only rows that are not ok, for those reasons. Stage D's install closes it: the owner runs `eff refresh all` and `eff install-launchd`, and then `eff doctor --online` must exit 0 | plan 10 live smoke at the Stage C gate; Stage D's install acceptance |
+| R8-2 (A16a stall measurement) | The host-evidence repeat is accepted as built. The 50 ms bound and the heartbeat measurement are unchanged. A window over the bound is repeated (at most three windows) only with evidence that the host set it. A JavaScript block over the bound is never excused, and a host that sets every window fails as "cannot be measured", never as a pass | plan 10 A16a; `tests/e2e/helpers.ts` `measureStall` (as built) |
+| R8-3 (news matcher, shared names) | When a name has more than one holder, precision comes before recall. A namesake's item put on a star gives E10 a false injury or transaction claim; a star's lost item still has ESPN's own status behind it. (1) Backlog choices 1–5 stand as built. (2) For a shared name, a team named loosely (not attached to the name, not tied to it by a roster move) is never evidence FOR a holder. It can only rule a holder out, and `full_name_team` (0.95) on a shared name needs an attached team or a roster-move tie. (3) A team named as the other side of a game or a play is the opponent. The cue vocabulary covers result and play wording ("win over", "loss to", "lost to", "beat", "fell to", "against", "past", "sacks the `<team>` QB", "picks off a `<team>` pass" and the like) as a closed, tested list. (4) Choice 6(c): a position word or abbreviation written next to the name, or describing the subject, is evidence like an attached team. It comes from ESPN's `position_id` joined into the matcher's universe and rules out every holder of another position. The full-name and bare-surname paths follow the same rule. (5) When the evidence leaves no single holder, no one takes the name, and the item is counted where unmatched items are counted (plan 07 D6), never dropped in silence. (6) Accepted residual: an item that names no team, no position and no cue goes to the prominent holder at `full_name` (0.80), as built. No verb parsing beyond the cue list (R7-4's precedent) | `src/sources/news/match.ts`, `teams.ts`, `UNIVERSE_SQL`; plan 07 D6 (Stage C) |
+| R8-4 (F8, division winners first) | The owner confirmed that the league's division winners take the top seeds. The shipped chain, division winners first whenever a league has more than one division under ESPN's rule reading, is right for every observed league. The owner's league (`playoffSeedingRuleBy` 0, two divisions, division winners first) refutes the hypothesis that 0 means "by record". E3's `division_rule` stays as built: the record-only answer is shown as the stated alternative | none (§B8 stands) |
+| R8-5 (ledger) | `trade-locked-week-counted`, `store-future-stamped-rows-block` and `crosswalk-unpaired-joins-silent` are closed as fixed, verified at the gate's third and fourth runs. `ci-default-branch-controls-inert` is closed by the Stage D merge of `build/phase-1` into `main` and does not block the gate before it. R7-2 and R7-6 stand | the orchestrator's ledger |
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
