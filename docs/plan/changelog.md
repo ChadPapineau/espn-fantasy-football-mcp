@@ -661,6 +661,53 @@ found no defect in the gate's commands or product checks. It was red on what
   the measured scope (16 shared full names; Justin Jefferson, Byron Young and Marcus Harris).
   `tests/sources/news/match-universe.test.ts` holds both as built.
 
+## B8 — what the final gate's fix round 3 built (Stage C, 2026-10-28)
+
+These are not rulings. They record what fix round 3 added for the problems of the final gate's third
+run, each with tests that fail on the code before (commits `42de906` and `ebc9187`). That run found no defect in its commands or
+product checks; it was red on the owner's stale datasets (doctor #10, by design until
+`eff refresh all`) and listed low items. What stays open is in `docs/evals/stage-c-backlog.md`.
+
+- **A prompt's undeclared argument key** · plan 07 §4.2 (a sentence added), plan 02 §5 · A
+  prompts/get argument key the prompt does not take was stripped by its non-strict object and the
+  prompt rendered. A `__proto__` key never reached it at all: the SDK's `arguments` record drops it,
+  as on tools/call before changelog §B3's fix round 2. tools/call answers VALIDATION for the same key.
+  - Every prompt's argument object is strict (`src/mcp/prompts/index.ts`), and every prompt registers
+    its schema, the argument-less five too: without one the SDK never shows the handler the
+    arguments. prompts/list now lists their `arguments` as `[]`.
+  - An undeclared key is refused -32602 "unknown argument key (this prompt takes: …)". The message
+    names the keys the prompt takes and never quotes the caller's key; zod's own message quotes it
+    (`unknownArgumentMessage`).
+  - `src/cli/serve.ts` `withProtoKeyCarried` carries a prompts/get `__proto__` key past the SDK's
+    re-parse, as it does for tools/call, and logs the method. A value that is not a string fails the
+    SDK's own record first: -32602 "Invalid params". No prototype is touched.
+  - Tests: `tests/mcp/prompt-args.test.ts` (all 13 prompts, both eras, the schema's coded issue, an
+    asynchronous schema), `tests/mcp/serve.test.ts` (over stdio: string and object values, beside a
+    valid argument, an argument-less prompt, no echo, the log line; the carry's unit cases and
+    property; no prompt declares the stand-in). Against the code before, 35 of them fail.
+- **E3's division-winners-first step, stated and priced** · plan 07 E3 (`division_rule` added; the
+  Method sentence); research 05 §2.1; Stage C live finding F8 · Under the ESPN rule reading the
+  simulator seeds division winners first in a league with more than one division. That is ESPN's
+  documented rule, but no league field is known to confirm a league applies it (`playoffSeedingRuleBy`
+  is [U]), and the owner's two-division league states "record first, then Total Points For".
+  - `simulateSeason` also ranks every path by record alone, with the same chain without that step:
+    one more ranking on the base variant's paths, no extra draw, so every reading is unchanged.
+    E3 `season` returns `division_rule` (`divisions`, `p_playoffs_record_only`, `p_bye_record_only`;
+    null with one division or without an ESPN rule reading), and `rec.assumptions[]` states both
+    answers to three decimals with the revisit trigger. The cheat-sheet's E3 row names the field.
+  - Which chain the owner's league uses stays open (backlog: F8 — the owner's one answer, or a
+    ruling).
+  - Tests: `tests/domain/analytics/seeding.test.ts` (the five-team league where a 1-3 division
+    winner takes a seed record order denies him; one division and points-only alone are null; a
+    property: record alone equals the same league's plain chain on the same paths),
+    `tests/mcp/season-division-rule.test.ts` (the four-division `league-c` and the one-division
+    `league-a` through the composition root). Against the code before, all 6 fail.
+- **The backlog** · `docs/evals/stage-c-backlog.md` · the ledger's three closable findings re-verified
+  at the third run; the news matcher's scope measured on its own universe (2 574 persons, 16 shared
+  keys, 11 of them the identical full name); F8's evidence and options; the dev-only `vite`
+  advisories (unreachable: no listener; Dependabot after the Stage D merge); the two tight margins and
+  fixture mode's INTERNAL for an unrecorded period, recorded with the reasons they stay.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |

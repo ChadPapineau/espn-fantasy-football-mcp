@@ -26,8 +26,8 @@ passed to agents in their prompts and kept in local environment/config only — 
 
 ## RESUME HERE
 
-**Stage C — the final gate's fix round 2 landed (2026-10-28).** See `docs/HANDOFF.md` ▶ NEXT STEP for the state and `docs/evals/stage-c-backlog.md` for what no agent change closes.
+**Stage C — the final gate's fix round 3 landed (2026-10-28).** See `docs/HANDOFF.md` ▶ NEXT STEP for the state and `docs/evals/stage-c-backlog.md` for what no agent change closes.
 
 - Stages A ✅ · B1 ✅ · B2a ✅ · B2b ✅ (rulings R5, R6). Owner stop ✅ (2026-10-11).
-- Stage C: rounds 0–3 ✅ (live lane ✅; plugin-eval lane not runnable on this account, R7-2); the final gate RED on 2026-10-28 → fix round 1 ✅ (changelog §B6); its second run RED on no agent-fixable defect → fix round 2 ✅ (changelog §B7).
+- Stage C: rounds 0–3 ✅ (live lane ✅; plugin-eval lane not runnable on this account, R7-2); the final gate RED on 2026-10-28 → fix round 1 ✅ (changelog §B6); its second run RED on no agent-fixable defect → fix round 2 ✅ (changelog §B7); its third run RED on the owner's stale datasets and low items → fix round 3 ✅ (changelog §B8).
 - **Next:** the orchestrator re-runs the final gate → Stage D (merge, CI green on `main`, the owner's install).
