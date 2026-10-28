@@ -62,6 +62,7 @@ import { runCrosswalkRebuild } from "./crosswalk.js";
 import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
 import type { Logger } from "./log.js";
+import { DRIFT_REFRESH_TARGET } from "./drift-recheck.js";
 import { createNotifier } from "./notify.js";
 import { errorText, openStore } from "./store-access.js";
 
@@ -135,6 +136,11 @@ export const REFRESH_TARGETS = ["all", ...REFRESH_JOBS_BUILT, ...SOURCE_TARGETS]
  * an ESPN read through the provider, not a dataset, so main.ts routes it before the runner.
  */
 export const SETTINGS_REFRESH_TARGET = "espn:settings";
+/**
+ * The other ESPN target: re-read every view drift_state marks red (src/cli/refresh-drift.ts) — the
+ * way to re-judge a view the daily probe never reads.
+ */
+export { DRIFT_REFRESH_TARGET };
 export type RefreshTarget = (typeof REFRESH_TARGETS)[number];
 
 /** Whether `s` is a refresh target. */
@@ -144,7 +150,7 @@ export function isRefreshTarget(s: string): s is RefreshTarget {
 
 /** The usage error of a missing or unknown target (an unknown one is named only when it is a plain token). */
 export function targetUsageError(target: string | undefined): UsageError {
-  const list = [...REFRESH_TARGETS, SETTINGS_REFRESH_TARGET].join(" | ");
+  const list = [...REFRESH_TARGETS, SETTINGS_REFRESH_TARGET, DRIFT_REFRESH_TARGET].join(" | ");
   if (target === undefined) return new UsageError(`refresh needs a target: ${list}`);
   const named = /^[a-z][a-z0-9_:-]{0,63}$/.test(target) ? ` '${target}'` : "";
   return new UsageError(`refresh: unknown target${named} — the targets are: ${list}`);

@@ -61,6 +61,7 @@ import {
   type PluginInstall,
 } from "./client-config.js";
 import { onlineRows } from "./doctor-online.js";
+import { DRIFT_REFRESH_TARGET, redViewsOutsideProbe } from "./drift-recheck.js";
 import { exitCodeFor, row, type DoctorRow, type RowStatus } from "./doctor-rows.js";
 import { bothCredentialStores } from "./espn-stack.js";
 import { writeLine, distEntry, type CliIo } from "./io.js";
@@ -1345,6 +1346,9 @@ export function checkDrift(store: Store | null, nowMs: number): DoctorRow {
       .filter((d) => d.removed.length > 0)
       .flatMap((d) => d.removed.slice(0, 5).map((p) => `${d.view}: removed ${p}`))
       .slice(0, 15);
+    // a red view the daily probe never reads is re-judged only by a read of that view: `eff probe`
+    // would go in a circle (Stage C final gate: mPendingTransactions stayed red 16 days)
+    const outside = drift.status === "red" ? redViewsOutsideProbe(drift.diff_json) : [];
     return row(
       9,
       "drift",
@@ -1353,7 +1357,9 @@ export function checkDrift(store: Store | null, nowMs: number): DoctorRow {
       drift.status === "host_moved"
         ? "ESPN_HOST_MOVED"
         : "red: ESPN removed or renamed a key the server reads",
-      "run `eff probe` and read the diff (plan 01 §7)",
+      outside.length > 0
+        ? `run \`eff refresh ${DRIFT_REFRESH_TARGET}\` — it re-reads ${outside.join(", ")}, which \`eff probe\` never reads, and clears what ESPN serves again (plan 01 §7)`
+        : "run `eff probe` and read the diff (plan 01 §7)",
       details,
     );
   }

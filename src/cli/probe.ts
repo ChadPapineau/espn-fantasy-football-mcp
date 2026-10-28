@@ -40,6 +40,7 @@ import type {
   Store,
   StoreFactory,
 } from "../store/types.js";
+import { DRIFT_REFRESH_TARGET, PROBE_VIEWS } from "./drift-recheck.js";
 import { driftManifest, driftProbeSpecs } from "./espn-stack.js";
 import { espnRequest, jsonBody, type EspnAnswer } from "./espn-http.js";
 import { EXIT } from "./exit.js";
@@ -541,6 +542,13 @@ export async function probe(
     );
     const stored = recorded.status;
     const status = worstStatus(checks);
+    // the stored red diff, which may name views this probe never reads (on a private league it
+    // reads no league view at all): shown, with the command that re-reads them — before, the probe
+    // exited 4 on a red row it printed nothing of and could not clear (Stage C final gate)
+    const storedRow = stored === "red" ? store.repos.driftState.get() : null;
+    const storedRed =
+      storedRow === null ? [] : parseDiffs(storedRow.diff_json).filter((d) => d.removed.length > 0);
+    const outside = storedRed.filter((d) => !PROBE_VIEWS.includes(d.view)).map((d) => d.view);
     log.info("probe.done", {
       status,
       stored,
@@ -578,6 +586,11 @@ export async function probe(
           manifest: deps.observations === undefined ? "absent" : "present",
           probe_specs: specs === undefined ? "absent" : "present",
           rebaselined: recorded.rebaselined,
+          stored_red: storedRed.slice(0, 30).map((d) => ({
+            view: d.view,
+            removed: d.removed.slice(0, 20),
+          })),
+          recheck: outside.length > 0 ? `eff refresh ${DRIFT_REFRESH_TARGET}` : null,
           checks: checks.map((c) => ({
             name: c.name,
             views: c.views,
@@ -615,6 +628,16 @@ export async function probe(
         io.stdout,
         `drift_state: ${stored}${deps.observations === undefined ? " (manifest absent: required keys and skeletons only)" : specs === undefined ? " (the manifest's probe specs are unreadable: required keys and skeletons only)" : ""}${recorded.rebaselined ? " (re-baselined on a newer drift manifest: the old diff was discarded)" : ""}`,
       );
+      for (const d of storedRed.slice(0, 10))
+        await writeLine(
+          io.stdout,
+          `       red (stored): ${d.view}: removed ${d.removed.slice(0, 5).join(", ")}${d.removed.length > 5 ? ", …" : ""}`,
+        );
+      if (outside.length > 0)
+        await writeLine(
+          io.stdout,
+          `       this probe never reads ${outside.join(", ")}: \`eff refresh ${DRIFT_REFRESH_TARGET}\` re-reads them and clears what ESPN serves again`,
+        );
       const a = alarmText(checks);
       if (a !== null) await writeLine(io.stderr, a);
     }

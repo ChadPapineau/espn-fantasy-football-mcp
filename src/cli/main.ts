@@ -19,7 +19,8 @@ import { backup, prune } from "./maintenance.js";
 import { createNotifier } from "./notify.js";
 import { printConfig } from "./print-config.js";
 import { probe } from "./probe.js";
-import { refresh, SETTINGS_REFRESH_TARGET } from "./refresh.js";
+import { DRIFT_REFRESH_TARGET, refresh, SETTINGS_REFRESH_TARGET } from "./refresh.js";
+import { refreshDrift } from "./refresh-drift.js";
 import { refreshSettings } from "./refresh-settings.js";
 import type { Logger } from "./log.js";
 import { bootLevel, loadLenientRuntime, loadRuntime, makeLogger } from "./runtime.js";
@@ -87,7 +88,8 @@ export const USAGE = `usage: eff <command> [options]
                               targets: all | espn:schedule | espn:players | nflverse:schedules |
                               nflverse:daily | nflverse:stats | weather | any source id \`eff status\`
                               lists (espn:pro_schedule, weather:open_meteo, nflverse:<source>, …) |
-                              espn:settings (re-read the league settings now: a commissioner's edit)
+                              espn:settings (re-read the league settings now: a commissioner's edit) |
+                              espn:drift (re-read every view drift_state marks red, the probe's or not)
                               (--seasons adds seasons: every file keeps its own; earlier seasons
                               go to a source's _history file; --game-day-cadence: off a game day
                               only the 00/06/12/18 h wakes run)
@@ -460,6 +462,19 @@ export async function main(
         dryRun: flag(p, "dry-run"),
         keepConfig: flag(p, "keep-config"),
         exportLog: str(p, "export-log"),
+      });
+    }
+    if (command === "refresh" && p.positionals[0] === DRIFT_REFRESH_TARGET) {
+      // ESPN reads through the provider (the credential), like espn:settings: the jobs' strict runtime
+      for (const f of ["seasons", "game-day-cadence", "force"] as const)
+        if (p.values[f] !== undefined)
+          throw new UsageError(
+            `refresh ${DRIFT_REFRESH_TARGET} takes no --${f}: it re-reads the views drift_state marks red`,
+          );
+      const { config, log } = await loadRuntime(io);
+      return await refreshDrift(io, config, log, {
+        notify: flag(p, "notify"),
+        json: flag(p, "json"),
       });
     }
     if (command === "refresh" && p.positionals[0] === SETTINGS_REFRESH_TARGET) {
