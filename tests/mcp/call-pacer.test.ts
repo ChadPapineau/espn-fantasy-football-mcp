@@ -342,3 +342,52 @@ describe("the request context reaches the call (plan 03 §1.2; MCP cancellation)
     expect(typeof rec.cpu_ms).toBe("number");
   });
 });
+
+describe("the call's CPU account (Stage C ci-cpu-deadline-scaled-flaky)", () => {
+  it("counts from the account's start reading and adds the CPU spent before the turn", () => {
+    const { base, tick } = fakeBase();
+    tick(100);
+    // the turn resumed at 90 (beforeCall ran 10 ms since), and 7 ms were spent before the turn
+    const pacer = callPacer(base, {}, undefined, { startCpu: 90, spentBefore: 7 });
+    expect(pacer.spentMs()).toBe(17);
+    tick(5);
+    expect(pacer.spentMs()).toBe(22);
+    // the deadline sees the same account
+    expect(remainingDeadline(50, pacer.spentMs())).toBe(28);
+  });
+
+  it("a malformed account is ignored (the pacer's own start), and a pacer without a CPU meter ignores it", () => {
+    const { base, tick } = fakeBase();
+    tick(100);
+    const bad = callPacer(base, {}, undefined, { startCpu: Number.NaN, spentBefore: 7 });
+    expect(bad.spentMs()).toBe(0);
+    const negative = callPacer(base, {}, undefined, { startCpu: 100, spentBefore: -5 });
+    expect(negative.spentMs()).toBe(0);
+    const plain = callPacer(
+      { nowMs: () => 0, yieldToLoop: () => Promise.resolve() },
+      {},
+      undefined,
+      {
+        startCpu: -1_000,
+        spentBefore: 50,
+      },
+    );
+    expect(plain.spentMs()).toBe(0);
+  });
+
+  it("other calls' batches since the account's start are still not this call's", async () => {
+    const { base, tick } = fakeBase();
+    tick(10);
+    const mine = callPacer(base, {}, undefined, { startCpu: 10, spentBefore: 2 });
+    const other = callPacer(base);
+    await runCooperative(
+      4,
+      () => {
+        tick(5);
+      },
+      { pacer: other, batchMs: 100, deadlineMs: null },
+    );
+    // 20 ms of the other call's batch ran since mine's start: mine spent only its 2 ms before the turn
+    expect(mine.spentMs()).toBe(2);
+  });
+});

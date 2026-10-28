@@ -368,3 +368,74 @@ describe("runTool", () => {
     ).rejects.toBeInstanceOf(RangeError);
   });
 });
+
+describe("a call's CPU account starts at its handler's entry, the turn wait excepted (Stage C ci-cpu-deadline-scaled-flaky)", () => {
+  // Before, the account began once the call's context was built: the handler's in-flight
+  // bookkeeping, input validation and beforeCall (the seeding reading, the datasets' re-open check)
+  // were never counted — 6–12 ms of every call on a 6× slower CPU, which put the e2e's
+  // "the server counts the call's whole CPU" rule out of reach for its ~100 ms calls.
+  const threadMs = (): number => {
+    const u = process.threadCpuUsage();
+    return (u.user + u.system) / 1000;
+  };
+  const spin = (ms: number): void => {
+    const end = threadMs() + ms;
+    while (threadMs() < end) {
+      // burn this thread's CPU
+    }
+  };
+  function recording(beforeCall?: () => void): {
+    svc: McpServices;
+    ends: Record<string, unknown>[];
+  } {
+    const ends: Record<string, unknown>[] = [];
+    const svc = {
+      clock: {
+        nowMs: () => Date.parse("2026-10-06T12:00:00Z"),
+        nowIso: () => "2026-10-06T12:00:00.000Z",
+      },
+      logger: {
+        error: () => undefined,
+        warn: () => undefined,
+        info: (event: string, f: Record<string, unknown>) => {
+          if (event === "tool.end") ends.push(f);
+        },
+        debug: () => undefined,
+      },
+      ...(beforeCall === undefined ? {} : { beforeCall }),
+    } as unknown as McpServices;
+    return { svc, ends };
+  }
+  const options = { version: "0.0.0" } as never;
+  const quick = defineTool({
+    ...minimal,
+    name: "espn_get_standings",
+    run: () => Promise.resolve({ data: { x: 1 }, inputs: [] }),
+  });
+
+  it("the CPU spent before the call's turn (from entryCpu) is the call's", async () => {
+    const { svc, ends } = recording();
+    const entry = threadMs();
+    spin(40);
+    await runTool(quick, {}, { requestId: "r-0000000000e1" }, svc, options, entry);
+    expect(ends[0]?.cpu_ms as number).toBeGreaterThanOrEqual(40);
+  });
+
+  it("beforeCall's CPU is the call's", async () => {
+    const { svc, ends } = recording(() => {
+      spin(30);
+    });
+    await runTool(quick, {}, { requestId: "r-0000000000e2" }, svc, options, threadMs());
+    expect(ends[0]?.cpu_ms as number).toBeGreaterThanOrEqual(30);
+  });
+
+  it("the turn wait is never charged: what another call runs before this one's turn is not its CPU", async () => {
+    const { svc, ends } = recording();
+    // another call's synchronous step, queued ahead of this call's turn
+    setImmediate(() => {
+      spin(60);
+    });
+    await runTool(quick, {}, { requestId: "r-0000000000e3" }, svc, options, threadMs());
+    expect(ends[0]?.cpu_ms as number).toBeLessThan(30);
+  });
+});

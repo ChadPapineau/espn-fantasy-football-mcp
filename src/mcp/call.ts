@@ -61,6 +61,21 @@ export interface CallPacer extends Pacer {
 const BATCH_LEDGER = { ms: 0 };
 
 /**
+ * Where a call's CPU account starts (the tool wrapper's reads of the base pacer's CPU meter): the
+ * call's own CPU before its turn (`spentBefore`: the handler's entry — its in-flight bookkeeping and
+ * input validation, synchronous, so no other call runs inside it) and the reading its turn resumed
+ * at (`startCpu`: beforeCall's per-call refresh and context set-up count from here). The turn wait
+ * between the two is never charged: other calls run in it. Before, the account began only once the
+ * context was built, so every call's first 1–2 ms of CPU (6–12 ms on a 6× slower CPU) went
+ * uncounted (Stage C finding ci-cpu-deadline-scaled-flaky). Absent: the account starts when the
+ * pacer is made (a resource read, the engines' own tests).
+ */
+export interface CallAccount {
+  readonly startCpu: number;
+  readonly spentBefore: number;
+}
+
+/**
  * The pacer one tool call hands every engine it runs. `base` is the production loop pacer (the
  * injected clock, the thread's CPU, the process-wide turn gate). The runner reads `cpuMs()` once at
  * a batch's start and once at its end, and yields between batches, so the CPU between the two reads
@@ -72,6 +87,7 @@ export function callPacer(
   base: Pacer,
   controls: CallControls = {},
   wallMs: () => number = () => performance.now(),
+  account?: CallAccount,
 ): CallPacer {
   let spent = 0;
   let batchStart: number | null = null;
@@ -84,7 +100,10 @@ export function callPacer(
   };
   const cpuNow = (): number => (base.cpuMs === undefined ? base.nowMs() : base.cpuMs());
   const hasCpu = base.cpuMs !== undefined;
-  const startCpu = cpuNow();
+  const fromAccount = hasCpu && account !== undefined && Number.isFinite(account.startCpu);
+  const startCpu = fromAccount ? account.startCpu : cpuNow();
+  const before =
+    fromAccount && Number.isFinite(account.spentBefore) ? Math.max(0, account.spentBefore) : 0;
   const ledgerAtStart = BATCH_LEDGER.ms;
   return Object.freeze({
     nowMs: () => base.nowMs(),
@@ -123,7 +142,7 @@ export function callPacer(
     spentMs: () => {
       if (!hasCpu) return spent;
       const others = Math.max(0, BATCH_LEDGER.ms - ledgerAtStart - spent);
-      return Math.max(spent, cpuNow() - startCpu - others);
+      return before + Math.max(spent, cpuNow() - startCpu - others);
     },
     batchMs: () => spent,
     cancelled,
@@ -131,9 +150,13 @@ export function callPacer(
   });
 }
 
-/** The production call pacer over the injected clock. */
-export function productionCallPacer(clock: Clock, controls: CallControls = {}): CallPacer {
-  return callPacer(loopPacer(clock), controls);
+/** The production call pacer over the injected clock (its account from `account` when given). */
+export function productionCallPacer(
+  clock: Clock,
+  controls: CallControls = {},
+  account?: CallAccount,
+): CallPacer {
+  return callPacer(loopPacer(clock), controls, undefined, account);
 }
 
 /**

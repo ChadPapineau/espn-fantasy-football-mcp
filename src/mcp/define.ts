@@ -14,8 +14,15 @@ import type {
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
 import { yieldTurn } from "../domain/analytics/cooperative.js";
+import { threadCpuClock } from "../domain/clock.js";
 import { createUpstreamBudget, type UpstreamBudget } from "../providers/platform.js";
-import { CallCancelled, controlsFromRequest, productionCallPacer, type CallPacer } from "./call.js";
+import {
+  CallCancelled,
+  controlsFromRequest,
+  productionCallPacer,
+  type CallAccount,
+  type CallPacer,
+} from "./call.js";
 import {
   ANALYTICS_BUDGET_CHARS,
   INJECTION_FLAGS,
@@ -386,6 +393,7 @@ export function toolContext(
   base: HandlerContext,
   services: McpServices,
   options: McpServerOptions,
+  account?: CallAccount,
 ): ToolContext {
   const nowMs = services.clock.nowMs();
   const controls = controlsFromRequest(base.extra);
@@ -410,7 +418,7 @@ export function toolContext(
     log: services.logger,
     memo: new Map(),
     budget,
-    pacer: productionCallPacer(services.clock, controls),
+    pacer: productionCallPacer(services.clock, controls, account),
   };
 }
 
@@ -552,21 +560,32 @@ export function envelopeOf(
   });
 }
 
-/** Runs a tool body and turns its output into the tool result (budget, validation, structure). */
+/**
+ * Runs a tool body and turns its output into the tool result (budget, validation, structure).
+ * `entryCpu`: the thread's CPU when the call's handler was entered (registerDefinedTool) — the call's
+ * CPU account (the per-call deadline's, tool.end's `cpu_ms`) counts from there, less the turn wait.
+ */
 export async function runTool(
   def: AnyToolDefinition,
   args: unknown,
   base: HandlerContext,
   services: McpServices,
   options: McpServerOptions,
+  entryCpu?: number,
 ): Promise<ToolSuccessResult> {
   const log = services.logger;
+  // the call's own CPU before its turn: the handler's entry to here runs synchronously (no other
+  // call runs inside it), so it is all this call's (Stage C finding ci-cpu-deadline-scaled-flaky)
+  const spentBefore = entryCpu === undefined ? 0 : Math.max(0, threadCpuClock.cpuMs() - entryCpu);
   // a call starts in a turn of its own: N requests arriving in one stdin chunk are dispatched in one
   // turn, and each ran its first synchronous steps (cached reads, the player mapping) before its
   // first yield — N of them back to back (Stage C finding analytics-parallel-calls-stall-loop)
   await yieldTurn();
+  // the account resumes with the turn (the wait is other calls'): beforeCall's per-call refresh
+  // (the seeding reading, the datasets' re-open check) is this call's CPU too
+  const account: CallAccount = { startCpu: threadCpuClock.cpuMs(), spentBefore };
   services.beforeCall?.();
-  const ctx = toolContext(base, services, options);
+  const ctx = toolContext(base, services, options, account);
   const started = performance.now();
   log.debug("tool.start", { request_id: ctx.requestId, tool: def.name });
   let out: ToolOutput<unknown>;
@@ -647,22 +666,27 @@ export function registerDefinedTool(
   options: McpServerOptions,
 ): void {
   const log = services.logger;
-  const wrapped = wrapHandler(
-    def.input,
-    (args, base) => runTool(def, args, base, services, options),
-    {
-      onError: (e, requestId) => {
-        // a cancelled call is not an error (runTool logged tool.cancelled; no reply is sent)
-        if (e instanceof CallCancelled) return;
-        log.warn("tool.error", { request_id: requestId, tool: def.name, error: describeForLog(e) });
-      },
-    },
-  );
+  const onError = (e: unknown, requestId: string): void => {
+    // a cancelled call is not an error (runTool logged tool.cancelled; no reply is sent)
+    if (e instanceof CallCancelled) return;
+    log.warn("tool.error", { request_id: requestId, tool: def.name, error: describeForLog(e) });
+  };
+  /** The validated call, its CPU account begun at `entryCpu`. */
+  const wrappedFrom = (entryCpu: number) =>
+    wrapHandler(def.input, (args, base) => runTool(def, args, base, services, options, entryCpu), {
+      onError,
+    });
   // the SDK's request context (abort signal, progressToken, notifier) rides along to the call
-  const handler = async (raw: unknown, extra?: unknown): ReturnType<typeof wrapped> => {
+  const handler = async (
+    raw: unknown,
+    extra?: unknown,
+  ): ReturnType<ReturnType<typeof wrappedFrom>> => {
+    // the call's CPU account starts at its handler's entry: its in-flight bookkeeping and input
+    // validation are its own CPU (Stage C finding ci-cpu-deadline-scaled-flaky)
+    const entryCpu = threadCpuClock.cpuMs();
     services.inflight?.enter();
     try {
-      return await wrapped(raw, extra);
+      return await wrappedFrom(entryCpu)(raw, extra);
     } finally {
       services.inflight?.exit();
     }
