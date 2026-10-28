@@ -62,7 +62,7 @@ import {
 } from "../../providers/platform.js";
 import { BOUNDS } from "../bounds.js";
 import { stampToInput, type InputStamp } from "../envelope.js";
-import { EffError, SERVER_HINTS } from "../errors.js";
+import { EffError, SERVER_HINTS, STALE_ONLY_SOURCE_HINTS } from "../errors.js";
 import type { ToolContext } from "../define.js";
 import { asGsisId } from "./schemas.js";
 
@@ -152,7 +152,9 @@ export function datasetInput(
   const input = stampToInput(stamp, j.nowMs, j.ttl);
   if (input.state === "expired" && !allowStale) {
     if (freshnessClass(stamp.freshness_class).beyondHard === "omit") return null;
-    throw new EffError("STALE_ONLY");
+    // the hint names the one refresh that fixes it (a fixed string per source)
+    const hint = (STALE_ONLY_SOURCE_HINTS as Partial<Record<string, string>>)[stamp.source];
+    throw new EffError("STALE_ONLY", hint === undefined ? {} : { hint });
   }
   return input;
 }

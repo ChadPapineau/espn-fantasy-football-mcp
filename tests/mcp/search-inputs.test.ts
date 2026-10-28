@@ -103,6 +103,10 @@ describe("C1 allow_stale (Stage C players-search-no-allow-stale)", () => {
       const stale = await err("espn_search_players", { query: "allen" });
       expect(stale.code).toBe("STALE_ONLY");
       expect(String(stale.hint)).toContain("allow_stale");
+      // the hint names the one refresh that fixes it (Stage C final gate: it said "<source>")
+      expect(stale.hint).toBe(
+        "Retry with allow_stale: true, or run eff refresh espn:players in a terminal.",
+      );
       const served = await ok("espn_search_players", { query: "allen", allow_stale: true });
       expect(players(served).length).toBeGreaterThan(0);
       expect((served.meta as { freshness: string }).freshness).toBe("stale");

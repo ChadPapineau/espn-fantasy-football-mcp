@@ -10,6 +10,7 @@
 import { randomBytes } from "node:crypto";
 import type { StandardSchemaWithJSON } from "@modelcontextprotocol/server";
 import type { z } from "zod/v4";
+import { DATASET_SOURCE_IDS, type DatasetSourceId } from "../config/freshness.js";
 import { SEASON_RENEWAL_TEXT } from "../config/schema.js";
 import { ROSTER_EMPTY_TEXT } from "../domain/analytics/errors.js";
 import {
@@ -165,7 +166,24 @@ export const SERVER_HINTS = Object.freeze({
   /** An analytics engine's `roster_empty` (a league before its draft): the domain's fixed text. */
   rosterEmpty: ROSTER_EMPTY_TEXT.hint,
 });
-const SERVER_HINT_SET: ReadonlySet<string> = new Set(Object.values(SERVER_HINTS));
+/**
+ * STALE_ONLY's hint for a dataset past its hard limit: the one refresh that fixes it, a fixed string
+ * per source. The table hint says "run eff refresh <source>" and leaves the model to guess which
+ * (Stage C final gate: on an install idle for 16 days, lineup, waivers and the simulator answered
+ * STALE_ONLY naming no source).
+ */
+export const STALE_ONLY_SOURCE_HINTS: Readonly<Record<DatasetSourceId, string>> = Object.freeze(
+  Object.fromEntries(
+    DATASET_SOURCE_IDS.map((id) => [
+      id,
+      `Retry with allow_stale: true, or run eff refresh ${id} in a terminal.`,
+    ]),
+  ) as Record<DatasetSourceId, string>,
+);
+const SERVER_HINT_SET: ReadonlySet<string> = new Set([
+  ...Object.values(SERVER_HINTS),
+  ...Object.values(STALE_ONLY_SOURCE_HINTS),
+]);
 
 /**
  * Server-authored messages that may replace a table message where the table's words would mislead

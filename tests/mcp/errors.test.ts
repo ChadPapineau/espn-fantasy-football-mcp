@@ -11,6 +11,7 @@ import { z } from "zod/v4";
 import { describe, expect, it } from "vitest";
 import { fakeEspnS2, fakeGuid, fakeLeagueId } from "../../scripts/ci/secret-fixtures.mjs";
 import { PathSecurityError } from "../../src/config/paths.js";
+import { DATASET_SOURCE_IDS } from "../../src/config/freshness.js";
 import { ConfigError } from "../../src/config/schema.js";
 import { KNOWN_UPSTREAM_TYPES } from "../../src/providers/platform.js";
 import { playerIdsSchema, weekSchema } from "../../src/mcp/bounds.js";
@@ -21,6 +22,7 @@ import {
   EffError,
   NETWORK_ERROR_CODES,
   SERVER_HINTS,
+  STALE_ONLY_SOURCE_HINTS,
   classifyError,
   deferValidation,
   describeForLog,
@@ -105,6 +107,18 @@ describe("the error table (plan 01 §4.3)", () => {
       retryable: ERROR_TABLE[code].retryable,
       request_id: RID,
     });
+  });
+  it("STALE_ONLY names the source to refresh: one fixed hint per dataset source, kept by the mapper", () => {
+    expect(Object.keys(STALE_ONLY_SOURCE_HINTS).sort()).toEqual([...DATASET_SOURCE_IDS].sort());
+    for (const id of DATASET_SOURCE_IDS) {
+      const hint = STALE_ONLY_SOURCE_HINTS[id];
+      expect(hint).toBe(`Retry with allow_stale: true, or run eff refresh ${id} in a terminal.`);
+      expect(body(new EffError("STALE_ONLY", { hint })).hint).toBe(hint);
+    }
+    // a hint outside the fixed tables is never carried
+    expect(body(new EffError("STALE_ONLY", { hint: "run eff refresh evil" })).hint).toBe(
+      ERROR_TABLE.STALE_ONLY.hint,
+    );
   });
   it("isErrorCode is exact", () => {
     expect(isErrorCode("VALIDATION")).toBe(true);
