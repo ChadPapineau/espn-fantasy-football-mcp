@@ -14,7 +14,10 @@
 // channel, item fields), `publish` builds the rows: new items get `first_seen_ms` = the fetch, items
 // already in the previous file keep theirs (append + dedup by item id), anything published more than
 // NEWS_RETENTION_MS before the fetch is not carried, promotional items and invalid items are dropped
-// and counted. Player refs are recomputed for every kept item against the current universe.
+// and counted. Player refs are recomputed for every kept item against the current universe; the
+// kept items no player is matched to, and those naming a shared name the evidence left to no single
+// holder (ruling R8-3 clause 5, match.ts), are counted in the publish step's warnings — stored all the
+// same, never dropped (espn_get_news lists them with no players_matched for that name; plan 07 D6).
 // Nothing in an item is ever acted on: the text is stored, matched for ids, and nothing else.
 // A run parses its feed once (Stage C remediation news-rss-quadratic-children): `assertSchema`
 // parses the file and hands the document to the row build, and `publish` reuses the file and
@@ -47,7 +50,12 @@ import {
   type TempFile,
 } from "../source.js";
 import { cleanLink, collapse, isPromo, NEWS_FEEDS, pubDateMs, type NewsFeedSpec } from "./feeds.js";
-import { buildPlayerMatcher, percentOwnedOf, type NewsUniversePlayer } from "./match.js";
+import {
+  buildPlayerMatcher,
+  percentOwnedOf,
+  positionIdOf,
+  type NewsUniversePlayer,
+} from "./match.js";
 import {
   decodeBody,
   parseRss,
@@ -117,6 +125,7 @@ export function universePlayerOf(v: unknown): NewsUniversePlayer | null {
   const team = own(v, "team");
   const gsis = own(v, "gsis_id");
   const share = percentOwnedOf(own(v, "percent_owned"));
+  const position = positionIdOf(own(v, "position_id"));
   if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) return null;
   if (typeof name !== "string" || name.length === 0 || name.length > 128) return null;
   return {
@@ -125,6 +134,7 @@ export function universePlayerOf(v: unknown): NewsUniversePlayer | null {
     team: typeof team === "string" && isNflTeam(team) ? team : null,
     gsis_id: typeof gsis === "string" && GSIS_ID_RE.test(gsis) ? gsis : null,
     ...(share === null ? {} : { percent_owned: share }),
+    ...(position === null ? {} : { position_id: position }),
   };
 }
 
@@ -232,10 +242,36 @@ export function previousRowOf(v: unknown, source: NewsSource): ItemRow | null {
 export interface NewsBuild {
   readonly news: readonly DatasetRow[];
   readonly refs: readonly DatasetRow[];
+  /**
+   * `unmatched`: kept items that carry no player ref; `unresolved`: kept items naming a name several
+   * universe players share that the evidence left to no single holder (R8-3 clause 5) — 0 both when
+   * the matcher did not run.
+   */
   readonly counts: Readonly<
-    Record<DropReason | "carried" | "new" | "bad_previous" | "over_cap", number>
+    Record<
+      DropReason | "carried" | "new" | "bad_previous" | "over_cap" | "unmatched" | "unresolved",
+      number
+    >
   >;
   readonly warnings: readonly string[];
+}
+
+/**
+ * The publish step's warnings about matching (R8-3 clause 5: an item a shared name was left out of is
+ * counted, never dropped in silence): the items without a player ref, and the items naming a shared
+ * name the evidence picked no single holder of. Counts only — no item text, no name.
+ */
+export function matchWarnings(counts: NewsBuild["counts"]): readonly string[] {
+  const out: string[] = [];
+  if (counts.unmatched > 0)
+    out.push(
+      `${String(counts.unmatched)} item(s) carry no player ref (kept; espn_get_news shows them with players_matched empty)`,
+    );
+  if (counts.unresolved > 0)
+    out.push(
+      `${String(counts.unresolved)} item(s) name a player several universe players share, and the evidence picks none of them: no ref for that name`,
+    );
+  return out;
 }
 
 /**
@@ -256,6 +292,8 @@ export function buildNewsRows(
     new: 0,
     bad_previous: 0,
     over_cap: 0,
+    unmatched: 0,
+    unresolved: 0,
   };
   const kept = new Map<string, ItemRow>();
   for (const prev of file.previous) {
@@ -305,8 +343,10 @@ export function buildNewsRows(
   if (matcher.size > 0) {
     for (const r of rows) {
       // " | " is a break: a name never spans the title's end and the blurb's start
-      for (const ref of matcher.match(`${r.title} | ${r.blurb ?? ""}`))
-        refs.push(Object.freeze({ item_id: r.item_id, ...ref }));
+      const m = matcher.matchItem(`${r.title} | ${r.blurb ?? ""}`);
+      if (m.refs.length === 0) counts.unmatched++;
+      if (m.unresolved > 0) counts.unresolved++;
+      for (const ref of m.refs) refs.push(Object.freeze({ item_id: r.item_id, ...ref }));
     }
   }
   refs.sort((a, b) =>
@@ -331,6 +371,7 @@ export function buildNewsRows(
   say(counts.over_cap, "oldest item(s) beyond the per-file ceiling were not kept");
   if (matcher.size === 0 && opts.refs !== false)
     warnings.push("no player universe: items carry no player refs");
+  warnings.push(...matchWarnings(counts));
   return {
     news: rows.map((r) => Object.freeze({ ...r })),
     refs,
@@ -481,7 +522,8 @@ export function createNewsSource(feed: NewsSource, opts: NewsSourceOptions = {})
       into.createTable(refsTable);
       const n = built.news.length === 0 ? 0 : into.insert(itemsTable.name, built.news);
       const r = built.refs.length === 0 ? 0 : into.insert(refsTable.name, built.refs);
-      return {
+      // the matching counts reach the run's warnings (the runner reads `warnings` off the stats)
+      const stats: PublishStats & { readonly warnings: readonly string[] } = {
         rows: n + r,
         tables: [
           { name: itemsTable.name, rows: n },
@@ -489,7 +531,9 @@ export function createNewsSource(feed: NewsSource, opts: NewsSourceOptions = {})
         ],
         seasons: [],
         columns_hash: contractColumnsHash(spec.id),
+        warnings: matchWarnings(built.counts),
       };
+      return stats;
     },
   });
 }

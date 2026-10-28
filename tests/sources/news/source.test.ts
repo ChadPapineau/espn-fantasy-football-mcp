@@ -713,6 +713,48 @@ describe("the wiring statements (the universe and the previous file, read from r
     ).toEqual([{ espn_id: 5, full_name: "A B", team: null, gsis_id: null }]);
   });
 
+  it("UNIVERSE_SQL carries ESPN's position_id into the universe (ruling R8-3 clause 4)", () => {
+    const db = new DatabaseSync(":memory:");
+    for (const sql of ddlFor(DS_PLAYERS)) db.exec(sql);
+    const roster = JSON.parse(fixtureText("fixtures/players/fixture-roster.json")) as {
+      players: {
+        espn_id: number;
+        espn_name: string;
+        espn_pro_team_id: number;
+        espn_position_id: number;
+      }[];
+    };
+    const ins = db.prepare(
+      "INSERT INTO ds_players (season, espn_id, full_name, position_id, pro_team_id) VALUES (?, ?, ?, ?, ?)",
+    );
+    for (const p of roster.players)
+      ins.run(2026, p.espn_id, p.espn_name, p.espn_position_id, p.espn_pro_team_id);
+    const universe = universeFromEspnPlayers(
+      db.prepare(UNIVERSE_SQL).all({ season: 2026 }),
+      () => null,
+    );
+    expect(universe).toHaveLength(roster.players.length);
+    for (const p of roster.players)
+      expect(universe.find((u) => u.espn_id === p.espn_id)?.position_id).toBe(p.espn_position_id);
+    // an id outside ESPN's integer range is unknown: left out, as an unknown share is
+    expect(
+      universeFromEspnPlayers(
+        [
+          { espn_id: 5, full_name: "A B", position_id: 11 },
+          { espn_id: 6, full_name: "C D", position_id: 1.5 },
+          { espn_id: 7, full_name: "E F", position_id: "11" },
+          { espn_id: 8, full_name: "G H", position_id: 100 },
+        ],
+        () => null,
+      ),
+    ).toEqual([
+      { espn_id: 5, full_name: "A B", team: null, gsis_id: null, position_id: 11 },
+      { espn_id: 6, full_name: "C D", team: null, gsis_id: null },
+      { espn_id: 7, full_name: "E F", team: null, gsis_id: null },
+      { espn_id: 8, full_name: "G H", team: null, gsis_id: null },
+    ]);
+  });
+
   it("two refreshes: PREVIOUS_NEWS_SQL on the first file feeds the second (append, dedup, first sighting kept)", async () => {
     const first = deps(fakeGet({ [NEWS_FEEDS.rotowire.url]: CAPTURED.rotowire() }));
     const r1 = await runRefresh(
@@ -884,5 +926,55 @@ describe("row rules", () => {
       { espn_id: 1, full_name: "x".repeat(200) },
     ])
       expect(universePlayerOf(bad)).toBeNull();
+  });
+
+  it("universePlayerOf carries the position id through the temp file (ruling R8-3 clause 4)", () => {
+    const row = { espn_id: 1, full_name: "A B" };
+    expect(universePlayerOf({ ...row, position_id: 11 })?.position_id).toBe(11);
+    expect(universePlayerOf({ ...row, position_id: 0 })?.position_id).toBe(0);
+    for (const v of [-1, 100, 1.5, "11", null, Number.NaN])
+      expect(universePlayerOf({ ...row, position_id: v })).toEqual({
+        espn_id: 1,
+        full_name: "A B",
+        team: null,
+        gsis_id: null,
+      });
+  });
+
+  it("a run counts the items without a ref and those a shared name was left out of (ruling R8-3 clause 5)", async () => {
+    const universe = [
+      { espn_id: 9_100_001, full_name: "Sam Twin", team: "BUF", gsis_id: null, percent_owned: 40 },
+      { espn_id: 9_100_002, full_name: "Sam Twin", team: "MIA", gsis_id: null, percent_owned: 40 },
+      ...rosterUniverse(),
+    ] as const;
+    const xml = rss([
+      { title: "Sam Twin: Out Sunday", guid: "a" },
+      { title: "Bijan Robinson: Questionable", guid: "b" },
+      { title: "Bengals sign veteran kicker", guid: "c" },
+      { title: "Sam Twin: Out | Bijan Robinson ran for 100 yards.", guid: "d" },
+    ]);
+    const http = fakeGet({ [NEWS_FEEDS.rotowire.url]: xml });
+    const { publisher, deps: d } = deps(http);
+    const r = await runRefresh(
+      {
+        source: createNewsSource("rotowire", { universe: () => universe }),
+        seasons: [2026],
+        week: 5,
+      },
+      d,
+    );
+    expect(r.status).toBe("published");
+    // every item is stored: none is dropped because a name was left to no one
+    expect(rows(publisher.db, "SELECT item_id FROM ds_news")).toHaveLength(4);
+    expect(rows(publisher.db, "SELECT DISTINCT espn_id FROM ds_news_players")).toEqual([
+      { espn_id: 4430807 },
+    ]);
+    if (r.status === "published")
+      expect(r.warnings).toEqual(
+        expect.arrayContaining([
+          "2 item(s) carry no player ref (kept; espn_get_news shows them with players_matched empty)",
+          "2 item(s) name a player several universe players share, and the evidence picks none of them: no ref for that name",
+        ]),
+      );
   });
 });

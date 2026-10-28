@@ -18,6 +18,22 @@
 // Bengals"). A cue word BETWEEN two teams names a game ("Bills vs. Ravens"): it says the subject
 // plays in it, never which side he is on (`pair`; Stage C remediation news-match-universe-homonyms,
 // attempt 4).
+//
+// Two readings of the cues (ruling R8-3, changelog §R8; plan 07 D6). `cue`, `opponent` and `pair`
+// are the reading a name only one universe player holds is matched with, exactly as before R8-3:
+// against, vs, vs., versus, facing, and "<team> matchup". `shared` is the reading the matcher
+// decides between the holders of a shared name with (R8-3 clause 3: a team named as the other side
+// of a game or a play is the opponent), over a closed, tested list: those words, the result wording
+// of RESULT_CUES ("win over", "loss to", "lost to", "beat", "fell to", "past" …), the play wording of
+// PLAY_CUES ("sacks the <team> QB", "picks off a <team> pass", "torches the <team>'s secondary" …),
+// and, between two teams only, the game wording of GAME_CUES ("Vikings host Browns", "the Browns'
+// loss to the Vikings"). A result word right before a team's possessive is no cue ("beats the
+// Browns' sack record", "fell to the Browns' third string" are the team's own); a play word is
+// ("sacks the Vikings' quarterback"). Words outside the lists stay no evidence either way (no verb
+// parsing: R7-4's precedent). Each word is one news wording uses for the other side of the subject's
+// game or play; words the subject's own team often follows are left out: "at", "tops", "visits",
+// "faces" and "over" alone ("at the Browns' facility", "tops the Browns' depth chart", "visits Bears"
+// for a free agent's workout, "faces Browns' fine", "took over the Browns' duties").
 import type { NflTeam } from "../../config/schema.js";
 
 /** Nicknames and their common short forms. */
@@ -52,6 +68,14 @@ const TEAM_RE = new RegExp(
   `(?<![\\p{L}\\p{N}])(${ALL.map(([k]) => escape(k)).join("|")})(?![\\p{L}\\p{N}])`,
   "gu",
 );
+/** A cue phrase as a pattern: its words as written, any whitespace between them. */
+const phrase = (w: string): string => w.split(" ").map(escape).join("\\s+");
+/** An alternation of phrases, the longest first (so "picks off" wins over a shorter cue). */
+const alternation = (words: readonly string[]): string =>
+  [...words]
+    .sort((a, b) => b.length - a.length)
+    .map(phrase)
+    .join("|");
 const LOOKUP: ReadonlyMap<string, NflTeam> = new Map(ALL);
 
 /** The words a team mention occupies (the matcher never reads them as a surname). */
@@ -88,13 +112,80 @@ export interface TeamMention {
    * "Bengals vs. Vikings: Justin Jefferson questionable" ruled the Vikings WR out of his own game.)
    */
   readonly pair: { readonly team: NflTeam; readonly start: number } | null;
+  /**
+   * The shared-name reading of the same mention (ruling R8-3 clause 3; the header): `cue` over the
+   * closed lists (the words above, RESULT_CUES, PLAY_CUES; "matchup" after it as above), `pair` over
+   * GAME_CUES between two teams. A shared name's holders are told apart with it; a unique name is
+   * matched with the reading above.
+   */
+  readonly shared: {
+    readonly cue: "before" | "after" | null;
+    readonly pair: { readonly team: NflTeam; readonly start: number } | null;
+  };
 }
+
+/** The cue words before a team that a unique name's reading knows (unchanged by R8-3). */
+export const LEGACY_CUES: readonly string[] = Object.freeze([
+  "against",
+  "vs",
+  "vs.",
+  "versus",
+  "facing",
+]);
+/**
+ * Result wording (R8-3 clause 3): the team right after it is the other side of the subject's game —
+ * unless a possessive follows the team ("tops the Browns' depth chart": a thing of that team). The
+ * subject's own side is never named by it ("Leads Vikings past Browns": the Vikings are no cue's).
+ */
+// prettier-ignore
+export const RESULT_CUES: readonly string[] = Object.freeze([
+  "win over", "wins over", "victory over", "victories over", "triumph over", "rout of",
+  "loss to", "losses to", "lost to", "lose to", "loses to", "losing to",
+  "fell to", "falls to", "fall to", "falling to",
+  "beat", "beats", "beating", "defeat", "defeats", "defeated", "defeating",
+  "past", "matchup with", "matchups with",
+]);
+/**
+ * Play wording (R8-3 clause 3): the team right after it — its quarterback, pass, runner or
+ * secondary, a possessive allowed — is the other side of the subject's play.
+ */
+// prettier-ignore
+export const PLAY_CUES: readonly string[] = Object.freeze([
+  "sack", "sacks", "sacked", "sacking", "strip-sack", "strip-sacks", "strip-sacked",
+  "intercept", "intercepts", "intercepted", "intercepting",
+  "pick off", "picks off", "picked off", "picking off",
+  "tackle", "tackles", "tackled", "tackling",
+  "bring down", "brings down", "brought down", "bringing down",
+  "torch", "torches", "torched", "torching", "burn", "burns", "burned",
+  "gash", "gashes", "gashed", "shred", "shreds", "shredded",
+]);
+/**
+ * Game wording BETWEEN two teams (R8-3): every cue above, and the words that name a game only when
+ * a team stands on each side ("Vikings host Browns", "the Ravens visit the Bengals", "the Vikings
+ * face the Browns"). After a single team they name no opponent ("visits Bears" may be a workout).
+ */
+export const GAME_CUES: readonly string[] = Object.freeze([
+  ...LEGACY_CUES,
+  ...RESULT_CUES,
+  ...PLAY_CUES,
+  "host",
+  "hosts",
+  "hosted",
+  "hosting",
+  "visit",
+  "visits",
+  "visited",
+  "visiting",
+  "face",
+  "faces",
+  "faced",
+]);
 
 /** A cue word ending the text before a mention (with an optional "the"). */
 const OPPONENT_BEFORE_RE = /(?<![\p{L}\p{N}])(?:against|vs\.?|versus|facing)\s+(?:the\s+)?$/iu;
 /** "matchup" right after a mention (whitespace only between). */
 const OPPONENT_AFTER_RE = /^\s+matchups?(?![\p{L}\p{N}])/iu;
-/** The longest cue before a mention ("against the " plus slack): the look-behind window. */
+/** The longest cue before a mention ("victories over the " plus slack): the look-behind window. */
 const CUE_WINDOW = 24;
 /**
  * The whole text between two teams that names a game between them: an optional possessive, an
@@ -103,6 +194,26 @@ const CUE_WINDOW = 24;
  */
 const PAIR_GAP_RE =
   /^(?:['’ʼ]s?)?(?:\s+(?:game|matchup|contest|meeting|clash|showdown|tilt))?\s+(?:against|vs\.?|versus|facing)\s+(?:the\s+)?$/iu;
+/** The shared-name reading's cue before a mention: a legacy or play cue, an article allowed. */
+const SHARED_BEFORE_RE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${alternation([...LEGACY_CUES, ...PLAY_CUES])})\\s+(?:(?:the|a|an)\\s+)?$`,
+  "iu",
+);
+/** The shared-name reading's result cue before a mention (refused before a possessive). */
+const SHARED_RESULT_RE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${alternation(RESULT_CUES)})\\s+(?:(?:the|a|an)\\s+)?$`,
+  "iu",
+);
+/** A possessive right after a mention ("Browns'", "Browns's"). */
+const POSSESSIVE_AFTER_RE = /^['’ʼ](?:s(?![\p{L}\p{N}]))?/u;
+/**
+ * The shared-name reading's game between two teams: as PAIR_GAP_RE, with GAME_CUES and an optional
+ * score ("the Vikings' 24-20 win over the Browns", "Vikings host Browns", "Browns' loss to the ").
+ */
+const SHARED_PAIR_GAP_RE = new RegExp(
+  `^(?:['’ʼ]s?)?(?:\\s+\\d{1,2}-\\d{1,2})?(?:\\s+(?:game|matchup|contest|meeting|clash|showdown|tilt))?\\s+(?:${alternation(GAME_CUES)})\\s+(?:(?:the|a|an)\\s+)?$`,
+  "iu",
+);
 
 /** Every team mention of a (sanitised, case-preserved) text, in text order. */
 export function teamMentions(text: string): readonly TeamMention[] {
@@ -120,13 +231,24 @@ export function teamMentions(text: string): readonly TeamMention[] {
       : OPPONENT_AFTER_RE.test(after)
         ? "after"
         : null;
+    const sharedCue =
+      SHARED_BEFORE_RE.test(before) ||
+      (SHARED_RESULT_RE.test(before) && !POSSESSIVE_AFTER_RE.test(after))
+        ? "before"
+        : OPPONENT_AFTER_RE.test(after)
+          ? "after"
+          : null;
     const prev = out[out.length - 1];
+    const gap = prev === undefined ? "" : text.slice(prev.end, start);
     const pairs =
-      cue === "before" &&
-      prev !== undefined &&
-      prev.team !== team &&
-      PAIR_GAP_RE.test(text.slice(prev.end, start));
-    if (pairs) out[out.length - 1] = { ...prev, pair: { team, start } };
+      cue === "before" && prev !== undefined && prev.team !== team && PAIR_GAP_RE.test(gap);
+    const game = prev !== undefined && prev.team !== team && SHARED_PAIR_GAP_RE.test(gap);
+    if (prev !== undefined && (pairs || game))
+      out[out.length - 1] = {
+        ...prev,
+        pair: pairs ? { team, start } : prev.pair,
+        shared: { cue: prev.shared.cue, pair: game ? { team, start } : prev.shared.pair },
+      };
     out.push({
       team,
       words,
@@ -135,6 +257,10 @@ export function teamMentions(text: string): readonly TeamMention[] {
       opponent: cue !== null,
       cue,
       pair: pairs ? { team: prev.team, start: prev.start } : null,
+      shared: {
+        cue: sharedCue,
+        pair: game ? { team: prev.team, start: prev.start } : null,
+      },
     });
   }
   return out;

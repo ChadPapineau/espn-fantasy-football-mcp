@@ -1915,8 +1915,14 @@ const newsPlayers = (src: NewsSource, id: Phase2DatasetSourceId): Phase2TableCon
         "espn_id",
         "INTEGER",
         false,
-        ["ds_players.espn_id", "ds_players.full_name", "ds_pro_teams.abbrev"],
-        "the news source's deterministic name matcher (plan 07 D6 players_matched; plan 02 §6.4 — rules, never a model) over the item's title and blurb against ds_players",
+        [
+          "ds_players.espn_id",
+          "ds_players.full_name",
+          "ds_players.position_id",
+          "ds_players.percent_owned",
+          "ds_pro_teams.abbrev",
+        ],
+        "the news source's deterministic name matcher (plan 07 D6 players_matched; plan 02 §6.4 — rules, never a model) over the item's title and blurb against ds_players; a name several players share goes to the one holder its team, position and cue evidence leaves (ruling R8-3)",
       ),
       p2(
         "gsis_id",

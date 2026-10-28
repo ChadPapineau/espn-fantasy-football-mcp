@@ -209,10 +209,14 @@ describe("the final gate's items (news-match-universe-homonyms, attempt 4)", () 
     // the Bengals signed (the universe still lists him as a free agent): no ref, never the wrong one
     for (const title of [
       "Lamar Jackson, Bengals: Signed to practice squad",
-      "Bengals CB Lamar Jackson: Signed to practice squad",
       "Lamar Jackson, Bengals: Questionable against Steelers",
     ])
       expect(refs(title), title).toEqual([]);
+    // R8-3 clause 4: the CB written next to the name rules the QB out and is the free-agent CB's own
+    // evidence — the Bengals, no holder's team, leave him as a free agent since signed (was no ref)
+    expect(refs("Bengals CB Lamar Jackson: Signed to practice squad")).toEqual([
+      [CB_LAMAR, "full_name"],
+    ]);
     // controls: the star's own team attached decides for him, whatever else the item names
     expect(refs("Ravens' Lamar Jackson: Expected to play against Bengals")).toEqual([
       [QB_LAMAR, "full_name_team"],
@@ -242,13 +246,15 @@ describe("the final gate's items (news-match-universe-homonyms, attempt 4)", () 
       "Bengals vs. Ravens: Lamar Jackson questionable | Jackson (ankle) was limited.",
     ])
       expect(refs(title), title).toEqual([[QB_LAMAR, "full_name"]]);
+    // R8-3 clause 2: a game's teams are named loosely — they rule a holder out, never raise one to
+    // full_name_team (was full_name_team)
     expect(refs("Lamar Jackson: Ravens vs. Steelers moved to Monday")).toEqual([
-      [QB_LAMAR, "full_name_team"],
+      [QB_LAMAR, "full_name"],
     ]);
-    // the namesake's game: his, never the star's
-    expect(refs("Browns vs. Bengals: Justin Jefferson records two sacks")).toEqual([
-      [LB_JEFFERSON, "full_name_team"],
-    ]);
+    // the namesake's game: never the star's — and, R8-3 clause 2, the game alone is no evidence FOR
+    // the namesake either: it rules the WR out, and the LB left by elimination has none of his own
+    // (was the LB at full_name_team)
+    expect(refs("Browns vs. Bengals: Justin Jefferson records two sacks")).toEqual([]);
     // both holders' teams in the game: it may be either — no ref, never the wrong one
     for (const title of [
       "Vikings vs. Browns: Justin Jefferson questionable",
@@ -286,12 +292,13 @@ describe("the final gate's items (news-match-universe-homonyms, attempt 4)", () 
   });
 });
 
-describe("the final gate's recall items (round 2): fail-safe by design, put to a ruling", () => {
-  // docs/evals/stage-c-backlog.md, "the news matcher's fail-safe choices" 5 and 6. Each expectation
-  // below is the rule as built; a ruling for recall changes it, and the counter-examples show what
-  // that ruling would misattribute. Of the recorded universe's 16 shared full names, the owned ones
-  // a namesake WITH a team can block are these three (the Lamar Jackson and Chris Jones namesakes
-  // are free agents).
+describe("the final gate's recall items (round 2): fail-safe by design, as ruled (R8-3)", () => {
+  // docs/evals/stage-c-backlog.md, "the news matcher's fail-safe choices" 5 and 6. Ruling R8-3
+  // (changelog §R8) kept choice 5 and took 6(c); the expectations marked R8-3 changed with it (a cue
+  // now names what was a loose mention; a written position decides), and the counter-examples show
+  // what prominence alone would misattribute. Of the recorded universe's 16 shared full names, the
+  // owned ones a namesake WITH a team can block are these three (the Lamar Jackson and Chris Jones
+  // namesakes are free agents).
   const DE_YOUNG = idOf("Byron Young", "LA"); // 20.13 % owned; the Eagles DT namesake 0.08 %
   const DT_YOUNG = idOf("Byron Young", "PHI");
   const CB_HARRIS = idOf("Marcus Harris", "TEN"); // 2.08 %; the Chiefs DT namesake 0.02 %
@@ -299,14 +306,26 @@ describe("the final gate's recall items (round 2): fail-safe by design, put to a
 
   it("choice 5: a namesake's team named anywhere, with no cue, blocks the prominent holder", () => {
     for (const title of [
+      // R8-3 clause 3: "past", "host" and "face" between two teams name a game both holders play in
       "Justin Jefferson: Leads Vikings past Browns",
-      "Justin Jefferson: Catches TD | Jefferson caught seven passes in a win over the Browns.",
       "Justin Jefferson: Vikings host Browns on Sunday",
       "Justin Jefferson: Practice limited | Jefferson (hamstring) was limited Wednesday. The Vikings face the Browns.",
-      "Byron Young: Records two sacks in win over Eagles",
-      "Marcus Harris: Breaks up two passes in loss to Chiefs",
     ])
       expect(refs(title), title).toEqual([]);
+    // R8-3 clause 3: "win over" and "loss to" are cues now — the namesake's team is the subject's
+    // opponent, not named loosely, so it rules the namesake out and the star takes his own item (each
+    // was no ref under choice 5)
+    expect(
+      refs(
+        "Justin Jefferson: Catches TD | Jefferson caught seven passes in a win over the Browns.",
+      ),
+    ).toEqual([[WR_JEFFERSON, "full_name"]]);
+    expect(refs("Byron Young: Records two sacks in win over Eagles")).toEqual([
+      [DE_YOUNG, "full_name"],
+    ]);
+    expect(refs("Marcus Harris: Breaks up two passes in loss to Chiefs")).toEqual([
+      [CB_HARRIS, "full_name"],
+    ]);
     // what prominence would misattribute: the namesake's own news, naming his team (or both) — the
     // last one would hand the 99.86 %-owned WR an IR claim (E10 reads status claims from news)
     for (const title of [
@@ -324,15 +343,25 @@ describe("the final gate's recall items (round 2): fail-safe by design, put to a
   });
 
   it("choice 6: a namesake's team attached to the name never gives him the name past a prominent holder", () => {
+    // the attached team alone: blocked (the lagging universe — after a trade of the star to the
+    // namesake's team, "Cleveland's Justin Jefferson" would be his)
     for (const title of [
-      "Browns LB Justin Jefferson: Records sack",
+      "Cleveland's Justin Jefferson: Records sack",
+      "Philadelphia's Byron Young: Two sacks",
+      "Kansas City's Marcus Harris: Records sack",
+      // "DT" fits both Byron Youngs (ESPN lists an interior end as DT or DE): it rules no one out
       "Eagles DT Byron Young: Records two sacks",
-      "Chiefs DT Marcus Harris: Records sack",
     ])
       expect(refs(title), title).toEqual([]);
-    // the same evidence by the bare surname gives the namesake (the inconsistency put to the ruling;
-    // held as built by "a bare surname is not the namesake on a loosely named team while a star holds it")
+    // R8-3 clause 4, choice 6(c): a position written next to the name that rules the star out lets
+    // the attached namesake take it (each was no ref)
+    expect(refs("Browns LB Justin Jefferson: Records sack")).toEqual([
+      [LB_JEFFERSON, "full_name_team"],
+    ]);
+    expect(refs("Chiefs DT Marcus Harris: Records sack")).toEqual([[DT_HARRIS, "full_name_team"]]);
+    // the bare surname follows the same rule (R8-3 clause 4): the position decides there too
     expect(refs("Browns LB Jefferson: Records sack")).toEqual([[LB_JEFFERSON, "last_name_team"]]);
+    expect(refs("Cleveland's Jefferson: Records sack")).toEqual([]);
     // a cue that rules the star out lets the attached namesake take it (the rule's one opening)
     expect(refs("Eagles DT Byron Young: Records sack against the Rams")).toEqual([
       [DT_YOUNG, "full_name_team"],
@@ -348,12 +377,13 @@ describe("a roster move ties its team to the name, like a team written next to i
     // each went to the Ravens QB at 0.80 (the verifier's transaction titles)
     for (const title of [
       "Lamar Jackson: Signs with Bengals",
-      "Bengals sign CB Lamar Jackson",
       "Lamar Jackson: Waived by Bengals | The Bengals waived Jackson on Tuesday.",
       "Lamar Jackson: Lands on Bengals practice squad",
       "Lamar Jackson, signed to the Bengals' practice squad",
     ])
       expect(refs(title), title).toEqual([]);
+    // R8-3 clause 4: the CB written next to the name is the free-agent CB's evidence (was no ref)
+    expect(refs("Bengals sign CB Lamar Jackson")).toEqual([[CB_LAMAR, "full_name"]]);
     // the star's own team making the move is his
     expect(refs("Ravens activate QB Lamar Jackson")).toEqual([[QB_LAMAR, "full_name_team"]]);
     expect(refs("Lamar Jackson: Signs with Ravens")).toEqual([[QB_LAMAR, "full_name_team"]]);
@@ -438,21 +468,25 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
 
   it("the verification's phrasings: the namesake on a team named any way never takes the ref", () => {
     const cases: readonly (readonly [string, readonly (readonly [number, string])[]])[] = [
+      // R8-3 clause 3: "win over", "loss to", "torches" and "matchup with" are cues now — the Browns
+      // are the subject's opponent, so the namesake on them is ruled out and the star takes his own
+      // item (each was no ref, a team named loosely)
       [
         "Justin Jefferson: Catches TD | Jefferson caught seven passes for 120 yards in Sunday's 27-20 win over the Browns.",
-        [],
+        [[WR_JEFFERSON, "full_name"]],
       ],
       [
         "Justin Jefferson: Quiet in loss | Jefferson caught two passes in Sunday's loss to the Browns.",
-        [],
+        [[WR_JEFFERSON, "full_name"]],
       ],
-      [
-        "Justin Jefferson: Questionable for Sunday | Jefferson (hamstring) is questionable for Sunday's game at Cleveland.",
-        [],
-      ],
-      ["Justin Jefferson: Torches Browns' secondary", []],
+      ["Justin Jefferson: Torches Browns' secondary", [[WR_JEFFERSON, "full_name"]]],
       [
         "Justin Jefferson: Limited Thursday | Jefferson (hamstring) was limited ahead of the Week 8 matchup with Cleveland.",
+        [[WR_JEFFERSON, "full_name"]],
+      ],
+      // "at" is no cue (the team after it may be his own: "at the Browns' facility"): loose
+      [
+        "Justin Jefferson: Questionable for Sunday | Jefferson (hamstring) is questionable for Sunday's game at Cleveland.",
         [],
       ],
       // both teams named: the star's news or the namesake's — no ref, never the wrong one
@@ -460,7 +494,8 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
         "Justin Jefferson: Questionable | Jefferson (hamstring) is questionable; the Vikings host the Browns Sunday.",
         [],
       ],
-      ["Michael Carter: Gets more work in loss to Eagles", []],
+      // R8-3 clause 3: "loss to" rules the Eagles S out; the Titans RB takes it (was no ref)
+      ["Michael Carter: Gets more work in loss to Eagles", [[RB_CARTER, "full_name"]]],
       // a recognised cue still rules the namesake out
       [
         "Justin Jefferson: Questionable vs. Browns | Jefferson (hamstring) was limited Thursday.",
@@ -470,9 +505,11 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
         "Justin Jefferson: Questionable | Jefferson (hamstring) is questionable for Sunday's game against the Browns.",
         [[WR_JEFFERSON, "full_name"]],
       ],
+      // R8-3 clause 2: the Ravens are named loosely — never full_name_team on a shared name (was
+      // full_name_team)
       [
         "Lamar Jackson: Limited | Jackson (ankle) was limited; the Ravens visit the Bengals Sunday.",
-        [[QB_LAMAR, "full_name_team"]],
+        [[QB_LAMAR, "full_name"]],
       ],
       [
         "Lamar Jackson: Throws three TDs in win over Bengals | Jackson completed 25 of 31 passes.",
@@ -557,7 +594,12 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
     expect(
       refs("Vikings WR Justin Jefferson: Questionable | the Vikings host the Browns Sunday."),
     ).toEqual([[WR_JEFFERSON, "full_name_team"]]);
-    expect(refs("Browns LB Justin Jefferson: Records sack")).toEqual([]);
+    // the namesake's team attached alone blocks the star
+    expect(refs("Browns' Justin Jefferson: Records sack")).toEqual([]);
+    // R8-3 clause 4: with the LB written next to the name, the WR is ruled out (was no ref)
+    expect(refs("Browns LB Justin Jefferson: Records sack")).toEqual([
+      [LB_JEFFERSON, "full_name_team"],
+    ]);
   });
 
   it("a written generational suffix is ESPN's spelling of one namesake", () => {
@@ -565,11 +607,13 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
     expect(refs("Byron Murphy II: Records sack")).toEqual([[BYRON_II, "full_name"]]);
     expect(refs("Byron Murphy Jr.: Records sack")).toEqual([[BYRON_JR, "full_name"]]);
     expect(refs("Byron Murphy: Records sack")).toEqual([]);
+    // R8-3 clause 2: the suffix picks the Eagles S; the Eagles, named loosely, do not raise him to
+    // full_name_team on a shared name (was full_name_team)
     expect(
       refs(
         "Michael Carter II: Records interception | Carter II picked off a pass in the Eagles' win.",
       ),
-    ).toEqual([[S_CARTER, "full_name_team"]]);
+    ).toEqual([[S_CARTER, "full_name"]]);
     // a suffix no namesake is spelled with is no evidence
     expect(refs("Lamar Jackson Jr.: Could miss multiple games")).toEqual([[QB_LAMAR, "full_name"]]);
   });
@@ -646,8 +690,11 @@ describe("the prominence rule's bounds (synthetic namesakes)", () => {
     expect(who(40, 40, "Bills WR Sam Twin, Dolphins: Out")).toEqual([]); // two teams attached
     expect(who(40, 40, "Sam Twin: Out vs. Bills, vs. Dolphins")).toEqual([]); // both ruled out
     // a loose mention, whichever holder's, picks no one between equals
-    expect(who(40, 40, "Sam Twin: Out in loss to Dolphins")).toEqual([]);
     expect(who(40, 40, "Sam Twin: Out in Bills loss")).toEqual([]);
+    expect(who(40, 40, "Sam Twin: Out as Dolphins rally")).toEqual([]);
+    // R8-3 clause 3: "loss to" names the Dolphins as the opponent, not loosely — the Dolphins holder
+    // is ruled out, the Bills holder left (was no ref)
+    expect(who(40, 40, "Sam Twin: Out in loss to Dolphins")).toEqual([9_100_001]);
   });
 });
 

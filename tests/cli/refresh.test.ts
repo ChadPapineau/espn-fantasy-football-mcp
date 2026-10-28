@@ -197,8 +197,15 @@ describe("planning", () => {
     const opts = newsInputs(() => store, sb.dir, "espn");
     const ctx = { seasons: [2026] } as never;
     const u = opts.universe?.(ctx) ?? [];
+    // ruling R8-3 clause 4: ESPN's position_id is joined into the matcher's universe
     expect(u).toEqual([
-      { espn_id: 4239996, full_name: "Travis Etienne Jr.", team: "NO", gsis_id: "00-0036973" },
+      {
+        espn_id: 4239996,
+        full_name: "Travis Etienne Jr.",
+        team: "NO",
+        gsis_id: "00-0036973",
+        position_id: 2,
+      },
     ]);
     expect(opts.previous?.(ctx)).toEqual([]);
     expect(newsInputs(() => null, sb.dir, "cbs").universe?.(ctx)).toEqual([]);
