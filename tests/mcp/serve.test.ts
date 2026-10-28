@@ -2,7 +2,8 @@
 // exit 2; the store's open failures (newer → 1 with plan 03 §7's message, pending migration → 1, an
 // unsafe path → 2, anything else → 1); fixture mode answers initialize, tools/list and a call with
 // ONLY JSON-RPC frames on stdout; an invalid request gets -32600 under its id, a line that is not
-// JSON -32700 with no id; a tools/call argument key `__proto__` is a coded VALIDATION; stdin EOF, stdout
+// JSON -32700 with no id; a tools/call argument key `__proto__` is a coded VALIDATION, a prompts/get
+// one -32602 never quoting it; stdin EOF, stdout
 // EPIPE, an over-cap frame, SIGTERM/SIGINT/SIGHUP and reparenting all run the single-flight close
 // (exit 0); in-flight reads are drained; a stuck close exits 5 at the deadline; a second SIGINT
 // forces it; a crash exits 1. The spawned-process twin is tests/process/serve.test.ts.
@@ -27,6 +28,11 @@ import {
   withoutEchoedName,
   type ServeInternals,
 } from "../../src/cli/serve.js";
+import {
+  ALL_PROMPTS,
+  promptArgsSchema,
+  unknownArgumentMessage,
+} from "../../src/mcp/prompts/index.js";
 import { toolsFor } from "../../src/mcp/registry.js";
 import { createLogger } from "../../src/cli/log.js";
 import { PathSecurityError } from "../../src/config/paths.js";
@@ -424,6 +430,63 @@ describe("fixture mode over stdio", () => {
     expect(r.raw()).not.toContain("yes-71");
     expect(r.raw()).not.toContain("__proto__");
     expect(await r.log("transport.proto_key")).toMatchObject({ method: "tools/call" });
+    r.stdin.end();
+    expect(await r.code).toBe(EXIT.ok);
+  });
+
+  it("a prompts/get argument key __proto__ is refused -32602 like any unknown key, never echoed (Stage C final gate)", async () => {
+    // before: the SDK's record re-parse dropped the key and the prompt rendered as if it were absent
+    const r = start(tempEnv());
+    await ready(r);
+    const before = Object.getOwnPropertyNames(Object.prototype).sort();
+    const raw = (id: number, name: string, args: string): void => {
+      r.stdin.write(
+        `{"jsonrpc":"2.0","id":${String(id)},"method":"prompts/get","params":{"name":"${name}","arguments":${args}}}\n`,
+      );
+    };
+    const errorOf = async (id: number): Promise<{ code: unknown; message: string }> => {
+      const f = await r.reply(id);
+      expect(f.result, `reply ${String(id)}`).toBeUndefined();
+      const e = f.error as { code: unknown; message: unknown };
+      return { code: e.code, message: String(e.message) };
+    };
+    raw(81, "espn.weekly", '{"__proto__":"zz-81"}');
+    raw(82, "espn.weekly", '{"week":"7","__proto__":"zz-82"}');
+    raw(83, "espn.onboard", '{"__proto__":"zz-83"}'); // an argument-less prompt
+    raw(84, "espn.stream", '{"position":"K","__proto__":{"polluted":"yes-84"}}');
+    raw(85, "espn.weekly", '{"zz_undeclared_85":"7"}'); // any undeclared key: the same answer
+    for (const [id, takes] of [
+      [81, "week"],
+      [82, "week"],
+      [85, "week"],
+    ] as const) {
+      const e = await errorOf(id);
+      expect(e.code).toBe(-32602);
+      expect(e.message).toBe(
+        `Invalid arguments for prompt espn.weekly: unknown argument key (this prompt takes: ${takes})`,
+      );
+    }
+    expect(await errorOf(83)).toEqual({
+      code: -32602,
+      message:
+        "Invalid arguments for prompt espn.onboard: unknown argument key (this prompt takes no arguments)",
+    });
+    // a value that is not a string fails the SDK's own `arguments` record first (fixed text)
+    expect(await errorOf(84)).toEqual({ code: -32602, message: "Invalid params" });
+    // controls: the same prompts without the key render
+    raw(86, "espn.weekly", '{"week":"7"}');
+    raw(87, "espn.onboard", "{}");
+    raw(88, "espn.stream", '{"position":"K"}');
+    for (const id of [86, 87, 88]) {
+      const res = (await r.reply(id)).result as { messages?: unknown[] } | undefined;
+      expect(res?.messages?.length ?? 0, `reply ${String(id)}`).toBeGreaterThan(0);
+    }
+    // nothing reached a prototype, nothing was echoed, and the carry is logged value-free
+    expect(Object.getOwnPropertyNames(Object.prototype).sort()).toEqual(before);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    for (const s of ["zz-81", "zz-82", "zz-83", "yes-84", "zz_undeclared_85", "__proto__"])
+      expect(r.raw()).not.toContain(s);
+    expect(await r.log("transport.proto_key")).toMatchObject({ method: "prompts/get" });
     r.stdin.end();
     expect(await r.code).toBe(EXIT.ok);
   });
@@ -1020,13 +1083,29 @@ describe("withProtoKeyCarried", () => {
     expect(({} as Record<string, unknown>).include).toBeUndefined();
   });
 
+  it("carries a prompts/get argument key __proto__ the same way (Stage C final gate)", () => {
+    const msg = JSON.parse(
+      '{"jsonrpc":"2.0","id":9,"method":"prompts/get","params":{"name":"espn.weekly","arguments":{"week":"3","__proto__":"x"}}}',
+    ) as JSONRPCMessage;
+    const out = withProtoKeyCarried(msg);
+    expect(out).not.toBe(msg);
+    const a = argsOf(out);
+    expect(Object.keys(a)).toEqual(["week", PROTO_KEY_STANDIN]);
+    expect(Object.hasOwn(a, "__proto__")).toBe(false);
+    expect(Object.getPrototypeOf(a)).toBe(Object.prototype);
+    expect(a[PROTO_KEY_STANDIN]).toBe("x");
+    expect((out as { method: string }).method).toBe("prompts/get");
+    expect(Object.hasOwn(argsOf(msg), "__proto__")).toBe(true);
+  });
+
   it("returns every other message as is (the same object)", () => {
     const own = withOwnProto({ week: 1 }, { x: 1 });
     for (const m of [
       call({ week: 1 }),
+      call({ week: "1" }, "prompts/get"),
       call({ players: withOwnProto({ team_id: 1 }, { x: 1 }) }), // nested: the strict schema sees it
-      call(own, "prompts/get"),
       call(own, "resources/read"),
+      call(own, "completion/complete"),
       call([own]),
       call(null),
       call("x"),
@@ -1047,9 +1126,10 @@ describe("withProtoKeyCarried", () => {
           fc.jsonValue(),
         ),
         fc.jsonValue(),
-        (rest, value) => {
+        fc.constantFrom("tools/call", "prompts/get"),
+        (rest, value, method) => {
           const args = withOwnProto(rest, value);
-          const out = argsOf(withProtoKeyCarried(call(args)));
+          const out = argsOf(withProtoKeyCarried(call(args, method)));
           expect(Object.hasOwn(out, "__proto__")).toBe(false);
           expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
           expect(Object.keys(out).sort()).toEqual([...Object.keys(rest), PROTO_KEY_STANDIN].sort());
@@ -1071,6 +1151,17 @@ describe("withProtoKeyCarried", () => {
       const unknown = r.error?.issues.find((i) => i.code === "unrecognized_keys");
       expect(unknown, t.name).toBeDefined();
       expect((unknown as { keys: string[] }).keys).toContain(PROTO_KEY_STANDIN);
+    }
+  });
+
+  it("no prompt declares the stand-in: its schema refuses it with a message that never quotes it", async () => {
+    expect(ALL_PROMPTS.length).toBe(13);
+    for (const p of ALL_PROMPTS) {
+      const r = await promptArgsSchema(p.args)["~standard"].validate({ [PROTO_KEY_STANDIN]: "x" });
+      expect("issues" in r && r.issues !== undefined, p.name).toBe(true);
+      const messages = ("issues" in r ? (r.issues ?? []) : []).map((i) => i.message);
+      expect(messages, p.name).toContain(unknownArgumentMessage(p.args));
+      expect(messages.join(" "), p.name).not.toContain("__proto__");
     }
   });
 });

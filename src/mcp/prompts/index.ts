@@ -10,7 +10,8 @@
 // espn-ff://league/settings resource when it is readable, the espn-ff://docs/tool-outputs resource
 // when the prompt links references/tool-outputs.md, and both guardrail sentences (plan 02 §6.3's and
 // research 06 §A.3 rule 5's ESPN clause — plan 01 §4.1: prompts state the rule). An omitted
-// `arguments` object reads as {}. Prompts hold no logic and never call tools.
+// `arguments` object reads as {}; an argument key a prompt does not take (`__proto__` included) is
+// refused -32602 like a tool's unknown key, never quoted. Prompts hold no logic and never call tools.
 // Ported from sibling @5daa625, adapted (13 prompts).
 import type {
   GetPromptResult,
@@ -114,21 +115,21 @@ export const PROMPTS: readonly PromptSpec[] = Object.freeze([
     name: "espn.onboard",
     skill: "onboard",
     description: "First run: read the league, confirm the scoring golden and the seeding reading.",
-    args: z.object({}),
+    args: z.strictObject({}),
     priority: "P0",
   },
   {
     name: "espn.weekly",
     skill: "weekly",
     description: "The weekly plan: lineup, waivers, K/D-ST streams and the log, for one week.",
-    args: z.object({ week: weekArg }),
+    args: z.strictObject({ week: weekArg }),
     priority: "P0",
   },
   {
     name: "espn.start_sit",
     skill: "start-sit",
     description: "Start/sit and flex for a week (game-day branch once slots lock).",
-    args: z.object({ week: weekArg }),
+    args: z.strictObject({ week: weekArg }),
     priority: "P0",
   },
   {
@@ -139,7 +140,7 @@ export const PROMPTS: readonly PromptSpec[] = Object.freeze([
     // `position`, espn_analyze_waivers `positions`) accept only ESPN's `D/ST`, and the Skill's own
     // argument hint is `[K | D/ST]` — so both spellings are accepted and the prompt hands the model
     // `D/ST` (Stage C finding `prompts-stream-dst-spelling`)
-    args: z.object({ position: z.enum(["K", "DST", "D/ST"]) }),
+    args: z.strictObject({ position: z.enum(["K", "DST", "D/ST"]) }),
     toolVocabulary: { position: { DST: "D/ST" } },
     priority: "P0",
   },
@@ -147,14 +148,14 @@ export const PROMPTS: readonly PromptSpec[] = Object.freeze([
     name: "espn.retro",
     skill: "retro",
     description: "Score a week's logged calls against what happened.",
-    args: z.object({ week: weekArg }),
+    args: z.strictObject({ week: weekArg }),
     priority: "P0",
   },
   {
     name: "espn.apply",
     skill: "apply",
     description: "The exact ESPN clicks for an agreed change (read-only: nothing is executed).",
-    args: z.object({ what: textArg(200) }),
+    args: z.strictObject({ what: textArg(200) }),
     priority: "P0",
     freeText: ["what"],
     completeOneWord: { what: APPLY_ACTION_RE },
@@ -163,14 +164,14 @@ export const PROMPTS: readonly PromptSpec[] = Object.freeze([
     name: "espn.session",
     skill: "session-check",
     description: "Check the ESPN session (credential state) and what to do about it.",
-    args: z.object({}),
+    args: z.strictObject({}),
     priority: "P0",
   },
   {
     name: "espn.waivers",
     skill: "waivers",
     description: "Waiver targets priced against the cost of waiver priority.",
-    args: z.object({}),
+    args: z.strictObject({}),
     priority: "P0",
   },
 ]);
@@ -181,7 +182,7 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
     name: "espn.trade",
     skill: "trade",
     description: "Evaluate a trade offer for both sides, or find trade partners for a position.",
-    args: z.object({ offer: textArg(200) }),
+    args: z.strictObject({ offer: textArg(200) }),
     // the partner search's documented one-word form — a position — in the tools' spelling
     toolVocabulary: { offer: TRADE_POSITION_VOCABULARY },
     priority: "P1",
@@ -192,7 +193,7 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
     name: "espn.injury",
     skill: "injury-cascade",
     description: "Who gains when a player is out, the IR move, and a claim or pass for each.",
-    args: z.object({ player: textArg(64) }),
+    args: z.strictObject({ player: textArg(64) }),
     priority: "P1",
     freeText: ["player"],
     completeOneWord: { player: PLAYER_ID_ARG_RE },
@@ -202,21 +203,21 @@ export const P1_PROMPTS: readonly PromptSpec[] = Object.freeze([
     skill: "schedule-plan",
     description:
       "The rest-of-season schedule plan: bye clusters, holes, fixes and the playoff weeks.",
-    args: z.object({}),
+    args: z.strictObject({}),
     priority: "P1",
   },
   {
     name: "espn.roster_audit",
     skill: "roster-audit",
     description: "Audit the roster: bench roles, handcuffs, stashes, droppables and the IR slots.",
-    args: z.object({}),
+    args: z.strictObject({}),
     priority: "P1",
   },
   {
     name: "espn.check",
     skill: "news-check",
     description: "Check a news claim or an outlook about a player against the structured facts.",
-    args: z.object({ claim: textArg(400) }),
+    args: z.strictObject({ claim: textArg(400) }),
     priority: "P1",
     freeText: ["claim"],
   },
@@ -421,20 +422,54 @@ export function promptsFor(toolset: McpServerOptions["toolset"]): readonly Promp
 }
 
 /**
- * The schema a prompt registers: its zod object, with `arguments` OMITTED read as `{}`. MCP's
- * GetPromptRequest makes `arguments` optional, but the SDK parses `params.arguments` (undefined)
- * against the object schema and refuses with -32602 — so a prompt whose arguments are all optional
- * (espn.weekly, espn.start_sit, espn.retro [week]) failed on any client that sends no arguments
- * object (Stage C finding `prompts-optional-args-omitted-refused`). A required argument still
- * fails, now on the argument itself. Advertised as the object's own JSON Schema (prompts/list).
+ * What a prompt answers an argument key it does not declare with (the SDK prefixes `Invalid
+ * arguments for prompt <name>: `): the keys the prompt takes, never the caller's key — zod's own
+ * message quotes it, and a client's key is caller text like a tool name (serve.ts withoutEchoedName).
+ */
+export function unknownArgumentMessage(args: z.ZodObject): string {
+  const names = Object.keys(args.shape);
+  return names.length === 0
+    ? "unknown argument key (this prompt takes no arguments)"
+    : `unknown argument key (this prompt takes: ${names.join(", ")})`;
+}
+
+/** A zod issue for keys the strict object does not declare. */
+const isUnknownKeyIssue = (issue: unknown): boolean =>
+  (issue as { code?: unknown } | null)?.code === "unrecognized_keys";
+
+/**
+ * The schema a prompt registers: its zod object made strict, with `arguments` OMITTED read as `{}`.
+ * MCP's GetPromptRequest makes `arguments` optional, but the SDK parses `params.arguments`
+ * (undefined) against the object schema and refuses with -32602 — so a prompt whose arguments are
+ * all optional (espn.weekly, espn.start_sit, espn.retro [week]) failed on any client that sends no
+ * arguments object (Stage C finding `prompts-optional-args-omitted-refused`). A required argument
+ * still fails, now on the argument itself. An argument key the prompt does not declare is refused
+ * -32602 like a tool's unknown key (plan 02 §5; plan 07 §4.2), its key never quoted
+ * (`unknownArgumentMessage`); before, the object stripped it and the prompt rendered as if it were
+ * absent — `__proto__` included, which tools/call answers VALIDATION for (Stage C final gate). The
+ * transport carries a `__proto__` key past the SDK's re-parse for this (serve.ts
+ * withProtoKeyCarried). Advertised as the object's own JSON Schema (prompts/list).
  */
 export function promptArgsSchema(args: z.ZodObject): StandardSchemaWithJSON {
-  const std = args["~standard"] as unknown as StandardSchemaWithJSON["~standard"];
+  const std = args.strict()["~standard"] as unknown as StandardSchemaWithJSON["~standard"];
+  const unknownKey = unknownArgumentMessage(args);
+  type Result = Awaited<ReturnType<StandardSchemaWithJSON["~standard"]["validate"]>>;
+  const coded = (r: Result): Result =>
+    r.issues === undefined
+      ? r
+      : {
+          issues: r.issues.map((i) =>
+            isUnknownKeyIssue(i) ? { message: unknownKey, path: [] } : i,
+          ),
+        };
   return {
     "~standard": {
       version: 1,
       vendor: "eff-prompt-args",
-      validate: (value: unknown) => std.validate(value ?? {}),
+      validate: (value: unknown) => {
+        const r = std.validate(value ?? {});
+        return r instanceof Promise ? r.then(coded) : coded(r);
+      },
       jsonSchema: std.jsonSchema,
     },
   };
@@ -509,14 +544,14 @@ export function registerPrompts(
         });
       return { description: p.description, messages };
     };
-    // an argument-less prompt has no argsSchema: a client may omit `arguments` entirely
-    if (Object.keys(p.args.shape).length === 0)
-      server.registerPrompt(p.name, { description: p.description }, () => build({}));
-    else
-      server.registerPrompt(
-        p.name,
-        { description: p.description, argsSchema: promptArgsSchema(p.args) },
-        (raw) => build(raw as Readonly<Record<string, unknown>>),
-      );
+    // every prompt registers its strict schema, an argument-less one too: without a schema the SDK
+    // never shows the handler the arguments, so a key it does not take rendered unchecked (a client
+    // may still omit `arguments` — promptArgsSchema reads it as {}); prompts/list then lists its
+    // arguments as []
+    server.registerPrompt(
+      p.name,
+      { description: p.description, argsSchema: promptArgsSchema(p.args) },
+      (raw) => build(raw as Readonly<Record<string, unknown>>),
+    );
   }
 }

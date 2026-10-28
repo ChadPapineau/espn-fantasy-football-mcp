@@ -9,10 +9,11 @@
 // transport in arrival order (a batch's elements in its place, so a later line never overtakes them).
 // A stdin line the SDK transport would drop is answered (-32700 for a line that is not JSON, -32600
 // for any other line that is not a valid JSON-RPC message: under its id when it is a request with a
-// usable one, else with no id), and a tools/call argument key `__proto__` reaches the tool's strict
-// schema (plan 02 §5) instead of being dropped by the SDK's re-parse. A JSON-RPC batch (an array
-// line; MCP 2025-03-26 §Batching: a server MUST support receiving them) is answered with ONE array of
-// the responses, `[]` with a single -32600; no line, however nested, can throw out of the reader;
+// usable one, else with no id), and a tools/call or prompts/get argument key `__proto__` reaches
+// the strict schema (plan 02 §5) instead of being dropped by the SDK's re-parse. A JSON-RPC batch
+// (an array line; MCP 2025-03-26 §Batching: a server MUST support receiving them) is answered with
+// ONE array of the responses, `[]` with a single -32600; no line, however nested, can throw out of
+// the reader;
 // the SDK's invalid-params replies (-32603 carrying a raw zod issue dump, or the URI-length
 // refusal) become -32602 "Invalid params"; an open `subscriptions/listen` (a stream, answered only at
 // teardown) never holds the drain; and the process resolves its exit code only once stdout has
@@ -188,26 +189,32 @@ export function invalidReplyFor(raw: unknown): JSONRPCErrorResponse {
 }
 
 /**
- * The name a tools/call argument key `__proto__` is carried under past the SDK. No tool declares it
- * (tests/mcp/serve.test.ts holds that for every tool of both toolsets), so the tool's strict input
- * schema reports it as an unknown key.
+ * The name a tools/call or prompts/get argument key `__proto__` is carried under past the SDK. No
+ * tool and no prompt declares it (tests/mcp/serve.test.ts holds that for every tool and prompt of
+ * both toolsets), so the strict input schema reports it as an unknown key.
  */
 export const PROTO_KEY_STANDIN = "__proto__ (own key)";
 
+/** The requests whose `arguments` object a strict schema of ours validates. */
+const ARGUMENT_METHODS: ReadonlySet<string> = new Set(["tools/call", "prompts/get"]);
+
 /**
- * A tools/call whose `arguments` carry an own `__proto__` key, with that key carried under
- * `PROTO_KEY_STANDIN` (its value and every other key unchanged). The SDK re-parses `arguments` as a
- * zod record before the handler runs, and zod never copies a `__proto__` key into the object it
- * builds, so the tool's strict schema (plan 01 §4; plan 02 §5: `__proto__` keys are rejected by the
- * schemas' `.strict()`) would never see it and the call would answer as if the key were absent.
- * Carried under a name no tool declares, it is an unknown key like any other: a coded VALIDATION
- * (`(root) (unknown key)`), the key never echoed. A deeper `__proto__` key needs no carrying: the
- * SDK passes argument values through untouched and the nested strict objects reject it. Every
- * other message is returned as is (the same object). The copies define own data properties only,
- * so no prototype is ever set.
+ * A tools/call or prompts/get whose `arguments` carry an own `__proto__` key, with that key carried
+ * under `PROTO_KEY_STANDIN` (its value and every other key unchanged). The SDK re-parses
+ * `arguments` as a zod record before the handler runs, and zod never copies a `__proto__` key into
+ * the object it builds, so the strict schema (plan 01 §4; plan 02 §5: `__proto__` keys are rejected
+ * by the schemas' `.strict()`) would never see it and the request would answer as if the key were
+ * absent. Carried under a name nothing declares, it is an unknown key like any other: a tool answers
+ * a coded VALIDATION (`(root) (unknown key)`), a prompt -32602 (prompts/index.ts promptArgsSchema;
+ * a value that is not a string fails the SDK's own `arguments` record first: -32602 "Invalid
+ * params"), the key never echoed. Before, a prompt rendered as if the key were absent (Stage C final
+ * gate). A deeper `__proto__` key needs no carrying: the SDK passes argument values through
+ * untouched and the nested strict objects reject it (a prompt's arguments are strings). Every other
+ * message is returned as is (the same object). The copies define own data properties only, so no
+ * prototype is ever set.
  */
 export function withProtoKeyCarried(message: JSONRPCMessage): JSONRPCMessage {
-  if (!isJSONRPCRequest(message) || message.method !== "tools/call") return message;
+  if (!isJSONRPCRequest(message) || !ARGUMENT_METHODS.has(message.method)) return message;
   const params: unknown = message.params;
   if (typeof params !== "object" || params === null || Array.isArray(params)) return message;
   if (!Object.prototype.hasOwnProperty.call(params, "arguments")) return message;
@@ -888,8 +895,8 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
     // serveStdio queues each message and dispatches it from an async pump, so a request followed at
     // once by EOF would otherwise be uncounted when the drain looks (resources and prompts included).
     // A cancellation settles it (the SDK sends no reply to a cancelled request).
-    // A tools/call argument named `__proto__` is carried past the SDK's re-parse so the tool's strict
-    // schema rejects it like any unknown key (withProtoKeyCarried).
+    // A tools/call or prompts/get argument named `__proto__` is carried past the SDK's re-parse so
+    // the strict schema rejects it like any unknown key (withProtoKeyCarried).
     const sdkOnMessage = transport.onmessage;
     transport.onmessage = (message) => {
       if (isJSONRPCRequest(message)) {
@@ -902,7 +909,8 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
         }
       }
       const carried = withProtoKeyCarried(message);
-      if (carried !== message) logger.warn("transport.proto_key", { method: "tools/call" });
+      if (carried !== message && isJSONRPCRequest(carried))
+        logger.warn("transport.proto_key", { method: carried.method });
       sdkOnMessage?.(carried);
     };
     // the transport closes itself on a frame over its read cap and pauses stdin: run the close

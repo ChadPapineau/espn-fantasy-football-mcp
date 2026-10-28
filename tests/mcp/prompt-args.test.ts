@@ -5,11 +5,22 @@
 //    arguments object; omitted now reads as {} and a required argument still fails on itself;
 //  - Stage C finding `prompts-stream-dst-spelling`: espn.stream took `DST` only and handed the model
 //    `position="DST"`, which espn_list_players and espn_analyze_waivers refuse (VALIDATION
-//    unknown_position); both spellings are accepted and the prompt carries the tools' `D/ST`.
+//    unknown_position); both spellings are accepted and the prompt carries the tools' `D/ST`;
+//  - the Stage C final gate: an argument key a prompt does not take was stripped and the prompt
+//    rendered (`__proto__` too, which tools/call answers VALIDATION for); every prompt's object is
+//    strict now, the key refused -32602 and never quoted (the stdio `__proto__` leg:
+//    tests/mcp/serve.test.ts).
 // Both eras: the legacy initialize session and the 2026-07-28 stateless one (serveStdio).
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PROMPTS, promptArgsSchema, toToolVocabulary } from "../../src/mcp/prompts/index.js";
+import { z } from "zod/v4";
+import {
+  ALL_PROMPTS,
+  PROMPTS,
+  promptArgsSchema,
+  toToolVocabulary,
+  unknownArgumentMessage,
+} from "../../src/mcp/prompts/index.js";
 import { call, connect, makeWorld, type World } from "./helpers/world.js";
 
 let world: World;
@@ -105,9 +116,41 @@ describe.each([0, 1])("prompt arguments (session %i)", (i) => {
     const stream = list.find((p) => p.name === "espn.stream");
     expect(weekly?.arguments).toEqual([{ name: "week", required: false }]);
     expect(stream?.arguments).toEqual([{ name: "position", required: true }]);
-    expect(list.find((p) => p.name === "espn.onboard")?.arguments).toBeUndefined();
+    // an argument-less prompt registers its (empty, strict) schema too: it lists no argument
+    expect(list.find((p) => p.name === "espn.onboard")?.arguments).toEqual([]);
   });
+
+  it.each(ALL_PROMPTS.map((p) => [p.name, p] as const))(
+    "%s refuses an argument key it does not take, never quoting it; the same call without it renders",
+    async (name, spec) => {
+      const declared = Object.keys(spec.args.shape);
+      const valid = Object.fromEntries(declared.map((k) => [k, VALID_VALUE[k] ?? ""]));
+      const e = await client()
+        .getPrompt({ name, arguments: { ...valid, zz_undeclared: "7" } })
+        .then(
+          () => null,
+          (x: unknown) => x,
+        );
+      expect(e, name).not.toBeNull();
+      const message = String((e as { message?: unknown }).message);
+      expect((e as { code?: unknown }).code).toBe(-32602);
+      expect(message).toContain(unknownArgumentMessage(spec.args));
+      expect(message).not.toContain("zz_undeclared");
+      const r = await client().getPrompt({ name, arguments: valid });
+      expect(r.messages.length).toBeGreaterThan(0);
+    },
+  );
 });
+
+/** A valid value of every declared prompt argument (the controls above). */
+const VALID_VALUE: Readonly<Record<string, string>> = {
+  week: "7",
+  position: "K",
+  what: "start the kicker",
+  offer: "my WR for your RB",
+  player: "12345",
+  claim: "the backup gets more work",
+};
 
 describe("the argument helpers", () => {
   it("promptArgsSchema reads undefined as {} and validates everything else unchanged", async () => {
@@ -120,6 +163,46 @@ describe("the argument helpers", () => {
     expect("issues" in bad && bad.issues !== undefined && bad.issues.length > 0).toBe(true);
     const bad2 = await s["~standard"].validate("not an object");
     expect("issues" in bad2 && bad2.issues !== undefined && bad2.issues.length > 0).toBe(true);
+  });
+
+  it("promptArgsSchema refuses undeclared keys with one fixed issue and keeps the others", async () => {
+    const weekly = PROMPTS.find((p) => p.name === "espn.weekly");
+    const onboard = PROMPTS.find((p) => p.name === "espn.onboard");
+    if (weekly === undefined || onboard === undefined) throw new Error("no prompt");
+    expect(unknownArgumentMessage(weekly.args)).toBe(
+      "unknown argument key (this prompt takes: week)",
+    );
+    expect(unknownArgumentMessage(onboard.args)).toBe(
+      "unknown argument key (this prompt takes no arguments)",
+    );
+    // an own `__proto__` key (what JSON.parse builds) and a plain one: one issue, no key quoted
+    const hostile = JSON.parse('{"week":"x","__proto__":"a","b\\"c":"d"}') as unknown;
+    const r = await promptArgsSchema(weekly.args)["~standard"].validate(hostile);
+    const issues = "issues" in r ? (r.issues ?? []) : [];
+    expect(issues.map((i) => i.message)).toContain(unknownArgumentMessage(weekly.args));
+    expect(issues.find((i) => i.message === unknownArgumentMessage(weekly.args))?.path).toEqual([]);
+    // the invalid declared value is still reported on its own path
+    expect(issues.some((i) => (i.path ?? []).map(String).join(".") === "week")).toBe(true);
+    expect(JSON.stringify(issues)).not.toMatch(/__proto__|b\\"c/);
+    expect(await promptArgsSchema(onboard.args)["~standard"].validate({})).toEqual({ value: {} });
+  });
+
+  it("every prompt's argument object is strict (an undeclared key never passes)", () => {
+    for (const p of ALL_PROMPTS) expect(p.args.safeParse({ zz: "x" }).success, p.name).toBe(false);
+  });
+
+  it("an asynchronous argument schema's issues are coded the same way", async () => {
+    const asyncArgs = z.strictObject({
+      week: z.string().refine((v) => Promise.resolve(v !== "x")),
+    });
+    const s = promptArgsSchema(asyncArgs);
+    const pending = s["~standard"].validate({ week: "3", zz: "y" });
+    expect(pending).toBeInstanceOf(Promise);
+    const r = await pending;
+    expect("issues" in r ? r.issues?.map((i) => i.message) : []).toEqual([
+      "unknown argument key (this prompt takes: week)",
+    ]);
+    expect(await s["~standard"].validate({ week: "3" })).toEqual({ value: { week: "3" } });
   });
 
   it("toToolVocabulary maps only the listed values of the listed argument", () => {
