@@ -42,6 +42,7 @@ import {
   playerSelectorSchema,
   positionsSchema,
   singlePlayerSelectorSchema,
+  type PlayerSelector,
 } from "../bounds.js";
 import { bareTextSchema, type InputStamp } from "../envelope.js";
 import { EffError } from "../errors.js";
@@ -60,6 +61,7 @@ import {
   newsRefsOf,
   newsSelectionOf,
   type NewsSelection,
+  isTeamUnitIdentity,
   optionalDataset,
   readOpts,
   requiredDataset,
@@ -964,6 +966,62 @@ export const newsSchema = z.strictObject({
     .max(50),
 });
 
+/**
+ * The news selection of an id selector: the players the selector resolved, plus every asked id it
+ * did not. A news item names its players by ESPN id (and the crosswalk's gsis id at load), so a
+ * player is matched by the id itself — his platform record is not needed. Before, an id the pool
+ * read did not return (a rostered practice-squad player, a pool page that left him out) was dropped
+ * with no warning: `players: {player_ids: [his id]}` answered no items, while the same item came
+ * back for his team with the "no crosswalk pair" warning (Stage C finding
+ * crosswalk-unpaired-joins-silent). An asked ESPN id that neither the pool read nor the player
+ * universe knows is still matched, and counted as not found, as every selector tool counts it; an
+ * asked gsis id is matched as given (the refs carry it), counted when the crosswalk knows no player
+ * of it.
+ */
+export function newsSelectionOfSelector(
+  ctx: ToolContext,
+  selector: PlayerSelector,
+  resolved: readonly PlatformPlayer[],
+  warnings: string[],
+): NewsSelection {
+  const base = newsSelectionOf(ctx, resolved);
+  if (!("player_ids" in selector) && !("gsis_ids" in selector)) return base;
+  const espn = new Set(base.espn_ids);
+  const gsis = new Set(base.gsis_ids);
+  let unpaired = base.unpaired;
+  let missing = 0;
+  if ("player_ids" in selector) {
+    const found = new Set(resolved.map((p) => p.ref.id));
+    const rest = [...new Set(selector.player_ids)].filter((id) => !found.has(id));
+    let known = new Map<number, number>();
+    if (rest.length > 0)
+      try {
+        known = new Map(
+          ctx.services.playerUniverse.byIds(rest).rows.map((r) => [r.espn_id, r.position_id]),
+        );
+      } catch {
+        known = new Map();
+      }
+    for (const id of rest) {
+      espn.add(id);
+      const position = known.get(id);
+      const pair = crosswalkOf(ctx, id, position ?? 0);
+      if (pair.gsis_id !== null) gsis.add(pair.gsis_id);
+      else if (position === undefined && !isTeamUnitIdentity({ espn_id: id, position_id: 0 }))
+        missing++;
+      else if (!isTeamUnitIdentity({ espn_id: id, position_id: position ?? 0 })) unpaired = true;
+    }
+  } else
+    for (const g of new Set(selector.gsis_ids)) {
+      gsis.add(g);
+      const id = espnIdOfGsis(ctx, g);
+      if (id === null) missing++;
+      else espn.add(id);
+    }
+  if (missing > 0) warnings.push(`${String(missing)} requested player(s) not found`);
+  return { espn_ids: [...espn], gsis_ids: [...gsis], unpaired };
+}
+
 /** D6 `espn_get_news`. */
 export const getNews = defineTool({
   name: "espn_get_news",
@@ -1019,7 +1077,7 @@ export const getNews = defineTool({
         inputs,
         warnings,
       );
-      selection = newsSelectionOf(ctx, sel.players);
+      selection = newsSelectionOfSelector(ctx, args.players, sel.players, warnings);
     } else if (args.nfl_team !== undefined) {
       const team = args.nfl_team;
       const uni = await universeOf(ctx, league.ref.season, inputs, warnings);

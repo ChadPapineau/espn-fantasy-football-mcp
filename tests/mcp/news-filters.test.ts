@@ -208,4 +208,56 @@ describe("D6 finds an unpaired player's items by his ESPN id (Stage C crosswalk-
     expect(want.some((it) => !refsName(it, subject))).toBe(true);
     everyOrSaidCut(both, want.slice(0, 50));
   });
+
+  it("an asked id the pool read does not return is still matched by his ESPN id; an id nobody knows is counted", async () => {
+    // the final gate's case: a rostered unpaired player the pool read left out (kona_player_info
+    // pages a practice-squad call-up rarely) — `players: {player_ids: [him]}` answered 0 items and
+    // no warning while the same item came back for his team, with the "no crosswalk pair" line
+    const subject = unpairedRefs().find((id) => inWindow.some((it) => refsName(it, id)));
+    if (subject === undefined) throw new Error("no unpaired player with an in-window item");
+    const his = inWindow.filter((it) => refsName(it, subject));
+    const platform = world.services.platform;
+    const blind = new Proxy(platform, {
+      get(target, key) {
+        if (key === "getPlayers")
+          return async (...a: Parameters<typeof platform.getPlayers>) => {
+            const got = await target.getPlayers(...a);
+            return { ...got, value: got.value.filter((p) => p.ref.id !== subject) };
+          };
+        const v: unknown = Reflect.get(target, key);
+        return typeof v === "function" ? (v as (...x: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const c = await connect(world, {
+      options: { toolset: "full" },
+      services: { platform: blind },
+    });
+    try {
+      const alone = await news(c.client, {
+        since_hours: WEEK_H,
+        players: { player_ids: [subject] },
+      });
+      everyOrSaidCut(alone, his.slice(0, 20));
+      expect(alone.warnings).toContain(
+        "a selected player has no crosswalk pair: his items are matched by the ESPN id in their refs",
+      );
+      expect(alone.warnings.some((w) => w.includes("not found"))).toBe(false);
+      // an id neither the pool read nor the player universe knows: still no silent drop — counted
+      const unknown = await news(c.client, {
+        since_hours: WEEK_H,
+        players: { player_ids: [subject, 99_999_991] },
+      });
+      everyOrSaidCut(unknown, his.slice(0, 20));
+      expect(unknown.warnings).toContain("1 requested player(s) not found");
+      // a gsis id is matched as the refs carry it; one the crosswalk knows no player of is counted
+      const gsisOnly = await news(c.client, {
+        since_hours: WEEK_H,
+        players: { gsis_ids: ["00-0099999"] },
+      });
+      expect(gsisOnly.items).toEqual([]);
+      expect(gsisOnly.warnings).toContain("1 requested player(s) not found");
+    } finally {
+      await c.close();
+    }
+  });
 });
