@@ -93,8 +93,13 @@ describe("full names", () => {
     };
     const mm = buildPlayerMatcher([...universe, twin]);
     expect(mm.match("Bijan Robinson scores")).toEqual([]);
-    expect(mm.match("Bijan Robinson, Dolphins")[0]?.espn_id).toBe(9_000_001);
-    expect(mm.match("Bijan Robinson, Falcons")[0]?.espn_id).toBe(4430807);
+    // ruling R8-6 (a): a team after a comma labels the name only in its name tag, before the colon
+    expect(mm.match("Bijan Robinson, Dolphins: Out")[0]?.espn_id).toBe(9_000_001);
+    expect(mm.match("Bijan Robinson, Falcons: Out")[0]?.espn_id).toBe(4430807);
+    // …and with no colon it is no label, and the item names a team: no ref (each the team's holder
+    // at f41e810)
+    expect(mm.match("Bijan Robinson, Dolphins")).toEqual([]);
+    expect(mm.match("Bijan Robinson, Falcons")).toEqual([]);
   });
 
   it("matches a free agent by full name only", () => {

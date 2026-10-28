@@ -19,12 +19,9 @@
 // plays in it, never which side he is on (`pair`; Stage C remediation news-match-universe-homonyms,
 // attempt 4).
 //
-// This is the reading a name only one universe player holds is matched with, exactly as before ruling
-// R8-3 (changelog §R8): `cue`, `opponent` and `pair`, over against, vs, vs., versus, facing and
-// "<team> matchup", and `attachedTeams` / `movedTeams` as here. The holders of a shared name are told
-// apart with the shared-name reading of cues.ts (R8-3 clauses 2 and 3), which reads the same teams
-// with its own closed lists; this file also holds the team data that reading adds (the
-// abbreviations and the short names feeds write, the two homes that hold two teams).
+// Ruling R8-6 (changelog §R8): this is the reading a name only one universe player holds is matched
+// with, and its code is exactly `f41e810`'s. A name several universe players hold is read by labels.ts
+// (a label written next to it, and the broad scan), never by this file's cues, games or moves.
 import type { NflTeam } from "../../config/schema.js";
 
 /** Nicknames and their common short forms. */
@@ -48,40 +45,6 @@ export const TEAM_HOMES: Readonly<Record<string, NflTeam>> = Object.freeze({
   "New England": "NE", "New Orleans": "NO", Philadelphia: "PHI", Philly: "PHI",
   Pittsburgh: "PIT", Seattle: "SEA", "San Francisco": "SF", "Tampa Bay": "TB", Tennessee: "TEN",
   Washington: "WAS",
-});
-
-/**
- * The team abbreviations feeds write (nflverse's, and ESPN's LAR / WSH and the JAC some feeds use),
- * read only in capitals and only by the shared-name reading, where a context makes one a team: right
- * after a cue word ("vs. MIN", "@ MIN", "Sacks MIN QB"), or in a tag after a name ("Justin Jefferson,
- * CLE:", "(PHI)", "(CLE - LB)"). Elsewhere a capital pair like "NO" or "LA" is a word.
- */
-// prettier-ignore
-export const TEAM_ABBREVIATIONS: Readonly<Record<string, NflTeam>> = Object.freeze({
-  ARI: "ARI", ATL: "ATL", BAL: "BAL", BUF: "BUF", CAR: "CAR", CHI: "CHI", CIN: "CIN", CLE: "CLE",
-  DAL: "DAL", DEN: "DEN", DET: "DET", GB: "GB", HOU: "HOU", IND: "IND", JAX: "JAX", JAC: "JAX",
-  KC: "KC", LA: "LA", LAR: "LA", LAC: "LAC", LV: "LV", MIA: "MIA", MIN: "MIN", NE: "NE", NO: "NO",
-  NYG: "NYG", NYJ: "NYJ", PHI: "PHI", PIT: "PIT", SEA: "SEA", SF: "SF", TB: "TB", TEN: "TEN",
-  WAS: "WAS", WSH: "WAS",
-});
-
-/**
- * The short names feeds also write for a team ("the Vikes", "the Pack"), read only by the
- * shared-name reading (capitalised, like a nickname): an item naming a team so is no item that
- * names no team (R8-3 clause 6).
- */
-// prettier-ignore
-export const TEAM_SHORT_NAMES: Readonly<Record<string, NflTeam>> = Object.freeze({
-  Vikes: "MIN", Fins: "MIA", Bolts: "LAC", Pack: "GB", Hawks: "SEA", Cards: "ARI", "G-Men": "NYG",
-});
-
-/**
- * The homes that hold two teams: no evidence alone, but the first words of a team's full name
- * ("the Los Angeles Rams", "New York Jets") in the shared-name reading.
- */
-export const SHARED_HOMES: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
-  "Los Angeles": Object.freeze(["LA", "LAC"] as const),
-  "New York": Object.freeze(["NYG", "NYJ"] as const),
 });
 
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -131,14 +94,6 @@ export interface TeamMention {
   readonly pair: { readonly team: NflTeam; readonly start: number } | null;
 }
 
-/** The cue words before a team that a unique name's reading knows (unchanged by R8-3). */
-export const LEGACY_CUES: readonly string[] = Object.freeze([
-  "against",
-  "vs",
-  "vs.",
-  "versus",
-  "facing",
-]);
 /** A cue word ending the text before a mention (with an optional "the"). */
 const OPPONENT_BEFORE_RE = /(?<![\p{L}\p{N}])(?:against|vs\.?|versus|facing)\s+(?:the\s+)?$/iu;
 /** "matchup" right after a mention (whitespace only between). */
@@ -152,6 +107,7 @@ const CUE_WINDOW = 24;
  */
 const PAIR_GAP_RE =
   /^(?:['’ʼ]s?)?(?:\s+(?:game|matchup|contest|meeting|clash|showdown|tilt))?\s+(?:against|vs\.?|versus|facing)\s+(?:the\s+)?$/iu;
+
 /** Every team mention of a (sanitised, case-preserved) text, in text order. */
 export function teamMentions(text: string): readonly TeamMention[] {
   const out: TeamMention[] = [];
@@ -260,7 +216,7 @@ export function attachedTeams(
  * A roster move a team makes, before the player it names: "Bengals sign CB Lamar Jackson", "Browns
  * waive LB Justin Jefferson" (role words may stand between the verb and the name).
  */
-export const TEAM_MOVES_RE = new RegExp(
+const TEAM_MOVES_RE = new RegExp(
   `^\\s+(?:re-?)?(?:sign|signs|signed|waive|waives|waived|release|releases|released|claim|claims|claimed|cut|cuts|promote|promotes|promoted|elevate|elevates|elevated|activate|activates|activated)(?:\\s+(?:${ATTACH_ALT}))*\\s+$`,
   "iu",
 );
@@ -270,7 +226,7 @@ export const TEAM_MOVES_RE = new RegExp(
  * practice squad". Never a trade ("traded to", "dealt to"): a traded player's team in the universe
  * is the one he left, and his news must not be blocked by it.
  */
-export const PLAYER_MOVE_RE =
+const PLAYER_MOVE_RE =
   /^\s*[:,]?\s*(?:(?:is|was|has\s+been|gets|got)\s+)?(?:re-?)?(?:signs?|signed|inks?|inked|joins?|joined|waived|released|cut|claimed(?:\s+off\s+waivers)?|promoted|elevated|lands?|landed)\s+(?:(?:with|by|to|on|onto)\s+)?(?:the\s+)?$/iu;
 
 /**
