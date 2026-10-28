@@ -1,12 +1,15 @@
 // match-r83.test.ts — ruling R8-3 (docs/plan/changelog.md §R8: the news matcher's shared names;
-// src/sources/news/match.ts, teams.ts, positions.ts; plan 07 D6), clause by clause, over the WHOLE
-// recorded ESPN universe built as the refresh wiring builds it (universeFromEspnPlayers over
+// src/sources/news/match.ts, cues.ts, teams.ts, positions.ts; plan 07 D6), clause by clause, over the
+// WHOLE recorded ESPN universe built as the refresh wiring builds it (universeFromEspnPlayers over
 // fixtures/espn/recorded/season/players_wl.json, ESPN's position_id joined in). Then the final gate's
 // four repro batteries of its fourth run (at f41e810: gk-homonyms*.mts, kept outside the repo), every
 // title with its label — the gate's own for battery 1, the batteries' stated intent for 2–4 — and
 // the outcome R8-3 gives it. Then fast-check properties over the universe's 16 shared full-name keys
 // and its unique names. The names are public NFL players of the recorded fixture; no league, owner or
-// member identifier. No network.
+// member identifier. No network. The expectations R8-3's fix round 2 changed (match-r83-round2.test.ts
+// holds the attack that drove it) are commented where they stand: clause 6's residual is an item
+// naming no team, no position and no cue, so an item naming one that leaves two holders gets no ref
+// (clause 5); a describing sentence elsewhere in an item never picks a holder.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import fc from "fast-check";
@@ -15,6 +18,7 @@ import { mergeName } from "../../../src/domain/crosswalk/normalize.js";
 import type { NflTeam } from "../../../src/config/schema.js";
 import { playersRows } from "../../../src/sources/espn_season/index.js";
 import {
+  AGAINST_CUES,
   buildNewsRows,
   buildPlayerMatcher,
   GAME_CUES,
@@ -22,11 +26,14 @@ import {
   MATCH_CONFIDENCE,
   NEWS_FILE_FORMAT,
   NOT_DESCRIBING,
+  PASSIVE_PLAY_CUES,
   PLAY_CUES,
+  PLAY_OBJECT_CUES,
   POSITION_WORDS,
   RESULT_CUES,
+  sharedMentions,
   TEAM_NICKNAMES,
-  teamMentions,
+  TEAM_RESULT_CUES,
   UNIVERSE_SQL,
   universeFromEspnPlayers,
   type NewsUniversePlayer,
@@ -106,18 +113,20 @@ describe("R8-3 clause 1: backlog choices 1–5 stand as built, under the new evi
 });
 
 describe("R8-3 clause 2: a team named loosely is never evidence FOR a holder of a shared name", () => {
-  it("it never raises a holder to full_name_team (each was 0.95)", () => {
+  it("it never raises a holder to full_name_team (each was 0.95), nor makes the item a residual", () => {
+    // fix round 2 (clauses 5 and 6): each went to the star at full_name at 52796bf. The item names a
+    // team, so it is no residual, and the team rules no holder out: no ref, counted
     for (const title of [
       "Justin Jefferson: Leads Vikings to win | Jefferson caught nine passes.",
       "Justin Jefferson: Notches 100 yards as Vikings roll",
-    ])
-      expect(refs(title), title).toEqual([[WR_JEFFERSON, "full_name"]]);
-    for (const title of [
       "Lamar Jackson: Signs extension with Ravens",
       "Ravens' John Harbaugh: Lamar Jackson day-to-day",
-      "Lamar Jackson: Ravens vs. Steelers moved to Monday",
     ])
-      expect(refs(title), title).toEqual([[QB_LAMAR, "full_name"]]);
+      expect(m.matchItem(title), title).toEqual({ refs: [], unresolved: 1 });
+    // a game is evidence (choice 2): it rules the free agent out, and leaves the star — at full_name
+    expect(refs("Lamar Jackson: Ravens vs. Steelers moved to Monday")).toEqual([
+      [QB_LAMAR, "full_name"],
+    ]);
   });
 
   it("full_name_team needs a team written next to the name or tied to it by a roster move", () => {
@@ -173,11 +182,36 @@ describe("R8-3 clause 3: a team named as the other side of a game or a play is t
   });
 
   it("the closed list, word by word: each names the opponent, the star's team or the namesake's", () => {
-    for (const cue of [...RESULT_CUES, ...PLAY_CUES]) {
-      const star = `Justin Jefferson: Big day | Jefferson made his mark ${cue} the Browns.`;
-      const namesake = `Justin Jefferson: Big day | Jefferson made his mark ${cue} the Vikings.`;
-      expect(refs(star), star).toEqual([[WR_JEFFERSON, "full_name"]]);
-      expect(refs(namesake), namesake).toEqual([]);
+    // fix round 2: each in its own form (cues.ts) — a result or "against" word after his doing, a
+    // play word right after his name and before the team's player, a passive one before "by"
+    const forms = (team: string): string[] => [
+      ...[...AGAINST_CUES, ...RESULT_CUES].map(
+        (c) => `Justin Jefferson: Big day | Jefferson caught two passes ${c} the ${team}.`,
+      ),
+      ...[...PLAY_CUES, ...PLAY_OBJECT_CUES].map(
+        (c) => `Justin Jefferson: Big day | Jefferson ${c} the ${team} quarterback twice.`,
+      ),
+      ...PASSIVE_PLAY_CUES.map(
+        (c) => `Justin Jefferson: Big day | Jefferson was ${c} twice by the ${team}.`,
+      ),
+    ];
+    const star = forms("Browns");
+    const namesake = forms("Vikings");
+    expect(star).toHaveLength(
+      AGAINST_CUES.length +
+        RESULT_CUES.length +
+        PLAY_CUES.length +
+        PLAY_OBJECT_CUES.length +
+        PASSIVE_PLAY_CUES.length,
+    );
+    for (const t of star) expect(refs(t), t).toEqual([[WR_JEFFERSON, "full_name"]]);
+    for (const t of namesake) expect(m.matchItem(t), t).toEqual({ refs: [], unresolved: 1 });
+    // the team-result words name a game between two teams only ("the Vikings fell to the Bengals")
+    for (const c of TEAM_RESULT_CUES) {
+      const game = `Justin Jefferson: Big day | Jefferson caught two passes as the Vikings ${c} the Bengals.`;
+      expect(refs(game), game).toEqual([[WR_JEFFERSON, "full_name"]]);
+      const draft = `Justin Jefferson: Rookie profile | Jefferson ${c} the Browns in the draft.`;
+      expect(refs(draft), draft).toEqual([]);
     }
   });
 
@@ -204,24 +238,27 @@ describe("R8-3 clause 3: a team named as the other side of a game or a play is t
   });
 });
 
-describe("teamMentions' shared-name reading (R8-3 clause 3): the closed, tested cue lists", () => {
+describe("sharedMentions' reading (cues.ts; R8-3 clause 3): the closed, tested cue lists", () => {
+  // fix round 2: the shared-name reading moved from teamMentions' `shared` field to cues.ts
   const read = (text: string) =>
-    teamMentions(text).map((t) => ({
+    sharedMentions(text).map((t) => ({
       team: t.team,
-      legacy: [t.cue, t.pair?.team ?? null],
-      shared: [t.shared.cue, t.shared.pair?.team ?? null],
+      cue: t.cue?.kind ?? (t.weak ? "matchup" : null),
+      pair: t.pair?.team ?? null,
     }));
 
   it("the lists, word for word", () => {
     expect(LEGACY_CUES).toEqual(["against", "vs", "vs.", "versus", "facing"]);
+    expect(AGAINST_CUES).toEqual([...LEGACY_CUES, "@"]);
     // prettier-ignore
     expect(RESULT_CUES).toEqual([
       "win over", "wins over", "victory over", "victories over", "triumph over", "rout of",
-      "loss to", "losses to", "lost to", "lose to", "loses to", "losing to",
-      "fell to", "falls to", "fall to", "falling to",
+      "shutout of", "blowout of", "win at", "wins at", "victory at",
+      "loss to", "losses to", "lost to", "lose to", "loses to", "losing to", "loss at", "losses at",
       "beat", "beats", "beating", "defeat", "defeats", "defeated", "defeating",
       "past", "matchup with", "matchups with",
     ]);
+    expect(TEAM_RESULT_CUES).toEqual(["fell to", "falls to", "fall to", "falling to"]);
     // prettier-ignore
     expect(PLAY_CUES).toEqual([
       "sack", "sacks", "sacked", "sacking", "strip-sack", "strip-sacks", "strip-sacked",
@@ -232,10 +269,24 @@ describe("teamMentions' shared-name reading (R8-3 clause 3): the closed, tested 
       "torch", "torches", "torched", "torching", "burn", "burns", "burned",
       "gash", "gashes", "gashed", "shred", "shreds", "shredded",
     ]);
+    // prettier-ignore
+    expect(PLAY_OBJECT_CUES).toEqual([
+      "strip", "strips", "stripped", "stripping", "force", "forces", "forced", "forcing",
+      "block", "blocks", "blocked", "blocking", "drop", "drops", "dropped", "dropping",
+      "get to", "gets to", "got to", "getting to", "pressure", "pressures", "pressured", "pressuring",
+      "stuff", "stuffs", "stuffed", "stuffing",
+    ]);
+    // prettier-ignore
+    expect(PASSIVE_PLAY_CUES).toEqual([
+      "sacked", "intercepted", "picked off", "tackled", "brought down", "stripped", "pressured",
+      "beaten", "beat", "defeated", "upset", "routed", "edged", "blanked", "shut out",
+    ]);
     expect(GAME_CUES).toEqual([
-      ...LEGACY_CUES,
+      ...AGAINST_CUES,
       ...RESULT_CUES,
+      ...TEAM_RESULT_CUES,
       ...PLAY_CUES,
+      ...PLAY_OBJECT_CUES,
       "host",
       "hosts",
       "hosted",
@@ -250,48 +301,55 @@ describe("teamMentions' shared-name reading (R8-3 clause 3): the closed, tested 
     ]);
   });
 
-  it("each result and play word names the team after it, in the shared reading only", () => {
-    for (const cue of [...RESULT_CUES, ...PLAY_CUES]) {
-      for (const text of [`Jefferson ${cue} the Browns`, `Jefferson ${cue} Browns`]) {
-        const [t] = read(text);
-        expect(t, text).toEqual({ team: "CLE", legacy: [null, null], shared: ["before", null] });
+  it("each result and play word names the team after it, in its form", () => {
+    for (const cue of [...AGAINST_CUES, ...RESULT_CUES])
+      for (const text of [`Jefferson ${cue} the Browns.`, `Jefferson ${cue} Browns in Week 8`]) {
+        const kind = AGAINST_CUES.includes(cue) ? "against" : "result";
+        expect(read(text), text).toEqual([{ team: "CLE", cue: kind, pair: null }]);
       }
-    }
-    // the legacy words are read alike in both; "matchup" after a team in both
-    expect(read("Out against the Browns")).toEqual([
-      { team: "CLE", legacy: ["before", null], shared: ["before", null] },
-    ]);
+    for (const cue of [...PLAY_CUES, ...PLAY_OBJECT_CUES])
+      for (const text of [`Jefferson ${cue} the Browns QB`, `Jefferson ${cue} a Browns pass`])
+        expect(read(text), text).toEqual([{ team: "CLE", cue: "play", pair: null }]);
+    for (const cue of PASSIVE_PLAY_CUES)
+      expect(read(`Jackson was ${cue} three times by the Browns.`)).toEqual([
+        { team: "CLE", cue: "passive", pair: null },
+      ]);
+    // "matchup" after a team in both readings
     expect(read("Questionable for Browns matchup")).toEqual([
-      { team: "CLE", legacy: ["after", null], shared: ["after", null] },
+      { team: "CLE", cue: "matchup", pair: null },
     ]);
   });
 
-  it("a result word before a team's possessive is no cue; a play word is", () => {
-    expect(read("Beats Browns' franchise sack record")[0]?.shared).toEqual([null, null]);
-    expect(read("Fell to the Browns' third string")[0]?.shared).toEqual([null, null]);
-    expect(read("Brought down the Vikings' quarterback")[0]?.shared).toEqual(["before", null]);
-    expect(read("Picks off a Ravens pass")[0]?.shared).toEqual(["before", null]);
+  it("a result word before a team's possessive is no cue; a play word is, before its player", () => {
+    expect(read("Beats Browns' franchise sack record")[0]?.cue).toBeNull();
+    expect(read("Fell to the Browns' third string")[0]?.cue).toBeNull();
+    expect(read("Brought down the Vikings' quarterback")[0]?.cue).toBe("play");
+    expect(read("Picks off a Ravens pass")[0]?.cue).toBe("play");
+    // a play word before anything but the team's player or unit is no play (fix round 2)
+    expect(read("Shreds the Browns' linebacker depth")[0]?.cue).toBeNull();
+    expect(read("Torched the Browns on social media")[0]?.cue).toBeNull();
+    expect(read("Torches Browns for 150 yards")[0]?.cue).toBe("play");
   });
 
   it("game words between two teams name a game; after a single team they name no opponent", () => {
     expect(read("Vikings host Browns on Sunday")).toEqual([
-      { team: "MIN", legacy: [null, null], shared: [null, "CLE"] },
-      { team: "CLE", legacy: [null, null], shared: [null, "MIN"] },
+      { team: "MIN", cue: null, pair: "CLE" },
+      { team: "CLE", cue: null, pair: "MIN" },
     ]);
     expect(read("in the Browns' loss to the Vikings")).toEqual([
-      { team: "CLE", legacy: [null, null], shared: [null, "MIN"] },
-      { team: "MIN", legacy: [null, null], shared: ["before", "CLE"] },
+      { team: "CLE", cue: null, pair: "MIN" },
+      { team: "MIN", cue: "result", pair: "CLE" },
     ]);
-    expect(read("the Vikings' 24-20 win over the Browns").map((t) => t.shared)).toEqual([
+    expect(read("the Vikings' 24-20 win over the Browns").map((t) => [t.cue, t.pair])).toEqual([
       [null, "CLE"],
-      ["before", "MIN"],
+      ["result", "MIN"],
     ]);
     expect(read("Bills vs. Ravens")).toEqual([
-      { team: "BUF", legacy: [null, "BAL"], shared: [null, "BAL"] },
-      { team: "BAL", legacy: ["before", "BUF"], shared: ["before", "BUF"] },
+      { team: "BUF", cue: null, pair: "BAL" },
+      { team: "BAL", cue: "against", pair: "BUF" },
     ]);
     for (const text of ["Visits Bears", "Hosts Bears", "Faces Bears", "Top Bears", "at Bears"])
-      expect(read(text)[0]?.shared, text).toEqual([null, null]);
+      expect(read(text)[0], text).toEqual({ team: "CHI", cue: null, pair: null });
   });
 });
 
@@ -308,32 +366,37 @@ describe("R8-3 clause 4: a position written next to the name, or describing the 
     expect(refs("DT Marcus Harris: Records sack")).toEqual([[DT_HARRIS, "full_name"]]);
   });
 
-  it("describing the subject: a sentence opening 'The [<team>] <position>' about him", () => {
-    expect(
-      refs(
-        "Justin Jefferson: Dealing with knee injury | The linebacker did not practice Wednesday.",
-      ),
-    ).toEqual([[LB_JEFFERSON, "full_name"]]);
-    expect(
-      refs(
-        "Justin Jefferson: Questionable for Sunday | Jefferson (ankle) was limited. The defender has started every game.",
-      ),
-    ).toEqual([[LB_JEFFERSON, "full_name"]]);
+  it("describing the subject: the headline's clause about him decides; a sentence elsewhere never picks", () => {
+    // the clause a headline's topic colon opens right after the name is his label
     expect(refs("Lamar Jackson injury update: Bengals CB dealing with ankle sprain")).toEqual([
       [CB_LAMAR, "full_name"],
     ]);
+    // fix round 2: a sentence elsewhere may describe the player he faced ("| The cornerback jumped
+    // the route."), so it no longer picks the holder its position fits — each went to it at 52796bf
+    // (the LB, the LB, the WR); the item names a position, so it is no residual: no ref, counted
+    for (const title of [
+      "Justin Jefferson: Dealing with knee injury | The linebacker did not practice Wednesday.",
+      "Justin Jefferson: Questionable for Sunday | Jefferson (ankle) was limited. The defender has started every game.",
+      "Justin Jefferson: Practices fully | The Vikings wideout faces Cleveland on Sunday.",
+    ])
+      expect(m.matchItem(title), title).toEqual({ refs: [], unresolved: 1 });
+    // … but it supports the holder a cue left, whom a ruled-out holder outshines
     expect(
-      refs("Justin Jefferson: Practices fully | The Vikings wideout faces Cleveland on Sunday."),
-    ).toEqual([[WR_JEFFERSON, "full_name"]]);
+      refs(
+        "Justin Jefferson: Records 12 tackles in loss to Vikings | The Browns linebacker led the team.",
+      ),
+    ).toEqual([[LB_JEFFERSON, "full_name"]]);
   });
 
   it("a sentence describing someone else is not the subject's", () => {
-    // another person named before it, or one named after it in its sentence
+    // another person named before it: no evidence about him — but the item names a position, so
+    // it is no residual (fix round 2: no ref for him; the WR at 52796bf), never the LB
     expect(
       refs(
         "Justin Jefferson: Catches TD | Denzel Ward covered him. The linebacker was beaten twice.",
       ),
-    ).toContainEqual([WR_JEFFERSON, "full_name"]);
+    ).toEqual([[idOf("Denzel Ward", "CLE"), "full_name"]]);
+    // a person named after it in its sentence: plainly another player's, the item a residual
     expect(
       refs("Justin Jefferson: Catches TD | The linebacker who covered Jefferson was benched."),
     ).toEqual([[WR_JEFFERSON, "full_name"]]);
@@ -359,10 +422,13 @@ describe("R8-3 clause 4: a position written next to the name, or describing the 
     expect(
       refs("LB Justin Jefferson: Records sack | The linebacker led the team in tackles."),
     ).toEqual([[LB_JEFFERSON, "full_name"]]);
-    // they contradict each other: no holder plays both (choice 1)
+    // fix round 2: a describing sentence is never read past his label — the WR written next to the
+    // name decides (no ref at 52796bf, where the two were intersected)
     expect(
       refs("WR Justin Jefferson: Questionable | The linebacker did not practice Wednesday."),
-    ).toEqual([]);
+    ).toEqual([[WR_JEFFERSON, "full_name"]]);
+    // two labels that contradict each other: no holder plays both (choice 1)
+    expect(refs("WR Justin Jefferson (LB): Questionable")).toEqual([]);
     // the evidence of every occurrence is pooled: the second, bare one is the same LB (it went to
     // the WR by prominence), and a suffix written once spells the name for the whole item
     expect(refs("LB Justin Jefferson: Records sack | Justin Jefferson added two tackles.")).toEqual(
@@ -382,14 +448,17 @@ describe("R8-3 clause 4: a position written next to the name, or describing the 
     );
     // the namesake's attached team alone never gives him the surname past the star (was the LB)
     expect(refs("Cleveland's Jefferson: Placed on IR")).toEqual([]);
-    // a sentence describing the surname when it is the item's subject (it holds no full name)
+    // fix round 2: a describing sentence never lifts the prominent sharer's block (the LB at 52796bf)
     expect(
       refs("Cleveland's Jefferson: Placed on IR | The linebacker will miss four games."),
-    ).toEqual([[LB_JEFFERSON, "last_name_team"]]);
-    // … not when another person is named between them
+    ).toEqual([]);
     expect(
       refs("Cleveland's Jefferson: Placed on IR | Ward was beaten. The linebacker will miss time."),
     ).toEqual([]);
+    // a position written next to the surname does (its own label)
+    expect(refs("Cleveland LB Jefferson: Placed on IR")).toEqual([
+      [LB_JEFFERSON, "last_name_team"],
+    ]);
   });
 });
 
@@ -449,23 +518,26 @@ describe("R8-3 clause 6: the accepted residual — no team, no position, no cue 
       ["Lamar Jackson: Inks reserve/future contract", QB_LAMAR],
     ] as const)
       expect(refs(title), title).toEqual([[id, "full_name"]]);
-    // the star's own team named loosely, in wording no cue knows, is no evidence: the residual's
-    // 0.80, never the 0.95 it was (clause 2)
-    expect(refs("Justin Jefferson: Catches TD as Vikings rally late")).toEqual([
-      [WR_JEFFERSON, "full_name"],
-    ]);
-    expect(m.match("Justin Jefferson: Catches TD as Vikings rally late")[0]?.match_confidence).toBe(
+    expect(m.match("Lamar Jackson: Inks reserve/future contract")[0]?.match_confidence).toBe(
       MATCH_CONFIDENCE.full_name,
     );
+    // fix round 2: the star's own team named loosely, in wording no cue knows, makes the item no
+    // residual — no ref, counted (the WR at full_name at 52796bf, at 0.95 at f41e810)
+    expect(m.matchItem("Justin Jefferson: Catches TD as Vikings rally late")).toEqual({
+      refs: [],
+      unresolved: 1,
+    });
   });
 });
 
 // ---------------------------------------------------------------------------------------------------
 // The final gate's batteries (fourth run, at f41e810). Labels: "star" / "namesake" — whose item it is
 // (never the other holder's ref); "either" — genuinely ambiguous; "residual" — the namesake's by its
-// words, but naming no holder's team, no position and no cue, so R8-3 clause 6 gives the prominent
-// holder at full_name, as accepted; "open" — the one item R8-3's ruled evidence still gives the star
-// (choice 3 stands as built: a roster move to his own team ties it to him; docs/evals/stage-c-backlog.md).
+// words, but naming no team, no position and no cue, so R8-3 clause 6 gives the prominent holder at
+// full_name, as accepted; "open" — the one item R8-3's ruled evidence still gives the star (choice 3
+// stands as built: a roster move to his own team ties it to him; docs/evals/stage-c-backlog.md).
+// Fix round 2 changed the outcomes commented "r2" (strict clause 6; describing sentences never pick;
+// tags and label words written next to the name attach its team), none to the other holder.
 
 type Who = "star" | "namesake";
 type Label = Who | "either" | "residual" | "open";
@@ -506,15 +578,18 @@ describe("the final gate's batteries, every labelled title (fourth run, at f41e8
     // prettier-ignore
     const cases: readonly Case[] = [
       // the star's news, phrased in ways the tests did not use
-      ["JJ", "star", "Justin Jefferson: Practices fully Wednesday | The Vikings wideout faces Cleveland on Sunday.", [["star", "full_name"]]],
+      // r2: a describing sentence never picks; the item names teams (the WR at 52796bf)
+      ["JJ", "star", "Justin Jefferson: Practices fully Wednesday | The Vikings wideout faces Cleveland on Sunday.", []],
       ["JJ", "star", "Justin Jefferson catches two touchdowns as Minnesota beats Cleveland", []],
       ["JJ", "star", "Browns' secondary must slow Justin Jefferson", []],
       ["JJ", "star", "Cleveland defense prepares for Justin Jefferson", []],
       ["JJ", "star", "Justin Jefferson (hamstring) questionable for Sunday vs. CLE", [["star", "full_name"]]],
-      ["JJ", "star", "Justin Jefferson, WR, Minnesota: Questionable", [["star", "full_name"]]],
+      // r2: the tag attaches Minnesota (full_name at 52796bf)
+      ["JJ", "star", "Justin Jefferson, WR, Minnesota: Questionable", [["star", "full_name_team"]]],
       ["JJ", "star", "Minnesota Vikings star Justin Jefferson ruled out", [["star", "full_name_team"]]],
       ["JJ", "star", "Justin Jefferson: Torches Browns for 150 yards", [["star", "full_name"]]],
-      ["JJ", "star", "Justin Jefferson: Leads Vikings to win | Jefferson caught nine passes.", [["star", "full_name"]]],
+      // r2: names a team loosely, so no residual (the WR at 52796bf)
+      ["JJ", "star", "Justin Jefferson: Leads Vikings to win | Jefferson caught nine passes.", []],
       ["JJ", "star", "Kevin O'Connell: Justin Jefferson will play Sunday", [["star", "full_name"]]],
       ["JJ", "star", "Justin Jefferson: Questionable, Browns next | Jefferson (hamstring) did not practice.", []],
       ["JJ", "star", "Justin Jefferson and the Vikings visit the Browns in Week 9", []],
@@ -523,7 +598,8 @@ describe("the final gate's batteries, every labelled title (fourth run, at f41e8
       // the namesake's news
       ["JJ", "namesake", "Justin Jefferson: Records 12 tackles in loss to Vikings | The Browns linebacker led the team.", [["namesake", "full_name"]]],
       ["JJ", "namesake", "Browns linebacker Justin Jefferson suspended", [["namesake", "full_name_team"]]],
-      ["JJ", "namesake", "Justin Jefferson, LB, Cleveland: Out with knee injury", [["namesake", "full_name"]]],
+      // r2: the tag attaches Cleveland (full_name at 52796bf)
+      ["JJ", "namesake", "Justin Jefferson, LB, Cleveland: Out with knee injury", [["namesake", "full_name_team"]]],
       ["JJ", "namesake", "Cleveland's Justin Jefferson: Placed on IR", []],
       ["JJ", "namesake", "Justin Jefferson: Released by Browns", []],
       ["JJ", "namesake", "Vikings sign LB Justin Jefferson off Browns practice squad", []],
@@ -533,15 +609,17 @@ describe("the final gate's batteries, every labelled title (fourth run, at f41e8
       ["LJ", "namesake", "Ravens sign CB Lamar Jackson to practice squad", [["namesake", "full_name"]]],
       ["LJ", "open", "Lamar Jackson: Signs with Ravens practice squad", [["star", "full_name_team"]]],
       ["LJ", "namesake", "Cornerback Lamar Jackson: Works out for Ravens", [["namesake", "full_name"]]],
-      ["LJ", "namesake", "Lamar Jackson: Claimed off waivers by Ravens | The cornerback joins Baltimore's secondary.", [["namesake", "full_name"]]],
+      // r2: the describing sentence only blocks the QB the move ties (the CB at 52796bf)
+      ["LJ", "namesake", "Lamar Jackson: Claimed off waivers by Ravens | The cornerback joins Baltimore's secondary.", []],
       ["LJ", "namesake", "Free-agent cornerback Lamar Jackson visits Bengals", [["namesake", "full_name"]]],
       ["LJ", "namesake", "Lamar Jackson: Intercepts Ravens QB", []],
       // the star's own (Ravens QB)
       ["LJ", "star", "Lamar Jackson: Throws three TDs vs. Bengals", [["star", "full_name"]]],
       ["LJ", "star", "Baltimore QB Lamar Jackson questionable", [["star", "full_name_team"]]],
-      ["LJ", "star", "Lamar Jackson: Signs extension with Ravens", [["star", "full_name"]]],
-      ["LJ", "star", "Lamar Jackson (ankle) limited | The Ravens quarterback was limited.", [["star", "full_name"]]],
-      ["LJ", "star", "Ravens' John Harbaugh: Lamar Jackson day-to-day", [["star", "full_name"]]],
+      // r2: each names a team (a describing sentence never picks): no residual (the QB at 52796bf)
+      ["LJ", "star", "Lamar Jackson: Signs extension with Ravens", []],
+      ["LJ", "star", "Lamar Jackson (ankle) limited | The Ravens quarterback was limited.", []],
+      ["LJ", "star", "Ravens' John Harbaugh: Lamar Jackson day-to-day", []],
       ["LJ", "star", "Lamar Jackson: Sacked five times by Steelers", [["star", "full_name"]]],
       // Byron Young / Marcus Harris
       ["BY", "star", "Byron Young: Records two sacks against Eagles | The Rams edge rusher was dominant.", [["star", "full_name"]]],
@@ -565,8 +643,8 @@ describe("the final gate's batteries, every labelled title (fourth run, at f41e8
       ["LJ", "namesake", "Bengals CB Jackson: Signed to practice squad", []],
     ];
     expect(cases).toHaveLength(52);
-    // 35 refs: the gate's 34 ok and the open item (it counted 20 ok and 10 misattributions)
-    expect(battery(cases)).toEqual({ misattributed: 0, refd: 35 });
+    // 29 refs: 28 ok and the open item (the gate counted 20 ok and 10 misattributions; 52796bf 35)
+    expect(battery(cases)).toEqual({ misattributed: 0, refd: 29 });
   });
 
   it("battery 2 (gk-homonyms2.mts, 'more realistic namesake items')", () => {
@@ -574,21 +652,24 @@ describe("the final gate's batteries, every labelled title (fourth run, at f41e8
     const cases: readonly Case[] = [
       ["LJ", "namesake", "Lamar Jackson: Intercepts Ravens QB", []],
       ["LJ", "namesake", "Lamar Jackson: Picks off Ravens pass | Jackson returned the interception 30 yards.", []],
-      ["LJ", "residual", "Lamar Jackson: Works out for Bengals", [["star", "full_name"]]],
-      ["LJ", "residual", "Lamar Jackson: Visits Bears", [["star", "full_name"]]],
+      // r2: the gate's own label again — each names a team, so it is no residual (the QB at 52796bf)
+      ["LJ", "namesake", "Lamar Jackson: Works out for Bengals", []],
+      ["LJ", "namesake", "Lamar Jackson: Visits Bears", []],
       ["LJ", "residual", "Lamar Jackson: Inks reserve/future contract", [["star", "full_name"]]],
       ["LJ", "residual", "Lamar Jackson: Waived with injury designation | Jackson (hamstring) reverts to injured reserve.", [["star", "full_name"]]],
       ["JJ", "namesake", "Justin Jefferson: Sacks Vikings QB twice", []],
-      ["JJ", "namesake", "Justin Jefferson: Notches 11 tackles in Vikings loss | The linebacker led all defenders.", [["namesake", "full_name"]]],
+      // r2: a describing sentence never picks (the LB at 52796bf)
+      ["JJ", "namesake", "Justin Jefferson: Notches 11 tackles in Vikings loss | The linebacker led all defenders.", []],
       ["JJ", "residual", "Justin Jefferson: Placed on IR | Jefferson (knee) will miss at least four games.", [["star", "full_name"]]],
-      ["JJ", "namesake", "Justin Jefferson: Dealing with knee injury | The linebacker did not practice Wednesday.", [["namesake", "full_name"]]],
-      ["JJ", "namesake", "Justin Jefferson: Questionable for Sunday | Jefferson (ankle) was limited. The defender has started every game.", [["namesake", "full_name"]]],
+      // r2: a describing sentence never picks, and the item names a position: no residual (the LB)
+      ["JJ", "namesake", "Justin Jefferson: Dealing with knee injury | The linebacker did not practice Wednesday.", []],
+      ["JJ", "namesake", "Justin Jefferson: Questionable for Sunday | Jefferson (ankle) was limited. The defender has started every game.", []],
       ["BY", "namesake", "Byron Young: Sacks Rams QB", []],
       ["MH", "namesake", "Marcus Harris: Sacks Titans QB", []],
       ["MH", "residual", "Marcus Harris: Placed on IR | Harris (knee) will miss the rest of the season.", [["star", "full_name"]]],
       ["BY", "residual", "Byron Young: Placed on IR | Young (knee) will miss the rest of the season.", [["star", "full_name"]]],
     ];
-    expect(battery(cases)).toEqual({ misattributed: 0, refd: 10 });
+    expect(battery(cases)).toEqual({ misattributed: 0, refd: 5 });
   });
 
   it("battery 3 (gk-homonyms3.mts, RotoWire IDP blurbs naming only the opponent, and two controls)", () => {

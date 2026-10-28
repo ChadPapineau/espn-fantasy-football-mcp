@@ -70,9 +70,15 @@ describe("a shared full name (news-match-universe-homonyms)", () => {
     for (const title of [
       "Lamar Jackson: Could miss multiple games", // fixtures/news/labelled/items.json #2
       "Lamar Jackson: Viewed as 'unlikely' for Week 5", // holdout.json #1
-      "Lamar Jackson: Limited ahead of Bengals game | Jackson (ankle) was limited Wednesday.",
     ])
       expect(refs(title)).toEqual([[QB_LAMAR, "full_name"]]);
+    // R8-3 fix round 2 (clauses 5 and 6): naming a team, this one is no residual, and the team rules
+    // no holder out — no ref, counted (the QB at full_name before)
+    expect(
+      m.matchItem(
+        "Lamar Jackson: Limited ahead of Bengals game | Jackson (ankle) was limited Wednesday.",
+      ),
+    ).toEqual({ refs: [], unresolved: 1 });
     expect(refs("Ravens QB Lamar Jackson has ankle sprain")).toEqual([
       [QB_LAMAR, "full_name_team"],
     ]);
@@ -391,13 +397,18 @@ describe("a roster move ties its team to the name, like a team written next to i
     expect(refs("Justin Jefferson: Released by Browns")).toEqual([]);
   });
 
-  it("a trade or any other verb ties no team: the star's news stays his", () => {
+  it("a trade or any other verb ties no team: never the namesake's, never 0.95", () => {
+    // a cue's opponent rules the free agent out: the star's
+    expect(refs("Lamar Jackson: Throws three TDs in win over Bengals")).toEqual([
+      [QB_LAMAR, "full_name"],
+    ]);
+    // R8-3 fix round 2 (clauses 5 and 6): a team named loosely makes the item no residual and rules
+    // no holder out — no ref, counted (the QB at full_name before)
     for (const title of [
       "Lamar Jackson: Traded to Bengals in blockbuster",
-      "Lamar Jackson: Throws three TDs in win over Bengals",
       "Lamar Jackson: Cut through Bengals defense",
     ])
-      expect(refs(title), title).toEqual([[QB_LAMAR, "full_name"]]);
+      expect(m.matchItem(title), title).toEqual({ refs: [], unresolved: 1 });
   });
 
   it("movedTeams: the move's team, before the name (a team's move) or after it (his clause's)", () => {
@@ -506,10 +517,11 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
         [[WR_JEFFERSON, "full_name"]],
       ],
       // R8-3 clause 2: the Ravens are named loosely — never full_name_team on a shared name (was
-      // full_name_team)
+      // full_name_team); fix round 2: the game is in a sentence about no one, so it is no evidence
+      // about him, and the item, naming teams, is no residual: no ref (full_name before)
       [
         "Lamar Jackson: Limited | Jackson (ankle) was limited; the Ravens visit the Bengals Sunday.",
-        [[QB_LAMAR, "full_name"]],
+        [],
       ],
       [
         "Lamar Jackson: Throws three TDs in win over Bengals | Jackson completed 25 of 31 passes.",
@@ -580,14 +592,17 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
     expect(refs("Vikings WR Jefferson torches Browns")).toEqual([[WR_JEFFERSON, "last_name_team"]]);
   });
 
-  it("a cue is about the item's subject: it rules no one out for another name it holds", () => {
+  it("a cue is about the person it is written about: it rules no one out for another name", () => {
     // "against Ravens" is Chase's opponent; it ruled the Ravens QB out and gave his name to the
     // free-agent CB
-    const got = m.match(
+    const got = m.matchItem(
       "Ja'Marr Chase: Catches eight passes against Ravens | Chase outdueled Lamar Jackson.",
     );
-    expect(got.map((r) => r.espn_id)).toContain(QB_LAMAR);
-    expect(got.map((r) => r.espn_id)).not.toContain(CB_LAMAR);
+    expect(got.refs.map((r) => r.espn_id)).not.toContain(CB_LAMAR);
+    // R8-3 fix round 2 (clauses 5 and 6): for Lamar Jackson the Ravens are named loosely, so the item
+    // is no residual — no ref for him, counted (the Ravens QB at full_name before)
+    expect(got.refs.map((r) => r.espn_id)).toEqual([idOf("Ja'Marr Chase", "CIN")]);
+    expect(got.unresolved).toBe(1);
   });
 
   it("a team attached to the name decides; a namesake's attached team only blocks a star", () => {
