@@ -921,3 +921,47 @@ describe("deterministic edges (σ 0): ties, multi-week matchups, the deep tiebre
     expect(r?.pf_per_win).toBeNull();
   });
 });
+
+describe("marginal_weeks: the weeks the +3 ppw marginal spans (Stage C trade-locked-week-counted)", () => {
+  // E6 scales `plus_3_ppw` by the trade's points over exactly these weeks: my undecided
+  // regular-season matchups, each for the scoring periods it spans (the week in progress among
+  // them) — never the other teams' games, never the playoffs
+  it("counts my remaining regular-season matchups by their periods", async () => {
+    const t = [1, 2, 3, 4].map((id) => team(id, 1, 1, 200, { mu: 100, sigma: 20 }));
+    const out = await simulateSeason(
+      base({
+        teams: t,
+        remaining: [
+          { period: 3, home: 1, away: 2 }, // the week in progress: undecided, so counted
+          { period: 3, home: 3, away: 4 }, // not mine
+          { period: 4, home: 3, away: 1 },
+          { period: 5, home: 1, away: 4, weeks: 2 }, // a two-week matchup period
+        ],
+        playoff: { team_count: 2, seeding_rule: "TOTAL_POINTS_SCORED", reseed: false, rounds: [] },
+        seeding_mode: "espn_rule",
+        n_sims: 1000,
+      }),
+    );
+    expect(out.marginal_weeks).toBe(4);
+    const forThree = await simulateSeason(
+      base({
+        teams: t,
+        remaining: [{ period: 4, home: 3, away: 1 }],
+        me: 3,
+        playoff: { team_count: 2, seeding_rule: "TOTAL_POINTS_SCORED", reseed: false, rounds: [] },
+        seeding_mode: "espn_rule",
+        n_sims: 1000,
+      }),
+    );
+    expect(forThree.marginal_weeks).toBe(1);
+    const over = await simulateSeason(
+      base({
+        teams: t,
+        playoff: { team_count: 2, seeding_rule: "TOTAL_POINTS_SCORED", reseed: false, rounds: [] },
+        seeding_mode: "espn_rule",
+        n_sims: 1000,
+      }),
+    );
+    expect(over.marginal_weeks).toBe(0);
+  });
+});

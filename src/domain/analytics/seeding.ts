@@ -120,6 +120,14 @@ export interface SeasonSimOutcome {
   readonly warnings: readonly string[];
   /** The weekly models used (team id → μ, σ) — what a reader needs to reproduce a run. */
   readonly models: ReadonlyMap<number, { readonly mu: number; readonly sigma: number }>;
+  /**
+   * The scoring periods the `plus_3_ppw` marginal spans: those of `me`'s remaining (undecided)
+   * regular-season matchups — the week in progress among them — each counted for the periods its
+   * matchup spans. `marginal_values.plus_3_ppw` is the change from 3 more points in each of them,
+   * so a caller scaling it linearly must divide by this horizon, never by a count of its own weeks
+   * (E6's ΔU: Stage C finding trade-locked-week-counted).
+   */
+  readonly marginal_weeks: number;
 }
 
 // --- tiebreak chains (research 05 §2.1) ---------------------------------------------------------------
@@ -1052,6 +1060,7 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
     },
     partial: run.partial,
     warnings,
+    marginal_weeks: remaining.reduce((sum, g) => sum + (g.h === me || g.a === me ? g.L : 0), 0),
     models: new Map(
       req.teams.map((t, i) => [
         t.team_id,

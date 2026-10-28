@@ -583,6 +583,65 @@ describe("the health multiplier counts from the week ESPN's status describes (St
     expect(asIfStatusWeek.weekly_impact[0]).not.toEqual(later.weekly_impact[0]);
   });
 
+  it("ΔU spreads the trade's points over the simulator's horizon, never over the value weeks alone", async () => {
+    // The +3 ppw marginal is the change from 3 more points in EACH undecided regular-season week the
+    // simulator plays — the as-of week in progress among them, even when the trade cannot reach it.
+    // With identical weekly impacts, leaving the as-of week out (E6 mid-Sunday) scaled ΔU by
+    // 11/10 (the gate's reproduction: 0.0772 vs 0.0702), because Δ was divided by the 10 value weeks.
+    const TRADED = new Set([102, 204]);
+    const withReading = (t: TradeTeam, p: number, d3: number): TradeTeam => ({
+      ...t,
+      readings: [reading("espn_rule", p, 0.2, d3)],
+    });
+    // (A) every week listed, the as-of week worth 0 to the traded players (its trade delta is 0)
+    const zeroFirst = (t: TradeTeam): TradeTeam => ({
+      ...t,
+      players: t.players.map((x) =>
+        TRADED.has(x.player_id) ? { ...x, weekly: [0, ...x.weekly.slice(1)] } : x,
+      ),
+    });
+    // (B) the as-of week left out, as E6 does when a trade accepted now cannot reach its lineups
+    const dropFirst = (t: TradeTeam): TradeTeam => ({
+      ...t,
+      players: t.players.map((x) => ({ ...x, weekly: x.weekly.slice(1) })),
+    });
+    const me = withReading(ME, 0.5, 0.06);
+    const partner = withReading(PARTNER, 0.7, 0.03);
+    // the simulator's horizon from week 4: regular-season weeks 4..14 (both teams play each)
+    const horizon = (t: TradeTeam): TradeTeam => ({ ...t, marginal_weeks: 11 });
+    const a = await evaluation({
+      me: horizon(zeroFirst(me)),
+      teams: [partner, ...OTHERS].map((t) => horizon(zeroFirst(t))),
+    });
+    const b = await evaluation({
+      weeks: WEEKS.slice(1),
+      me: horizon(dropFirst(me)),
+      teams: [partner, ...OTHERS].map((t) => horizon(dropFirst(t))),
+    });
+    expect(b.weekly_impact).toEqual(a.weekly_impact.slice(1));
+    expect(a.weekly_impact[0]).toMatchObject({ week: WEEK, me: 0, partner: 0 });
+    expect(b.delta_u.me).toEqual(a.delta_u.me);
+    expect(b.delta_u.partner).toEqual(a.delta_u.partner);
+    // exactly the linear scaling: Δ_regular / 11 / 3 × the marginal
+    const regular = b.weekly_impact.filter((w) => w.week <= 14).reduce((s, w) => s + w.me, 0);
+    expect(b.delta_u.me.d_p_playoffs).toBeCloseTo((regular / 11 / 3) * 0.06, 3);
+    expect(b.delta_u.me.d_p_playoffs).not.toBe(0);
+    // without the simulator's count the regular season's weeks from the as-of week are the horizon
+    const fallback = await evaluation({
+      weeks: WEEKS.slice(1),
+      me: dropFirst(me),
+      teams: [partner, ...OTHERS].map(dropFirst),
+    });
+    expect(fallback.delta_u.me).toEqual(b.delta_u.me);
+    // a shorter horizon (the as-of week decided) scales ΔU up by exactly that ratio
+    const ten = await evaluation({
+      weeks: WEEKS.slice(1),
+      me: { ...dropFirst(me), marginal_weeks: 10 },
+      teams: [{ ...dropFirst(partner), marginal_weeks: 10 }, ...OTHERS.map(dropFirst)],
+    });
+    expect(ten.delta_u.me.d_p_playoffs).toBeCloseTo((regular / 10 / 3) * 0.06, 3);
+  });
+
   it("availability: the status's week by the status alone, a later week by its recovery and the weekly miss", () => {
     const p = { position: "RB", injury_status: "DOUBTFUL" };
     expect(availability(p, 0)).toBeCloseTo(0.059, 9);

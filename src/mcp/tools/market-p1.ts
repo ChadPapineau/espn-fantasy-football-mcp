@@ -33,6 +33,7 @@ import type { ActivityTeam } from "../../domain/analytics/leagueActivity.js";
 import type {
   LeagueActivityData,
   NewsItem,
+  SeasonReading,
   TradeData,
   UsageGameRow,
   WaiverVerdict,
@@ -593,6 +594,8 @@ export const analyzeTradeTool = defineTool({
     const standings = await standingsOrNull(ctx, inputs, warnings);
     // a deadline-stopped season run gives ΔU from fewer paths: its warning and flag reach the envelope
     const sims = { partial: false };
+    // the readings with the weeks their +3 ppw marginal spans (the simulator's horizon: the as-of
+    // week's undecided matchup counts there even when the trade cannot reach it — ΔU divides by it)
     const readingsFor = async (team: number) => {
       if (mGot === null) return null;
       const out = await runSeason(ctx, {
@@ -609,9 +612,9 @@ export const analyzeTradeTool = defineTool({
         through_playoffs: true,
       });
       if (carryOutcome(out, warnings)) sims.partial = true;
-      return out?.data.readings ?? null;
+      return out === null ? null : { readings: out.data.readings, weeks: out.marginal_weeks };
     };
-    const aliveOf = (readings: Awaited<ReturnType<typeof readingsFor>>): Record<string, number> => {
+    const aliveOf = (readings: readonly SeasonReading[] | null): Record<string, number> => {
       const out: Record<string, number> = {};
       for (const x of readings?.[0]?.p_alive_by_week ?? [])
         if (b.rules.playoffs.playoff_weeks.includes(x.week)) out[String(x.week)] = x.p;
@@ -619,13 +622,15 @@ export const analyzeTradeTool = defineTool({
     };
     const partnerId = args.offer?.partner_team_id ?? null;
     const teamOfRoster = async (r: Roster, withReadings: boolean): Promise<TradeTeam> => {
-      const readings = withReadings ? await readingsFor(r.team.team_id) : null;
+      const sim = withReadings ? await readingsFor(r.team.team_id) : null;
+      const readings = sim?.readings ?? null;
       return {
         team_id: r.team.team_id,
         name: r.team_name,
         players: r.entries.map((e) => tradePlayerOf(ctx, e.player, e.slot_id, weeks, ros, b.w)),
         readings,
         alive_by_week: aliveOf(readings),
+        ...(sim === null ? {} : { marginal_weeks: sim.weeks }),
       };
     };
     const meTeam = await teamOfRoster(mine, args.offer !== undefined);

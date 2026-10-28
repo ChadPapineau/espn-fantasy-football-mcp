@@ -15,7 +15,7 @@
 // to Δ_partner ≥ ε (sib §5.7). Cooperative over Monte-Carlo paths. Pure. New here.
 import type { Clock, Rng } from "../clock.js";
 import type { SeedingMode } from "../../config/schema.js";
-import { tradeDeadlineStatus } from "../league/rules.js";
+import { regularSeasonWeeks, tradeDeadlineStatus } from "../league/rules.js";
 import { slotClassOf } from "../league/slots.js";
 import type { BareText, LeagueRules, RosterSlots, UntrustedText, Week } from "../league/types.js";
 import { isIrEligible } from "../league/types.js";
@@ -69,6 +69,14 @@ export interface TradeTeam {
   readonly readings?: readonly SeasonReading[] | null;
   /** P(this team alive) by playoff week (string keys); a playoff week without one is weighted 1. */
   readonly alive_by_week?: Readonly<Record<string, number>>;
+  /**
+   * The scoring periods `readings`' +3-points-per-week marginal spans (the season simulator's
+   * `marginal_weeks`: this team's undecided regular-season matchups, the week in progress among
+   * them). ΔU scales that marginal by the trade's points over exactly these weeks. Absent: the
+   * regular season's weeks from `as_of_week` on (the simulator's horizon while the as-of week is
+   * undecided).
+   */
+  readonly marginal_weeks?: number;
 }
 
 /** An E6 request (validated by the tool's zod schema; re-checked here). */
@@ -461,11 +469,19 @@ function evalPair(
   ];
 }
 
-/** ΔU of one side under one reading: the +3 points-per-week marginal scaled linearly (research 05 §2.4). */
+/**
+ * ΔU of one side under one reading: the +3 points-per-week marginal scaled linearly (research 05
+ * §2.4). That marginal is the change from 3 more points in EACH week of the simulator's horizon
+ * (`horizonWeeks`: the team's undecided regular-season matchups, the week in progress among them),
+ * so the trade's regular-season points are spread over the same horizon: Δ / horizon / 3. Divided by
+ * the value weeks instead, a trade that cannot reach the as-of week (E6 leaves it out mid-week)
+ * scaled ΔU by 11/10 with identical weekly impacts (Stage C finding trade-locked-week-counted).
+ */
 function deltaUOf(
   reading: SeasonReading | undefined,
   regDelta: number,
   regWeeks: number,
+  horizonWeeks: number,
 ): MarginalValue {
   if (regWeeks <= 0) return { d_p_playoffs: 0, d_p_bye: 0 };
   if (reading === undefined) {
@@ -475,7 +491,8 @@ function deltaUOf(
       d_p_bye: round(wins * TRADE.coldDpByePerWin, 4),
     };
   }
-  const scale = regDelta / regWeeks / 3;
+  if (!(horizonWeeks > 0)) return { d_p_playoffs: 0, d_p_bye: 0 };
+  const scale = regDelta / horizonWeeks / 3;
   const mv = reading.marginal_values.plus_3_ppw;
   const clampTo = (d: number, p: number): number => round(Math.min(1 - p, Math.max(-p, d)), 4);
   return {
@@ -486,6 +503,18 @@ function deltaUOf(
 
 function readingsToRun(req: TradeRequest): SeedingMode[] {
   return req.seeding_mode === "both" ? ["espn_rule", "points_only"] : [req.seeding_config.mode];
+}
+
+/**
+ * The weeks a team's readings' +3 ppw marginal spans: the simulator's own count when the caller
+ * passed it, else the regular season's weeks from the as-of week on (the simulator's horizon while
+ * that week is undecided), else the regular-season value weeks.
+ */
+function horizonOf(req: TradeRequest, t: TradeTeam, regWeeks: number): number {
+  const given = t.marginal_weeks;
+  if (typeof given === "number" && Number.isFinite(given) && given >= 0) return given;
+  const fromAsOf = regularSeasonWeeks(req.rules.playoffs).filter((w) => w >= req.as_of_week);
+  return fromAsOf.length > 0 ? fromAsOf.length : regWeeks;
 }
 
 function deltaU(req: TradeRequest, partner: TradeTeam, me: SideEval, pe: SideEval): DeltaU {
@@ -500,11 +529,13 @@ function deltaU(req: TradeRequest, partner: TradeTeam, me: SideEval, pe: SideEva
       req.me.readings?.find((r) => r.seeding_mode === mode),
       reg(me),
       regWeeks,
+      horizonOf(req, req.me, regWeeks),
     ),
     partner: deltaUOf(
       partner.readings?.find((r) => r.seeding_mode === mode),
       reg(pe),
       regWeeks,
+      horizonOf(req, partner, regWeeks),
     ),
   }));
   const cfg = rows.find((r) => r.seeding_mode === req.seeding_config.mode) ?? rows[0];
