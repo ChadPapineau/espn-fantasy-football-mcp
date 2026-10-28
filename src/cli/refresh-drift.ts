@@ -109,6 +109,13 @@ export interface DriftRefreshReport {
   readonly views: readonly DriftRecheckView[];
 }
 
+/** The code of a read the provider served from its cache after ESPN failed, else null. */
+const degradedCode = (got: unknown): string | null => {
+  const c = (got as { stamp?: { degraded?: { code?: unknown } | null } } | null)?.stamp?.degraded
+    ?.code;
+  return typeof c === "string" && /^[A-Z][A-Z_]{0,39}$/.test(c) ? c : null;
+};
+
 const errorCode = (e: unknown): string => {
   const c = (e as { effCode?: unknown } | null)?.effCode;
   return typeof c === "string" && /^[A-Z][A-Z_]{0,39}$/.test(c) ? c : "INTERNAL";
@@ -144,29 +151,40 @@ export async function refreshDrift(
       );
       return EXIT.ok;
     }
-    // the week a weekly view is read for: the league's current scoring period (the tools' default)
-    const league = await run.stack.provider.getLeague(run.stack.ref);
-    const week = Math.max(1, league.value.clock.current_scoring_period);
+    // the week a weekly view is read for: the league's current scoring period (the tools' default);
+    // a league read that fails — mSettings itself red, ESPN down — is judged with the views below
+    let week = 1;
+    try {
+      const league = await run.stack.provider.getLeague(run.stack.ref);
+      week = Math.max(1, league.value.clock.current_scoring_period);
+    } catch (e) {
+      const code = errorCode(e);
+      if (code === "ESPN_AUTH_REJECTED" || code === "ESPN_REQUIRES_COOKIES") throw e;
+    }
     const reasons = new Map<EspnView, string>();
-    const reread = new Set<(r: Reread) => Promise<unknown>>();
+    // each read once (mSettings and mNav are one read): its failure, if any, is every such view's
+    const done = new Map<(r: Reread) => Promise<unknown>, string | null>();
     for (const view of red) {
       const read = DRIFT_REREADS[view];
       if (read === undefined) {
         reasons.set(view, "no_read");
         continue;
       }
-      if (reread.has(read)) continue; // mSettings and mNav are one read
-      reread.add(read);
-      try {
-        await read({ run, week });
-      } catch (e) {
-        // a drift error is the judgement itself (the key is still missing); anything else is not
-        const code = errorCode(e);
-        if (code !== "ESPN_DRIFT_DETECTED") {
+      if (!done.has(read)) {
+        let failure: string | null = null;
+        try {
+          // a copy served from the cache because ESPN failed was never re-judged: say why
+          failure = degradedCode(await read({ run, week }));
+        } catch (e) {
+          // a drift error is the judgement itself (the key is still missing); anything else is not
+          const code = errorCode(e);
           if (code === "ESPN_AUTH_REJECTED" || code === "ESPN_REQUIRES_COOKIES") throw e;
-          reasons.set(view, code);
+          if (code !== "ESPN_DRIFT_DETECTED") failure = code;
         }
+        done.set(read, failure);
       }
+      const failure = done.get(read) ?? null;
+      if (failure !== null) reasons.set(view, failure);
     }
     const after = run.store.repos.driftState.get();
     const still = new Map(

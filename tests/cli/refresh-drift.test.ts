@@ -187,6 +187,88 @@ describe("eff refresh espn:drift re-judges the views drift_state marks red (Stag
     expect(none.urls).toEqual([]);
   });
 
+  it("a read ESPN fails (a copy served from the cache, or an error) is named not re-read, for each view it serves", async () => {
+    sb = sandbox();
+    await seed(
+      redRow([
+        { view: "mSettings", removed: ["$.settings.scoringSettings"] },
+        { view: "mNav", removed: ["$.members[].isLeagueCreator"] },
+        ...PENDING_RED,
+      ]),
+    );
+    // ESPN answers nothing: every read fails, the week's league read among them
+    const f = fakeFetch(
+      () => new Response("down", { status: 503, headers: { "content-type": "text/plain" } }),
+    );
+    const { exec } = fakeExec();
+    const io = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock("2026-10-06T18:00:00.000Z"),
+      platform: "darwin",
+      exec,
+      packageRoot: fakePackage(sb),
+      env: ENV,
+    });
+    const code = await main(["refresh", DRIFT_REFRESH_TARGET, "--json"], io);
+    expect(code, `${io.out.text} | ${io.err.text} | ${f.urls.join(" ; ")}`).toBe(4);
+    const report = JSON.parse(io.out.text.trim().split("\n").pop() ?? "{}") as DriftRefreshReport;
+    expect(report.views.map((v) => [v.view, v.outcome])).toEqual([
+      ["mSettings", "not_read"],
+      ["mNav", "not_read"],
+      ["mPendingTransactions", "not_read"],
+    ]);
+    for (const v of report.views) expect(v.reason, v.view).toMatch(/^[A-Z_]+$/);
+    expect((await stored())?.status).toBe("red");
+  });
+
+  it("a copy the cache served because ESPN failed is never taken as re-judged", async () => {
+    sb = sandbox();
+    await seed(redRow(PENDING_RED));
+    expect((await run("ok")).code).toBe(0); // the views are cached now
+    await seed(redRow(PENDING_RED)); // red again; ESPN then fails every request
+    const f = fakeFetch(
+      () => new Response("down", { status: 503, headers: { "content-type": "text/plain" } }),
+    );
+    const { exec } = fakeExec();
+    const io = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock("2026-10-06T18:10:00.000Z"),
+      platform: "darwin",
+      exec,
+      packageRoot: fakePackage(sb),
+      env: ENV,
+    });
+    expect(await main(["refresh", DRIFT_REFRESH_TARGET, "--json"], io)).toBe(4);
+    const report = JSON.parse(io.out.text.trim().split("\n").pop() ?? "{}") as DriftRefreshReport;
+    expect(report.views.map((v) => [v.view, v.outcome, v.removed])).toEqual([
+      ["mPendingTransactions", "not_read", ["$.pendingTransactions"]],
+    ]);
+    expect(report.views[0]?.reason).toMatch(/^[A-Z_]+$/);
+  });
+
+  it("mSettings still missing a key: the league read itself is the judgement — red, exit 4, never a crash", async () => {
+    sb = sandbox();
+    await seed(redRow([{ view: "mSettings", removed: ["$.settings.scheduleSettings"] }]));
+    const f = fakeFetch((url) => {
+      const u = new URL(url);
+      if (!u.pathname.includes("/leagues/0")) return new Response(null, { status: 404 });
+      const s = rec("league-a/mSettings.json") as { settings: Record<string, unknown> };
+      const { scheduleSettings: _gone, ...settings } = s.settings;
+      return jsonRes({ ...rec("league-a/mNav.json"), ...s, settings });
+    });
+    const { exec } = fakeExec();
+    const io = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock("2026-10-06T18:00:00.000Z"),
+      platform: "darwin",
+      exec,
+      packageRoot: fakePackage(sb),
+      env: ENV,
+    });
+    expect(await main(["refresh", DRIFT_REFRESH_TARGET], io)).toBe(4);
+    expect(io.out.text).toContain("mSettings: still red — removed $.settings.scheduleSettings");
+  });
+
   it("is a listed target; --seasons, --force and --game-day-cadence are refused", async () => {
     sb = sandbox();
     expect(targetUsageError("nope").message).toContain(DRIFT_REFRESH_TARGET);
