@@ -26,8 +26,8 @@ passed to agents in their prompts and kept in local environment/config only — 
 
 ## RESUME HERE
 
-**Stage C in progress — PAUSED 2026-10-19 at a safe point** (weekly usage 86 %). See `docs/HANDOFF.md` ▶ NEXT STEP for the exact resume.
+**Stage C — the final gate's fix round 1 landed (2026-10-28).** See `docs/HANDOFF.md` ▶ NEXT STEP for the state and `docs/evals/stage-c-backlog.md` for what no agent change closes.
 
 - Stages A ✅ · B1 ✅ · B2a ✅ · B2b ✅ (rulings R5, R6). Owner stop ✅ (2026-10-11).
-- Stage C: round 0 ✅, live lane ✅, plugin-eval lane blocked (R7-2), round 1 89/93 fixed, round 2 43/79 fixed (36 open). PAUSED 2026-10-19 at 86 % weekly usage.
-- **Next:** `docs/scratch/workflows/effmcp-qa-pentest-continue.js` with the saved resume args (outside the repo) → rounds until two dry → final gate → Stage D.
+- Stage C: rounds 0–3 ✅ (live lane ✅; plugin-eval lane not runnable on this account, R7-2); the final gate RED on 2026-10-28 → fix round 1 ✅ (changelog §B6).
+- **Next:** the orchestrator re-runs the final gate → Stage D (merge, CI green on `main`, the owner's install).
