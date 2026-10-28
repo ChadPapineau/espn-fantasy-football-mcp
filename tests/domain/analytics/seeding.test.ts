@@ -345,6 +345,120 @@ describe("tiebreak chains and the bracket", () => {
     expect(out.data.readings[1]).toMatchObject({ seeding_mode: "points_only", p_playoffs: 0 });
   });
 
+  describe("what division winners first is worth (Stage C live finding F8)", () => {
+    // the league above: team 4 leads division 2 at 1-3; seeded by record alone the 4-0 and 3-1
+    // teams of division 1 take both seeds
+    const teams = [
+      team(1, 4, 0, 400, { mu: 100, sigma: 0 }, 1),
+      team(2, 3, 1, 390, { mu: 100, sigma: 0 }, 1),
+      team(3, 3, 1, 380, { mu: 100, sigma: 0 }, 1),
+      team(4, 1, 3, 300, { mu: 100, sigma: 0 }, 2),
+      team(5, 0, 4, 200, { mu: 100, sigma: 0 }, 2),
+    ];
+    const playoff = {
+      team_count: 2,
+      seeding_rule: "TOTAL_POINTS_SCORED",
+      reseed: false,
+      rounds: [],
+    } as const;
+
+    it("ranks the same paths by record alone and states both answers", async () => {
+      for (const seeding_mode of ["espn_rule", "both"] as const) {
+        const out = await simulateSeason(
+          base({ teams, me: 4, playoff, seeding_mode, marginal: false }),
+        );
+        expect(out.data.division_rule, seeding_mode).toEqual({
+          divisions: 2,
+          p_playoffs_record_only: 0,
+          p_bye_record_only: 0,
+        });
+        // the seeded reading is unchanged by the check
+        expect(out.data.readings[0]).toMatchObject({ seeding_mode: "espn_rule", p_playoffs: 1 });
+        const said = out.data.rec.assumptions.filter((a) => a.text.includes("division winners"));
+        expect(said, seeding_mode).toHaveLength(1);
+        expect(said[0]?.text).toBe(
+          "espn_rule seeds the 2 division winners first (ESPN's documented rule; no league setting is known to confirm it): P(playoffs) 1, P(bye) 0; seeded by record alone 0 and 0",
+        );
+        expect(said[0]?.revisit_trigger).toBe(
+          "the league's settings or a finished season show whether division winners are seeded first",
+        );
+      }
+      // a division winner who also leads by record: both rankings agree
+      const leader = await simulateSeason(
+        base({ teams, me: 1, playoff, seeding_mode: "espn_rule", marginal: false }),
+      );
+      expect(leader.data.division_rule).toMatchObject({ p_playoffs_record_only: 1 });
+      expect(leader.data.readings[0]?.p_playoffs).toBe(1);
+    });
+
+    it("is null without more than one division, and under points_only alone", async () => {
+      const one = await simulateSeason(
+        base({
+          teams: teams.map((t) => ({ ...t, division_id: 1 })),
+          me: 4,
+          playoff,
+          seeding_mode: "both",
+          marginal: false,
+        }),
+      );
+      expect(one.data.division_aware).toBe(false);
+      expect(one.data.division_rule).toBeNull();
+      expect(one.data.rec.assumptions.some((a) => a.text.includes("division winners"))).toBe(false);
+      const pointsOnly = await simulateSeason(
+        base({ teams, me: 4, playoff, seeding_mode: "points_only", marginal: false }),
+      );
+      expect(pointsOnly.data.division_aware).toBe(true);
+      expect(pointsOnly.data.division_rule).toBeNull();
+      expect(pointsOnly.data.rec.assumptions.some((a) => a.text.includes("division winners"))).toBe(
+        false,
+      );
+    });
+
+    it("property: record alone is the plain chain's answer on the same paths", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(fc.integer({ min: 0, max: 6 }), { minLength: 6, maxLength: 6 }),
+          fc.array(fc.integer({ min: 300, max: 700 }), { minLength: 6, maxLength: 6 }),
+          fc.integer({ min: 1, max: 6 }),
+          fc.integer({ min: 1, max: 4 }),
+          async (wins, pfs, me, field) => {
+            const league = wins.map((w, i) =>
+              team(i + 1, w, 6 - w, pfs[i] ?? 400, { mu: 100, sigma: 20 }, i < 3 ? 1 : 2),
+            );
+            const remaining = [
+              { period: 7, home: 1, away: 4 },
+              { period: 7, home: 2, away: 5 },
+              { period: 7, home: 3, away: 6 },
+            ];
+            const p = { ...playoff, team_count: field };
+            const run = (ts: SeasonTeam[]) =>
+              simulateSeason(
+                base({
+                  teams: ts,
+                  remaining,
+                  me,
+                  playoff: p,
+                  seeding_mode: "espn_rule",
+                  n_sims: 1_000,
+                  marginal: false,
+                }),
+              );
+            const divided = await run(league);
+            // the same league in one division: the plain chain, every path the same draws
+            const flat = await run(league.map((t) => ({ ...t, division_id: 1 })));
+            expect(divided.data.division_rule?.p_playoffs_record_only).toBe(
+              flat.data.readings[0]?.p_playoffs,
+            );
+            expect(divided.data.division_rule?.p_bye_record_only).toBe(
+              flat.data.readings[0]?.p_bye,
+            );
+          },
+        ),
+        { numRuns: 25 },
+      );
+    });
+  });
+
   it("the bracket: a 6-team field gives seeds 1–2 a bye; a champion only when every round is known", async () => {
     const teams = Array.from({ length: 6 }, (_, i) =>
       team(i + 1, 6 - i, i, 1000 - 10 * i, { mu: 100, sigma: 15 }),

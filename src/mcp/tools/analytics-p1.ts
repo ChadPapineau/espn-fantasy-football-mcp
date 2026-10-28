@@ -325,6 +325,13 @@ export const matchupSchema = z.discriminatedUnion("mode", [
     divergence: z.strictObject({ p_playoffs_delta_between_readings: z.number() }).nullable(),
     playoff_pct_espn: probNull,
     division_aware: z.boolean(),
+    division_rule: z
+      .strictObject({
+        divisions: z.number().int().min(2).max(20),
+        p_playoffs_record_only: prob,
+        p_bye_record_only: prob,
+      })
+      .nullable(),
     n_sims: count,
     weekly_model: z.enum(["e1_fitted", "cold_start", "mixed"]),
     rec,

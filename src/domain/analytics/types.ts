@@ -468,6 +468,17 @@ export interface SeasonSimData extends AnalyticsResult {
   readonly divergence: { readonly p_playoffs_delta_between_readings: number } | null;
   readonly playoff_pct_espn: number | null;
   readonly division_aware: boolean;
+  /**
+   * What the espn_rule reading's first step is worth (Stage C live finding F8): division winners
+   * first is ESPN's documented rule, but no league field is known to confirm a league applies it, so
+   * the same paths are also ranked by record alone. Null without more than one division or without
+   * an espn_rule reading. `rec.assumptions[]` states both answers.
+   */
+  readonly division_rule: {
+    readonly divisions: number;
+    readonly p_playoffs_record_only: number;
+    readonly p_bye_record_only: number;
+  } | null;
   readonly n_sims: number;
   readonly rec: Rec;
 }

@@ -695,6 +695,11 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
       ),
     );
   const variants: readonly Variant[] = req.marginal === false ? ["base"] : VARIANTS;
+  // division winners first is ESPN's documented rule (research 05 §2.1), but no league field is
+  // known to say a league applies it (`playoffSeedingRuleBy`'s meaning is unverified): every path is
+  // ranked by record alone too, so the answer says what the rule is worth (Stage C live finding F8)
+  const checkDivisionRule = divisionAware && modes.includes("espn_rule");
+  const recordOnly = { playoffs: 0, bye: 0 };
   const tallies = modes.map(() =>
     variants.map((): Tally => ({
       playoffs: 0,
@@ -778,6 +783,12 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
       const chain = chains[mi]?.chain ?? [];
       const order0 = rankAll(chain, mode === "espn_rule" && divisionAware, agg);
       const rank = order0.indexOf(me) + 1;
+      if (v === "base" && mode === "espn_rule" && checkDivisionRule) {
+        // the same path and chain without the division-winners step (no draw: the coin is drawn)
+        const alt = rankAll(chain, false, agg).indexOf(me) + 1;
+        if (alt <= P) recordOnly.playoffs += 1;
+        if (alt <= byes) recordOnly.bye += 1;
+      }
       const tally = tallies[mi]?.[variants.indexOf(v)];
       if (tally === undefined) return;
       tally.seeds[rank - 1] = (tally.seeds[rank - 1] ?? 0) + 1;
@@ -1007,6 +1018,25 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
     };
   });
 
+  const seeded = readings.find((x) => x.seeding_mode === "espn_rule");
+  const divisionRule =
+    checkDivisionRule && seeded !== undefined
+      ? {
+          divisions: divIds.length,
+          p_playoffs_record_only: round(recordOnly.playoffs / Math.max(1, k), 4),
+          p_bye_record_only: round(recordOnly.bye / Math.max(1, k), 4),
+        }
+      : null;
+  if (divisionRule !== null && seeded !== undefined) {
+    // three decimals: the numbers as the analytics tools print them (src/mcp ANALYTICS_DECIMALS)
+    const p3 = (x: number): string => String(round(x, 3));
+    assumptions.push(
+      A(
+        `espn_rule seeds the ${String(divisionRule.divisions)} division winners first (ESPN's documented rule; no league setting is known to confirm it): P(playoffs) ${p3(seeded.p_playoffs)}, P(bye) ${p3(seeded.p_bye)}; seeded by record alone ${p3(divisionRule.p_playoffs_record_only)} and ${p3(divisionRule.p_bye_record_only)}`,
+        "the league's settings or a finished season show whether division winners are seeded first",
+      ),
+    );
+  }
   const used = readings[0];
   const inputs = mergeInputs(collectInputs(req.stamps ?? [], req.clock), req.inputs ?? []);
   const p = used?.p_playoffs ?? 0;
@@ -1054,6 +1084,7 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
             },
       playoff_pct_espn: req.playoff_pct_espn ?? null,
       division_aware: divisionAware,
+      division_rule: divisionRule,
       n_sims: k,
       rec,
       inputs,
