@@ -734,7 +734,8 @@ tests that fail on the code at `f41e810`, how fix round 2 (commit `91a8c1b`, bel
 independent attack on that build, and how fix round 3 (commit `c16b9d8`, below) answered the attack on
 fix round 2. What stays open is in `docs/evals/stage-c-backlog.md` ("Ruled R8-3"). The bullets fix
 round 2 changed say so. Ruling R8-6 then replaced the shared-name reading these rounds built ("R8-6 —
-the matcher fails closed" below, and its fix round 2, the last part).
+the matcher fails closed" below, and its fix rounds 2 to 4). The last part, fix round 4, is R8-8's
+targeted round; the matcher is frozen for Stage C after it.
 
 - **The universe carries ESPN's position** · R8-3 clause 4 · `src/sources/news/match.ts`
   `universeFromEspnPlayers` and `UNIVERSE_SQL` read `ds_players.position_id` into
@@ -1485,6 +1486,190 @@ What each clause of R8-7 built:
     back.
   - The counting noise. A dateline or a draft writer's surname that a universe player shares is
     counted ("HENDERSON, Nev."), as a count only.
+
+### R8-6 fix round 4 — the targeted round under R8-8 (commit `cd7f99a`)
+
+The independent attack on `08524ff` (three lenses, about 200,000 titles) and its judge found 19
+violations. Ruling R8-8 (§R8, `52f21d7`) set one targeted round, then a freeze. Each violation is fixed
+at its root in `src/sources/news/match.ts`, `labels.ts` and `positions.ts`. Of round 3's three guards
+that cost labels and counts, two are removed, not patched: the first-name reading and the gate on a
+capitalised word after a surname. The third, the teams-alone test, now reads the possessive on the part
+next to the name instead of the leftmost part. One narrower rule takes the first-name reading's place,
+and it only takes a label away. Before a surname, a one-word singular or place written without a
+possessive labels no one, and the surname is counted. Names one universe player holds
+still take `f41e810`'s path. The equality test is unchanged and green, and the attack's 40,000 random
+items and 7,739 generated items show no difference.
+
+- **Violation 1, a suffix after a surname mention (R8-7 (5))** · `match.ts`. A suffix written right
+  after a surname is read as step 1 reads one after a full name (`suffixAfter`). It joins the spellings
+  that exclude holders, and the mention's label is read after it ("Murphy II (Seahawks DT)"). "Marcus
+  Harris: Placed on IR | Harris II (knee) …" and "Lamar Jackson: Questionable | Jackson Jr. (knee) …"
+  lose the residual (the TEN CB and the BAL QB at 0.80 at `08524ff`). "Vikings CB Murphy II:
+  Questionable | Byron Murphy (hamstring) …" and "Michael Carter: Questionable | Titans RB Carter II
+  (ankle) …" pick no one (the MIN CB and the TEN RB at 0.95). A bare shared surname's suffix narrows
+  its sharers, and choice 6's blockers too: "Seahawks DT Murphy II" is the SEA DT, and "Vikings CB
+  Murphy II" no one. Tests: `match-r88.test.ts` "violation 1" (four, the news build among them).
+- **Violations 2–6, forms inside R8-7 (1)'s categories** · `labels.ts`, `positions.ts`.
+  - Facilities and the camp town (2): "Jefferson Health" (PHI; the NovaCare Complex was renamed in
+    February 2026), "Kettering Health" and "IEL" (CIN), "New Balance" (NE), "Atrium Health" (CAR) and
+    "Rochester" (BUF). Also the three the attack found by accident: "Meijer Performance" (DET),
+    "Vanderbilt Health" (TEN) and "CommonSpirit" (DEN).
+  - Positions (3): "nose guard" (and so "noseguard"), NG, SE, and ED. ED is an ordinary word ("Ed").
+  - A stadium in one case (4): "FedEx Field", so "FEDEXFIELD" and "fedexfield" are found.
+  - City short names (5): "Phila", "PHL", "PGH", "MSP" and "the Valley".
+  - ESPN's team-unit positions (6): HC, TQB, "head coach" and "d st". So "DST", "D-ST" and "D ST" are
+    found, and so is "D/ST", because the scan now lets a slash join the words of a form. No universe
+    player holds ids 14, 15 or 16, so these forms carry no ids, and as a label they fit no one.
+    `pluralOf` adds "es" after "ch" and "sh" ("head coaches", "pass rushes").
+
+  Each item the attack quoted loses the star's residual and is counted. Tests: `match-r88.test.ts`
+  "violations 2-6" (five), `positions.test.ts` (the plurals), and every new entry through
+  `match-r86.test.ts`'s list tests.
+- **Violation 7, an ordinary-word abbreviation after a game or move word** · `labels.ts`
+  `ambiguousForm`. Right after a blocker or a game or move word, two kinds of label word are the
+  ordinary word: an `AMBIGUOUS_LABEL_WORDS` word, and an ordinary-word abbreviation in lower or title
+  case. In capitals the abbreviation labels wherever R8-7 (2) counts it, as (3) says. "Injury update for
+  MIN WR Justin Jefferson", "The latest on TEN CB Marcus Harris", "Two sacks from DE Byron Young",
+  "INJURY UPDATE FOR MIA DT JORDAN PHILLIPS" and the matchup item give the labelled holder (each ∅ u1
+  at `08524ff`). "to Will Jefferson" (title case, a first name's case) stays no label and is counted.
+  Tests: `match-r88.test.ts` "violation 7" (two).
+- **Violation 8, the possessive home-and-nickname label** · `labels.ts` `partsBefore`. A label of teams
+  alone must open its clause only when no part of it is possessive; the possessive stands on the part
+  next to the name. "NFL fines the Kansas City Chiefs' Chris Jones", "the Minnesota Vikings' Jefferson"
+  and "the Jacksonville Jaguars' Washington" give the labelled holder (∅ at `08524ff`). Tests:
+  `match-r88.test.ts` "violation 8".
+- **Violation 9, a capitalised word after a surname** · `match.ts` `noMention`. The rule that a
+  universe surname after a surname makes it no mention is gone. "Vikings WR Jefferson Still Limited At
+  Practice", "Ravens QB Jackson Likely To Play Sunday" and the rows beside another ref give the
+  labelled sharer (no ref and uncounted at `08524ff`). A shared surname that follows ("Key", "Long",
+  "Strong") is counted. Tests: `match-r88.test.ts` "violation 9".
+- **Violation 10, the first-name reading** · `match.ts` `firstNameBefore` and `labels.ts` `formBefore`
+  are gone. A capitalised word before a shared surname leaves it a mention. "Vikings Place Jefferson On
+  IR", "Is Jackson playing tonight?", "Pro Bowler Jefferson" and "MVP Jackson" are counted (u0 at
+  `08524ff`). "Vikes Jefferson", "Pack Johnson" and "Cincy Taylor" give the labelled sharer at 0.60.
+  The one rule left only takes a label away. A one-word singular or place (`TEAM_SINGULARS`,
+  `TEAM_CITIES`, `TEAM_FACILITIES`, `TEAM_STADIUMS`) written without a possessive right before a
+  surname may be a first name. Examples: "Bill Johnson" (the Bills have one Johnson, who would take the
+  item), "Charlotte Jones", "Eagan Smith". Tests: `match-r88.test.ts` "violation 10".
+- **Violation 11, a team-word surname** · `match.ts` `surnameLabel`. With no label it is counted
+  ("Terry McLaurin: Scores twice | Washington (ankle) did not return." gives u1; u0 at `08524ff`). It
+  is the team only when a word of its team's own name follows it ("Washington Commanders", "Houston
+  Texans"). Tests: `match-r88.test.ts` "violation 11".
+- **Violation 12, a period and a compound hashtag in a label (R8-7 (3))** · `labels.ts`.
+  - `formAt` now drops an initialism's periods itself when it keys a form. So the label reader passes
+    "L.A" with its periods, and a dotted form counts in any case ("L.A.'S BYRON YOUNG", "N.O.'S DAVID
+    LONG JR.").
+  - A state's abbreviation may carry its period where a possessive or another label word follows it
+    ("Tenn.'s Marcus Harris", "Tenn. CB Marcus Harris").
+  - In a tag, a state's or an initialism's period ends the item ("(Tenn.)", "(MO.)", "Justin Jefferson,
+    Minn.:"), and an inner word's period joins a form ("(St. Louis)").
+  - A team code's stray period stays punctuation ("Marcus Harris, TEN.: Out" gives ∅ u1, a row of the
+    attack's own battery), and so does a period right before the name ("…traded to MIN. Justin
+    Jefferson said").
+  - A hashtag's teams are a label part, before the name and in its tag ("#ChiefsKingdom Chris Jones",
+    "(#ChiefsKingdom)", "#TitanUp CB Marcus Harris"). `labelFormAt` reads them through `compoundRead`,
+    and the compound tries now carry their forms' teams.
+
+  Tests: `match-r88.test.ts` "violation 12" (three).
+- **Violation 13, the all-caps possessive** · `match.ts`. The tokenizer keeps `f41e810`'s norm and adds
+  `bare`: the norm with a possessive cut that `f41e810`'s cuts leave ("JEFFERSON'S", "Jefferson’S",
+  "Jefferson's."). It is read for a shared name only. A full name's last word may be read by it after
+  `f41e810`'s own match fails (`spells`, `unread`), and so may a surname whose norm no universe player
+  bears (`endingOf`, `kept`). "JUSTIN JEFFERSON'S STATUS UNCLEAR | Jordan Addison …" reads as the same
+  name in lower case (the residual). "VIKINGS WR JUSTIN JEFFERSON'S …" gives the MIN WR at 0.95, and
+  "JEFFERSON'S …" is counted. "PATRICK MAHOMES'S" stays unmatched, as at `f41e810`. Tests:
+  `match-r88.test.ts` "violation 13".
+- **Violation 14, the crafted item** · `labels.ts`, `match.ts`. The forms of several words a surname
+  may stand in are now read in one pass over the item, when the first surname near a form's first word
+  asks; `headNear` stays as the pre-check. Each mention no longer re-reads a window around it. A
+  written form's lookups are remembered (a bounded cache). A lookup of several words is tried only after
+  a word that opens a form, a tag reads one word unless that word opens a form, and `passOf` tests an
+  ASCII letter's case by its code. `introduced` is one pass per segment, and surname mentions are pushed,
+  not copied. Tests: `match.perf.test.ts` "R8-8": the item costs at most 6 times a benign one and grows
+  linearly, and 1,000 of them build in under 15 s.
+- **Violation 15, `LEAD_WORDS` and `STAFF_WORDS`** · now exported. `forms.ts` writes both, and
+  `match-r88.test.ts` "violation 15" holds them word for word and entry by entry on `f41e810`'s path.
+  Each lead word before "Addison" keeps Jordan Addison's 0.60, and each staff word before "Burrow" or
+  "Jefferson" makes him a staff member (∅ u0).
+- **Violation 16, the forms that name several teams** · `match-r88.test.ts` "violation 16". There are
+  34 such forms, with 78 team entries in all. For each team of each form, the form's possessive picks
+  the holder on that team over one on a team the form does not name.
+- **Violation 17, the code entries** · `match-r88.test.ts` "violation 17" (five tests). It holds the 25
+  of the 28 entries still in the code, with more texts for the curly apostrophes, the digits and the
+  period's flags. Three went with their code: `formBefore`'s two alternatives and `firstNameBefore`'s
+  `TEAM_WORDS` test. `lastPart` stays with `headNear`, and both its separators are held.
+- **Violation 18, `spellingsOf`** · `positions.ts`. A string of more than four parts is joined one way
+  throughout (three spellings), so the work is linear; a listed form has three parts at most. Test:
+  `positions.test.ts` "violation 18": 40 words in well under a second, where 17 words exhausted a
+  2 GB heap at `08524ff`.
+- **Violation 19, a test change `93f8843`'s body did not name** · recorded here. `93f8843` changed the
+  property "with no label next to the name, a holder takes it only in the residual — the prominent one
+  at 0.80" in `match-r86.test.ts`. Its blurb generator went from `{ maxLength: 8 }` to
+  `{ minLength: 1, maxLength: 8 }`, so it no longer generates an empty blurb, or a blurb that holds only
+  the inserted form. R8-7 (2) supersedes the old generator. An ordinary-word abbreviation counts in
+  capitals only outside a segment written all in capitals, so every segment the property writes must
+  hold a lower-case word, as the test's comment says. The commit's body named only the vocabulary
+  change.
+
+**Expectations this round changed.** Each is commented where it stands, and none moves a ref to
+another holder. "at WILL Justin Jefferson: Starts" gives the CLE LB at 0.80 (∅ u1; violation 7).
+R8-7 (4) and violations 9–11 count these now (each u0 before): "Washington thin at RB | …", "Bill
+Johnson: Signs with team", "Charlotte Jones: Cowboys executive speaks", "Eagles' Lane Johnson retires …"
+(u2) and "K.J. Osborn and P.J. Walker also practiced". So are six `match-r86-cases.test.ts` rows:
+"Kevin O'Connell: …", "… Jackson found P.J. Walker twice.", the two "per P.J. Smith" rows, "St. Brown,
+No. 1" and "Former Brown cut" (u2). No test is deleted, skipped or loosened.
+
+**Measured** (locally, under `heavy-lock`):
+
+- **Speed.** The crafted item costs 8.0 ms, 2.6 times a benign capped item (3.1 ms); at `08524ff` it
+  cost 80.2 ms, 23.5 times 3.42 ms. Its blurb at 500, 1,000, 2,000 and 4,000 characters costs 0.90,
+  1.67, 3.11 and 5.91 ms (about 1.9 times per doubling). 1,000 of the items build in 5.9 s in
+  `match.perf.test.ts` and 7.3 s under `tsx` (77.8 s at `08524ff`). The 5,000-item build takes 4.7 s
+  (4.4 s at the gate's run of `08524ff`; bound 15 s). The other perf tests are unchanged: the last
+  attacks' 1,000 items in 1.9 s and 3.0 s.
+- **The batteries.** The round-3 batteries and the gate's four ran at this head and at `08524ff` (a
+  worktree, removed after). No wrong holder is added at any confidence.
+  - The gate's four batteries are unchanged: battery 1 has 19 right refs, 33 recall losses and no
+    misattribution, battery 2 its five accepted residuals, and batteries 3 and 4 no ref.
+  - The misattribution battery (245 titles) has 0 misattributions, and 0 residual misuses (11 at
+    `08524ff`).
+  - The generated surname, full-name and position-label batteries (6,601 items) have 0
+    misattributions. Six position-label rows, "Browns HC Jefferson" and "Head Coach" forms, give
+    ∅ u0. A surname after a staff word is a staff member's, as at `f41e810`.
+  - Label recall rises from 14,252 to 14,970 of the expected picks (misses 328 → 57). Its 10 wrong rows
+    are unchanged: the title-case AP forms' accepted residuals.
+  - Surname recall has 3 misses (3,259) and no silent drop (3,081). The forms matrix has 199 misses
+    (227) and no wrong team. The scan's team table misses 2 of 1,997 items (28): "#ForeverNE" in lower
+    case and in capitals.
+  - The fuzz of 60,000 items gives no exception, no malformed ref and no unique-name difference from
+    `f41e810`. The exported helpers take 3,000 raw odd strings at random offsets with no exception.
+  - The R8-6 round-2 battery (378 titles) keeps its 31 misattributions, all in the judges' rejected
+    classes, and its 3 residual misuses. Its one silent drop, the all-caps possessive, is now counted.
+- **Mutation.** 238 of 241 mutants are killed. The three that survive change no outcome by
+  construction. `CHUNK_RE`'s "ʼ" is a modifier letter, which `\p{L}` already holds. The tokenizer's cut
+  of a trailing apostrophe is redundant, because `mergeName` drops apostrophes anyway. `headNear` is a
+  speed pre-check. The mutants ran against the news suite with its word-for-word tests skipped:
+  - each of the 58 `LEAD_WORDS` and 8 `STAFF_WORDS` entries;
+  - each team of the 34 multi-team forms (78);
+  - each of this round's 24 list entries;
+  - 73 code entries, the attack's and this round's.
+- **The recall cost against `08524ff`** (refs to a shared name's holders):
+  - Over the earlier batteries' 3,007 texts holding a shared full name, the gate's among them, the refs
+    equal `08524ff`'s: 882 refs, none lost or gained. On the 199 gate-labelled texts, 38 are right and
+    none wrong, as at `08524ff`.
+  - Over the 142 recorded fixture items the refs equal `08524ff`'s, and unique names equal `f41e810`'s.
+    `unresolved` rises from 3 to 7 over the 67 captured feed items: names of people outside the
+    universe are counted ("Could Jeremiah Smith go No. 1", "Sean Payton's", "referee Adrian Hill").
+  - Over the round-3 misattribution battery, 124 titles are right (123). The 11 wrong residuals go
+    (no ref, counted), and none is lost.
+  - Recall gained: labels after a game or move word, possessive home-and-nickname labels, a surname
+    before a capitalised word, short names before a surname, periods, hashtags.
+  - The cost the batteries do not show: "head coach" is now a position form, so an item that quotes the
+    head coach and names no team loses the residual ("Lamar Jackson: Questionable | Head coach John
+    Harbaugh said Jackson will play." gives ∅ u1; the BAL QB at 0.80 at `08524ff`). The counting noise
+    is also higher.
+  - Both are in `docs/evals/stage-c-backlog.md` "Known limitations of the news matcher (R8-8)", with
+    every class R8-8 (3) names.
 
 ## Reviews (re-run on every version bump of the named dependency)
 

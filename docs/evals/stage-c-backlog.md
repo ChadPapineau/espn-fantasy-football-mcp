@@ -3,8 +3,8 @@
 The tracked list of Stage C items that need the owner, a repository setting, the Stage D merge or an
 orchestrator ruling. The ledger of fixed findings lives with the orchestrator; this file records only
 what stays open after the final gate's fix rounds 1, 2 and 3, ruling R8-3's fix and its fix rounds
-2 and 3, and ruling R8-6's fix (2026-10-28, `build/phase-1`). Each item says why code cannot close it
-and what would.
+2 and 3, ruling R8-6's fix and its fix rounds 2 to 4, the last of them R8-8's targeted round
+(2026-10-29, `build/phase-1`). Each item says why code cannot close it and what would.
 
 ## For the orchestrator's ledger
 
@@ -423,6 +423,97 @@ items count: those that name the Browns.
 **The fixer's recommendation:** keep 1–5 as built, because the alternative to 5 puts a namesake's
 injury and transaction news on the star, which E10 then reads as his claim. For 6, take (c) as a
 follow-up, or (b) now if the two paths must agree before Stage D.
+
+## Known limitations of the news matcher (R8-8)
+
+**Ruled R8-8 (2026-10-29, `docs/plan/changelog.md` §R8):** after one targeted round (changelog §B9,
+"R8-6 fix round 4 — the targeted round under R8-8") the matcher is frozen for Stage C. The gate checks
+it for no exception and linear time on hostile input, no wrong holder picked by a label (0.95) in
+realistic RSS items, unique names exactly as at `f41e810`, and every shared name left to no one
+counted. The classes below are known limitations, not gate failures. Each row is data: an item, and
+what the frozen matcher gives it — the refs ("Name/TEAM/POS:method"; ∅ for none), then `u`, the shared
+names no one took. Matching against the week's schedule (R8-6) stays the later improvement.
+
+**A residual (0.80) taken because a rarer form is missing from the lists** (R8-3 clause 6's accepted
+residual). The forms known to be missing: the nicknames from the scan sweep of R8-6's round-2 attack
+(Broncs, Redbirds, Lambs, Hogs, Aints, Raiduhs, Squawks, Vikingos, Honolulu Blue, Green and Gold,
+Purple and Gold, Clutch City, Steeltown, Bold City, Champa Bay, Cowtown, "the 305", and Fish or
+Faithful without "the"); former facilities and camps, which R8-7
+(1) does not name (Winter Park, Valley Ranch, Eden Prairie, Cortland, River Falls, Canton, the
+Coliseum, Twin Creeks); full state names other than the teams' homes and New Jersey (Ohio, Texas,
+Florida); the AP abbreviations that are ordinary words, in title case ("Wash.", "Mass.", "Ill.",
+"Pa.", "Mo.", "La.": R8-7 (2) counts them only in capitals or after a game or move word); a hashtag
+written in one case that no segment or listed form finds ("#foreverne"); glued or misspelt forms no
+list holds ("kickreturner", "head coachs"); and words outside the categories ("interior lineman",
+another league's team).
+
+| item | the frozen matcher |
+|---|---|
+| Lamar Jackson: Works out for the Broncs \| Jackson auditioned Tuesday. | Lamar Jackson/BAL/QB:full_name u0 |
+| Justin Jefferson: Records sack at Valley Ranch | Justin Jefferson/MIN/WR:full_name u0 |
+| Lamar Jackson: Works out in Ohio \| Jackson auditioned Tuesday. | Lamar Jackson/BAL/QB:full_name u0 |
+| Lamar Jackson: Works out in Wash. \| Jackson auditioned Tuesday. | Lamar Jackson/BAL/QB:full_name u0 |
+| Justin Jefferson: Released \| The kickreturner was let go Tuesday. | Justin Jefferson/MIN/WR:full_name u0 |
+| Chris Jones: Signs with the Birmingham Stallions | Chris Jones/KC/DT:full_name u0 |
+
+**A label lost (recall).** Each fails closed: no ref for the shared name, which is counted.
+
+| item | the frozen matcher | why |
+|---|---|---|
+| Tenn. Marcus Harris: Questionable | ∅ u1 | a period right before the name may end a sentence ("…in Tenn. Marcus Harris said") |
+| Marcus Harris, TEN.: Out | ∅ u1 | a period is a state abbreviation's or an initialism's only, never a team code's |
+| Ind.'s Lamar Jackson: Limited | ∅ u1 | Indiana's and Louisiana's AP forms are team codes (IND, LA) here |
+| INJURY UPDATE FOR PHI S MICHAEL CARTER II | ∅ u1 | an ordinary-word abbreviation ("S") counts in a segment all in capitals only after a game or move word (R8-7 (2)) |
+| for Min WR Justin Jefferson: Questionable | ∅ u1 | in lower or title case an ordinary-word abbreviation counts only for the scan ("to Will Smith") |
+| Charlotte Jones: Cowboys executive speaks | ∅ u1 | a one-word singular or place without a possessive before a surname may be a first name |
+| Browns' Justin Jefferson: Placed on IR | ∅ u1 | choice 6: no position of the label rules the star out |
+| Lamar Jackson: Questionable \| Head coach John Harbaugh said Jackson will play. | ∅ u1 | "head coach" names ESPN's HC (R8-7 (1) read literally): the residual goes (Lamar Jackson/BAL/QB:full_name at `08524ff`) |
+| Chiefs interior lineman Chris Jones: Two sacks | Chris Jones/KC/DT:full_name u0 | "interior" is no form, so the team is no label; the residual holds |
+
+**The readings the R8-6 and R8-7 judges rejected** (open-r8-6 and open-r3 triage; each picks as (a)
+literally reads it):
+
+| class | item | the frozen matcher |
+|---|---|---|
+| a contrast across title and blurb (B10) | Justin Jefferson: Released by Browns \| Not to be confused with Vikings WR Justin Jefferson. | Justin Jefferson/MIN/WR:full_name_team u0 |
+| the same across a line break (B10-2, B10-8) | Justin Jefferson: Catches two touchdowns \| Justin Jefferson caught two scores.\nHe beat Browns LB Justin Jefferson on the second. | Justin Jefferson/CLE/LB:full_name_team u0 |
+| a labelled star's namesake (B13) | Ravens QB Lamar Jackson's namesake signs with Bengals | Lamar Jackson/BAL/QB:full_name_team u0 |
+| a coach or offensive lineman on a team with one sharer (B12) | Lions' Campbell: Goff will start Sunday | Jack Campbell/DET/LB:last_name_team, Jared Goff/DET/QB:last_name_team u0 |
+| lookalike letters (C8) | Justin Jefferson: Released by Browոs | Justin Jefferson/MIN/WR:full_name u0 |
+| apostrophe-like marks (B6) | Justin Jefferson: Joins Brownsꞌ practice squad | Justin Jefferson/MIN/WR:full_name u0 |
+| small capitals and other scripts | Justin Jefferson: Placed on IR by the ʙʀᴏᴡɴꜱ | Justin Jefferson/MIN/WR:full_name u0 |
+| choice 6 (D4) | Browns' Justin Jefferson: Placed on IR | ∅ u1 |
+| the 10-ref cap (D6) | a roundup of eleven names or more | unique names as at `f41e810`; the cap keeps the ten best |
+| redundant entries and code that changes no outcome | `OnePride`; the 25 code survivors of the attack on `08524ff`; this round's remembered lookups, the ASCII case test and the head pre-check | no behaviour to hold |
+
+The order rule's rows the round-3 judge rejected now fail closed, because the surname a capitalised
+word stands before is a mention again: "Justin Jefferson: Catches TD | All-Pro Jefferson beat Browns
+LB Jefferson, his namesake, deep." and "Lamar Jackson: Throws three TDs | MVP Jackson torched CB
+Jackson, his namesake, twice." give ∅ u1 (the CLE LB at 0.95 and the free-agent CB at 0.80 at
+`08524ff`).
+
+**The counting noise.** A shared surname no label picks is counted wherever it stands (R8-7 (4)), so a
+person outside the universe who shares it is counted too: a dateline, a writer, a coach, a college
+player, a referee, a team word read as the team, a title-case word that is a universe surname. These
+are counts only; no ref changes. Over the 67 captured feed items `unresolved` rises from 3 to 7 at
+this round (cbs 1 → 3, espn 2 → 3, the CBS hold-out 0 → 1): "Could Jeremiah Smith go No. 1", "Sean
+Payton's 'disrespect'", "referee Adrian Hill".
+
+| item | the frozen matcher |
+|---|---|
+| Lamar Jackson: Signs \| HENDERSON, Nev. — Jackson inked a one-year deal Tuesday. | ∅ u2 |
+| Reid ranks the top 50 prospects: Smith at No. 1? | ∅ u2 |
+| Justin Jefferson: Questionable \| Coach Kevin O'Connell said Jefferson is day-to-day. | Justin Jefferson/MIN/WR:full_name u1 |
+| Lamar Jackson: Throws three touchdowns \| Jackson found P.J. Walker twice. | Lamar Jackson/BAL/QB:full_name u1 |
+| NFL suspends referee Adrian Hill for unprofessional conduct toward Vikings' Eric Wilson | Eric Wilson/MIN/LB:full_name_team u1 |
+| Washington thin at RB \| Commanders sign veteran | ∅ u1 |
+| Rams DE Young Key In Win Over 49ers | Byron Young/LA/DE:last_name_team u1 |
+
+Two cases are no count, by design: a surname right after a staff word is a staff member ("Browns HC
+Jefferson: Questionable for Sunday" gives ∅ u0, as at `f41e810`), and an all-caps possessive whose
+letters spell another universe surname reads as that surname, as at `f41e810` ("JOSEPH'S STATUS
+UNCLEAR | Saquon Barkley (ankle) is expected to play." gives Saquon Barkley/PHI/RB:full_name u0:
+"JOSEPHS" is Joshua Josephs).
 
 ## Ruled R8-2 — the stall bound's measurement
 
