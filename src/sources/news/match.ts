@@ -96,8 +96,9 @@
 // broke a line or held a tag (sanitizeText makes both a space) is read from a second sanitised copy
 // with the breaks marked (labels.ts `markBreaks`), for the labels alone; a name one universe player
 // holds never sees it. Matching time is linear in the item's length: the fold, the breaks and the
-// quotes are one pass each, a label reads a bounded window around each name, the scan each word once,
-// and the forms of several words around the surnames one pass over the item, when one first asks.
+// quotes are one pass each, a label reads a bounded window around each name (each form in it once per
+// item: adjacent mentions share their windows' words), the scan each word once, and the forms of
+// several words around the surnames one pass over the item, when one first asks.
 import { GSIS_ID_RE, type NflTeam } from "../../config/schema.js";
 import { mergeName, NAME_SUFFIXES } from "../../domain/crosswalk/normalize.js";
 import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";

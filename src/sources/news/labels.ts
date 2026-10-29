@@ -79,13 +79,16 @@
 // has already removed controls and zero-width characters and collapsed whitespace. Every reading is
 // linear in the item: the fold, the breaks, the quotes and the scan are one pass each (the scan reads
 // each word once, a compound up to MAX_COMPOUND letters through a trie of the forms), a label reads a
-// bounded window around each name, and the forms of several words a surname may stand in are one pass
-// over the item, read when the first surname near a form's first word asks; a written form's lookups
-// are remembered (bounded).
+// bounded window around each name and each form in it once per item (the windows of adjacent names
+// share their words: "Houston Houston …"), and the forms of several words a surname may stand in are
+// one pass over the item, read when the first surname near a form's first word asks. A form of several
+// words is looked up only after a word that opens one, and past it only after two that do; a written
+// form's lookups are remembered (bounded).
 import type { NflTeam } from "../../config/schema.js";
 import {
   isAmbiguousLabelWord,
   MAX_POSITION_WORDS,
+  opensPositionPhrase,
   POSITION_PHRASE_HEADS,
   positionAbbreviation,
   positionWordIds,
@@ -824,6 +827,21 @@ function overlaps(spans: Spans, a: number, b: number): boolean {
   return s !== undefined && s[0] < b;
 }
 
+/** A form read before a name: its part, where it starts, as written, whether it is an ordinary word. */
+interface FormHit {
+  readonly part: LabelPart;
+  readonly from: number;
+  /** As written (folded: its words joined by single spaces, a period ending one cut). */
+  readonly written: string;
+  readonly ambiguous: boolean;
+}
+
+/** One item of a tag: its parts (a form, or the forms a hyphen joins) and the offset after it. */
+interface TagItem {
+  readonly parts: readonly LabelPart[];
+  readonly end: number;
+}
+
 /** A label word or form read before a name, and where it starts. */
 interface ReadPart {
   readonly part: LabelPart;
@@ -952,18 +970,23 @@ export function sharedReading(
     return out;
   };
 
-  /** The longest form ending at `end` (possessive cut), or null: its part and where it starts. */
-  const formEndingAt = (
-    end: number,
-    possessive: boolean,
-    period: boolean,
-  ): { part: LabelPart; from: number; written: string } | null => {
+  /**
+   * The longest form ending at `end` (possessive cut), or null: its part, where it starts, as written,
+   * and whether it is an ordinary word there (`ambiguousForm`).
+   */
+  const readFormEndingAt = (end: number, possessive: boolean, period: boolean): FormHit | null => {
     const words = wordsBefore(end, period);
     for (let n = words.length; n >= 1; n--) {
       const first = words[n - 1];
       if (first === undefined) continue;
-      // a form of several words opens with a head (bounded work: no lookup otherwise)
-      if (n > 1 && !isHead(wordOf(wordAt(first.start, first.end)))) continue;
+      // a form of several words opens with a head, and its first two words with a pair (bounded work:
+      // no lookup otherwise)
+      if (n > 1) {
+        const head = wordAt(first.start, first.end);
+        const second = words[n - 2];
+        if (!isHead(wordOf(head)) || second === undefined) continue;
+        if (!opensPair(head, wordAt(second.start, second.end))) continue;
+      }
       const from = first.start;
       const written = words
         .slice(0, n)
@@ -978,9 +1001,28 @@ export function sharedReading(
       };
       const part = labelFormAt(written, place);
       if (part === null || (possessive && part.kind === "position")) continue;
-      return { part, from, written };
+      return { part, from, written, ambiguous: ambiguousForm(written) };
     }
     return null;
+  };
+  /**
+   * The forms read before names, by where they end (and how): each is read once per item. Adjacent
+   * mentions read the same words, and a run of surnames that are each a form ("Brown Brown …", "Houston
+   * Houston …") re-read its whole window per mention (ruling R8-8 (1): 20 times a benign item). The
+   * index (allocated on first use) holds 0 for a read not yet made, else its place in the list, plus 1.
+   */
+  let endingIndex: Int32Array | null = null;
+  const endings: (FormHit | null)[] = [];
+  const formEndingAt = (end: number, possessive: boolean, period: boolean): FormHit | null => {
+    // `period` is read only where the last word ends with one (`startOf`)
+    const dotted = period && s[end - 1] === ".";
+    const key = end * 4 + (possessive ? 2 : 0) + (dotted ? 1 : 0);
+    endingIndex ??= new Int32Array(4 * (s.length + 1));
+    const k = endingIndex[key] ?? 0;
+    if (k > 0) return endings[k - 1] ?? null;
+    const hit = readFormEndingAt(end, possessive, dotted);
+    endingIndex[key] = endings.push(hit);
+    return hit;
   };
 
   /** Where the label's last word ends before `pos`: its possessive cut. Null when no word ends there. */
@@ -1019,7 +1061,7 @@ export function sharedReading(
         from: hit.from,
         written: hit.written,
         possessive: le.possessive,
-        ambiguous: ambiguousForm(hit.written),
+        ambiguous: hit.ambiguous,
       });
       pos = hit.from;
     }
@@ -1054,6 +1096,77 @@ export function sharedReading(
     (INITIALISM_RE.test(s.slice(b, e)) || STATE_ABBREVIATIONS.has(s.slice(b, e).toUpperCase()));
 
   /**
+   * The tag item at offset `at` (a hashtag's "#" there): a form that is a team or a position (a
+   * hashtag's teams among them), ending with its last word's own period and a possessive (a position
+   * takes none), or forms a hyphen joins with no space ("(CLE-LB)"); null when none stands there.
+   */
+  const readItem = (at: number): TagItem | null => {
+    const hash = s[at] === "#";
+    const i = hash ? at + 1 : at;
+    // the words starting here (spaces, or a period and spaces, only between: "St. Louis"; no break,
+    // no name), at most MAX_FORM_WORDS: a second only when the first two may open a form of several
+    // words (`isHead`, `opensPair`)
+    const words: { readonly start: number; readonly end: number }[] = [];
+    let b = i;
+    for (let k = 0; k < MAX_FORM_WORDS; k++) {
+      const e = wordEndAfter(s, b);
+      if (e < 0 || inName(b, e)) break;
+      const head = words[0];
+      if (k === 1 && head !== undefined && !opensPair(s.slice(head.start, head.end), s.slice(b, e)))
+        break;
+      words.push({ start: b, end: e });
+      if (k === 0 && !isHead(wordOf(s.slice(b, e)))) break;
+      const d = s[e] === "." ? e + 1 : e;
+      let g = d;
+      while (s[g] === " ") g++;
+      if (g === d || breakIn(e, g) || !isWordChar(s[g])) break;
+      b = g;
+    }
+    if (words.length === 0) return null;
+    for (let k = words.length; k >= 1; k--) {
+      const last = words[k - 1];
+      if (last === undefined) continue;
+      // the item ends with its last word, and with that word's own period
+      const end = ownPeriod(last.start, last.end) ? last.end + 1 : last.end;
+      const pe = possessiveEnd(end);
+      const written = words
+        .slice(0, k)
+        .map((w) => s.slice(w.start, w.end))
+        .join(" ");
+      const part = labelFormAt(written, {
+        caps: caps[i] === 1,
+        after: () => after(i),
+        tag: true,
+        hash,
+      });
+      if (part !== null && !(pe > end && part.kind === "position"))
+        return { parts: [part], end: pe };
+    }
+    // items a hyphen joins with no space ("(CLE-LB)"): each a form
+    const e = wordEndAfter(s, i);
+    const written = s.slice(i, e);
+    const pieces = written.includes("-") ? written.split("-") : [];
+    const place: Place = { caps: caps[i] === 1, after: NEVER, tag: true, hash: false };
+    const split = pieces.map((w) => formAt(w, place));
+    if (split.length === 0 || !split.every((x) => x !== null)) return null;
+    return { parts: split, end: possessiveEnd(e) };
+  };
+  /**
+   * The tag items read, by offset: each is read once per item, as the forms before names are (the
+   * tags after adjacent mentions read the same words; ruling R8-8 (1)). Indexed as `endings` is.
+   */
+  let itemIndex: Int32Array | null = null;
+  const items: (TagItem | null)[] = [];
+  const itemAt = (at: number): TagItem | null => {
+    itemIndex ??= new Int32Array(s.length + 1);
+    const k = itemIndex[at] ?? 0;
+    if (k > 0) return items[k - 1] ?? null;
+    const item = readItem(at);
+    itemIndex[at] = items.push(item);
+    return item;
+  };
+
+  /**
    * The items of a tag that opens at `from`, up to `close` (")" or ":"): forms that are each a team or
    * a position (a hashtag's teams among them), a separator or a space between them. Null when anything
    * else stands in it (a break too), or no item does.
@@ -1065,58 +1178,10 @@ export function sharedReading(
       const startGap = i;
       while (s[i] === " ") i++;
       if (breakIn(startGap, i)) return null;
-      const hash = s[i] === "#";
-      if (hash) i++;
-      // the words starting here (spaces, or a period and spaces, only between: "St. Louis"; no break,
-      // no name), at most MAX_FORM_WORDS, and one only when it opens no form of several words
-      const words: { readonly start: number; readonly end: number }[] = [];
-      let b = i;
-      for (let k = 0; k < MAX_FORM_WORDS; k++) {
-        const e = wordEndAfter(s, b);
-        if (e < 0 || inName(b, e)) break;
-        words.push({ start: b, end: e });
-        if (k === 0 && !isHead(wordOf(s.slice(b, e)))) break;
-        const d = s[e] === "." ? e + 1 : e;
-        let g = d;
-        while (s[g] === " ") g++;
-        if (g === d || breakIn(e, g) || !isWordChar(s[g])) break;
-        b = g;
-      }
-      if (words.length === 0) return null;
-      let hit: { part: LabelPart; end: number } | null = null;
-      for (let k = words.length; k >= 1 && hit === null; k--) {
-        const last = words[k - 1];
-        if (last === undefined) continue;
-        // the item ends with its last word, and with that word's own period
-        const end = ownPeriod(last.start, last.end) ? last.end + 1 : last.end;
-        const pe = possessiveEnd(end);
-        const from = i;
-        const written = words
-          .slice(0, k)
-          .map((w) => s.slice(w.start, w.end))
-          .join(" ");
-        const part = labelFormAt(written, {
-          caps: caps[from] === 1,
-          after: () => after(from),
-          tag: true,
-          hash,
-        });
-        if (part !== null && !(pe > end && part.kind === "position")) hit = { part, end: pe };
-      }
-      if (hit === null) {
-        // items a hyphen joins with no space ("(CLE-LB)"): each a form
-        const e = wordEndAfter(s, i);
-        const written = s.slice(i, e);
-        const pieces = written.includes("-") ? written.split("-") : [];
-        const place: Place = { caps: caps[i] === 1, after: NEVER, tag: true, hash: false };
-        const split = pieces.map((w) => formAt(w, place));
-        if (split.length === 0 || !split.every((x) => x !== null)) return null;
-        out.push(...split);
-        i = possessiveEnd(e);
-      } else {
-        out.push(hit.part);
-        i = hit.end;
-      }
+      const item = itemAt(i);
+      if (item === null) return null;
+      out.push(...item.parts);
+      i = item.end;
       let j = i;
       while (s[j] === " ") j++;
       if (breakIn(i, j)) return null;
@@ -1380,6 +1445,30 @@ const isHead = (word: string | undefined): boolean => {
   return head;
 };
 
+/** The first two words of every team form of several words ("green bay", "valley of"). */
+const TEAM_PHRASE_PAIRS: ReadonlySet<string> = new Set(
+  [...WORD_TEAMS.keys()]
+    .filter((k) => k.includes(" "))
+    .map((k) => k.split(" ").slice(0, 2).join(" ")),
+);
+const PAIR_CACHE = new Map<string, boolean>();
+/**
+ * Whether two written words (folded, as a reader joins them) may open a form of several words: their
+ * key is the first two words of a team's or a position's (remembered, bounded). A pre-check for speed,
+ * as `isHead` is (ruling R8-8 (1): a run of form heads, "Ford Ford …", tried every longer form at each
+ * word): a form's key opens with its first two words' key, so where they open none, no form of several
+ * words opens with them.
+ */
+const opensPair = (first: string, second: string): boolean => {
+  const written = `${first} ${second}`;
+  const hit = PAIR_CACHE.get(written);
+  if (hit !== undefined) return hit;
+  const { key } = keyedOf(written);
+  const opens = TEAM_PHRASE_PAIRS.has(key) || opensPositionPhrase(key);
+  if (PAIR_CACHE.size < KEYED_CACHE_MAX) PAIR_CACHE.set(written, opens);
+  return opens;
+};
+
 /** Whether words in a row (folded) are a word form of several words: a team's or a position's. */
 function phraseFound(words: readonly string[]): boolean {
   const { teams, ids } = keyedOf(words.join(" "));
@@ -1430,8 +1519,11 @@ function windowFound(recent: readonly Recent[], heads: readonly string[]): numbe
     const first = recent[recent.length - n];
     if (first === undefined || first.leads.length === 0) continue;
     const rest = recent.slice(recent.length - n + 1).map((r) => r.whole);
-    for (const lead of first.leads)
+    const second = rest[0];
+    for (const lead of first.leads) {
+      if (second !== undefined && !opensPair(lead, second)) continue;
       if (heads.some((h) => phraseFound([lead, ...rest, h]))) return n;
+    }
   }
   return 0;
 }

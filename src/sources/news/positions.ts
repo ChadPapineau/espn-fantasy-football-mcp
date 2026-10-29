@@ -239,6 +239,23 @@ export const POSITION_PHRASE_HEADS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The first two words of every position form of several words, keyed as `positionKey` keys them
+ * ("running back", "d line" of "d line man").
+ */
+const POSITION_PHRASE_PAIRS: ReadonlySet<string> = new Set(
+  [...WORD_IDS.keys()]
+    .filter((k) => k.includes(" "))
+    .map((k) => k.split(" ").slice(0, 2).join(" ")),
+);
+/**
+ * Whether two words, keyed as `positionKey` keys them (one space between), may open a position form of
+ * several words: the first two words of one, or a technique of two words ("nine technique", "5 tech";
+ * a technique has two at most). Where they do not, no position form of several words opens with them.
+ */
+export const opensPositionPhrase = (pair: string): boolean =>
+  POSITION_PHRASE_PAIRS.has(pair) || TECHNIQUE_RE.test(pair);
+
+/**
  * The ESPN ids a written WORD form names — one word or several, any case, any spelling, its plural, or
  * a technique ("edge-rusher", "line backers", "1-tech") — or null.
  */
@@ -278,6 +295,15 @@ export function positionAbbreviation(written: string): AbbreviationRead | null {
   return ids === undefined ? null : { ids, stem: base };
 }
 
+/**
+ * Every spelling of every AMBIGUOUS_LABEL_WORDS word, keyed once (the label reader asks for each label
+ * word it reads; ruling R8-8 (1): recomputing them on every call cost a crafted item 20 times a benign
+ * one).
+ */
+const AMBIGUOUS_SPELLINGS: ReadonlySet<string> = new Set(
+  AMBIGUOUS_LABEL_WORDS.flatMap(spellingsOf),
+);
+
 /** Whether a written label word is one of AMBIGUOUS_LABEL_WORDS (an ordinary word too). */
 export const isAmbiguousLabelWord = (written: string): boolean =>
-  AMBIGUOUS_LABEL_WORDS.some((w) => spellingsOf(w).includes(positionKey(written)));
+  AMBIGUOUS_SPELLINGS.has(positionKey(written));

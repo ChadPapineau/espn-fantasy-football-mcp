@@ -8,7 +8,10 @@
 // so a slower machine moves both — and a file of them builds well inside a refresh run
 // (build.perf.test.ts' 15 s). Ruling R8-8 (1) adds the attack on 08524ff's item: bare shared surnames,
 // each followed by a word that opens a form of several words (23.5 times a benign item at 08524ff, and
-// 1 000 of them 77.8 s, because each mention re-read the forms around it).
+// 1 000 of them 77.8 s, because each mention re-read the forms around it); and the verifier's items at
+// 67bc88e: a shared surname that is also a team form ("Brown", "Houston", "Henderson", "Washington"),
+// repeated to the caps (11 to 30 times a benign item, and 1 000 of them 41 to 60 s, because each
+// mention re-read a label window whose every word is a form).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -298,6 +301,80 @@ describe("news matcher — R8-8: the attack on 08524ff's capped item, over the r
     expect(b.news).toHaveLength(1_000);
     expect(b.counts).toMatchObject({ unresolved: 1_000 });
     // measured 2026-10-29: about 6 s (08524ff 77.8 s by the attack's measure)
+    expect(performance.now() - t0).toBeLessThan(15_000);
+  });
+});
+
+describe("news matcher — R8-8: the verifier's team-word surnames, over the recorded universe", () => {
+  const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const recorded = universeFromEspnPlayers(
+    playersRows(
+      JSON.parse(
+        readFileSync(path.join(ROOT, "fixtures/espn/recorded/season/players_wl.json"), "utf8"),
+      ) as unknown,
+      2026,
+    ).rows,
+    () => null,
+  );
+  const m = buildPlayerMatcher(recorded);
+  /** `s` repeated to exactly `n` characters. */
+  const rep = (s: string, n: number): string => cap(s.repeat(Math.ceil(n / s.length) + 1), n);
+  // the verifier's construction (verify-r4 at 67bc88e, perf-build1000.mts): a shared surname that is
+  // also a team form (a singular, a home, a facility) repeated to the caps, and its possessive. Each
+  // mention read a label window whose every word is a form, the next mention the same words again, and
+  // each word read recomputed the ordinary words' spellings
+  const WRITTEN = ["Brown", "Houston", "Henderson", "Washington"].flatMap((w) => [
+    `${w} `,
+    `${w}'s `,
+  ]);
+  const itemOf = (written: string): { title: string; blurb: string } => ({
+    title: cap(`Lamar Jackson: ${rep(written, 1_000)}`, 1_000),
+    blurb: rep(written, 4_000),
+  });
+  const benign = `Lamar Jackson: Questionable | ${rep("Notes on the week ahead. ", 4_000)}`;
+
+  it("each costs at most 6 times a benign capped item, and grows linearly with its blurb", () => {
+    const quiet = median(() => m.matchItem(benign));
+    for (const written of WRITTEN) {
+      const { title, blurb } = itemOf(written);
+      const item = `${title} | ${blurb}`;
+      // what it reads: no ref; the full name and the surname counted
+      expect(m.matchItem(item), written).toEqual({ refs: [], unresolved: 2 });
+      const adversarial = median(() => m.matchItem(item));
+      // measured 2026-10-29: at most 3.6 times ("Brown ", 7 ms against 2 ms); 67bc88e 11 to 30 times
+      expect(adversarial, written).toBeLessThan(6 * Math.max(quiet, 0.05));
+    }
+    // four times the blurb, about four times the cost (a quadratic reading would be sixteen)
+    const short = median(() => m.matchItem(`Lamar Jackson: x | ${rep("Brown ", 1_000)}`));
+    const long = median(() => m.matchItem(`Lamar Jackson: x | ${rep("Brown ", 4_000)}`));
+    expect(long).toBeLessThan(8 * Math.max(short, 0.05));
+  });
+
+  it("1 000 of the costliest build in < 15 s", () => {
+    const now = Date.parse("2026-10-06T20:00:00Z");
+    const { title, blurb } = itemOf("Brown ");
+    const previous = Array.from({ length: 1_000 }, (_, i) => ({
+      item_id: i.toString(16).padStart(32, "0"),
+      source: "cbs",
+      published_ms: now - 86_400_000,
+      first_seen_ms: now - 86_400_000,
+      title,
+      blurb,
+      link: null,
+    }));
+    const t0 = performance.now();
+    const b = buildNewsRows({
+      format: NEWS_FILE_FORMAT,
+      source: "cbs",
+      fetched_ms: now,
+      xml: "<rss><channel></channel></rss>",
+      universe: recorded,
+      previous,
+      warnings: [],
+    });
+    expect(b.news).toHaveLength(1_000);
+    expect(b.counts).toMatchObject({ unmatched: 1_000, unresolved: 1_000 });
+    // measured 2026-10-29: about 7 s (67bc88e 59.5 s by the verifier's measure)
     expect(performance.now() - t0).toBeLessThan(15_000);
   });
 });

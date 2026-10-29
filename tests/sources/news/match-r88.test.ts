@@ -9,7 +9,10 @@
 // compound hashtag (R8-7 (3)); the all-caps possessive; and behaviour tests for every closed-list and
 // code entry the attack found untested (LEAD_WORDS, STAFF_WORDS, the multi-team forms, 28 code entries).
 // The crafted item's cost is held by match.perf.test.ts, spellingsOf's bound by positions.test.ts. Names
-// one universe player holds still match exactly as at f41e810 (match-r86.test.ts). No network.
+// one universe player holds still match exactly as at f41e810 (match-r86.test.ts). The verifier's item at
+// 67bc88e (a shared surname that is also a team form, repeated to the caps) is held by match.perf.test.ts,
+// and the code its fix adds by the last two describes here: the pre-check that a form's first two words
+// open one, and each form and tag item read once per item. No network.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -721,6 +724,103 @@ describe("violation 17: the code entries no test held, each by a behaviour", () 
       // the head pre-check reads a word's last part after a hyphen or a period ("Love" no surname)
       ["Byron Young: Two sacks | ex-Brotherly Love notes", "∅ u1"],
       ["Byron Young: Two sacks | Notes.Brotherly Love notes", "∅ u1"],
+    ]);
+  });
+});
+
+describe("the verifier's item (67bc88e): the pre-check that a form's first two words open one", () => {
+  // the fix reads every item as 67bc88e does (each row gives this outcome there too); a form of several
+  // words is looked up only when its first two words open one (labels.ts opensPair, positions.ts
+  // opensPositionPhrase), so these rows hold each kind of pair it must let through, in each reader
+  it("a technique of two words, before the name, in a tag and in the name tag", () => {
+    expectEach([
+      ["Chiefs 3 technique Chris Jones: Two sacks", "Chris Jones/KC/DT:full_name_team u0"],
+      ["Chiefs three technique Chris Jones: Two sacks", "Chris Jones/KC/DT:full_name_team u0"],
+      ["Chris Jones (KC, 3 technique): Two sacks", "Chris Jones/KC/DT:full_name_team u0"],
+      ["Chris Jones, KC 5 tech: Two sacks", "Chris Jones/KC/DT:full_name_team u0"],
+      ["Chiefs 5 Techniques Jones: Two sacks", "Chris Jones/KC/DT:last_name_team u0"],
+    ]);
+  });
+
+  it("forms of three words or four, a pair keyed as the lists key it, a head before a word it opens none with", () => {
+    expectEach([
+      [
+        "Purple People Eaters WR Justin Jefferson: Questionable",
+        "Justin Jefferson/MIN/WR:full_name_team u0",
+      ],
+      [
+        "Factory of Sadness LB Justin Jefferson: Questionable",
+        "Justin Jefferson/CLE/LB:full_name_team u0",
+      ],
+      // an initialism's periods dropped, as the lists key it ("U.S" → "us")
+      [
+        "Justin Jefferson (U.S. Bank, WR): Questionable",
+        "Justin Jefferson/MIN/WR:full_name_team u0",
+      ],
+      // "New" opens forms ("New England"), none with "Ravens": "Ravens" reads alone
+      ["New Ravens QB Lamar Jackson: Limited", "Lamar Jackson/BAL/QB:full_name_team u0"],
+      // the scan's window: a form of four words and one of three, no shorter form inside either
+      ["Lamar Jackson: Notes | Jackson met the Monsters of the Midway", "∅ u1"],
+      ["Lamar Jackson: Notes | He worked out at Bank of America on Tuesday", "∅ u1"],
+    ]);
+  });
+});
+
+describe("the verifier's item (67bc88e): each form before a name and each tag item read once per item", () => {
+  // labels.ts remembers, per item, the form that ends at an offset (by its possessive, and by whether
+  // the period ending its last word is read: `formEndingAt`) and the tag item at an offset (`itemAt`).
+  // A remembered read must give what a fresh reading gives, whatever was asked before it. In each text
+  // two mentions read the same words, because a surname that is a form stands between them; in the
+  // first three a state's period is read both ways (punctuation right before the surname, a label word
+  // two words before the name). Each row gives this outcome at 67bc88e too
+  const TEXTS = [
+    "Tenn. Houston LB Marcus Harris: Questionable",
+    "Tenn. Houston CB Harris (knee) is out",
+    "Minn. Brown WR Justin Jefferson: Out",
+    "Brown Henderson CB: Out",
+    "Commanders Washington LB Allen: Out",
+    "Houston Houston (HOU, LB): Out",
+    "Raiders Henderson, LB, Houston, CB: Out",
+  ];
+  const WORD = /[\p{L}\p{N}]+(?:['.&-][\p{L}\p{N}]+)*/gu;
+  const keyOf = (parts: readonly news.LabelPart[]): string =>
+    parts
+      .map((p) =>
+        p.kind === "team"
+          ? `T:${p.teams.join(",")}`
+          : `P:${[...p.ids].sort((a, b) => a - b).join(",")}`,
+      )
+      .join("|");
+  /** Every word's label and sides, asked in `order` on one reading, or each on a fresh reading. */
+  const readAll = (text: string, order: "forwards" | "backwards" | "fresh"): string[] => {
+    const words = [...text.matchAll(WORD)].map((x) => [x.index, x.index + x[0].length] as const);
+    const one = news.sharedReading(text, null, [], []);
+    const seq = order === "backwards" ? [...words].reverse() : words;
+    const out = seq.map(([a, b]) => {
+      const r = order === "fresh" ? news.sharedReading(text, null, [], []) : one;
+      const { before, after } = r.surnameSides(a, b);
+      return `${String(a)}: ${keyOf(r.label(a, b))} / ${keyOf(before)} / ${keyOf(after)}`;
+    });
+    return order === "backwards" ? out.reverse() : out;
+  };
+
+  it("a remembered read gives what a fresh reading gives, read forwards or backwards", () => {
+    for (const t of TEXTS) {
+      const fresh = readAll(t, "fresh");
+      expect(readAll(t, "forwards"), t).toEqual(fresh);
+      expect(readAll(t, "backwards"), t).toEqual(fresh);
+    }
+  });
+
+  it("as the matcher reads them; and a position takes no possessive in a tag", () => {
+    expectEach([
+      // Henderson's name tag is the one Brown's runs over ("CB"); "Brown" before him is a first name
+      ["Brown Henderson CB: Out", "C.J. Henderson/ATL/CB:last_name_team u1"],
+      // `readItem`: a position with a possessive is no tag item, so the tag labels no one (the scan's
+      // position takes the residual away)
+      ["Justin Jefferson (LBs'): Out", "∅ u1"],
+      ["Justin Jefferson (W.R.'s): Questionable", "∅ u1"],
+      ["Justin Jefferson (Vikings' WR): Questionable", "Justin Jefferson/MIN/WR:full_name_team u0"],
     ]);
   });
 });
