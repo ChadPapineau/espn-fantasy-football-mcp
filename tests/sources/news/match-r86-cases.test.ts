@@ -128,9 +128,10 @@ describe("evidence that leaves no single holder gives no ref, and the item is co
     // a decided name is not counted; a unique one never is
     expect(m.matchItem("LB Justin Jefferson: Records sack").unresolved).toBe(0);
     expect(m.matchItem("Bijan Robinson: Questionable").unresolved).toBe(0);
-    // a shared surname is counted only when the item names a team or a position
+    // a shared surname left to no one is counted: with a label that picks none, and (R8-7 (4)
+    // supersedes the uncounted unlabelled one, 0 at 66bb2a2) with no label at all
     expect(m.matchItem("Ravens' Jackson: Limited").unresolved).toBe(1);
-    expect(m.matchItem("Jackson: Limited").unresolved).toBe(0);
+    expect(m.matchItem("Jackson: Limited").unresolved).toBe(1);
   });
 
   it("the news build counts the items without a ref and those a shared name was left out of", () => {
@@ -1006,8 +1007,10 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["WR Justin Jefferson: Questionable | The linebacker did not practice Wednesday.", "", "Justin Jefferson/MIN/WR:full_name u0"],
   ["WR Justin Jefferson (LB): Questionable", "", "∅ u1"],
   ["LB Justin Jefferson: Records sack | Justin Jefferson added two tackles.", "", "Justin Jefferson/CLE/LB:full_name u0"],
-  ["Michael Carter II: Records interception | Michael Carter also forced a fumble.", "", "Michael Carter II/PHI/S:full_name u0"],
-  ["Michael Carter II", "", "Michael Carter II/PHI/S:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Michael Carter II/PHI/S:full_name u0 at 66bb2a2)
+  ["Michael Carter II: Records interception | Michael Carter also forced a fumble.", "", "∅ u1"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Michael Carter II/PHI/S:full_name u0 at 66bb2a2)
+  ["Michael Carter II", "", "∅ u1"],
   ["Browns LB Jefferson: Records sack", "", "Justin Jefferson/CLE/LB:last_name_team u0"],
   ["Ravens QB Jackson: Limited in practice", "", "Lamar Jackson/BAL/QB:last_name_team u0"],
   ["Sources: Ravens QB Jackson has ankle sprain, slim chance to play Week 5", "", "Lamar Jackson/BAL/QB:last_name_team u0"],
@@ -1018,7 +1021,8 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["DL Byron Young: Records sack", "", "∅ u1"],
   ["Michael Carter: Limited in practice", "", "∅ u1"],
   ["Ravens' Jackson: Limited", "", "∅ u1"],
-  ["Jackson: Limited", "", "∅ u0"],
+  // R8-7 (4): an unlabelled shared surname is counted (∅ u0 at 66bb2a2)
+  ["Jackson: Limited", "", "∅ u1"],
   ["Michael Carter: Limited | Ja'Marr Chase caught 10 passes.", "", "Ja'Marr Chase/CIN/WR:full_name u1"],
   ["Justin Jefferson: Placed on IR | Jefferson (knee) will miss at least four games.", "", "Justin Jefferson/MIN/WR:full_name u0"],
   ["Byron Young: Placed on IR | Young (knee) will miss the rest of the season.", "", "Byron Young/LA/DE:full_name u0"],
@@ -1070,7 +1074,8 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Justin Jefferson: Catches TD in win over the Cleveland Browns", "", "∅ u1"],
   ["Lamar Jackson: Throws pick-six | The cornerback jumped the route.", "", "∅ u1"],
   ["Lamar Jackson throws pick-six: Bengals cornerback returns it 80 yards", "", "∅ u1"],
-  ["Byron Murphy II", "", "Byron Murphy II/SEA/DT:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Byron Murphy II/SEA/DT:full_name u0 at 66bb2a2)
+  ["Byron Murphy II", "", "∅ u1"],
   ["Justin Jefferson: Catches two TDs | Jefferson caught seven passes. The quarterback found him twice in the red zone.", "", "∅ u1"],
   ["Ravens' Lamar Jackson: Picked off twice | The cornerback returned one for a touchdown.", "", "Lamar Jackson/BAL/QB:full_name_team u0"],
   ["Lamar Jackson (Ravens) picked off twice | The cornerback returned one for a touchdown.", "", "Lamar Jackson/BAL/QB:full_name_team u0"],
@@ -1121,7 +1126,8 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Blake Cashman: Records 12 tackles in Vikings win | Jefferson caught two touchdowns.", "", "Blake Cashman/MIN/LB:full_name_team u1"],
   ["Kyler Murray: Throws three TDs to Jefferson | The Vikings beat the Bears.", "", "Kyler Murray/MIN/QB:full_name_team u1"],
   ["Jordan Addison: Steps up | Addison and Jefferson combined for 200 yards for the Vikings.", "", "Jordan Addison/MIN/WR:full_name_team u1"],
-  ["Kyler Murray: Throws three TDs to Jefferson", "", "Kyler Murray/MIN/QB:full_name u0"],
+  // R8-7 (4): an unlabelled shared surname is counted (Kyler Murray/MIN/QB:full_name u0 at 66bb2a2)
+  ["Kyler Murray: Throws three TDs to Jefferson", "", "Kyler Murray/MIN/QB:full_name u1"],
   ["Lamar Jackson: Lands on Bengals practice squad", "", "∅ u1"],
   ["Byron Young (LAR) questionable", "", "Byron Young/LA/DE:full_name_team u0"],
   ["Justin Jefferson: Out for season | Jefferson tore his ACL in practice, a big loss to the Browns.", "", "∅ u1"],
@@ -1150,7 +1156,8 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Justin Jefferson: Catches TD | Jefferson caught two passes against the Browns' starters.", "", "∅ u1"],
   ["Sam Twin: Out vs. Bills, vs. Dolphins", "", "∅ u0"],
   ["Sam Twin, Dolphins: Out vs. Bills", "", "∅ u0"],
-  ["Byron Murphy Jr.", "", "Byron Murphy Jr./MIN/CB:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Byron Murphy Jr./MIN/CB:full_name u0 at 66bb2a2)
+  ["Byron Murphy Jr.", "", "∅ u1"],
   ["Lamar Jackson injury update: Cornerback limited after a late hit on him", "", "∅ u1"],
   ["Lamar Jackson injury update: Ravens QB dealing with ankle sprain; Week 5 status still unknown, per report", "", "∅ u1"],
   ["Lamar Jackson injury update: Cornerback limited in practice Wednesday", "", "∅ u1"],
@@ -1190,13 +1197,15 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Lamar Jackson of the Ravens: Questionable", "", "∅ u1"],
   ["Vikings superstar Justin Jefferson: Questionable", "", "∅ u1"],
   ["Vikings playmaker Justin Jefferson: Questionable", "", "∅ u1"],
-  ["Vikings pass-catcher Justin Jefferson: Questionable", "", "∅ u1"],
+  // R8-7 (3): the scan's form is a label form (∅ u1 at 66bb2a2)
+  ["Vikings pass-catcher Justin Jefferson: Questionable", "", "Justin Jefferson/MIN/WR:full_name_team u0"],
   ["Ravens superstar Lamar Jackson: Questionable", "", "∅ u1"],
   ["Ravens MVP Lamar Jackson: Questionable", "", "∅ u1"],
   ["Vikings' No. 1 receiver Justin Jefferson: Questionable", "", "Justin Jefferson/MIN/WR:full_name u0"],
   ["Vikings' top receiver Justin Jefferson: Questionable", "", "Justin Jefferson/MIN/WR:full_name u0"],
   ["Vikings WRs Jordan Addison and Justin Jefferson limited", "", "Jordan Addison/MIN/WR:full_name_team u1"],
-  ["Vikings receivers Justin Jefferson and Jordan Addison limited", "", "Jordan Addison/MIN/WR:full_name_team u1"],
+  // R8-7 (3): the scan's form is a label form (Jordan Addison/MIN/WR:full_name_team u1 at 66bb2a2)
+  ["Vikings receivers Justin Jefferson and Jordan Addison limited", "", "Justin Jefferson/MIN/WR:full_name_team, Jordan Addison/MIN/WR:full_name_team u0"],
   ["Justin Jefferson, out of the Vikings' lineup, is day-to-day", "", "∅ u1"],
   ["Vikings top Justin Jefferson: Questionable", "", "∅ u1"],
   ["Browns LB Jordan Hicks and Justin Jefferson limited", "", "Jordan Hicks/CLE/LB:full_name_team u1"],
@@ -1277,15 +1286,18 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Rams edge Byron Young: Sack", "", "∅ u1"],
   ["Eagles S Michael Carter II", "", "Michael Carter II/PHI/S:full_name_team u0"],
   ["LB/DE Justin Jefferson", "", "∅ u1"],
-  ["lb Justin Jefferson", "", "Justin Jefferson/MIN/WR:full_name u0"],
-  ["Lb Justin Jefferson", "", "Justin Jefferson/MIN/WR:full_name u0"],
+  // R8-7 (2), (3): "lb" is no ordinary word, so it counts in any case and labels (Justin Jefferson/MIN/WR:full_name u0 at 66bb2a2)
+  ["lb Justin Jefferson", "", "Justin Jefferson/CLE/LB:full_name u0"],
+  // R8-7 (2), (3): "lb" is no ordinary word, so it counts in any case and labels (Justin Jefferson/MIN/WR:full_name u0 at 66bb2a2)
+  ["Lb Justin Jefferson", "", "Justin Jefferson/CLE/LB:full_name u0"],
   ["s Justin Jefferson", "", "Justin Jefferson/MIN/WR:full_name u0"],
   ["Linebacker Justin Jefferson", "", "Justin Jefferson/CLE/LB:full_name u0"],
   ["EDGE Byron Young", "", "Byron Young/LA/DE:full_name u0"],
   ["QB: Lamar Jackson", "", "∅ u1"],
   ["QB, Lamar Jackson", "", "∅ u1"],
   ["non-QB Lamar Jackson", "", "∅ u1"],
-  ["QBs Lamar Jackson", "", "∅ u1"],
+  // R8-7 (3): the scan's form is a label form (∅ u1 at 66bb2a2)
+  ["QBs Lamar Jackson", "", "Lamar Jackson/BAL/QB:full_name u0"],
   ["the Ravens' pass rush. Lamar Jackson", "", "∅ u1"],
   ["Justin Jefferson, LB, Cleveland: Out", "", "Justin Jefferson/CLE/LB:full_name_team u0"],
   ["Lamar Jackson, a free-agent cornerback, visits", "", "∅ u1"],
@@ -1302,7 +1314,8 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["The Browns linebacker Justin Jefferson led the team.", "", "Justin Jefferson/CLE/LB:full_name_team u0"],
   ["Lamar Jackson: Safety concerns linger", "", "∅ u1"],
   ["Justin Jefferson LB - Records sack", "", "∅ u1"],
-  ["Justin Jefferson lb: Records", "", "Justin Jefferson/MIN/WR:full_name u0"],
+  // R8-7 (2), (3): "lb" is no ordinary word, so it counts in any case and labels (Justin Jefferson/MIN/WR:full_name u0 at 66bb2a2)
+  ["Justin Jefferson lb: Records", "", "Justin Jefferson/CLE/LB:full_name u0"],
   ["Justin Jefferson LB rating", "", "∅ u1"],
   ["Byron Young (Eagles DT) questionable", "", "Byron Young/PHI/DT:full_name_team u0"],
   ["Lamar Jackson (CLE) limited", "", "∅ u1"],
@@ -1443,7 +1456,8 @@ const VIOLATIONS_R86_1: readonly (readonly [string, string, string])[] = [
   ["Justin Jefferson: Questionable | Vikings WR Justin Jefferson (hamstring) did not practice.", "Justin Jefferson/MIN/WR", "Justin Jefferson/MIN/WR:full_name_team u0"],
   ["Justin Jefferson: Out for season | Browns LB Justin Jefferson tore his ACL.", "Justin Jefferson/CLE/LB", "Justin Jefferson/CLE/LB:full_name_team u0"],
   ["Michael Carter II: Questionable | Eagles S Michael Carter II (ankle) was limited.", "Michael Carter II/PHI/S", "Michael Carter II/PHI/S:full_name_team u0"],
-  ["Michael Carter II: Questionable | Michael Carter II (ankle) was limited.", "Michael Carter II/PHI/S", "Michael Carter II/PHI/S:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Michael Carter II/PHI/S:full_name u0 at 66bb2a2)
+  ["Michael Carter II: Questionable | Michael Carter II (ankle) was limited.", "Michael Carter II/PHI/S", "∅ u1"],
   ["Lamar Jackson: Throws pick to CB Lamar Jackson", "either", "∅ u1"],
   ["Michael Carter II: Waived by Titans | The running back was released.", "", "∅ u1"],
   ["Byron Murphy II: Vikings CB ruled out", "", "∅ u1"],
@@ -1640,7 +1654,8 @@ const BATTERIES_R86_1: readonly (readonly [string, string, string])[] = [
   ["Ravens QB Jackson: Limited in practice", "Lamar Jackson/BAL/QB", "Lamar Jackson/BAL/QB:last_name_team u0"],
   ["Vikings WR Jefferson: Catches TD", "Justin Jefferson/MIN/WR", "Justin Jefferson/MIN/WR:last_name_team u0"],
   ["Browns' Jefferson: Placed on IR", "Justin Jefferson/CLE/LB", "∅ u1"],
-  ["Jefferson: Placed on IR", "either", "∅ u0"],
+  // R8-7 (4): an unlabelled shared surname is counted (∅ u0 at 66bb2a2)
+  ["Jefferson: Placed on IR", "either", "∅ u1"],
   ["Lamar Jackson: Inks reserve/future contract", "", "Lamar Jackson/BAL/QB:full_name u0"],
   ["Vikings vs. Browns: Justin Jefferson questionable", "Justin Jefferson/MIN/WR", "∅ u1"],
   ["Browns at Vikings Justin Jefferson props", "Justin Jefferson/MIN/WR", "∅ u1"],
@@ -1662,16 +1677,20 @@ const BATTERIES_R86_1: readonly (readonly [string, string, string])[] = [
   ["Justin Jefferson: Records sack | Jefferson, an ex-Viking, got home once.", "Justin Jefferson/CLE/LB", "∅ u1"],
   ["Justin Jefferson: Records sack | Jefferson got home once (via @Browns).", "Justin Jefferson/CLE/LB", "∅ u1"],
   ["Bengals sign corner | After a tryout with the Ravens Jackson signed a futures deal.", "Lamar Jackson/FA/CB", "∅ u1"],
-  ["Byron Murphy Jr.: Questionable | Murphy (hamstring) was limited.", "Byron Murphy Jr./MIN/CB", "Byron Murphy Jr./MIN/CB:full_name u0"],
-  ["Byron Murphy II: Records sack", "Byron Murphy II/SEA/DT", "Byron Murphy II/SEA/DT:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Byron Murphy Jr./MIN/CB:full_name u0 at 66bb2a2)
+  ["Byron Murphy Jr.: Questionable | Murphy (hamstring) was limited.", "Byron Murphy Jr./MIN/CB", "∅ u1"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Byron Murphy II/SEA/DT:full_name u0 at 66bb2a2)
+  ["Byron Murphy II: Records sack", "Byron Murphy II/SEA/DT", "∅ u1"],
   ["Vikings CB Byron Murphy: Questionable", "Byron Murphy Jr./MIN/CB", "Byron Murphy Jr./MIN/CB:full_name_team u0"],
   ["Seahawks DT Byron Murphy: Records sack", "Byron Murphy II/SEA/DT", "Byron Murphy II/SEA/DT:full_name_team u0"],
   ["Byron Murphy: Placed on IR | Murphy (knee) will miss at least four games.", "either", "∅ u1"],
   ["Byron Murphy Jr. (DT): Records sack", "either", "∅ u1"],
-  ["Michael Carter II: Picks off pass", "Michael Carter II/PHI/S", "Michael Carter II/PHI/S:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Michael Carter II/PHI/S:full_name u0 at 66bb2a2)
+  ["Michael Carter II: Picks off pass", "Michael Carter II/PHI/S", "∅ u1"],
   ["Titans RB Michael Carter: Waived", "Michael Carter/TEN/RB", "Michael Carter/TEN/RB:full_name_team u0"],
   ["Titans RB Michael Carter II: Waived", "either", "∅ u1"],
-  ["DJ Turner II: Breaks up two passes", "DJ Turner II/CIN/CB", "DJ Turner II/CIN/CB:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (DJ Turner II/CIN/CB:full_name u0 at 66bb2a2)
+  ["DJ Turner II: Breaks up two passes", "DJ Turner II/CIN/CB", "∅ u1"],
   ["DJ Turner: Waived", "either", "∅ u1"],
   ["WR DJ Turner: Signs futures deal", "DJ Turner/FA/WR", "DJ Turner/FA/WR:full_name u0"],
   ["Saints CB David Long Jr.: Questionable", "David Long Jr./NO/CB", "David Long Jr./NO/CB:full_name_team u0"],
@@ -1684,9 +1703,11 @@ const BATTERIES_R86_1: readonly (readonly [string, string, string])[] = [
   ["Brandon Johnson (S): Signs", "Brandon Johnson/FA/S", "Brandon Johnson/FA/S:full_name u0"],
   ["WR Brandon Johnson: Signs", "Brandon Johnson/FA/WR", "Brandon Johnson/FA/WR:full_name u0"],
   ["Brandon Smith, LB: Signs", "Brandon Smith/FA/LB", "Brandon Smith/FA/LB:full_name u0"],
-  ["Chris Smith II: Signs", "Chris Smith II/FA/S", "Chris Smith II/FA/S:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Chris Smith II/FA/S:full_name u0 at 66bb2a2)
+  ["Chris Smith II: Signs", "Chris Smith II/FA/S", "∅ u1"],
   ["DT Chris Smith: Signs", "Chris Smith/FA/DT", "Chris Smith/FA/DT:full_name u0"],
-  ["Tony Brown II: Signs", "Tony Brown II/FA/CB", "Tony Brown II/FA/CB:full_name u0"],
+  // R8-7 (5): a spelling makes no holder the residual's taker (Tony Brown II/FA/CB:full_name u0 at 66bb2a2)
+  ["Tony Brown II: Signs", "Tony Brown II/FA/CB", "∅ u1"],
   ["WR Tony Brown: Signs", "Tony Brown/FA/WR", "Tony Brown/FA/WR:full_name u0"],
   ["Titans CB Jaylon Jones: Waived", "either", "∅ u1"],
   ["Jaylon Jones: Waived", "either", "∅ u1"],

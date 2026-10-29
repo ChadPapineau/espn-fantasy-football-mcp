@@ -598,25 +598,32 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
     ]);
   });
 
-  it("a written generational suffix is ESPN's spelling of one namesake", () => {
-    // Byron Murphy Jr. (MIN) and Byron Murphy II (SEA) fold to one name: neither had a ref
-    expect(refs("Byron Murphy II: Records sack")).toEqual([[BYRON_II, "full_name"]]);
-    expect(refs("Byron Murphy Jr.: Records sack")).toEqual([[BYRON_JR, "full_name"]]);
+  it("a written generational suffix is ESPN's spelling of one namesake: it narrows a label, never the residual", () => {
+    // Byron Murphy Jr. (MIN) and Byron Murphy II (SEA) fold to one name. R8-7 (5) supersedes the
+    // spelled holder's residual (each the spelled holder at full_name at 66bb2a2): a spelling narrows
+    // the holders a label can fit, and the residual goes only to the name's prominent holder, which
+    // neither Byron Murphy nor either Michael Carter is
+    expect(refs("Byron Murphy II: Records sack")).toEqual([]);
+    expect(refs("Byron Murphy Jr.: Records sack")).toEqual([]);
     expect(refs("Byron Murphy: Records sack")).toEqual([]);
-    // R8-6 (b): the one holder the suffix spells takes the residual only when the item names no
-    // team and no position; the Eagles, named loosely, are no label (full_name at 6ba7bb1, before
-    // the scan was read for a spelled name)
+    expect(refs("Seahawks DT Byron Murphy II: Records sack")).toEqual([
+      [BYRON_II, "full_name_team"],
+    ]);
+    expect(refs("Vikings CB Byron Murphy Jr.: Picks off pass")).toEqual([
+      [BYRON_JR, "full_name_team"],
+    ]);
     expect(
       refs(
         "Michael Carter II: Records interception | Carter II picked off a pass in the Eagles' win.",
       ),
     ).toEqual([]);
-    expect(refs("Michael Carter II: Records interception")).toEqual([[S_CARTER, "full_name"]]);
+    expect(refs("Michael Carter II: Records interception")).toEqual([]);
     expect(refs("Eagles S Michael Carter II: Records interception")).toEqual([
       [S_CARTER, "full_name_team"],
     ]);
-    // a suffix no namesake is spelled with is no evidence
-    expect(refs("Lamar Jackson Jr.: Could miss multiple games")).toEqual([[QB_LAMAR, "full_name"]]);
+    // a suffix no holder is spelled with excludes them all (R8-7 (5): the QB at full_name at 66bb2a2)
+    expect(refs("Lamar Jackson Jr.: Could miss multiple games")).toEqual([]);
+    expect(refs("Lamar Jackson: Could miss multiple games")).toEqual([[QB_LAMAR, "full_name"]]);
   });
 });
 

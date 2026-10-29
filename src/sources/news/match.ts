@@ -24,36 +24,37 @@
 // position read.
 //
 // A shared name fails closed (ruling R8-6, changelog §R8; it supersedes R8-3 clause 3, clause 4's
-// "describing the subject" reading and choice 3 for such a name). The universe is every players_wl
-// person, so 0 %-owned free agents and defensive players hold the names of stars (16 full-name keys
-// and 302 surnames have more than one holder in the recorded universe), and a namesake's item put on
-// a star gives E10 a false injury or transaction claim. A name written several times in one item is
-// decided once, over every occurrence of it (labels.ts reads the item: `sharedReading`):
-//   spelling — a generational suffix written after the name ("Michael Carter II", "Byron Murphy
-//     Jr.") keeps only the holders ESPN spells with that suffix, when one is. It only narrows the
-//     holders: the name is a shared name still, so (a)–(d) decide among them, and the one holder a
-//     suffix leaves takes the residual (b) in place of the prominent one ("Michael Carter II:
-//     Questionable | Michael Carter II (ankle) was limited." is his; "Michael Carter II: Waived by
-//     Titans | The running back was released." names a team and a position, and no one takes it);
-//   (a) a LABEL written next to the name — a team or a position directly before it, in parentheses
-//     directly after it, or in the headline's name tag before the colon (labels.ts: a word of another
-//     person's name is never a label word; punctuation but the possessive, a closing quotation mark,
-//     a line or paragraph break the raw item writes, a word before a label of teams alone (it must
-//     open its clause: "Against the Vikings Justin Jefferson …"), an ordinary-word position after an
-//     article or a preposition ("After safety …") and, in a segment all in capitals, an ordinary-word
-//     form break it) — picks the one holder it
-//     fits: a team fits a holder the universe lists on it (a free agent fits none), a position a holder
-//     whose ESPN `position_id` it allows (ESPN's own position only its own id: "DT" is no ESPN DE's).
-//     The labels of every mention count, and they must fit him — one part fitting, none ruling him
-//     out — and rule every other holder out (a holder of unknown position is never ruled out by a
-//     position): labels that fit different holders, or one holder and one they cannot rule out, pick
-//     none ("Lamar Jackson: Limited | Ravens QB Lamar Jackson (ankle) …" is the QB's). A segment (the
-//     title, the blurb) that writes the name both with a label and without one may speak of two
-//     holders, so no label picks ("Lamar Jackson: Throws pick to CB Lamar Jackson"; "Lamar Jackson,
-//     not the Ravens QB Lamar Jackson, signs …"). Choice 6 stands: a holder far more widely owned than
-//     the one picked (the prominent one, below) blocks a label that no position of it rules him out by
-//     — after a trade of the star to his namesake's team, "Cleveland's Justin Jefferson" would be the
-//     star. A team in the label gives full_name_team, a position alone full_name;
+// "describing the subject" reading and choice 3 for such a name; ruling R8-7 bounds what its label and
+// its scan read). The universe is every players_wl person, so 0 %-owned free agents and defensive
+// players hold the names of stars (16 full-name keys and 302 surnames have more than one holder in the
+// recorded universe), and a namesake's item put on a star gives E10 a false injury or transaction
+// claim. A name written several times in one item is decided once, over every mention of it: each
+// occurrence of the full name, and each surname written alone that the full name ends with (R8-7 (4);
+// labels.ts reads the item: `sharedReading`):
+//   spelling (R8-7 (5)) — a generational suffix written after a mention ("Michael Carter II", "Byron
+//     Murphy Jr.") excludes every holder ESPN spells otherwise (one no holder carries excludes them
+//     all). It narrows the holders a label can fit and never makes the spelled holder the residual's
+//     taker: the residual goes only to the name's prominent holder, and only when no spelling excludes
+//     him ("Michael Carter II: Questionable" gets no ref: no Michael Carter is prominent);
+//   (a) a LABEL written next to a mention — a team or a position directly before it, in parentheses
+//     directly after it, or in the headline's name tag before the colon, in every form the scan reads
+//     (R8-7 (3); labels.ts: its forms, adjacency and the rules that take a label away) — picks the one
+//     holder it fits: a team fits a holder the universe lists on it (a free agent fits none), a
+//     position a holder whose ESPN `position_id` it allows (ESPN's own position only its own id: "DT" is
+//     no ESPN DE's). The labels of every mention count, the surname's too ("Justin Jefferson:
+//     Questionable | Vikings WR Jefferson (hamstring) …" is the WR's), and they must fit him — one part
+//     fitting, none ruling him out — and rule every other holder out (a holder of unknown position is
+//     never ruled out by a position): labels that fit different holders, or one holder and one they
+//     cannot rule out, pick none ("Chiefs DT Harris: Placed on IR | Harris is no relation to Titans CB
+//     Marcus Harris." picks no one). A segment (the title, the blurb, a part a "|" or a line break
+//     separates) that writes the full name both with a label and without one, or a surname alone before
+//     a labelled mention, may speak of two holders, so no label picks ("Lamar Jackson: Throws pick to CB
+//     Lamar Jackson"; "Justin Jefferson: Catches TD | Jefferson beat Browns LB Jefferson …"); a surname
+//     alone after a labelled mention refers back to him. A surname that two full names of the item end
+//     with, labelled, may be either's: neither name's label picks. Choice 6 stands: a holder far more
+//     widely owned than the one picked (the prominent one, below) blocks a label that no position of it
+//     rules him out by — after a trade of the star to his namesake's team, "Cleveland's Justin
+//     Jefferson" would be the star. A team in the label gives full_name_team, a position alone full_name;
 //   (b) with no label, the PROMINENT holder — owned in at least PROMINENT_OWNED % of ESPN leagues and
 //     PROMINENCE_RATIO times as many as each other holder (`prominentOf`) — takes the item at
 //     full_name, only when the broad scan (labels.ts) finds no team and no position anywhere in the
@@ -64,16 +65,24 @@
 //     squad" gets no ref: the item names a team, and no label is next to the name);
 //   (d) otherwise no one takes the name, and the item is counted (`matchItem().unresolved`, the news
 //     build's warning; R8-3 clause 5, plan 07 D6) — never dropped in silence.
-// A bare surname. One standing alone that a full name in the item ends with is that person
-// ("Justin Jefferson: … | Jefferson caught …"): never a last_name_team ref to someone else. A surname
-// one universe player holds is matched as at f41e810: on a team written next to it, or named in the
-// item as its subject's. A surname several players share follows (a) and (d) and never takes the
-// residual: the labels of its mentions must fit one sharer ("Browns LB Jefferson", "LB Jefferson",
-// "Jefferson MLB:"), and choice 6 blocks him on its two prominent holders, the surname's and his own
-// full name's ("Cleveland's Jefferson" and "Eagles' Young" get no ref, as "Eagles' Byron Young" does).
-// A team or position label word may stand right before or after a shared surname ("Linebacker
-// Jefferson", "Jackson QB2:"). A shared surname left to no one in an item that names a team or a
-// position is counted.
+// A bare surname. One standing alone that a full name in the item ends with is that person: a name one
+// universe player holds is matched as at f41e810 and his surname never refs anyone else; a shared
+// name's surname is its mention (above). A surname one universe player holds is matched as at f41e810:
+// on a team written next to it, or named in the item as its subject's. A surname several players share,
+// with no full name in the item ending with it, reads its labels as (a) does, in every form (a
+// possessive: "MIN's Jefferson", "Cincy's Taylor"; a position of two words in title case: "Chiefs
+// Defensive Tackle Jones"; a capitalised word after it: "Rams DE Young Records Two Sacks"; a surname
+// that is also a team word: "Jaguars WR Washington"); the labels of its mentions must fit one sharer,
+// and choice 6 blocks him on its two prominent holders, the surname's and his own full name's
+// ("Cleveland's Jefferson" and "Eagles' Young" get no ref, as "Eagles' Byron Young" does). It never
+// takes the residual, and left to no one it is counted, beside other refs too (R8-7 (4): "Jordan
+// Addison: Two TDs | Addison and Jefferson combined …"). It is no mention where it is a word of
+// another person's name or of a form: a first name before it (a capitalised word that is no lead word
+// and no label word: "Van Jefferson", "Bill Johnson", "Charlotte Jones"; labels.ts `formBefore`), a
+// universe surname or a full name right after it ("Eagles' Lane Johnson"; "Burns Denzel Ward"), or a
+// form of several words it stands in ("Allen Park", "Gang Green", "Ralph Wilson"; labels.ts `inForm`).
+// A surname that is a team word with no label next to it is the team ("Washington thin at RB"), and a
+// team it names right after it is its own name ("Washington Commanders:"), no label.
 // The matcher reads the SANITISED text (plan 02 §6.2), only to decide which ids an item is about; the
 // text is never interpreted beyond that, and nothing of it is copied into a ref. Where the raw item
 // broke a line or held a tag (sanitizeText makes both a space) is read from a second sanitised copy
@@ -85,15 +94,16 @@ import { mergeName, NAME_SUFFIXES } from "../../domain/crosswalk/normalize.js";
 import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
 import { sanitizeText } from "../../domain/league/types.js";
 import type { NewsMatchMethod } from "../../store/datasets/derive.js";
-import {
-  isLabelForm,
-  markBreaks,
-  sharedReading,
-  type LabelPart,
-  type SharedReading,
-} from "./labels.js";
+import { markBreaks, sharedReading, type LabelPart, type SharedReading } from "./labels.js";
 import { KNOWN_POSITION_IDS } from "./positions.js";
-import { attachedTeams, movedTeams, TEAM_WORDS, teamMentions } from "./teams.js";
+import {
+  attachedTeams,
+  movedTeams,
+  TEAM_HOMES,
+  TEAM_NICKNAMES,
+  TEAM_WORDS,
+  teamMentions,
+} from "./teams.js";
 
 /** One player of the ESPN universe the matcher reads (ds_players + the crosswalk's gsis id). */
 export interface NewsUniversePlayer {
@@ -276,6 +286,14 @@ const STAFF_WORDS: ReadonlySet<string> = new Set([
   "coordinator",
   "coordinators",
 ]);
+
+/** The teams a team word names as a word of its home or nickname ("washington" WAS, "green" GB). */
+const OWN_TEAMS: ReadonlyMap<string, ReadonlySet<NflTeam>> = (() => {
+  const out = new Map<string, Set<NflTeam>>();
+  for (const [k, team] of [...Object.entries(TEAM_NICKNAMES), ...Object.entries(TEAM_HOMES)])
+    for (const w of k.toLowerCase().split(" ")) out.set(w, new Set([...(out.get(w) ?? []), team]));
+  return out;
+})();
 
 interface Token {
   readonly norm: string;
@@ -602,7 +620,108 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       return labels.some((l) => l.parts.length > 0 && bare.has(read().segment(l.at)));
     };
 
-    // 3. who each name is
+    // 3. the capitalised words no full name took: a surname of a full name the item holds, or a
+    // bare surname. A surname right after a coaching-staff word is that staff member, not a player
+    // (whatever the staff word's case — "Bengals coach Corbin" as much as "Coach Corbin")
+    const endingWith = new Map<string, Set<Entry>>();
+    for (const n of names) {
+      const last = n.entry.key[n.entry.key.length - 1] ?? "";
+      endingWith.set(last, new Set([...(endingWith.get(last) ?? []), n.entry]));
+    }
+    /**
+     * Whether the capitalised word right before token `i` is a first name — another person's name,
+     * not a lead word nor a label form ("Van Jefferson"; but "MIN's Jefferson", "Chiefs Defensive
+     * Tackle Jones", "Ravens QB Jackson" are labels).
+     */
+    const firstNameBefore = (i: number, t: Token): boolean => {
+      const prev = i > 0 ? tokens[i - 1] : null;
+      if (t.breakBefore || prev?.capital !== true) return false;
+      if (LEAD_WORDS.has(prev.norm) || TEAM_WORDS.has(prev.norm)) return false;
+      return !read().formBefore(t.start);
+    };
+    /**
+     * Whether a shared surname at token `i` is no mention: another person's first name before it, a
+     * form it is a word of ("Allen Park", "Gang Green"), a full name right after it (a headline's verb:
+     * "Burns Denzel Ward"), or a universe surname right after it (it is that person's first name:
+     * "Eagles' Lane Johnson"). Any other capitalised word after it leaves it a surname ("Rams DE Young
+     * Records Two Sacks").
+     */
+    const noMention = (i: number, t: Token): boolean => {
+      const next = tokens[i + 1];
+      if (
+        next !== null &&
+        next !== undefined &&
+        !next.breakBefore &&
+        (consumed[i + 1] === true || (next.capital && bySurname.has(next.norm)))
+      )
+        return true;
+      return firstNameBefore(i, t) || read().inForm(t.start, t.end);
+    };
+    /**
+     * The label of a shared surname's mention (R8-7 (4)): every form, before it and after it; a
+     * surname that is also a team word reads the team it names written after it as that team's own
+     * name ("Washington Commanders: …"), and labels nothing without a label (it is the team).
+     */
+    const surnameLabel = (t: Token): readonly LabelPart[] | null => {
+      const { before, after } = read().labelSides(t.start, t.end);
+      if (!TEAM_WORDS.has(t.norm)) return [...before, ...after];
+      const own = OWN_TEAMS.get(t.norm) ?? new Set<NflTeam>();
+      const parts = [
+        ...before,
+        ...after.filter((x) => x.kind !== "team" || !x.teams.some((tm) => own.has(tm))),
+      ];
+      return parts.length > 0 ? parts : null;
+    };
+    /** Mentions of a shared full name by its surname alone ("Justin Jefferson … Vikings WR Jefferson"). */
+    const surnameMentions = new Map<Entry, { at: number; parts: readonly LabelPart[] }[]>();
+    /** The shared names a labelled surname may be another full name's mention of: no label picks. */
+    const crossed = new Set<Entry>();
+    const bare: number[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (t === null || t === undefined || consumed[i] === true || !t.capital) continue;
+      const prev = i > 0 ? tokens[i - 1] : null;
+      if (!t.breakBefore && prev !== null && prev !== undefined && STAFF_WORDS.has(prev.norm))
+        continue;
+      const ending = endingWith.get(t.norm);
+      if (ending === undefined) {
+        bare.push(i);
+        continue;
+      }
+      // the surname of a full name the item holds is that person, whoever he turns out to be — never
+      // another player of the surname ("Justin Jefferson: … | Jefferson caught …"; f41e810 for a name
+      // one universe player holds). R8-7 (4): for a shared name it is a mention of that name, and a
+      // label next to it is the name's label
+      const shared = [...ending].filter((e) => e.players.length > 1);
+      if (shared.length === 0 || noMention(i, t)) continue;
+      const parts = surnameLabel(t) ?? [];
+      if (ending.size > 1) {
+        if (parts.length > 0) for (const e of shared) crossed.add(e);
+        continue;
+      }
+      for (const e of shared)
+        surnameMentions.set(e, [...(surnameMentions.get(e) ?? []), { at: t.start, parts }]);
+    }
+    /**
+     * Whether a surname written alone, before a labelled mention in its segment, may be the other
+     * holder ("Justin Jefferson: Catches TD | Jefferson beat Browns LB Jefferson …"): no label picks.
+     * One written after a labelled mention refers back to him ("Vikings WR Justin Jefferson … Jefferson
+     * is expected to play").
+     */
+    const introduced = (
+      mentions: readonly { at: number; parts: readonly LabelPart[] }[],
+      labels: readonly { at: number; parts: readonly LabelPart[] }[],
+    ): boolean =>
+      mentions.some(
+        (b) =>
+          b.parts.length === 0 &&
+          labels.some(
+            (l) =>
+              l.parts.length > 0 && l.at > b.at && read().segment(l.at) === read().segment(b.at),
+          ),
+      );
+
+    // 4. who each full name is
     const decided = new Set<string>();
     for (const occ of names) {
       const { at, entry } = occ;
@@ -619,25 +738,35 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         add(p, own ? "full_name_team" : "full_name", at);
         continue;
       }
-      // a shared name (R8-6): decided once per item, over every occurrence of it
+      // a shared name (R8-6): decided once per item, over every occurrence of it and every labelled
+      // mention of its surname (R8-7 (4))
       const key = entry.key.join(" ");
       if (decided.has(key)) continue;
       decided.add(key);
       const all = names.filter((n) => n.entry === entry);
-      // spelling: a written suffix keeps the holders ESPN spells with it, when one is
+      // R8-7 (5): a written suffix excludes every holder ESPN spells otherwise; it narrows the holders
+      // a label can fit, and the residual goes only to the prominent holder it does not exclude
       const written = new Set(all.flatMap((n) => (n.suffix === null ? [] : [n.suffix])));
-      const spelled = entry.players.filter((p) => p.suffix !== null && written.has(p.suffix));
-      const holders = spelled.length > 0 ? spelled : entry.players;
+      const excluded = (p: Held): boolean => [...written].some((x) => p.suffix !== x);
+      const holders = entry.players.filter((p) => !excluded(p));
+      const top = prominentOf(entry.players);
+      const prominent = top !== null && !excluded(top) ? top : null;
       // (a) the labels of every mention: one holder must fit them all
-      const labels = all.map((n) => ({ at: n.start, parts: read().label(n.start, n.end) }));
+      const alone = surnameMentions.get(entry) ?? [];
+      const labels = [
+        ...all.map((n) => ({ at: n.start, parts: read().label(n.start, n.end) })),
+        ...alone.filter((x) => x.parts.length > 0),
+      ];
       const parts = labels.flatMap((l) => l.parts);
       let p: Held | null = null;
-      if (parts.length > 0)
-        p = contrasted(labels) ? null : labelledHolder(holders, parts, [prominentOf(holders)]);
-      // (b) the residual, only when the scan finds no team and no position: the one spelled holder,
-      // or the prominent one
-      else if (!read().namesTeamOrPosition())
-        p = holders.length === 1 ? (holders[0] ?? null) : prominentOf(holders);
+      if (crossed.has(entry)) p = null;
+      else if (parts.length > 0)
+        p =
+          contrasted(labels) || introduced(alone, labels)
+            ? null
+            : labelledHolder(holders, parts, [prominent]);
+      // (b) the residual, only when the scan finds no team and no position: the prominent holder
+      else if (prominent !== null && !read().namesTeamOrPosition()) p = prominent;
       if (p === null) {
         unresolved++;
         continue;
@@ -645,56 +774,49 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       add(p, labelMethod(parts), at);
     }
 
-    // 4. bare surnames: a unique one on a team the item names; a shared one by its label
-    const sharedSurnames = new Map<string, number[]>();
-    for (let i = 0; i < tokens.length; i++) {
+    // 5. bare surnames: a unique one on a team the item names (f41e810); a shared one by its label
+    const sharedSurnames = new Map<
+      string,
+      { i: number; at: number; parts: readonly LabelPart[] }[]
+    >();
+    for (const i of bare) {
       const t = tokens[i];
-      if (t === null || t === undefined || consumed[i] === true || !t.capital) continue;
-      if (TEAM_WORDS.has(t.norm)) continue;
-      // the surname of a full name the item holds is that person, whoever he turned out to be —
-      // never another player of the surname ("Justin Jefferson: … | Jefferson caught …")
-      if (surnames.has(t.norm)) continue;
-      const prev = i > 0 ? tokens[i - 1] : null;
-      // a surname right after a coaching-staff word is that staff member, not a player (whatever the
-      // staff word's case — "Bengals coach Corbin" as much as "Coach Corbin")
-      if (!t.breakBefore && prev !== null && prev !== undefined && STAFF_WORDS.has(prev.norm))
-        continue;
+      if (t === null || t === undefined) continue;
       const sharers = bySurname.get(t.norm);
-      const shared = (sharers?.length ?? 0) > 1;
-      if (!t.breakBefore && prev?.capital === true) {
-        // a capitalised word before a surname is a first name unless it is a lead word — or, before
-        // a surname several players share, a team or a position label word ("Linebacker Jefferson")
-        const lead = LEAD_WORDS.has(prev.norm) || TEAM_WORDS.has(prev.norm);
-        if (!lead && !(shared && isLabelForm(text.slice(prev.start, prev.end)))) continue;
-      }
-      const next = tokens[i + 1];
-      if (next !== null && next !== undefined && !next.breakBefore && next.capital) {
-        // …and a capitalised word after it is a second name unless it is a lead word — or, after a
-        // shared surname, a label word of its name tag ("Jefferson MLB: Records sack")
-        const lead = TEAM_WORDS.has(next.norm) || LEAD_WORDS.has(next.norm);
-        if (!lead && !(shared && isLabelForm(text.slice(next.start, next.end)))) continue;
-      }
-      if (sharers === undefined) continue;
-      if (shared) {
-        sharedSurnames.set(t.norm, [...(sharedSurnames.get(t.norm) ?? []), i]);
+      if ((sharers?.length ?? 0) <= 1) {
+        // a surname one player holds (or none): exactly as at f41e810 — his team written next to it
+        // ("Commanders RB Croskey-Merritt"), or named in the item ("Croskey-Merritt to start;
+        // Washington thin at RB"); a capitalised word before it is a first name unless it is a lead
+        // word, and one after it a second name
+        if (TEAM_WORDS.has(t.norm)) continue;
+        const prev = i > 0 ? tokens[i - 1] : null;
+        if (!t.breakBefore && prev?.capital === true) {
+          if (!LEAD_WORDS.has(prev.norm) && !TEAM_WORDS.has(prev.norm)) continue;
+        }
+        const next = tokens[i + 1];
+        if (next !== null && next !== undefined && !next.breakBefore && next.capital) {
+          if (!TEAM_WORDS.has(next.norm) && !LEAD_WORDS.has(next.norm)) continue;
+        }
+        const only = sharers?.[0];
+        const team = only?.team ?? null;
+        if (team === null || only === undefined || named.size === 0) continue;
+        if (attachedTeams(text, mentions, t.start, t.end).has(team) || onTeam(only))
+          add(only, "last_name_team", i);
         continue;
       }
-      // a surname one player holds: as at f41e810 — his team written next to it ("Commanders RB
-      // Croskey-Merritt"), or named in the item ("Croskey-Merritt to start; Washington thin at RB")
-      const only = sharers[0];
-      const team = only?.team ?? null;
-      if (team === null || only === undefined || named.size === 0) continue;
-      if (attachedTeams(text, mentions, t.start, t.end).has(team) || onTeam(only))
-        add(only, "last_name_team", i);
+      // R8-7 (4): a surname several players share, no full name in the item ending with it, reads
+      // its labels as (a) does, in every form (a possessive, a two-word position in title case, a
+      // capitalised word after it, a surname that is also a team word); `noMention` makes it none
+      if (noMention(i, t)) continue;
+      const parts = surnameLabel(t);
+      if (parts === null) continue;
+      sharedSurnames.set(t.norm, [
+        ...(sharedSurnames.get(t.norm) ?? []),
+        { i, at: t.start, parts },
+      ]);
     }
-    for (const [norm, at] of sharedSurnames) {
+    for (const [norm, labels] of sharedSurnames) {
       const sharers = bySurname.get(norm) ?? [];
-      const labels = at.flatMap((i) => {
-        const t = tokens[i];
-        return t === null || t === undefined
-          ? []
-          : [{ at: t.start, parts: read().label(t.start, t.end) }];
-      });
       const parts = labels.flatMap((l) => l.parts);
       // R8-6 (a) and choice 6: the one sharer the labels of its mentions fit, past the surname's
       // prominent holder and his own full name's ("Eagles' Young" is no more the Eagles DT's than
@@ -706,8 +828,9 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         const own = him === null ? null : prominentOf(sharers.filter((x) => x.key === him.key));
         if (own !== null && own !== him && !positionRulesOut(parts, own)) p = null;
       }
-      if (p !== null) add(p, "last_name_team", at[0] ?? 0);
-      else if (parts.length > 0 || read().namesTeamOrPosition()) unresolved++;
+      // R8-7 (4): left to no one, it is counted — beside other refs too
+      if (p !== null) add(p, "last_name_team", labels[0]?.i ?? 0);
+      else unresolved++;
     }
 
     const refs = [...found.values()]

@@ -1,56 +1,81 @@
 // labels.ts — the reading of a name several universe players hold (a shared name), for the news
-// player matcher (ruling R8-6, changelog §R8: the matcher fails closed for a shared name; plan 07 D6;
-// plan 02 §6.4 — rules over closed, tested lists, never a model). It reads two things, and nothing else
-// about a shared name's holders is read anywhere (R8-6 (c)):
+// player matcher (ruling R8-6, changelog §R8: the matcher fails closed for a shared name; ruling R8-7
+// bounds what its label and scan read; plan 07 D6; plan 02 §6.4 — rules over closed, tested lists,
+// never a model). It reads two things, and nothing else about a shared name's holders is read anywhere
+// (R8-6 (c)), both with ONE set of forms (R8-7 (3): any form the scan reads as a team or a position is
+// a label form where a label stands):
 //
 //   the LABEL written next to the name (R8-6 (a), `SharedReading.label`) — a team or a position
 //     directly before it, whitespace only between ("Browns LB Justin Jefferson", "Browns' Justin
-//     Jefferson", "LB Justin Jefferson", "Kansas City's Chris Jones"); in parentheses directly after it
-//     ("(CLE)", "(CLE - LB)", "(LB, Browns)", "(Vikings wide receiver)"); or in the headline's name tag
-//     before the colon ("Justin Jefferson, CLE:", "Justin Jefferson LB:"). Adjacency is broken by any
-//     punctuation but the possessive ("…the Vikings, Justin Jefferson…" is no label), by a closing
-//     quotation mark ("'Beat the Vikings' Justin Jefferson tells …": an apostrophe that closes a quote
-//     opened in its segment is no possessive), by a line or a paragraph break the raw item writes (a
-//     newline, or any HTML tag: sanitizeText turns both into a space, `markBreaks` keeps where they
-//     were), and by any word that is no team and no position ("Vikings star Justin Jefferson" labels no
+//     Jefferson", "L.A.'s Byron Young", "Nashville's Marcus Harris", "Chiefs Defensive Tackle Jones");
+//     in parentheses directly after it ("(CLE)", "(L.A.)", "(CLE - LB)", "(LB, Browns)"); or in the
+//     headline's name tag before the colon ("Justin Jefferson, CLE:", "Jefferson MLB:"). A form is one
+//     word or up to four ("Green Bay", "wide receiver", "Bank of America"), its words joined by spaces
+//     (a period may end a word of it: "St. Louis", "U.S. Bank"). Adjacency is broken by any punctuation
+//     but the possessive ("…the Vikings, Justin Jefferson…" is no label), by a closing quotation mark
+//     ("'Beat the Vikings' Justin Jefferson tells …": an apostrophe that closes a quote opened in its
+//     segment is no possessive), by a line or a paragraph break the raw item writes (a newline, or any
+//     HTML tag, an opening or a closing one: sanitizeText turns both into a space, `markBreaks` keeps
+//     where they were), and by any word that is no form ("Vikings star Justin Jefferson" labels no
 //     team). Three more rules only take labels away: a label of teams alone (no possessive, no position)
 //     must open its clause, so a word right before it makes it that word's object or modifier
 //     ("Against the Vikings Justin Jefferson recorded 12 tackles", "Week 9 at Vikings Justin Jefferson
-//     …", "Browns beat Vikings Justin Jefferson …"); an AMBIGUOUS_LABEL_WORDS word ("safety", "corner")
-//     right after a LABEL_BLOCKERS word is the ordinary word ("After safety Lamar Jackson leads …";
-//     "Veteran safety …" and "the Eagles safety …" label him); and in a segment written all in
-//     capitals, the forms that are also ordinary words (CAPS_ONLY_ABBREVIATIONS, "EDGE") label no name
-//     before it ("BROWNS EDGE JUSTIN JEFFERSON, VIKINGS"). A tag that holds anything else is no label
-//     ("(knee)", "(vs. CLE)");
+//     …", "Browns beat Vikings Justin Jefferson …"); a word that is also an ordinary word
+//     (positions.ts AMBIGUOUS_LABEL_WORDS, and every ORDINARY_WORD_ABBREVIATIONS form) right after a
+//     LABEL_BLOCKERS or a GAME_MOVE_WORDS word is the ordinary word ("After safety Lamar Jackson leads
+//     …", "at WILL …"; "Veteran safety …" and "the Eagles safety …" label him); and an ordinary-word
+//     abbreviation labels in capitals only, in a segment written all in capitals only inside a tag
+//     ("BROWNS EDGE JUSTIN JEFFERSON, VIKINGS" labels no one; "SAM TWIN (NO): OUT" does). A tag that
+//     holds anything else is no label ("(knee)", "(vs. CLE)");
 //   the broad SCAN (R8-6 (b), `SharedReading.namesTeamOrPosition`) — whether the title or the blurb
 //     names any team or any position anywhere, the persons' full names left out ("Dallas Goedert"; a
-//     surname standing alone may be a team, "Washington", and is read): a team in every form and any
-//     case — a nickname, a
-//     singular ("Ex-Brown"), a home, a city (TEAM_CITIES: where a team plays or trains), a short name, a
-//     legacy name ("Oilers", "Oakland"), a whole-word abbreviation (TEAM_ABBREVIATIONS, PFR's and MFL's
-//     among them, and the legacy ones), and a compound that holds one: a handle, a hashtag, a domain or
-//     a camel-cased word ("@Browns", "#RaiderNation", "#CLEvsMIN", "ClevelandBrowns.com",
-//     "kcchiefs.com"); and a position in every written form (positions.ts). The scan only ever takes the
+//     surname standing alone may be a team, "Washington", and is read): every form of the lists below,
+//     in any case, as a word, two to four words in a row, the parts a hyphen or a period joins, and a
+//     compound that holds one (a handle, a hashtag, a domain, a camel-cased word: "@Browns",
+//     "#RaiderNation", "#CLEvsMIN", "ClevelandBrowns.com", "kcchiefs.com"). The scan only ever takes the
 //     residual away, so it errs toward finding: an ambiguous token costs recall, never precision.
 //
-// The item is read FOLDED (`foldText`), one code point at a time, with a map back to the sanitised text's
-// offsets: NFKD with the combining marks stripped (accents, fullwidth and compatibility forms), the
-// lookalike letters folded to Latin ones (CONFUSABLES), the apostrophe-like marks to "'" (APOSTROPHES)
-// and the dash punctuation to "-" (Unicode's Pd, and DASHES). sanitizeText (plan 02 §6.2) has already
-// removed controls and zero-width characters and collapsed whitespace. Words are read in any case; an
-// abbreviation whose lower-case form is an ordinary word or a name (CAPS_ONLY_ABBREVIATIONS, and
-// positions.ts' CAPS_ONLY_POSITION_ABBREVIATIONS) counts only in capitals, so an all-caps headline's "NO"
-// counts and "No timetable" does not.
+// The case of an abbreviation (R8-7 (2)). One whose lower case is an ordinary English word or part of a
+// name (ORDINARY_WORD_ABBREVIATIONS: "NO", "WAS", "TEN", "MIN", "SEA", "WILL", "EDGE" …) counts in
+// capitals outside a segment written all in capitals, and in any case directly after a game or move
+// word (GAME_MOVE_WORDS: "vs. Sea", "by Den", "at Will", "@ Min"): "Jackson was limited", "No
+// timetable" and "He will play" name nothing. Every other abbreviation counts in any case ("cle",
+// "olb"), and so does every abbreviation written with periods ("L.A.", "K.C.", "N.O."). A segment is
+// the title or the blurb, or a part a "|" or a line or paragraph break separates.
 //
-// The team forms, each list closed and held entry by entry by the tests: teams.ts' nicknames and homes
-// (exactly the unique names' own), SHARED_HOMES, TEAM_SHORT_NAMES and TEAM_ABBREVIATIONS (labels and the
-// scan, each with its hyphenated and glued spellings: "G-Men", "Gmen"); for the scan only,
-// TEAM_SINGULARS, TEAM_CITIES, SCAN_ONLY_TEAM_NAMES and SCAN_ONLY_TEAM_ABBREVIATIONS. A label's team is
-// the universe's: it fits only a holder on one of the teams it names (match.ts). Both readings are
-// linear in the item: the fold, the breaks and the quotes are one pass each, a label reads a bounded
-// window around each name, and the scan reads each word once (a compound up to MAX_COMPOUND letters).
+// The forms (R8-7 (1): complete when they hold, for each of the 32 teams, every category below; a form
+// outside them leaves the accepted residual, R8-3 clause 6). Each list is closed and held entry by entry
+// by the tests: teams.ts' nicknames and homes (exactly the unique names' own) and SHARED_HOMES;
+// TEAM_SHORT_NAMES and TEAM_SINGULARS (the nickname's short forms and its singular); TEAM_CITIES (the
+// city or state, its short names and nicknames); TEAM_STADIUMS (the current stadium by every name it has
+// had since 2015, by the words a writer keeps: "Lincoln Financial", "the Linc", "Huntington Bank"; and
+// some former homes); TEAM_FACILITIES (the training facility, its town and the camp town); TEAM_HASHTAGS
+// (the official hashtags no other form finds; read after "#" only); TEAM_FAN_NAMES (the fans' names and
+// nicknames: every form an attack has reported, and more); TEAM_LEGACY_NAMES; TEAM_ABBREVIATIONS
+// (ESPN's, nflverse's, PFR's and PFF's, MyFantasyLeague's, the feeds'), TEAM_LEGACY_ABBREVIATIONS and
+// TEAM_STATE_ABBREVIATIONS (the home state's postal and AP abbreviations: "MN", "Minn."; Louisiana's
+// "LA" and "La." read as the Rams' LA, and New York's "NY" as either New York team: one form, one
+// reading). Each word form is read in each spelling: its words joined by a space, a hyphen or nothing
+// ("G-Men", "G Men", "Gmen"; a spaced spelling never opens with the article "a": "A-Town"), its
+// possessive "'s" written or not ("America's Team"). A label's team is the universe's: it fits only a
+// holder on one of the teams it names (match.ts).
+//
+// The item is read FOLDED (`foldText`), one code point at a time, with a map back to the sanitised
+// text's offsets: an apostrophe-like mark (APOSTROPHES) to "'", a lookalike letter (CONFUSABLES) to its
+// Latin letter, else NFKD with the combining marks stripped (accents, fullwidth and compatibility
+// forms), each piece's dash punctuation (Unicode's Pd, and DASHES) to "-". sanitizeText (plan 02 §6.2)
+// has already removed controls and zero-width characters and collapsed whitespace. Every reading is
+// linear in the item: the fold, the breaks, the quotes and the multi-word forms are one pass each, a
+// label reads a bounded window around each name, and the scan reads each word once (a compound up to
+// MAX_COMPOUND letters, through a trie of the forms).
 import type { NflTeam } from "../../config/schema.js";
-import { isAmbiguousLabelWord, positionFound, positionLabelIds } from "./positions.js";
+import {
+  isAmbiguousLabelWord,
+  MAX_POSITION_WORDS,
+  POSITION_PHRASE_HEADS,
+  positionAbbreviation,
+  positionWordIds,
+} from "./positions.js";
 import { TEAM_HOMES, TEAM_NICKNAMES } from "./teams.js";
 
 /** The homes that hold two teams: a team of either ("the Los Angeles Rams", "New York's"). */
@@ -59,50 +84,18 @@ export const SHARED_HOMES: Readonly<Record<string, readonly NflTeam[]>> = Object
   "New York": Object.freeze(["NYG", "NYJ"] as const),
 });
 
-/** The short names feeds write for a team, beside teams.ts' nicknames and homes. */
+/** The short names feeds write for a team, beside teams.ts' nicknames ("Vikes", "Jints"). */
 // prettier-ignore
 export const TEAM_SHORT_NAMES: Readonly<Record<string, NflTeam>> = Object.freeze({
   Vikes: "MIN", Fins: "MIA", Phins: "MIA", Bolts: "LAC", Pack: "GB", Hawks: "SEA", Cards: "ARI",
-  "G-Men": "NYG", Cincy: "CIN", Vegas: "LV", "Big Blue": "NYG", "Gang Green": "NYJ",
+  "G-Men": "NYG", Cincy: "CIN", Vegas: "LV", "Big Blue": "NYG", "Gang Green": "NYJ", Jints: "NYG",
+  Brownies: "CLE", Stillers: "PIT", Commies: "WAS", Donkeys: "DEN", Bungles: "CIN",
 });
 
 /**
- * The team abbreviations feeds write: nflverse's; ESPN's LAR and WSH; the JAC some feeds use; PFF's
- * ARZ, BLT, CLV and HST; Pro Football Reference's GNB, KAN, LVR, NOR, NWE, SFO and TAM; MyFantasyLeague's
- * GBP, KCC, NEP, NOS and TBB; and NY (either New York team).
- */
-// prettier-ignore
-export const TEAM_ABBREVIATIONS: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
-  ARI: ["ARI"], ARZ: ["ARI"], ATL: ["ATL"], BAL: ["BAL"], BLT: ["BAL"], BUF: ["BUF"], CAR: ["CAR"],
-  CHI: ["CHI"], CIN: ["CIN"], CLE: ["CLE"], CLV: ["CLE"], DAL: ["DAL"], DEN: ["DEN"], DET: ["DET"],
-  GB: ["GB"], GNB: ["GB"], GBP: ["GB"], HOU: ["HOU"], HST: ["HOU"], IND: ["IND"], JAX: ["JAX"],
-  JAC: ["JAX"], KC: ["KC"], KAN: ["KC"], KCC: ["KC"], LA: ["LA"], LAR: ["LA"], LAC: ["LAC"],
-  LV: ["LV"], LVR: ["LV"], MIA: ["MIA"], MIN: ["MIN"], NE: ["NE"], NWE: ["NE"], NEP: ["NE"],
-  NO: ["NO"], NOR: ["NO"], NOS: ["NO"], NYG: ["NYG"], NYJ: ["NYJ"], NY: ["NYG", "NYJ"],
-  PHI: ["PHI"], PIT: ["PIT"], SEA: ["SEA"], SF: ["SF"], SFO: ["SF"], TB: ["TB"], TAM: ["TB"],
-  TBB: ["TB"], TEN: ["TEN"], WAS: ["WAS"], WSH: ["WAS"],
-});
-
-/**
- * The legacy abbreviations of moved and renamed teams (OAK, SD, SDG, STL, PHX, WFT), and the D.C. of
- * Washington's (an initialism reads as "DC"): found by the scan only, never a label.
- */
-// prettier-ignore
-export const SCAN_ONLY_TEAM_ABBREVIATIONS: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
-  OAK: ["LV"], SD: ["LAC"], SDG: ["LAC"], STL: ["LA"], PHX: ["ARI"], WFT: ["WAS"], DC: ["WAS"],
-});
-
-/** The abbreviations whose lower-case form is an ordinary word or a name: counted only in capitals. */
-// prettier-ignore
-export const CAPS_ONLY_ABBREVIATIONS: readonly string[] = Object.freeze([
-  "ARI", "CAR", "CHI", "DAL", "DEN", "JAC", "LA", "LAC", "MIA", "MIN", "NE", "NO", "NOR", "NOS",
-  "OAK", "PHI", "PIT", "SEA", "TAM", "TEN", "WAS",
-]);
-
-/**
- * Singular nicknames ("a former Raven", "Ex-Brown", "ex-Bolt"), found by the scan only, never a label.
- * Those that are ordinary words or names (Brown, Bill, Chief, Giant, Jet, Saint, Ram, Colt, Lion,
- * Bear, Pat) are found too: an ambiguous token counts as found (R8-6 (b)).
+ * Singular nicknames ("a former Raven", "Ex-Brown", "ex-Bolt"). Those that are ordinary words or names
+ * (Brown, Bill, Chief, Giant, Jet, Saint, Ram, Colt, Lion, Bear, Pat) are forms too: an ambiguous token
+ * counts as found (R8-6 (b)), and a label of teams alone must open its clause.
  */
 // prettier-ignore
 export const TEAM_SINGULARS: Readonly<Record<string, NflTeam>> = Object.freeze({
@@ -116,70 +109,256 @@ export const TEAM_SINGULARS: Readonly<Record<string, NflTeam>> = Object.freeze({
 });
 
 /**
- * The places of a team where its home is not the place's name: the city it plays or trains in ("in
- * Nashville", "per a Minneapolis Star Tribune writer", "at practice in Berea"), its city's nicknames
- * ("Titletown", "Steel City", "NOLA") and its stadium ("Lambeau", "Arrowhead"): found by the scan
- * only, never a label.
+ * The city or state of a team where teams.ts names neither, its common short names and its nicknames
+ * ("in Nashville", "Chi-Town", "the Big Apple", "Mpls"); New Jersey, where both New York teams play.
  */
 // prettier-ignore
 export const TEAM_CITIES: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
-  Glendale: ["ARI"], Phoenix: ["ARI"], Tempe: ["ARI"], "Flowery Branch": ["ATL"],
-  "Owings Mills": ["BAL"], "Charm City": ["BAL"], "Orchard Park": ["BUF"], Highmark: ["BUF"],
-  Charlotte: ["CAR"], "Queen City": ["CAR", "CIN"], "Lake Forest": ["CHI"], "Windy City": ["CHI"],
-  "Soldier Field": ["CHI"], Berea: ["CLE"], Arlington: ["DAL"], Frisco: ["DAL"], "Big D": ["DAL"],
-  "Mile High": ["DEN"], "Allen Park": ["DET"], "Motor City": ["DET"], Motown: ["DET"],
-  Titletown: ["GB"], Lambeau: ["GB"], "H-Town": ["HOU"], "Space City": ["HOU"], Duval: ["JAX"],
-  Arrowhead: ["KC"], Inglewood: ["LA", "LAC"], SoFi: ["LA", "LAC"], "Thousand Oaks": ["LA"],
-  "El Segundo": ["LAC"], "Costa Mesa": ["LAC"], Paradise: ["LV"], "Sin City": ["LV"],
-  Allegiant: ["LV"], Davie: ["MIA"], "Magic City": ["MIA"], Minneapolis: ["MIN"], Eagan: ["MIN"],
-  "Twin Cities": ["MIN"], Foxborough: ["NE"], Foxboro: ["NE"], Gillette: ["NE"], Metairie: ["NO"],
-  "Big Easy": ["NO"], NOLA: ["NO"], Superdome: ["NO"], "East Rutherford": ["NYG", "NYJ"],
-  MetLife: ["NYG", "NYJ"], "Big Apple": ["NYG", "NYJ"], "Florham Park": ["NYJ"], Latrobe: ["PIT"],
-  "Steel City": ["PIT"], Acrisure: ["PIT"], Renton: ["SEA"], "Emerald City": ["SEA"], Lumen: ["SEA"],
-  "Santa Clara": ["SF"], "Bay Area": ["SF"], Tampa: ["TB"], Nashville: ["TEN"],
-  "Music City": ["TEN"], Landover: ["WAS"], Ashburn: ["WAS"],
+  Phoenix: ["ARI"], Zona: ["ARI"], "Valley of the Sun": ["ARI"],
+  "A-Town": ["ATL"], Hotlanta: ["ATL"],
+  "Charm City": ["BAL"], "B'more": ["BAL"],
+  "Queen City": ["BUF", "CAR", "CIN"], "Nickel City": ["BUF"], WNY: ["BUF"],
+  Charlotte: ["CAR"], Carolinas: ["CAR"],
+  "Windy City": ["CHI"], "Chi-Town": ["CHI"], "Second City": ["CHI"], Chicagoland: ["CHI"],
+  Nati: ["CIN"],
+  "the Land": ["CLE"], "C-Town": ["CLE"], Believeland: ["CLE"],
+  "Big D": ["DAL"], Metroplex: ["DAL"], DFW: ["DAL"], Frisco: ["DAL", "SF"],
+  "Mile High": ["DEN"],
+  "Motor City": ["DET"], Motown: ["DET"],
+  Titletown: ["GB"],
+  "H-Town": ["HOU"], "Space City": ["HOU"], "Bayou City": ["HOU"],
+  Naptown: ["IND"], "Circle City": ["IND"],
+  Duval: ["JAX"], "River City": ["JAX"],
+  KCMO: ["KC"],
+  SoCal: ["LA", "LAC"], "City of Angels": ["LA", "LAC"], Tinseltown: ["LA", "LAC"],
+  "Sin City": ["LV"],
+  "Magic City": ["MIA"], "South Beach": ["MIA"], "South Florida": ["MIA"],
+  Minneapolis: ["MIN"], Mpls: ["MIN"], "Twin Cities": ["MIN"], Minny: ["MIN"], "St Paul": ["MIN"],
+  "Saint Paul": ["MIN"],
+  Boston: ["NE"], Beantown: ["NE"],
+  NOLA: ["NO"], "Big Easy": ["NO"], "Crescent City": ["NO"],
+  NYC: ["NYG", "NYJ"], "Big Apple": ["NYG", "NYJ"], Gotham: ["NYG", "NYJ"],
+  "New Jersey": ["NYG", "NYJ"],
+  "Brotherly Love": ["PHI"],
+  "Steel City": ["PIT"], Burgh: ["PIT"], Pitt: ["PIT"],
+  "San Fran": ["SF"], "Bay Area": ["SF"],
+  "Emerald City": ["SEA"], "Rain City": ["SEA"], PNW: ["SEA"], "Pacific Northwest": ["SEA"],
+  Tampa: ["TB"], "Cigar City": ["TB"], "St Pete": ["TB"], "St Petersburg": ["TB"],
+  Nashville: ["TEN"], "Music City": ["TEN"], Nashvegas: ["TEN"],
+  DMV: ["WAS"], "the District": ["WAS"],
 });
 
 /**
- * The names the scan finds that never label a name: short names more than one team or ordinary words
- * share ("Birds", "'Boys"), fans' names for a team ("Skol", "Who Dey", "Dawg Pound", "12s"), and the
- * legacy names of moved and renamed teams ("Oilers", "Football Team", "St. Louis").
+ * Each team's current stadium by every name it has had since 2015, by the words a writer keeps
+ * ("Lincoln Financial" of Lincoln Financial Field, "US Bank" of U.S. Bank Stadium), its nicknames ("the
+ * Linc", "Jerry World") and the former homes of some.
  */
 // prettier-ignore
-export const SCAN_ONLY_TEAM_NAMES: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
-  Birds: ["ARI", "ATL", "BAL", "PHI", "SEA"], Boys: ["DAL"], "Big Red": ["ARI"],
-  "Dawg Pound": ["CLE"], "Who Dey": ["CIN"], Skol: ["MIN"], "Who Dat": ["NO"], Iggles: ["PHI"],
-  "Steel Curtain": ["PIT"], "12s": ["SEA"], "12th Man": ["SEA"],
-  Skins: ["WAS"], Redskins: ["WAS"], "Football Team": ["WAS"], Oilers: ["TEN"], Oakland: ["LV"],
+export const TEAM_STADIUMS: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
+  "State Farm": ["ARI"], "University of Phoenix": ["ARI"],
+  "Mercedes-Benz": ["ATL", "NO"], "Georgia Dome": ["ATL"],
+  "M&T Bank": ["BAL"], "M&T": ["BAL"],
+  Highmark: ["BUF"], "New Era Field": ["BUF"], "Ralph Wilson": ["BUF"],
+  "Bank of America": ["CAR"], BofA: ["CAR"],
+  "Soldier Field": ["CHI"],
+  Paycor: ["CIN"], "Paul Brown Stadium": ["CIN"], "the Jungle": ["CIN"],
+  "Huntington Bank": ["CLE"], FirstEnergy: ["CLE"],
+  "AT&T": ["DAL"], "Jerry World": ["DAL"],
+  "Empower Field": ["DEN"], "Sports Authority": ["DEN"],
+  "Ford Field": ["DET"],
+  Lambeau: ["GB"],
+  NRG: ["HOU"],
+  "Lucas Oil": ["IND"],
+  EverBank: ["JAX"], TIAA: ["JAX"],
+  Arrowhead: ["KC"], GEHA: ["KC"],
+  SoFi: ["LA", "LAC"], "Edward Jones": ["LA"], Qualcomm: ["LAC"], StubHub: ["LAC"],
+  Allegiant: ["LV"], "Death Star": ["LV"],
+  "Hard Rock": ["MIA"], "Sun Life": ["MIA"],
+  "US Bank": ["MIN"], "TCF Bank": ["MIN"],
+  Gillette: ["NE"],
+  Superdome: ["NO"],
+  MetLife: ["NYG", "NYJ"], Meadowlands: ["NYG", "NYJ"],
+  "Lincoln Financial": ["PHI"], Linc: ["PHI"],
+  Acrisure: ["PIT"], "Heinz Field": ["PIT"],
+  "Levi's Stadium": ["SF"],
+  Lumen: ["SEA"], CenturyLink: ["SEA"],
+  "Raymond James": ["TB"], "Ray Jay": ["TB"],
+  "Nissan Stadium": ["TEN"], "LP Field": ["TEN"],
+  "Northwest Stadium": ["WAS"], FedEx: ["WAS"],
+});
+
+/** Each team's training facility, the town it stands in, and its training camp's town. */
+// prettier-ignore
+export const TEAM_FACILITIES: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
+  Tempe: ["ARI"], Glendale: ["ARI"], "Dignity Health": ["ARI", "LAC"],
+  "Flowery Branch": ["ATL"], "IBM Performance": ["ATL"],
+  "Owings Mills": ["BAL"], "Armour Performance": ["BAL"],
+  "Orchard Park": ["BUF"], ADPRO: ["BUF"], Pittsford: ["BUF"], "John Fisher": ["BUF"],
+  Spartanburg: ["CAR"], Wofford: ["CAR"],
+  "Halas Hall": ["CHI"], "Lake Forest": ["CHI"], Bourbonnais: ["CHI"], Olivet: ["CHI"],
+  Berea: ["CLE"], CrossCountry: ["CLE"],
+  Arlington: ["DAL"], "the Star": ["DAL"], "Ford Center": ["DAL"], Oxnard: ["DAL"],
+  "River Ridge": ["DAL"],
+  "Dove Valley": ["DEN"], UCHealth: ["DEN"], Englewood: ["DEN"],
+  "Allen Park": ["DET"],
+  "Don Hutson": ["GB"], Nitschke: ["GB"],
+  "Methodist Training": ["HOU"], Greenbrier: ["HOU", "NO"], "White Sulphur": ["HOU", "NO"],
+  "Farm Bureau": ["IND"], Westfield: ["IND"], "Grand Park": ["IND"], "Anderson University": ["IND"],
+  "Miller Electric": ["JAX"],
+  "Kansas Health": ["KC"], "St Joseph": ["KC"], "Saint Joseph": ["KC"], "Missouri Western": ["KC"],
+  Inglewood: ["LA", "LAC"], "Thousand Oaks": ["LA"], "Cal Lutheran": ["LA"],
+  "Woodland Hills": ["LA"], "Warner Center": ["LA"], "Agoura Hills": ["LA"], Irvine: ["LA", "NO"],
+  "El Segundo": ["LAC"], "Costa Mesa": ["LAC"], "Jack Hammett": ["LAC"],
+  Henderson: ["LV"], Intermountain: ["LV"], Napa: ["LV"], Paradise: ["LV"],
+  Davie: ["MIA"], "Miami Gardens": ["MIA"], "Baptist Health": ["MIA"], "Nova Southeastern": ["MIA"],
+  Eagan: ["MIN"], TCO: ["MIN"], Mankato: ["MIN"],
+  Foxborough: ["NE"], Foxboro: ["NE"],
+  Metairie: ["NO"], Ochsner: ["NO"],
+  "East Rutherford": ["NYG", "NYJ"], "Quest Diagnostics": ["NYG"],
+  "Florham Park": ["NYJ"], "Atlantic Health": ["NYJ"],
+  NovaCare: ["PHI"],
+  Latrobe: ["PIT"], "Saint Vincent": ["PIT"], "St Vincent": ["PIT"], "UPMC Rooney": ["PIT"],
+  "Rooney Sports": ["PIT"],
+  "Santa Clara": ["SF"], "SAP Performance": ["SF"],
+  Renton: ["SEA"], VMAC: ["SEA"], "Virginia Mason": ["SEA"],
+  AdventHealth: ["TB"],
+  "Saint Thomas": ["TEN"], "St Thomas": ["TEN"],
+  Ashburn: ["WAS"], Landover: ["WAS"], Inova: ["WAS"], OrthoVirginia: ["WAS"], Richmond: ["WAS"],
+  "Bon Secours": ["WAS"],
+});
+
+/**
+ * The teams' own hashtags that no other form finds inside them ("#HereWeGo", "#KeepPounding"): read
+ * after "#" only, in any case. ("#OnePride", "#DUUUVAL", "#BirdGang" and "#RuleTheJungle" hold a fans'
+ * name or a stadium's, so those forms find them.)
+ */
+// prettier-ignore
+export const TEAM_HASHTAGS: Readonly<Record<string, NflTeam>> = Object.freeze({
+  BirdCityFootball: "ARI", BeRedSeeRed: "ARI", RiseUp: "ATL", InBrotherhood: "ATL",
+  KeepPounding: "CAR", ForTheShoe: "IND", WhoseHouse: "LA", TogetherBlue: "NYG", TakeFlight: "NYJ",
+  HereWeGo: "PIT", FTTB: "SF", SiegeTheDay: "TB", HTTC: "WAS", HTTR: "WAS", RaiseHail: "WAS",
+});
+
+/**
+ * The fans' names and the nicknames fans and writers give a team, those several teams share among them
+ * ("Birds", "Cats"): every form an attack on the matcher has reported ("Jints", "the Fish", "the Cats",
+ * "the Dawgs", "America's Team", "Factory of Sadness"), and the common others.
+ */
+// prettier-ignore
+export const TEAM_FAN_NAMES: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
+  Birds: ["ARI", "ATL", "BAL", "PHI", "SEA"], Cats: ["CAR", "CIN", "DET", "JAX"],
+  "Big Red": ["ARI"], "Red Sea": ["ARI"],
+  "Dirty Birds": ["ATL"], "Dirty Bird": ["ATL"],
+  "Roaring Riot": ["CAR"],
+  "Monsters of the Midway": ["CHI"],
+  "Who Dey": ["CIN"],
+  "Dawg Pound": ["CLE"], Dawgs: ["CLE"], "Factory of Sadness": ["CLE"],
+  Boys: ["DAL"], Boyz: ["DAL"], "America's Team": ["DAL"],
+  "Orange Crush": ["DEN"],
+  "One Pride": ["DET"],
+  Cheeseheads: ["GB"], Cheesehead: ["GB"],
+  "Bulls on Parade": ["HOU"],
+  Duuuval: ["JAX"],
+  "Black Hole": ["LV"], "Silver and Black": ["LV"],
+  "the Fish": ["MIA"], Dolfans: ["MIA"],
+  Skol: ["MIN"], "Purple People Eaters": ["MIN"],
+  "Who Dat": ["NO"], "Black and Gold": ["NO", "PIT"],
+  Iggles: ["PHI"], "Bird Gang": ["PHI"],
+  "Steel Curtain": ["PIT"], "Terrible Towel": ["PIT"], Yinzers: ["PIT"], Yinzer: ["PIT"],
+  Yinz: ["PIT"],
+  "the Faithful": ["SF"],
+  "12s": ["SEA"], "12th Man": ["SEA"], "Legion of Boom": ["SEA"],
+  "Burgundy and Gold": ["WAS"],
+});
+
+/** The names of moved and renamed teams ("Oilers", "Football Team", "St. Louis"). */
+// prettier-ignore
+export const TEAM_LEGACY_NAMES: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
+  Oilers: ["TEN"], Redskins: ["WAS"], Skins: ["WAS"], "Football Team": ["WAS"], Oakland: ["LV"],
   "San Diego": ["LAC"], "St Louis": ["LA"], "Saint Louis": ["LA"],
 });
 
 /**
- * The teams' own hashtags that hold no team form ("#HereWeGo", "#DUUUVAL"): found by the scan only
- * after "#", in any case.
+ * The team abbreviations feeds write: nflverse's; ESPN's LAR and WSH; the JAC some feeds use; PFF's
+ * ARZ, BLT, CLV and HST; Pro Football Reference's GNB, KAN, LVR, NOR, NWE, SFO and TAM and its franchise
+ * codes CRD, RAV, HTX, CLT, OTI and RAI; MyFantasyLeague's GBP, KCC, NEP, NOS and TBB; and NY (either New
+ * York team).
  */
 // prettier-ignore
-export const TEAM_HASHTAGS: Readonly<Record<string, NflTeam>> = Object.freeze({
-  RiseUp: "ATL", KeepPounding: "CAR", RuleTheJungle: "CIN", OnePride: "DET", ForTheShoe: "IND",
-  DUUUVAL: "JAX", TogetherBlue: "NYG", TakeFlight: "NYJ", BirdGang: "PHI", HereWeGo: "PIT",
-  FTTB: "SF", HTTC: "WAS", HTTR: "WAS",
+export const TEAM_ABBREVIATIONS: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
+  ARI: ["ARI"], ARZ: ["ARI"], CRD: ["ARI"], ATL: ["ATL"], BAL: ["BAL"], BLT: ["BAL"], RAV: ["BAL"],
+  BUF: ["BUF"], CAR: ["CAR"], CHI: ["CHI"], CIN: ["CIN"], CLE: ["CLE"], CLV: ["CLE"], DAL: ["DAL"],
+  DEN: ["DEN"], DET: ["DET"], GB: ["GB"], GNB: ["GB"], GBP: ["GB"], HOU: ["HOU"], HST: ["HOU"],
+  HTX: ["HOU"], IND: ["IND"], CLT: ["IND"], JAX: ["JAX"], JAC: ["JAX"], KC: ["KC"], KAN: ["KC"],
+  KCC: ["KC"], LA: ["LA"], LAR: ["LA"], LAC: ["LAC"], LV: ["LV"], LVR: ["LV"], RAI: ["LV"],
+  MIA: ["MIA"], MIN: ["MIN"], NE: ["NE"], NWE: ["NE"], NEP: ["NE"], NO: ["NO"], NOR: ["NO"],
+  NOS: ["NO"], NYG: ["NYG"], NYJ: ["NYJ"], NY: ["NYG", "NYJ"], PHI: ["PHI"], PIT: ["PIT"],
+  SEA: ["SEA"], SF: ["SF"], SFO: ["SF"], TB: ["TB"], TAM: ["TB"], TBB: ["TB"], TEN: ["TEN"],
+  OTI: ["TEN"], WAS: ["WAS"], WSH: ["WAS"],
 });
+
+/** The abbreviations of moved and renamed teams (OAK, SD, SDG, STL, PHX, PHO, WFT, BOS). */
+// prettier-ignore
+export const TEAM_LEGACY_ABBREVIATIONS: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
+  OAK: ["LV"], SD: ["LAC"], SDG: ["LAC"], STL: ["LA"], PHX: ["ARI"], PHO: ["ARI"], WFT: ["WAS"],
+  BOS: ["NE"],
+});
+
+/**
+ * The postal and AP abbreviations of each team's home state ("MN", "Minn.", "TN", "Tenn."; the AP's
+ * period is the word's punctuation), and D.C.'s. Louisiana's LA and La. are TEAM_ABBREVIATIONS' LA, New
+ * York's NY and N.Y. its NY, Indiana's Ind. its IND.
+ */
+// prettier-ignore
+export const TEAM_STATE_ABBREVIATIONS: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
+  AZ: ["ARI"], ARIZ: ["ARI"], GA: ["ATL"], MD: ["BAL", "WAS"], NC: ["CAR"], IL: ["CHI"],
+  ILL: ["CHI"], OH: ["CIN", "CLE"], TX: ["DAL", "HOU"], CO: ["DEN"], COLO: ["DEN"], MI: ["DET"],
+  MICH: ["DET"], WI: ["GB"], WIS: ["GB"], IN: ["IND"], FL: ["JAX", "MIA", "TB"],
+  FLA: ["JAX", "MIA", "TB"], MO: ["KC"], CA: ["LA", "LAC", "SF"], CALIF: ["LA", "LAC", "SF"],
+  NV: ["LV"], NEV: ["LV"], MN: ["MIN"], MINN: ["MIN"], MA: ["NE"], MASS: ["NE"],
+  NJ: ["NYG", "NYJ"], PA: ["PHI", "PIT"], WA: ["SEA"], WASH: ["SEA"], TN: ["TEN"], TENN: ["TEN"],
+  VA: ["WAS"], DC: ["WAS"],
+});
+
+/**
+ * R8-7 (2): the abbreviations whose lower case is an ordinary English word or part of a name — teams',
+ * states' and positions' (positions.ts POSITION_ABBREVIATIONS) — counted in capitals outside a segment
+ * written all in capitals, and in any case directly after a GAME_MOVE_WORDS word.
+ */
+// prettier-ignore
+export const ORDINARY_WORD_ABBREVIATIONS: readonly string[] = Object.freeze([
+  "ARI", "CAR", "CHI", "DAL", "DEN", "JAC", "LA", "LAC", "MIA", "MIN", "NO", "NOR", "NOS", "OAK",
+  "PHI", "PHO", "PIT", "RAI", "SEA", "TAM", "TEN", "WAS",
+  "CO", "ILL", "IN", "MA", "MASS", "MI", "MO", "OH", "PA", "WASH", "WI",
+  "C", "DE", "DI", "EDGE", "G", "K", "LT", "MIKE", "OL", "P", "S", "SAM", "ST", "WILL",
+]);
+
+/**
+ * R8-7 (2): the game and move words after which an ordinary-word abbreviation counts in any case ("vs.
+ * Sea", "by Den", "at Will"). "v" counts with its period only; "@" may be written glued ("@Min").
+ */
+// prettier-ignore
+export const GAME_MOVE_WORDS: readonly string[] = Object.freeze([
+  "vs", "vs.", "v.", "@", "at", "against", "by", "from", "for", "to", "with", "visits", "hosts",
+  "faces",
+]);
 
 /** What may stand between the items of a tag (a space too): "(CLE - LB)", "(LB, Browns)", "(QB/RB)". */
 export const LABEL_SEPARATORS: readonly string[] = Object.freeze([",", "-", "/"]);
 
 /**
  * The articles and prepositions an ordinary-word position (AMBIGUOUS_LABEL_WORDS) is the object of
- * right after them: "After safety Lamar Jackson leads …", "in the corner Justin Jefferson …" — no
- * label ("Veteran safety …" is one). A label of teams alone needs no list: it must open its clause.
+ * right after them, beside GAME_MOVE_WORDS: "After safety Lamar Jackson leads …", "in the corner
+ * Justin Jefferson …" — no label ("Veteran safety …" is one). A label of teams alone needs no list: it
+ * must open its clause.
  */
 // prettier-ignore
 export const LABEL_BLOCKERS: readonly string[] = Object.freeze([
-  "a", "about", "above", "across", "after", "against", "along", "amid", "among", "an", "around",
-  "as", "at", "before", "behind", "beside", "between", "beyond", "by", "despite", "during",
-  "facing", "for", "from", "in", "inside", "into", "like", "near", "of", "off", "on", "onto",
-  "outside", "over", "past", "per", "since", "than", "the", "through", "to", "toward", "towards",
-  "under", "until", "upon", "v", "versus", "via", "vs", "with", "within", "without",
+  "a", "about", "above", "across", "after", "along", "amid", "among", "an", "around", "as",
+  "before", "behind", "beside", "between", "beyond", "despite", "during", "facing", "in", "inside",
+  "into", "like", "near", "of", "off", "on", "onto", "outside", "over", "past", "per", "since",
+  "than", "the", "through", "toward", "towards", "under", "until", "upon", "v", "versus", "via",
+  "within", "without",
 ]);
 
 /**
@@ -189,15 +368,9 @@ export const LABEL_BLOCKERS: readonly string[] = Object.freeze([
 export const CLAUSE_ABBREVIATIONS: readonly string[] = Object.freeze(["v", "vs"]);
 
 /**
- * The position abbreviations that, written in a segment all in capitals, may be the ordinary word
- * ("BROWNS EDGE JUSTIN JEFFERSON, VIKINGS"): no label before the name there (nor is any of
- * CAPS_ONLY_ABBREVIATIONS).
- */
-export const HEADLINE_ORDINARY_WORDS: readonly string[] = Object.freeze(["EDGE"]);
-
-/**
- * The letters folded to Latin ones: the Cyrillic, Greek and Armenian letters that look like them, and
- * the Latin letters NFKD does not decompose (accents are stripped as combining marks).
+ * The letters folded to Latin ones: some Cyrillic, Greek and Armenian lookalikes (each listed one, not
+ * every lookalike), and the Latin letters NFKD does not decompose (accents are stripped as combining
+ * marks).
  */
 // prettier-ignore
 export const CONFUSABLES: Readonly<Record<string, string>> = Object.freeze({
@@ -213,7 +386,10 @@ export const CONFUSABLES: Readonly<Record<string, string>> = Object.freeze({
   "ħ": "h", "þ": "th", "ɡ": "g", "ɑ": "a",
 });
 
-/** The marks folded to an apostrophe ("'"): curly and reversed quotes, the modifier letters, accents, primes. */
+/**
+ * The marks folded to an apostrophe ("'"): the curly and reversed single quotes, the modifier letters
+ * apostrophe and turned comma, the grave and acute accents, and the prime.
+ */
 // prettier-ignore
 export const APOSTROPHES: readonly string[] = Object.freeze([
   "\u2019", "\u2018", "\u201B", "\u02BC", "\u02BB", "`", "\u00B4", "\u2032",
@@ -225,15 +401,26 @@ export const DASHES: readonly string[] = Object.freeze(["\u2212"]);
 // ---------------------------------------------------------------------------------------------------
 // The forms, keyed once.
 
-/** A word or two of the folded text as the lists key it: lower case, no apostrophe, one space. */
+/** A word or several of the folded text as the lists key them: lower case, no apostrophe, one space. */
 function formKey(written: string): string {
   return written.toLowerCase().replaceAll("'", "").replace(/\s+/gu, " ").trim();
 }
 
-/** A form's spellings: as listed, with a hyphen for each space, and glued ("g-men", "gmen"). */
+/**
+ * A listed word form's spellings: its possessive "'s" written or not, then its words (split at a space
+ * or a hyphen) joined by a space, a hyphen or nothing, each join chosen apart; a spaced spelling never
+ * opens with the article "a" ("A-Town" is "a-town" and "atown", never "a town").
+ */
 function spellings(form: string): string[] {
-  const k = formKey(form);
-  return [...new Set([k, k.replaceAll(" ", "-"), k.replace(/[\s-]/gu, "")])];
+  const out = new Set<string>();
+  for (const base of new Set([form, form.replace(/'s\b/gu, "")])) {
+    const words = formKey(base).split(/[\s-]+/u);
+    let joins = [words[0] ?? ""];
+    for (const w of words.slice(1))
+      joins = joins.flatMap((s) => [`${s} ${w}`, `${s}-${w}`, `${s}${w}`]);
+    for (const j of joins) if (!j.startsWith("a ")) out.add(j);
+  }
+  return [...out];
 }
 
 const freezeTeams = (teams: readonly NflTeam[]): readonly NflTeam[] => Object.freeze([...teams]);
@@ -242,78 +429,188 @@ const entriesOf = (
 ): (readonly [string, readonly NflTeam[]])[] =>
   Object.entries(o).map(([k, t]) => [k, freezeTeams(typeof t === "string" ? [t] : t)] as const);
 
-/** The word forms of a team that label a name (any case, each spelling): nicknames, homes, short names. */
-const LABEL_WORD_TEAMS: ReadonlyMap<string, readonly NflTeam[]> = new Map(
+/** Keys their teams, a key listed twice naming the teams of both ("Queen City", "Irvine"). */
+function teamMap(
+  entries: readonly (readonly [string, readonly NflTeam[]])[],
+): ReadonlyMap<string, readonly NflTeam[]> {
+  const out = new Map<string, readonly NflTeam[]>();
+  for (const [k, ts] of entries)
+    out.set(k, freezeTeams([...new Set([...(out.get(k) ?? []), ...ts])]));
+  return out;
+}
+
+/** Every word form of a team, each spelling: one word or up to four. */
+const WORD_TEAMS: ReadonlyMap<string, readonly NflTeam[]> = teamMap(
   [
-    ...entriesOf(TEAM_NICKNAMES),
-    ...entriesOf(TEAM_HOMES),
-    ...entriesOf(SHARED_HOMES),
-    ...entriesOf(TEAM_SHORT_NAMES),
-  ].flatMap(([k, ts]) => spellings(k).map((s) => [s, ts] as const)),
+    TEAM_NICKNAMES,
+    TEAM_HOMES,
+    SHARED_HOMES,
+    TEAM_SHORT_NAMES,
+    TEAM_SINGULARS,
+    TEAM_CITIES,
+    TEAM_STADIUMS,
+    TEAM_FACILITIES,
+    TEAM_FAN_NAMES,
+    TEAM_LEGACY_NAMES,
+  ]
+    .flatMap(entriesOf)
+    .flatMap(([k, ts]) => spellings(k).map((s) => [s, ts] as const)),
 );
-const LABEL_ABBREVIATIONS: ReadonlyMap<string, readonly NflTeam[]> = new Map(
-  entriesOf(TEAM_ABBREVIATIONS),
+/** The hashtags, lower case (read after "#" only). */
+const HASHTAG_TEAMS: ReadonlyMap<string, readonly NflTeam[]> = teamMap(
+  entriesOf(TEAM_HASHTAGS).map(([k, ts]) => [k.toLowerCase(), ts] as const),
 );
-const CAPS_ONLY: ReadonlySet<string> = new Set(CAPS_ONLY_ABBREVIATIONS);
-const HEADLINE_AMBIGUOUS: ReadonlySet<string> = new Set([
-  ...CAPS_ONLY_ABBREVIATIONS,
-  ...HEADLINE_ORDINARY_WORDS,
-]);
-/** Every word form of a team the scan finds, each spelling ("st louis", "st-louis", "stlouis"). */
-const SCAN_TEAM_KEYS: ReadonlySet<string> = new Set([
-  ...LABEL_WORD_TEAMS.keys(),
-  ...[TEAM_SINGULARS, TEAM_CITIES, SCAN_ONLY_TEAM_NAMES].flatMap((o) =>
-    Object.keys(o).flatMap(spellings),
-  ),
-]);
-const SCAN_ABBREVIATIONS: ReadonlySet<string> = new Set([
-  ...Object.keys(TEAM_ABBREVIATIONS),
-  ...Object.keys(SCAN_ONLY_TEAM_ABBREVIATIONS),
-]);
+/** Every team abbreviation, in capitals. */
+const ABBREVIATION_TEAMS: ReadonlyMap<string, readonly NflTeam[]> = teamMap(
+  [TEAM_ABBREVIATIONS, TEAM_LEGACY_ABBREVIATIONS, TEAM_STATE_ABBREVIATIONS].flatMap(entriesOf),
+);
+const ORDINARY: ReadonlySet<string> = new Set(ORDINARY_WORD_ABBREVIATIONS);
+/** teams.ts' nicknames and homes, each spelling: before a surname they label it, never a first name. */
+const NICKNAME_OR_HOME: ReadonlySet<string> = new Set(
+  [TEAM_NICKNAMES, TEAM_HOMES, SHARED_HOMES].flatMap((o) => Object.keys(o).flatMap(spellings)),
+);
+/** The longest form, in words (a reader tries forms of up to this many words). */
+const MAX_FORM_WORDS = Math.max(
+  MAX_POSITION_WORDS,
+  ...[...WORD_TEAMS.keys()].map((k) => k.split(" ").length),
+);
+
+/** A trie of forms, for the forms inside a compound (bounded: a walk per start offset). */
+interface Trie {
+  readonly next: Map<string, Trie>;
+  end: boolean;
+}
+function trieOf(words: Iterable<string>): Trie {
+  const root: Trie = { next: new Map(), end: false };
+  for (const w of words) {
+    let node = root;
+    for (const c of w) {
+      let n = node.next.get(c);
+      if (n === undefined) {
+        n = { next: new Map(), end: false };
+        node.next.set(c, n);
+      }
+      node = n;
+    }
+    node.end = true;
+  }
+  return root;
+}
+/** Whether a trie's word stands anywhere in `s`. */
+function trieFinds(trie: Trie, s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    let node: Trie | undefined = trie;
+    for (let j = i; j < s.length; j++) {
+      node = node.next.get(s[j] ?? "");
+      if (node === undefined) break;
+      if (node.end) return true;
+    }
+  }
+  return false;
+}
 /** The longest compound read (bounded work): "www.philadelphiaeagles.com" fits. */
 const MAX_COMPOUND = 64;
 /** The team word forms searched for inside a compound: glued, four letters or more. */
-const COMPOUND_FORMS: readonly string[] = [...SCAN_TEAM_KEYS].filter(
-  (k) => !/[\s-]/u.test(k) && k.length >= 4,
+const COMPOUND_TRIE: Trie = trieOf(
+  [...WORD_TEAMS.keys()]
+    .filter((k) => !/[\s-]/u.test(k))
+    .map((k) => k.replaceAll(/[^\p{L}\p{N}]/gu, ""))
+    .filter((k) => k.length >= 4),
 );
 /**
- * Inside a hashtag only, the team's own hashtags, and the shorter forms too: three-letter
- * abbreviations and words ("#clevsmin", "#jetup").
+ * Inside a hashtag only, the team's own hashtags, and the shorter forms too: the three-letter
+ * abbreviations that are no ordinary word (R8-7 (2)) and the three-letter words ("#clevsmin", "#jetup").
  */
-const HASHTAG_FORMS: readonly string[] = [
-  ...new Set([
-    ...Object.keys(TEAM_HASHTAGS).map((h) => h.toLowerCase()),
-    ...[...SCAN_ABBREVIATIONS].filter((a) => a.length === 3).map((a) => a.toLowerCase()),
-    ...[...SCAN_TEAM_KEYS].filter((k) => !/[\s-]/u.test(k) && k.length === 3),
-  ]),
-];
+const HASHTAG_TRIE: Trie = trieOf([
+  ...HASHTAG_TEAMS.keys(),
+  ...[...ABBREVIATION_TEAMS.keys()]
+    .filter((a) => a.length === 3 && !ORDINARY.has(a))
+    .map((a) => a.toLowerCase()),
+  ...[...WORD_TEAMS.keys()].filter((k) => !/[\s-]/u.test(k) && k.length === 3),
+]);
+
+// ---------------------------------------------------------------------------------------------------
+// A form as it stands: its case read where it is written (R8-7 (2)).
+
+/** One part of a label written next to a name: the teams it may name, or the position ids it names. */
+export type LabelPart =
+  | { readonly kind: "team"; readonly teams: readonly NflTeam[] }
+  | { readonly kind: "position"; readonly ids: ReadonlySet<number> };
+
+/** Where a form stands, for the case of an ordinary-word abbreviation. */
+interface Place {
+  /** Its segment is written all in capitals. */
+  readonly caps: boolean;
+  /** It stands directly after a game or move word. */
+  readonly after: boolean;
+  /** It stands inside a label's tag (parentheses, the name tag). */
+  readonly tag: boolean;
+  /** It is a hashtag's word. */
+  readonly hash: boolean;
+}
+
+/** Letters joined by periods: an initialism ("L.A", "K.C"), read as one word. */
+const INITIALISM_RE = /^(?:\p{L}\.)+\p{L}$/u;
+const isLower = (c: string): boolean => c !== c.toUpperCase();
+const isUpper = (c: string): boolean => c !== c.toLowerCase();
+/** Whether a written token is all capitals (at least one letter, no lower-case letter). */
+const isCaps = (written: string): boolean => /\p{Lu}/u.test(written) && !/\p{Ll}/u.test(written);
+
+/** Whether an abbreviation written as `stem` counts where it stands (R8-7 (2)). */
+function counts(stem: string, place: Place): boolean {
+  if (!ORDINARY.has(stem.toUpperCase())) return true;
+  return place.after || (isCaps(stem) && (!place.caps || place.tag));
+}
+
+const ID_SETS = new Map<readonly number[], ReadonlySet<number>>();
+const idSet = (ids: readonly number[]): ReadonlySet<number> => {
+  let s = ID_SETS.get(ids);
+  if (s === undefined) {
+    s = new Set(ids);
+    ID_SETS.set(ids, s);
+  }
+  return s;
+};
 
 /**
- * The teams a written word or two (folded) name as a LABEL: a nickname, home or short name in any
- * case and spelling, or an abbreviation (in capitals; in any case unless CAPS_ONLY_ABBREVIATIONS lists
- * it); null when it names none. A scan-only form is none.
+ * What a written form (folded; one word, or several with single spaces) names where it stands: a team
+ * (a word form in any case and spelling, a hashtag after "#", an abbreviation by its case, an initialism
+ * in any case) or a position (positions.ts), else null.
  */
-export function labelTeams(written: string): readonly NflTeam[] | null {
+function formAt(written: string, place: Place): LabelPart | null {
   const key = formKey(written);
-  const word = LABEL_WORD_TEAMS.get(key) ?? LABEL_WORD_TEAMS.get(key.replaceAll("-", ""));
-  if (word !== undefined) return word;
-  const upper = written.toUpperCase();
-  const abbreviation = LABEL_ABBREVIATIONS.get(upper);
-  if (abbreviation === undefined) return null;
-  return written === upper || !CAPS_ONLY.has(upper) ? abbreviation : null;
+  const teams = WORD_TEAMS.get(key) ?? (place.hash ? HASHTAG_TEAMS.get(key) : undefined);
+  if (teams !== undefined) return { kind: "team", teams };
+  const words = positionWordIds(written);
+  if (words !== null) return { kind: "position", ids: idSet(words) };
+  if (written.includes(" ")) return null;
+  const dotted = INITIALISM_RE.test(written);
+  if (!dotted && written.includes(".")) return null;
+  const bare = dotted ? written.replaceAll(".", "") : written;
+  const abbreviation = ABBREVIATION_TEAMS.get(bare.toUpperCase());
+  if (abbreviation !== undefined)
+    return dotted || counts(bare, place) ? { kind: "team", teams: abbreviation } : null;
+  const position = positionAbbreviation(bare);
+  if (position === null) return null;
+  return dotted || counts(position.stem, place)
+    ? { kind: "position", ids: idSet(position.ids) }
+    : null;
 }
 
-/** Whether the scan finds a team in one written word or two (folded). */
-function teamFound(written: string): boolean {
-  if (SCAN_TEAM_KEYS.has(formKey(written))) return true;
-  if (written.includes(" ")) return false;
-  const upper = written.toUpperCase();
-  if (!SCAN_ABBREVIATIONS.has(upper)) return false;
-  return written === upper || !CAPS_ONLY.has(upper);
+/** Whether a written form is an ordinary word too: a label word right after a blocker labels no one. */
+function ambiguousForm(written: string): boolean {
+  if (isAmbiguousLabelWord(written)) return true;
+  const stem = positionAbbreviation(written)?.stem ?? written;
+  return ORDINARY.has(stem.toUpperCase());
 }
 
-/** Whether the scan finds a team or a position in a written word or two (folded). */
-const found = (written: string): boolean => teamFound(written) || positionFound(written);
+/** Whether the scan finds a team or a position in a written form where it stands. */
+const found = (written: string, place: Place): boolean => formAt(written, place) !== null;
+
+/** Whether the scan finds a team or a position in a written word or several (folded), in mixed text. */
+export function scanFinds(written: string): boolean {
+  return scanText(foldText(written).text, null);
+}
 
 // ---------------------------------------------------------------------------------------------------
 // The fold.
@@ -350,14 +647,14 @@ function foldChar(c: string): string {
 }
 
 /** A text folded, and where each offset of the original text lands in it. */
-export interface Folded {
+interface Folded {
   readonly text: string;
   /** `at[i]`: the folded offset of the original offset i (0 ≤ i ≤ the original's length). */
   readonly at: Int32Array;
 }
 
 /** The (sanitised) text folded one code point at a time, with its offset map. */
-export function foldText(text: string): Folded {
+function foldText(text: string): Folded {
   const at = new Int32Array(text.length + 1);
   const out: string[] = [];
   let len = 0;
@@ -382,7 +679,7 @@ const BREAK_MARK = "\u00B6";
 const AMP_RE = /&amp;/giu;
 const LT_RE = /&(?:lt|#0*60|#x0*3c);/giu;
 const GT_RE = /&(?:gt|#0*62|#x0*3e);/giu;
-/** A tag, as sanitizeText removes it (bounded: an attribute run of at most 512 characters). */
+/** A tag, opening or closing, as sanitizeText removes it (an attribute run of at most 512 characters). */
 const TAG_RE = /<\/?[A-Za-z][^<>]{0,512}>/gu;
 const LINE_RE = /\r\n?|[\n\v\f\u0085\u2028\u2029]/gu;
 /** Levels of `&amp;` decoded before the tags are marked (sanitizeText's own bound). */
@@ -404,7 +701,7 @@ export function markBreaks(raw: string): string {
  * `marked` is sanitizeText's output over `markBreaks(raw)`; the two are walked together, and the walk
  * stops where they part (past that, no break is known: as if none were written).
  */
-export function breakOffsets(text: string, marked: string): Uint8Array {
+function breakOffsets(text: string, marked: string): Uint8Array {
   const out = new Uint8Array(text.length + 1);
   let i = 0;
   let j = 0;
@@ -426,21 +723,17 @@ export function breakOffsets(text: string, marked: string): Uint8Array {
 // ---------------------------------------------------------------------------------------------------
 // The reading of one item.
 
-/** One part of a label written next to a name: the teams it may name, or the position ids it names. */
-export type LabelPart =
-  | { readonly kind: "team"; readonly teams: readonly NflTeam[] }
-  | { readonly kind: "position"; readonly ids: ReadonlySet<number> };
-
 /** Sorted, non-overlapping [start, end) spans of the sanitised text: persons' names. */
 export type Spans = readonly (readonly [number, number])[];
 
 /** At most this many words of a label are read on either side of a name (bounded work). */
 const MAX_LABEL_WORDS = 6;
+/** How far around a word a form holding it is looked for (characters; four long words fit). */
+const FORM_WINDOW = 160;
 const isWordChar = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c);
-/** The characters that join the parts of one word in the folded text ("G-Men", "O'Connell", "L.A"). */
-const isJoiner = (c: string | undefined): boolean => c === "'" || c === "." || c === "-";
-const isLower = (c: string): boolean => c !== c.toUpperCase();
-const isUpper = (c: string): boolean => c !== c.toLowerCase();
+/** The characters that join the parts of one word in the folded text ("G-Men", "O'Connell", "L.A", "M&T"). */
+const isJoiner = (c: string | undefined): boolean =>
+  c === "'" || c === "." || c === "-" || c === "&";
 
 /** The start of the word that ends at `end` (exclusive), or -1 when none does. */
 function wordStartBefore(s: string, end: number): number {
@@ -477,17 +770,10 @@ function overlaps(spans: Spans, a: number, b: number): boolean {
   return s !== undefined && s[0] < b;
 }
 
-/** A word or two as a label part: a team (a possessive allowed), else a position; null for neither. */
-function labelPart(written: string, possessive: boolean, capsSegment: boolean): LabelPart | null {
-  if (capsSegment && HEADLINE_AMBIGUOUS.has(written)) return null;
-  const teams = labelTeams(written);
-  if (teams !== null) return { kind: "team", teams };
-  if (possessive) return null;
-  const ids = positionLabelIds(written);
-  return ids === null ? null : { kind: "position", ids };
-}
+/** A word of a form as the reader keys it: an initialism without its periods ("U.S" → "US"). */
+const wordOf = (w: string): string => (INITIALISM_RE.test(w) ? w.replaceAll(".", "") : w);
 
-/** A label word read before a name, and where it starts. */
+/** A label word or form read before a name, and where it starts. */
 interface ReadPart {
   readonly part: LabelPart;
   readonly from: number;
@@ -495,10 +781,29 @@ interface ReadPart {
   readonly ambiguous: boolean;
 }
 
-/** How one item is read for its shared names (R8-6 (a), (b)). */
+/** How one item is read for its shared names (R8-6 (a), (b); R8-7). */
 export interface SharedReading {
   /** The label parts written next to the name at [start, end) of the sanitised text (R8-6 (a)). */
   label(start: number, end: number): readonly LabelPart[];
+  /** The same, apart: the parts before the name, and those in parentheses or the name tag after it. */
+  labelSides(
+    start: number,
+    end: number,
+  ): { readonly before: readonly LabelPart[]; readonly after: readonly LabelPart[] };
+  /**
+   * Whether a label word stands directly before offset `start` of the sanitised text (spaces only
+   * between), whatever the clause around it: the capitalised word before a surname is then no first
+   * name. A form with a possessive ("MIN's Jefferson", "Charlotte's Jones"), a position ("Chiefs
+   * Defensive Tackle Jones"), an abbreviation ("L.A. Young") or a form of several words ("Los Angeles
+   * Young"); not a one-word team form that may be a first name ("Bill Johnson", "Charlotte Jones": a
+   * singular, a city, a short name or a fans' name, written without a possessive).
+   */
+  formBefore(start: number): boolean;
+  /**
+   * Whether [start, end) of the sanitised text lies inside a form of two words or more ("Allen Park",
+   * "Halas Hall", "Gang Green", "Strong Safety"): a word of it is no surname.
+   */
+  inForm(start: number, end: number): boolean;
   /**
    * The segment the sanitised offset `at` lies in: the title and the blurb (joined by " | ") and the
    * parts a "|" or a line or paragraph break separates are numbered in order.
@@ -532,50 +837,14 @@ export function sharedReading(
     const raw = breakOffsets(text, marked);
     for (let i = 0; i < raw.length; i++) if (raw[i] === 1) brk[at[i] ?? 0] = 1;
   }
-  const boundary = (k: number): boolean => brk[k] === 1 || s[k] === "|";
-  // one pass: which apostrophes close a quotation opened in their segment, and which segments are
-  // written all in capitals
-  const closes = new Uint8Array(s.length);
-  const caps = new Uint8Array(s.length + 1);
-  const segments = new Int32Array(s.length + 1);
-  let seg = 0;
-  let open = 0;
-  let segStart = 0;
-  let lower = false;
-  let upper = false;
-  const flush = (end: number): void => {
-    if (upper && !lower) caps.fill(1, segStart, end);
-  };
-  for (let k = 0; k < s.length; k++) {
-    if (boundary(k)) {
-      open = 0;
-      flush(k);
-      segStart = k;
-      lower = false;
-      upper = false;
-      seg++;
-    }
-    segments[k] = seg;
-    const c = s[k] ?? "";
-    if (isLower(c)) lower = true;
-    else if (isUpper(c)) upper = true;
-    if (c !== "'") continue;
-    const prevW = isWordChar(s[k - 1]);
-    const nextW = isWordChar(s[k + 1]);
-    if (!prevW && nextW) open++;
-    else if (prevW && !nextW && open > 0) {
-      closes[k] = 1;
-      open--;
-    }
-  }
-  flush(s.length);
-  segments[s.length] = seg;
+  const { closes, caps, segments } = passOf(s, brk);
   /** Whether a break sits in the gap (a, b]. */
   const breakIn = (a: number, b: number): boolean => {
     for (let k = a + 1; k <= b; k++) if (brk[k] === 1) return true;
     return false;
   };
   const inName = (a: number, b: number): boolean => overlaps(nameSpans, a, b);
+  const after = (from: number): boolean => afterGameWord(s, from);
   /**
    * The word right before offset `from`, lower case, or null when the clause opens there: at the
    * start, after a break or punctuation, after a period (one after CLAUSE_ABBREVIATIONS' "vs" and "v"
@@ -585,6 +854,7 @@ export function sharedReading(
     let e = from;
     while (e > 0 && s[e - 1] === " ") e--;
     if (e === from || breakIn(e, from)) return null;
+    if (s[e - 1] === "@") return "@";
     const period = s[e - 1] === ".";
     if (period) e--;
     const b = wordStartBefore(s, e);
@@ -592,49 +862,97 @@ export function sharedReading(
     const w = s.slice(b, e).toLowerCase();
     return period && !CLAUSE_ABBREVIATIONS.includes(w) ? null : w;
   };
+  /**
+   * The start of the word that ends at `end`, or -1: a period may end it when it is an initialism
+   * ("L.A.'s Byron Young"), or any word inside a form (`inner`: "St. Louis", "U.S. Bank"); next to the
+   * name a period is punctuation ("…the Vikings. Justin Jefferson").
+   */
+  const startOf = (end: number, inner: boolean): number => {
+    if (s[end - 1] === ".") {
+      const b = wordStartBefore(s, end - 1);
+      return b >= 0 && (inner || INITIALISM_RE.test(s.slice(b, end - 1))) ? b : -1;
+    }
+    return wordStartBefore(s, end);
+  };
+  /** The word of [b, e) as a form keys it (its period dropped, an initialism's too). */
+  const wordAt = (b: number, e: number): string =>
+    wordOf(s[e - 1] === "." ? s.slice(b, e - 1) : s.slice(b, e));
+  /**
+   * The words ending at `end` (whitespace, or a period and whitespace, between them; no break, no
+   * name), last first, at most MAX_FORM_WORDS.
+   */
+  const wordsBefore = (end: number): { readonly start: number; readonly end: number }[] => {
+    const out: { start: number; end: number }[] = [];
+    let e = end;
+    for (let n = 0; n < MAX_FORM_WORDS; n++) {
+      const b = startOf(e, n > 0);
+      if (b < 0 || inName(b, e)) break;
+      out.push({ start: b, end: e });
+      let g = b;
+      while (g > 0 && s[g - 1] === " ") g--;
+      if (g === b || g === 0 || breakIn(g, b)) break;
+      e = g;
+    }
+    return out;
+  };
+
+  /** The longest form ending at `end` (possessive cut), or null: its part and where it starts. */
+  const formEndingAt = (
+    end: number,
+    possessive: boolean,
+  ): { part: LabelPart; from: number; written: string } | null => {
+    const words = wordsBefore(end);
+    for (let n = words.length; n >= 1; n--) {
+      const from = words[n - 1]?.start ?? 0;
+      const written = words
+        .slice(0, n)
+        .reverse()
+        .map((w) => wordAt(w.start, w.end))
+        .join(" ");
+      const place: Place = {
+        caps: caps[from] === 1,
+        after: after(from),
+        tag: false,
+        hash: from > 0 && s[from - 1] === "#",
+      };
+      const part = formAt(written, place);
+      if (part === null || (possessive && part.kind === "position")) continue;
+      return { part, from, written };
+    }
+    return null;
+  };
+
+  /** Where the label's last word ends before `pos`: its possessive cut. Null when no word ends there. */
+  const labelEnd = (pos: number): { end: number; possessive: boolean } | null => {
+    let end = pos;
+    while (end > 0 && s[end - 1] === " ") end--;
+    if (end === pos || end === 0 || breakIn(end, pos)) return null;
+    // a possessive on the label's last word ("Browns'", "Cleveland's", "L.A.'s"); a quotation's
+    // closing mark is punctuation
+    if (s[end - 1] === "'") {
+      if (closes[end - 1] === 1) return null;
+      return { end: end - 1, possessive: true };
+    }
+    if ((s[end - 1] === "s" || s[end - 1] === "S") && s[end - 2] === "'")
+      return { end: end - 2, possessive: true };
+    return { end, possessive: false };
+  };
 
   const partsBefore = (start: number): LabelPart[] => {
     const read: ReadPart[] = [];
     let pos = start;
     for (let n = 0; n < MAX_LABEL_WORDS; n++) {
-      let end = pos;
-      while (end > 0 && s[end - 1] === " ") end--;
-      if (end === pos || end === 0 || breakIn(end, pos)) break;
-      // a possessive on the label's last word ("Browns'", "Cleveland's"); a quotation's closing
-      // mark is punctuation
-      let possessive = false;
-      if (s[end - 1] === "'") {
-        if (closes[end - 1] === 1) break;
-        possessive = true;
-        end--;
-      } else if ((s[end - 1] === "s" || s[end - 1] === "S") && s[end - 2] === "'") {
-        possessive = true;
-        end -= 2;
-      }
-      const first = wordStartBefore(s, end);
-      // a word of another person's name is no label ("Tyrie Cleveland Justin Jefferson")
-      if (first < 0 || inName(first, end)) break;
-      const capsSegment = caps[first] === 1;
-      // a two-word form ending here ("Green Bay", "wide receiver"): the word before, a space between
-      let gap = first;
-      while (gap > 0 && s[gap - 1] === " ") gap--;
-      const before = gap < first && gap > 0 && !breakIn(gap, first) ? wordStartBefore(s, gap) : -1;
-      const prev = before >= 0 && !inName(before, gap) ? before : -1;
-      const two =
-        prev < 0
-          ? null
-          : labelPart(`${s.slice(prev, gap)} ${s.slice(first, end)}`, possessive, capsSegment);
-      if (two !== null) {
-        read.push({ part: two, from: prev, possessive, ambiguous: false });
-        pos = prev;
-        continue;
-      }
-      const written = s.slice(first, end);
-      const one = labelPart(written, possessive, capsSegment);
-      if (one === null) break;
-      const ambiguous = one.kind === "position" && isAmbiguousLabelWord(written);
-      read.push({ part: one, from: first, possessive, ambiguous });
-      pos = first;
+      const le = labelEnd(pos);
+      if (le === null) break;
+      const hit = formEndingAt(le.end, le.possessive);
+      if (hit === null) break;
+      read.push({
+        part: hit.part,
+        from: hit.from,
+        possessive: le.possessive,
+        ambiguous: ambiguousForm(hit.written),
+      });
+      pos = hit.from;
     }
     // teams alone (no possessive, no position) must open their clause: a word right before them makes
     // them its object or its modifier ("Against the Vikings Justin Jefferson …", "Browns beat Vikings
@@ -647,9 +965,15 @@ export function sharedReading(
       wordBefore(left.from) !== null
     )
       return [];
-    // an ambiguous word right after a blocker word is the ordinary word ("After safety …", "in the
-    // corner …"): no label
-    if (left?.ambiguous === true && LABEL_BLOCKERS.includes(wordBefore(left.from) ?? "")) return [];
+    // an ordinary word right after a blocker or a game or move word is the ordinary word ("After safety
+    // …", "in the corner …", "at WILL …"): no label
+    const w = left === undefined ? null : wordBefore(left.from);
+    if (
+      left?.ambiguous === true &&
+      w !== null &&
+      (LABEL_BLOCKERS.includes(w) || GAME_MOVE_WORDS.includes(w))
+    )
+      return [];
     return read.map((x) => x.part);
   };
 
@@ -660,10 +984,15 @@ export function sharedReading(
       ? end + 2
       : end + 1;
   };
+  /** The end of the word starting at `i`, an initialism's period included, or -1. */
+  const endOf = (i: number): number => {
+    const e = wordEndAfter(s, i);
+    return e >= 0 && s[e] === "." && INITIALISM_RE.test(s.slice(i, e)) ? e + 1 : e;
+  };
 
   /**
-   * The items of a tag that opens at `from`, up to `close` (")" or ":"): words that are each a team
-   * or a position, a separator or a space between them. Null when anything else stands in it (a break
+   * The items of a tag that opens at `from`, up to `close` (")" or ":"): forms that are each a team or
+   * a position, a separator or a space between them. Null when anything else stands in it (a break
    * too), or no item does.
    */
   const tagItems = (from: number, close: string): LabelPart[] | null => {
@@ -673,30 +1002,51 @@ export function sharedReading(
       const startGap = i;
       while (s[i] === " ") i++;
       if (breakIn(startGap, i)) return null;
-      const end = wordEndAfter(s, i);
-      if (end < 0 || inName(i, end)) return null;
-      // a two-word form ("Green Bay", "wide receiver"): a space only between the words
-      let next = end;
-      while (s[next] === " ") next++;
-      const after = next > end && !breakIn(end, next) ? wordEndAfter(s, next) : -1;
-      const end2 = after >= 0 && !inName(next, after) ? after : -1;
-      const pe2 = end2 < 0 ? end2 : possessiveEnd(end2);
-      const two =
-        end2 < 0 ? null : labelPart(`${s.slice(i, end)} ${s.slice(next, end2)}`, pe2 > end2, false);
-      if (two !== null) {
-        out.push(two);
-        i = pe2;
-      } else {
+      // the words starting here (spaces only between; no break, no name), at most MAX_FORM_WORDS
+      const ends: number[] = [];
+      let b = i;
+      for (let k = 0; k < MAX_FORM_WORDS; k++) {
+        const e = endOf(b);
+        if (e < 0 || inName(b, e)) break;
+        ends.push(e);
+        let g = e;
+        while (s[g] === " ") g++;
+        if (g === e || breakIn(e, g) || !isWordChar(s[g])) break;
+        b = g;
+      }
+      if (ends.length === 0) return null;
+      let hit: { part: LabelPart; end: number } | null = null;
+      for (let k = ends.length; k >= 1 && hit === null; k--) {
+        const end = ends[k - 1] ?? 0;
         const pe = possessiveEnd(end);
-        const written = s.slice(i, end);
-        const one = labelPart(written, pe > end, false);
-        // items a hyphen joins with no space ("(CLE-LB)"): each a team or a position
-        const pieces = one === null && written.includes("-") ? written.split("-") : [];
-        const split = pieces.map((w) => labelPart(w, false, false));
-        if (one !== null) out.push(one);
-        else if (split.length > 0 && split.every((x) => x !== null)) out.push(...split);
-        else return null;
-        i = pe;
+        const written = s
+          .slice(i, end)
+          .split(/\s+/u)
+          .map((w) =>
+            wordOf(w.endsWith(".") && INITIALISM_RE.test(w.slice(0, -1)) ? w.slice(0, -1) : w),
+          )
+          .join(" ");
+        const part = formAt(written, {
+          caps: caps[i] === 1,
+          after: after(i),
+          tag: true,
+          hash: false,
+        });
+        if (part !== null && !(pe > end && part.kind === "position")) hit = { part, end: pe };
+      }
+      if (hit === null) {
+        // items a hyphen joins with no space ("(CLE-LB)"): each a form
+        const e = endOf(i);
+        const written = s.slice(i, e);
+        const pieces = written.includes("-") ? written.split("-") : [];
+        const place: Place = { caps: caps[i] === 1, after: false, tag: true, hash: false };
+        const split = pieces.map((w) => formAt(w, place));
+        if (split.length === 0 || !split.every((x) => x !== null)) return null;
+        out.push(...split);
+        i = possessiveEnd(e);
+      } else {
+        out.push(hit.part);
+        i = hit.end;
       }
       let j = i;
       while (s[j] === " ") j++;
@@ -735,35 +1085,149 @@ export function sharedReading(
 
   let scanned: boolean | null = null;
   const scan = (): boolean => {
-    // the folded text with the spared spans (persons' names) blanked
-    let blanked = "";
-    let from = 0;
-    for (const [a, b] of spared.map(span)) {
-      if (a < from || b <= a) continue;
-      blanked += `${s.slice(from, a)} `;
-      from = b;
-    }
-    return scanText(blanked + s.slice(from));
+    // the folded text with the spared spans (persons' names) blanked, offsets kept
+    const chars = s.split("");
+    for (const [a, b] of spared.map(span)) for (let k = a; k < b; k++) chars[k] = " ";
+    return scanText(chars.join(""), { s, caps });
   };
-
+  /** A word's last part as the multi-word reading keys it ("U.S" → "US", "Mercedes-Benz" → "Benz"). */
+  const lastPart = (w: string): string =>
+    INITIALISM_RE.test(w)
+      ? wordOf(w)
+      : (w
+          .split(/[.-]/u)
+          .filter((x) => x.length > 0)
+          .at(-1) ?? "");
+  /**
+   * Whether a form of several words may hold [a, b): the word's last part, or one of the words right
+   * before it, may open one (a form's first word is its own or one of the MAX_FORM_WORDS - 1 before).
+   */
+  const opens = (w: string): boolean => isHead(wordOf(w)) || isHead(lastPart(w));
+  const headNear = (a: number, b: number): boolean => {
+    if (opens(s.slice(a, b))) return true;
+    let e = a;
+    for (let n = 1; n < MAX_FORM_WORDS; n++) {
+      let g = e;
+      while (g > 0 && s[g - 1] === " ") g--;
+      if (g === e || g === 0) return false;
+      if (s[g - 1] === ".") g--;
+      const st = wordStartBefore(s, g);
+      if (st < 0) return false;
+      if (opens(s.slice(st, g))) return true;
+      e = st;
+    }
+    return false;
+  };
+  const sides = (start: number, end: number) => {
+    const [a, b] = span([start, end]);
+    return { before: partsBefore(a), after: [...partsInParentheses(b), ...partsInNameTag(b)] };
+  };
   return {
     label: (start, end) => {
+      const { before, after: behind } = sides(start, end);
+      return [...before, ...behind];
+    },
+    labelSides: sides,
+    formBefore: (start) => {
+      const le = labelEnd(at[start] ?? 0);
+      const hit = le === null ? null : formEndingAt(le.end, false);
+      if (le === null || hit === null) return false;
+      return (
+        le.possessive ||
+        hit.part.kind === "position" ||
+        hit.written.includes(" ") ||
+        ABBREVIATION_TEAMS.has(hit.written.toUpperCase()) ||
+        NICKNAME_OR_HOME.has(formKey(hit.written))
+      );
+    },
+    inForm: (start, end) => {
+      // a bounded window around the word, cut at word boundaries: a form of up to MAX_FORM_WORDS
+      // words that holds it lies inside (bounded work per mention)
       const [a, b] = span([start, end]);
-      return [...partsBefore(a), ...partsInParentheses(b), ...partsInNameTag(b)];
+      if (!headNear(a, b)) return false;
+      let lo = Math.max(0, a - FORM_WINDOW);
+      let hi = Math.min(s.length, b + FORM_WINDOW);
+      while (lo > 0 && lo < a && isWordChar(s[lo - 1])) lo++;
+      while (hi < s.length && hi > b && isWordChar(s[hi])) hi--;
+      const phrases = phraseSpans(s.slice(lo, hi));
+      for (let k = a - lo; k < b - lo; k++) if (phrases[k] === 1) return true;
+      return false;
     },
     segment: (pos) => segments[at[pos] ?? 0] ?? 0,
     namesTeamOrPosition: () => (scanned ??= scan()),
   };
 }
 
+/**
+ * One pass over the folded text: which apostrophes close a quotation opened in their segment, which
+ * offsets lie in a segment written all in capitals, and each offset's segment.
+ */
+function passOf(
+  s: string,
+  brk: Uint8Array,
+): { closes: Uint8Array; caps: Uint8Array; segments: Int32Array } {
+  const boundary = (k: number): boolean => brk[k] === 1 || s[k] === "|";
+  const closes = new Uint8Array(s.length);
+  const caps = new Uint8Array(s.length + 1);
+  const segments = new Int32Array(s.length + 1);
+  let seg = 0;
+  let open = 0;
+  let segStart = 0;
+  let lower = false;
+  let upper = false;
+  const flush = (end: number): void => {
+    if (upper && !lower) caps.fill(1, segStart, end);
+  };
+  for (let k = 0; k < s.length; k++) {
+    if (boundary(k)) {
+      open = 0;
+      flush(k);
+      segStart = k;
+      lower = false;
+      upper = false;
+      seg++;
+    }
+    segments[k] = seg;
+    const c = s[k] ?? "";
+    if (isLower(c)) lower = true;
+    else if (isUpper(c)) upper = true;
+    if (c !== "'") continue;
+    const prevW = isWordChar(s[k - 1]);
+    const nextW = isWordChar(s[k + 1]);
+    if (!prevW && nextW) open++;
+    else if (prevW && !nextW && open > 0) {
+      closes[k] = 1;
+      open--;
+    }
+  }
+  flush(s.length);
+  segments[s.length] = seg;
+  return { closes, caps, segments };
+}
+
+/**
+ * Whether the word at offset `i` of the folded text stands directly after a game or move word
+ * (GAME_MOVE_WORDS; whitespace between, "vs" and "v" with their period, "@" glued or spaced).
+ */
+function afterGameWord(s: string, i: number): boolean {
+  let k = i;
+  while (k > 0 && s[k - 1] === " ") k--;
+  if (k === 0) return false;
+  if (s[k - 1] === "@") return GAME_MOVE_WORDS.includes("@");
+  const period = s[k - 1] === ".";
+  const e = period ? k - 1 : k;
+  const b = wordStartBefore(s, e);
+  if (b < 0) return false;
+  const w = `${s.slice(b, e).toLowerCase()}${period ? "." : ""}`;
+  return GAME_MOVE_WORDS.includes(w);
+}
+
 // ---------------------------------------------------------------------------------------------------
 // The scan.
 
-/** One word as the scan reads it: letters and digits, joined inside by an apostrophe, a period or a hyphen. */
-const SCAN_WORD_RE = /[\p{L}\p{N}]+(?:['.-][\p{L}\p{N}]+)*/gu;
-/** Letters joined by periods: an initialism ("L.A", "K.C"), read as one word. */
-const INITIALISM_RE = /^(?:\p{L}\.)+\p{L}$/u;
-/** What may stand between the two words of a form: whitespace, a period before it ("St. Louis"). */
+/** One word as the scan reads it: letters and digits, joined inside by an apostrophe, a period, an ampersand or a hyphen. */
+const SCAN_WORD_RE = /[\p{L}\p{N}]+(?:['.&-][\p{L}\p{N}]+)*/gu;
+/** What may stand between the words of a form: whitespace, a period before it ("St. Louis"). */
 const PAIR_GAP_RE = /^\.?\s+$/u;
 /** A lower-case letter followed by a capital: a camel-cased word ("ClevelandBrowns", "CLEvsMIN"). */
 const CAMEL_RE = /\p{Ll}\p{Lu}/u;
@@ -794,84 +1258,172 @@ function segmentsOf(piece: string): string[] {
 
 /**
  * Whether a compound (a handle, a hashtag, a domain, a camel-cased word) holds a team: a segment of it
- * read as a word, or a team word form of four letters or more anywhere in it ("kcchiefs.com"); inside
- * a hashtag, a three-letter abbreviation or word too ("#clevsmin").
+ * read as a word where it stands (the first right after "@" stands after a game word: "@Min"), or a
+ * team word form of four letters or more anywhere in it ("kcchiefs.com"); inside a hashtag, a team's
+ * own hashtag and the three-letter forms too ("#clevsmin").
  */
-function compoundFinds(word: string, hashtag: boolean): boolean {
+function compoundFinds(word: string, hashtag: boolean, place: Place): boolean {
   const w = word.slice(0, MAX_COMPOUND);
-  for (const piece of w.split(/[.-]/u))
-    for (const seg of segmentsOf(piece)) if (found(seg)) return true;
+  let first = true;
+  for (const piece of w.split(/[.&-]/u))
+    for (const seg of segmentsOf(piece)) {
+      if (found(seg, { ...place, after: first && place.after, hash: hashtag })) return true;
+      first = false;
+    }
   const lower = w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-  if (COMPOUND_FORMS.some((f) => lower.includes(f))) return true;
-  return hashtag && HASHTAG_FORMS.some((f) => lower.includes(f));
+  return trieFinds(COMPOUND_TRIE, lower) || (hashtag && trieFinds(HASHTAG_TRIE, lower));
+}
+
+/** The first words of every form of several words: a run opening with any other word is none. */
+const PHRASE_HEADS: ReadonlySet<string> = new Set([
+  ...[...WORD_TEAMS.keys()].filter((k) => k.includes(" ")).map((k) => k.split(" ")[0] ?? ""),
+  ...POSITION_PHRASE_HEADS,
+]);
+
+/** Whether a word may open a form of several words. */
+const isHead = (word: string | undefined): boolean =>
+  word !== undefined && PHRASE_HEADS.has(word.toLowerCase().replaceAll("'", ""));
+
+/** Whether words in a row (folded) are a word form of several words: a team's or a position's. */
+function phraseFound(words: readonly string[]): boolean {
+  const phrase = words.join(" ");
+  return WORD_TEAMS.has(formKey(phrase)) || positionWordIds(phrase) !== null;
 }
 
 /**
- * Whether the scan finds a team or a position in a folded text: each word whole, a compound's segments
- * and the team forms inside it, the parts a hyphen or a period joins (each alone, each two in a row,
- * and glued: "wide-out", "full-back"), and each two words in a row.
+ * The ways a word may end a form of several words: each run of its parts from the first, hyphenated
+ * ("people-eaters" of "people-eaters-led"), and itself whole.
  */
-function scanText(t: string): boolean {
+const headsOf = (base: string, parts: readonly string[]): string[] => [
+  ...new Set([...parts.map((_, k) => parts.slice(0, k + 1).join("-")), base]),
+];
+/** The ways a word may open one: itself whole, and each run of its parts to the last ("ex-Green"). */
+const leadsOf = (whole: string, parts: readonly string[]): string[] => [
+  ...new Set([whole, ...parts.map((_, k) => parts.slice(k).join("-"))]),
+];
+
+/** A word the multi-word reading remembers: as written (a hyphenated one whole), its leads, where. */
+interface Recent {
+  readonly whole: string;
+  /** The ways it may open a form (`leadsOf`). */
+  readonly leads: readonly string[];
+  readonly start: number;
+}
+
+/**
+ * How many remembered words open a form of several words that ends with one of `heads` (the next word,
+ * whole or by its first part: "Valley of the-Sun", "Bank of America-led"), the longest first; 0 when
+ * none. A form's middle words are read whole ("Monsters-of the Midway"), its first word whole or by a
+ * run of its last parts ("ex-Green Bay").
+ */
+function windowFound(recent: readonly Recent[], heads: readonly string[]): number {
+  for (let n = recent.length; n >= 1; n--) {
+    const first = recent[recent.length - n];
+    if (first === undefined) continue;
+    const rest = recent.slice(recent.length - n + 1).map((r) => r.whole);
+    for (const lead of first.leads)
+      if (isHead(lead) && heads.some((h) => phraseFound([lead, ...rest, h]))) return n;
+  }
+  return 0;
+}
+
+/** The context of a scan: the folded text with nothing blanked, and its all-capitals segments. */
+interface ScanContext {
+  readonly s: string;
+  readonly caps: Uint8Array;
+}
+
+/**
+ * Whether the scan finds a team or a position in a folded text (`t`: names blanked, offsets kept;
+ * `ctx`: the unblanked text and its all-capitals segments, null for a text of mixed case): each word
+ * whole where it stands, a compound's segments and the team forms inside it, the parts a hyphen, a
+ * period or an ampersand joins (each alone, each run of two to four, and glued: "wide-out",
+ * "full-back", "new-era-field-led"), and the forms of two to four words in a row ("Green Bay", "running
+ * back", "St. Louis", "Bank of America").
+ */
+function scanText(t: string, ctx: ScanContext | null): boolean {
+  const s = ctx?.s ?? t;
+  const placeAt = (i: number, lead: string): Place => ({
+    caps: ctx?.caps[i] === 1,
+    after: afterGameWord(s, i),
+    tag: false,
+    hash: lead === "#",
+  });
   let prevEnd = 0;
-  let prevLast: string | null = null;
+  const recent: Recent[] = [];
   for (const m of t.matchAll(SCAN_WORD_RE)) {
     const w = m[0];
     const i = m.index;
-    const lead = i > 0 ? t[i - 1] : "";
+    const lead = i > 0 ? (t[i - 1] ?? "") : "";
     // a possessive ("Jefferson's", "RAVEN'S") is the word without it
     const base = w.length > 2 && /'[sS]$/u.test(w) ? w.slice(0, -2) : w;
     const initialism = INITIALISM_RE.test(base);
-    const whole = initialism ? base.replaceAll(".", "") : base;
-    if (found(whole)) return true;
+    const place = placeAt(i, lead);
+    if (found(base, place)) return true;
     const hashtag = lead === "#";
     const compound =
       hashtag || lead === "@" || (!initialism && base.includes(".")) || CAMEL_RE.test(base);
-    if (compound && compoundFinds(base, hashtag)) return true;
+    if (compound && compoundFinds(base, hashtag, place)) return true;
     const parts =
-      !initialism && /[.-]/u.test(base) ? base.split(/[.-]/u).filter((p) => p.length > 0) : [whole];
+      !initialism && /[.-]/u.test(base)
+        ? base.split(/[.-]/u).filter((p) => p.length > 0)
+        : [wordOf(base)];
+    const quiet: Place = { ...place, after: false };
     for (let k = 0; parts.length > 1 && k < parts.length; k++) {
       const p = parts[k] ?? "";
-      if (found(p)) return true;
       const q = parts[k - 1];
-      if (q !== undefined && (found(`${q}-${p}`) || found(`${q} ${p}`) || found(`${q}${p}`)))
+      const here =
+        k === 0 ? place : { ...quiet, after: GAME_MOVE_WORDS.includes(q?.toLowerCase() ?? "") };
+      if (found(p, here)) return true;
+      if (
+        q !== undefined &&
+        (found(`${q}-${p}`, quiet) || found(`${q} ${p}`, quiet) || found(`${q}${p}`, quiet))
+      )
         return true;
     }
-    if (parts.length > 2 && found(parts.join(""))) return true;
-    // a two-word form across a gap ("Green Bay", "running back", "St. Louis")
-    const gap = t.slice(prevEnd, i);
-    if (prevLast !== null && PAIR_GAP_RE.test(gap) && found(`${prevLast} ${parts[0] ?? ""}`))
-      return true;
+    for (const p of parts)
+      if (p.includes("&") && p.split("&").some((x) => x.length > 0 && found(x, quiet))) return true;
+    if (parts.length > 2 && found(parts.join(""), quiet)) return true;
+    // a run of three or four parts inside one word ("new-era-field-led", "city-of-angels")
+    for (let len = 3; len <= Math.min(MAX_FORM_WORDS, parts.length); len++)
+      for (let k = 0; k + len <= parts.length; k++)
+        if (found(parts.slice(k, k + len).join("-"), quiet)) return true;
+    // a form of two to four words across the gaps ("Green Bay", "running back", "St. Louis")
+    if (!PAIR_GAP_RE.test(t.slice(prevEnd, i))) recent.length = 0;
+    if (windowFound(recent, headsOf(base, parts)) !== 0) return true;
+    const whole = parts.length > 1 ? base : wordOf(base);
+    recent.push({ whole, leads: leadsOf(whole, parts), start: i });
+    if (recent.length >= MAX_FORM_WORDS) recent.shift();
     prevEnd = i + w.length;
-    prevLast = parts[parts.length - 1] ?? null;
   }
   return false;
 }
 
-/** Whether the scan finds a team or a position in a written word or two (read folded). */
-export function scanFinds(written: string): boolean {
-  return scanText(foldText(written).text);
-}
-
 /**
- * The label written next to the name at [start, end) of a sanitised text with no raw text at hand (no
- * break known): every part of it (R8-6 (a)). `names` are the persons' names (sorted spans).
+ * Which offsets of the folded text lie inside a form of two words or more (`SharedReading.inForm`):
+ * one pass, each word tried as the last of a form of up to MAX_FORM_WORDS words.
  */
-export function labelPartsNextTo(
-  text: string,
-  start: number,
-  end: number,
-  names: Spans = [],
-): readonly LabelPart[] {
-  return sharedReading(text, null, names, names).label(start, end);
-}
-
-/** R8-6 (b): whether a sanitised text names any team or any position outside `spared` (sorted spans). */
-export function namesTeamOrPosition(text: string, spared: Spans): boolean {
-  return sharedReading(text, null, spared, spared).namesTeamOrPosition();
-}
-
-/** Whether a written word (sanitised, not yet folded) is a team or a position label form. */
-export function isLabelForm(written: string): boolean {
-  const w = foldText(written).text;
-  return labelTeams(w) !== null || positionLabelIds(w) !== null;
+function phraseSpans(s: string): Uint8Array {
+  const out = new Uint8Array(s.length + 1);
+  let prevEnd = 0;
+  const recent: Recent[] = [];
+  for (const m of s.matchAll(SCAN_WORD_RE)) {
+    const w = m[0];
+    const i = m.index;
+    const base = w.length > 2 && /'[sS]$/u.test(w) ? w.slice(0, -2) : w;
+    const initialism = INITIALISM_RE.test(base);
+    const parts =
+      !initialism && /[.-]/u.test(base)
+        ? base.split(/[.-]/u).filter((p) => p.length > 0)
+        : [wordOf(base)];
+    if (!PAIR_GAP_RE.test(s.slice(prevEnd, i))) recent.length = 0;
+    const n = windowFound(recent, headsOf(base, parts));
+    const from = recent[recent.length - n];
+    if (n !== 0 && from !== undefined) out.fill(1, from.start, i + w.length);
+    const whole = parts.length > 1 ? base : wordOf(base);
+    recent.push({ whole, leads: leadsOf(whole, parts), start: i });
+    if (recent.length >= MAX_FORM_WORDS) recent.shift();
+    prevEnd = i + w.length;
+  }
+  return out;
 }

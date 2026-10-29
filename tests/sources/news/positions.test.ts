@@ -1,33 +1,35 @@
 // positions.test.ts — the closed position vocabulary of the news matcher (src/sources/news/positions.ts;
 // ruling R8-6, docs/plan/changelog.md §R8: a position "directly before" a shared name, "in
 // parentheses directly after it" or "in the headline's name tag" labels him, a label must fit "position
-// from ESPN position_id", and the broad scan finds "a position in every written form (hyphenated,
-// abbreviated, singular/plural)"). The ids are ESPN's position ids (src/domain/league/slots.ts
-// POSITION_NAMES). Every list is held here word for word and, from these literals, entry by entry
-// through a behaviour: a deleted entry fails a behaviour test as well as the literal. Where a position
-// is read — next to the name, and anywhere for the scan — is labels.ts', held by match-r86.test.ts.
+// from ESPN position_id", and the broad scan finds a position in every written form; ruling R8-7 (1):
+// the forms are "every ESPN position, its standard abbreviations and the alignment words ('weakside',
+// 'strongside', 'Mike', 'Will', 'Sam'), each written glued, hyphenated or with a space, singular or
+// plural", and (3) every form the scan reads is a label form). The ids are ESPN's position ids
+// (src/domain/league/slots.ts POSITION_NAMES). Every list is held here word for word and, from these
+// literals, entry by entry through a behaviour: a deleted entry fails a behaviour test as well as the
+// literal. Where a position is read and in which case an abbreviation counts (R8-7 (2)) is labels.ts',
+// held by match-r86.test.ts and match-r87.test.ts.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { POSITION_NAMES } from "../../../src/domain/league/slots.js";
 import {
   AMBIGUOUS_LABEL_WORDS,
-  CAPS_ONLY_POSITION_ABBREVIATIONS,
   isAmbiguousLabelWord,
   KNOWN_POSITION_IDS,
   pluralOf,
   POSITION_ABBREVIATIONS,
   POSITION_WORDS,
-  positionFound,
+  positionAbbreviation,
   positionKey,
-  positionLabelIds,
-  SCAN_ONLY_ABBREVIATIONS,
-  SCAN_ONLY_WORDS,
+  positionWordIds,
+  spellingsOf,
 } from "../../../src/sources/news/index.js";
 
-const ids = (written: string): number[] | null => {
-  const s = positionLabelIds(written);
-  return s === null ? null : [...s].sort((a, b) => a - b);
-};
+const sortedIds = (ids: readonly number[] | null | undefined): number[] | null =>
+  ids === null || ids === undefined ? null : [...ids].sort((a, b) => a - b);
+const word = (written: string): number[] | null => sortedIds(positionWordIds(written));
+const abbr = (written: string): number[] | null =>
+  sortedIds(positionAbbreviation(written)?.ids ?? null);
 
 const QB = [1];
 const RB = [2];
@@ -42,54 +44,65 @@ const CB = [12];
 const S = [13];
 const DL = [9, 10];
 const EDGE = [10, 11];
-const RUSHER = [9, 10, 11];
+const FRONT = [9, 10, 11];
 const DB = [12, 13];
+const ROVER = [11, 12, 13];
 const DEFENSE = [9, 10, 11, 12, 13];
+const RETURNER = [2, 3, 12, 13];
+const GUNNER = [3, 12, 13];
+const CATCHER = [2, 3, 4];
+const BACK = [2, 3];
+const H_BACK = [2, 4];
+const SLOT = [3, 12];
+const CORPS = [3, 4];
+const BACKFIELD = [1, 2, 12, 13];
+const HOLDER = [1, 7];
+const SPECIALIST = [5, 7];
+const ANY = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13];
 const OL: number[] = [];
 // prettier-ignore
 const ABBREVIATIONS: Readonly<Record<string, readonly number[]>> = {
   QB, RB, HB: RB, FB: RB, WR, TE, K, PK: K, P,
-  DT, NT: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL,
-  EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE,
-  LB, ILB: LB, MLB: LB, WLB: LB, SLB: LB, LILB: LB, RILB: LB,
-  CB, RCB: CB, LCB: CB, NCB: CB, S, FS: S, SS: S, NB: DB, DB,
-  OL, OT: OL, OG: OL,
+  DT, NT: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL, DI: DL,
+  EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE, WILL: EDGE, SAM: EDGE,
+  LB, ILB: LB, MLB: LB, WLB: LB, SLB: LB, LILB: LB, RILB: LB, MIKE: LB,
+  CB, RCB: CB, LCB: CB, NCB: CB, S, FS: S, SS: S, SAF: S, NB: DB, DB,
+  KR: RETURNER, PR: RETURNER, ST: ANY, ATH: ANY,
+  OL, OT: OL, OG: OL, G: OL, C: OL, LT: OL, RT: OL, LG: OL, RG: OL, IOL: OL, LS: OL,
 };
 // prettier-ignore
 const WORDS: Readonly<Record<string, readonly number[]>> = {
-  quarterback: QB, "signal caller": QB,
-  "running back": RB, halfback: RB, tailback: RB, fullback: RB,
-  receiver: WR, wideout: WR, "wide receiver": WR, "slot receiver": WR,
+  "quarter back": QB, "signal caller": QB,
+  "running back": RB, "half back": RB, "tail back": RB, "full back": RB,
+  receiver: WR, "wide out": WR, "wide receiver": WR, "slot receiver": WR, flanker: WR,
+  "split end": WR,
   "tight end": TE,
-  kicker: K, placekicker: K, punter: P,
-  "defensive tackle": DT, "nose tackle": DT, "d-tackle": DT,
-  "defensive end": DE, "d-end": DE,
-  lineman: DL, "d-lineman": DL, "defensive lineman": DL, "3-technique": DL,
-  "edge rusher": EDGE, "outside linebacker": EDGE,
-  linebacker: LB, "inside linebacker": LB, "middle linebacker": LB,
-  "pass rusher": RUSHER,
-  cornerback: CB, corner: CB, "slot corner": CB,
+  kicker: K, "place kicker": K, punter: P,
+  "defensive tackle": DT, "nose tackle": DT, "d tackle": DT, nose: DT,
+  "defensive end": DE, "d end": DE,
+  "line man": DL, "d line man": DL, "defensive line man": DL, tackle: DL,
+  "d line": DL, "defensive line": DL, "defensive interior": DL,
+  "edge rusher": EDGE, "outside line backer": EDGE, backer: EDGE, "line backing": EDGE,
+  "line backer": LB, "inside line backer": LB, "middle line backer": LB, "off ball": LB,
+  "pass rusher": FRONT, rusher: FRONT, "pass rush": FRONT, "defensive front": FRONT,
+  "front seven": FRONT, "weak side": FRONT, "strong side": FRONT,
+  "corner back": CB, corner: CB, "slot corner": CB,
   safety: S, "free safety": S, "strong safety": S,
-  "nickel back": DB, "defensive back": DB,
-  defender: DEFENSE, "defensive player": DEFENSE,
-  "offensive lineman": OL,
+  "nickel back": DB, "defensive back": DB, nickel: DB, dime: DB, "dime back": DB, secondary: DB,
+  rover: ROVER,
+  defender: DEFENSE, "defensive player": DEFENSE, tackler: DEFENSE,
+  returner: RETURNER, "return man": RETURNER, gunner: GUNNER,
+  "pass catcher": CATCHER, "wing back": BACK, "slot back": BACK, "scat back": BACK,
+  "h back": H_BACK, slot: SLOT, "receiving corps": CORPS, "back field": BACKFIELD,
+  holder: HOLDER, specialist: SPECIALIST, "special teams": ANY, "special teamer": ANY,
+  "offensive line man": OL, "offensive line": OL, "o line": OL, guard: OL, center: OL,
+  centre: OL, snapper: OL, "long snapper": OL,
 };
-const AMBIGUOUS = ["corner", "safety"];
 // prettier-ignore
-const SCAN_ABBREVIATIONS = [
-  "LT", "RT", "LG", "RG", "C", "LS", "KR", "PR", "ST", "DI", "ATH", "MIKE", "WILL", "SAM",
+const AMBIGUOUS = [
+  "back field", "corner", "dime", "gunner", "holder", "nickel", "nose", "rover", "safety",
+  "secondary", "slot", "specialist", "tackle",
 ];
-// prettier-ignore
-const SCAN_WORDS = [
-  "tackle", "guard", "center", "centre", "nose", "rusher", "backer", "off-ball", "rover",
-  "returner", "return man", "snapper", "gunner", "holder", "specialist", "special teams",
-  "special teamer", "tackler", "pass catcher", "flanker", "split end", "slot", "h-back",
-  "wingback", "slotback", "scatback", "nickel", "dime", "dimeback",
-  "secondary", "defensive line", "offensive line", "o-line", "d-line", "defensive front",
-  "defensive interior", "front seven", "pass rush", "linebacking", "receiving corps", "backfield",
-];
-// prettier-ignore
-const CAPS_ONLY = ["C", "DE", "DI", "K", "LB", "LT", "MIKE", "OL", "P", "S", "SAM", "ST", "WILL"];
 
 const sorted = (o: Readonly<Record<string, unknown>> | readonly string[]): unknown =>
   Array.isArray(o)
@@ -101,9 +114,6 @@ describe("the vocabulary is closed and maps to ESPN's position ids", () => {
     expect(sorted(POSITION_ABBREVIATIONS)).toEqual(sorted(ABBREVIATIONS));
     expect(sorted(POSITION_WORDS)).toEqual(sorted(WORDS));
     expect(sorted(AMBIGUOUS_LABEL_WORDS)).toEqual(sorted(AMBIGUOUS));
-    expect(sorted(SCAN_ONLY_ABBREVIATIONS)).toEqual(sorted(SCAN_ABBREVIATIONS));
-    expect(sorted(SCAN_ONLY_WORDS)).toEqual(sorted(SCAN_WORDS));
-    expect(sorted(CAPS_ONLY_POSITION_ABBREVIATIONS)).toEqual(sorted(CAPS_ONLY));
   });
 
   it("names only ESPN position ids of persons: QB RB WR TE K P DT DE LB CB S", () => {
@@ -127,9 +137,8 @@ describe("the vocabulary is closed and maps to ESPN's position ids", () => {
 
   it("ESPN's own position, abbreviated or spelled out, fits only its own id (fail closed)", () => {
     // R8-6 (a): "position from ESPN position_id"; R8-3 clause 4, choice 6(c): a written position rules
-    // out every holder of another ESPN position. At dbe9686 DT and DE were {DT, DE}, CB and S {CB, S},
-    // LB {DE, LB}: "Vikings CB Smith" went to the Vikings S, and no label reached the Eagles DT.
-    for (const [abbr, word] of [
+    // out every holder of another ESPN position
+    for (const [a, w] of [
       ["QB", "quarterback"],
       ["RB", "running back"],
       ["WR", "wide receiver"],
@@ -142,134 +151,111 @@ describe("the vocabulary is closed and maps to ESPN's position ids", () => {
       ["CB", "cornerback"],
       ["S", "safety"],
     ] as const) {
-      const id = Object.entries(POSITION_NAMES).find(([, n]) => n === abbr)?.[0];
-      expect(ids(abbr), abbr).toEqual([Number(id)]);
-      expect(ids(word), word).toEqual([Number(id)]);
+      const id = Object.entries(POSITION_NAMES).find(([, n]) => n === a)?.[0];
+      expect(abbr(a), a).toEqual([Number(id)]);
+      expect(word(w), w).toEqual([Number(id)]);
     }
-    // a writer's group forms span the ids a player they describe may carry
-    expect(ids("DL")).toEqual([9, 10]);
-    expect(ids("EDGE")).toEqual([10, 11]);
-    expect(ids("OLB")).toEqual([10, 11]);
-    expect(ids("DB")).toEqual([12, 13]);
-    expect(ids("edge rusher")).toEqual([10, 11]);
-    expect(ids("defender")).toEqual([9, 10, 11, 12, 13]);
+    // a writer's group forms span the ids a player they describe may carry, wide rather than narrow
+    expect(abbr("DL")).toEqual([9, 10]);
+    expect(abbr("EDGE")).toEqual([10, 11]);
+    expect(abbr("WILL")).toEqual([10, 11]);
+    expect(abbr("MIKE")).toEqual([11]);
+    expect(word("tackle")).toEqual([9, 10]);
+    expect(word("weakside")).toEqual([9, 10, 11]);
+    expect(word("defender")).toEqual([9, 10, 11, 12, 13]);
+    // an offensive-line form fits no universe player
+    expect(abbr("OT")).toEqual([]);
+    expect(word("guard")).toEqual([]);
+  });
+
+  it("R8-7 (1): every ESPN position, its standard abbreviations and the alignment words are listed", () => {
+    for (const [ids, forms] of [
+      [QB, ["QB", "quarterback", "signal caller"]],
+      [RB, ["RB", "HB", "FB", "running back", "halfback", "tailback", "fullback"]],
+      [WR, ["WR", "wide receiver", "wideout", "slot receiver", "flanker", "split end"]],
+      [TE, ["TE", "tight end"]],
+      [K, ["K", "PK", "kicker", "placekicker"]],
+      [P, ["P", "punter"]],
+      [DT, ["DT", "NT", "defensive tackle", "nose tackle"]],
+      [DE, ["DE", "defensive end"]],
+      [LB, ["LB", "ILB", "MLB", "linebacker", "MIKE"]],
+      [CB, ["CB", "cornerback", "corner"]],
+      [S, ["S", "FS", "SS", "safety", "free safety", "strong safety"]],
+    ] as const)
+      for (const f of forms) {
+        const got = /^[A-Z]+$/u.test(f) ? abbr(f) : word(f);
+        expect(got, f).toEqual([...ids]);
+      }
+    // the alignment words the ruling names
+    for (const f of ["weakside", "strongside", "weak-side", "strong side", "weaksides"])
+      expect(word(f), f).toEqual(FRONT);
+    for (const f of ["MIKE", "WILL", "SAM"]) expect(abbr(f), f).not.toBeNull();
   });
 });
 
-describe("a label's position (R8-6 (a))", () => {
-  it("each abbreviation, in capitals only, its rank allowed", () => {
+describe("spellings: glued, hyphenated or with a space, each join chosen apart", () => {
+  it("a two-part form", () => {
+    expect(spellingsOf("half back").sort()).toEqual(["half back", "half-back", "halfback"]);
+    expect(spellingsOf("d line").sort()).toEqual(["d line", "d-line", "dline"]);
+  });
+  it("a three-part form: nine spellings", () => {
+    expect(spellingsOf("d line man")).toHaveLength(9);
+    expect(spellingsOf("d line man")).toEqual(
+      expect.arrayContaining(["d-lineman", "d lineman", "dlineman", "d line man", "d-line-man"]),
+    );
+  });
+  it("R8-7 (1): the spaced spellings the last attack found missing (violation 10)", () => {
+    // "The D line reserve was let go" (the TEN CB at 0.80 at 66bb2a2)
+    for (const [f, ids] of [
+      ["D line", DL],
+      ["O line", OL],
+      ["half back", RB],
+      ["full back", RB],
+      ["tail back", RB],
+      ["wide out", WR],
+      ["wing back", BACK],
+      ["scat back", BACK],
+      ["off ball", LB],
+      ["h back", H_BACK],
+      ["line backer", LB],
+      ["corner back", CB],
+      ["place kicker", K],
+      ["quarter back", QB],
+    ] as const)
+      expect(word(f), f).toEqual([...ids]);
+  });
+});
+
+describe("a position abbreviation (labels and the scan)", () => {
+  it("each abbreviation, any case here (labels.ts reads the case), its rank and its plural", () => {
     for (const [form, want] of Object.entries(ABBREVIATIONS)) {
-      expect(ids(form), form).toEqual([...want]);
-      // a depth chart's rank: "LB1", "CB2", "WR10" (at dbe9686 only QB, RB, WR and TE 1–3)
-      for (const rank of ["1", "2", "4", "10"])
-        expect(ids(`${form}${rank}`), `${form}${rank}`).toEqual([...want]);
-      // in lower case or title case it is no label ("lb" is a pound; "Lb")
-      if (!(form.toLowerCase() in WORDS)) {
-        expect(ids(form.toLowerCase()), form.toLowerCase()).toBeNull();
-        if (form.length > 1)
-          expect(ids(`${form.slice(0, 1)}${form.slice(1).toLowerCase()}`)).toBeNull();
-      }
+      // a plural that is an abbreviation of its own is that one ("SS", strong safety, beside "S")
+      const another = `${form}S` in ABBREVIATIONS;
+      for (const w of [form, form.toLowerCase(), `${form}1`, `${form}10`])
+        expect(abbr(w), w).toEqual(sortedIds(want));
+      if (another) expect(abbr(`${form}s`), form).toEqual(sortedIds(ABBREVIATIONS[`${form}S`]));
+      else
+        for (const w of [`${form}s`, `${form}S`]) {
+          expect(abbr(w), w).toEqual(sortedIds(want));
+          expect(positionAbbreviation(w)?.stem, w).toBe(form);
+        }
+      expect(positionAbbreviation(`${form}2`)?.stem, form).toBe(form);
     }
-    expect(ids("LB0")).toBeNull();
-    expect(ids("LB100")).toBeNull();
-  });
-
-  it("each word, in any case and spacing, hyphenated or glued", () => {
-    for (const [form, want] of Object.entries(WORDS)) {
-      expect(ids(form), form).toEqual([...want]);
-      expect(ids(form.toUpperCase()), form.toUpperCase()).toEqual([...want]);
-      expect(ids(form.replace(/\b\p{L}/gu, (c) => c.toUpperCase())), form).toEqual([...want]);
-      expect(ids(form.replaceAll(" ", "-")), form).toEqual([...want]);
-      expect(ids(form.replace(/[\s-]/gu, "")), form).toEqual([...want]);
-    }
-    // a hyphen inside a one-word form ("wide-out", "full-back", "place-kicker")
-    expect(ids("wide-out")).toEqual(WR);
-    expect(ids("full-back")).toEqual(RB);
-    expect(ids("half-back")).toEqual(RB);
-    expect(ids("place-kicker")).toEqual(K);
-    expect(ids("RUNNING  BACK")).toEqual(RB);
-  });
-
-  it("the scan's forms are never labels: a verb or a common noun before a name, a role", () => {
-    for (const w of [...SCAN_WORDS, ...SCAN_ABBREVIATIONS]) expect(ids(w), w).toBeNull();
-    for (const w of [
-      "star",
-      "starter",
-      "rookie",
-      "back",
-      "end",
-      "line",
-      "free-agent",
-      "edge",
-      "Edge",
-    ])
-      expect(ids(w), w).toBeNull();
-  });
-
-  it("each ambiguous label word is known as one; no other word is", () => {
-    for (const w of AMBIGUOUS) {
-      expect(isAmbiguousLabelWord(w), w).toBe(true);
-      expect(isAmbiguousLabelWord(w.toUpperCase()), w).toBe(true);
-    }
-    for (const w of ["cornerback", "free safety", "slot corner", "linebacker", "CB", "S"])
-      expect(isAmbiguousLabelWord(w), w).toBe(false);
-  });
-
-  it("property: no arbitrary word is a position unless it is a listed form", () => {
-    const listed = new Set(
-      [...Object.keys(WORDS)].flatMap((w) => {
-        const k = positionKey(w);
-        return [k, k.replaceAll(" ", "-"), k.replace(/[\s-]/gu, "")];
-      }),
-    );
-    fc.assert(
-      fc.property(fc.stringMatching(/^[A-Za-z-]{1,12}$/), (w) => {
-        if (ids(w) === null) return;
-        const k = positionKey(w);
-        const abbreviation = w === w.toUpperCase() && /^(\p{Lu}+?)([1-9][0-9]?)?$/u.test(w);
-        expect(
-          listed.has(k) ||
-            listed.has(k.replaceAll("-", "")) ||
-            (abbreviation && w.replace(/[0-9]+$/u, "") in ABBREVIATIONS),
-          w,
-        ).toBe(true);
-      }),
-      { numRuns: 2_000 },
-    );
+    expect(abbr("LB0")).toBeNull();
+    expect(abbr("LB100")).toBeNull();
+    expect(abbr("WR1s")).toEqual(WR);
   });
 });
 
-describe("the scan's positions (R8-6 (b)): every form, its plural, the ambiguous tokens", () => {
-  it("each word form, each spelling, each plural, in any case", () => {
-    for (const w of [...Object.keys(WORDS), ...SCAN_WORDS]) {
-      for (const v of [w, w.replaceAll(" ", "-"), w.replace(/[\s-]/gu, "")]) {
-        for (const c of [v, pluralOf(v)]) {
-          expect(positionFound(c), c).toBe(true);
-          expect(positionFound(c.toUpperCase()), c.toUpperCase()).toBe(true);
+describe("a position word (labels and the scan)", () => {
+  it("each word, in any case and every spelling, and its plural", () => {
+    for (const [form, want] of Object.entries(WORDS))
+      for (const sp of spellingsOf(form))
+        for (const w of [sp, sp.toUpperCase(), sp.replace(/\b\p{L}/gu, (c) => c.toUpperCase())]) {
+          expect(word(w), w).toEqual(sortedIds(want));
+          expect(word(pluralOf(w.toLowerCase())), pluralOf(w)).toEqual(sortedIds(want));
         }
-      }
-    }
-  });
-
-  it("each abbreviation in capitals, its plural and its rank; in lower case unless caps-only", () => {
-    for (const a of [...Object.keys(ABBREVIATIONS), ...SCAN_ABBREVIATIONS]) {
-      for (const v of [a, `${a}s`, `${a}S`, `${a}1`, `${a}4`, `${a}10`, `${a}1s`])
-        expect(positionFound(v), v).toBe(true);
-      const caps = CAPS_ONLY.includes(a);
-      // "lb" is a pound, "will" a verb, "s" a letter: only in capitals; "cb", "olb", "idl" in any case
-      for (const v of [a.toLowerCase(), `${a.slice(0, 1)}${a.slice(1).toLowerCase()}`]) {
-        if (v === a || v.toLowerCase() in WORDS || SCAN_WORDS.includes(v.toLowerCase())) continue;
-        expect(positionFound(v), v).toBe(!caps);
-        const plural = `${v}s`;
-        const another =
-          plural.toUpperCase() in ABBREVIATIONS ||
-          SCAN_ABBREVIATIONS.includes(plural.toUpperCase());
-        if (!another) expect(positionFound(plural), plural).toBe(!caps);
-      }
-    }
-    // the edge: the EDGE abbreviation in any case ("edge" is no label, a verb before a name)
-    expect(positionFound("edge")).toBe(true);
-    expect(positionFound("Edge")).toBe(true);
+    expect(word("RUNNING  BACK")).toEqual(RB);
   });
 
   it("a technique: an alignment number (a digit or its word, an 'i' allowed) and tech or technique", () => {
@@ -284,11 +270,11 @@ describe("the scan's positions (R8-6 (b)): every form, its plural, the ambiguous
         `${n}tech`,
         `${n}-techniques`,
       ])
-        expect(positionFound(v), v).toBe(true);
+        expect(word(v), v).toEqual(DL);
     for (const v of ["4i", "2i", "4i-technique", "1-TECH", "5-Technique"])
-      expect(positionFound(v), v).toBe(true);
+      expect(word(v), v).toEqual(DL);
     for (const v of ["tech", "technique", "1", "10-tech", "ten-technique", "4", "high-tech"])
-      expect(positionFound(v), v).toBe(false);
+      expect(word(v), v).toBeNull();
   });
 
   it("plurals: a lineman's men, a safety's ies, any other word's s", () => {
@@ -301,35 +287,55 @@ describe("the scan's positions (R8-6 (b)): every form, its plural, the ambiguous
     expect(pluralOf("tight end")).toBe("tight ends");
   });
 
-  it("an ambiguous token counts as found; an initial, a time, a plain word does not", () => {
+  it("no plain word is a position: the parts of a form, a role word, an initial, a time", () => {
     for (const w of [
-      "OT",
-      "corner",
-      "safety",
-      "edge",
-      "Tackle",
-      "guard",
-      "center",
-      "slot",
-      "dime",
-      "nose",
-    ])
-      expect(positionFound(w), w).toBe(true);
-    for (const w of [
-      "lb",
-      "Lb",
-      "lbs",
-      "will",
-      "s",
-      "P.J",
-      "PJ",
-      "PM",
       "back",
       "end",
       "line",
       "starter",
+      "star",
+      "rookie",
       "team",
+      "edge",
+      "free-agent",
     ])
-      expect(positionFound(w), w).toBe(false);
+      expect(word(w), w).toBeNull();
+    for (const w of ["P.J", "PJ", "PM", "AM", "IR", "I", "A", "US"]) expect(abbr(w), w).toBeNull();
+  });
+
+  it("each ambiguous label word is known as one, in every spelling; no other word is", () => {
+    for (const w of AMBIGUOUS)
+      for (const sp of spellingsOf(w)) {
+        expect(isAmbiguousLabelWord(sp), sp).toBe(true);
+        expect(isAmbiguousLabelWord(sp.toUpperCase()), sp).toBe(true);
+      }
+    for (const w of [
+      "cornerback",
+      "free safety",
+      "slot corner",
+      "linebacker",
+      "CB",
+      "S",
+      "receiver",
+    ])
+      expect(isAmbiguousLabelWord(w), w).toBe(false);
+  });
+
+  it("property: no arbitrary word is a position unless it is a listed form", () => {
+    const listed = new Set(
+      Object.keys(WORDS).flatMap((w) => spellingsOf(w).flatMap((sp) => [sp, pluralOf(sp)])),
+    );
+    fc.assert(
+      fc.property(fc.stringMatching(/^[A-Za-z-]{1,12}$/), (w) => {
+        if (word(w) !== null) expect(listed.has(positionKey(w)), w).toBe(true);
+        if (abbr(w) !== null)
+          expect(
+            w.toUpperCase().replace(/[0-9]+S?$|S$/u, "") in ABBREVIATIONS ||
+              w.toUpperCase() in ABBREVIATIONS,
+            w,
+          ).toBe(true);
+      }),
+      { numRuns: 2_000 },
+    );
   });
 });

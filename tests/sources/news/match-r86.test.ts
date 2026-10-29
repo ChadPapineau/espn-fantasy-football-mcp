@@ -24,6 +24,7 @@ import {
   type PlayerMatcher,
 } from "../../../src/sources/news/index.js";
 import * as f41e810 from "./f41e810/match.js";
+import * as F from "./forms.js";
 import { NEWS_NOW_MS, rss } from "./helpers.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
@@ -353,10 +354,15 @@ describe("R8-6 (b): the prominent holder takes the item only when no team and no
       "Lamar Jackson: Signs with the browns",
       "Justin Jefferson: Former Viking signs elsewhere",
       "Lamar Jackson: Works out in Nashville",
-      "LAMAR JACKSON: NO TIMETABLE FOR RETURN",
+      "LAMAR JACKSON: TRADED TO NO",
       "Justin Jefferson: Leads the pack in targets",
     ])
       expect(outcome(t), t).toBe("∅ u1");
+    // R8-7 (2) supersedes the all-caps headline's "NO": an ordinary-word abbreviation counts in an
+    // all-capitals segment only right after a game or move word ("TRADED TO NO" above)
+    expect(outcome("LAMAR JACKSON: NO TIMETABLE FOR RETURN")).toBe(
+      "Lamar Jackson/BAL/QB:full_name u0",
+    );
   });
 
   it("…and a position in every written form, an ambiguous token counting as found", () => {
@@ -364,7 +370,7 @@ describe("R8-6 (b): the prominent holder takes the item only when no team and no
     for (const t of [
       "Lamar Jackson: Waived | The corner was released after two weeks on the practice squad.",
       "Lamar Jackson: Waived | The safety was released",
-      "Byron Young: Waived | The edge was released Tuesday.",
+      "Byron Young: Waived | The EDGE was released Tuesday.",
       "Byron Young: Waived | The IDL was let go Tuesday.",
       "Justin Jefferson: Records 10 tackles",
       "Justin Jefferson: Catches TD | Jefferson beat the D-lineman.",
@@ -373,6 +379,11 @@ describe("R8-6 (b): the prominent holder takes the item only when no team and no
       expect(outcome(t), t).toBe("∅ u1");
     // "OT": no ref at dbe9686 too; the WR at 0.80 at f41e810
     expect(outcome("Justin Jefferson: Scores winning TD in OT")).toBe("∅ u1");
+    // R8-7 (2) supersedes the lower-case "edge" (found at 66bb2a2): EDGE is an ordinary word, counted
+    // in capitals or right after a game or move word
+    expect(outcome("Byron Young: Waived | The edge was released Tuesday.")).toBe(
+      "Byron Young/LA/DE:full_name u0",
+    );
   });
 
   it("the text is read normalised: lookalike letters, fullwidth forms, zero-width marks, curly apostrophes", () => {
@@ -496,19 +507,20 @@ describe("R8-6 (d): otherwise no one takes the name, and the item is counted", (
   });
 
   it("a spelled name is a shared name still: no residual when a team or a position is named, counted", () => {
-    // R8-6 (b), (c), (d): a generational suffix narrows the holders to those ESPN spells with it, and
-    // the one spelled holder takes the residual only when the scan finds nothing (each 0.80 at
-    // 6ba7bb1, where spelling alone gave it: "Byron Murphy II … Vikings CB" is the Vikings CB Byron
-    // Murphy Jr.'s, misspelled)
+    // R8-6 (b), (c), (d): a generational suffix narrows the holders to those ESPN spells with it (each
+    // 0.80 at 6ba7bb1, where spelling alone gave it: "Byron Murphy II … Vikings CB" is the Vikings CB
+    // Byron Murphy Jr.'s, misspelled)
     for (const t of [
       "Michael Carter II: Waived by Titans | The running back was released.",
       "Byron Murphy II: Vikings CB ruled out",
       "Michael Carter II: Waived by Eagles",
     ])
       expect(outcome(t), t).toBe("∅ u1");
+    // R8-7 (5) supersedes the spelled holder's residual (PHI S at 0.80 at 66bb2a2): the residual goes
+    // only to the name's prominent holder, and Michael Carter has none
     expect(
       outcome("Michael Carter II: Questionable | Michael Carter II (ankle) was limited."),
-    ).toBe("Michael Carter II/PHI/S:full_name u0");
+    ).toBe("∅ u1");
     expect(outcome("Eagles S Michael Carter II: Questionable")).toBe(
       "Michael Carter II/PHI/S:full_name_team u0",
     );
@@ -516,8 +528,10 @@ describe("R8-6 (d): otherwise no one takes the name, and the item is counted", (
     expect(outcome("Byron Murphy II (Vikings CB): Ruled out")).toBe("∅ u1");
   });
 
-  it("the bare surname never takes the residual; one left to no one is counted when a team or a position is named", () => {
-    expect(outcome("Jefferson: Catches TD")).toBe("∅ u0");
+  it("the bare surname never takes the residual; one left to no one is counted, beside another ref too", () => {
+    // R8-7 (4) supersedes the uncounted unlabelled surname ("∅ u0" at 66bb2a2): left to no one, it
+    // is counted whatever else the item names
+    expect(outcome("Jefferson: Catches TD")).toBe("∅ u1");
     // counted: the item names a position (uncounted at dbe9686), or a team; beside another ref too
     expect(outcome("Jefferson: Catches TD | The receiver had 100 yards.")).toBe("∅ u1");
     expect(outcome("Jefferson torches Browns in win")).toBe("∅ u1");
@@ -552,189 +566,9 @@ describe("R8-6 (d): otherwise no one takes the name, and the item is counted", (
 });
 
 // -----------------------------------------------------------------------------------------------
-// The closed lists, word for word (each literal below is the source's list), and entry by entry
-// through a behaviour, from the same literal: a deleted entry fails both.
-
-// prettier-ignore
-const TEAM_NICKNAMES: Readonly<Record<string, NflTeam>> = {
-  Cardinals: "ARI", Falcons: "ATL", Ravens: "BAL", Bills: "BUF", Panthers: "CAR", Bears: "CHI",
-  Bengals: "CIN", Browns: "CLE", Cowboys: "DAL", Broncos: "DEN", Lions: "DET", Packers: "GB",
-  Texans: "HOU", Colts: "IND", Jaguars: "JAX", Jags: "JAX", Chiefs: "KC", Rams: "LA",
-  Chargers: "LAC", Raiders: "LV", Dolphins: "MIA", Vikings: "MIN", Patriots: "NE", Pats: "NE",
-  Saints: "NO", Giants: "NYG", Jets: "NYJ", Eagles: "PHI", Steelers: "PIT", Seahawks: "SEA",
-  "49ers": "SF", Niners: "SF", Buccaneers: "TB", Bucs: "TB", Titans: "TEN", Commanders: "WAS",
-};
-// prettier-ignore
-const TEAM_HOMES: Readonly<Record<string, NflTeam>> = {
-  Arizona: "ARI", Atlanta: "ATL", Baltimore: "BAL", Buffalo: "BUF", Carolina: "CAR",
-  Chicago: "CHI", Cincinnati: "CIN", Cleveland: "CLE", Dallas: "DAL", Denver: "DEN",
-  Detroit: "DET", "Green Bay": "GB", Houston: "HOU", Indianapolis: "IND", Indy: "IND",
-  Jacksonville: "JAX", "Kansas City": "KC", "Las Vegas": "LV", Miami: "MIA", Minnesota: "MIN",
-  "New England": "NE", "New Orleans": "NO", Philadelphia: "PHI", Philly: "PHI",
-  Pittsburgh: "PIT", Seattle: "SEA", "San Francisco": "SF", "Tampa Bay": "TB", Tennessee: "TEN",
-  Washington: "WAS",
-};
-const SHARED_HOMES: Readonly<Record<string, readonly NflTeam[]>> = {
-  "Los Angeles": ["LA", "LAC"],
-  "New York": ["NYG", "NYJ"],
-};
-// prettier-ignore
-const TEAM_SHORT_NAMES: Readonly<Record<string, NflTeam>> = {
-  Vikes: "MIN", Fins: "MIA", Phins: "MIA", Bolts: "LAC", Pack: "GB", Hawks: "SEA", Cards: "ARI",
-  "G-Men": "NYG", Cincy: "CIN", Vegas: "LV", "Big Blue": "NYG", "Gang Green": "NYJ",
-};
-// prettier-ignore
-const TEAM_ABBREVIATIONS: Readonly<Record<string, readonly NflTeam[]>> = {
-  ARI: ["ARI"], ARZ: ["ARI"], ATL: ["ATL"], BAL: ["BAL"], BLT: ["BAL"], BUF: ["BUF"], CAR: ["CAR"],
-  CHI: ["CHI"], CIN: ["CIN"], CLE: ["CLE"], CLV: ["CLE"], DAL: ["DAL"], DEN: ["DEN"], DET: ["DET"],
-  GB: ["GB"], GNB: ["GB"], GBP: ["GB"], HOU: ["HOU"], HST: ["HOU"], IND: ["IND"], JAX: ["JAX"],
-  JAC: ["JAX"], KC: ["KC"], KAN: ["KC"], KCC: ["KC"], LA: ["LA"], LAR: ["LA"], LAC: ["LAC"],
-  LV: ["LV"], LVR: ["LV"], MIA: ["MIA"], MIN: ["MIN"], NE: ["NE"], NWE: ["NE"], NEP: ["NE"],
-  NO: ["NO"], NOR: ["NO"], NOS: ["NO"], NYG: ["NYG"], NYJ: ["NYJ"], NY: ["NYG", "NYJ"],
-  PHI: ["PHI"], PIT: ["PIT"], SEA: ["SEA"], SF: ["SF"], SFO: ["SF"], TB: ["TB"], TAM: ["TB"],
-  TBB: ["TB"], TEN: ["TEN"], WAS: ["WAS"], WSH: ["WAS"],
-};
-// prettier-ignore
-const SCAN_ONLY_TEAM_ABBREVIATIONS: Readonly<Record<string, readonly NflTeam[]>> = {
-  OAK: ["LV"], SD: ["LAC"], SDG: ["LAC"], STL: ["LA"], PHX: ["ARI"], WFT: ["WAS"], DC: ["WAS"],
-};
-// prettier-ignore
-const CAPS_ONLY_ABBREVIATIONS = [
-  "ARI", "CAR", "CHI", "DAL", "DEN", "JAC", "LA", "LAC", "MIA", "MIN", "NE", "NO", "NOR", "NOS",
-  "OAK", "PHI", "PIT", "SEA", "TAM", "TEN", "WAS",
-];
-// prettier-ignore
-const TEAM_SINGULARS: Readonly<Record<string, NflTeam>> = {
-  Cardinal: "ARI", Falcon: "ATL", Raven: "BAL", Bill: "BUF", Panther: "CAR", Bear: "CHI",
-  Bengal: "CIN", Brown: "CLE", Cowboy: "DAL", Bronco: "DEN", Lion: "DET", Packer: "GB",
-  Texan: "HOU", Colt: "IND", Jaguar: "JAX", Jag: "JAX", Chief: "KC", Ram: "LA", Charger: "LAC",
-  Bolt: "LAC", Raider: "LV", Dolphin: "MIA", Fin: "MIA", Phin: "MIA", Viking: "MIN", Vike: "MIN",
-  Patriot: "NE", Pat: "NE", Saint: "NO", Giant: "NYG", Jet: "NYJ", Eagle: "PHI", Steeler: "PIT",
-  Seahawk: "SEA", "49er": "SF", Niner: "SF", Buccaneer: "TB", Buc: "TB", Titan: "TEN",
-  Commander: "WAS",
-};
-// prettier-ignore
-const TEAM_CITIES: Readonly<Record<string, readonly NflTeam[]>> = {
-  Glendale: ["ARI"], Phoenix: ["ARI"], Tempe: ["ARI"], "Flowery Branch": ["ATL"],
-  "Owings Mills": ["BAL"], "Charm City": ["BAL"], "Orchard Park": ["BUF"], Highmark: ["BUF"],
-  Charlotte: ["CAR"], "Queen City": ["CAR", "CIN"], "Lake Forest": ["CHI"], "Windy City": ["CHI"],
-  "Soldier Field": ["CHI"], Berea: ["CLE"], Arlington: ["DAL"], Frisco: ["DAL"], "Big D": ["DAL"],
-  "Mile High": ["DEN"], "Allen Park": ["DET"], "Motor City": ["DET"], Motown: ["DET"],
-  Titletown: ["GB"], Lambeau: ["GB"], "H-Town": ["HOU"], "Space City": ["HOU"], Duval: ["JAX"],
-  Arrowhead: ["KC"], Inglewood: ["LA", "LAC"], SoFi: ["LA", "LAC"], "Thousand Oaks": ["LA"],
-  "El Segundo": ["LAC"], "Costa Mesa": ["LAC"], Paradise: ["LV"], "Sin City": ["LV"],
-  Allegiant: ["LV"], Davie: ["MIA"], "Magic City": ["MIA"], Minneapolis: ["MIN"], Eagan: ["MIN"],
-  "Twin Cities": ["MIN"], Foxborough: ["NE"], Foxboro: ["NE"], Gillette: ["NE"], Metairie: ["NO"],
-  "Big Easy": ["NO"], NOLA: ["NO"], Superdome: ["NO"], "East Rutherford": ["NYG", "NYJ"],
-  MetLife: ["NYG", "NYJ"], "Big Apple": ["NYG", "NYJ"], "Florham Park": ["NYJ"], Latrobe: ["PIT"],
-  "Steel City": ["PIT"], Acrisure: ["PIT"], Renton: ["SEA"], "Emerald City": ["SEA"], Lumen: ["SEA"],
-  "Santa Clara": ["SF"], "Bay Area": ["SF"], Tampa: ["TB"], Nashville: ["TEN"],
-  "Music City": ["TEN"], Landover: ["WAS"], Ashburn: ["WAS"],
-};
-// prettier-ignore
-const SCAN_ONLY_TEAM_NAMES: Readonly<Record<string, readonly NflTeam[]>> = {
-  Birds: ["ARI", "ATL", "BAL", "PHI", "SEA"], Boys: ["DAL"], "Big Red": ["ARI"],
-  "Dawg Pound": ["CLE"], "Who Dey": ["CIN"], Skol: ["MIN"], "Who Dat": ["NO"], Iggles: ["PHI"],
-  "Steel Curtain": ["PIT"], "12s": ["SEA"], "12th Man": ["SEA"],
-  Skins: ["WAS"], Redskins: ["WAS"], "Football Team": ["WAS"], Oilers: ["TEN"], Oakland: ["LV"],
-  "San Diego": ["LAC"], "St Louis": ["LA"], "Saint Louis": ["LA"],
-};
-// prettier-ignore
-const TEAM_HASHTAGS: Readonly<Record<string, NflTeam>> = {
-  RiseUp: "ATL", KeepPounding: "CAR", RuleTheJungle: "CIN", OnePride: "DET", ForTheShoe: "IND",
-  DUUUVAL: "JAX", TogetherBlue: "NYG", TakeFlight: "NYJ", BirdGang: "PHI", HereWeGo: "PIT",
-  FTTB: "SF", HTTC: "WAS", HTTR: "WAS",
-};
-// prettier-ignore
-const CONFUSABLES: Readonly<Record<string, string>> = {
-  "а": "a", "А": "A", "В": "B", "с": "c", "С": "C", "е": "e", "Е": "E", "Н": "H", "і": "i",
-  "І": "I", "ј": "j", "Ј": "J", "К": "K", "к": "k", "М": "M", "о": "o", "О": "O", "р": "p",
-  "Р": "P", "ѕ": "s", "Ѕ": "S", "Т": "T", "у": "y", "Х": "X", "х": "x", "ԁ": "d", "ԝ": "w",
-  "ӏ": "l",
-  "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N",
-  "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X", "ο": "o", "ι": "i", "κ": "k", "ν": "v",
-  "ρ": "p", "υ": "u", "χ": "x", "ϲ": "c",
-  "օ": "o",
-  "ø": "o", "Ø": "O", "ß": "ss", "đ": "d", "Đ": "D", "ð": "d", "ł": "l", "Ł": "L", "ı": "i",
-  "ħ": "h", "þ": "th", "ɡ": "g", "ɑ": "a",
-};
-// prettier-ignore
-const APOSTROPHES = ["’", "‘", "‛", "ʼ", "ʻ", "`", "´", "′"];
-const DASHES = ["−"];
-const LABEL_SEPARATORS = [",", "-", "/"];
-// prettier-ignore
-const LABEL_BLOCKERS = [
-  "a", "about", "above", "across", "after", "against", "along", "amid", "among", "an", "around",
-  "as", "at", "before", "behind", "beside", "between", "beyond", "by", "despite", "during",
-  "facing", "for", "from", "in", "inside", "into", "like", "near", "of", "off", "on", "onto",
-  "outside", "over", "past", "per", "since", "than", "the", "through", "to", "toward", "towards",
-  "under", "until", "upon", "v", "versus", "via", "vs", "with", "within", "without",
-];
-const CLAUSE_ABBREVIATIONS = ["v", "vs"];
-const HEADLINE_ORDINARY_WORDS = ["EDGE"];
-const QB = [1];
-const RB = [2];
-const WR = [3];
-const TE = [4];
-const K = [5];
-const P = [7];
-const DT = [9];
-const DE = [10];
-const LB = [11];
-const CB = [12];
-const S = [13];
-const DL = [9, 10];
-const EDGE = [10, 11];
-const RUSHER = [9, 10, 11];
-const DB = [12, 13];
-const DEFENSE = [9, 10, 11, 12, 13];
-const OL: number[] = [];
-// prettier-ignore
-const POSITION_ABBREVIATIONS: Readonly<Record<string, readonly number[]>> = {
-  QB, RB, HB: RB, FB: RB, WR, TE, K, PK: K, P,
-  DT, NT: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL,
-  EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE,
-  LB, ILB: LB, MLB: LB, WLB: LB, SLB: LB, LILB: LB, RILB: LB,
-  CB, RCB: CB, LCB: CB, NCB: CB, S, FS: S, SS: S, NB: DB, DB,
-  OL, OT: OL, OG: OL,
-};
-// prettier-ignore
-const POSITION_WORDS: Readonly<Record<string, readonly number[]>> = {
-  quarterback: QB, "signal caller": QB,
-  "running back": RB, halfback: RB, tailback: RB, fullback: RB,
-  receiver: WR, wideout: WR, "wide receiver": WR, "slot receiver": WR,
-  "tight end": TE,
-  kicker: K, placekicker: K, punter: P,
-  "defensive tackle": DT, "nose tackle": DT, "d-tackle": DT,
-  "defensive end": DE, "d-end": DE,
-  lineman: DL, "d-lineman": DL, "defensive lineman": DL, "3-technique": DL,
-  "edge rusher": EDGE, "outside linebacker": EDGE,
-  linebacker: LB, "inside linebacker": LB, "middle linebacker": LB,
-  "pass rusher": RUSHER,
-  cornerback: CB, corner: CB, "slot corner": CB,
-  safety: S, "free safety": S, "strong safety": S,
-  "nickel back": DB, "defensive back": DB,
-  defender: DEFENSE, "defensive player": DEFENSE,
-  "offensive lineman": OL,
-};
-const AMBIGUOUS_LABEL_WORDS = ["corner", "safety"];
-// prettier-ignore
-const SCAN_ONLY_ABBREVIATIONS = [
-  "LT", "RT", "LG", "RG", "C", "LS", "KR", "PR", "ST", "DI", "ATH", "MIKE", "WILL", "SAM",
-];
-// prettier-ignore
-const SCAN_ONLY_WORDS = [
-  "tackle", "guard", "center", "centre", "nose", "rusher", "backer", "off-ball", "rover",
-  "returner", "return man", "snapper", "gunner", "holder", "specialist", "special teams",
-  "special teamer", "tackler", "pass catcher", "flanker", "split end", "slot", "h-back",
-  "wingback", "slotback", "scatback", "nickel", "dime", "dimeback",
-  "secondary", "defensive line", "offensive line", "o-line", "d-line", "defensive front",
-  "defensive interior", "front seven", "pass rush", "linebacking", "receiving corps", "backfield",
-];
-// prettier-ignore
-const CAPS_ONLY_POSITION_ABBREVIATIONS = [
-  "C", "DE", "DI", "K", "LB", "LT", "MIKE", "OL", "P", "S", "SAM", "ST", "WILL",
-];
+// The closed lists, word for word (each literal of ./forms.ts is the source's list), and entry by
+// entry through a behaviour, from the same literal: a deleted entry fails both. Ruling R8-7 (3): one
+// set of forms — every form the scan reads is a label form where a label stands.
 
 /** A list as a sorted copy, so the comparison is word for word, order aside. */
 const sorted = (o: Readonly<Record<string, unknown>> | readonly string[]): unknown =>
@@ -742,14 +576,6 @@ const sorted = (o: Readonly<Record<string, unknown>> | readonly string[]): unkno
     ? [...(o as readonly string[])].sort()
     : Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 
-/** Each case of a word: as written, lower case, capitals, title case. */
-const cases = (w: string): string[] => [
-  ...new Set([w, w.toLowerCase(), w.toUpperCase(), w.replace(/\b\p{L}/gu, (c) => c.toUpperCase())]),
-];
-/** A form's spellings: as listed, a hyphen for each space, glued. */
-const spellingsOf = (w: string): string[] => [
-  ...new Set([w, w.replaceAll(" ", "-"), w.replace(/[\s-]/gu, "")]),
-];
 /** A residual item (the WR at 0.80) with `form` written in its blurb: the residual must go. */
 const withForm = (form: string): string =>
   `Justin Jefferson: Questionable | Notes: ${form}, as of Wednesday.`;
@@ -779,6 +605,9 @@ const twinOn = (t: NflTeam): number => 9_300_000 + NFL_TEAMS.indexOf(t);
 /** The holders a label picks among the "Sam Twin"s. */
 const picked = (label: string): number[] =>
   twins.match(`${label} Sam Twin: Out`).map((r) => r.espn_id);
+/** What a label of `teams` picks among the twins: the one on its team; none between several. */
+const pickOf = (teams: readonly NflTeam[]): number[] =>
+  teams.length === 1 ? teams.map(twinOn) : [];
 
 /** Free agents named "Pat Twin", one of each ESPN position: a position label picks the one it fits. */
 function positionTwins(ids: readonly number[]) {
@@ -795,12 +624,12 @@ function positionTwins(ids: readonly number[]) {
 const ALL_IDS = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13];
 /**
  * A label of ids `ids` picks the holder of its first id beside a holder of each id it does not name
- * (ESPN's own position fits only itself: "DT" rules an ESPN DE out), and none beside another of its ids.
+ * (ESPN's own position fits only itself: "DT" rules an ESPN DE out), and none beside another of its ids;
+ * a form naming every id or none picks no one.
  */
 function expectPositionLabel(written: string, ids: readonly number[]): void {
   const first = ids[0];
-  if (first === undefined) {
-    // an offensive-line label fits no universe player
+  if (first === undefined || ids.length === ALL_IDS.length) {
     expect(positionTwins(ALL_IDS).match(`${written} Pat Twin: Out`), written).toEqual([]);
     return;
   }
@@ -824,81 +653,51 @@ const DASH_PUNCTUATION: readonly string[] = (() => {
   }
   return out;
 })();
+const ORDINARY: ReadonlySet<string> = new Set(F.ORDINARY_WORD_ABBREVIATIONS);
+/** An abbreviation written with a period after each letter ("N.O.", "C.L.E."). */
+const dotted = (a: string): string => `${a.split("").join(".")}.`;
 
 describe("the closed lists, word for word and entry by entry", () => {
   it("word for word", () => {
-    expect(sorted(news.TEAM_NICKNAMES)).toEqual(sorted(TEAM_NICKNAMES));
-    expect(sorted(news.TEAM_HOMES)).toEqual(sorted(TEAM_HOMES));
-    expect(sorted(news.SHARED_HOMES)).toEqual(sorted(SHARED_HOMES));
-    expect(sorted(news.TEAM_SHORT_NAMES)).toEqual(sorted(TEAM_SHORT_NAMES));
-    expect(sorted(news.TEAM_ABBREVIATIONS)).toEqual(sorted(TEAM_ABBREVIATIONS));
-    expect(sorted(news.SCAN_ONLY_TEAM_ABBREVIATIONS)).toEqual(sorted(SCAN_ONLY_TEAM_ABBREVIATIONS));
-    expect(sorted(news.CAPS_ONLY_ABBREVIATIONS)).toEqual(sorted(CAPS_ONLY_ABBREVIATIONS));
-    expect(sorted(news.TEAM_SINGULARS)).toEqual(sorted(TEAM_SINGULARS));
-    expect(sorted(news.TEAM_CITIES)).toEqual(sorted(TEAM_CITIES));
-    expect(sorted(news.SCAN_ONLY_TEAM_NAMES)).toEqual(sorted(SCAN_ONLY_TEAM_NAMES));
-    expect(sorted(news.TEAM_HASHTAGS)).toEqual(sorted(TEAM_HASHTAGS));
-    expect(sorted(news.CONFUSABLES)).toEqual(sorted(CONFUSABLES));
-    expect(sorted(news.APOSTROPHES)).toEqual(sorted(APOSTROPHES));
-    expect(sorted(news.DASHES)).toEqual(sorted(DASHES));
-    expect(sorted(news.LABEL_SEPARATORS)).toEqual(sorted(LABEL_SEPARATORS));
-    expect(sorted(news.LABEL_BLOCKERS)).toEqual(sorted(LABEL_BLOCKERS));
-    expect(sorted(news.CLAUSE_ABBREVIATIONS)).toEqual(sorted(CLAUSE_ABBREVIATIONS));
-    expect(sorted(news.HEADLINE_ORDINARY_WORDS)).toEqual(sorted(HEADLINE_ORDINARY_WORDS));
-    expect(sorted(news.POSITION_ABBREVIATIONS)).toEqual(sorted(POSITION_ABBREVIATIONS));
-    expect(sorted(news.POSITION_WORDS)).toEqual(sorted(POSITION_WORDS));
-    expect(sorted(news.AMBIGUOUS_LABEL_WORDS)).toEqual(sorted(AMBIGUOUS_LABEL_WORDS));
-    expect(sorted(news.SCAN_ONLY_ABBREVIATIONS)).toEqual(sorted(SCAN_ONLY_ABBREVIATIONS));
-    expect(sorted(news.SCAN_ONLY_WORDS)).toEqual(sorted(SCAN_ONLY_WORDS));
-    expect(sorted(news.CAPS_ONLY_POSITION_ABBREVIATIONS)).toEqual(
-      sorted(CAPS_ONLY_POSITION_ABBREVIATIONS),
-    );
+    expect(sorted(news.TEAM_NICKNAMES)).toEqual(sorted(F.TEAM_NICKNAMES));
+    expect(sorted(news.TEAM_HOMES)).toEqual(sorted(F.TEAM_HOMES));
+    expect(sorted(news.SHARED_HOMES)).toEqual(sorted(F.SHARED_HOMES));
+    expect(sorted(news.TEAM_SHORT_NAMES)).toEqual(sorted(F.TEAM_SHORT_NAMES));
+    expect(sorted(news.TEAM_SINGULARS)).toEqual(sorted(F.TEAM_SINGULARS));
+    expect(sorted(news.TEAM_CITIES)).toEqual(sorted(F.TEAM_CITIES));
+    expect(sorted(news.TEAM_STADIUMS)).toEqual(sorted(F.TEAM_STADIUMS));
+    expect(sorted(news.TEAM_FACILITIES)).toEqual(sorted(F.TEAM_FACILITIES));
+    expect(sorted(news.TEAM_HASHTAGS)).toEqual(sorted(F.TEAM_HASHTAGS));
+    expect(sorted(news.TEAM_FAN_NAMES)).toEqual(sorted(F.TEAM_FAN_NAMES));
+    expect(sorted(news.TEAM_LEGACY_NAMES)).toEqual(sorted(F.TEAM_LEGACY_NAMES));
+    expect(sorted(news.TEAM_ABBREVIATIONS)).toEqual(sorted(F.TEAM_ABBREVIATIONS));
+    expect(sorted(news.TEAM_LEGACY_ABBREVIATIONS)).toEqual(sorted(F.TEAM_LEGACY_ABBREVIATIONS));
+    expect(sorted(news.TEAM_STATE_ABBREVIATIONS)).toEqual(sorted(F.TEAM_STATE_ABBREVIATIONS));
+    expect(sorted(news.ORDINARY_WORD_ABBREVIATIONS)).toEqual(sorted(F.ORDINARY_WORD_ABBREVIATIONS));
+    expect(sorted(news.GAME_MOVE_WORDS)).toEqual(sorted(F.GAME_MOVE_WORDS));
+    expect(sorted(news.CONFUSABLES)).toEqual(sorted(F.CONFUSABLES));
+    expect(sorted(news.APOSTROPHES)).toEqual(sorted(F.APOSTROPHES));
+    expect(sorted(news.DASHES)).toEqual(sorted(F.DASHES));
+    expect(sorted(news.LABEL_SEPARATORS)).toEqual(sorted(F.LABEL_SEPARATORS));
+    expect(sorted(news.LABEL_BLOCKERS)).toEqual(sorted(F.LABEL_BLOCKERS));
+    expect(sorted(news.CLAUSE_ABBREVIATIONS)).toEqual(sorted(F.CLAUSE_ABBREVIATIONS));
+    expect(sorted(news.POSITION_ABBREVIATIONS)).toEqual(sorted(F.POSITION_ABBREVIATIONS));
+    expect(sorted(news.POSITION_WORDS)).toEqual(sorted(F.POSITION_WORDS));
+    expect(sorted(news.AMBIGUOUS_LABEL_WORDS)).toEqual(sorted(F.AMBIGUOUS_LABEL_WORDS));
   });
 
-  it("a nickname, home or short name, in any case and spelling: the scan finds it, and as a label it is his team", () => {
+  it("every word form of a team, in any case and spelling: the scan finds it, and as a label it is its team", () => {
     expect(scanned("none")).toBe(RESIDUAL);
-    const one = { ...TEAM_NICKNAMES, ...TEAM_HOMES, ...TEAM_SHORT_NAMES };
-    for (const [form, team] of Object.entries(one)) {
-      for (const w of cases(form).flatMap(spellingsOf)) expect(scanned(w), w).toBe("∅ u1");
-      for (const w of spellingsOf(form)) expect(picked(w), w).toEqual([twinOn(team)]);
-      expect(picked(`${form}'`), `${form}'`).toEqual([twinOn(team)]);
-    }
-    // a home that holds two teams fits a holder on either: it picks no one between them
-    for (const form of Object.keys(SHARED_HOMES)) {
-      for (const w of cases(form).flatMap(spellingsOf)) expect(scanned(w), w).toBe("∅ u1");
-      expect(picked(form), form).toEqual([]);
-    }
-  });
-
-  it("an abbreviation: in capitals always; in other cases only when its lower case is no word", () => {
-    for (const [form, teams] of Object.entries(TEAM_ABBREVIATIONS)) {
-      expect(scanned(form), form).toBe("∅ u1");
-      expect(picked(form), form).toEqual(teams.length === 1 ? teams.map(twinOn) : []);
-      const caps = CAPS_ONLY_ABBREVIATIONS.includes(form);
-      for (const w of [form.toLowerCase(), `${form.slice(0, 1)}${form.slice(1).toLowerCase()}`]) {
-        if (w === form) continue;
-        expect(scanned(w), w).toBe(caps ? RESIDUAL : "∅ u1");
-        expect(picked(w), w).toEqual(caps || teams.length !== 1 ? [] : teams.map(twinOn));
+    for (const [name, list] of Object.entries(F.TEAM_WORD_LISTS))
+      for (const [form, t] of Object.entries(list)) {
+        const teams = F.teamsOf(t);
+        for (const w of F.cases(form).flatMap(F.spellingsOf))
+          expect(scanned(w), `${name}: ${w}`).toBe("∅ u1");
+        // R8-7 (3): the scan's form is a label form, its possessive too ("Nashville's Marcus Harris")
+        for (const w of F.spellingsOf(form))
+          expect(picked(w), `${name}: ${w}`).toEqual(pickOf(teams));
+        expect(picked(`${form}'s`), `${name}: ${form}'s`).toEqual(pickOf(teams));
       }
-    }
-    // a legacy abbreviation: found by the scan by the same case rule, never a label
-    for (const form of Object.keys(SCAN_ONLY_TEAM_ABBREVIATIONS)) {
-      expect(scanned(form), form).toBe("∅ u1");
-      expect(picked(form), form).toEqual([]);
-      const caps = CAPS_ONLY_ABBREVIATIONS.includes(form);
-      expect(scanned(form.toLowerCase()), form).toBe(caps ? RESIDUAL : "∅ u1");
-    }
-  });
-
-  it("a singular nickname, a city or a scan-only name: the scan finds it in any case; it never labels a name", () => {
-    for (const form of [
-      ...Object.keys(TEAM_SINGULARS),
-      ...Object.keys(TEAM_CITIES),
-      ...Object.keys(SCAN_ONLY_TEAM_NAMES),
-    ]) {
-      for (const w of cases(form).flatMap(spellingsOf)) expect(scanned(w), w).toBe("∅ u1");
-      expect(picked(form), form).toEqual([]);
-    }
     // the forms written as feeds write them
     for (const w of [
       "Ex-Brown",
@@ -908,85 +707,118 @@ describe("the closed lists, word for word and entry by entry", () => {
       "St. Louis",
       "St.Louis",
       "D.C.",
+      "U.S. Bank Stadium",
+      "Levi’s Stadium",
+      "M&amp;T Bank Stadium",
+      "Monsters-of the Midway",
     ])
       expect(scanned(w), w).toBe("∅ u1");
+    // and as labels: a period may end a word inside a form ("St. Louis"), an initialism's too
+    for (const [w, team] of [
+      ["St. Louis's", "LA"],
+      ["St. Joseph's", "KC"],
+      ["U.S. Bank's", "MIN"],
+      ["St. Paul", "MIN"],
+    ] as const)
+      expect(picked(w), w).toEqual([twinOn(team)]);
   });
 
-  it("a team's own hashtag: found after '#' in any case, never as a plain word", () => {
-    for (const tag of Object.keys(TEAM_HASHTAGS)) {
+  it("an abbreviation: in capitals, dotted, and in any case unless its lower case is an ordinary word", () => {
+    for (const [name, list] of Object.entries(F.TEAM_ABBREVIATION_LISTS))
+      for (const [form, teams] of Object.entries(list)) {
+        const ordinary = ORDINARY.has(form);
+        // R8-7 (1), (3): in capitals and dotted ("L.A.", "K.C."), found and a label
+        for (const w of [form, dotted(form)]) {
+          expect(scanned(w), `${name}: ${w}`).toBe("∅ u1");
+          expect(picked(w), `${name}: ${w}`).toEqual(pickOf(teams));
+        }
+        // R8-7 (2): in another case only when its lower case is no ordinary word; after a game or
+        // move word in any case
+        for (const w of [form.toLowerCase(), `${form.slice(0, 1)}${form.slice(1).toLowerCase()}`]) {
+          if (w === form) continue;
+          expect(scanned(w), `${name}: ${w}`).toBe(ordinary ? RESIDUAL : "∅ u1");
+          expect(picked(w), `${name}: ${w}`).toEqual(ordinary ? [] : pickOf(teams));
+          expect(scanned(`vs. ${w}`), `${name}: vs. ${w}`).toBe("∅ u1");
+        }
+      }
+  });
+
+  it("a team's own hashtag: found after '#' in any case, and a label there; never as a plain word", () => {
+    for (const [tag, team] of Object.entries(F.TEAM_HASHTAGS)) {
       for (const w of [`#${tag}`, `#${tag.toLowerCase()}`, `#${tag.toUpperCase()}`, `#${tag}2026`])
         expect(scanned(w), w).toBe("∅ u1");
-      expect(picked(`#${tag}`), tag).toEqual([]);
+      expect(picked(`#${tag}`), tag).toEqual([twinOn(team)]);
+      // the plain words of a phrase hashtag name no team ("here we go", "rise up")
+      expect(scanned(tag), tag).toBe(RESIDUAL);
     }
-    // the plain words of a phrase hashtag name no team ("here we go", "rise up")
-    for (const w of ["HereWeGo", "here we go", "RiseUp", "take flight"])
-      expect(scanned(w), w).toBe(RESIDUAL);
+    for (const w of ["here we go", "take flight"]) expect(scanned(w), w).toBe(RESIDUAL);
   });
 
   it("a compound holding a team: a handle, a hashtag, a domain, a camel-cased word", () => {
-    const words = [
-      ...Object.keys(TEAM_NICKNAMES),
-      ...Object.keys(TEAM_HOMES),
-      ...Object.keys(SHARED_HOMES),
-      ...Object.keys(TEAM_SHORT_NAMES),
-      ...Object.keys(TEAM_SINGULARS),
-      ...Object.keys(TEAM_CITIES),
-      ...Object.keys(SCAN_ONLY_TEAM_NAMES),
-    ];
-    for (const form of words) {
-      const glued = form.replace(/[\s'-]/gu, "");
-      const lower = glued.toLowerCase();
-      const title = glued.replace(/^\p{L}/u, (c) => c.toUpperCase());
-      // a segment of a camel-cased compound ("#BearDown", "ClevelandBrowns.com") at any length; a
-      // form of four letters or more inside a lower-case one ("kcchiefs.com", "@xbrownsNFL")
-      for (const w of [`#${title}Up`, `@The${title}`, `per The${title}.com`, `per Go${title}Now`])
-        expect(scanned(w), w).toBe("∅ u1");
-      if (lower.length >= 4)
-        for (const w of [`@x${lower}nfl`, `#${lower}nation`, `per www.the${lower}online.com`])
-          expect(scanned(w), w).toBe("∅ u1");
-      else expect(scanned(`#${lower}up`), `#${lower}up`).toBe("∅ u1");
-    }
-    for (const form of [
-      ...Object.keys(TEAM_ABBREVIATIONS),
-      ...Object.keys(SCAN_ONLY_TEAM_ABBREVIATIONS),
-    ]) {
-      // a game tag ("#CLEvsMIN"); a team site's ("KCChiefs.com"); in a lower-case hashtag, three
-      // letters ("#clevsmin")
-      expect(scanned(`#${form}vsXYZ`), form).toBe("∅ u1");
-      expect(scanned(`per ${form}Online.com`), form).toBe("∅ u1");
-      if (form.length === 3) expect(scanned(`#${form.toLowerCase()}vsxyz`), form).toBe("∅ u1");
-    }
+    for (const list of Object.values(F.TEAM_WORD_LISTS))
+      for (const form of Object.keys(list)) {
+        // a form holding "&" ("M&T", "AT&T") is a word of its own, never glued into a handle
+        if (form.includes("&")) continue;
+        const glued = form.replace(/[\s'-]/gu, "");
+        const lower = glued.toLowerCase();
+        const title = glued.replace(/^\p{L}/u, (c) => c.toUpperCase());
+        // a segment of a camel-cased compound at any length; a form of four letters or more inside a
+        // lower-case one ("kcchiefs.com", "@xbrownsNFL")
+        if (!form.includes(" "))
+          for (const w of [
+            `#${title}Up`,
+            `@The${title}`,
+            `per The${title}.com`,
+            `per Go${title}Now`,
+          ])
+            expect(scanned(w), w).toBe("∅ u1");
+        if (lower.length >= 4)
+          for (const w of [`@x${lower}nfl`, `#${lower}nation`, `per www.the${lower}online.com`])
+            expect(scanned(w), w).toBe("∅ u1");
+        else expect(scanned(`#${lower}up`), `#${lower}up`).toBe("∅ u1");
+      }
+    for (const list of Object.values(F.TEAM_ABBREVIATION_LISTS))
+      for (const form of Object.keys(list)) {
+        // a game tag ("#CLEvsMIN"); a team site's ("KCChiefs.com"); in a lower-case hashtag, three
+        // letters ("#clevsmin") unless its lower case is an ordinary word (R8-7 (2): "#pitstop")
+        expect(scanned(`#${form}vsXYZ`), form).toBe("∅ u1");
+        expect(scanned(`per ${form}Online.com`), form).toBe("∅ u1");
+        if (form.length === 3)
+          expect(scanned(`#${form.toLowerCase()}vsxyz`), form).toBe(
+            ORDINARY.has(form) ? RESIDUAL : "∅ u1",
+          );
+      }
     // no form inside: no team ("@Jaxon…" names none in a handle; "Jax" alone does)
     for (const w of ["@JaxonFanClub", "per @AdamSchefter", "per McCaffrey.com", "LaPorta"])
       expect(scanned(w), w).toBe(RESIDUAL);
     expect(scanned("@Jax")).toBe("∅ u1");
   });
 
-  it("a position abbreviation: in capitals, its rank, its plural; as a label it fits its ids", () => {
-    for (const [form, ids] of Object.entries(POSITION_ABBREVIATIONS)) {
+  it("a position abbreviation: found and a label in capitals, dotted, ranked and plural; in other cases unless ordinary", () => {
+    for (const [form, ids] of Object.entries(F.POSITION_ABBREVIATIONS)) {
       for (const w of [form, `${form}s`, `${form}S`, `${form}1`, `${form}4`, `${form}10`])
         expect(scanned(w), w).toBe("∅ u1");
       expectPositionLabel(form, ids);
       expectPositionLabel(`${form}2`, ids);
-      // in lower case it labels no one; the scan counts it unless its lower case is a word
-      expect(positionTwins(ALL_IDS).match(`${form.toLowerCase()} Pat Twin: Out`), form).toEqual([]);
-      if (!(form.toLowerCase() in POSITION_WORDS))
-        expect(scanned(form.toLowerCase()), form).toBe(
-          CAPS_ONLY_POSITION_ABBREVIATIONS.includes(form) ? RESIDUAL : "∅ u1",
-        );
+      // R8-7 (2), (3): in lower case it is found and labels unless its lower case is an ordinary word
+      const lower = form.toLowerCase();
+      if (spellingIsWord(lower)) continue;
+      if (ORDINARY.has(form)) {
+        expect(positionTwins(ALL_IDS).match(`${lower} Pat Twin: Out`), form).toEqual([]);
+        expect(scanned(lower), form).toBe(RESIDUAL);
+        expect(scanned(`at ${lower}`), form).toBe("∅ u1");
+      } else {
+        expectPositionLabel(lower, ids);
+        expect(scanned(lower), form).toBe("∅ u1");
+      }
     }
   });
 
-  it("a position word, one or two, in any case, spelling and its plural; as a label it fits its ids", () => {
-    for (const [form, ids] of Object.entries(POSITION_WORDS)) {
-      for (const w of cases(form).flatMap(spellingsOf)) expect(scanned(w), w).toBe("∅ u1");
-      const plural = form.endsWith("man")
-        ? `${form.slice(0, -3)}men`
-        : /[^aeiou]y$/u.test(form)
-          ? `${form.slice(0, -1)}ies`
-          : `${form}s`;
-      expect(scanned(plural), plural).toBe("∅ u1");
-      for (const w of spellingsOf(form)) {
+  it("a position word, in any case, spelling and its plural: found, and as a label it fits its ids", () => {
+    for (const [form, ids] of Object.entries(F.POSITION_WORDS)) {
+      for (const w of F.cases(form).flatMap(F.spellingsOf)) expect(scanned(w), w).toBe("∅ u1");
+      for (const w of F.spellingsOf(form)) {
+        expect(scanned(news.pluralOf(w)), news.pluralOf(w)).toBe("∅ u1");
         expectPositionLabel(w, ids);
         expectPositionLabel(
           w.replace(/\b\p{L}/gu, (c) => c.toUpperCase()),
@@ -994,26 +826,12 @@ describe("the closed lists, word for word and entry by entry", () => {
         );
       }
     }
-  });
-
-  it("a scan-only form: the scan finds it (an ambiguous token counts); it never labels a name", () => {
-    for (const form of SCAN_ONLY_ABBREVIATIONS) {
-      for (const w of [form, `${form}s`, `${form}1`]) expect(scanned(w), w).toBe("∅ u1");
-      expect(positionTwins(ALL_IDS).match(`${form} Pat Twin: Out`), form).toEqual([]);
-      expect(scanned(form.toLowerCase()), form).toBe(
-        CAPS_ONLY_POSITION_ABBREVIATIONS.includes(form) ? RESIDUAL : "∅ u1",
-      );
-    }
-    for (const form of SCAN_ONLY_WORDS) {
-      for (const w of cases(form).flatMap(spellingsOf)) expect(scanned(w), w).toBe("∅ u1");
-      expect(positionTwins(ALL_IDS).match(`${form} Pat Twin: Out`), form).toEqual([]);
-    }
     // the ruling's ambiguous tokens, in prose; techniques and ranks by rule
     for (const t of [
       "in OT",
       "around the corner",
       "for safety reasons",
-      "an edge",
+      "an EDGE",
       "1-tech",
       "the 4i",
       "nine-technique",
@@ -1023,18 +841,22 @@ describe("the closed lists, word for word and entry by entry", () => {
       expect(scanned(t), t).toBe("∅ u1");
   });
 
-  it("an ambiguous label word right after a preposition or an article is the ordinary word", () => {
-    for (const w of AMBIGUOUS_LABEL_WORDS) {
-      const id = (POSITION_WORDS[w] ?? [])[0] ?? 0;
-      const mm = positionTwins([id, 1]);
+  it("an ambiguous label word right after a preposition, an article or a game or move word is the ordinary word", () => {
+    for (const w of F.AMBIGUOUS_LABEL_WORDS) {
+      const ids = F.POSITION_WORDS[w] ?? [];
+      const id = ids[0] ?? 0;
+      const other = ALL_IDS.find((x) => !ids.includes(x)) ?? 1;
+      const mm = positionTwins([id, other]);
       const at = (t: string) => mm.match(t).map((r) => r.espn_id);
       // "After safety Lamar Jackson leads Ravens on winning drive" (the free-agent CB at 0.80 at dbe9686)
-      for (const blocker of ["After", "in the", "for", "around the"])
+      for (const blocker of ["After", "in the", "for", "around the", "vs."])
         expect(at(`${blocker} ${w} Pat Twin scored`), `${blocker} ${w}`).toEqual([]);
-      // a label still: at the start, after a modifier, beside a team
-      expect(at(`${w} Pat Twin: Signs`), w).toEqual([9_400_000 + id]);
-      expect(at(`Veteran ${w} Pat Twin: Signs`), w).toEqual([9_400_000 + id]);
-      expect(at(`Pat Twin (${w}): Signs`), w).toEqual([9_400_000 + id]);
+      // a label still: at the start, after a modifier, in a tag
+      if (ids.length === 1) {
+        expect(at(`${w} Pat Twin: Signs`), w).toEqual([9_400_000 + id]);
+        expect(at(`Veteran ${w} Pat Twin: Signs`), w).toEqual([9_400_000 + id]);
+        expect(at(`Pat Twin (${w}): Signs`), w).toEqual([9_400_000 + id]);
+      }
     }
     expect(outcome("After safety Lamar Jackson leads Ravens on winning drive")).toBe("∅ u1");
     expect(outcome("Free-agent corner Lamar Jackson visits")).toBe(
@@ -1043,17 +865,13 @@ describe("the closed lists, word for word and entry by entry", () => {
   });
 
   it("each lookalike letter folds to its Latin letter before the scan", () => {
-    const forms = [
-      ...Object.keys(TEAM_NICKNAMES),
-      ...Object.keys(TEAM_HOMES),
-      ...Object.keys(TEAM_ABBREVIATIONS),
-    ].flatMap((f) => [f, f.toUpperCase(), f.toLowerCase()]);
-    for (const [look, latin] of Object.entries(CONFUSABLES)) {
-      const form = forms.find(
-        (f) =>
-          f.includes(latin) &&
-          (f === f.toUpperCase() || !CAPS_ONLY_ABBREVIATIONS.includes(f.toUpperCase())),
-      );
+    const forms = [...Object.keys(F.TEAM_NICKNAMES), ...Object.keys(F.TEAM_HOMES)].flatMap((f) => [
+      f,
+      f.toUpperCase(),
+      f.toLowerCase(),
+    ]);
+    for (const [look, latin] of Object.entries(F.CONFUSABLES)) {
+      const form = forms.find((f) => f.includes(latin));
       expect(form, `a team form holding ${latin}`).toBeDefined();
       const written = (form ?? "").replace(latin, look);
       expect(written).not.toBe(form);
@@ -1062,22 +880,20 @@ describe("the closed lists, word for word and entry by entry", () => {
   });
 
   it("each apostrophe-like mark folds to an apostrophe: a possessive, in a label and in the scan", () => {
-    for (const mark of APOSTROPHES) {
+    for (const mark of F.APOSTROPHES) {
       expect(picked(`Browns${mark}`), mark).toEqual([twinOn("CLE")]);
       expect(picked(`Cleveland${mark}s`), mark).toEqual([twinOn("CLE")]);
-      // the scan reads "TEAM'S" as one word, not "TEAM" and the S of a safety (the QB at 0.80;
+      // the scan reads "Team'S" as one word, not "Team" and the S of a safety (the QB at 0.80;
       // no ref when the mark is not folded)
-      expect(outcome(`LAMAR JACKSON: TEAM${mark}S DECISION LOOMS`), mark).toBe(
+      expect(outcome(`Lamar Jackson: Team${mark}S decision looms`), mark).toBe(
         "Lamar Jackson/BAL/QB:full_name u0",
       );
     }
-    expect(outcome("LAMAR JACKSON: TEAM'S DECISION LOOMS")).toBe(
-      "Lamar Jackson/BAL/QB:full_name u0",
-    );
-    // a mark that is no apostrophe is punctuation: no possessive, and the S counts
+    // a mark that is no apostrophe is punctuation: no possessive, and the S counts (in capitals,
+    // outside a segment all in capitals: R8-7 (2))
     for (const mark of ['"', "”", "^"]) {
       expect(picked(`Browns${mark}`), mark).toEqual([]);
-      expect(outcome(`LAMAR JACKSON: TEAM${mark}S DECISION LOOMS`), mark).toBe("∅ u1");
+      expect(outcome(`Lamar Jackson: Team${mark}S decision looms`), mark).toBe("∅ u1");
     }
     // an apostrophe that closes a quotation opened in its segment is no possessive (the WR at 0.95
     // at dbe9686 and f41e810)
@@ -1094,10 +910,15 @@ describe("the closed lists, word for word and entry by entry", () => {
 
   it("each dash folds to a hyphen: every Unicode dash punctuation and the minus sign", () => {
     expect(DASH_PUNCTUATION.length).toBeGreaterThan(20);
-    for (const dash of [...DASH_PUNCTUATION, ...DASHES]) {
-      // the residual's star at 0.80 when the dash is not folded ("d" and "line" are no forms)
+    for (const dash of [...DASH_PUNCTUATION, ...F.DASHES]) {
+      // the residual's star at 0.80 when the dash is not folded ("cb" and "olb" read alone are
+      // positions, but "d" and "line" are no forms)
       expect(
-        outcome(`Justin Jefferson: Waived | The d${dash}line reserve was cut.`),
+        outcome(`Justin Jefferson: Waived | The nose${dash}tackle reserve was cut.`),
+        `U+${(dash.codePointAt(0) ?? 0).toString(16)}`,
+      ).toBe("∅ u1");
+      expect(
+        outcome(`Justin Jefferson: Waived | The Mercedes${dash}Benz crowd roared.`),
         `U+${(dash.codePointAt(0) ?? 0).toString(16)}`,
       ).toBe("∅ u1");
       const mm = buildPlayerMatcher([
@@ -1112,7 +933,7 @@ describe("the closed lists, word for word and entry by entry", () => {
   });
 
   it("each separator of a label's tag, and nothing else between the label and the name", () => {
-    for (const sep of LABEL_SEPARATORS) {
+    for (const sep of F.LABEL_SEPARATORS) {
       const mm = buildPlayerMatcher([
         { espn_id: 9_500_001, full_name: "Sam Twin", team: "CLE", gsis_id: null, position_id: 11 },
         { espn_id: 9_500_002, full_name: "Sam Twin", team: "CLE", gsis_id: null, position_id: 3 },
@@ -1146,7 +967,8 @@ describe("the closed lists, word for word and entry by entry", () => {
   it("a label of teams alone must open its clause: a word right before it makes it that word's object", () => {
     // "Against the Vikings Justin Jefferson recorded 12 tackles" (the WR at 0.95 at dbe9686 and f41e810)
     for (const w of [
-      ...LABEL_BLOCKERS,
+      ...F.LABEL_BLOCKERS,
+      ...F.GAME_MOVE_WORDS,
       "beat",
       "stun",
       "edges",
@@ -1170,7 +992,7 @@ describe("the closed lists, word for word and entry by entry", () => {
       );
     }
     // a period ends the clause, but after "vs" and "v"
-    for (const w of CLAUSE_ABBREVIATIONS)
+    for (const w of F.CLAUSE_ABBREVIATIONS)
       for (const t of [
         `Week 9 ${w}. Vikings Justin Jefferson led`,
         `${w}. the Vikings Justin Jefferson led`,
@@ -1189,9 +1011,9 @@ describe("the closed lists, word for word and entry by entry", () => {
     );
   });
 
-  it("each blocker word: an ordinary-word position right after it is the ordinary word", () => {
+  it("each blocker word and game or move word: an ordinary-word position right after it is the ordinary word", () => {
     const mm = positionTwins([13, 1]);
-    for (const w of LABEL_BLOCKERS) {
+    for (const w of [...F.LABEL_BLOCKERS, ...F.GAME_MOVE_WORDS]) {
       // "After safety Lamar Jackson leads Ravens on winning drive" (the free-agent CB at 0.80 at dbe9686)
       for (const t of [`${w} safety Pat Twin scored`, `Notes: ${w} safety Pat Twin scored`])
         expect(mm.match(t), t).toEqual([]);
@@ -1199,27 +1021,29 @@ describe("the closed lists, word for word and entry by entry", () => {
     expect(mm.match("Veteran safety Pat Twin scored").map((r) => r.espn_id)).toEqual([9_400_013]);
   });
 
-  it("in a segment written all in capitals, the forms that are ordinary words label no name before it", () => {
-    for (const w of HEADLINE_ORDINARY_WORDS) {
-      // "Browns edge Justin Jefferson's Vikings": the verb (the Browns LB at 0.95 at dbe9686)
-      expect(outcome(`BROWNS ${w} JUSTIN JEFFERSON, VIKINGS IN OT`), w).toBe("∅ u1");
-      expect(outcome(`Browns ${w} Justin Jefferson: Records sack`), w).toBe(
-        "Justin Jefferson/CLE/LB:full_name_team u0",
-      );
-    }
-    for (const form of CAPS_ONLY_ABBREVIATIONS) {
-      const teams = TEAM_ABBREVIATIONS[form];
-      if (teams?.length !== 1) continue;
-      expect(twins.match(`${form} SAM TWIN: OUT`), form).toEqual([]);
-      expect(
-        twins.match(`${form} Sam Twin: Out`).map((r) => r.espn_id),
-        form,
-      ).toEqual(teams.map(twinOn));
-      // in a tag the form is a label in any segment
-      expect(
-        twins.match(`SAM TWIN (${form}): OUT`).map((r) => r.espn_id),
-        form,
-      ).toEqual(teams.map(twinOn));
+  it("an ordinary-word abbreviation labels in capitals: in a segment all in capitals only inside a tag", () => {
+    for (const form of F.ORDINARY_WORD_ABBREVIATIONS) {
+      // "BROWNS EDGE JUSTIN JEFFERSON, VIKINGS": the verb (the Browns LB at 0.95 at dbe9686)
+      const teams =
+        F.TEAM_ABBREVIATIONS[form] ??
+        F.TEAM_LEGACY_ABBREVIATIONS[form] ??
+        F.TEAM_STATE_ABBREVIATIONS[form];
+      if (teams !== undefined) {
+        expect(twins.match(`${form} SAM TWIN: OUT`), form).toEqual([]);
+        expect(
+          twins.match(`${form} Sam Twin: Out`).map((r) => r.espn_id),
+          form,
+        ).toEqual(pickOf(teams));
+        // in a tag the form is a label in any segment
+        expect(
+          twins.match(`SAM TWIN (${form}): OUT`).map((r) => r.espn_id),
+          form,
+        ).toEqual(pickOf(teams));
+        continue;
+      }
+      const ids = F.POSITION_ABBREVIATIONS[form] ?? [];
+      expect(positionTwins(ALL_IDS).match(`${form} PAT TWIN: OUT`), form).toEqual([]);
+      expectPositionLabel(form, ids);
     }
   });
 
@@ -1245,6 +1069,12 @@ describe("the closed lists, word for word and entry by entry", () => {
       "<div>",
       "</li><li>",
       "<b>",
+      // a closing tag alone (violation 10 of the attack on 66bb2a2: TAG_RE's "\/?" held by no test)
+      "</p>",
+      "</div>",
+      "</li>",
+      "</b>",
+      "&lt;/p&gt;",
       "&lt;br&gt;",
       "&#60;br&#62;",
       "&#x3C;br&#x3E;",
@@ -1283,19 +1113,25 @@ describe("the closed lists, word for word and entry by entry", () => {
     );
   });
 
-  it("every label form is a form the scan finds (a label is never a residual's)", () => {
+  it("every label form is a form the scan finds, in text of mixed case (a label is never a residual's)", () => {
+    for (const list of [
+      ...Object.values(F.TEAM_WORD_LISTS),
+      ...Object.values(F.TEAM_ABBREVIATION_LISTS),
+    ])
+      for (const w of Object.keys(list).flatMap(F.spellingsOf))
+        expect(news.scanFinds(w), w).toBe(true);
     for (const w of [
-      ...Object.keys(TEAM_NICKNAMES),
-      ...Object.keys(TEAM_HOMES),
-      ...Object.keys(SHARED_HOMES),
-      ...Object.keys(TEAM_SHORT_NAMES),
-      ...Object.keys(TEAM_ABBREVIATIONS),
-      ...Object.keys(POSITION_ABBREVIATIONS),
-      ...Object.keys(POSITION_WORDS),
-    ].flatMap(spellingsOf))
+      ...Object.keys(F.POSITION_ABBREVIATIONS),
+      ...Object.keys(F.POSITION_WORDS),
+    ].flatMap(F.spellingsOf))
       expect(news.scanFinds(w), w).toBe(true);
   });
 });
+
+/** Whether an abbreviation's lower case is also a listed position word ("nose" is no abbreviation). */
+function spellingIsWord(lower: string): boolean {
+  return news.positionWordIds(lower) !== null;
+}
 
 // -----------------------------------------------------------------------------------------------
 // Properties over the recorded universe's shared names.
@@ -1325,52 +1161,49 @@ function prominentOf(hs: readonly NewsUniversePlayer[]): NewsUniversePlayer | nu
     ? top
     : null;
 }
-/** Words that are no team and no position form in any case (and no universe name). */
+/**
+ * Words that are no team and no position form in any case (and no universe name), and no
+ * ordinary-word abbreviation either ("No", "Will", "in": R8-7 (2) counts one right after a game or
+ * move word, "to in"; it is held by match-r87.test.ts).
+ */
 // prettier-ignore
 const NEUTRAL = [
   "limited", "questionable", "practice", "Wednesday", "Sunday", "ankle", "knee", "hamstring",
   "returns", "expected", "to", "play", "week", "game", "season", "status", "update", "per",
   "report", "sources", "say", "after", "missing", "time", "full", "participant", "listed",
   "doubtful", "yards", "touchdowns", "catches", "throws", "sprain", "injury", "notes", "with",
-  "the", "a", "his", "and", "for", "in", "on", "last", "next", "two", "three", "No", "Timetable",
+  "the", "a", "his", "and", "for", "on", "last", "next", "two", "three", "Timetable",
 ];
-/** The words R8-3 read and R8-6 does not: cues, game words, moves, describing openings. */
+/**
+ * The words R8-3 read and R8-6 does not: cues, game words, moves, describing openings ("star" went
+ * with R8-7 (1): "the Star" is the Cowboys' facility).
+ */
 // prettier-ignore
 const NOT_LABELS = [
   "vs.", "against", "versus", "facing", "win over", "loss to", "beat", "host", "visits", "at",
   "sign", "signs", "waived by", "activated by", "joins", "claimed by", "traded to", "matchup",
-  "The", "starter", "star", "veteran", "rookie", "former",
+  "The", "starter", "veteran", "rookie", "former",
 ];
 /** Every team form and position form of the closed lists (each found by the scan). */
 const FORMS: readonly string[] = [
-  ...Object.keys(TEAM_NICKNAMES),
-  ...Object.keys(TEAM_HOMES),
-  ...Object.keys(SHARED_HOMES),
-  ...Object.keys(TEAM_SHORT_NAMES),
-  ...Object.keys(TEAM_ABBREVIATIONS),
-  ...Object.keys(SCAN_ONLY_TEAM_ABBREVIATIONS),
-  ...Object.keys(TEAM_SINGULARS),
-  ...Object.keys(TEAM_CITIES),
-  ...Object.keys(SCAN_ONLY_TEAM_NAMES),
-  ...Object.keys(POSITION_ABBREVIATIONS),
-  ...Object.keys(POSITION_WORDS),
-  ...SCAN_ONLY_ABBREVIATIONS,
-  ...SCAN_ONLY_WORDS,
+  ...Object.values(F.TEAM_WORD_LISTS).flatMap((l) => Object.keys(l)),
+  ...Object.values(F.TEAM_ABBREVIATION_LISTS).flatMap((l) => Object.keys(l)),
+  ...Object.keys(F.POSITION_ABBREVIATIONS),
+  ...Object.keys(F.POSITION_WORDS),
 ];
-/** The abbreviations among them: written in capitals (a caps-only one counts only so). */
+/** The abbreviations among them: written in capitals or dotted (an ordinary-word one counts so). */
 const ABBREVIATION_FORMS: ReadonlySet<string> = new Set([
-  ...Object.keys(TEAM_ABBREVIATIONS),
-  ...Object.keys(SCAN_ONLY_TEAM_ABBREVIATIONS),
-  ...Object.keys(POSITION_ABBREVIATIONS),
-  ...SCAN_ONLY_ABBREVIATIONS,
+  ...Object.values(F.TEAM_ABBREVIATION_LISTS).flatMap((l) => Object.keys(l)),
+  ...Object.keys(F.POSITION_ABBREVIATIONS),
 ]);
 /**
- * A form as it may be written: any case and spelling for a word, capitals for an abbreviation; bare,
- * with a possessive, as a handle or a hashtag, in parentheses, hyphenated to another word, ranked.
+ * A form as it may be written: any case and spelling for a word, capitals or periods for an
+ * abbreviation; bare, with a possessive, as a handle or a hashtag, in parentheses, hyphenated to
+ * another word, ranked.
  */
 const writeForm = (form: string, how: number): string => {
   if (ABBREVIATION_FORMS.has(form)) {
-    const plural = form in POSITION_ABBREVIATIONS || SCAN_ONLY_ABBREVIATIONS.includes(form);
+    const plural = form in F.POSITION_ABBREVIATIONS;
     const ws = [
       form,
       `${form}'s`,
@@ -1378,14 +1211,14 @@ const writeForm = (form: string, how: number): string => {
       `non-${form}`,
       `#${form}`,
       plural ? `${form}s` : form,
+      dotted(form),
     ];
     return ws[how % ws.length] ?? form;
   }
-  const c = cases(form).flatMap(spellingsOf);
+  const c = F.cases(form).flatMap(F.spellingsOf);
   const w = c[how % c.length] ?? form;
   return [w, `${w}'s`, `(${w})`, `${w}-led`][Math.floor(how / 16) % 4] ?? w;
 };
-
 describe("properties over the recorded universe's shared names", () => {
   it("the universe's shared keys: 16, 5 with a prominent holder", () => {
     expect(SHARED).toHaveLength(16);
@@ -1397,7 +1230,7 @@ describe("properties over the recorded universe's shared names", () => {
       fc.property(
         fc.constantFrom(...SHARED),
         fc.array(fc.constantFrom(...NEUTRAL), { minLength: 1, maxLength: 8 }),
-        fc.array(fc.constantFrom(...NEUTRAL, ...NOT_LABELS), { maxLength: 8 }),
+        fc.array(fc.constantFrom(...NEUTRAL, ...NOT_LABELS), { minLength: 1, maxLength: 8 }),
         fc.option(fc.tuple(fc.constantFrom(...FORMS), fc.nat(), fc.boolean()), { nil: null }),
         fc.constantFrom(":", " -", ";"),
         fc.boolean(),
@@ -1405,14 +1238,15 @@ describe("properties over the recorded universe's shared names", () => {
           // the name opens the item and is followed by punctuation, or follows punctuation: never a
           // label next to it; a team or a position form is written among the words, or none
           const words = [...blurb];
-          if (form !== null)
-            words.splice(form[1] % (words.length + 1), 0, writeForm(form[0], form[1]));
+          const written = form === null ? null : writeForm(form[0], form[1]);
+          if (written !== null) words.splice((form?.[1] ?? 0) % (words.length + 1), 0, written);
           const text = nameFirst
             ? `${s.name}${colon} ${head.join(" ")} | ${words.join(" ")}.`
             : `${head.join(" ")}. ${s.name}${colon} ${words.join(" ")}.`;
           const got = m.matchItem(text);
           const mine = got.refs.filter((r) => s.holders.some((h) => h.espn_id === r.espn_id));
           const top = prominentOf(s.holders);
+          // every segment holds a lower-case word, so a form written in capitals counts (R8-7 (2))
           const scanFindsNothing = form === null && !blurb.some((w) => FORMS.includes(w));
           const want = scanFindsNothing && top !== null ? [[top.espn_id, "full_name", 0.8]] : [];
           expect(
@@ -1445,7 +1279,8 @@ describe("properties over the recorded universe's shared names", () => {
             m.match(base).map((r) => r.espn_id),
             base,
           ).toContain(top?.espn_id);
-          // never next to the name: in the headline after its first word, or in the blurb
+          // never next to the name: in the headline after its first word, or in the blurb (each segment
+          // holds a lower-case word, so an ordinary-word abbreviation in capitals counts there)
           const inHead = where % 2 === 0;
           const ws = inHead ? [...head] : [...blurb];
           const at = inHead ? 1 + (where % ws.length) : where % (ws.length + 1);
