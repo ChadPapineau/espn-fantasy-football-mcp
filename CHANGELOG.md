@@ -164,12 +164,25 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   division, the season simulator seeds division winners first under ESPN's rule reading, as before.
   `espn_analyze_matchup`'s `season` now also ranks every simulated path by record alone and returns
   `division_rule` (`divisions`, `p_playoffs_record_only`, `p_bye_record_only`; null with one
-  division), and `rec.assumptions[]` states both answers. The record-only answer is the stated
-  alternative; every other reading is unchanged.
+  division or without an ESPN rule reading), and `rec.assumptions[]` states both answers. The
+  record-only answer is the stated alternative; every other reading is unchanged.
 - **`eff refresh espn:drift` (plan 01 §7, plan 06 §1.2; changelog §B6).** Re-reads, once each,
   every view the stored drift row marks red, through the jobs' provider and limiter on the read
   host. It clears what ESPN serves again and exits 4 while a view stays red. `eff probe` prints the
   stored red diff (`--json`: `stored_red`, `recheck`), and doctor #9 names the command.
+- **`eff smoke [--week N] [--json]` (plan 05 §5, plan 06 §1.5, plan 10 A1b).** The live smoke the
+  plan documents, run by the owner and never by CI: the settings, one roster, one pool page, one
+  completed week scored per stat and in total against ESPN's applied points, and the keyless probe
+  diff, all through the one provider. It prints counts only and exits 0 on a pass, 1 on a failed
+  check, 3 when credentials are not configured or rejected (a private league with no cookies
+  stored included; plan 03 §1.3) and 4 on drift.
+- **`eff transactions --backfill [--seasons …]` (ruling R6-3).** Stores the league's previous
+  seasons' transactions (every scoring period; idempotent), so the waiver premium can be fitted from
+  the league's own history on its first call. A season ESPN does not serve is skipped and said.
+- **`eff refresh espn:settings` (plan 08 §6, §9).** Re-reads the league's settings now, once (one
+  request, read host only), in place of waiting out their 24 h cache after a commissioner's scoring
+  edit; a changed hash raises `settings_changed`. A box score whose per-stat golden finds a
+  league-wide mismatch with a cached copy of the settings marks them dirty, and says so.
 - **A10b's question set (plan 05 §6; changelog §B4).** `tests/evals/read-only.xml`: ten read-only
   questions over `fx-10h`; every push re-derives each answer from the built server under both
   toolsets. The model-graded run itself is manual and comes before a release.
@@ -202,6 +215,13 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 - **E2's no-move (ruling R7-1).** A swap inside the coin-flip band gives `no_move: true` and is
   logged as a no-move, which the retrospective scores as "keep". E2's mean-optimal assignment is
   unchanged.
+- **A league 404 while the new season awaits renewal (research 03 §A.4).** From July 1 an unset
+  `ESPN_SEASON` is the new season, which ESPN serves only once the league's manager renews the
+  league. Until October 1 of the configured season, a 404 on that season now carries
+  `reason: season_not_renewed` and a fixed hint (set `ESPN_SEASON` to last season until the renewal,
+  then unset it) in place of "the league id may be wrong". The Skills' error table, `eff setup`,
+  `eff check-auth`, `eff doctor --online` rows 16 and 17, the daily probe and the credential check
+  say the same, and the two jobs send no failure notice for it. A past season's 404 reads as before.
 - **STALE_ONLY's hint (plan 01 §4.3; changelog §B6).** One fixed hint per dataset source: "Retry
   with allow_stale: true, or run eff refresh `<id>` in a terminal."
 - **The release install (plan 03 §4.3; changelog §B4).** `eff print-config`, `eff install-launchd`
@@ -244,6 +264,10 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   as the plugin's own file, never as a client registration, and `eff uninstall` leaves it instead of
   printing a `claude mcp remove --scope project` that would delete the plugin's server from the
   clone. A client entry that uses a plugin variable is a hard row-2 problem.
+- **Stage C's other fixes.** QA and penetration testing (rounds 0–3 and the final gate's fix
+  rounds) fixed many smaller defects, each with a regression test. They are not itemised here: the
+  commits on `build/phase-1` record each one, and `docs/plan/changelog.md` §B4–§B9 the records
+  written back during Stage C.
 
 ### Security
 
@@ -260,6 +284,28 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   input that arrives before a question is dropped unshown and said; a hidden answer with a line
   break, or sharing a chunk with another answer, is refused and re-asked. A property test over
   random chunkings holds that no `espn_s2` byte is ever written.
+- **No redirect from the read host is followed (plan 01 §4.3, §7).** Every 3xx the read host
+  answers is ESPN_HOST_MOVED, wherever its `Location` points, in the CLI's HTTP client as in the
+  provider. Before, the CLI followed a redirect to another path on the read host and re-sent the
+  cookie, so `eff probe`, doctor row 15 and `eff smoke` judged green what every tool reports as a
+  host move.
+- **No ESPN request while certificate verification is off.** With `NODE_TLS_REJECT_UNAUTHORIZED=0`
+  (often inherited from a shell), the provider and the CLI send nothing to ESPN, with or without a
+  cookie, and `eff setup` refuses before it asks for the cookies, naming the fix
+  (`NODE_EXTRA_CA_CERTS` for a proxy's CA). `eff status`, the server's start-up log and doctor say
+  so.
+- **The setup page holds no password field (plan 02 S1, §2.2).** `eff setup --page` takes both
+  values in plain text areas, so no browser or password-manager extension offers to save `espn_s2`
+  to a synced password store, and every POST is answered with a redirect, so the browser's history
+  never keeps the posted values.
+- **A league member's Markdown is inert (plan 02 §6.2).** A link, an image or a link definition in
+  a team name, a trade block or any other text a member writes reaches every answer as text that no
+  Markdown client renders as a link, entity-encoded and invisible-character forms included.
+- **The `0700`/`0600` checks read macOS ACLs (plan 02 §2.2, §8 #1).** A file or directory whose
+  access control list gives anyone but the owner access is refused and named by doctor, and one
+  that cannot be read fails closed; the directories `eff` creates drop an entry their parent passes
+  down. Before, an inherited ACL could expose the config, the session file and the store while their
+  mode bits read private.
 - **A prompt's undeclared argument key is refused (plan 07 §4.2; changelog §B8).** Every prompt's
   arguments are strict: a key the prompt does not take, `__proto__` included, answers -32602
   "unknown argument key (this prompt takes: …)" and is never quoted. Before, the prompt rendered

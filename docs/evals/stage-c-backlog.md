@@ -10,7 +10,9 @@ what stays open after the final gate's fix rounds 1, 2 and 3, ruling R8-3's fix 
 news matcher frozen at `b9d73eb` (R8-8). What remains is Stage D's: the merge of `build/phase-1`
 into `main` closes `ci-default-branch-controls-inert`, and the owner's install closes R8-1 (the
 doctor exit on stale datasets) and makes R6-3's `league_fitted` live (both under "Before Stage D —
-the owner's install").
+the owner's install"). R7-2 and R7-6 stay the owner's while `claude plugin eval` is gated, and the
+dev-only `vite` advisories wait for Dependabot's update after the merge, or the owner's
+`npm update vite` (under "Needs the Stage D merge or a repository setting").
 
 ## For the orchestrator's ledger
 

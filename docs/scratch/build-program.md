@@ -18,7 +18,7 @@ scaffold to QA-hardened merge in about 12 hours).
 | B2 | `effmcp-expansion` | Phase 2 + 3 (P1 + model wave): usage/market sources (snap counts, depth charts, pbp subset, team stats, ffopportunity, Sleeper trending, news RSS), the 16 P1 tools and 5 P1 Skills, the opportunity model and calibration, the waiver DP and seeding simulator on league history, scheduled jobs (launchd) → integration → independent gate | full gate green; all 34 read tools callable end to end |
 | — | **owner stop** | (1) run `eff setup` in a terminal (hidden-input cookie entry; nothing in chat); (2) switch effort to Ultracode; (3) reply "go" | — |
 | C | `effmcp-qa-pentest` | QA + penetration-test finders (many lenses, incl. live read-only end-to-end against the real league) → adversarial verification → remediation by lead architects → re-verification; loop until two dry rounds | no confirmed finding open |
-| D | merge + install | final gate, docs (README status, CHANGELOG, HANDOFF), merge to `main`, CI green on `main`, launch config + Skills installed for the owner | `main` green; the owner's client sees the server |
+| D | merge + install | the final gate (✅ — it ran at the end of Stage C, 2026-10-29) and the docs (README status, CHANGELOG, HANDOFF ✅), then the merge to `main`, CI green on `main`, launch config + Skills installed for the owner | `main` green; the owner's client sees the server |
 
 Agent rules: repo `CLAUDE.md`. Commits only via `scripts/dev/commit-paths.sh`; Node via
 `scripts/dev/with-node.sh`; heavy jobs via `scripts/dev/heavy-lock.sh`. The probe-league ids are

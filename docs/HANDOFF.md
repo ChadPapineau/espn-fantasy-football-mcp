@@ -75,6 +75,9 @@ R8-5), 0 open.
    must exit 0 (closes R8-1).
 3. Optional: `EFF_PROBE_LEAGUE_ID` set locally to a public probe league (the ids stay in local
    config only).
+4. After the merge: the dev-only `vite` advisories wait for Dependabot's update from `main`, or the
+   owner's `npm update vite` with the lockfile diff reviewed, then `npm run test:coverage`
+   (`docs/evals/stage-c-backlog.md`, "Needs the Stage D merge or a repository setting").
 
 R7-2 (`claude plugin eval`) stays the owner's when the tooling is available. In sessions opened in
 the clone, the project server stays unapproved. No version tag is part of Stage D: a tag is the
@@ -296,7 +299,7 @@ owner's choice, and `release.yml` runs only on a `v*` tag.
 | build — Stage B2a (Phase 2: the 16 P1 tools, 34 read tools in all) | ✅ 2026-10-07 (rulings R5-3 to R5-5) | "Build facts (Stage B2a)"; `docs/evals/phase2-acceptance.md` |
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
 | build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | ▶ NEXT STEP; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
-| build — Stage D (the merge to `main`, the owner's install) | 🚧 next: the fast-forward of `main` with CI green on it, then the owner's install | ▶ NEXT STEP; `docs/scratch/build-program.md` |
+| build — Stage D (the merge to `main`, the owner's install) | next: the fast-forward of `main` with CI green on it, then the owner's install | ▶ NEXT STEP; `docs/scratch/build-program.md` |
 
 ## Decisions made
 
@@ -459,6 +462,7 @@ approving the plan accepts them unless Chad says otherwise.
 - [ ] Stage D — fast-forward `main` to `build/phase-1`, CI green on `main` (closes `ci-default-branch-controls-inert`)
 - [ ] Stage D — the owner's install: the plugin or `eff print-config`'s entry, `eff refresh all`, `eff install-launchd`, `eff transactions --backfill`, then `eff doctor --online` exits 0 (closes R8-1)
 - [ ] R7-2 (`claude plugin eval`) — the owner's, when the tooling is available
+- [ ] the dev-only `vite` advisories — Dependabot's update from `main` after the merge, or the owner's `npm update vite` (lockfile diff reviewed)
 
 ## Log
 
