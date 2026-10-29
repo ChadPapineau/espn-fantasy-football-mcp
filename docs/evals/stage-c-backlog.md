@@ -6,10 +6,21 @@ what stays open after the final gate's fix rounds 1, 2 and 3, ruling R8-3's fix 
 2 and 3, ruling R8-6's fix and its fix rounds 2 to 4, the last of them R8-8's targeted round
 (2026-10-29, `build/phase-1`). Each item says why code cannot close it and what would.
 
+**Stage C's final gate passed on 2026-10-29 at `0b21c01`** (0 gate fix rounds; CI green), with the
+news matcher frozen at `b9d73eb` (R8-8). What remains is Stage D's: the merge of `build/phase-1`
+into `main` closes `ci-default-branch-controls-inert`, and the owner's install closes R8-1 (the
+doctor exit on stale datasets) and makes R6-3's `league_fitted` live (both under "Before Stage D —
+the owner's install").
+
 ## For the orchestrator's ledger
 
 **Ruled R8-5 (2026-10-28, `docs/plan/changelog.md` §R8):** the three findings below are closed as
 fixed; `ci-default-branch-controls-inert` closes with the Stage D merge.
+
+**At the gate (2026-10-29, `0b21c01`):** the ledger holds 34 fixed, 3 disputed and ruled
+(`eval-plugin-eval-gated` R7-2, `eval-on1-regex-too-narrow` R7-6, `ci-default-branch-controls-inert`
+R8-5) and 0 open. The merge closes `ci-default-branch-controls-inert`; R7-2 and R7-6 stay the
+owner's while `claude plugin eval` is gated.
 
 The final gate's second run (at `2ca70dc`) and its third (at `125c184`) verified three findings fixed
 with the last verifiers' own repros, yet the ledger still lists them as confirmed:
@@ -592,3 +603,11 @@ fit both chains. So 0 with divisions has no discriminating sample. The reading t
   fixture gap is a hole in the test world, and an absorbable code such as NOT_FOUND could let a test
   pass without reading what it meant to read (`isOptionalReadFailure` already absorbs it for the
   optional reads). Live, ESPN answers those weeks.
+- **Fixture mode, a reused cache and the auth gate (the final gate's note b, 2026-10-29).** A
+  server that reuses a cache an earlier process wrote answered `espn_list_transactions` with
+  ESPN_REQUIRES_COOKIES for a public league with no stored credential, where a process with a fresh
+  cache served it. The cause: `src/providers/espn/auth-gate.ts` reads a view that needs cookies
+  keyless only after this process has seen a league body answer public, and settings served from
+  the cache never teach it that. The answer is typed and truthful (no credential is stored). It is
+  not fixed now: Stage C is closed, and nothing the owner runs meets it — the owner's install has a
+  credential, and the e2e suites start from fresh homes.

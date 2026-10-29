@@ -26,8 +26,8 @@ passed to agents in their prompts and kept in local environment/config only — 
 
 ## RESUME HERE
 
-**Stage C — the final gate's fix round 3 landed (2026-10-28).** See `docs/HANDOFF.md` ▶ NEXT STEP for the state and `docs/evals/stage-c-backlog.md` for what no agent change closes.
+**Stage C ✅ — the final gate passed on 2026-10-29 at `0b21c01` (0 gate fix rounds; CI green).** See `docs/HANDOFF.md` ▶ NEXT STEP for the state and `docs/evals/stage-c-backlog.md` for what the gate left to the merge and the owner.
 
 - Stages A ✅ · B1 ✅ · B2a ✅ · B2b ✅ (rulings R5, R6). Owner stop ✅ (2026-10-11).
-- Stage C: rounds 0–3 ✅ (live lane ✅; plugin-eval lane not runnable on this account, R7-2); the final gate RED on 2026-10-28 → fix round 1 ✅ (changelog §B6); its second run RED on no agent-fixable defect → fix round 2 ✅ (changelog §B7); its third run RED on the owner's stale datasets and low items → fix round 3 ✅ (changelog §B8).
-- **Next:** the orchestrator re-runs the final gate → Stage D (merge, CI green on `main`, the owner's install).
+- Stage C ✅: rounds 0–3 (live lane ✅; plugin-eval lane not runnable on this account, R7-2); the final gate's fix rounds 1–3 (changelog §B6–§B8); rulings R8-1 to R8-8, the news matcher's rounds under R8-3, R8-6, R8-7 and R8-8, frozen at `b9d73eb` (changelog §B9); the final gate green at `0b21c01`.
+- **Next: Stage D.** The orchestrator fast-forwards `main` to `build/phase-1` once CI is green on it, and CI must be green on `main` (closes `ci-default-branch-controls-inert`). Then the owner's install, with the owner present: the plugin or `eff print-config`'s entry, `eff refresh all`, `eff install-launchd`, `eff transactions --backfill`, and `eff doctor --online` exiting 0 (closes R8-1). No version tag is part of Stage D; a tag is the owner's choice.

@@ -3,7 +3,7 @@
 <p align="center"><strong>Format-aware, deeply reasoned fantasy-football recommendations for Claude, under your league's real scoring, roster, waiver and playoff rules — read-only first, a human confirms every write, and news is data, never instructions.</strong></p>
 
 <p align="center">
-  <a href="#status"><img alt="status: built, in QA" src="https://img.shields.io/badge/status-built%2C%20in%20QA-blue"></a>
+  <a href="#status"><img alt="status: built, QA complete, not yet a release" src="https://img.shields.io/badge/status-built%2C%20QA%20complete-blue"></a>
   <a href="LICENSE"><img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
   <img alt="TypeScript strict" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white">
   <img alt="Node >= 24.15" src="https://img.shields.io/badge/node-%3E%3D24.15-339933?logo=node.js&logoColor=white">
@@ -13,7 +13,7 @@
 
 <p align="center"><em>Unofficial. Not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company.</em></p>
 
-> **Built, in QA — not yet a release.** Phases 1a, 1b, 2 and 3 are built: 34 read-only tools (18 under the default `EFF_TOOLSET=core`), 13 Skills, 13 prompts and 10 resources, read-only by design; the write module is **not built** (its seam is declared in code). Stage C — QA and penetration testing — is in progress, and no version is tagged yet. The [Status](#status) section and the generated tables below (configuration keys, test keys, the registered tools) are current and checked in CI. The design sections summarise the plan in its words and cite the section they summarise ([`docs/plan/`](docs/plan/00-index.md), kept as the record of the design); the state of the build is in [`docs/HANDOFF.md`](docs/HANDOFF.md).
+> **Built, QA complete — not yet a release.** Phases 1a, 1b, 2 and 3 are built: 34 read-only tools (18 under the default `EFF_TOOLSET=core`), 13 Skills, 13 prompts and 10 resources, read-only by design; the write module is **not built** (its seam is declared in code). Stage C — QA and penetration testing — is complete: its final gate passed on 2026-10-29. No version is tagged yet, and the owner's install is the remaining step (Stage D). The [Status](#status) section and the generated tables below (configuration keys, test keys, the registered tools) are current and checked in CI. The design sections summarise the plan in its words and cite the section they summarise ([`docs/plan/`](docs/plan/00-index.md), kept as the record of the design); the state of the build is in [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 > **Not affiliated with ESPN — and read this before you use it.** This project is not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company. It uses ESPN's **unofficial, undocumented** fantasy API, authenticated with **your own session cookies**. The Disney Terms of Use, as the research read them, prohibit automated access of this kind and let Disney suspend an account for it. The full, honest disclosure is in [Terms of use and account risk](#terms-of-use-and-account-risk); read it and decide for yourself. "ESPN" is used here only as a plain description of the service this tool reads.
 
@@ -50,19 +50,19 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 
 ## Status
 
-**Built; in QA.** The research (`docs/research/00-*` … `06-*`), the refined plan (`docs/plan/01-*` … `10-*`, after a three-round adversarial review — [`adversarial-log.md`](docs/plan/adversarial-log.md) — and the build-time rulings in [`changelog.md`](docs/plan/changelog.md)) and the product it specifies exist. The owner approved the build on 2026-10-05; Phases 1a, 1b, 2 and 3 are built and pass their acceptance gates ([`docs/evals/`](docs/evals/)); Stage C (QA and penetration testing, including a live read-only lane on the owner's league) is in progress, and Stage D (the final gate, the first tagged release) follows. The plan in reading order: **[`docs/plan/00-index.md`](docs/plan/00-index.md)**. The handoff document a fresh session reads first: [`docs/HANDOFF.md`](docs/HANDOFF.md).
+**Built; QA complete.** The research (`docs/research/00-*` … `06-*`), the refined plan (`docs/plan/01-*` … `10-*`, after a three-round adversarial review — [`adversarial-log.md`](docs/plan/adversarial-log.md) — and the build-time rulings in [`changelog.md`](docs/plan/changelog.md)) and the product it specifies exist. The owner approved the build on 2026-10-05; Phases 1a, 1b, 2 and 3 are built and pass their acceptance gates ([`docs/evals/`](docs/evals/)); Stage C (QA and penetration testing, including a live read-only lane on the owner's league) is complete: its final gate passed on 2026-10-29 ([`docs/evals/stage-c-backlog.md`](docs/evals/stage-c-backlog.md) records what it left to the owner). Stage D follows: the merge to `main` and the owner's install. No version is tagged yet; a tag is the owner's choice. The plan in reading order: **[`docs/plan/00-index.md`](docs/plan/00-index.md)**. The handoff document a fresh session reads first: [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 | Area | State | Evidence |
 |---|---|---|
 | Research pack (00–06) | ✅ complete, verified by the orchestrator against load-bearing claims at source | [`docs/README.md`](docs/README.md) |
-| Refined plan (01–10) | ✅ written, adversarially reviewed and revised — **approved by the owner 2026-10-05**; build-time rulings R5–R7 | [`docs/plan/00-index.md`](docs/plan/00-index.md), [`changelog.md`](docs/plan/changelog.md) |
+| Refined plan (01–10) | ✅ written, adversarially reviewed and revised — **approved by the owner 2026-10-05**; build-time rulings R5–R8 | [`docs/plan/00-index.md`](docs/plan/00-index.md), [`changelog.md`](docs/plan/changelog.md) |
 | Adversarial review | ✅ closed after three rounds: 26 objections (1 blocking, 10 significant, 15 marginal), 16 tensions and 15 nits — every one resolved and landed in the plan, none pressed; the closing verdict ranks the residual concerns | [`adversarial-log.md`](docs/plan/adversarial-log.md) (closing verdict at the end), [`changelog.md`](docs/plan/changelog.md) |
 | `LICENSE`, `SECURITY.md`, this README, the docs indexes | ✅ | repository root, [`docs/`](docs/README.md) |
 | `.gitignore`, `.env.example` (names and placeholders only) | ✅ | repository root |
 | GitHub secret scanning and push protection | ✅ on (a repository setting) | [`docs/HANDOFF.md`](docs/HANDOFF.md) |
 | CI workflows (`ci.yml`, `docs.yml` with `docs-current`, `secret-scan.yml`, `release.yml` on a tag) | ✅ | [`.github/workflows/`](.github/workflows), [`docs/plan/04-repo-structure-and-ci.md` §4](docs/plan/04-repo-structure-and-ci.md) |
 | Daily drift probe (`eff probe`, scheduled by `eff install-launchd`) | ✅ | [`docs/plan/06-automation-inventory.md` §1.2](docs/plan/06-automation-inventory.md) |
-| Server, `eff` CLI, scoring engine, the 34 read tools, 13 Skills, 13 prompts, 10 resources, tests | ✅ built (Phases 1a, 1b, 2, 3); 🚧 Stage C QA in progress | [`docs/HANDOFF.md`](docs/HANDOFF.md), [`docs/evals/`](docs/evals/) |
+| Server, `eff` CLI, scoring engine, the 34 read tools, 13 Skills, 13 prompts, 10 resources, tests | ✅ built (Phases 1a, 1b, 2, 3); ✅ Stage C QA complete (final gate passed 2026-10-29) | [`docs/HANDOFF.md`](docs/HANDOFF.md), [`docs/evals/`](docs/evals/) |
 | Write module | ⛔ not built — plan verdict **"recommended: do not build yet"**, the owner's decision D11; the seam is declared and marked in code | [`docs/plan/10-phasing-and-acceptance.md` §3.W](docs/plan/10-phasing-and-acceptance.md) |
 
 **What the research established** — six facts shape everything on this page, and the plan carries them openly:
@@ -83,7 +83,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 5. The fixture rules rest on one path guard and one manifest flag — the rule a builder under time pressure is most likely to bend.
 6. Build-time unknowns, each named with a fallback (Keychain behaviour under launchd, what clients deliver to the model, never-observed transaction fields, ESPN's rounding, the private-league 401 body).
 7. Detecting a session in which the model has file or shell reach is a heuristic — so the documentation must keep saying "unsupported", never "safe".
-8. At review time the plan was only a plan: its acceptance criteria are tests, and the tests are the next adversary. Phases 0–3 now pass their gates ([`docs/evals/`](docs/evals/)), and Stage C — QA and penetration testing — is that adversary.
+8. At review time the plan was only a plan: its acceptance criteria are tests, and the tests are the next adversary. Phases 0–3 now pass their gates ([`docs/evals/`](docs/evals/)), and Stage C — QA and penetration testing — was that adversary; its final gate passed on 2026-10-29.
 
 ### Terms of use and account risk
 
@@ -621,7 +621,7 @@ timeline
         Draft tools and Skill : what-if scoring : activity feed : seasons before 2018 : shared core extraction
 ```
 
-*Phase 1 is split so that everything that needs no cookie is built and accepted first on fixtures and public data, and the half that touches a real account waits for the owner's explicit acceptance of the terms-of-use risk. Writes are a conditional phase with a "do not build yet" verdict, not a numbered one. The tags are the plan's: the build cut none, and the first tagged release comes with Stage D — plan 10 §0 (Ph1–Ph9), §1, §3, §5 (D0, D2, D11).*
+*Phase 1 is split so that everything that needs no cookie is built and accepted first on fixtures and public data, and the half that touches a real account waits for the owner's explicit acceptance of the terms-of-use risk. Writes are a conditional phase with a "do not build yet" verdict, not a numbered one. The tags are the plan's: the build cut none, and a first tag is the owner's choice after Stage D — plan 10 §0 (Ph1–Ph9), §1, §3, §5 (D0, D2, D11).*
 
 ---
 
@@ -1213,7 +1213,7 @@ The untrusted-text rule the server declares to the model, verbatim from the plan
 
 ## Contributing
 
-> **The product is built and in QA (Stage C).** The most useful contribution is an issue against what it does or what the plan claims — a recommendation that does not hold, an acceptance criterion that cannot be tested, a risk that is missing. Security problems go through [`SECURITY.md`](SECURITY.md), never a public issue.
+> **The product is built, and its QA (Stage C) is complete.** The most useful contribution is an issue against what it does or what the plan claims — a recommendation that does not hold, an acceptance criterion that cannot be tested, a risk that is missing. Security problems go through [`SECURITY.md`](SECURITY.md), never a public issue.
 
 **Conventions** ([`docs/plan/04-repo-structure-and-ci.md`](docs/plan/04-repo-structure-and-ci.md)):
 
@@ -1264,7 +1264,7 @@ The pass bar for Lane 2: every free grader passes, the model-graded rubric reach
 
 ## Roadmap
 
-> **The owner approved the plan on 2026-10-05; Phases 0–3 are built, Phase W is not, and Stage C (QA) is in progress.** Phases, not dates. Effort scale from the plan, recalibrated on 2026-10-05: **S** ≈ hours · **M** ≈ a build session · **L** ≈ one to two build sessions — relative sizes, bound by the owner's usage limits rather than engineering time. Every acceptance criterion is a test, a CI job, a fixture assertion, or a one-line manual check with named evidence ([`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-acceptance.md)). The tags in the acceptance column (`v0.1.0`–`v0.3.0`) are the plan's: the phases were built on one branch without them, and the first tagged release comes with Stage D.
+> **The owner approved the plan on 2026-10-05; Phases 0–3 are built, Phase W is not, and Stage C (QA) is complete (its final gate passed on 2026-10-29).** Phases, not dates. Effort scale from the plan, recalibrated on 2026-10-05: **S** ≈ hours · **M** ≈ a build session · **L** ≈ one to two build sessions — relative sizes, bound by the owner's usage limits rather than engineering time. Every acceptance criterion is a test, a CI job, a fixture assertion, or a one-line manual check with named evidence ([`docs/plan/10-phasing-and-acceptance.md`](docs/plan/10-phasing-and-acceptance.md)). The tags in the acceptance column (`v0.1.0`–`v0.3.0`) are the plan's: the phases were built on one branch without them, and a first tag is the owner's choice after Stage D.
 
 | Phase | Scope | Effort | Acceptance, summarised | Status |
 |---|---|---|---|---|
@@ -1278,7 +1278,7 @@ The pass bar for Lane 2: every free grader passes, the model-graded rubric reach
 
 ### The honest expectation for the 2026 season
 
-From [plan 10 §0](docs/plan/10-phasing-and-acceptance.md#0-decisions-at-a-glance), whose expectation paragraph was rewritten on 2026-10-05: the plan's first estimate, made in NFL week 4 of 18 on a human-engineer effort scale, put the P0 tools in mid-to-late November and had the `trade` Skill miss the 2026-12-02 trade deadline — wrong by roughly thirtyfold against the sibling project's measured build. The owner approved the build on 2026-10-05 (NFL week 5), and the full read-only scope — Phases 0, 1a, 1b, 2 and 3: the P0 tools and Skills, the `trade` Skill, usage-first waiver detection and the opportunity model — was built by 2026-10-11 and has been in QA and penetration testing (Stage C) since. The owner's client gets it at Stage D, aiming at most of the remaining regular season, the trade deadline and the fantasy playoffs; what can still delay it is usage limits and the owner's review stops, not the plan's size. What the season buys either way is the projection-snapshot corpus, the transaction history for the demand model and the league's own logged calls — the evidence the time-bound gates wait on (plan 10 B14 needs eight weeks of snapshots, C3 a pre-week scoreboard snapshot). The adversarial review's caution still stands: with ESPN's mean as the point estimate (`weight_espn = 1.0`), v1's added value over ESPN's own numbers may be thin, and the retrospective is built to show it either way.
+From [plan 10 §0](docs/plan/10-phasing-and-acceptance.md#0-decisions-at-a-glance), whose expectation paragraph was rewritten on 2026-10-05: the plan's first estimate, made in NFL week 4 of 18 on a human-engineer effort scale, put the P0 tools in mid-to-late November and had the `trade` Skill miss the 2026-12-02 trade deadline — wrong by roughly thirtyfold against the sibling project's measured build. The owner approved the build on 2026-10-05 (NFL week 5), and the full read-only scope — Phases 0, 1a, 1b, 2 and 3: the P0 tools and Skills, the `trade` Skill, usage-first waiver detection and the opportunity model — was built by 2026-10-11 and then went through QA and penetration testing (Stage C), whose final gate passed on 2026-10-29. The owner's client gets it at Stage D, aiming at most of the remaining regular season, the trade deadline and the fantasy playoffs; what can still delay it is usage limits and the owner's review stops, not the plan's size. What the season buys either way is the projection-snapshot corpus, the transaction history for the demand model and the league's own logged calls — the evidence the time-bound gates wait on (plan 10 B14 needs eight weeks of snapshots, C3 a pre-week scoreboard snapshot). The adversarial review's caution still stands: with ESPN's mean as the point estimate (`weight_espn = 1.0`), v1's added value over ESPN's own numbers may be thin, and the retrospective is built to show it either way.
 
 ### The write module: "recommended: do not build yet"
 
@@ -1303,7 +1303,7 @@ The plan lists sixteen ([plan 10 §5](docs/plan/10-phasing-and-acceptance.md), D
 
 ### Is any of this implemented?
 
-Yes. The read-only product is built — the server, the `eff` CLI, 34 read tools, 13 Skills, 13 prompts and 10 resources — and is in QA (Stage C) before its first tagged release. The write module is not built.
+Yes. The read-only product is built — the server, the `eff` CLI, 34 read tools, 13 Skills, 13 prompts and 10 resources — and has passed QA (Stage C, final gate 2026-10-29); no version is tagged yet. The write module is not built.
 
 ### Why read-only first?
 

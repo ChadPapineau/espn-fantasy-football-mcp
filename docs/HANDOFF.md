@@ -22,46 +22,63 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — Stage C final gate: fix round 3 landed (2026-10-28); the orchestrator re-gates
+## ▶ NEXT STEP — Stage C ✅ (final gate green 2026-10-29); Stage D next: the merge, then the owner's install
 
-**Orchestrator, 2026-10-28:** the gate's fourth run (at `f41e810`) was red only on the items ruled in
-changelog §R8. R8-1 accepts doctor's exit on the stale datasets until the Stage D install. R8-2
-accepts the stall measurement. R8-4 closes F8: the owner confirmed division winners first. R8-5
-closes the three fixed ledger items and leaves `ci-default-branch-controls-inert` to the Stage D
-merge. R8-3 rules the news matcher's shared names: its fix runs next, then the re-gate.
+**Orchestrator, 2026-10-29:** Stage C's final gate passed at `0b21c01`, with 0 gate fix rounds. Every
+check passed:
 
-**Orchestrator, 2026-10-28 (later):** R8-3's fix run (`cb2bcc7` … `dbe9686`, three rounds, CI green) did not converge: each independent attack found 15–16 new violations. R8-6 (changelog §R8) makes the matcher fail closed for shared names: only a label written next to the name picks a holder, and the prominent holder takes an item only when it names no team and no position. Its fix run is next, then the re-gate.
+- clean install, lint, format, typecheck; the coverage run (520 test files, 11,818 tests; 60
+  coverage thresholds met); build, the process tests, and the smoke under `core` and `full` in both
+  protocol eras;
+- the supply chain (6 runtime packages, no install hooks, licences, the runtime tree), the tarball
+  scan, the Skills (13; the listing within its ceiling), `scan-secrets --all` and `--identity`
+  clean, and CI green on `0b21c01` (ci, docs, secrets);
+- the gatekeeper's own stdio sessions on all 18 `core` and 34 `full` tools with valid and hostile
+  input (0 INTERNAL, 0 crash, 0 echo), hostile free text and RSS feeds (0 unwrapped), protocol,
+  resource and prompt abuse, a clean exit on stdin close, SIGTERM and SIGINT, no network call and no
+  keychain read at startup, read-only (no write tool; the seam markers present), no GUID outside the
+  fake range;
+- the news matcher under R8-8 (0 wrong holders at 0.95 on realistic and templated items, every
+  shared name left to no one counted, unique names identical to `f41e810`, linear time, the
+  backlog's known-limitation rows re-derive exactly); rulings R5–R8 applied; the Phase 1–3 hard
+  acceptance still met;
+- the live read-only smoke on the owner's league: `eff probe` exit 0; `eff doctor --online` printed
+  every row with every ESPN and credential row ok, exiting 1 only on #10 (expired datasets) and #11
+  (no launchd jobs), exactly R8-1's case; `espn_get_league` restates the owner's format; one lineup,
+  one waiver and one seeding call typed and sane; the per-stat scoring golden matched every checked
+  live player-week; drift additive, never red; the read host only, within the request budget; the
+  logs clean of cookies.
 
-**State:** branch `build/phase-1`; fix round 1 is `e40fd88` … `7f39044` (changelog §B6), fix round 2
-`01cb8e5` and `2396b07` (§B7), fix round 3 `42de906` and `ebc9187` plus this docs commit (§B8); tree clean,
-HEAD == origin. The final gate's third run found no defect in its commands or product checks. It was red only
-on the live `eff doctor --online` exit (the owner's stale datasets), plus ledger housekeeping and low
-items. Fix round 3 took the fixable ones at root, each with regression tests that fail on the code
-before:
+The gate's two non-blocking notes:
 
-- **A prompt's undeclared argument key.** prompts/get stripped a key a prompt does not take and
-  rendered, `__proto__` included, which tools/call answers VALIDATION for. Every prompt's arguments
-  are strict now: -32602 "unknown argument key (this prompt takes: …)", the key never quoted; the
-  transport carries a prompts/get `__proto__` past the SDK's re-parse.
-- **F8, division winners first.** E3 `season` ranks every path by record alone as well and returns
-  `division_rule`; its assumptions state both answers. The chain is unchanged.
-- **The backlog:** the matcher's scope on its own universe (16 shared keys, 11 identical names), the
-  `vite` dev advisories (unreachable), the tight margins and fixture mode's INTERNAL, with reasons.
+- Gatekeeper conduct, not a product defect: the positive control of its own startup guard ran
+  `security -h` once (the macOS CLI's help text; no keychain, item or credential read); the guard was
+  fixed and the check re-run.
+- Fixture mode, informational: a server reusing a cache an earlier process wrote can answer
+  `espn_list_transactions` with ESPN_REQUIRES_COOKIES for a public league with no stored credential;
+  no owner impact (`docs/evals/stage-c-backlog.md`, "Informational — recorded, no change").
 
-**Open, not an agent's to close** (each with its evidence in `docs/evals/stage-c-backlog.md`): the
-owner's `eff refresh all` and `eff install-launchd` (doctor exits 1 only on #10, the expired
-datasets: plan 03 §5's worst-row exit), or a ruling that the exit is accepted until then;
-`ci-default-branch-controls-inert` and the `vite` patch (the Stage D merge, or the owner's
-default-branch setting); R7-2 and R7-6 (the plugin-eval tooling is gated). Rulings requested: the
-news matcher's fail-safe choices 1–6, the stall bound's host evidence, and F8's chain (the owner's
-one answer first). The ledger can close `trade-locked-week-counted`,
-`store-future-stamped-rows-block` and `crosswalk-unpaired-joins-silent`, verified again at the third
-run. The owner also runs `eff transactions --backfill`, and at Stage D installs the plugin or
-`eff print-config`'s entry. In sessions opened in the clone, the project server stays unapproved.
+**State:** branch `build/phase-1`; the news matcher frozen at `b9d73eb` (R8-8; changelog §B9, fix
+rounds 4 and 5); the re-gate prompt `0b21c01`. The Stage C ledger: 34 fixed, 3 disputed and ruled
+(`eval-plugin-eval-gated` R7-2, `eval-on1-regex-too-narrow` R7-6, `ci-default-branch-controls-inert`
+R8-5), 0 open.
 
-**Next:** the orchestrator re-runs the final gate. Then Stage **D**
-(`docs/scratch/build-program.md`), whose CHANGELOG pass also carries the Stage C additions
-(`league.keepers` and E3's `division_rule` among them).
+**Next — Stage D** (`docs/scratch/build-program.md`):
+
+1. The orchestrator fast-forwards `main` to `build/phase-1`'s head once CI is green on it (a
+   fast-forward push, no merge commit), and CI must be green on `main`. That closes
+   `ci-default-branch-controls-inert`: the schedules, the weekly audits and Dependabot then run from
+   `main`.
+2. The owner's install, with the owner present, each step confirmed: install the plugin (README
+   step 5) or `eff print-config`'s entry; `eff refresh all`; `eff install-launchd`;
+   `eff transactions --backfill` (makes R6-3's `league_fitted` live); then `eff doctor --online`
+   must exit 0 (closes R8-1).
+3. Optional: `EFF_PROBE_LEAGUE_ID` set locally to a public probe league (the ids stay in local
+   config only).
+
+R7-2 (`claude plugin eval`) stays the owner's when the tooling is available. In sessions opened in
+the clone, the project server stays unapproved. No version tag is part of Stage D: a tag is the
+owner's choice, and `release.yml` runs only on a `v*` tag.
 
 ## Build facts (Stage A, verified by the orchestrator 2026-10-06)
 
@@ -278,8 +295,8 @@ run. The owner also runs `eff transactions --backfill`, and at Stage D installs 
 | build — Stage B1 (Phases 1a and 1b: the 18 P0 tools) | ✅ gate closed 2026-10-06 (rulings R5-1, R5-2) | `docs/evals/1a-*.md`; changelog §B1, §R5 |
 | build — Stage B2a (Phase 2: the 16 P1 tools, 34 read tools in all) | ✅ 2026-10-07 (rulings R5-3 to R5-5) | "Build facts (Stage B2a)"; `docs/evals/phase2-acceptance.md` |
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
-| build — Stage C (QA and penetration testing) | 🚧 in progress — the final gate's fix round 3 landed (2026-10-28) | ▶ NEXT STEP; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §B4, §B5, §B6, §B7, §B8 |
-| build — Stage D (the final gate, the merge to `main`, the owner's install) | next | `docs/scratch/build-program.md` |
+| build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | ▶ NEXT STEP; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
+| build — Stage D (the merge to `main`, the owner's install) | 🚧 next: the fast-forward of `main` with CI green on it, then the owner's install | ▶ NEXT STEP; `docs/scratch/build-program.md` |
 
 ## Decisions made
 
@@ -438,7 +455,10 @@ approving the plan accepts them unless Chad says otherwise.
 - [x] §R4 consistency programme (verification pass, V1–V8, loop-until-dry, R-1–R-8)
 - [x] executive summary delivered to Chad (2026-09-30)
 - [x] Chad's review and the decisions above → the build approved 2026-10-05 ("Decisions made"), Phase 0 first
-- [ ] the build — Stage C in progress, then Stage D ("Program status"; ▶ NEXT STEP)
+- [x] the build — Stages A, B1, B2a, B2b and C (final gate green 2026-10-29, `0b21c01`)
+- [ ] Stage D — fast-forward `main` to `build/phase-1`, CI green on `main` (closes `ci-default-branch-controls-inert`)
+- [ ] Stage D — the owner's install: the plugin or `eff print-config`'s entry, `eff refresh all`, `eff install-launchd`, `eff transactions --backfill`, then `eff doctor --online` exits 0 (closes R8-1)
+- [ ] R7-2 (`claude plugin eval`) — the owner's, when the tooling is available
 
 ## Log
 
@@ -534,3 +554,4 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-10-29 — R8-6 fix round 3, the first under R8-7 (`93f8843`, `a35e5fe`): the independent attack on `66bb2a2` found 11 violations, and each is fixed at root as R8-7 settles it. A surname of the item's full name carries its label. A bare shared surname reads its label in every form and is counted beside other refs. A spelled suffix narrows a label and never takes the residual. Dotted abbreviations and every scan form label (one set of forms). Ordinary-word abbreviations count in capitals or after a game or move word. The scan's lists are complete for all 32 teams in every R8-7 (1) category (stadiums since 2015, facilities, towns, camp towns, state abbreviations, hashtags, fans' names) and for every position form, spaced, hyphenated or glued. A closing tag alone is held by a test. Each violation and clause has a test that fails at `66bb2a2`, every one of the 854 list entries and the code mutants is held, and the recall cost is measured (changelog §B9 "R8-6 fix round 3 — the first under R8-7"; `docs/evals/stage-c-backlog.md`).
 - 2026-10-29 — R8-8's targeted round (R8-6 fix round 4, `cd7f99a`), and the news matcher is now frozen for Stage C under R8-8: the attack on `08524ff` found 19 violations, and each is fixed at root. A suffix after a surname mention narrows its holders. Round 3's first-name reading and capitalised-word-after gate go, so a shared surname a capitalised word stands beside is a mention, labelled or counted, and the teams-alone test reads the possessive next to the name. An ordinary-word abbreviation in capitals labels after a game or move word, and a possessive home and nickname labels. A team-word surname is counted. The label reader reads a state's period, an initialism in any case and a hashtag's teams. A shared name's all-caps possessive is read. The forms the attack named are listed (facilities, the camp town, stadium, city short names, positions, ESPN's HC, TQB and D/ST). The crafted item is linear (2.6 times a benign item; 1,000 build in 5.9 s, 77.8 s before). Every LEAD_WORDS, STAFF_WORDS, multi-team and code entry is held by a behaviour, and spellingsOf is bounded. Unique names still match `f41e810`, the gate's batteries are unchanged, and no wrong holder is added; the known limitations are listed (changelog §B9 "R8-6 fix round 4 — the targeted round under R8-8"; `docs/evals/stage-c-backlog.md` "Known limitations of the news matcher (R8-8)").
 - 2026-10-29 — R8-8's verifier item (R8-6 fix round 5, `5531653`), and the news matcher stays frozen for Stage C under R8-8. The verifier of the targeted round found one gate-class item at `67bc88e`: a shared surname that is also a team form ("Brown", "Houston", "Henderson", "Washington") repeated to the caps cost 11 to 20 times a benign item, and 1,000 took 41 to 60 s to build. It is fixed at root: each label form and tag item is read once per item, the ordinary words' spellings are keyed once, and a form of several words is looked up only after two words that open one. The items now cost at most 3.6 times a benign one, and the perf test's 1,000 build in 8.3 s (73.0 s at `67bc88e`). Nothing the matcher reads changes (a differential against `67bc88e` over 264,626 texts and 6.8 million word reads), so refs, counts and the known limitations stand. A mutation run found four code entries no test held; each now has one (changelog §B9 "R8-6 fix round 5 — the verifier's item under R8-8").
+- 2026-10-29 — Stage C ✅. R8-8's targeted round (fix rounds 4 and 5: `cd7f99a`, `67bc88e`, `5531653`, `b9d73eb`; an independent verify after each, no regression), then the news matcher frozen at `b9d73eb`. The final gate (run with the re-gate prompt `0b21c01`) passed at `0b21c01` with 0 fix rounds: every build, test, supply-chain, secret, hostile-input and protocol check, the news matcher under R8-8 and the live read-only smoke (doctor exits 1 only on #10 and #11, R8-1's case); CI green. Non-blocking: the gatekeeper's guard control ran `security -h` once (help text only; no keychain read; guard fixed, check re-run), and a fixture-mode auth-gate note is recorded in the backlog. Next: Stage D (the fast-forward of `main`, CI green on `main`, the owner's install).

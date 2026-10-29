@@ -157,6 +157,22 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 - **Store migration 002.** `parameter_proposal`, `waiver_run` and `scored_claim` (never pruned) and
   three attribution columns on `projection`; a v1 store migrates on the next start with a
   pre-migration backup.
+- **`league.keepers` in `espn_get_league` (plan 07 A1; changelog §B7).** The league's keeper
+  setting, read from ESPN's draft settings; a keeper league is said in `warnings[]`, and the onboard
+  Skill restates it. A field of another shape reads as null, never as a failed settings read.
+- **E3's `division_rule` (plan 07 E3; changelog §B8, ruling R8-4).** In a league with more than one
+  division, the season simulator seeds division winners first under ESPN's rule reading, as before.
+  `espn_analyze_matchup`'s `season` now also ranks every simulated path by record alone and returns
+  `division_rule` (`divisions`, `p_playoffs_record_only`, `p_bye_record_only`; null with one
+  division), and `rec.assumptions[]` states both answers. The record-only answer is the stated
+  alternative; every other reading is unchanged.
+- **`eff refresh espn:drift` (plan 01 §7, plan 06 §1.2; changelog §B6).** Re-reads, once each,
+  every view the stored drift row marks red, through the jobs' provider and limiter on the read
+  host. It clears what ESPN serves again and exits 4 while a view stays red. `eff probe` prints the
+  stored red diff (`--json`: `stored_red`, `recheck`), and doctor #9 names the command.
+- **A10b's question set (plan 05 §6; changelog §B4).** `tests/evals/read-only.xml`: ten read-only
+  questions over `fx-10h`; every push re-derives each answer from the built server under both
+  toolsets. The model-graded run itself is manual and comes before a release.
 
 ### Changed
 
@@ -169,6 +185,28 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   simulated season from its posterior (sd σ/√(n + 4)), so early-season P(playoffs) — and E2's
   points-for exchange rate — is no longer over-confident about the order; on nine recorded
   league-seasons the Brier score improves at weeks 4, 8 and 12.
+- **The news matcher's shared names (plan 07 D6; rulings R8-6, R8-7, R8-8; changelog §B9).** When
+  several players share a name, precision comes before recall. Only a label written next to the
+  name picks a holder (0.95): a team or a position directly before it, in parentheses after it, or
+  in the headline's name tag. The prominent holder takes the item (0.80) only when the item names no
+  team and no position. Otherwise no player ref is given, and the news refresh counts the item as
+  unresolved in its warnings. Names one player holds match as before, and matching time is linear in
+  the item's length. A shared name's item that names a team but carries no label goes unlinked, with
+  ESPN's own status still behind the player. The matcher is frozen for Stage C; its known
+  limitations are listed in `docs/evals/stage-c-backlog.md` ("Known limitations of the news matcher
+  (R8-8)").
+- **E10's multi-player items (ruling R7-4; changelog §B5).** In a text that names more than one
+  player, a claim is the subject's only when its clause names no other player, opens with his name
+  and states the claim of him directly. Every other claim is listed under
+  `ambiguous_multi_player[]`, wrapped, and is never logged, scored or weighed.
+- **E2's no-move (ruling R7-1).** A swap inside the coin-flip band gives `no_move: true` and is
+  logged as a no-move, which the retrospective scores as "keep". E2's mean-optimal assignment is
+  unchanged.
+- **STALE_ONLY's hint (plan 01 §4.3; changelog §B6).** One fixed hint per dataset source: "Retry
+  with allow_stale: true, or run eff refresh `<id>` in a terminal."
+- **The release install (plan 03 §4.3; changelog §B4).** `eff print-config`, `eff install-launchd`
+  and `eff doctor` name the README's release install (an unpack, `npm ci`, `npm link`) where they
+  used to say `npm install -g`.
 
 ### Fixed
 
@@ -190,6 +228,22 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   instead of re-reading the season's schedule on every read, a large fresh body yields between its
   parse, drift check, schema check and cache strip, and the heavier P1 tools yield between their
   synchronous steps (measured 37 ms worst case against the 50 ms bound).
+- **`espn_get_status` past 11.6 days of dataset age (plan 07 G1; changelog §B6).** A dataset
+  source's and a freshness class's `age_s` are whole seconds with a wide bound; before, the output
+  schema refused the whole answer as INTERNAL.
+- **Holds after a backward clock step (plan 01 §6; changelog §B6).** The ESPN breaker's open window,
+  ESPN's Retry-After hold and `espn_check_auth`'s once-a-minute gap last their own length at the
+  most, never the clock's skew.
+- **E6's ΔU horizon (plan 07 E6; changelog §B6).** A trade's regular-season points are divided by
+  the weeks of my undecided regular-season matchups (`marginal_weeks`), not by the value weeks.
+- **D6's id selection (plan 07 D6; changelog §B6).** Every asked id is matched by itself, whether or
+  not the pool read returned the player; an id nobody knows is counted "not found".
+- **Doctor #14 (plan 03 §5; changelog §B6).** The server time adds the `Age` a cache in front of
+  ESPN reports, so a CDN copy's minutes-old `Date` no longer reads as clock skew.
+- **The plugin's own `.mcp.json` in a clone (plan 03 §5 #2; changelog §B7).** Doctor row 2 lists it
+  as the plugin's own file, never as a client registration, and `eff uninstall` leaves it instead of
+  printing a `claude mcp remove --scope project` that would delete the plugin's server from the
+  clone. A client entry that uses a plugin variable is a hard row-2 problem.
 
 ### Security
 
@@ -201,3 +255,12 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   (diff, install scripts, dependencies, provenance, licence) and are recorded in
   `docs/plan/changelog.md` "Reviews"; the runtime tree keeps its six names, and a test holds the
   lockfile out of the advisories' ranges offline.
+- **`eff setup` keeps the cookie off the screen (ruling R7-3; changelog §B5).** Echo is off at the
+  terminal for the whole of `eff setup`. Only a visible answer is drawn, by the prompt's own code;
+  input that arrives before a question is dropped unshown and said; a hidden answer with a line
+  break, or sharing a chunk with another answer, is refused and re-asked. A property test over
+  random chunkings holds that no `espn_s2` byte is ever written.
+- **A prompt's undeclared argument key is refused (plan 07 §4.2; changelog §B8).** Every prompt's
+  arguments are strict: a key the prompt does not take, `__proto__` included, answers -32602
+  "unknown argument key (this prompt takes: …)" and is never quoted. Before, the prompt rendered
+  with the key stripped.
