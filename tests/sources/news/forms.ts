@@ -1,5 +1,6 @@
 // forms.ts — the news matcher's closed lists, written out once for the tests (src/sources/news/
-// labels.ts, positions.ts, teams.ts; rulings R8-6 and R8-7, docs/plan/changelog.md §R8). Each literal
+// labels.ts, positions.ts, teams.ts, match.ts; rulings R8-6, R8-7 and R8-8, docs/plan/changelog.md
+// §R8). Each literal
 // is the source's list word for word (match-r86.test.ts and positions.test.ts compare them), and the
 // behaviour tests iterate these literals, so an entry deleted from the source fails a behaviour test as
 // well as the word-for-word one. Not a test file: it is imported.
@@ -46,7 +47,7 @@ export const TEAM_SINGULARS: Readonly<Record<string, NflTeam>> = {
 };
 // prettier-ignore
 export const TEAM_CITIES: Readonly<Record<string, readonly NflTeam[]>> = {
-  Phoenix: ["ARI"], Zona: ["ARI"], "Valley of the Sun": ["ARI"],
+  Phoenix: ["ARI"], Zona: ["ARI"], "Valley of the Sun": ["ARI"], "the Valley": ["ARI"],
   "A-Town": ["ATL"], Hotlanta: ["ATL"],
   "Charm City": ["BAL"], "B'more": ["BAL"],
   "Queen City": ["BUF", "CAR", "CIN"], "Nickel City": ["BUF"], WNY: ["BUF"],
@@ -66,13 +67,13 @@ export const TEAM_CITIES: Readonly<Record<string, readonly NflTeam[]>> = {
   "Sin City": ["LV"],
   "Magic City": ["MIA"], "South Beach": ["MIA"], "South Florida": ["MIA"],
   Minneapolis: ["MIN"], Mpls: ["MIN"], "Twin Cities": ["MIN"], Minny: ["MIN"], "St Paul": ["MIN"],
-  "Saint Paul": ["MIN"],
+  "Saint Paul": ["MIN"], MSP: ["MIN"],
   Boston: ["NE"], Beantown: ["NE"],
   NOLA: ["NO"], "Big Easy": ["NO"], "Crescent City": ["NO"],
   NYC: ["NYG", "NYJ"], "Big Apple": ["NYG", "NYJ"], Gotham: ["NYG", "NYJ"],
   "New Jersey": ["NYG", "NYJ"],
-  "Brotherly Love": ["PHI"],
-  "Steel City": ["PIT"], Burgh: ["PIT"], Pitt: ["PIT"],
+  "Brotherly Love": ["PHI"], Phila: ["PHI"], PHL: ["PHI"],
+  "Steel City": ["PIT"], Burgh: ["PIT"], Pitt: ["PIT"], PGH: ["PIT"],
   "San Fran": ["SF"], "Bay Area": ["SF"],
   "Emerald City": ["SEA"], "Rain City": ["SEA"], PNW: ["SEA"], "Pacific Northwest": ["SEA"],
   Tampa: ["TB"], "Cigar City": ["TB"], "St Pete": ["TB"], "St Petersburg": ["TB"],
@@ -110,7 +111,7 @@ export const TEAM_STADIUMS: Readonly<Record<string, readonly NflTeam[]>> = {
   Lumen: ["SEA"], CenturyLink: ["SEA"],
   "Raymond James": ["TB"], "Ray Jay": ["TB"],
   "Nissan Stadium": ["TEN"], "LP Field": ["TEN"],
-  "Northwest Stadium": ["WAS"], FedEx: ["WAS"],
+  "Northwest Stadium": ["WAS"], FedEx: ["WAS"], "FedEx Field": ["WAS"],
 };
 // prettier-ignore
 export const TEAM_FACILITIES: Readonly<Record<string, readonly NflTeam[]>> = {
@@ -118,13 +119,15 @@ export const TEAM_FACILITIES: Readonly<Record<string, readonly NflTeam[]>> = {
   "Flowery Branch": ["ATL"], "IBM Performance": ["ATL"],
   "Owings Mills": ["BAL"], "Armour Performance": ["BAL"],
   "Orchard Park": ["BUF"], ADPRO: ["BUF"], Pittsford: ["BUF"], "John Fisher": ["BUF"],
-  Spartanburg: ["CAR"], Wofford: ["CAR"],
+  Rochester: ["BUF"],
+  Spartanburg: ["CAR"], Wofford: ["CAR"], "Atrium Health": ["CAR"],
   "Halas Hall": ["CHI"], "Lake Forest": ["CHI"], Bourbonnais: ["CHI"], Olivet: ["CHI"],
+  "Kettering Health": ["CIN"], IEL: ["CIN"],
   Berea: ["CLE"], CrossCountry: ["CLE"],
   Arlington: ["DAL"], "the Star": ["DAL"], "Ford Center": ["DAL"], Oxnard: ["DAL"],
   "River Ridge": ["DAL"],
-  "Dove Valley": ["DEN"], UCHealth: ["DEN"], Englewood: ["DEN"],
-  "Allen Park": ["DET"],
+  "Dove Valley": ["DEN"], UCHealth: ["DEN"], Englewood: ["DEN"], CommonSpirit: ["DEN"],
+  "Allen Park": ["DET"], "Meijer Performance": ["DET"],
   "Don Hutson": ["GB"], Nitschke: ["GB"],
   "Methodist Training": ["HOU"], Greenbrier: ["HOU", "NO"], "White Sulphur": ["HOU", "NO"],
   "Farm Bureau": ["IND"], Westfield: ["IND"], "Grand Park": ["IND"], "Anderson University": ["IND"],
@@ -136,17 +139,17 @@ export const TEAM_FACILITIES: Readonly<Record<string, readonly NflTeam[]>> = {
   Henderson: ["LV"], Intermountain: ["LV"], Napa: ["LV"], Paradise: ["LV"],
   Davie: ["MIA"], "Miami Gardens": ["MIA"], "Baptist Health": ["MIA"], "Nova Southeastern": ["MIA"],
   Eagan: ["MIN"], TCO: ["MIN"], Mankato: ["MIN"],
-  Foxborough: ["NE"], Foxboro: ["NE"],
+  Foxborough: ["NE"], Foxboro: ["NE"], "New Balance": ["NE"],
   Metairie: ["NO"], Ochsner: ["NO"],
   "East Rutherford": ["NYG", "NYJ"], "Quest Diagnostics": ["NYG"],
   "Florham Park": ["NYJ"], "Atlantic Health": ["NYJ"],
-  NovaCare: ["PHI"],
+  NovaCare: ["PHI"], "Jefferson Health": ["PHI"],
   Latrobe: ["PIT"], "Saint Vincent": ["PIT"], "St Vincent": ["PIT"], "UPMC Rooney": ["PIT"],
   "Rooney Sports": ["PIT"],
   "Santa Clara": ["SF"], "SAP Performance": ["SF"],
   Renton: ["SEA"], VMAC: ["SEA"], "Virginia Mason": ["SEA"],
   AdventHealth: ["TB"],
-  "Saint Thomas": ["TEN"], "St Thomas": ["TEN"],
+  "Saint Thomas": ["TEN"], "St Thomas": ["TEN"], "Vanderbilt Health": ["TEN"],
   Ashburn: ["WAS"], Landover: ["WAS"], Inova: ["WAS"], OrthoVirginia: ["WAS"], Richmond: ["WAS"],
   "Bon Secours": ["WAS"],
 };
@@ -219,7 +222,7 @@ export const ORDINARY_WORD_ABBREVIATIONS: readonly string[] = [
   "ARI", "CAR", "CHI", "DAL", "DEN", "JAC", "LA", "LAC", "MIA", "MIN", "NO", "NOR", "NOS", "OAK",
   "PHI", "PHO", "PIT", "RAI", "SEA", "TAM", "TEN", "WAS",
   "CO", "ILL", "IN", "MA", "MASS", "MI", "MO", "OH", "PA", "WASH", "WI",
-  "C", "DE", "DI", "EDGE", "G", "K", "LT", "MIKE", "OL", "P", "S", "SAM", "ST", "WILL",
+  "C", "DE", "DI", "ED", "EDGE", "G", "K", "LT", "MIKE", "OL", "P", "S", "SAM", "ST", "WILL",
 ];
 // prettier-ignore
 export const GAME_MOVE_WORDS: readonly string[] = [
@@ -282,15 +285,17 @@ export const HOLDER = [1, 7];
 export const SPECIALIST = [5, 7];
 export const ANY = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13];
 export const OL: number[] = [];
+export const TEAM_UNIT: number[] = [];
 // prettier-ignore
 export const POSITION_ABBREVIATIONS: Readonly<Record<string, readonly number[]>> = {
-  QB, RB, HB: RB, FB: RB, WR, TE, K, PK: K, P,
-  DT, NT: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL, DI: DL,
-  EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE, WILL: EDGE, SAM: EDGE,
+  QB, RB, HB: RB, FB: RB, WR, SE: WR, TE, K, PK: K, P,
+  DT, NT: DT, NG: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL, DI: DL,
+  EDGE, ED: EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE, WILL: EDGE, SAM: EDGE,
   LB, ILB: LB, MLB: LB, WLB: LB, SLB: LB, LILB: LB, RILB: LB, MIKE: LB,
   CB, RCB: CB, LCB: CB, NCB: CB, S, FS: S, SS: S, SAF: S, NB: DB, DB,
   KR: RETURNER, PR: RETURNER, ST: ANY, ATH: ANY,
   OL, OT: OL, OG: OL, G: OL, C: OL, LT: OL, RT: OL, LG: OL, RG: OL, IOL: OL, LS: OL,
+  HC: TEAM_UNIT, TQB: TEAM_UNIT,
 };
 // prettier-ignore
 export const POSITION_WORDS: Readonly<Record<string, readonly number[]>> = {
@@ -300,7 +305,7 @@ export const POSITION_WORDS: Readonly<Record<string, readonly number[]>> = {
   "split end": WR,
   "tight end": TE,
   kicker: K, "place kicker": K, punter: P,
-  "defensive tackle": DT, "nose tackle": DT, "d tackle": DT, nose: DT,
+  "defensive tackle": DT, "nose tackle": DT, "nose guard": DT, "d tackle": DT, nose: DT,
   "defensive end": DE, "d end": DE,
   "line man": DL, "d line man": DL, "defensive line man": DL, tackle: DL,
   "d line": DL, "defensive line": DL, "defensive interior": DL,
@@ -319,11 +324,33 @@ export const POSITION_WORDS: Readonly<Record<string, readonly number[]>> = {
   holder: HOLDER, specialist: SPECIALIST, "special teams": ANY, "special teamer": ANY,
   "offensive line man": OL, "offensive line": OL, "o line": OL, guard: OL, center: OL,
   centre: OL, snapper: OL, "long snapper": OL,
+  "head coach": TEAM_UNIT, "d st": TEAM_UNIT,
 };
 // prettier-ignore
 export const AMBIGUOUS_LABEL_WORDS = [
   "back field", "corner", "dime", "gunner", "holder", "nickel", "nose", "rover", "safety",
   "secondary", "slot", "specialist", "tackle",
+];
+
+/** match.ts' LEAD_WORDS: capitalised words that may stand next to a surname one universe player holds. */
+// prettier-ignore
+export const LEAD_WORDS: readonly string[] = [
+  "qb", "rb", "wr", "te", "k", "p", "fb", "lb", "ilb", "olb", "cb", "s", "de", "dt", "edge", "ol", "ot",
+  "og", "ls", "star", "rookie", "veteran", "receiver", "quarterback", "kicker", "sources", "source",
+  "report", "reports", "nfl", "afc", "nfc", "the", "and", "with", "as", "at", "for", "from", "of", "on",
+  "to", "in", "after", "before", "but", "while", "when", "why", "how", "rb1", "wr1", "qb1", "te1", "rb2",
+  "wr2", "backup", "starter",
+];
+/** match.ts' STAFF_WORDS: a surname right after one is a staff member's. */
+export const STAFF_WORDS: readonly string[] = [
+  "coach",
+  "coaches",
+  "hc",
+  "oc",
+  "dc",
+  "stc",
+  "coordinator",
+  "coordinators",
 ];
 
 /** Every team word form list (one word or several), keyed by the source's list name. */

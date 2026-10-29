@@ -440,9 +440,10 @@ describe("R8-6 (b): the prominent holder takes the item only when no team and no
     expect(outcome("Lamar Jackson: Catches up with Dallas Goedert")).toBe(
       "Lamar Jackson/BAL/QB:full_name, Dallas Goedert/PHI/TE:full_name u0",
     );
+    // a shared surname after initials is counted (R8-8 (1), violation 10: u0 at 08524ff)
     expect(
       outcome("Justin Jefferson: Questionable | K.J. Osborn and P.J. Walker also practiced."),
-    ).toBe("Justin Jefferson/MIN/WR:full_name, K.J. Osborn/FA/WR:full_name u0");
+    ).toBe("Justin Jefferson/MIN/WR:full_name, K.J. Osborn/FA/WR:full_name u1");
   });
 });
 

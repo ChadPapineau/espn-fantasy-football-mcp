@@ -317,9 +317,14 @@ describe("R8-7 (2): an abbreviation whose lower case is an ordinary word", () =>
       expect(scanned(t), t).toBe(RESIDUAL);
   });
 
-  it("as a label: in capitals, never the ordinary word right after a game or move word", () => {
+  it("as a label: in capitals, right after a game or move word too; never in lower or title case", () => {
     expect(outcome("WILL Justin Jefferson: Starts")).toBe("Justin Jefferson/CLE/LB:full_name u0");
-    expect(outcome("at WILL Justin Jefferson: Starts")).toBe("∅ u1");
+    // R8-8 (1), violation 7: in capitals it labels after a game or move word as anywhere (∅ u1 at
+    // 08524ff); in lower or title case there it counts for the scan only ("to Will Smith")
+    expect(outcome("at WILL Justin Jefferson: Starts")).toBe(
+      "Justin Jefferson/CLE/LB:full_name u0",
+    );
+    expect(outcome("at Will Justin Jefferson: Starts")).toBe("∅ u1");
     expect(outcome("Will Justin Jefferson play Sunday?")).toBe(RESIDUAL);
   });
 
@@ -556,19 +561,24 @@ describe("R8-7 (4): a surname", () => {
     expect(outcome("Bears' Jefferson: Questionable | Puka Nacua (ankle) is also listed.")).toBe(
       "Puka Nacua/LA/WR:full_name u1",
     );
-    // a team word with no label is the team; a word of a form ("Allen Park", "Gang Green") and a first
-    // name before it ("Bill Johnson", "Charlotte Jones") make it no surname
+    // a team word followed by its team's own name is the team; a word of a form ("Allen Park", "Gang
+    // Green") is no surname
     for (const t of [
-      "Washington thin at RB | Commanders sign veteran",
       "Washington Commanders: Sign veteran",
       "Lions' Allen Park facility hosts workouts",
       "Jets fans: Gang Green rolls on",
-      "Bill Johnson: Signs with team",
-      "Charlotte Jones: Cowboys executive speaks",
-      // a universe surname after it makes it that person's first name; a full name after it, a verb
-      "Eagles' Lane Johnson retires from NFL due to personal reasons",
     ])
       expect(outcome(t), t).toBe("∅ u0");
+    // R8-8 (1), violations 9-11 (each ∅ u0 at 08524ff): a team word with no label, a surname after
+    // a first name ("Bill Johnson": a one-word singular or place without a possessive is no label
+    // there) and one before another surname ("Lane Johnson") are counted, no label picking
+    for (const [t, want] of [
+      ["Washington thin at RB | Commanders sign veteran", "∅ u1"],
+      ["Bill Johnson: Signs with team", "∅ u1"],
+      ["Charlotte Jones: Cowboys executive speaks", "∅ u1"],
+      ["Eagles' Lane Johnson retires from NFL due to personal reasons", "∅ u2"],
+    ] as const)
+      expect(outcome(t), t).toBe(want);
     expect(
       outcome(
         "Justin Jefferson: Burns Denzel Ward | Jefferson beat Ward for a 60-yard TD in the win over the Browns.",

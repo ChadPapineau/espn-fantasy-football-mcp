@@ -6,7 +6,9 @@
 // shared full names and 260 surnames in one list, then 400 handles; dbe9686 took about 200 ms for it,
 // and a file of 100 such items 21 s). Each costs a small multiple of a benign near-cap item — a ratio,
 // so a slower machine moves both — and a file of them builds well inside a refresh run
-// (build.perf.test.ts' 15 s).
+// (build.perf.test.ts' 15 s). Ruling R8-8 (1) adds the attack on 08524ff's item: bare shared surnames,
+// each followed by a word that opens a form of several words (23.5 times a benign item at 08524ff, and
+// 1 000 of them 77.8 s, because each mention re-read the forms around it).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -234,6 +236,68 @@ describe("news matcher — R8-6's second build: items at the caps against each n
     });
     expect(b.news).toHaveLength(1_000);
     // measured 2026-10-28: about 2.5 s
+    expect(performance.now() - t0).toBeLessThan(15_000);
+  });
+});
+
+describe("news matcher — R8-8: the attack on 08524ff's capped item, over the recorded universe", () => {
+  const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const recorded = universeFromEspnPlayers(
+    playersRows(
+      JSON.parse(
+        readFileSync(path.join(ROOT, "fixtures/espn/recorded/season/players_wl.json"), "utf8"),
+      ) as unknown,
+      2026,
+    ).rows,
+    () => null,
+  );
+  const m = buildPlayerMatcher(recorded);
+  /** `s` repeated to exactly `n` characters. */
+  const rep = (s: string, n: number): string => cap(s.repeat(Math.ceil(n / s.length) + 1), n);
+  // the attack's construction (code-audit-r3/perf4.mts): shared surnames, each before "New"
+  const P = "Jones New Smith New Brown New Green New Wilson New Allen New Young New ";
+  const title = cap(`Lamar Jackson: ${rep(P, 1_000)}`, 1_000);
+  const blurb = rep(P, 4_000);
+  const benign = `Lamar Jackson: Questionable | ${rep("Notes on the week ahead. ", 4_000)}`;
+
+  it("costs at most 6 times a benign capped item, and grows linearly with its blurb", () => {
+    const item = `${title} | ${blurb}`;
+    // what it reads: no ref; the full name and each of the seven surnames counted
+    expect(m.matchItem(item)).toEqual({ refs: [], unresolved: 8 });
+    const adversarial = median(() => m.matchItem(item));
+    const quiet = median(() => m.matchItem(benign));
+    // measured 2026-10-29: about 3 times (08524ff 23.5 times: 80 ms against 3.4 ms)
+    expect(adversarial).toBeLessThan(6 * Math.max(quiet, 0.05));
+    // four times the blurb, about four times the cost (a quadratic reading would be sixteen)
+    const short = median(() => m.matchItem(`Lamar Jackson: x | ${rep(P, 1_000)}`));
+    const long = median(() => m.matchItem(`Lamar Jackson: x | ${rep(P, 4_000)}`));
+    expect(long).toBeLessThan(8 * Math.max(short, 0.05));
+  });
+
+  it("1 000 such items build in < 15 s", () => {
+    const now = Date.parse("2026-10-06T20:00:00Z");
+    const previous = Array.from({ length: 1_000 }, (_, i) => ({
+      item_id: i.toString(16).padStart(32, "0"),
+      source: "cbs",
+      published_ms: now - 86_400_000,
+      first_seen_ms: now - 86_400_000,
+      title,
+      blurb,
+      link: null,
+    }));
+    const t0 = performance.now();
+    const b = buildNewsRows({
+      format: NEWS_FILE_FORMAT,
+      source: "cbs",
+      fetched_ms: now,
+      xml: "<rss><channel></channel></rss>",
+      universe: recorded,
+      previous,
+      warnings: [],
+    });
+    expect(b.news).toHaveLength(1_000);
+    expect(b.counts).toMatchObject({ unresolved: 1_000 });
+    // measured 2026-10-29: about 6 s (08524ff 77.8 s by the attack's measure)
     expect(performance.now() - t0).toBeLessThan(15_000);
   });
 });

@@ -60,15 +60,18 @@ const HOLDER = [1, 7];
 const SPECIALIST = [5, 7];
 const ANY = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13];
 const OL: number[] = [];
+/** ESPN's team-unit positions (14 HC, 15 TQB, 16 D/ST): no universe player holds one. */
+const TEAM_UNIT: number[] = [];
 // prettier-ignore
 const ABBREVIATIONS: Readonly<Record<string, readonly number[]>> = {
-  QB, RB, HB: RB, FB: RB, WR, TE, K, PK: K, P,
-  DT, NT: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL, DI: DL,
-  EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE, WILL: EDGE, SAM: EDGE,
+  QB, RB, HB: RB, FB: RB, WR, SE: WR, TE, K, PK: K, P,
+  DT, NT: DT, NG: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL, DI: DL,
+  EDGE, ED: EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE, WILL: EDGE, SAM: EDGE,
   LB, ILB: LB, MLB: LB, WLB: LB, SLB: LB, LILB: LB, RILB: LB, MIKE: LB,
   CB, RCB: CB, LCB: CB, NCB: CB, S, FS: S, SS: S, SAF: S, NB: DB, DB,
   KR: RETURNER, PR: RETURNER, ST: ANY, ATH: ANY,
   OL, OT: OL, OG: OL, G: OL, C: OL, LT: OL, RT: OL, LG: OL, RG: OL, IOL: OL, LS: OL,
+  HC: TEAM_UNIT, TQB: TEAM_UNIT,
 };
 // prettier-ignore
 const WORDS: Readonly<Record<string, readonly number[]>> = {
@@ -78,7 +81,7 @@ const WORDS: Readonly<Record<string, readonly number[]>> = {
   "split end": WR,
   "tight end": TE,
   kicker: K, "place kicker": K, punter: P,
-  "defensive tackle": DT, "nose tackle": DT, "d tackle": DT, nose: DT,
+  "defensive tackle": DT, "nose tackle": DT, "nose guard": DT, "d tackle": DT, nose: DT,
   "defensive end": DE, "d end": DE,
   "line man": DL, "d line man": DL, "defensive line man": DL, tackle: DL,
   "d line": DL, "defensive line": DL, "defensive interior": DL,
@@ -97,6 +100,7 @@ const WORDS: Readonly<Record<string, readonly number[]>> = {
   holder: HOLDER, specialist: SPECIALIST, "special teams": ANY, "special teamer": ANY,
   "offensive line man": OL, "offensive line": OL, "o line": OL, guard: OL, center: OL,
   centre: OL, snapper: OL, "long snapper": OL,
+  "head coach": TEAM_UNIT, "d st": TEAM_UNIT,
 };
 // prettier-ignore
 const AMBIGUOUS = [
@@ -204,6 +208,17 @@ describe("spellings: glued, hyphenated or with a space, each join chosen apart",
       expect.arrayContaining(["d-lineman", "d lineman", "dlineman", "d line man", "d-line-man"]),
     );
   });
+  it("R8-8 (1), violation 18: a raw string of many words is joined one way throughout (linear work)", () => {
+    // four parts: each join chosen apart (27 spellings); five or more: spaced, hyphenated or glued
+    expect(spellingsOf("a b c d")).toHaveLength(27);
+    expect(spellingsOf("a b c d e").sort()).toEqual(["a b c d e", "a-b-c-d-e", "abcde"]);
+    // 3^(n-1) spellings at 08524ff: 17 words exhausted a 2 GB heap, 14 took 1.4 s
+    const words = Array.from({ length: 40 }, (_, k) => `w${String(k)}`).join(" ");
+    const t0 = performance.now();
+    expect(spellingsOf(words)).toHaveLength(3);
+    expect(spellingsOf(`${words}-x y`)).toHaveLength(3);
+    expect(performance.now() - t0).toBeLessThan(1_000);
+  });
   it("R8-7 (1): the spaced spellings the last attack found missing (violation 10)", () => {
     // "The D line reserve was let go" (the TEN CB at 0.80 at 66bb2a2)
     for (const [f, ids] of [
@@ -256,6 +271,9 @@ describe("a position word (labels and the scan)", () => {
           expect(word(pluralOf(w.toLowerCase())), pluralOf(w)).toEqual(sortedIds(want));
         }
     expect(word("RUNNING  BACK")).toEqual(RB);
+    // an apostrophe is no letter of a form (positionKey drops it): "d'line", "D'Line"
+    expect(word("d'line")).toEqual(DL);
+    expect(word("D'Line")).toEqual(DL);
   });
 
   it("a technique: an alignment number (a digit or its word, an 'i' allowed) and tech or technique", () => {
@@ -277,7 +295,7 @@ describe("a position word (labels and the scan)", () => {
       expect(word(v), v).toBeNull();
   });
 
-  it("plurals: a lineman's men, a safety's ies, any other word's s", () => {
+  it("plurals: a lineman's men, a safety's ies, a coach's es, any other word's s", () => {
     expect(pluralOf("lineman")).toBe("linemen");
     expect(pluralOf("d-lineman")).toBe("d-linemen");
     expect(pluralOf("return man")).toBe("return men");
@@ -285,6 +303,11 @@ describe("a position word (labels and the scan)", () => {
     expect(pluralOf("secondary")).toBe("secondaries");
     expect(pluralOf("running back")).toBe("running backs");
     expect(pluralOf("tight end")).toBe("tight ends");
+    // R8-8 (1): "head coaches" (each "head coachs" at 08524ff), "pass rushes"
+    expect(pluralOf("head coach")).toBe("head coaches");
+    expect(pluralOf("pass rush")).toBe("pass rushes");
+    expect(word("head coaches")).toEqual([]);
+    expect(word("pass rushes")).toEqual(FRONT);
   });
 
   it("no plain word is a position: the parts of a form, a role word, an initial, a time", () => {

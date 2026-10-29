@@ -12,6 +12,7 @@ export {
 } from "./feeds.js";
 export {
   buildPlayerMatcher,
+  LEAD_WORDS,
   MATCH_CONFIDENCE,
   MATCH_TEXT_CAP,
   MAX_REFS_PER_ITEM,
@@ -22,6 +23,7 @@ export {
   positionIdOf,
   PROMINENCE_RATIO,
   PROMINENT_OWNED,
+  STAFF_WORDS,
   UNIVERSE_SQL,
   universeFromEspnPlayers,
   type PlayerMatcher,

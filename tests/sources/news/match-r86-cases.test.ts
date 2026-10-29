@@ -1036,7 +1036,9 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Justin Jefferson (hamstring) questionable for Sunday vs. CLE", "", "∅ u1"],
   ["Justin Jefferson, WR, Minnesota: Questionable", "", "Justin Jefferson/MIN/WR:full_name_team u0"],
   ["Minnesota Vikings star Justin Jefferson ruled out", "", "∅ u1"],
-  ["Kevin O'Connell: Justin Jefferson will play Sunday", "", "Justin Jefferson/MIN/WR:full_name u0"],
+  // R8-8 (1), violation 10: a capitalised word before a shared surname no longer silences it, a first
+  // name's neither ("O'Connell", "Walker", "Smith", "St. Brown", "Former Brown" counted; u0 at 08524ff)
+  ["Kevin O'Connell: Justin Jefferson will play Sunday", "", "Justin Jefferson/MIN/WR:full_name u1"],
   ["Justin Jefferson: Questionable, Browns next | Jefferson (hamstring) did not practice.", "", "∅ u1"],
   ["Justin Jefferson and the Vikings visit the Browns in Week 9", "", "∅ u1"],
   ["Justin Jefferson: Traded to Browns", "", "∅ u1"],
@@ -1243,10 +1245,10 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Justin Jefferson: Torches Browns for a lack of support", "", "∅ u1"],
   ["Justin Jefferson: Torches Browns' linebacker depth", "", "∅ u1"],
   ["Lamar Jackson: Questionable for Sunday's 1 P.M. kickoff | Jackson (ankle) was limited.", "", "Lamar Jackson/BAL/QB:full_name u0"],
-  ["Lamar Jackson: Throws three touchdowns | Jackson found P.J. Walker twice.", "", "Lamar Jackson/BAL/QB:full_name u0"],
+  ["Lamar Jackson: Throws three touchdowns | Jackson found P.J. Walker twice.", "", "Lamar Jackson/BAL/QB:full_name u1"],
   ["Lamar Jackson: Ruled out | Jackson (knee) will not play, coach John Harbaugh said at a 2 P.M. news conference.", "", "Lamar Jackson/BAL/QB:full_name u0"],
   ["Lamar Jackson: Throws TD to S. Smith", "", "∅ u2"],
-  ["Justin Jefferson: Placed on IR | Jefferson (knee) will miss at least four games, per P.J. Smith.", "", "Justin Jefferson/MIN/WR:full_name u0"],
+  ["Justin Jefferson: Placed on IR | Jefferson (knee) will miss at least four games, per P.J. Smith.", "", "Justin Jefferson/MIN/WR:full_name u1"],
   ["Lamar Jackson: Throws two TDs | Jackson hit K.J. Osborn and Isaiah Likely for scores.", "", "Lamar Jackson/BAL/QB:full_name, K.J. Osborn/FA/WR:full_name, Isaiah Likely/NYG/TE:full_name u0"],
   ["Sunday's 1 P.M. kickoff, per P.J. Smith and S. Smith", "", "∅ u1"],
   ["Lamar Jackson: Questionable for Sunday's 1 P.M. kickoff | The Ravens are thin at receiver.", "", "∅ u1"],
@@ -1280,7 +1282,7 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Ja'Marr Chase: Catches two TDs | DT Harris added a sack.", "", "Ja'Marr Chase/CIN/WR:full_name u1"],
   ["Myles Garrett: Two sacks | LB Jefferson added one.", "", "Myles Garrett/LA/DE:full_name, Justin Jefferson/CLE/LB:last_name_team u0"],
   ["Kirk Cousins: Sacked by LB Jefferson", "", "Kirk Cousins/LV/QB:full_name, Justin Jefferson/CLE/LB:last_name_team u0"],
-  ["Limited, per P.J. Smith", "", "∅ u0"],
+  ["Limited, per P.J. Smith", "", "∅ u1"],
   ["Free-agent cornerback Lamar Jackson visits", "", "Lamar Jackson/FA/CB:full_name u0"],
   ["Minnesota Vikings wide receiver Justin Jefferson", "", "Justin Jefferson/MIN/WR:full_name_team u0"],
   ["Rams edge Byron Young: Sack", "", "∅ u1"],
@@ -1325,7 +1327,7 @@ const R83_TEXTS: readonly (readonly [string, string, string])[] = [
   ["Free-agent corner Lamar Jackson visits", "", "Lamar Jackson/FA/CB:full_name u0"],
   ["Lamar Jackson: Ravens QB dealing with ankle sprain", "", "∅ u1"],
   ["Lamar Jackson update: The cornerback covering him slipped", "", "∅ u1"],
-  ["C.J. Stroud vs. Browns. St. Brown, No. 1 | Jr. scored; done! ok? end.", "", "C.J. Stroud/HOU/QB:full_name u0"],
+  ["C.J. Stroud vs. Browns. St. Brown, No. 1 | Jr. scored; done! ok? end.", "", "C.J. Stroud/HOU/QB:full_name u1"],
 ];
 
 describe("every case of R8-3's rounds, at its R8-6 outcome", () => {
@@ -1751,7 +1753,7 @@ const BATTERIES_R86_1: readonly (readonly [string, string, string])[] = [
   ["Lamar Jackson: Former Chief cut loose", "", "∅ u1"],
   ["Lamar Jackson: Ex-Saint waived", "", "∅ u1"],
   ["Lamar Jackson: Ex-Buc waived", "", "∅ u1"],
-  ["Lamar Jackson: Former Brown cut", "", "∅ u1"],
+  ["Lamar Jackson: Former Brown cut", "", "∅ u2"],
   ["Chris Jones: Former Jet retires | The ex-Jet announced his retirement Tuesday.", "", "∅ u1"],
   ["Justin Jefferson: Waived | #NinerEmpire", "", "∅ u1"],
   ["Chris Jones: Released | #TitanUp", "", "∅ u1"],

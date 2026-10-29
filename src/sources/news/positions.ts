@@ -11,10 +11,13 @@
 // and "-".
 //
 // ESPN position ids (ds_players `position_id`; research 03 §B.2; src/domain/league/slots.ts
-// POSITION_NAMES): 1 QB, 2 RB, 3 WR, 4 TE, 5 K, 7 P, 9 DT, 10 DE, 11 LB, 12 CB, 13 S. ESPN's own
-// position, abbreviated or spelled out, fits only its own id ("DT" and "defensive tackle" fit an ESPN
-// DT, never an ESPN DE): a label that fits a holder of another ESPN position would pick a wrong holder
-// (fail closed). A writer's form that is no ESPN position stands for every id a player it describes
+// POSITION_NAMES): 1 QB, 2 RB, 3 WR, 4 TE, 5 K, 7 P, 9 DT, 10 DE, 11 LB, 12 CB, 13 S, and the
+// positions of its team units, 14 HC (the head coach), 15 TQB (the team quarterback) and 16 D/ST (the
+// team defense), which no universe player holds: the scan finds their forms ("every ESPN position",
+// R8-7 (1); ruling R8-8 (1)), and as a label they fit no one, like an offensive-line form. ESPN's
+// own position, abbreviated or spelled out, fits only its own id ("DT" and "defensive tackle" fit an
+// ESPN DT, never an ESPN DE): a label that fits a holder of another ESPN position would pick a wrong
+// holder (fail closed). A writer's form that is no ESPN position stands for every id a player it describes
 // may carry, wide rather than narrow: the defensive line (DL, "lineman", "tackle") ESPN's DT or DE, an
 // edge rusher, an outside linebacker or a Will or Sam its DE or LB (ESPN lists the Rams' 3-4 outside
 // linebacker Byron Young as a DE), a pass rusher or an alignment word any of the front, a nickel or
@@ -86,6 +89,11 @@ const SPECIALIST = [5, 7];
 const ANY = [1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13];
 /** The offensive line and the long snapper: no universe player (ESPN's index lists none). */
 const OL: number[] = [];
+/**
+ * ESPN's fantasy positions of its team units (14 HC, 15 TQB, 16 D/ST): no universe player holds one
+ * (ESPN's players index lists team units under negative ids, which the universe skips).
+ */
+const TEAM_UNIT: number[] = [];
 
 const freeze = (
   entries: Readonly<Record<string, readonly number[]>>,
@@ -102,13 +110,14 @@ const freeze = (
 /** Abbreviations (labels and the scan): ESPN's own, then writers' and depth charts'. */
 // prettier-ignore
 export const POSITION_ABBREVIATIONS: Readonly<Record<string, readonly number[]>> = freeze({
-  QB, RB, HB: RB, FB: RB, WR, TE, K, PK: K, P,
-  DT, NT: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL, DI: DL,
-  EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE, WILL: EDGE, SAM: EDGE,
+  QB, RB, HB: RB, FB: RB, WR, SE: WR, TE, K, PK: K, P,
+  DT, NT: DT, NG: DT, LDT: DT, RDT: DT, DE, LDE: DE, RDE: DE, DL, IDL: DL, DI: DL,
+  EDGE, ED: EDGE, OLB: EDGE, LOLB: EDGE, ROLB: EDGE, WILL: EDGE, SAM: EDGE,
   LB, ILB: LB, MLB: LB, WLB: LB, SLB: LB, LILB: LB, RILB: LB, MIKE: LB,
   CB, RCB: CB, LCB: CB, NCB: CB, S, FS: S, SS: S, SAF: S, NB: DB, DB,
   KR: RETURNER, PR: RETURNER, ST: ANY, ATH: ANY,
   OL, OT: OL, OG: OL, G: OL, C: OL, LT: OL, RT: OL, LG: OL, RG: OL, IOL: OL, LS: OL,
+  HC: TEAM_UNIT, TQB: TEAM_UNIT,
 });
 
 /**
@@ -123,7 +132,7 @@ export const POSITION_WORDS: Readonly<Record<string, readonly number[]>> = freez
   "split end": WR,
   "tight end": TE,
   kicker: K, "place kicker": K, punter: P,
-  "defensive tackle": DT, "nose tackle": DT, "d tackle": DT, nose: DT,
+  "defensive tackle": DT, "nose tackle": DT, "nose guard": DT, "d tackle": DT, nose: DT,
   "defensive end": DE, "d end": DE,
   "line man": DL, "d line man": DL, "defensive line man": DL, tackle: DL,
   "d line": DL, "defensive line": DL, "defensive interior": DL,
@@ -142,6 +151,7 @@ export const POSITION_WORDS: Readonly<Record<string, readonly number[]>> = freez
   holder: HOLDER, specialist: SPECIALIST, "special teams": ANY, "special teamer": ANY,
   "offensive line man": OL, "offensive line": OL, "o line": OL, guard: OL, center: OL,
   centre: OL, snapper: OL, "long snapper": OL,
+  "head coach": TEAM_UNIT, "d st": TEAM_UNIT,
 });
 
 /**
@@ -167,19 +177,30 @@ export function positionKey(written: string): string {
   return written.toLowerCase().replaceAll("'", "").replace(/\s+/gu, " ").trim();
 }
 
-/** A word's plural as the scan reads it ("linebackers", "safeties", "linemen", "running backs"). */
+/**
+ * A word's plural as the scan reads it ("linebackers", "safeties", "linemen", "running backs", "head
+ * coaches").
+ */
 export function pluralOf(word: string): string {
   if (word.endsWith("man")) return `${word.slice(0, -3)}men`;
   if (/[^aeiou]y$/u.test(word)) return `${word.slice(0, -1)}ies`;
+  if (/(?:ch|sh)$/u.test(word)) return `${word}es`;
   return `${word}s`;
 }
 
+/** The most parts whose joins a spelling chooses apart (a listed form has three at most). */
+const MAX_SPELLING_PARTS = 4;
+
 /**
  * A listed form's spellings: its parts (split at a space or a hyphen) joined by a space, a hyphen or
- * nothing, each join chosen apart ("d line man" is also "d-lineman", "d lineman" and "dlineman").
+ * nothing, each join chosen apart ("d line man" is also "d-lineman", "d lineman" and "dlineman"). A
+ * longer string (never a listed form) is joined one way throughout, so the work stays linear in it
+ * (ruling R8-8 (1): 3^(n-1) spellings exhausted the heap at 17 words).
  */
 export function spellingsOf(form: string): string[] {
   const parts = positionKey(form).split(/[\s-]+/u);
+  if (parts.length > MAX_SPELLING_PARTS)
+    return [...new Set([" ", "-", ""].map((j) => parts.join(j)))];
   let out = [parts[0] ?? ""];
   for (const p of parts.slice(1)) out = out.flatMap((s) => [`${s} ${p}`, `${s}-${p}`, `${s}${p}`]);
   return [...new Set(out)];
