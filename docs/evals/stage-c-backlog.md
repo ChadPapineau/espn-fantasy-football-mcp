@@ -109,16 +109,45 @@ What stays, as R8-6 accepts it:
   injury update: Ravens QB …". Matching an item's opponent against the week's schedule would recover
   much of it; it is not built.
 
+**Fix round 2 of R8-6 (2026-10-28, commit `1ca78bf`; changelog §B9, "R8-6 fix round 2").** The
+independent attack on the first build found 23 violations. What closes:
+
+- **The scan's 14 gaps.** Team-site domains, ranks, unit and alignment forms, depth-chart names,
+  hyphenated spellings, roles, all-caps plurals, cities, singulars, other sites' and legacy
+  abbreviations, hashtags, short names and lower-case abbreviations each take the residual away now.
+  The round's scan-sweep of 223 team forms misses none; city nicknames, stadiums, fans' names and the
+  teams' own hashtags are listed too.
+- **The label readings.** A word before a label of teams alone (it must open its clause), a line or
+  paragraph break and a closing quotation mark break a label. ESPN's own position fits only its own id, so "Vikings CB
+  Smith" is no S's and "Eagles DT Byron Young" is the Eagles DT's. The two-word forms and "EDGE" are
+  labels again. Every mention's label counts ("Lamar Jackson: Limited | Ravens QB Lamar Jackson …").
+- **The spelling.** A suffix narrows the holders; it picks no one past the scan.
+- **The character sets.** One fold reads both the label and the scan, and every entry is held by a
+  behaviour (the mutation run caught all 626 deletions).
+
+What stays, as R8-6 accepts it: the residual; the recall loss (measured in §B9: against `6ba7bb1`,
+4 star and 12 namesake refs over the 1,167 earlier texts, each a form the scan now finds, a writer's
+position ESPN does not give him, or a team after a blocker word); and the new ordinary-word forms,
+which take a star's residual away where they stand ("throws a dime", "a roster slot", "per CBS
+Sports").
+
 Readings for the re-gate to check:
 
-- **(a) The label is the first mention's.** A label written only on a later mention picks no one,
-  because a later mention may be the other holder: "Lamar Jackson: Throws pick to CB Lamar Jackson"
-  went to the free-agent CB at `dbe9686`.
+- **(a) The label is the first mention's.** Superseded by fix round 2: every mention's label counts,
+  and a segment that writes the name both with a label and without one picks no one ("Lamar Jackson:
+  Throws pick to CB Lamar Jackson"). A name the title writes alone takes the blurb's label, even where
+  the blurb contrasts the other holder ("Justin Jefferson: Released by Browns | Not to be confused with
+  Vikings' Justin Jefferson" gives the WR).
+- **A label next to the name picks him in his namesake's item.** "Ravens QB Lamar Jackson's namesake
+  signs with Bengals" gives the QB at 0.95, as at every earlier build.
+- **An inline tag breaks a label.** "Vikings<b> WR</b> Justin Jefferson" gets no ref: any tag is a
+  break.
 - **Choice 6 stands.** A prominent holder whom no position of the label rules out blocks a team-only
   namesake label ("Cleveland's Justin Jefferson", "Philadelphia's Byron Young": no ref).
 - **A free agent fits no team label.** "Bengals CB Lamar Jackson" gets no ref; the universe lists no
   Lamar Jackson on the Bengals.
-- **Spelling stays as at `f41e810`.** A written suffix that leaves one holder is his name.
+- **Spelling stays as at `f41e810`.** Superseded by fix round 2: a written suffix narrows the
+  holders, and the one it leaves takes the residual only when the scan finds nothing.
 - **The scan errs toward finding.** "leads the pack", "OT" and "medical bills" each take the residual
   away.
 

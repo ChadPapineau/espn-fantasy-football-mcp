@@ -732,7 +732,7 @@ tests that fail on the code at `f41e810`, how fix round 2 (commit `91a8c1b`, bel
 independent attack on that build, and how fix round 3 (commit `c16b9d8`, below) answered the attack on
 fix round 2. What stays open is in `docs/evals/stage-c-backlog.md` ("Ruled R8-3"). The bullets fix
 round 2 changed say so. Ruling R8-6 then replaced the shared-name reading these rounds built ("R8-6 —
-the matcher fails closed", the last part below).
+the matcher fails closed" below, and its fix round 2, the last part).
 
 - **The universe carries ESPN's position** · R8-3 clause 4 · `src/sources/news/match.ts`
   `universeFromEspnPlayers` and `UNIVERSE_SQL` read `ds_players.position_id` into
@@ -1172,6 +1172,137 @@ one universe player holds take `f41e810`'s code path, unchanged.
   namesake signed since the universe was read). Two holders on one team at one position ("Jaylon
   Jones", both Titans CBs) are never told apart. Over-detection costs some star recall ("leads the
   pack", "OT", "medical bills"), as the ruling accepts.
+
+### R8-6 fix round 2 — the attack on the first build (commit `1ca78bf`)
+
+The independent attack on `154838b` (its docs at `6ba7bb1`) found 23 violations of R8-6. Fourteen
+were forms the scan missed: team-site domains, every rank, the unit and alignment forms, depth-chart
+names, hyphenated spellings, roles, plurals in capitals, cities, singulars, other sites' and legacy
+abbreviations, hashtags, short names and lower-case abbreviations. Five were label readings that broke
+adjacency or ESPN's position id: a team ending an introductory phrase, a line or paragraph break, a
+closing quotation mark, positions read wider than ESPN's id, and the two-word forms the first build
+dropped. The rest were the first-mention reading, a spelling that bypassed the scan, and
+character-set entries no test held. Each is fixed at its root.
+
+- **One folded reading** · `src/sources/news/labels.ts` `sharedReading`, `foldText`. The item is
+  folded one code point at a time, with a map back to the sanitised text's offsets: an apostrophe-like
+  mark or a lookalike letter first (APOSTROPHES, CONFUSABLES), else NFKD with the combining marks
+  stripped, then each piece's dash (Unicode's Pd and the minus sign, DASHES) or lookalike. The label
+  and the scan both read the folded text, so one set of characters decides both. The first build had
+  five sets, and 35 of their 51 entries changed no behaviour. The scan's zero-width set went:
+  sanitizeText removes those characters before the matcher reads.
+- **Adjacency as written** · `labels.ts`, `match.ts`, `feeds.ts`. A line or a paragraph break breaks a
+  label. `markBreaks` marks every newline and every HTML tag of the raw item (entity-encoded ones too),
+  a second sanitizeText keeps the marks, and `breakOffsets` aligns them with the sanitised text. Only
+  the labels read them, only for a shared name, and only when the raw item holds a line break, "<" or
+  "&". The stored title and blurb now keep each line break as one "\n" (`collapseLines`;
+  sanitizeText makes it a space for every reader, and the promo filter reads it as one), so the news
+  build sees what the item wrote. An
+  apostrophe that closes a quotation opened in its segment is no possessive ("'Beat the Vikings'
+  Justin Jefferson tells …"). Three rules take labels away and never add one. A label of teams alone
+  (no possessive, no position) must open its clause: a word right before it makes the team that
+  word's object or modifier ("Against the Vikings Justin Jefferson recorded …", "Week 9 at Vikings
+  …", "Browns beat Vikings Justin Jefferson …"; a period ends the clause, but after
+  CLAUSE_ABBREVIATIONS' "vs" and "v"). An AMBIGUOUS_LABEL_WORDS word ("safety", "corner") right after
+  a LABEL_BLOCKERS word (54 articles and prepositions) is the ordinary word ("After safety Lamar
+  Jackson leads …"). In a segment all in capitals, the forms that are also ordinary words
+  (CAPS_ONLY_ABBREVIATIONS, and HEADLINE_ORDINARY_WORDS' "EDGE") label no name before it.
+- **Labels: ESPN's position, every mention** · `positions.ts`, `match.ts`. ESPN's own position,
+  abbreviated or spelled out, fits only its own id: DT, NT and "defensive tackle" an ESPN DT; DE an
+  ESPN DE; LB, ILB, MLB and "linebacker" an ESPN LB; CB a CB; S, FS, SS and "safety" an S. A writer's
+  group form spans its ids (DL, EDGE, OLB, DB, NB, "edge rusher", "pass rusher", "defender"). So
+  "Vikings CB Smith" is no Vikings S's and "Chiefs DE Jones" no Chiefs DT's, and "Eagles DT Byron
+  Young" is the Eagles DT's: choice 6(c) works again. The two-word forms the first build dropped are
+  labels again ("wide receiver", "slot receiver", "defensive lineman", "inside", "middle" and "outside
+  linebacker", "free" and "strong safety"), and so is "EDGE" in capitals. A rank may follow any
+  abbreviation ("LB1"), and a label word may be written hyphenated or glued ("edge-rusher",
+  "wide-out"). The labels of every mention count: "Lamar Jackson: Limited | Ravens QB Lamar Jackson
+  (ankle) …" is the QB's, and the first-mention reading went. A segment that writes the name both with
+  a label and without one picks no one ("Lamar Jackson: Throws pick to CB Lamar Jackson"; "Lamar
+  Jackson, not the Ravens QB Lamar Jackson, signs …").
+- **A spelling picks no one** · `match.ts`. A written suffix narrows the holders to those ESPN spells
+  with it. The name stays shared, so a label decides among them, and the one spelled holder takes the
+  residual only when the scan finds nothing, as the prominent one does. "Michael Carter II: Waived by
+  Titans | The running back was released." and "Byron Murphy II: Vikings CB ruled out" get no ref and
+  are counted.
+- **The scan, every form** · `labels.ts`, `positions.ts`. Teams: Pro Football Reference's and
+  MyFantasyLeague's abbreviations (TEAM_ABBREVIATIONS, 52); the legacy ones and D.C.
+  (SCAN_ONLY_TEAM_ABBREVIATIONS, 7); every singular, the ordinary-word ones included (TEAM_SINGULARS,
+  40); the places a team plays or trains, its city's nicknames and its stadium (TEAM_CITIES, 64); the
+  short names several teams or words share, and the fans' and legacy names (SCAN_ONLY_TEAM_NAMES,
+  19); and the teams' own hashtags (TEAM_HASHTAGS, 13); each word form in its hyphenated and glued
+  spellings. A compound (a handle, a hashtag, a dotted word, a camel-cased word) is read for its
+  segments ("CLE", "KC", "Bear", "12s") and for any word form of four letters or more inside it
+  ("clevelandbrowns.com"); a hashtag for three-letter ones too. Positions: every rank and plural by
+  rule ("CB2", "WR10", "LBS"), techniques by rule ("1-tech", "9-technique", "4i"), and the units,
+  roles, alignments and depth-chart names (SCAN_ONLY_WORDS, 41; SCAN_ONLY_ABBREVIATIONS, 14). A
+  lower-case abbreviation counts unless CAPS_ONLY_POSITION_ABBREVIATIONS (13) lists it: "cb", "olb"
+  and "idl" count, "lb", "will" and "s" do not. The round's scan-sweep of 223 team forms misses none
+  (31 at the first build).
+- **What was removed** · `RANKED_ABBREVIATIONS` (a rank follows any abbreviation), `POSSESSIVE_MARKS`
+  (one mark after the fold), `SCAN_POSITION_KEYS` and `SCAN_POSITION_ABBREVIATIONS` (now
+  `positionFound`), the scan's zero-width set, `positions.ts`' own dash fold, "edge" in SCAN_ONLY_WORDS
+  (the EDGE abbreviation reads it in any case), the entries their spellings now cover
+  ("signal-caller", "place-kicker", "edge-rusher", "pass-rusher", "nickelback"), and `match.ts`'
+  first-mention reading and spelled-holder shortcut.
+- **Tests** · `tests/sources/news/match-r86.test.ts` (45), `match-r86-cases.test.ts` (21),
+  `positions.test.ts` (13, rewritten), `feeds.test.ts` (one more), `match-universe.test.ts` and
+  `match.perf.test.ts` (two more). Every list is held word for word and entry by entry. The dash fold
+  is held over every Pd character Unicode lists (the test enumerates them), each apostrophe by a label
+  and by the scan's "TEAM'S", and each line-break character and tag form by a label. A mutation run
+  deleted each of the 580 closed-list entries and 46 character-class and alternation entries
+  one at a time (626 mutants), with the word-for-word tests removed: a behaviour test caught every
+  one. The cases file holds the 23 violations with every variant and the triage's texts (142 rows),
+  and the round's batteries (274 more titles), each with whose item it is. None reaches another holder
+  of the name, except the readings below. The properties now write every list's forms in every
+  spelling, and the frozen `f41e810` oracle still matches the unique names over the 142 fixture items
+  and the generated corpus. Of the 98 tests in the four files this round rewrote or extended, 41 fail
+  at `6ba7bb1`, 67 at `dbe9686` and 77 at `f41e810`. Each clause has a test that fails at all three:
+  (a) "adjacency as written", "a label must fit exactly one holder", "labels … pick none; so does a
+  segment …" and "a label of teams alone must open its clause"; (b) "every form the attack on the
+  first build found missing"; (c) and (d) "a spelled name is a shared name still".
+- **Expectations this round changed** (each commented where it stands; none moves to the other
+  holder). "DE Byron Young" and "Eagles DT Byron Young" now pick the holder of that ESPN position
+  (`match-r86.test.ts`, `match-universe.test.ts`, the R8-3 texts). "Michael Carter II: Records
+  interception | … in the Eagles' win." loses the residual: it names a team. The R8-3 texts' two-word
+  labels ("Rams outside linebacker Byron Young", "Chiefs defensive lineman Chris Jones", "Vikings slot
+  receiver …", "Minnesota Vikings wide receiver …") give `full_name_team`. "EDGE Byron Young" and
+  "Byron Young (Eagles DT)" pick their holder.
+- **Measured** · the gate's battery 1 still has no misattribution and 19 right refs. The last attack's
+  4,000-character item and the round's hostile items (compounds, domains, tags, unclosed tags, nested
+  entities, quotes, hyphens, camel-cased pairs, labels) each cost at most 2.8 times a benign near-cap
+  item (about 2.4 ms), and 1,000 of them build in about 2.5 s (bound 15 s).
+- **The recall cost** (refs to a shared name's holders; the batteries by their labels):
+  - Over the earlier batteries' 1,167 labelled texts, 318 carry their right holder's ref (326 at
+    `6ba7bb1`, 529 at `dbe9686`, 424 at `f41e810`) and 3 a wrong one, the accepted residuals (3, 237
+    and 383). Against `6ba7bb1`, 4 star and 12 namesake refs are lost, and 1 star and 7 namesake refs
+    gained. Against `dbe9686`, 162 star and 58 namesake refs are lost and 9 namesake refs gained,
+    while 234 wrong refs go. Against `f41e810`, 195 star and 29 namesake refs are lost and 4 star and
+    114 namesake refs gained, while 380 wrong refs go.
+  - Over the round's own batteries (289 texts on a shared name), 68 carry their right holder's ref
+    (69, 80 and 60) and 6 a wrong one (115, 136 and 166). Against `6ba7bb1`, 14 star and 2 namesake
+    refs are lost and 4 star and 11 namesake refs gained, while 109 wrong refs go; against `dbe9686`,
+    20 and 5 lost, 4 and 9 gained, 130 wrong gone; against `f41e810`, 29 and 1 lost, 2 and 36 gained,
+    160 wrong gone.
+  - Over the 142 recorded fixture items, nothing changes against `6ba7bb1`. Against `dbe9686` and
+    `f41e810` the CBS "Lamar Jackson injury update: Ravens QB …" still loses its star ref, and
+    against `f41e810` "Sources: Ravens QB Jackson has ankle sprain …" still gains the QB's surname
+    ref. Unique names differ from `f41e810` on none.
+  - The star refs lost against `6ba7bb1` are items that name a form the scan now finds ("WR4",
+    "split end", "per TitansOnline.com", "Minneapolis"), a writer's position ESPN does not give him
+    ("Chiefs DE Chris Jones", "Rams linebacker Byron Young"), or a team after a blocker word ("Browns
+    at Vikings Justin Jefferson props"). The new forms that are also ordinary words take the star's
+    residual away where they stand ("throws a dime", "a roster slot", "(nose)", "per CBS Sports",
+    "Brown" as a surname), as the ruling accepts.
+- **Kept as accepted, or a reading for the re-gate** · the residual (the 3 above, and gate battery 2's
+  "Lamar Jackson: Inks reserve/future contract"); the recall loss; choice 6; a free agent fits no team
+  label; two holders on one team at one position. Readings: a label written next to the name picks him
+  even where the item is his namesake's ("Ravens QB Lamar Jackson's namesake signs with Bengals", the
+  round's B3 rows, as at every earlier build); a name the title writes alone and the blurb labels takes
+  the blurb's label, even where the blurb contrasts the other holder ("Justin Jefferson: Released by
+  Browns | Not to be confused with Vikings' Justin Jefferson"; within one segment such a contrast
+  picks no one); an inline tag inside a label breaks it ("Vikings<b> WR</b> Justin Jefferson"); and a
+  newline a feed writes inside a field is kept as a break (CBS's padding around a field is not one).
 
 ## Reviews (re-run on every version bump of the named dependency)
 
