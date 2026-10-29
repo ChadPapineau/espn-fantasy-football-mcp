@@ -484,13 +484,17 @@ literally reads it):
 | small capitals and other scripts | Justin Jefferson: Placed on IR by the ʙʀᴏᴡɴꜱ | Justin Jefferson/MIN/WR:full_name u0 |
 | choice 6 (D4) | Browns' Justin Jefferson: Placed on IR | ∅ u1 |
 | the 10-ref cap (D6) | a roundup of eleven names or more | unique names as at `f41e810`; the cap keeps the ten best |
-| redundant entries and code that changes no outcome | `OnePride`; the 25 code survivors of the attack on `08524ff`; this round's remembered lookups, the ASCII case test and the head pre-check | no behaviour to hold |
+| redundant entries and code that changes no outcome | `OnePride`; the 25 code survivors of the attack on `08524ff`; this round's remembered lookups, the ASCII case test and the head pre-check; the verifier round's 11 survivors: its pair pre-check made always true or removed, its pair cache and remembered reads switched off, their key's possessive bit, and the period passed as asked | no behaviour to hold |
 
 The order rule's rows the round-3 judge rejected now fail closed, because the surname a capitalised
 word stands before is a mention again: "Justin Jefferson: Catches TD | All-Pro Jefferson beat Browns
 LB Jefferson, his namesake, deep." and "Lamar Jackson: Throws three TDs | MVP Jackson torched CB
 Jackson, his namesake, twice." give ∅ u1 (the CLE LB at 0.95 and the free-agent CB at 0.80 at
-`08524ff`).
+`08524ff`). So do the rows of the R8-6 round-2 judge's first rejected class (B9-14, B9-15): since
+round 3 a surname written alone before a labelled mention in its segment may be the other holder, so
+no label picks. "Browns release Jefferson | Jefferson, not to be confused with Vikings WR Justin
+Jefferson, was waived Tuesday." and "Jackson (not Ravens QB Lamar Jackson) signs with Bengals practice
+squad" give ∅ u1 (the MIN WR and the BAL QB at 0.95 at `66bb2a2`).
 
 **The counting noise.** A shared surname no label picks is counted wherever it stands (R8-7 (4)), so a
 person outside the universe who shares it is counted too: a dateline, a writer, a coach, a college

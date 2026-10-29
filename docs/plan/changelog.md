@@ -1671,6 +1671,102 @@ No. 1" and "Former Brown cut" (u2). No test is deleted, skipped or loosened.
   - Both are in `docs/evals/stage-c-backlog.md` "Known limitations of the news matcher (R8-8)", with
     every class R8-8 (3) names.
 
+### R8-6 fix round 5 — the verifier's item under R8-8 (commit `5531653`)
+
+The independent verifier of R8-8's targeted round found one gate-class item at `67bc88e`: a crafted
+item that slows the news build past the perf tests' bounds (R8-8 (1) and (2): linear time within the
+bounds on hostile input; an adversarial capped item costs at most 6 times a benign one, and 1,000
+build in under 15 s). It is fixed at its root in `src/sources/news/labels.ts` and `positions.ts`.
+Nothing the matcher reads changes: refs and counts equal `67bc88e`'s on every text compared.
+
+- **The item: a shared surname that is also a team form, repeated** · `labels.ts` `sharedReading`,
+  `positions.ts` `isAmbiguousLabelWord`.
+  - The text. The title is "Lamar Jackson: " followed by "Brown " repeated, capped at 1,000
+    characters, and the blurb is "Brown " repeated to 4,000. The same holds for "Houston ",
+    "Henderson " and "Washington " and for the four possessives: a singular, two homes and a
+    facility, each a shared surname. By the verifier's measure each cost 11 to 20 times a benign
+    capped item at `67bc88e`, and 1,000 took 41 to 60 s through `buildNewsRows`. In its sweep (370
+    words in three writings), 8 of the 1,110 items were over 6 times.
+  - The root. `cd7f99a` removed round 3's guards, so each capitalised shared surname is a mention,
+    and `match.ts` `surnameLabel` reads its label. The label reader reads up to six label words
+    before a mention and up to six tag items after it. Here every word is a form, so each mention
+    re-read the window that the mention before it had read. Each word read also recomputed the
+    spellings of every `AMBIGUOUS_LABEL_WORDS` entry.
+  - The fix. `isAmbiguousLabelWord` keys the spellings once, in a set. The form that ends at an
+    offset (`formEndingAt`) and the tag item at an offset (`itemAt`) are read once per item. An
+    index, allocated on first use, remembers them, so adjacent mentions share their windows' words.
+    The key holds the possessive, and holds the period only where the word ends with one, because
+    `startOf` reads it nowhere else.
+  - The head words of the same sweep. A word that opens a form of several words ("Ford" of "Ford
+    Field", "Long" of "long snapper", "White" of "White Sulphur") tried every longer form at each
+    word, in the label reader, the tag reader and the scan's window. Under tsx, "Ford " and "Long "
+    cost 6.2 to 6.4 times a benign item at `67bc88e`. A form of several words is now looked up only
+    when its first two words open one (`opensPair`, with `positions.ts` `opensPositionPhrase` for
+    the position forms and the techniques). The check is exact: a form's key opens with its first
+    two words' key, and a technique has two words at most.
+
+  Test: `match.perf.test.ts` "R8-8: the verifier's team-word surnames". Each of the eight writings
+  gives no ref and counts two names (`unresolved` 2), and costs at most 6 times a benign capped
+  item. Four times the blurb costs about four times as much, and 1,000 "Brown " items build in under
+  15 s. At `67bc88e` both tests fail: "Brown " costs 72.0 ms against the bound of 11.5 ms (6 times a
+  benign 1.9 ms), and the 1,000 items take 73.0 s. Here they take 8.3 s.
+
+  Test, the code the fix adds: `match-r88.test.ts` "the verifier's item (67bc88e)", two parts. The
+  pre-check's rows hold each kind of pair it must let through, in each reader. The remembered reads'
+  test reads every word's label and sides on one reading, forwards and then backwards, and expects
+  what a fresh reading per word gives. Its texts have two mentions that read the same words, because
+  a surname that is a form stands between them, and in three of them a state's period is read both
+  ways. Its rows read one such text ("Brown Henderson CB: Out") and a position with a possessive in
+  a tag ("Justin Jefferson (LBs'): Out" gives ∅ u1). Every row gives the same outcome at `67bc88e`.
+- **No outcome changes.** A differential compares the tree with `67bc88e` (a `git archive`, each
+  bundled, both in one process) in three ways, and finds no difference:
+  - `matchItem` over 264,626 texts: every string literal of the news and evidence tests, the gate's
+    four batteries, each of the 1,378 listed forms (in up to four cases) in 28 templates, runs of
+    forms, heads and shared surnames, each of the 177 heads before each of the forms' 140 second
+    words and before words that open none, and 30,000 random items (10,000 in three cases);
+  - `sharedReading`'s `label`, `surnameSides`, `inForm` and `segment`, in 6,840,054 reads: each word
+    of each text, and each word up to the next word's end. The words are read forwards on one
+    reading and backwards on another, because a remembered read must not depend on what was asked
+    before;
+  - `scanFinds` over 268,554 texts.
+- **The mutation run** over the code this round adds or moves (27 mutants, against the news tests).
+  - The 16 mutants that change an outcome are killed. Four of them survived the first run: the
+    period bit of the remembered reads' key, an off-by-one in either index, and the rule that a
+    position in a tag takes no possessive, which moved into `readItem`. The remembered reads' test
+    and its rows were written for them, and each of the four now fails them.
+  - The 11 that survive change no outcome. They make the pair pre-check always true, or remove it
+    from any of its three readers; switch off the pair cache or either index; drop the key's
+    possessive bit (one offset never ends a label word both before a possessive and before a space);
+    or pass the period as asked (it is read only where the word ends with one). They are listed in
+    `docs/evals/stage-c-backlog.md` with the earlier rounds' code that changes no outcome.
+- **Measured** (locally, under `heavy-lock`, against `67bc88e` in the same runs). The Mac had just
+  restarted, so both trees ran slower than in the verifier's runs.
+  - Per item, in an esbuild bundle of each tree (without tsx's function names): "Brown " costs 7.0
+    to 7.7 ms, 3.6 times a benign item (66 ms and 30 times at `67bc88e`). The head words gain less
+    here than under tsx: "Ford " costs 3.8 to 5.6 times (5.2 to 5.5 at `67bc88e`), "Long " 3.3 to
+    4.3 (4.8 to 5.6) and "White " 3.0 to 3.8 (4.3 to 4.6); the spread is mostly the benign item's.
+    The shortest shared surnames have three letters, and each of their words is a mention; they cost
+    what they did: "Lee " 4.7 to 5.0 times (4.9 to 5.1 at `67bc88e`), "Fox " 4.2 to 4.5 (4.2) and
+    "Jones " 3.3 to 3.7 (3.2).
+  - Under tsx, the verifier's measure (its scripts, rebuilt). The eight team-word writings cost 2.0
+    to 3.6 times a benign item (10.2 to 20.6 at `67bc88e`), and the cost about doubles with the
+    blurb. "Ford " costs 3.9 to 4.1 times (6.4) and "Long " 3.4 to 3.5 (6.3). Through
+    `buildNewsRows`, 1,000 items take 10.2 s for "Brown " (95.1 s at `67bc88e`), 9.8 s for
+    "Brown's " (65.9), 9.4 s for "Houston " (58.0), 7.9 s for "Henderson " (48.9) and 8.2 s for
+    "Washington " (45.3).
+  - The sweep, rebuilt as a superset of the verifier's: 715 words (the recorded universe's 302
+    shared surnames, every first word of a listed form of several words and every one-word team
+    form), each in three writings ("Brown ", "Brown's ", "Brown, "), so 2,145 items. At `67bc88e`,
+    10 are over 6 times when measured again: "Brown " 29, "Houston " 23, "Brown's " 23,
+    "Washington " 19, "Henderson " 18, "Houston's " 18, "Henderson's " 15, "Washington's " 14,
+    "Long " 6.4 and "Ford " 6.2. Now none is. The costliest is "Lee " at 5.1, the cost of the
+    shortest surnames above, which `67bc88e` had too.
+  - CI's Linux runner is faster than this Mac: at `67bc88e` CI's process job built the 1,000 items
+    of the attack on `08524ff` in 4.6 s, and this Mac takes 5.4 s.
+- **The gate's batteries** (`gk-homonyms{,2,3,4}.mts`) give the same output as at `67bc88e`: 52
+  labelled titles, 19 right, 33 with no ref, none wrong.
+- **The recall cost:** none. Refs and counts equal `67bc88e`'s on every text the differential reads.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
