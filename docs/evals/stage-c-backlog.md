@@ -151,6 +151,44 @@ Readings for the re-gate to check:
 - **The scan errs toward finding.** "leads the pack", "OT" and "medical bills" each take the residual
   away.
 
+**Fix round 3 of R8-6, the first under R8-7 (2026-10-29, commit `93f8843`; changelog §B9, "R8-6
+fix round 3 — the first under R8-7").** The independent attack on `66bb2a2` found 11 violations. Ruling
+R8-7 bounds what the scan and the labels read. What R8-7 closed:
+
+- **A surname's label (R8-7 (4)).** A surname that a full name in the item ends with is a mention of
+  that name. Labels that fit different holders pick none: "Chiefs DT Harris: Placed on IR | Harris is
+  no relation to Titans CB Marcus Harris." gets no ref. The recall rows give the labelled holder
+  ("Justin Jefferson: Questionable | Vikings WR Jefferson (hamstring) …"). A bare shared surname
+  reads its label in every form: a possessive of an abbreviation, a short name or a shared home, a
+  two-word position in title case, a capitalised word after it, a surname that is a team word. Left
+  to no one, it is counted, beside other refs too.
+- **A spelled suffix (R8-7 (5)).** It narrows the holders a label can fit. The residual goes only to
+  the prominent holder, and only when no spelling excludes him: "Michael Carter II: Questionable"
+  gets no ref.
+- **Dotted abbreviations (R8-7 (3)).** "L.A.'s Byron Young" and "Byron Young (L.A.)" are labels.
+- **The lists (R8-7 (1)).** For every team: the stadium by its names since 2015, the training facility,
+  its town and the camp town, the home state's postal and AP abbreviations, the official hashtag, and
+  the fans' names. Every position form is read spaced, hyphenated or glued, and the alignment words
+  are listed. The triage's `scan.out` finds 82 of its 83 forms. Title-case "Wash." is R8-7 (2)'s
+  ordinary word.
+- **Ordinary-word abbreviations (R8-7 (2)).** They count in capitals outside an all-caps segment, and
+  in any case right after a game or move word: "vs. Sea", "by Den", "at Will".
+- **One set of forms (R8-7 (3)).** Every form the scan reads labels a name where (a) places a label.
+- **The closing tag.** A test holds it, and deleting the alternative fails it.
+
+What stays accepted (R8-7 and the judge's rejected list):
+
+- the residual and the recall loss;
+- a form outside R8-7 (1)'s categories ("Topeka"; state names other than the homes and New Jersey);
+- the lookalike and apostrophe-like letters;
+- the cross-segment contrast, the namesake of a labelled star, and a coach on a team with one sharer,
+  each read as (a) reads it;
+- choice 6 and the cap.
+
+The round's own readings are in §B9: R8-7 (2) as written ("with no timetable" counts its "no"), the
+first-name rule ("Bill Johnson", "Eagles' Lane Johnson"), the order rule for a surname alone in a
+labelled segment, and the counting noise of a dateline surname.
+
 **Ruled R8-3 (2026-10-28, changelog §R8):** choices 1–5 stand; a loose team mention on a shared name is
 never evidence for a holder; the opponent cues cover result and play wording; choice 6 takes (c),
 position words from ESPN's `position_id`, on both paths. The gate's fourth run found namesake items

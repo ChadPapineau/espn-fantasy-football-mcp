@@ -1305,6 +1305,181 @@ character-set entries no test held. Each is fixed at its root.
   picks no one); an inline tag inside a label breaks it ("Vikings<b> WR</b> Justin Jefferson"); and a
   newline a feed writes inside a field is kept as a break (CBS's padding around a field is not one).
 
+### R8-6 fix round 3 — the first under R8-7 (commit `93f8843`)
+
+The independent attack on `66bb2a2` (its docs) found 11 violations. Ruling R8-7 (§R8, `c2a631d`)
+bounds what R8-6's scan and labels must read: (1) the lists, complete per team in named categories;
+(2) the case of an abbreviation that is an ordinary word; (3) one set of forms for the scan and the
+labels; (4) a surname's label and count; (5) a spelled suffix. Each violation is fixed at its root as
+R8-7 settles it, in `src/sources/news/labels.ts`, `positions.ts` and `match.ts`. Names one universe
+player holds still take `f41e810`'s path: no difference over the 142 fixture items, the generated
+corpus or the earlier batteries.
+
+- **Violation 1, a surname's label (R8-7 (4))** · `match.ts`. A surname written alone that a full name
+  in the item ends with is a mention of that name, and its label is the name's label. So labels that
+  fit different holders pick none: "Chiefs DT Harris: Placed on IR | Harris is no relation to Titans
+  CB Marcus Harris." gets no ref and is counted (the Titans CB at 0.95 at `66bb2a2`). So do the eight
+  star-to-namesake variants the attack named. The recall rows give the labelled holder ("Justin
+  Jefferson: Questionable | Vikings WR Jefferson (hamstring) …" is the WR's at 0.95; no ref at
+  `66bb2a2`). The one-segment guard reads surname mentions too. A surname alone written before a
+  labelled mention in its segment may be the other holder, so no label picks ("Justin Jefferson:
+  Catches TD | Jefferson beat Browns LB Jefferson, his namesake, deep."). One written after a labelled
+  mention refers back to him ("Vikings WR Justin Jefferson … Jefferson is expected to play"). A
+  labelled surname that two full names in the item end with may belong to either name, so neither
+  name takes its label.
+- **Violation 2, a spelled suffix (R8-7 (5))** · `match.ts`. A written suffix excludes every holder
+  ESPN spells otherwise (one no holder carries excludes them all). It narrows the holders a label can
+  fit and never makes the spelled holder take the residual. The residual goes only to the name's
+  prominent holder, and only when no spelling excludes him. "Byron Murphy II: Ruled out for Sunday |
+  …", "Michael Carter II: Questionable", "DJ Turner II", "Chris Smith II" and "Tony Brown II" get no
+  ref and are counted (each the spelled holder at 0.80 at `66bb2a2`). So do the four items where a
+  suffix on another occurrence re-spelled the subject. "Seahawks DT Byron Murphy II" still picks his
+  holder.
+- **Violation 3, a bare shared surname's label in every form (R8-7 (4))** · `match.ts`,
+  `labels.ts` `formBefore`, `inForm`. The first-name gate asks the label reader whether a form stands
+  right before the surname, possessive cut. So "MIN's Jefferson", "LA's Young", "Pack's Johnson",
+  "Cincy's Taylor", "Los Angeles' Young" and "New York's Wilson" are labels, and so is a two-word
+  position in title case ("Chiefs Defensive Tackle Jones"). A capitalised word after a shared surname
+  no longer drops it ("Rams DE Young Records Two Sacks"). A surname that is also a team word reads its
+  labels ("Jaguars WR Washington"). Each was no ref and uncounted at `66bb2a2`. Three rules keep this
+  fail-closed. A first name before the surname makes it another person's name: a capitalised word
+  that is no lead word and no label word, or a one-word team form that may be a first name, written
+  without a possessive ("Van Jefferson", "Bill Johnson", "Charlotte Jones"). So does a universe
+  surname or a full name right after it ("Eagles' Lane Johnson", "Burns Denzel Ward"), and so does a
+  form of several words it stands in ("Allen Park", "Gang Green", "Ralph Wilson"). A team word with
+  no label is the team. A team it names right after it is the team's own name ("Washington
+  Commanders:").
+- **Violation 4, dotted abbreviations (R8-7 (3))** · `labels.ts`. An initialism's period is part of
+  the word in the label reader, before the name and in a tag. So "L.A.'s Byron Young", "Byron Young
+  (L.A.)", "Byron Young, L.A.:", "K.C.'s Chris Jones" and "L.A. DE Byron Young" give `full_name_team`
+  (no ref, or 0.80, at `66bb2a2`).
+- **Violation 5, the unlabelled surname (R8-7 (4))** · `match.ts`. A shared surname that no label
+  picks is counted, beside other refs too ("Jordan Addison: Two TDs | Addison and Jefferson combined
+  for 200 yards." is Addison's with `unresolved` 1). The news build counts it.
+- **Violations 6, 7, 9 and 10, the lists (R8-7 (1))** · `labels.ts`, `positions.ts`. The triage's
+  `scan.out` finds 82 of its 83 forms now: the towns, facilities and stadiums, the nicknames, fans'
+  names, city names and state abbreviations, and the alignment words and spaced position forms. The
+  one left is "Wash." alone in title case. It is listed, but its lower case is an ordinary word, so
+  R8-7 (2) counts it only in capitals ("WASH.") or after a game or move word ("to Wash.").
+- **Violation 8, ordinary-word abbreviations (R8-7 (2))** · `labels.ts`. "vs. Sea", "by Den", "@
+  Min", "for Pit", "at Will" and "Traded to Ten" take the residual away. "Jackson was limited", "No
+  timetable" and "He will play" keep it.
+- **Violation 11, the closing tag** · `tests/sources/news/match-r86.test.ts`, `match-r87.test.ts`. A
+  closing tag alone ("Vikings</p>Justin Jefferson") is a break the tests hold. Deleting `TAG_RE`'s
+  closing alternative fails them.
+
+What each clause of R8-7 built:
+
+- **(1) Complete lists.** Each team's forms in every category the ruling names. `TEAM_CITIES` (77)
+  holds the city or state, its short names and nicknames, and New Jersey. `TEAM_STADIUMS` (56) holds
+  the current stadium by every name since 2015, by the words a writer keeps ("Lincoln Financial",
+  "the Linc", "US Bank", "Bank of America", "M&T Bank"), and some former homes. `TEAM_FACILITIES` (91)
+  holds the training facility, its town and the camp town. `TEAM_HASHTAGS` (15) holds the official
+  hashtags no other form finds. `TEAM_FAN_NAMES` (41) holds every form an attack has reported, and
+  more. `TEAM_LEGACY_NAMES` (8). `TEAM_SHORT_NAMES` (18) adds "Jints", "Brownies", "Stillers",
+  "Commies", "Donkeys" and "Bungles". `TEAM_ABBREVIATIONS` (58) adds PFR's franchise codes CRD, RAV,
+  HTX, CLT, OTI and RAI. `TEAM_LEGACY_ABBREVIATIONS` (8) adds PHO and BOS. `TEAM_STATE_ABBREVIATIONS`
+  (35) holds each home state's postal and AP abbreviations, and D.C. Louisiana's "LA" and "La." read
+  as the Rams' LA, and New York's "NY" as either New York team: one form, one reading. Dotted forms
+  hold by rule ("N.O.", "C.L.E."). Each word form is read in each spelling: its words joined by a
+  space, a hyphen or nothing, each join chosen apart, with its possessive "'s" written or not. A
+  spaced spelling never opens with "a" ("A-Town"). Positions: `POSITION_ABBREVIATIONS` (58; G, IOL and
+  SAF new) and `POSITION_WORDS` (83). Each compound is listed with a space at its joins ("half back",
+  "line backer", "d line", "weak side", "strong side") and read glued, hyphenated or spaced, singular
+  or plural. The scan reads forms of up to four words in a row, a period allowed inside one ("St.
+  Louis", "U.S. Bank"), and runs of three or four parts inside one hyphenated word. It finds the forms
+  inside a compound through a trie. A test table holds each of the 32 teams in all nine categories.
+- **(2) Ordinary-word abbreviations.** `ORDINARY_WORD_ABBREVIATIONS` (47: the teams', the states' and
+  the positions', EDGE and LT among them) replaces `CAPS_ONLY_ABBREVIATIONS`,
+  `CAPS_ONLY_POSITION_ABBREVIATIONS` and `HEADLINE_ORDINARY_WORDS`. Such a form counts in capitals
+  outside a segment written all in capitals, and in any case right after a `GAME_MOVE_WORDS` word (14:
+  "vs", "vs.", "v.", "@", "at", "against", "by", "from", "for", "to", "with", "visits", "hosts",
+  "faces"). Every other abbreviation counts in any case ("lb", "ne", "cle", "minn"), and so does every
+  dotted one.
+- **(3) One set of forms.** The label reader and the scan share `formAt`, so every form the scan
+  reads labels a name where (a) places a label: a place, a stadium, a singular, a fans' name, a
+  hashtag after "#", a state abbreviation, a plural or ranked position. The scan-only lists are folded
+  into the label lists. Each position form has the ids of the players it may describe, wide rather
+  than narrow: "tackle" the defensive line, "returner" a back, receiver or defensive back, and an
+  offensive-line form or "snapper" no one. So "Nashville's Marcus Harris" is the Titans CB at 0.95,
+  and "Vikings pass-catcher Justin Jefferson" the WR. The rules that take a label away read every
+  form. An ordinary-word form (`AMBIGUOUS_LABEL_WORDS`, 13, and every ordinary-word abbreviation)
+  right after a `LABEL_BLOCKERS` word or a game or move word labels no one ("at WILL Justin
+  Jefferson"). `LABEL_BLOCKERS` (46) loses the eight words `GAME_MOVE_WORDS` holds.
+- **(4) Surnames** and **(5) spelled suffixes**: violations 1, 3, 5 and 2 above.
+- **Also** · the unused exports went (`labelPartsNextTo`, `namesTeamOrPosition`, `isLabelForm`,
+  `labelTeams`, `breakOffsets`, `foldText`, `isCaps`, `positionFound`, `positionLabelIds`). So did the
+  scan-only and caps-only lists, and four hashtags another form finds (`OnePride`, `DUUUVAL`,
+  `BirdGang`, `RuleTheJungle`). "Hollywood" stays out: it is a player's nickname, "Hollywood Brown",
+  and as a label it would pick a Brown. The `CONFUSABLES` and `APOSTROPHES` comments say what the
+  lists hold.
+- **Tests** · `tests/sources/news/match-r87.test.ts` (25) holds each violation with the variants the
+  attack named, each clause, the 32-team table, and three fast-check properties. One property is
+  R8-7 (2)'s case rule, one any one-team form labelling with a possessive, and one a team's
+  possessive before a shared surname. `tests/sources/news/forms.ts` writes every list once for the
+  tests. `match-r86.test.ts` (43) iterates it, so each entry is held word for word and entry by entry:
+  found in every case and spelling, and a label to its team or ids. Its two properties write every
+  list's forms, dotted abbreviations included. The news suite has 226 tests (202 at `66bb2a2`). Of
+  `match-r87.test.ts`'s 25, 20 fail at `66bb2a2` on refs or counts. The five that pass are controls or
+  guards: the out-of-category residual, the anaphora rule, a label among the spelled holders, the
+  possessive property, and the closing tag, which the mutation holds. A mutation run deleted each of
+  the 854 list entries in turn in a copy of the modules and compared the texts its entry-by-entry
+  tests derive. The first run's 13 survivors were redundant entries and went: "@" was read by hand,
+  eight `LABEL_BLOCKERS` words were also game words, "3 technique" was a technique by rule, and
+  "center", "centre" and "guard" as ambiguous words could change no outcome. The rerun had none. 84
+  code mutants (character classes, regex alternatives, and each rule this round added) ran against
+  the news suite, and two more for the surname-after rule added since. Five of the first run's six
+  survivors gained tests or went (a redundant clause); the rerun kills them. The one kept is
+  `headNear`, a speed pre-check that by design never changes a result. Unique names still equal the
+  frozen `f41e810` oracle.
+- **Expectations R8-7 changed** (each commented where it stands; none moves to another holder).
+  "LAMAR JACKSON: NO TIMETABLE FOR RETURN", "The edge was released" and "Will Justin Jefferson play
+  Sunday?" keep the residual (R8-7 (2)). "Jefferson: Catches TD" and "Jackson: Limited" are counted
+  (R8-7 (4), the `match-r86.test.ts` pin at 66bb2a2's line 520). The spelled holders' residuals go
+  (R8-7 (5)): seven `match-r86-cases.test.ts` rows, `match-universe.test.ts`' suffix test, and "Lamar
+  Jackson Jr.", which excludes both holders. Lower-case "lb", plural "QBs" and "receivers", and
+  "pass-catcher" label their holder (R8-7 (2), (3)). The closed-list tests are rewritten: every form
+  labels, the case rule is the ordinary-word list, and three-letter ordinary abbreviations in a
+  lower-case hashtag are not found.
+- **Measured** · the gate's four batteries are unchanged from `66bb2a2`: battery 1 has 19 right refs,
+  33 recall losses and no misattribution, battery 2 its five accepted residuals, and batteries 3 and
+  4 no ref. Speed against `66bb2a2`: the 5,000-item build takes 5.3 s (4.6 s; bound 15 s). 1,000 of
+  the last attack's capped items build in 1.7 s (1.4 s), and 1,000 of the second build's costliest in
+  3.1 s (3.1 s). Every ratio test holds.
+- **The recall cost** (refs to a shared name's holders; the batteries by their labels):
+  - Over the earlier batteries' 1,167 labelled texts, 318 carry their right holder's ref (318 at
+    `66bb2a2`, 424 at `f41e810`) and 3 a wrong one, the accepted residuals (3; 383). Against
+    `66bb2a2`, 1 namesake ref is lost (a spelled suffix's) and 1 star ref gained; no wrong ref is
+    added or removed. Against `f41e810`, 194 star and 30 namesake refs are lost and 4 star and 114
+    namesake refs gained, while 380 wrong refs go.
+  - Over the attack on `6ba7bb1`'s 289 battery texts, 61 carry their right holder's ref (68 at
+    `66bb2a2`, 60 at `f41e810`) and 6 a wrong one, the readings below (6; 166). The 7 lost against
+    `66bb2a2` are all spelled suffixes' residuals, as R8-7 (5) writes. Against `f41e810`, 29 star and
+    8 namesake refs are lost and 2 star and 36 namesake refs gained, while 160 wrong refs go.
+  - Over the attack on `66bb2a2`'s 187 misattribution-battery texts, 42 carry their right holder's
+    ref (40; 47) and 24 a wrong one (83; 92). Against `66bb2a2`, 2 star refs are gained, none is
+    lost, and 59 wrong refs go. The 24 left are the judge's rejected classes: the cross-segment
+    contrasts, the namesakes of a labelled star, the lookalike letters and the apostrophe-like
+    letters.
+  - Over the 142 recorded fixture items, the refs equal `66bb2a2`'s, and unique names `f41e810`'s.
+    The `unresolved` count rises from 2 to 8: bare shared surnames now counted ("Daniels set to
+    practice in full", "Reid ranks the top 50 prospects …: Smith at No. 1?", in the capture and the
+    labelled set).
+- **Kept as accepted, or a reading for the re-gate** · the residual; the recall loss; choice 6; the
+  judge's rejected classes. Readings:
+  - R8-7 (2) as written. A "no" right after "with" or "at" counts ("Out with no timetable", "at No.
+    1"), at a recall cost. So does an AP abbreviation that is an ordinary word: "Wash.", "Mass.",
+    "Ill.", "Pa.", "Mo." and "La." count only in capitals or after a game or move word. Full state
+    names other than the teams' homes and New Jersey are outside R8-7 (1) and are not listed ("Ohio",
+    "Texas", "Florida").
+  - The first-name rule. A singular, a city, a short name or a fans' name written without a
+    possessive right before a bare surname is read as a first name. So is a surname followed by a
+    universe surname. Both get no label and no count.
+  - The order rule: a surname alone before a labelled mention contrasts, and one after it refers
+    back.
+  - The counting noise. A dateline or a draft writer's surname that a universe player shares is
+    counted ("HENDERSON, Nev."), as a count only.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
