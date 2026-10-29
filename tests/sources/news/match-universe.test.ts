@@ -297,6 +297,7 @@ describe("the final gate's recall items (round 2): fail-safe by design, as ruled
   // owned ones a namesake WITH a team can block are these three (the Lamar Jackson and Chris Jones
   // namesakes are free agents).
   const DE_YOUNG = idOf("Byron Young", "LA"); // 20.13 % owned; the Eagles DT namesake 0.08 %
+  const DT_YOUNG = idOf("Byron Young", "PHI");
   const CB_HARRIS = idOf("Marcus Harris", "TEN"); // 2.08 %; the Chiefs DT namesake 0.02 %
   const DT_HARRIS = idOf("Marcus Harris", "KC");
 
@@ -339,10 +340,13 @@ describe("the final gate's recall items (round 2): fail-safe by design, as ruled
       "Cleveland's Justin Jefferson: Records sack",
       "Philadelphia's Byron Young: Two sacks",
       "Kansas City's Marcus Harris: Records sack",
-      // "DT" fits both Byron Youngs (ESPN lists an interior end as DT or DE): it rules no one out
-      "Eagles DT Byron Young: Records two sacks",
     ])
       expect(refs(title), title).toEqual([]);
+    // R8-6 (a): ESPN's DT fits only an ESPN DT, so it rules the Rams DE out and the Eagles DT takes
+    // it (no ref at dbe9686 and 6ba7bb1, where "DT" fitted both)
+    expect(refs("Eagles DT Byron Young: Records two sacks")).toEqual([
+      [DT_YOUNG, "full_name_team"],
+    ]);
     // R8-3 clause 4, choice 6(c): a position written next to the name that rules the star out lets
     // the attached namesake take it (each was no ref)
     expect(refs("Browns LB Justin Jefferson: Records sack")).toEqual([
@@ -352,9 +356,10 @@ describe("the final gate's recall items (round 2): fail-safe by design, as ruled
     // the bare surname follows the same rule (R8-3 clause 4): the position decides there too
     expect(refs("Browns LB Jefferson: Records sack")).toEqual([[LB_JEFFERSON, "last_name_team"]]);
     expect(refs("Cleveland's Jefferson: Records sack")).toEqual([]);
-    // R8-6 (c): a cue rules no one out now, and "DT" fits both Byron Youngs: the star blocks the
-    // attached namesake, no ref (the Eagles DT at 0.95 before)
-    expect(refs("Eagles DT Byron Young: Records sack against the Rams")).toEqual([]);
+    // R8-6 (c): a cue rules no one out; R8-6 (a): the label fits only the Eagles DT
+    expect(refs("Eagles DT Byron Young: Records sack against the Rams")).toEqual([
+      [DT_YOUNG, "full_name_team"],
+    ]);
     expect(refs("Chiefs DT Marcus Harris: Records sack vs. Titans")).toEqual([
       [DT_HARRIS, "full_name_team"],
     ]);
@@ -598,13 +603,18 @@ describe("a team named loosely is never evidence for a namesake (news-match-univ
     expect(refs("Byron Murphy II: Records sack")).toEqual([[BYRON_II, "full_name"]]);
     expect(refs("Byron Murphy Jr.: Records sack")).toEqual([[BYRON_JR, "full_name"]]);
     expect(refs("Byron Murphy: Records sack")).toEqual([]);
-    // R8-3 clause 2: the suffix picks the Eagles S; the Eagles, named loosely, do not raise him to
-    // full_name_team on a shared name (was full_name_team)
+    // R8-6 (b): the one holder the suffix spells takes the residual only when the item names no
+    // team and no position; the Eagles, named loosely, are no label (full_name at 6ba7bb1, before
+    // the scan was read for a spelled name)
     expect(
       refs(
         "Michael Carter II: Records interception | Carter II picked off a pass in the Eagles' win.",
       ),
-    ).toEqual([[S_CARTER, "full_name"]]);
+    ).toEqual([]);
+    expect(refs("Michael Carter II: Records interception")).toEqual([[S_CARTER, "full_name"]]);
+    expect(refs("Eagles S Michael Carter II: Records interception")).toEqual([
+      [S_CARTER, "full_name_team"],
+    ]);
     // a suffix no namesake is spelled with is no evidence
     expect(refs("Lamar Jackson Jr.: Could miss multiple games")).toEqual([[QB_LAMAR, "full_name"]]);
   });

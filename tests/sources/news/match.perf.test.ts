@@ -158,3 +158,75 @@ describe("news matcher — R8-6: the last attack's capped item, over the recorde
     expect(performance.now() - t0).toBeLessThan(15_000);
   });
 });
+
+describe("news matcher — R8-6's second build: items at the caps against each new reading", () => {
+  const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+  const recorded = universeFromEspnPlayers(
+    playersRows(
+      JSON.parse(
+        readFileSync(path.join(ROOT, "fixtures/espn/recorded/season/players_wl.json"), "utf8"),
+      ) as unknown,
+      2026,
+    ).rows,
+    () => null,
+  );
+  const m = buildPlayerMatcher(recorded);
+  const benign = `Lamar Jackson: Questionable | ${"Notes on the week ahead. ".repeat(160)}`;
+  // each names no team and no position, so the scan reads all of it (the residual is taken)
+  const items: Readonly<Record<string, string>> = {
+    // camel-cased hashtags and handles: each read for its segments and the forms inside it
+    compounds: cap(`#AbcDefGhi @XyzQrsTuv ${"#QwertyUiop AsdfGhjkl ".repeat(200)}`, 4_000),
+    // dotted words: each part a compound
+    domains: cap("www.abcdefghij.com per qrs.tuvwx.net ".repeat(120), 4_000),
+    // tags and line breaks: the break pass marks each
+    tags: cap("<p>abc</p><br>def\n".repeat(250), 4_000),
+    // an unclosed tag run: the tag pattern's bounded attribute run
+    openTags: cap(`<a${"x".repeat(500)}`.repeat(10), 4_000),
+    // entities nested to the decoding bound
+    entities: cap("&amp;amp;amp;lt;b&amp;gt; ".repeat(160), 4_000),
+    // quotations opened and closed: the quote pass
+    quotes: cap("'abc def' ghi's ".repeat(250), 4_000),
+    // hyphenated words: every part, pair and glued spelling
+    hyphens: cap("a-b-c-d-e-f-g-h ".repeat(250), 4_000),
+    // camel-cased pairs: a compound each
+    camelPairs: cap("aB ".repeat(1_400), 4_000),
+    // the shared names, labelled again and again: a label window per mention
+    labels: cap("Ravens QB Lamar Jackson, LB Justin Jefferson (CLE - LB), ".repeat(80), 4_000),
+  };
+
+  it("each costs at most 6 times a benign near-cap item", () => {
+    const quiet = median(() => m.matchItem(benign));
+    for (const [name, blurb] of Object.entries(items)) {
+      const item = `Lamar Jackson: Notes | ${blurb}`;
+      const adversarial = median(() => m.matchItem(item));
+      // measured 2026-10-28: at most 2.8 times (the hyphenated words, 7 ms; the benign item 2.4 ms)
+      expect(adversarial, name).toBeLessThan(6 * Math.max(quiet, 0.05));
+    }
+  });
+
+  it("1 000 of the costliest build in < 15 s", () => {
+    const now = Date.parse("2026-10-06T20:00:00Z");
+    const previous = Array.from({ length: 1_000 }, (_, i) => ({
+      item_id: i.toString(16).padStart(32, "0"),
+      source: "cbs",
+      published_ms: now - 86_400_000,
+      first_seen_ms: now - 86_400_000,
+      title: "Lamar Jackson: Notes",
+      blurb: Object.values(items)[i % Object.keys(items).length] ?? "",
+      link: null,
+    }));
+    const t0 = performance.now();
+    const b = buildNewsRows({
+      format: NEWS_FILE_FORMAT,
+      source: "cbs",
+      fetched_ms: now,
+      xml: "<rss><channel></channel></rss>",
+      universe: recorded,
+      previous,
+      warnings: [],
+    });
+    expect(b.news).toHaveLength(1_000);
+    // measured 2026-10-28: about 2.5 s
+    expect(performance.now() - t0).toBeLessThan(15_000);
+  });
+});

@@ -102,12 +102,33 @@ export function collapse(raw: string | null): string | null {
   return t === "" ? null : t;
 }
 
+/** A line break as a feed writes it (the matcher's labels.ts reads the same set). */
+const LINE_BREAK_RE = /\r\n?|[\n\v\f\u0085\u2028\u2029]/u;
+
+/**
+ * `collapse` for a stored title or blurb, keeping each line break between two lines of text as one
+ * "\n": ruling R8-6 (a) — a team ending one line is not written next to a name opening the next, and
+ * the stored text is what the player matcher reads. Each line's layout whitespace and the blank lines
+ * go (CBS's padded fields store as before); every reader of the text sanitises it, which makes the
+ * "\n" a space again (plan 02 §6.2). Empty → null.
+ */
+export function collapseLines(raw: string | null): string | null {
+  if (raw === null) return null;
+  const t = raw
+    .split(LINE_BREAK_RE)
+    .map((line) => line.replace(/\s+/gu, " ").trim())
+    .filter((line) => line !== "")
+    .join("\n");
+  return t === "" ? null : t;
+}
+
 /**
  * A promotional item (sportsbook sign-up offers — the CBS "promo filter", sibling plan 07 D6): never
  * news, dropped at load. Matched on the folded title only; deterministic.
  */
 export function isPromo(title: string): boolean {
-  const t = title.normalize("NFKC").toLowerCase();
+  // a stored title keeps its line breaks (collapseLines): read as spaces here
+  const t = title.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ");
   const promo = /\bpromo(?:s|tion|tional)?\b/.test(t);
   const gambling = /\b(?:bet|bets|betting|sportsbooks?|bonus|bonuses|deposit|casino)\b/.test(t);
   return (

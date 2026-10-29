@@ -1,7 +1,8 @@
 // feeds.test.ts — the per-item field rules of the news sources (src/sources/news/feeds.ts): the three
 // feeds equal tables.ts NEWS_TABLES `upstream`, pubDate in every observed format (RotoWire's 12-hour
 // clock included — `rssDateMs` alone refuses it), tracking parameters stripped, layout whitespace
-// collapsed, the CBS promo filter, and the hosts src/http's allow-list must carry.
+// collapsed (a stored title's or blurb's line breaks kept, one "\n" each: ruling R8-6 (a)), the CBS
+// promo filter, and the hosts src/http's allow-list must carry.
 import { describe, expect, it } from "vitest";
 import { checkUrl, DATA_SOURCE_HOSTS } from "../../../src/http/allowlist.js";
 import { rssDateMs } from "../../../src/store/datasets/derive.js";
@@ -9,6 +10,7 @@ import { NEWS_TABLES } from "../../../src/store/datasets/tables.js";
 import {
   cleanLink,
   collapse,
+  collapseLines,
   isPromo,
   NEWS_FEED_HOSTS,
   NEWS_FEEDS,
@@ -119,6 +121,22 @@ describe("collapse / isPromo", () => {
     expect(collapse(null)).toBeNull();
   });
 
+  it("collapseLines: layout whitespace collapsed, each line break between two lines kept as one", () => {
+    // CBS's padded fields store as before
+    expect(
+      collapseLines("\n                        NFL Referees Association\n                    "),
+    ).toBe("NFL Referees Association");
+    // R8-6 (a): a team ending one line is not written next to a name opening the next
+    for (const br of ["\n", "\r", "\r\n", "\v", "\f", "\u0085", "\u2028", "\u2029"])
+      expect(
+        collapseLines(`Released: Ravens ${br}  Lamar Jackson,\tcornerback`),
+        JSON.stringify(br),
+      ).toBe("Released: Ravens\nLamar Jackson, cornerback");
+    expect(collapseLines("a\n\n\n  \n b")).toBe("a\nb");
+    expect(collapseLines("   \n ")).toBeNull();
+    expect(collapseLines(null)).toBeNull();
+  });
+
   it("flags sportsbook promotions, not betting news", () => {
     expect(
       isPromo("Use FanDuel promo code to get $250 in bonus bets by targeting Falcons vs. Saints"),
@@ -130,5 +148,8 @@ describe("collapse / isPromo", () => {
     expect(isPromo("Week 5 betting: Odds, lines and totals for every game")).toBe(false);
     expect(isPromo("Saints vs. Falcons picks, player props: Expert's best bets")).toBe(false);
     expect(isPromo("Player A promoted to the active roster")).toBe(false);
+    // a title's line break (kept by collapseLines) reads as a space
+    expect(isPromo("Use FanDuel promo code to get $250 in bonus\nbets")).toBe(true);
+    expect(isPromo("DraftKings sign-up\nbonus for Week 5")).toBe(true);
   });
 });

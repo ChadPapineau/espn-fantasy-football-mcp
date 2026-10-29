@@ -49,7 +49,15 @@ import {
   type SourceContext,
   type TempFile,
 } from "../source.js";
-import { cleanLink, collapse, isPromo, NEWS_FEEDS, pubDateMs, type NewsFeedSpec } from "./feeds.js";
+import {
+  cleanLink,
+  collapse,
+  collapseLines,
+  isPromo,
+  NEWS_FEEDS,
+  pubDateMs,
+  type NewsFeedSpec,
+} from "./feeds.js";
 import {
   buildPlayerMatcher,
   percentOwnedOf,
@@ -188,7 +196,7 @@ export function itemRowOf(
   source: NewsSource,
   fetchedMs: number,
 ): { readonly row: ItemRow } | { readonly drop: DropReason } {
-  const title = capText(collapse(it.title), NEWS_STORAGE_CAPS.title);
+  const title = capText(collapseLines(it.title), NEWS_STORAGE_CAPS.title);
   const link = cleanLink(it.link);
   const guid = collapse(it.guid);
   const published = pubDateMs(it.pubDate);
@@ -204,7 +212,7 @@ export function itemRowOf(
       published_ms: published,
       first_seen_ms: fetchedMs,
       title,
-      blurb: capText(collapse(it.description), NEWS_STORAGE_CAPS.blurb),
+      blurb: capText(collapseLines(it.description), NEWS_STORAGE_CAPS.blurb),
       link,
     },
   };
