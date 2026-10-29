@@ -151,7 +151,7 @@ Readings for the re-gate to check:
 - **The scan errs toward finding.** "leads the pack", "OT" and "medical bills" each take the residual
   away.
 
-**Fix round 3 of R8-6, the first under R8-7 (2026-10-29, commit `93f8843`; changelog §B9, "R8-6
+**Fix round 3 of R8-6, the first under R8-7 (2026-10-29, commits `93f8843`, `a35e5fe`; changelog §B9, "R8-6
 fix round 3 — the first under R8-7").** The independent attack on `66bb2a2` found 11 violations. Ruling
 R8-7 bounds what the scan and the labels read. What R8-7 closed:
 

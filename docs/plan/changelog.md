@@ -1305,7 +1305,7 @@ character-set entries no test held. Each is fixed at its root.
   picks no one); an inline tag inside a label breaks it ("Vikings<b> WR</b> Justin Jefferson"); and a
   newline a feed writes inside a field is kept as a break (CBS's padding around a field is not one).
 
-### R8-6 fix round 3 — the first under R8-7 (commit `93f8843`)
+### R8-6 fix round 3 — the first under R8-7 (commits `93f8843`, `a35e5fe`)
 
 The independent attack on `66bb2a2` (its docs) found 11 violations. Ruling R8-7 (§R8, `c2a631d`)
 bounds what R8-6's scan and labels must read: (1) the lists, complete per team in named categories;
@@ -1443,9 +1443,14 @@ What each clause of R8-7 built:
   lower-case hashtag are not found.
 - **Measured** · the gate's four batteries are unchanged from `66bb2a2`: battery 1 has 19 right refs,
   33 recall losses and no misattribution, battery 2 its five accepted residuals, and batteries 3 and
-  4 no ref. Speed against `66bb2a2`: the 5,000-item build takes 5.3 s (4.6 s; bound 15 s). 1,000 of
-  the last attack's capped items build in 1.7 s (1.4 s), and 1,000 of the second build's costliest in
-  3.1 s (3.1 s). Every ratio test holds.
+  4 no ref. At `93f8843` one long hyphenated or dotted word cost 14 times a benign near-cap item,
+  because the multi-word reading built every prefix and suffix of its parts. `a35e5fe` bounds them to
+  the longest form and reads the game-word context only when an ordinary-word abbreviation asks; the
+  results are unchanged. Speed against `66bb2a2`, at `a35e5fe`: the 5,000-item build takes 4.4 s
+  (4.6 s; bound 15 s), and 1,000 of the last attack's capped items build in 1.5 s (1.4 s).
+  `match.perf.test.ts` adds four capped items: a long hyphenated word, a long dotted word, a run of
+  words that may each open a form, and a run of bare shared surnames. Each costs at most 6 times a
+  benign item, and 1,000 of the costliest build in 3.6 s.
 - **The recall cost** (refs to a shared name's holders; the batteries by their labels):
   - Over the earlier batteries' 1,167 labelled texts, 318 carry their right holder's ref (318 at
     `66bb2a2`, 424 at `f41e810`) and 3 a wrong one, the accepted residuals (3; 383). Against
