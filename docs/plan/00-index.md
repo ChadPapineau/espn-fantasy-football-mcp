@@ -4,10 +4,10 @@ The refined plan for `espn-fantasy-football-mcp`: a local, stdio-only, **read-on
 server for ESPN Fantasy Football, with a Skills bundle, written in Node/TypeScript on the official MCP
 SDK. **The plan is the record of the design and its reasons, kept as written — not a status page.**
 The owner approved it on 2026-10-05 and the build follows it: Phases 0, 1a, 1b, 2 and 3 are built and
-in QA, and Phase W, the write module, is not built. Where the plan marks a feature 📋 or speaks of
+their QA is complete (Stage C's final gate passed on 2026-10-29), and Phase W, the write module, is not built. Where the plan marks a feature 📋 or speaks of
 work ahead, that is its state at approval. The state of the build is the README's
 [Status](../../README.md#status) and [`../HANDOFF.md`](../HANDOFF.md); the build-time rulings that
-supersede plan text are in [`changelog.md`](changelog.md) (§R5–§R7, with the records §B1–§B4).
+supersede plan text are in [`changelog.md`](changelog.md) (§R5–§R8, with the records §B1–§B9).
 
 This project is not affiliated with, endorsed by, or supported by ESPN or The Walt Disney Company. It
 uses ESPN's unofficial, undocumented API with the user's own session cookies; plan 02 and

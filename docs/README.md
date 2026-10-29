@@ -4,7 +4,8 @@ The research, the plan, the record of how the plan was attacked and defended, th
 and the orchestration state of the agent programs that produced them.
 **Read [`HANDOFF.md`](HANDOFF.md) first** in any fresh session; then
 [`plan/00-index.md`](plan/00-index.md) for the plan in reading order. The product these documents
-describe is **built and in QA** (Stage C): the read-only server, the `eff` CLI and the Skills exist;
+describe is **built, and its QA is complete** (Stage C's final gate passed on 2026-10-29): the
+read-only server, the `eff` CLI and the Skills exist;
 the write module is not built. The research and the plan are kept as written, with the build-time
 rulings in [`plan/changelog.md`](plan/changelog.md).
 
