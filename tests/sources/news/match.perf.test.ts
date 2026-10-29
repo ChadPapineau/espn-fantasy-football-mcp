@@ -192,6 +192,13 @@ describe("news matcher — R8-6's second build: items at the caps against each n
     camelPairs: cap("aB ".repeat(1_400), 4_000),
     // the shared names, labelled again and again: a label window per mention
     labels: cap("Ravens QB Lamar Jackson, LB Justin Jefferson (CLE - LB), ".repeat(80), 4_000),
+    // R8-7's round: one long hyphenated or dotted word (each run of its parts, its form's heads and
+    // leads: 14 times a benign item before they were bounded), and words that may each open a form
+    longHyphen: cap("st-".repeat(1_400), 4_000),
+    longDots: cap("ab.".repeat(1_400), 4_000),
+    heads: cap("St St Bank of ".repeat(300), 4_000),
+    // bare shared surnames, each read for its label and the forms around it
+    surnames: cap("Jones Allen Park Smith Brown Green Washington ".repeat(90), 4_000),
   };
 
   it("each costs at most 6 times a benign near-cap item", () => {

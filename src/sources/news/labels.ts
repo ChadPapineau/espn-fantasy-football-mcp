@@ -541,14 +541,16 @@ export type LabelPart =
 interface Place {
   /** Its segment is written all in capitals. */
   readonly caps: boolean;
-  /** It stands directly after a game or move word. */
-  readonly after: boolean;
+  /** Whether it stands directly after a game or move word (read only when an abbreviation asks). */
+  readonly after: () => boolean;
   /** It stands inside a label's tag (parentheses, the name tag). */
   readonly tag: boolean;
   /** It is a hashtag's word. */
   readonly hash: boolean;
 }
 
+/** A place's game-word context where none applies. */
+const NEVER = (): boolean => false;
 /** Letters joined by periods: an initialism ("L.A", "K.C"), read as one word. */
 const INITIALISM_RE = /^(?:\p{L}\.)+\p{L}$/u;
 const isLower = (c: string): boolean => c !== c.toUpperCase();
@@ -559,7 +561,7 @@ const isCaps = (written: string): boolean => /\p{Lu}/u.test(written) && !/\p{Ll}
 /** Whether an abbreviation written as `stem` counts where it stands (R8-7 (2)). */
 function counts(stem: string, place: Place): boolean {
   if (!ORDINARY.has(stem.toUpperCase())) return true;
-  return place.after || (isCaps(stem) && (!place.caps || place.tag));
+  return (isCaps(stem) && (!place.caps || place.tag)) || place.after();
 }
 
 const ID_SETS = new Map<readonly number[], ReadonlySet<number>>();
@@ -911,7 +913,7 @@ export function sharedReading(
         .join(" ");
       const place: Place = {
         caps: caps[from] === 1,
-        after: after(from),
+        after: () => after(from),
         tag: false,
         hash: from > 0 && s[from - 1] === "#",
       };
@@ -1026,9 +1028,10 @@ export function sharedReading(
             wordOf(w.endsWith(".") && INITIALISM_RE.test(w.slice(0, -1)) ? w.slice(0, -1) : w),
           )
           .join(" ");
+        const from = i;
         const part = formAt(written, {
-          caps: caps[i] === 1,
-          after: after(i),
+          caps: caps[from] === 1,
+          after: () => after(from),
           tag: true,
           hash: false,
         });
@@ -1039,7 +1042,7 @@ export function sharedReading(
         const e = endOf(i);
         const written = s.slice(i, e);
         const pieces = written.includes("-") ? written.split("-") : [];
-        const place: Place = { caps: caps[i] === 1, after: false, tag: true, hash: false };
+        const place: Place = { caps: caps[i] === 1, after: NEVER, tag: true, hash: false };
         const split = pieces.map((w) => formAt(w, place));
         if (split.length === 0 || !split.every((x) => x !== null)) return null;
         out.push(...split);
@@ -1267,7 +1270,7 @@ function compoundFinds(word: string, hashtag: boolean, place: Place): boolean {
   let first = true;
   for (const piece of w.split(/[.&-]/u))
     for (const seg of segmentsOf(piece)) {
-      if (found(seg, { ...place, after: first && place.after, hash: hashtag })) return true;
+      if (found(seg, { ...place, after: first ? place.after : NEVER, hash: hashtag })) return true;
       first = false;
     }
   const lower = w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
@@ -1294,18 +1297,31 @@ function phraseFound(words: readonly string[]): boolean {
  * The ways a word may end a form of several words: each run of its parts from the first, hyphenated
  * ("people-eaters" of "people-eaters-led"), and itself whole.
  */
-const headsOf = (base: string, parts: readonly string[]): string[] => [
-  ...new Set([...parts.map((_, k) => parts.slice(0, k + 1).join("-")), base]),
-];
+const headsOf = (base: string, parts: readonly string[]): string[] =>
+  parts.length === 1
+    ? [parts[0] ?? ""]
+    : [
+        ...new Set([
+          ...parts.slice(0, MAX_FORM_WORDS - 1).map((_, k) => parts.slice(0, k + 1).join("-")),
+          ...(parts.length < MAX_FORM_WORDS ? [base] : []),
+        ]),
+      ];
 /** The ways a word may open one: itself whole, and each run of its parts to the last ("ex-Green"). */
-const leadsOf = (whole: string, parts: readonly string[]): string[] => [
-  ...new Set([whole, ...parts.map((_, k) => parts.slice(k).join("-"))]),
-];
+const leadsOf = (whole: string, parts: readonly string[]): string[] =>
+  (parts.length === 1
+    ? [whole]
+    : [
+        ...new Set([
+          ...(parts.length < MAX_FORM_WORDS ? [whole] : []),
+          ...parts.slice(-(MAX_FORM_WORDS - 1)).map((_, k, tail) => tail.slice(k).join("-")),
+        ]),
+      ]
+  ).filter(isHead);
 
 /** A word the multi-word reading remembers: as written (a hyphenated one whole), its leads, where. */
 interface Recent {
   readonly whole: string;
-  /** The ways it may open a form (`leadsOf`). */
+  /** The ways it may open a form (`leadsOf`: only those that open one). */
   readonly leads: readonly string[];
   readonly start: number;
 }
@@ -1319,10 +1335,10 @@ interface Recent {
 function windowFound(recent: readonly Recent[], heads: readonly string[]): number {
   for (let n = recent.length; n >= 1; n--) {
     const first = recent[recent.length - n];
-    if (first === undefined) continue;
+    if (first === undefined || first.leads.length === 0) continue;
     const rest = recent.slice(recent.length - n + 1).map((r) => r.whole);
     for (const lead of first.leads)
-      if (isHead(lead) && heads.some((h) => phraseFound([lead, ...rest, h]))) return n;
+      if (heads.some((h) => phraseFound([lead, ...rest, h]))) return n;
   }
   return 0;
 }
@@ -1345,7 +1361,7 @@ function scanText(t: string, ctx: ScanContext | null): boolean {
   const s = ctx?.s ?? t;
   const placeAt = (i: number, lead: string): Place => ({
     caps: ctx?.caps[i] === 1,
-    after: afterGameWord(s, i),
+    after: () => afterGameWord(s, i),
     tag: false,
     hash: lead === "#",
   });
@@ -1368,12 +1384,14 @@ function scanText(t: string, ctx: ScanContext | null): boolean {
       !initialism && /[.-]/u.test(base)
         ? base.split(/[.-]/u).filter((p) => p.length > 0)
         : [wordOf(base)];
-    const quiet: Place = { ...place, after: false };
+    const quiet: Place = { ...place, after: NEVER };
     for (let k = 0; parts.length > 1 && k < parts.length; k++) {
       const p = parts[k] ?? "";
       const q = parts[k - 1];
       const here =
-        k === 0 ? place : { ...quiet, after: GAME_MOVE_WORDS.includes(q?.toLowerCase() ?? "") };
+        k === 0
+          ? place
+          : { ...quiet, after: () => GAME_MOVE_WORDS.includes(q?.toLowerCase() ?? "") };
       if (found(p, here)) return true;
       if (
         q !== undefined &&
