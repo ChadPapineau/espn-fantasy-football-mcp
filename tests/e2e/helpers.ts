@@ -325,6 +325,11 @@ export interface Heartbeat {
   readonly gap_cpu_ms: number;
   /** …and the process's involuntary context switches inside it (the OS took a thread off the CPU). */
   readonly gap_invol: number;
+  /**
+   * The main thread's longest run on the CPU between two ticks anywhere in the window (ms): a
+   * JavaScript block, seen even when a longer gap beside it is the window's longest.
+   */
+  readonly cpu_max_ms: number;
 }
 
 /** The window of a process running the heartbeat preload, and a fresh window. */
@@ -344,6 +349,7 @@ export async function heartbeatRecordOf(p: HeartbeatSource): Promise<Heartbeat> 
         gap_ms: num("gap_ms"),
         gap_cpu_ms: num("gap_cpu_ms"),
         gap_invol: num("gap_invol"),
+        cpu_max_ms: num("cpu_max_ms"),
       };
     }
     if (Date.now() > end) throw new Error("no heartbeat line");
@@ -431,6 +437,8 @@ export interface StallWindow {
   readonly attempts: number;
   /** The server window's preemption evidence (its longest timer gap). */
   readonly server: Heartbeat;
+  /** Each window before it that was over the bound and repeated on the host's evidence. */
+  readonly repeated: readonly { readonly server: Heartbeat; readonly control_ms: number }[];
 }
 
 /**
@@ -439,12 +447,14 @@ export interface StallWindow {
  * OS took a thread of the process off the CPU inside that gap (involuntary switches), or an idle
  * process beside it (the control) stalled past CONTROL_STARVED_MS in the same window. A JavaScript
  * block over the bound spends that time on the CPU, so it is the server's own and is never excused,
- * whatever the host did. (The switch count is process-wide: a synchronous wait of the main thread
- * that coincides with another thread's preemption is repeated, and a stall that recurs in every
- * window ends in measureStall's "cannot be measured" failure — never a pass.)
+ * whatever the host did — wherever it sits in the window (ruling R8-2): the main thread's longest
+ * run on the CPU between two ticks (cpu_max_ms) over the bound refuses the excuse even when a
+ * longer gap the host set is the window's longest. (The switch count is process-wide: a synchronous
+ * wait of the main thread that coincides with another thread's preemption is repeated, and a stall
+ * that recurs in every window ends in measureStall's "cannot be measured" failure — never a pass.)
  */
 export function hostSetStall(server: Heartbeat, controlMs: number, boundMs: number): boolean {
-  if (server.gap_cpu_ms > boundMs) return false;
+  if (server.gap_cpu_ms > boundMs || server.cpu_max_ms > boundMs) return false;
   return server.gap_invol > 0 || controlMs > CONTROL_STARVED_MS;
 }
 
@@ -458,10 +468,11 @@ export function hostSetStall(server: Heartbeat, controlMs: number, boundMs: numb
  */
 export async function measureStall(
   server: HeartbeatSource,
-  control: StallControl,
+  control: HeartbeatSource,
   work: () => Promise<void>,
   boundMs: number,
 ): Promise<StallWindow> {
+  const repeated: { server: Heartbeat; control_ms: number }[] = [];
   for (let attempt = 1; ; attempt++) {
     await heartbeatOf(server); // fresh windows: only `work` is measured
     await heartbeatOf(control);
@@ -469,10 +480,11 @@ export async function measureStall(
     const s = await heartbeatRecordOf(server);
     const ctl = await heartbeatOf(control);
     if (s.max_ms <= boundMs || !hostSetStall(s, ctl, boundMs))
-      return { stall_ms: s.max_ms, control_ms: ctl, attempts: attempt, server: s };
+      return { stall_ms: s.max_ms, control_ms: ctl, attempts: attempt, server: s, repeated };
+    repeated.push({ server: s, control_ms: ctl });
     if (attempt >= STALL_WINDOW_ATTEMPTS)
       throw new Error(
-        `the host set the server's stall in all ${String(attempt)} windows (the last: ${s.max_ms.toFixed(1)} ms, ${s.gap_cpu_ms.toFixed(1)} ms of its own CPU in its longest gap with ${String(s.gap_invol)} involuntary switches; an idle control process ${ctl.toFixed(1)} ms): the ${String(boundMs)} ms bound cannot be measured on this machine now — rerun when it is quieter`,
+        `the host set the server's stall in all ${String(attempt)} windows (the last: ${s.max_ms.toFixed(1)} ms, ${s.gap_cpu_ms.toFixed(1)} ms of its own CPU in its longest gap with ${String(s.gap_invol)} involuntary switches, its longest run on the CPU ${s.cpu_max_ms.toFixed(1)} ms; an idle control process ${ctl.toFixed(1)} ms): the ${String(boundMs)} ms bound cannot be measured on this machine now — rerun when it is quieter`,
       );
   }
 }

@@ -7,7 +7,10 @@
 // espn_analyze_lineup (pwin) calls for N = 3, 6 and 10, and the realistic mix of a weekly turn, under
 // both toolsets: the event loop's longest stall stays ≤ 50 ms, every call answers, and each answer
 // equals the same call made alone. Before the fix each run's raw setImmediate let every in-flight
-// call's slice share one check phase (72 ms at 6, 117 ms at 10 under core).
+// call's slice share one check phase (72 ms at 6, 117 ms at 10 under core). A window over the bound
+// is repeated only on the host's evidence (helpers.ts measureStall, ruling R8-2); the report prints
+// each window's control, the server's own longest run on the CPU, and every repeated window's
+// evidence.
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
@@ -21,6 +24,7 @@ import {
   StallControl,
   type E2eHome,
   type Served,
+  type StallWindow,
 } from "./helpers.js";
 
 const LINEUP = { week: 5, objective: "pwin", seed: 7 } as const;
@@ -72,10 +76,9 @@ for (const toolset of ["core", "full"] as const) {
         control = await StallControl.start();
         const ctl = control;
         await heartbeatOf(served.transport);
-        const report: Record<string, number> = {};
-        const controls: Record<string, number> = {};
+        const windows: Record<string, StallWindow> = {};
         for (const n of [3, 6, 10]) {
-          const w = await measureStall(
+          windows[`n${String(n)}`] = await measureStall(
             served.transport,
             ctl,
             async () => {
@@ -86,10 +89,8 @@ for (const toolset of ["core", "full"] as const) {
             },
             50,
           );
-          report[`n${String(n)}`] = Math.round(w.stall_ms * 10) / 10;
-          controls[`n${String(n)}`] = Math.round(w.control_ms * 10) / 10;
         }
-        const mix = await measureStall(
+        windows.mix = await measureStall(
           served.transport,
           ctl,
           async () => {
@@ -97,12 +98,25 @@ for (const toolset of ["core", "full"] as const) {
           },
           50,
         );
-        report.mix = Math.round(mix.stall_ms * 10) / 10;
-        controls.mix = Math.round(mix.control_ms * 10) / 10;
+        // the report: each stall, the control's, the server's own longest run on the CPU (the
+        // evidence the verdict rests on) and the windows taken
+        const each = (f: (w: StallWindow) => number) =>
+          JSON.stringify(
+            Object.fromEntries(
+              Object.entries(windows).map(([k, w]) => [k, Math.round(f(w) * 10) / 10]),
+            ),
+          );
         process.stdout.write(
-          `parallel stall (${toolset}): ${JSON.stringify(report)} control ${JSON.stringify(controls)}\n`,
+          `parallel stall (${toolset}): ${each((w) => w.stall_ms)} control ${each((w) => w.control_ms)} own CPU ${each((w) => w.server.cpu_max_ms)} windows ${each((w) => w.attempts)}\n`,
         );
-        for (const [k, v] of Object.entries(report)) expect(v, k).toBeLessThanOrEqual(50);
+        // every window repeated on the host's evidence, with that evidence
+        for (const [k, w] of Object.entries(windows))
+          for (const r of w.repeated)
+            process.stdout.write(
+              `parallel stall (${toolset}) ${k} repeated: ${JSON.stringify({ ...r.server, control_ms: r.control_ms })}\n`,
+            );
+        // the bound on the stall as measured, never on the report's rounding (R8-2: unchanged)
+        for (const [k, w] of Object.entries(windows)) expect(w.stall_ms, k).toBeLessThanOrEqual(50);
       });
     },
   );

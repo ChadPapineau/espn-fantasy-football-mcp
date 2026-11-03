@@ -8,7 +8,10 @@
 // own CPU time and the process's involuntary context switches. A loop blocked by JavaScript spends
 // the gap on the CPU; one waiting on a synchronous read spends it off the CPU with no involuntary
 // switch; only a thread the OS took off the CPU shows involuntary switches with little CPU of its
-// own. tests/e2e/helpers.ts measureStall reads it.
+// own. The line also carries the main thread's longest run on the CPU between two ticks anywhere in
+// the window (cpu_max_ms): a JavaScript block over the bound that is not the window's longest gap
+// — a longer gap the host set beside it — is still seen, and is never excused (ruling R8-2).
+// tests/e2e/helpers.ts measureStall reads it.
 const { monitorEventLoopDelay } = process.getBuiltinModule("node:perf_hooks");
 const h = monitorEventLoopDelay({ resolution: 5 });
 h.enable();
@@ -23,13 +26,16 @@ const sample = () => {
 };
 let last = sample();
 let worst = { gap_ms: 0, gap_cpu_ms: 0, gap_invol: 0 };
+let cpuMax = 0;
 setInterval(() => {
   const s = sample();
   const gap = Number(s.t - last.t) / 1e6 - TICK_MS;
+  const cpu = (s.cpu_us - last.cpu_us) / 1000;
+  if (cpu > cpuMax) cpuMax = cpu;
   if (gap > worst.gap_ms)
     worst = {
       gap_ms: gap,
-      gap_cpu_ms: (s.cpu_us - last.cpu_us) / 1000,
+      gap_cpu_ms: cpu,
       gap_invol: s.invol - last.invol,
     };
   last = s;
@@ -41,9 +47,11 @@ process.on("SIGUSR2", () => {
     p99_ms: h.percentile(99) / 1e6,
     n: h.count,
     ...worst,
+    cpu_max_ms: cpuMax,
   };
   process.stderr.write(`${JSON.stringify(line)}\n`);
   h.reset();
   worst = { gap_ms: 0, gap_cpu_ms: 0, gap_invol: 0 };
+  cpuMax = 0;
   last = sample();
 });
