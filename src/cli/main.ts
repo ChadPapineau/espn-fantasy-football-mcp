@@ -101,7 +101,9 @@ export const USAGE = `usage: eff <command> [options]
                               append unseen league transactions
   transactions --backfill [--seasons 2024,2025]
                               store the league's previous seasons' transactions (the waiver fit's
-                              own history; cookies on a private league; you run it once)
+                              own history; cookies on a private league; you run it once). Paced
+                              under ESPN's request limit, about 1.5 min for two seasons; a full
+                              window is waited out, Ctrl-C stops it, a re-run resumes
   credential-check [--notify] the daily credential probe (launchd)
   pre-kickoff [--notify]      the check before the day's first kickoff (launchd)
   crosswalk rebuild [--notify] [--all]
@@ -299,10 +301,10 @@ export interface MainDeps {
   readonly loadServe?: () => Promise<ServeFn | null>;
   /**
    * The process's interrupt policy (src/cli/interrupt.ts; src/cli.ts passes it). A command claims
-   * SIGINT/SIGTERM for exactly the scope that honours cancellation: `refresh` for its run, `setup
-   * --page` while the page waits. Nothing else claims, so the first signal ends any other command
-   * by the default action (Stage C finding cli-first-signal-swallowed). Default: claims that never
-   * abort (in-process callers).
+   * SIGINT/SIGTERM for exactly the scope that honours cancellation: `refresh` and `transactions
+   * --backfill` for their runs, `setup --page` while the page waits. Nothing else claims, so the
+   * first signal ends any other command by the default action (Stage C finding
+   * cli-first-signal-swallowed). Default: claims that never abort (in-process callers).
    */
   readonly interrupts?: Interrupts;
 }
@@ -408,11 +410,20 @@ export async function main(
         case "credential-check":
           return await credentialCheck(io, config, log, { notify: flag(p, "notify") });
         case "transactions":
-          if (flag(p, "backfill"))
-            return await transactionsBackfill(io, config, log, {
-              notify: flag(p, "notify"),
-              seasons: str(p, "seasons"),
-            });
+          if (flag(p, "backfill")) {
+            // the backfill honours cancellation (src/cli/espn-pacing.ts): a wait ends at once, no
+            // later read starts, it says what it stored, exit 1. So it claims the signals for the run
+            const claim = interrupts.claim();
+            try {
+              return await transactionsBackfill(io, config, log, {
+                notify: flag(p, "notify"),
+                seasons: str(p, "seasons"),
+                signal: claim.signal,
+              });
+            } finally {
+              claim.release();
+            }
+          }
           if (str(p, "seasons") !== undefined)
             throw new UsageError("transactions: --seasons applies to --backfill only");
           return await transactionsAppend(io, config, log, {

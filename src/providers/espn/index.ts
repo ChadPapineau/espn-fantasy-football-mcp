@@ -15,6 +15,7 @@ import type { DriftObservations } from "../../drift/types.js";
 import type { RequestOrigin, StoreRepositories } from "../../store/types.js";
 import { createFixtureFetch } from "./fixture.js";
 import { createDerivedLeagueFetch, readDerivedManifest } from "./fixture-league.js";
+import type { Sleep } from "./limiter.js";
 import { EspnProvider, type ProScheduleDataset } from "./provider.js";
 import { EspnProviderError, type ProviderLog } from "./request.js";
 import type { FetchLike } from "./transport.js";
@@ -100,6 +101,8 @@ export interface CreateEspnProviderOptions {
    */
   readonly proSchedule?: ProScheduleDataset;
   readonly log?: ProviderLog;
+  /** Every limiter and retry wait (default: a real timer); the CLI's tests inject fake time. */
+  readonly sleep?: Sleep;
 }
 
 /** Builds the provider (see the file header for fixture mode's guard). */
@@ -141,6 +144,7 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     ...(o.periodProvisional === undefined ? {} : { periodProvisional: o.periodProvisional }),
     ...(o.proSchedule === undefined ? {} : { proSchedule: o.proSchedule }),
     ...(o.log === undefined ? {} : { log: o.log }),
+    ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
     ...(tlsVerificationDisabled === undefined ? {} : { tlsVerificationDisabled }),
   });
 }

@@ -12,6 +12,7 @@ import { loadNativeKeyring, type KeyringPort } from "../auth/keychain.js";
 import { packageRoot, systemXattrReader, type Env, type XattrReader } from "../config/paths.js";
 import { systemClock, type Clock } from "../domain/clock.js";
 import type { FetchLike } from "../http/client.js";
+import type { Sleep } from "../providers/espn/limiter.js";
 
 /** The result of running a program. `code` is null when it was killed (timeout, signal). */
 export interface ExecResult {
@@ -86,6 +87,11 @@ export interface CliIo {
   readonly uid: number | null;
   /** This process's pid. */
   readonly pid: number;
+  /**
+   * Every wait of an ESPN run: the provider's limiter waits and a paced run's (src/cli/espn-pacing.ts).
+   * Absent in the real process — a real, referenced timer; tests inject fake time.
+   */
+  readonly sleep?: Sleep;
 }
 
 /** A fetch that ends the process with TEST_STUB_EXIT — `EFF_TEST_STUBS=1` (plan 05 §4.2). */

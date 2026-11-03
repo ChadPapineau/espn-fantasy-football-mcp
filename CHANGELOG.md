@@ -264,6 +264,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   as the plugin's own file, never as a client registration, and `eff uninstall` leaves it instead of
   printing a `claude mcp remove --scope project` that would delete the plugin's server from the
   clone. A client entry that uses a plugin variable is a hard row-2 problem.
+- **`eff transactions --backfill` past the 30-a-minute window (plan 01 §6; found at the owner's
+  install, 2026-11-02).** The default run's ~37 reads met the limiter's full window part-way and
+  died RATE_LIMITED. The run now paces itself at 24 reads a minute, waits out a full window or
+  ESPN's Retry-After (one stderr line, the same read retried, within a bound), and stops on Ctrl-C
+  (at once during a wait); a spent daily cap and repeated concurrency refusals fail as before.
 - **Stage C's other fixes.** QA and penetration testing (rounds 0–3 and the final gate's fix
   rounds) fixed many smaller defects, each with a regression test. They are not itemised here: the
   commits on `build/phase-1` record each one, and `docs/plan/changelog.md` §B4–§B9 the records

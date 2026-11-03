@@ -111,9 +111,15 @@ function plantCookies(): void {
 }
 
 async function runBackfill(f: ReturnType<typeof fakeFetch>, argv: string[] = []) {
+  const clock = movingClock("2026-10-06T18:00:00.000Z");
   const io = makeIo(sb, {
     fetch: f.fetch,
-    clock: movingClock("2026-10-06T18:00:00.000Z"),
+    clock,
+    // fake time for every wait (the limiter's and the run's pacing): the clock moves, nothing sleeps
+    sleep: (ms) => {
+      clock.advance(Math.max(0, ms));
+      return Promise.resolve();
+    },
     packageRoot: fakePackage(sb),
     env: { ESPN_LEAGUE_ID: "0", EFF_CREDENTIAL_STORE: "file", ESPN_SEASON: "2026" },
   });

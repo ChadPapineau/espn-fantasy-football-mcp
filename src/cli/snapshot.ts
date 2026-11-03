@@ -46,6 +46,7 @@ import {
   WAKE_GRACE_MS,
   type JobRun,
 } from "./espn-jobs.js";
+import { PacedRun, paceWaitText, RunInterrupted } from "./espn-pacing.js";
 import { effCodeOf } from "./espn-stack.js";
 import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
@@ -694,6 +695,11 @@ export const BACKFILL_DEFAULT_SEASONS = 2;
 export const BACKFILL_MAX_SEASONS = 3;
 /** One week's transactions page (mTransactions2 holds the whole week; the cap only bounds it). */
 export const BACKFILL_WEEK_COUNT = 1000;
+/**
+ * The scoring periods a season is planned at before its settings are read (an NFL regular season's
+ * 18 weeks bound every ESPN fantasy season's): it sizes the run's wait budget (espn-pacing.ts).
+ */
+export const BACKFILL_WEEKS_BOUND = 18;
 
 /** What a backfill did for one season (counts and codes only). */
 export interface BackfillSeason {
@@ -705,6 +711,10 @@ export interface BackfillSeason {
   readonly skipped: string | null;
 }
 
+/** Whether a read's answer came from ESPN (a cache hit sent nothing: the next read is not paced). */
+const wentUpstream = (r: { readonly stamp: { readonly cache: string } }): boolean =>
+  r.stamp.cache !== "hit";
+
 /**
  * `eff transactions --backfill [--seasons 2024,2025]` (changelog R6-3; plan 07 E5 "the league's
  * own feed"): appends each previous season's transactions — every scoring period's mTransactions2,
@@ -713,12 +723,25 @@ export interface BackfillSeason {
  * owner (an interactive `server` origin: never the jobs' daily caps), read host only, under the
  * limiter; idempotent (appendNew dedups by transaction id). Default: the league's newest
  * BACKFILL_DEFAULT_SEASONS previous seasons; a season ESPN does not serve is skipped and said.
+ *
+ * The run is more reads than one limiter window holds (plan 01 §6: 30/min; the default is one
+ * settings read plus one per scoring period of each season, ~37): every read goes through a
+ * PacedRun (src/cli/espn-pacing.ts) — 24 a minute, a full window or ESPN's Retry-After waited out
+ * with one stderr line and the same read retried, bounded, Ctrl-C honoured at once during a wait.
+ * Before, the 31st read was refused RATE_LIMITED and the run died part-way (found at the owner's
+ * install, 2026-11-02). A spent daily cap, repeated concurrency refusals and every other failure end
+ * the run as before (jobFailure: the same code and exit). A run stopped by the wait bounds or an
+ * interrupt says what it stored; a re-run resumes, re-reading stores nothing twice.
  */
 export async function transactionsBackfill(
   io: CliIo,
   config: Config,
   log: Logger,
-  opts: SnapshotOptions & { readonly seasons: string | undefined },
+  opts: SnapshotOptions & {
+    readonly seasons: string | undefined;
+    /** The command's claim on SIGINT/SIGTERM (src/cli/main.ts): ends a wait at once. */
+    readonly signal?: AbortSignal;
+  },
 ): Promise<number> {
   const job = "transactions-backfill";
   let asked: number[] | null = null;
@@ -735,11 +758,25 @@ export async function transactionsBackfill(
   }
   const run = await startJob(io, config, log, job, { ...opts, origin: "server" });
   if (typeof run === "number") return run;
+  // the reads planned: the league read (default seasons) and each season's settings read and weeks
+  const planOf = (seasons: number, leagueRead: boolean): number =>
+    (leagueRead ? 1 : 0) + seasons * (1 + BACKFILL_WEEKS_BOUND);
+  const paced = new PacedRun({
+    clock: io.clock,
+    ...(io.sleep === undefined ? {} : { sleep: io.sleep }),
+    signal: opts.signal ?? null,
+    plannedReads: planOf(asked?.length ?? BACKFILL_DEFAULT_SEASONS, asked === null),
+    onWait: (w) => writeLine(io.stderr, paceWaitText(job, w)),
+  });
+  let stored = 0;
   try {
     const ref = run.stack.ref;
     const seasons =
       asked ??
-      [...(await run.stack.provider.getLeague(ref)).value.previous_seasons]
+      [
+        ...(await paced.read(() => run.stack.provider.getLeague(ref), wentUpstream)).value
+          .previous_seasons,
+      ]
         .filter((y) => y < config.season)
         .sort((a, b) => b - a)
         .slice(0, BACKFILL_DEFAULT_SEASONS);
@@ -748,13 +785,15 @@ export async function transactionsBackfill(
       await writeLine(io.stdout, `${job}: the league has no previous season to read`);
       return EXIT.ok;
     }
+    let planned = planOf(seasons.length, asked === null);
     const done: BackfillSeason[] = [];
     for (const season of seasons) {
       const sref = { ...ref, season };
       let first: number;
       let last: number;
       try {
-        const clock = (await run.stack.provider.getLeague(sref)).value.clock;
+        const clock = (await paced.read(() => run.stack.provider.getLeague(sref), wentUpstream))
+          .value.clock;
         first = Math.max(1, clock.first_scoring_period);
         last = Math.max(first, clock.final_scoring_period);
       } catch (e) {
@@ -767,18 +806,27 @@ export async function transactionsBackfill(
         }
         throw e;
       }
+      // a season longer than the bound raises the plan (and so the wait budget)
+      planned += Math.max(0, last - first + 1 - BACKFILL_WEEKS_BOUND);
+      paced.plan(planned);
       let read = 0;
       let added = 0;
       for (let week = first; week <= last; week++) {
-        const page = await run.stack.provider.listTransactions(sref, {
-          types: TRANSACTION_TYPES,
-          week,
-          since: null,
-          count: BACKFILL_WEEK_COUNT,
-          team_id: null,
-        });
+        const page = await paced.read(
+          () =>
+            run.stack.provider.listTransactions(sref, {
+              types: TRANSACTION_TYPES,
+              week,
+              since: null,
+              count: BACKFILL_WEEK_COUNT,
+              team_id: null,
+            }),
+          wentUpstream,
+        );
         read += page.value.items.length;
-        added += run.store.repos.transactionsSeen.appendNew(page.value.items, io.clock.nowIso());
+        const n = run.store.repos.transactionsSeen.appendNew(page.value.items, io.clock.nowIso());
+        added += n;
+        stored += n;
       }
       done.push({ season, weeks: last - first + 1, read, added, skipped: null });
     }
@@ -804,6 +852,20 @@ export async function transactionsBackfill(
     jobWorked(io, config, job);
     return EXIT.ok;
   } catch (e) {
+    const sofar = `${String(paced.reads)} read(s) done, ${String(stored)} new transaction(s) stored so far`;
+    if (e instanceof RunInterrupted) {
+      // the owner's Ctrl-C: no failure is recorded (a cancel is not ESPN's), the lock is released
+      await writeLine(
+        io.stderr,
+        `eff ${job}: interrupted — ${sofar}; run \`eff transactions --backfill\` again to resume (it is safe to repeat)`,
+      );
+      return EXIT.error;
+    }
+    if (paced.gaveUp !== null)
+      await writeLine(
+        io.stdout,
+        `${job}: stopped — ESPN's request limit kept refusing (${String(paced.waits)} wait(s), ${String(Math.ceil(paced.waitedMs / 1000))} s of waiting); ${sofar}; run \`eff transactions --backfill\` again later to resume (it is safe to repeat)`,
+      );
     return await jobFailure(io, config, run, job, e, opts.notify);
   } finally {
     endJob(io, run);

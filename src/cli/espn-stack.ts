@@ -209,6 +209,8 @@ export function buildEspnStack(
     clock: io.clock,
     scoring: translateScoringInput,
     ...(io.fetch === null ? {} : { fetch: io.fetch }),
+    // the limiter's waits (the real timer unless a test injects fake time)
+    ...(io.sleep === undefined ? {} : { sleep: io.sleep }),
     origin: opts.origin,
     observer: opts.observer,
     ...(opts.probeObserver === undefined ? {} : { probeObserver: opts.probeObserver }),
