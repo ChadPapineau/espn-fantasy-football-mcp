@@ -27,7 +27,7 @@ What the failures are (detail in **Failures by class**):
 - **No product defect was found.** No failure traces to a wrong server answer. Every fixture fact checked against the eval servers matched what the replies said.
 - **Finding N1 is systematic, not intermittent.** This corrects the run summary. N1 is the not_configured hand-off: a fixture-mode server always reports `credential.state: not_configured`.
   - 15 of the 83 Lane 2 replies stop at the session hand-off, with the setup steps and no analysis.
-  - It hits 6 of the 8 `weekly` cases and all 5 `onboard` cases. It also hits `roster-audit` RA-1, `start-sit` SS-8 and SS-10-E, and `news-check` NC-INJ-2.
+  - It hits 6 of the 7 `weekly` Lane 2 cases and all 5 `onboard` cases. It also hits `roster-audit` RA-1, `start-sit` SS-8 and SS-10-E, and `news-check` NC-INJ-2.
   - Those 15 cases account for 39 failed graders.
   - In other runs the same row is read as continue: IC-3, SP-4-E and WV-2 say the public league answered and carry on. KD-1's 0.2 in calibration and 0.8 here is that same coin-flip.
 - **N1 is not the only gap.** With those 15 cases set aside, the `llm` graders still pass only 46 of 91 (51 %), and the free graders 116 of 148.
