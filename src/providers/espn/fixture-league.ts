@@ -8,7 +8,10 @@
 // composite request composes its views. A variant's bodies are the base bodies plus a JSON patch
 // (RFC 6902 add / remove / replace; paths as pointers or segment arrays). The manifest's `clock` is
 // the league's frozen instant (`derivedLeagueClock`; serve starts a running clock there in fixture
-// mode only).
+// mode only). A view entry marked `absentWhenEmpty` answers an empty list of its view's
+// ABSENT_MEANS_EMPTY keys by leaving the key out — the shape ESPN gives the owner's cookie for a
+// period nobody has moved in (finding transactions-absent-key-red); unmarked, an empty list is sent
+// as `[]`, as research 03 P10/P11 recorded anonymously (fixture mode never holds a cookie).
 //
 // Same guarantees as the recorded fixture fetch: no network, a Cookie header is refused, an
 // unanswerable request is a FixtureError naming the path (league id 0), every file path stays inside
@@ -17,8 +20,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import { FixtureError, composeBodies } from "./fixture.js";
-import { HEADER_FILTER, HEADER_PLAYER_COUNT, HEADER_TRANSACTION_COUNT } from "./types.js";
+import {
+  HEADER_FILTER,
+  HEADER_PLAYER_COUNT,
+  HEADER_TRANSACTION_COUNT,
+  isEspnView,
+} from "./types.js";
 import type { FetchLike } from "./transport.js";
+import { ABSENT_MEANS_EMPTY } from "./views/index.js";
 
 /** The manifest `kind` of a derived league. */
 export const DERIVED_LEAGUE_KIND = "derived_league";
@@ -37,6 +46,8 @@ export interface DerivedView {
   readonly path: string;
   readonly patch?: string;
   readonly pool?: boolean;
+  /** Its views' ABSENT_MEANS_EMPTY lists, when empty, are answered without their keys (the cookie's). */
+  readonly absentWhenEmpty?: boolean;
 }
 
 /** The parts of a derived manifest fixture mode reads. */
@@ -78,6 +89,7 @@ export function readDerivedManifest(dir: string): DerivedManifest | null {
       path: typeof v.path === "string" ? v.path : "",
       ...(typeof v.patch === "string" ? { patch: v.patch } : {}),
       ...(v.pool === true ? { pool: true } : {}),
+      ...(v.absentWhenEmpty === true ? { absentWhenEmpty: true } : {}),
     })),
   };
 }
@@ -461,14 +473,17 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
       // the shared bodies are never mutated: the filters below replace top-level keys on a copy,
       // and composeBodies builds new objects
       let body: unknown;
+      let served: readonly DerivedView[];
       if (v !== undefined) {
         const one = await bodyOf(v);
         body = isObject(one) ? { ...one } : one;
+        served = [v];
       } else {
         const parts = views.map((x) => containing(leagueSeason, x, sp));
         if (parts.some((p) => p === undefined)) return missing();
+        served = parts as DerivedView[];
         const bodies: unknown[] = [];
-        for (const p of parts as DerivedView[]) bodies.push(await bodyOf(p));
+        for (const p of served) bodies.push(await bodyOf(p));
         // one part reduces to the shared body itself: copy it like the single-view case
         const composed = bodies.reduce((acc, b) => composeBodies(acc, b));
         body = isObject(composed) ? { ...composed } : composed;
@@ -499,6 +514,15 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
         );
         headers[HEADER_TRANSACTION_COUNT] = String(body.transactions.length);
       }
+      // a marked entry's empty list goes unsent (the count header, if any, stays: 0)
+      if (isObject(body))
+        for (const entry of served.filter((x) => x.absentWhenEmpty === true))
+          for (const view of entry.views.filter(isEspnView))
+            for (const p of ABSENT_MEANS_EMPTY[view] ?? []) {
+              const key = p.slice(2);
+              const list = Object.hasOwn(body, key) ? body[key] : undefined;
+              if (Array.isArray(list) && list.length === 0) Reflect.deleteProperty(body, key);
+            }
       return await respond(body, headers);
     } catch (e) {
       if (e instanceof FixtureError) throw e;

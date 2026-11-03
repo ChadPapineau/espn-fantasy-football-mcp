@@ -384,8 +384,14 @@ const parseRatings = (b: unknown): WirePositionalRatingsBody =>
 const parsePro = (b: unknown): WireProScheduleBody =>
   must("proTeamSchedules_wl", proTeamSchedulesSchema, b);
 const parsePlayersWl = (b: unknown): WirePlayersWlBody => must("players_wl", playersWlSchema, b);
+/**
+ * The period's transactions; absent on an answer to the recognised view, they are none (views
+ * `absentAsEmpty`, ABSENT_MEANS_EMPTY; finding transactions-absent-key-red: ESPN answers the cookie
+ * this way for a period nobody has moved in yet) — the in-call check excused exactly that case, and
+ * only when ESPN's count header did not count any (ABSENT_LIST_COUNT_HEADER).
+ */
 const parseTxns = (b: unknown): readonly unknown[] =>
-  must("mTransactions2", mTransactions2Schema, b).transactions;
+  must("mTransactions2", mTransactions2Schema, absentAsEmpty("mTransactions2", b)).transactions;
 /**
  * The pending list; absent on an answer to the recognised view, it means nothing is pending
  * (views `absentAsEmpty`, ABSENT_MEANS_EMPTY) — the in-call check excused exactly that case.

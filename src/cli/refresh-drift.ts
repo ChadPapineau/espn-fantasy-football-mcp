@@ -14,7 +14,7 @@
 // no read of this build requests is named, never guessed at.
 import { parseDiffs } from "../drift/index.js";
 import type { Config } from "../config/schema.js";
-import type { Week } from "../domain/league/types.js";
+import { TRANSACTION_TYPES, type Week } from "../domain/league/types.js";
 import type { ReadOptions } from "../providers/platform.js";
 import type { EspnView } from "../providers/espn/types.js";
 import { redViews } from "./drift-recheck.js";
@@ -55,7 +55,9 @@ async function playercardRead(r: Reread): Promise<unknown> {
 /**
  * One read of the provider per view — the read the tools make of it, forced past the cache. A view
  * missing here is one no read of this build requests (`mScoreboard`, `mDraftDetail`; the board
- * probe's `kona_league_communication` is `eff check-auth`'s).
+ * probe's `kona_league_communication` is `eff check-auth`'s). `mTransactions2` asks every type, as
+ * the transactions job does: an empty type list is refused before any request (VALIDATION), so the
+ * view was never re-read (finding transactions-absent-key-red).
  */
 export const DRIFT_REREADS: Readonly<Partial<Record<EspnView, (r: Reread) => Promise<unknown>>>> =
   Object.freeze({
@@ -70,7 +72,7 @@ export const DRIFT_REREADS: Readonly<Partial<Record<EspnView, (r: Reread) => Pro
     mTransactions2: (r) =>
       r.run.stack.provider.listTransactions(
         r.run.stack.ref,
-        { types: [], week: r.week, since: null, count: 25, team_id: null },
+        { types: TRANSACTION_TYPES, week: r.week, since: null, count: 25, team_id: null },
         FORCE,
       ),
     mPendingTransactions: (r) =>

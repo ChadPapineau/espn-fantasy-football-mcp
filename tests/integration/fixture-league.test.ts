@@ -433,6 +433,69 @@ describe("routing over fx-10h", () => {
     expect(turns - atCold).toBeGreaterThanOrEqual(1);
   });
 
+  // finding transactions-absent-key-red: the cookie-bearing shape of a period nobody moved in
+  it("an `absentWhenEmpty` entry leaves an empty transactions or pending list out (count 0 kept); unmarked sends []", async () => {
+    const base = readDerivedManifest(FX);
+    if (base === null) throw new Error("fx-10h manifest");
+    const marked = (views: string[]) => ({
+      kind: "derived_league",
+      season: 2026,
+      root: path.resolve(FX, base.root),
+      views: base.views.map((v) =>
+        v.views.some((x) => views.includes(x)) ? { ...v, absentWhenEmpty: true } : v,
+      ),
+    });
+    const dir = tempTree({ "manifest.json": marked(["mTransactions2", "mPendingTransactions"]) });
+    expect(
+      readDerivedManifest(dir)
+        ?.views.filter((v) => v.absentWhenEmpty === true)
+        .map((v) => v.views),
+    ).toEqual([["mTransactions2"], ["mPendingTransactions"]]);
+    const fx = createDerivedLeagueFetch({ dir });
+    const filter = { headers: { "X-Fantasy-Filter": transactionsFilter(["WAIVER", "FREEAGENT"]) } };
+    // week 5: nobody has moved yet — no key, the count header still 0, the base keys all there
+    const none = await fx(`${LEAGUE}?view=mTransactions2&scoringPeriodId=5`, filter);
+    const noneBody = (await none.json()) as Record<string, unknown>;
+    expect(Object.hasOwn(noneBody, "transactions")).toBe(false);
+    expect(Object.keys(noneBody)).toEqual(expect.arrayContaining(["draftDetail", "status"]));
+    expect(none.headers.get("x-fantasy-filter-transaction-count")).toBe("0");
+    // week 3 has moves: served as before
+    const some = await fx(`${LEAGUE}?view=mTransactions2&scoringPeriodId=3`, filter);
+    expect(
+      ((await some.json()) as { transactions: unknown[] }).transactions.length,
+    ).toBeGreaterThan(0);
+    const pending = (await (await fx(`${LEAGUE}?view=mPendingTransactions`, {})).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.hasOwn(pending, "pendingTransactions")).toBe(false);
+    // a composite request composed from a marked entry drops it too; an unmarked league keeps []
+    const composed = (await (
+      await fx(`${LEAGUE}?view=mTransactions2&view=mNav&scoringPeriodId=5`, filter)
+    ).json()) as Record<string, unknown>;
+    expect(Object.hasOwn(composed, "transactions")).toBe(false);
+    expect(Array.isArray(composed.members)).toBe(true);
+    const plain = await get(
+      `${LEAGUE}?view=mTransactions2&scoringPeriodId=5`,
+      transactionsFilter(["WAIVER", "FREEAGENT"]),
+    );
+    expect(plain.body.transactions).toEqual([]);
+    // the shared body is never changed: a marked league answers the unfiltered list whole after
+    const whole = (await (await fx(`${LEAGUE}?view=mTransactions2`, {})).json()) as {
+      transactions: unknown[];
+    };
+    expect(whole.transactions.length).toBeGreaterThan(0);
+    // only the marked view's list: mTransactions2 alone marked keeps the pending []
+    const one = createDerivedLeagueFetch({
+      dir: tempTree({ "manifest.json": marked(["mTransactions2"]) }),
+    });
+    const kept = (await (await one(`${LEAGUE}?view=mPendingTransactions`, {})).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(kept.pendingTransactions).toEqual([]);
+  });
+
   it("a variant serves the base body plus its patch", async () => {
     const k10 = createDerivedLeagueFetch({ dir: path.join(FX, "k10") });
     const r = await k10(`${LEAGUE}?view=mTeam&view=mStandings`, {});

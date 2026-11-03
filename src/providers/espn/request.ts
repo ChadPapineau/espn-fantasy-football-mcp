@@ -87,7 +87,7 @@ import {
 import { CookieGate, type CookieUse, type PublicityStore } from "./auth-gate.js";
 import { ESPN_BACKOFF } from "../../config/schema.js";
 import type { EspnView } from "./types.js";
-import { absentMeansEmptyPaths } from "./views/index.js";
+import { absentListCount, absentMeansEmptyPaths, isUnrecognizedViewAnswer } from "./views/index.js";
 
 /** Thrown inside a parse function when the body does not match a view schema (internal). */
 export class SchemaSignals extends Error {
@@ -691,8 +691,13 @@ export class EspnRequester {
     return { fetchedAt: e.fetched_at, serverTime: e.server_time };
   }
 
-  /** Records drift signals (best effort — a failed write never changes the result) and builds the error. */
-  private driftError(signals: readonly DriftSignal[]): EspnDriftError {
+  /**
+   * Records drift signals (best effort — a failed write never changes the result) and builds the
+   * error. Given the answer's `body` (the in-call check's verdict), the log line also says whether
+   * it was ESPN's unrecognised-view answer (views `isUnrecognizedViewAnswer`) — a skeleton alone
+   * cannot tell that from a recognised view's bare base (finding transactions-absent-key-red).
+   */
+  private driftError(signals: readonly DriftSignal[], body?: unknown): EspnDriftError {
     try {
       this.drift.record(signals);
     } catch {
@@ -700,24 +705,45 @@ export class EspnRequester {
     }
     const first = signals.find(failsResponse) ?? signals[0];
     const view = first?.view ?? "mSettings";
-    this.deps.log?.warn("espn.drift", { view, path: first?.path ?? "$", kind: first?.kind });
+    this.deps.log?.warn("espn.drift", {
+      view,
+      path: first?.path ?? "$",
+      kind: first?.kind,
+      ...(body === undefined ? {} : { unrecognized_view: isUnrecognizedViewAnswer(body) }),
+    });
     return new EspnDriftError(view, errorPath(first?.path ?? "$"));
   }
 
   /**
    * The in-call drift check (plan 01 §7) with the seed paths whose absence means "none" on this
    * answer (views `absentMeansEmptyPaths`: listed in ABSENT_MEANS_EMPTY, on an answer to a
-   * recognised view) read as empty lists: such a signal is never drift and never reaches
+   * recognised view, and not counted above 0 by ESPN's count header among `headers` —
+   * ABSENT_LIST_COUNT_HEADER) read as empty lists: such a signal is never drift and never reaches
    * `drift_state`; a view whose only failing signals they are is judged without them, and every
-   * other signal — an unrecognised-view skeleton included — stands as the detector gave it.
+   * other signal — an unrecognised-view skeleton, an absent list ESPN counted — stands as the
+   * detector gave it (Stage C finding drift-pending-transactions-absent-key-red; finding
+   * transactions-absent-key-red).
    */
-  private checkBody(views: readonly EspnView[], body: unknown): DriftCheck {
+  private checkBody(
+    views: readonly EspnView[],
+    body: unknown,
+    headers: Readonly<Record<string, string>> = {},
+  ): DriftCheck {
     const check = checkResponse(views, body, this.deps.observations);
     if (!check.drifted) return check;
+    const absentList = (s: DriftSignal): boolean =>
+      s.kind === "skeleton" || s.kind === "missing_required_key";
     const excused = (s: DriftSignal): boolean =>
-      (s.kind === "skeleton" || s.kind === "missing_required_key") &&
-      absentMeansEmptyPaths(s.view, body).includes(s.path);
+      absentList(s) && absentMeansEmptyPaths(s.view, body, headers).includes(s.path);
     const failing = check.signals.filter(failsResponse);
+    // an absent list the rule would excuse but ESPN's count says is not empty: said, kept as drift
+    for (const s of failing)
+      if (absentList(s) && !excused(s) && absentMeansEmptyPaths(s.view, body).includes(s.path))
+        this.deps.log?.warn("espn.absent_contradicted", {
+          view: s.view,
+          path: s.path,
+          count: absentListCount(s.view, headers),
+        });
     if (!failing.some(excused)) return check;
     for (const s of failing.filter(excused))
       this.deps.log?.debug("espn.absent_means_empty", { view: s.view, path: s.path });
@@ -1058,8 +1084,8 @@ export class EspnRequester {
       throw new EspnUpstreamError("malformed", { view, upstream_status: answer.status });
     }
     if (large) await yieldToLoop();
-    const check = this.checkBody(spec.target.views, body);
-    if (check.drifted) throw this.driftError(check.signals);
+    const check = this.checkBody(spec.target.views, body, answer.headers);
+    if (check.drifted) throw this.driftError(check.signals, body);
     if (large) await yieldToLoop();
     let parsed: unknown;
     try {

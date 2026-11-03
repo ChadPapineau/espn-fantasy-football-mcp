@@ -206,14 +206,15 @@ describe("the in-call check excuses exactly the listed absent paths on a recogni
     const alone = checkBody(w, ["mPendingTransactions"], withoutPendingKey());
     expect(alone.drifted).toBe(false);
     expect(alone.signals).toEqual([]);
-    const both = checkBody(w, ["mPendingTransactions", "mTransactions2"], withoutPendingKey());
+    // mRoster's seed is not listed (mTransactions2's is, since finding transactions-absent-key-red)
+    const both = checkBody(w, ["mPendingTransactions", "mRoster"], withoutPendingKey());
     expect(both).toMatchObject({ drifted: true, skeleton: true });
     expect(both.signals.map((s) => [s.kind, s.view, s.path])).toEqual([
-      ["skeleton", "mTransactions2", "$.transactions"],
+      ["skeleton", "mRoster", "$.teams[].roster.entries"],
     ]);
-    expect(both.first).toMatchObject({ view: "mTransactions2", path: "$.transactions" });
+    expect(both.first).toMatchObject({ view: "mRoster", path: "$.teams[].roster.entries" });
     // a view whose seed is not listed keeps its skeleton verdict
-    const other = checkBody(w, ["mTransactions2"], withoutPendingKey());
+    const other = checkBody(w, ["mRoster"], withoutPendingKey());
     expect(other.drifted).toBe(true);
     // the pending key present: nothing to excuse, nothing changed
     const present = checkBody(w, ["mPendingTransactions"], {
