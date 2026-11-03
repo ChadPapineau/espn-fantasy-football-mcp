@@ -275,6 +275,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   request keeps its whole 20 s deadline (a wait ending in the deadline's last moments had made the
   request time out). After Ctrl-C no request is sent (a read waiting inside the limiter had sent up
   to 20 s later), and the run's share counts requests, retries included: at most 24 in any minute.
+  Once its bound on waiting is spent, the run now stops (exit 1, RATE_LIMITED, saying what it
+  stored) instead of sending past that share: beside a busy server it had filled the shared window.
+  A read that Ctrl-C cuts is never counted as done, even when the stale cache answers it (a Ctrl-C
+  during the last read had ended the run 0). Rows stamped ahead of the clock (a clock since set
+  back) no longer hold the run waiting: only the next request re-stamps them.
 - **Stage C's other fixes.** QA and penetration testing (rounds 0–3 and the final gate's fix
   rounds) fixed many smaller defects, each with a regression test. They are not itemised here: the
   commits on `build/phase-1` record each one, and `docs/plan/changelog.md` §B4–§B9 the records

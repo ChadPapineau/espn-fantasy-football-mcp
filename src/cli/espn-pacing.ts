@@ -14,14 +14,23 @@
 //    most RUN_START_MAX_ROWS rows of every process — room for each attempt the read can make (its
 //    first and each retry on a 429, a 5xx or a timeout, a row each: READ_MAX_ROWS) inside
 //    RUN_SHARE_PER_MINUTE. So the run's own requests, its retries included, are at most 24 in any
-//    minute however flaky ESPN is (for reads of one request, as the backfill's are), the run alone
-//    never fills the 30/min window, and the MCP server and the launchd jobs that share it find a
-//    slot within a few seconds (a burst of 30 would hold the window full for half a minute, longer
-//    than their reads wait: refused, a job's run failed). Pacing counted reads before, blind to a
-//    read's retries: with every first attempt a 503, the run alone filled the window and was
-//    refused by it (verifier finding F2 on fbbd705). Reads that go out once each find room at every
-//    start at RUN_PACE_MS but for moments of latency, which are waited silently as pacing (at most
-//    RUN_PACE_MS); a longer wait for the share is announced (`share`) and counted like a refusal's;
+//    minute however flaky ESPN is (for reads of one request, as the backfill's are; past a bound
+//    the run stops rather than send past it, below), the run alone never fills the 30/min window,
+//    and the MCP server and the launchd jobs that share it find a slot within a few seconds (a
+//    burst of 30 would hold the window full for half a minute, longer than their reads wait:
+//    refused, a job's run failed). Pacing counted reads before, blind to a read's retries: with
+//    every first attempt a 503, the run alone filled the window and was refused by it (verifier
+//    finding F2 on fbbd705). Reads that go out once each find room at every start at RUN_PACE_MS
+//    but for moments of latency, which are waited silently as pacing (at most RUN_PACE_MS); a
+//    longer wait for the share is announced (`share`) and counted like a refusal's. A row stamped
+//    further ahead of the clock than the store reads as written (a clock since set back: more
+//    than REQUEST_SKEW_TOLERANCE_MS — src/store/repos/skew.ts) holds no slot in the look: it never
+//    ages until a request's tryRecord re-stamps it to that request's instant, so waiting on it
+//    could not help. Counted as made now at every look, 22 such rows made the run wait out its
+//    whole budget for nothing and then crowd the window (verifier finding V2 on 76269ba). The
+//    read goes to the limiter, which re-stamps and counts them; the look before the next read
+//    counts them where the store put them (a clock set back mid-run may so let one read of the
+//    run's own past its share; the limiter's 30/min holds);
 //  - waiting for a full window before the read: the same look says whether another process filled
 //    the 30/min window; if it did, the run waits itself — until the window has room for the read
 //    inside the share, in whole seconds, plus WINDOW_WAIT_MARGIN_MS — before the read starts. The
@@ -44,9 +53,13 @@
 //  - bounded: at most MAX_CONSECUTIVE_REFUSALS waits in a row for one read (on refusals and on the
 //    look before it), and in all no more waiting than the run's planned reads need at 30/min in
 //    whole windows plus one spare window (waitBudgetMs: load from the other processes); the silent
-//    pacing waits are not counted. A full window or a used share past a bound is not waited on —
-//    the read goes to the limiter as it is (its 30/min holds; the share then does not); a refusal
-//    past one is rethrown and `gaveUp` says which bound it was;
+//    pacing waits are not counted. Past a bound the run stops: a full window or a used share seen
+//    by the look ends it before the read starts, as the limiter's own refusal (RATE_LIMITED,
+//    `window`), and a refusal past one is rethrown; `gaveUp` says which bound it was. The run
+//    never sends past its share to finish: the read went to the limiter as it was before, and the
+//    run then crowded the window it shares — it filled it to 30 beside a busy server, and with
+//    every read retried its own requests reached 27 in a minute (verifier finding V1 on 76269ba).
+//    A re-run resumes;
 //  - cancellable, and no request after the signal: the run's signal (the command's claim on
 //    SIGINT/SIGTERM, src/cli/interrupt.ts) ends a wait at once, no read starts after it
 //    (RunInterrupted), and it reaches each read: every attempt runs under an upstream budget of its
@@ -59,12 +72,15 @@
 //    on fbbd705). What such a read throws — a refusal, the budget's, the cancelled request's, an
 //    aborted wait's (endedByAbort), itself or behind a STALE_ONLY — is the run's interrupt
 //    (RunInterrupted: no wait announced, F3; no failure recorded); an answer from ESPN (a rejected
-//    cookie, a 404) still fails as itself. A second signal ends the process.
+//    cookie, a 404) still fails as itself. So is a value the read returns once the signal has
+//    aborted: the provider's stale fallback serves a cached copy in place of the request the
+//    signal cut (its `aborted` is a degraded code), and counted as done, a Ctrl-C during the last
+//    read ended the run 0 as worked (verifier finding V1 on 76269ba). Such a read is not counted;
+//    a re-run resumes either way. A second signal ends the process.
 // It never sends a request itself and never widens the limiter: every read still takes its slot
 // from src/providers/espn/limiter.ts, which alone decides when a request goes out (the look before
 // a read only reads rows and only ever adds a wait; the budget only ever refuses), and the waits
 // are the injected Sleep (tests run on fake time).
-import { stampedAhead } from "../config/freshness.js";
 import { ESPN_BACKOFF, ESPN_LIMITER } from "../config/schema.js";
 import type { Clock } from "../domain/clock.js";
 import { isEspnUpstreamError } from "../providers/espn/errors.js";
@@ -75,6 +91,7 @@ import {
   UpstreamBudgetExhausted,
   type ReadOptions,
 } from "../providers/platform.js";
+import { REQUEST_SKEW_TOLERANCE_MS } from "../store/repos/skew.js";
 import { limiterDecision } from "../store/types.js";
 
 /**
@@ -158,10 +175,14 @@ export function limiterRefusal(e: unknown): LimiterRefusal | null {
  * now) — by default the limiter's 30: until the 30/min window has a free slot — from its newest
  * rows (LimiterRepository.recentOutcomes, newest first, at least `max` of them) counted as the store
  * counts them inside its BEGIN IMMEDIATE (src/store/types.ts limiterDecision: a row at or after
- * nowMs − 60 s holds a slot; the oldest of the `max` newest frees one 60 s after it). A row stamped
- * ahead of `nowMs` (stampedAhead: a clock since set back) counts as made now — the store re-stamps
- * it to the next request's instant (src/store/repos/limiter.ts). An unreadable instant holds no
- * slot. Pure and read-only: it decides nothing — the limiter does, when the read takes its slot.
+ * nowMs − 60 s holds a slot, one stamped a little ahead of nowMs included; the oldest of the `max`
+ * newest frees one 60 s after it). A row stamped more than REQUEST_SKEW_TOLERANCE_MS ahead of
+ * `nowMs` (a clock since set back) holds no slot here: the store re-stamps it to the next request's
+ * instant (src/store/repos/limiter.ts) — and only a request does, so it never ages before one; a
+ * wait on it could not end (verifier finding V2 on 76269ba; inFlightOf and breakerFromOutcomes
+ * leave such rows out the same way). It is skipped before the `max` newest are taken, as is an
+ * unreadable instant. Pure and read-only: it decides nothing — the limiter does, when the read
+ * takes its slot.
  */
 export function windowFreeInMs(
   newestFirst: readonly { readonly at: string }[],
@@ -169,13 +190,11 @@ export function windowFreeInMs(
   max: number = ESPN_LIMITER.perMinute,
 ): number {
   const startMs = nowMs - WINDOW_MS;
-  const rows: number[] = [];
-  for (const r of newestFirst.slice(0, max)) {
-    const at = Date.parse(r.at);
-    if (!Number.isFinite(at)) continue;
-    const t = stampedAhead(at, nowMs) ? nowMs : at;
-    if (t >= startMs) rows.push(t);
-  }
+  const rows = newestFirst
+    .map((r) => Date.parse(r.at))
+    .filter((at) => Number.isFinite(at) && at >= startMs && at <= nowMs + REQUEST_SKEW_TOLERANCE_MS)
+    .sort((a, b) => b - a)
+    .slice(0, max);
   const v = limiterDecision({
     nowMs,
     windows: [{ startMs, max }],
@@ -276,11 +295,18 @@ export interface PacedRunOptions {
   readonly bucketRows?: () => readonly { readonly at: string }[];
 }
 
-/** The look before a read: a counted wait (`announced`), or a silent pacing one. */
+/**
+ * The look before a read: a counted wait (`announced`), a silent pacing one, or — a counted wait
+ * past a bound (`past`) — the run's stop.
+ */
 interface LookWait {
   readonly reason: "window" | "share";
   readonly ms: number;
   readonly announced: boolean;
+  /** The bound a counted wait would pass (the run stops), or null. */
+  readonly past: "consecutive" | "budget" | null;
+  /** The exact time until the share has room (what the stop's refusal states). */
+  readonly roomMs: number;
 }
 
 /** A run of ESPN reads, paced and waiting out the limiter's refusals (this module's header). */
@@ -341,10 +367,12 @@ export class PacedRun {
   /**
    * Runs one read: paced, a full window or a used share seen before it waited for, the limiter's
    * window and Retry-After refusals waited out (behind a STALE_ONLY too), every other failure
-   * rethrown as is. Each attempt of `fn` gets ReadOptions with an upstream budget of its own that
-   * the run's signal aborts (pass them to the provider read: a read waiting inside the limiter is
-   * then refused before its slot). `upstream(value)` says whether the answer came from ESPN
-   * (default yes): a cache hit sent nothing, so the next read is not paced after it.
+   * rethrown as is; past a bound the run stops (the look's stop is the limiter's own `window`
+   * refusal, thrown before the read starts). Each attempt of `fn` gets ReadOptions with an
+   * upstream budget of its own that the run's signal aborts (pass them to the provider read: a
+   * read waiting inside the limiter is then refused before its slot); a value returned once the
+   * signal has aborted is the run's interrupt too. `upstream(value)` says whether the answer came
+   * from ESPN (default yes): a cache hit sent nothing, so the next read is not paced after it.
    */
   async read<T>(
     fn: (opts: ReadOptions) => Promise<T>,
@@ -360,6 +388,12 @@ export class PacedRun {
       // without room for the read inside the run's share, is waited for here — never inside the
       // read's ≤ 20 s deadline — counted like a refusal's wait; moments of the share are pacing
       const ahead = this.look(refusals);
+      if (ahead !== null && ahead.past !== null) {
+        // past a bound the run stops before the read, as the limiter's refusal: it never sends
+        // past its share to finish (verifier finding V1 on 76269ba); a re-run resumes
+        this.stopped = ahead.past;
+        throw new EspnRateLimitedError(ahead.roomMs, "window");
+      }
       if (ahead?.announced === true) {
         refusals++;
         await this.waitFor(ahead.reason, ahead.ms, tried);
@@ -369,6 +403,9 @@ export class PacedRun {
       const startedAt = this.clock.nowMs();
       const a = await this.attempt(fn, startedAt);
       if (a.ok) {
+        // a value after the signal is no read done: it may be the stale copy the provider served
+        // in place of the request the signal cut (verifier finding V1 on 76269ba)
+        if (this.signal?.aborted === true) throw new RunInterrupted();
         if (upstream(a.value)) this.lastStart = startedAt;
         this.done++;
         return a.value;
@@ -434,9 +471,9 @@ export class PacedRun {
    * full window frees). A wait no longer than the pacing interval while the window is not full is
    * pacing — moments between a read's start and its row — silent and uncounted, its exact time
    * plus 1 ms (the window's start is inclusive). Else the wait is counted (`window` when full,
-   * else `share`): its time in whole seconds plus the margin — none past a bound
-   * (MAX_CONSECUTIVE_REFUSALS waits for this read, or the budget), where the read goes to the
-   * limiter as it is; none when the look fails.
+   * else `share`): its time in whole seconds plus the margin — and past a bound
+   * (MAX_CONSECUTIVE_REFUSALS waits for this read, or the budget) it is `past` that bound: the
+   * run stops there, the read not started. None when the look fails.
    */
   private look(refusals: number): LookWait | null {
     if (this.bucketRows === null) return null;
@@ -452,10 +489,15 @@ export class PacedRun {
     }
     if (!Number.isFinite(room) || room <= 0) return null;
     if (full <= 0 && room <= this.paceMs)
-      return { reason: "share", ms: room + 1, announced: false };
+      return { reason: "share", ms: room + 1, announced: false, past: null, roomMs: room };
     const ms = Math.ceil(room / 1000) * 1000 + WINDOW_WAIT_MARGIN_MS;
-    if (refusals >= MAX_CONSECUTIVE_REFUSALS || this.waitedTotal + ms > this.budgetMs) return null;
-    return { reason: full > 0 ? "window" : "share", ms, announced: true };
+    const past =
+      refusals >= MAX_CONSECUTIVE_REFUSALS
+        ? "consecutive"
+        : this.waitedTotal + ms > this.budgetMs
+          ? "budget"
+          : null;
+    return { reason: full > 0 ? "window" : "share", ms, announced: true, past, roomMs: room };
   }
 
   /** One counted wait: announced (never after the signal — F3), slept, added to the total. */

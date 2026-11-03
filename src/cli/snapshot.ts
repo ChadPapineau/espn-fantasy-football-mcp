@@ -728,8 +728,9 @@ const wentUpstream = (r: { readonly stamp: { readonly cache: string } }): boolea
  * settings read plus one per scoring period of each season, ~37): every read goes through a
  * PacedRun (src/cli/espn-pacing.ts) — 22 a minute and at most 24 requests in any minute, retries
  * included; a full window, a used share or ESPN's Retry-After waited out with one stderr line,
- * bounded; Ctrl-C honoured at once, and no request sent after it (each read gets the run's signal
- * through its own upstream budget).
+ * bounded, and past a bound the run stops rather than send past its share; Ctrl-C honoured at
+ * once, no request sent after it (each read gets the run's signal through its own upstream
+ * budget), and a read it cut never counted as done, even one the stale cache answered.
  * Before, the 31st read was refused RATE_LIMITED and the run died part-way (found at the owner's
  * install, 2026-11-02). A spent daily cap, repeated concurrency refusals and every other failure end
  * the run as before (jobFailure: the same code and exit). A run stopped by the wait bounds or an

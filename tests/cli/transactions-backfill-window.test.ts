@@ -25,7 +25,15 @@
 //    written, and the run ends with its interrupt line, exit 1, no failure recorded (F1); with every
 //    request's first attempt answered 503, the run's own requests, retries included, stay within
 //    RUN_SHARE_PER_MINUTE in any minute — the waits are the share's, before a read — and the run
-//    completes, each week stored once (F2).
+//    completes, each week stored once (F2);
+//  - the verifiers' findings on 76269ba: Ctrl-C while a re-run's last request is in flight — the
+//    provider serves the week's stale copy in place of the cut request — ends the run with its
+//    interrupt line and the true read count, exit 1, the job not recorded as worked (V1); past a
+//    bound the run stops with its stopped line rather than crowd the window it shares — beside a
+//    server sending every 3 s, and with every read retried twice beside one sending every 20 s
+//    (its own requests within RUN_SHARE_PER_MINUTE in every minute, never ESPN_UPSTREAM_UNAVAILABLE)
+//    (V1); 22 rows another process stamped an hour ahead (a clock since set back) are no wait —
+//    the first read re-stamps them and the run waits for the share once after it, 503s or not (V2).
 // No request leaves the process; the transactions are crafted in the fake GUID range.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -36,6 +44,7 @@ import {
   MAX_CONSECUTIVE_REFUSALS,
   RUN_PACE_MS,
   RUN_SHARE_PER_MINUTE,
+  RUN_START_MAX_ROWS,
   WINDOW_WAIT_MARGIN_MS,
   waitBudgetMs,
 } from "../../src/cli/espn-pacing.js";
@@ -880,5 +889,294 @@ describe("a read's retries count against the run's share (verifier F2 on fbbd705
     expect(store.repos.limiter.recentOutcomes(500).filter((r) => r.outcome === "pending")).toEqual(
       [],
     );
+  }, 60_000);
+});
+
+describe("Ctrl-C during a re-run's last read: the stale copy that answers it is no read done (verifier finding V1 on 76269ba)", () => {
+  it("the cut read's stale fallback is the run's interrupt: exit 1, the true read count, the job not recorded as worked", async () => {
+    sb = sandbox();
+    plantCookies();
+    const t1 = fakeTime(START);
+    expect(await main(["transactions", "--backfill"], ioFor(t1, history(t1)))).toBe(0);
+    const before = readJobState(sb.cacheDir);
+    expect(before["run.transactions-backfill.ok"]).toBe(1);
+    // an hour later: every week cached past its 10 min TTL, inside its 1-day hard limit — the
+    // provider serves it stale in place of a request the signal cuts
+    const time = fakeTime("2026-10-06T19:00:00.000Z");
+    const base = history(time);
+    const sig = signalHost();
+    let cut = 0;
+    const fetch: typeof base.fetch = (url, init) => {
+      const u = new URL(url);
+      const last =
+        u.pathname.includes("/seasons/2024/") &&
+        u.searchParams.get("scoringPeriodId") === "17" &&
+        u.searchParams.getAll("view").includes("mTransactions2");
+      if (!last) return base.fetch(url, init);
+      // Ctrl-C while the run's last request is in flight; it is cancelled as the real one is
+      cut++;
+      sig.fire();
+      return new Promise<Response>((resolve, reject) => {
+        const abort = (): void => {
+          reject(new DOMException("aborted", "AbortError"));
+        };
+        if (init.signal?.aborted === true) {
+          abort();
+          return;
+        }
+        init.signal?.addEventListener("abort", abort, { once: true });
+        // never aborted: the answer comes and the test fails on it instead of hanging
+        setTimeout(() => {
+          resolve(base.fetch(url, init));
+        }, 2_000).unref();
+      });
+    };
+    const io = ioFor(time, { fetch });
+    const code = await main(["transactions", "--backfill"], io, {
+      interrupts: createInterrupts(sig.host),
+    });
+    expect(cut).toBe(1);
+    expect(sig.raised()).toBe(0);
+    expect(code).toBe(1);
+    // the cut read is not counted: the 36 before it were done, the 37th was not
+    expect(stderrLines(io.err.text)).toEqual([
+      `eff transactions-backfill: interrupted — ${String(DEFAULT_READS - 1)} read(s) done, 0 new transaction(s) stored so far; run \`eff transactions --backfill\` again to resume (it is safe to repeat)`,
+    ]);
+    expect(io.out.text).not.toContain("fits its premium");
+    // the job is not recorded as worked (nor as failed): the first run's record stands
+    const after = readJobState(sb.cacheDir);
+    expect(after["run.transactions-backfill.at"]).toBe(before["run.transactions-backfill.at"]);
+    expect(after["run.transactions-backfill.ok"]).toBe(1);
+    expect(after["run.transactions-backfill.error"] ?? null).toBeNull();
+    // nothing sent after the signal; the cancelled request is no failure the breaker counts
+    expect(base.sends.some((s) => s.season === 2024 && s.week === 17)).toBe(false);
+    const store = await otherProcess(io);
+    const rows = store.repos.limiter.recentOutcomes(500);
+    expect(rows.filter((r) => r.outcome === "pending")).toEqual([]);
+    expect(rows[0]?.outcome).toBe("client_error");
+    expect(storedIds(store)).toHaveLength(34);
+  }, 60_000);
+});
+
+/**
+ * A store factory whose limiter repository first records another process's requests — one every
+ * `periodMs` from `fromMs` up to the clock's now — before every look at the bucket and every slot
+ * the run takes (the MCP server sending steadily); `planted` holds their instants.
+ */
+function steadyServer(clock: { nowMs(): number }, fromMs: number, periodMs: number) {
+  const planted: number[] = [];
+  let next = fromMs;
+  const factory: StoreFactory = {
+    open: (o) => {
+      const s = storeFactory.open(o);
+      const real = s.repos.limiter;
+      const catchUp = (): void => {
+        for (; next <= clock.nowMs(); next += periodMs) {
+          const v = real.tryRecord({
+            at: new Date(next).toISOString(),
+            keyless: false,
+            origin: "server",
+            windows: [],
+            dailyCap: null,
+          });
+          if (v.ok) {
+            real.recordOutcome(v.id, "ok");
+            planted.push(next);
+          }
+        }
+      };
+      const limiter: LimiterRepository = {
+        ...real,
+        recentOutcomes: (limit) => {
+          catchUp();
+          return real.recentOutcomes(limit);
+        },
+        tryRecord: (req) => {
+          catchUp();
+          return real.tryRecord(req);
+        },
+      };
+      return { ...s, repos: { ...s.repos, limiter } };
+    },
+    openPublisher: (o) => storeFactory.openPublisher(o),
+  };
+  return { planted, factory };
+}
+
+const STOPPED_LINE =
+  /^transactions-backfill: stopped — ESPN's request limit kept refusing \(\d+ wait\(s\), \d+ s of waiting\); \d+ read\(s\) done, \d+ new transaction\(s\) stored so far; run `eff transactions --backfill` again later to resume \(it is safe to repeat\)$/m;
+
+describe("past a bound the run stops rather than crowd the window it shares (verifier finding V1 on 76269ba)", () => {
+  it("the MCP server sending every 3 s, a minute of it before the run: no own send into a minute past the share, and the run ends with its stopped line", async () => {
+    sb = sandbox();
+    plantCookies();
+    const time = fakeTime(START);
+    const server = steadyServer(time.clock, time.clock.nowMs() - 60_000, 3_000);
+    const f = history(time);
+    const io = ioFor(time, f);
+    const { config, log } = await loadRuntime(io);
+    const code = await transactionsBackfill(io, config, log, {
+      notify: false,
+      seasons: undefined,
+      factory: server.factory,
+    });
+    expect(code).toBe(1);
+    expect(io.out.text).toMatch(STOPPED_LINE);
+    expect(io.err.text).toMatch(/^eff transactions-backfill: RATE_LIMITED$/m);
+    expect(readJobState(sb.cacheDir)["run.transactions-backfill.error"]).toBe("RATE_LIMITED");
+    // the run waited within its bounds, every wait the share's or the window's, before a read
+    const waits = stderrLines(io.err.text).filter((l) => WAIT_LINE.test(l));
+    expect(waits.length).toBeGreaterThanOrEqual(1);
+    const waited = waits.reduce((a, l) => a + Number(WAIT_LINE.exec(l)?.[1]), 0);
+    expect(waited * 1000).toBeLessThanOrEqual(waitBudgetMs(1 + 2 * 19) + waits.length * 1000);
+    // no own send while the minute before it held more than the share leaves room for: the look's
+    // RUN_START_MAX_ROWS, one more landing between the look and the send, and one more the
+    // limiter admits in the same instant (the window's start is inclusive)
+    const ours = f.sends.map((s) => s.at);
+    expect(ours.length).toBeGreaterThanOrEqual(1);
+    expect(ours.length).toBeLessThan(DEFAULT_READS);
+    const store = await otherProcess(io);
+    const rows = store.repos.limiter.recentOutcomes(1000).map((r) => Date.parse(r.at));
+    expect(rows).toHaveLength(ours.length + server.planted.length);
+    for (const s of ours)
+      expect(rows.filter((u) => u >= s - 60_000 && u < s).length, String(s)).toBeLessThanOrEqual(
+        RUN_START_MAX_ROWS + 2,
+      );
+    assertWindows(ours, server.planted);
+  }, 60_000);
+
+  it("every request answered 503, 503, then 200, three seasons, the server every 20 s: the run's own requests stay within its share in every minute, and it ends stopped — never ESPN_UPSTREAM_UNAVAILABLE", async () => {
+    sb = sandbox();
+    plantCookies();
+    const time = fakeTime(START);
+    const server = steadyServer(time.clock, time.clock.nowMs() - 60_000, 20_000);
+    const ok = history(time);
+    const tries = new Map<string, number>();
+    const sendsAt: number[] = [];
+    const fetch: typeof ok.fetch = async (url, init) => {
+      sendsAt.push(time.clock.nowMs());
+      const n = (tries.get(url) ?? 0) + 1;
+      tries.set(url, n);
+      if (n < 3) {
+        time.clock.advance(LATENCY_MS);
+        return new Response("upstream", { status: 503, headers: { "content-type": "text/plain" } });
+      }
+      return ok.fetch(url, init);
+    };
+    const io = ioFor(time, { fetch });
+    const { config, log } = await loadRuntime(io);
+    const code = await transactionsBackfill(io, config, log, {
+      notify: false,
+      seasons: "2023,2024,2025",
+      factory: server.factory,
+    });
+    expect(io.err.text).not.toMatch(/ESPN_UPSTREAM_UNAVAILABLE/);
+    expect(code).toBe(1);
+    expect(io.out.text).toMatch(STOPPED_LINE);
+    expect(io.err.text).toMatch(/^eff transactions-backfill: RATE_LIMITED$/m);
+    // every read went out three times: no read was cut short
+    expect([...tries.values()].every((n) => n === 3)).toBe(true);
+    // the run's own requests, retries included, within its share in every closed minute
+    expect(sendsAt.length).toBeGreaterThan(RUN_SHARE_PER_MINUTE);
+    for (const t of sendsAt)
+      expect(sendsAt.filter((s) => s >= t - 60_000 && s <= t).length).toBeLessThanOrEqual(
+        RUN_SHARE_PER_MINUTE,
+      );
+    assertWindows(sendsAt, server.planted);
+    const store = await otherProcess(io);
+    expect(store.repos.limiter.recentOutcomes(1000).filter((r) => r.outcome === "pending")).toEqual(
+      [],
+    );
+  }, 60_000);
+});
+
+describe("rows stamped far ahead (a clock since set back) are no wait: only a request re-stamps them (verifier finding V2 on 76269ba)", () => {
+  /** Another process's `n` rows stamped `leadMs` ahead of the clock. */
+  function plantAhead(store: Store, nowMs: number, n: number, leadMs: number): void {
+    for (let i = 0; i < n; i++) {
+      const v = store.repos.limiter.tryRecord({
+        at: new Date(nowMs + leadMs).toISOString(),
+        keyless: false,
+        origin: "server",
+        windows: [],
+        dailyCap: null,
+      });
+      if (v.ok) store.repos.limiter.recordOutcome(v.id, "ok");
+    }
+  }
+
+  it("22 rows an hour ahead: no wait before the first read, at most one share wait after it; exit 0, every week stored", async () => {
+    sb = sandbox();
+    plantCookies();
+    const time = fakeTime(START);
+    const t0 = time.clock.nowMs();
+    const other = await otherProcess(ioFor(time, { fetch: fakeFetch().fetch }));
+    plantAhead(other, t0, RUN_START_MAX_ROWS + 1, 3_600_000);
+    const f = history(time);
+    const io = ioFor(time, f);
+    const code = await main(["transactions", "--backfill"], io);
+    expect(io.err.text).not.toMatch(/^eff /m);
+    expect(code).toBe(0);
+    expect(f.sends).toHaveLength(DEFAULT_READS);
+    // the first read went out at once: the rows ahead never aged in the look, and a wait on them
+    // could not end (two 61 s waits for nothing before, then crowding)
+    expect((f.sends[0]?.at ?? 0) - t0).toBeLessThan(RUN_PACE_MS);
+    // its request re-stamped them; the look before the next read counted them where the store put
+    // them, and waited for the share once
+    const lines = stderrLines(io.err.text);
+    expect(lines.length, lines.join("\n")).toBeLessThanOrEqual(1);
+    for (const l of lines) {
+      expect(l).toMatch(WAIT_LINE);
+      expect(l).toContain("is near full (the run keeps six free)");
+      expect(l).not.toContain("(0 read(s) done;");
+    }
+    const rows = other.repos.limiter.recentOutcomes(500);
+    expect(rows.every((r) => Date.parse(r.at) <= time.clock.nowMs())).toBe(true);
+    assertWindows(
+      f.sends.map((s) => s.at),
+      Array.from({ length: RUN_START_MAX_ROWS + 1 }, () => f.sends[0]?.at ?? 0),
+    );
+    expect(storedIds(other)).toHaveLength(34);
+  }, 60_000);
+
+  it("the same, every request's first attempt answered 503: exit 0, the run's own requests within its share in any minute", async () => {
+    sb = sandbox();
+    plantCookies();
+    const time = fakeTime(START);
+    const t0 = time.clock.nowMs();
+    const other = await otherProcess(ioFor(time, { fetch: fakeFetch().fetch }));
+    plantAhead(other, t0, RUN_START_MAX_ROWS + 1, 3_600_000);
+    const ok = history(time);
+    const seen = new Set<string>();
+    const sendsAt: number[] = [];
+    const fetch: typeof ok.fetch = async (url, init) => {
+      sendsAt.push(time.clock.nowMs());
+      if (!seen.has(url)) {
+        seen.add(url);
+        time.clock.advance(LATENCY_MS);
+        return new Response("upstream", { status: 503, headers: { "content-type": "text/plain" } });
+      }
+      return ok.fetch(url, init);
+    };
+    const io = ioFor(time, { fetch });
+    const code = await main(["transactions", "--backfill"], io);
+    expect(io.err.text).not.toMatch(/^eff /m);
+    expect(code).toBe(0);
+    expect(sendsAt).toHaveLength(2 * DEFAULT_READS);
+    expect(ok.sends).toHaveLength(DEFAULT_READS);
+    for (const t of sendsAt)
+      expect(sendsAt.filter((s) => s >= t - 60_000 && s <= t).length).toBeLessThanOrEqual(
+        RUN_SHARE_PER_MINUTE,
+      );
+    // the waits were the share's, before a read, none before the first
+    const lines = stderrLines(io.err.text);
+    for (const l of lines) {
+      expect(l).toMatch(WAIT_LINE);
+      expect(l).toContain("is near full (the run keeps six free) — waiting");
+      expect(l).not.toContain("(0 read(s) done;");
+    }
+    const ids = storedIds(other);
+    expect(ids).toHaveLength(34);
+    expect(new Set(ids).size).toBe(34);
   }, 60_000);
 });
