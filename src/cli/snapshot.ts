@@ -25,6 +25,7 @@ import {
   type ProSchedule,
   type Roster,
   type RosterSlots,
+  type Transaction,
   type WaiverRules,
 } from "../domain/league/types.js";
 import type { EspnProjectionSnapshot } from "../domain/analytics/types.js";
@@ -625,7 +626,28 @@ export function transactionPeriods(
   return { read, gap: start > from ? { from, to: start - 1 } : null };
 }
 
-/** `eff transactions` — append unseen transactions after the pool's working run (plan 06 §1.4). */
+/**
+ * The moves of a period's page that ESPN executed (`EXECUTED`): what a later answer for the same
+ * period must still list. A pending or failed entry may leave the list; an executed move is never
+ * un-made (verifier finding F2 on ec68d08).
+ */
+export function executedCount(items: readonly Transaction[]): number {
+  return items.filter((t) => t.status === "EXECUTED").length;
+}
+
+/**
+ * `eff transactions` — append unseen transactions after the pool's working run (plan 06 §1.4).
+ *
+ * The tripwire (verifier finding F2 on ec68d08): an answer without the transactions list is read
+ * as the empty week (ABSENT_MEANS_EMPTY, finding transactions-absent-key-red) — but a view that
+ * stopped serving the list would read the same, every week, silently. Each run records how many
+ * executed moves its read of the current period listed (`transactions.period_executed`, beside
+ * `transactions.period`); the next run re-reads that period first, and if ESPN now answers it
+ * without the list (the page's `list_absent`) although that read listed executed moves, the answer
+ * contradicts the record: drift on `$.transactions` (red; the provider records it) and the run
+ * fails ESPN_DRIFT_DETECTED, its state unmoved, so the next run re-reads the same period. It cannot
+ * fire on a period nobody has moved in, nor on a list ESPN sends (even an empty one).
+ */
 export async function transactionsAppend(
   io: CliIo,
   config: Config,
@@ -653,7 +675,16 @@ export async function transactionsAppend(
       Math.max(1, league.clock.first_scoring_period),
       week,
     );
+    // what the previous run's read of its period (re-read first below) listed as executed
+    const recorded =
+      stateNumber(state, "transactions.season") === config.season
+        ? {
+            period: stateNumber(state, "transactions.period"),
+            executed: stateNumber(state, "transactions.period_executed") ?? 0,
+          }
+        : null;
     let added = 0;
+    let executedNow = 0;
     for (const period of plan.read) {
       const page = await run.stack.provider.listTransactions(ref, {
         types: TRANSACTION_TYPES,
@@ -662,12 +693,23 @@ export async function transactionsAppend(
         count: 100,
         team_id: null,
       });
+      if (
+        page.value.list_absent === true &&
+        recorded !== null &&
+        recorded.period === period &&
+        recorded.executed > 0
+      ) {
+        log.warn("transactions.absent_contradicted", { period, executed: recorded.executed });
+        throw run.stack.provider.transactionsListContradicted();
+      }
       added += run.store.repos.transactionsSeen.appendNew(page.value.items, io.clock.nowIso());
+      if (period === week) executedNow = executedCount(page.value.items);
     }
     updateJobState(config.cacheDir, {
       ...(poolAt === null ? {} : { "transactions.after": poolAt }),
       "transactions.season": config.season,
       "transactions.period": week,
+      "transactions.period_executed": executedNow,
     });
     await writeLine(
       io.stdout,

@@ -21,6 +21,7 @@ import { redViews } from "./drift-recheck.js";
 import { endJob, jobFailure, jobWorked, startJob, type JobRun } from "./espn-jobs.js";
 import { EXIT } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
+import { readJobState, stateNumber } from "./job-state.js";
 import type { Logger } from "./log.js";
 
 /** The job name the run is recorded under (job-state.json; doctor #11 lists it). */
@@ -30,6 +31,12 @@ export const DRIFT_REFRESH_JOB = "refresh-drift";
 interface Reread {
   readonly run: JobRun;
   readonly week: Week;
+  /**
+   * The scoring period the transactions job recorded (job state `transactions.period`, this
+   * season), or null: the job re-reads it every run, so its answer is the one that keeps
+   * mTransactions2 red or clears it (verifier finding F3 on ec68d08).
+   */
+  readonly jobPeriod: Week | null;
 }
 
 const FORCE: ReadOptions = Object.freeze({ force_refresh: true });
@@ -52,12 +59,42 @@ async function playercardRead(r: Reread): Promise<unknown> {
   return provider.getPlayerStats(ref, [first.ref], { type: "season" }, FORCE);
 }
 
+/** Whether a read's page said ESPN answered without its list (read as none; platform TransactionPage). */
+const listAbsent = (got: unknown): boolean =>
+  (got as { value?: { list_absent?: unknown } } | null)?.value?.list_absent === true;
+
+/**
+ * `mTransactions2`'s re-read: every type, as the transactions job asks (an empty type list is
+ * refused before any request — VALIDATION — so the view was never re-read: finding
+ * transactions-absent-key-red); the job's recorded period first when it is older than the current
+ * one, then the current period. An answer without the list (read as none) does not show the key,
+ * so it clears nothing (request.ts `unconfirmedViews`): the job's period — the one it is stuck
+ * re-reading, where moves were made — is the read that can (verifier finding F3 on ec68d08). The
+ * result says whether EVERY answer came without the list, and the first degraded read's stamp.
+ */
+async function transactionsReread(r: Reread): Promise<unknown> {
+  const weeks =
+    r.jobPeriod !== null && r.jobPeriod >= 1 && r.jobPeriod < r.week
+      ? [r.jobPeriod, r.week]
+      : [r.week];
+  let absent = true;
+  let degraded: unknown = null;
+  for (const week of weeks) {
+    const got = await r.run.stack.provider.listTransactions(
+      r.run.stack.ref,
+      { types: TRANSACTION_TYPES, week, since: null, count: 25, team_id: null },
+      FORCE,
+    );
+    if (degraded === null && degradedCode(got) !== null) degraded = got;
+    if (!listAbsent(got)) absent = false;
+  }
+  return { ...(degraded as object | null), value: { list_absent: absent } };
+}
+
 /**
  * One read of the provider per view — the read the tools make of it, forced past the cache. A view
  * missing here is one no read of this build requests (`mScoreboard`, `mDraftDetail`; the board
- * probe's `kona_league_communication` is `eff check-auth`'s). `mTransactions2` asks every type, as
- * the transactions job does: an empty type list is refused before any request (VALIDATION), so the
- * view was never re-read (finding transactions-absent-key-red).
+ * probe's `kona_league_communication` is `eff check-auth`'s). `mTransactions2`: `transactionsReread`.
  */
 export const DRIFT_REREADS: Readonly<Partial<Record<EspnView, (r: Reread) => Promise<unknown>>>> =
   Object.freeze({
@@ -69,12 +106,7 @@ export const DRIFT_REREADS: Readonly<Partial<Record<EspnView, (r: Reread) => Pro
     mMatchup: (r) => r.run.stack.provider.getMatchups(r.run.stack.ref, FORCE),
     mMatchupScore: (r) => r.run.stack.provider.getLiveMatchups(r.run.stack.ref, r.week, FORCE),
     mBoxscore: (r) => r.run.stack.provider.getBoxScores(r.run.stack.ref, r.week, FORCE),
-    mTransactions2: (r) =>
-      r.run.stack.provider.listTransactions(
-        r.run.stack.ref,
-        { types: TRANSACTION_TYPES, week: r.week, since: null, count: 25, team_id: null },
-        FORCE,
-      ),
+    mTransactions2: transactionsReread,
     mPendingTransactions: (r) =>
       r.run.stack.provider.listPendingTransactions(r.run.stack.ref, FORCE),
     mPositionalRatings: (r) =>
@@ -98,7 +130,11 @@ export interface DriftRecheckView {
   readonly outcome: "cleared" | "red" | "not_read";
   /** The keys the row still records missing for it (after the re-read). */
   readonly removed: readonly string[];
-  /** Why it was not re-read or judged: `no_read` (no read of this build), or the read's error code. */
+  /**
+   * Why it was not re-read or judged: `no_read` (no read of this build), or the read's error code;
+   * for a `red` view, `list_absent` — ESPN answered without the list (read as none), which does not
+   * show the key (verifier finding F3 on ec68d08); otherwise null.
+   */
   readonly reason: string | null;
 }
 
@@ -163,7 +199,18 @@ export async function refreshDrift(
       const code = errorCode(e);
       if (code === "ESPN_AUTH_REJECTED" || code === "ESPN_REQUIRES_COOKIES") throw e;
     }
+    // the transactions job's recorded period, this season (transactionsReread)
+    const state = readJobState(config.cacheDir);
+    const recorded = stateNumber(state, "transactions.period");
+    const jobPeriod =
+      stateNumber(state, "transactions.season") === config.season &&
+      recorded !== null &&
+      Number.isInteger(recorded)
+        ? recorded
+        : null;
     const reasons = new Map<EspnView, string>();
+    // the views whose every answer came without the list (read as none): they show no key
+    const absent = new Set<EspnView>();
     // each read once (mSettings and mNav are one read): its failure, if any, is every such view's
     const done = new Map<(r: Reread) => Promise<unknown>, string | null>();
     for (const view of red) {
@@ -176,7 +223,9 @@ export async function refreshDrift(
         let failure: string | null = null;
         try {
           // a copy served from the cache because ESPN failed was never re-judged: say why
-          failure = degradedCode(await read({ run, week }));
+          const got = await read({ run, week, jobPeriod });
+          failure = degradedCode(got);
+          if (failure === null && listAbsent(got)) absent.add(view);
         } catch (e) {
           // a drift error is the judgement itself (the key is still missing); anything else is not
           const code = errorCode(e);
@@ -204,7 +253,7 @@ export async function refreshDrift(
               ? "red"
               : "cleared",
         removed,
-        reason: removed.length > 0 ? reason : null,
+        reason: removed.length === 0 ? null : (reason ?? (absent.has(view) ? "list_absent" : null)),
       };
     });
     const status = after?.status ?? "green";
@@ -217,9 +266,11 @@ export async function refreshDrift(
           io.stdout,
           v.outcome === "cleared"
             ? `${v.view}: cleared — ESPN's answer has every key the server reads`
-            : v.outcome === "red"
-              ? `${v.view}: still red — removed ${v.removed.slice(0, 5).join(", ")}${v.removed.length > 5 ? ", …" : ""}`
-              : `${v.view}: not re-read (${v.reason === "no_read" ? "no read of this build requests it" : (v.reason ?? "?")}) — removed ${v.removed.slice(0, 5).join(", ")}`,
+            : v.outcome === "red" && v.reason === "list_absent"
+              ? `${v.view}: still red — ESPN answered without the list (read as none), which does not show ${v.removed.slice(0, 5).join(", ")}; it clears on an answer that carries the list (the period's first move) or counts 0`
+              : v.outcome === "red"
+                ? `${v.view}: still red — removed ${v.removed.slice(0, 5).join(", ")}${v.removed.length > 5 ? ", …" : ""}`
+                : `${v.view}: not re-read (${v.reason === "no_read" ? "no read of this build requests it" : (v.reason ?? "?")}) — removed ${v.removed.slice(0, 5).join(", ")}`,
         );
       await writeLine(io.stdout, `drift_state: ${before} → ${status}`);
     }

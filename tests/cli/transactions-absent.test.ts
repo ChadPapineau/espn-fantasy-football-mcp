@@ -102,6 +102,20 @@ type Week9 = "absent" | "skeleton" | { count: string };
  * count above 0, or the unrecognised-view answer (the recorded P28 skeleton).
  */
 function privateLeague(week9: Week9 = "absent") {
+  return scriptedLeague((p) => {
+    if (p === 8)
+      return jsonRes(
+        { ...bareBase(), transactions: [tx(1, 8, "2026-11-02T18:00:00.000Z")] },
+        { [HEADER_TRANSACTION_COUNT]: "1" },
+      );
+    if (week9 === "skeleton") return jsonRes(rec("league-a/skeleton.json"));
+    if (week9 === "absent") return jsonRes(bareBase(), { [HEADER_TRANSACTION_COUNT]: "0" });
+    return jsonRes(bareBase(), { [HEADER_TRANSACTION_COUNT]: week9.count });
+  });
+}
+
+/** The private league at scoring period `current`, each period's mTransactions2 answer scripted. */
+function scriptedLeague(txns: (period: number) => Response, current = 9) {
   return fakeFetch((url) => {
     const u = new URL(url);
     const views = u.searchParams.getAll("view");
@@ -112,18 +126,9 @@ function privateLeague(week9: Week9 = "absent") {
       settings: Record<string, unknown>;
     };
     s.settings.isPublic = false;
-    const settings = { ...s, scoringPeriodId: 9 };
-    if (views.includes("mTransactions2")) {
-      const p = Number(u.searchParams.get("scoringPeriodId") ?? "0");
-      if (p === 8)
-        return jsonRes(
-          { ...bareBase(), transactions: [tx(1, 8, "2026-11-02T18:00:00.000Z")] },
-          { [HEADER_TRANSACTION_COUNT]: "1" },
-        );
-      if (week9 === "skeleton") return jsonRes(rec("league-a/skeleton.json"));
-      if (week9 === "absent") return jsonRes(bareBase(), { [HEADER_TRANSACTION_COUNT]: "0" });
-      return jsonRes(bareBase(), { [HEADER_TRANSACTION_COUNT]: week9.count });
-    }
+    const settings = { ...s, scoringPeriodId: current };
+    if (views.includes("mTransactions2"))
+      return txns(Number(u.searchParams.get("scoringPeriodId") ?? "0"));
     let body: unknown = settings;
     if (views.includes("mNav")) body = composeBodies(body, rec("league-a/mNav.json"));
     if (views.includes("mTeam")) body = composeBodies(body, rec("league-a/mTeam.json"));
@@ -303,5 +308,244 @@ describe("`eff refresh espn:drift` re-reads a red mTransactions2 and clears it",
       new Headers(reads[0]?.init?.headers).get("x-fantasy-filter") ?? "{}",
     ) as { transactions: { filterType: { value: string[] } } };
     expect(filter.transactions.filterType.value).toEqual([...TRANSACTION_TYPES]);
+  });
+});
+
+// verifier finding F2 on ec68d08: an answer without the list reads as the empty week, so a view that
+// stopped serving the list would read the same, every week, silently. The job's tripwire: the period
+// it recorded, whose read listed executed moves, answering without the list is drift.
+describe("`eff transactions`: a period that listed executed moves answering without the list is drift (F2)", () => {
+  /** Every period answered with the bare base and no count header: the view serving nothing. */
+  const noop = () => scriptedLeague(() => jsonRes(bareBase()));
+
+  it("run 1 stores a week-8 move and records it; ESPN then serves no list: run 2 fails ESPN_DRIFT_DETECTED, red, state unmoved", async () => {
+    sb = sandbox();
+    plantCookies();
+    updateJobState(sb.cacheDir, { "transactions.season": 2026, "transactions.period": 8 });
+    const week8 = scriptedLeague(
+      (p) =>
+        p === 8
+          ? jsonRes(
+              { ...bareBase(), transactions: [tx(1, 8, "2026-11-02T18:00:00.000Z")] },
+              { [HEADER_TRANSACTION_COUNT]: "1" },
+            )
+          : jsonRes(bareBase()),
+      8,
+    );
+    const r1 = await runtime("2026-11-02T20:30:00.000Z", week8);
+    expect(await transactionsAppend(r1.io, r1.config, r1.log, { notify: true, force: true })).toBe(
+      0,
+    );
+    expect(readJobState(sb.cacheDir)).toMatchObject({
+      "transactions.period": 8,
+      "transactions.period_executed": 1,
+    });
+    const f = noop();
+    const r2 = await runtime("2026-11-03T12:30:00.000Z", f);
+    const code = await transactionsAppend(r2.io, r2.config, r2.log, { notify: true, force: true });
+    expect(code, `${r2.io.out.text} | ${r2.io.err.text}`).toBe(1);
+    expect(r2.io.err.text).toContain("eff transactions: ESPN_DRIFT_DETECTED");
+    expect(r2.io.err.text).toContain('"event":"transactions.absent_contradicted"');
+    expect(r2.io.out.text).not.toContain("appended");
+    // the contradicted period is the first read; nothing after it is read
+    expect(
+      f.urls
+        .filter((u) => u.includes("view=mTransactions2"))
+        .map((u) => new URL(u).searchParams.get("scoringPeriodId")),
+    ).toEqual(["8"]);
+    await withStore((s) => {
+      const row = s.repos.driftState.get();
+      expect(row?.status).toBe("red");
+      expect(parseDiffs(row?.diff_json ?? "[]")).toEqual([
+        { view: "mTransactions2", removed: ["$.transactions"], added: [], enums: [] },
+      ]);
+      expect(s.repos.transactionsSeen.list(null, 100)).toHaveLength(1);
+    });
+    expect(readJobState(sb.cacheDir)).toMatchObject({
+      "transactions.period": 8,
+      "transactions.period_executed": 1,
+    });
+    expect(readNotifications(sb.cacheDir).some((n) => n.kind === "failure")).toBe(true);
+    // the next run re-reads the same period and fails again: the drift stays said, never flaps
+    const r3 = await runtime("2026-11-03T13:30:00.000Z", noop());
+    expect(await transactionsAppend(r3.io, r3.config, r3.log, { notify: false, force: true })).toBe(
+      1,
+    );
+    await withStore((s) => {
+      expect(s.repos.driftState.get()?.status).toBe("red");
+    });
+  });
+
+  it("cannot fire on a period nobody moved in, another season's period, or a list ESPN sends (even empty)", async () => {
+    const cases: [string, Record<string, number>, () => ReturnType<typeof fakeFetch>][] = [
+      [
+        "no executed move recorded",
+        {
+          "transactions.season": 2026,
+          "transactions.period": 8,
+          "transactions.period_executed": 0,
+        },
+        noop,
+      ],
+      [
+        "no count recorded (a run of an older build)",
+        { "transactions.season": 2026, "transactions.period": 8 },
+        noop,
+      ],
+      [
+        "another season's period",
+        {
+          "transactions.season": 2025,
+          "transactions.period": 9,
+          "transactions.period_executed": 4,
+        },
+        noop,
+      ],
+      [
+        "the list sent, empty",
+        {
+          "transactions.season": 2026,
+          "transactions.period": 8,
+          "transactions.period_executed": 2,
+        },
+        () =>
+          scriptedLeague((p) =>
+            p === 8 ? jsonRes({ ...bareBase(), transactions: [] }) : jsonRes(bareBase()),
+          ),
+      ],
+    ];
+    for (const [name, state, league] of cases) {
+      sb = sandbox();
+      plantCookies();
+      updateJobState(sb.cacheDir, state);
+      const r = await runtime("2026-11-03T12:30:00.000Z", league());
+      const code = await transactionsAppend(r.io, r.config, r.log, { notify: true, force: true });
+      expect(code, `${name}: ${r.io.err.text}`).toBe(0);
+      expect(r.io.err.text, name).not.toContain("absent_contradicted");
+      await withStore((s) => {
+        expect(s.repos.driftState.get()?.status ?? "green", name).not.toBe("red");
+      });
+      expect(readJobState(sb.cacheDir), name).toMatchObject({
+        "transactions.period": 9,
+        "transactions.period_executed": 0,
+      });
+      sb.cleanup();
+    }
+    sb = sandbox();
+  });
+
+  it("records the executed moves of the current period only (pending and failed entries are not counted)", async () => {
+    sb = sandbox();
+    plantCookies();
+    updateJobState(sb.cacheDir, { "transactions.season": 2026, "transactions.period": 9 });
+    const at = "2026-11-03T09:00:00.000Z";
+    const league = scriptedLeague(() =>
+      jsonRes({
+        ...bareBase(),
+        transactions: [
+          tx(1, 9, at),
+          tx(2, 9, at),
+          { ...tx(3, 9, at), status: "PENDING" },
+          { ...tx(4, 9, at), type: "WAIVER_ERROR", status: "FAILED_INVALIDPLAYERSOURCE" },
+        ],
+      }),
+    );
+    const r = await runtime("2026-11-03T12:30:00.000Z", league);
+    expect(await transactionsAppend(r.io, r.config, r.log, { notify: true, force: true })).toBe(0);
+    expect(readJobState(sb.cacheDir)).toMatchObject({ "transactions.period_executed": 2 });
+  });
+});
+
+describe("`eff refresh espn:drift` on an answer without the list (F3)", () => {
+  async function refresh(f: ReturnType<typeof fakeFetch>, json: boolean) {
+    const { exec } = fakeExec();
+    const io = makeIo(sb, {
+      fetch: f.fetch,
+      clock: movingClock("2026-11-03T13:00:00.000Z"),
+      platform: "darwin",
+      exec,
+      packageRoot: fakePackage(sb),
+      env: ENV,
+    });
+    const code = await main(["refresh", DRIFT_REFRESH_TARGET, ...(json ? ["--json"] : [])], io);
+    return { code, io };
+  }
+
+  it("no count beside the absent list: still red, said as an answer without the list — never 'has every key'", async () => {
+    for (const json of [true, false]) {
+      sb = sandbox();
+      plantCookies();
+      await withStore((s) => {
+        s.repos.driftState.put(liveRedRow());
+      });
+      const { code, io } = await refresh(
+        scriptedLeague(() => jsonRes(bareBase())),
+        json,
+      );
+      expect(code, io.err.text).toBe(4);
+      if (json) {
+        const report = JSON.parse(
+          io.out.text.trim().split("\n").pop() ?? "{}",
+        ) as DriftRefreshReport;
+        expect(report).toMatchObject({ before: "red", after: "red" });
+        expect(report.views).toEqual([
+          {
+            view: "mTransactions2",
+            outcome: "red",
+            removed: ["$.transactions"],
+            reason: "list_absent",
+          },
+        ]);
+      } else {
+        expect(io.out.text).toContain(
+          "mTransactions2: still red — ESPN answered without the list (read as none)",
+        );
+        expect(io.out.text).not.toContain("has every key");
+      }
+      sb.cleanup();
+    }
+    sb = sandbox();
+  });
+
+  it("re-reads the job's recorded period first: its moves show the key, and the row clears", async () => {
+    sb = sandbox();
+    plantCookies();
+    updateJobState(sb.cacheDir, { "transactions.season": 2026, "transactions.period": 8 });
+    await withStore((s) => {
+      s.repos.driftState.put(liveRedRow());
+    });
+    const f = scriptedLeague((p) =>
+      p === 8
+        ? jsonRes({ ...bareBase(), transactions: [tx(1, 8, "2026-11-02T18:00:00.000Z")] })
+        : jsonRes(bareBase()),
+    );
+    const { code, io } = await refresh(f, true);
+    expect(code, io.err.text).toBe(0);
+    const report = JSON.parse(io.out.text.trim().split("\n").pop() ?? "{}") as DriftRefreshReport;
+    expect(report).toMatchObject({ before: "red", after: "additive" });
+    expect(report.views).toEqual([
+      { view: "mTransactions2", outcome: "cleared", removed: [], reason: null },
+    ]);
+    expect(
+      f.urls
+        .filter((u) => u.includes("view=mTransactions2"))
+        .map((u) => new URL(u).searchParams.get("scoringPeriodId")),
+    ).toEqual(["8", "9"]);
+  });
+
+  it("another season's recorded period is not read", async () => {
+    sb = sandbox();
+    plantCookies();
+    updateJobState(sb.cacheDir, { "transactions.season": 2025, "transactions.period": 8 });
+    await withStore((s) => {
+      s.repos.driftState.put(liveRedRow());
+    });
+    const f = scriptedLeague(() => jsonRes(bareBase()));
+    await refresh(f, true);
+    expect(
+      f.urls
+        .filter((u) => u.includes("view=mTransactions2"))
+        .map((u) => new URL(u).searchParams.get("scoringPeriodId")),
+    ).toEqual(["9"]);
   });
 });
