@@ -689,20 +689,27 @@ function runTool(bin: string, args: readonly string[]): string | null {
 }
 
 /**
- * `ls -ledq -- <p>`'s stdout, or null. A run that did not complete (`incomplete`) is run ONCE more:
- * the live install's launchd job, started as the Mac woke, once refused its store with
- * `acl_unverifiable` on the cache directory while the runs around it read the same directory
- * (finding acl-read-transient-unverifiable) — at wake, `ls -le` resolving the entries' and the
- * owner's names through the directory service can outlast the 2 s bound, and a spawn can fail for
- * want of a process slot. Nothing it refuses changes: a run that completed and failed, output that
- * does not parse, and every entry a parsed listing shows are judged on the first answer, and a
- * second incomplete run is still null (fail closed). At most 4 s of waiting, only on that path.
+ * How long after a listing that did not complete twice no listing is run a second time
+ * (`createSystemAcl`): one stalled directory service costs a command one double run, not one per
+ * path (verifier finding F5 on e94c135).
  */
-function listAcl(p: string): string | null {
+export const ACL_STALL_HOLD_MS = 30_000;
+
+/**
+ * `ls -ledq -- <p>`'s stdout (`ok`), or why not. A run that did not complete (`incomplete`) is run
+ * ONCE more when `retry`: the live install's launchd job, started as the Mac woke, once refused its
+ * store with `acl_unverifiable` on the cache directory while the runs around it read the same
+ * directory (finding acl-read-transient-unverifiable) — at wake, `ls -le` resolving the entries' and
+ * the owner's names through the directory service can outlast the 2 s bound, and a spawn can fail
+ * for want of a process slot. Nothing it refuses changes: a run that completed and failed, output
+ * that does not parse, and every entry a parsed listing shows are judged on the first answer, and a
+ * second incomplete run is still refused (fail closed). At most 4 s of waiting per path, and only
+ * while no listing has failed to complete twice in the last ACL_STALL_HOLD_MS (`createSystemAcl`).
+ */
+function listAcl(p: string, retry: boolean): ToolRun {
   const args = ["-ledq", "--", p] as const;
-  let run = runToolOnce(LS_BIN, args);
-  if (run.kind === "incomplete") run = runToolOnce(LS_BIN, args);
-  return run.kind === "ok" ? run.stdout : null;
+  const run = runToolOnce(LS_BIN, args);
+  return run.kind === "incomplete" && retry ? runToolOnce(LS_BIN, args) : run;
 }
 
 /** The most verdicts one system access keeps (one per inode state; the oldest goes first). */
@@ -715,10 +722,15 @@ export const ACL_CACHE_MAX = 256;
  * an unchanged directory is read once, not on every check; a strip is `chmod -h -N` on the absolute
  * path (`-h`: never through a symlink; chmod takes no `--`, and an absolute path cannot read as an
  * option), run once. Elsewhere there is nothing to read (see the section comment). The platform is
- * read per call.
+ * read per call. A listing that did not complete twice holds the second run off for
+ * ACL_STALL_HOLD_MS (`now`, ms): while the directory service stalls, a caller that catches
+ * `acl_unverifiable` and goes on to the next path (the `--to` ancestor walk, doctor's ACL rows)
+ * waits 2 s per path, not 4 s — every such read still fails closed; a completed listing ends the
+ * hold (verifier finding F5 on e94c135).
  */
-export function createSystemAcl(): AclAccess {
+export function createSystemAcl(now: () => number = Date.now): AclAccess {
   const cache = new Map<string, readonly AclEntry[]>();
+  let holdUntil = Number.NEGATIVE_INFINITY;
   return Object.freeze({
     read(p: string): readonly AclEntry[] | null {
       if (process.platform !== "darwin") return [];
@@ -731,7 +743,14 @@ export function createSystemAcl(): AclAccess {
       const key = `${String(before.dev)}:${String(before.ino)}:${String(before.ctimeNs)}`;
       const known = cache.get(key);
       if (known !== undefined) return known;
-      const stdout = listAcl(p);
+      const retry = now() >= holdUntil;
+      const run = listAcl(p, retry);
+      if (run.kind === "incomplete") {
+        if (retry) holdUntil = now() + ACL_STALL_HOLD_MS;
+        return null;
+      }
+      holdUntil = Number.NEGATIVE_INFINITY;
+      const stdout = run.kind === "ok" ? run.stdout : null;
       const parsed = stdout === null ? null : parseLsAcl(stdout);
       if (parsed === null) return null;
       let after: BigIntStats;

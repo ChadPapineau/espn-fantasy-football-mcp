@@ -14,7 +14,7 @@ vi.mock("node:child_process", async (orig) => ({
   spawnSync,
 }));
 
-const { ACL_CACHE_MAX, CHMOD_BIN, LS_BIN, createSystemAcl } =
+const { ACL_CACHE_MAX, ACL_STALL_HOLD_MS, CHMOD_BIN, LS_BIN, createSystemAcl } =
   await import("../../src/config/paths.js");
 const { tempDir } = await import("./helpers.js");
 
@@ -239,6 +239,73 @@ describe("createSystemAcl().read: one more run only when `ls` did not run to com
     spawnSync.mockReturnValueOnce(timedOut).mockReturnValue({ status: 0, stdout: "" });
     expect(createSystemAcl().strip(tmp.dir)).toBe(false);
     expect(spawnSync).toHaveBeenCalledTimes(1);
+  });
+
+  // verifier finding F5 on e94c135: a caller that catches acl_unverifiable and goes on to the next
+  // path (the `--to` ancestor walk, doctor's ACL rows) paid 4 s per path while the directory service
+  // stalled. Two incomplete runs hold the second run off for ACL_STALL_HOLD_MS: 2 s per path, still
+  // fail closed; a completed listing ends the hold.
+  it("after two incomplete runs, the next paths get one run each (null, fail closed) until the hold ends", () => {
+    let t = 1_000_000;
+    const acl = createSystemAcl(() => t);
+    const paths = ["a", "b", "c"].map((n) => {
+      const p = path.join(tmp.dir, n);
+      mkdirSync(p, { mode: 0o700 });
+      return p;
+    });
+    spawnSync.mockReturnValue(timedOut);
+    expect(acl.read(paths[0]!)).toBeNull();
+    expect(spawnSync).toHaveBeenCalledTimes(2);
+    expect(acl.read(paths[1]!)).toBeNull();
+    expect(acl.read(paths[2]!)).toBeNull();
+    expect(spawnSync).toHaveBeenCalledTimes(4);
+    // still held just before it ends; past it, a path gets its second run again
+    t += ACL_STALL_HOLD_MS - 1;
+    expect(acl.read(paths[1]!)).toBeNull();
+    expect(spawnSync).toHaveBeenCalledTimes(5);
+    t += 1;
+    expect(acl.read(paths[1]!)).toBeNull();
+    expect(spawnSync).toHaveBeenCalledTimes(7);
+    expect(ACL_STALL_HOLD_MS).toBe(30_000);
+  });
+
+  it("a listing that completes ends the hold at once; the hold is per access", () => {
+    const t = 5_000;
+    const acl = createSystemAcl(() => t);
+    const a = path.join(tmp.dir, "a");
+    const b = path.join(tmp.dir, "b");
+    mkdirSync(a, { mode: 0o700 });
+    mkdirSync(b, { mode: 0o700 });
+    spawnSync.mockReturnValueOnce(timedOut).mockReturnValueOnce(timedOut);
+    expect(acl.read(a)).toBeNull();
+    // held: one run, and it completes — the verdict stands and the hold is over
+    spawnSync.mockReturnValueOnce({ status: 0, stdout: LISTING });
+    expect(acl.read(b)).toEqual([]);
+    expect(spawnSync).toHaveBeenCalledTimes(3);
+    spawnSync.mockReturnValueOnce(timedOut).mockReturnValueOnce({ status: 0, stdout: LISTING });
+    expect(acl.read(a)).toEqual([]);
+    expect(spawnSync).toHaveBeenCalledTimes(5);
+    // another access never inherits a hold
+    spawnSync.mockReset();
+    spawnSync.mockReturnValueOnce(timedOut).mockReturnValueOnce(timedOut);
+    const held = createSystemAcl(() => t);
+    expect(held.read(path.join(tmp.dir))).toBeNull();
+    spawnSync.mockReturnValueOnce(timedOut).mockReturnValueOnce({ status: 0, stdout: LISTING });
+    expect(createSystemAcl(() => t).read(a)).toEqual([]);
+    expect(spawnSync).toHaveBeenCalledTimes(4);
+  });
+
+  it("while held, a foreign entry a completed run shows is still refused (insecure_acl)", async () => {
+    const { foreignAclEntries } = await import("../../src/config/paths.js");
+    const acl = createSystemAcl(() => 0);
+    const a = path.join(tmp.dir, "a");
+    mkdirSync(a, { mode: 0o700 });
+    spawnSync.mockReturnValueOnce(timedOut).mockReturnValueOnce(timedOut);
+    expect(() => foreignAclEntries(a, "cache directory", acl)).toThrow(
+      expect.objectContaining({ reason: "acl_unverifiable" }) as Error,
+    );
+    spawnSync.mockReturnValueOnce({ status: 0, stdout: WITH_ENTRY });
+    expect(foreignAclEntries(tmp.dir, "cache directory", acl)).toHaveLength(1);
   });
 });
 
