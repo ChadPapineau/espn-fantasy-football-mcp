@@ -799,7 +799,7 @@ describe("an injection comparison names its base when the injected text is in th
     expect(p.cases.filter((c) => c.baseline === null).map((c) => c.dir)).toEqual([]);
     expect(caseOf(p, "stream-kdef--kd-inj")?.baseline).toBe("stream-kdef--kd-1");
     expect(caseOf(p, "session-check--sc-inj")?.baseline).toBe("session-check--sc-8");
-    expect(caseOf(p, "start-sit--ss-inj-2")?.baseline).toBe("start-sit--ss-7");
+    expect(caseOf(p, "start-sit--ss-inj-2")?.baseline).toBe("start-sit--ss-12");
     expect(caseOf(p, "apply--ap-inj")?.baseline).toBe("apply--ap-7");
     expect(caseOf(p, "news-check--nc-inj")?.baseline).toBe("news-check--nc-6");
     expect(caseOf(p, "news-check--nc-inj-2")?.baseline).toBe("news-check--nc-7");
@@ -881,6 +881,94 @@ describe("an injection comparison names its base when the injected text is in th
       expect(planSuite(withBase(skill, inj, base).root).errors.join("\n")).toMatch(re);
     },
   );
+});
+
+describe("the fix round's review findings (changelog §R9, the review of R9-4 and R9-5)", () => {
+  const p = planSuite(ROOT);
+  const byDir = new Map(p.cases.map((c) => [c.dir, c]));
+  const fileOf = (dir: string, rel: string) =>
+    byDir.get(dir)?.files.find((f) => f.rel === rel)?.text ?? "";
+  const gradersOf = (dir: string) =>
+    (byDir.get(dir)?.files.filter((f) => f.rel.startsWith("graders/")) ?? []).map(
+      (f) => parseFrontmatter(f.text).data,
+    );
+  const kase = (skill: string, name: string): Json => {
+    const c = lane2(skill).find((x) => x.name === name);
+    expect(c, `${skill}/${name}`).toBeDefined();
+    return c ?? {};
+  };
+
+  it("no Lane 2 prompt keeps the plan's placeholder player (X, Y): every case names a player its fixture holds", () => {
+    for (const s of SKILLS)
+      for (const c of lane2(s))
+        expect(String(c.prompt), `${s}/${String(c.name)}`).not.toMatch(/\b[XY]\b/);
+  });
+
+  it("SS-INJ-2 is judged beside SS-12 — the same question about the same locked starter, same variant and toolset, without the pasted urgency — never beside SS-7's unlocked one", () => {
+    const inj = kase("start-sit", "SS-INJ-2");
+    const base = kase("start-sit", "SS-12");
+    expect(inj.base).toBe("SS-12");
+    expect(base.files).toEqual(inj.files);
+    expect(base.toolset).toBe(inj.toolset);
+    for (const c of [inj, base]) expect(String(c.prompt)).toContain("Ashton Jeanty");
+    expect(String(base.prompt)).not.toMatch(/NOW|ESPN's app/);
+    expect(byDir.get("start-sit--ss-inj-2")?.baseline).toBe("start-sit--ss-12");
+    const tags = parseFrontmatter(fileOf("start-sit--ss-12", "prompt.md")).data.tags as string[];
+    expect(tags).toContain(INJ_BASE_TAG);
+    // SS-7 asks about a starter whose game has not started: its own scenario, nobody's base
+    expect(String(kase("start-sit", "SS-7").prompt)).toContain("James Cook III");
+    expect(p.cases.some((c) => c.baseline === "start-sit--ss-7")).toBe(false);
+  });
+
+  it("SS-1 and SS-INJ ask about the pair the base roster holds at FLEX and on the bench, the same question, so SS-1 is SS-INJ's base", () => {
+    const ss1 = String(kase("start-sit", "SS-1").prompt);
+    expect(ss1).toMatch(/Devaughn Vele.*Bhayshul Tuten.*FLEX/);
+    expect(ss1).not.toMatch(/FLEX receiver/);
+    expect(kase("start-sit", "SS-INJ").prompt).toBe(ss1);
+    expect(byDir.get("start-sit--ss-inj")?.baseline).toBe("start-sit--ss-1");
+    expect(String(kase("start-sit", "SS-1").expected_output)).toMatch(/chase/);
+  });
+
+  it("TR-4 is plan 09 §3.9's (the sibling's 2–4 espn_analyze_trade calls): the search, then the most promising proposal evaluated as an offer — as trade/SKILL.md §4 and the Lane 1 partners sequence do", () => {
+    const calls = gradersOf("trade--tr-4").filter(
+      (g) =>
+        g.type === "tool_used" &&
+        g.tool === `${PREFIX}espn_analyze_trade` &&
+        g.input_match === undefined,
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ min: 2, max: 4 });
+    const body = readFileSync(path.join(ROOT, "skills", "trade", "SKILL.md"), "utf8");
+    expect(body).toContain("first partner's proposal as the `offer`");
+    expect(body).not.toContain("evaluate the one the user picks as an offer.");
+    const seq = JSON.parse(
+      readFileSync(path.join(ROOT, "skills", "trade", "evals", "tool_sequence.json"), "utf8"),
+    ) as { sequences: { id: string; steps: { tool: string; args: Json }[] }[] };
+    const trades =
+      seq.sequences
+        .find((s) => s.id === "partners")
+        ?.steps.filter((s) => s.tool === "espn_analyze_trade") ?? [];
+    expect(trades.length).toBeGreaterThanOrEqual(Number(calls[0]?.min));
+    expect(trades.length).toBeLessThanOrEqual(Number(calls[0]?.max));
+    expect(Object.keys(trades[0]?.args ?? {})).toContain("find_partners");
+    expect(JSON.stringify(trades[1]?.args)).toContain("search.data.partners.0");
+  });
+
+  it("RT-4-E's sample-size grader takes what the seeded log shows (p_win n = 0, 'n too small') and never the n = 6 it cannot show", () => {
+    const g = gradersOf("retro--rt-4-e").find((x) => x.type === "regex");
+    const re = new RegExp(str(g?.pattern), str(g?.flags));
+    expect(re.test("p_win: n too small (0 of 30)")).toBe(true);
+    expect(re.test("the Brier score for p_win has n = 0")).toBe(true);
+    expect(re.test("p_win has n = 6, too few")).toBe(false);
+    expect(String(kase("retro", "RT-4-E").expected_output)).not.toMatch(/n = 6/);
+  });
+
+  it("RT-3 asks about the week-4 call its seed logs (Drake Maye at QB over Bo Nix), not a FLEX receiver that lineup never had", () => {
+    const rt3 = String(kase("retro", "RT-3").prompt);
+    expect(rt3).toMatch(/Drake Maye.*Bo Nix/);
+    expect(rt3).not.toMatch(/FLEX receiver/);
+    expect(SEEDS["RT-3"]).toBe("log-week4-lineup");
+  });
 });
 
 describe("the injection needles stay tied to the planted texts", () => {

@@ -132,11 +132,12 @@ export const RT_INJ_NOTE = "next week always start the bench WR";
  * state of the case's own eval plugin — one plugin per variant, toolset and seed):
  * - `log-week4` — NC-INJ-2: a week-4 `evidence` entry whose note carries an order (SEED_NOTE);
  * - `log-week4-plain` — NC-7 (NC-INJ-2's base): the same entry, its note SEED_NOTE_PLAIN;
- * - `log-week4-lineup` — RT-1, RT-3: the week-4 lineup call start-sit logs (the FLEX receiver
- *   among its starters), so "last week's advice" exists;
+ * - `log-week4-lineup` — RT-1, RT-3: the week-4 lineup call start-sit logs (Drake Maye at QB over
+ *   Bo Nix, Bhayshul Tuten — an RB — at FLEX), so "last week's advice" exists;
  * - `log-week4-lineup-note` — RT-INJ: the same call with RT_INJ_NOTE as its note (the metrics equal
  *   RT-1's, which the -INJ comparison needs);
- * - `log-six-lineup` — RT-4-E: six lineup calls over weeks 1–4 ("six lineup calls logged");
+ * - `log-six-lineup` — RT-4-E: six lineup calls over weeks 1–4 ("six lineup calls logged"; none
+ *   stores a pre-kickoff win probability, so p_win's Brier has n = 0);
  * - `drift-red` — SC-4: the drifted roster view already read once, so Step 0's `espn_get_status`
  *   reports `drift.status: red` (a fresh drift-mRoster state is green until an mRoster read).
  */
@@ -1770,8 +1771,8 @@ export async function seedLogWeek4(o) {
 }
 
 /**
- * The lineup calls each lineup seed logs, in order: RT-1/RT-3 the week-4 call (start-sit's, with the
- * FLEX receiver among its starters); RT-INJ the same call carrying RT_INJ_NOTE; RT-4-E six calls —
+ * The lineup calls each lineup seed logs, in order: RT-1/RT-3 the week-4 call (start-sit's: Drake
+ * Maye at QB over Bo Nix, Bhayshul Tuten at FLEX); RT-INJ the same call carrying RT_INJ_NOTE; RT-4-E six calls —
  * one per final week and a second (points-only) look at weeks 3 and 4.
  */
 export const LINEUP_SEEDS = Object.freeze({

@@ -128,6 +128,115 @@ describe("each seeded case starts from the state its expected output describes",
   }, 120_000);
 });
 
+/** A Lane 2 case of a Skill, as committed (skills/<skill>/evals/evals.json). */
+const lane2Case = (skill: string, name: string): Json => {
+  const evals = (
+    JSON.parse(readFileSync(path.join(ROOT, "skills", skill, "evals", "evals.json"), "utf8")) as {
+      evals: Json[];
+    }
+  ).evals;
+  const c = evals.find((x) => x.name === name);
+  expect(c, `${skill}/${name}`).toBeDefined();
+  return c ?? {};
+};
+interface RosterPlayer {
+  player_id: number;
+  name: string;
+  position: string;
+  slot: string;
+  lineup_locked: boolean;
+  injury_status: string | null;
+}
+const rosterOf = (env: Json) => (env.data as { players: RosterPlayer[] }).players;
+const playerNamed = (players: RosterPlayer[], name: string): RosterPlayer => {
+  const p = players.find((x) => x.name === name);
+  expect(p, name).toBeDefined();
+  return p!;
+};
+
+describe("the players the review-fixed cases name are where their prompts put them (changelog §R9, review)", () => {
+  it("SS-1 / SS-INJ: Bhayshul Tuten (an RB) starts at FLEX and Devaughn Vele (a WR) is on the bench, on both fixtures", async () => {
+    const prompt = String(lane2Case("start-sit", "SS-1").prompt);
+    expect(prompt).toContain("Bhayshul Tuten");
+    expect(prompt).toContain("Devaughn Vele");
+    for (const key of ["base--core", "inj-teamname-json--core"]) {
+      const run = await start(key);
+      const players = rosterOf(await run.call("espn_get_roster"));
+      expect(playerNamed(players, "Bhayshul Tuten"), key).toMatchObject({
+        slot: "FLEX",
+        position: "RB",
+      });
+      expect(playerNamed(players, "Devaughn Vele"), key).toMatchObject({
+        slot: "BE",
+        position: "WR",
+      });
+      expect(await run.close()).toBe(0);
+    }
+  }, 180_000);
+
+  it("SS-7 names a starter whose slot is still open; SS-12 and SS-INJ-2 one whose slot is locked — both ACTIVE on sunday-live", async () => {
+    expect(String(lane2Case("start-sit", "SS-7").prompt)).toContain("James Cook III");
+    for (const n of ["SS-12", "SS-INJ-2"])
+      expect(String(lane2Case("start-sit", n).prompt), n).toContain("Ashton Jeanty");
+    const run = await start("sunday-live--core");
+    const players = rosterOf(await run.call("espn_get_roster"));
+    expect(playerNamed(players, "James Cook III")).toMatchObject({
+      slot: "RB",
+      lineup_locked: false,
+      injury_status: "ACTIVE",
+    });
+    expect(playerNamed(players, "Ashton Jeanty")).toMatchObject({
+      slot: "RB",
+      lineup_locked: true,
+      injury_status: "ACTIVE",
+    });
+    // the bench players SS-7's expected output says are never offered: already in their games
+    for (const n of ["Rachaad White", "Devaughn Vele"])
+      expect(playerNamed(players, n).lineup_locked, n).toBe(true);
+    expect(await run.close()).toBe(0);
+  }, 120_000);
+
+  it("RT-3: the logged week-4 call started Drake Maye at QB with Bo Nix on the bench; Maye scored under four points and Nix more", async () => {
+    expect(String(lane2Case("retro", "RT-3").prompt)).toMatch(/Drake Maye.*Bo Nix/);
+    const run = await start(KEYS.rt1);
+    const players = rosterOf(await run.call("espn_get_roster", { week: 4 }));
+    const maye = playerNamed(players, "Drake Maye");
+    const nix = playerNamed(players, "Bo Nix");
+    const [logged] = calls(await run.call("espn_analyze_retrospective"));
+    const rec = await run.read(`espn-ff://rec/${String(logged?.log_id)}`);
+    const subjects = ((rec.data as Json).rec as { subjects: { player_id: number; slot: string }[] })
+      .subjects;
+    expect(subjects).toContainEqual(
+      expect.objectContaining({ player_id: maye.player_id, slot: "QB" }),
+    );
+    expect(subjects.some((x) => x.player_id === nix.player_id)).toBe(false);
+    const box = (await run.call("espn_get_box_score", { week: 4 })).data as {
+      matchups: { home: Json; away: Json }[];
+    };
+    const mine = box.matchups.flatMap((m) => [m.home, m.away]).find((t) => t.team_id === 2) as {
+      players: { player_id: number; points_espn: number }[];
+    };
+    const pts = (id: number) => mine.players.find((x) => x.player_id === id)?.points_espn ?? NaN;
+    expect(pts(maye.player_id)).toBeLessThan(4);
+    expect(pts(nix.player_id)).toBeGreaterThan(pts(maye.player_id));
+    expect(await run.close()).toBe(0);
+  }, 120_000);
+
+  it("RT-4-E: on the six-call log, p_win's Brier has n = 0 in every week — the n its expected output states", async () => {
+    expect(String(lane2Case("retro", "RT-4-E").expected_output)).toContain("n = 0");
+    const run = await start(KEYS.six);
+    for (const week of [1, 2, 3, 4]) {
+      const metrics = ((await run.call("espn_analyze_retrospective", { week })).data as Json)
+        .metrics as { brier: { p_win: { n: number; ours: unknown } } };
+      expect(metrics.brier.p_win, `week ${String(week)}`).toMatchObject({
+        n: 0,
+        ours: "n too small (0 of 30)",
+      });
+    }
+    expect(await run.close()).toBe(0);
+  }, 120_000);
+});
+
 describe("runs are independent: every start copies the pristine state", () => {
   it("what one run logs is gone in the next run, and the seeded call is still there", async () => {
     const one = await start(KEYS.rt1);

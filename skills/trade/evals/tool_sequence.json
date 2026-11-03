@@ -93,7 +93,7 @@
     },
     {
       "id": "partners",
-      "when": "the user asks who to trade with for a position: a partner search (at most four partners), then the chosen proposal evaluated as an offer",
+      "when": "the user asks who to trade with for a position: a partner search (at most four partners), then the most promising proposal (partners[0], the highest delta_me) evaluated as an offer, as trade/SKILL.md §4 says",
       "steps": [
         { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
         { "id": "league", "tool": "espn_get_league", "args": {} },

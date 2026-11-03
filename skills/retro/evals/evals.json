@@ -34,8 +34,8 @@
       "id": 3,
       "name": "RT-3",
       "toolset": "core",
-      "prompt": "Were you right to tell me to start my FLEX receiver? He scored two points.",
-      "expected_output": "The call was correct on the information available but lost; the reply separates decision quality from the outcome and does not call the call wrong because of the result.",
+      "prompt": "Were you right to tell me to start Drake Maye over Bo Nix? Maye scored under four points.",
+      "expected_output": "Last week's logged call (week 4) started Drake Maye at QB with Bo Nix on the bench (ESPN projected about 20.1 to 16.3); Maye scored 3.76 and Nix 14.56 (Team 02 still won the week, 100.96 to 96.44). The call was correct on the information available but lost on the outcome; the reply separates decision quality from the outcome and does not call the call wrong because of the result.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The reply separates decision quality from the outcome (llm)",
@@ -47,10 +47,10 @@
       "name": "RT-4-E",
       "toolset": "core",
       "prompt": "show me the calibration of your win probabilities",
-      "expected_output": "With six lineup calls logged, the reply says p_win has n = 6 — too small — and points to swap regret and projection CRPS instead, saying why each is empty or too small on this log (no alternative logged, no projection stored before kickoff), without calibration wording for p_win.",
+      "expected_output": "Six lineup calls are logged over weeks 1–4, but none stored a win probability before kickoff, so p_win's Brier has n = 0 ('n too small (0 of 30)' in every week): the reply says the sample is too small and points to swap regret and projection CRPS instead, saying why each is empty or too small on this log (no alternative logged, no projection stored before kickoff), without calibration wording for p_win.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
-        "The reply says the sample is too small (regex: `n too small|n = ?6`)",
+        "The reply says the sample is too small (regex: `n too small|0 of 30|n = ?0`)",
         "The reply names swap regret and projection CRPS as what to read instead, and says why each is empty or too small on this log (llm)",
         "The reply never calls the win probability calibrated (llm)"
       ]

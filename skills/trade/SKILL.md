@@ -44,15 +44,15 @@ Run Step 0 of [orient](references/orient.md). Then:
 ### 4. The evaluation
 `espn_analyze_trade` with exactly one of:
 - `offer: { partner_team_id, give: [...], get: [...] }` (1–6 `player_id`s a side) for an offer received or considered;
-- `find_partners: { need_position, max_partners: 3 }` (never more than 4) for "who should I trade with" — it returns `partners[]`; evaluate the one the user picks as an offer.
+- `find_partners: { need_position, max_partners: 3 }` (never more than 4) for "who should I trade with" — it returns `partners[]`, the highest `delta_me` first, each with a proposal and both sides' Δ, but no ΔU, counters or verdict. Then call `espn_analyze_trade` again with the first partner's proposal as the `offer` (`partner_team_id`, `give` and `get` copied from `partners[0]`): that evaluation is the one the rest of this procedure reads back and logs. List the other partners with their proposals and both Δs, and evaluate another as an offer only when the user picks it.
 
-Pass `seeding_mode` as step 1 decided. A 2-for-1 always carries the implied drop (`consolidation.implied_drop`).
+Pass `seeding_mode` as step 1 decided, the same on both calls of a partner search. A 2-for-1 always carries the implied drop (`consolidation.implied_drop`).
 
 ### 5. Devil's advocate, before the verdict
 Write one short paragraph arguing against the tool's verdict: the strongest case the other way — the far end of the `delta_me` interval, the injury or bye week that would flip it, the partner's real reason to want the deal. Then give the verdict.
 
 ### 6. Log, then answer
-`espn_record_recommendation` with `kind: "trade"`, the result's `rec` copied verbatim and its `seeding_mode_used`, before rendering ([log](references/log.md)).
+`espn_record_recommendation` with `kind: "trade"`, the evaluation's `rec` (after a partner search, the offer's) copied verbatim and its `seeding_mode_used`, before rendering ([log](references/log.md)).
 
 ## Output additions
 - **Δ for both sides:** `delta_me` and `delta_partner` (mean, p10, p90 and the distribution `basis`) — and **ΔU**: `delta_u.me` and `delta_u.partner` (`d_p_playoffs`, `d_p_bye`) under `delta_u.reading`; both readings side by side when `seeding_mode: "both"` was passed.
