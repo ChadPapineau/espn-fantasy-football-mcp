@@ -18,7 +18,7 @@ scaffold to QA-hardened merge in about 12 hours).
 | B2 | `effmcp-expansion` | Phase 2 + 3 (P1 + model wave): usage/market sources (snap counts, depth charts, pbp subset, team stats, ffopportunity, Sleeper trending, news RSS), the 16 P1 tools and 5 P1 Skills, the opportunity model and calibration, the waiver DP and seeding simulator on league history, scheduled jobs (launchd) → integration → independent gate | full gate green; all 34 read tools callable end to end |
 | — | **owner stop** | (1) run `eff setup` in a terminal (hidden-input cookie entry; nothing in chat); (2) switch effort to Ultracode; (3) reply "go" | — |
 | C | `effmcp-qa-pentest` | QA + penetration-test finders (many lenses, incl. live read-only end-to-end against the real league) → adversarial verification → remediation by lead architects → re-verification; loop until two dry rounds | no confirmed finding open |
-| D | merge + install | the final gate (✅ — it ran at the end of Stage C, 2026-10-29) and the docs (README status, CHANGELOG, HANDOFF ✅), then the merge to `main` (✅ 2026-10-29, again once CI is green), CI green on `main`, launch config + Skills installed for the owner (✅ 2026-11-02) | `main` green; the owner's client sees the server |
+| D | merge + install | the final gate (✅ — it ran at the end of Stage C, 2026-10-29) and the docs (README status, CHANGELOG, HANDOFF ✅), then the merge to `main` (✅ 2026-10-29, again 2026-11-03), CI green on `main` (✅ 2026-11-03), launch config + Skills installed for the owner (✅ 2026-11-02) | `main` green; the owner's client sees the server |
 
 Agent rules: repo `CLAUDE.md`. Commits only via `scripts/dev/commit-paths.sh`; Node via
 `scripts/dev/with-node.sh`; heavy jobs via `scripts/dev/heavy-lock.sh`. The probe-league ids are
@@ -26,8 +26,8 @@ passed to agents in their prompts and kept in local environment/config only — 
 
 ## RESUME HERE
 
-**Stage D closing — the owner's install ✅ (2026-11-02); `main` follows `build/phase-1` by fast-forward once CI is green, and Stage D closes with CI green on `main`.** See `docs/HANDOFF.md` ▶ NEXT STEP for the state and the follow-up work, and `docs/evals/stage-c-backlog.md` for what Stage C left open.
+**Stage D ✅ — every stage of this program is done** (the owner's install on 2026-11-02; CI green on `main` on 2026-11-03). See `docs/HANDOFF.md` ▶ NEXT STEP for the state and the follow-up work, and `docs/evals/stage-c-backlog.md` for what Stage C left open.
 
 - Stages A ✅ · B1 ✅ · B2a ✅ · B2b ✅ (rulings R5, R6). Owner stop ✅ (2026-10-11).
 - Stage C ✅: rounds 0–3 (live lane ✅; plugin-eval lane not runnable on this account then, R7-2 — it ran on 2026-11-03, after the owner's install: `docs/evals/stage-c-plugin-eval.md`); the final gate's fix rounds 1–3 (changelog §B6–§B8); rulings R8-1 to R8-8, the news matcher's rounds under R8-3, R8-6, R8-7 and R8-8, frozen at `b9d73eb` (changelog §B9); the final gate green at `0b21c01`.
-- Stage D: `main` fast-forwarded to `build/phase-1` on 2026-10-29 (closed `ci-default-branch-controls-inert`; its push run red on macOS, fixed since), and again once CI is green on the head; the owner's install ✅ on 2026-11-02, `eff doctor --online` exit 0 (closed R8-1). Stage D closes with CI green on `main`. No version tag; a tag is the owner's choice.
+- Stage D ✅: `main` fast-forwarded to `build/phase-1` on 2026-10-29 (closed `ci-default-branch-controls-inert`; its push run red on macOS, fixed since) and to `6182a9e` on 2026-11-03, CI green on `main`; the owner's install on 2026-11-02, `eff doctor --online` exit 0 (closed R8-1). No version tag; a tag is the owner's choice.

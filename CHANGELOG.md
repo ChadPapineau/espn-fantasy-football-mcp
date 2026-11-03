@@ -234,11 +234,11 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Fixed
 
-- **The hourly transactions job on a week nobody has moved in (found on the owner's install,
+- **The hourly transactions job after the week's rollover (found on the owner's install,
   2026-11-03).** An `mTransactions2` answer on ESPN's recognised base (its own `draftDetail` object)
   without a `transactions` list is read as the empty week, unless ESPN's count header says there are
-  moves. Before, it failed the job `ESPN_DRIFT_DETECTED` every hour from the week's rollover to its
-  first move, and turned drift red. `{}`, a 200 carrying ESPN's error envelope and the
+  moves. Before, such an answer (most likely a week nobody had moved in yet; ESPN's cookie-bearing
+  shape is not recorded) failed the job `ESPN_DRIFT_DETECTED` at every run and turned drift red. `{}`, a 200 carrying ESPN's error envelope and the
   unrecognised-view answer stay drift, for both transactions views. The first such answer per view
   is logged at info with its key names and ESPN's count, and it clears no red row unless ESPN counts
   0. The job fails as drift when a period that listed executed moves later answers without the list.
@@ -246,12 +246,14 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   before).
 - **`espn_analyze_league_activity` on a cold cache.** It reads the standings before the weekly feeds
   and answers partial, not NOT_FOUND, when no read named a team.
-- **The ACL check as the Mac wakes.** An `ls -led` listing that did not complete (a timeout, a spawn
+- **The ACL check as the Mac wakes.** An `ls -ledq` listing that did not complete (a timeout, a spawn
   error, a signal) is run once more; everything it refuses is unchanged, and two incomplete listings
   hold the second run off for 30 s.
 - **Phase 3 event-loop stalls.** v2's scoring scores 128 samples per cooperative step
-  (`V2_SIMS.scoreSlice`) and the matchup table scores a week in slices: every `full` analytics call stays under the 50 ms stall
-  bound (29 ms worst, measured over stdio).
+  (`V2_SIMS.scoreSlice`) and the matchup table scores a week in slices. Still open: a cold
+  `espn_analyze_evidence` runs one 76 ms turn of CPU on the owner's Mac, over the 50 ms stall bound,
+  and Linux CI's `full` P1 analytics window fails now and then (`docs/evals/stage-c-backlog.md`,
+  "Ruled R8-2").
 - **Drift.** A composite read (several views in one request) is compared against the union of its
   views' observations, and integer-keyed maps no longer read as additive drift.
 - **Event-loop stalls on large cached bodies.** JSON without `__proto__` or escapes parses on the

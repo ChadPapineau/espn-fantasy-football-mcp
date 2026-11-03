@@ -14,19 +14,20 @@ the owner's install"). R7-2 and R7-6 stay the owner's while `claude plugin eval`
 dev-only `vite` advisories wait for Dependabot's update after the merge, or the owner's
 `npm update vite` (under "Needs the Stage D merge or a repository setting").
 
-**After the owner's install (2026-11-03).** `main` was fast-forwarded to `build/phase-1` (`18fa414`
+**After the owner's install (2026-11-02; recorded 2026-11-03).** `main` was fast-forwarded to `build/phase-1` (`18fa414`
 on 2026-10-29), which closed `ci-default-branch-controls-inert`: the schedules, the weekly audits and
-Dependabot run from `main`. It is fast-forwarded again once CI is green on the head. The owner's
+Dependabot run from `main`. It was fast-forwarded again to `6182a9e` on 2026-11-03, with CI green on `main`. The owner's
 install on 2026-11-02 ran `eff refresh all`, `eff install-launchd` and `eff transactions --backfill`,
 and `eff doctor --online` exited 0, which closes R8-1. The backfill closes R6-3: on the owner's
 league `espn_analyze_waivers` reads `premium_basis: league_fitted` (2026-11-03). `claude plugin eval`
 is no longer gated on this account, so R7-2 and R7-6 are no longer the owner's: the suite ran twice
 on 2026-11-03; ON-1 (R7-6) scores 1.0 on both round-2 runs, and B11 Lane 2 and B15 are recorded as
 failing on Sonnet, not as met (`docs/evals/stage-c-plugin-eval.md`; rulings §R9). Still open: the
-dev-only `vite` advisories (Dependabot's `vite` 8.3.5 PR waits for review) and the items of "Ruled
-R8-2" dated 2026-11-03 (the owner's choice on R8-2 under load, the slices over the bound, the news
-matcher's cost-ratio check, the Linux P1 window). The other rows below are kept as the record of
-what Stage C left open.
+dev-only `vite` advisories (Dependabot's `vite` 8.3.5 PR waits for review); B11 Lane 2 and B15
+(round 3, `docs/HANDOFF.md` ▶ NEXT STEP); the items of "Ruled R8-2" dated 2026-11-03 (the owner's
+choice on R8-2 under load, the slices over the bound, the news matcher's cost-ratio check, the Linux
+P1 window); and the items under "Found after the owner's install (2026-11-03)" at the end. The
+other rows below are kept as the record of what Stage C left open.
 
 ## For the orchestrator's ledger
 

@@ -22,20 +22,20 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — Stage D closing (the owner's install ✅ 2026-11-02; `main` follows on CI green); next: the rulings and round 3 of the plugin eval
+## ▶ NEXT STEP — Stage D ✅ (the owner's install 2026-11-02; CI green on `main` 2026-11-03); next: the rulings and round 3 of the plugin eval
 
-**Orchestrator, 2026-11-03:** Stage D, the last stage of the build program, closes when CI is
-green on `main`. What follows it is follow-up work.
+**Orchestrator, 2026-11-03:** Stage D, the last stage of the build program, is done: CI is green on
+`main` (run 41682577637). What follows is follow-up work.
 
-**Stage D.**
+**Stage D ✅.**
 
 - `main` was fast-forwarded to `build/phase-1` on 2026-10-29 (`18fa414`; a fast-forward push, no
   merge commit, every commit it added with the no-reply identity). That closed
   `ci-default-branch-controls-inert`: the schedules, the weekly audits and Dependabot run from `main`
   (Dependabot opened its first PRs that day). `main`'s push run then failed on macOS
-  (`stall-parallel`; fixed since, below). `main` is fast-forwarded again to the commit that carries
-  this entry once CI is green on it, and Stage D closes when CI is green on `main`; the Log records
-  that run.
+  (`stall-parallel`; fixed since, below). On 2026-11-03 it was fast-forwarded again, to
+  `6182a9e` (26 commits, no merge commit, every one with the no-reply identity), and CI is green on
+  `main` there (run 41682577637), which closes Stage D. `main` follows `build/phase-1` by fast-forward.
 - The owner's install, on 2026-11-02, every step approved by the owner: a runtime clone at
   `18fa414` outside any file-provider directory (`npm ci`, then the build); the plugin at user scope
   with `toolset` `full`; the Claude Desktop chat entry; `eff refresh all`; `eff install-launchd` (20
@@ -67,7 +67,9 @@ green on `main`. What follows it is follow-up work.
   the job's recorded period. Found on the way: `espn_analyze_league_activity` answered NOT_FOUND on
   a cold cache (`ccc2231`), and a launchd job once refused its store when the ACL listing did not
   complete as the Mac woke; such a listing is now run once more, still fail-closed (`e94c135`,
-  `1d38f6b`). Two verifiers found ten items on the first fix; each is fixed with tests.
+  `1d38f6b`). Two verifiers of `ec68d08` and `e94c135` found ten items: six in the code (two of
+  them the same gap), each fixed with tests, and four on the owner's recovery steps and the docs'
+  wording, answered in item 4 and the Log.
 - R7-2 has run: the plugin eval's pilot, rulings R9-1 to R9-5 built (`docs/plan/changelog.md` §R9),
   then round 2 (`docs/evals/stage-c-plugin-eval.md`).
 
@@ -119,17 +121,24 @@ both runs.
      timings and compare CPU time;
    - read the evidence lines of the next Linux failure of `latency.test.ts`'s `full` P1 window.
 4. The owner's:
-   - update the runtime clone and the plugin to `main`'s head (README, "Upgrade"): `git pull &&
-     npm ci && npm run build` in the runtime clone; the plugin's version is still 0.0.0, so a plain
-     `claude plugin update` keeps the old copy: `claude plugin uninstall
-     espn-fantasy-football@espn-fantasy-football-mcp` and install it again as in README step 5;
-     restart Claude Code and the Desktop app before any other call (a server still on the old build
-     turns drift red again), then `eff doctor`. This brings in the transactions and backfill fixes
-     and the §R9 Skills. Drift then clears at the next :30 transactions run or with
-     `eff refresh espn:drift`, and `espn_get_status`'s warning goes from red to additive (the
-     additive keys and enum values stay for a manifest review); the first empty-week run logs one
-     `espn.absent_means_empty` line (key names and a count only), which records the cookie-bearing
-     shape;
+   - update the runtime clone and the plugin to `main`'s head (README, "Upgrade"). Quit Claude Code
+     and the Desktop app first: a server still on the old build turns drift red again. Then
+     `git pull && npm ci && npm run build` in the runtime clone, `claude plugin marketplace update
+     espn-fantasy-football-mcp`, and, because the plugin's version is still 0.0.0 (a plain
+     `claude plugin update` keeps the old copy), `claude plugin uninstall
+     espn-fantasy-football@espn-fantasy-football-mcp` and install it again as in README step 5 with
+     the install's `toolset` `full` (a second `--config toolset=full`). Start the apps again, then
+     `eff doctor`. This brings in the transactions and backfill fixes and the §R9 Skills;
+   - after the update, drift clears at the next :30 transactions run or with
+     `eff refresh espn:drift`: the failed runs left the job's recorded period at the week before the
+     rollover, and that re-read carries the list. `espn_get_status`'s warning then goes from red to
+     additive (the additive keys and enum values stay for a manifest review). Once a new-build run
+     has moved the job to the current week, a red row an old-build server writes stays red until the
+     week's first move or until ESPN counts 0 (`eff refresh espn:drift` then says "still red — ESPN
+     answered without the list", as expected). Each run in a week nobody has moved in logs one
+     `espn.absent_means_empty` line (key names and a count only): the evidence the backlog's "Record
+     the cookie-bearing shapes" asks for. If the job instead fails again with an `espn.drift` line
+     whose keys lack `draftDetail`, keep that line: the rule then needs that shape;
    - run the onboard Skill in a new session;
    - the two older registrations doctor warns about;
    - the five Dependabot PRs opened from `main` on 2026-10-29: `vite` 8.3.5 (the dev-only
@@ -404,7 +413,7 @@ R8-5), 0 open.
 | build — Stage B2a (Phase 2: the 16 P1 tools, 34 read tools in all) | ✅ 2026-10-07 (rulings R5-3 to R5-5) | "Build facts (Stage B2a)"; `docs/evals/phase2-acceptance.md` |
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
 | build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | "Build facts (Stage C)"; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
-| build — Stage D (the merge to `main`, the owner's install) | closing — the owner's install ✅ 2026-11-02 (`eff doctor --online` exit 0, R8-1 closed); `main` fast-forwarded on 2026-10-29 and again with this entry once CI is green on it; closes when CI is green on `main` | ▶ NEXT STEP; Log |
+| build — Stage D (the merge to `main`, the owner's install) | ✅ 2026-11-03 — `main` fast-forwarded (`18fa414` on 2026-10-29, `6182a9e` on 2026-11-03), CI green on `main`; the owner's install on 2026-11-02, `eff doctor --online` exit 0 (R8-1 closed) | ▶ NEXT STEP; Log |
 | follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); B15 and B11 Lane 2 below plan 09 §5.2's bar on Sonnet; round 3 next | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9 |
 
 ## Decisions made
@@ -565,7 +574,7 @@ approving the plan accepts them unless Chad says otherwise.
 - [x] executive summary delivered to Chad (2026-09-30)
 - [x] Chad's review and the decisions above → the build approved 2026-10-05 ("Decisions made"), Phase 0 first
 - [x] the build — Stages A, B1, B2a, B2b and C (final gate green 2026-10-29, `0b21c01`)
-- [ ] Stage D — fast-forward `main` to `build/phase-1`, CI green on `main`: fast-forwarded on 2026-10-29 (closed `ci-default-branch-controls-inert`; its push run red on macOS, fixed since) and again with this entry once CI is green on it
+- [x] Stage D — fast-forward `main` to `build/phase-1`, CI green on `main`: 2026-10-29 (closed `ci-default-branch-controls-inert`; its push run red on macOS, fixed since), and `6182a9e` on 2026-11-03 with CI green on `main`
 - [x] Stage D — the owner's install: the plugin, the Desktop chat entry, `eff refresh all`, `eff install-launchd`, `eff transactions --backfill`, then `eff doctor --online` exits 0 (closes R8-1): 2026-11-02
 - [x] R7-2 (`claude plugin eval`) — run on 2026-11-03: the pilot and round 2 (`docs/evals/stage-c-plugin-eval.md`)
 - [ ] the plugin eval's round 3 — the rulings, the round-2 triage's defects fixed, then the re-run, until B15 and B11 Lane 2 meet plan 09 §5.2 (▶ NEXT STEP, items 1 and 2)
@@ -677,5 +686,6 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-03 — The backfill's account-safety items on `fbbd705`. F1: after Ctrl-C, a read already waiting inside the limiter still sent up to 20 s later; each read now runs under its own upstream budget, which the run's signal aborts, so it is refused before its slot (no row, nothing sent) and the run ends with its `interrupted` line, no failure recorded. F2: pacing counted reads, not requests, so retries on a flaky ESPN let the run alone fill the window; a read now starts only while the shared bucket's last minute leaves room for its every attempt (at most 24 requests in any minute, retries included; 22 reads a minute). The limiter's caps and semantics are unchanged.
 - 2026-11-03 — The backfill's verifier items on `76269ba`. V1 (Ctrl-C): a read the signal cut could still return a value, because the provider's stale fallback serves a cached copy in place of the aborted request; counted as done, a Ctrl-C during a re-run's last read ended the run 0 and recorded it as worked. A value returned after the signal is now the run's interrupt, not a read done. V1 (bounds): past a wait bound the read went to the limiter as it was, so beside a busy server the run filled the shared window, and with retries its own requests reached 27 in a minute. Past a bound the run now stops before the read, as the limiter's own `window` refusal (the `stopped` line, RATE_LIMITED, exit 1; a re-run resumes). V2: the look counted a row stamped far ahead of the clock (a clock since set back) as made now at every look, so it never aged and the run waited out its budget for nothing. A row more than `REQUEST_SKEW_TOLERANCE_MS` ahead now holds no slot in the look (only a request's `tryRecord` re-stamps it); one ahead by less is counted at its own stamp, as the store counts it. The limiter's caps and semantics are unchanged.
 - 2026-11-03 — The plugin eval's round 2 after §R9 (`42942d4`; `docs/evals/stage-c-plugin-eval.md`). Sonnet's `llm` graders pass 66.3 % (pilot 46 %; the bar is 80 %), its free graders 385 of 410, and its mean case score is 0.80 (pilot 0.59). Opus fired correctly on 90 of 90 trigger runs and Sonnet on 82 of 90; Opus Lane 2 did not run. B15 and B11 Lane 2 still fail. N1 is gone except on one short news-check path. The triage: 3 product defects, 11 Skill-text defects, 13 eval-case defects, 6 harness cases and 23 model-variance cases. The rulings it needs and round 3 are in ▶ NEXT STEP.
-- 2026-11-03 — The hourly transactions job on the owner's install failed `ESPN_DRIFT_DETECTED` from the week's rollover (11:30 and 12:30 UTC), with drift red on `mTransactions2` `$.transactions`: an answer without the list, most likely a week nobody had moved in yet, which nothing excused (only `mPendingTransactions` had the absent-means-empty rule). Fixed in `ec68d08`; the ACL listing that did not complete at wake is run once more, still fail-closed (`e94c135`). The verifiers found ten items, all fixed (`82478e7`, `4ddf3e7`, `ccc2231`, `1d38f6b`; CI green on `1d38f6b`): the excuse needs ESPN's recognised base (its own `draftDetail` object; every cookie-bearing league answer in the owner's cache has one) and no count header above 0; it clears no red row unless ESPN counts 0; the first excused answer per view is logged at info with its key names and count; the job fails as drift when a period that listed executed moves answers without the list; `eff refresh espn:drift` re-reads the job's recorded period (it sent no request for this view before); `espn_analyze_league_activity` reads the standings first and answers partial, not NOT_FOUND; two incomplete ACL listings hold the second run off for 30 s. The cookie-bearing shape is still unrecorded: the next empty-week run's info line records it.
+- 2026-11-03 — The hourly transactions job on the owner's install failed `ESPN_DRIFT_DETECTED` from the week's rollover (11:30 and 12:30 UTC), with drift red on `mTransactions2` `$.transactions`: an answer without the list, most likely a week nobody had moved in yet, which nothing excused (only `mPendingTransactions` had the absent-means-empty rule). Fixed in `ec68d08`; the ACL listing that did not complete at wake is run once more, still fail-closed (`e94c135`). The verifiers found ten items: the six in the code (two the same gap) are fixed with tests (`82478e7`, `4ddf3e7`, `ccc2231`, `1d38f6b`; CI green on `1d38f6b`), and the four on the recovery steps and the docs' wording are answered in ▶ NEXT STEP item 4: the excuse needs ESPN's recognised base (its own `draftDetail` object; every cookie-bearing league answer in the owner's cache has one) and no count header above 0; it clears no red row unless ESPN counts 0; the first excused answer per view is logged at info with its key names and count; the job fails as drift when a period that listed executed moves answers without the list; `eff refresh espn:drift` re-reads the job's recorded period (it sent no request for this view before); `espn_analyze_league_activity` reads the standings first and answers partial, not NOT_FOUND; two incomplete ACL listings hold the second run off for 30 s. The cookie-bearing shape is still unrecorded: the next empty-week run's info line records it.
 - 2026-11-03 — The docs record the owner's install and R6-3 live (`espn_analyze_waivers` reads `premium_basis: league_fitted` on the owner's league). `main` is fast-forwarded to the commit that carries this entry once CI is green on it, and the Log records `main`'s run, which closes Stage D. ▶ NEXT STEP, Program status and Open items, the README's status lines, the build program's RESUME HERE, the Stage C backlog's header, SECURITY.md and the plan index follow; Stage C's gate record moves to "Build facts (Stage C)".
+- 2026-11-03 — Stage D ✅: `main` fast-forwarded to `6182a9e` (26 commits, no merge commit, every one with the no-reply identity), and CI is green on `main` (run 41682577637). A second review of the close-out docs found nine items (a stale stall claim in the CHANGELOG; the owner's update steps: quit the apps first, the marketplace update, `toolset=full` on the reinstall, and the recovery's conditions; the fix's counts; a date; the Phase 2 row's caveat); each is answered in this entry's commit. `main` follows `build/phase-1` by fast-forward.
