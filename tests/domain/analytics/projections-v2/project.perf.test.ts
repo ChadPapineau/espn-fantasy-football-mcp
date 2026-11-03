@@ -3,8 +3,9 @@
 // OBJ-07), run in the `process` project (wall clock, never under coverage): the worst in-bounds call
 // — 64 targets, every one with an ESPN mean (so the anchored ensemble simulates too), n_sims at the
 // E1 ceiling shared down by V2_SIMS.maxTotalLines — finishes inside half the deadline, never partial;
-// one scoring step (scoreSamples over V2_SIMS.max lines) stays under 20 ms; a 5 ms heartbeat never
-// sees a gap over 50 ms while it runs on the real event loop.
+// a whole sample set (scoreSamples over V2_SIMS.max lines) scores in under 20 ms warm — the scoring
+// phase scores V2_SIMS.scoreSlice of them per cooperative step (project-slices.test.ts counts it); a
+// 5 ms heartbeat never sees a gap over 50 ms while it runs on the real event loop.
 import { describe, expect, it } from "vitest";
 import { seededRng, systemClock } from "../../../../src/domain/clock.js";
 import { SIMS } from "../../../../src/domain/analytics/constants.js";
@@ -89,7 +90,7 @@ describe("v2-opportunity budgets", () => {
     expect(out.data.projections).toHaveLength(64);
   });
 
-  it("one scoring step (scoreSamples over V2_SIMS.max lines) stays under 20 ms", () => {
+  it("a whole sample set (scoreSamples over V2_SIMS.max lines) scores in under 20 ms warm", () => {
     const r = expectV2(
       { position: "WR", position_id: 3, team: "AAA", games: weeks.map((w) => wrGame(w)) },
       {

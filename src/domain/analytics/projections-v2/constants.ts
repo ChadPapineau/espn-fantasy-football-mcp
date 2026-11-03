@@ -312,8 +312,14 @@ export const MULT_BOUNDS = Object.freeze({
 export const V2_SIMS = Object.freeze({
   default: 2000,
   min: 200,
-  /** One scoreSamples call scores at most this many lines (a ≤ 20 ms cooperative slice). */
+  /** One scoreSamples call scores at most this many lines. */
   max: 2000,
+  /**
+   * Samples one cooperative step of the scoring phase scores (project.ts phase 3): a few ms, so
+   * the runner's batches stay near COOPERATIVE.batchMs. A whole set of `max` in one step held the
+   * loop 30–48 ms of CPU under parallel calls, 82 ms on a loaded machine (Stage C, stall-parallel).
+   */
+  scoreSlice: 128,
   /** Samples one call simulates in all (targets × samples): n is shared down past it. */
   maxTotalLines: 200_000,
   /** The ensemble rescale is applied only within [1/x, x] of the simulated mean. */

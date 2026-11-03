@@ -69,7 +69,15 @@ export {
   type UnmappedLog,
   unmappedIds,
 } from "./settings.js";
-export { explain, MAX_SAMPLES, score, scoreSamples, sumPoints } from "./engine.js";
+export {
+  explain,
+  MAX_SAMPLES,
+  type SampleScorer,
+  sampleScorer,
+  score,
+  scoreSamples,
+  sumPoints,
+} from "./engine.js";
 export {
   classifyMismatch,
   isLeagueWideMismatch,

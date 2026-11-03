@@ -350,6 +350,55 @@ function quantile(sorted: readonly number[], p: number): number {
 
 const byKey = <V>(m: Map<string, V>): [string, V][] => [...m].sort(([a], [b]) => (a < b ? -1 : 1));
 
+/** The distribution of scored points (1..MAX_SAMPLES of them, in sample order): §5's quantiles. */
+function distOfPoints(points: readonly number[], basis: DistBasis): Dist {
+  const n = points.length;
+  const sorted = [...points].sort((a, b) => a - b);
+  return Object.freeze({
+    mean: denoise(stableSum(points) / n),
+    p10: quantile(sorted, 0.1),
+    p25: quantile(sorted, 0.25),
+    p50: quantile(sorted, 0.5),
+    p75: quantile(sorted, 0.75),
+    p90: quantile(sorted, 0.9),
+    p_zero: denoise(points.filter((p) => p === 0).length / n),
+    basis,
+  });
+}
+
+/** `scoreSamples`'s distribution, scored a slice of lines at a time (sampleScorer). */
+export interface SampleScorer {
+  /** Scores each line as scoreSamples does, in order (refuses past MAX_SAMPLES lines in all). */
+  add(lines: readonly StatLine[]): void;
+  /** The distribution of every line added: scoreSamples(all of them, settings, basis).dist. */
+  dist(): Dist;
+}
+
+/**
+ * `scoreSamples(lines, settings, basis).dist`, scored a slice at a time (plan 01 §1.1, plan 03
+ * §1.2: a cooperative step does a slice of the work, so the loop is never blocked by one whole
+ * sample set — Stage C, a v2 player's 2 000 samples took 30–48 ms of CPU in one step under
+ * parallel calls). Each line is evaluated exactly as scoreSamples evaluates it and the distribution
+ * is built by the same code from the same points in the same order, so the answer is identical to
+ * one call over every line added. Throws `invalid_line` as scoreSamples does: an unknown basis at
+ * once, more than MAX_SAMPLES lines before scoring any of the slice, and no line at `dist()`.
+ */
+export function sampleScorer(settings: ScoringSettings, basis: DistBasis): SampleScorer {
+  if (!DIST_BASES.includes(basis)) throw invalidLine("basis must be position_cv or player_sim");
+  const points: number[] = [];
+  const refuse = (): ScoringError => invalidLine(`samples must be 1..${String(MAX_SAMPLES)} lines`);
+  return Object.freeze({
+    add: (lines: readonly StatLine[]) => {
+      if (points.length + lines.length > MAX_SAMPLES) throw refuse();
+      for (const line of lines) points.push(evaluate(line, settings, false).result.points);
+    },
+    dist: () => {
+      if (points.length === 0) throw refuse();
+      return distOfPoints(points, basis);
+    },
+  });
+}
+
 /**
  * Scores sampled stat lines into a distribution (plan 08 §2, §5, E5): quantiles and `p_zero` over
  * the final points; `mean_of_exact` = E[linear] + E[bonus] + E[bracket] over the exact totals, so a
@@ -389,17 +438,7 @@ export function scoreSamples(
     points.push(e.result.points);
     exact.push(stableSum([e.parts.linear, e.parts.bonus, e.parts.bracket]));
   }
-  const sorted = [...points].sort((a, b) => a - b);
-  const dist: Dist = Object.freeze({
-    mean: denoise(stableSum(points) / n),
-    p10: quantile(sorted, 0.1),
-    p25: quantile(sorted, 0.25),
-    p50: quantile(sorted, 0.5),
-    p75: quantile(sorted, 0.75),
-    p90: quantile(sorted, 0.9),
-    p_zero: denoise(points.filter((p) => p === 0).length / n),
-    basis,
-  });
+  const dist = distOfPoints(points, basis);
   const bonus_probability: Record<Canonical, number> = {};
   for (const [c, total] of byKey(bonusTotals)) bonus_probability[c] = denoise(total / n);
   const bracket_probability: Record<string, readonly number[]> = {};

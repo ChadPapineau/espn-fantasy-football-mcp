@@ -2,14 +2,17 @@
 // exclusive tiers (per game: an ESPN season split carries counts) and derived lines, §4.2–4.3
 // bonuses (A-2: exclusive yardage tiers) / per-N / long-TD, §4.6 E4, §4.7 complete, §5 E5 samples).
 // Hand-built inputs only (plan 05 §3 fixture law: never golden evidence).
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   explain,
   MAX_SAMPLES,
+  sampleScorer,
   score,
   scoreSamples,
   sumPoints,
 } from "../../../src/domain/scoring/engine.js";
+import { ScoringError } from "../../../src/domain/scoring/errors.js";
 import { renormalizeSettings } from "../../../src/domain/scoring/settings.js";
 import { statLineFromEspn } from "../../../src/domain/scoring/stat_map.js";
 import type { ScoringSettings, StatLine } from "../../../src/domain/scoring/types.js";
@@ -398,6 +401,85 @@ describe("scoreSamples (plan 08 §5, E5)", () => {
   it("is deterministic (P12): byte-identical results", () => {
     const a = JSON.stringify(scoreSamples([rb(50), rb(150)], s, "player_sim"));
     expect(JSON.stringify(scoreSamples([rb(50), rb(150)], s, "player_sim"))).toBe(a);
+  });
+});
+
+describe("sampleScorer: scoreSamples's distribution, a slice at a time (plan 01 §1.1)", () => {
+  const s = settingsOf([
+    item(24, 0.1),
+    item(37, 5),
+    item(38, 10),
+    item(42, 0.1),
+    item(53, 0.5),
+    item(72, -2),
+    item(89, 0, { "16": 5 }),
+    item(92, 0, { "16": 1 }),
+  ]);
+  const rb = (yd: number): StatLine => line({ rush_yd: yd }, RB, "projection:v1-ensemble");
+  const sample = fc.oneof(
+    fc
+      .record({
+        rush_yd: fc.integer({ min: -20, max: 260 }),
+        fum_lost: fc.integer({ min: 0, max: 2 }),
+      })
+      .map((v) => line(v, RB, "projection:v1-ensemble")),
+    fc
+      .record({ rec_yd: fc.integer({ min: 0, max: 220 }), rec: fc.integer({ min: 0, max: 14 }) })
+      .map((v) => line(v, WR, "projection:v1-ensemble")),
+    fc
+      .integer({ min: 0, max: 45 })
+      .map((pa) => line({ dst_pa_raw: pa }, DST, "projection:v1-ensemble")),
+  );
+  it("property: any slicing of the lines gives scoreSamples's exact distribution, both bases", () => {
+    fc.assert(
+      fc.property(
+        fc.array(sample, { minLength: 1, maxLength: 300 }),
+        fc.array(fc.integer({ min: 1, max: 64 }), { minLength: 1, maxLength: 300 }),
+        fc.constantFrom("player_sim" as const, "position_cv" as const),
+        (lines, cuts, basis) => {
+          const scorer = sampleScorer(s, basis);
+          for (let at = 0, c = 0; at < lines.length; c++) {
+            const width = cuts[c % cuts.length] ?? 1;
+            scorer.add(lines.slice(at, at + width));
+            at += width;
+          }
+          expect(JSON.stringify(scorer.dist())).toBe(
+            JSON.stringify(scoreSamples(lines, s, basis).dist),
+          );
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+  it("an empty slice adds nothing; dist() may be read again and after more lines", () => {
+    const scorer = sampleScorer(s, "player_sim");
+    scorer.add([]);
+    scorer.add([rb(50), rb(150)]);
+    expect(scorer.dist()).toEqual(scoreSamples([rb(50), rb(150)], s, "player_sim").dist);
+    expect(scorer.dist()).toEqual(scoreSamples([rb(50), rb(150)], s, "player_sim").dist);
+    scorer.add([rb(90)]);
+    expect(scorer.dist()).toEqual(scoreSamples([rb(50), rb(150), rb(90)], s, "player_sim").dist);
+  });
+  it("refuses as scoreSamples does: an unknown basis at once, no line at dist(), past MAX_SAMPLES before scoring the slice", () => {
+    expect(() => sampleScorer(s, "mean" as "player_sim")).toThrow(
+      expect.objectContaining({ code: "invalid_line" }),
+    );
+    expect(() => sampleScorer(s, "player_sim").dist()).toThrow(
+      expect.objectContaining({ code: "invalid_line" }),
+    );
+    const scorer = sampleScorer(s, "player_sim");
+    scorer.add([rb(10)]);
+    // one past the cap in all: refused before any line of the slice is scored (an invalid line in
+    // it is never reached), and the lines added before stay the distribution
+    const over = Array.from({ length: MAX_SAMPLES }, () => ({}) as StatLine);
+    expect(() => {
+      scorer.add(over);
+    }).toThrow(expect.objectContaining({ code: "invalid_line" }));
+    expect(scorer.dist()).toEqual(scoreSamples([rb(10)], s, "player_sim").dist);
+    // an invalid line is refused by the engine, as scoreSamples refuses it
+    expect(() => {
+      sampleScorer(s, "player_sim").add([{} as StatLine]);
+    }).toThrow(ScoringError);
   });
 });
 

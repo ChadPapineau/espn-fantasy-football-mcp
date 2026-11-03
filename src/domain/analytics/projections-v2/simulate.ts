@@ -11,7 +11,7 @@
 // needs the points (the backtest's CRPS) — so half-PPR, the 5-pt TD and every bonus are the
 // league's own. Pure; draws only from the injected Rng. New here.
 import type { Rng } from "../../clock.js";
-import { score, scoreSamples } from "../../scoring/engine.js";
+import { sampleScorer, score, scoreSamples } from "../../scoring/engine.js";
 import { positionClassOf } from "../../scoring/stat_map.js";
 import {
   asPositionId,
@@ -403,6 +403,25 @@ export function simulateLines(
 /** The engine's Dist over simulated lines (`basis: "player_sim"`). */
 export function simDist(lines: readonly StatLine[], settings: ScoringSettings): Dist {
   return scoreSamples(lines, settings, "player_sim").dist;
+}
+
+/**
+ * simDist over the samples [from, to) of `buf`, one slice per `addSlice` (a cooperative step's
+ * share): `dist()` equals simDist(linesOf(buf, 0, to, positionId), settings) once every slice up to
+ * `to` is added in order — the same lines, scored by the same engine.
+ */
+export function simScorer(
+  buf: Float64Array,
+  positionId: number,
+  settings: ScoringSettings,
+): { addSlice(from: number, to: number): void; dist(): Dist } {
+  const scorer = sampleScorer(settings, "player_sim");
+  return Object.freeze({
+    addSlice: (from: number, to: number) => {
+      scorer.add(linesOf(buf, from, to, positionId));
+    },
+    dist: () => scorer.dist(),
+  });
 }
 
 /** Each line's points under S (the same engine), for callers that need the samples (CRPS). */

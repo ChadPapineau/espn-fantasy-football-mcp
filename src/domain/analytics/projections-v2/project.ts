@@ -7,8 +7,9 @@
 // mean (ensemble.ts: the volume carries the difference) and pinned to it; the 25 % flag compares the
 // two means. One target week per call (the decision week — E1's player_sim precedent); the rest of a
 // horizon is E1's to compose. Three cooperative phases — set-up one target per step, sampling
-// sample-major (a deadline-stopped run leaves every player with the same count), scoring one target
-// per step — each yielding every ≤ 12 ms (plan 01 §1.1; the 50 ms stall bound) under the 8 s CPU
+// sample-major (a deadline-stopped run leaves every player with the same count), scoring a slice of
+// one target's samples per step (V2_SIMS.scoreSlice; the engine's sampleScorer, the same answer) —
+// each yielding every ≤ 12 ms (plan 01 §1.1; the 50 ms stall bound) under the 8 s CPU
 // deadline (`partial` with the completed count, never cached — plan 07 E1, ADV OBJ-07). Samples are
 // held as numbers until scored (SAMPLE_WIDTH per sample), so a 60-player call stays small. Pure:
 // clock, rng, pacer injected. New here.
@@ -40,6 +41,7 @@ import {
   linesOf,
   SAMPLE_WIDTH,
   simDist,
+  simScorer,
   simulateInto,
 } from "./simulate.js";
 import type { TeamVolume } from "./team.js";
@@ -310,32 +312,59 @@ export async function projectV2(req: V2Request): Promise<V2Outcome> {
   if (run.partial)
     warnings.push(`partial: ${String(k)} of ${String(n)} samples before the CPU deadline`);
 
-  // phase 3 — scoring and assembly: the own simulation of a target is scored in one step and its
-  // anchored simulation (with the assembly) in the next, so no step scores more than one sample set
-  // (two scoreSamples passes in one step overran the 50 ms stall bound on a slower machine)
+  // phase 3 — scoring and assembly, V2_SIMS.scoreSlice samples per step: a target's own simulation
+  // is scored a slice at a time, then its anchored one (only when the assembly serves it), then the
+  // target is assembled. One sample set scored in one step held the loop 30–48 ms of CPU under
+  // parallel calls, 82 ms on a loaded machine (Stage C: stall-parallel's own-CPU evidence), past plan
+  // 03 §1.2's ≤ 20 ms batch; a slice is a few ms, and the answer is the same (simScorer)
   const projections: Projection[] = [];
   const details: V2PlayerDetail[] = [];
+  const slice = V2_SIMS.scoreSlice;
+  const steps = scoringSteps(plans, k, Math.ceil(k / slice));
   const owns: (Dist | null)[] = plans.map(() => null);
+  const anchors: (Dist | null)[] = plans.map(() => null);
+  const scorers: (ReturnType<typeof simScorer> | null)[] = plans.map(() => null);
   const scoring = budget.spend(
     await runCooperative(
-      budget.left() === 0 ? 0 : plans.length * 2,
+      budget.left() === 0 ? 0 : steps.length,
       (j) => {
-        const i = Math.floor(j / 2);
-        const p = plans[i];
-        if (p === undefined) return;
-        if (j % 2 === 0) {
-          owns[i] = ownDist(p, settings, k);
+        const st = steps[j];
+        const p = st === undefined ? undefined : plans[st.i];
+        if (st === undefined || p === undefined) return;
+        const i = st.i;
+        if (st.kind === "assemble") {
+          const built = assemble(p, settings, k, req, owns[i] ?? null, anchors[i] ?? null);
+          if (built.projection !== null) projections.push(built.projection);
+          details.push(built.detail);
           return;
         }
-        const built = assemble(p, settings, k, req, owns[i] ?? null);
-        if (built.projection !== null) projections.push(built.projection);
-        details.push(built.detail);
+        const position = p.result?.expectation.position_id ?? 0;
+        if (st.slice === 0) {
+          const own = owns[i] ?? null;
+          // the anchored set is scored only when the assembly will serve it (its own condition)
+          scorers[i] =
+            st.kind === "own"
+              ? simScorer(p.buf, position, settings)
+              : own !== null && servesAnchored(p, k, own)
+                ? simScorer(p.abuf, position, settings)
+                : null;
+        }
+        const scorer = scorers[i] ?? null;
+        if (scorer === null) return;
+        scorer.addSlice(st.slice * slice, Math.min(k, (st.slice + 1) * slice));
+        if (st.last) {
+          if (st.kind === "own") owns[i] = scorer.dist();
+          else anchors[i] = scorer.dist();
+          scorers[i] = null;
+        }
       },
       { pacer, deadlineMs: budget.left() },
     ),
   );
-  // the targets the scoring did not reach: skipped (E1 keeps v1); a skip of their own stays theirs
-  for (let i = Math.floor(scoring.completed / 2); i < plans.length; i++) {
+  // the targets the scoring did not reach (their assembly did not run): skipped (E1 keeps v1); a
+  // skip of their own stays theirs
+  const reached = steps.slice(0, scoring.completed).filter((s) => s.kind === "assemble").length;
+  for (let i = reached; i < plans.length; i++) {
     const p = plans[i];
     if (p === undefined) continue;
     const q = p.result === null ? p : { ...p, result: null, skipped: V2_DEADLINE_SKIP };
@@ -420,7 +449,6 @@ function driversOf(
   return out.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
 }
 
-/** Builds one target's Projection (null when skipped) and detail. */
 /** A modelled target's own player_sim Dist (a point mass at 0 when ruled out or unsampled). */
 function ownDist(p: Plan, settings: ScoringSettings, k: number): Dist | null {
   if (p.result === null) return null;
@@ -428,15 +456,65 @@ function ownDist(p: Plan, settings: ScoringSettings, k: number): Dist | null {
   return simDist(linesOf(p.buf, 0, k, p.result.expectation.position_id), settings);
 }
 
+/** One step of the scoring phase: a slice of a target's own or anchored samples, or its assembly. */
+type ScoringStep =
+  | {
+      readonly kind: "own" | "anchored";
+      readonly i: number;
+      readonly slice: number;
+      readonly last: boolean;
+    }
+  | { readonly kind: "assemble"; readonly i: number };
+
+/**
+ * The scoring phase's steps, target by target: its own samples in `slices` slices when ownDist
+ * would score them, its anchored samples in as many when the assembly may serve them (decided at
+ * the first slice, from the own mean: servesAnchored), then its assembly.
+ */
+function scoringSteps(plans: readonly Plan[], k: number, slices: number): ScoringStep[] {
+  const steps: ScoringStep[] = [];
+  plans.forEach((p, i) => {
+    const sampled = p.result !== null && p.active.p !== 0 && k > 0;
+    const sets: ("own" | "anchored")[] = !sampled
+      ? []
+      : !p.anchor_failed && p.anchored !== null
+        ? ["own", "anchored"]
+        : ["own"];
+    for (const kind of sets)
+      for (let s = 0; s < slices; s++) steps.push({ kind, i, slice: s, last: s === slices - 1 });
+    steps.push({ kind: "assemble", i });
+  });
+  return steps;
+}
+
+/** The ESPN mean a target's ensemble reads (null when not a finite number). */
+function espnOf(p: Plan): number | null {
+  return fin(p.target.espn_mean) ? p.target.espn_mean : null;
+}
+
+/**
+ * Whether the assembly serves the anchored simulation (assemble's own branch: not ruled out, an
+ * ensemble mean not ≤ 0, anchoring possible, an anchored expectation and samples).
+ */
+function servesAnchored(p: Plan, k: number, own: Dist): boolean {
+  const ens = ensembleMean(espnOf(p), own.mean, p.weight);
+  return p.active.p !== 0 && !(ens.mean <= 0) && !p.anchor_failed && p.anchored !== null && k > 0;
+}
+
+/**
+ * Builds one target's Projection (null when skipped) and detail; `ownIn` and `anchoredIn` are the
+ * own and anchored Dists the scoring phase built (null: scored here).
+ */
 function assemble(
   p: Plan,
   settings: ScoringSettings,
   k: number,
   req: V2Request,
   ownIn: Dist | null,
+  anchoredIn: Dist | null = null,
 ): { projection: Projection | null; detail: V2PlayerDetail } {
   const t = p.target;
-  const espn = fin(t.espn_mean) ? t.espn_mean : null;
+  const espn = espnOf(p);
   if (p.result === null) {
     return {
       projection: null,
@@ -474,7 +552,10 @@ function assemble(
       ),
     );
   } else if (p.anchored !== null && k > 0)
-    served = pinDist(simDist(linesOf(p.abuf, 0, k, e.position_id), settings), ens.mean);
+    served = pinDist(
+      anchoredIn ?? simDist(linesOf(p.abuf, 0, k, e.position_id), settings),
+      ens.mean,
+    );
   else served = pinDist(own, ens.mean);
   if (espn === null)
     assumptions.push(
