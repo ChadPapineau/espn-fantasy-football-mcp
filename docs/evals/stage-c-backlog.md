@@ -555,6 +555,31 @@ failed. The same build read 26.1 and 25.2 ms locally, and `a579917` read 24.5 ms
 only the news matcher, which runs at refresh (and at the e2e seed, before the server starts), never
 inside a tool call. Re-running CI needs a push from this account.
 
+**After the Stage D merge (2026-11-03).** `main`'s push run of `18fa414` (CI 40962466083) failed
+`stall-parallel` under `full` on the macOS runner with "cannot be measured". The host set all three
+windows: the last read 69.9 ms, with 9.6 ms of the server's own CPU in its longest gap, 21
+involuntary switches, and the idle control at 37.9 ms. R8-2 rules that outcome for such a host, and it
+stands. Two places where the helper did not match R8-2 are fixed. First, the heartbeat now also
+reports the main thread's longest run on the CPU between two ticks anywhere in the window
+(`cpu_max_ms`), and `hostSetStall` never excuses a window in which that run passes the bound. Before,
+a JavaScript block over the bound beside a longer gap the host set was repeated with the window, and
+three such windows ended as "cannot be measured" (`tests/e2e/heartbeat-evidence.test.ts`: the old
+rule repeats that window three times and prints that message; now it is measured once). Second,
+`stall-parallel` asserts each stall as measured, not the report's 0.1 ms rounding. Its report also
+prints each window's control, the server's own longest CPU run, and every repeated window's evidence.
+
+The server's own slice is cut at root. v2's scoring phase scored one player's whole sample set (2 000
+samples) in one cooperative step. Under parallel `full` calls that held the loop 30–48 ms of CPU on
+the owner's Mac, and 82 ms on a slowed CPU; two such windows failed as the server's own (52.7 and
+82.4 ms). It now scores 128 samples a step (`V2_SIMS.scoreSlice`, the engine's `sampleScorer`), with
+byte-identical answers (`tests/domain/analytics/projections-v2/project-slices.test.ts` counts the
+lines per scoring call and compares slice widths). Under `full` the server's longest own run is now
+about 30 ms. The slices left at that size are the trailing-window dataset reads, the output
+envelope's validation and the roster view's parse. On the owner's Mac under sustained CPU load the
+processor throttles (speed limit 63–68 %), and every process freezes for 30–50 ms several times in 20
+s, an idle probe included. There a stall window can be the host's in every attempt, and the stall
+test then ends as "cannot be measured", as R8-2 rules (it did under four busy loops).
+
 ## Closed by R8-4 — F8, division winners first
 
 **Closed by R8-4 (2026-10-28, changelog §R8):** the owner confirmed that the league's division
