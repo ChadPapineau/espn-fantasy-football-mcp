@@ -6,9 +6,13 @@
 // (pending-absent.test.ts): an answer that shows ESPN recognised the view (the base every recognised
 // league view answers, with `draftDetail` — research 03 P11/P17/P18) without the list is the empty
 // week — no drift, drift_state untouched, the red row the live runs left clears on the next such
-// answer. Kept as drift: the unrecognised-view answer (P28, the recorded skeleton), the key present
-// with a non-list value, and an absent list ESPN's own count header (`x-fantasy-filter-transaction-
-// count`, research 03 §A.3) says is not empty. The drift seed is unchanged.
+// answer. Kept as drift: the unrecognised-view answer (P28, the recorded skeleton), any body that
+// does not show the recognised base (`{}`, ESPN's error envelope on a 200, the base without
+// `draftDetail` — verifier finding F1 on ec68d08), the key present with a non-list value, and an
+// absent list ESPN's own count header (`x-fantasy-filter-transaction-count`, research 03 §A.3) says
+// is not empty. An excused answer does not show the key: it clears a red row only when ESPN counted
+// 0 (F3). The first excused answer of a process is said at info with its key names (F2); the page
+// says `list_absent` (the transactions job's tripwire, F2). The drift seed is unchanged.
 import { describe, expect, it } from "vitest";
 import type { DriftCheck } from "../../../src/drift/detect.js";
 import { REQUIRED_PATHS_BY_VIEW, REQUIRED_PATHS_UNVERIFIED } from "../../../src/drift/types.js";
@@ -19,6 +23,8 @@ import {
   absentAsEmpty,
   absentListCount,
   absentMeansEmptyPaths,
+  bodyKeyNames,
+  LOGGED_KEY_NAMES_MAX,
 } from "../../../src/providers/espn/views/index.js";
 import type { DriftStateRow } from "../../../src/store/types.js";
 import {
@@ -92,7 +98,12 @@ interface Answer {
   readonly headers?: Record<string, string>;
 }
 
-function world(txns: (url: URL) => Answer) {
+interface NotModified {
+  readonly notModified: true;
+  readonly headers?: Record<string, string>;
+}
+
+function world(txns: (url: URL) => Answer | NotModified) {
   const auth = new FakeAuthority("validated", { ok: true, header: testCookieHeader(SWID) });
   const calls: string[] = [];
   const logs: { level: string; event: string; fields: Record<string, unknown> }[] = [];
@@ -100,7 +111,7 @@ function world(txns: (url: URL) => Answer) {
     logs.push({ level, event, fields: { ...fields } });
   const w = makeWorld({
     credentials: auth,
-    over: { log: { debug: log("debug"), warn: log("warn") } },
+    over: { log: { debug: log("debug"), warn: log("warn"), info: log("info") } },
     fetch: (url) => {
       const u = new URL(url);
       const views = u.searchParams.getAll("view").join("&");
@@ -108,6 +119,8 @@ function world(txns: (url: URL) => Answer) {
       if (views === "mSettings&mNav") return Promise.resolve(jsonResponse(privateSettings()));
       if (views === "mTransactions2") {
         const a = txns(u);
+        if ("notModified" in a)
+          return Promise.resolve(new Response(null, { status: 304, headers: a.headers ?? {} }));
         return Promise.resolve(jsonResponse(a.body, 200, a.headers ?? {}));
       }
       return Promise.reject(new Error(`unscripted ${views}`));
@@ -212,8 +225,55 @@ describe("what stays drift (ESPN_DRIFT_DETECTED, red, nothing cached)", () => {
         path: "$.transactions",
         kind: "skeleton",
         unrecognized_view: true,
+        // the shape is named: schema names only (F2 — the live log could not show it)
+        keys: [
+          "gameId",
+          "id",
+          "members",
+          "scoringPeriodId",
+          "seasonId",
+          "segmentId",
+          "settings",
+          "status",
+          "teams",
+        ],
       });
     }
+  });
+
+  it("a body that does not show the recognised base is drift, whatever the count says (F1)", async () => {
+    const p28 = loadFixture("recorded/league-a/skeleton.json") as Record<string, unknown>;
+    const { teams: _t, ...p28NoTeams } = p28;
+    const { members: _m, ...p28NoMembers } = p28;
+    const { draftDetail: _d, ...noDraft } = withoutTxnKey();
+    const bodies: [string, unknown][] = [
+      ["{}", {}],
+      ["{id:0}", { id: 0 }],
+      ["ESPN's error envelope on a 200", { messages: ["x"], details: [{ type: "GENERAL_ERROR" }] }],
+      ["the base without draftDetail", noDraft],
+      ["draftDetail null", { ...withoutTxnKey(), draftDetail: null }],
+      ["draftDetail a list", { ...withoutTxnKey(), draftDetail: [] }],
+      ["draftDetail a string", { ...withoutTxnKey(), draftDetail: "x" }],
+      ["P28 without teams", p28NoTeams],
+      ["P28 without members", p28NoMembers],
+    ];
+    for (const [name, body] of bodies)
+      for (const headers of [{}, { [HEADER_TRANSACTION_COUNT]: "0" }]) {
+        const logs = await expectDrift({ body, headers });
+        expect(
+          logs.some((l) => l.event === "espn.absent_means_empty"),
+          name,
+        ).toBe(false);
+      }
+  });
+
+  it("a red row the unrecognised-view answer left is not cleared by such a body (F1)", async () => {
+    const { w } = world(() => ({ body: {} }));
+    w.drift.row = liveRedRow(null);
+    await expect(w.provider.listTransactions(w.ref, QUERY)).rejects.toMatchObject({
+      effCode: "ESPN_DRIFT_DETECTED",
+    });
+    expect(w.drift.row.status).toBe("red");
   });
 
   it("a recognised answer's drift log says so (the live log could not tell the two apart)", async () => {
@@ -269,9 +329,24 @@ function liveRedRow(extra: { view: string; path: string } | null): DriftStateRow
   };
 }
 
-describe("the live install's red row clears on the next such answer (src/drift applyRecovered, schema)", () => {
-  it("$.transactions leaves the row; the additive keys and enum values stay; the status is additive", async () => {
-    const { w } = world(() => ({ body: withoutTxnKey() }));
+describe("the live install's red row clears on an answer that shows the key (src/drift applyRecovered, schema)", () => {
+  it("an answer without the list and without ESPN's count does not show the key: the row stays red (F3)", async () => {
+    for (const headers of [{}, { [HEADER_TRANSACTION_COUNT]: "x" }]) {
+      const { w } = world(() => ({ body: withoutTxnKey(), headers }));
+      w.drift.row = liveRedRow(null);
+      const before = { ...w.drift.row };
+      const r = await w.provider.listTransactions(w.ref, QUERY);
+      expect(r.value.items).toEqual([]);
+      expect(r.value.list_absent).toBe(true);
+      expect(w.drift.row).toEqual(before);
+    }
+  });
+
+  it("ESPN's count of 0 beside the absent list says the week is empty: $.transactions leaves the row, the additive keys and enum values stay", async () => {
+    const { w } = world(() => ({
+      body: withoutTxnKey(),
+      headers: { [HEADER_TRANSACTION_COUNT]: "0" },
+    }));
     w.drift.row = liveRedRow(null);
     const r = await w.provider.listTransactions(w.ref, QUERY);
     expect(r.value.items).toEqual([]);
@@ -291,7 +366,10 @@ describe("the live install's red row clears on the next such answer (src/drift a
   });
 
   it("only the verified view clears: another view's removed key stays red", async () => {
-    const { w } = world(() => ({ body: withoutTxnKey() }));
+    const { w } = world(() => ({
+      body: withoutTxnKey(),
+      headers: { [HEADER_TRANSACTION_COUNT]: "0" },
+    }));
     w.drift.row = liveRedRow({ view: "mRoster", path: "$.teams[].roster.entries" });
     await w.provider.listTransactions(w.ref, QUERY);
     expect(w.drift.row.status).toBe("red");
@@ -405,5 +483,159 @@ describe("ABSENT_MEANS_EMPTY / ABSENT_LIST_COUNT_HEADER / absentListCount", () =
     expect(out.transactions).toEqual([]);
     const present = { ...withoutTxnKey(), transactions: "x" };
     expect(absentAsEmpty("mTransactions2", present)).toBe(present);
+  });
+});
+
+describe("what the owner's logs and the job see of an excused answer (F2)", () => {
+  it("the first excused answer of a process is said at info with its key names and ESPN's count; later ones at debug", async () => {
+    let n = 0;
+    const { w, logs } = world(() => {
+      n += 1;
+      return {
+        body: withoutTxnKey(),
+        headers: n === 1 ? { [HEADER_TRANSACTION_COUNT]: "0" } : {},
+      };
+    });
+    await w.provider.listTransactions(w.ref, QUERY);
+    await w.provider.listTransactions(w.ref, { ...QUERY, week: 8 });
+    const said = logs.filter((l) => l.event === "espn.absent_means_empty");
+    expect(said.map((l) => l.level)).toEqual(["info", "debug"]);
+    expect(said[0]?.fields).toEqual({
+      view: "mTransactions2",
+      path: "$.transactions",
+      keys: ["draftDetail", "gameId", "id", "scoringPeriodId", "seasonId", "segmentId", "status"],
+      count: 0,
+    });
+    expect(said[1]?.fields).toMatchObject({ count: null });
+  });
+
+  it("a log surface without info says it at debug (never lost, never above its level)", async () => {
+    const logs: { level: string; event: string }[] = [];
+    const auth = new FakeAuthority("validated", { ok: true, header: testCookieHeader(SWID) });
+    const w = makeWorld({
+      credentials: auth,
+      over: {
+        log: {
+          debug: (event: string) => logs.push({ level: "debug", event }),
+          warn: (event: string) => logs.push({ level: "warn", event }),
+        },
+      },
+      fetch: (url) => {
+        const views = new URL(url).searchParams.getAll("view").join("&");
+        if (views === "mSettings&mNav") return Promise.resolve(jsonResponse(privateSettings()));
+        return Promise.resolve(jsonResponse(withoutTxnKey()));
+      },
+    });
+    await w.provider.listTransactions(w.ref, QUERY);
+    expect(logs.filter((l) => l.event === "espn.absent_means_empty")).toEqual([
+      { level: "debug", event: "espn.absent_means_empty" },
+    ]);
+  });
+
+  it("the key names logged are schema names only: no numeric or GUID key, at most 16", () => {
+    const body: Record<string, unknown> = { ...withoutTxnKey() };
+    body["12345"] = 1;
+    body["{00000000-0000-4000-8000-000000000011}"] = 1;
+    body["a b"] = 1;
+    body[`k${"x".repeat(41)}`] = 1;
+    for (let i = 0; i < 20; i++) body[`z${String(i).padStart(2, "0")}`] = i;
+    const keys = bodyKeyNames(body);
+    expect(keys).toHaveLength(LOGGED_KEY_NAMES_MAX);
+    expect(keys.slice(0, 7)).toEqual([
+      "draftDetail",
+      "gameId",
+      "id",
+      "scoringPeriodId",
+      "seasonId",
+      "segmentId",
+      "status",
+    ]);
+    for (const k of keys) expect(k).toMatch(/^[A-Za-z_]\w{0,40}$/);
+    for (const odd of [null, 5, "s", [1]]) expect(bodyKeyNames(odd)).toEqual([]);
+  });
+
+  it("the page says list_absent — fresh, and from the cached copy; a list sent (even empty) is not absent", async () => {
+    const { w } = world(() => ({ body: withoutTxnKey() }));
+    const fresh = await w.provider.listTransactions(w.ref, QUERY);
+    expect(fresh.value.list_absent).toBe(true);
+    const hit = await w.provider.listTransactions(w.ref, QUERY);
+    expect(hit.stamp.cache).toBe("hit");
+    expect(hit.value.list_absent).toBe(true);
+    for (const transactions of [[], recordedTxns()]) {
+      const { w: w2 } = world(() => ({ body: { ...withoutTxnKey(), transactions } }));
+      expect((await w2.provider.listTransactions(w2.ref, QUERY)).value.list_absent).toBe(false);
+    }
+  });
+
+  it("the job's contradiction is recorded as the absent seed key (red) and is the drift error; only a listed path", () => {
+    const { w } = world(() => ({ body: withoutTxnKey() }));
+    w.drift.row = additiveRow();
+    const err = w.provider.transactionsListContradicted();
+    expect(err).toMatchObject({
+      effCode: "ESPN_DRIFT_DETECTED",
+      effDetails: { view: "mTransactions2", path: "transactions" },
+    });
+    expect(w.drift.row.status).toBe("red");
+    expect(
+      (JSON.parse(w.drift.row.diff_json) as { view: string; removed: string[] }[]).find(
+        (d) => d.view === "mTransactions2",
+      )?.removed,
+    ).toEqual(["$.transactions"]);
+    const req = (
+      w.provider as unknown as {
+        req: { absentListContradicted(v: EspnView, p: string): unknown };
+      }
+    ).req;
+    expect(() => req.absentListContradicted("mRoster", "$.teams[].roster.entries")).toThrow(
+      RangeError,
+    );
+    expect(() => req.absentListContradicted("mTransactions2", "$.other")).toThrow(RangeError);
+  });
+});
+
+describe("a 304 revalidating an excused answer verifies the view no more than its 200 did (F3)", () => {
+  const stale = (w: ReturnType<typeof makeWorld>) => {
+    for (const [k, e] of w.cache.map)
+      if (k.includes("mTransactions2"))
+        w.cache.map.set(k, { ...e, fetched_at: "2026-01-01T00:00:00.000Z" });
+  };
+
+  it("cached without the list, ESPN's 304 without a count: the red row stays; with a count of 0 it clears", async () => {
+    for (const [headers, cleared] of [
+      [{}, false],
+      [{ [HEADER_TRANSACTION_COUNT]: "0" }, true],
+    ] as const) {
+      let n = 0;
+      const { w } = world(() => {
+        n += 1;
+        return n === 1
+          ? { body: withoutTxnKey(), headers: { etag: '"e1"' } }
+          : { notModified: true, headers };
+      });
+      await w.provider.listTransactions(w.ref, QUERY);
+      w.drift.row = liveRedRow(null);
+      stale(w);
+      const r = await w.provider.listTransactions(w.ref, QUERY);
+      expect(n).toBe(2);
+      expect(r.value.items).toEqual([]);
+      expect(r.value.list_absent).toBe(true);
+      expect(w.drift.row.status).toBe(cleared ? "additive" : "red");
+    }
+  });
+
+  it("cached with the list (even empty), ESPN's 304 clears it as before", async () => {
+    let n = 0;
+    const { w } = world(() => {
+      n += 1;
+      return n === 1
+        ? { body: { ...withoutTxnKey(), transactions: [] }, headers: { etag: '"e1"' } }
+        : { notModified: true };
+    });
+    await w.provider.listTransactions(w.ref, QUERY);
+    w.drift.row = liveRedRow(null);
+    stale(w);
+    await w.provider.listTransactions(w.ref, QUERY);
+    expect(n).toBe(2);
+    expect(w.drift.row.status).toBe("additive");
   });
 });

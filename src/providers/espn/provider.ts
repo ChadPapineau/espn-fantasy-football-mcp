@@ -77,6 +77,7 @@ import {
   type PlayerQuery,
   type ReadOptions,
   type StatsQuery,
+  type TransactionPage,
   type TransportStatus,
   type TxnQuery,
   type UpstreamBudget,
@@ -159,6 +160,7 @@ import {
 } from "./types.js";
 import {
   absentAsEmpty,
+  absentMeansEmptyPaths,
   konaPlayerInfoSchema,
   konaPlayercardSchema,
   mBoxscoreSchema,
@@ -384,14 +386,25 @@ const parseRatings = (b: unknown): WirePositionalRatingsBody =>
 const parsePro = (b: unknown): WireProScheduleBody =>
   must("proTeamSchedules_wl", proTeamSchedulesSchema, b);
 const parsePlayersWl = (b: unknown): WirePlayersWlBody => must("players_wl", playersWlSchema, b);
+/** One `mTransactions2` answer as the provider reads it: the list, and whether it was absent. */
+interface TxnsBody {
+  readonly transactions: readonly unknown[];
+  /** The answer carried no list and it was read as none (`absentAsEmpty`). */
+  readonly absent: boolean;
+}
 /**
- * The period's transactions; absent on an answer to the recognised view, they are none (views
- * `absentAsEmpty`, ABSENT_MEANS_EMPTY; finding transactions-absent-key-red: ESPN answers the cookie
- * this way for a period nobody has moved in yet) — the in-call check excused exactly that case, and
- * only when ESPN's count header did not count any (ABSENT_LIST_COUNT_HEADER).
+ * The period's transactions; absent on an answer that shows ESPN recognised the view, they are
+ * none (views `absentAsEmpty`, ABSENT_MEANS_EMPTY; finding transactions-absent-key-red: what the
+ * live failures after the rollover point to, for a period nobody has moved in yet) — the in-call
+ * check excused exactly that case, and only when ESPN's count header did not count any
+ * (ABSENT_LIST_COUNT_HEADER). `absent` says so, the cached copy included (the page's `list_absent`;
+ * verifier finding F2 on ec68d08).
  */
-const parseTxns = (b: unknown): readonly unknown[] =>
-  must("mTransactions2", mTransactions2Schema, absentAsEmpty("mTransactions2", b)).transactions;
+const parseTxns = (b: unknown): TxnsBody => ({
+  transactions: must("mTransactions2", mTransactions2Schema, absentAsEmpty("mTransactions2", b))
+    .transactions,
+  absent: absentMeansEmptyPaths("mTransactions2", b).length > 0,
+});
 /**
  * The pending list; absent on an answer to the recognised view, it means nothing is pending
  * (views `absentAsEmpty`, ABSENT_MEANS_EMPTY) — the in-call check excused exactly that case.
@@ -1295,7 +1308,7 @@ export class EspnProvider implements FantasyPlatform {
     ref: LeagueRef,
     q: TxnQuery,
     opts?: ReadOptions,
-  ): Promise<Stamped<PageOf<Transaction>>> {
+  ): Promise<Stamped<TransactionPage>> {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const r = await this.read(
@@ -1310,7 +1323,7 @@ export class EspnProvider implements FantasyPlatform {
     );
     const counts = newCounts();
     const since = q.since === null ? null : Date.parse(q.since);
-    const all = r.value
+    const all = r.value.transactions
       .map((t) => normalizeTransaction(t, id.identity, counts))
       .filter((t): t is Transaction => t !== null)
       .filter((t) => q.team_id === null || t.team_id === q.team_id)
@@ -1337,7 +1350,17 @@ export class EspnProvider implements FantasyPlatform {
           : null,
       has_more: all.length > items.length,
       next_offset: all.length > items.length ? items.length : null,
+      list_absent: r.value.absent,
     });
+  }
+
+  /**
+   * The transactions job's tripwire (snapshot.ts `transactionsAppend`; verifier finding F2 on
+   * ec68d08): a period whose previous answer listed executed moves answered without the list.
+   * Recorded as drift on `$.transactions` (request.ts `absentListContradicted`); the error to throw.
+   */
+  transactionsListContradicted(): EspnDriftError {
+    return this.req.absentListContradicted("mTransactions2", "$.transactions");
   }
 
   async listPendingTransactions(

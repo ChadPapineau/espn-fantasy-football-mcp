@@ -5,8 +5,11 @@
 // with `draftDetail`): the empty list, no drift, and `drift_state` untouched — one ordinary read
 // never turns the whole product red; the red row the live run left clears on the next good answer.
 // The unrecognised-view answer (research 03 P28, the recorded skeleton) is still a skeleton — a
-// renamed view stays detected. The key present with a non-list value is still drift; the in-call
-// check excuses exactly that absent path and nothing else; the drift seed is unchanged.
+// renamed view stays detected — and so is any body that does not show the recognised base
+// (`showsRecognizedView`: its own `draftDetail` object; verifier finding F1 on ec68d08). The key
+// present with a non-list value is still drift; the in-call check excuses exactly that absent path
+// and nothing else; the drift seed is unchanged. An excused answer does not show the key, so it
+// never clears a red row's removed key (verifier finding F3); an answer that carries the list does.
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -18,6 +21,7 @@ import {
   absentAsEmpty,
   absentMeansEmptyPaths,
   isUnrecognizedViewAnswer,
+  showsRecognizedView,
 } from "../../../src/providers/espn/views/index.js";
 import type { DriftStateRow } from "../../../src/store/types.js";
 import {
@@ -112,11 +116,22 @@ describe("an absent pending list on a recognised view's answer is the empty list
     expect(calls.filter((c) => c === "mPendingTransactions")).toHaveLength(1);
   });
 
-  it("an answer with neither the recognised base nor the unrecognised-view summary reads as none too", async () => {
-    const { w } = world(() => ({ gameId: 1, id: 0, seasonId: 2026, segmentId: 0 }));
-    const r = await w.provider.listPendingTransactions(w.ref);
-    expect(r.value).toEqual([]);
-    expect(w.drift.row).toBeNull();
+  it("an answer that does not show the recognised base (no draftDetail) is drift, not none (F1)", async () => {
+    for (const body of [
+      { gameId: 1, id: 0, seasonId: 2026, segmentId: 0 },
+      { id: 0 },
+      {},
+      { messages: ["x"], details: [{ type: "GENERAL_ERROR" }] },
+      { ...withoutPendingKey(), draftDetail: null },
+    ]) {
+      const { w } = world(() => body);
+      await expect(w.provider.listPendingTransactions(w.ref)).rejects.toMatchObject({
+        effCode: "ESPN_DRIFT_DETECTED",
+        effDetails: { view: "mPendingTransactions", path: "pendingTransactions" },
+      });
+      expect(w.drift.row?.status).toBe("red");
+      expect([...w.cache.map.keys()].some((k) => k.includes("mPendingTransactions"))).toBe(false);
+    }
   });
 
   it("the unrecognised-view answer (the recorded P28 skeleton) is still a skeleton: drift, red, nothing cached", async () => {
@@ -172,8 +187,18 @@ function liveRedRow(extra: { view: string; path: string } | null): DriftStateRow
 }
 
 describe("a good answer clears the drift its views recorded (src/drift applyRecovered, schema)", () => {
-  it("the live run's red row clears on the next good pending answer (absent key = nothing pending)", async () => {
+  it("an answer without the list (read as none) does not show the key: the red row stays (F3)", async () => {
     const { w } = world(withoutPendingKey);
+    w.drift.row = liveRedRow(null);
+    const r = await w.provider.listPendingTransactions(w.ref);
+    expect(r.value).toEqual([]);
+    expect(w.drift.row.status).toBe("red");
+    expect(JSON.parse(w.drift.row.diff_json)).toEqual([
+      { view: "mPendingTransactions", removed: ["$.pendingTransactions"], added: [], enums: [] },
+    ]);
+  });
+  it("the red row clears on the next answer that carries the list, an empty one included", async () => {
+    const { w } = world(() => ({ ...withoutPendingKey(), pendingTransactions: [] }));
     w.drift.row = liveRedRow(null);
     const r = await w.provider.listPendingTransactions(w.ref);
     expect(r.value).toEqual([]);
@@ -182,7 +207,7 @@ describe("a good answer clears the drift its views recorded (src/drift applyReco
     expect(w.drift.row.diff_json).toBe("[]");
   });
   it("only the verified views clear: another view's removed key stays red", async () => {
-    const { w } = world(withoutPendingKey);
+    const { w } = world(() => ({ ...withoutPendingKey(), pendingTransactions: [] }));
     w.drift.row = liveRedRow({ view: "mRoster", path: "$.teams[].roster.entries" });
     await w.provider.listPendingTransactions(w.ref);
     expect(w.drift.row.status).toBe("red");
@@ -273,6 +298,39 @@ describe("isUnrecognizedViewAnswer over the recorded corpus", () => {
     expect(isUnrecognizedViewAnswer({ ...p28, members: {} })).toBe(false);
     for (const odd of [null, undefined, 5, "s", [p28]])
       expect(isUnrecognizedViewAnswer(odd)).toBe(false);
+    // not being P28 is not recognition: none of these shows the recognised base (F1)
+    for (const body of [noMembers, noTeams, { ...p28, members: {} }])
+      expect(showsRecognizedView(body)).toBe(false);
+  });
+
+  it("showsRecognizedView: every recorded recognised league answer; nothing without its own draftDetail object (F1)", () => {
+    const bodies = leagueBodies();
+    for (const b of bodies)
+      expect(showsRecognizedView(b.body), b.file).toBe(!b.file.endsWith("/skeleton.json"));
+    expect(showsRecognizedView(withoutPendingKey())).toBe(true);
+    expect(showsRecognizedView(loadFixture("fx-10h/league/mTransactions2.json"))).toBe(true);
+    const base = withoutPendingKey();
+    const { draftDetail: _d, ...noDraft } = base;
+    for (const odd of [
+      {},
+      { id: 0 },
+      { messages: ["x"], details: [{ type: "GENERAL_ERROR" }] },
+      noDraft,
+      { ...base, draftDetail: null },
+      { ...base, draftDetail: [] },
+      { ...base, draftDetail: "x" },
+      { ...base, draftDetail: 1 },
+      Object.assign(Object.create({ draftDetail: {} }) as object, noDraft),
+      null,
+      undefined,
+      5,
+      "s",
+      [base],
+    ])
+      expect(showsRecognizedView(odd), JSON.stringify(odd)).toBe(false);
+    // P28 with a draftDetail grafted on is no longer the unrecognised-view answer: recognised
+    const p28 = loadFixture("recorded/league-a/skeleton.json") as Record<string, unknown>;
+    expect(showsRecognizedView({ ...p28, draftDetail: {} })).toBe(true);
   });
 });
 
@@ -302,10 +360,14 @@ describe("ABSENT_MEANS_EMPTY / absentMeansEmptyPaths / absentAsEmpty", () => {
       expect(absentMeansEmptyPaths("mPendingTransactions", odd)).toEqual([]);
   });
   it("fills only an absent key, on a copy; anything else is left for the schema", () => {
-    const body = { id: 0 };
+    const body = withoutPendingKey();
+    const copy = structuredClone(body);
     const out = absentAsEmpty("mPendingTransactions", body);
-    expect(out).toEqual({ id: 0, pendingTransactions: [] });
-    expect(body).toEqual({ id: 0 });
+    expect(out).toEqual({ ...copy, pendingTransactions: [] });
+    expect(body).toEqual(copy);
+    // a body without the recognised base is left for the schema (F1: it was once filled)
+    const bare = { id: 0 };
+    expect(absentAsEmpty("mPendingTransactions", bare)).toBe(bare);
     const present = { pendingTransactions: "x" };
     expect(absentAsEmpty("mPendingTransactions", present)).toBe(present);
     const p28 = loadFixture("recorded/league-a/skeleton.json");

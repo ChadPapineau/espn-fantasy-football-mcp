@@ -87,7 +87,13 @@ import {
 import { CookieGate, type CookieUse, type PublicityStore } from "./auth-gate.js";
 import { ESPN_BACKOFF } from "../../config/schema.js";
 import type { EspnView } from "./types.js";
-import { absentListCount, absentMeansEmptyPaths, isUnrecognizedViewAnswer } from "./views/index.js";
+import {
+  ABSENT_MEANS_EMPTY,
+  absentListCount,
+  absentMeansEmptyPaths,
+  bodyKeyNames,
+  isUnrecognizedViewAnswer,
+} from "./views/index.js";
 
 /** Thrown inside a parse function when the body does not match a view schema (internal). */
 export class SchemaSignals extends Error {
@@ -132,6 +138,8 @@ export class EspnProviderError extends Error {
 export interface ProviderLog {
   debug(event: string, fields?: Readonly<Record<string, unknown>>): void;
   warn(event: string, fields?: Readonly<Record<string, unknown>>): void;
+  /** Lines the owner's default level (info) must keep; a surface without it logs them at debug. */
+  info?(event: string, fields?: Readonly<Record<string, unknown>>): void;
 }
 
 /** What the pipeline needs, injected. */
@@ -285,6 +293,8 @@ export class EspnRequester {
   private readonly coalescer: Coalescer<Fresh>;
   private readonly gate = new ForceRefreshGate();
   private readonly reportedSignals = new Set<string>();
+  /** The views whose excused absent list this process has logged at info (`checkBody`). */
+  private readonly reportedAbsent = new Set<EspnView>();
   /**
    * Parsed cache bodies per parse function and cache key, valid while the stored entry is the same
    * (fetched_at, etag, length): a warm read of an unchanged entry skips the JSON parse and the view
@@ -694,8 +704,10 @@ export class EspnRequester {
   /**
    * Records drift signals (best effort — a failed write never changes the result) and builds the
    * error. Given the answer's `body` (the in-call check's verdict), the log line also says whether
-   * it was ESPN's unrecognised-view answer (views `isUnrecognizedViewAnswer`) — a skeleton alone
-   * cannot tell that from a recognised view's bare base (finding transactions-absent-key-red).
+   * it was ESPN's unrecognised-view answer (views `isUnrecognizedViewAnswer`) and names its
+   * top-level keys (views `bodyKeyNames`: schema names only) — a skeleton alone cannot tell that
+   * from a recognised view's bare base (finding transactions-absent-key-red; verifier finding F2 on
+   * ec68d08: the live shape is unrecorded, so the next occurrence must show it).
    */
   private driftError(signals: readonly DriftSignal[], body?: unknown): EspnDriftError {
     try {
@@ -709,9 +721,47 @@ export class EspnRequester {
       view,
       path: first?.path ?? "$",
       kind: first?.kind,
-      ...(body === undefined ? {} : { unrecognized_view: isUnrecognizedViewAnswer(body) }),
+      ...(body === undefined
+        ? {}
+        : { unrecognized_view: isUnrecognizedViewAnswer(body), keys: bodyKeyNames(body) }),
     });
     return new EspnDriftError(view, errorPath(first?.path ?? "$"));
+  }
+
+  /**
+   * A caller's own record contradicts an absent list this provider read as none: the transactions
+   * job re-read a period whose previous answer listed executed moves, and ESPN now answered it
+   * without the list (snapshot.ts `transactionsAppend`; verifier finding F2 on ec68d08 — a view that
+   * stopped serving the list would otherwise read as an empty week, permanently and silently).
+   * Recorded as the detector records the absent seed key (`missing_required_key`: the view turns
+   * red, and only an answer that carries the list, or ESPN's count of 0, clears it — `success`),
+   * and the error to throw. Only an ABSENT_MEANS_EMPTY path is accepted.
+   */
+  absentListContradicted(view: EspnView, path: string): EspnDriftError {
+    if (!(ABSENT_MEANS_EMPTY[view] ?? []).includes(path))
+      throw new RangeError("espn: only an absent-means-empty path can be contradicted");
+    return this.driftError([{ kind: "missing_required_key", view, path, value: null }]);
+  }
+
+  /**
+   * The views of `views` whose answer `body` (with `headers`) did NOT verify although it passed: an
+   * ABSENT_MEANS_EMPTY list was absent and read as none, and ESPN's own count did not positively say
+   * 0 (views `absentMeansEmptyPaths`, `absentListCount`). Such an answer lacks the key, so it does
+   * not show the key is back: a red row's removed key stays until an answer carries the list, or
+   * ESPN counts 0 (verifier finding F3 on ec68d08: a red row the count-header belt wrote for one
+   * period was cleared by another period's empty answer, `eff refresh espn:drift` said "has every
+   * key", and the next hourly run turned it red again).
+   */
+  private unconfirmedViews(
+    views: readonly EspnView[],
+    body: unknown,
+    headers: Readonly<Record<string, string>>,
+  ): ReadonlySet<EspnView> {
+    const out = new Set<EspnView>();
+    for (const v of views)
+      if (absentMeansEmptyPaths(v, body, headers).length > 0 && absentListCount(v, headers) !== 0)
+        out.add(v);
+    return out;
   }
 
   /**
@@ -745,8 +795,23 @@ export class EspnRequester {
           count: absentListCount(s.view, headers),
         });
     if (!failing.some(excused)) return check;
-    for (const s of failing.filter(excused))
-      this.deps.log?.debug("espn.absent_means_empty", { view: s.view, path: s.path });
+    // the first excused list of each view in this process is said at info, with the answer's key
+    // names and ESPN's count: the owner's logs (default level info) then show which shape ESPN
+    // sent — the rule rests on an unrecorded cookie-bearing shape (plan 10 §3.1b; verifier finding
+    // F2 on ec68d08); the later ones stay at debug
+    for (const s of failing.filter(excused)) {
+      const first = !this.reportedAbsent.has(s.view);
+      if (first) this.reportedAbsent.add(s.view);
+      const fields = {
+        view: s.view,
+        path: s.path,
+        keys: bodyKeyNames(body),
+        count: absentListCount(s.view, headers),
+      };
+      const log = this.deps.log;
+      if (first && log?.info !== undefined) log.info("espn.absent_means_empty", fields);
+      else log?.debug("espn.absent_means_empty", fields);
+    }
     if (failing.some((s) => !excused(s))) {
       const signals = check.signals.filter((s) => !excused(s));
       return {
@@ -1024,13 +1089,22 @@ export class EspnRequester {
     } catch {
       this.deps.log?.warn("espn.cache.write_failed");
     }
+    const body = parseJsonSafe(entry.parsed_json);
+    // a revalidated body that lacked an absent-means-empty list verifies its view no more than the
+    // 200 that brought it did (`unconfirmedViews`; verifier finding F3 on ec68d08)
+    const unconfirmed = views.some((v) => ABSENT_MEANS_EMPTY[v] !== undefined)
+      ? this.unconfirmedViews(views, body, answer.headers)
+      : new Set<EspnView>();
     try {
-      this.drift.recovered(views, "schema");
+      this.drift.recovered(
+        views.filter((v) => !unconfirmed.has(v)),
+        "schema",
+      );
     } catch {
       this.deps.log?.warn("espn.drift_state.write_failed");
     }
     return {
-      body: parseJsonSafe(entry.parsed_json),
+      body,
       parsed: null,
       parsedBy: null,
       headers: answer.headers,
@@ -1101,8 +1175,13 @@ export class EspnRequester {
     try {
       // this answer passed every requested view's required keys AND its schema: drift is a fact
       // about the latest answer, so the views it verified clear their removed keys (src/drift
-      // applyRecovered, `schema`) — and a good answer from the configured host ends a host move
-      this.drift.recovered(spec.target.views, "schema");
+      // applyRecovered, `schema`) — and a good answer from the configured host ends a host move.
+      // A view whose absent list was read as none, uncounted, verified nothing (`unconfirmedViews`)
+      const unconfirmed = this.unconfirmedViews(spec.target.views, body, answer.headers);
+      this.drift.recovered(
+        spec.target.views.filter((v) => !unconfirmed.has(v)),
+        "schema",
+      );
     } catch {
       this.deps.log?.warn("espn.drift_state.write_failed");
     }

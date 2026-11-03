@@ -367,6 +367,16 @@ export interface PageOf<T> {
   readonly next_offset: number | null;
 }
 
+/**
+ * A page of one scoring period's transactions (plan 07 A6). `list_absent`: ESPN's answer carried
+ * no transactions list and was read as none (ABSENT_MEANS_EMPTY) — the transactions job compares
+ * it with what the period's previous answer listed (snapshot.ts `transactionsAppend`; verifier
+ * finding F2 on ec68d08); optional so other platforms need not say it (absent = false).
+ */
+export interface TransactionPage extends PageOf<Transaction> {
+  readonly list_absent?: boolean;
+}
+
 /** A transactions query (plan 07 A6). */
 export interface TxnQuery {
   readonly types: readonly TransactionType[];
@@ -487,7 +497,7 @@ export interface FantasyPlatform {
     ref: LeagueRef,
     q: TxnQuery,
     opts?: ReadOptions,
-  ): Promise<Stamped<PageOf<Transaction>>>;
+  ): Promise<Stamped<TransactionPage>>;
   /** Pending claims and proposals (mPendingTransactions). */
   listPendingTransactions(
     ref: LeagueRef,

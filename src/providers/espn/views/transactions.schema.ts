@@ -1,8 +1,9 @@
 // transactions.schema.ts — `mTransactions2`, `mPendingTransactions`, the board probe view and
 // `mDraftDetail` (research 03 §A.2, §B.6; plan 07 A6; plan 02 §2.1). The view-level seed paths are
-// required (drift) — except the transactions and pending lists on an answer to a recognised view,
-// whose absence means none (ABSENT_MEANS_EMPTY; Stage C finding
-// drift-pending-transactions-absent-key-red, finding transactions-absent-key-red); each transaction
+// required (drift) — except the transactions and pending lists on an answer that shows ESPN
+// recognised the view (`showsRecognizedView`: the `draftDetail` base), whose absence means none
+// (ABSENT_MEANS_EMPTY; Stage C finding drift-pending-transactions-absent-key-red, finding
+// transactions-absent-key-red and its verifier findings F1–F3 on ec68d08); each transaction
 // is parsed LENIENTLY per entry against the community shape, grounded on the transactions
 // `kona_playercard` embeds (recorded): a mismatch there is NOT drift (plan 07 A6, ADV OBJ-19(c)) —
 // the entry is skipped and counted. `memberId` is never read.
@@ -56,10 +57,15 @@ export const mPendingTransactionsSchema = z.looseObject({
  * Root keys (`$.<key>`) whose ABSENCE on an answer to a RECOGNISED view is ESPN's "none", not drift.
  * Plan 01 §7 reads an answer without a view's seed keys as a skeleton, because a renamed view
  * answers 200 with one (research 03 §A.2 P28); for these keys an answer that shows ESPN recognised
- * the view (`isUnrecognizedViewAnswer` false) reads the absent key as the empty list
+ * the view (`showsRecognizedView`: the `draftDetail` object every recorded recognised league answer
+ * carries, and not the unrecognised-view answer) reads the absent key as the empty list
  * (`absentAsEmpty`), and the provider's in-call check excuses exactly that signal — it never reaches
  * `drift_state`. The unrecognised-view answer itself stays a skeleton (drift), so a renamed view is
- * still detected. Present with a non-list value the key still fails the schema (drift).
+ * still detected; so does any other body without that base — `{}`, a 200 carrying ESPN's error
+ * envelope, the base without `draftDetail` (verifier finding F1 on ec68d08: the rule once excused
+ * anything that was not exactly P28). Present with a non-list value the key still fails the schema
+ * (drift). An excused answer does not show the key, so it never clears a red row's removed key on
+ * its own (request.ts `unconfirmedViews`; verifier finding F3).
  *
  * `$.pendingTransactions`: the owner's private league answered `view=mPendingTransactions` with the
  * cookie and no such key (Stage C live run, 2026-10-11), where research 03 P10 recorded
@@ -79,8 +85,14 @@ export const mPendingTransactionsSchema = z.looseObject({
  * empty default (its baseball league's `transactions()`, the same view and filter); the previous
  * night's backfill read every period of two previous seasons — each with transactions — through
  * this view with the cookie and no drift. Not verified on a recorded cookie-bearing answer either
- * (plan 10 §3.1b). The belt against reading a real removal as an empty week: ESPN's own count
- * (ABSENT_LIST_COUNT_HEADER) above 0 beside the absent list keeps the signal (drift).
+ * (plan 10 §3.1b): the live log could not tell a recognised bare base from the unrecognised-view
+ * answer, so the first excused answer of each view in a process is logged at info with its
+ * top-level key names (request.ts; verifier finding F2), and `espn.drift` names them too. The belts
+ * against reading a real removal as an empty week: ESPN's own count (ABSENT_LIST_COUNT_HEADER) above
+ * 0 beside the absent list keeps the signal (drift); and the transactions job records drift when a
+ * period whose previous answer listed executed moves answers without the list (snapshot.ts
+ * `transactionsAppend`; verifier finding F2 — ESPN does not un-make executed moves, and a view that
+ * stopped serving the list would otherwise read as an empty week forever).
  */
 export const ABSENT_MEANS_EMPTY: Readonly<Partial<Record<EspnView, readonly string[]>>> =
   Object.freeze({
@@ -131,12 +143,54 @@ export function isUnrecognizedViewAnswer(body: unknown): boolean {
   return !ownKey(o, "draftDetail") && Array.isArray(o.members) && Array.isArray(o.teams);
 }
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Whether `body` positively shows ESPN recognised the requested view: a plain object with its own
+ * `draftDetail` object — the base every recognised league view answers (research 03 §A.2: `gameId,
+ * id, scoringPeriodId, seasonId, segmentId, status, draftDetail{drafted,inProgress}`; every
+ * recorded league-route body of three leagues, the shape probe and the derived fixture league's
+ * `mTransactions2` / `mPendingTransactions` carry it) — and not the unrecognised-view answer. The
+ * league ids, season and status are NOT evidence: P28 carries them too. Required before an absent
+ * list is read as none (verifier finding F1 on ec68d08: `{}`, ESPN's error envelope on a 200, the
+ * base without `draftDetail`, P28 without `teams` once read as an empty week).
+ */
+export function showsRecognizedView(body: unknown): boolean {
+  return (
+    isPlainObject(body) &&
+    ownKey(body, "draftDetail") &&
+    isPlainObject(body.draftDetail) &&
+    !isUnrecognizedViewAnswer(body)
+  );
+}
+
+/** At most this many key names are logged for one body (`bodyKeyNames`). */
+export const LOGGED_KEY_NAMES_MAX = 16;
+const KEY_NAME_RE = /^[A-Za-z_]\w{0,40}$/;
+
+/**
+ * The top-level key names of `body`, sorted, for a log line that has to say which shape ESPN sent
+ * (plan 10 §3.1b; verifier finding F2 on ec68d08): schema names only — a key that is not a short
+ * identifier-shaped name (`/^[A-Za-z_]\w{0,40}$/`: never a numeric id, a GUID or free text) is
+ * left out, and at most LOGGED_KEY_NAMES_MAX are kept. Anything but a plain object has none.
+ */
+export function bodyKeyNames(body: unknown): readonly string[] {
+  if (!isPlainObject(body)) return [];
+  return Object.keys(body)
+    .filter((k) => KEY_NAME_RE.test(k))
+    .sort()
+    .slice(0, LOGGED_KEY_NAMES_MAX);
+}
+
 /**
  * The ABSENT_MEANS_EMPTY paths of `view` that `body` lacks and that read as the empty list: none
- * for a body that is not a plain object or that is an unrecognised-view answer, and — given the
- * answer's `headers` — none when ESPN's count for the list is above 0 (`absentListCount`). The
- * provider's in-call check (with the headers) and its parse (`absentAsEmpty`, without them) use this
- * one rule: the parse only ever runs on an answer the check passed, or on the cached copy of one.
+ * for a body that does not show ESPN recognised the view (`showsRecognizedView` — not a plain
+ * object, no `draftDetail` base, or the unrecognised-view answer), and — given the answer's
+ * `headers` — none when ESPN's count for the list is above 0 (`absentListCount`). The provider's
+ * in-call check (with the headers) and its parse (`absentAsEmpty`, without them) use this one rule:
+ * the parse only ever runs on an answer the check passed, or on the cached copy of one (the cache
+ * strip keeps `draftDetail`).
  */
 export function absentMeansEmptyPaths(
   view: EspnView,
@@ -144,17 +198,15 @@ export function absentMeansEmptyPaths(
   headers?: Readonly<Record<string, string>>,
 ): readonly string[] {
   const paths = ABSENT_MEANS_EMPTY[view];
-  if (paths === undefined || typeof body !== "object" || body === null || Array.isArray(body))
-    return [];
-  if (isUnrecognizedViewAnswer(body)) return [];
+  if (paths === undefined || !isPlainObject(body) || !showsRecognizedView(body)) return [];
   if (headers !== undefined && (absentListCount(view, headers) ?? 0) > 0) return [];
   return paths.filter((p) => !ownKey(body, p.slice(2)));
 }
 
 /**
  * `body` with every `absentMeansEmptyPaths` key set to the empty list (a copy; the body itself is
- * never changed). Anything else — a key present with any value, an unrecognised-view answer, a
- * value that is not a plain object — is left for the schema to judge.
+ * never changed). Anything else — a key present with any value, a body that does not show ESPN
+ * recognised the view, a value that is not a plain object — is left for the schema to judge.
  */
 export function absentAsEmpty(view: EspnView, body: unknown): unknown {
   const absent = absentMeansEmptyPaths(view, body);
