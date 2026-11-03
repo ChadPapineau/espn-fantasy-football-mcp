@@ -1,8 +1,9 @@
 # Security policy
 
 This repository holds a local, read-only MCP server for ESPN Fantasy Football, its `eff` CLI, its
-Skills and CI workflows, and the plan they were built from. The read-only product is built and in
-QA; no version is tagged yet, and the write module is not built (see
+Skills and CI workflows, and the plan they were built from. The read-only product is built, its QA
+is complete (Stage C, 2026-10-29) and it is installed for the owner (2026-11-02); no version is
+tagged yet, and the write module is not built (see
 [README → Status](README.md#status)). This policy covers all of it: the code, the CLI, the Skills,
 the workflows, the documents and the configuration examples.
 

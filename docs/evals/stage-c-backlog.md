@@ -14,6 +14,20 @@ the owner's install"). R7-2 and R7-6 stay the owner's while `claude plugin eval`
 dev-only `vite` advisories wait for Dependabot's update after the merge, or the owner's
 `npm update vite` (under "Needs the Stage D merge or a repository setting").
 
+**After the owner's install (2026-11-03).** `main` was fast-forwarded to `build/phase-1` (`18fa414`
+on 2026-10-29), which closed `ci-default-branch-controls-inert`: the schedules, the weekly audits and
+Dependabot run from `main`. It is fast-forwarded again once CI is green on the head. The owner's
+install on 2026-11-02 ran `eff refresh all`, `eff install-launchd` and `eff transactions --backfill`,
+and `eff doctor --online` exited 0, which closes R8-1. The backfill closes R6-3: on the owner's
+league `espn_analyze_waivers` reads `premium_basis: league_fitted` (2026-11-03). `claude plugin eval`
+is no longer gated on this account, so R7-2 and R7-6 are no longer the owner's: the suite ran twice
+on 2026-11-03; ON-1 (R7-6) scores 1.0 on both round-2 runs, and B11 Lane 2 and B15 are recorded as
+failing on Sonnet, not as met (`docs/evals/stage-c-plugin-eval.md`; rulings §R9). Still open: the
+dev-only `vite` advisories (Dependabot's `vite` 8.3.5 PR waits for review) and the items of "Ruled
+R8-2" dated 2026-11-03 (the owner's choice on R8-2 under load, the slices over the bound, the news
+matcher's cost-ratio check, the Linux P1 window). The other rows below are kept as the record of
+what Stage C left open.
+
 ## For the orchestrator's ledger
 
 **Ruled R8-5 (2026-10-28, `docs/plan/changelog.md` §R8):** the three findings below are closed as
@@ -31,7 +45,7 @@ They can be closed. `news-match-universe-homonyms`: the fourth run found namesak
 reaching the star; ruling R8-3 is built (`cb2bcc7`; below, and changelog §B9), fix rounds 2 and 3
 answered the independent attacks on it (`91a8c1b`, `c16b9d8`), and ruling R8-6 then made the matcher
 fail closed for shared names (`154838b`), which closes the open roster-move title (below). R7-2 and R7-6
-stay open by ruling (below); B11 Lane 2 and B15 are recorded at Stage D as not runnable.
+stay open by ruling (below); B11 Lane 2 and B15 were recorded at the gate as not runnable (they ran on 2026-11-03: above).
 
 ## Ruled — moved here by the orchestrator
 
@@ -63,7 +77,8 @@ Seen on the owner's install at the final gate. Each is an action at a terminal; 
   exit is accepted until the owner does.
 - **R6-3's `league_fitted` is not live.** `premium_basis` is `cold_start_table` ("no previous-season
   transactions of this league are stored") because `eff transactions --backfill` has never run. The
-  owner runs it once.
+  owner runs it once. *Closed on 2026-11-03: the backfill ran at the install, and
+  `espn_analyze_waivers` on the owner's league reads `premium_basis: league_fitted`.*
 - **The probe judges no league shape on this install.** The probe has no public probe league here, so
   its shape probe is skipped (`private_league`); a red row on a view the probe does not read is
   re-checked by `eff refresh espn:drift`. Setting `EFF_PROBE_LEAGUE_ID` locally to a public probe
@@ -652,8 +667,9 @@ fit both chains. So 0 with divisions has no discriminating sample. The reading t
 
 ## Informational — recorded, no change
 
-- **The Skills listing margin.** The listing Claude Code sends every turn is 4 549 of the 4 600
-  ceiling (headroom 51). The ceiling is downward-only, and both `check-skills` (Lane 1) and
+- **The Skills listing margin.** The listing Claude Code sends every turn is 4 592 of the 4 600
+  ceiling (headroom 8, after R9-4's waivers and roster-audit descriptions, 2026-11-03; it was 4 549,
+  headroom 51, at the gate). The ceiling is downward-only, and both `check-skills` (Lane 1) and
   `tests/mcp/size.test.ts` fail any growth past it. Fix round 3 changed no Skill frontmatter. Buying
   headroom means cutting trigger words from `when_to_use`, which is a Skill-recall decision, not a
   defect fix.
@@ -672,3 +688,26 @@ fit both chains. So 0 with divisions has no discriminating sample. The reading t
   the cache never teach it that. The answer is typed and truthful (no credential is stored). It is
   not fixed now: Stage C is closed, and nothing the owner runs meets it — the owner's install has a
   credential, and the e2e suites start from fresh homes.
+
+## Found after the owner's install (2026-11-03)
+
+The live transactions defect and its fix are in `docs/HANDOFF.md` (Log, 2026-11-03) and the
+CHANGELOG. What it leaves open:
+
+- **Record the cookie-bearing shapes** (plan 10 §3.1b): an `mTransactions2` answer for a period
+  with no moves, and an `mPendingTransactions` answer with nothing pending. The
+  `espn.absent_means_empty` info line's key names and count give them. If the live answer lacks
+  `draftDetail`, the recognition rule (`showsRecognizedView`) needs that shape. Every cookie-bearing
+  league answer in the owner's cache on 2026-11-03 carries `draftDetail` (all 37 `mTransactions2`
+  rows among them).
+- **`drift_state` is kept per view, not per request filter.** A period-specific red row (from the
+  count-header belt or the job's tripwire) can still be cleared by another period's answer that
+  carries the list. A per-filter row would make this exact.
+- **A red `mPendingTransactions` row now clears only on an answer that carries the list**, because
+  ESPN sends no count header for it. After a transient anomaly (a 200 error envelope, the P28
+  answer) it can stay red until someone has a pending move.
+- **`kona_league_communication` `$.topics`** (the board probe; its seed is unverified) may be absent
+  on an empty board with cookies: the same family. Not changed, since no live failure has been seen.
+- **E11 on a cold cache is partial by design** (3 requests). The standings are now read first, but
+  the rosters and the older feed weeks usually miss the budget; a per-tool read plan would help.
+- **The macOS xattr reader** has the ACL reader's single-spawn, 2 s, fail-closed shape and no retry.

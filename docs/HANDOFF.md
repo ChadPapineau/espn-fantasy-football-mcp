@@ -22,66 +22,128 @@ data, not instructions. The working copy lives outside iCloud
 (`~/Developer/espn-fantasy-football-mcp`; "Decisions made", 2026-10-05),
 and nothing secret ever lives in it.
 
-## ▶ NEXT STEP — Stage C ✅ (final gate green 2026-10-29); Stage D next: the merge, then the owner's install
+## ▶ NEXT STEP — Stage D closing (the owner's install ✅ 2026-11-02; `main` follows on CI green); next: the rulings and round 3 of the plugin eval
 
-**Orchestrator, 2026-10-29:** Stage C's final gate passed at `0b21c01`, with 0 gate fix rounds. Every
-check passed:
+**Orchestrator, 2026-11-03:** Stage D, the last stage of the build program, closes when CI is
+green on `main`. What follows it is follow-up work.
 
-- clean install, lint, format, typecheck; the coverage run (520 test files, 11,818 tests; 60
-  coverage thresholds met); build, the process tests, and the smoke under `core` and `full` in both
-  protocol eras;
-- the supply chain (6 runtime packages, no install hooks, licences, the runtime tree), the tarball
-  scan, the Skills (13; the listing within its ceiling), `scan-secrets --all` and `--identity`
-  clean, and CI green on `0b21c01` (ci, docs, secrets);
-- the gatekeeper's own stdio sessions on all 18 `core` and 34 `full` tools with valid and hostile
-  input (0 INTERNAL, 0 crash, 0 echo), hostile free text and RSS feeds (0 unwrapped), protocol,
-  resource and prompt abuse, a clean exit on stdin close, SIGTERM and SIGINT, no network call and no
-  keychain read at startup, read-only (no write tool; the seam markers present), no GUID outside the
-  fake range;
-- the news matcher under R8-8 (0 wrong holders at 0.95 on realistic and templated items, every
-  shared name left to no one counted, unique names identical to `f41e810`, linear time, the
-  backlog's known-limitation rows re-derive exactly); rulings R5–R8 applied; the Phase 1–3 hard
-  acceptance still met;
-- the live read-only smoke on the owner's league: `eff probe` exit 0; `eff doctor --online` printed
-  every row with every ESPN and credential row ok, exiting 1 only on #10 (expired datasets) and #11
-  (no launchd jobs), exactly R8-1's case; `espn_get_league` restates the owner's format; one lineup,
-  one waiver and one seeding call typed and sane; the per-stat scoring golden matched every checked
-  live player-week; drift additive, never red; the read host only, within the request budget; the
-  logs clean of cookies.
+**Stage D.**
 
-The gate's two non-blocking notes:
+- `main` was fast-forwarded to `build/phase-1` on 2026-10-29 (`18fa414`; a fast-forward push, no
+  merge commit, every commit it added with the no-reply identity). That closed
+  `ci-default-branch-controls-inert`: the schedules, the weekly audits and Dependabot run from `main`
+  (Dependabot opened its first PRs that day). `main`'s push run then failed on macOS
+  (`stall-parallel`; fixed since, below). `main` is fast-forwarded again to the commit that carries
+  this entry once CI is green on it, and Stage D closes when CI is green on `main`; the Log records
+  that run.
+- The owner's install, on 2026-11-02, every step approved by the owner: a runtime clone at
+  `18fa414` outside any file-provider directory (`npm ci`, then the build); the plugin at user scope
+  with `toolset` `full`; the Claude Desktop chat entry; `eff refresh all`; `eff install-launchd` (20
+  jobs loaded); `eff transactions --backfill`; `eff probe` green; `eff doctor --online` exit 0
+  (closes R8-1). Doctor's one warning is two older `claude mcp add` registrations in another project
+  folder, left to the owner. The default backfill died RATE_LIMITED part-way and was finished one
+  `--seasons` at a time; that defect is fixed (below).
 
-- Gatekeeper conduct, not a product defect: the positive control of its own startup guard ran
-  `security -h` once (the macOS CLI's help text; no keychain, item or credential read); the guard was
-  fixed and the check re-run.
-- Fixture mode, informational: a server reusing a cache an earlier process wrote can answer
-  `espn_list_transactions` with ESPN_REQUIRES_COOKIES for a public league with no stored credential;
-  no owner impact (`docs/evals/stage-c-backlog.md`, "Informational — recorded, no change").
+**After the install** (2026-11-03, on `build/phase-1`; the Log has each step):
 
-**State:** branch `build/phase-1`; the news matcher frozen at `b9d73eb` (R8-8; changelog §B9, fix
-rounds 4 and 5); the re-gate prompt `0b21c01`. The Stage C ledger: 34 fixed, 3 disputed and ruled
-(`eval-plugin-eval-gated` R7-2, `eval-on1-regex-too-narrow` R7-6, `ci-default-branch-controls-inert`
-R8-5), 0 open.
+- The failures of `main`'s push run after the fast-forward are fixed at root: A16a's float clock,
+  `stall-parallel`'s helper brought in line with R8-2, and v2's scoring slices. Two timing checks
+  still fail now and then (item 3).
+- `eff transactions --backfill` no longer dies at the 30-a-minute window. It is paced within a share
+  of it: at most 24 requests in any minute, retries included, while it is inside its wait bounds.
+  It waits out a full window and ESPN's Retry-After, stops at its bounds (a re-run resumes), and
+  sends nothing after Ctrl-C. Its verifiers found eight items, each fixed with tests (`fbbd705`,
+  `76269ba`, `10e0bf6`); the limiter's caps and semantics are unchanged.
+- R6-3 is live on the owner's league: `espn_analyze_waivers` reads `premium_basis: league_fitted`,
+  re-solved from the two seasons the backfill stored.
+- A live defect, found on the owner's install on 2026-11-03: from the week's rollover the hourly
+  transactions job failed `ESPN_DRIFT_DETECTED` and drift went red, on an `mTransactions2` answer
+  without its `transactions` list (most likely a week nobody had moved in yet; the cookie-bearing
+  shape is not recorded). Fixed (`ec68d08`, `82478e7`, `4ddf3e7`): such an answer is the empty week
+  only on ESPN's recognised base, with its own `draftDetail` object (every cookie-bearing league
+  answer in the owner's cache has one), and only while ESPN's count header does not say there are
+  moves. A period that listed executed moves and later answers without the list is still drift. The
+  first excused answer is logged at info with its key names, and `eff refresh espn:drift` re-reads
+  the job's recorded period. Found on the way: `espn_analyze_league_activity` answered NOT_FOUND on
+  a cold cache (`ccc2231`), and a launchd job once refused its store when the ACL listing did not
+  complete as the Mac woke; such a listing is now run once more, still fail-closed (`e94c135`,
+  `1d38f6b`). Two verifiers found ten items on the first fix; each is fixed with tests.
+- R7-2 has run: the plugin eval's pilot, rulings R9-1 to R9-5 built (`docs/plan/changelog.md` §R9),
+  then round 2 (`docs/evals/stage-c-plugin-eval.md`).
 
-**Next — Stage D** (`docs/scratch/build-program.md`):
+**The plugin eval, round 2** (fixture mode only, no cookie): B15 and B11 Lane 2 still fail on
+Sonnet. Its `llm` graders pass 66.3 % (pilot 46 %; the bar is 80 %), its free graders 385 of 410,
+and its mean case score is 0.80 (pilot 0.59). Opus fired correctly on every trigger case it ran (90
+of 90 runs); Sonnet on 82 of 90. Opus Lane 2 did not run (the round's usage gate). The triage of the
+56 cases below 1.0: 3 product defects, 11 Skill-text defects, 13 eval-case defects, 6 harness cases
+(an injection case whose base never passed) and 23 model-variance cases. ON-1 (R7-6) scores 1.0 on
+both runs.
 
-1. The orchestrator fast-forwards `main` to `build/phase-1`'s head once CI is green on it (a
-   fast-forward push, no merge commit), and CI must be green on `main`. That closes
-   `ci-default-branch-controls-inert`: the schedules, the weekly audits and Dependabot then run from
-   `main`.
-2. The owner's install, with the owner present, each step confirmed: install the plugin (README
-   step 5) or `eff print-config`'s entry; `eff refresh all`; `eff install-launchd`;
-   `eff transactions --backfill` (makes R6-3's `league_fitted` live); then `eff doctor --online`
-   must exit 0 (closes R8-1).
-3. Optional: `EFF_PROBE_LEAGUE_ID` set locally to a public probe league (the ids stay in local
-   config only).
-4. After the merge: the dev-only `vite` advisories wait for Dependabot's update from `main`, or the
-   owner's `npm update vite` with the lockfile diff reviewed, then `npm run test:coverage`
-   (`docs/evals/stage-c-backlog.md`, "Needs the Stage D merge or a repository setting").
+**Next:**
 
-R7-2 (`claude plugin eval`) stays the owner's when the tooling is available. In sessions opened in
-the clone, the project server stays unapproved. No version tag is part of Stage D: a tag is the
-owner's choice, and `release.yml` runs only on a `v*` tag.
+1. The rulings the triage asks for (the orchestrator's unless marked):
+   - plan 07 E14: whether `espn_list_recommendations` items carry the entry's `note` (path-listed,
+     source `store.recommendation_log`) — NC-7, NC-INJ-2;
+   - TR-5-E: under `seeding_mode: "both"`, `why_they_accept` gives one standing line per reading
+     (`whyTheyAccept` in `src/domain/analytics/trade.ts` reads `seeding_config.mode` only; plan 09
+     §3.9);
+   - the §R9 review's F6 (orient's positional rule goes on through the bench, against its own ask
+     condition for "my TE2" with one TE; NC-3's round-3 fix rests on it) and F7 (NC-2's rubric fails
+     "the two sources are consistent", which `espn_analyze_evidence` returns as `flag: consistent`):
+     changelog §R9, "Review of the fix round";
+   - WV-7-E: orient's `rejected` row continues keylessly on a public league, as R9-1's
+     `not_configured` row does, or the case gets a variant of its own;
+   - retro, the review's F5: seed the week-4 call with a scored alternative (RT-1, RT-3);
+   - TR-3: the long-shot standing line, or the case's expected outcome;
+   - R8-2 under load (the owner's): keep it, or judge a window the host set by the server's own CPU
+     (`cpu_max_ms`).
+2. Round 3 of the plugin eval, in fixture mode only, with the eval clone, the suite and the results
+   in a scratch workspace outside every repository, under the heavy lock, and the flags of round 2's
+   "Commands as run" (`docs/evals/stage-c-plugin-eval.md`):
+   - fix the round-2 triage's product, Skill-text and eval-case defects (round 2's "Remaining
+     failures by class" and "Next steps, in order"); a description change must fit the Skills
+     listing's 8 characters of headroom;
+   - rebuild the suite (`npm run build:plugin-evals -- --seed --seed-datasets`), run the inj-base
+     pass (`--tag inj-base --keep-temp --runs 2`), then `build-plugin-evals.mjs --baselines` (or let
+     it attach the best kept run, a harness change);
+   - then Lane 2 at `--runs 2` on Sonnet, and on both models the trigger cases of every Skill whose
+     description changes; the Opus baselines and Opus Lane 2 run only while the owner's weekly usage
+     meter reads 20 % or less (round 2 stopped at 25 %). Round 2 cost about $126 for 20 batches.
+3. The timing items (`docs/evals/stage-c-backlog.md`, "Ruled R8-2"):
+   - split the slices over plan 03 §1.2's 20 ms CPU batch: a cold `espn_analyze_evidence` turn (76
+     ms of CPU on the owner's Mac, the one slice over the 50 ms stall bound), the trade tool's pair
+     step (30–45 ms), and the output validation, the `mRoster` parse and `stripForCache` (20–30 ms
+     each);
+   - make the news matcher's cost-ratio check (`tests/sources/news/match.perf.test.ts`) robust
+     without loosening its 6× bound (one macOS CI run timed 6.4× on the wall clock): interleave the
+     timings and compare CPU time;
+   - read the evidence lines of the next Linux failure of `latency.test.ts`'s `full` P1 window.
+4. The owner's:
+   - update the runtime clone and the plugin to `main`'s head (README, "Upgrade"): `git pull &&
+     npm ci && npm run build` in the runtime clone; the plugin's version is still 0.0.0, so a plain
+     `claude plugin update` keeps the old copy: `claude plugin uninstall
+     espn-fantasy-football@espn-fantasy-football-mcp` and install it again as in README step 5;
+     restart Claude Code and the Desktop app before any other call (a server still on the old build
+     turns drift red again), then `eff doctor`. This brings in the transactions and backfill fixes
+     and the §R9 Skills. Drift then clears at the next :30 transactions run or with
+     `eff refresh espn:drift`, and `espn_get_status`'s warning goes from red to additive (the
+     additive keys and enum values stay for a manifest review); the first empty-week run logs one
+     `espn.absent_means_empty` line (key names and a count only), which records the cookie-bearing
+     shape;
+   - run the onboard Skill in a new session;
+   - the two older registrations doctor warns about;
+   - the five Dependabot PRs opened from `main` on 2026-10-29: `vite` 8.3.5 (the dev-only
+     advisories: review the lockfile diff, then `npm run test:coverage`); the `npm-minor-and-patch`
+     group, which bumps three runtime packages (`@modelcontextprotocol/server` 2.4.0, with the dev
+     client, `@napi-rs/keyring` 2.1.2, `hyparquet` 1.31.5), each needing plan 04 §2's review, a
+     changelog "Reviews" row and a reviewed `scripts/ci/runtime-allowlist.json`, or
+     `check:runtime-tree` fails it; the majors `typescript` 7.0.2 and `@types/node` 26.6.5 (Node is
+     24.21.0 by `.nvmrc`); and the github-actions group;
+   - optional: `EFF_PROBE_LEAGUE_ID` in local config, and the Skills as zips for the Desktop chat.
+
+**State:** branch `build/phase-1`; `main` follows it by fast-forward once CI is green on the head
+(the Log records each); the news matcher frozen at `b9d73eb` (R8-8). In sessions opened in the clone, the project server stays unapproved. No version
+is tagged: a tag is the owner's choice, and `release.yml` runs only on a `v*` tag.
 
 ## Build facts (Stage A, verified by the orchestrator 2026-10-06)
 
@@ -181,6 +243,49 @@ owner's choice, and `release.yml` runs only on a `v*` tag.
   selection bias already named). `docs/evals/phase3-startsit.md` regenerated (only those lines
   change) and ruling 2 in `docs/evals/phase3-summary.md` now cites the floor and lists two options.
   No criterion, threshold or verdict changed. **For the orchestrator:** R6 (step 2 above).
+
+## Build facts (Stage C — the final gate, 2026-10-29, `0b21c01`)
+
+Moved here from ▶ NEXT STEP when Stage D's install was recorded (2026-11-03).
+
+**Orchestrator, 2026-10-29:** Stage C's final gate passed at `0b21c01`, with 0 gate fix rounds. Every
+check passed:
+
+- clean install, lint, format, typecheck; the coverage run (520 test files, 11,818 tests; 60
+  coverage thresholds met); build, the process tests, and the smoke under `core` and `full` in both
+  protocol eras;
+- the supply chain (6 runtime packages, no install hooks, licences, the runtime tree), the tarball
+  scan, the Skills (13; the listing within its ceiling), `scan-secrets --all` and `--identity`
+  clean, and CI green on `0b21c01` (ci, docs, secrets);
+- the gatekeeper's own stdio sessions on all 18 `core` and 34 `full` tools with valid and hostile
+  input (0 INTERNAL, 0 crash, 0 echo), hostile free text and RSS feeds (0 unwrapped), protocol,
+  resource and prompt abuse, a clean exit on stdin close, SIGTERM and SIGINT, no network call and no
+  keychain read at startup, read-only (no write tool; the seam markers present), no GUID outside the
+  fake range;
+- the news matcher under R8-8 (0 wrong holders at 0.95 on realistic and templated items, every
+  shared name left to no one counted, unique names identical to `f41e810`, linear time, the
+  backlog's known-limitation rows re-derive exactly); rulings R5–R8 applied; the Phase 1–3 hard
+  acceptance still met;
+- the live read-only smoke on the owner's league: `eff probe` exit 0; `eff doctor --online` printed
+  every row with every ESPN and credential row ok, exiting 1 only on #10 (expired datasets) and #11
+  (no launchd jobs), exactly R8-1's case; `espn_get_league` restates the owner's format; one lineup,
+  one waiver and one seeding call typed and sane; the per-stat scoring golden matched every checked
+  live player-week; drift additive, never red; the read host only, within the request budget; the
+  logs clean of cookies.
+
+The gate's two non-blocking notes:
+
+- Gatekeeper conduct, not a product defect: the positive control of its own startup guard ran
+  `security -h` once (the macOS CLI's help text; no keychain, item or credential read); the guard was
+  fixed and the check re-run.
+- Fixture mode, informational: a server reusing a cache an earlier process wrote can answer
+  `espn_list_transactions` with ESPN_REQUIRES_COOKIES for a public league with no stored credential;
+  no owner impact (`docs/evals/stage-c-backlog.md`, "Informational — recorded, no change").
+
+**State:** branch `build/phase-1`; the news matcher frozen at `b9d73eb` (R8-8; changelog §B9, fix
+rounds 4 and 5); the re-gate prompt `0b21c01`. The Stage C ledger: 34 fixed, 3 disputed and ruled
+(`eval-plugin-eval-gated` R7-2, `eval-on1-regex-too-narrow` R7-6, `ci-default-branch-controls-inert`
+R8-5), 0 open.
 
 ## The findings that shape the product (verified by the orchestrator)
 
@@ -298,8 +403,9 @@ owner's choice, and `release.yml` runs only on a `v*` tag.
 | build — Stage B1 (Phases 1a and 1b: the 18 P0 tools) | ✅ gate closed 2026-10-06 (rulings R5-1, R5-2) | `docs/evals/1a-*.md`; changelog §B1, §R5 |
 | build — Stage B2a (Phase 2: the 16 P1 tools, 34 read tools in all) | ✅ 2026-10-07 (rulings R5-3 to R5-5) | "Build facts (Stage B2a)"; `docs/evals/phase2-acceptance.md` |
 | build — Stage B2b (Phase 3: the model wave) | ✅ 2026-10-11 (rulings R6-1 to R6-5) | "Build facts (Stage B2b)"; `docs/evals/phase3-summary.md` |
-| build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | ▶ NEXT STEP; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
-| build — Stage D (the merge to `main`, the owner's install) | next: the fast-forward of `main` with CI green on it, then the owner's install | ▶ NEXT STEP; `docs/scratch/build-program.md` |
+| build — Stage C (QA and penetration testing) | ✅ 2026-10-29 — final gate green at `0b21c01` (rulings R7, R8; the news matcher frozen at `b9d73eb`) | "Build facts (Stage C)"; `docs/evals/stage-c-live.md`, `docs/evals/stage-c-plugin-eval.md`, `docs/evals/stage-c-backlog.md`; changelog §R7, §R8, §B4–§B9 |
+| build — Stage D (the merge to `main`, the owner's install) | closing — the owner's install ✅ 2026-11-02 (`eff doctor --online` exit 0, R8-1 closed); `main` fast-forwarded on 2026-10-29 and again with this entry once CI is green on it; closes when CI is green on `main` | ▶ NEXT STEP; Log |
+| follow-up — the plugin eval (R7-2) | rounds 1 and 2 run on 2026-11-03 (rulings R9); B15 and B11 Lane 2 below plan 09 §5.2's bar on Sonnet; round 3 next | ▶ NEXT STEP; `docs/evals/stage-c-plugin-eval.md`; changelog §R9 |
 
 ## Decisions made
 
@@ -459,10 +565,13 @@ approving the plan accepts them unless Chad says otherwise.
 - [x] executive summary delivered to Chad (2026-09-30)
 - [x] Chad's review and the decisions above → the build approved 2026-10-05 ("Decisions made"), Phase 0 first
 - [x] the build — Stages A, B1, B2a, B2b and C (final gate green 2026-10-29, `0b21c01`)
-- [ ] Stage D — fast-forward `main` to `build/phase-1`, CI green on `main` (closes `ci-default-branch-controls-inert`)
-- [ ] Stage D — the owner's install: the plugin or `eff print-config`'s entry, `eff refresh all`, `eff install-launchd`, `eff transactions --backfill`, then `eff doctor --online` exits 0 (closes R8-1)
-- [ ] R7-2 (`claude plugin eval`) — the owner's, when the tooling is available
-- [ ] the dev-only `vite` advisories — Dependabot's update from `main` after the merge, or the owner's `npm update vite` (lockfile diff reviewed)
+- [ ] Stage D — fast-forward `main` to `build/phase-1`, CI green on `main`: fast-forwarded on 2026-10-29 (closed `ci-default-branch-controls-inert`; its push run red on macOS, fixed since) and again with this entry once CI is green on it
+- [x] Stage D — the owner's install: the plugin, the Desktop chat entry, `eff refresh all`, `eff install-launchd`, `eff transactions --backfill`, then `eff doctor --online` exits 0 (closes R8-1): 2026-11-02
+- [x] R7-2 (`claude plugin eval`) — run on 2026-11-03: the pilot and round 2 (`docs/evals/stage-c-plugin-eval.md`)
+- [ ] the plugin eval's round 3 — the rulings, the round-2 triage's defects fixed, then the re-run, until B15 and B11 Lane 2 meet plan 09 §5.2 (▶ NEXT STEP, items 1 and 2)
+- [ ] the timing items — the slices over the stall bound and the news matcher's cost-ratio check (▶ NEXT STEP, item 3)
+- [ ] the owner's runtime clone and plugin updated to `main`'s head (the transactions and backfill fixes, the §R9 Skills), then drift back to additive (▶ NEXT STEP, item 4)
+- [ ] the dev-only `vite` advisories — Dependabot's `vite` 8.3.5 PR (opened from `main` on 2026-10-29), its lockfile diff reviewed, then `npm run test:coverage`
 
 ## Log
 
@@ -559,6 +668,7 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-10-29 — R8-8's targeted round (R8-6 fix round 4, `cd7f99a`), and the news matcher is now frozen for Stage C under R8-8: the attack on `08524ff` found 19 violations, and each is fixed at root. A suffix after a surname mention narrows its holders. Round 3's first-name reading and capitalised-word-after gate go, so a shared surname a capitalised word stands beside is a mention, labelled or counted, and the teams-alone test reads the possessive next to the name. An ordinary-word abbreviation in capitals labels after a game or move word, and a possessive home and nickname labels. A team-word surname is counted. The label reader reads a state's period, an initialism in any case and a hashtag's teams. A shared name's all-caps possessive is read. The forms the attack named are listed (facilities, the camp town, stadium, city short names, positions, ESPN's HC, TQB and D/ST). The crafted item is linear (2.6 times a benign item; 1,000 build in 5.9 s, 77.8 s before). Every LEAD_WORDS, STAFF_WORDS, multi-team and code entry is held by a behaviour, and spellingsOf is bounded. Unique names still match `f41e810`, the gate's batteries are unchanged, and no wrong holder is added; the known limitations are listed (changelog §B9 "R8-6 fix round 4 — the targeted round under R8-8"; `docs/evals/stage-c-backlog.md` "Known limitations of the news matcher (R8-8)").
 - 2026-10-29 — R8-8's verifier item (R8-6 fix round 5, `5531653`), and the news matcher stays frozen for Stage C under R8-8. The verifier of the targeted round found one gate-class item at `67bc88e`: a shared surname that is also a team form ("Brown", "Houston", "Henderson", "Washington") repeated to the caps cost 11 to 20 times a benign item, and 1,000 took 41 to 60 s to build. It is fixed at root: each label form and tag item is read once per item, the ordinary words' spellings are keyed once, and a form of several words is looked up only after two words that open one. The items now cost at most 3.6 times a benign one, and the perf test's 1,000 build in 8.3 s (73.0 s at `67bc88e`). Nothing the matcher reads changes (a differential against `67bc88e` over 264,626 texts and 6.8 million word reads), so refs, counts and the known limitations stand. A mutation run found four code entries no test held; each now has one (changelog §B9 "R8-6 fix round 5 — the verifier's item under R8-8").
 - 2026-10-29 — Stage C ✅. R8-8's targeted round (fix rounds 4 and 5: `cd7f99a`, `67bc88e`, `5531653`, `b9d73eb`; an independent verify after each, no regression), then the news matcher frozen at `b9d73eb`. The final gate (run with the re-gate prompt `0b21c01`) passed at `0b21c01` with 0 fix rounds: every build, test, supply-chain, secret, hostile-input and protocol check, the news matcher under R8-8 and the live read-only smoke (doctor exits 1 only on #10 and #11, R8-1's case); CI green. Non-blocking: the gatekeeper's guard control ran `security -h` once (help text only; no keychain read; guard fixed, check re-run), and a fixture-mode auth-gate note is recorded in the backlog. Next: Stage D (the fast-forward of `main`, CI green on `main`, the owner's install).
+- 2026-11-02 — The owner's install (Stage D's second step; `main` had been fast-forwarded to `18fa414` on 2026-10-29, no merge commit, and its push run went red on macOS: below). The install, every step approved by the owner: a runtime clone at `18fa414` outside any file-provider directory, the plugin at user scope (`full`), the Claude Desktop chat entry, `eff refresh all`, `eff install-launchd` (20 jobs), `eff transactions --backfill` (the default run died RATE_LIMITED part-way and was finished one `--seasons` at a time: a defect, fixed on 2026-11-03), `eff probe` green and `eff doctor --online` exit 0 (R8-1 closed). Doctor's one warning: two older `claude mcp add` registrations in another project folder, the owner's to remove. On the live news feeds, about 23 of 178 items named a shared name and got no ref: R8-8's known recall cost (`docs/evals/stage-c-backlog.md`).
 - 2026-11-03 — `main`'s CI went red after the Stage D fast-forward; each flake is fixed at root on `build/phase-1`. The A16a cooperative property (`kernels.test.ts`) failed on a deterministic fast-check counterexample, not on timing: the test's float clock reads a 0.5 ms step as 0.49999999999999989 ms, so two steps share a chunk. The property now checks the chunks the runner timed, pins the CI case and has a cheap-step sibling. `stall-parallel`'s macOS failure was R8-2's "cannot be measured" on a host that set all three windows. The helper now matches R8-2: a JavaScript block over the bound beside a longer host gap is never excused, the stall is asserted unrounded, and each window's evidence is reported. v2's scoring step (30–82 ms of CPU) now scores 128-sample slices with byte-identical answers. The scheduled run's cancelled `process (macOS)` was GitHub's (no hosted macOS arm64 runner was acquired); nothing changed for it (`docs/evals/stage-c-backlog.md`, "Ruled R8-2").
 - 2026-11-03 — `eff transactions --backfill` no longer dies RATE_LIMITED part-way (found at the owner's install on 2026-11-02: the default run's ~37 reads met the limiter's 30-a-minute window, and the owner finished it one `--seasons` at a time). Every read now goes through `src/cli/espn-pacing.ts` (`PacedRun`): 24 reads a minute, start to start, so the run never fills the shared window and the server and the jobs keep slots. A full window or ESPN's Retry-After is waited out with one stderr line (counts and seconds only) and the same read is retried, within two bounds: five refusals in a row, and the planned reads' windows plus one spare. Ctrl-C ends a wait at once, because the backfill now claims SIGINT/SIGTERM. A spent daily cap, a second concurrency refusal in a row and every other failure end the run as before (same exit, same line). The limiter's caps are unchanged. The sweep of `src/cli/**` found no other command that sends more than ~20 ESPN requests and can meet the window: `eff refresh espn:*` with `--seasons` sends up to 28 per source, but its source paces them at one a minute; every other command sends 15 or fewer. `io.sleep` now reaches the provider's limiter, so the CLI tests run on fake time.
 - 2026-11-03 — Rulings R9-1 to R9-5 after the plugin eval's pilot are built (`docs/plan/changelog.md` §R9; commits `fc7b510`, `b913e3f`). Orient's `not_configured` row splits on `league.is_public`: a public league prints one Session line and continues keylessly, and a private or unknown one hands over to session-check and stops. onboard and session-check follow it, and check-skills asserts it in every orient copy. A shared convention resolves "my RB1" by ESPN's week projection. Fixture mode reports a variant's scripted credential state and probe result as a label only (`src/services/fixture-credential.ts`): never a value, no request, keyless reads, and the guard runs first. ON-5-E, SC-1, SC-3 and SC-6 are back. WV-7-E is held out: orient's `rejected` row stops at Step 0, and the case expects the answer to carry on, so it needs a ruling. The eval-case defects are fixed on the case side or with gen-fixtures variant data (post-run's free agents lose a stale waiver date; a new variant, `outlook-more-work`). retro no longer promises a corrections-window close time. The waivers and roster-audit descriptions draw the drop-for-an-add boundary (listing 4 592 of 4 600). A trigger negative now fails only when its Skill fires first. Every injection case has a base: new AP-7, NC-6, NC-7 and SC-8; KD-INJ names KD-1 and SS-INJ-2 names SS-7. IC-INJ, RA-INJ and WV-INJ moved to injections their Skills read. Next: rebuild the suite (`--seed --seed-datasets`), run the inj-base pass with `--keep-temp`, then `--baselines`, then `--runs 2` on Sonnet with Opus on both lanes. Re-run the trigger cases of waivers and roster-audit, whose descriptions changed.
@@ -566,3 +676,6 @@ approving the plan accepts them unless Chad says otherwise.
 - 2026-11-03 — The backfill fix's verifier items (`4141144`). F1: a re-run more than a day after a run died STALE_ONLY on a full window. Its cached weeks were past the 1-day hard limit of `espn_transactions`, so the provider's stale fallback replaced the limiter's refusal with STALE_ONLY. `EspnStaleOnlyError` now keeps the failure as its `cause` (the code and details are unchanged, because every mapping reads `effCode` first). `PacedRun` waits out a refusal behind it, and rethrows one it does not wait on as RATE_LIMITED. F2: another process's burst could make the limiter wait inside a read until just before its 20 s deadline; the request then timed out (counted by the shared breaker) and the run died. Before each read the backfill now looks at the shared bucket's newest rows, read-only (`windowFreeInMs`, the store's own count), and waits for a full window itself. Those waits count against the same bounds. Past a bound the read goes to the limiter as it is. F3: a read refused after Ctrl-C no longer prints a wait line. Under a refusal storm the run now stops at the wait budget (3 whole-window waits) instead of after 5 shorter ones; the exit, the line and what it stored are unchanged. The limiter's caps and semantics are unchanged.
 - 2026-11-03 — The backfill's account-safety items on `fbbd705`. F1: after Ctrl-C, a read already waiting inside the limiter still sent up to 20 s later; each read now runs under its own upstream budget, which the run's signal aborts, so it is refused before its slot (no row, nothing sent) and the run ends with its `interrupted` line, no failure recorded. F2: pacing counted reads, not requests, so retries on a flaky ESPN let the run alone fill the window; a read now starts only while the shared bucket's last minute leaves room for its every attempt (at most 24 requests in any minute, retries included; 22 reads a minute). The limiter's caps and semantics are unchanged.
 - 2026-11-03 — The backfill's verifier items on `76269ba`. V1 (Ctrl-C): a read the signal cut could still return a value, because the provider's stale fallback serves a cached copy in place of the aborted request; counted as done, a Ctrl-C during a re-run's last read ended the run 0 and recorded it as worked. A value returned after the signal is now the run's interrupt, not a read done. V1 (bounds): past a wait bound the read went to the limiter as it was, so beside a busy server the run filled the shared window, and with retries its own requests reached 27 in a minute. Past a bound the run now stops before the read, as the limiter's own `window` refusal (the `stopped` line, RATE_LIMITED, exit 1; a re-run resumes). V2: the look counted a row stamped far ahead of the clock (a clock since set back) as made now at every look, so it never aged and the run waited out its budget for nothing. A row more than `REQUEST_SKEW_TOLERANCE_MS` ahead now holds no slot in the look (only a request's `tryRecord` re-stamps it); one ahead by less is counted at its own stamp, as the store counts it. The limiter's caps and semantics are unchanged.
+- 2026-11-03 — The plugin eval's round 2 after §R9 (`42942d4`; `docs/evals/stage-c-plugin-eval.md`). Sonnet's `llm` graders pass 66.3 % (pilot 46 %; the bar is 80 %), its free graders 385 of 410, and its mean case score is 0.80 (pilot 0.59). Opus fired correctly on 90 of 90 trigger runs and Sonnet on 82 of 90; Opus Lane 2 did not run. B15 and B11 Lane 2 still fail. N1 is gone except on one short news-check path. The triage: 3 product defects, 11 Skill-text defects, 13 eval-case defects, 6 harness cases and 23 model-variance cases. The rulings it needs and round 3 are in ▶ NEXT STEP.
+- 2026-11-03 — The hourly transactions job on the owner's install failed `ESPN_DRIFT_DETECTED` from the week's rollover (11:30 and 12:30 UTC), with drift red on `mTransactions2` `$.transactions`: an answer without the list, most likely a week nobody had moved in yet, which nothing excused (only `mPendingTransactions` had the absent-means-empty rule). Fixed in `ec68d08`; the ACL listing that did not complete at wake is run once more, still fail-closed (`e94c135`). The verifiers found ten items, all fixed (`82478e7`, `4ddf3e7`, `ccc2231`, `1d38f6b`; CI green on `1d38f6b`): the excuse needs ESPN's recognised base (its own `draftDetail` object; every cookie-bearing league answer in the owner's cache has one) and no count header above 0; it clears no red row unless ESPN counts 0; the first excused answer per view is logged at info with its key names and count; the job fails as drift when a period that listed executed moves answers without the list; `eff refresh espn:drift` re-reads the job's recorded period (it sent no request for this view before); `espn_analyze_league_activity` reads the standings first and answers partial, not NOT_FOUND; two incomplete ACL listings hold the second run off for 30 s. The cookie-bearing shape is still unrecorded: the next empty-week run's info line records it.
+- 2026-11-03 — The docs record the owner's install and R6-3 live (`espn_analyze_waivers` reads `premium_basis: league_fitted` on the owner's league). `main` is fast-forwarded to the commit that carries this entry once CI is green on it, and the Log records `main`'s run, which closes Stage D. ▶ NEXT STEP, Program status and Open items, the README's status lines, the build program's RESUME HERE, the Stage C backlog's header, SECURITY.md and the plan index follow; Stage C's gate record moves to "Build facts (Stage C)".
