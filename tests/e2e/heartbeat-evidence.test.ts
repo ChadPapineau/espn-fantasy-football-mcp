@@ -7,7 +7,8 @@
 // longer wait (ruling R8-2: a JavaScript block over the bound is never excused, even when another
 // gap is the window's longest). Each is over the bound and is the process's own; none may read as
 // the host's. A block spins on the thread's own CPU time, so it spends exactly that much CPU however
-// loaded the machine is. No network.
+// loaded the machine is. stallEvidence's line, which the latency suite prints with each verdict,
+// carries that evidence. No network.
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import {
@@ -17,6 +18,7 @@ import {
   measureStall,
   NO_SOCKET,
   ROOT,
+  stallEvidence,
   type HeartbeatSource,
 } from "./helpers.js";
 
@@ -156,6 +158,61 @@ describe("the heartbeat's evidence never excuses the process's own stall", () =>
     } finally {
       p.stop();
     }
+  }, 30_000);
+
+  it("stallEvidence prints what a verdict rests on: a JavaScript block's own CPU, and every repeated window", async () => {
+    // a real block over the bound beside a quiet control (5 ms): measured once, and its line names
+    // the server's own CPU — a red stall says it was the server's, not an unexcused wait
+    const p = await stallingProcess("busy", 120);
+    try {
+      const w = await measureStall(p.src, starvedControl(5), () => p.stall(), 50);
+      const ev = JSON.parse(stallEvidence(w)) as Record<string, unknown>;
+      expect(ev.attempts).toBe(1);
+      expect(ev.stall_ms).toBeGreaterThan(100);
+      expect(ev.gap_cpu_ms).toBeGreaterThan(100);
+      expect(ev.cpu_max_ms).toBeGreaterThan(100);
+      expect(ev.control_ms).toBe(5);
+      expect(ev.repeated).toEqual([]);
+    } finally {
+      p.stop();
+    }
+    // a window repeated on the host's evidence: the measured window, then the repeated one, at 0.1 ms
+    const hb = (max_ms: number, gap_cpu_ms: number, gap_invol: number, cpu_max_ms: number) => ({
+      max_ms,
+      gap_ms: max_ms - 5,
+      gap_cpu_ms,
+      gap_invol,
+      cpu_max_ms,
+    });
+    expect(
+      stallEvidence({
+        stall_ms: 31.26,
+        control_ms: 6.04,
+        attempts: 2,
+        server: hb(31.26, 30.71, 4, 30.71),
+        repeated: [{ server: hb(74.83, 4.44, 9, 23.08), control_ms: 36.51 }],
+      }),
+    ).toBe(
+      JSON.stringify({
+        attempts: 2,
+        stall_ms: 31.3,
+        gap_ms: 26.3,
+        gap_cpu_ms: 30.7,
+        gap_invol: 4,
+        cpu_max_ms: 30.7,
+        control_ms: 6,
+        repeated: [
+          {
+            stall_ms: 74.8,
+            gap_ms: 69.8,
+            gap_cpu_ms: 4.4,
+            gap_invol: 9,
+            cpu_max_ms: 23.1,
+            control_ms: 36.5,
+          },
+        ],
+      }),
+    );
   }, 30_000);
 
   it("hostSetStall: the host only with preemption inside a gap the thread barely used, or a starved control", () => {

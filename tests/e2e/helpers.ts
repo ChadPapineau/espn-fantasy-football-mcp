@@ -442,6 +442,29 @@ export interface StallWindow {
 }
 
 /**
+ * A window's evidence as one line (ms to 0.1): the stall, the windows taken, the idle control's
+ * stall, and the server's longest gap with its own CPU and involuntary switches and its longest run
+ * on the CPU anywhere in the window, then every repeated window's. What a stall verdict rests on is
+ * printed with it, so a red run says whether the server's own CPU or an unexcused wait set it.
+ */
+export function stallEvidence(w: StallWindow): string {
+  const r = (x: number): number => Math.round(x * 10) / 10;
+  const beat = (s: Heartbeat, controlMs: number) => ({
+    stall_ms: r(s.max_ms),
+    gap_ms: r(s.gap_ms),
+    gap_cpu_ms: r(s.gap_cpu_ms),
+    gap_invol: s.gap_invol,
+    cpu_max_ms: r(s.cpu_max_ms),
+    control_ms: r(controlMs),
+  });
+  return JSON.stringify({
+    attempts: w.attempts,
+    ...beat(w.server, w.control_ms),
+    repeated: w.repeated.map((x) => beat(x.server, x.control_ms)),
+  });
+}
+
+/**
  * Whether a server window over `boundMs` may have been set by the HOST: its longest gap holds no
  * more of the main thread's own CPU than the bound, AND something shows the host interfering — the
  * OS took a thread of the process off the CPU inside that gap (involuntary switches), or an idle
