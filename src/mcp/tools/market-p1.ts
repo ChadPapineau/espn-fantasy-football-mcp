@@ -1960,8 +1960,13 @@ export const analyzeLeagueActivityTool = defineTool({
     const warnings: string[] = [];
     const b = await basicsOf(ctx, inputs, args);
     const since = new Date(ctx.nowMs - args.since_days * 24 * 3600 * 1000).toISOString();
-    const txns = await transactionsOf(ctx, b.w, args.since_days, since, inputs, warnings);
+    // the standings that name the league's teams are read before the weekly feeds: on a cold cache
+    // the feeds could spend the call's 3 requests, and the tool then had no team to report on and
+    // answered NOT_FOUND — an empty current week that answered drift used to stop the feeds first
+    // (verifier finding F2 on ec68d08); a feed week past the budget comes from the persisted
+    // history, said (`partial:`)
     const standings = await standingsOrNull(ctx, inputs, warnings);
+    const txns = await transactionsOf(ctx, b.w, args.since_days, since, inputs, warnings);
     const myTeam = b.league.my_team?.team_id ?? null;
     const rosters = await withinBudget(
       () => rostersOf(ctx, b.w, inputs, warnings, args, myTeam),
@@ -2016,7 +2021,13 @@ export const analyzeLeagueActivityTool = defineTool({
         },
       ];
     });
-    if (teams.length === 0) throw new EffError("NOT_FOUND");
+    // no read named the league's teams (standings and rosters both unavailable — the call's budget
+    // spent, ESPN failing): the window's totals still stand, said; a NOT_FOUND here read as "no such
+    // league" (verifier finding F2 on ec68d08)
+    if (teams.length === 0)
+      warnings.push(
+        "partial: the league's teams were not read (standings and rosters unavailable): by-team activity, waiver-order movement and rival needs are omitted",
+      );
     const out = analyzeLeagueActivity({
       since_days: args.since_days,
       transactions: txns,
