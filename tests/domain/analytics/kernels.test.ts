@@ -47,6 +47,95 @@ import type { PlatformStamp } from "../../../src/domain/league/types.js";
 import type { DatasetStamp } from "../../../src/domain/analytics/types.js";
 import { dist, steppingPacer } from "./helpers.js";
 
+/** One chunk the runner timed: steps [from, to) between two of its clock reads in one batch. */
+interface TimedChunk {
+  /** The first chunk of its batch (always runs: progress is never blocked). */
+  readonly first: boolean;
+  readonly from: number;
+  readonly to: number;
+  /** The runner's own reading of the chunk: the difference of its two clock reads. */
+  readonly ms: number;
+}
+
+/**
+ * Runs `costs` (ms per step) on a fake clock the steps advance, recording every clock read the
+ * runner makes and every yield: a batch is one read at its start and one after each chunk, so the
+ * chunks and batches are exactly the ones the runner timed, read with its own subtractions.
+ */
+async function timedRun(costs: readonly number[], batchMs: number) {
+  let wall = 0;
+  let done = 0;
+  const reads: { at: number; done: number }[] = [];
+  const yields: number[] = [];
+  const pacer = {
+    nowMs: () => {
+      reads.push({ at: wall, done });
+      return wall;
+    },
+    yieldToLoop: () => {
+      yields.push(reads.length);
+      return Promise.resolve();
+    },
+  };
+  const result = await runCooperative(
+    costs.length,
+    (i) => {
+      wall += costs[i] ?? 0;
+      done += 1;
+    },
+    { pacer, batchMs, deadlineMs: null },
+  );
+  const chunks: TimedChunk[] = [];
+  /** Each batch: its length, its length before its last chunk, and its chunks. */
+  const batches: { ms: number; before_last_ms: number; chunks: TimedChunk[] }[] = [];
+  for (let b = 1; b < yields.length; b++) {
+    const rs = reads.slice(yields[b - 1], yields[b]);
+    const start = rs[0];
+    const end = rs.at(-1);
+    const beforeLast = rs.at(-2);
+    if (start === undefined || end === undefined || beforeLast === undefined)
+      throw new Error(`batch ${String(b)} made no chunk`);
+    const own = rs.slice(1).map((z, j) => {
+      const a = rs[j] ?? start;
+      return { first: j === 0, from: a.done, to: z.done, ms: z.at - a.at };
+    });
+    batches.push({ ms: end.at - start.at, before_last_ms: beforeLast.at - start.at, chunks: own });
+    chunks.push(...own);
+  }
+  return { result, chunks, batches };
+}
+
+/**
+ * The runner's pacing claim (cooperative.ts runCooperative), read from what it timed: a batch over
+ * `batchMs` (past float noise) was within it until its last chunk, and that chunk is the batch's
+ * only one or longer than every chunk the run timed before it. Returns each such batch.
+ */
+function expectPacedBatches(
+  chunks: readonly TimedChunk[],
+  batches: readonly { ms: number; before_last_ms: number; chunks: readonly TimedChunk[] }[],
+  batchMs: number,
+): { k: number; last: TimedChunk }[] {
+  const over: { k: number; last: TimedChunk }[] = [];
+  batches.forEach((b, k) => {
+    if (b.ms <= batchMs + 1e-9) return;
+    const last = b.chunks.at(-1);
+    if (last === undefined) throw new Error(`batch ${String(k)} has no chunk`);
+    expect(b.before_last_ms, `batch ${String(k)} over budget`).toBeLessThan(batchMs);
+    const earlier = chunks.slice(0, chunks.indexOf(last));
+    expect(
+      last.first || earlier.every((c) => c.ms < last.ms),
+      `batch ${String(k)} over budget`,
+    ).toBe(true);
+    over.push({ k, last });
+  });
+  return over;
+}
+
+/** fast-check's counterexample on CI (main, 2026-10-29, seed 1127482550). */
+const CI_CHUNK_EXAMPLE: readonly number[] = Object.freeze([
+  0.9379839195499918, 0.5, 8.357687299104612, 6.204328782345398, 0.5,
+]);
+
 describe("runCooperative", () => {
   it("runs every step once, in order, yielding before, between and after batches of ≤ batchMs", async () => {
     const seen: number[] = [];
@@ -173,47 +262,98 @@ describe("runCooperative", () => {
   });
 
   it("A16a property: a batch passes batchMs only on a chunk longer than every chunk before it", async () => {
-    // steps of 0.5..15.9 ms are each timed alone (a chunk of one step: the clock is read after every
-    // step at this pace), so the claim is about steps: any batch over budget ends on a record step
+    // The runner times CHUNKS of steps (one clock read after each) and sizes the next chunk from
+    // what it read: under 0.5 ms doubles it, over 2 ms halves it. At 0.5..15.9 ms a step is timed
+    // alone — except that the test's floating-point clock reads a 0.5 ms step as
+    // 0.49999999999999989 ms once the wall is past 1 ms, and the next two steps then share a chunk.
+    // The claim about steps this test made until then is false there; the runner's own claim, about
+    // chunks, holds (CI seed 1127482550, the example below: steps 2 and 3 timed as one 14.56 ms
+    // chunk, the batch ended at 16.000000001 ms on step 3, and step 2 cost more). So every claim is
+    // read from the clock reads the runner made (timedRun), in its own floating point
     await fc.assert(
       fc.asyncProperty(
         fc.array(fc.double({ min: 0.5, max: 15.9, noNaN: true }), { minLength: 1, maxLength: 120 }),
         async (costs) => {
-          let wall = 0;
-          let done = 0;
-          const ends: { at: number; done: number }[] = [{ at: 0, done: 0 }];
-          const pacer = {
-            nowMs: () => wall,
-            yieldToLoop: () => {
-              ends.push({ at: wall, done });
-              return Promise.resolve();
-            },
-          };
-          const r = await runCooperative(
-            costs.length,
-            (i) => {
-              wall += costs[i] ?? 0;
-              done += 1;
-            },
-            { pacer, batchMs: 16, deadlineMs: null },
-          );
-          expect(r.completed).toBe(costs.length);
-          for (let k = 1; k < ends.length; k++) {
-            const a = ends[k - 1];
-            const b = ends[k];
-            if (a === undefined || b === undefined || b.done === a.done) continue;
-            if (b.at - a.at <= 16 + 1e-9) continue;
-            const last = costs[b.done - 1] ?? 0;
-            const before = costs.slice(0, b.done - 1);
-            expect(
-              before.every((c) => c < last),
-              `batch ${String(k)} over budget`,
-            ).toBe(true);
-          }
+          const { result, chunks, batches } = await timedRun(costs, 16);
+          expect(result.completed).toBe(costs.length);
+          // the chunks run every step once, in order; a step is timed alone, or two share a chunk
+          // after the clock read one under 0.5 ms
+          chunks.forEach((c, j) => {
+            expect(c.from, `chunk ${String(j)}`).toBe(j === 0 ? 0 : chunks[j - 1]?.to);
+            const steps = c.to - c.from;
+            expect(steps, `chunk ${String(j)}`).toBeGreaterThanOrEqual(1);
+            expect(steps, `chunk ${String(j)}`).toBeLessThanOrEqual(2);
+            if (steps === 2)
+              expect(
+                chunks.slice(0, j).some((p) => p.ms < 0.5),
+                `chunk ${String(j)}: two steps`,
+              ).toBe(true);
+          });
+          expect(chunks.at(-1)?.to).toBe(costs.length);
+          expectPacedBatches(chunks, batches, 16).forEach(({ k, last }) => {
+            // a step timed alone: the claim about steps, where it holds
+            if (last.to - last.from === 1) {
+              const step = costs[last.from] ?? 0;
+              expect(
+                costs.slice(0, last.from).every((c) => c < step),
+                `batch ${String(k)} over budget`,
+              ).toBe(true);
+            }
+          });
+        },
+      ),
+      // 300 generated runs after the one example (fast-check counts examples in numRuns)
+      { numRuns: 301, examples: [[[...CI_CHUNK_EXAMPLE]]] },
+    );
+  });
+
+  it("A16a property: with cheap steps too (many to a chunk), a batch passes batchMs only on a chunk longer than every chunk before it", async () => {
+    // steps under 0.5 ms (a sampler's draws) make the runner time many steps per chunk, and a heavy
+    // step may then end a chunk of cheap ones: the claim is about chunks, as the runner times them
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.oneof(
+            fc.double({ min: 0.001, max: 0.5, noNaN: true }),
+            fc.double({ min: 0.5, max: 15.9, noNaN: true }),
+          ),
+          { minLength: 1, maxLength: 120 },
+        ),
+        async (costs) => {
+          const { result, chunks, batches } = await timedRun(costs, 16);
+          expect(result.completed).toBe(costs.length);
+          chunks.forEach((c, j) => {
+            expect(c.from, `chunk ${String(j)}`).toBe(j === 0 ? 0 : chunks[j - 1]?.to);
+            expect(c.to, `chunk ${String(j)}`).toBeGreaterThan(c.from);
+          });
+          expect(chunks.at(-1)?.to).toBe(costs.length);
+          expectPacedBatches(chunks, batches, 16);
         },
       ),
       { numRuns: 300 },
     );
+  });
+
+  it("A16a: CI's counterexample — the 0.5 ms step read under 0.5 ms puts two steps in one chunk, and the batch passes 16 ms only on that chunk", async () => {
+    const { chunks, batches } = await timedRun(CI_CHUNK_EXAMPLE, 16);
+    // the float clock: 1.4379839195499917 − 0.9379839195499918 = 0.49999999999999989
+    expect(chunks[1]?.ms).toBeLessThan(0.5);
+    expect(chunks.map((c) => [c.from, c.to])).toEqual([
+      [0, 1],
+      [1, 2],
+      [2, 4],
+      [4, 5],
+    ]);
+    expect(batches.map((b) => b.chunks.length)).toEqual([3, 1]);
+    const first = batches[0];
+    expect(first?.ms).toBeGreaterThan(16 + 1e-9); // 16.000000001000004
+    expect(first?.before_last_ms).toBeLessThan(16);
+    // its last chunk (steps 2 and 3, 14.56 ms) is longer than every chunk before it; its last step
+    // (6.20 ms) is not the costliest — the claim about steps fails here, the one about chunks holds
+    const last = first?.chunks.at(-1);
+    expect(last).toBe(chunks[2]);
+    expect(chunks.slice(0, 2).every((c) => c.ms < (last?.ms ?? 0))).toBe(true);
+    expect(CI_CHUNK_EXAMPLE[3]).toBeLessThan(CI_CHUNK_EXAMPLE[2] ?? 0);
   });
 
   it("the deadline counts the thread's CPU: a machine asleep mid-batch never cuts the run short", async () => {
