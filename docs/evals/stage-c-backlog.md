@@ -572,13 +572,37 @@ The server's own slice is cut at root. v2's scoring phase scored one player's wh
 samples) in one cooperative step. Under parallel `full` calls that held the loop 30–48 ms of CPU on
 the owner's Mac, and 82 ms on a slowed CPU; two such windows failed as the server's own (52.7 and
 82.4 ms). It now scores 128 samples a step (`V2_SIMS.scoreSlice`, the engine's `sampleScorer`), with
-byte-identical answers (`tests/domain/analytics/projections-v2/project-slices.test.ts` counts the
-lines per scoring call and compares slice widths). Under `full` the server's longest own run is now
-about 30 ms. The slices left at that size are the trailing-window dataset reads, the output
-envelope's validation and the roster view's parse. On the owner's Mac under sustained CPU load the
-processor throttles (speed limit 63–68 %), and every process freezes for 30–50 ms several times in 20
-s, an idle probe included. There a stall window can be the host's in every attempt, and the stall
-test then ends as "cannot be measured", as R8-2 rules (it did under four busy loops).
+byte-identical answers (`tests/domain/analytics/projections-v2/project-slices.test.ts` holds the
+lines each cooperative step scores to a fixed ceiling and compares slice widths). Under `full` the
+server's longest own run is now about 30 ms. The slices left at that size are the trailing-window
+dataset reads, the output envelope's validation and the roster view's parse. On the owner's Mac
+under sustained CPU load the processor throttles (speed limit 63–68 %), and every process freezes
+for 30–50 ms several times in 20 s, an idle probe included. There a stall window can be the host's
+in every attempt, and the stall test then ends as "cannot be measured", as R8-2 rules (it did under
+four busy loops).
+
+**The verifier of `85739b2` (2026-11-03).** `project-slices.test.ts` held each scoring call to
+`V2_SIMS.scoreSlice` itself, so a whole-set slice (2 000, the shape before the fix) passed it. It now
+wraps the cooperative runner's steps and holds the lines each step scores to a literal ceiling of
+256. At the slowest per-line cost measured (41 µs), that is 10.5 ms, inside one 12 ms batch. No line
+is scored outside a step, and the slice constant is held to the same ceiling. Under four busy loops
+`stall-parallel` passed 28 of 30 runs. Both failures were "cannot be measured": the host set all
+three windows, and the server's own longest run on the CPU peaked at 37 ms over the 30 runs. While
+R8-2 stands, the test cannot pass 30 consecutive runs under that load, because the ruling fails a
+host that sets every window. The owner decides whether to keep that outcome or to judge such windows
+by the server's own CPU (`cpu_max_ms`).
+
+**Open: the server's own slices in `full`'s P1 analytics.** `latency.test.ts`'s window over the P1
+analytics failed on Linux CI at 104.9 and 62.1 ms (`4e3a2c3`, both attempts) and at 63.8 and
+143.4 ms (`c9849e4`, 2026-10-29). Its other runs read 22–43 ms. The helper did not excuse those
+windows, and CI printed no evidence for them. Locally the window's stall is the server's own CPU
+(31–40 ms of 31–40 ms). A probe that measured each tool alone found the slices. A cold
+`espn_analyze_evidence` runs its dataset reads, its claim extraction and its assembly in one turn of
+76 ms of CPU, over the bound on the owner's Mac (24–31 ms warm). One `espn_analyze_trade` step, a
+package's lineup weeks, takes 30–45 ms. The output validation, the roster view's parse and the cache
+strip take 20–30 ms each. A slower CI runner can stretch these past 50 ms. The latency suite now
+prints each window's evidence with its verdict (`tests/e2e/helpers.ts` `stallEvidence`). The fix is
+to split these slices, as v2's scoring was split. It is not built yet.
 
 ## Closed by R8-4 — F8, division winners first
 
