@@ -1,6 +1,6 @@
 ---
 name: roster-audit
-description: Audits the roster rest-of-season in the user's ESPN league — what each bench spot is for, handcuffs and stashes, who is droppable, IR eligibility, and whether a healed player makes the roster invalid.
+description: Audits the roster rest-of-season in the user's ESPN league — what each bench spot is for, handcuffs and stashes, who is droppable long-term (not a drop for an add), IR eligibility, and whether a healed player invalidates the roster.
 when_to_use: rate my team, rate my roster, droppable, IR spot, IR eligible, roster invalid, can't add players, handcuff, stash, rest of season, backup QB
 argument-hint: "[competing or eliminated]"
 disallowed-tools:

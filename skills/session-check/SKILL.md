@@ -34,7 +34,7 @@ Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_ch
 |---|---|
 | `drift.status: red` | **Not a session problem.** ESPN changed the shape of a response: name the views and say what still works (the table in [orient](references/orient.md)). No setup, no probe. |
 | `drift.status: host_moved` | **Not a session problem either.** "ESPN moved its API; stale data until the override is set or a new version ships" — the operator sets `EFF_ESPN_READ_HOST`, or waits for the release. No setup, no probe. |
-| `credential.state: not_configured` | No cookies are stored. A public league still answers keyless reads; private data needs the setup steps (§3). |
+| `credential.state: not_configured` | No cookies are stored. On a public league (`league.is_public: true` in `espn_get_status`, or in a settings read already in the conversation) every other Skill reads keylessly and carries on without a session — say so; the setup steps (§3) add a session when private data is needed. On a private league (`league.is_public` false or null), private data needs the setup steps (§3). |
 | `credential.state: rejected` | ESPN did not accept the stored cookies for this league — "this usually means `espn_s2` expired" (never "expired" as a fact: the 401 cannot tell expired from not-your-league). The setup steps (§3), then wait for the user to say they ran it, then verify (§4). |
 | `credential.state: stored` | Cookies are stored but not yet confirmed. Verify (§4). |
 | `credential.state: validated` | ESPN accepted the cookies at `last_accepted_at`; say so with `age_days`. No probe needed. |

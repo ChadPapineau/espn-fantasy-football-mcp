@@ -1,6 +1,6 @@
 ---
 name: waivers
-description: Ranks waiver and free-agent targets in the user's ESPN league under its waiver system — whether a claim is worth the priority it spends, the ordered claim list, the drop, and the free-agent scramble once claims clear.
+description: Ranks waiver and free-agent targets in the user's ESPN league under its waiver system — whether a claim is worth the priority it spends, the ordered claim list, the drop for an add, and the free-agent scramble once claims clear.
 when_to_use: waiver, pickup, claim, add, drop, worth my waiver spot, priority, clears, free agents, scramble, FAAB, bid, work the wire
 argument-hint: "[position or player]"
 disallowed-tools:

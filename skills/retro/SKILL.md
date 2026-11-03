@@ -29,7 +29,7 @@ Conventions: Step 0, routing and the never-re-fetch rules in [orient](references
 Run Step 0 of [orient](references/orient.md). The week under review is the last final week (`clock.current_week_final`; on a Tuesday of week 5 that is week 4) unless the user named one.
 
 ### 2. Is the week final?
-`espn_get_scoreboard` for that week. `meta.provisional: true` → every number below is **provisional** — say so in the first line; `meta.corrections_window_open: true` → stat corrections can still move the totals — say when the window closes.
+`espn_get_scoreboard` for that week. `meta.provisional: true` → every number below is **provisional** — say so in the first line; `meta.corrections_window_open: true` → stat corrections can still move the totals — say the window is still open; no tool gives its close time, so never state one.
 
 ### 3. Score the calls
 `espn_analyze_retrospective` for that week. Read `calls[]` (`followed`, `regret`, `decisive`), `baselines` (`last_week_points`, `espn_projection_lineup` with its `informative` flag), `metrics` (`projection_vs_espn`, `swap_regret`, `brier`) and `sample_size`.

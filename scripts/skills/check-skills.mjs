@@ -120,6 +120,43 @@ export const GAME_DAY_OWNER = "start-sit";
  */
 export const TOOLSET_STOP =
   "this Skill needs the full toolset — set `EFF_TOOLSET=full` in the server's env and restart the client";
+/**
+ * The `not_configured` routing split every orient copy carries (changelog §R9, ruling R9-1 — the
+ * 2026-11-03 plugin eval's N1: one row that said neither stop nor continue was read both ways). A
+ * public league prints one Session line and continues keylessly; a private league, or one whose
+ * publicity is unknown, hands over to session-check and stops. Exactly these two rows.
+ */
+export const ORIENT_NOT_CONFIGURED = Object.freeze({
+  row: /^\|\s*`credential\.state: not_configured`.*$/gm,
+  public:
+    /^\|\s*`credential\.state: not_configured` and `league\.is_public: true`[^\n]*\*\*continue\*\*[^\n]*\|\s*$/m,
+  private:
+    /^\|\s*`credential\.state: not_configured` and `league\.is_public` false or null[^\n]*`espn-fantasy-football:session-check` Skill[^\n]*and stop\.\s*\|\s*$/m,
+});
+
+/**
+ * Why an orient copy lacks the public/private `not_configured` split (R9-1), or [] when it has it.
+ * @param {string} text an orient.md
+ * @returns {string[]}
+ */
+export function orientRoutingProblems(text) {
+  /** @type {string[]} */
+  const out = [];
+  const rows = text.match(ORIENT_NOT_CONFIGURED.row) ?? [];
+  if (!ORIENT_NOT_CONFIGURED.public.test(text))
+    out.push(
+      "no `credential.state: not_configured` and `league.is_public: true` row that continues (**continue**)",
+    );
+  if (!ORIENT_NOT_CONFIGURED.private.test(text))
+    out.push(
+      "no `credential.state: not_configured` and `league.is_public` false or null row that hands over to `espn-fantasy-football:session-check` and stops",
+    );
+  if (rows.length !== 2)
+    out.push(
+      `${String(rows.length)} \`credential.state: not_configured\` routing rows (exactly the public and the private one)`,
+    );
+  return out;
+}
 /** ESPN's injury statuses (src/domain/league/types.ts) a `$player` template may filter on. */
 export const INJURY_STATUSES = Object.freeze([
   "ACTIVE",
@@ -2304,6 +2341,13 @@ export function checkSkills(opts = {}) {
       if (re.test(body))
         errors.push(`${rel}/SKILL.md: body must not mention ${String(re)} (plan 09 §3 Lane 1)`);
     }
+    // every orient copy splits not_configured by the league's publicity (R9-1): continue keylessly
+    // on a public league, hand over and stop on a private one
+    const orientCopy = path.join(dir, "references", "orient.md");
+    if (!existsSync(orientCopy)) errors.push(`${rel}/references/orient.md: missing`);
+    else
+      for (const p of orientRoutingProblems(readFileSync(orientCopy, "utf8")))
+        errors.push(`${rel}/references/orient.md: ${p}`);
     // a P1 Skill under `core` stops in Step 0 and says how to turn it on (plan 10 B10; ADV OBJ-18)
     if (p1Skill && !body.includes(TOOLSET_STOP)) {
       errors.push(

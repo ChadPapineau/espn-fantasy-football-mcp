@@ -25,6 +25,7 @@ import {
   listingProblem,
   listingText,
   main,
+  orientRoutingProblems,
   phrases,
   recKindOf,
   routeScore,
@@ -507,6 +508,58 @@ describe("the Skills listing as Claude Code sends it (Stage C finding skills-lis
     const ball = `${"x".repeat(SKILLS_LISTING_MAX - 1)}\u{1F3C8}`;
     expect(codePoints(ball)).toBe(SKILLS_LISTING_MAX);
     expect(listingProblem(ball, [{}])).toContain("over by 1");
+  });
+});
+
+describe("orient's not_configured routing (changelog §R9, R9-1)", () => {
+  const shared = readFileSync(path.join(ROOT, "skills/_shared/references/orient.md"), "utf8");
+  const publicRow = /^\|\s*`credential\.state: not_configured` and `league\.is_public: true`.*$/m;
+  const privateRow = /^\|\s*`credential\.state: not_configured` and `league\.is_public` false.*$/m;
+
+  it("every committed orient copy splits it: continue keylessly on a public league, hand over and stop on a private one", () => {
+    expect(orientRoutingProblems(shared)).toEqual([]);
+    const skills = readdirSync(path.join(ROOT, "skills"), { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name !== "_shared")
+      .map((d) => d.name);
+    expect(skills).toHaveLength(13);
+    for (const s of skills) {
+      const copy = readFileSync(path.join(ROOT, "skills", s, "references", "orient.md"), "utf8");
+      expect(orientRoutingProblems(copy), s).toEqual([]);
+    }
+  });
+
+  it("names each missing half, and the old single row that said neither stop nor continue", () => {
+    const old =
+      "| `credential.state: not_configured` | Hand over to the `espn-fantasy-football:session-check` Skill (its setup steps). A public league still answers keyless reads — say so. |";
+    const pub = publicRow.exec(shared)?.[0] ?? "";
+    const priv = privateRow.exec(shared)?.[0] ?? "";
+    expect(pub).not.toBe("");
+    expect(priv).not.toBe("");
+    const oneRow = shared.replace(`${pub}\n${priv}`, old);
+    const p = orientRoutingProblems(oneRow);
+    expect(p.join("\n")).toMatch(/league\.is_public: true` row that continues/);
+    expect(p.join("\n")).toMatch(/false or null row that hands over/);
+    expect(orientRoutingProblems(shared.replace(pub, ""))).toEqual([
+      "no `credential.state: not_configured` and `league.is_public: true` row that continues (**continue**)",
+      "1 `credential.state: not_configured` routing rows (exactly the public and the private one)",
+    ]);
+    // the public row must continue, the private one must stop
+    expect(orientRoutingProblems(shared.replace("**continue**", "stop"))).toHaveLength(1);
+    expect(
+      orientRoutingProblems(shared.replace(priv, priv.replace("and stop.", "and continue."))),
+    ).toHaveLength(1);
+    expect(orientRoutingProblems(`${shared}\n${old}\n`)).toEqual([
+      "3 `credential.state: not_configured` routing rows (exactly the public and the private one)",
+    ]);
+  });
+
+  it("check-skills fails on a copy without the split (the shared text rebuilt into every Skill)", () => {
+    const t = fresh();
+    t.edit("skills/_shared/references/orient.md", "and **continue** with", "and then answer");
+    buildSkills({ root: t.root });
+    expect(errorsOf(t)).toMatch(
+      /skills\/weekly\/references\/orient\.md: no `credential\.state: not_configured` and `league\.is_public: true` row that continues/,
+    );
   });
 });
 
