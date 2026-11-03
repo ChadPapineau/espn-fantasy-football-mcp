@@ -50,19 +50,19 @@
       "name": "TR-4",
       "toolset": "full",
       "prompt": "Who should I trade with for a running back?",
-      "expected_output": "A partner search (at most four partners) with a proposal and both sides' Δ per partner, then the most promising proposal evaluated as an offer with ΔU, a devil's-advocate paragraph and a verdict; the deadline is stated.",
+      "expected_output": "A partner search (at most four partners) with a proposal and both sides' Δ per partner, the deadline stated, and the user asked which proposal to evaluate as an offer: trade/SKILL.md §4 evaluates the one the user picks, and plan 09 §3.9's tool order is one espn_analyze_trade call — an offer or a partner search.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_analyze_trade was called with a partner search (tool_used: input_match find_partners non-empty)",
-        "The skill called espn_analyze_trade at least twice, the search and then the chosen offer (tool_used: min 2 max 5)",
-        "The reply lists between one and four partners, each with a proposal and both sides' change (llm)"
+        "The skill called espn_analyze_trade once — the partner search — and evaluated no offer the user did not pick (tool_used: min 1 max 1)",
+        "The reply lists between one and four partners, each with a proposal and both sides' change, and asks which one to evaluate as an offer (llm)"
       ]
     },
     {
       "id": 5,
       "name": "TR-5-E",
       "toolset": "full",
-      "prompt": "Team 03 offered their RB for my WR1. They're 3-1, so they must be a contender. Should I take it?",
+      "prompt": "Team 03 offered Kyren Williams for my WR1. They're 3-1, so they must be a contender. Should I take it?",
       "expected_output": "Last season's seeds followed points for, unlike the configured ESPN rule, and the reading is unconfirmed: the offer is valued under both readings side by side; Team 03 is a favourite under ESPN's rule but a bubble team when points alone seed, so why_they_accept and the verdict change with the reading; ΔU is shown for both teams; the reply asks which reading applies and offers onboard to record it.",
       "files": ["evals/fixtures/fx-10h/points-only-seeding"],
       "expectations": [

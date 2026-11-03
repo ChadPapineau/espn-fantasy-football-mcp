@@ -31,6 +31,10 @@
 // runTool, src/mcp/resources/index.ts readAsEnvelope). A copy froze the reading at its spread, so
 // the stdio server kept the start reading until a restart (finding services-seeding-read-once,
 // attempt 2); no consumer has to avoid copying the services now.
+// In fixture mode a derived variant may script the credential state it stands for (`harness`
+// in its manifest — auth-rejected, public-league): status and espn_check_auth report that label and
+// the scripted probe result, never a value, and every read stays keyless (src/services/
+// fixture-credential.ts; changelog §R9, R9-3).
 // Nothing here runs a request or reads a secret.
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
@@ -86,6 +90,7 @@ import { createEspnProvider, type EspnProvider, type FetchLike } from "../provid
 import type { LeagueRef } from "../providers/platform.js";
 import type { Store } from "../store/types.js";
 import { VERSION } from "../version.js";
+import { readScriptedCredential, scriptedAuth, type ScriptedAuth } from "./fixture-credential.js";
 import { adoptSeedingReading, createSeedingReader } from "./seeding.js";
 
 /** What the composition root needs of the logger (src/cli/log.ts Logger satisfies it). */
@@ -429,6 +434,17 @@ export function buildServices(args: BuildServicesArgs): Wiring {
       throw new ConfigError(refused);
     }
   }
+  // fixture mode's credential-state test seam (changelog §R9, R9-3): the state a derived variant's
+  // manifest scripts, reported as a label only — never a value; reached only in fixture mode, and
+  // only after the guard above refused every stored credential
+  const scripted: ScriptedAuth | null = fixture
+    ? ((): ScriptedAuth | null => {
+        const s = readScriptedCredential(config.fixtureDir);
+        return s === null ? null : scriptedAuth(s, clock);
+      })()
+    : null;
+  if (scripted !== null)
+    logger.info("services.fixture_credential_scripted", { state: scripted.state() });
   const loadKeyring = config.testStubs ? stubbedKeyring(stderr) : args.loadKeyring;
   const fetchFn = config.testStubs && !fixture ? stubbedFetch(stderr) : args.fetch;
   const ref: LeagueRef = { platform: "espn", league_id: config.leagueId, season: config.season };
@@ -494,6 +510,7 @@ export function buildServices(args: BuildServicesArgs): Wiring {
   };
 
   const credentialView = (): CredentialView => {
+    if (scripted !== null) return scripted.view();
     let row = null;
     try {
       row = store.repos.credentialState.get();
@@ -649,10 +666,13 @@ export function buildServices(args: BuildServicesArgs): Wiring {
         }
       },
     },
-    auth: {
-      state: () => authority?.state() ?? "not_configured",
-      probe: (r) => provider.probeCredential(r),
-    },
+    auth:
+      scripted === null
+        ? {
+            state: () => authority?.state() ?? "not_configured",
+            probe: (r) => provider.probeCredential(r),
+          }
+        : { state: () => scripted.state(), probe: () => scripted.probe() },
     transport: () => provider.transportStatus(),
     beforeCall(this: unknown) {
       seeding.refresh();

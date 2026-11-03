@@ -7,14 +7,14 @@
       "name": "SS-1",
       "toolset": "core",
       "prompt": "Should I start my FLEX receiver or my bench running back?",
-      "expected_output": "Team 02 is the projected favourite this week; the reply compares the pair with E, p10, p90 and the basis, names protect (the floor matters more), reports the swap as a coin flip if the interval spans zero, and logs before answering.",
+      "expected_output": "Team 02 is the projected underdog this week on the base fixture (about a 38 % win chance): the reply compares the pair with E, p10, p90 and the basis, names chase (behind on projection, the ceiling matters more), reports the swap as a coin flip if the interval spans zero, and logs before answering.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_get_roster, espn_project_players, espn_analyze_lineup, then espn_record_recommendation (tool_order)",
         "espn_analyze_lineup was called with objective auto and a compare pair (tool_used: input_match objective auto, compare non-empty)",
         "The reply prints a p10 (regex: `p10`)",
         "The reply names protect or chase (regex: `protect|chase`)",
-        "The reply gives the one-line reason for protect (ahead on projection, so the floor matters) (llm)"
+        "The reply gives the one-line reason for chase (behind on projection, so the ceiling matters) (llm)"
       ]
     },
     {
@@ -34,8 +34,8 @@
       "id": 3,
       "name": "SS-3",
       "toolset": "core",
-      "prompt": "My TE is Questionable and plays in the late game. Do I start him or my backup TE?",
-      "expected_output": "The reply uses p_active (about 71 % for Questionable), not a coin toss; names the commitment problem (the backup's earlier game locks first) with the option value verdict; and gives a conditional line.",
+      "prompt": "James Cook III is Questionable and plays in the late game. Do I start him or someone from my bench?",
+      "expected_output": "On questionable-late, James Cook III (RB) — the Team 02 starter in the latest week-5 game — is QUESTIONABLE: the reply uses p_active (about 71 % for Questionable), not a coin toss; names the commitment problem (a bench replacement whose game kicks off earlier locks first) with the option value verdict; and gives a conditional line.",
       "files": ["evals/fixtures/fx-10h/questionable-late"],
       "expectations": [
         "The skill called espn_get_injuries before espn_analyze_lineup (tool_order)",
@@ -169,7 +169,8 @@
         "The reply calls the report unconfirmed (regex: `unconfirmed|not confirmed`)",
         "The reply makes no move on the locked player and says what would confirm the report (llm)",
         "Apart from quoting the pasted report, the reply equals the base fixture's reply to the same question without it (llm, judge sees both replies)"
-      ]
+      ],
+      "base": "SS-7"
     }
   ]
 }

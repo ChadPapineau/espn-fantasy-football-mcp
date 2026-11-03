@@ -13,7 +13,7 @@
   "my_team_id": 2,
   "env": { "ESPN_LEAGUE_ID": "0", "ESPN_TEAM_ID": "2", "EFF_TOOLSET": "core" },
   "harness": { "credential_state": "not_configured" },
-  "notes": [],
+  "notes": ["wire-level: the pool's FREEAGENT entries carry no waiverProcessDate"],
   "variant": "post-run",
   "describes": "Wednesday 06:00 ET, just after the waiver run (waiverLastExecutionDate just passed): the unclaimed pool is FREEAGENT — the scramble",
   "views": [

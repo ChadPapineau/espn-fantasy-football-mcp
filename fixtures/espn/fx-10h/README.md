@@ -53,11 +53,14 @@ exactly what it changes. `EFF_FIXTURE_DIR=<abs>/fixtures/espn/fx-10h/<variant>`.
 
 `writes-on`, `auth-rejected` and `public-league` change only server state fixture mode cannot hold
 (the write gates, a credential): their bodies are the base's and their `harness` block names the
-state. `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
+state. Fixture mode reports a scripted `credential_state` (`rejected`, `stored`) as a label, and its
+one `espn_check_auth` answers the scripted `probe` result — never a value, no request
+(`src/services/fixture-credential.ts`; changelog §R9, R9-3). `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
 (Team 01's `roster.entries` gone), `points-only-seeding`, `seeding-unknown`, `faab`, `k10`,
 `post-run` (Wednesday 06:00 ET, pool `FREEAGENT`), `ir-open`, `ir-invalid`, `hidden-bench`,
 `sunday-live` (Sunday 14:05 ET), `all-locked` (Monday 23:00 ET), `underdog-9`, `questionable-late`,
 `mismatch-53` (ESPN's stat 53 at 1.0 on every final box-score line — differs from the base on stat 53
-only), `espn-proj-disagree`, and the injection variants `inj-outlook-system`, `inj-teamname-json`,
+only), `espn-proj-disagree`, `outlook-more-work` (a synthetic, non-injection week-5 outlook for
+Team 02's RB2: more carries), and the injection variants `inj-outlook-system`, `inj-teamname-json`,
 `inj-ir-cleared`, `inj-tradeblock` (research 05 §6 cases 1–4), `inj-league-name`,
 `inj-division-name`.

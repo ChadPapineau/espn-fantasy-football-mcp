@@ -35,6 +35,7 @@ import {
   traceProblem,
   EVAL_SERVER,
   FIXTURE_CREDENTIAL_STATES,
+  HELD_OUT_CASES,
   HISTORY_FORMAT_VERSION,
   INJECTION_NEEDLES,
   LINEUP_SEEDS,
@@ -43,6 +44,7 @@ import {
   SEEDS,
   SEED_KINDS,
   SEED_NOTE,
+  SEED_NOTE_PLAIN,
   STATE_ENV_KEYS,
   STATE_ROOT_FILE,
   SYNTHETIC_TOKEN,
@@ -51,6 +53,7 @@ import {
   caseDir,
   caseYaml,
   envelopeOf,
+  firstSkillGuard,
   firstToolGuard,
   gitTreeOf,
   gradersFor,
@@ -326,7 +329,16 @@ describe("planSuite on the committed bundle", () => {
     ).toBe(false);
   });
 
-  it("a trigger case fires its Skill (positive) or never does in either arm (negative); a user-invoked Skill never fires on its own", () => {
+  it("a trigger case fires its Skill (positive), is not the first Skill called (negative), and a user-invoked Skill never fires on its own", () => {
+    /** A trace with these Skill calls, in order, as session-stream lines. */
+    const trace = (...skills: string[]) =>
+      [
+        '{"type":"system","subtype":"init","tools":[{"name":"Skill","description":"x"}]}',
+        ...skills.map(
+          (k, i) =>
+            `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t${String(i)}","name":"Skill","input":{"skill":"${k}"}}]}}`,
+        ),
+      ].join("\n");
     for (const s of SKILLS) {
       const list = triggers(s);
       const userInvoked = USER_INVOKED.includes(s);
@@ -338,14 +350,39 @@ describe("planSuite on the committed bundle", () => {
         const dir = `${s}--trigger-${kind}-${String(positive ? ++pos : ++neg).padStart(2, "0")}`;
         expect(file(dir, "prompt.md"), dir).toContain(String(t.query));
         const g = parseFrontmatter(graders(dir)[0]?.text ?? "").data;
-        expect(g.tool, dir).toBe("Skill");
-        if (positive && !userInvoked) expect(g.min).toBe(1);
-        else expect(g, dir).toMatchObject({ min: 0, max: 0, arm: "both" });
-        const re = new RegExp(str(g.input_match));
-        expect(re.test(`{"skill":"espn-fantasy-football:${s}"}`), dir).toBe(true);
-        expect(re.test(`{"skill":"${s}"}`), dir).toBe(true);
-        for (const o of SKILLS.filter((x) => x !== s && !x.endsWith(s)))
-          expect(re.test(`{"skill":"espn-fantasy-football:${o}"}`), `${dir} vs ${o}`).toBe(false);
+        if (positive || userInvoked) {
+          expect(g.tool, dir).toBe("Skill");
+          if (positive && !userInvoked) expect(g.min).toBe(1);
+          else expect(g, dir).toMatchObject({ min: 0, max: 0, arm: "both" });
+          const re = new RegExp(str(g.input_match));
+          expect(re.test(`{"skill":"espn-fantasy-football:${s}"}`), dir).toBe(true);
+          expect(re.test(`{"skill":"${s}"}`), dir).toBe(true);
+          for (const o of SKILLS.filter((x) => x !== s && !x.endsWith(s)))
+            expect(re.test(`{"skill":"espn-fantasy-football:${o}"}`), `${dir} vs ${o}`).toBe(false);
+          continue;
+        }
+        // a negative: a regex over the trace, failing only when this Skill is the first one called
+        expect(g, dir).toMatchObject({
+          type: "regex",
+          target: "trace",
+          pattern: firstSkillGuard(s),
+          match: "not_contains",
+          arm: "both",
+        });
+        const re = new RegExp(str(g.pattern));
+        const other = SKILLS.find((x) => x !== s && !x.endsWith(s) && !s.endsWith(x)) ?? "x";
+        expect(re.test(trace(`espn-fantasy-football:${s}`)), dir).toBe(true);
+        expect(re.test(trace(s)), dir).toBe(true);
+        expect(re.test(trace(`espn-fantasy-football:${s}`, `espn-fantasy-football:${other}`))).toBe(
+          true,
+        );
+        // fired first by another Skill, then handed over: that Skill's routing, not this trigger
+        expect(
+          re.test(trace(`espn-fantasy-football:${other}`, `espn-fantasy-football:${s}`)),
+          dir,
+        ).toBe(false);
+        expect(re.test(trace()), dir).toBe(false);
+        expect(re.test(trace(`espn-fantasy-football:${other}`)), dir).toBe(false);
       }
     }
   });
@@ -419,31 +456,34 @@ describe("apply is user-invoked (Stage C finding eval-apply-model-invocation-tri
   });
 });
 
-describe("credential-state variants a fixture-mode server cannot show (Stage C finding eval-credential-state-variants-missing)", () => {
+describe("credential-state variants (Stage C finding eval-credential-state-variants-missing; changelog §R9, R9-3)", () => {
   const plan = planSuite(ROOT);
   const byDir = new Map(plan.cases.map((c) => [c.dir, c]));
 
-  it("fixture mode reports not_configured only (tests/skills/eval-fixture-credential.test.ts holds it to the real composition root)", () => {
-    expect([...FIXTURE_CREDENTIAL_STATES]).toEqual(["not_configured"]);
+  it("fixture mode reports not_configured and the two scripted states (tests/skills/eval-fixture-credential.test.ts holds it to the real composition root)", () => {
+    expect([...FIXTURE_CREDENTIAL_STATES]).toEqual(["not_configured", "rejected", "stored"]);
   });
 
-  it("every case on auth-rejected or public-league is listed as not testable, with its reason, and never written", () => {
-    expect(plan.notTestable.map((n) => n.name).sort()).toEqual([
-      "ON-5-E",
-      "SC-1",
-      "SC-3",
-      "SC-6",
-      "WV-7-E",
-    ]);
-    for (const n of plan.notTestable) {
-      expect(byDir.has(n.dir), n.dir).toBe(false);
-      expect(["auth-rejected", "public-league"]).toContain(n.variant);
-      expect(n.reason).toMatch(/always reports "not_configured"/);
-      expect(n.reason).toContain(`fx-10h/${String(n.variant)} stands for credential.state`);
-    }
+  it("the cases on auth-rejected and public-league are written again; WV-7-E is held out by name, with its reason", () => {
+    for (const dir of [
+      "onboard--on-5-e",
+      "session-check--sc-1",
+      "session-check--sc-3",
+      "session-check--sc-6",
+    ])
+      expect(byDir.has(dir), dir).toBe(true);
+    expect(byDir.get("onboard--on-5-e")?.plugin).toBe("public-league--core");
+    expect(byDir.get("session-check--sc-1")?.plugin).toBe("auth-rejected--core");
+    expect(plan.notTestable.map((n) => n.name)).toEqual(["WV-7-E"]);
+    const [held] = plan.notTestable;
+    expect(byDir.has(String(held?.dir))).toBe(false);
+    expect(held?.reason).toBe(HELD_OUT_CASES["WV-7-E"]);
+    expect(held?.reason).toMatch(/rejected/);
+    expect(Object.keys(HELD_OUT_CASES)).toEqual(["WV-7-E"]);
     expect(
-      plan.plugins.some((p) => p.variant === "auth-rejected" || p.variant === "public-league"),
-    ).toBe(false);
+      plan.plugins.some((p) => p.variant === "auth-rejected") &&
+        plan.plugins.some((p) => p.variant === "public-league"),
+    ).toBe(true);
   });
 
   it("every written case runs on a variant whose credential state its server reports", () => {
@@ -466,10 +506,14 @@ describe("credential-state variants a fixture-mode server cannot show (Stage C f
   it("notTestableReason and variantHarness", () => {
     expect(notTestableReason({}, null)).toBeNull();
     expect(notTestableReason({ credential_state: "not_configured" }, "writes-on")).toBeNull();
-    expect(notTestableReason({ credential_state: "rejected" }, "auth-rejected")).toMatch(
-      /fx-10h\/auth-rejected stands for credential\.state "rejected"/,
+    expect(notTestableReason({ credential_state: "rejected" }, "auth-rejected")).toBeNull();
+    expect(notTestableReason({ credential_state: "validated" }, "x")).toMatch(
+      /fx-10h\/x stands for credential\.state "validated"/,
     );
-    expect(variantHarness(ROOT, "auth-rejected")).toEqual({ credential_state: "rejected" });
+    expect(variantHarness(ROOT, "auth-rejected")).toEqual({
+      credential_state: "rejected",
+      probe: { accepted: false, reason: null, probe: "board" },
+    });
     expect(variantHarness(ROOT, null)).toEqual({ credential_state: "not_configured" });
     expect(() => variantHarness(ROOT, "no-such-variant")).toThrow(/no manifest\.json/);
   });
@@ -631,6 +675,7 @@ describe("recorded-state preconditions (Stage C finding eval-recorded-state-prec
   it("every case whose expected output assumes recorded state has its seed, in an eval plugin of its own", () => {
     expect(SEEDS).toEqual({
       "NC-INJ-2": "log-week4",
+      "NC-7": "log-week4-plain",
       "RT-1": "log-week4-lineup",
       "RT-3": "log-week4-lineup",
       "RT-4-E": "log-six-lineup",
@@ -749,10 +794,23 @@ describe("an injection comparison names its base when the injected text is in th
       ?.files.filter((f) => f.rel.includes("matches-base"))
       .map((f) => f.text) ?? [];
 
-  it("on the committed bundle the prompt-borne injections have no base: the same-prompt rule cannot find one", () => {
+  it("on the committed bundle every injection comparison has its base (changelog §R9, R9-5), the prompt-borne ones through `base`", () => {
     const p = planSuite(ROOT);
-    for (const dir of ["stream-kdef--kd-inj", "session-check--sc-inj", "start-sit--ss-inj-2"])
-      expect(caseOf(p, dir)?.baseline, dir).toBeNull();
+    expect(p.cases.filter((c) => c.baseline === null).map((c) => c.dir)).toEqual([]);
+    expect(caseOf(p, "stream-kdef--kd-inj")?.baseline).toBe("stream-kdef--kd-1");
+    expect(caseOf(p, "session-check--sc-inj")?.baseline).toBe("session-check--sc-8");
+    expect(caseOf(p, "start-sit--ss-inj-2")?.baseline).toBe("start-sit--ss-7");
+    expect(caseOf(p, "apply--ap-inj")?.baseline).toBe("apply--ap-7");
+    expect(caseOf(p, "news-check--nc-inj")?.baseline).toBe("news-check--nc-6");
+    expect(caseOf(p, "news-check--nc-inj-2")?.baseline).toBe("news-check--nc-7");
+    // every case judged beside a base names one the suite writes, on the same toolset
+    const dirs = new Set(p.cases.map((c) => c.dir));
+    for (const c of p.cases)
+      if (typeof c.baseline === "string") expect(dirs.has(c.baseline), c.dir).toBe(true);
+    // NC-7's seed is NC-INJ-2's minus the order
+    expect(SEED_NOTE_PLAIN).not.toMatch(/drop|immediately/i);
+    expect(SEED_NOTE).toContain(SEED_NOTE_PLAIN.split(":")[0] ?? "");
+    expect(caseOf(p, "news-check--nc-7")?.plugin).toBe("base--full--log-week4-plain");
   });
 
   it("KD-INJ with base KD-1: judged beside KD-1's passing run, KD-1 tagged for the first run, the judge told KD-1's question", () => {
@@ -1123,17 +1181,12 @@ describe("buildPluginEvals on a copy", () => {
         "base--core--log-six-lineup",
         "base--core--log-week4-lineup",
         "base--full--log-week4",
+        "base--full--log-week4-plain",
         "drift-mRoster--core--drift-red",
         "inj-teamname-json--core--log-week4-lineup-note",
       ].sort(),
     );
-    expect(r.notTestable.map((n) => n.name).sort()).toEqual([
-      "ON-5-E",
-      "SC-1",
-      "SC-3",
-      "SC-6",
-      "WV-7-E",
-    ]);
+    expect(r.notTestable.map((n) => n.name).sort()).toEqual(["WV-7-E"]);
     for (const key of r.plugins) {
       const dir = path.join(out, "plugins", key);
       const plugin = JSON.parse(

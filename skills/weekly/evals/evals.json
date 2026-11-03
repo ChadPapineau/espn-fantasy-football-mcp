@@ -35,13 +35,13 @@
       "id": 3,
       "name": "WK-3",
       "toolset": "core",
-      "prompt": "what happened in my league this week",
-      "expected_output": "A league activity digest — rivals' adds, drops, successful and losing claims, trades and waiver-order movement — without a lineup analysis.",
+      "prompt": "what happened in my league in week 2",
+      "expected_output": "A league activity digest for week 2 — rivals' adds and drops, the successful claims, Team 02's one losing claim (WAIVER_ERROR) and the claim that beat it, and waiver-order movement — without a lineup analysis. (This fixture's transactions are all in weeks 2–3, and week 2 holds its one losing claim; the current week has none yet.)",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_list_transactions (tool_used)",
         "espn_analyze_lineup was not called (tool_used: min 0 max 0)",
-        "The reply lists rivals' claims including losing claims (llm)"
+        "The reply lists week 2's claims, the losing claim included (llm)"
       ]
     },
     {

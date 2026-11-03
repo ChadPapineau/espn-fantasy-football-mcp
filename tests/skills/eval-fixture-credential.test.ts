@@ -1,14 +1,14 @@
 // eval-fixture-credential.test.ts — holds scripts/skills/build-plugin-evals.mjs FIXTURE_CREDENTIAL_STATES
-// to the real composition root (Stage C finding eval-credential-state-variants-missing): an eval
-// server is `dist/cli.js serve` in fixture mode, and fixture mode builds no CredentialAuthority
-// (src/services/index.ts), so `credential.state` is `not_configured` on every fx-10h variant,
-// whatever the variant's `harness.credential_state` says — and with a `rejected` or `stored`
-// credential row in its store it does not start at all (fixture mode's guard, plan 05 §3.1 step 5;
-// Stage C finding config-fixture-mode-guard-bypassed), so it can report no other state. The builder
-// writes a case only when its variant's harness state is one of FIXTURE_CREDENTIAL_STATES; the day
-// fixture mode reproduces another state, the first test here fails until that state is added (and
-// its cases come back by themselves). Nothing here touches the network, a keychain, ~/.config or
-// ~/.cache.
+// to the real composition root (Stage C finding eval-credential-state-variants-missing; changelog
+// §R9, R9-3): an eval server is `dist/cli.js serve` in fixture mode, which holds no credential and
+// reports `not_configured` — or, on a variant whose manifest scripts `harness.credential_state` and
+// its probe (auth-rejected, public-league), that label and the scripted probe result
+// (src/services/fixture-credential.ts). With a `rejected` or `stored` credential row in its store it
+// does not start at all (fixture mode's guard, plan 05 §3.1 step 5; Stage C finding
+// config-fixture-mode-guard-bypassed). The builder writes a case only when its variant's harness
+// state is one of FIXTURE_CREDENTIAL_STATES: the states seen here must be exactly that list, and
+// every variant's scripted probe must be what its server answers. Nothing here touches the
+// network, a keychain, ~/.config or ~/.cache.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -128,17 +128,23 @@ describe("FIXTURE_CREDENTIAL_STATES is what a fixture-mode server reports", () =
         const s = await serverOn(v);
         expect(s.fixtureMode, String(v)).toBe(true);
         seen.add(s.state);
-        // the one probe answers "cannot tell" — never a validity claim — whatever the variant
-        expect(s.probe, String(v)).toMatchObject({ accepted: null, reason: "not_configured" });
+        const harness = variantHarness(ROOT, v);
+        expect(s.state, String(v)).toBe(harness.credential_state ?? "not_configured");
+        // the one probe: the variant's scripted result, or "cannot tell" when nothing is scripted —
+        // never a request (upstream_status null) and never a validity claim of its own
+        expect(s.probe, String(v)).toMatchObject(
+          harness.probe ?? { accepted: null, reason: "not_configured" },
+        );
+        expect(s.probe.upstream_status, String(v)).toBeNull();
       }
     }
     store.repos.credentialState.clear();
     expect([...seen].sort()).toEqual([...FIXTURE_CREDENTIAL_STATES].sort());
   });
 
-  it("so exactly the variants whose harness state is another one are not testable", () => {
+  it("so no variant is left untestable by its credential state any more", () => {
     const blocked = variants.filter((v) => notTestableReason(variantHarness(ROOT, v), v) !== null);
-    expect(blocked.sort()).toEqual(["auth-rejected", "public-league"]);
+    expect(blocked).toEqual([]);
     for (const v of variants) {
       const want = variantHarness(ROOT, v).credential_state;
       expect(

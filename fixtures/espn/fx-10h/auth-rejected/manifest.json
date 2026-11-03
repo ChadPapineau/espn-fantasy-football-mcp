@@ -12,10 +12,10 @@
   "final_weeks": [1, 2, 3, 4],
   "my_team_id": 2,
   "env": { "ESPN_LEAGUE_ID": "0", "ESPN_TEAM_ID": "2", "EFF_TOOLSET": "core" },
-  "harness": { "credential_state": "rejected" },
+  "harness": { "credential_state": "rejected", "probe": { "accepted": false, "reason": null, "probe": "board" } },
   "notes": ["server state only: credential rejected; bodies unchanged"],
   "variant": "auth-rejected",
-  "describes": "credential.state rejected (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base; fixture mode holds no credential, so the state is a harness hint",
+  "describes": "credential.state rejected (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result",
   "views": [
     { "route": "league", "season": 2026, "views": ["mSettings"], "scoringPeriodId": null, "path": "fx-10h/league/mSettings.json", "derived": true },
     { "route": "league", "season": 2026, "views": ["mNav"], "scoringPeriodId": null, "path": "fx-10h/league/mNav.json", "derived": true },
