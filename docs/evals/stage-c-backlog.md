@@ -590,19 +590,29 @@ is scored outside a step, and the slice constant is held to the same ceiling. Un
 three windows, and the server's own longest run on the CPU peaked at 37 ms over the 30 runs. While
 R8-2 stands, the test cannot pass 30 consecutive runs under that load, because the ruling fails a
 host that sets every window. The owner decides whether to keep that outcome or to judge such windows
-by the server's own CPU (`cpu_max_ms`).
+by the server's own CPU (`cpu_max_ms`). On the macOS runner (`ci` dispatched on `8665842`),
+`stall-parallel` passed with one window per measurement (worst 25.8 ms; the server's own longest run
+21.6 ms). That job failed instead on the news matcher's R8-8 cost-ratio check
+(`tests/sources/news/match.perf.test.ts`: "Henderson" took 7.16 ms, against 6 times a benign item's
+1.12 ms; at most 3.6 times when measured locally on 2026-10-29). The check compares wall-clock
+medians, and it times the benign item once, before the adversarial ones, on a runner whose idle
+control stalled 44 ms in the same job.
 
-**Open: the server's own slices in `full`'s P1 analytics.** `latency.test.ts`'s window over the P1
-analytics failed on Linux CI at 104.9 and 62.1 ms (`4e3a2c3`, both attempts) and at 63.8 and
-143.4 ms (`c9849e4`, 2026-10-29). Its other runs read 22–43 ms. The helper did not excuse those
-windows, and CI printed no evidence for them. Locally the window's stall is the server's own CPU
-(31–40 ms of 31–40 ms). A probe that measured each tool alone found the slices. A cold
-`espn_analyze_evidence` runs its dataset reads, its claim extraction and its assembly in one turn of
-76 ms of CPU, over the bound on the owner's Mac (24–31 ms warm). One `espn_analyze_trade` step, a
-package's lineup weeks, takes 30–45 ms. The output validation, the roster view's parse and the cache
-strip take 20–30 ms each. A slower CI runner can stretch these past 50 ms. The latency suite now
-prints each window's evidence with its verdict (`tests/e2e/helpers.ts` `stallEvidence`). The fix is
-to split these slices, as v2's scoring was split. It is not built yet.
+**Open: the stall in `full`'s P1 analytics window.** `latency.test.ts`'s window over the P1
+analytics failed on Linux CI at 104.9 and 62.1 ms (`4e3a2c3`, its first two attempts) and at 63.8
+and 143.4 ms (`c9849e4`, 2026-10-29). Its other runs read 22–43 ms. The helper did not excuse those
+windows, and CI printed no evidence for them. The suite now prints each window's evidence with its
+verdict (`tests/e2e/helpers.ts` `stallEvidence`). Two green Linux runs of `8665842` show where to
+look. The window's longest gap held 9.4 and 10.3 ms of the server's own CPU (stalls of 21.8 and
+38.6 ms), the server's longest run on the CPU was 16.2 and 29 ms, and the involuntary switch count
+read 0 in every window. On Linux the host's evidence is therefore the control alone. The outliers
+are either a host stall that this evidence cannot see there, or a synchronous wait in the server.
+The next red run's line will tell which. On the owner's Mac the window's stall is the server's own
+CPU (31–40 ms of 31–40 ms). There a probe that measured each tool alone found one slice over the
+bound: a cold `espn_analyze_evidence` runs its dataset reads, its claim extraction and its assembly
+in one turn of 76 ms of CPU (24–31 ms warm). One `espn_analyze_trade` step, a package's lineup
+weeks, takes 30–45 ms, and the output validation, the roster view's parse and the cache strip take
+20–30 ms each. Splitting those slices, as v2's scoring was split, is not built yet.
 
 ## Closed by R8-4 — F8, division winners first
 
