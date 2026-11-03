@@ -652,8 +652,19 @@ function currentUserName(): string | null {
   return ownerName;
 }
 
-/** Runs a system tool (argument array, never a shell, bounded, a C locale); stdout, or null. */
-function runTool(bin: string, args: readonly string[]): string | null {
+/**
+ * How one run of a system tool ended: `ok` (exit 0, its stdout); `failed` — it ran to completion
+ * and failed (a non-zero exit, no stdout) or wrote more than the bound (ENOBUFS: it would again);
+ * `incomplete` — it never ran to completion: it could not be started (a spawn error), the 2 s bound
+ * ended it (ETIMEDOUT), or a signal did.
+ */
+type ToolRun =
+  | { readonly kind: "ok"; readonly stdout: string }
+  | { readonly kind: "failed" }
+  | { readonly kind: "incomplete" };
+
+/** Runs a system tool once (argument array, never a shell, bounded, a C locale). */
+function runToolOnce(bin: string, args: readonly string[]): ToolRun {
   const r = spawnSync(bin, [...args], {
     encoding: "utf8",
     shell: false,
@@ -662,8 +673,36 @@ function runTool(bin: string, args: readonly string[]): string | null {
     stdio: ["ignore", "pipe", "ignore"],
     env: { LC_ALL: "C" },
   });
-  if (r.error !== undefined || r.status !== 0 || typeof r.stdout !== "string") return null;
-  return r.stdout;
+  if (r.error !== undefined)
+    return (r.error as NodeJS.ErrnoException).code === "ENOBUFS"
+      ? { kind: "failed" }
+      : { kind: "incomplete" };
+  if (r.status === null) return { kind: "incomplete" };
+  if (r.status !== 0 || typeof r.stdout !== "string") return { kind: "failed" };
+  return { kind: "ok", stdout: r.stdout };
+}
+
+/** Runs a system tool once; stdout, or null. */
+function runTool(bin: string, args: readonly string[]): string | null {
+  const r = runToolOnce(bin, args);
+  return r.kind === "ok" ? r.stdout : null;
+}
+
+/**
+ * `ls -ledq -- <p>`'s stdout, or null. A run that did not complete (`incomplete`) is run ONCE more:
+ * the live install's launchd job, started as the Mac woke, once refused its store with
+ * `acl_unverifiable` on the cache directory while the runs around it read the same directory
+ * (finding acl-read-transient-unverifiable) — at wake, `ls -le` resolving the entries' and the
+ * owner's names through the directory service can outlast the 2 s bound, and a spawn can fail for
+ * want of a process slot. Nothing it refuses changes: a run that completed and failed, output that
+ * does not parse, and every entry a parsed listing shows are judged on the first answer, and a
+ * second incomplete run is still null (fail closed). At most 4 s of waiting, only on that path.
+ */
+function listAcl(p: string): string | null {
+  const args = ["-ledq", "--", p] as const;
+  let run = runToolOnce(LS_BIN, args);
+  if (run.kind === "incomplete") run = runToolOnce(LS_BIN, args);
+  return run.kind === "ok" ? run.stdout : null;
 }
 
 /** The most verdicts one system access keeps (one per inode state; the oldest goes first). */
@@ -671,11 +710,12 @@ export const ACL_CACHE_MAX = 256;
 
 /**
  * A system ACL access with its own verdict cache. On macOS a read is one `ls -ledq -- <path>`
- * (bounded: 2 s, 256 KiB), kept per inode state — device, inode and change time, which every ACL
- * edit moves (`chmod +a`, `-N`) — so an unchanged directory is read once, not on every check; a
- * strip is `chmod -h -N` on the absolute path (`-h`: never through a symlink; chmod takes no `--`,
- * and an absolute path cannot read as an option). Elsewhere there is nothing to read (see the
- * section comment). The platform is read per call.
+ * (bounded: 2 s, 256 KiB; run once more only when it did not complete — `listAcl`), kept per
+ * inode state — device, inode and change time, which every ACL edit moves (`chmod +a`, `-N`) — so
+ * an unchanged directory is read once, not on every check; a strip is `chmod -h -N` on the absolute
+ * path (`-h`: never through a symlink; chmod takes no `--`, and an absolute path cannot read as an
+ * option), run once. Elsewhere there is nothing to read (see the section comment). The platform is
+ * read per call.
  */
 export function createSystemAcl(): AclAccess {
   const cache = new Map<string, readonly AclEntry[]>();
@@ -691,7 +731,7 @@ export function createSystemAcl(): AclAccess {
       const key = `${String(before.dev)}:${String(before.ino)}:${String(before.ctimeNs)}`;
       const known = cache.get(key);
       if (known !== undefined) return known;
-      const stdout = runTool(LS_BIN, ["-ledq", "--", p]);
+      const stdout = listAcl(p);
       const parsed = stdout === null ? null : parseLsAcl(stdout);
       if (parsed === null) return null;
       let after: BigIntStats;

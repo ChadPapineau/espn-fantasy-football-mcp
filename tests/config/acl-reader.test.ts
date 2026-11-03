@@ -147,6 +147,101 @@ describe("createSystemAcl().read on darwin", () => {
   });
 });
 
+// finding acl-read-transient-unverifiable: a launchd job started as the Mac woke refused its store
+// once with acl_unverifiable on the cache directory, the runs around it fine. A listing that never
+// ran to completion is run once more; nothing a completed answer says is ever retried away.
+describe("createSystemAcl().read: one more run only when `ls` did not run to completion", () => {
+  const errno = (code: string) => Object.assign(new Error(code), { code });
+  const timedOut = { error: errno("ETIMEDOUT"), status: null, signal: "SIGTERM", stdout: "" };
+  const spawnFailed = { error: errno("EAGAIN"), status: null, signal: null, stdout: undefined };
+  const killed = { status: null, signal: "SIGKILL", stdout: "" };
+
+  it.each([
+    ["the 2 s bound ended it (ETIMEDOUT)", timedOut],
+    ["it could not be started (EAGAIN)", spawnFailed],
+    ["a signal ended it", killed],
+  ])("%s: run again, and the second answer is judged as any answer", (_n, first) => {
+    spawnSync.mockReturnValueOnce(first).mockReturnValueOnce({ status: 0, stdout: WITH_ENTRY });
+    const acl = createSystemAcl();
+    const entries = acl.read(tmp.dir);
+    expect(entries).toEqual([
+      { principal: "group:staff", inherited: true, kind: "allow", perms: ["list", "search"] },
+    ]);
+    expect(spawnSync).toHaveBeenCalledTimes(2);
+    for (const [bin, args, opts] of spawnSync.mock.calls as [
+      string,
+      string[],
+      Record<string, unknown>,
+    ][]) {
+      expect([bin, args]).toEqual([LS_BIN, ["-ledq", "--", tmp.dir]]);
+      expect(opts).toMatchObject({ shell: false, timeout: 2000, env: { LC_ALL: "C" } });
+    }
+    // the second answer's verdict is cached like any (the inode state is unchanged)
+    expect(acl.read(tmp.dir)).toBe(entries);
+    expect(spawnSync).toHaveBeenCalledTimes(2);
+  });
+
+  it("a foreign entry shown by the second run is still refused (insecure_acl), never excused", async () => {
+    const { foreignAclEntries } = await import("../../src/config/paths.js");
+    spawnSync.mockReturnValueOnce(timedOut).mockReturnValueOnce({ status: 0, stdout: WITH_ENTRY });
+    expect(foreignAclEntries(tmp.dir, "cache directory", createSystemAcl())).toHaveLength(1);
+  });
+
+  it("two incomplete runs: null (acl_unverifiable), and never a third", async () => {
+    const { foreignAclEntries } = await import("../../src/config/paths.js");
+    spawnSync.mockReturnValue(timedOut);
+    expect(createSystemAcl().read(tmp.dir)).toBeNull();
+    expect(spawnSync).toHaveBeenCalledTimes(2);
+    spawnSync.mockReset();
+    spawnSync.mockReturnValueOnce(timedOut).mockReturnValueOnce(spawnFailed);
+    expect(() => foreignAclEntries(tmp.dir, "cache directory", createSystemAcl())).toThrow(
+      expect.objectContaining({ reason: "acl_unverifiable" }) as Error,
+    );
+    expect(spawnSync).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["a non-zero exit", { status: 1, stdout: LISTING }],
+    ["no stdout", { status: 0, stdout: null }],
+    ["output it cannot parse", { status: 0, stdout: `${LISTING}not an entry\n` }],
+    ["more output than the bound (ENOBUFS)", { error: errno("ENOBUFS"), status: null, stdout: "" }],
+  ])("%s: null at once, never run again", (_n, result) => {
+    spawnSync.mockReturnValueOnce(result).mockReturnValue({ status: 0, stdout: LISTING });
+    expect(createSystemAcl().read(tmp.dir)).toBeNull();
+    expect(spawnSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("a parsed foreign entry is answered at once (one run): the refusal comes from the first answer", () => {
+    spawnSync.mockReturnValueOnce({ status: 0, stdout: WITH_ENTRY }).mockReturnValue({
+      status: 0,
+      stdout: LISTING,
+    });
+    expect(createSystemAcl().read(tmp.dir)).toHaveLength(1);
+    expect(spawnSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("the second run must still list the inode the first lstat saw (a rename between is refused)", () => {
+    const f = path.join(tmp.dir, "f");
+    const g = path.join(tmp.dir, "g");
+    writeFileSync(f, "1", { mode: 0o600 });
+    writeFileSync(g, "2", { mode: 0o600 });
+    spawnSync
+      .mockImplementationOnce(() => {
+        renameSync(g, f);
+        return timedOut;
+      })
+      .mockImplementationOnce(() => ({ status: 0, stdout: LISTING }));
+    expect(createSystemAcl().read(f)).toBeNull();
+    expect(spawnSync).toHaveBeenCalledTimes(2);
+  });
+
+  it("chmod -N (strip) is still run once: a failed or incomplete strip is false", () => {
+    spawnSync.mockReturnValueOnce(timedOut).mockReturnValue({ status: 0, stdout: "" });
+    expect(createSystemAcl().strip(tmp.dir)).toBe(false);
+    expect(spawnSync).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("createSystemAcl().strip on darwin", () => {
   it("spawns /bin/chmod -h -N <absolute path> (no symlink followed; a relative path is resolved)", () => {
     spawnSync.mockReturnValue({ status: 0, stdout: "" });
