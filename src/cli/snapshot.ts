@@ -46,7 +46,7 @@ import {
   WAKE_GRACE_MS,
   type JobRun,
 } from "./espn-jobs.js";
-import { PacedRun, paceWaitText, RunInterrupted, windowFreeInMs } from "./espn-pacing.js";
+import { PacedRun, paceWaitText, RunInterrupted } from "./espn-pacing.js";
 import { effCodeOf } from "./espn-stack.js";
 import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
@@ -726,8 +726,10 @@ const wentUpstream = (r: { readonly stamp: { readonly cache: string } }): boolea
  *
  * The run is more reads than one limiter window holds (plan 01 §6: 30/min; the default is one
  * settings read plus one per scoring period of each season, ~37): every read goes through a
- * PacedRun (src/cli/espn-pacing.ts) — 24 a minute, a full window or ESPN's Retry-After waited out
- * with one stderr line and the same read retried, bounded, Ctrl-C honoured at once during a wait.
+ * PacedRun (src/cli/espn-pacing.ts) — 22 a minute and at most 24 requests in any minute, retries
+ * included; a full window, a used share or ESPN's Retry-After waited out with one stderr line,
+ * bounded; Ctrl-C honoured at once, and no request sent after it (each read gets the run's signal
+ * through its own upstream budget).
  * Before, the 31st read was refused RATE_LIMITED and the run died part-way (found at the owner's
  * install, 2026-11-02). A spent daily cap, repeated concurrency refusals and every other failure end
  * the run as before (jobFailure: the same code and exit). A run stopped by the wait bounds or an
@@ -767,13 +769,11 @@ export async function transactionsBackfill(
     signal: opts.signal ?? null,
     plannedReads: planOf(asked?.length ?? BACKFILL_DEFAULT_SEASONS, asked === null),
     onWait: (w) => writeLine(io.stderr, paceWaitText(job, w)),
-    // the shared bucket's newest rows, read-only: a window another process filled is waited for
-    // before the read, not inside its ≤ 20 s deadline (espn-pacing.ts; verifier finding F2)
-    windowFreeInMs: () =>
-      windowFreeInMs(
-        run.store.repos.limiter.recentOutcomes(ESPN_LIMITER.perMinute),
-        io.clock.nowMs(),
-      ),
+    // the shared bucket's newest rows, read-only: a window another process filled, or one without
+    // room for the read inside the run's share (its retries counted), is waited for before the
+    // read, not inside its ≤ 20 s deadline (espn-pacing.ts; verifier findings F2 on 4141144 and
+    // on fbbd705)
+    bucketRows: () => run.store.repos.limiter.recentOutcomes(ESPN_LIMITER.perMinute),
   });
   let stored = 0;
   try {
@@ -781,7 +781,7 @@ export async function transactionsBackfill(
     const seasons =
       asked ??
       [
-        ...(await paced.read(() => run.stack.provider.getLeague(ref), wentUpstream)).value
+        ...(await paced.read((o) => run.stack.provider.getLeague(ref, o), wentUpstream)).value
           .previous_seasons,
       ]
         .filter((y) => y < config.season)
@@ -799,7 +799,7 @@ export async function transactionsBackfill(
       let first: number;
       let last: number;
       try {
-        const clock = (await paced.read(() => run.stack.provider.getLeague(sref), wentUpstream))
+        const clock = (await paced.read((o) => run.stack.provider.getLeague(sref, o), wentUpstream))
           .value.clock;
         first = Math.max(1, clock.first_scoring_period);
         last = Math.max(first, clock.final_scoring_period);
@@ -819,15 +819,20 @@ export async function transactionsBackfill(
       let read = 0;
       let added = 0;
       for (let week = first; week <= last; week++) {
+        // each read under its own budget, which the run's signal aborts (espn-pacing.ts)
         const page = await paced.read(
-          () =>
-            run.stack.provider.listTransactions(sref, {
-              types: TRANSACTION_TYPES,
-              week,
-              since: null,
-              count: BACKFILL_WEEK_COUNT,
-              team_id: null,
-            }),
+          (o) =>
+            run.stack.provider.listTransactions(
+              sref,
+              {
+                types: TRANSACTION_TYPES,
+                week,
+                since: null,
+                count: BACKFILL_WEEK_COUNT,
+                team_id: null,
+              },
+              o,
+            ),
           wentUpstream,
         );
         read += page.value.items.length;

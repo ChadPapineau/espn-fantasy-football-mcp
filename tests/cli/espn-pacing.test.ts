@@ -12,30 +12,48 @@
 // STALE_ONLY (a week cached more than a day before) is the refusal, waited on and rethrown as itself
 // (F1); a window another process filled is seen before the read (windowFreeInMs, the store's count)
 // and waited for there, so the limiter never admits a send in the last moments of the read's
-// deadline (F2); a read refused after the signal announces no wait (F3). No request is made.
+// deadline (F2); a read refused after the signal announces no wait (F3). The verifier's findings on
+// fbbd705: the share counts requests — a read starts only while the bucket's last minute leaves
+// room for its every attempt (shareFreeInMs), so over the real limiter reads of two or three
+// attempts, or a minute of one-attempt reads and then three each, keep the run's own rows within
+// RUN_SHARE_PER_MINUTE in any minute; reads of one attempt never wait for it, moments of it are
+// silent pacing, a longer wait is announced and bounded (F2); and the run's signal reaches each read
+// through a budget of its own, so a read waiting in the limiter is refused before its slot and what
+// an aborted read throws is the run's interrupt, while ESPN's own answers fail as themselves (F1).
+// No request is made.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   MAX_CONCURRENCY_RETRIES,
   MAX_CONSECUTIVE_REFUSALS,
   PacedRun,
+  READ_MAX_ROWS,
   RUN_PACE_MS,
   RUN_SHARE_PER_MINUTE,
+  RUN_START_MAX_ROWS,
   RunInterrupted,
   WINDOW_WAIT_MARGIN_MS,
+  endedByAbort,
   limiterRefusal,
   paceWaitText,
   refusalBehind,
+  shareFreeInMs,
   waitBudgetMs,
   windowFreeInMs,
   type PaceWait,
 } from "../../src/cli/espn-pacing.js";
 import { FUTURE_STAMP_TOLERANCE_MS } from "../../src/config/freshness.js";
-import { ESPN_LIMITER } from "../../src/config/schema.js";
+import { ESPN_BACKOFF, ESPN_LIMITER } from "../../src/config/schema.js";
 import { fixedClock } from "../../src/domain/clock.js";
 import { EspnUpstreamError } from "../../src/providers/espn/errors.js";
 import { EspnLimiter, EspnRateLimitedError, type Sleep } from "../../src/providers/espn/limiter.js";
 import { EspnStaleOnlyError } from "../../src/providers/espn/request.js";
+import {
+  MAX_UPSTREAM_PER_CALL,
+  PER_CALL_DEADLINE_MS,
+  UpstreamBudgetExhausted,
+  type ReadOptions,
+} from "../../src/providers/platform.js";
 import { limiterDecision } from "../../src/store/types.js";
 import { MemoryLimiterRepo } from "../providers/espn/helpers.js";
 
@@ -66,6 +84,10 @@ const refusal = (ms: number, reason: ConstructorParameters<typeof EspnRateLimite
 /** What the provider's stale fallback throws past the hard limit: `cause` kept (request.ts). */
 const staleOnly = (cause?: unknown) =>
   new EspnStaleOnlyError("mTransactions2", cause === undefined ? undefined : { cause });
+
+/** `n` rows of the shared bucket at `atMs` (another process's burst), newest first. */
+const rowsAt = (atMs: number, n: number = ESPN_LIMITER.perMinute): { at: string }[] =>
+  Array.from({ length: n }, () => ({ at: new Date(atMs).toISOString() }));
 
 /** A read that throws each of `errors` in turn, then answers `value` (its starts recorded). */
 function scripted<T>(
@@ -191,6 +213,46 @@ describe("windowFreeInMs: the shared window's next free slot, counted as the sto
   });
 });
 
+describe("shareFreeInMs: room for a read inside the run's share, counted as the store counts it", () => {
+  const NOW = T0;
+
+  it("21 rows in the minute: room now; 22: until the 22nd newest leaves it; a full window: never sooner than it frees", () => {
+    expect(shareFreeInMs([], NOW)).toBe(0);
+    expect(shareFreeInMs(rowsAt(NOW - 5_000, RUN_START_MAX_ROWS), NOW)).toBe(0);
+    expect(shareFreeInMs(rowsAt(NOW - 5_000, RUN_START_MAX_ROWS + 1), NOW)).toBe(55_000);
+    // newest first: the 22 newest decide; the window's own count is the 30 newest's
+    const rows = [
+      ...rowsAt(NOW - 1_000, RUN_START_MAX_ROWS),
+      ...rowsAt(NOW - 20_000, 1),
+      ...rowsAt(NOW - 50_000, 8),
+    ];
+    expect(windowFreeInMs(rows, NOW)).toBe(10_000);
+    expect(shareFreeInMs(rows, NOW)).toBe(40_000);
+    expect(windowFreeInMs(rows, NOW, RUN_START_MAX_ROWS + 1)).toBe(40_000);
+  });
+
+  it("property: free at its answer + 1 ms by the store's own decision at 22, full a moment before; never before the window", () => {
+    fc.assert(
+      fc.property(fc.array(fc.integer({ min: -120_000, max: 0 }), { maxLength: 45 }), (offsets) => {
+        const all = offsets.map((o) => NOW + o);
+        const newestFirst = [...all]
+          .sort((a, b) => b - a)
+          .map((at) => ({ at: new Date(at).toISOString() }));
+        const room = (at: number) =>
+          all.filter((t) => t >= at - 60_000 && t <= at).length <= RUN_START_MAX_ROWS;
+        const free = shareFreeInMs(newestFirst, NOW);
+        expect(free).toBeGreaterThanOrEqual(windowFreeInMs(newestFirst, NOW));
+        expect(free).toBeLessThanOrEqual(60_001);
+        if (free === 0) expect(room(NOW)).toBe(true);
+        else {
+          expect(room(NOW + free - 1)).toBe(false);
+          expect(room(NOW + free + 1)).toBe(true);
+        }
+      }),
+    );
+  });
+});
+
 describe("waitBudgetMs: the planned reads at 30/min in whole windows, plus one spare window", () => {
   it("the backfill's sizes", () => {
     expect(waitBudgetMs(37)).toBe(180_000);
@@ -215,9 +277,15 @@ describe("waitBudgetMs: the planned reads at 30/min in whole windows, plus one s
 });
 
 describe("pacing", () => {
-  it("leaves six slots a minute to the other processes", () => {
-    expect(RUN_SHARE_PER_MINUTE).toBeLessThan(ESPN_LIMITER.perMinute);
-    expect(RUN_PACE_MS).toBe(2500);
+  it("leaves six slots a minute to the other processes, retries counted", () => {
+    expect(RUN_SHARE_PER_MINUTE).toBe(ESPN_LIMITER.perMinute - 6);
+    // a read can add its every attempt to the bucket: it starts with room for them in the share
+    expect(READ_MAX_ROWS).toBe(ESPN_BACKOFF.maxAttempts);
+    expect(RUN_START_MAX_ROWS).toBe(RUN_SHARE_PER_MINUTE - READ_MAX_ROWS);
+    expect(RUN_START_MAX_ROWS).toBe(21);
+    // 22 reads a minute: reads of one attempt each find room at every start
+    expect(RUN_PACE_MS).toBe(2728);
+    expect(RUN_PACE_MS * (RUN_START_MAX_ROWS + 1)).toBeGreaterThan(60_000);
     expect(RUN_PACE_MS).toBeGreaterThan(1000 / ESPN_LIMITER.perSecond);
   });
 
@@ -436,14 +504,14 @@ describe("F1: a refusal the provider turned into STALE_ONLY (a week cached more 
 });
 
 describe("F2: a window another process filled is waited for before the read, not inside it", () => {
-  /** A look that answers each of `answers` in turn (then 0: free), its calls counted. */
-  function look(answers: (number | Error)[]) {
+  /** A look that answers each of `answers` in turn (then no row: free), its calls counted. */
+  function look(answers: (readonly { at: string }[] | Error)[]) {
     let calls = 0;
-    const fn = (): number => {
+    const fn = (): readonly { at: string }[] => {
       calls++;
       const a = answers.shift();
       if (a instanceof Error) throw a;
-      return a ?? 0;
+      return a ?? [];
     };
     return { fn, calls: () => calls };
   }
@@ -451,12 +519,13 @@ describe("F2: a window another process filled is waited for before the read, not
   it("seen full: its time to free in whole seconds plus the margin, one event, then one read", async () => {
     const t = fakeTime();
     const waits: PaceWait[] = [];
-    const l = look([19_701]);
+    // 30 rows of another process 40.299 s old: the window frees in 19.701 s
+    const l = look([rowsAt(T0 - 40_299)]);
     const run = new PacedRun({
       clock: t.clock,
       sleep: t.sleep,
       plannedReads: 37,
-      windowFreeInMs: l.fn,
+      bucketRows: l.fn,
       onWait: (w) => {
         waits.push(w);
       },
@@ -474,14 +543,20 @@ describe("F2: a window another process filled is waited for before the read, not
     expect(l.calls()).toBe(2);
   });
 
-  it("free, unreadable or nonsense: no wait (the limiter decides as always)", async () => {
-    for (const a of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, new Error("store busy")]) {
+  it("free, room in the share, rows past the minute, unreadable or failing: no wait (the limiter decides as always)", async () => {
+    for (const a of [
+      [],
+      rowsAt(T0 - 5_000, RUN_START_MAX_ROWS),
+      rowsAt(T0 - 60_001),
+      Array.from({ length: ESPN_LIMITER.perMinute }, () => ({ at: "not an instant" })),
+      new Error("store busy"),
+    ]) {
       const t = fakeTime();
       const run = new PacedRun({
         clock: t.clock,
         sleep: t.sleep,
         plannedReads: 37,
-        windowFreeInMs: look([a]).fn,
+        bucketRows: look([a]).fn,
       });
       expect(await run.read(() => Promise.resolve(1))).toBe(1);
       expect(t.sleeps).toEqual([]);
@@ -496,8 +571,9 @@ describe("F2: a window another process filled is waited for before the read, not
       clock: t.clock,
       sleep: t.sleep,
       plannedReads: 37,
-      // free at the first look; full at the second (after the refusal's wait)
-      windowFreeInMs: look([0, 4_000]).fn,
+      // free at the first look; full at the second (after the read's 300 ms and the refusal's
+      // 30.5 s wait), freeing 4 s later
+      bucketRows: look([[], rowsAt(T0 + 30_800 - 56_000)]).fn,
       onWait: (w) => {
         waits.push(w);
       },
@@ -517,7 +593,8 @@ describe("F2: a window another process filled is waited for before the read, not
       clock: t.clock,
       sleep: t.sleep,
       plannedReads: 1_000,
-      windowFreeInMs: () => 10_000,
+      // another process keeps the window full: it frees 10 s after every look
+      bucketRows: () => rowsAt(t.clock.nowMs() - 50_000),
     });
     // never refused: the read runs once the waits are spent, and its answer stands
     const ok = scripted(t.clock, [], "page");
@@ -539,7 +616,7 @@ describe("F2: a window another process filled is waited for before the read, not
       clock: t.clock,
       sleep: t.sleep,
       plannedReads: 1,
-      windowFreeInMs: () => 59_000,
+      bucketRows: () => rowsAt(t.clock.nowMs() - 1_000),
     });
     expect(run.budgetMs).toBe(120_000);
     expect(await run.read(() => Promise.resolve(1))).toBe(1);
@@ -559,7 +636,7 @@ describe("F2: a window another process filled is waited for before the read, not
       sleep: t.sleep,
       signal: ac.signal,
       plannedReads: 37,
-      windowFreeInMs: () => 30_000,
+      bucketRows: () => rowsAt(t.clock.nowMs() - 30_000),
     });
     let called = 0;
     await expect(
@@ -597,8 +674,7 @@ describe("F2: a window another process filled is waited for before the read, not
       clock: t.clock,
       sleep: t.sleep,
       plannedReads: 37,
-      windowFreeInMs: () =>
-        windowFreeInMs(repo.recentOutcomes(ESPN_LIMITER.perMinute), t.clock.nowMs()),
+      bucketRows: () => repo.recentOutcomes(ESPN_LIMITER.perMinute),
     });
     let left = -1;
     await run.read(async () => {
@@ -806,7 +882,7 @@ describe("over the real limiter (fake time): 37 reads complete, no send passes a
     }
   }
 
-  async function runReads(paceMs: number) {
+  async function runReads(paceMs: number, looks = false) {
     const repo = new MemoryLimiterRepo();
     const t = fakeTime();
     const limiter = new EspnLimiter({ repo, clock: t.clock, origin: "server", sleep: t.sleep });
@@ -819,6 +895,7 @@ describe("over the real limiter (fake time): 37 reads complete, no send passes a
       onWait: (w) => {
         waits.push(w);
       },
+      ...(looks ? { bucketRows: () => repo.recentOutcomes(ESPN_LIMITER.perMinute) } : {}),
     });
     for (let i = 0; i < 37; i++)
       await run.read(async () => {
@@ -830,7 +907,7 @@ describe("over the real limiter (fake time): 37 reads complete, no send passes a
         t.clock.advance(250);
         ticket.finish("ok");
       });
-    return { at: repo.rows.map((r) => r.at), waits, run };
+    return { at: repo.rows.map((r) => r.at), waits, run, sleeps: t.sleeps };
   }
 
   it("paced (the default): never refused, 24 a minute at the most", async () => {
@@ -842,6 +919,19 @@ describe("over the real limiter (fake time): 37 reads complete, no send passes a
     for (const t of at)
       expect(at.filter((s) => s > t - 60_000 && s <= t).length).toBeLessThanOrEqual(
         RUN_SHARE_PER_MINUTE,
+      );
+  });
+
+  it("paced, the share looked at before every read (as the backfill runs): reads of one attempt never wait for it", async () => {
+    const { at, waits, run, sleeps } = await runReads(RUN_PACE_MS, true);
+    expect(at).toHaveLength(37);
+    expect(waits).toEqual([]);
+    expect(run.waits).toBe(0);
+    // the pacing waits only: never a share wait, silent or not
+    expect(sleeps.every((ms) => ms <= RUN_PACE_MS - 250)).toBe(true);
+    for (const t of at)
+      expect(at.filter((s) => s >= t - 60_000 && s <= t).length).toBeLessThanOrEqual(
+        RUN_START_MAX_ROWS + 1,
       );
   });
 
@@ -862,6 +952,9 @@ describe("the progress line: counts and seconds only", () => {
     expect(paceWaitText("transactions-backfill", { ...w, reason: "window" })).toBe(
       "transactions-backfill: the ESPN request window (30 a minute, shared with the server and the jobs) is full — waiting 31 s, then retrying the same read (30 read(s) done; wait 1, at most 180 s of waiting in all)",
     );
+    expect(paceWaitText("transactions-backfill", { ...w, reason: "share", retry: false })).toBe(
+      "transactions-backfill: the ESPN request window (30 a minute, shared with the server and the jobs) is near full (the run keeps six free) — waiting 31 s, then reading (30 read(s) done; wait 1, at most 180 s of waiting in all)",
+    );
     expect(paceWaitText("transactions-backfill", { ...w, reason: "retry_after" })).toContain(
       "ESPN asked for a pause (Retry-After) — waiting 31 s",
     );
@@ -877,7 +970,7 @@ describe("the progress line: counts and seconds only", () => {
   it("property: fixed words and numbers, nothing else", () => {
     fc.assert(
       fc.property(
-        fc.constantFrom("window", "retry_after", "concurrency"),
+        fc.constantFrom("window", "share", "retry_after", "concurrency"),
         fc.boolean(),
         fc.nat(),
         fc.nat(),
@@ -893,10 +986,345 @@ describe("the progress line: counts and seconds only", () => {
             budget_s,
           });
           expect(text).toMatch(
-            /^transactions-backfill: [A-Za-z ,()-]+(?:30 a minute, shared with the server and the jobs\) is full)? — waiting \d+ s, then (?:retrying the same read|reading) \(\d+ read\(s\) done; wait \d+, at most \d+ s of waiting in all\)$/,
+            /^transactions-backfill: [A-Za-z ,()-]+(?:30 a minute, shared with the server and the jobs\) is (?:full|near full \(the run keeps six free\)))? — waiting \d+ s, then (?:retrying the same read|reading) \(\d+ read\(s\) done; wait \d+, at most \d+ s of waiting in all\)$/,
           );
         },
       ),
     );
+  });
+});
+
+describe("the share counts requests: a read starts only with room for its every attempt (verifier F2 on fbbd705)", () => {
+  /** A run looking at fixed rows, its waits and starts recorded. */
+  function shareRun(rows: () => readonly { at: string }[], plannedReads = 37) {
+    const t = fakeTime();
+    const waits: PaceWait[] = [];
+    const run = new PacedRun({
+      clock: t.clock,
+      sleep: t.sleep,
+      plannedReads,
+      bucketRows: rows,
+      onWait: (w) => {
+        waits.push(w);
+      },
+    });
+    return { t, waits, run };
+  }
+
+  it("22 rows in the minute, the window not full: a share wait, announced and counted, then one read", async () => {
+    let calls = 0;
+    const { t, waits, run } = shareRun(() =>
+      calls++ === 0 ? rowsAt(T0 - 30_000, RUN_START_MAX_ROWS + 1) : [],
+    );
+    const r = scripted(t.clock, [], "page");
+    expect(await run.read(r.fn)).toBe("page");
+    expect(r.starts).toEqual([T0 + 30_000 + WINDOW_WAIT_MARGIN_MS]);
+    expect(t.sleeps).toEqual([30_000 + WINDOW_WAIT_MARGIN_MS]);
+    expect(waits).toEqual([
+      { reason: "share", retry: false, wait_s: 31, reads: 0, waits: 1, budget_s: 180 },
+    ]);
+    expect(run.waitedMs).toBe(30_500);
+    expect(calls).toBe(2);
+  });
+
+  it("a full window is a `window` wait, until the share has room — not only its first free slot", async () => {
+    // 8 rows 59 s old and 22 rows 30 s old: one slot frees in 1 s, the share's room in 30 s
+    let calls = 0;
+    const { t, waits, run } = shareRun(() =>
+      calls++ === 0
+        ? [...rowsAt(T0 - 30_000, RUN_START_MAX_ROWS + 1), ...rowsAt(T0 - 59_000, 8)]
+        : [],
+    );
+    await run.read(scripted(t.clock, [], 1).fn);
+    expect(waits.map((w) => [w.reason, w.wait_s])).toEqual([["window", 31]]);
+    expect(t.sleeps).toEqual([30_500]);
+  });
+
+  it("moments of the share are pacing: waited silently, uncounted, to the millisecond", async () => {
+    // 22 rows 59 s old: room in 1 s, shorter than the pacing interval (latency, not load)
+    let calls = 0;
+    const { t, waits, run } = shareRun(() =>
+      calls++ === 0 ? rowsAt(T0 - 59_000, RUN_START_MAX_ROWS + 1) : [],
+    );
+    const r = scripted(t.clock, [], "page");
+    expect(await run.read(r.fn)).toBe("page");
+    expect(t.sleeps).toEqual([1_001]);
+    expect(r.starts).toEqual([T0 + 1_001]);
+    expect(waits).toEqual([]);
+    expect(run.waits).toBe(0);
+    expect(run.waitedMs).toBe(0);
+    // looked once: the read follows the pacing wait
+    expect(calls).toBe(1);
+    // the window full, a wait as short is still a window wait: announced
+    const full = shareRun(() => rowsAt(T0 - 59_000));
+    await full.run.read(scripted(full.t.clock, [], 1).fn);
+    expect(full.waits.map((w) => [w.reason, w.wait_s])).toEqual([["window", 2]]);
+  });
+
+  it("past a bound the share is not waited on: the read goes to the limiter as it is", async () => {
+    const t = fakeTime();
+    // a guard: an unbounded run of waits fails here instead of spinning on fake time
+    let slept = 0;
+    const guarded: Sleep = (ms, signal) =>
+      ++slept > 100 ? Promise.reject(new Error("unbounded waits")) : t.sleep(ms, signal);
+    const run = new PacedRun({
+      clock: t.clock,
+      sleep: guarded,
+      plannedReads: 1_000,
+      bucketRows: () => rowsAt(t.clock.nowMs() - 10_000, RUN_START_MAX_ROWS + 1),
+    });
+    const r = scripted(t.clock, [], "page");
+    expect(await run.read(r.fn)).toBe("page");
+    expect(r.starts).toHaveLength(1);
+    expect(run.waits).toBe(MAX_CONSECUTIVE_REFUSALS);
+    expect(run.gaveUp).toBeNull();
+  });
+
+  it.each([
+    ["two attempts each (a 5xx, then its retry)", (): number => 2],
+    ["three attempts each", (): number => 3],
+    // a minute of reads that went out once, then reads that need every attempt: the share kept
+    // room for them at every start
+    ["one attempt for a minute of reads, then three each", (i: number): number => (i < 20 ? 1 : 3)],
+  ])(
+    "over the real limiter: reads of %s — the run's own rows stay within its share in any minute",
+    async (_name, attemptsOf) => {
+      const repo = new MemoryLimiterRepo();
+      const t = fakeTime();
+      const limiter = new EspnLimiter({ repo, clock: t.clock, origin: "server", sleep: t.sleep });
+      const waits: PaceWait[] = [];
+      const reads = 37;
+      const planned = Array.from({ length: reads }, (_, i) => attemptsOf(i));
+      const rows = planned.reduce((a, n) => a + n, 0);
+      const run = new PacedRun({
+        clock: t.clock,
+        sleep: t.sleep,
+        // the budget sized for the attempts (the backfill's covers two a read)
+        plannedReads: rows,
+        bucketRows: () => repo.recentOutcomes(ESPN_LIMITER.perMinute),
+        onWait: (w) => {
+          waits.push(w);
+        },
+      });
+      for (const attempts of planned)
+        await run.read(async (o: ReadOptions) => {
+          const b = o.budget;
+          if (b === undefined) throw new Error("no budget");
+          // one request: its attempts, each a row of its own, a backoff of 1 s between them
+          for (let a = 1; a <= attempts; a++) {
+            const ticket = await limiter.acquire({
+              keyless: false,
+              deadlineAtMs: b.deadline_at_ms,
+              signal: b.signal,
+            });
+            t.clock.advance(200);
+            ticket.finish(a < attempts ? "server_error" : "ok");
+            if (a < attempts) await t.sleep(1_000, b.signal);
+          }
+        });
+      const at = repo.rows.map((r) => r.at);
+      expect(at).toHaveLength(rows);
+      for (const s of at)
+        expect(at.filter((u) => u >= s - 60_000 && u <= s).length).toBeLessThanOrEqual(
+          RUN_SHARE_PER_MINUTE,
+        );
+      // waited for the share before reads, never refused by a window the run filled itself
+      expect(waits.length).toBeGreaterThanOrEqual(1);
+      expect(waits.every((w) => w.reason === "share" && !w.retry)).toBe(true);
+      expect(run.waitedMs).toBeLessThanOrEqual(run.budgetMs);
+      expect(run.gaveUp).toBeNull();
+    },
+  );
+});
+
+describe("the run's signal reaches each read through its own budget (verifier F1 on fbbd705)", () => {
+  it("each attempt gets a fresh budget — the provider's per-call defaults — that the run's signal alone aborts", async () => {
+    const t = fakeTime();
+    const ac = new AbortController();
+    const run = new PacedRun({
+      clock: t.clock,
+      sleep: t.sleep,
+      signal: ac.signal,
+      plannedReads: 3,
+    });
+    const seen: { opts: ReadOptions; at: number }[] = [];
+    const once = [refusal(1_000, "window")];
+    await run.read((o) => {
+      seen.push({ opts: o, at: t.clock.nowMs() });
+      const e = once.shift();
+      return e === undefined ? Promise.resolve(1) : Promise.reject(e);
+    });
+    expect(seen).toHaveLength(2);
+    const [a, b] = seen.map((x) => x.opts.budget);
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    expect(a).not.toBe(b);
+    for (const { opts, at } of seen) {
+      const budget = opts.budget;
+      expect(budget?.deadline_at_ms).toBe(at + PER_CALL_DEADLINE_MS);
+      expect(budget?.signal.aborted).toBe(false);
+      expect(budget?.used()).toBe(0);
+      expect(budget?.canStart(at)).toBe(true);
+      for (let i = 0; i < MAX_UPSTREAM_PER_CALL; i++) expect(budget?.tryConsume()).toBe(true);
+      expect(budget?.tryConsume()).toBe(false);
+    }
+    // the attempts have ended: the run's signal no longer reaches their budgets
+    ac.abort();
+    expect(a?.signal.aborted).toBe(false);
+    expect(b?.signal.aborted).toBe(false);
+    // without a signal the reads still get their budgets, never aborted
+    const quiet = new PacedRun({ clock: t.clock, sleep: t.sleep, plannedReads: 1 });
+    let got: ReadOptions | null = null;
+    await quiet.read((o) => {
+      got = o;
+      return Promise.resolve(1);
+    });
+    expect((got as ReadOptions | null)?.budget?.signal.aborted).toBe(false);
+  });
+
+  it("the signal aborts the running attempt's budget at once", async () => {
+    const t = fakeTime();
+    const ac = new AbortController();
+    const run = new PacedRun({
+      clock: t.clock,
+      sleep: t.sleep,
+      signal: ac.signal,
+      plannedReads: 3,
+    });
+    let aborted: boolean | null = null;
+    await expect(
+      run.read((o) => {
+        ac.abort();
+        aborted = o.budget?.signal.aborted ?? null;
+        return Promise.reject(refusal(250, "concurrency"));
+      }),
+    ).rejects.toBeInstanceOf(RunInterrupted);
+    expect(aborted).toBe(true);
+  });
+
+  it("what an aborted read throws is the run's interrupt: a refusal of any reason, the budget's, the cancelled request's, an aborted wait's — behind a STALE_ONLY too", async () => {
+    const cancelled = new EspnUpstreamError("aborted", { reason: "aborted" });
+    for (const e of [
+      refusal(250, "concurrency"),
+      refusal(1_000, "window"),
+      refusal(3_600_000, "daily_cap"),
+      refusal(5_000, "retry_after"),
+      new UpstreamBudgetExhausted("mTransactions2", "deadline"),
+      new UpstreamBudgetExhausted("mTransactions2", "budget"),
+      cancelled,
+      abortError(),
+      staleOnly(cancelled),
+      staleOnly(refusal(250, "concurrency")),
+      staleOnly(new UpstreamBudgetExhausted("mSettings", "deadline")),
+    ]) {
+      expect(endedByAbort(e)).toBe(true);
+      const t = fakeTime();
+      const ac = new AbortController();
+      const waits: PaceWait[] = [];
+      const run = new PacedRun({
+        clock: t.clock,
+        sleep: t.sleep,
+        signal: ac.signal,
+        plannedReads: 3,
+        onWait: (w) => {
+          waits.push(w);
+        },
+      });
+      await expect(
+        run.read(() => {
+          ac.abort();
+          return Promise.reject(e);
+        }),
+      ).rejects.toBeInstanceOf(RunInterrupted);
+      expect(waits).toEqual([]);
+      expect(t.sleeps).toEqual([]);
+      expect(run.gaveUp).toBeNull();
+    }
+  });
+
+  it("an answer from ESPN is the read's own outcome, signal or not; without the signal the abort's failures are rethrown as they are", async () => {
+    for (const e of [
+      Object.assign(new Error("rejected"), { effCode: "ESPN_AUTH_REJECTED" }),
+      new EspnUpstreamError("league_not_found", { reason: "league_not_found" }),
+      new EspnUpstreamError("server_error", { upstream_status: 503 }),
+      new EspnUpstreamError("rate_limited", { upstream_status: 429, retry_after_s: 2 }),
+      new EspnUpstreamError("timeout", { reason: "attempt_timeout" }),
+      staleOnly(new EspnUpstreamError("server_error", { upstream_status: 503 })),
+      staleOnly(),
+      new Error("x"),
+    ]) {
+      expect(endedByAbort(e)).toBe(false);
+      const t = fakeTime();
+      const ac = new AbortController();
+      const run = new PacedRun({
+        clock: t.clock,
+        sleep: t.sleep,
+        signal: ac.signal,
+        plannedReads: 3,
+      });
+      await expect(
+        run.read(() => {
+          ac.abort();
+          return Promise.reject(e);
+        }),
+      ).rejects.toBe(e);
+    }
+    expect(endedByAbort(null)).toBe(false);
+    expect(endedByAbort({ name: "AbortError" })).toBe(false);
+    // no signal: the budget's and the cancelled request's failures are no refusal — rethrown at once
+    const t = fakeTime();
+    const run = new PacedRun({ clock: t.clock, sleep: t.sleep, plannedReads: 3 });
+    for (const e of [
+      new UpstreamBudgetExhausted("mTransactions2", "deadline"),
+      new EspnUpstreamError("aborted", { reason: "aborted" }),
+    ]) {
+      const r = scripted(t.clock, [e], "never");
+      await expect(run.read(r.fn)).rejects.toBe(e);
+      expect(r.starts).toHaveLength(1);
+    }
+    expect(run.waits).toBe(0);
+  });
+
+  it("over the real limiter: a read waiting there for the window is refused before its slot — no row, the run's interrupt", async () => {
+    const repo = new MemoryLimiterRepo();
+    for (let i = 0; i < ESPN_LIMITER.perMinute; i++)
+      repo.rows.push({
+        id: 10_000 + i,
+        at: T0 - 45_000,
+        keyless: false,
+        origin: "server",
+        outcome: "ok",
+      });
+    const ac = new AbortController();
+    const limiterSleeps: number[] = [];
+    // the limiter's wait for the window (15 s, inside the 20 s deadline): Ctrl-C during it
+    const t = fakeTime((ms) => {
+      if (ms > RUN_PACE_MS) {
+        limiterSleeps.push(ms);
+        ac.abort();
+      }
+    });
+    const limiter = new EspnLimiter({ repo, clock: t.clock, origin: "server", sleep: t.sleep });
+    // no look before the read: the limiter itself waits for the window, inside the read
+    const run = new PacedRun({
+      clock: t.clock,
+      sleep: t.sleep,
+      signal: ac.signal,
+      plannedReads: 3,
+    });
+    await expect(
+      run.read(async (o) => {
+        const b = o.budget;
+        if (b === undefined) throw new Error("no budget");
+        const ticket = await limiter.acquire({
+          keyless: false,
+          deadlineAtMs: b.deadline_at_ms,
+          signal: b.signal,
+        });
+        ticket.finish("ok");
+      }),
+    ).rejects.toBeInstanceOf(RunInterrupted);
+    expect(limiterSleeps).toEqual([15_000]);
+    expect(repo.rows.filter((r) => r.id < 10_000)).toEqual([]);
   });
 });

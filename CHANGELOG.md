@@ -273,7 +273,8 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   limit, and the stale-cache fallback had reported the refusal as STALE_ONLY, which the run did not
   wait on. A window that another process filled is now waited for before the read starts, so the
   request keeps its whole 20 s deadline (a wait ending in the deadline's last moments had made the
-  request time out).
+  request time out). After Ctrl-C no request is sent (a read waiting inside the limiter had sent up
+  to 20 s later), and the run's share counts requests, retries included: at most 24 in any minute.
 - **Stage C's other fixes.** QA and penetration testing (rounds 0–3 and the final gate's fix
   rounds) fixed many smaller defects, each with a regression test. They are not itemised here: the
   commits on `build/phase-1` record each one, and `docs/plan/changelog.md` §B4–§B9 the records

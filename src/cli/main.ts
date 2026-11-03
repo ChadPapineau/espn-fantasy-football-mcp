@@ -411,8 +411,9 @@ export async function main(
           return await credentialCheck(io, config, log, { notify: flag(p, "notify") });
         case "transactions":
           if (flag(p, "backfill")) {
-            // the backfill honours cancellation (src/cli/espn-pacing.ts): a wait ends at once, no
-            // later read starts, it says what it stored, exit 1. So it claims the signals for the run
+            // the backfill honours cancellation (src/cli/espn-pacing.ts): a wait ends at once, a read
+            // waiting for its slot is refused, no request is sent after it, it says what it stored,
+            // exit 1. So it claims the signals for the run
             const claim = interrupts.claim();
             try {
               return await transactionsBackfill(io, config, log, {

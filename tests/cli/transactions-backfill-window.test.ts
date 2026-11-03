@@ -18,7 +18,14 @@
 //    full window (a burst landing just after the run looked) and another process's Retry-After hold,
 //    and stores nothing twice (F1); a window another process filled 40.3 s before the first read is
 //    waited for before the read, so the send keeps its whole deadline and a slow answer (1 s, real
-//    time) is not cut short (F2: it timed out in the last 299 ms and the run died).
+//    time) is not cut short (F2: it timed out in the last 299 ms and the run died);
+//  - the verifier's findings on fbbd705: Ctrl-C while the limiter itself waits inside a read — for
+//    an in-flight slot another process holds, or for a window a burst filled just after the run
+//    looked — sends nothing after the signal: the read is refused before its slot, no row is
+//    written, and the run ends with its interrupt line, exit 1, no failure recorded (F1); with every
+//    request's first attempt answered 503, the run's own requests, retries included, stay within
+//    RUN_SHARE_PER_MINUTE in any minute — the waits are the share's, before a read — and the run
+//    completes, each week stored once (F2).
 // No request leaves the process; the transactions are crafted in the fake GUID range.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -42,7 +49,7 @@ import { fixedClock } from "../../src/domain/clock.js";
 import { transactionsBySeason } from "../../src/domain/analytics/waiver-fit/history.js";
 import { cachedRetryAfter } from "../../src/providers/espn/cache.js";
 import { composeBodies } from "../../src/providers/espn/index.js";
-import type { Sleep } from "../../src/providers/espn/limiter.js";
+import { IN_FLIGHT_POLL_MS, type Sleep } from "../../src/providers/espn/limiter.js";
 import { storeFactory } from "../../src/store/index.js";
 import type {
   LimiterRepository,
@@ -52,7 +59,7 @@ import type {
 } from "../../src/store/types.js";
 import { fakeCookies } from "../auth/helpers.js";
 import { ROOT, fakeFetch, fakePackage, makeIo, sandbox, type Sandbox } from "./helpers.js";
-import { ESPN_READ_HOST_DEFAULT } from "../../src/config/schema.js";
+import { ESPN_LIMITER, ESPN_READ_HOST_DEFAULT } from "../../src/config/schema.js";
 
 let sb: Sandbox;
 const opened: Store[] = [];
@@ -238,7 +245,7 @@ const stderrLines = (text: string): string[] =>
   text.split("\n").filter((l) => l !== "" && !l.startsWith("{"));
 
 const WAIT_LINE =
-  /^transactions-backfill: [A-Za-z ,()-]+(?:30 a minute, shared with the server and the jobs\) is full)? — waiting (\d+) s, then (?:retrying the same read|reading) \(\d+ read\(s\) done; wait \d+, at most (\d+) s of waiting in all\)$/;
+  /^transactions-backfill: [A-Za-z ,()-]+(?:30 a minute, shared with the server and the jobs\) is (?:full|near full \(the run keeps six free\)))? — waiting (\d+) s, then (?:retrying the same read|reading) \(\d+ read\(s\) done; wait \d+, at most (\d+) s of waiting in all\)$/;
 
 function storedIds(store: Store): string[] {
   return store.repos.transactionsSeen.list(null, 1000).map((t) => t.transaction_id);
@@ -687,5 +694,191 @@ describe("the refusals that still fail as before", () => {
     expect(lines[1]).toBe("eff transactions-backfill: RATE_LIMITED");
     expect(io.out.text).toBe("");
     expect(f.sends).toHaveLength(6);
+  }, 60_000);
+});
+
+/** A signal host whose SIGINT the test fires (no process is touched). */
+function signalHost() {
+  const listeners = new Map<string, () => void>();
+  let raised = 0;
+  const host: SignalHost = {
+    on: (sig, l) => {
+      listeners.set(sig, l);
+    },
+    off: (sig) => {
+      listeners.delete(sig);
+    },
+    raise: () => {
+      raised++;
+    },
+    exit: () => {
+      raised++;
+    },
+  };
+  return { host, fire: () => listeners.get("SIGINT")?.(), raised: () => raised };
+}
+
+const INTERRUPTED_8 =
+  "eff transactions-backfill: interrupted — 8 read(s) done, 6 new transaction(s) stored so far; run `eff transactions --backfill` again to resume (it is safe to repeat)";
+
+describe("Ctrl-C while the limiter waits inside a read: no request after it (verifier F1 on fbbd705)", () => {
+  it("in the limiter's poll for an in-flight slot: refused before its slot, no row written, the run's interrupt", async () => {
+    sb = sandbox();
+    plantCookies();
+    const time = fakeTime(START);
+    const other = await otherProcess(ioFor(time, { fetch: fakeFetch().fetch }));
+    const f = history(time);
+    const sig = signalHost();
+    // another process's two requests in flight, recorded during the pacing sleep before the 9th
+    // read: the run's look sees no full window (pending rows are no window), the limiter polls for
+    // an in-flight slot inside the read; Ctrl-C at the 2nd poll, the two finish at the 4th
+    const pending: number[] = [];
+    let polls = 0;
+    let sendsAtSignal = -1;
+    time.onSleep((ms) => {
+      if (pending.length === 0 && f.sends.length === 8) {
+        for (let i = 0; i < ESPN_LIMITER.concurrency; i++) {
+          const v = other.repos.limiter.tryRecord({
+            at: new Date(time.clock.nowMs()).toISOString(),
+            keyless: false,
+            origin: "server",
+            windows: [],
+            dailyCap: null,
+          });
+          if (v.ok) pending.push(v.id);
+        }
+        return;
+      }
+      if (pending.length === 0 || ms !== IN_FLIGHT_POLL_MS) return;
+      polls++;
+      if (polls === 2) {
+        sendsAtSignal = f.sends.length;
+        sig.fire();
+      }
+      if (polls === 4) for (const id of pending) other.repos.limiter.recordOutcome(id, "ok");
+    });
+    const io = ioFor(time, f);
+    const code = await main(["transactions", "--backfill"], io, {
+      interrupts: createInterrupts(sig.host),
+    });
+    expect(pending).toHaveLength(ESPN_LIMITER.concurrency);
+    expect(sendsAtSignal).toBe(8);
+    expect(f.sends).toHaveLength(sendsAtSignal);
+    expect(code).toBe(1);
+    expect(sig.raised()).toBe(0);
+    // the run's interrupt line, never a failure (no RATE_LIMITED, no job failure recorded)
+    expect(stderrLines(io.err.text)).toEqual([INTERRUPTED_8]);
+    expect(readJobState(sb.cacheDir)["run.transactions-backfill.error"]).toBeUndefined();
+    // no row after the signal: the run's 8 sends and the other process's 2 — which, once finished,
+    // leave none pending (the run left none of its own)
+    expect(polls).toBeLessThan(4);
+    for (const id of pending) other.repos.limiter.recordOutcome(id, "ok");
+    const rows = other.repos.limiter.recentOutcomes(500);
+    expect(rows).toHaveLength(f.sends.length + pending.length);
+    expect(rows.filter((r) => r.outcome === "pending")).toEqual([]);
+  }, 60_000);
+
+  it("in the limiter's wait for the window (a burst just after the run looked): refused, no row, the run's interrupt", async () => {
+    sb = sandbox();
+    plantCookies();
+    const time = fakeTime(START);
+    const other = await otherProcess(ioFor(time, { fetch: fakeFetch().fetch }));
+    const f = history(time);
+    const look = afterNextLook();
+    const ac = new AbortController();
+    let armed = false;
+    let planted: number[] = [];
+    let sendsAtSignal = -1;
+    let limiterWait = -1;
+    time.onSleep((ms) => {
+      // the pacing sleep before the 9th read: 30 rows of another process land just after the run's
+      // look, 44.7 s old — they leave the window in 15.3 s, inside the read's 20 s deadline, so the
+      // limiter itself waits for them inside the read
+      if (!armed && f.sends.length === 8) {
+        armed = true;
+        look.arm(() => {
+          planted = burst(other, time.clock.nowMs() - 44_700);
+        });
+        return;
+      }
+      if (planted.length > 0 && sendsAtSignal < 0 && ms > RUN_PACE_MS) {
+        sendsAtSignal = f.sends.length;
+        limiterWait = ms;
+        ac.abort();
+      }
+    });
+    const io = ioFor(time, f);
+    const { config, log } = await loadRuntime(io);
+    const code = await transactionsBackfill(io, config, log, {
+      notify: false,
+      seasons: undefined,
+      factory: look.factory,
+      signal: ac.signal,
+    });
+    expect(planted).toHaveLength(30);
+    expect(sendsAtSignal).toBe(8);
+    // the limiter's own wait (the run's are whole seconds plus the margin)
+    expect(limiterWait % 1000).not.toBe(WINDOW_WAIT_MARGIN_MS);
+    expect(limiterWait).toBeLessThan(20_000);
+    expect(f.sends).toHaveLength(sendsAtSignal);
+    expect(code).toBe(1);
+    expect(stderrLines(io.err.text)).toEqual([INTERRUPTED_8]);
+    expect(readJobState(sb.cacheDir)["run.transactions-backfill.error"]).toBeUndefined();
+    const rows = other.repos.limiter.recentOutcomes(500);
+    expect(rows).toHaveLength(f.sends.length + planted.length);
+    expect(rows.filter((r) => r.outcome === "pending")).toEqual([]);
+  }, 60_000);
+});
+
+describe("a read's retries count against the run's share (verifier F2 on fbbd705)", () => {
+  it("every request's first attempt answered 503: the run's own sends stay within its share in any minute; exit 0, each week stored once", async () => {
+    sb = sandbox();
+    plantCookies();
+    const time = fakeTime(START);
+    const ok = history(time);
+    const seen = new Set<string>();
+    const sendsAt: number[] = [];
+    const fetch: typeof ok.fetch = async (url, init) => {
+      sendsAt.push(time.clock.nowMs());
+      if (!seen.has(url)) {
+        seen.add(url);
+        time.clock.advance(LATENCY_MS);
+        return new Response("upstream", { status: 503, headers: { "content-type": "text/plain" } });
+      }
+      return ok.fetch(url, init);
+    };
+    const io = ioFor(time, { fetch });
+    const code = await main(["transactions", "--backfill"], io);
+    expect(io.err.text).not.toMatch(/^eff /m);
+    expect(code).toBe(0);
+    // each read went out twice (the 503, then its retry): 74 requests, 37 answers
+    expect(seen.size).toBe(DEFAULT_READS);
+    expect(sendsAt).toHaveLength(2 * DEFAULT_READS);
+    expect(ok.sends).toHaveLength(DEFAULT_READS);
+    // the run's own requests — first attempts and retries — never pass its share in any minute
+    // (each window counted from its start millisecond inclusive, as the store counts), and every
+    // send obeys the limiter's windows
+    for (const t of sendsAt)
+      expect(sendsAt.filter((s) => s >= t - 60_000 && s <= t).length).toBeLessThanOrEqual(
+        RUN_SHARE_PER_MINUTE,
+      );
+    assertWindows(sendsAt, []);
+    // the waits were the share's, before a read, announced in the fixed vocabulary: never the
+    // window the run filled itself, never a refusal
+    const lines = stderrLines(io.err.text);
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    for (const l of lines) {
+      expect(l).toMatch(WAIT_LINE);
+      expect(l).toContain("is near full (the run keeps six free) — waiting");
+      expect(l).toContain(", then reading (");
+    }
+    // every week stored once, no row left pending
+    const store = await otherProcess(io);
+    const ids = storedIds(store);
+    expect(ids).toHaveLength(34);
+    expect(new Set(ids).size).toBe(34);
+    expect(store.repos.limiter.recentOutcomes(500).filter((r) => r.outcome === "pending")).toEqual(
+      [],
+    );
   }, 60_000);
 });
