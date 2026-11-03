@@ -7,8 +7,14 @@
 // malformed and oversized bodies; stale fallback within the hard limit, STALE_ONLY past it,
 // allow_stale and the host-moved suspension; the 304 path. No network: every fetch is scripted.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ESPN_READ_HOST_DEFAULT } from "../../../src/config/schema.js";
 import type { Clock } from "../../../src/domain/clock.js";
+import { classifyError } from "../../../src/mcp/errors.js";
+import { cachedRetryAfter } from "../../../src/providers/espn/cache.js";
+import { EspnUpstreamError } from "../../../src/providers/espn/errors.js";
+import { EspnRateLimitedError } from "../../../src/providers/espn/limiter.js";
 import { EspnProvider } from "../../../src/providers/espn/provider.js";
+import { EspnStaleOnlyError } from "../../../src/providers/espn/request.js";
 import type { FetchLike } from "../../../src/providers/espn/transport.js";
 import { createUpstreamBudget } from "../../../src/providers/platform.js";
 import {
@@ -740,6 +746,58 @@ describe("stale fallback (plan 01 §5.4, §5.7, ADV OBJ-06)", () => {
       });
     const r = await w.provider.getProSchedule(SEASON);
     expect(r.stamp.degraded?.code).toBe("RATE_LIMITED");
+  });
+  it("past the hard limit, STALE_ONLY keeps what it replaced as its cause; its code is unchanged", async () => {
+    // a paced CLI run waits out our limiter's refusal behind it (src/cli/espn-pacing.ts; verifier
+    // finding F1 on 4141144: a re-run of `eff transactions --backfill` died STALE_ONLY on a window)
+    const caught = async (w: ReturnType<typeof makeWorld>): Promise<EspnStaleOnlyError> => {
+      const e: unknown = await w.provider.getProSchedule(SEASON).then(
+        () => null,
+        (x: unknown) => x,
+      );
+      expect(e).toBeInstanceOf(EspnStaleOnlyError);
+      const stale = e as EspnStaleOnlyError;
+      expect(stale.effDetails).toEqual({ view: "proTeamSchedules_wl" });
+      expect(classifyError(stale).code).toBe("STALE_ONLY");
+      return stale;
+    };
+    // our limiter's window refusal
+    const full = makeWorld({ fetch: scripted({ proTeamSchedules_wl: [ok] }) });
+    await full.provider.getProSchedule(SEASON);
+    full.clock.advance(8 * 24 * 3600 * 1000);
+    for (let i = 0; i < 30; i++)
+      full.limiter.rows.push({
+        id: 1000 + i,
+        at: full.clock.nowMs() - 1000 - i,
+        keyless: true,
+        origin: "server",
+        outcome: "ok",
+      });
+    const refused = (await caught(full)).cause;
+    expect(refused).toBeInstanceOf(EspnRateLimitedError);
+    expect((refused as EspnRateLimitedError).effDetails.reason).toBe("window");
+    // ESPN's Retry-After hold, kept by another process: refused before any request
+    const fetch = scripted({ proTeamSchedules_wl: [ok] });
+    const held = makeWorld({ fetch });
+    await held.provider.getProSchedule(SEASON);
+    held.clock.advance(8 * 24 * 3600 * 1000);
+    cachedRetryAfter(held.cache, ESPN_READ_HOST_DEFAULT, held.clock).save(
+      held.clock.nowMs() + 30_000,
+    );
+    const hold = (await caught(held)).cause;
+    expect(hold).toBeInstanceOf(EspnRateLimitedError);
+    expect((hold as EspnRateLimitedError).effDetails).toEqual({
+      retry_after_s: 30,
+      reason: "retry_after",
+    });
+    expect(fetch.calls).toHaveLength(1);
+    // ESPN's own failure
+    const down503 = makeWorld({ fetch: scripted({ proTeamSchedules_wl: [ok, down] }) });
+    await down503.provider.getProSchedule(SEASON);
+    down503.clock.advance(8 * 24 * 3600 * 1000);
+    const failed = (await caught(down503)).cause;
+    expect(failed).toBeInstanceOf(EspnUpstreamError);
+    expect((failed as EspnUpstreamError).effCode).toBe("ESPN_UPSTREAM_UNAVAILABLE");
   });
   it("a limiter row that cannot be written: nothing is sent (fail closed) — INTERNAL", async () => {
     const fetch = scripted({ proTeamSchedules_wl: [ok] });

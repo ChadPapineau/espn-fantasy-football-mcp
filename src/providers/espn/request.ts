@@ -99,12 +99,18 @@ export class SchemaSignals extends Error {
   }
 }
 
-/** A stale-only answer: only data past its hard limit exists (plan 01 §4.3 STALE_ONLY). */
+/**
+ * A stale-only answer: only data past its hard limit exists (plan 01 §4.3 STALE_ONLY). Its `cause`
+ * is the failure the stale fallback could not cover (a degraded code: ESPN unavailable, the host
+ * moved, or RATE_LIMITED — our limiter's refusal or ESPN's 429): a caller that waits out our
+ * limiter's refusals (src/cli/espn-pacing.ts) still sees one behind it. The code and details are
+ * unchanged by it: every mapping reads `effCode` first (src/mcp/errors.ts classifyError).
+ */
 export class EspnStaleOnlyError extends Error {
   readonly effCode = "STALE_ONLY" as const;
   readonly effDetails: { readonly view: EspnView };
-  constructor(view: EspnView) {
-    super("espn: only data past its hard limit is cached");
+  constructor(view: EspnView, options?: ErrorOptions) {
+    super("espn: only data past its hard limit is cached", options);
     this.name = "EspnStaleOnlyError";
     this.effDetails = Object.freeze({ view });
   }
@@ -593,13 +599,15 @@ export class EspnRequester {
       };
     };
     // ESPN (or our limiter) could not answer: the entry when usable, else the failure — or
-    // STALE_ONLY when only data past its hard limit is cached
+    // STALE_ONLY when only data past its hard limit is cached, the failure kept as its cause (a
+    // limiter refusal behind it stays one a paced run waits out: a re-run of `eff transactions
+    // --backfill` over weeks cached more than a day before died STALE_ONLY on a full window)
     const fallback = (err: unknown): ReadResult<T> => {
       const code = (err as { effCode?: unknown } | null)?.effCode;
       if (!(DEGRADED_CODES as readonly unknown[]).includes(code)) throw err;
       return serveStale(code as DegradedCode, () => {
         if (usable === null) throw err;
-        throw new EspnStaleOnlyError(view);
+        throw new EspnStaleOnlyError(view, { cause: err });
       });
     };
     // the call's budget cannot pay for a request — its ≤ 20 s deadline passed or its three requests

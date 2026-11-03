@@ -7,7 +7,7 @@
 // transactions` (append unseen transactions 30 min after the pool's working run) and `eff
 // pre-kickoff` (no request: the newest roster snapshot vs the schedule, 60 min before the day's first
 // kickoff). Notifications carry counts and slot names only — never a member or player name.
-import type { Config } from "../config/schema.js";
+import { ESPN_LIMITER, type Config } from "../config/schema.js";
 import {
   auditIr,
   emptyStartingSlots,
@@ -46,7 +46,7 @@ import {
   WAKE_GRACE_MS,
   type JobRun,
 } from "./espn-jobs.js";
-import { PacedRun, paceWaitText, RunInterrupted } from "./espn-pacing.js";
+import { PacedRun, paceWaitText, RunInterrupted, windowFreeInMs } from "./espn-pacing.js";
 import { effCodeOf } from "./espn-stack.js";
 import { EXIT, UsageError } from "./exit.js";
 import { writeLine, type CliIo } from "./io.js";
@@ -767,6 +767,13 @@ export async function transactionsBackfill(
     signal: opts.signal ?? null,
     plannedReads: planOf(asked?.length ?? BACKFILL_DEFAULT_SEASONS, asked === null),
     onWait: (w) => writeLine(io.stderr, paceWaitText(job, w)),
+    // the shared bucket's newest rows, read-only: a window another process filled is waited for
+    // before the read, not inside its ≤ 20 s deadline (espn-pacing.ts; verifier finding F2)
+    windowFreeInMs: () =>
+      windowFreeInMs(
+        run.store.repos.limiter.recentOutcomes(ESPN_LIMITER.perMinute),
+        io.clock.nowMs(),
+      ),
   });
   let stored = 0;
   try {

@@ -268,7 +268,12 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   install, 2026-11-02).** The default run's ~37 reads met the limiter's full window part-way and
   died RATE_LIMITED. The run now paces itself at 24 reads a minute, waits out a full window or
   ESPN's Retry-After (one stderr line, the same read retried, within a bound), and stops on Ctrl-C
-  (at once during a wait); a spent daily cap and repeated concurrency refusals fail as before.
+  (at once during a wait); a spent daily cap and repeated concurrency refusals fail as before. A
+  re-run more than a day later waits the same way: the weeks it cached are then past their hard
+  limit, and the stale-cache fallback had reported the refusal as STALE_ONLY, which the run did not
+  wait on. A window that another process filled is now waited for before the read starts, so the
+  request keeps its whole 20 s deadline (a wait ending in the deadline's last moments had made the
+  request time out).
 - **Stage C's other fixes.** QA and penetration testing (rounds 0–3 and the final gate's fix
   rounds) fixed many smaller defects, each with a regression test. They are not itemised here: the
   commits on `build/phase-1` record each one, and `docs/plan/changelog.md` §B4–§B9 the records

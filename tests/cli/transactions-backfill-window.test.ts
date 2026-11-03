@@ -12,7 +12,13 @@
 //    nothing twice;
 //  - a spent daily cap fails at once and a second concurrency refusal in a row fails as before;
 //  - Ctrl-C during a wait (the command's claim on SIGINT) ends the run at once, no request after it;
-//  - the progress line carries counts and seconds only.
+//  - the progress line carries counts and seconds only;
+//  - the verifiers' findings on 4141144: a re-run two days later — every week cached past its 1-day
+//    hard limit, so the provider's stale fallback turns a refusal into STALE_ONLY — still waits out a
+//    full window (a burst landing just after the run looked) and another process's Retry-After hold,
+//    and stores nothing twice (F1); a window another process filled 40.3 s before the first read is
+//    waited for before the read, so the send keeps its whole deadline and a slow answer (1 s, real
+//    time) is not cut short (F2: it timed out in the last 299 ms and the run died).
 // No request leaves the process; the transactions are crafted in the fake GUID range.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -34,6 +40,7 @@ import { transactionsBackfill } from "../../src/cli/snapshot.js";
 import { openStore } from "../../src/cli/store-access.js";
 import { fixedClock } from "../../src/domain/clock.js";
 import { transactionsBySeason } from "../../src/domain/analytics/waiver-fit/history.js";
+import { cachedRetryAfter } from "../../src/providers/espn/cache.js";
 import { composeBodies } from "../../src/providers/espn/index.js";
 import type { Sleep } from "../../src/providers/espn/limiter.js";
 import { storeFactory } from "../../src/store/index.js";
@@ -45,6 +52,7 @@ import type {
 } from "../../src/store/types.js";
 import { fakeCookies } from "../auth/helpers.js";
 import { ROOT, fakeFetch, fakePackage, makeIo, sandbox, type Sandbox } from "./helpers.js";
+import { ESPN_READ_HOST_DEFAULT } from "../../src/config/schema.js";
 
 let sb: Sandbox;
 const opened: Store[] = [];
@@ -230,7 +238,7 @@ const stderrLines = (text: string): string[] =>
   text.split("\n").filter((l) => l !== "" && !l.startsWith("{"));
 
 const WAIT_LINE =
-  /^transactions-backfill: [A-Za-z ,()-]+(?:30 a minute, shared with the server and the jobs\) is full)? — waiting (\d+) s, then retrying the same read \(\d+ read\(s\) done; wait \d+, at most (\d+) s of waiting in all\)$/;
+  /^transactions-backfill: [A-Za-z ,()-]+(?:30 a minute, shared with the server and the jobs\) is full)? — waiting (\d+) s, then (?:retrying the same read|reading) \(\d+ read\(s\) done; wait \d+, at most (\d+) s of waiting in all\)$/;
 
 function storedIds(store: Store): string[] {
   return store.repos.transactionsSeen.list(null, 1000).map((t) => t.transaction_id);
@@ -350,10 +358,16 @@ describe("eff transactions --backfill under a full window (the 2026-11-02 instal
     );
     expect(io.out.text).not.toContain("fits its premium");
     const waits = stderrLines(io.err.text).filter((l) => WAIT_LINE.test(l));
-    // the window never empties: the read is refused five times in a row, then the run stops
-    expect(waits).toHaveLength(MAX_CONSECUTIVE_REFUSALS);
+    // the window never empties: the run waits for it — seen full before the read, then refused —
+    // until a bound (five waits in a row for the read, or the budget: here the budget, each wait a
+    // whole window), then stops
+    expect(waits.length).toBeGreaterThanOrEqual(1);
+    expect(waits.length).toBeLessThanOrEqual(MAX_CONSECUTIVE_REFUSALS);
     const waited = waits.reduce((a, l) => a + Number(WAIT_LINE.exec(l)?.[1]), 0);
     expect(waited * 1000).toBeLessThanOrEqual(waitBudgetMs(1 + 2 * 19) + waits.length * 1000);
+    const stated = /\((\d+) wait\(s\), (\d+) s of waiting\)/.exec(io.out.text);
+    expect(Number(stated?.[1])).toBe(waits.length);
+    expect(Number(stated?.[2]) * 1000).toBeLessThanOrEqual(waitBudgetMs(1 + 2 * 19));
     // nothing after 2024 week 6 was read
     expect(f.sends.some((s) => s.season === 2024 && (s.week ?? 0) > 6)).toBe(false);
     expect(readJobState(sb.cacheDir)["run.transactions-backfill.error"]).toBe("RATE_LIMITED");
@@ -433,6 +447,181 @@ describe("eff transactions --backfill under a full window (the 2026-11-02 instal
     expect(await main(["transactions", "--backfill"], io2)).toBe(0);
     expect(io2.out.text).not.toContain("another run holds the job lock");
     expect(storedIds(await otherProcess(io2))).toHaveLength(34);
+  }, 60_000);
+});
+
+/**
+ * A store factory whose limiter repository runs the armed hook once, right after the next look at its
+ * newest rows has returned them (the run's look before a read is the first one after its pacing
+ * sleep): another process's burst landing just after the run looked.
+ */
+function afterNextLook(): { factory: StoreFactory; arm: (hook: () => void) => void } {
+  let armed: (() => void) | null = null;
+  return {
+    arm: (hook) => {
+      armed = hook;
+    },
+    factory: {
+      open: (o) => {
+        const s = storeFactory.open(o);
+        const real = s.repos.limiter;
+        const limiter: LimiterRepository = {
+          ...real,
+          recentOutcomes: (limit) => {
+            const rows = real.recentOutcomes(limit);
+            const hook = armed;
+            armed = null;
+            hook?.();
+            return rows;
+          },
+        };
+        return { ...s, repos: { ...s.repos, limiter } };
+      },
+      openPublisher: (o) => storeFactory.openPublisher(o),
+    },
+  };
+}
+
+describe("a re-run two days later: the cached weeks are past their 1-day hard limit (F1)", () => {
+  /** The first run, complete on 2026-10-06: every week cached and stored. */
+  async function firstRun(): Promise<void> {
+    sb = sandbox();
+    plantCookies();
+    const t1 = fakeTime(START);
+    const io1 = ioFor(t1, history(t1));
+    expect(await main(["transactions", "--backfill"], io1)).toBe(0);
+    expect(storedIds(await otherProcess(io1))).toHaveLength(34);
+  }
+  const LATER = "2026-10-08T18:00:00.000Z";
+
+  it("a burst landing just after the run looked: the refusal behind STALE_ONLY is waited out", async () => {
+    await firstRun();
+    const time = fakeTime(LATER);
+    const other = await otherProcess(ioFor(time, { fetch: fakeFetch().fetch }));
+    const f = history(time);
+    const look = afterNextLook();
+    let planted: number[] = [];
+    let armedAt = -1;
+    time.onSleep(() => {
+      // the pacing sleep before the 7th read (a 2025 week, upstream: its entry is 2 days old)
+      if (armedAt < 0 && f.sends.length === 6) {
+        armedAt = f.sends.length;
+        look.arm(() => {
+          planted = burst(other, time.clock.nowMs());
+        });
+      }
+    });
+    const io = ioFor(time, f);
+    const { config, log } = await loadRuntime(io);
+    const code = await transactionsBackfill(io, config, log, {
+      notify: false,
+      seasons: undefined,
+      factory: look.factory,
+    });
+    expect(io.err.text).not.toMatch(/STALE_ONLY/);
+    expect(code).toBe(0);
+    expect(planted).toHaveLength(30);
+    // the refusal was the limiter's (the look had seen the window free), waited out, the same read
+    // retried: the refusal's wait (until the window's oldest row leaves it — one of the run's own),
+    // then the look before the retry for the rest; one window in all
+    const lines = stderrLines(io.err.text);
+    expect(lines.length, lines.join("\n")).toBeGreaterThanOrEqual(1);
+    expect(lines.length, lines.join("\n")).toBeLessThanOrEqual(2);
+    for (const l of lines) {
+      expect(l).toMatch(WAIT_LINE);
+      expect(l).toMatch(/is full — waiting \d+ s, then retrying the same read \(6 read\(s\) done;/);
+    }
+    const waited = lines.reduce((a, l) => a + Number(WAIT_LINE.exec(l)?.[1]), 0);
+    expect(waited).toBeGreaterThanOrEqual(60);
+    expect(waited).toBeLessThanOrEqual(61 + lines.length);
+    expect(f.sends).toHaveLength(DEFAULT_READS);
+    assertWindows(
+      f.sends.map((s) => s.at),
+      planted,
+    );
+    // every week re-read, nothing stored twice
+    expect(io.out.text).toContain("season 2025: 17 week(s) read, 17 transaction(s), 0 new");
+    expect(io.out.text).toContain("season 2024: 17 week(s) read, 17 transaction(s), 0 new");
+    expect(io.out.text).toContain("0 new transaction(s) stored");
+    const ids = storedIds(await otherProcess(io));
+    expect(ids).toHaveLength(34);
+    expect(new Set(ids).size).toBe(34);
+  }, 60_000);
+
+  it("another process's Retry-After hold: the refusal behind STALE_ONLY is waited out", async () => {
+    await firstRun();
+    const time = fakeTime(LATER);
+    const other = await otherProcess(ioFor(time, { fetch: fakeFetch().fetch }));
+    let heldUntil = -1;
+    const f = history(time, (s, n) => {
+      // the 6th request: ESPN answered another process's read with Retry-After: 30, kept for all
+      if (n === 6) {
+        heldUntil = s.at + 30_000;
+        cachedRetryAfter(other.repos.espnCache, ESPN_READ_HOST_DEFAULT, time.clock).save(heldUntil);
+      }
+    });
+    const io = ioFor(time, f);
+    expect(await main(["transactions", "--backfill"], io)).toBe(0);
+    expect(io.err.text).not.toMatch(/STALE_ONLY/);
+    const lines = stderrLines(io.err.text);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^transactions-backfill: ESPN asked for a pause \(Retry-After\) — waiting \d+ s, then retrying the same read \(6 read\(s\) done;/,
+    );
+    // nothing went out before the hold ended
+    expect(f.sends.filter((s) => s.at > (f.sends[5]?.at ?? 0) && s.at < heldUntil)).toEqual([]);
+    expect(f.sends).toHaveLength(DEFAULT_READS);
+    expect(io.out.text).toContain("0 new transaction(s) stored");
+    expect(storedIds(await otherProcess(io))).toHaveLength(34);
+  }, 60_000);
+});
+
+describe("a window another process filled is waited for before the read (F2)", () => {
+  it("30 rows 40.3 s before the first read: waited for here; a 1 s answer is not cut short", async () => {
+    sb = sandbox();
+    plantCookies();
+    const time = fakeTime(START);
+    const t0 = time.clock.nowMs();
+    const other = await otherProcess(ioFor(time, { fetch: fakeFetch().fetch }));
+    // the MCP server's 30 reads, 40.3 s before the run's first read: the window frees in 19.7 s —
+    // the limiter, waiting for it inside the read, sent with 299 ms of the deadline left
+    const planted = burst(other, t0 - 40_300);
+    const base = history(time);
+    let n = 0;
+    const slowFirst: typeof base.fetch = async (url, init) => {
+      if (n++ === 0)
+        // ESPN answering in 1 s of real time, honouring the attempt's abort
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 1000);
+          init.signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        });
+      return base.fetch(url, init);
+    };
+    const io = ioFor(time, { fetch: slowFirst });
+    const code = await main(["transactions", "--backfill"], io);
+    expect(io.err.text).not.toMatch(/^eff /m);
+    expect(code).toBe(0);
+    const lines = stderrLines(io.err.text);
+    expect(lines).toEqual([
+      "transactions-backfill: the ESPN request window (30 a minute, shared with the server and the jobs) is full — waiting 21 s, then reading (0 read(s) done; wait 1, at most 180 s of waiting in all)",
+    ]);
+    // the first send went out once the burst had left the window, and no send passed a window
+    const ours = base.sends.map((s) => s.at);
+    expect(ours).toHaveLength(DEFAULT_READS);
+    expect((ours[0] ?? 0) - (planted[0] ?? 0)).toBeGreaterThan(60_000);
+    assertWindows(ours, planted);
+    // the slow answer was not timed out: no request failed, so none counted against the breaker
+    const store = await otherProcess(io);
+    expect(
+      store.repos.limiter
+        .recentOutcomes(100)
+        .filter((r) => r.outcome !== "ok")
+        .map((r) => r.outcome),
+    ).toEqual([]);
+    expect(storedIds(store)).toHaveLength(34);
   }, 60_000);
 });
 
