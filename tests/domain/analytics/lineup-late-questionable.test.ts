@@ -105,6 +105,11 @@ describe("V-6: a QUESTIONABLE Monday-night starter whose every replacement locks
     const out = analyzeLineup(request(lateRoster(), { compare: [{ out: 2, in: 10 }] }));
     const swap = out.swaps.find((s) => s.out === 2 && s.in === 10);
     expect(swap?.option_value).toMatchObject({ kind: "monday", value: 0 });
+    // the verdict says why, never the option as the reason to hold (the round-4 F7 / R4VS-5): the
+    // swap loses points, and waiting is worth nothing because nothing opens after Monday's news
+    expect(swap?.option_value?.verdict).toBe(
+      "hold: the swap loses expected points; waiting has no option value (nothing opens after his status is known)",
+    );
     // a swap with no Thursday, Monday or late questionable game has no option at all: null
     for (const s of out.swaps.filter((x) => x.out !== 2 && x.in !== 2 && x.out !== 8))
       expect(s.option_value, `${String(s.out)}→${String(s.in)}`).toBeNull();
@@ -112,7 +117,9 @@ describe("V-6: a QUESTIONABLE Monday-night starter whose every replacement locks
 
   it("control: a bench RB with a Monday game is the conditional, and the option is worth (1 − p) × his mean", () => {
     const players = lateRoster(MONDAY);
-    const out = analyzeLineup(request(players, { compare: [{ out: 2, in: 3 }] }));
+    // the direct settable swap (changelog §R10, R10-24): the Sunday bench RB 14 for RB 2 — the
+    // starting RB 3 is no `in` (he already starts; that pair is warned, never scored)
+    const out = analyzeLineup(request(players, { compare: [{ out: 2, in: 14 }] }));
     const c = out.conditionals.find((x) => x.if.player_id === 2);
     expect(c).toEqual({
       if: {
@@ -122,8 +129,11 @@ describe("V-6: a QUESTIONABLE Monday-night starter whose every replacement locks
       },
       then: { slot: "RB", in: 10 },
     });
-    const swap = out.swaps.find((s) => s.out === 2 && s.in === 3);
+    const swap = out.swaps.find((s) => s.out === 2 && s.in === 14);
     expect(swap?.option_value?.kind).toBe("monday");
     expect(swap?.option_value?.value).toBeCloseTo((1 - 0.6) * 6, 3);
+    expect(swap?.option_value?.verdict).toBe(
+      "hold: the swap loses expected points and gives up the option value of the later game",
+    );
   });
 });

@@ -4,9 +4,13 @@
 // the only chain that could replace him (the FLEX RB into his seat, a bench WR into FLEX) locks on
 // Sunday. When his status is decided (90 min before his kickoff) nothing that could take his seat
 // is still open, so espn_analyze_lineup answers no conditional for him — the specified answer — and
-// a swap involving him (a compare pair) carries the Monday option worth 0, while the default swap
-// (two Sunday receivers, neither questionable) carries no option (null). Fixture mode, the schedule
-// dataset seeded, committed files only, no network.
+// a swap involving him (a compare pair) carries the Monday option worth 0 — its verdict says the
+// swap loses points and nothing opens after his status is known (the round-4 F7 / R4VS-5) — while
+// the default swap (two Sunday receivers, neither questionable) carries no option (null). The pair is
+// a direct settable swap, a bench RB for his seat (changelog §R10, R10-24): the FLEX RB (already
+// starting) and a bench WR (cannot play RB), the pairs round 4's SS-3 read a number from, are
+// warned and never scored. Fixture mode, the schedule dataset seeded, committed files only, no
+// network.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -27,6 +31,7 @@ interface Row {
   kickoff: string | null;
   injury_status: string | null;
   eligible_slots: string[];
+  lineup_locked: boolean;
 }
 interface Swap {
   out: number | null;
@@ -85,16 +90,91 @@ describe("V-6 on questionable-late: the Monday-night QUESTIONABLE starter", () =
     expect(d.conditionals.filter((c) => c.if.player_id === q.player_id)).toEqual([]);
     for (const s of d.swaps.filter((x) => x.out !== q.player_id && x.in !== q.player_id))
       expect(s.option_value).toBeNull();
-    // the FLEX RB (Sunday's first game) for his seat: the option exists and is worth nothing
-    const flexRb = all.find((r) => r.slot === "FLEX" && r.position === "RB")!;
+    // a direct settable swap for his seat (changelog §R10, R10-24): a bench player eligible for
+    // RB, whose game is Sunday — the option exists and is worth nothing, and its verdict says so
+    const benchRb = all.find(
+      (r) =>
+        r.slot === "BE" &&
+        r.eligible_slots.includes(q.slot) &&
+        r.kickoff !== null &&
+        !r.lineup_locked,
+    );
+    expect(
+      benchRb,
+      JSON.stringify(all.map((r) => [r.player_id, r.slot, r.position])),
+    ).toBeDefined();
     const cmp = await call(client, "espn_analyze_lineup", {
       week: 5,
-      compare: [{ out: q.player_id, in: flexRb.player_id }],
+      compare: [{ out: q.player_id, in: benchRb!.player_id }],
     });
     expect(cmp.isError, JSON.stringify(cmp.body).slice(0, 300)).toBe(false);
     const swap = (cmp.body.data as LineupData).swaps.find(
-      (s) => s.out === q.player_id && s.in === flexRb.player_id,
+      (s) => s.out === q.player_id && s.in === benchRb!.player_id,
     );
     expect(swap?.option_value).toMatchObject({ kind: "monday", value: 0 });
+    // the round-4 F7 / R4VS-5: never "the gain does not cover the option value" with an option
+    // worth 0 — the swap loses points, and nothing opens after his Monday status is known
+    expect(swap?.option_value?.verdict).toBe(
+      "hold: the swap loses expected points; waiting has no option value (nothing opens after his status is known)",
+    );
+    expect((cmp.body.warnings as string[]).filter((w) => w.startsWith("compare pair "))).toEqual(
+      [],
+    );
+  });
+
+  it("R10-24: the pairs SS-3 read are warned and never scored — the FLEX RB (already starts), a bench WR (cannot play RB)", async () => {
+    const all = await rows();
+    const q = all.find((r) => starter(r) && r.injury_status === "QUESTIONABLE")!;
+    const flexRb = all.find((r) => r.slot === "FLEX" && r.position === "RB")!;
+    const benchWr = all.find((r) => r.slot === "BE" && r.position === "WR")!;
+    const ir = all.find((r) => r.slot === "IR");
+    const benchAny = all.find((r) => r.slot === "BE")!;
+    const cells: { out: number; in: number; reason: string }[] = [
+      {
+        out: q.player_id,
+        in: flexRb.player_id,
+        reason: `player ${String(flexRb.player_id)} already starts`,
+      },
+      {
+        out: q.player_id,
+        in: benchWr.player_id,
+        reason: `player ${String(benchWr.player_id)} cannot play ${q.slot}`,
+      },
+      {
+        out: benchAny.player_id,
+        in: benchWr.player_id,
+        reason: `player ${String(benchAny.player_id)} is not starting`,
+      },
+      ...(ir === undefined
+        ? []
+        : [
+            {
+              out: q.player_id,
+              in: ir.player_id,
+              reason: `player ${String(ir.player_id)} is on IR (the lineup never starts a player from IR)`,
+            },
+          ]),
+    ].filter((c) => c.out !== c.in);
+    const plain = await call(client, "espn_analyze_lineup", { week: 5 });
+    const flow = (plain.body.data as LineupData).swaps;
+    const r = await call(client, "espn_analyze_lineup", {
+      week: 5,
+      compare: cells.map(({ out, in: inn }) => ({ out, in: inn })),
+    });
+    expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+    const warned = (r.body.warnings as string[]).filter((w) => w.startsWith("compare pair "));
+    expect(warned).toEqual(
+      cells.map(
+        (c) => `compare pair out ${String(c.out)} / in ${String(c.in)} not evaluated: ${c.reason}`,
+      ),
+    );
+    // none is scored: a row for the pair exists only when it is the optimizer's own flow pair
+    for (const c of cells) {
+      const scored = (r.body.data as LineupData).swaps.some(
+        (s) => s.out === c.out && s.in === c.in,
+      );
+      const own = flow.some((s) => s.out === c.out && s.in === c.in);
+      expect(scored, `${String(c.out)}→${String(c.in)}`).toBe(own);
+    }
   });
 });

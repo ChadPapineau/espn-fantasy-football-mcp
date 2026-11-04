@@ -675,12 +675,16 @@ describe("option value, conditionals, stacks, cross-check", () => {
           const players = myRoster().map((p, i) => ({ ...p, locked: locks[i] ?? false }));
           const out = analyzeLineup(request({ players, compare }));
           const warned = compareWarnings(players, compare);
+          // a warned pair is never scored; it is in swaps only as the optimizer's own flow pair (a
+          // chain the same call without compare makes too — changelog §R10, R10-24)
+          const plain = analyzeLineup(request({ players }));
           return compare.every((c) => {
             const isWarned = warned.some((w) =>
               w.startsWith(`compare pair out ${String(c.out)} / in ${String(c.in)} `),
             );
             const isSwap = out.swaps.some((s) => s.out === c.out && s.in === c.in);
-            return isWarned !== isSwap;
+            const flow = plain.swaps.some((s) => s.out === c.out && s.in === c.in);
+            return isWarned ? isSwap === flow : isSwap;
           });
         },
       ),

@@ -740,12 +740,54 @@ function optionValue(
     .reduce((best, y) => Math.max(best, y.points.mean), 0);
   const value = round((1 - pLater) * reserve, 3);
   const gain = pr.in.points.mean - pr.out.points.mean;
-  const verdict = inFirst
-    ? gain >= value
+  // a value of 0: no reserve opens after his status is decided, else his status is (all but) sure
+  const why: NoOptionWhy = reserve === 0 ? "nothing_opens" : "not_in_doubt";
+  return { kind, value, verdict: optionVerdict({ inFirst, gain, value, why }) };
+}
+
+/** Why waiting is worth nothing: no reserve opens after the later status is known, or none is in doubt. */
+export type NoOptionWhy = "nothing_opens" | "not_in_doubt";
+
+const NO_OPTION_WHY: Readonly<Record<NoOptionWhy, string>> = Object.freeze({
+  nothing_opens: "nothing opens after his status is known",
+  not_in_doubt: "his status is not in doubt",
+});
+
+/**
+ * The option-value verdict of a swap, true in every branch (the round-4 F7 / R4VS-5: a swap that
+ * benches a Monday starter with nothing left to open read "hold: the gain does not cover the option
+ * value of the later game" with an option worth 0 and a gain below 0). Research 05 §3.4 (sib):
+ * when the entrant's game locks first (`inFirst`), committing to him gives up waiting for the later
+ * game, so the swap is made only when `gain ≥ value`; when the entrant plays later, starting him
+ * keeps that option, so the swap is worth `gain + value`. A value of 0 says why waiting is worth
+ * nothing (`why`), and a negative gain says the swap loses expected points, never that the option
+ * is the reason. Fixed texts, no third-party data.
+ */
+export function optionVerdict(o: {
+  readonly inFirst: boolean;
+  readonly gain: number;
+  readonly value: number;
+  readonly why: NoOptionWhy;
+}): string {
+  const { inFirst, gain, value } = o;
+  const loses = gain < 0;
+  if (!(value > 0)) {
+    const none = inFirst
+      ? `waiting has no option value (${NO_OPTION_WHY[o.why]})`
+      : `the later game adds no option value (${NO_OPTION_WHY[o.why]})`;
+    return loses ? `hold: the swap loses expected points; ${none}` : `commit: ${none}`;
+  }
+  if (inFirst) {
+    if (loses)
+      return "hold: the swap loses expected points and gives up the option value of the later game";
+    return gain >= value
       ? "commit: the gain covers the option value of waiting"
-      : "hold: the gain does not cover the option value of the later game"
-    : "commit: starting the later player keeps the option open";
-  return { kind, value, verdict };
+      : "hold: the gain does not cover the option value of the later game";
+  }
+  if (!loses) return "commit: starting the later player keeps the option open";
+  return gain + value >= 0
+    ? "commit: the option value of the later game covers the expected points the swap loses"
+    : "hold: the swap loses more expected points than the option value of the later game";
 }
 
 // --- the season context ---------------------------------------------------------------------------------
@@ -802,8 +844,14 @@ interface ComparePair {
 /**
  * Why E2 cannot evaluate a `compare` pair against this roster — each reason names the player id:
  * the same player out and in, a player not on the roster, or a locked player (a locked player never
- * moves — A11a). Empty when the pair can be evaluated. analyzeLineup skips exactly the pairs with a
- * reason and compareWarnings reports them, so a pair is never dropped silently (changelog R5).
+ * moves — A11a). Then, for a pair of two unlocked rostered players, the pair must be the direct
+ * settable swap it names (changelog §R10, R10-24; the round-4 R4VS-4): `out` in a starting seat,
+ * `in` a player the optimizer could start in that seat — on the bench (not already starting, so
+ * never seated twice; not on IR, which the solve never starts from: `solve` keeps every IR slot)
+ * and eligible for `out`'s slot (canOccupySlot). Such a pair is never read as a chain the user did
+ * not name. Empty when the pair can be evaluated. analyzeLineup skips exactly the pairs with a
+ * reason and compareWarnings reports them, so a pair is never dropped silently and never scored
+ * (changelog R5).
  */
 function compareIssues(byId: ReadonlyMap<number, LineupPlayer>, c: ComparePair): string[] {
   if (c.out === c.in) return [`out and in are the same player ${String(c.out)}`];
@@ -813,13 +861,27 @@ function compareIssues(byId: ReadonlyMap<number, LineupPlayer>, c: ComparePair):
     if (p === undefined) issues.push(`player ${String(id)} is not on the roster`);
     else if (p.locked) issues.push(`player ${String(id)} is locked`);
   }
+  const o = byId.get(c.out);
+  const i = byId.get(c.in);
+  if (issues.length > 0 || o === undefined || i === undefined) return issues;
+  const starting = (p: LineupPlayer): boolean => {
+    const k = slotClassOf(p.slot_id);
+    return k === "starter" || k === "flex";
+  };
+  if (!starting(o)) issues.push(`player ${String(c.out)} is not starting`);
+  if (slotClassOf(i.slot_id) === "ir")
+    issues.push(`player ${String(c.in)} is on IR (the lineup never starts a player from IR)`);
+  else if (starting(i)) issues.push(`player ${String(c.in)} already starts`);
+  else if (starting(o) && !canOccupySlot(o.slot_id, i))
+    issues.push(`player ${String(c.in)} cannot play ${slotNameOf(o.slot_id)}`);
   return issues;
 }
 
 /**
  * The warnings[] entries for the `compare` pairs analyzeLineup does not evaluate (one per pair,
- * naming each offending player id; ids only — no third-party text). The tool adds them to the
- * envelope's warnings (changelog R5).
+ * naming each offending player id and the reason — a pair that is not the direct settable swap it
+ * names included, changelog §R10, R10-24; ids and fixed slot names only — no third-party text). The
+ * tool adds them to the envelope's warnings (changelog R5).
  */
 export function compareWarnings(
   players: readonly LineupPlayer[],
