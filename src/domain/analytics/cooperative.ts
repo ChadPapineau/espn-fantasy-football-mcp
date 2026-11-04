@@ -186,6 +186,91 @@ export async function runCooperative(
   opts: CooperativeOptions,
 ): Promise<CooperativeResult> {
   if (!Number.isInteger(units) || units < 0) throw new RangeError("cooperative: bad unit count");
+  return runBatches(
+    units,
+    (i) => {
+      step(i);
+      return true;
+    },
+    opts,
+  );
+}
+
+/** What a run of resumable work did (runCooperativeSteps). */
+export interface CooperativeStepsResult<T> extends CooperativeResult {
+  /** The work ran to its end (false: the deadline stopped it between two of its steps). */
+  readonly done: boolean;
+  /** The work's return value once it ran to its end; undefined when it did not. */
+  readonly value: T | undefined;
+}
+
+/**
+ * Runs resumable work in the same batches as runCooperative: one step is one `next()` of `work` (a
+ * generator that yields where its work may be cut — plan 03 §1.2's ≤ 20 ms CPU batch for a unit too
+ * coarse to be one step: one trade package's lineup solves, changelog §R10 timing items). The work
+ * runs in order exactly as one synchronous drain of it would (drainSteps), so the answer is the
+ * same wherever the batches end; the deadline stops it between two steps (`done: false`).
+ * `completed` counts the steps before the one that ended the work.
+ */
+export async function runCooperativeSteps<T>(
+  work: Iterator<unknown, T, undefined>,
+  opts: CooperativeOptions,
+): Promise<CooperativeStepsResult<T>> {
+  let end: { readonly value: T } | null = null;
+  const run = await runBatches(
+    Number.POSITIVE_INFINITY,
+    () => {
+      const r = work.next();
+      if (r.done !== true) return true;
+      end = { value: r.value };
+      return false;
+    },
+    opts,
+  );
+  // assigned in the step above (a closure the compiler does not follow)
+  const ended = end as { readonly value: T } | null;
+  return {
+    ...run,
+    completed: ended === null ? run.completed : run.completed - 1,
+    done: ended !== null,
+    value: ended?.value,
+  };
+}
+
+/**
+ * Drains resumable work synchronously (the same answer as runCooperativeSteps, in one turn): for a
+ * caller with no loop to share, and for tests comparing the two.
+ */
+export function drainSteps<T>(work: Generator<unknown, T, undefined>): T {
+  for (;;) {
+    const r = work.next();
+    if (r.done === true) return r.value;
+  }
+}
+
+/**
+ * Runs resumable synchronous work with the event loop running between its steps, through the
+ * process-wide turn gate (yieldTurn): each `yield` of `work` ends a turn. No deadline and no
+ * pacer: for a fixed transform of one value (the cache strip of a large ESPN body, a large view's
+ * schema parse — plan 03 §1.2, changelog §R10 timing items) whose answer is the drain's.
+ */
+export async function inTurns<T>(work: Generator<unknown, T, undefined>): Promise<T> {
+  for (;;) {
+    const r = work.next();
+    if (r.done === true) return r.value;
+    await yieldTurn();
+  }
+}
+
+/**
+ * The batching core of runCooperative and runCooperativeSteps: `step(i)` for i = 0, 1, … while
+ * i < units and the previous step said there is more (it returns false after the last one).
+ */
+async function runBatches(
+  units: number,
+  step: (i: number) => boolean,
+  opts: CooperativeOptions,
+): Promise<CooperativeResult> {
   const { pacer } = opts;
   const batchMs = Math.min(20, Math.max(1, opts.batchMs ?? COOPERATIVE.batchMs));
   const deadline = opts.deadlineMs === undefined ? COOPERATIVE.deadlineMs : opts.deadlineMs;
@@ -196,6 +281,8 @@ export async function runCooperative(
   let checkEvery = CHECK_MIN;
   /** The longest chunk timed in this run (ms, ≤ batchMs) — an upper bound on any one step seen. */
   let heaviest = 0;
+  /** The last step said there is nothing after it (runCooperativeSteps: the work's end). */
+  let ended = false;
   if (units > 0) await pacer.yieldToLoop();
   while (i < units) {
     const start = pacer.nowMs();
@@ -205,7 +292,14 @@ export async function runCooperative(
     for (;;) {
       const from = i;
       const end = Math.min(units, i + checkEvery);
-      for (; i < end; i++) step(i);
+      while (i < end) {
+        const more = step(i);
+        i += 1;
+        if (!more) {
+          ended = true;
+          break;
+        }
+      }
       const now = pacer.nowMs();
       const gap = now - last;
       last = now;
@@ -214,7 +308,7 @@ export async function runCooperative(
       if (gap < 0.5 && checkEvery < CHECK_MAX) checkEvery *= 2;
       else if (gap > 2 && checkEvery > CHECK_MIN) checkEvery = Math.max(CHECK_MIN, checkEvery >> 1);
       elapsed = now - start;
-      if (i >= units || elapsed >= batchMs) break;
+      if (i >= units || ended || elapsed >= batchMs) break;
       // the deadline inside a batch: the CPU spent so far in it when the pacer can peek its meter,
       // else the batch's time
       const used =
@@ -234,7 +328,7 @@ export async function runCooperative(
     batches += 1;
     maxBatch = Math.max(maxBatch, elapsed);
     await pacer.yieldToLoop();
-    if (i >= units) break;
+    if (i >= units || ended) break;
     if (deadline !== null && cpu >= deadline) {
       return { completed: i, partial: true, cpu_ms: cpu, batches, max_batch_ms: maxBatch };
     }
