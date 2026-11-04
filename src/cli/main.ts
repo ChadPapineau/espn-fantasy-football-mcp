@@ -100,10 +100,11 @@ export const USAGE = `usage: eff <command> [options]
   transactions [--force] [--notify]
                               append unseen league transactions
   transactions --backfill [--seasons 2024,2025]
-                              store the league's previous seasons' transactions (the waiver fit's
-                              own history; cookies on a private league; you run it once). Paced
-                              under ESPN's request limit, about 1.5 min for two seasons; a full
-                              window is waited out, Ctrl-C stops it, a re-run resumes
+                              store this season's transactions so far and the league's previous
+                              seasons' (the waiver fit's own history; after \`eff setup\` it fills
+                              the weeks a rejected session missed; cookies on a private league).
+                              Paced under ESPN's request limit, about 2 min; a full window is
+                              waited out, Ctrl-C stops it, a re-run resumes
   credential-check [--notify] the daily credential probe (launchd)
   pre-kickoff [--notify]      the check before the day's first kickoff (launchd)
   crosswalk rebuild [--notify] [--all]

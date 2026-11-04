@@ -58,7 +58,9 @@ import {
   stateNumber,
   stateToken,
   updateJobState,
+  updateJobStateWith,
   type JobState,
+  type JobStateValue,
 } from "./job-state.js";
 import type { Logger } from "./log.js";
 import { parseSeasons } from "./refresh.js";
@@ -663,7 +665,9 @@ export async function transactionsAppend(
   // request while rejected), so its pool rule never fires and the exception appended at most once
   // per rejection while saying "read keyless" on every wake (the round-3 review's R3B-CS-3). The
   // history resumes with the session: the next run re-reads the periods since its last one (up to
-  // TRANSACTIONS_MAX_PERIODS, any older gap said), and the tools read the feed live meanwhile
+  // TRANSACTIONS_MAX_PERIODS, any older gap said and kept), `eff transactions --backfill` after
+  // `eff setup` fills the periods the job did not read (changelog §R10, R10-17), and the tools read
+  // the feed live meanwhile
   const run = await startJob(io, config, log, job, {
     ...opts,
     keylessOnPublicWhenRejected: opts.force,
@@ -719,12 +723,15 @@ export async function transactionsAppend(
       added += run.store.repos.transactionsSeen.appendNew(page.value.items, io.clock.nowIso());
       if (period === week) executedNow = executedCount(page.value.items);
     }
-    updateJobState(config.cacheDir, {
+    // a gap is kept until a backfill reads it (changelog §R10, R10-17: unreadTransactionPeriods)
+    const gap = plan.gap;
+    updateJobStateWith(config.cacheDir, (s) => ({
       ...(poolAt === null ? {} : { "transactions.after": poolAt }),
       "transactions.season": config.season,
       "transactions.period": week,
       "transactions.period_executed": executedNow,
-    });
+      ...(gap === null ? {} : gapPatch(s, config.season, gap.from)),
+    }));
     await writeLine(
       io.stdout,
       `${job}: ${String(added)} new transaction(s) appended (week${plan.read.length > 1 ? "s" : ""} ${plan.read.join(", ")})`,
@@ -733,7 +740,7 @@ export async function transactionsAppend(
       log.warn("transactions.gap", { from: plan.gap.from, to: plan.gap.to });
       await writeLine(
         io.stdout,
-        `${job}: warning: scoring period(s) ${String(plan.gap.from)}–${String(plan.gap.to)} were not read (the job did not run then): the moves made in them since the last run are missing from transactions_seen`,
+        `${job}: warning: scoring period(s) ${String(plan.gap.from)}–${String(plan.gap.to)} were not read (the job did not run then): the moves made in them since the last run are missing from transactions_seen; \`eff transactions --backfill\` reads them`,
       );
     }
     jobWorked(io, config, job);
@@ -765,6 +772,91 @@ export interface BackfillSeason {
   readonly added: number;
   /** A fixed code when ESPN does not serve the season to these cookies (it is skipped). */
   readonly skipped: string | null;
+  /** The configured season's periods `from`–`to` (changelog §R10, R10-17), else null. */
+  readonly current?: { readonly from: number; readonly to: number } | null;
+}
+
+/**
+ * The job-state patch that keeps the oldest unread period of `season` (`transactions.gap_from`,
+ * `transactions.gap_season`): a gap transactionsAppend found is kept until a backfill reads it
+ * (changelog §R10, R10-17), the older of two gaps of the same season winning.
+ */
+export function gapPatch(
+  state: JobState,
+  season: number,
+  from: number,
+): Record<string, JobStateValue> {
+  const kept =
+    stateNumber(state, "transactions.gap_season") === season
+      ? stateNumber(state, "transactions.gap_from")
+      : null;
+  return {
+    "transactions.gap_season": season,
+    "transactions.gap_from": kept === null ? from : Math.min(kept, from),
+  };
+}
+
+/**
+ * The first period of `season` the transactions job has not read through `current` (changelog
+ * §R10, R10-17), or null: the gap it said and kept (gapPatch), else — when its last read is behind
+ * `current` — that period (re-read, as the job re-reads it). A rejected session holds the job (plan
+ * 06 §1.4), so the weeks it sat out are read back by `eff transactions --backfill` after `eff
+ * setup`, from here. Null when the job never read this season (nothing recorded to fill: `--seasons`
+ * names the current season to read it whole) or has read through `current` with no gap kept.
+ */
+export function unreadTransactionPeriods(
+  state: JobState,
+  season: number,
+  current: number,
+): number | null {
+  const gap =
+    stateNumber(state, "transactions.gap_season") === season
+      ? stateNumber(state, "transactions.gap_from")
+      : null;
+  const last =
+    stateNumber(state, "transactions.season") === season
+      ? stateNumber(state, "transactions.period")
+      : null;
+  const behind = last !== null && Number.isInteger(last) && last < current ? last : null;
+  const from = [gap, behind].filter((x): x is number => x !== null && Number.isInteger(x));
+  return from.length === 0 ? null : Math.min(...from);
+}
+
+/**
+ * After a backfill read `season`'s periods `from`–`to` (changelog §R10, R10-17), under the job-state
+ * lock: the transactions job's state reads as having read through `to` — `transactions.period` and
+ * the executed moves that read listed (the tripwire's record, as transactionsAppend writes it) — so
+ * its next run re-reads from there and never says, as a gap, the periods the backfill filled; a kept
+ * gap the read covered is cleared. Only forward: a job run that already read as far keeps its own
+ * record, and `transactions.after` (the pool run the job last answered) is never touched.
+ */
+export function backfillCaughtUp(
+  cacheDir: string,
+  season: number,
+  read: { readonly from: number; readonly to: number; readonly executed: number },
+): void {
+  updateJobStateWith(cacheDir, (s) => {
+    const recorded =
+      stateNumber(s, "transactions.season") === season
+        ? stateNumber(s, "transactions.period")
+        : null;
+    const gap =
+      stateNumber(s, "transactions.gap_season") === season
+        ? stateNumber(s, "transactions.gap_from")
+        : null;
+    return {
+      ...(recorded !== null && recorded >= read.to
+        ? {}
+        : {
+            "transactions.season": season,
+            "transactions.period": read.to,
+            "transactions.period_executed": read.executed,
+          }),
+      ...(gap !== null && gap >= read.from
+        ? { "transactions.gap_season": null, "transactions.gap_from": null }
+        : {}),
+    };
+  });
 }
 
 /** Whether a read's answer came from ESPN (a cache hit sent nothing: the next read is not paced). */
@@ -779,6 +871,14 @@ const wentUpstream = (r: { readonly stamp: { readonly cache: string } }): boolea
  * owner (an interactive `server` origin: never the jobs' daily caps), read host only, under the
  * limiter; idempotent (appendNew dedups by transaction id). Default: the league's newest
  * BACKFILL_DEFAULT_SEASONS previous seasons; a season ESPN does not serve is skipped and said.
+ *
+ * The current season (changelog §R10, R10-17): a rejected session holds every launchd job (plan 06
+ * §1.4), the transactions job included, so the weeks it sat out are missing from transactions_seen.
+ * After `eff setup` this command reads them first: the periods the job has not read
+ * (unreadTransactionPeriods — the gap it said, or the weeks since its last read) through the current
+ * one; `--seasons` naming the current season reads it whole. Rows already stored are never stored
+ * twice, and the job's state then reads as caught up (backfillCaughtUp), so its next run re-reads
+ * only the current period and never says the gap the backfill filled.
  *
  * The run is more reads than one limiter window holds (plan 01 §6: 30/min; the default is one
  * settings read plus one per scoring period of each season, ~37): every read goes through a
@@ -806,9 +906,9 @@ export async function transactionsBackfill(
   let asked: number[] | null = null;
   if (opts.seasons !== undefined) {
     asked = parseSeasons(opts.seasons);
-    if (asked.some((y) => y >= config.season))
+    if (asked.some((y) => y > config.season))
       throw new UsageError(
-        `transactions --backfill: --seasons takes previous seasons only (before ${String(config.season)})`,
+        `transactions --backfill: --seasons takes this season or previous ones (up to ${String(config.season)})`,
       );
     if (asked.length > BACKFILL_MAX_SEASONS)
       throw new UsageError(
@@ -824,7 +924,8 @@ export async function transactionsBackfill(
     clock: io.clock,
     ...(io.sleep === undefined ? {} : { sleep: io.sleep }),
     signal: opts.signal ?? null,
-    plannedReads: planOf(asked?.length ?? BACKFILL_DEFAULT_SEASONS, asked === null),
+    // the default's current-season pass (when the job left periods unread) counts as one more season
+    plannedReads: planOf(asked?.length ?? BACKFILL_DEFAULT_SEASONS + 1, asked === null),
     onWait: (w) => writeLine(io.stderr, paceWaitText(job, w)),
     // the shared bucket's newest rows, read-only: a window another process filled, or one without
     // room for the read inside the run's share (its retries counted), is waited for before the
@@ -835,15 +936,27 @@ export async function transactionsBackfill(
   let stored = 0;
   try {
     const ref = run.stack.ref;
-    const seasons =
-      asked ??
-      [
-        ...(await paced.read((o) => run.stack.provider.getLeague(ref, o), wentUpstream)).value
-          .previous_seasons,
-      ]
-        .filter((y) => y < config.season)
-        .sort((a, b) => b - a)
-        .slice(0, BACKFILL_DEFAULT_SEASONS);
+    // the default: the periods of the current season the transactions job left unread first (the
+    // gap a rejected session left — changelog §R10, R10-17), then the newest previous seasons
+    let unreadFrom: number | null = null;
+    let seasons: number[];
+    if (asked !== null) seasons = asked;
+    else {
+      const league = (await paced.read((o) => run.stack.provider.getLeague(ref, o), wentUpstream))
+        .value;
+      unreadFrom = unreadTransactionPeriods(
+        readJobState(config.cacheDir),
+        config.season,
+        league.clock.current_scoring_period,
+      );
+      seasons = [
+        ...(unreadFrom === null ? [] : [config.season]),
+        ...[...league.previous_seasons]
+          .filter((y) => y < config.season)
+          .sort((a, b) => b - a)
+          .slice(0, BACKFILL_DEFAULT_SEASONS),
+      ];
+    }
     if (seasons.length === 0) {
       jobIdle(io, config, job);
       await writeLine(io.stdout, `${job}: the league has no previous season to read`);
@@ -853,13 +966,19 @@ export async function transactionsBackfill(
     const done: BackfillSeason[] = [];
     for (const season of seasons) {
       const sref = { ...ref, season };
+      const current = season === config.season;
       let first: number;
       let last: number;
       try {
         const clock = (await paced.read((o) => run.stack.provider.getLeague(sref, o), wentUpstream))
           .value.clock;
-        first = Math.max(1, clock.first_scoring_period);
-        last = Math.max(first, clock.final_scoring_period);
+        const opening = Math.max(1, clock.first_scoring_period);
+        const final = Math.max(opening, clock.final_scoring_period);
+        // the current season through the period it is in (never a week not yet played), from the
+        // first period the job left unread (the default) or its first (named by --seasons)
+        last = current ? Math.min(final, Math.max(opening, clock.current_scoring_period)) : final;
+        first =
+          current && unreadFrom !== null ? Math.min(last, Math.max(opening, unreadFrom)) : opening;
       } catch (e) {
         // a season ESPN does not serve this league is skipped, never fatal; no cookie stored for
         // a private league is no such season — it is the run's credential failure (exit 3, `eff
@@ -875,6 +994,7 @@ export async function transactionsBackfill(
       paced.plan(planned);
       let read = 0;
       let added = 0;
+      let executedLast = 0;
       for (let week = first; week <= last; week++) {
         // each read under its own budget, which the run's signal aborts (espn-pacing.ts)
         const page = await paced.read(
@@ -896,22 +1016,39 @@ export async function transactionsBackfill(
         const n = run.store.repos.transactionsSeen.appendNew(page.value.items, io.clock.nowIso());
         added += n;
         stored += n;
+        if (week === last) executedLast = executedCount(page.value.items);
       }
-      done.push({ season, weeks: last - first + 1, read, added, skipped: null });
+      if (current)
+        backfillCaughtUp(config.cacheDir, season, {
+          from: first,
+          to: last,
+          executed: executedLast,
+        });
+      done.push({
+        season,
+        weeks: last - first + 1,
+        read,
+        added,
+        skipped: null,
+        current: current ? { from: first, to: last } : null,
+      });
     }
     for (const d of done)
       await writeLine(
         io.stdout,
         d.skipped === null
-          ? `${job}: season ${String(d.season)}: ${String(d.weeks)} week(s) read, ${String(d.read)} transaction(s), ${String(d.added)} new`
+          ? `${job}: season ${String(d.season)}: ${String(d.weeks)} week(s) read, ${String(d.read)} transaction(s), ${String(d.added)} new${d.current === undefined || d.current === null ? "" : ` (this season, weeks ${String(d.current.from)}–${String(d.current.to)})`}`
           : `${job}: season ${String(d.season)}: not served (${d.skipped}) — skipped`,
       );
     const total = done.reduce((a, d) => a + d.added, 0);
     const readAny = done.some((d) => d.skipped === null);
+    const readPrevious = done.some(
+      (d) => d.skipped === null && (d.current === undefined || d.current === null),
+    );
     await writeLine(
       io.stdout,
       readAny
-        ? `${job}: ${String(total)} new transaction(s) stored — espn_analyze_waivers fits its premium from them`
+        ? `${job}: ${String(total)} new transaction(s) stored${readPrevious ? " — espn_analyze_waivers fits its premium from them" : ""}`
         : `${job}: no season could be read — nothing stored; espn_analyze_waivers keeps the basis it has`,
     );
     if (!readAny) {

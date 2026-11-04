@@ -136,6 +136,9 @@ describe("eff transactions --backfill (R6-3: the league's previous seasons are i
     const { code, io } = await runBackfill(f);
     expect(io.err.text.split("\n").filter((l) => l.startsWith("eff "))).toEqual([]);
     expect(code).toBe(0);
+    // the transactions job never read this season, so no period of it is the backfill's to fill
+    // (changelog §R10, R10-17: transactions-rejection-gap.test.ts)
+    expect(io.out.text).not.toContain("season 2026");
     expect(io.out.text).toContain("season 2025: 17 week(s) read, 17 transaction(s), 17 new");
     expect(io.out.text).toContain("season 2024: 17 week(s) read, 17 transaction(s), 17 new");
     // every scoring period of both seasons was asked, on the read host
@@ -178,11 +181,12 @@ describe("eff transactions --backfill (R6-3: the league's previous seasons are i
     expect(io.out.text).toContain("season 2025: 17 week(s) read");
   }, 60_000);
 
-  it("refuses the current season and a --seasons without --backfill (usage)", async () => {
+  it("refuses a season after the configured one and a --seasons without --backfill (usage)", async () => {
     sb = sandbox();
+    // the current season is read since changelog §R10, R10-17 (transactions-rejection-gap.test.ts)
     const io = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0", ESPN_SEASON: "2026" } });
-    expect(await main(["transactions", "--backfill", "--seasons", "2026"], io)).toBe(2);
-    expect(io.err.text).toContain("previous seasons only");
+    expect(await main(["transactions", "--backfill", "--seasons", "2027"], io)).toBe(2);
+    expect(io.err.text).toContain("this season or previous ones (up to 2026)");
     const io2 = makeIo(sb, { env: { ESPN_LEAGUE_ID: "0", ESPN_SEASON: "2026" } });
     expect(await main(["transactions", "--seasons", "2025"], io2)).toBe(2);
   });
