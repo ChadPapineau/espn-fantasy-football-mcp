@@ -98,7 +98,11 @@
 // holds never sees it. Matching time is linear in the item's length: the fold, the breaks and the
 // quotes are one pass each, a label reads a bounded window around each name (each form in it once per
 // item: adjacent mentions share their windows' words), the scan each word once, and the forms of
-// several words around the surnames one pass over the item, when one first asks.
+// several words around the surnames one pass over the item, when one first asks; a team mention is
+// checked against the one name it may overlap, and a name reads the team mentions within its attach
+// window only (binary searches over both lists, in text order). Changelog §R10, R10-16 holds this by
+// count (work.ts): the scans of every name at each team mention and of every team mention at each
+// name were quadratic in the item, each cheap per mention, so no timing ratio saw them.
 import { GSIS_ID_RE, type NflTeam } from "../../config/schema.js";
 import { mergeName, NAME_SUFFIXES } from "../../domain/crosswalk/normalize.js";
 import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
@@ -106,13 +110,16 @@ import { sanitizeText } from "../../domain/league/types.js";
 import type { NewsMatchMethod } from "../../store/datasets/derive.js";
 import { markBreaks, sharedReading, type LabelPart, type SharedReading } from "./labels.js";
 import { KNOWN_POSITION_IDS } from "./positions.js";
+import { matchWork } from "./work.js";
 import {
+  ATTACH_WINDOW,
   attachedTeams,
   movedTeams,
   TEAM_HOMES,
   TEAM_NICKNAMES,
   TEAM_WORDS,
   teamMentions,
+  type TeamMention,
 } from "./teams.js";
 
 /** One player of the ESPN universe the matcher reads (ds_players + the crosswalk's gsis id). */
@@ -368,6 +375,7 @@ function tokenize(text: string, cache: Map<string, string | null>): (Token | nul
           },
     );
   }
+  step(text.length + out.length);
   return out;
 }
 
@@ -399,6 +407,44 @@ interface Occurrence {
 
 const owned = (p: NewsUniversePlayer): number => p.percent_owned ?? 0;
 
+/** Counts `n` steps of the matcher's work while a count is open (work.ts; changelog §R10, R10-16). */
+function step(n: number): void {
+  if (matchWork !== null) matchWork.steps += n;
+}
+
+/**
+ * The first index of the sorted, non-overlapping [start, end) spans whose end passes `at` (their ends
+ * are sorted too), by a binary search: `spans.length` when none does.
+ */
+function firstEndingAfter(spans: readonly { readonly end: number }[], at: number): number {
+  let lo = 0;
+  let hi = spans.length;
+  let halvings = 1;
+  while (lo < hi) {
+    halvings++;
+    const mid = (lo + hi) >> 1;
+    if ((spans[mid]?.end ?? 0) <= at) lo = mid + 1;
+    else hi = mid;
+  }
+  step(halvings);
+  return lo;
+}
+
+/** The first index of the spans (sorted by start) whose start passes `at`, by a binary search. */
+function firstStartingAfter(spans: readonly { readonly start: number }[], at: number): number {
+  let lo = 0;
+  let hi = spans.length;
+  let halvings = 1;
+  while (lo < hi) {
+    halvings++;
+    const mid = (lo + hi) >> 1;
+    if ((spans[mid]?.start ?? 0) <= at) lo = mid + 1;
+    else hi = mid;
+  }
+  step(halvings);
+  return lo;
+}
+
 /** Whether `a` is rostered so much more widely than `b` that an item may be about `a` instead. */
 const outshines = (a: NewsUniversePlayer, b: NewsUniversePlayer): boolean =>
   owned(a) >= PROMINENT_OWNED && owned(a) >= PROMINENCE_RATIO * owned(b);
@@ -417,6 +463,7 @@ function suffixOf(fullName: string): string | null {
  * or null when none does.
  */
 function prominentOf<P extends NewsUniversePlayer>(holders: readonly P[]): P | null {
+  step(holders.length);
   const ranked = [...holders].sort((a, b) => owned(b) - owned(a));
   const top = ranked[0];
   if (top === undefined || owned(top) < PROMINENT_OWNED) return null;
@@ -467,7 +514,9 @@ function labelledHolder(
   blockers: readonly (Held | null)[],
 ): Held | null {
   let him: Held | null = null;
+  step(blockers.length * parts.length);
   for (const p of holders) {
+    step(parts.length);
     const fit = labelFit(p, parts);
     if (fit === "out") continue;
     if (fit === "open" || him !== null) return null;
@@ -548,6 +597,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
 
   const normCache = new Map<string, string | null>();
   const matchItem = (raw: string): NewsItemMatch => {
+    step(raw.length);
     const text = sanitizeText(raw, MATCH_TEXT_CAP).value;
     const tokens = tokenize(text, normCache);
     const consumed = new Array<boolean>(tokens.length).fill(false);
@@ -585,6 +635,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
      * f41e810 keeps ("JUSTIN JEFFERSON'S"), read for a shared name only.
      */
     const spells = (i: number, e: Entry, kept: boolean): boolean => {
+      step(e.key.length);
       if (i + e.key.length > tokens.length) return false;
       for (let k = 0; k < e.key.length; k++) {
         const tk = tokens[i + k];
@@ -620,16 +671,33 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       names.push({ at: i, entry: e, start: t.start, end: endTok?.end ?? t.end, suffix });
       i = after === null ? last : last + 1;
     }
+    step(tokens.length);
 
     // 2. the teams the item names as its subject's (the unique names' reading, as at f41e810): a
     // word of a name it holds, or that name's surname alone, is the person; a team named only as
     // the opponent is not the subject's
     const surnames = new Set(names.map(({ entry }) => entry.key[entry.key.length - 1] ?? ""));
+    step(names.length);
+    // the names are in text order and never overlap: the one a mention may overlap is the first that
+    // ends after its start (a binary search; a scan of every name at each mention was quadratic in
+    // the item — changelog §R10, R10-16's count)
+    const inName = (m: { readonly start: number; readonly end: number }): boolean =>
+      (names[firstEndingAfter(names, m.start)]?.start ?? Number.POSITIVE_INFINITY) < m.end;
     const mentions = teamMentions(text).filter(
-      (m) =>
-        !names.some((s) => m.start < s.end && s.start < m.end) &&
-        !surnames.has(normOf(text.slice(m.start, m.end), normCache) ?? ""),
+      (m) => !inName(m) && !surnames.has(normOf(text.slice(m.start, m.end), normCache) ?? ""),
     );
+    step(2 * mentions.length);
+    /**
+     * The mentions an attached or moved team may be read from for the name at [start, end): those
+     * within ATTACH_WINDOW of it (teams.ts reads no other). The mentions are in text order and never
+     * overlap, so they are one run of the list, found by two binary searches; the whole list at each
+     * name was quadratic in the item (changelog §R10, R10-16's count).
+     */
+    const near = (start: number, end: number): readonly TeamMention[] => {
+      const from = firstEndingAfter(mentions, start - ATTACH_WINDOW - 1);
+      const to = firstStartingAfter(mentions, end + ATTACH_WINDOW);
+      return from < to ? mentions.slice(from, to) : [];
+    };
     const subject = new Set(mentions.filter((m) => !m.opponent).map((m) => m.team));
     const onTeam = (p: NewsUniversePlayer): boolean => p.team !== null && subject.has(p.team);
     const named = new Set(mentions.map((m) => m.team));
@@ -639,6 +707,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
     // ("Dallas Goedert" names no team). A surname standing alone may be a team ("Washington"), so the
     // scan reads it (fail closed: it only takes the residual away)
     const spans = names.map((n): readonly [number, number] => [n.start, n.end]);
+    step(names.length);
     let reading: SharedReading | null = null;
     const read = (): SharedReading => {
       if (reading !== null) return reading;
@@ -657,6 +726,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
     const contrasted = (
       labels: readonly { at: number; parts: readonly LabelPart[] }[],
     ): boolean => {
+      step(2 * labels.length);
       const bare = new Set(
         labels.filter((l) => l.parts.length === 0).map((l) => read().segment(l.at)),
       );
@@ -667,6 +737,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
     // bare surname. A surname right after a coaching-staff word is that staff member, not a player
     // (whatever the staff word's case — "Bengals coach Corbin" as much as "Coach Corbin")
     const endingWith = new Map<string, Set<Entry>>();
+    step(names.length);
     for (const n of names) {
       const last = n.entry.key[n.entry.key.length - 1] ?? "";
       const set = endingWith.get(last) ?? new Set<Entry>();
@@ -748,6 +819,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       // another player of the surname ("Justin Jefferson: … | Jefferson caught …"; f41e810 for a name
       // one universe player holds). R8-7 (4): for a shared name it is a mention of that name, and a
       // label next to it is the name's label; R8-7 (5): a suffix written after it is the name's spelling
+      step(of.ending.size);
       const shared = [...of.ending].filter((e) => e.players.length > 1);
       if (shared.length === 0 || noMention(i, t)) continue;
       const suffix = suffixAfter(i);
@@ -757,12 +829,14 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         if (parts.length > 0) for (const e of shared) crossed.add(e);
         continue;
       }
+      step(shared.length);
       for (const e of shared) {
         const list = surnameMentions.get(e) ?? [];
         list.push({ i, at: t.start, parts, suffix: suffix?.norm ?? null });
         surnameMentions.set(e, list);
       }
     }
+    step(tokens.length);
     /**
      * Whether a surname written alone, before a labelled mention in its segment, may be the other
      * holder ("Justin Jefferson: Catches TD | Jefferson beat Browns LB Jefferson …"): no label picks.
@@ -774,6 +848,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       labels: readonly { at: number; parts: readonly LabelPart[] }[],
     ): boolean => {
       const lastLabel = new Map<number, number>();
+      step(labels.length + alone.length);
       for (const l of labels)
         if (l.parts.length > 0) {
           const g = read().segment(l.at);
@@ -786,11 +861,20 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
     /** The suffixes written after mentions (R8-7 (5)): a holder ESPN spells otherwise is excluded. */
     const spelledBy =
       (written: ReadonlySet<string>) =>
-      (p: Held): boolean =>
-        [...written].every((x) => p.suffix === x);
+      (p: Held): boolean => {
+        step(written.size);
+        return [...written].every((x) => p.suffix === x);
+      };
 
-    // 4. who each full name is
+    // 4. who each full name is; a shared name's occurrences, in text order, gathered in one pass
     const decided = new Set<string>();
+    const occurrences = new Map<Entry, Occurrence[]>();
+    step(2 * names.length);
+    for (const n of names) {
+      const list = occurrences.get(n.entry);
+      if (list === undefined) occurrences.set(n.entry, [n]);
+      else list.push(n);
+    }
     for (const occ of names) {
       const { at, entry } = occ;
       if (entry.players.length === 1) {
@@ -798,9 +882,10 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         // written next to the name or tied to it by a roster move ("Bengals sign CB Lamar Jackson")
         const p = entry.players[0];
         if (p === undefined) continue;
+        const around = near(occ.start, occ.end);
         const attached = new Set([
-          ...attachedTeams(text, mentions, occ.start, occ.end),
-          ...movedTeams(text, mentions, occ.start, occ.end),
+          ...attachedTeams(text, around, occ.start, occ.end),
+          ...movedTeams(text, around, occ.start, occ.end),
         ]);
         const own = onTeam(p) || (p.team !== null && attached.has(p.team));
         add(p, own ? "full_name_team" : "full_name", at);
@@ -811,8 +896,9 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       const key = entry.key.join(" ");
       if (decided.has(key)) continue;
       decided.add(key);
-      const all = names.filter((n) => n.entry === entry);
+      const all = occurrences.get(entry) ?? [];
       const alone = surnameMentions.get(entry) ?? [];
+      step(2 * (all.length + alone.length));
       // R8-7 (5): a suffix written after a mention, the full name's or its surname's, excludes every
       // holder ESPN spells otherwise; it narrows the holders a label can fit, and the residual goes only
       // to the prominent holder it does not exclude
@@ -846,6 +932,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
 
     // 5. bare surnames: a unique one on a team the item names (f41e810); a shared one by its label
     const sharedSurnames = new Map<string, Mention[]>();
+    step(bare.length);
     for (const i of bare) {
       const t = tokens[i];
       if (t === null || t === undefined) continue;
@@ -872,7 +959,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
         const only = sharers?.[0];
         const team = only?.team ?? null;
         if (team === null || only === undefined || named.size === 0) continue;
-        if (attachedTeams(text, mentions, t.start, t.end).has(team) || onTeam(only))
+        if (attachedTeams(text, near(t.start, t.end), t.start, t.end).has(team) || onTeam(only))
           add(only, "last_name_team", i);
         continue;
       }
@@ -890,6 +977,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
     }
     for (const [norm, labels] of sharedSurnames) {
       const all = bySurname.get(norm) ?? [];
+      step(all.length + 2 * labels.length);
       // R8-7 (5): a suffix written after a mention excludes every sharer ESPN spells otherwise
       const spelled = spelledBy(
         new Set(labels.flatMap((l) => (l.suffix === null ? [] : [l.suffix]))),
@@ -912,6 +1000,7 @@ export function buildPlayerMatcher(universe: readonly NewsUniversePlayer[]): Pla
       else unresolved++;
     }
 
+    step(found.size);
     const refs = [...found.values()]
       .sort(
         (a, b) => b.match_confidence - a.match_confidence || a.at - b.at || a.espn_id - b.espn_id,

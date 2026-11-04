@@ -83,7 +83,9 @@
 // share their words: "Houston Houston …"), and the forms of several words a surname may stand in are
 // one pass over the item, read when the first surname near a form's first word asks. A form of several
 // words is looked up only after a word that opens one, and past it only after two that do; a written
-// form's lookups are remembered (bounded).
+// form's lookups are remembered (bounded). The work count (work.ts; changelog §R10, R10-16) adds a
+// step for each iteration of these passes, walks and windows and for each form looked up; it changes
+// nothing they read or return.
 import type { NflTeam } from "../../config/schema.js";
 import {
   isAmbiguousLabelWord,
@@ -94,6 +96,12 @@ import {
   positionWordIds,
 } from "./positions.js";
 import { TEAM_HOMES, TEAM_NICKNAMES } from "./teams.js";
+import { matchWork } from "./work.js";
+
+/** Counts `n` steps of the matcher's work while a count is open (work.ts). */
+function step(n: number): void {
+  if (matchWork !== null) matchWork.steps += n;
+}
 
 /** The homes that hold two teams: a team of either ("the Los Angeles Rams", "New York's"). */
 export const SHARED_HOMES: Readonly<Record<string, readonly NflTeam[]>> = Object.freeze({
@@ -528,14 +536,17 @@ function trieOf(entries: Iterable<readonly [string, readonly NflTeam[]]>): Trie 
 }
 /** Adds the teams of every trie form standing anywhere in `s` to `out`. */
 function trieTeams(trie: Trie, s: string, out: Set<NflTeam>): void {
+  let walked = 0;
   for (let i = 0; i < s.length; i++) {
     let node: Trie | undefined = trie;
     for (let j = i; j < s.length; j++) {
+      walked++;
       node = node.next.get(s[j] ?? "");
       if (node === undefined) break;
       for (const t of node.teams ?? []) out.add(t);
     }
   }
+  step(walked);
 }
 /** The longest compound read (bounded work): "www.philadelphiaeagles.com" fits. */
 const MAX_COMPOUND = 64;
@@ -618,6 +629,7 @@ const KEYED_CACHE = new Map<string, Keyed>();
 const KEYED_CACHE_MAX = 65_536;
 /** A written form's lookups, remembered (an item repeats its words; bounded work, bounded memory). */
 function keyedOf(written: string): Keyed {
+  step(written.length + 1);
   const hit = KEYED_CACHE.get(written);
   if (hit !== undefined) return hit;
   const key = formKey(written.split(" ").map(wordOf).join(" "));
@@ -727,6 +739,7 @@ function foldText(text: string): Folded {
     i += n;
   }
   at[text.length] = len;
+  step(text.length);
   return { text: out.join(""), at };
 }
 
@@ -750,7 +763,9 @@ const MAX_DECODE = 8;
  */
 export function markBreaks(raw: string): string {
   let s = raw;
-  for (let k = 0; k < MAX_DECODE && /&amp;/iu.test(s); k++) s = s.replace(AMP_RE, "&");
+  let k = 0;
+  for (; k < MAX_DECODE && /&amp;/iu.test(s); k++) s = s.replace(AMP_RE, "&");
+  step(raw.length * (k + 5));
   s = s.replace(LT_RE, "<").replace(GT_RE, ">");
   return s.replace(TAG_RE, ` ${BREAK_MARK} `).replace(LINE_RE, ` ${BREAK_MARK} `);
 }
@@ -776,6 +791,7 @@ function breakOffsets(text: string, marked: string): Uint8Array {
     else if (text[i] === " ") i++;
     else break;
   }
+  step(i + j + 1);
   return out;
 }
 
@@ -800,6 +816,7 @@ function wordStartBefore(s: string, end: number): number {
     else if (isJoiner(s[i - 1]) && i < end && isWordChar(s[i]) && isWordChar(s[i - 2])) i--;
     else break;
   }
+  step(end - i + 1);
   return i < end ? i : -1;
 }
 
@@ -811,6 +828,7 @@ function wordEndAfter(s: string, start: number): number {
     else if (isJoiner(s[i]) && i > start && isWordChar(s[i - 1]) && isWordChar(s[i + 1])) i++;
     else break;
   }
+  step(i - start + 1);
   return i > start ? i : -1;
 }
 
@@ -818,11 +836,14 @@ function wordEndAfter(s: string, start: number): number {
 function overlaps(spans: Spans, a: number, b: number): boolean {
   let lo = 0;
   let hi = spans.length;
+  let halvings = 1;
   while (lo < hi) {
+    halvings++;
     const mid = (lo + hi) >> 1;
     if ((spans[mid]?.[1] ?? 0) <= a) lo = mid + 1;
     else hi = mid;
   }
+  step(halvings);
   const s = spans[lo];
   return s !== undefined && s[0] < b;
 }
@@ -902,11 +923,13 @@ export function sharedReading(
   const brk = new Uint8Array(s.length + 1);
   if (marked !== null) {
     const raw = breakOffsets(text, marked);
+    step(raw.length);
     for (let i = 0; i < raw.length; i++) if (raw[i] === 1) brk[at[i] ?? 0] = 1;
   }
   const { closes, caps, segments } = passOf(s, brk);
   /** Whether a break sits in the gap (a, b]. */
   const breakIn = (a: number, b: number): boolean => {
+    step(Math.max(1, b - a));
     for (let k = a + 1; k <= b; k++) if (brk[k] === 1) return true;
     return false;
   };
@@ -920,6 +943,7 @@ export function sharedReading(
   const wordBefore = (from: number): string | null => {
     let e = from;
     while (e > 0 && s[e - 1] === " ") e--;
+    step(from - e + 1);
     if (e === from || breakIn(e, from)) return null;
     if (s[e - 1] === "@") return "@";
     const period = s[e - 1] === ".";
@@ -964,6 +988,7 @@ export function sharedReading(
       out.push({ start: b, end: e });
       let g = b;
       while (g > 0 && s[g - 1] === " ") g--;
+      step(b - g + 1);
       if (g === b || g === 0 || breakIn(g, b)) break;
       e = g;
     }
@@ -977,6 +1002,7 @@ export function sharedReading(
   const readFormEndingAt = (end: number, possessive: boolean, period: boolean): FormHit | null => {
     const words = wordsBefore(end, period);
     for (let n = words.length; n >= 1; n--) {
+      step(n);
       const first = words[n - 1];
       if (first === undefined) continue;
       // a form of several words opens with a head, and its first two words with a pair (bounded work:
@@ -1015,6 +1041,7 @@ export function sharedReading(
   const endings: (FormHit | null)[] = [];
   const formEndingAt = (end: number, possessive: boolean, period: boolean): FormHit | null => {
     // `period` is read only where the last word ends with one (`startOf`)
+    step(1);
     const dotted = period && s[end - 1] === ".";
     const key = end * 4 + (possessive ? 2 : 0) + (dotted ? 1 : 0);
     endingIndex ??= new Int32Array(4 * (s.length + 1));
@@ -1029,6 +1056,7 @@ export function sharedReading(
   const labelEnd = (pos: number): { end: number; possessive: boolean } | null => {
     let end = pos;
     while (end > 0 && s[end - 1] === " ") end--;
+    step(pos - end + 1);
     if (end === pos || end === 0 || breakIn(end, pos)) return null;
     // a possessive on the label's last word ("Browns'", "Cleveland's", "L.A.'S"); a quotation's
     // closing mark is punctuation
@@ -1052,6 +1080,7 @@ export function sharedReading(
     const read: ReadPart[] = [];
     let pos = start;
     for (let n = 0; n < MAX_LABEL_WORDS; n++) {
+      step(1);
       const le = labelEnd(pos);
       if (le === null) break;
       const hit = formEndingAt(le.end, le.possessive, le.possessive || n > 0);
@@ -1119,11 +1148,13 @@ export function sharedReading(
       const d = s[e] === "." ? e + 1 : e;
       let g = d;
       while (s[g] === " ") g++;
+      step(g - d + 1);
       if (g === d || breakIn(e, g) || !isWordChar(s[g])) break;
       b = g;
     }
     if (words.length === 0) return null;
     for (let k = words.length; k >= 1; k--) {
+      step(k);
       const last = words[k - 1];
       if (last === undefined) continue;
       // the item ends with its last word, and with that word's own period
@@ -1146,6 +1177,7 @@ export function sharedReading(
     const e = wordEndAfter(s, i);
     const written = s.slice(i, e);
     const pieces = written.includes("-") ? written.split("-") : [];
+    step(written.length + pieces.length);
     const place: Place = { caps: caps[i] === 1, after: NEVER, tag: true, hash: false };
     const split = pieces.map((w) => formAt(w, place));
     if (split.length === 0 || !split.every((x) => x !== null)) return null;
@@ -1158,6 +1190,7 @@ export function sharedReading(
   let itemIndex: Int32Array | null = null;
   const items: (TagItem | null)[] = [];
   const itemAt = (at: number): TagItem | null => {
+    step(1);
     itemIndex ??= new Int32Array(s.length + 1);
     const k = itemIndex[at] ?? 0;
     if (k > 0) return items[k - 1] ?? null;
@@ -1177,6 +1210,7 @@ export function sharedReading(
     for (let n = 0; n < MAX_LABEL_WORDS; n++) {
       const startGap = i;
       while (s[i] === " ") i++;
+      step(i - startGap + 1);
       if (breakIn(startGap, i)) return null;
       const item = itemAt(i);
       if (item === null) return null;
@@ -1184,6 +1218,7 @@ export function sharedReading(
       i = item.end;
       let j = i;
       while (s[j] === " ") j++;
+      step(j - i + 1);
       if (breakIn(i, j)) return null;
       if (s[j] === close) return out;
       if (LABEL_SEPARATORS.includes(s[j] ?? "_")) {
@@ -1203,6 +1238,7 @@ export function sharedReading(
   const partsInParentheses = (end: number): LabelPart[] => {
     let i = end;
     while (i < s.length && i - end < 2 && s[i] === " ") i++;
+    step(i - end + 1);
     if (s[i] !== "(" || breakIn(end, i)) return [];
     return tagItems(i + 1, ")") ?? [];
   };
@@ -1211,6 +1247,7 @@ export function sharedReading(
   const partsInNameTag = (end: number): LabelPart[] => {
     let i = end;
     while (s[i] === " ") i++;
+    step(i - end + 1);
     if (breakIn(end, i)) return [];
     if (LABEL_SEPARATORS.includes(s[i] ?? "_")) i++;
     else if (i === end) return [];
@@ -1221,7 +1258,11 @@ export function sharedReading(
   const scan = (): boolean => {
     // the folded text with the spared spans (persons' names) blanked, offsets kept
     const chars = s.split("");
-    for (const [a, b] of spared.map(span)) for (let k = a; k < b; k++) chars[k] = " ";
+    step(s.length + spared.length);
+    for (const [a, b] of spared.map(span)) {
+      step(b - a);
+      for (let k = a; k < b; k++) chars[k] = " ";
+    }
     return scanText(chars.join(""), { s, caps });
   };
   /** A word's last part as the multi-word reading keys it ("U.S" → "US", "Mercedes-Benz" → "Benz"). */
@@ -1244,6 +1285,7 @@ export function sharedReading(
     for (let n = 1; n < MAX_FORM_WORDS; n++) {
       let g = e;
       while (g > 0 && s[g - 1] === " ") g--;
+      step(e - g + 1);
       if (g === e || g === 0) return false;
       if (s[g - 1] === ".") g--;
       const st = wordStartBefore(s, g);
@@ -1272,6 +1314,7 @@ export function sharedReading(
       const [a, b] = span([start, end]);
       if (!headNear(a, b)) return false;
       phrases ??= phraseSpans(s);
+      step(Math.max(1, b - a));
       for (let k = a; k < b; k++) if (phrases[k] === 1) return true;
       return false;
     },
@@ -1329,6 +1372,7 @@ function passOf(
   }
   flush(s.length);
   segments[s.length] = seg;
+  step(s.length);
   return { closes, caps, segments };
 }
 
@@ -1339,6 +1383,7 @@ function passOf(
 function afterGameWord(s: string, i: number): boolean {
   let k = i;
   while (k > 0 && s[k - 1] === " ") k--;
+  step(i - k + 1);
   if (k === 0) return false;
   if (s[k - 1] === "@") return GAME_MOVE_WORDS.includes("@");
   const period = s[k - 1] === ".";
@@ -1370,6 +1415,7 @@ const CAMEL_RE = /\p{Ll}\p{Lu}/u;
 function segmentsOf(piece: string): string[] {
   const out: string[] = [];
   const runs = [...piece.matchAll(/\p{Lu}+|\p{Ll}+|\p{N}+/gu)].map((m) => m[0]);
+  step(piece.length + runs.length);
   for (let k = 0; k < runs.length; k++) {
     const r = runs[k] ?? "";
     const next = runs[k + 1] ?? "";
@@ -1412,6 +1458,7 @@ function compoundRead(word: string, hashtag: boolean, place: Place): CompoundRea
       first = false;
     }
   const lower = w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  step(w.length);
   trieTeams(COMPOUND_TRIE, lower, teams);
   if (hashtag) trieTeams(HASHTAG_TRIE, lower, teams);
   return { teams, position };
@@ -1437,6 +1484,7 @@ const PHRASE_HEADS: ReadonlySet<string> = new Set([
 const HEAD_CACHE = new Map<string, boolean>();
 /** Whether a word may open a form of several words (remembered, bounded). */
 const isHead = (word: string | undefined): boolean => {
+  step((word?.length ?? 0) + 1);
   if (word === undefined) return false;
   const hit = HEAD_CACHE.get(word);
   if (hit !== undefined) return hit;
@@ -1461,6 +1509,7 @@ const PAIR_CACHE = new Map<string, boolean>();
  */
 const opensPair = (first: string, second: string): boolean => {
   const written = `${first} ${second}`;
+  step(written.length + 1);
   const hit = PAIR_CACHE.get(written);
   if (hit !== undefined) return hit;
   const { key } = keyedOf(written);
@@ -1515,17 +1564,24 @@ interface Recent {
  * run of its last parts ("ex-Green Bay").
  */
 function windowFound(recent: readonly Recent[], heads: readonly string[]): number {
-  for (let n = recent.length; n >= 1; n--) {
-    const first = recent[recent.length - n];
-    if (first === undefined || first.leads.length === 0) continue;
-    const rest = recent.slice(recent.length - n + 1).map((r) => r.whole);
-    const second = rest[0];
-    for (const lead of first.leads) {
-      if (second !== undefined && !opensPair(lead, second)) continue;
-      if (heads.some((h) => phraseFound([lead, ...rest, h]))) return n;
+  let read = heads.length;
+  try {
+    for (let n = recent.length; n >= 1; n--) {
+      read++;
+      const first = recent[recent.length - n];
+      if (first === undefined || first.leads.length === 0) continue;
+      const rest = recent.slice(recent.length - n + 1).map((r) => r.whole);
+      const second = rest[0];
+      for (const lead of first.leads) {
+        read += n + heads.length;
+        if (second !== undefined && !opensPair(lead, second)) continue;
+        if (heads.some((h) => phraseFound([lead, ...rest, h]))) return n;
+      }
     }
+    return 0;
+  } finally {
+    step(read);
   }
-  return 0;
 }
 
 /** The context of a scan: the folded text with nothing blanked, and its all-capitals segments. */
@@ -1555,6 +1611,7 @@ function scanText(t: string, ctx: ScanContext | null): boolean {
   for (const m of t.matchAll(SCAN_WORD_RE)) {
     const w = m[0];
     const i = m.index;
+    step(w.length + 1);
     const lead = i > 0 ? (t[i - 1] ?? "") : "";
     // a possessive ("Jefferson's", "RAVEN'S") is the word without it
     const base = w.length > 2 && /'[sS]$/u.test(w) ? w.slice(0, -2) : w;
@@ -1573,6 +1630,7 @@ function scanText(t: string, ctx: ScanContext | null): boolean {
         ? base.split(/[.-]/u).filter((p) => p.length > 0)
         : [wordOf(base)];
     const quiet: Place = { ...place, after: NEVER };
+    step(3 * parts.length);
     for (let k = 0; parts.length > 1 && k < parts.length; k++) {
       const p = parts[k] ?? "";
       const q = parts[k - 1];
@@ -1591,9 +1649,11 @@ function scanText(t: string, ctx: ScanContext | null): boolean {
       if (p.includes("&") && p.split("&").some((x) => x.length > 0 && found(x, quiet))) return true;
     if (parts.length > 2 && found(parts.join(""), quiet)) return true;
     // a run of three or four parts inside one word ("new-era-field-led", "city-of-angels")
-    for (let len = 3; len <= Math.min(MAX_FORM_WORDS, parts.length); len++)
+    for (let len = 3; len <= Math.min(MAX_FORM_WORDS, parts.length); len++) {
+      step(len * (parts.length - len + 1));
       for (let k = 0; k + len <= parts.length; k++)
         if (found(parts.slice(k, k + len).join("-"), quiet)) return true;
+    }
     // a form of two to four words across the gaps ("Green Bay", "running back", "St. Louis")
     if (!PAIR_GAP_RE.test(t.slice(prevEnd, i))) recent.length = 0;
     if (windowFound(recent, headsOf(base, parts)) !== 0) return true;
@@ -1616,6 +1676,7 @@ function phraseSpans(s: string): Uint8Array {
   for (const m of s.matchAll(SCAN_WORD_RE)) {
     const w = m[0];
     const i = m.index;
+    step(w.length + 1);
     const base = w.length > 2 && /'[sS]$/u.test(w) ? w.slice(0, -2) : w;
     const initialism = INITIALISM_RE.test(base);
     const parts =
@@ -1625,7 +1686,10 @@ function phraseSpans(s: string): Uint8Array {
     if (!PAIR_GAP_RE.test(s.slice(prevEnd, i))) recent.length = 0;
     const n = windowFound(recent, headsOf(base, parts));
     const from = recent[recent.length - n];
-    if (n !== 0 && from !== undefined) out.fill(1, from.start, i + w.length);
+    if (n !== 0 && from !== undefined) {
+      step(i + w.length - from.start);
+      out.fill(1, from.start, i + w.length);
+    }
     const whole = parts.length > 1 ? base : wordOf(base);
     recent.push({ whole, leads: leadsOf(whole, parts), start: i });
     if (recent.length >= MAX_FORM_WORDS) recent.shift();

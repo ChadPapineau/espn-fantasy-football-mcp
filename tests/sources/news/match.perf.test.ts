@@ -19,8 +19,8 @@
 // Its limit (round 3's review, 2026-11-04): the control's ratios sit far past the bounds (33–38 against
 // 6, 11–12 against 8), and a quadratic that is cheap per mention — a scan of every token at each bare
 // shared-surname mention, under about 1.5 times the linear reading at the caps — passes every ratio
-// here ("Brown " 4.9–5.2 against 6, the 4× blurb 4.9–5.3 against 8). A tighter check needs a ruling
-// on R8-8's frozen bounds; until then that blind spot is a backlog item, not a pass.
+// here ("Brown " 4.9–5.2 against 6, the 4× blurb 4.9–5.3 against 8). Changelog §R10, R10-16 keeps
+// these bounds and closes that blind spot by count, with no clock: match-work.test.ts.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";

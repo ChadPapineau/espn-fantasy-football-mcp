@@ -21,8 +21,15 @@
 //
 // Ruling R8-6 (changelog §R8): this is the reading a name only one universe player holds is matched
 // with, and its code is exactly `f41e810`'s. A name several universe players hold is read by labels.ts
-// (a label written next to it, and the broad scan), never by this file's cues, games or moves.
+// (a label written next to it, and the broad scan), never by this file's cues, games or moves. The work
+// count (work.ts; changelog §R10, R10-16) adds a step for each mention read; it changes nothing here.
 import type { NflTeam } from "../../config/schema.js";
+import { matchWork } from "./work.js";
+
+/** Counts `n` steps of the matcher's work while a count is open (work.ts). */
+function step(n: number): void {
+  if (matchWork !== null) matchWork.steps += n;
+}
 
 /** Nicknames and their common short forms. */
 // prettier-ignore
@@ -141,6 +148,7 @@ export function teamMentions(text: string): readonly TeamMention[] {
       pair: pairs ? { team: prev.team, start: prev.start } : null,
     });
   }
+  step(out.length);
   return out;
 }
 
@@ -179,7 +187,7 @@ const AFTER_COMMA_RE = new RegExp(
 /** After "<name> (<team>": role words, then ")". */
 const AFTER_PAREN_RE = new RegExp(`^(?:\\s+(?:${ATTACH_ALT}))*\\s*\\)`, "iu");
 /** How far from a name an attached team may sit (the gaps above are short; bounded work). */
-const ATTACH_WINDOW = 64;
+export const ATTACH_WINDOW = 64;
 
 /**
  * The teams written next to the name at [start, end) of the text — its own team as the writer
@@ -195,6 +203,7 @@ export function attachedTeams(
   end: number,
 ): ReadonlySet<NflTeam> {
   const out = new Set<NflTeam>();
+  step(mentions.length);
   for (const m of mentions) {
     if (m.end <= start) {
       if (start - m.end <= ATTACH_WINDOW && BEFORE_NAME_RE.test(text.slice(m.end, start)))
@@ -243,6 +252,7 @@ export function movedTeams(
   end: number,
 ): ReadonlySet<NflTeam> {
   const out = new Set<NflTeam>();
+  step(mentions.length);
   for (const m of mentions) {
     if (m.end <= start) {
       if (start - m.end <= ATTACH_WINDOW && TEAM_MOVES_RE.test(text.slice(m.end, start)))
