@@ -32,6 +32,10 @@ import {
   ACTIVITY_REFUSAL_SENTENCE,
   LIVE_COUNTS_SENTENCE,
   RETRO_TRUNCATED_SENTENCE,
+  MATCHUP_LISTS_SENTENCE,
+  OPTION_VALUE_ZERO_SENTENCE,
+  INJURY_CONFIRM_SENTENCE,
+  TEMPLATE_PARTIAL_SESSION_LINE,
   TRIM_WARNING_ABSENT,
   pendingReadProblems,
   ORIENT_REJECTED,
@@ -742,6 +746,43 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
     );
   });
 
+  const sharedRef = (f: string) =>
+    readFileSync(path.join(ROOT, "skills/_shared/references", f), "utf8");
+  // the round-4 verifiers' F1: the output contract's partial rule names the session-refusal line,
+  // which no repeat call reads, so the contract never tells weekly to repeat E11's call
+  it("check-skills fails on a copy whose output template loses the session-refusal partial line (rebuilt into every Skill)", () => {
+    const template = sharedRef("output-template.md");
+    expect(template).toContain(TEMPLATE_PARTIAL_SESSION_LINE);
+    // the exception sits right after the rule it narrows
+    expect(template).toContain(`never as the final answer. ${TEMPLATE_PARTIAL_SESSION_LINE}`);
+    const t = fresh();
+    t.edit("skills/_shared/references/output-template.md", ` ${TEMPLATE_PARTIAL_SESSION_LINE}`, "");
+    buildSkills({ root: t.root });
+    const e = errorsOf(t);
+    expect(e).toMatch(
+      /skills\/weekly\/SKILL\.md: the output contract's session-refusal partial line is missing/,
+    );
+    expect(e).not.toMatch(
+      /skills\/session-check\/SKILL\.md: the output contract's session-refusal partial line/,
+    );
+  });
+
+  it("the three partial rules agree: the cheat-sheet, the contract and orient's re-fetch row each carve out the session-refusal line", () => {
+    const sheet = sharedRef("tool-outputs.md");
+    const rule = sheet.split("\n").find((l) => l.startsWith("**`partial: true`**")) ?? "";
+    expect(rule).toContain("call the same tool **once** more");
+    expect(rule).toContain(
+      "A `partial:` line that names a session refusal and ends in `eff setup`",
+    );
+    expect(rule).toContain("no repeat call reads it");
+    expect(TOOL_OUTPUT_SHEET_PHRASES.some((ph) => rule.includes(ph))).toBe(true);
+    const orient = sharedRef("orient.md");
+    const row = orient.split("\n").find((l) => l.startsWith("| `espn_analyze_*` |")) ?? "";
+    expect(row).toContain(ORIENT_SENTENCES.partialSession);
+    // and weekly, the one Skill that calls E11, says the same
+    expect(ACTIVITY_PARTIAL_SENTENCE).toContain("a repeat call reads nothing more");
+  });
+
   it.each([
     ["weekly", "**Every action carries its deadline.**", "Actions may carry deadlines."],
     ["weekly", "**The header** prints the data time", "The header prints a title"],
@@ -895,6 +936,30 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
     ["weekly", ACTIVITY_REFUSAL_SENTENCE, "When it fails, say so."],
     // changelog §R10, R10-20: a truncated retrospective says how many calls it scored
     ["retro", RETRO_TRUNCATED_SENTENCE, "When the result is truncated, say so."],
+    // the round-4 verifiers' F2: E11's refusal line on a private or unknown league is a rejection
+    // mid-procedure, which ends the briefing with the hand-off (changelog §R10, R10-7)
+    [
+      "weekly",
+      "On a private or unknown league (`league.is_public` false or null) such a line is a rejection mid-procedure",
+      "On a private league carry on",
+    ],
+    [
+      "weekly",
+      "and end the briefing with the hand-off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7).",
+      "and carry on.",
+    ],
+    // F5 and R4VS-8: a narrowed retrospective that is still truncated, or one kind, stops there
+    [
+      "retro",
+      "when that call is still truncated, or `kinds` already named one kind, say that N of the week's M calls were scored and stop — no further call narrows it",
+      "keep narrowing until it fits",
+    ],
+    // R4VS-1: the live matchup's lists hold both sides' starters; F7/R4VS-5: a 0 option value is no
+    // value in waiting, whatever the verdict says
+    ["start-sit", MATCHUP_LISTS_SENTENCE, "`players_final`, `players_live` and `players_pending`"],
+    ["start-sit", OPTION_VALUE_ZERO_SENTENCE, "Read its `verdict`."],
+    // R4VS-6: an injury is confirmed by ESPN's status or the official report, whatever the flag
+    ["injury-cascade", INJURY_CONFIRM_SENTENCE, "Then list what would confirm it."],
   ])("%s: check-skills fails when the fixed sentence %j is gone", (skill, from, to) => {
     const t = fresh();
     t.edit(`skills/${skill}/SKILL.md`, from, to);
