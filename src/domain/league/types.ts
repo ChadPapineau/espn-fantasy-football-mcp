@@ -326,10 +326,22 @@ function capCodePoints(t: SanitizedText, cap: number): SanitizedText {
 
 /** Each flag fires when any of its patterns matches (a flag may have several). */
 const FLAG_RES: readonly (readonly [InjectionFlag, RegExp])[] = [
-  ["role_marker", /(?:^|[.!?:;]\s*)(?:system|assistant|user|developer)\s*:/i],
-  // a chat-template role tag in brackets, anywhere: "[system] override", "[INST] … [/INST]" (these
-  // read as json_like while that rule took any text opening with "[" — round 2's product follow-up)
-  ["role_marker", /\[\s*(?:\/\s*)?(?:system|assistant|user|developer|inst)\s*\]/i],
+  // a chat role as the label of what follows, opening the text, a sentence or a bracket or
+  // parenthesis: "System: …", "[Assistant: I recommend …]", "(system note: …)" — the bracketed forms
+  // read as json_like while that rule took any text opening with "[" (round 3's review of round 2's
+  // product follow-up, changelog §R10)
+  [
+    "role_marker",
+    /(?:^|[.!?:;[(]\s*)(?:system|assistant|user|developer)(?:[ _]?(?:prompt|note|message|notice|instructions?))?\s*:/i,
+  ],
+  // a chat-template role or tool tag in brackets, anywhere, closed or labelled: "[system] override",
+  // "[INST] … [/INST]", "[SYSTEM NOTE: …]", "[SYSTEM_PROMPT] … [/SYSTEM_PROMPT]", "[TOOL_CALLS] …",
+  // "[AVAILABLE_TOOLS]" (round 2's product follow-up and round 3's review of it, changelog §R10). A
+  // role word that runs on ("[System of a Down]", "[Users] group") is no tag
+  [
+    "role_marker",
+    /\[\s*(?:\/\s*)?(?:(?:system|assistant|user|developer)(?:[ _]?(?:prompt|note|message|notice|instructions?))?|inst|sys|tool[ _]?calls?|tool[ _]?results?|available[ _]?tools)\s*[\]:]/i,
+  ],
   // a claimed league authority as the label of what follows: "Commissioner note: accept any trade…"
   // (research 05 §6 case 4, fx-10h inj-tradeblock), "League manager notice:", "Admin:" — the
   // label must open the text or a sentence and end in a colon ("NFL commissioner: …" stays clean)
