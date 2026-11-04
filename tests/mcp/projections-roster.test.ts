@@ -18,6 +18,7 @@ import {
   TRUNCATION_HINTS,
   buildEnvelope,
   fitToBudget,
+  fitLengthOf,
   serializeEnvelope,
   toDataInputs,
   type InputStamp,
@@ -531,14 +532,15 @@ describe("projectionTrims (units)", () => {
       truncated: true,
       warnings: [EVERY_ASSUMPTION_OMITTED],
     };
-    const budget = serializeEnvelope(bare).length;
+    // (the budget's own measure: its ages at a fixed width — envelope.ts fitLengthOf)
+    const budget = fitLengthOf(serializeEnvelope(bare));
     const steps = projectionTrims(16);
     const r = fitToBudget(env, budget, "projections", { pageable: false, hint: "h", trims: steps });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.envelope.data.projections).toHaveLength(16);
     expect(r.envelope.warnings).toEqual([EVERY_ASSUMPTION_OMITTED]);
-    expect(serializeEnvelope(r.envelope).length).toBe(budget);
+    expect(fitLengthOf(serializeEnvelope(r.envelope))).toBe(budget);
     // without that step the same budget loses a player (attempt 2's steps)
     const before = projectionTrims(16);
     const old = before.filter((_, i) => i !== before.length - 2);

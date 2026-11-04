@@ -40,6 +40,8 @@ import {
   collectWrappedFields,
   distSchema,
   envelopeSchema,
+  AGE_S_FIT_DIGITS,
+  fitLengthOf,
   fitToBudget,
   humanAge,
   injectionFlags,
@@ -800,10 +802,10 @@ describe("fitToBudget (20 000 chars; explicit truncation, never silent)", () => 
         fc.integer({ min: 1, max: 600 }),
         (n, rowChars) => {
           const env = listEnv(n, rowChars);
-          const before = serializeEnvelope(env).length;
+          const before = fitLengthOf(serializeEnvelope(env));
           const r = fitToBudget(env, RESULT_BUDGET_CHARS, "players");
           if (!r.ok) return false;
-          const size = serializeEnvelope(r.envelope).length;
+          const size = fitLengthOf(serializeEnvelope(r.envelope));
           return (
             size <= RESULT_BUDGET_CHARS && r.envelope.truncated === before > RESULT_BUDGET_CHARS
           );
@@ -845,7 +847,7 @@ describe("fitToBudget (20 000 chars; explicit truncation, never silent)", () => 
     });
     expect(fitToBudget(huge, RESULT_BUDGET_CHARS)).toEqual({
       ok: false,
-      size: serializeEnvelope(huge).length,
+      size: fitLengthOf(serializeEnvelope(huge)),
     });
     expect(fitToBudget(huge, RESULT_BUDGET_CHARS, "missing").ok).toBe(false);
     const scalar = buildEnvelope({
@@ -915,23 +917,25 @@ describe("fitToBudget keepMost: the longest prefix that fits (espn_list_recommen
         fc.integer({ min: 1, max: 900 }),
         (n, rowChars) => {
           const env = listEnv(n, rowChars);
-          const before = serializeEnvelope(env).length;
+          const before = fitLengthOf(serializeEnvelope(env));
           const r = fitToBudget(env, RESULT_BUDGET_CHARS, "players", most);
           if (!r.ok) return false;
-          const size = serializeEnvelope(r.envelope).length;
+          const size = fitLengthOf(serializeEnvelope(r.envelope));
           const kept = r.envelope.data.players.length;
           if (size > RESULT_BUDGET_CHARS) return false;
           if (r.envelope.truncated !== before > RESULT_BUDGET_CHARS) return false;
           if (!r.envelope.truncated) return kept === n;
           // maximal: the same cut one item longer is over the budget
-          const oneMore = serializeEnvelope({
-            ...r.envelope,
-            data: { players: env.data.players.slice(0, kept + 1) },
-            warnings: [
-              ...env.warnings,
-              `result truncated to ${String(kept + 1)} of ${String(n)} players to fit the ${String(RESULT_BUDGET_CHARS)}-character budget; ${TRUNCATION_HINTS.list}`,
-            ],
-          }).length;
+          const oneMore = fitLengthOf(
+            serializeEnvelope({
+              ...r.envelope,
+              data: { players: env.data.players.slice(0, kept + 1) },
+              warnings: [
+                ...env.warnings,
+                `result truncated to ${String(kept + 1)} of ${String(n)} players to fit the ${String(RESULT_BUDGET_CHARS)}-character budget; ${TRUNCATION_HINTS.list}`,
+              ],
+            }),
+          );
           return (
             kept < n &&
             oneMore > RESULT_BUDGET_CHARS &&
@@ -1284,5 +1288,103 @@ describe("zod schemas: wrapper, meta, page, Dist, Rec", () => {
         drift: { views: ["mRoster"], since: "2026-10-05T17:00:00Z", detail: "other" },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("fitLengthOf: the budget counts every age at a fixed width (round 4: the same data fits the same way at any clock)", () => {
+  it("adds each age_s key's reserve to the text's length, and nothing for text that only spells one", () => {
+    const pad = (digits: number) => AGE_S_FIT_DIGITS - digits;
+    expect(fitLengthOf('{"age_s":7}')).toBe(11 + pad(1));
+    expect(fitLengthOf('{"a":[{"age_s":42},{"age_s":0}],"age_s":123}')).toBe(
+      44 + pad(2) + pad(1) + pad(3),
+    );
+    // at the width or wider: its own width, no reserve
+    expect(fitLengthOf('{"age_s":1234567890}')).toBe(20);
+    expect(fitLengthOf('{"age_s":123456789012}')).toBe(22);
+    // a null age, another key, or a string that spells the key (third-party text) adds nothing
+    expect(fitLengthOf('{"age_s":null}')).toBe(14);
+    expect(fitLengthOf('{"xage_s":1,"age_sx":2}')).toBe(23);
+    const spelled = JSON.stringify({ t: '"age_s":1', u: "age_s:2" });
+    expect(fitLengthOf(spelled)).toBe(spelled.length);
+    expect(fitLengthOf("")).toBe(0);
+  });
+
+  it("property: an envelope fits to the same answer whatever its inputs' ages read (on the text's own length it did not)", () => {
+    // listEnv's rows under a fit with a trim and the halving floor, its ages one digit at one clock
+    // and up to five at another: what is kept, the warnings and the flags never move with the clock
+    interface D {
+      players: { id: number; blob: string }[];
+      note: string;
+    }
+    const trims = [
+      (d: unknown) => {
+        const x = d as D;
+        return x.note === "" ? null : { data: { ...x, note: "" }, warning: "note dropped" };
+      },
+    ];
+    const at = (n: number, rowChars: number, noteChars: number, ages: readonly number[]) =>
+      buildEnvelope({
+        data: {
+          players: Array.from({ length: n }, (_, id) => ({ id, blob: "x".repeat(rowChars) })),
+          note: "n".repeat(noteChars),
+          inputs: toDataInputs(
+            ages.map((a, i) =>
+              stamp({
+                source: `espn:v${String(i)}`,
+                fetched_at: new Date(NOW - a * 1000).toISOString(),
+              }),
+            ),
+            NOW,
+          ),
+        },
+        requestId: RID,
+        nowMs: NOW,
+        inputs: ages.map((a, i) =>
+          stamp({
+            source: `espn:v${String(i)}`,
+            fetched_at: new Date(NOW - a * 1000).toISOString(),
+          }),
+        ),
+      });
+    const level = (e: Envelope<unknown>): string =>
+      JSON.stringify(e, (k, v: unknown) => (k === "age_s" ? 0 : k === "fetched_at" ? "<t>" : v));
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 40 }),
+        fc.integer({ min: 1, max: 400 }),
+        fc.integer({ min: 0, max: 600 }),
+        fc.array(fc.tuple(fc.integer({ min: 0, max: 9 }), fc.integer({ min: 0, max: 99_999 })), {
+          minLength: 1,
+          maxLength: 12,
+        }),
+        fc.integer({ min: -60, max: 60 }),
+        (n, rowChars, noteChars, ages, delta) => {
+          const young = at(
+            n,
+            rowChars,
+            noteChars,
+            ages.map(([a]) => a),
+          );
+          const old = at(
+            n,
+            rowChars,
+            noteChars,
+            ages.map(([, b]) => b),
+          );
+          // a budget within a few characters of the answer: where an age's digits decided the fit
+          const budget = serializeEnvelope(young).length + delta;
+          const opts = { pageable: false, hint: TRUNCATION_HINTS.analytics, trims };
+          const a = fitToBudget(young, budget, "players", opts);
+          const b = fitToBudget(old, budget, "players", opts);
+          if (a.ok !== b.ok) return false;
+          if (!a.ok || !b.ok) return true;
+          // within the budget as sent
+          if (serializeEnvelope(a.envelope).length > budget) return false;
+          if (serializeEnvelope(b.envelope).length > budget) return false;
+          return level(a.envelope) === level(b.envelope);
+        },
+      ),
+      { numRuns: 400 },
+    );
   });
 });

@@ -15,6 +15,7 @@ import {
   TRUNCATION_HINTS,
   buildEnvelope,
   fitToBudget,
+  fitLengthOf,
   serializeEnvelope,
   type Envelope,
 } from "../../src/mcp/envelope.js";
@@ -80,11 +81,11 @@ describe("E13 keeps the longest prefix of whole calls that fits C8's budget (R10
         (n, textChars, note, summaryChars) => {
           const calls = Array.from({ length: n }, (_, i) => callRow(i, textChars, note));
           const env = retroEnv(calls, summaryChars);
-          const before = serializeEnvelope(env).length;
+          const before = fitLengthOf(serializeEnvelope(env));
           const r = fitToBudget(env, ANALYTICS_BUDGET_CHARS, "calls", options);
           if (!r.ok) return false;
           const out = r.envelope;
-          const size = serializeEnvelope(out).length;
+          const size = fitLengthOf(serializeEnvelope(out));
           const kept = out.data.calls;
           // fits
           if (size > ANALYTICS_BUDGET_CHARS) return false;
@@ -97,11 +98,13 @@ describe("E13 keeps the longest prefix of whole calls that fits C8's budget (R10
           if (out.warnings.at(-1) !== warningFor(kept.length, n)) return false;
           if (out.page !== undefined) return false;
           // maximal: the same answer one call longer is over the budget
-          const oneMore = serializeEnvelope({
-            ...out,
-            data: { ...out.data, calls: calls.slice(0, kept.length + 1) },
-            warnings: [...env.warnings, warningFor(kept.length + 1, n)],
-          }).length;
+          const oneMore = fitLengthOf(
+            serializeEnvelope({
+              ...out,
+              data: { ...out.data, calls: calls.slice(0, kept.length + 1) },
+              warnings: [...env.warnings, warningFor(kept.length + 1, n)],
+            }),
+          );
           return kept.length < n && oneMore > ANALYTICS_BUDGET_CHARS;
         },
       ),
@@ -142,11 +145,13 @@ describe("E13 keeps the longest prefix of whole calls that fits C8's budget (R10
     const k = r.envelope.data.calls.length;
     expect(k).toBeGreaterThan(0);
     expect(k).toBeLessThan(80);
-    const oneMore = serializeEnvelope({
-      ...r.envelope,
-      data: { ...r.envelope.data, calls: calls.slice(0, k + 1) },
-      warnings: [...r.envelope.warnings.slice(0, -1), warningFor(k + 1, 80)],
-    }).length;
+    const oneMore = fitLengthOf(
+      serializeEnvelope({
+        ...r.envelope,
+        data: { ...r.envelope.data, calls: calls.slice(0, k + 1) },
+        warnings: [...r.envelope.warnings.slice(0, -1), warningFor(k + 1, 80)],
+      }),
+    );
     expect(oneMore).toBeGreaterThan(ANALYTICS_BUDGET_CHARS);
   });
 

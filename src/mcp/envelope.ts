@@ -444,9 +444,43 @@ export function toDataInputs(inputs: readonly InputStamp[], nowMs: number): Data
   return out;
 }
 
-/** Serialises an envelope (the one `text` block and the size the budget measures). */
+/** Serialises an envelope (the one `text` block; fitLengthOf gives the size the budget measures). */
 export function serializeEnvelope(env: Envelope<unknown>): string {
   return JSON.stringify(env);
+}
+
+/**
+ * The digits the budget counts every `age_s` at (fitLengthOf): ten covers any age a source can have
+ * (under 10^10 s, three centuries), so no age ever reaches a wider count.
+ */
+export const AGE_S_FIT_DIGITS = 10;
+/**
+ * An `age_s` key and its integer value in serialised JSON. A string value cannot spell one: every
+ * quote inside a JSON string is escaped, and the pattern needs the key's closing quote unescaped.
+ */
+const AGE_S_KEY_RE = /"age_s":(\d+)/g;
+
+/**
+ * The size the budget measures (plan 01 §4.2; plan 07 C8): the serialisation's length with every
+ * `age_s` counted at AGE_S_FIT_DIGITS digits (at its own width if ever wider). An input's age is the
+ * one number of an answer that moves with the clock alone, a second at a time: measured at its own
+ * width, an answer within a few characters of the budget fitted whole while its ages had one digit
+ * and was trimmed once they had two — the same data, two answers a minute apart (espn_analyze_lineup
+ * on fx-10h at 9 991 characters lost lock_schedule, or kept only the starters who move, when an age
+ * gained a digit between two calls; the round-4 slice-steps flake). Counted at a fixed width, what
+ * the fit keeps depends on the data and never on the clock, and the text sent is never longer than
+ * what was measured.
+ */
+export function fitLengthOf(text: string): number {
+  let reserve = 0;
+  for (const m of text.matchAll(AGE_S_KEY_RE))
+    reserve += Math.max(0, AGE_S_FIT_DIGITS - (m[1]?.length ?? AGE_S_FIT_DIGITS));
+  return text.length + reserve;
+}
+
+/** fitLengthOf an envelope's serialisation. */
+function fitSize(env: Envelope<unknown>): number {
+  return fitLengthOf(serializeEnvelope(env));
 }
 
 /** The result of fitting an envelope to a budget. */
@@ -524,7 +558,7 @@ function applyTrims<D>(
   let applied = false;
   for (const [index, trim] of trims.entries()) {
     for (let i = 0; i < MAX_TRIM_STEPS; i++) {
-      if (applied && serializeEnvelope(build()).length <= budget) return build();
+      if (applied && fitSize(build()) <= budget) return build();
       const r = trim(data);
       if (r === null) break;
       applied = true;
@@ -565,7 +599,8 @@ function withList<D>(
  * Fits an envelope to `budget` characters (plan 01 §4.2): trims first, then the array at
  * `data[listKey]` is halved until the result fits; `truncated: true` and a warning with the fixed
  * hint. Never silent. A result that cannot fit returns `ok: false` — a bug the caller surfaces as
- * INTERNAL (plan 01 §4.2: a non-list result over budget is a bug).
+ * INTERNAL (plan 01 §4.2: a non-list result over budget is a bug). Every size is fitLengthOf's (the
+ * ages at a fixed width), so the same data fits the same way at any clock.
  */
 export function fitToBudget<D>(
   env: Envelope<D>,
@@ -573,12 +608,12 @@ export function fitToBudget<D>(
   listKey?: string,
   opts: FitOptions = { pageable: true, hint: TRUNCATION_HINTS.list },
 ): FitResult<D> {
-  const size = serializeEnvelope(env).length;
+  const size = fitSize(env);
   if (size <= budget) return { ok: true, envelope: env };
   if (opts.trims !== undefined && opts.trims.length > 0) {
     const trimmed = applyTrims(env, budget, opts.trims);
     if (trimmed !== env) {
-      if (serializeEnvelope(trimmed).length <= budget) return { ok: true, envelope: trimmed };
+      if (fitSize(trimmed) <= budget) return { ok: true, envelope: trimmed };
       return fitToBudget(trimmed, budget, listKey, {
         pageable: opts.pageable,
         hint: opts.hint,
@@ -601,7 +636,7 @@ export function fitToBudget<D>(
     while (lo <= hi) {
       const mid = Math.floor((lo + hi) / 2);
       const candidate = withList(env, listKey, list.slice(0, mid), total, budget, opts);
-      if (serializeEnvelope(candidate).length <= budget) {
+      if (fitSize(candidate) <= budget) {
         best = candidate;
         lo = mid + 1;
       } else hi = mid - 1;
@@ -612,7 +647,7 @@ export function fitToBudget<D>(
   while (n > 0) {
     n = Math.floor(n / 2);
     const candidate = withList(env, listKey, list.slice(0, n), total, budget, opts);
-    if (serializeEnvelope(candidate).length <= budget) return { ok: true, envelope: candidate };
+    if (fitSize(candidate) <= budget) return { ok: true, envelope: candidate };
   }
   return { ok: false, size };
 }

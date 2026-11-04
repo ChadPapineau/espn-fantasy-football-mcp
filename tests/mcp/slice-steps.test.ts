@@ -254,6 +254,28 @@ function stable(data: unknown): string {
   );
 }
 
+/**
+ * Where two answers differ once levelled (stable): "" when they are the same, else the first path
+ * that differs and both values, cut — a failure names what moved, never 4 000 characters of both.
+ */
+function sameAnswer(a: unknown, b: unknown): string {
+  const walk = (x: unknown, y: unknown, at: string): string => {
+    if (JSON.stringify(x) === JSON.stringify(y)) return "";
+    if (typeof x !== "object" || typeof y !== "object" || x === null || y === null)
+      return `${at}: ${(JSON.stringify(x) as string | undefined)?.slice(0, 200) ?? "undefined"} vs ${(JSON.stringify(y) as string | undefined)?.slice(0, 200) ?? "undefined"}`;
+    for (const k of new Set([...Object.keys(x), ...Object.keys(y)])) {
+      const d = walk(
+        (x as Record<string, unknown>)[k],
+        (y as Record<string, unknown>)[k],
+        `${at}.${k}`,
+      );
+      if (d !== "") return d;
+    }
+    return `${at}: differs`;
+  };
+  return walk(JSON.parse(stable(a)) as unknown, JSON.parse(stable(b)) as unknown, "data");
+}
+
 /** The answer on the default meter (byte-identical to the frozen meter's). */
 async function plain(name: string, args: Record<string, unknown>): Promise<unknown> {
   const r = await call(client, name, args);
@@ -400,8 +422,13 @@ describe("E1's trailing reads: one dataset statement a step (espn_analyze_lineup
         // each E1 run reads this season's lines, the prior season's and the implied totals
         expect(total, `${name}: ${stepsLine(r.steps)}`).toBeGreaterThanOrEqual(3);
         expect(Math.max(...r.steps), `${name}: ${stepsLine(r.steps)}`).toBe(1);
+        // the same answer later on the running clock (ages levelled): its inputs' ages gain digits
+        // over 100 s (the CI flake of run 41865100926: the lineup's answer, 9 991 characters with
+        // one-digit ages, fitted whole on one call and was trimmed on the next once an age had two —
+        // envelope.ts fitLengthOf counts every age at a fixed width, so the fit no longer moves)
+        world.clock.advance(100_000);
         const again = await call(c.client, name, args);
-        expect(stable(r.data)).toBe(stable(again.body.data));
+        expect(sameAnswer(r.data, again.body.data), name).toBe("");
       } finally {
         await c.close();
       }
