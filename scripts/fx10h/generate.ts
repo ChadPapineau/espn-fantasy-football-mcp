@@ -21,7 +21,7 @@ import {
 import { diff, jsonEqual, type PatchOp } from "./patch.js";
 import { Renderer } from "./render.js";
 import { makeScorer } from "./score.js";
-import { VARIANTS } from "./variants.js";
+import { applyBaseTexts, VARIANTS } from "./variants.js";
 
 /** The fixture directory, relative to fixtures/espn (every manifest path is relative to it). */
 export const FX_DIR = "fx-10h";
@@ -187,6 +187,7 @@ export function generate(): Generated {
   const files = new Map<string, Json>();
 
   const base = baseModel();
+  applyBaseTexts(base);
   const baseRenderer = new Renderer(base, scorer);
   assignWaiverRanks(base, baseRenderer);
   assertSkillsPlumbing(base);
@@ -234,6 +235,7 @@ export function generate(): Generated {
 
   for (const v of VARIANTS) {
     const model = baseModel();
+    applyBaseTexts(model);
     const r0 = new Renderer(model, scorer);
     assignWaiverRanks(model, r0);
     model.name = `${FX_DIR}/${v.name}`;

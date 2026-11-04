@@ -788,7 +788,7 @@
   },
   { "op": "replace", "path": ["schedule", 24, "away", "totalPointsLive"], "value": 73.24 },
   { "op": "replace", "path": ["schedule", 24, "away", "totalProjectedPointsLive"], "value": 106.608007 },
-  { "op": "replace", "path": ["schedule", 24, "away", "winProbability"], "value": 0.5147 },
+  { "op": "replace", "path": ["schedule", 24, "away", "winProbability"], "value": 0.25 },
   { "op": "replace", "path": ["schedule", 24, "home", "pointsByScoringPeriod", "5"], "value": 55.16 },
   { "op": "replace", "path": ["schedule", 24, "home", "rosterForCurrentScoringPeriod", "appliedStatTotal"], "value": 55.16 },
   {
@@ -883,5 +883,5 @@
   },
   { "op": "replace", "path": ["schedule", 24, "home", "totalPointsLive"], "value": 55.16 },
   { "op": "replace", "path": ["schedule", 24, "home", "totalProjectedPointsLive"], "value": 105.683685 },
-  { "op": "replace", "path": ["schedule", 24, "home", "winProbability"], "value": 0.4853 }
+  { "op": "replace", "path": ["schedule", 24, "home", "winProbability"], "value": 0.75 }
 ]

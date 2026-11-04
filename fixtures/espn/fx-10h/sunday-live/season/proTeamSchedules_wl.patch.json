@@ -1,4 +1,6 @@
 [
   { "op": "replace", "path": ["settings", "proTeams", 6, "proGamesByScoringPeriod", "5", 0, "statsOfficial"], "value": true },
-  { "op": "replace", "path": ["settings", "proTeams", 27, "proGamesByScoringPeriod", "5", 0, "statsOfficial"], "value": true }
+  { "op": "replace", "path": ["settings", "proTeams", 21, "proGamesByScoringPeriod", "5", 0, "statsOfficial"], "value": true },
+  { "op": "replace", "path": ["settings", "proTeams", 27, "proGamesByScoringPeriod", "5", 0, "statsOfficial"], "value": true },
+  { "op": "replace", "path": ["settings", "proTeams", 30, "proGamesByScoringPeriod", "5", 0, "statsOfficial"], "value": true }
 ]

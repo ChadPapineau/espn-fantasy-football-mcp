@@ -1046,7 +1046,7 @@
                 "ownership": { "auctionValueAverage": 44.58, "averageDraftPosition": 13.09, "percentChange": 0, "percentOwned": 99.9, "percentStarted": 98.77 },
                 "proTeamId": 2,
                 "rankings": {},
-                "seasonOutlook": "[outlook 676 chars]",
+                "seasonOutlook": "Heads into the week as part of a balanced offense, with nothing new on his status.",
                 "universeId": 1,
                 "stats": [
                   { "appliedAverage": 16.9, "appliedStats": { "24": 50, "25": 18, "42": 1.6, "53": 2, "72": -4 }, "appliedTotal": 67.6, "externalId": "2026", "id": "002026", "proTeamId": 0, "scoringPeriodId": 0, "seasonId": 2026, "statSourceId": 0, "statSplitTypeId": 0, "stats": { "23": 82, "24": 500, "25": 3, "27": 98, "28": 48, "29": 22, "30": 19, "31": 9, "32": 3, "33": 14, "34": 7, "37": 3, "39": 23.648, "40": 500, "41": 4, "42": 16, "47": 2, "48": 1, "53": 4, "58": 9, "59": 16, "60": 8, "61": 16, "65": 3, "66": 3, "68": 3, "69": 2, "70": 2, "72": 2, "73": 2, "155": 4, "158": 18, "179": 3, "210": 4, "212": 26, "213": 2 } },

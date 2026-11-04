@@ -70,7 +70,31 @@ export const INJECTIONS = Object.freeze({
  */
 export const SYNTHETIC_OUTLOOKS = Object.freeze({
   moreWork: "Should see more carries this week as the offense leans on the run game.",
+  /**
+   * The base fixture's season outlook for Team 02's first starting RB by player id (James Cook III —
+   * the player inj-outlook-system plants its text on): a sentence the claim extractor reads as no
+   * claim and the injection check flags nothing in, so news-check NC-6 (NC-INJ's base) has real text
+   * to quote with its source tag instead of the scrub's placeholder (changelog §R10; round 2's
+   * eval-case triage, NC-6).
+   */
+  neutral: "Heads into the week as part of a balanced offense, with nothing new on his status.",
 });
+
+/**
+ * ESPN's live win probability for Team 02 on sunday-live (ESPN's `winProbability` stand-in on the
+ * user's week-5 matchup, its opponent's the complement): more than 0.15 from this server's own
+ * estimates on that variant — the pre-game one under `core` and the live one under `full` — so
+ * start-sit SS-10-E and SS-11-E have a gap to state (round 2's eval-case triage).
+ */
+export const SUNDAY_LIVE_WIN_PROBABILITY_ESPN = 0.75;
+
+/**
+ * How long after its kickoff a game of the variant clock counts as final (statsOfficial): a game
+ * runs about three and a half hours, so the 09:30 ET London game is over at sunday-live's 14:05 ET
+ * while the 13:00 ET games are under way (round 2's eval-case triage: no game was final on
+ * sunday-live, so start-sit's final / live / pending split had an empty bucket).
+ */
+export const GAME_FINAL_AFTER_MS = 4 * 3600_000;
 
 const mySeats = (m: Model): Seat[] => {
   const s = m.rosters.get(CURRENT_WEEK)?.get(MY_TEAM_ID);
@@ -120,16 +144,48 @@ function goLive(m: Model, atMs: number): void {
     const latest = p.actual.get(4) ?? p.actual.get(3);
     if (latest !== undefined) m.live.set(p.id, clone(latest));
   }
-  // games that kicked off more than a day before the clock are final; the rest are under way
+  // games that kicked off GAME_FINAL_AFTER_MS or more before the clock are final; the rest are
+  // under way
   for (const t of arr(obj(m.proSchedule.settings, "settings").proTeams, "proTeams")) {
     const games = obj(t, "proTeam").proGamesByScoringPeriod;
     if (!isObj(games)) continue;
     for (const g of arr(games[String(CURRENT_WEEK)] ?? [], "games")) {
       const game = obj(g, "game");
-      if (typeof game.date === "number" && game.date + 24 * 3600_000 <= atMs)
+      if (typeof game.date === "number" && game.date + GAME_FINAL_AFTER_MS <= atMs)
         game.statsOfficial = true;
     }
   }
+}
+
+/**
+ * The base texts every fixture of the tree starts from (the base and each variant, before its own
+ * mutation): Team 02's first starting RB by player id carries SYNTHETIC_OUTLOOKS.neutral as his
+ * season outlook, where the scrub left a placeholder.
+ */
+export function applyBaseTexts(m: Model): void {
+  const s = pick(starters(m), (x) => positionOf(m, x.playerId) === 2, "Team 02's RB");
+  m.outlook.set(s.playerId, SYNTHETIC_OUTLOOKS.neutral);
+}
+
+/** Sets ESPN's live `winProbability` of Team 02's week-5 matchup (its opponent's the complement). */
+function setMyWinProbability(bodies: RenderedBody[], p: number): void {
+  let set = 0;
+  for (const b of bodies) {
+    if (!b.key.includes("|mMatchupScore|") || !isObj(b.body)) continue;
+    for (const mm of arr(b.body.schedule, "schedule")) {
+      const matchup = obj(mm, "matchup");
+      if (matchup.matchupPeriodId !== CURRENT_WEEK) continue;
+      const home = obj(matchup.home, "home");
+      const away = obj(matchup.away, "away");
+      if (home.teamId !== MY_TEAM_ID && away.teamId !== MY_TEAM_ID) continue;
+      const [mine, other] = home.teamId === MY_TEAM_ID ? [home, away] : [away, home];
+      if (typeof mine.winProbability !== "number") continue;
+      mine.winProbability = p;
+      other.winProbability = Math.round((1 - p) * 1e4) / 1e4;
+      set++;
+    }
+  }
+  if (set === 0) throw new FixtureGenError("fx-10h: no week-5 winProbability for Team 02");
 }
 
 /** Waiver order with Team 02 at `rank`, everyone else in their current order around it. */
@@ -174,8 +230,11 @@ export const VARIANTS: readonly Variant[] = [
   {
     name: "auth-rejected",
     describes:
-      "credential.state rejected (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result",
+      "credential.state rejected on a public league (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base, which is public; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result — orient's rejected row carries on keylessly here (changelog §R10, R10-7)",
     mutate: (m) => {
+      // the base league is public (fixture mode never holds a cookie): a stored session ESPN
+      // rejected on a public league, the state waivers WV-7-E stands for (changelog §R10, R10-7)
+      m.isPublic = true;
       // the one espn_check_auth after the user re-ran setup: ESPN still rejects the cookies
       m.harness = {
         ...m.harness,
@@ -315,11 +374,19 @@ export const VARIANTS: readonly Variant[] = [
   {
     name: "sunday-live",
     describes:
-      "Sunday of week 5, 14:05 ET: the 13:00 ET games under way (lineupLocked, live totals), the late games not",
+      "Sunday of week 5, 14:05 ET: the 09:30 ET London game final, the 13:00 ET games under way (lineupLocked, live totals), the late games not; ESPN's live win probability for Team 02 set to 0.75",
     mutate: (m) => {
       m.clock = CLOCKS.sundayLive;
       goLive(m, ms(CLOCKS.sundayLive));
+      m.notes.push(
+        `wire-level: Team 02's week-5 winProbability ${String(SUNDAY_LIVE_WIN_PROBABILITY_ESPN)} (its opponent's the complement)`,
+      );
     },
+    postRender: [
+      (bodies) => {
+        setMyWinProbability(bodies, SUNDAY_LIVE_WIN_PROBABILITY_ESPN);
+      },
+    ],
   },
   {
     name: "all-locked",

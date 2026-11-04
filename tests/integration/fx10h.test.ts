@@ -20,6 +20,14 @@ import {
 } from "../../src/providers/espn/fixture-league.js";
 import type { EspnView } from "../../src/providers/espn/types.js";
 import { GoldenPathError, readRecorded } from "../golden/recorded.js";
+import { extractClaim } from "../../src/domain/evidence/claims.js";
+import { wrapUntrusted } from "../../src/domain/league/types.js";
+import {
+  GAME_FINAL_AFTER_MS,
+  INJECTIONS,
+  SUNDAY_LIVE_WIN_PROBABILITY_ESPN,
+  SYNTHETIC_OUTLOOKS,
+} from "../../scripts/fx10h/variants.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const ESPN = path.join(ROOT, "fixtures", "espn");
@@ -368,6 +376,102 @@ describe("variants change only what they name", () => {
         JSON.stringify(body(FX, ["mRoster"], 5)).includes(t) ||
           JSON.stringify(body(FX, ["mTeam", "mStandings"])).includes(t),
       ).toBe(false);
+  });
+
+  // round 3's eval-case fixes (changelog §R10; round 2's triage): the facts SS-7, SS-9, SS-10-E,
+  // SS-11-E, NC-6 and WV-7-E rely on
+  it("sunday-live: the London game is final at the variant's clock, the 13:00 ET games under way, the late games not", () => {
+    const m = readDerivedManifest(path.join(FX, "sunday-live")) as unknown as { clock: string };
+    const now = Date.parse(m.clock);
+    const sched = body(path.join(FX, "sunday-live"), ["proTeamSchedules_wl"]) as {
+      settings: {
+        proTeams: {
+          abbrev: string;
+          proGamesByScoringPeriod: Record<string, { date: number; statsOfficial?: boolean }[]>;
+        }[];
+      };
+    };
+    const games = sched.settings.proTeams.flatMap((t) =>
+      (t.proGamesByScoringPeriod["5"] ?? []).map((g) => ({ team: t.abbrev, ...g })),
+    );
+    const started = games.filter((g) => g.date <= now);
+    const final = started.filter((g) => g.statsOfficial === true);
+    const live = started.filter((g) => g.statsOfficial !== true);
+    // each bucket holds games: final (London and Thursday), live (13:00 ET), pending (later)
+    expect(final.map((g) => g.team)).toContain("JAX");
+    expect(final.every((g) => now - g.date >= GAME_FINAL_AFTER_MS)).toBe(true);
+    expect(live.length).toBeGreaterThan(0);
+    expect(live.every((g) => now - g.date < GAME_FINAL_AFTER_MS)).toBe(true);
+    expect(games.some((g) => g.date > now)).toBe(true);
+    // the base and all-locked keep their own clocks' rule (a game is final four hours on)
+    const allLocked = body(path.join(FX, "all-locked"), ["proTeamSchedules_wl"]) as typeof sched;
+    const ml = Date.parse(
+      (readDerivedManifest(path.join(FX, "all-locked")) as unknown as { clock: string }).clock,
+    );
+    for (const t of allLocked.settings.proTeams)
+      for (const g of t.proGamesByScoringPeriod["5"] ?? [])
+        if (g.date <= ml) expect(g.statsOfficial === true).toBe(ml - g.date >= GAME_FINAL_AFTER_MS);
+  });
+
+  it("sunday-live: ESPN's live win probability for Team 02's week-5 matchup is the variant's, the opponent's its complement", () => {
+    const sched = body(path.join(FX, "sunday-live"), ["mMatchupScore"], 5).schedule as {
+      matchupPeriodId: number;
+      home: { teamId: number; winProbability?: number };
+      away: { teamId: number; winProbability?: number };
+    }[];
+    const mine = sched.find(
+      (x) => x.matchupPeriodId === 5 && (x.home.teamId === 2 || x.away.teamId === 2),
+    );
+    expect(mine).toBeDefined();
+    const [me, other] =
+      mine!.home.teamId === 2 ? [mine!.home, mine!.away] : [mine!.away, mine!.home];
+    expect(me.winProbability).toBe(SUNDAY_LIVE_WIN_PROBABILITY_ESPN);
+    expect(other.winProbability).toBeCloseTo(1 - SUNDAY_LIVE_WIN_PROBABILITY_ESPN, 6);
+    // the base's own stand-in is untouched
+    const baseSched = body(FX, ["mMatchupScore"], 5).schedule as typeof sched;
+    const b = baseSched.find(
+      (x) => x.matchupPeriodId === 5 && (x.home.teamId === 2 || x.away.teamId === 2),
+    );
+    const bm = b!.home.teamId === 2 ? b!.home : b!.away;
+    expect(bm.winProbability).not.toBe(SUNDAY_LIVE_WIN_PROBABILITY_ESPN);
+  });
+
+  it("the base: Team 02's first starting RB carries the neutral synthetic season outlook — no claim, no flag — and every other outlook stays the scrub's placeholder", () => {
+    const entries = (
+      (body(FX, ["mRoster"], 5).teams as { id: number; roster: { entries: J[] } }[]).find(
+        (t) => t.id === 2,
+      )?.roster.entries ?? []
+    ).map((e) => (e.playerPoolEntry as { player: J }).player);
+    const withText = entries.filter(
+      (p) =>
+        typeof p.seasonOutlook === "string" && !/^\[outlook \d+ chars\]$/.test(p.seasonOutlook),
+    );
+    expect(withText.map((p) => p.fullName)).toEqual(["James Cook III"]);
+    expect(withText[0]?.seasonOutlook).toBe(SYNTHETIC_OUTLOOKS.neutral);
+    expect(extractClaim(SYNTHETIC_OUTLOOKS.neutral)).toBeNull();
+    expect(
+      wrapUntrusted(SYNTHETIC_OUTLOOKS.neutral, "espn.player.season_outlook").untrusted_text.flags,
+    ).toBeUndefined();
+    // inj-outlook-system writes its text over the same field of the same player
+    const inj = (
+      (
+        body(path.join(FX, "inj-outlook-system"), ["mRoster"], 5).teams as {
+          id: number;
+          roster: { entries: J[] };
+        }[]
+      ).find((t) => t.id === 2)?.roster.entries ?? []
+    )
+      .map((e) => (e.playerPoolEntry as { player: J }).player)
+      .find((p) => p.fullName === "James Cook III");
+    expect(inj?.seasonOutlook).toBe(INJECTIONS.outlookSystem);
+  });
+
+  it("auth-rejected: a rejected session on a public league (WV-7-E's state — changelog §R10, R10-7)", () => {
+    const m = readRel("fx-10h/auth-rejected/manifest.json") as {
+      harness: { credential_state: string };
+    };
+    expect(m.harness.credential_state).toBe("rejected");
+    expect((body(path.join(FX, "auth-rejected"), ["mSettings"]).settings as J).isPublic).toBe(true);
   });
 
   it("k10, post-run, drift-mRoster and seeding-unknown change what they describe", () => {

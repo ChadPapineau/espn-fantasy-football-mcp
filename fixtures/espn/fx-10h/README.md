@@ -44,6 +44,10 @@ refuses to run unless the recorded golden is green.
   `WAIVER_ERROR` for Team 02 (synthetic ids in the fake range).
 - **Last season (2025)**: final standings for the seeding evidence; seeds follow the record.
 - **Pro schedule**: the recorded 2026 view with every week-4 game marked `statsOfficial`.
+- **Outlooks**: the scrub leaves every ESPN outlook a placeholder (`[outlook N chars]`), except one
+  synthetic sentence of ours: Team 02's first starting RB by player id (James Cook III) carries a
+  neutral season outlook that states no claim (`SYNTHETIC_OUTLOOKS.neutral` in
+  `scripts/fx10h/variants.ts`), so a check of ESPN's outlook on the base fixture has text to quote.
 
 ## Variants
 
@@ -53,12 +57,14 @@ exactly what it changes. `EFF_FIXTURE_DIR=<abs>/fixtures/espn/fx-10h/<variant>`.
 
 `writes-on`, `auth-rejected` and `public-league` change only server state fixture mode cannot hold
 (the write gates, a credential): their bodies are the base's and their `harness` block names the
-state. Fixture mode reports a scripted `credential_state` (`rejected`, `stored`) as a label, and its
+state (`auth-rejected`: a stored session ESPN rejected, on the base's public league). Fixture mode reports a scripted `credential_state` (`rejected`, `stored`) as a label, and its
 one `espn_check_auth` answers the scripted `probe` result — never a value, no request
 (`src/services/fixture-credential.ts`; changelog §R9, R9-3). `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
 (Team 01's `roster.entries` gone), `points-only-seeding`, `seeding-unknown`, `faab`, `k10`,
 `post-run` (Wednesday 06:00 ET, pool `FREEAGENT`), `ir-open`, `ir-invalid`, `hidden-bench`,
-`sunday-live` (Sunday 14:05 ET), `all-locked` (Monday 23:00 ET), `underdog-9`, `questionable-late`,
+`sunday-live` (Sunday 14:05 ET: the 09:30 ET London game final — a game is final four hours after
+its kickoff —, the 13:00 ET games under way, the late games pending; ESPN's live win probability
+for Team 02 set to 0.75), `all-locked` (Monday 23:00 ET), `underdog-9`, `questionable-late`,
 `mismatch-53` (ESPN's stat 53 at 1.0 on every final box-score line — differs from the base on stat 53
 only), `espn-proj-disagree`, `outlook-more-work` (a synthetic, non-injection week-5 outlook for
 Team 02's RB2: more carries), and the injection variants `inj-outlook-system`, `inj-teamname-json`,
