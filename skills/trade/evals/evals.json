@@ -12,8 +12,8 @@
       "expectations": [
         "The skill called espn_project_players before espn_analyze_trade, then espn_record_recommendation (tool_order)",
         "espn_analyze_trade was called with an offer (tool_used: input_match offer non-empty)",
-        "The reply prints a p10 and a p90 for the user's side (regex: `p10[\\s\\S]{0,120}p90`)",
-        "The reply states the trade deadline (regex: `deadline`)",
+        "The reply prints a p10 and a p90 for the user's side (regex: `p10\\b(?:\\s*[/–-]\\s*p\\d+\\b)*(?:\\s+(?:of|at|is|was))?[^\\w\\n]{0,4}-?\\d[\\s\\S]{0,160}?p90|p10\\b(?:\\s*[/–-]\\s*p\\d+\\b)*\\s*[/–-]\\s*p90[^\\w\\n]{0,4}-?\\d|p10\\b[^\\n]*p90[^\\n]*\\|[^\\n]*\\n(?:[\\s|:-]+\\n)?\\s*\\|[^\\n]*\\d`)",
+        "The reply states the trade deadline (regex: `deadline[\\s\\S]{0,40}?(?:2026-12-02|Dec(?:ember)?\\.? 0?2\\b|\\b0?2 Dec(?:ember)?\\b|\\b12/0?2\\b)|(?:2026-12-02|Dec(?:ember)?\\.? 0?2\\b|\\b0?2 Dec(?:ember)?\\b|\\b12/0?2\\b)[^.\\n]{0,40}deadline`)",
         "The reply gives the change for both teams and the playoff-odds change for both, under the named seeding reading (llm)",
         "The reply names the roster spot the 2-for-1 frees or the drop it forces, with its value (llm)",
         "A devil's-advocate paragraph comes before the verdict, and a verdict whose interval spans zero is called fair or a coin flip (llm)"

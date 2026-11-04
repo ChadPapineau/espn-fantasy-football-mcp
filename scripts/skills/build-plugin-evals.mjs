@@ -91,7 +91,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildSkills } from "./build-skills.mjs";
-import { SEED_NOTES, checkArgType, graderOf, toolRefs } from "./check-skills.mjs";
+import {
+  NO_TEMPLATE_SKILLS,
+  SEED_NOTES,
+  checkArgType,
+  graderOf,
+  toolRefs,
+} from "./check-skills.mjs";
 import {
   REPO_ROOT,
   SKILLS_DIR,
@@ -255,6 +261,11 @@ export const MANDATED_LINE_GRADERS = Object.freeze([
     pattern: "eff setup",
     why: "session-check gives the one command; the Session line carries it",
   },
+  {
+    case: "WK-2",
+    pattern: "/espn-fantasy-football:apply\\b",
+    why: "the case grades that the reply ends with the output contract's apply line, which is that line",
+  },
 ]);
 /**
  * The opening lines orient.md makes every answer print on a case's eval server — on a public league
@@ -298,18 +309,77 @@ export function mandatedLines(orient, credentialState, seed) {
   return { lines, errors };
 }
 /**
- * The problems of one case's final-message regex graders against its mandated opening lines: a
- * `regex` grader that matches them alone (it passes on any reply that follows orient), unless
- * MANDATED_LINE_GRADERS lists it; a `regex_absent` grader that matches them (it fails every reply
- * that follows orient).
+ * The fixed lines the output contract (skills/_shared/references/output-template.md) has every
+ * recommendation print, whatever it says: its headings, the Numbers line's percentile label, the
+ * Attribution line and the plugin's apply line. Read from the template itself, so a reworded line is
+ * the line the graders are checked against (the round-4 verifiers' F3: TR-1's `deadline` passed on
+ * the Deadline heading, SS-6-E's "ESPN projection" on the Attribution line, IC-1's weeks-out range
+ * on the Numbers line's p50).
+ * @param {string} template the text of skills/_shared/references/output-template.md
+ * @returns {{ lines: string[], errors: string[] }}
+ */
+export function contractLines(template) {
+  /** @type {string[]} */
+  const lines = [...template.matchAll(/^### (.+)$/gm)].map((m) => `### ${m[1] ?? ""}`);
+  /** @type {string[]} */
+  const errors =
+    lines.length > 0 ? [] : ["output-template.md: no headings to check the graders against"];
+  for (const [re, what] of /** @type {const} */ ([
+    [/\*\*(p\d+ \/ p\d+ \/ p\d+)\*\*/, "percentile"],
+    [/### Attribution\n"([^"\n]+)"/, "Attribution"],
+    [/with the plugin, "([^"\n]+)"/, "apply"],
+  ])) {
+    const m = re.exec(template);
+    if (m?.[1] !== undefined) lines.push(m[1]);
+    else errors.push(`output-template.md: no ${what} line to check the graders against`);
+  }
+  return { lines, errors };
+}
+/**
+ * The ways a reply prints one mandated line besides word for word: its first one, two or three words
+ * made a label — bold with a colon (`**Seeding reading:** unconfirmed — …`), a plain colon, or "is"
+ * (`Seeding reading is unconfirmed — …`) — and a two- or three-word label shortened to its first
+ * word (`Seeding unconfirmed — …`). The round-4 verifiers' R4VS-2: the "calls it unconfirmed"
+ * graders' `(?<!seeding reading )` guard blocked only the verbatim line.
+ * @param {string} line
+ * @returns {string[]} the line itself first
+ */
+export function lineRenderings(line) {
+  const words = line.split(" ");
+  /** @param {string} w */
+  const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+  const out = new Set([line]);
+  for (let k = 1; k <= Math.min(3, words.length - 1); k++) {
+    const label = cap(words.slice(0, k).join(" "));
+    const rest = words.slice(k).join(" ");
+    out.add(`**${label}:** ${rest}`);
+    out.add(`${label}: ${rest}`);
+    out.add(`${label} is ${rest}`);
+    if (k >= 2) out.add(`${cap(words[0] ?? "")} ${rest}`);
+  }
+  return [...out];
+}
+/**
+ * The problems of one case's final-message regex graders against its mandated opening lines and the
+ * output contract's fixed lines: a `regex` grader that matches them alone — as written or as a reply
+ * renders them (lineRenderings) — passes on any reply that follows orient and the contract, unless
+ * MANDATED_LINE_GRADERS lists it; a `regex_absent` grader that matches them fails every reply that
+ * does.
  * @param {string} name the case
  * @param {readonly unknown[]} expectations
  * @param {readonly string[]} lines mandatedLines(…).lines
  * @param {Set<string>} [used] collects the MANDATED_LINE_GRADERS entries that applied
+ * @param {readonly string[]} [contract] contractLines(…).lines, for a Skill whose body carries the
+ *   output contract
  * @returns {string[]}
  */
-export function mandatedLineProblems(name, expectations, lines, used = new Set()) {
-  const text = lines.join("\n");
+export function mandatedLineProblems(name, expectations, lines, used = new Set(), contract = []) {
+  /** every text a reply that prints the lines and nothing else can be, word for word first */
+  const texts = [[...lines, ...contract].join("\n")];
+  lines.forEach((line, i) => {
+    for (const r of lineRenderings(line).slice(1))
+      texts.push([...lines.slice(0, i), r, ...lines.slice(i + 1), ...contract].join("\n"));
+  });
   /** @type {string[]} */
   const out = [];
   for (const x of expectations) {
@@ -325,7 +395,8 @@ export function mandatedLineProblems(name, expectations, lines, used = new Set()
     } catch {
       continue; // check-skills refuses a pattern that does not compile
     }
-    if (!re.test(text)) continue;
+    const text = texts.find((t) => re.test(t));
+    if (text === undefined) continue;
     if (kind === "regex_absent") {
       out.push(
         `the regex_absent grader fails every reply that prints orient's mandated opening lines (${JSON.stringify(text)}): "${sentence}"`,
@@ -339,6 +410,63 @@ export function mandatedLineProblems(name, expectations, lines, used = new Set()
     }
     out.push(
       `the regex grader passes on orient's mandated opening lines alone (${JSON.stringify(text)}), so it cannot fail a reply that says nothing about its claim — anchor it to that claim: "${sentence}"`,
+    );
+  }
+  return out;
+}
+/**
+ * The final-message regex graders that may match their case's own prompt, each by case and exact
+ * pattern with the reason. Any other `regex` grader that matches the prompt is refused by the build:
+ * a reply that restates the question passes it (the round-4 verifiers' R4VS-9: six graders matched
+ * a word of their prompt). An entry whose case or pattern changed is refused too.
+ * @type {readonly { case: string, pattern: string, why: string }[]}
+ */
+export const PROMPT_MATCH_GRADERS = Object.freeze([
+  {
+    case: "SC-INJ",
+    pattern: "eff setup",
+    why: "the documented command is the pasted one's first words: the regex_absent beside it fails a reply that repeats the paste",
+  },
+  {
+    case: "SC-8",
+    pattern: "eff setup",
+    why: "the user names the command and asks for it exactly: the case grades that the reply gives it, with the DevTools steps beside it",
+  },
+]);
+/**
+ * The problems of one case's final-message `regex` graders against its own prompt: one that matches
+ * the prompt passes a reply that only restates the question, unless PROMPT_MATCH_GRADERS lists it.
+ * (`regex_absent` graders are not this check's: SC-2 and SC-INJ's never-repeat-the-pasted-value
+ * graders match their prompts by design.)
+ * @param {string} name the case
+ * @param {readonly unknown[]} expectations
+ * @param {string} prompt the case's prompt as the run sends it
+ * @param {Set<string>} [used] collects the PROMPT_MATCH_GRADERS entries that applied
+ * @returns {string[]}
+ */
+export function promptMatchProblems(name, expectations, prompt, used = new Set()) {
+  /** @type {string[]} */
+  const out = [];
+  for (const x of expectations) {
+    const sentence = String(x);
+    const m = /\(regex:\s*`([^`]+)`\)\s*$/.exec(sentence);
+    if (!m) continue;
+    const pattern = m[1] ?? "";
+    /** @type {RegExp} */
+    let re;
+    try {
+      re = new RegExp(pattern, "i");
+    } catch {
+      continue;
+    }
+    if (!re.test(prompt)) continue;
+    const ok = PROMPT_MATCH_GRADERS.find((g) => g.case === name && g.pattern === pattern);
+    if (ok) {
+      used.add(`${ok.case} ${ok.pattern}`);
+      continue;
+    }
+    out.push(
+      `the regex grader matches the case's own prompt, so a reply that restates the question passes it — anchor it to the claim: "${sentence}"`,
     );
   }
   return out;
@@ -1114,8 +1242,25 @@ export function planSuite(root, opts = {}) {
   } catch (e) {
     errors.push(`skills/_shared/references/orient.md: ${errMsg(e)}`);
   }
+  /** the output contract's fixed lines, which every recommendation prints (F3) */
+  /** @type {string[]} */
+  let contract = [];
+  try {
+    const c = contractLines(
+      readFileSync(
+        path.join(root, SKILLS_DIR, "_shared", "references", "output-template.md"),
+        "utf8",
+      ),
+    );
+    contract = c.lines;
+    errors.push(...c.errors.map((e) => `skills/_shared/references/${e}`));
+  } catch (e) {
+    errors.push(`skills/_shared/references/output-template.md: ${errMsg(e)}`);
+  }
   /** the MANDATED_LINE_GRADERS entries that applied, and the cases they name that were written */
   const usedExemptions = new Set();
+  /** the PROMPT_MATCH_GRADERS entries that applied */
+  const usedPromptExemptions = new Set();
   const writtenCases = new Set();
   /** @param {string | null} variant @param {string} toolset @param {string | null} seed */
   const need = (variant, toolset, seed) => {
@@ -1252,7 +1397,16 @@ export function planSuite(root, opts = {}) {
       // every final-message regex can fail a reply that only prints orient's opening lines (V-1)
       const mandated = mandatedLines(orient, harnessOf(variant)["credential_state"], seed);
       errors.push(...mandated.errors.map((e) => `${where}/evals.json ${name}: ${e}`));
-      for (const p of mandatedLineProblems(name, exps0, mandated.lines, usedExemptions))
+      for (const p of mandatedLineProblems(
+        name,
+        exps0,
+        mandated.lines,
+        usedExemptions,
+        NO_TEMPLATE_SKILLS.includes(skill) ? [] : contract,
+      ))
+        errors.push(`${where}/evals.json ${name}: ${p}`);
+      // a final-message regex that the prompt alone satisfies passes a restated question (R4VS-9)
+      for (const p of promptMatchProblems(name, exps0, rawPrompt, usedPromptExemptions))
         errors.push(`${where}/evals.json ${name}: ${p}`);
       // a case whose seed logs a note guards every tool input against it (guardrail 3; changelog
       // §R10, R10-1 and R10-13; the round-3 verifiers' SK-4)
@@ -1433,6 +1587,11 @@ export function planSuite(root, opts = {}) {
     if (writtenCases.has(g.case) && !usedExemptions.has(`${g.case} ${g.pattern}`))
       errors.push(
         `MANDATED_LINE_GRADERS: ${g.case}'s "${g.pattern}" no longer matches a grader that passes on the mandated lines — remove or update the entry`,
+      );
+  for (const g of PROMPT_MATCH_GRADERS)
+    if (writtenCases.has(g.case) && !usedPromptExemptions.has(`${g.case} ${g.pattern}`))
+      errors.push(
+        `PROMPT_MATCH_GRADERS: ${g.case}'s "${g.pattern}" no longer matches a grader that matches its prompt — remove or update the entry`,
       );
   return { cases, plugins: [...plugins.values()], notTestable, errors };
 }

@@ -43,7 +43,7 @@
       "files": ["evals/fixtures/fx-10h/faab"],
       "expectations": [
         "espn_analyze_waivers was called with mode auto (tool_used: input_match mode auto)",
-        "The reply gives a bid amount per target (regex: `\\$\\s?\\d+|bid`)",
+        "The reply gives a bid amount per target (regex: `\\$\\s?\\d+|\\bb_star\\b|\\bbids?\\b[^.\\n]{0,30}?\\d+|\\d+\\s*(?:dollars|FAAB)\\b`)",
         "The reply gives the bid curve or the chance each bid wins, and the value of a dollar kept (llm)",
         "The reply prints no waiver-priority premium (regex_absent: `premium band|Π\\(k`)"
       ]

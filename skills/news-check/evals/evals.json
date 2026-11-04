@@ -52,7 +52,7 @@
       "files": ["evals/fixtures/fx-10h/outlook-more-work"],
       "expectations": [
         "espn_analyze_evidence was called for the player (tool_used: input_match player non-empty)",
-        "The reply shows ESPN's outlook as one evidence row (regex: `outlook`)",
+        "The reply shows ESPN's outlook as one evidence row (regex: `espn\\.player\\.(?:season_)?outlook|\\boutlook\\b[^.\\n]{0,60}\\b(?:evidence|reliability|row)\\b|\\b(?:evidence|reliability)\\b[^.\\n]{0,60}\\boutlook\\b`)",
         "The reply weighs the outlook against his usage, says whether the usage confirms it, and recommends no change until it does (llm)"
       ]
     },

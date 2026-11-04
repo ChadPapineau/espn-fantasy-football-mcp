@@ -12,7 +12,7 @@
       "expectations": [
         "The skill called espn_analyze_matchup before espn_analyze_schedule (tool_order)",
         "The skill called espn_analyze_schedule before espn_record_recommendation (tool_order)",
-        "The reply mentions the bye weeks (regex: `bye`)",
+        "The reply mentions the bye weeks (regex: `\\bw(?:ee)?ks?\\.? ?\\d+\\b[^\\n]{0,80}\\bbyes?\\b|\\bbyes?\\b[^\\n]{0,80}\\bw(?:ee)?ks?\\.? ?\\d+\\b`)",
         "The reply gives a per-week table, names the worst bye cluster and its cost in points (llm)"
       ]
     },
@@ -51,7 +51,7 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_analyze_matchup was called in season mode (tool_used: input_match mode season)",
-        "The reply gives the playoff probability and ESPN's figure, labelled (regex: `playoff_pct_espn|ESPN['’]?s?\\b[^.\\n]{0,60}playoff|playoff[^.\\n]{0,60}\\bESPN`)",
+        "The reply gives the playoff probability and ESPN's figure, labelled (regex: `playoff_pct_espn|ESPN(?!['’]s rule)['’]?s?\\b[^.\\n]{0,60}(?:0?\\.46\\b|46(?:\\.0)? ?%)|(?:0?\\.46\\b|46(?:\\.0)? ?%)[^.\\n]{0,40}\\bESPN(?!['’]s rule)`)",
         "The reply prints the marginal-values table with the win row and the points rows (llm)",
         "The reply names the seeding reading and translates one win into points with one sentence (llm)",
         "The reply never recommends coasting (regex_absent: `\\bcoast(ing)? (is|would be) (fine|safe|ok)`)"

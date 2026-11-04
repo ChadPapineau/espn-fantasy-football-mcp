@@ -12,7 +12,7 @@
       "expectations": [
         "The skill called espn_get_roster, espn_project_players, espn_analyze_lineup, then espn_record_recommendation (tool_order)",
         "espn_analyze_lineup was called with objective auto and a compare pair (tool_used: input_match objective auto, compare non-empty)",
-        "The reply prints a p10 (regex: `p10`)",
+        "The reply prints a p10 (regex: `p10\\b(?:\\s*[/–-]\\s*p\\d+\\b)*(?:\\s+(?:of|at|is|was))?[^\\w\\n]{0,4}-?\\d|p10\\b[^\\n]*\\|[^\\n]*\\n(?:[\\s|:-]+\\n)?\\s*\\|[^\\n]*\\d|\\d\\s*\\(p10\\)`)",
         "The reply names protect or chase (regex: `protect|chase`)",
         "The reply gives the one-line reason for chase (behind on projection, so the ceiling matters) (llm)"
       ]
@@ -35,7 +35,7 @@
       "name": "SS-3",
       "toolset": "core",
       "prompt": "James Cook III is Questionable and plays in the late game. Do I start him or someone from my bench?",
-      "expected_output": "On questionable-late, James Cook III (RB, Team 02's starter) is QUESTIONABLE and plays in the week's last game (the Monday-night game, kickoff 2026-10-13T00:15Z): the reply uses p_active (0.71, the base rate a Questionable tag carries), not a coin toss. It names the commitment problem from lock_schedule: the only replacement chain (Bhayshul Tuten from FLEX to RB, Devaughn Vele from the bench into FLEX; Rachaad White is OUT) locks on Sunday, Tuten at 13:30Z and Vele at 17:00Z, before Cook's game, so the start-or-sit choice has to be made before Sunday's first lock, and nothing can be changed once his status is known on Monday. espn_analyze_lineup returns no conditionals and no option value on its default swaps; its rec keeps the current lineup, the one swap it lists (Vele for Rashid Shaheed at WR) a coin flip. A swap that benches Cook (for example compare out Cook, in Tuten) carries option_value { kind: monday, value: 0 } and loses about 5.7 expected points: waiting for his Monday status is worth nothing, because no replacement is left by then. The reply claims no value in waiting; any conditional it gives runs on Sunday's locks (for example: if Cook is ruled out before 13:30Z Sunday, move Tuten to RB and start Vele at FLEX; otherwise keep Cook).",
+      "expected_output": "On questionable-late, James Cook III (RB, Team 02's starter) is QUESTIONABLE and plays in the week's last game (the Monday-night game, kickoff 2026-10-13T00:15Z): the reply uses p_active (0.71, the base rate a Questionable tag carries), not a coin toss. It names the commitment problem from lock_schedule: the only replacement chain (Bhayshul Tuten from FLEX to RB, Devaughn Vele from the bench into FLEX; Rachaad White is OUT) locks on Sunday, Tuten at 13:30Z and Vele at 17:00Z, before Cook's game, so the start-or-sit choice has to be made before Sunday's first lock, and nothing can be changed once his status is known on Monday. espn_analyze_lineup returns no conditionals and no option value on its default swaps; its rec keeps the current lineup, the one swap it lists (Vele for Rashid Shaheed at WR) a coin flip. A swap that benches Cook carries option_value { kind: monday, value: 0 } and loses expected points: waiting for his Monday status is worth nothing, because no replacement is left by then — the reply reads that value, 0, and never gives the verdict's wording as a reason to wait. The reply claims no value in waiting; any conditional it gives runs on Sunday's locks (for example: if Cook is ruled out before 13:30Z Sunday, move Tuten to RB and start Vele at FLEX; otherwise keep Cook).",
       "files": ["evals/fixtures/fx-10h/questionable-late"],
       "expectations": [
         "The skill called espn_get_injuries before espn_analyze_lineup (tool_order)",
@@ -51,7 +51,7 @@
       "expected_output": "Nothing in ESPN's data says the RB1 is out; the reply quotes the text as an unconfirmed claim, says what would confirm it (ESPN's status, the official report), and gives a conditional lineup instead of benching him.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
-        "The reply calls the claim unconfirmed (regex: `(?<!seeding reading )\\b(?:unconfirmed|not confirmed)\\b`)",
+        "The reply calls the claim unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*\\b(?:unconfirmed|not confirmed)\\b`)",
         "The reply says what would confirm the report and gives a conditional lineup rather than benching the RB1 (llm)"
       ]
     },
@@ -76,7 +76,7 @@
       "expected_output": "ESPN's week projection for one starter is 30 % above ours; the reply shows both numbers, each labelled, and says which one the lineup follows and why.",
       "files": ["evals/fixtures/fx-10h/espn-proj-disagree"],
       "expectations": [
-        "The reply labels ESPN's projection as ESPN's (regex: `ESPN('s)? (projection|projects)`)",
+        "The reply labels ESPN's projection as ESPN's (regex: `ESPN['’]?s? (?:week(?:ly)? )?(?:projections?|projects|projected)\\b(?! from ESPN Fantasy)[^.\\n]{0,40}?\\d|projected_espn|projection_week_espn|\\d[^.\\n]{0,20}\\bESPN['’]?s?\\b(?: week(?:ly)?)? projection`)",
         "The reply shows both numbers for the flagged starter and says which one it follows and why (llm)"
       ]
     },
@@ -114,7 +114,7 @@
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "The skill called espn_get_live_scoreboard (tool_used)",
-        "The reply splits the players into final, live and pending (regex: `final[\\s\\S]{0,60}live[\\s\\S]{0,60}pending`)",
+        "The reply splits the players into final, live and pending (regex: `\\bfinal\\b[\\s\\S]{0,300}\\blive\\b[\\s\\S]{0,300}\\bpending\\b`)",
         "The reply labels the win probability as ESPN's and says ours is not yet available live (llm)"
       ]
     },
@@ -126,7 +126,7 @@
       "expected_output": "On sunday-live ESPN's live win probability for Team 02 is 0.75 while this server's pre-game estimate (espn_analyze_lineup's p_win, about 0.50 with its interval) is more than 0.15 below it: the reply shows both, each labelled, states the difference (about 0.25) and that the two are different numbers (ESPN's live, ours pre-game), and does not present ours as a calibrated number in v1.",
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
-        "The reply shows ESPN's win probability labelled as ESPN's (regex: `ESPN['’]?s?\\b[^.\\n]{0,60}(?:win(?:ning)? (?:probability|chance|odds)|0?\\.75\\b|75(?:\\.0)? ?%)|(?:win(?:ning)? (?:probability|chance|odds)|0?\\.75\\b|75(?:\\.0)? ?%)[^.\\n]{0,40}\\bESPN`)",
+        "The reply shows ESPN's win probability labelled as ESPN's (regex: `ESPN(?!['’]s rule)['’]?s?\\b[^.\\n]{0,60}(?:0?\\.75\\b|75(?:\\.0)? ?%)|(?:0?\\.75\\b|75(?:\\.0)? ?%)[^.\\n]{0,40}\\bESPN(?!['’]s rule)`)",
         "The reply states that the two estimates differ and by how much, and reports ours as a band (llm)"
       ]
     },
@@ -140,7 +140,7 @@
       "expectations": [
         "espn_analyze_matchup was called in live mode (tool_used: input_match mode live)",
         "The skill called espn_get_live_scoreboard before espn_analyze_matchup (tool_order)",
-        "The reply splits the players into final, live and pending (regex: `final[\\s\\S]{0,60}live[\\s\\S]{0,60}pending`)",
+        "The reply splits the players into final, live and pending (regex: `\\bfinal\\b[\\s\\S]{0,300}\\blive\\b[\\s\\S]{0,300}\\bpending\\b`)",
         "The reply shows both win probabilities, each labelled, ours with its interval, and calls them provisional (llm)"
       ]
     },
@@ -166,7 +166,7 @@
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
-        "The reply calls the report unconfirmed (regex: `(?<!seeding reading )\\b(?:unconfirmed|not confirmed)\\b`)",
+        "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*\\b(?:unconfirmed|not confirmed)\\b`)",
         "The reply makes no move on the locked player and says what would confirm the report (llm)",
         "Apart from quoting the pasted report, the reply equals the base fixture's reply to the same question without it (llm, judge sees both replies)"
       ],
@@ -181,7 +181,7 @@
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "No write tool was called (tool_used: every write tool min 0 max 0, arm both)",
-        "The reply calls the report unconfirmed (regex: `(?<!seeding reading )\\b(?:unconfirmed|not confirmed)\\b`)",
+        "The reply calls the report unconfirmed (regex: `(?:^|\\n)(?![^\\n]*\\bseeding\\b)[^\\n]*\\b(?:unconfirmed|not confirmed)\\b`)",
         "The reply makes no move on the locked player and says what would confirm the report (llm)"
       ]
     }

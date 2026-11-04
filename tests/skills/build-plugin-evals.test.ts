@@ -2906,7 +2906,8 @@ describe("every final-message regex can fail a reply that only prints orient's o
   it.each([
     ["SS-4", "The reply calls the claim unconfirmed: your buddy's text is not confirmed by ESPN."],
     ["SS-10-E", "ESPN's live win probability is 0.75; ours, pre-game, is about 0.50."],
-    ["SP-4-E", "P(playoffs) 0.62 — ESPN's playoff percentage is 55 %."],
+    // base--full's ESPN figure (playoff_pct_espn 0.46): the grader is anchored to it (R4VS-3)
+    ["SP-4-E", "P(playoffs) 0.62 — ESPN's playoff percentage is 46 %."],
     ["NC-1", "The tool flags it unconfirmed_narrative."],
   ])("%s: the anchored grader still passes a reply that makes its claim", (name, reply) => {
     const skill = name.startsWith("SS")
@@ -2943,6 +2944,53 @@ describe("every final-message regex can fail a reply that only prints orient's o
     expect(e).toContain(
       `MANDATED_LINE_GRADERS: WV-7-E's "session-check|eff setup" no longer matches a grader that passes on the mandated lines`,
     );
+  });
+
+  // the round-4 verifiers' F3 and R4VS-9: the output contract's fixed lines and the case's own prompt
+  it("planSuite refuses a grader the output contract's lines or the prompt satisfy, never one of a Skill without the contract, and a stale prompt exemption", () => {
+    const t = repoWithFixtures();
+    t.editJson("skills/start-sit/evals/evals.json", (j) => {
+      const c = (j.evals as Json[]).find((x) => x.name === "SS-1")!;
+      (c.expectations as string[]).push("The reply logs (regex: `### Log`)");
+    });
+    t.editJson("skills/session-check/evals/evals.json", (j) => {
+      const c = (j.evals as Json[]).find((x) => x.name === "SC-8")!;
+      const x = c.expectations as string[];
+      // session-check renders no output contract: a heading grader is not refused there
+      x.push("The reply logs (regex: `### Log`)");
+      // a changed pattern is reviewed again: the old exemption goes stale, the new one is refused
+      const i = x.findIndex((e) => e.endsWith("(regex: `eff setup`)"));
+      expect(i).toBeGreaterThanOrEqual(0);
+      x[i] = (x[i] ?? "").replace("`eff setup`", "`eff setup\\b`");
+    });
+    t.editJson("skills/apply/evals/evals.json", (j) => {
+      const c = (j.evals as Json[]).find((x) => x.name === "AP-INJ")!;
+      const x = c.expectations as string[];
+      const i = x.findIndex((e) => e.includes("`espn\\.team\\.trade_block`"));
+      expect(i).toBeGreaterThanOrEqual(0);
+      x[i] = (x[i] ?? "").replace(
+        "`espn\\.team\\.trade_block`",
+        "`espn\\.team\\.trade_block|trade[- ]block`",
+      );
+    });
+    const e = planSuite(t.root).errors.join("\n");
+    expect(e).toMatch(
+      /skills\/start-sit\/evals\/evals\.json SS-1: the regex grader passes on orient's mandated opening lines alone[^\n]*### Log/,
+    );
+    expect(e).not.toMatch(
+      /skills\/session-check\/evals\/evals\.json SC-8: the regex grader passes[^\n]*The reply logs/,
+    );
+    expect(e).toMatch(
+      /skills\/session-check\/evals\/evals\.json SC-8: the regex grader matches the case's own prompt/,
+    );
+    expect(e).toContain(
+      `PROMPT_MATCH_GRADERS: SC-8's "eff setup" no longer matches a grader that matches its prompt`,
+    );
+    expect(e).toMatch(
+      /skills\/apply\/evals\/evals\.json AP-INJ: the regex grader matches the case's own prompt/,
+    );
+    // the shipped suite has none of these
+    expect(planSuite(ROOT).errors).toEqual([]);
   });
 
   it("every fx-10h variant's league is public (the Session lines assume it): no variant patch turns it private", () => {

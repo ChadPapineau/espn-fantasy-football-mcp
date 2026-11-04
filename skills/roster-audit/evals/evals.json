@@ -26,7 +26,7 @@
       "files": ["evals/fixtures/fx-10h/ir-open"],
       "expectations": [
         "The skill called espn_analyze_roster (tool_used)",
-        "The reply names the move to IR (regex: `\\bIR\\b`)",
+        "The reply names the move to IR (regex: `\\b(?:move|put|place|slide|stash|send)\\b[^.\\n]{0,60}\\b(?:to|in|into)\\b (?:the |your |an |his |that )?(?:open )?IR\\b|\\bBE\\s*(?:→|->|to)\\s*IR\\b|\\bIR\\b[^.\\n]{0,20}\\b(?:move|stash)\\b`)",
         "The reply warns to activate only after the waiver run (regex: `after the (waiver )?run`)",
         "The reply names the bench spot the move frees (llm)"
       ]
@@ -53,8 +53,9 @@
       "files": ["evals/fixtures/fx-10h/hidden-bench"],
       "expectations": [
         "The skill called espn_analyze_roster (tool_used)",
-        "The reply says the player may stay in IR while Questionable (regex: `\\b(?:may|can)(?: still)? (?:stay|remain)\\b[^.\\n]{0,40}\\bIR\\b|(?<!n['’]t |not |never )\\b(?:stays?|remains?|staying|remaining) in (?:the |your |his )?IR\\b|(?<!not )\\ballowed to (?:stay|remain)\\b[^.\\n]{0,40}\\bIR\\b`)",
-        "The reply names the tool's three risks — the roster turns invalid when the tag clears (every add blocked, a forced drop on a full bench), activating before a pending claim makes it fail, and IR moves count in the transaction counter — and says the extra bench player the play adds is the drop when the tag clears (llm)"
+        "The reply says the player may stay in IR while Questionable (regex: `(?<!n['’]t |not |never |no longer )\\b(?:can|may)(?: still| safely)? (?:stay|remain)\\b(?! (?:on|in|at) (?:your |the |his )?bench)|(?<!n['’]t |not |never |don['’]t )\\bkeep (?:him|Bo Nix|Nix) (?:in (?:the |your |his |that )?IR|there)\\b|(?<!\\bnot |n['’]t |never )\\ballowed (?:to (?:stay|remain)|there|in (?:the |an |your )?IR)|\\b(?:he|Nix) (?:stays|remains) (?:in (?:the |your |his |that |an )?IR(?: slot)?|there)\\b(?![^.\\n]{0,25}\\bonly (?:if|when)\\b)`)",
+        "The reply names the tool's three risks — the roster turns invalid when the tag clears (every add blocked, a forced drop on a full bench), activating before a pending claim makes it fail, and IR moves count in the transaction counter — and says the extra bench player the play adds is the drop when the tag clears (llm)",
+        "The reply answers that he may stay in IR while the Questionable tag lasts — never that he must leave IR now or cannot stay there (llm)"
       ]
     },
     {

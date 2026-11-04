@@ -14,7 +14,7 @@
         "espn_analyze_waivers was called with look_ahead 2 and positions D/ST (tool_used: input_match look_ahead 2, positions D/ST)",
         "The reply cites the opponent's implied total (regex: `implied (team )?total`)",
         "The reply looks ahead to next week (regex: `next week|week 6`)",
-        "The reply gives a hold-or-stream verdict (regex: `\\bhold\\b|\\bstream\\b`)"
+        "The reply gives a hold-or-stream verdict (regex: `\\bhold_vs_stream\\b|\\b(?:verdict|recommendation|call)\\b[^\\w\\n]{0,6}(?:\\*\\*)?\\s*(?:hold|stream)\\b|\\*\\*(?:hold|stream)(?:ing)?\\b|\\b(?:hold|stream)\\b[^.\\n?]{0,60}\\b(?:over|instead of|rather than)\\b|\\b(?:hold|keep|stream)\\b (?:the |your )?(?:[\\w.'’]+ ){1,3}D/ST\\b`)"
       ]
     },
     {

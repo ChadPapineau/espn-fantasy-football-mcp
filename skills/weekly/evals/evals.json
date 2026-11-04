@@ -13,7 +13,7 @@
         "espn_get_league was called at most once (tool_used: min 0 max 1)",
         "The skill called espn_project_players before espn_analyze_lineup and espn_record_recommendation last (tool_order)",
         "The reply has all six section headings (regex: `Last week[\\s\\S]*matchup and lineup[\\s\\S]*Waivers[\\s\\S]*K and D/ST[\\s\\S]*Injuries and byes[\\s\\S]*League activity`)",
-        "The reply gives a p10 and a p90 with the distribution basis (regex: `p10[\\s\\S]{0,80}p90|p90[\\s\\S]{0,80}p10`)",
+        "The reply gives a p10 and a p90 with the distribution basis (regex: `p10\\b(?:\\s*[/–-]\\s*p\\d+\\b)*(?:\\s+(?:of|at|is|was))?[^\\w\\n]{0,4}-?\\d[\\s\\S]{0,160}?p90|p10\\b(?:\\s*[/–-]\\s*p\\d+\\b)*\\s*[/–-]\\s*p90[^\\w\\n]{0,4}-?\\d|p10\\b[^\\n]*p90[^\\n]*\\|[^\\n]*\\n(?:[\\s|:-]+\\n)?\\s*\\|[^\\n]*\\d`)",
         "The reply names a claim, pass or marginal verdict for each candidate and prints the premium band (llm)",
         "Every action in the reply names its deadline and the reply prints an as_of (llm)"
       ]
