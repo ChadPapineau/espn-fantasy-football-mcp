@@ -1,7 +1,8 @@
 // view-parse-steps.test.ts — a large view's schema parse in steps (views/index.ts parseViewSteps;
 // provider.ts parseRosterSteps, mRoster a team a step; request.ts runs a body over
 // YIELD_BEFORE_PARSE_CHARS through `inTurns`, fresh and cached; plan 03 §1.2's ≤ 20 ms batch;
-// changelog §R10 timing items: the 1 MB roster's parse was one 20–30 ms turn on the owner's Mac).
+// changelog §R10 timing items: league-c's 1 MB week-3 roster parsed in one turn of about 12–14 ms of
+// CPU, round 3's profile on the owner's Mac).
 // The value is parseView's — the same output, its keys in the same order — over recorded rosters and
 // random ones; any failure gives parseView's signals for the whole body (the same paths, the same
 // order); a schema the split cannot read the same way, a short array and a non-object are parsed
@@ -85,6 +86,34 @@ describe("parseViewSteps: parseView's value, a slice a step", () => {
       for (let r2 = work.next(); r2.done !== true; r2 = work.next()) yields += 1;
       expect(yields).toBe(0);
     }
+  });
+
+  it("a schema that is no plain object, or whose field is no plain array: parsed whole, parseView's value", () => {
+    // splitElementOf's two other refusals (round 3's review): a pipe, a union or a readonly wrapper
+    // is no ZodObject (it has no shape to split), and an optional, defaulted or nullable field is no
+    // ZodArray (it has no element to parse a step at a time) — each read whole, never in steps
+    const odd: [string, z.ZodType][] = [
+      ["transform", z.looseObject({ teams: z.array(z.number()) }).transform((x) => x)],
+      [
+        "union",
+        z.union([z.looseObject({ teams: z.array(z.number()) }), z.looseObject({ id: z.number() })]),
+      ],
+      ["readonly", z.looseObject({ teams: z.array(z.number()) }).readonly()],
+      ["optional field", z.looseObject({ teams: z.array(z.number()).optional() })],
+      ["default field", z.looseObject({ teams: z.array(z.number()).default([]) })],
+      ["nullable field", z.looseObject({ teams: z.array(z.number()).nullable() })],
+    ];
+    for (const [name, schema] of odd)
+      for (const body of [{ teams: [1, 2, 3, 4] }, { teams: [1, "x", 3] }, { id: 1 }]) {
+        let yields = 0;
+        const work = parseViewSteps("mRoster", schema, body, "teams", 1);
+        let r2 = work.next();
+        for (; r2.done !== true; r2 = work.next()) yields += 1;
+        expect(yields, name).toBe(0);
+        expect(JSON.stringify(r2.value), name).toBe(
+          JSON.stringify(parseView("mRoster", schema, body)),
+        );
+      }
   });
 
   it("counted: no step parses more than STEP_ELEMENTS teams; a roster takes a step per team", () => {
