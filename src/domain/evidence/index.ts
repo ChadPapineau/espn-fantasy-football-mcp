@@ -28,6 +28,7 @@ export {
   RULES_V1,
   RULES_V1_TABLE,
   toClaimExtract,
+  warmRulesSteps,
   type AvailabilityClass,
   type ClaimDirection,
   type ClaimType,

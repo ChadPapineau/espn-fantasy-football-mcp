@@ -23,7 +23,8 @@ import type {
   PlayerWeekLine,
   UsageGameRow,
 } from "../../domain/analytics/types.js";
-import { newsClaim } from "../../domain/evidence/index.js";
+import { inTurns, turnIfSpent } from "../../domain/analytics/cooperative.js";
+import { newsClaim, warmRulesSteps } from "../../domain/evidence/index.js";
 import { teamOfProTeamId } from "../../domain/crosswalk/teams.js";
 import {
   INJECTION_FLAGS,
@@ -923,9 +924,6 @@ export const getDefenseProfile = defineTool({
 
 // --- D6 espn_get_news ----------------------------------------------------------------------------
 
-/** News items whose claims are extracted in one turn of the event loop (plan 03 §1.2). */
-export const NEWS_ITEMS_PER_TURN = 5;
-
 /** The matcher's lowest confidence (re-exported: the shared reader lives in common.ts). */
 export { NEWS_MATCH_FLOOR };
 
@@ -1129,12 +1127,15 @@ export const getNews = defineTool({
       for (const r of u.rows) names.set(r.espn_id, bareUntrusted(r.full_name, "player_name"));
     }
     let flagged = 0;
-    // the rules_v1 claim of each item runs its whole rule set over the title and blurb (the first
-    // call also compiles every rule's pattern): a few items per turn, so a full page of news never
-    // runs as one macrotask (plan 03 §1.2; plan 10 A16a)
+    // the rules_v1 claim of each item runs its whole rule set over the title and blurb, and the
+    // process's first claims compiled every rule's pattern (16–18 ms in this call's first turn by
+    // round 3's turn profiler; changelog §R10 timing items): the table is compiled first, a rule a
+    // step, then each item is a step, and the turn ends between two once the slice has spent its
+    // share (plan 03 §1.2; plan 10 A16a) — a warm page takes no pass through the turn gate
+    await inTurns(warmRulesSteps());
     const items: NewsData["items"][number][] = [];
-    for (const [i, it] of kept.entries()) {
-      if (i % NEWS_ITEMS_PER_TURN === 0) await turn();
+    for (const it of kept) {
+      await turnIfSpent();
       const c = newsClaim(it);
       if (c.flags.length > 0) flagged++;
       items.push({

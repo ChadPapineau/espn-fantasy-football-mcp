@@ -6,6 +6,7 @@
 // ≤ 100 rows are the filter builder's invariants; never outlook text — C14; drift → the last pool
 // snapshot, stale). Rows carry ESPN's numbers labelled `_espn` and the crosswalk state.
 import { z } from "zod/v4";
+import { inTurns, turnIfSpent } from "../../domain/analytics/cooperative.js";
 import { mergeName } from "../../domain/crosswalk/normalize.js";
 import type { EspnPlayerIdentity } from "../../domain/crosswalk/types.js";
 import { gamesOfWeek, kickoffOf, opponentOf, teamGame } from "../../domain/league/schedule.js";
@@ -114,11 +115,37 @@ interface IndexEntry {
   readonly player: PlatformPlayer | null;
 }
 
+/** Universe rows whose names one step of the index folds (cooperative.ts inTurns). */
+export const NAME_INDEX_STEP = 500;
+
+/**
+ * The index entries of universe rows, folded NAME_INDEX_STEP rows a step: the universe's read and
+ * the fold of its ~2 700 names ran in one turn, 10–11 ms of CPU by round 3's turn profiler (19 ms
+ * on a warm call by the heartbeat; changelog §R10 timing items). The entries are the map's.
+ */
+function* indexSteps(
+  rows: readonly EspnPlayerIdentity[],
+): Generator<void, IndexEntry[], undefined> {
+  const out: IndexEntry[] = [];
+  for (const [i, r] of rows.entries()) {
+    if (i > 0 && i % NAME_INDEX_STEP === 0) yield;
+    out.push({
+      id: r.espn_id,
+      tokens: foldTokens(r.full_name),
+      position: positionNameOf(r.position_id) ?? `POS_${String(r.position_id)}`,
+      percent_owned: r.percent_owned ?? 0,
+      identity: r,
+      player: null,
+    });
+  }
+  return out;
+}
+
 /**
  * The local name index: `espn:players`, else the keyless players_wl view (1 request). Past the
  * dataset's hard limit it is STALE_ONLY unless the call passed `allow_stale` (then served, labelled
  * stale) — the STALE_ONLY hint and orient's host_moved rule tell the model to retry that way (Stage C
- * finding players-search-no-allow-stale).
+ * finding players-search-no-allow-stale). The read is one statement; the fold runs in steps after it.
  */
 async function nameIndex(
   ctx: ToolContext,
@@ -134,14 +161,8 @@ async function nameIndex(
   if (ds.stamp !== null && ds.rows.length > 0) {
     const input = datasetInput(ds.stamp, ctx, args.allow_stale === true);
     if (input !== null) inputs.push(input);
-    return ds.rows.map((r) => ({
-      id: r.espn_id,
-      tokens: foldTokens(r.full_name),
-      position: positionNameOf(r.position_id) ?? `POS_${String(r.position_id)}`,
-      percent_owned: r.percent_owned ?? 0,
-      identity: r,
-      player: null,
-    }));
+    await turnIfSpent();
+    return inTurns(indexSteps(ds.rows));
   }
   const got = await withinBudget(
     () => ctx.services.espn.getSeasonPlayers(season, readOpts(ctx, args)),

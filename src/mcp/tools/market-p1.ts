@@ -30,7 +30,7 @@ import {
   type TradeTeam,
   type WaiverP1Request,
 } from "../../domain/analytics/phase2.js";
-import type { ActivityTeam } from "../../domain/analytics/leagueActivity.js";
+import type { ActivityRequest, ActivityTeam } from "../../domain/analytics/leagueActivity.js";
 import type {
   LeagueActivityData,
   NewsItem,
@@ -818,10 +818,15 @@ async function waiverVerdicts(
   const out = new Map<number, WaiverVerdict>();
   const gsis = (p: PlatformPlayer): string | null =>
     crosswalkOf(ctx, p.ref.id, p.position_id).gsis_id;
+  // E5's players are built a candidate, my roster and a rival's roster at a time, and the turn ends
+  // between two once the slice has spent its share (turnIfSpent): the cascade's claim evaluation ran
+  // them all and E5's first slice in one turn, 13–15 ms of CPU by round 3's turn profiler
+  // (changelog §R10 timing items); the request is the one the synchronous build gave
   const candidates: WaiverCandidateInput[] = [];
   for (const c of list) {
     const p = teammates.get(c.player_id);
     if (p === undefined || c.status === "ONTEAM") continue;
+    await turnIfSpent();
     const base = waiverPlayerOf(p, 20, false, weeks, gsis(p), ros, b.w);
     const delta = new Map(c.delta_proj_by_week.map((x) => [x.week, x.delta]));
     candidates.push({
@@ -834,11 +839,19 @@ async function waiverVerdicts(
   }
   if (candidates.length === 0) return out;
   const me = mine.team.team_id;
+  await turnIfSpent();
+  const base = waiverBase(ctx, b, mine, rosters, standings, weeks, ros);
+  const rivals: RivalRoster[] = [];
+  for (const r of rivalsOf(rosters, me)) {
+    await turnIfSpent();
+    rivals.push(rivalRosterOf(ctx, r, weeks, ros, b.w));
+  }
+  await turnIfSpent();
   const req: WaiverP1Request = {
-    ...waiverBase(ctx, b, mine, rosters, standings, weeks, ros),
+    ...base,
     candidates: candidates.slice(0, BOUNDS.waiverCandidates.max),
     value_basis: "ensemble",
-    rival_rosters: rivalRosters(ctx, rosters, me, weeks, ros, b.w),
+    rival_rosters: rivals,
     deadline_ms: cpuDeadlineOf(ctx),
   };
   const res = await analyzeWaiversP1(req);
@@ -902,22 +915,35 @@ export function rivalRosters(
   /** The week ESPN's numbers describe (waiverPlayerOf's `asOf`). */
   asOf: Week,
 ): RivalRoster[] {
-  return rosters
-    .filter((r) => r.team.team_id !== me)
-    .map((r) => ({
-      team_id: r.team.team_id,
-      players: r.entries.map((e) =>
-        waiverPlayerOf(
-          e.player,
-          e.slot_id,
-          e.lineup_locked,
-          weeks,
-          crosswalkOf(ctx, e.player.ref.id, e.player.position_id).gsis_id,
-          ros,
-          asOf,
-        ),
+  return rivalsOf(rosters, me).map((r) => rivalRosterOf(ctx, r, weeks, ros, asOf));
+}
+
+/** The rosters of every team but mine, in their order. */
+const rivalsOf = (rosters: readonly Roster[], me: number): Roster[] =>
+  rosters.filter((r) => r.team.team_id !== me);
+
+/** One rival's roster as E5 players (rivalRosters, a roster at a time). */
+function rivalRosterOf(
+  ctx: ToolContext,
+  r: Roster,
+  weeks: readonly Week[],
+  ros: RosReading | null,
+  asOf: Week,
+): RivalRoster {
+  return {
+    team_id: r.team.team_id,
+    players: r.entries.map((e) =>
+      waiverPlayerOf(
+        e.player,
+        e.slot_id,
+        e.lineup_locked,
+        weeks,
+        crosswalkOf(ctx, e.player.ref.id, e.player.position_id).gsis_id,
+        ros,
+        asOf,
       ),
-    }));
+    ),
+  };
 }
 
 /** The single player a selector names (one cached filterIds read). */
@@ -2014,6 +2040,9 @@ async function transactionsOf(
   return [...byId.values()];
 }
 
+/** Pool players E11 values in one step (a roster's worth: the step's work stays one roster's). */
+export const ACTIVITY_POOL_STEP = 25;
+
 /** E11 `espn_analyze_league_activity`. */
 export const analyzeLeagueActivityTool = defineTool({
   name: "espn_analyze_league_activity",
@@ -2071,33 +2100,48 @@ export const analyzeLeagueActivityTool = defineTool({
         ...(rosters ?? []).map((r) => r.team.team_id),
       ]),
     ];
-    const teams: ActivityTeam[] = ids.flatMap((id) => {
+    // each team's players are valued in a step of their own, and the pool's a page at a time: the
+    // turn ends between two once the slice has spent its share (turnIfSpent) — every roster and the
+    // pool valued in one turn took 13 ms of CPU by round 3's turn profiler, most of it the first
+    // reading of each pro team's ROS weeks (changelog §R10 timing items); the values are the same
+    const teams: ActivityTeam[] = [];
+    for (const id of ids) {
       const name = names.get(id);
-      if (name === undefined) return [];
+      if (name === undefined) continue;
+      await turnIfSpent();
       const st = standings?.teams.find((t) => t.team_id === id) ?? null;
       const r = rosters?.find((x) => x.team.team_id === id) ?? null;
-      return [
-        {
-          team_id: id,
-          name,
-          rank_before: null,
-          rank_now: st?.rank ?? null,
-          waiver_rank_before: null,
-          waiver_rank_now: st?.waiver_rank ?? null,
-          ir_blocked: r === null ? false : auditIr(seatsOf(r), b.slots).invalid,
-          ...(r === null
-            ? {}
-            : {
-                players: r.entries.map((e) => ({
-                  player_id: e.player.ref.id,
-                  position: e.player.position,
-                  slot_id: e.slot_id,
-                  weekly: valueWeeks(e.player, weeks, ros, b.w),
-                })),
-              }),
-        },
-      ];
-    });
+      teams.push({
+        team_id: id,
+        name,
+        rank_before: null,
+        rank_now: st?.rank ?? null,
+        waiver_rank_before: null,
+        waiver_rank_now: st?.waiver_rank ?? null,
+        ir_blocked: r === null ? false : auditIr(seatsOf(r), b.slots).invalid,
+        ...(r === null
+          ? {}
+          : {
+              players: r.entries.map((e) => ({
+                player_id: e.player.ref.id,
+                position: e.player.position,
+                slot_id: e.slot_id,
+                weekly: valueWeeks(e.player, weeks, ros, b.w),
+              })),
+            }),
+      });
+    }
+    const poolPlayers: NonNullable<ActivityRequest["pool"]>[number][] = [];
+    for (const [i, p] of pool.entries()) {
+      if (i % ACTIVITY_POOL_STEP === 0) await turnIfSpent();
+      poolPlayers.push({
+        player_id: p.ref.id,
+        position: p.position,
+        slot_id: 20,
+        weekly: valueWeeks(p, weeks, ros, b.w),
+      });
+    }
+    await turnIfSpent();
     // no read named the league's teams (standings and rosters both unavailable — the call's budget
     // spent, ESPN failing): the window's totals still stand, said; a NOT_FOUND here read as "no such
     // league" (verifier finding F2 on ec68d08)
@@ -2111,12 +2155,7 @@ export const analyzeLeagueActivityTool = defineTool({
       teams,
       my_team_id: myTeam,
       roster: b.slots,
-      pool: pool.map((p) => ({
-        player_id: p.ref.id,
-        position: p.position,
-        slot_id: 20,
-        weekly: valueWeeks(p, weeks, ros, b.w),
-      })),
+      pool: poolPlayers,
       include_rival_needs: args.include_rival_needs,
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),

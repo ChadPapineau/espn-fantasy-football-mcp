@@ -676,6 +676,48 @@ function hitsOf(folded: string): Hit[] {
   return out;
 }
 
+/** The rule table's patterns have run on the samples (warmRulesSteps): none compiles on first use. */
+let rulesWarm = false;
+/**
+ * What warmRulesSteps runs each pattern on: folded text of one byte per character, and the same with
+ * a character past Latin-1 (two bytes per character), the two kinds of text an item folds to.
+ */
+const WARM_SAMPLES: readonly string[] = (() => {
+  const one = claimFold("He was ruled out (ankle); the coach said he will start on Sunday.");
+  return [one, `${one} \u2022`];
+})();
+
+/**
+ * Resumable work that runs every pattern the rules read twice on each sample, once per process, a
+ * rule per step (a no-op once done). A pattern is compiled when it first runs, again natively when it
+ * runs again, and again natively the first time it reads text of the other width, so the first items
+ * an extractor reads in a process paid for the whole table — 9 ms, 4.6 ms and, for the first item
+ * with a character past Latin-1 (a bullet, a CJK name), 6.8 ms of CPU on the owner's Mac; 16–18 ms in
+ * espn_get_news's first turn by round 3's turn profiler (changelog §R10 timing items) — and no step
+ * of an item can be cut inside them. Run in steps first (cooperative.ts inTurns), the table costs the
+ * same in turns that end once their slice has spent its share. What any text reads is unchanged:
+ * patterns are global, every read starts at lastIndex 0, and matchAll reads a copy of the pattern.
+ */
+export function* warmRulesSteps(): Generator<void, void, undefined> {
+  if (rulesWarm) return;
+  for (const sample of WARM_SAMPLES)
+    for (let k = 0; k < 2; k++) {
+      NEGATED_RE.test(sample);
+      OFFICIALS_RE.test(sample);
+      CONDITIONED_RE.test(sample);
+    }
+  yield;
+  for (const r of RULES_V1_TABLE) {
+    for (const sample of WARM_SAMPLES)
+      for (let k = 0; k < 2; k++) {
+        r.re.lastIndex = 0;
+        for (const _m of sample.matchAll(r.re)) break;
+      }
+    yield;
+  }
+  rulesWarm = true;
+}
+
 /**
  * The winning hit: the earliest; when other hits START INSIDE its phrase (one claim read by two
  * rules — "suffers season-ending injury", "to start the year on PUP"), the table order decides.

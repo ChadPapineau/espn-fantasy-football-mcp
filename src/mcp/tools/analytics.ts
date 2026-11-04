@@ -126,6 +126,7 @@ import {
 } from "./schemas.js";
 import { selectPlayers } from "./select.js";
 import { analyzeWaiversP1 } from "../../domain/analytics/phase2.js";
+import { drainSteps, inTurns, turnIfSpent } from "../../domain/analytics/cooperative.js";
 import { waiverP1Extras } from "./market-p1.js";
 import { playoffAliveOf, projectMany } from "./p1-common.js";
 import {
@@ -166,7 +167,32 @@ export function trailingFor(
   warnings: string[],
   allowStale: boolean,
 ): Map<number, TrailingLine[]> {
+  return drainSteps(trailingSteps(ctx, subjects, season, w, inputs, warnings, allowStale));
+}
+
+/**
+ * trailingFor as resumable work (cooperative.ts): a step after each dataset statement, so E1's
+ * caller runs one statement a turn once the slice has spent its share — E1's reads and their
+ * mapping ran in one turn, ~12 ms of CPU in espn_analyze_lineup and espn_analyze_roster by round
+ * 3's turn profiler (changelog §R10 timing items; plan 03 §1.2: one SQLite statement or one batch).
+ * The lines, inputs and warnings are trailingFor's.
+ */
+export function* trailingSteps(
+  ctx: ToolContext,
+  subjects: readonly Subject[],
+  season: number,
+  w: Week,
+  inputs: InputStamp[],
+  warnings: string[],
+  allowStale: boolean,
+): Generator<void, Map<number, TrailingLine[]>, undefined> {
   const out = new Map<number, TrailingLine[]>();
+  /** Appends a line to a player's list, in the rows' order. */
+  const add = (id: number, l: TrailingLine): void => {
+    const list = out.get(id);
+    if (list === undefined) out.set(id, [l]);
+    else list.push(l);
+  };
   const now: Week[] = Array.from({ length: Math.max(0, w - 1) }, (_, i) => i + 1);
   const prior: Week[] = Array.from({ length: 18 }, (_, i) => i + 1);
   const gsis = present(subjects.map((s) => s.gsis));
@@ -182,14 +208,18 @@ export function trailingFor(
       // stat lines only: E1 scores them, it never reads the usage extras
       const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks, { usage: false });
       const input = optionalDataset(r, ctx, allowStale);
-      if (input === null) continue;
+      if (input === null) {
+        yield;
+        continue;
+      }
       loaded = true;
       inputs.push(input);
       for (const l of r.rows) {
         const id = byGsis.get(l.gsis_id);
         if (id === undefined) continue;
-        out.set(id, [...(out.get(id) ?? []), { season: l.season, week: l.week, line: l.line }]);
+        add(id, { season: l.season, week: l.week, line: l.line });
       }
+      yield;
     }
   }
   const dst = subjects.filter((s) => s.p.position === "D/ST");
@@ -207,9 +237,10 @@ export function trailingFor(
       for (const l of r.rows) {
         const id = teams.get(l.nfl_team);
         if (id === undefined) continue;
-        out.set(id, [...(out.get(id) ?? []), { season: l.season, week: l.week, line: l.line }]);
+        add(id, { season: l.season, week: l.week, line: l.line });
       }
     }
+    yield;
   }
   if (!loaded && subjects.length > 0)
     warnings.push("nflverse:stats_player_week not loaded: spreads from the positional CV only");
@@ -317,15 +348,17 @@ export async function project(
   // a call with no CPU left reads no trailing line (E1 plans every target thin and runs no v2):
   // the reads outside every batch count against the deadline too (Stage C finding
   // analytics-cpu-deadline-per-run — a 30× slower CPU took a chunked season call far past 8 s)
+  // one dataset statement a turn once the slice has spent its share (trailingSteps, turnIfSpent)
   const trailing =
     cpuDeadlineOf(ctx) === 0
       ? new Map<number, TrailingLine[]>()
-      : trailingFor(ctx, subjects, season, o.week, inputs, warnings, o.allowStale);
+      : await inTurns(trailingSteps(ctx, subjects, season, o.week, inputs, warnings, o.allowStale));
   const lastWeek = Math.max(o.week, o.last_week ?? o.league.clock.final_scoring_period);
   const weeks: Week[] =
     o.horizon === "week"
       ? [o.week]
       : Array.from({ length: lastWeek - o.week + 1 }, (_, i) => o.week + i);
+  await turnIfSpent();
   const implied = impliedTotals(ctx, o.schedule, season, weeks, inputs, o.allowStale);
   // the trailing reads and their scoring are one synchronous step: the loop runs before sampling
   await turn();
