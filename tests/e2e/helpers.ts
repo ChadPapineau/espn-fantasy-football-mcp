@@ -329,9 +329,11 @@ export interface Heartbeat {
   readonly gap_invol: number;
   /**
    * The main thread's longest run on the CPU between two ticks anywhere in the window (ms): a
-   * JavaScript block, seen even when a longer gap beside it is the window's longest.
+   * JavaScript block, seen even when a longer gap beside it is the window's longest. Null when the
+   * line does not carry it as a finite, non-negative number (it cannot be read: changelog §R10,
+   * R10-9 leaves such a measurement to R8-2, "cannot be measured").
    */
-  readonly cpu_max_ms: number;
+  readonly cpu_max_ms: number | null;
 }
 
 /** The window of a process running the heartbeat preload, and a fresh window. */
@@ -346,12 +348,14 @@ export async function heartbeatRecordOf(p: HeartbeatSource): Promise<Heartbeat> 
         const v = rec[k];
         return typeof v === "number" ? v : 0;
       };
+      const cpuMax = rec.cpu_max_ms;
       return {
         max_ms: num("max_ms"),
         gap_ms: num("gap_ms"),
         gap_cpu_ms: num("gap_cpu_ms"),
         gap_invol: num("gap_invol"),
-        cpu_max_ms: num("cpu_max_ms"),
+        cpu_max_ms:
+          typeof cpuMax === "number" && Number.isFinite(cpuMax) && cpuMax >= 0 ? cpuMax : null,
       };
     }
     if (Date.now() > end) throw new Error("no heartbeat line");
@@ -432,6 +436,62 @@ export class StallControl implements HeartbeatSource {
   }
 }
 
+/** One recorded window of a stall measurement: the server's heartbeat and the idle control's stall. */
+export interface RecordedWindow {
+  readonly server: Heartbeat;
+  readonly control_ms: number;
+}
+
+/**
+ * How a stall measurement ends (plan 10 A16a; ruling R8-2, amended by changelog §R10, R10-9):
+ * `within` — its last window stayed within the bound (a plain pass); `host_set` — every window was
+ * over the bound and set by the host by the control's stall, the server's own longest run on the CPU
+ * under the bound in each (a pass, never reported as a plain one); `own` — the server's own stall (a
+ * failure); `unmeasurable` — the host set every window and the R10-9 pass does not apply (a failure:
+ * "cannot be measured").
+ */
+export type StallVerdict =
+  | { readonly kind: "within" }
+  | { readonly kind: "host_set"; readonly own_cpu_max_ms: number }
+  | { readonly kind: "own" }
+  | { readonly kind: "unmeasurable" };
+
+/** What one more window tells a measurement: its verdict, or that the window is to be repeated. */
+export type StallStep = StallVerdict | { readonly kind: "repeat" };
+
+/**
+ * The verdict over the windows a measurement took, in order (a pure function: what measureStall
+ * decides after each window). A window within the bound, or over it with nothing showing the host
+ * set it (hostSetStall: never a JavaScript block over the bound), ends the measurement: `within` or
+ * `own`. A window the host set is repeated, at most STALL_WINDOW_ATTEMPTS windows in all (R8-2).
+ * When the host set every one of them, changelog §R10, R10-9: a window whose `cpu_max_ms` reaches
+ * the bound fails as the server's own stall; where one cannot be read, or one window's only evidence
+ * was the process's involuntary switches (the idle control did not stall in it), R8-2 stands — it
+ * cannot be measured; otherwise every window was set by the host by the control's stall with the
+ * server's own longest run on the CPU under the bound, and the measurement passes as `host_set`,
+ * with that longest run. Throws RangeError on no window, or on a window after one that ended it.
+ */
+export function judgeStall(windows: readonly RecordedWindow[], boundMs: number): StallStep {
+  if (windows.length === 0) throw new RangeError("judgeStall: no window");
+  for (const [i, w] of windows.entries()) {
+    const ended =
+      w.server.max_ms <= boundMs
+        ? ({ kind: "within" } as const)
+        : !hostSetStall(w.server, w.control_ms, boundMs)
+          ? ({ kind: "own" } as const)
+          : null;
+    if (ended === null) continue;
+    if (i !== windows.length - 1) throw new RangeError("judgeStall: a window after the last one");
+    return ended;
+  }
+  if (windows.length < STALL_WINDOW_ATTEMPTS) return { kind: "repeat" };
+  const runs = windows.map((w) => w.server.cpu_max_ms);
+  if (runs.some((ms) => ms !== null && ms >= boundMs)) return { kind: "own" };
+  if (runs.some((ms) => ms === null)) return { kind: "unmeasurable" };
+  if (windows.some((w) => w.control_ms <= CONTROL_STARVED_MS)) return { kind: "unmeasurable" };
+  return { kind: "host_set", own_cpu_max_ms: Math.max(...runs.map((ms) => ms ?? 0)) };
+}
+
 /** One measured stall window: the server's longest stall, the control's, and the windows taken. */
 export interface StallWindow {
   readonly stall_ms: number;
@@ -440,7 +500,34 @@ export interface StallWindow {
   /** The server window's preemption evidence (its longest timer gap). */
   readonly server: Heartbeat;
   /** Each window before it that was over the bound and repeated on the host's evidence. */
-  readonly repeated: readonly { readonly server: Heartbeat; readonly control_ms: number }[];
+  readonly repeated: readonly RecordedWindow[];
+  /** The measurement's verdict (judgeStall): `within` or `host_set` pass, `own` fails. */
+  readonly verdict: Exclude<StallVerdict, { readonly kind: "unmeasurable" }>;
+  /** The verdict as one line ("host-set; the server's own longest CPU run N ms" for R10-9's pass). */
+  readonly report: string;
+}
+
+/** Whether a measured window passes its bound: within it, or host-set under R10-9. */
+export function stallPassed(w: Pick<StallWindow, "verdict">): boolean {
+  return w.verdict.kind === "within" || w.verdict.kind === "host_set";
+}
+
+/**
+ * A verdict as one line (ms to 0.1): changelog §R10, R10-9's pass reads exactly "host-set; the
+ * server's own longest CPU run N ms", never as a plain pass.
+ */
+export function stallReport(verdict: StallVerdict, stallMs: number, boundMs: number): string {
+  const f = (x: number): string => x.toFixed(1);
+  switch (verdict.kind) {
+    case "within":
+      return `within the bound: ${f(stallMs)} ms <= ${String(boundMs)} ms`;
+    case "host_set":
+      return `host-set; the server's own longest CPU run ${f(verdict.own_cpu_max_ms)} ms`;
+    case "own":
+      return `the server's own stall: ${f(stallMs)} ms > ${String(boundMs)} ms`;
+    case "unmeasurable":
+      return `the ${String(boundMs)} ms bound cannot be measured on this machine now`;
+  }
 }
 
 /**
@@ -449,14 +536,18 @@ export interface StallWindow {
  * on the CPU anywhere in the window, then every repeated window's. What a stall verdict rests on is
  * printed with it, so a red run says whether the server's own CPU or an unexcused wait set it.
  */
-export function stallEvidence(w: StallWindow): string {
+export function stallEvidence(
+  w: Pick<StallWindow, "attempts" | "server" | "control_ms" | "repeated"> & {
+    readonly stall_ms?: number;
+  },
+): string {
   const r = (x: number): number => Math.round(x * 10) / 10;
   const beat = (s: Heartbeat, controlMs: number) => ({
     stall_ms: r(s.max_ms),
     gap_ms: r(s.gap_ms),
     gap_cpu_ms: r(s.gap_cpu_ms),
     gap_invol: s.gap_invol,
-    cpu_max_ms: r(s.cpu_max_ms),
+    cpu_max_ms: s.cpu_max_ms === null ? null : r(s.cpu_max_ms),
     control_ms: r(controlMs),
   });
   return JSON.stringify({
@@ -476,20 +567,27 @@ export function stallEvidence(w: StallWindow): string {
  * run on the CPU between two ticks (cpu_max_ms) over the bound refuses the excuse even when a
  * longer gap the host set is the window's longest. (The switch count is process-wide: a synchronous
  * wait of the main thread that coincides with another thread's preemption is repeated, and a stall
- * that recurs in every window ends in measureStall's "cannot be measured" failure — never a pass.)
+ * that recurs in every window on that evidence alone ends in measureStall's "cannot be measured"
+ * failure — never a pass: changelog §R10, R10-9's pass needs the idle control's stall in every
+ * window, which such a wait does not cause.)
  */
 export function hostSetStall(server: Heartbeat, controlMs: number, boundMs: number): boolean {
-  if (server.gap_cpu_ms > boundMs || server.cpu_max_ms > boundMs) return false;
+  // an unreadable cpu_max_ms refuses nothing here (R8-2's longest-gap reading); judgeStall then
+  // never lets the measurement pass on the host's evidence (changelog §R10, R10-9)
+  if (server.gap_cpu_ms > boundMs || (server.cpu_max_ms ?? 0) > boundMs) return false;
   return server.gap_invol > 0 || controlMs > CONTROL_STARVED_MS;
 }
 
 /**
  * The server's longest main-loop stall over one run of `work`, against `boundMs` (the heartbeat is
- * wall-clock event-loop delay, so the OS's preemption on a loaded host reads as the server's stall).
- * A window is measured when the server stayed within the bound, or when nothing shows the host set
- * it (hostSetStall) — then the caller asserts it, and a stall of the server's own fails. A window
- * over the bound that the host set is repeated — `work` is idempotent reads and analytics — up to
- * STALL_WINDOW_ATTEMPTS windows; a host that sets every window throws, saying so: never a pass.
+ * wall-clock event-loop delay, so the OS's preemption on a loaded host reads as the server's stall),
+ * judged after each window by judgeStall. A window is measured when the server stayed within the
+ * bound, or when nothing shows the host set it (hostSetStall) — `own`: the caller's stallPassed
+ * check fails on the server's own stall. A window over the bound that the host set is repeated —
+ * `work` is idempotent reads and analytics — up to STALL_WINDOW_ATTEMPTS windows. When the host set
+ * every one, the measurement passes as `host_set` only by changelog §R10, R10-9 (the control stalled
+ * in each, the server's own longest CPU run under the bound in each), reported so; otherwise it
+ * throws, saying the bound cannot be measured: never a plain pass.
  */
 export async function measureStall(
   server: HeartbeatSource,
@@ -497,19 +595,29 @@ export async function measureStall(
   work: () => Promise<void>,
   boundMs: number,
 ): Promise<StallWindow> {
-  const repeated: { server: Heartbeat; control_ms: number }[] = [];
-  for (let attempt = 1; ; attempt++) {
+  const windows: RecordedWindow[] = [];
+  for (;;) {
     await heartbeatOf(server); // fresh windows: only `work` is measured
     await heartbeatOf(control);
     await work();
     const s = await heartbeatRecordOf(server);
     const ctl = await heartbeatOf(control);
-    if (s.max_ms <= boundMs || !hostSetStall(s, ctl, boundMs))
-      return { stall_ms: s.max_ms, control_ms: ctl, attempts: attempt, server: s, repeated };
-    repeated.push({ server: s, control_ms: ctl });
-    if (attempt >= STALL_WINDOW_ATTEMPTS)
+    windows.push({ server: s, control_ms: ctl });
+    const step = judgeStall(windows, boundMs);
+    if (step.kind === "repeat") continue;
+    const attempt = windows.length;
+    if (step.kind === "unmeasurable")
       throw new Error(
-        `the host set the server's stall in all ${String(attempt)} windows (the last: ${s.max_ms.toFixed(1)} ms, ${s.gap_cpu_ms.toFixed(1)} ms of its own CPU in its longest gap with ${String(s.gap_invol)} involuntary switches, its longest run on the CPU ${s.cpu_max_ms.toFixed(1)} ms; an idle control process ${ctl.toFixed(1)} ms): the ${String(boundMs)} ms bound cannot be measured on this machine now — rerun when it is quieter`,
+        `the host set the server's stall in all ${String(attempt)} windows (the last: ${s.max_ms.toFixed(1)} ms, ${s.gap_cpu_ms.toFixed(1)} ms of its own CPU in its longest gap with ${String(s.gap_invol)} involuntary switches, its longest run on the CPU ${s.cpu_max_ms === null ? "unread" : `${s.cpu_max_ms.toFixed(1)} ms`}; an idle control process ${ctl.toFixed(1)} ms): the ${String(boundMs)} ms bound cannot be measured on this machine now — rerun when it is quieter`,
       );
+    return {
+      stall_ms: s.max_ms,
+      control_ms: ctl,
+      attempts: attempt,
+      server: s,
+      repeated: windows.slice(0, -1),
+      verdict: step,
+      report: stallReport(step, s.max_ms, boundMs),
+    };
   }
 }

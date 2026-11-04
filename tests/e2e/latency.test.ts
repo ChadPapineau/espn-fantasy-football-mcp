@@ -9,7 +9,10 @@
 // rules carry to the P1 tools: every P1 read tool warm < 500 ms, every P1 analytics call inside the
 // 8 s per-call deadline with the loop stall ≤ 50 ms, and the warm P1 reads hold the same stall bound
 // (plan 03 §1.2: the loop never blocks longer than one SQLite statement or one ≤ 20 ms CPU batch).
-// The measured numbers are printed for the report.
+// The measured numbers are printed for the report. A stall window over the bound is judged by
+// helpers.ts measureStall (ruling R8-2; changelog §R10, R10-9: a measurement every window of which
+// the host set by the idle control's stall passes only with the server's own longest CPU run under
+// the bound, and its report line says so).
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
@@ -21,6 +24,7 @@ import {
   serve,
   StallControl,
   stallEvidence,
+  stallPassed,
   type Served,
 } from "./helpers.js";
 
@@ -166,11 +170,12 @@ describe("latency on fx-10h over real stdio (A15a, A16a)", { timeout: 300_000 },
       max_loop_stall_ms: Math.round(stall * 10) / 10,
     });
     process.stdout.write(`latency report: ${JSON.stringify(report)}\n`);
-    process.stdout.write(`latency stall (core analytics): ${stallEvidence(w)}\n`);
+    process.stdout.write(`latency stall (core analytics): ${w.report} ${stallEvidence(w)}\n`);
     expect(e1).toBeLessThan(3000);
     expect(e2).toBeLessThan(5000);
     expect(e5).toBeLessThan(5000);
-    expect(stall, stallEvidence(w)).toBeLessThanOrEqual(50);
+    // changelog §R10, R10-9: within the bound, or host-set with the server's own CPU run under it
+    expect(stallPassed(w), `${w.report} ${stallEvidence(w)}`).toBe(true);
     for (const k of Object.keys(report))
       if (k.startsWith("warm_") && ANALYTICS.has(k.slice(5))) expect(report[k]).toBeLessThan(500);
   });
@@ -268,9 +273,9 @@ describe(
       // window of player-weeks as one read + score once stalled it 40–55 ms here (B2a gate round 2)
       const readStall = w.stall_ms;
       report.max_loop_stall_reads_ms = Math.round(readStall * 10) / 10;
-      process.stdout.write(`latency stall (full reads): ${stallEvidence(w)}\n`);
+      process.stdout.write(`latency stall (full reads): ${w.report} ${stallEvidence(w)}\n`);
       expect(slow).toEqual([]);
-      expect(readStall, stallEvidence(w)).toBeLessThanOrEqual(50);
+      expect(stallPassed(w), `${w.report} ${stallEvidence(w)}`).toBe(true);
       // the dataset reads never went upstream
       for (const n of ["espn_get_player_usage", "espn_get_depth_chart", "espn_get_news"])
         expect(report[`warm_${n}`], n).toBeLessThan(500);
@@ -297,9 +302,9 @@ describe(
       const stall = w.stall_ms;
       report.max_loop_stall_ms = Math.round(stall * 10) / 10;
       process.stdout.write(`latency report (full): ${JSON.stringify(report)}\n`);
-      process.stdout.write(`latency stall (full analytics): ${stallEvidence(w)}\n`);
+      process.stdout.write(`latency stall (full analytics): ${w.report} ${stallEvidence(w)}\n`);
       expect(slow).toEqual([]);
-      expect(stall, stallEvidence(w)).toBeLessThanOrEqual(50);
+      expect(stallPassed(w), `${w.report} ${stallEvidence(w)}`).toBe(true);
     });
   },
 );

@@ -10,7 +10,9 @@
 // call's slice share one check phase (72 ms at 6, 117 ms at 10 under core). A window over the bound
 // is repeated only on the host's evidence (helpers.ts measureStall, ruling R8-2); the report prints
 // each window's control, the server's own longest run on the CPU, and every repeated window's
-// evidence.
+// evidence. A measurement whose every window the host set by the idle control's stall passes only
+// with the server's own longest CPU run under the bound in each, reported as "host-set; the
+// server's own longest CPU run N ms" (changelog §R10, R10-9), never as a plain pass.
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
@@ -22,6 +24,8 @@ import {
   seedHome,
   serve,
   StallControl,
+  stallEvidence,
+  stallPassed,
   type E2eHome,
   type Served,
   type StallWindow,
@@ -107,16 +111,21 @@ for (const toolset of ["core", "full"] as const) {
             ),
           );
         process.stdout.write(
-          `parallel stall (${toolset}): ${each((w) => w.stall_ms)} control ${each((w) => w.control_ms)} own CPU ${each((w) => w.server.cpu_max_ms)} windows ${each((w) => w.attempts)}\n`,
+          `parallel stall (${toolset}): ${each((w) => w.stall_ms)} control ${each((w) => w.control_ms)} own CPU ${each((w) => w.server.cpu_max_ms ?? Number.NaN)} windows ${each((w) => w.attempts)}\n`,
         );
+        // each measurement's verdict (R10-9's host-set pass is reported as such, never as a plain one)
+        for (const [k, w] of Object.entries(windows))
+          process.stdout.write(`parallel stall (${toolset}) ${k}: ${w.report}\n`);
         // every window repeated on the host's evidence, with that evidence
         for (const [k, w] of Object.entries(windows))
           for (const r of w.repeated)
             process.stdout.write(
               `parallel stall (${toolset}) ${k} repeated: ${JSON.stringify({ ...r.server, control_ms: r.control_ms })}\n`,
             );
-        // the bound on the stall as measured, never on the report's rounding (R8-2: unchanged)
-        for (const [k, w] of Object.entries(windows)) expect(w.stall_ms, k).toBeLessThanOrEqual(50);
+        // the bound on the stall as measured, never on the report's rounding (R8-2), or R10-9's
+        // host-set pass on the server's own longest CPU run as measured
+        for (const [k, w] of Object.entries(windows))
+          expect(stallPassed(w), `${k}: ${w.report} ${stallEvidence(w)}`).toBe(true);
       });
     },
   );

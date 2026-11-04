@@ -6,7 +6,8 @@
 // logged to the per-week cap (100 lineup records, each with ten full-length alternatives and a
 // 200-char note),
 // then espn_analyze_retrospective for week 4 — the longest stall stays ≤ 50 ms and the scored
-// week's calls are all scored.
+// week's calls are all scored. Each window is judged by helpers.ts measureStall (ruling R8-2;
+// changelog §R10, R10-9's host-set pass on the server's own longest CPU run).
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
@@ -17,7 +18,10 @@ import {
   serve,
   StallControl,
   STALL_WINDOW_ATTEMPTS,
+  stallEvidence,
+  stallPassed,
   type Served,
+  type StallWindow,
 } from "./helpers.js";
 
 const PER_WEEK = 100;
@@ -85,31 +89,44 @@ describe("E13 over a full log (fx-10h over real stdio)", { timeout: 600_000 }, (
     // beside the server stalled too measured the host's preemption, and is repeated
     control = await StallControl.start();
     const ctl = control;
-    const stallOf = async (boundMs: number): Promise<number> =>
-      (
-        await measureStall(
-          x.transport,
-          ctl,
-          async () => {
-            const r = await ok(x, "espn_analyze_retrospective", { week: 4, min_n: 1 });
-            expect((r.data.calls as unknown[]).length).toBeGreaterThan(0);
-          },
-          boundMs,
-        )
-      ).stall_ms;
+    const stallOf = (boundMs: number): Promise<StallWindow> =>
+      measureStall(
+        x.transport,
+        ctl,
+        async () => {
+          const r = await ok(x, "espn_analyze_retrospective", { week: 4, min_n: 1 });
+          expect((r.data.calls as unknown[]).length).toBeGreaterThan(0);
+        },
+        boundMs,
+      );
+    /**
+     * A window's figure for the baseline: its stall, or, for changelog §R10, R10-9's host-set pass,
+     * the server's own longest CPU run (lower than the host's stall: a tighter growth bound below).
+     */
+    const figure = (w: StallWindow): number =>
+      w.verdict.kind === "host_set" ? w.verdict.own_cpu_max_ms : w.stall_ms;
     // a near-empty log: five calls of the scored week — the least of several windows, so that a
     // window the host inflated cannot shrink the growth below (CI read 16.9 ms > 15 at 92e933d)
     await log(4, 0, 5);
     let small = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < STALL_WINDOW_ATTEMPTS; i++) small = Math.min(small, await stallOf(50));
-    // the full log: every window week at the per-week cap
+    for (let i = 0; i < STALL_WINDOW_ATTEMPTS; i++) {
+      const w = await stallOf(50);
+      expect(stallPassed(w), `${w.report} ${stallEvidence(w)}`).toBe(true);
+      small = Math.min(small, figure(w));
+    }
+    // the full log: every window week at the per-week cap, against a bound that holds both the 50 ms
+    // and the growth (within it, or R10-9's host-set pass under it)
     for (const week of [1, 2, 3]) await log(week, 0, PER_WEEK);
     await log(4, 5, PER_WEEK);
-    const full = await stallOf(Math.min(50, small + GROWTH_MAX_MS));
+    const bound = Math.min(50, small + GROWTH_MAX_MS);
+    const full = await stallOf(bound);
     process.stdout.write(
-      `retrospective stall: ${small.toFixed(1)} ms at 5 records, ${full.toFixed(1)} ms at ${String(4 * PER_WEEK)}\n`,
+      `retrospective stall: ${small.toFixed(1)} ms at 5 records, ${full.stall_ms.toFixed(1)} ms at ${String(4 * PER_WEEK)} (bound ${bound.toFixed(1)} ms: ${full.report})\n`,
     );
-    expect(full).toBeLessThanOrEqual(50);
-    expect(full - small).toBeLessThanOrEqual(GROWTH_MAX_MS);
+    expect(stallPassed(full), `${full.report} ${stallEvidence(full)}`).toBe(true);
+    if (full.verdict.kind === "within") {
+      expect(full.stall_ms).toBeLessThanOrEqual(50);
+      expect(full.stall_ms - small).toBeLessThanOrEqual(GROWTH_MAX_MS);
+    }
   });
 });
