@@ -22,6 +22,7 @@ import {
   type TtlContext,
 } from "../config/freshness.js";
 import { GSIS_ID_RE, containsCredentialShape, type SeedingMode } from "../config/schema.js";
+import { drainSteps } from "../domain/analytics/cooperative.js";
 import type { DatasetStamp, InputFreshness } from "../domain/analytics/types.js";
 import {
   INJECTION_FLAGS,
@@ -605,7 +606,11 @@ export interface ToolResultOptions {
  * `structuredContent` exactly when the outputSchema is advertised on the wire.
  */
 export function toToolResult(env: Envelope<unknown>, opts: ToolResultOptions): ToolSuccessResult {
-  const text = serializeEnvelope(env);
+  return resultOfText(serializeEnvelope(env), opts);
+}
+
+/** The tool result for an envelope already serialised (`toToolResult` of the same envelope). */
+function resultOfText(text: string, opts: ToolResultOptions): ToolSuccessResult {
   return opts.wireOutputSchema
     ? {
         content: [{ type: "text", text }],
@@ -633,7 +638,25 @@ export function validatedToolResult(
   outputSchema: z.ZodType,
   opts: ToolResultOptions,
 ): ValidatedResult {
-  const parsed = outputSchema.safeParse(JSON.parse(serializeEnvelope(env)));
+  return drainSteps(validatedToolResultSteps(env, outputSchema, opts));
+}
+
+/**
+ * validatedToolResult as resumable work: the serialisation and its JSON round trip, the schema check,
+ * then the result, each a step — in one turn the three were 20–30 ms of an analytics answer on the
+ * owner's Mac (plan 03 §1.2's ≤ 20 ms batch; changelog §R10 timing items), so the tool's runner takes
+ * them in turns of their own (`inTurns`). The result is built from the text that was checked, which
+ * is the envelope's own serialisation: drained, it is validatedToolResult.
+ */
+export function* validatedToolResultSteps(
+  env: Envelope<unknown>,
+  outputSchema: z.ZodType,
+  opts: ToolResultOptions,
+): Generator<void, ValidatedResult, undefined> {
+  const text = serializeEnvelope(env);
+  const json: unknown = JSON.parse(text);
+  yield;
+  const parsed = outputSchema.safeParse(json);
   if (!parsed.success)
     return {
       ok: false,
@@ -651,7 +674,8 @@ export function validatedToolResult(
         code: i.code,
       })),
     };
-  return { ok: true, result: toToolResult(env, opts) };
+  yield;
+  return { ok: true, result: resultOfText(text, opts) };
 }
 
 // --- resources (plan 07 §4.1 `ttlMs` column) -------------------------------------------------------

@@ -13,7 +13,7 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
-import { yieldTurn } from "../domain/analytics/cooperative.js";
+import { inTurns, yieldTurn } from "../domain/analytics/cooperative.js";
 import { threadCpuClock } from "../domain/clock.js";
 import { createUpstreamBudget, type UpstreamBudget } from "../providers/platform.js";
 import {
@@ -38,7 +38,7 @@ import {
   isUntrustedText,
   serializeEnvelope,
   toolAnnotations,
-  validatedToolResult,
+  validatedToolResultSteps,
   type BudgetTrim,
   type Envelope,
   type InputStamp,
@@ -633,9 +633,13 @@ export async function runTool(
     log.error("tool.over_budget", { request_id: ctx.requestId, tool: def.name, size: fit.size });
     throw new EffError("INTERNAL");
   }
-  const result = validatedToolResult(fit.envelope, outputSchemaOf(def), {
-    wireOutputSchema: def.wire !== "none",
-  });
+  // its serialisation, schema check and result in turns of their own (validatedToolResultSteps)
+  await yieldTurn();
+  const result = await inTurns(
+    validatedToolResultSteps(fit.envelope, outputSchemaOf(def), {
+      wireOutputSchema: def.wire !== "none",
+    }),
+  );
   if (!result.ok) {
     log.error("tool.output_invalid", {
       request_id: ctx.requestId,
