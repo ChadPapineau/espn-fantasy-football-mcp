@@ -549,6 +549,11 @@ export const listRecommendations = defineTool({
   data: recommendationListSchema,
   budget: "list",
   pageable: true,
+  // a page over the budget keeps the most whole items that fit, not half (define.ts `fit`): with
+  // every summary and note at the log's 200-char bound (the worst JSON escaping) a 25-item page is
+  // over 20 000 chars, and halving kept 12 of 25 where 20 fit; `next_offset` pages on from where it
+  // stopped either way
+  fit: "most",
   run: (args, ctx) => {
     const ref = leagueRef(ctx);
     const page = ctx.services.recommendationLog.list({

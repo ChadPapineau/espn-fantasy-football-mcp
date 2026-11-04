@@ -486,6 +486,16 @@ export interface FitOptions {
   readonly hint: string;
   /** Tool-specific steps tried in order BEFORE the list is halved. */
   readonly trims?: readonly BudgetTrim[];
+  /**
+   * Keep the longest prefix of the list that fits instead of halving (a pageable list tool's opt-in:
+   * espn_list_recommendations). Plan 01 §4.2's contract is what the result guarantees — within the
+   * budget, `truncated: true`, the warning that says how to page, and for a pageable list
+   * `has_more`/`next_offset` from where it stopped — and halving is the floor it names, not a cap on
+   * what may be kept: a page that keeps 24 of 25 items pages on exactly as one that keeps 12 does,
+   * in half the calls. The size of a prefix grows with its length, so a binary search finds it in
+   * ⌈log₂ n⌉ serialisations (≤ 7 for a 100-item page), as many as the halving loop's worst case.
+   */
+  readonly keepMost?: boolean;
 }
 
 const MAX_TRIM_STEPS = 128;
@@ -566,7 +576,11 @@ export function fitToBudget<D>(
     const trimmed = applyTrims(env, budget, opts.trims);
     if (trimmed !== env) {
       if (serializeEnvelope(trimmed).length <= budget) return { ok: true, envelope: trimmed };
-      return fitToBudget(trimmed, budget, listKey, { pageable: opts.pageable, hint: opts.hint });
+      return fitToBudget(trimmed, budget, listKey, {
+        pageable: opts.pageable,
+        hint: opts.hint,
+        ...(opts.keepMost === true ? { keepMost: true } : {}),
+      });
     }
   }
   const data = env.data as unknown;
@@ -575,6 +589,22 @@ export function fitToBudget<D>(
   const list = (data as Record<string, unknown>)[listKey];
   if (!Array.isArray(list)) return { ok: false, size };
   const total = list.length;
+  if (opts.keepMost === true) {
+    // the longest prefix of fewer than `total` items that fits (FitOptions.keepMost): the size of a
+    // prefix — its items and the warning that counts them — grows with its length
+    let lo = 0;
+    let hi = total - 1;
+    let best: Envelope<D> | null = null;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const candidate = withList(env, listKey, list.slice(0, mid), total, budget, opts);
+      if (serializeEnvelope(candidate).length <= budget) {
+        best = candidate;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return best === null ? { ok: false, size } : { ok: true, envelope: best };
+  }
   let n = total;
   while (n > 0) {
     n = Math.floor(n / 2);

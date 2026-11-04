@@ -906,6 +906,110 @@ describe("fitToBudget (20 000 chars; explicit truncation, never silent)", () => 
   });
 });
 
+describe("fitToBudget keepMost: the longest prefix that fits (espn_list_recommendations)", () => {
+  const most = { pageable: true, hint: TRUNCATION_HINTS.list, keepMost: true } as const;
+  it("property: it fits, truncated iff over budget, and keeps the most items — one more would not fit", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 300 }),
+        fc.integer({ min: 1, max: 900 }),
+        (n, rowChars) => {
+          const env = listEnv(n, rowChars);
+          const before = serializeEnvelope(env).length;
+          const r = fitToBudget(env, RESULT_BUDGET_CHARS, "players", most);
+          if (!r.ok) return false;
+          const size = serializeEnvelope(r.envelope).length;
+          const kept = r.envelope.data.players.length;
+          if (size > RESULT_BUDGET_CHARS) return false;
+          if (r.envelope.truncated !== before > RESULT_BUDGET_CHARS) return false;
+          if (!r.envelope.truncated) return kept === n;
+          // maximal: the same cut one item longer is over the budget
+          const oneMore = serializeEnvelope({
+            ...r.envelope,
+            data: { players: env.data.players.slice(0, kept + 1) },
+            warnings: [
+              ...env.warnings,
+              `result truncated to ${String(kept + 1)} of ${String(n)} players to fit the ${String(RESULT_BUDGET_CHARS)}-character budget; ${TRUNCATION_HINTS.list}`,
+            ],
+          }).length;
+          return (
+            kept < n &&
+            oneMore > RESULT_BUDGET_CHARS &&
+            r.envelope.page?.count === kept &&
+            r.envelope.page.has_more &&
+            r.envelope.page.next_offset === 200 + kept
+          );
+        },
+      ),
+      { numRuns: 150 },
+    );
+  });
+  it("keeps at least as many as halving, and more where halving overshoots", () => {
+    for (const [n, rowChars] of [
+      [25, 760],
+      [100, 760],
+      [64, 300],
+    ] as const) {
+      const env = listEnv(n, rowChars);
+      const halved = fitToBudget(env, RESULT_BUDGET_CHARS, "players");
+      const kept = fitToBudget(env, RESULT_BUDGET_CHARS, "players", most);
+      expect(halved.ok && kept.ok).toBe(true);
+      if (!halved.ok || !kept.ok) continue;
+      expect(kept.envelope.data.players.length).toBeGreaterThan(
+        halved.envelope.data.players.length,
+      );
+      // the same warning and paging contract as halving
+      expect(kept.envelope.warnings.at(-1)).toContain(TRUNCATION_HINTS.list);
+      expect(kept.envelope.warnings.at(-1)).toContain(`of ${String(n)} players`);
+    }
+  });
+  it("a result that cannot fit is still reported; trims run first and keepMost follows them", () => {
+    const fat = buildEnvelope({
+      data: { players: [], blob: "x".repeat(30_000) },
+      requestId: RID,
+      nowMs: NOW,
+      inputs: [],
+    });
+    expect(fitToBudget(fat, RESULT_BUDGET_CHARS, "players", most).ok).toBe(false);
+    // a trim that cannot help falls through to the longest prefix
+    const r = fitToBudget(listEnv(200), RESULT_BUDGET_CHARS, "players", {
+      ...most,
+      trims: [() => null],
+    });
+    const plain = fitToBudget(listEnv(200), RESULT_BUDGET_CHARS, "players", most);
+    expect(r.ok && plain.ok && r.envelope.data.players.length).toBe(
+      plain.ok ? plain.envelope.data.players.length : -1,
+    );
+    // a trim that helps only partly is followed by the longest prefix, keepMost carried through
+    const env = buildEnvelope({
+      data: {
+        players: Array.from({ length: 60 }, (_, id) => ({ id, blob: "y".repeat(400) })),
+        filler: "f".repeat(4000),
+      },
+      requestId: RID,
+      nowMs: NOW,
+      inputs: [],
+      page: { limit: 100, offset: 0, count: 60, total: 60, has_more: false, next_offset: null },
+    });
+    const dropFiller = (d: unknown) => {
+      const data = d as { filler: string };
+      return data.filler === ""
+        ? null
+        : { data: { ...data, filler: "" }, warning: "filler dropped" };
+    };
+    const t = fitToBudget(env, RESULT_BUDGET_CHARS, "players", { ...most, trims: [dropFiller] });
+    const h = fitToBudget(env, RESULT_BUDGET_CHARS, "players", {
+      pageable: true,
+      hint: TRUNCATION_HINTS.list,
+      trims: [dropFiller],
+    });
+    expect(t.ok && h.ok).toBe(true);
+    if (!t.ok || !h.ok) return;
+    expect(t.envelope.warnings).toContain("filler dropped");
+    expect(t.envelope.data.players.length).toBeGreaterThan(h.envelope.data.players.length);
+  });
+});
+
 describe("fitToBudget: a step's warning stands for earlier ones", () => {
   it("dropKeys removes the named earlier warnings; a same-key warning replaces in place", () => {
     const env = buildEnvelope({

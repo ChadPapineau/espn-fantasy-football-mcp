@@ -150,6 +150,12 @@ export interface ToolDefinition<S extends z.ZodType, D> {
   readonly budget: "list" | "analytics";
   /** Whether the list under `listKey` pages with offset (list tools) or is only halved. */
   readonly pageable?: boolean;
+  /**
+   * How an over-budget list is cut: `halve` (default; plan 01 §4.2) or `most` — the longest prefix
+   * that fits (envelope.ts FitOptions.keepMost), for a pageable list tool whose items are whole
+   * texts that must not be cut (espn_list_recommendations).
+   */
+  readonly fit?: "halve" | "most";
   /** The truncation warning's fixed advice. */
   readonly hint?: string;
   /** The output schema's wire form (default `outline`). */
@@ -172,6 +178,7 @@ export interface AnyToolDefinition {
   readonly data: z.ZodType;
   readonly budget: "list" | "analytics";
   readonly pageable?: boolean;
+  readonly fit?: "halve" | "most";
   readonly hint?: string;
   readonly wire: WireOutputMode;
   readonly opaqueInput?: Readonly<Record<string, string>>;
@@ -203,6 +210,7 @@ export function defineTool<S extends z.ZodType, D>(def: ToolDefinition<S, D>): A
     data: def.data,
     budget: def.budget,
     ...(def.pageable === undefined ? {} : { pageable: def.pageable }),
+    ...(def.fit === undefined ? {} : { fit: def.fit }),
     ...(def.hint === undefined ? {} : { hint: def.hint }),
     wire: def.wire ?? "outline",
     ...(def.opaqueInput === undefined ? {} : { opaqueInput: def.opaqueInput }),
@@ -628,6 +636,7 @@ export async function runTool(
     pageable: def.pageable === true,
     hint: truncationHint(def, args),
     ...(out.trims === undefined ? {} : { trims: out.trims }),
+    ...(def.fit === "most" ? { keepMost: true } : {}),
   });
   if (!fit.ok) {
     log.error("tool.over_budget", { request_id: ctx.requestId, tool: def.name, size: fit.size });

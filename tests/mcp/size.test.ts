@@ -260,6 +260,14 @@ describe("E14 at the recommendation log's own bound (changelog §R10, R10-1)", (
         for (const item of body.data.items) expect(item.note).toBe(worst);
         if (body.truncated) expect(body.warnings.some((w) => w.includes("truncated"))).toBe(true);
         expect(body.page.count).toBe(body.data.items.length);
+        console.log(
+          `[size] espn_list_recommendations ${JSON.stringify(args)} keeps ${String(body.data.items.length)} items`,
+        );
+        // the most whole items that fit, not half of the page (reclog.ts `fit: "most"`): halving
+        // kept 12 of a 25-item page here, 20 fit
+        expect(body.truncated).toBe(true);
+        expect(body.data.items.length).toBeGreaterThan(12);
+        expect(body.page.next_offset).toBe(body.data.items.length);
       }
       // paging by next_offset reaches every entry, truncated pages included
       const seen = new Set<string>();
