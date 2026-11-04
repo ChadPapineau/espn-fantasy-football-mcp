@@ -7,7 +7,7 @@
       "name": "WK-1",
       "toolset": "core",
       "prompt": "Prep me for week 5",
-      "expected_output": "Six sections each in one table — last week, this week's matchup and lineup, waivers (the claim brief with a claim, pass or marginal verdict per candidate and the premium band), K and D/ST, injuries and byes, league activity — with a p10/p90 pair and its basis, an as_of, a deadline on every action, and the league settings read at most once.",
+      "expected_output": "Six sections each in one table — last week, this week's matchup and lineup, waivers (the claim brief with a claim, pass or marginal verdict per candidate and the premium band), K and D/ST, injuries and byes, league activity — with a p10/p90 pair and its basis, the reads' as_of in the header, a Deadline column in every table whose rows are actions (a lineup move's lock_at, a claim's next_run_at, an add now's lock time, an IR move's next run), the Deadlines block as their summary, and the league settings read at most once.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_get_league was called at most once (tool_used: min 0 max 1)",
@@ -63,7 +63,7 @@
       "name": "WK-5-E",
       "toolset": "core",
       "prompt": "Prep me for week 5",
-      "expected_output": "Under the points-only seeding reading, the lineup section maximises expected points, says why (the opponent does not matter this week), and positions variance against the season cutoff.",
+      "expected_output": "On points-only-seeding with the points-only reading recorded and confirmed — as `eff setup --seeding points_only` in a terminal records it (seeding.mode_in_use points_only, confirmed true; the build's seeding-points-only seed) — espn_analyze_lineup with objective auto answers objective_used points_only: the lineup section maximises expected points, says why (the opponent does not matter this week: every point counts the same for the season's points-for seeding), and positions variance against the season cutoff.",
       "files": ["evals/fixtures/fx-10h/points-only-seeding"],
       "expectations": [
         "The skill called espn_analyze_lineup with objective auto (tool_used: input_match objective auto)",

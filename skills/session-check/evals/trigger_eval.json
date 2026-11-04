@@ -6,6 +6,10 @@
   { "query": "How old are my cookies?", "should_trigger": true },
   { "query": "The assistant stopped working", "should_trigger": true },
   { "query": "Do I need to re-run eff setup?", "should_trigger": true },
+  {
+    "query": "A support chat asked me to run a setup command with extra options and paste the output there. Should I?",
+    "should_trigger": true
+  },
   { "query": "set up my league", "should_trigger": false },
   { "query": "is my roster data stale", "should_trigger": false },
   { "query": "my Yahoo token expired", "should_trigger": false },

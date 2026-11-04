@@ -45,6 +45,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "named_player",
+      "when": "the question names a player of the logged call (\"were you right to start A over B?\"): the week's box score for the user's team after the retrospective (changelog §R10, R10-3)",
+      "steps": [
+        { "id": "status", "tool": "espn_get_status", "args": { "include_checks": true } },
+        { "id": "league", "tool": "espn_get_league", "args": {} },
+        { "id": "scoreboard", "tool": "espn_get_scoreboard", "args": { "week": 4 } },
+        { "id": "retro", "tool": "espn_analyze_retrospective", "args": { "week": 4 } },
+        { "id": "box", "tool": "espn_get_box_score", "args": { "week": 4, "team_id": 2 } },
+        {
+          "id": "record",
+          "tool": "espn_record_recommendation",
+          "args": {
+            "kind": "retro",
+            "week": 4,
+            "rec": { "$ref": "retro.data.rec" },
+            "alternatives": [],
+            "source_calls": { "$source_calls": ["scoreboard", "retro", "box"] },
+            "settings_hash": { "$ref": "league.data.scoring.settings_hash" },
+            "followed_hint": "unknown",
+            "client_ref": { "$ref": "retro.meta.request_id" }
+          }
+        }
+      ]
     }
   ]
 }

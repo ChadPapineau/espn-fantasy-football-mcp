@@ -44,11 +44,20 @@ const REASONS = (() => {
   return values.filter((v): v is string => typeof v === "string").sort();
 })();
 
-/** §4's bullet for one reason of a null answer. */
-const branch = (reason: string): string =>
-  VERIFY.split("\n").find((l) =>
+/** §4's bullet for one reason of a null answer, with its indented continuation (a fixed block). */
+const branch = (reason: string): string => {
+  const lines = VERIFY.split("\n");
+  const at = lines.findIndex((l) =>
     l.startsWith(`- **\`accepted: null\`, \`reason: ${reason}\`:**`),
-  ) ?? "";
+  );
+  if (at === -1) return "";
+  const out = [lines[at] ?? ""];
+  for (const l of lines.slice(at + 1)) {
+    if (l !== "" && !l.startsWith("  ")) break;
+    out.push(l);
+  }
+  return out.join("\n").trimEnd();
+};
 
 describe("session-check §4 reports a null probe by its reason (Stage C skills-session-check-not-configured-branch)", () => {
   it("G2's null reasons are read from its schema: not_configured and board_not_discriminating", () => {
@@ -69,9 +78,12 @@ describe("session-check §4 reports a null probe by its reason (Stage C skills-s
   it("not_configured: no cookies are stored yet — eff setup again in a terminal, eff doctor if it said stored — never the board sentence", () => {
     const b = branch("not_configured");
     expect(b).toMatch(/nothing was probed — the server found no cookies it can use/);
-    expect(b).toContain('**"no cookies are stored yet"**');
-    expect(b).toMatch(/run `eff setup` again in a terminal and read how it ends/);
-    expect(b).toMatch(/`eff doctor` in a terminal says why it cannot read them/);
+    // a fixed block, printed verbatim (round 2's triage, SC-7-E: both replies improvised)
+    expect(b).toContain("Print this block verbatim, and nothing in its place:");
+    expect(b).toContain("> **No cookies are stored yet.**");
+    expect(b).toMatch(/Run `eff setup` again in a terminal and read how it ends/);
+    expect(b).toMatch(/run `eff doctor` in the terminal — it says why the server cannot read them/);
+    expect(b).toMatch(/Nothing needs to come back here — not the values, not the command's output/);
     expect(b).toMatch(/Never call this a board that cannot be tested/);
     expect(b).not.toContain(BOARD_SENTENCE);
     // never asks for the command's output (the Skill's own guardrail)

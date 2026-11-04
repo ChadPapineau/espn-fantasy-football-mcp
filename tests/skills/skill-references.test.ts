@@ -81,11 +81,17 @@ describe("cross-Skill references (Stage C finding skills-cross-references-bare-n
     const weekly = read("skills/weekly/SKILL.md");
     expect(weekly).toContain(`the full review is the \`${PLUGIN}:retro\` Skill`);
     expect(weekly).toContain(`The full treatment is the \`${PLUGIN}:stream-kdef\` Skill.`);
+    // the news gate calls the evidence tool under news-check's claim rules (round 2's triage, IC-2)
     expect(read("skills/injury-cascade/SKILL.md")).toContain(
-      `run the \`${PLUGIN}:news-check\` Skill first`,
+      `under the \`${PLUGIN}:news-check\` Skill's §4 rules`,
     );
-    for (const s of ["trade", "schedule-plan"])
-      expect(read(`skills/${s}/SKILL.md`), s).toContain(`offer the \`${PLUGIN}:onboard\` Skill`);
+    expect(read("skills/schedule-plan/SKILL.md")).toContain(
+      `offer the \`${PLUGIN}:onboard\` Skill`,
+    );
+    // trade's offer is its fixed ask line (changelog §R10, R10-2)
+    expect(read("skills/trade/SKILL.md")).toContain(
+      `the \`${PLUGIN}:onboard\` Skill records the one you choose`,
+    );
     const guardrails = read("skills/_shared/references/guardrails.md");
     expect(guardrails).toContain(`the \`${PLUGIN}:session-check\` Skill says what to do`);
     expect(guardrails).toContain(

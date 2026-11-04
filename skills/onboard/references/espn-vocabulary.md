@@ -32,6 +32,10 @@ A player's **position** (QB, RB, WR, TE, K, D/ST) comes from the position map, n
 - Under the default one-day waiver period most players clear Wednesday mornings; a dropped player clears at the first run at least 24 hours later; a player dropped within 24 hours of being added is an immediate free agent.
 - A successful claim sends the team to the back of the order (`waiver_rank`); a failed claim costs nothing. After the run, every unclaimed player is a free agent.
 
+### The seeding rule (`seeding.rule`)
+
+`TOTAL_POINTS_SCORED` is ESPN's rule: the record seeds and total points break ties. It is not the points-only reading, which no ESPN field records — that reading lives only in `seeding.mode_in_use`, recorded by `eff setup --seeding points_only`.
+
 ### The pages a manual step names
 
 Labels as ESPN shows them on the web and in the app this season; if a label reads slightly differently, the page and the order of steps are the same.

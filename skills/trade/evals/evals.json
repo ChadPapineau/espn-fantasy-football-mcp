@@ -37,25 +37,25 @@
       "name": "TR-3",
       "toolset": "full",
       "prompt": "Team 08 wants my RB2 for their WR1. Why would they do that, and should I?",
-      "expected_output": "Team 08 is 1–3 and last in points for while Team 02 is 3–1: why_they_accept reflects the partner's standing (they need points now and are chasing), the user's side is judged on its own Δ and ΔU, and the deadline is stated.",
+      "expected_output": "Team 08 is 1–3 with the league's lowest points for while Team 02 is 3–1; Team 08's WR1 is Garrett Wilson and the user's RB2 is James Cook III. The tool's why_they_accept reads: their lineup gains about 35 points, it fills their weakest starting position (RB), and \"a long shot under the record-first reading: future value matters more to them\" (changelog §R10, R10-4: the server's standing line stands) — the reply explains the partner's motive with that line, read back as the tool gives it. The user's side is judged on its own Δ (mean about −44, p10 about −104, p90 about +23) and ΔU; the tool's verdict is fair (the interval spans zero): the reply states it with its interval before its own recommendation and, if it recommends declining instead, says why in so many words; the deadline is stated.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_get_standings before espn_analyze_trade (tool_order)",
-        "The reply explains why the partner would accept in terms of their record or their place in the standings (llm)",
-        "The reply's verdict for the user rests on the user's own change and playoff-odds change (llm)"
+        "The reply explains why the partner would accept with the tool's own standing line — a long shot under the record-first reading, so future value matters more to them — never a motive the tool does not state (llm)",
+        "The reply states the tool's verdict (fair) with its interval before its own recommendation, rests that recommendation on the user's own change and playoff-odds change, and says why whenever it departs from the tool's verdict (llm)"
       ]
     },
     {
       "id": 4,
       "name": "TR-4",
       "toolset": "full",
-      "prompt": "Who should I trade with for a running back?",
-      "expected_output": "A partner search (at most four partners) with a proposal and both sides' Δ per partner, then the most promising proposal (the first partner's, the highest Δ for the user) evaluated as an offer with ΔU for both sides, a devil's-advocate paragraph and a verdict (plan 09 §3.9: TR-4 as the sibling's, 2–4 espn_analyze_trade calls; trade/SKILL.md §4); the other partners are listed for the user to pick from; the deadline is stated.",
+      "prompt": "Who should I trade with for a wide receiver?",
+      "expected_output": "A partner search for a wide receiver (at most four partners) returns two on this fixture — Team 06 (CeeDee Lamb for Bhayshul Tuten, Δ for the user about +32.8) and Team 05 (Δ about +5.3) — each with a proposal and both sides' Δ; then the most promising proposal (the first partner's, the highest Δ for the user) is evaluated as an offer with ΔU for both sides, a devil's-advocate paragraph and a verdict (plan 09 §3.9: TR-4 as the sibling's, 2–4 espn_analyze_trade calls; trade/SKILL.md §4); the other partner is listed for the user to pick from; the deadline is stated.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_analyze_trade was called with a partner search (tool_used: input_match find_partners non-empty)",
         "The skill called espn_analyze_trade at least twice, the search and then the most promising proposal as an offer (tool_used: min 2 max 4)",
-        "The reply lists between one and four partners, each with a proposal and both sides' change, and gives the most promising one's ΔU and verdict (llm)"
+        "The reply lists the partners the search returns (one to four), each with a proposal and both sides' change, and gives the most promising one's ΔU and verdict (llm)"
       ]
     },
     {
@@ -63,13 +63,13 @@
       "name": "TR-5-E",
       "toolset": "full",
       "prompt": "Team 03 offered Kyren Williams for my WR1. They're 3-1, so they must be a contender. Should I take it?",
-      "expected_output": "Last season's seeds followed points for, unlike the configured ESPN rule, and the reading is unconfirmed: the offer is valued under both readings side by side; Team 03 is a favourite under ESPN's rule but a bubble team when points alone seed, so why_they_accept and the verdict change with the reading; ΔU is shown for both teams; the reply asks which reading applies and offers onboard to record it.",
+      "expected_output": "Last season's seeds followed points for, unlike the configured ESPN rule, and the reading is unconfirmed: the offer is valued under both readings side by side (seeding_mode both); why_they_accept gives Team 03's standing once per reading, each line naming its reading (changelog §R10, R10-2: \"under the record-first reading: …\", \"under the points-only reading: …\") — Team 03 is 3–1 and 6th in points for, the last playoff place — and the reply reads both lines back as the tool gives them (R10-4: never a standing the tool does not state), beside each reading's ΔU for both teams; it then asks which reading applies in trade's fixed line and offers the onboard Skill to record it, even though the verdict is the same under both.",
       "files": ["evals/fixtures/fx-10h/points-only-seeding"],
       "expectations": [
         "espn_analyze_trade was called with both readings (tool_used: input_match seeding_mode both)",
         "The reply shows the playoff-odds change for both teams (regex: `playoff`)",
-        "The reply shows both seeding readings side by side and says Team 03 is a bubble team when points alone seed (llm)",
-        "The reply asks which seeding reading applies instead of asserting one (llm)"
+        "The reply shows both seeding readings side by side, with Team 03's standing under each reading as the tool's why_they_accept lines state it, each naming its reading (llm)",
+        "The reply asks which seeding reading applies instead of asserting one, even though the verdict is the same under both, and offers onboard to record it (llm)"
       ]
     },
     {

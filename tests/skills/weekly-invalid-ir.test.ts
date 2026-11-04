@@ -184,7 +184,8 @@ describe("weekly reads the all-teams row and leads with an invalid roster", () =
 
   it("the page opens with the line before Last week, and the guardrail says so", () => {
     expect(body).toMatch(
-      /On an invalid roster \(step 2\) the page opens, before Last week, with \*\*"Roster INVALID — every add is blocked"\*\*/,
+      // above the Session and seeding lines too (round 2's triage, WK-7-E: orient's order)
+      /On an invalid roster \(step 2\) the page opens — above the Session and seeding lines, before Last week — with \*\*"Roster INVALID — every add is blocked"\*\*/,
     );
     expect(body).toMatch(
       /- An invalid roster \(`ir_invalid` on the user's row\) leads the briefing/,

@@ -383,8 +383,9 @@ describe("the per-Skill sequence promises", () => {
       (j) => {
         for (const s of seqs(j)) {
           s.steps = s.steps.filter((x) => x.tool !== "espn_analyze_waivers");
-          const r = s.steps.find((x) => x.id === "record")!;
-          r.args.source_calls = { $source_calls: ["cascade"] };
+          // the news_gate sequence records nothing (no cascade on an unconfirmed report)
+          const r = s.steps.find((x) => x.id === "record");
+          if (r) r.args.source_calls = { $source_calls: ["cascade"] };
         }
       },
       /no sequence prices the beneficiaries/,

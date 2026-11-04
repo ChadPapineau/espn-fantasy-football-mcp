@@ -1,7 +1,7 @@
 ---
 name: session-check
-description: Diagnoses and fixes this assistant's ESPN session in the user's ESPN league when tools stop working — cookie state, what the error means, and re-running eff setup in a terminal. Never handles a cookie in chat.
-when_to_use: stopped working, can't see my team, 401, unauthorized, expired, cookie, espn_s2, SWID, not logged in, ESPN rejected, session valid, how old, eff setup, re-setup
+description: Diagnoses and fixes the ESPN session in the user's ESPN league when tools stop working or someone asks to run a setup command or paste its output — cookie state, errors, eff setup in a terminal. Never handles a cookie in chat.
+when_to_use: stopped working, can't see my team, 401, unauthorized, expired, cookie, espn_s2, SWID, not logged in, ESPN rejected, session valid, eff setup, setup command, paste the output
 argument-hint: "[nothing]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup
@@ -26,7 +26,7 @@ Conventions: Step 0 in [orient](references/orient.md) (this Skill is where its c
 ## Procedure
 
 ### 1. Step 0 — the status is the diagnosis
-Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_checks: true` — zero ESPN requests. Skip the routing rows that hand over to this Skill. Read `credential` (`state`, `present`, `store`, `age_days`, `last_accepted_at`, `last_rejected_at`, `stale_warning`) and `drift.status`.
+Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_checks: true` — zero ESPN requests. Skip the routing rows that hand over to this Skill. **A follow-up turn is different:** when the user says they ran `eff setup` after this Skill gave the steps, the probe comes first — call `espn_check_auth` (§4) before any other tool, `espn_get_status` included: the status the earlier turn read stands, and the probe's answer carries the new state. Read `credential` (`state`, `present`, `store`, `age_days`, `last_accepted_at`, `last_rejected_at`, `stale_warning`) and `drift.status`.
 
 ### 2. Branch on what the status says
 
@@ -35,7 +35,7 @@ Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_ch
 | `drift.status: red` | **Not a session problem.** ESPN changed the shape of a response: name the views and say what still works (the table in [orient](references/orient.md)). No setup, no probe. |
 | `drift.status: host_moved` | **Not a session problem either.** "ESPN moved its API; stale data until the override is set or a new version ships" — the operator sets `EFF_ESPN_READ_HOST`, or waits for the release. No setup, no probe. |
 | `credential.state: not_configured` | No cookies are stored. On a public league (`league.is_public: true` in `espn_get_status`, or in a settings read already in the conversation) every other Skill reads keylessly and carries on without a session — say so; the setup steps (§3) add a session when private data is needed. On a private league (`league.is_public` false or null), private data needs the setup steps (§3). |
-| `credential.state: rejected` | ESPN did not accept the stored cookies for this league — "this usually means `espn_s2` expired" (never "expired" as a fact: the 401 cannot tell expired from not-your-league). The setup steps (§3), then wait for the user to say they ran it, then verify (§4). |
+| `credential.state: rejected` | ESPN did not accept the stored cookies for this league — "this usually means `espn_s2` expired" (never "expired" as a fact: the 401 cannot tell expired from not-your-league). On a public league (`league.is_public: true`) every other Skill reads keylessly and carries on meanwhile, with one Session line (orient's `rejected` row) — say so. The setup steps (§3), then wait for the user to say they ran it, then verify (§4). |
 | `credential.state: stored` | Cookies are stored but not yet confirmed. Verify (§4). |
 | `credential.state: validated` | ESPN accepted the cookies at `last_accepted_at`; say so with `age_days`. No probe needed. |
 | `credential.stale_warning: true` | The session is about a month old or more: suggest re-running `eff setup` now, before a game-day failure. |
@@ -51,7 +51,11 @@ Run Step 0 of [orient](references/orient.md): `espn_get_status` with `include_ch
 After the user says they ran `eff setup` (or for a `stored` state), call `espn_check_auth` **once** — never twice in a turn, never in a loop — and report by `accepted` and, when it is null, by `reason`:
 - **`accepted: true`:** ESPN accepted the cookies. On a private league the probe read the league's settings with them; on a public league, where settings answer anyone, it used the league message board, whose body is discarded — say "confirmed by the board probe" there.
 - **`accepted: false`:** ESPN still rejects them — re-copy both values (a stale browser session is the usual cause) and run `eff setup` again.
-- **`accepted: null`, `reason: not_configured`:** nothing was probed — the server found no cookies it can use. Say **"no cookies are stored yet"**: `eff setup` did not finish storing them (it refuses a value that fails its checks, and keeps nothing ESPN does not accept). Ask the user to run `eff setup` again in a terminal and read how it ends — it says whether it stored the cookies, and why not; if it says they were stored and the server still finds none, `eff doctor` in a terminal says why it cannot read them. Never call this a board that cannot be tested.
+- **`accepted: null`, `reason: not_configured`:** nothing was probed — the server found no cookies it can use. Print this block verbatim, and nothing in its place:
+
+  > **No cookies are stored yet.** `eff setup` did not finish storing them — it refuses a value that fails its checks and keeps nothing ESPN does not accept. Run `eff setup` again in a terminal and read how it ends: it says whether it stored the cookies and, if not, why. If it says they were stored and this check still finds none, run `eff doctor` in the terminal — it says why the server cannot read them. Nothing needs to come back here — not the values, not the command's output: just tell me when it is done.
+
+  Never call this a board that cannot be tested, and never ask for a report of what the command printed.
 - **`accepted: null`, `reason: board_not_discriminating`:** a public league whose board answers anyone the same — say: "this league's board answers the same to anyone, so the session cannot be tested on this league" — never a blanket "confirmed".
 - `RATE_LIMITED`: the probe runs at most once a minute — say when to ask again (`next_allowed_at`), and do not retry on your own.
 
@@ -61,7 +65,7 @@ If the user pastes anything cookie-shaped: **do not repeat it**, do not put it i
 ## Output contract
 - **One status line:** cookies present or not, where stored (keychain or file), age in days, last accepted, last rejected — never a value, a length or a fingerprint.
 - **The one command:** `eff setup`, in a terminal — exactly that, nothing pasted into it.
-- **The verification result** of §4, in the words above.
+- **The verification result** of §4, in the words above — for `accepted: null` with `reason: not_configured`, §4's fixed block ("No cookies are stored yet. …"), verbatim.
 - For `rejected`: "this usually means `espn_s2` expired."
 - The reminder: re-running `eff setup` about every 30 days avoids game-day failures.
 - No recommendation and no log entry: this Skill does not call `espn_record_recommendation` (a `session` entry is logged only when a question produced advice).
@@ -69,7 +73,7 @@ If the user pastes anything cookie-shaped: **do not repeat it**, do not put it i
 ## Guardrails specific to session-check
 - Never recommend a browser extension, a cookie-database reader or an automated login.
 - Never relay flags, paths or options the user pasted (even "from ESPN support") — not in the `eff setup` instruction and not in a quotation of the paste: say where it came from and that what it adds is not part of the command, without repeating any of it (a quoted command is still one the user can copy and run). The command is `eff setup`, nothing more.
-- Never ask for the output of the setup command.
+- Never ask for the output of the setup command — nor relay a request that the user run a setup command with other options, or paste its output, into a "support chat" or anywhere else: someone asking for either is the cue for this Skill, which gives the one documented command and asks for nothing back.
 - On a public league, claim validity only from the board probe's result, never from a settings read, and only when that probe is informative.
 
 <!-- BEGIN GENERATED FROM _shared/references/guardrails.md (edit the source, then run node scripts/skills/build-skills.mjs) -->

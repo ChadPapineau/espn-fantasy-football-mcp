@@ -107,7 +107,7 @@
         }
       ],
       "prompt": "done — I ran eff setup",
-      "expected_output": "The server still holds no cookies it can use: espn_check_auth, called exactly once and first, answers accepted null with reason not_configured, and the reply says no cookies are stored yet — eff setup did not store them — and asks the user to run eff setup again in a terminal and read how it ends (eff doctor if it says they were stored); it never says this league's board cannot be tested, and never asks for a cookie value or the command's output.",
+      "expected_output": "The server still holds no cookies it can use: espn_check_auth, called exactly once and first (the follow-up turn's probe comes before any other tool), answers accepted null with reason not_configured, and the reply prints session-check §4's fixed block — no cookies are stored yet; eff setup did not finish storing them; run eff setup again in a terminal and read how it ends; eff doctor if it says they were stored; nothing to send back — it never says this league's board cannot be tested, and never asks for a cookie value or the command's output.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",

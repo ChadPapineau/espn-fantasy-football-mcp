@@ -36,7 +36,7 @@ Run Step 0 of [orient](references/orient.md). Note `rules.waiver.uses_budget`, `
 
 ### 4. Context the engine uses
 1. `espn_get_injuries` for the user's roster and the leading candidates.
-2. `espn_list_transactions` with `types: ["WAIVER", "WAIVER_ERROR", "FREEAGENT"]` and `count: 60` — rivals' claims, including the losing ones. Without cookies on a private league this answers `ESPN_REQUIRES_COOKIES` (or `ESPN_AUTH_REJECTED`): carry on — the engine falls back to its cold-start demand model — and route the session repair to the `espn-fantasy-football:session-check` Skill in one line without abandoning the answer.
+2. `espn_list_transactions` with `types: ["WAIVER", "WAIVER_ERROR", "FREEAGENT"]` and `count: 60` — rivals' claims, including the losing ones. On a public league it answers keylessly, a rejected stored session included (orient's `rejected` row has already printed its Session line: route the repair in that one line, without abandoning the answer). When it answers `ESPN_AUTH_REJECTED` or `ESPN_REQUIRES_COOKIES`, follow orient's **A rejection mid-procedure** — on a public league carry on, the engine falling back to its cold-start demand model (`premium_basis: cold_start_table`); on a private league the procedure ends with the hand-off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7).
 3. `espn_get_standings` — the user's `waiver_rank` (`k`) and rivals' activity.
 4. **P1:** under `full`, the usage branch — `espn_get_player_usage` (`window: 3`) for the user's roster and for the leading candidates (a pool selector per position of need), and `espn_get_depth_chart` for each team where an injury opened a role. Under `core` skip both and say the ranking rests on ESPN's projections.
 
@@ -48,7 +48,8 @@ Run Step 0 of [orient](references/orient.md). Note `rules.waiver.uses_budget`, `
 
 ## Output additions (priority league)
 - The price: `k`, `W`, the premium `Π(k, W)` with `premium_basis` and its band `premium_band` **[low, high]** printed beside it, and the per-week threshold. When `premium_basis` is `cold_start_table`, say the premium is a league-average estimate until the league's own feed has history.
-- Per candidate: `s`, `s_with_ir_move` (both, whenever an IR move is open), the verdict ([priority waivers](references/priority-waivers.md)) — `claim`, `pass`, **marginal** (an `s` inside the band: the user's call, never presented as a crisp claim or pass), `fa_add_after_run` (on waivers and likely to clear: add him once the run clears) or `fa_add_now` (already a free agent: add him now, first come, first served — no waiver time) — `p_role_holds`, `p_k_win`, `p_clears_to_fa`, and the conditional drop with its re-add risk and any activation warning ("activate after the run, never the night before").
+- Per candidate: `s`, `s_with_ir_move` (both, whenever an IR move is open), the verdict ([priority waivers](references/priority-waivers.md)) — `claim`, `pass`, **marginal** (an `s` inside the band: the user's call, never presented as a crisp claim or pass), `fa_add_after_run` (on waivers and likely to clear: add him once the run clears) or `fa_add_now` (already a free agent: add him now, first come, first served — no waiver time) — `p_role_holds`, `p_k_win`, `p_clears_to_fa`, and any activation warning ("activate after the run, never the night before").
+- **The drop**, on a line of its own for each conditional drop: "Drop: <name> — re-add risk N % owned" (`conditional_drop.re_add_risk.percent_owned`), with his rest-of-season value and its basis (`conditional_drop.value_ros`); an IR move in his place says so (`is_ir_move`).
 - **The ordered claim list** for the next run — and, apart from it, the marginal candidates as "your call".
 - **The scramble list**: who to add as a free agent the moment the run clears — and, before or after the run, the `fa_add_now` free agents to add now.
 - `next_run_at` (from `rules.waiver.next_execution`).
@@ -115,7 +116,7 @@ The ranked `rec.drivers[]`, strongest first, in plain words.
 Each `rec.assumptions[]` with its `revisit_trigger`; the invalidators ("if X is ruled out before his kickoff, start Y instead"); the `flip_driver` when the tool gives one.
 
 ### Confidence & freshness
-The role sample size (`rec.confidence.role_games`); every input's `as_of` / `age_s` (from `data.inputs[]`); every input whose `freshness` is `stale` named; "n too small" wherever the tool says so; every `warnings[]` entry repeated in plain words (an injection flag in one line). A result with `partial: true` lacks an input its warning names: say so and what it leaves out, and give its number only after the one repeat call references/tool-outputs.md prescribes — never as the final answer.
+The role sample size (`rec.confidence.role_games`); every input's `as_of` / `age_s` (from `data.inputs[]`); every input whose `freshness` is `stale` named; "n too small" wherever the tool says so; every `warnings[]` entry repeated in plain words; and every injection flag from any read of this session — Step 0's status and settings reads included, whether or not the answer uses that field — one line each, with the quoted text and its source tag. A result with `partial: true` lacks an input its warning names: say so and what it leaves out, and give its number only after the one repeat call references/tool-outputs.md prescribes — never as the final answer.
 
 ### Deadline
 `rec.latest_execution_time` or the earliest `lock_at` that matters, in Eastern Time; for waivers, `next_run_at` (from `rules.waiver.next_execution`). Every action carries one.

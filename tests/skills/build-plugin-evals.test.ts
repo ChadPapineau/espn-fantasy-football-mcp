@@ -29,8 +29,16 @@ import {
   CASE_RUNS,
   DEFAULT_OUT,
   INJ_BASE_TAG,
+  BASELINES_ATTACHED,
+  BASELINES_BEGIN,
+  BASELINES_END,
+  SEEDING_SEEDS,
   attachBaselines,
+  baseRunOf,
+  baselineLines,
   passingTraceOf,
+  qbAlternative,
+  seedSeedingReading,
   run as runCommand,
   traceProblem,
   EVAL_SERVER,
@@ -464,22 +472,26 @@ describe("credential-state variants (Stage C finding eval-credential-state-varia
     expect([...FIXTURE_CREDENTIAL_STATES]).toEqual(["not_configured", "rejected", "stored"]);
   });
 
-  it("the cases on auth-rejected and public-league are written again; WV-7-E is held out by name, with its reason", () => {
+  it("the cases on auth-rejected and public-league are written again, and WV-7-E with them: none is held out (changelog §R10, R10-7)", () => {
     for (const dir of [
       "onboard--on-5-e",
       "session-check--sc-1",
       "session-check--sc-3",
       "session-check--sc-6",
+      "waivers--wv-7-e",
     ])
       expect(byDir.has(dir), dir).toBe(true);
     expect(byDir.get("onboard--on-5-e")?.plugin).toBe("public-league--core");
     expect(byDir.get("session-check--sc-1")?.plugin).toBe("auth-rejected--core");
-    expect(plan.notTestable.map((n) => n.name)).toEqual(["WV-7-E"]);
-    const [held] = plan.notTestable;
-    expect(byDir.has(String(held?.dir))).toBe(false);
-    expect(held?.reason).toBe(HELD_OUT_CASES["WV-7-E"]);
-    expect(held?.reason).toMatch(/rejected/);
-    expect(Object.keys(HELD_OUT_CASES)).toEqual(["WV-7-E"]);
+    // a public league whose stored session ESPN rejected: orient's rejected row carries on
+    expect(byDir.get("waivers--wv-7-e")?.plugin).toBe("auth-rejected--core");
+    expect(variantHarness(ROOT, "auth-rejected").credential_state).toBe("rejected");
+    const settings = JSON.parse(
+      readFileSync(path.join(ROOT, "fixtures/espn/fx-10h/league/mSettings.json"), "utf8"),
+    ) as { settings: { isPublic: boolean } };
+    expect(settings.settings.isPublic).toBe(true);
+    expect(plan.notTestable).toEqual([]);
+    expect(Object.keys(HELD_OUT_CASES)).toEqual([]);
     expect(
       plan.plugins.some((p) => p.variant === "auth-rejected") &&
         plan.plugins.some((p) => p.variant === "public-league"),
@@ -681,7 +693,19 @@ describe("recorded-state preconditions (Stage C finding eval-recorded-state-prec
       "RT-4-E": "log-six-lineup",
       "RT-INJ": "log-week4-lineup-note",
       "SC-4": "drift-red",
+      "SS-5-E": "seeding-points-only",
+      "WK-5-E": "seeding-points-only",
     });
+    // the configured points-only plugin (round 2's triage: SS-5-E and WK-5-E); ON-4-E and TR-5-E
+    // keep the unconfigured one, whose unconfirmed reading they need
+    expect(SEEDING_SEEDS).toEqual({ "seeding-points-only": "points_only" });
+    expect(byDir.get("start-sit--ss-5-e")?.plugin).toBe(
+      "points-only-seeding--core--seeding-points-only",
+    );
+    expect(byDir.get("weekly--wk-5-e")?.plugin).toBe(
+      "points-only-seeding--core--seeding-points-only",
+    );
+    expect(byDir.get("trade--tr-5-e")?.plugin).toBe("points-only-seeding--full");
     for (const seed of Object.values(SEEDS)) expect(SEED_KINDS).toContain(seed);
     expect(byDir.get("retro--rt-1")?.plugin).toBe("base--core--log-week4-lineup");
     expect(byDir.get("retro--rt-3")?.plugin).toBe("base--core--log-week4-lineup");
@@ -1272,9 +1296,10 @@ describe("buildPluginEvals on a copy", () => {
         "base--full--log-week4-plain",
         "drift-mRoster--core--drift-red",
         "inj-teamname-json--core--log-week4-lineup-note",
+        "points-only-seeding--core--seeding-points-only",
       ].sort(),
     );
-    expect(r.notTestable.map((n) => n.name).sort()).toEqual(["WV-7-E"]);
+    expect(r.notTestable).toEqual([]);
     for (const key of r.plugins) {
       const dir = path.join(out, "plugins", key);
       const plugin = JSON.parse(
@@ -1652,8 +1677,12 @@ describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () =
         path.join(t.root, "scripts", "seed-fixture-datasets.ts"),
       ]);
       expect(c.args[3]?.startsWith(r.state!)).toBe(true);
-      // only PATH reaches the seed process (no other env)
-      expect(Object.keys(c.env)).toEqual(["PATH"]);
+      // only PATH — and TMPDIR when set, which the seed's temp-directory check reads (the state
+      // root was made under it) — reaches the seed process, no other env
+      expect(c.env).toEqual({
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+      });
     }
     await expect(
       seedDatasetStates({
@@ -1664,6 +1693,27 @@ describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () =
         spawnImpl: spawnWith(1),
       }),
     ).rejects.toThrow(/the dataset seed exited 1/);
+    // a set TMPDIR always reaches the seed (macOS sets one: the state root is made under it, and
+    // without it the seed's own temp directory is /tmp and it refused every cache)
+    const saved = process.env.TMPDIR;
+    try {
+      process.env.TMPDIR = "/var/folders/xx/T/";
+      calls.length = 0;
+      await seedDatasetStates({
+        root: t.root,
+        out,
+        node: "/n",
+        plugins: r.plugins.slice(0, 1),
+        spawnImpl: spawnWith(0),
+      });
+      expect(calls[0]?.env).toEqual({
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        TMPDIR: "/var/folders/xx/T/",
+      });
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved;
+    }
   });
 
   it("the premise holds: `eff refresh` publishes the same datasets whatever the toolset (refresh never reads it)", () => {
@@ -1688,18 +1738,66 @@ describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () =
   });
 });
 
+/** A lineup rec that starts a QB (player 1) and a WR (player 3): what qbAlternative swaps from. */
+const LINEUP_REC = {
+  action: "keep the current lineup",
+  log_id: null,
+  subjects: [
+    { player_id: 1, gsis_id: null, role: "start", slot: "QB" },
+    { player_id: 3, gsis_id: null, role: "start", slot: "WR" },
+  ],
+  point_estimate: 100,
+  distribution: {
+    mean: 100,
+    p10: 80,
+    p25: 90,
+    p50: 100,
+    p75: 110,
+    p90: 120,
+    p_zero: 0,
+    basis: "position_cv",
+  },
+};
+/** The week's roster the seed reads: the starting QB, two bench QBs (the higher-projected is 2), a WR. */
+const SEED_ROSTER = {
+  players: [
+    { player_id: 1, gsis_id: null, position: "QB", slot: "QB", projection_week_espn: 20 },
+    { player_id: 4, gsis_id: null, position: "QB", slot: "BE", projection_week_espn: 9 },
+    { player_id: 2, gsis_id: "00-0000002", position: "QB", slot: "BE", projection_week_espn: 16 },
+    { player_id: 3, gsis_id: null, position: "WR", slot: "WR", projection_week_espn: 12 },
+  ],
+};
+const SEED_PROJECTIONS = {
+  projections: [
+    { player_id: 1, weeks: [{ week: 4, points: { mean: 20 } }] },
+    { player_id: 2, weeks: [{ week: 4, points: { mean: 16.5 } }] },
+    { player_id: 4, weeks: [{ week: 4, points: { mean: 9 } }] },
+  ],
+};
+
 describe("the seeds of RT-1/RT-3/RT-4-E/RT-INJ and SC-4 (seedState over a fake server; tests/e2e/plugin-evals-state.test.ts runs them on dist)", () => {
   /** A server that answers the lineup seeds' calls; record answers carry an increasing log id. */
   const lineupServer = () => {
     let n = 0;
+    let r = 0;
     return fakeServer((name) => {
       if (name === "initialize") return { protocolVersion: "2025-06-18", capabilities: {} };
       if (name === "espn_get_league")
         return text({ data: { scoring: { settings_hash: "b".repeat(64) } }, meta: {} });
       if (name === "espn_analyze_lineup")
         return text({
-          data: { rec: REC, seeding_mode_used: "espn_rule" },
+          data: { rec: LINEUP_REC, seeding_mode_used: "espn_rule" },
           meta: { request_id: `r-00000000000${String(n)}` },
+        });
+      if (name === "espn_get_roster")
+        return text({
+          data: SEED_ROSTER,
+          meta: { request_id: `r-1000000000${String(++r).padStart(2, "0")}` },
+        });
+      if (name === "espn_project_players")
+        return text({
+          data: SEED_PROJECTIONS,
+          meta: { request_id: `r-2000000000${String(r).padStart(2, "0")}` },
         });
       if (name === "espn_record_recommendation")
         return text({ data: { log_id: `rec-${String(++n)}` } });
@@ -1709,7 +1807,51 @@ describe("the seeds of RT-1/RT-3/RT-4-E/RT-INJ and SC-4 (seedState over a fake s
   const toolCalls = (s: FakeServer) =>
     s.calls.filter((c) => c.method === "tools/call").map((c) => c.params);
 
-  it("log-week4-lineup logs start-sit's week-4 call: kind lineup, its rec, no alternatives, its seeding reading", async () => {
+  it("qbAlternative: the told lineup with the bench QB of the highest projection in the starter's seat, the rec moved by the two QBs' means (changelog §R10, R10-3)", () => {
+    const alt = qbAlternative(LINEUP_REC, SEED_ROSTER, SEED_PROJECTIONS, 4);
+    expect(alt).toEqual({
+      action: "start the bench QB (player_id 2) at QB instead of player_id 1",
+      subjects: [
+        { player_id: 2, gsis_id: "00-0000002", role: "start", slot: "QB" },
+        { player_id: 3, gsis_id: null, role: "start", slot: "WR" },
+        { player_id: 1, gsis_id: null, role: "sit", slot: "BE" },
+      ],
+      point_estimate: 96.5,
+      distribution: {
+        mean: 96.5,
+        p10: 76.5,
+        p25: 86.5,
+        p50: 96.5,
+        p75: 106.5,
+        p90: 116.5,
+        p_zero: 0,
+        basis: "position_cv",
+      },
+      decision_metric_value: 96.5,
+    });
+    // no name copied out of a tool result: the action names the two by player_id
+    expect(alt.action).not.toMatch(/[A-Z][a-z]+ [A-Z][a-z]+/);
+    // it refuses rather than log a meaningless alternative
+    expect(() =>
+      qbAlternative(
+        LINEUP_REC,
+        { players: SEED_ROSTER.players.filter((p) => p.slot !== "BE") },
+        SEED_PROJECTIONS,
+        4,
+      ),
+    ).toThrow(/no starting QB and bench QB/);
+    expect(() =>
+      qbAlternative({ ...LINEUP_REC, subjects: [] }, SEED_ROSTER, SEED_PROJECTIONS, 4),
+    ).toThrow(/does not start the QB/);
+    expect(() => qbAlternative(LINEUP_REC, SEED_ROSTER, { projections: [] }, 4)).toThrow(
+      /no projected mean/,
+    );
+    expect(() =>
+      qbAlternative({ ...LINEUP_REC, point_estimate: null }, SEED_ROSTER, SEED_PROJECTIONS, 4),
+    ).toThrow(/no point estimate/);
+  });
+
+  it("log-week4-lineup logs start-sit's week-4 call: kind lineup, its rec, one scored alternative (the bench QB), its seeding reading", async () => {
     const s = lineupServer();
     expect(
       await seedState({
@@ -1724,15 +1866,28 @@ describe("the seeds of RT-1/RT-3/RT-4-E/RT-INJ and SC-4 (seedState over a fake s
     expect(calls.map((c) => c.name)).toEqual([
       "espn_get_league",
       "espn_analyze_lineup",
+      "espn_get_roster",
+      "espn_project_players",
       "espn_record_recommendation",
     ]);
     expect(calls[1]!.arguments).toEqual({ week: 4, objective: "auto" });
-    expect(calls[2]!.arguments).toEqual({
+    expect(calls[2]!.arguments).toEqual({ week: 4 });
+    // the starting QB and every bench QB, projected for the call's week
+    expect(calls[3]!.arguments).toEqual({
+      players: { player_ids: [1, 4, 2] },
+      horizon: "week",
+      week: 4,
+    });
+    expect(calls[4]!.arguments).toEqual({
       kind: "lineup",
       week: 4,
-      rec: REC,
-      alternatives: [],
-      source_calls: [{ tool: "espn_analyze_lineup", request_id: "r-000000000000" }],
+      rec: LINEUP_REC,
+      alternatives: [qbAlternative(LINEUP_REC, SEED_ROSTER, SEED_PROJECTIONS, 4)],
+      source_calls: [
+        { tool: "espn_analyze_lineup", request_id: "r-000000000000" },
+        { tool: "espn_get_roster", request_id: "r-100000000001" },
+        { tool: "espn_project_players", request_id: "r-200000000001" },
+      ],
       settings_hash: "b".repeat(64),
       followed_hint: "unknown",
       client_ref: "plugin-evals-seed-log-week4-lineup-w4-auto",
@@ -1780,6 +1935,106 @@ describe("the seeds of RT-1/RT-3/RT-4-E/RT-INJ and SC-4 (seedState over a fake s
     );
     expect(new Set(recs.map((r) => r.client_ref)).size).toBe(6);
     expect(recs.every((r) => r.note === undefined)).toBe(true);
+    // every seeded lineup call carries its one scored alternative (changelog §R10, R10-3)
+    expect(recs.every((r) => Array.isArray(r.alternatives) && r.alternatives.length === 1)).toBe(
+      true,
+    );
+  });
+
+  it("the evidence seeds (NC-7, NC-INJ-2) log no alternative and read no roster", async () => {
+    const s = fakeServer(happy);
+    await seedState({ root: "/r", node: "/n", env: {}, seed: "log-week4", spawnImpl: s.spawnImpl });
+    const calls = toolCalls(s);
+    expect(calls.map((c) => c.name)).not.toContain("espn_get_roster");
+    expect(
+      (calls.find((c) => c.name === "espn_record_recommendation")!.arguments as Json).alternatives,
+    ).toEqual([]);
+  });
+
+  /** `eff setup --seeding <mode>` as a fake child that exits `code`, then a fake server. */
+  const seedingSpawn = (code: number | null, mode: string, confirmed = true) => {
+    const spawned: { cmd: string; args: string[]; env: Record<string, string> }[] = [];
+    const server = fakeServer((name) => {
+      if (name === "initialize") return { protocolVersion: "2025-06-18", capabilities: {} };
+      if (name === "espn_get_league")
+        return text({ data: { seeding: { mode_in_use: mode, confirmed } }, meta: {} });
+      return null;
+    });
+    const spawnImpl: NonNullable<Parameters<typeof seedSeedingReading>[0]["spawnImpl"]> = (
+      cmd,
+      args,
+      o,
+    ) => {
+      spawned.push({ cmd, args, env: o.env });
+      if (args.includes("serve")) return server.spawnImpl(cmd, args, o);
+      const ev = new EventEmitter();
+      const stdout = new PassThrough();
+      setImmediate(() => ev.emit("exit", code));
+      return {
+        stdin: new PassThrough(),
+        stdout,
+        stderr: null,
+        on: (e: "exit", fn: (c: number | null) => void) => ev.on(e, fn),
+        kill: () => undefined,
+      };
+    };
+    return { spawnImpl, spawned, server };
+  };
+
+  it("seeding-points-only runs the owner's own `eff setup --seeding points_only` on the plugin's state, then insists the server reads it confirmed", async () => {
+    const f = seedingSpawn(0, "points_only");
+    expect(
+      await seedState({
+        root: "/repo",
+        node: "/n",
+        env: { EFF_CONFIG_DIR: "/s/config" },
+        seed: "seeding-points-only",
+        spawnImpl: f.spawnImpl,
+      }),
+    ).toBe("seeding points_only recorded");
+    expect(f.spawned[0]).toEqual({
+      cmd: "/n",
+      args: [
+        "--import",
+        path.join("/repo", NO_SOCKET),
+        path.join("/repo", "dist", "cli.js"),
+        "setup",
+        "--seeding",
+        "points_only",
+      ],
+      env: { EFF_CONFIG_DIR: "/s/config" },
+    });
+    expect(f.spawned[1]?.args.at(-1)).toBe("serve");
+    expect(
+      f.server.calls.filter((c) => c.method === "tools/call").map((c) => c.params.name),
+    ).toEqual(["espn_get_league"]);
+    expect(SEED_KINDS).toContain("seeding-points-only");
+  });
+
+  it("seeding-points-only fails loudly when setup fails or the server does not read the reading back", async () => {
+    await expect(
+      seedSeedingReading(
+        { root: "/r", node: "/n", env: {}, spawnImpl: seedingSpawn(1, "points_only").spawnImpl },
+        "points_only",
+      ),
+    ).rejects.toThrow(/eff setup --seeding points_only exited 1/);
+    await expect(
+      seedSeedingReading(
+        { root: "/r", node: "/n", env: {}, spawnImpl: seedingSpawn(0, "espn_rule").spawnImpl },
+        "points_only",
+      ),
+    ).rejects.toThrow(/reports espn_rule \(confirmed true\)/);
+    await expect(
+      seedSeedingReading(
+        {
+          root: "/r",
+          node: "/n",
+          env: {},
+          spawnImpl: seedingSpawn(0, "points_only", false).spawnImpl,
+        },
+        "points_only",
+      ),
+    ).rejects.toThrow(/confirmed false/);
   });
 
   it("drift-red reads the drifted roster view once, then insists the status is red", async () => {
@@ -1976,6 +2231,165 @@ describe("the generated README runs the suite the harness can find, and the base
       expect(a.errors.join("\n")).toContain(`${e.case}: no base case`);
       expect(existsSync(path.join(out, "evals", e.case, BASELINE_FILE))).toBe(false);
     }
+  });
+
+  it("--baselines falls back to the best-scoring kept run when no run of the base passed, and names each base attached that way (changelog §R10, R10-8)", () => {
+    const t = repoWithFixtures();
+    const out = temp("eff-pe-out-");
+    const r = buildPluginEvals({ root: t.root, out, node: "/n" });
+    cleanups.push(() => {
+      if (r.state) rmSync(r.state, { recursive: true, force: true });
+    });
+    const readmeBefore = readFileSync(path.join(out, "README.md"), "utf8");
+    expect(readmeBefore).toContain(
+      `${BASELINES_BEGIN}\n${baselineLines([]).join("\n")}\n${BASELINES_END}`,
+    );
+    const index = JSON.parse(readFileSync(path.join(out, BASELINES_INDEX), "utf8")) as {
+      case: string;
+      base: string | null;
+    }[];
+    const withBase = index.filter((e): e is { case: string; base: string } => e.base !== null);
+    expect(withBase.length).toBeGreaterThan(1);
+    const sand = temp("eff-pe-sandbox-");
+    const BEST = [
+      { type: "assistant", message: { content: [{ type: "text", text: "best of the failed" }] } },
+    ];
+    const WORSE = [
+      { type: "assistant", message: { content: [{ type: "text", text: "a worse reply" }] } },
+    ];
+    const results = {
+      cases: withBase.map((e, i) => ({
+        name: e.base,
+        arms: {
+          // the first base passes once; every other base only fails, its best run in the middle,
+          // and an errored run scoring higher is never the reference (it has no reply)
+          with:
+            i === 0
+              ? [
+                  {
+                    score: 0.9,
+                    passed: false,
+                    error: null,
+                    tracePath: sandboxTrace(sand, `a${String(i)}`, WORSE),
+                  },
+                  {
+                    score: 1,
+                    passed: true,
+                    error: null,
+                    tracePath: sandboxTrace(sand, `b${String(i)}`, STREAM),
+                  },
+                ]
+              : [
+                  {
+                    score: 0.25,
+                    passed: false,
+                    error: null,
+                    tracePath: sandboxTrace(sand, `c${String(i)}`, WORSE),
+                  },
+                  {
+                    score: 0.75,
+                    passed: false,
+                    error: null,
+                    tracePath: sandboxTrace(sand, `d${String(i)}`, BEST),
+                  },
+                  {
+                    score: 0.95,
+                    passed: false,
+                    error: "timed out",
+                    tracePath: sandboxTrace(sand, `e${String(i)}`, WORSE),
+                  },
+                  {
+                    score: 0.5,
+                    passed: false,
+                    error: null,
+                    tracePath: sandboxTrace(sand, `f${String(i)}`, WORSE),
+                  },
+                ],
+        },
+      })),
+    };
+    const file = path.join(sand, "base-results.json");
+    writeFileSync(file, JSON.stringify(results));
+    const a = attachBaselines({ out, resultsFile: file, roots: [sand] });
+    expect(a.chosen).toHaveLength(withBase.length);
+    const [first, ...rest] = withBase;
+    expect(readFileSync(path.join(out, "evals", first!.case, BASELINE_FILE), "utf8")).toContain(
+      "the base reply",
+    );
+    expect(a.chosen[0]).toEqual({ case: first!.case, base: first!.base, how: "passing", score: 1 });
+    for (const e of rest) {
+      expect(readFileSync(path.join(out, "evals", e.case, BASELINE_FILE), "utf8")).toContain(
+        "best of the failed",
+      );
+      expect(a.chosen).toContainEqual({
+        case: e.case,
+        base: e.base,
+        how: "best_scoring",
+        score: 0.75,
+      });
+    }
+    expect(a.attached.join("\n")).toMatch(/the best-scoring kept run, score 0\.75: no run passed/);
+    // the record and the README name each base attached that way
+    expect(JSON.parse(readFileSync(path.join(out, BASELINES_ATTACHED), "utf8"))).toEqual(a.chosen);
+    const readme = readFileSync(path.join(out, "README.md"), "utf8");
+    expect(readme).toContain(baselineLines(a.chosen).join("\n"));
+    for (const e of rest)
+      expect(readme).toContain(
+        `- \`${e.case}\` ← \`${e.base}\`: the best-scoring kept run (score 0.75) — no run passed`,
+      );
+    expect(readme).toContain(`- \`${first!.case}\` ← \`${first!.base}\`: a passing run`);
+    expect(readme).toMatch(/1 from a passing run of the base, \d+ from its best-scoring kept run/);
+    // the rest of the README is untouched
+    expect(readme.slice(0, readme.indexOf(BASELINES_BEGIN))).toBe(
+      readmeBefore.slice(0, readmeBefore.indexOf(BASELINES_BEGIN)),
+    );
+  });
+
+  it("baseRunOf: a passing kept run first, else the highest score among the kept runs that did not error, else the reason", () => {
+    const sand = temp("eff-pe-sandbox-");
+    const p1 = sandboxTrace(sand, "p1", STREAM);
+    const p2 = sandboxTrace(sand, "p2", STREAM);
+    const one = (runs: unknown[]) => ({ cases: [{ name: "x", runs }] });
+    expect(
+      baseRunOf(
+        one([
+          { score: 0.6, error: null, trace_path: p1 },
+          { score: 1, error: null, trace_path: p2 },
+        ]),
+        "x",
+        [sand],
+      ),
+    ).toEqual({ trace: p2, how: "passing", score: 1 });
+    expect(
+      baseRunOf(
+        one([
+          { score: 0.6, error: null, trace_path: p1 },
+          { score: 0.4, error: null, trace_path: p2 },
+        ]),
+        "x",
+        [sand],
+      ),
+    ).toEqual({ trace: p1, how: "best_scoring", score: 0.6 });
+    // ties keep the first; a run without a kept trace is never one
+    expect(
+      baseRunOf(
+        one([
+          { score: 0.5, error: null, trace_path: path.join(sand, "gone", "out", "trace.jsonl") },
+          { score: 0.5, error: null, trace_path: p2 },
+          { score: 0.5, error: null, trace_path: p1 },
+        ]),
+        "x",
+        [sand],
+      ),
+    ).toEqual({ trace: p2, how: "best_scoring", score: 0.5 });
+    expect(
+      baseRunOf(one([{ score: 0.9, error: "boom", trace_path: p1 }]), "x", [sand]),
+    ).toMatchObject({
+      problem: expect.stringMatching(/no run of x with a kept trace/) as unknown,
+    });
+    expect(baseRunOf({ cases: [] }, "x", [sand])).toMatchObject({
+      problem: expect.stringMatching(/did not run/) as unknown,
+    });
   });
 
   it("refuses a trace that is not a kept harness sandbox's: outside the temp roots, a symlink, not a session stream, too big, gone", () => {

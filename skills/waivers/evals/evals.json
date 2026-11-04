@@ -7,7 +7,7 @@
       "name": "WV-1",
       "toolset": "core",
       "prompt": "Who should I pick up this week and is it worth my waiver spot?",
-      "expected_output": "At k = 2 with W = 12 (the usable weeks after this week's claim; the premium about 27 points — changelog R5-1): mode_used priority; a claim, pass or marginal verdict per candidate; the premium with its band printed beside it and each candidate's surplus; the ordered claim list — or, when no candidate clears the premium (an empty claim_list, as on this fixture's pool), that said plainly — with marginal candidates apart; the scramble list; next_run_at; a drop with re-add risk; the value-basis line; a log id.",
+      "expected_output": "At k = 2 with W = 12 (the usable weeks after this week's claim; the premium about 27 points — changelog R5-1): mode_used priority; a claim, pass or marginal verdict per candidate; the premium with its band printed beside it and each candidate's surplus; the ordered claim list — or, when no candidate clears the premium (an empty claim_list, as on this fixture's pool), that said plainly — with marginal candidates apart; the scramble list; next_run_at; the drop on a line of its own — 'Drop: Tank Dell — re-add risk 28.15 % owned' (conditional_drop.re_add_risk.percent_owned) with his value; the value-basis line; a log id.",
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_list_players before espn_analyze_waivers, and espn_record_recommendation last (tool_order)",
@@ -65,11 +65,11 @@
       "name": "WV-5-E",
       "toolset": "core",
       "prompt": "Who should I pick up, and who do I drop for him?",
-      "expected_output": "An OUT player sits on the bench and an IR slot is open: the reply shows both surplus values (s and s_with_ir_move), offers the IR move as the drop alternative, and warns to activate after the run.",
+      "expected_output": "On ir-open an OUT player sits on the bench and an IR slot is open: the reply offers the IR move as the drop alternative and warns to activate after the run. It shows the surplus with and without the IR move (s and s_with_ir_move) — on this fixture the two are equal for every candidate (9.957 for the top one), because the conditional drop, Tank Dell, is himself IR-eligible and worth 0 rest of season, so one value said to hold either way passes.",
       "files": ["evals/fixtures/fx-10h/ir-open"],
       "expectations": [
-        "The reply shows both surplus values (regex: `s_with_ir_move|with (the|an) IR move`)",
-        "The reply offers moving the OUT player to IR instead of a drop (llm)",
+        "The reply prints the candidates' surplus (regex: `surplus|s_with_ir_move|\\bs\\s*=`)",
+        "The reply shows both surplus values, or one value said to hold with and without the IR move when they are equal, and offers moving the OUT player to IR instead of a drop (llm)",
         "The reply warns to activate players only after the run (regex: `after the (waiver )?run`)"
       ]
     },
@@ -91,7 +91,7 @@
       "name": "WV-7-E",
       "toolset": "core",
       "prompt": "Who should I pick up this week and is it worth my waiver spot?",
-      "expected_output": "The stored cookies are rejected but the pool is cached: the reply still ranks the candidates, states premium_basis cold_start_table (a league-average estimate), and routes the session repair to session-check in one line without abandoning the answer.",
+      "expected_output": "On auth-rejected — a public league whose stored session ESPN rejected — orient's rejected row prints one Session line (the stored session was rejected; reads are keyless where the league allows them; eff setup in a terminal replaces it) and carries on (changelog §R10, R10-7): the reply still ranks the candidates with their verdicts, states premium_basis cold_start_table (a league-average estimate), and routes the session repair to session-check or eff setup in one line without abandoning the answer.",
       "files": ["evals/fixtures/fx-10h/auth-rejected"],
       "expectations": [
         "The reply states the cold-start premium (regex: `cold_start_table|league-average`)",
