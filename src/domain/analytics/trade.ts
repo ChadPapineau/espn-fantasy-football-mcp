@@ -20,7 +20,14 @@ import { slotClassOf } from "../league/slots.js";
 import type { BareText, LeagueRules, RosterSlots, UntrustedText, Week } from "../league/types.js";
 import { isIrEligible } from "../league/types.js";
 import { P_ACTIVE_BY_STATUS } from "./constants.js";
-import { loopPacer, RunBudget, runCooperative, type Pacer } from "./cooperative.js";
+import {
+  drainSteps,
+  loopPacer,
+  RunBudget,
+  runCooperative,
+  runCooperativeSteps,
+  type Pacer,
+} from "./cooperative.js";
 import { AnalyticsError, ensure, ensurePlayers } from "./errors.js";
 import { newestAsOf } from "./inputs.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
@@ -211,22 +218,42 @@ const activeOf = (players: readonly TradePlayer[]): TradePlayer[] =>
   players.filter((p) => slotClassOf(p.slot_id) !== "ir");
 
 /**
+ * Resumable work: it yields after each lineup solve it makes (a memoised value is no solve), so a
+ * cooperative step is at most one solve however large the unit of work — one trade package's
+ * evaluation solves hundreds (its drops, the wire's ranking, both sides' weeks), 30–45 ms of CPU in
+ * one step on the owner's Mac before (plan 03 §1.2's ≤ 20 ms batch; changelog §R10 timing items).
+ * Drained, it is the same computation in the same order: the same answer (drainSteps).
+ */
+type Steps<T> = Generator<void, T, undefined>;
+
+/**
  * L(players, w) for every value week. Weeks whose player values are identical (a rest-of-season total
  * shared evenly, a healthy roster) are solved once: the assignment depends only on the values.
  */
-function lineupWeeks(ctx: Ctx, players: readonly TradePlayer[], pass: Pass): number[] {
+function* lineupWeeksSteps(ctx: Ctx, players: readonly TradePlayer[], pass: Pass): Steps<number[]> {
   const act = activeOf(players);
   const ids = act.map((p) => p.player_id).join(",");
-  return ctx.weeks.map((_, wi) => {
+  const out: number[] = [];
+  for (let wi = 0; wi < ctx.weeks.length; wi++) {
     const fast = act.map((p) => fastOf(ctx, p, wi, pass));
     // the players (their eligibility) and their values decide the assignment, nothing else
     const key = `${ids}|${fast.map((f) => f.value).join(",")}`;
     const hit = ctx.lineups.get(key);
-    if (hit !== undefined) return hit;
+    if (hit !== undefined) {
+      out.push(hit);
+      continue;
+    }
     const v = fastLineupValue(ctx.seats, fast);
     if (ctx.lineups.size < LINEUP_MEMO_MAX) ctx.lineups.set(key, v);
-    return v;
-  });
+    out.push(v);
+    yield;
+  }
+  return out;
+}
+
+/** lineupWeeksSteps in one go (a Monte Carlo path: one path is one step, at most 4 × weeks solves). */
+function lineupWeeks(ctx: Ctx, players: readonly TradePlayer[], pass: Pass): number[] {
+  return drainSteps(lineupWeeksSteps(ctx, players, pass));
 }
 
 /** One side's roster change: the roster after, the drops, the wire fills. */
@@ -245,21 +272,23 @@ const weighted = (values: readonly number[], weight: readonly number[]): number 
  * The cheapest player to cut from `players` (least weighted lineup loss; ties by own total, then
  * id), never one of `keep`; undroppable players only when nothing else is left.
  */
-function cheapestCut(
+function* cheapestCutSteps(
   ctx: Ctx,
   players: readonly TradePlayer[],
   keep: ReadonlySet<number>,
   weight: readonly number[],
-): { player: TradePlayer; value: number } | null {
+): Steps<{ player: TradePlayer; value: number } | null> {
   const act = activeOf(players);
-  const baseV = weighted(lineupWeeks(ctx, act, { health: true, mult: null }), weight);
+  const base = yield* lineupWeeksSteps(ctx, act, { health: true, mult: null });
+  const baseV = weighted(base, weight);
   const pool = act.filter((p) => !keep.has(p.player_id));
   const droppable = pool.filter((p) => p.droppable !== false);
   const cands = droppable.length > 0 ? droppable : pool;
   let best: { player: TradePlayer; value: number; own: number } | null = null;
   for (const p of cands) {
     const rest = act.filter((x) => x !== p);
-    const loss = baseV - weighted(lineupWeeks(ctx, rest, { health: true, mult: null }), weight);
+    const without = yield* lineupWeeksSteps(ctx, rest, { health: true, mult: null });
+    const loss = baseV - weighted(without, weight);
     const o = own(p);
     if (
       best === null ||
@@ -282,13 +311,13 @@ interface SideCore {
 }
 
 /** The roster after giving `out` and receiving `inc`: received IR-eligible players use open IR seats. */
-function sideCore(
+function* sideCoreSteps(
   ctx: Ctx,
   before: readonly TradePlayer[],
   out: ReadonlySet<number>,
   inc: readonly TradePlayer[],
   weight: readonly number[],
-): SideCore {
+): Steps<SideCore> {
   const kept = before.filter((p) => !out.has(p.player_id));
   let irUsed = kept.filter((p) => slotClassOf(p.slot_id) === "ir").length;
   const received = inc.map((p) => {
@@ -302,13 +331,14 @@ function sideCore(
   const keep = new Set(received.map((p) => p.player_id));
   const drops: { player: TradePlayer; value: number }[] = [];
   while (activeOf(after).length > ctx.capacity) {
-    const cut = cheapestCut(ctx, after, keep, weight);
+    const cut = yield* cheapestCutSteps(ctx, after, keep, weight);
     if (cut === null) break;
     drops.push(cut);
     after = after.filter((p) => p !== cut.player);
   }
   const uneven = inc.length > out.size;
-  const nextCut = uneven && drops.length === 0 ? cheapestCut(ctx, after, keep, weight) : null;
+  const nextCut =
+    uneven && drops.length === 0 ? yield* cheapestCutSteps(ctx, after, keep, weight) : null;
   const freed = Math.max(
     0,
     Math.min(
@@ -334,33 +364,37 @@ interface FillSide {
  * alone fills exactly as before (the best gain, ties by wire order). Each side's ranking is computed
  * once per roster it holds and only re-ranked after it takes a player (the cost of the per-side fill).
  */
-function fillJointly(
+function* fillJointlySteps(
   ctx: Ctx,
   sides: readonly FillSide[],
   wire: readonly TradePlayer[],
-): TradePlayer[][] {
+): Steps<TradePlayer[][]> {
   const pass: Pass = { health: true, mult: null };
   const fills: TradePlayer[][] = sides.map(() => []);
   const afters = sides.map((x) => [...x.core.after]);
   const left = sides.map((x) => x.core.freed);
   const used = new Set<number>();
   /** Side i's candidates under its current roster: positive gains, best first (stable by wire order). */
-  const rankOf = (i: number): { p: TradePlayer; gain: number }[] => {
+  function* rankOf(i: number): Steps<{ p: TradePlayer; gain: number }[]> {
     const after = afters[i] ?? [];
     const weight = sides[i]?.weight ?? [];
-    const cur = weighted(lineupWeeks(ctx, after, pass), weight);
+    const cur = weighted(yield* lineupWeeksSteps(ctx, after, pass), weight);
     const ranked: { p: TradePlayer; gain: number; at: number }[] = [];
-    wire.forEach((w, at) => {
-      if (used.has(w.player_id) || after.some((x) => x.player_id === w.player_id)) return;
-      const gain =
-        weighted(lineupWeeks(ctx, [...after, { ...w, slot_id: BENCH }], pass), weight) - cur;
+    for (let at = 0; at < wire.length; at++) {
+      const w = wire[at];
+      if (w === undefined) continue;
+      if (used.has(w.player_id) || after.some((x) => x.player_id === w.player_id)) continue;
+      const withHim = yield* lineupWeeksSteps(ctx, [...after, { ...w, slot_id: BENCH }], pass);
+      const gain = weighted(withHim, weight) - cur;
       if (gain > 1e-9) ranked.push({ p: w, gain, at });
-    });
+    }
     // best gain first; within 1e-12 the wire's own order decides (as the per-side fill did)
     ranked.sort((a, b) => (Math.abs(a.gain - b.gain) <= 1e-12 ? a.at - b.at : b.gain - a.gain));
     return ranked;
-  };
-  const ranks = sides.map((_, i) => ((left[i] ?? 0) > 0 && wire.length > 0 ? rankOf(i) : []));
+  }
+  const ranks: { p: TradePlayer; gain: number }[][] = [];
+  for (let i = 0; i < sides.length; i++)
+    ranks.push((left[i] ?? 0) > 0 && wire.length > 0 ? yield* rankOf(i) : []);
   for (;;) {
     let best: { side: number; p: TradePlayer; gain: number } | null = null;
     for (let i = 0; i < sides.length; i++) {
@@ -377,7 +411,7 @@ function fillJointly(
     afters[best.side]?.push(filled);
     left[best.side] = (left[best.side] ?? 0) - 1;
     // the side that took him holds a new roster: its gains change; the other's only lose him
-    ranks[best.side] = (left[best.side] ?? 0) > 0 ? rankOf(best.side) : [];
+    ranks[best.side] = (left[best.side] ?? 0) > 0 ? yield* rankOf(best.side) : [];
   }
   return fills;
 }
@@ -417,21 +451,21 @@ interface SideEval {
 }
 
 /** One side's Δ over a roster change already decided (its fills included). */
-function evalAfter(
+function* evalAfterSteps(
   ctx: Ctx,
   before: readonly TradePlayer[],
   after: SideAfter,
   weight: readonly number[],
-): SideEval {
+): Steps<SideEval> {
   const healthy: Pass = { health: true, mult: null };
   const rawPass: Pass = { health: false, mult: null };
-  const b = lineupWeeks(ctx, before, healthy);
-  const a = lineupWeeks(ctx, after.after, healthy);
+  const b = yield* lineupWeeksSteps(ctx, before, healthy);
+  const a = yield* lineupWeeksSteps(ctx, after.after, healthy);
   const weekly = a.map((v, i) => (v - (b[i] ?? 0)) * (weight[i] ?? 1));
   const delta = weekly.reduce((s, v) => s + v, 0);
-  const raw =
-    weighted(lineupWeeks(ctx, after.after, rawPass), weight) -
-    weighted(lineupWeeks(ctx, before, rawPass), weight);
+  const rawAfter = yield* lineupWeeksSteps(ctx, after.after, rawPass);
+  const rawBefore = yield* lineupWeeksSteps(ctx, before, rawPass);
+  const raw = weighted(rawAfter, weight) - weighted(rawBefore, weight);
   return { delta, raw, weekly, after, beforeVals: b, afterVals: a };
 }
 
@@ -447,15 +481,15 @@ interface PairSide {
  * Both sides of one trade: each roster change, the seats it frees filled JOINTLY from the one wire
  * (fillJointly — never the same free agent on both sides), then each side's Δ. [me, partner].
  */
-function evalPair(
+function* evalPairSteps(
   ctx: Ctx,
   me: PairSide,
   partner: PairSide,
   wire: readonly TradePlayer[],
-): readonly [SideEval, SideEval] {
-  const cm = sideCore(ctx, me.before, me.out, me.inc, me.weight);
-  const cp = sideCore(ctx, partner.before, partner.out, partner.inc, partner.weight);
-  const [fm, fp] = fillJointly(
+): Steps<readonly [SideEval, SideEval]> {
+  const cm = yield* sideCoreSteps(ctx, me.before, me.out, me.inc, me.weight);
+  const cp = yield* sideCoreSteps(ctx, partner.before, partner.out, partner.inc, partner.weight);
+  const [fm, fp] = yield* fillJointlySteps(
     ctx,
     [
       { core: cm, weight: me.weight },
@@ -463,10 +497,9 @@ function evalPair(
     ],
     wire,
   );
-  return [
-    evalAfter(ctx, me.before, withFills(cm, fm ?? []), me.weight),
-    evalAfter(ctx, partner.before, withFills(cp, fp ?? []), partner.weight),
-  ];
+  const em = yield* evalAfterSteps(ctx, me.before, withFills(cm, fm ?? []), me.weight);
+  const ep = yield* evalAfterSteps(ctx, partner.before, withFills(cp, fp ?? []), partner.weight);
+  return [em, ep];
 }
 
 /**
@@ -749,12 +782,19 @@ async function evaluateOffer(
   const wP = weightsOf(req.weeks, req.rules, partner, horizon);
   const giveIds = new Set(offer.give);
   const getIds = new Set(offer.get);
-  const [me, pe] = evalPair(
-    ctx,
-    { before: req.me.players, out: giveIds, inc: get, weight: wMe },
-    { before: partner.players, out: getIds, inc: give, weight: wP },
-    wire,
+  // the offer's own pair, cooperatively (one lineup solve a step) and always whole: before, it ran
+  // in the call's turn, and outside the deadline (no budget charge), as it still does
+  const base = await runCooperativeSteps(
+    evalPairSteps(
+      ctx,
+      { before: req.me.players, out: giveIds, inc: get, weight: wMe },
+      { before: partner.players, out: getIds, inc: give, weight: wP },
+      wire,
+    ),
+    { pacer, deadlineMs: null },
   );
+  if (base.value === undefined) throw new Error("trade: the offer's evaluation did not finish");
+  const [me, pe] = base.value;
 
   // Monte Carlo on common random numbers (the drops and fills held at their deterministic choice)
   const nSims = Math.max(20, Math.min(2000, req.n_sims ?? TRADE.nSims));
@@ -1134,29 +1174,30 @@ async function counterOffers(
   const sdMe = sigmaOf(dMe);
   const sdP = sigmaOf(dP);
   const out: { give: number[]; get: number[]; me: number; partner: number }[] = [];
-  const run = await runCooperative(
-    variants.length,
-    (i) => {
-      const v = variants[i];
-      if (v === undefined) return;
+  // one variant's pair is many lineup solves: the run is resumable inside it (one solve a step), and
+  // a deadline between two steps leaves that variant unevaluated (`evaluated` counts whole ones)
+  let evaluated = 0;
+  function* variantSteps(): Steps<void> {
+    for (const v of variants) {
       const g = findPlayers(req.me.players, v.give);
       const t = findPlayers(partner.players, v.get);
-      const [em, ep] = evalPair(
+      const [em, ep] = yield* evalPairSteps(
         ctx,
         { before: req.me.players, out: new Set(v.give), inc: t, weight: wMe },
         { before: partner.players, out: new Set(v.get), inc: g, weight: wP },
         wire,
       );
+      evaluated += 1;
       const m = em.delta;
       const p = ep.delta;
       if (m > 0 && p >= TRADE.partnerEpsilon) out.push({ ...v, me: m, partner: p });
-    },
-    { pacer, deadlineMs: budget.left() },
-  );
+    }
+  }
+  const run = await runCooperativeSteps(variantSteps(), { pacer, deadlineMs: budget.left() });
   budget.spend(run);
-  if (run.partial)
+  if (!run.done)
     warnings.push(
-      `partial: ${String(run.completed)} of ${String(variants.length)} counter-offers evaluated before the CPU deadline`,
+      `partial: ${String(evaluated)} of ${String(variants.length)} counter-offers evaluated before the CPU deadline`,
     );
   return out
     .sort((a, b) => b.me - a.me || b.partner - a.partner)
@@ -1241,13 +1282,13 @@ async function searchPartners(
     plans.push(plan);
     for (const g of gets) for (const give of combos) units.push({ plan, get: g, give });
   }
-  const run = await runCooperative(
-    units.length,
-    (i) => {
-      const u = units[i];
-      if (u === undefined) return;
+  // one package's pair is many lineup solves: the run is resumable inside it (one solve a step), and
+  // a deadline between two steps leaves that package unevaluated (`evaluated` counts whole ones)
+  let evaluated = 0;
+  function* packageSteps(): Steps<void> {
+    for (const u of units) {
       const gp = findPlayers(req.me.players, u.give);
-      const [em, ep] = evalPair(
+      const [em, ep] = yield* evalPairSteps(
         ctx,
         { before: req.me.players, out: new Set(u.give), inc: [u.get], weight: wMe },
         {
@@ -1258,9 +1299,10 @@ async function searchPartners(
         },
         wire,
       );
+      evaluated += 1;
       const m = em.delta;
       const p = ep.delta;
-      if (p < TRADE.partnerEpsilon || m <= 0) return;
+      if (p < TRADE.partnerEpsilon || m <= 0) continue;
       const best = u.plan.best;
       if (
         best === null ||
@@ -1274,13 +1316,13 @@ async function searchPartners(
           partner: p,
           moved: [...gp, u.get],
         };
-    },
-    { pacer, deadlineMs: budget.left() },
-  );
+    }
+  }
+  const run = await runCooperativeSteps(packageSteps(), { pacer, deadlineMs: budget.left() });
   budget.spend(run);
-  if (run.partial)
+  if (!run.done)
     warnings.push(
-      `partial: ${String(run.completed)} of ${String(units.length)} packages evaluated before the CPU deadline`,
+      `partial: ${String(evaluated)} of ${String(units.length)} packages evaluated before the CPU deadline`,
     );
   const partners: TradePartnersData["partners"][number][] = [];
   for (const plan of plans) {
