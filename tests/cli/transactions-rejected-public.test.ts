@@ -18,7 +18,7 @@ import { loadRuntime } from "../../src/cli/runtime.js";
 import { snapshotPool, transactionsAppend } from "../../src/cli/snapshot.js";
 import { openStore } from "../../src/cli/store-access.js";
 import { parseDiffs } from "../../src/drift/index.js";
-import { cachedPublicity } from "../../src/providers/espn/cache.js";
+import { cachedPublicity, publicityKey } from "../../src/providers/espn/cache.js";
 import { composeBodies } from "../../src/providers/espn/index.js";
 import { HEADER_TRANSACTION_COUNT } from "../../src/providers/espn/types.js";
 import { fakeCookies, stateRow } from "../auth/helpers.js";
@@ -209,6 +209,98 @@ describe("the transactions job under a rejected session (changelog §R10, R10-10
     const r = await runtime("2026-11-03T12:30:00.000Z", f);
     expect(await transactionsAppend(r.io, r.config, r.log, { notify: true, force: true })).toBe(0);
     expect(r.io.out.text).toContain("rejected — waiting for the daily credential check");
+    expect(f.urls).toEqual([]);
+  });
+
+  it("R3B-CS-3: launchd's wakes (no --force) keep plan 06 §1.4's rule — exit 0, no request, never a 'read keyless' line — and a forced run then reads keyless", async () => {
+    // the pool job is held by the rejection (exit 0, no request, pool.worked_at never advances):
+    // before, the transactions job's exception appended at most once per rejection and printed
+    // "read keyless" on every wake that read nothing
+    sb = sandbox();
+    await rejectedInstall(true);
+    const poolAt = new Date(2026, 10, 2, 10, 0).getTime();
+    // the last pool run's append is still due: a wake would have read once, and only once, before
+    updateJobState(sb.cacheDir, {
+      "pool.worked_at": poolAt,
+      "transactions.season": 2026,
+      "transactions.period": 8,
+    });
+    for (const at of [
+      new Date(2026, 10, 2, 10, 30),
+      new Date(2026, 10, 2, 18, 30),
+      new Date(2026, 10, 3, 6, 30),
+      new Date(2026, 10, 4, 9, 30),
+    ]) {
+      const pool = oneMove();
+      const rp = await runtime(new Date(at.getTime() - 30 * 60_000).toISOString(), pool);
+      expect(await snapshotPool(rp.io, rp.config, rp.log, { notify: true })).toBe(0);
+      expect(pool.urls).toEqual([]);
+      const f = oneMove();
+      const r = await runtime(at.toISOString(), f);
+      const code = await transactionsAppend(r.io, r.config, r.log, { notify: true, force: false });
+      const label = `${at.toString()} ${r.io.out.text}`;
+      expect(code, label).toBe(0);
+      expect(f.urls, label).toEqual([]);
+      expect(r.io.out.text, label).toContain("rejected — waiting for the daily credential check");
+      expect(r.io.out.text, label).not.toContain("read keyless");
+    }
+    expect(readJobState(sb.cacheDir)).toMatchObject({
+      "pool.worked_at": poolAt,
+      "transactions.period": 8,
+    });
+    // the owner's `eff transactions --force`: keyless, the periods since the last read appended
+    const f = oneMove();
+    const r = await runtime(new Date(2026, 10, 4, 12, 0).toISOString(), f);
+    expect(await transactionsAppend(r.io, r.config, r.log, { notify: false, force: true })).toBe(0);
+    expect(r.io.out.text).toContain("this league is public, so it is read keyless");
+    expect(r.io.out.text).toContain("2 new transaction(s) appended (weeks 8, 9)");
+    expect(cookieSent(f)).toBe(false);
+  });
+
+  it("R3B-CS-3: a wake with nothing to do never says it reads keyless", async () => {
+    // a forced run says it once it reads; a wake under a working session says the pool's rule
+    sb = sandbox();
+    mkdirSync(sb.configDir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(sb.configDir, "session.json"),
+      sessionFileBody(COOKIES, metaFor(COOKIES, STORED_AT)),
+      { mode: 0o600 },
+    );
+    const poolAt = new Date(2026, 10, 2, 10, 0).getTime();
+    updateJobState(sb.cacheDir, { "pool.worked_at": poolAt, "transactions.after": poolAt });
+    const f = oneMove();
+    const r = await runtime(new Date(2026, 10, 3, 6, 30).toISOString(), f);
+    expect(await transactionsAppend(r.io, r.config, r.log, { notify: true, force: false })).toBe(0);
+    expect(r.io.out.text).toContain("not 30 min after a pool run — nothing to do");
+    expect(r.io.out.text).not.toContain("read keyless");
+    expect(f.urls).toEqual([]);
+  });
+
+  it("R3B-M3: a publicity row that cannot be read proves nothing — under a rejected session the job exits 0 with no request", async () => {
+    sb = sandbox();
+    await rejectedInstall(null);
+    // the kept publicity row, corrupt (its JSON unreadable): keptPublic's catch must fail closed
+    const r0 = await runtime("2026-11-03T12:00:00.000Z", oneMove());
+    const store = openStore(r0.config, r0.io.clock, r0.log, { migrate: false });
+    try {
+      store.repos.espnCache.put({
+        key: publicityKey("0"),
+        parsed_json: "{not json",
+        fetched_at: r0.io.clock.nowIso(),
+        server_time: null,
+        etag: null,
+        http_status: 200,
+        raw_body: null,
+      });
+      expect(() => cachedPublicity(store.repos.espnCache, "0", r0.io.clock).load()).toThrow();
+    } finally {
+      store.close();
+    }
+    const f = oneMove();
+    const r = await runtime("2026-11-03T12:30:00.000Z", f);
+    expect(await transactionsAppend(r.io, r.config, r.log, { notify: true, force: true })).toBe(0);
+    expect(r.io.out.text).toContain("rejected — waiting for the daily credential check");
+    expect(r.io.out.text).not.toContain("read keyless");
     expect(f.urls).toEqual([]);
   });
 

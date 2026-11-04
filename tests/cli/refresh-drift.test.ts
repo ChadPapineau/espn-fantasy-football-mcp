@@ -292,6 +292,54 @@ describe("eff refresh espn:drift re-judges the views drift_state marks red (Stag
     expect(r.urls.some((u) => u.includes("view=mPendingTransactions"))).toBe(false);
   });
 
+  it.each([
+    // a private league, a stored session ESPN now rejects: the roster re-read's cookie-bearing 401
+    ["ESPN_AUTH_REJECTED", true, false, "ESPN rejected the stored cookies"],
+    // nothing stored, a league its settings call public that refuses the keyless roster read now
+    ["ESPN_REQUIRES_COOKIES", false, true, "this league needs cookies and none are stored"],
+  ] as const)(
+    "changelog §R10, R10-10 (R3B-M3): a red view other than pending claims answering %s fails the run with that code — never a view merely not re-read",
+    async (_code, session, isPublic, said) => {
+      sb = sandbox();
+      if (session) plantSession();
+      await seed(
+        redRow([{ view: "mRoster", removed: ["$.teams[].roster.entries"] }, ...PENDING_RED]),
+      );
+      // the league read answers (the week is read), the roster re-read is refused with a 401
+      const f = fakeFetch((url) => {
+        const u = new URL(url);
+        if (!u.pathname.includes("/leagues/0")) return new Response(null, { status: 404 });
+        const views = u.searchParams.getAll("view");
+        if (views.includes("mRoster")) return jsonRes({ messages: ["not authorized"] }, 401);
+        if (views.includes("mPendingTransactions"))
+          return jsonRes({ ...rec("league-a/mNav.json"), pendingTransactions: [] });
+        const s = structuredClone(rec("league-a/mSettings.json")) as {
+          settings: Record<string, unknown>;
+        };
+        s.settings.isPublic = isPublic;
+        return jsonRes({ ...rec("league-a/mNav.json"), ...s });
+      });
+      const { exec } = fakeExec();
+      const io = makeIo(sb, {
+        fetch: f.fetch,
+        clock: movingClock("2026-10-06T18:00:00.000Z"),
+        platform: "darwin",
+        exec,
+        packageRoot: fakePackage(sb),
+        env: ENV,
+      });
+      const exit = await main(["refresh", DRIFT_REFRESH_TARGET, "--json"], io);
+      expect(exit, `${io.out.text} | ${io.err.text} | ${f.urls.join(" ; ")}`).toBe(3);
+      expect(io.out.text).toContain(said);
+      // the run stopped at the refusal: no report saying the roster was merely not re-read, and the
+      // views after it were not read either
+      expect(io.out.text).not.toContain('"outcome"');
+      expect(f.urls.some((u) => u.includes("view=mRoster"))).toBe(true);
+      expect(f.urls.some((u) => u.includes("view=mPendingTransactions"))).toBe(false);
+      expect((await stored())?.status).toBe("red");
+    },
+  );
+
   it("mSettings still missing a key: the league read itself is the judgement — red, exit 4, never a crash", async () => {
     sb = sandbox();
     await seed(redRow([{ view: "mSettings", removed: ["$.settings.scheduleSettings"] }]));

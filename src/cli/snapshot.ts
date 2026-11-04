@@ -40,6 +40,7 @@ import {
   jobFailure,
   jobIdle,
   jobWorked,
+  keylessLine,
   nextDayFirstKickoff,
   proScheduleOf,
   startJob,
@@ -655,9 +656,18 @@ export async function transactionsAppend(
   opts: SnapshotOptions & { readonly force: boolean },
 ): Promise<number> {
   const job = "transactions";
-  // the league's settings and its feed only: read keyless on a league kept public under a rejected
-  // session (changelog §R10, R10-10; espn-jobs.ts keylessOnPublicWhenRejected)
-  const run = await startJob(io, config, log, job, { ...opts, keylessOnPublicWhenRejected: true });
+  // the league's settings and its feed only: a run the owner forces reads them keyless on a league
+  // kept public under a rejected session (changelog §R10, R10-10; espn-jobs.ts
+  // keylessOnPublicWhenRejected). launchd's wakes do not: the job follows the pool job, which a
+  // rejected session holds (plan 06 §1.4: every job but the daily credential check exits 0 with no
+  // request while rejected), so its pool rule never fires and the exception appended at most once
+  // per rejection while saying "read keyless" on every wake (the round-3 review's R3B-CS-3). The
+  // history resumes with the session: the next run re-reads the periods since its last one (up to
+  // TRANSACTIONS_MAX_PERIODS, any older gap said), and the tools read the feed live meanwhile
+  const run = await startJob(io, config, log, job, {
+    ...opts,
+    keylessOnPublicWhenRejected: opts.force,
+  });
   if (typeof run === "number") return run;
   try {
     const now = io.clock.nowMs();
@@ -668,6 +678,8 @@ export async function transactionsAppend(
       await writeLine(io.stdout, `${job}: not 30 min after a pool run — nothing to do`);
       return EXIT.ok;
     }
+    // said only by a run that reads (a forced one: see above)
+    if (run.keylessRejected) await writeLine(io.stdout, keylessLine(job));
     const ref = run.stack.ref;
     const league = (await run.stack.provider.getLeague(ref)).value;
     const week = league.clock.current_scoring_period;

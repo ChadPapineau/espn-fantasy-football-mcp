@@ -5,9 +5,11 @@
 // a fixed cadence and self-select their working run from epoch-ms instants (the pro schedule's
 // kickoffs, `waiverNextExecutionDate` read at the previous run) — never a time baked into a plist.
 // A cookie-bearing 401 records the rejection (src/auth) and notifies ONCE (credential-check.ts).
-// One exception to the rejected gate (changelog §R10, R10-10): a job that reads only what ESPN
-// serves anyone on a public league — the transactions job — still runs on a league kept public,
-// every read keyless (the provider's cookie gate never sends the rejected cookie).
+// One exception to the rejected gate (changelog §R10, R10-10): a run the owner forces of a job that
+// reads only what ESPN serves anyone on a public league — `eff transactions --force` — still runs on
+// a league kept public, every read keyless (the provider's cookie gate never sends the rejected
+// cookie). launchd's wakes keep plan 06 §1.4's rule (the round-3 review's R3B-CS-3: the job follows
+// the pool job, which the rejection holds, so the exception never had a run to make there).
 import type { Config } from "../config/schema.js";
 import type { ProGame, ProSchedule } from "../providers/platform.js";
 import { cachedPublicity } from "../providers/espn/cache.js";
@@ -35,6 +37,12 @@ export interface JobRun {
   readonly lockName: string;
   /** Whose requests these are: `job` (a launchd run) or `server` (one the owner typed). */
   readonly origin: RequestOrigin;
+  /**
+   * The run goes on under a rejected session because the league is kept public
+   * (`keylessOnPublicWhenRejected`): every read keyless. The job says so when it reads (keylessLine),
+   * never on a wake with nothing to do.
+   */
+  readonly keylessRejected: boolean;
 }
 
 /** Common options of the ESPN jobs. */
@@ -51,12 +59,12 @@ export interface JobOptions {
    */
   readonly origin?: RequestOrigin;
   /**
-   * The job reads only what ESPN serves anyone on a public league (the transactions job: the
-   * league's settings and its transaction feed — changelog §R10, R10-10). Under a rejected session
-   * it still runs when the league is kept public (the provider's publicity row, read with no
-   * request), every read keyless — the provider's cookie gate never sends the rejected cookie and
-   * never loads its secret; on a league not known to be public it exits 0 with no request, as every
-   * other job does.
+   * The run reads only what ESPN serves anyone on a public league (a forced run of the
+   * transactions job: the league's settings and its transaction feed — changelog §R10, R10-10).
+   * Under a rejected session it still runs when the league is kept public (the provider's
+   * publicity row, read with no request), every read keyless — the provider's cookie gate never
+   * sends the rejected cookie and never loads its secret; on a league not known to be public it
+   * exits 0 with no request, as every other job does.
    */
   readonly keylessOnPublicWhenRejected?: boolean;
 }
@@ -100,6 +108,7 @@ export async function startJob(
     if (opts.notify) await notifier.failure(job, "store");
     return EXIT.error;
   }
+  let keylessRejected = false;
   if (config.fixtureDir === null) {
     let row = null;
     try {
@@ -108,11 +117,10 @@ export async function startJob(
       row = null;
     }
     const rejected = row?.league_id === config.leagueId && row.state === "rejected";
+    // the job says it reads keyless only when it reads (keylessLine): a wake with nothing to do
+    // says nothing of the kind (the round-3 review's R3B-CS-3)
     if (rejected && opts.keylessOnPublicWhenRejected === true && keptPublic(store, config, io)) {
-      await writeLine(
-        io.stdout,
-        `${job}: the stored cookies are rejected; this league is public, so it is read keyless (no cookie sent)`,
-      );
+      keylessRejected = true;
     } else if (rejected) {
       store.close();
       jobIdle(io, config, job);
@@ -141,7 +149,12 @@ export async function startJob(
     origin,
     observer: origin === "job" ? "daily_job" : "server",
   });
-  return { store, stack, notifier, lockName, origin };
+  return { store, stack, notifier, lockName, origin, keylessRejected };
+}
+
+/** What a run under `keylessRejected` says when it reads (never on a wake with nothing to do). */
+export function keylessLine(job: string): string {
+  return `${job}: the stored cookies are rejected; this league is public, so it is read keyless (no cookie sent)`;
 }
 
 /** Closes a job run (releases the lock, drops the secret, closes the store). */
