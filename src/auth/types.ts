@@ -213,6 +213,16 @@ export interface CredentialAuthority {
   getCookieHeader(): Promise<CookieHeaderResult>;
   /** Records a discriminating observation and applies the transition. */
   observe(o: CredentialObservation): Promise<CredentialState>;
+  /**
+   * Whether the value this process would send is rejected NOW: the label, or a rejection another
+   * process recorded in the shared `credential_state` row for that very value (adopted, as
+   * getCookieHeader adopts it). One row read, never a credential-store read. `state()` re-reads the
+   * row only while `not_configured`, so a read in flight asks this before each cookie-bearing
+   * attempt (request.ts fetchFresh): a launchd job, a second `eff serve` or `eff doctor` may record
+   * the 401 while this process waits at the cross-process limiter (the round-4 verifier's V4-S1).
+   * Optional: an authority without it is read by its label.
+   */
+  rejectedNow?(): boolean;
 }
 
 /** Additive (B1): the name the build briefs use for the port the ESPN provider consumes. */

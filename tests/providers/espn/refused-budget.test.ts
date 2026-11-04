@@ -205,15 +205,31 @@ describe("R10-19: a read the cookie gate refuses spends none of the call's budge
   });
 
   it("the 20 s deadline is unchanged: a call past it starts no request, refused or not", async () => {
-    const w = makeWorld({
+    // a read the gate refuses reports its refusal, which wins over every outage answer (R10-18;
+    // the round-4 verifier's V4-M1: the deadline answered it as an outage, from stale cache when
+    // an entry was usable); a read the gate does not refuse reports the deadline. Neither sends
+    const refused = makeWorld({
       credentials: new FakeAuthority("rejected", { ok: true, header: testCookieHeader(SWID) }),
       fetch: privateRecordings(),
     });
-    const late = createUpstreamBudget(RID, w.clock.nowMs() - PER_CALL_DEADLINE_MS - 1);
-    const err = await w.provider.getRosters(w.ref, 3, { budget: late }).catch((e: unknown) => e);
-    expect(isUpstreamBudgetExhausted(err)).toBe(true);
-    expect((err as { missing: { reason: string } }).missing.reason).toBe("deadline");
-    expect(w.sent).toEqual([]);
+    const late = createUpstreamBudget(RID, refused.clock.nowMs() - PER_CALL_DEADLINE_MS - 1);
+    const err = await refused.provider
+      .getRosters(refused.ref, 3, { budget: late })
+      .catch((e: unknown) => e);
+    expect((err as { effCode?: string }).effCode).toBe("ESPN_AUTH_REJECTED");
+    expect(refused.sent).toEqual([]);
+    expect(late.used()).toBe(0);
+    const open = makeWorld({
+      credentials: new FakeAuthority("stored", { ok: true, header: testCookieHeader(SWID) }),
+      fetch: privateRecordings(),
+    });
+    const late2 = createUpstreamBudget(RID, open.clock.nowMs() - PER_CALL_DEADLINE_MS - 1);
+    const err2 = await open.provider
+      .getRosters(open.ref, 3, { budget: late2 })
+      .catch((e: unknown) => e);
+    expect(isUpstreamBudgetExhausted(err2)).toBe(true);
+    expect((err2 as { missing: { reason: string } }).missing.reason).toBe("deadline");
+    expect(open.sent).toEqual([]);
   });
 
   it("a refusal met in flight (rejected while the read waited at the limiter) gives its charge back", async () => {

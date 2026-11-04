@@ -289,13 +289,34 @@ export class CookieGate {
   }
 
   /**
-   * Whether the session the authority holds is rejected (the label; no store read). A keyless read
-   * made because of it that ESPN refuses (a league kept public that is private now) is the rejected
-   * session's to report, as the anonymous settings read's refusal already is (provider.ts
-   * settingsRead).
+   * Whether the session the authority holds is rejected now: the label, or a rejection another
+   * process recorded in the shared row for the value held (the authority's rejectedNow — one row
+   * read, never a credential-store read; the round-4 verifier's V4-S1). A keyless read made because
+   * of it that ESPN refuses (a league kept public that is private now) is the rejected session's to
+   * report, as the anonymous settings read's refusal already is (provider.ts settingsRead).
    */
   rejectedNow(): boolean {
-    return this.auth !== null && this.auth.state() === "rejected";
+    if (this.auth === null) return false;
+    return this.auth.rejectedNow?.() ?? this.auth.state() === "rejected";
+  }
+
+  /**
+   * Whether forRequest may refuse this read with zero requests (ESPN_REQUIRES_COOKIES, the
+   * ESPN_AUTH_REJECTED short-circuit), judged from labels alone (the row check of rejectedNow at
+   * most; no credential-store read). False only when it cannot: a cookie-free read, a shared read
+   * of a league known public, an `auto` read with nothing stored (keyless), or a value held and not
+   * rejected. The read pipeline asks forRequest itself, before any outage fallback, when this is
+   * true, so a refusal is never answered from stale cache as an outage (changelog §R10, R10-18; the
+   * round-4 verifier's V4-M1); forRequest decides, so a value `eff setup` stored since is still
+   * found.
+   */
+  mayRefuse(use: CookieUse, route: EspnRoute): boolean {
+    if (use === "never" || route === "season" || route === "players") return false;
+    const shared = use === "auto" || use === "feed";
+    if (shared && this.known() === true) return false;
+    if (this.auth === null) return use !== "auto";
+    if (this.rejectedNow()) return true;
+    return use !== "auto" && !this.configured();
   }
 
   /**

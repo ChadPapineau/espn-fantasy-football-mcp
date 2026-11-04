@@ -239,6 +239,14 @@ export const YIELD_BEFORE_PARSE_CHARS = 64 * 1024;
 export const PARSED_MEMO_MAX = 16;
 
 /**
+ * At most this many times one attempt re-asks the cookie gate after the session it holds was
+ * rejected during the limiter's wait (fetchFresh): each round needs a value `eff setup` stored since
+ * that is itself rejected during the wait that follows, so a fourth is never a real install's case;
+ * past it the attempt ends with the short-circuit and no request (the round-4 verifier's V4-S1).
+ */
+export const REJECTED_REASK_ROUNDS = 3;
+
+/**
  * Freezes a parsed body in place, every nested object and array (iterative — no recursion limit):
  * a memoised value is shared by every later read of the same stored entry, so a consumer that
  * tried to change it would throw instead of corrupting the next read.
@@ -665,6 +673,24 @@ export class EspnRequester {
         },
       );
 
+    // the cookie gate's zero-request refusal wins over every outage answer below (changelog §R10,
+    // R10-18: a session refusal is never a reason to serve stale cache). An open breaker, ESPN's
+    // Retry-After hold and a passed deadline each answered a read the gate refuses from the stale
+    // entry, as an outage — on a private league under a rejected session, settings up to 7 days old
+    // with the rejection the owner has to fix hidden behind the outage label (the round-4
+    // verifier's V4-M1). Asked first whenever the gate may refuse (its labels alone decide that:
+    // mayRefuse), so under a rejected session the authority reads metadata only and no secret is
+    // loaded; and only while TLS verification holds, so a request the TLS policy refuses still loads
+    // no secret (fetchFresh refuses it first). The verdict — a refusal thrown, else the header or
+    // null — is the read's when this reader starts it; a value `eff setup` stored since is the
+    // gate's to hand out, as before
+    let gate: GateVerdict | null = null;
+    let at = now;
+    if (!this.tlsOff() && this.cookies.mayRefuse(spec.cookies, spec.target.route)) {
+      gate = { cookie: await this.cookies.forRequest(spec.cookies, spec.target.route) };
+      at = this.deps.clock.nowMs();
+    }
+
     // while the host is moved (drift_state), an open breaker reports the move, not an outage
     if (this.limiter.breaker.isOpen())
       return fallback(
@@ -674,7 +700,7 @@ export class EspnRequester {
       );
     // ESPN asked us to wait (Retry-After): nothing is sent until it ends — the entry when usable,
     // else RATE_LIMITED with the time left; no budget is spent on a request that cannot go out
-    const held = this.holdLeftMs(now);
+    const held = this.holdLeftMs(at);
     if (held > 0) return fallback(new EspnRateLimitedError(held, "retry_after"));
 
     // this reader's own limits: its call's deadline and cancellation (plan 01 §6, ADV OBJ-20). A
@@ -683,7 +709,7 @@ export class EspnRequester {
     // under one reader's limits (cache.ts Coalescer; Stage C finding espn-coalesced-read-leader-
     // budget: a cancelled or nearly-spent first caller failed a parallel call)
     const budget = opts.budget;
-    if (budget !== undefined && !budget.canStart(now))
+    if (budget !== undefined && !budget.canStart(at))
       return spent(new UpstreamBudgetExhausted(view, "deadline"));
     // the cookie gate's verdict BEFORE the call's budget is charged (changelog §R10, R10-19; plan 01
     // §5.6 counts upstream requests): a read it refuses — ESPN_REQUIRES_COOKIES, the
@@ -693,8 +719,7 @@ export class EspnRequester {
     // answer: it is no DEGRADED_CODES outage — R10-18). Asked by a reader that would start the read
     // (a joiner shares the leader's request and cookie), and only while TLS verification holds, so
     // a request the TLS policy refuses still loads no secret (fetchFresh refuses it first)
-    let gate: GateVerdict | null = null;
-    if (budget !== undefined && !this.coalescer.has(key) && !this.tlsOff())
+    if (gate === null && budget !== undefined && !this.coalescer.has(key) && !this.tlsOff())
       gate = { cookie: await this.cookies.forRequest(spec.cookies, spec.target.route) };
     if (budget !== undefined && !this.coalescer.has(key) && !budget.tryConsume())
       return spent(new UpstreamBudgetExhausted(view, "budget"));
@@ -926,8 +951,37 @@ export class EspnRequester {
     cacheable: boolean,
     /** The cookie gate's verdict the starting reader already had (read), else null: asked here. */
     gate: GateVerdict | null = null,
-    /** The starting reader's budget (it paid for this read — read), refunded on a refusal. */
+    /** The starting reader's budget (it paid for this read — read), refunded when nothing was sent. */
     budget?: UpstreamBudget,
+  ): Promise<Fresh> {
+    // the request this read was charged for is given back when the read ends before any attempt
+    // went out (changelog §R10, R10-19: the budget is charged only for a request about to be sent):
+    // every refusal of our own — the TLS policy, ESPN's Retry-After hold met here, the limiter's
+    // full window, concurrency or daily cap, the cookie gate's refusal in flight, a deadline that
+    // leaves the attempt no time. Before, only the gate's in-flight refusal on a first attempt gave
+    // it back, and a call whose reads the limiter refused reported "the 3-request budget of this
+    // call was used" with nothing sent (the round-4 verifier's V4-M2). Once an attempt was sent the
+    // request is spent, whatever follows (a retry is not a new request)
+    const sent = { any: false };
+    try {
+      return await this.attempts(spec, entry, limits, key, cacheable, gate, () => {
+        sent.any = true;
+      });
+    } catch (e) {
+      if (!sent.any) budget?.refund();
+      throw e;
+    }
+  }
+
+  /** fetchFresh's attempts; `markSent` runs just before an attempt is handed to the transport. */
+  private async attempts<T>(
+    spec: ReadSpec<T>,
+    entry: EspnCacheEntry | null,
+    limits: SharedLimits,
+    key: string,
+    cacheable: boolean,
+    gate: GateVerdict | null,
+    markSent: () => void,
   ): Promise<Fresh> {
     const target = spec.target;
     const view = primaryView(target);
@@ -964,26 +1018,24 @@ export class EspnRequester {
       }
       let ticket = await acquire(cookie === null);
       // the session was rejected while this attempt waited (the limiter's 1/s wait, a retry's
-      // backoff): a concurrent read's cookie-bearing 401 recorded it, and the header held from
-      // before is that rejected cookie — never sent (plan 02 §2.1 "Short-circuit": zero requests
-      // once rejected; the round-3 review's R3B-CS-2). The gate is asked again: a league known
-      // public reads keyless (changelog §R10, R10-10), any other read is refused with no request
-      // (the ticket is finished as unsent, never a counted failure); a value `eff setup` stored
-      // since is the gate's to hand out
-      if (cookie !== null && this.cookies.rejectedNow()) {
+      // backoff): a concurrent read's cookie-bearing 401 recorded it — in this process, or in
+      // another one sharing the credential_state row (a launchd job, a second `eff serve`, `eff
+      // doctor`: the gate's rejectedNow reads the row) — and the header held from before is that
+      // rejected cookie, never sent (plan 02 §2.1 "Short-circuit": zero requests once rejected; the
+      // round-3 review's R3B-CS-2, the round-4 verifier's V4-S1). The gate is asked again: a league
+      // known public reads keyless (changelog §R10, R10-10), any other read is refused with no
+      // request (the ticket is finished as unsent, never a counted failure); a value `eff setup`
+      // stored since is the gate's to hand out. The check runs after EVERY acquire, the one that
+      // follows a re-ask included — the value handed out may be rejected during that wait too — so
+      // no attempt goes out on an acquire that was not checked; bounded, each round needing a newly
+      // stored value rejected during the wait that followed it
+      for (let round = 1; cookie !== null && this.cookies.rejectedNow(); round++) {
         ticket.finish("client_error");
-        // the gate's refusal here (or its rejected cookie) sends nothing: the request this read was
-        // charged for never goes out, so the call gets it back (changelog §R10, R10-19)
-        try {
-          cookie = await this.cookies.forRequest(spec.cookies, target.route);
-        } catch (e) {
-          if (attempt === 1) budget?.refund();
-          throw e;
-        }
-        if (cookie !== null && this.cookies.rejectedNow()) {
-          if (attempt === 1) budget?.refund();
+        if (round > REJECTED_REASK_ROUNDS)
           throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
-        }
+        cookie = await this.cookies.forRequest(spec.cookies, target.route);
+        if (cookie !== null && this.cookies.rejectedNow())
+          throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
         ticket = await acquire(cookie === null);
       }
       // what the row records when the attempt ends before an upstream verdict was classified:
@@ -1001,6 +1053,7 @@ export class EspnRequester {
         if (timeoutMs <= 0) throw new UpstreamBudgetExhausted(view, "deadline");
         let answer: AttemptAnswer | null = null;
         let failure: unknown = null;
+        markSent();
         try {
           answer = await sendAttempt(this.deps.fetch, {
             target,

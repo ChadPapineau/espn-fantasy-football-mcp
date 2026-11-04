@@ -454,6 +454,24 @@ export function createCredentialAuthority(
       }
       return Promise.resolve(state);
     },
+    rejectedNow: () => {
+      if (state === "rejected") return true;
+      // another process recorded the rejection (its own cookie-bearing 401) while this one holds
+      // the value: the row says so, the label does not (state() re-reads it only while
+      // not_configured). One row read; the secret store is not touched (the round-4 verifier's
+      // V4-S1, plan 02 §2.1 "Short-circuit": zero requests once rejected)
+      const row = rejectedRowOf(ownRow(quietRow()));
+      if (row === null) return false;
+      const held = loaded?.meta.storedAt ?? null;
+      // the row rejects another value than the one held (a row without stored_at is taken to
+      // describe the held one, as resolve takes it): this process's value is not the rejected one
+      if (held !== null && (row.stored_at ?? held) !== held) return false;
+      markRejected(
+        held ?? row.stored_at,
+        msOf(row.last_rejected_at ?? row.rejected_since ?? row.updated_at),
+      );
+      return true;
+    },
     dropSecret: drop,
     holdsSecret: () => loaded !== null,
   };
