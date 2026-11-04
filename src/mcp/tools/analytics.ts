@@ -1469,8 +1469,10 @@ export function lineupTrims(untrimmed: unknown): readonly AnalyticsTrim[] {
           recommended_lineup: rows.slice(0, Math.floor(rows.length / 2)),
           rec: { ...rec, drivers: drivers.slice(0, Math.floor(drivers.length / 2)) },
         },
+        // R10-22: swaps and rec.subjects name every change; rec.lineup is the mean-optimal
+        // assignment, which under no_move still starts the held entrant (never "every change")
         warning:
-          "recommended_lineup and rec.drivers truncated to fit the budget (rec.lineup and swaps name every change)",
+          "recommended_lineup and rec.drivers truncated to fit the budget (swaps and rec.subjects name every change; rec.lineup is the mean-optimal assignment)",
         key: "moved_rows",
       };
     },

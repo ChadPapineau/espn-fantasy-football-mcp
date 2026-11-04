@@ -269,6 +269,18 @@ describe("E2's budget steps cap a worst-case answer (plan 07 C8)", () => {
     expect(said).toContain(
       "recommended_lineup lists only the players who move (rec.lineup carries the whole mean-optimal assignment)",
     );
+    // the last step (round 4's F6): rec.lineup is never where "every change" is named — under
+    // no_move it starts the held entrant; swaps and rec.subjects name every change
+    const last = lineupTrims(withHeld)
+      .map((t) => t(withHeld))
+      .find((r) => r?.key === "moved_rows");
+    expect(last?.warning).toBe(
+      "recommended_lineup and rec.drivers truncated to fit the budget (swaps and rec.subjects name every change; rec.lineup is the mean-optimal assignment)",
+    );
+    for (const w of said) {
+      expect(w).not.toMatch(/rec\.lineup[^;)]*\bevery change/);
+      expect(w).not.toMatch(/rec\.lineup (?:and \w+ )?names? every/);
+    }
   });
 
   it("a no-move answer trims only repeats (nothing a decision needs is cut first)", () => {
