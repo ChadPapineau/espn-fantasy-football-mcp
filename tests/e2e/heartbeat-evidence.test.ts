@@ -12,6 +12,8 @@
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import {
+  callAt,
+  gapAttributionOf,
   HEARTBEAT,
   heartbeatRecordOf,
   hostSetStall,
@@ -30,18 +32,27 @@ const wait = (ms: number): string =>
   `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${String(ms)});`;
 
 /**
+ * A store write that waits `ms` on a lock another connection holds (SQLite's busy handler sleeps
+ * off the CPU inside the statement), in a temp WAL store removed after.
+ */
+const lockedWrite = (ms: number): string =>
+  `{ const { DatabaseSync } = process.getBuiltinModule("node:sqlite"); const fs = process.getBuiltinModule("node:fs"); const os = process.getBuiltinModule("node:os"); const path = process.getBuiltinModule("node:path"); const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eff-hb-")); const f = path.join(dir, "s.sqlite"); const a = new DatabaseSync(f); a.exec("PRAGMA journal_mode = WAL; CREATE TABLE t(x)"); const b = new DatabaseSync(f, { timeout: ${String(ms)} }); const ins = b.prepare("INSERT INTO t VALUES (1)"); a.exec("BEGIN IMMEDIATE"); try { ins.run(); } catch {} a.exec("COMMIT"); a.close(); b.close(); fs.rmSync(dir, { recursive: true, force: true }); }`;
+
+/**
  * A process with the probe preloaded that, on SIGUSR1, stalls its loop `ms` the given way —
  * "masked": a block of `ms`, then, after a few ticks of the probe, a wait of 1 s, the window's
- * longest gap.
+ * longest gap; "locked": a store write waiting on another connection's lock.
  */
-async function stallingProcess(kind: "busy" | "wait" | "masked", ms: number) {
+async function stallingProcess(kind: "busy" | "wait" | "masked" | "locked", ms: number) {
   const marker = `process.stderr.write("e2e.stalled\\n");`;
   const handler =
     kind === "busy"
       ? `${busy(ms)} ${marker}`
       : kind === "wait"
         ? `${wait(ms)} ${marker}`
-        : `${busy(ms)} setTimeout(() => { ${wait(1000)} ${marker} }, 30);`;
+        : kind === "locked"
+          ? `${lockedWrite(ms)} ${marker}`
+          : `${busy(ms)} setTimeout(() => { ${wait(1000)} ${marker} }, 30);`;
   const child = spawn(
     process.execPath,
     [
@@ -236,5 +247,107 @@ describe("the heartbeat's evidence never excuses the process's own stall", () =>
     expect(hostSetStall(hb(20, 3, 49.9), 40, 50)).toBe(true);
     // the longest gap's own CPU is R8-2's, excused up to the bound itself
     expect(hostSetStall(hb(50, 3, 49.9), 40, 50)).toBe(true);
+  });
+});
+
+describe("the longest gap's attribution names the synchronous call that held it (heartbeat.cjs attr)", () => {
+  it.each([
+    ["wait", "Atomics.wait 120", "wait"],
+    ["locked", "INSERT INTO t VALUES (1)", "sql"],
+  ] as const)(
+    "a %s stall of 120 ms: the gap's own synchronous call, its label and its wall time",
+    async (kind, label, k) => {
+      const p = await stallingProcess(kind, 120);
+      try {
+        await heartbeatRecordOf(p.src); // a fresh window
+        await p.stall();
+        await new Promise((r) => setTimeout(r, 30));
+        const hb = await heartbeatRecordOf(p.src);
+        const a = hb.attr;
+        expect(a, JSON.stringify(hb)).toBeTruthy();
+        if (a === null || a === undefined) return;
+        // the gap is the stall, and the one call inside it holds (nearly) all of it
+        expect(hb.gap_ms).toBeGreaterThan(100);
+        expect(a[`${k}_top`]).toBe(label);
+        expect(a[`${k}_top_ms`]).toBeGreaterThan(100);
+        expect(a[`${k}_ms`]).toBeGreaterThanOrEqual(a[`${k}_top_ms`] as number);
+        expect(a[`win_${k}_top`]).toBe(label);
+        // off the CPU: a voluntary wait inside the server, never its own CPU
+        expect(hb.gap_cpu_ms).toBeLessThan(50);
+        // the other kinds held nothing of it
+        for (const other of ["sql", "fs", "wait"].filter((x) => x !== k))
+          expect(a[`${other}_ms`] as number, other).toBeLessThan(5);
+        expect(typeof a.at).toBe("number");
+        expect(Math.abs((a.at as number) - Date.now())).toBeLessThan(10_000);
+        if (process.platform === "linux") {
+          // the main thread went off the CPU by itself: a voluntary switch, none involuntary needed
+          expect(a.vol as number).toBeGreaterThanOrEqual(1);
+        }
+      } finally {
+        p.stop();
+      }
+    },
+    30_000,
+  );
+
+  it("a busy stall: the gap is its own CPU, with no synchronous call holding it", async () => {
+    const p = await stallingProcess("busy", 120);
+    try {
+      await heartbeatRecordOf(p.src);
+      await p.stall();
+      await new Promise((r) => setTimeout(r, 30));
+      const hb = await heartbeatRecordOf(p.src);
+      const a = hb.attr ?? {};
+      expect(hb.gap_cpu_ms).toBeGreaterThan(100);
+      for (const k of ["sql", "fs", "wait"]) expect(a[`${k}_ms`] as number, k).toBeLessThan(5);
+    } finally {
+      p.stop();
+    }
+  }, 30_000);
+
+  it("gapAttributionOf keeps numbers, labels cut to 80 characters and nulls; callAt names the call", () => {
+    expect(gapAttributionOf(null)).toBeNull();
+    expect(gapAttributionOf([1])).toBeNull();
+    expect(gapAttributionOf("x")).toBeNull();
+    expect(
+      gapAttributionOf({
+        sql_ms: 47.2,
+        sql_top: "x".repeat(200),
+        fs_top: null,
+        bad: Number.NaN,
+        nested: { a: 1 },
+        list: [1],
+        flag: true,
+        "Not-A-Key": 1,
+      }),
+    ).toEqual({ sql_ms: 47.2, sql_top: "x".repeat(80), fs_top: null });
+    const spans = [
+      { name: "a", t0: 100, t1: 200 },
+      { name: "b", t0: 250, t1: 300 },
+    ];
+    expect(callAt(spans, 150)).toBe("a");
+    expect(callAt(spans, 300)).toBe("b");
+    expect(callAt(spans, 220)).toBe("after a");
+    expect(callAt(spans, 50)).toBeNull();
+    // the evidence line carries the attribution and the call it fell in
+    const ev = JSON.parse(
+      stallEvidence(
+        {
+          control_ms: 6,
+          attempts: 1,
+          server: {
+            max_ms: 63,
+            gap_ms: 58,
+            gap_cpu_ms: 9.6,
+            gap_invol: 0,
+            cpu_max_ms: 18.2,
+            attr: { at: 260, sql_ms: 47.2, sql_top: "COMMIT" },
+          },
+          repeated: [],
+        },
+        spans,
+      ),
+    ) as { attr: Record<string, unknown> };
+    expect(ev.attr).toEqual({ at: 260, sql_ms: 47.2, sql_top: "COMMIT", call: "b" });
   });
 });

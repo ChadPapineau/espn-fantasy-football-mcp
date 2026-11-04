@@ -334,6 +334,47 @@ export interface Heartbeat {
    * R10-9 leaves such a measurement to R8-2, "cannot be measured").
    */
   readonly cpu_max_ms: number | null;
+  /**
+   * What the main thread did inside the longest gap (heartbeat.cjs `attr`): wall ms inside
+   * node:sqlite, synchronous node:fs and Atomics.wait calls with counts and the longest call's label,
+   * the GC pauses overlapping it, and on Linux the main thread's own switches, run-queue delay and
+   * block I/O and the system's pressure stall and steal; `at` is the gap's end (epoch ms). Null when
+   * the line carries none. Only numbers, short labels and nulls are kept.
+   */
+  readonly attr?: GapAttribution | null;
+}
+
+/** heartbeat.cjs's attribution of a window's longest gap (numbers, short code labels, nulls). */
+export type GapAttribution = Readonly<Record<string, number | string | null>>;
+
+/** The attribution a heartbeat line carries, kept to numbers, labels cut to 80 characters and nulls. */
+export function gapAttributionOf(v: unknown): GapAttribution | null {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+  const out: Record<string, number | string | null> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (!/^[a-z][a-z0-9_]{0,31}$/.test(k)) continue;
+    if (typeof x === "number" && Number.isFinite(x)) out[k] = x;
+    else if (typeof x === "string") out[k] = x.slice(0, 80);
+    else if (x === null) out[k] = null;
+  }
+  return out;
+}
+
+/** A tool call's span (epoch ms) in a stall window: what names the call a gap fell in. */
+export interface CallSpan {
+  readonly name: string;
+  readonly t0: number;
+  readonly t1: number;
+}
+
+/** The call whose span holds `at` (epoch ms), else the last call that started before it. */
+export function callAt(spans: readonly CallSpan[], at: number): string | null {
+  let before: CallSpan | null = null;
+  for (const c of spans) {
+    if (c.t0 <= at && at <= c.t1) return c.name;
+    if (c.t0 <= at) before = c;
+  }
+  return before === null ? null : `after ${before.name}`;
 }
 
 /** The window of a process running the heartbeat preload, and a fresh window. */
@@ -356,6 +397,7 @@ export async function heartbeatRecordOf(p: HeartbeatSource): Promise<Heartbeat> 
         gap_invol: num("gap_invol"),
         cpu_max_ms:
           typeof cpuMax === "number" && Number.isFinite(cpuMax) && cpuMax >= 0 ? cpuMax : null,
+        attr: gapAttributionOf(rec.attr),
       };
     }
     if (Date.now() > end) throw new Error("no heartbeat line");
@@ -537,13 +579,22 @@ export function stallReport(verdict: StallVerdict, stallMs: number, boundMs: num
  * stall, and the server's longest gap with its own CPU and involuntary switches and its longest run
  * on the CPU anywhere in the window, then every repeated window's. What a stall verdict rests on is
  * printed with it, so a red run says whether the server's own CPU or an unexcused wait set it.
+ * Each window's gap attribution (Heartbeat.attr) rides with it, naming the tool call the gap fell
+ * in when `spans` are given: the failing assertion's message carries it, so a CI annotation does.
  */
 export function stallEvidence(
   w: Pick<StallWindow, "attempts" | "server" | "control_ms" | "repeated"> & {
     readonly stall_ms?: number;
   },
+  spans: readonly CallSpan[] = [],
 ): string {
   const r = (x: number): number => Math.round(x * 10) / 10;
+  const attrOf = (s: Heartbeat) => {
+    if (s.attr === undefined || s.attr === null) return {};
+    const at = s.attr.at;
+    const call = typeof at === "number" && spans.length > 0 ? callAt(spans, at) : null;
+    return { attr: { ...s.attr, ...(call === null ? {} : { call }) } };
+  };
   const beat = (s: Heartbeat, controlMs: number) => ({
     stall_ms: r(s.max_ms),
     gap_ms: r(s.gap_ms),
@@ -551,6 +602,7 @@ export function stallEvidence(
     gap_invol: s.gap_invol,
     cpu_max_ms: s.cpu_max_ms === null ? null : r(s.cpu_max_ms),
     control_ms: r(controlMs),
+    ...attrOf(s),
   });
   return JSON.stringify({
     attempts: w.attempts,

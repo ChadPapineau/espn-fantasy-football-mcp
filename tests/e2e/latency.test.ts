@@ -16,6 +16,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
+  type CallSpan,
   HEARTBEAT,
   makeHome,
   measureStall,
@@ -70,11 +71,16 @@ afterAll(async () => {
   home.cleanup();
 });
 
+/** Every timed call's span (epoch ms): a stall's evidence names the call its longest gap fell in. */
+const spans: CallSpan[] = [];
+
 async function timed(name: string, args: Record<string, unknown>): Promise<number> {
   if (s === null) throw new Error("not served");
   const t0 = performance.now();
+  const e0 = Date.now();
   const r = await s.client.callTool({ name, arguments: args });
   const ms = performance.now() - t0;
+  spans.push({ name, t0: e0, t1: Date.now() });
   expect(r.isError, `${name}: ${JSON.stringify(bodyOf(r)).slice(0, 300)}`).not.toBe(true);
   return ms;
 }
@@ -170,12 +176,14 @@ describe("latency on fx-10h over real stdio (A15a, A16a)", { timeout: 300_000 },
       max_loop_stall_ms: Math.round(stall * 10) / 10,
     });
     process.stdout.write(`latency report: ${JSON.stringify(report)}\n`);
-    process.stdout.write(`latency stall (core analytics): ${w.report} ${stallEvidence(w)}\n`);
+    process.stdout.write(
+      `latency stall (core analytics): ${w.report} ${stallEvidence(w, spans)}\n`,
+    );
     expect(e1).toBeLessThan(3000);
     expect(e2).toBeLessThan(5000);
     expect(e5).toBeLessThan(5000);
     // changelog §R10, R10-9: within the bound, or host-set with the server's own CPU run under it
-    expect(stallPassed(w), `${w.report} ${stallEvidence(w)}`).toBe(true);
+    expect(stallPassed(w), `${w.report} ${stallEvidence(w, spans)}`).toBe(true);
     for (const k of Object.keys(report))
       if (k.startsWith("warm_") && ANALYTICS.has(k.slice(5))) expect(report[k]).toBeLessThan(500);
   });
@@ -224,8 +232,10 @@ describe(
     async function timedFull(name: string, args: Record<string, unknown>): Promise<number> {
       if (f === null) throw new Error("not served");
       const t0 = performance.now();
+      const e0 = Date.now();
       const r = await f.client.callTool({ name, arguments: args }, { timeout: 120_000 });
       const ms = performance.now() - t0;
+      spans.push({ name, t0: e0, t1: Date.now() });
       const b = bodyOf(r);
       expect(r.isError, `${name}: ${JSON.stringify(b).slice(0, 300)}`).not.toBe(true);
       lastWarnings = (b.warnings as string[] | undefined) ?? [];
@@ -273,9 +283,9 @@ describe(
       // window of player-weeks as one read + score once stalled it 40–55 ms here (B2a gate round 2)
       const readStall = w.stall_ms;
       report.max_loop_stall_reads_ms = Math.round(readStall * 10) / 10;
-      process.stdout.write(`latency stall (full reads): ${w.report} ${stallEvidence(w)}\n`);
+      process.stdout.write(`latency stall (full reads): ${w.report} ${stallEvidence(w, spans)}\n`);
       expect(slow).toEqual([]);
-      expect(stallPassed(w), `${w.report} ${stallEvidence(w)}`).toBe(true);
+      expect(stallPassed(w), `${w.report} ${stallEvidence(w, spans)}`).toBe(true);
       // the dataset reads never went upstream
       for (const n of ["espn_get_player_usage", "espn_get_depth_chart", "espn_get_news"])
         expect(report[`warm_${n}`], n).toBeLessThan(500);
@@ -302,9 +312,11 @@ describe(
       const stall = w.stall_ms;
       report.max_loop_stall_ms = Math.round(stall * 10) / 10;
       process.stdout.write(`latency report (full): ${JSON.stringify(report)}\n`);
-      process.stdout.write(`latency stall (full analytics): ${w.report} ${stallEvidence(w)}\n`);
+      process.stdout.write(
+        `latency stall (full analytics): ${w.report} ${stallEvidence(w, spans)}\n`,
+      );
       expect(slow).toEqual([]);
-      expect(stallPassed(w), `${w.report} ${stallEvidence(w)}`).toBe(true);
+      expect(stallPassed(w), `${w.report} ${stallEvidence(w, spans)}`).toBe(true);
     });
   },
 );
