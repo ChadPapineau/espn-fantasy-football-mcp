@@ -241,6 +241,36 @@ describe("E2's budget steps cap a worst-case answer (plan 07 C8)", () => {
     expect(((data.rec as J).lineup as unknown[]).length).toBe(7);
   });
 
+  it("R10-22: no step says rec.lineup carries the lineup to set — rec.subjects' rest is the roster's current slots", () => {
+    // changelog §R10, R10-22 (clarifying R10-15): rec.lineup, like recommended_lineup, is E2's
+    // mean-optimal assignment and under no_move still starts the held coin-flip entrant; the lineup
+    // the user is told is the current slots with rec.subjects[]' moves applied
+    const d = worstCase();
+    const rec = d.rec as J;
+    const subjects = rec.subjects as J[];
+    // a subject that does not move (the held entrant of a no_move call is one): the step drops it
+    const held = { player_id: 9_999_999, gsis_id: null, role: "start", slot: "FLEX" };
+    const withHeld = { ...d, rec: { ...rec, subjects: [...subjects, held] } };
+    const said: string[] = [];
+    for (const trim of lineupTrims(withHeld)) {
+      const r = trim(withHeld);
+      if (r !== null) said.push(r.warning);
+    }
+    const step = lineupTrims(withHeld)
+      .map((t) => t(withHeld))
+      .find((r) => r?.key === "rec_subjects");
+    expect(step?.warning).toBe(
+      "rec.subjects lists only the players who move (the roster's current slots hold the rest)",
+    );
+    expect(((step?.data as J).rec as J).subjects).toEqual(subjects);
+    // never "rec.lineup carries the lineup" (or "the whole lineup"): it is the mean-optimal one
+    expect(said.length).toBeGreaterThan(3);
+    for (const w of said) expect(w).not.toMatch(/rec\.lineup carries the (whole )?lineup/);
+    expect(said).toContain(
+      "recommended_lineup lists only the players who move (rec.lineup carries the whole mean-optimal assignment)",
+    );
+  });
+
   it("a no-move answer trims only repeats (nothing a decision needs is cut first)", () => {
     const d = worstCase();
     const same = {

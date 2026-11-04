@@ -1360,13 +1360,18 @@ const BENCH_SLOTS: ReadonlySet<unknown> = new Set(["BE", "IR"]);
  * repeat `recommended_lineup`), the lock schedule goes (espn_get_roster carries it), the rec's
  * confidence inputs go (`data.inputs` carries them), the bench and IR rows that do not change leave
  * `recommended_lineup` (espn_get_roster carries them), `rec.subjects` keeps the players who move
- * (`rec.lineup` carries the whole lineup), `current_lineup` goes (its rows repeat the moved
+ * (the roster's current slots hold the rest), `current_lineup` goes (its rows repeat the moved
  * players' rows of `recommended_lineup`; `swaps` and `rec.subjects` name every from-slot), the
  * cross-check, stack flags and conditionals are halved, the unchanged starters leave
- * `recommended_lineup` (`rec.lineup` still names them), and last the moved rows and the rec's
- * drivers are halved. With every step taken the answer is the fixed fields plus `rec.lineup`, so an
- * `exclude`/`force_start` that changes many slots trims instead of failing (Stage C:
- * `lineup-exclude-over-budget-internal`).
+ * `recommended_lineup` (`rec.lineup`, the same mean-optimal assignment, still names them), and last
+ * the moved rows and the rec's drivers are halved. With every step taken the answer is the fixed
+ * fields plus `rec.lineup`, so an `exclude`/`force_start` that changes many slots trims instead of
+ * failing (Stage C: `lineup-exclude-over-budget-internal`).
+ *
+ * What the user is told (changelog §R10, R10-22, clarifying R10-15; R7-1): `rec.lineup`, like
+ * `recommended_lineup`, is E2's mean-optimal assignment, and under `no_move` it still starts the
+ * coin-flip entrant the rec holds. The lineup to set, by slot, is the roster's current slots with
+ * `rec.subjects[]`' moves applied — so no warning here ever says `rec.lineup` carries it.
  */
 export function lineupTrims(untrimmed: unknown): readonly AnalyticsTrim[] {
   const moved = movedPlayers(untrimmed);
@@ -1406,7 +1411,9 @@ export function lineupTrims(untrimmed: unknown): readonly AnalyticsTrim[] {
       if (kept.length === subjects.length) return null;
       return {
         data: { ...(d as Obj), rec: { ...rec, subjects: kept } },
-        warning: "rec.subjects lists only the players who move (rec.lineup carries the lineup)",
+        // never "rec.lineup carries the lineup" (R10-22): under no_move it starts the held entrant
+        warning:
+          "rec.subjects lists only the players who move (the roster's current slots hold the rest)",
         key: "rec_subjects",
       };
     },
@@ -1449,7 +1456,7 @@ export function lineupTrims(untrimmed: unknown): readonly AnalyticsTrim[] {
     keepRows(
       "recommended_lineup",
       hasMoved,
-      "recommended_lineup lists only the players who move (rec.lineup carries the whole lineup)",
+      "recommended_lineup lists only the players who move (rec.lineup carries the whole mean-optimal assignment)",
     ),
     (d) => {
       const rows = arr(d, "recommended_lineup");
