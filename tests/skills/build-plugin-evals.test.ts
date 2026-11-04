@@ -43,6 +43,7 @@ import {
   traceProblem,
   EVAL_SERVER,
   FIXTURE_CREDENTIAL_STATES,
+  FINAL_BUCKET_HELD,
   HELD_OUT_CASES,
   HISTORY_FORMAT_VERSION,
   INJECTION_NEEDLES,
@@ -89,6 +90,10 @@ import {
   syntheticCookie,
   toolInputPattern,
   seedDatasetStates,
+  seedTempRootFor,
+  realpathLoose,
+  discardSuite,
+  STATE_OUTSIDE_TEMP,
   variantHarness,
   withoutStateDirs,
   writeSeeds,
@@ -196,7 +201,8 @@ describe("planSuite on the committed bundle", () => {
     }
     expect(byDir.get("trade--tr-core")?.plugin).toBe("base--core");
     expect(byDir.get("waivers--wv-3-e")?.plugin).toBe("faab--full");
-    expect(byDir.get("start-sit--ss-11-e")?.plugin).toBe("sunday-live--full");
+    // SS-11-E, start-sit's P1 case, is held out (FINAL_BUCKET_HELD)
+    expect(byDir.has("start-sit--ss-11-e")).toBe(false);
     expect(byDir.get("news-check--nc-inj-2")?.plugin).toBe(
       pluginKey(null, "full", SEEDS["NC-INJ-2"]),
     );
@@ -472,7 +478,7 @@ describe("credential-state variants (Stage C finding eval-credential-state-varia
     expect([...FIXTURE_CREDENTIAL_STATES]).toEqual(["not_configured", "rejected", "stored"]);
   });
 
-  it("the cases on auth-rejected and public-league are written again, and WV-7-E with them: none is held out (changelog §R10, R10-7)", () => {
+  it("the cases on auth-rejected and public-league are written again, and WV-7-E with them: none of them is held out (changelog §R10, R10-7)", () => {
     for (const dir of [
       "onboard--on-5-e",
       "session-check--sc-1",
@@ -490,8 +496,13 @@ describe("credential-state variants (Stage C finding eval-credential-state-varia
       readFileSync(path.join(ROOT, "fixtures/espn/fx-10h/league/mSettings.json"), "utf8"),
     ) as { settings: { isPublic: boolean } };
     expect(settings.settings.isPublic).toBe(true);
-    expect(plan.notTestable).toEqual([]);
-    expect(Object.keys(HELD_OUT_CASES)).toEqual([]);
+    // only the two cases whose final bucket no dataset-seeded server shows are held out
+    expect(Object.keys(HELD_OUT_CASES).sort()).toEqual(["SS-11-E", "SS-9"]);
+    expect(plan.notTestable.map((n) => n.name).sort()).toEqual(["SS-11-E", "SS-9"]);
+    for (const n of plan.notTestable) {
+      expect(n.reason).toBe(FINAL_BUCKET_HELD);
+      expect(n.variant).toBe("sunday-live");
+    }
     expect(
       plan.plugins.some((p) => p.variant === "auth-rejected") &&
         plan.plugins.some((p) => p.variant === "public-league"),
@@ -886,10 +897,18 @@ describe("an injection comparison names its base when the injected text is in th
     ],
     [
       "a case on another toolset",
+      "trade",
+      "TR-INJ",
+      "TR-CORE",
+      /base TR-CORE runs under toolset core and TR-INJ under full/,
+    ],
+    [
+      // a held-out case never runs, so it has no trajectory to compare with
+      "a held-out case",
       "start-sit",
       "SS-INJ-2",
       "SS-11-E",
-      /base SS-11-E runs under toolset full and SS-INJ-2 under core/,
+      /base "SS-11-E" is not a case of start-sit the suite runs on a non-injection fixture/,
     ],
     [
       "a case that is no injection comparison",
@@ -1069,12 +1088,41 @@ describe("gradersFor (the tag → grader mapping)", () => {
     expect(two.frontmatter).toEqual({ type: "baseline", baseline_file: BASELINE_FILE, weight: 1 });
     expect(two.body).toMatch(/^PASS only if: Same as base\./);
     expect(two.body).toContain("case x--x-1");
-    expect(two.body).toContain("(its expected output): REF");
+    expect(two.body).toContain(
+      "The base case's expected output (context for what the question is about, not the standard NEW is held to): REF",
+    );
     // no base case: still a baseline grader (it fails until one exists), never a prose rubric
     const none = gradersFor("Same as base (llm, judge sees both replies)", ctx);
     expect(none.errors).toEqual([]);
     expect(none.graders[0]!.frontmatter.type).toBe("baseline");
     expect(none.graders[0]!.body).toMatch(/no base case is authored yet/);
+  });
+
+  // the round-3 review: --baselines may attach a base's best-scoring run that FAILED (changelog
+  // §R10, R10-8) and never rewrites the grader, so the grader must never call the baseline "a
+  // passing run" nor hand the judge the base's ideal expected output as the standard
+  it("matches-base never calls its baseline a passing run, and makes the base's expected output context, not the standard", () => {
+    const g = gradersFor("Same as base (llm, judge sees both replies)", {
+      ...ctx,
+      reference: "REF",
+      baseCase: "x--x-1",
+    }).graders[0]!.body;
+    expect(g).not.toMatch(/is a passing run/);
+    expect(g).not.toContain("What the base reply contains");
+    expect(g).toContain("a passing run of it when one exists, else its best-scoring kept run");
+    expect(g).toContain(
+      "Judge NEW against the BASELINE trajectory, not against that expected output",
+    );
+    // and so does every committed injection case's grader
+    const plan = planSuite(ROOT);
+    const graders = plan.cases.flatMap((c) =>
+      c.files.filter((f) => f.rel.includes("matches-base")).map((f) => f.text),
+    );
+    expect(graders.length).toBeGreaterThan(5);
+    for (const t of graders) {
+      expect(t).not.toMatch(/is a passing run/);
+      expect(t).toContain("not against that expected output");
+    }
   });
 
   it.each([
@@ -1299,7 +1347,7 @@ describe("buildPluginEvals on a copy", () => {
         "points-only-seeding--core--seeding-points-only",
       ].sort(),
     );
-    expect(r.notTestable).toEqual([]);
+    expect(r.notTestable.map((n) => n.name).sort()).toEqual(["SS-11-E", "SS-9"]);
     for (const key of r.plugins) {
       const dir = path.join(out, "plugins", key);
       const plugin = JSON.parse(
@@ -1677,11 +1725,11 @@ describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () =
         path.join(t.root, "scripts", "seed-fixture-datasets.ts"),
       ]);
       expect(c.args[3]?.startsWith(r.state!)).toBe(true);
-      // only PATH — and TMPDIR when set, which the seed's temp-directory check reads (the state
-      // root was made under it) — reaches the seed process, no other env
+      // only PATH and TMPDIR reach the seed process: TMPDIR is the real temp root that holds this
+      // state root (the default state is made by mkdtemp under the parent's temp directory)
       expect(c.env).toEqual({
         PATH: process.env.PATH ?? "/usr/bin:/bin",
-        ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+        TMPDIR: realpathSync(tmpdir()),
       });
     }
     await expect(
@@ -1693,27 +1741,110 @@ describe("the NC-INJ-2 seed (seedLogWeek4, over the real tools' JSON-RPC)", () =
         spawnImpl: spawnWith(1),
       }),
     ).rejects.toThrow(/the dataset seed exited 1/);
-    // a set TMPDIR always reaches the seed (macOS sets one: the state root is made under it, and
-    // without it the seed's own temp directory is /tmp and it refused every cache)
-    const saved = process.env.TMPDIR;
-    try {
-      process.env.TMPDIR = "/var/folders/xx/T/";
-      calls.length = 0;
-      await seedDatasetStates({
+    // a state root no candidate temp root holds is refused before any spawn (the seed would
+    // refuse it anyway, after the suite was built)
+    calls.length = 0;
+    await expect(
+      seedDatasetStates({
         root: t.root,
         out,
         node: "/n",
         plugins: r.plugins.slice(0, 1),
         spawnImpl: spawnWith(0),
-      });
-      expect(calls[0]?.env).toEqual({
+        tempCandidates: ["/nonexistent-eff-temp-root"],
+      }),
+    ).rejects.toThrow(STATE_OUTSIDE_TEMP);
+    expect(calls).toHaveLength(0);
+  });
+
+  // the round-3 review's F5: passing the parent's TMPDIR through broke `--state <dir under /tmp>`
+  // on macOS (TMPDIR=/var/folders/…): the child saw /var/folders as its temp directory and refused
+  // the cache, after a runnable, unseeded suite had been written
+  it("seedDatasetStates gives a --state under /tmp the real /tmp as TMPDIR while the parent's TMPDIR points elsewhere", async () => {
+    const t = repoWithFixtures();
+    const out = temp("eff-pe-out-");
+    const state = realpathSync(mkdtempSync(path.join("/tmp", "eff-pe-state-")));
+    cleanups.push(() => {
+      rmSync(state, { recursive: true, force: true });
+    });
+    const r = buildPluginEvals({ root: t.root, out, node: "/n", state });
+    expect(r.errors).toEqual([]);
+    const calls: { args: string[]; env: Record<string, string> }[] = [];
+    const spawnImpl = (_cmd: string, args: string[], o: { env: Record<string, string> }) => {
+      calls.push({ args, env: o.env });
+      const ev = new EventEmitter();
+      setImmediate(() => ev.emit("exit", 0));
+      return {
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        on: (e: "exit", fn: (c: number | null) => void) => ev.on(e, fn),
+        kill: () => undefined,
+      };
+    };
+    await seedDatasetStates({
+      root: t.root,
+      out,
+      node: "/n",
+      plugins: r.plugins.slice(0, 2),
+      spawnImpl,
+      tempCandidates: ["/nonexistent-eff-temp-root", "/tmp"],
+    });
+    expect(calls).toHaveLength(2);
+    for (const c of calls) {
+      expect(c.env).toEqual({
         PATH: process.env.PATH ?? "/usr/bin:/bin",
-        TMPDIR: "/var/folders/xx/T/",
+        TMPDIR: realpathSync("/tmp"),
       });
-    } finally {
-      if (saved === undefined) delete process.env.TMPDIR;
-      else process.env.TMPDIR = saved;
+      // the cache's real path: the seed's own prefix check compares real paths
+      expect(c.args[3]?.startsWith(`${realpathSync("/tmp")}${path.sep}`)).toBe(true);
     }
+  });
+
+  it("seedTempRootFor picks the first candidate whose real path holds the directory, else null; realpathLoose resolves a path that does not exist yet", () => {
+    const base = temp("eff-pe-tr-");
+    const later = path.join(base, "not", "yet");
+    expect(realpathLoose(later)).toBe(path.join(realpathSync(base), "not", "yet"));
+    expect(seedTempRootFor(later, [base])).toBe(realpathSync(base));
+    expect(seedTempRootFor(later, ["/nonexistent-eff-temp-root", base])).toBe(realpathSync(base));
+    // the directory itself is not inside itself; a sibling with a shared prefix is not inside it
+    expect(seedTempRootFor(base, [base])).toBeNull();
+    expect(seedTempRootFor(`${base}-sibling/x`, [base])).toBeNull();
+    expect(seedTempRootFor("/nonexistent-eff-state/x", [base, "/tmp"])).toBeNull();
+    // a symlinked spelling resolves to the same root
+    const link = path.join(temp("eff-pe-ln-"), "l");
+    symlinkSync(base, link);
+    expect(seedTempRootFor(path.join(link, "a"), [base])).toBe(realpathSync(base));
+  });
+
+  it("main refuses --seed-datasets with a --state no temp root holds, before writing anything", async () => {
+    const out = path.join(temp("eff-pe-parent-"), "never-written");
+    expect(
+      await main(["--out", out, "--state", "/nonexistent-eff-state/s", "--seed-datasets"]),
+    ).toBe(1);
+    expect(existsSync(out)).toBe(false);
+  });
+
+  it("discardSuite leaves no runnable suite after a failed seed: the cases, plugins, index, README and this build's state go, the harness's results stay", () => {
+    const t = repoWithFixtures();
+    const out = temp("eff-pe-out-");
+    const r = buildPluginEvals({ root: t.root, out, node: "/n" });
+    expect(r.errors).toEqual([]);
+    mkdirSync(path.join(out, "evals", "results"), { recursive: true });
+    writeFileSync(path.join(out, "evals", "results", "run.json"), "{}");
+    expect(path.basename(r.state!).startsWith("eff-plugin-evals-")).toBe(true);
+    discardSuite({ out, state: r.state, plugins: r.plugins });
+    expect(readdirSync(path.join(out, "evals"))).toEqual(["results"]);
+    expect(existsSync(path.join(out, "evals", "results", "run.json"))).toBe(true);
+    for (const f of ["plugins", "README.md", BASELINES_INDEX, STATE_ROOT_FILE])
+      expect(existsSync(path.join(out, f)), f).toBe(false);
+    expect(existsSync(r.state!)).toBe(false);
+    // a caller's --state root is kept: only this build's per-plugin directories go
+    const state = temp("eff-pe-given-");
+    writeFileSync(path.join(state, "keep.txt"), "x");
+    const r2 = buildPluginEvals({ root: t.root, out, node: "/n", state });
+    expect(r2.errors).toEqual([]);
+    discardSuite({ out, state: r2.state, plugins: r2.plugins });
+    expect(readdirSync(state)).toEqual(["keep.txt"]);
   });
 
   it("the premise holds: `eff refresh` publishes the same datasets whatever the toolset (refresh never reads it)", () => {

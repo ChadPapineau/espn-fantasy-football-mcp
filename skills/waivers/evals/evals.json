@@ -68,7 +68,7 @@
       "expected_output": "On ir-open an OUT player sits on the bench and an IR slot is open: the reply offers the IR move as the drop alternative and warns to activate after the run. It shows the surplus with and without the IR move (s and s_with_ir_move) — on this fixture the two are equal for every candidate (9.957 for the top one), because the conditional drop, Tank Dell, is himself IR-eligible and worth 0 rest of season, so one value said to hold either way passes.",
       "files": ["evals/fixtures/fx-10h/ir-open"],
       "expectations": [
-        "The reply prints the candidates' surplus (regex: `surplus|s_with_ir_move|\\bs\\s*=`)",
+        "The reply ties the surplus to the IR move — both values, or one said to hold either way (regex: `s_with_ir_move|with(out)? (the|an) IR move|either way|same (with|without)|same (value|surplus)`)",
         "The reply shows both surplus values, or one value said to hold with and without the IR move when they are equal, and offers moving the OUT player to IR instead of a drop (llm)",
         "The reply warns to activate players only after the run (regex: `after the (waiver )?run`)"
       ]

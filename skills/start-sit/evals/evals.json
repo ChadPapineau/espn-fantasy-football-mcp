@@ -60,12 +60,12 @@
       "name": "SS-5-E",
       "toolset": "core",
       "prompt": "Should I start my safer WR or the boom-or-bust one?",
-      "expected_output": "On points-only-seeding with the points-only reading recorded and confirmed — as `eff setup --seeding points_only` in a terminal records it (seeding.mode_in_use points_only, confirmed true; the build's seeding-points-only seed) — espn_analyze_lineup with objective auto answers objective_used points_only (\"the points_only reading seeds by points for, so every point counts the same\"), mode protect: the reply says the opponent does not matter this week and prefers the lower-variance option, because Team 02 sits comfortably above the season cutoff; the Rashid Shaheed / Devaughn Vele WR swap is a coin flip (its interval spans zero).",
+      "expected_output": "On points-only-seeding with the points-only reading recorded and confirmed — as `eff setup --seeding points_only` in a terminal records it (seeding.mode_in_use points_only, confirmed true; the build's seeding-points-only seed) — espn_analyze_lineup with objective auto answers objective_used points_only (\"the points_only reading seeds by points for, so every point counts the same\"), mode protect, because Team 02 sits comfortably above the season cutoff, so the higher floor (p10) is worth more: the reply says the opponent does not matter this week. On this fixture neither WR is the lower-variance option: both carry the same spread basis (position_cv) — Rashid Shaheed (the starter) mean 9.40, p10 3.09, p90 17.17; Devaughn Vele mean 9.40, p10 3.05, p90 17.02 — so Shaheed has the higher floor and also the wider range. The only swap, Shaheed out for Vele, is a coin flip (ΔE +0.008, interval about −9.9 to +9.9) and the tool's rec keeps the current lineup. A passing reply calls it a coin flip under protect and keeps Shaheed, or names Shaheed's higher p10 as the reason; it never labels either WR safer or boom-or-bust beyond what p10 and p90 show.",
       "files": ["evals/fixtures/fx-10h/points-only-seeding"],
       "expectations": [
         "The skill called espn_analyze_lineup with objective auto (tool_used: input_match objective auto)",
         "The reply says the opponent does not matter this week (llm)",
-        "The reply prefers the lower-variance option because the team is comfortably above the cutoff (llm)"
+        "The reply answers from the tool's numbers under protect: it calls the Shaheed / Vele swap a coin flip and keeps the current lineup, or names the higher p10 (Shaheed's) with the reason, and never calls either WR safer or boom-or-bust beyond what p10 and p90 show (llm)"
       ]
     },
     {
@@ -85,7 +85,7 @@
       "name": "SS-7",
       "toolset": "core",
       "prompt": "James Cook III is inactive, who goes in?",
-      "expected_output": "On sunday-live some starters are locked: the 09:30 ET London game is final (Bhayshul Tuten at FLEX, Cam Little at K), and Ashton Jeanty, Drake Maye and Harold Fannin Jr. are in their 13:00 ET games; James Cook III's game has not kicked off, so his RB slot is still open, and ESPN still shows him ACTIVE: the reply takes availability from ESPN's status, calls the report unconfirmed and makes any swap conditional (if ESPN shows him Out before his kickoff), offers only replacements whose slots are still unlocked — never Rachaad White or Devaughn Vele, whose games have started — and says so plainly when no unlocked bench player can fill the slot.",
+      "expected_output": "On sunday-live some starters are locked: the 09:30 ET London game has kicked off, so Bhayshul Tuten (FLEX) and Cam Little (K) are locked, and Ashton Jeanty, Drake Maye and Harold Fannin Jr. are in their 13:00 ET games; James Cook III's game has not kicked off, so his RB slot is still open, and ESPN still shows him ACTIVE: the reply takes availability from ESPN's status, calls the report unconfirmed and makes any swap conditional (if ESPN shows him Out before his kickoff), offers only replacements whose slots are still unlocked — never Rachaad White or Devaughn Vele, whose games have started — and says so plainly when no unlocked bench player can fill the slot.",
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "espn_analyze_lineup was called with only_unlocked true (tool_used: input_match only_unlocked true)",

@@ -184,8 +184,16 @@ describe("weekly reads the all-teams row and leads with an invalid roster", () =
 
   it("the page opens with the line before Last week, and the guardrail says so", () => {
     expect(body).toMatch(
-      // above the Session and seeding lines too (round 2's triage, WK-7-E: orient's order)
-      /On an invalid roster \(step 2\) the page opens — above the Session and seeding lines, before Last week — with \*\*"Roster INVALID — every add is blocked"\*\*/,
+      // above the header and the Session and seeding lines too (round 2's triage, WK-7-E: both
+      // replies opened with a title line, then the Session and seeding lines, then the block)
+      /On an invalid roster \(step 2\) the \*\*Roster INVALID\*\* block comes first — above the header \(the title and the reads' `as_of`\) and the Session and seeding lines, before Last week: the page opens with \*\*"Roster INVALID — every add is blocked"\*\*/,
+    );
+    expect(body).toMatch(
+      /on an invalid roster it comes right after the Roster INVALID block, never above it/,
+    );
+    // orient's order says the same for every Skill
+    expect(readFileSync(path.join(ROOT, "skills/weekly/references/orient.md"), "utf8")).toContain(
+      "the invalid-roster block always comes first, above the Session and seeding lines and above any title or header line",
     );
     expect(body).toMatch(
       /- An invalid roster \(`ir_invalid` on the user's row\) leads the briefing/,

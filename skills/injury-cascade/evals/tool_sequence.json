@@ -26,14 +26,18 @@
           "id": "injuries",
           "tool": "espn_get_injuries",
           "args": {
-            "players": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] }
+            "players": {
+              "player_ids": [{ "$player": { "step": "roster", "position": "RB", "rank": 1 } }]
+            }
           }
         },
         {
           "id": "evidence",
           "tool": "espn_analyze_evidence",
           "args": {
-            "player": { "player_ids": [{ "$player": { "step": "roster", "slot": "RB" } }] },
+            "player": {
+              "player_ids": [{ "$player": { "step": "roster", "position": "RB", "rank": 1 } }]
+            },
             "claim": {
               "text": "A headline says my RB1 tore his ACL in practice.",
               "source": "a headline"

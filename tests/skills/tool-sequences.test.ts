@@ -10,6 +10,7 @@ import {
   LOAD_TOOLSETS,
   idsOf,
   loadToolSequences,
+  rankedPlayerOf,
   opponentOf,
   outcomeAllowed,
   playerOf,
@@ -397,6 +398,45 @@ describe("opponentOf and playerOf", () => {
     expect(() => opponentOf(envelope({ matchups: [null, "x"] }), "s")).toThrow(
       /no matchup is the user's/,
     );
+  });
+
+  // orient's Positional references rule (changelog §R9, R9-2; §R10, R10-5): starters at the
+  // position by ESPN's week projection, a FLEX player at his own position, then the bench
+  it("a positional $player resolves 'my RB1' to the highest-projected starting RB, never the first RB slot", () => {
+    const p = (player_id: number, position: string, slot: string, proj: number | null) => ({
+      player_id,
+      position,
+      slot,
+      projection_week_espn: proj,
+    });
+    const roster = envelope({
+      players: [
+        p(1, "RB", "RB", 15.9), // the first RB-slot player
+        p(2, "RB", "RB", 16.54), // the highest-projected starting RB
+        p(3, "RB", "FLEX", 10.15), // a FLEX RB counts at his own position
+        p(4, "RB", "BE", 30), // the bench comes after every starter, whatever its projection
+        p(5, "RB", "IR", 40), // IR is never ranked
+        p(6, "WR", "WR", 50),
+        p(7, "RB", "BE", null), // a null projection ranks last
+      ],
+    });
+    const results = new Map([["roster", { tool: "espn_get_roster", result: roster }]]);
+    const at = (rank: number) =>
+      resolveArgs({ $player: { step: "roster", position: "RB", rank } }, results);
+    expect(at(1)).toBe(2);
+    expect(at(2)).toBe(1);
+    expect(at(3)).toBe(3);
+    expect(at(4)).toBe(4);
+    expect(at(5)).toBe(7);
+    expect(() => at(6)).toThrow(/no rostered RB holds rank 6 \(starters, then the bench\)/);
+    // the old template's answer differs: that is the defect the selector removes
+    expect(resolveArgs({ $player: { step: "roster", slot: "RB" } }, results)).toBe(1);
+    expect(() => rankedPlayerOf([], { step: "r", position: "TE", rank: 1 })).toThrow(
+      /no rostered TE holds rank 1/,
+    );
+    expect(() =>
+      resolveArgs({ $player: { step: "roster", position: "RB", rank: 0 } }, results),
+    ).toThrow(/\$player must be/);
   });
 
   it("playerOf skips rows without a numeric id and refuses a result without players", () => {

@@ -63,12 +63,12 @@
       "name": "WK-5-E",
       "toolset": "core",
       "prompt": "Prep me for week 5",
-      "expected_output": "On points-only-seeding with the points-only reading recorded and confirmed — as `eff setup --seeding points_only` in a terminal records it (seeding.mode_in_use points_only, confirmed true; the build's seeding-points-only seed) — espn_analyze_lineup with objective auto answers objective_used points_only: the lineup section maximises expected points, says why (the opponent does not matter this week: every point counts the same for the season's points-for seeding), and positions variance against the season cutoff.",
+      "expected_output": "On points-only-seeding with the points-only reading recorded and confirmed — as `eff setup --seeding points_only` in a terminal records it (seeding.mode_in_use points_only, confirmed true; the build's seeding-points-only seed) — espn_analyze_lineup with objective auto answers objective_used points_only, mode protect: the lineup section reads the tool's rec back — keep the current lineup: the only swap, Rashid Shaheed out for Devaughn Vele, is a coin flip (ΔE +0.008, its interval spanning zero), so no move — says why (the opponent does not matter this week: every point counts the same for the season's points-for seeding), and positions variance against the season cutoff (Team 02 sits above it, so the higher floor is worth more).",
       "files": ["evals/fixtures/fx-10h/points-only-seeding"],
       "expectations": [
         "The skill called espn_analyze_lineup with objective auto (tool_used: input_match objective auto)",
         "The reply says the opponent does not matter this week under points-only seeding (llm)",
-        "The reply's lineup maximises expected points and explains the choice (llm)"
+        "The reply's lineup section follows the tool's rec under points-only — a coin-flip swap is no move — and explains the choice against the season cutoff, never against the opponent (llm)"
       ]
     },
     {

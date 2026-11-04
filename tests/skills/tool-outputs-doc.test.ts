@@ -20,6 +20,8 @@ import { INJECTION_FLAGS } from "../../src/domain/league/types.js";
 import { ROOT, SKILLS } from "./helpers.js";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { z } from "zod/v4";
+import { TOOL_OUTPUT_FIELDS, toolOutputFieldProblems } from "../../scripts/skills/check-skills.mjs";
 
 const sheet = loadTexts(ROOT).tool_outputs ?? "";
 /** What the server serves as espn-ff://docs/tool-outputs (the package's cheat-sheet). */
@@ -34,6 +36,41 @@ const bareSources = [
       .map((f) => f.source),
   ),
 ].sort();
+
+/** Every property key a zod schema names, at any depth (its JSON Schema's `properties`). */
+const keysOf = (schema: z.ZodType): Set<string> => {
+  const out = new Set<string>();
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) for (const x of v as unknown[]) walk(x);
+    else if (v !== null && typeof v === "object") {
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+        if (k === "properties" && x !== null && typeof x === "object")
+          for (const p of Object.keys(x)) out.add(p);
+        walk(x);
+      }
+    }
+  };
+  walk(z.toJSONSchema(schema, { unrepresentable: "any", io: "output" }));
+  return out;
+};
+
+// the round-3 review's F3 and F13: the fields check-skills holds the cheat-sheet's rows to
+// (TOOL_OUTPUT_FIELDS) are the server's own — each one a key of that tool's data schema
+describe("the cheat-sheet's held fields are real output fields", () => {
+  it.each(Object.entries(TOOL_OUTPUT_FIELDS))(
+    "%s carries every field its row is held to",
+    (name, fields) => {
+      const tool = toolsFor("full").find((t) => t.name === name);
+      expect(tool, name).toBeDefined();
+      const keys = keysOf(tool!.data);
+      for (const f of fields) {
+        const leaf = /`(?:[a-z_.[\]]*\.)?([a-z_]+)`/.exec(f)?.[1] ?? "";
+        expect(keys.has(leaf), `${name}: ${f}`).toBe(true);
+      }
+      expect(toolOutputFieldProblems(sheet)).toEqual([]);
+    },
+  );
+});
 
 describe("the served cheat-sheet explains meta.untrusted_fields", () => {
   it("is the package's file, served whole", () => {

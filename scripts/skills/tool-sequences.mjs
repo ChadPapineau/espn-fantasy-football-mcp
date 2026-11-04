@@ -8,7 +8,8 @@
 // the toolset it runs under, and `loadToolSequences` returns one toolset's sequences — `core` (the
 // default, the eight P0 Skills' P0 paths) or `full` (the P1 Skills and the P0 Skills' P1 branches) —
 // so a dry run starts its server with the matching EFF_TOOLSET; `$ids` and `$player.injury_status`
-// resolve here too.
+// resolve here too, and `$player: { step, position, rank }` — a positional reference by orient's
+// rule (changelog §R10, R10-5).
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { IDS_MAX, SKILL_RULES, validateToolSequence } from "./check-skills.mjs";
@@ -152,11 +153,48 @@ export function opponentOf(result, id) {
 }
 
 /**
+ * The player a positional reference names ("my RB1", "my WR3"), by orient's **Positional
+ * references** rule (changelog §R9, R9-2; §R10, R10-5): the user's starters at `position` — every
+ * slot but `BE` and `IR`, a FLEX player at his own position — ranked by ESPN's projection for the
+ * week (`projection_week_espn`, highest first; a null projection last), then the bench at that
+ * position by the same projection; `rank` 1 is the first of that order. Throws when no rostered
+ * player holds the rank (orient asks the user then — a dry run never guesses).
+ * @param {unknown[]} players `data.players[]` of an espn_get_roster envelope
+ * @param {{ step: string, position: string, rank: number }} spec
+ * @returns {number}
+ */
+export function rankedPlayerOf(players, spec) {
+  /** @param {Record<string, unknown>} p */
+  const proj = (p) =>
+    typeof p["projection_week_espn"] === "number" ? p["projection_week_espn"] : -Infinity;
+  const at = players
+    .filter(isRecord)
+    .filter(
+      (p) =>
+        p["position"] === spec.position && typeof p["player_id"] === "number" && p["slot"] !== "IR",
+    );
+  /** @param {Record<string, unknown>[]} list */
+  const byProjection = (list) => [...list].sort((a, b) => proj(b) - proj(a));
+  const ordered = [
+    ...byProjection(at.filter((p) => p["slot"] !== "BE")),
+    ...byProjection(at.filter((p) => p["slot"] === "BE")),
+  ];
+  const hit = ordered[spec.rank - 1];
+  if (hit === undefined)
+    throw new Error(
+      `$player "${spec.step}": no rostered ${spec.position} holds rank ${String(spec.rank)} (starters, then the bench)`,
+    );
+  return /** @type {number} */ (hit["player_id"]);
+}
+
+/**
  * The first player of a roster result in `slot` (plan 07 B1: `data.players[]` with `slot`,
  * `eligible_slots[]`, `injury_status`, `player_id`), optionally one also eligible for `eligible`
- * and carrying ESPN's `injury_status`.
+ * and carrying ESPN's `injury_status` — or, with `position` and `rank` instead of `slot`, the
+ * player a positional reference names (rankedPlayerOf).
  * @param {unknown} result an espn_get_roster envelope
- * @param {{ step: string, slot: string, eligible?: string, injury_status?: string }} spec
+ * @param {{ step: string, slot: string, eligible?: string, injury_status?: string }
+ *   | { step: string, position: string, rank: number }} spec
  * @returns {number}
  */
 export function playerOf(result, spec) {
@@ -164,6 +202,7 @@ export function playerOf(result, spec) {
     isRecord(result) && isRecord(result["data"]) ? result["data"]["players"] : undefined;
   if (!Array.isArray(players))
     throw new Error(`$player "${spec.step}": the result has no data.players`);
+  if (!("slot" in spec)) return rankedPlayerOf(players, spec);
   for (const p of players) {
     if (!isRecord(p) || p["slot"] !== spec.slot) continue;
     const slots = p["eligible_slots"];
@@ -252,16 +291,35 @@ export function resolveArgs(template, results) {
   }
   if (Object.hasOwn(template, "$player")) {
     const spec = template["$player"];
-    if (!isRecord(spec) || typeof spec["step"] !== "string" || typeof spec["slot"] !== "string") {
-      throw new Error("$player must be { step, slot, eligible? }");
+    const ranked =
+      isRecord(spec) &&
+      typeof spec["step"] === "string" &&
+      typeof spec["position"] === "string" &&
+      typeof spec["rank"] === "number" &&
+      Number.isInteger(spec["rank"]) &&
+      spec["rank"] >= 1;
+    if (
+      !isRecord(spec) ||
+      typeof spec["step"] !== "string" ||
+      (typeof spec["slot"] !== "string" && !ranked)
+    ) {
+      throw new Error(
+        "$player must be { step, slot, eligible?, injury_status? } or { step, position, rank }",
+      );
     }
     const done = results.get(spec["step"]);
     if (!done) throw new Error(`$player "${spec["step"]}": step has no result`);
+    if (ranked)
+      return playerOf(done.result, {
+        step: spec["step"],
+        position: String(spec["position"]),
+        rank: Number(spec["rank"]),
+      });
     const eligible = spec["eligible"];
     const status = spec["injury_status"];
     return playerOf(done.result, {
       step: spec["step"],
-      slot: spec["slot"],
+      slot: String(spec["slot"]),
       ...(typeof eligible === "string" ? { eligible } : {}),
       ...(typeof status === "string" ? { injury_status: status } : {}),
     });
