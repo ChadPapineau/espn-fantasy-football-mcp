@@ -41,8 +41,10 @@ import {
   type LeagueDigestSection,
   type LiveMatchup,
   type LiveScoreboardData,
+  type LiveSide,
   type Matchup,
   type ProSchedule,
+  type Roster,
   type ScoreboardData,
   type ScoringDigest,
   type SeedingEvidence,
@@ -73,6 +75,7 @@ import { defineTool, dropLastTrim, type ToolContext } from "../define.js";
 import {
   clockWeek,
   isDegradable,
+  isOptionalReadFailure,
   leagueOf,
   leagueRef,
   platformInput,
@@ -883,6 +886,51 @@ function asLive(m: Matchup): LiveMatchup {
   };
 }
 
+/** A side's starters by their game's state (plan 07 A4 `players { final, live, pending }`). */
+export type StarterGameCounts = NonNullable<LiveSide["players"]>;
+
+/**
+ * Each team's `players { final, live, pending }` for week `w` (plan 07 A4; research 04 §B.1.7 "in
+ * progress" = validForLocking && !statsOfficial && now ≥ date): its starters — every filled slot but
+ * the bench and IR, FLEX included — counted by their game's state, read exactly as espn_get_roster's
+ * `game_state` reads it (schedule.ts lockPlan over the same pro schedule at the call's clock), so
+ * the counts match each starter's roster row. `final` → final; `in` → live; `pre` and `tbd` (a game
+ * not started, or one whose start is not set yet) → pending. A starter on bye (or with no NFL team)
+ * has no game this week: his points are settled at 0, so he counts as final — the live matchup
+ * engine's reading (analytics/matchup.ts treats `bye` as `final`). An empty starting slot holds no
+ * player and is not counted: final + live + pending is the number of filled starting slots.
+ */
+export function starterGameCounts(
+  rosters: readonly Roster[],
+  schedule: ProSchedule,
+  w: Week,
+  nowMs: number,
+): ReadonlyMap<number, StarterGameCounts> {
+  const out = new Map<number, StarterGameCounts>();
+  for (const r of rosters) {
+    const starters = r.entries.filter((e) => e.slot_class === "starter" || e.slot_class === "flex");
+    const plan = lockPlan(
+      starters.map((e) => ({
+        player_id: e.player.ref.id,
+        pro_team_id: e.player.pro_team_id,
+        lineup_locked: e.lineup_locked,
+      })),
+      schedule,
+      w,
+      null,
+      nowMs,
+    );
+    const counts = { final: 0, live: 0, pending: 0 };
+    for (const p of plan.players) {
+      if (p.game_state === "in") counts.live++;
+      else if (p.game_state === "pre" || p.game_state === "tbd") counts.pending++;
+      else counts.final++;
+    }
+    out.set(r.team.team_id, counts);
+  }
+  return out;
+}
+
 /** A4 `espn_get_live_scoreboard`. */
 export const getLiveScoreboard = defineTool({
   name: "espn_get_live_scoreboard",
@@ -930,6 +978,31 @@ export const getLiveScoreboard = defineTool({
     ).catch(() => null);
     const st = sched === null ? null : weekGameState(sched.schedule, w, ctx.nowMs);
     if (st === null) warnings.push("pro schedule unavailable: game window unknown");
+    // each side's starters by game state (plan 07 A4 `players`), from the week's rosters and the same
+    // pro schedule the game window reads (no schedule: null, the warning above says why); read
+    // after the live view and the schedule, so a cold call's budget goes to those first
+    let counts: ReadonlyMap<number, StarterGameCounts> | null = null;
+    if (sched !== null) {
+      const rosters = await withinBudget(
+        () => ctx.services.platform.getRosters(leagueRef(ctx), w, readOpts(ctx, args)),
+        warnings,
+      ).catch((e: unknown) => {
+        if (!isOptionalReadFailure(e)) throw e;
+        warnings.push("espn:mRoster unavailable: players { final, live, pending } is null");
+        return null;
+      });
+      if (rosters !== null)
+        counts = starterGameCounts(take(ctx, rosters, inputs), sched.schedule, w, ctx.nowMs);
+    }
+    const withCounts = (side: LiveSide): LiveSide => ({
+      ...side,
+      players: counts?.get(side.team_id) ?? null,
+    });
+    const counted = matchups.map((m) => ({
+      ...m,
+      home: withCounts(m.home),
+      away: m.away === null ? null : withCounts(m.away),
+    }));
     const data: LiveScoreboardData = {
       week: w,
       game_window: {
@@ -937,8 +1010,8 @@ export const getLiveScoreboard = defineTool({
         games_in_progress: st === null ? [] : [...st.games_in_progress],
         next_kickoff: st?.next_kickoff ?? null,
       },
-      matchups,
-      my_matchup: matchups.find((m) => m.is_mine)?.matchup_id ?? null,
+      matchups: counted,
+      my_matchup: counted.find((m) => m.is_mine)?.matchup_id ?? null,
     };
     return {
       data,
