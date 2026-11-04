@@ -173,6 +173,12 @@ export interface UpstreamBudget {
   readonly signal: AbortSignal;
   used(): number;
   tryConsume(): boolean;
+  /**
+   * Gives back one request `tryConsume` took for a read that never sent it because the cookie gate
+   * refused it before the first attempt went out (changelog §R10, R10-19: a refused read spends
+   * none of the call's budget). Never below zero.
+   */
+  refund(): void;
   /** Whether a request or retry may still start at `nowMs` (before the deadline, not aborted). */
   canStart(nowMs: number): boolean;
 }
@@ -206,6 +212,9 @@ export function createUpstreamBudget(
       if (controller.signal.aborted || used >= max) return false;
       used++;
       return true;
+    },
+    refund: () => {
+      if (used > 0) used--;
     },
     canStart: (at: number) => !controller.signal.aborted && Number.isFinite(at) && at < deadline,
     abort: () => {

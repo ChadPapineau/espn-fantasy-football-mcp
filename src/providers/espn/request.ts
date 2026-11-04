@@ -279,6 +279,11 @@ export function parseJsonSafe(text: string): unknown {
   return JSON.parse(text, (k: string, v: unknown) => (k === "__proto__" ? undefined : v));
 }
 
+/** The cookie gate's answer for one read: the Cookie header, or null for a keyless request. */
+interface GateVerdict {
+  readonly cookie: string | null;
+}
+
 /** A reader's own limits: its call's budget, or the default ≤ 20 s window from now (no budget). */
 function partyOf(budget: UpstreamBudget | undefined, nowMs: number): CoalesceParty {
   return {
@@ -394,14 +399,17 @@ export class EspnRequester {
    * limiter row — nothing is sent, no row is written, the cookie never leaves the authority. A
    * policy that cannot be read refuses too (fail closed).
    */
-  private assertTlsVerified(view: EspnView): void {
-    let off: boolean;
+  /** Whether certificate verification is off process-wide (an unreadable answer reads as off). */
+  private tlsOff(): boolean {
     try {
-      off = (this.deps.tlsVerificationDisabled ?? tlsVerificationDisabled)();
+      return (this.deps.tlsVerificationDisabled ?? tlsVerificationDisabled)();
     } catch {
-      off = true;
+      return true;
     }
-    if (!off) return;
+  }
+
+  private assertTlsVerified(view: EspnView): void {
+    if (!this.tlsOff()) return;
     this.deps.log?.warn("espn.tls_verification_disabled", { view });
     throw new EspnTlsPolicyError(view);
   }
@@ -672,12 +680,24 @@ export class EspnRequester {
     const budget = opts.budget;
     if (budget !== undefined && !budget.canStart(now))
       return spent(new UpstreamBudgetExhausted(view, "deadline"));
+    // the cookie gate's verdict BEFORE the call's budget is charged (changelog §R10, R10-19; plan 01
+    // §5.6 counts upstream requests): a read it refuses — ESPN_REQUIRES_COOKIES, the
+    // ESPN_AUTH_REJECTED short-circuit — sends nothing and so spends none of the ≤ 3, and a later
+    // read of the call then meets its own verdict, never a budget no request used. The budget is
+    // charged only for a request about to be sent; the refusal propagates as before (never a stale
+    // answer: it is no DEGRADED_CODES outage — R10-18). Asked by a reader that would start the read
+    // (a joiner shares the leader's request and cookie), and only while TLS verification holds, so
+    // a request the TLS policy refuses still loads no secret (fetchFresh refuses it first)
+    let gate: GateVerdict | null = null;
+    if (budget !== undefined && !this.coalescer.has(key) && !this.tlsOff())
+      gate = { cookie: await this.cookies.forRequest(spec.cookies, spec.target.route) };
     if (budget !== undefined && !this.coalescer.has(key) && !budget.tryConsume())
       return spent(new UpstreamBudgetExhausted(view, "budget"));
     const run = this.coalescer.run(
       key,
-      partyOf(budget, now),
-      (limits) => this.fetchFresh(spec, usable?.entry ?? null, limits, key, cacheable),
+      partyOf(budget, this.deps.clock.nowMs()),
+      (limits) =>
+        this.fetchFresh(spec, usable?.entry ?? null, limits, key, cacheable, gate, budget),
       (why) => leaveError(why, view),
     );
     let fresh: Fresh;
@@ -899,12 +919,17 @@ export class EspnRequester {
     limits: SharedLimits,
     key: string,
     cacheable: boolean,
+    /** The cookie gate's verdict the starting reader already had (read), else null: asked here. */
+    gate: GateVerdict | null = null,
+    /** The starting reader's budget (it paid for this read — read), refunded on a refusal. */
+    budget?: UpstreamBudget,
   ): Promise<Fresh> {
     const target = spec.target;
     const view = primaryView(target);
     const signal = limits.signal;
     this.assertTlsVerified(view);
-    let cookie = await this.cookies.forRequest(spec.cookies, target.route);
+    let cookie =
+      gate !== null ? gate.cookie : await this.cookies.forRequest(spec.cookies, target.route);
     let last: EspnUpstreamError | null = null;
     const acquire = async (keyless: boolean): Promise<LimiterTicket> => {
       try {
@@ -942,9 +967,18 @@ export class EspnRequester {
       // since is the gate's to hand out
       if (cookie !== null && this.cookies.rejectedNow()) {
         ticket.finish("client_error");
-        cookie = await this.cookies.forRequest(spec.cookies, target.route);
-        if (cookie !== null && this.cookies.rejectedNow())
+        // the gate's refusal here (or its rejected cookie) sends nothing: the request this read was
+        // charged for never goes out, so the call gets it back (changelog §R10, R10-19)
+        try {
+          cookie = await this.cookies.forRequest(spec.cookies, target.route);
+        } catch (e) {
+          if (attempt === 1) budget?.refund();
+          throw e;
+        }
+        if (cookie !== null && this.cookies.rejectedNow()) {
+          if (attempt === 1) budget?.refund();
           throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
+        }
         ticket = await acquire(cookie === null);
       }
       // what the row records when the attempt ends before an upstream verdict was classified:

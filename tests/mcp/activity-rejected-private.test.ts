@@ -117,9 +117,10 @@ describe("R10-11 on a private league under a rejected session (R3B-CS-1)", () =>
   it.each([
     // the feed (10 min) and the rosters (5 min) stale, the standings (15 min) still cached
     [11, ["rosters", "free-agent pool"]],
-    // every one of them stale: the standings refuse too (the pool is then past the call's
-    // 3-request budget — each refused read was counted against it — and said so on its own line)
-    [20, ["standings", "rosters"]],
+    // every one of them stale: the standings refuse too, and so does the pool — a refused read
+    // spends none of the call's 3-request budget (changelog §R10, R10-19: before, the three
+    // refusals "used" it and the pool was said not requested for a budget no request had used)
+    [20, ["standings", "rosters", "free-agent pool"]],
   ] as const)(
     "%i minutes on: partial from the persisted history, with the reason, and no request",
     async (minutes, refusedReads) => {
@@ -135,9 +136,35 @@ describe("R10-11 on a private league under a rejected session (R3B-CS-1)", () =>
       // the first call's reads)
       const line = body.warnings.find((w) => w.includes("need one on a league not known"));
       expect(line).toBe(activityLeagueReadsWarning("rejected", refusedReads));
+      // never a budget no request used (R10-19)
+      expect(body.warnings.filter((w) => w.includes("budget"))).toEqual([]);
       const totals = (body.data as { transactions: { adds: number } }).transactions;
       expect(totals.adds).toBeGreaterThan(0);
       // the short-circuit: nothing was sent, least of all the rejected cookie
+      expect(sent.slice(n)).toEqual([]);
+    },
+  );
+
+  it.each([false, true])(
+    "R10-18: the league settings stale too (allow_stale %s): it fails as every tool does — ESPN_AUTH_REJECTED with the fix, no request, never stale settings",
+    async (allowStale) => {
+      // past the settings' 24 h TTL, inside their 7-day hard limit: a stale body is cached, and a
+      // session refusal is never a reason to serve it (changelog §R10, R10-18)
+      if (!allowStale) world.clock.advance(25 * 60 * 60 * 1000);
+      const n = sent.length;
+      const r = await call(client.client, "espn_analyze_league_activity", {
+        since_days: 30,
+        ...(allowStale ? { allow_stale: true } : {}),
+      });
+      expect(r.isError).toBe(true);
+      const err = (r.body as { error: { code: string; hint: string; retryable: boolean } }).error;
+      expect(err.code).toBe("ESPN_AUTH_REJECTED");
+      expect(err.hint).toContain("eff setup");
+      expect(err.retryable).toBe(false);
+      expect(sent.slice(n)).toEqual([]);
+      // the league tool reads the same settings and fails the same way: one rule for every tool
+      const lg = await call(client.client, "espn_get_league");
+      expect(codeOf(lg.body)).toBe("ESPN_AUTH_REJECTED");
       expect(sent.slice(n)).toEqual([]);
     },
   );
