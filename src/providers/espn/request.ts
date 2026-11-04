@@ -85,7 +85,12 @@ import {
   type AttemptAnswer,
   type FetchLike,
 } from "./transport.js";
-import { CookieGate, type CookieUse, type PublicityStore } from "./auth-gate.js";
+import {
+  CookieGate,
+  EspnCredentialError,
+  type CookieUse,
+  type PublicityStore,
+} from "./auth-gate.js";
 import { ESPN_BACKOFF } from "../../config/schema.js";
 import type { EspnView } from "./types.js";
 import {
@@ -899,8 +904,20 @@ export class EspnRequester {
     const view = primaryView(target);
     const signal = limits.signal;
     this.assertTlsVerified(view);
-    const cookie = await this.cookies.forRequest(spec.cookies, target.route);
+    let cookie = await this.cookies.forRequest(spec.cookies, target.route);
     let last: EspnUpstreamError | null = null;
+    const acquire = async (keyless: boolean): Promise<LimiterTicket> => {
+      try {
+        return await this.limiter.acquire({
+          keyless,
+          deadlineAtMs: () => limits.deadline(),
+          signal,
+        });
+      } catch (e) {
+        if (last !== null && e instanceof EspnRateLimitedError) throw last;
+        throw e;
+      }
+    };
     for (let attempt = 1; ; attempt++) {
       // the hold before every attempt: a first attempt inside it is refused at once; a retry's own
       // wait already covers this read's hint (retryWaitMs), and what is left after it — a timer that
@@ -915,16 +932,20 @@ export class EspnRequester {
         if (last === null) throw new EspnRateLimitedError(held, "retry_after");
         throw last;
       }
-      let ticket: LimiterTicket;
-      try {
-        ticket = await this.limiter.acquire({
-          keyless: cookie === null,
-          deadlineAtMs: () => limits.deadline(),
-          signal,
-        });
-      } catch (e) {
-        if (last !== null && e instanceof EspnRateLimitedError) throw last;
-        throw e;
+      let ticket = await acquire(cookie === null);
+      // the session was rejected while this attempt waited (the limiter's 1/s wait, a retry's
+      // backoff): a concurrent read's cookie-bearing 401 recorded it, and the header held from
+      // before is that rejected cookie — never sent (plan 02 §2.1 "Short-circuit": zero requests
+      // once rejected; the round-3 review's R3B-CS-2). The gate is asked again: a league known
+      // public reads keyless (changelog §R10, R10-10), any other read is refused with no request
+      // (the ticket is finished as unsent, never a counted failure); a value `eff setup` stored
+      // since is the gate's to hand out
+      if (cookie !== null && this.cookies.rejectedNow()) {
+        ticket.finish("client_error");
+        cookie = await this.cookies.forRequest(spec.cookies, target.route);
+        if (cookie !== null && this.cookies.rejectedNow())
+          throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
+        ticket = await acquire(cookie === null);
       }
       // what the row records when the attempt ends before an upstream verdict was classified:
       // nothing went out (our own refusal) — never a network failure the breaker would count

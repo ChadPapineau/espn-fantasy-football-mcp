@@ -535,6 +535,52 @@ describe("the short-circuit (plan 02 §2.1; plan 10 A2b: zero requests while rej
     w.repo.row = stateRow({ state: "validated", stored_at: T0, last_accepted_at: T3 });
     expect((await auth.getCookieHeader()).ok).toBe(true);
   });
+  it("a label still `stored` when another process recorded this value rejected: adopted from the metadata, the secret never loaded (R3B-CS-4)", async () => {
+    // the label is `stored` from startup and nothing is loaded yet; then a job (daily_job) sees ESPN
+    // reject this very value and writes the row. Before, the first ask loaded the full secret (the
+    // keychain's espn_s2 and SWID), registered it, and only then read the row and went rejected
+    for (const label of ["stored", "validated"] as const) {
+      const w = world({ row: stateRow({ state: label, stored_at: T0 }) });
+      const auth = w.make();
+      expect(auth.state()).toBe(label);
+      w.repo.row = stateRow({
+        state: "rejected",
+        stored_at: T0,
+        last_rejected_at: T2,
+        rejected_since: T2,
+        updated_by: "daily_job",
+      });
+      for (let i = 0; i < 3; i++)
+        expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "rejected" });
+      expect(w.store.reads, label).toBe(0);
+      expect(w.reg.registered, label).toEqual([]);
+      expect(auth.holdsSecret()).toBe(false);
+      expect(auth.state()).toBe("rejected");
+      // the rejection's time is the row's: an acceptance after it lifts it (the secret loads then)
+      w.repo.row = stateRow({ state: "validated", stored_at: T0, last_accepted_at: T3 });
+      expect((await auth.getCookieHeader()).ok).toBe(true);
+      expect(w.store.reads).toBe(1);
+    }
+  });
+  it("a rejected row naming no value (no stored_at) is taken to describe the stored one: no secret read", async () => {
+    const w = world({ row: stateRow({ state: "stored", stored_at: T0 }) });
+    const auth = w.make();
+    w.repo.row = stateRow({ state: "rejected", stored_at: null, last_rejected_at: T2 });
+    expect(await auth.getCookieHeader()).toEqual({ ok: false, reason: "rejected" });
+    expect(w.store.reads).toBe(0);
+  });
+  it("a rejected row for an OLDER value while setup has stored a newer one: the new value loads and is sent", async () => {
+    const w = world({ row: stateRow({ state: "stored", stored_at: T0 }) });
+    const auth = w.make();
+    // setup stores the new value first, then rewrites the row; between the two the row still
+    // records the old value's rejection
+    w.repo.row = stateRow({ state: "rejected", stored_at: T0, last_rejected_at: T1 });
+    const fresh = fakeCookies("rerun-after-reject");
+    w.store.set(fresh, T3);
+    expect(await auth.getCookieHeader()).toEqual({ ok: true, header: buildCookieHeader(fresh) });
+    expect(w.store.reads).toBe(1);
+    expect(auth.state()).toBe("stored");
+  });
   it("startup in rejected from a row without stored_at: the stored value is taken as the rejected one", async () => {
     const w = world({
       row: stateRow({ state: "rejected", stored_at: null, last_rejected_at: T1 }),

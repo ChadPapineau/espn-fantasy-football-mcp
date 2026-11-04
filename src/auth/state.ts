@@ -151,6 +151,9 @@ export function createCredentialAuthority(
     row !== null && row.league_id === leagueId ? row : null;
   const forValue = (row: CredentialStateRow | null, storedAt: string): row is CredentialStateRow =>
     row !== null && row.league_id === leagueId && row.stored_at === storedAt;
+  /** This league's row when it records a rejection, else null. */
+  const rejectedRowOf = (row: CredentialStateRow | null): CredentialStateRow | null =>
+    row !== null && row.state === "rejected" ? row : null;
 
   // the install's store follows the backend the row records: `eff setup --storage …` writes the row
   // naming the store it moved to, so this process — and the probe read through the same store —
@@ -322,8 +325,14 @@ export function createCredentialAuthority(
     let kind: CredentialStoreKind;
     /** The row's value when the last store operation started. */
     let before: string | null;
+    // another process recorded this league's value rejected while this process's label still reads
+    // otherwise (a job, `eff doctor`, the daily check): the metadata alone tells whether the stored
+    // value is the rejected one, so the secret of a value nobody will send is never loaded (the
+    // round-3 review's R3B-CS-4; changelog §R10, R10-10: "the authority reads metadata only")
+    const rejectedElsewhere =
+      loaded === null && state !== "rejected" ? rejectedRowOf(ownRow(quietRow())) : null;
     try {
-      if (loaded === null && state !== "rejected") {
+      if (loaded === null && state !== "rejected" && rejectedElsewhere === null) {
         const r = await served(() => opts.store.read());
         fresh = r.value;
         kind = r.kind;
@@ -341,6 +350,21 @@ export function createCredentialAuthority(
     // the install moved to the other backend: the value held came from the one setup emptied
     if (loadedKind !== null && loadedKind !== kind) drop();
     if (meta === null) return nothingStored(kind, before);
+    // the row another process wrote rejects this very value (a row without stored_at is taken to
+    // describe the stored one, as below): adopt its rejection and its time, so the short-circuit
+    // answers from the metadata; another value stored since is read and settled as before
+    if (
+      rejectedElsewhere !== null &&
+      (rejectedElsewhere.stored_at ?? meta.storedAt) === meta.storedAt
+    )
+      markRejected(
+        meta.storedAt,
+        msOf(
+          rejectedElsewhere.last_rejected_at ??
+            rejectedElsewhere.rejected_since ??
+            rejectedElsewhere.updated_at,
+        ),
+      );
 
     // a rejection whose value is unknown (a row without stored_at) is taken to be the stored one:
     // never send a cookie that may be the rejected one; a later `eff setup` still lifts it
