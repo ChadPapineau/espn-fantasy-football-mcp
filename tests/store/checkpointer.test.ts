@@ -141,7 +141,11 @@ describe("the server's store: its connection never checkpoints, the worker does"
       "a checkpoint",
     );
     expect(cp?.stats().last?.busy).toBe(0);
-    await new Promise((r) => setTimeout(r, 100));
+    // a barrier, not a pause: the worker's messages arrive in order, so the reply to an asked
+    // checkpoint comes after every threshold checkpoint it ran before (a second one of the long
+    // log, posted while a loaded main thread had not yet read it, was counted after `runs` and
+    // failed this test under the full suite's load), and the log is empty after it
+    expect((await cp?.checkpointNow())?.busy).toBe(0);
     // under the threshold it waits: nothing more is copied, however many polls pass
     const runs = cp?.stats().checkpoints ?? 0;
     const left = pending();
