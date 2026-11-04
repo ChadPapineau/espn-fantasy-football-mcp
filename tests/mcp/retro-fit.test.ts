@@ -20,17 +20,20 @@ import {
   type Envelope,
 } from "../../src/mcp/envelope.js";
 import { REGISTRY } from "../../src/mcp/registry.js";
-import { analyzeRetrospective } from "../../src/mcp/tools/reclog.js";
+import { analyzeRetrospective, callsByKind } from "../../src/mcp/tools/reclog.js";
 
 const NOW = Date.parse("2026-10-06T18:00:00Z");
 const RID = "r-0123456789ab";
 
+/** The kinds the property's calls cycle through (RECOMMENDATION_KINDS values, a week of several). */
+const KINDS = ["lineup", "waiver", "trade"] as const;
+
 /** A call row shaped as E13's (its texts at `textChars`, a note or none), numbered `i`. */
-function callRow(i: number, textChars: number, note: boolean) {
+function callRow(i: number, textChars: number, note: boolean, kinds = 1) {
   const text = '"\\'.repeat(Math.ceil(textChars / 2)).slice(0, textChars);
   return {
     log_id: `rec-${String(i).padStart(4, "0")}`,
-    kind: "lineup",
+    kind: KINDS[i % kinds] ?? "lineup",
     action: text,
     note: note ? text : null,
     followed: "unknown",
@@ -55,8 +58,17 @@ function retroEnv(calls: ReturnType<typeof callRow>[], summaryChars = 300): Enve
 }
 
 const options = fitOptionsOf(analyzeRetrospective, {});
-const warningFor = (kept: number, total: number): string =>
-  `result truncated to ${String(kept)} of ${String(total)} calls to fit the ${String(ANALYTICS_BUDGET_CHARS)}-character budget; ${TRUNCATION_HINTS.retrospective}`;
+/**
+ * The warning for the first `kept` of `calls` (changelog §R10, R10-25): the R10-20 sentence, then
+ * the calls kept and in the week per kind, in RECOMMENDATION_KINDS order (counted here by hand).
+ */
+const warningFor = (kept: number, calls: readonly { kind: string }[]): string => {
+  const per = KINDS.filter((k) => calls.some((c) => c.kind === k)).map((k) => {
+    const of = (list: readonly { kind: string }[]) => list.filter((c) => c.kind === k).length;
+    return `${k} ${String(of(calls.slice(0, kept)))} of ${String(of(calls))}`;
+  });
+  return `result truncated to ${String(kept)} of ${String(calls.length)} calls to fit the ${String(ANALYTICS_BUDGET_CHARS)}-character budget; ${TRUNCATION_HINTS.retrospective}; calls kept by kind: ${per.join(", ")}`;
+};
 
 describe("E13 keeps the longest prefix of whole calls that fits C8's budget (R10-20)", () => {
   it("the registered definition: keepMost, not pageable, the hint naming kinds", () => {
@@ -66,6 +78,7 @@ describe("E13 keeps the longest prefix of whole calls that fits C8's budget (R10
       pageable: false,
       hint: TRUNCATION_HINTS.retrospective,
       keepMost: true,
+      detail: callsByKind,
     });
     expect(TRUNCATION_HINTS.retrospective).toContain("kinds");
     expect(TRUNCATION_HINTS.retrospective).toContain("does not page");
@@ -78,8 +91,9 @@ describe("E13 keeps the longest prefix of whole calls that fits C8's budget (R10
         fc.integer({ min: 0, max: 200 }),
         fc.boolean(),
         fc.integer({ min: 0, max: 3000 }),
-        (n, textChars, note, summaryChars) => {
-          const calls = Array.from({ length: n }, (_, i) => callRow(i, textChars, note));
+        fc.integer({ min: 1, max: KINDS.length }),
+        (n, textChars, note, summaryChars, kinds) => {
+          const calls = Array.from({ length: n }, (_, i) => callRow(i, textChars, note, kinds));
           const env = retroEnv(calls, summaryChars);
           const before = fitLengthOf(serializeEnvelope(env));
           const r = fitToBudget(env, ANALYTICS_BUDGET_CHARS, "calls", options);
@@ -95,14 +109,14 @@ describe("E13 keeps the longest prefix of whole calls that fits C8's budget (R10
           // the tool's own order: a prefix, every kept call whole
           if (JSON.stringify(kept) !== JSON.stringify(calls.slice(0, kept.length))) return false;
           // said, naming the narrowing input; never a paging promise
-          if (out.warnings.at(-1) !== warningFor(kept.length, n)) return false;
+          if (out.warnings.at(-1) !== warningFor(kept.length, calls)) return false;
           if (out.page !== undefined) return false;
           // maximal: the same answer one call longer is over the budget
           const oneMore = fitLengthOf(
             serializeEnvelope({
               ...out,
               data: { ...out.data, calls: calls.slice(0, kept.length + 1) },
-              warnings: [...env.warnings, warningFor(kept.length + 1, n)],
+              warnings: [...env.warnings, warningFor(kept.length + 1, calls)],
             }),
           );
           return kept.length < n && oneMore > ANALYTICS_BUDGET_CHARS;
@@ -149,7 +163,7 @@ describe("E13 keeps the longest prefix of whole calls that fits C8's budget (R10
       serializeEnvelope({
         ...r.envelope,
         data: { ...r.envelope.data, calls: calls.slice(0, k + 1) },
-        warnings: [...r.envelope.warnings.slice(0, -1), warningFor(k + 1, 80)],
+        warnings: [...r.envelope.warnings.slice(0, -1), warningFor(k + 1, calls)],
       }),
     );
     expect(oneMore).toBeGreaterThan(ANALYTICS_BUDGET_CHARS);

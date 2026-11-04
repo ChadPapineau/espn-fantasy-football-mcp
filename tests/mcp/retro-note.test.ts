@@ -214,18 +214,18 @@ describe("E13 at the recommendation log's own bound (changelog §R10, R10-13)", 
       expect(body.truncated).toBe(true);
       // the longest prefix of whole calls that fits (changelog §R10, R10-20), said with the
       // narrowing input — E13 does not page
-      const said = `result truncated to ${String(calls.length)} of 100 calls to fit the ${String(ANALYTICS_BUDGET_CHARS)}-character budget; ${TRUNCATION_HINTS.retrospective}`;
+      // with the calls kept and in the week per kind (changelog §R10, R10-25): all 100 are lineup
+      // calls, so the count says narrowing by kinds cannot help
+      const saidFor = (k: number) =>
+        `result truncated to ${String(k)} of 100 calls to fit the ${String(ANALYTICS_BUDGET_CHARS)}-character budget; ${TRUNCATION_HINTS.retrospective}; calls kept by kind: lineup ${String(k)} of 100`;
+      const said = saidFor(calls.length);
       expect(body.warnings).toContain(said);
       // maximal: the same answer with one more of these calls is over the budget (halving kept a
       // few of 100 in 7 927 characters)
       const oneMore = JSON.stringify({
         ...r.body,
         data: { ...body.data, calls: [...calls, calls[calls.length - 1]] },
-        warnings: body.warnings.map((x) =>
-          x === said
-            ? said.replace(`to ${String(calls.length)} of`, `to ${String(calls.length + 1)} of`)
-            : x,
-        ),
+        warnings: body.warnings.map((x) => (x === said ? saidFor(calls.length + 1) : x)),
       }).length;
       expect(oneMore).toBeGreaterThan(ANALYTICS_BUDGET_CHARS);
       console.log(

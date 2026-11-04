@@ -161,6 +161,11 @@ export interface ToolDefinition<S extends z.ZodType, D> {
   readonly fit?: "halve" | "most";
   /** The truncation warning's fixed advice. */
   readonly hint?: string;
+  /**
+   * A fixed-text detail the truncation warning adds (envelope.ts FitOptions.detail): counts and
+   * fixed vocabulary only — E13's calls kept and in the week per kind (changelog §R10, R10-25).
+   */
+  readonly fitDetail?: (kept: readonly unknown[], all: readonly unknown[]) => string | null;
   /** The output schema's wire form (default `outline`). */
   readonly wire?: WireOutputMode;
   /**
@@ -183,6 +188,7 @@ export interface AnyToolDefinition {
   readonly pageable?: boolean;
   readonly fit?: "halve" | "most";
   readonly hint?: string;
+  readonly fitDetail?: (kept: readonly unknown[], all: readonly unknown[]) => string | null;
   readonly wire: WireOutputMode;
   readonly opaqueInput?: Readonly<Record<string, string>>;
   /** The bare-text paths the data schema marks (derived once at definition time). */
@@ -215,6 +221,7 @@ export function defineTool<S extends z.ZodType, D>(def: ToolDefinition<S, D>): A
     ...(def.pageable === undefined ? {} : { pageable: def.pageable }),
     ...(def.fit === undefined ? {} : { fit: def.fit }),
     ...(def.hint === undefined ? {} : { hint: def.hint }),
+    ...(def.fitDetail === undefined ? {} : { fitDetail: def.fitDetail }),
     wire: def.wire ?? "outline",
     ...(def.opaqueInput === undefined ? {} : { opaqueInput: def.opaqueInput }),
     bareFields: bareFieldsFromSchema(def.data),
@@ -387,11 +394,11 @@ export function truncationHint(
 
 /**
  * How a tool's over-budget result is fitted (envelope.ts fitToBudget): its paging, its truncation
- * advice, the result's own trims (run first), and `keepMost` when the tool keeps the longest prefix
- * of whole items that fits (`fit: "most"`) instead of halving.
+ * advice, the result's own trims (run first), `keepMost` when the tool keeps the longest prefix
+ * of whole items that fits (`fit: "most"`) instead of halving, and the warning's fixed detail.
  */
 export function fitOptionsOf(
-  def: Pick<AnyToolDefinition, "hint" | "budget" | "pageable" | "fit">,
+  def: Pick<AnyToolDefinition, "hint" | "budget" | "pageable" | "fit" | "fitDetail">,
   args: unknown,
   trims?: readonly BudgetTrim[],
 ): FitOptions {
@@ -400,6 +407,7 @@ export function fitOptionsOf(
     hint: truncationHint(def, args),
     ...(trims === undefined ? {} : { trims }),
     ...(def.fit === "most" ? { keepMost: true } : {}),
+    ...(def.fitDetail === undefined ? {} : { detail: def.fitDetail }),
   };
 }
 

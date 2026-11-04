@@ -304,6 +304,37 @@ async function lastFinalWeek(
   return Math.max(1, current - 1);
 }
 
+/** The kind a call row counts under in E13's truncation detail: its own when one of ours, else `other`. */
+function kindOfCall(c: unknown): string {
+  const k = typeof c === "object" && c !== null ? (c as { kind?: unknown }).kind : undefined;
+  return typeof k === "string" && (RECOMMENDATION_KINDS as readonly string[]).includes(k)
+    ? k
+    : "other";
+}
+
+/**
+ * E13's truncation detail (changelog §R10, R10-25, extending R10-20): the calls kept and the calls
+ * in the week, per kind, in RECOMMENDATION_KINDS order — counts and kind names only, a fixed text —
+ * so retro can tell whether narrowing by `kinds` can help (a week whose calls are all one kind
+ * cannot narrow further). Null for an empty list.
+ */
+export function callsByKind(kept: readonly unknown[], all: readonly unknown[]): string | null {
+  const count = (list: readonly unknown[]): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const c of list) {
+      const k = kindOfCall(c);
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  };
+  const total = count(all);
+  const have = count(kept);
+  const parts = [...RECOMMENDATION_KINDS, "other"]
+    .filter((k) => total.has(k))
+    .map((k) => `${k} ${String(have.get(k) ?? 0)} of ${String(total.get(k) ?? 0)}`);
+  return parts.length === 0 ? null : `calls kept by kind: ${parts.join(", ")}`;
+}
+
 /** E13 `espn_analyze_retrospective`. */
 export const analyzeRetrospective = defineTool({
   name: "espn_analyze_retrospective",
@@ -324,6 +355,8 @@ export const analyzeRetrospective = defineTool({
   // truncation warning names its narrowing input (`kinds`)
   fit: "most",
   hint: TRUNCATION_HINTS.retrospective,
+  // the warning also counts the calls kept and in the week per kind (R10-25)
+  fitDetail: callsByKind,
   run: async (args, ctx) => {
     const inputs: InputStamp[] = [];
     const warnings: string[] = [];

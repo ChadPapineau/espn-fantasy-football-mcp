@@ -539,6 +539,13 @@ export interface FitOptions {
    * ⌈log₂ n⌉ serialisations (≤ 7 for a 100-item page), as many as the halving loop's worst case.
    */
   readonly keepMost?: boolean;
+  /**
+   * A fixed-text detail the truncation warning adds after its hint, from the items kept and the
+   * whole list — counts and fixed vocabulary only, never a value read from the data (E13's calls
+   * kept and in the week per kind: changelog §R10, R10-25). Null adds nothing. Its length is part of
+   * every candidate's measured size, so the fit stays the longest prefix that fits.
+   */
+  readonly detail?: (kept: readonly unknown[], all: readonly unknown[]) => string | null;
 }
 
 const MAX_TRIM_STEPS = 128;
@@ -581,12 +588,13 @@ function withList<D>(
   env: Envelope<D>,
   listKey: string,
   items: unknown[],
-  total: number,
+  all: readonly unknown[],
   budget: number,
   opts: FitOptions,
 ): Envelope<D> {
   const data = { ...(env.data as Record<string, unknown>), [listKey]: items } as D;
-  const warning = `result truncated to ${String(items.length)} of ${String(total)} ${listKey} to fit the ${String(budget)}-character budget; ${opts.hint}`;
+  const detail = opts.detail?.(items, all) ?? null;
+  const warning = `result truncated to ${String(items.length)} of ${String(all.length)} ${listKey} to fit the ${String(budget)}-character budget; ${opts.hint}${detail === null ? "" : `; ${detail}`}`;
   const warnings = [...env.warnings, warning];
   if (env.page === undefined) return { ...env, data, truncated: true, warnings };
   if (!opts.pageable) {
@@ -624,6 +632,7 @@ export function fitToBudget<D>(
         pageable: opts.pageable,
         hint: opts.hint,
         ...(opts.keepMost === true ? { keepMost: true } : {}),
+        ...(opts.detail === undefined ? {} : { detail: opts.detail }),
       });
     }
   }
@@ -641,7 +650,7 @@ export function fitToBudget<D>(
     let best: Envelope<D> | null = null;
     while (lo <= hi) {
       const mid = Math.floor((lo + hi) / 2);
-      const candidate = withList(env, listKey, list.slice(0, mid), total, budget, opts);
+      const candidate = withList(env, listKey, list.slice(0, mid), list, budget, opts);
       if (fitSize(candidate) <= budget) {
         best = candidate;
         lo = mid + 1;
@@ -652,7 +661,7 @@ export function fitToBudget<D>(
   let n = total;
   while (n > 0) {
     n = Math.floor(n / 2);
-    const candidate = withList(env, listKey, list.slice(0, n), total, budget, opts);
+    const candidate = withList(env, listKey, list.slice(0, n), list, budget, opts);
     if (fitSize(candidate) <= budget) return { ok: true, envelope: candidate };
   }
   return { ok: false, size };
