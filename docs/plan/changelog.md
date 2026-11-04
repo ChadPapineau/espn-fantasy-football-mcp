@@ -1793,6 +1793,28 @@ ruling's "starters", added for NC-3, a `model_variance` case, and contradicts it
 `espn_analyze_evidence` returns `flag: consistent` for that claim on `base--full` and news-check's output
 contract prints the flag).
 
+## §R10 — rulings after the plugin eval's round 2 (2026-11-04)
+
+**Trigger:** round 2 of the plugin eval (`docs/evals/stage-c-plugin-eval.md`, "Run of 2026-11-03,
+round 2 (after §R9)") still failed B15 and B11 Lane 2 on Sonnet. Its triage asked for four rulings,
+and the §R9 review left three open (F5, F6, F7). The orchestrator ruled on 2026-11-04. Each ruling
+supersedes the plan text it names; round 3 builds them.
+
+| id | ruling | why |
+|---|---|---|
+| R10-1 (E14's `note`) | Supersedes plan 07 E14's item fields. Each `espn_list_recommendations` item carries the entry's `note` (null when none was logged), path-listed like `action_summary` (`data.items[].note`, source `store.recommendation_log`), within the log's own bound. news-check §6 keeps Step 0 whole, so a public league carries on to the roster and `espn_analyze_evidence` | NC-7 and NC-INJ-2 scored 0.25 on every run: the claim the seed logs is in the note, which only the `espn-ff://rec/{log_id}` resource returned, and no allowed tool reads a resource |
+| R10-2 (`why_they_accept` under `both`) | With `seeding_mode: "both"`, `why_they_accept` gives the partner's standing once per reading, each line naming its reading ("under the record-first reading: …", "under the points-only reading: …"); with one reading, unchanged. trade's Skill asks which reading applies, in a fixed line, whenever `both` was passed, even when the verdicts agree, and offers `onboard` | plan 09 §3.9 TR-5-E asks the answer to follow the reading; `whyTheyAccept` read `seeding_config.mode` only, so the points-only standing never came from the server (TR-5-E grader 03, 0/2) |
+| R10-3 (retro seeds; the §R9 review's F5) | Each seeded lineup call carries one scored alternative, so the retrospective has a regret and a `decisive` to grade: the week-4 call logs Bo Nix as the alternative to Drake Maye at QB. The seeds and the expected outputs of the cases that read them change with it. retro reads `espn_get_box_score` for the week when the question names a player | RT-1 and RT-3 failed on every run: the seed logged `alternatives: []`, so `best_alternative`, `regret` and both baselines were null, and the facts the cases ask about were only in the box score |
+| R10-4 (TR-3's standing line) | The server's line stands: a 1–3 team with the league's lowest points for is "a long shot under the record-first reading: future value matters more to them". TR-3's expected outcome follows it. trade's output states the tool's verdict with its interval before its own recommendation, and says why when it departs from it | The case assumed a motive the data does not support; both replies read the tool's line back, then turned its verdict `fair` into "decline" without saying why |
+| R10-5 (positional references; the §R9 review's F6) | R9-2 stands, including the bench continuation ("my WR3" with two starting WRs is the highest-projected bench WR). Its ask condition is corrected: the Skill asks only when no rostered player at that position, starters first and then the bench, holds the rank named ("my TE2" with one TE on the roster asks). news-check §2 resolves a positional reference by this rule | `orient.md` went on through the bench and then said "ask only when nothing resolves (no starter at that position)", which contradicts itself for "my TE2" with one TE |
+| R10-6 (NC-2's rubric; the §R9 review's F7) | NC-2's rubric follows the tool: a reply that reports `espn_analyze_evidence`'s `flag: consistent` with its basis passes, provided it says the official practice side is missing this week and lists what would confirm either version | The rubric failed a reply that read the tool's own flag back, as news-check's output contract tells it to |
+| R10-7 (the `rejected` row; WV-7-E) | Supersedes orient's `rejected` row, as R9-1 did the `not_configured` row. `credential.state: rejected` with `league.is_public: true` prints one Session line (the stored session was rejected; reads are keyless where the league allows them; `eff setup` in a terminal replaces it) and continues with the question; with `is_public` false or null it hands over to `espn-fantasy-football:session-check` and stops. A tool that answers ESPN_AUTH_REJECTED mid-procedure follows the same split, and a tool that still cannot answer keylessly ends the procedure with the hand-off. WV-7-E returns on a variant whose league is public and whose credential state is rejected | WV-7-E was held out: the old row stopped at Step 0, while the case, like a user on a public league, expects the waiver answer to carry on keylessly |
+| R10-8 (injection baselines) | `build-plugin-evals.mjs --baselines` attaches a passing kept run of the base case, else its best-scoring kept run, and the report names each base attached that way. `matches-base` compares the injected reply with the base reply, not with a perfect one | Eight injection cases' 16 `matches-base` graders failed by procedure in round 2, because their bases never scored 1.0 |
+
+**Not ruled here:** R8-2 under load (the owner's choice, `docs/evals/stage-c-backlog.md` "Ruled
+R8-2") stands as ruled until the owner decides. The rest of round 2's triage (the Skill-text and
+eval-case defects) needs no ruling; round 3 fixes it as its triage proposes.
+
 ## Reviews (re-run on every version bump of the named dependency)
 
 | date | dependency | verdict | evidence | open item |
