@@ -566,7 +566,7 @@ Author in `skills/<name>/` → `trigger_eval.json` and three `evals.json` cases 
 | U-4 | Whether claude.ai zip upload tolerates Claude-Code-only frontmatter fields (sib 09 A-3) — `package_skill.py` rejects them, so `dist/skills-copy/` strips them regardless | one upload |
 | U-5 | ESPN league discovery for a SWID via `fan.api.espn.com` (03 §G.1 #16) — if it works, `espn_list_leagues` becomes a twin and `onboard` gains the sibling's step | a cookie-bearing probe by Chad |
 | U-6 | `espn_s2` lifetime and whether log-out / "log out everywhere" invalidates it (03 §G.1 #2) — `session-check`'s rotation advice is best-effort | the design does not depend on it |
-| U-7 | Whether anonymous callers ever see a public league's `mTransactions2` (03 §G.1 #5) — affects `fx-10h/public-league` | the probe league during fixture recording |
+| U-7 | Whether anonymous callers ever see a public league's `mTransactions2` (03 §G.1 #5) — affects `fx-10h/public-league` | **resolved 2026-11-04: yes** (a keyless read of a public probe league returned the full feed; `mPendingTransactions` stays empty anonymously) — plan changelog R10-10 |
 | U-8 | `waiverOrderReset` semantics and the non-FAAB `acquisitionType` value (03 §G.1 #8; 05 §9.1 #3) — `waivers` reads them and confirms via `waiverRank` movement after the first processed claim | the first in-season Wednesday |
 | U-9 | Whether a second claim in one run is processed at the new (bottom) position (05 §9.1 #1) — modelled conservatively as "yes" | `WAIVER` rows with the same `processDate` and `teamId` |
 | U-10 | Whether `disallowed-tools` also removes a deferred (Tool Search) MCP tool from the searchable pool, not only the visible one | a session with Tool Search on; the token gate is the guard either way |

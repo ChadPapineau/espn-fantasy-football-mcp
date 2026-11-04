@@ -304,7 +304,7 @@ Tool errors are results with `isError: true` [V-sib 01 §4.3]. Shape:
 | Code | Meaning | Retryable | Source of the rule |
 |---|---|---|---|
 | `ESPN_AUTH_REJECTED` | a cookie-bearing request got 401/403; credential state → `rejected`; every further cookie-bearing call short-circuits with this code until `eff setup` succeeds, `espn_check_auth` (one probe, ≤ 1/min) succeeds, `eff doctor --online` succeeds, or the daily `credential check` job's probe (≤ 2/day, plan 06 §1.4 — ADV OBJ-04) succeeds | no | [V-03 §C.3]; brief fact 7 |
-| `ESPN_REQUIRES_COOKIES` | the tool needs private data (transactions, pending claims, activity feed, live scoring detail) and no credential is stored | no (run `eff setup`) | [V-03 §F.2 degradation table] |
+| `ESPN_REQUIRES_COOKIES` | the tool needs private data (transactions on a private league, pending claims on any league — changelog R10-10 — activity feed, live scoring detail) and no credential is stored | no (run `eff setup`) | [V-03 §F.2 degradation table] |
 | `ESPN_DRIFT_DETECTED` | a required key was missing from a view, or a skeleton came back for a known view; names the JSON path and the view | no (a human reads the diff) | [V-03 §F.2]; D5 |
 | `ESPN_UPSTREAM_UNAVAILABLE` | 5xx / timeout / non-JSON body / breaker open after backoff; stale cache within the hard limit is returned as data with this code in `warnings` instead of failing | yes | §5.7 |
 | `ESPN_LEAGUE_NOT_FOUND` | 404 `GENERAL_NOT_FOUND` — the league id does not exist for that season | no | [V-03 §A.4] |
@@ -618,6 +618,6 @@ The tool set, prompts, Skills, phasing and the engine's internals (plans 07–10
 | U (03 §G.1 #1) | the private-league 401 body | first `eff setup` against the real league; the classifier is a table with fixtures |
 | U (03 §G.1 #2) | `espn_s2` lifetime | the design does not depend on it (D12; plan 02 §2) |
 | U (03 §G.1 #10, #11) | `If-None-Match` → 304; when `lineupLocked` flips; `statsOfficial`/`validForLocking` semantics (04 §B.1.6 infers them by count) | counters in `eff status`; the first in-season week |
-| U (03 §G.1 #5) | what `mLiveScoring` adds with cookies; whether anonymous callers ever see a public league's transactions | first cookie-bearing smoke; the probe league |
+| U (03 §G.1 #5) | what `mLiveScoring` adds with cookies; whether anonymous callers ever see a public league's transactions (**yes** for `mTransactions2`, 2026-11-04 — changelog R10-10; pending claims stay owner-scoped) | first cookie-bearing smoke; the probe league |
 | U (03 §G.1 #14) | Keychain partition behaviour between the setup CLI and the server binary (same node + same addon here, which should mean one ACL entry) | `eff doctor` performs one keychain read and reports whether a prompt appeared |
 | U (04 §G #15) | parquet schemas equal the CSV twins | the loader's schema assertion on first `eff refresh` |
