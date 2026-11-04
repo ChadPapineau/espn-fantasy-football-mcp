@@ -134,6 +134,13 @@ export interface EvidenceRequest {
    * P(active) over the items; absent → the Phase 2 behaviour from `calibration_n`.
    */
   readonly calibration_table?: CalibrationTable | null;
+  /**
+   * The claims of these texts already read (`extractClaim`'s answers by text value): the tool reads
+   * them one text per cooperative step, so this call's own turn is not every text's rules pass
+   * (plan 03 §1.2; changelog §R10 timing items). A text not in it is read here. rules_v1 is pure,
+   * so the answer is the same with or without it.
+   */
+  readonly extracted?: ReadonlyMap<string, RulesV1Claim | null>;
   readonly week: Week;
   readonly clock: Clock;
   readonly inputs?: readonly InputFreshness[];
@@ -234,6 +241,10 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
   const warnings: string[] = [];
   const newsMoved =
     p.last_news_at !== null && nowMs - Date.parse(p.last_news_at) <= EVIDENCE.newsFreshMs;
+  const memo = req.extracted;
+  /** A text's claim: the one the caller already read, else read here (the same rules either way). */
+  const claimOf = (value: string): RulesV1Claim | null =>
+    memo?.has(value) === true ? (memo.get(value) ?? null) : extractClaim(value);
 
   // structure every text claim (rule 1), weighted by the hand-set table (rule 2), never league text (rule 4)
   const items: Item[] = [];
@@ -245,7 +256,7 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
     const src = wrapped.untrusted_text.source;
     const rs = reliabilitySourceOf(src);
     if (rs === null) return false;
-    const ex = extractClaim(wrapped.untrusted_text.value);
+    const ex = claimOf(wrapped.untrusted_text.value);
     const type = typeOverride ?? ex?.type ?? "other";
     const rel = reliabilityOf(rs, type, {
       flags: wrapped.untrusted_text.flags ?? [],
@@ -277,7 +288,7 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
       if (reliabilitySourceOf(t.text.untrusted_text.source) === null) ignored += 1;
       else if (ambiguous.length >= EVIDENCE.maxAmbiguous) ambiguousOver += 1;
       else {
-        const ex = extractClaim(t.text.untrusted_text.value);
+        const ex = claimOf(t.text.untrusted_text.value);
         ambiguous.push({
           source: t.text.untrusted_text.source,
           claim: t.text,

@@ -17,6 +17,7 @@ import {
   analyzeTrade,
   analyzeWaiversP1,
   claimRuns,
+  isEvidenceSource,
   learnWaiverMechanics,
   usageWeekOf,
   type CascadeClaimInput,
@@ -44,10 +45,12 @@ import type {
   WaiverRequest,
 } from "../../domain/analytics/waivers.js";
 import { CASCADE_PRIORS } from "../../domain/analytics/cascade-priors/index.js";
+import { inTurns, runCooperative } from "../../domain/analytics/cooperative.js";
 import {
   CALIBRATION,
   buildCalibrationTable,
   clauseClaims,
+  extractClaim,
   nameKeysOf,
   namedIn,
   practiceHistoryClaims,
@@ -55,6 +58,7 @@ import {
   type CalibrationTable,
   type ClaimSignal,
   type NameKeys,
+  type RulesV1Claim,
   type ScoredClaim,
   type ScoredClaimType,
 } from "../../domain/evidence/index.js";
@@ -119,6 +123,7 @@ import {
   runSeason,
   rzShareOf,
   usageOf,
+  usageSteps,
   USAGE_SOURCES,
   valueWeeks,
   type LeagueBasics,
@@ -1288,14 +1293,16 @@ export function logClaims(
  * "with Quist (ankle) ruled out" about a teammate — or an opponent the outlook discusses — may carry
  * nothing to say whom it is about: one of these names in the text makes it a multi-player text for
  * E10. Empty when neither is loaded (refs alone decide); the opponent is skipped when the week's pro
- * schedule cannot say who it is.
+ * schedule cannot say who it is. Resumable work: it yields after each of its dataset reads (the
+ * week's pro schedule, ESPN's player index, the pro teams with nflverse's weekly roster), so E10
+ * reads them in turns of their own (`inTurns`; plan 03 §1.2, changelog §R10 timing items).
  */
-export function neighbourKeysOf(
+export function* neighbourKeysSteps(
   ctx: ToolContext,
   season: number,
   w: Week,
   subject: { readonly espn_id: number; readonly pro_team_id: number; readonly keys: NameKeys },
-): readonly NameKeys[] {
+): Generator<void, readonly NameKeys[], undefined> {
   if (subject.pro_team_id <= 0) return [];
   const teams = new Set<number>([subject.pro_team_id]);
   try {
@@ -1307,6 +1314,7 @@ export function neighbourKeysOf(
   } catch {
     // the opponent stays unknown: teammates only
   }
+  yield;
   const out: NameKeys[] = [];
   const add = (name: string): void => {
     const k = nameKeysOf(name);
@@ -1320,6 +1328,7 @@ export function neighbourKeysOf(
   } catch {
     // the index is not loaded: refs alone decide, and the roster below
   }
+  yield;
   // every other player of those NFL teams on nflverse's weekly roster: the linemen and defenders
   // ESPN's player index leaves out ("Left tackle X (knee) was ruled out, so <him> may see stacked
   // boxes" names another player too — Stage C finding evidence-item-claims-misattributed)
@@ -1332,6 +1341,7 @@ export function neighbourKeysOf(
       const t = nflverseTeam(abbrevs.get(id) ?? null);
       if (t !== null) nfl.add(t);
     }
+    yield;
     if (nfl.size > 0)
       for (const r of ctx.services.rosterWeekly.latest(season).rows)
         if (nfl.has(r.team) && r.espn_id !== subject.espn_id) add(r.full_name);
@@ -1589,7 +1599,11 @@ export const analyzeEvidenceTool = defineTool({
         locked = e.lineup_locked;
       }
     }
-    // structured: the official report (nflverse injuries) beside ESPN's status
+    // structured: the official report (nflverse injuries) beside ESPN's status. Each dataset read
+    // below sits in a turn of its own, and every text's claim is read in a cooperative step: one cold
+    // call ran them all in one turn of 76 ms of CPU on the owner's Mac (plan 03 §1.2's ≤ 20 ms batch,
+    // plan 10 A16a; changelog §R10 timing items) — the answer is the same
+    await turn();
     let official: {
       report_status: string | null;
       practice: { day: string; status: string }[];
@@ -1611,14 +1625,16 @@ export const analyzeEvidenceTool = defineTool({
     }
     // usage (D1's rows) as the detector reads them
     await turn();
-    const u = usageOf(
-      ctx,
-      [{ p, gsis }],
-      season,
-      Array.from({ length: b.w }, (_, i) => i + 1),
-      b.settings,
-      allowStale,
-      inputs,
+    const u = await inTurns(
+      usageSteps(
+        ctx,
+        [{ p, gsis }],
+        season,
+        Array.from({ length: b.w }, (_, i) => i + 1),
+        b.settings,
+        allowStale,
+        inputs,
+      ),
     );
     const usage = (u.byId.get(p.ref.id)?.games ?? []).map((g) => usageWeekOf(g, g.rz_team ?? null));
     // his usage could be joined (a pair) but its dataset could not be read: said, never silent
@@ -1641,14 +1657,17 @@ export const analyzeEvidenceTool = defineTool({
     // evidence-item-claims-misattributed, ruling R7-4: "with <teammate> sidelined, <him> …" in his
     // own ESPN outlook was an 'out' claim about him)
     const keys = nameKeysOf(p.name);
+    await turn();
     const around =
       keys === null
         ? []
-        : neighbourKeysOf(ctx, season, b.w, {
-            espn_id: p.ref.id,
-            pro_team_id: p.pro_team_id,
-            keys,
-          });
+        : await inTurns(
+            neighbourKeysSteps(ctx, season, b.w, {
+              espn_id: p.ref.id,
+              pro_team_id: p.pro_team_id,
+              keys,
+            }),
+          );
     // the claims that cannot be tied to him, kept apart so they never crowd out his own
     const ambiguous: EvidenceText[] = [];
     /** A multi-player text's claim-bearing clauses, each under the text's own source tag. */
@@ -1673,11 +1692,21 @@ export const analyzeEvidenceTool = defineTool({
       outlooksScoped += 1;
       claimsOf(t, named, time);
     };
+    const outlooks: { readonly t: UntrustedText; readonly time: string | null }[] = [];
     for (const o of ol === null ? [] : take(ctx, ol, inputs)) {
       const wk = o.weekly[String(b.w)];
-      if (wk !== undefined) outlookText(wk, p.last_news_at);
-      if (o.season !== null) outlookText(o.season, null);
+      if (wk !== undefined) outlooks.push({ t: wk, time: p.last_news_at });
+      if (o.season !== null) outlooks.push({ t: o.season, time: null });
     }
+    // one outlook text a step (its clauses' claims), always whole: no deadline, as before
+    await runCooperative(
+      outlooks.length,
+      (i) => {
+        const x = outlooks[i];
+        if (x !== undefined) outlookText(x.t, x.time);
+      },
+      { pacer: ctx.pacer, deadlineMs: null },
+    );
     if (outlooksScoped > 0)
       warnings.push(
         `${String(outlooksScoped)} ESPN outlook text(s) also name other players: ${MULTI_PLAYER_RULE}`,
@@ -1686,6 +1715,7 @@ export const analyzeEvidenceTool = defineTool({
       // his items: by his gsis id or, unpaired, by the ESPN id in the items' refs (Stage C finding
       // crosswalk-unpaired-joins-silent — the news was skipped for a player without a pair)
       const since = new Date(ctx.nowMs - 7 * 24 * 3600 * 1000).toISOString();
+      await turn();
       const read = await newsMatching(ctx, {
         sinceIso: since,
         limit: 8,
@@ -1704,35 +1734,72 @@ export const analyzeEvidenceTool = defineTool({
         // "<starter> (ankle) ruled out, <him> to start" is no 'out' claim about him; an item whose
         // other players cannot be named ties no claim to him at all
         let multi = 0;
-        for (const it of read.items) {
-          const byRefs = othersOf(ctx, it, { espn_id: p.ref.id, gsis_id: gsis, name: p.name });
-          // a player around him the matcher did not ref (his surname alone, no team named) counts too
-          const unreffed = namedIn(
-            `${it.title.untrusted_text.value}\n${it.blurb.untrusted_text.value}`,
-            around,
-          );
-          const who: ItemOthers =
-            byRefs.kind === "unreadable" || unreffed.length === 0
-              ? byRefs
-              : {
-                  kind: "others",
-                  keys: [...(byRefs.kind === "others" ? byRefs.keys : []), ...unreffed],
-                };
-          const fields = [it.title, it.blurb].filter((t) => t.untrusted_text.value.length > 0);
-          if (who.kind === "own") {
-            for (const t of fields) texts.push({ text: t, time: it.published_at });
-            continue;
-          }
-          multi += 1;
-          for (const t of fields)
-            claimsOf(t, who.kind === "others" ? who.keys : null, it.published_at);
-        }
+        // one item a step (its other players, its clauses' claims), always whole: no deadline
+        const items = read.items;
+        await runCooperative(
+          items.length,
+          (i) => {
+            const it = items[i];
+            if (it === undefined) return;
+            const byRefs = othersOf(ctx, it, { espn_id: p.ref.id, gsis_id: gsis, name: p.name });
+            // a player around him the matcher did not ref (his surname alone, no team named) counts too
+            const unreffed = namedIn(
+              `${it.title.untrusted_text.value}\n${it.blurb.untrusted_text.value}`,
+              around,
+            );
+            const who: ItemOthers =
+              byRefs.kind === "unreadable" || unreffed.length === 0
+                ? byRefs
+                : {
+                    kind: "others",
+                    keys: [...(byRefs.kind === "others" ? byRefs.keys : []), ...unreffed],
+                  };
+            const fields = [it.title, it.blurb].filter((t) => t.untrusted_text.value.length > 0);
+            if (who.kind === "own") {
+              for (const t of fields) texts.push({ text: t, time: it.published_at });
+              return;
+            }
+            multi += 1;
+            for (const t of fields)
+              claimsOf(t, who.kind === "others" ? who.keys : null, it.published_at);
+          },
+          { pacer: ctx.pacer, deadlineMs: null },
+        );
         if (multi > 0)
           warnings.push(
             `${String(multi)} news item(s) also name other players: ${MULTI_PLAYER_RULE}`,
           );
       }
     }
+    // his texts first (at most 20), then the ambiguous claims (the engine lists 8: R7-4)
+    const evidenceTexts = [...texts.slice(0, 20), ...ambiguous.slice(0, 20)];
+    // every claim the engine reads, one text a step (rules_v1 is pure: the engine reads these
+    // answers instead of extracting them again — the same claims), always whole: no deadline
+    const userClaim =
+      args.claim === undefined ? null : wrapUntrusted(args.claim.text, "user.claim.text");
+    const toRead = [
+      ...new Set([
+        ...evidenceTexts
+          .filter((t) => isEvidenceSource(t.text.untrusted_text.source))
+          .map((t) => t.text.untrusted_text.value),
+        ...(userClaim === null ? [] : [userClaim.untrusted_text.value]),
+      ]),
+    ];
+    const extracted = new Map<string, RulesV1Claim | null>();
+    await runCooperative(
+      toRead.length,
+      (i) => {
+        const v = toRead[i];
+        if (v !== undefined) extracted.set(v, extractClaim(v));
+      },
+      { pacer: ctx.pacer, deadlineMs: null },
+    );
+    // the per-source calibration table (Phase 3, plan 10 C8): the official practice report's
+    // labelled history plus every claim the retrospective scored for this league; table_n counts
+    // the news claims only, so the posterior stays null until 200 of them are scored
+    await turn();
+    const calibrationTable = calibrationTableOf(ctx);
+    await turn();
     const out = analyzeEvidence({
       player: {
         player_id: p.ref.id,
@@ -1748,8 +1815,8 @@ export const analyzeEvidenceTool = defineTool({
       },
       official,
       usage,
-      // his texts first (at most 20), then the ambiguous claims (the engine lists 8: R7-4)
-      texts: [...texts.slice(0, 20), ...ambiguous.slice(0, 20)],
+      texts: evidenceTexts,
+      extracted,
       ...(args.claim === undefined
         ? {}
         : {
@@ -1760,15 +1827,13 @@ export const analyzeEvidenceTool = defineTool({
               ...(args.claim.type === undefined ? {} : { type: args.claim.type }),
             },
           }),
-      // the per-source calibration table (Phase 3, plan 10 C8): the official practice report's
-      // labelled history plus every claim the retrospective scored for this league; table_n counts
-      // the news claims only, so the posterior stays null until 200 of them are scored
-      calibration_table: calibrationTableOf(ctx),
+      calibration_table: calibrationTable,
       week: b.w,
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
     // this call's scorable news claims, logged value-free for the retrospective to score (C8)
+    await turn();
     logClaims(
       ctx,
       season,

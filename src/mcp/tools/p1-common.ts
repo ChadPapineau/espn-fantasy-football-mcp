@@ -30,6 +30,7 @@ import type {
   SeedingModeArg,
   UsageGameRow,
 } from "../../domain/analytics/types.js";
+import { drainSteps } from "../../domain/analytics/cooperative.js";
 import { weeklyValues } from "../../domain/analytics/waivers.js";
 import { xfpOf } from "../../domain/analytics/xfp.js";
 import { seededRng } from "../../domain/clock.js";
@@ -569,6 +570,12 @@ export interface UsageRead {
   readonly data_gaps: readonly string[];
 }
 
+/** What usageOf returns: each subject's read and the datasets missing for all of them. */
+export interface UsageReads {
+  readonly byId: Map<number, UsageRead>;
+  readonly gaps: readonly string[];
+}
+
 /** The per-game usage rows of `subjects` over `weeks` of `season`, keyed by ESPN player id. */
 export function usageOf(
   ctx: ToolContext,
@@ -581,7 +588,29 @@ export function usageOf(
   settings: ScoringSettings | null,
   allowStale: boolean,
   inputs: InputStamp[],
-): { readonly byId: Map<number, UsageRead>; readonly gaps: readonly string[] } {
+): UsageReads {
+  return drainSteps(usageSteps(ctx, subjects, season, weeks, settings, allowStale, inputs));
+}
+
+/**
+ * usageOf as resumable work: it yields after each of its two dataset reads (the weekly stats, the
+ * expected points), so a caller with the event loop to share reads them in turns of their own
+ * (`inTurns`; plan 03 §1.2 — a cold read opens its dataset file: E10's one turn of 76 ms of CPU on
+ * the owner's Mac held both of these with its other reads and its claim extraction, changelog §R10
+ * timing items). Drained, it is usageOf.
+ */
+export function* usageSteps(
+  ctx: ToolContext,
+  subjects: readonly {
+    readonly p: { readonly ref: { readonly id: number }; readonly position_id: number };
+    readonly gsis: string | null;
+  }[],
+  season: number,
+  weeks: readonly Week[],
+  settings: ScoringSettings | null,
+  allowStale: boolean,
+  inputs: InputStamp[],
+): Generator<void, UsageReads, undefined> {
   const byId = new Map<number, UsageRead>();
   const gaps: string[] = [];
   const gsis = [...new Set(subjects.map((s) => s.gsis).filter((g): g is string => g !== null))];
@@ -597,6 +626,7 @@ export function usageOf(
       if (!inputs.some((x) => x.source === input.source)) inputs.push(input);
       for (const l of r.rows) byGsis.set(l.gsis_id, [...(byGsis.get(l.gsis_id) ?? []), l]);
     }
+    yield;
     const ep = ctx.services.datasets.epWeekly.rows(gsis, season, weeks);
     const epInput = optionalDataset(ep, ctx, allowStale);
     if (epInput !== null) {
@@ -604,6 +634,7 @@ export function usageOf(
       if (!inputs.some((x) => x.source === epInput.source)) inputs.push(epInput);
       for (const e of ep.rows) epBy.set(`${e.gsis_id}:${String(e.week)}`, e);
     }
+    yield;
   }
   if (!statsLoaded) gaps.push(`${USAGE_SOURCES.stats} not loaded`);
   if (!epLoaded) gaps.push(`${USAGE_SOURCES.ep} not loaded: xfp_ep and xfp_gap are null`);
