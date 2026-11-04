@@ -7,7 +7,7 @@
 // PHASE W SEAM — NOT IMPLEMENTED (plan 10 §3.W; owner decision D11): no write provider is built here.
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { CredentialAuthority, CredentialObserver } from "../../auth/types.js";
+import type { CredentialAuthority, CredentialObserver, CredentialState } from "../../auth/types.js";
 import type { TtlContext } from "../../config/freshness.js";
 import type { Config } from "../../config/schema.js";
 import type { Clock } from "../../domain/clock.js";
@@ -103,6 +103,13 @@ export interface CreateEspnProviderOptions {
   readonly log?: ProviderLog;
   /** Every limiter and retry wait (default: a real timer); the CLI's tests inject fake time. */
   readonly sleep?: Sleep;
+  /**
+   * FIXTURE MODE ONLY (changelog §R10, R10-21): the scripted credential state's value-free label,
+   * read for the caller's own pending claims (`own`) alone — src/services/index.ts passes the
+   * variant's `harness.credential_state` (fixture-credential.ts). Ignored outside fixture mode: it
+   * is forwarded only in the fixture branch below, after the guard.
+   */
+  readonly fixtureCredentialLabel?: () => CredentialState;
 }
 
 /** Builds the provider (see the file header for fixture mode's guard). */
@@ -110,6 +117,7 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
   let fetchFn: FetchLike = o.fetch ?? ((url, init) => fetch(url, init));
   let credentials = o.credentials;
   let tlsVerificationDisabled: (() => boolean) | undefined;
+  let fixtureCredentialLabel: (() => CredentialState) | undefined;
   if (o.config.fixtureDir !== null) {
     if (credentials !== null && credentials.state() !== "not_configured")
       throw new EspnProviderError("INTERNAL", "fixture_mode_with_credentials");
@@ -120,6 +128,8 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     credentials = null;
     // fixture mode reads recorded files and opens no connection: no TLS policy applies to it
     tlsVerificationDisabled = () => false;
+    // the scripted session's label, past the guard above (R10-21)
+    fixtureCredentialLabel = o.fixtureCredentialLabel;
   }
   return new EspnProvider({
     config: o.config,
@@ -146,5 +156,6 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     ...(o.log === undefined ? {} : { log: o.log }),
     ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
     ...(tlsVerificationDisabled === undefined ? {} : { tlsVerificationDisabled }),
+    ...(fixtureCredentialLabel === undefined ? {} : { fixtureCredentialLabel }),
   });
 }

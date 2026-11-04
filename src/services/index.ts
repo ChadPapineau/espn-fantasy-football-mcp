@@ -500,6 +500,9 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     // nothing else supplies it (Stage C finding normalize-bye-week-never-populated)
     proSchedule: store.datasets.proSchedule,
     log: logger,
+    // fixture mode's scripted session for the caller's own pending claims (changelog §R10, R10-21,
+    // amending R9-3): the same label espn_get_status reports, value-free, moving with the probe
+    ...(scripted === null ? {} : { fixtureCredentialLabel: () => scripted.state() }),
   });
 
   const golden: GoldenState = {

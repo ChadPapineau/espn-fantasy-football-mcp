@@ -22,7 +22,7 @@ import {
   probeVerdict,
   type ProbePlan,
 } from "../../auth/probe.js";
-import type { CredentialAuthority, CredentialObserver } from "../../auth/types.js";
+import type { CredentialAuthority, CredentialObserver, CredentialState } from "../../auth/types.js";
 import type { Clock } from "../../domain/clock.js";
 import type {
   BoxScoreMatchup,
@@ -340,6 +340,12 @@ export interface EspnProviderDeps {
    * NODE_TLS_REJECT_UNAUTHORIZED rule, read at each request). Only fixture mode overrides it.
    */
   readonly tlsVerificationDisabled?: () => boolean;
+  /**
+   * FIXTURE MODE ONLY (changelog §R10, R10-21): the scripted credential state's label for the
+   * caller's own pending claims (auth-gate.ts CookieGateOptions.fixtureOwnLabel). createEspnProvider
+   * passes it only in its fixture branch, and it is dropped here whenever an authority exists.
+   */
+  readonly fixtureCredentialLabel?: () => CredentialState;
 }
 
 interface SettingsRead {
@@ -512,6 +518,10 @@ export class EspnProvider implements FantasyPlatform {
         : { tlsVerificationDisabled: deps.tlsVerificationDisabled }),
       // the league's publicity outlives the process: a CLI probe never re-learns it anonymously
       publicity: cachedPublicity(deps.repos.cache, deps.config.leagueId, deps.clock),
+      // fixture mode's scripted label (R10-21): never beside a credential authority
+      ...(deps.fixtureCredentialLabel === undefined || deps.credentials !== null
+        ? {}
+        : { fixtureOwnLabel: deps.fixtureCredentialLabel }),
     });
   }
 

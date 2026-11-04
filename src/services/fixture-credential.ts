@@ -7,11 +7,15 @@
 // `readScriptedCredential(null)` is null — reports that state through espn_get_status and answers
 // the one probe with the scripted result. Both are a label and a fixed, value-free result: nothing
 // here holds, builds or logs a cookie or a Cookie header, and no request is made (the provider is
-// still built with no credential authority, so every read stays keyless, as in fixture mode
-// before — and the user's own pending claims, never read keyless, are refused with zero requests:
-// changelog §R10, R10-10). Fixture mode's guard runs first and is unchanged: with a real credential stored, fixture
-// mode does not start at all (src/services/index.ts fixtureModeIssues). A variant that scripts
-// nothing (or `not_configured`) keeps the old path exactly. New here.
+// still built with no credential authority, so every `auto` and feed read stays keyless and is
+// served, as in fixture mode before). The one exception is the user's own pending claims, which are
+// never read keyless (changelog §R10, R10-10): for them alone the cookie gate gets this label
+// (changelog §R10, R10-21, amending R9-3; auth-gate.ts fixtureOwnLabel) — `rejected` answers
+// ESPN_AUTH_REJECTED and `stored`/`validated` serve the variant's recorded mPendingTransactions, as
+// a session read would, with zero network either way and still no Cookie header; the label moves
+// with espn_check_auth's verdict. Fixture mode's guard runs first and is unchanged: with a real
+// credential stored, fixture mode does not start at all (src/services/index.ts fixtureModeIssues).
+// A variant that scripts nothing (or `not_configured`) keeps the old path exactly. New here.
 import path from "node:path";
 import { readSecureFile } from "../config/paths.js";
 import { ConfigError, type CredentialState } from "../config/schema.js";

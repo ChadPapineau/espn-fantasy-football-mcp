@@ -21,7 +21,7 @@ import {
   type TtlContext,
 } from "../../config/freshness.js";
 import type { RequestOutcome } from "../../config/schema.js";
-import type { CredentialAuthority, CredentialObserver } from "../../auth/types.js";
+import type { CredentialAuthority, CredentialObserver, CredentialState } from "../../auth/types.js";
 import type { Clock } from "../../domain/clock.js";
 import {
   DEGRADED_CODES,
@@ -168,6 +168,8 @@ export interface RequestDeps {
   readonly attemptTimeoutMs?: number;
   /** Where the league's publicity outlives this process (auth-gate.ts PublicityStore). */
   readonly publicity?: PublicityStore;
+  /** Fixture mode's scripted credential label for `own` reads (auth-gate.ts; R10-21). */
+  readonly fixtureOwnLabel?: () => CredentialState;
   /**
    * Whether certificate verification is off process-wide, asked before every request (default:
    * transport.ts `tlsVerificationDisabled`, Node's own rule, read at each request). Only fixture
@@ -354,7 +356,10 @@ export class EspnRequester {
       deps.clock,
       deps.observer,
       deps.publicity ?? null,
-      { keylessOnPublic: deps.origin !== "job" },
+      {
+        keylessOnPublic: deps.origin !== "job",
+        ...(deps.fixtureOwnLabel === undefined ? {} : { fixtureOwnLabel: deps.fixtureOwnLabel }),
+      },
     );
     this.retryAfter = cachedRetryAfter(deps.cache, deps.host, deps.clock);
   }

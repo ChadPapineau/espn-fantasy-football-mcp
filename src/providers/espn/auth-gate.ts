@@ -19,6 +19,7 @@ import type {
   CookieHeaderResult,
   CredentialAuthority,
   CredentialObserver,
+  CredentialState,
 } from "../../auth/types.js";
 import type { Clock } from "../../domain/clock.js";
 import type { EspnRoute } from "./path.js";
@@ -92,6 +93,17 @@ export interface CookieGateOptions {
    * cookie still reads a public league anonymously either way (plan 02 §2.1 "Short-circuit").
    */
   readonly keylessOnPublic?: boolean;
+  /**
+   * FIXTURE MODE ONLY (changelog §R10, R10-21, amending R9-3): the scripted credential state of a
+   * derived variant (fixture-credential.ts, the same `harness.credential_state` espn_get_status
+   * reports), a value-free label read for `own` reads alone, and only while no authority exists
+   * (fixture mode builds the provider with none). `not_configured` → ESPN_REQUIRES_COOKIES;
+   * `rejected` → the ESPN_AUTH_REJECTED short-circuit; `stored`/`validated` → the read goes out
+   * with no Cookie header (none exists) and the fixture serves the variant's recording, as a session
+   * read would be. The provider passes it only in fixture mode (index.ts createEspnProvider, and
+   * EspnProvider only without an authority); every `auto` and `feed` read ignores it.
+   */
+  readonly fixtureOwnLabel?: () => CredentialState;
 }
 
 /** The provider's cookie gate (one per provider instance). */
@@ -111,6 +123,7 @@ export class CookieGate {
   private readonly observer: CredentialObserver;
   private readonly store: PublicityStore | null;
   private readonly keylessOnPublic: boolean;
+  private readonly fixtureOwnLabel: (() => CredentialState) | null;
 
   constructor(
     auth: CredentialAuthority | null,
@@ -124,6 +137,8 @@ export class CookieGate {
     this.observer = observer;
     this.store = store;
     this.keylessOnPublic = opts.keylessOnPublic ?? true;
+    // a label is a fixture-mode seam: with an authority present it is never read
+    this.fixtureOwnLabel = auth === null ? (opts.fixtureOwnLabel ?? null) : null;
   }
 
   /** What is known: learned in this process, else the persisted value (read once), else null. */
@@ -207,7 +222,11 @@ export class CookieGate {
    */
   async forRequest(use: CookieUse, route: EspnRoute): Promise<string | null> {
     if (use === "never" || route === "season" || route === "players") return null;
-    if (this.auth === null) return this.keyless(use, "ESPN_REQUIRES_COOKIES");
+    if (this.auth === null) {
+      // fixture mode's scripted session, for the caller's own pending claims only (R10-21)
+      if (use === "own" && this.fixtureOwnLabel !== null) return this.ownByLabel();
+      return this.keyless(use, "ESPN_REQUIRES_COOKIES");
+    }
     // a public league's `auto` read: keyless for the server, the stored cookie for the jobs
     // (CookieGateOptions.keylessOnPublic)
     if (use === "auto" && this.keylessOnPublic && this.known() === true) return null;
@@ -255,6 +274,18 @@ export class CookieGate {
     if (use === "auto" && why === "ESPN_REQUIRES_COOKIES") return null;
     if (why === "ESPN_REQUIRES_COOKIES") this.requires();
     throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
+  }
+
+  /**
+   * An `own` read in fixture mode under the scripted label (CookieGateOptions.fixtureOwnLabel;
+   * changelog §R10, R10-21): the refusal the label names, with zero requests, or null — the read
+   * goes out with no Cookie header and the fixture serves the recording. No value exists to send.
+   */
+  private ownByLabel(): null {
+    const state = this.fixtureOwnLabel?.() ?? "not_configured";
+    if (state === "rejected") throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
+    if (state === "stored" || state === "validated") return null;
+    return this.requires();
   }
 
   /**
