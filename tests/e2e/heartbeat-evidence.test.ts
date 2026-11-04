@@ -231,6 +231,10 @@ describe("the heartbeat's evidence never excuses the process's own stall", () =>
     // a block over the bound elsewhere in the window: never excused, whatever the longest gap shows
     expect(hostSetStall(hb(20, 3, 60), 5, 50)).toBe(false);
     expect(hostSetStall(hb(20, 0, 60), 40, 50)).toBe(false);
-    expect(hostSetStall(hb(20, 3, 50), 40, 50)).toBe(true); // at the bound, not over it
+    // a run that reaches the bound is the server's own (changelog §R10, R10-9), just under it is not
+    expect(hostSetStall(hb(20, 3, 50), 40, 50)).toBe(false);
+    expect(hostSetStall(hb(20, 3, 49.9), 40, 50)).toBe(true);
+    // the longest gap's own CPU is R8-2's, excused up to the bound itself
+    expect(hostSetStall(hb(50, 3, 49.9), 40, 50)).toBe(true);
   });
 });

@@ -126,7 +126,7 @@ import {
 } from "./schemas.js";
 import { selectPlayers } from "./select.js";
 import { analyzeWaiversP1 } from "../../domain/analytics/phase2.js";
-import { drainSteps, inTurns, turnIfSpent } from "../../domain/analytics/cooperative.js";
+import { inTurns, turnIfSpent } from "../../domain/analytics/cooperative.js";
 import { waiverP1Extras } from "./market-p1.js";
 import { playoffAliveOf, projectMany } from "./p1-common.js";
 import {
@@ -157,25 +157,12 @@ export function seedOf(ctx: ToolContext, explicit: number | undefined, key: stri
  * Trailing canonical lines per player (nflverse, scored by the engine at projection time): this
  * season's weeks before `w` and the prior season. D/ST units read the team-defence lines. A dataset
  * never loaded leaves the trailing window empty and says so (E1 degradation: ESPN-anchored, CV only).
- */
-export function trailingFor(
-  ctx: ToolContext,
-  subjects: readonly Subject[],
-  season: number,
-  w: Week,
-  inputs: InputStamp[],
-  warnings: string[],
-  allowStale: boolean,
-): Map<number, TrailingLine[]> {
-  return drainSteps(trailingSteps(ctx, subjects, season, w, inputs, warnings, allowStale));
-}
-
-/**
- * trailingFor as resumable work (cooperative.ts): a step after each dataset statement, so E1's
- * caller runs one statement a turn once the slice has spent its share — E1's reads and their
- * mapping ran in one turn, ~12 ms of CPU in espn_analyze_lineup and espn_analyze_roster by round
- * 3's turn profiler (changelog §R10 timing items; plan 03 §1.2: one SQLite statement or one batch).
- * The lines, inputs and warnings are trailingFor's.
+ *
+ * Resumable work (cooperative.ts): a step after each dataset statement, so E1's caller runs one
+ * statement a turn once the slice has spent its share — E1's reads and their mapping ran in one
+ * turn, ~12 ms of CPU in espn_analyze_lineup and espn_analyze_roster by round 3's turn profiler
+ * (changelog §R10 timing items; plan 03 §1.2: one SQLite statement or one batch). Its one caller
+ * runs it with inTurns; the synchronous wrapper it replaced had no caller left and is gone.
  */
 export function* trailingSteps(
   ctx: ToolContext,

@@ -98,7 +98,17 @@ describe("judgeStall: every cell of R8-2 as amended by changelog §R10, R10-9", 
   });
 
   it("R10-9: a window whose own CPU run reaches the bound fails as the server's own stall", () => {
-    expect(judgeStall([frozen(12), frozen(BOUND), frozen(12)], BOUND)).toEqual({ kind: "own" });
+    // at the bound in the FIRST window: the server's own at once, never repeated (hostSetStall reads
+    // "reaches" as judgeStall's last check does; it used to excuse a run equal to the bound, so the
+    // window was repeated and a later window within the bound passed the measurement)
+    expect(judgeStall([frozen(BOUND)], BOUND)).toEqual({ kind: "own" });
+    expect(judgeStall([frozen(12), frozen(BOUND)], BOUND)).toEqual({ kind: "own" });
+    expect(judgeStall([win(hb(60, { cpu_max_ms: BOUND }), 40)], BOUND)).toEqual({ kind: "own" });
+    expect(() =>
+      judgeStall([win(hb(60, { cpu_max_ms: BOUND }), 40), win(hb(30), 5)], BOUND),
+    ).toThrow(RangeError);
+    // a window at the bound ends the measurement: no window is taken after it
+    expect(() => judgeStall([frozen(12), frozen(BOUND), frozen(12)], BOUND)).toThrow(RangeError);
     // …even when another window's run cannot be read
     expect(judgeStall([frozen(null), frozen(12), frozen(BOUND)], BOUND)).toEqual({ kind: "own" });
   });
@@ -208,6 +218,25 @@ describe("measureStall over scripted windows (the verdict, the windows taken, th
       () => Promise.resolve(),
       BOUND,
     );
+    expect(w.attempts).toBe(1);
+    expect(w.verdict).toEqual({ kind: "own" });
+    expect(stallPassed(w)).toBe(false);
+  });
+
+  it("a window whose own CPU run is exactly the bound beside a starved control is the server's own, never repeated (changelog §R10, R10-9)", async () => {
+    // before: hostSetStall excused a run equal to the bound, so this window was repeated and the
+    // next one, within the bound, passed the measurement
+    let runs = 0;
+    const w = await measureStall(
+      scripted([line(60, BOUND), line(30, 3)]),
+      scripted([{ max_ms: 40 }, { max_ms: 5 }]),
+      () => {
+        runs++;
+        return Promise.resolve();
+      },
+      BOUND,
+    );
+    expect(runs).toBe(1);
     expect(w.attempts).toBe(1);
     expect(w.verdict).toEqual({ kind: "own" });
     expect(stallPassed(w)).toBe(false);

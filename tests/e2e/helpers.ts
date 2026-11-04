@@ -566,8 +566,8 @@ export function stallEvidence(
  * process beside it (the control) stalled past CONTROL_STARVED_MS in the same window. A JavaScript
  * block over the bound spends that time on the CPU, so it is the server's own and is never excused,
  * whatever the host did — wherever it sits in the window (ruling R8-2): the main thread's longest
- * run on the CPU between two ticks (cpu_max_ms) over the bound refuses the excuse even when a
- * longer gap the host set is the window's longest. (The switch count is process-wide: a synchronous
+ * run on the CPU between two ticks (cpu_max_ms) at or over the bound refuses the excuse even when
+ * a longer gap the host set is the window's longest (changelog §R10, R10-9: one that reaches it). (The switch count is process-wide: a synchronous
  * wait of the main thread that coincides with another thread's preemption is repeated, and a stall
  * that recurs in every window on that evidence alone ends in measureStall's "cannot be measured"
  * failure — never a pass: changelog §R10, R10-9's pass needs the idle control's stall in every
@@ -576,7 +576,10 @@ export function stallEvidence(
 export function hostSetStall(server: Heartbeat, controlMs: number, boundMs: number): boolean {
   // an unreadable cpu_max_ms refuses nothing here (R8-2's longest-gap reading); judgeStall then
   // never lets the measurement pass on the host's evidence (changelog §R10, R10-9)
-  if (server.gap_cpu_ms > boundMs || (server.cpu_max_ms ?? 0) > boundMs) return false;
+  // a run on the CPU that REACHES the bound is the server's own (changelog §R10, R10-9: "a window
+  // whose cpu_max_ms reaches the bound fails as the server's own stall"), as judgeStall's last check
+  // reads it; the longest gap's own CPU is R8-2's, excused up to the bound
+  if (server.gap_cpu_ms > boundMs || (server.cpu_max_ms ?? 0) >= boundMs) return false;
   return server.gap_invol > 0 || controlMs > CONTROL_STARVED_MS;
 }
 
