@@ -73,7 +73,7 @@ At most one page: each section one table; a sub-decision whose Δ interval inclu
 Result, score, the retrospective headline (or "provisional").
 
 ### This week's matchup and lineup
-Opponent (quoted name, `team_id`), `P(win)` as its band with `basis`, the lineup the rec sets or keeps, by slot, with `E`, `p10`, `p90`, the top swap or "no move", the lock schedule. The move is the tool's `rec` — its action, or **"No move"** when `rec.no_move` is true — never `recommended_lineup`, the mean-optimal assignment, which also starts a swap the rec holds as a coin flip (changelog §R10, R10-15).
+Opponent (quoted name, `team_id`), `P(win)` as its band with `basis`, the lineup the rec sets or keeps, by slot, with `E`, `p10`, `p90`, the top swap or "no move", the lock schedule. The lineup the rec sets or keeps is `rec.subjects[]`: each `start` subject in its `slot` — or, when a warning says `rec.subjects` lists only the players who move, the roster's current slots with each `start` subject put in its `slot` and each `sit` subject on the bench (changelog §R10, R10-15). The move is the tool's `rec` — its action, or **"No move"** when `rec.no_move` is true — never `recommended_lineup` or `rec.lineup`, both the mean-optimal assignment, which also starts a swap the rec holds as a coin flip (changelog §R10, R10-15).
 
 ### Waivers
 The claim brief or the scramble brief, with the premium band, verdicts, the drop and `next_run_at`; the **Value basis** line.
