@@ -30,7 +30,8 @@ import {
   validateRecordInput,
 } from "../../../src/domain/reclog/record.js";
 import { LOG_ID_RE, type RecordRecommendationInput } from "../../../src/domain/reclog/types.js";
-import { TEXT_CAPS } from "../../../src/domain/league/types.js";
+import { TEXT_CAPS, bareUntrusted } from "../../../src/domain/league/types.js";
+import { containsCredentialShape } from "../../../src/config/schema.js";
 import { BOUNDS, RECORD_LIMITS, recordRecommendationInputSchema } from "../../../src/mcp/bounds.js";
 import {
   INPUT_SOURCE_RE,
@@ -433,6 +434,78 @@ describe("validateRecordInput — hostile input", () => {
     ).toEqual(["alternatives[0].action: credential_shaped"]);
     // ordinary rationale, ids and hashes are fine
     expect(issues(input({ note: "start the WR: floor 9.1 vs 7.4, r-0123456789ab" }))).toEqual([]);
+  });
+
+  // round 3's review of changelog §R10, R10-1: the read-back sanitiser decodes entities and drops
+  // tags, so a text that passed the raw check came back credential-shaped in E14's items and
+  // espn-ff://rec/{log_id}. Judged as it is read back too, it is refused here and by the tool schema
+  const G = "00000000-0000-4000-8000-000000000001";
+  const ENCODED = [
+    `SWID&#61;&#123;${G}&#125;`,
+    `SWID&#x3D;&#x7B;${G}&#x7D;`,
+    `owner &#123;${G}&#125;`,
+    "espn&#95;s2&#61;x",
+    "espn_s2<i></i>=x", // a tag reads back as a space
+    `SWID<i>=</i>&#123;${G}&#125;`,
+    "espn_s2&amp;#61;x", // decoded to a fixed point
+    "espn_s2&#x3d;x",
+  ];
+  it.each(ENCODED)("text: %j is credential-shaped once read back, so never stored", (raw) => {
+    expect(containsCredentialShape(raw), "raw check alone misses it").toBe(false);
+    expect(containsCredentialShape(bareUntrusted(raw, "rec_log_text"))).toBe(true);
+    expect(issues(input({ note: raw }))).toEqual(["note: credential_shaped"]);
+    expect(recIssues({ action: raw })).toEqual(["rec.action: credential_shaped"]);
+    expect(issues(input({ alternatives: [{ ...alt(), action: raw }] }))).toEqual([
+      "alternatives[0].action: credential_shaped",
+    ]);
+    // the tool's schema agrees (boundedTextSchema mirrors checkText)
+    expect(recordRecommendationInputSchema.safeParse(toolArgs(input({ note: raw }))).success).toBe(
+      false,
+    );
+    expect(
+      recordRecommendationInputSchema.safeParse(toolArgs(input({ rec: { ...rec(), action: raw } })))
+        .success,
+    ).toBe(false);
+  });
+
+  it("property: no text the log accepts is credential-shaped as it is read back", () => {
+    const piece = fc.constantFrom(
+      "SWID",
+      "swid",
+      "espn_s2",
+      "espn&#95;s2",
+      "espn_s2<b></b>",
+      "=",
+      "&#61;",
+      "&#x3D;",
+      ":",
+      "&#58;",
+      "{",
+      "&#123;",
+      "&#x7B;",
+      "}",
+      "&#125;",
+      "&#x7D;",
+      G,
+      "&amp;",
+      "<i>",
+      "</i>",
+      " ",
+      "x",
+      "start the WR",
+    );
+    fc.assert(
+      fc.property(fc.array(piece, { maxLength: 12 }), (parts) => {
+        const text = parts.join("").slice(0, 200);
+        if (issues(input({ note: text })).length === 0)
+          expect(containsCredentialShape(bareUntrusted(text, "rec_log_text")), text).toBe(false);
+        // the domain check and the tool schema agree on every such text
+        expect(issues(input({ note: text })).length === 0, text).toBe(
+          recordRecommendationInputSchema.safeParse(toolArgs(input({ note: text }))).success,
+        );
+      }),
+      { numRuns: 400 },
+    );
   });
 
   it("rec: shape, text and numbers", () => {

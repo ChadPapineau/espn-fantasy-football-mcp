@@ -22,6 +22,7 @@ import type {
 } from "../../src/domain/analytics/types.js";
 import type { FreshnessClassId } from "../../src/config/freshness.js";
 import type { DatasetSourceId } from "../../src/config/freshness.js";
+import { containsCredentialShape } from "../../src/config/schema.js";
 import { EP_EXPECTED_COLUMNS } from "../../src/domain/analytics/xfp.js";
 import { INJECTION_RELIABILITY_CAP } from "../../src/domain/evidence/index.js";
 import { familyVerification } from "../../src/domain/scoring/index.js";
@@ -1281,6 +1282,64 @@ describe("E14 espn_list_recommendations", () => {
     expect(bareFieldsFromSchema(recommendationListSchema)).toEqual(
       expect.arrayContaining([{ path: "data.items[].note", source: "store.recommendation_log" }]),
     );
+  });
+
+  it("round 3's review of R10-1: a text credential-shaped once read back is refused; nothing read back is", async () => {
+    const lineup = await ok("espn_analyze_lineup", { week: 4, seed: 3 });
+    const rid = (lineup as unknown as { meta: { request_id: string } }).meta.request_id;
+    const settings = (await ok("espn_get_league", { include: ["scoring"] })).data as {
+      scoring: { settings_hash: string };
+    };
+    const rec = (lineup.data as { rec: J }).rec;
+    const args = (ref: string, over: J): J => ({
+      kind: "lineup",
+      week: 4,
+      rec,
+      source_calls: [{ tool: "espn_analyze_lineup", request_id: rid }],
+      settings_hash: settings.scoring.settings_hash,
+      client_ref: ref,
+      ...over,
+    });
+    const G = "00000000-0000-4000-8000-000000000001";
+    // the read-back sanitiser decodes these to "SWID={…}" and "espn_s2=x": E14's items and
+    // espn-ff://rec/{log_id} returned them so
+    const encoded = [
+      `MARK_SWID SWID&#61;&#123;${G}&#125;`,
+      "MARK_S2 espn&#95;s2&#61;x",
+      `owner &#x7B;${G}&#x7D;`,
+      "espn_s2<i></i>=x",
+    ];
+    for (const raw of encoded) {
+      const asNote = await err("espn_record_recommendation", args("r3-enc", { note: raw }));
+      expect(asNote, raw).toMatchObject({ code: "VALIDATION", field: "note" });
+      const asAction = await err(
+        "espn_record_recommendation",
+        args("r3-enc", { rec: { ...(rec as Record<string, unknown>), action: raw } }),
+      );
+      expect(asAction, raw).toMatchObject({ code: "VALIDATION", field: "rec.action" });
+    }
+    // what the log does accept reads back credential-free: hostile but not credential-shaped notes,
+    // through the list and the resource
+    const accepted = [
+      "SWID is a cookie name &amp; nothing more",
+      "espn&#95;s2 alone, no value",
+      `a brace &#123; and ${G.slice(0, 8)} apart &#125;`,
+      "<b>espn</b> s2 x",
+    ];
+    const ids: string[] = [];
+    for (const [k, note] of accepted.entries()) {
+      const r = await ok("espn_record_recommendation", args(`r3-ok-${String(k)}`, { note }));
+      ids.push((r.data as { log_id: string }).log_id);
+    }
+    const listed = await ok("espn_list_recommendations", { week: 4, limit: 100 });
+    for (const leaf of stringLeaves(listed))
+      expect(containsCredentialShape(leaf.value), leaf.path).toBe(false);
+    for (const id of ids) {
+      const res = await client.readResource({ uri: `espn-ff://rec/${id}` });
+      const text = (res.contents[0] as { text: string }).text;
+      for (const leaf of stringLeaves(JSON.parse(text) as unknown))
+        expect(containsCredentialShape(leaf.value), leaf.path).toBe(false);
+    }
   });
 
   it("validation: limit 1..100, an unknown kind", async () => {

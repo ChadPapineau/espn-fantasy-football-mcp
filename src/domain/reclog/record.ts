@@ -14,7 +14,7 @@ import {
 } from "../../config/schema.js";
 import type { Assumption, Driver, InputFreshness, Rec, RecSubject } from "../analytics/types.js";
 import { parseIso, toIso, type Clock, type Rng } from "../clock.js";
-import { TEXT_CAPS } from "../league/types.js";
+import { TEXT_CAPS, bareUntrusted } from "../league/types.js";
 import { SETTINGS_HASH_RE, type Dist } from "../scoring/types.js";
 import { at } from "./metrics.js";
 import {
@@ -160,8 +160,12 @@ function checkText(v: unknown, max: number, path: string, out: Issues): void {
   else if (v.length > max) out.push({ path, code: "too_long" });
   else if (!PRINTABLE_TEXT_RE.test(v)) out.push({ path, code: "unprintable_characters" });
   // a cookie or SWID never belongs in the log (it would be stored and read back): defence in
-  // depth behind the Skills, mirrored by src/mcp's boundedTextSchema (B1)
-  else if (containsCredentialShape(v)) out.push({ path, code: "credential_shaped" });
+  // depth behind the Skills, mirrored by src/mcp's boundedTextSchema (B1). Judged as written and as
+  // it is read back: the read-back sanitiser decodes entities and drops tags, so
+  // "SWID&#61;&#123;…&#125;" passed the raw check and came back "SWID={…}" in E14's items and
+  // espn-ff://rec/{log_id} (round 3's review of changelog §R10, R10-1)
+  else if (containsCredentialShape(v) || containsCredentialShape(bareUntrusted(v, "rec_log_text")))
+    out.push({ path, code: "credential_shaped" });
 }
 
 function checkNumber(v: unknown, bound: number, path: string, out: Issues): void {

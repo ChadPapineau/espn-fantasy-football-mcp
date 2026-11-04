@@ -31,6 +31,7 @@ import {
   UNTRUSTED_SOURCE_CLASS as UNTRUSTED_SOURCE_CLASS_MAP,
   isUntrustedSource,
   isUntrustedText,
+  sanitizeText,
   type DegradedRead,
   type DriftMeta,
   type IsoInstant,
@@ -643,10 +644,12 @@ export function validatedToolResult(
 
 /**
  * validatedToolResult as resumable work: the serialisation and its JSON round trip, the schema check,
- * then the result, each a step — in one turn the three were 20–30 ms of an analytics answer on the
- * owner's Mac (plan 03 §1.2's ≤ 20 ms batch; changelog §R10 timing items), so the tool's runner takes
- * them in turns of their own (`inTurns`). The result is built from the text that was checked, which
- * is the envelope's own serialisation: drained, it is validatedToolResult.
+ * then the result, each a step — the three took up to about 5 ms of an analytics answer in the
+ * profile of round 3 on the owner's Mac, beside the envelope's fit in the same turn (plan 03 §1.2's
+ * ≤ 20 ms batch; changelog §R10 timing items), so the tool's runner takes them through `inTurns`,
+ * which gives up the turn between them once the slice has spent its share. The result is built from
+ * the text that was checked, which is the envelope's own serialisation: drained, it is
+ * validatedToolResult.
  */
 export function* validatedToolResultSteps(
   env: Envelope<unknown>,
@@ -889,13 +892,23 @@ export function toolAnnotations(name: string): ToolAnnotationHints {
 /** Printable text: no controls, format characters or other default-ignorable code points. */
 export const PRINTABLE_RE = /^[^\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Default_Ignorable_Code_Point}]*$/u;
 
-/** Model-supplied free text with a cap: printable, capped, never credential-shaped (B1). */
+/**
+ * Model-supplied free text with a cap: printable, capped, never credential-shaped (B1) — as written
+ * nor as it is read back: the sanitiser that every read-back runs (sanitizeText, at the field's own
+ * cap) decodes entities and drops tags, so "SWID&#61;&#123;…&#125;" passed the raw check and came
+ * back "SWID={…}" (round 3's review of changelog §R10, R10-1). Mirrored by src/domain/reclog
+ * record.ts checkText.
+ */
 export function boundedTextSchema(maxChars: number) {
   return z
     .string()
     .max(maxChars)
     .regex(PRINTABLE_RE, { message: "unprintable_characters" })
-    .refine((t) => !containsCredentialShape(t), { message: "credential_shaped" });
+    .refine(
+      (t) =>
+        !containsCredentialShape(t) && !containsCredentialShape(sanitizeText(t, maxChars).value),
+      { message: "credential_shaped" },
+    );
 }
 
 /** An input provenance tag: `espn:<View>`, a dataset source id, `store:<table>`, or a plain tag. */
