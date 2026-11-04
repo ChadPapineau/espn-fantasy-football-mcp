@@ -27,6 +27,8 @@ import {
   isTextSource,
   evidencePosterior,
   extractClaim,
+  healthDisagreement,
+  INJURY_REPORTED,
   posteriorEvidenceOf,
   reliabilityOf,
   reliabilitySourceOf,
@@ -371,6 +373,8 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
   // comparisons: structured fields win (rule 3); the most important disagreement is named
   type Disagree = NonNullable<EvidenceData["structured_disagrees"]>;
   const found: Disagree[] = [];
+  /** Injuries reported against ESPN's ACTIVE (R4VS-6): named after every designated disagreement. */
+  const injuries: Disagree[] = [];
   const claimsOnly = items.filter((i) => !i.official);
   const facts = { injury_status: status ?? (offOut ? "OUT" : null) };
   for (const it of claimsOnly) {
@@ -383,6 +387,13 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
           status === null ? `${d.structured_value} (official report)` : d.structured_value,
         claim_value: d.claim_value,
       });
+    // an injury reported with no designation word on a player ESPN lists ACTIVE (the round-4
+    // R4VS-6; rule 3): the same field disagrees — never a quiet role change
+    const h =
+      d === null && status === "ACTIVE"
+        ? healthDisagreement(it.extract, { injury_status: status }, it.claim.untrusted_text.value)
+        : null;
+    if (h !== null) injuries.push(h);
     const cd = it.extract?.designation ?? null;
     if ((cd === "practice_limited" || cd === "practice_full") && offPractice === "practice_dnp")
       found.push({
@@ -434,6 +445,8 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
     "waiver_process_date",
     "stats",
   ];
+  // a designated disagreement names the field first; an injury report against ACTIVE after it
+  found.push(...injuries);
   found.sort((a, b) => order.indexOf(a.field) - order.indexOf(b.field));
   const disagree = found[0] ?? null;
   const roleClaims = claimsOnly.filter((i) => i.type === "role" || i.type === "availability");
@@ -518,7 +531,15 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
         };
 
   const confirm: string[] = [];
-  if (flag === "availability_conflict")
+  if (flag === "availability_conflict" && disagree?.claim_value === INJURY_REPORTED)
+    // ESPN lists him ACTIVE and the text reports an injury: what would confirm it is ESPN's own
+    // status and the official report, never a role (the round-4 R4VS-6)
+    confirm.push(
+      "ESPN's injuryStatus for him changes from ACTIVE (an injury designation)",
+      "the next official injury report lists the injury",
+      "the inactives list about 90 minutes before kickoff",
+    );
+  else if (flag === "availability_conflict")
     confirm.push(
       "ESPN's injuryStatus or the official game status changes",
       "the inactives list about 90 minutes before kickoff",

@@ -484,12 +484,14 @@ export const RULES_V1_TABLE: readonly Rule[] = Object.freeze([
     null,
     String.raw`\b(?:mri|x-rays?|tests?|scans?)\s+(?:came back\s+)?(?:clean|negative)\b|\bno structural damage\b|\bavoid(?:s|ed)?\s+(?:a\s+|an\s+)?(?:serious|significant|major|long-term|season-ending|severe)\s+(?:knee |ankle |foot |shoulder |hamstring )?injury\b|\bminor\s+(?:injury|sprain|strain|tweak)\b|\bdodged? (?:a )?bullet\b|\bavoid(?:s|ed)?\s+surgery\b|\bwon't need surgery\b`,
   ),
+  // negatable (the round-4 R4VS-6): "no ACL tear", "not a hamstring injury" report no injury
   rule(
     "health.injury",
     "health",
     "down",
     null,
     `\\b${BODY}\\s+${INJURY_NOUN}\\b|\\bconcussion\\b|\\billness\\b|\\bsetback\\b`,
+    { negatable: true },
   ),
   rule(
     "health.suffered",
@@ -793,6 +795,22 @@ export function claimAvailability(c: RulesV1Claim | null): Designation | null {
   if (c === null) return null;
   if (c.type === "availability") return c.designation;
   return IMPLIED.get(c.rule) ?? null;
+}
+
+/**
+ * Whether any rule that says he plays fires on the text — an availability rule of the `plays` class
+ * ("will play", "cleared", "practiced in full") or a start of the coming game, which implies he plays
+ * — wherever it stands, not only as the text's claim: "has an ankle sprain but will play" reports an
+ * injury and that he plays. What the structured comparator reads before it calls an injury report a
+ * disagreement with ESPN's ACTIVE (structured.ts healthDisagreement; the round-4 R4VS-6). A full
+ * pass of the table over the text: called only for a down health claim on an ACTIVE player.
+ */
+export function statesPlays(text: string | null | undefined): boolean {
+  if (typeof text !== "string" || text.length === 0) return false;
+  return hitsOf(claimFold(text)).some((h) => {
+    const d = h.rule.type === "availability" ? h.rule.designation : h.rule.implies;
+    return d !== null && CLASS_OF[d] === "plays";
+  });
 }
 
 /** The plan 07 D6 `claim` shape of an extract (the three public fields only). */

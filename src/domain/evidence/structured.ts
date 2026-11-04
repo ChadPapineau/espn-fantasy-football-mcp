@@ -16,13 +16,27 @@
 // a role claim, and a start says he plays, so against an OUT player it names `injury_status` with
 // `claim_value: "will_play"` like "will play Sunday" does — a start/sit decision hinges on exactly
 // that contradiction.
+//
+// An injury reported with no designation word ("tore his ACL in practice", "broke his leg") about a
+// player ESPN lists ACTIVE is a disagreement with the same field (the round-4 R4VS-6; research 05 §6
+// rule 3; plan 07 E10 `structured_disagrees.field: "injury_status"`): ESPN's ACTIVE says no injury
+// designation, the claim says he is hurt. `healthDisagreement` names it with `claim_value:
+// "injury_reported"`, so E10 flags `availability_conflict` and asks for ESPN's status and the official
+// report — never `quiet_role_change`, which is a usage move with no claim about it. A questionable or
+// out status is consistent with an injury report; a report that also says he plays ("an ankle sprain
+// but he will play"), or that negates the injury ("no ACL tear", "did not tear his ACL" — the
+// extractor reads no injury claim there), names nothing.
 import type { InjuryStatus } from "../league/types.js";
 import {
   availabilityClass,
   claimAvailability,
+  statesPlays,
   type AvailabilityClass,
   type RulesV1Claim,
 } from "./claims.js";
+
+/** `claim_value` of an injury reported with no designation word, against ESPN's ACTIVE (R4VS-6). */
+export const INJURY_REPORTED = "injury_reported";
 
 /** The structured facts a claim is compared with (ESPN's view of the player). */
 export interface StructuredFacts {
@@ -76,4 +90,22 @@ export function structuredDisagreement(
         claim_value: said,
       }
     : null;
+}
+
+/**
+ * The disagreement between an injury the text reports with no designation word (a `health` claim
+ * whose direction is down) and ESPN's `ACTIVE`, or null: another claim, another status (QUESTIONABLE,
+ * OUT … are consistent with an injury), or a text that also says he plays (`statesPlays`). `text` is
+ * the claim's own text (what the extractor read). Read after `structuredDisagreement`, which decides
+ * every claim that names his availability.
+ */
+export function healthDisagreement(
+  claim: RulesV1Claim | null,
+  facts: StructuredFacts,
+  text: string,
+): StructuredDisagreement | null {
+  if (claim?.type !== "health" || claim.direction !== "down") return null;
+  if (facts.injury_status !== "ACTIVE") return null;
+  if (statesPlays(text)) return null;
+  return { field: "injury_status", structured_value: "ACTIVE", claim_value: INJURY_REPORTED };
 }

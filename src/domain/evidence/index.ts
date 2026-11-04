@@ -27,6 +27,7 @@ export {
   ruleHits,
   RULES_V1,
   RULES_V1_TABLE,
+  statesPlays,
   toClaimExtract,
   warmRulesSteps,
   type AvailabilityClass,
@@ -94,6 +95,8 @@ export {
   type ScoredClaim,
 } from "./calibration.js";
 export {
+  healthDisagreement,
+  INJURY_REPORTED,
   statusClass,
   structuredDisagreement,
   type StructuredDisagreement,
