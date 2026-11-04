@@ -997,9 +997,20 @@ describe("E6 espn_analyze_trade", () => {
       seeding_mode: "both",
       seed: 4,
     });
+    const bd = both.data as {
+      delta_u: { reading: string; basis: string; by_reading: unknown[] };
+      why_they_accept: string[];
+    };
+    expect(bd.delta_u.by_reading).toHaveLength(2);
+    // changelog §R10, R10-2: the partner's standing once per reading, each line naming it
+    const per = (prefix: string): number =>
+      bd.why_they_accept.filter((w) => w.startsWith(prefix)).length;
+    const simulated = bd.delta_u.basis === "season_sim" ? 1 : 0;
+    expect(per("under the record-first reading: ")).toBe(simulated);
+    expect(per("under the points-only reading: ")).toBe(simulated);
     expect(
-      (both.data as { delta_u: { reading: string; by_reading: unknown[] } }).delta_u.by_reading,
-    ).toHaveLength(2);
+      bd.why_they_accept.some((w) => /^(a contender|on the bubble|a long shot) under/.test(w)),
+    ).toBe(false);
     const risky = await ok("espn_analyze_trade", {
       offer: { partner_team_id: 2, give: give.slice(0, 1), get },
       risk: "floor",

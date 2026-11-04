@@ -315,6 +315,113 @@ describe("plan 10 B5 hard: delta_u under the configured reading, and under both 
   });
 });
 
+describe("changelog §R10, R10-2: why_they_accept under `both` gives the standing once per reading", () => {
+  // Team 03's case in the round-2 report (TR-5-E): a contender when the record seeds, but 6th in
+  // points for — the last playoff place — so on the bubble when points alone seed
+  const TEAM03 = team(3, "wr_rich");
+  const team03 = (er: number, po: number): TradeTeam => ({
+    ...TEAM03,
+    readings: [reading("espn_rule", er, 0.3, 0.03), reading("points_only", po, 0.1, 0.08)],
+  });
+  const offerTo03 = (partner: TradeTeam, mode: SeedingMode, both: boolean) => ({
+    me: {
+      ...ME,
+      readings: [reading("espn_rule", 0.5, 0.2, 0.06), reading("points_only", 0.45, 0.15, 0.09)],
+    },
+    teams: [partner, PARTNER, ...OTHERS.filter((t) => t.team_id !== 3)],
+    offer: { partner_team_id: 3, give: [102], get: [304] },
+    seeding_config: { mode, confirmed_at: null },
+    ...(both ? { seeding_mode: "both" as const } : {}),
+  });
+  const named = (lines: readonly string[]) => ({
+    recordFirst: lines.filter((w) => w.startsWith("under the record-first reading: ")),
+    pointsOnly: lines.filter((w) => w.startsWith("under the points-only reading: ")),
+  });
+  const pts = (x: number): string => `${x >= 0 ? "+" : ""}${String(Math.round(x * 10) / 10)}`;
+
+  it.each(["espn_rule", "points_only"] as const)(
+    "configured %s, both passed: a contender record-first, on the bubble points-only — one named line each",
+    async (mode) => {
+      const d = await evaluation(offerTo03(team03(0.75, 0.42), mode, true));
+      expect(d.delta_u.by_reading.map((r) => r.seeding_mode)).toEqual(["espn_rule", "points_only"]);
+      const { recordFirst, pointsOnly } = named(d.why_they_accept);
+      expect(recordFirst).toEqual(["under the record-first reading: a contender, buying now"]);
+      // the points-only standing comes from the points-only reading itself, its own ΔP(playoffs)
+      const dPo = d.delta_u.by_reading[1]?.partner.d_p_playoffs ?? Number.NaN;
+      expect(pointsOnly).toEqual([
+        `under the points-only reading: on the bubble, ΔP(playoffs) ${pts(dPo * 100)} pts matters to them (their seed follows points-for)`,
+      ]);
+      // the configured reading's single-form line never stands in for both
+      expect(d.why_they_accept.some((w) => w.startsWith("a contender under"))).toBe(false);
+      expect(
+        d.why_they_accept.some((w) => w.startsWith("under the points-only reading their seed")),
+      ).toBe(false);
+      // record-first first, as delta_u.by_reading orders the readings
+      expect(d.why_they_accept.indexOf(recordFirst[0] ?? "")).toBeLessThan(
+        d.why_they_accept.indexOf(pointsOnly[0] ?? ""),
+      );
+    },
+  );
+
+  it("one reading (no `both`): the configured reading's line, unchanged", async () => {
+    const er = await evaluation(offerTo03(team03(0.75, 0.42), "espn_rule", false));
+    expect(named(er.why_they_accept).pointsOnly).toEqual([]);
+    expect(er.why_they_accept).toContain("a contender under the record-first reading: buying now");
+    const po = await evaluation(offerTo03(team03(0.75, 0.42), "points_only", false));
+    const dPo = po.delta_u.by_reading[0]?.partner.d_p_playoffs ?? Number.NaN;
+    expect(po.why_they_accept).toContain(
+      `under the points-only reading their seed follows points-for: ΔP(playoffs) ${pts(dPo * 100)} pts`,
+    );
+    expect(po.why_they_accept.some((w) => w.includes("record-first"))).toBe(false);
+    // the R10-4 long-shot line stands as it was
+    const low = await evaluation(offerTo03(team03(0.05, 0.05), "espn_rule", false));
+    expect(low.why_they_accept).toContain(
+      "a long shot under the record-first reading: future value matters more to them",
+    );
+  });
+
+  it("both, the partner simulated under one reading only: that reading's line alone, named", async () => {
+    const one: TradeTeam = { ...TEAM03, readings: [reading("points_only", 0.1, 0.02, 0.05)] };
+    const d = await evaluation(offerTo03(one, "espn_rule", true));
+    const { recordFirst, pointsOnly } = named(d.why_they_accept);
+    expect(recordFirst).toEqual([]);
+    expect(pointsOnly).toEqual([
+      "under the points-only reading: a long shot, future value matters more to them (their seed follows points-for)",
+    ]);
+  });
+
+  it("both, no reading simulated (cold start): no standing line at all, as before", async () => {
+    const d = await evaluation(offerTo03({ ...TEAM03 }, "espn_rule", true));
+    expect(d.delta_u.basis).toBe("cold_start");
+    expect(d.why_they_accept.some((w) => w.includes("reading"))).toBe(false);
+  });
+
+  it("property: under both, each reading's line follows that reading's own P(playoffs)", async () => {
+    const standingOf = (p: number): string =>
+      p >= 0.6 ? "a contender" : p >= 0.2 ? "on the bubble" : "a long shot";
+    await fc.assert(
+      fc.asyncProperty(
+        fc.double({ min: 0, max: 1, noNaN: true }),
+        fc.double({ min: 0, max: 1, noNaN: true }),
+        fc.constantFrom<SeedingMode>("espn_rule", "points_only"),
+        async (er, po, mode) => {
+          const d = await evaluation(offerTo03(team03(er, po), mode, true));
+          const { recordFirst, pointsOnly } = named(d.why_they_accept);
+          expect(recordFirst).toHaveLength(1);
+          expect(pointsOnly).toHaveLength(1);
+          expect(recordFirst[0]?.slice("under the record-first reading: ".length)).toMatch(
+            new RegExp(`^${standingOf(er)}`),
+          );
+          expect(pointsOnly[0]?.slice("under the points-only reading: ".length)).toMatch(
+            new RegExp(`^${standingOf(po)}`),
+          );
+        },
+      ),
+      { numRuns: 25 },
+    );
+  }, 60_000);
+});
+
 describe("plan 10 B5 hard: the deadline from tradeSettings.deadlineDate", () => {
   it("stated before it passes; after it, no move and no execution time", async () => {
     const before = await evaluation();

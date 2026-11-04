@@ -1025,6 +1025,10 @@ function vetoRisk(votes: number, dMe: number, dPartner: number): "low" | "medium
   return "low";
 }
 
+/** P(playoffs) at or above which the partner reads as a contender, and as on the bubble. */
+const STANDING_CONTENDER_P = 0.6;
+const STANDING_BUBBLE_P = 0.2;
+
 function whyTheyAccept(
   req: TradeRequest,
   partner: TradeTeam,
@@ -1051,6 +1055,19 @@ function whyTheyAccept(
     out.push(`it fills their weakest starting position (${weak})`);
   if (get.length > give.length)
     out.push("they consolidate: two of theirs become one starter and a free roster seat");
+  if (req.seeding_mode === "both") {
+    // changelog §R10, R10-2: under `both`, the partner's standing once per reading, each line
+    // naming its reading, from that reading's own P(playoffs) and ΔP(playoffs) (delta_u.by_reading)
+    // — the configured reading alone never stands for the other (TR-5-E: a contender seeded
+    // record-first can be on the bubble when points alone seed)
+    for (const row of du.by_reading) {
+      const reading = partner.readings?.find((r) => r.seeding_mode === row.seeding_mode);
+      if (reading !== undefined)
+        out.push(standingUnder(row.seeding_mode, reading.p_playoffs, row.partner.d_p_playoffs));
+    }
+    return out;
+  }
+  // one reading (the configured one): the lines as before R10-2, unchanged
   const mode = req.seeding_config.mode;
   const reading = partner.readings?.find((r) => r.seeding_mode === mode);
   if (reading !== undefined) {
@@ -1060,14 +1077,31 @@ function whyTheyAccept(
       out.push(
         `under the points-only reading their seed follows points-for: ΔP(playoffs) ${fmt(d * 100)} pts`,
       );
-    else if (p >= 0.6) out.push("a contender under the record-first reading: buying now");
-    else if (p >= 0.2)
+    else if (p >= STANDING_CONTENDER_P)
+      out.push("a contender under the record-first reading: buying now");
+    else if (p >= STANDING_BUBBLE_P)
       out.push(
         `on the bubble under the record-first reading: ΔP(playoffs) ${fmt(d * 100)} pts matters to them`,
       );
     else out.push("a long shot under the record-first reading: future value matters more to them");
   }
   return out;
+}
+
+/**
+ * The partner's standing under one named reading (changelog §R10, R10-2), on the same thresholds as
+ * the single-reading lines: "under the record-first reading: …" / "under the points-only reading: …".
+ */
+function standingUnder(mode: SeedingMode, p: number, d: number): string {
+  const standing =
+    p >= STANDING_CONTENDER_P
+      ? "a contender, buying now"
+      : p >= STANDING_BUBBLE_P
+        ? `on the bubble, ΔP(playoffs) ${fmt(d * 100)} pts matters to them`
+        : "a long shot, future value matters more to them";
+  return mode === "points_only"
+    ? `under the points-only reading: ${standing} (their seed follows points-for)`
+    : `under the record-first reading: ${standing}`;
 }
 
 /** Counters: drop one of my given players, or add one of the partner's bench players to the get side. */
