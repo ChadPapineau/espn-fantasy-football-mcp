@@ -32,7 +32,7 @@ import {
 } from "../league/types.js";
 import type { Dist } from "../scoring/types.js";
 import { DEFAULT_CV, POSITION_CV } from "./constants.js";
-import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
+import { loopPacer, runCooperativeSteps, type Pacer } from "./cooperative.js";
 import { ensure, ensurePlayers } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs, newestAsOf } from "./inputs.js";
 import { fastLineupValue, seatPlan, type FastPlayer } from "./lineup.js";
@@ -411,11 +411,17 @@ export async function analyzeRoster(req: RosterAuditRequest): Promise<RosterAudi
   // h, h · max(0, m_s − m0) with m_s = V(R \ s) − V(R \ {s, p}) — p's value when s is out
   const cuffs = new Map((req.handcuffs ?? []).map((h) => [h.handcuff, h]));
   const benchRows: { p: AuditPlayer; lineup: number; injury: number }[] = [];
-  const run = await runCooperative(
-    bench.length,
-    (i) => {
-      const p = bench[i];
-      if (p === undefined) return;
+  /**
+   * The bench rows as resumable work, a step per bench player's week (cooperative.ts
+   * runCooperativeSteps): a week costs two lineup solves plus two per active player injured in it,
+   * so a player's whole horizon was one step of uneven cost — one out most weeks is cheap, the next
+   * a dozen weeks of solves — and the batch that met the first heavy one after cheap ones ran past
+   * its 12 ms by that step (17–20 ms turns of a warm espn_analyze_roster on the owner's Mac, round
+   * 3b's M5; plan 03 §1.2's ≤ 20 ms batch). The sums run in the same order, so every row is the
+   * same; a row is kept only once all its weeks ran (the CPU deadline stops between two steps).
+   */
+  function* benchSteps(): Generator<void, void, undefined> {
+    for (const p of bench) {
       const without = active.filter((x) => x.player_id !== p.player_id);
       let lineup = 0;
       let injury = 0;
@@ -424,21 +430,25 @@ export async function analyzeRoster(req: RosterAuditRequest): Promise<RosterAudi
         if (wt === 0) continue;
         const m0 = lineupWith(active, w, null, null) - lineupWith(without, w, null, null);
         lineup += wt * m0;
-        if (weekMean(p, w) <= 0) continue;
-        for (const s of active) {
-          if (s.player_id === p.player_id || weekMean(s, w) <= 0) continue;
-          const ms =
-            lineupWith(active, w, s.player_id, null) - lineupWith(without, w, s.player_id, null);
-          injury += wt * ROSTER_AUDIT.weeklyAbsence * Math.max(0, ms - m0);
-        }
+        if (weekMean(p, w) > 0)
+          for (const s of active) {
+            if (s.player_id === p.player_id || weekMean(s, w) <= 0) continue;
+            const ms =
+              lineupWith(active, w, s.player_id, null) - lineupWith(without, w, s.player_id, null);
+            injury += wt * ROSTER_AUDIT.weeklyAbsence * Math.max(0, ms - m0);
+          }
+        yield;
       }
       benchRows.push({ p, lineup, injury });
-    },
-    { pacer: req.pacer ?? loopPacer(req.clock), deadlineMs: req.deadline_ms },
-  );
+    }
+  }
+  const run = await runCooperativeSteps(benchSteps(), {
+    pacer: req.pacer ?? loopPacer(req.clock),
+    deadlineMs: req.deadline_ms,
+  });
   if (run.partial)
     warnings.push(
-      `partial: ${String(run.completed)} of ${String(bench.length)} bench players before the CPU deadline`,
+      `partial: ${String(benchRows.length)} of ${String(bench.length)} bench players before the CPU deadline`,
     );
 
   const altUse = Math.max(0, ...streamPositions.map(addValue));
