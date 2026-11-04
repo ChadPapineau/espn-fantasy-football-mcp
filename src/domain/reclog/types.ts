@@ -95,11 +95,13 @@ export const RECLOG_UNTRUSTED_SOURCE = "store.recommendation_log";
 /**
  * The model-authored text paths of `espn_analyze_retrospective` data (plan 07 E13, C15), relative to
  * `data`: the tool path-lists them with source RECLOG_UNTRUSTED_SOURCE (`rec.action` there is the
- * server's own text, not the log's).
+ * server's own text, not the log's). `note` since changelog §R10, R10-13, as R10-1 did for E14: the
+ * claim a logged call carries is in its note, which no tool retro may call returned.
  */
 export const RETROSPECTIVE_TEXT_PATHS: readonly string[] = Object.freeze([
   "calls[].recommended",
   "calls[].best_alternative",
+  "calls[].note",
 ]);
 /**
  * The model-authored text paths of `espn_list_recommendations` data (plan 07 E14, C15), relative to
@@ -419,6 +421,12 @@ export interface RetrospectiveCall {
   /** Model-authored, sanitised on read (BareText; path-listed). */
   readonly best_alternative: BareText | null;
   readonly realised: number | null;
+  /**
+   * The logged entry's model-authored note, sanitised and capped on read at the log's own text cap
+   * (TEXT_CAPS.rec_log_text), path-listed like `recommended`; null when none was logged (changelog
+   * §R10, R10-13).
+   */
+  readonly note: BareText | null;
 }
 
 /** `espn_analyze_retrospective` data (plan 07 E13). */

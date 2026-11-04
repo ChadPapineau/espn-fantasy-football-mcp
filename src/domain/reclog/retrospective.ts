@@ -565,6 +565,8 @@ export function scoreCall(
       recommended: readBack(record.rec.action),
       best_alternative: best === null ? null : readBack(best.action),
       realised,
+      // the logged note read back like the summary (changelog §R10, R10-13); null when none
+      note: record.note === null ? null : readBack(record.note),
     },
     swaps,
     baseline_last_week: baselined ? baselineRegret(record, facts, LAST_WEEK) : null,

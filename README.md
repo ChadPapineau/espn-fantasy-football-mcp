@@ -659,7 +659,7 @@ Generated from the registry `tools/list` is built from (`scripts/gen-tool-docs.t
 | E2 | `espn_analyze_lineup` | core · full | analytics | Start/sit as an assignment under the objective the seeding reading implies: lineup, swaps with expected points and P(win) change, coin flips, locks. |
 | E5 | `espn_analyze_waivers` | core · full | analytics | Waiver targets priced against waiver priority: premium of position k, surplus over the drop, claim/pass/marginal, claim and scramble lists; K/D-ST streams. |
 | E12 | `espn_record_recommendation` | core · full | local_write | Log the recommendation just presented (rec, alternatives shown, source request_ids) so the retrospective can score it. Idempotent on client_ref. |
-| E13 | `espn_analyze_retrospective` | core · full | analytics | Score a week's logged calls (default: last final week) by regret and proper scoring rules vs two baselines and ESPN's numbers; never applies changes. |
+| E13 | `espn_analyze_retrospective` | core · full | analytics | Score a week's logged calls (default: last final week), each with its note, by regret and proper scoring rules vs two baselines and ESPN's numbers; never applies changes. |
 | G1 | `espn_get_status` | core · full | ops | Server, credential state (never a value), capabilities, drift, limiter, data-source ages, crosswalk, store; zero ESPN requests. Call first. |
 | G2 | `espn_check_auth` | core · full | ops | One explicit ESPN credential probe (accepted / rejected / undeterminable), at most once a minute; use after eff setup following ESPN_AUTH_REJECTED. |
 | B2 | `espn_get_player_stats` | full | espn_fact | Weekly, season or prior-season stat splits for up to 25 players (rostered or not), recomputed under league scoring with the golden match. |

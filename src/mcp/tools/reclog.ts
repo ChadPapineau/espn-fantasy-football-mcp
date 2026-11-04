@@ -184,6 +184,10 @@ export const retrospectiveSchema = z.strictObject({
         recommended: recLogText,
         best_alternative: recLogText.nullable(),
         realised: z.number().nullable(),
+        // the logged entry's note (changelog §R10, R10-13, superseding E13's `calls[]` fields): null
+        // when none was logged, else read back within the log's own text cap and path-listed
+        // `data.calls[].note` with source `store.recommendation_log` (the schema's bare-text mark)
+        note: recLogText.nullable(),
       }),
     )
     .max(200),
@@ -299,7 +303,7 @@ async function lastFinalWeek(
 export const analyzeRetrospective = defineTool({
   name: "espn_analyze_retrospective",
   description:
-    "Score a week's logged calls (default: last final week) by regret and proper scoring rules vs two baselines and ESPN's numbers; never applies changes.",
+    "Score a week's logged calls (default: last final week), each with its note, by regret and proper scoring rules vs two baselines and ESPN's numbers; never applies changes.",
   input: z.strictObject({
     week: weekSchema.optional(),
     kinds: recommendationKindsSchema.optional(),
