@@ -54,6 +54,7 @@ import {
   nameKeysOf,
   namedIn,
   practiceHistoryClaims,
+  warmRulesSteps,
   type CalibrationSource,
   type CalibrationTable,
   type ClaimSignal,
@@ -1815,6 +1816,12 @@ export const analyzeEvidenceTool = defineTool({
         yield;
       }
     }
+    // the texts' first claims in a process compiled every rules_v1 pattern in one step (cold
+    // cpu_max 10.9–14.8 ms on the owner's Mac when E10 was the process's first extractor; round 3b's
+    // timing account): the table is compiled first, a rule a step, in turns that end once the slice
+    // has spent its share (plan 03 §1.2; plan 10 A16a), as espn_get_news does — once per process, so a
+    // warm call takes no step and no pass through the gate, and the claims read are the same
+    await inTurns(warmRulesSteps());
     await runCooperativeSteps(textSteps(), { pacer: ctx.pacer, deadlineMs: null });
     // the per-source calibration table (Phase 3, plan 10 C8): the official practice report's
     // labelled history plus every claim the retrospective scored for this league; table_n counts
