@@ -91,12 +91,14 @@
       "name": "WV-7-E",
       "toolset": "core",
       "prompt": "Who should I pick up this week and is it worth my waiver spot?",
-      "expected_output": "On auth-rejected — a public league whose stored session ESPN rejected — orient's rejected row prints one Session line (the stored session was rejected; reads are keyless where the league allows them; eff setup in a terminal replaces it) and carries on (changelog §R10, R10-7): the reply still ranks the candidates with their verdicts, states premium_basis cold_start_table (a league-average estimate), and routes the session repair to session-check or eff setup in one line without abandoning the answer.",
+      "expected_output": "On auth-rejected — a public league whose stored session ESPN rejected — orient's rejected row prints one Session line (the stored session was rejected; reads are keyless where the league allows them; eff setup in a terminal replaces it) and carries on (changelog §R10, R10-7). ESPN serves the league's transaction feed to anyone on a public league, so espn_list_transactions answers keylessly under the rejected session (R10-10; week 5 has no moves yet): the waiver answer needs no fallback for a refused read (R10-12). The reply ranks the candidates with their verdicts, states premium_basis cold_start_table (a league-average estimate until the league's own feed has history — the league has no fitted history yet, not a refused read), and routes the session repair to session-check or eff setup in one line without abandoning the answer; it never calls the transaction feed unavailable because of the session.",
       "files": ["evals/fixtures/fx-10h/auth-rejected"],
       "expectations": [
+        "The skill called espn_list_transactions (tool_used)",
         "The reply states the cold-start premium (regex: `cold_start_table|league-average`)",
         "The reply routes the session repair to session-check or eff setup in one line (regex: `session-check|eff setup`)",
-        "The reply still gives the ranking and verdicts (llm)"
+        "The reply still gives the ranking and verdicts (llm)",
+        "The reply reads the league's transactions keylessly and never calls the transaction feed unavailable or refused because of the rejected session (llm)"
       ]
     },
     {

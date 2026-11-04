@@ -1,7 +1,7 @@
 ---
 name: schedule-plan
-description: Plans the roster across byes and the playoffs in the user's ESPN league — lineup holes and the cheapest fixes, playoff and first-round-bye odds, the seed race, and what a win or a block of points is worth.
-when_to_use: byes, playoff odds, am I making the playoffs, playoff seed, first-round bye, wins or points, weeks 15-17, plan ahead, down the stretch, coast, playoff schedule
+description: Plans the roster across byes and the playoffs in the user's ESPN league — lineup holes and fixes, playoff and first-round-bye odds, the seed race, and what a win or a block of points is worth.
+when_to_use: bye week, byes, playoff odds, am I making the playoffs, playoff seed, first-round bye, wins or points, weeks 15-17, plan ahead, down the stretch, coast, playoff schedule
 argument-hint: "[weeks, or a playoff question]"
 disallowed-tools:
   - mcp__espn-fantasy-football__espn_commit_lineup

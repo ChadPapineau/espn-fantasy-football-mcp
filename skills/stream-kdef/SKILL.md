@@ -1,6 +1,6 @@
 ---
 name: stream-kdef
-description: Picks the kicker or defense to start or stream in the user's ESPN league from implied totals, weather, opponents and the league's K and D/ST scoring, with a two-week look-ahead and a hold-or-stream verdict.
+description: Picks the kicker or defense to start or stream in the user's ESPN league from implied totals, weather, opponents and the league's scoring, with a two-week look-ahead and a hold-or-stream verdict.
 when_to_use: stream, kicker, defense, D/ST, DST, which K, which defense, hold my kicker
 argument-hint: "[K | D/ST]"
 disallowed-tools:

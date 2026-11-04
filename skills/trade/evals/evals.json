@@ -63,12 +63,13 @@
       "name": "TR-5-E",
       "toolset": "full",
       "prompt": "Team 03 offered Kyren Williams for my WR1. They're 3-1, so they must be a contender. Should I take it?",
-      "expected_output": "Last season's seeds followed points for, unlike the configured ESPN rule, and the reading is unconfirmed: the offer is valued under both readings side by side (seeding_mode both); why_they_accept gives Team 03's standing once per reading, each line naming its reading (changelog §R10, R10-2: \"under the record-first reading: …\", \"under the points-only reading: …\") — Team 03 is 3–1 and 6th in points for, the last playoff place — and the reply reads both lines back as the tool gives them (R10-4: never a standing the tool does not state), beside each reading's ΔU for both teams; it then asks which reading applies in trade's fixed line and offers the onboard Skill to record it, even though the verdict is the same under both.",
+      "expected_output": "Last season's seeds followed points for, unlike the configured ESPN rule, and the reading is unconfirmed: the offer is valued under both readings side by side (seeding_mode both). Team 03 leads by record (3–1) but is seventh in points for, just behind the last playoff place (changelog §R10, R10-14), so why_they_accept gives its standing once per reading, each line naming its reading (R10-2): \"under the record-first reading: a contender, buying now\" and \"under the points-only reading: on the bubble, ΔP(playoffs) … pts matters to them (their seed follows points-for)\". The reply reads both lines back as the tool gives them (R10-4: never a standing the tool does not state) — a contender when the record seeds, on the bubble when points alone seed — beside each reading's ΔU for both teams; it then asks which reading applies in trade's fixed line and offers the onboard Skill to record it, even though the verdict is the same under both.",
       "files": ["evals/fixtures/fx-10h/points-only-seeding"],
       "expectations": [
         "espn_analyze_trade was called with both readings (tool_used: input_match seeding_mode both)",
         "The reply shows the playoff-odds change for both teams (regex: `playoff`)",
-        "The reply shows both seeding readings side by side, with Team 03's standing under each reading as the tool's why_they_accept lines state it, each naming its reading (llm)",
+        "The reply reads Team 03 on the bubble under the points-only reading (regex: `bubble`)",
+        "The reply shows both seeding readings side by side, with Team 03's standing under each reading as the tool's why_they_accept lines state it — a contender under the record-first reading, on the bubble under the points-only reading — each naming its reading (llm)",
         "The reply asks which seeding reading applies instead of asserting one, even though the verdict is the same under both, and offers onboard to record it (llm)"
       ]
     },

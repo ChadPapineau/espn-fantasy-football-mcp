@@ -1,6 +1,6 @@
 ---
 name: weekly
-description: Produces the weekly game plan in the user's ESPN league — last week's result, this week's matchup and lineup with the win chance, waiver claims, K and D/ST streams, injuries, byes and league activity.
+description: Produces the weekly game plan in the user's ESPN league — last week's result, this week's matchup, lineup and win chance, waiver claims, K and D/ST streams, injuries, byes and league activity.
 when_to_use: weekly plan, game plan, briefing, prep me, what should I do this week, what happened in my league, waivers cleared, weekly check-in
 argument-hint: "[week]"
 disallowed-tools:
@@ -73,7 +73,7 @@ At most one page: each section one table; a sub-decision whose Δ interval inclu
 Result, score, the retrospective headline (or "provisional").
 
 ### This week's matchup and lineup
-Opponent (quoted name, `team_id`), `P(win)` as its band with `basis`, the recommended lineup by slot with `E`, `p10`, `p90`, the top swap or "no move", the lock schedule.
+Opponent (quoted name, `team_id`), `P(win)` as its band with `basis`, the lineup the rec sets or keeps, by slot, with `E`, `p10`, `p90`, the top swap or "no move", the lock schedule. The move is the tool's `rec` — its action, or **"No move"** when `rec.no_move` is true — never `recommended_lineup`, the mean-optimal assignment, which also starts a swap the rec holds as a coin flip (changelog §R10, R10-15).
 
 ### Waivers
 The claim brief or the scramble brief, with the premium band, verdicts, the drop and `next_run_at`; the **Value basis** line.

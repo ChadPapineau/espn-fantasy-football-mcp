@@ -16,7 +16,12 @@ import {
   ORIENT_ABSENT,
   SEED_NOTES,
   TOOL_OUTPUT_FIELDS,
+  TOOL_OUTPUT_PHRASES,
   toolOutputFieldProblems,
+  LINEUP_REC_SENTENCE,
+  PENDING_NULL_SENTENCE,
+  RETRO_NOTE_SENTENCE,
+  pendingReadProblems,
   ORIENT_REJECTED,
   ORIENT_SENTENCES,
   TEMPLATE_FLAG_LINE,
@@ -652,6 +657,32 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
     ]);
   });
 
+  // changelog §R10, R10-12: orient's mid-procedure sentence stands as written — "when the answer
+  // still needs that tool" is what lets waivers carry on with its named fallback — so the sentence
+  // is held whole: cutting any run of it, the R10-12 clause alone included, is refused
+  it("holds the mid-procedure sentence whole: any cut of it, R10-12's clause included, is refused", () => {
+    const sentence = ORIENT_SENTENCES.midProcedure;
+    const clause = "when the answer still needs that tool, or ";
+    expect(sentence).toContain(clause);
+    expect(orientRoutingProblems(shared.replace(clause, ""))).toEqual([
+      `the fixed sentence "midProcedure" is missing: "${sentence}"`,
+    ]);
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: sentence.length - 1 }),
+        fc.integer({ min: 1, max: 40 }),
+        (at, n) => {
+          const cut = sentence.slice(0, at) + sentence.slice(Math.min(sentence.length, at + n));
+          fc.pre(cut !== sentence && !shared.split(sentence).join(cut).includes(sentence));
+          expect(orientRoutingProblems(shared.split(sentence).join(cut))).toContain(
+            `the fixed sentence "midProcedure" is missing: "${sentence}"`,
+          );
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
   it("refuses the ask condition R10-5 corrected (the bench rank holds it, not the starters alone)", () => {
     const back = shared.replace(
       ORIENT_SENTENCES.positionalAsk,
@@ -774,11 +805,21 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
       "`rejected` on a private league (`league.is_public` false or null) → hand over to the `espn-fantasy-football:session-check` Skill and stop",
       "`rejected` on a private league → continue",
     ],
+    // changelog §R10, R10-10 (reversing round 3's "this cookie-only feed answers
+    // ESPN_AUTH_REJECTED even on a public league"): the feed answers keylessly there
     [
       "waivers",
-      "With a rejected stored session this cookie-only feed answers `ESPN_AUTH_REJECTED` even on a public league",
-      "On a public league it answers",
+      "ESPN serves the league's feed to anyone on a public league, so there it answers keylessly, under a rejected stored session too",
+      "On a public league it may answer",
     ],
+    // R10-12: the fallback is said in Confidence & freshness
+    ["waivers", ", and say so in Confidence & freshness (changelog §R10, R10-12)", ""],
+    // R10-15: the move is the rec, never recommended_lineup
+    ["start-sit", LINEUP_REC_SENTENCE, "The move is the recommended lineup."],
+    ["weekly", LINEUP_REC_SENTENCE, "The move is the recommended lineup."],
+    // R10-13: a call's logged note is a claim with its source
+    ["retro", RETRO_NOTE_SENTENCE, "Each call's note is shown."],
+    ["retro", "Read `calls[]` (`followed`, `regret`, `decisive`, `note`)", "Read `calls[]`"],
     [
       "waivers",
       "on a private or unknown league (`league.is_public` false or null) the procedure ends with the hand-off",
@@ -816,9 +857,27 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
     expect(errorsOf(t)).toMatch(new RegExp(`skills/${skill}/SKILL\\.md: body must mention /`));
   });
 
+  // changelog §R10, R10-10 reversed round 3's waivers sentence: it may never come back
+  it.each([
+    "With a rejected stored session this cookie-only feed answers `ESPN_AUTH_REJECTED` even on a public league (plan 02 §2.1, the short-circuit).",
+    "Fixture mode serves it keylessly; fixture mode serves it keylessly.",
+  ])("waivers: check-skills refuses the withdrawn feed sentence %j", (back) => {
+    const t = fresh();
+    t.edit(
+      "skills/waivers/SKILL.md",
+      "ESPN serves the league's feed to anyone on a public league",
+      `${back} ESPN serves the league's feed to anyone on a public league`,
+    );
+    expect(errorsOf(t)).toMatch(/skills\/waivers\/SKILL\.md: body must not mention \//);
+  });
+
   it("the frontmatter keeps the words the trigger suite relies on (session-check's setup command, roster-audit's single IR question)", () => {
     const t = fresh();
-    t.edit("skills/session-check/SKILL.md", "setup command, paste the output", "re-setup");
+    t.edit(
+      "skills/session-check/SKILL.md",
+      "how old, eff setup, re-setup, setup command, paste the output",
+      "eff setup",
+    );
     t.edit("skills/roster-audit/SKILL.md", "a single player's IR eligibility", "IR eligibility");
     // the round-3 review's F4: the game-day prompt "who should I start?" matched one phrase fewer
     t.edit("skills/start-sit/SKILL.md", "when_to_use: who should I start, ", "when_to_use: ");
@@ -833,6 +892,45 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
     expect(e).toContain(
       `skills/roster-audit/SKILL.md: frontmatter description must carry "${FRONTMATTER_PHRASES["roster-audit"].description[0] ?? ""}"`,
     );
+  });
+
+  // the phrases round 3 cut for listing room and this round restores: each one a positive of the
+  // trigger suite relies on ("share a bye week", "Is the scoring right", "How old are my cookies?",
+  // "re-run eff setup")
+  it.each([
+    ["schedule-plan", "bye week, ", "", "bye week"],
+    ["onboard", "is the scoring right, ", "", "is the scoring right"],
+    ["session-check", "how old, ", "", "how old"],
+    ["session-check", "re-setup, ", "", "re-setup"],
+  ])("%s: check-skills fails when when_to_use loses %j", (skill, from, to, phrase) => {
+    const t = fresh();
+    t.edit(`skills/${skill}/SKILL.md`, from, to);
+    expect(errorsOf(t)).toContain(
+      `skills/${skill}/SKILL.md: frontmatter when_to_use must carry "${phrase}"`,
+    );
+  });
+
+  it("every restored phrase is in a trigger positive's words, and the listing still fits", () => {
+    const trig = (skill: string) =>
+      (
+        JSON.parse(
+          readFileSync(path.join(ROOT, `skills/${skill}/evals/trigger_eval.json`), "utf8"),
+        ) as {
+          query: string;
+          should_trigger: boolean;
+        }[]
+      )
+        .filter((q) => q.should_trigger)
+        .map((q) => q.query.toLowerCase());
+    expect(trig("schedule-plan").some((q) => q.includes("bye week"))).toBe(true);
+    expect(trig("onboard").some((q) => q.includes("is the scoring right"))).toBe(true);
+    expect(trig("session-check").some((q) => q.includes("how old"))).toBe(true);
+    expect(trig("session-check").some((q) => q.includes("re-run eff setup"))).toBe(true);
+    const r = checkSkills({ root: ROOT, scan: false });
+    expect(r.errors).toEqual([]);
+    const note = r.notes.find((n) => n.includes("Skills listing")) ?? "";
+    const size = Number(/is (\d+) chars/.exec(note)?.[1]);
+    expect(size).toBeLessThanOrEqual(SKILLS_LISTING_MAX);
   });
 });
 
@@ -901,8 +999,11 @@ describe("the body (plan 09 §2, §5.1 item 2)", () => {
     );
     expect(toolOutputFieldProblems(sheet)).toEqual([]);
     expect(Object.keys(TOOL_OUTPUT_FIELDS).sort()).toEqual([
+      "espn_analyze_lineup",
+      "espn_analyze_retrospective",
       "espn_get_box_score",
       "espn_list_recommendations",
+      "espn_list_transactions",
     ]);
     const noNote = sheet
       .replace("`note` — null when none was logged —, ", "")
@@ -932,6 +1033,100 @@ describe("the body (plan 09 §2, §5.1 item 2)", () => {
     expect(errorsOf(t)).toContain(
       "skills/_shared/references/tool-outputs.md: the `espn_get_box_score` row does not list `projected_espn`",
     );
+  });
+
+  // changelog §R10, R10-10, R10-13, R10-15: the rows the Skills read carry the rulings' phrases —
+  // the feed keyless on a public league and `pending: null` without an accepted session; E13's
+  // calls[].note a claim with its source; recommended_lineup never the move by itself
+  it.each(
+    Object.entries(TOOL_OUTPUT_PHRASES).flatMap(([tool, phrases]) =>
+      (phrases as readonly string[]).map((ph) => [tool, ph] as const),
+    ),
+  )("fails when the cheat-sheet's %s row loses %j", (tool, phrase) => {
+    const sheet = readFileSync(
+      path.join(ROOT, "skills/_shared/references/tool-outputs.md"),
+      "utf8",
+    );
+    expect(sheet).toContain(phrase);
+    expect(toolOutputFieldProblems(sheet.replace(phrase, "[cut]"))).toEqual([
+      `the \`${tool}\` row does not carry "${phrase}"`,
+    ]);
+  });
+
+  it("fails when the cheat-sheet loses E13's calls[].note or the transactions row its pending field", () => {
+    const sheet = readFileSync(
+      path.join(ROOT, "skills/_shared/references/tool-outputs.md"),
+      "utf8",
+    );
+    const noNote = sheet.replace("`data.calls[].note`", "`data.calls[].x`");
+    expect(toolOutputFieldProblems(noNote)).toEqual([
+      "the `espn_analyze_retrospective` row does not list `data.calls[].note`",
+    ]);
+    const t = fresh();
+    t.edit(
+      "skills/_shared/references/tool-outputs.md",
+      "without one, `pending` is null and a warning says why",
+      "without one, it is empty",
+    );
+    buildSkills({ root: t.root });
+    const e = errorsOf(t);
+    expect(e).toContain(
+      "skills/_shared/references/tool-outputs.md: the `espn_list_transactions` row does not carry",
+    );
+    // the field itself, wherever the row names it
+    expect(toolOutputFieldProblems(sheet.split("`pending`").join("`pend`"))).toContain(
+      "the `espn_list_transactions` row does not list `pending`",
+    );
+  });
+
+  // changelog §R10, R10-10: a Skill that reads the user's pending claims answers `pending: null`
+  // with its reason and the one command — never "no pending claims", never a guess
+  describe("a Skill that reads pending claims (pendingReadProblems)", () => {
+    const seq = (pending: unknown) => [
+      { steps: [{ tool: "espn_list_transactions", args: { count: 20, pending } }] },
+    ];
+    it("no Skill of this build reads them, so none needs the sentence", () => {
+      for (const sk of SKILLS) {
+        const body = readFileSync(path.join(ROOT, "skills", sk, "SKILL.md"), "utf8");
+        const q = JSON.parse(readFileSync(path.join(ROOT, SEQ(sk)), "utf8")) as {
+          sequences: { steps: { tool: string; args: Record<string, unknown> }[] }[];
+        };
+        expect(pendingReadProblems(body, q.sequences), sk).toEqual([]);
+      }
+    });
+    it("a sequence step with pending: true, or a body naming `pending: true`, needs the sentence", () => {
+      const want = [
+        `reads pending claims (espn_list_transactions with pending: true) without the pending: null sentence (changelog §R10, R10-10): "${PENDING_NULL_SENTENCE}"`,
+      ];
+      expect(pendingReadProblems("a body", seq(true))).toEqual(want);
+      expect(pendingReadProblems("call it with `pending: true` for the claims", [])).toEqual(want);
+      expect(pendingReadProblems(`a body. ${PENDING_NULL_SENTENCE}`, seq(true))).toEqual([]);
+      // the sentence itself names `pending: true`: alone it is no read
+      expect(pendingReadProblems(PENDING_NULL_SENTENCE, [])).toEqual([]);
+      expect(pendingReadProblems("a body", seq(false))).toEqual([]);
+      expect(pendingReadProblems("a body", seq("true"))).toEqual([]);
+    });
+    it("check-skills fails a Skill whose sequence starts reading pending claims without it", () => {
+      const t = fresh();
+      t.editJson(SEQ("retro"), (j) => {
+        const steps = (
+          j.sequences as { steps: { tool: string; args: Record<string, unknown> }[] }[]
+        )
+          .flatMap((q) => q.steps)
+          .filter((st) => st.tool === "espn_list_transactions");
+        expect(steps.length).toBeGreaterThan(0);
+        steps[0]!.args.pending = true;
+      });
+      expect(errorsOf(t)).toContain(
+        "skills/retro/SKILL.md: reads pending claims (espn_list_transactions with pending: true) without the pending: null sentence",
+      );
+      t.edit(
+        "skills/retro/SKILL.md",
+        "### 6. Log, then answer",
+        `${PENDING_NULL_SENTENCE}\n\n### 6. Log, then answer`,
+      );
+      expect(errorsOf(t)).not.toContain("reads pending claims");
+    });
   });
 
   // the round-3 review's RT-INJ finding: retro's guardrail used RT-INJ's own seeded note as its
