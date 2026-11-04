@@ -43,7 +43,13 @@ import { envelopeOf, toolContext, type AnyToolDefinition, type ToolContext } fro
 import type { McpServerOptions, McpServices } from "../services.js";
 import { getLeague } from "../tools/league.js";
 import { driftReport, freshnessReport, getStatus } from "../tools/ops.js";
-import { REC_SOURCE, recWeekItems, recordTextFields, recordView } from "../tools/reclog.js";
+import {
+  REC_SOURCE,
+  recListTextFields,
+  recWeekItems,
+  recordTextFields,
+  recordView,
+} from "../tools/reclog.js";
 import { rosterSummary } from "../tools/roster.js";
 import { slotsOf } from "../tools/common.js";
 import { createUpstreamBudget } from "../../providers/platform.js";
@@ -388,7 +394,8 @@ export function registerResources(
         Promise.resolve({
           data: { week: w, items: recWeekItems(ctx, w) },
           inputs: [],
-          bareFields: [{ path: "data.items[].action_summary", source: REC_SOURCE }],
+          // the summary and the note (changelog §R10, R10-1), as the E14 tool lists them
+          bareFields: recListTextFields(),
           extraSources: [REC_SOURCE],
           listKey: "items",
         }),

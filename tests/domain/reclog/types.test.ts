@@ -176,6 +176,8 @@ describe("CAT-09: the read-back view never carries league_id (espn-ff://rec/{log
   });
   it("read-back strings are BareText (a raw string does not type-check)", () => {
     expectTypeOf<RecommendationListItem["action_summary"]>().toEqualTypeOf<BareText>();
+    // changelog §R10, R10-1: the note is read back too, null when none was logged
+    expectTypeOf<RecommendationListItem["note"]>().toEqualTypeOf<BareText | null>();
     expectTypeOf<RetrospectiveCall["recommended"]>().toEqualTypeOf<BareText>();
     expectTypeOf<RetrospectiveCall["best_alternative"]>().toEqualTypeOf<BareText | null>();
   });

@@ -589,7 +589,10 @@ export function outcomeOf(
   };
 }
 
-/** The E14 list item of a record (`followed` from its persisted outcome, null until scored). */
+/**
+ * The E14 list item of a record (`followed` from its persisted outcome, null until scored): the
+ * summary and the note read back (changelog §R10, R10-1: the note, null when none was logged).
+ */
 export function toListItem(
   record: RecommendationRecord,
   outcome: RecommendationOutcome | null,
@@ -600,6 +603,7 @@ export function toListItem(
     week: record.week,
     recorded_at: record.recorded_at,
     action_summary: readBack(record.rec.action),
+    note: record.note === null ? null : readBack(record.note),
     followed: outcome === null ? null : outcome.followed,
   };
 }

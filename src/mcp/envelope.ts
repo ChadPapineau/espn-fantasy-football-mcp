@@ -730,7 +730,7 @@ export interface RosterSnapshotResourceData {
   readonly diff: RosterSnapshotDiff | null;
 }
 
-/** One `espn-ff://rec/week/{week}` entry (summary form; `action_summary` is path-listed, C15). */
+/** One `espn-ff://rec/week/{week}` entry (summary form; `action_summary` and `note` path-listed, C15). */
 export type RecWeekResourceItem = RecommendationListItem;
 /** `espn-ff://rec/week/{week}`. */
 export interface RecWeekResourceData {

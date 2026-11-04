@@ -677,7 +677,7 @@ Generated from the registry `tools/list` is built from (`scripts/gen-tool-docs.t
 | E9 | `espn_analyze_roster` | full | analytics | Rest-of-season roster construction: derived bench template, bench roles, handcuffs and stashes per case, droppables, and the IR audit. |
 | E10 | `espn_analyze_evidence` | full | analytics | Weigh news, ESPN outlooks or a pasted claim about one player against the structured facts (status, slot, usage); structured fields win. |
 | E11 | `espn_analyze_league_activity` | full | analytics | The league activity digest: adds, drops, claims won and lost, trades, waiver-order movement, rival needs and IR-blocked rivals over a window. |
-| E14 | `espn_list_recommendations` | full | ops | Browse the recommendation log (this league, this season), newest first: kind, week, a summary and whether it was followed. |
+| E14 | `espn_list_recommendations` | full | ops | Browse the recommendation log (this league, this season), newest first: kind, week, a summary, its note and whether it was followed. |
 <!-- END GENERATED: tools -->
 
 **Annotation families** ([plan 01 §4.1](docs/plan/01-system-architecture.md#41-naming-d4-and-families)). Annotations are hints to the client's UI, not the security boundary.

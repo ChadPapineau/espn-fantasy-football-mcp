@@ -606,7 +606,7 @@ describe("read-back of model-authored text (plan 07 C15)", () => {
     expect(Array.from(t).length).toBeLessThanOrEqual(200);
   });
 
-  it("toListItem: sanitised summary, followed from the outcome (null until scored)", () => {
+  it("toListItem: sanitised summary and note (null when none), followed from the outcome (null until scored)", () => {
     const r = record({ rec: rec({ action: nasty }) });
     const item = toListItem(r, null);
     expect(item).toEqual({
@@ -615,8 +615,14 @@ describe("read-back of model-authored text (plan 07 C15)", () => {
       week: 4,
       recorded_at: r.recorded_at,
       action_summary: readBack(nasty),
+      note: null,
       followed: null,
     });
+    // changelog §R10, R10-1: the logged note comes back, read back within the log's own cap
+    const noted = toListItem(record({ note: nasty }), null);
+    expect(noted.note).toBe(readBack(nasty));
+    expect(noted.note).not.toMatch(/[<>\u202e\u200b\u0007]/u);
+    expect(Array.from(noted.note ?? "").length).toBeLessThanOrEqual(200);
     const scored = outcomeOf(
       { ...scoreCall(r, factIndex(FACTS_W4), rosterIndex(ROSTER_W4), null).call },
       NOW,
@@ -624,7 +630,7 @@ describe("read-back of model-authored text (plan 07 C15)", () => {
     );
     expect(toListItem(r, scored).followed).toBe(true);
     expect(JSON.stringify(item)).not.toContain("league_id");
-    expect(RECOMMENDATION_LIST_TEXT_PATHS).toEqual(["items[].action_summary"]);
+    expect(RECOMMENDATION_LIST_TEXT_PATHS).toEqual(["items[].action_summary", "items[].note"]);
   });
 
   it("readBackView strips league_id and sanitises every RECLOG_TEXT_PATHS field", () => {

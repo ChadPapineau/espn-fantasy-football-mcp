@@ -101,9 +101,14 @@ export const RETROSPECTIVE_TEXT_PATHS: readonly string[] = Object.freeze([
   "calls[].recommended",
   "calls[].best_alternative",
 ]);
-/** The model-authored text paths of `espn_list_recommendations` data (plan 07 E14, C15). */
+/**
+ * The model-authored text paths of `espn_list_recommendations` data (plan 07 E14, C15), relative to
+ * `data` — also the `espn-ff://rec/week/{week}` items. `note` since changelog §R10, R10-1: the claim
+ * a logged entry carries is in its note, which only the `espn-ff://rec/{log_id}` resource returned.
+ */
 export const RECOMMENDATION_LIST_TEXT_PATHS: readonly string[] = Object.freeze([
   "items[].action_summary",
+  "items[].note",
 ]);
 
 /** Recommendation kinds (plan 07 E12 `kind`). */
@@ -244,6 +249,12 @@ export interface RecommendationListItem {
   readonly recorded_at: IsoInstant;
   /** Model-authored summary, sanitised and capped on read (BareText; path-listed — C15). */
   readonly action_summary: BareText;
+  /**
+   * The entry's model-authored note, sanitised and capped on read at the log's own text cap
+   * (TEXT_CAPS.rec_log_text), path-listed like `action_summary`; null when none was logged
+   * (changelog §R10, R10-1).
+   */
+  readonly note: BareText | null;
   readonly followed: boolean | null;
 }
 

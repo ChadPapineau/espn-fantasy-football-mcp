@@ -199,3 +199,84 @@ describe("result budgets (plan 01 §4.2; plan 07 C8)", () => {
     }
   });
 });
+
+describe("E14 at the recommendation log's own bound (changelog §R10, R10-1)", () => {
+  it("100 entries with a 200-char summary and note each: ≤ 20 000 chars, truncated and paged, every entry reachable", async () => {
+    // the longest serialisation of a capped text: 200 chars that JSON escapes to two each
+    const worst = '"\\'.repeat(100);
+    expect(worst).toHaveLength(200);
+    const log = world.store.repos.recommendationLog;
+    const base = Date.parse("2026-10-06T11:00:00.000Z");
+    for (let i = 0; i < 100; i++)
+      log.record(
+        {
+          league_id: "0",
+          season: 2026,
+          kind: "lineup",
+          week: 1 + (i % 4),
+          rec: {
+            action: worst,
+            subjects: [],
+            lineup: null,
+            point_estimate: 1.5,
+            distribution: null,
+            delta_vs_next: null,
+            decision_metric: "expected_points",
+            drivers: [],
+            assumptions: [],
+            confidence: "medium",
+            as_of: "2026-10-06T11:00:00.000Z",
+            latest_execution_time: null,
+            no_move: false,
+            log_id: null,
+          },
+          alternatives: [],
+          source_calls: [],
+          settings_hash: "a".repeat(64),
+          seeding_mode_used: null,
+          followed_hint: "unknown",
+          client_ref: `size-${String(i)}`,
+          note: worst,
+        } as never,
+        new Date(base + i * 1000).toISOString(),
+      );
+    const c = await connect(world, { options: { toolset: "full", fixtureMode: false } });
+    try {
+      for (const args of [{}, { limit: 100 }]) {
+        const r = await call(c.client, "espn_list_recommendations", args);
+        expect(r.isError, JSON.stringify(r.body).slice(0, 200)).toBe(false);
+        const chars = JSON.stringify(r.body).length;
+        console.log(
+          `[size] espn_list_recommendations ${JSON.stringify(args)} at the bound: ${String(chars)} chars`,
+        );
+        expect(chars).toBeLessThanOrEqual(RESULT_BUDGET_CHARS);
+        const body = r.body as {
+          data: { items: { note: string | null }[] };
+          truncated: boolean;
+          warnings: string[];
+          page: { has_more: boolean; next_offset: number | null; count: number };
+        };
+        // the note is never cut to fit: whole items are dropped instead, said in a warning
+        for (const item of body.data.items) expect(item.note).toBe(worst);
+        if (body.truncated) expect(body.warnings.some((w) => w.includes("truncated"))).toBe(true);
+        expect(body.page.count).toBe(body.data.items.length);
+      }
+      // paging by next_offset reaches every entry, truncated pages included
+      const seen = new Set<string>();
+      let offset: number | null = 0;
+      for (let n = 0; offset !== null && n < 100; n++) {
+        const r = await call(c.client, "espn_list_recommendations", { limit: 100, offset });
+        const body = r.body as {
+          data: { items: { log_id: string }[] };
+          page: { next_offset: number | null };
+        };
+        expect(body.data.items.length).toBeGreaterThan(0);
+        for (const item of body.data.items) seen.add(item.log_id);
+        offset = body.page.next_offset;
+      }
+      expect(seen.size).toBeGreaterThanOrEqual(100);
+    } finally {
+      await c.close();
+    }
+  }, 120_000);
+});

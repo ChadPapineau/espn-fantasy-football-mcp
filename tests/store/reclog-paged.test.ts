@@ -383,7 +383,7 @@ describe("recordOutcomes", () => {
 describe("list answers what a reference model over the same log answers", () => {
   const KINDS: readonly RecommendationKind[] = ["lineup", "waiver", "trade", "retro"];
 
-  it("property: every filter combination, limit and offset; total, order, summary and followed", () => {
+  it("property: every filter combination, limit and offset; total, order, summary, note and followed", () => {
     const log = s.repos.recommendationLog;
     // a seeded log over two leagues, three seasons, four weeks and four kinds, with tied instants
     const rows: {
@@ -395,6 +395,7 @@ describe("list answers what a reference model over the same log answers", () => 
       ms: number;
       at: string;
       action: string;
+      note: string | null;
     }[] = [];
     let x = 7; // a fixed linear-congruential stream: the same log every run
     const next = (m: number): number => {
@@ -408,8 +409,11 @@ describe("list answers what a reference model over the same log answers", () => 
       const kind = KINDS[next(4)] ?? "lineup";
       const when = at(next(40)); // many ties: log_id breaks them
       const action = `Start <b>Test</b> Player ${String(i)}`;
+      // every other row carries a note with markup and a zero-width character, which the list
+      // item reads back sanitised (changelog §R10, R10-1); the rest log none (null)
+      const note = i % 2 === 0 ? `Beat writer <i>says</i>\u200b more work ${String(i)}` : null;
       const r = log.record(
-        input(i, { league_id: league, season, week, kind, rec: { ...input(i).rec, action } }),
+        input(i, { league_id: league, season, week, kind, rec: { ...input(i).rec, action }, note }),
         when,
       );
       rows.push({
@@ -421,6 +425,7 @@ describe("list answers what a reference model over the same log answers", () => 
         ms: Date.parse(when),
         at: when,
         action,
+        note,
       });
     }
     // some scored outcomes, so `followed` is joined
@@ -467,9 +472,12 @@ describe("list answers what a reference model over the same log answers", () => 
               week: r.week,
               recorded_at: r.at,
               action_summary: bareUntrusted(r.action, "rec_log_text"),
+              note: r.note === null ? null : bareUntrusted(r.note, "rec_log_text"),
               followed: followed.get(r.log_id) ?? null,
             })),
           );
+          // the note is never returned as stored: no markup or invisible character survives
+          for (const item of page.items) expect(item.note ?? "").not.toMatch(/[<>\u200b]/u);
         },
       ),
       { numRuns: 400 },

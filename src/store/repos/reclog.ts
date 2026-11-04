@@ -2,7 +2,8 @@
 // record, E13 retrospective, E14 list; sib critic C-02b the scored outcome beside the immutable row;
 // sib QA-1-061 the dedup scope is the whole RECORD_DEDUP_SCOPE). Required writes. Free text in a
 // stored record is model-authored and untrusted on read (plan 07 C15): the store returns it raw,
-// except `action_summary`, which is sanitised to BareText here; readers path-list RECLOG_TEXT_PATHS.
+// except the E14 list item's `action_summary` and `note` (changelog §R10, R10-1), which are
+// sanitised to BareText here; readers path-list RECLOG_TEXT_PATHS.
 // The never-pruned log's reads are bounded per turn of the event loop however long it grows (plan
 // 03 §1.2: the loop never blocks longer than one SQLite statement or one ≤ 20 ms CPU batch; Stage C,
 // reclog-retrospective-unbounded-read): one league-week holds at most RECORDS_PER_WEEK_MAX rows and
@@ -435,6 +436,7 @@ export function recommendationLogRepository({
           week: rec.week,
           recorded_at: r.recorded_at,
           action_summary: bareUntrusted(rec.rec.action, "rec_log_text"),
+          note: rec.note === null ? null : bareUntrusted(rec.note, "rec_log_text"),
           followed: boolOrNull(r.followed),
         };
       });

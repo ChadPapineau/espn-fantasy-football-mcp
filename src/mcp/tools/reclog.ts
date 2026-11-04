@@ -27,6 +27,7 @@ import {
   RECLOG_TEXT_PATHS,
   RECLOG_UNTRUSTED_SOURCE,
   RECOMMENDATION_KINDS,
+  RECOMMENDATION_LIST_TEXT_PATHS,
   type RecommendationRecord,
   type RecommendationRecordView,
   type RecordResult,
@@ -490,6 +491,14 @@ export function recordView(r: RecommendationRecord): RecommendationRecordView {
   return readBackView(r);
 }
 
+/**
+ * The E14 item text paths (RECOMMENDATION_LIST_TEXT_PATHS: the summary and, since changelog §R10,
+ * R10-1, the note) as `meta.untrusted_fields` entries — the tool and its espn-ff://rec/week twin.
+ */
+export function recListTextFields(): UntrustedField[] {
+  return RECOMMENDATION_LIST_TEXT_PATHS.map((p) => ({ path: `data.${p}`, source: REC_SOURCE }));
+}
+
 /** espn-ff://rec/week/{week}: the configured league's current-season entries of one week. */
 export function recWeekItems(ctx: ToolContext, w: Week) {
   const ref = leagueRef(ctx);
@@ -500,7 +509,12 @@ export function recWeekItems(ctx: ToolContext, w: Week) {
 
 // --- E14 espn_list_recommendations -----------------------------------------------------------------
 
-/** E14 data (plan 07 E14): the log's summary rows, newest first; free text under C15. */
+/**
+ * E14 data (plan 07 E14): the log's summary rows, newest first; free text under C15. Each item
+ * carries the entry's `note` (changelog §R10, R10-1, superseding E14's item fields): null when none
+ * was logged, else read back within the log's own text cap (TEXT_CAPS.rec_log_text, as
+ * `action_summary`) and path-listed `data.items[].note` with source `store.recommendation_log`.
+ */
 export const recommendationListSchema = z.strictObject({
   items: z
     .array(
@@ -510,6 +524,7 @@ export const recommendationListSchema = z.strictObject({
         week,
         recorded_at: iso,
         action_summary: recLogText,
+        note: recLogText.nullable(),
         followed: z.boolean().nullable(),
       }),
     )
@@ -520,7 +535,7 @@ export const recommendationListSchema = z.strictObject({
 export const listRecommendations = defineTool({
   name: "espn_list_recommendations",
   description:
-    "Browse the recommendation log (this league, this season), newest first: kind, week, a summary and whether it was followed.",
+    "Browse the recommendation log (this league, this season), newest first: kind, week, a summary, its note and whether it was followed.",
   input: z.strictObject({
     week: z.number().int().min(0).max(BOUNDS.week.max).optional(),
     kind: z.enum(RECOMMENDATION_KINDS).optional(),
@@ -545,7 +560,7 @@ export const listRecommendations = defineTool({
       data: { items },
       inputs: [],
       extraSources: ["store:recommendation_log"],
-      bareFields: [{ path: "data.items[].action_summary", source: REC_SOURCE }],
+      bareFields: recListTextFields(),
       page: {
         limit: args.limit,
         offset: args.offset,
