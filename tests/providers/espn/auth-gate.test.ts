@@ -100,9 +100,11 @@ describe("forRequest", () => {
 /**
  * changelog §R10, R10-10: every (use × credential state × publicity) cell. `feed` (mTransactions2,
  * served to anyone on a public league) goes keyless on a league known public whenever no accepted
- * cookie is at hand; `own` (mPendingTransactions, the caller's own) never goes keyless; `auto` is
- * unchanged. Publicity is known one way, in both credential branches: what this process saw, else
- * the value another process kept — so each "public"/"private" cell is run both ways.
+ * cookie is at hand; `own` (mPendingTransactions, the caller's own) never goes keyless; `auto` with
+ * nothing stored goes keyless only while the publicity is unknown (changelog §R10, R10-23: known
+ * private, it is ESPN_REQUIRES_COOKIES with zero requests). Publicity is known one way, in both
+ * credential branches: what this process saw, else the value another process kept — so each
+ * "public"/"private" cell is run both ways.
  */
 describe("the cookie-use matrix (changelog §R10, R10-10)", () => {
   type State = "none" | "not_configured" | "validated" | "rejected";
@@ -120,7 +122,9 @@ describe("the cookie-use matrix (changelog §R10, R10-10)", () => {
     if (st === "validated") return use === "auto" && pub === "public" ? "keyless" : "header";
     if (use === "own") return noSession ? "ESPN_REQUIRES_COOKIES" : "ESPN_AUTH_REJECTED";
     if (pub === "public") return "keyless";
-    if (use === "auto" && noSession) return "keyless";
+    // the learning read only while the publicity is unknown; known private refuses with zero
+    // requests (changelog §R10, R10-23)
+    if (use === "auto" && noSession && pub === "unknown") return "keyless";
     return noSession ? "ESPN_REQUIRES_COOKIES" : "ESPN_AUTH_REJECTED";
   };
   const got = async (g: CookieGate, use: "auto" | "feed" | "own"): Promise<Want> => {

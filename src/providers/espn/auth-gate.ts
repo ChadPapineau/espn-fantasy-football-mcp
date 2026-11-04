@@ -7,7 +7,9 @@
 // the credentialed launchd jobs read it with the stored cookie, as plan 06 §1.4 designs and budgets
 // them (`keylessOnPublic`); `rejected` short-circuits with ESPN_AUTH_REJECTED and ZERO requests
 // (unless the league is public and the read is one ESPN serves anyone there); a view that needs
-// cookies with none stored is ESPN_REQUIRES_COOKIES, also with zero requests. Changelog §R10, R10-10
+// cookies with none stored is ESPN_REQUIRES_COOKIES, also with zero requests — an `auto` read with
+// nothing stored included once the league is known private (changelog §R10, R10-23: only while the
+// publicity is unknown does it go out keyless, the one read whose 401 teaches it). Changelog §R10, R10-10
 // split the old `required` use in two: the league's transaction feed (`feed`, mTransactions2) is
 // served to anyone on a public league, so it is read keyless there whenever no accepted cookie is
 // at hand (nothing stored, or a rejected session); pending claims (`own`, mPendingTransactions) are
@@ -22,6 +24,7 @@ import type {
   CredentialState,
 } from "../../auth/types.js";
 import type { Clock } from "../../domain/clock.js";
+import { PUBLICITY_MAX_AGE_MS } from "./cache.js";
 import type { EspnRoute } from "./path.js";
 import type { CredentialProbeAccess, EspnView } from "./types.js";
 
@@ -29,7 +32,9 @@ import type { CredentialProbeAccess, EspnView } from "./types.js";
  * How a read uses cookies (changelog §R10, R10-10 split the old `required` in two):
  * - `never` — keyless routes and the anonymous reads that learn a league's publicity;
  * - `auto` — the cookie when one is at hand; a league known public keyless for the server
- *   (CookieGateOptions.keylessOnPublic) and, under a rejected session, for every process;
+ *   (CookieGateOptions.keylessOnPublic) and, under a rejected session, for every process; with
+ *   nothing stored, keyless while the publicity is unknown (the learning read) and refused once it
+ *   is known private (changelog §R10, R10-23);
  * - `feed` — league-wide data ESPN serves anyone on a public league (mTransactions2): the cookie
  *   when one not rejected is at hand, else keyless on a league known public, else the refusal
  *   (ESPN_REQUIRES_COOKIES with nothing stored, ESPN_AUTH_REJECTED under a rejected session);
@@ -76,6 +81,12 @@ export function hasProbeAccess(
  */
 export interface PublicityStore {
   load(): boolean | null;
+  /**
+   * When the value `load` answers was learned (epoch ms), or null when not known — a kept `false`
+   * is trusted PUBLICITY_MAX_AGE_MS from it, then read again (changelog §R10, R10-23). A store
+   * without it is trusted from the moment this process read it.
+   */
+  learnedAt?(): number | null;
   save(isPublic: boolean): void;
 }
 
@@ -110,9 +121,13 @@ export interface CookieGateOptions {
 export class CookieGate {
   /** What THIS process saw ESPN answer (a league body, a keyless 401); null until it has. */
   private publicity: boolean | null = null;
-  /** The value another process kept (PublicityStore), read once and lazily; null when none. */
+  /** When this process last learned `publicity` (epoch ms): a `false` is trusted 7 days from it. */
+  private publicityAtMs = Number.NEGATIVE_INFINITY;
+  /** The value another process kept (PublicityStore), read lazily; null when none. */
   private kept: boolean | null = null;
-  /** The persisted publicity was consulted (once per process, lazily). */
+  /** When the kept value was learned (the store's own stamp, else when this process read it). */
+  private keptAtMs = Number.NEGATIVE_INFINITY;
+  /** The persisted publicity was consulted (once per process, and again when a `false` expires). */
   private loaded = false;
   /** This process has written what it learned (once, and again on every change). */
   private saved = false;
@@ -141,14 +156,32 @@ export class CookieGate {
     this.fixtureOwnLabel = auth === null ? (opts.fixtureOwnLabel ?? null) : null;
   }
 
-  /** What is known: learned in this process, else the persisted value (read once), else null. */
+  /**
+   * What is known: learned in this process, else the persisted value (read once), else null. A
+   * `false` — learned here or kept — is trusted PUBLICITY_MAX_AGE_MS (7 days) from when it was
+   * learned (changelog §R10, R10-23): it is what refuses an `auto` read with nothing stored, with
+   * zero requests, so once past its trust it is forgotten and the store read again, and with
+   * nothing newer kept the next read re-learns it with one keyless request (a league that turned
+   * public is then read keyless again, even in a process that lives for days). A `true` keeps its
+   * rule: a league that has since gone private costs one keyless 401, which teaches `false`.
+   */
   private known(): boolean | null {
-    if (this.publicity !== null) return this.publicity;
+    if (this.publicity !== null) {
+      if (this.publicity || this.trusted(this.publicityAtMs)) return this.publicity;
+      this.publicity = null;
+      this.loaded = false;
+    }
+    if (this.loaded && this.kept === false && !this.trusted(this.keptAtMs)) this.loaded = false;
     if (!this.loaded) {
       this.loaded = true;
+      this.kept = null;
       try {
         const v = this.store?.load() ?? null;
-        if (typeof v === "boolean") this.kept = v;
+        if (typeof v === "boolean") {
+          this.kept = v;
+          const at = this.store?.learnedAt?.() ?? null;
+          this.keptAtMs = at !== null && Number.isFinite(at) ? at : this.clock.nowMs();
+        }
       } catch {
         // an unreadable store reads as unknown: the anonymous read learns it
       }
@@ -156,10 +189,16 @@ export class CookieGate {
     return this.kept;
   }
 
+  /** Whether a publicity learned at `atMs` is still within its 7-day trust (R10-23). */
+  private trusted(atMs: number): boolean {
+    return this.clock.nowMs() - atMs <= PUBLICITY_MAX_AGE_MS;
+  }
+
   /** Records a learned value, persisting it once per process and on every change. */
   private learn(v: boolean): void {
     const changed = this.publicity !== v;
     this.publicity = v;
+    this.publicityAtMs = this.clock.nowMs();
     if (this.store === null || (!changed && this.saved)) return;
     this.saved = true;
     try {
@@ -250,10 +289,15 @@ export class CookieGate {
   /**
    * The read with no accepted cookie at hand (nothing stored, or a rejected session — `why` names
    * which): keyless when ESPN serves it to anyone, else the zero-request refusal. `auto` and `feed`
-   * reads of a league known public go keyless; `own` never does (changelog §R10, R10-10). Without a
-   * credential an `auto` read goes keyless whatever the publicity (the anonymous read is the only
-   * one there is), while under a rejected session it short-circuits unless the league is known
-   * public (plan 02 §2.1 "Short-circuit").
+   * reads of a league known public go keyless; `own` never does (changelog §R10, R10-10). With
+   * nothing stored, an `auto` read of a league whose publicity is unknown goes keyless once — plan
+   * 02 §2.1's learning read, whose 401 teaches `false` — and once `known()` is `false` (this
+   * process saw the 401, or the kept value, each within its 7-day trust) it answers
+   * ESPN_REQUIRES_COOKIES with zero requests and none of the call's budget, as `feed` and `own`
+   * already do (changelog §R10, R10-23, R10-19): a read ESPN must refuse tells nothing new. Under a
+   * rejected session it short-circuits unless the league is known public (plan 02 §2.1
+   * "Short-circuit"); the anonymous settings read that learns an unknown publicity there is the
+   * provider's (needsPublicity).
    *
    * The one publicity rule is `known()`: what this process saw ESPN answer, else the value another
    * process kept (PublicityStore). Plan 02 §2.1 has the server learn `settings.isPublic` once and
@@ -270,8 +314,11 @@ export class CookieGate {
     why: "ESPN_REQUIRES_COOKIES" | "ESPN_AUTH_REJECTED",
   ): null {
     const shared = use === "auto" || use === "feed";
-    if (shared && this.known() === true) return null;
-    if (use === "auto" && why === "ESPN_REQUIRES_COOKIES") return null;
+    // `own` never reads the publicity: it is refused whatever it is
+    const known = shared ? this.known() : null;
+    if (known === true) return null;
+    // the learning read (R10-23): nothing stored and the publicity unknown
+    if (use === "auto" && why === "ESPN_REQUIRES_COOKIES" && known === null) return null;
     if (why === "ESPN_REQUIRES_COOKIES") this.requires();
     throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
   }
@@ -304,8 +351,9 @@ export class CookieGate {
    * Whether forRequest may refuse this read with zero requests (ESPN_REQUIRES_COOKIES, the
    * ESPN_AUTH_REJECTED short-circuit), judged from labels alone (the row check of rejectedNow at
    * most; no credential-store read). False only when it cannot: a cookie-free read, a shared read
-   * of a league known public, an `auto` read with nothing stored (keyless), or a value held and not
-   * rejected. The read pipeline asks forRequest itself, before any outage fallback, when this is
+   * of a league known public, an `auto` read with nothing stored while the publicity is unknown
+   * (the keyless learning read — R10-23), or a value held and not rejected. The read pipeline asks
+   * forRequest itself, before any outage fallback, when this is
    * true, so a refusal is never answered from stale cache as an outage (changelog §R10, R10-18; the
    * round-4 verifier's V4-M1); forRequest decides, so a value `eff setup` stored since is still
    * found.
@@ -314,9 +362,11 @@ export class CookieGate {
     if (use === "never" || route === "season" || route === "players") return false;
     const shared = use === "auto" || use === "feed";
     if (shared && this.known() === true) return false;
-    if (this.auth === null) return use !== "auto";
+    // an `auto` read with nothing stored refuses once the league is known private (R10-23)
+    const refusesNone = use !== "auto" || this.known() === false;
+    if (this.auth === null) return refusesNone;
     if (this.rejectedNow()) return true;
-    return use !== "auto" && !this.configured();
+    return !this.configured() && refusesNone;
   }
 
   /**

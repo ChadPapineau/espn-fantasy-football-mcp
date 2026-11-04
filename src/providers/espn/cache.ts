@@ -128,6 +128,12 @@ export function cachedPublicity(
       const v = (JSON.parse(e.parsed_json) as { isPublic?: unknown } | null)?.isPublic;
       return typeof v === "boolean" ? v : null;
     },
+    // the row's own stamp: a kept `false` is trusted 7 days from it (changelog §R10, R10-23)
+    learnedAt: () => {
+      const e = cache.get(key);
+      const at = e === null ? Number.NaN : Date.parse(e.fetched_at);
+      return Number.isFinite(at) ? at : null;
+    },
     save: (isPublic) => {
       cache.put({
         key,
