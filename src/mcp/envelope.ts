@@ -422,21 +422,27 @@ export type DataInput = InputFreshness;
 
 /**
  * The analytics `data.inputs[]` rows for the stamps the envelope used (an expired input reads
- * `stale`). Identical rows (the same source, version, age and freshness — a file or view read more
- * than once by one call) appear once: a repeat carries no information and only spends the C8 budget.
+ * `stale`). A repeat read (the same source, version, fetch time and freshness — a file or view read
+ * more than once by one call) appears once: it carries no information and only spends the C8
+ * budget. The repeat is told by the stamp's own fetch time, never by the age derived from it: an age
+ * is a floor in whole seconds of the clock, so two reads under a second apart merged at some clock
+ * phases and stayed two at others, and the row count — and the length the budget measures — moved
+ * with the clock alone (the round-4 verifier's R4M-3; fitLengthOf's promise that the fit depends on
+ * the data and never on the clock).
  */
 export function toDataInputs(inputs: readonly InputStamp[], nowMs: number): DataInput[] {
   if (!Number.isFinite(nowMs)) throw new RangeError("envelope: nowMs must be finite");
   const out: DataInput[] = [];
   const seen = new Set<string>();
   for (const i of inputs) {
+    const fetchedMs = isoOrThrow(i.fetched_at);
     const row: DataInput = {
       source: i.source,
       as_of: new Date(isoOrThrow(i.as_of)).toISOString(),
-      age_s: Math.max(0, Math.floor((nowMs - isoOrThrow(i.fetched_at)) / 1000)),
+      age_s: Math.max(0, Math.floor((nowMs - fetchedMs) / 1000)),
       freshness: i.state === "fresh" ? (i.provisional === true ? "provisional" : "fresh") : "stale",
     };
-    const key = `${row.source}|${row.as_of}|${String(row.age_s)}|${row.freshness}`;
+    const key = `${row.source}|${row.as_of}|${String(fetchedMs)}|${row.freshness}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(row);
