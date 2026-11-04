@@ -24,11 +24,14 @@
 // (a label written next to it, and the broad scan), never by this file's cues, games or moves. The work
 // count (work.ts; changelog §R10, R10-16) adds a step for each mention read; it changes nothing here.
 import type { NflTeam } from "../../config/schema.js";
-import { matchWork } from "./work.js";
+import { matchTally } from "./work.js";
 
-/** Counts `n` steps of the matcher's work while a count is open (work.ts). */
+/** The matcher's tally (work.ts), held here: a counted site reads no imported binding. */
+const TALLY = matchTally;
+
+/** Counts `n` steps of the matcher's work (work.ts; changelog §R10, R10-16): one add, always. */
 function step(n: number): void {
-  if (matchWork !== null) matchWork.steps += n;
+  TALLY.steps += n;
 }
 
 /** Nicknames and their common short forms. */

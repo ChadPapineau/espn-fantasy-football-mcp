@@ -27,7 +27,7 @@ import {
   type PlayerMatcher,
 } from "../../../src/sources/news/index.js";
 import { teamMentions } from "../../../src/sources/news/teams.js";
-import { countMatchWork, matchWork } from "../../../src/sources/news/work.js";
+import { countMatchWork, countOpen, matchTally } from "../../../src/sources/news/work.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 const recorded = universeFromEspnPlayers(
@@ -194,8 +194,7 @@ function quadratic(every: number): Pick<PlayerMatcher, "matchItem"> {
       const tokens = text.split(" ");
       let n = 0;
       for (const _hit of text.matchAll(SHARED))
-        if (n++ % every === 0)
-          for (const _t of tokens) if (matchWork !== null) matchWork.steps += 1;
+        if (n++ % every === 0) for (const _t of tokens) matchTally.steps += 1;
       return out;
     },
   };
@@ -241,7 +240,7 @@ function everyTeamAtEachName(): Pick<PlayerMatcher, "matchItem"> {
     matchItem: (text) => {
       const out = m.matchItem(text);
       const all = teamMentions(text).length;
-      for (const _hit of text.matchAll(UNIQUE)) if (matchWork !== null) matchWork.steps += 2 * all;
+      for (const _hit of text.matchAll(UNIQUE)) matchTally.steps += 2 * all;
       return out;
     },
   };
@@ -272,8 +271,31 @@ describe("news matcher — R10-16: the count is a seam that changes nothing", ()
       const counted = countMatchWork(() => m.matchItem(text));
       expect(JSON.stringify(counted.value)).toBe(plain);
       expect(counted.steps).toBeGreaterThan(0);
-      expect(matchWork).toBeNull();
+      expect(countOpen()).toBe(false);
     }
+  });
+
+  it("a counted site reads no imported live binding: one add to the module's own tally (the round-3 review's R3B-M2)", () => {
+    // each site used to test an imported `let` (the open count) against null: 11–27 % more thread
+    // CPU on R8-8's bare-surname attack families than the matcher before the count; one add to a
+    // const the module holds costs 1.00–1.03 (work.ts)
+    const news = path.join(ROOT, "src", "sources", "news");
+    expect(readFileSync(path.join(news, "work.ts"), "utf8")).not.toMatch(/export\s+let\b/u);
+    for (const f of ["labels.ts", "match.ts", "teams.ts"]) {
+      const s = readFileSync(path.join(news, f), "utf8");
+      expect(s, f).toContain('import { matchTally } from "./work.js";');
+      expect(s, f).toContain("const TALLY = matchTally;");
+      expect(s, f).toMatch(/function step\(n: number\): void \{\n {2}TALLY\.steps \+= n;\n\}/u);
+      expect(s, f).not.toMatch(/\bmatchWork\b/u);
+    }
+    // the tally only grows; a count is its growth while open, the matcher's output unchanged
+    const before = matchTally.steps;
+    const text = "Patrick Mahomes, Chiefs: Notes";
+    const plain = JSON.stringify(m.matchItem(text));
+    expect(matchTally.steps).toBeGreaterThan(before);
+    const counted = countMatchWork(() => m.matchItem(text));
+    expect(JSON.stringify(counted.value)).toBe(plain);
+    expect(counted.steps).toBe(workOf(m, text));
   });
 
   it("a count is closed when the counted work throws, and an inner count is its own", () => {
@@ -282,7 +304,7 @@ describe("news matcher — R10-16: the count is a seam that changes nothing", ()
         throw new Error("x");
       }),
     ).toThrow("x");
-    expect(matchWork).toBeNull();
+    expect(countOpen()).toBe(false);
     const own = "Patrick Mahomes KC: Notes";
     const other = "Justin Jefferson: Questionable | Vikings WR Jefferson (hamstring) was limited.";
     const outer = countMatchWork(() => {
@@ -292,6 +314,6 @@ describe("news matcher — R10-16: the count is a seam that changes nothing", ()
     // each count holds its own item's steps: the outer one not the inner one's
     expect(outer.value).toBe(workOf(m, other));
     expect(outer.steps).toBe(workOf(m, own));
-    expect(matchWork).toBeNull();
+    expect(countOpen()).toBe(false);
   });
 });

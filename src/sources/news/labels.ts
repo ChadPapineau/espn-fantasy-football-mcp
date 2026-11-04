@@ -96,11 +96,14 @@ import {
   positionWordIds,
 } from "./positions.js";
 import { TEAM_HOMES, TEAM_NICKNAMES } from "./teams.js";
-import { matchWork } from "./work.js";
+import { matchTally } from "./work.js";
 
-/** Counts `n` steps of the matcher's work while a count is open (work.ts). */
+/** The matcher's tally (work.ts), held here: a counted site reads no imported binding. */
+const TALLY = matchTally;
+
+/** Counts `n` steps of the matcher's work (work.ts; changelog §R10, R10-16): one add, always. */
 function step(n: number): void {
-  if (matchWork !== null) matchWork.steps += n;
+  TALLY.steps += n;
 }
 
 /** The homes that hold two teams: a team of either ("the Los Angeles Rams", "New York's"). */

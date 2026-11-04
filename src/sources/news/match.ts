@@ -110,7 +110,7 @@ import { sanitizeText } from "../../domain/league/types.js";
 import type { NewsMatchMethod } from "../../store/datasets/derive.js";
 import { markBreaks, sharedReading, type LabelPart, type SharedReading } from "./labels.js";
 import { KNOWN_POSITION_IDS } from "./positions.js";
-import { matchWork } from "./work.js";
+import { matchTally } from "./work.js";
 import {
   ATTACH_WINDOW,
   attachedTeams,
@@ -407,9 +407,12 @@ interface Occurrence {
 
 const owned = (p: NewsUniversePlayer): number => p.percent_owned ?? 0;
 
-/** Counts `n` steps of the matcher's work while a count is open (work.ts; changelog §R10, R10-16). */
+/** The matcher's tally (work.ts), held here: a counted site reads no imported binding. */
+const TALLY = matchTally;
+
+/** Counts `n` steps of the matcher's work (work.ts; changelog §R10, R10-16): one add, always. */
 function step(n: number): void {
-  if (matchWork !== null) matchWork.steps += n;
+  TALLY.steps += n;
 }
 
 /**
