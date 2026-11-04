@@ -4,15 +4,18 @@
 // the caps would flake a timing bound tight enough to see it). Here the matcher's own work count
 // (src/sources/news/work.ts: one step per iteration of its loops over the item and per form lookup)
 // is read with no clock: for every attack construction of the perf file and the R8-6/R8-7/R8-8
-// rounds, and for each kind of mention (a shared surname, a shared full name, a unique name, a
-// labelled surname, a team-word surname), the work added by the last doubling of the item is at most
+// rounds, and for each kind of mention (a shared surname, a shared full name, a unique name with its
+// team written next to it or moving it, a labelled surname, a team-word surname), the work added by
+// the last doubling of the item is at most
 // GROWTH_MAX times that of the doubling before (a linear reading adds the same; a binary search's log
 // factor one step a search; a quadratic doubles), and at a fixed length the work added per mention
 // does not grow with the mention count. The count found two quadratics in the frozen matcher, each
 // cheap per mention: every name scanned at each team mention, and every team mention scanned at each
 // name (a run of "Justin Jefferson, Vikings: " grew 1.31 times per doubling; now 1.01). Positive
 // controls: a matcher that scans every token at each shared-surname mention fails, and so does one
-// whose extra scan costs only half the linear work at the caps (the timing ratios' blind spot). The
+// whose extra scan costs only half the linear work at the caps (the timing ratios' blind spot), and
+// one that scans every team mention at each unique name (the second quadratic; the round-3 review's
+// R3B-M1 found the unique-name families held no team mention teams.ts reads, so that one passed). The
 // count changes nothing: every item's match is the same with a count open. No clock, no network.
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -23,6 +26,7 @@ import {
   universeFromEspnPlayers,
   type PlayerMatcher,
 } from "../../../src/sources/news/index.js";
+import { teamMentions } from "../../../src/sources/news/teams.js";
 import { countMatchWork, matchWork } from "../../../src/sources/news/work.js";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
@@ -97,13 +101,28 @@ const FAMILIES: Readonly<Record<string, string>> = {
   tags: "<p>abc</p><br>def\n", openTags: `<a${"x".repeat(480)}`, entities: "&amp;amp;amp;lt;b&amp;gt; ",
   quotes: "'abc def' ghi's ", hyphens: "a-b-c-d-e-f-g-h ", camelPairs: "aB ", heads: "St St Bank of ",
   labels: "Ravens QB Lamar Jackson, LB Justin Jefferson (CLE - LB), ",
-  // a shared name and a team beside it, again and again (the two quadratics the count found)
-  sharedTagged: "Justin Jefferson, Vikings: ", sharedAbbreviated: "Lamar Jackson NE ",
-  // a unique name and its team, again and again (teams.ts' attached and moved teams)
-  uniqueTagged: "Patrick Mahomes KC ", uniqueSurname: "Mahomes KC ",
-  // R8-3's attack: abbreviations and team names after a shared name
-  abbreviations: "NE ", teamNames: "Jets ",
+  // a shared name and its team beside it, again and again (the two quadratics the count found)
+  sharedTagged: "Justin Jefferson, Vikings: ",
+  // a unique name and its team written next to it or moving it, again and again: teams.ts' attached
+  // and moved teams at every name (the second quadratic: every team mention scanned at each name).
+  // teams.ts reads a nickname or a home, never an abbreviation, so each unit holds a team mention
+  // (TEAM_FAMILIES below holds that)
+  uniqueTagged: "Patrick Mahomes, Chiefs: ", uniqueLabelled: "Chiefs QB Patrick Mahomes ",
+  uniqueSurname: "Chiefs QB Mahomes ", uniqueMoved: "Chiefs sign QB Patrick Mahomes. ",
+  // R8-3's attack: abbreviations after a shared name (labels.ts reads them as labels; teams.ts
+  // reads no abbreviation, so these hold no team mention), and team names
+  sharedAbbreviated: "Lamar Jackson NE ", abbreviations: "NE ", teamNames: "Jets ",
 };
+
+/** The families whose every unit holds a teams.ts mention (the attached and moved teams' reading). */
+const TEAM_FAMILIES = [
+  "sharedTagged",
+  "uniqueTagged",
+  "uniqueLabelled",
+  "uniqueSurname",
+  "uniqueMoved",
+  "teamNames",
+] as const;
 
 describe("news matcher — R10-16: the work per item grows linearly with the item, by count", () => {
   it.each(Object.entries(FAMILIES))("%s: each doubling adds the same work", (_name, unit) => {
@@ -114,6 +133,19 @@ describe("news matcher — R10-16: the work per item grows linearly with the ite
     const v = linear(d);
     expect(v.ok, v.evidence).toBe(true);
   });
+
+  it.each(TEAM_FAMILIES)(
+    "%s: every unit holds a team mention teams.ts reads (so the family exercises its scan)",
+    (name) => {
+      const unit = FAMILIES[name] ?? "";
+      const k = unitsIn(unit);
+      for (const x of [1, 8])
+        expect(
+          teamMentions(repeated(unit)(k * x)).length,
+          `${name} ×${String(x)}`,
+        ).toBeGreaterThanOrEqual(k * x);
+    },
+  );
 
   it("one long word (hyphenated, dotted): each doubling of the word adds the same work", () => {
     for (const unit of ["st-", "ab."]) {
@@ -193,6 +225,37 @@ describe("news matcher — R10-16's positive controls: the check fails a quadrat
       expect(v.ok, `${unit} every ${String(every)}: ${v.evidence}`).toBe(false);
     }
   });
+});
+
+/** The bare unique name the attached-teams control re-reads at. */
+const UNIQUE = /\bMahomes\b/gu;
+
+/**
+ * The matcher with the second quadratic put back, counted as its own steps are: at each mention of
+ * a unique name, attachedTeams and movedTeams each step over EVERY team mention of the item (match.ts
+ * `near` handing them all, not the ones within ATTACH_WINDOW of the name) — the reading b6e6e39
+ * fixed. Quadratic in a repeated item's length, and cheap per mention.
+ */
+function everyTeamAtEachName(): Pick<PlayerMatcher, "matchItem"> {
+  return {
+    matchItem: (text) => {
+      const out = m.matchItem(text);
+      const all = teamMentions(text).length;
+      for (const _hit of text.matchAll(UNIQUE)) if (matchWork !== null) matchWork.steps += 2 * all;
+      return out;
+    },
+  };
+}
+
+describe("news matcher — R10-16's positive controls: the team families see the attached-teams quadratic", () => {
+  it.each(["uniqueTagged", "uniqueLabelled", "uniqueSurname", "uniqueMoved"] as const)(
+    "%s: a matcher scanning every team mention at each name fails",
+    (name) => {
+      const unit = FAMILIES[name] ?? "";
+      const v = linear(doublings(repeated(unit), unitsIn(unit), everyTeamAtEachName()));
+      expect(v.ok, `${name}: ${v.evidence}`).toBe(false);
+    },
+  );
 });
 
 describe("news matcher — R10-16: the count is a seam that changes nothing", () => {
