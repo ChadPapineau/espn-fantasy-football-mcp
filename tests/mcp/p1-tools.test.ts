@@ -11,6 +11,7 @@ import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MANDATORY_SENTENCES, bareFieldsFromSchema } from "../../src/mcp/envelope.js";
+import { SESSION_READ_WARNINGS } from "../../src/mcp/tools/common.js";
 import { recommendationListSchema } from "../../src/mcp/tools/reclog.js";
 import type {
   DatasetReaders,
@@ -1182,6 +1183,39 @@ describe("E11 espn_analyze_league_activity", () => {
     const c = await connect(world, { options: { toolset: "full" }, services: s });
     const e = await ok("espn_analyze_league_activity", {}, c.client);
     expect(e.warnings.some((w) => w.includes("persisted history only"))).toBe(true);
+    await c.close();
+  });
+
+  it("changelog §R10, R10-11: a session refusal from the feed degrades to the persisted history, partial, with the reason", async () => {
+    // the history holds the feed's rows: what the tool reports from it must not depend on the
+    // session's state (the same totals as with the feed read)
+    const feed = (await ok("espn_list_transactions", { count: 50 })).data.transactions as never[];
+    expect(feed.length).toBeGreaterThan(0);
+    world.store.repos.transactionsSeen.appendNew(feed, world.clock.nowIso());
+    const plain = await ok("espn_analyze_league_activity", { since_days: 30 });
+    const plainTotals = (plain.data as { transactions: Record<string, unknown> }).transactions;
+    for (const [code, warning] of [
+      ["ESPN_REQUIRES_COOKIES", SESSION_READ_WARNINGS.feed_no_session],
+      ["ESPN_AUTH_REJECTED", SESSION_READ_WARNINGS.feed_rejected],
+    ] as const) {
+      const s = faulty(world.services, { listTransactions: coded(code) });
+      const c = await connect(world, { options: { toolset: "full" }, services: s });
+      const e = await ok("espn_analyze_league_activity", { since_days: 30 }, c.client);
+      expect(e.partial).toBe(true);
+      expect(e.warnings).toContain(warning);
+      expect(warning.startsWith("partial:")).toBe(true);
+      expect(warning).toContain("eff setup");
+      expect(warning).toContain("persisted history only");
+      // the two refusals answer the same way: only the warning differs
+      expect(e.warnings.some((w) => w.includes("mTransactions2 unavailable"))).toBe(false);
+      const totals = (e.data as { transactions: Record<string, unknown> }).transactions;
+      expect(totals).toEqual(plainTotals);
+      await c.close();
+    }
+    // a failure that is not a session refusal nor an outage still propagates
+    const s = faulty(world.services, { listTransactions: coded("INTERNAL") });
+    const c = await connect(world, { options: { toolset: "full" }, services: s });
+    expect((await err("espn_analyze_league_activity", {}, c.client)).code).toBe("INTERNAL");
     await c.close();
   });
 

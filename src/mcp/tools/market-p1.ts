@@ -108,6 +108,8 @@ import {
   readOpts,
   rosReadingOf,
   seasonTransactions,
+  sessionRefusalOf,
+  SESSION_READ_WARNINGS,
   take,
   teamOf,
   turn,
@@ -1953,7 +1955,10 @@ async function transactionsOf(
 ): Promise<Transaction[]> {
   const byId = new Map<string, Transaction>();
   const weeks = activityWeeks(w, sinceDays);
-  const state = { unavailable: false };
+  const state: { unavailable: boolean; refusal: "no_session" | "rejected" | null } = {
+    unavailable: false,
+    refusal: null,
+  };
   for (const week of weeks) {
     const got = await withinBudget(
       () =>
@@ -1970,14 +1975,29 @@ async function transactionsOf(
         ),
       warnings,
     ).catch((e: unknown) => {
-      if (!isDegradable(e) && (e as { effCode?: unknown }).effCode !== "ESPN_REQUIRES_COOKIES")
-        throw e;
+      // the session cannot read the feed (a league not known to be public, with nothing stored or a
+      // rejected session — the feed is read keyless on a public one, changelog §R10, R10-10): the
+      // persisted history, partial, said with the reason and `eff setup`. ESPN_AUTH_REJECTED
+      // degrades exactly as ESPN_REQUIRES_COOKIES does (R10-11): the history the server holds stays
+      // valid whatever the session's state
+      const refusal = sessionRefusalOf(e);
+      if (refusal !== null) {
+        state.refusal = refusal;
+        return null;
+      }
+      if (!isDegradable(e)) throw e;
       state.unavailable = true;
       return null;
     });
     if (got === null) break;
     for (const t of take(ctx, got, inputs).items) byId.set(t.transaction_id, t);
   }
+  if (state.refusal !== null)
+    warnings.push(
+      state.refusal === "rejected"
+        ? SESSION_READ_WARNINGS.feed_rejected
+        : SESSION_READ_WARNINGS.feed_no_session,
+    );
   if (state.unavailable)
     warnings.push("espn:mTransactions2 unavailable: the server's persisted history only");
   const covered = weeks[weeks.length - 1] ?? w;
