@@ -744,6 +744,13 @@ export interface StoreOpenOptions {
    * under another league are never read as this one's (Stage C finding store-not-league-scoped).
    */
   readonly league?: string | null;
+  /**
+   * The stdio server's store (eff serve only): the server's connection never checkpoints its WAL
+   * (`wal_autocheckpoint = 0`) and a worker thread runs the checkpoints at SQLite's own threshold
+   * (checkpointer.ts — a checkpoint's copy and syncs inside a commit held the event loop 50–84 ms on
+   * a slow disk; plan 03 §1.2, plan 10 A16a). Default false: SQLite's own checkpoints (CLI jobs).
+   */
+  readonly offThreadCheckpoint?: boolean;
 }
 
 /** A league-scoped record written through a store opened for no league (StoreOpenOptions.league). */

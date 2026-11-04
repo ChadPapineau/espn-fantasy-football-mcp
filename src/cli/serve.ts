@@ -778,6 +778,9 @@ export async function serve(opts: ServeOptions, internals: ServeInternals = {}):
       recordRawBodies: config.fixtureRecord,
       // the configured league's records only (Stage C finding store-not-league-scoped)
       league: config.leagueId,
+      // the WAL's checkpoints (a copy and two syncs) on a worker thread, never inside a commit on
+      // the event loop (store/checkpointer.ts; plan 03 §1.2, plan 10 A16a)
+      offThreadCheckpoint: true,
       onWarning: (code) => {
         logger.warn("store.warning", { code });
       },

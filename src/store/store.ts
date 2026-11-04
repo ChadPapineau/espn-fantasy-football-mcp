@@ -19,6 +19,7 @@ import {
   removePreMigrationCopies,
   vacuumInto,
 } from "./backup.js";
+import { startCheckpointer, type Checkpointer, type CheckpointerOptions } from "./checkpointer.js";
 import { DatasetConnections } from "./datasets/connections.js";
 import { createReaders } from "./datasets/readers.js";
 import { acquireLock, acquireLockSync, lockPathOf } from "./lock.js";
@@ -78,6 +79,8 @@ export interface StoreInternals {
   readonly busyTimeoutMs?: number;
   /** The best-effort wait (default BEST_EFFORT_BUSY_MS). */
   readonly bestEffortMs?: number;
+  /** The off-thread checkpointer's poll, threshold or worker (tests). */
+  readonly checkpointer?: CheckpointerOptions;
 }
 
 /** An open store's internals (diagnostics, prune and tests; never handed to src/mcp). */
@@ -90,6 +93,8 @@ export interface StoreInternalsView {
   readonly datasetDir: string;
   readonly backupDir: string;
   readonly nflPlayers: NflPlayersReader;
+  /** The off-thread checkpointer (StoreOpenOptions.offThreadCheckpoint), else null. */
+  readonly checkpointer: Checkpointer | null;
 }
 
 const internalsByStore = new WeakMap<object, StoreInternalsView>();
@@ -272,6 +277,16 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
     }
   };
   const writes = new WriteExecutor(db, busyMs, internals.bestEffortMs ?? BEST_EFFORT_BUSY_MS);
+  // the server's checkpoints off its event loop (checkpointer.ts); a failed worker hands them back
+  const checkpointer =
+    opts.offThreadCheckpoint === true
+      ? startCheckpointer(db, opts.path, {
+          ...internals.checkpointer,
+          onFallback: () => {
+            warn("checkpoint_worker_failed");
+          },
+        })
+      : null;
   const deps: RepoDeps = {
     db,
     writes,
@@ -337,6 +352,7 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
     close() {
       if (closed) return;
       closed = true;
+      checkpointer?.stop();
       connections.closeAll();
       // never waits for another process's reader or writer (store-close-checkpoint-blocks-exit)
       closingCheckpoint(db);
@@ -353,6 +369,7 @@ export function openStore(opts: StoreOpenOptions, internals: StoreInternals = {}
     datasetDir: opts.datasetDir,
     backupDir: opts.backupDir,
     nflPlayers: readers.nflPlayers,
+    checkpointer,
   });
   return store;
 }
