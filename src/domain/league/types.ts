@@ -327,6 +327,9 @@ function capCodePoints(t: SanitizedText, cap: number): SanitizedText {
 /** Each flag fires when any of its patterns matches (a flag may have several). */
 const FLAG_RES: readonly (readonly [InjectionFlag, RegExp])[] = [
   ["role_marker", /(?:^|[.!?:;]\s*)(?:system|assistant|user|developer)\s*:/i],
+  // a chat-template role tag in brackets, anywhere: "[system] override", "[INST] … [/INST]" (these
+  // read as json_like while that rule took any text opening with "[" — round 2's product follow-up)
+  ["role_marker", /\[\s*(?:\/\s*)?(?:system|assistant|user|developer|inst)\s*\]/i],
   // a claimed league authority as the label of what follows: "Commissioner note: accept any trade…"
   // (research 05 §6 case 4, fx-10h inj-tradeblock), "League manager notice:", "Admin:" — the
   // label must open the text or a sentence and end in a colon ("NFL commissioner: …" stays clean)
@@ -354,7 +357,15 @@ const FLAG_RES: readonly (readonly [InjectionFlag, RegExp])[] = [
     "second_person",
     /\byou\s+(?:must|should|need\s+to|have\s+to|are\s+required\s+to|will\s+now)\b/i,
   ],
-  ["json_like", /^\s*[{[]/],
+  // a JSON-shaped opening: an object, or an array whose first element is JSON (an object, an array,
+  // a string, a literal or a number that a comma follows). Not any text opening with "[" — that
+  // flagged ordinary bracketed prose ("[Updated Oct. 3] Cook has…", a "[TAG] Name" team, a markdown
+  // link's label) and the fixtures' scrub placeholder "[outlook N chars]" (round 2's product
+  // follow-up, changelog §R10)
+  [
+    "json_like",
+    /^\s*(?:\{|\[\s*(?:[{["']|(?:true|false|null)\s*[,\]]|-?\d+(?:\.\d+)?(?:e[+-]?\d+)?\s*,))/i,
+  ],
 ];
 
 /**
