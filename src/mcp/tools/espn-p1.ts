@@ -7,7 +7,8 @@
 // editorial paragraphs, every one inside its `untrusted_text` wrapper with the deterministic
 // injection flags, plus the `rules_v1` claim extract — C14, plan 02 §6.4; never on rows).
 import { z } from "zod/v4";
-import { extractClaim, toClaimExtract } from "../../domain/evidence/index.js";
+import { inTurns } from "../../domain/analytics/cooperative.js";
+import { extractClaim, toClaimExtract, warmRulesSteps } from "../../domain/evidence/index.js";
 import {
   INJECTION_FLAGS,
   type EspnProjectionsData,
@@ -623,6 +624,13 @@ export const getPlayerOutlook = defineTool({
       );
     }
     const byId = new Map(outlooks.map((o) => [o.player.id, o]));
+    // each player's claim runs the rules_v1 table over his newest text, and the process's first
+    // claims compiled every rule's pattern in this one synchronous map (cold cpu_max 9.3–11.6 ms
+    // against 4.7–5.8 ms warm on the owner's Mac; round 4's timing account): the table is compiled
+    // first, a rule a step, in turns that end once the slice has spent its share (plan 03 §1.2;
+    // plan 10 A16a), as espn_get_news and espn_analyze_evidence do — once per process, so a warm
+    // call takes no step and no pass through the gate, and the claims read are the same
+    await inTurns(warmRulesSteps());
     const data: PlayerOutlookData = {
       players: players.map((p) => {
         const o = byId.get(p.ref.id);
