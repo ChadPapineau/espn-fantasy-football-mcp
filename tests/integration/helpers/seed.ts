@@ -1,7 +1,8 @@
 // seed.ts — the fixture-mode dataset seed (plan 05 §3: committed fixtures + injected transports; no
 // test ever touches the network): every dataset source of `full` that has a committed fixture is
 // published through the REAL runner and publisher into a store — the ESPN pro schedule and player
-// universe from the recorded season views, the nflverse Phase-1 and Phase-2 excerpts and their
+// universe from the season views (the pro schedule of the fixture league the server will serve,
+// when the target names one — SeedTarget.fixtureDir), the nflverse Phase-1 and Phase-2 excerpts and their
 // history twins, ffopportunity's expected points, Sleeper's trending lists and the three captured
 // RSS feeds — exactly as `eff refresh all` would wire them (src/cli/refresh.ts DEFAULT_REGISTRY,
 // defaultSeasons, newsInputs), then the crosswalk is rebuilt. The four usage files (weekly rosters,
@@ -59,6 +60,12 @@ export interface SeedTarget {
   readonly clock: FixedClock;
   /** The current season (the fixtures' 2026). */
   readonly season: number;
+  /**
+   * The derived fixture league the seeded server will serve (fixture mode's EFF_FIXTURE_DIR): its
+   * pro schedule — the variant's manifest view plus its patch — is the one published, as `eff
+   * refresh espn:schedule` would at its clock (world.ts proScheduleBody). Absent: the recorded one.
+   */
+  readonly fixtureDir?: string;
 }
 
 /** What one seed did. */

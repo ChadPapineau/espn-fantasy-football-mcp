@@ -1,7 +1,8 @@
 // seed-fixture-datasets.ts — dev tool: seeds a fixture-mode server's cache with every fixture-backed
 // dataset source of `full` (plan 10 §3.2; plan 05 §3: committed fixtures through the REAL runner and
 // publisher, no network) — the state an `eff refresh all` leaves — at the fixture league's own clock,
-// then rebuilds the crosswalk (tests/integration/helpers/seed.ts). Used by the plugin-eval suite
+// with that league's own pro schedule (a variant's patch included), then rebuilds the crosswalk
+// (tests/integration/helpers/seed.ts). Used by the plugin-eval suite
 // (`build-plugin-evals.mjs --seed-datasets`, plan 10 B15) so the P1 Skills' Lane 2 cases see usage,
 // depth charts, news and trending; the stdio end-to-end suites seed the same way (tests/e2e).
 //
@@ -55,6 +56,9 @@ export async function seedFixtureDatasets(
     cache,
     clock,
     season: 2026,
+    // the variant's own pro schedule (its manifest view plus patch), not the recorded one: the
+    // provider reads the dataset first, so a variant's finished or locked games read as it says
+    fixtureDir,
   };
   const store = storeFactory.open({
     path: t.storePath,

@@ -93,6 +93,8 @@ export async function seedHome(home: E2eHome, fixtureDir: string = FX): Promise<
     cache: home.cache,
     clock,
     season: 2026,
+    // the served league's own pro schedule (seed.ts SeedTarget.fixtureDir)
+    fixtureDir,
   };
   const store = storeFactory.open({
     path: t.storePath,

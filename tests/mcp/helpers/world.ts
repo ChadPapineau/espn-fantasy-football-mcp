@@ -20,7 +20,12 @@ import { rebuildCrosswalk } from "../../../src/domain/crosswalk/rebuild.js";
 import { createServer } from "../../../src/mcp/server.js";
 import type { McpServerOptions, McpServices } from "../../../src/mcp/services.js";
 import { createFixtureFetch, type FetchLike } from "../../../src/providers/espn/index.js";
+import {
+  createDerivedLeagueFetch,
+  readDerivedManifest,
+} from "../../../src/providers/espn/fixture-league.js";
 import { buildServices, type Wiring } from "../../../src/services/index.js";
+import { proScheduleRows } from "../../../src/sources/espn_season/index.js";
 import { NFLVERSE_SOURCES } from "../../../src/sources/nflverse/index.js";
 import { fsTempArea, runRefresh } from "../../../src/sources/runner.js";
 import {
@@ -70,7 +75,10 @@ export interface WorldOptions {
   readonly league?: LeagueSlot;
   /** ESPN_TEAM_ID (default 1 — a team of every recorded league). */
   readonly teamId?: number | null;
-  /** Publish the pro schedule + player universe dataset files (default true). */
+  /**
+   * Publish the pro schedule + player universe dataset files (default true): in fixture mode over a
+   * derived league, that league's own pro schedule (publishEspnDatasets `fixtureDir`).
+   */
   readonly publishEspn?: boolean;
   /** Publish the nflverse excerpts through the real runner (default false; slower). */
   readonly publishNflverse?: boolean;
@@ -199,67 +207,49 @@ export function embeddedTransactions(league: LeagueSlot): unknown[] {
   return [...out.values()];
 }
 
-/** Publishes `ds_pro_schedule` + `ds_pro_teams` and `ds_players` from the recorded season views. */
+/**
+ * The pro schedule a seed publishes: the recorded season view, or — given a derived fixture league
+ * directory (a fx-10h variant) — the body that league's fixture transport serves, its manifest view
+ * plus its patch (sunday-live's finished London game, all-locked's Monday game), so a
+ * dataset-seeded server reads the schedule `eff refresh espn:schedule` would publish at the
+ * variant's clock. The provider reads this dataset before the season view (scheduleOf,
+ * finalityGames), so publishing the recorded file for every variant left a variant's patched games
+ * `in` on a seeded eval server. No network: the fixture transport reads committed files only.
+ */
+export async function proScheduleBody(fixtureDir?: string): Promise<unknown> {
+  if (fixtureDir === undefined) return readJson("recorded/season/proTeamSchedules_wl.json");
+  const served = createDerivedLeagueFetch({ dir: path.resolve(fixtureDir) });
+  const r = await served(
+    `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${String(SEASON)}?view=proTeamSchedules_wl`,
+    { headers: {} },
+  );
+  if (!r.ok)
+    throw new Error(`the fixture league serves no pro schedule (HTTP ${String(r.status)})`);
+  return await r.json();
+}
+
+/**
+ * Publishes `ds_pro_schedule` + `ds_pro_teams` and `ds_players` from the season views: the pro
+ * schedule of `fixtureDir`'s derived league when one is passed (proScheduleBody), else the recorded
+ * one; its rows as the `espn:pro_schedule` source writes them (proScheduleRows).
+ */
 export async function publishEspnDatasets(t: {
   storePath: string;
   datasetDir: string;
   clock: FixedClock;
+  fixtureDir?: string;
 }): Promise<void> {
+  const body = await proScheduleBody(t.fixtureDir);
   const publisher = storeFactory.openPublisher({
     storePath: t.storePath,
     datasetDir: t.datasetDir,
     clock: t.clock,
   });
   try {
-    const sched = readJson("recorded/season/proTeamSchedules_wl.json") as {
-      settings: {
-        proTeams: {
-          id: number;
-          abbrev: string;
-          location: string;
-          name: string;
-          byeWeek: number;
-          proGamesByScoringPeriod?: Record<
-            string,
-            {
-              id: number;
-              scoringPeriodId: number;
-              date: number;
-              startTimeTBD: boolean;
-              validForLocking: boolean;
-              statsOfficial: boolean;
-              homeProTeamId: number;
-              awayProTeamId: number;
-            }[]
-          >;
-        }[];
-      };
-    };
-    const games = new Map<number, DatasetRow>();
-    const teams: DatasetRow[] = [];
-    for (const t2 of sched.settings.proTeams) {
-      teams.push({
-        season: SEASON,
-        pro_team_id: t2.id,
-        abbrev: t2.abbrev,
-        location: t2.location,
-        name: t2.name,
-        bye_week: t2.byeWeek >= 1 && t2.byeWeek <= 22 ? t2.byeWeek : null,
-      });
-      for (const list of Object.values(t2.proGamesByScoringPeriod ?? {}))
-        for (const g of list)
-          games.set(g.id, {
-            season: SEASON,
-            espn_game_id: g.id,
-            week: g.scoringPeriodId,
-            date_ms: g.date,
-            start_time_tbd: g.startTimeTBD ? 1 : 0,
-            valid_for_locking: g.validForLocking ? 1 : 0,
-            stats_official: g.statsOfficial ? 1 : 0,
-            home_pro_team_id: g.homeProTeamId,
-            away_pro_team_id: g.awayProTeamId,
-          });
-    }
+    // the real source's own rows (src/sources/espn_season): what `eff refresh espn:schedule` writes
+    const sched = proScheduleRows(body, SEASON);
+    const games = sched.games;
+    const teams = sched.teams;
     const out1 = await publisher.publish(
       "espn:pro_schedule",
       `fixture_${String(SEASON)}`,
@@ -267,7 +257,7 @@ export async function publishEspnDatasets(t: {
       (w) => {
         w.createTable(DS_PRO_SCHEDULE);
         w.createTable(DS_PRO_TEAMS);
-        const a = w.insert("ds_pro_schedule", [...games.values()]);
+        const a = w.insert("ds_pro_schedule", [...games]);
         const b = w.insert("ds_pro_teams", teams);
         return Promise.resolve({
           rows: a + b,
@@ -397,7 +387,12 @@ export async function makeWorld(o: WorldOptions = {}): Promise<World> {
     league: config.leagueId,
   });
   const t = { storePath: sp, datasetDir: dd, cache, clock };
-  if (o.publishEspn !== false) await publishEspnDatasets(t);
+  // a derived fixture league (fixture mode) publishes its OWN pro schedule, as the dataset seed does
+  const fixtureDir = env.EFF_FIXTURE_DIR;
+  const derived =
+    fixtureDir !== undefined && readDerivedManifest(fixtureDir) !== null ? fixtureDir : undefined;
+  if (o.publishEspn !== false)
+    await publishEspnDatasets({ ...t, ...(derived === undefined ? {} : { fixtureDir: derived }) });
   if (o.publishNflverse === true) {
     await publishNflverse(store, t);
     const r = rebuildCrosswalk({
