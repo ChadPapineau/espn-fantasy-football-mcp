@@ -12,6 +12,10 @@
 // 67bc88e: a shared surname that is also a team form ("Brown", "Houston", "Henderson", "Washington"),
 // repeated to the caps (11 to 30 times a benign item, and 1 000 of them 41 to 60 s, because each
 // mention re-read a label window whose every word is a form).
+// Every ratio is measured by costRatio (./cost-ratio.ts; changelog §R10 timing items): interleaved
+// pairs in the thread's own CPU time, the median of the per-pair ratios — one macOS CI run timed a
+// wall-clock median at 6.4 times while the host stalled; the bounds are R8-8's, unchanged. A positive
+// control holds that the measure fails a matcher that re-reads the item for each mention (quadratic).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,6 +29,7 @@ import {
   universeFromEspnPlayers,
   type NewsUniversePlayer,
 } from "../../../src/sources/news/index.js";
+import { costRatio, ratioEvidence } from "./cost-ratio.js";
 
 const FIRST = ["James", "John", "Michael", "Chris", "Josh", "Jordan", "Tyler", "Ryan", "Kevin"];
 const LAST = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis", "Wilson"];
@@ -45,17 +50,10 @@ const TITLE = cap(`Sam Twin ${"NE ".repeat(400)}`, 1_000);
 const BLURB = cap("Jets ".repeat(900), 4_000);
 const BENIGN = `Sam Twin: Questionable | ${"Notes on the week ahead. ".repeat(160)}`;
 
-/** The median of `n` timed calls, after a warm-up. */
-function median(f: () => unknown, n = 21): number {
-  for (let i = 0; i < 5; i++) f();
-  const ts: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const t0 = performance.now();
-    f();
-    ts.push(performance.now() - t0);
-  }
-  ts.sort((a, b) => a - b);
-  return ts[Math.floor(n / 2)] ?? 0;
+/** Asserts `a` costs less than `bound` times `b` (costRatio), with the measurement in the message. */
+function expectRatioBelow(a: () => unknown, b: () => unknown, bound: number, what = ""): void {
+  const r = costRatio(a, b);
+  expect(r.ratio, `${what} ${ratioEvidence(r)}`.trim()).toBeLessThan(bound);
 }
 
 describe("news matcher — the shared-name reading's worst case", () => {
@@ -64,11 +62,13 @@ describe("news matcher — the shared-name reading's worst case", () => {
     const item = `${TITLE} | ${BLURB}`;
     // what it reads: no ref for the shared name (a team named loosely), counted
     expect(m.matchItem(item)).toEqual({ refs: [], unresolved: 1 });
-    const adversarial = median(() => m.matchItem(item));
-    const benign = median(() => m.matchItem(BENIGN));
     // measured 2026-10-28: 3.4 times at dbe9686 (f41e810 4.8; 7b9572c 56); under R8-6 the scan
     // stops at the first team it finds, so this item costs less than the benign one
-    expect(adversarial).toBeLessThan(12 * Math.max(benign, 0.05));
+    expectRatioBelow(
+      () => m.matchItem(item),
+      () => m.matchItem(BENIGN),
+      12,
+    );
   });
 
   it("1 000 such items build in < 15 s", () => {
@@ -131,10 +131,12 @@ describe("news matcher — R8-6: the last attack's capped item, over the recorde
     const m = buildPlayerMatcher(recorded);
     const item = `Lamar Jackson: Notes | ${blurb}`;
     expect(blurb).toHaveLength(4_000);
-    const adversarial = median(() => m.matchItem(item));
-    const quiet = median(() => m.matchItem(benign));
     // measured 2026-10-28: 1.3 times, 1.8 ms (dbe9686 about 210 times, 203 ms)
-    expect(adversarial).toBeLessThan(6 * Math.max(quiet, 0.05));
+    expectRatioBelow(
+      () => m.matchItem(item),
+      () => m.matchItem(benign),
+      6,
+    );
   });
 
   it("1 000 such items build in < 15 s", () => {
@@ -207,12 +209,15 @@ describe("news matcher — R8-6's second build: items at the caps against each n
   };
 
   it("each costs at most 6 times a benign near-cap item", () => {
-    const quiet = median(() => m.matchItem(benign));
     for (const [name, blurb] of Object.entries(items)) {
       const item = `Lamar Jackson: Notes | ${blurb}`;
-      const adversarial = median(() => m.matchItem(item));
       // measured 2026-10-28: at most 2.8 times (the hyphenated words, 7 ms; the benign item 2.4 ms)
-      expect(adversarial, name).toBeLessThan(6 * Math.max(quiet, 0.05));
+      expectRatioBelow(
+        () => m.matchItem(item),
+        () => m.matchItem(benign),
+        6,
+        name,
+      );
     }
   });
 
@@ -267,14 +272,21 @@ describe("news matcher — R8-8: the attack on 08524ff's capped item, over the r
     const item = `${title} | ${blurb}`;
     // what it reads: no ref; the full name and each of the seven surnames counted
     expect(m.matchItem(item)).toEqual({ refs: [], unresolved: 8 });
-    const adversarial = median(() => m.matchItem(item));
-    const quiet = median(() => m.matchItem(benign));
     // measured 2026-10-29: about 3 times (08524ff 23.5 times: 80 ms against 3.4 ms)
-    expect(adversarial).toBeLessThan(6 * Math.max(quiet, 0.05));
+    expectRatioBelow(
+      () => m.matchItem(item),
+      () => m.matchItem(benign),
+      6,
+    );
     // four times the blurb, about four times the cost (a quadratic reading would be sixteen)
-    const short = median(() => m.matchItem(`Lamar Jackson: x | ${rep(P, 1_000)}`));
-    const long = median(() => m.matchItem(`Lamar Jackson: x | ${rep(P, 4_000)}`));
-    expect(long).toBeLessThan(8 * Math.max(short, 0.05));
+    const short = `Lamar Jackson: x | ${rep(P, 1_000)}`;
+    const long = `Lamar Jackson: x | ${rep(P, 4_000)}`;
+    expectRatioBelow(
+      () => m.matchItem(long),
+      () => m.matchItem(short),
+      8,
+      "4× the blurb",
+    );
   });
 
   it("1 000 such items build in < 15 s", () => {
@@ -334,20 +346,54 @@ describe("news matcher — R8-8: the verifier's team-word surnames, over the rec
   const benign = `Lamar Jackson: Questionable | ${rep("Notes on the week ahead. ", 4_000)}`;
 
   it("each costs at most 6 times a benign capped item, and grows linearly with its blurb", () => {
-    const quiet = median(() => m.matchItem(benign));
     for (const written of WRITTEN) {
       const { title, blurb } = itemOf(written);
       const item = `${title} | ${blurb}`;
       // what it reads: no ref; the full name and the surname counted
       expect(m.matchItem(item), written).toEqual({ refs: [], unresolved: 2 });
-      const adversarial = median(() => m.matchItem(item));
       // measured 2026-10-29: at most 3.6 times ("Brown ", 7 ms against 2 ms); 67bc88e 11 to 30 times
-      expect(adversarial, written).toBeLessThan(6 * Math.max(quiet, 0.05));
+      expectRatioBelow(
+        () => m.matchItem(item),
+        () => m.matchItem(benign),
+        6,
+        written,
+      );
     }
     // four times the blurb, about four times the cost (a quadratic reading would be sixteen)
-    const short = median(() => m.matchItem(`Lamar Jackson: x | ${rep("Brown ", 1_000)}`));
-    const long = median(() => m.matchItem(`Lamar Jackson: x | ${rep("Brown ", 4_000)}`));
-    expect(long).toBeLessThan(8 * Math.max(short, 0.05));
+    const short = `Lamar Jackson: x | ${rep("Brown ", 1_000)}`;
+    const long = `Lamar Jackson: x | ${rep("Brown ", 4_000)}`;
+    expectRatioBelow(
+      () => m.matchItem(long),
+      () => m.matchItem(short),
+      8,
+      "4× the blurb",
+    );
+  });
+
+  it("positive control: the measure fails a matcher that re-reads the item at each mention", () => {
+    // the matcher's reading plus what the attacked builds did (a re-read of the item at each mention
+    // of a shared surname: quadratic in the mentions, so in the length of a repeated item) — the
+    // same bounds must fail it, or the ratios above could not tell a quadratic reading from a linear
+    const SHARED = /\b(?:Brown|Houston|Henderson|Washington|Jackson)\b/gu;
+    const quadratic = (text: string): number => {
+      m.matchItem(text);
+      let n = 0;
+      for (const hit of text.matchAll(SHARED))
+        n += text.split(" ").filter((w) => w.startsWith(hit[0])).length;
+      return n;
+    };
+    const { title, blurb } = itemOf("Brown ");
+    const item = `${title} | ${blurb}`;
+    const vsBenign = costRatio(
+      () => quadratic(item),
+      () => quadratic(benign),
+    );
+    expect(vsBenign.ratio, ratioEvidence(vsBenign)).toBeGreaterThan(6);
+    const growth = costRatio(
+      () => quadratic(`Lamar Jackson: x | ${rep("Brown ", 4_000)}`),
+      () => quadratic(`Lamar Jackson: x | ${rep("Brown ", 1_000)}`),
+    );
+    expect(growth.ratio, ratioEvidence(growth)).toBeGreaterThan(8);
   });
 
   it("1 000 of the costliest build in < 15 s", () => {
