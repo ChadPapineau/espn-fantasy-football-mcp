@@ -655,7 +655,9 @@ export async function transactionsAppend(
   opts: SnapshotOptions & { readonly force: boolean },
 ): Promise<number> {
   const job = "transactions";
-  const run = await startJob(io, config, log, job, opts);
+  // the league's settings and its feed only: read keyless on a league kept public under a rejected
+  // session (changelog §R10, R10-10; espn-jobs.ts keylessOnPublicWhenRejected)
+  const run = await startJob(io, config, log, job, { ...opts, keylessOnPublicWhenRejected: true });
   if (typeof run === "number") return run;
   try {
     const now = io.clock.nowMs();

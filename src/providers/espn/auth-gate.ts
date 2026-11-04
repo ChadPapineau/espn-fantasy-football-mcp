@@ -6,8 +6,14 @@
 // read keyless by the server (cookies cannot be tested there, and a 200 is not an acceptance) — but
 // the credentialed launchd jobs read it with the stored cookie, as plan 06 §1.4 designs and budgets
 // them (`keylessOnPublic`); `rejected` short-circuits with ESPN_AUTH_REJECTED and ZERO requests
-// (unless the league is public); a view that needs cookies with none stored is
-// ESPN_REQUIRES_COOKIES, also with zero requests. The SWID is read from the header only to compute
+// (unless the league is public and the read is one ESPN serves anyone there); a view that needs
+// cookies with none stored is ESPN_REQUIRES_COOKIES, also with zero requests. Changelog §R10, R10-10
+// split the old `required` use in two: the league's transaction feed (`feed`, mTransactions2) is
+// served to anyone on a public league, so it is read keyless there whenever no accepted cookie is
+// at hand (nothing stored, or a rejected session); pending claims (`own`, mPendingTransactions) are
+// the caller's own and are never read keyless, public or not. One publicity rule decides every
+// keyless league read, in both credential branches: `known()` — what this process saw, else the
+// value another process kept (see forRequest). The SWID is read from the header only to compute
 // `my_team` — it is never emitted.
 import type {
   CookieHeaderResult,
@@ -18,8 +24,18 @@ import type { Clock } from "../../domain/clock.js";
 import type { EspnRoute } from "./path.js";
 import type { CredentialProbeAccess, EspnView } from "./types.js";
 
-/** How a read uses cookies: never (keyless routes), auto (when available), required (private data). */
-export type CookieUse = "never" | "auto" | "required";
+/**
+ * How a read uses cookies (changelog §R10, R10-10 split the old `required` in two):
+ * - `never` — keyless routes and the anonymous reads that learn a league's publicity;
+ * - `auto` — the cookie when one is at hand; a league known public keyless for the server
+ *   (CookieGateOptions.keylessOnPublic) and, under a rejected session, for every process;
+ * - `feed` — league-wide data ESPN serves anyone on a public league (mTransactions2): the cookie
+ *   when one not rejected is at hand, else keyless on a league known public, else the refusal
+ *   (ESPN_REQUIRES_COOKIES with nothing stored, ESPN_AUTH_REJECTED under a rejected session);
+ * - `own` — the caller's own data (mPendingTransactions): only with a cookie, never keyless, public
+ *   or not.
+ */
+export type CookieUse = "never" | "auto" | "feed" | "own";
 
 /** A validated session acceptance is re-recorded at most this often (one row write per hour). */
 export const ACCEPT_OBSERVE_INTERVAL_MS = 60 * 60 * 1000;
@@ -191,13 +207,7 @@ export class CookieGate {
    */
   async forRequest(use: CookieUse, route: EspnRoute): Promise<string | null> {
     if (use === "never" || route === "season" || route === "players") return null;
-    // a `required` view is read keyless only on a league THIS process saw answer as public: the
-    // kept value decides the probe and the `auto` reads, never that a cookie-only view (transactions,
-    // pending claims — empty anonymously, research 03 §B) is read without one
-    if (this.auth === null) {
-      if (use === "required" && this.publicity !== true) this.requires();
-      return null;
-    }
+    if (this.auth === null) return this.keyless(use, "ESPN_REQUIRES_COOKIES");
     // a public league's `auto` read: keyless for the server, the stored cookie for the jobs
     // (CookieGateOptions.keylessOnPublic)
     if (use === "auto" && this.keylessOnPublic && this.known() === true) return null;
@@ -210,15 +220,51 @@ export class CookieGate {
     // nothing stored — or a store that cannot be read while nothing was ever recorded as stored (a
     // keychain that will not load on an install that never ran setup): no credential, as before
     // this call asked; an unreadable store behind a recorded value stays INTERNAL (doctor #6/#7)
-    if (r.reason === "not_configured" || (labelledNone && r.reason === "unreadable")) {
-      if (use === "required" && this.publicity !== true) this.requires();
-      return null;
-    }
-    if (r.reason === "rejected") {
-      if (this.known() === true && use === "auto") return null;
-      throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
-    }
+    if (r.reason === "not_configured" || (labelledNone && r.reason === "unreadable"))
+      return this.keyless(use, "ESPN_REQUIRES_COOKIES");
+    // a rejected session: the authority answered from the stored metadata alone (the secret is not
+    // loaded for a value already rejected — src/auth/state.ts), and the cookie is never sent again
+    if (r.reason === "rejected") return this.keyless(use, "ESPN_AUTH_REJECTED");
     throw new EspnCredentialError("INTERNAL", `credential_${r.reason}`);
+  }
+
+  /**
+   * The read with no accepted cookie at hand (nothing stored, or a rejected session — `why` names
+   * which): keyless when ESPN serves it to anyone, else the zero-request refusal. `auto` and `feed`
+   * reads of a league known public go keyless; `own` never does (changelog §R10, R10-10). Without a
+   * credential an `auto` read goes keyless whatever the publicity (the anonymous read is the only
+   * one there is), while under a rejected session it short-circuits unless the league is known
+   * public (plan 02 §2.1 "Short-circuit").
+   *
+   * The one publicity rule is `known()`: what this process saw ESPN answer, else the value another
+   * process kept (PublicityStore). Plan 02 §2.1 has the server learn `settings.isPublic` once and
+   * "remember it", and the kept value is that memory across processes (a launchd job and every
+   * `eff` command is a new process). The in-process-only rule the `required` branch used guarded a
+   * premise R10-10 withdrew (research 03 §B's "empty anonymously"): a stale kept value could have had
+   * a cookie-only view read keyless and answer an empty list. The feed is now known to be served in
+   * full anonymously, and the caller's own pending claims are never keyless, so no read depends on
+   * it; a kept value the league has since outgrown costs one keyless 401, which learns `false` (the
+   * request pipeline's learnPublic) and answers the refusal.
+   */
+  private keyless(
+    use: Exclude<CookieUse, "never">,
+    why: "ESPN_REQUIRES_COOKIES" | "ESPN_AUTH_REJECTED",
+  ): null {
+    const shared = use === "auto" || use === "feed";
+    if (shared && this.known() === true) return null;
+    if (use === "auto" && why === "ESPN_REQUIRES_COOKIES") return null;
+    if (why === "ESPN_REQUIRES_COOKIES") this.requires();
+    throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
+  }
+
+  /**
+   * Whether the session the authority holds is rejected (the label; no store read). A keyless read
+   * made because of it that ESPN refuses (a league kept public that is private now) is the rejected
+   * session's to report, as the anonymous settings read's refusal already is (provider.ts
+   * settingsRead).
+   */
+  rejectedNow(): boolean {
+    return this.auth !== null && this.auth.state() === "rejected";
   }
 
   /**

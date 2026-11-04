@@ -162,7 +162,8 @@ describe("a credential stored while the server runs is picked up without a resta
     const a = new FakeAuthority("validated", { ok: true, header });
     a.state = () => "not_configured";
     const g = new CookieGate(a, w0clock(), "server");
-    expect(await g.forRequest("required", "league")).toBe(header);
+    expect(await g.forRequest("own", "league")).toBe(header);
+    expect(await g.forRequest("feed", "league")).toBe(header);
     expect(await g.forRequest("auto", "league")).toBe(header);
     expect(await new CookieGate(a, w0clock(), "server").memberId()).toBe(SWID);
     // season routes and a known-public league's auto reads still never ask
@@ -180,10 +181,11 @@ describe("a credential stored while the server runs is picked up without a resta
     none.state = () => "not_configured";
     const g = new CookieGate(none, w0clock(), "server");
     expect(await g.forRequest("auto", "league")).toBeNull();
-    await expect(g.forRequest("required", "league")).rejects.toMatchObject({
-      effCode: "ESPN_REQUIRES_COOKIES",
-      effDetails: { reason: "no_credential" },
-    });
+    for (const use of ["own", "feed"] as const)
+      await expect(g.forRequest(use, "league")).rejects.toMatchObject({
+        effCode: "ESPN_REQUIRES_COOKIES",
+        effDetails: { reason: "no_credential" },
+      });
     expect(await g.memberId()).toBeNull();
     const recorded = new CookieGate(
       new FakeAuthority("stored", { ok: false, reason: "unreadable" }),

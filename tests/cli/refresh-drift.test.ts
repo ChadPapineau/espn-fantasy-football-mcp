@@ -6,10 +6,15 @@
 // diff, and only a tool call that re-read the view cleared it. Here: the command re-reads each red
 // view through the provider (one request per view), clears what ESPN serves again and keeps what is
 // still missing; doctor #9 names it for a view the probe never reads; the probe prints the stored
-// red diff with it. The recorded league-a stand-in (league id 0, keyless): no cookie is sent.
-import { readFileSync } from "node:fs";
+// red diff with it. The recorded league-a stand-in (league id 0, public): every read is keyless but
+// the pending claims' re-read, which carries the session's (placeholder) cookie — the user's own
+// claims are never read keyless (changelog §R10, R10-10); with nothing stored that one view is
+// named not re-read with its refusal, and the other red views are still judged.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { sessionFileBody } from "../../src/auth/file.js";
+import { metaFor } from "../../src/auth/upgrade.js";
 import { checkDrift } from "../../src/cli/doctor.js";
 import {
   DRIFT_REFRESH_TARGET,
@@ -24,6 +29,7 @@ import { openStore } from "../../src/cli/store-access.js";
 import { parseDiffs } from "../../src/drift/index.js";
 import type { DriftStateRow } from "../../src/drift/types.js";
 import { LEAGUE_VIEWS } from "../../src/providers/espn/types.js";
+import { fakeCookies } from "../auth/helpers.js";
 import {
   ROOT,
   fakeExec,
@@ -118,6 +124,18 @@ async function stored(): Promise<DriftStateRow | null> {
   }
 }
 
+const COOKIES = fakeCookies("cli-refresh-drift");
+
+/** A stored session (placeholder cookies in the sandbox's 0600 file store). */
+function plantSession(): void {
+  mkdirSync(sb.configDir, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    path.join(sb.configDir, "session.json"),
+    sessionFileBody(COOKIES, metaFor(COOKIES, "2026-10-01T00:00:00.000Z")),
+    { mode: 0o600 },
+  );
+}
+
 async function run(pending: "ok" | "skeleton", extra: readonly string[] = []) {
   const f = leagueA(pending);
   const { exec } = fakeExec();
@@ -130,7 +148,12 @@ async function run(pending: "ok" | "skeleton", extra: readonly string[] = []) {
     env: ENV,
   });
   const code = await main(["refresh", DRIFT_REFRESH_TARGET, ...extra], io);
-  for (const init of f.inits) expect(new Headers(init.headers).has("cookie")).toBe(false);
+  // the user's own pending claims carry the session's cookie (never keyless); once the first
+  // league read has shown the league public, every other read is keyless
+  f.inits.forEach((init, i) => {
+    const own = f.urls[i]?.includes("view=mPendingTransactions") === true;
+    if (own || i > 0) expect(new Headers(init.headers).has("cookie"), f.urls[i]).toBe(own);
+  });
   return { code, io, urls: f.urls };
 }
 
@@ -139,6 +162,7 @@ const PENDING_RED = [{ view: "mPendingTransactions", removed: ["$.pendingTransac
 describe("eff refresh espn:drift re-judges the views drift_state marks red (Stage C final gate)", () => {
   it("a red view the probe never reads: one re-read, cleared when ESPN serves it again (exit 0)", async () => {
     sb = sandbox();
+    plantSession();
     await seed(redRow(PENDING_RED));
     const r = await run("ok", ["--json"]);
     expect(r.code).toBe(0);
@@ -156,6 +180,7 @@ describe("eff refresh espn:drift re-judges the views drift_state marks red (Stag
 
   it("a key still missing stays red: said, exit 4", async () => {
     sb = sandbox();
+    plantSession();
     await seed(redRow(PENDING_RED));
     const r = await run("skeleton");
     expect(r.code).toBe(4);
@@ -223,6 +248,7 @@ describe("eff refresh espn:drift re-judges the views drift_state marks red (Stag
 
   it("a copy the cache served because ESPN failed is never taken as re-judged", async () => {
     sb = sandbox();
+    plantSession();
     await seed(redRow(PENDING_RED));
     expect((await run("ok")).code).toBe(0); // the views are cached now
     await seed(redRow(PENDING_RED)); // red again; ESPN then fails every request
@@ -244,6 +270,26 @@ describe("eff refresh espn:drift re-judges the views drift_state marks red (Stag
       ["mPendingTransactions", "not_read", ["$.pendingTransactions"]],
     ]);
     expect(report.views[0]?.reason).toMatch(/^[A-Z_]+$/);
+  });
+
+  it("changelog §R10, R10-10: with nothing stored the pending re-read is named not re-read (no request); the rest are judged", async () => {
+    sb = sandbox();
+    await seed(
+      redRow([{ view: "mSettings", removed: ["$.settings.scoringSettings"] }, ...PENDING_RED]),
+    );
+    const r = await run("ok", ["--json"]);
+    expect(r.code).toBe(4);
+    const report = JSON.parse(r.io.out.text.trim()) as DriftRefreshReport;
+    expect(report.views).toEqual([
+      { view: "mSettings", outcome: "cleared", removed: [], reason: null },
+      {
+        view: "mPendingTransactions",
+        outcome: "not_read",
+        removed: ["$.pendingTransactions"],
+        reason: "ESPN_REQUIRES_COOKIES",
+      },
+    ]);
+    expect(r.urls.some((u) => u.includes("view=mPendingTransactions"))).toBe(false);
   });
 
   it("mSettings still missing a key: the league read itself is the judgement — red, exit 4, never a crash", async () => {

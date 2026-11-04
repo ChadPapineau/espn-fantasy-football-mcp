@@ -229,7 +229,14 @@ export async function refreshDrift(
         } catch (e) {
           // a drift error is the judgement itself (the key is still missing); anything else is not
           const code = errorCode(e);
-          if (code === "ESPN_AUTH_REJECTED" || code === "ESPN_REQUIRES_COOKIES") throw e;
+          // the user's own pending claims are never read without the session (changelog §R10,
+          // R10-10), public league or not: that view alone is named not re-read with the refusal's
+          // code, and the other red views are still judged; any other view's refusal is the run's
+          if (
+            (code === "ESPN_AUTH_REJECTED" || code === "ESPN_REQUIRES_COOKIES") &&
+            view !== "mPendingTransactions"
+          )
+            throw e;
           if (code !== "ESPN_DRIFT_DETECTED") failure = code;
         }
         done.set(read, failure);

@@ -7,6 +7,7 @@ import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fakeEspnS2 } from "../../scripts/ci/secret-fixtures.mjs";
 import { MANDATORY_SENTENCES } from "../../src/mcp/envelope.js";
+import { SESSION_READ_WARNINGS } from "../../src/mcp/tools/common.js";
 import { coded, faulty } from "./helpers/faults.js";
 import { envelopeViolations, identifierLeaks } from "./helpers/walk.js";
 import { call, connect, makeWorld, type World } from "./helpers/world.js";
@@ -305,7 +306,11 @@ describe("A6 espn_list_transactions", () => {
     expect(
       t.every((x) => /^t[0-9a-f]{24}$/.test(x.transaction_id) || /^\d+$/.test(x.transaction_id)),
     ).toBe(true);
-    expect(e.data.pending).toEqual([]);
+    // nothing is stored: pending claims are never read keyless, even on this public league
+    // (changelog §R10, R10-10) — `pending: null` with the fixed reason; the feed above is unaffected
+    expect(e.data.pending).toBeNull();
+    expect(e.warnings).toContain(SESSION_READ_WARNINGS.pending_no_session);
+    expect(world.requests.some((u) => u.includes("mPendingTransactions"))).toBe(false);
     expect(e.data.learned).toEqual({
       second_claim_at_new_position: null,
       waiver_rank_moves_on_success: null,
@@ -332,6 +337,33 @@ describe("A6 espn_list_transactions", () => {
     const s = faulty(world.services, { listTransactions: coded("ESPN_REQUIRES_COOKIES") });
     const c = await connect(world, { services: s });
     expect((await err("espn_list_transactions", {}, c.client)).code).toBe("ESPN_REQUIRES_COOKIES");
+    await c.close();
+  });
+
+  it("changelog §R10, R10-10: a pending refusal is `pending: null` with its reason; the feed part is unaffected", async () => {
+    const plain = await ok("espn_list_transactions", { count: 50 });
+    for (const [code, warning] of [
+      ["ESPN_REQUIRES_COOKIES", SESSION_READ_WARNINGS.pending_no_session],
+      ["ESPN_AUTH_REJECTED", SESSION_READ_WARNINGS.pending_rejected],
+    ] as const) {
+      const s = faulty(world.services, { listPendingTransactions: coded(code) });
+      const c = await connect(world, { services: s });
+      const e = await ok("espn_list_transactions", { pending: true, count: 50 }, c.client);
+      expect(e.data.pending).toBeNull();
+      expect(e.warnings).toContain(warning);
+      expect(warning).toContain("eff setup");
+      // the feed part: the same transactions, not partial, the other warnings unchanged
+      expect(e.data.transactions).toEqual(plain.data.transactions);
+      expect(e.partial).toBe(plain.partial);
+      expect(e.warnings.filter((w) => w !== warning)).toEqual(plain.warnings);
+      await c.close();
+    }
+    // any other failure of the pending read is not absorbed as a session refusal
+    const s = faulty(world.services, { listPendingTransactions: coded("INTERNAL") });
+    const c = await connect(world, { services: s });
+    expect((await err("espn_list_transactions", { pending: true }, c.client)).code).toBe(
+      "INTERNAL",
+    );
     await c.close();
   });
 });

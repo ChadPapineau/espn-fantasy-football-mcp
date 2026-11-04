@@ -166,17 +166,20 @@ describe("working runs over the recorded league", () => {
     expect(proj.io.out.text).toMatch(/ESPN projection row\(s\) stored/);
     const tx = await runtime("2026-10-07T19:00:00.000Z");
     const txc = await transactionsAppend(tx.io, tx.config, tx.log, { notify: true, force: false });
-    // mTransactions2 always needs cookies; with none stored the launchd job says so, sends nothing
-    // more and stays quiet (exit 0)
-    expect(txc).toBe(0);
-    expect(tx.io.out.text).toContain("needs cookies and none are stored");
-    // typed at a terminal it is the credentials failure it is: exit 3 and `eff setup` (Stage C
-    // finding cli-backfill-no-cookie-exit-zero)
+    // this league is public and ESPN serves its feed to anyone (changelog §R10, R10-10): with none
+    // stored the job reads it keyless on the publicity an earlier process kept — its settings come
+    // from the cache, so this process saw no answer of its own — and works (exit 0). A private
+    // league with none stored is still refused (jobs-round3.test.ts, exit 3 by hand)
+    expect(txc, `${tx.io.out.text} | ${tx.io.err.text}`).toBe(0);
+    expect(tx.io.out.text).toContain("new transaction(s) appended");
+    expect(tx.f.urls.some((u) => u.includes("view=mTransactions2"))).toBe(true);
+    for (const init of tx.f.inits) expect(new Headers(init.headers).has("cookie")).toBe(false);
+    // typed at a terminal with --force: the same keyless read
     const hand = await runtime("2026-10-07T19:05:00.000Z");
     expect(
-      await transactionsAppend(hand.io, hand.config, hand.log, { notify: false, force: false }),
-    ).toBe(3);
-    expect(hand.io.out.text).toContain("run `eff setup`");
+      await transactionsAppend(hand.io, hand.config, hand.log, { notify: false, force: true }),
+    ).toBe(0);
+    expect(hand.io.out.text).toContain("new transaction(s) appended");
     // the pre-kickoff check, 61 min before a game day's first kickoff, over the newest snapshot
     const s = await schedule();
     const sunday = s.games

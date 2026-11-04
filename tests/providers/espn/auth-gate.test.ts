@@ -1,8 +1,10 @@
 // auth-gate.test.ts — src/providers/espn/auth-gate.ts (plan 02 §2.1; plan 01 §10): the provider
 // never reads a store; season routes are keyless; a public league is read keyless; `rejected`
-// short-circuits with zero requests; required views without a credential refuse; only
-// discriminating acceptances are recorded (private league; hourly while validated); the SWID is read
-// from the header only to compute my_team; the probe uses the short-circuit-exempt access if offered.
+// short-circuits with zero requests; the league feed goes keyless on a league known public whenever
+// no accepted cookie is at hand and the caller's own data never does (changelog §R10, R10-10: the
+// whole use × state × publicity matrix); only discriminating acceptances are recorded (private
+// league; hourly while validated); the SWID is read from the header only to compute my_team; the
+// probe uses the short-circuit-exempt access if offered.
 import { describe, expect, it } from "vitest";
 import { fixedClock } from "../../../src/domain/clock.js";
 import {
@@ -42,27 +44,12 @@ describe("forRequest", () => {
     const a = new FakeAuthority("validated", { ok: true, header });
     const g = new CookieGate(a, clock, "server");
     expect(await g.forRequest("auto", "season")).toBeNull();
-    expect(await g.forRequest("required", "players")).toBeNull();
+    expect(await g.forRequest("own", "players")).toBeNull();
+    expect(await g.forRequest("feed", "season")).toBeNull();
     expect(await g.forRequest("never", "league")).toBeNull();
     expect(a.headerCalls).toBe(0);
   });
-  it("no authority / not configured: keyless, or REQUIRES_COOKIES for required views unless public", async () => {
-    for (const a of [
-      null,
-      new FakeAuthority("not_configured", { ok: false, reason: "not_configured" }),
-    ]) {
-      const g = new CookieGate(a, clock, "server");
-      expect(await g.forRequest("auto", "league")).toBeNull();
-      expect(await reason(g.forRequest("required", "league"))).toEqual([
-        "ESPN_REQUIRES_COOKIES",
-        "no_credential",
-      ]);
-      g.learnPublic(true);
-      expect(await g.forRequest("required", "league")).toBeNull();
-      expect(g.configured()).toBe(false);
-    }
-  });
-  it("configured: the header; a public league reads keyless for auto views but sends it for required ones", async () => {
+  it("configured: the header; a public league reads keyless for auto views but sends it for the feed and own data", async () => {
     const a = new FakeAuthority("validated", { ok: true, header });
     const g = new CookieGate(a, clock, "server");
     expect(await g.forRequest("auto", "communication")).toBe(header);
@@ -70,21 +57,8 @@ describe("forRequest", () => {
     g.learnFromBody({ settings: { isPublic: true } });
     expect(g.isPublic()).toBe(true);
     expect(await g.forRequest("auto", "league")).toBeNull();
-    expect(await g.forRequest("required", "league")).toBe(header);
-  });
-  it("rejected: the zero-request short-circuit (ESPN_AUTH_REJECTED); keyless on a known-public league", async () => {
-    const a = new FakeAuthority("rejected", { ok: true, header });
-    const g = new CookieGate(a, clock, "server");
-    expect(await reason(g.forRequest("auto", "league"))).toEqual([
-      "ESPN_AUTH_REJECTED",
-      "short_circuit",
-    ]);
-    g.learnPublic(true);
-    expect(await g.forRequest("auto", "league")).toBeNull();
-    expect(await reason(g.forRequest("required", "league"))).toEqual([
-      "ESPN_AUTH_REJECTED",
-      "short_circuit",
-    ]);
+    expect(await g.forRequest("feed", "league")).toBe(header);
+    expect(await g.forRequest("own", "league")).toBe(header);
   });
   it("a store-side not_configured after the state said stored; unreadable and invalid formats are INTERNAL", async () => {
     const nc = new CookieGate(
@@ -93,19 +67,24 @@ describe("forRequest", () => {
       "server",
     );
     expect(await nc.forRequest("auto", "league")).toBeNull();
-    expect(await reason(nc.forRequest("required", "league"))).toEqual([
+    expect(await reason(nc.forRequest("feed", "league"))).toEqual([
       "ESPN_REQUIRES_COOKIES",
       "no_credential",
     ]);
     nc.learnPublic(true);
-    expect(await nc.forRequest("required", "league")).toBeNull();
+    expect(await nc.forRequest("feed", "league")).toBeNull();
+    expect(await reason(nc.forRequest("own", "league"))).toEqual([
+      "ESPN_REQUIRES_COOKIES",
+      "no_credential",
+    ]);
     for (const r of ["unreadable", "invalid_format"] as const) {
       const g = new CookieGate(
         new FakeAuthority("stored", { ok: false, reason: r }),
         clock,
         "server",
       );
-      expect(await reason(g.forRequest("auto", "league"))).toEqual(["INTERNAL", `credential_${r}`]);
+      for (const use of ["auto", "feed", "own"] as const)
+        expect(await reason(g.forRequest(use, "league"))).toEqual(["INTERNAL", `credential_${r}`]);
     }
   });
   it("learnFromBody ignores bodies without a boolean settings.isPublic", () => {
@@ -115,6 +94,109 @@ describe("forRequest", () => {
     expect(g.isPublic()).toBeNull();
     g.learnFromBody({ settings: { isPublic: false } });
     expect(g.isPublic()).toBe(false);
+  });
+});
+
+/**
+ * changelog §R10, R10-10: every (use × credential state × publicity) cell. `feed` (mTransactions2,
+ * served to anyone on a public league) goes keyless on a league known public whenever no accepted
+ * cookie is at hand; `own` (mPendingTransactions, the caller's own) never goes keyless; `auto` is
+ * unchanged. Publicity is known one way, in both credential branches: what this process saw, else
+ * the value another process kept — so each "public"/"private" cell is run both ways.
+ */
+describe("the cookie-use matrix (changelog §R10, R10-10)", () => {
+  type State = "none" | "not_configured" | "validated" | "rejected";
+  type Publicity = "unknown" | "public" | "private";
+  type Want = "header" | "keyless" | "ESPN_REQUIRES_COOKIES" | "ESPN_AUTH_REJECTED";
+  const authority = (st: State): FakeAuthority | null => {
+    if (st === "none") return null;
+    if (st === "not_configured")
+      return new FakeAuthority("not_configured", { ok: false, reason: "not_configured" });
+    return new FakeAuthority(st, { ok: true, header });
+  };
+  /** What a server-process read gets (keylessOnPublic: true). */
+  const want = (use: "auto" | "feed" | "own", st: State, pub: Publicity): Want => {
+    const noSession = st === "none" || st === "not_configured";
+    if (st === "validated") return use === "auto" && pub === "public" ? "keyless" : "header";
+    if (use === "own") return noSession ? "ESPN_REQUIRES_COOKIES" : "ESPN_AUTH_REJECTED";
+    if (pub === "public") return "keyless";
+    if (use === "auto" && noSession) return "keyless";
+    return noSession ? "ESPN_REQUIRES_COOKIES" : "ESPN_AUTH_REJECTED";
+  };
+  const got = async (g: CookieGate, use: "auto" | "feed" | "own"): Promise<Want> => {
+    try {
+      const h = await g.forRequest(use, "league");
+      return h === header ? "header" : h === null ? "keyless" : (`unexpected ${h}` as Want);
+    } catch (e) {
+      expect(e).toBeInstanceOf(EspnCredentialError);
+      const err = e as EspnCredentialError;
+      expect(err.effDetails.reason).toBe(
+        err.effCode === "ESPN_AUTH_REJECTED" ? "short_circuit" : "no_credential",
+      );
+      return err.effCode as Want;
+    }
+  };
+  const cells: [State, Publicity, "seen" | "kept"][] = [];
+  for (const st of ["none", "not_configured", "validated", "rejected"] as const)
+    for (const pub of ["unknown", "public", "private"] as const)
+      for (const how of pub === "unknown" ? (["seen"] as const) : (["seen", "kept"] as const))
+        cells.push([st, pub, how]);
+
+  it.each(cells)("state %s, publicity %s (%s)", async (st, pub, how) => {
+    for (const use of ["auto", "feed", "own"] as const) {
+      const a = authority(st);
+      const kept = how === "kept" && pub !== "unknown" ? pub === "public" : null;
+      const g = new CookieGate(a, fixedClock(NOW_ISO), "server", {
+        load: () => kept,
+        save: () => undefined,
+      });
+      if (how === "seen" && pub !== "unknown") g.learnPublic(pub === "public");
+      expect(await got(g, use), `${use} / ${st} / ${pub} (${how})`).toBe(want(use, st, pub));
+      // a rejected cookie is never handed out, whatever the use
+      if (st === "rejected") expect(await got(g, use)).not.toBe("header");
+    }
+  });
+
+  it("the jobs (keylessOnPublic false): auto sends the stored cookie on a public league; feed and own are the server's", async () => {
+    for (const st of ["none", "not_configured", "validated", "rejected"] as const)
+      for (const pub of ["unknown", "public", "private"] as const)
+        for (const use of ["auto", "feed", "own"] as const) {
+          const g = new CookieGate(authority(st), fixedClock(NOW_ISO), "daily_job", null, {
+            keylessOnPublic: false,
+          });
+          if (pub !== "unknown") g.learnPublic(pub === "public");
+          const server = want(use, st, pub);
+          const expected = use === "auto" && st === "validated" ? "header" : server;
+          expect(await got(g, use), `${use} / ${st} / ${pub}`).toBe(expected);
+        }
+  });
+
+  it("own data refuses with zero asks of the network and never reads the publicity it does not need", async () => {
+    const a = new FakeAuthority("rejected", { ok: true, header });
+    let loads = 0;
+    const g = new CookieGate(a, fixedClock(NOW_ISO), "server", {
+      load: () => {
+        loads++;
+        return true;
+      },
+      save: () => undefined,
+    });
+    expect(await got(g, "own")).toBe("ESPN_AUTH_REJECTED");
+    expect(loads).toBe(0);
+    // the feed on the same gate reads the kept value once and goes keyless
+    expect(await got(g, "feed")).toBe("keyless");
+    expect(await got(g, "feed")).toBe("keyless");
+    expect(loads).toBe(1);
+  });
+
+  it("rejectedNow follows the authority's label, never a store read", () => {
+    const a = new FakeAuthority("validated", { ok: true, header });
+    const g = new CookieGate(a, fixedClock(NOW_ISO), "server");
+    expect(g.rejectedNow()).toBe(false);
+    a.current = "rejected";
+    expect(g.rejectedNow()).toBe(true);
+    expect(a.headerCalls).toBe(0);
+    expect(new CookieGate(null, fixedClock(NOW_ISO), "server").rejectedNow()).toBe(false);
   });
 });
 

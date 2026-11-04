@@ -5,8 +5,12 @@
 // a fixed cadence and self-select their working run from epoch-ms instants (the pro schedule's
 // kickoffs, `waiverNextExecutionDate` read at the previous run) — never a time baked into a plist.
 // A cookie-bearing 401 records the rejection (src/auth) and notifies ONCE (credential-check.ts).
+// One exception to the rejected gate (changelog §R10, R10-10): a job that reads only what ESPN
+// serves anyone on a public league — the transactions job — still runs on a league kept public,
+// every read keyless (the provider's cookie gate never sends the rejected cookie).
 import type { Config } from "../config/schema.js";
 import type { ProGame, ProSchedule } from "../providers/platform.js";
+import { cachedPublicity } from "../providers/espn/cache.js";
 import { SEASON_WINDOW_DAYS } from "../sources/runner.js";
 import type { RequestOrigin, Store, StoreFactory } from "../store/types.js";
 import { notifyRejectionOnce } from "./credential-check.js";
@@ -46,10 +50,29 @@ export interface JobOptions {
    * finding cli-snapshot-manual-charged-job-cap). `eff transactions --backfill` passes `server`.
    */
   readonly origin?: RequestOrigin;
+  /**
+   * The job reads only what ESPN serves anyone on a public league (the transactions job: the
+   * league's settings and its transaction feed — changelog §R10, R10-10). Under a rejected session
+   * it still runs when the league is kept public (the provider's publicity row, read with no
+   * request), every read keyless — the provider's cookie gate never sends the rejected cookie and
+   * never loads its secret; on a league not known to be public it exits 0 with no request, as every
+   * other job does.
+   */
+  readonly keylessOnPublicWhenRejected?: boolean;
+}
+
+/** Whether the league's kept publicity (another process learned it) says public; no request. */
+function keptPublic(store: Store, config: Config, io: CliIo): boolean {
+  try {
+    return cachedPublicity(store.repos.espnCache, config.leagueId, io.clock).load() === true;
+  } catch {
+    return false; // an unreadable row proves nothing: the gate stays closed
+  }
 }
 
 /**
- * Opens a job run: store, credential gate (rejected → exit 0, no request), job lock, provider.
+ * Opens a job run: store, credential gate (rejected → exit 0, no request — but see
+ * `keylessOnPublicWhenRejected`), job lock, provider.
  * Returns an exit code instead when the job must not run.
  */
 export async function startJob(
@@ -84,7 +107,13 @@ export async function startJob(
     } catch {
       row = null;
     }
-    if (row?.league_id === config.leagueId && row.state === "rejected") {
+    const rejected = row?.league_id === config.leagueId && row.state === "rejected";
+    if (rejected && opts.keylessOnPublicWhenRejected === true && keptPublic(store, config, io)) {
+      await writeLine(
+        io.stdout,
+        `${job}: the stored cookies are rejected; this league is public, so it is read keyless (no cookie sent)`,
+      );
+    } else if (rejected) {
       store.close();
       jobIdle(io, config, job);
       await writeLine(

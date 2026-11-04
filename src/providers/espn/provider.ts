@@ -863,6 +863,15 @@ export class EspnProvider implements FantasyPlatform {
     return r;
   }
 
+  /**
+   * The league's publicity as this provider knows it — what it saw ESPN answer, else the value
+   * another process kept (auth-gate.ts `known()`, the one rule every keyless read follows) — or
+   * null when unknown. Never a request.
+   */
+  knownPublic(): boolean | null {
+    return this.req.cookies.isPublic();
+  }
+
   /** The ref check, then (rejected, publicity unknown) the one anonymous settings read. */
   private async prepare(ref: LeagueRef, opts?: ReadOptions): Promise<void> {
     this.checkRef(ref);
@@ -1319,16 +1328,28 @@ export class EspnProvider implements FantasyPlatform {
   ): Promise<Stamped<TransactionPage>> {
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
+    // the league's feed: ESPN serves it to anyone on a public league, so with no accepted cookie at
+    // hand (nothing stored, or a rejected session) it is read keyless there (changelog §R10, R10-10;
+    // auth-gate.ts `feed`)
     const r = await this.read(
       {
         target: this.league(ref, ["mTransactions2"], q.week),
         filter: transactionsFilter(q.types),
         leagueId: ref.league_id,
-        cookies: "required",
+        cookies: "feed",
         parse: parseTxns,
       },
       opts,
-    );
+    ).catch((e: unknown) => {
+      // a league kept public that refuses the keyless read now (it went private): under a rejected
+      // session the session is still the problem, as the anonymous settings read's refusal is
+      if (
+        (e as { effCode?: unknown } | null)?.effCode === "ESPN_REQUIRES_COOKIES" &&
+        this.req.cookies.rejectedNow()
+      )
+        throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
+      throw e;
+    });
     const counts = newCounts();
     const since = q.since === null ? null : Date.parse(q.since);
     const all = r.value.transactions
@@ -1375,6 +1396,12 @@ export class EspnProvider implements FantasyPlatform {
     ref: LeagueRef,
     opts?: ReadOptions,
   ): Promise<Stamped<readonly Transaction[]>> {
+    this.checkRef(ref);
+    // the caller's own claims are never read keyless, public or not (changelog §R10, R10-10): with
+    // nothing stored ESPN_REQUIRES_COOKIES, under a rejected session ESPN_AUTH_REJECTED — asked
+    // before any read of this call, so the refusal costs zero requests (the identity read and the
+    // publicity read included) and a pending list cached earlier is not served without the session
+    await this.req.cookies.forRequest("own", "league");
     await this.prepare(ref, opts);
     const id = await this.identity(ref, opts);
     const r = await this.read(
@@ -1382,7 +1409,7 @@ export class EspnProvider implements FantasyPlatform {
         target: this.league(ref, ["mPendingTransactions"]),
         filter: null,
         leagueId: ref.league_id,
-        cookies: "required",
+        cookies: "own",
         parse: parsePending,
       },
       opts,

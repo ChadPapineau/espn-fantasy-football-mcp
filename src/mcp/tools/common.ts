@@ -1082,6 +1082,31 @@ export function isDegradable(e: unknown): boolean {
   );
 }
 
+/**
+ * The fixed warnings of a read the ESPN session cannot make (changelog §R10, R10-10 and R10-11): the
+ * reason and `eff setup`, never upstream text. Pending claims are the user's own and are never read
+ * without the session, public league or not; the league's transaction feed is read keyless on a
+ * league known public, so its refusals name a league not known to be public.
+ */
+export const SESSION_READ_WARNINGS = Object.freeze({
+  pending_no_session:
+    "pending: null — pending claims are read only with your ESPN session, and none is stored: run `eff setup` in a terminal to add one",
+  pending_rejected:
+    "pending: null — pending claims are read only with your ESPN session, and the stored session was rejected: run `eff setup` in a terminal to replace it",
+  feed_no_session:
+    "partial: ESPN's transaction feed needs an ESPN session on a league not known to be public, and none is stored: the server's persisted history only; run `eff setup` in a terminal to add one",
+  feed_rejected:
+    "partial: the stored ESPN session was rejected, and ESPN's transaction feed needs one on a league not known to be public: the server's persisted history only; run `eff setup` in a terminal to replace it",
+} as const);
+
+/** The session refusal an error carries (ESPN_REQUIRES_COOKIES / ESPN_AUTH_REJECTED), else null. */
+export function sessionRefusalOf(e: unknown): "no_session" | "rejected" | null {
+  const code = (e as { effCode?: unknown } | null)?.effCode;
+  if (code === "ESPN_REQUIRES_COOKIES") return "no_session";
+  if (code === "ESPN_AUTH_REJECTED") return "rejected";
+  return null;
+}
+
 /** A fixed degradation warning naming the view (never upstream text). */
 export function degradedViewWarning(view: string, what: string): string {
   return `espn:${view} unavailable: ${what}`;

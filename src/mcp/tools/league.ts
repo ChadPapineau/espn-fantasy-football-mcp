@@ -80,6 +80,8 @@ import {
   rulesOf,
   scheduleOf,
   seasonTransactions,
+  sessionRefusalOf,
+  SESSION_READ_WARNINGS,
   settingsOf,
   take,
   teamOf,
@@ -1380,6 +1382,17 @@ export const listTransactions = defineTool({
         () => ctx.services.platform.listPendingTransactions(leagueRef(ctx), readOpts(ctx, args)),
         warnings,
       ).catch((e: unknown) => {
+        // the user's own claims need the session, public league or not (changelog §R10, R10-10):
+        // `pending: null` with the reason and `eff setup`; the feed part above is unaffected
+        const refusal = sessionRefusalOf(e);
+        if (refusal !== null) {
+          warnings.push(
+            refusal === "rejected"
+              ? SESSION_READ_WARNINGS.pending_rejected
+              : SESSION_READ_WARNINGS.pending_no_session,
+          );
+          return null;
+        }
         if (!isDegradable(e)) throw e;
         warnings.push("espn:mPendingTransactions unavailable");
         return null;

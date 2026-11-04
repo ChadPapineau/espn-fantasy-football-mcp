@@ -193,9 +193,11 @@ describe("keyless 401 and cookie-required views (plan 01 §4.3 ESPN_REQUIRES_COO
     await expect(w.provider.listPendingTransactions(w.ref)).rejects.toMatchObject({
       effCode: "ESPN_REQUIRES_COOKIES",
     });
-    expect(fetch.calls).toEqual(["mSettings&mNav", "mSettings&mNav"]);
+    // the user's own pending claims are refused before any read of the call — the identity read
+    // included (changelog §R10, R10-10: zero requests)
+    expect(fetch.calls).toEqual(["mSettings&mNav"]);
   });
-  it("transactions on a public league with no credential are tried keyless; on an unknown league refused", async () => {
+  it("transactions on a public league with no credential are read keyless; pending claims never; on an unknown league refused", async () => {
     const txn = (
       loadFixture("recorded/league-b/kona_playercard.json") as {
         players: { transactions?: unknown[] }[];
@@ -259,8 +261,14 @@ describe("keyless 401 and cookie-required views (plan 01 §4.3 ESPN_REQUIRES_COO
     });
     expect(filtered.value.total).toBeNull();
     expect(filtered.value.items.every((t) => t.team_id === 4)).toBe(true);
-    const pending = await w.provider.listPendingTransactions(w.ref);
-    expect(pending.value).toHaveLength(1);
+    // pending claims are the user's own: never read keyless, public league or not (changelog §R10,
+    // R10-10) — refused with no request, though ESPN would answer this one
+    const before = fetch.calls.length;
+    await expect(w.provider.listPendingTransactions(w.ref)).rejects.toMatchObject({
+      effCode: "ESPN_REQUIRES_COOKIES",
+    });
+    expect(fetch.calls.length).toBe(before);
+    expect(fetch.calls).not.toContain("mPendingTransactions");
     expect(fetch.calls.every((c) => c !== "")).toBe(true);
   });
 });

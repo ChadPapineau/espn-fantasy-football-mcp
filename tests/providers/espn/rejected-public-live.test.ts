@@ -5,12 +5,14 @@
 // Plan 02 §2.1 "Short-circuit": in Rejected, getCookieHeader answers the typed failure with no
 // request; "tools that work anonymously on a public league continue without cookies if the league
 // is public — the server tries anonymously once to learn settings.isPublic and remembers it".
-// Research 03 §B: the cookie-only views (mTransactions2, mPendingTransactions) are empty
-// anonymously, so they stay behind the short-circuit (ESPN_AUTH_REJECTED, zero requests). What is
-// held here: every `auto` read goes keyless after one anonymous settings read; the rejected cookie
-// is never sent — its secret is never even loaded; a private league still answers
-// ESPN_AUTH_REJECTED after its one anonymous 401; a new `eff setup` lifts it with the NEW value. No
-// network; the cookies are run-time fakes (tests/auth/helpers.ts).
+// Changelog §R10, R10-10 superseded research 03 §B's "empty anonymously" for the league feed: ESPN
+// serves mTransactions2 in full to anyone on a public league, so it is read keyless there under a
+// rejected session (and with nothing stored), while pending claims (mPendingTransactions, the
+// caller's own) are never read keyless — ESPN_AUTH_REJECTED / ESPN_REQUIRES_COOKIES with zero
+// requests, public or private. What is held here: every `auto` read and the feed go keyless after
+// one anonymous settings read; the rejected cookie is never sent — its secret is never even loaded;
+// a private league still answers ESPN_AUTH_REJECTED after its one anonymous 401; a new `eff setup`
+// lifts it with the NEW value. No network; the cookies are run-time fakes (tests/auth/helpers.ts).
 import { describe, expect, it } from "vitest";
 import { createCredentialAuthority } from "../../../src/auth/state.js";
 import { withProbeAccess } from "../../../src/services/index.js";
@@ -21,7 +23,17 @@ import {
   fakeCookies,
   stateRow,
 } from "../../auth/helpers.js";
-import { NOW_ISO, jsonResponse, loadFixture, makeWorld } from "./helpers.js";
+import { createFixtureFetch, type FetchLike } from "../../../src/providers/espn/index.js";
+import { FIXTURES, NOW_ISO, jsonResponse, loadFixture, makeWorld } from "./helpers.js";
+
+/** league-a's recordings, plus the feed the recording lacks (fx-10h's week, as ESPN serves it). */
+function withFeed(): FetchLike {
+  const recorded = createFixtureFetch({ dir: FIXTURES, league: "league-a" });
+  return (url, init) =>
+    new URL(url).searchParams.getAll("view").join("&") === "mTransactions2"
+      ? Promise.resolve(jsonResponse(loadFixture("fx-10h/league/mTransactions2.json")))
+      : recorded(url, init);
+}
 
 const SETUP_AT = "2026-10-01T11:00:00.000Z";
 const REJECTED_AT = "2026-10-05T09:00:00.000Z";
@@ -65,10 +77,10 @@ const sends = (sent: { url: string; headers: Record<string, string> }[]) =>
   }));
 
 describe("R10-7: credential state rejected on a public league (the live code path)", () => {
-  it("every auto read goes keyless after ONE anonymous settings read; the cookie-only views short-circuit", async () => {
+  it("every auto read and the feed go keyless after ONE anonymous settings read; pending claims short-circuit", async () => {
     const { store, auth, cookies } = rejectedInstall("r10-7-public");
     // league-a's recorded settings say isPublic: true
-    const w = makeWorld({ credentials: auth });
+    const w = makeWorld({ credentials: auth, fetch: withFeed() });
     expect(auth.state()).toBe("rejected");
 
     const league = await w.provider.getLeague(w.ref);
@@ -86,24 +98,31 @@ describe("R10-7: credential state rejected on a public league (the live code pat
     const before = w.sent.length;
     expect(before).toBeGreaterThan(1);
 
-    // the cookie-only views (empty anonymously, research 03 §B): ESPN_AUTH_REJECTED, no request
+    // pending claims are the caller's own (changelog §R10, R10-10): never keyless — no request
     await expect(w.provider.listPendingTransactions(w.ref)).rejects.toMatchObject({
       effCode: "ESPN_AUTH_REJECTED",
       effDetails: { reason: "short_circuit" },
     });
-    await expect(
-      w.provider.listTransactions(w.ref, {
-        types: ["WAIVER", "FREEAGENT"],
-        week: 4,
-        since: null,
-        count: 10,
-        team_id: null,
-      }),
-    ).rejects.toMatchObject({
-      effCode: "ESPN_AUTH_REJECTED",
-      effDetails: { reason: "short_circuit" },
-    });
     expect(w.sent.length).toBe(before);
+    // the league's feed is served to anyone on a public league: read keyless, answered
+    const feed = await w.provider.listTransactions(w.ref, {
+      types: ["WAIVER", "FREEAGENT"],
+      week: 3,
+      since: null,
+      count: 10,
+      team_id: null,
+    });
+    expect(feed.stamp.source).toBe("espn:mTransactions2");
+    const feedSends = sends(w.sent.slice(before));
+    expect(feedSends.filter((s) => s.views === "mTransactions2")).toEqual([
+      { views: "mTransactions2", cookie: false },
+    ]);
+    // pending still refused after the feed was read, with no request
+    const afterFeed = w.sent.length;
+    await expect(w.provider.listPendingTransactions(w.ref)).rejects.toMatchObject({
+      effCode: "ESPN_AUTH_REJECTED",
+    });
+    expect(w.sent.length).toBe(afterFeed);
 
     // the rejected cookie was never sent, and its secret was never loaded (meta reads only)
     expect(sends(w.sent).every((s) => !s.cookie)).toBe(true);
@@ -157,6 +176,15 @@ describe("R10-7: credential state rejected on a public league (the live code pat
       () => w.provider.getRosters(w.ref, 4),
       () => w.provider.getStandings(w.ref),
       () => w.provider.listPendingTransactions(w.ref),
+      // a private league's feed needs the session: refused as before (R10-10), no request
+      () =>
+        w.provider.listTransactions(w.ref, {
+          types: ["WAIVER"],
+          week: 3,
+          since: null,
+          count: 10,
+          team_id: null,
+        }),
     ])
       await expect(read()).rejects.toMatchObject({ effCode: "ESPN_AUTH_REJECTED" });
     expect(sentCookies).toEqual([false]);
