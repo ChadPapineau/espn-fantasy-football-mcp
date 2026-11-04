@@ -14,7 +14,11 @@ import type { Clock } from "../../domain/clock.js";
 import type { DriftObservations } from "../../drift/types.js";
 import type { RequestOrigin, StoreRepositories } from "../../store/types.js";
 import { createFixtureFetch } from "./fixture.js";
-import { createDerivedLeagueFetch, readDerivedManifest } from "./fixture-league.js";
+import {
+  createDerivedLeagueFetch,
+  derivedLeaguePublicity,
+  readDerivedManifest,
+} from "./fixture-league.js";
 import type { Sleep } from "./limiter.js";
 import { EspnProvider, type ProScheduleDataset } from "./provider.js";
 import { EspnProviderError, type ProviderLog } from "./request.js";
@@ -28,6 +32,7 @@ export {
   applyJsonPatch,
   createDerivedLeagueFetch,
   derivedLeagueClock,
+  derivedLeaguePublicity,
   DERIVED_LEAGUE_KIND,
   poolQuery,
   readDerivedManifest,
@@ -105,9 +110,11 @@ export interface CreateEspnProviderOptions {
   readonly sleep?: Sleep;
   /**
    * FIXTURE MODE ONLY (changelog §R10, R10-21): the scripted credential state's value-free label,
-   * read for the caller's own pending claims (`own`) alone — src/services/index.ts passes the
-   * variant's `harness.credential_state` (fixture-credential.ts). Ignored outside fixture mode: it
-   * is forwarded only in the fixture branch below, after the guard.
+   * read for the caller's own pending claims (`own`) — and, on the variant whose recorded league is
+   * private, for every league read (R10-27; the fixture branch below reads the recorded
+   * `settings.isPublic` with derivedLeaguePublicity) — src/services/index.ts passes the variant's
+   * `harness.credential_state` (fixture-credential.ts). Ignored outside fixture mode: it and the
+   * private flag are forwarded only in the fixture branch below, after the guard.
    */
   readonly fixtureCredentialLabel?: () => CredentialState;
 }
@@ -118,6 +125,7 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
   let credentials = o.credentials;
   let tlsVerificationDisabled: (() => boolean) | undefined;
   let fixtureCredentialLabel: (() => CredentialState) | undefined;
+  let fixturePrivateLeague = false;
   if (o.config.fixtureDir !== null) {
     if (credentials !== null && credentials.state() !== "not_configured")
       throw new EspnProviderError("INTERNAL", "fixture_mode_with_credentials");
@@ -130,6 +138,8 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     tlsVerificationDisabled = () => false;
     // the scripted session's label, past the guard above (R10-21)
     fixtureCredentialLabel = o.fixtureCredentialLabel;
+    // the private-league variant (R10-27): its recorded settings say so, read before any request
+    fixturePrivateLeague = loc.kind === "derived" && derivedLeaguePublicity(loc.dir) === false;
   }
   return new EspnProvider({
     config: o.config,
@@ -157,5 +167,6 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
     ...(tlsVerificationDisabled === undefined ? {} : { tlsVerificationDisabled }),
     ...(fixtureCredentialLabel === undefined ? {} : { fixtureCredentialLabel }),
+    ...(fixturePrivateLeague ? { fixturePrivateLeague: true } : {}),
   });
 }

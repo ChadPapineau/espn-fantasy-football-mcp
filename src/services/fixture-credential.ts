@@ -13,7 +13,10 @@
 // (changelog §R10, R10-21, amending R9-3; auth-gate.ts fixtureOwnLabel) — `rejected` answers
 // ESPN_AUTH_REJECTED and `stored`/`validated` serve the variant's recorded mPendingTransactions, as
 // a session read would, with zero network either way and still no Cookie header; the label moves
-// with espn_check_auth's verdict. Fixture mode's guard runs first and is unchanged: with a real
+// with espn_check_auth's verdict. On the one variant whose recorded league is private
+// (`private-league`, changelog §R10, R10-27) the label governs every `auto` and feed read too
+// (auth-gate.ts fixturePrivateLeague, set by createEspnProvider from the recorded settings): a
+// variant scripting nothing reads as `not_configured` there. Fixture mode's guard runs first and is unchanged: with a real
 // credential stored, fixture mode does not start at all (src/services/index.ts fixtureModeIssues).
 // A variant that scripts nothing (or `not_configured`) keeps the old path exactly. New here.
 import path from "node:path";

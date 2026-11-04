@@ -169,7 +169,9 @@ export interface RequestDeps {
   /** Where the league's publicity outlives this process (auth-gate.ts PublicityStore). */
   readonly publicity?: PublicityStore;
   /** Fixture mode's scripted credential label for `own` reads (auth-gate.ts; R10-21). */
-  readonly fixtureOwnLabel?: () => CredentialState;
+  readonly fixtureLabel?: () => CredentialState;
+  /** Fixture mode's private-league variant: the label governs every league read (R10-27). */
+  readonly fixturePrivateLeague?: boolean;
   /**
    * Whether certificate verification is off process-wide, asked before every request (default:
    * transport.ts `tlsVerificationDisabled`, Node's own rule, read at each request). Only fixture
@@ -366,7 +368,8 @@ export class EspnRequester {
       deps.publicity ?? null,
       {
         keylessOnPublic: deps.origin !== "job",
-        ...(deps.fixtureOwnLabel === undefined ? {} : { fixtureOwnLabel: deps.fixtureOwnLabel }),
+        ...(deps.fixtureLabel === undefined ? {} : { fixtureLabel: deps.fixtureLabel }),
+        ...(deps.fixturePrivateLeague === true ? { fixturePrivateLeague: true } : {}),
       },
     );
     this.retryAfter = cachedRetryAfter(deps.cache, deps.host, deps.clock);

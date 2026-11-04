@@ -342,6 +342,25 @@ export const VARIANTS: readonly Variant[] = [
     },
   },
   {
+    name: "private-league",
+    describes:
+      "a PRIVATE league (settings.isPublic false) whose stored session ESPN rejected: the one variant whose recorded league is private (changelog §R10, R10-27), so the scripted label governs every league read, as a session would — rejected gives the ESPN_AUTH_REJECTED short-circuit with zero requests (orient's private-league rejection hand-off, changelog §R10, R10-7), stored or validated serves the recording, not_configured gives ESPN_REQUIRES_COOKIES; a fresh cache entry is still served first. Its one espn_check_auth accepts (the user re-ran setup: the label moves to validated in memory), which is also how a seed fills the cache before a run starts again on the rejected label (E11's session-refusal partial lines over fresh settings)",
+    mutate: (m) => {
+      // the recorded league is private: mSettings, mNav and mMatchup carry isPublic false
+      m.isPublic = false;
+      // the stored session is rejected; the one espn_check_auth after the user re-ran setup accepts
+      // the new one (a private league's settings read discriminates: the probe is "settings")
+      m.harness = {
+        ...m.harness,
+        credential_state: "rejected",
+        probe: { accepted: true, reason: null, probe: "settings" },
+      };
+      m.notes.push(
+        "the league is private: every league read follows the scripted credential label (R10-27)",
+      );
+    },
+  },
+  {
     name: "drift-mRoster",
     describes:
       "mRoster drifted: Team 01's roster.entries is gone in every week (a required key, plan 05 §3.3) — espn_get_roster answers ESPN_DRIFT_DETECTED naming teams[].roster.entries; standings still work",

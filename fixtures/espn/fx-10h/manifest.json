@@ -16,7 +16,7 @@
   "notes": [],
   "golden_gate_lines": 2788,
   "derivations": { "projected 5": 268, "actual 4": 171, "projected 4": 171 },
-  "variants": ["writes-on", "auth-rejected", "public-league", "drift-mRoster", "points-only-seeding", "seeding-unknown", "faab", "k10", "post-run", "ir-open", "ir-invalid", "hidden-bench", "sunday-live", "all-locked", "underdog-9", "questionable-late", "owner-mismatch", "mismatch-53", "espn-proj-disagree", "outlook-more-work", "inj-outlook-system", "inj-teamname-json", "inj-ir-cleared", "inj-tradeblock", "inj-league-name", "inj-division-name"],
+  "variants": ["writes-on", "auth-rejected", "public-league", "private-league", "drift-mRoster", "points-only-seeding", "seeding-unknown", "faab", "k10", "post-run", "ir-open", "ir-invalid", "hidden-bench", "sunday-live", "all-locked", "underdog-9", "questionable-late", "owner-mismatch", "mismatch-53", "espn-proj-disagree", "outlook-more-work", "inj-outlook-system", "inj-teamname-json", "inj-ir-cleared", "inj-tradeblock", "inj-league-name", "inj-division-name"],
   "views": [
     { "route": "league", "season": 2026, "views": ["mSettings"], "scoringPeriodId": null, "path": "fx-10h/league/mSettings.json", "derived": true },
     { "route": "league", "season": 2026, "views": ["mNav"], "scoringPeriodId": null, "path": "fx-10h/league/mNav.json", "derived": true },

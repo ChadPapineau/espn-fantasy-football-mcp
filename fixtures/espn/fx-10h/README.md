@@ -20,7 +20,7 @@ refuses to run unless the recorded golden is green.
 | schedule | 14 regular-season matchup periods, 6 playoff teams (weeks 15–17), seeded `TOTAL_POINTS_SCORED` (record first, points the tiebreak — D1); trade deadline 2026-12-02 |
 | teams | `Team 01` … `Team 10`, members `Member 01` … `Member 11` in the fake GUID range, league id `0`; the user is **Team 02** (waiver rank 2) |
 | clock | **Tuesday of week 5, 21:00 ET** (`2026-10-07T01:00:00Z`): weeks 1–4 final, week 5 pre-kickoff, before the waiver run |
-| public | yes — fixture mode never holds a cookie, so every view is answered keylessly, the league's transaction feed included (ESPN serves it to anyone on a public league); the user's own pending claims are never read keyless (changelog §R10, R10-10); fixture mode answers them by the variant's scripted credential state (changelog §R10, R10-21): `not_configured` (the base and every variant that scripts nothing) gives `pending: null` with the no-session warning, `rejected` (auth-rejected) gives `pending: null` with the rejected-session warning, and `stored` or `validated` (public-league, or after an accepting espn_check_auth) serves the recorded `mPendingTransactions` (`pending: []`) |
+| public | yes on every variant but `private-league` — fixture mode never holds a cookie, so every view is answered keylessly, the league's transaction feed included (ESPN serves it to anyone on a public league); the user's own pending claims are never read keyless (changelog §R10, R10-10); fixture mode answers them by the variant's scripted credential state (changelog §R10, R10-21): `not_configured` (the base and every variant that scripts nothing) gives `pending: null` with the no-session warning, `rejected` (auth-rejected) gives `pending: null` with the rejected-session warning, and `stored` or `validated` (public-league, or after an accepting espn_check_auth) serves the recorded `mPendingTransactions` (`pending: []`). `private-league` is the one private league (`isPublic: false`; changelog §R10, R10-27): there the scripted state governs every league read, as a session would — `stored` or `validated` serves the recording, `not_configured` gives `ESPN_REQUIRES_COOKIES`, `rejected` the `ESPN_AUTH_REJECTED` short-circuit, each with zero requests and none of the call's budget, a fresh cache entry served first |
 
 ## How it is derived
 
@@ -59,7 +59,20 @@ exactly what it changes. `EFF_FIXTURE_DIR=<abs>/fixtures/espn/fx-10h/<variant>`.
 (the write gates, a credential): their bodies are the base's and their `harness` block names the
 state (`auth-rejected`: a stored session ESPN rejected, on the base's public league, where the transaction feed still answers keylessly and pending claims answer `pending: null` with the rejected-session warning, as espn_get_status reports — changelog §R10, R10-10, R10-21). Fixture mode reports a scripted `credential_state` (`rejected`, `stored`) as a label, and its
 one `espn_check_auth` answers the scripted `probe` result — never a value, no request
-(`src/services/fixture-credential.ts`; changelog §R9, R9-3). `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
+(`src/services/fixture-credential.ts`; changelog §R9, R9-3). `private-league` (changelog §R10,
+R10-27) is the base with `isPublic: false` in every body that carries it (`mSettings`, `mNav`,
+`mBoxscore`) and a scripted `rejected` session whose one `espn_check_auth` accepts (`settings`
+probe: the user re-ran setup), so the label moves to `validated` in memory. Fixture mode reads the
+recorded `isPublic` before any request (`derivedLeaguePublicity`): on this variant alone the label
+also governs the `auto` and `feed` reads — under `rejected` the first league read (`espn_get_league`
+included) is the `ESPN_AUTH_REJECTED` short-circuit with no request, so `league.is_public` stays null
+until a body is read (orient's private-league hand-off, changelog §R10, R10-7). A cache entry still
+fresh is served before the label is asked, as the real pipeline serves it: a seed that runs
+`espn_check_auth` (now `validated`) and then `espn_get_league` leaves the settings fresh in the
+state, and a run started again on it reads them while the transaction feed, the standings, the
+rosters and the pool are refused — `espn_analyze_league_activity`'s session-refusal partial lines
+(changelog §R10, R10-11, R10-18). A seed must not read the feed (`mTransactions2` is cached: a fresh
+copy is served too). `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
 (Team 01's `roster.entries` gone), `points-only-seeding` (last season's seeds follow points for; Team 03 keeps its 3–1 record on weaker week 1–4 lineups, seventh in points for, 2.34 behind the last playoff place — a contender under the record-first reading, on the bubble under the points-only one: changelog §R10, R10-14), `seeding-unknown`, `faab`, `k10`,
 `post-run` (Wednesday 06:00 ET, pool `FREEAGENT`), `ir-open`, `ir-invalid`, `hidden-bench`,
 `sunday-live` (Sunday 14:05 ET: the 09:30 ET London game final — a game is final four hours after

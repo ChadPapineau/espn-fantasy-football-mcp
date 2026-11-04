@@ -102,6 +102,49 @@ export function derivedLeagueClock(dir: string): number | null {
   return Number.isFinite(t) && /^\d{4}-\d{2}-\d{2}T/.test(clock) ? t : null;
 }
 
+/**
+ * The recorded league's publicity of a derived fixture directory — `settings.isPublic` of its
+ * current season's `mSettings` body, its variant's patch applied — or null when the directory is
+ * not a derived league, has no such view, or its body cannot be read (read synchronously, once, at
+ * provider construction; the same files and path rules as the fetch). Fixture mode's private-league
+ * variant is told by it (changelog §R10, R10-27): on it, the scripted credential label governs
+ * `auto` and `feed` reads before any request, so the gate must know the league is private before
+ * its first read — the fixture fetch serves anyone, as no Cookie header exists to tell them apart.
+ */
+export function derivedLeaguePublicity(dir: string): boolean | null {
+  if (!path.isAbsolute(dir)) return null;
+  const manifest = readDerivedManifest(dir);
+  if (manifest === null) return null;
+  const v = manifest.views.find(
+    (x) =>
+      x.route === "league" &&
+      x.season === manifest.season &&
+      x.scoringPeriodId === null &&
+      x.views.length === 1 &&
+      x.views[0] === "mSettings",
+  );
+  if (v === undefined) return null;
+  const root = path.resolve(dir, manifest.root);
+  const read = (rel: string): unknown => {
+    if (rel === "" || path.isAbsolute(rel) || rel.split(/[\\/]/).includes(".."))
+      throw new RangeError("manifest path refused");
+    const abs = path.resolve(root, rel);
+    if (!abs.startsWith(root + path.sep)) throw new RangeError("manifest path refused");
+    const text = readFileSync(abs, "utf8");
+    if (text.length > DERIVED_FILE_MAX_BYTES) throw new RangeError("fixture file too large");
+    return JSON.parse(text) as unknown;
+  };
+  try {
+    const base = read(v.path);
+    const body = v.patch === undefined ? base : applyJsonPatch(base, read(v.patch));
+    const settings = isObject(body) ? body.settings : undefined;
+    const p = isObject(settings) ? settings.isPublic : undefined;
+    return typeof p === "boolean" ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 // --- JSON patch (RFC 6902 subset) ---------------------------------------------------------------------
 
 const FORBIDDEN_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);

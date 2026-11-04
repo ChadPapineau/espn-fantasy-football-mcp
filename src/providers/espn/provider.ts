@@ -346,6 +346,13 @@ export interface EspnProviderDeps {
    * passes it only in its fixture branch, and it is dropped here whenever an authority exists.
    */
   readonly fixtureCredentialLabel?: () => CredentialState;
+  /**
+   * FIXTURE MODE ONLY (changelog §R10, R10-27): the variant's recorded league is private, so the
+   * scripted label governs every league read (auth-gate.ts CookieGateOptions.fixturePrivateLeague).
+   * createEspnProvider sets it only in its fixture branch, from the recorded settings body; dropped
+   * here whenever an authority exists.
+   */
+  readonly fixturePrivateLeague?: boolean;
 }
 
 interface SettingsRead {
@@ -521,7 +528,11 @@ export class EspnProvider implements FantasyPlatform {
       // fixture mode's scripted label (R10-21): never beside a credential authority
       ...(deps.fixtureCredentialLabel === undefined || deps.credentials !== null
         ? {}
-        : { fixtureOwnLabel: deps.fixtureCredentialLabel }),
+        : { fixtureLabel: deps.fixtureCredentialLabel }),
+      // the private variant (R10-27): never beside a credential authority either
+      ...(deps.fixturePrivateLeague === true && deps.credentials === null
+        ? { fixturePrivateLeague: true }
+        : {}),
     });
   }
 
