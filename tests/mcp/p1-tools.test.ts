@@ -11,7 +11,7 @@ import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MANDATORY_SENTENCES, bareFieldsFromSchema } from "../../src/mcp/envelope.js";
-import { SESSION_READ_WARNINGS } from "../../src/mcp/tools/common.js";
+import { SESSION_READ_WARNINGS, activityLeagueReadsWarning } from "../../src/mcp/tools/common.js";
 import { recommendationListSchema } from "../../src/mcp/tools/reclog.js";
 import type {
   DatasetReaders,
@@ -1214,6 +1214,67 @@ describe("E11 espn_analyze_league_activity", () => {
     }
     // a failure that is not a session refusal nor an outage still propagates
     const s = faulty(world.services, { listTransactions: coded("INTERNAL") });
+    const c = await connect(world, { options: { toolset: "full" }, services: s });
+    expect((await err("espn_analyze_league_activity", {}, c.client)).code).toBe("INTERNAL");
+    await c.close();
+  });
+
+  it("changelog §R10, R10-11 (R3B-CS-1): the session refusing the standings, rosters and pool too degrades the same way — never the call's error", async () => {
+    // on a private league every league read needs the session: the feed's degradation must be
+    // reachable when those reads refuse as well (before, the standings' or the rosters' refusal
+    // rethrew and the call failed ESPN_AUTH_REJECTED before the history answered)
+    const feed = (await ok("espn_list_transactions", { count: 50 })).data.transactions as never[];
+    world.store.repos.transactionsSeen.appendNew(feed, world.clock.nowIso());
+    const plainTotals = (
+      (await ok("espn_analyze_league_activity", { since_days: 30 })).data as {
+        transactions: Record<string, unknown>;
+      }
+    ).transactions;
+    for (const [code, feedWarning, reason] of [
+      ["ESPN_AUTH_REJECTED", SESSION_READ_WARNINGS.feed_rejected, "rejected"],
+      ["ESPN_REQUIRES_COOKIES", SESSION_READ_WARNINGS.feed_no_session, "no_session"],
+    ] as const) {
+      for (const which of [
+        ["getStandings"],
+        ["getRosters"],
+        ["listPlayers"],
+        ["getStandings", "getRosters", "listPlayers"],
+      ] as const) {
+        const faults = Object.fromEntries([
+          ["listTransactions", coded(code)],
+          ...which.map((m) => [m, coded(code)]),
+        ]) as Parameters<typeof faulty>[1];
+        const s = faulty(world.services, faults);
+        const c = await connect(world, { options: { toolset: "full" }, services: s });
+        const e = await ok("espn_analyze_league_activity", { since_days: 30 }, c.client);
+        const label = `${code} ${which.join("+")}`;
+        expect(e.partial, label).toBe(true);
+        expect(e.warnings, label).toContain(feedWarning);
+        const reads = which.map((m) =>
+          m === "getStandings" ? "standings" : m === "getRosters" ? "rosters" : "free-agent pool",
+        );
+        expect(e.warnings, label).toContain(activityLeagueReadsWarning(reason, reads));
+        for (const w of e.warnings) expect(w, label).not.toMatch(/short_circuit|no_credential/);
+        // the window's totals come from the persisted history, as with the feed alone refused; with
+        // no read naming the league's teams the by-team rows are omitted, said
+        const totals = (e.data as { transactions: Record<string, unknown> }).transactions;
+        if (which.length === 3) {
+          const { by_team: _mine, ...rest } = totals;
+          const { by_team: _plain, ...plainRest } = plainTotals;
+          expect(rest, label).toEqual(plainRest);
+          expect(totals.by_team ?? [], label).toEqual([]);
+          expect(e.warnings, label).toContain(
+            "partial: the league's teams were not read (standings and rosters unavailable): by-team activity, waiver-order movement and rival needs are omitted",
+          );
+        } else expect(totals, label).toEqual(plainTotals);
+        await c.close();
+      }
+    }
+    // the warning names the stronger reason once, whatever mix refused
+    expect(activityLeagueReadsWarning("rejected", ["standings"])).toContain("eff setup");
+    expect(activityLeagueReadsWarning("no_session", ["rosters"]).startsWith("partial:")).toBe(true);
+    // an INTERNAL from the standings still propagates (only a session refusal or an outage degrades)
+    const s = faulty(world.services, { getStandings: coded("INTERNAL") });
     const c = await connect(world, { options: { toolset: "full" }, services: s });
     expect((await err("espn_analyze_league_activity", {}, c.client)).code).toBe("INTERNAL");
     await c.close();

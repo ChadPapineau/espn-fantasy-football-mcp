@@ -110,6 +110,8 @@ import {
   seasonTransactions,
   sessionRefusalOf,
   SESSION_READ_WARNINGS,
+  activityLeagueReadsWarning,
+  type ActivityLeagueRead,
   take,
   teamOf,
   turn,
@@ -2071,13 +2073,30 @@ export const analyzeLeagueActivityTool = defineTool({
     // answered NOT_FOUND — an empty current week that answered drift used to stop the feeds first
     // (verifier finding F2 on ec68d08); a feed week past the budget comes from the persisted
     // history, said (`partial:`)
-    const standings = await standingsOrNull(ctx, inputs, warnings);
+    //
+    // On a league not known to be public the standings, rosters and pool need the session as the
+    // feed does: a refusal of any of them (ESPN_AUTH_REJECTED, ESPN_REQUIRES_COOKIES) degrades the
+    // digest like the feed's (changelog §R10, R10-11) — the persisted history's totals, partial, one
+    // fixed line naming the reason and `eff setup`. Before, the feed's degradation was reached only
+    // while those reads were still cached: a stale one rethrew the refusal and the call failed
+    // (the round-3 review's R3B-CS-1). E11 alone: the shared helpers keep their callers' rules
+    const refused = new Map<ActivityLeagueRead, "no_session" | "rejected">();
+    const orRefused =
+      (what: ActivityLeagueRead) =>
+      (e: unknown): null => {
+        const refusal = sessionRefusalOf(e);
+        if (refusal === null) throw e;
+        refused.set(what, refusal);
+        return null;
+      };
+    const standings = await standingsOrNull(ctx, inputs, warnings).catch(orRefused("standings"));
     const txns = await transactionsOf(ctx, b.w, args.since_days, since, inputs, warnings);
     const myTeam = b.league.my_team?.team_id ?? null;
     const rosters = await withinBudget(
       () => rostersOf(ctx, b.w, inputs, warnings, args, myTeam),
       warnings,
     ).catch((e: unknown) => {
+      if (sessionRefusalOf(e) !== null) return orRefused("rosters")(e);
       if (!isDegradable(e)) throw e;
       return null;
     });
@@ -2090,7 +2109,14 @@ export const analyzeLeagueActivityTool = defineTool({
       warnings,
       args.allow_stale === true,
     );
-    const pool = args.include_rival_needs ? await poolOf(ctx, b.w, inputs, warnings, 25) : [];
+    const pool = args.include_rival_needs
+      ? ((await poolOf(ctx, b.w, inputs, warnings, 25).catch(orRefused("free-agent pool"))) ?? [])
+      : [];
+    if (refused.size > 0) {
+      // one line for the call, with the stronger reason (a rejection outranks nothing stored)
+      const reason = [...refused.values()].includes("rejected") ? "rejected" : "no_session";
+      warnings.push(activityLeagueReadsWarning(reason, [...refused.keys()]));
+    }
     const names = new Map<number, UntrustedText>();
     for (const r of rosters ?? []) names.set(r.team.team_id, r.team_name);
     for (const t of standings?.teams ?? []) if (!names.has(t.team_id)) names.set(t.team_id, t.name);

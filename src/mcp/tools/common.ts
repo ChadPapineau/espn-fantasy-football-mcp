@@ -1099,6 +1099,25 @@ export const SESSION_READ_WARNINGS = Object.freeze({
     "partial: the stored ESPN session was rejected, and ESPN's transaction feed needs one on a league not known to be public: the server's persisted history only; run `eff setup` in a terminal to replace it",
 } as const);
 
+/** The league reads espn_analyze_league_activity goes without when the session refuses them. */
+export type ActivityLeagueRead = "standings" | "rosters" | "free-agent pool";
+
+/**
+ * E11's fixed warning for the league reads the session refused (changelog §R10, R10-11; the round-3
+ * review's R3B-CS-1): on a league not known to be public the standings, rosters and pool need the
+ * session too, and a refusal of any of them degrades the digest as the feed's does — the persisted
+ * history's totals stand, said with the reason and `eff setup`; never upstream text.
+ */
+export function activityLeagueReadsWarning(
+  refusal: "no_session" | "rejected",
+  reads: readonly ActivityLeagueRead[],
+): string {
+  const what = `ESPN's ${reads.join(", ")}`;
+  return refusal === "rejected"
+    ? `partial: the stored ESPN session was rejected, and ${what} need one on a league not known to be public: they were not read (by-team activity, waiver-order movement and rival needs go without them); run \`eff setup\` in a terminal to replace it`
+    : `partial: ${what} need an ESPN session on a league not known to be public, and none is stored: they were not read (by-team activity, waiver-order movement and rival needs go without them); run \`eff setup\` in a terminal to add one`;
+}
+
 /** The session refusal an error carries (ESPN_REQUIRES_COOKIES / ESPN_AUTH_REJECTED), else null. */
 export function sessionRefusalOf(e: unknown): "no_session" | "rejected" | null {
   const code = (e as { effCode?: unknown } | null)?.effCode;
