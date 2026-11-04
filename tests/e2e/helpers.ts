@@ -518,15 +518,17 @@ export function stallPassed(w: Pick<StallWindow, "verdict">): boolean {
  */
 export function stallReport(verdict: StallVerdict, stallMs: number, boundMs: number): string {
   const f = (x: number): string => x.toFixed(1);
+  // a bound derived from a measurement (retrospective-stall's growth bound) to 0.1, a literal as is
+  const b = Number.isInteger(boundMs) ? String(boundMs) : f(boundMs);
   switch (verdict.kind) {
     case "within":
-      return `within the bound: ${f(stallMs)} ms <= ${String(boundMs)} ms`;
+      return `within the bound: ${f(stallMs)} ms <= ${b} ms`;
     case "host_set":
       return `host-set; the server's own longest CPU run ${f(verdict.own_cpu_max_ms)} ms`;
     case "own":
-      return `the server's own stall: ${f(stallMs)} ms > ${String(boundMs)} ms`;
+      return `the server's own stall: ${f(stallMs)} ms > ${b} ms`;
     case "unmeasurable":
-      return `the ${String(boundMs)} ms bound cannot be measured on this machine now`;
+      return `the ${b} ms bound cannot be measured on this machine now`;
   }
 }
 

@@ -135,6 +135,9 @@ describe("judgeStall: every cell of R8-2 as amended by changelog §R10, R10-9", 
       "within the bound: 31.3 ms <= 50 ms",
     );
     expect(stallReport({ kind: "own" }, 72, BOUND)).toBe("the server's own stall: 72.0 ms > 50 ms");
+    expect(stallReport({ kind: "within" }, 6.1, 21.774783)).toBe(
+      "within the bound: 6.1 ms <= 21.8 ms",
+    );
     expect(stallReport({ kind: "unmeasurable" }, 72, BOUND)).toContain("cannot be measured");
     expect(stallPassed({ verdict: { kind: "within" } })).toBe(true);
     expect(stallPassed({ verdict: { kind: "host_set", own_cpu_max_ms: 1 } })).toBe(true);
