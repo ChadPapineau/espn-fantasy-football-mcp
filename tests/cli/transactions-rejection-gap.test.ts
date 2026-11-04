@@ -19,7 +19,12 @@ import { readJobState, updateJobState } from "../../src/cli/job-state.js";
 import { JOBS } from "../../src/cli/launchd.js";
 import { main } from "../../src/cli/main.js";
 import { loadRuntime } from "../../src/cli/runtime.js";
-import { gapPatch, transactionsAppend, unreadTransactionPeriods } from "../../src/cli/snapshot.js";
+import {
+  gapPatch,
+  transactionPeriods,
+  transactionsAppend,
+  unreadTransactionPeriods,
+} from "../../src/cli/snapshot.js";
 import { openStore } from "../../src/cli/store-access.js";
 import { cachedPublicity } from "../../src/providers/espn/cache.js";
 import { composeBodies } from "../../src/providers/espn/index.js";
@@ -431,13 +436,146 @@ describe("R10-17: the gap a rejection leaves is filled by `eff transactions --ba
   });
 });
 
+/**
+ * The install whose transactions job last ran in the PREVIOUS season (its state at 2025's period
+ * 17, the old value then accepted), and a rejection recorded before this season began: launchd held
+ * the job through this season's weeks so far (plan 06 §1.4), so nothing of 2026 was read.
+ */
+async function rejectedSinceLastSeason(f: ReturnType<typeof privateLeague>) {
+  mkdirSync(sb.configDir, { recursive: true, mode: 0o700 });
+  writeFileSync(
+    path.join(sb.configDir, "session.json"),
+    sessionFileBody(OLD, metaFor(OLD, OLD_AT)),
+    { mode: 0o600 },
+  );
+  await withStore(OLD_AT, f, (store) => {
+    store.repos.credentialState.put(
+      stateRow({
+        store: "file",
+        state: "rejected",
+        stored_at: OLD_AT,
+        last_accepted_at: OLD_AT,
+        last_rejected_at: "2026-09-02T09:00:00.000Z",
+        rejected_since: "2026-09-02T09:00:00.000Z",
+        rejected_view: "mRoster",
+      }),
+    );
+  });
+  updateJobState(sb.cacheDir, {
+    "transactions.season": SEASON - 1,
+    "transactions.period": 17,
+    "transactions.period_executed": 1,
+  });
+}
+
+describe("V4-M3: a rejection across the season boundary leaves no silent hole (changelog §R10, R10-17)", () => {
+  // the round-4 verifier's V4-M3: with the job's state naming an earlier season, the job planned the
+  // current period alone with no gap, and the default backfill read previous seasons only — this
+  // season's weeks before `eff setup` were neither said nor read
+  it("plans an earlier season's record as this season unread from its first period", () => {
+    const earlier = { "transactions.season": SEASON - 1, "transactions.period": 17 };
+    expect(transactionPeriods(earlier, SEASON, 1, 5)).toEqual({
+      read: [2, 3, 4, 5],
+      gap: { from: 1, to: 1 },
+    });
+    expect(transactionPeriods(earlier, SEASON, 1, 9)).toEqual({
+      read: [6, 7, 8, 9],
+      gap: { from: 1, to: 5 },
+    });
+    expect(transactionPeriods(earlier, SEASON, 1, 3)).toEqual({ read: [1, 2, 3], gap: null });
+    expect(transactionPeriods(earlier, SEASON, 1, 1)).toEqual({ read: [1], gap: null });
+    expect(transactionPeriods(earlier, SEASON, 2, 6)).toEqual({
+      read: [3, 4, 5, 6],
+      gap: { from: 2, to: 2 },
+    });
+    // before the season's first period (nothing to plan from), and a later season's record, read
+    // the current period alone, as before
+    expect(transactionPeriods(earlier, SEASON, 2, 1)).toEqual({ read: [1], gap: null });
+    expect(
+      transactionPeriods(
+        { "transactions.season": SEASON + 1, "transactions.period": 3 },
+        SEASON,
+        1,
+        5,
+      ),
+    ).toEqual({ read: [5], gap: null });
+  });
+
+  it("the default backfill after setup reads this season from week 1; the job then re-reads the current week only", async () => {
+    sb = sandbox();
+    const league = { current: 5, oldAccepted: false };
+    const f = privateLeague(league);
+    await rejectedSinceLastSeason(f);
+    // launchd's wakes while rejected: exit 0, no request
+    const held = await jobWake(new Date("2026-10-07T11:30:00.000Z"), f);
+    expect(held.code).toBe(0);
+    expect(held.io.out.text).toContain("rejected — waiting for the daily credential check");
+    expect(f.seen).toEqual([]);
+
+    await setupDone(f);
+    const io = ioAt("2026-10-07T12:00:00.000Z", f);
+    expect(await main(["transactions", "--backfill"], io), io.err.text).toBe(0);
+    expect(io.out.text).toContain(
+      "season 2026: 5 week(s) read, 5 transaction(s), 5 new (this season, weeks 1–5)",
+    );
+    expect(await storedWeeks(f)).toEqual([1, 2, 3, 4, 5]);
+    expect(f.seen.filter((s) => s.cookie !== "new" && s.url.includes("/leagues/"))).toEqual([]);
+    expect(readJobState(sb.cacheDir)).toMatchObject({
+      "transactions.season": SEASON,
+      "transactions.period": 5,
+      "transactions.period_executed": 1,
+    });
+    const next = await jobWake(new Date("2026-10-07T13:30:00.000Z"), f);
+    expect(next.code, next.io.err.text).toBe(0);
+    expect(next.io.out.text).toContain("0 new transaction(s) appended (week 5)");
+    expect(next.io.out.text).not.toContain("warning");
+    expect(await storedWeeks(f)).toEqual([1, 2, 3, 4, 5]);
+  }, 120_000);
+
+  it("the job running first after setup says and keeps the gap from week 1, which the backfill then fills", async () => {
+    sb = sandbox();
+    const league = { current: 5, oldAccepted: false };
+    const f = privateLeague(league);
+    await rejectedSinceLastSeason(f);
+    await setupDone(f);
+    const first = await jobWake(new Date("2026-10-07T11:30:00.000Z"), f);
+    expect(first.code, first.io.err.text).toBe(0);
+    expect(first.io.out.text).toContain("4 new transaction(s) appended (weeks 2, 3, 4, 5)");
+    expect(first.io.out.text).toContain(
+      "warning: scoring period(s) 1–1 were not read (the job did not run then)",
+    );
+    expect(readJobState(sb.cacheDir)).toMatchObject({
+      "transactions.season": SEASON,
+      "transactions.period": 5,
+      "transactions.gap_season": SEASON,
+      "transactions.gap_from": 1,
+    });
+    const io = ioAt("2026-10-07T12:00:00.000Z", f);
+    expect(await main(["transactions", "--backfill"], io), io.err.text).toBe(0);
+    expect(io.out.text).toContain(
+      "season 2026: 5 week(s) read, 5 transaction(s), 1 new (this season, weeks 1–5)",
+    );
+    expect(await storedWeeks(f)).toEqual([1, 2, 3, 4, 5]);
+    expect(readJobState(sb.cacheDir)["transactions.gap_from"]).toBeUndefined();
+  }, 120_000);
+});
+
 describe("R10-17: the unread periods a backfill reads (unreadTransactionPeriods, gapPatch)", () => {
   const S = SEASON;
   it.each([
     ["never read this season", {}, 9, null],
+    // the job last read an earlier season: none of this one was read, from its first period (the
+    // round-4 verifier's V4-M3 — before, null: a rejection across the season boundary left this
+    // season's weeks before setup neither said nor read)
     [
-      "another season's record",
+      "an earlier season's record: this season from its first period",
       { "transactions.season": S - 1, "transactions.period": 3 },
+      9,
+      1,
+    ],
+    [
+      "a later season's record proves nothing of this one",
+      { "transactions.season": S + 1, "transactions.period": 3 },
       9,
       null,
     ],
@@ -483,6 +621,16 @@ describe("R10-17: the unread periods a backfill reads (unreadTransactionPeriods,
     ],
   ] as const)("%s", (_name, state, current, want) => {
     expect(unreadTransactionPeriods(state, S, current)).toBe(want);
+  });
+
+  it("an earlier season's record reads this season from the first period the league names (V4-M3)", () => {
+    const earlier = { "transactions.season": S - 1, "transactions.period": 17 };
+    expect(unreadTransactionPeriods(earlier, S, 5, 2)).toBe(2);
+    expect(unreadTransactionPeriods(earlier, S, 5)).toBe(1);
+    // a gap kept for this season, or a read of it, is the job's own record of this season
+    expect(
+      unreadTransactionPeriods({ "transactions.season": S, "transactions.period": 5 }, S, 5, 1),
+    ).toBeNull();
   });
 
   it("gapPatch keeps the older of two gaps of one season, and a new season's gap replaces the old", () => {

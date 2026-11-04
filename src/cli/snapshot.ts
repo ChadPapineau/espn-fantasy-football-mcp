@@ -603,14 +603,21 @@ export interface TransactionPeriods {
   readonly gap: { readonly from: number; readonly to: number } | null;
 }
 
+/** Whether `season` follows the season the job state recorded (an integer before it). */
+function laterSeason(recorded: number | null, season: number): boolean {
+  return recorded !== null && Number.isInteger(recorded) && recorded < season;
+}
+
 /**
  * Which scoring periods an append reads (plan 06 §1.4 `transactions append`, "warn on gap
  * detection"): from the period the previous append last read — read AGAIN, so the moves made in it
  * after that read (Monday's adds for the Monday game, the drops before ESPN rolls the period) are
  * stored — through the current one, at most TRANSACTIONS_MAX_PERIODS (the newest); older periods
- * never read are the gap, said. A first run, another season, or a period behind the recorded one
- * reads the current period alone. Before, only the current period was read, so each week's last
- * moves were never stored and nothing noticed (Stage C finding jobs-transactions-period-rollover-gap).
+ * never read are the gap, said. A season after the recorded one is read the same way from its
+ * first period (the job ran before: its weeks before this run were not read). A first run, a season
+ * before the recorded one, or a period behind the recorded one reads the current period alone.
+ * Before, only the current period was read, so each week's last moves were never stored and nothing
+ * noticed (Stage C finding jobs-transactions-period-rollover-gap).
  */
 export function transactionPeriods(
   state: JobState,
@@ -620,9 +627,19 @@ export function transactionPeriods(
 ): TransactionPeriods {
   const lastSeason = stateNumber(state, "transactions.season");
   const last = stateNumber(state, "transactions.period");
-  if (lastSeason !== season || last === null || last > current || !Number.isInteger(last))
-    return { read: [current], gap: null };
-  const from = Math.max(firstPeriod, last);
+  // the job last read an EARLIER season (it ran before, so this is no fresh install): the new
+  // season is unread from its first period — the weeks a rejection held the job across the season
+  // boundary are read (the newest TRANSACTIONS_MAX_PERIODS) or said and kept as the gap, never
+  // silently missing (the round-4 verifier's V4-M3; changelog §R10, R10-17)
+  let from: number;
+  if (laterSeason(lastSeason, season)) {
+    if (current < firstPeriod) return { read: [current], gap: null };
+    from = firstPeriod;
+  } else {
+    if (lastSeason !== season || last === null || last > current || !Number.isInteger(last))
+      return { read: [current], gap: null };
+    from = Math.max(firstPeriod, last);
+  }
   const start = Math.max(from, current - TRANSACTIONS_MAX_PERIODS + 1);
   const read: number[] = [];
   for (let p = start; p <= current; p++) read.push(p);
@@ -799,24 +816,28 @@ export function gapPatch(
 /**
  * The first period of `season` the transactions job has not read through `current` (changelog
  * §R10, R10-17), or null: the gap it said and kept (gapPatch), else — when its last read is behind
- * `current` — that period (re-read, as the job re-reads it). A rejected session holds the job (plan
- * 06 §1.4), so the weeks it sat out are read back by `eff transactions --backfill` after `eff
- * setup`, from here. Null when the job never read this season (nothing recorded to fill: `--seasons`
- * names the current season to read it whole) or has read through `current` with no gap kept.
+ * `current` — that period (re-read, as the job re-reads it); when its last read is of an earlier
+ * season, `firstPeriod` (this season's weeks so far were never read). A rejected session holds the
+ * job (plan 06 §1.4), so the weeks it sat out are read back by `eff transactions --backfill` after
+ * `eff setup`, from here. Null when the job never read any season (nothing recorded to fill:
+ * `--seasons` names the current season to read it whole) or has read through `current` with no gap
+ * kept.
  */
 export function unreadTransactionPeriods(
   state: JobState,
   season: number,
   current: number,
+  firstPeriod = 1,
 ): number | null {
   const gap =
     stateNumber(state, "transactions.gap_season") === season
       ? stateNumber(state, "transactions.gap_from")
       : null;
-  const last =
-    stateNumber(state, "transactions.season") === season
-      ? stateNumber(state, "transactions.period")
-      : null;
+  const recordedSeason = stateNumber(state, "transactions.season");
+  // the job's last read is of an earlier season: nothing of this one was read, from its first
+  // period (the round-4 verifier's V4-M3 — a rejection across the season boundary)
+  if (laterSeason(recordedSeason, season)) return firstPeriod;
+  const last = recordedSeason === season ? stateNumber(state, "transactions.period") : null;
   const behind = last !== null && Number.isInteger(last) && last < current ? last : null;
   const from = [gap, behind].filter((x): x is number => x !== null && Number.isInteger(x));
   return from.length === 0 ? null : Math.min(...from);
@@ -948,6 +969,7 @@ export async function transactionsBackfill(
         readJobState(config.cacheDir),
         config.season,
         league.clock.current_scoring_period,
+        Math.max(1, league.clock.first_scoring_period),
       );
       seasons = [
         ...(unreadFrom === null ? [] : [config.season]),
