@@ -216,6 +216,86 @@ function benchToIr(m: Model, pred: (s: Seat) => boolean, what: string): Seat {
 
 const isFlexy = (m: Model, s: Seat): boolean => eligible(m.players, s.playerId).includes(SLOT.FLEX);
 
+/** One lineup change of a final week: `out` (a starter) to the bench, `in` (a bench player) in. */
+export interface Benching {
+  readonly week: number;
+  readonly out: number;
+  readonly in: number;
+}
+
+/**
+ * points-only-seeding's Team 03 (changelog §R10, R10-14; plan 09 §3.9: the TR-5-E partner "leads by
+ * record but is a bubble team by PF"): in each final week a weaker bench player starts in place of
+ * a starter, so Team 03 keeps its 3–1 record — every win still a win — while its points for fall by
+ * 78.20, from sixth in the league to seventh (369.72, 2.34 behind the last playoff place). The tool
+ * then reads Team 03 a contender under the record-first reading and on the bubble under the
+ * points-only reading (tests/integration/fx10h.test.ts holds the record, the points and the rank; the
+ * eval server's why_they_accept lines are checked on the built suite).
+ */
+export const POINTS_ONLY_PARTNER = 3;
+export const POINTS_ONLY_BENCHINGS: readonly Benching[] = Object.freeze([
+  // week 1, a win over Team 08 by 45.16: Jahmyr Gibbs for Blake Corum (−25.70, still a win)
+  { week: 1, out: 4429795, in: 4429096 },
+  // week 2, the loss to Team 10: Gibbs for Chris Rodriguez Jr. (−19.00)
+  { week: 2, out: 4429795, in: 4362619 },
+  // week 3, a win over Team 07 by 19.48: Matthew Golden for Brian Thomas Jr. (−17.20, still a win)
+  { week: 3, out: 4701936, in: 4432773 },
+  // week 4, a win over Team 09 by 17.84: Kyren Williams for Corum (−16.30, still a win)
+  { week: 4, out: 4430737, in: 4429096 },
+]);
+
+/**
+ * Applies the benchings to a team's final-week lineups: each `in` takes the slot of `out` and `out`
+ * goes to the bench. Refuses a change that is not a starter-for-bench swap the slot allows, or one
+ * that changes the week's result (a win stays a win, a loss a loss).
+ */
+function applyBenchings(
+  m: Model,
+  r0: Renderer,
+  teamId: number,
+  changes: readonly Benching[],
+): void {
+  const total = (week: number, team: number): number =>
+    (m.rosters.get(week)?.get(team) ?? [])
+      .filter((s) => s.lineupSlotId !== SLOT.BE && s.lineupSlotId !== SLOT.IR)
+      .reduce((a, s) => a + r0.actualPoints(s.playerId, week), 0);
+  const weeks = [...new Set(changes.map((c) => c.week))];
+  const resultOf = (week: number): number => {
+    const mm = m.schedule.find(
+      (x) => x.period === week && (x.home === teamId || x.away === teamId),
+    );
+    if (mm === undefined)
+      throw new FixtureGenError(`fx-10h: team ${String(teamId)} has no week-${String(week)} game`);
+    const other = mm.home === teamId ? mm.away : mm.home;
+    return Math.sign(total(week, teamId) - total(week, other));
+  };
+  const before = new Map(weeks.map((w) => [w, resultOf(w)]));
+  for (const c of changes) {
+    if (!(FINAL_WEEKS as readonly number[]).includes(c.week))
+      throw new FixtureGenError(`fx-10h: week ${String(c.week)} is not a final week`);
+    const seats = m.rosters.get(c.week)?.get(teamId) ?? [];
+    const out = seats.find((s) => s.playerId === c.out);
+    const inn = seats.find((s) => s.playerId === c.in);
+    if (out === undefined || out.lineupSlotId === SLOT.BE || out.lineupSlotId === SLOT.IR)
+      throw new FixtureGenError(`fx-10h: ${String(c.out)} is no week-${String(c.week)} starter`);
+    if (inn?.lineupSlotId !== SLOT.BE)
+      throw new FixtureGenError(
+        `fx-10h: ${String(c.in)} is not on the week-${String(c.week)} bench`,
+      );
+    if (!eligible(m.players, c.in).includes(out.lineupSlotId))
+      throw new FixtureGenError(
+        `fx-10h: ${String(c.in)} may not fill slot ${String(out.lineupSlotId)}`,
+      );
+    inn.lineupSlotId = out.lineupSlotId;
+    out.lineupSlotId = SLOT.BE;
+  }
+  for (const w of weeks)
+    if (resultOf(w) !== before.get(w))
+      throw new FixtureGenError(
+        `fx-10h: the benchings change team ${String(teamId)}'s week-${String(w)} result`,
+      );
+}
+
 export const VARIANTS: readonly Variant[] = [
   {
     name: "writes-on",
@@ -230,10 +310,11 @@ export const VARIANTS: readonly Variant[] = [
   {
     name: "auth-rejected",
     describes:
-      "credential.state rejected on a public league (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base, which is public; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result — orient's rejected row carries on keylessly here (changelog §R10, R10-7)",
+      "credential.state rejected on a public league (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base, which is public; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result — orient's rejected row carries on keylessly here (changelog §R10, R10-7): the league's transaction feed answers keylessly, as ESPN serves it to anyone on a public league, and pending claims, never read keyless, answer pending: null (changelog §R10, R10-10)",
     mutate: (m) => {
       // the base league is public (fixture mode never holds a cookie): a stored session ESPN
-      // rejected on a public league, the state waivers WV-7-E stands for (changelog §R10, R10-7)
+      // rejected on a public league, the state waivers WV-7-E stands for (changelog §R10, R10-7) —
+      // its feed read keyless, as ESPN serves it anyone there; its pending claims never (R10-10)
       m.isPublic = true;
       // the one espn_check_auth after the user re-ran setup: ESPN still rejects the cookies
       m.harness = {
@@ -247,7 +328,7 @@ export const VARIANTS: readonly Variant[] = [
   {
     name: "public-league",
     describes:
-      "a public league with a stored, not yet validated credential: bodies as base (public); fixture mode reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result",
+      "a public league with a stored, not yet validated credential: bodies as base (public); fixture mode reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result; fixture mode sends no cookie, so the transaction feed answers keylessly and pending claims, never read keyless, answer pending: null (changelog §R10, R10-10)",
     mutate: (m) => {
       m.isPublic = true;
       // a public league's board answers anyone the same: the probe cannot tell (ADV OBJ-26)
@@ -281,10 +362,14 @@ export const VARIANTS: readonly Variant[] = [
   {
     name: "points-only-seeding",
     describes:
-      "last season's seeds follow points for, not the record (isPlayoffMatchupEdited true): the seeding evidence suggests points_only",
-    mutate: (m) => {
+      "last season's seeds follow points for, not the record (isPlayoffMatchupEdited true): the seeding evidence suggests points_only; Team 03 keeps its 3–1 record on weaker lineups, seventh in points for — a contender record-first, on the bubble when points alone seed (changelog §R10, R10-14)",
+    mutate: (m, r) => {
       m.lastSeason = lastSeasonRows("points_only");
       m.playoffMatchupEdited = true;
+      applyBenchings(m, r, POINTS_ONLY_PARTNER, POINTS_ONLY_BENCHINGS);
+      m.notes.push(
+        `Team ${String(POINTS_ONLY_PARTNER).padStart(2, "0")}'s weeks 1–4: ${String(POINTS_ONLY_BENCHINGS.length)} starters benched for weaker bench players, every result unchanged`,
+      );
     },
   },
   {

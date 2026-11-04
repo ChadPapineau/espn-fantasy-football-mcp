@@ -472,8 +472,12 @@ export function baseModel(): Model {
     leagueName: "Example League",
     divisionName: "Division 1",
     clock: CLOCKS.base,
-    // public: fixture mode never holds a cookie, so the Skills league answers every view keylessly
-    // (a private league would answer ESPN_REQUIRES_COOKIES on mTransactions2 — decision recorded)
+    // public: fixture mode never holds a cookie, so the Skills league answers keylessly — the
+    // league's transaction feed (mTransactions2) included, which ESPN serves anyone on a public
+    // league (a private league would answer ESPN_REQUIRES_COOKIES there — decision recorded). The
+    // user's own pending claims (mPendingTransactions) are never read keyless, public or not
+    // (changelog §R10, R10-10): in fixture mode espn_list_transactions(pending: true) answers
+    // `pending: null` with its warning, and the empty body below is never requested
     isPublic: true,
     usesBudget: false,
     budget: 0,

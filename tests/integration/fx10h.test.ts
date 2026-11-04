@@ -25,6 +25,8 @@ import { wrapUntrusted } from "../../src/domain/league/types.js";
 import {
   GAME_FINAL_AFTER_MS,
   INJECTIONS,
+  POINTS_ONLY_BENCHINGS,
+  POINTS_ONLY_PARTNER,
   SUNDAY_LIVE_WIN_PROBABILITY_ESPN,
   SYNTHETIC_OUTLOOKS,
 } from "../../scripts/fx10h/variants.js";
@@ -333,6 +335,86 @@ describe("variants change only what they name", () => {
         expect(tail).toMatch(/\/appliedStats\/53$|^stats\/\d+\/appliedTotal$/);
       }
     }
+  });
+
+  it("points-only-seeding: Team 03 keeps its 3–1 record, seventh in points for, every result unchanged (changelog §R10, R10-14)", () => {
+    const PO = path.join(FX, "points-only-seeding");
+    interface Team {
+      id: number;
+      record: { overall: { wins: number; losses: number; pointsFor: number } };
+    }
+    const teams = (dir: string) => body(dir, ["mTeam", "mStandings"]).teams as Team[];
+    const base = new Map(teams(FX).map((t) => [t.id, t.record.overall]));
+    const po = teams(PO);
+    const t3 = po.find((t) => t.id === POINTS_ONLY_PARTNER)?.record.overall;
+    expect(t3).toMatchObject({ wins: 3, losses: 1 });
+    expect(t3?.pointsFor).toBeCloseTo(369.72, 2);
+    // seventh by points for, just behind the last playoff place (6 playoff teams): a bubble team
+    // when points alone seed, while the record still leads
+    const byPf = [...po].sort((a, b) => b.record.overall.pointsFor - a.record.overall.pointsFor);
+    expect(byPf.findIndex((t) => t.id === POINTS_ONLY_PARTNER)).toBe(6);
+    expect(byPf[5]!.record.overall.pointsFor - (t3?.pointsFor ?? 0)).toBeLessThan(5);
+    const byRecord = [...po].sort((a, b) => b.record.overall.wins - a.record.overall.wins);
+    expect(byRecord.findIndex((t) => t.id === POINTS_ONLY_PARTNER)).toBeLessThan(4);
+    // every other team's record and points for are the base's; Team 03 lost 78.20 points, no win
+    for (const t of po) {
+      const b = base.get(t.id);
+      expect(t.record.overall.wins, `team ${String(t.id)}`).toBe(b?.wins);
+      if (t.id !== POINTS_ONLY_PARTNER)
+        expect(t.record.overall.pointsFor, `team ${String(t.id)}`).toBe(b?.pointsFor);
+    }
+    expect((base.get(POINTS_ONLY_PARTNER)?.pointsFor ?? 0) - (t3?.pointsFor ?? 0)).toBeCloseTo(
+      78.2,
+      2,
+    );
+    // every final week's winner is the base's, and Team 03's total is its starters' points
+    interface Side {
+      teamId: number;
+      totalPoints: number;
+    }
+    const schedule = (dir: string) =>
+      body(dir, ["mMatchup"]).schedule as {
+        matchupPeriodId: number;
+        winner: string;
+        home: Side;
+        away: Side;
+      }[];
+    const baseWinners = schedule(FX).map((m) => [m.matchupPeriodId, m.home.teamId, m.winner]);
+    expect(schedule(PO).map((m) => [m.matchupPeriodId, m.home.teamId, m.winner])).toEqual(
+      baseWinners,
+    );
+    const benched = new Set(POINTS_ONLY_BENCHINGS.map((b) => `${String(b.week)}:${String(b.out)}`));
+    for (const w of [1, 2, 3, 4]) {
+      const side = (body(PO, ["mBoxscore"], w).schedule as J[])
+        .flatMap((m) => [m.home, m.away] as J[])
+        .find((s) => s.teamId === POINTS_ONLY_PARTNER);
+      const entries = (
+        side?.rosterForCurrentScoringPeriod as {
+          entries: {
+            lineupSlotId: number;
+            playerId: number;
+            playerPoolEntry: {
+              player: { stats: { statSourceId: number; appliedTotal: number }[] };
+            };
+          }[];
+        }
+      ).entries;
+      const sum = entries
+        .filter((e) => e.lineupSlotId !== 20 && e.lineupSlotId !== 21)
+        .reduce(
+          (a, e) =>
+            a +
+            (e.playerPoolEntry.player.stats.find((s) => s.statSourceId === 0)?.appliedTotal ?? 0),
+          0,
+        );
+      expect(Math.abs((side?.totalPoints as number) - sum)).toBeLessThanOrEqual(0.01);
+      // each benched starter sits on the bench that week
+      for (const e of entries)
+        if (benched.has(`${String(w)}:${String(e.playerId)}`)) expect(e.lineupSlotId).toBe(20);
+    }
+    // the current week is the base's: the offer TR-5-E names reads the same week-5 rosters
+    // (its status block carries the variant's isPlayoffMatchupEdited, as every body's does)
+    expect(body(PO, ["mRoster"], 5).teams).toEqual(body(FX, ["mRoster"], 5).teams);
   });
 
   it("server-state variants keep the base bodies (writes-on, auth-rejected, public-league, owner-mismatch)", () => {

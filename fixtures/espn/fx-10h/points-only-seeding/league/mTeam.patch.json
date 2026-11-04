@@ -1,1 +1,18 @@
-[{ "op": "replace", "path": ["status", "isPlayoffMatchupEdited"], "value": true }]
+[
+  { "op": "replace", "path": ["schedule", 3, "away", "totalPoints"], "value": 84.92 },
+  { "op": "replace", "path": ["schedule", 7, "home", "totalPoints"], "value": 82.06 },
+  { "op": "replace", "path": ["schedule", 11, "away", "totalPoints"], "value": 101.72 },
+  { "op": "replace", "path": ["schedule", 15, "away", "totalPoints"], "value": 101.02 },
+  { "op": "replace", "path": ["status", "isPlayoffMatchupEdited"], "value": true },
+  { "op": "replace", "path": ["teams", 2, "points"], "value": 369.72 },
+  { "op": "replace", "path": ["teams", 2, "record", "division", "pointsFor"], "value": 369.72 },
+  { "op": "replace", "path": ["teams", 2, "record", "overall", "pointsFor"], "value": 369.72 },
+  { "op": "replace", "path": ["teams", 6, "record", "division", "pointsAgainst"], "value": 449.74 },
+  { "op": "replace", "path": ["teams", 6, "record", "overall", "pointsAgainst"], "value": 449.74 },
+  { "op": "replace", "path": ["teams", 7, "record", "division", "pointsAgainst"], "value": 360.58 },
+  { "op": "replace", "path": ["teams", 7, "record", "overall", "pointsAgainst"], "value": 360.58 },
+  { "op": "replace", "path": ["teams", 8, "record", "division", "pointsAgainst"], "value": 423.86 },
+  { "op": "replace", "path": ["teams", 8, "record", "overall", "pointsAgainst"], "value": 423.86 },
+  { "op": "replace", "path": ["teams", 9, "record", "division", "pointsAgainst"], "value": 461.54 },
+  { "op": "replace", "path": ["teams", 9, "record", "overall", "pointsAgainst"], "value": 461.54 }
+]

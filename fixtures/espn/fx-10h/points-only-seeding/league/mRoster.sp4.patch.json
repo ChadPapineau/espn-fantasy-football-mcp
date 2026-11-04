@@ -1,1 +1,6 @@
-[{ "op": "replace", "path": ["status", "isPlayoffMatchupEdited"], "value": true }]
+[
+  { "op": "replace", "path": ["status", "isPlayoffMatchupEdited"], "value": true },
+  { "op": "replace", "path": ["teams", 2, "roster", "appliedStatTotal"], "value": 101.02 },
+  { "op": "replace", "path": ["teams", 2, "roster", "entries", 2, "lineupSlotId"], "value": 20 },
+  { "op": "replace", "path": ["teams", 2, "roster", "entries", 7, "lineupSlotId"], "value": 2 }
+]

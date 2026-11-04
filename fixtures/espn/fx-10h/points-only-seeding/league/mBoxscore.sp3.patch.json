@@ -1,1 +1,9 @@
-[{ "op": "replace", "path": ["status", "isPlayoffMatchupEdited"], "value": true }]
+[
+  { "op": "replace", "path": ["schedule", 1, "away", "pointsByScoringPeriod", "3"], "value": 101.72 },
+  { "op": "replace", "path": ["schedule", 1, "away", "rosterForCurrentScoringPeriod", "appliedStatTotal"], "value": 101.72 },
+  { "op": "replace", "path": ["schedule", 1, "away", "rosterForCurrentScoringPeriod", "entries", 8, "lineupSlotId"], "value": 4 },
+  { "op": "replace", "path": ["schedule", 1, "away", "rosterForCurrentScoringPeriod", "entries", 10, "lineupSlotId"], "value": 20 },
+  { "op": "replace", "path": ["schedule", 1, "away", "rosterForMatchupPeriod", "appliedStatTotal"], "value": 101.72 },
+  { "op": "replace", "path": ["schedule", 1, "away", "totalPoints"], "value": 101.72 },
+  { "op": "replace", "path": ["status", "isPlayoffMatchupEdited"], "value": true }
+]

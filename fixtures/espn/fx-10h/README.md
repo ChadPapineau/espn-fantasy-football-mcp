@@ -20,7 +20,7 @@ refuses to run unless the recorded golden is green.
 | schedule | 14 regular-season matchup periods, 6 playoff teams (weeks 15–17), seeded `TOTAL_POINTS_SCORED` (record first, points the tiebreak — D1); trade deadline 2026-12-02 |
 | teams | `Team 01` … `Team 10`, members `Member 01` … `Member 11` in the fake GUID range, league id `0`; the user is **Team 02** (waiver rank 2) |
 | clock | **Tuesday of week 5, 21:00 ET** (`2026-10-07T01:00:00Z`): weeks 1–4 final, week 5 pre-kickoff, before the waiver run |
-| public | yes — fixture mode never holds a cookie, so every view (transactions included) is answered keylessly |
+| public | yes — fixture mode never holds a cookie, so every view is answered keylessly, the league's transaction feed included (ESPN serves it to anyone on a public league); the user's own pending claims are never read keyless (changelog §R10, R10-10), so `espn_list_transactions(pending: true)` answers `pending: null` with its warning |
 
 ## How it is derived
 
@@ -57,10 +57,10 @@ exactly what it changes. `EFF_FIXTURE_DIR=<abs>/fixtures/espn/fx-10h/<variant>`.
 
 `writes-on`, `auth-rejected` and `public-league` change only server state fixture mode cannot hold
 (the write gates, a credential): their bodies are the base's and their `harness` block names the
-state (`auth-rejected`: a stored session ESPN rejected, on the base's public league). Fixture mode reports a scripted `credential_state` (`rejected`, `stored`) as a label, and its
+state (`auth-rejected`: a stored session ESPN rejected, on the base's public league, where the transaction feed still answers keylessly and pending claims answer `pending: null` — changelog §R10, R10-10). Fixture mode reports a scripted `credential_state` (`rejected`, `stored`) as a label, and its
 one `espn_check_auth` answers the scripted `probe` result — never a value, no request
 (`src/services/fixture-credential.ts`; changelog §R9, R9-3). `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
-(Team 01's `roster.entries` gone), `points-only-seeding`, `seeding-unknown`, `faab`, `k10`,
+(Team 01's `roster.entries` gone), `points-only-seeding` (last season's seeds follow points for; Team 03 keeps its 3–1 record on weaker week 1–4 lineups, seventh in points for, 2.34 behind the last playoff place — a contender under the record-first reading, on the bubble under the points-only one: changelog §R10, R10-14), `seeding-unknown`, `faab`, `k10`,
 `post-run` (Wednesday 06:00 ET, pool `FREEAGENT`), `ir-open`, `ir-invalid`, `hidden-bench`,
 `sunday-live` (Sunday 14:05 ET: the 09:30 ET London game final — a game is final four hours after
 its kickoff —, the 13:00 ET games under way, the late games pending; ESPN's live win probability

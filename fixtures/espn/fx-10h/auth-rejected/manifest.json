@@ -15,7 +15,7 @@
   "harness": { "credential_state": "rejected", "probe": { "accepted": false, "reason": null, "probe": "board" } },
   "notes": ["server state only: credential rejected; bodies unchanged"],
   "variant": "auth-rejected",
-  "describes": "credential.state rejected on a public league (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base, which is public; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result — orient's rejected row carries on keylessly here (changelog §R10, R10-7)",
+  "describes": "credential.state rejected on a public league (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base, which is public; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result — orient's rejected row carries on keylessly here (changelog §R10, R10-7): the league's transaction feed answers keylessly, as ESPN serves it to anyone on a public league, and pending claims, never read keyless, answer pending: null (changelog §R10, R10-10)",
   "views": [
     { "route": "league", "season": 2026, "views": ["mSettings"], "scoringPeriodId": null, "path": "fx-10h/league/mSettings.json", "derived": true },
     { "route": "league", "season": 2026, "views": ["mNav"], "scoringPeriodId": null, "path": "fx-10h/league/mNav.json", "derived": true },

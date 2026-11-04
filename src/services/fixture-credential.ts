@@ -8,7 +8,8 @@
 // the one probe with the scripted result. Both are a label and a fixed, value-free result: nothing
 // here holds, builds or logs a cookie or a Cookie header, and no request is made (the provider is
 // still built with no credential authority, so every read stays keyless, as in fixture mode
-// before). Fixture mode's guard runs first and is unchanged: with a real credential stored, fixture
+// before — and the user's own pending claims, never read keyless, are refused with zero requests:
+// changelog §R10, R10-10). Fixture mode's guard runs first and is unchanged: with a real credential stored, fixture
 // mode does not start at all (src/services/index.ts fixtureModeIssues). A variant that scripts
 // nothing (or `not_configured`) keeps the old path exactly. New here.
 import path from "node:path";

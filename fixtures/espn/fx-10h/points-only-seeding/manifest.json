@@ -13,9 +13,9 @@
   "my_team_id": 2,
   "env": { "ESPN_LEAGUE_ID": "0", "ESPN_TEAM_ID": "2", "EFF_TOOLSET": "core" },
   "harness": { "credential_state": "not_configured" },
-  "notes": [],
+  "notes": ["Team 03's weeks 1–4: 4 starters benched for weaker bench players, every result unchanged"],
   "variant": "points-only-seeding",
-  "describes": "last season's seeds follow points for, not the record (isPlayoffMatchupEdited true): the seeding evidence suggests points_only",
+  "describes": "last season's seeds follow points for, not the record (isPlayoffMatchupEdited true): the seeding evidence suggests points_only; Team 03 keeps its 3–1 record on weaker lineups, seventh in points for — a contender record-first, on the bubble when points alone seed (changelog §R10, R10-14)",
   "views": [
     { "route": "league", "season": 2026, "views": ["mSettings"], "scoringPeriodId": null, "path": "fx-10h/league/mSettings.json", "patch": "fx-10h/points-only-seeding/league/mSettings.patch.json", "derived": true },
     { "route": "league", "season": 2026, "views": ["mNav"], "scoringPeriodId": null, "path": "fx-10h/league/mNav.json", "patch": "fx-10h/points-only-seeding/league/mNav.patch.json", "derived": true },
