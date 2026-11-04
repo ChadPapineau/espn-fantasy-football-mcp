@@ -30,7 +30,7 @@ import {
   type DegradedRead,
   type PlatformStamp,
 } from "../../domain/league/types.js";
-import { yieldTurn } from "../../domain/analytics/cooperative.js";
+import { inTurns, yieldTurn } from "../../domain/analytics/cooperative.js";
 import { checkResponse, failsResponse, type DriftCheck } from "../../drift/detect.js";
 import { errorPath } from "../../drift/pattern.js";
 import { DriftStateWriter, driftMetaFor } from "../../drift/state.js";
@@ -60,6 +60,7 @@ import {
   serverTimeIso,
   statusInstantsOf,
   stripForCache,
+  stripForCacheSteps,
   UNCACHED_VIEWS,
   type CoalesceParty,
   type KeptInstant,
@@ -179,6 +180,13 @@ export interface ReadSpec<T> {
   readonly cookies: CookieUse;
   /** Parses a validated body; throws SchemaSignals when a view schema fails. */
   readonly parse: (body: unknown) => T;
+  /**
+   * `parse` as resumable work (the same value, the same SchemaSignals): a large body's schema parse
+   * runs in turns of its own, a slice a step (mRoster: one team a step — the 1 MB roster's parse was
+   * one 20–30 ms turn on the owner's Mac; plan 03 §1.2, changelog §R10 timing items). Absent: `parse`
+   * in one turn.
+   */
+  readonly parseSteps?: (body: unknown) => Generator<void, T, undefined>;
   /** The stamp's provisional flag for this read (from the parsed value). */
   readonly provisional?: (value: T) => boolean;
   /** The stamp source (`espn:<view>` by default). */
@@ -484,7 +492,10 @@ export class EspnRequester {
       if (large) await yieldToLoop();
       const raw = parseJsonSafe(e.parsed_json);
       if (large) await yieldToLoop();
-      const parsed = spec.parse(raw);
+      const parsed =
+        large && spec.parseSteps !== undefined
+          ? await inTurns(spec.parseSteps(raw))
+          : spec.parse(raw);
       if (large) await yieldToLoop();
       value = deepFreeze(parsed);
     } catch {
@@ -1163,7 +1174,10 @@ export class EspnRequester {
     if (large) await yieldToLoop();
     let parsed: unknown;
     try {
-      parsed = spec.parse(body);
+      parsed =
+        large && spec.parseSteps !== undefined
+          ? await inTurns(spec.parseSteps(body))
+          : spec.parse(body);
     } catch (e) {
       if (e instanceof SchemaSignals) throw this.driftError(e.signals);
       throw e;
@@ -1188,8 +1202,9 @@ export class EspnRequester {
     const fetchedAt = this.deps.clock.nowIso();
     const serverTime = serverTimeIso(answer.headers["x-fantasy-server-time"]);
     if (cacheable) {
-      // the cache strip of a large body walks it whole: the loop runs before and after it
-      const stripped = stripForCache(body);
+      // the cache strip of a large body walks it in steps with the loop running between them
+      // (stripForCacheSteps; changelog §R10 timing items), and before and after it
+      const stripped = large ? await inTurns(stripForCacheSteps(body)) : stripForCache(body);
       if (large) await yieldToLoop();
       try {
         this.deps.cache.put({

@@ -17,6 +17,7 @@ import {
   type FreshnessClass,
   type FreshnessClassId,
 } from "../../config/freshness.js";
+import { drainSteps } from "../../domain/analytics/cooperative.js";
 import type { Clock } from "../../domain/clock.js";
 import type { CheckRow } from "../../domain/league/types.js";
 import type { EspnCacheEntry, EspnCacheRepository } from "../../store/types.js";
@@ -515,6 +516,9 @@ const ANYWHERE_DROPPED_KEYS: ReadonlySet<string> = new Set([
 /** Nesting deeper than this is cut (a hostile body cannot recurse the walk). */
 const MAX_STRIP_DEPTH = 40;
 
+/** The nodes the cache strip walks in one step of its resumable form (stripForCacheSteps). */
+export const STRIP_NODES_PER_STEP = 8192;
+
 /**
  * A copy of a parsed body safe to persist: `members[]` keep only non-name fields (ids — needed for
  * own-team resolution — and flags), every `clientAddress` / `lastUpdateInfo` /
@@ -522,24 +526,102 @@ const MAX_STRIP_DEPTH = 40;
  * normaliser wraps them on every read.
  */
 export function stripForCache(body: unknown): unknown {
-  const walk = (v: unknown, depth: number, inMembers: boolean): unknown => {
-    if (depth > MAX_STRIP_DEPTH) return null;
-    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1, inMembers));
-    if (typeof v !== "object" || v === null) return v;
-    const out: Record<string, unknown> = {};
-    for (const [k, x] of Object.entries(v)) {
-      if (k === "__proto__" || ANYWHERE_DROPPED_KEYS.has(k)) continue;
-      if (inMembers && MEMBER_DROPPED_KEYS.has(k)) continue;
-      Object.defineProperty(out, k, {
-        value: walk(x, depth + 1, k === "members"),
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+  return drainSteps(stripForCacheSteps(body));
+}
+
+/** One container the strip is copying: its entries left to walk and the copy being built. */
+type StripFrame =
+  | {
+      readonly kind: "array";
+      readonly src: readonly unknown[];
+      readonly out: unknown[];
+      readonly depth: number;
+      readonly inMembers: boolean;
+      i: number;
     }
-    return out;
+  | {
+      readonly kind: "object";
+      readonly entries: readonly (readonly [string, unknown])[];
+      readonly out: Record<string, unknown>;
+      readonly depth: number;
+      i: number;
+    };
+
+/**
+ * stripForCache as resumable work: the same walk, with an explicit stack, yielding after every
+ * `nodesPerStep` nodes — a 1 MB roster body walked whole was one 20–30 ms turn on the owner's Mac
+ * (plan 03 §1.2's ≤ 20 ms batch; changelog §R10 timing items), so the requester walks a large body
+ * in turns of its own (`inTurns`). Drained, it is stripForCache: the same copy, its keys in the
+ * same order, an array's holes kept, the depth cut at the same depth.
+ */
+export function* stripForCacheSteps(
+  body: unknown,
+  nodesPerStep: number = STRIP_NODES_PER_STEP,
+): Generator<void, unknown, undefined> {
+  const per = Math.max(1, Math.trunc(nodesPerStep));
+  /** A node's copy when it is a leaf (or cut), else the frame that copies it. */
+  const open = (
+    v: unknown,
+    depth: number,
+    inMembers: boolean,
+  ): { readonly leaf: unknown } | { readonly frame: StripFrame } => {
+    if (depth > MAX_STRIP_DEPTH) return { leaf: null };
+    if (Array.isArray(v))
+      return {
+        frame: { kind: "array", src: v, out: new Array<unknown>(v.length), depth, inMembers, i: 0 },
+      };
+    if (typeof v !== "object" || v === null) return { leaf: v };
+    const entries = Object.entries(v).filter(
+      ([k]) =>
+        k !== "__proto__" &&
+        !ANYWHERE_DROPPED_KEYS.has(k) &&
+        !(inMembers && MEMBER_DROPPED_KEYS.has(k)),
+    );
+    return { frame: { kind: "object", entries, out: {}, depth, i: 0 } };
   };
-  return walk(body, 0, false);
+  /** Puts a finished child into its parent's copy at the parent's current entry. */
+  const place = (f: StripFrame, value: unknown): void => {
+    if (f.kind === "array") f.out[f.i] = value;
+    else {
+      const key = f.entries[f.i]?.[0];
+      if (key !== undefined)
+        Object.defineProperty(f.out, key, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
+    }
+    f.i += 1;
+  };
+  const root = open(body, 0, false);
+  if ("leaf" in root) return root.leaf;
+  const stack: StripFrame[] = [root.frame];
+  let walked = 0;
+  for (;;) {
+    const f = stack[stack.length - 1];
+    if (f === undefined) return root.frame.out;
+    if (f.kind === "array" ? f.i >= f.src.length : f.i >= f.entries.length) {
+      stack.pop();
+      const parent = stack[stack.length - 1];
+      if (parent === undefined) return f.out;
+      place(parent, f.out);
+      continue;
+    }
+    if (f.kind === "array" && !(f.i in f.src)) {
+      // a hole stays a hole (Array.prototype.map's copy)
+      f.i += 1;
+      continue;
+    }
+    const child =
+      f.kind === "array"
+        ? open(f.src[f.i], f.depth + 1, f.inMembers)
+        : open(f.entries[f.i]?.[1], f.depth + 1, f.entries[f.i]?.[0] === "members");
+    if ("frame" in child) stack.push(child.frame);
+    else place(f, child.leaf);
+    walked += 1;
+    if (walked % per === 0) yield;
+  }
 }
 
 /** The force_refresh gate: honoured at most once per 60 s per key (plan 01 §5.3). */

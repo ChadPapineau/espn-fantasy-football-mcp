@@ -175,6 +175,7 @@ import {
   mTeamSchema,
   mTransactions2Schema,
   parseView,
+  parseViewSteps,
   playersWlSchema,
   proTeamSchedulesSchema,
   type WireBoxscoreBody,
@@ -370,6 +371,12 @@ const parseSettingsAlone = (b: unknown): SettingsRead => ({
 const identityOf = (nav: WireNavBody | null): LeagueIdentity | null =>
   nav === null ? null : identityFromNav(nav);
 const parseRoster = (b: unknown): WireRosterBody => must("mRoster", mRosterSchema, b);
+/** parseRoster a team a step (parseViewSteps): a large roster's parse in turns of its own. */
+function* parseRosterSteps(b: unknown): Generator<void, WireRosterBody, undefined> {
+  const r = yield* parseViewSteps("mRoster", mRosterSchema, b, "teams", 1);
+  if (!r.ok) throw new SchemaSignals(r.signals);
+  return r.value;
+}
 const parseTeam = (b: unknown): WireTeamBody => {
   must("mStandings", mStandingsSchema, b);
   return must("mTeam", mTeamSchema, b);
@@ -956,6 +963,7 @@ export class EspnProvider implements FantasyPlatform {
         leagueId: ref.league_id,
         cookies: "auto",
         parse: parseRoster,
+        parseSteps: parseRosterSteps,
         provisional: (b) => this.provisional(ref.season, week, b.status.latestScoringPeriod),
       },
       opts,
