@@ -1,7 +1,7 @@
 // trade-slices.test.ts — E6's pair evaluations run one lineup solve per cooperative step (trade.ts
 // `Steps`, cooperative.ts runCooperativeSteps; plan 03 §1.2: the loop never blocks for more than one
 // ≤ 20 ms batch; changelog §R10 timing items: one partner-search package — its drops, the wire's
-// ranking, both sides' weeks — was one step of 30–45 ms of CPU on the owner's Mac). Counted, never
+// ranking, both sides' weeks — was one step of more than 50 lineup solves, counted). Counted, never
 // timed: every lineup solve runs inside a cooperative step; a step of a pair run (the partner search,
 // the counters, the offer's own pair) solves at most STEP_SOLVES — a fixed ceiling, never read from
 // the code it holds — and a Monte Carlo path at most 4 × the value weeks; one package is many solves

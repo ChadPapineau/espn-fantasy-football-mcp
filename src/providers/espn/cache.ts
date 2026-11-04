@@ -549,9 +549,10 @@ type StripFrame =
 
 /**
  * stripForCache as resumable work: the same walk, with an explicit stack, yielding after every
- * `nodesPerStep` nodes — a 1 MB roster body walked whole was one 20–30 ms turn on the owner's Mac
- * (plan 03 §1.2's ≤ 20 ms batch; changelog §R10 timing items), so the requester walks a large body
- * in turns of its own (`inTurns`). Drained, it is stripForCache: the same copy, its keys in the
+ * `nodesPerStep` nodes — league-c's 1 MB week-3 roster walked whole was one turn of about 10 ms of
+ * CPU beside a parse of about 12 (round 3's profile on the owner's Mac; plan 03 §1.2's ≤ 20 ms batch;
+ * changelog §R10 timing items), so the requester walks a large body through `inTurns`, which gives up
+ * the turn between steps once the slice has spent its share. Drained, it is stripForCache: the same copy, its keys in the
  * same order, an array's holes kept, the depth cut at the same depth.
  */
 export function* stripForCacheSteps(

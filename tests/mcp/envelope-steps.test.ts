@@ -1,13 +1,15 @@
 // envelope-steps.test.ts — a tool result's serialisation, schema check and result are steps of their
 // own (envelope.ts validatedToolResultSteps; define.ts runTool takes them through `inTurns`; plan 03
-// §1.2's ≤ 20 ms batch; changelog §R10 timing items: in one turn the three were 20–30 ms of an
-// analytics answer on the owner's Mac). The result is the one built from the envelope before — the
+// §1.2's ≤ 20 ms batch; changelog §R10 timing items: the three took up to about 5 ms of an analytics
+// answer beside its fit, round 3's profile on the owner's Mac). The result is the one built from the envelope before — the
 // same text block, the same structuredContent — and an invalid envelope's issues are the same; in a
 // served call, the tool body, the fit, the schema check and the result each run in a loop turn of
-// their own (a loop-turn counter, no wall time).
+// their own when the slice has spent its share (a meter that spends a slice a read), and a small
+// envelope takes no pass through the gate past the call's two (a frozen meter; round 3's review of
+// changelog §R10's timing items). A loop-turn counter and the gate's own count, no wall time.
 import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
-import { drainSteps } from "../../src/domain/analytics/cooperative.js";
+import { drainSteps, grantedTurns } from "../../src/domain/analytics/cooperative.js";
 import { defineTool, outputSchemaOf, runTool } from "../../src/mcp/define.js";
 import {
   serializeEnvelope,
@@ -17,6 +19,7 @@ import {
   type Envelope,
 } from "../../src/mcp/envelope.js";
 import type { McpServices } from "../../src/mcp/services.js";
+import { frozenMeter, spendingMeter, withSliceMeter } from "../domain/analytics/slice-meter.js";
 
 /** One increment per event-loop iteration (an immediate queued inside an immediate runs next turn). */
 function turnCounter(): { now: () => number; stop: () => void } {
@@ -104,8 +107,8 @@ describe("validatedToolResultSteps", () => {
   });
 });
 
-describe("runTool: the body, the fit, the check and the result in turns of their own", () => {
-  it("the output schema's check runs in a turn after the tool body's, and the reply after it", async () => {
+describe("runTool: the body, the fit, the check and the result in turns of their own when they cost one", () => {
+  it("a slice spent at every read: the output schema's check runs in a turn after the tool body's, and the reply after it", async () => {
     const turns = turnCounter();
     const seen: Partial<Record<"body" | "check" | "reply", number>> = {};
     const checked = z.strictObject({
@@ -125,11 +128,25 @@ describe("runTool: the body, the fit, the check and the result in turns of their
         return Promise.resolve({ data: { rows: [{ k: 1, s: "a" }] }, inputs: [] });
       },
     });
-    const r = await runTool(t, {}, { requestId: "r-0123456789ab" }, services, options);
+    const r = await withSliceMeter(spendingMeter(), () =>
+      runTool(t, {}, { requestId: "r-0123456789ab" }, services, options),
+    );
     seen.reply = turns.now();
     turns.stop();
     expect(r.structuredContent).toBeDefined();
     expect(seen.check).toBeGreaterThan(seen.body ?? Infinity);
     expect(seen.reply).toBeGreaterThan(seen.check ?? Infinity);
+  });
+
+  it("counted: a small envelope takes no pass through the gate past the call's two (round 3's review)", async () => {
+    // the call's own turn and the envelope's are unconditional (Stage C); the check's steps give up
+    // the turn only once the slice has spent SLICE_CPU_MS. A pass per step (85f147f: five a call)
+    // made a warm espn_get_standings wait behind every queued slice three times over
+    const before = grantedTurns();
+    const r = await withSliceMeter(frozenMeter, () =>
+      runTool(rowsTool, {}, { requestId: "r-0123456789ab" }, services, options),
+    );
+    expect(r.structuredContent).toBeDefined();
+    expect(grantedTurns() - before).toBe(2);
   });
 });

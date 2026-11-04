@@ -91,8 +91,8 @@ export function parseView<T>(view: EspnView, schema: z.ZodType<T>, body: unknown
  * parseView as resumable work for a body whose bulk is one array field of an object schema (`split`:
  * mRoster's `teams`): the array's elements are parsed `per` a step against the field's element
  * schema, then the rest of the body in one more step, and the elements' outputs put in the field —
- * a 1 MB roster's parse was one 20–30 ms turn on the owner's Mac (plan 03 §1.2's ≤ 20 ms batch;
- * changelog §R10 timing items). The same value as parseView: the object's own output with the field
+ * league-c's 1 MB week-3 roster parsed in one turn of about 12–14 ms of CPU, round 3's profile on
+ * the owner's Mac (plan 03 §1.2's ≤ 20 ms batch; changelog §R10 timing items). The same value as parseView: the object's own output with the field
  * in its place. Any failure returns parseView of the whole body, so the signals name the same paths
  * in the same order; a schema the split cannot read exactly the same way (not an object without
  * checks, the field not a plain array without checks) and a short array are parsed whole.

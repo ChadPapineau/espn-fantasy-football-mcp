@@ -1,7 +1,7 @@
 // evidence-extracted.test.ts — E10 reads the claims the tool already read (evidence.ts
 // EvidenceRequest.extracted; market-p1.ts reads every text's claim one text per cooperative step,
-// changelog §R10 timing items: a cold call ran every text's rules pass in one turn of 76 ms of CPU on
-// the owner's Mac). rules_v1 is pure, so the answer with the tool's reads is byte-identical to the
+// changelog §R10 timing items: a cold call ran every text's rules pass in its longest turn, 20–26 ms
+// of CPU on the owner's Mac by the heartbeat's cpu_max over 10 fresh servers, round 3's review). rules_v1 is pure, so the answer with the tool's reads is byte-identical to the
 // answer that reads every text itself — over random texts of every claim source, the ambiguous
 // ones and the user's pasted claim included — and the engine reads no text the map holds. The map is
 // really read: a map that holds another answer for a text changes the item (the property is not

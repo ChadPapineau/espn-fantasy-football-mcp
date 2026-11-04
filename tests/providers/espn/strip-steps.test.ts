@@ -1,7 +1,7 @@
 // strip-steps.test.ts — the cache strip of a large ESPN body walks it in steps (cache.ts
 // stripForCacheSteps; request.ts runs a body over YIELD_BEFORE_PARSE_CHARS through `inTurns`; plan 03
-// §1.2's ≤ 20 ms batch; changelog §R10 timing items: the strip of a 1 MB roster was one 20–30 ms turn
-// on the owner's Mac). The copy is the one the recursive walk made before (its code kept here as the
+// §1.2's ≤ 20 ms batch; changelog §R10 timing items: the strip of league-c's 1 MB week-3 roster was
+// one turn of about 10 ms of CPU beside its 12 ms parse, round 3's profile on the owner's Mac). The copy is the one the recursive walk made before (its code kept here as the
 // oracle): the same keys in the same order, member names and IP fields dropped, `__proto__` never
 // copied, holes kept, the depth cut at the same depth — over recorded bodies and random JSON, for any
 // step size. Counted, never timed: no step reads more than STEP_NODES of the body's values — a fixed

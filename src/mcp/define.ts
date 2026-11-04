@@ -13,7 +13,7 @@ import type {
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
-import { inTurns, yieldTurn } from "../domain/analytics/cooperative.js";
+import { inTurns, turnIfSpent, yieldTurn } from "../domain/analytics/cooperative.js";
 import { threadCpuClock } from "../domain/clock.js";
 import { createUpstreamBudget, type UpstreamBudget } from "../providers/platform.js";
 import {
@@ -633,8 +633,11 @@ export async function runTool(
     log.error("tool.over_budget", { request_id: ctx.requestId, tool: def.name, size: fit.size });
     throw new EffError("INTERNAL");
   }
-  // its serialisation, schema check and result in turns of their own (validatedToolResultSteps)
-  await yieldTurn();
+  // its serialisation, schema check and result as steps (validatedToolResultSteps) that give up the
+  // turn once the slice has spent its share of CPU: a large analytics answer's check takes turns of
+  // its own, a small envelope's costs no pass through the gate (round 3's review of changelog §R10's
+  // timing items: an unconditional pass per step tripled espn_get_standings under parallel calls)
+  await turnIfSpent();
   const result = await inTurns(
     validatedToolResultSteps(fit.envelope, outputSchemaOf(def), {
       wireOutputSchema: def.wire !== "none",

@@ -220,8 +220,9 @@ const activeOf = (players: readonly TradePlayer[]): TradePlayer[] =>
 /**
  * Resumable work: it yields after each lineup solve it makes (a memoised value is no solve), so a
  * cooperative step is at most one solve however large the unit of work — one trade package's
- * evaluation solves hundreds (its drops, the wire's ranking, both sides' weeks), 30–45 ms of CPU in
- * one step on the owner's Mac before (plan 03 §1.2's ≤ 20 ms batch; changelog §R10 timing items).
+ * evaluation solves many (its drops, the wire's ranking, both sides' weeks): more than 50 in one step
+ * before, counted by trade-slices.test.ts (plan 03 §1.2's ≤ 20 ms batch; changelog §R10 timing items;
+ * on fx-10h the longest CPU turn read 12–19 ms before and after, round 3's review on the owner's Mac).
  * Drained, it is the same computation in the same order: the same answer (drainSteps).
  */
 type Steps<T> = Generator<void, T, undefined>;

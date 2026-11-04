@@ -1,11 +1,15 @@
-// evidence-steps.test.ts — espn_analyze_evidence reads its datasets in turns of their own and every
-// text's claim in a cooperative step (market-p1.ts E10; plan 03 §1.2: the loop never blocks for more
-// than one SQLite statement or one ≤ 20 ms CPU batch; changelog §R10 timing items: a cold call ran
-// its dataset reads, its claim extraction and its assembly in one turn of 76 ms of CPU on the owner's
-// Mac). Counted, never timed: every rules_v1 read of the call (a clause, an item, a text) runs inside
-// a cooperative step; no step reads more than STEP_CHARS of text — a fixed ceiling, one outlook's
-// cap — while the call reads many times that; and each bulk dataset read sits in a loop turn with no
-// other bulk read and no claim read. The tool on league-a under EFF_TOOLSET=full with the news reader
+// evidence-steps.test.ts — espn_analyze_evidence gives up the loop turn between its dataset reads once
+// the slice has spent its share, and reads every text's claim in a cooperative step (market-p1.ts E10;
+// plan 03 §1.2: the loop never blocks for more than one SQLite statement or one ≤ 20 ms CPU batch;
+// changelog §R10 timing items: a cold call ran its dataset reads, its claim extraction and its
+// assembly in its longest turn, 20–26 ms of CPU on the owner's Mac by the heartbeat's cpu_max over 10
+// fresh servers, round 3's review). Counted, never timed: every rules_v1 read of the call (a clause,
+// an item, a text) runs inside a cooperative step; no step reads more than STEP_CHARS of text — a
+// fixed ceiling, one outlook's cap — while the call reads many times that; with every bulk dataset
+// read spending a full slice (a slice meter) and nothing else any, each sits in a loop turn with no
+// other bulk read and no claim read; and on a frozen meter a warm call takes WARM_PASSES passes
+// through the turn gate, no more (round 3's review: a pass at every read and step made it 20 times
+// slower beside parallel calls). The tool on league-a under EFF_TOOLSET=full with the news reader
 // injected (eight items, multi-player ones among them); no network.
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -15,9 +19,17 @@ import type { DatasetStamp, NewsItem } from "../../src/domain/analytics/types.js
 import { wrapUntrusted } from "../../src/mcp/envelope.js";
 import type { McpServices } from "../../src/mcp/services.js";
 import { call, connect, makeWorld, type World } from "./helpers/world.js";
+import { SLICE_CPU_MS, grantedTurns } from "../../src/domain/analytics/cooperative.js";
+import { frozenMeter, manualMeter, withSliceMeter } from "../domain/analytics/slice-meter.js";
 
 /** The most text one cooperative step may read for claims: a literal — one ESPN outlook's cap. */
 const STEP_CHARS = 1200;
+/**
+ * The passes through the turn gate a warm call takes when no slice spends its share: the call's own
+ * turn, the texts' cooperative run before and after its one batch, and the envelope's turn. A
+ * literal (85f147f took about 23: a pass at every dataset read and every inTurns step, three runs).
+ */
+const WARM_PASSES = 4;
 
 /** What the claim reads and the steps saw (shared with the module mocks, hoisted above them). */
 const probe = vi.hoisted(() => ({
@@ -54,6 +66,17 @@ vi.mock("../../src/domain/evidence/claims.js", async (importOriginal) => {
 });
 vi.mock("../../src/domain/analytics/cooperative.js", async (importOriginal) => {
   const m = await importOriginal<typeof Cooperative>();
+  /** One step of a cooperative run, its claim text counted. */
+  const counted = <R>(step: () => R): R => {
+    const outer = probe.open;
+    probe.open = 0;
+    try {
+      return step();
+    } finally {
+      if (probe.on) probe.steps.push(probe.open);
+      probe.open = outer;
+    }
+  };
   return {
     ...m,
     runCooperative: (
@@ -64,14 +87,19 @@ vi.mock("../../src/domain/analytics/cooperative.js", async (importOriginal) => {
       m.runCooperative(
         units,
         (i) => {
-          const outer = probe.open;
-          probe.open = 0;
-          try {
+          counted(() => {
             step(i);
-          } finally {
-            if (probe.on) probe.steps.push(probe.open);
-            probe.open = outer;
-          }
+          });
+        },
+        opts,
+      ),
+    runCooperativeSteps: <T>(
+      work: Iterator<unknown, T, undefined>,
+      opts: Cooperative.CooperativeOptions,
+    ) =>
+      m.runCooperativeSteps<T>(
+        {
+          next: () => counted(() => work.next()),
         },
         opts,
       ),
@@ -140,11 +168,15 @@ const BULK = new Set([
   "rosterWeekly.latest",
 ]);
 
-/** `obj` with every method recording `name.method` and the loop turn it ran in. */
+/**
+ * `obj` with every method recording `name.method` and the loop turn it ran in; a bulk read spends a
+ * full slice on the meter (a cold read opens its file: the slice has spent its share after it).
+ */
 function recorded<T extends object>(
   obj: T,
   name: string,
   log: { read: string; turn: number }[],
+  meter?: { spend: (ms: number) => void },
 ): T {
   return new Proxy(obj, {
     get(t, p, r) {
@@ -152,6 +184,7 @@ function recorded<T extends object>(
       if (typeof v !== "function" || typeof p !== "string") return v;
       return (...a: unknown[]) => {
         if (probe.on) log.push({ read: `${name}.${p}`, turn: probe.turn() });
+        if (BULK.has(`${name}.${p}`)) meter?.spend(SLICE_CPU_MS);
         return (v as (...x: unknown[]) => unknown).apply(t, a);
       };
     },
@@ -187,24 +220,29 @@ describe("E10's slices: turns for the reads, a cooperative step per text (counte
       gsis_ids: k % 2 === 0 ? [subject.gsis] : [subject.gsis, mate.gsis],
     }));
     const log: { read: string; turn: number }[] = [];
+    // every bulk read costs a full slice and nothing else costs any: each bulk read must end its
+    // turn by the slice account alone (turnIfSpent, inTurns), however cheap the work around it
+    const meter = manualMeter();
     const ds = world.services.datasets;
     const datasets = Object.fromEntries(
       Object.entries({ ...ds, news: { recent: () => ({ rows: items, stamp }) } }).map(([k, v]) => [
         k,
-        recorded(v as object, `datasets.${k}`, log),
+        recorded(v as object, `datasets.${k}`, log, meter),
       ]),
     ) as unknown as McpServices["datasets"];
     const services: Partial<McpServices> = {
       datasets,
-      playerUniverse: recorded(world.services.playerUniverse, "playerUniverse", log),
-      rosterWeekly: recorded(world.services.rosterWeekly, "rosterWeekly", log),
+      playerUniverse: recorded(world.services.playerUniverse, "playerUniverse", log, meter),
+      rosterWeekly: recorded(world.services.rosterWeekly, "rosterWeekly", log, meter),
     };
     const c = await connect(world, { options: { toolset: "full" }, services });
     const turns = turnCounter();
     Object.assign(probe, { on: true, outside: 0, steps: [], claimTurns: [], turn: turns.now });
     let r: Awaited<ReturnType<typeof call>>;
     try {
-      r = await call(c.client, "espn_analyze_evidence", { player: { player_ids: [subject.id] } });
+      r = await withSliceMeter(meter, () =>
+        call(c.client, "espn_analyze_evidence", { player: { player_ids: [subject.id] } }),
+      );
     } finally {
       probe.on = false;
       turns.stop();
@@ -235,5 +273,23 @@ describe("E10's slices: turns for the reads, a cooperative step per text (counte
         b.read,
       ).toEqual([]);
     }
+  }, 120_000);
+  it("counted: a warm call on a frozen meter takes a fixed number of passes through the gate", async () => {
+    // round 3's review of changelog §R10's timing items: an unconditional pass at every dataset read,
+    // three cooperative runs and a pass per inTurns step made a warm call wait behind every queued
+    // slice — 1.2 s instead of 60 ms beside 10 parallel lineup calls. On a frozen meter only the
+    // passes no slice account can skip remain
+    const args = { player: { player_ids: [subject.id] } };
+    await call(client, "espn_analyze_evidence", args);
+    const before = grantedTurns();
+    const r = await withSliceMeter(frozenMeter, () => call(client, "espn_analyze_evidence", args));
+    const passes = grantedTurns() - before;
+    expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+    expect(passes).toBeLessThanOrEqual(WARM_PASSES);
+    // and the answer is the one the default meter gives
+    const plain = await call(client, "espn_analyze_evidence", args);
+    expect(JSON.stringify((r.body as { data: unknown }).data)).toBe(
+      JSON.stringify((plain.body as { data: unknown }).data),
+    );
   }, 120_000);
 });

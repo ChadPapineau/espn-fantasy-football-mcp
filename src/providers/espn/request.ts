@@ -182,9 +182,10 @@ export interface ReadSpec<T> {
   readonly parse: (body: unknown) => T;
   /**
    * `parse` as resumable work (the same value, the same SchemaSignals): a large body's schema parse
-   * runs in turns of its own, a slice a step (mRoster: one team a step — the 1 MB roster's parse was
-   * one 20–30 ms turn on the owner's Mac; plan 03 §1.2, changelog §R10 timing items). Absent: `parse`
-   * in one turn.
+   * runs a slice a step, giving up the turn once the slice has spent its share (`inTurns`; mRoster:
+   * one team a step — league-c's 1 MB week-3 roster parsed in one turn of about 12–14 ms of CPU, its
+   * strip of about 10 ms beside it, round 3's profile on the owner's Mac; plan 03 §1.2, changelog §R10
+   * timing items). Absent: `parse` in one turn.
    */
   readonly parseSteps?: (body: unknown) => Generator<void, T, undefined>;
   /** The stamp's provisional flag for this read (from the parsed value). */

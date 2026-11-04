@@ -595,9 +595,11 @@ export function usageOf(
 /**
  * usageOf as resumable work: it yields after each of its two dataset reads (the weekly stats, the
  * expected points), so a caller with the event loop to share reads them in turns of their own
- * (`inTurns`; plan 03 §1.2 — a cold read opens its dataset file: E10's one turn of 76 ms of CPU on
- * the owner's Mac held both of these with its other reads and its claim extraction, changelog §R10
- * timing items). Drained, it is usageOf.
+ * (`inTurns`, which gives up the turn once the slice has spent its share; plan 03 §1.2 — a cold
+ * read opens its dataset file: a cold E10 call's longest CPU turn, both of these in it with its
+ * other reads and its claim extraction, was 20–26 ms on the owner's Mac by the heartbeat's
+ * cpu_max over 10 fresh servers, round 3's review; changelog §R10 timing items). Drained, it is
+ * usageOf.
  */
 export function* usageSteps(
   ctx: ToolContext,

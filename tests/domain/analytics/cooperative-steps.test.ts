@@ -3,17 +3,24 @@
 // ≤ 20 ms CPU batch; changelog §R10 timing items). runCooperativeSteps runs a generator's steps in
 // runCooperative's batches — every step once, in order, the same yields for the same work — returns
 // the work's value, and its deadline stops it between two steps; drainSteps is the same work in one
-// go; inTurns ends a loop turn at every yield. Deterministic pacers and a loop-turn counter; no wall
-// time is asserted.
+// go; inTurns gives up the loop turn at a yield once the slice has spent SLICE_CPU_MS (round 3's
+// review of changelog §R10's timing items), so cheap steps share a turn. Deterministic pacers, slice
+// meters and a loop-turn counter; no wall time is asserted.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  SLICE_CPU_MS,
   drainSteps,
+  grantedTurns,
   inTurns,
   runCooperative,
   runCooperativeSteps,
+  sliceSpentMs,
+  turnIfSpent,
+  yieldTurn,
 } from "../../../src/domain/analytics/cooperative.js";
 import { instantPacer, steppingPacer } from "./helpers.js";
+import { frozenMeter, manualMeter, spendingMeter, withSliceMeter } from "./slice-meter.js";
 
 /** n steps of work: each step records its index; the value is the count. */
 function* counting(n: number, log: number[]): Generator<void, number, undefined> {
@@ -115,22 +122,101 @@ describe("runCooperativeSteps", () => {
   });
 });
 
-describe("inTurns", () => {
-  it("each yield of the work ends a loop turn: no two steps share one", async () => {
+describe("inTurns and turnIfSpent: a turn given up once the slice has spent its share", () => {
+  /** Six steps recording the loop turn each ran in; `cost` ms of the meter spent a step. */
+  function* sixSteps(
+    seen: number[],
+    turns: { now: () => number },
+    spend: (ms: number) => void = () => undefined,
+    cost = 0,
+  ): Generator<void, string, undefined> {
+    for (let i = 0; i < 6; i++) {
+      seen.push(turns.now());
+      spend(cost);
+      yield;
+    }
+    seen.push(turns.now());
+    return "done";
+  }
+
+  it("a meter that spends a slice a read: each yield of the work ends a loop turn, no two steps share one", async () => {
     const turns = turnCounter();
     const seen: number[] = [];
-    function* work(): Generator<void, string, undefined> {
-      for (let i = 0; i < 6; i++) {
-        seen.push(turns.now());
-        yield;
-      }
-      seen.push(turns.now());
-      return "done";
-    }
-    expect(await inTurns(work())).toBe("done");
+    const before = grantedTurns();
+    expect(await withSliceMeter(spendingMeter(), () => inTurns(sixSteps(seen, turns)))).toBe(
+      "done",
+    );
     turns.stop();
     expect(seen).toHaveLength(7);
     for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThan(seen[i - 1] ?? 0);
+    expect(grantedTurns() - before).toBe(6);
+  });
+
+  it("a frozen meter: cheap steps share the caller's turn and take no pass through the gate", async () => {
+    // round 3's review of changelog §R10's timing items: a pass per step made every cheap step wait
+    // behind every slice queued, 2–20 times slower under parallel calls
+    const turns = turnCounter();
+    const seen: number[] = [];
+    const before = grantedTurns();
+    // the account starts unknown (−∞): one release first, then the slice is counted from it
+    await withSliceMeter(frozenMeter, async () => {
+      await yieldTurn();
+      expect(await inTurns(sixSteps(seen, turns))).toBe("done");
+    });
+    turns.stop();
+    expect(new Set(seen).size).toBe(1);
+    expect(grantedTurns() - before).toBe(1);
+  });
+
+  it("steps of 3 ms each: a turn holds the steps that fit SLICE_CPU_MS, then gives it up", async () => {
+    const meter = manualMeter();
+    const turns = turnCounter();
+    const seen: number[] = [];
+    await withSliceMeter(meter, async () => {
+      await yieldTurn();
+      await inTurns(sixSteps(seen, turns, meter.spend, 3));
+    });
+    turns.stop();
+    // 3 + 3 + 3 = 9 ≥ 8: three steps a turn, never more, and more than one (the batching is real)
+    const perTurn = [...new Set(seen.slice(0, 6))].map(
+      (t) => seen.slice(0, 6).filter((x) => x === t).length,
+    );
+    expect(Math.max(...perTurn)).toBe(Math.ceil(SLICE_CPU_MS / 3));
+    expect(perTurn).toEqual([3, 3]);
+  });
+
+  it("turnIfSpent: no pass while the slice is under its share, one once it has spent it", async () => {
+    const meter = manualMeter();
+    await withSliceMeter(meter, async () => {
+      // unknown start (−∞ after the swap): the first check yields
+      let before = grantedTurns();
+      await turnIfSpent();
+      expect(grantedTurns() - before).toBe(1);
+      expect(sliceSpentMs()).toBe(0);
+      before = grantedTurns();
+      meter.spend(SLICE_CPU_MS - 1);
+      await turnIfSpent();
+      expect(grantedTurns() - before).toBe(0);
+      meter.spend(1);
+      await turnIfSpent();
+      expect(grantedTurns() - before).toBe(1);
+      expect(sliceSpentMs()).toBe(0);
+    });
+  });
+
+  it("the slice account counts from the gate's last release, whichever waiter it released", async () => {
+    const meter = manualMeter();
+    await withSliceMeter(meter, async () => {
+      // two waiters: each one's slice is counted from its own release, the other's CPU before it
+      // never charged to it
+      const a = yieldTurn().then(() => {
+        meter.spend(5);
+        return sliceSpentMs();
+      });
+      const b = yieldTurn().then(() => sliceSpentMs());
+      expect(await a).toBe(5);
+      expect(await b).toBe(0);
+    });
   });
 
   it("work that never yields is answered in the caller's turn; an error propagates", async () => {

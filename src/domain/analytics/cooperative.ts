@@ -37,6 +37,27 @@ export interface Pacer {
 /** Waiters for a turn, first come first served. */
 const turnQueue: (() => void)[] = [];
 /**
+ * The thread CPU a slice may spend before a conditional yield (turnIfSpent, inTurns between steps)
+ * gives up its turn. Every pass through the gate waits behind every slice queued before it, so a
+ * yield that a cheap slice did not need costs a call one more wait — under 10 parallel analytics
+ * calls a warm espn_get_standings took 325 ms instead of 100–130 ms, and a warm
+ * espn_analyze_evidence 1.2 s instead of 60 ms, when every step gave up its turn (round 3's review
+ * of changelog §R10's timing items). 8 ms leaves a step's worth of room under plan 03 §1.2's ≤ 20 ms
+ * batch.
+ */
+export const SLICE_CPU_MS = 8;
+/** The CPU meter the slice account reads: the thread's (setSliceMeter swaps it for tests). */
+let sliceMeter: CpuClock = threadCpuClock;
+/**
+ * The meter's reading when the gate last released a waiter: the slice running now started there or
+ * later, so the CPU spent since is an upper bound on its own (a slice the gate did not release — a
+ * request read from stdin, an I/O completion — is counted from the last release before it, which
+ * over-counts: it only ever yields sooner). −∞ until the first release: the first check yields.
+ */
+let sliceStart = Number.NEGATIVE_INFINITY;
+/** Waiters the gate has released since load (diagnostics and tests: a call's turn count). */
+let granted = 0;
+/**
  * The real `setImmediate`, read once at load: a test that later installs fake timers must not swallow
  * the gate's pending release (the queue's flag would then stay set and every later run would wait).
  */
@@ -51,6 +72,8 @@ function releaseTurn(): void {
     releasing = false;
     return;
   }
+  granted += 1;
+  sliceStart = sliceMeter.cpuMs();
   next();
   // an immediate queued from inside an immediate callback runs in the NEXT loop iteration: timers,
   // stdin, the ppid watchdog and the shutdown handler run between two released slices
@@ -82,6 +105,39 @@ export function yieldTurn(): Promise<void> {
 /** Waiters queued for a turn now (diagnostics and tests). */
 export function pendingTurns(): number {
   return turnQueue.length;
+}
+
+/** Waiters the gate has released since load (diagnostics and tests: count a call's turns). */
+export function grantedTurns(): number {
+  return granted;
+}
+
+/** The CPU spent since the gate's last release: at least the running slice's own (ms). */
+export function sliceSpentMs(): number {
+  return sliceMeter.cpuMs() - sliceStart;
+}
+
+/**
+ * Swaps the slice account's meter and returns the one it replaces (tests: a frozen meter makes every
+ * conditional yield pass, one that moves a slice a read makes every one yield). The account restarts
+ * (−∞: the next check yields), since two meters' readings do not compare.
+ */
+export function setSliceMeter(meter: CpuClock): CpuClock {
+  const previous = sliceMeter;
+  sliceMeter = meter;
+  sliceStart = Number.NEGATIVE_INFINITY;
+  return previous;
+}
+
+/**
+ * yieldTurn only when the slice running now has spent SLICE_CPU_MS of CPU (sliceSpentMs); otherwise
+ * the caller goes on in the same turn (a resolved promise: microtasks, no loop pass). For a yield
+ * between two short synchronous sections whose cost depends on what is warm (a dataset read, a
+ * cached parse): a cold section gives up the turn after it, a warm one does not cost a pass through
+ * the gate (round 3's review of changelog §R10's timing items).
+ */
+export async function turnIfSpent(): Promise<void> {
+  if (sliceSpentMs() >= SLICE_CPU_MS) await yieldTurn();
 }
 
 /**
@@ -250,15 +306,17 @@ export function drainSteps<T>(work: Generator<unknown, T, undefined>): T {
 
 /**
  * Runs resumable synchronous work with the event loop running between its steps, through the
- * process-wide turn gate (yieldTurn): each `yield` of `work` ends a turn. No deadline and no
- * pacer: for a fixed transform of one value (the cache strip of a large ESPN body, a large view's
- * schema parse — plan 03 §1.2, changelog §R10 timing items) whose answer is the drain's.
+ * process-wide turn gate: at a `yield` of `work` the turn ends once the slice has spent
+ * SLICE_CPU_MS of CPU (turnIfSpent), so cheap steps share a turn and a pass through the gate is
+ * taken only for work that needs one. No deadline and no pacer: for a fixed transform of one value
+ * (the cache strip of a large ESPN body, a large view's schema parse, a tool result's check — plan
+ * 03 §1.2, changelog §R10 timing items) whose answer is the drain's.
  */
 export async function inTurns<T>(work: Generator<unknown, T, undefined>): Promise<T> {
   for (;;) {
     const r = work.next();
     if (r.done === true) return r.value;
-    await yieldTurn();
+    if (sliceSpentMs() >= SLICE_CPU_MS) await yieldTurn();
   }
 }
 
