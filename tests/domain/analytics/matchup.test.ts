@@ -613,6 +613,38 @@ function rawWeekGames(variant: string): Map<number, { kickoff: number; official:
   return out;
 }
 
+/**
+ * ESPN's `winProbability` for my side of the week's matchup, read from the variant's raw body (its
+ * manifest's mMatchupScore view, the patch applied) — never a pinned literal, so a regenerated
+ * variant (round 2's eval-case triage moved sunday-live's to more than 0.15 from ours) still holds.
+ */
+function rawEspnWinProbability(variant: string): number {
+  const dir = path.join(FX10H, variant);
+  const m = readDerivedManifest(dir);
+  const v = m?.views.find(
+    (x) => x.views.includes("mMatchupScore") && x.scoringPeriodId === FX_WEEK,
+  );
+  if (v === undefined) throw new Error("no week matchup view");
+  const root = path.resolve(FX10H, "..");
+  const read = (rel: string): unknown =>
+    JSON.parse(readFileSync(path.join(root, rel), "utf8")) as unknown;
+  const body = (
+    v.patch === undefined ? read(v.path) : applyJsonPatch(read(v.path), read(v.patch))
+  ) as {
+    schedule: {
+      matchupPeriodId?: number;
+      home?: { teamId: number; winProbability?: number };
+      away?: { teamId: number; winProbability?: number };
+    }[];
+  };
+  for (const g of body.schedule) {
+    if (g.matchupPeriodId !== FX_WEEK) continue;
+    const side = g.home?.teamId === MY_TEAM ? g.home : g.away?.teamId === MY_TEAM ? g.away : null;
+    if (side !== null && typeof side.winProbability === "number") return side.winProbability;
+  }
+  throw new Error("no ESPN win probability for my side");
+}
+
 async function liveInputs(fx: FxLeague): Promise<{ me: MatchupPlayer[]; opp: MatchupPlayer[] }> {
   const box = fx.box.find((b) => b.home.team_id === MY_TEAM || b.away?.team_id === MY_TEAM);
   if (box === undefined) throw new Error("no week-5 box score for my team");
@@ -732,7 +764,10 @@ describe("plan 10 B9 (hard): fx-10h sunday-live and all-locked through the provi
       if (occupants.every((p) => p.player.locked) && occupants.length === seats)
         expect(actionableIds.has(id)).toBe(false);
     }
-    expect(out.data.espn_cross_check?.win_probability_espn).toBeCloseTo(0.4853, 4);
+    expect(out.data.espn_cross_check?.win_probability_espn).toBeCloseTo(
+      rawEspnWinProbability("sunday-live"),
+      4,
+    );
     expect(out.data.p_win).toBeGreaterThan(0);
     expect(out.data.p_win).toBeLessThan(1);
   });
