@@ -15,7 +15,7 @@
   "harness": { "credential_state": "stored", "probe": { "accepted": null, "reason": "board_not_discriminating", "probe": "board" } },
   "notes": ["server state only: credential stored; the league is public"],
   "variant": "public-league",
-  "describes": "a public league with a stored, not yet validated credential: bodies as base (public); fixture mode reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result; fixture mode sends no cookie, so the transaction feed answers keylessly and pending claims, never read keyless, answer pending: null (changelog §R10, R10-10)",
+  "describes": "a public league with a stored, not yet validated credential: bodies as base (public); fixture mode reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result; fixture mode sends no cookie, so the transaction feed answers keylessly and pending claims are served from the recorded mPendingTransactions (pending: []), as a session read would be under the stored label (changelog §R10, R10-21)",
   "views": [
     { "route": "league", "season": 2026, "views": ["mSettings"], "scoringPeriodId": null, "path": "fx-10h/league/mSettings.json", "derived": true },
     { "route": "league", "season": 2026, "views": ["mNav"], "scoringPeriodId": null, "path": "fx-10h/league/mNav.json", "derived": true },

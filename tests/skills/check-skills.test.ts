@@ -27,6 +27,12 @@ import {
   LINEUP_REC_SENTENCE,
   PENDING_NULL_SENTENCE,
   RETRO_NOTE_SENTENCE,
+  ACTIVITY_PARTIAL_FRAGMENTS,
+  ACTIVITY_PARTIAL_SENTENCE,
+  ACTIVITY_REFUSAL_SENTENCE,
+  LIVE_COUNTS_SENTENCE,
+  RETRO_TRUNCATED_SENTENCE,
+  TRIM_WARNING_ABSENT,
   pendingReadProblems,
   ORIENT_REJECTED,
   ORIENT_SENTENCES,
@@ -881,12 +887,14 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
       'then the rec of step 6 — its action, or **"No move"** when `rec.no_move` is true (a swap it holds is named as a coin flip, never as the move)',
       "then the single best swap among unlocked slots",
     ],
-    // SK-8: the game-state split while the scoreboard's counts are null
-    [
-      "start-sit",
-      " — each starter by the fresh roster's `game_state` (`final` or `bye` counts as final, `in` as live, `pre` or `tbd` as pending) when the scoreboard's `players` counts are null",
-      "",
-    ],
+    // plan 07 A4 (the round-3b product account): the scoreboard's counts first, the roster's game
+    // state (SK-8's classes) only when they are null
+    ["start-sit", LIVE_COUNTS_SENTENCE, "read from each starter's game state"],
+    // changelog §R10, R10-11 and R10-18: E11's partial lines and its refusal on the settings
+    ["weekly", ACTIVITY_PARTIAL_SENTENCE, "**P1:** `espn_analyze_league_activity` can be partial."],
+    ["weekly", ACTIVITY_REFUSAL_SENTENCE, "When it fails, say so."],
+    // changelog §R10, R10-20: a truncated retrospective says how many calls it scored
+    ["retro", RETRO_TRUNCATED_SENTENCE, "When the result is truncated, say so."],
   ])("%s: check-skills fails when the fixed sentence %j is gone", (skill, from, to) => {
     const t = fresh();
     t.edit(`skills/${skill}/SKILL.md`, from, to);
@@ -1101,7 +1109,7 @@ describe("the body (plan 09 §2, §5.1 item 2)", () => {
     const t = fresh();
     t.edit(
       "skills/_shared/references/tool-outputs.md",
-      "without one, `pending` is null and a warning says why",
+      "with none stored, or with the stored one rejected, `pending` is null and its warning says which",
       "without one, it is empty",
     );
     buildSkills({ root: t.root });
@@ -2546,6 +2554,12 @@ describe("the untrusted-text guards and ruling sentences are held (the round-3 v
       'then the rec of step 6 — its action, or **"No move"** when `rec.no_move` is true (a swap it holds is named as a coin flip, never as the move)',
       "then the single best swap among unlocked slots",
     ],
+    // round 3b's roster-first split, from when the server's counts were always null
+    [
+      "start-sit",
+      LIVE_COUNTS_SENTENCE,
+      `${LIVE_COUNTS_SENTENCE}; each starter by the fresh roster's \`game_state\` (\`final\` or \`bye\` counts as final, \`in\` as live, \`pre\` or \`tbd\` as pending) when the scoreboard's \`players\` counts are null`,
+    ],
   ])("%s: check-skills refuses %j reverted to %j", (skill, from, to) => {
     const t = fresh();
     t.edit(`skills/${skill}/SKILL.md`, from, to);
@@ -2601,5 +2615,77 @@ describe("the untrusted-text guards and ruling sentences are held (the round-3 v
     expect(errorsOf(t)).toContain(
       "skills/retro/SKILL.md: reads pending claims (espn_list_transactions with pending: true) without the pending: null sentence",
     );
+  });
+});
+
+// changelog §R10, R10-22: rec.lineup is E2's mean-optimal assignment, so the trim-warning wording
+// that said it carries the lineup (round 3b's server need) comes back in no body and not in the
+// cheat-sheet; the server's second warning ("the whole mean-optimal assignment") is not that wording
+describe("the withdrawn trim-warning wording stays out (changelog §R10, R10-22)", () => {
+  it.each([
+    "rec.subjects lists only the players who move (rec.lineup carries the lineup)",
+    "recommended_lineup lists only the players who move (rec.lineup carries the whole lineup)",
+    "`rec.lineup` carries the lineup",
+    "REC.LINEUP CARRIES THE WHOLE LINEUP",
+  ])("refuses %j in a body and in the cheat-sheet", (old) => {
+    expect(TRIM_WARNING_ABSENT.test(old)).toBe(true);
+    for (const skill of ["start-sit", "weekly"]) {
+      const t = fresh();
+      t.edit(`skills/${skill}/SKILL.md`, "## Procedure", `${old}\n\n## Procedure`);
+      expect(errorsOf(t)).toContain(
+        `skills/${skill}/SKILL.md: says rec.lineup carries the lineup — withdrawn wording (changelog §R10, R10-22)`,
+      );
+    }
+    const sheet = readFileSync(
+      path.join(ROOT, "skills/_shared/references/tool-outputs.md"),
+      "utf8",
+    );
+    expect(toolOutputFieldProblems(`${sheet}\n${old}\n`)).toEqual([
+      "the cheat-sheet says rec.lineup carries the lineup — withdrawn wording (changelog §R10, R10-22)",
+    ]);
+  });
+
+  it("passes the server's own wording and every committed text", () => {
+    for (const ok of [
+      "recommended_lineup lists only the players who move (rec.lineup carries the whole mean-optimal assignment)",
+      "rec.subjects lists only the players who move (the roster's current slots hold the rest)",
+    ])
+      expect(TRIM_WARNING_ABSENT.test(ok), ok).toBe(false);
+    const sheet = readFileSync(
+      path.join(ROOT, "skills/_shared/references/tool-outputs.md"),
+      "utf8",
+    );
+    expect(TRIM_WARNING_ABSENT.test(sheet)).toBe(false);
+    for (const s of SKILLS)
+      expect(
+        TRIM_WARNING_ABSENT.test(readFileSync(path.join(ROOT, "skills", s, "SKILL.md"), "utf8")),
+        s,
+      ).toBe(false);
+  });
+});
+
+// changelog §R10, R10-21: the pending sentence names both states a null answers (none stored, the
+// stored session rejected), and E11's row quotes each of its partial lines
+describe("the pending sentence and E11's row follow round 4's rulings", () => {
+  it("the pending: null sentence names no session stored and a rejected one, never 'no accepted session'", () => {
+    expect(PENDING_NULL_SENTENCE).toContain("no ESPN session stored, or the stored one rejected");
+    expect(PENDING_NULL_SENTENCE).toContain("R10-21");
+    expect(PENDING_NULL_SENTENCE).not.toContain("no accepted ESPN session");
+  });
+
+  it("E11's row carries every partial-line fragment, once each", () => {
+    const sheet = readFileSync(
+      path.join(ROOT, "skills/_shared/references/tool-outputs.md"),
+      "utf8",
+    );
+    const row = sheet
+      .split("\n")
+      .find((l) => l.startsWith("| (P1) `espn_analyze_league_activity` |"));
+    expect(row).toBeDefined();
+    expect(ACTIVITY_PARTIAL_FRAGMENTS).toHaveLength(3);
+    for (const f of ACTIVITY_PARTIAL_FRAGMENTS) {
+      expect(TOOL_OUTPUT_PHRASES.espn_analyze_league_activity).toContain(f);
+      expect(row?.split(f).length, f).toBe(2);
+    }
   });
 });

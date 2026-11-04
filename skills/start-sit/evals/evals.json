@@ -35,12 +35,12 @@
       "name": "SS-3",
       "toolset": "core",
       "prompt": "James Cook III is Questionable and plays in the late game. Do I start him or someone from my bench?",
-      "expected_output": "On questionable-late, James Cook III (RB, Team 02's starter) is QUESTIONABLE and plays in the week's last game (the Monday-night game, kickoff 2026-10-13T00:15Z): the reply uses p_active (about 0.70 here, near the 71 % a Questionable tag carries), not a coin toss; it names the commitment problem from lock_schedule — the only replacement chain (Bhayshul Tuten from FLEX to RB, Devaughn Vele from the bench into FLEX; Rachaad White is OUT) locks on Sunday, Tuten at 13:30Z and Vele at 17:00Z, before Cook's game, so the choice is made before his status is final — and claims no option value (espn_analyze_lineup returns none and no conditionals; its rec keeps the current lineup, the one swap it lists a coin flip); and it gives a conditional line it builds from those lock times (for example: if Cook is ruled out before Sunday's first lock, move Tuten to RB and start Vele at FLEX; otherwise keep Cook).",
+      "expected_output": "On questionable-late, James Cook III (RB, Team 02's starter) is QUESTIONABLE and plays in the week's last game (the Monday-night game, kickoff 2026-10-13T00:15Z): the reply uses p_active (0.71, the base rate a Questionable tag carries), not a coin toss. It names the commitment problem from lock_schedule: the only replacement chain (Bhayshul Tuten from FLEX to RB, Devaughn Vele from the bench into FLEX; Rachaad White is OUT) locks on Sunday, Tuten at 13:30Z and Vele at 17:00Z, before Cook's game, so the start-or-sit choice has to be made before Sunday's first lock, and nothing can be changed once his status is known on Monday. espn_analyze_lineup returns no conditionals and no option value on its default swaps; its rec keeps the current lineup, the one swap it lists (Vele for Rashid Shaheed at WR) a coin flip. A swap that benches Cook (for example compare out Cook, in Tuten) carries option_value { kind: monday, value: 0 } and loses about 5.7 expected points: waiting for his Monday status is worth nothing, because no replacement is left by then. The reply claims no value in waiting; any conditional it gives runs on Sunday's locks (for example: if Cook is ruled out before 13:30Z Sunday, move Tuten to RB and start Vele at FLEX; otherwise keep Cook).",
       "files": ["evals/fixtures/fx-10h/questionable-late"],
       "expectations": [
         "The skill called espn_get_injuries before espn_analyze_lineup (tool_order)",
         "The reply uses the probability of playing (regex: `p_active|7[01] ?%|0?\\.7[01]\\b|probability of playing`)",
-        "The reply names the lock-order problem and gives a conditional lineup (llm)"
+        "The reply says the start-or-sit choice on Cook has to be made before Sunday's first lock, because every replacement locks on Sunday and nothing can be changed once his status is known on Monday, and it claims no option value from waiting (llm)"
       ]
     },
     {
@@ -110,7 +110,7 @@
       "name": "SS-9",
       "toolset": "core",
       "prompt": "what are my odds right now?",
-      "expected_output": "Mid-game on sunday-live: the London game is final (Bhayshul Tuten, Cam Little), the 13:00 ET games are live (Ashton Jeanty, Drake Maye, Harold Fannin Jr.) and the late games are pending (James Cook III, Jaxon Smith-Njigba, Rashid Shaheed, the Rams D/ST): the reply splits the points into final, live and pending, gives ESPN's live win probability for Team 02 (0.75) labelled as ESPN's, says our own live win probability is not available in this version (core), and treats in-game numbers as provisional.",
+      "expected_output": "Mid-game on sunday-live: the London game is final (Bhayshul Tuten, Cam Little), the 13:00 ET games are live (Ashton Jeanty, Drake Maye, Harold Fannin Jr.) and the late games are pending (James Cook III, Jaxon Smith-Njigba, Rashid Shaheed, the Rams D/ST) — espn_get_live_scoreboard's players counts for Team 02 read final 2, live 3, pending 4: the reply splits the starters into final, live and pending, gives ESPN's live win probability for Team 02 (0.75) labelled as ESPN's, says our own live win probability is not available in this version (core), and treats in-game numbers as provisional.",
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "The skill called espn_get_live_scoreboard (tool_used)",
@@ -135,7 +135,7 @@
       "name": "SS-11-E",
       "toolset": "full",
       "prompt": "what are my odds right now?",
-      "expected_output": "Mid-game under the full toolset on sunday-live: espn_analyze_matchup in live mode gives this server's live win probability (about 0.25) with its interval beside ESPN's 0.75, each labelled; the players are split into final (the London game: Bhayshul Tuten, Cam Little), live and pending; the difference, well over 0.15, is stated; every in-game number is provisional; the matchup rec is logged before the answer.",
+      "expected_output": "Mid-game under the full toolset on sunday-live: espn_analyze_matchup in live mode gives this server's live win probability (about 0.25) with its interval beside ESPN's 0.75, each labelled; the players are split into final (the London game: Bhayshul Tuten, Cam Little), live and pending (espn_get_live_scoreboard's counts for Team 02: final 2, live 3, pending 4); the difference, well over 0.15, is stated; every in-game number is provisional; the matchup rec is logged before the answer.",
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "espn_analyze_matchup was called in live mode (tool_used: input_match mode live)",

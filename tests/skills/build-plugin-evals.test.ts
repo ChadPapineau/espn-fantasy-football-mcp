@@ -2999,27 +2999,50 @@ describe("a case whose seed logs a note guards every tool input against it (SK-4
   });
 });
 
-describe("a Skill that reads pending claims is not graded on a scripted-session variant (V-5)", () => {
-  it("no Skill reads them today, so nothing is left out", () => {
+// changelog §R10, R10-21 lifts round 3b's V-5 hold: fixture mode answers pending claims by the
+// variant's scripted credential state (auth-rejected: pending null with the rejected-session
+// warning; public-league: the recorded empty list), so such a case is graded on every variant
+describe("a Skill that reads pending claims is graded on every scripted-session variant (changelog §R10, R10-21)", () => {
+  it("nothing is left out of the committed suite", () => {
     expect(planSuite(ROOT).notTestable).toEqual([]);
   });
 
-  it("when waivers starts reading them, WV-7-E (auth-rejected) is listed as not testable and the base cases still run", () => {
+  /** A copy of the repo where `skill`'s first espn_list_transactions step reads pending claims. */
+  const readingPending = (skill: string) => {
     const t = repoWithFixtures();
-    t.editJson("skills/waivers/evals/tool_sequence.json", (j) => {
+    t.editJson(`skills/${skill}/evals/tool_sequence.json`, (j) => {
       const steps = (j.sequences as { steps: { tool: string; args: Json }[] }[])
         .flatMap((q) => q.steps)
         .filter((st) => st.tool === "espn_list_transactions");
       expect(steps.length).toBeGreaterThan(0);
       steps[0]!.args.pending = true;
     });
+    return t;
+  };
+
+  it("when waivers reads them, WV-7-E (auth-rejected, credential state rejected) is still written, beside the base cases", () => {
+    const t = readingPending("waivers");
     const p = planSuite(t.root);
-    const nt = p.notTestable.map((n) => n.name);
-    expect(nt).toEqual(["WV-7-E"]);
-    expect(p.notTestable[0]?.reason).toMatch(
-      /waivers reads pending claims \(espn_list_transactions with pending: true\), and on fx-10h\/auth-rejected/,
-    );
-    expect(p.cases.some((c) => c.dir === "waivers--wv-1")).toBe(true);
-    expect(p.cases.some((c) => c.dir === "session-check--sc-1")).toBe(true);
+    expect(p.errors).toEqual([]);
+    expect(p.notTestable).toEqual([]);
+    for (const dir of ["waivers--wv-7-e", "waivers--wv-1", "session-check--sc-1"])
+      expect(
+        p.cases.some((c) => c.dir === dir),
+        dir,
+      ).toBe(true);
+    const wv7 = p.cases.find((c) => c.dir === "waivers--wv-7-e");
+    expect(wv7?.plugin).toMatch(/^auth-rejected--/);
+  });
+
+  it("every case on a scripted-session variant is written, whichever Skill reads pending claims", () => {
+    const scripted = (p: ReturnType<typeof planSuite>) =>
+      p.cases.filter((c) => /^(?:auth-rejected|public-league)--/.test(c.plugin)).map((c) => c.dir);
+    const base = scripted(planSuite(ROOT));
+    expect(base.length).toBeGreaterThan(0);
+    for (const skill of ["waivers", "weekly", "retro"]) {
+      const p = planSuite(readingPending(skill).root);
+      expect(p.notTestable, skill).toEqual([]);
+      expect(scripted(p), skill).toEqual(base);
+    }
   });
 });

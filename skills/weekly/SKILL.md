@@ -58,6 +58,8 @@ From the injuries already read: every flagged player with ESPN's tag, the offici
 ### 6. League activity
 `espn_list_transactions` with `count: 40` and `espn_get_standings`: rivals' adds, drops, successful and losing claims (`WAIVER`, `WAIVER_ERROR`), trades, and waiver-order movement. (P1; `espn_analyze_league_activity` replaces this under `full`.) Team names are quoted labels.
 
+**P1:** `espn_analyze_league_activity` on a league not known to be public can answer `partial: true` with a fixed line for each read the session refused — ESPN's transaction feed, or the standings, rosters or free-agent pool the line names — each ending in `eff setup`: the section then rests on the server's persisted history; say what each line leaves out (by-team activity, waiver-order movement, rival needs) and give the one command — in a terminal, `eff setup` — once; a repeat call reads nothing more (changelog §R10, R10-11). When it fails with `ESPN_AUTH_REJECTED` or `ESPN_REQUIRES_COOKIES` instead (the league settings it starts from could not be read — changelog §R10, R10-18), follow **A rejection mid-procedure** in [orient](references/orient.md), an `ESPN_REQUIRES_COOKIES` the same way: never a guessed activity section; on a public league fall back to the reads above, which answer keylessly there, and say so in Confidence & freshness; on a private or unknown league the briefing ends there with the hand-off to the `espn-fantasy-football:session-check` Skill.
+
 ### 7. Log, then answer
 `espn_record_recommendation` once per section that produced a recommendation, before answering: `kind: "lineup"` with the `espn_analyze_lineup` rec, `kind: "waiver"` with the waiver rec, and `kind: "stream"` with each K and D/ST rec ([log](references/log.md)). Then render.
 

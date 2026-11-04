@@ -91,13 +91,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildSkills } from "./build-skills.mjs";
-import {
-  SEED_NOTES,
-  checkArgType,
-  graderOf,
-  readsPendingClaims,
-  toolRefs,
-} from "./check-skills.mjs";
+import { SEED_NOTES, checkArgType, graderOf, toolRefs } from "./check-skills.mjs";
 import {
   REPO_ROOT,
   SKILLS_DIR,
@@ -1164,29 +1158,6 @@ export function planSuite(root, opts = {}) {
     }
     const slash = slashCommand(manifest.plugin, skill);
     const list = isRecord(evals) && Array.isArray(evals["evals"]) ? evals["evals"] : [];
-    // a Skill that reads the user's pending claims (changelog §R10, R10-10)
-    let readsPending = false;
-    try {
-      const body = readFileSync(path.join(root, SKILLS_DIR, skill, "SKILL.md"), "utf8");
-      const seqs = /** @type {unknown} */ (
-        JSON.parse(readFileSync(path.join(root, where, "tool_sequence.json"), "utf8"))
-      );
-      const sequences =
-        isRecord(seqs) && Array.isArray(seqs["sequences"])
-          ? seqs["sequences"].map((q) => ({
-              steps: (isRecord(q) && Array.isArray(q["steps"]) ? q["steps"] : [])
-                .filter(isRecord)
-                .map((st) => ({
-                  tool: String(st["tool"]),
-                  args: isRecord(st["args"]) ? st["args"] : {},
-                })),
-            }))
-          : [];
-      const fm = parseFrontmatter(body);
-      readsPending = readsPendingClaims(body.split("\n").slice(fm.bodyStart).join("\n"), sequences);
-    } catch (e) {
-      errors.push(`${where}: ${errMsg(e)}`);
-    }
     /** @param {unknown} c */
     const variantOf = (c) => {
       const f = isRecord(c) && Array.isArray(c["files"]) ? c["files"][0] : undefined;
@@ -1268,16 +1239,9 @@ export function planSuite(root, opts = {}) {
       }
       const held = Object.hasOwn(heldOut, name) ? heldOut[name] : undefined;
       if (reason === null && held !== undefined) reason = held;
-      // the server's pending-claims warning gives a fixture's scripted session the reason for no
-      // stored session (the round-3 verifiers' V-5, a server need): until it names the scripted
-      // state, a Skill that reads pending claims is not graded on such a variant
-      const harnessState = harnessOf(variant)["credential_state"];
-      if (
-        reason === null &&
-        readsPending &&
-        (harnessState ?? "not_configured") !== "not_configured"
-      )
-        reason = `${skill} reads pending claims (espn_list_transactions with pending: true), and on fx-10h/${variant ?? ""} (credential.state ${JSON.stringify(harnessState)}) the server's pending: null warning names no stored session — the reason a fixture-mode server gives, not the variant's (changelog §R10, R10-10)`;
+      // a Skill that reads the user's pending claims is graded on every variant: fixture mode answers
+      // them by the variant's scripted credential state, the one espn_get_status reports
+      // (changelog §R10, R10-21, which lifts the round-3 verifiers' V-5 hold)
       if (reason !== null) {
         notTestable.push({ dir, skill, name, variant, reason });
         continue;

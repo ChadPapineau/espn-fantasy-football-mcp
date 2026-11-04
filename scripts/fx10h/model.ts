@@ -476,8 +476,9 @@ export function baseModel(): Model {
     // league's transaction feed (mTransactions2) included, which ESPN serves anyone on a public
     // league (a private league would answer ESPN_REQUIRES_COOKIES there — decision recorded). The
     // user's own pending claims (mPendingTransactions) are never read keyless, public or not
-    // (changelog §R10, R10-10): in fixture mode espn_list_transactions(pending: true) answers
-    // `pending: null` with its warning, and the empty body below is never requested
+    // (changelog §R10, R10-10): fixture mode answers them by the variant's scripted credential
+    // state (R10-21) — not_configured or rejected gives `pending: null` with that state's warning,
+    // and stored or validated serves the empty body below (`pending: []`)
     isPublic: true,
     usesBudget: false,
     budget: 0,

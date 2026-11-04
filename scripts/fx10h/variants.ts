@@ -310,11 +310,12 @@ export const VARIANTS: readonly Variant[] = [
   {
     name: "auth-rejected",
     describes:
-      "credential.state rejected on a public league (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base, which is public; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result — orient's rejected row carries on keylessly here (changelog §R10, R10-7): the league's transaction feed answers keylessly, as ESPN serves it to anyone on a public league, and pending claims, never read keyless, answer pending: null (changelog §R10, R10-10)",
+      "credential.state rejected on a public league (06 §D.0 cookie-rejected, renamed for .gitignore): bodies as base, which is public; fixture mode holds no credential and reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result — orient's rejected row carries on keylessly here (changelog §R10, R10-7): the league's transaction feed answers keylessly, as ESPN serves it to anyone on a public league, and pending claims, never read keyless, answer pending: null with the rejected-session warning, the state espn_get_status reports (changelog §R10, R10-10, R10-21)",
     mutate: (m) => {
       // the base league is public (fixture mode never holds a cookie): a stored session ESPN
       // rejected on a public league, the state waivers WV-7-E stands for (changelog §R10, R10-7) —
-      // its feed read keyless, as ESPN serves it anyone there; its pending claims never (R10-10)
+      // its feed read keyless, as ESPN serves it anyone there; its pending claims never, so they
+      // answer pending: null with the rejected-session warning (changelog §R10, R10-10, R10-21)
       m.isPublic = true;
       // the one espn_check_auth after the user re-ran setup: ESPN still rejects the cookies
       m.harness = {
@@ -328,7 +329,7 @@ export const VARIANTS: readonly Variant[] = [
   {
     name: "public-league",
     describes:
-      "a public league with a stored, not yet validated credential: bodies as base (public); fixture mode reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result; fixture mode sends no cookie, so the transaction feed answers keylessly and pending claims, never read keyless, answer pending: null (changelog §R10, R10-10)",
+      "a public league with a stored, not yet validated credential: bodies as base (public); fixture mode reports the harness state as a label (changelog §R9, R9-3), its one probe answering the scripted result; fixture mode sends no cookie, so the transaction feed answers keylessly and pending claims are served from the recorded mPendingTransactions (pending: []), as a session read would be under the stored label (changelog §R10, R10-21)",
     mutate: (m) => {
       m.isPublic = true;
       // a public league's board answers anyone the same: the probe cannot tell (ADV OBJ-26)
