@@ -41,6 +41,7 @@ import {
   validatedToolResultSteps,
   type BudgetTrim,
   type Envelope,
+  type FitOptions,
   type InputStamp,
   type PageInfo,
   type ToolFamily,
@@ -152,8 +153,10 @@ export interface ToolDefinition<S extends z.ZodType, D> {
   readonly pageable?: boolean;
   /**
    * How an over-budget list is cut: `halve` (default; plan 01 §4.2) or `most` — the longest prefix
-   * that fits (envelope.ts FitOptions.keepMost), for a pageable list tool whose items are whole
-   * texts that must not be cut (espn_list_recommendations).
+   * that fits (envelope.ts FitOptions.keepMost), for a list whose items are whole records that must
+   * not be cut: espn_list_recommendations (pageable) and espn_analyze_retrospective (changelog §R10,
+   * R10-20: plan 07 C8's 10 000 characters are the contract and halving its floor; E13 does not
+   * page, so its hint names the narrowing input). Every other tool halves.
    */
   readonly fit?: "halve" | "most";
   /** The truncation warning's fixed advice. */
@@ -380,6 +383,24 @@ export function truncationHint(
     return full ? TRUNCATION_HINTS.analytics : TRUNCATION_HINTS.analyticsCompact;
   }
   return def.pageable === true ? TRUNCATION_HINTS.list : TRUNCATION_HINTS.narrow;
+}
+
+/**
+ * How a tool's over-budget result is fitted (envelope.ts fitToBudget): its paging, its truncation
+ * advice, the result's own trims (run first), and `keepMost` when the tool keeps the longest prefix
+ * of whole items that fits (`fit: "most"`) instead of halving.
+ */
+export function fitOptionsOf(
+  def: Pick<AnyToolDefinition, "hint" | "budget" | "pageable" | "fit">,
+  args: unknown,
+  trims?: readonly BudgetTrim[],
+): FitOptions {
+  return {
+    pageable: def.pageable === true,
+    hint: truncationHint(def, args),
+    ...(trims === undefined ? {} : { trims }),
+    ...(def.fit === "most" ? { keepMost: true } : {}),
+  };
 }
 
 /** The full output schema of a tool (the envelope around its `data`). */
@@ -632,12 +653,7 @@ export async function runTool(
   await yieldTurn();
   const env = envelopeOf(out, ctx, def);
   const budget = def.budget === "analytics" ? ANALYTICS_BUDGET_CHARS : RESULT_BUDGET_CHARS;
-  const fit = fitToBudget(env, budget, out.listKey, {
-    pageable: def.pageable === true,
-    hint: truncationHint(def, args),
-    ...(out.trims === undefined ? {} : { trims: out.trims }),
-    ...(def.fit === "most" ? { keepMost: true } : {}),
-  });
+  const fit = fitToBudget(env, budget, out.listKey, fitOptionsOf(def, args, out.trims));
   if (!fit.ok) {
     log.error("tool.over_budget", { request_id: ctx.requestId, tool: def.name, size: fit.size });
     throw new EffError("INTERNAL");

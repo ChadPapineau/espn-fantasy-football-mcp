@@ -12,7 +12,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Client } from "@modelcontextprotocol/client";
 import { containsCredentialShape } from "../../src/config/schema.js";
-import { ANALYTICS_BUDGET_CHARS, bareFieldsFromSchema } from "../../src/mcp/envelope.js";
+import {
+  ANALYTICS_BUDGET_CHARS,
+  TRUNCATION_HINTS,
+  bareFieldsFromSchema,
+} from "../../src/mcp/envelope.js";
 import { retrospectiveSchema } from "../../src/mcp/tools/reclog.js";
 import { identifierLeaks, stringLeaves } from "./helpers/walk.js";
 import { call, connect, makeWorld, type World } from "./helpers/world.js";
@@ -208,7 +212,25 @@ describe("E13 at the recommendation log's own bound (changelog §R10, R10-13)", 
       expect(calls.length).toBeGreaterThan(0);
       expect(calls.length).toBeLessThan(100);
       expect(body.truncated).toBe(true);
-      expect(body.warnings.some((x) => x.includes("truncated"))).toBe(true);
+      // the longest prefix of whole calls that fits (changelog §R10, R10-20), said with the
+      // narrowing input — E13 does not page
+      const said = `result truncated to ${String(calls.length)} of 100 calls to fit the ${String(ANALYTICS_BUDGET_CHARS)}-character budget; ${TRUNCATION_HINTS.retrospective}`;
+      expect(body.warnings).toContain(said);
+      // maximal: the same answer with one more of these calls is over the budget (halving kept a
+      // few of 100 in 7 927 characters)
+      const oneMore = JSON.stringify({
+        ...r.body,
+        data: { ...body.data, calls: [...calls, calls[calls.length - 1]] },
+        warnings: body.warnings.map((x) =>
+          x === said
+            ? said.replace(`to ${String(calls.length)} of`, `to ${String(calls.length + 1)} of`)
+            : x,
+        ),
+      }).length;
+      expect(oneMore).toBeGreaterThan(ANALYTICS_BUDGET_CHARS);
+      console.log(
+        `[size] espn_analyze_retrospective keeps ${String(calls.length)} of 100 worst-case calls (${String(chars)} chars)`,
+      );
       // a note is never cut to fit: whole calls are dropped instead
       for (const call of calls) expect(call.note).toBe(worst);
     } finally {

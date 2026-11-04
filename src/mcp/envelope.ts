@@ -463,6 +463,8 @@ export const TRUNCATION_HINTS = Object.freeze({
   boxScore: "request one matchup or use detail compact",
   narrow: "narrow the request or filter",
   schedule: "request fewer weeks or filter by nfl_team",
+  /** E13 does not page (changelog §R10, R10-20): its narrowing input. */
+  retrospective: "narrow the calls with kinds (this tool does not page)",
 });
 
 /**
@@ -487,8 +489,9 @@ export interface FitOptions {
   /** Tool-specific steps tried in order BEFORE the list is halved. */
   readonly trims?: readonly BudgetTrim[];
   /**
-   * Keep the longest prefix of the list that fits instead of halving (a pageable list tool's opt-in:
-   * espn_list_recommendations). Plan 01 §4.2's contract is what the result guarantees — within the
+   * Keep the longest prefix of the list that fits instead of halving (the opt-in of
+   * espn_list_recommendations, and of espn_analyze_retrospective under plan 07 C8 — changelog §R10,
+   * R10-20). Plan 01 §4.2's contract is what the result guarantees — within the
    * budget, `truncated: true`, the warning that says how to page, and for a pageable list
    * `has_more`/`next_offset` from where it stopped — and halving is the floor it names, not a cap on
    * what may be kept: a page that keeps 24 of 25 items pages on exactly as one that keeps 12 does,

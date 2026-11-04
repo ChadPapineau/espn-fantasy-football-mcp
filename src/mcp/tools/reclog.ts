@@ -43,7 +43,12 @@ import {
   recordRecommendationInputSchema,
   weekSchema,
 } from "../bounds.js";
-import { toDataInputs, type InputStamp, type UntrustedField } from "../envelope.js";
+import {
+  TRUNCATION_HINTS,
+  toDataInputs,
+  type InputStamp,
+  type UntrustedField,
+} from "../envelope.js";
 import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, recentCall, type ToolContext } from "../define.js";
 import {
@@ -312,6 +317,13 @@ export const analyzeRetrospective = defineTool({
   }),
   data: retrospectiveSchema,
   budget: "analytics",
+  // plan 07 C8's 10 000 characters are the contract and halving its floor (changelog §R10, R10-20):
+  // the retrospective is the record the owner audits, so it keeps the longest prefix of whole
+  // calls[] that fits, in its own order, after any trims — at the log's bound, halving kept a few
+  // of 100 calls in 7 927 characters while more whole calls would fit. E13 does not page, so the
+  // truncation warning names its narrowing input (`kinds`)
+  fit: "most",
+  hint: TRUNCATION_HINTS.retrospective,
   run: async (args, ctx) => {
     const inputs: InputStamp[] = [];
     const warnings: string[] = [];
