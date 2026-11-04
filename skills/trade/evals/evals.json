@@ -67,9 +67,9 @@
       "files": ["evals/fixtures/fx-10h/points-only-seeding"],
       "expectations": [
         "espn_analyze_trade was called with both readings (tool_used: input_match seeding_mode both)",
-        "The reply shows the playoff-odds change for both teams (regex: `playoff`)",
+        "The reply shows a signed playoff-odds change (regex: `playoff[^\\n]{0,120}[+−-]\\s?(?:\\d+(?:\\.\\d+)?\\s?(?:pts?\\b|%|pp\\b|percentage points?)|0?\\.\\d+)|[+−-]\\s?(?:\\d+(?:\\.\\d+)?\\s?(?:pts?\\b|%|pp\\b|percentage points?)|0?\\.\\d+)[^\\n]{0,60}playoff`)",
         "The reply reads Team 03 on the bubble under the points-only reading (regex: `bubble`)",
-        "The reply shows both seeding readings side by side, with Team 03's standing under each reading as the tool's why_they_accept lines state it — a contender under the record-first reading, on the bubble under the points-only reading — each naming its reading (llm)",
+        "The reply shows both seeding readings side by side, each with the playoff-odds change (ΔU) for both teams, and Team 03's standing under each reading as the tool's why_they_accept lines state it — a contender under the record-first reading, on the bubble under the points-only reading — each naming its reading (llm)",
         "The reply asks which seeding reading applies instead of asserting one, even though the verdict is the same under both, and offers onboard to record it (llm)"
       ]
     },

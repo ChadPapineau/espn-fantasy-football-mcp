@@ -22,10 +22,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   COPY_PREFIX,
+  ENV_KEY_RE,
   NO_SOCKET,
+  SERVER_ENV_RE,
   STATE_DIRS,
   USAGE_EXIT,
   copyTree,
@@ -96,14 +99,38 @@ function fakeSpawn() {
   return st;
 }
 
+/** The keys a plugin's .mcp.json declares, as the build passes them. */
+const KEEP = ["EFF_TOOLSET", "ESPN_LEAGUE_ID"];
+const KEEP_ARG = ["--keep-env", KEEP.join(",")];
+
 describe("arguments and the pristine state", () => {
-  it("parses --state and --root, and nothing else", () => {
-    expect(parseArgs(["--state", "/s", "--root", "/r"])).toEqual({ state: "/s", root: "/r" });
-    expect(parseArgs(["--root", "/r", "--state", "/s"])).toEqual({ state: "/s", root: "/r" });
-    expect(parseArgs(["--state", "/s"])).toBeNull();
-    expect(parseArgs(["--state", "/s", "--root"])).toBeNull();
-    expect(parseArgs(["--state", "/a", "--state", "/b", "--root", "/r"])).toBeNull();
-    expect(parseArgs(["--state", "/s", "--root", "/r", "--frobnicate"])).toBeNull();
+  it("parses --state, --root and --keep-env, all three, and nothing else", () => {
+    const want = { state: "/s", root: "/r", keep: KEEP };
+    expect(parseArgs(["--state", "/s", "--root", "/r", ...KEEP_ARG])).toEqual(want);
+    expect(parseArgs([...KEEP_ARG, "--root", "/r", "--state", "/s"])).toEqual(want);
+    expect(parseArgs(["--state", "/s", ...KEEP_ARG])).toBeNull();
+    expect(parseArgs(["--state", "/s", "--root", "/r", "--keep-env"])).toBeNull();
+    expect(parseArgs(["--state", "/a", "--state", "/b", "--root", "/r", ...KEEP_ARG])).toBeNull();
+    expect(parseArgs(["--state", "/s", "--root", "/r", ...KEEP_ARG, "--frobnicate"])).toBeNull();
+    expect(parseArgs(["--state", "/s", "--root", "/r", ...KEEP_ARG, ...KEEP_ARG])).toBeNull();
+  });
+
+  // the round-3 verifiers' V-2: without the list the launcher would pass the inherited env on whole
+  it("refuses a launch with no key list, or a malformed one", () => {
+    expect(parseArgs(["--state", "/s", "--root", "/r"])).toBeNull();
+    for (const bad of [
+      "",
+      "EFF_TOOLSET,",
+      ",EFF_TOOLSET",
+      "EFF_TOOLSET,,ESPN_LEAGUE_ID",
+      "eff_toolset",
+      "EFF TOOLSET",
+      "EFF_TOOLSET,EFF_TOOLSET",
+      "EFF-TOOLSET",
+      `E${"X".repeat(64)}`,
+    ])
+      expect(parseArgs(["--state", "/s", "--root", "/r", "--keep-env", bad]), bad).toBeNull();
+    expect(ENV_KEY_RE.test("EFF_TEST_STUBS")).toBe(true);
   });
 
   it("a state must exist outside every git tree and hold home/, config/ and cache/", () => {
@@ -151,9 +178,13 @@ describe("the fresh copy", () => {
     }).toThrow(/symbolic link/);
   });
 
-  it("points the server's state directories at the copy, every other variable kept", () => {
+  it("points the server's state directories at the copy, the declared and the non-ESPN variables kept", () => {
     expect(
-      serverEnvFor({ PATH: "/bin", EFF_TOOLSET: "core", HOME: "/elsewhere", U: undefined }, "/c"),
+      serverEnvFor(
+        { PATH: "/bin", EFF_TOOLSET: "core", HOME: "/elsewhere", U: undefined },
+        "/c",
+        KEEP,
+      ),
     ).toEqual({
       PATH: "/bin",
       EFF_TOOLSET: "core",
@@ -161,6 +192,56 @@ describe("the fresh copy", () => {
       EFF_CONFIG_DIR: path.join("/c", "config"),
       EFF_CACHE_DIR: path.join("/c", "cache"),
     });
+  });
+
+  // V-2: a variable exported in the shell that runs the suite changed the graded fixture state
+  // (ESPN_TEAM_ID on owner-mismatch, EFF_SEEDING_MODE on points-only-seeding) or stopped the server
+  // (an invalid EFF_WEATHER_SOURCE): every undeclared ESPN_* / EFF_* variable is dropped
+  it("drops every inherited ESPN_* and EFF_* variable the plugin does not declare", () => {
+    const inherited = {
+      PATH: "/bin",
+      TMPDIR: "/t",
+      EFF_TOOLSET: "core",
+      ESPN_LEAGUE_ID: "0",
+      ESPN_TEAM_ID: "7",
+      EFF_SEEDING_MODE: "espn_rule",
+      EFF_WEATHER_SOURCE: "bogus",
+      EFF_CREDENTIAL_STORE: "file",
+      ESPN_S2: "x",
+      EFF_CONFIG_DIR: "/real/config",
+    };
+    const out = serverEnvFor(inherited, "/c", KEEP);
+    expect(Object.keys(out).sort()).toEqual(
+      [
+        "EFF_CACHE_DIR",
+        "EFF_CONFIG_DIR",
+        "EFF_TOOLSET",
+        "ESPN_LEAGUE_ID",
+        "HOME",
+        "PATH",
+        "TMPDIR",
+      ].sort(),
+    );
+    expect(out.EFF_CONFIG_DIR).toBe(path.join("/c", "config"));
+    // owner-mismatch declares no ESPN_TEAM_ID: an inherited one never reaches its server
+    expect(serverEnvFor(inherited, "/c", ["EFF_TOOLSET"]).ESPN_TEAM_ID).toBeUndefined();
+    // a declared key is kept with whatever value the harness gives it (the .mcp.json value)
+    expect(serverEnvFor(inherited, "/c", [...KEEP, "ESPN_TEAM_ID"]).ESPN_TEAM_ID).toBe("7");
+    fc.assert(
+      fc.property(
+        fc.dictionary(fc.stringMatching(/^[A-Z][A-Z0-9_]{0,12}$/), fc.string(), { maxKeys: 12 }),
+        fc.array(fc.stringMatching(/^[A-Z][A-Z0-9_]{0,12}$/), { maxLength: 6 }),
+        (env, keep) => {
+          const STATE_KEYS: string[] = Object.values(STATE_DIRS);
+          const o = serverEnvFor(env, "/c", keep);
+          for (const k of Object.keys(o))
+            if (!STATE_KEYS.includes(k) && SERVER_ENV_RE.test(k)) expect(keep).toContain(k);
+          for (const [k, v] of Object.entries(env))
+            if (!SERVER_ENV_RE.test(k) && !STATE_KEYS.includes(k)) expect(o[k]).toBe(v);
+        },
+      ),
+      { numRuns: 200 },
+    );
   });
 
   it("maps an exit to the server's code, or 128 + the signal's number", () => {
@@ -178,8 +259,8 @@ describe("main (a fake server)", () => {
     const base = temp("eff-es-tmp-");
     const f = fakeSpawn();
     const signals = new Map<string, () => void>();
-    const done = main(["--state", s, "--root", r], {
-      env: { PATH: "/bin", EFF_TOOLSET: "core" },
+    const done = main(["--state", s, "--root", r, ...KEEP_ARG], {
+      env: { PATH: "/bin", EFF_TOOLSET: "core", ESPN_TEAM_ID: "7", EFF_SEEDING_MODE: "espn_rule" },
       spawnImpl: f.spawnImpl,
       node: "/n",
       tmp: base,
@@ -203,6 +284,9 @@ describe("main (a fake server)", () => {
       EFF_TOOLSET: "core",
       HOME: path.join(copy, "home"),
     });
+    // the undeclared variables the shell exported never reach the server
+    expect(sp.env.ESPN_TEAM_ID).toBeUndefined();
+    expect(sp.env.EFF_SEEDING_MODE).toBeUndefined();
     expect(readFileSync(path.join(copy, "cache", "store.sqlite"), "utf8")).toBe("seeded log");
     // a signal to the launcher reaches the server
     expect([...signals.keys()].sort()).toEqual(["SIGHUP", "SIGINT", "SIGTERM"]);
@@ -221,16 +305,16 @@ describe("main (a fake server)", () => {
     const base = temp("eff-es-tmp-");
     const quiet = { stderr: () => undefined, onSignal: () => undefined, tmp: base };
     const a = fakeSpawn();
-    const pa = main(["--state", s, "--root", r], { ...quiet, spawnImpl: a.spawnImpl });
+    const pa = main(["--state", s, "--root", r, ...KEEP_ARG], { ...quiet, spawnImpl: a.spawnImpl });
     a.exit(98);
     expect(await pa).toBe(98);
     const b = fakeSpawn();
-    const pb = main(["--state", s, "--root", r], { ...quiet, spawnImpl: b.spawnImpl });
+    const pb = main(["--state", s, "--root", r, ...KEEP_ARG], { ...quiet, spawnImpl: b.spawnImpl });
     b.exit(null, "SIGKILL");
     expect(await pb).toBe(137);
     const c = fakeSpawn();
     const lines: string[] = [];
-    const pc = main(["--state", s, "--root", r], {
+    const pc = main(["--state", s, "--root", r, ...KEEP_ARG], {
       ...quiet,
       stderr: (x) => lines.push(x),
       spawnImpl: c.spawnImpl,
@@ -251,16 +335,23 @@ describe("main (a fake server)", () => {
       onSignal: () => undefined,
     };
     expect(await main(["--state"], deps)).toBe(USAGE_EXIT);
+    expect(await main(["--state", pristine(), "--root", repo()], deps)).toBe(USAGE_EXIT);
     expect(
-      await main(["--state", path.join(tmpdir(), "eff-es-none"), "--root", repo()], deps),
+      await main(
+        ["--state", path.join(tmpdir(), "eff-es-none"), "--root", repo(), ...KEEP_ARG],
+        deps,
+      ),
     ).toBe(USAGE_EXIT);
-    expect(await main(["--state", pristine(), "--root", temp("eff-es-nodist-")], deps)).toBe(
-      USAGE_EXIT,
-    );
+    expect(
+      await main(["--state", pristine(), "--root", temp("eff-es-nodist-"), ...KEEP_ARG], deps),
+    ).toBe(USAGE_EXIT);
     const linked = pristine();
     symlinkSync("/etc/hosts", path.join(linked, "home", "link"));
     expect(
-      await main(["--state", linked, "--root", repo()], { ...deps, tmp: temp("eff-es-tmp-") }),
+      await main(["--state", linked, "--root", repo(), ...KEEP_ARG], {
+        ...deps,
+        tmp: temp("eff-es-tmp-"),
+      }),
     ).toBe(USAGE_EXIT);
     expect(f.spawned).toEqual([]);
     expect(lines.join("")).toMatch(/usage: eval-server\.mjs/);
@@ -278,7 +369,7 @@ describe("a real start (a stand-in dist/cli.js, never the server)", () => {
       [
         'const fs = require("node:fs");',
         'const p = require("node:path").join(process.env.EFF_CACHE_DIR, "store.sqlite");',
-        'process.stderr.write(JSON.stringify({ saw: fs.readFileSync(p, "utf8"), cache: process.env.EFF_CACHE_DIR, mode: fs.statSync(p).mode & 0o777 }) + "\\n");',
+        'process.stderr.write(JSON.stringify({ saw: fs.readFileSync(p, "utf8"), cache: process.env.EFF_CACHE_DIR, mode: fs.statSync(p).mode & 0o777, keys: Object.keys(process.env).filter((k) => /^(ESPN|EFF)_/.test(k)).sort() }) + "\\n");',
         'fs.appendFileSync(p, " + a retro this run logged");',
         "process.exit(7);",
       ].join("\n"),
@@ -295,8 +386,21 @@ describe("a real start (a stand-in dist/cli.js, never the server)", () => {
           s,
           "--root",
           r,
+          "--keep-env",
+          "EFF_TOOLSET",
         ],
-        { env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, encoding: "utf8", input: "" },
+        {
+          // the shell running the suite exports variables the plugin does not declare (V-2)
+          env: {
+            PATH: process.env.PATH ?? "/usr/bin:/bin",
+            EFF_TOOLSET: "core",
+            ESPN_TEAM_ID: "7",
+            EFF_SEEDING_MODE: "espn_rule",
+            EFF_WEATHER_SOURCE: "bogus",
+          },
+          encoding: "utf8",
+          input: "",
+        },
       );
       return {
         code: p.status,
@@ -316,6 +420,8 @@ describe("a real start (a stand-in dist/cli.js, never the server)", () => {
     expect(one.seen.saw).toBe("seeded log");
     expect(two.seen.saw).toBe("seeded log");
     expect(one.seen.mode).toBe(0o600);
+    // only the declared variable and the state directories reach the server
+    expect(one.seen.keys).toEqual(["EFF_CACHE_DIR", "EFF_CONFIG_DIR", "EFF_TOOLSET"]);
     expect(one.seen.cache).not.toBe(two.seen.cache);
     expect(existsSync(String(one.seen.cache))).toBe(false);
     expect(existsSync(String(two.seen.cache))).toBe(false);

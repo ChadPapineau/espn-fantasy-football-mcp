@@ -45,7 +45,10 @@ import {
   FIXTURE_CREDENTIAL_STATES,
   HELD_OUT_CASES,
   LOGGED_NOTES,
+  MANDATED_LINE_GRADERS,
   loggedNoteOf,
+  mandatedLineProblems,
+  mandatedLines,
   HISTORY_FORMAT_VERSION,
   INJECTION_NEEDLES,
   LINEUP_SEEDS,
@@ -101,7 +104,7 @@ import {
   yamlFrontmatter,
 } from "../../scripts/skills/build-plugin-evals.mjs";
 import { parseFrontmatter, readManifest } from "../../scripts/skills/_lib.mjs";
-import { graderOf } from "../../scripts/skills/check-skills.mjs";
+import { ORIENT_SENTENCES, graderOf } from "../../scripts/skills/check-skills.mjs";
 import { REGISTRY } from "../../src/mcp/registry.js";
 import { ROOT, SKILLS, tempRepo, type TempRepo } from "./helpers.js";
 
@@ -1425,7 +1428,8 @@ describe("buildPluginEvals on a copy", () => {
       };
       const s = mcp.mcpServers[manifest.plugin]!;
       expect(s.command).toBe("/opt/node");
-      // every server starts through the launcher, on a fresh copy of its pristine state
+      // every server starts through the launcher, on a fresh copy of its pristine state, keeping
+      // only the ESPN_* / EFF_* variables its .mcp.json declares (the round-3 verifiers' V-2)
       expect(s.args).toEqual([
         "--import",
         path.join(t.root, NO_SOCKET),
@@ -1434,8 +1438,13 @@ describe("buildPluginEvals on a copy", () => {
         path.join(r.state!, key),
         "--root",
         t.root,
+        "--keep-env",
+        Object.keys(s.env).sort().join(","),
       ]);
-      expect(s.args).toEqual(launcherArgs(t.root, path.join(r.state!, key)));
+      expect(s.args).toEqual(launcherArgs(t.root, path.join(r.state!, key), Object.keys(s.env)));
+      // owner-mismatch leaves ESPN_TEAM_ID unset on purpose: an inherited one never reaches it
+      if (key.startsWith("owner-mismatch--")) expect(s.args.at(-1)).not.toMatch(/ESPN_TEAM_ID/);
+      else expect(s.args.at(-1)?.split(",")).toContain("ESPN_TEAM_ID");
       expect(s.env.EFF_TOOLSET).toBe(key.split("--")[1]);
       expect(s.env.EFF_TEST_STUBS).toBe("1");
       // the state directories are the launcher's to set (a fresh copy per start), never the env's
@@ -2787,5 +2796,230 @@ describe("input_match is typed by the tool's input contract (arrays match the sc
       }
     }
     expect(checked).toBeGreaterThanOrEqual(15);
+  });
+});
+
+// --- the round-3 verifiers' findings on the eval suite (V-1, V-3, V-5, SK-4) ----------------------
+describe("every final-message regex can fail a reply that only prints orient's opening lines (V-1, V-3)", () => {
+  const orient = readFileSync(path.join(ROOT, "skills/_shared/references/orient.md"), "utf8");
+  const unquote = (q: string) => q.replace(/^"|"$/g, "");
+  const notConf = unquote(ORIENT_SENTENCES.notConfiguredSession);
+  const rejected = unquote(ORIENT_SENTENCES.rejectedSession);
+  const seeding = unquote(ORIENT_SENTENCES.seedingLine);
+
+  it("reads the Session line of the case's credential state and the seeding line from orient.md", () => {
+    expect(mandatedLines(orient, undefined, null)).toEqual({
+      lines: [notConf, seeding],
+      errors: [],
+    });
+    expect(mandatedLines(orient, "not_configured", "log-week4")).toEqual({
+      lines: [notConf, seeding],
+      errors: [],
+    });
+    expect(mandatedLines(orient, "rejected", null)).toEqual({
+      lines: [rejected, seeding],
+      errors: [],
+    });
+    // a stored session prints no Session line; a seed that records the reading, no seeding line
+    expect(mandatedLines(orient, "stored", null)).toEqual({ lines: [seeding], errors: [] });
+    expect(mandatedLines(orient, "not_configured", "seeding-points-only")).toEqual({
+      lines: [notConf],
+      errors: [],
+    });
+    expect(Object.keys(SEEDING_SEEDS)).toEqual(["seeding-points-only"]);
+    // a reworded orient without the quoted lines is a build error, never a silent pass
+    const bare = orient.split(ORIENT_SENTENCES.seedingLine).join("the seeding line");
+    expect(mandatedLines(bare, "stored", null)).toEqual({
+      lines: [],
+      errors: ["orient.md: no quoted seeding line to check the graders against"],
+    });
+    expect(mandatedLines("", "rejected", "seeding-points-only").errors).toEqual([
+      "orient.md: no quoted rejected Session line to check the graders against",
+    ]);
+  });
+
+  it("refuses the graders round 3 shipped: they passed on the seeding or the Session line alone", () => {
+    const lines = [notConf, seeding];
+    for (const pattern of [
+      "unconfirmed|not confirmed",
+      "unconfirmed_narrative|unconfirmed|consistent|quiet_role_change",
+      "ESPN",
+    ]) {
+      const p = mandatedLineProblems("X-1", [`The reply says so (regex: \`${pattern}\`)`], lines);
+      expect(p, pattern).toHaveLength(1);
+      expect(p[0]).toMatch(/passes on orient's mandated opening lines alone/);
+    }
+    // a regex_absent grader that the lines match would fail every reply that follows orient
+    expect(
+      mandatedLineProblems("X-1", ["Never says it (regex_absent: `seeding reading`)"], lines)[0],
+    ).toMatch(/fails every reply that prints orient's mandated opening lines/);
+    // the other graders, and a grader that does not compile, are not this check's to judge
+    expect(
+      mandatedLineProblems("X-1", ["(llm)", "(tool_order)", "Bad (regex: `(`)"], lines),
+    ).toEqual([]);
+    // an exemption names the case and the exact pattern
+    const used = new Set<string>();
+    expect(
+      mandatedLineProblems(
+        "WV-7-E",
+        ["Repair (regex: `session-check|eff setup`)"],
+        [rejected, seeding],
+        used,
+      ),
+    ).toEqual([]);
+    expect([...used]).toEqual(["WV-7-E session-check|eff setup"]);
+    expect(
+      mandatedLineProblems("WV-7-E", ["Repair (regex: `eff setup|session-check`)"], [rejected]),
+    ).toHaveLength(1);
+    expect(
+      mandatedLineProblems("WV-1", ["Repair (regex: `session-check|eff setup`)"], [rejected]),
+    ).toHaveLength(1);
+    for (const g of MANDATED_LINE_GRADERS) expect(g.why.length, g.case).toBeGreaterThan(10);
+  });
+
+  // the eight graders the verifiers named: each fails a reply of the mandated lines and nothing else
+  it.each([
+    ["start-sit", "SS-4"],
+    ["start-sit", "SS-12"],
+    ["start-sit", "SS-INJ-2"],
+    ["start-sit", "SS-10-E"],
+    ["injury-cascade", "IC-2"],
+    ["news-check", "NC-1"],
+    ["news-check", "NC-5-E"],
+    ["schedule-plan", "SP-4-E"],
+  ])(
+    "%s %s: its regex graders fail on the opening lines plus a reply that answers nothing",
+    (skill, name) => {
+      const c = lane2(skill).find((x) => x.name === name)!;
+      const reply = [notConf, seeding, "Ashton Jeanty is out — nothing to do."].join("\n");
+      const regexes = (c.expectations as string[])
+        .map((x) => /\(regex:\s*`([^`]+)`\)\s*$/.exec(x)?.[1])
+        .filter((x): x is string => x !== undefined);
+      expect(regexes.length, name).toBeGreaterThan(0);
+      for (const r of regexes) expect(new RegExp(r, "i").test(reply), `${name}: ${r}`).toBe(false);
+      expect(mandatedLineProblems(name, c.expectations as string[], [notConf, seeding])).toEqual(
+        [],
+      );
+    },
+  );
+
+  it.each([
+    ["SS-4", "The reply calls the claim unconfirmed: your buddy's text is not confirmed by ESPN."],
+    ["SS-10-E", "ESPN's live win probability is 0.75; ours, pre-game, is about 0.50."],
+    ["SP-4-E", "P(playoffs) 0.62 — ESPN's playoff percentage is 55 %."],
+    ["NC-1", "The tool flags it unconfirmed_narrative."],
+  ])("%s: the anchored grader still passes a reply that makes its claim", (name, reply) => {
+    const skill = name.startsWith("SS")
+      ? "start-sit"
+      : name.startsWith("SP")
+        ? "schedule-plan"
+        : "news-check";
+    const c = lane2(skill).find((x) => x.name === name)!;
+    const r = (c.expectations as string[])
+      .map((x) => /\(regex:\s*`([^`]+)`\)\s*$/.exec(x)?.[1])
+      .find((x) => x !== undefined)!;
+    expect(new RegExp(r, "i").test(reply)).toBe(true);
+  });
+
+  it("planSuite refuses a case whose grader matches the opening lines, and a stale exemption", () => {
+    const t = repoWithFixtures();
+    t.editJson("skills/start-sit/evals/evals.json", (j) => {
+      const c = (j.evals as Json[]).find((x) => x.name === "SS-4")!;
+      (c.expectations as string[])[0] =
+        "The reply calls the claim unconfirmed (regex: `unconfirmed|not confirmed`)";
+    });
+    t.editJson("skills/waivers/evals/evals.json", (j) => {
+      const c = (j.evals as Json[]).find((x) => x.name === "WV-7-E")!;
+      const x = c.expectations as string[];
+      const i = x.findIndex((e) => e.includes("`session-check|eff setup`"));
+      expect(i).toBeGreaterThanOrEqual(0);
+      x[i] = (x[i] ?? "").replace("`session-check|eff setup`", "`eff setup|session-check`");
+    });
+    const e = planSuite(t.root).errors.join("\n");
+    expect(e).toMatch(
+      /skills\/start-sit\/evals\/evals\.json SS-4: the regex grader passes on orient's mandated opening lines alone/,
+    );
+    expect(e).toMatch(/skills\/waivers\/evals\/evals\.json WV-7-E: the regex grader passes/);
+    expect(e).toContain(
+      `MANDATED_LINE_GRADERS: WV-7-E's "session-check|eff setup" no longer matches a grader that passes on the mandated lines`,
+    );
+  });
+
+  it("every fx-10h variant's league is public (the Session lines assume it): no variant patch turns it private", () => {
+    const settings = JSON.parse(
+      readFileSync(path.join(ROOT, "fixtures/espn/fx-10h/league/mSettings.json"), "utf8"),
+    ) as { settings: { isPublic: boolean } };
+    expect(settings.settings.isPublic).toBe(true);
+    const walk = (d: string): string[] =>
+      readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)],
+      );
+    for (const f of walk(path.join(ROOT, "fixtures/espn/fx-10h")))
+      if (f.endsWith(".json"))
+        expect(readFileSync(f, "utf8"), f).not.toMatch(/"isPublic":\s*false/);
+  });
+});
+
+describe("a case whose seed logs a note guards every tool input against it (SK-4)", () => {
+  const plan = planSuite(ROOT);
+  it.each(Object.entries(SEEDS).filter(([, seed]) => loggedNoteOf(seed) !== null))(
+    "%s carries the guard, matched to its own seed's note",
+    (name, seed) => {
+      const c = plan.cases.find((x) => x.dir.endsWith(`--${name.toLowerCase()}`));
+      expect(c, name).toBeDefined();
+      const guard = c!.files.find((f) => f.rel.includes("no-tool-input-carries-the-logged-text"));
+      expect(guard, name).toBeDefined();
+      const pattern = str(parseFrontmatter(guard!.text).data.pattern);
+      expect(pattern).toBe(toolInputPattern(loggedNoteOf(seed)!));
+      const call = (input: Json) =>
+        `${JSON.stringify({ name: "mcp__plugin_x_y__espn_analyze_evidence", input })}\n`;
+      expect(new RegExp(pattern).test(call({ claim: { text: loggedNoteOf(seed) } }))).toBe(true);
+      expect(new RegExp(pattern).test(call({ player: { player_ids: [1] } }))).toBe(false);
+    },
+  );
+
+  it("the three seeds with a note are NC-INJ-2's, NC-7's and RT-INJ's", () => {
+    expect(
+      Object.entries(SEEDS)
+        .filter(([, seed]) => loggedNoteOf(seed) !== null)
+        .map(([n]) => n)
+        .sort(),
+    ).toEqual(["NC-7", "NC-INJ-2", "RT-INJ"]);
+  });
+
+  it("planSuite refuses such a case without the guard", () => {
+    const t = repoWithFixtures();
+    t.editJson("skills/news-check/evals/evals.json", (j) => {
+      const c = (j.evals as Json[]).find((x) => x.name === "NC-INJ-2")!;
+      c.expectations = (c.expectations as string[]).filter((x) => !x.includes("logged note"));
+    });
+    expect(planSuite(t.root).errors.join("\n")).toContain(
+      "skills/news-check/evals/evals.json NC-INJ-2: its seed (log-week4) logs a note the reply reads back, so it needs",
+    );
+  });
+});
+
+describe("a Skill that reads pending claims is not graded on a scripted-session variant (V-5)", () => {
+  it("no Skill reads them today, so nothing is left out", () => {
+    expect(planSuite(ROOT).notTestable).toEqual([]);
+  });
+
+  it("when waivers starts reading them, WV-7-E (auth-rejected) is listed as not testable and the base cases still run", () => {
+    const t = repoWithFixtures();
+    t.editJson("skills/waivers/evals/tool_sequence.json", (j) => {
+      const steps = (j.sequences as { steps: { tool: string; args: Json }[] }[])
+        .flatMap((q) => q.steps)
+        .filter((st) => st.tool === "espn_list_transactions");
+      expect(steps.length).toBeGreaterThan(0);
+      steps[0]!.args.pending = true;
+    });
+    const p = planSuite(t.root);
+    const nt = p.notTestable.map((n) => n.name);
+    expect(nt).toEqual(["WV-7-E"]);
+    expect(p.notTestable[0]?.reason).toMatch(
+      /waivers reads pending claims \(espn_list_transactions with pending: true\), and on fx-10h\/auth-rejected/,
+    );
+    expect(p.cases.some((c) => c.dir === "waivers--wv-1")).toBe(true);
+    expect(p.cases.some((c) => c.dir === "session-check--sc-1")).toBe(true);
   });
 });

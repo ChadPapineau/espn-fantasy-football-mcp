@@ -9,10 +9,16 @@
 // removes the copy when the server exits. So every run of every case starts from the state its
 // expected output describes, whatever an earlier run logged, and no run can change what a later one
 // sees (before this, one state directory per plugin was shared by every run and case, so results
-// depended on their order).
+// depended on their order). The server's `ESPN_*` and `EFF_*` variables are the plugin's own: every
+// one the inherited env carries that the plugin does not declare (`--keep-env`, written by the
+// build from its .mcp.json env) is dropped, so a variable exported in the shell that runs the suite
+// (`ESPN_TEAM_ID`, `EFF_SEEDING_MODE`, an invalid `EFF_WEATHER_SOURCE`) cannot change the fixture
+// state a case is graded on or stop its server (the round-3 verifiers' V-2; config reads the env
+// before config.json).
 //
 // Usage (generated; the env is the server's, minus its state directories):
 //   node --import <repo>/tests/e2e/fixtures/no-socket.cjs eval-server.mjs --state <dir> --root <repo>
+//     --keep-env <KEY,KEY,…>
 // stdin/stdout are the server's own (the MCP stdio transport, inherited): this process never writes
 // to stdout. Exit: the server's code (128 + n when a signal ended it); 2 on a usage or state problem.
 // Zero dependencies (Node built-ins and ./_lib.mjs).
@@ -45,6 +51,10 @@ export const NO_SOCKET = "tests/e2e/fixtures/no-socket.cjs";
 export const COPY_PREFIX = "eff-eval-run-";
 /** The exit code of a usage or state problem. */
 export const USAGE_EXIT = 2;
+/** The inherited variables the launcher filters: only the declared ones of these reach the server. */
+export const SERVER_ENV_RE = /^(?:ESPN|EFF)_/;
+/** One `--keep-env` key. */
+export const ENV_KEY_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 /**
  * The first ancestor of `dir` (itself included) holding a `.git` entry, or null — the server refuses
@@ -63,24 +73,34 @@ export function gitTreeOf(dir) {
 }
 
 /**
- * Parse `--state <dir> --root <repo>`; null on anything else.
+ * Parse `--state <dir> --root <repo> --keep-env <KEY,…>` (all three, each once, in any order); null
+ * on anything else — a missing or malformed key list included, so a launcher never starts a server
+ * with the inherited env unfiltered.
  * @param {readonly string[]} argv
- * @returns {{ state: string, root: string } | null}
+ * @returns {{ state: string, root: string, keep: string[] } | null}
  */
 export function parseArgs(argv) {
   /** @type {string | undefined} */
   let state;
   /** @type {string | undefined} */
   let root;
+  /** @type {string[] | undefined} */
+  let keep;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = argv[i + 1];
     if (a === "--state" && v !== undefined && state === undefined) state = path.resolve(v);
     else if (a === "--root" && v !== undefined && root === undefined) root = path.resolve(v);
-    else return null;
+    else if (a === "--keep-env" && v !== undefined && keep === undefined) {
+      const keys = v.split(",");
+      if (!keys.every((k) => ENV_KEY_RE.test(k)) || new Set(keys).size !== keys.length) return null;
+      keep = keys;
+    } else return null;
     i++;
   }
-  return state !== undefined && root !== undefined ? { state, root } : null;
+  return state !== undefined && root !== undefined && keep !== undefined
+    ? { state, root, keep }
+    : null;
 }
 
 /**
@@ -143,15 +163,18 @@ export function freshCopy(state, base = tmpdir()) {
 }
 
 /**
- * The server's env for one start: the inherited env with its state directories pointed at the copy.
+ * The server's env for one start: the inherited env without the `ESPN_*` / `EFF_*` variables the
+ * plugin does not declare (`keep`), its state directories pointed at the copy.
  * @param {Readonly<Record<string, string | undefined>>} env
  * @param {string} copy
+ * @param {readonly string[]} keep the plugin's declared env keys
  * @returns {Record<string, string>}
  */
-export function serverEnvFor(env, copy) {
+export function serverEnvFor(env, copy, keep) {
   /** @type {Record<string, string>} */
   const out = {};
-  for (const [k, v] of Object.entries(env)) if (typeof v === "string") out[k] = v;
+  for (const [k, v] of Object.entries(env))
+    if (typeof v === "string" && (!SERVER_ENV_RE.test(k) || keep.includes(k))) out[k] = v;
   for (const [d, key] of Object.entries(STATE_DIRS)) out[key] = path.join(copy, d);
   return out;
 }
@@ -186,7 +209,9 @@ export async function main(argv, deps = {}) {
   const err = deps.stderr ?? ((s) => process.stderr.write(s));
   const args = parseArgs(argv);
   if (args === null) {
-    err("eval-server: usage: eval-server.mjs --state <pristine state dir> --root <repo>\n");
+    err(
+      "eval-server: usage: eval-server.mjs --state <pristine state dir> --root <repo> --keep-env <KEY,…>\n",
+    );
     return USAGE_EXIT;
   }
   const problem = stateProblem(args.state);
@@ -211,7 +236,7 @@ export async function main(argv, deps = {}) {
   const child = spawnImpl(
     deps.node ?? process.execPath,
     ["--import", path.join(args.root, NO_SOCKET), cli, "serve"],
-    { env: serverEnvFor(deps.env ?? process.env, copy), stdio: "inherit" },
+    { env: serverEnvFor(deps.env ?? process.env, copy, args.keep), stdio: "inherit" },
   );
   const onSignal =
     deps.onSignal ??

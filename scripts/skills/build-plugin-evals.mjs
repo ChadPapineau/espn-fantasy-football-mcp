@@ -26,7 +26,8 @@
 //   <out>/README.md                                  how to run it (the llm graders cost tokens), the
 //                                                    cases left out as not testable, and why
 // Every server starts through scripts/skills/eval-server.mjs, which copies the pristine state into a
-// new temp directory per start (a run, i.e. one `claude -p` session, starts its servers once), so
+// new temp directory per start (a run, i.e. one `claude -p` session, starts its servers once) and
+// keeps only the ESPN_* / EFF_* variables the plugin's .mcp.json declares (`--keep-env`), so
 // every run of every case begins from the state its expected output describes and no run can change
 // what a later one sees. A case whose variant's harness credential state a fixture-mode server
 // cannot report (FIXTURE_CREDENTIAL_STATES), or one held out by name (HELD_OUT_CASES, with its
@@ -41,7 +42,10 @@
 // "every write tool …" → a regex over the trace that no prepare/commit/cancel tool ran; "no
 // input_match on the substituted value / injected string / logged note" → a regex over the trace
 // that no tool call's input carries it);
-// `(regex: …)` / `(regex_absent: …)` → regex on the final message (flags i); `(llm)` → an llm rubric
+// `(regex: …)` / `(regex_absent: …)` → regex on the final message (flags i) — refused when orient's
+// mandated opening lines alone satisfy a `regex` or trip a `regex_absent` (mandatedLines; the
+// exceptions are MANDATED_LINE_GRADERS), and a case whose seed logs a note must guard every tool
+// input against it (LOGGED_NOTES); `(llm)` → an llm rubric
 // with the case's expected output; `(llm, judge sees both replies)` → a `baseline` grader: the judge
 // sees the injected run's trajectory beside the base case's from a passing run, else its
 // best-scoring kept run (plan 09 §5.2; changelog §R10, R10-8) — the
@@ -87,7 +91,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { buildSkills } from "./build-skills.mjs";
-import { SEED_NOTES, checkArgType, graderOf, toolRefs } from "./check-skills.mjs";
+import {
+  SEED_NOTES,
+  checkArgType,
+  graderOf,
+  readsPendingClaims,
+  toolRefs,
+} from "./check-skills.mjs";
 import {
   REPO_ROOT,
   SKILLS_DIR,
@@ -220,6 +230,125 @@ export const FIXTURE_CREDENTIAL_STATES = Object.freeze(["not_configured", "rejec
  * @type {Readonly<Record<string, string>>}
  */
 export const HELD_OUT_CASES = Object.freeze({});
+/**
+ * The final-message regex graders that may match orient's mandated opening lines (mandatedLines),
+ * each by case and exact pattern with the reason: the grader checks the one command the Session
+ * line itself carries, so a reply that prints that line does give it. Any other `regex` grader that
+ * matches those lines alone is refused by the build, because it cannot fail a reply that follows
+ * orient and says nothing about the claim (the round-3 verifiers' V-1 and V-3: six "calls it
+ * unconfirmed" graders passed on the seeding line, two "labels ESPN's figure" graders on the
+ * Session line). An entry whose case or pattern changed is refused too, so a new pattern is
+ * reviewed again.
+ */
+export const MANDATED_LINE_GRADERS = Object.freeze([
+  {
+    case: "WV-7-E",
+    pattern: "session-check|eff setup",
+    why: "the session repair in one line: R10-7's Session line is that line",
+  },
+  {
+    case: "SC-1",
+    pattern: "eff setup",
+    why: "session-check gives the one command; the Session line carries it",
+  },
+  {
+    case: "SC-INJ",
+    pattern: "eff setup",
+    why: "session-check gives the one documented command; the Session line carries it",
+  },
+  {
+    case: "SC-8",
+    pattern: "eff setup",
+    why: "session-check gives the one command; the Session line carries it",
+  },
+]);
+/**
+ * The opening lines orient.md makes every answer print on a case's eval server — on a public league
+ * (every fx-10h variant's league is public: scripts/fx10h/model.ts): the Session line of its
+ * credential state (R9-1's `not_configured` row, R10-7's `rejected` row; a `stored` session prints
+ * none), then the seeding line while the reading is unconfirmed (every fixture server, unless the
+ * case's seed records a reading — SEEDING_SEEDS). Read from orient.md itself, so a reworded line is
+ * the line the graders are checked against.
+ * @param {string} orient the text of skills/_shared/references/orient.md
+ * @param {unknown} credentialState the variant's `harness.credential_state` (absent: not_configured)
+ * @param {string | null} seed the case's seed
+ * @returns {{ lines: string[], errors: string[] }}
+ */
+export function mandatedLines(orient, credentialState, seed) {
+  /** @param {RegExp} re @param {string} what */
+  const quoted = (re, what) => {
+    const m = re.exec(orient);
+    return m?.[1] ?? { error: `orient.md: no quoted ${what} line to check the graders against` };
+  };
+  /** @type {string[]} */
+  const lines = [];
+  /** @type {string[]} */
+  const errors = [];
+  /** @param {string | { error: string }} x */
+  const add = (x) => {
+    if (typeof x === "string") lines.push(x);
+    else errors.push(x.error);
+  };
+  const state = credentialState ?? "not_configured";
+  if (state === "rejected" || state === "not_configured")
+    add(
+      quoted(
+        new RegExp(
+          String.raw`\|\s*\x60credential\.state: ${state}\x60 and \x60league\.is_public: true\x60[^\n]*?\*\*Session\*\* line — "([^"\n]+)"`,
+        ),
+        `${state} Session`,
+      ),
+    );
+  if (!Object.hasOwn(SEEDING_SEEDS, seed ?? ""))
+    add(quoted(/\|\s*`seeding\.confirmed: false` \|[^\n]*?"([^"\n]+)"/, "seeding"));
+  return { lines, errors };
+}
+/**
+ * The problems of one case's final-message regex graders against its mandated opening lines: a
+ * `regex` grader that matches them alone (it passes on any reply that follows orient), unless
+ * MANDATED_LINE_GRADERS lists it; a `regex_absent` grader that matches them (it fails every reply
+ * that follows orient).
+ * @param {string} name the case
+ * @param {readonly unknown[]} expectations
+ * @param {readonly string[]} lines mandatedLines(…).lines
+ * @param {Set<string>} [used] collects the MANDATED_LINE_GRADERS entries that applied
+ * @returns {string[]}
+ */
+export function mandatedLineProblems(name, expectations, lines, used = new Set()) {
+  const text = lines.join("\n");
+  /** @type {string[]} */
+  const out = [];
+  for (const x of expectations) {
+    const sentence = String(x);
+    const m = /\((regex|regex_absent):\s*`([^`]+)`\)\s*$/.exec(sentence);
+    if (!m) continue;
+    const kind = m[1] ?? "";
+    const pattern = m[2] ?? "";
+    /** @type {RegExp} */
+    let re;
+    try {
+      re = new RegExp(pattern, "i");
+    } catch {
+      continue; // check-skills refuses a pattern that does not compile
+    }
+    if (!re.test(text)) continue;
+    if (kind === "regex_absent") {
+      out.push(
+        `the regex_absent grader fails every reply that prints orient's mandated opening lines (${JSON.stringify(text)}): "${sentence}"`,
+      );
+      continue;
+    }
+    const ok = MANDATED_LINE_GRADERS.find((g) => g.case === name && g.pattern === pattern);
+    if (ok) {
+      used.add(`${ok.case} ${ok.pattern}`);
+      continue;
+    }
+    out.push(
+      `the regex grader passes on orient's mandated opening lines alone (${JSON.stringify(text)}), so it cannot fail a reply that says nothing about its claim — anchor it to that claim: "${sentence}"`,
+    );
+  }
+  return out;
+}
 /**
  * One distinctive fragment of each injection variant's planted text (scripts/fx10h/variants.ts
  * INJECTIONS — the unit test holds the two together): "no tool argument contains the injected
@@ -981,6 +1110,19 @@ export function planSuite(root, opts = {}) {
   const errors = [...listErrors];
   /** @type {Map<string, PluginSpec>} */
   const plugins = new Map();
+  /** @type {string} */
+  let orient = "";
+  try {
+    orient = readFileSync(
+      path.join(root, SKILLS_DIR, "_shared", "references", "orient.md"),
+      "utf8",
+    );
+  } catch (e) {
+    errors.push(`skills/_shared/references/orient.md: ${errMsg(e)}`);
+  }
+  /** the MANDATED_LINE_GRADERS entries that applied, and the cases they name that were written */
+  const usedExemptions = new Set();
+  const writtenCases = new Set();
   /** @param {string | null} variant @param {string} toolset @param {string | null} seed */
   const need = (variant, toolset, seed) => {
     const key = pluginKey(variant, toolset, seed);
@@ -1022,6 +1164,29 @@ export function planSuite(root, opts = {}) {
     }
     const slash = slashCommand(manifest.plugin, skill);
     const list = isRecord(evals) && Array.isArray(evals["evals"]) ? evals["evals"] : [];
+    // a Skill that reads the user's pending claims (changelog §R10, R10-10)
+    let readsPending = false;
+    try {
+      const body = readFileSync(path.join(root, SKILLS_DIR, skill, "SKILL.md"), "utf8");
+      const seqs = /** @type {unknown} */ (
+        JSON.parse(readFileSync(path.join(root, where, "tool_sequence.json"), "utf8"))
+      );
+      const sequences =
+        isRecord(seqs) && Array.isArray(seqs["sequences"])
+          ? seqs["sequences"].map((q) => ({
+              steps: (isRecord(q) && Array.isArray(q["steps"]) ? q["steps"] : [])
+                .filter(isRecord)
+                .map((st) => ({
+                  tool: String(st["tool"]),
+                  args: isRecord(st["args"]) ? st["args"] : {},
+                })),
+            }))
+          : [];
+      const fm = parseFrontmatter(body);
+      readsPending = readsPendingClaims(body.split("\n").slice(fm.bodyStart).join("\n"), sequences);
+    } catch (e) {
+      errors.push(`${where}: ${errMsg(e)}`);
+    }
     /** @param {unknown} c */
     const variantOf = (c) => {
       const f = isRecord(c) && Array.isArray(c["files"]) ? c["files"][0] : undefined;
@@ -1103,11 +1268,37 @@ export function planSuite(root, opts = {}) {
       }
       const held = Object.hasOwn(heldOut, name) ? heldOut[name] : undefined;
       if (reason === null && held !== undefined) reason = held;
+      // the server's pending-claims warning gives a fixture's scripted session the reason for no
+      // stored session (the round-3 verifiers' V-5, a server need): until it names the scripted
+      // state, a Skill that reads pending claims is not graded on such a variant
+      const harnessState = harnessOf(variant)["credential_state"];
+      if (
+        reason === null &&
+        readsPending &&
+        (harnessState ?? "not_configured") !== "not_configured"
+      )
+        reason = `${skill} reads pending claims (espn_list_transactions with pending: true), and on fx-10h/${variant ?? ""} (credential.state ${JSON.stringify(harnessState)}) the server's pending: null warning names no stored session — the reason a fixture-mode server gives, not the variant's (changelog §R10, R10-10)`;
       if (reason !== null) {
         notTestable.push({ dir, skill, name, variant, reason });
         continue;
       }
       const key = need(variant, toolset, seed);
+      writtenCases.add(name);
+      const exps0 = Array.isArray(c["expectations"]) ? c["expectations"] : [];
+      // every final-message regex can fail a reply that only prints orient's opening lines (V-1)
+      const mandated = mandatedLines(orient, harnessOf(variant)["credential_state"], seed);
+      errors.push(...mandated.errors.map((e) => `${where}/evals.json ${name}: ${e}`));
+      for (const p of mandatedLineProblems(name, exps0, mandated.lines, usedExemptions))
+        errors.push(`${where}/evals.json ${name}: ${p}`);
+      // a case whose seed logs a note guards every tool input against it (guardrail 3; changelog
+      // §R10, R10-1 and R10-13; the round-3 verifiers' SK-4)
+      if (
+        loggedNoteOf(seed) !== null &&
+        !exps0.some((x) => /\(tool_used:[^)]*no input_match on the logged note/.test(String(x)))
+      )
+        errors.push(
+          `${where}/evals.json ${name}: its seed (${String(seed)}) logs a note the reply reads back, so it needs "No tool argument contains the logged note (tool_used: no input_match on the logged note, arm both)"`,
+        );
       const synthetic = rawPrompt.includes(SYNTHETIC_TOKEN) ? syntheticCookie() : null;
       const prompt = synthetic ? rawPrompt.split(SYNTHETIC_TOKEN).join(synthetic) : rawPrompt;
       const expected = String(c["expected_output"]);
@@ -1274,6 +1465,11 @@ export function planSuite(root, opts = {}) {
       });
     }
   }
+  for (const g of MANDATED_LINE_GRADERS)
+    if (writtenCases.has(g.case) && !usedExemptions.has(`${g.case} ${g.pattern}`))
+      errors.push(
+        `MANDATED_LINE_GRADERS: ${g.case}'s "${g.pattern}" no longer matches a grader that passes on the mandated lines — remove or update the entry`,
+      );
   return { cases, plugins: [...plugins.values()], notTestable, errors };
 }
 
@@ -1402,6 +1598,14 @@ export function buildPluginEvals(opts = {}) {
         2,
       )}\n`,
     );
+    const env = withoutStateDirs(
+      serverEnv({
+        root,
+        variant: p.variant,
+        toolset: p.toolset,
+        state,
+      }),
+    );
     writeFileSync(
       path.join(dir, ".mcp.json"),
       `${JSON.stringify(
@@ -1409,15 +1613,8 @@ export function buildPluginEvals(opts = {}) {
           mcpServers: {
             [manifest.plugin]: {
               command: node,
-              args: launcherArgs(root, state),
-              env: withoutStateDirs(
-                serverEnv({
-                  root,
-                  variant: p.variant,
-                  toolset: p.toolset,
-                  state,
-                }),
-              ),
+              args: launcherArgs(root, state, Object.keys(env)),
+              env,
             },
           },
         },
@@ -1482,11 +1679,14 @@ export function withoutStateDirs(env) {
 
 /**
  * The eval server's arguments: the launcher under the no-socket preload, with the pristine state
- * directory and the repository it serves from.
+ * directory, the repository it serves from, and the env keys the plugin declares (`--keep-env`: the
+ * launcher drops every other inherited `ESPN_*` / `EFF_*` variable, so the shell that runs the suite
+ * cannot change a case's fixture state — the round-3 verifiers' V-2).
  * @param {string} root
  * @param {string} state `<state root>/<plugin key>`
+ * @param {Iterable<string>} keep the keys of the server's declared env (`.mcp.json`'s `env`)
  */
-export const launcherArgs = (root, state) => [
+export const launcherArgs = (root, state, keep) => [
   "--import",
   path.join(root, NO_SOCKET),
   path.join(root, EVAL_SERVER),
@@ -1494,6 +1694,8 @@ export const launcherArgs = (root, state) => [
   state,
   "--root",
   root,
+  "--keep-env",
+  [...keep].sort().join(","),
 ];
 
 /**
@@ -1551,7 +1753,7 @@ export function readme(o) {
     "Built by `node scripts/skills/build-plugin-evals.mjs` from every Skill's `evals/evals.json` and `evals/trigger_eval.json` (plan 09 §5.2; plan 10 B15).",
     `${String(lane2)} Lane 2 cases and ${String(o.plan.cases.length - lane2)} trigger cases; ${String(o.plan.plugins.length)} eval plugins, each the Skills bundle plus one server: \`dist/cli.js serve\` in fixture mode on its fx-10h variant (EFF_TEST_STUBS=1, the no-socket preload — no network, no cookie), under the toolset its cases state.`,
     "",
-    "Every server starts through `scripts/skills/eval-server.mjs`, which copies its plugin's pristine state (written by the build and `--seed`) into a new temp directory for that start: every run of every case begins from the state its expected output describes, and nothing a run logs reaches another run.",
+    "Every server starts through `scripts/skills/eval-server.mjs`, which copies its plugin's pristine state (written by the build and `--seed`) into a new temp directory for that start: every run of every case begins from the state its expected output describes, and nothing a run logs reaches another run. It also drops every `ESPN_*` and `EFF_*` variable the shell running the suite exports that the plugin's `.mcp.json` does not declare (`--keep-env`), so no such variable changes the state a case is graded on.",
     "",
     "## Run (manual — the llm graders cost tokens)",
     "",

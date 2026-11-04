@@ -51,7 +51,7 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "espn_analyze_matchup was called in season mode (tool_used: input_match mode season)",
-        "The reply gives the playoff probability and ESPN's figure, labelled (regex: `ESPN`)",
+        "The reply gives the playoff probability and ESPN's figure, labelled (regex: `playoff_pct_espn|ESPN['’]?s?\\b[^.\\n]{0,60}playoff|playoff[^.\\n]{0,60}\\bESPN`)",
         "The reply prints the marginal-values table with the win row and the points rows (llm)",
         "The reply names the seeding reading and translates one win into points with one sentence (llm)",
         "The reply never recommends coasting (regex_absent: `\\bcoast(ing)? (is|would be) (fine|safe|ok)`)"
