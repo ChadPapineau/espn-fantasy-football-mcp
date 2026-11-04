@@ -20,6 +20,7 @@ import {
   HEARTBEAT,
   makeHome,
   measureStall,
+  printStall,
   requireDist,
   seedHome,
   serve,
@@ -176,9 +177,7 @@ describe("latency on fx-10h over real stdio (A15a, A16a)", { timeout: 300_000 },
       max_loop_stall_ms: Math.round(stall * 10) / 10,
     });
     process.stdout.write(`latency report: ${JSON.stringify(report)}\n`);
-    process.stdout.write(
-      `latency stall (core analytics): ${w.report} ${stallEvidence(w, spans)}\n`,
-    );
+    printStall("core analytics", w, spans);
     expect(e1).toBeLessThan(3000);
     expect(e2).toBeLessThan(5000);
     expect(e5).toBeLessThan(5000);
@@ -283,7 +282,7 @@ describe(
       // window of player-weeks as one read + score once stalled it 40–55 ms here (B2a gate round 2)
       const readStall = w.stall_ms;
       report.max_loop_stall_reads_ms = Math.round(readStall * 10) / 10;
-      process.stdout.write(`latency stall (full reads): ${w.report} ${stallEvidence(w, spans)}\n`);
+      printStall("full reads", w, spans);
       expect(slow).toEqual([]);
       expect(stallPassed(w), `${w.report} ${stallEvidence(w, spans)}`).toBe(true);
       // the dataset reads never went upstream
@@ -312,9 +311,7 @@ describe(
       const stall = w.stall_ms;
       report.max_loop_stall_ms = Math.round(stall * 10) / 10;
       process.stdout.write(`latency report (full): ${JSON.stringify(report)}\n`);
-      process.stdout.write(
-        `latency stall (full analytics): ${w.report} ${stallEvidence(w, spans)}\n`,
-      );
+      printStall("full analytics", w, spans);
       expect(slow).toEqual([]);
       expect(stallPassed(w), `${w.report} ${stallEvidence(w, spans)}`).toBe(true);
     });

@@ -612,6 +612,26 @@ export function stallEvidence(
 }
 
 /**
+ * Prints a measured window's verdict and evidence (stallEvidence, the calls named): one line on
+ * stdout, and under GitHub Actions also a `::notice` workflow command, so every CI run's stall
+ * evidence — a green one's too — is an annotation the public check-run API returns (the job log is
+ * not readable without a login). The text is the evidence line only: numbers, the tools' names and
+ * the code labels of heartbeat.cjs, never data.
+ */
+export function printStall(
+  label: string,
+  w: Pick<StallWindow, "attempts" | "server" | "control_ms" | "repeated" | "report">,
+  spans: readonly CallSpan[] = [],
+): void {
+  const line = `${w.report} ${stallEvidence(w, spans)}`;
+  process.stdout.write(`latency stall (${label}): ${line}\n`);
+  if (process.env.GITHUB_ACTIONS === "true")
+    process.stdout.write(
+      `::notice title=latency stall (${label})::${line.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}\n`,
+    );
+}
+
+/**
  * Whether a server window over `boundMs` may have been set by the HOST: its longest gap holds no
  * more of the main thread's own CPU than the bound, AND something shows the host interfering — the
  * OS took a thread of the process off the CPU inside that gap (involuntary switches), or an idle
