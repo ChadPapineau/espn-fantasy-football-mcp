@@ -5,10 +5,25 @@
 // lets the loop run between its parse, drift check, schema check and cache strip (the full-toolset
 // stall probe found those phases at ~100 ms as one macrotask). A warm read of an UNCHANGED stored
 // entry is served from the parse memo (deep-frozen): no parse, no yield; a new stored version
-// parses again.
+// parses again. A small read gives up the turn only once the slice has spent its share (F1, round 4d:
+// request.ts `read` starts with turnIfSpent), so the "no yield" checks run with the slice account
+// frozen and started (`unspent`): on a slow runner the thread's own CPU could have spent the slice.
 import { describe, expect, it } from "vitest";
+import { yieldTurn } from "../../src/domain/analytics/cooperative.js";
 import { deepFreeze, YIELD_BEFORE_PARSE_CHARS } from "../../src/providers/espn/request.js";
+import { frozenMeter, withSliceMeter } from "../domain/analytics/slice-meter.js";
 import { makeWorld } from "../providers/espn/helpers.js";
+
+/**
+ * Runs `check` with the slice account frozen and started by one pass through the gate, so no
+ * conditional yield is taken in it (the account's first check after a swap otherwise yields).
+ */
+async function unspent(check: () => Promise<void>): Promise<void> {
+  await withSliceMeter(frozenMeter, async () => {
+    await yieldTurn();
+    await check();
+  });
+}
 
 /** Whether a setImmediate queued just before `work` starts runs before `work` resolves. */
 async function yieldsDuring(work: () => Promise<unknown>): Promise<boolean> {
@@ -32,8 +47,10 @@ describe("the provider yields before parsing a large cached body", () => {
       YIELD_BEFORE_PARSE_CHARS,
     );
     expect(await yieldsDuring(() => w.provider.getRosters(w.ref, 3))).toBe(true);
-    // the settings body is small: served without a yield (microtasks only)
-    expect(await yieldsDuring(() => w.provider.getLeague(w.ref))).toBe(false);
+    // the settings body is small: served without a yield (microtasks only) while the slice is unspent
+    await unspent(async () => {
+      expect(await yieldsDuring(() => w.provider.getLeague(w.ref))).toBe(false);
+    });
   });
 });
 
@@ -66,8 +83,10 @@ describe("the provider parses a large cached body in turns of its own", () => {
       fetched_at: new Date(Date.parse(e.fetched_at) + 1).toISOString(),
     });
     expect(await turnsDuring(() => w.provider.getRosters(w.ref, 3))).toBeGreaterThanOrEqual(3);
-    // memoised now: no turn at all
-    expect(await turnsDuring(() => w.provider.getRosters(w.ref, 3))).toBe(0);
+    // memoised now: no turn at all (while the slice is unspent)
+    await unspent(async () => {
+      expect(await turnsDuring(() => w.provider.getRosters(w.ref, 3))).toBe(0);
+    });
   });
 });
 
@@ -86,11 +105,13 @@ describe("the parse memo", () => {
     const cold = await w.provider.getRosters(w.ref, 3);
     expect(await yieldsDuring(() => w.provider.getRosters(w.ref, 3))).toBe(true); // parses, memoises
     let warm: unknown;
-    expect(
-      await yieldsDuring(async () => {
-        warm = await w.provider.getRosters(w.ref, 3);
-      }),
-    ).toBe(false);
+    await unspent(async () => {
+      expect(
+        await yieldsDuring(async () => {
+          warm = await w.provider.getRosters(w.ref, 3);
+        }),
+      ).toBe(false);
+    });
     expect(JSON.stringify((warm as { value: unknown }).value)).toBe(JSON.stringify(cold.value));
     // the stored entry changes (a re-fetch writes a new fetched_at): parsed again
     const key = [...w.cache.map.keys()].find((k) => k.includes("mRoster")) ?? "";
