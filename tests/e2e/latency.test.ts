@@ -12,12 +12,16 @@
 // The measured numbers are printed for the report. A stall window over the bound is judged by
 // helpers.ts measureStall (ruling R8-2; changelog §R10, R10-9: a measurement every window of which
 // the host set by the idle control's stall passes only with the server's own longest CPU run under
-// the bound, and its report line says so).
+// the bound, and its report line says so). A last probe prints each P1 analytics call's own longest
+// run on the CPU, cold, in a fresh server (evidence only, a CI notice: the round-4b review's F1 —
+// trade's 22 ms run on the Linux runner, past plan 03 §1.2's 20 ms batch, was seen only as the
+// window's longest call; the per-tool Mac probe never measured trade or matchup).
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
   type CallSpan,
   HEARTBEAT,
+  heartbeatRecordOf,
   makeHome,
   measureStall,
   printStall,
@@ -314,6 +318,47 @@ describe(
       printStall("full analytics", w, spans);
       expect(slow).toEqual([]);
       expect(stallPassed(w), `${w.report} ${stallEvidence(w, spans)}`).toBe(true);
+    });
+
+    // the round-4b review's F1: each P1 analytics call's OWN longest run on the CPU, cold (its first
+    // call in a fresh server on the same seeded home, in the window's order), so a CI run names the
+    // tool and its run against plan 03 §1.2's 20 ms batch. Evidence only: the 50 ms bound above is
+    // the test; this prints numbers and the tools' names, never data
+    it("per-tool evidence: each P1 analytics call's own longest CPU run, cold (printed, a CI notice)", async () => {
+      if (f !== null) {
+        await f.stop();
+        f = null;
+      }
+      const g = await serve(homeFull, { preloads: [HEARTBEAT] });
+      try {
+        await g.client.callTool({ name: "espn_get_league", arguments: {} }, { timeout: 120_000 });
+        const r = (x: number | null): number | null =>
+          x === null ? null : Math.round(x * 10) / 10;
+        const each: Record<string, unknown> = {};
+        for (const [name, args] of P1_ANALYTICS) {
+          await heartbeatRecordOf(g.transport); // a fresh window: this call only
+          const res = await g.client.callTool({ name, arguments: args }, { timeout: 120_000 });
+          expect(res.isError, name).not.toBe(true);
+          const hb = await heartbeatRecordOf(g.transport);
+          each[`${name}${typeof args.mode === "string" ? `_${args.mode}` : ""}`] = {
+            cpu_max_ms: r(hb.cpu_max_ms),
+            gap_ms: r(hb.gap_ms),
+            gap_cpu_ms: r(hb.gap_cpu_ms),
+            gap_invol: hb.gap_invol,
+            // the longest gap's store and GC time (numbers only): what is NOT the JavaScript step
+            sql_ms: typeof hb.attr?.sql_ms === "number" ? r(hb.attr.sql_ms) : null,
+            gc_ms: typeof hb.attr?.gc_ms === "number" ? r(hb.attr.gc_ms) : null,
+          };
+        }
+        const line = JSON.stringify(each);
+        process.stdout.write(`latency per-tool cpu_max (full, cold): ${line}\n`);
+        if (process.env.GITHUB_ACTIONS === "true")
+          process.stdout.write(
+            `::notice title=latency per-tool cpu_max (full, cold)::${line.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}\n`,
+          );
+      } finally {
+        await g.stop();
+      }
     });
   },
 );

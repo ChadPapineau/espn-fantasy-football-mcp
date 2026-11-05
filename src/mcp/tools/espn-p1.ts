@@ -625,11 +625,14 @@ export const getPlayerOutlook = defineTool({
     }
     const byId = new Map(outlooks.map((o) => [o.player.id, o]));
     // each player's claim runs the rules_v1 table over his newest text, and the process's first
-    // claims compiled every rule's pattern in this one synchronous map (cold cpu_max 9.3–11.6 ms
-    // against 4.7–5.8 ms warm on the owner's Mac; round 4's timing account): the table is compiled
-    // first, a rule a step, in turns that end once the slice has spent its share (plan 03 §1.2;
-    // plan 10 A16a), as espn_get_news and espn_analyze_evidence do — once per process, so a warm
-    // call takes no step and no pass through the gate, and the claims read are the same
+    // claims compiled every rule's pattern in this one synchronous map: the table is compiled first,
+    // a rule a step, in turns that end once the slice has spent its share (plan 03 §1.2; plan 10
+    // A16a), as espn_get_news and espn_analyze_evidence do — once per process, so a warm call takes
+    // no step and no pass through the gate, and the claims read are the same. The split is counted
+    // (tests/mcp/outlook-rules-steps.test.ts), but the cold call's longest run on the CPU did not
+    // move with it (round 4b's review F2: cold cpu_max 10.8–16.9 ms after, 11.4–15.6 ms before, 9
+    // rounds each on the owner's Mac; warm 6.2–10.1 ms): the compile is not what sets the cold
+    // call's cpu_max, and that run is not yet attributed
     await inTurns(warmRulesSteps());
     const data: PlayerOutlookData = {
       players: players.map((p) => {
