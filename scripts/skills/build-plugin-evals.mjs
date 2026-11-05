@@ -190,13 +190,13 @@ export function loggedNoteOf(seed) {
  *   R10-27). The seed reads nothing else: the feed, standings, rosters and pool stay unread;
  * - `private-expiring-weekly` — WK-10: on private-expiring (changelog §R10, R10-28), the datasets
  *   first (as `--seed-datasets` publishes them), then `espn_check_auth` (its scripted probe accepts:
- *   the label is `validated` in memory, and a validated session is never rejected) and every read
- *   weekly's steps 1–5 make (expiringWeeklyReads), so the run's server — started again on the
- *   `stored` label — serves them from the fresh cache and the first read it cannot serve is
- *   `espn_analyze_league_activity`'s transaction feed: ESPN's 401 there turns the label `rejected`,
- *   and E11 answers its session-refusal partial lines (R10-11) on a league known private, so
- *   weekly's E11 paragraph (R10-12) and its hand-off (R10-7) are graded through the Skill. Never the
- *   feed, the league activity, `espn_list_transactions` or the log: nothing is logged;
+ *   the label is `validated` in memory, and a validated session is never rejected) and
+ *   `espn_get_league` only, as `private-settings-fresh` does, so the run's server — started again on
+ *   the `stored` label — passes Step 0 from the fresh settings, and the first read it cannot serve
+ *   is inside `espn_analyze_league_activity`: ESPN's 401 there turns the label `rejected`, and E11
+ *   answers its session-refusal partial lines (R10-11) on a league known private, so weekly's E11
+ *   paragraph (R10-12) and its hand-off (R10-7) are graded through the Skill. WK-10 asks what
+ *   happened in the league (weekly's League-activity-only scope), so no other read comes first;
  * - `drift-red` — SC-4: the drifted roster view already read once, so Step 0's `espn_get_status`
  *   reports `drift.status: red` (a fresh drift-mRoster state is green until an mRoster read);
  * - `seeding-points-only` — SS-5-E, WK-5-E: the points-only reading recorded and confirmed, exactly
@@ -237,7 +237,8 @@ export const SEED_KINDS = Object.freeze([
  * The seeds whose plugin's datasets are published BEFORE the seed runs (`writeSeeds`, whatever
  * `--seed-datasets` says): the seed's reads must be the ones the run's server makes, and that server
  * has the datasets (the P1 tools read them, and what they read from ESPN follows). Every other seed
- * runs first, as before, so the state it logs is unchanged.
+ * runs first, as before, so the state it logs is unchanged. `private-expiring-weekly` reads the
+ * settings only, which no dataset changes; publishing first keeps its seed server's state the run's.
  */
 export const DATASET_FIRST_SEEDS = Object.freeze(["private-expiring-weekly"]);
 /** The seeding reading each seeding seed records (`eff setup --seeding <mode>`). */
@@ -2064,7 +2065,7 @@ export function readme(o) {
     "- Weather: not seeded — no committed weather fixture covers fx-10h's week, so no case grades a reply on wind (KD-2 grades the game total and the roof).",
     ...(o.seedNeeded.some((k) => seedOfKey(k) === "private-expiring-weekly")
       ? [
-          "- A session rejected mid-procedure (`private-expiring-weekly`; changelog §R10, R10-28): each start sets the server's clock back to the fixture's instant, and a stored copy stamped past that clock is never served fresh, so the seed's reads (stamped about a second apart, all within its first 20 seconds) are served once the run's clock passes them, and the roster copy for its 5-minute TTL after its stamp: a run that reaches League activity later than that sees ESPN's 401 on an earlier read, and orient's mid-procedure rule ends the briefing there.",
+          "- A session rejected mid-procedure (`private-expiring-weekly`; changelog §R10, R10-28): the seed reads the league settings only, stamped in its first second (inside the server's 1-second tolerance for a copy stamped ahead of a start's clock, which each start sets back to the fixture's instant) and fresh for their 1-day TTL, so WK-10's run passes Step 0 on `stored` whenever it calls, and its first read past the settings takes ESPN's 401. WK-10 asks what happened in the league, which weekly scopes to the League activity section alone, so that read is inside `espn_analyze_league_activity`; a reply that runs another step first (a lineup, a projection, a usage read) takes the 401 there, and orient's mid-procedure rule ends it with the hand-off before E11, which WK-10's graders fail.",
         ]
       : []),
     ...(() => {
@@ -2485,98 +2486,43 @@ export async function seedPrivateSettingsFresh(o) {
       throw new Error(
         `private-settings-fresh: espn_check_auth answered accepted ${String(auth["accepted"])} (reason ${String(auth["reason"])})`,
       );
-    const league = sub(sub(await t.call("espn_get_league", {}), "data"), "league");
-    if (league["is_public"] !== false)
-      throw new Error(
-        `private-settings-fresh: espn_get_league reports is_public ${String(league["is_public"])}, not false`,
-      );
+    await privateSettingsRead(t, "private-settings-fresh");
     return "league settings fresh (private), nothing else read";
   });
 }
 
 /**
- * The reads WK-10's seed makes on private-expiring after its accepting probe, in order (changelog
- * §R10, R10-28): each read weekly's steps 1–5 make, with the arguments weekly gives them — Step 0's
- * settings; last week's scoreboard and the retrospective's box scores (twice: the first call's
- * budget holds one back, the repeat reads it — weekly calls E13 for last week when the log has
- * entries, and a model checks); this week's scoreboard, both rosters (`all: true`), the injuries,
- * both teams' week projections, the lineup; K and D/ST; the pool on waivers and among free agents
- * and the waiver brief; the user's usage, the next three weeks' schedule and the bye analysis.
- * Their answers also serve the other forms a briefing gives these reads (checked on the eval
- * server: a team's roster after `all: true`, `week: 5` spelled out, the pool's default sort and
- * limit, the injuries by `team_id`, the waiver brief's defaults); a form that reads another view
- * (projections by `player_ids`, the pool by `position`) is not served, and takes the 401. Not the feed:
- * `espn_list_transactions` and `espn_analyze_league_activity` stay unread, so E11's transaction
- * feed is the first read the run's server cannot serve. The opponent is read from this week's
- * scoreboard (the other side of the matchup where `is_mine` is true).
- * @param {number} me the user's team id
- * @param {number} opponent this week's opponent's team id
- * @returns {readonly (readonly [string, Record<string, unknown>])[]}
+ * A private seed's one league read: `espn_get_league` must answer whole (never `partial: true` — a
+ * partial answer could leave the settings copy the run needs unwritten, with no build error: the
+ * round-4c review's SEED-PARTIAL-UNCHECKED) and read the league private.
+ * @param {SeedTools} t
+ * @param {string} seed the seed's name, for the error
  */
-export function expiringWeeklyReads(me, opponent) {
-  return Object.freeze([
-    ["espn_get_league", {}],
-    ["espn_get_scoreboard", { week: 4 }],
-    ["espn_analyze_retrospective", { week: 4 }],
-    ["espn_analyze_retrospective", { week: 4 }],
-    ["espn_get_scoreboard", {}],
-    ["espn_get_roster", { all: true }],
-    ["espn_get_injuries", {}],
-    ["espn_project_players", { players: { team_id: me }, horizon: "week" }],
-    ["espn_project_players", { players: { team_id: opponent }, horizon: "week" }],
-    ["espn_analyze_lineup", { objective: "auto" }],
-    ["espn_analyze_waivers", { positions: ["K"], look_ahead: 2 }],
-    ["espn_analyze_waivers", { positions: ["D/ST"], look_ahead: 2 }],
-    ["espn_list_players", { status: "WAIVERS" }],
-    ["espn_list_players", { status: "FREEAGENT" }],
-    ["espn_analyze_waivers", { mode: "auto", phase: "auto" }],
-    ["espn_get_player_usage", { players: { team_id: me } }],
-    ["espn_get_schedule", { weeks: [5, 6, 7] }],
-    ["espn_analyze_schedule", {}],
-  ]);
-}
-/** The tools WK-10's seed never calls: the feed, the league activity and the log (R10-28). */
-export const EXPIRING_WEEKLY_NEVER = Object.freeze([
-  "espn_list_transactions",
-  "espn_analyze_league_activity",
-  "espn_record_recommendation",
-  "espn_list_recommendations",
-]);
-
-/**
- * The user's team and this week's opponent from an `espn_get_scoreboard` answer's data: the two
- * sides of the one matchup where `is_mine` is true, or null.
- * @param {Record<string, unknown>} data
- * @returns {{ me: number, opponent: number } | null}
- */
-export function matchupSidesOf(data) {
-  const matchups = Array.isArray(data["matchups"]) ? data["matchups"].filter(isRecord) : [];
-  for (const m of matchups) {
-    const home = isRecord(m["home"]) ? m["home"] : null;
-    const away = isRecord(m["away"]) ? m["away"] : null;
-    if (home === null || away === null) continue;
-    const [mine, theirs] =
-      home["is_mine"] === true ? [home, away] : away["is_mine"] === true ? [away, home] : [];
-    if (mine === undefined || theirs === undefined) continue;
-    const a = mine["team_id"];
-    const b = theirs["team_id"];
-    if (Number.isInteger(a) && Number.isInteger(b) && a !== b)
-      return { me: /** @type {number} */ (a), opponent: /** @type {number} */ (b) };
-  }
-  return null;
+async function privateSettingsRead(t, seed) {
+  const body = await t.call("espn_get_league", {});
+  if (body["partial"] === true) throw new Error(`${seed}: espn_get_league answered partial`);
+  const league = sub(sub(body, "data"), "league");
+  if (league["is_public"] !== false)
+    throw new Error(
+      `${seed}: espn_get_league reports is_public ${String(league["is_public"])}, not false`,
+    );
 }
 
 /**
  * WK-10's seed on private-expiring (changelog §R10, R10-28): `espn_check_auth` first — its scripted
- * probe accepts, so the label is `validated` in this server's memory and none of the reads below is
- * rejected — then expiringWeeklyReads, each of which must answer (a `partial` retrospective is the
- * first of its two calls); the league must read private, and the label must still be `validated` at
- * the end. The run's server starts again on the `stored` label: it serves these reads from the
- * cache, and the first read it cannot serve — E11's transaction feed — takes ESPN's 401. A stored
- * copy is stamped by the server's clock, which a start sets back to the fixture's instant: each read
- * is served once that run's clock passes its stamp (a second or so per request after the start),
- * and the roster read stays fresh for its 5-minute TTL (the README's limits). Its plugin's datasets
- * are published first (DATASET_FIRST_SEEDS).
+ * probe accepts, so the label is `validated` in this server's memory and its read is not rejected —
+ * then `espn_get_league` only, so the league settings are fresh in the state (`partial: false`, the
+ * league private); the label must still be `validated` at the end. Nothing else is read. The run's
+ * server starts again on the `stored` label: Step 0's settings are served from the cache (stamped in
+ * the seed's first second, inside the server's 1-second tolerance for a copy stamped ahead of a
+ * start's clock, and fresh for their 1-day TTL, so whenever the run calls), and the first read it
+ * cannot serve is `espn_analyze_league_activity`'s first league read past the settings: ESPN's 401
+ * there turns the label `rejected`, and E11 answers its session-refusal partial lines (R10-11) on a
+ * league known private. WK-10 asks what happened in the league, which weekly scopes to its League
+ * activity section alone, so the 401 lands inside E11 whatever forms a model gives its reads; a full
+ * briefing seeded read by read could not pin it (a usage or projection read by `player_ids`, or a
+ * roster copy past its 5-minute TTL, takes the 401 first, and orient's mid-procedure rule then ends
+ * the briefing before E11 — the round-4c review's WK10-USAGE-FORM and WK10-ROSTER-TTL).
  * @param {SeedOpts} o
  * @returns {Promise<string>}
  */
@@ -2587,21 +2533,11 @@ export async function seedPrivateExpiringWeekly(o) {
       throw new Error(
         `private-expiring-weekly: espn_check_auth answered accepted ${String(auth["accepted"])}, state ${String(auth["state"])} (reason ${String(auth["reason"])})`,
       );
-    const sides = matchupSidesOf(sub(await t.call("espn_get_scoreboard", {}), "data"));
-    if (sides === null)
-      throw new Error("private-expiring-weekly: this week's scoreboard names no matchup of mine");
-    const reads = expiringWeeklyReads(sides.me, sides.opponent);
-    for (const [tool, args] of reads) {
-      const body = await t.call(tool, args);
-      if (tool === "espn_get_league" && sub(sub(body, "data"), "league")["is_public"] !== false)
-        throw new Error(
-          `private-expiring-weekly: espn_get_league reports is_public ${String(sub(sub(body, "data"), "league")["is_public"])}, not false`,
-        );
-    }
+    await privateSettingsRead(t, "private-expiring-weekly");
     const state = sub(sub(await t.call("espn_get_status", {}), "data"), "credential")["state"];
     if (state !== "validated")
-      throw new Error(`private-expiring-weekly: the label is ${String(state)} after the reads`);
-    return `${String(reads.length)} reads fresh (private; team ${String(sides.me)} v ${String(sides.opponent)}), the feed unread, nothing logged`;
+      throw new Error(`private-expiring-weekly: the label is ${String(state)} after the read`);
+    return "league settings fresh (private), nothing else read; the run starts on stored";
   });
 }
 

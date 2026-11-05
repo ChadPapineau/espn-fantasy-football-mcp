@@ -13,7 +13,7 @@
         "The skill called espn_get_depth_chart before espn_analyze_injury_cascade (tool_order)",
         "The skill called espn_analyze_injury_cascade before espn_record_recommendation (tool_order)",
         "The reply gives the expected weeks out with a range (regex: `\\d+\\s*(?:[–-]|to)\\s*\\d+[\\s-]*(?:weeks?|games?)\\b|\\b(?:out|miss(?:es|ing)?|sidelined|absence)\\b[^.\\n]{0,40}?(?<![p\\d.])\\d+\\s*(?:[–/-]|to)\\s*\\d+\\b(?!\\s*(?:points?|pts|%|targets?|carries|snaps|touches))|\\bweeks?\\s*\\(\\s*\\d+\\s*[–-]\\s*\\d+\\s*\\)|between \\d+ and \\d+\\b(?![.,]?\\d|\\s*(?:points?|pts|%|targets?|carries))|\\bp25\\b(?:\\s*[/–-]\\s*p\\d+\\b)+[^\\w\\n]{0,4}\\d|\\bp25\\b[^\\w\\n]{0,4}\\d[^\\n]{0,30}\\bp75\\b[^\\w\\n]{0,4}\\d|\\bp25\\b[^\\n]*\\|[^\\n]*\\bp75\\b[^\\n]*\\n(?:[\\s|:-]+\\n)?\\s*\\|[^\\n]*\\d[^\\n]*\\|[^\\n]*\\d`)",
-        "The reply gives each beneficiary's chance the role holds (regex: `role holds|p_role_holds`)",
+        "The reply gives each beneficiary's chance the role holds (regex: `(?<!\\bno chance (?:that )?(?:[\\w'’]+\\s){0,3})role holds|p_role_holds`)",
         "No beneficiary inherits the whole vacated role, and the reply says why the share is lower (llm)",
         "Each available beneficiary gets a claim, pass or marginal verdict against the user's own drop candidate — or, when every beneficiary is already rostered, the reply says no one is available to claim and invents no verdict (llm)"
       ]

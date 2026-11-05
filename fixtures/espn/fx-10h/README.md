@@ -81,13 +81,15 @@ league read answers `ESPN_REQUIRES_COOKIES` with zero requests, `league.is_publi
 `espn_check_auth` answers `accepted: null`, reason `not_configured` — session-check's private-league
 row (changelog §R9, R9-1; SC-11). `private-expiring` scripts a `stored` session that ESPN rejects
 mid-procedure (changelog §R10, R10-28): the build's `private-expiring-weekly` seed publishes the
-datasets, runs the accepting `espn_check_auth` and then every read weekly's steps 1–5 make, so a run
-started again on `stored` passes Step 0 and is served those reads from the cache; the first read the
-cache cannot serve — `espn_analyze_league_activity`'s transaction feed — takes the 401, and E11
-answers its session-refusal partial lines, graded through the Skill (WK-10: the section from the
-persisted history, labelled partial, then the hand-off to session-check). A stored copy is stamped by
-the seed server's clock, which every start sets back to the fixture's instant, so a run is served
-each copy once its own clock passes the stamp, and the roster copy for its 5-minute TTL. `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
+datasets, runs the accepting `espn_check_auth` and then `espn_get_league` only, so a run started
+again on `stored` passes Step 0 from the fresh settings (stamped in the seed's first second, inside
+the server's 1-second tolerance for a copy stamped ahead of a start's clock, and fresh for their
+1-day TTL), and its first read past them takes the 401. WK-10 asks what happened in the league —
+weekly's League-activity-only scope — so that read is inside `espn_analyze_league_activity`, and E11
+answers its session-refusal partial lines (the feed; the standings, rosters and free-agent pool),
+graded through the Skill (the section from the persisted history, labelled partial, then the
+hand-off to session-check). A run that makes any other league read first (a lineup, a projection, a usage
+read) takes the 401 there and ends at the hand-off before E11. `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
 (Team 01's `roster.entries` gone), `points-only-seeding` (last season's seeds follow points for; Team 03 keeps its 3–1 record on weaker week 1–4 lineups, seventh in points for, 2.34 behind the last playoff place — a contender under the record-first reading, on the bubble under the points-only one: changelog §R10, R10-14), `seeding-unknown`, `faab`, `k10`,
 `post-run` (Wednesday 06:00 ET, pool `FREEAGENT`), `ir-open`, `ir-invalid`, `hidden-bench`,
 `sunday-live` (Sunday 14:05 ET: the 09:30 ET London game final — a game is final four hours after

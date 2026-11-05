@@ -17,7 +17,11 @@ import {
   mandatedLines,
   promptMatchProblems,
 } from "../../scripts/skills/build-plugin-evals.mjs";
-import { ORIENT_SENTENCES } from "../../scripts/skills/check-skills.mjs";
+import {
+  ORIENT_SENTENCES,
+  SKILL_RULES,
+  TOOL_OUTPUT_SHEET_PHRASES,
+} from "../../scripts/skills/check-skills.mjs";
 import { ROOT } from "./helpers.js";
 
 interface Case {
@@ -750,50 +754,49 @@ describe("the patterns round 4b shipped had the holes the verifiers showed (R4BS
 // does.
 describe("round 4c's graders: the mid-procedure rejection, the not_configured private row, the cross-check (R10-27, R10-28, R10-29)", () => {
   const seedingLine = seeding;
+  // WK-10 asks what happened in the league: weekly's League-activity-only scope (the round-4c
+  // review's WK10-USAGE-FORM), so a correct reply is that section, partial, then the hand-off
   const wkProse = `${seedingLine}
 
-# Week 5 game plan — data as of Tue Oct 6, 9:00 PM ET
-
-## Last week
-Team 02 beat "Team 05" (team_id 5) — final.
-
-## This week's matchup and lineup
-"Team 10" (team_id 10); P(win) about even (position-level spread). No move: keep the current lineup.
-
-## K and D/ST
-Hold both: no stream beats Cam Little or the Rams D/ST by more than a coin flip.
-
-## Waivers
-The claim brief: no claim clears the premium this week.
-
-## Injuries and byes
-Rachaad White (OUT) is IR-eligible on the bench.
+# League activity — week 5 (data as of Tue Oct 6, 9:00 PM ET)
 
 ## League activity
-Partial: ESPN rejected the stored session when this section read the transaction feed, so it shows only the server's persisted history, which holds no transaction yet — 0 adds, drops, claims and trades. The free-agent pool was not read either, so by-team activity, waiver-order movement and rival needs go without it. In a terminal, run \`eff setup\` to replace the session.
+Partial: ESPN rejected the stored session when this section read the league, so it shows only the server's persisted history, which holds no transaction yet — 0 adds, drops, claims and trades in the last 7 days. The feed, the standings, the rosters and the free-agent pool were not read, so by-team activity, waiver-order movement and rival needs go without them. In a terminal, run \`eff setup\` to replace the session.
 
 ### Confidence & freshness
-- League activity is partial: the stored ESPN session was rejected mid-briefing; the section rests on the persisted history only.
+- League activity is partial: the stored ESPN session was rejected mid-answer; the section rests on the persisted history only.
 
 This league is private, so the session has to be repaired before the next read: hand-over to the \`espn-fantasy-football:session-check\` Skill.`;
   const wkTable = `${seedingLine}
 
-| Section | Plan | Deadline |
-|---|---|---|
-| Last week | W v "Team 05" | — |
-| This week's matchup and lineup | No move v "Team 10" | Sun 1:00 PM ET |
-| K and D/ST | Hold both | — |
-| Waivers | No claim | Wed 3:30 AM ET |
-| Injuries and byes | Rachaad White to IR | Wed 3:30 AM ET |
-| League activity | **partial** — the stored ESPN session was rejected; persisted history only (0 moves); by-team activity, waiver-order movement and rival needs go without the pool; \`eff setup\` in a terminal | — |
+| League activity | |
+|---|---|
+| Status | **partial** — the stored ESPN session was rejected; persisted history only |
+| Moves (7 days) | 0 adds, 0 drops, 0 claims, 0 trades |
+| Not read | the feed, standings, rosters and free-agent pool: by-team activity, waiver-order movement and rival needs go without them |
+| Fix | \`eff setup\` in a terminal |
 
 Next: the session-check Skill repairs the session (\`espn-fantasy-football:session-check\`).`;
+  /** Correct wordings the round-4c review's BRITTLE-CORRECT-WORDINGS found failing (WK-10 03, 05). */
+  const wkLabelLine =
+    "League activity (partial): ESPN refused your stored session partway through the answer, so this is the persisted history only — run `eff setup` in a terminal; then the session-check Skill.";
+  const wkNumbered =
+    "### 6) League activity\nPartial — the stored session was rejected; persisted history only.";
+  /** A correct reply naming the league's publicity flag (the round-4c review's PUBLIC-LINE-GUARD-FLAG). */
+  const flagNamed = [
+    "Confidence & freshness: the league's public flag is false (is_public false), so nothing reads keylessly.",
+    "The league's public setting is off: private league.",
+  ];
   /** The Step 0 hand-off WK-9 grades: right there, wrong here (the session read stored). */
   const step0 =
     "ESPN rejected the stored session on this private league, so I can't prep week 5: run the `espn-fantasy-football:session-check` Skill; in a terminal, `eff setup` replaces it.";
   /** The opposite of WK-10's claims: a complete section, a valid session, no hand-off. */
   const complete =
     "## League activity\nComplete — not partial: no rival moves this week.\n\n### Confidence & freshness\nEvery read answered; your ESPN session was not rejected, and nothing needs repairing.";
+  /** Negations the round-4c review's NEGATION-PASSES found passing (WK-10 03 and 04). */
+  const wkNothingPartial = "### League activity\nNothing partial here: the feed was read in full.";
+  const wkNotRead =
+    "| Section | Status |\n|---|---|\n| League activity | not read |\n\nESPN rejected the stored session: run the session-check Skill.";
   const publicSession =
     "**Session:** ESPN rejected the stored session; this league is public, so reads are keyless where the league allows them; `eff setup` in a terminal replaces the session";
 
@@ -841,8 +844,8 @@ Tell me when you have run it.`;
       "regex",
       "The reply gives the League activity section",
       wk,
-      [wkProse, wkTable],
-      [step0],
+      [wkProse, wkTable, wkLabelLine, wkNumbered],
+      [step0, wkNotRead],
     ],
     [
       "weekly",
@@ -850,8 +853,8 @@ Tell me when you have run it.`;
       "regex",
       "The reply labels the League activity section partial",
       wk,
-      [wkProse, wkTable],
-      [complete, step0],
+      [wkProse, wkTable, wkLabelLine, wkNumbered],
+      [complete, step0, wkNothingPartial],
     ],
     [
       "weekly",
@@ -859,14 +862,14 @@ Tell me when you have run it.`;
       "regex",
       "The reply says ESPN rejected the stored session",
       wk,
-      [wkProse, wkTable],
+      [wkProse, wkTable, wkLabelLine],
       [complete],
     ],
     [
       "weekly",
       "WK-10",
       "regex",
-      "The briefing hands over to the session-check Skill",
+      "The answer hands over to the session-check Skill",
       wk,
       [wkProse, wkTable],
       [complete],
@@ -877,7 +880,7 @@ Tell me when you have run it.`;
       "regex_absent",
       "The reply never prints the public-league Session line",
       wk,
-      [wkProse, wkTable],
+      [wkProse, wkTable, ...flagNamed],
       [`${publicSession}\n${wkProse}`],
     ],
     [
@@ -904,7 +907,7 @@ Tell me when you have run it.`;
       "regex_absent",
       "The reply never says this league is public",
       sc,
-      [scProse, scTable],
+      [scProse, scTable, ...flagNamed],
       [
         "No session is stored; this league is public, so every other Skill reads keylessly meanwhile — run `eff setup` only for private data.",
       ],
@@ -964,22 +967,31 @@ Tell me when you have run it.`;
     ).toEqual([]);
   });
 
-  it("WK-10 grades E11's lines through the Skill: called once, the briefing run, the expected output from the eval server", () => {
+  it("WK-10 grades E11's lines through the Skill: League activity only, E11 called once, the expected output from the eval server", () => {
     const c = caseOf("weekly", "WK-10");
+    // weekly's Scope rule: "What happened in my league?" alone is step 6 only (WK10-USAGE-FORM)
+    expect(c.prompt).toBe("What happened in my league this week?");
     expect(c.expectations).toContain(
       "espn_analyze_league_activity was called exactly once — never repeated for its session-refusal lines (tool_used: min 1 max 1)",
     );
-    expect(c.expectations).toContain("The skill called espn_analyze_lineup (tool_used)");
+    expect(c.expectations).toContain(
+      "espn_analyze_lineup was not called — the question is the League activity section only, weekly's scope rule (tool_used: min 0 max 0)",
+    );
     for (const fact of [
       "credential.state stored",
       "is_public false",
+      "the only read it makes",
+      "weekly's League-activity-only scope",
       "ESPN's 401",
       "'partial: the stored ESPN session was rejected, and ESPN's transaction feed needs one on a league not known to be public: the server's persisted history only; run `eff setup` in a terminal to replace it'",
-      "by-team activity, waiver-order movement and rival needs go without them",
+      "'partial: the stored ESPN session was rejected, and ESPN's standings, rosters, free-agent pool need one on a league not known to be public: they were not read (by-team activity, waiver-order movement and rival needs go without them); run `eff setup` in a terminal to replace it'",
+      "'league digest: 0 claims won, 0 lost, 0 trades in 7 days'",
       "never repeated for these lines",
       "the hand-off to the session-check Skill",
     ])
       expect(c.expected_output).toContain(fact);
+    // no expectation still names a briefing step the scope leaves out as called
+    expect(c.expectations.join("\n")).not.toContain("The skill called espn_analyze_lineup");
   });
 
   it("SS-6-E reads the cross-check's own numbers for Cook, and SS-3's direct swap is no coin flip (F12)", () => {
@@ -993,5 +1005,121 @@ Tell me when you have run it.`;
     const ss3 = caseOf("start-sit", "SS-3").expected_output;
     expect(ss3).toContain("interval [−35.215, 0]");
     expect(ss3).toContain("coin_flip false");
+  });
+});
+
+// The round-4c review's grader findings (SS9-SPLIT-TABLE, SS6E-GAP-POINTS, NEGATION-PASSES,
+// BRITTLE-CORRECT-WORDINGS, R4CS-3): each changed regex passes the correct wording it failed and
+// fails the opposite claim it passed; the claimed items no test held are pinned here.
+describe("the round-4c review's grader fixes", () => {
+  const splitTables = [
+    "| Final | Live | Pending |\n|---|---|---|\n| 2 | 3 | 4 |",
+    "| Final | Live | Pending |\n|---|---|---|\n| Tuten, Little | Jeanty, Maye, Fannin | Cook, Smith-Njigba, Shaheed, Rams D/ST |",
+  ];
+  type Row = readonly [skill: string, name: string, lead: string, pass: string[], fail: string[]];
+  const rows: readonly Row[] = [
+    [
+      "start-sit",
+      "SS-9",
+      "The reply splits the players",
+      splitTables,
+      ["Final score so far: 64.2 to 51.0.", NO_SPLIT],
+    ],
+    [
+      "start-sit",
+      "SS-11-E",
+      "The reply splits the players",
+      splitTables,
+      ["Final score so far: 64.2 to 51.0.", NO_SPLIT],
+    ],
+    [
+      "start-sit",
+      "SS-6-E",
+      "The reply gives the gap between them",
+      [
+        "ESPN's projection is 23.8 and ours is 16.9 — ESPN is 7.0 points higher than our own line, which the tool flags.",
+        "ESPN projects 23.8 for Cook, our model 16.9: a 6.98-point gap, flagged.",
+      ],
+      ["ESPN's projection for Cook is 23.8 and ours 16.9."],
+    ],
+    [
+      "start-sit",
+      "SS-6-E",
+      "The reply gives Cook's two numbers",
+      [
+        "ESPN projects 23.8 points for Cook this week, our model 16.9.",
+        "Cook: 23.8 (ESPN) against 16.9 (our own line).",
+      ],
+      ["ESPN projects Cook at 16.9; our own line is 23.8."],
+    ],
+    [
+      "start-sit",
+      "SS-1",
+      "The reply names the mode, chase",
+      ["Mode: chase — you're behind on projection, so the ceiling matters."],
+      ["protect mode, not chase", "Don't chase: protect the lead."],
+    ],
+    [
+      "roster-audit",
+      "RA-2",
+      "The reply names the move to IR",
+      [
+        'Move Rachaad White ("Rachaad White", player_id 4697815, OUT since week 3) from your bench to IR.',
+      ],
+      ["Don't move anyone to IR — keep Rachaad White on the bench."],
+    ],
+    [
+      "roster-audit",
+      "RA-2",
+      "The reply warns to activate only after the waiver run",
+      ["Activate him only once waivers process on Wednesday."],
+      ["there is no need to wait until after the waiver run"],
+    ],
+    [
+      "injury-cascade",
+      "IC-1",
+      "The reply gives each beneficiary's chance the role holds",
+      ["Tyrone Tracy Jr.: 0.62 that the role holds (p_role_holds)."],
+      ["it gave no chance that anyone's role holds"],
+    ],
+    [
+      "schedule-plan",
+      "SP-1",
+      "The reply mentions the bye weeks",
+      [
+        "| Week | Starters on bye | Cost |\n|---|---|---|\n| 7 | K, QB, RB | 25.2 |",
+        "Week 11 has five starters on bye.",
+      ],
+      ["Your bye weeks are fine — week 7 has no bye conflict at all."],
+    ],
+  ];
+  it.each(rows)("%s %s: %s", (skill, name, lead, pass, fail) => {
+    const re = graderOf(skill, name, lead);
+    for (const s of pass) expect(re.test(s), `passes: ${s}`).toBe(true);
+    for (const s of fail) expect(re.test(s), `fails: ${s}`).toBe(false);
+  });
+
+  it("SC-11 keeps its no-probe grader and its never-ask-for-a-cookie rubric (R4CS-3)", () => {
+    const x = caseOf("session-check", "SC-11").expectations;
+    expect(x).toContain(
+      "espn_check_auth was not called: nothing is stored to probe (tool_used: min 0 max 0)",
+    );
+    expect(x).toContain(
+      "The reply never asks for a cookie value or for the setup command's output (llm)",
+    );
+  });
+
+  it("check-skills requires §R10's private-league cases (R4CS-3)", () => {
+    expect(SKILL_RULES.weekly?.requiredCases).toEqual(expect.arrayContaining(["WK-9", "WK-10"]));
+    expect(SKILL_RULES["session-check"]?.requiredCases).toContain("SC-11");
+  });
+
+  it("the cheat-sheet's rate-limit clause is required word for word (round 4's V4-M2; R4CS-3)", () => {
+    const clause =
+      "a rate-limit hold names its `RATE_LIMITED` reason, never the request budget, when nothing was sent";
+    expect(TOOL_OUTPUT_SHEET_PHRASES.some((p) => p.includes(clause))).toBe(true);
+    expect(
+      readFileSync(path.join(ROOT, "skills/_shared/references/tool-outputs.md"), "utf8"),
+    ).toContain(clause);
   });
 });

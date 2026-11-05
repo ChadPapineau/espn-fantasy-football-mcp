@@ -60,9 +60,6 @@ import {
   SEEDS,
   SEED_KINDS,
   DATASET_FIRST_SEEDS,
-  EXPIRING_WEEKLY_NEVER,
-  expiringWeeklyReads,
-  matchupSidesOf,
   SEED_NOTE,
   SEED_NOTE_PLAIN,
   STATE_ENV_KEYS,
@@ -1687,6 +1684,15 @@ describe("WK-9's private-settings-fresh seed (changelog §R10, R10-27)", () => {
     ["the probe rejects", answer(false, false), /espn_check_auth answered accepted false/],
     ["the league reads public", answer(true, true), /is_public true, not false/],
     ["the league's publicity is unknown", answer(true, null), /is_public null, not false/],
+    [
+      // the round-4c review's SEED-PARTIAL-UNCHECKED: a partial read may leave the settings unwritten
+      "the league read is partial",
+      (name: string): unknown =>
+        name === "espn_get_league"
+          ? text({ data: { league: { is_public: false } }, partial: true })
+          : answer(true, false)(name),
+      /private-settings-fresh: espn_get_league answered partial/,
+    ],
   ])("fails when %s", async (_, a, why) => {
     const s = fakeServer(a);
     await expect(
@@ -1702,17 +1708,11 @@ describe("WK-9's private-settings-fresh seed (changelog §R10, R10-27)", () => {
 });
 
 describe("WK-10's private-expiring-weekly seed (changelog §R10, R10-28)", () => {
-  const scoreboard = {
-    matchups: [
-      { home: { team_id: 1, is_mine: false }, away: { team_id: 9, is_mine: false } },
-      { home: { team_id: 2, is_mine: true }, away: { team_id: 10, is_mine: false } },
-    ],
-  };
   interface Opts {
     accepted?: unknown;
     state?: unknown;
     isPublic?: unknown;
-    sb?: unknown;
+    partial?: boolean;
     endState?: unknown;
     failOn?: string;
   }
@@ -1729,9 +1729,11 @@ describe("WK-10's private-expiring-weekly seed (changelog §R10, R10-28)", () =>
             reason: null,
           },
         });
-      if (name === "espn_get_scoreboard") return text({ data: o.sb ?? scoreboard });
       if (name === "espn_get_league")
-        return text({ data: { league: { is_public: "isPublic" in o ? o.isPublic : false } } });
+        return text({
+          data: { league: { is_public: "isPublic" in o ? o.isPublic : false } },
+          partial: o.partial ?? false,
+        });
       if (name === "espn_get_status")
         return text({ data: { credential: { state: o.endState ?? "validated" } } });
       return text({ data: {}, meta: {} });
@@ -1756,45 +1758,18 @@ describe("WK-10's private-expiring-weekly seed (changelog §R10, R10-28)", () =>
     expect(DATASET_FIRST_SEEDS).toEqual(["private-expiring-weekly"]);
   });
 
-  it("probes once, reads this week's sides, then every read weekly's steps 1–5 make, in order — never the feed or the log", async () => {
+  it("probes once, reads the league settings and nothing else, then checks the label", async () => {
     const s = fakeServer(answer());
     expect(await seed(s)).toBe(
-      "18 reads fresh (private; team 2 v 10), the feed unread, nothing logged",
+      "league settings fresh (private), nothing else read; the run starts on stored",
     );
-    // the reads, pinned: each one the run repeats is then served from the cache, and E11's
-    // transaction feed is the first read the run's server cannot serve
-    expect(expiringWeeklyReads(2, 10)).toEqual([
-      ["espn_get_league", {}],
-      ["espn_get_scoreboard", { week: 4 }],
-      ["espn_analyze_retrospective", { week: 4 }],
-      ["espn_analyze_retrospective", { week: 4 }],
-      ["espn_get_scoreboard", {}],
-      ["espn_get_roster", { all: true }],
-      ["espn_get_injuries", {}],
-      ["espn_project_players", { players: { team_id: 2 }, horizon: "week" }],
-      ["espn_project_players", { players: { team_id: 10 }, horizon: "week" }],
-      ["espn_analyze_lineup", { objective: "auto" }],
-      ["espn_analyze_waivers", { positions: ["K"], look_ahead: 2 }],
-      ["espn_analyze_waivers", { positions: ["D/ST"], look_ahead: 2 }],
-      ["espn_list_players", { status: "WAIVERS" }],
-      ["espn_list_players", { status: "FREEAGENT" }],
-      ["espn_analyze_waivers", { mode: "auto", phase: "auto" }],
-      ["espn_get_player_usage", { players: { team_id: 2 } }],
-      ["espn_get_schedule", { weeks: [5, 6, 7] }],
-      ["espn_analyze_schedule", {}],
-    ]);
+    // the round-4c review's WK10-USAGE-FORM and WK10-ROSTER-TTL: no copy past the settings, so
+    // the run's first read past Step 0 — E11's, under weekly's League-activity-only scope — is the
+    // one that takes the 401, whatever forms a model gives its reads and whenever it calls
     expect(toolCalls(s)).toEqual([
       ["espn_check_auth", {}],
-      ["espn_get_scoreboard", {}],
-      ...expiringWeeklyReads(2, 10),
+      ["espn_get_league", {}],
       ["espn_get_status", {}],
-    ]);
-    for (const [name] of toolCalls(s)) expect(EXPIRING_WEEKLY_NEVER).not.toContain(name);
-    expect(EXPIRING_WEEKLY_NEVER).toEqual([
-      "espn_list_transactions",
-      "espn_analyze_league_activity",
-      "espn_record_recommendation",
-      "espn_list_recommendations",
     ]);
   });
 
@@ -1804,37 +1779,16 @@ describe("WK-10's private-expiring-weekly seed (changelog §R10, R10-28)", () =>
     ["the label is not validated after it", { state: "stored" }, /state stored/],
     ["the league reads public", { isPublic: true }, /is_public true, not false/],
     ["the league's publicity is unknown", { isPublic: null }, /is_public null, not false/],
+    // the round-4c review's SEED-PARTIAL-UNCHECKED: a partial read may leave the settings unwritten
     [
-      "this week's scoreboard names no matchup of mine",
-      { sb: { matchups: [{ home: { team_id: 1 }, away: { team_id: 9 } }] } },
-      /names no matchup of mine/,
+      "the league read is partial",
+      { partial: true },
+      /private-expiring-weekly: espn_get_league answered partial/,
     ],
-    ["a read is refused", { failOn: "espn_get_injuries" }, /espn_get_injuries: ESPN_AUTH_REJECTED/],
-    [
-      "the label turned rejected",
-      { endState: "rejected" },
-      /the label is rejected after the reads/,
-    ],
+    ["the league read is refused", { failOn: "espn_get_league" }, /ESPN_AUTH_REJECTED/],
+    ["the label turned rejected", { endState: "rejected" }, /the label is rejected after the read/],
   ] as const)("fails when %s", async (_, o, why) => {
     await expect(seed(fakeServer(answer(o)))).rejects.toThrow(why);
-  });
-
-  it("matchupSidesOf reads the user's side and the other one, either way round, or null", () => {
-    expect(matchupSidesOf(scoreboard)).toEqual({ me: 2, opponent: 10 });
-    expect(
-      matchupSidesOf({
-        matchups: [{ home: { team_id: 4, is_mine: false }, away: { team_id: 2, is_mine: true } }],
-      }),
-    ).toEqual({ me: 2, opponent: 4 });
-    for (const bad of [
-      {},
-      { matchups: "x" },
-      { matchups: [{ home: { team_id: 2, is_mine: true } }] },
-      { matchups: [{ home: { team_id: 2, is_mine: true }, away: { team_id: 2 } }] },
-      { matchups: [{ home: { team_id: "2", is_mine: true }, away: { team_id: 10 } }] },
-      { matchups: [{ home: { team_id: 2, is_mine: "true" }, away: { team_id: 10 } }] },
-    ])
-      expect(matchupSidesOf(bad as Json), JSON.stringify(bad)).toBeNull();
   });
 
   it("writeSeeds publishes the plugin's datasets before the seed's server starts, and only for it", async () => {
@@ -1875,7 +1829,7 @@ describe("WK-10's private-expiring-weekly seed (changelog §R10, R10-28)", () =>
     expect(order).toEqual([`datasets ${key}`, "server"]);
     expect(done).toEqual([
       `${key}: datasets seeded`,
-      `${key}: 18 reads fresh (private; team 2 v 10), the feed unread, nothing logged`,
+      `${key}: league settings fresh (private), nothing else read; the run starts on stored`,
     ]);
     // the seed's server runs on the PRISTINE state the datasets went into
     expect(server.spawned[0]?.env.EFF_CACHE_DIR).toBe(path.join(r.state!, key, "cache"));
