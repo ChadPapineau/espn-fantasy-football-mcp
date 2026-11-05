@@ -610,10 +610,9 @@ const NEGATED_RE =
 const OFFICIALS_RE =
   /\b(?:referees?|refs|officials?|officiating|umpires?|line judge|side judge|back judge|field judge)\b/;
 /**
- * The words CONDITIONED_RE reads as a condition, as one source: DEFERS_GAME_RE (the plays carve-out's
- * fail-safe tail) is built from them too, so the carve-out can never read as unconditional a word
- * this module drops a start for (the round-4d verifier's F4: "will play Sunday pending a final test"
- * and "… as long as he feels fine" had read as playing the coming game).
+ * The words CONDITIONED_RE reads as a condition ("if", "pending", "provided", "assuming", "as long
+ * as"). The plays carve-out does not list them: its tail is an allow-list (PLAYS_TAIL_RE), so no
+ * condition word, listed or not, ever reads as playing the coming game.
  */
 const CONDITION_WORDS = String.raw`if|pending|provided|assuming|(?:as|so)\s+long\s+as`;
 /**
@@ -817,41 +816,89 @@ export function claimAvailability(c: RulesV1Claim | null): Designation | null {
 /**
  * The words between a text's injury report and a plays phrase that keep the injured player its
  * subject (healthClaimSaysPlays): the injured part ("tore | his ACL"), where it happened ("in
- * practice"), a connector ("but", "and", "yet"), a report of it ("the coach says"), "he", and a few
- * adverbs and auxiliaries — nothing else. Any other word (a name, "the backup", "his replacement")
- * may be another subject, so the phrase is not read as his (fail safe, as R7-4's attribution).
+ * practice"), a connector ("but", "and", "yet"), a report of it ("the coach says"; never "expects",
+ * a forecast: "the coach expects he will play Sunday" is no report that he plays, R4E-VS-1), "he",
+ * and a few adverbs and auxiliaries — nothing else. Any other word (a name, "the backup", "his
+ * replacement") may be another subject, so the phrase is not read as his (fail safe, as R7-4's
+ * attribution).
  */
 const SAME_SUBJECT_GAP_RE = new RegExp(
-  String.raw`^(?:\s+(?:his|a|an|the)\s+${BODY}(?:\s+${INJURY_NOUN})?)?(?:\s+(?:in|at|during)\s+(?:practice|the game|warmups|warm-ups|training camp))?[\s,-]*(?:(?:but|and|yet|though|although|however|still|so)\b[\s,]*)?(?:(?:the\s+)?(?:head\s+)?(?:coach|team)\s+)?(?:(?:says?|said|insists?|insisted|expects?|expected|confirms?|confirmed|reports?|reported)\s+)?(?:(?:he|he's|he'll)\s+)?(?:(?:still|also|fully|now|reportedly)\s+)?(?:(?:is|was|remains)\s+)?(?:(?:still|also)\s+)?$`,
+  String.raw`^(?:\s+(?:his|a|an|the)\s+${BODY}(?:\s+${INJURY_NOUN})?)?(?:\s+(?:in|at|during)\s+(?:practice|the game|warmups|warm-ups|training camp))?[\s,-]*(?:(?:but|and|yet|though|although|however|still|so)\b[\s,]*)?(?:(?:the\s+)?(?:head\s+)?(?:coach|team)\s+)?(?:(?:says?|said|insists?|insisted|confirms?|confirmed|reports?|reported)\s+)?(?:(?:he|he's|he'll)\s+)?(?:(?:still|also|fully|now|reportedly)\s+)?(?:(?:is|was|remains)\s+)?(?:(?:still|also)\s+)?$`,
+);
+/** The coming game's day, with "on" or "this" and a part of it ("this Sunday", "Monday night"). */
+const TAIL_DAY = String.raw`(?:(?:on|this)\s+)?(?:sunday|monday|thursday|saturday|friday|tuesday|wednesday)(?:\s+(?:night|afternoon|evening|morning))?`;
+/**
+ * An NFL team, as a plays phrase's opponent names it: a nickname, a home with or without its
+ * nickname ("the Kansas City Chiefs", "Dallas"), or an abbreviation (never "no", "was" or "la",
+ * which are words too). A closed list, so a condition can never pass as an opponent ("against the
+ * odds", "against medical advice" are no team).
+ */
+const TAIL_TEAM = (() => {
+  const nick = String.raw`cardinals|falcons|ravens|bills|panthers|bears|bengals|browns|cowboys|broncos|lions|packers|texans|colts|jaguars|jags|chiefs|rams|chargers|raiders|dolphins|vikings|patriots|pats|saints|giants|jets|eagles|steelers|seahawks|49ers|niners|buccaneers|bucs|titans|commanders`;
+  const home = String.raw`arizona|atlanta|baltimore|buffalo|carolina|chicago|cincinnati|cleveland|dallas|denver|detroit|green bay|houston|indianapolis|indy|jacksonville|kansas city|las vegas|los angeles|miami|minnesota|new england|new orleans|new york|philadelphia|philly|pittsburgh|seattle|san francisco|tampa bay|tennessee|washington`;
+  const abbr = String.raw`ari|atl|bal|buf|car|chi|cin|cle|dal|den|det|gb|hou|ind|jax|kc|lac|lar|lv|mia|min|ne|nyg|nyj|phi|pit|sea|sf|tb|ten|wsh`;
+  return String.raw`(?:the\s+)?(?:(?:${home})(?:\s+(?:${nick}))?|${nick}|${abbr})\b`;
+})();
+/** One word group a plays phrase's tail may hold: the coming game's time, or its opponent. */
+const TAIL_ITEM = String.raw`(?:(?:for\s+)?(?:${TAIL_DAY}|${GAME_TIME})\b|(?:against|versus|vs\.?|v\.)(?:\s+${TAIL_TEAM})?|at\s+${TAIL_TEAM})`;
+/** A report of the plays phrase after a comma (", the coach said", ", per the team"); no other. */
+const TAIL_REPORT = String.raw`\s*,\s*(?:(?:(?:the\s+)?(?:head\s+)?(?:coach|team|club)|he)\s+(?:says|said|confirms|confirmed|announced|reported|reports)|(?:per|according\s+to)\s+(?:the\s+)?(?:head\s+)?(?:coach|team|club))\b`;
+/** The end of a tail: only clause breaks (`,`, `:`, `)`, a dash) and spaces to the clause end. */
+const TAIL_END = String.raw`[\s,:)\-]*$`;
+/**
+ * The whole tail a plays phrase may have, up to the end of its clause, for its game to be the
+ * coming one — an ALLOW-list, fail safe (the round-4c verifier's CR-1; the round-4e verifier's
+ * R4E-VS-1, which found the round-4d deny-list, DEFERS_GAME_RE, missing "should his ankle hold up",
+ * "health permitting", "subject to", "presumably", "or sit", "as a game-time decision" and many
+ * more): nothing, or at most two of the coming game's time and its opponent ("Sunday", "Monday
+ * night against the Bears", "vs. Dallas"), then at most a report of it (", the coach said"), then
+ * only clause breaks. Any other word anywhere in the clause makes the phrase not this game's — a
+ * condition, a hedge, a later game, an alternative ("or sit"), another designation — and so does a
+ * question. "And" may join another plays phrase whose own tail is allowed ("practiced in full and
+ * is cleared"; COORD_TAIL_RE).
+ */
+const PLAYS_TAIL_RE = new RegExp(
+  String.raw`^(?:\s+${TAIL_ITEM}){0,2}(?:${TAIL_REPORT})?${TAIL_END}`,
 );
 /**
- * What may follow a plays phrase, up to the end of its clause, for its game to be the coming one —
- * fail safe (the round-4c verifier's CR-1): nothing more, this game named (GAME_TIME, "against | vs
- * | versus …"), a clause break (`,`, `:`, `)`, a spaced dash) or "and" — never another word first
- * ("next week", "in two weeks", "after the bye", "if he practices", "when he returns", "later this
- * month", "again", "through it"), and then no word anywhere in it that DEFERS_GAME_RE names.
+ * A tail that joins another statement with "and" after at most two allowed items: group 1 runs to
+ * the end of "and ", the whole match on over the joined statement's subject and auxiliaries ("he",
+ * "is", "has been", "also"), where the next plays phrase (or a bare "cleared") must stand.
  */
-const THIS_GAME_TAIL_RE = new RegExp(
-  String.raw`^(?:\s*$|\s+(?:${GAME_TIME}|against|vs|versus|and)\b|\s*[,:)]|\s+-)`,
+const COORD_TAIL_RE = new RegExp(
+  String.raw`^((?:\s+${TAIL_ITEM}){0,2}\s+and\s+)(?:(?:he|he's|he'll)\s+)?(?:(?:is|was|remains|has\s+been|will\s+be)\s+)?(?:(?:now|also|fully|still)\s+)?`,
 );
-/**
- * A word, anywhere after a plays phrase in its clause, that puts the game past this one, makes it
- * conditional, hedges it or reverses it: "will play, though not this week", "will play Sunday if he
- * practices Friday", "will play no more", "will play next season", "in 2027", "in two weeks". Every
- * CONDITION_WORDS word is one (CONDITIONED_RE's), and so are the other conditions — "barring a
- * setback", "depending on how he feels", "contingent on", "should he clear the protocol" — and the
- * hedges ("probably", "hopefully", "likely", "possibly", "perhaps"; the round-4d verifier's F4).
- */
-const DEFERS_GAME_RE = new RegExp(
-  String.raw`\b(?:${CONDITION_WORDS}|unless|providing|barring|depending|depends|contingent|conditional|conditionally|should\s+he|once|when|whenever|after|before|until|till|later|next|not|no|never|though|although|but|however|again|anymore|longer|rest|season|year|month|months|weeks|days|bye|return|returns|healthy|heal|heals|eventually|soon|maybe|perhaps|probably|hopefully|likely|possibly|might|could|hope|hopes|hoping|20\d\d)\b|n't\b|\b\d+\s+(?:days?|weeks?|months?)\b`,
-);
+/** A bare "cleared" joined by "and", with nothing after it ("… and is cleared"). */
+const BARE_CLEARED_RE = new RegExp(String.raw`^cleared${TAIL_END}`);
 
-/** Whether a plays phrase ending at `end`, in a clause ending at `clauseEnd`, is the coming game's. */
-function playsThisGame(folded: string, end: number, clauseEnd: number): boolean {
+/** A plays phrase found in the health claim's clause, as `folded[index, end)`. */
+interface PlaysHit {
+  readonly index: number;
+  readonly end: number;
+}
+
+/**
+ * Whether a plays phrase ending at `end`, in a clause ending at `clauseEnd`, is the coming game's:
+ * its tail is PLAYS_TAIL_RE's, or it joins with "and" one of `plays` (or a bare "cleared") whose
+ * own tail is (each step moves past the last, so this ends).
+ */
+function playsThisGame(
+  folded: string,
+  end: number,
+  clauseEnd: number,
+  plays: readonly PlaysHit[],
+): boolean {
   // a question is no statement that he plays ("will play? Unlikely.")
   if (folded[clauseEnd] === "?") return false;
   const tail = folded.slice(end, clauseEnd);
-  return THIS_GAME_TAIL_RE.test(tail) && !DEFERS_GAME_RE.test(tail);
+  if (PLAYS_TAIL_RE.test(tail)) return true;
+  const joined = COORD_TAIL_RE.exec(tail);
+  if (joined === null) return false;
+  const from = end + (joined[1] ?? "").length;
+  const to = end + joined[0].length;
+  if (BARE_CLEARED_RE.test(folded.slice(to, clauseEnd))) return true;
+  const next = plays.find((p) => p.index >= from && p.index <= to && p.end > to);
+  return next !== undefined && playsThisGame(folded, next.end, clauseEnd, plays);
 }
 
 /**
@@ -874,9 +921,12 @@ export function healthClaimSaysPlays(text: string | null | undefined): boolean {
   const health = winner(hitsOf(folded));
   if (health?.rule.type !== "health" || health.rule.direction !== "down") return false;
   const rest = folded.slice(health.end);
-  const stop = rest.search(/[.;!?]/);
+  // "vs." and "v." end no clause: "will play Sunday vs. Dallas if he practices" is one clause, read
+  // to its end (R4E-VS-1), never cut to "will play Sunday vs"
+  const stop = rest.search(/(?<!\bvs?)[.;!?]/);
   const clauseEnd = health.end + (stop < 0 ? rest.length : stop);
   const officials = OFFICIALS_RE.test(folded);
+  const plays: PlaysHit[] = [];
   for (const r of RULES_V1_TABLE) {
     const d = r.type === "availability" ? r.designation : r.implies;
     if (d === null || CLASS_OF[d] !== "plays") continue;
@@ -886,13 +936,14 @@ export function healthClaimSaysPlays(text: string | null | undefined): boolean {
       if (index < health.end) continue;
       if (index >= clauseEnd) break;
       const end = index + m[0].length;
-      if (!survives(r, folded, index, end, officials)) continue;
-      if (!SAME_SUBJECT_GAP_RE.test(folded.slice(health.end, index))) continue;
-      if (!playsThisGame(folded, end, clauseEnd)) continue;
-      return true;
+      if (survives(r, folded, index, end, officials)) plays.push({ index, end });
     }
   }
-  return false;
+  return plays.some(
+    (p) =>
+      SAME_SUBJECT_GAP_RE.test(folded.slice(health.end, p.index)) &&
+      playsThisGame(folded, p.end, clauseEnd, plays),
+  );
 }
 
 /** The plan 07 D6 `claim` shape of an extract (the three public fields only). */

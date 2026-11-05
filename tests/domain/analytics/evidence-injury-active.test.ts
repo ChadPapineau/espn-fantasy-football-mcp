@@ -163,6 +163,14 @@ describe("R4VS-6: an injury reported with no designation word, against ESPN's AC
     "has an ankle sprain but will play Sunday against the Bears",
     "has an ankle sprain but will play, the coach said",
     "has an ankle sprain but will play.",
+    // the round-4e verifier's R4E-VS-1: the tail is an allow-list — the coming game's time and
+    // opponent (a closed list of teams), a report of it, "and" another plays phrase
+    "has an ankle sprain but will play Sunday vs. Dallas.",
+    "has an ankle sprain but will play Monday night against the Kansas City Chiefs.",
+    "has an ankle sprain but will play this Sunday at Green Bay.",
+    "has an ankle sprain but will play Sunday, the team confirmed.",
+    "has an ankle sprain but will play Sunday and is cleared.",
+    "has an ankle sprain but practiced in full and will play Sunday.",
   ])("a report that also says he plays, %s, is consistent with ACTIVE", (text) => {
     expect(extractClaim(text)?.type).toBe("health");
     expect(healthClaimSaysPlays(text)).toBe(true);
@@ -216,6 +224,38 @@ describe("R4VS-6: an injury reported with no designation word, against ESPN's AC
     "Has an ankle sprain but will play Sunday, likely in a reduced role.",
     "Has an ankle sprain but will play Sunday, possibly.",
     "Has an ankle sprain but will play Sunday, perhaps.",
+    // the round-4e verifier's R4E-VS-1: the round-4d deny-list missed these (each read as playing
+    // the coming game); the allow-list (claims.ts PLAYS_TAIL_RE) reads every one as not this game
+    "Has an ankle sprain but will play Sunday should his ankle hold up.",
+    "Has an ankle sprain but will play Sunday should the knee respond.",
+    "Has an ankle sprain but will play Sunday, health permitting.",
+    "Has an ankle sprain but will play Sunday, weather permitting.",
+    "Has an ankle sprain but will play Sunday on the condition that he practices Friday.",
+    "Has an ankle sprain but will play Sunday subject to a final test.",
+    "Has an ankle sprain but will play Sunday, dependent on how he feels.",
+    "Has an ankle sprain but will play Sunday were he to clear the protocol.",
+    "Has an ankle sprain but will play Sunday given he practices Friday.",
+    "Has an ankle sprain but will play Sunday in case the backup sits.",
+    "Has an ankle sprain but will play Sunday, presumably.",
+    "Has an ankle sprain but will play Sunday, tentatively.",
+    "Has an ankle sprain but will play Sunday, ideally.",
+    "Has an ankle sprain but will play Sunday, in theory.",
+    "Has an ankle sprain but will play Sunday, in all likelihood.",
+    "Has an ankle sprain but will play Sunday, he thinks.",
+    "Has an ankle sprain but will play Sunday, he believes.",
+    "Has an ankle sprain but will play Sunday, the team expects.",
+    "Has an ankle sprain but will play Sunday as a game-time decision.",
+    "Has an ankle sprain but will play Sunday or sit.",
+    "Has an ankle sprain but will play Sunday or be rested.",
+    // "expects" is a forecast, not a report that he plays (SAME_SUBJECT_GAP_RE)
+    "Has an ankle sprain but the coach expects he will play Sunday.",
+    // "vs." ends no clause: the condition after the opponent is read
+    "Has an ankle sprain but will play Sunday vs. Dallas if he practices Friday.",
+    // an opponent is a team from the closed list, never a condition
+    "Has an ankle sprain but will play Sunday against medical advice if needed.",
+    // "and" joins only another plays phrase, never a condition
+    "Has an ankle sprain but will play Sunday and is cleared if he practices.",
+    "Has an ankle sprain but practiced in full and will play next week.",
   ])("%s → the plays phrase is not his: availability_conflict on injury_status", (text) => {
     expect(extractClaim(text)).toMatchObject({ type: "health", direction: "down" });
     expect(healthClaimSaysPlays(text)).toBe(false);
