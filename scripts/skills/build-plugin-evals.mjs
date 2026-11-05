@@ -197,6 +197,8 @@ export function loggedNoteOf(seed) {
  *   answers its session-refusal partial lines (R10-11) on a league known private, so weekly's E11
  *   paragraph (R10-12) and its hand-off (R10-7) are graded through the Skill. WK-10 asks what
  *   happened in the league (weekly's League-activity-only scope), so no other read comes first;
+ *   WK-11 asks for the full briefing on the same state (changelog §R10, R10-31): the 401 lands at
+ *   the first read the model makes that the cache does not serve, wherever that is;
  * - `drift-red` — SC-4: the drifted roster view already read once, so Step 0's `espn_get_status`
  *   reports `drift.status: red` (a fresh drift-mRoster state is green until an mRoster read);
  * - `seeding-points-only` — SS-5-E, WK-5-E: the points-only reading recorded and confirmed, exactly
@@ -218,6 +220,8 @@ export const SEEDS = Object.freeze({
   "WK-5-E": "seeding-points-only",
   "WK-9": "private-settings-fresh",
   "WK-10": "private-expiring-weekly",
+  // changelog §R10, R10-31: the full briefing on the same state, graded wherever the 401 lands
+  "WK-11": "private-expiring-weekly",
 });
 /** Every seed `--seed` knows how to write. */
 export const SEED_KINDS = Object.freeze([

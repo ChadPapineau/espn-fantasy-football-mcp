@@ -729,6 +729,8 @@ describe("recorded-state preconditions (Stage C finding eval-recorded-state-prec
       "WK-5-E": "seeding-points-only",
       "WK-9": "private-settings-fresh",
       "WK-10": "private-expiring-weekly",
+      // changelog §R10, R10-31: the full briefing on WK-10's state
+      "WK-11": "private-expiring-weekly",
     });
     // the configured points-only plugin (round 2's triage: SS-5-E and WK-5-E); ON-4-E and TR-5-E
     // keep the unconfigured one, whose unconfirmed reading they need
@@ -755,6 +757,9 @@ describe("recorded-state preconditions (Stage C finding eval-recorded-state-prec
     // changelog §R10, R10-28: the session rejected mid-procedure, after a seed of weekly's reads;
     // R10-27's second private variant for session-check's not_configured private row
     expect(byDir.get("weekly--wk-10")?.plugin).toBe(
+      "private-expiring--full--private-expiring-weekly",
+    );
+    expect(byDir.get("weekly--wk-11")?.plugin).toBe(
       "private-expiring--full--private-expiring-weekly",
     );
     expect(byDir.get("session-check--sc-11")?.plugin).toBe("private-league-none--core");

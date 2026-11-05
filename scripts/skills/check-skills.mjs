@@ -167,8 +167,27 @@ export const TOOL_OUTPUT_FIELDS = Object.freeze({
  */
 export const ACTIVITY_PARTIAL_FRAGMENTS = Object.freeze([
   "\"partial: … ESPN's transaction feed needs …: the server's persisted history only; …\"",
-  '"partial: … need one on a league not known to be public: they were not read (by-team activity, waiver-order movement and rival needs go without them); …"',
-  '"partial: … need an ESPN session on a league not known to be public, and none is stored: they were not read …"',
+  // the league-reads lines name only the reads refused and what those reads carry, with the verb
+  // and pronoun agreeing (the round-4d product account's E11 texts): each form matches its own
+  // refusal's line, whatever reads it names, and never the feed's
+  '"partial: the stored ESPN session was rejected, and ESPN\'s … one on a league not known to be public: … not read (… without …); …"',
+  '"partial: ESPN\'s … an ESPN session on a league not known to be public, and none is stored: … not read …"',
+]);
+/**
+ * E11's history line when the feed was not read (refused or out) and nothing is persisted yet: the
+ * window holds no transactions, which is never a quiet week (the round-4d product account's E11
+ * texts; changelog §R10, R10-11).
+ */
+export const ACTIVITY_NO_FEED_HISTORY_LINE =
+  "no persisted transaction history yet, and ESPN's feed was not read: the window holds no transactions";
+/**
+ * The one line any tool adds when it went without a read the session refused (src/mcp/refusals.ts
+ * sessionReadsWarning): what was not read, why and the one command — never "unavailable". It is a
+ * rejection mid-procedure (changelog §R10, R10-7, R10-12), not a budget hold.
+ */
+export const SESSION_LINE_FRAGMENTS = Object.freeze([
+  '"partial: the stored ESPN session was rejected, and ESPN\'s … one on a league not known to be public: … not read; …"',
+  '"partial: ESPN\'s … an ESPN session on a league not known to be public, and none is stored: … not read; …"',
 ]);
 /**
  * The fixed phrases a tool's cheat-sheet row carries verbatim, each with its ruling: E13's note is a
@@ -188,6 +207,9 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
     // still truncated has no narrower input (E13 does not page); a kind already scored whole is
     // never asked for again (the round-4b verifiers' R4BS-6)
     'when the counts list one kind only (for example "calls kept by kind: lineup 9 of 20"), report the N of M it scored and make no narrowed call; otherwise call it again with `kinds: [...]` naming fewer of the kinds the counts list — the kinds the question is about whose K is below T first, else the kinds whose calls were left out (K below T); when every kind the question is about was scored whole, make no narrowed call; and when that call is still truncated, report the N of M it scored and stop — no further call narrows it',
+    // E13's session line (the round-4d product account): a refused box score is never "N week(s) of
+    // box scores unavailable"; retro presents what was scored and hands off (changelog §R10, R10-7)
+    'a week whose box score the session refused is not scored and never counted as unavailable: the call is `partial: true` with the line "partial: the stored ESPN session was rejected, and ESPN\'s box scores need one on a league not known to be public: they were not read; run `eff setup` in a terminal to replace it"',
   ],
   espn_list_transactions: [
     "there it answers keylessly, with no session or a rejected one (changelog §R10, R10-10)",
@@ -213,7 +235,7 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
   // changelog §R10, R10-30: a health claim explains a usage drop under a hurt designation
   // (HEALTH_COVER_DESIGNATIONS in src/domain/analytics/evidence.ts), never a rise
   espn_analyze_evidence: [
-    "`quiet_role_change` is a usage move no claim explains: a usage drop explained by a health claim about him while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields (a claim that he plays against ESPN's `OUT` or `INJURY_RESERVE` still reads `availability_conflict`) — a rise is never explained so, and against ESPN's `ACTIVE` an injury claim stays `availability_conflict`; changelog §R10, R10-30",
+    "`quiet_role_change` is a usage move no claim explains: a usage drop explained by a health claim about him while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields (a claim that he plays against ESPN's `OUT` or `INJURY_RESERVE` still reads `availability_conflict`) — a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change` (changelog §R10, R10-32) — and against ESPN's `ACTIVE` an injury claim stays `availability_conflict` unless a claim says he plays in the coming game ('will play Sunday', 'is cleared'; 'will play next week', 'after the bye', 'if he practices Friday' or a question do not clear it); changelog §R10, R10-30",
   ],
   // the round-4b review's F3: a week's row does not depend on the window asked for; a past week is
   // dropped with a warning, a window of past weeks only is refused
@@ -237,6 +259,7 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
   espn_analyze_league_activity: [
     "a read the session refuses (none stored, or the stored one rejected) makes it `partial: true` on the server's persisted history, with up to two fixed lines, each ending in `eff setup`",
     ...ACTIVITY_PARTIAL_FRAGMENTS,
+    `"${ACTIVITY_NO_FEED_HISTORY_LINE}"`,
     "say what each leaves out and the one command — no repeat call reads them (changelog §R10, R10-11)",
     "When the league settings themselves cannot be read, it fails as every tool does — `ESPN_AUTH_REJECTED` or `ESPN_REQUIRES_COOKIES`, never a stale answer (changelog §R10, R10-18)",
   ],
@@ -256,7 +279,9 @@ export const TOOL_OUTPUT_SHEET_PHRASES = Object.freeze([
   "**`partial: true`** means the call returned what it had: its ESPN request budget (3 requests), its deadline or the rate limiter held a read back, and a warning names the missing input (`partial: espn:<view> was not requested …`, or a tool's own line such as `live conditioning unavailable: …`; a rate-limit hold names its `RATE_LIMITED` reason, never the request budget, when nothing was sent).",
   // E11's session-refusal lines are not a budget or deadline hold: no repeat call reads them (the
   // round-4 verifiers' F1 — the partial rule said to repeat every partial call once)
-  "A `partial:` line that names a session refusal and ends in `eff setup` (`espn_analyze_league_activity`'s fixed lines; changelog §R10, R10-11, R10-19) is not a budget or deadline hold: no repeat call reads it — give the result as what the server's persisted history shows, with that line in Confidence & freshness, and on a private or unknown league follow **A rejection mid-procedure** in references/orient.md (changelog §R10, R10-7).",
+  "A `partial:` line that names a session refusal and ends in `eff setup` (`espn_analyze_league_activity`'s fixed lines, `espn_list_transactions`' pending line, or the one line any tool adds when it went without a read the session refused; changelog §R10, R10-11, R10-12, R10-19) is not a budget or deadline hold: no repeat call reads it — give the result as what it did read (for `espn_analyze_league_activity`, the server's persisted history), say what the line names as not read and never fill it in, with that line in Confidence & freshness, and on a private or unknown league follow **A rejection mid-procedure** in references/orient.md (changelog §R10, R10-7).",
+  // the any-tool session line (round 4d): a refused read is never "unavailable"
+  `Any tool's session line reads ${SESSION_LINE_FRAGMENTS.join(" or ")}: it is never a "… unavailable" line and is printed only on a league not known to be public.`,
 ]);
 /**
  * The trim-warning wording R10-22 withdrew ("rec.lineup carries the lineup", "… the whole lineup"):
@@ -431,7 +456,7 @@ export const INJURY_CONFIRM_SENTENCE =
  * (HEALTH_COVER_DESIGNATIONS in src/domain/analytics/evidence.ts).
  */
 export const NEWS_HEALTH_COVER_SENTENCE =
-  "`quiet_role_change` when the role moved and no claim explains it, else `consistent` or `no_claim` (a usage drop that a health claim about him explains while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields, `availability_conflict` when one says he plays against ESPN's `OUT` or `INJURY_RESERVE`: changelog §R10, R10-30)";
+  "`quiet_role_change` when the role moved and no claim explains it, else `consistent` or `no_claim` (a usage drop that a health claim about him explains while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields, `availability_conflict` when one says he plays against ESPN's `OUT` or `INJURY_RESERVE`; a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change`; against ESPN's `ACTIVE` an injury claim is cleared to `consistent` only by a claim that he plays in the coming game ('will play Sunday', 'is cleared' — never 'will play next week', 'after the bye', 'if he practices Friday' or a question): changelog §R10, R10-30, R10-32)";
 /** A RegExp matching `text` literally. @param {string} text */
 const literal = (text) => new RegExp(text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"));
 /** The Phase W seam marker (plan 10 §3.W; D11) — the apply Skill declares it. */
@@ -497,6 +522,10 @@ export const ORIENT_REJECTED = Object.freeze({
 export const ORIENT_SENTENCES = Object.freeze({
   midProcedure:
     "A tool that answers `ESPN_AUTH_REJECTED` after Step 0 follows the same split: on a public league (`league.is_public: true`) print the Session line above once and carry on with the reads that answer keylessly; when the answer still needs that tool, or the league is private or unknown, end the procedure there with the hand-off to the `espn-fantasy-football:session-check` Skill.",
+  // the any-tool session line (round 4d): a tool that absorbed a refusal answers partial with one
+  // line; the same rejection, the same hand-off (changelog §R10, R10-7, R10-12)
+  sessionLinePartial:
+    'A tool that answers `partial: true` with a session line instead ("partial: … ESPN session …" ending in `eff setup`: it went without a read the session refused; references/tool-outputs.md) met the same rejection: present what it did read, labelled partial, say what the line names as not read and why, never fill it in or call the tool again for it, and on a private or unknown league end the procedure with the same hand-off (changelog §R10, R10-7, R10-12).',
   order:
     "the invalid-roster block always comes first, above the Session and seeding lines and above any title or header line",
   benchContinuation:
@@ -957,12 +986,15 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         "WK-INJ",
         "WK-9",
         "WK-10",
+        // changelog §R10, R10-31: the full briefing on the mid-procedure state
+        "WK-11",
       ],
       // WK-9 grades that the P1 league-activity read is never reached past orient's private-league
       // rejection hand-off (changelog §R10, R10-7, R10-27), so it runs where that tool exists; WK-10
       // grades that P1 read's session-refusal lines once the session is rejected mid-procedure
       // (changelog §R10, R10-11, R10-12, R10-28)
-      p1Cases: ["WK-9", "WK-10"],
+      // WK-11 runs on WK-10's full-toolset server (changelog §R10, R10-31)
+      p1Cases: ["WK-9", "WK-10", "WK-11"],
       body: [
         ...WEEKLY_HEADINGS.map(heading),
         /never re-fetch/i,

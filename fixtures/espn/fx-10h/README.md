@@ -84,12 +84,19 @@ mid-procedure (changelog §R10, R10-28): the build's `private-expiring-weekly` s
 datasets, runs the accepting `espn_check_auth` and then `espn_get_league` only, so a run started
 again on `stored` passes Step 0 from the fresh settings (stamped in the seed's first second, inside
 the server's 1-second tolerance for a copy stamped ahead of a start's clock, and fresh for their
-1-day TTL), and its first read past them takes the 401. WK-10 asks what happened in the league —
+1-day TTL), and its first read past them takes the 401. Its `espn_check_auth` accepts until that
+401 (a session it validates is never rejected after it: how the seed fills the cache) and reports
+the session rejected after it (`accepted: false`, `upstream_status: 401`; changelog §R10, R10-28,
+R10-31); every later league read, and a read already under way when the 401 lands, is refused with
+the short-circuit and no request, while a fresh store entry is still served. WK-10 asks what happened in the league —
 weekly's League-activity-only scope — so that read is inside `espn_analyze_league_activity`, and E11
 answers its session-refusal partial lines (the feed; the standings, rosters and free-agent pool),
 graded through the Skill (the section from the persisted history, labelled partial, then the
 hand-off to session-check). A run that makes any other league read first (a lineup, a projection, a usage
-read) takes the 401 there and ends at the hand-off before E11. `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
+read) takes the 401 there and ends at the hand-off before E11. WK-11 asks for the full briefing
+on the same state (changelog §R10, R10-31): where the 401 lands depends on the model's order,
+argument forms and pace, so the case grades only what holds wherever it lands (what was read
+before it, labelled partial; the rest said as not read; the hand-off to session-check at the end). `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
 (Team 01's `roster.entries` gone), `points-only-seeding` (last season's seeds follow points for; Team 03 keeps its 3–1 record on weaker week 1–4 lineups, seventh in points for, 2.34 behind the last playoff place — a contender under the record-first reading, on the bubble under the points-only one: changelog §R10, R10-14), `seeding-unknown`, `faab`, `k10`,
 `post-run` (Wednesday 06:00 ET, pool `FREEAGENT`), `ir-open`, `ir-invalid`, `hidden-bench`,
 `sunday-live` (Sunday 14:05 ET: the 09:30 ET London game final — a game is final four hours after
