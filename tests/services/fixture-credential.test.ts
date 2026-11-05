@@ -325,7 +325,14 @@ describe("the seam is unreachable outside fixture mode, and the guard runs befor
         updated_at: "2026-10-06T00:00:00.000Z",
         updated_by: "setup",
       });
-      for (const v of ["auth-rejected", "public-league"]) {
+      // the private variants too, the session rejected mid-procedure among them (changelog §R10,
+      // R10-27, R10-28): the guard runs before any scripted state is read
+      for (const v of [
+        "auth-rejected",
+        "public-league",
+        "private-league-none",
+        "private-expiring",
+      ]) {
         const { build, lines } = wire({ EFF_FIXTURE_DIR: path.join(FX, v), EFF_TEST_STUBS: "1" });
         expect(build, `${state} ${v}`).toThrow(ConfigError);
         expect(lines.some((l) => l.includes("fixture_credential_scripted"))).toBe(false);

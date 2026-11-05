@@ -45,6 +45,12 @@ import { ROOT, call, connect, makeWorld, type World } from "../mcp/helpers/world
 
 const FX = path.join(ROOT, "fixtures", "espn", "fx-10h");
 const PRIVATE = path.join(FX, "private-league");
+/**
+ * The committed private variants (changelog §R10, R10-27 allows more than one, R10-28): private-league
+ * (rejected), private-league-none (not_configured) and private-expiring (a session rejected
+ * mid-procedure — fixture-expiring.test.ts).
+ */
+const PRIVATE_VARIANTS = ["private-league", "private-league-none", "private-expiring"] as const;
 const CLOCK_AT = "2026-10-07T01:00:00.000Z";
 const EPOCH = "1970-01-01T00:00:00.000Z";
 /** Words that would mean a credential value or its carrier left the seam. */
@@ -115,7 +121,7 @@ const codeOf = (b: Record<string, unknown>): unknown =>
 type Body = Record<string, unknown> & { data?: unknown; warnings?: string[]; partial?: boolean };
 
 describe("derivedLeaguePublicity: read from the variant's recorded settings before any request", () => {
-  it("private-league is private; the base and every other committed variant public; anything else unknown", () => {
+  it("the committed private variants are private; the base and every other committed variant public; anything else unknown", () => {
     expect(derivedLeaguePublicity(PRIVATE)).toBe(false);
     expect(derivedLeaguePublicity(FX)).toBe(true);
     const variants = readdirSync(FX, { withFileTypes: true })
@@ -124,8 +130,11 @@ describe("derivedLeaguePublicity: read from the variant's recorded settings befo
       )
       .map((d) => d.name);
     expect(variants.length).toBeGreaterThan(20);
+    for (const v of PRIVATE_VARIANTS) expect(variants, v).toContain(v);
     for (const v of variants)
-      expect(derivedLeaguePublicity(path.join(FX, v)), v).toBe(v !== "private-league");
+      expect(derivedLeaguePublicity(path.join(FX, v)), v).toBe(
+        !(PRIVATE_VARIANTS as readonly string[]).includes(v),
+      );
     expect(derivedLeaguePublicity(path.join(ROOT, "fixtures", "espn"))).toBeNull();
     expect(derivedLeaguePublicity("fixtures/espn/fx-10h/private-league")).toBeNull();
     expect(derivedLeaguePublicity(tmp)).toBeNull();
@@ -289,7 +298,7 @@ describe("every public variant is unchanged: the label never governs an auto or 
     .filter(
       (d) =>
         d.isDirectory() &&
-        d.name !== "private-league" &&
+        !(PRIVATE_VARIANTS as readonly string[]).includes(d.name) &&
         readdirSync(path.join(FX, d.name)).includes("manifest.json"),
     )
     .map((d) => d.name);

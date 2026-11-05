@@ -15,7 +15,7 @@
   "harness": { "credential_state": "not_configured" },
   "notes": [],
   "variant": "espn-proj-disagree",
-  "describes": "ESPN's week-5 projection 30 % above the rest for one Team 02 starter",
+  "describes": "ESPN's week-5 projection for one Team 02 starter (the first RB starter by id) 1.5× its recording, so ESPN's number and the own model's line (espn_project_players inputs.own, from the published datasets) are about 30 % apart by E1's disagreement pct (|ESPN − own| / ESPN), where the base has them within 10 %: espn_analyze_lineup's espn_cross_check lists him as espn_project_players flags him (changelog §R10, R10-29)",
   "views": [
     { "route": "league", "season": 2026, "views": ["mSettings"], "scoringPeriodId": null, "path": "fx-10h/league/mSettings.json", "derived": true },
     { "route": "league", "season": 2026, "views": ["mNav"], "scoringPeriodId": null, "path": "fx-10h/league/mNav.json", "derived": true },

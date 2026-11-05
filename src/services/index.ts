@@ -460,6 +460,8 @@ export function buildServices(args: BuildServicesArgs): Wiring {
     // fixture mode's scripted session for the caller's own pending claims (changelog §R10, R10-21,
     // amending R9-3): the same label espn_get_status reports, value-free, moving with the probe
     ...(scripted === null ? {} : { fixtureCredentialLabel: () => scripted.state() }),
+    // its session ESPN rejects at the first read the cache does not serve (changelog §R10, R10-28)
+    ...(scripted === null ? {} : { fixtureRejectsRead: () => scripted.rejectsRead() }),
   });
 
   const golden: GoldenState = {

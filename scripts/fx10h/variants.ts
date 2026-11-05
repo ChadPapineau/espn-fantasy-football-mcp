@@ -344,7 +344,7 @@ export const VARIANTS: readonly Variant[] = [
   {
     name: "private-league",
     describes:
-      "a PRIVATE league (settings.isPublic false) whose stored session ESPN rejected: the one variant whose recorded league is private (changelog §R10, R10-27), so the scripted label governs every league read, as a session would — rejected gives the ESPN_AUTH_REJECTED short-circuit with zero requests (orient's private-league rejection hand-off, changelog §R10, R10-7), stored or validated serves the recording, not_configured gives ESPN_REQUIRES_COOKIES; a fresh cache entry is still served first. Its one espn_check_auth accepts (the user re-ran setup: the label moves to validated in memory), which is also how a seed fills the cache before a run starts again on the rejected label (E11's session-refusal partial lines over fresh settings)",
+      "a PRIVATE league (settings.isPublic false) whose stored session ESPN rejected: a variant whose recorded league is private (changelog §R10, R10-27; private-league-none and private-expiring are the others), so the scripted label governs every league read, as a session would — rejected gives the ESPN_AUTH_REJECTED short-circuit with zero requests (orient's private-league rejection hand-off, changelog §R10, R10-7), stored or validated serves the recording, not_configured gives ESPN_REQUIRES_COOKIES; a fresh cache entry is still served first. Its one espn_check_auth accepts (the user re-ran setup: the label moves to validated in memory), which is also how a seed fills the cache before a run starts again on the rejected label (E11's session-refusal partial lines over fresh settings)",
     mutate: (m) => {
       // the recorded league is private: mSettings, mNav and mMatchup carry isPublic false
       m.isPublic = false;
@@ -357,6 +357,38 @@ export const VARIANTS: readonly Variant[] = [
       };
       m.notes.push(
         "the league is private: every league read follows the scripted credential label (R10-27)",
+      );
+    },
+  },
+  {
+    name: "private-league-none",
+    describes:
+      "a PRIVATE league (settings.isPublic false) with no session stored (credential not_configured): every league read answers ESPN_REQUIRES_COOKIES with zero requests (changelog §R10, R10-27's second private variant), the state session-check's private-league row stands for (changelog §R9, R9-1)",
+    mutate: (m) => {
+      m.isPublic = false;
+      // nothing stored: fixture mode's default label, said explicitly
+      m.harness = { ...m.harness, credential_state: "not_configured" };
+      m.notes.push(
+        "the league is private and no session is stored: every league read answers ESPN_REQUIRES_COOKIES (R10-27)",
+      );
+    },
+  },
+  {
+    name: "private-expiring",
+    describes:
+      "a PRIVATE league (settings.isPublic false) whose stored session ESPN rejects mid-procedure (changelog §R10, R10-28): espn_get_status reports credential stored; the first read the cache does not serve is answered as ESPN's 401 would be (ESPN_AUTH_REJECTED with upstream_status 401, nothing sent), the label moves to rejected and every later league read gets the ESPN_AUTH_REJECTED short-circuit with zero requests; a fresh cache entry is still served first. Its espn_check_auth accepts (the user re-ran setup: the label moves to validated in memory, and a validated session is never rejected), which is how a seed fills the cache before a run starts again on the stored label",
+    mutate: (m) => {
+      m.isPublic = false;
+      // espn_get_status reports `stored` (the label at Step 0); `rejects` scripts ESPN's 401 at the
+      // first read the cache does not serve (changelog §R10, R10-28)
+      m.harness = {
+        ...m.harness,
+        credential_state: "stored",
+        rejects: "first_uncached_read",
+        probe: { accepted: true, reason: null, probe: "settings" },
+      };
+      m.notes.push(
+        "the league is private; the stored session is rejected at the first read the cache does not serve (R10-28)",
       );
     },
   },
@@ -580,14 +612,13 @@ export const VARIANTS: readonly Variant[] = [
   },
   {
     name: "espn-proj-disagree",
-    describes: "ESPN's week-5 projection 30 % above the rest for one Team 02 starter",
+    describes:
+      "ESPN's week-5 projection for one Team 02 starter (the first RB starter by id) 1.5× its recording, so ESPN's number and the own model's line (espn_project_players inputs.own, from the published datasets) are about 30 % apart by E1's disagreement pct (|ESPN − own| / ESPN), where the base has them within 10 %: espn_analyze_lineup's espn_cross_check lists him as espn_project_players flags him (changelog §R10, R10-29)",
     mutate: (m) => {
-      const s = pick(
-        starters(m),
-        (x) => [2, 3].includes(positionOf(m, x.playerId)),
-        "an RB/WR starter",
-      );
-      m.projectionScale.set(s.playerId, 1.3);
+      // the base's first RB starter: ESPN 15.9 against an own line of 16.87 (pct 0.06); 1.5× puts
+      // ESPN about 30 % above the own line by E1's pct (changelog §R10, R10-29: SS-6-E's variant)
+      const s = pick(starters(m), (x) => positionOf(m, x.playerId) === 2, "an RB starter");
+      m.projectionScale.set(s.playerId, 1.5);
     },
   },
   {

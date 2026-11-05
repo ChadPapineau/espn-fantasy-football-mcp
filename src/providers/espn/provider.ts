@@ -353,6 +353,12 @@ export interface EspnProviderDeps {
    * here whenever an authority exists.
    */
   readonly fixturePrivateLeague?: boolean;
+  /**
+   * FIXTURE MODE ONLY (changelog §R10, R10-28): the scripted session ESPN rejects at its first read
+   * the cache does not serve (auth-gate.ts CookieGateOptions.fixtureRejectsRead). createEspnProvider
+   * passes it only in its fixture branch; dropped here whenever an authority exists.
+   */
+  readonly fixtureRejectsRead?: () => boolean;
 }
 
 interface SettingsRead {
@@ -533,6 +539,10 @@ export class EspnProvider implements FantasyPlatform {
       ...(deps.fixturePrivateLeague === true && deps.credentials === null
         ? { fixturePrivateLeague: true }
         : {}),
+      // the scripted session's rejection at its first uncached read (R10-28): the same rule
+      ...(deps.fixtureRejectsRead === undefined || deps.credentials !== null
+        ? {}
+        : { fixtureRejectsRead: deps.fixtureRejectsRead }),
     });
   }
 

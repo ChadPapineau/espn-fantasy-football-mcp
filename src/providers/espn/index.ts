@@ -121,6 +121,12 @@ export interface CreateEspnProviderOptions {
    * private flag are forwarded only in the fixture branch below, after the guard.
    */
   readonly fixtureCredentialLabel?: () => CredentialState;
+  /**
+   * FIXTURE MODE ONLY (changelog §R10, R10-28): the scripted session ESPN rejects at its first read
+   * the cache does not serve (fixture-credential.ts `harness.rejects`). Forwarded only in the
+   * fixture branch below, after the guard, like the label.
+   */
+  readonly fixtureRejectsRead?: () => boolean;
 }
 
 /** Builds the provider (see the file header for fixture mode's guard). */
@@ -129,6 +135,7 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
   let credentials = o.credentials;
   let tlsVerificationDisabled: (() => boolean) | undefined;
   let fixtureCredentialLabel: (() => CredentialState) | undefined;
+  let fixtureRejectsRead: (() => boolean) | undefined;
   let fixturePrivateLeague = false;
   if (o.config.fixtureDir !== null) {
     if (credentials !== null && credentials.state() !== "not_configured")
@@ -142,6 +149,8 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     tlsVerificationDisabled = () => false;
     // the scripted session's label, past the guard above (R10-21)
     fixtureCredentialLabel = o.fixtureCredentialLabel;
+    // the scripted session's rejection at its first uncached read (R10-28), past the guard too
+    fixtureRejectsRead = o.fixtureRejectsRead;
     // the private-league variant (R10-27): its recorded settings say so, read before any request.
     // A variant whose settings view is listed but cannot be read refuses to start: read as public,
     // a malformed private variant's reads would pass the scripted label silently (the round-4b
@@ -177,6 +186,7 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     ...(o.sleep === undefined ? {} : { sleep: o.sleep }),
     ...(tlsVerificationDisabled === undefined ? {} : { tlsVerificationDisabled }),
     ...(fixtureCredentialLabel === undefined ? {} : { fixtureCredentialLabel }),
+    ...(fixtureRejectsRead === undefined ? {} : { fixtureRejectsRead }),
     ...(fixturePrivateLeague ? { fixturePrivateLeague: true } : {}),
   });
 }

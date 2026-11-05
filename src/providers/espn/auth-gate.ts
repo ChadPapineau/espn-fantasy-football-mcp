@@ -27,6 +27,7 @@ import type {
 } from "../../auth/types.js";
 import type { Clock } from "../../domain/clock.js";
 import { PUBLICITY_MAX_AGE_MS } from "./cache.js";
+import { EspnUpstreamError } from "./errors.js";
 import type { EspnRoute } from "./path.js";
 import type { CredentialProbeAccess, EspnView } from "./types.js";
 
@@ -129,6 +130,17 @@ export interface CookieGateOptions {
    * only while no authority exists, like the label; every public variant is unchanged.
    */
   readonly fixturePrivateLeague?: boolean;
+  /**
+   * FIXTURE MODE ONLY (changelog §R10, R10-28): asked when the scripted label would serve a read
+   * (`stored`/`validated`) that is about to go out (CookieGate.fixtureSend) — a read the cache did
+   * not serve (a fresh entry is served first, as in the real pipeline) and its budget paid for,
+   * never a cache-only check or the pending-claims pre-check. True once,
+   * for a variant scripting `rejects: "first_uncached_read"`: the scripted session has just been rejected (the label
+   * moved to `rejected`, recorded as a 401 is — fixture-credential.ts), and that read answers
+   * ESPN_AUTH_REJECTED as ESPN's 401 would, with nothing sent; every later read meets the rejected
+   * label (the short-circuit, R10-27). Read only while no authority exists, like the label.
+   */
+  readonly fixtureRejectsRead?: () => boolean;
 }
 
 /** The provider's cookie gate (one per provider instance). */
@@ -154,6 +166,7 @@ export class CookieGate {
   private readonly keylessOnPublic: boolean;
   private readonly fixtureLabel: (() => CredentialState) | null;
   private readonly fixturePrivate: boolean;
+  private readonly fixtureRejectsRead: (() => boolean) | null;
 
   constructor(
     auth: CredentialAuthority | null,
@@ -170,6 +183,7 @@ export class CookieGate {
     // a label is a fixture-mode seam: with an authority present it is never read
     this.fixtureLabel = auth === null ? (opts.fixtureLabel ?? null) : null;
     this.fixturePrivate = auth === null && opts.fixturePrivateLeague === true;
+    this.fixtureRejectsRead = auth === null ? (opts.fixtureRejectsRead ?? null) : null;
   }
 
   /**
@@ -280,8 +294,7 @@ export class CookieGate {
     if (this.auth === null) {
       // fixture mode's scripted session: every league read of the private variant (R10-27), the
       // caller's own pending claims on any variant (R10-21)
-      if (this.fixturePrivate || (use === "own" && this.fixtureLabel !== null))
-        return this.byLabel();
+      if (this.byScript(use)) return this.byLabel();
       return this.keyless(use, "ESPN_REQUIRES_COOKIES");
     }
     // a public league's `auto` read: keyless for the server, the stored cookie for the jobs
@@ -352,6 +365,30 @@ export class CookieGate {
     if (state === "rejected") throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
     if (state === "stored" || state === "validated") return null;
     return this.requires();
+  }
+
+  /** Whether fixture mode's scripted label decides this read (R10-21 `own`; R10-27 every read). */
+  private byScript(use: Exclude<CookieUse, "never">): boolean {
+    return this.fixturePrivate || (use === "own" && this.fixtureLabel !== null);
+  }
+
+  /**
+   * FIXTURE MODE ONLY (changelog §R10, R10-28): called by the read pipeline when a read is about to
+   * go out — the cache did not serve it, the gate let it through and its budget paid for it — never
+   * for a read only checked (the status snapshot's cache-only reads, whose zero budget sends
+   * nothing; the pending-claims pre-check). Where the scripted label decides the read and still
+   * serves it (`stored`/`validated`), a session scripted to be rejected (`rejects: "first_uncached_read"`) and not yet rejected is rejected here
+   * (CookieGateOptions.fixtureRejectsRead moves the label to `rejected`, recorded as a 401 is) and
+   * the read answers as ESPN's 401 to a cookie-bearing read does (errors.ts classifyAnswer:
+   * ESPN_AUTH_REJECTED with `upstream_status` 401) — nothing is sent, no value or header exists. A
+   * no-op outside fixture mode (an authority present) and for every other read.
+   */
+  fixtureSend(use: CookieUse, route: EspnRoute, view: EspnView): void {
+    if (this.auth !== null || this.fixtureRejectsRead === null) return;
+    if (use === "never" || route === "season" || route === "players" || !this.byScript(use)) return;
+    const state = this.fixtureLabel?.() ?? "not_configured";
+    if ((state === "stored" || state === "validated") && this.fixtureRejectsRead())
+      throw new EspnUpstreamError("auth_rejected", { upstream_status: 401, view });
   }
 
   /**

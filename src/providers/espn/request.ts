@@ -172,6 +172,8 @@ export interface RequestDeps {
   readonly fixtureLabel?: () => CredentialState;
   /** Fixture mode's private-league variant: the label governs every league read (R10-27). */
   readonly fixturePrivateLeague?: boolean;
+  /** Fixture mode's session rejected at its first uncached read (auth-gate.ts; R10-28). */
+  readonly fixtureRejectsRead?: () => boolean;
   /**
    * Whether certificate verification is off process-wide, asked before every request (default:
    * transport.ts `tlsVerificationDisabled`, Node's own rule, read at each request). Only fixture
@@ -370,6 +372,9 @@ export class EspnRequester {
         keylessOnPublic: deps.origin !== "job",
         ...(deps.fixtureLabel === undefined ? {} : { fixtureLabel: deps.fixtureLabel }),
         ...(deps.fixturePrivateLeague === true ? { fixturePrivateLeague: true } : {}),
+        ...(deps.fixtureRejectsRead === undefined
+          ? {}
+          : { fixtureRejectsRead: deps.fixtureRejectsRead }),
       },
     );
     this.retryAfter = cachedRetryAfter(deps.cache, deps.host, deps.clock);
@@ -992,6 +997,10 @@ export class EspnRequester {
     this.assertTlsVerified(view);
     let cookie =
       gate !== null ? gate.cookie : await this.cookies.forRequest(spec.cookies, target.route);
+    // fixture mode's scripted session ESPN rejects at its first read the cache does not serve
+    // (changelog §R10, R10-28): this read is about to go out — the cache did not serve it and its
+    // budget paid for it — so it is the one; it throws ESPN's 401 answer with nothing sent
+    this.cookies.fixtureSend(spec.cookies, target.route, view);
     let last: EspnUpstreamError | null = null;
     const acquire = async (keyless: boolean): Promise<LimiterTicket> => {
       try {

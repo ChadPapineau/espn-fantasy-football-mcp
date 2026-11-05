@@ -18,7 +18,18 @@
 // (auth-gate.ts fixturePrivateLeague, set by createEspnProvider from the recorded settings): a
 // variant scripting nothing reads as `not_configured` there. Fixture mode's guard runs first and is unchanged: with a real
 // credential stored, fixture mode does not start at all (src/services/index.ts fixtureModeIssues).
-// A variant that scripts nothing (or `not_configured`) keeps the old path exactly. New here.
+// A variant that scripts nothing (or `not_configured`) keeps the old path exactly. One more scripted
+// state (changelog §R10, R10-28) is a session ESPN rejects mid-procedure — `credential_state:
+// "stored"` with `rejects: "first_uncached_read"`, so the label it scripts is the one espn_get_status
+// reports at Step 0 (`stored`, the eval harness's own state list unchanged): the first read on that
+// server the cache does not serve (a fresh entry is
+// served first, as the real pipeline serves it; a read is the one about to go out, its budget paid —
+// never a cache-only check, and never espn_check_auth's probe, which answers the scripted result as
+// on every variant) is answered as ESPN's 401 to a cookie-bearing read is: the label moves to
+// `rejected`, recorded as the real pipeline records a 401 (`last_rejected_at` and `rejected_since` at
+// that instant, in memory only — never the store's credential row, which the fixture guard reads),
+// so espn_get_status and espn_check_auth say `rejected` from then on, and every later read follows
+// the rejected label (R10-27). Still a label: no value, no Cookie header, nothing sent. New here.
 import path from "node:path";
 import { readSecureFile } from "../config/paths.js";
 import { ConfigError, type CredentialState } from "../config/schema.js";
@@ -29,6 +40,13 @@ import type { CredentialProbeResult } from "../providers/platform.js";
 /** The `credential_state` values a variant may script (the plan's auth-rejected and public-league). */
 export const SCRIPTED_CREDENTIAL_STATES = Object.freeze(["stored", "rejected"] as const);
 export type ScriptedCredentialState = (typeof SCRIPTED_CREDENTIAL_STATES)[number];
+
+/**
+ * What a `stored` session's `harness.rejects` may script (changelog §R10, R10-28): ESPN rejects it at
+ * the first read on the server that the cache does not serve.
+ */
+export const SCRIPTED_REJECTIONS = Object.freeze(["first_uncached_read"] as const);
+export type ScriptedRejection = (typeof SCRIPTED_REJECTIONS)[number];
 
 /** The manifest `kind` of a derived fixture league (scripts/fx10h/generate.ts). */
 const DERIVED_KIND = "derived_league";
@@ -46,6 +64,8 @@ export interface ScriptedProbe {
 export interface ScriptedCredential {
   readonly state: ScriptedCredentialState;
   readonly probe: ScriptedProbe;
+  /** A `stored` session ESPN rejects mid-procedure (R10-28); absent: never. */
+  readonly rejects?: ScriptedRejection;
 }
 
 /** Why a variant's harness block is refused (fixed, value-free texts). */
@@ -54,6 +74,7 @@ export const SCRIPTED_CREDENTIAL_REFUSALS = Object.freeze({
   state: `harness.credential_state must be "not_configured" or one of ${SCRIPTED_CREDENTIAL_STATES.join(", ")}`,
   probe:
     'a scripted credential state needs harness.probe { accepted: true | false | null, reason: null | "not_configured" | "board_not_discriminating" (null exactly when accepted is not), probe: "settings" | "board" }',
+  rejects: `harness.rejects must be ${SCRIPTED_REJECTIONS.join(", ")}, beside credential_state "stored" only`,
 } as const);
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -111,21 +132,44 @@ export function readScriptedCredential(fixtureDir: string | null): ScriptedCrede
   if (harness === undefined) return null;
   if (!isRecord(harness)) return refuse(SCRIPTED_CREDENTIAL_REFUSALS.state);
   const state = harness.credential_state;
-  if (state === undefined || state === "not_configured") return null;
+  if (state === undefined || state === "not_configured") {
+    if (harness.rejects !== undefined) return refuse(SCRIPTED_CREDENTIAL_REFUSALS.rejects);
+    return null;
+  }
   if (state !== "stored" && state !== "rejected") return refuse(SCRIPTED_CREDENTIAL_REFUSALS.state);
   const probe = probeOf(harness.probe);
   if (probe === null) return refuse(SCRIPTED_CREDENTIAL_REFUSALS.probe);
-  return { state, probe };
+  const rejects = harness.rejects;
+  if (rejects === undefined) return { state, probe };
+  if (state !== "stored" || rejects !== "first_uncached_read")
+    return refuse(SCRIPTED_CREDENTIAL_REFUSALS.rejects);
+  return { state, probe, rejects };
 }
 
 /** The status view and the auth port over a scripted credential (one per server process). */
 export interface ScriptedAuth {
   /** The state label espn_get_status and espn_check_auth report. */
   state(): CredentialState;
-  /** espn_get_status's credential block: a label only (no store, no time stamps). */
+  /**
+   * espn_get_status's credential block: a label only (no store; time stamps only for the 401 a
+   * session scripted `rejects: "first_uncached_read"` met — R10-28).
+   */
   view(): CredentialView;
-  /** The one probe: the scripted result; no request (`upstream_status` null), no value. */
+  /**
+   * The one probe: the scripted result; no request (`upstream_status` null), no value. It is the
+   * explicit credential check, not a data read, so a scripted rejection's 401 is never its
+   * answer (R10-28): an accepting probe moves the label to `validated` — the user re-ran setup —
+   * and a validated session is never rejected after it (how a seed fills the cache).
+   */
   probe(): Promise<CredentialProbeResult>;
+  /**
+   * Asked by the cookie gate when the label would serve a read about to go out (a read the cache
+   * did not serve — R10-28): true exactly once for a session scripted `rejects:
+   * "first_uncached_read"` while it is still `stored`, which
+   * is then rejected as a 401 records it (the label `rejected`, `last_rejected_at` and
+   * `rejected_since` now). False for every other state and every later read.
+   */
+  rejectsRead(): boolean;
 }
 
 /**
@@ -134,6 +178,17 @@ export interface ScriptedAuth {
  */
 export function scriptedAuth(scripted: ScriptedCredential, clock: Clock): ScriptedAuth {
   let state: CredentialState = scripted.state;
+  // the session ESPN rejects at its first uncached read (changelog §R10, R10-28): `stored` until then
+  let expiring = scripted.rejects === "first_uncached_read";
+  let rejectedAt: string | null = null;
+  /** The scripted 401: the label moves to `rejected`, recorded as the pipeline records a 401. */
+  const expire = (): boolean => {
+    if (!expiring || state !== "stored") return false;
+    expiring = false;
+    state = "rejected";
+    rejectedAt = clock.nowIso();
+    return true;
+  };
   return {
     state: () => state,
     view: () => ({
@@ -143,8 +198,8 @@ export function scriptedAuth(scripted: ScriptedCredential, clock: Clock): Script
       present: true,
       stored_at: null,
       last_accepted_at: null,
-      last_rejected_at: null,
-      rejected_since: null,
+      last_rejected_at: rejectedAt,
+      rejected_since: state === "rejected" ? rejectedAt : null,
       next_probe_at: null,
     }),
     probe: () => {
@@ -159,5 +214,6 @@ export function scriptedAuth(scripted: ScriptedCredential, clock: Clock): Script
         checked_at: clock.nowIso(),
       });
     },
+    rejectsRead: expire,
   };
 }
