@@ -118,17 +118,15 @@ export const GUARDRAIL_REJECTED =
 export const GUARDRAIL_REJECTED_ABSENT = "— and stop. If a cookie";
 /**
  * Guardrail 9's no-move rule, as every body carries it (changelog §R10, R10-34, which states the
- * reading of plan 09 §2's "a Δ interval including 0"): the tool's flag and the rec decide — E2's
- * `coin_flip` (an interval that spans 0, spansZero, or a ΔP(win) under the threshold even when the
- * interval does not) and trade's `fair` (`p10 ≤ 0 ≤ p90`); a held coin flip is "no move", while a
- * zero-scoring seat is filled and a forced change made whatever the flag (R7-1 rules 2–3; the refix
- * verifier's V1). The old "includes 0 … a coin
- * flip" called SS-3's swap (`[−35.2, 0]`, `coin_flip: false`) a coin flip, against the tool; the
- * first R10-34 wording ("a best case of 0 is never a coin flip") then contradicted the ΔP(win)
- * branch (`[−3, 0]`, `coin_flip: true`; the follow-up verifier's F1).
+ * reading of plan 09 §2's "a Δ interval including 0"): what is a coin flip is the tool's to say —
+ * E2's `coin_flip`, the rec's own words for a change it holds, trade's `fair` — never the interval
+ * read alone; a held change is "no move", named as the rec names it; a `compare` pair is only
+ * scored. Earlier wordings listed E2's rules and each missed one (SS-3's `[−35.2, 0]` pair; a
+ * `[−3, 0]` pair flagged by ΔP(win); a zero-scoring seat; a forced change; the follow-up verifiers),
+ * so the guardrail now names none of them.
  */
 export const GUARDRAIL_NO_MOVE =
-  'A change the tool flags `coin_flip: true` is a coin flip, said plainly — its Δ interval spans 0 (below 0 at one end, above it at the other), or its win-chance move is under the threshold even when the interval does not — and **"no move"** when the rec holds it. The flag and the rec decide, never the interval read alone: a seat that scores a known 0 is filled whenever the entrant is expected to score, and a change the user asked for, or one that moves a player out of a seat he cannot hold, is made whatever the flag; a trade verdict `fair` is a coin flip; a change with `coin_flip: false` is never called one, and one whose best case is 0 cannot gain';
+  "What is a coin flip is the tool's to say — its `coin_flip` flag, the rec's own words for a change it holds, a trade verdict `fair` — never the interval read alone (a Δ interval that spans 0, below 0 at one end and above it at the other, is the usual reason); a change the rec holds is **\"no move\"**, said plainly and named as the rec names it (a coin flip, or a change that gains nothing); a change with `coin_flip: false` is never called a coin flip, and a `compare` pair is only scored — the move is the rec's";
 /** The superseded guardrail 9 (every interval that includes 0 read as a coin flip). */
 export const GUARDRAIL_NO_MOVE_ABSENT = "whose interval includes 0 is";
 /**
