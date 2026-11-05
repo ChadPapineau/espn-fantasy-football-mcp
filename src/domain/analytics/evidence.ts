@@ -174,6 +174,17 @@ const LOGGED_CLAIM_TYPES: readonly ScoredClaimType[] = [
 
 const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisit_trigger });
 const UNAVAILABLE: ReadonlySet<string> = new Set(["OUT", "INJURY_RESERVE", "SUSPENSION"]);
+/**
+ * ESPN's injury designations under which a health claim explains a usage drop (changelog §R10,
+ * R10-30: "not ACTIVE (QUESTIONABLE, DOUBTFUL, OUT or IR)"); no designation, ACTIVE, SUSPENSION and
+ * any other value leave a move with no role or availability claim a `quiet_role_change`.
+ */
+export const HEALTH_COVER_DESIGNATIONS: ReadonlySet<string> = new Set([
+  "QUESTIONABLE",
+  "DOUBTFUL",
+  "OUT",
+  "INJURY_RESERVE",
+]);
 
 /** The official report's own labels (nflverse enums, not free text) as designations. */
 function officialDesignation(label: string): Designation | null {
@@ -451,12 +462,23 @@ export function analyzeEvidence(req: EvidenceRequest): EvidenceOutcome {
   const disagree = found[0] ?? null;
   const roleClaims = claimsOnly.filter((i) => i.type === "role" || i.type === "availability");
   const typed = claimsOnly.filter((i) => i.type !== "other");
+  // a usage DROP of a player ESPN designates hurt (QUESTIONABLE, DOUBTFUL, OUT, IR) is explained by
+  // a health claim tied to him (every item here passed R7-4's attribution: an ambiguous one is never
+  // an item): not a quiet role change, the flag follows the rules below (changelog §R10, R10-30). A
+  // health claim never covers a rise, and against ACTIVE the claim is R4VS-6's availability_conflict
+  // above (an injury reported against ACTIVE — `injuries`), unchanged
+  const healthCovers =
+    roleDown &&
+    !roleUp &&
+    status !== null &&
+    HEALTH_COVER_DESIGNATIONS.has(status) &&
+    claimsOnly.some((i) => i.type === "health");
   const flag: EvidenceData["flag"] =
     disagree !== null && disagree.field !== "stats"
       ? "availability_conflict"
       : disagree !== null
         ? "unconfirmed_narrative"
-        : (roleUp || roleDown) && roleClaims.length === 0
+        : (roleUp || roleDown) && roleClaims.length === 0 && !healthCovers
           ? "quiet_role_change"
           : typed.length > 0
             ? "consistent"
