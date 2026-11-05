@@ -438,7 +438,7 @@ describe("ci.yml's weekly macOS run on whatever branch is built: macos-due and t
       expect(s).not.toMatch(/^ {8}(?:if|continue-on-error):/m);
     const up = steps[upload] ?? "";
     expect(up).toContain(
-      "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+      "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
     );
     expect(up).toContain(`          name: ${marker}\n`);
     expect(up).toContain("          path: ${{ runner.temp }}/process-macos-pass/\n");
@@ -1753,7 +1753,7 @@ describe("release.yml (plan 04 §4.4, R8; Stage C finding ci-release-workflow-mi
     }
     expect(writeScopes(release)).toEqual(["contents"]);
     expect(usesOf(release)).toEqual([
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+      "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     ]);
   });
 
@@ -1775,7 +1775,7 @@ describe("release.yml (plan 04 §4.4, R8; Stage C finding ci-release-workflow-mi
       'sha256sum "$tgz" > "$tgz.sha256"',
       // the README's locked install, run on the very tarball the release uploads
       `${REHEARSED[3] ?? ""} "$RUNNER_TEMP/release/espn-fantasy-football-mcp-\${GITHUB_REF_NAME#v}.tgz"`,
-      "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+      "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
     ]);
     const upload = step(build, "uses: actions/upload-artifact@");
     expect(upload).toContain("          name: release-files\n");
@@ -1801,7 +1801,7 @@ describe("release.yml (plan 04 §4.4, R8; Stage C finding ci-release-workflow-mi
 
   it("release downloads that artifact, checks it against build's outputs (read from the environment, never spliced into the script), then creates the GitHub Release", () => {
     inOrder(release, [
-      "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+      "uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2",
       "          name: release-files\n",
       "          path: ${{ runner.temp }}/release\n",
       "          digest-mismatch: error\n",
