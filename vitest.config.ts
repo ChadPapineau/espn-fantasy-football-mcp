@@ -53,6 +53,8 @@ export default defineConfig({
     environment: "node",
     pool: "forks",
     restoreMocks: true,
+    // every fast-check property names its seed and path on failure, replayable (tests/setup)
+    setupFiles: ["tests/setup/fast-check.ts"],
     projects: [
       {
         extends: true,

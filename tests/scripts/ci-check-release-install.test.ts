@@ -252,14 +252,32 @@ describe("check-release-install CLI on a fake release", () => {
   let tmp: ReturnType<typeof tempDir> | undefined;
   afterEach(() => tmp?.cleanup());
   /** Run the check with an empty npm cache of its own (never the user's). */
-  const run = (opts: FakeOptions = {}) => {
+  const run = (opts: FakeOptions = {}, env: Record<string, string> = {}) => {
     tmp = tempDir("eff-release-test-");
     const cache = path.join(tmp.dir, "npm-cache");
     mkdirSync(cache);
     return runCheck("check-release-install.mjs", fakeRelease(tmp.dir, opts), {
       npm_config_cache: cache,
+      ...env,
     });
   };
+
+  // The round-4b Skills account's "EINTEGRITY under load": the full suite ran under a silent npm
+  // script, which hands every child `npm_config_loglevel=silent`, and the nested npm ci then failed
+  // with nothing on stderr — the check reported no reason and this file's integrity test failed,
+  // while it passed alone. The check pins npm's log level (scripts/ci/_lib.mjs NPM_LOGLEVEL).
+  it.each(["silent", "error"])(
+    "a caller's npm_config_loglevel=%s: the tampered package's failure still names EINTEGRITY, and a good one still passes",
+    (level) => {
+      const bad = run({ tamper: true }, { npm_config_loglevel: level });
+      expect(bad.status).toBe(1);
+      expect(bad.stderr).toContain("EINTEGRITY");
+      tmp?.cleanup();
+      const good = run({}, { npm_config_loglevel: level });
+      expect(good.stderr).toBe("");
+      expect(good.status).toBe(0);
+    },
+  );
 
   it("passes: the locked runtime tree, no dev dependency, the bin linked into the folder and running", () => {
     const r = run();

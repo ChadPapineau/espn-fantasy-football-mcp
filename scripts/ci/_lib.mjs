@@ -73,8 +73,19 @@ export function isRecord(v) {
 }
 
 /**
+ * The log level every npm these checks run reports at, whatever the caller's environment says. A
+ * check launched from `npm run -s …` (or `--silent`, or `--loglevel silent`) inherits
+ * `npm_config_loglevel=silent`, and a nested npm then exits 1 with nothing on stderr: the release
+ * check's "npm ci … failed" carried no reason (no EINTEGRITY), and its test failed when the full
+ * suite ran under a silent npm script while it passed alone (the round-4b Skills account's
+ * "EINTEGRITY under load"). `warn` prints every error and warning npm has, without its notices.
+ */
+export const NPM_LOGLEVEL = "warn";
+
+/**
  * Run npm with an argument array (never a shell string) and return its output. npm ls exits 1 when
- * the tree has problems but still prints JSON; the caller inspects `problems`.
+ * the tree has problems but still prints JSON; the caller inspects `problems`. The log level is
+ * pinned (NPM_LOGLEVEL), so a failure always says why.
  * @param {readonly string[]} args
  * @param {string} cwd
  * @param {Readonly<Record<string, string>>} [env] extra environment (e.g. a throwaway npm_config_prefix)
@@ -90,6 +101,7 @@ export function runNpm(args, cwd, env = {}) {
       npm_config_update_notifier: "false",
       npm_config_fund: "false",
       ...env,
+      npm_config_loglevel: NPM_LOGLEVEL,
     },
   });
   if (r.error) throw new Error(`npm ${args.join(" ")} failed to start: ${r.error.message}`);
