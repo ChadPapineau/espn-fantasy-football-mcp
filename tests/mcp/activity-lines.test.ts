@@ -5,12 +5,18 @@
 // that failed for another reason than the session (a refused one is said by the reads line, with
 // what the digest goes without), and never when both were refused. Every combination of the feed,
 // the standings and the rosters: refused, unavailable (an outage), or read. fx-10h, fixture mode,
-// an empty transaction history; no network.
+// an empty transaction history; no network. Round 4d (the verifier's F2, F3): a refused rosters read
+// is never said again as "N rosters unreadable", and a feed that fails after its newest weeks were
+// read names the weeks before them, never "the server's persisted history only".
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SESSION_READ_WARNINGS, activityLeagueReadsWarning } from "../../src/mcp/tools/common.js";
+import {
+  SESSION_READ_WARNINGS,
+  activityLeagueReadsWarning,
+  feedCutWarning,
+} from "../../src/mcp/tools/common.js";
 import { coded, faulty, type Fault } from "./helpers/faults.js";
 import { ESPN_FIXTURES, call, connect, makeWorld, type World } from "./helpers/world.js";
 
@@ -128,8 +134,16 @@ describe("E11's lines, every combination of the feed, standings and rosters (the
       expect(teams).toEqual(
         teamsUnread && unsaid.length > 0 ? [teamsLine(unsaid.join(" and "))] : [],
       );
-      // a refused read is never "unavailable"; one line per fact: no line twice
+      // a refused read is never "unavailable" nor "unreadable" (the round-4d verifier's F2: a refused
+      // rosters read was said again as "10 rosters unreadable: no needs for them"); one line per
+      // fact: no line twice
       for (const x of w) expect(x).not.toMatch(/^(?:standings|rosters) unavailable/);
+      for (const r of refused)
+        for (const x of w)
+          if (x.includes(r)) expect(x).not.toMatch(/\b(?:unavailable|unreadable)\b/);
+      if (ro === "refused") expect(w.filter((x) => x.includes("rosters unreadable"))).toEqual([]);
+      if (ro === "unavailable" && st === "read")
+        expect(w.some((x) => /^\d+ rosters unreadable: no needs for them$/.test(x))).toBe(true);
       expect(new Set(w).size).toBe(w.length);
       // partial whenever the session refused a read (an outage keeps E11's own rule)
       if (feed === "refused" || st === "refused" || ro === "refused") expect(b.partial).toBe(true);
@@ -137,18 +151,69 @@ describe("E11's lines, every combination of the feed, standings and rosters (the
     60_000,
   );
 
-  it("one feed week read (the next one over the budget): 'this week's feed only'; two: the weeks named", async () => {
-    let n = 0;
-    const once: Fault = (real, ...args) =>
-      n++ === 0 ? real(...args) : Promise.reject(coded("ESPN_UPSTREAM_UNAVAILABLE"));
-    const c = await connect(world, {
-      options: { toolset: "full" },
-      services: faulty(world.services, { listTransactions: once }),
-    });
-    const r = await call(c.client, "espn_analyze_league_activity", { since_days: 7 });
-    await c.close();
-    const w = (r.body as unknown as Body).warnings;
-    expect(w).toContain(NO_HISTORY_FEED);
+  // the round-4d verifier's F3: the feed fails after its newest weeks were read — its line names the
+  // weeks before them, never "the server's persisted history only" beside the history line's "the
+  // window shows this week's feed only" (or "weeks N–M only")
+  it.each([
+    ["refused", 7, 1],
+    ["unavailable", 7, 1],
+    ["refused", 14, 2],
+    ["unavailable", 14, 2],
+  ] as const)(
+    "the feed %s after its first read(s) (since_days %i, %i week(s) read): the lines agree",
+    async (how, sinceDays, read) => {
+      let n = 0;
+      const after: Fault = (real, ...args) =>
+        n++ < read
+          ? real(...args)
+          : Promise.reject(
+              coded(how === "refused" ? "ESPN_AUTH_REJECTED" : "ESPN_UPSTREAM_UNAVAILABLE"),
+            );
+      const c = await connect(world, {
+        options: { toolset: "full" },
+        services: faulty(world.services, { listTransactions: after }),
+      });
+      const r = await call(c.client, "espn_analyze_league_activity", { since_days: sinceDays });
+      await c.close();
+      expect(r.isError).toBe(false);
+      const b = r.body as unknown as Body;
+      const oldest = week - read + 1;
+      const feedLine = feedCutWarning(how === "refused" ? "rejected" : "unavailable", oldest);
+      expect(b.warnings).toContain(feedLine);
+      expect(feedLine).toContain(`weeks before ${String(oldest)} come from`);
+      expect(b.warnings).toContain(
+        read === 1
+          ? NO_HISTORY_FEED
+          : `no persisted transaction history yet: the window shows ESPN's feed of weeks ${String(oldest)}–${String(week)} only`,
+      );
+      for (const x of b.warnings) expect(x).not.toContain("persisted history only");
+      expect(b.warnings).not.toContain(SESSION_READ_WARNINGS.feed_rejected);
+      expect(b.warnings).not.toContain(
+        "espn:mTransactions2 unavailable: the server's persisted history only",
+      );
+      expect(new Set(b.warnings).size).toBe(b.warnings.length);
+      if (how === "refused") {
+        expect(b.partial).toBe(true);
+        // said by the feed's own line: the call's session line does not repeat it
+        expect(b.warnings.filter((x) => x.includes("transaction feed"))).toEqual([feedLine]);
+      }
+    },
+    60_000,
+  );
+
+  it("feedCutWarning keeps each refusal's reason and fix, and the outage's view form", () => {
+    expect(feedCutWarning("rejected", 4)).toBe(
+      "partial: the stored ESPN session was rejected, and ESPN's transaction feed needs one on a league not known to be public: weeks before 4 come from the server's persisted history; run `eff setup` in a terminal to replace it",
+    );
+    expect(feedCutWarning("no_session", 4)).toBe(
+      "partial: ESPN's transaction feed needs an ESPN session on a league not known to be public, and none is stored: weeks before 4 come from the server's persisted history; run `eff setup` in a terminal to add one",
+    );
+    expect(feedCutWarning("unavailable", 4)).toBe(
+      "espn:mTransactions2 unavailable: weeks before 4 come from the server's persisted history",
+    );
+  });
+
+  it("two feed weeks read: the weeks named", async () => {
     expect((await activity("read", "read", "read", 7)).warnings).toContain(twoWeeks());
   }, 60_000);
 });

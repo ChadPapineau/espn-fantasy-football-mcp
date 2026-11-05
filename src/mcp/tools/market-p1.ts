@@ -117,6 +117,7 @@ import {
   sessionRefusalOf,
   SESSION_READ_WARNINGS,
   activityLeagueReadsWarning,
+  feedCutWarning,
   ACTIVITY_READ_LABEL,
   type ActivityLeagueRead,
   take,
@@ -2054,16 +2055,26 @@ async function transactionsOf(
     feedWeeks.push(week);
     for (const t of take(ctx, got, inputs).items) byId.set(t.transaction_id, t);
   }
-  // the feed's refusal is said by its own line (the call's session line names it no more)
+  // the feed's refusal is said by its own line (the call's session line names it no more). When the
+  // newest weeks were read before it failed, the line says only the weeks before them come from the
+  // persisted history (feedCutWarning; the round-4d verifier's F3): the whole window is the persisted
+  // history only when no feed week was read
+  const oldestRead = feedWeeks.length === 0 ? null : Math.min(...feedWeeks);
   if (state.refusal !== null) ctx.refusals.said("transaction feed");
   if (state.refusal !== null)
     warnings.push(
-      state.refusal === "rejected"
-        ? SESSION_READ_WARNINGS.feed_rejected
-        : SESSION_READ_WARNINGS.feed_no_session,
+      oldestRead !== null
+        ? feedCutWarning(state.refusal, oldestRead)
+        : state.refusal === "rejected"
+          ? SESSION_READ_WARNINGS.feed_rejected
+          : SESSION_READ_WARNINGS.feed_no_session,
     );
   if (state.unavailable)
-    warnings.push("espn:mTransactions2 unavailable: the server's persisted history only");
+    warnings.push(
+      oldestRead !== null
+        ? feedCutWarning("unavailable", oldestRead)
+        : "espn:mTransactions2 unavailable: the server's persisted history only",
+    );
   const covered = weeks[weeks.length - 1] ?? w;
   if (Math.ceil(sinceDays / 7) + 1 > weeks.length && covered > 1)
     warnings.push(
@@ -2227,6 +2238,9 @@ export const analyzeLeagueActivityTool = defineTool({
       since_days: args.since_days,
       transactions: txns,
       teams,
+      // a refused rosters read is said by the reads line, with the rival needs it costs: the domain
+      // does not say it again as "N rosters unreadable" (the round-4d verifier's F2)
+      rosters_said: refused.has("rosters"),
       my_team_id: myTeam,
       roster: b.slots,
       pool: poolPlayers,

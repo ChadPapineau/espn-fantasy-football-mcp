@@ -1105,6 +1105,25 @@ export const SESSION_READ_WARNINGS = Object.freeze({
     "partial: the stored ESPN session was rejected, and ESPN's transaction feed needs one on a league not known to be public: the server's persisted history only; run `eff setup` in a terminal to replace it",
 } as const);
 
+/**
+ * E11's feed line when the feed failed after its newest weeks were read (the round-4d verifier's F3):
+ * the weeks from `oldestRead` on are ESPN's feed, read this call, and only the weeks before it come
+ * from the persisted history — never "the server's persisted history only" for the whole window,
+ * which the history line beside it ("… the window shows this week's feed only") contradicted. A
+ * refusal keeps SESSION_READ_WARNINGS' reason and `eff setup`; an outage keeps degradedViewWarning's
+ * form. Fixed text but the week (changelog §R10, R10-11).
+ */
+export function feedCutWarning(
+  cause: "no_session" | "rejected" | "unavailable",
+  oldestRead: number,
+): string {
+  const before = `weeks before ${String(oldestRead)} come from the server's persisted history`;
+  if (cause === "unavailable") return `espn:mTransactions2 unavailable: ${before}`;
+  return cause === "rejected"
+    ? `partial: the stored ESPN session was rejected, and ESPN's transaction feed needs one on a league not known to be public: ${before}; run \`eff setup\` in a terminal to replace it`
+    : `partial: ESPN's transaction feed needs an ESPN session on a league not known to be public, and none is stored: ${before}; run \`eff setup\` in a terminal to add one`;
+}
+
 /** The league reads espn_analyze_league_activity goes without when the session refuses them. */
 export type ActivityLeagueRead = "standings" | "rosters" | "free-agent pool";
 

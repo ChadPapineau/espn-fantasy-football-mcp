@@ -50,6 +50,12 @@ export interface ActivityRequest {
   /** The persisted feed (A6 + `transactions_seen`), any order, any age. */
   readonly transactions: readonly Transaction[];
   readonly teams: readonly ActivityTeam[];
+  /**
+   * The caller already said why no team has players (a rosters read the ESPN session refused, said
+   * with what it costs): no "N rosters unreadable" line then — one line per fact, and a refusal is
+   * never read as data unreadable (changelog §R10, R10-11; the round-4d verifier's F2).
+   */
+  readonly rosters_said?: boolean;
   readonly my_team_id: number | null;
   readonly roster: RosterSlots;
   /** The best free agents (rival needs' likely targets), weekly values aligned with the teams'. */
@@ -259,7 +265,7 @@ export function analyzeLeagueActivity(req: ActivityRequest): ActivityOutcome {
   if (req.include_rival_needs !== false) {
     const withPlayers = teams.filter((t) => t.players !== undefined);
     const league = withPlayers.map((t) => t.players ?? []);
-    if (withPlayers.length < teams.length)
+    if (withPlayers.length < teams.length && req.rosters_said !== true)
       warnings.push(
         `${String(teams.length - withPlayers.length)} rosters unreadable: no needs for them`,
       );
