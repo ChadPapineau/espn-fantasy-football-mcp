@@ -93,6 +93,13 @@ export interface ScheduleRequest {
   readonly players: readonly SchedulePlayer[];
   /** The weeks analysed (default: the remaining regular season and playoff weeks — the tool's). */
   readonly weeks: readonly Week[];
+  /**
+   * The current scoring week: an injured player's return curve counts from it (E9's cold-start
+   * hazards). Default: the first week any player's projection covers, else the first week analysed.
+   * Never the requested window's first week — a week's row is the same whatever other weeks are
+   * asked for (the round-4b review's F3).
+   */
+  readonly current_week?: Week;
   /** The league's playoff weeks (`matchupPeriods`) and first-round byes. */
   readonly playoff: { readonly weeks: readonly Week[]; readonly bye_seeds: number | null };
   readonly include_playoffs?: boolean;
@@ -130,7 +137,12 @@ const A = (text: string, revisit_trigger: string): Assumption => ({ text, revisi
 const cvOf = (position: string): number =>
   Object.hasOwn(POSITION_CV, position) ? (POSITION_CV[position] ?? DEFAULT_CV) : DEFAULT_CV;
 
-/** A player's typical value: his mean over the horizon's non-bye weeks (0 when none). */
+/**
+ * A player's typical value: his mean over every non-bye week of his projection (0 when none) — the
+ * whole rest-of-season projection the caller passes, never only the weeks analysed, so a week's
+ * holes and bye-cluster cost do not change with the other weeks requested (the round-4b review's
+ * F3: a lone bye week gave every bye starter a typical value of 0, and its cost read 0).
+ */
 export function typicalValue(p: SchedulePlayer): number {
   const ws = p.weeks.filter((w) => !w.bye && Number.isFinite(w.dist.mean));
   return ws.length === 0 ? 0 : ws.reduce((s, w) => s + w.dist.mean, 0) / ws.length;
@@ -299,13 +311,18 @@ export async function analyzeSchedule(req: ScheduleRequest): Promise<ScheduleOut
       ),
     );
   const typical = new Map(active.map((p) => [p.player_id, typicalValue(p)]));
+  // the current week the return curve counts from: the caller's, else the projection's first week
+  // (never the window's first week — F3)
+  const projected = req.players.flatMap((p) => p.weeks.map((w) => w.week));
+  const currentWeek =
+    req.current_week ?? (projected.length > 0 ? Math.min(...projected) : Math.min(...weeks));
   // an injured player is out of a week whose P(returned by then) is below one half — E1 applies the
   // injury status to its first week only (projection.ts); the cold-start return hazards of E9
   const out = new Map(
     req.players
       .filter((p) => isIrEligible(p.injury_status) || p.injury_status === "SUSPENSION")
       .map((p) => {
-        const curve = returnCurve({ injury_status: p.injury_status }, weeks, Math.min(...weeks));
+        const curve = returnCurve({ injury_status: p.injury_status }, weeks, currentWeek);
         return [p.player_id, new Set(curve.filter((c) => c.p < 0.5).map((c) => c.week))] as const;
       }),
   );

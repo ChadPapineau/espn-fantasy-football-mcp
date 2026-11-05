@@ -62,3 +62,51 @@ describe("weeks past the final scoring period (Stage C schedule-weeks-past-final
     });
   }, 60_000);
 });
+
+// The round-4b review's F3 at the tool: on base--full with seed 7, week 11's row (its holes and
+// bye_cluster_cost) changed with the other weeks asked for — [11] gave cost 0, [7, 11] 6.71, [11, 12]
+// 4.01. Every week is now projected from the current one and valued against the whole rest-of-season
+// projection, so the row is the same in every window; a week already behind the current one is
+// dropped and said.
+describe("F3: a week's row is the same whatever other weeks are requested", () => {
+  type Row = Week & { holes: unknown[]; bye_cluster_cost: number; lineup_pts: unknown };
+  const rowOf = async (weeks: number[], w: number): Promise<Row | undefined> => {
+    const r = await call(client, "espn_analyze_schedule", { seed: 7, weeks });
+    expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+    return (r.body.data as { weeks: Row[] }).weeks.find((x) => x.week === w);
+  };
+
+  it("week 11 in [11], [7, 11], [11, 12] and [11, 13, 15]: one row", async () => {
+    const alone = await rowOf([11], 11);
+    expect(alone).toBeDefined();
+    for (const weeks of [
+      [7, 11],
+      [11, 12],
+      [11, 13, 15],
+    ])
+      expect(await rowOf(weeks, 11), JSON.stringify(weeks)).toEqual(alone);
+  }, 120_000);
+
+  it("week 7 in [7], [7, 11, 13] and [6, 7, 8]: one row", async () => {
+    const alone = await rowOf([7], 7);
+    for (const weeks of [
+      [7, 11, 13],
+      [6, 7, 8],
+    ])
+      expect(await rowOf(weeks, 7), JSON.stringify(weeks)).toEqual(alone);
+  }, 120_000);
+
+  it("a week before the current one is dropped and said; only such weeks: VALIDATION before_current_week", async () => {
+    const r = await call(client, "espn_analyze_schedule", { seed: 7, weeks: [3, 11] });
+    expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+    expect((r.body.data as { weeks: Week[] }).weeks.map((w) => w.week)).toEqual([11]);
+    expect(r.body.warnings as string[]).toContain("week(s) 3 dropped: before the current week (5)");
+    const only = await call(client, "espn_analyze_schedule", { seed: 7, weeks: [2, 3] });
+    expect(only.isError).toBe(true);
+    expect((only.body as { error: Record<string, unknown> }).error).toMatchObject({
+      code: "VALIDATION",
+      field: "weeks",
+      reason: "before_current_week",
+    });
+  }, 120_000);
+});

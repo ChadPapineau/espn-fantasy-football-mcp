@@ -604,11 +604,30 @@ describe("option value, conditionals, stacks, cross-check", () => {
     expect(b.stack_flags[0]?.advice_under_reading).toContain("points_only");
   });
 
-  it("ESPN's projection is the cross-check: empty at weight 1.0, a > 25 % gap listed otherwise", () => {
+  // changelog §R10, R10-29: ESPN's projection against the own model's line (E1's inputs.own) by
+  // E1's flag, never against the blended mean (ESPN's own at weight_espn 1.0)
+  it("ESPN's projection is the cross-check against E1's own line: a flagged starter listed, no own line never", () => {
     expect(analyzeLineup(request()).espn_cross_check.starter_disagreements).toEqual([]);
-    const players = myRoster().map((p) => (p.player_id === 1 ? { ...p, espn_projection: 12 } : p));
+    // ESPN 12 against the blended mean 20, but no own line: never listed (before: 0.667 listed)
+    const meanOnly = myRoster().map((p) => (p.player_id === 1 ? { ...p, espn_projection: 12 } : p));
+    expect(
+      analyzeLineup(request({ players: meanOnly })).espn_cross_check.starter_disagreements,
+    ).toEqual([]);
+    const e1 = (espn: number, own: number | null) => {
+      const pct = own === null ? null : Math.round((Math.abs(espn - own) / espn) * 1000) / 1000;
+      return { espn, own, pct, flagged: pct !== null && pct > 0.25 };
+    };
+    const players = myRoster().map((p) =>
+      p.player_id === 1
+        ? { ...p, e1_cross_check: e1(20, 14) }
+        : p.player_id === 2
+          ? { ...p, e1_cross_check: e1(15, 13) }
+          : p.player_id === 3
+            ? { ...p, e1_cross_check: e1(12, null) }
+            : p,
+    );
     expect(analyzeLineup(request({ players })).espn_cross_check.starter_disagreements).toEqual([
-      { player_id: 1, ours: 20, espn: 12, pct: 0.667 },
+      { player_id: 1, ours: 14, espn: 20, pct: 0.3 },
     ]);
   });
 

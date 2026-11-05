@@ -400,3 +400,64 @@ describe("cooperative batching and hostile inputs", () => {
     expect(out.data.fixes.every((f) => f.deadline === null)).toBe(true);
   });
 });
+
+// The round-4b review's F3: a week's row (its lineup, holes, bye-cluster cost and weight) is the
+// same whatever other weeks are requested. Before, the typical values were averaged over the
+// requested weeks only (a lone bye week gave every bye starter a typical value of 0, its holes and
+// cluster cost 0) and the injured players' return curve counted from the window's first week.
+describe("F3: a week's row does not change with the window", () => {
+  const row = (out: Awaited<ReturnType<typeof analyzeSchedule>>, w: number) =>
+    out.data.weeks.find((x) => x.week === w);
+
+  it("week 9's three-starter bye asked alone costs what it costs inside the full window", async () => {
+    const full = row(await analyzeSchedule(rq()), 9);
+    const alone = row(await analyzeSchedule(rq({ weeks: [9] })), 9);
+    expect(full?.bye_cluster_cost).toBeGreaterThan(0);
+    expect(alone).toEqual(full);
+    expect(alone?.holes.every((h) => h.cost >= 0)).toBe(true);
+    expect(alone?.holes.some((h) => h.cost > 0)).toBe(true);
+  });
+
+  it("an injured player's return curve counts from the current week, never the window's first", async () => {
+    const hurt = roster().map((p) =>
+      p.player_id === 2 ? { ...p, injury_status: "OUT" as const } : p,
+    );
+    for (const w of [10, 11, 15])
+      expect(row(await analyzeSchedule(rq({ players: hurt, weeks: [w] })), w)).toEqual(
+        row(await analyzeSchedule(rq({ players: hurt })), w),
+      );
+    // an explicit current week wins over the projection's first week
+    const late = await analyzeSchedule(rq({ players: hurt, weeks: [10], current_week: 10 }));
+    const early = await analyzeSchedule(rq({ players: hurt, weeks: [10], current_week: 8 }));
+    expect(row(late, 10)).not.toEqual(row(early, 10));
+  });
+
+  it("property: over random windows, injuries and byes, every week's row equals its row in the full window", async () => {
+    const statuses = [null, "OUT", "INJURY_RESERVE", "QUESTIONABLE", "SUSPENSION"] as const;
+    await fc.assert(
+      fc.asyncProperty(
+        fc.subarray(WEEKS, { minLength: 1 }),
+        fc.array(fc.constantFrom(...statuses), { minLength: 14, maxLength: 14 }),
+        fc.array(fc.constantFrom(null, ...WEEKS), { minLength: 14, maxLength: 14 }),
+        async (window, injuries, byes) => {
+          const players = roster().map((p, i) => {
+            const bye = byes[i] ?? null;
+            return {
+              ...p,
+              injury_status: injuries[i] ?? null,
+              weeks: p.weeks.map((x) => ({
+                ...x,
+                dist: x.week === bye ? dist(0, 0) : x.dist,
+                bye: x.week === bye,
+              })),
+            };
+          });
+          const full = await analyzeSchedule(rq({ players }));
+          const part = await analyzeSchedule(rq({ players, weeks: window }));
+          for (const w of window) expect(row(part, w), `week ${String(w)}`).toEqual(row(full, w));
+        },
+      ),
+      { numRuns: 60 },
+    );
+  });
+});

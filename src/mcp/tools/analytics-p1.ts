@@ -33,6 +33,7 @@ import type { ProjectedPlayer } from "../../domain/analytics/projection.js";
 import {
   seedingStatus,
   type MatchupWinData,
+  type ProjectionWeek,
   type SeasonSimData,
 } from "../../domain/analytics/types.js";
 import { seededRng } from "../../domain/clock.js";
@@ -222,6 +223,11 @@ function lineupOf(
         dist: d,
         p_active: pw?.p_active ?? null,
         role_games: projected.get(e.player.ref.id)?.projection.role_confidence_games ?? 0,
+        ...((): { e1?: ProjectionWeek } => {
+          // E1's own row of the week (changelog §R10, R10-29)
+          const row = projected.get(e.player.ref.id)?.projection.weeks.find((x) => x.week === w);
+          return row === undefined ? {} : { e1: row };
+        })(),
       },
       lock,
       gsisById?.has(e.player.ref.id) === true
@@ -1144,12 +1150,25 @@ export const analyzeScheduleTool = defineTool({
       warnings.push(
         `week(s) ${past.map(String).join(", ")} dropped: after the league's final scoring period (${String(finalWeek)})`,
       );
+    // a week already behind the current one has no lineup left to set: dropped and said, as a week
+    // past the final period is — every week is projected from the current one, so a week's row is
+    // the same whatever other weeks are asked for (the round-4b review's F3)
+    const before = asked.filter((w) => w < b.w);
+    if (before.length > 0)
+      warnings.push(
+        `week(s) ${before.map(String).join(", ")} dropped: before the current week (${String(b.w)})`,
+      );
     const weeks = asked.filter(
       (w) =>
-        !past.includes(w) && (args.include_playoffs || !b.rules.playoffs.playoff_weeks.includes(w)),
+        !past.includes(w) &&
+        !before.includes(w) &&
+        (args.include_playoffs || !b.rules.playoffs.playoff_weeks.includes(w)),
     );
     if (weeks.length === 0)
-      throw new EffError("VALIDATION", { field: "weeks", reason: "season_over" });
+      throw new EffError("VALIDATION", {
+        field: "weeks",
+        reason: before.length > 0 && past.length === 0 ? "before_current_week" : "season_over",
+      });
     const rosters = await required(() => rostersOf(ctx, b.w, inputs, warnings, args, team));
     const mine = rosters.find((r) => r.team.team_id === team);
     if (mine === undefined) throw new EffError("NOT_FOUND");
@@ -1159,7 +1178,10 @@ export const analyzeScheduleTool = defineTool({
       args.seed,
       ["e8", b.league.ref.season, b.w, team, b.settings.settings_hash].join("|"),
     );
-    const from = Math.min(...weeks);
+    // every week from the current one (never the window's first week — F3): E1 applies an injury
+    // status to its first week only, and each player's typical value is his whole rest-of-season
+    // projection (scheduleStress.ts typicalValue), so a week's row never moves with the window
+    const from = b.w;
     const proj = await projectMany(
       ctx,
       await subjectsOf(
@@ -1246,11 +1268,16 @@ export const analyzeScheduleTool = defineTool({
         injury_status: e.player.injury_status,
         pro_team_id: e.player.pro_team_id,
         slot_id: e.slot_id,
-        weeks: (proj.byId.get(e.player.ref.id)?.weeks ?? [])
-          .filter((x) => weeks.includes(x.week))
-          .map((x) => ({ week: x.week, dist: x.dist, bye: x.bye })),
+        // the whole rest-of-season projection (the typical values' basis), the window analysed
+        // below by `weeks`
+        weeks: (proj.byId.get(e.player.ref.id)?.weeks ?? []).map((x) => ({
+          week: x.week,
+          dist: x.dist,
+          bye: x.bye,
+        })),
       })),
       weeks,
+      current_week: b.w,
       playoff: { weeks: b.rules.playoffs.playoff_weeks, bye_seeds: b.rules.playoffs.bye_seeds },
       include_playoffs: args.include_playoffs,
       p_alive_by_week: alive,

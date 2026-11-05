@@ -511,26 +511,27 @@ describe("invariants over random rosters (R7-1)", () => {
         for (const seat of referenceSlots().slots)
           if ((counts.get(seat.name) ?? 0) > (seat.class === "bench" ? 99 : seat.count))
             return false;
-        // held ⟺ coin flip, change by change: a coin flip's entrant never starts in the advice, a
+        // held ⟺ a coin flip or a change that gains nothing (`[0, 0]`, never a coin flip — the
+        // round-4b review's F12), change by change: a held entrant never starts in the advice, a
         // decisive one always does
         const told = new Set(starts(out));
+        const held = (s: (typeof out.swaps)[number]): boolean =>
+          s.coin_flip || (s.interval[0] === 0 && s.interval[1] === 0);
         for (const s of out.swaps) {
-          if (s.coin_flip && told.has(s.in)) return false;
-          if (!s.coin_flip && !told.has(s.in)) return false;
+          if (s.coin_flip && s.interval[0] === 0 && s.interval[1] === 0) return false;
+          if (held(s) && told.has(s.in)) return false;
+          if (!held(s) && !told.has(s.in)) return false;
         }
         // no move ⟺ nothing made: the current starters, the kept lineup's numbers, no deadline
         const cur = ids(startingRows(out.current_lineup));
-        if (rec.no_move !== out.swaps.every((s) => s.coin_flip)) return false;
+        if (rec.no_move !== out.swaps.every(held)) return false;
         if (rec.no_move) {
           if (starts(out).join() !== cur.join()) return false;
           if (Math.abs(rec.point_estimate - out.e_points_before) > 1e-3) return false;
           if (rec.latest_execution_time !== null) return false;
         }
         // nothing held: the advice is E2's assignment
-        if (
-          out.swaps.every((s) => !s.coin_flip) &&
-          starts(out).join() !== ids(rec.lineup ?? []).join()
-        )
+        if (out.swaps.every((s) => !held(s)) && starts(out).join() !== ids(rec.lineup ?? []).join())
           return false;
         // the advice lies between the current lineup and the assignment
         if (rec.point_estimate < out.e_points_before - 1e-3) return false;

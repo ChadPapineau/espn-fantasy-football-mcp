@@ -14,6 +14,7 @@ export {
   PREMIUM_BAND_MULTIPLIERS,
   WEIGHT_ESPN_V1,
   isCoinFlip,
+  spansZero,
   isValidClearsToFa,
   seedingStatus,
   toCoarseDelta,

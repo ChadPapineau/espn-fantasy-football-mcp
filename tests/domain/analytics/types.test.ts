@@ -6,6 +6,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   CLEARS_TO_FA_MIN_COLD_WIDTH,
   isValidClearsToFa,
+  spansZero,
   seedingStatus,
   type ClearsToFa,
   type LineupData,
@@ -76,8 +77,40 @@ describe("isCoinFlip", () => {
     expect(isCoinFlip("position_cv", 0.04, [0.01, 0.07])).toBe(false);
     expect(isCoinFlip("position_cv", 0.04, [-0.01, 0.09])).toBe(true);
     expect(isCoinFlip("player_sim", 0.02, [0.001, 0.04])).toBe(false);
-    expect(isCoinFlip("player_sim", -0.3, [-0.5, 0])).toBe(true);
-    expect(isCoinFlip("player_sim", 0.3, [0, 0.5])).toBe(true);
+    // an interval that ends at 0 does not span it (the round-4b review's F12): it cannot gain, or
+    // cannot lose
+    expect(isCoinFlip("player_sim", -0.3, [-0.5, 0])).toBe(false);
+    expect(isCoinFlip("player_sim", 0.3, [0, 0.5])).toBe(false);
+  });
+  // F12 (the round-4b review): an interval is a coin flip only strictly on both sides of 0 — plan 09
+  // §2 guardrail 9's "a Δ interval including 0" read as a change that can either gain or lose
+  it.each([
+    [[-35.215, 0], false],
+    [[0, 0], false],
+    [[0, 4.2], false],
+    [[-0.0001, 0.0001], true],
+    [[-1e-9, 3], true],
+    [[-3, 1e-9], true],
+    [[-3, -1e-9], false],
+    [[1e-9, 3], false],
+  ] as const)("the interval %j alone: coin flip %s (no ΔP(win))", (iv, want) => {
+    expect(spansZero(iv)).toBe(want);
+    expect(isCoinFlip("position_cv", null, iv)).toBe(want);
+    expect(isCoinFlip("player_sim", null, iv)).toBe(want);
+  });
+  it("property: spansZero is exactly lo < 0 < hi, and isCoinFlip with no ΔP(win) is spansZero", () => {
+    const edge = fc.oneof(
+      fc.constant(0),
+      fc.constant(-0),
+      fc.double({ noNaN: true, min: -50, max: 50 }),
+    );
+    fc.assert(
+      fc.property(edge, edge, (a, b) => {
+        const iv = [Math.min(a, b), Math.max(a, b)] as const;
+        expect(spansZero(iv)).toBe(iv[0] < 0 && iv[1] > 0);
+        expect(isCoinFlip("player_sim", null, iv)).toBe(spansZero(iv));
+      }),
+    );
   });
   it("the thresholds differ by basis (sim is sharper)", () => {
     expect(COIN_FLIP_DPWIN).toEqual({ position_cv: 0.04, player_sim: 0.02 });

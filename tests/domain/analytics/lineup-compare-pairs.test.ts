@@ -225,3 +225,67 @@ describe("R10-24: a compare pair is scored only as the direct settable swap it n
     );
   });
 });
+
+// The round-4b review's F12: a compare pair whose entrant is ruled out (a point mass at 0) against a
+// starter whose p10 is 0 has the interval [-p90, 0] — it can only lose or gain nothing, never a coin
+// flip (spansZero: strictly both sides of 0). Before the fix it read `coin_flip: true` while its
+// option verdict said the swap loses points (questionable-late--core, out 4379399 / in 4697815).
+describe("F12: a compare pair that can never gain is not a coin flip", () => {
+  const CAPPED = {
+    mean: 15.9,
+    p10: 0,
+    p25: 8,
+    p50: 15,
+    p75: 22,
+    p90: 35.215,
+    p_zero: 0.1,
+    basis: "position_cv" as const,
+  };
+  const ruledOut = (players: LineupPlayer[]): LineupPlayer[] =>
+    players.map((p) =>
+      p.player_id === 2
+        ? { ...p, points: CAPPED }
+        : p.player_id === 10
+          ? { ...p, injury_status: "OUT", p_active: 0, points: dist(0) }
+          : p,
+    );
+
+  it("out a starter with p10 0 / in a point mass at 0: interval [-35.215, 0], coin_flip false", () => {
+    const players = ruledOut(roster());
+    expect(warningOf(players, { out: 2, in: 10 })).toBeNull();
+    for (const opponent of [true, false]) {
+      const req = request(players, { compare: [{ out: 2, in: 10 }] });
+      const out = analyzeLineup(opponent ? req : { ...req, opponent: null });
+      const swap = out.swaps.find((s) => s.out === 2 && s.in === 10);
+      expect(swap?.interval).toEqual([-35.215, 0]);
+      expect(swap?.delta_e).toBe(-15.9);
+      expect(swap?.coin_flip).toBe(false);
+    }
+  });
+
+  // (a starter who scores a known 0 is rule 2's seat, priced by the entrant alone: not drawn here)
+  it("every scored compare pair: coin_flip with no ΔP(win) to read is exactly lo < 0 < hi", () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: 0.5, max: 30, noNaN: true }),
+        fc.double({ min: 0, max: 30, noNaN: true }),
+        fc.constantFrom(0, 0.3, 0.6),
+        (outMean, inMean, cv) => {
+          const players = roster().map((p) =>
+            p.player_id === 2
+              ? { ...p, points: dist(outMean, cv) }
+              : p.player_id === 10
+                ? { ...p, points: dist(inMean, cv) }
+                : p,
+          );
+          const req = request(players, { compare: [{ out: 2, in: 10 }], opponent: null });
+          const swap = analyzeLineup(req).swaps.find((s) => s.out === 2 && s.in === 10);
+          if (swap === undefined) return;
+          const [lo, hi] = swap.interval;
+          expect(swap.coin_flip).toBe(lo < 0 && hi > 0);
+        },
+      ),
+      { numRuns: 60 },
+    );
+  });
+});

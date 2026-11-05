@@ -931,17 +931,30 @@ const lineupBase = {
       }),
     )
     .max(20),
+  // changelog §R10, R10-29: ESPN's projection against the own model's line (E1's inputs.own) by
+  // E1's disagreement rule — never against the blended mean, which is ESPN's own at weight_espn 1.0
   espn_cross_check: z.strictObject({
     starter_disagreements: z
       .array(
         z.strictObject({
           player_id: playerId,
-          ours: z.number(),
-          espn: z.number(),
-          pct: z.number(),
+          ours: z
+            .number()
+            .describe(
+              "the own model's line for the week (espn_project_players inputs.own), never the blended mean",
+            ),
+          espn: z.number().describe("ESPN's weekly projection (espn_project_players inputs.espn)"),
+          pct: z
+            .number()
+            .describe(
+              "|espn − ours| / espn, as espn_project_players disagreement.pct; listed when over 0.25",
+            ),
         }),
       )
-      .max(30),
+      .max(30)
+      .describe(
+        "the told lineup's starters whose ESPN projection and own line disagree by E1's flag rule; a starter with no own line is never listed",
+      ),
   }),
   lock_schedule: z
     .array(
@@ -1229,6 +1242,8 @@ export const analyzeLineupTool = defineTool({
           dist: first.dist,
           p_active: first.p_active,
           role_games: pw?.projection.role_confidence_games ?? 0,
+          // E1's own row of the week: the cross-check's ESPN and own lines (changelog §R10, R10-29)
+          ...(pw?.projection.weeks[0] === undefined ? {} : { e1: pw.projection.weeks[0] }),
         },
         lockBy.get(e.player.ref.id) ?? null,
         gsis,

@@ -62,9 +62,9 @@ import {
 } from "./totals.js";
 import {
   COIN_FLIP_DPWIN,
-  DISAGREEMENT_FLAG_PCT,
   PF_PER_WIN_COLD_START,
   isCoinFlip,
+  spansZero,
   seedingStatus,
   toCoarseDelta,
   type Assumption,
@@ -78,6 +78,7 @@ import {
   type Objective,
   type ObjectiveArg,
   type OptionValue,
+  type ProjectionWeek,
   type Rec,
   type RecSubject,
   type SeedingModeArg,
@@ -104,14 +105,45 @@ export interface LineupPlayer {
   readonly p_active: number | null;
   /** ESPN's own weekly projection (labelled; the cross-check). */
   readonly espn_projection: number | null;
+  /**
+   * E1's own row for this week: its `inputs.espn` and `inputs.own` and its `disagreement` (changelog
+   * §R10, R10-29) — what `espn_cross_check` compares, so E1 and E2 agree for every starter. Absent
+   * or `own` null: no own line, and the starter is never listed.
+   */
+  readonly e1_cross_check?: E1CrossCheck | null;
   readonly percent_started: number | null;
   readonly role_games: number;
+}
+
+/** E1's own-line cross-check of one week (`ProjectionWeek.inputs` and `.disagreement`). */
+export interface E1CrossCheck {
+  readonly espn: number | null;
+  readonly own: number | null;
+  readonly pct: number | null;
+  readonly flagged: boolean;
+}
+
+/** E1's week row as E2's cross-check reads it (changelog §R10, R10-29), or null without one. */
+export function e1CrossCheckOf(
+  w: Pick<ProjectionWeek, "inputs" | "disagreement"> | undefined,
+): E1CrossCheck | null {
+  if (w === undefined) return null;
+  return {
+    espn: w.inputs.espn,
+    own: w.inputs.own,
+    pct: w.disagreement.pct,
+    flagged: w.disagreement.flagged,
+  };
 }
 
 /** A LineupPlayer from a roster entry, its E1 week and its lock (plan 07 B1 + E1). */
 export function lineupPlayerOf(
   e: RosterEntry,
-  week: Pick<ProjectedWeek, "dist" | "p_active"> & { readonly role_games?: number },
+  week: Pick<ProjectedWeek, "dist" | "p_active"> & {
+    readonly role_games?: number;
+    /** E1's own row of the week (R10-29): the cross-check's ESPN and own lines. */
+    readonly e1?: Pick<ProjectionWeek, "inputs" | "disagreement">;
+  },
   lock: Pick<PlayerLock, "lock_at" | "locked"> | null,
   gsisId: string | null = null,
 ): LineupPlayer {
@@ -129,6 +161,7 @@ export function lineupPlayerOf(
     points: week.dist,
     p_active: week.p_active,
     espn_projection: e.player.projection_week_espn,
+    e1_cross_check: e1CrossCheckOf(week.e1),
     percent_started: e.player.ownership?.percent_started ?? null,
     role_games: week.role_games ?? 0,
   };
@@ -578,9 +611,10 @@ function actionText(c: ActionCounts): string {
 // splits into independent changes on disjoint seats: an entrant's chain (a swap, or a fill of an
 // empty seat, with the starters who only change slots on his way) or a starter benched with nobody
 // reaching his seat. Each change is decided on its own numbers, the ones `swaps[]` shows:
-//  1. held when it is a coin flip (`coin_flip`: its Δ interval includes 0, or — when this week's
-//     opponent decides it — |ΔP(win)| is under the basis threshold); held when it gains nothing
-//     (Δ 0 whatever happens); made otherwise;
+//  1. held when it is a coin flip (`coin_flip`: its Δ interval spans 0 — strictly below at one end,
+//     strictly above at the other: spansZero, the round-4b review's F12 — or, when this week's
+//     opponent decides it, |ΔP(win)| is under the basis threshold); held when it gains nothing (Δ 0
+//     whatever happens: `[0, 0]`, `coin_flip` false); made otherwise;
 //  2. a seat that scores a known 0 now — empty, or held by a player who will not play (a point mass
 //     at 0: on bye, ruled out) — is priced exactly, by the entrant's own quantiles: doing nothing
 //     there scores exactly 0, so the change is made whenever the entrant is expected to score;
@@ -591,7 +625,7 @@ function actionText(c: ActionCounts): string {
 // are the starters kept and the entrants held out). E2's mean-optimal assignment — its starters in
 // `recommended_lineup` and `rec.lineup`, `e_points_after`, `p_win_after`, `p_win_interval` — is
 // unchanged by the rule (R7-1: C2 replays it, and R6-1's identity with ESPN's lineup holds);
-// `swaps[]` lists every change of it, a held one with `coin_flip` set. Which entrant takes which
+// `swaps[]` lists every change of it, a held one with `coin_flip` set or its interval `[0, 0]`. Which entrant takes which
 // freed seat is the solve's tie-break, re-seated only when that makes more of the changes (below).
 
 /** How the no-move rule decided one change. */
@@ -659,8 +693,11 @@ function pairDelta(pr: { readonly out: LineupPlayer | null; readonly in: LineupP
 
 /** Rule 1 for a change that is not forced: made, or held as a coin flip or as gaining nothing. */
 function heldOrMade(coinFlip: boolean, zeroSeat: boolean, iv: readonly [number, number]): Verdict {
+  // Δ 0 whatever happens is held as gaining nothing, coin flip or not: `[0, 0]` does not span 0
+  // (spansZero — the round-4b review's F12), and a change that gains nothing is never made
+  if (gainsNothing(iv)) return "gains_nothing";
   if (!coinFlip) return "made";
-  return zeroSeat || gainsNothing(iv) ? "gains_nothing" : "coin_flip";
+  return zeroSeat ? "gains_nothing" : "coin_flip";
 }
 
 /**
@@ -1164,11 +1201,14 @@ export function analyzeLineup(req: LineupRequest): LineupData {
       dp,
       delta_pf: round(de),
       interval,
-      // rule 2: doing nothing at a seat that scores 0 scores exactly 0 — never a coin flip while
-      // the entrant is expected to score
-      coin_flip: freesZeroSeat(pr)
-        ? !(de > 0)
-        : isCoinFlip(basis, pwinDecides ? dp : null, interval),
+      // a change that gains nothing whatever happens ([0, 0]) is held as gaining nothing, never a
+      // coin flip (spansZero; the round-4b review's F12). Rule 2: doing nothing at a seat that
+      // scores 0 scores exactly 0 — never a coin flip while the entrant is expected to score
+      coin_flip: gainsNothing(interval)
+        ? false
+        : freesZeroSeat(pr)
+          ? !(de > 0)
+          : isCoinFlip(basis, pwinDecides ? dp : null, interval),
       option_value:
         out === null
           ? null
@@ -1180,7 +1220,9 @@ export function analyzeLineup(req: LineupRequest): LineupData {
     const c = slotClassOf(p.slot_id);
     return (c === "starter" || c === "flex") && !canOccupySlot(p.slot_id, p);
   };
-  const spans = (iv: readonly [number, number]): boolean => iv[0] <= 0 && iv[1] >= 0;
+  // the coin flip's own interval rule (spansZero, F12): a held change is "by ΔP(win)" exactly when
+  // its interval does not span 0
+  const spans = spansZero;
   /** Every change of a flow with its verdict: its pairs (in flow order), its benched starters. */
   const decide = (f: Flow, raw: readonly RawSwap[]): Change[] => {
     const out: Change[] = f.pairs.map((pr, i) => {
@@ -1365,19 +1407,18 @@ export function analyzeLineup(req: LineupRequest): LineupData {
   }
   stackFlags.sort((a, b) => a.players.join(",").localeCompare(b.players.join(",")));
 
-  // ESPN's projection as the labelled cross-check (plan 07 C13), on the told lineup's starters
+  // ESPN's projection as the labelled cross-check (plan 07 C13; plan 01 D15 gives "the disagreement
+  // flag" to the own trailing line): ESPN's weekly projection against the own model's line — E1's
+  // `inputs.own` — by E1's own disagreement and flag rule (changelog §R10, R10-29), on the told
+  // lineup's starters. Never against the blended mean, which is ESPN's own while weight_espn = 1.0
+  // (the cross-check compared ESPN with itself and could never list a starter). A starter with no
+  // own line is never listed; `ours` is that own line, `pct` E1's |espn − own| / espn
   const disagreements = toldStarters
-    .filter((p) => p.espn_projection !== null && p.espn_projection > 0)
-    .map((p) => {
-      const espn = p.espn_projection ?? 0;
-      return {
-        player_id: p.player_id,
-        ours: round(p.points.mean, 2),
-        espn: round(espn, 2),
-        pct: round(Math.abs(p.points.mean - espn) / espn, 3),
-      };
+    .flatMap((p) => {
+      const x = p.e1_cross_check;
+      if (x?.flagged !== true || x.own === null || x.espn === null || x.pct === null) return [];
+      return [{ player_id: p.player_id, ours: x.own, espn: x.espn, pct: x.pct }];
     })
-    .filter((x) => x.pct > DISAGREEMENT_FLAG_PCT)
     .sort((a, b) => a.player_id - b.player_id);
 
   const schedule = lockGroups(req.players);
