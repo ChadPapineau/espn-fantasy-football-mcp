@@ -255,6 +255,33 @@ export const SEED_KINDS = Object.freeze([
  * settings only, which no dataset changes; publishing first keeps its seed server's state the run's.
  */
 export const DATASET_FIRST_SEEDS = Object.freeze(["private-expiring-weekly"]);
+/**
+ * The seeds whose cases grade counts that hold only on a server whose cache holds the committed
+ * dataset excerpts (the round-4e verifiers' R4E-SK-1; changelog §R10, R10-20, R10-25, R10-27):
+ * E13's fit is a character budget, so the "N of M" its truncation warning names moves with the
+ * size of every call it returns, and the dataset-backed fields are part of that size. Built
+ * without `--seed-datasets`, RT-5 and RT-6 answer other counts (21 of 33 for RT-5's week, 17 of 24
+ * on RT-6's cold call) than their graders and expected outputs name, so such a build lists their cases as not testable
+ * (datasetHeldOut). tests/skills/retro-truncation-counts.test.ts holds the counts to the server.
+ */
+export const DATASET_COUNT_SEEDS = Object.freeze(["log-week4-mixed", "log-week4-many"]);
+/** Why a DATASET_COUNT_SEEDS case is left out of a build run without `--seed-datasets`. */
+export const DATASETS_NEEDED =
+  "its graded truncation counts (E13's 10 000-character fit) hold only on a server whose cache holds the committed dataset excerpts, and this build ran without --seed-datasets — rebuild with --seed-datasets --seed";
+/**
+ * The cases a build holds out for want of the dataset excerpts: none when the build seeds them,
+ * else every case whose seed is in DATASET_COUNT_SEEDS, with DATASETS_NEEDED.
+ * @param {boolean} datasets whether this build seeds the datasets (`--seed-datasets`)
+ * @returns {Record<string, string>}
+ */
+export function datasetHeldOut(datasets) {
+  if (datasets) return {};
+  return Object.fromEntries(
+    Object.entries(SEEDS)
+      .filter(([, seed]) => DATASET_COUNT_SEEDS.includes(seed))
+      .map(([name]) => [name, DATASETS_NEEDED]),
+  );
+}
 /** The seeding reading each seeding seed records (`eff setup --seeding <mode>`). */
 export const SEEDING_SEEDS = Object.freeze({ "seeding-points-only": "points_only" });
 /**
@@ -1831,7 +1858,9 @@ export const STATE_ROOT_FILE = ".state-root";
 
 /**
  * Write the suite (a full rebuild of <out>/plugins, <out>/evals, the README and the state root).
- * @param {{ root?: string, out?: string, node?: string, state?: string }} [opts]
+ * `datasets: false` (main without `--seed-datasets`) lists the cases whose counts need the dataset
+ * excerpts as not testable (datasetHeldOut); the default builds them, for a caller that seeds.
+ * @param {{ root?: string, out?: string, node?: string, state?: string, datasets?: boolean }} [opts]
  * @returns {{ out: string, state: string | null, cases: number, plugins: string[],
  *   seedNeeded: string[], notTestable: NotTestable[], errors: string[] }}
  */
@@ -1867,7 +1896,9 @@ export function buildPluginEvals(opts = {}) {
   /** @type {ReturnType<typeof planSuite>} */
   let plan = { cases: [], plugins: [], notTestable: [], errors: [] };
   try {
-    plan = planSuite(root);
+    plan = planSuite(root, {
+      heldOut: { ...HELD_OUT_CASES, ...datasetHeldOut(opts.datasets ?? true) },
+    });
   } catch (e) {
     errors.push(errMsg(e));
   }
@@ -3206,6 +3237,8 @@ export async function main(argv) {
     ...(out ? { out } : {}),
     ...(node ? { node } : {}),
     ...(state ? { state } : {}),
+    // R4E-SK-1: without the dataset excerpts, RT-5 and RT-6 would grade counts their server never answers
+    datasets: seedDatasets,
   });
   if (r.errors.length) {
     process.stderr.write(`build-plugin-evals: ${String(r.errors.length)} problem(s):\n`);

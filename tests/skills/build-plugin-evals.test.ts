@@ -60,6 +60,9 @@ import {
   SEEDS,
   SEED_KINDS,
   DATASET_FIRST_SEEDS,
+  DATASET_COUNT_SEEDS,
+  DATASETS_NEEDED,
+  datasetHeldOut,
   SEED_NOTE,
   SEED_NOTE_PLAIN,
   SEED_ONLY_ENV,
@@ -1561,6 +1564,43 @@ describe("buildPluginEvals on a copy", () => {
     expect(readFileSync(path.join(out, STATE_ROOT_FILE), "utf8").trim()).toBe(state);
     expect(await main(["--root", t.root, "--out", out, "--state", state, "--seed"])).toBe(1);
     expect(await main(["--root", t.root, "--out", t.p("src/x")])).toBe(1);
+  });
+
+  // the round-4e verifiers' R4E-SK-1: RT-5's and RT-6's counts are the dataset-seeded server's
+  // (tests/skills/retro-truncation-counts.test.ts), so a build without --seed-datasets lists them
+  // as not testable instead of grading counts its servers never answer
+  it("a build without --seed-datasets lists RT-5 and RT-6 as not testable; one with it builds them", async () => {
+    expect(DATASET_COUNT_SEEDS).toEqual([SEEDS["RT-5"], SEEDS["RT-6"]]);
+    expect(datasetHeldOut(true)).toEqual({});
+    expect(datasetHeldOut(false)).toEqual({ "RT-5": DATASETS_NEEDED, "RT-6": DATASETS_NEEDED });
+    const t = repoWithFixtures();
+    const without = buildPluginEvals({ root: t.root, out: temp("eff-pe-out-"), datasets: false });
+    const seeded = buildPluginEvals({ root: t.root, out: temp("eff-pe-out-") });
+    cleanups.push(() => {
+      for (const r of [without, seeded])
+        if (r.state) rmSync(r.state, { recursive: true, force: true });
+    });
+    expect(without.errors).toEqual([]);
+    expect(without.notTestable.map((n) => [n.name, n.reason])).toEqual([
+      ["RT-5", DATASETS_NEEDED],
+      ["RT-6", DATASETS_NEEDED],
+    ]);
+    expect(
+      without.seedNeeded.filter((k) => DATASET_COUNT_SEEDS.includes(seedOfKey(k) ?? "")),
+    ).toEqual([]);
+    expect(without.cases).toBe(seeded.cases - 2);
+    expect(seeded.notTestable).toEqual([]);
+    expect(seeded.seedNeeded).toEqual(
+      expect.arrayContaining(["base--core--log-week4-mixed", "base--core--log-week4-many"]),
+    );
+    // main passes its flag: the README of a build without it says why the two are left out
+    const out = temp("eff-pe-out-");
+    const state = path.join(temp("eff-pe-state-"), "s");
+    expect(await main(["--root", t.root, "--out", out, "--state", state])).toBe(0);
+    const text = readFileSync(path.join(out, "README.md"), "utf8");
+    expect(text).toContain(`(RT-5): ${DATASETS_NEEDED}.`);
+    expect(text).toContain(`(RT-6): ${DATASETS_NEEDED}.`);
+    expect(existsSync(path.join(out, "evals", "retro--rt-5"))).toBe(false);
   });
 });
 
