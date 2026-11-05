@@ -112,6 +112,7 @@ import {
   sessionRefusalOf,
   SESSION_READ_WARNINGS,
   activityLeagueReadsWarning,
+  ACTIVITY_READ_LABEL,
   type ActivityLeagueRead,
   take,
   teamOf,
@@ -1995,7 +1996,10 @@ export function activityWeeks(w: Week, sinceDays: number): Week[] {
   return out;
 }
 
-/** The league's transactions: the window's weekly ESPN feeds merged with the persisted history (A6). */
+/**
+ * The league's transactions: the window's weekly ESPN feeds merged with the persisted history (A6),
+ * and the weeks whose feed was read (none when the first was refused, unavailable or over budget).
+ */
 async function transactionsOf(
   ctx: ToolContext,
   w: Week,
@@ -2003,13 +2007,14 @@ async function transactionsOf(
   since: string,
   inputs: InputStamp[],
   warnings: string[],
-): Promise<Transaction[]> {
+): Promise<{ readonly transactions: Transaction[]; readonly feedWeeks: readonly Week[] }> {
   const byId = new Map<string, Transaction>();
   const weeks = activityWeeks(w, sinceDays);
   const state: { unavailable: boolean; refusal: "no_session" | "rejected" | null } = {
     unavailable: false,
     refusal: null,
   };
+  const feedWeeks: Week[] = [];
   for (const week of weeks) {
     const got = await withinBudget(
       () =>
@@ -2041,8 +2046,11 @@ async function transactionsOf(
       return null;
     });
     if (got === null) break;
+    feedWeeks.push(week);
     for (const t of take(ctx, got, inputs).items) byId.set(t.transaction_id, t);
   }
+  // the feed's refusal is said by its own line (the call's session line names it no more)
+  if (state.refusal !== null) ctx.refusals.said("transaction feed");
   if (state.refusal !== null)
     warnings.push(
       state.refusal === "rejected"
@@ -2062,7 +2070,7 @@ async function transactionsOf(
   for (const t of seasonTransactions(ctx.services.transactionsSeen, leagueRef(ctx).season, since)
     .rows)
     if (!byId.has(t.transaction_id)) byId.set(t.transaction_id, t);
-  return [...byId.values()];
+  return { transactions: [...byId.values()], feedWeeks };
 }
 
 /** Pool players E11 values in one step (a roster's worth: the step's work stays one roster's). */
@@ -2113,7 +2121,14 @@ export const analyzeLeagueActivityTool = defineTool({
         return null;
       };
     const standings = await standingsOrNull(ctx, inputs, warnings).catch(orRefused("standings"));
-    const txns = await transactionsOf(ctx, b.w, args.since_days, since, inputs, warnings);
+    const { transactions: txns, feedWeeks } = await transactionsOf(
+      ctx,
+      b.w,
+      args.since_days,
+      since,
+      inputs,
+      warnings,
+    );
     const myTeam = b.league.my_team?.team_id ?? null;
     const rosters = await withinBudget(
       () => rostersOf(ctx, b.w, inputs, warnings, args, myTeam),
@@ -2136,9 +2151,11 @@ export const analyzeLeagueActivityTool = defineTool({
       ? ((await poolOf(ctx, b.w, inputs, warnings, 25).catch(orRefused("free-agent pool"))) ?? [])
       : [];
     if (refused.size > 0) {
-      // one line for the call, with the stronger reason (a rejection outranks nothing stored)
+      // one line for the call, with the stronger reason (a rejection outranks nothing stored); it
+      // says these reads' refusals, so the call's session line does not repeat them (refusals.ts)
       const reason = [...refused.values()].includes("rejected") ? "rejected" : "no_session";
       warnings.push(activityLeagueReadsWarning(reason, [...refused.keys()]));
+      ctx.refusals.said(...[...refused.keys()].map((r) => ACTIVITY_READ_LABEL[r]));
     }
     const names = new Map<number, UntrustedText>();
     for (const r of rosters ?? []) names.set(r.team.team_id, r.team_name);
@@ -2193,10 +2210,13 @@ export const analyzeLeagueActivityTool = defineTool({
     await turnIfSpent();
     // no read named the league's teams (standings and rosters both unavailable — the call's budget
     // spent, ESPN failing): the window's totals still stand, said; a NOT_FOUND here read as "no such
-    // league" (verifier finding F2 on ec68d08)
-    if (teams.length === 0)
+    // league" (verifier finding F2 on ec68d08). One line per fact (the round-4c product account): a
+    // read the session refused is said by the reads line above with what the digest goes without,
+    // so this line names only the reads that failed otherwise, and none when both were refused
+    const teamReadsUnsaid = (["standings", "rosters"] as const).filter((r) => !refused.has(r));
+    if (teams.length === 0 && teamReadsUnsaid.length > 0)
       warnings.push(
-        "partial: the league's teams were not read (standings and rosters unavailable): by-team activity, waiver-order movement and rival needs are omitted",
+        `partial: the league's teams were not read (${teamReadsUnsaid.join(" and ")} unavailable): by-team activity, waiver-order movement and rival needs are omitted`,
       );
     const out = analyzeLeagueActivity({
       since_days: args.since_days,
@@ -2209,8 +2229,16 @@ export const analyzeLeagueActivityTool = defineTool({
       clock: ctx.services.clock,
       inputs: toDataInputs(inputs, ctx.nowMs),
     });
+    // only what is true (the round-4c product account): with no persisted history the window is the
+    // feed read this call, and with no feed read either it holds no transaction at all
     if (ctx.services.transactionsSeen.oldestSeen() === null)
-      warnings.push("no persisted transaction history yet: the window shows this week's feed only");
+      warnings.push(
+        feedWeeks.length === 0
+          ? "no persisted transaction history yet, and ESPN's feed was not read: the window holds no transactions"
+          : feedWeeks.length === 1
+            ? "no persisted transaction history yet: the window shows this week's feed only"
+            : `no persisted transaction history yet: the window shows ESPN's feed of weeks ${String(Math.min(...feedWeeks))}–${String(Math.max(...feedWeeks))} only`,
+      );
     const data: LeagueActivityData = { ...out.data, inputs: toDataInputs(inputs, ctx.nowMs) };
     return {
       data,

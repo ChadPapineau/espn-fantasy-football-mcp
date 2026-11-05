@@ -42,6 +42,7 @@ import {
   crosswalkOf,
   isDegradable,
   isOptionalReadFailure,
+  sessionRefusalOf,
   leagueOf,
   leagueRef,
   optionalDataset,
@@ -226,8 +227,13 @@ export const getPlayerStats = defineTool({
       lines = got === null ? null : take(ctx, got, inputs);
     } catch (e) {
       if (!isOptionalReadFailure(e)) throw e;
+      // a session refusal is said by the call's session line (ESPN's player stats were not read,
+      // why, `eff setup`), never as unavailable; where the lines come from instead is still said
+      // (refusals.ts; changelog §R10, R10-11 and R10-12's house form)
       warnings.push(
-        "espn:kona_playercard unavailable: weekly actuals unavailable; nflverse lines scored by the engine instead",
+        sessionRefusalOf(e) === null
+          ? "espn:kona_playercard unavailable: weekly actuals unavailable; nflverse lines scored by the engine instead"
+          : "weekly actuals: nflverse lines scored by the engine instead of ESPN's",
       );
     }
     const rows: PlayerStatsData["players"][number][] = [];

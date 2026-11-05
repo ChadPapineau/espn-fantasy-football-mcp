@@ -20,6 +20,7 @@ import { positionNameOf } from "../../domain/league/slots.js";
 import { matchupPeriodOfWeek } from "../../domain/league/rules.js";
 import { lockPlan, weekGameState } from "../../domain/league/schedule.js";
 import { seedingDigest, seedingEvidence } from "../../domain/league/seeding.js";
+import { rawPlatform } from "../refusals.js";
 import {
   REPRODUCTION_FINDINGS,
   reproduceSeason,
@@ -76,6 +77,7 @@ import {
   clockWeek,
   isDegradable,
   isOptionalReadFailure,
+  unavailableUnlessRefused,
   leagueOf,
   leagueRef,
   platformInput,
@@ -356,7 +358,8 @@ export function goldenFor(ctx: ToolContext, settings: ScoringSettings): ScoringD
 const ABSENT_SEASONS = new WeakMap<object, Set<number>>();
 
 function absentSeasons(ctx: ToolContext): Set<number> {
-  const key = ctx.services.platform as object;
+  // the provider as built: every services bundle (and call) over it shares the memo (refusals.ts)
+  const key = rawPlatform(ctx.services.platform) as object;
   let set = ABSENT_SEASONS.get(key);
   if (set === undefined) {
     set = new Set();
@@ -445,11 +448,15 @@ async function evidenceOf(
     standings = take(ctx, got, inputs);
   } catch (e) {
     rememberAbsentSeason(ctx, prev, e);
-    warnings.push(
-      isLeagueNotFound(e)
-        ? NO_PREVIOUS_SEASON_WARNING
-        : "seeding evidence unavailable: last season could not be read",
-    );
+    // a session refusal is said by the call's session line (last season's standings were not
+    // read, why, `eff setup`), never as unavailable (refusals.ts; the round-4c E13 defect's class)
+    if (isLeagueNotFound(e)) warnings.push(NO_PREVIOUS_SEASON_WARNING);
+    else
+      unavailableUnlessRefused(
+        e,
+        warnings,
+        "seeding evidence unavailable: last season could not be read",
+      );
     return null;
   }
   if (rules !== null) {
@@ -988,7 +995,12 @@ export const getLiveScoreboard = defineTool({
         warnings,
       ).catch((e: unknown) => {
         if (!isOptionalReadFailure(e)) throw e;
-        warnings.push("espn:mRoster unavailable: players { final, live, pending } is null");
+        // a session refusal is said by the call's session line, never as unavailable (refusals.ts)
+        unavailableUnlessRefused(
+          e,
+          warnings,
+          "espn:mRoster unavailable: players { final, live, pending } is null",
+        );
         return null;
       });
       if (rosters !== null)
@@ -1464,6 +1476,8 @@ export const listTransactions = defineTool({
               ? SESSION_READ_WARNINGS.pending_rejected
               : SESSION_READ_WARNINGS.pending_no_session,
           );
+          // said by its own line: the call's session line does not repeat it (refusals.ts)
+          ctx.refusals.said("pending claims");
           return null;
         }
         if (!isDegradable(e)) throw e;

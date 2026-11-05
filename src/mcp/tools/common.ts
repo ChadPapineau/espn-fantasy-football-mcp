@@ -64,6 +64,7 @@ import { BOUNDS } from "../bounds.js";
 import { stampToInput, type InputStamp } from "../envelope.js";
 import { EffError, SERVER_HINTS, STALE_ONLY_SOURCE_HINTS } from "../errors.js";
 import type { ToolContext } from "../define.js";
+import { andList, refusalOf } from "../refusals.js";
 import { asGsisId } from "./schemas.js";
 
 /** The configured league for a season (default: the configured season). */
@@ -1102,28 +1103,75 @@ export const SESSION_READ_WARNINGS = Object.freeze({
 /** The league reads espn_analyze_league_activity goes without when the session refuses them. */
 export type ActivityLeagueRead = "standings" | "rosters" | "free-agent pool";
 
+/** E11's league reads in the line's order. */
+export const ACTIVITY_LEAGUE_READS: readonly ActivityLeagueRead[] = Object.freeze([
+  "standings",
+  "rosters",
+  "free-agent pool",
+]);
+
+/** The session line's label of each E11 league read (refusals.ts SESSION_READ_OF). */
+export const ACTIVITY_READ_LABEL: Readonly<Record<ActivityLeagueRead, string>> = Object.freeze({
+  standings: "standings",
+  rosters: "rosters",
+  "free-agent pool": "player pool",
+});
+
+/**
+ * What the digest goes without when these reads are refused (each part true of the reads named):
+ * no team named without the standings and the rosters (by-team activity), no waiver ranks without
+ * the standings, no rival needs without the rosters (every rival's players) or the pool (the free
+ * agents who would fill them).
+ */
+function activityLacks(has: ReadonlySet<ActivityLeagueRead>): string {
+  const lacks: string[] = [];
+  if (has.has("standings") && has.has("rosters")) lacks.push("by-team activity");
+  if (has.has("standings")) lacks.push("waiver-order movement");
+  if (has.has("rosters") || has.has("free-agent pool")) lacks.push("rival needs");
+  // "rival needs" is the one plural noun of the three
+  const plural = lacks.length > 1 || lacks[0] === "rival needs";
+  const pronoun = has.size === 1 && has.has("free-agent pool") ? "it" : "them";
+  return `${andList(lacks)} ${plural ? "go" : "goes"} without ${pronoun}`;
+}
+
 /**
  * E11's fixed warning for the league reads the session refused (changelog §R10, R10-11; the round-3
  * review's R3B-CS-1): on a league not known to be public the standings, rosters and pool need the
  * session too, and a refusal of any of them degrades the digest as the feed's does — the persisted
- * history's totals stand, said with the reason and `eff setup`; never upstream text.
+ * history's totals stand, said with the reason and `eff setup`; never upstream text. The reads are
+ * named in ACTIVITY_LEAGUE_READS' order, joined with "and", the verb and pronoun agreeing with them,
+ * and the consequence names only what those reads carry (the round-4c product account: "ESPN's
+ * free-agent pool need one" and three reads with no "and").
  */
 export function activityLeagueReadsWarning(
   refusal: "no_session" | "rejected",
   reads: readonly ActivityLeagueRead[],
 ): string {
-  const what = `ESPN's ${reads.join(", ")}`;
+  const has = new Set(reads);
+  const named = ACTIVITY_LEAGUE_READS.filter((r) => has.has(r));
+  // "the free-agent pool" is the one singular noun of the three
+  const plural = named.length !== 1 || named[0] !== "free-agent pool";
+  const what = `ESPN's ${andList(named)}`;
+  const verb = plural ? "need" : "needs";
+  const not = `${plural ? "they were" : "it was"} not read (${activityLacks(has)})`;
   return refusal === "rejected"
-    ? `partial: the stored ESPN session was rejected, and ${what} need one on a league not known to be public: they were not read (by-team activity, waiver-order movement and rival needs go without them); run \`eff setup\` in a terminal to replace it`
-    : `partial: ${what} need an ESPN session on a league not known to be public, and none is stored: they were not read (by-team activity, waiver-order movement and rival needs go without them); run \`eff setup\` in a terminal to add one`;
+    ? `partial: the stored ESPN session was rejected, and ${what} ${verb} one on a league not known to be public: ${not}; run \`eff setup\` in a terminal to replace it`
+    : `partial: ${what} ${verb} an ESPN session on a league not known to be public, and none is stored: ${not}; run \`eff setup\` in a terminal to add one`;
 }
 
 /** The session refusal an error carries (ESPN_REQUIRES_COOKIES / ESPN_AUTH_REJECTED), else null. */
 export function sessionRefusalOf(e: unknown): "no_session" | "rejected" | null {
-  const code = (e as { effCode?: unknown } | null)?.effCode;
-  if (code === "ESPN_REQUIRES_COOKIES") return "no_session";
-  if (code === "ESPN_AUTH_REJECTED") return "rejected";
-  return null;
+  return refusalOf(e);
+}
+
+/**
+ * Pushes a failed optional read's "unavailable" line — never for a session refusal: the call's
+ * session line says that read was not read, why, and `eff setup` (refusals.ts; changelog §R10,
+ * R10-11 and R10-12's house form; the round-4c product account's E13 defect). A refusal is never
+ * read as data unavailable.
+ */
+export function unavailableUnlessRefused(e: unknown, warnings: string[], line: string): void {
+  if (refusalOf(e) === null) warnings.push(line);
 }
 
 /** A fixed degradation warning naming the view (never upstream text). */

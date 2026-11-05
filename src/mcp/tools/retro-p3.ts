@@ -70,7 +70,9 @@ function kickoffsOf(schedule: ProSchedule | null, week: Week): Map<number, numbe
 
 /**
  * The attribution rows of the window (see the header). `boxes(week)` returns that week's box scores
- * (the caller's reads, cached or budgeted) or null when they are unavailable.
+ * (the caller's reads, cached or budgeted) or null when they are unavailable — or were refused by the
+ * session: a week in `refused` is not counted as unavailable (the call's session line says it,
+ * refusals.ts; the round-4c product account).
  */
 export async function attributionRows(
   ctx: ToolContext,
@@ -80,6 +82,7 @@ export async function attributionRows(
   schedule: ProSchedule | null,
   inputs: InputStamp[],
   warnings: string[],
+  refused: ReadonlySet<Week> = new Set(),
 ): Promise<AttributionRow[]> {
   const rows: AttributionRow[] = [];
   let missing = 0;
@@ -87,7 +90,7 @@ export async function attributionRows(
     await turn();
     const bx = await boxes(x);
     if (bx === null) {
-      missing += 1;
+      if (!refused.has(x)) missing += 1;
       continue;
     }
     const kick = kickoffsOf(schedule, x);

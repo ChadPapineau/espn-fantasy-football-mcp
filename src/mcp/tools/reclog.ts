@@ -56,6 +56,7 @@ import {
   leagueRef,
   readOpts,
   scheduleOf,
+  sessionRefusalOf,
   settingsOf,
   take,
   teamOf,
@@ -378,11 +379,17 @@ export const analyzeRetrospective = defineTool({
     const boxes = take(ctx, box, inputs);
     const prev = new Map<number, number | null>();
     if (w > 1) {
+      const prevRead = { refused: false };
       const pGot = await withinBudget(
         () => ctx.services.platform.getBoxScores(ref, w - 1, readOpts(ctx, args)),
         warnings,
-      ).catch(() => null);
-      if (pGot === null)
+      ).catch((e: unknown) => {
+        prevRead.refused = sessionRefusalOf(e) !== null;
+        return null;
+      });
+      // a session refusal is said by the call's session line (ESPN's box scores were not read, why,
+      // `eff setup`; partial), never as unavailable (refusals.ts; the round-4c product account)
+      if (pGot === null && !prevRead.refused)
         warnings.push("last week's box scores unavailable: the last-week baseline is unknown");
       for (const m of pGot === null ? [] : take(ctx, pGot, inputs))
         for (const side of [m.home, m.away])
@@ -415,12 +422,19 @@ export const analyzeRetrospective = defineTool({
     // earlier weeks are cached reads (final weeks), each within the call's budget
     const settings = await withinBudget(() => settingsOf(ctx, inputs), warnings).catch(() => null);
     const boxCache = new Map<Week, readonly BoxScoreMatchup[] | null>([[w, boxes]]);
+    // the weeks whose box scores the session refused: not "unavailable" — the call's session line
+    // says them (refusals.ts; the round-4c product account: an uncached mBoxscore's 401 read as
+    // "1 week(s) of box scores unavailable", partial false, the rejection hidden)
+    const refusedWeeks = new Set<Week>();
     const boxesOf = async (x: Week): Promise<readonly BoxScoreMatchup[] | null> => {
       if (boxCache.has(x)) return boxCache.get(x) ?? null;
       const got = await withinBudget(
         () => ctx.services.platform.getBoxScores(ref, x, readOpts(ctx, args)),
         warnings,
-      ).catch(() => null);
+      ).catch((e: unknown) => {
+        if (sessionRefusalOf(e) !== null) refusedWeeks.add(x);
+        return null;
+      });
       const v = got === null ? null : take(ctx, got, inputs);
       boxCache.set(x, v);
       return v;
@@ -428,7 +442,16 @@ export const analyzeRetrospective = defineTool({
     const attrRows =
       settings === null
         ? []
-        : await attributionRows(ctx, season, w, boxesOf, sched?.schedule ?? null, inputs, warnings);
+        : await attributionRows(
+            ctx,
+            season,
+            w,
+            boxesOf,
+            sched?.schedule ?? null,
+            inputs,
+            warnings,
+            refusedWeeks,
+          );
     // the forecasts the tools served before lock, against what happened (Stage C finding
     // reclog-retro-forecasts-never-scored): the projections (CRPS, coverage vs ESPN), P(active),
     // and P(win) of the lineups as played beside ESPN's pre-week number

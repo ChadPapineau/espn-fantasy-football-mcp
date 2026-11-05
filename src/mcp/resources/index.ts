@@ -40,6 +40,7 @@ import {
   toToolError,
 } from "../errors.js";
 import { envelopeOf, toolContext, type AnyToolDefinition, type ToolContext } from "../define.js";
+import { recordingServices, sayRefusals } from "../refusals.js";
 import type { McpServerOptions, McpServices } from "../services.js";
 import { getLeague } from "../tools/league.js";
 import { driftReport, freshnessReport, getStatus } from "../tools/ops.js";
@@ -123,8 +124,10 @@ export async function readAsEnvelope(
     // resources-prompts-bypass-turn-gate; plan 03 §1.2, plan 10 A16a)
     await yieldTurn();
     services.beforeCall?.();
-    const ctx = toolContext({ requestId }, services, options);
-    const out = await body(ctx);
+    // a resource carries what its tool twin carries: a session refusal its body absorbed is said
+    // (refusals.ts; changelog §R10, R10-11 and R10-12's house form)
+    const ctx = toolContext({ requestId }, recordingServices(services), options);
+    const out = sayRefusals(await body(ctx), ctx.refusals);
     await yieldTurn();
     const env = envelopeOf(out, ctx, twin);
     const fit = fitToBudget(env, budget, out.listKey, {

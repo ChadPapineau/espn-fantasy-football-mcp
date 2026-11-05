@@ -1234,10 +1234,14 @@ describe("E11 espn_analyze_league_activity", () => {
       ["ESPN_AUTH_REJECTED", SESSION_READ_WARNINGS.feed_rejected, "rejected"],
       ["ESPN_REQUIRES_COOKIES", SESSION_READ_WARNINGS.feed_no_session, "no_session"],
     ] as const) {
+      // every combination of the three league reads (the round-4c product account's E11 texts)
       for (const which of [
         ["getStandings"],
         ["getRosters"],
         ["listPlayers"],
+        ["getStandings", "getRosters"],
+        ["getStandings", "listPlayers"],
+        ["getRosters", "listPlayers"],
         ["getStandings", "getRosters", "listPlayers"],
       ] as const) {
         const faults = Object.fromEntries([
@@ -1258,15 +1262,31 @@ describe("E11 espn_analyze_league_activity", () => {
         // the window's totals come from the persisted history, as with the feed alone refused; with
         // no read naming the league's teams the by-team rows are omitted, said
         const totals = (e.data as { transactions: Record<string, unknown> }).transactions;
-        if (which.length === 3) {
+        if (
+          (which as readonly string[]).includes("getStandings") &&
+          (which as readonly string[]).includes("getRosters")
+        ) {
           const { by_team: _mine, ...rest } = totals;
           const { by_team: _plain, ...plainRest } = plainTotals;
           expect(rest, label).toEqual(plainRest);
           expect(totals.by_team ?? [], label).toEqual([]);
-          expect(e.warnings, label).toContain(
-            "partial: the league's teams were not read (standings and rosters unavailable): by-team activity, waiver-order movement and rival needs are omitted",
-          );
+          // one line per fact (the round-4c product account): both team reads were refused, and the
+          // reads line already says what the digest goes without — no second "teams" line
+          expect(
+            e.warnings.filter((w) => w.includes("the league's teams were not read")),
+            label,
+          ).toEqual([]);
         } else expect(totals, label).toEqual(plainTotals);
+        // E11 said every refusal itself: the call's generic session line names none of them
+        // (its label for the pool is "player pool"; E11's own line says "free-agent pool")
+        for (const w of e.warnings) expect(w, label).not.toContain("player pool");
+        expect(
+          e.warnings.filter(
+            (w) =>
+              w.endsWith("in a terminal to replace it") || w.endsWith("in a terminal to add one"),
+          ),
+          label,
+        ).toHaveLength(2);
         await c.close();
       }
     }

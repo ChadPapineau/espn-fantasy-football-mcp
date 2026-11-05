@@ -54,6 +54,7 @@ import {
   espnIdOfGsisSelector,
   isDegradable,
   isOptionalReadFailure,
+  unavailableUnlessRefused,
   leagueOf,
   leagueRef,
   NEWS_MATCH_FLOOR,
@@ -828,7 +829,12 @@ export const getDefenseProfile = defineTool({
       warnings,
     ).catch((e: unknown) => {
       if (!isOptionalReadFailure(e)) throw e;
-      warnings.push("espn:mPositionalRatings unavailable: espn_positional_rating is null");
+      // a session refusal is said by the call's session line, never as unavailable (refusals.ts)
+      unavailableUnlessRefused(
+        e,
+        warnings,
+        "espn:mPositionalRatings unavailable: espn_positional_rating is null",
+      );
       return null;
     });
     const ratingRows = ratings === null ? [] : take(ctx, ratings, inputs);

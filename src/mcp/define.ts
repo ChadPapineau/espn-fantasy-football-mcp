@@ -55,6 +55,14 @@ import {
   wrapHandler,
   type HandlerContext,
 } from "./errors.js";
+import {
+  createSessionRefusals,
+  rawServices,
+  recordingServices,
+  registerRefusals,
+  sayRefusals,
+  type SessionRefusals,
+} from "./refusals.js";
 import type { McpLogger, McpServerOptions, McpServices } from "./services.js";
 
 /** The tool-name grammar (plan 01 §4.1): `espn_<verb>_<resource>`, ≤ 40 characters. */
@@ -102,10 +110,12 @@ export const CALL_LEDGER_MAX = 1024;
 const LEDGERS = new WeakMap<McpServices, Map<string, CallRecord>>();
 
 function rememberCall(services: McpServices, requestId: string, rec: CallRecord): void {
-  let ledger = LEDGERS.get(services);
+  // keyed by the bundle as configured, whether a call sees it wrapped or not (refusals.ts)
+  const key = rawServices(services);
+  let ledger = LEDGERS.get(key);
   if (ledger === undefined) {
     ledger = new Map();
-    LEDGERS.set(services, ledger);
+    LEDGERS.set(key, ledger);
   }
   ledger.set(requestId, rec);
   while (ledger.size > CALL_LEDGER_MAX) {
@@ -117,7 +127,7 @@ function rememberCall(services: McpServices, requestId: string, rec: CallRecord)
 
 /** The successful call this server answered under `requestId`, or null (unknown or forgotten). */
 export function recentCall(services: McpServices, requestId: string): CallRecord | null {
-  return LEDGERS.get(services)?.get(requestId) ?? null;
+  return LEDGERS.get(rawServices(services))?.get(requestId) ?? null;
 }
 
 /** Per-call context a tool implementation receives. */
@@ -137,6 +147,12 @@ export interface ToolContext extends HandlerContext {
   readonly memo: Map<string, unknown>;
   /** This call's ESPN budget: ≤ 3 new requests, ≤ 20 s (plan 01 §5.6, §6). */
   readonly budget: UpstreamBudget;
+  /**
+   * The session refusals this call's reads met (refusals.ts): one the tool absorbs and does not
+   * say itself (`said`) is said by runTool — `partial: true` and one fixed line — never read as
+   * data unavailable (changelog §R10, R10-11, R10-12 house form; the round-4c E13 defect).
+   */
+  readonly refusals: SessionRefusals;
 }
 
 /** One tool's definition. */
@@ -435,6 +451,8 @@ export function toolContext(
   const nowMs = services.clock.nowMs();
   const controls = controlsFromRequest(base.extra);
   const budget = createUpstreamBudget(base.requestId, nowMs);
+  const refusals = createSessionRefusals();
+  registerRefusals(budget, refusals);
   const signal = controls.signal;
   if (signal !== undefined) {
     if (signal.aborted) budget.abort();
@@ -455,6 +473,7 @@ export function toolContext(
     log: services.logger,
     memo: new Map(),
     budget,
+    refusals,
     pacer: productionCallPacer(services.clock, controls, account),
   };
 }
@@ -622,13 +641,15 @@ export async function runTool(
   // (the seeding reading, the datasets' re-open check) is this call's CPU too
   const account: CallAccount = { startCpu: threadCpuClock.cpuMs(), spentBefore };
   services.beforeCall?.();
-  const ctx = toolContext(base, services, options, account);
+  // the services' platform records each read's session refusal against this call (refusals.ts)
+  const ctx = toolContext(base, recordingServices(services), options, account);
   const started = performance.now();
   log.debug("tool.start", { request_id: ctx.requestId, tool: def.name });
   let out: ToolOutput<unknown>;
   try {
     ctx.pacer.throwIfCancelled();
-    out = await def.run(args as never, ctx);
+    // a session refusal the tool absorbed and did not say is said: partial, one fixed line
+    out = sayRefusals(await def.run(args as never, ctx), ctx.refusals);
     // a call cancelled while its last step ran is not answered (the transport drops the reply)
     ctx.pacer.throwIfCancelled();
   } catch (e) {
