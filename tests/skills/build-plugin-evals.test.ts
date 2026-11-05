@@ -49,6 +49,8 @@ import {
   loggedNoteOf,
   mandatedLineProblems,
   mandatedLines,
+  handsOverAtStep0,
+  contractLines,
   HISTORY_FORMAT_VERSION,
   INJECTION_NEEDLES,
   LINEUP_SEEDS,
@@ -512,10 +514,15 @@ describe("credential-state variants (Stage C finding eval-credential-state-varia
       readFileSync(path.join(ROOT, "fixtures/espn/fx-10h/league/mSettings.json"), "utf8"),
     ) as { settings: { isPublic: boolean } };
     expect(settings.settings.isPublic).toBe(true);
-    // nothing is held out any more: SS-9 and SS-11-E run again on sunday-live, whose London game
-    // reads final on a dataset-seeded server now that the seed publishes the variant's own schedule
-    expect(HELD_OUT_CASES).toEqual({});
-    expect(plan.notTestable).toEqual([]);
+    // SS-9 and SS-11-E run again on sunday-live, whose London game reads final on a dataset-seeded
+    // server now that the seed publishes the variant's own schedule; SS-6-E is held out, with its
+    // reason, until a ruling (the round-4b verifiers' F1: its server's cross-check never flags)
+    expect(Object.keys(HELD_OUT_CASES)).toEqual(["SS-6-E"]);
+    expect(HELD_OUT_CASES["SS-6-E"]).toMatch(/weight_espn 1\b/);
+    expect(HELD_OUT_CASES["SS-6-E"]).toMatch(/starter_disagreements is empty/);
+    expect(plan.notTestable.map((n) => [n.name, n.reason])).toEqual([
+      ["SS-6-E", HELD_OUT_CASES["SS-6-E"]],
+    ]);
     expect(
       plan.plugins.some((p) => p.variant === "auth-rejected") &&
         plan.plugins.some((p) => p.variant === "public-league"),
@@ -938,7 +945,7 @@ describe("an injection comparison names its base when the injected text is in th
   );
 
   // a held-out case never runs, so it has no trajectory to compare with (planSuite's heldOut
-  // option stands in for HELD_OUT_CASES, empty since SS-9 and SS-11-E returned)
+  // option stands in for HELD_OUT_CASES, which holds SS-6-E only)
   it("refuses a base that is a held-out case, and lists the held-out case with its reason", () => {
     const root = withBase("start-sit", "SS-INJ-2", "SS-12").root;
     expect(planSuite(root).errors).toEqual([]);
@@ -949,6 +956,8 @@ describe("an injection comparison names its base when the injected text is in th
     expect(held.notTestable.map((n) => [n.name, n.reason])).toEqual([
       ["SS-12", "held for the test"],
     ]);
+    // the default map holds SS-6-E out by name; the option replaces it
+    expect(planSuite(root).notTestable.map((n) => n.name)).toEqual(["SS-6-E"]);
     expect(held.cases.some((c) => c.dir === "start-sit--ss-12")).toBe(false);
   });
 });
@@ -1433,7 +1442,7 @@ describe("buildPluginEvals on a copy", () => {
         "private-league--full--private-settings-fresh",
       ].sort(),
     );
-    expect(r.notTestable).toEqual([]);
+    expect(r.notTestable.map((n) => n.name)).toEqual(["SS-6-E"]);
     for (const key of r.plugins) {
       const dir = path.join(out, "plugins", key);
       const plugin = JSON.parse(
@@ -2860,10 +2869,60 @@ describe("input_match is typed by the tool's input contract (arrays match the sc
     expect(new RegExp(inputPattern("positions", "K")).test('{"positions":"K"}')).toBe(true);
   });
 
+  // the round-4b verifiers' F7: RT-5's "narrowed to evidence" grader compiled to `contains`, so the
+  // whole week again (["lineup", "evidence"]) passed it; `exactly` holds the array to its elements
+  it("exactly <v> … matches an array of those elements and nothing else, in any order", () => {
+    const one = new RegExp(inputPattern("kinds", "exactly evidence", "enum[]:lineup|evidence"));
+    expect(one.test('{"week":4,"kinds":["evidence"]}')).toBe(true);
+    expect(one.test('{"week": 4, "kinds": [ "evidence" ]}')).toBe(true);
+    expect(one.test(JSON.stringify({ week: 4, kinds: ["evidence"] }, null, 2))).toBe(true);
+    for (const bad of [
+      '{"week":4,"kinds":["lineup","evidence"]}',
+      '{"week":4,"kinds":["evidence","lineup"]}',
+      '{"week":4,"kinds":["lineup"]}',
+      '{"week":4,"kinds":[]}',
+      '{"week":4,"kinds":"evidence"}',
+      '{"week":4}',
+    ])
+      expect(one.test(bad), bad).toBe(false);
+    const two = new RegExp(
+      inputPattern("kinds", "exactly lineup evidence", "enum[]:lineup|evidence"),
+    );
+    expect(two.test('{"kinds":["evidence","lineup"]}')).toBe(true);
+    expect(two.test('{"kinds":["lineup","evidence"]}')).toBe(true);
+    expect(two.test('{"kinds":["lineup","lineup"]}')).toBe(false);
+    expect(two.test('{"kinds":["lineup"]}')).toBe(false);
+    expect(two.test('{"kinds":["lineup","evidence","waiver"]}')).toBe(false);
+    const ints = new RegExp(inputPattern("weeks", "exactly 2", "int[]:1..18"));
+    expect(ints.test('{"weeks":[2]}')).toBe(true);
+    expect(ints.test('{"weeks":[12]}')).toBe(false);
+    expect(ints.test('{"weeks":[2,3]}')).toBe(false);
+  });
+
+  it("RT-5's narrowed-call grader passes the call to evidence alone, never the whole week again", () => {
+    const c = lane2("retro").find((x) => x.name === "RT-5")!;
+    const x = (c.expectations as string[]).find((e) => e.includes("input_match kinds"))!;
+    expect(x).toContain("input_match kinds exactly evidence");
+    const r = gradersFor(x, ctx);
+    expect(r.errors).toEqual([]);
+    const re = new RegExp(String(r.graders[0]?.frontmatter.input_match));
+    expect(re.test(JSON.stringify({ week: 4, kinds: ["evidence"] }))).toBe(true);
+    expect(re.test(JSON.stringify({ week: 4, kinds: ["lineup", "evidence"] }))).toBe(false);
+    expect(re.test(JSON.stringify({ week: 4 }))).toBe(false);
+  });
+
   it.each([
     ["espn_get_league", "includes", "league", /not an input of espn_get_league/],
     ["espn_get_league", "include", "contains seeding_evidnce", /must be a non-empty array of/],
     ["espn_analyze_waivers", "mode", "contains auto", /"contains" needs an array input/],
+    ["espn_analyze_waivers", "mode", "exactly auto", /"exactly" needs an array input/],
+    ["espn_analyze_retrospective", "kinds", "exactly evidnce", /must be a non-empty array of/],
+    [
+      "espn_analyze_retrospective",
+      "kinds",
+      "exactly evidence lineupp",
+      /must be a non-empty array of/,
+    ],
     ["espn_analyze_waivers", "mode", "sometimes", /must be one of auto\|priority\|faab/],
     ["espn_analyze_waivers", "look_ahead", "7", /must be an integer in 0\.\.2/],
     ["espn_analyze_lineup", "only_unlocked", "yes", /must be a boolean/],
@@ -2910,8 +2969,13 @@ describe("input_match is typed by the tool's input contract (arrays match the sc
             const type = types[k] ?? "";
             const kind = type.split(":")[0];
             const elem = (v ?? "").replace(/^contains\s+/, "");
+            // `exactly <v> …`: the array of those elements (the round-4b verifiers' F7)
+            const exact = /^exactly\s+(.+)$/.exec(v ?? "")?.[1]?.split(/\s+/);
             if (v === "non-empty") call[k] = NON_EMPTY[k];
-            else if (kind === "int[]") call[k] = [Number(elem)];
+            else if (exact !== undefined) {
+              call[k] = kind === "int[]" ? exact.map(Number) : exact;
+              scalars.push({ [k]: exact[0] });
+            } else if (kind === "int[]") call[k] = [Number(elem)];
             else if (kind?.endsWith("[]")) {
               call[k] = [elem];
               scalars.push({ [k]: elem });
@@ -3008,6 +3072,58 @@ describe("every final-message regex can fail a reply that only prints orient's o
       "session-check--sc-10",
     ])
       expect(plan.cases.find((c) => c.dir === dir)?.plugin, dir).toMatch(/^private-league--/);
+  });
+
+  // the round-4b verifiers' F5: a hand-off case grades "no section of the answer" with a
+  // regex_absent on the output contract's headings, which the right reply never prints
+  it("a hand-off case's regex_absent is checked against the opening lines alone, never the output contract", () => {
+    expect(handsOverAtStep0("rejected", false)).toBe(true);
+    expect(handsOverAtStep0(undefined, false)).toBe(true);
+    expect(handsOverAtStep0("not_configured", false)).toBe(true);
+    expect(handsOverAtStep0("stored", false)).toBe(false);
+    for (const st of [undefined, "not_configured", "rejected", "stored"])
+      expect(handsOverAtStep0(st, true), String(st)).toBe(false);
+    const template = readFileSync(
+      path.join(ROOT, "skills/_shared/references/output-template.md"),
+      "utf8",
+    );
+    const contract = contractLines(template).lines;
+    const absent = [
+      "No contract heading (regex_absent: `(?:^|\\n)[ \\t]*#{1,6}[ \\t]*(?:Recommendation|Numbers|Why)\\b`)",
+    ];
+    // on a public league every recommendation prints the contract: the grader would fail them all
+    expect(
+      mandatedLineProblems("X-1", absent, [notConf, seeding], new Set(), contract),
+    ).toHaveLength(1);
+    // on a Step 0 hand-off the right reply prints none of it
+    expect(mandatedLineProblems("X-1", absent, [], new Set(), contract, true)).toEqual([]);
+    // a positive grader the contract satisfies is still refused there
+    expect(
+      mandatedLineProblems(
+        "X-1",
+        ["Says it (regex: `### Numbers`)"],
+        [],
+        new Set(),
+        contract,
+        true,
+      ),
+    ).toHaveLength(1);
+    // the committed hand-off cases carry such a grader and build clean
+    const plan = planSuite(ROOT);
+    expect(plan.errors).toEqual([]);
+    for (const [skill, name] of [
+      ["start-sit", "SS-13"],
+      ["onboard", "ON-6"],
+    ] as const) {
+      const c = lane2(skill).find((x) => x.name === name)!;
+      const x = (c.expectations as string[]).filter((e) => e.includes("(regex_absent:"));
+      expect(
+        x.some((e) => e.includes("Recommendation|Numbers|Why")),
+        name,
+      ).toBe(true);
+      expect(mandatedLineProblems(name, x, [], new Set(), contract)).toHaveLength(1);
+      expect(mandatedLineProblems(name, x, [], new Set(), contract, true)).toEqual([]);
+    }
   });
 
   it("a private-league grader that matched the public Session line would still be refused", () => {
@@ -3231,8 +3347,8 @@ describe("a case whose seed logs a note guards every tool input against it (SK-4
 // variant's scripted credential state (auth-rejected: pending null with the rejected-session
 // warning; public-league: the recorded empty list), so such a case is graded on every variant
 describe("a Skill that reads pending claims is graded on every scripted-session variant (changelog §R10, R10-21)", () => {
-  it("nothing is left out of the committed suite", () => {
-    expect(planSuite(ROOT).notTestable).toEqual([]);
+  it("nothing is left out of the committed suite but the case held out by name", () => {
+    expect(planSuite(ROOT).notTestable.map((n) => n.name)).toEqual(Object.keys(HELD_OUT_CASES));
   });
 
   /** A copy of the repo where `skill`'s first espn_list_transactions step reads pending claims. */
@@ -3252,7 +3368,7 @@ describe("a Skill that reads pending claims is graded on every scripted-session 
     const t = readingPending("waivers");
     const p = planSuite(t.root);
     expect(p.errors).toEqual([]);
-    expect(p.notTestable).toEqual([]);
+    expect(p.notTestable.map((n) => n.name)).toEqual(Object.keys(HELD_OUT_CASES));
     for (const dir of ["waivers--wv-7-e", "waivers--wv-1", "session-check--sc-1"])
       expect(
         p.cases.some((c) => c.dir === dir),
@@ -3269,7 +3385,10 @@ describe("a Skill that reads pending claims is graded on every scripted-session 
     expect(base.length).toBeGreaterThan(0);
     for (const skill of ["waivers", "weekly", "retro"]) {
       const p = planSuite(readingPending(skill).root);
-      expect(p.notTestable, skill).toEqual([]);
+      expect(
+        p.notTestable.map((n) => n.name),
+        skill,
+      ).toEqual(Object.keys(HELD_OUT_CASES));
       expect(scripted(p), skill).toEqual(base);
     }
   });

@@ -34,6 +34,7 @@ import {
   RETRO_TRUNCATED_SENTENCE,
   MATCHUP_LISTS_SENTENCE,
   OPTION_VALUE_ZERO_SENTENCE,
+  COMPARE_DIRECT_SENTENCE,
   INJURY_CONFIRM_SENTENCE,
   TEMPLATE_PARTIAL_SESSION_LINE,
   TRIM_WARNING_ABSENT,
@@ -964,6 +965,32 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
     // value in waiting, whatever the verdict says
     ["start-sit", MATCHUP_LISTS_SENTENCE, "`players_final`, `players_live` and `players_pending`"],
     ["start-sit", OPTION_VALUE_ZERO_SENTENCE, "Read its `verdict`."],
+    // changelog §R10, R10-24 (the round-4b verifiers' R4BS-1: only check-skills' own literal held
+    // it): a compare pair is scored only as a direct swap — and R4BS-5: neither player locked, and
+    // a locked player or one not on the roster is a refused pair too
+    ["start-sit", COMPARE_DIRECT_SENTENCE, "Pass the pair as `compare`."],
+    [
+      "start-sit",
+      "`in` a bench player who can play `out`'s slot, neither locked.",
+      "`in` a bench player who can play `out`'s slot.",
+    ],
+    [
+      "start-sit",
+      "an `out` not starting, a locked player, one not on the roster —",
+      "an `out` not starting —",
+    ],
+    // R4BS-6: a kind the question is about is asked for again only when its calls were cut, and a
+    // question whose kinds were all scored whole makes no narrowed call
+    [
+      "retro",
+      "the kinds the question is about whose K is below T first",
+      "the kinds the question is about first",
+    ],
+    [
+      "retro",
+      "when every kind the question is about was scored whole, make no narrowed call; ",
+      "",
+    ],
     // R4VS-6: an injury is confirmed by ESPN's status or the official report, whatever the flag
     ["injury-cascade", INJURY_CONFIRM_SENTENCE, "Then list what would confirm it."],
   ])("%s: check-skills fails when the fixed sentence %j is gone", (skill, from, to) => {

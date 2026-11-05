@@ -2,13 +2,15 @@
 // quote are the server's own: each quoted form matches a line the server writes, from the server's
 // own code, never a copy of its template (changelog §R10, R10-11 and the round-3b server refix's
 // second E11 line; R10-20's E13 warning with R10-25's per-kind counts; R10-22's lineup trim warnings
-// and the round-4 F6's last one; R10-24's compare refusals).
+// and the round-4 F6's last one; R10-24's compare refusals, each reason compareIssues gives named by
+// start-sit and the row — the round-4b verifiers' R4BS-1 and R4BS-5).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   ACTIVITY_PARTIAL_FRAGMENTS,
+  COMPARE_DIRECT_SENTENCE,
   RETRO_TRUNCATED_SENTENCE,
   TOOL_OUTPUT_PHRASES,
   TOOL_OUTPUT_SHEET_PHRASES,
@@ -16,7 +18,7 @@ import {
 } from "../../scripts/skills/check-skills.mjs";
 import { fitOptionsOf } from "../../src/mcp/define.js";
 import { ANALYTICS_BUDGET_CHARS, fitToBudget } from "../../src/mcp/envelope.js";
-import { compareWarnings } from "../../src/domain/analytics/lineup.js";
+import { compareWarnings, type LineupPlayer } from "../../src/domain/analytics/lineup.js";
 import { RECOMMENDATION_KINDS } from "../../src/domain/reclog/types.js";
 import { lineupTrims } from "../../src/mcp/tools/analytics.js";
 import {
@@ -200,6 +202,20 @@ describe("E13's truncation warning, as the cheat-sheet and retro quote it (chang
     expect(text).toMatch(/make no narrowed call/);
   });
 
+  // the round-4b verifiers' R4BS-6: a kind already scored whole is never asked for again
+  it.each([
+    ["the cheat-sheet's E13 row", rowOf("espn_analyze_retrospective")],
+    ["retro's sentence", RETRO_TRUNCATED_SENTENCE],
+  ])("%s narrows to the question's kinds only when their calls were cut", (_, text) => {
+    expect(text).toContain("the kinds the question is about whose K is below T first");
+    expect(text).toContain("else the kinds whose calls were left out (K below T)");
+    expect(text).toContain(
+      "when every kind the question is about was scored whole, make no narrowed call",
+    );
+    // round 4b's priority asked for the question's kinds whatever their counts
+    expect(text).not.toContain("the kinds the question is about first");
+  });
+
   it("the quoted form rejects the warning without its per-kind counts (round 4's text)", () => {
     const re = quotedIn(RETRO_TRUNCATED_SENTENCE);
     expect(
@@ -308,6 +324,11 @@ describe("the compare refusal the lineup row quotes is compareWarnings' own (cha
   it("the row and the Skill quote the form, and it matches every refusal the server writes", () => {
     expect(quoted).toBeDefined();
     expect(rowOf("espn_analyze_lineup")).toContain(`"${quoted ?? ""}"`);
+    // R4BS-1: start-sit's own sentence quotes it too, in the body the model reads
+    expect(COMPARE_DIRECT_SENTENCE).toContain(`"${quoted ?? ""}"`);
+    expect(readFileSync(path.join(ROOT, "skills/start-sit/SKILL.md"), "utf8")).toContain(
+      COMPARE_DIRECT_SENTENCE,
+    );
     fc.assert(
       fc.property(
         fc.integer({ min: 1, max: 9_999_999 }),
@@ -322,6 +343,78 @@ describe("the compare refusal the lineup row quotes is compareWarnings' own (cha
         },
       ),
       { numRuns: 50 },
+    );
+  });
+
+  /** A roster entry of the lineup engine: only the fields compareIssues reads vary. */
+  const player = (id: number, slot: number, eligible: readonly number[], locked = false) =>
+    ({
+      player_id: id,
+      gsis_id: null,
+      name: "Team A player",
+      position: "RB",
+      eligible_slot_ids: eligible,
+      injury_status: slot === 21 ? "OUT" : null,
+      pro_team_id: null,
+      slot_id: slot,
+      locked,
+      lock_at: null,
+      points: {
+        mean: 10,
+        p10: 4,
+        p25: 7,
+        p50: 10,
+        p75: 13,
+        p90: 16,
+        p_zero: 0,
+        basis: "position_cv",
+      },
+      p_active: 1,
+      espn_projection: 10,
+      percent_started: null,
+      role_games: 0,
+    }) as unknown as LineupPlayer;
+  // RB 2, WR 4, FLEX 23, BE 20, IR 21 (src/domain/league/slots.ts)
+  const RB_ELIG = [2, 23, 20, 21];
+  const roster: LineupPlayer[] = [
+    player(1, 2, RB_ELIG), // the starting RB
+    player(2, 20, RB_ELIG), // a bench RB: the direct swap
+    player(3, 20, [4, 23, 20, 21]), // a bench WR: cannot play RB
+    player(4, 21, RB_ELIG), // on IR
+    player(5, 20, RB_ELIG, true), // a locked bench RB
+    player(6, 4, [4, 23, 20, 21]), // a starting WR
+  ];
+  // each reason compareIssues gives (src/domain/analytics/lineup.ts), and the words start-sit's
+  // sentence and the row name it by (R4BS-5: a locked player and one not on the roster were left out)
+  it.each([
+    [{ out: 1, in: 5 }, "is locked", "a locked player"],
+    [{ out: 1, in: 99 }, "is not on the roster", "one not on the roster"],
+    [{ out: 2, in: 3 }, "is not starting", "an `out` not starting"],
+    [{ out: 1, in: 6 }, "already starts", "an `in` already starting"],
+    [{ out: 1, in: 3 }, "cannot play RB", "one who cannot play that slot"],
+    [{ out: 1, in: 4 }, "is on IR", "is on IR"],
+  ])(
+    "a pair %j is refused (%s), and the Skill and the row name that refusal",
+    (pair, reason, named) => {
+      const w = compareWarnings(roster, [pair]);
+      expect(w).toHaveLength(1);
+      expect(w[0]).toContain(reason);
+      expect(form.test(w[0] ?? "")).toBe(true);
+      expect(COMPARE_DIRECT_SENTENCE).toContain(named);
+      expect(TOOL_OUTPUT_PHRASES.espn_analyze_lineup.join(" ")).toContain(named);
+    },
+  );
+
+  it("the direct swap both texts define is the one pair compareIssues scores, neither player locked", () => {
+    expect(compareWarnings(roster, [{ out: 1, in: 2 }])).toEqual([]);
+    // the same pair with the starter locked is refused: "neither locked" is part of the definition
+    const lockedOut = roster.map((p) => (p.player_id === 1 ? { ...p, locked: true } : p));
+    expect(compareWarnings(lockedOut, [{ out: 1, in: 2 }])[0]).toContain("player 1 is locked");
+    expect(COMPARE_DIRECT_SENTENCE).toContain(
+      "`out` a starter, `in` a bench player who can play `out`'s slot, neither locked.",
+    );
+    expect(TOOL_OUTPUT_PHRASES.espn_analyze_lineup.join(" ")).toContain(
+      "`out` a starter, `in` a player on the bench who can play `out`'s slot, neither locked;",
     );
   });
 

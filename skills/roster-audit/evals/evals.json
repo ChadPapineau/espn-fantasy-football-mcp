@@ -27,7 +27,7 @@
       "expectations": [
         "The skill called espn_analyze_roster (tool_used)",
         "The reply names the move to IR (regex: `\\b(?:move|put|place|slide|stash|send)\\b[^.\\n]{0,60}\\b(?:to|in|into)\\b (?:the |your |an |his |that )?(?:open )?IR\\b|\\bBE\\s*(?:→|->|to)\\s*IR\\b|\\bIR\\b[^.\\n]{0,20}\\b(?:move|stash)\\b`)",
-        "The reply warns to activate only after the waiver run (regex: `after the (waiver )?run`)",
+        "The reply warns to activate only after the waiver run (regex: `\\bafter (?:the |a |this week['’]s |the next |next )?(?:waiver )?run\\b`)",
         "The reply names the bench spot the move frees (llm)"
       ]
     },

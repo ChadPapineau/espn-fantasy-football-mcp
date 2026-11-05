@@ -100,7 +100,8 @@
         "espn_get_box_score was not called (tool_used: min 0 max 0)",
         "espn_record_recommendation was not called (tool_used: min 0 max 0)",
         "The reply hands over to the session-check Skill or gives its one command (regex: `session-check|eff setup`)",
-        "The reply never says the walkthrough runs on keyless public reads (regex_absent: `this league is public`)",
+        "The reply gives no heading of the output contract — no walkthrough (regex_absent: `(?:^|\\n)[ \\t]*#{1,6}[ \\t]*(?:Recommendation|Numbers|Why)\\b`)",
+        "The reply never says the walkthrough runs on keyless public reads or prints the public-league Session line (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b|(?<!\\b(?:no|not|never|without|cannot|can['’]?t|won['’]?t|didn['’]?t)\\b[^.\\n]{0,40})\\bkeyless public reads\\b|\\bran on keyless\\b`)",
         "The reply says ESPN rejected the stored session on a league not known to be public, hands over to session-check, and gives no walkthrough (llm)"
       ]
     }

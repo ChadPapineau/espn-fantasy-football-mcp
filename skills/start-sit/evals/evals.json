@@ -13,7 +13,7 @@
         "The skill called espn_get_roster, espn_project_players, espn_analyze_lineup, then espn_record_recommendation (tool_order)",
         "espn_analyze_lineup was called with objective auto and a compare pair (tool_used: input_match objective auto, compare non-empty)",
         "The reply prints a p10 (regex: `p10\\b(?:\\s*[/–-]\\s*p\\d+\\b)*(?:\\s+(?:of|at|is|was))?[^\\w\\n]{0,4}-?\\d|p10\\b[^\\n]*\\|[^\\n]*\\n(?:[\\s|:-]+\\n)?\\s*\\|[^\\n]*\\d|\\d\\s*\\(p10\\)`)",
-        "The reply names protect or chase (regex: `protect|chase`)",
+        "The reply names the mode, chase (regex: `\\bchase\\b`)",
         "The reply gives the one-line reason for chase (behind on projection, so the ceiling matters) (llm)"
       ]
     },
@@ -76,7 +76,7 @@
       "expected_output": "ESPN's week projection for one starter is 30 % above ours; the reply shows both numbers, each labelled, and says which one the lineup follows and why.",
       "files": ["evals/fixtures/fx-10h/espn-proj-disagree"],
       "expectations": [
-        "The reply labels ESPN's projection as ESPN's (regex: `ESPN['’]?s? (?:week(?:ly)? )?(?:projections?|projects|projected)\\b(?! from ESPN Fantasy)[^.\\n]{0,40}?\\d|projected_espn|projection_week_espn|\\d[^.\\n]{0,20}\\bESPN['’]?s?\\b(?: week(?:ly)?)? projection`)",
+        "The reply labels ESPN's projection as ESPN's (regex: `ESPN['’]?s? (?:week(?:ly)? )?(?:projections?|projects|projected|proj)\\b\\.?(?! from ESPN Fantasy)[^.\\n]{0,40}?\\d|ESPN['’]?s? (?:week(?:ly)? )?proj(?:ections?|ected)?\\b\\.?(?! from ESPN Fantasy)[^\\n|]*\\|[^\\n]*\\n(?:[\\s|:-]+\\n)?\\s*\\|[^\\n]*\\d|projected_espn|projection_week_espn|\\d[^.\\n]{0,20}\\bESPN['’]?s?\\b(?: week(?:ly)?)? proj(?:ection|\\.|\\b)`)",
         "The reply shows both numbers for the flagged starter and says which one it follows and why (llm)"
       ]
     },
@@ -114,7 +114,7 @@
       "files": ["evals/fixtures/fx-10h/sunday-live"],
       "expectations": [
         "The skill called espn_get_live_scoreboard (tool_used)",
-        "The reply splits the players into final, live and pending (regex: `\\bfinal\\b[\\s\\S]{0,300}\\blive\\b[\\s\\S]{0,300}\\bpending\\b`)",
+        "The reply splits the players into final, live and pending, each state with its count or its players (regex: `^(?=[\\s\\S]*?(?:\\bfinal\\b[^\\n]{0,120}?(?:(?<![\\d.])2(?!\\.?\\d)|\\bTuten\\b|\\bLittle\\b)|(?:\\bTuten\\b|\\bLittle\\b)[^\\n]{0,120}?\\bfinal\\b))(?=[\\s\\S]*?(?:\\blive\\b[^\\n]{0,120}?(?:(?<![\\d.])3(?!\\.?\\d)|\\bJeanty\\b|\\bMaye\\b|\\bFannin\\b)|(?:\\bJeanty\\b|\\bMaye\\b|\\bFannin\\b)[^\\n]{0,120}?\\blive\\b))(?=[\\s\\S]*?(?:\\bpending\\b[^\\n]{0,120}?(?:(?<![\\d.])4(?!\\.?\\d)|\\bCook\\b|\\bSmith-Njigba\\b|\\bShaheed\\b|\\bRams\\b)|(?:\\bCook\\b|\\bSmith-Njigba\\b|\\bShaheed\\b|\\bRams\\b)[^\\n]{0,120}?\\bpending\\b))`)",
         "The reply labels the win probability as ESPN's and says ours is not yet available live (llm)"
       ]
     },
@@ -140,7 +140,7 @@
       "expectations": [
         "espn_analyze_matchup was called in live mode (tool_used: input_match mode live)",
         "The skill called espn_get_live_scoreboard before espn_analyze_matchup (tool_order)",
-        "The reply splits the players into final, live and pending (regex: `\\bfinal\\b[\\s\\S]{0,300}\\blive\\b[\\s\\S]{0,300}\\bpending\\b`)",
+        "The reply splits the players into final, live and pending, each state with its count or its players (regex: `^(?=[\\s\\S]*?(?:\\bfinal\\b[^\\n]{0,120}?(?:(?<![\\d.])2(?!\\.?\\d)|\\bTuten\\b|\\bLittle\\b)|(?:\\bTuten\\b|\\bLittle\\b)[^\\n]{0,120}?\\bfinal\\b))(?=[\\s\\S]*?(?:\\blive\\b[^\\n]{0,120}?(?:(?<![\\d.])3(?!\\.?\\d)|\\bJeanty\\b|\\bMaye\\b|\\bFannin\\b)|(?:\\bJeanty\\b|\\bMaye\\b|\\bFannin\\b)[^\\n]{0,120}?\\blive\\b))(?=[\\s\\S]*?(?:\\bpending\\b[^\\n]{0,120}?(?:(?<![\\d.])4(?!\\.?\\d)|\\bCook\\b|\\bSmith-Njigba\\b|\\bShaheed\\b|\\bRams\\b)|(?:\\bCook\\b|\\bSmith-Njigba\\b|\\bShaheed\\b|\\bRams\\b)[^\\n]{0,120}?\\bpending\\b))`)",
         "The reply shows both win probabilities, each labelled, ours with its interval, and calls them provisional (llm)"
       ]
     },
@@ -195,8 +195,9 @@
       "expectations": [
         "espn_analyze_lineup was not called (tool_used: min 0 max 0)",
         "espn_project_players was not called (tool_used: min 0 max 0)",
-        "The reply hands over to the session-check Skill or gives its one command, and no section of the answer (regex: `session-check|eff setup`)",
-        "The reply never prints the public-league Session line (regex_absent: `this league is public`)",
+        "The reply hands over to the session-check Skill or gives its one command (regex: `session-check|eff setup`)",
+        "The reply gives no heading of the output contract (regex_absent: `(?:^|\\n)[ \\t]*#{1,6}[ \\t]*(?:Recommendation|Numbers|Why)\\b`)",
+        "The reply never prints the public-league Session line, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
         "The reply gives no start/sit verdict for Vele or Tuten and hands over to session-check because ESPN rejected the stored session on a league not known to be public (llm)"
       ]
     }

@@ -110,8 +110,9 @@
         "The skill called espn_get_status (tool_used)",
         "espn_analyze_lineup was not called (tool_used: min 0 max 0)",
         "espn_analyze_waivers was not called (tool_used: min 0 max 0)",
-        "The reply hands over to the session-check Skill or gives its one command, and no section of the answer (regex: `session-check|eff setup`)",
-        "The reply never prints the public-league Session line (regex_absent: `this league is public`)",
+        "The reply hands over to the session-check Skill or gives its one command (regex: `session-check|eff setup`)",
+        "The reply gives no section of the briefing (regex_absent: `(?:^|\\n)[ \\t]*(?:#{1,6}[ \\t]*|\\*\\*)(?:\\d+\\.[ \\t]*)?(?:Last week|This week['’]s matchup(?: and lineup)?|K and D/ST|Waivers|Injuries and byes|League activity)\\b`)",
+        "The reply never prints the public-league Session line, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
         "The reply says ESPN rejected the stored session on a league whose settings could not be read, hands over to session-check, and gives no section of the briefing (llm)"
       ]
     },
@@ -126,8 +127,9 @@
         "espn_get_league was called at most once (tool_used: min 0 max 1)",
         "espn_analyze_league_activity was not called (tool_used: min 0 max 0)",
         "espn_analyze_lineup was not called (tool_used: min 0 max 0)",
-        "The reply hands over to the session-check Skill or gives its one command, and no section of the answer (regex: `session-check|eff setup`)",
-        "The reply never prints the public-league Session line (regex_absent: `this league is public`)",
+        "The reply hands over to the session-check Skill or gives its one command (regex: `session-check|eff setup`)",
+        "The reply gives no section of the briefing (regex_absent: `(?:^|\\n)[ \\t]*(?:#{1,6}[ \\t]*|\\*\\*)(?:\\d+\\.[ \\t]*)?(?:Last week|This week['’]s matchup(?: and lineup)?|K and D/ST|Waivers|Injuries and byes|League activity)\\b`)",
+        "The reply never prints the public-league Session line, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
         "The reply says ESPN rejected the stored session on this private league, hands over to session-check, and gives no section of the briefing (llm)"
       ]
     }

@@ -238,16 +238,24 @@ export const FIXTURE_CREDENTIAL_STATES = Object.freeze(["not_configured", "rejec
 /**
  * Cases held out by name, with the reason the README prints (a case whose expected output its eval
  * server cannot show, or the Skills as they stand cannot reach on that state — left out rather than
- * run to fail, until it is fixed or ruled). None is held out now: WV-7-E, held out under §R9, runs
- * again on auth-rejected — a public league whose stored session ESPN rejected — since orient's
- * `rejected` row splits on `league.is_public` like its `not_configured` row (changelog §R10, R10-7);
- * SS-9 and SS-11-E, held out in round 3 because the dataset seed published the recorded pro
- * schedule, run again since the seed publishes the served variant's own (sunday-live's London game
- * reads final on a dataset-seeded server: Bhayshul Tuten, Cam Little). `planSuite`'s `heldOut`
- * option replaces this map (the tests hold a held-out case's handling with it).
+ * run to fail, until it is fixed or ruled). SS-6-E is held out (the round-4b verifiers' F1): on
+ * espn-proj-disagree, `espn_project_players` weights ESPN 1.0 while untuned (`weight_espn` 1), so
+ * our mean equals ESPN's for every player, `espn_analyze_lineup`'s `espn_cross_check` never flags
+ * a starter, and the variant's 1.3× scales both numbers — no reply can show "one starter 30 %
+ * above ours"; it waits for a ruling (the cross-check against the own model, or a case on
+ * `disagreement.flagged`). WV-7-E, held out under §R9, runs again on auth-rejected — a public
+ * league whose stored session ESPN rejected — since orient's `rejected` row splits on
+ * `league.is_public` like its `not_configured` row (changelog §R10, R10-7); SS-9 and SS-11-E, held
+ * out in round 3 because the dataset seed published the recorded pro schedule, run again since the
+ * seed publishes the served variant's own (sunday-live's London game reads final on a
+ * dataset-seeded server: Bhayshul Tuten, Cam Little). `planSuite`'s `heldOut` option replaces this
+ * map (the tests hold a held-out case's handling with it).
  * @type {Readonly<Record<string, string>>}
  */
-export const HELD_OUT_CASES = Object.freeze({});
+export const HELD_OUT_CASES = Object.freeze({
+  "SS-6-E":
+    "ESPN's projection never disagrees with ours on espn-proj-disagree: espn_project_players weights ESPN 1.0 while untuned (weight_espn 1), so our mean equals ESPN's for every player and espn_analyze_lineup's espn_cross_check.starter_disagreements is empty — the variant's 1.3× scales both numbers; held for a ruling (espn_cross_check against the own model, or a case graded on espn_project_players' disagreement.flagged rows)",
+});
 /**
  * The final-message regex graders that may match orient's mandated opening lines (mandatedLines),
  * each by case and exact pattern with the reason: the grader checks the one command the Session
@@ -318,8 +326,8 @@ export function mandatedLines(orient, credentialState, seed, isPublic = true) {
   const state = credentialState ?? "not_configured";
   const handsOver = state === "rejected" || state === "not_configured";
   // orient's private-league rows hand over before any opening line (changelog §R10, R10-7)
-  if (!isPublic && handsOver) return { lines, errors };
-  if (isPublic && handsOver)
+  if (handsOverAtStep0(credentialState, isPublic)) return { lines, errors };
+  if (handsOver)
     add(
       quoted(
         new RegExp(
@@ -331,6 +339,18 @@ export function mandatedLines(orient, credentialState, seed, isPublic = true) {
   if (!Object.hasOwn(SEEDING_SEEDS, seed ?? ""))
     add(quoted(/\|\s*`seeding\.confirmed: false` \|[^\n]*?"([^"\n]+)"/, "seeding"));
   return { lines, errors };
+}
+/**
+ * Whether orient's routing hands a case's Skill over to session-check at Step 0, before any answer:
+ * a `rejected` or `not_configured` session on a league not known to be public (changelog §R10,
+ * R10-7, R9-1). Such a reply prints neither opening line nor the output contract.
+ * @param {unknown} credentialState the variant's `harness.credential_state` (absent: not_configured)
+ * @param {boolean} isPublic whether the variant's recorded league is public
+ * @returns {boolean}
+ */
+export function handsOverAtStep0(credentialState, isPublic) {
+  const state = credentialState ?? "not_configured";
+  return !isPublic && (state === "rejected" || state === "not_configured");
 }
 /**
  * The fixed lines the output contract (skills/_shared/references/output-template.md) has every
@@ -395,15 +415,36 @@ export function lineRenderings(line) {
  * @param {Set<string>} [used] collects the MANDATED_LINE_GRADERS entries that applied
  * @param {readonly string[]} [contract] contractLines(…).lines, for a Skill whose body carries the
  *   output contract
+ * @param {boolean} [handsOver] the case's Skill hands over at Step 0 (handsOverAtStep0): the right
+ *   reply prints no output contract, so a `regex_absent` on the contract's headings ("no section of
+ *   the answer" — the round-4b verifiers' F5) is checked against the opening lines alone, while a
+ *   `regex` is still refused when the contract's lines satisfy it
  * @returns {string[]}
  */
-export function mandatedLineProblems(name, expectations, lines, used = new Set(), contract = []) {
-  /** every text a reply that prints the lines and nothing else can be, word for word first */
-  const texts = [[...lines, ...contract].join("\n")];
-  lines.forEach((line, i) => {
-    for (const r of lineRenderings(line).slice(1))
-      texts.push([...lines.slice(0, i), r, ...lines.slice(i + 1), ...contract].join("\n"));
-  });
+export function mandatedLineProblems(
+  name,
+  expectations,
+  lines,
+  used = new Set(),
+  contract = [],
+  handsOver = false,
+) {
+  /**
+   * Every text a reply that prints the lines, then `tail`, and nothing else can be (word for word
+   * first).
+   * @param {readonly string[]} tail
+   * @returns {string[]}
+   */
+  const textsWith = (tail) => {
+    const out = [[...lines, ...tail].join("\n")];
+    lines.forEach((line, i) => {
+      for (const r of lineRenderings(line).slice(1))
+        out.push([...lines.slice(0, i), r, ...lines.slice(i + 1), ...tail].join("\n"));
+    });
+    return out;
+  };
+  const texts = textsWith(contract);
+  const absentTexts = handsOver ? textsWith([]) : texts;
   /** @type {string[]} */
   const out = [];
   for (const x of expectations) {
@@ -419,7 +460,7 @@ export function mandatedLineProblems(name, expectations, lines, used = new Set()
     } catch {
       continue; // check-skills refuses a pattern that does not compile
     }
-    const text = texts.find((t) => re.test(t));
+    const text = (kind === "regex_absent" ? absentTexts : texts).find((t) => re.test(t));
     if (text === undefined) continue;
     if (kind === "regex_absent") {
       out.push(
@@ -639,9 +680,12 @@ const kindOf = (type) => (type ?? "").split(":")[0] ?? "";
  * shaped by the input's type in the tool's contract (`manifest.inputs`, the grammar of
  * skills/README.md) so it matches the call the strict schema accepts: an array input (`enum[]`,
  * `string[]`, `int[]`) — an array holding the value as an element (`contains <value>` says the
- * same explicitly), never the bare scalar the schema rejects; `non-empty` — an array or object with
- * something in it; `true`/`false`/a number — that literal; anything else — that string; no value —
- * the key is present. Untyped (no contract given), the value is a scalar.
+ * same explicitly), never the bare scalar the schema rejects; `exactly <v> [<v> …]` — an array that
+ * holds those elements and nothing else, in any order (the round-4b verifiers' F7: RT-5's narrowed
+ * call matched `contains evidence` with `["lineup", "evidence"]`, the whole week again);
+ * `non-empty` — an array or object with something in it; `true`/`false`/a number — that literal;
+ * anything else — that string; no value — the key is present. Untyped (no contract given), the
+ * value is a scalar.
  * @param {string} key
  * @param {string | undefined} value
  * @param {string} [type] the input's contract type (`enum[]:a|b`, `int:1..18`, …)
@@ -652,12 +696,20 @@ export function inputPattern(key, value, type) {
   if (value === "non-empty") return `${k}[\\[{]\\s*[^\\]}\\s]`;
   const kind = kindOf(type);
   if (kind === "enum[]" || kind === "string[]" || kind === "int[]") {
-    const elem = value.replace(/^contains\s+/, "");
-    const lit =
+    /** @param {string} elem */
+    const litOf = (elem) =>
       kind === "int[]"
         ? `(?<![\\d.-])${escapeRe(elem)}(?![\\d.])`
         : `"${escapeRe(JSON.stringify(elem).slice(1, -1))}"`;
-    return `${k}\\[[^\\]]*?${lit}`;
+    const exact = /^exactly\s+(.+)$/.exec(value);
+    if (exact) {
+      // exactly these elements: one lookahead per element, then N elements each one of them
+      const elems = [...new Set((exact[1] ?? "").split(/\s+/))];
+      const any = `(?:${elems.map(litOf).join("|")})`;
+      const each = elems.map((e) => `(?=[^\\]]*${litOf(e)})`).join("");
+      return `${k}\\[${each}\\s*${any}(?:\\s*,\\s*${any}){${String(elems.length - 1)}}\\s*\\]`;
+    }
+    return `${k}\\[[^\\]]*?${litOf(value.replace(/^contains\s+/, ""))}`;
   }
   if (value === "true" || value === "false") return `${k}${value}\\b`;
   if (/^-?\d+(?:\.\d+)?$/.test(value)) return `${k}${escapeRe(value)}(?![\\d.])`;
@@ -667,7 +719,8 @@ export function inputPattern(key, value, type) {
 /**
  * Why an `input_match <key> <value>` pair cannot match a schema-valid call of `tool`, or null: the
  * key must be one of the tool's inputs, and the value must fit the input's type — an element of an
- * array input (`contains <value>` only there), `non-empty` only on a list or an object, a literal of
+ * array input (`contains <value>`, and `exactly <v> [<v> …]`, only there), `non-empty` only on a
+ * list or an object, a literal of
  * the scalar's type otherwise (checkArgType: the same rules the Lane 1 sequences are held to).
  * @param {string} tool a bare tool name
  * @param {string} key
@@ -686,13 +739,19 @@ export function inputMatchProblem(tool, key, value, inputs) {
       ? null
       : `input_match ${key} non-empty: ${tool}.${key} is ${type}, not a list or an object`;
   const contains = /^contains\s+/.test(value);
-  const elem = value.replace(/^contains\s+/, "");
+  const exactly = /^exactly\s+\S/.test(value);
+  const elems = exactly
+    ? value.replace(/^exactly\s+/, "").split(/\s+/)
+    : [value.replace(/^contains\s+/, "")];
   if (kind === "enum[]" || kind === "string[]" || kind === "int[]") {
-    const why = checkArgType([kind === "int[]" ? Number(elem) : elem], type);
+    const why = checkArgType(
+      elems.map((e) => (kind === "int[]" ? Number(e) : e)),
+      type,
+    );
     return why === null ? null : `input_match ${key} ${value}: ${tool}.${key} ${why}`;
   }
-  if (contains)
-    return `input_match ${key} ${value}: "contains" needs an array input; ${tool}.${key} is ${type}`;
+  if (contains || exactly)
+    return `input_match ${key} ${value}: "${contains ? "contains" : "exactly"}" needs an array input; ${tool}.${key} is ${type}`;
   if (!["bool", "int", "number", "enum", "string"].includes(kind))
     return `input_match ${key} ${value}: ${tool}.${key} is ${type} — only "non-empty" can be matched on it`;
   /** @type {unknown} */
@@ -1463,6 +1522,7 @@ export function planSuite(root, opts = {}) {
         mandated.lines,
         usedExemptions,
         NO_TEMPLATE_SKILLS.includes(skill) ? [] : contract,
+        handsOverAtStep0(harnessOf(variant)["credential_state"], variantIsPublic(root, variant)),
       ))
         errors.push(`${where}/evals.json ${name}: ${p}`);
       // a final-message regex that the prompt alone satisfies passes a restated question (R4VS-9)
