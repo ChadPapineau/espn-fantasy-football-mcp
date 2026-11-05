@@ -16,7 +16,7 @@
 // Same guarantees as the recorded fixture fetch: no network, a Cookie header is refused, an
 // unanswerable request is a FixtureError naming the path (league id 0), every file path stays inside
 // the manifest's root, and patch pointers can never reach a prototype.
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import { FixtureError, composeBodies } from "./fixture.js";
@@ -102,16 +102,44 @@ export function derivedLeagueClock(dir: string): number | null {
   return Number.isFinite(t) && /^\d{4}-\d{2}-\d{2}T/.test(clock) ? t : null;
 }
 
+/** A manifest file the path rules or the size bound refuse (derivedFileText). */
+export class DerivedFileRefused extends RangeError {}
+
 /**
- * The recorded league's publicity of a derived fixture directory — `settings.isPublic` of its
- * current season's `mSettings` body, its variant's patch applied — or null when the directory is
- * not a derived league, has no such view, or its body cannot be read (read synchronously, once, at
- * provider construction; the same files and path rules as the fetch). Fixture mode's private-league
- * variant is told by it (changelog §R10, R10-27): on it, the scripted credential label governs
- * `auto` and `feed` reads before any request, so the gate must know the league is private before
- * its first read — the fixture fetch serves anyone, as no Cookie header exists to tell them apart.
+ * The text of `rel` under a derived manifest's `root` — the ONE path resolver the fixture fetch and
+ * the publicity read share, so their rules cannot drift apart (the round-4b review's F3): never an
+ * empty, absolute or `..` path, never a path that resolves to `root` itself or outside it, never a
+ * file over DERIVED_FILE_MAX_BYTES (its size is read before its bytes are). A refusal throws
+ * DerivedFileRefused; a file that cannot be read throws the read's own error.
  */
-export function derivedLeaguePublicity(dir: string): boolean | null {
+export function derivedFileText(root: string, rel: string): string {
+  if (rel === "" || path.isAbsolute(rel) || rel.split(/[\\/]/).includes(".."))
+    throw new DerivedFileRefused("manifest path refused");
+  const abs = path.resolve(root, rel);
+  if (!abs.startsWith(root + path.sep)) throw new DerivedFileRefused("manifest path refused");
+  if (statSync(abs).size > DERIVED_FILE_MAX_BYTES)
+    throw new DerivedFileRefused("fixture file too large");
+  const text = readFileSync(abs, "utf8");
+  if (text.length > DERIVED_FILE_MAX_BYTES) throw new DerivedFileRefused("fixture file too large");
+  return text;
+}
+
+/**
+ * The recorded league's publicity of a derived fixture directory: `known` (`settings.isPublic` of
+ * its current season's `mSettings` body, its variant's patch applied), `no_settings` (no such view:
+ * the variant serves no league settings, so no league read of it can answer), or `unreadable` (the
+ * view is listed but its body or patch is refused by derivedFileText, cannot be read or parsed, or
+ * holds no boolean `isPublic`); null when the directory is not a derived league. Read synchronously,
+ * once, at provider construction. Fixture mode refuses to start on `unreadable` (src/providers/
+ * espn/index.ts): a malformed private variant read as public would let its reads past the scripted
+ * label silently (the round-4b review's F3; changelog §R10, R10-27).
+ */
+export type DerivedPublicity =
+  | { readonly kind: "known"; readonly value: boolean }
+  | { readonly kind: "no_settings" }
+  | { readonly kind: "unreadable" };
+
+export function readDerivedPublicity(dir: string): DerivedPublicity | null {
   if (!path.isAbsolute(dir)) return null;
   const manifest = readDerivedManifest(dir);
   if (manifest === null) return null;
@@ -123,26 +151,31 @@ export function derivedLeaguePublicity(dir: string): boolean | null {
       x.views.length === 1 &&
       x.views[0] === "mSettings",
   );
-  if (v === undefined) return null;
+  if (v === undefined) return { kind: "no_settings" };
   const root = path.resolve(dir, manifest.root);
-  const read = (rel: string): unknown => {
-    if (rel === "" || path.isAbsolute(rel) || rel.split(/[\\/]/).includes(".."))
-      throw new RangeError("manifest path refused");
-    const abs = path.resolve(root, rel);
-    if (!abs.startsWith(root + path.sep)) throw new RangeError("manifest path refused");
-    const text = readFileSync(abs, "utf8");
-    if (text.length > DERIVED_FILE_MAX_BYTES) throw new RangeError("fixture file too large");
-    return JSON.parse(text) as unknown;
-  };
+  const read = (rel: string): unknown => JSON.parse(derivedFileText(root, rel)) as unknown;
   try {
     const base = read(v.path);
     const body = v.patch === undefined ? base : applyJsonPatch(base, read(v.patch));
     const settings = isObject(body) ? body.settings : undefined;
     const p = isObject(settings) ? settings.isPublic : undefined;
-    return typeof p === "boolean" ? p : null;
+    return typeof p === "boolean" ? { kind: "known", value: p } : { kind: "unreadable" };
   } catch {
-    return null;
+    return { kind: "unreadable" };
   }
+}
+
+/**
+ * The recorded league's publicity of a derived fixture directory as a value — readDerivedPublicity's
+ * `known` value, else null (not a derived league, no settings view, or unreadable). Fixture mode's
+ * private-league variant is told by it (changelog §R10, R10-27): on it, the scripted credential label
+ * governs `auto` and `feed` reads before any request, so the gate must know the league is private
+ * before its first read — the fixture fetch serves anyone, as no Cookie header exists to tell them
+ * apart.
+ */
+export function derivedLeaguePublicity(dir: string): boolean | null {
+  const p = readDerivedPublicity(dir);
+  return p?.kind === "known" ? p.value : null;
 }
 
 // --- JSON patch (RFC 6902 subset) ---------------------------------------------------------------------
@@ -396,14 +429,13 @@ export function createDerivedLeagueFetch(opts: { readonly dir: string }): FetchL
   if (manifest === null) throw new RangeError("fixture mode: not a derived fixture league");
   const root = path.resolve(opts.dir, manifest.root);
   const read = async (rel: string): Promise<unknown> => {
-    if (rel === "" || path.isAbsolute(rel) || rel.split(/[\\/]/).includes(".."))
-      throw new FixtureError("fixture_missing", "manifest path refused");
-    const abs = path.resolve(root, rel);
-    if (!abs.startsWith(root + path.sep))
-      throw new FixtureError("fixture_missing", "manifest path refused");
-    const text = readFileSync(abs, "utf8");
-    if (text.length > DERIVED_FILE_MAX_BYTES)
-      throw new FixtureError("fixture_missing", "fixture file too large");
+    let text: string;
+    try {
+      text = derivedFileText(root, rel);
+    } catch (e) {
+      if (e instanceof DerivedFileRefused) throw new FixtureError("fixture_missing", e.message);
+      throw e;
+    }
     await turn();
     const body = JSON.parse(text) as unknown;
     await turn();

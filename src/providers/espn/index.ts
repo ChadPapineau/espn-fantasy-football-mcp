@@ -16,8 +16,8 @@ import type { RequestOrigin, StoreRepositories } from "../../store/types.js";
 import { createFixtureFetch } from "./fixture.js";
 import {
   createDerivedLeagueFetch,
-  derivedLeaguePublicity,
   readDerivedManifest,
+  readDerivedPublicity,
 } from "./fixture-league.js";
 import type { Sleep } from "./limiter.js";
 import { EspnProvider, type ProScheduleDataset } from "./provider.js";
@@ -32,10 +32,14 @@ export {
   applyJsonPatch,
   createDerivedLeagueFetch,
   derivedLeagueClock,
+  derivedFileText,
+  DerivedFileRefused,
   derivedLeaguePublicity,
   DERIVED_LEAGUE_KIND,
   poolQuery,
   readDerivedManifest,
+  readDerivedPublicity,
+  type DerivedPublicity,
 } from "./fixture-league.js";
 export { EspnDriftError, EspnUpstreamError, isEspnUpstreamError } from "./errors.js";
 export type { FetchLike } from "./transport.js";
@@ -138,8 +142,14 @@ export function createEspnProvider(o: CreateEspnProviderOptions): EspnProvider {
     tlsVerificationDisabled = () => false;
     // the scripted session's label, past the guard above (R10-21)
     fixtureCredentialLabel = o.fixtureCredentialLabel;
-    // the private-league variant (R10-27): its recorded settings say so, read before any request
-    fixturePrivateLeague = loc.kind === "derived" && derivedLeaguePublicity(loc.dir) === false;
+    // the private-league variant (R10-27): its recorded settings say so, read before any request.
+    // A variant whose settings view is listed but cannot be read refuses to start: read as public,
+    // a malformed private variant's reads would pass the scripted label silently (the round-4b
+    // review's F3)
+    const publicity = loc.kind === "derived" ? readDerivedPublicity(loc.dir) : null;
+    if (publicity?.kind === "unreadable")
+      throw new EspnProviderError("INTERNAL", "fixture_settings_unreadable");
+    fixturePrivateLeague = publicity?.kind === "known" && !publicity.value;
   }
   return new EspnProvider({
     config: o.config,
