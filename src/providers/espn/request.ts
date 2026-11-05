@@ -30,7 +30,7 @@ import {
   type DegradedRead,
   type PlatformStamp,
 } from "../../domain/league/types.js";
-import { inTurns, yieldTurn } from "../../domain/analytics/cooperative.js";
+import { inTurns, turnIfSpent, yieldTurn } from "../../domain/analytics/cooperative.js";
 import { checkResponse, failsResponse, type DriftCheck } from "../../drift/detect.js";
 import { errorPath } from "../../drift/pattern.js";
 import { DriftStateWriter, driftMetaFor } from "../../drift/state.js";
@@ -522,16 +522,18 @@ export class EspnRequester {
     const memo = this.memoOf(spec, e);
     if (memo !== undefined) return memo;
     const large = e.parsed_json.length > YIELD_BEFORE_PARSE_CHARS;
+    // a smaller body's phases give up the turn only once the slice has spent its share (F1, round 4d)
+    const between = (): Promise<void> => (large ? yieldToLoop() : turnIfSpent());
     let value: T;
     try {
-      if (large) await yieldToLoop();
+      await between();
       const raw = parseJsonSafe(e.parsed_json);
-      if (large) await yieldToLoop();
+      await between();
       const parsed =
         large && spec.parseSteps !== undefined
           ? await inTurns(spec.parseSteps(raw))
           : spec.parse(raw);
-      if (large) await yieldToLoop();
+      await between();
       value = deepFreeze(parsed);
     } catch {
       return null;
@@ -592,6 +594,12 @@ export class EspnRequester {
 
   /** The read (see the file header). */
   async read<T>(spec: ReadSpec<T>, opts: ReadOptions = {}): Promise<ReadResult<T>> {
+    // a tool's reads chain as microtasks: each cache lookup (SQLite) and small body's parse ran in
+    // the slice of the read before it — on the Linux CI runner espn_analyze_matchup pre held the CPU
+    // 19.8–23.6 ms in one such chain of 53 statements and parses (F1, round 4d; plan 03 §1.2's 20 ms
+    // batch). A read starts a turn of its own once the slice has spent its share (turnIfSpent: free
+    // otherwise); the answer is the same
+    await turnIfSpent();
     const views = spec.target.views;
     const view = primaryView(spec.target);
     const classOf = this.classesOf(spec);
@@ -1288,16 +1296,19 @@ export class EspnRequester {
     // tens of ms on a 1 MB roster; the event loop runs between the phases (the 50 ms stall bound,
     // plan 10 A16a; ADV OBJ-07 — found by the end-to-end stall probe), as `read` does for a hit.
     const large = answer.bodyText.length > YIELD_BEFORE_PARSE_CHARS;
+    // a body under the large bound runs its phases in the slice that holds them unless the slice has
+    // spent its share: then each phase starts a turn of its own (turnIfSpent; F1, round 4d)
+    const between = (): Promise<void> => (large ? yieldToLoop() : turnIfSpent());
     let body: unknown;
     try {
       body = parseJsonSafe(answer.bodyText);
     } catch {
       throw new EspnUpstreamError("malformed", { view, upstream_status: answer.status });
     }
-    if (large) await yieldToLoop();
+    await between();
     const check = this.checkBody(spec.target.views, body, answer.headers);
     if (check.drifted) throw this.driftError(check.signals, body);
-    if (large) await yieldToLoop();
+    await between();
     let parsed: unknown;
     try {
       parsed =
@@ -1308,7 +1319,7 @@ export class EspnRequester {
       if (e instanceof SchemaSignals) throw this.driftError(e.signals);
       throw e;
     }
-    if (large) await yieldToLoop();
+    await between();
     this.reportSoftSignals(check.signals);
     this.cookies.learnFromBody(body);
     if (cookieBearing) await this.cookies.observe("accepted", answer.status, view);
@@ -1331,7 +1342,7 @@ export class EspnRequester {
       // the cache strip of a large body walks it in steps with the loop running between them
       // (stripForCacheSteps; changelog §R10 timing items), and before and after it
       const stripped = large ? await inTurns(stripForCacheSteps(body)) : stripForCache(body);
-      if (large) await yieldToLoop();
+      await between();
       try {
         this.deps.cache.put({
           key,

@@ -302,11 +302,12 @@ const PROFILE = process.env.EFF_HB_PROFILE === "1";
 let session = null;
 /** performance.now() minus the profile clock (µs → ms) at the profiler's start. */
 let profileOffset = 0;
-const startProfile = () => {
+const startProfile = (then) => {
   if (session === null) return;
   session.post("Profiler.setSamplingInterval", { interval: 100 }, () => {
     session.post("Profiler.start", () => {
       profileOffset = now();
+      then?.();
     });
   });
 };
@@ -416,8 +417,10 @@ process.on("SIGUSR2", () => {
     const [p0, p1] = cpuWindow;
     session.post("Profiler.stop", (err, res) => {
       const fns = err ? null : functionsIn(res?.profile ?? null, p0, p1, offset);
-      process.stderr.write(`${JSON.stringify({ ...line, cpu_fn: fns })}\n`);
-      startProfile();
+      // the line once the profiler runs again: the next window's first interval is sampled too
+      startProfile(() => {
+        process.stderr.write(`${JSON.stringify({ ...line, cpu_fn: fns })}\n`);
+      });
     });
   }
   h.reset();

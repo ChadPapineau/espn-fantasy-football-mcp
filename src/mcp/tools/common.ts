@@ -15,8 +15,13 @@ import {
   type FreshnessClassId,
   type TtlContext,
 } from "../../config/freshness.js";
-import type { DatasetResult, DatasetStamp, NewsItem } from "../../domain/analytics/types.js";
-import { yieldTurn } from "../../domain/analytics/cooperative.js";
+import type {
+  DatasetResult,
+  DatasetStamp,
+  NewsItem,
+  PlayerWeekLine,
+} from "../../domain/analytics/types.js";
+import { turnIfSpent, yieldTurn } from "../../domain/analytics/cooperative.js";
 import { ESPN_ROS, LIMITS, NFL_REGULAR_SEASON } from "../../domain/analytics/constants.js";
 import {
   espnRosLastWeek,
@@ -1191,6 +1196,62 @@ export function isOptionalReadFailure(e: unknown): boolean {
   if (code === "ESPN_AUTH_REJECTED" || code === "ESPN_REQUIRES_COOKIES") return true;
   const reason = (e as { effDetails?: { reason?: unknown } } | null)?.effDetails?.reason;
   return (e as { name?: unknown } | null)?.name === "FixtureError" && reason === "fixture_missing";
+}
+
+/**
+ * Players per read of nflverse's weekly stat lines (F1, round 4d). A season's eighteen weeks for a
+ * matchup's two rosters (~30 players, ~500 rows of every stat column) were one synchronous
+ * statement, translation and freeze of every row: on the Linux CI runner that one step held the
+ * CPU 23.6 ms (3.2 of it SQLite, 4.2 the GC its allocation set off) inside espn_analyze_matchup
+ * pre, over plan 03 §1.2's 20 ms batch. Six players' weeks is ~100 rows a read.
+ */
+export const PLAYER_WEEK_CHUNK = 6;
+
+/**
+ * nflverse's weekly stat lines of `gsis` — the rows, in the order, with the stamp one
+ * `playerWeeks.lines` read answers — read PLAYER_WEEK_CHUNK players at a time, yielding between two
+ * reads (a cut point for the caller's runner). The statement orders by player id, then week, so
+ * reading the sorted ids in slices and joining the slices is that one read's answer, row for row
+ * (the usage extras are per player-week, their team totals per team-week: the same). A source that
+ * is not loaded answers as the one read does.
+ */
+export function* playerWeekLinesSteps(
+  ctx: Pick<ToolContext, "services">,
+  gsis: readonly string[],
+  season: number,
+  weeks: readonly Week[],
+  opts?: { readonly usage?: boolean },
+): Generator<void, DatasetResult<PlayerWeekLine>, undefined> {
+  const reader = ctx.services.datasets.playerWeeks;
+  // SQLite's BINARY order of the ASCII ids: JavaScript's default sort of the same strings
+  const ids = [...new Set(gsis)].sort();
+  if (ids.length <= PLAYER_WEEK_CHUNK) return reader.lines(gsis, season, weeks, opts);
+  const rows: PlayerWeekLine[] = [];
+  let stamp: DatasetStamp | null = null;
+  for (let i = 0; i < ids.length; i += PLAYER_WEEK_CHUNK) {
+    if (i > 0) yield;
+    const r = reader.lines(ids.slice(i, i + PLAYER_WEEK_CHUNK), season, weeks, opts);
+    if (r.stamp === null) return r;
+    stamp ??= r.stamp;
+    for (const row of r.rows) rows.push(row);
+  }
+  return { rows, stamp };
+}
+
+/** playerWeekLinesSteps run to its end, giving up the turn between reads once the slice is spent. */
+export async function playerWeekLines(
+  ctx: Pick<ToolContext, "services">,
+  gsis: readonly string[],
+  season: number,
+  weeks: readonly Week[],
+  opts?: { readonly usage?: boolean },
+): Promise<DatasetResult<PlayerWeekLine>> {
+  const work = playerWeekLinesSteps(ctx, gsis, season, weeks, opts);
+  for (;;) {
+    const r = work.next();
+    if (r.done === true) return r.value;
+    await turnIfSpent();
+  }
 }
 
 /**

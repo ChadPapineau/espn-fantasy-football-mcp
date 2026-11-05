@@ -85,6 +85,7 @@ import {
   leagueOf,
   leagueRef,
   optionalDataset,
+  playerWeekLinesSteps,
   present,
   readOpts,
   rosOptsOf,
@@ -193,7 +194,8 @@ export function* trailingSteps(
     ] as const) {
       if (weeks.length === 0) continue;
       // stat lines only: E1 scores them, it never reads the usage extras
-      const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks, { usage: false });
+      // a few players a read, a cut point between reads (F1, round 4d): the same rows
+      const r = yield* playerWeekLinesSteps(ctx, gsis, yr, weeks, { usage: false });
       const input = optionalDataset(r, ctx, allowStale);
       if (input === null) {
         yield;

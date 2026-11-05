@@ -45,9 +45,12 @@ function stripYields(body: unknown): number {
  * The gate passes a large read cannot skip. Fresh: the requester's resume after each upstream
  * answer (two reads: the league's settings, then the roster), and one after the roster's JSON parse,
  * its drift check, its schema parse and its strip. Cached: one before and one after the stored
- * body's JSON parse and one after its schema parse. Literals: the reads' fixed ceiling.
+ * body's JSON parse and one after its schema parse. Each also starts with the read's own
+ * conditional turn (request.ts `read`: turnIfSpent, F1 round 4d), which a frozen meter takes once —
+ * the account's first check after the meter is set always yields (sliceStart −∞) — and never again.
+ * Literals: the reads' fixed ceiling.
  */
-const FIXED_PASSES = { fresh: 6, cached: 3 } as const;
+const FIXED_PASSES = { fresh: 7, cached: 4 } as const;
 
 describe("a large roster read: a team a step, fresh and cached", () => {
   const body = loadRoster("league-c", 3);

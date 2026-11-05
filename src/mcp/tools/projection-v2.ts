@@ -51,7 +51,7 @@ import type { ScoringSettings } from "../../domain/scoring/types.js";
 import type { NflTeam } from "../../config/schema.js";
 import { toDataInputs, type InputStamp } from "../envelope.js";
 import { beforeSideEffect, type ToolContext } from "../define.js";
-import { optionalDataset, turn } from "./common.js";
+import { optionalDataset, playerWeekLines, turn } from "./common.js";
 
 /** One E1 subject (analytics.ts Subject — repeated here to keep this module import-cycle free). */
 export interface V2Subject {
@@ -371,7 +371,8 @@ export async function runV2(
     // the usage extras (snap share, red-zone counts) for the current season only: the prior
     // season's eighteen weeks of them were one long statement (the stall bound), and v2 reads the
     // role metric and location from the recent games first (null → opportunity share / xTD)
-    const r = ctx.services.datasets.playerWeeks.lines(gsis, yr, weeks, { usage: yr === season });
+    // a few players a read, the turn given up between reads once spent (F1, round 4d): the same rows
+    const r = await playerWeekLines(ctx, gsis, yr, weeks, { usage: yr === season });
     const st = optionalDataset(r, ctx, o.allowStale);
     if (st === null) continue;
     anyLines = true;
