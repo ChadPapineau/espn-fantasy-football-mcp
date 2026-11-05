@@ -1196,6 +1196,7 @@ The untrusted-text rule the server declares to the model, verbatim from the plan
 |---|---|---|
 | `EFF_FIXTURE_DIR` | — | Fixture mode: serve recorded, anonymised fixtures from this absolute directory. |
 | `EFF_FIXTURE_RECORD` | `0` | Raw-body recording for fixture capture (1 \| 0); raw bodies stay outside the repo. |
+| `EFF_FIXTURE_SEED` | `0` | Fixture mode only: the eval seed's server (1 \| 0); a scripted mid-procedure 401 is never armed. Ignored outside fixture mode. |
 | `EFF_TEST_STUBS` | `0` | Startup test stubs (1 \| 0): any network call or keychain read exits 99. |
 <!-- END GENERATED: test-keys -->
 

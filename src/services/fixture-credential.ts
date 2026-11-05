@@ -29,9 +29,13 @@
 // `rejected`, recorded as the real pipeline records a 401 (`last_rejected_at` and `rejected_since` at
 // that instant, in memory only — never the store's credential row, which the fixture guard reads),
 // so espn_get_status and espn_check_auth say `rejected` from then on (the probe answers accepted
-// false with ESPN's 401; before the 401 an accepting probe validates the session, which is then never
-// rejected), and every later read follows the rejected label (R10-27). Still a label: no value, no
-// Cookie header, nothing sent. New here.
+// false with ESPN's 401), and every later read follows the rejected label (R10-27). Before the 401 an
+// accepting probe validates the session and does NOT disarm the 401 (changelog §R10, R10-33,
+// amending R10-28 and R10-31): the first uncached read under `validated` still meets it, as a
+// cookie can expire after a probe accepted it. Only the eval seed's server disarms it — the
+// fixture-only seed path EFF_FIXTURE_SEED=1 (config.fixtureSeed, true only in fixture mode), which
+// the eval run's `.mcp.json` never carries — so the seed's reads are served and cached and never
+// rejected. Still a label: no value, no Cookie header, nothing sent. New here.
 import path from "node:path";
 import { readSecureFile } from "../config/paths.js";
 import { ConfigError, type CredentialState } from "../config/schema.js";
@@ -160,8 +164,9 @@ export interface ScriptedAuth {
   /**
    * The one probe: the scripted result; no request (`upstream_status` null), no value. It is the
    * explicit credential check, not a data read, so it never fires a scripted rejection's 401
-   * (R10-28): before that 401 an accepting probe moves the label to `validated`, and a validated
-   * session is never rejected after it (how a seed fills the cache). Once the 401 has rejected the
+   * (R10-28): before that 401 an accepting probe moves the label to `validated` and leaves the 401
+   * armed (changelog §R10, R10-33): the first uncached read after it is still the 401. Only the
+   * seed path (`ScriptedAuthOptions.seed`) disarms it. Once the 401 has rejected the
    * session, the probe reports `rejected` from then on, as R10-28 rules (the same session, probed
    * again, is ESPN's 401 again): accepted false, `upstream_status` 401, the label kept `rejected`
    * (the round-4c verifier's R4C-VS-3).
@@ -170,25 +175,43 @@ export interface ScriptedAuth {
   /**
    * Asked by the cookie gate when the label would serve a read about to go out (a read the cache
    * did not serve — R10-28): true exactly once for a session scripted `rejects:
-   * "first_uncached_read"` while it is still `stored`, which
-   * is then rejected as a 401 records it (the label `rejected`, `last_rejected_at` and
-   * `rejected_since` now). False for every other state and every later read.
+   * "first_uncached_read"` while it is still `stored` or, after an accepting probe, `validated`
+   * (changelog §R10, R10-33), which is then rejected as a 401 records it (the label `rejected`,
+   * `last_rejected_at` and `rejected_since` now). False on the seed path, for every other state and
+   * for every later read.
    */
   rejectsRead(): boolean;
+}
+
+/** How the composition root builds the scripted authority (fixture mode only). */
+export interface ScriptedAuthOptions {
+  /**
+   * The eval seed's server (changelog §R10, R10-33; config.fixtureSeed, EFF_FIXTURE_SEED=1, true
+   * only in fixture mode): a scripted mid-procedure 401 is never armed, so the seed's reads are
+   * served and cached. A label, never a value; the eval run's server never carries it.
+   */
+  readonly seed?: boolean;
 }
 
 /**
  * The scripted authority. The probe's verdict moves the label as a real probe would (plan 02 §2.1:
  * accepted → `validated`, rejected → `rejected`; an undecided probe leaves it), in memory only.
  */
-export function scriptedAuth(scripted: ScriptedCredential, clock: Clock): ScriptedAuth {
+export function scriptedAuth(
+  scripted: ScriptedCredential,
+  clock: Clock,
+  opts: ScriptedAuthOptions = {},
+): ScriptedAuth {
   let state: CredentialState = scripted.state;
-  // the session ESPN rejects at its first uncached read (changelog §R10, R10-28): `stored` until then
-  let expiring = scripted.rejects === "first_uncached_read";
+  // the session ESPN rejects at its first uncached read (changelog §R10, R10-28), armed until then
+  // on every server but the seed's (R10-33: only the seed path disarms it, never a probe)
+  let expiring = scripted.rejects === "first_uncached_read" && opts.seed !== true;
   let rejectedAt: string | null = null;
   /** The scripted 401: the label moves to `rejected`, recorded as the pipeline records a 401. */
   const expire = (): boolean => {
-    if (!expiring || state !== "stored") return false;
+    // `stored`, or `validated` by an accepting probe that left the 401 armed (R10-33); a label the
+    // probe moved to `rejected` short-circuits at the gate and never asks
+    if (!expiring || (state !== "stored" && state !== "validated")) return false;
     expiring = false;
     state = "rejected";
     rejectedAt = clock.nowIso();

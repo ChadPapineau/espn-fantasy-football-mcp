@@ -309,6 +309,26 @@ describe("the seam is unreachable outside fixture mode, and the guard runs befor
     }
   });
 
+  // changelog §R10, R10-33: the eval seed's path (EFF_FIXTURE_SEED) is unreachable outside fixture
+  // mode — the real path is unchanged, and no scripted state is read or disarmed
+  it("EFF_FIXTURE_SEED=1 with no EFF_FIXTURE_DIR is ignored: the own store's state, never a variant's", async () => {
+    store.repos.credentialState.clear();
+    for (const v of ["1", "true"]) {
+      const { build, lines } = wire({ EFF_FIXTURE_SEED: v });
+      const w = build();
+      try {
+        expect(w.options.fixtureMode).toBe(false);
+        expect(w.services.status.credential().state).toBe("not_configured");
+        expect(w.services.auth.state()).toBe("not_configured");
+        const r = await w.services.auth.probe(w.services.league);
+        expect(r).toMatchObject({ accepted: null, reason: "not_configured" });
+        expect(lines.some((l) => l.includes("fixture_credential_scripted"))).toBe(false);
+      } finally {
+        w.close();
+      }
+    }
+  });
+
   it("with a credential stored, fixture mode on auth-rejected or public-league is refused before the seam is read", () => {
     for (const state of ["stored", "rejected", "validated"] as const) {
       store.repos.credentialState.put({
@@ -333,10 +353,17 @@ describe("the seam is unreachable outside fixture mode, and the guard runs befor
         "private-league-none",
         "private-expiring",
       ]) {
-        const { build, lines } = wire({ EFF_FIXTURE_DIR: path.join(FX, v), EFF_TEST_STUBS: "1" });
-        expect(build, `${state} ${v}`).toThrow(ConfigError);
-        expect(lines.some((l) => l.includes("fixture_credential_scripted"))).toBe(false);
-        expect(lines.some((l) => l.includes("services.fixture_mode_refused"))).toBe(true);
+        // the seed's path too (R10-33): the guard runs first, before the flag is read
+        for (const seed of [{}, { EFF_FIXTURE_SEED: "1" }]) {
+          const { build, lines } = wire({
+            EFF_FIXTURE_DIR: path.join(FX, v),
+            EFF_TEST_STUBS: "1",
+            ...seed,
+          });
+          expect(build, `${state} ${v} ${JSON.stringify(seed)}`).toThrow(ConfigError);
+          expect(lines.some((l) => l.includes("fixture_credential_scripted"))).toBe(false);
+          expect(lines.some((l) => l.includes("services.fixture_mode_refused"))).toBe(true);
+        }
       }
     }
     store.repos.credentialState.clear();

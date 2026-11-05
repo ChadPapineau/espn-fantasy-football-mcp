@@ -293,6 +293,7 @@ export const CONFIG_KEYS = [
   "EFF_NODE",
   "EFF_FIXTURE_DIR",
   "EFF_FIXTURE_RECORD",
+  "EFF_FIXTURE_SEED",
   "EFF_TEST_STUBS",
 ] as const;
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -353,6 +354,7 @@ export const CONFIG_KEY_SPECS: readonly ConfigKeySpec[] = Object.freeze([
   spec("EFF_NODE", "launcher", "Absolute Node path for scripts/eff-launch.sh (the plugin shim). Unset: resolved automatically.", null),
   spec("EFF_FIXTURE_DIR", "test", "Fixture mode: serve recorded, anonymised fixtures from this absolute directory.", null),
   spec("EFF_FIXTURE_RECORD", "test", "Raw-body recording for fixture capture (1 | 0); raw bodies stay outside the repo.", "0"),
+  spec("EFF_FIXTURE_SEED", "test", "Fixture mode only: the eval seed's server (1 | 0); a scripted mid-procedure 401 is never armed. Ignored outside fixture mode.", "0"),
   spec("EFF_TEST_STUBS", "test", "Startup test stubs (1 | 0): any network call or keychain read exits 99.", "0"),
 ]);
 
@@ -558,6 +560,12 @@ export interface Config {
   readonly keychainSelftest: KeychainSelftestRecord | null;
   readonly fixtureDir: string | null;
   readonly fixtureRecord: boolean;
+  /**
+   * EFF_FIXTURE_SEED: the eval seed's server (changelog §R10, R10-33) — the one path that disarms a
+   * fixture variant's scripted mid-procedure 401. True only in fixture mode (`fixtureDir` set); a
+   * label for the composition root's fixture branch, never a value.
+   */
+  readonly fixtureSeed: boolean;
   readonly testStubs: boolean;
   readonly origins: Readonly<Record<ConfigKey, ValueOrigin>>;
   /** Env values ignored because config.json recorded a different one (`doctor` #6 fails on these). */
@@ -875,6 +883,9 @@ export function loadConfig(
     }
   }
   const fixtureRecord = flag("EFF_FIXTURE_RECORD");
+  // the eval seed's path (changelog §R10, R10-33): parsed as every flag is, honoured only in fixture
+  // mode — outside it the flag is ignored (no scripted credential exists there to disarm)
+  const fixtureSeed = flag("EFF_FIXTURE_SEED") && fixtureDir !== null;
   const testStubs = flag("EFF_TEST_STUBS");
   origins.EFF_NODE = envStr(env, "EFF_NODE") === undefined ? "default" : "env";
 
@@ -914,6 +925,7 @@ export function loadConfig(
     keychainSelftest,
     fixtureDir,
     fixtureRecord,
+    fixtureSeed,
     testStubs,
     origins: Object.freeze(origins),
     credentialEnvConflicts: Object.freeze(credentialEnvConflicts),

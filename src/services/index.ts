@@ -393,15 +393,20 @@ export function buildServices(args: BuildServicesArgs): Wiring {
   }
   // fixture mode's credential-state test seam (changelog §R9, R9-3): the state a derived variant's
   // manifest scripts, reported as a label only — never a value; reached only in fixture mode, and
-  // only after the guard above refused every stored credential
+  // only after the guard above refused every stored credential. The eval seed's path
+  // (config.fixtureSeed, changelog §R10, R10-33) is read here only, inside this branch: it disarms a
+  // scripted mid-procedure 401 on the seed's server alone
   const scripted: ScriptedAuth | null = fixture
     ? ((): ScriptedAuth | null => {
         const s = readScriptedCredential(config.fixtureDir);
-        return s === null ? null : scriptedAuth(s, clock);
+        return s === null ? null : scriptedAuth(s, clock, { seed: config.fixtureSeed });
       })()
     : null;
   if (scripted !== null)
-    logger.info("services.fixture_credential_scripted", { state: scripted.state() });
+    logger.info("services.fixture_credential_scripted", {
+      state: scripted.state(),
+      seed: config.fixtureSeed,
+    });
   const loadKeyring = config.testStubs ? stubbedKeyring(stderr) : args.loadKeyring;
   const fetchFn = config.testStubs && !fixture ? stubbedFetch(stderr) : args.fetch;
   const ref: LeagueRef = { platform: "espn", league_id: config.leagueId, season: config.season };

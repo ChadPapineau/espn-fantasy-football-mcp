@@ -15,7 +15,14 @@
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServices } from "../../src/services/index.js";
-import { ROOT, call, connect, makeWorld, type World } from "../mcp/helpers/world.js";
+import {
+  ROOT,
+  call,
+  connect,
+  makeWorld,
+  withFixtureSeed,
+  type World,
+} from "../mcp/helpers/world.js";
 
 const FX = path.join(ROOT, "fixtures", "espn", "fx-10h");
 const CLOCK_AT = "2026-10-07T01:00:00.000Z";
@@ -76,10 +83,17 @@ async function worldOn(variant: string): Promise<World> {
   });
 }
 
-/** A new server process over the world's store (its scripted label starts again). */
-async function server(world: World): Promise<{ client: Client; close: () => Promise<void> }> {
+/**
+ * A new server process over the world's store (its scripted label starts again); `seed`: the eval
+ * seed's server (EFF_FIXTURE_SEED, the one path that disarms the scripted 401 — changelog §R10,
+ * R10-33).
+ */
+async function server(
+  world: World,
+  seed = false,
+): Promise<{ client: Client; close: () => Promise<void> }> {
   const w = buildServices({
-    config: world.config,
+    config: withFixtureSeed(world.config, seed),
     store: world.store,
     clock: world.clock,
     logger: world.logger,
@@ -130,8 +144,9 @@ describe("private-expiring (R10-28): the 401 lands mid-call in every tool, and e
   let world: World;
   beforeAll(async () => {
     world = await worldOn("private-expiring");
-    // the seed: an accepting probe validates, and the league settings are read (left fresh)
-    const seed = await server(world);
+    // the seed (its own path, R10-33): an accepting probe validates, and the league settings are
+    // read (left fresh)
+    const seed = await server(world, true);
     expect((await call(seed.client, "espn_check_auth", {})).isError).toBe(false);
     expect((await call(seed.client, "espn_get_league", {})).isError).toBe(false);
     await seed.close();

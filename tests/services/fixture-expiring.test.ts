@@ -8,9 +8,12 @@
 // records a 401 (`last_rejected_at`, `rejected_since`), so espn_get_status and espn_check_auth say
 // `rejected` from then on, and every later read follows R10-27's rejected rule (the short-circuit,
 // zero requests). The probe is the explicit check, never a data read: it never fires the 401, and
-// before it an accepting probe validates the session (never rejected after — how the seed fills the
-// cache); after it the probe answers accepted false with ESPN's 401 and the label stays `rejected`
-// (the round-4c verifier's R4C-VS-3). A read the 401 overtook is refused too (CR-2). Zero network and no
+// before it an accepting probe validates the session and leaves the 401 armed (changelog §R10,
+// R10-33): on the eval run's server the first uncached read under `validated` is still the 401.
+// Only the seed's own path disarms it — EFF_FIXTURE_SEED=1 (config.fixtureSeed), honoured in
+// fixture mode alone and never in the run's `.mcp.json` — so the seed's reads are served and cached,
+// never rejected. After the 401 the probe answers accepted false with ESPN's 401 and the label stays
+// `rejected` (the round-4c verifier's R4C-VS-3). A read the 401 overtook is refused too (CR-2). Zero network and no
 // value or Cookie header anywhere; the fixture guard runs first (fixture-credential.test.ts); nothing
 // outside fixture mode reaches the seam. Also R10-27's second private variant, `private-league-none`
 // (not_configured): its first reads. Over the production stdio entry (serveStdio over an in-memory
@@ -42,7 +45,14 @@ import {
   MemoryLimiterRepo,
   testCookieHeader,
 } from "../providers/espn/helpers.js";
-import { ROOT, call, connect, makeWorld, type World } from "../mcp/helpers/world.js";
+import {
+  ROOT,
+  call,
+  connect,
+  makeWorld,
+  withFixtureSeed,
+  type World,
+} from "../mcp/helpers/world.js";
 
 const FX = path.join(ROOT, "fixtures", "espn", "fx-10h");
 const EXPIRING = path.join(FX, "private-expiring");
@@ -70,15 +80,21 @@ const credOf = async (c: Client) => {
   ).credential;
 };
 
-/** One world (store) for a variant, and its first server (the seed's process). */
-async function worldOn(dir: string): Promise<{
+/**
+ * One world (store) for a variant, and its first server: with `seed`, the seed's process, started
+ * as build-plugin-evals starts it (EFF_FIXTURE_SEED=1, changelog §R10, R10-33); without, a run's.
+ */
+async function worldOn(
+  dir: string,
+  seed = false,
+): Promise<{
   world: World;
   client: Client;
   close: () => Promise<void>;
   requests: () => number;
 }> {
   const world = await makeWorld({
-    env: { EFF_FIXTURE_DIR: dir, EFF_TOOLSET: "full" },
+    env: { EFF_FIXTURE_DIR: dir, EFF_TOOLSET: "full", ...(seed ? { EFF_FIXTURE_SEED: "1" } : {}) },
     teamId: 2,
     clock: CLOCK_AT,
     publishEspn: false,
@@ -95,10 +111,16 @@ async function worldOn(dir: string): Promise<{
   };
 }
 
-/** A new server process over the same store (the run's server after the seed's). */
-async function again(world: World): Promise<{ client: Client; close: () => Promise<void> }> {
+/**
+ * A new server process over the same store: the run's server after the seed's (no seed path, as
+ * the run's `.mcp.json` starts it), or with `seed` another seed server (R10-33).
+ */
+async function again(
+  world: World,
+  seed = false,
+): Promise<{ client: Client; close: () => Promise<void> }> {
   const w = buildServices({
-    config: world.config,
+    config: withFixtureSeed(world.config, seed),
     store: world.store,
     clock: world.clock,
     logger: world.logger,
@@ -185,7 +207,7 @@ describe("R10-28: the scripted state reads as `stored` and is value-free", () =>
     expect(JSON.stringify(a.view())).not.toMatch(COOKIE_WORDS);
   });
 
-  it("the probe is the explicit check, not a data read: before the 401 it answers the scripted result and a validated session is never rejected; after it, rejected from then on", async () => {
+  it("the probe is the explicit check, not a data read: before the 401 it answers the scripted result and validates, leaving the 401 armed (R10-33); after it, rejected from then on", async () => {
     const clock = fixedClock(CLOCK_AT);
     const a = scriptedAuth(
       {
@@ -197,8 +219,15 @@ describe("R10-28: the scripted state reads as `stored` and is value-free", () =>
     );
     await expect(a.probe()).resolves.toMatchObject({ accepted: true, upstream_status: null });
     expect(a.state()).toBe("validated");
-    expect(a.rejectsRead()).toBe(false);
     expect(a.view()).toMatchObject({ last_rejected_at: null, rejected_since: null });
+    // changelog §R10, R10-33: the accepting probe did not disarm the 401 — the first uncached read
+    // under `validated` is still ESPN's 401, recorded as one, and only once
+    expect(a.rejectsRead()).toBe(true);
+    expect(a.state()).toBe("rejected");
+    expect(a.view()).toMatchObject({ last_rejected_at: CLOCK_AT, rejected_since: CLOCK_AT });
+    expect(a.rejectsRead()).toBe(false);
+    await expect(a.probe()).resolves.toMatchObject({ accepted: false, upstream_status: 401 });
+    expect(a.state()).toBe("rejected");
     // after the 401, the probe reports the session rejected from then on (R10-28; R4C-VS-3)
     const b = scriptedAuth(
       {
@@ -224,10 +253,54 @@ describe("R10-28: the scripted state reads as `stored` and is value-free", () =>
   });
 });
 
+describe("R10-33: only the seed's path disarms the scripted 401", () => {
+  const scripted = {
+    state: "stored",
+    probe: { accepted: true, reason: null, probe: "settings" },
+    rejects: "first_uncached_read",
+  } as const;
+
+  it("the seed path: never armed — unprobed reads stay `stored`, an accepting probe validates, no read is ever rejected", async () => {
+    const clock = fixedClock(CLOCK_AT);
+    const unprobed = scriptedAuth(scripted, clock, { seed: true });
+    for (let i = 0; i < 3; i++) expect(unprobed.rejectsRead()).toBe(false);
+    expect(unprobed.state()).toBe("stored");
+    const probed = scriptedAuth(scripted, clock, { seed: true });
+    await expect(probed.probe()).resolves.toMatchObject({ accepted: true, upstream_status: null });
+    for (let i = 0; i < 3; i++) expect(probed.rejectsRead()).toBe(false);
+    expect(probed.state()).toBe("validated");
+    expect(probed.view()).toMatchObject({ last_rejected_at: null, rejected_since: null });
+  });
+
+  it("without the seed path (the eval run's server; `seed: false` or absent), the 401 is armed whether or not a probe accepted first", async () => {
+    const clock = fixedClock(CLOCK_AT);
+    for (const opts of [undefined, {}, { seed: false }] as const) {
+      for (const probeFirst of [false, true]) {
+        const a = scriptedAuth(scripted, clock, opts);
+        if (probeFirst) await a.probe();
+        expect(a.state(), `${JSON.stringify(opts)} ${String(probeFirst)}`).toBe(
+          probeFirst ? "validated" : "stored",
+        );
+        expect(a.rejectsRead()).toBe(true);
+        expect(a.state()).toBe("rejected");
+      }
+    }
+    // a variant scripting no rejection is unchanged by either path
+    for (const seed of [true, false]) {
+      const b = scriptedAuth({ state: "stored", probe: scripted.probe }, clock, { seed });
+      await b.probe();
+      expect(b.rejectsRead()).toBe(false);
+      expect(b.state()).toBe("validated");
+    }
+  });
+});
+
 describe("R10-28 over stdio: status stored → a cached read served → the first uncached read rejected and recorded → status rejected → later reads refused with zero requests", () => {
   let s: Awaited<ReturnType<typeof worldOn>>;
   beforeAll(async () => {
-    s = await worldOn(EXPIRING);
+    // the seed's server, on its own path (EFF_FIXTURE_SEED=1, R10-33)
+    s = await worldOn(EXPIRING, true);
+    expect(s.world.config.fixtureSeed).toBe(true);
   }, 120_000);
   afterAll(async () => {
     await s.close();
@@ -331,6 +404,146 @@ describe("R10-28 over stdio: status stored → a cached read served → the firs
   });
 });
 
+describe("R10-33 over stdio: on the eval run's server an accepting espn_check_auth validates and leaves the 401 armed", () => {
+  let s: Awaited<ReturnType<typeof worldOn>>;
+  beforeAll(async () => {
+    // no seed path: the world's first server is a run's, started as the run's .mcp.json starts it
+    s = await worldOn(EXPIRING);
+    expect(s.world.config.fixtureSeed).toBe(false);
+  }, 120_000);
+  afterAll(async () => {
+    await s.close();
+  });
+
+  const rejectedAfter = async (c: Client, label: string): Promise<void> => {
+    const cred = await credOf(c);
+    expect(cred.state, label).toBe("rejected");
+    expect(cred.last_rejected_at, label).not.toBeNull();
+    expect(cred.rejected_since, label).toBe(cred.last_rejected_at);
+    for (const [tool, args] of [
+      ["espn_get_standings", {}],
+      ["espn_list_transactions", { count: 20 }],
+      ["espn_get_roster", { week: 5 }],
+    ] as const) {
+      const r = await call(c, tool, args);
+      expect(r.isError, `${label} ${tool} ${JSON.stringify(r.body).slice(0, 200)}`).toBe(true);
+      expect(codeOf(r.body), `${label} ${tool}`).toBe("ESPN_AUTH_REJECTED");
+      expect(errOf(r.body).reason, `${label} ${tool}`).toBe("short_circuit");
+    }
+    // (the probe after the 401 is R10-28's case above; this server already used its one probe a
+    // minute, plan 07 G2)
+    expect((await credOf(c)).state, label).toBe("rejected");
+  };
+
+  it("nothing cached: the probe accepts (validated), and the first read is ESPN's 401 — the label rejected, later reads short-circuited, zero requests", async () => {
+    expect((await credOf(s.client)).state).toBe("stored");
+    const probe = await call(s.client, "espn_check_auth", {});
+    expect(probe.body.data).toMatchObject({ accepted: true, upstream_status: null });
+    expect((await credOf(s.client)).state).toBe("validated");
+    const lg = await call(s.client, "espn_get_league", {});
+    expect(lg.isError, JSON.stringify(lg.body).slice(0, 300)).toBe(true);
+    expect(codeOf(lg.body)).toBe("ESPN_AUTH_REJECTED");
+    expect(errOf(lg.body).upstream_status).toBe(401);
+    expect(errOf(lg.body).reason).toBeUndefined();
+    await rejectedAfter(s.client, "unseeded run");
+    expect(s.requests()).toBe(0);
+    expect(JSON.stringify(lg.body)).not.toMatch(COOKIE_WORDS);
+  });
+
+  it("on the seeded state: the seed (its own path) leaves the settings fresh; the run probes first (validated), the settings are served, and its first uncached read is the 401", async () => {
+    const seed = await again(s.world, true);
+    try {
+      expect((await call(seed.client, "espn_check_auth", {})).body.data).toMatchObject({
+        accepted: true,
+      });
+      const lg = await call(seed.client, "espn_get_league", {});
+      expect(lg.isError, JSON.stringify(lg.body).slice(0, 300)).toBe(false);
+      expect((await credOf(seed.client)).state).toBe("validated");
+    } finally {
+      await seed.close();
+    }
+    const run = await again(s.world);
+    try {
+      const n = s.requests();
+      expect((await credOf(run.client)).state).toBe("stored");
+      const probe = await call(run.client, "espn_check_auth", {});
+      expect(probe.body.data).toMatchObject({ accepted: true, upstream_status: null });
+      expect((await credOf(run.client)).state).toBe("validated");
+      // a cached read is served under `validated` (the 401 is the first read the cache does not serve)
+      const lg = await call(run.client, "espn_get_league", {});
+      expect(lg.isError, JSON.stringify(lg.body).slice(0, 300)).toBe(false);
+      expect((await credOf(run.client)).state).toBe("validated");
+      const st = await call(run.client, "espn_get_standings", {});
+      expect(st.isError, JSON.stringify(st.body).slice(0, 300)).toBe(true);
+      expect(codeOf(st.body)).toBe("ESPN_AUTH_REJECTED");
+      expect(errOf(st.body).upstream_status).toBe(401);
+      await rejectedAfter(run.client, "seeded run");
+      // the settings stay fresh: still served under the rejected label; nothing was sent
+      expect((await call(run.client, "espn_get_league", {})).isError).toBe(false);
+      expect(s.requests()).toBe(n);
+    } finally {
+      await run.close();
+    }
+  });
+});
+
+describe("R10-33 over stdio: the seed's path (EFF_FIXTURE_SEED=1) — reads served and cached, never rejected, probed or not", () => {
+  let s: Awaited<ReturnType<typeof worldOn>>;
+  beforeAll(async () => {
+    s = await worldOn(EXPIRING, true);
+  }, 120_000);
+  afterAll(async () => {
+    await s.close();
+  });
+
+  it("before and after an accepting probe every read is served; the run's server after it is served the cached reads with zero requests and still meets the 401 at its first uncached one", async () => {
+    expect((await credOf(s.client)).state).toBe("stored");
+    // unprobed: the read is served, the label stays stored
+    const lg = await call(s.client, "espn_get_league", {});
+    expect(lg.isError, JSON.stringify(lg.body).slice(0, 300)).toBe(false);
+    expect((await credOf(s.client)).state).toBe("stored");
+    const probe = await call(s.client, "espn_check_auth", {});
+    expect(probe.body.data).toMatchObject({ accepted: true, upstream_status: null });
+    for (const [tool, args] of [
+      ["espn_get_standings", {}],
+      ["espn_get_roster", {}],
+    ] as const) {
+      const r = await call(s.client, tool, args);
+      expect(r.isError, `${tool} ${JSON.stringify(r.body).slice(0, 200)}`).toBe(false);
+    }
+    const cred = await credOf(s.client);
+    expect(cred).toMatchObject({
+      state: "validated",
+      last_rejected_at: null,
+      rejected_since: null,
+    });
+    expect(s.requests()).toBeGreaterThan(0);
+    // the run's server (no seed path) over the same store: the seed's reads were cached
+    const run = await again(s.world);
+    try {
+      const n = s.requests();
+      for (const [tool, args] of [
+        ["espn_get_league", {}],
+        ["espn_get_standings", {}],
+      ] as const) {
+        const r = await call(run.client, tool, args);
+        expect(r.isError, `${tool} ${JSON.stringify(r.body).slice(0, 200)}`).toBe(false);
+      }
+      expect((await credOf(run.client)).state).toBe("stored");
+      expect(s.requests()).toBe(n);
+      // and its 401 is armed: the first read the cache does not serve
+      const tx = await call(run.client, "espn_list_transactions", { count: 20 });
+      expect(tx.isError, JSON.stringify(tx.body).slice(0, 300)).toBe(true);
+      expect(codeOf(tx.body)).toBe("ESPN_AUTH_REJECTED");
+      expect(errOf(tx.body).upstream_status).toBe(401);
+      expect((await credOf(run.client)).state).toBe("rejected");
+      expect(s.requests()).toBe(n);
+    } finally {
+      await run.close();
+    }
+  });
+});
+
 describe("R10-27's second private variant, private-league-none (not_configured): its first reads", () => {
   let s: Awaited<ReturnType<typeof worldOn>>;
   beforeAll(async () => {
@@ -399,7 +612,7 @@ describe("R10-28 under concurrency (the round-4c verifier's CR-2): a read the 40
         fixtureCredentialLabel: label,
         fixtureRejectsRead: rejects,
       });
-    // the seed's process (validated: never rejected) leaves the settings fresh in the cache
+    // the seed's process (its own path, R10-33: never rejected) leaves the settings fresh in the cache
     await make(
       () => "validated",
       () => false,

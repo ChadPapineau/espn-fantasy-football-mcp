@@ -511,3 +511,19 @@ export async function call(
   const r = await client.callTool({ name, arguments: args }, { timeout: TEST_CALL_TIMEOUT_MS });
   return { isError: (r as { isError?: boolean }).isError === true, body: body(r), raw: r };
 }
+
+/**
+ * The world's config with the eval seed's path on or off (EFF_FIXTURE_SEED, config.fixtureSeed;
+ * changelog §R10, R10-33): a seed server and the run's servers over one store, as
+ * build-plugin-evals runs them. Honoured only in fixture mode, as loadConfig has it; the
+ * non-enumerable `secrets` are carried over.
+ */
+export function withFixtureSeed(config: Config, seed: boolean): Config {
+  const out = { ...config, fixtureSeed: seed && config.fixtureDir !== null };
+  Object.defineProperty(out, "secrets", {
+    value: config.secrets,
+    enumerable: false,
+    writable: false,
+  });
+  return Object.freeze(out);
+}

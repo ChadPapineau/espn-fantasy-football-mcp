@@ -106,6 +106,7 @@ describe("defaults and the key table", () => {
       keychainSelftest: null,
       fixtureDir: null,
       fixtureRecord: false,
+      fixtureSeed: false,
       testStubs: false,
       credentialEnvConflicts: [],
       warnings: [],
@@ -130,6 +131,7 @@ describe("defaults and the key table", () => {
     expect(configKeysByScope("test").map((s) => s.key)).toEqual([
       "EFF_FIXTURE_DIR",
       "EFF_FIXTURE_RECORD",
+      "EFF_FIXTURE_SEED",
       "EFF_TEST_STUBS",
     ]);
   });
@@ -932,6 +934,26 @@ describe("test scope and secrets", () => {
         loadConfig(input({ env: { ESPN_LEAGUE_ID: LEAGUE, EFF_TEST_STUBS: "maybe" } })),
       )[0]?.key,
     ).toBe("EFF_TEST_STUBS");
+  });
+  // changelog §R10, R10-33: the eval seed's path is a fixture-mode flag, ignored outside it
+  it("EFF_FIXTURE_SEED is honoured in fixture mode only, parsed as every flag is", () => {
+    const fx = path.join(ROOT, "fixtures", "espn");
+    const seedOf = (env: Record<string, string>): boolean =>
+      loadConfig(input({ env: { ESPN_LEAGUE_ID: LEAGUE, ...env } })).fixtureSeed;
+    expect(seedOf({ EFF_FIXTURE_DIR: fx, EFF_FIXTURE_SEED: "1" })).toBe(true);
+    expect(seedOf({ EFF_FIXTURE_DIR: fx, EFF_FIXTURE_SEED: "true" })).toBe(true);
+    expect(seedOf({ EFF_FIXTURE_DIR: fx, EFF_FIXTURE_SEED: "0" })).toBe(false);
+    expect(seedOf({ EFF_FIXTURE_DIR: fx })).toBe(false);
+    // outside fixture mode the flag is ignored: nothing scripted exists there to disarm
+    expect(seedOf({ EFF_FIXTURE_SEED: "1" })).toBe(false);
+    expect(seedOf({ EFF_FIXTURE_SEED: "true" })).toBe(false);
+    expect(
+      issuesOf(() =>
+        loadConfig(
+          input({ env: { ESPN_LEAGUE_ID: LEAGUE, EFF_FIXTURE_DIR: fx, EFF_FIXTURE_SEED: "yes" } }),
+        ),
+      )[0]?.key,
+    ).toBe("EFF_FIXTURE_SEED");
   });
   it("keeps secrets non-enumerable and out of every serialisation", () => {
     // assembled at run time: a key-shaped literal would trip gitleaks' generic-api-key rule

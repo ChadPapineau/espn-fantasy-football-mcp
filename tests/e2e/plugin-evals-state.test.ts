@@ -6,7 +6,10 @@
 // eval-server.mjs), begins from that state on every start: what one run logs never reaches the next.
 // Also WK-10's seed (changelog §R10, R10-28, R10-31): on private-expiring the datasets, then the
 // settings read under an accepting probe; the run starts on `stored`, and E11 is its first uncached
-// read — partial, with the feed's and the league reads' session lines (the round-4d texts).
+// read — partial, with the feed's and the league reads' session lines (the round-4d texts). R10-33:
+// the seed runs on its own path (EFF_FIXTURE_SEED=1, the one way to disarm the scripted 401), which
+// the run's .mcp.json never carries, so a run that probes first is validated and still meets the 401
+// at its first uncached read.
 // Fixture mode only, under the no-socket preload: no network, no cookie, no ~/.config or ~/.cache.
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -278,6 +281,36 @@ describe("WK-10 (changelog §R10, R10-28, R10-31): the session is rejected insid
     expect(w.some((x) => x.includes("the league's teams were not read"))).toBe(false);
     expect(w.some((x) => x.includes("this week's feed only"))).toBe(false);
     expect(w.filter((x) => x.endsWith("in a terminal to replace it"))).toHaveLength(2);
+    expect((((await run.call("espn_get_status")).data as Json).credential as Json).state).toBe(
+      "rejected",
+    );
+    expect(await run.close()).toBe(0);
+  }, 180_000);
+
+  // changelog §R10, R10-33: an accepting probe on the run's server validates and leaves the 401
+  // armed; only the seed's path disarms it, and the run's .mcp.json never carries that path
+  it("the run's .mcp.json carries no seed path; a run that probes first is validated, its cached settings are served, and its first uncached read is the 401", async () => {
+    const mcp = JSON.parse(
+      readFileSync(path.join(out, "plugins", KEYS.wk10, ".mcp.json"), "utf8"),
+    ) as { mcpServers: Record<string, { args: string[]; env: Record<string, string> }> };
+    for (const s of Object.values(mcp.mcpServers)) {
+      expect(Object.keys(s.env)).not.toContain("EFF_FIXTURE_SEED");
+      expect(s.args.join(" ")).not.toContain("EFF_FIXTURE_SEED");
+    }
+    const run = await start(KEYS.wk10);
+    const auth = await run.call("espn_check_auth");
+    expect(auth.data).toMatchObject({ accepted: true, upstream_status: null });
+    expect((((await run.call("espn_get_status")).data as Json).credential as Json).state).toBe(
+      "validated",
+    );
+    const league = await run.call("espn_get_league");
+    expect(league.partial).toBe(false);
+    expect((((await run.call("espn_get_status")).data as Json).credential as Json).state).toBe(
+      "validated",
+    );
+    const e11 = await run.call("espn_analyze_league_activity");
+    expect(e11.partial).toBe(true);
+    expect(e11.warnings as string[]).toContain(SESSION_READ_WARNINGS.feed_rejected);
     expect((((await run.call("espn_get_status")).data as Json).credential as Json).state).toBe(
       "rejected",
     );
