@@ -223,14 +223,19 @@ describe("unmaskPath and manifestDir (a path npm masked)", () => {
     expect(unmaskPath("/srv/***/node_modules/a", ROOT_A)).toBeNull(); // one segment short
   });
 
-  it("manifestDir keeps an unmasked path, and falls back to the hoisted directory otherwise", () => {
+  it("manifestDir keeps an unmasked path, takes the hoisted directory only with no path, and refuses a masked path it cannot rebuild", () => {
     expect(manifestDir(node("a", "/real/proj/node_modules/a"), ROOT_A)).toBe(
       "/real/proj/node_modules/a",
     );
     expect(manifestDir(node("@s/b"), ROOT_A)).toBe(path.join(ROOT_A, "node_modules", "@s/b"));
-    expect(manifestDir(node("a", "/other/***/node_modules/a"), ROOT_A)).toBe(
-      path.join(ROOT_A, "node_modules", "a"),
+    expect(() => manifestDir(node("a", "/other/***/node_modules/a"), ROOT_A)).toThrow(
+      /npm masked the path it reported .* does not rebuild under the root/,
     );
+    // the follow-up verifier's F2: a nested package under a parent whose name npm masked is never
+    // read from the hoisted copy of its name, which may be another version
+    expect(() =>
+      manifestDir(node("b", "/srv/***/proj/node_modules/a-***/node_modules/b"), ROOT_A),
+    ).toThrow(/does not rebuild under the root/);
   });
 
   it("npm ls does mask a UUID-named checkout, and manifestDir finds the installed package there", () => {

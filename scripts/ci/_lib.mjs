@@ -232,16 +232,22 @@ export function unmaskPath(reported, root) {
 
 /**
  * Where a node's installed package.json lives: the path `npm ls` reported, unmasked when npm
- * masked it (`unmaskPath`); the hoisted `root/node_modules/<name>` when it reported none, or a
- * masked one that does not lie under `root`.
+ * masked it (`unmaskPath`); the hoisted `root/node_modules/<name>` only when it reported none.
+ * A masked path that does not rebuild under `root` throws, so the check reports that package:
+ * the hoisted copy of the same name may be another version (a nested package's own copy) and
+ * reading it would check the wrong manifest (the follow-up verifier's F2).
  * @param {TreeNode} node
  * @param {string} root
  */
 export function manifestDir(node, root) {
-  const hoisted = path.join(root, "node_modules", node.name);
-  if (node.path === undefined) return hoisted;
+  if (node.path === undefined) return path.join(root, "node_modules", node.name);
   if (!node.path.includes(NPM_MASK)) return node.path;
-  return unmaskPath(node.path, root) ?? hoisted;
+  const real = unmaskPath(node.path, root);
+  if (real === null)
+    throw new Error(
+      `npm masked the path it reported (${node.path}) and it does not rebuild under the root`,
+    );
+  return real;
 }
 
 /**

@@ -176,10 +176,11 @@ export function main(root) {
   let platform = 0;
   for (const node of tree.nodes.values()) {
     const id = `${node.name}@${node.version}`;
-    const dir = manifestDir(node, root);
     if (PLATFORM_PACKAGE.test(node.name)) platform++;
+    let dir;
     let manifest;
     try {
+      dir = manifestDir(node, root);
       manifest = readJson(path.join(dir, "package.json"));
     } catch (e) {
       r.error(`${id}: ${e instanceof Error ? e.message : String(e)}`);
