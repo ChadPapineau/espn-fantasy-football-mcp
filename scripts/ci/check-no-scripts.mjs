@@ -45,7 +45,7 @@ export const NATIVE_HELPERS = Object.freeze([
  * @type {Readonly<Record<string, string>>}
  */
 export const PREPARE_ALLOWED = Object.freeze({
-  "hyparquet@1.31.2":
+  "hyparquet@1.31.5":
     "`prepare` builds types from a git checkout only; npm never runs it for a registry tarball (plan 04 §2, A-5)",
 });
 
@@ -97,6 +97,14 @@ export function inspectPackage(pkg) {
 }
 
 /**
+ * A licence notice npm packs whatever `files` says (a `LICENSE`/`LICENCE`-prefixed name): text or
+ * Markdown only, never code. From 2.1.2 each keyring platform package ships
+ * `LICENSE.third-party.md`, the statically linked crates' licences (changelog "Reviews",
+ * 2026-11-04).
+ */
+export const LICENSE_NOTICE = /^LICEN[CS]E(?:[.-][A-Za-z0-9-]+)*\.(?:md|txt)$/;
+
+/**
  * A keyring platform package: a prebuilt `.node`, nothing to run.
  * @param {string} id
  * @param {string} dir
@@ -129,7 +137,7 @@ export function inspectPlatformPackage(id, dir, m, fromRegistry) {
     errors.push(`${id}: cannot list the package directory`);
   }
   const unexpected = entries.filter(
-    (f) => !["package.json", "README.md", "LICENSE", main].includes(f),
+    (f) => !["package.json", "README.md", "LICENSE", main].includes(f) && !LICENSE_NOTICE.test(f),
   );
   if (unexpected.length)
     errors.push(`${id}: platform package ships unexpected files: ${unexpected.join(", ")}`);

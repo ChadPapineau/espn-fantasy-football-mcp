@@ -46,7 +46,7 @@ import { ageSeconds, count, iso, isoNull } from "./schemas.js";
  * (src/mcp reads no file — plan 01 §1.1). A version bump that misses it fails that test (Stage C
  * finding status-sdk-version-stale: the reviewed 2.3.1 bump left 2.2.0 here, untested).
  */
-export const SDK_VERSION = "2.3.1";
+export const SDK_VERSION = "2.4.0";
 /** The stateless era the server serves beside the legacy initialize eras (plan 01 §3.1). */
 export const MODERN_PROTOCOL_ERA = "2026-07-28";
 /** The protocol eras the server answers (the modern one, then the SDK's legacy list). */

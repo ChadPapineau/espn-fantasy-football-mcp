@@ -8,6 +8,7 @@ import {
   PREPARE_ALLOWED,
   inspectPackage,
   inspectPlatformPackage,
+  LICENSE_NOTICE,
   lockfileInstallScripts,
 } from "../../scripts/ci/check-no-scripts.mjs";
 import { fakeProject, runCheck, tempDir, writeTree } from "../lint/helpers.js";
@@ -31,9 +32,9 @@ describe("inspectPackage", () => {
   });
 
   it("allows `prepare` (as a warning) only for the exact listed name@version from the registry", () => {
-    expect(Object.keys(PREPARE_ALLOWED)).toEqual(["hyparquet@1.31.2"]);
+    expect(Object.keys(PREPARE_ALLOWED)).toEqual(["hyparquet@1.31.5"]);
     const ok = inspectPackage({
-      id: "hyparquet@1.31.2",
+      id: "hyparquet@1.31.5",
       dir: base.dir,
       manifest: { scripts: { prepare: "x" } },
       resolved: REG,
@@ -41,7 +42,7 @@ describe("inspectPackage", () => {
     expect(ok.errors).toEqual([]);
     expect(ok.warnings.join()).toContain("prepare");
     const otherVersion = inspectPackage({
-      id: "hyparquet@1.31.3",
+      id: "hyparquet@1.31.2",
       dir: base.dir,
       manifest: { scripts: { prepare: "x" } },
       resolved: REG,
@@ -56,7 +57,7 @@ describe("inspectPackage", () => {
     "https://evil.example/x.tgz",
   ])("fails on a listed `prepare` when resolved from %s", (resolved) => {
     const r = inspectPackage({
-      id: "hyparquet@1.31.2",
+      id: "hyparquet@1.31.5",
       dir: base.dir,
       manifest: { scripts: { prepare: "tsc" } },
       resolved,
@@ -132,6 +133,22 @@ describe("the keyring's prebuilt platform packages", () => {
 
   it("accepts a bare prebuilt .node", () => {
     expect(platform(good, { "k.node": "\u0000bin", "README.md": "x" })).toEqual([]);
+  });
+
+  it("accepts a licence notice npm packs on its own (2.1.2's LICENSE.third-party.md), never a script", () => {
+    expect(platform(good, { "k.node": "x", "LICENSE.third-party.md": "# x" })).toEqual([]);
+    expect(platform(good, { "k.node": "x", "LICENCE.txt": "x" })).toEqual([]);
+    for (const f of [
+      "LICENSE.js",
+      "LICENSE.third-party.md.js",
+      "LICENSE.sh",
+      "xLICENSE.md",
+      "LICENSE/x.md",
+    ])
+      expect(LICENSE_NOTICE.test(f), f).toBe(false);
+    expect(platform(good, { "k.node": "x", "LICENSE.js": "x" }).join()).toContain(
+      "unexpected files",
+    );
   });
 
   it.each([

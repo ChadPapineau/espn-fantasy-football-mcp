@@ -81,7 +81,7 @@ describe("parseAllowlist", () => {
     const a = parseAllowlist(raw);
     expect(a.count).toBe(6);
     expect(a.oneOf).toHaveLength(12);
-    expect(a.packages).toContain("@napi-rs/keyring@2.1.0");
+    expect(a.packages).toContain("@napi-rs/keyring@2.1.2");
   });
 });
 

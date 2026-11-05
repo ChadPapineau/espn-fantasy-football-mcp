@@ -81,11 +81,12 @@ describe("package.json", () => {
 
   it("has exactly the four planned runtime dependencies at the plan 04 §2 versions", () => {
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual(RUNTIME);
-    // 2.2.0 → 2.3.1 on 2026-10-25 (GHSA-jm63-cq47-j5jp, GHSA-46jr-4wx8-v453, GHSA-rvq5-wwqv-78pq),
-    // reviewed in docs/plan/changelog.md "Reviews"
-    expect(pkg.dependencies?.["@modelcontextprotocol/server"]).toBe("2.3.1");
-    expect(pkg.dependencies?.hyparquet).toBe("1.31.2");
-    expect(pkg.dependencies?.["@napi-rs/keyring"]).toBe("2.1.0");
+    // 2.2.0 → 2.3.1 on 2026-10-25 (GHSA-jm63-cq47-j5jp, GHSA-46jr-4wx8-v453, GHSA-rvq5-wwqv-78pq);
+    // 2.3.1 → 2.4.0, hyparquet 1.31.2 → 1.31.5 and the keyring 2.1.0 → 2.1.2 on 2026-11-04
+    // (Dependabot); each reviewed in docs/plan/changelog.md "Reviews"
+    expect(pkg.dependencies?.["@modelcontextprotocol/server"]).toBe("2.4.0");
+    expect(pkg.dependencies?.hyparquet).toBe("1.31.5");
+    expect(pkg.dependencies?.["@napi-rs/keyring"]).toBe("2.1.2");
   });
 
   it("never carries the sibling's yaml or fast-xml-parser, anywhere in the tree", () => {
