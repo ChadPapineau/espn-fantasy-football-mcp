@@ -2,9 +2,10 @@
 // _lib.mjs — shared helpers for the zero-dependency supply-chain checks in scripts/ci/ (plan 04
 // §4.1 `supply-chain`, R11; plan 02 §7). Ported from sibling @d72e03b, adapted: unmet OPTIONAL
 // dependencies (the eleven @napi-rs/keyring platform packages for other platforms) are recorded,
-// not treated as missing. Node built-ins only.
+// not treated as missing, and a package path npm masked as `***` is unmasked (manifestDir). Node
+// built-ins only.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -185,13 +186,62 @@ export function runtimeTree(root) {
   return flattenTree(parsed);
 }
 
+/** What npm's output redaction (`@npmcli/redact`) prints in place of a UUID-shaped run of text. */
+export const NPM_MASK = "***";
+
+/** @param {string} s */
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** @param {string} p */
+const segments = (p) => p.split(/[\\/]/).filter((s) => s !== "");
+
 /**
- * Where a node's installed package.json lives.
+ * The real path behind a package path `npm ls` printed masked, or null when it cannot be matched
+ * to `root`. `npm ls --long`, run in `root`, reports each installed package's absolute path, but
+ * npm masks any UUID-shaped run in its output as `***` — a checkout under a session directory
+ * reports a path that does not exist (2026-11-04 dependency-review finding RG-4). A UUID holds no
+ * separator, so the masked path keeps the real path's segments: each of `root`'s segments must
+ * match (a `***` stands for one or more characters inside its segment), and the rest —
+ * `node_modules/…/<name>`, with no mask and no `..` — is joined under `root`.
+ * @param {string} reported
+ * @param {string} root
+ * @returns {string | null}
+ */
+export function unmaskPath(reported, root) {
+  let real = path.resolve(root);
+  try {
+    real = realpathSync(real);
+  } catch {
+    // a root that does not exist keeps its resolved spelling; the readers then report ENOENT
+  }
+  const want = segments(real);
+  const got = segments(reported);
+  if (got.length <= want.length) return null;
+  for (const [i, w] of want.entries()) {
+    const g = got[i] ?? "";
+    if (g === w) continue;
+    if (!g.includes(NPM_MASK)) return null;
+    const pattern = new RegExp(`^${g.split(NPM_MASK).map(escapeRegExp).join(".+")}$`, "s");
+    if (!pattern.test(w)) return null;
+  }
+  const rest = got.slice(want.length);
+  if (rest[0] !== "node_modules" || rest.some((s) => s.includes(NPM_MASK) || s === ".."))
+    return null;
+  return path.join(root, ...rest);
+}
+
+/**
+ * Where a node's installed package.json lives: the path `npm ls` reported, unmasked when npm
+ * masked it (`unmaskPath`); the hoisted `root/node_modules/<name>` when it reported none, or a
+ * masked one that does not lie under `root`.
  * @param {TreeNode} node
  * @param {string} root
  */
 export function manifestDir(node, root) {
-  return node.path ?? path.join(root, "node_modules", node.name);
+  const hoisted = path.join(root, "node_modules", node.name);
+  if (node.path === undefined) return hoisted;
+  if (!node.path.includes(NPM_MASK)) return node.path;
+  return unmaskPath(node.path, root) ?? hoisted;
 }
 
 /**

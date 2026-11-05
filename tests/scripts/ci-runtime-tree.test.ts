@@ -1,7 +1,8 @@
 // ci-runtime-tree.test.ts — scripts/ci/check-runtime-tree.mjs must FAIL on any addition, removal or
 // version drift at any depth of the runtime tree, on zero or two keyring platform packages, and on
-// non-registry provenance (plan 04 §2, §4.1, R11). Ported from sibling @d72e03b, adapted (`oneOf`,
-// unmet optional dependencies).
+// non-registry provenance (plan 04 §2, §4.1, R11); and the shared tree helpers must read a package's
+// manifest where it is installed even when npm masked its path. Ported from sibling @d72e03b,
+// adapted (`oneOf`, unmet optional dependencies, masked paths).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,7 +11,14 @@ import {
   compareTree,
   parseAllowlist,
 } from "../../scripts/ci/check-runtime-tree.mjs";
-import { flattenTree } from "../../scripts/ci/_lib.mjs";
+import {
+  flattenTree,
+  manifestDir,
+  NPM_MASK,
+  runNpm,
+  runtimeTree,
+  unmaskPath,
+} from "../../scripts/ci/_lib.mjs";
 import { ROOT, runCheck, tempDir, writeTree } from "../lint/helpers.js";
 
 const allow = {
@@ -170,6 +178,76 @@ describe("flattenTree", () => {
     for (let i = 0; i < 205; i++)
       deep = { version: "1.0.0", dependencies: { [`n${String(i)}`]: deep } };
     expect(() => flattenTree({ dependencies: { root: deep } })).toThrow(/deeper/);
+  });
+});
+
+// npm masks a UUID-shaped run in its output as `***`, the `path` field of `npm ls --long` included
+// (2026-11-04 dependency-review finding RG-4): a checkout under such a directory must still read
+// each package's manifest where it is installed.
+describe("unmaskPath and manifestDir (a path npm masked)", () => {
+  let tmp: ReturnType<typeof tempDir> | undefined;
+  afterEach(() => tmp?.cleanup());
+  const ROOT_A = "/srv/00000000-0000-4000-8000-000000000001/proj";
+  const node = (name: string, p?: string) => ({
+    name,
+    version: "1.0.0",
+    ...(p ? { path: p } : {}),
+  });
+
+  it("rebuilds a whole masked segment under root", () => {
+    expect(unmaskPath("/srv/***/proj/node_modules/a", ROOT_A)).toBe(`${ROOT_A}/node_modules/a`);
+    expect(manifestDir(node("a", "/srv/***/proj/node_modules/a"), ROOT_A)).toBe(
+      `${ROOT_A}/node_modules/a`,
+    );
+  });
+
+  it("rebuilds a mask inside a segment, and keeps a nested and a scoped install where they are", () => {
+    const root = "/srv/x-00000000-0000-4000-8000-000000000002-y/proj";
+    expect(unmaskPath("/srv/x-***-y/proj/node_modules/a/node_modules/@s/b", root)).toBe(
+      `${root}/node_modules/a/node_modules/@s/b`,
+    );
+  });
+
+  it("treats root's own characters literally (a regex metacharacter is not a pattern)", () => {
+    const root = "/srv/a+b(c)/00000000-0000-4000-8000-000000000003";
+    expect(unmaskPath("/srv/a+b(c)/***/node_modules/a", root)).toBe(`${root}/node_modules/a`);
+    expect(unmaskPath("/srv/aab(c)/***/node_modules/a", root)).toBeNull();
+  });
+
+  it("refuses a masked path that does not lie under root's node_modules", () => {
+    expect(unmaskPath("/other/***/proj/node_modules/a", ROOT_A)).toBeNull(); // another prefix
+    expect(unmaskPath("/srv/***/proj", ROOT_A)).toBeNull(); // root itself
+    expect(unmaskPath("/srv/***/proj/lib/a", ROOT_A)).toBeNull(); // not under node_modules
+    expect(unmaskPath("/srv/***/proj/node_modules/***", ROOT_A)).toBeNull(); // a mask past root
+    expect(unmaskPath("/srv/***/proj/node_modules/../../x", ROOT_A)).toBeNull(); // climbs out
+    expect(unmaskPath("/srv/***/node_modules/a", ROOT_A)).toBeNull(); // one segment short
+  });
+
+  it("manifestDir keeps an unmasked path, and falls back to the hoisted directory otherwise", () => {
+    expect(manifestDir(node("a", "/real/proj/node_modules/a"), ROOT_A)).toBe(
+      "/real/proj/node_modules/a",
+    );
+    expect(manifestDir(node("@s/b"), ROOT_A)).toBe(path.join(ROOT_A, "node_modules", "@s/b"));
+    expect(manifestDir(node("a", "/other/***/node_modules/a"), ROOT_A)).toBe(
+      path.join(ROOT_A, "node_modules", "a"),
+    );
+  });
+
+  it("npm ls does mask a UUID-named checkout, and manifestDir finds the installed package there", () => {
+    tmp = tempDir();
+    const root = path.join(tmp.dir, "x-00000000-0000-4000-8000-000000000004-y", "proj");
+    writeTree(root, {
+      "package.json": { name: "p", version: "1.0.0", private: true, dependencies: { a: "1.0.0" } },
+      "node_modules/a/package.json": { name: "a", version: "1.0.0", license: "MIT" },
+    });
+    const ls = runNpm(["ls", "--omit=dev", "--all", "--json", "--long"], root);
+    const reported = (JSON.parse(ls.stdout) as { dependencies: { a: { path: string } } })
+      .dependencies.a.path;
+    expect(reported).toContain(NPM_MASK); // the condition this suite guards against
+    const t = runtimeTree(root);
+    const a = t.nodes.get("a@1.0.0");
+    expect(a).toBeDefined();
+    if (a) expect(manifestDir(a, root)).toBe(path.join(root, "node_modules", "a"));
   });
 });
 
