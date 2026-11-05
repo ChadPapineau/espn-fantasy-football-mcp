@@ -211,7 +211,10 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
     'when the counts list one kind only (for example "calls kept by kind: lineup 9 of 20"), report the N of M it scored and make no narrowed call; otherwise call it again with `kinds: [...]` naming fewer of the kinds the counts list — the kinds the question is about whose K is below T first, else the kinds whose calls were left out (K below T); when every kind the question is about was scored whole, make no narrowed call; and when that call is still truncated, report the N of M it scored and stop — no further call narrows it',
     // E13's session line (the round-4d product account): a refused box score is never "N week(s) of
     // box scores unavailable"; retro presents what was scored and hands off (changelog §R10, R10-7)
-    'a week whose box score the session refused is not scored and never counted as unavailable: the call is `partial: true` with the line "partial: the stored ESPN session was rejected, and ESPN\'s box scores need one on a league not known to be public: they were not read; run `eff setup` in a terminal to replace it"',
+    'a box score of an earlier week (the last-week baseline, the attribution and forecast windows) that the session refused is left out and never counted as unavailable: the call is `partial: true` with the line "partial: the stored ESPN session was rejected, and ESPN\'s box scores need one on a league not known to be public: they were not read; run `eff setup` in a terminal to replace it"',
+    // the line names no week, and the scored week's own refusal fails the call (R4DVF-1)
+    "which names no week: present what was scored, say that the baseline and the attribution go without those box scores and why — never name or guess a week —",
+    "a refusal of the scored week's own box score fails the call (`ESPN_AUTH_REJECTED`)",
   ],
   espn_list_transactions: [
     "there it answers keylessly, with no session or a rejected one (changelog §R10, R10-10)",
@@ -416,10 +419,12 @@ export const ACTIVITY_REFUSAL_SENTENCE =
 /**
  * retro's step 3 on E13's session line (the round-4d product account): a refused week's box score
  * is never "unavailable"; what was scored is presented and the hand-off follows (changelog §R10,
- * R10-7, R10-12).
+ * R10-7, R10-12). The refused box scores are earlier weeks' (reclog.ts reads the scored week's
+ * uncaught, so its refusal fails the call), and the line names no week (refusals.ts records "box
+ * scores" with a season prefix at most), so retro never names one (the round-4d verifiers' R4DVF-1).
  */
 export const RETRO_SESSION_SENTENCE =
-  "When it answers `partial: true` with the session line naming ESPN's box scores (references/tool-outputs.md), the weeks that line names were not read: present what was scored, say which weeks were not read and why, give the one command — in a terminal, `eff setup` — once, never score those weeks from memory and never call it again for them, and follow **A rejection mid-procedure** in references/orient.md: on a private or unknown league end with the hand-off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7, R10-12).";
+  "When it answers `partial: true` with the session line naming ESPN's box scores (references/tool-outputs.md), box scores of weeks before the scored one were not read (the last-week baseline, the attribution and forecast windows); the line names no week, so never name or guess which: present what was scored, say that the baseline and the attribution go without them and why, give the one command — in a terminal, `eff setup` — once, never fill them in and never call it again for them, and follow **A rejection mid-procedure** in references/orient.md: on a private or unknown league end with the hand-off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7, R10-12). A refusal of the scored week's own box score fails the call with `ESPN_AUTH_REJECTED`, which that rule governs.";
 /**
  * retro on E13's truncated result (changelog §R10, R10-20): it kept the most whole calls that fit;
  * say how many of the week's calls were scored and narrow by `kinds` (E13 does not page). Its

@@ -261,16 +261,53 @@ describe("retro on E13's session line (changelog §R10, R10-7, R10-12)", () => {
     expect(step3).toContain(RETRO_SESSION_SENTENCE);
     for (const part of [
       "present what was scored",
-      "say which weeks were not read and why",
+      "box scores of weeks before the scored one were not read",
+      "the line names no week, so never name or guess which",
       "`eff setup`",
       "**A rejection mid-procedure**",
       "`espn-fantasy-football:session-check`",
+      "A refusal of the scored week's own box score fails the call with `ESPN_AUTH_REJECTED`",
     ])
       expect(RETRO_SESSION_SENTENCE).toContain(part);
     const rules = SKILL_RULES.retro?.body ?? [];
     const rule = rules.find((r) => r.test(RETRO_SESSION_SENTENCE));
     expect(rule).toBeDefined();
     expect(rule?.test(retro.replace(RETRO_SESSION_SENTENCE, ""))).toBe(false);
+  });
+});
+
+// the round-4d verifiers' R4DVF-1: retro and the E13 row asked for "the weeks that line names",
+// but the line names no week and E13 outputs none of the refused weeks, which are earlier weeks'
+// (the scored week's own read is not caught: its refusal fails the call)
+describe("E13's refused box scores name no week (changelog §R10, R10-7, R10-12)", () => {
+  const row = sheet.split("\n").find((l) => l.startsWith("| `espn_analyze_retrospective` |")) ?? "";
+  const retro = read("skills/retro/SKILL.md");
+  it("the server's line carries no week number, for either refusal", () => {
+    for (const r of ["rejected", "no_session"] as const)
+      expect(sessionReadsWarning(r, ["box scores"])).not.toMatch(/\d/);
+  });
+  it("neither text asks for the weeks the line names, and both say it names none", () => {
+    for (const t of [row, retro, RETRO_SESSION_SENTENCE]) {
+      expect(t).not.toMatch(/which weeks|weeks that line names|score those weeks/);
+      expect(t).toMatch(/names no week/);
+      expect(t).toMatch(/never name or guess/);
+    }
+    expect(row).toContain(
+      "a box score of an earlier week (the last-week baseline, the attribution and forecast windows) that the session refused is left out",
+    );
+    expect(row).toContain(
+      "a refusal of the scored week's own box score fails the call (`ESPN_AUTH_REJECTED`)",
+    );
+  });
+  it("E13 reads the scored week's box score uncaught and catches only the earlier weeks'", () => {
+    const src = read("src/mcp/tools/reclog.ts");
+    // the scored week: awaited bare, so a refusal propagates as the call's error
+    expect(src).toMatch(/const box = await ctx\.services\.platform\.getBoxScores\(ref, w, /);
+    // last week and the windows' weeks: inside withinBudget(…).catch(…), recorded as refused
+    expect(src).toMatch(
+      /getBoxScores\(ref, w - 1, [\s\S]{0,80}\.catch\(\(e: unknown\) => \{\s*prevRead\.refused/,
+    );
+    expect(src).toMatch(/if \(sessionRefusalOf\(e\) !== null\) refusedWeeks\.add\(x\)/);
   });
 });
 
