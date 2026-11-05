@@ -420,8 +420,20 @@ describe("each anchored grader passes its claim and fails what only looks like i
         "20 of the week's 33 calls were scored.",
         "Narrowed to evidence: 21 of 30 scored.",
         "| Kind | Kept | In week |\n|---|---|---|\n| lineup | 3 | 3 |\n| evidence | 17 | 30 |\n| all | 20 | 33 |",
+        // the round-4d verifiers' R4D-VS-4: the N of M forms that tie the two counts together
+        "Only 20 of the week's 33 calls were scored (the result was cut); narrowed to evidence, 21 of 30 evidence calls were scored.",
+        "| Kind | Scored |\n|---|---|\n| lineup | 3 of 3 |\n| evidence | 21 of 30 |",
+        "20/33 calls scored.",
+        "Of the 30 evidence calls, 21 were scored.",
       ],
-      ["All 33 calls were scored.", "The tool scored 20 of 30 evidence calls."],
+      [
+        "All 33 calls were scored.",
+        "The tool scored 20 of 30 evidence calls.",
+        // R4D-VS-4: both numbers present, the whole week claimed scored
+        "All 33 of last week's calls were scored: 20 were right.",
+        "All of the week's 33 calls were scored; 20 were right.",
+        "All 30 evidence calls were scored: 21 were right.",
+      ],
     ],
     [
       "retro",
@@ -430,8 +442,17 @@ describe("each anchored grader passes its claim and fails what only looks like i
       [
         "15 of the week's 24 lineup calls were scored.",
         "Of last week's 24 start/sit calls, 15 fit the tool's budget and were scored.",
+        // the round-4d verifiers' R4D-VS-4: a counts table and a slash
+        "| Calls scored | Calls in week 4 |\n|---|---|\n| 15 | 24 |",
+        "15 out of 24 calls fit; 15/24 scored.",
       ],
-      ["All 24 calls were scored.", "The tool scored 15 calls."],
+      [
+        "All 24 calls were scored.",
+        "The tool scored 15 calls.",
+        // R4D-VS-4: both numbers present, the whole week claimed scored
+        "All 24 of your week-4 start/sit calls were scored: 15 beat the alternative.",
+        "All of your 24 week-4 calls were scored: 15 beat the alternative.",
+      ],
     ],
     [
       "waivers",

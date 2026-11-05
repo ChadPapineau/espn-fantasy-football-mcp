@@ -82,7 +82,7 @@
       "expectations": [
         "The skill called espn_analyze_retrospective two or three times — the partial repeat and one narrowed call at most (tool_used: min 2 max 3)",
         "espn_analyze_retrospective was narrowed to the kind whose calls were left out, and to that kind only (tool_used: input_match kinds exactly evidence)",
-        "The reply says how many of the calls were scored, with the count it was cut from (regex: `\\b20\\b[^\\n]{0,80}\\b33\\b|\\b33\\b[^\\n]{0,80}\\b20\\b|\\b21\\b[^\\n]{0,80}\\b30\\b|\\b30\\b[^\\n]{0,80}\\b21\\b`)",
+        "The reply says how many of the calls were scored, with the count it was cut from, as N of M (regex: `\\b20\\b[^\\n]{0,20}?\\b(?:of|out of)\\b[^\\n]{0,20}?\\b33\\b|\\b20\\s*/\\s*33\\b|\\|\\s*20\\s*\\|\\s*33\\s*\\||(?<!\\ball\\s)\\bof\\b[^\\n]{0,30}?\\b33\\b[^\\n]{0,40}?\\b20\\b|\\b21\\b[^\\n]{0,20}?\\b(?:of|out of)\\b[^\\n]{0,20}?\\b30\\b|\\b21\\s*/\\s*30\\b|\\|\\s*21\\s*\\|\\s*30\\s*\\||(?<!\\ball\\s)\\bof\\b[^\\n]{0,30}?\\b30\\b[^\\n]{0,40}?\\b21\\b`)",
         "The reply says the lineup calls were scored whole and that only part of the evidence calls were (21 of 30 after narrowing), never presents the scored calls as the whole week, and makes no further call once the narrowed one is still truncated (llm)"
       ]
     },
@@ -95,7 +95,7 @@
       "files": ["evals/fixtures/fx-10h"],
       "expectations": [
         "The skill called espn_analyze_retrospective once, or twice with the partial repeat — never a narrowed call (tool_used: min 1 max 2)",
-        "The reply says 15 of the week's 24 calls were scored (regex: `\\b15\\b[^\\n]{0,80}\\b24\\b|\\b24\\b[^\\n]{0,80}\\b15\\b`)",
+        "The reply says 15 of the week's 24 calls were scored, as N of M (regex: `\\b15\\b[^\\n]{0,20}?\\b(?:of|out of)\\b[^\\n]{0,20}?\\b24\\b|\\b15\\s*/\\s*24\\b|\\|\\s*15\\s*\\|\\s*24\\s*\\||(?<!\\ball\\s)\\bof\\b[^\\n]{0,30}?\\b24\\b[^\\n]{0,40}?\\b15\\b`)",
         "The reply never presents the scored calls as the whole week and says no narrower call scores the rest, since every call of the week is a lineup call (llm)"
       ]
     }
