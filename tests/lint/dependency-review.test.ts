@@ -216,6 +216,8 @@ describe("the installed zod refuses an over-long input on its size alone (GHSA-m
 
 interface ReviewRow {
   date: string;
+  /** The dependency cell as written (the names it lists besides its `name@version` tokens). */
+  dependency: string;
   deps: { name: string; version: string }[];
   verdict: string;
   evidence: string;
@@ -245,7 +247,7 @@ function reviewRows(changelog: string): ReviewRow[] {
       name: m[1] ?? "",
       version: m[2] ?? "",
     }));
-    rows.push({ date, deps, verdict, evidence });
+    rows.push({ date, dependency, deps, verdict, evidence });
   }
   return rows;
 }
@@ -268,8 +270,26 @@ describe("the changelog's Reviews table (plan 02 §7.2: re-run on every version 
     }
   });
 
-  it("names the SDK (server, core, client), zod and the keyring", () => {
-    for (const name of [...SDK, "zod", "@napi-rs/keyring"]) expect(named, name).toContain(name);
+  it("names the SDK (server, core, client), zod, the keyring and hyparquet", () => {
+    for (const name of [...SDK, "zod", "@napi-rs/keyring", "hyparquet"])
+      expect(named, name).toContain(name);
+  });
+
+  it("reviews the keyring together with every one of its platform packages, at the keyring's pin", () => {
+    const pin = pkg.dependencies?.["@napi-rs/keyring"];
+    const platforms = Object.keys(
+      (lock.packages["node_modules/@napi-rs/keyring"] as { optionalDependencies?: object })
+        .optionalDependencies ?? {},
+    );
+    expect(platforms).toHaveLength(12);
+    const row = rows.find((r) =>
+      r.deps.some((d) => d.name === "@napi-rs/keyring" && d.version === pin),
+    );
+    expect(row, `a Reviews row for @napi-rs/keyring@${String(pin)}`).toBeDefined();
+    for (const name of platforms) {
+      expect(lock.packages[`node_modules/${name}`]?.version, name).toBe(pin);
+      expect(row?.dependency, name).toContain(name.replace("@napi-rs/keyring-", ""));
+    }
   });
 
   it("reviews every named dependency at the version the lockfile pins, with a passing verdict", () => {
@@ -288,5 +308,44 @@ describe("the changelog's Reviews table (plan 02 §7.2: re-run on every version 
       SDK.every((name) => r.deps.some((d) => d.name === name && d.version === pin)),
     );
     expect(row, `one Reviews row for the SDK at ${String(pin)}`).toBeDefined();
+  });
+});
+
+// --- majors declined on review (2026-11-04, Dependabot PRs 4 and 5) -----------------------------
+
+describe("the declined majors stay declined until their re-check trigger (.github/dependabot.yml)", () => {
+  const dependabot = read(".github/dependabot.yml");
+  const major = (v: string | undefined): number => Number(/^v?(\d+)\./.exec(v ?? "")?.[1]);
+
+  it("ignores the semver-major updates of @types/node and typescript in the npm ecosystem", () => {
+    const npm = dependabot.slice(dependabot.indexOf('package-ecosystem: "npm"'));
+    expect(npm.length).toBeLessThan(dependabot.length);
+    for (const name of ["@types/node", "typescript"]) {
+      expect(npm, name).toMatch(
+        new RegExp(
+          `- dependency-name: "${name.replace("/", "\\/")}"\\n {8}update-types: \\["version-update:semver-major"\\]`,
+        ),
+      );
+    }
+  });
+
+  it("@types/node's major is the runtime's (.nvmrc), so tsc never accepts an API Node lacks", () => {
+    const runtime = major(read(".nvmrc").trim());
+    expect(runtime).toBeGreaterThanOrEqual(24);
+    expect(major(pkg.devDependencies?.["@types/node"])).toBe(runtime);
+    expect(major(lock.packages["node_modules/@types/node"]?.version)).toBe(runtime);
+  });
+
+  it("typescript stays inside typescript-eslint's supported peer range (the lint gate's parser)", () => {
+    const peer = (
+      lock.packages["node_modules/@typescript-eslint/typescript-estree"] as {
+        peerDependencies?: Record<string, string>;
+      }
+    ).peerDependencies?.typescript;
+    const ts = lock.packages["node_modules/typescript"]?.version ?? "";
+    const m = /^>=(\S+?)\s*<(\S+)$/.exec(peer ?? "");
+    expect(m, `typescript-estree's typescript peer range: ${String(peer)}`).not.toBeNull();
+    expect(compareVersions(ts, m?.[1] ?? "")).toBeGreaterThanOrEqual(0);
+    expect(compareVersions(ts, m?.[2] ?? "")).toBeLessThan(0);
   });
 });
