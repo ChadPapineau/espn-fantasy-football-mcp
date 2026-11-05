@@ -52,6 +52,7 @@ import {
 import { EffError } from "../errors.js";
 import { beforeSideEffect, defineTool, recentCall, type ToolContext } from "../define.js";
 import {
+  isOptionalReadFailure,
   leagueOf,
   leagueRef,
   readOpts,
@@ -76,6 +77,19 @@ import {
   serverText,
   week,
 } from "./schemas.js";
+
+/**
+ * What E13's optional reads absorb (the round-4d product account): an optional read's failure — an
+ * outage, a session refusal (said by the call's session line; refusals.ts) or fixture mode's
+ * `fixture_missing` (isOptionalReadFailure) — or a dataset past its hard limit (STALE_ONLY: the
+ * schedule read here takes no `allow_stale`, so the call degrades as before). Anything else is a
+ * bug and propagates, as every other tool's optional reads do; before, every error read as null.
+ */
+export function retroReadAbsorbed(e: unknown): null {
+  if (isOptionalReadFailure(e) || (e as { effCode?: unknown } | null)?.effCode === "STALE_ONLY")
+    return null;
+  throw e;
+}
 
 /** The provenance tag of read-back log text (plan 07 C15). */
 export const REC_SOURCE = RECLOG_UNTRUSTED_SOURCE;
@@ -297,7 +311,7 @@ async function lastFinalWeek(
   warnings: string[],
 ): Promise<Week> {
   const sched = await withinBudget(() => scheduleOf(ctx, season, inputs), warnings).catch(
-    () => null,
+    retroReadAbsorbed,
   );
   if (sched !== null)
     for (let w = Math.min(current, BOUNDS.week.max); w >= 1; w--)
@@ -385,7 +399,7 @@ export const analyzeRetrospective = defineTool({
         warnings,
       ).catch((e: unknown) => {
         prevRead.refused = sessionRefusalOf(e) !== null;
-        return null;
+        return retroReadAbsorbed(e);
       });
       // a session refusal is said by the call's session line (ESPN's box scores were not read, why,
       // `eff setup`; partial), never as unavailable (refusals.ts; the round-4c product account)
@@ -415,12 +429,14 @@ export const analyzeRetrospective = defineTool({
       team_result: scored.result,
     });
     const sched = await withinBudget(() => scheduleOf(ctx, season, inputs), warnings).catch(
-      () => null,
+      retroReadAbsorbed,
     );
     // Phase 3 (plan 10 C9): the attribution rows of the re-fit window — v2 projections stored before
     // their game joined to the final box scores — and the applied overrides; ESPN's box scores of
     // earlier weeks are cached reads (final weeks), each within the call's budget
-    const settings = await withinBudget(() => settingsOf(ctx, inputs), warnings).catch(() => null);
+    const settings = await withinBudget(() => settingsOf(ctx, inputs), warnings).catch(
+      retroReadAbsorbed,
+    );
     const boxCache = new Map<Week, readonly BoxScoreMatchup[] | null>([[w, boxes]]);
     // the weeks whose box scores the session refused: not "unavailable" — the call's session line
     // says them (refusals.ts; the round-4c product account: an uncached mBoxscore's 401 read as
@@ -433,7 +449,7 @@ export const analyzeRetrospective = defineTool({
         warnings,
       ).catch((e: unknown) => {
         if (sessionRefusalOf(e) !== null) refusedWeeks.add(x);
-        return null;
+        return retroReadAbsorbed(e);
       });
       const v = got === null ? null : take(ctx, got, inputs);
       boxCache.set(x, v);
