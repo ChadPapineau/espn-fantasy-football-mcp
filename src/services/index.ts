@@ -39,24 +39,13 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { cookieUnavailableFor } from "../auth/errors.js";
 import { fileStoreExistsSync } from "../auth/file.js";
-import { buildCookieHeader } from "../auth/format.js";
 import { evaluateRegistrationGates } from "../auth/gates.js";
 import type { KeyringPort } from "../auth/keychain.js";
-import { registerCredentialRedaction } from "../auth/redact.js";
-import {
-  createCredentialAuthority,
-  deriveStartupState,
-  type CredentialAuthorityHandle,
-} from "../auth/state.js";
+import { withProbeAccess, type ProbingAuthority } from "../auth/probe-access.js";
+import { createCredentialAuthority, deriveStartupState } from "../auth/state.js";
 import { openCredentialStore, type InstallCredentialStore } from "../auth/stores.js";
-import type {
-  CookieHeaderResult,
-  CredentialStateRepository,
-  CredentialStore,
-  SecretRegistrar,
-} from "../auth/types.js";
+import type { CredentialStateRepository, SecretRegistrar } from "../auth/types.js";
 import {
   DEFAULT_TTL_CONTEXT,
   isPeriodProvisional,
@@ -300,41 +289,9 @@ export function stubbedKeyring(stderr: NodeJS.WritableStream): () => Promise<Key
   };
 }
 
-/** The authority plus probe access (the provider's CredentialProbeAccess — plan 02 §2.1). */
-export type ProbingAuthority = CredentialAuthorityHandle & {
-  getCookieHeaderForProbe(): Promise<CookieHeaderResult>;
-};
-
-/**
- * Adds probe access: espn_check_auth reads the stored value directly — even while `rejected` — so
- * the one explicit probe can flip `rejected → validated` (plan 02 §2.1, ADV OBJ-04). The value is
- * registered with the redactor before it is used; it is never returned or logged.
- */
-export function withProbeAccess(
-  authority: CredentialAuthorityHandle,
-  store: CredentialStore,
-  registrar: SecretRegistrar,
-): ProbingAuthority {
-  return {
-    state: () => authority.state(),
-    getCookieHeader: () => authority.getCookieHeader(),
-    observe: (o) => authority.observe(o),
-    dropSecret: () => {
-      authority.dropSecret();
-    },
-    holdsSecret: () => authority.holdsSecret(),
-    getCookieHeaderForProbe: async (): Promise<CookieHeaderResult> => {
-      try {
-        const stored = await store.read();
-        if (stored === null) return { ok: false, reason: "not_configured" };
-        registerCredentialRedaction(registrar, stored.cookies);
-        return { ok: true, header: buildCookieHeader(stored.cookies) };
-      } catch (e) {
-        return { ok: false, reason: cookieUnavailableFor(e) };
-      }
-    },
-  };
-}
+// the authority plus probe access: the one wrapper both composition roots use, forwarding every
+// member of the handle (src/auth/probe-access.ts; the round-4b review's CS-1)
+export { withProbeAccess, type ProbingAuthority };
 
 /**
  * How long one computed freshness context is reused (ms). Every ESPN read asks for it, and computing

@@ -377,6 +377,7 @@ describe("composition root", () => {
       state: () => "rejected" as const,
       getCookieHeader: () => Promise.resolve({ ok: false as const, reason: "rejected" as const }),
       observe: () => Promise.resolve("rejected" as const),
+      rejectedNow: () => true,
       dropSecret: () => undefined,
       holdsSecret: () => false,
     };

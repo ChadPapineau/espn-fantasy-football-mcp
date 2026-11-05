@@ -9,9 +9,15 @@
 // (the controls). Under a rejected session the authority reads metadata only: no secret is loaded.
 // The fake transport and the in-memory ports; the cookies are synthetic test values. No network.
 import { describe, expect, it } from "vitest";
-import { createCredentialAuthority } from "../../../src/auth/state.js";
+import {
+  createCredentialAuthority,
+  type CredentialAuthorityHandle,
+} from "../../../src/auth/state.js";
+import type { CredentialStore } from "../../../src/auth/types.js";
+import { withProbeAccess as cliProbeAccess } from "../../../src/cli/espn-stack.js";
 import { createFixtureFetch, type FetchLike } from "../../../src/providers/espn/index.js";
 import { createUpstreamBudget, PER_CALL_DEADLINE_MS } from "../../../src/providers/platform.js";
+import { withProbeAccess as serveProbeAccess } from "../../../src/services/index.js";
 import {
   MemoryStateRepo,
   MemoryStore,
@@ -183,6 +189,64 @@ describe("V4-M1: the gate's refusal wins over the outage answers (a private leag
     expect(await outcome(w.provider.getLeague(w.ref))).toEqual({ error: "ESPN_AUTH_REJECTED" });
     expect(store.reads).toBe(reads);
     expect(auth.holdsSecret()).toBe(false);
+    expect(w.sent.length).toBe(n);
+  });
+});
+
+/** How a composition root hands the provider its authority (the round-4b review's CS-1). */
+const COMPOSED: readonly (readonly [
+  string,
+  (a: CredentialAuthorityHandle, store: CredentialStore) => CredentialAuthorityHandle,
+])[] = [
+  ["unwrapped", (a) => a],
+  [
+    "eff serve's withProbeAccess",
+    (a, store) => serveProbeAccess(a, store, new RecordingRegistrar()),
+  ],
+  [
+    "the eff commands' withProbeAccess",
+    (a, store) => cliProbeAccess(a, store, new RecordingRegistrar()),
+  ],
+];
+
+// V4-M1 across processes, as the processes are composed (the round-4b review's CS-1): another
+// process records the rejection; this one's label still reads `validated`, so only the authority's
+// rejectedNow (the shared row) tells the gate. Both roots' wrappers dropped it, and the open
+// breaker answered the stale settings as an outage instead of the refusal (changelog §R10, R10-18).
+describe.each(COMPOSED)("V4-M1 across processes as composed (%s)", (_label, compose) => {
+  it("another process's rejection, an open breaker: ESPN_AUTH_REJECTED, never stale settings", async () => {
+    const at = "2026-10-01T11:00:00.000Z";
+    const store = new MemoryStore("keychain");
+    store.set(fakeCookies("v4-m1-xproc"), at);
+    const repo = new MemoryStateRepo();
+    repo.row = stateRow({ state: "stored", stored_at: at });
+    const authorityOf = (observer: "server" | "daily_job") =>
+      createCredentialAuthority({
+        store,
+        repo,
+        leagueId: "0",
+        registrar: new RecordingRegistrar(),
+        observer,
+        now: () => NOW_ISO,
+      });
+    const server = compose(authorityOf("server"), store);
+    const w = makeWorld({ credentials: server, fetch: league(false) });
+    expect((await w.provider.getLeague(w.ref)).value.is_public).toBe(false);
+    const job = authorityOf("daily_job");
+    await job.getCookieHeader();
+    await job.observe({
+      kind: "rejected",
+      at: NOW_ISO,
+      by: "daily_job",
+      upstream_status: 401,
+      view: "mTeam",
+    });
+    // this process's label still reads the session it accepted: only the row says rejected
+    expect(server.state()).toBe("validated");
+    w.clock.advance(25 * HOUR_MS);
+    breakerOf(w).forceOpen();
+    const n = w.sent.length;
+    expect(await outcome(w.provider.getLeague(w.ref))).toEqual({ error: "ESPN_AUTH_REJECTED" });
     expect(w.sent.length).toBe(n);
   });
 });

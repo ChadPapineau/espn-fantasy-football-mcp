@@ -13,11 +13,24 @@
 //     was sent without a second check. Every acquire is now followed by the check (bounded).
 // Over the REAL authority (src/auth/state.ts), two of them sharing one row for (a), on the fake
 // transport; the cookies are run-time fakes. No network.
+// (a) runs as the processes are composed (the round-4b review's CS-1): `eff serve` and every `eff`
+// command hand the provider the authority wrapped by withProbeAccess (src/services/index.ts,
+// src/cli/espn-stack.ts). Both wrappers dropped rejectedNow, so the gate read the label only and the
+// retry went out with the rejected cookie in every real process; the unwrapped authority hid it.
 import { describe, expect, it } from "vitest";
-import { createCredentialAuthority } from "../../../src/auth/state.js";
-import type { CredentialObservation, CredentialObserver } from "../../../src/auth/types.js";
+import {
+  createCredentialAuthority,
+  type CredentialAuthorityHandle,
+} from "../../../src/auth/state.js";
+import type {
+  CredentialObservation,
+  CredentialObserver,
+  CredentialStore,
+} from "../../../src/auth/types.js";
+import { withProbeAccess as cliProbeAccess } from "../../../src/cli/espn-stack.js";
 import { createFixtureFetch, type FetchLike } from "../../../src/providers/espn/index.js";
 import { REJECTED_REASK_ROUNDS } from "../../../src/providers/espn/request.js";
+import { withProbeAccess as serveProbeAccess } from "../../../src/services/index.js";
 import {
   MemoryStateRepo,
   MemoryStore,
@@ -79,6 +92,49 @@ function privateFailingOnce(view: string, during: () => Promise<void>): FetchLik
   };
 }
 
+/** How a composition root hands the provider its authority (the round-4b review's CS-1). */
+const COMPOSED: readonly (readonly [
+  string,
+  (a: CredentialAuthorityHandle, store: CredentialStore) => CredentialAuthorityHandle,
+])[] = [
+  ["unwrapped", (a) => a],
+  [
+    "eff serve's withProbeAccess",
+    (a, store) => serveProbeAccess(a, store, new RecordingRegistrar()),
+  ],
+  [
+    "the eff commands' withProbeAccess",
+    (a, store) => cliProbeAccess(a, store, new RecordingRegistrar()),
+  ],
+];
+
+describe.each(COMPOSED)("V4-S1 (a) as composed (%s)", (_label, compose) => {
+  it("the retry after another process's 401 is not sent; the read answers ESPN_AUTH_REJECTED", async () => {
+    const { store, repo, authority } = install("xproc-composed");
+    const base = authority("server");
+    const server = compose(base, store);
+    const job = authority("daily_job");
+    let rejectedAt = -1;
+    const w = makeWorld({
+      credentials: server,
+      fetch: privateFailingOnce("mRoster", async () => {
+        await job.getCookieHeader();
+        await job.observe(rejection("mTeam", "daily_job"));
+        rejectedAt = w.sent.length;
+      }),
+    });
+    await expect(w.provider.getRosters(w.ref, 3)).rejects.toMatchObject({
+      effCode: "ESPN_AUTH_REJECTED",
+      effDetails: { reason: "short_circuit" },
+    });
+    expect(repo.row?.state).toBe("rejected");
+    expect(rejectedAt).toBeGreaterThan(0);
+    expect(w.sent.slice(rejectedAt)).toEqual([]);
+    expect(server.rejectedNow()).toBe(true);
+    expect(base.holdsSecret()).toBe(false);
+  });
+});
+
 describe("V4-S1 (a): a rejection another process records while the read waits is honoured", () => {
   it("the retry after another process's 401 is not sent; the read answers ESPN_AUTH_REJECTED", async () => {
     const { store, repo, authority } = install("xproc");
@@ -119,21 +175,21 @@ describe("V4-S1 (a): a rejection another process records while the read waits is
     expect((await a.getCookieHeader()).ok).toBe(true);
     const reads = store.reads;
     const metaReads = store.metaReads;
-    expect(a.rejectedNow?.()).toBe(false);
+    expect(a.rejectedNow()).toBe(false);
     // a row rejecting ANOTHER value (one stored since, rejected): not the held one
     repo.row = stateRow({ state: "rejected", stored_at: "2026-10-09T00:00:00.000Z" });
-    expect(a.rejectedNow?.()).toBe(false);
+    expect(a.rejectedNow()).toBe(false);
     expect(a.state()).toBe("stored");
     // a row read that fails proves nothing
     repo.row = stateRow({ state: "rejected", stored_at: SETUP_AT });
     repo.failGet = true;
-    expect(a.rejectedNow?.()).toBe(false);
+    expect(a.rejectedNow()).toBe(false);
     repo.failGet = false;
     // the row rejects the held value: adopted (label, dropped secret), and it stays rejected
-    expect(a.rejectedNow?.()).toBe(true);
+    expect(a.rejectedNow()).toBe(true);
     expect(a.state()).toBe("rejected");
     expect(a.holdsSecret()).toBe(false);
-    expect(a.rejectedNow?.()).toBe(true);
+    expect(a.rejectedNow()).toBe(true);
     expect(store.reads).toBe(reads);
     expect(store.metaReads).toBe(metaReads);
     // a row without stored_at is taken to describe the held value, as getCookieHeader takes it
@@ -141,12 +197,12 @@ describe("V4-S1 (a): a rejection another process records while the read waits is
     const b = other.authority("server");
     expect((await b.getCookieHeader()).ok).toBe(true);
     other.repo.row = stateRow({ state: "rejected", stored_at: null });
-    expect(b.rejectedNow?.()).toBe(true);
+    expect(b.rejectedNow()).toBe(true);
     // nothing loaded: a rejected row is adopted as the startup label is
     const third = install("xproc-unloaded");
     const c = third.authority("server");
     third.repo.row = stateRow({ state: "rejected", stored_at: SETUP_AT });
-    expect(c.rejectedNow?.()).toBe(true);
+    expect(c.rejectedNow()).toBe(true);
     expect((await c.getCookieHeader()).ok).toBe(false);
   });
 });

@@ -66,6 +66,13 @@ export interface CredentialAuthorityOptions {
 
 /** The authority plus the shutdown and introspection hooks the CLI needs. */
 export interface CredentialAuthorityHandle extends CredentialAuthority {
+  /**
+   * Required on the handle the composition roots wrap (optional on CredentialAuthority, which test
+   * fakes implement): a wrapper that drops it leaves the cookie gate reading this process's label
+   * only, so a rejection another process recorded is not honoured (src/auth/probe-access.ts; the
+   * round-4b review's CS-1; plan 02 §2.1).
+   */
+  rejectedNow(): boolean;
   /** Shutdown: drop the in-memory value (a JavaScript string cannot be zeroed — plan 03 §1.3). */
   dropSecret(): void;
   /** Whether a value is held in memory right now (never the value). */

@@ -100,6 +100,7 @@ describe("probe access (plan 02 §2.1: the explicit probe reads the stored value
     state: () => "rejected" as const,
     getCookieHeader: () => Promise.resolve({ ok: false as const, reason: "rejected" as const }),
     observe: () => Promise.resolve("rejected" as const),
+    rejectedNow: vi.fn(() => true),
     dropSecret: vi.fn(),
     holdsSecret: () => false,
   };
@@ -149,6 +150,9 @@ describe("probe access (plan 02 §2.1: the explicit probe reads the stored value
         view: null,
       }),
     ).toBe("rejected");
+    // rejectedNow is the authority's own, forwarded (the round-4b review's CS-1)
+    expect(ok.rejectedNow()).toBe(true);
+    expect(authority.rejectedNow).toHaveBeenCalled();
     ok.dropSecret();
     expect(authority.dropSecret).toHaveBeenCalled();
     expect(ok.holdsSecret()).toBe(false);
