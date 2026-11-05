@@ -20,7 +20,9 @@ import {
 import {
   ACTIVITY_NO_FEED_HISTORY_LINE,
   ACTIVITY_PARTIAL_FRAGMENTS,
+  GUARDRAIL_REJECTED,
   ORIENT_SENTENCES,
+  orientRoutingProblems,
   RETRO_SESSION_SENTENCE,
   SESSION_LINE_FRAGMENTS,
   SKILL_RULES,
@@ -43,6 +45,7 @@ const read = (rel: string): string => readFileSync(path.join(ROOT, rel), "utf8")
 const sheet = read("skills/_shared/references/tool-outputs.md");
 const orient = read("skills/_shared/references/orient.md");
 const template = read("skills/_shared/references/output-template.md");
+const guardrails = read("skills/_shared/references/guardrails.md");
 
 /** A quoted form as an anchored RegExp over a whole line: "…" elides the words that vary. */
 const formRe = (quoted: string): RegExp => {
@@ -133,6 +136,56 @@ describe("the any-tool session line, as the cheat-sheet quotes it (changelog §R
       }
       expect(text, skill).toContain(s);
     }
+  });
+});
+
+// the round-4d verifiers' R4DVF-2 and R4D-VS-1: orient ended the procedure on an ESPN_AUTH_REJECTED
+// with the hand-off alone, so a reply that did exactly that failed three of WK-11's graders; R10-31
+// grades what was read labelled partial, the rest said as not read and Confidence & freshness
+describe("an ESPN_AUTH_REJECTED that ends the procedure (changelog §R10, R10-7, R10-12, R10-31)", () => {
+  const clause =
+    "end the procedure there: present what was read before it, labelled partial (the answer is partial even when nothing was read before it), say which steps or inputs were not read and never fill them in, say so in Confidence & freshness, naming the rejection and what was not read, and hand off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7, R10-12, R10-31).";
+  it("orient's rule says what R10-31 grades before the hand-off, and every orient copy carries it", () => {
+    expect(ORIENT_SENTENCES.midProcedure).toContain(clause);
+    const para =
+      orient.split("\n").find((l) => l.startsWith("**A rejection mid-procedure.**")) ?? "";
+    expect(para).toContain(ORIENT_SENTENCES.midProcedure);
+    for (const skill of Object.keys(SKILL_RULES))
+      expect(read(`skills/${skill}/references/orient.md`), skill).toContain(clause);
+  });
+  it("check-skills refuses an orient that hands off without it, or keeps any part of it out", () => {
+    const old = orient.replace(
+      clause,
+      "end the procedure there with the hand-off to the `espn-fantasy-football:session-check` Skill.",
+    );
+    expect(old).not.toBe(orient);
+    expect(orientRoutingProblems(old)).toEqual([
+      `the fixed sentence "midProcedure" is missing: "${ORIENT_SENTENCES.midProcedure}"`,
+    ]);
+    for (const part of [
+      "labelled partial ",
+      "(the answer is partial even when nothing was read before it), ",
+      "say which steps or inputs were not read and never fill them in, ",
+      "say so in Confidence & freshness, naming the rejection and what was not read, ",
+    ])
+      expect(orientRoutingProblems(orient.replace(part, "")), part).toHaveLength(1);
+  });
+  it("guardrail 5 stops the same way in every body, and check-skills requires it", () => {
+    const stop =
+      "on a private or unknown one, stop there: present what was read before it, labelled partial, say what was not read and never fill it in, say so in Confidence & freshness, and hand off to the `espn-fantasy-football:session-check` Skill";
+    expect(GUARDRAIL_REJECTED).toContain(stop);
+    expect(guardrails).toContain(`${GUARDRAIL_REJECTED} (changelog §R10, R10-7, R10-31)`);
+    for (const skill of Object.keys(SKILL_RULES))
+      expect(read(`skills/${skill}/SKILL.md`), skill).toContain(GUARDRAIL_REJECTED);
+    // the old stop, hand-off alone, is not the clause check-skills asks of every body
+    expect(
+      guardrails
+        .replace(
+          stop,
+          "on a private or unknown one, stop with the hand-off to the `espn-fantasy-football:session-check` Skill",
+        )
+        .includes(GUARDRAIL_REJECTED),
+    ).toBe(false);
   });
 });
 
@@ -255,6 +308,46 @@ This league is private, so the session has to be repaired before anything else i
 | Fix | \`eff setup\` in a terminal |
 
 Next: the session-check Skill repairs the session (\`espn-fantasy-football:session-check\`).`;
+  // the 401 on the first read with nothing before it, as orient now ends it (R4D-VS-1): the answer is
+  // partial even so, with what was not read and a Confidence & freshness line, then the hand-off
+  const handoffOnly = `ESPN rejected your stored session at the first read of the briefing (last week's scoreboard), so this briefing is partial: nothing past the league settings was read. Last week, the matchup and lineup, K and D/ST, waivers, injuries and byes and league activity were not read, and I won't guess them.
+
+**Confidence & freshness:** partial — the stored session was rejected; nothing after the league settings was read.
+
+In a terminal, run \`eff setup\` to replace the session. Your league is private, so the \`espn-fantasy-football:session-check\` Skill takes it from here.`;
+  const handoffTable = `| Briefing step | Status |
+|---|---|
+| Last week | not read: ESPN rejected the stored session (401) |
+| This week's matchup and lineup | not read |
+| K and D/ST, Waivers, Injuries and byes, League activity | not read |
+
+### Confidence & freshness
+| | |
+|---|---|
+| Briefing | partial: nothing was read before the rejection |
+
+Fix: \`eff setup\` in a terminal. This private league's session repair is the \`espn-fantasy-football:session-check\` Skill's job.`;
+  // order B: the keyless NFL schedule read first, then the 401 at the schedule analysis
+  const orderB = `# Week 5 briefing (partial)
+
+### Injuries and byes
+Byes weeks 5-7 from the NFL schedule (read before the rejection): BUF and NE off in week 7.
+
+ESPN then rejected the stored session at the schedule analysis; last week, the lineup, K and D/ST, waivers and league activity were not read.
+
+### Confidence & freshness
+Partial: the stored session was rejected mid-briefing.
+
+Run \`eff setup\` in a terminal; the session-check Skill takes it from here.`;
+  // what orient said before R4DVF-2 (the hand-off alone): no partial label and no Confidence &
+  // freshness, so these are wrong replies now
+  const terse = handoffOnly
+    .replace(
+      "so this briefing is partial: nothing past the league settings was read",
+      "so I stopped there",
+    )
+    .replace(/\n\n\*\*Confidence & freshness:\*\*[^\n]*/, "");
+  const terseTable = handoffTable.replace(/\n\n### Confidence & freshness\n[\s\S]*?\n\n/, "\n\n");
   /** The opposite claim: a complete briefing on a valid session, no hand-off. */
   const complete = `# Week 5 briefing
 
@@ -281,34 +374,43 @@ Claim the top RB.`;
 
   const wk = mandatedLines(orient, "stored", "private-expiring-weekly", false).lines;
   const contract = contractLines(template);
+  const good = [prose, table, handoffOnly, handoffTable, orderB];
   const rows: readonly (readonly [
     string,
     "regex" | "regex_absent",
     readonly string[],
     readonly string[],
   ])[] = [
-    ["The reply says ESPN rejected the stored session", "regex", [prose, table], [complete]],
-    ["The reply labels what it gives partial", "regex", [prose, table], [complete]],
-    ["The reply says what was not read", "regex", [prose, table], [complete]],
+    ["The reply says ESPN rejected the stored session", "regex", good, [complete]],
+    ["The reply labels what it gives partial", "regex", good, [complete, terse, terseTable]],
+    ["The reply says what was not read", "regex", good, [complete]],
     [
       "Confidence & freshness says the briefing is partial or the session was rejected",
       "regex",
-      [prose, table],
-      [complete],
+      good,
+      [complete, terse, terseTable],
     ],
     [
       "The briefing ends with the hand-off to the session-check Skill",
       "regex",
-      [prose, table],
+      good,
       [complete, handoffFirst],
     ],
     [
       "The reply never prints the public-league Session line",
       "regex_absent",
-      [prose, table],
+      good,
       [`${publicSession}\n${prose}`],
     ],
   ];
+
+  it("the terse replies are what orient asked for before R10-31's clause, and nothing else changed", () => {
+    expect(terse).not.toBe(handoffOnly);
+    expect(terse).not.toMatch(/partial|Confidence/);
+    expect(terseTable).not.toBe(handoffTable);
+    expect(terseTable).not.toMatch(/partial|Confidence/);
+    expect(terseTable).toContain("`espn-fantasy-football:session-check`");
+  });
 
   it.each(rows)("%s (%s)", (lead, kind, good, wrong) => {
     const re = graderOf(lead, kind);

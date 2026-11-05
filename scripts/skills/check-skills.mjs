@@ -108,10 +108,12 @@ export const COOKIE_LINE = "Never ask for, accept, echo or forward `espn_s2` or 
  * plan 09 §2 guardrail 5's "and stop": a mid-procedure ESPN_AUTH_REJECTED follows orient's split —
  * keyless reads go on on a public league, a private or unknown one hands over and stops). Guardrail
  * 5 is inline in every body, ahead of the referenced orient.md, so a stale "and stop" there would
- * contradict orient for every Skill (the round-3 review's F1).
+ * contradict orient for every Skill (the round-3 review's F1). Its stop is orient's (changelog §R10,
+ * R10-31; the round-4d verifiers' R4DVF-2): what was read is given, labelled partial, the rest said
+ * as not read, Confidence & freshness says so, then the hand-off.
  */
 export const GUARDRAIL_REJECTED =
-  "on `ESPN_AUTH_REJECTED` say the one command — in a terminal, `eff setup` — and follow **A rejection mid-procedure** in references/orient.md: carry on with the keyless reads on a public league; on a private or unknown one, stop with the hand-off to the `espn-fantasy-football:session-check` Skill";
+  "on `ESPN_AUTH_REJECTED` say the one command — in a terminal, `eff setup` — and follow **A rejection mid-procedure** in references/orient.md: carry on with the keyless reads on a public league; on a private or unknown one, stop there: present what was read before it, labelled partial, say what was not read and never fill it in, say so in Confidence & freshness, and hand off to the `espn-fantasy-football:session-check` Skill";
 /** The superseded end of guardrail 5 (it stopped every Skill on ESPN_AUTH_REJECTED). */
 export const GUARDRAIL_REJECTED_ABSENT = "— and stop. If a cookie";
 /**
@@ -516,7 +518,10 @@ export const ORIENT_REJECTED = Object.freeze({
  * triage), each with the ruling or the defect it holds:
  * - `midProcedure` (R10-7): a tool's ESPN_AUTH_REJECTED after Step 0 follows the same split — both
  *   halves: the keyless reads carry on on a public league, and the procedure ends with the hand-off
- *   when the answer still needs that tool or the league is private or unknown;
+ *   when the answer still needs that tool or the league is private or unknown — and that end is
+ *   R10-31's: what was read before it, labelled partial (also when nothing was), what was not read,
+ *   Confidence & freshness saying so, then the hand-off (the round-4d verifiers' R4DVF-2, R4D-VS-1:
+ *   a reply that stopped as the sentence said failed WK-11's partial and C&F graders);
  * - `order` and `invalidFirst` (WK-7-E): the invalid-roster block opens the answer, above the
  *   Session and seeding lines and any title or header;
  * - `benchContinuation` (R9-2, affirmed by R10-5): "my WR3" with two starting WRs is the
@@ -528,7 +533,7 @@ export const ORIENT_REJECTED = Object.freeze({
  */
 export const ORIENT_SENTENCES = Object.freeze({
   midProcedure:
-    "A tool that answers `ESPN_AUTH_REJECTED` after Step 0 follows the same split: on a public league (`league.is_public: true`) print the Session line above once and carry on with the reads that answer keylessly; when the answer still needs that tool, or the league is private or unknown, end the procedure there with the hand-off to the `espn-fantasy-football:session-check` Skill.",
+    "A tool that answers `ESPN_AUTH_REJECTED` after Step 0 follows the same split: on a public league (`league.is_public: true`) print the Session line above once and carry on with the reads that answer keylessly; when the answer still needs that tool, or the league is private or unknown, end the procedure there: present what was read before it, labelled partial (the answer is partial even when nothing was read before it), say which steps or inputs were not read and never fill them in, say so in Confidence & freshness, naming the rejection and what was not read, and hand off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7, R10-12, R10-31).",
   // the any-tool session line (round 4d): a tool that absorbed a refusal answers partial with one
   // line; the same rejection, the same hand-off (changelog §R10, R10-7, R10-12)
   sessionLinePartial:

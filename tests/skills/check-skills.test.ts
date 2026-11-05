@@ -660,7 +660,7 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
   // the round-3 review's F3: the hand-off half of the mid-procedure rule was not held
   it("names midProcedure when its hand-off half is gone, and benchContinuation when the bench rank is", () => {
     const half =
-      "; when the answer still needs that tool, or the league is private or unknown, end the procedure there with the hand-off to the `espn-fantasy-football:session-check` Skill.";
+      "; when the answer still needs that tool, or the league is private or unknown, end the procedure there: present what was read before it, labelled partial (the answer is partial even when nothing was read before it), say which steps or inputs were not read and never fill them in, say so in Confidence & freshness, naming the rejection and what was not read, and hand off to the `espn-fantasy-football:session-check` Skill (changelog §R10, R10-7, R10-12, R10-31).";
     expect(shared).toContain(half);
     expect(orientRoutingProblems(shared.replace(half, "."))).toEqual([
       `the fixed sentence "midProcedure" is missing: "${ORIENT_SENTENCES.midProcedure}"`,
@@ -1123,7 +1123,7 @@ describe("the body (plan 09 §2, §5.1 item 2)", () => {
     const t = fresh();
     t.edit(
       "skills/_shared/references/guardrails.md",
-      /and follow \*\*A rejection mid-procedure\*\*[^\n]*?\(changelog §R10, R10-7\)\. If a cookie/,
+      /and follow \*\*A rejection mid-procedure\*\*[^\n]*?\(changelog §R10, R10-7, R10-31\)\. If a cookie/,
       "and stop. If a cookie",
     );
     buildSkills({ root: t.root });
