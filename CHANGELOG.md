@@ -261,8 +261,9 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   `weekly` show the lineup from `rec.subjects` and read the live scoreboard's game-state counts;
   `retro` reads a truncated retrospective by its per-kind counts; `news-check` reads the evidence
   flag as the tool does; `injury-cascade` treats an injury as confirmed only by ESPN's status or the
-  official report. A Δ interval that spans 0 is a coin flip; one whose best case is 0 is held as
-  gaining nothing (R10-34). `check-skills` holds every fixed sentence, and the Skills listing is
+  official report. What is a coin flip is the tool's flag (`coin_flip`, or trade's `fair`), never the
+  interval read alone: an interval that spans 0 is one, and a `[0, 0]` change is held as gaining
+  nothing (R10-34). `check-skills` holds every fixed sentence, and the Skills listing is
   4 591 of 4 600 characters.
 - **The plugin eval suite (rulings R10-3, R10-8, R10-14, R10-27, R10-28, R10-31, R10-33).** New
   cases on the private variants (the hand-off on a rejected private session, the probe that accepts

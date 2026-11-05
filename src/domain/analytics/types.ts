@@ -253,8 +253,8 @@ export function toCoarseDelta(delta: number): CoarseDelta {
  * Whether a Δ interval spans 0: strictly below it at one end and strictly above it at the other, so
  * the change can either gain or lose (plan 09 §2 guardrail 9's "a Δ interval including 0"). An
  * interval that ends at 0 cannot gain (`[-35.2, 0]`: the swap loses or gains nothing) or cannot
- * lose (`[0, 5]`), and `[0, 0]` gains nothing whatever happens — none of them is a coin flip (the
- * round-4b review's F12: a pair whose entrant is ruled out read `coin_flip: true` while its own
+ * lose (`[0, 5]`), and `[0, 0]` gains nothing whatever happens — none of them spans 0, so none is a
+ * coin flip by its interval (isCoinFlip's ΔP(win) branch can still flag one; the round-4b review's F12: a pair whose entrant is ruled out read `coin_flip: true` while its own
  * verdict said the swap loses points). The one rule for every caller (E2's swaps, its compare
  * pairs and the held changes behind its Rec).
  */

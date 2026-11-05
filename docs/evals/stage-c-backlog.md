@@ -772,10 +772,19 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
   2026-11-05). E13's reads now follow the house pattern (`isOptionalReadFailure`, else rethrow;
   `8f41601`). These optional reads still turn every error into null, so a bug there reads as
   "unavailable": the schedule, settings or roster reads in `league.ts` (three), `players.ts`,
-  `analytics.ts` (two) and `datasets.ts`. These absorb an outage only (`isDegradable`), so a session
-  refusal or fixture mode's missing fixture fails the call instead of being said by the session
-  line: `roster.ts` (two), `analytics-p1.ts` (nine) and `datasets-p1.ts`. Each needs its read's
-  refusal semantics checked against `src/mcp/refusals.ts` and the refusal sweep before it narrows.
+  `analytics.ts` (two) and `datasets.ts`. These absorb an outage only (`isDegradable`, with no
+  refusal branch before it), so a session refusal or fixture mode's missing fixture fails the call
+  instead of being said by the session line: `analytics-p1.ts` (nine), `market-p1.ts` (six of its
+  eight; two handle a refusal first), `roster.ts` (two), `datasets-p1.ts` and `p1-common.ts` (one
+  each), and the fallback reads in `espn-p1.ts` and `players.ts` (two each) and `league.ts` (two of
+  its three). Each needs its read's refusal semantics checked against `src/mcp/refusals.ts` and the
+  refusal sweep before it narrows.
+- **A pair that cannot gain, flagged a coin flip by ΔP(win)** (the follow-up verifier's F1,
+  2026-11-05). F12 made the interval rule strict, so `[−p90, 0]` is no coin flip by its interval,
+  but E2's ΔP(win) branch still flags such a pair `coin_flip: true` when the win-chance move is
+  under the threshold (`[−3, 0]` with a ruled-out entrant; `lineup-no-move.test.ts` pins it as
+  built), and an always-losing swap the same way. Whether a change that cannot gain should ever be
+  called a coin flip is a ruling for round 3's triage; the Skills defer to the flag either way.
 - **From the Dependabot review (2026-11-04 to 2026-11-05).**
   - `hyparquet` 1.32.0 (published 2026-10-29) is not reviewed: no PR proposed it. It comes through
     Dependabot's next monthly group with its own "Reviews" row.

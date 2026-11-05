@@ -84,7 +84,7 @@ import {
  * `fixture_missing` (isOptionalReadFailure) — or a dataset past its hard limit (STALE_ONLY: the
  * schedule read here takes no `allow_stale`, so the call degrades as before). Anything else is a
  * bug and propagates, as the house optional reads do (isOptionalReadFailure, else rethrow: the live
- * scoreboard's rosters, espn-p1.ts); before, every error read as null.
+ * scoreboard's rosters in league.ts, the player stats in espn-p1.ts); before, every error read as null.
  */
 export function retroReadAbsorbed(e: unknown): null {
   if (isOptionalReadFailure(e) || (e as { effCode?: unknown } | null)?.effCode === "STALE_ONLY")

@@ -227,8 +227,9 @@ describe("R10-24: a compare pair is scored only as the direct settable swap it n
 });
 
 // The round-4b review's F12: a compare pair whose entrant is ruled out (a point mass at 0) against a
-// starter whose p10 is 0 has the interval [-p90, 0] — it can only lose or gain nothing, never a coin
-// flip (spansZero: strictly both sides of 0). Before the fix it read `coin_flip: true` while its
+// starter whose p10 is 0 has the interval [-p90, 0] — it can only lose or gain nothing, so it is no
+// coin flip by its interval (spansZero: strictly both sides of 0; the ΔP(win) branch can still flag
+// one, lineup-no-move.test.ts). Before the fix it read `coin_flip: true` while its
 // option verdict said the swap loses points (questionable-late--core, out 4379399 / in 4697815).
 describe("F12: a compare pair that can never gain is not a coin flip", () => {
   const CAPPED = {
