@@ -381,12 +381,17 @@ export class CookieGate {
    * (CookieGateOptions.fixtureRejectsRead moves the label to `rejected`, recorded as a 401 is) and
    * the read answers as ESPN's 401 to a cookie-bearing read does (errors.ts classifyAnswer:
    * ESPN_AUTH_REJECTED with `upstream_status` 401) — nothing is sent, no value or header exists. A
-   * no-op outside fixture mode (an authority present) and for every other read.
+   * read whose verdict was taken while the label still served it, and that reaches here after the
+   * label moved to `rejected` (a concurrent read the 401 overtook), is refused with the
+   * short-circuit, as the real pipeline's after-acquire `rejectedNow` re-check refuses it (nothing
+   * sent, so fetchFresh refunds its budget; the round-4c verifier's CR-2). A no-op outside fixture
+   * mode (an authority present) and for every other read.
    */
   fixtureSend(use: CookieUse, route: EspnRoute, view: EspnView): void {
     if (this.auth !== null || this.fixtureRejectsRead === null) return;
     if (use === "never" || route === "season" || route === "players" || !this.byScript(use)) return;
     const state = this.fixtureLabel?.() ?? "not_configured";
+    if (state === "rejected") throw new EspnCredentialError("ESPN_AUTH_REJECTED", "short_circuit");
     if ((state === "stored" || state === "validated") && this.fixtureRejectsRead())
       throw new EspnUpstreamError("auth_rejected", { upstream_status: 401, view });
   }

@@ -7,7 +7,10 @@
 // with `upstream_status: 401` — and the label moves to `rejected`, recorded as the real pipeline
 // records a 401 (`last_rejected_at`, `rejected_since`), so espn_get_status and espn_check_auth say
 // `rejected` from then on, and every later read follows R10-27's rejected rule (the short-circuit,
-// zero requests). The probe is such a read too (the cache never serves it). Zero network and no
+// zero requests). The probe is the explicit check, never a data read: it never fires the 401, and
+// before it an accepting probe validates the session (never rejected after — how the seed fills the
+// cache); after it the probe answers accepted false with ESPN's 401 and the label stays `rejected`
+// (the round-4c verifier's R4C-VS-3). A read the 401 overtook is refused too (CR-2). Zero network and no
 // value or Cookie header anywhere; the fixture guard runs first (fixture-credential.test.ts); nothing
 // outside fixture mode reaches the seam. Also R10-27's second private variant, `private-league-none`
 // (not_configured): its first reads. Over the production stdio entry (serveStdio over an in-memory
@@ -182,7 +185,7 @@ describe("R10-28: the scripted state reads as `stored` and is value-free", () =>
     expect(JSON.stringify(a.view())).not.toMatch(COOKIE_WORDS);
   });
 
-  it("the probe is the explicit check, not a data read: it answers the scripted result, and a validated session is never rejected", async () => {
+  it("the probe is the explicit check, not a data read: before the 401 it answers the scripted result and a validated session is never rejected; after it, rejected from then on", async () => {
     const clock = fixedClock(CLOCK_AT);
     const a = scriptedAuth(
       {
@@ -196,7 +199,7 @@ describe("R10-28: the scripted state reads as `stored` and is value-free", () =>
     expect(a.state()).toBe("validated");
     expect(a.rejectsRead()).toBe(false);
     expect(a.view()).toMatchObject({ last_rejected_at: null, rejected_since: null });
-    // after the 401, the probe still answers the scripted result (the user re-ran setup)
+    // after the 401, the probe reports the session rejected from then on (R10-28; R4C-VS-3)
     const b = scriptedAuth(
       {
         state: "stored",
@@ -206,8 +209,18 @@ describe("R10-28: the scripted state reads as `stored` and is value-free", () =>
       clock,
     );
     expect(b.rejectsRead()).toBe(true);
-    await expect(b.probe()).resolves.toMatchObject({ accepted: true });
-    expect(b.state()).toBe("validated");
+    for (let i = 0; i < 2; i++) {
+      await expect(b.probe()).resolves.toEqual({
+        accepted: false,
+        probe: "settings",
+        upstream_status: 401,
+        reason: null,
+        checked_at: CLOCK_AT,
+      });
+      expect(b.state()).toBe("rejected");
+      expect(b.view()).toMatchObject({ rejected_since: CLOCK_AT, last_rejected_at: CLOCK_AT });
+      expect(b.rejectsRead()).toBe(false);
+    }
   });
 });
 
@@ -279,10 +292,14 @@ describe("R10-28 over stdio: status stored → a cached read served → the firs
       expect((await call(run.client, "espn_get_league", {})).isError).toBe(false);
       // nothing was sent by this server at any point (zero network; the 401 is scripted)
       expect(s.requests()).toBe(n);
-      // espn_check_auth then reads the label: the scripted probe (the user re-ran setup)
+      // espn_check_auth after the 401: rejected from then on (R10-28; R4C-VS-3), and reads stay refused
       const probe = await call(run.client, "espn_check_auth", {});
-      expect(probe.body.data).toMatchObject({ accepted: true, upstream_status: null });
-      expect((await credOf(run.client)).state).toBe("validated");
+      expect(probe.body.data).toMatchObject({ accepted: false, upstream_status: 401 });
+      expect((await credOf(run.client)).state).toBe("rejected");
+      const after = await call(run.client, "espn_get_standings", {});
+      expect(codeOf(after.body)).toBe("ESPN_AUTH_REJECTED");
+      expect(errOf(after.body).reason).toBe("short_circuit");
+      expect(s.requests()).toBe(n);
     } finally {
       await run.close();
     }
@@ -344,6 +361,65 @@ describe("R10-27's second private variant, private-league-none (not_configured):
     const probe = await call(s.client, "espn_check_auth", {});
     expect(probe.body.data).toMatchObject({ accepted: null, reason: "not_configured" });
     expect(s.requests()).toBe(0);
+  });
+});
+
+describe("R10-28 under concurrency (the round-4c verifier's CR-2): a read the 401 overtook is never served", () => {
+  const ref = { platform: "espn", league_id: "0", season: 2026 } as const;
+
+  it("settings warmed, then two concurrent reads of uncached views: one the scripted 401, the other the short-circuit, none served", async () => {
+    const clock = fixedClock(CLOCK_AT);
+    const scripted = readScriptedCredential(EXPIRING);
+    if (scripted === null) throw new Error("private-expiring scripts no credential");
+    const auth = scriptedAuth(scripted, clock);
+    const repos = {
+      limiter: new MemoryLimiterRepo(),
+      espnCache: new MemoryCache(),
+      driftState: new MemoryDrift(),
+    };
+    const make = (label: () => CredentialState, rejects: () => boolean) =>
+      createEspnProvider({
+        config: {
+          leagueId: "0",
+          season: 2026,
+          teamId: 2,
+          espnReadHost: "lm-api-reads.fantasy.espn.com",
+          fixtureRecord: false,
+          fixtureDir: EXPIRING,
+        },
+        repos,
+        credentials: null,
+        clock,
+        fetch: () => Promise.reject(new Error("no network in tests")),
+        sleep: (ms) => {
+          clock.advance(ms);
+          return Promise.resolve();
+        },
+        scoring: translateScoringInput,
+        fixtureCredentialLabel: label,
+        fixtureRejectsRead: rejects,
+      });
+    // the seed's process (validated: never rejected) leaves the settings fresh in the cache
+    await make(
+      () => "validated",
+      () => false,
+    ).getLeague(ref);
+    const run = make(
+      () => auth.state(),
+      () => auth.rejectsRead(),
+    );
+    const rs = await Promise.allSettled([run.getRosters(ref, 1), run.getRosters(ref, 2)]);
+    expect(rs.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+    const reasons = rs.map((r) => (r.status === "rejected" ? (r.reason as unknown) : null)) as {
+      effCode?: unknown;
+      effDetails?: { upstream_status?: unknown; reason?: unknown };
+    }[];
+    for (const e of reasons) expect(e.effCode).toBe("ESPN_AUTH_REJECTED");
+    const kinds = reasons.map((e) =>
+      e.effDetails?.upstream_status === 401 ? "401" : String(e.effDetails?.reason),
+    );
+    expect(kinds.sort()).toEqual(["401", "short_circuit"]);
+    expect(auth.state()).toBe("rejected");
   });
 });
 

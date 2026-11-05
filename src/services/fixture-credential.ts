@@ -28,8 +28,10 @@
 // on every variant) is answered as ESPN's 401 to a cookie-bearing read is: the label moves to
 // `rejected`, recorded as the real pipeline records a 401 (`last_rejected_at` and `rejected_since` at
 // that instant, in memory only — never the store's credential row, which the fixture guard reads),
-// so espn_get_status and espn_check_auth say `rejected` from then on, and every later read follows
-// the rejected label (R10-27). Still a label: no value, no Cookie header, nothing sent. New here.
+// so espn_get_status and espn_check_auth say `rejected` from then on (the probe answers accepted
+// false with ESPN's 401; before the 401 an accepting probe validates the session, which is then never
+// rejected), and every later read follows the rejected label (R10-27). Still a label: no value, no
+// Cookie header, nothing sent. New here.
 import path from "node:path";
 import { readSecureFile } from "../config/paths.js";
 import { ConfigError, type CredentialState } from "../config/schema.js";
@@ -157,9 +159,12 @@ export interface ScriptedAuth {
   view(): CredentialView;
   /**
    * The one probe: the scripted result; no request (`upstream_status` null), no value. It is the
-   * explicit credential check, not a data read, so a scripted rejection's 401 is never its
-   * answer (R10-28): an accepting probe moves the label to `validated` — the user re-ran setup —
-   * and a validated session is never rejected after it (how a seed fills the cache).
+   * explicit credential check, not a data read, so it never fires a scripted rejection's 401
+   * (R10-28): before that 401 an accepting probe moves the label to `validated`, and a validated
+   * session is never rejected after it (how a seed fills the cache). Once the 401 has rejected the
+   * session, the probe reports `rejected` from then on, as R10-28 rules (the same session, probed
+   * again, is ESPN's 401 again): accepted false, `upstream_status` 401, the label kept `rejected`
+   * (the round-4c verifier's R4C-VS-3).
    */
   probe(): Promise<CredentialProbeResult>;
   /**
@@ -204,6 +209,15 @@ export function scriptedAuth(scripted: ScriptedCredential, clock: Clock): Script
     }),
     probe: () => {
       const p = scripted.probe;
+      // the session the scripted 401 rejected (R10-28): rejected from then on, as ESPN answers it
+      if (rejectedAt !== null)
+        return Promise.resolve({
+          accepted: false,
+          probe: p.probe,
+          upstream_status: 401,
+          reason: null,
+          checked_at: clock.nowIso(),
+        });
       if (p.accepted === true) state = "validated";
       else if (p.accepted === false) state = "rejected";
       return Promise.resolve({
