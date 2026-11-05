@@ -118,15 +118,17 @@ export const GUARDRAIL_REJECTED =
 export const GUARDRAIL_REJECTED_ABSENT = "— and stop. If a cookie";
 /**
  * Guardrail 9's no-move rule, as every body carries it (changelog §R10, R10-34, which states the
- * reading of plan 09 §2's "a Δ interval including 0"): an interval that spans 0 is a coin flip
- * (spansZero), and otherwise the tool's flag decides — E2's `coin_flip`, which its ΔP(win) branch
- * also sets whatever the interval, or trade's `fair` (`p10 ≤ 0 ≤ p90`). The old "includes 0 … a coin
+ * reading of plan 09 §2's "a Δ interval including 0"): the tool's flag and the rec decide — E2's
+ * `coin_flip` (an interval that spans 0, spansZero, or a ΔP(win) under the threshold even when the
+ * interval does not) and trade's `fair` (`p10 ≤ 0 ≤ p90`); a held coin flip is "no move", while a
+ * zero-scoring seat is filled and a forced change made whatever the flag (R7-1 rules 2–3; the refix
+ * verifier's V1). The old "includes 0 … a coin
  * flip" called SS-3's swap (`[−35.2, 0]`, `coin_flip: false`) a coin flip, against the tool; the
  * first R10-34 wording ("a best case of 0 is never a coin flip") then contradicted the ΔP(win)
  * branch (`[−3, 0]`, `coin_flip: true`; the follow-up verifier's F1).
  */
 export const GUARDRAIL_NO_MOVE =
-  'A Δ whose interval spans 0 — below 0 at one end, above it at the other — is **"no move"**: a coin flip, said plainly. The tool\'s flag decides what is a coin flip, never the interval read alone: a change with `coin_flip: true` (E2 also sets it when the win-chance move is under its threshold, whatever the interval) or a trade verdict `fair` is one; a change with `coin_flip: false` is never called one, and one whose best case is 0 cannot gain';
+  'A change the tool flags `coin_flip: true` is a coin flip, said plainly — its Δ interval spans 0 (below 0 at one end, above it at the other), or its win-chance move is under the threshold even when the interval does not — and **"no move"** when the rec holds it. The flag and the rec decide, never the interval read alone: a seat that scores a known 0 is filled whenever the entrant is expected to score, and a change the user asked for, or one that moves a player out of a seat he cannot hold, is made whatever the flag; a trade verdict `fair` is a coin flip; a change with `coin_flip: false` is never called one, and one whose best case is 0 cannot gain';
 /** The superseded guardrail 9 (every interval that includes 0 read as a coin flip). */
 export const GUARDRAIL_NO_MOVE_ABSENT = "whose interval includes 0 is";
 /**

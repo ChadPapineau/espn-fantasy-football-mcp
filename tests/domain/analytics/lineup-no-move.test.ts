@@ -478,7 +478,10 @@ describe("where ΔP(win) decides a coin flip (R7-1)", () => {
 
   // changelog §R10, R10-34 (the follow-up verifier's F1): the flag, not the interval read alone,
   // says what is a coin flip. A pair whose best case is 0 cannot gain, and no interval spans 0
-  // here, but against this week's opponent its win-chance move is under the threshold: coin_flip
+  // here, but against this week's opponent its win-chance move is under the threshold: coin_flip,
+  // as built. Whether a change that cannot gain should ever be a coin flip is open (the Stage C
+  // backlog, "A pair that cannot gain, flagged a coin flip by ΔP(win)"); this pins what the Skills
+  // read today
   it("a pair whose best case is 0 is a coin flip when ΔP(win) decides it, and not without an opponent", () => {
     const players = roster({
       5: {
