@@ -344,6 +344,56 @@ describe("the mid-call shapes: an optional read of another week or season refuse
     120_000,
   );
 
+  // the round-4d verifier's R4D-VS-3: on fx-10h the clean call already prints the playercard's
+  // "unavailable" line (no kona_playercard recorded), so the sweep's oracle skipped it. Here the
+  // clean call reads the stats (answered empty), and the refused call must carry the fallback's
+  // own line and the session line — never the "unavailable" one
+  it("espn_get_player_stats: a refused stats read says where the lines come from, never 'unavailable'", async () => {
+    const args = { players: { team_id: 2 }, type: "week", week: 4 } as const;
+    // answered with no line, under a real read's stamp (fx-10h records no kona_playercard)
+    const answered = async (
+      _real: (...a: unknown[]) => Promise<unknown>,
+      ...a: unknown[]
+    ): Promise<unknown> => {
+      const st = await world.services.platform.getStandings(
+        a[0] as Parameters<typeof world.services.platform.getStandings>[0],
+      );
+      return { value: [], stamp: st.stamp };
+    };
+    const run = async (fault: Parameters<typeof faulty>[1]): Promise<Body> => {
+      const c = await connect(world, {
+        options: { toolset: "full" },
+        services: faulty(world.services, fault),
+      });
+      const r = await call(c.client, "espn_get_player_stats", args);
+      await c.close();
+      expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+      return r.body;
+    };
+    const UNAVAILABLE =
+      "espn:kona_playercard unavailable: weekly actuals unavailable; nflverse lines scored by the engine instead";
+    const FALLBACK = "weekly actuals: nflverse lines scored by the engine instead of ESPN's";
+    const clean = await run({ getPlayerStats: answered });
+    expect(clean.warnings ?? []).not.toContain(UNAVAILABLE);
+    expect(clean.warnings ?? []).not.toContain(FALLBACK);
+    for (const [code, refusal] of [
+      ["ESPN_AUTH_REJECTED", "rejected"],
+      ["ESPN_REQUIRES_COOKIES", "no_session"],
+    ] as const) {
+      const body = await run({ getPlayerStats: coded(code) });
+      const w = body.warnings ?? [];
+      expect(body.partial, code).toBe(true);
+      expect(w, code).toContain(FALLBACK);
+      expect(w, code).toContain(sessionReadsWarning(refusal, ["player stats"]));
+      expect(w, code).not.toContain(UNAVAILABLE);
+      for (const x of w) expect(x, code).not.toMatch(/kona_playercard/);
+    }
+    // an outage keeps its own line, and no session line
+    const out = await run({ getPlayerStats: coded("ESPN_UPSTREAM_UNAVAILABLE") });
+    expect(out.warnings ?? []).toContain(UNAVAILABLE);
+    expect(out.warnings ?? []).not.toContain(FALLBACK);
+  }, 120_000);
+
   it("seeding evidence: last season's settings out (an outage) keeps 'could not be read'", async () => {
     const season = (world.services.league as { season: number }).season;
     const prev = (ref: unknown): boolean => (ref as { season?: number }).season === season - 1;
