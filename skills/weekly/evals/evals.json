@@ -132,6 +132,24 @@
         "The reply never prints the public-league Session line, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
         "The reply says ESPN rejected the stored session on this private league, hands over to session-check, and gives no section of the briefing (llm)"
       ]
+    },
+    {
+      "id": 10,
+      "name": "WK-10",
+      "toolset": "full",
+      "prompt": "Prep me for week 5",
+      "expected_output": "On private-expiring the stored session still reads stored at Step 0 (espn_get_status: credential.state stored; espn_get_league: is_public false, from the settings the build's private-expiring-weekly seed left fresh), so orient does not hand over and the briefing runs: every read weekly's steps 1–5 make (last week's scoreboard and retrospective, this week's scoreboard, both rosters, the injuries, both teams' projections, the lineup, K and D/ST, the pool and the waiver brief, the usage, the schedule and the bye analysis) is served from that fresh cache with no request. ESPN rejects the session at the first read the cache does not serve — espn_analyze_league_activity's transaction feed, ESPN's 401 (changelog §R10, R10-28) — and E11 answers partial: true with its session-refusal lines: 'partial: the stored ESPN session was rejected, and ESPN's transaction feed needs one on a league not known to be public: the server's persisted history only; run `eff setup` in a terminal to replace it' and the free-agent pool line ('partial: the stored ESPN session was rejected, and ESPN's free-agent pool need one on a league not known to be public: they were not read (by-team activity, waiver-order movement and rival needs go without them); run `eff setup` in a terminal to replace it'), with 'no persisted transaction history yet: the window shows this week's feed only': the persisted history holds no transaction, so the window shows 0 adds, drops, claims and trades, the waiver order as it stands (no movement: the earlier order is unknown) and rivals' weakest slots with no likely targets. espn_get_status reads rejected from then on. weekly's P1 paragraph governs (changelog §R10, R10-11, R10-12): the League activity section is given from the persisted history and labelled partial — ESPN rejected the stored session, so the feed and the free-agent pool were not read and by-team activity, waiver-order movement and rival needs go without them — with the one command, eff setup in a terminal, once; Confidence & freshness says the section is partial for that reason; espn_analyze_league_activity is called once, never repeated for these lines (a repeat reads nothing more); and on this private league the briefing ends with the hand-off to the session-check Skill (changelog §R10, R10-7). The other sections (last week, this week's matchup and lineup, K and D/ST, waivers, injuries and byes) are given from the reads that answered. No Session line about keyless reads: the league is private.",
+      "files": ["evals/fixtures/fx-10h/private-expiring"],
+      "expectations": [
+        "The skill called espn_analyze_lineup (tool_used)",
+        "espn_analyze_league_activity was called exactly once — never repeated for its session-refusal lines (tool_used: min 1 max 1)",
+        "The reply gives the League activity section (regex: `(?:^|\\n)[ \\t]*(?:#{1,6}[ \\t]*|\\*\\*|\\|[ \\t]*(?:\\*\\*)?)(?:\\d+\\.[ \\t]*)?League activity\\b`)",
+        "The reply labels the League activity section partial (regex: `League activity\\b[\\s\\S]{0,200}?(?<!\\bnot\\s)(?<!\\bnon-)\\bpartial\\b|(?<!\\bnot\\s)\\bpartial\\b[^\\n]{0,80}\\bLeague activity\\b`)",
+        "The reply says ESPN rejected the stored session (regex: `\\b(?:session|cookies?)\\b[^.\\n]{0,80}?(?<!\\bnot\\s)(?<!n['’]t\\s)(?<!\\bnever\\s)\\brejected\\b|(?<!\\bnot\\s)(?<!n['’]t\\s)(?<!\\bnever\\s)\\brejected\\b[^.\\n]{0,40}?\\b(?:session|cookies?)\\b`)",
+        "The briefing hands over to the session-check Skill (regex: `\\bsession-check\\b`)",
+        "The reply never prints the public-league Session line, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
+        "The League activity section rests on the server's persisted history, labelled partial, says what the session-refusal lines leave out (by-team activity, waiver-order movement, rival needs) and gives eff setup once; Confidence & freshness says the section is partial because ESPN rejected the stored session; the other sections are given; the briefing ends with the hand-off to session-check (llm)"
+      ]
     }
   ]
 }

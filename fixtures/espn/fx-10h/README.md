@@ -20,7 +20,7 @@ refuses to run unless the recorded golden is green.
 | schedule | 14 regular-season matchup periods, 6 playoff teams (weeks 15–17), seeded `TOTAL_POINTS_SCORED` (record first, points the tiebreak — D1); trade deadline 2026-12-02 |
 | teams | `Team 01` … `Team 10`, members `Member 01` … `Member 11` in the fake GUID range, league id `0`; the user is **Team 02** (waiver rank 2) |
 | clock | **Tuesday of week 5, 21:00 ET** (`2026-10-07T01:00:00Z`): weeks 1–4 final, week 5 pre-kickoff, before the waiver run |
-| public | yes on every variant but `private-league` — fixture mode never holds a cookie, so every view is answered keylessly, the league's transaction feed included (ESPN serves it to anyone on a public league); the user's own pending claims are never read keyless (changelog §R10, R10-10); fixture mode answers them by the variant's scripted credential state (changelog §R10, R10-21): `not_configured` (the base and every variant that scripts nothing) gives `pending: null` with the no-session warning, `rejected` (auth-rejected) gives `pending: null` with the rejected-session warning, and `stored` or `validated` (public-league, or after an accepting espn_check_auth) serves the recorded `mPendingTransactions` (`pending: []`). `private-league` is the one private league (`isPublic: false`; changelog §R10, R10-27): there the scripted state governs every league read, as a session would — `stored` or `validated` serves the recording, `not_configured` gives `ESPN_REQUIRES_COOKIES`, `rejected` the `ESPN_AUTH_REJECTED` short-circuit, each with zero requests and none of the call's budget, a fresh cache entry served first |
+| public | yes on every variant but the three private ones (`private-league`, `private-league-none`, `private-expiring`) — fixture mode never holds a cookie, so every view is answered keylessly, the league's transaction feed included (ESPN serves it to anyone on a public league); the user's own pending claims are never read keyless (changelog §R10, R10-10); fixture mode answers them by the variant's scripted credential state (changelog §R10, R10-21): `not_configured` (the base and every variant that scripts nothing) gives `pending: null` with the no-session warning, `rejected` (auth-rejected) gives `pending: null` with the rejected-session warning, and `stored` or `validated` (public-league, or after an accepting espn_check_auth) serves the recorded `mPendingTransactions` (`pending: []`). Three variants record a private league (`isPublic: false`; changelog §R10, R10-27, R10-28). On them the scripted state governs every league read, as a session would: `private-league` (`rejected`; its espn_check_auth accepts), `private-league-none` (`not_configured`: `ESPN_REQUIRES_COOKIES`), `private-expiring` (`stored`, `rejects: first_uncached_read`: espn_get_status says `stored` until the first read the store does not serve, which answers `ESPN_AUTH_REJECTED` as ESPN's 401 would, and the label is `rejected` from then on; its espn_check_auth accepts, and a validated session is never rejected). Each refusal has zero requests and spends none of the call's budget, and a fresh cache entry is served first |
 
 ## How it is derived
 
@@ -75,15 +75,26 @@ rosters and the pool are refused — `espn_analyze_league_activity`'s session-re
 copy is served too). The plugin eval grades R10-7's private-league hand-off on this variant as
 committed (`league.is_public` null: WK-8, SS-13, ON-6, SC-9; SC-10 the accepting probe after the
 user re-ran setup), and the `is_public: false` row after the build's `private-settings-fresh` seed
-(`espn_check_auth`, then `espn_get_league` only: WK-9). E11's partial lines are graded at tool level
-there, since orient hands over at Step 0 on that state. `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
+(`espn_check_auth`, then `espn_get_league` only: WK-9), where orient hands over at Step 0.
+`private-league-none` is the same private league with no session stored (`not_configured`): every
+league read answers `ESPN_REQUIRES_COOKIES` with zero requests, `league.is_public` stays null, and its
+`espn_check_auth` answers `accepted: null`, reason `not_configured` — session-check's private-league
+row (changelog §R9, R9-1; SC-11). `private-expiring` scripts a `stored` session that ESPN rejects
+mid-procedure (changelog §R10, R10-28): the build's `private-expiring-weekly` seed publishes the
+datasets, runs the accepting `espn_check_auth` and then every read weekly's steps 1–5 make, so a run
+started again on `stored` passes Step 0 and is served those reads from the cache; the first read the
+cache cannot serve — `espn_analyze_league_activity`'s transaction feed — takes the 401, and E11
+answers its session-refusal partial lines, graded through the Skill (WK-10: the section from the
+persisted history, labelled partial, then the hand-off to session-check). A stored copy is stamped by
+the seed server's clock, which every start sets back to the fixture's instant, so a run is served
+each copy once its own clock passes the stamp, and the roster copy for its 5-minute TTL. `owner-mismatch` unsets `ESPN_TEAM_ID` (its `env` block). The others: `drift-mRoster`
 (Team 01's `roster.entries` gone), `points-only-seeding` (last season's seeds follow points for; Team 03 keeps its 3–1 record on weaker week 1–4 lineups, seventh in points for, 2.34 behind the last playoff place — a contender under the record-first reading, on the bubble under the points-only one: changelog §R10, R10-14), `seeding-unknown`, `faab`, `k10`,
 `post-run` (Wednesday 06:00 ET, pool `FREEAGENT`), `ir-open`, `ir-invalid`, `hidden-bench`,
 `sunday-live` (Sunday 14:05 ET: the 09:30 ET London game final — a game is final four hours after
 its kickoff —, the 13:00 ET games under way, the late games pending; ESPN's live win probability
 for Team 02 set to 0.75), `all-locked` (Monday 23:00 ET), `underdog-9`, `questionable-late`,
 `mismatch-53` (ESPN's stat 53 at 1.0 on every final box-score line — differs from the base on stat 53
-only), `espn-proj-disagree`, `outlook-more-work` (a synthetic, non-injection week-5 outlook for
+only), `espn-proj-disagree` (ESPN's week-5 projection for Team 02's first RB starter, James Cook III, 1.5× its recording: 0.293 from the own model's line by E1's pct, so `espn_analyze_lineup`'s `espn_cross_check` lists him as `espn_project_players` flags him — changelog §R10, R10-29; it needs the published datasets: SS-6-E), `outlook-more-work` (a synthetic, non-injection week-5 outlook for
 Team 02's RB2: more carries), and the injection variants `inj-outlook-system`, `inj-teamname-json`,
 `inj-ir-cleared`, `inj-tradeblock` (research 05 §6 cases 1–4), `inj-league-name`,
 `inj-division-name`.

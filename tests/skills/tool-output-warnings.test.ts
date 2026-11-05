@@ -7,7 +7,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import type { Client } from "@modelcontextprotocol/client";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   ACTIVITY_PARTIAL_FRAGMENTS,
   COMPARE_DIRECT_SENTENCE,
@@ -18,7 +19,9 @@ import {
 } from "../../scripts/skills/check-skills.mjs";
 import { fitOptionsOf } from "../../src/mcp/define.js";
 import { ANALYTICS_BUDGET_CHARS, fitToBudget } from "../../src/mcp/envelope.js";
+import { HEALTH_COVER_DESIGNATIONS } from "../../src/domain/analytics/evidence.js";
 import { compareWarnings, type LineupPlayer } from "../../src/domain/analytics/lineup.js";
+import { DISAGREEMENT_FLAG_PCT } from "../../src/domain/analytics/types.js";
 import { RECOMMENDATION_KINDS } from "../../src/domain/reclog/types.js";
 import { lineupTrims } from "../../src/mcp/tools/analytics.js";
 import {
@@ -27,6 +30,7 @@ import {
   type ActivityLeagueRead,
 } from "../../src/mcp/tools/common.js";
 import { analyzeRetrospective } from "../../src/mcp/tools/reclog.js";
+import { ESPN_FIXTURES, call, connect, makeWorld, type World } from "../mcp/helpers/world.js";
 import { ROOT } from "./helpers.js";
 
 const sheet = readFileSync(path.join(ROOT, "skills/_shared/references/tool-outputs.md"), "utf8");
@@ -425,5 +429,78 @@ describe("the compare refusal the lineup row quotes is compareWarnings' own (cha
       "recommended_lineup and rec.drivers truncated to fit the budget (swaps and rec.subjects name every change; rec.lineup is the mean-optimal assignment)",
     ])
       expect(form.test(w)).toBe(false);
+  });
+});
+
+// The rows round 4c rewrote say what the server does (changelog §R10, R10-29, R10-30; the round-4b
+// review's F3): E2's cross-check reads E1's own line under E1's threshold, E10's health cover names
+// exactly the designations the server lets explain a usage drop, and E8's dropped-week quote is the
+// line the tool writes — read from a fixture-mode server on fx-10h, no network.
+describe("the E2, E8 and E10 rows follow the server (changelog §R10, R10-29, R10-30; F3)", () => {
+  it("E2's cross-check row: ours is E1's own line, listed over E1's own threshold", () => {
+    const row = rowOf("espn_analyze_lineup");
+    expect(row).toContain("`ours` is that own line (espn_project_players' inputs.own)");
+    expect(row).toContain("never the blended mean");
+    expect(row).toContain(`a starter is listed when it is over ${String(DISAGREEMENT_FLAG_PCT)}`);
+    expect(row).toContain("a starter with no own line is never listed");
+  });
+
+  it("E10's row names exactly the designations under which a health claim explains a drop", () => {
+    const row = rowOf("espn_analyze_evidence");
+    const named = [
+      ...row.matchAll(/`(QUESTIONABLE|DOUBTFUL|OUT|INJURY_RESERVE|DAY_TO_DAY|SUSPENSION)`/g),
+    ]
+      .map((m) => m[1])
+      .filter((d, i, a) => a.indexOf(d) === i);
+    expect(new Set(named)).toEqual(new Set(HEALTH_COVER_DESIGNATIONS));
+    expect(row).toContain("a rise is never explained so");
+    expect(row).toContain("against ESPN's `ACTIVE` an injury claim stays `availability_conflict`");
+  });
+
+  describe("E8 on fx-10h (full)", () => {
+    const FX = path.join(ESPN_FIXTURES, "fx-10h");
+    let world: World;
+    let client: Client;
+    let close: () => Promise<void>;
+    beforeAll(async () => {
+      const m = JSON.parse(readFileSync(path.join(FX, "manifest.json"), "utf8")) as {
+        clock: string;
+        my_team_id: number;
+      };
+      world = await makeWorld({
+        env: { EFF_FIXTURE_DIR: FX, EFF_TOOLSET: "full" },
+        teamId: m.my_team_id,
+        clock: m.clock,
+      });
+      ({ client, close } = await connect(world, { options: { toolset: "full" } }));
+    }, 120_000);
+    afterAll(async () => {
+      await close();
+      world.cleanup();
+    });
+
+    it("a past week's warning is the row's quoted form, and a window of past weeks is the row's refusal", async () => {
+      const row = rowOf("espn_analyze_schedule");
+      const quoted = /\("(week\(s\) N dropped: before the current week \(W\))"\)/.exec(row)?.[1];
+      expect(quoted).toBeDefined();
+      const form = new RegExp(
+        `^${(quoted ?? "")
+          .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          .replace(/\bN\b/, "\\d+(?:, \\d+)*")
+          .replace(/\bW\b/, "\\d+")}$`,
+      );
+      const r = await call(client, "espn_analyze_schedule", { seed: 7, weeks: [3, 11] });
+      expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+      const dropped = (r.body.warnings as string[]).filter((w) => w.includes("dropped"));
+      expect(dropped).toHaveLength(1);
+      expect(form.test(dropped[0] ?? "")).toBe(true);
+      const only = await call(client, "espn_analyze_schedule", { seed: 7, weeks: [3] });
+      expect(only.isError).toBe(true);
+      const error = (only.body as { error: Record<string, unknown> }).error;
+      expect(error).toMatchObject({ code: "VALIDATION", field: "weeks" });
+      expect(row).toContain(
+        `(\`${String(error.code)}\`, field \`${String(error.field)}\`, reason ${String(error.reason)})`,
+      );
+    }, 60_000);
   });
 });

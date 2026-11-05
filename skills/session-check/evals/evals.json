@@ -166,6 +166,23 @@
         "espn_check_auth was called exactly once, and no other ESPN tool ran before it (tool_used: min 1 max 1, first)",
         "The reply says the probe accepted the new session, and never asks for a cookie value (llm)"
       ]
+    },
+    {
+      "id": 11,
+      "name": "SC-11",
+      "toolset": "core",
+      "prompt": "Claude can't see my ESPN team — is my session set up?",
+      "expected_output": "On private-league-none no cookies are stored and the league is private: espn_get_status gives credential.state not_configured and league.is_public null (a settings read, if one is made, answers ESPN_REQUIRES_COOKIES with zero requests and a hint naming eff setup). session-check's not_configured row on a league not known to be public applies (changelog §R9, R9-1; §R10, R10-27): the reply says no session is stored, gives the setup steps — the DevTools steps and the one command, eff setup in a terminal — and asks the user to say when they have run it; it does not probe (nothing is stored: espn_check_auth would answer accepted null, reason not_configured) and never asks for a cookie value or the command's output. Unlike a public league's not_configured row, it never says the other Skills read keylessly or carry on without a session on this league — on a league not known to be public they hand over here.",
+      "files": ["evals/fixtures/fx-10h/private-league-none"],
+      "expectations": [
+        "The skill called espn_get_status (tool_used)",
+        "The reply gives the DevTools steps (regex: `DevTools`)",
+        "The reply gives the one command (regex: `eff setup`)",
+        "espn_check_auth was not called: nothing is stored to probe (tool_used: min 0 max 0)",
+        "The reply never says this league is public, in any wording (regex_absent: `(?<!\\b(?:whether|if|that|confirm|tell)\\s)\\b(?:this|the) league(?: is|['’]s) public\\b|(?<!\\b(?:whether|if|that)\\s)\\breads are keyless\\b`)",
+        "The reply says no session is stored, gives the setup steps and asks the user to say when they have run eff setup, and never says the other Skills read keylessly or carry on without a session on this league (llm)",
+        "The reply never asks for a cookie value or for the setup command's output (llm)"
+      ]
     }
   ]
 }

@@ -59,6 +59,10 @@ import {
   RT_INJ_NOTE,
   SEEDS,
   SEED_KINDS,
+  DATASET_FIRST_SEEDS,
+  EXPIRING_WEEKLY_NEVER,
+  expiringWeeklyReads,
+  matchupSidesOf,
   SEED_NOTE,
   SEED_NOTE_PLAIN,
   STATE_ENV_KEYS,
@@ -515,14 +519,12 @@ describe("credential-state variants (Stage C finding eval-credential-state-varia
     ) as { settings: { isPublic: boolean } };
     expect(settings.settings.isPublic).toBe(true);
     // SS-9 and SS-11-E run again on sunday-live, whose London game reads final on a dataset-seeded
-    // server now that the seed publishes the variant's own schedule; SS-6-E is held out, with its
-    // reason, until a ruling (the round-4b verifiers' F1: its server's cross-check never flags)
-    expect(Object.keys(HELD_OUT_CASES)).toEqual(["SS-6-E"]);
-    expect(HELD_OUT_CASES["SS-6-E"]).toMatch(/weight_espn 1\b/);
-    expect(HELD_OUT_CASES["SS-6-E"]).toMatch(/starter_disagreements is empty/);
-    expect(plan.notTestable.map((n) => [n.name, n.reason])).toEqual([
-      ["SS-6-E", HELD_OUT_CASES["SS-6-E"]],
-    ]);
+    // server now that the seed publishes the variant's own schedule; SS-6-E runs again on
+    // espn-proj-disagree since E2's cross-check reads E1's own line (changelog §R10, R10-29): no
+    // case is held out
+    expect(HELD_OUT_CASES).toEqual({});
+    expect(plan.notTestable).toEqual([]);
+    expect(byDir.get("start-sit--ss-6-e")?.plugin).toBe("espn-proj-disagree--core");
     expect(
       plan.plugins.some((p) => p.variant === "auth-rejected") &&
         plan.plugins.some((p) => p.variant === "public-league"),
@@ -729,6 +731,7 @@ describe("recorded-state preconditions (Stage C finding eval-recorded-state-prec
       "SS-5-E": "seeding-points-only",
       "WK-5-E": "seeding-points-only",
       "WK-9": "private-settings-fresh",
+      "WK-10": "private-expiring-weekly",
     });
     // the configured points-only plugin (round 2's triage: SS-5-E and WK-5-E); ON-4-E and TR-5-E
     // keep the unconfigured one, whose unconfirmed reading they need
@@ -752,6 +755,12 @@ describe("recorded-state preconditions (Stage C finding eval-recorded-state-prec
     expect(byDir.get("retro--rt-5")?.plugin).toBe("base--core--log-week4-mixed");
     expect(byDir.get("retro--rt-6")?.plugin).toBe("base--core--log-week4-many");
     expect(byDir.get("weekly--wk-9")?.plugin).toBe("private-league--full--private-settings-fresh");
+    // changelog §R10, R10-28: the session rejected mid-procedure, after a seed of weekly's reads;
+    // R10-27's second private variant for session-check's not_configured private row
+    expect(byDir.get("weekly--wk-10")?.plugin).toBe(
+      "private-expiring--full--private-expiring-weekly",
+    );
+    expect(byDir.get("session-check--sc-11")?.plugin).toBe("private-league-none--core");
     // RT-INJ's metrics must equal RT-1's: the same calls, the note the only difference
     expect(LINEUP_SEEDS["log-week4-lineup-note"].map((c) => ({ ...c, note: null }))).toEqual(
       LINEUP_SEEDS["log-week4-lineup"],
@@ -945,7 +954,7 @@ describe("an injection comparison names its base when the injected text is in th
   );
 
   // a held-out case never runs, so it has no trajectory to compare with (planSuite's heldOut
-  // option stands in for HELD_OUT_CASES, which holds SS-6-E only)
+  // option stands in for HELD_OUT_CASES, which holds none since R10-29 returned SS-6-E)
   it("refuses a base that is a held-out case, and lists the held-out case with its reason", () => {
     const root = withBase("start-sit", "SS-INJ-2", "SS-12").root;
     expect(planSuite(root).errors).toEqual([]);
@@ -956,8 +965,8 @@ describe("an injection comparison names its base when the injected text is in th
     expect(held.notTestable.map((n) => [n.name, n.reason])).toEqual([
       ["SS-12", "held for the test"],
     ]);
-    // the default map holds SS-6-E out by name; the option replaces it
-    expect(planSuite(root).notTestable.map((n) => n.name)).toEqual(["SS-6-E"]);
+    // the default map holds nothing out; the option replaces it
+    expect(planSuite(root).notTestable).toEqual([]);
     expect(held.cases.some((c) => c.dir === "start-sit--ss-12")).toBe(false);
   });
 });
@@ -1440,9 +1449,10 @@ describe("buildPluginEvals on a copy", () => {
         "inj-teamname-json--core--log-week4-lineup-note",
         "points-only-seeding--core--seeding-points-only",
         "private-league--full--private-settings-fresh",
+        "private-expiring--full--private-expiring-weekly",
       ].sort(),
     );
-    expect(r.notTestable.map((n) => n.name)).toEqual(["SS-6-E"]);
+    expect(r.notTestable).toEqual([]);
     for (const key of r.plugins) {
       const dir = path.join(out, "plugins", key);
       const plugin = JSON.parse(
@@ -1688,6 +1698,204 @@ describe("WK-9's private-settings-fresh seed (changelog §R10, R10-27)", () => {
         spawnImpl: s.spawnImpl,
       }),
     ).rejects.toThrow(why);
+  });
+});
+
+describe("WK-10's private-expiring-weekly seed (changelog §R10, R10-28)", () => {
+  const scoreboard = {
+    matchups: [
+      { home: { team_id: 1, is_mine: false }, away: { team_id: 9, is_mine: false } },
+      { home: { team_id: 2, is_mine: true }, away: { team_id: 10, is_mine: false } },
+    ],
+  };
+  interface Opts {
+    accepted?: unknown;
+    state?: unknown;
+    isPublic?: unknown;
+    sb?: unknown;
+    endState?: unknown;
+    failOn?: string;
+  }
+  const answer =
+    (o: Opts = {}) =>
+    (name: string): unknown => {
+      if (name === "initialize") return { protocolVersion: "2025-06-18", capabilities: {} };
+      if (name === o.failOn) return text({ error: { code: "ESPN_AUTH_REJECTED" } }, true);
+      if (name === "espn_check_auth")
+        return text({
+          data: {
+            accepted: "accepted" in o ? o.accepted : true,
+            state: o.state ?? "validated",
+            reason: null,
+          },
+        });
+      if (name === "espn_get_scoreboard") return text({ data: o.sb ?? scoreboard });
+      if (name === "espn_get_league")
+        return text({ data: { league: { is_public: "isPublic" in o ? o.isPublic : false } } });
+      if (name === "espn_get_status")
+        return text({ data: { credential: { state: o.endState ?? "validated" } } });
+      return text({ data: {}, meta: {} });
+    };
+  /** The tools/call a fake server saw, by name and arguments, in order. */
+  const toolCalls = (s: FakeServer) =>
+    s.calls
+      .filter((c) => c.method === "tools/call")
+      .map((c) => [String(c.params.name), c.params.arguments] as const);
+  const seed = (s: FakeServer) =>
+    seedState({
+      root: "/r",
+      node: "/n",
+      env: {},
+      seed: "private-expiring-weekly",
+      spawnImpl: s.spawnImpl,
+    });
+
+  it("is WK-10's, and runs on its plugin after the datasets", () => {
+    expect(SEEDS["WK-10"]).toBe("private-expiring-weekly");
+    expect(SEED_KINDS).toContain("private-expiring-weekly");
+    expect(DATASET_FIRST_SEEDS).toEqual(["private-expiring-weekly"]);
+  });
+
+  it("probes once, reads this week's sides, then every read weekly's steps 1–5 make, in order — never the feed or the log", async () => {
+    const s = fakeServer(answer());
+    expect(await seed(s)).toBe(
+      "18 reads fresh (private; team 2 v 10), the feed unread, nothing logged",
+    );
+    // the reads, pinned: each one the run repeats is then served from the cache, and E11's
+    // transaction feed is the first read the run's server cannot serve
+    expect(expiringWeeklyReads(2, 10)).toEqual([
+      ["espn_get_league", {}],
+      ["espn_get_scoreboard", { week: 4 }],
+      ["espn_analyze_retrospective", { week: 4 }],
+      ["espn_analyze_retrospective", { week: 4 }],
+      ["espn_get_scoreboard", {}],
+      ["espn_get_roster", { all: true }],
+      ["espn_get_injuries", {}],
+      ["espn_project_players", { players: { team_id: 2 }, horizon: "week" }],
+      ["espn_project_players", { players: { team_id: 10 }, horizon: "week" }],
+      ["espn_analyze_lineup", { objective: "auto" }],
+      ["espn_analyze_waivers", { positions: ["K"], look_ahead: 2 }],
+      ["espn_analyze_waivers", { positions: ["D/ST"], look_ahead: 2 }],
+      ["espn_list_players", { status: "WAIVERS" }],
+      ["espn_list_players", { status: "FREEAGENT" }],
+      ["espn_analyze_waivers", { mode: "auto", phase: "auto" }],
+      ["espn_get_player_usage", { players: { team_id: 2 } }],
+      ["espn_get_schedule", { weeks: [5, 6, 7] }],
+      ["espn_analyze_schedule", {}],
+    ]);
+    expect(toolCalls(s)).toEqual([
+      ["espn_check_auth", {}],
+      ["espn_get_scoreboard", {}],
+      ...expiringWeeklyReads(2, 10),
+      ["espn_get_status", {}],
+    ]);
+    for (const [name] of toolCalls(s)) expect(EXPIRING_WEEKLY_NEVER).not.toContain(name);
+    expect(EXPIRING_WEEKLY_NEVER).toEqual([
+      "espn_list_transactions",
+      "espn_analyze_league_activity",
+      "espn_record_recommendation",
+      "espn_list_recommendations",
+    ]);
+  });
+
+  it.each([
+    ["the probe does not accept", { accepted: null }, /espn_check_auth answered accepted null/],
+    ["the probe rejects", { accepted: false }, /espn_check_auth answered accepted false/],
+    ["the label is not validated after it", { state: "stored" }, /state stored/],
+    ["the league reads public", { isPublic: true }, /is_public true, not false/],
+    ["the league's publicity is unknown", { isPublic: null }, /is_public null, not false/],
+    [
+      "this week's scoreboard names no matchup of mine",
+      { sb: { matchups: [{ home: { team_id: 1 }, away: { team_id: 9 } }] } },
+      /names no matchup of mine/,
+    ],
+    ["a read is refused", { failOn: "espn_get_injuries" }, /espn_get_injuries: ESPN_AUTH_REJECTED/],
+    [
+      "the label turned rejected",
+      { endState: "rejected" },
+      /the label is rejected after the reads/,
+    ],
+  ] as const)("fails when %s", async (_, o, why) => {
+    await expect(seed(fakeServer(answer(o)))).rejects.toThrow(why);
+  });
+
+  it("matchupSidesOf reads the user's side and the other one, either way round, or null", () => {
+    expect(matchupSidesOf(scoreboard)).toEqual({ me: 2, opponent: 10 });
+    expect(
+      matchupSidesOf({
+        matchups: [{ home: { team_id: 4, is_mine: false }, away: { team_id: 2, is_mine: true } }],
+      }),
+    ).toEqual({ me: 2, opponent: 4 });
+    for (const bad of [
+      {},
+      { matchups: "x" },
+      { matchups: [{ home: { team_id: 2, is_mine: true } }] },
+      { matchups: [{ home: { team_id: 2, is_mine: true }, away: { team_id: 2 } }] },
+      { matchups: [{ home: { team_id: "2", is_mine: true }, away: { team_id: 10 } }] },
+      { matchups: [{ home: { team_id: 2, is_mine: "true" }, away: { team_id: 10 } }] },
+    ])
+      expect(matchupSidesOf(bad as Json), JSON.stringify(bad)).toBeNull();
+  });
+
+  it("writeSeeds publishes the plugin's datasets before the seed's server starts, and only for it", async () => {
+    const t = repoWithFixtures();
+    const out = temp("eff-pe-out-");
+    const r = buildPluginEvals({ root: t.root, out, node: "/n" });
+    cleanups.push(() => {
+      if (r.state) rmSync(r.state, { recursive: true, force: true });
+    });
+    t.write("dist/cli.js", "// stand-in\n");
+    const key = pluginKey("private-expiring", "full", "private-expiring-weekly");
+    expect(r.seedNeeded).toContain(key);
+    const server = fakeServer(answer());
+    const order: string[] = [];
+    const spawnImpl: FakeServer["spawnImpl"] = (cmd, args, o) => {
+      if (args.some((a) => a.endsWith("seed-fixture-datasets.ts"))) {
+        order.push(`datasets ${path.basename(path.dirname(args[3] ?? ""))}`);
+        const ev = new EventEmitter();
+        setImmediate(() => ev.emit("exit", 0));
+        return {
+          stdin: new PassThrough(),
+          stdout: new PassThrough(),
+          stderr: null,
+          on: (e: "exit", fn: (c: number | null) => void) => ev.on(e, fn),
+          kill: () => undefined,
+        };
+      }
+      order.push("server");
+      return server.spawnImpl(cmd, args, o);
+    };
+    const done = await writeSeeds({
+      root: t.root,
+      out,
+      node: "/n",
+      seedNeeded: [key],
+      spawnImpl,
+    });
+    expect(order).toEqual([`datasets ${key}`, "server"]);
+    expect(done).toEqual([
+      `${key}: datasets seeded`,
+      `${key}: 18 reads fresh (private; team 2 v 10), the feed unread, nothing logged`,
+    ]);
+    // the seed's server runs on the PRISTINE state the datasets went into
+    expect(server.spawned[0]?.env.EFF_CACHE_DIR).toBe(path.join(r.state!, key, "cache"));
+    // a seed outside DATASET_FIRST_SEEDS publishes nothing first (its state is unchanged)
+    order.length = 0;
+    const nc = pluginKey(null, "full", SEEDS["NC-INJ-2"]);
+    const plain = fakeServer(happy);
+    await writeSeeds({
+      root: t.root,
+      out,
+      node: "/n",
+      seedNeeded: [nc],
+      spawnImpl: (cmd, args, o) => {
+        order.push(
+          args.some((a) => a.endsWith("seed-fixture-datasets.ts")) ? "datasets" : "server",
+        );
+        return plain.spawnImpl(cmd, args, o);
+      },
+    });
+    expect(order).toEqual(["server"]);
   });
 });
 

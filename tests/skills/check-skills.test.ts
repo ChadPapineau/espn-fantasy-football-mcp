@@ -36,6 +36,7 @@ import {
   OPTION_VALUE_ZERO_SENTENCE,
   COMPARE_DIRECT_SENTENCE,
   INJURY_CONFIRM_SENTENCE,
+  NEWS_HEALTH_COVER_SENTENCE,
   TEMPLATE_PARTIAL_SESSION_LINE,
   TRIM_WARNING_ABSENT,
   pendingReadProblems,
@@ -926,7 +927,7 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
     // SK-6: game day presents the rec too, never E2's best swap
     [
       "start-sit",
-      'then the rec of step 6 — its action, or **"No move"** when `rec.no_move` is true (a swap it holds is named as a coin flip, never as the move)',
+      'then the rec of step 6 — its action, or **"No move"** when `rec.no_move` is true (a swap it holds is named as the tool holds it — a coin flip, or a change that gains nothing — never as the move)',
       "then the single best swap among unlocked slots",
     ],
     // plan 07 A4 (the round-3b product account): the scoreboard's counts first, the roster's game
@@ -993,6 +994,9 @@ describe("orient's rejected routing and round 3's fixed sentences (changelog §R
     ],
     // R4VS-6: an injury is confirmed by ESPN's status or the official report, whatever the flag
     ["injury-cascade", INJURY_CONFIRM_SENTENCE, "Then list what would confirm it."],
+    // changelog §R10, R10-30: a hurt player's usage drop that a health claim explains reads
+    // consistent, never quiet_role_change
+    ["news-check", NEWS_HEALTH_COVER_SENTENCE, "`quiet_role_change` or another flag"],
   ])("%s: check-skills fails when the fixed sentence %j is gone", (skill, from, to) => {
     const t = fresh();
     t.edit(`skills/${skill}/SKILL.md`, from, to);
@@ -2649,7 +2653,7 @@ describe("the untrusted-text guards and ruling sentences are held (the round-3 v
     ["weekly", "the lineup the rec sets or keeps, by slot,", "the recommended lineup by slot,"],
     [
       "start-sit",
-      'then the rec of step 6 — its action, or **"No move"** when `rec.no_move` is true (a swap it holds is named as a coin flip, never as the move)',
+      'then the rec of step 6 — its action, or **"No move"** when `rec.no_move` is true (a swap it holds is named as the tool holds it — a coin flip, or a change that gains nothing — never as the move)',
       "then the single best swap among unlocked slots",
     ],
     // round 3b's roster-first split, from when the server's counts were always null
@@ -2657,6 +2661,19 @@ describe("the untrusted-text guards and ruling sentences are held (the round-3 v
       "start-sit",
       LIVE_COUNTS_SENTENCE,
       `${LIVE_COUNTS_SENTENCE}; each starter by the fresh roster's \`game_state\` (\`final\` or \`bye\` counts as final, \`in\` as live, \`pre\` or \`tbd\` as pending) when the scoreboard's \`players\` counts are null`,
+    ],
+    // the round-4b review's F12: a held swap is a coin flip or a change that gains nothing ([0, 0]
+    // is no coin flip), so the pre-F12 wording, which called every held swap a coin flip, is refused
+    [
+      "start-sit",
+      "(a swap it holds is named as the tool holds it — a coin flip, or a change that gains nothing — never as the move)",
+      "(a swap it holds is named as the tool holds it — a coin flip, or a change that gains nothing — never as the move; a swap it holds is named as a coin flip, never as the move)",
+    ],
+    // changelog §R10, R10-30: the flag reading before it, which called every role move quiet
+    [
+      "news-check",
+      NEWS_HEALTH_COVER_SENTENCE,
+      `${NEWS_HEALTH_COVER_SENTENCE}; before: \`quiet_role_change\` when the role moved, else \`consistent\``,
     ],
   ])("%s: check-skills refuses %j reverted to %j", (skill, from, to) => {
     const t = fresh();

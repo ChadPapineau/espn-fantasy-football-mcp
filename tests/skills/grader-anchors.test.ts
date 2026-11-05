@@ -741,3 +741,257 @@ describe("the patterns round 4b shipped had the holes the verifiers showed (R4BS
     },
   );
 });
+
+// Round 4c's cases (changelog §R10, R10-27, R10-28, R10-29): every new or changed regex grader
+// passes a correct reply written from the case's expected outcome in two phrasings (prose and a
+// table) and fails the bad ones — the output contract's fixed lines, orient's mandated lines as a
+// reply renders them, the case's own prompt, and a reply stating the opposite claim. A regex_absent
+// grader is the mirror: the correct replies and the fixed lines never trip it, the opposite claim
+// does.
+describe("round 4c's graders: the mid-procedure rejection, the not_configured private row, the cross-check (R10-27, R10-28, R10-29)", () => {
+  const seedingLine = seeding;
+  const wkProse = `${seedingLine}
+
+# Week 5 game plan — data as of Tue Oct 6, 9:00 PM ET
+
+## Last week
+Team 02 beat "Team 05" (team_id 5) — final.
+
+## This week's matchup and lineup
+"Team 10" (team_id 10); P(win) about even (position-level spread). No move: keep the current lineup.
+
+## K and D/ST
+Hold both: no stream beats Cam Little or the Rams D/ST by more than a coin flip.
+
+## Waivers
+The claim brief: no claim clears the premium this week.
+
+## Injuries and byes
+Rachaad White (OUT) is IR-eligible on the bench.
+
+## League activity
+Partial: ESPN rejected the stored session when this section read the transaction feed, so it shows only the server's persisted history, which holds no transaction yet — 0 adds, drops, claims and trades. The free-agent pool was not read either, so by-team activity, waiver-order movement and rival needs go without it. In a terminal, run \`eff setup\` to replace the session.
+
+### Confidence & freshness
+- League activity is partial: the stored ESPN session was rejected mid-briefing; the section rests on the persisted history only.
+
+This league is private, so the session has to be repaired before the next read: hand-over to the \`espn-fantasy-football:session-check\` Skill.`;
+  const wkTable = `${seedingLine}
+
+| Section | Plan | Deadline |
+|---|---|---|
+| Last week | W v "Team 05" | — |
+| This week's matchup and lineup | No move v "Team 10" | Sun 1:00 PM ET |
+| K and D/ST | Hold both | — |
+| Waivers | No claim | Wed 3:30 AM ET |
+| Injuries and byes | Rachaad White to IR | Wed 3:30 AM ET |
+| League activity | **partial** — the stored ESPN session was rejected; persisted history only (0 moves); by-team activity, waiver-order movement and rival needs go without the pool; \`eff setup\` in a terminal | — |
+
+Next: the session-check Skill repairs the session (\`espn-fantasy-football:session-check\`).`;
+  /** The Step 0 hand-off WK-9 grades: right there, wrong here (the session read stored). */
+  const step0 =
+    "ESPN rejected the stored session on this private league, so I can't prep week 5: run the `espn-fantasy-football:session-check` Skill; in a terminal, `eff setup` replaces it.";
+  /** The opposite of WK-10's claims: a complete section, a valid session, no hand-off. */
+  const complete =
+    "## League activity\nComplete — not partial: no rival moves this week.\n\n### Confidence & freshness\nEvery read answered; your ESPN session was not rejected, and nothing needs repairing.";
+  const publicSession =
+    "**Session:** ESPN rejected the stored session; this league is public, so reads are keyless where the league allows them; `eff setup` in a terminal replaces the session";
+
+  const scProse = `No ESPN session is stored for this league (credential.state not_configured), and its settings can't be read without one, so I can't tell whether this league is public. To add one:
+1. Open https://fantasy.espn.com in the browser where you are logged in.
+2. Open DevTools → Application → Cookies → https://fantasy.espn.com.
+3. Copy SWID (with the braces) and espn_s2 (exactly as shown).
+4. In a terminal — not here — run \`eff setup\` and paste each value at its hidden prompt.
+5. Tell me when you have run eff setup.`;
+  const scTable = `| Status | |
+|---|---|
+| Cookies | none stored (not_configured) |
+| League | private or unknown — nothing reads without a session |
+| Fix | DevTools → Application → Cookies, copy SWID and espn_s2, then \`eff setup\` in a terminal |
+
+Tell me when you have run it.`;
+
+  const ssProse =
+    "James Cook III (player_id 4379399) is flagged: ESPN projects 23.8 points this week, our model 16.9 — ESPN about 41 % above ours (the tool's pct 0.293, flagged above 0.25). The lineup follows ESPN's number: the week projection weights ESPN 1.0 while it is untuned, so our point estimate is ESPN's mean and our own line is the cross-check. Five other starters are flagged too (Shaheed, Smith-Njigba, Maye, Tuten, Fannin).";
+  const ssTable =
+    "| Starter | ESPN's projection | Ours | pct |\n|---|---|---|---|\n| James Cook III (4379399) | 23.85 | 16.87 | 0.293 |\n| Drake Maye (4431452) | 20.14 | 6.99 | 0.653 |\n\nThe lineup follows ESPN's number (weight_espn 1.0 while untuned).";
+  /** The base fixture's numbers, as if nothing disagreed. */
+  const ssWrong =
+    "ESPN's projection for James Cook III is 15.9 and ours 16.9 — they agree, and your win chance is about 48 %; no starter's numbers disagree.";
+
+  type Row = readonly [
+    skill: string,
+    name: string,
+    kind: "regex" | "regex_absent",
+    lead: string,
+    lines: readonly string[],
+    good: readonly string[],
+    wrong: readonly string[],
+  ];
+  // the mandated lines each case's server makes a reply print (mandatedLines): a stored session on
+  // a private league prints the seeding line only; a not_configured one hands over (none); a public
+  // not_configured one prints its Session line and the seeding line
+  const wk = mandatedLines(orient, "stored", "private-expiring-weekly", false).lines;
+  const sc = mandatedLines(orient, "not_configured", null, false).lines;
+  const ss = mandatedLines(orient, "not_configured", null, true).lines;
+  const rows: readonly Row[] = [
+    [
+      "weekly",
+      "WK-10",
+      "regex",
+      "The reply gives the League activity section",
+      wk,
+      [wkProse, wkTable],
+      [step0],
+    ],
+    [
+      "weekly",
+      "WK-10",
+      "regex",
+      "The reply labels the League activity section partial",
+      wk,
+      [wkProse, wkTable],
+      [complete, step0],
+    ],
+    [
+      "weekly",
+      "WK-10",
+      "regex",
+      "The reply says ESPN rejected the stored session",
+      wk,
+      [wkProse, wkTable],
+      [complete],
+    ],
+    [
+      "weekly",
+      "WK-10",
+      "regex",
+      "The briefing hands over to the session-check Skill",
+      wk,
+      [wkProse, wkTable],
+      [complete],
+    ],
+    [
+      "weekly",
+      "WK-10",
+      "regex_absent",
+      "The reply never prints the public-league Session line",
+      wk,
+      [wkProse, wkTable],
+      [`${publicSession}\n${wkProse}`],
+    ],
+    [
+      "session-check",
+      "SC-11",
+      "regex",
+      "The reply gives the DevTools steps",
+      sc,
+      [scProse, scTable],
+      ["No cookies are stored. Run eff setup in a terminal."],
+    ],
+    [
+      "session-check",
+      "SC-11",
+      "regex",
+      "The reply gives the one command",
+      sc,
+      [scProse, scTable],
+      ["Open DevTools, copy SWID and espn_s2, and paste them here."],
+    ],
+    [
+      "session-check",
+      "SC-11",
+      "regex_absent",
+      "The reply never says this league is public",
+      sc,
+      [scProse, scTable],
+      [
+        "No session is stored; this league is public, so every other Skill reads keylessly meanwhile — run `eff setup` only for private data.",
+      ],
+    ],
+    [
+      "start-sit",
+      "SS-6-E",
+      "regex",
+      "The reply labels ESPN's projection as ESPN's",
+      ss,
+      [ssProse, ssTable],
+      ["Our model and the market agree on every starter: no move."],
+    ],
+    [
+      "start-sit",
+      "SS-6-E",
+      "regex",
+      "The reply gives Cook's two numbers",
+      ss,
+      [ssProse, ssTable],
+      [ssWrong],
+    ],
+    [
+      "start-sit",
+      "SS-6-E",
+      "regex",
+      "The reply gives the gap between them",
+      ss,
+      [ssProse, ssTable],
+      [ssWrong],
+    ],
+  ];
+
+  it.each(rows)("%s %s %s: %s", (skill, name, kind, lead, lines, good, wrong) => {
+    const re = graderOf(skill, name, lead, kind);
+    const fixed = [
+      contract.lines.join("\n"),
+      ...lines.flatMap((l) => lineRenderings(l)),
+      [...lines, ...contract.lines].join("\n"),
+      caseOf(skill, name).prompt,
+    ];
+    const matches = (s: string) => re.test(s);
+    for (const f of fixed) expect(matches(f), `a fixed line: ${f.slice(0, 60)}`).toBe(false);
+    for (const g of good)
+      expect(matches(g), `a correct reply: ${g.slice(0, 60)}`).toBe(kind === "regex");
+    for (const w of wrong)
+      expect(matches(w), `a wrong reply: ${w.slice(0, 60)}`).toBe(kind === "regex_absent");
+    // and the build's own check finds nothing to refuse in the case's graders on its server
+    expect(
+      mandatedLineProblems(
+        name,
+        caseOf(skill, name).expectations,
+        lines,
+        new Set(),
+        contract.lines,
+      ),
+    ).toEqual([]);
+  });
+
+  it("WK-10 grades E11's lines through the Skill: called once, the briefing run, the expected output from the eval server", () => {
+    const c = caseOf("weekly", "WK-10");
+    expect(c.expectations).toContain(
+      "espn_analyze_league_activity was called exactly once — never repeated for its session-refusal lines (tool_used: min 1 max 1)",
+    );
+    expect(c.expectations).toContain("The skill called espn_analyze_lineup (tool_used)");
+    for (const fact of [
+      "credential.state stored",
+      "is_public false",
+      "ESPN's 401",
+      "'partial: the stored ESPN session was rejected, and ESPN's transaction feed needs one on a league not known to be public: the server's persisted history only; run `eff setup` in a terminal to replace it'",
+      "by-team activity, waiver-order movement and rival needs go without them",
+      "never repeated for these lines",
+      "the hand-off to the session-check Skill",
+    ])
+      expect(c.expected_output).toContain(fact);
+  });
+
+  it("SS-6-E reads the cross-check's own numbers for Cook, and SS-3's direct swap is no coin flip (F12)", () => {
+    const eo = caseOf("start-sit", "SS-6-E").expected_output;
+    for (const fact of [
+      "espn 23.849, ours 16.868 and pct 0.293",
+      "weight_espn 1",
+      "five other starters",
+    ])
+      expect(eo).toContain(fact);
+    const ss3 = caseOf("start-sit", "SS-3").expected_output;
+    expect(ss3).toContain("interval [−35.215, 0]");
+    expect(ss3).toContain("coin_flip false");
+  });
+});
