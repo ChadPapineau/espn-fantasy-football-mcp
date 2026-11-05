@@ -783,8 +783,11 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
   2026-11-05). F12 made the interval rule strict, so `[−p90, 0]` is no coin flip by its interval,
   but E2's ΔP(win) branch still flags such a pair `coin_flip: true` when the win-chance move is
   under the threshold (`[−3, 0]` with a ruled-out entrant; `lineup-no-move.test.ts` pins it as
-  built), and an always-losing swap the same way. Whether a change that cannot gain should ever be
-  called a coin flip is a ruling for round 3's triage; the Skills defer to the flag either way.
+  built), and an always-losing swap the same way. At a seat that scores a known 0, the flag is
+  `!(de > 0)` whatever the interval, with or without an opponent: a pair whose entrant is not
+  expected to score is flagged a coin flip, while the rec holds such a change of its own flow as
+  gaining nothing (`heldOrMade`), so the flag and the rec's words differ there. Whether a change that cannot gain should ever be
+  flagged a coin flip is a ruling for round 3's triage; the Skills defer to the tool either way.
 - **From the Dependabot review (2026-11-04 to 2026-11-05).**
   - `hyparquet` 1.32.0 (published 2026-10-29) is not reviewed: no PR proposed it. It comes through
     Dependabot's next monthly group with its own "Reviews" row.
