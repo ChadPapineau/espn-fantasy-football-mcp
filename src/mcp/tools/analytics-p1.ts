@@ -807,25 +807,32 @@ export function replacementPlayerOf(
   };
 }
 
-/** Every rostered player plus the pool page as E4 players (rostered first, duplicates dropped). */
-function leaguePlayers(
+/**
+ * Every rostered player plus the pool page as E4 players (rostered first, duplicates dropped). One
+ * player a step (turnIfSpent between two): valuing the league's ~300 players over the window ran in
+ * one turn, the longest of a cold espn_analyze_replacement call in the local turn profile (the
+ * round-4c verifier's R4C-VS-1; plan 03 §1.2). The answer is the same.
+ */
+export async function leaguePlayers(
   rosters: readonly Roster[],
   pool: readonly PlatformPlayer[],
   weeks: readonly Week[],
   ros: RosReading | null,
   asOf: Week,
-): ReplacementPlayer[] {
+): Promise<ReplacementPlayer[]> {
   const seen = new Set<number>();
   const out: ReplacementPlayer[] = [];
   for (const r of rosters)
     for (const e of r.entries)
       if (!seen.has(e.player.ref.id)) {
         seen.add(e.player.ref.id);
+        await turnIfSpent();
         out.push(replacementPlayerOf(e.player, weeks, true, ros, asOf));
       }
   for (const p of pool)
     if (!seen.has(p.ref.id) && p.status !== "ONTEAM") {
       seen.add(p.ref.id);
+      await turnIfSpent();
       out.push(replacementPlayerOf(p, weeks, false, ros, asOf));
     }
   return out;
@@ -936,7 +943,7 @@ export const analyzeReplacementTool = defineTool({
       horizon: args.horizon,
       baseline: args.baseline,
       ...(args.positions === undefined ? {} : { positions: args.positions }),
-      players: leaguePlayers(rosters, pool, weeks, ros, b.w),
+      players: await leaguePlayers(rosters, pool, weeks, ros, b.w),
       ...(mine === undefined ? {} : { focus_player_ids: mine.entries.map((e) => e.player.ref.id) }),
       detail: args.detail,
       clock: ctx.services.clock,
@@ -1486,7 +1493,7 @@ export const analyzeRosterTool = defineTool({
       roster: b.slots,
       league_size: b.league.size,
       weeks,
-      players: leaguePlayers(rosters, pool, weeks, ros, b.w),
+      players: await leaguePlayers(rosters, pool, weeks, ros, b.w),
       clock: ctx.services.clock,
       pacer: ctx.pacer,
       deadline_ms: cpuDeadlineOf(ctx),

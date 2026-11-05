@@ -153,10 +153,16 @@ export const N_SIMS_MAX = SIMS.max;
 /** Cooperative batching (plan 01 §1.1, plan 03 §1.2; ADV OBJ-07). */
 export const COOPERATIVE = Object.freeze({
   /**
-   * Yield to the event loop after at most this much CPU in one batch (≤ 20 ms). 12 ms (16 until the
-   * B2a gate's round 2) leaves the 50 ms stall bound room for a preempted batch on a loaded machine.
+   * Yield to the event loop after at most this much CPU in one batch (≤ 20 ms). 8 ms, a slice's
+   * share (cooperative.ts SLICE_CPU_MS; 12 until the round-4c verifier's R4C-VS-1, 16 until the B2a
+   * gate's round 2): the local turn profile of cold espn_analyze_matchup `pre` and
+   * espn_analyze_trade calls found their longest runs on the CPU were default batches (the matchup
+   * simulation, E1's sampler, trade's package evaluation), and the process job's per-call
+   * `cpu_max_ms` — the length of the run itself — read 18.7–24.1 ms for them on the Linux runner
+   * with 12-ms batches, over plan 03 §1.2's 20 ms. Each batch's steps, their order and so every
+   * answer are the same (runCooperative: a deterministic prefix); only where the yields fall moves.
    */
-  batchMs: 12,
+  batchMs: 8,
   /** The per-call CPU deadline; past it a call returns `partial: true` (plan 07 E1; A16a). */
   deadlineMs: 8000,
   /** Steps between clock reads inside a batch (a clock read per step would dominate). */

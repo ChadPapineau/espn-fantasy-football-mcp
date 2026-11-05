@@ -295,11 +295,12 @@ function orderGroup(group: number[], chain: readonly TieLevel[], level: number, 
  * remainder): a slice's share, SLICE_CPU_MS, not COOPERATIVE.batchMs. Its batches set
  * espn_analyze_matchup `season`'s longest run on the CPU — the local turn profile's longest
  * stretches were all season-simulation batches (12.1 ms of 12-ms batches, 21 of them for 10 000
- * paths on fx-10h), and on the Linux runner the per-call notice read 15.0 ms of CPU in a 10.5 ms gap
- * at 5313ec6 and 21.9 ms in a 17.2 ms gap (1.3 ms of GC) at 6eda72d: the runner's thread-CPU
- * reading runs 4–5 ms over the gap's own wall time, so a 12-ms batch with a GC pause in it reads past
- * 20. An 8-ms batch keeps the reading under 20 with that margin; the paths, their order and so the
- * answer are the same (runCooperative: a deterministic prefix).
+ * paths on fx-10h). The process job's per-call notice reads `cpu_max_ms`, the thread's CPU over one
+ * heartbeat interval, beside `gap`, that interval less the 5 ms tick (tests/e2e/fixtures/
+ * heartbeat.cjs): a busy interval reads cpu ≈ gap + 5, so `cpu_max_ms` is the length of the run
+ * itself (21.9 ms at 6eda72d: a 12-ms batch, the sibling turns around it and a 1.3 ms GC). An 8-ms
+ * batch shortens the run the batch sets; the paths, their order and so the answer are the same
+ * (runCooperative: a deterministic prefix). The round-4c verifier's R4C-VS-1 corrected this reading.
  */
 export const SEASON_SIM_BATCH_MS = SLICE_CPU_MS;
 

@@ -722,12 +722,12 @@ describe("clinch and the cutoff read win % with ties as half wins (Stage C seedi
 
   // The round-4b server refix's F1 remainder: espn_analyze_matchup `season`'s longest CPU run is a
   // season-simulation batch; its batch is a slice's share (SEASON_SIM_BATCH_MS = SLICE_CPU_MS, 8 ms),
-  // not COOPERATIVE.batchMs (12). Counted on a pacer whose clock moves 1 ms a read, never timed: no
+  // never more than COOPERATIVE.batchMs (8 since R4C-VS-1). Counted on a pacer whose clock moves 1 ms a read, never timed: no
   // batch spans more than the batch plus the one step that may start inside it; the answer is the
   // one an unbatched run gives.
   it("the season simulation's batches hold at most SEASON_SIM_BATCH_MS of the pacer's time; the answer does not move", async () => {
     expect(SEASON_SIM_BATCH_MS).toBe(SLICE_CPU_MS);
-    expect(SEASON_SIM_BATCH_MS).toBeLessThan(COOPERATIVE.batchMs);
+    expect(SEASON_SIM_BATCH_MS).toBeLessThanOrEqual(COOPERATIVE.batchMs);
     const teams = Array.from({ length: 8 }, (_, i) => ({
       ...team(i + 1, 3 + (i % 3), 3 - (i % 3), 600 + 10 * i),
       weekly: { mu: 110 + i, sigma: 18 },
