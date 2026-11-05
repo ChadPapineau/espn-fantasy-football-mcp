@@ -51,7 +51,7 @@ Run Step 0 of [orient](references/orient.md). If `server.toolset` is `core`, sto
 - **The marginal-values table:** `+1 win`, `+20 PF`, `+40 PF`, `+80 PF`, a lower-variance lineup (`σ×0.7`) and a higher-variance one (`σ×1.4`), each as ΔP(playoffs) and ΔP(bye). Then one sentence translating it — "one win ≈ N points for you right now (`pf_per_win`); a high-variance lineup costs 0.03". Under points-only seeding `pf_per_win` is null — wins do not count — and the sentence says so.
 - Under `seeding_mode: "both"`: the two readings side by side, their `divergence`, and the sentence "the reading changes who should be buying".
 - The cut line (`cutoff`): the seed line, the wins gap, the points gap.
-- The per-week table from `weeks[]` — holes per slot, `bye_cluster_cost`, `weight.p_alive` — the `worst_weeks[]`, and the fixes with their cost and deadline (`fixes[]`).
+- The per-week table from `weeks[]` — holes per slot, `bye_cluster_cost`, `weight.p_alive` — the `worst_weeks[]`, and the fixes with what each recovers (`delta`, in points), its cost and its deadline (`fixes[]`).
 - The playoff weeks: the matchup multipliers with `shrink_w` and the evidence note (early-season schedule strength is close to noise), and the week 17 resting flag (`week17_rest_risk`) as a risk, never a rule.
 
 ## Guardrails specific to schedule-plan

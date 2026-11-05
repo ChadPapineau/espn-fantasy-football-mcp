@@ -208,15 +208,19 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
     "`ours` is that own line (espn_project_players' inputs.own), never the blended mean, which equals ESPN's while weight_espn is 1.0; `espn` is ESPN's (inputs.espn); `pct` is E1's disagreement.pct, abs(espn − ours) / espn, and a starter is listed when it is over 0.25; a starter with no own line is never listed",
     'a compare pair is scored only as a direct swap — `out` a starter, `in` a player on the bench who can play `out`\'s slot, neither locked; any other pair (an `in` already starting, one who cannot play that slot or is on IR, an `out` not starting, a locked player, one not on the roster) comes back as a warning ("compare pair out … / in … not evaluated: …") and is never scored: say so, never read a number for it (changelog §R10, R10-24)',
   ],
+  // the round-4c review's R4CS-5: the fields the E2 row's cross-check reads from E1 (R10-29)
+  espn_project_players: ["`inputs.own` (the own model's line)", "`disagreement.pct`"],
   // changelog §R10, R10-30: a health claim explains a usage drop under a hurt designation
   // (HEALTH_COVER_DESIGNATIONS in src/domain/analytics/evidence.ts), never a rise
   espn_analyze_evidence: [
-    "`quiet_role_change` is a usage move no claim explains: a usage drop explained by a health claim about him while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` reads `consistent` instead — a rise is never explained so, and against ESPN's `ACTIVE` an injury claim stays `availability_conflict`; changelog §R10, R10-30",
+    "`quiet_role_change` is a usage move no claim explains: a usage drop explained by a health claim about him while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields (a claim that he plays against ESPN's `OUT` or `INJURY_RESERVE` still reads `availability_conflict`) — a rise is never explained so, and against ESPN's `ACTIVE` an injury claim stays `availability_conflict`; changelog §R10, R10-30",
   ],
   // the round-4b review's F3: a week's row does not depend on the window asked for; a past week is
   // dropped with a warning, a window of past weeks only is refused
   espn_analyze_schedule: [
     "a week's row is the same whatever `weeks` asks for",
+    // the round-4c review's R4CS-4: the points a fix recovers are `delta` (scheduleStress.ts)
+    "`fixes[]` (`action`, `cost`, `delta` — the points the fix recovers, `deadline`)",
     'a week before the current one is dropped with a warning ("week(s) N dropped: before the current week (W)"), and a call that asks only for such weeks is refused (`VALIDATION`, field `weeks`, reason before_current_week)',
   ],
   // the server counts each side's starters by game state (plan 07 A4); start-sit falls back to the
@@ -427,7 +431,7 @@ export const INJURY_CONFIRM_SENTENCE =
  * (HEALTH_COVER_DESIGNATIONS in src/domain/analytics/evidence.ts).
  */
 export const NEWS_HEALTH_COVER_SENTENCE =
-  "`quiet_role_change` when the role moved and no claim explains it, else `consistent` or `no_claim` (a usage drop that a health claim about him explains while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` reads `consistent`: changelog §R10, R10-30)";
+  "`quiet_role_change` when the role moved and no claim explains it, else `consistent` or `no_claim` (a usage drop that a health claim about him explains while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields, `availability_conflict` when one says he plays against ESPN's `OUT` or `INJURY_RESERVE`: changelog §R10, R10-30)";
 /** A RegExp matching `text` literally. @param {string} text */
 const literal = (text) => new RegExp(text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"));
 /** The Phase W seam marker (plan 10 §3.W; D11) — the apply Skill declares it. */
@@ -942,7 +946,18 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "WK",
       kinds: ["lineup", "waiver", "stream"],
       records: true,
-      requiredCases: ["WK-1", "WK-2", "WK-3", "WK-4-E", "WK-5-E", "WK-7-E", "WK-INJ"],
+      // WK-9, WK-10: changelog §R10, R10-27, R10-28 (the round-4c review's R4CS-3)
+      requiredCases: [
+        "WK-1",
+        "WK-2",
+        "WK-3",
+        "WK-4-E",
+        "WK-5-E",
+        "WK-7-E",
+        "WK-INJ",
+        "WK-9",
+        "WK-10",
+      ],
       // WK-9 grades that the P1 league-activity read is never reached past orient's private-league
       // rejection hand-off (changelog §R10, R10-7, R10-27), so it runs where that tool exists; WK-10
       // grades that P1 read's session-refusal lines once the session is rejected mid-procedure
@@ -1193,7 +1208,8 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
       prefix: "SC",
       kinds: [],
       records: false,
-      requiredCases: ["SC-1", "SC-2", "SC-3", "SC-4", "SC-INJ", "SC-6", "SC-7-E"],
+      // SC-11: changelog §R10, R10-28 (R10-27's not_configured private row; R4CS-3)
+      requiredCases: ["SC-1", "SC-2", "SC-3", "SC-4", "SC-INJ", "SC-6", "SC-7-E", "SC-11"],
       body: [
         /DevTools/,
         /eff setup/,
@@ -1411,6 +1427,8 @@ export const SKILL_RULES = /** @type {Readonly<Record<string, SkillRule>>} */ (
         /week 17/i,
         /playoff_pct_espn/,
         /pf_per_win/,
+        // the round-4c review's R4CS-4: a fix's gain is its `delta`; its `cost` is a separate field
+        /what each recovers \(`delta`, in points\), its cost and its deadline/,
       ],
       sequences: (seqs) => {
         /** @type {string[]} */

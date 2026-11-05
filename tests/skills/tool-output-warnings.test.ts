@@ -19,7 +19,14 @@ import {
 } from "../../scripts/skills/check-skills.mjs";
 import { fitOptionsOf } from "../../src/mcp/define.js";
 import { ANALYTICS_BUDGET_CHARS, fitToBudget } from "../../src/mcp/envelope.js";
-import { HEALTH_COVER_DESIGNATIONS } from "../../src/domain/analytics/evidence.js";
+import {
+  HEALTH_COVER_DESIGNATIONS,
+  analyzeEvidence,
+  type EvidenceRequest,
+} from "../../src/domain/analytics/evidence.js";
+import type { UsageWeek } from "../../src/domain/analytics/usageSignals.js";
+import { wrapUntrusted, type InjuryStatus } from "../../src/domain/league/types.js";
+import { bare, clockAndRng } from "../domain/analytics/helpers.js";
 import { compareWarnings, type LineupPlayer } from "../../src/domain/analytics/lineup.js";
 import { DISAGREEMENT_FLAG_PCT } from "../../src/domain/analytics/types.js";
 import { RECOMMENDATION_KINDS } from "../../src/domain/reclog/types.js";
@@ -457,6 +464,95 @@ describe("the E2, E8 and E10 rows follow the server (changelog §R10, R10-29, R1
     expect(row).toContain("against ESPN's `ACTIVE` an injury claim stays `availability_conflict`");
   });
 
+  // the round-4c review's R4CS-2: a covered drop is not quiet_role_change, and it then reads by
+  // the remaining rules — consistent when the claims agree, availability_conflict when one says he
+  // plays against ESPN's OUT or INJURY_RESERVE — and both texts say exactly that
+  describe("E10's health cover reads by the remaining rules (changelog §R10, R10-30)", () => {
+    const NOW = "2026-10-06T20:00:00.000Z";
+    const week = (w: number, snap: number, tgt: number): UsageWeek => ({
+      week: w,
+      snap_pct: snap,
+      target_share: tgt,
+      rz_share: 0.1,
+      xfp: 9,
+      points: 8,
+    });
+    // snaps 0.55 → 0.25, targets 0.15 → 0.05: a usage drop
+    const drop: UsageWeek[] = [
+      ...[1, 2, 3, 4].map((w) => week(w, 0.55, 0.15)),
+      week(5, 0.25, 0.05),
+    ];
+    const flagOf = (status: InjuryStatus, texts: readonly string[]) =>
+      analyzeEvidence({
+        player: {
+          player_id: 77,
+          gsis_id: null,
+          name: bare("Player 77"),
+          position: "RB",
+          injury_status: status,
+          roster: "mine",
+          slot_id: 2,
+          lineup_locked: false,
+          waiver_process_date: null,
+          last_news_at: null,
+        },
+        texts: texts.map((t) => ({ text: wrapUntrusted(t, "rss.rotowire.title"), time: NOW })),
+        usage: drop,
+        week: 6,
+        clock: clockAndRng(NOW).clock,
+      } satisfies EvidenceRequest).data.flag;
+    const sheet = rowOf("espn_analyze_evidence");
+    const news = readFileSync(path.join(ROOT, "skills/news-check/SKILL.md"), "utf8");
+
+    it.each([...HEALTH_COVER_DESIGNATIONS])(
+      "%s with a health claim that agrees: consistent, never quiet_role_change",
+      (status) => {
+        expect(flagOf(status, ["has a hamstring injury"])).toBe("consistent");
+      },
+    );
+    it.each([
+      ["OUT", ["has a hamstring injury", "He will play Sunday."]],
+      ["OUT", ["has a hamstring injury", "Expected to play Sunday against Buffalo."]],
+      ["INJURY_RESERVE", ["has a hamstring injury", "He is active and will start Sunday."]],
+    ] as const)("%s with a claim that he plays: availability_conflict", (status, texts) => {
+      expect(flagOf(status, texts)).toBe("availability_conflict");
+    });
+    it("the cheat-sheet row and news-check §4 say a covered drop reads by the remaining rules", () => {
+      for (const text of [sheet, news]) {
+        expect(text).toContain("is not `quiet_role_change`: it reads by the remaining rules");
+        expect(text).toContain("`consistent` when the claims agree with the structured fields");
+        expect(text).toMatch(
+          /`availability_conflict`[^.]*against ESPN's `OUT` or `INJURY_RESERVE`|against ESPN's `OUT` or `INJURY_RESERVE` still reads `availability_conflict`/,
+        );
+        expect(text).not.toMatch(/`INJURY_RESERVE` reads `consistent`/);
+      }
+    });
+    it("news-check §4 names exactly the designations under which a health claim explains a drop", () => {
+      const sentence =
+        /a usage drop that a health claim about him explains while ESPN lists him ([^)]*?) is not/.exec(
+          news,
+        )?.[1];
+      expect(sentence).toBeDefined();
+      const named = [...(sentence ?? "").matchAll(/`([A-Z_]+)`/g)].map((m) => m[1]);
+      expect(new Set(named)).toEqual(new Set(HEALTH_COVER_DESIGNATIONS));
+    });
+  });
+
+  // the round-4c review's R4CS-5: the E2 row reads E1's fields; the E1 row lists each of them
+  it("every E1 field the E2 row names is in the E1 row", () => {
+    const e2 = rowOf("espn_analyze_lineup");
+    const e1 = rowOf("espn_project_players");
+    const named = [
+      ...e2.matchAll(
+        /espn_project_players' ([a-z_]+(?:\.[a-z_]+)*)|E1's ([a-z_]+(?:\.[a-z_]+)+)|\((inputs\.[a-z_]+)\)/g,
+      ),
+    ].map((m) => m[1] ?? m[2] ?? m[3]);
+    expect(named).toEqual(
+      expect.arrayContaining(["inputs.own", "disagreement.pct", "inputs.espn"]),
+    );
+    for (const f of named) expect(e1, f).toContain(`\`${String(f)}\``);
+  });
+
   describe("E8 on fx-10h (full)", () => {
     const FX = path.join(ESPN_FIXTURES, "fx-10h");
     let world: World;
@@ -478,6 +574,34 @@ describe("the E2, E8 and E10 rows follow the server (changelog §R10, R10-29, R1
       await close();
       world.cleanup();
     });
+
+    // the round-4c review's R4CS-3 (F3's sentence) and R4CS-4 (the fixes' fields)
+    it("a week's row is the same whatever `weeks` asks for, as the row says", async () => {
+      expect(rowOf("espn_analyze_schedule")).toContain(
+        "a week's row is the same whatever `weeks` asks for",
+      );
+      const rowFor = async (weeks: number[]) => {
+        const r = await call(client, "espn_analyze_schedule", { seed: 7, weeks });
+        expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+        const data = r.body.data as { weeks: { week: number }[] };
+        return data.weeks.find((w) => w.week === 11);
+      };
+      const alone = await rowFor([11]);
+      expect(alone).toBeDefined();
+      expect(await rowFor([7, 11])).toEqual(alone);
+    }, 60_000);
+
+    it("the row lists exactly the fields of a fix the tool returns, `delta` the points it recovers", async () => {
+      const row = rowOf("espn_analyze_schedule");
+      const list = /`fixes\[\]` \(([^)]*)\)/.exec(row)?.[1] ?? "";
+      const listed = [...list.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]);
+      expect(list).toContain("`delta` — the points the fix recovers");
+      const r = await call(client, "espn_analyze_schedule", { seed: 7, include_playoffs: true });
+      expect(r.isError, JSON.stringify(r.body).slice(0, 300)).toBe(false);
+      const fixes = (r.body.data as { fixes: Record<string, unknown>[] }).fixes;
+      expect(fixes.length).toBeGreaterThan(0);
+      for (const f of fixes) expect(new Set(Object.keys(f))).toEqual(new Set(listed));
+    }, 60_000);
 
     it("a past week's warning is the row's quoted form, and a window of past weeks is the row's refusal", async () => {
       const row = rowOf("espn_analyze_schedule");
