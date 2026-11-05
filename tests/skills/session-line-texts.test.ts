@@ -39,6 +39,8 @@ import {
   type ActivityLeagueRead,
   SESSION_READ_WARNINGS,
 } from "../../src/mcp/tools/common.js";
+import { fixedClock } from "../../src/domain/clock.js";
+import { readScriptedCredential, scriptedAuth } from "../../src/services/fixture-credential.js";
 import { ROOT } from "./helpers.js";
 
 const read = (rel: string): string => readFileSync(path.join(ROOT, rel), "utf8");
@@ -369,12 +371,60 @@ You won 112–98; nothing was not read.
 
 ## Waivers
 Claim the top RB.`;
+  // the round-4d verifiers' R4D-VS-2: a Confidence & freshness section that says the opposite, with
+  // the rejection only in the hand-off after weekly's **Deadlines** block
+  const confHigh = `# Week 5 briefing
+
+## Last week
+You won 112-98.
+
+## Confidence & freshness
+High: every input fresh (as of 9:00 PM ET), no stale reads.
+
+**Deadlines**: lineup locks Sun 1:00 PM ET.
+
+ESPN rejected the stored session on the last read; run \`eff setup\` in a terminal. Then the session-check Skill.`;
+  // R4D-VS-3 and R4DVF-5: sections invented after the hand-off as table rows, plain labels or a list
+  const tableAfter = `ESPN rejected the stored session; partial. Run eff setup, then espn-fantasy-football:session-check.
+
+| Section | Result |
+|---|---|
+| Waivers | claim the top RB |
+| League activity | 3 adds |`;
+  const rowsAfter = `ESPN rejected the stored session (partial; the rest was not read).
+
+### Confidence & freshness
+partial
+
+Hand-off: \`espn-fantasy-football:session-check\`.
+
+| Section | |
+|---|---|
+| Waivers | Claim RB 4697815 for $12 |
+| League activity | 3 trades |`;
+  const labelsAfter = `ESPN rejected the stored session; this briefing is partial and the rest was not read. Next: the session-check Skill.
+
+Waivers: claim the top RB for $12.
+- League activity: 3 trades.`;
+  // a not-read status given after the hand-off is no section of the briefing
+  const statusAfter = `ESPN rejected the stored session, so this briefing is partial.
+
+### Confidence & freshness
+Partial: nothing after the league settings was read.
+
+Run \`eff setup\` in a terminal; the \`espn-fantasy-football:session-check\` Skill takes it from here.
+
+| Section | Status |
+|---|---|
+| Last week | not read |
+| Waivers, League activity | not read |
+League activity: not read`;
   const publicSession =
     "**Session:** ESPN rejected the stored session; this league is public, so reads are keyless where the league allows them; `eff setup` in a terminal replaces the session";
 
   const wk = mandatedLines(orient, "stored", "private-expiring-weekly", false).lines;
   const contract = contractLines(template);
-  const good = [prose, table, handoffOnly, handoffTable, orderB];
+  const good = [prose, table, handoffOnly, handoffTable, orderB, statusAfter];
   const rows: readonly (readonly [
     string,
     "regex" | "regex_absent",
@@ -388,13 +438,13 @@ Claim the top RB.`;
       "Confidence & freshness says the briefing is partial or the session was rejected",
       "regex",
       good,
-      [complete, terse, terseTable],
+      [complete, terse, terseTable, confHigh],
     ],
     [
       "The briefing ends with the hand-off to the session-check Skill",
       "regex",
       good,
-      [complete, handoffFirst],
+      [complete, handoffFirst, tableAfter, rowsAfter, labelsAfter],
     ],
     [
       "The reply never prints the public-league Session line",
@@ -458,6 +508,31 @@ Claim the top RB.`;
       ).not.toContain(s);
     expect(c.expected_output).toContain("changelog §R10, R10-31");
     expect(c.expected_output).toContain("private-expiring-weekly");
+  });
+
+  // the round-4d verifiers' R4DVF-7: an espn_check_auth before the 401 validates the session, which
+  // is then never rejected (changelog §R10, R10-31), so the case's 401 never lands on that run
+  it("WK-10 and WK-11 say a run that probes the session before the 401 is out of the case", async () => {
+    const scripted = readScriptedCredential(
+      path.join(ROOT, "fixtures/espn/fx-10h/private-expiring"),
+    );
+    expect(scripted).toMatchObject({ state: "stored", rejects: "first_uncached_read" });
+    if (scripted === null) return;
+    const probed = scriptedAuth(scripted, fixedClock("2026-10-07T01:00:00.000Z"));
+    await probed.probe();
+    expect(probed.state()).toBe("validated");
+    expect(probed.rejectsRead()).toBe(false);
+    // unprobed, the first uncached read is the 401
+    const unprobed = scriptedAuth(scripted, fixedClock("2026-10-07T01:00:00.000Z"));
+    expect(unprobed.rejectsRead()).toBe(true);
+    expect(unprobed.state()).toBe("rejected");
+    const cases = (JSON.parse(read("skills/weekly/evals/evals.json")) as { evals: Case[] }).evals;
+    for (const name of ["WK-10", "WK-11"]) {
+      const c = cases.find((x) => x.name === name);
+      expect(c?.expected_output, name).toContain(
+        "A run that calls espn_check_auth before the first read the cache does not serve validates the session (an accepting probe validates before the 401, changelog §R10, R10-31), so the 401 never lands: that run is out of the case, never graded as a failure of the Skill.",
+      );
+    }
   });
 
   it("runs on WK-10's server and is a required, full-toolset weekly case", () => {
