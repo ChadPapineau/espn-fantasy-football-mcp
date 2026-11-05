@@ -1232,7 +1232,11 @@ export const PLAYER_WEEK_CHUNK = 6;
  * reads (a cut point for the caller's runner). The statement orders by player id, then week, so
  * reading the sorted ids in slices and joining the slices is that one read's answer, row for row
  * (the usage extras are per player-week, their team totals per team-week: the same). A source that
- * is not loaded answers as the one read does.
+ * is not loaded answers as the one read does. Every slice is of one published version: the reader
+ * re-opens the file when `eff refresh` publishes a new one, which can land between two slices, so a
+ * slice stamped with another `file_version` than the first restarts the slices once against it,
+ * and a second change answers with the one read instead (the round-4d verifier's R4D-VS-4: rows of
+ * two versions had been joined under the first one's stamp).
  */
 export function* playerWeekLinesSteps(
   ctx: Pick<ToolContext, "services">,
@@ -1245,16 +1249,25 @@ export function* playerWeekLinesSteps(
   // SQLite's BINARY order of the ASCII ids: JavaScript's default sort of the same strings
   const ids = [...new Set(gsis)].sort();
   if (ids.length <= PLAYER_WEEK_CHUNK) return reader.lines(gsis, season, weeks, opts);
-  const rows: PlayerWeekLine[] = [];
-  let stamp: DatasetStamp | null = null;
-  for (let i = 0; i < ids.length; i += PLAYER_WEEK_CHUNK) {
-    if (i > 0) yield;
-    const r = reader.lines(ids.slice(i, i + PLAYER_WEEK_CHUNK), season, weeks, opts);
-    if (r.stamp === null) return r;
-    stamp ??= r.stamp;
-    for (const row of r.rows) rows.push(row);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const rows: PlayerWeekLine[] = [];
+    let stamp: DatasetStamp | null = null;
+    let mixed = false;
+    for (let i = 0; i < ids.length; i += PLAYER_WEEK_CHUNK) {
+      if (i > 0 || attempt > 0) yield;
+      const r = reader.lines(ids.slice(i, i + PLAYER_WEEK_CHUNK), season, weeks, opts);
+      if (r.stamp === null) return r;
+      stamp ??= r.stamp;
+      if (r.stamp.file_version !== stamp.file_version) {
+        mixed = true;
+        break;
+      }
+      for (const row of r.rows) rows.push(row);
+    }
+    if (!mixed) return { rows, stamp };
   }
-  return { rows, stamp };
+  // the version changed twice while the slices were read: the one read is of one version
+  return reader.lines(gsis, season, weeks, opts);
 }
 
 /** playerWeekLinesSteps run to its end, giving up the turn between reads once the slice is spent. */

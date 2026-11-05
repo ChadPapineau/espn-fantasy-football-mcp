@@ -2,7 +2,8 @@
 // at a time (common.ts playerWeekLinesSteps), with a cut point between reads, and the answer is the
 // one read's, row for row and stamp for stamp. Counted, no clock: the reads and their sizes, the
 // yields between them; byte-identical against a stand-in reader over any id list (duplicates,
-// unsorted) and against the real dataset reader on fx-10h's published nflverse excerpt.
+// unsorted) and against the real dataset reader on fx-10h's published nflverse excerpt. A version
+// published between two slices restarts them once, never joins two versions (R4D-VS-4).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import fc from "fast-check";
@@ -103,6 +104,77 @@ describe("playerWeekLinesSteps: the one read's answer, a few players a read (F1,
     expect(await playerWeekLines(a.ctx, ids, 2025, [1, 3])).toEqual(
       b.ctx.services.datasets.playerWeeks.lines(ids, 2025, [1, 3]),
     );
+  });
+});
+
+// the round-4d verifier's R4D-VS-4: a publish between two slices (the reader re-opens the file when
+// refresh_log names a new version) must never join two versions' rows under one stamp
+describe("playerWeekLinesSteps over a version published between two slices (R4D-VS-4)", () => {
+  /** A reader whose version moves to the next of `versions` after the reads listed in `switchAfter`. */
+  function versioned(ids: readonly string[], versions: readonly string[], switchAfter: number[]) {
+    let reads = 0;
+    let at = 0;
+    const calls: string[][] = [];
+    const reader: Pick<PlayerWeekReader, "lines"> = {
+      lines(gsis, _season, weeks): DatasetResult<PlayerWeekLine> {
+        calls.push([...gsis]);
+        const v = versions[at] ?? "v?";
+        reads += 1;
+        if (switchAfter.includes(reads)) at += 1;
+        const want = new Set(gsis);
+        const rows = [...new Set(ids)]
+          .sort()
+          .filter((g) => want.has(g))
+          .flatMap((g) => weeks.map((week) => ({ gsis_id: g, week, season: 2025, v })));
+        return {
+          rows: rows as unknown as PlayerWeekLine[],
+          stamp: { ...STAMP, file_version: v },
+        };
+      },
+    };
+    const ctx = { services: { datasets: { playerWeeks: reader } } as unknown as McpServices };
+    return { ctx, calls };
+  }
+  const ids = Array.from({ length: 13 }, (_, i) => `00-00${String(33000 + i)}`);
+  const versionsOf = (r: DatasetResult<PlayerWeekLine>): string[] => [
+    ...new Set(r.rows.map((x) => (x as unknown as { v: string }).v)),
+  ];
+
+  it("a version published after the first slice: the slices restart once, every row of the new one", () => {
+    const s = versioned(ids, ["v1", "v2"], [1]);
+    const { value, yields } = drain(playerWeekLinesSteps(s.ctx, ids, 2025, [1, 2]));
+    expect(versionsOf(value)).toEqual(["v2"]);
+    expect(value.stamp?.file_version).toBe("v2");
+    expect(value.rows).toHaveLength(ids.length * 2);
+    expect(value.rows.map((r) => r.gsis_id)).toEqual(ids.flatMap((g) => [g, g]));
+    // read 1 (v1), read 2 (v2: mismatch), then three slices of v2
+    expect(s.calls).toHaveLength(5);
+    expect(yields).toBe(4);
+  });
+
+  it("a version published mid-way, after the second slice: still one version, stamped so", () => {
+    const s = versioned(ids, ["v1", "v2"], [2]);
+    const { value } = drain(playerWeekLinesSteps(s.ctx, ids, 2025, [3]));
+    expect(versionsOf(value)).toEqual(["v2"]);
+    expect(value.stamp?.file_version).toBe("v2");
+    expect(value.rows).toHaveLength(ids.length);
+  });
+
+  it("the version changes again during the restart: the one read answers, of one version", () => {
+    const s = versioned(ids, ["v1", "v2", "v3"], [1, 3]);
+    const { value } = drain(playerWeekLinesSteps(s.ctx, ids, 2025, [1]));
+    expect(versionsOf(value)).toEqual(["v3"]);
+    expect(value.stamp?.file_version).toBe("v3");
+    expect(s.calls.at(-1)).toEqual(ids);
+    expect(value.rows).toHaveLength(ids.length);
+  });
+
+  it("no publish: the slices once, as before", () => {
+    const s = versioned(ids, ["v1"], []);
+    const { value, yields } = drain(playerWeekLinesSteps(s.ctx, ids, 2025, [1]));
+    expect(versionsOf(value)).toEqual(["v1"]);
+    expect(s.calls).toHaveLength(3);
+    expect(yields).toBe(2);
   });
 });
 
