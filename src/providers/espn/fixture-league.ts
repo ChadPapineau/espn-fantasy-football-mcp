@@ -15,11 +15,18 @@
 //
 // Same guarantees as the recorded fixture fetch: no network, a Cookie header is refused, an
 // unanswerable request is a FixtureError naming the path (league id 0), every file path stays inside
-// the manifest's root, and patch pointers can never reach a prototype.
-import { readFileSync, realpathSync, statSync } from "node:fs";
+// the manifest's root (both fetches read through fixture.ts' derivedFileText), and patch pointers
+// can never reach a prototype.
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { yieldTurn } from "../../domain/analytics/cooperative.js";
-import { FixtureError, composeBodies } from "./fixture.js";
+import {
+  DERIVED_FILE_MAX_BYTES,
+  DerivedFileRefused,
+  FixtureError,
+  composeBodies,
+  derivedFileText,
+} from "./fixture.js";
 import {
   HEADER_FILTER,
   HEADER_PLAYER_COUNT,
@@ -29,10 +36,12 @@ import {
 import type { FetchLike } from "./transport.js";
 import { ABSENT_MEANS_EMPTY } from "./views/index.js";
 
+// The one path resolver lives in fixture.ts since round 4d (the recorded fetch reads through it too,
+// the round-4d verifier's F1); re-exported here, where its callers have always imported it.
+export { DERIVED_FILE_MAX_BYTES, DerivedFileRefused, derivedFileText };
+
 /** The manifest `kind` of a derived league. */
 export const DERIVED_LEAGUE_KIND = "derived_league";
-/** Largest body or patch file read (the fx-10h pool is ~3 MB). */
-export const DERIVED_FILE_MAX_BYTES = 32 * 1024 * 1024;
 
 type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 type JsonObject = Record<string, Json>;
@@ -102,9 +111,6 @@ export function derivedLeagueClock(dir: string): number | null {
   return Number.isFinite(t) && /^\d{4}-\d{2}-\d{2}T/.test(clock) ? t : null;
 }
 
-/** A manifest file the path rules or the size bound refuse (derivedFileText, derivedRootDir). */
-export class DerivedFileRefused extends RangeError {}
-
 /** The most levels a manifest `root` may climb: the generator writes `..` (the base) and `../..`. */
 export const DERIVED_ROOT_MAX_UP = 2;
 
@@ -137,29 +143,6 @@ export function derivedRootDir(dir: string, root: string): string {
     if (!inside) throw new DerivedFileRefused("manifest root refused");
   }
   return resolved;
-}
-
-/**
- * The text of `rel` under a derived manifest's `root` — the ONE path resolver the fixture fetch and
- * the publicity read share, so their rules cannot drift apart (the round-4b review's F3): never an
- * empty, absolute or `..` path, never a path that resolves to `root` itself or outside it — also
- * after symlinks are resolved, so a link inside `root` cannot point out of it (the round-4c
- * verifier's CR-3) — never a file over DERIVED_FILE_MAX_BYTES (its size is read before its bytes
- * are). A refusal throws DerivedFileRefused; a file that cannot be read throws the read's own error.
- */
-export function derivedFileText(root: string, rel: string): string {
-  if (rel === "" || path.isAbsolute(rel) || rel.split(/[\\/]/).includes(".."))
-    throw new DerivedFileRefused("manifest path refused");
-  const lexical = path.resolve(root, rel);
-  if (!lexical.startsWith(root + path.sep)) throw new DerivedFileRefused("manifest path refused");
-  const abs = realpathSync(lexical);
-  if (!abs.startsWith(realpathSync(root) + path.sep))
-    throw new DerivedFileRefused("manifest path refused");
-  if (statSync(abs).size > DERIVED_FILE_MAX_BYTES)
-    throw new DerivedFileRefused("fixture file too large");
-  const text = readFileSync(abs, "utf8");
-  if (text.length > DERIVED_FILE_MAX_BYTES) throw new DerivedFileRefused("fixture file too large");
-  return text;
 }
 
 /**

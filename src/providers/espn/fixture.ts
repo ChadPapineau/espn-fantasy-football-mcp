@@ -4,7 +4,11 @@
 // response is re-assembled (its array concatenated in part order). A request with no fixture is a
 // distinct error naming the request path (league id 0 in this mode — no identifier); a request that
 // carries a Cookie header is refused: fixture mode and real cookies never coexist in one process.
-import { readFileSync } from "node:fs";
+// Every manifest file path is read through derivedFileText, the one resolver both fixture fetches
+// share (the round-4d verifier's F1: the recorded fetch had no path check): a manifest with an
+// empty, absolute or `..` path fails at load, and a symlink out of the tree or an oversized file is
+// a fixture_missing read, never its contents.
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { canonicalJson } from "./filter.js";
 import { HEADER_FILTER } from "./types.js";
@@ -23,6 +27,46 @@ interface ManifestFile {
     readonly filter: unknown;
   };
   readonly part: { readonly index: number; readonly of: number; readonly array: string } | null;
+}
+
+/** Largest fixture body or patch file read (the fx-10h pool is ~3 MB). */
+export const DERIVED_FILE_MAX_BYTES = 32 * 1024 * 1024;
+
+/** A manifest file the path rules or the size bound refuse (derivedFileText, derivedRootDir). */
+export class DerivedFileRefused extends RangeError {}
+
+/** A manifest path no fixture fetch reads: empty, absolute (POSIX or Windows form) or with `..`. */
+function lexicallyRefused(rel: unknown): boolean {
+  return (
+    typeof rel !== "string" ||
+    rel === "" ||
+    path.isAbsolute(rel) ||
+    path.win32.isAbsolute(rel) ||
+    rel.split(/[\\/]/).includes("..")
+  );
+}
+
+/**
+ * The text of `rel` under a manifest's `root` — the ONE path resolver the recorded fixture fetch,
+ * the derived fixture fetch and the derived publicity read share, so their rules cannot drift apart
+ * (the round-4b review's F3; the recorded fetch since round 4d, F1): never an empty, absolute or
+ * `..` path, never a path that resolves to `root` itself or outside it — also after symlinks are
+ * resolved, so a link inside `root` cannot point out of it (the round-4c verifier's CR-3) — never a
+ * file over DERIVED_FILE_MAX_BYTES (its size is read before its bytes are). A refusal throws
+ * DerivedFileRefused; a file that cannot be read throws the read's own error.
+ */
+export function derivedFileText(root: string, rel: string): string {
+  if (lexicallyRefused(rel)) throw new DerivedFileRefused("manifest path refused");
+  const lexical = path.resolve(root, rel);
+  if (!lexical.startsWith(root + path.sep)) throw new DerivedFileRefused("manifest path refused");
+  const abs = realpathSync(lexical);
+  if (!abs.startsWith(realpathSync(root) + path.sep))
+    throw new DerivedFileRefused("manifest path refused");
+  if (statSync(abs).size > DERIVED_FILE_MAX_BYTES)
+    throw new DerivedFileRefused("fixture file too large");
+  const text = readFileSync(abs, "utf8");
+  if (text.length > DERIVED_FILE_MAX_BYTES) throw new DerivedFileRefused("fixture file too large");
+  return text;
 }
 
 /** Fixture mode refused or could not serve a request (never retried; INTERNAL to a tool). */
@@ -97,9 +141,13 @@ export interface FixtureFetchOptions {
 /** Builds fixture mode's `fetch` over the recorded fixtures of one league slot. */
 export function createFixtureFetch(opts: FixtureFetchOptions): FetchLike {
   if (!path.isAbsolute(opts.dir)) throw new RangeError("fixture mode: dir must be absolute");
+  const dir = path.resolve(opts.dir);
   const manifest = JSON.parse(
-    readFileSync(path.join(opts.dir, opts.manifest ?? "manifest.json"), "utf8"),
+    readFileSync(path.join(dir, opts.manifest ?? "manifest.json"), "utf8"),
   ) as { files: ManifestFile[] };
+  // a bad manifest fails at load, before any request (every entry, served or not)
+  if (manifest.files.some((f) => lexicallyRefused(f.path)))
+    throw new RangeError("fixture mode: manifest path refused");
   const groups = new Map<string, ManifestFile[]>();
   for (const f of manifest.files) {
     if (f.request.route === "league" || f.request.route === "communication") {
@@ -117,9 +165,16 @@ export function createFixtureFetch(opts: FixtureFetchOptions): FetchLike {
     const cached = bodies.get(id);
     if (cached !== undefined) return cached;
     const sorted = [...files].sort((a, b) => (a.part?.index ?? 0) - (b.part?.index ?? 0));
-    const parts = sorted.map(
-      (f) => JSON.parse(readFileSync(path.join(opts.dir, f.path), "utf8")) as unknown,
-    );
+    const parts = sorted.map((f) => {
+      let text: string;
+      try {
+        text = derivedFileText(dir, f.path);
+      } catch (e) {
+        if (e instanceof DerivedFileRefused) throw new FixtureError("fixture_missing", e.message);
+        throw e;
+      }
+      return JSON.parse(text) as unknown;
+    });
     let body: unknown = parts[0];
     const arr = sorted[0]?.part?.array;
     if (arr !== undefined && parts.length > 1) {
@@ -134,7 +189,7 @@ export function createFixtureFetch(opts: FixtureFetchOptions): FetchLike {
     bodies.set(id, text);
     return text;
   };
-  return (url: string, init: RequestInit): Promise<Response> => {
+  const handle = (url: string, init: RequestInit): Promise<Response> => {
     const u = new URL(url);
     if (headerOf(init, "cookie") !== null)
       return Promise.reject(new FixtureError("fixture_cookie_refused", u.pathname));
@@ -170,5 +225,13 @@ export function createFixtureFetch(opts: FixtureFetchOptions): FetchLike {
     return Promise.resolve(
       new Response(JSON.stringify(body), { status: 200, headers: { ...present[0]?.[0]?.headers } }),
     );
+  };
+  // a refused or unreadable file is a rejected answer, never a throw out of `fetch`
+  return (url: string, init: RequestInit): Promise<Response> => {
+    try {
+      return handle(url, init);
+    } catch (e) {
+      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
+    }
   };
 }
