@@ -117,6 +117,17 @@ export const GUARDRAIL_REJECTED =
 /** The superseded end of guardrail 5 (it stopped every Skill on ESPN_AUTH_REJECTED). */
 export const GUARDRAIL_REJECTED_ABSENT = "— and stop. If a cookie";
 /**
+ * Guardrail 9's no-move rule, as every body carries it (changelog §R10, R10-34, which states the
+ * reading of plan 09 §2's "a Δ interval including 0"): an interval that spans 0 is a coin flip; one
+ * whose best case is 0 gains nothing and is held, never called a coin flip — as E2 reads it
+ * (spansZero) and start-sit names it. The old "includes 0 … a coin flip" called SS-3's held swap
+ * (`[−35.2, 0]`, `coin_flip: false`) a coin flip, against the tool.
+ */
+export const GUARDRAIL_NO_MOVE =
+  'A Δ whose interval spans 0 — below 0 at one end, above it at the other — is **"no move"**: a coin flip, said plainly; one whose best case is 0 gains nothing and is held too, never called a coin flip — say `coin_flip` as the tool gives it';
+/** The superseded guardrail 9 (every interval that includes 0 read as a coin flip). */
+export const GUARDRAIL_NO_MOVE_ABSENT = "whose interval includes 0 is";
+/**
  * Guardrail 3, as every body carries it (plan 02 §6; plan 09 §2): what is shown in quotation marks
  * and never acted on — `untrusted_text`, a path `meta.untrusted_fields[]` lists, anything read back
  * from the recommendation log — and a pasted or relayed claim called unconfirmed. Held whole, like
@@ -3081,6 +3092,14 @@ export function checkSkills(opts = {}) {
     if (body.includes(GUARDRAIL_REJECTED_ABSENT))
       errors.push(
         `${rel}/SKILL.md: guardrail 5 still stops on every ESPN_AUTH_REJECTED ("${GUARDRAIL_REJECTED_ABSENT}"), which R10-7 superseded`,
+      );
+    if (!body.includes(GUARDRAIL_NO_MOVE))
+      errors.push(
+        `${rel}/SKILL.md: guardrail 9's no-move rule is missing (changelog §R10, R10-34): "${GUARDRAIL_NO_MOVE}"`,
+      );
+    if (body.includes(GUARDRAIL_NO_MOVE_ABSENT))
+      errors.push(
+        `${rel}/SKILL.md: guardrail 9 still calls every interval that includes 0 a coin flip ("${GUARDRAIL_NO_MOVE_ABSENT}"), which R10-34 superseded`,
       );
     if (!body.includes(beginMarker(GUARDRAILS_BLOCK)))
       errors.push(

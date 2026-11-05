@@ -11,6 +11,8 @@ import {
   CLIENT_LISTING_VERSION,
   DESCRIPTION_MAX,
   FRONTMATTER_PHRASES,
+  GUARDRAIL_NO_MOVE,
+  GUARDRAIL_NO_MOVE_ABSENT,
   GUARDRAIL_QUOTE,
   GUARDRAIL_REJECTED,
   GUARDRAIL_REJECTED_ABSENT,
@@ -1133,6 +1135,39 @@ describe("the body (plan 09 §2, §5.1 item 2)", () => {
       expect(e).toContain(
         `skills/${s}/SKILL.md: guardrail 5 still stops on every ESPN_AUTH_REJECTED`,
       );
+    }
+  });
+
+  // changelog §R10, R10-34: guardrail 9's "includes 0 … a coin flip" called SS-3's held swap
+  // ([−35.2, 0], coin_flip: false) a coin flip, against E2 (spansZero) and start-sit's own line
+  it("fails when guardrail 9 calls every interval that includes 0 a coin flip again, or loses R10-34's rule (rebuilt into every body)", () => {
+    const shared = readFileSync(path.join(ROOT, "skills/_shared/references/guardrails.md"), "utf8");
+    expect(shared).toContain(`${GUARDRAIL_NO_MOVE} (changelog §R10, R10-34).`);
+    expect(shared).not.toContain(GUARDRAIL_NO_MOVE_ABSENT);
+    const template = readFileSync(
+      path.join(ROOT, "skills/_shared/references/output-template.md"),
+      "utf8",
+    );
+    expect(template).toContain(
+      '- A Δ interval that spans 0 is "no move" — a coin flip — never a dramatised edge; one whose best case is 0 is "no move" too, as a change that gains nothing, never as a coin flip.',
+    );
+    expect(template).not.toMatch(/interval that includes 0/);
+    for (const s of SKILLS) {
+      const body = readFileSync(path.join(ROOT, "skills", s, "SKILL.md"), "utf8");
+      expect(body, s).toContain(GUARDRAIL_NO_MOVE);
+      expect(body, s).not.toMatch(/includes 0/);
+    }
+    const t = fresh();
+    t.edit(
+      "skills/_shared/references/guardrails.md",
+      `${GUARDRAIL_NO_MOVE} (changelog §R10, R10-34).`,
+      'A Δ whose interval includes 0 is **"no move"** — a coin flip, said plainly.',
+    );
+    buildSkills({ root: t.root });
+    const e = errorsOf(t);
+    for (const s of SKILLS) {
+      expect(e).toContain(`skills/${s}/SKILL.md: guardrail 9's no-move rule is missing`);
+      expect(e).toContain(`skills/${s}/SKILL.md: guardrail 9 still calls every interval`);
     }
   });
 

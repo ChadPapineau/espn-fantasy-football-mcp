@@ -10,7 +10,7 @@ The action in ESPN's vocabulary (slot names `QB RB WR TE FLEX D/ST K BE IR`; the
 - Δ versus the next-best option with its interval (`rec.delta_vs_next` value, p10–p90) and the decision metric named (`rec.decision_metric`).
 - ESPN's number beside ours, labelled as ESPN's (`projected_espn`, `projection_week_espn`, `win_probability_espn`, `playoff_pct_espn`).
 - A win-probability change reported as `sign_and_band` (`p_win_reporting`) is given as its band ("a small gain in win chance"), never turned into a precise number.
-- A Δ interval that includes 0 is "no move" — a coin flip — never a dramatised edge.
+- A Δ interval that spans 0 is "no move" — a coin flip — never a dramatised edge; one whose best case is 0 is "no move" too, as a change that gains nothing, never as a coin flip.
 
 ### Why
 The ranked `rec.drivers[]`, strongest first, in plain words.
