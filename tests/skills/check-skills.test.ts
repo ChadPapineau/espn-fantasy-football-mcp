@@ -2824,7 +2824,7 @@ describe("the pending sentence and E11's row follow round 4's rulings", () => {
       .split("\n")
       .find((l) => l.startsWith("| (P1) `espn_analyze_league_activity` |"));
     expect(row).toBeDefined();
-    expect(ACTIVITY_PARTIAL_FRAGMENTS).toHaveLength(3);
+    expect(ACTIVITY_PARTIAL_FRAGMENTS).toHaveLength(4);
     for (const f of ACTIVITY_PARTIAL_FRAGMENTS) {
       expect(TOOL_OUTPUT_PHRASES.espn_analyze_league_activity).toContain(f);
       expect(row?.split(f).length, f).toBe(2);

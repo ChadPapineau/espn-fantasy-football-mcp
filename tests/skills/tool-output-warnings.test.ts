@@ -34,6 +34,7 @@ import { lineupTrims } from "../../src/mcp/tools/analytics.js";
 import {
   SESSION_READ_WARNINGS,
   activityLeagueReadsWarning,
+  feedCutWarning,
   type ActivityLeagueRead,
 } from "../../src/mcp/tools/common.js";
 import { analyzeRetrospective } from "../../src/mcp/tools/reclog.js";
@@ -61,7 +62,32 @@ const readSets = fc
   .map((xs) => READS.filter((r) => xs.includes(r)));
 
 describe("E11's partial lines in the cheat-sheet are the server's (changelog §R10, R10-11)", () => {
-  const [feed, leagueRejected, leagueNoSession] = ACTIVITY_PARTIAL_FRAGMENTS.map(formRe);
+  const [feed, leagueRejected, leagueNoSession, feedCut] = ACTIVITY_PARTIAL_FRAGMENTS.map(formRe);
+  const weeks = fc.integer({ min: 1, max: 18 });
+
+  // the round-4d server refix's F3: a feed that failed after its newest weeks were read
+  it("the feed-cut form matches both of the server's session feed-cut lines, whatever week, and no other line", () => {
+    fc.assert(
+      fc.property(weeks, readSets, (n, reads) => {
+        const rejected = feedCutWarning("rejected", n);
+        const noSession = feedCutWarning("no_session", n);
+        expect(feedCut?.test(rejected)).toBe(true);
+        expect(feedCut?.test(noSession)).toBe(true);
+        expect(rejected).toContain(`weeks before ${String(n)} `);
+        // an outage is no session refusal: its line is not this form
+        expect(feedCut?.test(feedCutWarning("unavailable", n))).toBe(false);
+        // no other form matches a cut line, and the cut form matches no other line
+        for (const f of [feed, leagueRejected, leagueNoSession]) {
+          expect(f?.test(rejected)).toBe(false);
+          expect(f?.test(noSession)).toBe(false);
+        }
+        for (const refusal of ["rejected", "no_session"] as const)
+          expect(feedCut?.test(activityLeagueReadsWarning(refusal, reads))).toBe(false);
+      }),
+    );
+    expect(feedCut?.test(SESSION_READ_WARNINGS.feed_rejected)).toBe(false);
+    expect(feedCut?.test(SESSION_READ_WARNINGS.feed_no_session)).toBe(false);
+  });
 
   it("the feed's quoted form matches both of the server's feed lines, and no league-read line", () => {
     expect(feed?.test(SESSION_READ_WARNINGS.feed_no_session)).toBe(true);

@@ -164,7 +164,8 @@ export const TOOL_OUTPUT_FIELDS = Object.freeze({
 /**
  * The quoted forms of E11's fixed partial lines in the cheat-sheet's row (changelog §R10, R10-11;
  * the round-3b server refix's second line): the transaction feed's, then the standings, rosters or
- * pool's under a rejected session and with none stored. `…` stands for the words that vary; each
+ * pool's under a rejected session and with none stored, then the feed's when it failed after its
+ * newest weeks were read (the round-4d server refix's F3). `…` stands for the words that vary; each
  * matches a line the server writes (tests/skills/tool-output-warnings.test.ts).
  */
 export const ACTIVITY_PARTIAL_FRAGMENTS = Object.freeze([
@@ -174,6 +175,9 @@ export const ACTIVITY_PARTIAL_FRAGMENTS = Object.freeze([
   // refusal's line, whatever reads it names, and never the feed's
   '"partial: the stored ESPN session was rejected, and ESPN\'s … one on a league not known to be public: … not read (… without …); …"',
   '"partial: ESPN\'s … an ESPN session on a league not known to be public, and none is stored: … not read …"',
+  // the round-4d server refix's F3 (src/mcp/tools/common.ts feedCutWarning): the feed failed after
+  // its newest weeks were read, so the weeks before the oldest one read come from the history
+  "\"partial: … ESPN's transaction feed needs …: weeks before … come from the server's persisted history; …\"",
 ]);
 /**
  * E11's history line when the feed was not read (refused or out) and nothing is persisted yet: the
@@ -243,7 +247,7 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
   // src/domain/evidence/structured.ts), and under ACTIVE no health claim covers a move (the round-4d
   // verifiers' R4DVF-6)
   espn_analyze_evidence: [
-    "`quiet_role_change` is a usage move no claim explains: a usage drop explained by a health claim about him while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields (a claim that he plays against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE` still reads `availability_conflict`) — a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change` (changelog §R10, R10-32) — and against ESPN's `ACTIVE` an injury claim stays `availability_conflict` unless a claim says he plays in the coming game ('will play Sunday', 'is cleared'; 'will play next week', 'after the bye', 'if he practices Friday' or a question do not clear it); a usage move then still reads `quiet_role_change`, since a health claim never covers a move under `ACTIVE`; changelog §R10, R10-30",
+    "`quiet_role_change` is a usage move no claim explains: a usage drop explained by a health claim about him while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields (a claim that he plays against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE` still reads `availability_conflict`) — a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change` (changelog §R10, R10-32) — and against ESPN's `ACTIVE` an injury claim stays `availability_conflict` unless a claim says he plays in the coming game ('will play Sunday', 'is cleared'; 'will play next week', 'after the bye', 'if he practices Friday', a condition or a hedge — 'pending', 'as long as', 'barring', 'depending on', 'should he', 'provided', 'assuming', 'probably', 'likely', 'perhaps' — or a question do not clear it); a usage move then still reads `quiet_role_change`, since a health claim never covers a move under `ACTIVE`; changelog §R10, R10-30",
   ],
   // the round-4b review's F3: a week's row does not depend on the window asked for; a past week is
   // dropped with a warning, a window of past weeks only is refused
@@ -479,7 +483,7 @@ export const INJURY_CONFIRM_SENTENCE =
  * (the round-4d verifiers' R4DVF-6).
  */
 export const NEWS_HEALTH_COVER_SENTENCE =
-  "`quiet_role_change` when the role moved and no claim explains it, else `consistent` or `no_claim` (a usage drop that a health claim about him explains while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields, `availability_conflict` when one says he plays against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE`; a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change`; against ESPN's `ACTIVE` an injury claim stays `availability_conflict` unless a claim says he plays in the coming game ('will play Sunday', 'is cleared' — never 'will play next week', 'after the bye', 'if he practices Friday' or a question), and a usage move then still reads `quiet_role_change`, since a health claim never covers a move under `ACTIVE`: changelog §R10, R10-30, R10-32)";
+  "`quiet_role_change` when the role moved and no claim explains it, else `consistent` or `no_claim` (a usage drop that a health claim about him explains while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields, `availability_conflict` when one says he plays against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE`; a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change`; against ESPN's `ACTIVE` an injury claim stays `availability_conflict` unless a claim says he plays in the coming game ('will play Sunday', 'is cleared' — never 'will play next week', 'after the bye', 'if he practices Friday', a condition or a hedge such as 'pending', 'as long as', 'barring', 'depending on', 'should he', 'provided', 'assuming', 'probably', 'likely' or 'perhaps', or a question), and a usage move then still reads `quiet_role_change`, since a health claim never covers a move under `ACTIVE`: changelog §R10, R10-30, R10-32)";
 /** A RegExp matching `text` literally. @param {string} text */
 const literal = (text) => new RegExp(text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"));
 /** The Phase W seam marker (plan 10 §3.W; D11) — the apply Skill declares it. */

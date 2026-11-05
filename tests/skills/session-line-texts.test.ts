@@ -655,6 +655,21 @@ describe("E10's mixed move and the coming-game clearance (changelog §R10, R10-3
       expect(t).toContain("'will play Sunday', 'is cleared'");
       for (const later of ["'will play next week'", "'after the bye'", "'if he practices Friday'"])
         expect(t).toContain(later);
+      // the round-4d server refix's F4: a condition or a hedge never clears it
+      expect(t).toContain("a condition or a hedge");
+      for (const hedge of [
+        "'pending'",
+        "'as long as'",
+        "'barring'",
+        "'depending on'",
+        "'should he'",
+        "'provided'",
+        "'assuming'",
+        "'probably'",
+        "'likely'",
+        "'perhaps'",
+      ])
+        expect(t, hedge).toContain(hedge);
     }
   });
 });
@@ -728,6 +743,19 @@ describe("E10's flags as the texts state them (changelog §R10, R10-30, R10-32)"
     ).toBe("quiet_role_change");
     // with no claim that he plays, the injury report against ACTIVE stays a conflict
     expect(flagOf("ACTIVE", "has an ankle sprain", "flat")).toBe("availability_conflict");
+    // the round-4d server refix's F4: a conditional or hedged play is no claim about the coming game
+    for (const hedged of [
+      "has an ankle sprain but will play Sunday pending a test",
+      "has an ankle sprain but will play Sunday as long as he practices",
+      "has an ankle sprain but will play Sunday barring a setback",
+      "has an ankle sprain but will play Sunday depending on how he feels",
+      "has an ankle sprain but will play Sunday provided he clears the protocol",
+      "has an ankle sprain but will play Sunday assuming no setback",
+      "has an ankle sprain but will play Sunday, probably",
+      "has an ankle sprain but will play, likely on Sunday",
+      "has an ankle sprain but will play perhaps",
+    ])
+      expect(flagOf("ACTIVE", hedged, "flat"), hedged).toBe("availability_conflict");
     // a mixed move stays quiet_role_change under a hurt designation (R10-32)
     expect(flagOf("QUESTIONABLE", "He has a hamstring injury.", "mixed")).toBe("quiet_role_change");
     const tail =
