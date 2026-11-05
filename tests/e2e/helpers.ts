@@ -710,3 +710,80 @@ export async function measureStall(
     };
   }
 }
+
+// --- the per-tool CPU evidence as CI notices (the round-4d review's R4D-VS-2) --------------------
+
+/**
+ * GitHub cuts an annotation's message at 4096 characters; every notice message stays under this, so
+ * each one parses on its own (R4D-VS-2: one 4096-character notice ended mid-object).
+ */
+export const NOTICE_MESSAGE_MAX = 4000;
+
+/** A workflow command's message, escaped as GitHub reads it (%, CR, LF). */
+const escapeNoticeData = (v: string): string =>
+  v.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+/** A workflow command's property value (the title), escaped (%, CR, LF, `:`, `,`). */
+const escapeNoticeProperty = (v: string): string =>
+  escapeNoticeData(v).replace(/:/g, "%3A").replace(/,/g, "%2C");
+
+/** One CI notice: its title and its message (escaped JSON, under NOTICE_MESSAGE_MAX). */
+export interface CpuNotice {
+  readonly title: string;
+  readonly message: string;
+}
+
+const messageOf = (o: Record<string, unknown>): string => escapeNoticeData(JSON.stringify(o));
+
+/**
+ * One entry, alone, kept under the bound: its `fn` labels are dropped from the end until it fits,
+ * then (never seen: every field is bounded) a marker with its reading replaces it.
+ */
+function boundedEntry(key: string, value: unknown): Record<string, unknown> {
+  const whole = { [key]: value };
+  if (messageOf(whole).length < NOTICE_MESSAGE_MAX) return whole;
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const v = value as Record<string, unknown>;
+    if (Array.isArray(v.fn))
+      for (let n = v.fn.length - 1; n >= 0; n--) {
+        const cut = { [key]: { ...v, fn: v.fn.slice(0, n), fn_cut: v.fn.length - n } };
+        if (messageOf(cut).length < NOTICE_MESSAGE_MAX) return cut;
+      }
+    return { [key]: { cut: "over the notice bound", cpu_max_ms: v.cpu_max_ms ?? null } };
+  }
+  return { [key]: { cut: "over the notice bound" } };
+}
+
+/**
+ * The per-tool CPU evidence (latency.test.ts) as CI notices: the unprofiled readings in one notice
+ * (in parts only when they would not fit), and each profiled entry (`<key>_profiled`) in a notice
+ * of its own — every message escaped JSON under NOTICE_MESSAGE_MAX, so each parses on its own
+ * whatever number of tools the profiled pass names. Numbers and code labels only, never data.
+ */
+export function cpuNotices(title: string, each: Readonly<Record<string, unknown>>): CpuNotice[] {
+  const plain = Object.entries(each).filter(([k]) => !k.endsWith("_profiled"));
+  const profiled = Object.entries(each).filter(([k]) => k.endsWith("_profiled"));
+  const parts: Record<string, unknown>[] = [];
+  let part: Record<string, unknown> = {};
+  for (const [k, v] of plain) {
+    const entry = boundedEntry(k, v);
+    const next = { ...part, ...entry };
+    if (Object.keys(part).length > 0 && messageOf(next).length >= NOTICE_MESSAGE_MAX) {
+      parts.push(part);
+      part = entry;
+    } else part = next;
+  }
+  if (Object.keys(part).length > 0) parts.push(part);
+  const out: CpuNotice[] = parts.map((p, i) => ({
+    title:
+      parts.length === 1 ? title : `${title} (part ${String(i + 1)} of ${String(parts.length)})`,
+    message: messageOf(p),
+  }));
+  for (const [k, v] of profiled)
+    out.push({ title: `${title} — ${k}`, message: messageOf(boundedEntry(k, v)) });
+  // an empty reading is still one notice: the evidence step ran and read nothing
+  return out.length > 0 ? out : [{ title, message: messageOf({}) }];
+}
+
+/** A notice as the workflow command GitHub reads from stdout (`::notice title=…::…`). */
+export const noticeLine = (n: CpuNotice): string =>
+  `::notice title=${escapeNoticeProperty(n.title)}::${n.message}\n`;

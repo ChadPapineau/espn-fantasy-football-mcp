@@ -20,11 +20,14 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   bodyOf,
   type CallSpan,
+  cpuNotices,
   HEARTBEAT,
   type Heartbeat,
   heartbeatRecordOf,
   makeHome,
   measureStall,
+  NOTICE_MESSAGE_MAX,
+  noticeLine,
   printStall,
   requireDist,
   seedHome,
@@ -412,10 +415,12 @@ describe(
       }
       const line = JSON.stringify(each);
       process.stdout.write(`latency per-tool cpu_max (full, cold): ${line}\n`);
+      // one notice for the unprofiled readings, one per profiled entry, each under GitHub's cut
+      // (the round-4d review's R4D-VS-2; helpers.ts cpuNotices, tests/e2e/cpu-notice.test.ts)
+      const notices = cpuNotices("latency per-tool cpu_max (full, cold)", each);
+      for (const n of notices) expect(n.message.length, n.title).toBeLessThan(NOTICE_MESSAGE_MAX);
       if (process.env.GITHUB_ACTIONS === "true")
-        process.stdout.write(
-          `::notice title=latency per-tool cpu_max (full, cold)::${line.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}\n`,
-        );
+        for (const n of notices) process.stdout.write(noticeLine(n));
     });
   },
 );
