@@ -17,7 +17,7 @@ import type { Clock, Rng } from "../clock.js";
 import type { SeedingMode } from "../../config/schema.js";
 import type { Week } from "../league/types.js";
 import { SEEDING, Z90 } from "./constants.js";
-import { loopPacer, runCooperative, type Pacer } from "./cooperative.js";
+import { loopPacer, runCooperative, SLICE_CPU_MS, type Pacer } from "./cooperative.js";
 import { ensure } from "./errors.js";
 import { type AnyStamp, collectInputs, mergeInputs, newestAsOf } from "./inputs.js";
 import { normalDist, normalDraw, round } from "./math.js";
@@ -287,6 +287,92 @@ function orderGroup(group: number[], chain: readonly TieLevel[], level: number, 
     out.push(...(tied.length > 1 ? orderGroup(tied, chain, level + 1, s) : tied));
     k = j + 1;
   }
+  return out;
+}
+
+/**
+ * The season simulation's batch (plan 03 §1.2's ≤ 20 ms CPU batch; the round-4b server refix's F1
+ * remainder): a slice's share, SLICE_CPU_MS, not COOPERATIVE.batchMs. Its batches set
+ * espn_analyze_matchup `season`'s longest run on the CPU — the local turn profile's longest
+ * stretches were all season-simulation batches (12.1 ms of 12-ms batches, 21 of them for 10 000
+ * paths on fx-10h), and on the Linux runner the per-call notice read 15.0 ms of CPU in a 10.5 ms gap
+ * at 5313ec6 and 21.9 ms in a 17.2 ms gap (1.3 ms of GC) at 6eda72d: the runner's thread-CPU
+ * reading runs 4–5 ms over the gap's own wall time, so a 12-ms batch with a GC pause in it reads past
+ * 20. An 8-ms batch keeps the reading under 20 with that margin; the paths, their order and so the
+ * answer are the same (runCooperative: a deterministic prefix).
+ */
+export const SEASON_SIM_BATCH_MS = SLICE_CPU_MS;
+
+/** The most coin orders the no-game-left clinch check tries (6!: six teams level on points for). */
+export const CLINCH_COIN_ORDERS_MAX = 720;
+
+/**
+ * My best and worst seat over every coin order that can matter, or null when there are more than
+ * CLINCH_COIN_ORDERS_MAX of them. Teams whose points for differ never meet at the coin under an
+ * espn_rule chain (points for comes before it in each), so the coin is permuted only within groups
+ * of teams sharing their points for (chained within the ranking's own 1e-9), every other team's coin
+ * fixed and distinct.
+ */
+export function coinOrderSeats(
+  n: number,
+  pf: ArrayLike<number>,
+  seatOf: (coin: Float64Array) => number,
+): { best: number; worst: number } | null {
+  const idx = Array.from({ length: n }, (_, i) => i).sort((a, b) => rd(pf, a) - rd(pf, b) || a - b);
+  const groups: number[][] = [];
+  for (const i of idx) {
+    const g = groups[groups.length - 1];
+    const prev = g?.[g.length - 1];
+    if (g !== undefined && prev !== undefined && Math.abs(rd(pf, i) - rd(pf, prev)) <= 1e-9)
+      g.push(i);
+    else groups.push([i]);
+  }
+  const tied = groups.filter((g) => g.length > 1);
+  let total = 1;
+  for (const g of tied) {
+    for (let k = 2; k <= g.length; k++) total *= k;
+    if (total > CLINCH_COIN_ORDERS_MAX) return null;
+  }
+  const coin = Float64Array.from({ length: n }, (_, i) => n - i);
+  let best = Number.POSITIVE_INFINITY;
+  let worst = Number.NEGATIVE_INFINITY;
+  // every permutation of every group (an odometer over the groups' permutations, Heap-free: each
+  // group's order is the k-th permutation of its members' own coin values)
+  const perms = tied.map((g) => permutations(g.map((i) => rd(coin, i))));
+  const at = tied.map(() => 0);
+  for (;;) {
+    tied.forEach((g, gi) => {
+      const order = perms[gi]?.[at[gi] ?? 0] ?? [];
+      g.forEach((team, k) => {
+        coin[team] = order[k] ?? 0;
+      });
+    });
+    const seat = seatOf(coin);
+    best = Math.min(best, seat);
+    worst = Math.max(worst, seat);
+    let gi = 0;
+    while (gi < tied.length) {
+      const next = (at[gi] ?? 0) + 1;
+      if (next < (perms[gi]?.length ?? 0)) {
+        at[gi] = next;
+        break;
+      }
+      at[gi] = 0;
+      gi += 1;
+    }
+    if (gi === tied.length) break;
+  }
+  return { best, worst };
+}
+
+/** Every permutation of a short list (the caller bounds its length by CLINCH_COIN_ORDERS_MAX). */
+function permutations(xs: readonly number[]): number[][] {
+  if (xs.length <= 1) return [[...xs]];
+  const out: number[][] = [];
+  xs.forEach((x, i) => {
+    for (const rest of permutations([...xs.slice(0, i), ...xs.slice(i + 1)]))
+      out.push([x, ...rest]);
+  });
   return out;
 }
 
@@ -840,7 +926,7 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
       for (let i = 0; i < n; i++) coin[i] = stream.next();
       for (const v of variants) evaluate(v);
     },
-    { pacer, deadlineMs: req.deadline_ms },
+    { pacer, deadlineMs: req.deadline_ms, batchMs: SEASON_SIM_BATCH_MS },
   );
   const k = run.completed;
   if (run.partial)
@@ -934,13 +1020,17 @@ export async function simulateSeason(req: SeasonSimRequest): Promise<SeasonSimOu
         decided = true;
       } else {
         // division winners first: another division's coin flip can move its runner-up into the
-        // wild-card pool, so only an order no coin flip touches is exact (one that flips under the
-        // coins reversed has a coin-level tie somewhere)
-        const fwd = seatWith(Float64Array.from({ length: n }, (_, i) => n - i));
-        const rev = seatWith(Float64Array.from({ length: n }, (_, i) => i + 1));
-        if (fwd.every((x, k) => x === rev[k])) {
-          clinched = fwd.indexOf(me) + 1 <= P;
-          eliminated = !clinched;
+        // wild-card pool, so my seat is bounded over every coin order that can matter. The coin
+        // decides only between teams level on every level before it, and points for is one of those
+        // levels in every espn_rule chain (tiebreakChain), so only teams sharing their points for
+        // can meet at the coin: every order of each such group is tried — at most
+        // CLINCH_COIN_ORDERS_MAX in all — and the flags are exact over them (before, any coin-level
+        // tie anywhere left both false, also for a team in on every path: the hunted counterexample
+        // of seeding.test.ts, six 0–8 teams, five of them on 400 points for)
+        const seats = coinOrderSeats(n, pf0, (coin) => seatWith(coin).indexOf(me) + 1);
+        if (seats !== null) {
+          clinched = seats.worst <= P;
+          eliminated = seats.best > P;
           decided = true;
         }
       }

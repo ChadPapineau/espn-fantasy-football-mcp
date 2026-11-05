@@ -14,6 +14,9 @@ import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   bracketOrder,
+  CLINCH_COIN_ORDERS_MAX,
+  coinOrderSeats,
+  SEASON_SIM_BATCH_MS,
   coldStartMeanSd,
   simulateSeason,
   tiebreakChain,
@@ -22,6 +25,8 @@ import {
 } from "../../../src/domain/analytics/seeding.js";
 import { normalCdf, normalPdf } from "../../../src/domain/analytics/math.js";
 import { AnalyticsError } from "../../../src/domain/analytics/errors.js";
+import { COOPERATIVE } from "../../../src/domain/analytics/constants.js";
+import { SLICE_CPU_MS } from "../../../src/domain/analytics/cooperative.js";
 import { clockAndRng, instantPacer, steppingPacer } from "./helpers.js";
 
 const team = (
@@ -666,6 +671,125 @@ describe("clinch and the cutoff read win % with ties as half wins (Stage C seedi
     expect(flip?.p_playoffs).toBeGreaterThan(0.3);
     expect(flip?.p_playoffs).toBeLessThan(0.7);
     expect(flip?.clinch).toEqual({ clinched: false, eliminated: false, magic_number: null });
+  });
+
+  // The property below failed once under a full coverage run (round 4b); hunted with 10 seeds × 300
+  // runs it fails on seed 9: six 0–8 teams in two divisions, five on 400 points for and one on 401,
+  // no game left. Division winners first: any coin-level tie anywhere (the three-way flip for
+  // division 1) left both flags false — also for team 6, in on every path, and for team 1 with one
+  // spot, out on every path. The flags are now exact over every coin order that can matter
+  // (seeding.ts coinOrderSeats). A product defect, fixed; the property was right.
+  it("regression (hunted, seed 9): no game left, divisions first, a coin-level tie — the flags are exact", async () => {
+    const teams = [400, 400, 400, 400, 400, 401].map((pf, i) => ({
+      ...team(i + 1, 0, 8, pf),
+      division_id: (i % 2) + 1,
+    }));
+    const flags = async (me: number, P: number) => {
+      const out = await simulateSeason(
+        base({
+          teams,
+          me,
+          remaining: [],
+          playoff: {
+            team_count: P,
+            seeding_rule: "TOTAL_POINTS_SCORED",
+            reseed: false,
+            rounds: [],
+          },
+          seeding_mode: "espn_rule",
+          marginal: false,
+          n_sims: 1000,
+        }),
+      );
+      const r = out.data.readings[0];
+      return { p: r?.p_playoffs, clinched: r?.clinch.clinched, eliminated: r?.clinch.eliminated };
+    };
+    // team 6 wins division 2 on points for and takes the top seed on every coin
+    for (const P of [1, 2, 3])
+      expect(await flags(6, P)).toEqual({ p: 1, clinched: true, eliminated: false });
+    // one spot: team 6's; every other team is out on every path
+    for (const me of [1, 2, 3])
+      expect(await flags(me, 1)).toEqual({ p: 0, clinched: false, eliminated: true });
+    // two spots: the division winners; team 2 (division 2, behind team 6) is out, team 1 needs
+    // division 1's three-way coin
+    expect(await flags(2, 2)).toEqual({ p: 0, clinched: false, eliminated: true });
+    const one = await flags(1, 2);
+    expect(one.clinched).toBe(false);
+    expect(one.eliminated).toBe(false);
+    expect(one.p).toBeGreaterThan(0.25);
+    expect(one.p).toBeLessThan(0.42);
+  });
+
+  // The round-4b server refix's F1 remainder: espn_analyze_matchup `season`'s longest CPU run is a
+  // season-simulation batch; its batch is a slice's share (SEASON_SIM_BATCH_MS = SLICE_CPU_MS, 8 ms),
+  // not COOPERATIVE.batchMs (12). Counted on a pacer whose clock moves 1 ms a read, never timed: no
+  // batch spans more than the batch plus the one step that may start inside it; the answer is the
+  // one an unbatched run gives.
+  it("the season simulation's batches hold at most SEASON_SIM_BATCH_MS of the pacer's time; the answer does not move", async () => {
+    expect(SEASON_SIM_BATCH_MS).toBe(SLICE_CPU_MS);
+    expect(SEASON_SIM_BATCH_MS).toBeLessThan(COOPERATIVE.batchMs);
+    const teams = Array.from({ length: 8 }, (_, i) => ({
+      ...team(i + 1, 3 + (i % 3), 3 - (i % 3), 600 + 10 * i),
+      weekly: { mu: 110 + i, sigma: 18 },
+    }));
+    const remaining = [9, 10]
+      .flatMap((period, k) =>
+        Array.from({ length: 4 }, (_, j) => ({
+          period,
+          matchup_id: 10 * k + j,
+          home: j + 1,
+          away: 8 - j - k,
+        })),
+      )
+      .filter((g) => g.home !== g.away);
+    const req = (pacer: SeasonSimRequest["pacer"]) =>
+      base({
+        teams,
+        me: 3,
+        remaining,
+        playoff: { team_count: 4, seeding_rule: "TOTAL_POINTS_SCORED", reseed: false, rounds: [] },
+        seeding_mode: "espn_rule",
+        marginal: false,
+        n_sims: 1000,
+        ...(pacer === undefined ? {} : { pacer }),
+      });
+    let t = 0;
+    const yieldsAt: number[] = [];
+    const counting = {
+      nowMs: () => (t += 1),
+      yieldToLoop: () => {
+        yieldsAt.push(t);
+        return Promise.resolve();
+      },
+    };
+    const batched = await simulateSeason(req(counting));
+    const spans = yieldsAt.slice(1).map((x, i) => x - (yieldsAt[i] ?? 0));
+    expect(spans.length).toBeGreaterThan(10);
+    // a batch's own reads: its start, one per chunk; one more step may start before the last read
+    expect(Math.max(...spans)).toBeLessThanOrEqual(SEASON_SIM_BATCH_MS + 2);
+    const plain = await simulateSeason(req(instantPacer));
+    expect(JSON.stringify(batched.data)).toBe(JSON.stringify(plain.data));
+  });
+
+  it("coinOrderSeats: permutes only teams sharing their points for, and refuses past CLINCH_COIN_ORDERS_MAX", () => {
+    let calls = 0;
+    // no tie: one order; a 3-tie and a 2-tie: 3! × 2! = 12 orders
+    expect(coinOrderSeats(4, [1, 2, 3, 4], () => (calls++, 2))).toEqual({ best: 2, worst: 2 });
+    expect(calls).toBe(1);
+    calls = 0;
+    const seen = new Set<string>();
+    expect(
+      coinOrderSeats(5, [10, 10, 10, 20, 20], (c) => {
+        calls++;
+        seen.add(Array.from(c).join(","));
+        return 1;
+      }),
+    ).toEqual({ best: 1, worst: 1 });
+    expect(calls).toBe(12);
+    expect(seen.size).toBe(12);
+    // seven teams level on points for: 7! > 720 → null (the win-% bounds decide instead)
+    expect(coinOrderSeats(7, [5, 5, 5, 5, 5, 5, 5], () => 1)).toBeNull();
+    expect(CLINCH_COIN_ORDERS_MAX).toBe(720);
   });
 
   it("property: clinched ⇒ in on every path, eliminated ⇒ out on every path; with no game left both are exact", async () => {
