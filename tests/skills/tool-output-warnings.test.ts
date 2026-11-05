@@ -522,7 +522,7 @@ describe("the E2, E8 and E10 rows follow the server (changelog §R10, R10-29, R1
         expect(text).toContain("is not `quiet_role_change`: it reads by the remaining rules");
         expect(text).toContain("`consistent` when the claims agree with the structured fields");
         expect(text).toMatch(
-          /`availability_conflict`[^.]*against ESPN's `OUT` or `INJURY_RESERVE`|against ESPN's `OUT` or `INJURY_RESERVE` still reads `availability_conflict`/,
+          /`availability_conflict`[^.]*against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE`|against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE` still reads `availability_conflict`/,
         );
         expect(text).not.toMatch(/`INJURY_RESERVE` reads `consistent`/);
       }

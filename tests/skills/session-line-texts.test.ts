@@ -40,8 +40,12 @@ import {
   type ActivityLeagueRead,
   SESSION_READ_WARNINGS,
 } from "../../src/mcp/tools/common.js";
+import { analyzeEvidence, type EvidenceRequest } from "../../src/domain/analytics/evidence.js";
+import type { UsageWeek } from "../../src/domain/analytics/usageSignals.js";
 import { fixedClock } from "../../src/domain/clock.js";
+import type { InjuryStatus } from "../../src/domain/league/types.js";
 import { readScriptedCredential, scriptedAuth } from "../../src/services/fixture-credential.js";
+import { bare } from "../domain/analytics/helpers.js";
 import { ROOT } from "./helpers.js";
 
 const read = (rel: string): string => readFileSync(path.join(ROOT, rel), "utf8");
@@ -639,6 +643,86 @@ describe("E10's mixed move and the coming-game clearance (changelog §R10, R10-3
       expect(t).toContain("'will play Sunday', 'is cleared'");
       for (const later of ["'will play next week'", "'after the bye'", "'if he practices Friday'"])
         expect(t).toContain(later);
+    }
+  });
+});
+
+// the round-4d verifiers' R4DVF-6: the texts left DOUBTFUL out of the statuses a "he plays" claim
+// conflicts with, and said an ACTIVE player's coming-game claim clears a usage move to `consistent`
+// — E10 itself says otherwise (structured.ts STATUS_CLASS: DOUBTFUL is out; evidence.ts:
+// HEALTH_COVER_DESIGNATIONS excludes ACTIVE)
+describe("E10's flags as the texts state them (changelog §R10, R10-30, R10-32)", () => {
+  const row = sheet.split("\n").find((l) => l.includes("`espn_analyze_evidence` |")) ?? "";
+  const news = read("skills/news-check/SKILL.md");
+  const week = (w: number, snap: number, tgt: number, rz: number, xfp: number): UsageWeek => ({
+    week: w,
+    snap_pct: snap,
+    target_share: tgt,
+    rz_share: rz,
+    xfp,
+    points: xfp * 0.8,
+  });
+  const base = [1, 2, 3, 4].map((w) => week(w, 0.82, 0.26, 0.2, 15));
+  const usage = {
+    drop: [...base, week(5, 0.5, 0.12, 0.05, 7)],
+    mixed: [...base, week(5, 0.97, 0.1, 0.05, 9)],
+    flat: [...base, week(5, 0.82, 0.26, 0.2, 15)],
+  } as const;
+  const flagOf = (status: InjuryStatus, text: string, u: keyof typeof usage): string => {
+    const req: EvidenceRequest = {
+      player: {
+        player_id: 77,
+        gsis_id: null,
+        name: bare("Player 77"),
+        position: "RB",
+        injury_status: status,
+        roster: "mine",
+        slot_id: 2,
+        lineup_locked: false,
+        waiver_process_date: null,
+        last_news_at: null,
+      },
+      texts: [],
+      claim: { text },
+      usage: usage[u],
+      week: 6,
+      clock: fixedClock("2026-10-06T20:00:00.000Z"),
+    };
+    return analyzeEvidence(req).data.flag;
+  };
+  it("a claim that he plays conflicts with DOUBTFUL, OUT and INJURY_RESERVE alike, and both texts name all three", () => {
+    for (const st of ["DOUBTFUL", "OUT", "INJURY_RESERVE"] as const)
+      expect(flagOf(st, "He will play Sunday.", "drop"), st).toBe("availability_conflict");
+    // QUESTIONABLE is no out class: the health claim covers the drop there
+    expect(flagOf("QUESTIONABLE", "He has a hamstring injury.", "drop")).toBe("consistent");
+    expect(flagOf("DOUBTFUL", "He has a hamstring injury.", "drop")).toBe("consistent");
+    expect(row).toContain(
+      "(a claim that he plays against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE` still reads `availability_conflict`)",
+    );
+    expect(news).toContain(
+      "`availability_conflict` when one says he plays against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE`",
+    );
+  });
+  it("under ACTIVE a coming-game claim clears the injury report, never a usage move", () => {
+    const sprain = "has an ankle sprain but will play Sunday";
+    expect(flagOf("ACTIVE", sprain, "flat")).toBe("consistent");
+    expect(flagOf("ACTIVE", sprain, "drop")).toBe("quiet_role_change");
+    expect(
+      flagOf(
+        "ACTIVE",
+        "dealing with a hamstring injury, but he practiced in full and is cleared",
+        "drop",
+      ),
+    ).toBe("quiet_role_change");
+    // with no claim that he plays, the injury report against ACTIVE stays a conflict
+    expect(flagOf("ACTIVE", "has an ankle sprain", "flat")).toBe("availability_conflict");
+    // a mixed move stays quiet_role_change under a hurt designation (R10-32)
+    expect(flagOf("QUESTIONABLE", "He has a hamstring injury.", "mixed")).toBe("quiet_role_change");
+    const tail =
+      "a usage move then still reads `quiet_role_change`, since a health claim never covers a move under `ACTIVE`";
+    for (const t of [row, news]) {
+      expect(t).toContain(tail);
+      expect(t).not.toMatch(/`ACTIVE`[^;]{0,40}cleared to `consistent`/);
     }
   });
 });

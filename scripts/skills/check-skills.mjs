@@ -238,9 +238,12 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
   // the round-4c review's R4CS-5: the fields the E2 row's cross-check reads from E1 (R10-29)
   espn_project_players: ["`inputs.own` (the own model's line)", "`disagreement.pct`"],
   // changelog §R10, R10-30: a health claim explains a usage drop under a hurt designation
-  // (HEALTH_COVER_DESIGNATIONS in src/domain/analytics/evidence.ts), never a rise
+  // (HEALTH_COVER_DESIGNATIONS in src/domain/analytics/evidence.ts), never a rise; a "he plays"
+  // claim conflicts with every out class, DOUBTFUL included (STATUS_CLASS in
+  // src/domain/evidence/structured.ts), and under ACTIVE no health claim covers a move (the round-4d
+  // verifiers' R4DVF-6)
   espn_analyze_evidence: [
-    "`quiet_role_change` is a usage move no claim explains: a usage drop explained by a health claim about him while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields (a claim that he plays against ESPN's `OUT` or `INJURY_RESERVE` still reads `availability_conflict`) — a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change` (changelog §R10, R10-32) — and against ESPN's `ACTIVE` an injury claim stays `availability_conflict` unless a claim says he plays in the coming game ('will play Sunday', 'is cleared'; 'will play next week', 'after the bye', 'if he practices Friday' or a question do not clear it); changelog §R10, R10-30",
+    "`quiet_role_change` is a usage move no claim explains: a usage drop explained by a health claim about him while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields (a claim that he plays against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE` still reads `availability_conflict`) — a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change` (changelog §R10, R10-32) — and against ESPN's `ACTIVE` an injury claim stays `availability_conflict` unless a claim says he plays in the coming game ('will play Sunday', 'is cleared'; 'will play next week', 'after the bye', 'if he practices Friday' or a question do not clear it); a usage move then still reads `quiet_role_change`, since a health claim never covers a move under `ACTIVE`; changelog §R10, R10-30",
   ],
   // the round-4b review's F3: a week's row does not depend on the window asked for; a past week is
   // dropped with a warning, a window of past weeks only is refused
@@ -471,10 +474,12 @@ export const INJURY_CONFIRM_SENTENCE =
 /**
  * news-check §4's flag reading with nothing pasted (changelog §R10, R10-30): `quiet_role_change` is a
  * move no claim explains, and a drop a health claim explains under a hurt designation is `consistent`
- * (HEALTH_COVER_DESIGNATIONS in src/domain/analytics/evidence.ts).
+ * (HEALTH_COVER_DESIGNATIONS in src/domain/analytics/evidence.ts). A "he plays" claim conflicts with
+ * `DOUBTFUL` too, and under `ACTIVE` a usage move stays `quiet_role_change` whatever the health claim
+ * (the round-4d verifiers' R4DVF-6).
  */
 export const NEWS_HEALTH_COVER_SENTENCE =
-  "`quiet_role_change` when the role moved and no claim explains it, else `consistent` or `no_claim` (a usage drop that a health claim about him explains while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields, `availability_conflict` when one says he plays against ESPN's `OUT` or `INJURY_RESERVE`; a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change`; against ESPN's `ACTIVE` an injury claim is cleared to `consistent` only by a claim that he plays in the coming game ('will play Sunday', 'is cleared' — never 'will play next week', 'after the bye', 'if he practices Friday' or a question): changelog §R10, R10-30, R10-32)";
+  "`quiet_role_change` when the role moved and no claim explains it, else `consistent` or `no_claim` (a usage drop that a health claim about him explains while ESPN lists him `QUESTIONABLE`, `DOUBTFUL`, `OUT` or `INJURY_RESERVE` is not `quiet_role_change`: it reads by the remaining rules — `consistent` when the claims agree with the structured fields, `availability_conflict` when one says he plays against ESPN's `DOUBTFUL`, `OUT` or `INJURY_RESERVE`; a rise is never explained so — a mixed move, one measure up and another down, stays `quiet_role_change`; against ESPN's `ACTIVE` an injury claim stays `availability_conflict` unless a claim says he plays in the coming game ('will play Sunday', 'is cleared' — never 'will play next week', 'after the bye', 'if he practices Friday' or a question), and a usage move then still reads `quiet_role_change`, since a health claim never covers a move under `ACTIVE`: changelog §R10, R10-30, R10-32)";
 /** A RegExp matching `text` literally. @param {string} text */
 const literal = (text) => new RegExp(text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"));
 /** The Phase W seam marker (plan 10 §3.W; D11) — the apply Skill declares it. */
