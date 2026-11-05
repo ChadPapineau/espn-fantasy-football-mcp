@@ -45,7 +45,12 @@ import type {
   WaiverRequest,
 } from "../../domain/analytics/waivers.js";
 import { CASCADE_PRIORS } from "../../domain/analytics/cascade-priors/index.js";
-import { inTurns, runCooperativeSteps, turnIfSpent } from "../../domain/analytics/cooperative.js";
+import {
+  drainSteps,
+  inTurns,
+  runCooperativeSteps,
+  turnIfSpent,
+} from "../../domain/analytics/cooperative.js";
 import {
   CALIBRATION,
   buildCalibrationTable,
@@ -2268,7 +2273,16 @@ export interface WaiverP1Extras {
  * roster (each rival's own lineup gain), Sleeper's trending adds (secondary), the mechanics learned
  * from the persisted claim history, and — in a FAAB league — budgets and the league's winning bids.
  */
-export function waiverP1Extras(
+export function waiverP1Extras(...args: Parameters<typeof waiverP1ExtrasSteps>): WaiverP1Extras {
+  return drainSteps(waiverP1ExtrasSteps(...args));
+}
+
+/**
+ * waiverP1Extras as resumable work (F1, round 4d): the candidates' usage reads (a few players a read)
+ * and each candidate's games scored are cut points, and so are the trending and history reads, so
+ * espn_analyze_waivers reads them in turns of their own (`inTurns`). Drained, it is waiverP1Extras.
+ */
+export function* waiverP1ExtrasSteps(
   ctx: ToolContext,
   b: LeagueBasics,
   candidates: readonly WaiverPlayer[],
@@ -2280,12 +2294,12 @@ export function waiverP1Extras(
   warnings: string[],
   allowStale: boolean,
   ros: RosReading | null,
-): WaiverP1Extras {
+): Generator<void, WaiverP1Extras, undefined> {
   const season = b.league.ref.season;
   const byId = new Map<number, WaiverPlayer>();
   for (const c of candidates) byId.set(c.player_id, c);
   // usage: the candidates' D1 rows (the PlatformPlayer is not needed beyond the ids and positions)
-  const u = usageOf(
+  const u = yield* usageSteps(
     ctx,
     candidates.map((c) => ({
       p: { ref: { platform: "espn" as const, id: c.player_id }, position_id: c.position_id },
@@ -2308,6 +2322,7 @@ export function waiverP1Extras(
   if (u.gaps.length > 0) warnings.push(`usage signals limited: ${u.gaps[0] ?? ""}`.slice(0, 200));
   // Sleeper trending adds (secondary; ESPN's percentChange is primary)
   const sleeper = new Map<number, number>();
+  yield;
   const tr = ctx.services.datasets.trending.latest();
   const ti = optionalDataset(tr, ctx, allowStale);
   if (ti !== null) {
@@ -2324,6 +2339,7 @@ export function waiverP1Extras(
     }
   }
   // the mechanics the league's own persisted feed has shown (null until a same-run pair exists)
+  yield;
   const history = ctx.services.transactionsSeen.list(null, 1000);
   const runs = claimRuns(history);
   const mechanics = runs.length === 0 ? null : learnWaiverMechanics({ runs });

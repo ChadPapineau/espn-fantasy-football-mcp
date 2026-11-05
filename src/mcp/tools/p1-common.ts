@@ -65,6 +65,7 @@ import {
   leagueOf,
   leagueRef,
   optionalDataset,
+  playerWeekLinesSteps,
   readOpts,
   rosOptsOf,
   rulesOf,
@@ -621,7 +622,9 @@ export function* usageSteps(
   let statsLoaded = false;
   let epLoaded = false;
   if (gsis.length > 0 && weeks.length > 0) {
-    const r = ctx.services.datasets.playerWeeks.lines(gsis, season, weeks);
+    // a few players a read with a cut point between reads (F1, round 4d: E5's candidates' weeks
+    // with their usage extras were 357 statements in one turn on the CI runner); the same rows
+    const r = yield* playerWeekLinesSteps(ctx, gsis, season, weeks);
     const input = optionalDataset(r, ctx, allowStale);
     if (input !== null) {
       statsLoaded = true;
@@ -692,6 +695,8 @@ export function* usageSteps(
         `${USAGE_SOURCES.pbp} red-zone counts not in the store's usage rows: rz fields are null`,
       );
     const latest = lines[lines.length - 1];
+    // a cut point between two players' games (each scored under S): the same rows wherever cut
+    yield;
     byId.set(s.p.ref.id, {
       games,
       nfl_team: latest?.nfl_team ?? null,

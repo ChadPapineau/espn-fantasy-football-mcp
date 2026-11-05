@@ -128,7 +128,7 @@ import {
 import { selectPlayers } from "./select.js";
 import { analyzeWaiversP1 } from "../../domain/analytics/phase2.js";
 import { inTurns, turnIfSpent } from "../../domain/analytics/cooperative.js";
-import { waiverP1Extras } from "./market-p1.js";
+import { waiverP1ExtrasSteps } from "./market-p1.js";
 import { playoffAliveOf, projectMany } from "./p1-common.js";
 import {
   fitPremiumFromHistory,
@@ -2257,18 +2257,21 @@ export const analyzeWaiversTool = defineTool({
             mineV = minePlayers.map((m) => ({ ...m, weekly: e1(m.player_id, m.weekly) }));
             candV = candidates.map((c) => ({ ...c, weekly: e1(c.player_id, c.weekly) }));
           }
-          const extras = waiverP1Extras(
-            ctx,
-            { league, settings, slots, rules, w },
-            candV,
-            rosters,
-            team,
-            standings,
-            weeks,
-            inputs,
-            warnings,
-            allowStale,
-            ros,
+          // its usage reads and scoring in turns of their own (F1, round 4d): the same extras
+          const extras = await inTurns(
+            waiverP1ExtrasSteps(
+              ctx,
+              { league, settings, slots, rules, w },
+              candV,
+              rosters,
+              team,
+              standings,
+              weeks,
+              inputs,
+              warnings,
+              allowStale,
+              ros,
+            ),
           );
           return analyzeWaiversP1({
             ...p0Request,
