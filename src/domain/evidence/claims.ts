@@ -610,13 +610,19 @@ const NEGATED_RE =
 const OFFICIALS_RE =
   /\b(?:referees?|refs|officials?|officiating|umpires?|line judge|side judge|back judge|field judge)\b/;
 /**
+ * The words CONDITIONED_RE reads as a condition, as one source: DEFERS_GAME_RE (the plays carve-out's
+ * fail-safe tail) is built from them too, so the carve-out can never read as unconditional a word
+ * this module drops a start for (the round-4d verifier's F4: "will play Sunday pending a final test"
+ * and "… as long as he feels fine" had read as playing the coming game).
+ */
+const CONDITION_WORDS = String.raw`if|pending|provided|assuming|(?:as|so)\s+long\s+as`;
+/**
  * A condition ("if healthy", "once cleared", "pending a test", "as long as"; "once again" is none):
  * an `unconditional` rule's hit is dropped when one stands in its clause within CONDITION_REACH
  * characters before or after it — "will start Sunday if he clears the protocol" says nothing about
  * an OUT player's game.
  */
-const CONDITIONED_RE =
-  /\b(?:if|pending|provided|assuming|(?:as|so) long as)\b|\bonce\b(?!\s+again\b)/;
+const CONDITIONED_RE = new RegExp(String.raw`\b(?:${CONDITION_WORDS})\b|\bonce\b(?!\s+again\b)`);
 /** How far a condition is looked for around an `unconditional` hit (its clause, within this). */
 const CONDITION_REACH = 60;
 
@@ -830,11 +836,14 @@ const THIS_GAME_TAIL_RE = new RegExp(
 );
 /**
  * A word, anywhere after a plays phrase in its clause, that puts the game past this one, makes it
- * conditional or reverses it: "will play, though not this week", "will play Sunday if he practices
- * Friday", "will play no more", "will play next season", "in 2027", "in two weeks".
+ * conditional, hedges it or reverses it: "will play, though not this week", "will play Sunday if he
+ * practices Friday", "will play no more", "will play next season", "in 2027", "in two weeks". Every
+ * CONDITION_WORDS word is one (CONDITIONED_RE's), and so are the other conditions — "barring a
+ * setback", "depending on how he feels", "contingent on", "should he clear the protocol" — and the
+ * hedges ("probably", "hopefully", "likely", "possibly", "perhaps"; the round-4d verifier's F4).
  */
 const DEFERS_GAME_RE = new RegExp(
-  String.raw`\b(?:if|unless|provided|providing|assuming|once|when|whenever|after|before|until|till|later|next|not|no|never|though|although|but|however|again|anymore|longer|rest|season|year|month|months|weeks|days|bye|return|returns|healthy|heal|heals|eventually|soon|maybe|might|could|hope|hopes|hoping|20\d\d)\b|n't\b|\b\d+\s+(?:days?|weeks?|months?)\b`,
+  String.raw`\b(?:${CONDITION_WORDS}|unless|providing|barring|depending|depends|contingent|conditional|conditionally|should\s+he|once|when|whenever|after|before|until|till|later|next|not|no|never|though|although|but|however|again|anymore|longer|rest|season|year|month|months|weeks|days|bye|return|returns|healthy|heal|heals|eventually|soon|maybe|perhaps|probably|hopefully|likely|possibly|might|could|hope|hopes|hoping|20\d\d)\b|n't\b|\b\d+\s+(?:days?|weeks?|months?)\b`,
 );
 
 /** Whether a plays phrase ending at `end`, in a clause ending at `clauseEnd`, is the coming game's. */

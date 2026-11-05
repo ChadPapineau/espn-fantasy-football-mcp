@@ -198,6 +198,24 @@ describe("R4VS-6: an injury reported with no designation word, against ESPN's AC
     "Has an ankle sprain but will play Sunday if he practices Friday.",
     "Has an ankle sprain but will play against the Bears next week.",
     "Has an ankle sprain but will play once he is healthy.",
+    // the round-4d verifier's F4: this module's own condition words (CONDITIONED_RE) and the other
+    // conditionals and hedges after a game time or a comma — never the coming game for sure
+    "Has an ankle sprain but will play Sunday pending a final test.",
+    "Has an ankle sprain but will play Sunday, pending a final test.",
+    "Has an ankle sprain but will play, pending an MRI.",
+    "Has an ankle sprain but will play Sunday as long as he feels fine.",
+    "Has an ankle sprain but will play Sunday so long as the swelling stays down.",
+    "Has an ankle sprain but will play Sunday, depending on how he feels.",
+    "Has an ankle sprain but will play Sunday should he clear the protocol.",
+    "Has an ankle sprain but will play Sunday barring a setback.",
+    "Has an ankle sprain but will play Sunday, contingent on a final test.",
+    "Has an ankle sprain but will play Sunday, provided he warms up well.",
+    "Has an ankle sprain but will play Sunday assuming no setback.",
+    "Has an ankle sprain but will play Sunday, probably.",
+    "Has an ankle sprain but will play Sunday, hopefully.",
+    "Has an ankle sprain but will play Sunday, likely in a reduced role.",
+    "Has an ankle sprain but will play Sunday, possibly.",
+    "Has an ankle sprain but will play Sunday, perhaps.",
   ])("%s → the plays phrase is not his: availability_conflict on injury_status", (text) => {
     expect(extractClaim(text)).toMatchObject({ type: "health", direction: "down" });
     expect(healthClaimSaysPlays(text)).toBe(false);
