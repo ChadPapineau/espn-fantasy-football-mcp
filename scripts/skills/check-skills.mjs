@@ -264,7 +264,11 @@ export const TOOL_OUTPUT_PHRASES = Object.freeze({
   espn_analyze_league_activity: [
     "a read the session refuses (none stored, or the stored one rejected) makes it `partial: true` on the server's persisted history, with up to two fixed lines, each ending in `eff setup`",
     ...ACTIVITY_PARTIAL_FRAGMENTS,
+    // the round-4d verifiers' R4DVF-4: the reads line's parenthesis names only what the refused
+    // reads carry, and the no-feed history line is never a quiet week — held here, not by a test only
+    "whose parenthesis names only what those reads carry (by-team activity needs the standings and the rosters, waiver-order movement the standings, rival needs the rosters or the pool)",
     `"${ACTIVITY_NO_FEED_HISTORY_LINE}"`,
+    "no transaction was read, never a quiet week",
     "say what each leaves out and the one command — no repeat call reads them (changelog §R10, R10-11)",
     "When the league settings themselves cannot be read, it fails as every tool does — `ESPN_AUTH_REJECTED` or `ESPN_REQUIRES_COOKIES`, never a stale answer (changelog §R10, R10-18)",
   ],

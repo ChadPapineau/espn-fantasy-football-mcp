@@ -1199,6 +1199,33 @@ describe("the body (plan 09 §2, §5.1 item 2)", () => {
     ]);
   });
 
+  // the round-4d verifiers' R4DVF-4: E11's parenthesis rule and "never a quiet week" were held by a
+  // test but not by check-skills — a copy that lost them in every tool-outputs.md passed
+  it("fails when E11's row loses its parenthesis rule or 'never a quiet week', in every copy", () => {
+    const phrases = TOOL_OUTPUT_PHRASES.espn_analyze_league_activity;
+    const paren =
+      "whose parenthesis names only what those reads carry (by-team activity needs the standings and the rosters, waiver-order movement the standings, rival needs the rosters or the pool)";
+    const quiet = "no transaction was read, never a quiet week";
+    expect(phrases).toContain(paren);
+    expect(phrases).toContain(quiet);
+    for (const [cut, ph] of [
+      [paren.replace(/\(by-team[^)]*\)/, "(XX)"), paren],
+      [quiet.replace("never a quiet week", "a quiet week"), quiet],
+    ] as const) {
+      const t = fresh();
+      t.edit("skills/_shared/references/tool-outputs.md", ph, cut);
+      buildSkills({ root: t.root });
+      expect(errorsOf(t)).toContain(
+        `skills/_shared/references/tool-outputs.md: the \`espn_analyze_league_activity\` row does not carry "${ph}"`,
+      );
+      // build-skills copied the cut row into every Skill: no copy keeps the clause
+      for (const s of ["weekly", "retro", "apply"])
+        expect(
+          readFileSync(path.join(t.root, "skills", s, "references/tool-outputs.md"), "utf8"),
+        ).not.toContain(ph);
+    }
+  });
+
   it("fails when the cheat-sheet loses E13's calls[].note or the transactions row its pending field", () => {
     const sheet = readFileSync(
       path.join(ROOT, "skills/_shared/references/tool-outputs.md"),
