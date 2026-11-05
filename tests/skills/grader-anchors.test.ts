@@ -425,6 +425,10 @@ describe("each anchored grader passes its claim and fails what only looks like i
         "| Kind | Scored |\n|---|---|\n| lineup | 3 of 3 |\n| evidence | 21 of 30 |",
         "20/33 calls scored.",
         "Of the 30 evidence calls, 21 were scored.",
+        // the round-4e verifiers' R4E-SK-2: the week's count first, in prose and in a table whose
+        // columns put the week before the scored calls
+        "The week had 33 calls, and only 20 of them were scored.",
+        "| Kind | Calls in the week | Scored |\n|---|---|---|\n| lineup | 3 | 3 |\n| evidence | 30 | 21 |",
       ],
       [
         "All 33 calls were scored.",
@@ -433,6 +437,8 @@ describe("each anchored grader passes its claim and fails what only looks like i
         "All 33 of last week's calls were scored: 20 were right.",
         "All of the week's 33 calls were scored; 20 were right.",
         "All 30 evidence calls were scored: 21 were right.",
+        // R4E-SK-2: the of-form with the whole week claimed scored
+        "Of last week's 33 calls, all were scored, and 20 came out right.",
       ],
     ],
     [
@@ -445,6 +451,9 @@ describe("each anchored grader passes its claim and fails what only looks like i
         // the round-4d verifiers' R4D-VS-4: a counts table and a slash
         "| Calls scored | Calls in week 4 |\n|---|---|\n| 15 | 24 |",
         "15 out of 24 calls fit; 15/24 scored.",
+        // the round-4e verifiers' R4E-SK-2: the week's count first, in prose and in a table
+        "The week had 24 lineup calls, and only 15 of them were scored.",
+        "| Kind | Calls in the week | Scored |\n|---|---|---|\n| lineup | 24 | 15 |",
       ],
       [
         "All 24 calls were scored.",
@@ -452,6 +461,8 @@ describe("each anchored grader passes its claim and fails what only looks like i
         // R4D-VS-4: both numbers present, the whole week claimed scored
         "All 24 of your week-4 start/sit calls were scored: 15 beat the alternative.",
         "All of your 24 week-4 calls were scored: 15 beat the alternative.",
+        // R4E-SK-2: the of-form with the whole week claimed scored
+        "Of the 24 calls you made, you were right on 15 — every call was scored.",
       ],
     ],
     [
@@ -755,6 +766,53 @@ describe("the patterns round 4b shipped had the holes the verifiers showed (R4BS
       "retro",
       "The reply says how many of the calls were scored",
       "Of the week's 33 calls the tool scored 20 — every lineup call (3 of 3) and 17 of the 30 evidence calls.",
+      false,
+      true,
+    ],
+    // the round-4e verifiers' R4E-SK-2: 0eb9803's of-form passed a reply that claims the whole week
+    // scored, and no form passed a correct reply that gives the week's count first
+    [
+      "RT-5",
+      String.raw`\b20\b[^\n]{0,20}?\b(?:of|out of)\b[^\n]{0,20}?\b33\b|\b20\s*/\s*33\b|\|\s*20\s*\|\s*33\s*\||(?<!\ball\s)\bof\b[^\n]{0,30}?\b33\b[^\n]{0,40}?\b20\b|\b21\b[^\n]{0,20}?\b(?:of|out of)\b[^\n]{0,20}?\b30\b|\b21\s*/\s*30\b|\|\s*21\s*\|\s*30\s*\||(?<!\ball\s)\bof\b[^\n]{0,30}?\b30\b[^\n]{0,40}?\b21\b`,
+      "retro",
+      "The reply says how many of the calls were scored",
+      "Of last week's 33 calls, all were scored, and 20 came out right.",
+      true,
+      false,
+    ],
+    [
+      "RT-5",
+      String.raw`\b20\b[^\n]{0,20}?\b(?:of|out of)\b[^\n]{0,20}?\b33\b|\b20\s*/\s*33\b|\|\s*20\s*\|\s*33\s*\||(?<!\ball\s)\bof\b[^\n]{0,30}?\b33\b[^\n]{0,40}?\b20\b|\b21\b[^\n]{0,20}?\b(?:of|out of)\b[^\n]{0,20}?\b30\b|\b21\s*/\s*30\b|\|\s*21\s*\|\s*30\s*\||(?<!\ball\s)\bof\b[^\n]{0,30}?\b30\b[^\n]{0,40}?\b21\b`,
+      "retro",
+      "The reply says how many of the calls were scored",
+      "| Kind | Calls in the week | Scored |\n|---|---|---|\n| lineup | 3 | 3 |\n| evidence | 30 | 21 |",
+      false,
+      true,
+    ],
+    [
+      "RT-6",
+      String.raw`\b15\b[^\n]{0,20}?\b(?:of|out of)\b[^\n]{0,20}?\b24\b|\b15\s*/\s*24\b|\|\s*15\s*\|\s*24\s*\||(?<!\ball\s)\bof\b[^\n]{0,30}?\b24\b[^\n]{0,40}?\b15\b`,
+      "retro",
+      "The reply says 15 of the week's 24 calls were scored",
+      "Of the 24 calls you made, you were right on 15 — every call was scored.",
+      true,
+      false,
+    ],
+    [
+      "RT-6",
+      String.raw`\b15\b[^\n]{0,20}?\b(?:of|out of)\b[^\n]{0,20}?\b24\b|\b15\s*/\s*24\b|\|\s*15\s*\|\s*24\s*\||(?<!\ball\s)\bof\b[^\n]{0,30}?\b24\b[^\n]{0,40}?\b15\b`,
+      "retro",
+      "The reply says 15 of the week's 24 calls were scored",
+      "The week had 24 lineup calls, and only 15 of them were scored.",
+      false,
+      true,
+    ],
+    [
+      "RT-6",
+      String.raw`\b15\b[^\n]{0,20}?\b(?:of|out of)\b[^\n]{0,20}?\b24\b|\b15\s*/\s*24\b|\|\s*15\s*\|\s*24\s*\||(?<!\ball\s)\bof\b[^\n]{0,30}?\b24\b[^\n]{0,40}?\b15\b`,
+      "retro",
+      "The reply says 15 of the week's 24 calls were scored",
+      "| Kind | Calls in the week | Scored |\n|---|---|---|\n| lineup | 24 | 15 |",
       false,
       true,
     ],
