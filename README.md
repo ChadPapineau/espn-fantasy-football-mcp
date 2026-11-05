@@ -55,7 +55,7 @@ A local [Model Context Protocol](https://modelcontextprotocol.io/) server, writt
 | Area | State | Evidence |
 |---|---|---|
 | Research pack (00–06) | ✅ complete, verified by the orchestrator against load-bearing claims at source | [`docs/README.md`](docs/README.md) |
-| Refined plan (01–10) | ✅ written, adversarially reviewed and revised — **approved by the owner 2026-10-05**; build-time rulings R5–R9 | [`docs/plan/00-index.md`](docs/plan/00-index.md), [`changelog.md`](docs/plan/changelog.md) |
+| Refined plan (01–10) | ✅ written, adversarially reviewed and revised — **approved by the owner 2026-10-05**; build-time rulings R5–R10 | [`docs/plan/00-index.md`](docs/plan/00-index.md), [`changelog.md`](docs/plan/changelog.md) |
 | Adversarial review | ✅ closed after three rounds: 26 objections (1 blocking, 10 significant, 15 marginal), 16 tensions and 15 nits — every one resolved and landed in the plan, none pressed; the closing verdict ranks the residual concerns | [`adversarial-log.md`](docs/plan/adversarial-log.md) (closing verdict at the end), [`changelog.md`](docs/plan/changelog.md) |
 | `LICENSE`, `SECURITY.md`, this README, the docs indexes | ✅ | repository root, [`docs/`](docs/README.md) |
 | `.gitignore`, `.env.example` (names and placeholders only) | ✅ | repository root |

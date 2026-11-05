@@ -768,6 +768,14 @@ entry. Everything else they raised is fixed, or ruled in `docs/plan/changelog.md
   `espn_analyze_waivers` interval of 24.9 ms of JavaScript (under the 50 ms bound; later runs 15–19
   ms). A failing property now prints its seed (`FC_SEED`).
 
+- **Optional reads that still absorb every error, or only an outage** (the follow-up verifier's F3,
+  2026-11-05). E13's reads now follow the house pattern (`isOptionalReadFailure`, else rethrow;
+  `8f41601`). These optional reads still turn every error into null, so a bug there reads as
+  "unavailable": the schedule, settings or roster reads in `league.ts` (three), `players.ts`,
+  `analytics.ts` (two) and `datasets.ts`. These absorb an outage only (`isDegradable`), so a session
+  refusal or fixture mode's missing fixture fails the call instead of being said by the session
+  line: `roster.ts` (two), `analytics-p1.ts` (nine) and `datasets-p1.ts`. Each needs its read's
+  refusal semantics checked against `src/mcp/refusals.ts` and the refusal sweep before it narrows.
 - **From the Dependabot review (2026-11-04 to 2026-11-05).**
   - `hyparquet` 1.32.0 (published 2026-10-29) is not reviewed: no PR proposed it. It comes through
     Dependabot's next monthly group with its own "Reviews" row.

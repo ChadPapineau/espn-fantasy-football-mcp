@@ -83,7 +83,8 @@ import {
  * outage, a session refusal (said by the call's session line; refusals.ts) or fixture mode's
  * `fixture_missing` (isOptionalReadFailure) — or a dataset past its hard limit (STALE_ONLY: the
  * schedule read here takes no `allow_stale`, so the call degrades as before). Anything else is a
- * bug and propagates, as every other tool's optional reads do; before, every error read as null.
+ * bug and propagates, as the house optional reads do (isOptionalReadFailure, else rethrow: the live
+ * scoreboard's rosters, espn-p1.ts); before, every error read as null.
  */
 export function retroReadAbsorbed(e: unknown): null {
   if (isOptionalReadFailure(e) || (e as { effCode?: unknown } | null)?.effCode === "STALE_ONLY")

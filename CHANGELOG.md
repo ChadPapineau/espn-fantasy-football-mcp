@@ -31,8 +31,8 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   counterexample, and `FC_SEED` / `FC_PATH` replay it.
 - **Scaffold and supply chain (plan 04 §1–§2).** `.npmrc` (`ignore-scripts`, `save-exact`,
   `engine-strict`, `audit`), `.nvmrc` (Node 24.21.0; engines `>=24.15`), `package.json` with exactly
-  four runtime dependencies pinned exactly — `@modelcontextprotocol/server` 2.3.1, `zod` 4.6.7 (the
-  one zod the SDK resolves), `hyparquet` 1.31.2, `@napi-rs/keyring` 2.1.0 — and a committed
+  four runtime dependencies pinned exactly — `@modelcontextprotocol/server` 2.4.0, `zod` 4.6.7 (the
+  one zod the SDK resolves), `hyparquet` 1.31.5, `@napi-rs/keyring` 2.1.2 — and a committed
   lockfile; runtime tree of 6 packages held exactly by `scripts/ci/runtime-allowlist.json`.
 - **TypeScript, lint, format, tests (plan 04 §3, plan 05 §1, §7).** Strict `tsconfig` (NodeNext,
   ES2023, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`);
@@ -353,8 +353,8 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
   process (a launchd job, a second server, `eff doctor`) recorded the rejection; the credential
   authority adopts a rejection from the shared metadata without loading the rejected value.
 - **E13's optional reads.** `espn_analyze_retrospective` absorbs only what an optional read may lose
-  (an outage, a session refusal, a stale dataset, fixture mode's missing fixture); any other error now fails the call as `INTERNAL`
-  instead of reading as "unavailable".
+  (an outage, a session refusal, a stale dataset, fixture mode's missing fixture); any other error
+  now fails the call (a bug as `INTERNAL`) instead of reading as "unavailable".
 - **Fixture mode's file reads.** Every fixture file, its manifests included, is read through one
   path resolver and one regular-file reader: an empty, absolute or `..` manifest path, an absolute
   or sideways root, a symlink out of the tree, a file over the size bound, and a FIFO, socket,
@@ -443,6 +443,10 @@ minor version (plan 04 §4.4; plan 09 K6). One version covers the server, the Sk
 
 ### Security
 
+- **`vite` 8.3.2 → 8.3.5** (dev only, through vitest 5.0.5; Dependabot PR 2): GHSA-698v-4r3x-3vcv,
+  GHSA-r825-w8mm-5pxw, GHSA-587h-7wmj-h5pm, GHSA-9jrq-w75r-8gcw, GHSA-rq7h-c2jc-7f22 and
+  GHSA-vfpm-58rq-9qcg, all in the dev server's HTTP paths, which vitest never starts here; the
+  runtime audit was 0 throughout.
 - **The recommendation log refuses text that becomes credential-shaped once read back** (entities
   decoded, tags dropped), not only text that is credential-shaped as written: `SWID&#61;&#123;…&#125;`
   used to pass and come back as `SWID={…}`. The same check covers every bounded model text (E12's
