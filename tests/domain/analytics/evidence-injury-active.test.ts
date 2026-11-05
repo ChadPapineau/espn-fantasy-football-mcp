@@ -171,6 +171,8 @@ describe("R4VS-6: an injury reported with no designation word, against ESPN's AC
     "has an ankle sprain but will play Sunday, the team confirmed.",
     "has an ankle sprain but will play Sunday and is cleared.",
     "has an ankle sprain but practiced in full and will play Sunday.",
+    "has an ankle sprain but will play tonight against the Jets.",
+    "has an ankle sprain but will play this weekend.",
   ])("a report that also says he plays, %s, is consistent with ACTIVE", (text) => {
     expect(extractClaim(text)?.type).toBe("health");
     expect(healthClaimSaysPlays(text)).toBe(true);
@@ -256,6 +258,10 @@ describe("R4VS-6: an injury reported with no designation word, against ESPN's AC
     // "and" joins only another plays phrase, never a condition
     "Has an ankle sprain but will play Sunday and is cleared if he practices.",
     "Has an ankle sprain but practiced in full and will play next week.",
+    // "week N" is never read as the coming game: the text cannot say which week is next
+    "Has an ankle sprain but will play in Week 14.",
+    "Has an ankle sprain but will play Week 9 against the Bears.",
+    "Has an ankle sprain but is playing in week 12.",
   ])("%s → the plays phrase is not his: availability_conflict on injury_status", (text) => {
     expect(extractClaim(text)).toMatchObject({ type: "health", direction: "down" });
     expect(healthClaimSaysPlays(text)).toBe(false);

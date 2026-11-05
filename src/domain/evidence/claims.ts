@@ -839,8 +839,15 @@ const TAIL_TEAM = (() => {
   const abbr = String.raw`ari|atl|bal|buf|car|chi|cin|cle|dal|den|det|gb|hou|ind|jax|kc|lac|lar|lv|mia|min|ne|nyg|nyj|phi|pit|sea|sf|tb|ten|wsh`;
   return String.raw`(?:the\s+)?(?:(?:${home})(?:\s+(?:${nick}))?|${nick}|${abbr})\b`;
 })();
+/**
+ * The coming game's time as a plays phrase's tail may name it: a day (TAIL_DAY), "tonight",
+ * "today", "tomorrow", "this week" or "this weekend". Never GAME_TIME's "week N": the text alone
+ * cannot say whether week 14 is the coming one, so "will play in Week 14" is not read as this game
+ * (fail safe, as CR-1).
+ */
+const TAIL_TIME = String.raw`(?:${TAIL_DAY}|tonight|today|tomorrow|this\s+week(?:end)?)`;
 /** One word group a plays phrase's tail may hold: the coming game's time, or its opponent. */
-const TAIL_ITEM = String.raw`(?:(?:for\s+)?(?:${TAIL_DAY}|${GAME_TIME})\b|(?:against|versus|vs\.?|v\.)(?:\s+${TAIL_TEAM})?|at\s+${TAIL_TEAM})`;
+const TAIL_ITEM = String.raw`(?:(?:for\s+)?${TAIL_TIME}\b|(?:against|versus|vs\.?|v\.)(?:\s+${TAIL_TEAM})?|at\s+${TAIL_TEAM})`;
 /** A report of the plays phrase after a comma (", the coach said", ", per the team"); no other. */
 const TAIL_REPORT = String.raw`\s*,\s*(?:(?:(?:the\s+)?(?:head\s+)?(?:coach|team|club)|he)\s+(?:says|said|confirms|confirmed|announced|reported|reports)|(?:per|according\s+to)\s+(?:the\s+)?(?:head\s+)?(?:coach|team|club))\b`;
 /** The end of a tail: only clause breaks (`,`, `:`, `)`, a dash) and spaces to the clause end. */
