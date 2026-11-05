@@ -655,6 +655,12 @@ describe("E10's mixed move and the coming-game clearance (changelog §R10, R10-3
       expect(t).toContain("'will play Sunday', 'is cleared'");
       for (const later of ["'will play next week'", "'after the bye'", "'if he practices Friday'"])
         expect(t).toContain(later);
+      // the round-4e verifier's R4E-VS-1: the server's plays tail is an allow-list (claims.ts
+      // PLAYS_TAIL_RE), so the texts say what may follow the plays phrase, and never "week N"
+      expect(t).toContain(
+        "he plays in the coming game, with nothing else in its clause but that game's day, its opponent or who reported it (",
+      );
+      expect(t).toContain("'in Week 14'");
       // the round-4d server refix's F4: a condition or a hedge never clears it
       expect(t).toContain("a condition or a hedge");
       for (const hedge of [
@@ -756,6 +762,10 @@ describe("E10's flags as the texts state them (changelog §R10, R10-30, R10-32)"
       "has an ankle sprain but will play perhaps",
     ])
       expect(flagOf("ACTIVE", hedged, "flat"), hedged).toBe("availability_conflict");
+    // "week N" is no claim about the coming game, as the texts' 'in Week 14' says
+    expect(flagOf("ACTIVE", "has an ankle sprain but will play in Week 14", "flat")).toBe(
+      "availability_conflict",
+    );
     // a mixed move stays quiet_role_change under a hurt designation (R10-32)
     expect(flagOf("QUESTIONABLE", "He has a hamstring injury.", "mixed")).toBe("quiet_role_change");
     const tail =
