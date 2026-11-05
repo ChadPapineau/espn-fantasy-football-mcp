@@ -292,6 +292,10 @@ describe("CR-3 (the round-4c verifier): a manifest's root, or a symlink, cannot 
       },
     ],
     [
+      "an absolute root (CR-3's last escape)",
+      () => variant({ root: away, settingsPath: "secret.json" }),
+    ],
+    [
       "a root that is a symlink out of the manifest's directory",
       () => {
         const dir = variant({ root: "linked", settingsPath: "secret.json" });
@@ -318,7 +322,7 @@ describe("CR-3 (the round-4c verifier): a manifest's root, or a symlink, cannot 
     expect(derivedRootDir(dir, "./")).toBe(dir);
     expect(derivedRootDir(dir, "data")).toBe(path.join(dir, "data"));
     expect(DERIVED_ROOT_MAX_UP).toBe(2);
-    for (const bad of ["../../..", "../x", "x/..", "x/../..", "..\\..\\.."])
+    for (const bad of ["../../..", "../x", "x/..", "x/../..", "..\\..\\..", dir, "/", "C:\\x"])
       expect(() => derivedRootDir(dir, bad), bad).toThrow(DerivedFileRefused);
   });
 

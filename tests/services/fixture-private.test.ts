@@ -13,14 +13,7 @@
 // an `auto` or feed read there. No value and no Cookie header exist anywhere (the derived fixture
 // fetch refuses one); the fixture guard runs first and is unchanged; nothing outside fixture mode
 // reaches the label or the flag. Temp directories only, no network.
-import {
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -42,6 +35,7 @@ import {
   testCookieHeader,
 } from "../providers/espn/helpers.js";
 import { ROOT, call, connect, makeWorld, type World } from "../mcp/helpers/world.js";
+import { variantTree } from "../mcp/helpers/fixture-tree.js";
 
 const FX = path.join(ROOT, "fixtures", "espn", "fx-10h");
 const PRIVATE = path.join(FX, "private-league");
@@ -64,18 +58,12 @@ afterAll(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-/** private-league's manifest with its harness replaced, the root made absolute, in a temp dir. */
+/**
+ * private-league's manifest with its harness replaced, in a temp tree of its own with its relative
+ * root (an absolute root is refused: the round-4c CR-3).
+ */
 function scripted(harness: unknown): string {
-  const m = JSON.parse(readFileSync(path.join(PRIVATE, "manifest.json"), "utf8")) as Record<
-    string,
-    unknown
-  >;
-  const dir = mkdtempSync(path.join(tmp, "v-"));
-  writeFileSync(
-    path.join(dir, "manifest.json"),
-    JSON.stringify({ ...m, root: path.resolve(PRIVATE, String(m.root)), harness }),
-  );
-  return dir;
+  return variantTree(PRIVATE, { harness }, tmp);
 }
 
 const LABELS = {

@@ -12,7 +12,7 @@
 // read is unchanged (keyless, served). Nothing outside fixture mode reaches the label: a provider
 // built without fixture mode, or beside a credential authority, never reads it. The fixture guard
 // (fixture-credential.test.ts) runs first and is unchanged. Temp directories only.
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -28,6 +28,7 @@ import {
   MemoryLimiterRepo,
 } from "../providers/espn/helpers.js";
 import { ROOT, call, connect, makeWorld, type World } from "../mcp/helpers/world.js";
+import { variantTree } from "../mcp/helpers/fixture-tree.js";
 
 const FX = path.join(ROOT, "fixtures", "espn", "fx-10h");
 const CLOCK_AT = "2026-10-07T01:00:00.000Z";
@@ -43,24 +44,13 @@ afterAll(() => {
 });
 
 /**
- * A derived variant scripting `harness` — public-league's manifest (its views, its clock) with the
- * root made absolute, written to a fresh temp directory, so a probe verdict the committed variants
- * do not script (accepted true; a stored session the probe rejects) can be run.
+ * A derived variant scripting `harness` — public-league's manifest (its views, its clock) in a temp
+ * tree of its own with its relative root (an absolute root is refused: the round-4c CR-3), so a
+ * probe verdict the committed variants do not script (accepted true; a stored session the probe
+ * rejects) can be run.
  */
 function scriptedVariant(harness: unknown): string {
-  const m = JSON.parse(
-    readFileSync(path.join(FX, "public-league", "manifest.json"), "utf8"),
-  ) as Record<string, unknown>;
-  const dir = mkdtempSync(path.join(tmp, "v-"));
-  writeFileSync(
-    path.join(dir, "manifest.json"),
-    JSON.stringify({
-      ...m,
-      root: path.resolve(FX, "public-league", String(m.root)),
-      harness,
-    }),
-  );
-  return dir;
+  return variantTree(path.join(FX, "public-league"), { harness }, tmp);
 }
 
 interface Server {

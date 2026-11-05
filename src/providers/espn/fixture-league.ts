@@ -114,13 +114,14 @@ export const DERIVED_ROOT_MAX_UP = 2;
  * DERIVED_ROOT_MAX_UP `..` — the fixture tree the generator writes) or only descends (name
  * segments, no `..`, and no symlink out of `dir`). Never a climb that turns sideways
  * (`../elsewhere`), nor one past the fixture tree, which would let a manifest read, and the fixture
- * fetch serve, a file outside it. An absolute root names its directory outright and is taken as
- * written (a test manifest outside the tree points at the committed one that way; refusing it is an
- * open item of CR-3). A refusal throws DerivedFileRefused; a root that does not exist is left to the
- * reads, which fail on their own.
+ * fetch serve, a file outside it. Never an absolute root either: it names any directory outright
+ * (CR-3's last escape, closed in round 4d — the one test manifest that used one now builds a temp
+ * tree with a relative root). A refusal throws DerivedFileRefused; a root that does not exist is
+ * left to the reads, which fail on their own.
  */
 export function derivedRootDir(dir: string, root: string): string {
-  if (path.isAbsolute(root)) return path.resolve(root);
+  if (path.isAbsolute(root) || path.win32.isAbsolute(root))
+    throw new DerivedFileRefused("manifest root refused");
   const segs = root.split(/[\\/]/).filter((x) => x !== "" && x !== ".");
   const ups = segs.filter((x) => x === "..").length;
   const climbs = ups === segs.length && ups <= DERIVED_ROOT_MAX_UP;

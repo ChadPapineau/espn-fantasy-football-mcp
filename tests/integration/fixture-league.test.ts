@@ -4,7 +4,7 @@
 // pool emulation (filters, the provider's sorts, paging, split trimming), view routing by season /
 // period / composition, the mBoxscore and mTransactions2 filters, and the guards the recorded fixture
 // fetch has (no cookie, no path outside the root, unanswerable requests named, no network).
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -437,15 +437,28 @@ describe("routing over fx-10h", () => {
   it("an `absentWhenEmpty` entry leaves an empty transactions or pending list out (count 0 kept); unmarked sends []", async () => {
     const base = readDerivedManifest(FX);
     if (base === null) throw new Error("fx-10h manifest");
+    // a temp tree of its own with a RELATIVE root (the round-4c CR-3: an absolute root is refused):
+    // the views this test reads, their files copied under the tree at the paths the views name
+    const used = base.views.filter((v) =>
+      v.views.some((x) =>
+        ["mSettings", "mNav", "mTransactions2", "mPendingTransactions"].includes(x),
+      ),
+    );
+    const files = Object.fromEntries(
+      used.map((v) => [v.path, readFileSync(path.resolve(FX, base.root, v.path), "utf8")]),
+    );
     const marked = (views: string[]) => ({
       kind: "derived_league",
       season: 2026,
-      root: path.resolve(FX, base.root),
-      views: base.views.map((v) =>
+      root: ".",
+      views: used.map((v) =>
         v.views.some((x) => views.includes(x)) ? { ...v, absentWhenEmpty: true } : v,
       ),
     });
-    const dir = tempTree({ "manifest.json": marked(["mTransactions2", "mPendingTransactions"]) });
+    const dir = tempTree({
+      ...files,
+      "manifest.json": marked(["mTransactions2", "mPendingTransactions"]),
+    });
     expect(
       readDerivedManifest(dir)
         ?.views.filter((v) => v.absentWhenEmpty === true)
@@ -487,7 +500,7 @@ describe("routing over fx-10h", () => {
     expect(whole.transactions.length).toBeGreaterThan(0);
     // only the marked view's list: mTransactions2 alone marked keeps the pending []
     const one = createDerivedLeagueFetch({
-      dir: tempTree({ "manifest.json": marked(["mTransactions2"]) }),
+      dir: tempTree({ ...files, "manifest.json": marked(["mTransactions2"]) }),
     });
     const kept = (await (await one(`${LEAGUE}?view=mPendingTransactions`, {})).json()) as Record<
       string,
