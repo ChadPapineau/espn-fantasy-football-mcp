@@ -7,8 +7,10 @@
 // Every manifest file path is read through derivedFileText, the one resolver both fixture fetches
 // share (the round-4d verifier's F1: the recorded fetch had no path check): a manifest with an
 // empty, absolute or `..` path fails at load, and a symlink out of the tree or an oversized file is
-// a fixture_missing read, never its contents.
-import { readFileSync, realpathSync, statSync } from "node:fs";
+// a fixture_missing read, never its contents. Every fixture-mode file, the manifests too, is read
+// through regularFileText: a FIFO, socket, device or directory in the tree is refused before a byte
+// is read, never a read that blocks the process inside fetch (the round-4e verifier's R4E-VS-2).
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { canonicalJson } from "./filter.js";
 import { HEADER_FILTER } from "./types.js";
@@ -35,6 +37,34 @@ export const DERIVED_FILE_MAX_BYTES = 32 * 1024 * 1024;
 /** A manifest file the path rules or the size bound refuse (derivedFileText, derivedRootDir). */
 export class DerivedFileRefused extends RangeError {}
 
+/** O_NONBLOCK, or 0 where the platform has none (Windows: node's constants omit it at run time). */
+const OPEN_NONBLOCK: number = (constants as { readonly O_NONBLOCK?: number }).O_NONBLOCK ?? 0;
+
+/**
+ * The UTF-8 text of the regular file at `abs` — every fixture-mode read (the manifests, and through
+ * derivedFileText every manifest file). It is opened without blocking (O_NONBLOCK, where the
+ * platform has it) and checked on the open descriptor, so a file swapped after a check is still the
+ * one checked: anything but a regular file (a FIFO, a socket, a device, a directory) is refused
+ * before a byte is read — a FIFO has size 0 and its read blocks the whole process synchronously, so
+ * fetch never returns (the round-4e verifier's R4E-VS-2) — and so is a file over
+ * DERIVED_FILE_MAX_BYTES. A refusal throws DerivedFileRefused; a file that cannot be opened throws
+ * the open's own error.
+ */
+export function regularFileText(abs: string): string {
+  const fd = openSync(abs, constants.O_RDONLY | OPEN_NONBLOCK);
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new DerivedFileRefused("fixture file refused: not a regular file");
+    if (st.size > DERIVED_FILE_MAX_BYTES) throw new DerivedFileRefused("fixture file too large");
+    const text = readFileSync(fd, "utf8");
+    if (text.length > DERIVED_FILE_MAX_BYTES)
+      throw new DerivedFileRefused("fixture file too large");
+    return text;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** A manifest path no fixture fetch reads: empty, absolute (POSIX or Windows form) or with `..`. */
 function lexicallyRefused(rel: unknown): boolean {
   return (
@@ -52,8 +82,9 @@ function lexicallyRefused(rel: unknown): boolean {
  * (the round-4b review's F3; the recorded fetch since round 4d, F1): never an empty, absolute or
  * `..` path, never a path that resolves to `root` itself or outside it — also after symlinks are
  * resolved, so a link inside `root` cannot point out of it (the round-4c verifier's CR-3) — never a
- * file over DERIVED_FILE_MAX_BYTES (its size is read before its bytes are). A refusal throws
- * DerivedFileRefused; a file that cannot be read throws the read's own error.
+ * file over DERIVED_FILE_MAX_BYTES (its size is read before its bytes are) and never anything but a
+ * regular file (regularFileText; R4E-VS-2). A refusal throws DerivedFileRefused; a file that cannot
+ * be read throws the read's own error.
  */
 export function derivedFileText(root: string, rel: string): string {
   if (lexicallyRefused(rel)) throw new DerivedFileRefused("manifest path refused");
@@ -62,11 +93,7 @@ export function derivedFileText(root: string, rel: string): string {
   const abs = realpathSync(lexical);
   if (!abs.startsWith(realpathSync(root) + path.sep))
     throw new DerivedFileRefused("manifest path refused");
-  if (statSync(abs).size > DERIVED_FILE_MAX_BYTES)
-    throw new DerivedFileRefused("fixture file too large");
-  const text = readFileSync(abs, "utf8");
-  if (text.length > DERIVED_FILE_MAX_BYTES) throw new DerivedFileRefused("fixture file too large");
-  return text;
+  return regularFileText(abs);
 }
 
 /** Fixture mode refused or could not serve a request (never retried; INTERNAL to a tool). */
@@ -142,9 +169,12 @@ export interface FixtureFetchOptions {
 export function createFixtureFetch(opts: FixtureFetchOptions): FetchLike {
   if (!path.isAbsolute(opts.dir)) throw new RangeError("fixture mode: dir must be absolute");
   const dir = path.resolve(opts.dir);
+  // a manifest that is not a regular file, or is over the bound, fails at load (R4E-VS-2)
   const manifest = JSON.parse(
-    readFileSync(path.join(dir, opts.manifest ?? "manifest.json"), "utf8"),
-  ) as { files: ManifestFile[] };
+    regularFileText(path.join(dir, opts.manifest ?? "manifest.json")),
+  ) as {
+    files: ManifestFile[];
+  };
   // a bad manifest fails at load, before any request (every entry, served or not)
   if (manifest.files.some((f) => lexicallyRefused(f.path)))
     throw new RangeError("fixture mode: manifest path refused");

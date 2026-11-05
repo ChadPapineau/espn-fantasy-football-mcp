@@ -17,7 +17,7 @@
 // unanswerable request is a FixtureError naming the path (league id 0), every file path stays inside
 // the manifest's root (both fetches read through fixture.ts' derivedFileText), and patch pointers
 // can never reach a prototype.
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { yieldTurn } from "../../domain/analytics/cooperative.js";
 import {
@@ -26,6 +26,7 @@ import {
   FixtureError,
   composeBodies,
   derivedFileText,
+  regularFileText,
 } from "./fixture.js";
 import {
   HEADER_FILTER,
@@ -76,7 +77,8 @@ const isObject = (v: unknown): v is JsonObject =>
 export function readDerivedManifest(dir: string): DerivedManifest | null {
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path.join(dir, "manifest.json"), "utf8"));
+    // never a FIFO, a device or an oversized manifest (regularFileText; R4E-VS-2)
+    raw = JSON.parse(regularFileText(path.join(dir, "manifest.json")));
   } catch {
     return null;
   }

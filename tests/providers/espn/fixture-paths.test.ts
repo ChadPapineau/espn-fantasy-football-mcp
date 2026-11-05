@@ -3,15 +3,23 @@
 // round-4d verifier's F1; CR-3's class). A recorded manifest whose entry names `../outside.json` or
 // an absolute path fails at load; a symlinked file or subdirectory pointing out of the tree, or an
 // oversized file, is a fixture_missing read — never the outside file's contents as ESPN's body.
+// A FIFO or a directory where a body or a manifest belongs is refused before a byte is read (the
+// round-4e verifier's R4E-VS-2: a FIFO has size 0, so it passed the size bound, and its read blocked
+// the whole process inside fetch — the fetch never returned). Each such case has its own timeout:
+// without the fix it hangs.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DERIVED_FILE_MAX_BYTES,
+  DerivedFileRefused,
   FixtureError,
   createFixtureFetch,
+  derivedFileText,
 } from "../../../src/providers/espn/fixture.js";
+import { readDerivedManifest } from "../../../src/providers/espn/fixture-league.js";
 import { resolveFixtureDir } from "../../../src/providers/espn/index.js";
 
 const LEAGUE_PATH = "/apis/v3/games/ffl/seasons/2025/segments/0/leagues/0";
@@ -118,3 +126,69 @@ describe("the recorded fixture fetch keeps every file inside its tree (F1)", () 
     expect((e as Error).message).toContain("too large");
   });
 });
+
+/** Makes a FIFO at `p` (POSIX only; Node has no mkfifo of its own). */
+function fifo(p: string): void {
+  execFileSync("mkfifo", [p]);
+}
+
+describe.skipIf(process.platform === "win32")(
+  "a FIFO or a directory in the tree is refused before a byte is read (R4E-VS-2)",
+  () => {
+    it(
+      "a recorded body that is a FIFO is fixture_missing, as a rejection",
+      { timeout: 10_000 },
+      async () => {
+        const fx = tree("recorded/body.json", (d) => {
+          mkdirSync(path.join(d, "recorded"));
+          fifo(path.join(d, "recorded", "body.json"));
+        });
+        const e = await answer(fx);
+        expect(e).toBeInstanceOf(FixtureError);
+        expect((e as FixtureError).effDetails.reason).toBe("fixture_missing");
+        expect((e as Error).message).toContain("not a regular file");
+      },
+    );
+
+    it("a recorded body that is a directory is fixture_missing", { timeout: 10_000 }, async () => {
+      const fx = tree("recorded/body.json", (d) => {
+        mkdirSync(path.join(d, "recorded", "body.json"), { recursive: true });
+      });
+      const e = await answer(fx);
+      expect(e).toBeInstanceOf(FixtureError);
+      expect((e as FixtureError).effDetails.reason).toBe("fixture_missing");
+    });
+
+    it("the shared resolver (both fixture fetches) refuses a FIFO", { timeout: 10_000 }, () => {
+      const fx = tree("recorded/body.json", (d) => {
+        mkdirSync(path.join(d, "recorded"));
+        fifo(path.join(d, "recorded", "body.json"));
+      });
+      expect(() => derivedFileText(fx, "recorded/body.json")).toThrow(DerivedFileRefused);
+    });
+
+    it(
+      "a manifest that is a FIFO fails at load; the derived read finds no manifest",
+      { timeout: 10_000 },
+      () => {
+        const tmp = mkdtempSync(path.join(tmpdir(), "eff-fixture-paths-"));
+        tmps.push(tmp);
+        fifo(path.join(tmp, "manifest.json"));
+        expect(() => createFixtureFetch({ dir: tmp, league: "league-a" })).toThrow(
+          /not a regular file/,
+        );
+        expect(readDerivedManifest(tmp)).toBeNull();
+      },
+    );
+
+    it("a manifest over the size bound fails at load, before its bytes are read", () => {
+      const tmp = mkdtempSync(path.join(tmpdir(), "eff-fixture-paths-"));
+      tmps.push(tmp);
+      const m = path.join(tmp, "manifest.json");
+      writeFileSync(m, "");
+      truncateSync(m, DERIVED_FILE_MAX_BYTES + 1); // sparse: no bytes written
+      expect(() => createFixtureFetch({ dir: tmp, league: "league-a" })).toThrow(/too large/);
+      expect(readDerivedManifest(tmp)).toBeNull();
+    });
+  },
+);
