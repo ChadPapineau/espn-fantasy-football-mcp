@@ -23,6 +23,15 @@
 // run-queue delay, its block I/O, and the system's I/O and CPU pressure stall time and steal. `at`
 // is the gap's end as epoch ms, so a test can name the call it fell in. Only the probe's own
 // counters are read here: no value, path or environment variable is ever written.
+//
+// `cpu_attr` splits the interval of cpu_max_ms the same way (F1, round 4d: the longest CPU run of
+// a call is not always its longest gap): wall ms inside node:sqlite (count, longest statement's SQL
+// text), synchronous fs and Atomics.wait, the GC pauses overlapping it, the involuntary switches —
+// what is left is the JavaScript compute. With EFF_HB_PROFILE=1 the probe also runs V8's sampling
+// profiler (100 µs) and names the functions that held the CPU inside that interval (`cpu_fn`: up to
+// five `name file:line` code labels with their sampled ms — code, never data), so a CI notice
+// names the engine batch; the profiler's overhead makes that pass evidence of WHERE, never of how
+// long (the plain pass, without it, is the reading).
 const { monitorEventLoopDelay, performance, PerformanceObserver } =
   process.getBuiltinModule("node:perf_hooks");
 const fs = process.getBuiltinModule("node:fs");
@@ -222,25 +231,39 @@ tops();
 let worst = { gap_ms: 0, gap_cpu_ms: 0, gap_invol: 0 };
 let worstAttr = null;
 let cpuMax = 0;
+/** The split of the cpu_max interval (its sqlite, fs and wait time; p0/p1 for its GC and profile). */
+let cpuAttr = null;
 const r1 = (x) => Math.round(x * 10) / 10;
 setInterval(() => {
   const s = sample();
   const top = tops();
   const gap = Number(s.t - last.t) / 1e6 - TICK_MS;
   const cpu = (s.cpu_us - last.cpu_us) / 1000;
-  if (cpu > cpuMax) cpuMax = cpu;
+  const of = (k) => ({
+    [`${k}_ms`]: r1(s[k][0] - last[k][0]),
+    [`${k}_n`]: s[k][1] - last[k][1],
+    [`${k}_top`]: top[k][0],
+    [`${k}_top_ms`]: r1(top[k][1]),
+  });
+  if (cpu > cpuMax) {
+    cpuMax = cpu;
+    cpuAttr = {
+      at: s.at,
+      p0: last.p,
+      p1: s.p,
+      wall_ms: r1(s.p - last.p),
+      invol: s.invol - last.invol,
+      ...of("sql"),
+      ...of("fs"),
+      ...of("wait"),
+    };
+  }
   if (gap > worst.gap_ms) {
     worst = {
       gap_ms: gap,
       gap_cpu_ms: cpu,
       gap_invol: s.invol - last.invol,
     };
-    const of = (k) => ({
-      [`${k}_ms`]: r1(s[k][0] - last[k][0]),
-      [`${k}_n`]: s[k][1] - last[k][1],
-      [`${k}_top`]: top[k][0],
-      [`${k}_top_ms`]: r1(top[k][1]),
-    });
     worstAttr = {
       at: s.at,
       p0: last.p,
@@ -274,7 +297,95 @@ function gcIn(p0, p1) {
   return { gc_ms: r1(ms), gc_n: n, gc_top_ms: r1(top), gc_top_kind: topKind };
 }
 
+// --- the sampling profiler (EFF_HB_PROFILE=1 only): which functions held the CPU ---------------
+const PROFILE = process.env.EFF_HB_PROFILE === "1";
+let session = null;
+/** performance.now() minus the profile clock (µs → ms) at the profiler's start. */
+let profileOffset = 0;
+const startProfile = () => {
+  if (session === null) return;
+  session.post("Profiler.setSamplingInterval", { interval: 100 }, () => {
+    session.post("Profiler.start", () => {
+      profileOffset = now();
+    });
+  });
+};
+if (PROFILE) {
+  try {
+    const inspector = process.getBuiltinModule("node:inspector");
+    session = new inspector.Session();
+    session.connect();
+    session.post("Profiler.enable", () => {
+      startProfile();
+    });
+  } catch {
+    session = null;
+  }
+}
+/** A code label: the function's name and its file's base name and line (never data). */
+const fnLabel = (cf) => {
+  const file = typeof cf.url === "string" ? cf.url.split(/[\\/]/).pop() : "";
+  const name = cf.functionName === "" ? "(anonymous)" : cf.functionName;
+  return cut(`${name} ${file ?? ""}:${String((cf.lineNumber ?? -1) + 1)}`);
+};
+/** A frame of the server's own code (the built package), not Node's or V8's. */
+const ownFrame = (cf) => typeof cf?.url === "string" && /[\\/]dist[\\/]/.test(cf.url);
+/**
+ * The top functions inside [p0, p1] of a stopped profile, in sampled ms: each sample counts for the
+ * nearest frame of the server's own code at or above it (the engine step that ran — a leaf inside a
+ * builtin is its caller's), else its own frame ("(garbage collector)", "(program)"); idle is left
+ * out.
+ */
+function functionsIn(profile, p0, p1, offsetMs) {
+  if (profile === null || typeof profile !== "object") return null;
+  const byId = new Map();
+  const parent = new Map();
+  for (const n of profile.nodes ?? []) {
+    byId.set(n.id, n);
+    for (const c of n.children ?? []) parent.set(c, n.id);
+  }
+  const ownOf = (id) => {
+    for (let at = id; at !== undefined; at = parent.get(at)) {
+      const n = byId.get(at);
+      if (n !== undefined && ownFrame(n.callFrame)) return n;
+    }
+    return byId.get(id);
+  };
+  const samples = profile.samples ?? [];
+  const deltas = profile.timeDeltas ?? [];
+  let t = profile.startTime ?? 0;
+  const base = (profile.startTime ?? 0) / 1000;
+  const counts = new Map();
+  let prev = null;
+  for (let i = 0; i < samples.length; i++) {
+    t += deltas[i] ?? 0;
+    const at = offsetMs + (t / 1000 - base);
+    const dt = prev === null ? 0 : (t - prev) / 1000;
+    prev = t;
+    if (at < p0 || at > p1) continue;
+    const node = ownOf(samples[i]);
+    if (node === undefined || node.callFrame?.functionName === "(idle)") continue;
+    const label = fnLabel(node.callFrame ?? {});
+    counts.set(label, (counts.get(label) ?? 0) + dt);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([label, ms]) => `${label} ${String(r1(ms))}`);
+}
+
 process.on("SIGUSR2", () => {
+  // the cpu_max interval's split, read before the window restarts
+  let cpuSplit = null;
+  let cpuWindow = null;
+  if (cpuAttr !== null) {
+    const { p0, p1, ...rest } = cpuAttr;
+    const gc = gcIn(p0, p1);
+    const other = (rest.sql_ms ?? 0) + (rest.fs_ms ?? 0) + (rest.wait_ms ?? 0) + (gc.gc_ms ?? 0);
+    cpuSplit = { ...rest, ...gc, js_ms: r1(Math.max(0, cpuMax - other)) };
+    cpuWindow = [p0, p1];
+  }
+  cpuAttr = null;
   let attr = null;
   if (worstAttr !== null) {
     const { p0, p1, proc, ...rest } = worstAttr;
@@ -297,8 +408,18 @@ process.on("SIGUSR2", () => {
     ...worst,
     cpu_max_ms: cpuMax,
     attr,
+    cpu_attr: cpuSplit,
   };
-  process.stderr.write(`${JSON.stringify(line)}\n`);
+  if (session === null || cpuWindow === null) process.stderr.write(`${JSON.stringify(line)}\n`);
+  else {
+    const offset = profileOffset;
+    const [p0, p1] = cpuWindow;
+    session.post("Profiler.stop", (err, res) => {
+      const fns = err ? null : functionsIn(res?.profile ?? null, p0, p1, offset);
+      process.stderr.write(`${JSON.stringify({ ...line, cpu_fn: fns })}\n`);
+      startProfile();
+    });
+  }
   h.reset();
   worst = { gap_ms: 0, gap_cpu_ms: 0, gap_invol: 0 };
   worstAttr = null;

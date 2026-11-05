@@ -21,6 +21,7 @@ import {
   bodyOf,
   type CallSpan,
   HEARTBEAT,
+  type Heartbeat,
   heartbeatRecordOf,
   makeHome,
   measureStall,
@@ -219,6 +220,29 @@ const P1_ANALYTICS: readonly [string, Record<string, unknown>][] = [
   ["espn_analyze_waivers", { mode: "auto", phase: "auto" }],
 ];
 
+/** The cpu_max interval's split a heartbeat line carries, rounded (numbers and code labels only). */
+function cpuSplitOf(hb: Heartbeat): Record<string, number | string | null> | null {
+  const a = hb.cpu_attr;
+  if (a === null || a === undefined) return null;
+  const out: Record<string, number | string | null> = {};
+  for (const k of [
+    "wall_ms",
+    "js_ms",
+    "sql_ms",
+    "sql_n",
+    "sql_top",
+    "sql_top_ms",
+    "gc_ms",
+    "gc_n",
+    "gc_top_kind",
+    "fs_ms",
+    "wait_ms",
+    "invol",
+  ])
+    out[k] = typeof a[k] === "number" ? Math.round(a[k] * 10) / 10 : (a[k] ?? null);
+  return out;
+}
+
 describe(
   "latency under EFF_TOOLSET=full on a seeded fx-10h over real stdio (A16a carried to the P1 tools)",
   { timeout: 600_000 },
@@ -329,18 +353,19 @@ describe(
         await f.stop();
         f = null;
       }
+      const r = (x: number | null): number | null => (x === null ? null : Math.round(x * 10) / 10);
+      const keyOf = (name: string, args: Record<string, unknown>): string =>
+        `${name}${typeof args.mode === "string" ? `_${args.mode}` : ""}`;
+      const each: Record<string, unknown> = {};
       const g = await serve(homeFull, { preloads: [HEARTBEAT] });
       try {
         await g.client.callTool({ name: "espn_get_league", arguments: {} }, { timeout: 120_000 });
-        const r = (x: number | null): number | null =>
-          x === null ? null : Math.round(x * 10) / 10;
-        const each: Record<string, unknown> = {};
         for (const [name, args] of P1_ANALYTICS) {
           await heartbeatRecordOf(g.transport); // a fresh window: this call only
           const res = await g.client.callTool({ name, arguments: args }, { timeout: 120_000 });
           expect(res.isError, name).not.toBe(true);
           const hb = await heartbeatRecordOf(g.transport);
-          each[`${name}${typeof args.mode === "string" ? `_${args.mode}` : ""}`] = {
+          each[keyOf(name, args)] = {
             cpu_max_ms: r(hb.cpu_max_ms),
             gap_ms: r(hb.gap_ms),
             gap_cpu_ms: r(hb.gap_cpu_ms),
@@ -348,17 +373,49 @@ describe(
             // the longest gap's store and GC time (numbers only): what is NOT the JavaScript step
             sql_ms: typeof hb.attr?.sql_ms === "number" ? r(hb.attr.sql_ms) : null,
             gc_ms: typeof hb.attr?.gc_ms === "number" ? r(hb.attr.gc_ms) : null,
+            // the cpu_max interval's own split (F1, round 4d): SQL (its statements' count and the
+            // longest one's text), GC, the JavaScript left, the switches — code labels and numbers
+            cpu: cpuSplitOf(hb),
           };
         }
-        const line = JSON.stringify(each);
-        process.stdout.write(`latency per-tool cpu_max (full, cold): ${line}\n`);
-        if (process.env.GITHUB_ACTIONS === "true")
-          process.stdout.write(
-            `::notice title=latency per-tool cpu_max (full, cold)::${line.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}\n`,
-          );
       } finally {
         await g.stop();
       }
+      // where the CPU went (F1, round 4d): a second cold pass under V8's sampling profiler names the
+      // functions that held the CPU in each slow call's longest interval (its overhead makes that
+      // pass evidence of where, never of how long: the numbers above are the reading)
+      const slowest = Object.entries(each)
+        .filter(([, v]) => ((v as { cpu_max_ms: number | null }).cpu_max_ms ?? 0) >= 15)
+        .map(([k]) => k);
+      if (slowest.length > 0) {
+        const p = await serve(
+          { ...homeFull, env: { ...homeFull.env, EFF_HB_PROFILE: "1" } },
+          { preloads: [HEARTBEAT] },
+        );
+        try {
+          await p.client.callTool({ name: "espn_get_league", arguments: {} }, { timeout: 120_000 });
+          for (const [name, args] of P1_ANALYTICS) {
+            await heartbeatRecordOf(p.transport);
+            await p.client.callTool({ name, arguments: args }, { timeout: 120_000 });
+            const hb = await heartbeatRecordOf(p.transport);
+            const key = keyOf(name, args);
+            if (slowest.includes(key))
+              each[`${key}_profiled`] = {
+                cpu_max_ms: r(hb.cpu_max_ms),
+                cpu: cpuSplitOf(hb),
+                fn: hb.cpu_fn ?? null,
+              };
+          }
+        } finally {
+          await p.stop();
+        }
+      }
+      const line = JSON.stringify(each);
+      process.stdout.write(`latency per-tool cpu_max (full, cold): ${line}\n`);
+      if (process.env.GITHUB_ACTIONS === "true")
+        process.stdout.write(
+          `::notice title=latency per-tool cpu_max (full, cold)::${line.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}\n`,
+        );
     });
   },
 );

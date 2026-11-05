@@ -342,6 +342,14 @@ export interface Heartbeat {
    * the line carries none. Only numbers, short labels and nulls are kept.
    */
   readonly attr?: GapAttribution | null;
+  /**
+   * The split of the cpu_max_ms interval (heartbeat.cjs `cpu_attr`; F1, round 4d): its wall ms,
+   * involuntary switches, sqlite / fs / wait time with counts and the longest call's label, the GC
+   * overlapping it, and `js_ms` — the CPU left for JavaScript. Null when the line carries none.
+   */
+  readonly cpu_attr?: GapAttribution | null;
+  /** Under EFF_HB_PROFILE=1: the functions that held the CPU in that interval (code labels). */
+  readonly cpu_fn?: readonly string[] | null;
 }
 
 /** heartbeat.cjs's attribution of a window's longest gap (numbers, short code labels, nulls). */
@@ -398,6 +406,10 @@ export async function heartbeatRecordOf(p: HeartbeatSource): Promise<Heartbeat> 
         cpu_max_ms:
           typeof cpuMax === "number" && Number.isFinite(cpuMax) && cpuMax >= 0 ? cpuMax : null,
         attr: gapAttributionOf(rec.attr),
+        cpu_attr: gapAttributionOf(rec.cpu_attr),
+        cpu_fn: Array.isArray(rec.cpu_fn)
+          ? rec.cpu_fn.filter((x): x is string => typeof x === "string").map((x) => x.slice(0, 80))
+          : null,
       };
     }
     if (Date.now() > end) throw new Error("no heartbeat line");
