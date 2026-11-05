@@ -658,6 +658,19 @@ interface Hit {
   readonly rule: Rule;
 }
 
+/** Whether a match of `r` at `folded[index, end)` survives the table's filters (hitsOf's rules). */
+function survives(
+  r: Rule,
+  folded: string,
+  index: number,
+  end: number,
+  officials: boolean,
+): boolean {
+  if (r.notOfficials && officials) return false;
+  if (r.negatable && NEGATED_RE.test(folded.slice(Math.max(0, index - 48), index))) return false;
+  return !(r.unconditional && conditioned(folded, index, end));
+}
+
 /** Every surviving hit of the table on an already-folded text, earliest first. */
 function hitsOf(folded: string): Hit[] {
   const officials = OFFICIALS_RE.test(folded);
@@ -666,10 +679,8 @@ function hitsOf(folded: string): Hit[] {
     r.re.lastIndex = 0;
     for (const m of folded.matchAll(r.re)) {
       const index = m.index;
-      if (r.notOfficials && officials) continue;
-      if (r.negatable && NEGATED_RE.test(folded.slice(Math.max(0, index - 48), index))) continue;
       const end = index + m[0].length;
-      if (r.unconditional && conditioned(folded, index, end)) continue;
+      if (!survives(r, folded, index, end, officials)) continue;
       out.push({ index, end, order, rule: r });
       break; // the earliest hit of a rule is the only one that can win
     }
@@ -798,19 +809,62 @@ export function claimAvailability(c: RulesV1Claim | null): Designation | null {
 }
 
 /**
- * Whether any rule that says he plays fires on the text — an availability rule of the `plays` class
- * ("will play", "cleared", "practiced in full") or a start of the coming game, which implies he plays
- * — wherever it stands, not only as the text's claim: "has an ankle sprain but will play" reports an
- * injury and that he plays. What the structured comparator reads before it calls an injury report a
- * disagreement with ESPN's ACTIVE (structured.ts healthDisagreement; the round-4 R4VS-6). A full
- * pass of the table over the text: called only for a down health claim on an ACTIVE player.
+ * The words between a text's injury report and a plays phrase that keep the injured player its
+ * subject (healthClaimSaysPlays): the injured part ("tore | his ACL"), where it happened ("in
+ * practice"), a connector ("but", "and", "yet"), a report of it ("the coach says"), "he", and a few
+ * adverbs and auxiliaries — nothing else. Any other word (a name, "the backup", "his replacement")
+ * may be another subject, so the phrase is not read as his (fail safe, as R7-4's attribution).
  */
-export function statesPlays(text: string | null | undefined): boolean {
+const SAME_SUBJECT_GAP_RE = new RegExp(
+  String.raw`^(?:\s+(?:his|a|an|the)\s+${BODY}(?:\s+${INJURY_NOUN})?)?(?:\s+(?:in|at|during)\s+(?:practice|the game|warmups|warm-ups|training camp))?[\s,-]*(?:(?:but|and|yet|though|although|however|still|so)\b[\s,]*)?(?:(?:the\s+)?(?:head\s+)?(?:coach|team)\s+)?(?:(?:says?|said|insists?|insisted|expects?|expected|confirms?|confirmed|reports?|reported)\s+)?(?:(?:he|he's|he'll)\s+)?(?:(?:still|also|fully|now|reportedly)\s+)?(?:(?:is|was|remains)\s+)?(?:(?:still|also)\s+)?$`,
+);
+/**
+ * What, right after a plays phrase, puts its game past the coming one or reverses it: "will play no
+ * more", "will not play anymore", "will play again" (a return, unless this game is named), "will play
+ * next season".
+ */
+const NOT_THIS_GAME_RE = new RegExp(
+  String.raw`^\s*(?:no more|no longer|anymore|any more|never|again\b(?!\s+(?:${GAME_TIME}|against|vs|versus)\b)|(?:next|this|the rest of the)\s+(?:season|year))`,
+);
+
+/**
+ * Whether the text, in the clause of its own down health claim, says that HE plays the coming game:
+ * a rule that says he plays (an availability rule of the `plays` class — "will play", "cleared",
+ * "practiced in full" — or a start of the coming game, which implies he plays) after the injury
+ * report, in the same clause (no `.`, `;`, `!` or `?` between), with only SAME_SUBJECT_GAP_RE's words
+ * between the two, and not reversed or put past this game (NOT_THIS_GAME_RE). "Has an ankle sprain but
+ * will play Sunday" says he plays; "tore his ACL; the backup will start Sunday", "tore his ACL. Laube
+ * will start Sunday" and "tore his ACL and will play no more this season" do not (the round-4b
+ * review's CS-2: any plays hit anywhere in the text, about anyone, reversed or not, had read as his).
+ * What the structured comparator reads before it calls an injury report a disagreement with ESPN's
+ * ACTIVE (structured.ts healthDisagreement; the round-4 R4VS-6). False when the text's claim is not
+ * a down health claim. Called only for a down health claim on an ACTIVE player.
+ */
+export function healthClaimSaysPlays(text: string | null | undefined): boolean {
   if (typeof text !== "string" || text.length === 0) return false;
-  return hitsOf(claimFold(text)).some((h) => {
-    const d = h.rule.type === "availability" ? h.rule.designation : h.rule.implies;
-    return d !== null && CLASS_OF[d] === "plays";
-  });
+  const folded = claimFold(text);
+  const health = winner(hitsOf(folded));
+  if (health?.rule.type !== "health" || health.rule.direction !== "down") return false;
+  const rest = folded.slice(health.end);
+  const stop = rest.search(/[.;!?]/);
+  const clauseEnd = health.end + (stop < 0 ? rest.length : stop);
+  const officials = OFFICIALS_RE.test(folded);
+  for (const r of RULES_V1_TABLE) {
+    const d = r.type === "availability" ? r.designation : r.implies;
+    if (d === null || CLASS_OF[d] !== "plays") continue;
+    r.re.lastIndex = 0;
+    for (const m of folded.matchAll(r.re)) {
+      const index = m.index;
+      if (index < health.end) continue;
+      if (index >= clauseEnd) break;
+      const end = index + m[0].length;
+      if (!survives(r, folded, index, end, officials)) continue;
+      if (!SAME_SUBJECT_GAP_RE.test(folded.slice(health.end, index))) continue;
+      if (NOT_THIS_GAME_RE.test(folded.slice(end, clauseEnd))) continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 /** The plan 07 D6 `claim` shape of an extract (the three public fields only). */

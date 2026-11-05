@@ -23,14 +23,16 @@
 // designation, the claim says he is hurt. `healthDisagreement` names it with `claim_value:
 // "injury_reported"`, so E10 flags `availability_conflict` and asks for ESPN's status and the official
 // report — never `quiet_role_change`, which is a usage move with no claim about it. A questionable or
-// out status is consistent with an injury report; a report that also says he plays ("an ankle sprain
-// but he will play"), or that negates the injury ("no ACL tear", "did not tear his ACL" — the
-// extractor reads no injury claim there), names nothing.
+// out status is consistent with an injury report; a report that also says, in the same clause and of
+// the same player, that he plays the coming game ("an ankle sprain but he will play";
+// claims.ts healthClaimSaysPlays — never another player's start, a later sentence, or "will play no
+// more": the round-4b review's CS-2), or that negates the injury ("no ACL tear", "did not tear his
+// ACL" — the extractor reads no injury claim there), names nothing.
 import type { InjuryStatus } from "../league/types.js";
 import {
   availabilityClass,
   claimAvailability,
-  statesPlays,
+  healthClaimSaysPlays,
   type AvailabilityClass,
   type RulesV1Claim,
 } from "./claims.js";
@@ -95,7 +97,8 @@ export function structuredDisagreement(
 /**
  * The disagreement between an injury the text reports with no designation word (a `health` claim
  * whose direction is down) and ESPN's `ACTIVE`, or null: another claim, another status (QUESTIONABLE,
- * OUT … are consistent with an injury), or a text that also says he plays (`statesPlays`). `text` is
+ * OUT … are consistent with an injury), or a text whose injury clause also says he plays the coming
+ * game (`healthClaimSaysPlays`: same clause, same subject, not reversed). `text` is
  * the claim's own text (what the extractor read). Read after `structuredDisagreement`, which decides
  * every claim that names his availability.
  */
@@ -106,6 +109,6 @@ export function healthDisagreement(
 ): StructuredDisagreement | null {
   if (claim?.type !== "health" || claim.direction !== "down") return null;
   if (facts.injury_status !== "ACTIVE") return null;
-  if (statesPlays(text)) return null;
+  if (healthClaimSaysPlays(text)) return null;
   return { field: "injury_status", structured_value: "ACTIVE", claim_value: INJURY_REPORTED };
 }

@@ -27,7 +27,7 @@ export {
   ruleHits,
   RULES_V1,
   RULES_V1_TABLE,
-  statesPlays,
+  healthClaimSaysPlays,
   toClaimExtract,
   warmRulesSteps,
   type AvailabilityClass,

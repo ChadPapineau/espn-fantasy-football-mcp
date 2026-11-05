@@ -15,7 +15,11 @@
 import { describe, expect, it } from "vitest";
 import { analyzeEvidence, type EvidenceRequest } from "../../../src/domain/analytics/evidence.js";
 import type { UsageWeek } from "../../../src/domain/analytics/usageSignals.js";
-import { extractClaim, INJURY_REPORTED } from "../../../src/domain/evidence/index.js";
+import {
+  extractClaim,
+  healthClaimSaysPlays,
+  INJURY_REPORTED,
+} from "../../../src/domain/evidence/index.js";
 import {
   wrapUntrusted,
   type InjuryStatus,
@@ -152,11 +156,53 @@ describe("R4VS-6: an injury reported with no designation word, against ESPN's AC
   it.each([
     "has an ankle sprain but will play Sunday",
     "dealing with a hamstring injury, but he practiced in full and is cleared",
+    "tore his ACL but will play Sunday",
+    "has an ankle sprain, but the coach says he will play Sunday",
+    "has a hamstring injury and is expected to play Sunday",
   ])("a report that also says he plays, %s, is consistent with ACTIVE", (text) => {
     expect(extractClaim(text)?.type).toBe("health");
+    expect(healthClaimSaysPlays(text)).toBe(true);
     const { data } = analyzeEvidence(req("ACTIVE", { text, as: "user" }, flat));
     expect(data.structured_disagrees).toBeNull();
     expect(data.flag).toBe("consistent");
+  });
+
+  // the round-4b review's CS-2: a plays phrase counts only when it is about HIM, in the injury's own
+  // clause, and not reversed or put past this game — another player's start, the backup's, a later
+  // sentence's, "will play no more" are not his, and the injury still disagrees with ACTIVE
+  it.each([
+    "A headline says my RB1 tore his ACL in practice; the backup will start Sunday.",
+    "Player 77 tore his ACL in practice and will play no more this season.",
+    "Player 77 tore his ACL in practice. Player 12 will start Sunday.",
+    "has an ankle sprain and Player 12 will start Sunday",
+    "has an ankle sprain, so the backup will play Sunday",
+    "has a hamstring injury but his replacement will play Sunday",
+    "tore his ACL and will play again next season",
+    "has a knee injury and will not play anymore",
+    "tore his ACL but will play next season",
+  ])("%s → the plays phrase is not his: availability_conflict on injury_status", (text) => {
+    expect(extractClaim(text)).toMatchObject({ type: "health", direction: "down" });
+    expect(healthClaimSaysPlays(text)).toBe(false);
+    for (const as of ["user", "espn.player.outlook", "rss.rotowire.title"] as const)
+      for (const usage of [jump, flat, null]) {
+        const { data } = analyzeEvidence(req("ACTIVE", { text, as }, usage));
+        expect(data, `${as} ${String(usage?.length)}`).toMatchObject(conflict(INJURY_REPORTED));
+        expect(data.flag).not.toBe("quiet_role_change");
+        expect(data.what_would_confirm).toEqual(INJURY_CONFIRM);
+        expect(data.rec.no_move).toBe(true);
+        expect(data.rec.action).toBe("no move: structured fields win over text");
+      }
+  });
+
+  it.each([
+    // not a down health claim: the text's claim is the plays phrase itself, or a clean scan
+    ["will play Sunday despite an ankle sprain", false],
+    ["the MRI came back clean and he will play", false],
+    // a plays phrase before the injury report is not read after it
+    ["will play Sunday; has an ankle sprain", false],
+    ["", false],
+  ])("healthClaimSaysPlays(%j) is %s", (text, says) => {
+    expect(healthClaimSaysPlays(text)).toBe(says);
   });
 
   it("an up health claim (a clean MRI) on ACTIVE agrees", () => {
